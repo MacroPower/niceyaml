@@ -1,0 +1,18 @@
+restaurant:
+  name: ☕ Café Yamüll
+  established: &year 2025
+  hours: 7:00–11:00
+
+menu:
+  breakfast:
+    # Fluffy matcha pancakes
+    - item: "抹茶パンケーキ"
+      price: "¥1,200"
+      dietary: [🥛, 🥚, 🌾]
+
+    # Swedish cookies with coffee
+    - item: "Småkakor & Kaffe"
+      price: "150 kr"
+      dietary: [🌾]
+
+copyright: *year
