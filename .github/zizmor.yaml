@@ -1,0 +1,5 @@
+rules:
+  unpinned-uses:
+    ignore:
+      - validate.yaml
+      - renovate.yaml
