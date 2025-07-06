@@ -1,0 +1,22 @@
+policies:
+  - type: commit
+    spec:
+      header:
+        length: 89
+        imperative: true
+        case: lower
+        invalidLastCharacters: .
+      spellcheck:
+        locale: US
+      conventional:
+        types:
+          - build
+          - chore
+          - ci
+          - docs
+          - perf
+          - refactor
+          - revert
+          - style
+          - test
+        descriptionLength: 72
