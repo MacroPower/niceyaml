@@ -5,7 +5,7 @@ go 1.25.0
 require (
 	charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251125170225-454007a0ad4e
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20251201173703-9f73bfd934ff
-	github.com/charmbracelet/x/exp/golden v0.0.0-20250806222409-83e3a29d542f
+	github.com/charmbracelet/x/exp/golden v0.0.0-20251210182518-b3d4d1ed2373
 	github.com/goccy/go-yaml v1.19.0
 	github.com/invopop/jsonschema v0.13.0
 	github.com/lucasb-eyer/go-colorful v1.3.0
