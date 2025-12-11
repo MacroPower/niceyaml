@@ -186,6 +186,22 @@ func TestFinderPrinter_EmptySearch(t *testing.T) {
 	assert.Equal(t, "key: value", got)
 }
 
+func TestFinderPrinter_EmptyFile(t *testing.T) {
+	t.Parallel()
+
+	// Tokenize an empty string to simulate an empty YAML file.
+	tokens := lexer.Tokenize("")
+	finder, printer := testFinderPrinter(nil)
+
+	// Searching in empty file should return no matches.
+	ranges := finder.FindStringsInTokens("test", tokens)
+	assert.Empty(t, ranges)
+
+	// Printing empty file should produce empty output.
+	got := printer.PrintTokens(tokens)
+	assert.Empty(t, got)
+}
+
 func TestPrinter_Golden_DefaultColors(t *testing.T) {
 	t.Parallel()
 

@@ -498,6 +498,19 @@ func TestPrinter_ClearStyles_IncludesRanges(t *testing.T) {
 	assert.Equal(t, "key: value", p.PrintTokens(tokens))
 }
 
+func TestPrinter_PrintTokens_EmptyFile(t *testing.T) {
+	t.Parallel()
+
+	// Tokenize an empty string to simulate an empty YAML file.
+	tokens := lexer.Tokenize("")
+
+	p := testPrinter()
+	got := p.PrintTokens(tokens)
+
+	// Empty file should produce empty output.
+	assert.Empty(t, got)
+}
+
 func TestNewPrinter(t *testing.T) {
 	t.Parallel()
 
@@ -771,6 +784,57 @@ func TestPrinter_PrintTokenDiff_ModificationOrder(t *testing.T) {
 	require.Len(t, lines, 2)
 	assert.True(t, strings.HasPrefix(lines[0], "-"), "first line should be deleted")
 	assert.True(t, strings.HasPrefix(lines[1], "+"), "second line should be inserted")
+}
+
+func TestPrinter_PrintTokenDiff_EmptyFiles(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		before       string
+		after        string
+		wantContains []string
+		wantEmpty    bool
+	}{
+		"both empty": {
+			before:    "",
+			after:     "",
+			wantEmpty: true,
+		},
+		"empty before, content after": {
+			before:       "",
+			after:        "key: value\n",
+			wantContains: []string{"+key: value"},
+		},
+		"content before, empty after": {
+			before:       "key: value\n",
+			after:        "",
+			wantContains: []string{"-key: value"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := niceyaml.NewPrinter(
+				niceyaml.WithColorScheme(niceyaml.ColorScheme{}),
+				niceyaml.WithStyle(lipgloss.NewStyle()),
+			)
+			before := lexer.Tokenize(tc.before)
+			after := lexer.Tokenize(tc.after)
+
+			got := p.PrintTokenDiff(before, after)
+
+			if tc.wantEmpty {
+				assert.Empty(t, got)
+				return
+			}
+
+			for _, want := range tc.wantContains {
+				assert.Contains(t, got, want)
+			}
+		})
+	}
 }
 
 func TestPrinter_WordWrap(t *testing.T) {

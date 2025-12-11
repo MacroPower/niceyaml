@@ -192,3 +192,15 @@ func TestFinder_FindStringsInTokens_EmptyTokens(t *testing.T) {
 	got := finder.FindStringsInTokens("test", nil)
 	assert.Nil(t, got)
 }
+
+func TestFinder_FindStringsInTokens_EmptyFile(t *testing.T) {
+	t.Parallel()
+
+	// Tokenize an empty string to simulate an empty YAML file.
+	// This is distinct from nil tokens.
+	tokens := lexer.Tokenize("")
+
+	finder := niceyaml.NewFinder()
+	got := finder.FindStringsInTokens("test", tokens)
+	assert.Nil(t, got)
+}

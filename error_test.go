@@ -87,6 +87,24 @@ key: value`
 	}
 }
 
+func TestError_EmptyFile(t *testing.T) {
+	t.Parallel()
+
+	// Tokenize an empty string to simulate an empty YAML file.
+	tokens := lexer.Tokenize("")
+
+	err := niceyaml.NewError(
+		errors.New("error in empty file"),
+		niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Child("key").Build()),
+		niceyaml.WithTokens(tokens),
+	)
+
+	got := err.Error()
+	// With empty tokens, path resolution should fail gracefully.
+	assert.Contains(t, got, "error at $.key")
+	assert.Contains(t, got, "error in empty file")
+}
+
 func TestErrorWrapper(t *testing.T) {
 	t.Parallel()
 
