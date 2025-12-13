@@ -12,6 +12,12 @@ import (
 	"github.com/goccy/go-yaml/token"
 )
 
+// StyledErrorTokenPrinter extends [TokenStyler] with error token printing capabilities.
+type StyledErrorTokenPrinter interface {
+	TokenStyler
+	PrintErrorToken(tk *token.Token, contextLines int) (string, int)
+}
+
 // ErrorWrapper wraps errors with additional context for [Error] types.
 // It holds default options that are applied to all wrapped errors.
 type ErrorWrapper struct {
@@ -57,7 +63,7 @@ type Error struct {
 	err         error
 	path        *yaml.Path
 	token       *token.Token
-	printer     *Printer
+	printer     StyledErrorTokenPrinter
 	file        *ast.File
 	tokens      token.Tokens
 	sourceLines int
@@ -102,7 +108,7 @@ func WithErrorToken(tk *token.Token) ErrorOption {
 }
 
 // WithPrinter sets the printer used for formatting the error source.
-func WithPrinter(p *Printer) ErrorOption {
+func WithPrinter(p StyledErrorTokenPrinter) ErrorOption {
 	return func(e *Error) {
 		e.printer = p
 	}

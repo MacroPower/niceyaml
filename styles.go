@@ -79,6 +79,13 @@ func DefaultStyles() Styles {
 	}
 }
 
+// TokenStyler styles [token.Tokens].
+type TokenStyler interface {
+	AddStyleToToken(style lipgloss.Style, pos Position)
+	ClearStyles()
+	GetStyle(style Style) lipgloss.Style
+}
+
 // tokenStyle represents a style to apply at a specific token position.
 type tokenStyle struct {
 	style lipgloss.Style
