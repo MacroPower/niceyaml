@@ -49,15 +49,18 @@ func (ew *ErrorWrapper) Wrap(err error, opts ...ErrorOpt) error {
 }
 
 // Error represents a YAML error with optional source annotation.
-// Use [WithErrorToken], or [WithPath] and [WithTokens], to enable
-// annotated error output that shows the relevant YAML location.
+// Use [WithErrorToken], [WithPath] and [WithTokens], or [WithPath] and [WithFile],
+// to enable annotated error output that shows the relevant YAML location.
+//
+//nolint:recvcheck // Must satisfy error interface.
 type Error struct {
 	err         error
 	path        *yaml.Path
 	token       *token.Token
 	printer     *Printer
+	file        *ast.File
 	tokens      token.Tokens
-	sourceLines int // Number of lines to show around the error in the source.
+	sourceLines int
 }
 
 // NewError creates a new [Error] with the given underlying error and options.
@@ -113,7 +116,17 @@ func WithTokens(tokens token.Tokens) ErrorOpt {
 	}
 }
 
+// WithFile sets the parsed AST file for resolving the error path.
+// Use this instead of [WithTokens] when you already have a parsed file.
+func WithFile(file *ast.File) ErrorOpt {
+	return func(e *Error) {
+		e.file = file
+	}
+}
+
 // Error returns the error message with source annotation if available.
+//
+//nolint:gocritic // hugeParam: Must satisfy error interface.
 func (e Error) Error() string {
 	if e.err == nil {
 		return ""
@@ -136,7 +149,7 @@ func (e Error) Error() string {
 }
 
 // GetPath returns the YAML path where the error occurred as a string.
-func (e Error) GetPath() string {
+func (e *Error) GetPath() string {
 	if e.path == nil {
 		return ""
 	}
@@ -144,16 +157,10 @@ func (e Error) GetPath() string {
 	return e.path.String()
 }
 
-func (e Error) annotateSource(path *yaml.Path) (string, error) {
-	var (
-		tk  = e.token
-		err error
-	)
-	if e.token == nil {
-		tk, err = getTokenFromPath(e.tokens, path)
-		if err != nil {
-			return "", fmt.Errorf("get token from path: %w", err)
-		}
+func (e *Error) annotateSource(path *yaml.Path) (string, error) {
+	tk, err := e.resolveToken(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve token: %w", err)
 	}
 
 	line, col := getTokenPosition(tk)
@@ -163,7 +170,26 @@ func (e Error) annotateSource(path *yaml.Path) (string, error) {
 	return lipgloss.JoinVertical(lipgloss.Top, errMsg, "", errSource), nil
 }
 
-func (e Error) printErrorToken(tk *token.Token) string {
+// resolveToken returns the error token, resolving it from the path if needed.
+func (e *Error) resolveToken(path *yaml.Path) (*token.Token, error) {
+	if e.token != nil {
+		return e.token, nil
+	}
+
+	file := e.file
+	if file == nil {
+		var err error
+
+		file, err = parser.Parse(e.tokens, 0)
+		if err != nil {
+			return nil, fmt.Errorf("parse tokens into ast.File: %w", err)
+		}
+	}
+
+	return getTokenFromPath(file, path)
+}
+
+func (e *Error) printErrorToken(tk *token.Token) string {
 	p := e.printer
 	if p == nil {
 		p = NewPrinter(WithLineNumbers())
@@ -176,12 +202,7 @@ func (e Error) printErrorToken(tk *token.Token) string {
 	return content
 }
 
-func getTokenFromPath(tokens token.Tokens, path *yaml.Path) (*token.Token, error) {
-	file, err := parser.Parse(tokens, 0)
-	if err != nil {
-		return nil, fmt.Errorf("parse tokens into ast.File: %w", err)
-	}
-
+func getTokenFromPath(file *ast.File, path *yaml.Path) (*token.Token, error) {
 	node, err := path.FilterFile(file)
 	if err != nil {
 		return nil, fmt.Errorf("filter from ast.File by YAMLPath: %w", err)

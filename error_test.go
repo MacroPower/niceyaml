@@ -7,6 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/lexer"
+	"github.com/goccy/go-yaml/parser"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -20,6 +21,8 @@ func TestError(t *testing.T) {
 foo: bar
 key: value`
 	tokens := lexer.Tokenize(source)
+	file, err := parser.Parse(tokens, 0)
+	require.NoError(t, err)
 
 	tcs := map[string]struct {
 		err          error
@@ -40,6 +43,14 @@ key: value`
 				errors.New("invalid value"),
 				niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Child("key").Build()),
 				niceyaml.WithTokens(tokens),
+			),
+			wantContains: []string{"[3:1]", "invalid value"},
+		},
+		"with path and file shows annotated source": {
+			err: niceyaml.NewError(
+				errors.New("invalid value"),
+				niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Child("key").Build()),
+				niceyaml.WithFile(file),
 			),
 			wantContains: []string{"[3:1]", "invalid value"},
 		},
@@ -397,4 +408,55 @@ another: line`
 	got := err.Error()
 	// Should show the error at the root.
 	assert.Contains(t, got, "document root error")
+}
+
+func TestError_WithFile(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		source       string
+		pathBuilder  func() *yaml.Path
+		errMsg       string
+		wantContains []string
+	}{
+		"basic path with file": {
+			source:       "foo: bar\nkey: value",
+			pathBuilder:  func() *yaml.Path { return niceyaml.NewPathBuilder().Root().Child("key").Build() },
+			errMsg:       "file error",
+			wantContains: []string{"[2:1]", "file error"},
+		},
+		"nested path with file": {
+			source:       "outer:\n  inner: value",
+			pathBuilder:  func() *yaml.Path { return niceyaml.NewPathBuilder().Root().Child("outer").Child("inner").Build() },
+			errMsg:       "nested file error",
+			wantContains: []string{"[2:3]", "nested file error"},
+		},
+		"array element with file": {
+			source:       "items:\n  - first\n  - second",
+			pathBuilder:  func() *yaml.Path { return niceyaml.NewPathBuilder().Root().Child("items").Index(1).Build() },
+			errMsg:       "array file error",
+			wantContains: []string{"array file error", "second"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tokens := lexer.Tokenize(tc.source)
+			file, parseErr := parser.Parse(tokens, 0)
+			require.NoError(t, parseErr)
+
+			err := niceyaml.NewError(
+				errors.New(tc.errMsg),
+				niceyaml.WithPath(tc.pathBuilder()),
+				niceyaml.WithFile(file),
+			)
+
+			got := err.Error()
+			for _, want := range tc.wantContains {
+				assert.Contains(t, got, want)
+			}
+		})
+	}
 }
