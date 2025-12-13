@@ -404,3 +404,133 @@ func TestValidator_Validate(t *testing.T) {
 		})
 	}
 }
+
+func TestMustNewValidator(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		validateData any
+		schemaData   []byte
+		wantPanic    bool
+	}{
+		"valid schema returns validator": {
+			schemaData:   []byte(`{"type": "object", "properties": {"name": {"type": "string"}}}`),
+			wantPanic:    false,
+			validateData: map[string]any{"name": "test"},
+		},
+		"panics with invalid json": {
+			schemaData: []byte(`{"invalid": json}`),
+			wantPanic:  true,
+		},
+		"panics with invalid schema type": {
+			schemaData: []byte(`{"type": "invalid_type"}`),
+			wantPanic:  true,
+		},
+		"empty schema does not panic": {
+			schemaData: []byte(`{}`),
+			wantPanic:  false,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			if tc.wantPanic {
+				assert.Panics(t, func() {
+					schema.MustNewValidator("test", tc.schemaData)
+				})
+
+				return
+			}
+
+			validator := schema.MustNewValidator("test", tc.schemaData)
+			assert.NotNil(t, validator)
+
+			if tc.validateData != nil {
+				err := validator.Validate(tc.validateData)
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestNewValidator_InvalidSchemaTypes(t *testing.T) {
+	t.Parallel()
+
+	// Test with JSON documents that are valid JSON but not valid schema types.
+	// JSON Schema must be objects (maps) or booleans - not arrays, strings, numbers, or null.
+	// These fail during schema compilation with metaschema validation.
+	tcs := map[string]struct {
+		errMsg     string
+		schemaData []byte
+	}{
+		"array as schema": {
+			schemaData: []byte(`["not", "a", "schema"]`),
+			errMsg:     "compile schema",
+		},
+		"string as schema": {
+			schemaData: []byte(`"not a schema"`),
+			errMsg:     "compile schema",
+		},
+		"number as schema": {
+			schemaData: []byte(`42`),
+			errMsg:     "compile schema",
+		},
+		"null as schema": {
+			schemaData: []byte(`null`),
+			errMsg:     "compile schema",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			validator, err := schema.NewValidator("test", tc.schemaData)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.errMsg)
+			assert.Nil(t, validator)
+		})
+	}
+}
+
+func TestNewValidator_BooleanSchema(t *testing.T) {
+	t.Parallel()
+
+	// Boolean schemas are valid in JSON Schema: true accepts everything, false rejects everything.
+	tcs := map[string]struct {
+		schemaData []byte
+		acceptsAll bool
+	}{
+		"true schema accepts all data": {
+			schemaData: []byte(`true`),
+			acceptsAll: true,
+		},
+		"false schema rejects all data": {
+			schemaData: []byte(`false`),
+			acceptsAll: false,
+		},
+	}
+
+	testData := []any{"anything", 42, map[string]any{"key": "value"}}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			validator, err := schema.NewValidator("test", tc.schemaData)
+			require.NoError(t, err)
+			require.NotNil(t, validator)
+
+			for _, data := range testData {
+				err := validator.Validate(data)
+				if tc.acceptsAll {
+					assert.NoError(t, err)
+				} else {
+					assert.Error(t, err)
+				}
+			}
+		})
+	}
+}

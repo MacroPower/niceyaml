@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/invopop/jsonschema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -175,7 +176,7 @@ func TestDefaultLookupCommentFunc(t *testing.T) {
 	}
 
 	lookupFunc := schema.DefaultLookupCommentFunc(commentMap)
-	testType := reflect.TypeOf(TestStruct{})
+	testType := reflect.TypeFor[TestStruct]()
 
 	tcs := map[string]struct {
 		fieldName string
@@ -214,7 +215,7 @@ func TestDefaultLookupCommentFunc_EmptyCommentMap(t *testing.T) {
 
 	commentMap := map[string]string{}
 	lookupFunc := schema.DefaultLookupCommentFunc(commentMap)
-	testType := reflect.TypeOf(TestStruct{})
+	testType := reflect.TypeFor[TestStruct]()
 
 	tcs := map[string]struct {
 		fieldName string
@@ -262,7 +263,7 @@ func TestGenerator_SetCustomLookupFunc(t *testing.T) {
 	// Test the custom function directly.
 	commentMap := make(map[string]string)
 	lookupFunc := customLookupFunc(commentMap)
-	testType := reflect.TypeOf(TestStruct{})
+	testType := reflect.TypeFor[TestStruct]()
 	result := lookupFunc(testType, "Name")
 	assert.Equal(t, "custom comment", result)
 }
@@ -452,37 +453,37 @@ func TestDefaultLookupCommentFunc_ComplexStructures(t *testing.T) {
 		want       string
 	}{
 		"complex struct type comment": {
-			structType: reflect.TypeOf(ComplexStruct{}),
+			structType: reflect.TypeFor[ComplexStruct](),
 			fieldName:  "",
 			want:       "ComplexStruct demonstrates various Go type features.\n\nComplexStruct: https://pkg.go.dev/github.com/macropower/niceyaml/schema_test#ComplexStruct",
 		},
 		"complex struct basic field": {
-			structType: reflect.TypeOf(ComplexStruct{}),
+			structType: reflect.TypeFor[ComplexStruct](),
 			fieldName:  "BasicField",
 			want:       "BasicField is a simple field.\n\nComplexStruct.BasicField: https://pkg.go.dev/github.com/macropower/niceyaml/schema_test#ComplexStruct",
 		},
 		"complex struct slice field": {
-			structType: reflect.TypeOf(ComplexStruct{}),
+			structType: reflect.TypeFor[ComplexStruct](),
 			fieldName:  "SliceField",
 			want:       "SliceField contains multiple values.\n\nComplexStruct.SliceField: https://pkg.go.dev/github.com/macropower/niceyaml/schema_test#ComplexStruct",
 		},
 		"complex struct map field": {
-			structType: reflect.TypeOf(ComplexStruct{}),
+			structType: reflect.TypeFor[ComplexStruct](),
 			fieldName:  "MapField",
 			want:       "MapField contains key-value pairs.\n\nComplexStruct.MapField: https://pkg.go.dev/github.com/macropower/niceyaml/schema_test#ComplexStruct",
 		},
 		"embedded struct type comment": {
-			structType: reflect.TypeOf(EmbeddedStruct{}),
+			structType: reflect.TypeFor[EmbeddedStruct](),
 			fieldName:  "",
 			want:       "EmbeddedStruct provides embedded functionality.\n\nEmbeddedStruct: https://pkg.go.dev/github.com/macropower/niceyaml/schema_test#EmbeddedStruct",
 		},
 		"embedded struct field comment": {
-			structType: reflect.TypeOf(EmbeddedStruct{}),
+			structType: reflect.TypeFor[EmbeddedStruct](),
 			fieldName:  "EmbeddedValue",
 			want:       "EmbeddedValue is from an embedded struct.\n\nEmbeddedStruct.EmbeddedValue: https://pkg.go.dev/github.com/macropower/niceyaml/schema_test#EmbeddedStruct",
 		},
 		"missing comment for complex field": {
-			structType: reflect.TypeOf(ComplexStruct{}),
+			structType: reflect.TypeFor[ComplexStruct](),
 			fieldName:  "UndocumentedField",
 			want:       "ComplexStruct.UndocumentedField: https://pkg.go.dev/github.com/macropower/niceyaml/schema_test#ComplexStruct",
 		},
@@ -789,6 +790,71 @@ func TestGenerator_Generate_CommentExtractionPipeline(t *testing.T) {
 
 			// Run custom comment checks.
 			tc.checkComments(t, schemaData)
+		})
+	}
+}
+
+func TestWithReflector(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		reflector *jsonschema.Reflector
+		target    any
+		assertFn  func(t *testing.T, schemaData map[string]any)
+	}{
+		"custom reflector is used": {
+			reflector: &jsonschema.Reflector{DoNotReference: true},
+			target:    SimpleStruct{},
+			assertFn: func(t *testing.T, schemaData map[string]any) {
+				t.Helper()
+				assert.Contains(t, schemaData, "type")
+				assert.Equal(t, "object", schemaData["type"])
+				assert.Contains(t, schemaData, "properties")
+			},
+		},
+		"custom reflector with AllowAdditionalProperties": {
+			reflector: &jsonschema.Reflector{DoNotReference: true, AllowAdditionalProperties: true},
+			target:    TestStruct{},
+			assertFn: func(t *testing.T, schemaData map[string]any) {
+				t.Helper()
+
+				additionalProps, hasAdditionalProps := schemaData["additionalProperties"]
+				if hasAdditionalProps {
+					assert.NotEqual(t, false, additionalProps,
+						"AllowAdditionalProperties should not set additionalProperties to false")
+				}
+			},
+		},
+		"custom reflector with RequiredFromJSONSchemaTags": {
+			reflector: &jsonschema.Reflector{RequiredFromJSONSchemaTags: true, DoNotReference: true},
+			target:    TestStruct{},
+			assertFn: func(t *testing.T, schemaData map[string]any) {
+				t.Helper()
+				assert.Contains(t, schemaData, "type")
+				assert.Equal(t, "object", schemaData["type"])
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			gen := schema.NewGenerator(tc.target,
+				schema.WithReflector(tc.reflector),
+				schema.WithTests(true),
+			)
+
+			result, err := gen.Generate()
+			require.NoError(t, err)
+			assert.NotNil(t, result)
+
+			var schemaData map[string]any
+
+			err = json.Unmarshal(result, &schemaData)
+			require.NoError(t, err)
+
+			tc.assertFn(t, schemaData)
 		})
 	}
 }

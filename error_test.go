@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	"charm.land/lipgloss/v2"
+	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/lexer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -80,6 +82,8 @@ key: value`
 				return
 			}
 
+			require.NotEmpty(t, tc.wantContains, "test case must specify wantContains")
+
 			for _, want := range tc.wantContains {
 				assert.Contains(t, got, want)
 			}
@@ -112,56 +116,79 @@ func TestErrorWrapper(t *testing.T) {
 value: 123`
 	tokens := lexer.Tokenize(source)
 
-	t.Run("wrap nil returns nil", func(t *testing.T) {
-		t.Parallel()
+	tcs := map[string]struct {
+		wrapperOpts  func() []niceyaml.ErrorOpt
+		inputErr     func() error
+		wrapOpts     func() []niceyaml.ErrorOpt
+		wantContains []string
+		wantNil      bool
+		wantSameErr  bool
+	}{
+		"wrap nil returns nil": {
+			wrapperOpts: func() []niceyaml.ErrorOpt { return nil },
+			inputErr:    func() error { return nil },
+			wantNil:     true,
+		},
+		"wrap non-error type returns unchanged": {
+			wrapperOpts: func() []niceyaml.ErrorOpt { return nil },
+			inputErr:    func() error { return errors.New("plain error") },
+			wantSameErr: true,
+		},
+		"wrap error applies default options": {
+			wrapperOpts: func() []niceyaml.ErrorOpt { return []niceyaml.ErrorOpt{niceyaml.WithTokens(tokens)} },
+			inputErr: func() error {
+				return niceyaml.NewError(
+					errors.New("test error"),
+					niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Child("name").Build()),
+				)
+			},
+			wantContains: []string{"[1:1]", "test error"},
+		},
+		"call-site options override defaults": {
+			wrapperOpts: func() []niceyaml.ErrorOpt { return []niceyaml.ErrorOpt{niceyaml.WithSourceLines(1)} },
+			inputErr: func() error {
+				return niceyaml.NewError(
+					errors.New("test error"),
+					niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Child("name").Build()),
+				)
+			},
+			wrapOpts: func() []niceyaml.ErrorOpt {
+				return []niceyaml.ErrorOpt{niceyaml.WithTokens(tokens), niceyaml.WithSourceLines(3)}
+			},
+			wantContains: []string{"[1:1]"},
+		},
+	}
 
-		wrapper := niceyaml.NewErrorWrapper()
-		got := wrapper.Wrap(nil)
-		assert.NoError(t, got)
-	})
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	t.Run("wrap non-error type returns unchanged", func(t *testing.T) {
-		t.Parallel()
+			wrapper := niceyaml.NewErrorWrapper(tc.wrapperOpts()...)
+			inputErr := tc.inputErr()
 
-		wrapper := niceyaml.NewErrorWrapper()
-		plainErr := errors.New("plain error")
-		got := wrapper.Wrap(plainErr)
-		assert.Equal(t, plainErr, got)
-	})
+			var wrapOpts []niceyaml.ErrorOpt
+			if tc.wrapOpts != nil {
+				wrapOpts = tc.wrapOpts()
+			}
 
-	t.Run("wrap error applies default options", func(t *testing.T) {
-		t.Parallel()
+			got := wrapper.Wrap(inputErr, wrapOpts...)
 
-		wrapper := niceyaml.NewErrorWrapper(
-			niceyaml.WithTokens(tokens),
-		)
-		err := niceyaml.NewError(
-			errors.New("test error"),
-			niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Child("name").Build()),
-		)
-		got := wrapper.Wrap(err)
+			if tc.wantNil {
+				assert.NoError(t, got)
+				return
+			}
+			if tc.wantSameErr {
+				assert.Equal(t, inputErr, got)
+				return
+			}
 
-		require.Error(t, got)
-		assert.Contains(t, got.Error(), "[1:1]")
-		assert.Contains(t, got.Error(), "test error")
-	})
+			require.Error(t, got)
 
-	t.Run("call-site options override defaults", func(t *testing.T) {
-		t.Parallel()
-
-		wrapper := niceyaml.NewErrorWrapper(
-			niceyaml.WithSourceLines(1),
-		)
-		err := niceyaml.NewError(
-			errors.New("test error"),
-			niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Child("name").Build()),
-		)
-
-		got := wrapper.Wrap(err, niceyaml.WithTokens(tokens), niceyaml.WithSourceLines(3))
-
-		require.Error(t, got)
-		assert.Contains(t, got.Error(), "[1:1]")
-	})
+			for _, want := range tc.wantContains {
+				assert.Contains(t, got.Error(), want)
+			}
+		})
+	}
 }
 
 func TestGetPath(t *testing.T) {
@@ -204,77 +231,170 @@ func TestGetPath(t *testing.T) {
 func TestErrorAnnotation(t *testing.T) {
 	t.Parallel()
 
-	t.Run("nested path shows correct key", func(t *testing.T) {
+	tcs := map[string]struct {
+		pathBuilder  func() *yaml.Path
+		source       string
+		errMsg       string
+		wantContains []string
+		sourceLines  int
+	}{
+		"nested path shows correct key": {
+			source:       "foo:\n  bar: value",
+			pathBuilder:  func() *yaml.Path { return niceyaml.NewPathBuilder().Root().Child("foo").Child("bar").Build() },
+			errMsg:       "nested error",
+			wantContains: []string{"[2:3]", "nested error"},
+		},
+		"array element path - first item": {
+			source:       "items:\n  - first\n  - second",
+			pathBuilder:  func() *yaml.Path { return niceyaml.NewPathBuilder().Root().Child("items").Index(0).Build() },
+			errMsg:       "array error",
+			wantContains: []string{"array error", "first"},
+		},
+		"array element path - nested object in array": {
+			source: "users:\n  - name: alice\n    age: 30",
+			pathBuilder: func() *yaml.Path {
+				return niceyaml.NewPathBuilder().Root().Child("users").Index(0).Child("name").Build()
+			},
+			errMsg:       "nested array error",
+			wantContains: []string{"nested array error"},
+		},
+		"root path": {
+			source:       "key: value",
+			pathBuilder:  func() *yaml.Path { return niceyaml.NewPathBuilder().Root().Build() },
+			errMsg:       "root error",
+			wantContains: []string{"root error"},
+		},
+		"single top-level key path": {
+			source:       "key: value",
+			pathBuilder:  func() *yaml.Path { return niceyaml.NewPathBuilder().Root().Child("key").Build() },
+			errMsg:       "top level error",
+			wantContains: []string{"[1:1]", "top level error"},
+		},
+		"with custom source lines": {
+			source:       "line1: a\nline2: b\nline3: c\nline4: d\nline5: e",
+			pathBuilder:  func() *yaml.Path { return niceyaml.NewPathBuilder().Root().Child("line3").Build() },
+			errMsg:       "middle error",
+			sourceLines:  1,
+			wantContains: []string{"[3:1]", "middle error"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tokens := lexer.Tokenize(tc.source)
+
+			opts := []niceyaml.ErrorOpt{
+				niceyaml.WithPath(tc.pathBuilder()),
+				niceyaml.WithTokens(tokens),
+			}
+			if tc.sourceLines > 0 {
+				opts = append(opts, niceyaml.WithSourceLines(tc.sourceLines))
+			}
+
+			err := niceyaml.NewError(errors.New(tc.errMsg), opts...)
+
+			got := err.Error()
+			for _, want := range tc.wantContains {
+				assert.Contains(t, got, want)
+			}
+		})
+	}
+}
+
+func TestWithPrinter(t *testing.T) {
+	t.Parallel()
+
+	source := `key: value
+foo: bar`
+	tokens := lexer.Tokenize(source)
+
+	t.Run("custom printer is used for error formatting", func(t *testing.T) {
 		t.Parallel()
 
-		source := `foo:
-  bar: value`
-		tokens := lexer.Tokenize(source)
+		// Create a printer with a transform that wraps content in markers.
+		customPrinter := niceyaml.NewPrinter(
+			niceyaml.WithStyle(lipgloss.NewStyle().Transform(func(s string) string {
+				return "<<" + s + ">>"
+			})),
+			niceyaml.WithColorScheme(niceyaml.ColorScheme{}),
+		)
 
 		err := niceyaml.NewError(
-			errors.New("nested error"),
-			niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Child("foo").Child("bar").Build()),
-			niceyaml.WithTokens(tokens),
+			errors.New("test error"),
+			niceyaml.WithErrorToken(tokens[0]),
+			niceyaml.WithPrinter(customPrinter),
 		)
 
 		got := err.Error()
-		assert.Contains(t, got, "[2:3]")
-		assert.Contains(t, got, "nested error")
+		// The custom printer's transform should wrap the source in markers.
+		assert.Contains(t, got, "<<")
+		assert.Contains(t, got, ">>")
+		assert.Contains(t, got, "test error")
 	})
 
-	t.Run("array element path", func(t *testing.T) {
+	t.Run("custom printer with line numbers", func(t *testing.T) {
 		t.Parallel()
 
-		source := `items:
-  - first
-  - second`
-		tokens := lexer.Tokenize(source)
+		customPrinter := niceyaml.NewPrinter(
+			niceyaml.WithLineNumbers(),
+			niceyaml.WithColorScheme(niceyaml.ColorScheme{}),
+			niceyaml.WithStyle(lipgloss.NewStyle()),
+		)
 
 		err := niceyaml.NewError(
-			errors.New("array error"),
-			niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Child("items").Index(0).Build()),
-			niceyaml.WithTokens(tokens),
+			errors.New("line number error"),
+			niceyaml.WithErrorToken(tokens[0]),
+			niceyaml.WithPrinter(customPrinter),
 		)
 
 		got := err.Error()
-		assert.Contains(t, got, "array error")
+		// Should contain line numbers from the custom printer.
+		assert.Contains(t, got, "1")
+		assert.Contains(t, got, "line number error")
 	})
+}
 
-	t.Run("root path", func(t *testing.T) {
-		t.Parallel()
+func TestError_RootLevelArrayPath(t *testing.T) {
+	t.Parallel()
 
-		source := `key: value`
-		tokens := lexer.Tokenize(source)
+	// Path to array element at root level - parent is SequenceNode, not MappingValueNode.
+	// This tests findKeyToken returning nil when parent is not a MappingValueNode.
+	source := `- first
+- second
+- third`
+	tokens := lexer.Tokenize(source)
 
-		err := niceyaml.NewError(
-			errors.New("root error"),
-			niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Build()),
-			niceyaml.WithTokens(tokens),
-		)
+	err := niceyaml.NewError(
+		errors.New("array element error"),
+		niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Index(1).Build()),
+		niceyaml.WithTokens(tokens),
+	)
 
-		got := err.Error()
-		assert.Contains(t, got, "root error")
-	})
+	got := err.Error()
+	// Should still work and show the error.
+	assert.Contains(t, got, "array element error")
+	// Should point to line 2 where "second" is.
+	assert.Contains(t, got, "[2:")
+}
 
-	t.Run("with custom source lines", func(t *testing.T) {
-		t.Parallel()
+func TestError_DocumentRootPath(t *testing.T) {
+	t.Parallel()
 
-		source := `line1: a
-line2: b
-line3: c
-line4: d
-line5: e`
-		tokens := lexer.Tokenize(source)
+	// Path to document root - parent is nil.
+	// This tests findKeyToken returning nil when there's no parent.
+	source := `key: value
+another: line`
+	tokens := lexer.Tokenize(source)
 
-		err := niceyaml.NewError(
-			errors.New("middle error"),
-			niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Child("line3").Build()),
-			niceyaml.WithTokens(tokens),
-			niceyaml.WithSourceLines(1),
-		)
+	err := niceyaml.NewError(
+		errors.New("document root error"),
+		niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Build()),
+		niceyaml.WithTokens(tokens),
+	)
 
-		got := err.Error()
-		assert.Contains(t, got, "[3:1]")
-		assert.Contains(t, got, "middle error")
-	})
+	got := err.Error()
+	// Should show the error at the root.
+	assert.Contains(t, got, "document root error")
 }

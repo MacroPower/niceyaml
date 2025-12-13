@@ -23,62 +23,64 @@ func TestNewDecoder(t *testing.T) {
 func TestDecoder_Decode(t *testing.T) {
 	t.Parallel()
 
-	t.Run("simple string", func(t *testing.T) {
-		t.Parallel()
+	type nested struct {
+		Name  string `yaml:"name"`
+		Value int    `yaml:"value"`
+	}
 
-		r := strings.NewReader("hello")
-		dec := niceyaml.NewDecoder(r)
+	tcs := map[string]struct {
+		want  any
+		into  func() any
+		input string
+	}{
+		"simple string": {
+			input: "hello",
+			into:  func() any { var v string; return &v },
+			want:  "hello",
+		},
+		"simple map": {
+			input: "key: value",
+			into:  func() any { var v map[string]any; return &v },
+			want:  map[string]any{"key": "value"},
+		},
+		"nested struct": {
+			input: "name: test\nvalue: 42",
+			into:  func() any { var v nested; return &v },
+			want:  nested{Name: "test", Value: 42},
+		},
+		"slice": {
+			input: "- a\n- b\n- c",
+			into:  func() any { var v []string; return &v },
+			want:  []string{"a", "b", "c"},
+		},
+	}
 
-		var got string
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		err := dec.Decode(&got)
-		require.NoError(t, err)
-		assert.Equal(t, "hello", got)
-	})
+			r := strings.NewReader(tc.input)
+			dec := niceyaml.NewDecoder(r)
 
-	t.Run("simple map", func(t *testing.T) {
-		t.Parallel()
+			got := tc.into()
+			err := dec.Decode(got)
+			require.NoError(t, err)
 
-		r := strings.NewReader("key: value")
-		dec := niceyaml.NewDecoder(r)
-
-		var got map[string]any
-
-		err := dec.Decode(&got)
-		require.NoError(t, err)
-		assert.Equal(t, map[string]any{"key": "value"}, got)
-	})
-
-	t.Run("nested struct", func(t *testing.T) {
-		t.Parallel()
-
-		type nested struct {
-			Name  string `yaml:"name"`
-			Value int    `yaml:"value"`
-		}
-
-		r := strings.NewReader("name: test\nvalue: 42")
-		dec := niceyaml.NewDecoder(r)
-
-		var got nested
-
-		err := dec.Decode(&got)
-		require.NoError(t, err)
-		assert.Equal(t, nested{Name: "test", Value: 42}, got)
-	})
-
-	t.Run("slice", func(t *testing.T) {
-		t.Parallel()
-
-		r := strings.NewReader("- a\n- b\n- c")
-		dec := niceyaml.NewDecoder(r)
-
-		var got []string
-
-		err := dec.Decode(&got)
-		require.NoError(t, err)
-		assert.Equal(t, []string{"a", "b", "c"}, got)
-	})
+			// Dereference pointer to compare values.
+			switch v := got.(type) {
+			case *string:
+				assert.Equal(t, tc.want, *v)
+			case *map[string]any:
+				assert.Equal(t, tc.want, *v)
+			case *nested:
+				assert.Equal(t, tc.want, *v)
+			case *[]string:
+				assert.Equal(t, tc.want, *v)
+			default:
+				require.FailNow(t, "unsupported type", "got %T", got)
+			}
+		})
+	}
 }
 
 func TestDecoder_Decode_EmptyInput(t *testing.T) {

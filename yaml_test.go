@@ -8,6 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/golden"
 	"github.com/goccy/go-yaml/lexer"
+	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -159,125 +160,146 @@ func TestFinderPrinter_Integration(t *testing.T) {
 	}
 }
 
-func TestFinderPrinter_NoMatch(t *testing.T) {
+func TestFinderPrinter_EdgeCases(t *testing.T) {
 	t.Parallel()
 
-	tokens := lexer.Tokenize("key: value")
-	finder, printer := testFinderPrinter(nil)
-
-	ranges := finder.FindStringsInTokens("notfound", tokens)
-	assert.Empty(t, ranges)
-
-	// No styles applied, output unchanged.
-	got := printer.PrintTokens(tokens)
-	assert.Equal(t, "key: value", got)
-}
-
-func TestFinderPrinter_EmptySearch(t *testing.T) {
-	t.Parallel()
-
-	tokens := lexer.Tokenize("key: value")
-	finder, printer := testFinderPrinter(nil)
-
-	ranges := finder.FindStringsInTokens("", tokens)
-	assert.Empty(t, ranges)
-
-	got := printer.PrintTokens(tokens)
-	assert.Equal(t, "key: value", got)
-}
-
-func TestFinderPrinter_EmptyFile(t *testing.T) {
-	t.Parallel()
-
-	// Tokenize an empty string to simulate an empty YAML file.
-	tokens := lexer.Tokenize("")
-	finder, printer := testFinderPrinter(nil)
-
-	// Searching in empty file should return no matches.
-	ranges := finder.FindStringsInTokens("test", tokens)
-	assert.Empty(t, ranges)
-
-	// Printing empty file should produce empty output.
-	got := printer.PrintTokens(tokens)
-	assert.Empty(t, got)
-}
-
-func TestPrinter_Golden_DefaultColors(t *testing.T) {
-	t.Parallel()
-
-	input, err := os.ReadFile("testdata/full.yaml")
-	require.NoError(t, err)
-
-	tokens := lexer.Tokenize(string(input))
-	printer := niceyaml.NewPrinter(
-		niceyaml.WithColorScheme(niceyaml.DefaultColorScheme()),
-		niceyaml.WithStyle(lipgloss.NewStyle()),
-		niceyaml.WithLinePrefix(""),
-	)
-
-	output := printer.PrintTokens(tokens)
-	golden.RequireEqual(t, output)
-}
-
-func TestPrinter_Golden_LineNumbers(t *testing.T) {
-	t.Parallel()
-
-	input, err := os.ReadFile("testdata/full.yaml")
-	require.NoError(t, err)
-
-	tokens := lexer.Tokenize(string(input))
-	printer := niceyaml.NewPrinter(
-		niceyaml.WithColorScheme(niceyaml.DefaultColorScheme()),
-		niceyaml.WithStyle(lipgloss.NewStyle()),
-		niceyaml.WithLineNumbers(),
-	)
-
-	output := printer.PrintTokens(tokens)
-	golden.RequireEqual(t, output)
-}
-
-func TestPrinter_Golden_NoColors(t *testing.T) {
-	t.Parallel()
-
-	input, err := os.ReadFile("testdata/full.yaml")
-	require.NoError(t, err)
-
-	tokens := lexer.Tokenize(string(input))
-	printer := niceyaml.NewPrinter(
-		niceyaml.WithColorScheme(niceyaml.ColorScheme{}),
-		niceyaml.WithStyle(lipgloss.NewStyle()),
-		niceyaml.WithLinePrefix(""),
-	)
-
-	output := printer.PrintTokens(tokens)
-	golden.RequireEqual(t, output)
-}
-
-func TestPrinter_Golden_SearchHighlight(t *testing.T) {
-	t.Parallel()
-
-	input, err := os.ReadFile("testdata/full.yaml")
-	require.NoError(t, err)
-
-	tokens := lexer.Tokenize(string(input))
-
-	finder := niceyaml.NewFinder()
-	printer := niceyaml.NewPrinter(
-		niceyaml.WithColorScheme(niceyaml.DefaultColorScheme()),
-		niceyaml.WithStyle(lipgloss.NewStyle()),
-		niceyaml.WithLinePrefix(""),
-	)
-
-	// Search for "日本" (Japan) which appears multiple times in full.yaml.
-	highlightStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("#FFFF00")).
-		Foreground(lipgloss.Color("#000000"))
-
-	ranges := finder.FindStringsInTokens("日本", tokens)
-	for _, rng := range ranges {
-		printer.AddStyleToRange(highlightStyle, rng)
+	tcs := map[string]struct {
+		input      string
+		search     string
+		wantOutput string
+		wantRanges bool
+	}{
+		"no match": {
+			input:      "key: value",
+			search:     "notfound",
+			wantRanges: false,
+			wantOutput: "key: value",
+		},
+		"empty search": {
+			input:      "key: value",
+			search:     "",
+			wantRanges: false,
+			wantOutput: "key: value",
+		},
+		"empty file": {
+			input:      "",
+			search:     "test",
+			wantRanges: false,
+			wantOutput: "",
+		},
 	}
 
-	output := printer.PrintTokens(tokens)
-	golden.RequireEqual(t, output)
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tokens := lexer.Tokenize(tc.input)
+			finder, printer := testFinderPrinter(nil)
+
+			ranges := finder.FindStringsInTokens(tc.search, tokens)
+			if tc.wantRanges {
+				assert.NotEmpty(t, ranges)
+			} else {
+				assert.Empty(t, ranges)
+			}
+
+			got := printer.PrintTokens(tokens)
+			assert.Equal(t, tc.wantOutput, got)
+		})
+	}
+}
+
+func TestPrinter_Golden(t *testing.T) {
+	t.Parallel()
+
+	type goldenTest struct {
+		setupFunc func(*niceyaml.Printer, token.Tokens)
+		opts      []niceyaml.PrinterOption
+	}
+
+	tcs := map[string]goldenTest{
+		"DefaultColors": {
+			opts: []niceyaml.PrinterOption{
+				niceyaml.WithColorScheme(niceyaml.DefaultColorScheme()),
+				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithLinePrefix(""),
+			},
+		},
+		"LineNumbers": {
+			opts: []niceyaml.PrinterOption{
+				niceyaml.WithColorScheme(niceyaml.DefaultColorScheme()),
+				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithLineNumbers(),
+			},
+		},
+		"NoColors": {
+			opts: []niceyaml.PrinterOption{
+				niceyaml.WithColorScheme(niceyaml.ColorScheme{}),
+				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithLinePrefix(""),
+			},
+		},
+		"SearchHighlight": {
+			opts: []niceyaml.PrinterOption{
+				niceyaml.WithColorScheme(niceyaml.DefaultColorScheme()),
+				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithLinePrefix(""),
+			},
+			setupFunc: func(p *niceyaml.Printer, tokens token.Tokens) {
+				// Search for "日本" (Japan) which appears multiple times in full.yaml.
+				finder := niceyaml.NewFinder()
+				highlightStyle := lipgloss.NewStyle().
+					Background(lipgloss.Color("#FFFF00")).
+					Foreground(lipgloss.Color("#000000"))
+
+				ranges := finder.FindStringsInTokens("日本", tokens)
+				for _, rng := range ranges {
+					p.AddStyleToRange(highlightStyle, rng)
+				}
+			},
+		},
+	}
+
+	input, err := os.ReadFile("testdata/full.yaml")
+	require.NoError(t, err)
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tokens := lexer.Tokenize(string(input))
+			printer := niceyaml.NewPrinter(tc.opts...)
+
+			if tc.setupFunc != nil {
+				tc.setupFunc(printer, tokens)
+			}
+
+			output := printer.PrintTokens(tokens)
+			golden.RequireEqual(t, output)
+		})
+	}
+}
+
+func TestNewPositionTrackerFromTokens(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty tokens returns position 1,1", func(t *testing.T) {
+		t.Parallel()
+
+		tracker := niceyaml.NewPositionTrackerFromTokens(nil)
+		pos := tracker.Position()
+		assert.Equal(t, niceyaml.Position{Line: 1, Col: 1}, pos)
+	})
+
+	t.Run("with tokens returns first token position", func(t *testing.T) {
+		t.Parallel()
+
+		tokens := lexer.Tokenize("key: value")
+		require.NotEmpty(t, tokens)
+
+		tracker := niceyaml.NewPositionTrackerFromTokens(tokens)
+		pos := tracker.Position()
+		assert.Equal(t, 1, pos.Line)
+		assert.Equal(t, 1, pos.Col)
+	})
 }

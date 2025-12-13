@@ -185,22 +185,52 @@ func TestFinder_FindStringsInTokens(t *testing.T) {
 	}
 }
 
-func TestFinder_FindStringsInTokens_EmptyTokens(t *testing.T) {
+func TestFinder_FindStringsInTokens_EdgeCases(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input  string
+		search string
+		want   []niceyaml.PositionRange
+	}{
+		"empty tokens": {
+			input:  "",
+			search: "test",
+			want:   nil,
+		},
+		"first character": {
+			input:  "key: value",
+			search: "k",
+			want: []niceyaml.PositionRange{
+				{Start: niceyaml.Position{Line: 1, Col: 1}, End: niceyaml.Position{Line: 1, Col: 2}},
+			},
+		},
+		"last character": {
+			input:  "key: value",
+			search: "e",
+			want: []niceyaml.PositionRange{
+				{Start: niceyaml.Position{Line: 1, Col: 2}, End: niceyaml.Position{Line: 1, Col: 3}},
+				{Start: niceyaml.Position{Line: 1, Col: 10}, End: niceyaml.Position{Line: 1, Col: 11}},
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tokens := lexer.Tokenize(tc.input)
+			finder := niceyaml.NewFinder()
+			got := finder.FindStringsInTokens(tc.search, tokens)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestFinder_FindStringsInTokens_NilTokens(t *testing.T) {
 	t.Parallel()
 
 	finder := niceyaml.NewFinder()
 	got := finder.FindStringsInTokens("test", nil)
-	assert.Nil(t, got)
-}
-
-func TestFinder_FindStringsInTokens_EmptyFile(t *testing.T) {
-	t.Parallel()
-
-	// Tokenize an empty string to simulate an empty YAML file.
-	// This is distinct from nil tokens.
-	tokens := lexer.Tokenize("")
-
-	finder := niceyaml.NewFinder()
-	got := finder.FindStringsInTokens("test", tokens)
 	assert.Nil(t, got)
 }

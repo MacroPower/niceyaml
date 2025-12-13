@@ -568,6 +568,38 @@ func TestNewPrinter_NilColors(t *testing.T) {
 	assert.Contains(t, got, "value")
 }
 
+func TestPrinter_BlendColors_OverlayNoColor(t *testing.T) {
+	t.Parallel()
+
+	input := `key: value`
+	tokens := lexer.Tokenize(input)
+
+	// Use a ColorScheme with actual colors.
+	cs := niceyaml.ColorScheme{
+		Key:    lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")),
+		String: lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")),
+	}
+	p := niceyaml.NewPrinter(
+		niceyaml.WithColorScheme(cs),
+		niceyaml.WithStyle(lipgloss.NewStyle()),
+		niceyaml.WithLinePrefix(""),
+	)
+
+	// Add a range style with NO colors (only a transform).
+	// This tests blendColors when overlay (c2) has NoColor but base (c1) has color.
+	transformOnlyStyle := lipgloss.NewStyle().Transform(func(s string) string {
+		return "[" + s + "]"
+	})
+	p.AddStyleToRange(transformOnlyStyle, niceyaml.PositionRange{
+		Start: niceyaml.Position{Line: 1, Col: 6},
+		End:   niceyaml.Position{Line: 1, Col: 11},
+	})
+
+	got := p.PrintTokens(tokens)
+	// The value should be wrapped in brackets from the transform.
+	assert.Contains(t, got, "[value]")
+}
+
 func TestPrinter_LineNumbers(t *testing.T) {
 	t.Parallel()
 
@@ -829,6 +861,8 @@ func TestPrinter_PrintTokenDiff_EmptyFiles(t *testing.T) {
 				return
 			}
 
+			require.NotEmpty(t, tc.wantContains, "test case must specify wantContains")
+
 			for _, want := range tc.wantContains {
 				assert.Contains(t, got, want)
 			}
@@ -1075,4 +1109,211 @@ func TestPrinter_PrintTokenDiff_WithLineNumbers(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPrinter_PrintTokenDiff_CustomPrefixes(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		insertedPrefix string
+		deletedPrefix  string
+		before         string
+		after          string
+		wantContains   []string
+		wantNotContain []string
+	}{
+		"custom inserted prefix": {
+			insertedPrefix: ">>",
+			deletedPrefix:  "-",
+			before:         "key: old\n",
+			after:          "key: old\nnew: line\n",
+			wantContains:   []string{">>new: line"},
+			wantNotContain: []string{"+new: line"},
+		},
+		"custom deleted prefix": {
+			insertedPrefix: "+",
+			deletedPrefix:  "<<",
+			before:         "key: old\nold: line\n",
+			after:          "key: old\n",
+			wantContains:   []string{"<<old: line"},
+			wantNotContain: []string{"-old: line"},
+		},
+		"both custom prefixes": {
+			insertedPrefix: "ADD:",
+			deletedPrefix:  "DEL:",
+			before:         "key: old\n",
+			after:          "key: new\n",
+			wantContains:   []string{"DEL:key: old", "ADD:key: new"},
+			wantNotContain: []string{"-key: old", "+key: new"},
+		},
+		"empty prefixes": {
+			insertedPrefix: "",
+			deletedPrefix:  "",
+			before:         "a: 1\n",
+			after:          "a: 2\n",
+			wantContains:   []string{"a: 1", "a: 2"},
+		},
+		"multi-character prefixes with context": {
+			insertedPrefix: "[+]",
+			deletedPrefix:  "[-]",
+			before:         "line1: a\nline2: b\nline3: c\n",
+			after:          "line1: a\nline2: x\nline3: c\n",
+			wantContains: []string{
+				" line1: a",
+				"[-]line2: b",
+				"[+]line2: x",
+				" line3: c",
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := niceyaml.NewPrinter(
+				niceyaml.WithColorScheme(niceyaml.ColorScheme{}),
+				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithLineInsertedPrefix(tc.insertedPrefix),
+				niceyaml.WithLineDeletedPrefix(tc.deletedPrefix),
+			)
+
+			before := lexer.Tokenize(tc.before)
+			after := lexer.Tokenize(tc.after)
+
+			got := p.PrintTokenDiff(before, after)
+
+			for _, want := range tc.wantContains {
+				assert.Contains(t, got, want)
+			}
+
+			for _, notWant := range tc.wantNotContain {
+				assert.NotContains(t, got, notWant)
+			}
+		})
+	}
+}
+
+func TestPrinter_TokenTypes(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input        string
+		wantContains []string
+	}{
+		"null type": {
+			input:        "value: null",
+			wantContains: []string{"value", "null"},
+		},
+		"tilde null": {
+			input:        "value: ~",
+			wantContains: []string{"value", "~"},
+		},
+		"implicit null": {
+			input:        "value:",
+			wantContains: []string{"value", ":"},
+		},
+		"directive": {
+			input:        "%YAML 1.2\n---\nkey: value",
+			wantContains: []string{"%YAML 1.2", "---", "key", "value"},
+		},
+		"tag": {
+			input:        "tagged: !custom value",
+			wantContains: []string{"tagged", "!custom", "value"},
+		},
+		"merge key": {
+			input:        "base: &base\n  a: 1\nmerged:\n  <<: *base\n  b: 2",
+			wantContains: []string{"base", "&base", "<<", "*base", "merged"},
+		},
+		"document end": {
+			input:        "key: value\n...",
+			wantContains: []string{"key", "value", "..."},
+		},
+		"block scalar literal": {
+			input:        "text: |\n  line1\n  line2",
+			wantContains: []string{"text", "|", "line1", "line2"},
+		},
+		"block scalar folded": {
+			input:        "text: >\n  line1\n  line2",
+			wantContains: []string{"text", ">", "line1", "line2"},
+		},
+		"mapping key indicator": {
+			input:        "? explicit key\n: value",
+			wantContains: []string{"?", "explicit key", ":", "value"},
+		},
+		"flow sequence": {
+			input:        "items: [a, b, c]",
+			wantContains: []string{"items", "[", "a", "b", "c", "]"},
+		},
+		"flow mapping": {
+			input:        "map: {a: 1, b: 2}",
+			wantContains: []string{"map", "{", "a", "b", "}"},
+		},
+		"integer types": {
+			input:        "decimal: 42\noctal: 0o77\nhex: 0xFF\nbinary: 0b1010",
+			wantContains: []string{"42", "0o77", "0xFF", "0b1010"},
+		},
+		"float types": {
+			input:        "float: 3.14\ninf: .inf\nnan: .nan",
+			wantContains: []string{"3.14", ".inf", ".nan"},
+		},
+		"comment": {
+			input:        "key: value # comment",
+			wantContains: []string{"key", "value", "# comment"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tokens := lexer.Tokenize(tc.input)
+			p := testPrinter()
+
+			got := p.PrintTokens(tokens)
+
+			for _, want := range tc.wantContains {
+				assert.Contains(t, got, want)
+			}
+		})
+	}
+}
+
+func TestPrinter_PrintErrorToken_InitialLineNumberZero(t *testing.T) {
+	t.Parallel()
+
+	input := "line1: a\nline2: b\nline3: c"
+	tokens := lexer.Tokenize(input)
+
+	p := niceyaml.NewPrinter(
+		niceyaml.WithInitialLineNumber(0),
+		niceyaml.WithLineNumbers(),
+		niceyaml.WithColorScheme(niceyaml.ColorScheme{}),
+		niceyaml.WithStyle(lipgloss.NewStyle()),
+		niceyaml.WithLinePrefix(""),
+	)
+
+	// Error on line 2, show 1 line of context.
+	got, minLine := p.PrintErrorToken(tokens[2], 1)
+
+	// When initialLineNumber < 1, it should fall back to minLine.
+	assert.Equal(t, 1, minLine)
+	// Line numbers should start from minLine (1), not 0.
+	assert.Contains(t, got, "   1")
+}
+
+func TestPrinter_PrintErrorToken_FirstToken(t *testing.T) {
+	t.Parallel()
+
+	input := "key: value\nanother: line"
+	tokens := lexer.Tokenize(input)
+
+	p := testPrinter()
+
+	// Call on the first token - tests extractTokensInRange when Prev is nil.
+	got, minLine := p.PrintErrorToken(tokens[0], 1)
+
+	assert.Equal(t, 1, minLine)
+	assert.Contains(t, got, "key")
+	assert.Contains(t, got, "value")
 }
