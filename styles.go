@@ -104,33 +104,35 @@ type rangeStyle struct {
 }
 
 // blendColors blends two colors using LAB color space (50/50 mix).
-// If either color is nil/NoColor, returns the other.
+// If both colors are nil/NoColor, it returns nil.
+// If one color is nil/NoColor/invisible, it returns the other.
 func blendColors(c1, c2 color.Color) color.Color {
-	// Handle nil/NoColor cases.
 	_, isNoColor1 := c1.(lipgloss.NoColor)
 	_, isNoColor2 := c2.(lipgloss.NoColor)
+	noColor1 := c1 == nil || isNoColor1
+	noColor2 := c2 == nil || isNoColor2
 
-	if c1 == nil || isNoColor1 {
-		return c2
+	if noColor1 && noColor2 {
+		return nil
 	}
 
-	if c2 == nil || isNoColor2 {
+	if noColor1 {
+		return c2
+	}
+	if noColor2 {
 		return c1
 	}
 
-	// Convert to colorful.Color.
-	cf1, ok1 := colorful.MakeColor(c1)
-	cf2, ok2 := colorful.MakeColor(c2)
+	cf1, visible1 := colorful.MakeColor(c1)
+	cf2, visible2 := colorful.MakeColor(c2)
 
-	if !ok1 {
+	if !visible1 {
 		return c2
 	}
-
-	if !ok2 {
+	if !visible2 {
 		return c1
 	}
 
-	// Blend in LAB space.
 	return cf1.BlendLab(cf2, 0.5)
 }
 
@@ -142,16 +144,18 @@ func blendStyles(base, overlay *lipgloss.Style) *lipgloss.Style {
 	baseFg := style.GetForeground()
 	overlayFg := overlay.GetForeground()
 
-	if blended := blendColors(baseFg, overlayFg); blended != nil {
-		style = style.Foreground(blended)
+	blendedFg := blendColors(baseFg, overlayFg)
+	if blendedFg != nil {
+		style = style.Foreground(blendedFg)
 	}
 
 	// Blend background colors.
 	baseBg := style.GetBackground()
 	overlayBg := overlay.GetBackground()
 
-	if blended := blendColors(baseBg, overlayBg); blended != nil {
-		style = style.Background(blended)
+	blendedBg := blendColors(baseBg, overlayBg)
+	if blendedBg != nil {
+		style = style.Background(blendedBg)
 	}
 
 	// Compose transforms: overlay wraps base.
