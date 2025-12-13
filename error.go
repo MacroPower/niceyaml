@@ -195,7 +195,7 @@ func (e *Error) printErrorToken(tk *token.Token) string {
 		p = NewPrinter(WithLineNumbers())
 	}
 
-	p.AddStyleToToken(p.colorScheme.Error, Position{Line: tk.Position.Line, Col: tk.Position.Column})
+	p.AddStyleToToken(p.GetStyle(StyleError), Position{Line: tk.Position.Line, Col: tk.Position.Column})
 
 	content, _ := p.PrintErrorToken(tk.Clone(), e.sourceLines)
 

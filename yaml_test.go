@@ -31,7 +31,7 @@ func testFinderPrinter(normalizer func(string) string) (*niceyaml.Finder, *nicey
 
 	finder := niceyaml.NewFinder(opts...)
 	printer := niceyaml.NewPrinter(
-		niceyaml.WithColorScheme(niceyaml.ColorScheme{}),
+		niceyaml.WithStyles(niceyaml.Styles{}),
 		niceyaml.WithStyle(lipgloss.NewStyle()),
 		niceyaml.WithLinePrefix(""),
 	)
@@ -220,28 +220,28 @@ func TestPrinter_Golden(t *testing.T) {
 	tcs := map[string]goldenTest{
 		"DefaultColors": {
 			opts: []niceyaml.PrinterOption{
-				niceyaml.WithColorScheme(niceyaml.DefaultColorScheme()),
+				niceyaml.WithStyles(niceyaml.DefaultStyles()),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 				niceyaml.WithLinePrefix(""),
 			},
 		},
 		"LineNumbers": {
 			opts: []niceyaml.PrinterOption{
-				niceyaml.WithColorScheme(niceyaml.DefaultColorScheme()),
+				niceyaml.WithStyles(niceyaml.DefaultStyles()),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 				niceyaml.WithLineNumbers(),
 			},
 		},
 		"NoColors": {
 			opts: []niceyaml.PrinterOption{
-				niceyaml.WithColorScheme(niceyaml.ColorScheme{}),
+				niceyaml.WithStyles(niceyaml.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 				niceyaml.WithLinePrefix(""),
 			},
 		},
 		"SearchHighlight": {
 			opts: []niceyaml.PrinterOption{
-				niceyaml.WithColorScheme(niceyaml.DefaultColorScheme()),
+				niceyaml.WithStyles(niceyaml.DefaultStyles()),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 				niceyaml.WithLinePrefix(""),
 			},

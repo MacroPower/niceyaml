@@ -19,10 +19,10 @@ func testHighlightStyle() lipgloss.Style {
 	})
 }
 
-// testPrinter returns a printer without color scheme or padding for predictable output.
+// testPrinter returns a printer without styles or padding for predictable output.
 func testPrinter() *niceyaml.Printer {
 	return niceyaml.NewPrinter(
-		niceyaml.WithColorScheme(niceyaml.ColorScheme{}),
+		niceyaml.WithStyles(niceyaml.Styles{}),
 		niceyaml.WithStyle(lipgloss.NewStyle()),
 		niceyaml.WithLinePrefix(""),
 	)
@@ -463,7 +463,7 @@ func TestPrinter_AddStyleToRange_WithLineNumbers(t *testing.T) {
 	tokens := lexer.Tokenize(input)
 
 	p := niceyaml.NewPrinter(
-		niceyaml.WithColorScheme(niceyaml.ColorScheme{}),
+		niceyaml.WithStyles(niceyaml.Styles{}),
 		niceyaml.WithStyle(lipgloss.NewStyle()),
 		niceyaml.WithLineNumbers(),
 		niceyaml.WithLineNumberStyle(lipgloss.NewStyle()),
@@ -529,22 +529,22 @@ bool: true
 	assert.Contains(t, got, "value")
 }
 
-func TestNewPrinter_WithColorScheme(t *testing.T) {
+func TestNewPrinter_WithStyles(t *testing.T) {
 	t.Parallel()
 
 	input := `key: value`
 	tokens := lexer.Tokenize(input)
 
-	cs := niceyaml.ColorScheme{
-		Key: lipgloss.NewStyle().Transform(func(s string) string {
+	s := niceyaml.Styles{
+		niceyaml.StyleKey: lipgloss.NewStyle().Transform(func(s string) string {
 			return "<key>" + s + "</key>"
 		}),
-		String: lipgloss.NewStyle().Transform(func(s string) string {
+		niceyaml.StyleString: lipgloss.NewStyle().Transform(func(s string) string {
 			return "<str>" + s + "</str>"
 		}),
 	}
 	p := niceyaml.NewPrinter(
-		niceyaml.WithColorScheme(cs),
+		niceyaml.WithStyles(s),
 		niceyaml.WithStyle(lipgloss.NewStyle()),
 		niceyaml.WithLinePrefix(""),
 	)
@@ -552,15 +552,15 @@ func TestNewPrinter_WithColorScheme(t *testing.T) {
 	assert.Equal(t, "<key>key</key>: <str>value</str>", p.PrintTokens(tokens))
 }
 
-func TestNewPrinter_NilColors(t *testing.T) {
+func TestNewPrinter_EmptyStyles(t *testing.T) {
 	t.Parallel()
 
 	input := `key: value`
 	tokens := lexer.Tokenize(input)
 
-	// Empty ColorScheme should not panic.
-	cs := niceyaml.ColorScheme{}
-	p := niceyaml.NewPrinter(niceyaml.WithColorScheme(cs))
+	// Empty Styles should not panic.
+	s := niceyaml.Styles{}
+	p := niceyaml.NewPrinter(niceyaml.WithStyles(s))
 	got := p.PrintTokens(tokens)
 
 	// Should still contain original content.
@@ -574,13 +574,13 @@ func TestPrinter_BlendColors_OverlayNoColor(t *testing.T) {
 	input := `key: value`
 	tokens := lexer.Tokenize(input)
 
-	// Use a ColorScheme with actual colors.
-	cs := niceyaml.ColorScheme{
-		Key:    lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")),
-		String: lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")),
+	// Use Styles with actual colors.
+	s := niceyaml.Styles{
+		niceyaml.StyleKey:    lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")),
+		niceyaml.StyleString: lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")),
 	}
 	p := niceyaml.NewPrinter(
-		niceyaml.WithColorScheme(cs),
+		niceyaml.WithStyles(s),
 		niceyaml.WithStyle(lipgloss.NewStyle()),
 		niceyaml.WithLinePrefix(""),
 	)
@@ -634,7 +634,7 @@ func TestPrinter_LineNumbers(t *testing.T) {
 			tokens := lexer.Tokenize(tc.input)
 
 			opts := []niceyaml.PrinterOption{
-				niceyaml.WithColorScheme(niceyaml.ColorScheme{}),
+				niceyaml.WithStyles(niceyaml.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 				niceyaml.WithLineNumbers(),
 				niceyaml.WithLinePrefix(""),
@@ -666,7 +666,7 @@ text3: ffff`
 	tokens := lexer.Tokenize(input)
 
 	p := niceyaml.NewPrinter(
-		niceyaml.WithColorScheme(niceyaml.ColorScheme{}),
+		niceyaml.WithStyles(niceyaml.Styles{}),
 		niceyaml.WithStyle(lipgloss.NewStyle()),
 		niceyaml.WithLineNumbers(),
 	)
@@ -759,7 +759,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			t.Parallel()
 
 			p := niceyaml.NewPrinter(
-				niceyaml.WithColorScheme(niceyaml.ColorScheme{}),
+				niceyaml.WithStyles(niceyaml.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 			)
 			before := lexer.Tokenize(tc.before)
@@ -782,7 +782,7 @@ func TestPrinter_PrintTokenDiff_LineOrder(t *testing.T) {
 	after := "a: 1\nc: 3\n"
 
 	p := niceyaml.NewPrinter(
-		niceyaml.WithColorScheme(niceyaml.ColorScheme{}),
+		niceyaml.WithStyles(niceyaml.Styles{}),
 		niceyaml.WithStyle(lipgloss.NewStyle()),
 	)
 	got := p.PrintTokenDiff(lexer.Tokenize(before), lexer.Tokenize(after))
@@ -804,7 +804,7 @@ func TestPrinter_PrintTokenDiff_ModificationOrder(t *testing.T) {
 	after := "key: new\n"
 
 	p := niceyaml.NewPrinter(
-		niceyaml.WithColorScheme(niceyaml.ColorScheme{}),
+		niceyaml.WithStyles(niceyaml.Styles{}),
 		niceyaml.WithStyle(lipgloss.NewStyle()),
 	)
 	got := p.PrintTokenDiff(lexer.Tokenize(before), lexer.Tokenize(after))
@@ -848,7 +848,7 @@ func TestPrinter_PrintTokenDiff_EmptyFiles(t *testing.T) {
 			t.Parallel()
 
 			p := niceyaml.NewPrinter(
-				niceyaml.WithColorScheme(niceyaml.ColorScheme{}),
+				niceyaml.WithStyles(niceyaml.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 			)
 			before := lexer.Tokenize(tc.before)
@@ -917,7 +917,7 @@ func TestPrinter_WordWrap(t *testing.T) {
 			tokens := lexer.Tokenize(tc.input)
 
 			p := niceyaml.NewPrinter(
-				niceyaml.WithColorScheme(niceyaml.ColorScheme{}),
+				niceyaml.WithStyles(niceyaml.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 				niceyaml.WithLinePrefix(""),
 			)
@@ -962,7 +962,7 @@ func TestPrinter_WordWrap_WithLineNumbers(t *testing.T) {
 			tokens := lexer.Tokenize(tc.input)
 
 			p := niceyaml.NewPrinter(
-				niceyaml.WithColorScheme(niceyaml.ColorScheme{}),
+				niceyaml.WithStyles(niceyaml.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 				niceyaml.WithLineNumbers(),
 				niceyaml.WithLineNumberStyle(lipgloss.NewStyle()),
@@ -1021,7 +1021,7 @@ func TestPrinter_PrintTokenDiff_WithWordWrap(t *testing.T) {
 			t.Parallel()
 
 			p := niceyaml.NewPrinter(
-				niceyaml.WithColorScheme(niceyaml.ColorScheme{}),
+				niceyaml.WithStyles(niceyaml.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 			)
 			p.SetWidth(tc.width)
@@ -1094,7 +1094,7 @@ func TestPrinter_PrintTokenDiff_WithLineNumbers(t *testing.T) {
 			t.Parallel()
 
 			p := niceyaml.NewPrinter(
-				niceyaml.WithColorScheme(niceyaml.ColorScheme{}),
+				niceyaml.WithStyles(niceyaml.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 				niceyaml.WithLineNumbers(),
 			)
@@ -1172,7 +1172,7 @@ func TestPrinter_PrintTokenDiff_CustomPrefixes(t *testing.T) {
 			t.Parallel()
 
 			p := niceyaml.NewPrinter(
-				niceyaml.WithColorScheme(niceyaml.ColorScheme{}),
+				niceyaml.WithStyles(niceyaml.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 				niceyaml.WithLineInsertedPrefix(tc.insertedPrefix),
 				niceyaml.WithLineDeletedPrefix(tc.deletedPrefix),
@@ -1288,7 +1288,7 @@ func TestPrinter_PrintErrorToken_InitialLineNumberZero(t *testing.T) {
 	p := niceyaml.NewPrinter(
 		niceyaml.WithInitialLineNumber(0),
 		niceyaml.WithLineNumbers(),
-		niceyaml.WithColorScheme(niceyaml.ColorScheme{}),
+		niceyaml.WithStyles(niceyaml.Styles{}),
 		niceyaml.WithStyle(lipgloss.NewStyle()),
 		niceyaml.WithLinePrefix(""),
 	)

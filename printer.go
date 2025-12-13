@@ -14,10 +14,10 @@ const wrapOnCharacters = " /-"
 var crlfNormalizer = strings.NewReplacer("\r\n", "\n", "\r", "\n")
 
 // Printer renders YAML tokens with syntax highlighting using [lipgloss.Style].
-// It supports custom color schemes, line numbers, and styled token/range overlays
+// It supports custom styles, line numbers, and styled token/range overlays
 // for highlighting specific positions such as errors.
 type Printer struct {
-	colorScheme              *ColorScheme
+	styles                   Styles
 	style                    lipgloss.Style
 	lineNumberStyle          lipgloss.Style
 	linePrefix               string
@@ -33,11 +33,10 @@ type Printer struct {
 }
 
 // NewPrinter creates a new [Printer].
-// By default it uses [DefaultColorScheme].
+// By default it uses [DefaultStyles].
 func NewPrinter(opts ...PrinterOption) *Printer {
-	dcs := DefaultColorScheme()
 	p := &Printer{
-		colorScheme:        &dcs,
+		styles:             DefaultStyles(),
 		linePrefix:         " ",
 		lineInsertedPrefix: "+",
 		lineDeletedPrefix:  "-",
@@ -49,12 +48,12 @@ func NewPrinter(opts ...PrinterOption) *Printer {
 	}
 
 	if !p.hasCustomStyle {
-		p.style = p.colorScheme.Default.
+		p.style = p.styles.Get(StyleDefault).
 			PaddingRight(1)
 	}
 	if !p.hasCustomLineNumberStyle {
-		p.lineNumberStyle = p.colorScheme.Default.
-			Foreground(p.colorScheme.Comment.GetForeground()).
+		p.lineNumberStyle = p.styles.Get(StyleDefault).
+			Foreground(p.styles.Get(StyleComment).GetForeground()).
 			PaddingRight(1)
 	}
 
@@ -74,12 +73,10 @@ func WithStyle(s lipgloss.Style) PrinterOption {
 	}
 }
 
-// WithColorScheme configures the printer with the given color scheme.
-//
-//nolint:gocritic // hugeParam: Copying.
-func WithColorScheme(cs ColorScheme) PrinterOption {
+// WithStyles configures the printer with the given styles.
+func WithStyles(s Styles) PrinterOption {
 	return func(p *Printer) {
-		p.colorScheme = &cs
+		p.styles = s
 	}
 }
 
@@ -155,6 +152,11 @@ func (p *Printer) AddStyleToRange(style lipgloss.Style, r PositionRange) {
 		style: style,
 		rng:   r,
 	})
+}
+
+// GetStyle retrieves the underlying [lipgloss.Style] for the given [Style].
+func (p *Printer) GetStyle(s Style) lipgloss.Style {
+	return *p.styles.Get(s)
 }
 
 // ClearStyles removes all previously added styles.
@@ -260,10 +262,12 @@ func (p *Printer) renderFullFileDiff(ops []lineOp, afterTokens token.Tokens) str
 
 		switch op.kind {
 		case diffDelete:
-			p.writeLine(&sb, p.lineDeletedPrefix, op.content, op.beforeLine, &p.colorScheme.DiffDeleted)
+			deleted := p.styles.Get(StyleDiffDeleted)
+			p.writeLine(&sb, p.lineDeletedPrefix, op.content, op.beforeLine, deleted)
 
 		case diffInsert:
-			p.writeLine(&sb, p.lineInsertedPrefix, op.content, op.afterLine, &p.colorScheme.DiffInserted)
+			inserted := p.styles.Get(StyleDiffInserted)
+			p.writeLine(&sb, p.lineInsertedPrefix, op.content, op.afterLine, inserted)
 
 		default: // Equal.
 			// Use syntax-highlighted content from pre-rendered after tokens.
@@ -284,7 +288,7 @@ func (p *Printer) writeLine(sb *strings.Builder, prefix, content string, lineNum
 		if contentStyle != nil {
 			sb.WriteString(contentStyle.Render(pfx + cnt))
 		} else {
-			sb.WriteString(p.colorScheme.Default.Render(pfx))
+			sb.WriteString(p.styles.Get(StyleDefault).Render(pfx))
 			sb.WriteString(cnt)
 		}
 	}
@@ -374,61 +378,67 @@ func (p *Printer) styleForToken(tk *token.Token) *lipgloss.Style {
 	//nolint:exhaustive // Only needed for the current token.
 	switch tk.PreviousType() {
 	case token.AnchorType:
-		return &p.colorScheme.Anchor
+		return p.styles.Get(StyleAnchor)
+
 	case token.AliasType:
-		return &p.colorScheme.Alias
+		return p.styles.Get(StyleAlias)
 	}
 
 	//nolint:exhaustive // Only needed for the current token.
 	switch tk.NextType() {
 	case token.MappingValueType:
-		return &p.colorScheme.Key
+		return p.styles.Get(StyleKey)
 	}
 
 	switch tk.Type {
 	case token.BoolType:
-		return &p.colorScheme.Bool
+		return p.styles.Get(StyleBool)
 
 	case token.AnchorType:
-		return &p.colorScheme.Anchor
+		return p.styles.Get(StyleAnchor)
 
 	case token.AliasType, token.MergeKeyType:
-		return &p.colorScheme.Alias
+		return p.styles.Get(StyleAlias)
 
 	case token.StringType, token.SingleQuoteType, token.DoubleQuoteType:
-		return &p.colorScheme.String
+		return p.styles.Get(StyleString)
 
 	case token.IntegerType, token.FloatType,
 		token.BinaryIntegerType, token.OctetIntegerType, token.HexIntegerType,
 		token.InfinityType, token.NanType:
-		return &p.colorScheme.Number
+		return p.styles.Get(StyleNumber)
 
 	case token.NullType, token.ImplicitNullType:
-		return &p.colorScheme.Null
+		return p.styles.Get(StyleNull)
 
 	case token.CommentType:
-		return &p.colorScheme.Comment
+		return p.styles.Get(StyleComment)
 
 	case token.TagType:
-		return &p.colorScheme.Tag
+		return p.styles.Get(StyleTag)
 
 	case token.DocumentHeaderType, token.DocumentEndType:
-		return &p.colorScheme.Document
+		return p.styles.Get(StyleDocument)
 
 	case token.DirectiveType:
-		return &p.colorScheme.Directive
+		return p.styles.Get(StyleDirective)
 
 	case token.LiteralType, token.FoldedType:
-		return &p.colorScheme.BlockScalar
+		return p.styles.Get(StyleBlockScalar)
 
 	case token.SequenceEntryType, token.MappingKeyType, token.MappingValueType,
 		token.CollectEntryType, token.SequenceStartType, token.SequenceEndType,
 		token.MappingStartType, token.MappingEndType:
-		return &p.colorScheme.Punctuation
+		return p.styles.Get(StylePunctuation)
 
-	default:
-		return &p.colorScheme.Default
+	case token.UnknownType, token.InvalidType:
+		return p.styles.Get(StyleError)
+
+	case token.SpaceType:
+		return p.styles.Get(StyleDefault)
 	}
+
+	return p.styles.Get(StyleDefault)
 }
 
 // styleLineWithRanges styles a line with range-aware styling.
@@ -489,7 +499,7 @@ func (p *Printer) contentWidth(prefixWidth int) int {
 // formatContinuationMarker formats a continuation marker for wrapped lines.
 // Uses "   -" to match the 4-char width of line numbers.
 func (p *Printer) formatContinuationMarker() string {
-	return p.lineNumberStyle.Render("   -") + p.colorScheme.Default.Render(p.linePrefix)
+	return p.lineNumberStyle.Render("   -") + p.styles.Get(StyleDefault).Render(p.linePrefix)
 }
 
 // addLineNumbers prepends line numbers to each line of the content.
@@ -499,7 +509,7 @@ func (p *Printer) addLineNumbers(content string, startLine int) string {
 
 	lines := strings.Split(content, "\n")
 	lineNum := startLine
-	styledPrefix := p.colorScheme.Default.Render(p.linePrefix)
+	styledPrefix := p.styles.Get(StyleDefault).Render(p.linePrefix)
 	wrapWidth := p.contentWidth(0)
 
 	for i, line := range lines {
@@ -582,7 +592,8 @@ func (p *Printer) getTokenString(tokens token.Tokens) string {
 			// Part 1: Render separator portion (default style).
 			if separatorRunesInLine > 0 && separatorRunesInLine <= len(lineRunes) {
 				sepPart := string(lineRunes[:separatorRunesInLine])
-				sb.WriteString(p.styleLineWithRanges(sepPart, pt.Line, lineStartCol, &p.colorScheme.Default))
+				defaultStyle := p.styles.Get(StyleDefault)
+				sb.WriteString(p.styleLineWithRanges(sepPart, pt.Line, lineStartCol, defaultStyle))
 				pt.AdvanceBy(separatorRunesInLine)
 
 				lineRunes = lineRunes[separatorRunesInLine:]

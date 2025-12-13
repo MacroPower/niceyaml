@@ -329,7 +329,7 @@ foo: bar`
 			niceyaml.WithStyle(lipgloss.NewStyle().Transform(func(s string) string {
 				return "<<" + s + ">>"
 			})),
-			niceyaml.WithColorScheme(niceyaml.ColorScheme{}),
+			niceyaml.WithStyles(niceyaml.Styles{}),
 		)
 
 		err := niceyaml.NewError(
@@ -350,7 +350,7 @@ foo: bar`
 
 		customPrinter := niceyaml.NewPrinter(
 			niceyaml.WithLineNumbers(),
-			niceyaml.WithColorScheme(niceyaml.ColorScheme{}),
+			niceyaml.WithStyles(niceyaml.Styles{}),
 			niceyaml.WithStyle(lipgloss.NewStyle()),
 		)
 

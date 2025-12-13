@@ -8,52 +8,74 @@ import (
 	"github.com/lucasb-eyer/go-colorful"
 )
 
-// ColorScheme defines styles for YAML syntax highlighting.
-// Each field is a [lipgloss.Style] that will be applied to the corresponding token type.
-type ColorScheme struct {
-	Default      lipgloss.Style
-	Key          lipgloss.Style
-	String       lipgloss.Style
-	Number       lipgloss.Style
-	Bool         lipgloss.Style
-	Null         lipgloss.Style // E.g.: ~, null.
-	Anchor       lipgloss.Style // E.g.: &.
-	Alias        lipgloss.Style // E.g.: *, <<.
-	Comment      lipgloss.Style
-	Error        lipgloss.Style
-	Tag          lipgloss.Style // E.g.: !tag.
-	Document     lipgloss.Style // E.g.: ---.
-	Directive    lipgloss.Style // E.g.: %YAML, %TAG.
-	Punctuation  lipgloss.Style // E.g.: -, :, ?, [, ], {, }.
-	BlockScalar  lipgloss.Style // E.g.: |, >.
-	DiffInserted lipgloss.Style // Lines inserted in diff (+).
-	DiffDeleted  lipgloss.Style // Lines deleted in diff (-).
+// Style identifies a style category for YAML highlighting.
+type Style int
+
+// Style constants for YAML highlighting.
+const (
+	StyleDefault      Style = iota // Default/fallback style.
+	StyleKey                       // Mapping keys.
+	StyleString                    // String values.
+	StyleNumber                    // Numeric values.
+	StyleBool                      // Boolean values.
+	StyleNull                      // E.g.: ~, null.
+	StyleAnchor                    // E.g.: &.
+	StyleAlias                     // E.g.: *, <<.
+	StyleComment                   // Comments.
+	StyleError                     // Error highlighting.
+	StyleTag                       // E.g.: !tag.
+	StyleDocument                  // E.g.: ---.
+	StyleDirective                 // E.g.: %YAML, %TAG.
+	StylePunctuation               // E.g.: -, :, ?, [, ], {, }.
+	StyleBlockScalar               // E.g.: |, >.
+	StyleDiffInserted              // Lines inserted in diff (+).
+	StyleDiffDeleted               // Lines deleted in diff (-).
+)
+
+// Styles defines styles for YAML highlighting.
+type Styles map[Style]lipgloss.Style
+
+// Get returns the [lipgloss.Style] for the given [Style] category.
+// If the given [Style] is not defined, it returns [StyleDefault].
+// If no [StyleDefault] is defined, it returns an empty [lipgloss.Style].
+func (s Styles) Get(style Style) *lipgloss.Style {
+	matchedStyle, ok := s[style]
+	if ok {
+		return &matchedStyle
+	}
+
+	defaultStyle, ok := s[StyleDefault]
+	if ok {
+		return &defaultStyle
+	}
+
+	return &lipgloss.Style{}
 }
 
-// DefaultColorScheme returns a [ColorScheme] using CharmTone colors.
-func DefaultColorScheme() ColorScheme {
+// DefaultStyles returns [Styles] using CharmTone colors.
+func DefaultStyles() Styles {
 	base := lipgloss.NewStyle().
 		Foreground(charmtone.Smoke).
 		Background(charmtone.Pepper)
 
-	return ColorScheme{
-		Default:      base,
-		Key:          base.Foreground(charmtone.Mauve),  // NameTag.
-		String:       base.Foreground(charmtone.Cumin),  // LiteralString.
-		Number:       base.Foreground(charmtone.Julep),  // LiteralNumber.
-		Bool:         base.Foreground(charmtone.Malibu), // KeywordConstant.
-		Null:         base.Foreground(charmtone.Malibu), // KeywordConstant.
-		Anchor:       base.Foreground(charmtone.Bengal), // CommentPreproc.
-		Alias:        base.Foreground(charmtone.Bengal), // CommentPreproc.
-		Comment:      base.Foreground(charmtone.Oyster), // Comment.
-		Tag:          base.Foreground(charmtone.Bengal), // CommentPreproc.
-		Document:     base.Foreground(charmtone.Smoke),  // NameNamespace.
-		Directive:    base.Foreground(charmtone.Smoke),  // NameNamespace.
-		Punctuation:  base.Foreground(charmtone.Zest),   // Punctuation.
-		BlockScalar:  base.Foreground(charmtone.Zest),   // Punctuation.
-		Error:        base.Foreground(charmtone.Butter).Background(charmtone.Sriracha),
-		DiffInserted: base.Foreground(charmtone.Julep).Background(charmtone.Spinach), // GenericInserted.
-		DiffDeleted:  base.Foreground(charmtone.Cherry).Background(charmtone.Toast),  // GenericDeleted.
+	return Styles{
+		StyleDefault:      base,
+		StyleKey:          base.Foreground(charmtone.Mauve),  // NameTag.
+		StyleString:       base.Foreground(charmtone.Cumin),  // LiteralString.
+		StyleNumber:       base.Foreground(charmtone.Julep),  // LiteralNumber.
+		StyleBool:         base.Foreground(charmtone.Malibu), // KeywordConstant.
+		StyleNull:         base.Foreground(charmtone.Malibu), // KeywordConstant.
+		StyleAnchor:       base.Foreground(charmtone.Bengal), // CommentPreproc.
+		StyleAlias:        base.Foreground(charmtone.Bengal), // CommentPreproc.
+		StyleComment:      base.Foreground(charmtone.Oyster), // Comment.
+		StyleTag:          base.Foreground(charmtone.Bengal), // CommentPreproc.
+		StyleDocument:     base.Foreground(charmtone.Smoke),  // NameNamespace.
+		StyleDirective:    base.Foreground(charmtone.Smoke),  // NameNamespace.
+		StylePunctuation:  base.Foreground(charmtone.Zest),   // Punctuation.
+		StyleBlockScalar:  base.Foreground(charmtone.Zest),   // Punctuation.
+		StyleError:        base.Foreground(charmtone.Butter).Background(charmtone.Sriracha),
+		StyleDiffInserted: base.Foreground(charmtone.Julep).Background(charmtone.Spinach), // GenericInserted.
+		StyleDiffDeleted:  base.Foreground(charmtone.Cherry).Background(charmtone.Toast),  // GenericDeleted.
 	}
 }
 
