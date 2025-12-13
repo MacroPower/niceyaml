@@ -310,7 +310,7 @@ func (p *Printer) writeLine(sb *strings.Builder, prefix, content string, lineNum
 
 	for j, subLine := range subLines {
 		if j > 0 {
-			sb.WriteByte('\n')
+			sb.WriteString("\n")
 		}
 
 		if p.lineNumbers && lineNum > 0 {
