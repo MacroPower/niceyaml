@@ -12,7 +12,9 @@
 
 Package `niceyaml` combines the powers of [go-yaml][goccy/go-yaml], [bubbletea][bubbletea], and more.
 
-It provides opinionated utilities for **friendly and predictable handling of YAML and YAML-compatible documents** (like KYAML or JSON) in your **CLI** or **TUI** applications.
+It provides opinionated utilities for **friendly and predictable handling of YAML documents** in your **CLI** or **TUI** applications.
+
+> Also supports all YAML-compatible document formats like KYAML or JSON.
 
 ![demo](./examples/demo.png)
 
@@ -40,6 +42,12 @@ go get github.com/macropower/niceyaml@latest
 ## 🚀 Usage
 
 See [examples/](./examples/).
+
+If you want to try the examples locally, just run:
+
+```sh
+go run github.com/macropower/niceyaml/examples@latest
+```
 
 [goccy/go-yaml]: https://github.com/goccy/go-yaml
 [lipgloss]: https://github.com/charmbracelet/lipgloss
