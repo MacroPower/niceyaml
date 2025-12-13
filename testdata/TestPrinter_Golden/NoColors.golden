@@ -1,4 +1,3 @@
-%YAML 1.2
 %TAG !custom! tag:cafe-yamull.example.com,2024:
 ---
 # ═══════════════════════════════════════════════════════════════
@@ -55,10 +54,12 @@ restaurant:
   name: "Café Yamüll & 日本料理"
 
   # Complex key (must use ? explicit key indicator)
-? { city: "東京", district: "渋谷区" }: flagship_location: true
+  "東京":
+    flagship_location: true
 
   # Another complex key with emoji
-? [🍳, 🍜, 🍣]: signature_dishes: true
+  🍣:
+    signature_dish: true
 
   metadata:
     established: 2024-03-15        # Date type
