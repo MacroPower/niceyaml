@@ -35,10 +35,22 @@ const (
 // Styles defines styles for YAML highlighting.
 type Styles map[Style]lipgloss.Style
 
-// Get returns the [lipgloss.Style] for the given [Style] category.
+// StyleGetter retrieves styles by category.
+type StyleGetter interface {
+	GetStyle(s Style) *lipgloss.Style
+}
+
+// TokenStyler styles [token.Tokens].
+type TokenStyler interface {
+	StyleGetter
+	AddStyleToToken(style *lipgloss.Style, pos Position)
+	ClearStyles()
+}
+
+// GetStyle returns the [lipgloss.Style] for the given [Style] category.
 // If the given [Style] is not defined, it returns [StyleDefault].
 // If no [StyleDefault] is defined, it returns an empty [lipgloss.Style].
-func (s Styles) Get(style Style) *lipgloss.Style {
+func (s Styles) GetStyle(style Style) *lipgloss.Style {
 	matchedStyle, ok := s[style]
 	if ok {
 		return &matchedStyle
@@ -77,13 +89,6 @@ func DefaultStyles() Styles {
 		StyleDiffInserted: base.Foreground(charmtone.Julep).Background(charmtone.Spinach), // GenericInserted.
 		StyleDiffDeleted:  base.Foreground(charmtone.Cherry).Background(charmtone.Toast),  // GenericDeleted.
 	}
-}
-
-// TokenStyler styles [token.Tokens].
-type TokenStyler interface {
-	AddStyleToToken(style lipgloss.Style, pos Position)
-	ClearStyles()
-	GetStyle(style Style) lipgloss.Style
 }
 
 // tokenStyle represents a style to apply at a specific token position.

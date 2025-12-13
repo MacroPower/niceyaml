@@ -13,10 +13,12 @@ import (
 )
 
 // testHighlightStyle returns a style that wraps content in brackets for easy verification.
-func testHighlightStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Transform(func(s string) string {
+func testHighlightStyle() *lipgloss.Style {
+	style := lipgloss.NewStyle().Transform(func(s string) string {
 		return "[" + s + "]"
 	})
+
+	return &style
 }
 
 // testPrinter returns a printer without styles or padding for predictable output.
@@ -436,12 +438,12 @@ func TestPrinter_AddStyleToRange_Overlapping(t *testing.T) {
 
 	p := testPrinter()
 	// Inner range: "val" (cols 6-8, exclusive end 9).
-	p.AddStyleToRange(innerStyle, niceyaml.PositionRange{
+	p.AddStyleToRange(&innerStyle, niceyaml.PositionRange{
 		Start: niceyaml.Position{Line: 1, Col: 6},
 		End:   niceyaml.Position{Line: 1, Col: 9},
 	})
 	// Outer range: "alu" (cols 7-9, exclusive end 10).
-	p.AddStyleToRange(outerStyle, niceyaml.PositionRange{
+	p.AddStyleToRange(&outerStyle, niceyaml.PositionRange{
 		Start: niceyaml.Position{Line: 1, Col: 7},
 		End:   niceyaml.Position{Line: 1, Col: 10},
 	})
@@ -590,7 +592,7 @@ func TestPrinter_BlendColors_OverlayNoColor(t *testing.T) {
 	transformOnlyStyle := lipgloss.NewStyle().Transform(func(s string) string {
 		return "[" + s + "]"
 	})
-	p.AddStyleToRange(transformOnlyStyle, niceyaml.PositionRange{
+	p.AddStyleToRange(&transformOnlyStyle, niceyaml.PositionRange{
 		Start: niceyaml.Position{Line: 1, Col: 6},
 		End:   niceyaml.Position{Line: 1, Col: 11},
 	})

@@ -16,10 +16,12 @@ import (
 )
 
 // testBracketStyle returns a style that wraps content in brackets for verification.
-func testBracketStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Transform(func(s string) string {
+func testBracketStyle() *lipgloss.Style {
+	style := lipgloss.NewStyle().Transform(func(s string) string {
 		return "[" + s + "]"
 	})
+
+	return &style
 }
 
 // testFinderPrinter returns a Finder and Printer configured for testing.
@@ -254,7 +256,7 @@ func TestPrinter_Golden(t *testing.T) {
 
 				ranges := finder.FindStringsInTokens("日本", tokens)
 				for _, rng := range ranges {
-					p.AddStyleToRange(highlightStyle, rng)
+					p.AddStyleToRange(&highlightStyle, rng)
 				}
 			},
 		},

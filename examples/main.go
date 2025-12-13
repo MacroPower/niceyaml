@@ -37,13 +37,13 @@ func main() {
 
 	tokens := lexer.Tokenize(source)
 	red := lipgloss.NewStyle().Background(charmtone.Sapphire)
-	printer.AddStyleToRange(red, niceyaml.PositionRange{
+	printer.AddStyleToRange(&red, niceyaml.PositionRange{
 		Start: niceyaml.Position{Line: 10, Col: 5},
 		End:   niceyaml.Position{Line: 11, Col: 22},
 	})
 
 	blue := lipgloss.NewStyle().Background(charmtone.Pom)
-	printer.AddStyleToRange(blue, niceyaml.PositionRange{
+	printer.AddStyleToRange(&blue, niceyaml.PositionRange{
 		Start: niceyaml.Position{Line: 11, Col: 13},
 		End:   niceyaml.Position{Line: 11, Col: 31},
 	})
@@ -64,7 +64,7 @@ func main() {
 
 	highlight := lipgloss.NewStyle().Background(charmtone.Mustard).Foreground(charmtone.Salt)
 	for _, m := range matches {
-		printer.AddStyleToRange(highlight, m)
+		printer.AddStyleToRange(&highlight, m)
 	}
 
 	findDemo := printer.PrintTokens(tokens)
