@@ -15,11 +15,11 @@ import (
 // ErrorWrapper wraps errors with additional context for [Error] types.
 // It holds default options that are applied to all wrapped errors.
 type ErrorWrapper struct {
-	opts []ErrorOpt
+	opts []ErrorOption
 }
 
 // NewErrorWrapper creates a new [ErrorWrapper] with the given default options.
-func NewErrorWrapper(opts ...ErrorOpt) *ErrorWrapper {
+func NewErrorWrapper(opts ...ErrorOption) *ErrorWrapper {
 	return &ErrorWrapper{
 		opts: opts,
 	}
@@ -27,7 +27,7 @@ func NewErrorWrapper(opts ...ErrorOpt) *ErrorWrapper {
 
 // Wrap wraps an error with additional context for [Error]s.
 // If the error isn't an [Error], it returns the original error unmodified.
-func (ew *ErrorWrapper) Wrap(err error, opts ...ErrorOpt) error {
+func (ew *ErrorWrapper) Wrap(err error, opts ...ErrorOption) error {
 	if err == nil {
 		return nil
 	}
@@ -65,7 +65,7 @@ type Error struct {
 
 // NewError creates a new [Error] with the given underlying error and options.
 // Default SourceLines is 4.
-func NewError(err error, opts ...ErrorOpt) *Error {
+func NewError(err error, opts ...ErrorOption) *Error {
 	e := &Error{
 		err:         err,
 		sourceLines: 4,
@@ -77,32 +77,32 @@ func NewError(err error, opts ...ErrorOpt) *Error {
 	return e
 }
 
-// ErrorOpt configures an [Error].
-type ErrorOpt func(e *Error)
+// ErrorOption configures an [Error].
+type ErrorOption func(e *Error)
 
 // WithSourceLines sets the number of context lines to show around the error.
-func WithSourceLines(lines int) ErrorOpt {
+func WithSourceLines(lines int) ErrorOption {
 	return func(e *Error) {
 		e.sourceLines = lines
 	}
 }
 
 // WithPath sets the YAML path where the error occurred.
-func WithPath(path *yaml.Path) ErrorOpt {
+func WithPath(path *yaml.Path) ErrorOption {
 	return func(e *Error) {
 		e.path = path
 	}
 }
 
 // WithErrorToken sets the token where the error occurred.
-func WithErrorToken(tk *token.Token) ErrorOpt {
+func WithErrorToken(tk *token.Token) ErrorOption {
 	return func(e *Error) {
 		e.token = tk
 	}
 }
 
 // WithPrinter sets the printer used for formatting the error source.
-func WithPrinter(p *Printer) ErrorOpt {
+func WithPrinter(p *Printer) ErrorOption {
 	return func(e *Error) {
 		e.printer = p
 	}
@@ -110,7 +110,7 @@ func WithPrinter(p *Printer) ErrorOpt {
 
 // WithTokens sets the YAML tokens for annotating the error.
 // The tokens are used to resolve the error path to a specific token location.
-func WithTokens(tokens token.Tokens) ErrorOpt {
+func WithTokens(tokens token.Tokens) ErrorOption {
 	return func(e *Error) {
 		e.tokens = tokens
 	}
@@ -118,7 +118,7 @@ func WithTokens(tokens token.Tokens) ErrorOpt {
 
 // WithFile sets the parsed AST file for resolving the error path.
 // Use this instead of [WithTokens] when you already have a parsed file.
-func WithFile(file *ast.File) ErrorOpt {
+func WithFile(file *ast.File) ErrorOption {
 	return func(e *Error) {
 		e.file = file
 	}

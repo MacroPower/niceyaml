@@ -128,25 +128,25 @@ value: 123`
 	tokens := lexer.Tokenize(source)
 
 	tcs := map[string]struct {
-		wrapperOpts  func() []niceyaml.ErrorOpt
+		wrapperOpts  func() []niceyaml.ErrorOption
 		inputErr     func() error
-		wrapOpts     func() []niceyaml.ErrorOpt
+		wrapOpts     func() []niceyaml.ErrorOption
 		wantContains []string
 		wantNil      bool
 		wantSameErr  bool
 	}{
 		"wrap nil returns nil": {
-			wrapperOpts: func() []niceyaml.ErrorOpt { return nil },
+			wrapperOpts: func() []niceyaml.ErrorOption { return nil },
 			inputErr:    func() error { return nil },
 			wantNil:     true,
 		},
 		"wrap non-error type returns unchanged": {
-			wrapperOpts: func() []niceyaml.ErrorOpt { return nil },
+			wrapperOpts: func() []niceyaml.ErrorOption { return nil },
 			inputErr:    func() error { return errors.New("plain error") },
 			wantSameErr: true,
 		},
 		"wrap error applies default options": {
-			wrapperOpts: func() []niceyaml.ErrorOpt { return []niceyaml.ErrorOpt{niceyaml.WithTokens(tokens)} },
+			wrapperOpts: func() []niceyaml.ErrorOption { return []niceyaml.ErrorOption{niceyaml.WithTokens(tokens)} },
 			inputErr: func() error {
 				return niceyaml.NewError(
 					errors.New("test error"),
@@ -156,15 +156,15 @@ value: 123`
 			wantContains: []string{"[1:1]", "test error"},
 		},
 		"call-site options override defaults": {
-			wrapperOpts: func() []niceyaml.ErrorOpt { return []niceyaml.ErrorOpt{niceyaml.WithSourceLines(1)} },
+			wrapperOpts: func() []niceyaml.ErrorOption { return []niceyaml.ErrorOption{niceyaml.WithSourceLines(1)} },
 			inputErr: func() error {
 				return niceyaml.NewError(
 					errors.New("test error"),
 					niceyaml.WithPath(niceyaml.NewRootPath().Child("name").Build()),
 				)
 			},
-			wrapOpts: func() []niceyaml.ErrorOpt {
-				return []niceyaml.ErrorOpt{niceyaml.WithTokens(tokens), niceyaml.WithSourceLines(3)}
+			wrapOpts: func() []niceyaml.ErrorOption {
+				return []niceyaml.ErrorOption{niceyaml.WithTokens(tokens), niceyaml.WithSourceLines(3)}
 			},
 			wantContains: []string{"[1:1]"},
 		},
@@ -177,7 +177,7 @@ value: 123`
 			wrapper := niceyaml.NewErrorWrapper(tc.wrapperOpts()...)
 			inputErr := tc.inputErr()
 
-			var wrapOpts []niceyaml.ErrorOpt
+			var wrapOpts []niceyaml.ErrorOption
 			if tc.wrapOpts != nil {
 				wrapOpts = tc.wrapOpts()
 			}
@@ -296,7 +296,7 @@ func TestErrorAnnotation(t *testing.T) {
 
 			tokens := lexer.Tokenize(tc.source)
 
-			opts := []niceyaml.ErrorOpt{
+			opts := []niceyaml.ErrorOption{
 				niceyaml.WithPath(tc.pathBuilder()),
 				niceyaml.WithTokens(tokens),
 			}
