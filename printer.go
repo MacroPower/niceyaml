@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 )
 
@@ -171,8 +172,7 @@ func (p *Printer) ClearStyles() {
 	p.rangeStyles = nil
 }
 
-// PrintTokens renders tokens with syntax highlighting and returns the result.
-// If line numbers are enabled, each line is prefixed with its number.
+// PrintTokens prints [token.Tokens].
 func (p *Printer) PrintTokens(tokens token.Tokens) string {
 	content := p.getTokenString(tokens)
 	content = p.applyLinePrefixes(content, p.initialLineNumber)
@@ -185,34 +185,20 @@ func (p *Printer) PrintTokens(tokens token.Tokens) string {
 	return p.style.Render(content)
 }
 
-// applyLinePrefixes adds line numbers or line prefixes to content.
-func (p *Printer) applyLinePrefixes(content string, startLine int) string {
-	if p.lineNumbers {
-		return p.addLineNumbers(content, startLine)
+// PrintFile prints [*ast.File].
+func (p *Printer) PrintFile(f *ast.File) string {
+	if len(f.Docs) == 0 {
+		return ""
 	}
 
-	return addLinePrefix(content, p.linePrefix)
-}
-
-// wrapContent wraps each line of content to the configured width.
-func (p *Printer) wrapContent(content string) string {
-	if p.width <= 0 {
-		return content
+	tk := p.findAnyTokenInFile(f)
+	if tk == nil {
+		return ""
 	}
 
-	lines := strings.Split(content, "\n")
+	tokens := p.extractTokensInRange(tk, -1, -1)
 
-	var sb strings.Builder
-
-	for i, line := range lines {
-		if i > 0 {
-			sb.WriteByte('\n')
-		}
-
-		sb.WriteString(lipgloss.Wrap(line, p.width, wrapOnCharacters))
-	}
-
-	return sb.String()
+	return p.PrintTokens(tokens)
 }
 
 // PrintErrorToken prints the tokens around the error token with context.
@@ -250,6 +236,52 @@ func (p *Printer) PrintTokenDiff(before, after token.Tokens) string {
 	)
 
 	return p.style.Render(p.renderFullFileDiff(ops, after))
+}
+
+func (p *Printer) findAnyTokenInFile(f *ast.File) *token.Token {
+	for _, doc := range f.Docs {
+		if doc.Start != nil {
+			return doc.Start
+		}
+		if doc.Body != nil {
+			return doc.Body.GetToken()
+		}
+		if doc.End != nil {
+			return doc.End
+		}
+	}
+
+	return nil
+}
+
+// applyLinePrefixes adds line numbers or line prefixes to content.
+func (p *Printer) applyLinePrefixes(content string, startLine int) string {
+	if p.lineNumbers {
+		return p.addLineNumbers(content, startLine)
+	}
+
+	return addLinePrefix(content, p.linePrefix)
+}
+
+// wrapContent wraps each line of content to the configured width.
+func (p *Printer) wrapContent(content string) string {
+	if p.width <= 0 {
+		return content
+	}
+
+	lines := strings.Split(content, "\n")
+
+	var sb strings.Builder
+
+	for i, line := range lines {
+		if i > 0 {
+			sb.WriteByte('\n')
+		}
+
+		sb.WriteString(lipgloss.Wrap(line, p.width, wrapOnCharacters))
+	}
+
+	return sb.String()
 }
 
 // renderFullFileDiff renders line operations with appropriate prefixes and styling.
@@ -631,9 +663,10 @@ func (p *Printer) getTokenString(tokens token.Tokens) string {
 // extractTokensInRange extracts tokens that touch [minLine, maxLine].
 // It clones tokens and adjusts the first token's Origin to remove leading
 // newlines while preserving leading whitespace from the previous token.
+// If either range limit is negative, it is unbounded in that direction.
 func (p *Printer) extractTokensInRange(tk *token.Token, minLine, maxLine int) token.Tokens {
 	// Walk backward to find the first token at or after minLine.
-	for tk.Prev != nil && tk.Prev.Position.Line >= minLine {
+	for tk.Prev != nil && (minLine < 0 || tk.Prev.Position.Line >= minLine) {
 		tk = tk.Prev
 	}
 
@@ -649,13 +682,20 @@ func (p *Printer) extractTokensInRange(tk *token.Token, minLine, maxLine int) to
 		}
 	}
 
-	// Trim leading newlines (we're not showing earlier lines).
-	firstTk.Origin = strings.TrimLeft(firstTk.Origin, "\r\n")
+	// If min is bounded, trim any leading newlines.
+	if minLine >= 0 {
+		firstTk.Origin = strings.TrimLeft(firstTk.Origin, "\r\n")
+	}
 
 	tokens := token.Tokens{firstTk}
 
 	// Walk forward to collect tokens up to maxLine.
-	for t := tk.Next; t != nil && t.Position.Line <= maxLine; t = t.Next {
+	for t := tk.Next; t != nil && (maxLine < 0 || t.Position.Line <= maxLine); t = t.Next {
+		// Skip parser-added implicit null tokens to match lexer output.
+		if t.Type == token.ImplicitNullType {
+			continue
+		}
+
 		tokens.Add(t.Clone())
 	}
 

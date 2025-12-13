@@ -5,7 +5,10 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/lexer"
+	"github.com/goccy/go-yaml/parser"
+	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -28,6 +31,16 @@ func testPrinter() *niceyaml.Printer {
 		niceyaml.WithStyle(lipgloss.NewStyle()),
 		niceyaml.WithLinePrefix(""),
 	)
+}
+
+// parseFile parses tokens into an ast.File for testing PrintFile.
+func parseFile(t *testing.T, tokens token.Tokens) *ast.File {
+	t.Helper()
+
+	file, err := parser.Parse(tokens, 0)
+	require.NoError(t, err)
+
+	return file
 }
 
 func Test_PrinterErrorToken(t *testing.T) {
@@ -266,8 +279,11 @@ alias: *x`
 	p := testPrinter()
 
 	got := p.PrintTokens(tokens)
-
 	assert.Equal(t, input, got)
+
+	file := parseFile(t, tokens)
+	gotFile := p.PrintFile(file)
+	assert.Equal(t, got, gotFile)
 }
 
 func TestPrinter_Highlight(t *testing.T) {
@@ -336,7 +352,12 @@ func TestPrinter_Highlight(t *testing.T) {
 			p := testPrinter()
 			p.AddStyleToToken(testHighlightStyle(), niceyaml.Position{Line: line, Col: column})
 
-			assert.Equal(t, tc.want, p.PrintTokens(tokens))
+			got := p.PrintTokens(tokens)
+			assert.Equal(t, tc.want, got)
+
+			file := parseFile(t, tokens)
+			gotFile := p.PrintFile(file)
+			assert.Equal(t, got, gotFile)
 		})
 	}
 }
@@ -418,7 +439,12 @@ func TestPrinter_AddStyleToRange(t *testing.T) {
 			p := testPrinter()
 			p.AddStyleToRange(testHighlightStyle(), tc.rng)
 
-			assert.Equal(t, tc.want, p.PrintTokens(tokens))
+			got := p.PrintTokens(tokens)
+			assert.Equal(t, tc.want, got)
+
+			file := parseFile(t, tokens)
+			gotFile := p.PrintFile(file)
+			assert.Equal(t, got, gotFile)
 		})
 	}
 }
@@ -510,6 +536,10 @@ func TestPrinter_PrintTokens_EmptyFile(t *testing.T) {
 
 	// Empty file should produce empty output.
 	assert.Empty(t, got)
+
+	file := parseFile(t, tokens)
+	gotFile := p.PrintFile(file)
+	assert.Equal(t, got, gotFile)
 }
 
 func TestNewPrinter(t *testing.T) {
@@ -529,6 +559,10 @@ bool: true
 	// Should contain original content.
 	assert.Contains(t, got, "key")
 	assert.Contains(t, got, "value")
+
+	file := parseFile(t, tokens)
+	gotFile := p.PrintFile(file)
+	assert.Equal(t, got, gotFile)
 }
 
 func TestNewPrinter_WithStyles(t *testing.T) {
@@ -551,7 +585,12 @@ func TestNewPrinter_WithStyles(t *testing.T) {
 		niceyaml.WithLinePrefix(""),
 	)
 
-	assert.Equal(t, "<key>key</key>: <str>value</str>", p.PrintTokens(tokens))
+	got := p.PrintTokens(tokens)
+	assert.Equal(t, "<key>key</key>: <str>value</str>", got)
+
+	file := parseFile(t, tokens)
+	gotFile := p.PrintFile(file)
+	assert.Equal(t, got, gotFile)
 }
 
 func TestNewPrinter_EmptyStyles(t *testing.T) {
@@ -568,6 +607,10 @@ func TestNewPrinter_EmptyStyles(t *testing.T) {
 	// Should still contain original content.
 	assert.Contains(t, got, "key")
 	assert.Contains(t, got, "value")
+
+	file := parseFile(t, tokens)
+	gotFile := p.PrintFile(file)
+	assert.Equal(t, got, gotFile)
 }
 
 func TestPrinter_BlendColors_OverlayNoColor(t *testing.T) {
@@ -649,6 +692,10 @@ func TestPrinter_LineNumbers(t *testing.T) {
 
 			got := p.PrintTokens(tokens)
 			assert.Equal(t, tc.want, got)
+
+			file := parseFile(t, tokens)
+			gotFile := p.PrintFile(file)
+			assert.Equal(t, got, gotFile)
 		})
 	}
 }
@@ -929,6 +976,10 @@ func TestPrinter_WordWrap(t *testing.T) {
 
 			got := p.PrintTokens(tokens)
 			assert.Equal(t, tc.want, got)
+
+			file := parseFile(t, tokens)
+			gotFile := p.PrintFile(file)
+			assert.Equal(t, got, gotFile)
 		})
 	}
 }
@@ -1277,6 +1328,10 @@ func TestPrinter_TokenTypes(t *testing.T) {
 			for _, want := range tc.wantContains {
 				assert.Contains(t, got, want)
 			}
+
+			file := parseFile(t, tokens)
+			gotFile := p.PrintFile(file)
+			assert.Equal(t, got, gotFile)
 		})
 	}
 }
@@ -1318,4 +1373,54 @@ func TestPrinter_PrintErrorToken_FirstToken(t *testing.T) {
 	assert.Equal(t, 1, minLine)
 	assert.Contains(t, got, "key")
 	assert.Contains(t, got, "value")
+}
+
+func TestPrinter_PrintFile_MultiDocument(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  string
+	}{
+		"two documents": {
+			input: "doc1: value1\n---\ndoc2: value2",
+			want:  "doc1: value1\n---\ndoc2: value2",
+		},
+		"three documents": {
+			input: "first: 1\n---\nsecond: 2\n---\nthird: 3",
+			want:  "first: 1\n---\nsecond: 2\n---\nthird: 3",
+		},
+		"documents with header": {
+			input: "---\nkey: value",
+			want:  "---\nkey: value",
+		},
+		"documents with footer": {
+			input: "key: value\n...",
+			want:  "key: value\n...",
+		},
+		"document with header and footer": {
+			input: "---\nkey: value\n...",
+			want:  "---\nkey: value\n...",
+		},
+		"multiple docs with headers and footers": {
+			input: "---\ndoc1: value1\n...\n---\ndoc2: value2\n...",
+			want:  "---\ndoc1: value1\n...\n---\ndoc2: value2\n...",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tokens := lexer.Tokenize(tc.input)
+			p := testPrinter()
+
+			got := p.PrintTokens(tokens)
+			assert.Equal(t, tc.want, got)
+
+			file := parseFile(t, tokens)
+			gotFile := p.PrintFile(file)
+			assert.Equal(t, got, gotFile)
+		})
+	}
 }

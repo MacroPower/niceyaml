@@ -7,7 +7,9 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/golden"
+	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/lexer"
+	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -22,6 +24,16 @@ func testBracketStyle() *lipgloss.Style {
 	})
 
 	return &style
+}
+
+// testParseFile parses tokens into an ast.File for testing PrintFile.
+func testParseFile(t *testing.T, tokens token.Tokens) *ast.File {
+	t.Helper()
+
+	file, err := parser.Parse(tokens, 0)
+	require.NoError(t, err)
+
+	return file
 }
 
 // testFinderPrinter returns a Finder and Printer configured for testing.
@@ -158,6 +170,10 @@ func TestFinderPrinter_Integration(t *testing.T) {
 
 			got := printer.PrintTokens(tokens)
 			assert.Equal(t, tc.want, got)
+
+			file := testParseFile(t, tokens)
+			gotFile := printer.PrintFile(file)
+			assert.Equal(t, got, gotFile)
 		})
 	}
 }
@@ -207,6 +223,10 @@ func TestFinderPrinter_EdgeCases(t *testing.T) {
 
 			got := printer.PrintTokens(tokens)
 			assert.Equal(t, tc.wantOutput, got)
+
+			file := testParseFile(t, tokens)
+			gotFile := printer.PrintFile(file)
+			assert.Equal(t, got, gotFile)
 		})
 	}
 }
@@ -278,6 +298,10 @@ func TestPrinter_Golden(t *testing.T) {
 
 			output := printer.PrintTokens(tokens)
 			golden.RequireEqual(t, output)
+
+			file := testParseFile(t, tokens)
+			outputFile := printer.PrintFile(file)
+			assert.Equal(t, output, outputFile)
 		})
 	}
 }
