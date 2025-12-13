@@ -213,30 +213,23 @@ func (p *Printer) PrintErrorToken(tk *token.Token, lines int) (string, int) {
 	curLine := tk.Position.Line
 	curExtLine := curLine + countNewlines(strings.TrimLeft(tk.Origin, "\r\n"))
 	if endsWithNewline(tk.Origin) {
-		// If last character ( exclude white space ) is new line character, ignore it.
 		curExtLine--
 	}
 
 	minLine := max(curLine-lines, 1)
 	maxLine := curExtLine + lines
 
-	beforeTokens := p.printBeforeTokens(tk, minLine, curExtLine)
-	lastTk := beforeTokens[len(beforeTokens)-1]
-	afterTokens := p.printAfterTokens(lastTk.Next, maxLine)
-
-	beforeSource := p.getTokenString(beforeTokens)
-	afterSource := p.getTokenString(afterTokens)
-
-	all := beforeSource + "\n" + afterSource
+	tokens := p.extractTokensInRange(tk, minLine, maxLine)
+	content := p.getTokenString(tokens)
 
 	startLine := p.initialLineNumber
 	if startLine < 1 {
 		startLine = minLine
 	}
 
-	all = p.applyLinePrefixes(all, startLine)
+	content = p.applyLinePrefixes(content, startLine)
 
-	return p.style.Render(all), minLine
+	return p.style.Render(content), minLine
 }
 
 // PrintTokenDiff generates a full-file diff between two token collections.
@@ -608,69 +601,35 @@ func (p *Printer) getTokenString(tokens token.Tokens) string {
 	return sb.String()
 }
 
-func (p *Printer) printBeforeTokens(tk *token.Token, minLine, extLine int) token.Tokens {
-	for tk.Prev != nil {
-		if tk.Prev.Position.Line < minLine {
-			break
-		}
-
+// extractTokensInRange extracts tokens that touch [minLine, maxLine].
+// It clones tokens and adjusts the first token's Origin to remove leading
+// newlines while preserving leading whitespace from the previous token.
+func (p *Printer) extractTokensInRange(tk *token.Token, minLine, maxLine int) token.Tokens {
+	// Walk backward to find the first token at or after minLine.
+	for tk.Prev != nil && tk.Prev.Position.Line >= minLine {
 		tk = tk.Prev
 	}
 
-	minTk := tk.Clone()
-	if minTk.Prev != nil {
-		// Add white spaces to minTk by prev token.
-		prev := minTk.Prev
+	// Clone the first token.
+	firstTk := tk.Clone()
+
+	// Preserve leading whitespace from previous token.
+	if firstTk.Prev != nil {
+		prev := firstTk.Prev
 		whiteSpaceLen := len(prev.Origin) - len(strings.TrimRight(prev.Origin, " "))
-		minTk.Origin = strings.Repeat(" ", whiteSpaceLen) + minTk.Origin
-	}
-
-	minTk.Origin = strings.TrimLeft(minTk.Origin, "\r\n")
-	tokens := token.Tokens{minTk}
-
-	tk = minTk.Next
-	for tk != nil && tk.Position.Line <= extLine {
-		clonedTk := tk.Clone()
-		tokens.Add(clonedTk)
-
-		tk = clonedTk.Next
-	}
-
-	lastTk := tokens[len(tokens)-1]
-	trimmedOrigin := strings.TrimRight(lastTk.Origin, " \r\n")
-	suffix := lastTk.Origin[len(trimmedOrigin):]
-	lastTk.Origin = trimmedOrigin
-
-	if lastTk.Next != nil && len(suffix) > 1 {
-		next := lastTk.Next.Clone()
-		// Add suffix to header of next token.
-		if suffix[0] == '\n' || suffix[0] == '\r' {
-			suffix = suffix[1:]
+		if whiteSpaceLen > 0 {
+			firstTk.Origin = strings.Repeat(" ", whiteSpaceLen) + firstTk.Origin
 		}
-
-		next.Origin = suffix + next.Origin
-		lastTk.Next = next
 	}
 
-	return tokens
-}
+	// Trim leading newlines (we're not showing earlier lines).
+	firstTk.Origin = strings.TrimLeft(firstTk.Origin, "\r\n")
 
-func (p *Printer) printAfterTokens(tk *token.Token, maxLine int) token.Tokens {
-	tokens := token.Tokens{}
-	if tk == nil || tk.Position.Line > maxLine {
-		return tokens
-	}
+	tokens := token.Tokens{firstTk}
 
-	minTk := tk.Clone()
-	minTk.Origin = strings.TrimLeft(minTk.Origin, "\r\n")
-	tokens.Add(minTk)
-
-	tk = minTk.Next
-	for tk != nil && tk.Position.Line <= maxLine {
-		clonedTk := tk.Clone()
-		tokens.Add(clonedTk)
-
-		tk = clonedTk.Next
+	// Walk forward to collect tokens up to maxLine.
+	for t := tk.Next; t != nil && t.Position.Line <= maxLine; t = t.Next {
+		tokens.Add(t.Clone())
 	}
 
 	return tokens

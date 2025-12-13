@@ -231,8 +231,7 @@ text3: hello
 text2: "ffff
  gggg
  hhhh"
-text3: hello
-`,
+text3: hello`,
 			wantLine: 5,
 		},
 	}
