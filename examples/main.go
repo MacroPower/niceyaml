@@ -36,13 +36,13 @@ func main() {
 	printer := niceyaml.NewPrinter(niceyaml.WithLineNumbers())
 
 	tokens := lexer.Tokenize(source)
-	red := lipgloss.NewStyle().Background(charmtone.Sapphire)
+	red := lipgloss.NewStyle().Background(charmtone.Sapphire).Foreground(charmtone.Salt)
 	printer.AddStyleToRange(&red, niceyaml.PositionRange{
 		Start: niceyaml.Position{Line: 10, Col: 5},
 		End:   niceyaml.Position{Line: 11, Col: 22},
 	})
 
-	blue := lipgloss.NewStyle().Background(charmtone.Pom)
+	blue := lipgloss.NewStyle().Background(charmtone.Cherry).Foreground(charmtone.Salt)
 	printer.AddStyleToRange(&blue, niceyaml.PositionRange{
 		Start: niceyaml.Position{Line: 11, Col: 13},
 		End:   niceyaml.Position{Line: 11, Col: 31},
@@ -62,7 +62,7 @@ func main() {
 	finder := niceyaml.NewFinder(niceyaml.WithNormalizer(niceyaml.StandardNormalizer))
 	matches := finder.FindStringsInTokens("fe", tokens)
 
-	highlight := lipgloss.NewStyle().Background(charmtone.Mustard).Foreground(charmtone.Salt)
+	highlight := lipgloss.NewStyle().Background(charmtone.Mustard).Foreground(charmtone.Charcoal)
 	for _, m := range matches {
 		printer.AddStyleToRange(&highlight, m)
 	}

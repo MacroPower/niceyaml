@@ -103,6 +103,21 @@ type rangeStyle struct {
 	rng   PositionRange
 }
 
+// overrideColor returns the overlay color if valid, otherwise the base color.
+// Unlike blendColors, this does not blend - overlay takes precedence.
+func overrideColor(base, overlay color.Color) color.Color {
+	_, isNoColor := overlay.(lipgloss.NoColor)
+	if overlay == nil || isNoColor {
+		return base
+	}
+
+	if _, visible := colorful.MakeColor(overlay); visible {
+		return overlay
+	}
+
+	return base
+}
+
 // blendColors blends two colors using LAB color space (50/50 mix).
 // If both colors are nil/NoColor, it returns nil.
 // If one color is nil/NoColor/invisible, it returns the other.
@@ -171,6 +186,29 @@ func blendStyles(base, overlay *lipgloss.Style) *lipgloss.Style {
 	case overlayTransform != nil:
 		style = style.Transform(overlayTransform)
 		// Base transform is nil: keep base's transform (already in result).
+	}
+
+	return &style
+}
+
+// overrideStyles applies overlay on top of base: overlay properties replace base properties.
+// Colors are overridden (not blended), transforms are overridden (not composed).
+func overrideStyles(base, overlay *lipgloss.Style) *lipgloss.Style {
+	style := *base
+
+	// Override foreground if overlay has one.
+	if fg := overrideColor(style.GetForeground(), overlay.GetForeground()); fg != nil {
+		style = style.Foreground(fg)
+	}
+
+	// Override background if overlay has one.
+	if bg := overrideColor(style.GetBackground(), overlay.GetBackground()); bg != nil {
+		style = style.Background(bg)
+	}
+
+	// Override transform if overlay has one (not composed).
+	if overlayTransform := overlay.GetTransform(); overlayTransform != nil {
+		style = style.Transform(overlayTransform)
 	}
 
 	return &style

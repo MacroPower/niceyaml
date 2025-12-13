@@ -362,11 +362,21 @@ func buildLinesFromTokens(tokens token.Tokens) []string {
 }
 
 // styleForPosition returns the effective style for a character at (line, col),
-// blending the base style with all applicable range styles.
+// applying range styles to the base style.
+// The first matching range overrides the base style; subsequent ranges blend.
 func (p *Printer) styleForPosition(line, col int, style *lipgloss.Style) *lipgloss.Style {
+	firstRange := true
+
 	for i := range p.rangeStyles {
 		if p.rangeStyles[i].rng.Contains(line, col) {
-			style = blendStyles(style, &p.rangeStyles[i].style)
+			if firstRange {
+				// First range overrides base (colors and transforms).
+				style = overrideStyles(style, &p.rangeStyles[i].style)
+				firstRange = false
+			} else {
+				// Subsequent ranges blend (colors and compose transforms).
+				style = blendStyles(style, &p.rangeStyles[i].style)
+			}
 		}
 	}
 
