@@ -88,10 +88,7 @@ func NewPathBuilder() *yaml.PathBuilder {
 // Returns 1-indexed line and column values.
 func initialPositionFromToken(tk *token.Token) (int, int) {
 	line := tk.Position.Line
-	col := tk.Position.Column - tokenValueOffset(tk)
-	if col < 1 {
-		col = 1
-	}
+	col := max(tk.Position.Column-tokenValueOffset(tk), 1)
 
 	return line, col
 }
@@ -100,8 +97,8 @@ func initialPositionFromToken(tk *token.Token) (int, int) {
 // first non-empty line of the token's Origin. This offset is used for string
 // slicing operations.
 func tokenValueOffset(tk *token.Token) int {
-	lines := strings.Split(tk.Origin, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(tk.Origin, "\n")
+	for line := range lines {
 		if line != "" {
 			idx := strings.Index(line, tk.Value)
 			if idx >= 0 {

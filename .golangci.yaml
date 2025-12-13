@@ -43,6 +43,7 @@ linters:
     - bidichk
     - bodyclose
     - canonicalheader
+    - contextcheck
     - depguard
     - dupl
     - durationcheck
@@ -57,6 +58,7 @@ linters:
     - gocheckcompilerdirectives
     - goconst
     - gocritic
+    - godoclint
     - godot
     - goprintffuncname
     - gosec
@@ -68,10 +70,12 @@ linters:
     - inamedparam
     - ineffassign
     - intrange
+    - iotamixing
     # - ireturn
     - makezero
     - mirror
     - misspell
+    - modernize
     - musttag
     - nakedret
     - nestif
