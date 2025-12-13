@@ -41,7 +41,7 @@ key: value`
 		"with path and tokens shows annotated source": {
 			err: niceyaml.NewError(
 				errors.New("invalid value"),
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Child("key").Build()),
+				niceyaml.WithPath(niceyaml.NewRootPath().Child("key").Build()),
 				niceyaml.WithTokens(tokens),
 			),
 			wantContains: []string{"[3:1]", "invalid value"},
@@ -49,7 +49,7 @@ key: value`
 		"with path and file shows annotated source": {
 			err: niceyaml.NewError(
 				errors.New("invalid value"),
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Child("key").Build()),
+				niceyaml.WithPath(niceyaml.NewRootPath().Child("key").Build()),
 				niceyaml.WithFile(file),
 			),
 			wantContains: []string{"[3:1]", "invalid value"},
@@ -64,7 +64,7 @@ key: value`
 		"invalid path gracefully degrades": {
 			err: niceyaml.NewError(
 				errors.New("not found"),
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Child("nonexistent").Build()),
+				niceyaml.WithPath(niceyaml.NewRootPath().Child("nonexistent").Build()),
 				niceyaml.WithTokens(tokens),
 			),
 			wantContains: []string{"error at $.nonexistent", "not found"},
@@ -72,7 +72,7 @@ key: value`
 		"path without tokens gracefully degrades": {
 			err: niceyaml.NewError(
 				errors.New("missing tokens"),
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Child("key").Build()),
+				niceyaml.WithPath(niceyaml.NewRootPath().Child("key").Build()),
 			),
 			wantContains: []string{"error at $.key", "missing tokens"},
 		},
@@ -110,7 +110,7 @@ func TestError_EmptyFile(t *testing.T) {
 
 	err := niceyaml.NewError(
 		errors.New("error in empty file"),
-		niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Child("key").Build()),
+		niceyaml.WithPath(niceyaml.NewRootPath().Child("key").Build()),
 		niceyaml.WithTokens(tokens),
 	)
 
@@ -150,7 +150,7 @@ value: 123`
 			inputErr: func() error {
 				return niceyaml.NewError(
 					errors.New("test error"),
-					niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Child("name").Build()),
+					niceyaml.WithPath(niceyaml.NewRootPath().Child("name").Build()),
 				)
 			},
 			wantContains: []string{"[1:1]", "test error"},
@@ -160,7 +160,7 @@ value: 123`
 			inputErr: func() error {
 				return niceyaml.NewError(
 					errors.New("test error"),
-					niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Child("name").Build()),
+					niceyaml.WithPath(niceyaml.NewRootPath().Child("name").Build()),
 				)
 			},
 			wrapOpts: func() []niceyaml.ErrorOpt {
@@ -216,14 +216,14 @@ func TestGetPath(t *testing.T) {
 		"returns path string when set": {
 			err: niceyaml.NewError(
 				errors.New("test"),
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Child("foo").Build()),
+				niceyaml.WithPath(niceyaml.NewRootPath().Child("foo").Build()),
 			),
 			want: "$.foo",
 		},
 		"nested path": {
 			err: niceyaml.NewError(
 				errors.New("test"),
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Child("foo").Child("bar").Build()),
+				niceyaml.WithPath(niceyaml.NewRootPath().Child("foo").Child("bar").Build()),
 			),
 			want: "$.foo.bar",
 		},
@@ -251,39 +251,39 @@ func TestErrorAnnotation(t *testing.T) {
 	}{
 		"nested path shows correct key": {
 			source:       "foo:\n  bar: value",
-			pathBuilder:  func() *yaml.Path { return niceyaml.NewPathBuilder().Root().Child("foo").Child("bar").Build() },
+			pathBuilder:  func() *yaml.Path { return niceyaml.NewRootPath().Child("foo").Child("bar").Build() },
 			errMsg:       "nested error",
 			wantContains: []string{"[2:3]", "nested error"},
 		},
 		"array element path - first item": {
 			source:       "items:\n  - first\n  - second",
-			pathBuilder:  func() *yaml.Path { return niceyaml.NewPathBuilder().Root().Child("items").Index(0).Build() },
+			pathBuilder:  func() *yaml.Path { return niceyaml.NewRootPath().Child("items").Index(0).Build() },
 			errMsg:       "array error",
 			wantContains: []string{"array error", "first"},
 		},
 		"array element path - nested object in array": {
 			source: "users:\n  - name: alice\n    age: 30",
 			pathBuilder: func() *yaml.Path {
-				return niceyaml.NewPathBuilder().Root().Child("users").Index(0).Child("name").Build()
+				return niceyaml.NewRootPath().Child("users").Index(0).Child("name").Build()
 			},
 			errMsg:       "nested array error",
 			wantContains: []string{"nested array error"},
 		},
 		"root path": {
 			source:       "key: value",
-			pathBuilder:  func() *yaml.Path { return niceyaml.NewPathBuilder().Root().Build() },
+			pathBuilder:  func() *yaml.Path { return niceyaml.NewRootPath().Build() },
 			errMsg:       "root error",
 			wantContains: []string{"root error"},
 		},
 		"single top-level key path": {
 			source:       "key: value",
-			pathBuilder:  func() *yaml.Path { return niceyaml.NewPathBuilder().Root().Child("key").Build() },
+			pathBuilder:  func() *yaml.Path { return niceyaml.NewRootPath().Child("key").Build() },
 			errMsg:       "top level error",
 			wantContains: []string{"[1:1]", "top level error"},
 		},
 		"with custom source lines": {
 			source:       "line1: a\nline2: b\nline3: c\nline4: d\nline5: e",
-			pathBuilder:  func() *yaml.Path { return niceyaml.NewPathBuilder().Root().Child("line3").Build() },
+			pathBuilder:  func() *yaml.Path { return niceyaml.NewRootPath().Child("line3").Build() },
 			errMsg:       "middle error",
 			sourceLines:  1,
 			wantContains: []string{"[3:1]", "middle error"},
@@ -379,7 +379,7 @@ func TestError_RootLevelArrayPath(t *testing.T) {
 
 	err := niceyaml.NewError(
 		errors.New("array element error"),
-		niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Index(1).Build()),
+		niceyaml.WithPath(niceyaml.NewRootPath().Index(1).Build()),
 		niceyaml.WithTokens(tokens),
 	)
 
@@ -401,7 +401,7 @@ another: line`
 
 	err := niceyaml.NewError(
 		errors.New("document root error"),
-		niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Build()),
+		niceyaml.WithPath(niceyaml.NewRootPath().Build()),
 		niceyaml.WithTokens(tokens),
 	)
 
@@ -421,19 +421,19 @@ func TestError_WithFile(t *testing.T) {
 	}{
 		"basic path with file": {
 			source:       "foo: bar\nkey: value",
-			pathBuilder:  func() *yaml.Path { return niceyaml.NewPathBuilder().Root().Child("key").Build() },
+			pathBuilder:  func() *yaml.Path { return niceyaml.NewRootPath().Child("key").Build() },
 			errMsg:       "file error",
 			wantContains: []string{"[2:1]", "file error"},
 		},
 		"nested path with file": {
 			source:       "outer:\n  inner: value",
-			pathBuilder:  func() *yaml.Path { return niceyaml.NewPathBuilder().Root().Child("outer").Child("inner").Build() },
+			pathBuilder:  func() *yaml.Path { return niceyaml.NewRootPath().Child("outer").Child("inner").Build() },
 			errMsg:       "nested file error",
 			wantContains: []string{"[2:3]", "nested file error"},
 		},
 		"array element with file": {
 			source:       "items:\n  - first\n  - second",
-			pathBuilder:  func() *yaml.Path { return niceyaml.NewPathBuilder().Root().Child("items").Index(1).Build() },
+			pathBuilder:  func() *yaml.Path { return niceyaml.NewRootPath().Child("items").Index(1).Build() },
 			errMsg:       "array file error",
 			wantContains: []string{"array file error", "second"},
 		},

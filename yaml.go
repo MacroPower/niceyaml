@@ -83,6 +83,11 @@ func NewPathBuilder() *yaml.PathBuilder {
 	return &yaml.PathBuilder{}
 }
 
+// NewRootPath returns a new [yaml.PathBuilder] initialized to the root path.
+func NewRootPath() *yaml.PathBuilder {
+	return NewPathBuilder().Root()
+}
+
 // initialPositionFromToken calculates the starting line and column for a token.
 // It adjusts for leading whitespace in Origin by subtracting the value offset.
 // Returns 1-indexed line and column values.

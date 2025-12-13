@@ -20,7 +20,7 @@ func TestValidationError_Error(t *testing.T) {
 	}{
 		"with path": {
 			err: niceyaml.NewError(errors.New("value is required"),
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Child("field").Child("subfield").Build()),
+				niceyaml.WithPath(niceyaml.NewRootPath().Child("field").Child("subfield").Build()),
 			),
 			want: "error at $.field.subfield: value is required",
 		},
@@ -29,7 +29,7 @@ func TestValidationError_Error(t *testing.T) {
 			want: "value is required",
 		},
 		"empty error": {
-			err:  niceyaml.NewError(nil, niceyaml.WithPath(niceyaml.NewPathBuilder().Root().Child("field").Build())),
+			err:  niceyaml.NewError(nil, niceyaml.WithPath(niceyaml.NewRootPath().Child("field").Build())),
 			want: "",
 		},
 	}

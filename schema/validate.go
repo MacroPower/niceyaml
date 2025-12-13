@@ -127,7 +127,7 @@ func findAdditionalProperty(err *jsonschema.ValidationError) []string {
 
 // buildPathFromLocation converts an InstanceLocation slice to a [yaml.Path].
 func buildPathFromLocation(location []string) (*yaml.Path, error) {
-	current := niceyaml.NewPathBuilder().Root()
+	current := niceyaml.NewRootPath()
 
 	if len(location) == 0 {
 		// Root level error.
