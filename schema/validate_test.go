@@ -2,6 +2,7 @@ package schema_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -391,6 +392,282 @@ func TestValidator_Validate(t *testing.T) {
 			t.Parallel()
 
 			err := validator.Validate(tc.data)
+
+			if tc.wantErr {
+				require.Error(t, err)
+
+				var validationErr *niceyaml.Error
+				require.ErrorAs(t, err, &validationErr)
+				assert.Equal(t, tc.expectedPath, validationErr.GetPath())
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestValidator_ValidateWithDecoder(t *testing.T) {
+	t.Parallel()
+
+	schemaData := []byte(`{
+		"type": "object",
+		"properties": {
+			"name": {"type": "string"},
+			"age": {"type": "number"},
+			"items": {
+				"type": "array",
+				"items": {"type": "string"}
+			},
+			"nested": {
+				"type": "object",
+				"properties": {
+					"value": {"type": "string"}
+				},
+				"required": ["value"],
+				"additionalProperties": false
+			},
+			"users": {
+				"type": "array",
+				"items": {
+					"type": "object",
+					"properties": {
+						"id": {"type": "number"},
+						"email": {"type": "string"},
+						"profile": {
+							"type": "object",
+							"properties": {
+								"firstName": {"type": "string"},
+								"lastName": {"type": "string"},
+								"preferences": {
+									"type": "array",
+									"items": {"type": "string"}
+								}
+							},
+							"required": ["firstName", "lastName"],
+							"additionalProperties": false
+						}
+					},
+					"required": ["id", "email", "profile"],
+					"additionalProperties": false
+				}
+			},
+			"matrix": {
+				"type": "array",
+				"items": {
+					"type": "array",
+					"items": {"type": "number"}
+				}
+			}
+		},
+		"required": ["name"],
+		"additionalProperties": false
+	}`)
+
+	validator, err := schema.NewValidator("test", schemaData)
+	require.NoError(t, err)
+
+	tcs := map[string]struct {
+		input        string
+		expectedPath string
+		wantErr      bool
+	}{
+		"valid data": {
+			input: `
+name: Kallisto
+age: 30
+`,
+			wantErr: false,
+		},
+		"missing required field": {
+			input:        `age: 30`,
+			wantErr:      true,
+			expectedPath: "$",
+		},
+		"wrong type for name": {
+			input: `
+name: 123
+age: 30
+`,
+			wantErr:      true,
+			expectedPath: "$.name",
+		},
+		"wrong type for age": {
+			input: `
+name: Kallisto
+age: thirty
+`,
+			wantErr:      true,
+			expectedPath: "$.age",
+		},
+		"invalid array item": {
+			input: `
+name: John
+items:
+  - valid
+  - 123
+  - also valid
+`,
+			wantErr:      true,
+			expectedPath: "$.items[1]",
+		},
+		"nested object validation error": {
+			input: `
+name: Kallisto
+nested:
+  notValue: something
+`,
+			wantErr:      true,
+			expectedPath: "$.nested.notValue",
+		},
+		"valid array of objects": {
+			input: `
+name: Kallisto
+users:
+  - id: 1
+    email: kallisto@example.com
+    profile:
+      firstName: Kallisto
+      lastName: Lykaonis
+  - id: 2
+    email: aello@example.com
+    profile:
+      firstName: Jane
+      lastName: Thaumantias
+      preferences:
+        - dark_mode
+        - notifications
+`,
+			wantErr: false,
+		},
+		"invalid object in array": {
+			input: `
+name: Kallisto
+users:
+  - id: 1
+    email: kallisto@example.com
+    profile:
+      firstName: Kallisto
+      lastName: Lykaonis
+  - id: invalid
+    email: aello@example.com
+    profile:
+      firstName: Aello
+      lastName: Thaumantias
+`,
+			wantErr:      true,
+			expectedPath: "$.users[1].id",
+		},
+		"missing required field in nested object within array": {
+			input: `
+name: Kallisto
+users:
+  - id: 1
+    email: kallisto@example.com
+    profile:
+      firstName: Kallisto
+`,
+			wantErr:      true,
+			expectedPath: "$.users[0].profile",
+		},
+		"invalid preference in deeply nested array": {
+			input: `
+name: Kallisto
+users:
+  - id: 1
+    email: kallisto@example.com
+    profile:
+      firstName: Kallisto
+      lastName: Lykaonis
+      preferences:
+        - dark_mode
+        - 123
+        - notifications
+`,
+			wantErr:      true,
+			expectedPath: "$.users[0].profile.preferences[1]",
+		},
+		"valid matrix (2D array)": {
+			input: `
+name: Kallisto
+matrix:
+  - [1, 2, 3]
+  - [4, 5, 6]
+  - [7, 8, 9]
+`,
+			wantErr: false,
+		},
+		"invalid element in 2D array": {
+			input: `
+name: Kallisto
+matrix:
+  - [1, 2, 3]
+  - [4, invalid, 6]
+  - [7, 8, 9]
+`,
+			wantErr:      true,
+			expectedPath: "$.matrix[1][1]",
+		},
+		"missing email in second user": {
+			input: `
+name: Kallisto
+users:
+  - id: 1
+    email: kallisto@example.com
+    profile:
+      firstName: Kallisto
+      lastName: Lykaonis
+  - id: 2
+    profile:
+      firstName: Aello
+      lastName: Thaumantias
+`,
+			wantErr:      true,
+			expectedPath: "$.users[1]",
+		},
+		"additional property at root": {
+			input: `
+name: John
+extraProp: not allowed
+`,
+			wantErr:      true,
+			expectedPath: "$.extraProp",
+		},
+		"additional property in nested object": {
+			input: `
+name: Kallisto
+nested:
+  value: valid
+  extraNested: not allowed
+`,
+			wantErr:      true,
+			expectedPath: "$.nested.extraNested",
+		},
+		"additional property in array object": {
+			input: `
+name: Kallisto
+users:
+  - id: 1
+    email: kallisto@example.com
+    profile:
+      firstName: Kallisto
+      lastName: Lykaonis
+    extraUserProp: not allowed
+`,
+			wantErr:      true,
+			expectedPath: "$.users[0].extraUserProp",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := niceyaml.NewParser(strings.NewReader(tc.input))
+			file, err := p.Parse()
+			require.NoError(t, err)
+
+			d := niceyaml.NewDecoder(file)
+			err = d.Validate(0, validator)
 
 			if tc.wantErr {
 				require.Error(t, err)
