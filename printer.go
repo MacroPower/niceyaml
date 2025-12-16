@@ -191,12 +191,12 @@ func (p *Printer) PrintFile(f *ast.File) string {
 		return ""
 	}
 
-	tk := p.findAnyTokenInFile(f)
+	tk := findAnyTokenInFile(f)
 	if tk == nil {
 		return ""
 	}
 
-	tokens := p.extractTokensInRange(tk, -1, -1)
+	tokens := extractTokensInRange(tk, -1, -1)
 
 	return p.PrintTokens(tokens)
 }
@@ -213,7 +213,7 @@ func (p *Printer) PrintErrorToken(tk *token.Token, lines int) (string, int) {
 	minLine := max(curLine-lines, 1)
 	maxLine := curExtLine + lines
 
-	tokens := p.extractTokensInRange(tk, minLine, maxLine)
+	tokens := extractTokensInRange(tk, minLine, maxLine)
 	content := p.getTokenString(tokens)
 
 	startLine := p.initialLineNumber
@@ -236,22 +236,6 @@ func (p *Printer) PrintTokenDiff(before, after token.Tokens) string {
 	)
 
 	return p.style.Render(p.renderFullFileDiff(ops, after))
-}
-
-func (p *Printer) findAnyTokenInFile(f *ast.File) *token.Token {
-	for _, doc := range f.Docs {
-		if doc.Start != nil {
-			return doc.Start
-		}
-		if doc.Body != nil {
-			return doc.Body.GetToken()
-		}
-		if doc.End != nil {
-			return doc.End
-		}
-	}
-
-	return nil
 }
 
 // applyLinePrefixes adds line numbers or line prefixes to content.
@@ -660,11 +644,27 @@ func (p *Printer) getTokenString(tokens token.Tokens) string {
 	return sb.String()
 }
 
+func findAnyTokenInFile(f *ast.File) *token.Token {
+	for _, doc := range f.Docs {
+		if doc.Start != nil {
+			return doc.Start
+		}
+		if doc.Body != nil {
+			return doc.Body.GetToken()
+		}
+		if doc.End != nil {
+			return doc.End
+		}
+	}
+
+	return nil
+}
+
 // extractTokensInRange extracts tokens that touch [minLine, maxLine].
 // It clones tokens and adjusts the first token's Origin to remove leading
 // newlines while preserving leading whitespace from the previous token.
 // If either range limit is negative, it is unbounded in that direction.
-func (p *Printer) extractTokensInRange(tk *token.Token, minLine, maxLine int) token.Tokens {
+func extractTokensInRange(tk *token.Token, minLine, maxLine int) token.Tokens {
 	// Walk backward to find the first token at or after minLine.
 	for tk.Prev != nil && (minLine < 0 || tk.Prev.Position.Line >= minLine) {
 		tk = tk.Prev
