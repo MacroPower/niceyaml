@@ -12,7 +12,7 @@
 
 Package `niceyaml` combines the powers of [go-yaml][goccy/go-yaml], [bubbletea][bubbletea], and more.
 
-It provides opinionated utilities for **friendly and predictable handling of YAML documents** in your **CLI** or **TUI** applications.
+It enables **friendly and predictable handling of YAML documents** in your **CLI** or **TUI** applications.
 
 > Also supports all YAML-compatible document formats like KYAML or JSON.
 
