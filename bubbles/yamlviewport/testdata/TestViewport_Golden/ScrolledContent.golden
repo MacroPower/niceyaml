@@ -1,0 +1,10 @@
+     ports:                                                                     
+       - 80                                                                     
+       - 443                                                                    
+     environment:                                                               
+       DEBUG: "false"                                                           
+       LOG_LEVEL: info                                                          
+                                                                                
+ # Multi-line strings                                                           
+ description: |                                                                 
+   This is a literal block scalar.                                              

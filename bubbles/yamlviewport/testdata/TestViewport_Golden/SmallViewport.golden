@@ -1,0 +1,5 @@
+ key: value         
+ number: 42         
+ bool: true         
+ list:              
+   - item1          

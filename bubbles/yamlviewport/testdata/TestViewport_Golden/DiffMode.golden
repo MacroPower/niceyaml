@@ -1,0 +1,24 @@
+-name: original                                                                 
+-count: 10                                                                      
++name: modified                                                                 
++count: 20                                                                      
+ enabled: true                                                                  
++new_field: added                                                               
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                

@@ -1,0 +1,60 @@
+---
+# Configuration file with diverse YAML constructs
+metadata:
+  name: test-config
+  version: 1.2.3
+  enabled: true
+  count: 42
+  ratio: 3.14159
+  empty: null
+  unicode: "Hello \u4e16\u754c"
+
+# Nested mappings
+spec:
+  container:
+    image: nginx:latest
+    ports:
+      - 80
+      - 443
+    environment:
+      DEBUG: "false"
+      LOG_LEVEL: info
+
+# Multi-line strings
+description: |
+  This is a literal block scalar.
+  It preserves newlines exactly.
+  Useful for scripts and configs.
+
+folded_text: >
+  This is a folded block scalar
+  that joins lines with spaces
+  for paragraph-style text.
+
+# Anchors and aliases
+defaults: &defaults
+  timeout: 30
+  retries: 3
+
+production:
+  <<: *defaults
+  timeout: 60
+
+# Flow style
+tags: [alpha, beta, gamma]
+limits: {cpu: 100m, memory: 256Mi}
+
+# Long line for horizontal scroll testing
+very_long_key_that_extends_beyond_typical_viewport_width: "This is a very long value that should require horizontal scrolling to view completely in a narrow viewport"
+
+# Quoted strings
+single_quoted: 'contains ''escaped'' quotes'
+double_quoted: "contains \"escaped\" quotes and\ttabs"
+
+# Special values
+infinity: .inf
+negative_infinity: -.inf
+not_a_number: .nan
+
+# Document end marker
+...
