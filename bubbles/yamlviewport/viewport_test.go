@@ -129,7 +129,8 @@ another: y`
 			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
 				before := lexer.Tokenize(diffBeforeYAML)
 				after := lexer.Tokenize(diffAfterYAML)
-				m.SetDiff(before, after)
+				m.SetRevisions([]token.Tokens{before, after})
+				m.GoToRevision(1) // Show diff between revision 0 and 1.
 			},
 			width:  80,
 			height: 24,
@@ -508,52 +509,350 @@ item3: fourth`
 	}
 }
 
-func TestViewport_DiffMode(t *testing.T) {
+func TestViewport_Revisions(t *testing.T) {
 	t.Parallel()
 
-	before := `name: original
+	rev1 := `name: original
 value: 10`
 
-	after := `name: modified
-value: 20
+	rev2 := `name: modified
+value: 20`
+
+	rev3 := `name: final
+value: 30
 new: added`
 
-	beforeTokens := lexer.Tokenize(before)
-	afterTokens := lexer.Tokenize(after)
+	rev1Tokens := lexer.Tokenize(rev1)
+	rev2Tokens := lexer.Tokenize(rev2)
+	rev3Tokens := lexer.Tokenize(rev3)
 
 	tcs := map[string]struct {
 		setup func(m *yamlviewport.Model)
 		test  func(t *testing.T, m *yamlviewport.Model)
 	}{
-		"SetDiff": {
+		"SetRevisions/Empty": {
 			setup: func(m *yamlviewport.Model) {
-				m.SetDiff(beforeTokens, afterTokens)
+				m.SetRevisions(nil)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
-				assert.True(t, m.IsDiffMode())
+				assert.Equal(t, 0, m.RevisionCount())
+				assert.Equal(t, 0, m.RevisionIndex())
+				assert.False(t, m.IsShowingDiff())
 			},
 		},
-		"ClearDiff": {
+		"SetRevisions/Single": {
 			setup: func(m *yamlviewport.Model) {
-				m.SetDiff(beforeTokens, afterTokens)
+				m.SetRevisions([]token.Tokens{rev1Tokens})
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
-				m.ClearDiff()
-				assert.False(t, m.IsDiffMode())
+				assert.Equal(t, 1, m.RevisionCount())
+				assert.Equal(t, 1, m.RevisionIndex()) // At latest.
+				assert.True(t, m.IsAtLatestRevision())
+				assert.False(t, m.IsShowingDiff())
 			},
 		},
-		"SetTokensClearsDiff": {
+		"SetRevisions/Multiple": {
 			setup: func(m *yamlviewport.Model) {
-				m.SetDiff(beforeTokens, afterTokens)
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens, rev3Tokens})
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
-				assert.True(t, m.IsDiffMode())
+				assert.Equal(t, 3, m.RevisionCount())
+				assert.Equal(t, 3, m.RevisionIndex()) // At latest.
+				assert.True(t, m.IsAtLatestRevision())
+				assert.False(t, m.IsShowingDiff())
+			},
+		},
+		"AppendRevision": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens})
+				m.AppendRevision(rev2Tokens)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, 2, m.RevisionCount())
+				assert.Equal(t, 2, m.RevisionIndex()) // At latest.
+			},
+		},
+		"ClearRevisions": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens})
+				m.ClearRevisions()
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, 0, m.RevisionCount())
+				assert.Equal(t, 0, m.RevisionIndex())
+			},
+		},
+		"GoToRevision/First": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens, rev3Tokens})
+				m.GoToRevision(0)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, 0, m.RevisionIndex())
+				assert.True(t, m.IsAtFirstRevision())
+				assert.False(t, m.IsShowingDiff()) // Position 0 shows plain view.
+			},
+		},
+		"GoToRevision/Middle": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens, rev3Tokens})
+				m.GoToRevision(1)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, 1, m.RevisionIndex())
+				assert.True(t, m.IsShowingDiff()) // Position 1 shows diff.
+			},
+		},
+		"GoToRevision/Clamped": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens})
+				m.GoToRevision(100) // Should clamp to max.
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, 2, m.RevisionIndex())
+				assert.True(t, m.IsAtLatestRevision())
+			},
+		},
+		"NextRevision": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens, rev3Tokens})
+				m.GoToRevision(0)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				m.NextRevision()
+				assert.Equal(t, 1, m.RevisionIndex())
+				assert.True(t, m.IsShowingDiff())
+			},
+		},
+		"NextRevision/AtLatest": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens})
+				// Already at latest (index 2).
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				m.NextRevision()
+				assert.Equal(t, 2, m.RevisionIndex()) // Should not change.
+			},
+		},
+		"PrevRevision": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens, rev3Tokens})
+				m.GoToRevision(2)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				m.PrevRevision()
+				assert.Equal(t, 1, m.RevisionIndex())
+			},
+		},
+		"PrevRevision/AtFirst": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens})
+				m.GoToRevision(0)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				m.PrevRevision()
+				assert.Equal(t, 0, m.RevisionIndex()) // Should not change.
+			},
+		},
+		"IsShowingDiff/BoundaryConditions": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens, rev3Tokens})
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				// At index 3 (latest), not showing diff.
+				assert.False(t, m.IsShowingDiff())
 
-				m.SetTokens(afterTokens)
-				assert.False(t, m.IsDiffMode())
+				m.GoToRevision(0)
+				assert.False(t, m.IsShowingDiff()) // First revision, no diff.
+
+				m.GoToRevision(1)
+				assert.True(t, m.IsShowingDiff()) // Between 0 and 1.
+
+				m.GoToRevision(2)
+				assert.True(t, m.IsShowingDiff()) // Between 1 and 2.
+			},
+		},
+		"SetTokensReplacesSingleRevision": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens})
+				m.SetTokens(rev3Tokens)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, 1, m.RevisionCount())
+				assert.Equal(t, 1, m.RevisionIndex())
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+			m.SetWidth(80)
+			m.SetHeight(24)
+
+			if tc.setup != nil {
+				tc.setup(&m)
+			}
+
+			tc.test(t, &m)
+		})
+	}
+}
+
+func TestViewport_DiffMode(t *testing.T) {
+	t.Parallel()
+
+	rev1 := `name: original
+value: 10`
+
+	rev2 := `name: modified
+value: 20`
+
+	rev3 := `name: final
+value: 30
+new: added`
+
+	rev1Tokens := lexer.Tokenize(rev1)
+	rev2Tokens := lexer.Tokenize(rev2)
+	rev3Tokens := lexer.Tokenize(rev3)
+
+	tcs := map[string]struct {
+		setup func(m *yamlviewport.Model)
+		test  func(t *testing.T, m *yamlviewport.Model)
+	}{
+		"DefaultModeIsAdjacent": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens, rev3Tokens})
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, yamlviewport.DiffModeAdjacent, m.DiffMode())
+			},
+		},
+		"SetDiffMode": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens})
+				m.SetDiffMode(yamlviewport.DiffModeOrigin)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, yamlviewport.DiffModeOrigin, m.DiffMode())
+			},
+		},
+		"ToggleDiffMode/AdjacentToOrigin": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens})
+				m.ToggleDiffMode()
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, yamlviewport.DiffModeOrigin, m.DiffMode())
+			},
+		},
+		"ToggleDiffMode/OriginToNone": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens})
+				m.SetDiffMode(yamlviewport.DiffModeOrigin)
+				m.ToggleDiffMode()
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, yamlviewport.DiffModeNone, m.DiffMode())
+			},
+		},
+		"ToggleDiffMode/NoneToAdjacent": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens})
+				m.SetDiffMode(yamlviewport.DiffModeNone)
+				m.ToggleDiffMode()
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, yamlviewport.DiffModeAdjacent, m.DiffMode())
+			},
+		},
+		"ToggleDiffMode/FullCycle": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens})
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				// Start: Adjacent.
+				assert.Equal(t, yamlviewport.DiffModeAdjacent, m.DiffMode())
+
+				m.ToggleDiffMode()
+				assert.Equal(t, yamlviewport.DiffModeOrigin, m.DiffMode())
+
+				m.ToggleDiffMode()
+				assert.Equal(t, yamlviewport.DiffModeNone, m.DiffMode())
+
+				m.ToggleDiffMode()
+				assert.Equal(t, yamlviewport.DiffModeAdjacent, m.DiffMode())
+			},
+		},
+		"SetDiffMode/None": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens})
+				m.SetDiffMode(yamlviewport.DiffModeNone)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, yamlviewport.DiffModeNone, m.DiffMode())
+			},
+		},
+		"ModeNone/NotShowingDiff": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens, rev3Tokens})
+				m.GoToRevision(1)
+				m.SetDiffMode(yamlviewport.DiffModeNone)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				// At index 1 with None mode, IsShowingDiff should be false.
+				assert.False(t, m.IsShowingDiff())
+				assert.Equal(t, yamlviewport.DiffModeNone, m.DiffMode())
+			},
+		},
+		"ModeAtIndex0/NoEffect": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens, rev3Tokens})
+				m.GoToRevision(0)
+				m.SetDiffMode(yamlviewport.DiffModeOrigin)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				// At index 0, both modes show plain view (no diff).
+				assert.False(t, m.IsShowingDiff())
+				assert.Equal(t, yamlviewport.DiffModeOrigin, m.DiffMode())
+			},
+		},
+		"ModeAtLatest/NoEffect": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens})
+				// Already at latest (index 2).
+				m.SetDiffMode(yamlviewport.DiffModeOrigin)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				// At latest, both modes show plain view (no diff).
+				assert.False(t, m.IsShowingDiff())
+				assert.Equal(t, yamlviewport.DiffModeOrigin, m.DiffMode())
 			},
 		},
 	}
@@ -744,27 +1043,34 @@ new: added`
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				assert.Equal(t, 2, m.TotalLineCount())
-				assert.False(t, m.IsDiffMode())
+				assert.Equal(t, 1, m.RevisionCount())
+				assert.False(t, m.IsShowingDiff())
 			},
 		},
-		"SetFileDiff": {
+		"AppendFileRevision": {
 			beforeYAML: beforeYAML,
 			afterYAML:  afterYAML,
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
-				assert.True(t, m.IsDiffMode())
-				// Diff mode should show more lines due to changes.
+				assert.Equal(t, 2, m.RevisionCount())
+				assert.Equal(t, 2, m.RevisionIndex()) // At latest.
+				assert.False(t, m.IsShowingDiff())    // At latest, no diff.
+
+				// Go to revision 1 to see diff.
+				m.GoToRevision(1)
+				assert.True(t, m.IsShowingDiff())
 				assert.Positive(t, m.TotalLineCount())
 			},
 		},
-		"SetFileClearsDiff": {
+		"SetFileClearsRevisions": {
 			beforeYAML: beforeYAML,
 			afterYAML:  afterYAML,
 			yaml:       simpleYAML,
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
-				// After SetFile, diff mode should be cleared.
-				assert.False(t, m.IsDiffMode())
+				// After SetFile, revisions should be replaced with single file.
+				assert.Equal(t, 1, m.RevisionCount())
+				assert.False(t, m.IsShowingDiff())
 				assert.Equal(t, 2, m.TotalLineCount())
 			},
 		},
@@ -784,7 +1090,8 @@ new: added`
 
 				afterFile, err := parser.ParseBytes([]byte(tc.afterYAML), parser.ParseComments)
 				require.NoError(t, err)
-				m.SetFileDiff(beforeFile, afterFile)
+				m.AppendFileRevision(beforeFile)
+				m.AppendFileRevision(afterFile)
 			}
 
 			if tc.yaml != "" {
@@ -985,6 +1292,54 @@ another: y`
 				assert.Equal(t, 5, m.YOffset())
 			},
 		},
+		"Behavior/TabNextRevision": {
+			msg:    tea.KeyPressMsg{Code: tea.KeyTab},
+			yaml:   verticalYAML,
+			width:  80,
+			height: 5,
+			setup: func(m *yamlviewport.Model) {
+				// Add a second revision and go to revision 0.
+				second := lexer.Tokenize("line1: modified\nline2: changed")
+				m.AppendRevision(second)
+				m.GoToRevision(0)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, 1, m.RevisionIndex())
+				assert.True(t, m.IsShowingDiff())
+			},
+		},
+		"Behavior/ShiftTabPrevRevision": {
+			msg:    tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift},
+			yaml:   verticalYAML,
+			width:  80,
+			height: 5,
+			setup: func(m *yamlviewport.Model) {
+				// Add a second revision (starts at latest).
+				second := lexer.Tokenize("line1: modified\nline2: changed")
+				m.AppendRevision(second)
+				// Now at index 2 (latest).
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, 1, m.RevisionIndex())
+				assert.True(t, m.IsShowingDiff())
+			},
+		},
+		"Behavior/MToggleDiffMode": {
+			msg:    tea.KeyPressMsg{Code: 'm'},
+			yaml:   verticalYAML,
+			width:  80,
+			height: 5,
+			setup: func(m *yamlviewport.Model) {
+				second := lexer.Tokenize("line1: modified\nline2: changed")
+				m.AppendRevision(second)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, yamlviewport.DiffModeOrigin, m.DiffMode())
+			},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -1036,6 +1391,9 @@ func TestViewport_KeyMap(t *testing.T) {
 				assert.True(t, km.Up.Enabled())
 				assert.True(t, km.Left.Enabled())
 				assert.True(t, km.Right.Enabled())
+				assert.True(t, km.NextRevision.Enabled())
+				assert.True(t, km.PrevRevision.Enabled())
+				assert.True(t, km.ToggleDiffMode.Enabled())
 			},
 		},
 		"CustomKeyMap": {
@@ -1074,6 +1432,113 @@ func TestViewport_KeyMap(t *testing.T) {
 			m.SetWidth(80)
 			m.SetHeight(2)
 			m.SetTokens(tokens)
+
+			if tc.setup != nil {
+				tc.setup(&m)
+			}
+
+			tc.test(t, &m)
+		})
+	}
+}
+
+func TestViewport_RevisionDeduplication(t *testing.T) {
+	t.Parallel()
+
+	content := `name: same
+value: 10`
+
+	sameTokens1 := lexer.Tokenize(content)
+	sameTokens2 := lexer.Tokenize(content)
+
+	differentContent := `name: different
+value: 20`
+	differentTokens := lexer.Tokenize(differentContent)
+
+	tcs := map[string]struct {
+		setup func(m *yamlviewport.Model)
+		test  func(t *testing.T, m *yamlviewport.Model)
+	}{
+		"DuplicateRevisions/CountIsCorrect": {
+			setup: func(m *yamlviewport.Model) {
+				// Add two revisions with identical content.
+				m.SetRevisions([]token.Tokens{sameTokens1, sameTokens2})
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				// Should still report 2 revisions (the logical count).
+				assert.Equal(t, 2, m.RevisionCount())
+			},
+		},
+		"DuplicateRevisions/NavigationWorks": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{sameTokens1, sameTokens2})
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				// Should be able to navigate through all revisions.
+				m.GoToRevision(0)
+				assert.Equal(t, 0, m.RevisionIndex())
+				assert.True(t, m.IsAtFirstRevision())
+
+				m.NextRevision()
+				assert.Equal(t, 1, m.RevisionIndex())
+
+				m.NextRevision()
+				assert.Equal(t, 2, m.RevisionIndex())
+				assert.True(t, m.IsAtLatestRevision())
+			},
+		},
+		"DuplicateRevisions/ContentRendersCorrectly": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{sameTokens1, sameTokens2})
+				m.GoToRevision(0)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				// Content should render (not crash).
+				view := m.View()
+				assert.Contains(t, view, "name")
+				assert.Contains(t, view, "same")
+			},
+		},
+		"MixedRevisions/Works": {
+			setup: func(m *yamlviewport.Model) {
+				// Two identical + one different.
+				m.SetRevisions([]token.Tokens{sameTokens1, sameTokens2, differentTokens})
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, 3, m.RevisionCount())
+
+				// Navigate to latest.
+				assert.True(t, m.IsAtLatestRevision())
+
+				// Check diff between duplicate and different.
+				m.GoToRevision(2)
+				assert.True(t, m.IsShowingDiff())
+			},
+		},
+		"AppendDuplicate/Works": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{sameTokens1})
+				m.AppendRevision(sameTokens2)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, 2, m.RevisionCount())
+				assert.True(t, m.IsAtLatestRevision())
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+			m.SetWidth(80)
+			m.SetHeight(24)
 
 			if tc.setup != nil {
 				tc.setup(&m)

@@ -7,14 +7,17 @@ import "charm.land/bubbles/v2/key"
 // programmatically with methods like Model.LineDown(1). See the GoDocs for
 // details.
 type KeyMap struct {
-	PageDown     key.Binding
-	PageUp       key.Binding
-	HalfPageUp   key.Binding
-	HalfPageDown key.Binding
-	Down         key.Binding
-	Up           key.Binding
-	Left         key.Binding
-	Right        key.Binding
+	PageDown       key.Binding
+	PageUp         key.Binding
+	HalfPageUp     key.Binding
+	HalfPageDown   key.Binding
+	Down           key.Binding
+	Up             key.Binding
+	Left           key.Binding
+	Right          key.Binding
+	NextRevision   key.Binding
+	PrevRevision   key.Binding
+	ToggleDiffMode key.Binding
 }
 
 // DefaultKeyMap returns a set of pager-like default keybindings.
@@ -51,6 +54,18 @@ func DefaultKeyMap() KeyMap {
 		Right: key.NewBinding(
 			key.WithKeys("right", "l"),
 			key.WithHelp("→/l", "move right"),
+		),
+		NextRevision: key.NewBinding(
+			key.WithKeys("tab"),
+			key.WithHelp("tab", "next revision"),
+		),
+		PrevRevision: key.NewBinding(
+			key.WithKeys("shift+tab"),
+			key.WithHelp("shift+tab", "prev revision"),
+		),
+		ToggleDiffMode: key.NewBinding(
+			key.WithKeys("m"),
+			key.WithHelp("m", "toggle diff mode"),
 		),
 	}
 }

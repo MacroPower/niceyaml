@@ -2,6 +2,7 @@ package yamlviewport
 
 import (
 	"cmp"
+	"hash/fnv"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -18,6 +19,24 @@ import (
 const (
 	defaultHorizontalStep = 6
 )
+
+// DiffMode specifies how diffs are computed between revisions.
+type DiffMode int
+
+//nolint:grouper // Separate const block needed for iota.
+const (
+	// DiffModeAdjacent shows diff between consecutive revisions.
+	DiffModeAdjacent DiffMode = iota
+	// DiffModeOrigin shows diff between first revision and current.
+	DiffModeOrigin
+	// DiffModeNone shows current revision without diff.
+	DiffModeNone
+)
+
+// Revision holds metadata for a single revision.
+type Revision struct {
+	Hash uint64 // FNV-1a hash of token content for deduplication.
+}
 
 // Option is a configuration option that works in conjunction with [New].
 type Option func(*Model)
@@ -80,8 +99,8 @@ type Model struct {
 	printer             *niceyaml.Printer
 	KeyMap              KeyMap
 	searchMatches       []niceyaml.PositionRange
-	tokens              token.Tokens
-	beforeTokens        token.Tokens
+	revisions           []Revision
+	tokensByHash        map[uint64]token.Tokens
 	lines               []string
 	xOffset             int
 	horizontalStep      int
@@ -91,9 +110,10 @@ type Model struct {
 	yOffset             int
 	longestLineWidth    int
 	height              int
+	revisionIndex       int
+	diffMode            DiffMode
 	FillHeight          bool
 	MouseWheelEnabled   bool
-	diffMode            bool
 	initialized         bool
 }
 
@@ -138,77 +158,179 @@ func (m *Model) SetWidth(w int) {
 	m.width = w
 }
 
-// SetTokens sets the YAML tokens to display and re-renders.
-// Clears diff mode if active.
+// SetTokens replaces the revision history with a single revision.
+// This is a convenience method equivalent to SetRevisions([]token.Tokens{tokens}).
 func (m *Model) SetTokens(tokens token.Tokens) {
-	m.tokens = tokens
-	m.beforeTokens = nil
-	m.diffMode = false
-	m.rerender()
-
-	if m.YOffset() > m.maxYOffset() {
-		m.GotoBottom()
-	}
+	m.SetRevisions([]token.Tokens{tokens})
 }
 
-// SetFile sets the YAML file to display and re-renders.
-// Clears diff mode if active.
+// SetFile replaces the revision history with a single revision from a file.
+// This is a convenience method equivalent to ClearRevisions() followed by AppendFileRevision(file).
 func (m *Model) SetFile(file *ast.File) {
+	m.ClearRevisions()
+	m.AppendFileRevision(file)
+}
+
+// SetRevisions replaces all revisions with the given slice.
+// The revision index is set to len(revisions), showing the latest revision without diff.
+// Pass nil or empty slice to clear all content.
+func (m *Model) SetRevisions(revisions []token.Tokens) {
+	if len(revisions) == 0 {
+		m.revisions = nil
+		m.tokensByHash = nil
+		m.revisionIndex = 0
+	} else {
+		m.revisions = make([]Revision, len(revisions))
+		m.tokensByHash = make(map[uint64]token.Tokens)
+
+		for i, tokens := range revisions {
+			hash := hashTokens(tokens)
+			m.revisions[i] = Revision{Hash: hash}
+			m.tokensByHash[hash] = tokens
+		}
+
+		m.revisionIndex = len(revisions)
+	}
+
+	m.rerender()
+
+	if m.YOffset() > m.maxYOffset() {
+		m.GotoBottom()
+	}
+}
+
+// AppendRevision adds a new revision to the history.
+// The revision index is set to len(revisions), showing the latest revision without diff.
+func (m *Model) AppendRevision(revision token.Tokens) {
+	hash := hashTokens(revision)
+	m.revisions = append(m.revisions, Revision{Hash: hash})
+
+	if m.tokensByHash == nil {
+		m.tokensByHash = make(map[uint64]token.Tokens)
+	}
+
+	m.tokensByHash[hash] = revision
+	m.revisionIndex = len(m.revisions)
+	m.rerender()
+
+	if m.YOffset() > m.maxYOffset() {
+		m.GotoBottom()
+	}
+}
+
+// AppendFileRevision adds a new revision from an [*ast.File] to the history.
+// The revision index is set to len(revisions), showing the latest revision without diff.
+func (m *Model) AppendFileRevision(file *ast.File) {
 	tk := findAnyTokenInFile(file)
-	m.tokens = getAllTokens(tk)
-	m.beforeTokens = nil
-	m.diffMode = false
-	m.rerender()
+	tokens := getAllTokens(tk)
+	m.AppendRevision(tokens)
+}
 
-	if m.YOffset() > m.maxYOffset() {
-		m.GotoBottom()
+// ClearRevisions removes all revisions from the history.
+func (m *Model) ClearRevisions() {
+	m.revisions = nil
+	m.tokensByHash = nil
+	m.revisionIndex = 0
+	m.rerender()
+}
+
+// RevisionIndex returns the current revision index.
+// Returns 0 if revisions are empty.
+func (m *Model) RevisionIndex() int {
+	return m.revisionIndex
+}
+
+// GoToRevision sets the current revision index (clamped to valid range).
+// Index 0 shows the first revision without diff.
+// Index 1 to N-1 shows a diff between revisions[index-1] and revisions[index].
+// Index N (len) shows the latest revision without diff.
+func (m *Model) GoToRevision(index int) {
+	maxIndex := len(m.revisions)
+	m.revisionIndex = clamp(index, 0, maxIndex)
+	m.rerender()
+	m.GotoTop()
+}
+
+// RevisionCount returns the number of revisions in the history.
+func (m *Model) RevisionCount() int {
+	return len(m.revisions)
+}
+
+// getRevisionTokens returns the tokens for the revision at the given index.
+func (m *Model) getRevisionTokens(index int) token.Tokens {
+	if index < 0 || index >= len(m.revisions) {
+		return nil
 	}
+
+	return m.tokensByHash[m.revisions[index].Hash]
 }
 
-// SetDiff sets the YAML tokens for diff display and re-renders.
-// The viewport will show a unified diff between before and after tokens.
-func (m *Model) SetDiff(before, after token.Tokens) {
-	m.beforeTokens = before
-	m.tokens = after
-	m.diffMode = true
-	m.rerender()
-
-	if m.YOffset() > m.maxYOffset() {
-		m.GotoBottom()
-	}
+// IsAtFirstRevision returns true if at revision index 0.
+func (m *Model) IsAtFirstRevision() bool {
+	return m.revisionIndex == 0
 }
 
-// SetFileDiff sets the YAML files for diff display and re-renders.
-// The viewport will show a unified diff between before and after files.
-func (m *Model) SetFileDiff(before, after *ast.File) {
-	beforeTk := findAnyTokenInFile(before)
-	afterTk := findAnyTokenInFile(after)
-	m.beforeTokens = getAllTokens(beforeTk)
-	m.tokens = getAllTokens(afterTk)
-	m.diffMode = true
-	m.rerender()
-
-	if m.YOffset() > m.maxYOffset() {
-		m.GotoBottom()
-	}
+// IsAtLatestRevision returns true if at the latest revision index (len(revisions)).
+func (m *Model) IsAtLatestRevision() bool {
+	return m.revisionIndex >= len(m.revisions)
 }
 
-// ClearDiff exits diff mode and clears the before tokens.
-// The viewport will continue displaying the current "after" tokens in normal mode.
-func (m *Model) ClearDiff() {
-	m.beforeTokens = nil
-	m.diffMode = false
-	m.rerender()
+// IsShowingDiff returns true if currently displaying a diff between revisions.
+// This is true when 0 < revisionIndex < len(revisions) and diffMode is not None.
+func (m *Model) IsShowingDiff() bool {
+	n := len(m.revisions)
+	return n > 0 && m.revisionIndex > 0 && m.revisionIndex < n && m.diffMode != DiffModeNone
 }
 
-// IsDiffMode returns whether the viewport is in diff mode.
-func (m *Model) IsDiffMode() bool {
+// DiffMode returns the current diff display mode.
+func (m *Model) DiffMode() DiffMode {
 	return m.diffMode
+}
+
+// SetDiffMode sets the diff display mode and rerenders.
+func (m *Model) SetDiffMode(mode DiffMode) {
+	m.diffMode = mode
+	m.rerender()
+}
+
+// ToggleDiffMode cycles between diff modes.
+func (m *Model) ToggleDiffMode() {
+	switch m.diffMode {
+	case DiffModeAdjacent:
+		m.diffMode = DiffModeOrigin
+	case DiffModeOrigin:
+		m.diffMode = DiffModeNone
+	case DiffModeNone:
+		m.diffMode = DiffModeAdjacent
+	}
+
+	m.rerender()
+}
+
+// NextRevision moves to the next revision in history.
+// If already at the latest, does nothing.
+func (m *Model) NextRevision() {
+	if m.revisionIndex < len(m.revisions) {
+		m.revisionIndex++
+		m.rerender()
+		m.GotoTop()
+	}
+}
+
+// PrevRevision moves to the previous revision in history.
+// If already at the first (index 0), does nothing.
+func (m *Model) PrevRevision() {
+	if m.revisionIndex > 0 {
+		m.revisionIndex--
+		m.rerender()
+		m.GotoTop()
+	}
 }
 
 // rerender renders the tokens using the Printer with current search highlights.
 func (m *Model) rerender() {
-	if len(m.tokens) == 0 && len(m.beforeTokens) == 0 {
+	n := len(m.revisions)
+	if n == 0 {
 		m.lines = nil
 		m.longestLineWidth = 0
 
@@ -232,14 +354,42 @@ func (m *Model) rerender() {
 	}
 
 	var content string
-	if m.diffMode {
-		content = m.printer.PrintTokenDiff(m.beforeTokens, m.tokens)
-	} else {
-		content = m.printer.PrintTokens(m.tokens)
+
+	switch {
+	case m.revisionIndex == 0:
+		// At first position: show first revision without diff.
+		content = m.printer.PrintTokens(m.getRevisionTokens(0))
+	case m.revisionIndex >= n:
+		// At or past latest: show last revision without diff.
+		content = m.printer.PrintTokens(m.getRevisionTokens(n - 1))
+	default:
+		// In between: show diff.
+		content = m.getDiffContent()
 	}
 
 	m.lines = strings.Split(content, "\n")
 	m.longestLineWidth = maxLineWidth(m.lines)
+}
+
+func (m *Model) getDiffContent() string {
+	switch m.diffMode {
+	case DiffModeOrigin:
+		before := m.getRevisionTokens(0)
+		after := m.getRevisionTokens(m.revisionIndex)
+
+		return m.printer.PrintTokenDiff(before, after)
+
+	case DiffModeAdjacent:
+		before := m.getRevisionTokens(m.revisionIndex - 1)
+		after := m.getRevisionTokens(m.revisionIndex)
+
+		return m.printer.PrintTokenDiff(before, after)
+
+	case DiffModeNone:
+		return m.printer.PrintTokens(m.getRevisionTokens(m.revisionIndex))
+	}
+
+	panic("unexpected diff mode")
 }
 
 // AtTop returns whether the viewport is at the top.
@@ -564,6 +714,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 		case key.Matches(msg, m.KeyMap.Right):
 			m.ScrollRight(m.horizontalStep)
+
+		case key.Matches(msg, m.KeyMap.NextRevision):
+			m.NextRevision()
+
+		case key.Matches(msg, m.KeyMap.PrevRevision):
+			m.PrevRevision()
+
+		case key.Matches(msg, m.KeyMap.ToggleDiffMode):
+			m.ToggleDiffMode()
 		}
 
 	case tea.MouseWheelMsg:
@@ -632,6 +791,15 @@ func clamp[T cmp.Ordered](v, low, high T) T {
 	}
 
 	return min(high, max(low, v))
+}
+
+func hashTokens(tokens token.Tokens) uint64 {
+	h := fnv.New64a()
+	for _, tk := range tokens {
+		_, _ = h.Write([]byte(tk.Origin)) // Hash.Hash.Write never returns an error.
+	}
+
+	return h.Sum64()
 }
 
 func maxLineWidth(lines []string) int {

@@ -80,7 +80,8 @@ func newModel(filename string, content []byte, opts *modelOptions) model {
 		m.filename = opts.beforeFilename
 		m.diffFilename = fmt.Sprintf("%s → %s", opts.beforeFilename, opts.afterFilename)
 
-		m.viewport.SetDiff(beforeTokens, afterTokens)
+		m.viewport.SetRevisions([]token.Tokens{beforeTokens, afterTokens})
+		m.viewport.GoToRevision(1) // Start at diff view.
 	} else {
 		tokens := lexer.Tokenize(string(content))
 		m.tokens = tokens
@@ -220,8 +221,36 @@ func (m *model) statusBar() string {
 		filename = m.diffFilename
 	}
 
-	left := fmt.Sprintf(" %s[%d]",
+	// Add revision indicator if multiple revisions.
+	revisionInfo := ""
+	if m.viewport.RevisionCount() > 1 {
+		idx := m.viewport.RevisionIndex()
+		count := m.viewport.RevisionCount()
+
+		switch {
+		case m.viewport.IsShowingDiff():
+			modeIndicator := ""
+			if m.viewport.DiffMode() == yamlviewport.DiffModeOrigin {
+				modeIndicator = " origin"
+			}
+
+			revisionInfo = fmt.Sprintf(" [diff %d/%d%s]", idx, count, modeIndicator)
+
+		case m.viewport.DiffMode() == yamlviewport.DiffModeNone && idx > 0 && idx < count:
+			// None mode at a diff position shows rev with "none" indicator.
+			revisionInfo = fmt.Sprintf(" [rev %d/%d none]", idx+1, count)
+
+		case m.viewport.IsAtLatestRevision():
+			revisionInfo = fmt.Sprintf(" [rev %d/%d]", count, count)
+
+		default:
+			revisionInfo = fmt.Sprintf(" [rev %d/%d]", idx+1, count)
+		}
+	}
+
+	left := fmt.Sprintf(" %s%s[%d]",
 		filename,
+		revisionInfo,
 		m.viewport.YOffset()+1,
 	)
 
