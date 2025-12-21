@@ -20,40 +20,33 @@ func main() {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "nyaml <file> [file2]",
+		Use:   "nyaml [file...]",
 		Short: "A terminal YAML viewer with syntax highlighting",
-		Args:  cobra.RangeArgs(1, 2),
+		Args:  cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			content, err := os.ReadFile(args[0])
-			if err != nil {
-				return fmt.Errorf("read file: %w", err)
+			// Read all files.
+			var contents [][]byte
+			for _, arg := range args {
+				content, err := os.ReadFile(arg) //nolint:gosec // User-provided file paths are intentional.
+				if err != nil {
+					return fmt.Errorf("read file %s: %w", arg, err)
+				}
+
+				contents = append(contents, content)
 			}
 
 			opts := modelOptions{
 				lineNumbers: lineNumbers,
 				wrap:        wrap,
 				search:      search,
+				contents:    contents,
 			}
 
-			// Diff mode: two files provided.
-			if len(args) == 2 {
-				content2, err := os.ReadFile(args[1])
-				if err != nil {
-					return fmt.Errorf("read file: %w", err)
-				}
-
-				opts.diffMode = true
-				opts.beforeContent = content
-				opts.afterContent = content2
-				opts.beforeFilename = args[0]
-				opts.afterFilename = args[1]
-			}
-
-			m := newModel(args[0], content, &opts)
+			m := newModel(&opts)
 
 			p := tea.NewProgram(m)
 
-			_, err = p.Run()
+			_, err := p.Run()
 			if err != nil {
 				return fmt.Errorf("run program: %w", err)
 			}

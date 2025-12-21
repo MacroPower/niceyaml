@@ -17,32 +17,25 @@ import (
 )
 
 type modelOptions struct {
-	search         string
-	beforeFilename string
-	afterFilename  string
-	beforeContent  []byte
-	afterContent   []byte
-	lineNumbers    bool
-	wrap           bool
-	diffMode       bool
+	search      string
+	contents    [][]byte
+	lineNumbers bool
+	wrap        bool
 }
 
 //nolint:recvcheck // tea.Model requires value receivers for Init, Update, View.
 type model struct {
-	printer      *niceyaml.Printer
-	finder       *niceyaml.Finder
-	filename     string
-	diffFilename string
-	searchInput  string
-	tokens       token.Tokens
-	viewport     yamlviewport.Model
-	width        int
-	searching    bool
-	wrap         bool
-	diffMode     bool
+	printer     *niceyaml.Printer
+	finder      *niceyaml.Finder
+	searchInput string
+	tokens      token.Tokens
+	viewport    yamlviewport.Model
+	width       int
+	searching   bool
+	wrap        bool
 }
 
-func newModel(filename string, content []byte, opts *modelOptions) model {
+func newModel(opts *modelOptions) model {
 	// Create printer with options.
 	var printerOpts []niceyaml.PrinterOption
 
@@ -72,23 +65,13 @@ func newModel(filename string, content []byte, opts *modelOptions) model {
 		wrap:     opts.wrap,
 	}
 
-	if opts.diffMode {
-		beforeTokens := lexer.Tokenize(string(opts.beforeContent))
-		afterTokens := lexer.Tokenize(string(opts.afterContent))
-		m.tokens = afterTokens
-		m.diffMode = true
-		m.filename = opts.beforeFilename
-		m.diffFilename = fmt.Sprintf("%s → %s", opts.beforeFilename, opts.afterFilename)
-
-		m.viewport.SetRevisions([]token.Tokens{beforeTokens, afterTokens})
-		m.viewport.GoToRevision(1) // Start at diff view.
-	} else {
-		tokens := lexer.Tokenize(string(content))
-		m.tokens = tokens
-		m.filename = filename
-
-		m.viewport.SetTokens(tokens)
+	revisions := make([]token.Tokens, 0, len(opts.contents))
+	for _, c := range opts.contents {
+		revisions = append(revisions, lexer.Tokenize(string(c)))
 	}
+
+	m.tokens = revisions[len(revisions)-1]
+	m.viewport.SetRevisions(revisions)
 
 	// Apply initial search if provided.
 	if opts.search != "" {
@@ -215,12 +198,6 @@ func (m model) View() tea.View {
 }
 
 func (m *model) statusBar() string {
-	// Left: filename (or diff comparison) and position.
-	filename := m.filename
-	if m.diffMode {
-		filename = m.diffFilename
-	}
-
 	// Add revision indicator if multiple revisions.
 	revisionInfo := ""
 	if m.viewport.RevisionCount() > 1 {
@@ -234,22 +211,21 @@ func (m *model) statusBar() string {
 				modeIndicator = " origin"
 			}
 
-			revisionInfo = fmt.Sprintf(" [diff %d/%d%s]", idx, count, modeIndicator)
+			revisionInfo = fmt.Sprintf("[diff %d/%d%s] ", idx, count, modeIndicator)
 
 		case m.viewport.DiffMode() == yamlviewport.DiffModeNone && idx > 0 && idx < count:
 			// None mode at a diff position shows rev with "none" indicator.
-			revisionInfo = fmt.Sprintf(" [rev %d/%d none]", idx+1, count)
+			revisionInfo = fmt.Sprintf("[rev %d/%d none] ", idx+1, count)
 
 		case m.viewport.IsAtLatestRevision():
-			revisionInfo = fmt.Sprintf(" [rev %d/%d]", count, count)
+			revisionInfo = fmt.Sprintf("[rev %d/%d] ", count, count)
 
 		default:
-			revisionInfo = fmt.Sprintf(" [rev %d/%d]", idx+1, count)
+			revisionInfo = fmt.Sprintf("[rev %d/%d] ", idx+1, count)
 		}
 	}
 
-	left := fmt.Sprintf(" %s%s[%d]",
-		filename,
+	left := fmt.Sprintf(" %s[%d]",
 		revisionInfo,
 		m.viewport.YOffset()+1,
 	)
