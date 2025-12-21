@@ -26,7 +26,6 @@ type modelOptions struct {
 //nolint:recvcheck // tea.Model requires value receivers for Init, Update, View.
 type model struct {
 	printer     *niceyaml.Printer
-	finder      *niceyaml.Finder
 	searchInput string
 	tokens      token.Tokens
 	viewport    yamlviewport.Model
@@ -61,7 +60,6 @@ func newModel(opts *modelOptions) model {
 	m := model{
 		viewport: vp,
 		printer:  printer,
-		finder:   niceyaml.NewFinder(),
 		wrap:     opts.wrap,
 	}
 
@@ -175,12 +173,11 @@ func (m model) handleSearchInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (m *model) applySearch(term string) {
 	if term == "" {
-		m.viewport.ClearSearch()
+		m.viewport.SetFinder(nil)
 		return
 	}
 
-	matches := m.finder.FindStringsInTokens(term, m.tokens)
-	m.viewport.SetSearchMatches(matches)
+	m.viewport.SetFinder(niceyaml.NewFinder(term))
 }
 
 //nolint:gocritic // hugeParam: required for tea.Model interface.

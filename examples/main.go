@@ -59,8 +59,8 @@ func main() {
 
 	// Find and highlight all occurrences of "fe".
 	tokens = lexer.Tokenize(find)
-	finder := niceyaml.NewFinder(niceyaml.WithNormalizer(niceyaml.StandardNormalizer))
-	matches := finder.FindStringsInTokens("fe", tokens)
+	finder := niceyaml.NewFinder("fe", niceyaml.WithNormalizer(niceyaml.StandardNormalizer{}))
+	matches := finder.FindTokens(tokens)
 
 	highlight := lipgloss.NewStyle().Background(charmtone.Mustard).Foreground(charmtone.Charcoal)
 	for _, m := range matches {

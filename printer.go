@@ -285,17 +285,17 @@ func (p *Printer) renderFullFileDiff(ops []lineOp, afterTokens token.Tokens) str
 		switch op.kind {
 		case diffDelete:
 			deleted := p.styles.GetStyle(StyleDiffDeleted)
-			p.writeLine(&sb, p.lineDeletedPrefix, op.content, op.beforeLine, deleted)
+			p.writeLine(&sb, p.lineDeletedPrefix, op.content, op.beforeLine, deleted, true)
 
 		case diffInsert:
 			inserted := p.styles.GetStyle(StyleDiffInserted)
-			p.writeLine(&sb, p.lineInsertedPrefix, op.content, op.afterLine, inserted)
+			p.writeLine(&sb, p.lineInsertedPrefix, op.content, op.afterLine, inserted, false)
 
 		default: // Equal.
 			// Use syntax-highlighted content from pre-rendered after tokens.
 			// AfterLine is always >= 1 for Equal ops from [lcsLineDiff].
 			line := styledLines[op.afterLine-1]
-			p.writeLine(&sb, p.linePrefix, line, op.afterLine, nil)
+			p.writeLine(&sb, p.linePrefix, line, op.afterLine, nil, false)
 		}
 	}
 
@@ -305,10 +305,25 @@ func (p *Printer) renderFullFileDiff(ops []lineOp, afterTokens token.Tokens) str
 // writeLine writes a line with optional word wrapping.
 // If contentStyle is non-nil, applies it to prefix+content together (for diff lines).
 // If contentStyle is nil, styles only the prefix and preserves content styling (for equal lines).
-func (p *Printer) writeLine(sb *strings.Builder, prefix, content string, lineNum int, contentStyle *lipgloss.Style) {
-	renderLine := func(pfx, cnt string) {
+// If skipRangeStyles is true, range-based highlighting is not applied (used for deleted lines).
+func (p *Printer) writeLine(
+	sb *strings.Builder,
+	prefix, content string,
+	lineNum int,
+	contentStyle *lipgloss.Style,
+	skipRangeStyles bool,
+) {
+	renderLine := func(pfx, cnt string, col int) {
 		if contentStyle != nil {
-			sb.WriteString(contentStyle.Render(pfx + cnt))
+			// For diff lines: apply diff style to prefix.
+			sb.WriteString(contentStyle.Render(pfx))
+			if skipRangeStyles {
+				// For deleted lines: skip range highlights (they apply to "after" tokens only).
+				sb.WriteString(contentStyle.Render(cnt))
+			} else {
+				// For inserted lines: blend diff style with range highlights.
+				sb.WriteString(p.styleLineWithRanges(cnt, lineNum, col, contentStyle, true))
+			}
 		} else {
 			sb.WriteString(p.styles.GetStyle(StyleDefault).Render(pfx))
 			sb.WriteString(cnt)
@@ -324,6 +339,9 @@ func (p *Printer) writeLine(sb *strings.Builder, prefix, content string, lineNum
 		subLines = strings.Split(lipgloss.Wrap(content, cw, wrapOnCharacters), "\n")
 	}
 
+	// Track column offset for wrapped lines (1-indexed).
+	col := 1
+
 	for j, subLine := range subLines {
 		if j > 0 {
 			sb.WriteString("\n")
@@ -338,10 +356,12 @@ func (p *Printer) writeLine(sb *strings.Builder, prefix, content string, lineNum
 		}
 
 		if j == 0 {
-			renderLine(prefix, subLine)
+			renderLine(prefix, subLine, col)
 		} else {
-			renderLine(continuationPrefix, subLine)
+			renderLine(continuationPrefix, subLine, col)
 		}
+
+		col += len([]rune(subLine))
 	}
 }
 
@@ -379,13 +399,14 @@ func buildLinesFromTokens(tokens token.Tokens) []string {
 
 // styleForPosition returns the effective style for a character at (line, col),
 // applying range styles to the base style.
-// The first matching range overrides the base style; subsequent ranges blend.
-func (p *Printer) styleForPosition(line, col int, style *lipgloss.Style) *lipgloss.Style {
+// If alwaysBlend is false, the first matching range overrides the base style;
+// subsequent ranges blend. If alwaysBlend is true, all ranges blend with base.
+func (p *Printer) styleForPosition(line, col int, style *lipgloss.Style, alwaysBlend bool) *lipgloss.Style {
 	firstRange := true
 
 	for i := range p.rangeStyles {
 		if p.rangeStyles[i].rng.Contains(line, col) {
-			if firstRange {
+			if !alwaysBlend && firstRange {
 				// First range overrides base (colors and transforms).
 				style = overrideStyles(style, &p.rangeStyles[i].style)
 				firstRange = false
@@ -476,7 +497,13 @@ func (p *Printer) styleForToken(tk *token.Token) *lipgloss.Style {
 // styleLineWithRanges styles a line with range-aware styling.
 // It splits the line into spans based on effective styles (base + overlapping ranges).
 // LineNum is 1-indexed, startCol is the column of the first character in src.
-func (p *Printer) styleLineWithRanges(src string, lineNum, startCol int, style *lipgloss.Style) string {
+// If alwaysBlend is true, range styles always blend with base (used for diff lines).
+func (p *Printer) styleLineWithRanges(
+	src string,
+	lineNum, startCol int,
+	style *lipgloss.Style,
+	alwaysBlend bool,
+) string {
 	if src == "" {
 		return src
 	}
@@ -489,10 +516,10 @@ func (p *Printer) styleLineWithRanges(src string, lineNum, startCol int, style *
 
 	runes := []rune(src)
 	spanStart := 0
-	currentStyle := p.styleForPosition(lineNum, startCol, style)
+	currentStyle := p.styleForPosition(lineNum, startCol, style, alwaysBlend)
 
 	for i := 1; i < len(runes); i++ {
-		nextStyle := p.styleForPosition(lineNum, startCol+i, style)
+		nextStyle := p.styleForPosition(lineNum, startCol+i, style, alwaysBlend)
 		if !stylesEqual(currentStyle, nextStyle) {
 			sb.WriteString(currentStyle.Render(string(runes[spanStart:i])))
 
@@ -625,7 +652,7 @@ func (p *Printer) getTokenString(tokens token.Tokens) string {
 			if separatorRunesInLine > 0 && separatorRunesInLine <= len(lineRunes) {
 				sepPart := string(lineRunes[:separatorRunesInLine])
 				defaultStyle := p.styles.GetStyle(StyleDefault)
-				sb.WriteString(p.styleLineWithRanges(sepPart, pt.Line, lineStartCol, defaultStyle))
+				sb.WriteString(p.styleLineWithRanges(sepPart, pt.Line, lineStartCol, defaultStyle, false))
 				pt.AdvanceBy(separatorRunesInLine)
 
 				lineRunes = lineRunes[separatorRunesInLine:]
@@ -634,7 +661,7 @@ func (p *Printer) getTokenString(tokens token.Tokens) string {
 			// Part 2: Render content portion (token style).
 			if len(lineRunes) > 0 {
 				contentStartCol := pt.Col
-				sb.WriteString(p.styleLineWithRanges(string(lineRunes), pt.Line, contentStartCol, tokenStyle))
+				sb.WriteString(p.styleLineWithRanges(string(lineRunes), pt.Line, contentStartCol, tokenStyle, false))
 
 				pt.AdvanceBy(len(lineRunes))
 			}

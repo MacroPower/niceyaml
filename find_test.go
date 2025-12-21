@@ -11,13 +11,22 @@ import (
 	"github.com/macropower/niceyaml"
 )
 
-func TestFinder_FindStringsInTokens(t *testing.T) {
+// testNormalizer wraps a function to implement [niceyaml.Normalizer].
+type testNormalizer struct {
+	fn func(string) string
+}
+
+func (n testNormalizer) Normalize(in string) string {
+	return n.fn(in)
+}
+
+func TestFinder_FindTokens(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
 		input      string
 		search     string
-		normalizer func(string) string
+		normalizer niceyaml.Normalizer
 		want       []niceyaml.PositionRange
 	}{
 		"single token match": {
@@ -77,7 +86,7 @@ func TestFinder_FindStringsInTokens(t *testing.T) {
 		"with normalizer - diacritic match": {
 			input:      "name: Thaïs",
 			search:     "Thais",
-			normalizer: niceyaml.StandardNormalizer,
+			normalizer: niceyaml.StandardNormalizer{},
 			want: []niceyaml.PositionRange{
 				{Start: niceyaml.Position{Line: 1, Col: 7}, End: niceyaml.Position{Line: 1, Col: 12}},
 			},
@@ -85,7 +94,7 @@ func TestFinder_FindStringsInTokens(t *testing.T) {
 		"with normalizer - search has diacritic": {
 			input:      "name: Thais",
 			search:     "Thaïs",
-			normalizer: niceyaml.StandardNormalizer,
+			normalizer: niceyaml.StandardNormalizer{},
 			want: []niceyaml.PositionRange{
 				{Start: niceyaml.Position{Line: 1, Col: 7}, End: niceyaml.Position{Line: 1, Col: 12}},
 			},
@@ -98,7 +107,7 @@ func TestFinder_FindStringsInTokens(t *testing.T) {
 		"case insensitive with normalizer": {
 			input:      "key: VALUE",
 			search:     "value",
-			normalizer: strings.ToLower,
+			normalizer: testNormalizer{fn: strings.ToLower},
 			want: []niceyaml.PositionRange{
 				{Start: niceyaml.Position{Line: 1, Col: 6}, End: niceyaml.Position{Line: 1, Col: 11}},
 			},
@@ -148,7 +157,7 @@ func TestFinder_FindStringsInTokens(t *testing.T) {
 		"utf8 - normalizer finds diacritic as ascii": {
 			input:      "key: über öffentlich",
 			search:     "o",
-			normalizer: niceyaml.StandardNormalizer,
+			normalizer: niceyaml.StandardNormalizer{},
 			want: []niceyaml.PositionRange{
 				{Start: niceyaml.Position{Line: 1, Col: 11}, End: niceyaml.Position{Line: 1, Col: 12}},
 			},
@@ -156,9 +165,9 @@ func TestFinder_FindStringsInTokens(t *testing.T) {
 		"utf8 - combined normalizer case and diacritics": {
 			input:  "name: THAÏS test",
 			search: "thais",
-			normalizer: func(s string) string {
-				return strings.ToLower(niceyaml.StandardNormalizer(s))
-			},
+			normalizer: testNormalizer{fn: func(s string) string {
+				return strings.ToLower(niceyaml.StandardNormalizer{}.Normalize(s))
+			}},
 			want: []niceyaml.PositionRange{
 				{Start: niceyaml.Position{Line: 1, Col: 7}, End: niceyaml.Position{Line: 1, Col: 12}},
 			},
@@ -177,15 +186,15 @@ func TestFinder_FindStringsInTokens(t *testing.T) {
 				opts = append(opts, niceyaml.WithNormalizer(tc.normalizer))
 			}
 
-			finder := niceyaml.NewFinder(opts...)
+			finder := niceyaml.NewFinder(tc.search, opts...)
 
-			got := finder.FindStringsInTokens(tc.search, tokens)
+			got := finder.FindTokens(tokens)
 			assert.Equal(t, tc.want, got)
 		})
 	}
 }
 
-func TestFinder_FindStringsInTokens_EdgeCases(t *testing.T) {
+func TestFinder_FindTokens_EdgeCases(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -220,17 +229,17 @@ func TestFinder_FindStringsInTokens_EdgeCases(t *testing.T) {
 			t.Parallel()
 
 			tokens := lexer.Tokenize(tc.input)
-			finder := niceyaml.NewFinder()
-			got := finder.FindStringsInTokens(tc.search, tokens)
+			finder := niceyaml.NewFinder(tc.search)
+			got := finder.FindTokens(tokens)
 			assert.Equal(t, tc.want, got)
 		})
 	}
 }
 
-func TestFinder_FindStringsInTokens_NilTokens(t *testing.T) {
+func TestFinder_FindTokens_NilTokens(t *testing.T) {
 	t.Parallel()
 
-	finder := niceyaml.NewFinder()
-	got := finder.FindStringsInTokens("test", nil)
+	finder := niceyaml.NewFinder("test")
+	got := finder.FindTokens(nil)
 	assert.Nil(t, got)
 }

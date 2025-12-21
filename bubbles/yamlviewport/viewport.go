@@ -33,6 +33,14 @@ const (
 	DiffModeNone
 )
 
+// Finder finds matches in tokens for highlighting.
+// The viewport invokes this during rerender to get fresh matches.
+type Finder interface {
+	// FindTokens returns position ranges to highlight in the given tokens.
+	// Returns nil if no matches.
+	FindTokens(tokens token.Tokens) []niceyaml.PositionRange
+}
+
 // Revision holds metadata for a single revision.
 type Revision struct {
 	Hash uint64 // FNV-1a hash of token content for deduplication.
@@ -98,6 +106,7 @@ type Model struct {
 	SearchStyle         lipgloss.Style
 	printer             *niceyaml.Printer
 	KeyMap              KeyMap
+	finder              Finder
 	searchMatches       []niceyaml.PositionRange
 	revisions           []Revision
 	tokensByHash        map[uint64]token.Tokens
@@ -256,6 +265,24 @@ func (m *Model) RevisionCount() int {
 	return len(m.revisions)
 }
 
+// currentRevisionTokens returns the tokens for the currently displayed revision.
+// For diffs, this returns the "after" revision tokens.
+func (m *Model) currentRevisionTokens() token.Tokens {
+	n := len(m.revisions)
+	if n == 0 {
+		return nil
+	}
+
+	switch {
+	case m.revisionIndex == 0:
+		return m.getRevisionTokens(0)
+	case m.revisionIndex >= n:
+		return m.getRevisionTokens(n - 1)
+	default:
+		return m.getRevisionTokens(m.revisionIndex)
+	}
+}
+
 // getRevisionTokens returns the tokens for the revision at the given index.
 func (m *Model) getRevisionTokens(index int) token.Tokens {
 	if index < 0 || index >= len(m.revisions) {
@@ -342,6 +369,19 @@ func (m *Model) rerender() {
 	}
 
 	m.printer.ClearStyles()
+
+	// Compute fresh matches if finder is set.
+	if m.finder != nil {
+		tokens := m.currentRevisionTokens()
+		m.searchMatches = m.finder.FindTokens(tokens)
+
+		// Adjust search index if matches changed.
+		if len(m.searchMatches) == 0 {
+			m.searchIndex = -1
+		} else if m.searchIndex >= len(m.searchMatches) || m.searchIndex < 0 {
+			m.searchIndex = 0
+		}
+	}
 
 	// Apply search highlights.
 	for i, match := range m.searchMatches {
@@ -609,13 +649,14 @@ func (m *Model) VisibleLineCount() int {
 	return len(m.visibleLines())
 }
 
-// SetSearchMatches sets the search highlight ranges.
-// Use [niceyaml.Finder.FindStringsInTokens] to generate matches.
-func (m *Model) SetSearchMatches(matches []niceyaml.PositionRange) {
-	m.searchMatches = matches
-	if len(matches) > 0 {
-		m.searchIndex = 0
-	} else {
+// SetFinder sets a finder to be invoked during rerender.
+// The finder receives the current revision's tokens and returns ranges to highlight.
+// Pass nil to clear the finder and remove all highlights.
+func (m *Model) SetFinder(finder Finder) {
+	m.finder = finder
+
+	if finder == nil {
+		m.searchMatches = nil
 		m.searchIndex = -1
 	}
 
@@ -623,8 +664,9 @@ func (m *Model) SetSearchMatches(matches []niceyaml.PositionRange) {
 	m.scrollToCurrentMatch()
 }
 
-// ClearSearch removes all search highlights.
+// ClearSearch removes all search highlights and clears the finder.
 func (m *Model) ClearSearch() {
+	m.finder = nil
 	m.searchMatches = nil
 	m.searchIndex = -1
 	m.rerender()

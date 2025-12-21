@@ -13,16 +13,38 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
+// Normalizer transforms strings for comparison (e.g., removing diacritics).
+type Normalizer interface {
+	Normalize(in string) string
+}
+
+// StandardNormalizer removes diacritics from strings, e.g. "ö" becomes "o".
+// Note that [unicode.Mn] is the unicode key for nonspacing marks.
+type StandardNormalizer struct{}
+
+// Normalize implements [Normalizer].
+func (StandardNormalizer) Normalize(in string) string {
+	t := transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)
+	out, _, err := transform.String(t, in)
+	if err != nil {
+		slog.Debug("normalize string: %w", slog.Any("error", err))
+		return in
+	}
+
+	return out
+}
+
 // Finder searches for strings within YAML tokens.
 // Use [NewFinder] to create an instance with optional configuration.
 type Finder struct {
-	normalizer func(string) string
+	normalizer Normalizer
+	search     string
 }
 
-// NewFinder creates a new [Finder] with the given options.
+// NewFinder creates a new [Finder] with the given search string and options.
 // By default, no normalization is applied to search strings.
-func NewFinder(opts ...FinderOption) *Finder {
-	f := &Finder{}
+func NewFinder(search string, opts ...FinderOption) *Finder {
+	f := &Finder{search: search}
 
 	for _, opt := range opts {
 		opt(f)
@@ -34,32 +56,19 @@ func NewFinder(opts ...FinderOption) *Finder {
 // FinderOption configures a [Finder].
 type FinderOption func(*Finder)
 
-// WithNormalizer sets a normalizer function applied to both the search string
+// WithNormalizer sets a [Normalizer] applied to both the search string
 // and source text before matching. See [StandardNormalizer] for an example.
-func WithNormalizer(normalizer func(string) string) FinderOption {
+func WithNormalizer(normalizer Normalizer) FinderOption {
 	return func(f *Finder) {
 		f.normalizer = normalizer
 	}
 }
 
-// StandardNormalizer removes diacritics, e.g. "ö" becomes "o".
-// Note that [unicode.Mn] is the unicode key for nonspacing marks.
-func StandardNormalizer(in string) string {
-	t := transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)
-	out, _, err := transform.String(t, in)
-	if err != nil {
-		slog.Debug("failed to normalize string", slog.Any("error", err))
-		return in
-	}
-
-	return out
-}
-
-// FindStringsInTokens finds all occurrences of the given string in the provided tokens.
+// FindTokens finds all occurrences of the search string in the provided tokens.
 // It returns a slice of PositionRange indicating the start and end positions of each match.
 // The slice is provided in the order the matches appear in the tokens.
-func (f *Finder) FindStringsInTokens(in string, tokens token.Tokens) []PositionRange {
-	if in == "" || len(tokens) == 0 {
+func (f *Finder) FindTokens(tokens token.Tokens) []PositionRange {
+	if f.search == "" || len(tokens) == 0 {
 		return nil
 	}
 
@@ -72,11 +81,11 @@ func (f *Finder) FindStringsInTokens(in string, tokens token.Tokens) []PositionR
 	}
 
 	// Apply normalizer to search string if set.
-	searchStr := in
+	searchStr := f.search
 	searchSource := source
 	if f.normalizer != nil {
-		searchStr = f.normalizer(in)
-		searchSource = f.normalizer(source)
+		searchStr = f.normalizer.Normalize(f.search)
+		searchSource = f.normalizer.Normalize(source)
 	}
 
 	// Find all matches.

@@ -117,10 +117,8 @@ another: y`
 			yaml:   simpleYAML,
 			width:  80,
 			height: 24,
-			setupFunc: func(m *yamlviewport.Model, tokens token.Tokens) {
-				finder := niceyaml.NewFinder()
-				matches := finder.FindStringsInTokens("item", tokens)
-				m.SetSearchMatches(matches)
+			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+				m.SetFinder(niceyaml.NewFinder("item"))
 			},
 		},
 		"DiffMode": {
@@ -194,10 +192,8 @@ another: y`
 			yaml:   simpleYAML,
 			width:  80,
 			height: 24,
-			setupFunc: func(m *yamlviewport.Model, tokens token.Tokens) {
-				finder := niceyaml.NewFinder()
-				matches := finder.FindStringsInTokens("item", tokens)
-				m.SetSearchMatches(matches)
+			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+				m.SetFinder(niceyaml.NewFinder("item"))
 				m.SearchNext() // Move to second match.
 			},
 		},
@@ -428,16 +424,19 @@ other: third
 item3: fourth`
 
 	tokens := lexer.Tokenize(yaml)
-	finder := niceyaml.NewFinder()
-	matches := finder.FindStringsInTokens("item", tokens)
-	noMatches := finder.FindStringsInTokens("nonexistent", tokens)
+
+	// Finder that finds "item" in tokens.
+	itemFinder := niceyaml.NewFinder("item")
+
+	// Finder that finds nothing.
+	noMatchFinder := niceyaml.NewFinder("nonexistent")
 
 	tcs := map[string]struct {
-		test    func(t *testing.T, m *yamlviewport.Model)
-		matches []niceyaml.PositionRange
+		test   func(t *testing.T, m *yamlviewport.Model)
+		finder yamlviewport.Finder
 	}{
-		"SetSearchMatches": {
-			matches: matches,
+		"SetFinder": {
+			finder: itemFinder,
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				assert.Equal(t, 3, m.SearchCount())
@@ -445,7 +444,7 @@ item3: fourth`
 			},
 		},
 		"SearchNext": {
-			matches: matches,
+			finder: itemFinder,
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				m.SearchNext()
@@ -460,7 +459,7 @@ item3: fourth`
 			},
 		},
 		"SearchPrevious": {
-			matches: matches,
+			finder: itemFinder,
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				// Wraps around from 0 to last.
@@ -472,7 +471,7 @@ item3: fourth`
 			},
 		},
 		"ClearSearch": {
-			matches: matches,
+			finder: itemFinder,
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				m.ClearSearch()
@@ -481,7 +480,7 @@ item3: fourth`
 			},
 		},
 		"NoMatches": {
-			matches: noMatches,
+			finder: noMatchFinder,
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				assert.Equal(t, 0, m.SearchCount())
@@ -502,7 +501,7 @@ item3: fourth`
 			m.SetWidth(80)
 			m.SetHeight(24)
 			m.SetTokens(tokens)
-			m.SetSearchMatches(tc.matches)
+			m.SetFinder(tc.finder)
 
 			tc.test(t, &m)
 		})

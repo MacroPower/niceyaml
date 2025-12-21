@@ -1424,3 +1424,109 @@ func TestPrinter_PrintFile_MultiDocument(t *testing.T) {
 		})
 	}
 }
+
+func TestPrinter_PrintTokenDiff_WithRangeHighlights(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		before         string
+		after          string
+		wantContains   []string
+		wantNotContain []string
+		rng            niceyaml.PositionRange
+	}{
+		"highlight on inserted line": {
+			before: "key: old\n",
+			after:  "key: new\n",
+			rng: niceyaml.PositionRange{
+				Start: niceyaml.Position{Line: 1, Col: 6},
+				End:   niceyaml.Position{Line: 1, Col: 9},
+			},
+			wantContains:   []string{"+key: [new]"},
+			wantNotContain: []string{"-key: [old]"},
+		},
+		"highlight on unchanged line": {
+			before: "key: value\n",
+			after:  "key: value\n",
+			rng: niceyaml.PositionRange{
+				Start: niceyaml.Position{Line: 1, Col: 6},
+				End:   niceyaml.Position{Line: 1, Col: 11},
+			},
+			wantContains: []string{" key: [value]"},
+		},
+		"partial highlight on inserted line": {
+			before: "key: old\n",
+			after:  "key: new\n",
+			rng: niceyaml.PositionRange{
+				Start: niceyaml.Position{Line: 1, Col: 7},
+				End:   niceyaml.Position{Line: 1, Col: 9},
+			},
+			wantContains: []string{"+key: n[ew]"},
+		},
+		"highlight spanning multiple changed lines": {
+			before: "a: 1\nb: 2\n",
+			after:  "a: 1\nb: changed\n",
+			rng: niceyaml.PositionRange{
+				Start: niceyaml.Position{Line: 2, Col: 4},
+				End:   niceyaml.Position{Line: 2, Col: 11},
+			},
+			wantContains: []string{" a: 1", "+b: [changed]"},
+		},
+		"highlight on truly new line": {
+			before: "a: 1\n",
+			after:  "a: 1\nb: 2\n",
+			rng: niceyaml.PositionRange{
+				Start: niceyaml.Position{Line: 2, Col: 1},
+				End:   niceyaml.Position{Line: 2, Col: 2},
+			},
+			wantContains: []string{" a: 1", "+[b]: 2"},
+		},
+		"highlight only on inserted line, not deleted": {
+			// Searching for "baz" should highlight "+foo: baz" but NOT "-foo: bar".
+			before: "foo: bar\n",
+			after:  "foo: baz\n",
+			rng: niceyaml.PositionRange{
+				Start: niceyaml.Position{Line: 1, Col: 6},
+				End:   niceyaml.Position{Line: 1, Col: 9},
+			},
+			wantContains:   []string{"+foo: [baz]"},
+			wantNotContain: []string{"-foo: [bar]"},
+		},
+		"deleted line at same line number not highlighted": {
+			// Multi-line change where deleted and inserted lines have same line numbers.
+			before: "a: 1\nb: old\nc: 3\n",
+			after:  "a: 1\nb: new\nc: 3\n",
+			rng: niceyaml.PositionRange{
+				Start: niceyaml.Position{Line: 2, Col: 4},
+				End:   niceyaml.Position{Line: 2, Col: 7},
+			},
+			wantContains:   []string{"+b: [new]"},
+			wantNotContain: []string{"-b: [old]"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := niceyaml.NewPrinter(
+				niceyaml.WithStyles(niceyaml.Styles{}),
+				niceyaml.WithStyle(lipgloss.NewStyle()),
+			)
+			p.AddStyleToRange(testHighlightStyle(), tc.rng)
+
+			before := lexer.Tokenize(tc.before)
+			after := lexer.Tokenize(tc.after)
+
+			got := p.PrintTokenDiff(before, after)
+
+			for _, want := range tc.wantContains {
+				assert.Contains(t, got, want)
+			}
+
+			for _, notWant := range tc.wantNotContain {
+				assert.NotContains(t, got, notWant)
+			}
+		})
+	}
+}

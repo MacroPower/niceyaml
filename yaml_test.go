@@ -36,21 +36,23 @@ func testParseFile(t *testing.T, tokens token.Tokens) *ast.File {
 	return file
 }
 
-// testFinderPrinter returns a Finder and Printer configured for testing.
-func testFinderPrinter(normalizer func(string) string) (*niceyaml.Finder, *niceyaml.Printer) {
+// testBasicPrinter returns a Printer configured for testing.
+func testBasicPrinter() *niceyaml.Printer {
+	return niceyaml.NewPrinter(
+		niceyaml.WithStyles(niceyaml.Styles{}),
+		niceyaml.WithStyle(lipgloss.NewStyle()),
+		niceyaml.WithLinePrefix(""),
+	)
+}
+
+// testFinder returns a Finder configured for testing.
+func testFinder(search string, normalizer niceyaml.Normalizer) *niceyaml.Finder {
 	var opts []niceyaml.FinderOption
 	if normalizer != nil {
 		opts = append(opts, niceyaml.WithNormalizer(normalizer))
 	}
 
-	finder := niceyaml.NewFinder(opts...)
-	printer := niceyaml.NewPrinter(
-		niceyaml.WithStyles(niceyaml.Styles{}),
-		niceyaml.WithStyle(lipgloss.NewStyle()),
-		niceyaml.WithLinePrefix(""),
-	)
-
-	return finder, printer
+	return niceyaml.NewFinder(search, opts...)
 }
 
 func TestFinderPrinter_Integration(t *testing.T) {
@@ -59,7 +61,7 @@ func TestFinderPrinter_Integration(t *testing.T) {
 	tcs := map[string]struct {
 		input      string
 		search     string
-		normalizer func(string) string
+		normalizer niceyaml.Normalizer
 		want       string
 	}{
 		"simple match": {
@@ -122,21 +124,21 @@ func TestFinderPrinter_Integration(t *testing.T) {
 		"utf8 - normalizer diacritic to ascii": {
 			input:      "name: Thaïs",
 			search:     "Thais",
-			normalizer: niceyaml.StandardNormalizer,
+			normalizer: niceyaml.StandardNormalizer{},
 			want:       "name: [Thaïs]",
 		},
 		"utf8 - case insensitive with diacritics": {
 			input:  "name: THAÏS test",
 			search: "thais",
-			normalizer: func(s string) string {
-				return strings.ToLower(niceyaml.StandardNormalizer(s))
-			},
+			normalizer: testNormalizer{fn: func(s string) string {
+				return strings.ToLower(niceyaml.StandardNormalizer{}.Normalize(s))
+			}},
 			want: "name: [THAÏS] test",
 		},
 		"utf8 - search ascii finds normalized diacritic": {
 			input:      "key: über",
 			search:     "u",
-			normalizer: niceyaml.StandardNormalizer,
+			normalizer: niceyaml.StandardNormalizer{},
 			want:       "key: [ü]ber",
 		},
 		"utf8 - japanese characters": {
@@ -161,9 +163,10 @@ func TestFinderPrinter_Integration(t *testing.T) {
 			t.Parallel()
 
 			tokens := lexer.Tokenize(tc.input)
-			finder, printer := testFinderPrinter(tc.normalizer)
+			finder := testFinder(tc.search, tc.normalizer)
+			printer := testBasicPrinter()
 
-			ranges := finder.FindStringsInTokens(tc.search, tokens)
+			ranges := finder.FindTokens(tokens)
 			for _, rng := range ranges {
 				printer.AddStyleToRange(testBracketStyle(), rng)
 			}
@@ -212,9 +215,10 @@ func TestFinderPrinter_EdgeCases(t *testing.T) {
 			t.Parallel()
 
 			tokens := lexer.Tokenize(tc.input)
-			finder, printer := testFinderPrinter(nil)
+			finder := testFinder(tc.search, nil)
+			printer := testBasicPrinter()
 
-			ranges := finder.FindStringsInTokens(tc.search, tokens)
+			ranges := finder.FindTokens(tokens)
 			if tc.wantRanges {
 				assert.NotEmpty(t, ranges)
 			} else {
@@ -269,12 +273,12 @@ func TestPrinter_Golden(t *testing.T) {
 			},
 			setupFunc: func(p *niceyaml.Printer, tokens token.Tokens) {
 				// Search for "日本" (Japan) which appears multiple times in full.yaml.
-				finder := niceyaml.NewFinder()
+				finder := niceyaml.NewFinder("日本")
 				highlightStyle := lipgloss.NewStyle().
 					Background(lipgloss.Color("#FFFF00")).
 					Foreground(lipgloss.Color("#000000"))
 
-				ranges := finder.FindStringsInTokens("日本", tokens)
+				ranges := finder.FindTokens(tokens)
 				for _, rng := range ranges {
 					p.AddStyleToRange(&highlightStyle, rng)
 				}
