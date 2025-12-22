@@ -238,6 +238,156 @@ func (p *Printer) PrintTokenDiff(before, after token.Tokens) string {
 	return p.style.Render(p.renderFullFileDiff(ops, after))
 }
 
+// PrintTokenDiffSummary generates a summary diff showing only changed lines with context.
+// The context parameter specifies how many unchanged lines to show around each change.
+// A context of 0 shows only the changed lines.
+func (p *Printer) PrintTokenDiffSummary(before, after token.Tokens, context int) string {
+	context = max(0, context)
+	ops := lcsLineDiff(
+		buildLinesFromTokens(before),
+		buildLinesFromTokens(after),
+	)
+
+	if len(ops) == 0 {
+		return ""
+	}
+
+	// Find which lines to include based on context.
+	included := p.selectContextLines(ops, context)
+
+	return p.style.Render(p.renderDiffSummary(ops, after, included))
+}
+
+// formatHunkHeader formats a unified diff hunk header like "@@ -1,3 +1,4 @@".
+// Uses the same edge case handling as go-udiff (unified.go lines 218-235).
+func (p *Printer) formatHunkHeader(h diffHunk) string {
+	var b strings.Builder
+
+	fmt.Fprint(&b, "@@")
+
+	// Format "before" part.
+	switch {
+	case h.fromCount > 1:
+		fmt.Fprintf(&b, " -%d,%d", h.fromLine, h.fromCount)
+	case h.fromLine == 1 && h.fromCount == 0:
+		// Match GNU diff -u behavior for adding to empty file.
+		fmt.Fprint(&b, " -0,0")
+	default:
+		fmt.Fprintf(&b, " -%d", h.fromLine)
+	}
+
+	// Format "after" part.
+	switch {
+	case h.toCount > 1:
+		fmt.Fprintf(&b, " +%d,%d", h.toLine, h.toCount)
+	case h.toLine == 1 && h.toCount == 0:
+		// Match GNU diff -u behavior for adding to empty file.
+		fmt.Fprint(&b, " +0,0")
+	default:
+		fmt.Fprintf(&b, " +%d", h.toLine)
+	}
+
+	fmt.Fprint(&b, " @@")
+
+	return b.String()
+}
+
+// selectContextLines returns a slice indicating which operations to include.
+// Each change includes `context` lines before and after.
+func (p *Printer) selectContextLines(ops []lineOp, context int) []bool {
+	included := make([]bool, len(ops))
+	n := len(ops)
+	lastMarked := -1
+
+	for i, op := range ops {
+		if op.kind != diffEqual {
+			start := max(0, i-context)
+			end := min(n-1, i+context)
+
+			// Mark the range [start, end], avoiding re-marking already included lines.
+			// This should prevent O(n^2) issues in large files with many overlapping hunks.
+			for j := max(start, lastMarked+1); j <= end; j++ {
+				included[j] = true
+			}
+
+			lastMarked = max(lastMarked, end)
+		}
+	}
+
+	return included
+}
+
+// renderDiffSummary renders only the included operations with hunk headers.
+func (p *Printer) renderDiffSummary(ops []lineOp, afterTokens token.Tokens, included []bool) string {
+	var sb strings.Builder
+
+	if len(afterTokens) == 0 {
+		return ""
+	}
+
+	// Build hunks from included operations.
+	hunks := buildHunks(ops, included)
+
+	// Get a token to use for range extraction.
+	startToken := afterTokens[0]
+
+	for hunkIdx, hunk := range hunks {
+		// Add newline between hunks.
+		if hunkIdx > 0 {
+			sb.WriteByte('\n')
+		}
+
+		// Render hunk header.
+		header := p.formatHunkHeader(hunk)
+		if p.lineNumbers {
+			sb.WriteString(p.lineNumberStyle.Render("    "))
+		}
+
+		sb.WriteString(p.styles.GetStyle(StyleComment).Render(header))
+		sb.WriteByte('\n')
+
+		// Extract and render only tokens needed for this hunk.
+		minLine, maxLine := hunkAfterLineRange(ops, hunk)
+
+		var (
+			styledLines []string
+			lineOffset  int
+		)
+
+		if minLine > 0 && maxLine > 0 {
+			hunkTokens := extractTokensInRange(startToken, minLine, maxLine)
+			styledHunk := p.getTokenString(hunkTokens)
+			styledLines = strings.Split(styledHunk, "\n")
+			lineOffset = minLine - 1
+		}
+
+		// Render operations within this hunk.
+		for i := hunk.startIdx; i < hunk.endIdx; i++ {
+			if i > hunk.startIdx {
+				sb.WriteByte('\n')
+			}
+
+			op := ops[i]
+
+			switch op.kind {
+			case diffDelete:
+				deleted := p.styles.GetStyle(StyleDiffDeleted)
+				p.writeLine(&sb, p.lineDeletedPrefix, op.content, op.beforeLine, deleted, true)
+
+			case diffInsert:
+				inserted := p.styles.GetStyle(StyleDiffInserted)
+				p.writeLine(&sb, p.lineInsertedPrefix, op.content, op.afterLine, inserted, false)
+
+			default: // Equal.
+				line := styledLines[op.afterLine-1-lineOffset]
+				p.writeLine(&sb, p.linePrefix, line, op.afterLine, nil, false)
+			}
+		}
+	}
+
+	return sb.String()
+}
+
 // applyLinePrefixes adds line numbers or line prefixes to content.
 func (p *Printer) applyLinePrefixes(content string, startLine int) string {
 	if p.lineNumbers {
@@ -687,14 +837,45 @@ func findAnyTokenInFile(f *ast.File) *token.Token {
 	return nil
 }
 
+// firstTokenAtOrAfter positions tk at the first token at or after minLine.
+// If minLine is negative (unbounded), walks to the start of the token list.
+func firstTokenAtOrAfter(tk *token.Token, minLine int) *token.Token {
+	// Unbounded: walk to start.
+	if minLine < 0 {
+		for tk.Prev != nil {
+			tk = tk.Prev
+		}
+
+		return tk
+	}
+
+	// Before range: walk forward.
+	if tk.Position.Line < minLine {
+		for tk != nil && tk.Position.Line < minLine {
+			tk = tk.Next
+		}
+
+		return tk
+	}
+
+	// At or after range: walk backward to find first token in range.
+	for tk.Prev != nil && tk.Prev.Position.Line >= minLine {
+		tk = tk.Prev
+	}
+
+	return tk
+}
+
 // extractTokensInRange extracts tokens that touch [minLine, maxLine].
 // It clones tokens and adjusts the first token's Origin to remove leading
 // newlines while preserving leading whitespace from the previous token.
 // If either range limit is negative, it is unbounded in that direction.
 func extractTokensInRange(tk *token.Token, minLine, maxLine int) token.Tokens {
-	// Walk backward to find the first token at or after minLine.
-	for tk.Prev != nil && (minLine < 0 || tk.Prev.Position.Line >= minLine) {
-		tk = tk.Prev
+	tk = firstTokenAtOrAfter(tk, minLine)
+
+	// If no tokens in range, return empty.
+	if tk == nil || (maxLine >= 0 && tk.Position.Line > maxLine) {
+		return token.Tokens{}
 	}
 
 	// Clone the first token.

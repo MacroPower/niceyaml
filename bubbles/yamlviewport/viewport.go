@@ -2,6 +2,7 @@ package yamlviewport
 
 import (
 	"cmp"
+	"fmt"
 	"hash/fnv"
 	"strings"
 
@@ -799,10 +800,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// View renders the viewport.
-//
-//nolint:gocritic // hugeParam: required for tea.Model interface compatibility.
-func (m Model) View() string {
+// getViewDimensions returns (width, height, ok).
+// If ok is false, the viewport has zero dimensions and should not render.
+func (m *Model) getViewDimensions() (int, int, bool) {
 	w, h := m.Width(), m.Height()
 	if sw := m.Style.GetWidth(); sw != 0 {
 		w = min(w, sw)
@@ -812,19 +812,126 @@ func (m Model) View() string {
 	}
 
 	if w == 0 || h == 0 {
-		return ""
+		return 0, 0, false
 	}
 
-	contentWidth := w - m.Style.GetHorizontalFrameSize()
-	contentHeight := h - m.Style.GetVerticalFrameSize()
+	contentW := w - m.Style.GetHorizontalFrameSize()
+	contentH := h - m.Style.GetVerticalFrameSize()
+
+	return contentW, contentH, true
+}
+
+// renderContent applies styling and renders lines into final output.
+func (m *Model) renderContent(lines []string, contentW, contentH int) string {
 	contents := m.printer.GetStyle(niceyaml.StyleDefault).
-		Width(contentWidth).
-		Height(contentHeight).
-		Render(strings.Join(m.visibleLines(), "\n"))
+		Width(contentW).
+		Height(contentH).
+		Render(strings.Join(lines, "\n"))
 
 	return m.Style.
 		UnsetWidth().UnsetHeight().
 		Render(contents)
+}
+
+// applyScrolling applies Y and X offset scrolling to a slice of lines.
+func (m *Model) applyScrolling(lines []string) []string {
+	maxHeight := m.maxHeight()
+	maxWidth := m.maxWidth()
+	total := len(lines)
+
+	if total == 0 {
+		return nil
+	}
+
+	start := m.YOffset()
+	end := min(start+maxHeight, total)
+
+	if start >= total {
+		start = max(0, total-maxHeight)
+		end = total
+	}
+
+	visible := make([]string, end-start)
+	copy(visible, lines[start:end])
+
+	if m.xOffset > 0 {
+		for i := range visible {
+			visible[i] = ansi.Cut(visible[i], m.xOffset, m.xOffset+maxWidth)
+		}
+	}
+
+	return visible
+}
+
+// View renders the viewport.
+//
+//nolint:gocritic // hugeParam: required for tea.Model interface compatibility.
+func (m Model) View() string {
+	w, h, ok := m.getViewDimensions()
+	if !ok {
+		return ""
+	}
+
+	return m.renderContent(m.visibleLines(), w, h)
+}
+
+// ViewSummary renders the viewport with summary diff (changes + context only).
+// The context parameter specifies how many unchanged lines to show around each change.
+// This is useful for showing a condensed diff view instead of the full file.
+//
+//nolint:gocritic // hugeParam: required for tea.Model interface compatibility.
+func (m Model) ViewSummary(context int) string {
+	w, h, ok := m.getViewDimensions()
+	if !ok {
+		return ""
+	}
+
+	summaryContent := m.getSummaryDiffContent(context)
+	summaryLines := strings.Split(summaryContent, "\n")
+
+	if len(summaryLines) == 0 {
+		return ""
+	}
+
+	return m.renderContent(m.applyScrolling(summaryLines), w, h)
+}
+
+// getSummaryDiffContent returns summary diff content for the current revision.
+func (m *Model) getSummaryDiffContent(context int) string {
+	n := len(m.revisions)
+	if n == 0 {
+		return ""
+	}
+
+	// At first or last position, show tokens without diff.
+	// Note: revisionIndex ranges from 0 to n (inclusive), where n = len(revisions).
+	// - Index 0 is "before first revision".
+	// - Indices 1..n-1 show diffs.
+	// - Index n is "after last revision".
+	if m.revisionIndex == 0 || m.revisionIndex >= n {
+		return m.printer.PrintTokens(m.currentRevisionTokens())
+	}
+
+	// In between: show summary diff.
+	switch m.diffMode {
+	case DiffModeOrigin:
+		before := m.getRevisionTokens(0)
+		after := m.getRevisionTokens(m.revisionIndex)
+
+		return m.printer.PrintTokenDiffSummary(before, after, context)
+
+	case DiffModeAdjacent:
+		before := m.getRevisionTokens(m.revisionIndex - 1)
+		after := m.getRevisionTokens(m.revisionIndex)
+
+		return m.printer.PrintTokenDiffSummary(before, after, context)
+
+	case DiffModeNone:
+		return m.printer.PrintTokens(m.getRevisionTokens(m.revisionIndex))
+	}
+
+	// This should be impossible to reach with the above exhaustive switch.
+	panic(fmt.Sprintf("unimplemented diff mode: %+v", m.diffMode))
 }
 
 func clamp[T cmp.Ordered](v, low, high T) T {

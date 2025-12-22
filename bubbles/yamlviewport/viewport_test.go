@@ -1547,3 +1547,268 @@ value: 20`
 		})
 	}
 }
+
+func TestViewSummary_Golden(t *testing.T) {
+	t.Parallel()
+
+	// Base revision with multiple lines for context testing.
+	rev1YAML := `name: original
+count: 10
+enabled: true
+description: "This is the original description"
+tags:
+  - alpha
+  - beta
+settings:
+  timeout: 30
+  retries: 3
+`
+
+	// Modified revision with changes in middle.
+	rev2YAML := `name: modified
+count: 20
+enabled: true
+description: "This is the updated description"
+tags:
+  - alpha
+  - gamma
+settings:
+  timeout: 60
+  retries: 5
+`
+
+	// Third revision with additional changes.
+	rev3YAML := `name: final
+count: 30
+enabled: false
+description: "This is the final description"
+tags:
+  - alpha
+  - gamma
+  - delta
+settings:
+  timeout: 90
+  retries: 10
+`
+
+	rev1Tokens := lexer.Tokenize(rev1YAML)
+	rev2Tokens := lexer.Tokenize(rev2YAML)
+	rev3Tokens := lexer.Tokenize(rev3YAML)
+
+	type goldenTest struct {
+		setupFunc func(m *yamlviewport.Model)
+		context   int
+		width     int
+		height    int
+	}
+
+	tcs := map[string]goldenTest{
+		"BasicSummary": {
+			setupFunc: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens})
+				m.GoToRevision(1)
+			},
+			context: 1,
+			width:   80,
+			height:  30,
+		},
+		"SummaryWithContext3": {
+			setupFunc: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens})
+				m.GoToRevision(1)
+			},
+			context: 3,
+			width:   80,
+			height:  30,
+		},
+		"AtFirstRevision": {
+			setupFunc: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens})
+				m.GoToRevision(0)
+			},
+			context: 1,
+			width:   80,
+			height:  30,
+		},
+		"AtLatestRevision": {
+			setupFunc: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens})
+				// Default is at latest (index 2).
+			},
+			context: 1,
+			width:   80,
+			height:  30,
+		},
+		"DiffModeOrigin": {
+			setupFunc: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens, rev3Tokens})
+				m.GoToRevision(2)
+				m.SetDiffMode(yamlviewport.DiffModeOrigin)
+			},
+			context: 1,
+			width:   80,
+			height:  30,
+		},
+		"DiffModeNone": {
+			setupFunc: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens})
+				m.GoToRevision(1)
+				m.SetDiffMode(yamlviewport.DiffModeNone)
+			},
+			context: 1,
+			width:   80,
+			height:  30,
+		},
+		"MultipleRevisions": {
+			setupFunc: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens, rev3Tokens})
+				m.GoToRevision(2)
+			},
+			context: 1,
+			width:   80,
+			height:  30,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+			m.SetWidth(tc.width)
+			m.SetHeight(tc.height)
+
+			if tc.setupFunc != nil {
+				tc.setupFunc(&m)
+			}
+
+			output := m.ViewSummary(tc.context)
+			golden.RequireEqual(t, output)
+		})
+	}
+}
+
+func TestViewSummary_Behavior(t *testing.T) {
+	t.Parallel()
+
+	rev1YAML := `name: original
+count: 10
+enabled: true
+`
+
+	rev2YAML := `name: modified
+count: 20
+enabled: true
+`
+
+	rev1Tokens := lexer.Tokenize(rev1YAML)
+	rev2Tokens := lexer.Tokenize(rev2YAML)
+
+	tcs := map[string]struct {
+		setup   func(m *yamlviewport.Model)
+		test    func(t *testing.T, m *yamlviewport.Model)
+		context int
+		width   int
+		height  int
+	}{
+		"EmptyRevisions": {
+			width:   80,
+			height:  24,
+			context: 1,
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				output := m.ViewSummary(1)
+				// Viewport returns blank lines for empty content, not empty string.
+				// Check that no YAML keys are present.
+				assert.NotContains(t, output, ":")
+			},
+		},
+		"ZeroDimensions": {
+			width:   0,
+			height:  0,
+			context: 1,
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens})
+				m.GoToRevision(1)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				output := m.ViewSummary(1)
+				assert.Empty(t, output)
+			},
+		},
+		"ContextZero": {
+			width:   80,
+			height:  24,
+			context: 0,
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens})
+				m.GoToRevision(1)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				output := m.ViewSummary(0)
+				// Should still render something (changed lines only).
+				assert.NotEmpty(t, output)
+			},
+		},
+		"LargeContext": {
+			width:   80,
+			height:  24,
+			context: 100,
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens})
+				m.GoToRevision(1)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				output := m.ViewSummary(100)
+				// Should include all content with large context.
+				assert.NotEmpty(t, output)
+				assert.Contains(t, output, "name")
+				assert.Contains(t, output, "count")
+			},
+		},
+		"ScrollingApplied": {
+			width:   80,
+			height:  3,
+			context: 1,
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevisions([]token.Tokens{rev1Tokens, rev2Tokens})
+				m.GoToRevision(1)
+				m.SetYOffset(1)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				output := m.ViewSummary(1)
+				// Should have content but be scrolled.
+				assert.NotEmpty(t, output)
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+			if tc.width > 0 {
+				m.SetWidth(tc.width)
+			}
+			if tc.height > 0 {
+				m.SetHeight(tc.height)
+			}
+
+			if tc.setup != nil {
+				tc.setup(&m)
+			}
+
+			tc.test(t, &m)
+		})
+	}
+}
