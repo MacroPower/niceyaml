@@ -1530,3 +1530,170 @@ func TestPrinter_PrintTokenDiff_WithRangeHighlights(t *testing.T) {
 		})
 	}
 }
+
+func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		before         string
+		after          string
+		wantContains   []string
+		wantNotContain []string
+		context        int
+		wantEmpty      bool
+	}{
+		"no changes returns empty": {
+			before:    "key: value\n",
+			after:     "key: value\n",
+			context:   1,
+			wantEmpty: true,
+		},
+		"simple change no context": {
+			before:  "a: 1\nb: 2\nc: 3\n",
+			after:   "a: 1\nb: changed\nc: 3\n",
+			context: 0,
+			wantContains: []string{
+				"-b: 2",
+				"+b: changed",
+			},
+			wantNotContain: []string{
+				" a: 1",
+				" c: 3",
+			},
+		},
+		"simple change with context 1": {
+			before:  "a: 1\nb: 2\nc: 3\nd: 4\n",
+			after:   "a: 1\nb: changed\nc: 3\nd: 4\n",
+			context: 1,
+			wantContains: []string{
+				" a: 1",
+				"-b: 2",
+				"+b: changed",
+				" c: 3",
+			},
+			wantNotContain: []string{
+				" d: 4",
+			},
+		},
+		"multiple scattered changes with context": {
+			before:  "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n",
+			after:   "a: X\nb: 2\nc: 3\nd: 4\ne: Y\n",
+			context: 1,
+			wantContains: []string{
+				"@@ -1,2 +1,2 @@",
+				"-a: 1",
+				"+a: X",
+				" b: 2",
+				"@@ -4,2 +4,2 @@",
+				" d: 4",
+				"-e: 5",
+				"+e: Y",
+			},
+			wantNotContain: []string{
+				" c: 3",
+			},
+		},
+		"gap separator between non-adjacent changes": {
+			before:  "line1: a\nline2: b\nline3: c\nline4: d\nline5: e\nline6: f\n",
+			after:   "line1: X\nline2: b\nline3: c\nline4: d\nline5: e\nline6: Y\n",
+			context: 0,
+			wantContains: []string{
+				"@@ -1 +1 @@",
+				"-line1: a",
+				"+line1: X",
+				"@@ -6 +6 @@",
+				"-line6: f",
+				"+line6: Y",
+			},
+		},
+		"addition only": {
+			before:  "a: 1\nc: 3\n",
+			after:   "a: 1\nb: 2\nc: 3\n",
+			context: 1,
+			wantContains: []string{
+				" a: 1",
+				"+b: 2",
+				" c: 3",
+			},
+		},
+		"deletion only": {
+			before:  "a: 1\nb: 2\nc: 3\n",
+			after:   "a: 1\nc: 3\n",
+			context: 1,
+			wantContains: []string{
+				" a: 1",
+				"-b: 2",
+				" c: 3",
+			},
+		},
+		"empty files": {
+			before:    "",
+			after:     "",
+			context:   1,
+			wantEmpty: true,
+		},
+		"context larger than ops length includes all lines": {
+			before:  "a: 1\nb: 2\nc: 3\n",
+			after:   "a: 1\nb: changed\nc: 3\n",
+			context: 100, // Much larger than 3 lines.
+			wantContains: []string{
+				" a: 1",
+				"-b: 2",
+				"+b: changed",
+				" c: 3",
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := niceyaml.NewPrinter(
+				niceyaml.WithStyles(niceyaml.Styles{}),
+				niceyaml.WithStyle(lipgloss.NewStyle()),
+			)
+			before := lexer.Tokenize(tc.before)
+			after := lexer.Tokenize(tc.after)
+
+			got := p.PrintTokenDiffSummary(before, after, tc.context)
+
+			if tc.wantEmpty {
+				assert.Empty(t, got)
+				return
+			}
+
+			for _, want := range tc.wantContains {
+				assert.Contains(t, got, want)
+			}
+
+			for _, notWant := range tc.wantNotContain {
+				assert.NotContains(t, got, notWant)
+			}
+		})
+	}
+}
+
+func TestPrinter_PrintTokenDiffSummary_WithLineNumbers(t *testing.T) {
+	t.Parallel()
+
+	before := "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n"
+	after := "a: 1\nb: changed\nc: 3\nd: 4\ne: 5\n"
+
+	p := niceyaml.NewPrinter(
+		niceyaml.WithStyles(niceyaml.Styles{}),
+		niceyaml.WithStyle(lipgloss.NewStyle()),
+		niceyaml.WithLineNumbers(),
+	)
+
+	got := p.PrintTokenDiffSummary(lexer.Tokenize(before), lexer.Tokenize(after), 1)
+
+	// Should contain line numbers for included lines.
+	assert.Contains(t, got, "   1  a: 1")
+	assert.Contains(t, got, "   2 -b: 2")
+	assert.Contains(t, got, "   2 +b: changed")
+	assert.Contains(t, got, "   3  c: 3")
+
+	// Hunk header should be aligned with 4-char padding.
+	assert.Contains(t, got, "    @@")
+}
