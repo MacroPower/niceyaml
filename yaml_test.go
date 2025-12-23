@@ -141,6 +141,12 @@ func TestFinderPrinter_Integration(t *testing.T) {
 			normalizer: niceyaml.StandardNormalizer{},
 			want:       "key: [ü]ber",
 		},
+		"utf8 - normalizer search after multiple multibyte": {
+			input:      "key: über Yamüll test",
+			search:     "ya",
+			normalizer: niceyaml.StandardNormalizer{},
+			want:       "key: über [Ya]müll test",
+		},
 		"utf8 - japanese characters": {
 			input:  "名前: テスト value",
 			search: "value",

@@ -76,19 +76,18 @@ func (f *Finder) FindTokens(tokens token.Tokens) []PositionRange {
 	}
 
 	// Build concatenated source and position map.
-	// The position map uses character indices (not byte indices) so it works
-	// correctly with normalizers that preserve character counts but change byte lengths.
+	// When a normalizer is set, source is already normalized and posMap maps
+	// normalized character indices to original positions.
 	source, posMap := f.buildSourceAndPositionMap(tokens)
 	if source == "" {
 		return nil
 	}
 
-	// Apply normalizer to search string if set.
+	// Normalize search string if normalizer is set.
+	// Source is already normalized by buildSourceAndPositionMap.
 	searchStr := f.search
-	searchSource := source
 	if f.normalizer != nil {
 		searchStr = f.normalizer.Normalize(f.search)
-		searchSource = f.normalizer.Normalize(source)
 	}
 
 	// Find all matches.
@@ -96,7 +95,7 @@ func (f *Finder) FindTokens(tokens token.Tokens) []PositionRange {
 
 	offset := 0
 	for {
-		idx := strings.Index(searchSource[offset:], searchStr)
+		idx := strings.Index(source[offset:], searchStr)
 		if idx == -1 {
 			break
 		}
@@ -105,8 +104,7 @@ func (f *Finder) FindTokens(tokens token.Tokens) []PositionRange {
 		matchEnd := matchStart + len(searchStr)
 
 		// Convert byte offsets to character offsets for position map lookup.
-		// This ensures correct mapping when normalizers change byte lengths.
-		matchStartChar := utf8.RuneCountInString(searchSource[:matchStart])
+		matchStartChar := utf8.RuneCountInString(source[:matchStart])
 		matchEndChar := matchStartChar + utf8.RuneCountInString(searchStr) - 1
 
 		startPos := posMap.lookup(matchStartChar)
@@ -122,8 +120,9 @@ func (f *Finder) FindTokens(tokens token.Tokens) []PositionRange {
 }
 
 // buildSourceAndPositionMap concatenates all token Origins and builds a position map.
-// The position map uses character indices (not byte indices) so it works correctly
-// with normalizers that preserve character counts but may change byte lengths.
+// When a normalizer is set, the returned source is normalized and the position map
+// maps normalized character indices to original positions. This ensures correct
+// position lookup when searching in normalized text.
 func (f *Finder) buildSourceAndPositionMap(tokens token.Tokens) (string, *positionMap) {
 	var sb strings.Builder
 
@@ -134,18 +133,28 @@ func (f *Finder) buildSourceAndPositionMap(tokens token.Tokens) (string, *positi
 	}
 
 	pt := NewPositionTrackerFromTokens(tokens)
-
-	// Track position continuously across all tokens using character indices.
-	charIndex := 0
+	normalizedCharIndex := 0
 
 	for _, tk := range tokens {
 		for _, r := range tk.Origin {
-			// Record position for this character using character index.
-			pm.add(charIndex, pt.Position())
+			pos := pt.Position()
 
-			charIndex++
+			// Get normalized form of this rune (or original if no normalizer).
+			var normalized string
+			if f.normalizer != nil {
+				normalized = f.normalizer.Normalize(string(r))
+			} else {
+				normalized = string(r)
+			}
 
-			sb.WriteRune(r)
+			// Map each normalized char back to original position.
+			for _, nr := range normalized {
+				pm.add(normalizedCharIndex, pos)
+				sb.WriteRune(nr)
+
+				normalizedCharIndex++
+			}
+
 			pt.Advance(r)
 		}
 	}
