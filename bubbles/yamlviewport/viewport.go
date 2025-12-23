@@ -44,6 +44,7 @@ type Finder interface {
 
 // Revision holds metadata for a single revision.
 type Revision struct {
+	Name string // Arbitrary name for the revision (e.g., timestamp, commit sha).
 	Hash uint64 // FNV-1a hash of token content for deduplication.
 }
 
@@ -176,51 +177,24 @@ func (m *Model) SetWidth(w int) {
 }
 
 // SetTokens replaces the revision history with a single revision.
-// This is a convenience method equivalent to SetRevisions([]token.Tokens{tokens}).
+// This is a convenience method equivalent to ClearRevisions() followed by AppendRevision("", tokens).
 func (m *Model) SetTokens(tokens token.Tokens) {
-	m.SetRevisions([]token.Tokens{tokens})
+	m.ClearRevisions()
+	m.AppendRevision("", tokens)
 }
 
 // SetFile replaces the revision history with a single revision from a file.
-// This is a convenience method equivalent to ClearRevisions() followed by AppendFileRevision(file).
+// This is a convenience method equivalent to ClearRevisions() followed by AppendFileRevision("", file).
 func (m *Model) SetFile(file *ast.File) {
 	m.ClearRevisions()
-	m.AppendFileRevision(file)
-}
-
-// SetRevisions replaces all revisions with the given slice.
-// The revision index is set to len(revisions), showing the latest revision without diff.
-// Pass nil or empty slice to clear all content.
-func (m *Model) SetRevisions(revisions []token.Tokens) {
-	if len(revisions) == 0 {
-		m.revisions = nil
-		m.tokensByHash = nil
-		m.revisionIndex = 0
-	} else {
-		m.revisions = make([]Revision, len(revisions))
-		m.tokensByHash = make(map[uint64]token.Tokens)
-
-		for i, tokens := range revisions {
-			hash := hashTokens(tokens)
-			m.revisions[i] = Revision{Hash: hash}
-			m.tokensByHash[hash] = tokens
-		}
-
-		m.revisionIndex = len(revisions)
-	}
-
-	m.rerender()
-
-	if m.YOffset() > m.maxYOffset() {
-		m.GotoBottom()
-	}
+	m.AppendFileRevision("", file)
 }
 
 // AppendRevision adds a new revision to the history.
 // The revision index is set to len(revisions), showing the latest revision without diff.
-func (m *Model) AppendRevision(revision token.Tokens) {
+func (m *Model) AppendRevision(name string, revision token.Tokens) {
 	hash := hashTokens(revision)
-	m.revisions = append(m.revisions, Revision{Hash: hash})
+	m.revisions = append(m.revisions, Revision{Name: name, Hash: hash})
 
 	if m.tokensByHash == nil {
 		m.tokensByHash = make(map[uint64]token.Tokens)
@@ -237,10 +211,10 @@ func (m *Model) AppendRevision(revision token.Tokens) {
 
 // AppendFileRevision adds a new revision from an [*ast.File] to the history.
 // The revision index is set to len(revisions), showing the latest revision without diff.
-func (m *Model) AppendFileRevision(file *ast.File) {
+func (m *Model) AppendFileRevision(name string, file *ast.File) {
 	tk := findAnyTokenInFile(file)
 	tokens := getAllTokens(tk)
-	m.AppendRevision(tokens)
+	m.AppendRevision(name, tokens)
 }
 
 // ClearRevisions removes all revisions from the history.
@@ -255,6 +229,26 @@ func (m *Model) ClearRevisions() {
 // Returns 0 if revisions are empty.
 func (m *Model) RevisionIndex() int {
 	return m.revisionIndex
+}
+
+// RevisionName returns the name of the current revision.
+// Returns empty string if revisions are empty or index is out of range.
+func (m *Model) RevisionName() string {
+	if m.revisionIndex < 0 || m.revisionIndex >= len(m.revisions) {
+		return ""
+	}
+
+	return m.revisions[m.revisionIndex].Name
+}
+
+// RevisionNames returns all revision names in order.
+func (m *Model) RevisionNames() []string {
+	names := make([]string, len(m.revisions))
+	for i, rev := range m.revisions {
+		names[i] = rev.Name
+	}
+
+	return names
 }
 
 // GoToRevision sets the current revision index (clamped to valid range).

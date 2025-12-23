@@ -61,13 +61,10 @@ func newModel(opts *modelOptions) model {
 		viewport: vp,
 	}
 
-	revisions := make([]token.Tokens, 0, len(opts.contents))
-	for _, c := range opts.contents {
-		revisions = append(revisions, lexer.Tokenize(string(c)))
+	for i, c := range opts.contents {
+		m.tokens = lexer.Tokenize(string(c))
+		m.viewport.AppendRevision(fmt.Sprintf("v%d", i), m.tokens)
 	}
-
-	m.tokens = revisions[len(revisions)-1]
-	m.viewport.SetRevisions(revisions)
 
 	// Apply initial search if provided.
 	if opts.search != "" {
