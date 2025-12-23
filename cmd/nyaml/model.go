@@ -154,7 +154,11 @@ func (m *model) applySearch(term string) {
 		return
 	}
 
-	m.viewport.SetFinder(niceyaml.NewFinder(term))
+	m.viewport.SetFinder(
+		niceyaml.NewFinder(term,
+			niceyaml.WithNormalizer(niceyaml.StandardNormalizer{}),
+		),
+	)
 }
 
 //nolint:gocritic // hugeParam: required for tea.Model interface.
