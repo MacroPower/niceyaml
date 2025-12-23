@@ -6,6 +6,7 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/token"
@@ -89,7 +90,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		if m.searching {
-			return m.handleSearchInput(msg)
+			m.updateSearchInput(msg)
+			break
 		}
 
 		switch {
@@ -100,32 +102,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.searching = true
 			m.searchInput = ""
 
-			return m, nil
-
 		case key.Matches(msg, key.NewBinding(key.WithKeys("n"))):
 			m.viewport.SearchNext()
-
-			return m, nil
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("N"))):
 			m.viewport.SearchPrevious()
 
-			return m, nil
-
 		case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
 			m.viewport.ClearSearch()
-
-			return m, nil
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("g"))):
 			m.viewport.GotoTop()
 
-			return m, nil
-
 		case key.Matches(msg, key.NewBinding(key.WithKeys("G"))):
 			m.viewport.GotoBottom()
-
-			return m, nil
 		}
 	}
 
@@ -136,8 +126,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-//nolint:gocritic // hugeParam: required for tea.Model interface.
-func (m model) handleSearchInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m *model) updateSearchInput(msg tea.KeyPressMsg) {
 	switch {
 	case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
 		m.searching = false
@@ -157,8 +146,6 @@ func (m model) handleSearchInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.searchInput += s
 		}
 	}
-
-	return m, nil
 }
 
 func (m *model) applySearch(term string) {
@@ -234,11 +221,11 @@ func (m *model) statusBar() string {
 	}
 
 	// Pad middle.
-	padding := max(0, m.width-len(left)-len(right))
+	padding := max(0, m.width-ansi.StringWidth(left)-ansi.StringWidth(right))
 
 	style := lipgloss.NewStyle().
 		Background(charmtone.Charcoal).
 		Foreground(charmtone.Salt)
 
-	return style.Width(m.width).Render(left + strings.Repeat(" ", padding) + right)
+	return style.Render(left + strings.Repeat(" ", padding) + right)
 }
