@@ -163,11 +163,9 @@ func TestFinder_FindTokens(t *testing.T) {
 			},
 		},
 		"utf8 - combined normalizer case and diacritics": {
-			input:  "name: THAÏS test",
-			search: "thais",
-			normalizer: testNormalizer{fn: func(s string) string {
-				return strings.ToLower(niceyaml.StandardNormalizer{}.Normalize(s))
-			}},
+			input:      "name: THAÏS test",
+			search:     "thais",
+			normalizer: niceyaml.StandardNormalizer{},
 			want: []niceyaml.PositionRange{
 				{Start: niceyaml.Position{Line: 1, Col: 7}, End: niceyaml.Position{Line: 1, Col: 12}},
 			},

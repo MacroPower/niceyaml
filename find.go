@@ -8,6 +8,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/goccy/go-yaml/token"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 	"golang.org/x/text/runes"
 	"golang.org/x/text/transform"
 	"golang.org/x/text/unicode/norm"
@@ -18,13 +20,14 @@ type Normalizer interface {
 	Normalize(in string) string
 }
 
-// StandardNormalizer removes diacritics from strings, e.g. "ö" becomes "o".
+// StandardNormalizer removes diacritics and lowercases strings for
+// case-insensitive matching. For example, "Ö" becomes "o".
 // Note that [unicode.Mn] is the unicode key for nonspacing marks.
 type StandardNormalizer struct{}
 
 // Normalize implements [Normalizer].
 func (StandardNormalizer) Normalize(in string) string {
-	t := transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)
+	t := transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC, cases.Lower(language.Und))
 	out, _, err := transform.String(t, in)
 	if err != nil {
 		slog.Debug("normalize string: %w", slog.Any("error", err))
