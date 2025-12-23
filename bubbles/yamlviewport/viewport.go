@@ -124,6 +124,7 @@ type Model struct {
 	diffMode            DiffMode
 	FillHeight          bool
 	MouseWheelEnabled   bool
+	WrapEnabled         bool
 	initialized         bool
 }
 
@@ -165,7 +166,13 @@ func (m *Model) Width() int {
 
 // SetWidth sets the width of the viewport.
 func (m *Model) SetWidth(w int) {
-	m.width = w
+	if m.width != w {
+		m.width = w
+		if m.WrapEnabled {
+			m.printer.SetWidth(w)
+			m.rerender()
+		}
+	}
 }
 
 // SetTokens replaces the revision history with a single revision.

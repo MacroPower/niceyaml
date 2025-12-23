@@ -25,13 +25,11 @@ type modelOptions struct {
 
 //nolint:recvcheck // tea.Model requires value receivers for Init, Update, View.
 type model struct {
-	printer     *niceyaml.Printer
 	searchInput string
 	tokens      token.Tokens
 	viewport    yamlviewport.Model
 	width       int
 	searching   bool
-	wrap        bool
 }
 
 func newModel(opts *modelOptions) model {
@@ -57,10 +55,10 @@ func newModel(opts *modelOptions) model {
 		),
 	)
 
+	vp.WrapEnabled = opts.wrap
+
 	m := model{
 		viewport: vp,
-		printer:  printer,
-		wrap:     opts.wrap,
 	}
 
 	revisions := make([]token.Tokens, 0, len(opts.contents))
@@ -91,11 +89,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.viewport.SetWidth(msg.Width)
 		m.viewport.SetHeight(msg.Height - 1) // Reserve 1 line for status bar.
-
-		if m.wrap {
-			m.printer.SetWidth(msg.Width)
-			m.viewport.SetTokens(m.tokens) // Re-render with new width.
-		}
 
 	case tea.KeyPressMsg:
 		if m.searching {

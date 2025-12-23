@@ -567,7 +567,7 @@ new: added`
 		"AppendRevision": {
 			setup: func(m *yamlviewport.Model) {
 				m.SetRevisions([]token.Tokens{rev1Tokens})
-				m.AppendRevision(rev2Tokens)
+				m.AppendRevision("", rev2Tokens)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -1089,8 +1089,8 @@ new: added`
 
 				afterFile, err := parser.ParseBytes([]byte(tc.afterYAML), parser.ParseComments)
 				require.NoError(t, err)
-				m.AppendFileRevision(beforeFile)
-				m.AppendFileRevision(afterFile)
+				m.AppendFileRevision("", beforeFile)
+				m.AppendFileRevision("", afterFile)
 			}
 
 			if tc.yaml != "" {
@@ -1299,7 +1299,7 @@ another: y`
 			setup: func(m *yamlviewport.Model) {
 				// Add a second revision and go to revision 0.
 				second := lexer.Tokenize("line1: modified\nline2: changed")
-				m.AppendRevision(second)
+				m.AppendRevision("", second)
 				m.GoToRevision(0)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -1316,7 +1316,7 @@ another: y`
 			setup: func(m *yamlviewport.Model) {
 				// Add a second revision (starts at latest).
 				second := lexer.Tokenize("line1: modified\nline2: changed")
-				m.AppendRevision(second)
+				m.AppendRevision("", second)
 				// Now at index 2 (latest).
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -1332,7 +1332,7 @@ another: y`
 			height: 5,
 			setup: func(m *yamlviewport.Model) {
 				second := lexer.Tokenize("line1: modified\nline2: changed")
-				m.AppendRevision(second)
+				m.AppendRevision("", second)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -1521,7 +1521,7 @@ value: 20`
 		"AppendDuplicate/Works": {
 			setup: func(m *yamlviewport.Model) {
 				m.SetRevisions([]token.Tokens{sameTokens1})
-				m.AppendRevision(sameTokens2)
+				m.AppendRevision("", sameTokens2)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
