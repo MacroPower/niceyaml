@@ -1,4 +1,4 @@
-package schema_test
+package validate_test
 
 import (
 	"errors"
@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/macropower/niceyaml"
-	"github.com/macropower/niceyaml/schema"
+	"github.com/macropower/niceyaml/schema/validate"
 )
 
 func TestValidationError_Error(t *testing.T) {
@@ -84,7 +84,7 @@ func TestNewValidator(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			validator, err := schema.NewValidator("test", tc.schemaData)
+			validator, err := validate.NewValidator("test", tc.schemaData)
 
 			if tc.wantErr {
 				require.Error(t, err)
@@ -155,7 +155,7 @@ func TestValidator_Validate(t *testing.T) {
 		"additionalProperties": false
 	}`)
 
-	validator, err := schema.NewValidator("test", schemaData)
+	validator, err := validate.NewValidator("test", schemaData)
 	require.NoError(t, err)
 
 	tcs := map[string]struct {
@@ -463,7 +463,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 		"additionalProperties": false
 	}`)
 
-	validator, err := schema.NewValidator("test", schemaData)
+	validator, err := validate.NewValidator("test", schemaData)
 	require.NoError(t, err)
 
 	tcs := map[string]struct {
@@ -715,13 +715,13 @@ func TestMustNewValidator(t *testing.T) {
 
 			if tc.wantPanic {
 				assert.Panics(t, func() {
-					schema.MustNewValidator("test", tc.schemaData)
+					validate.MustNewValidator("test", tc.schemaData)
 				})
 
 				return
 			}
 
-			validator := schema.MustNewValidator("test", tc.schemaData)
+			validator := validate.MustNewValidator("test", tc.schemaData)
 			assert.NotNil(t, validator)
 
 			if tc.validateData != nil {
@@ -764,7 +764,7 @@ func TestNewValidator_InvalidSchemaTypes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			validator, err := schema.NewValidator("test", tc.schemaData)
+			validator, err := validate.NewValidator("test", tc.schemaData)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.errMsg)
 			assert.Nil(t, validator)
@@ -796,7 +796,7 @@ func TestNewValidator_BooleanSchema(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			validator, err := schema.NewValidator("test", tc.schemaData)
+			validator, err := validate.NewValidator("test", tc.schemaData)
 			require.NoError(t, err)
 			require.NotNil(t, validator)
 

@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/macropower/niceyaml"
-	"github.com/macropower/niceyaml/schema"
+	"github.com/macropower/niceyaml/schema/validate"
 )
 
 func validateCmd() *cobra.Command {
@@ -31,7 +31,7 @@ func validateCmd() *cobra.Command {
 				return fmt.Errorf("load schema: %w", err)
 			}
 
-			validator, err := schema.NewValidator(schemaRef, schemaData)
+			validator, err := validate.NewValidator(schemaRef, schemaData)
 			if err != nil {
 				return fmt.Errorf("compile schema: %w", err)
 			}
@@ -82,7 +82,7 @@ func fetchSchema(ctx context.Context, schemaURL string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-func validateFile(yamlPath string, validator *schema.Validator) error {
+func validateFile(yamlPath string, validator *validate.Validator) error {
 	yamlData, err := os.ReadFile(yamlPath) //nolint:gosec // User-provided file paths are intentional.
 	if err != nil {
 		return fmt.Errorf("read file: %w", err)
