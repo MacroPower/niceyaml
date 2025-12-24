@@ -1,66 +1,100 @@
-// Package main provides the nyaml CLI for viewing YAML files.
+// Package main provides the nyaml CLI for viewing and validating YAML files.
 package main
 
 import (
 	"context"
 	"fmt"
+	"image/color"
+	"io"
 	"os"
+	"strings"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/fang"
+	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/spf13/cobra"
-
-	tea "charm.land/bubbletea/v2"
 )
 
 func main() {
-	var (
-		lineNumbers bool
-		wrap        bool
-		search      string
-	)
-
-	cmd := &cobra.Command{
-		Use:   "nyaml [file...]",
-		Short: "A terminal YAML viewer with syntax highlighting",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			// Read all files.
-			var contents [][]byte
-			for _, arg := range args {
-				content, err := os.ReadFile(arg) //nolint:gosec // User-provided file paths are intentional.
-				if err != nil {
-					return fmt.Errorf("read file %s: %w", arg, err)
-				}
-
-				contents = append(contents, content)
-			}
-
-			opts := modelOptions{
-				lineNumbers: lineNumbers,
-				wrap:        wrap,
-				search:      search,
-				contents:    contents,
-			}
-
-			m := newModel(&opts)
-
-			p := tea.NewProgram(m)
-
-			_, err := p.Run()
-			if err != nil {
-				return fmt.Errorf("run program: %w", err)
-			}
-
-			return nil
-		},
+	rootCmd := &cobra.Command{
+		Use:   "nyaml",
+		Short: "A terminal YAML utility with syntax highlighting",
 	}
 
-	cmd.Flags().BoolVarP(&lineNumbers, "line-numbers", "n", false, "show line numbers")
-	cmd.Flags().BoolVarP(&wrap, "wrap", "w", false, "wrap long lines")
-	cmd.Flags().StringVarP(&search, "search", "s", "", "initial search term")
+	rootCmd.AddCommand(viewCmd())
+	rootCmd.AddCommand(validateCmd())
 
-	err := fang.Execute(context.Background(), cmd)
+	err := fang.Execute(context.Background(), rootCmd,
+		fang.WithErrorHandler(fangErrorHandler),
+		fang.WithColorSchemeFunc(fangColorScheme),
+	)
 	if err != nil {
 		os.Exit(1)
 	}
+}
+
+func fangColorScheme(c lipgloss.LightDarkFunc) fang.ColorScheme {
+	return fang.ColorScheme{
+		Base:           c(charmtone.Charcoal, charmtone.Ash),
+		Title:          charmtone.Charple,
+		Codeblock:      c(charmtone.Salt, lipgloss.Color("#2F2E36")),
+		Program:        c(charmtone.Malibu, charmtone.Guppy),
+		Command:        c(charmtone.Pony, charmtone.Cheeky),
+		DimmedArgument: c(charmtone.Squid, charmtone.Oyster),
+		Comment:        c(charmtone.Squid, lipgloss.Color("#747282")),
+		Flag:           c(lipgloss.Color("#0CB37F"), charmtone.Guac),
+		Argument:       c(charmtone.Charcoal, charmtone.Ash),
+		Description:    c(charmtone.Charcoal, charmtone.Ash), // Flag and command descriptions.
+		FlagDefault:    c(charmtone.Smoke, charmtone.Squid),  // Flag default values in descriptions.
+		QuotedString:   c(charmtone.Coral, charmtone.Salmon),
+		ErrorHeader: [2]color.Color{
+			charmtone.Butter,
+			charmtone.Cherry,
+		},
+	}
+}
+
+//nolint:gocritic // hugeParam: required by [fang.ErrorHandler] signature.
+func fangErrorHandler(w io.Writer, styles fang.Styles, err error) {
+	mustN(fmt.Fprintln(w, styles.ErrorHeader.String()))
+	mustN(fmt.Fprintln(w, lipgloss.NewStyle().MarginLeft(2).Render(err.Error())))
+	mustN(fmt.Fprintln(w))
+	if isUsageError(err) {
+		mustN(fmt.Fprintln(w, lipgloss.JoinHorizontal(
+			lipgloss.Left,
+			styles.ErrorText.UnsetWidth().Render("Try"),
+			styles.Program.Flag.Render("--help"),
+			styles.ErrorText.UnsetWidth().UnsetMargins().UnsetTransform().PaddingLeft(1).Render("for usage."),
+		)))
+		mustN(fmt.Fprintln(w))
+	}
+}
+
+func must(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
+func mustN(_ int, err error) {
+	must(err)
+}
+
+// XXX: this is a hack to detect usage errors.
+// See: https://github.com/spf13/cobra/pull/2266
+func isUsageError(err error) bool {
+	s := err.Error()
+	for _, prefix := range []string{
+		"flag needs an argument:",
+		"unknown flag:",
+		"unknown shorthand flag:",
+		"unknown command",
+		"invalid argument",
+	} {
+		if strings.HasPrefix(s, prefix) {
+			return true
+		}
+	}
+
+	return false
 }
