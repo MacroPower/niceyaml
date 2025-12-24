@@ -706,7 +706,7 @@ func (m *Model) SearchCount() int {
 	return len(m.searchMatches)
 }
 
-// scrollToCurrentMatch scrolls to make the current search match visible.
+// scrollToCurrentMatch scrolls to center the current search match in the viewport.
 func (m *Model) scrollToCurrentMatch() {
 	if m.searchIndex < 0 || m.searchIndex >= len(m.searchMatches) {
 		return
@@ -716,12 +716,8 @@ func (m *Model) scrollToCurrentMatch() {
 	// Line is 1-indexed in PositionRange, convert to 0-indexed.
 	line := match.Start.Line - 1
 
-	// Ensure the match line is visible.
-	if line < m.YOffset() {
-		m.SetYOffset(line)
-	} else if line >= m.YOffset()+m.maxHeight() {
-		m.SetYOffset(line - m.maxHeight() + 1)
-	}
+	// Center the match in the viewport.
+	m.SetYOffset(line - m.maxHeight()/2)
 }
 
 // Update handles messages.
