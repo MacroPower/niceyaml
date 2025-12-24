@@ -167,9 +167,10 @@ func (d *Decoder) ValidateContext(ctx context.Context, doc int, validator Valida
 		return err
 	}
 
+	ew := NewErrorWrapper(WithFile(d.f))
 	err = validator.Validate(v)
 	if err != nil {
-		return fmt.Errorf("invalid document: %w", err)
+		return ew.Wrap(fmt.Errorf("invalid document: %w", err))
 	}
 
 	return nil
