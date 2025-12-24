@@ -11,6 +11,7 @@ import (
 	_ "embed"
 
 	"github.com/macropower/niceyaml"
+	"github.com/macropower/niceyaml/tokens"
 )
 
 var (
@@ -35,7 +36,6 @@ var (
 func main() {
 	printer := niceyaml.NewPrinter(niceyaml.WithLineNumbers())
 
-	tokens := lexer.Tokenize(source)
 	red := lipgloss.NewStyle().Background(charmtone.Sapphire).Foreground(charmtone.Salt)
 	printer.AddStyleToRange(&red, niceyaml.PositionRange{
 		Start: niceyaml.Position{Line: 10, Col: 5},
@@ -48,26 +48,27 @@ func main() {
 		End:   niceyaml.Position{Line: 11, Col: 31},
 	})
 
-	rangeDemo := printer.PrintTokens(tokens)
+	rangeDemo := printer.PrintTokens(tokens.NewLinesFromString(source))
 	printer.ClearStyles()
 
 	// Show diff between two YAML documents.
-	tokens1 := lexer.Tokenize(original)
-	tokens2 := lexer.Tokenize(modified)
-	diffDemo := printer.PrintTokenDiff(tokens1, tokens2)
+	beforeRev := tokens.NewRevision(tokens.NewLinesFromString(original, tokens.WithName("before")))
+	afterRev := tokens.NewRevision(tokens.NewLinesFromString(modified, tokens.WithName("after")))
+	diff := tokens.NewFullDiff(beforeRev, afterRev)
+	diffDemo := printer.PrintTokens(diff.Lines())
 	printer.ClearStyles()
 
 	// Find and highlight all occurrences of "fe".
-	tokens = lexer.Tokenize(find)
+	tks := lexer.Tokenize(find)
 	finder := niceyaml.NewFinder("fe", niceyaml.WithNormalizer(niceyaml.StandardNormalizer{}))
-	matches := finder.FindTokens(tokens)
+	matches := finder.FindTokens(tks)
 
 	highlight := lipgloss.NewStyle().Background(charmtone.Mustard).Foreground(charmtone.Charcoal)
 	for _, m := range matches {
 		printer.AddStyleToRange(&highlight, m)
 	}
 
-	findDemo := printer.PrintTokens(tokens)
+	findDemo := printer.PrintTokens(tokens.NewLinesFromTokens(tks))
 	printer.ClearStyles()
 
 	out := lipgloss.NewStyle().

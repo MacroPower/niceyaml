@@ -1,20 +1,20 @@
- name: modified                                                                 
- count: 20                                                                      
+@@ -1,10 +1,10 @@                                                               
+-name: original                                                                 
+-count: 10                                                                      
++name: modified                                                                 
++count: 20                                                                      
  enabled: true                                                                  
- description: "This is the updated description"                                 
+-description: "This is the original description"                                
++description: "This is the updated description"                                 
  tags:                                                                          
    - alpha                                                                      
-   - gamma                                                                      
+-  - beta                                                                       
++  - gamma                                                                      
  settings:                                                                      
-   timeout: 60                                                                  
-   retries: 5                                                                   
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
+-  timeout: 30                                                                  
+-  retries: 3                                                                   
++  timeout: 60                                                                  
++  retries: 5                                                                   
                                                                                 
                                                                                 
                                                                                 

@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/macropower/niceyaml"
+	"github.com/macropower/niceyaml/tokens"
 )
 
 // testBracketStyle returns a style that wraps content in brackets for verification.
@@ -27,10 +28,10 @@ func testBracketStyle() *lipgloss.Style {
 }
 
 // testParseFile parses tokens into an ast.File for testing PrintFile.
-func testParseFile(t *testing.T, tokens token.Tokens) *ast.File {
+func testParseFile(t *testing.T, tks token.Tokens) *ast.File {
 	t.Helper()
 
-	file, err := parser.Parse(tokens, 0)
+	file, err := parser.Parse(tks, 0)
 	require.NoError(t, err)
 
 	return file
@@ -168,20 +169,20 @@ func TestFinderPrinter_Integration(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tokens := lexer.Tokenize(tc.input)
+			tks := lexer.Tokenize(tc.input)
 			finder := testFinder(tc.search, tc.normalizer)
 			printer := testBasicPrinter()
 
-			ranges := finder.FindTokens(tokens)
+			ranges := finder.FindTokens(tks)
 			for _, rng := range ranges {
 				printer.AddStyleToRange(testBracketStyle(), rng)
 			}
 
-			got := printer.PrintTokens(tokens)
+			got := printer.PrintTokens(tokens.NewLinesFromTokens(tks))
 			assert.Equal(t, tc.want, got)
 
-			file := testParseFile(t, tokens)
-			gotFile := printer.PrintFile(file)
+			file := testParseFile(t, tks)
+			gotFile := printer.PrintTokens(tokens.NewLinesFromFile(file))
 			assert.Equal(t, got, gotFile)
 		})
 	}
@@ -220,22 +221,22 @@ func TestFinderPrinter_EdgeCases(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tokens := lexer.Tokenize(tc.input)
+			tks := lexer.Tokenize(tc.input)
 			finder := testFinder(tc.search, nil)
 			printer := testBasicPrinter()
 
-			ranges := finder.FindTokens(tokens)
+			ranges := finder.FindTokens(tks)
 			if tc.wantRanges {
 				assert.NotEmpty(t, ranges)
 			} else {
 				assert.Empty(t, ranges)
 			}
 
-			got := printer.PrintTokens(tokens)
+			got := printer.PrintTokens(tokens.NewLinesFromTokens(tks))
 			assert.Equal(t, tc.wantOutput, got)
 
-			file := testParseFile(t, tokens)
-			gotFile := printer.PrintFile(file)
+			file := testParseFile(t, tks)
+			gotFile := printer.PrintTokens(tokens.NewLinesFromFile(file))
 			assert.Equal(t, got, gotFile)
 		})
 	}
@@ -306,18 +307,18 @@ func TestPrinter_Golden(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tokens := lexer.Tokenize(string(input))
+			tks := lexer.Tokenize(string(input))
 			printer := niceyaml.NewPrinter(tc.opts...)
 
 			if tc.setupFunc != nil {
-				tc.setupFunc(printer, tokens)
+				tc.setupFunc(printer, tks)
 			}
 
-			output := printer.PrintTokens(tokens)
+			output := printer.PrintTokens(tokens.NewLinesFromTokens(tks))
 			golden.RequireEqual(t, output)
 
-			file := testParseFile(t, tokens)
-			outputFile := printer.PrintFile(file)
+			file := testParseFile(t, tks)
+			outputFile := printer.PrintTokens(tokens.NewLinesFromFile(file))
 			assert.Equal(t, output, outputFile)
 		})
 	}
@@ -337,12 +338,131 @@ func TestNewPositionTrackerFromTokens(t *testing.T) {
 	t.Run("with tokens returns first token position", func(t *testing.T) {
 		t.Parallel()
 
-		tokens := lexer.Tokenize("key: value")
-		require.NotEmpty(t, tokens)
+		tks := lexer.Tokenize("key: value")
+		require.NotEmpty(t, tks)
 
-		tracker := niceyaml.NewPositionTrackerFromTokens(tokens)
+		tracker := niceyaml.NewPositionTrackerFromTokens(tks)
 		pos := tracker.Position()
 		assert.Equal(t, 1, pos.Line)
 		assert.Equal(t, 1, pos.Col)
 	})
+}
+
+func TestFinderPrinter_JapaneseMatch(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input  string
+		search string
+		want   string
+	}{
+		"japanese partial match": {
+			input:  "key: 日本酒",
+			search: "日本",
+			want:   "key: [日本]酒",
+		},
+		"japanese after other japanese": {
+			input:  "- 寿司: 日本酒",
+			search: "日本",
+			want:   "- 寿司: [日本]酒",
+		},
+		"multiline with japanese": {
+			input:  "a: test\n- 寿司: 日本酒",
+			search: "日本",
+			want:   "a: test\n- 寿司: [日本]酒",
+		},
+		"multiple japanese on different lines": {
+			input:  "a: 日本\nb: 日本酒",
+			search: "日本",
+			want:   "a: [日本]\nb: [日本]酒",
+		},
+		"box drawing not matched": {
+			input:  "# ─────",
+			search: "日本",
+			want:   "# ─────",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tks := lexer.Tokenize(tc.input)
+			finder := testFinder(tc.search, nil)
+			printer := testBasicPrinter()
+
+			ranges := finder.FindTokens(tks)
+			for _, rng := range ranges {
+				printer.AddStyleToRange(testBracketStyle(), rng)
+			}
+
+			got := printer.PrintTokens(tokens.NewLinesFromTokens(tks))
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestFinderPrinter_LargeDocument(t *testing.T) {
+	t.Parallel()
+
+	// Simulate the failing scenario: Japanese text followed by box drawing.
+	input := `# ─────────────────────────
+menu:
+  - 寿司: 日本酒
+# ─────────────────────────`
+
+	tks := lexer.Tokenize(input)
+	finder := testFinder("日本", nil)
+	printer := testBasicPrinter()
+
+	ranges := finder.FindTokens(tks)
+	require.Len(t, ranges, 1, "should find exactly one match")
+
+	// Verify the range is on line 3.
+	assert.Equal(t, 3, ranges[0].Start.Line, "match should be on line 3")
+	assert.Equal(t, 3, ranges[0].End.Line, "match end should be on line 3")
+
+	for _, rng := range ranges {
+		printer.AddStyleToRange(testBracketStyle(), rng)
+	}
+
+	got := printer.PrintTokens(tokens.NewLinesFromTokens(tks))
+
+	// The box drawing characters on lines 1 and 4 should NOT be highlighted
+	// Only "日本" on line 3 should be highlighted.
+	want := `# ─────────────────────────
+menu:
+  - 寿司: [日本]酒
+# ─────────────────────────`
+
+	assert.Equal(t, want, got)
+}
+
+func TestFinderPrinter_BoxDrawingNotMatched(t *testing.T) {
+	t.Parallel()
+
+	// Test that box drawing characters in comments aren't matched when searching for Japanese text.
+	input := `menu:
+  - 寿司: 日本酒
+# ┌─────────────────────────────────────────────────────────────┐
+# │  SPECIAL SECTION                                             │
+# └─────────────────────────────────────────────────────────────┘`
+
+	tks := lexer.Tokenize(input)
+	finder := testFinder("日本", nil)
+	printer := testBasicPrinter()
+
+	ranges := finder.FindTokens(tks)
+	require.Len(t, ranges, 1, "should find exactly one match")
+
+	for _, rng := range ranges {
+		printer.AddStyleToRange(testBracketStyle(), rng)
+	}
+
+	got := printer.PrintTokens(tokens.NewLinesFromTokens(tks))
+
+	// Verify the match is properly bracketed.
+	assert.Contains(t, got, "[日本]酒", "日本 should be highlighted")
+	assert.NotContains(t, got, "[─", "box drawing should not be highlighted")
+	assert.NotContains(t, got, "─]", "box drawing should not be highlighted")
 }

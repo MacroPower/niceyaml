@@ -170,6 +170,32 @@ func TestFinder_FindTokens(t *testing.T) {
 				{Start: niceyaml.Position{Line: 1, Col: 7}, End: niceyaml.Position{Line: 1, Col: 12}},
 			},
 		},
+		"utf8 - japanese characters partial match": {
+			input:  "key: 日本酒",
+			search: "日本",
+			want: []niceyaml.PositionRange{
+				{Start: niceyaml.Position{Line: 1, Col: 6}, End: niceyaml.Position{Line: 1, Col: 8}},
+			},
+		},
+		"utf8 - japanese after other japanese": {
+			input:  "- 寿司: 日本酒",
+			search: "日本",
+			want: []niceyaml.PositionRange{
+				{Start: niceyaml.Position{Line: 1, Col: 7}, End: niceyaml.Position{Line: 1, Col: 9}},
+			},
+		},
+		"utf8 - multiline with japanese": {
+			input:  "a: test\n- 寿司: 日本酒",
+			search: "日本",
+			want: []niceyaml.PositionRange{
+				{Start: niceyaml.Position{Line: 2, Col: 7}, End: niceyaml.Position{Line: 2, Col: 9}},
+			},
+		},
+		"utf8 - box drawing chars not matched by japanese": {
+			input:  "# ───────────",
+			search: "日本",
+			want:   nil,
+		},
 	}
 
 	for name, tc := range tcs {
