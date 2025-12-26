@@ -1,0 +1,449 @@
+   1  %TAG !custom! tag:cafe-yamull.example.com,2024:
+   2  ---
+   3  # ═══════════════════════════════════════════════════════════════
+   4  #  🌍 Global Café Menu — Ultimate YAML + Unicode Demo
+   5  # ═══════════════════════════════════════════════════════════════
+   6  
+   7  # ┌─────────────────────────────────────────────────────────────┐
+   8  # │  ANCHORS & ALIASES                                          │
+   9  # └─────────────────────────────────────────────────────────────┘
+  10  
+  11  # Define reusable anchors
+  12  defaults:
+  13    dietary_icons: &dietary_icons
+  14      vegan: 🌱
+  15      vegetarian: 🥬
+  16      gluten_free: 🚫🌾
+  17      dairy: 🥛
+  18      eggs: 🥚
+  19      nuts: 🥜
+  20      spicy: 🌶️
+  21  
+  22    currencies: &currencies
+  23      EUR: { symbol: "€", locale: "de-DE" }
+  24      JPY: { symbol: "¥", locale: "ja-JP" }
+  25      USD: { symbol: "$", locale: "en-US" }
+  26  
+  27    base_hours: &base_hours
+  28      open: "09:00"
+  29      close: "22:00"
+  30      timezone: "Europe/Berlin"
+  31  
+  32    premium_hours: &premium_hours
+  33      <<: *base_hours          # Merge key inheritance
+  34      open: "07:00"            # Override
+  35      close: "23:30"
+  36      vip_lounge: true
+  37  
+  38    # Staff role templates
+  39    chef_template: &chef
+  40      role: "Chef"
+  41      uniform: "👨‍🍳"
+  42      skills: [cooking, plating, "食品衛生"]
+  43  
+  44    server_template: &server
+  45      role: "Server"
+  46      uniform: "🧑‍💼"
+  47      skills: [service, languages, "おもてなし"]
+  48  
+  49  # ┌─────────────────────────────────────────────────────────────┐
+  50  # │  COMPLEX KEYS & NESTED STRUCTURES                           │
+  51  # └─────────────────────────────────────────────────────────────┘
+  52  
+  53  restaurant:
+  54    name: "Café Yamüll & 日本料理"
+  55  
+  56    # Complex key (must use ? explicit key indicator)
+  57    "東京":
+  58      flagship_location: true
+  59  
+  60    # Another complex key with emoji
+  61    🍣:
+  62      signature_dish: true
+  63  
+  64    metadata:
+  65      established: 2024-03-15        # Date type
+  66      last_inspection: 2024-11-20T14:30:00+01:00  # Timestamp with timezone
+  67      michelin_stars: 2
+  68      rating: 4.85                   # Float
+  69      active: true                   # Boolean
+  70      pending_review: false
+  71      previous_owner: null           # Null value
+  72      aliases: ~                     # Alternative null syntax
+  73  
+  74    # Different numeric formats
+  75    statistics:
+  76      visitors_decimal: 1_000_000    # Underscore separator
+  77      visitors_hex: 0xF4240          # Hexadecimal
+  78      visitors_octal: 0o3641100      # Octal
+  79      capacity_infinity: .inf        # Infinity
+  80      unknown_value: .nan            # Not a number
+  81      temperature: -18.5             # Negative float
+  82      scientific: 6.022e23           # Scientific notation
+  83  
+  84  # ┌─────────────────────────────────────────────────────────────┐
+  85  # │  MULTI-LINE STRINGS (All Variants)                          │
+  86  # └─────────────────────────────────────────────────────────────┘
+  87  
+  88  descriptions:
+  89    # Literal block scalar (preserves newlines)
+  90    about_us: |
+  91      Welcome to Café Yamüll & 日本料理!
+  92  
+  93      We blend European café culture with
+  94      authentic Japanese cuisine. 🍣☕
+  95  
+  96      「東西の味の出会い」
+  97      مرحباً بكم في مقهانا
+  98  
+  99    # Literal with strip indicator (remove trailing newlines)
+ 100    short_bio: |-
+ 101      Founded in München, expanded to 東京.
+ 102      Family owned since 2024.
+ 103      No trailing newline here
+ 104  
+ 105    # Literal with keep indicator (keep trailing newlines)
+ 106    poem: |+
+ 107      Coffee steams, 湯気立つ珈琲
+ 108      East meets West, 東西の出会い
+ 109      Flavors dance, 味が踊る ☕🍵
+ 110  
+ 111  
+ 112    # Folded block scalar (newlines become spaces)
+ 113    mission: >
+ 114      Our mission is to create a space where
+ 115      cultures collide deliciously. From
+ 116      Wiener Schnitzel to 寿司, from
+ 117      Croissants to カレーパン, we celebrate
+ 118      diversity on every plate.
+ 119  
+ 120    # Folded with strip
+ 121    slogan: >-
+ 122      Taste the world,
+ 123      one dish at a time,
+ 124      味わう世界
+ 125  
+ 126    # Folded with keep
+ 127    legal_notice: >+
+ 128      © 2024 Café Yamüll GmbH
+ 129      All rights reserved
+ 130      全著作権所有
+ 131  
+ 132  
+ 133    # Indentation indicators
+ 134    code_block: |2-
+ 135        def greet():
+ 136            print("Willkommen! ようこそ!")
+ 137            return "☕"
+ 138  
+ 139    # Quoted strings with escapes
+ 140    escaped_text: "Line1\nLine2\tTabbed\\"
+ 141    unicode_escape: "\\" # 日本 via escapes
+ 142  
+ 143    # Single quotes (no escape processing)
+ 144    raw_escapes: 'This has \n literal backslash-n'
+ 145  
+ 146    # Plain scalar (unquoted)
+ 147    plain_text: This is unquoted text with émojis 🎉
+ 148  
+ 149  # ┌─────────────────────────────────────────────────────────────┐
+ 150  # │  FLOW VS BLOCK STYLES                                       │
+ 151  # └─────────────────────────────────────────────────────────────┘
+ 152  
+ 153  # Block style sequences
+ 154  menu_block:
+ 155    - Crêpes Château
+ 156    - 抹茶パンケーキ
+ 157    - Ελληνική Σαλάτα
+ 158    - بيتزا مارغريتا
+ 159  
+ 160  # Flow style sequences (inline)
+ 161  menu_flow: [Crêpes, パンケーキ, Σαλάτα, بيتزا]
+ 162  
+ 163  # Nested flow in block
+ 164  hybrid_menu:
+ 165    breakfast: [Crêpes, Waffles, 卵焼き]
+ 166    lunch: [Salad, Soup, ラーメン]
+ 167    dinner:
+ 168      - Steak
+ 169      - { name: "寿司盛り合わせ", pieces: 12 }
+ 170      - Pizza: { size: large, toppings: [🍄, 🫑, 🧀] }
+ 171  
+ 172  # Block style mapping
+ 173  hours_block:
+ 174    monday:
+ 175      <<: *base_hours
+ 176    tuesday:
+ 177      <<: *premium_hours
+ 178      special_event: "Jazz Night 🎷"
+ 179  
+ 180  # Flow style mapping
+ 181  hours_flow: { mon: "9-22", tue: "7-23", wed: "9-22" }
+ 182  
+ 183  # ┌─────────────────────────────────────────────────────────────┐
+ 184  # │  EXPLICIT TYPING WITH TAGS                                  │
+ 185  # └─────────────────────────────────────────────────────────────┘
+ 186  
+ 187  typed_values:
+ 188    # Standard YAML tags
+ 189    explicit_string: !!str 12345
+ 190    explicit_int: !!int "42"
+ 191    explicit_float: !!float "3.14159"
+ 192    explicit_bool: !!bool "yes"
+ 193    explicit_null: !!null "null"
+ 194  
+ 195    # Force string for things that look like other types
+ 196    zip_code: !!str 01onal         # Would be octal without tag
+ 197    version: !!str 1.0             # Would be float without tag
+ 198    japanese_bool: !!str はい      # Not a boolean
+ 199  
+ 200    # Binary data (base64 encoded)
+ 201    tiny_icon: !!binary |
+ 202      R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7
+ 203  
+ 204    # Custom tags
+ 205    price_eur: !custom!price { amount: 12.50, currency: EUR }
+ 206    translation: !custom!i18n
+ 207  
+ 208      en: "Welcome"
+ 209      de: "Willkommen"
+ 210      ja: "ようこそ"
+ 211      ar: "أهلاً وسهلاً"
+ 212  
+ 213  # ┌─────────────────────────────────────────────────────────────┐
+ 214  # │  SETS AND ORDERED MAPS                                      │
+ 215  # └─────────────────────────────────────────────────────────────┘
+ 216  
+ 217  # Set (unique values only)
+ 218  allergens: !!set
+ 219  ? gluten
+ 220    ? dairy
+ 221    ? nuts
+ 222    ? shellfish
+ 223    ? 大豆 # Soy in Japanese
+ 224  ? بيض # Eggs in Arabic
+ 225  
+ 226  # Ordered map (preserves insertion order)
+ 227  course_order: !!omap
+ 228  
+ 229    - appetizer: "Мезе (Meze platter)"
+ 230    - soup: "味噌汁"
+ 231    - main: "Главное блюдо"
+ 232    - dessert: "حلويات"
+ 233    - coffee: "☕ Espresso"
+ 234  
+ 235  # Pairs (allows duplicates, unlike maps)
+ 236  wine_pairings: !!pairs
+ 237  
+ 238    - Crêpes: Champagne
+ 239    - Crêpes: Riesling # Duplicate key allowed
+ 240    - 寿司: 日本酒
+ 241    - 寿司: Grüner Veltliner # Another duplicate
+ 242  
+ 243  # ┌─────────────────────────────────────────────────────────────┐
+ 244  # │  ANCHORS WITH MERGE INHERITANCE                             │
+ 245  # └─────────────────────────────────────────────────────────────┘
+ 246  
+ 247  staff:
+ 248    - name: "José García-Yamüll"
+ 249      <<: *chef # Inherit from anchor
+ 250      languages: [Español, Deutsch, English]
+ 251      photo: 👨🏽‍🍳
+ 252  
+ 253    - name: "田中 さくら"
+ 254      <<: *chef
+ 255      specialty: "和食"
+ 256      languages: [日本語, English, Français]
+ 257      photo: 👩🏻‍🍳
+ 258  
+ 259    - name: "Владимир Петров"
+ 260      <<: *server
+ 261      languages: [Русский, Deutsch, العربية]
+ 262      photo: 🧑🏼‍💼
+ 263  
+ 264    - name: "مريم الفارسي"
+ 265      <<: *server
+ 266      languages: [العربية, English, Français]
+ 267      photo: 👩🏽‍💼
+ 268  
+ 269  # Multiple merge keys
+ 270  vip_room:
+ 271    <<: [*base_hours, *dietary_icons] # Merge multiple anchors
+ 272    capacity: 20
+ 273    minimum_spend: "€500"
+ 274  
+ 275  # ┌─────────────────────────────────────────────────────────────┐
+ 276  # │  MIXED DIRECTIONAL TEXT (BiDi Challenge)                    │
+ 277  # └─────────────────────────────────────────────────────────────┘
+ 278  
+ 279  reviews:
+ 280    - author: "أحمد محمد"
+ 281      locale: ar-EG
+ 282      text: "المطعم ممتاز! The börek was 10/10 👨‍🍳"
+ 283      mixed: "I love الطعام العربي and 日本料理 equally!"
+ 284      date: 2024-11-15
+ 285  
+ 286    - author: "יעל לוי"
+ 287      locale: he-IL
+ 288      text: "אוכל מעולה! Especially the קרואסון 🥐"
+ 289      mixed: "השילוב של French ו-ישראלי מדהים"
+ 290      date: 2024-11-18
+ 291  
+ 292    - author: "田中太郎"
+ 293      locale: ja-JP
+ 294      text: "素晴らしい！The café reminds me of München ☕"
+ 295      mixed: "ドイツ料理と日本料理のfusion最高！"
+ 296      date: 2024-11-20
+ 297  
+ 298  # ┌─────────────────────────────────────────────────────────────┐
+ 299  # │  SPECIAL CHARACTERS & EDGE CASES                            │
+ 300  # └─────────────────────────────────────────────────────────────┘
+ 301  
+ 302  edge_cases:
+ 303    # Strings that look like reserved words
+ 304    bool_lookalikes:
+ 305      - !!str yes
+ 306      - !!str no
+ 307      - !!str true
+ 308      - !!str false
+ 309      - !!str null
+ 310      - !!str ~
+ 311  
+ 312    # Strings that look like numbers
+ 313    number_lookalikes:
+ 314      phone: "+49 89 12345678"
+ 315      version: "2.0"
+ 316      time: "12:30" # Would be sexagesimal without quotes
+ 317  
+ 318    # Special YAML characters in strings
+ 319    special_chars:
+ 320      colon: "Note: this has a colon"
+ 321      hash: "Price #1 choice"
+ 322      ampersand: "Tom & Jerry"
+ 323      asterisk: "5* rating"
+ 324      brackets: "[not a list]"
+ 325      braces: "{not a map}"
+ 326      question: "Why? Because!"
+ 327      pipe: "Option A | Option B"
+ 328      greater: "A > B"
+ 329  
+ 330    # Unicode normalization forms
+ 331    normalization:
+ 332      nfc: "Ñ"                    # Single codepoint U+00D1
+ 333      nfd: "Ñ"                    # N + combining tilde (visually same!)
+ 334  
+ 335    # Zero-width characters
+ 336    invisible:
+ 337      zwsp: "foo​bar"             # Zero-width space between
+ 338      zwnj: "می‌روم"              # Persian with ZWNJ
+ 339      zwj: "👨‍👩‍👧‍👦"                   # Family emoji with ZWJs
+ 340  
+ 341    # Emoji sequences
+ 342    emoji_test:
+ 343      flags: [🇩🇪, 🇯🇵, 🇪🇬, 🇮🇱, 🏳️‍🌈, 🏴‍☠️]
+ 344      skin_tones: [👋🏻, 👋🏼, 👋🏽, 👋🏾, 👋🏿]
+ 345      professions: [👨🏻‍🍳, 👩🏽‍🔬, 🧑🏿‍💻, 👨🏼‍🎨]
+ 346      keycaps: [0️⃣, 1️⃣, 2️⃣, 3️⃣, 4️⃣, 5️⃣, 6️⃣, 7️⃣, 8️⃣, 9️⃣, 🔟]
+ 347  
+ 348    # Combining marks galore
+ 349    combining:
+ 350      vietnamese: "Việt Nam"
+ 351      polynesian: "Hawai'i"
+ 352      zalgo: "H̷̭͂ë̶̬l̷̰̐l̴̮̈́o̷̱͝" # Combining marks stacked
+ 353  
+ 354  # ┌─────────────────────────────────────────────────────────────┐
+ 355  # │  DEEPLY NESTED STRUCTURE                                    │
+ 356  # └─────────────────────────────────────────────────────────────┘
+ 357  
+ 358  locations:
+ 359    europe:
+ 360      germany:
+ 361        münchen:
+ 362          <<: *premium_hours
+ 363          address: "Königstraße 42"
+ 364          menu:
+ 365            breakfast:
+ 366              items:
+ 367                - &croissant
+ 368                  name: "Croissant"
+ 369                  price: { amount: 3.50, currency: *currencies }
+ 370                  variants:
+ 371                    plain: { calories: 270 }
+ 372                    chocolate: { calories: 340, emoji: 🍫 }
+ 373                    almond: { calories: 320, emoji: 🥜 }
+ 374    asia:
+ 375      japan:
+ 376        tokyo:
+ 377          渋谷:
+ 378            <<: *base_hours
+ 379            address: "渋谷区神南1-2-3"
+ 380            menu:
+ 381              breakfast:
+ 382                items:
+ 383                  - <<: *croissant # Reuse croissant definition
+ 384                    price: { amount: 450, currency: JPY }
+ 385                    name_local: "クロワッサン"
+ 386  
+ 387  # ┌─────────────────────────────────────────────────────────────┐
+ 388  # │  ASCII ART LOGO (Box Drawing Characters)                    │
+ 389  # └─────────────────────────────────────────────────────────────┘
+ 390  
+ 391  branding:
+ 392    logo_simple: |
+ 393      ╔═══════════════════════════════════════╗
+ 394      ║         ☕ CAFÉ YAMÜLL ☕             ║
+ 395      ╚═══════════════════════════════════════╝
+ 396  
+ 397    logo_fancy: |
+ 398      ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+ 399      ┃  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  ┃
+ 400      ┃  ░  ╔═╗ ╔═╗ ╔═╗ ╔═╗   ░░░░░░░░░░░░░░  ┃
+ 401      ┃  ░  ║   ╠═╣ ╠╣  ║╣    ░░░░░░░░░░░░░░  ┃
+ 402      ┃  ░  ╚═╝ ╩ ╩ ╚   ╚═╝   YAMÜLL  ░░░░░░  ┃
+ 403      ┃  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  ┃
+ 404      ┃  ░░░░░░░░  日 本 料 理  ░░░░░░░░░░░░  ┃
+ 405      ┃  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  ┃
+ 406      ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+ 407  
+ 408  # ┌─────────────────────────────────────────────────────────────┐
+ 409  # │  MATHEMATICAL & SCIENTIFIC NOTATION                         │
+ 410  # └─────────────────────────────────────────────────────────────┘
+ 411  
+ 412  science:
+ 413    formulas:
+ 414      energy: "E = mc²"
+ 415      water: "H₂O"
+ 416      quadratic: "x = (−b ± √(b²−4ac)) / 2a"
+ 417      integral: "∫f(x)dx"
+ 418      summation: "∑(i=1 to n)"
+ 419  
+ 420    units:
+ 421      temperature: "−20°C to 200°C"
+ 422      energy: "kJ·mol⁻¹"
+ 423      area: "500 m²"
+ 424  
+ 425    symbols:
+ 426      arrows: [→, ←, ↑, ↓, ↔, ⇒, ⇐, ⇔]
+ 427      math: [±, ×, ÷, ≠, ≈, ≤, ≥, ∞, ∅, ∈, ⊂, ∪, ∩]
+ 428      greek: [α, β, γ, δ, ε, π, θ, λ, μ, σ, φ, ω, Ω]
+ 429  
+ 430  # ┌─────────────────────────────────────────────────────────────┐
+ 431  # │  FOOTER                                                     │
+ 432  # └─────────────────────────────────────────────────────────────┘
+ 433  
+ 434  footer:
+ 435    copyright: "© 2024 Café Yamüll GmbH & 株式会社田中"
+ 436    motto:
+ 437      de: "Essen ist Liebe"
+ 438      ja: "食は愛"
+ 439      ar: "الطعام حب"
+ 440      he: "אוכל זה אהבה"
+ 441      ru: "Еда — это любовь"
+ 442  
+ 443  ...
+ 444  # End of first document
+ 445  ---
+ 446  # Second document
+ 447  document: 2
+ 448  purpose: "Demonstrates multi-document YAML"
+ 449  emoji_summary: "📄➡️📄"

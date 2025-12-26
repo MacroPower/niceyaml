@@ -250,28 +250,35 @@ func TestPrinter_Golden(t *testing.T) {
 	}
 
 	tcs := map[string]goldenTest{
-		"DefaultColors": {
+		"default colors": {
 			opts: []niceyaml.PrinterOption{
 				niceyaml.WithStyles(niceyaml.DefaultStyles()),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 				niceyaml.WithLinePrefix(""),
 			},
 		},
-		"LineNumbers": {
+		"default colors with line numbers": {
 			opts: []niceyaml.PrinterOption{
 				niceyaml.WithStyles(niceyaml.DefaultStyles()),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 				niceyaml.WithLineNumbers(),
 			},
 		},
-		"NoColors": {
+		"no colors": {
 			opts: []niceyaml.PrinterOption{
 				niceyaml.WithStyles(niceyaml.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 				niceyaml.WithLinePrefix(""),
 			},
 		},
-		"SearchHighlight": {
+		"no colors with line numbers": {
+			opts: []niceyaml.PrinterOption{
+				niceyaml.WithStyles(niceyaml.Styles{}),
+				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithLineNumbers(),
+			},
+		},
+		"find and highlight": {
 			opts: []niceyaml.PrinterOption{
 				niceyaml.WithStyles(niceyaml.DefaultStyles()),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
