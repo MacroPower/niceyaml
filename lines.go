@@ -258,7 +258,6 @@ func NewLinesFromTokens(tks token.Tokens, opts ...LinesOption) *Lines {
 		origin := tk.Origin
 		newlineCount := strings.Count(origin, "\n")
 
-		// Get the token's line number.
 		tkLine := currentLine
 		if tk.Position != nil {
 			tkLine = tk.Position.Line
@@ -275,11 +274,10 @@ func NewLinesFromTokens(tks token.Tokens, opts ...LinesOption) *Lines {
 				joinFromPrev = false
 				currentLineTokens = nil
 			}
-			// Only sync forward to handle gaps, never backwards.
+
 			if len(currentLineTokens) == 0 && tkLine > currentLine {
 				currentLine = tkLine
 
-				// Sync position tracking from token if available.
 				if tk.Position != nil {
 					if tk.Position.Offset > 0 {
 						currentOffset = tk.Position.Offset
@@ -315,7 +313,6 @@ func NewLinesFromTokens(tks token.Tokens, opts ...LinesOption) *Lines {
 				currentIndentLevel = updateIndentLevel(prevLineIndentNum, currentIndentNum, currentIndentLevel)
 			}
 
-			// Calculate column position and value for this part.
 			var (
 				col int
 				val string
@@ -361,7 +358,6 @@ func NewLinesFromTokens(tks token.Tokens, opts ...LinesOption) *Lines {
 			}
 			currentLineTokens.Add(newTk)
 
-			// Advance cumulative position by byte length of this part.
 			currentOffset += len(part)
 
 			// If this part ends with newline, finish the current line.
@@ -446,16 +442,12 @@ func (t *Lines) EachLine(fn func(idx int, line Line)) {
 }
 
 // EachRune iterates through all runes in all lines with their positions.
-// It calls fn for each rune with its (line, column) position.
 // Position values are 1-indexed to match [token.Position].
-// The iteration order is left-to-right, top-to-bottom across lines.
 func (t *Lines) EachRune(fn func(r rune, pos Position)) {
 	if len(t.lines) == 0 {
 		return
 	}
 
-	// Initialize position from first token.
-	// Adjust column for value offset (Position.Column points to Value, not Origin start).
 	line := 1
 	col := 1
 	if len(t.lines[0].value) > 0 {
@@ -466,7 +458,6 @@ func (t *Lines) EachRune(fn func(r rune, pos Position)) {
 		}
 	}
 
-	// Iterate through all tokens, tracking position as we go.
 	for _, l := range t.lines {
 		for _, tk := range l.value {
 			for _, r := range tk.Origin {
@@ -629,20 +620,17 @@ func (t *Lines) TokenPositions(lineNum, col int) []*token.Position {
 		return nil
 	}
 
-	// Find the join token based on flags.
 	joinToken := joinTokenForLine(line)
 	if joinToken == nil || joinToken.Position == nil {
 		return nil
 	}
 
-	// Check if col falls within the join token.
 	if !colWithinToken(col, joinToken) {
 		return nil
 	}
 
 	var positions []*token.Position
 
-	// Add position for the matched line.
 	positions = append(positions, joinToken.Position)
 
 	// Walk backward through JoinPrev lines.
@@ -716,7 +704,6 @@ func partColumnAndValue(tk *token.Token, part string, isFirst bool) (int, string
 		if isFirst && tk.Position != nil && tk.Position.Column > 0 {
 			col = tk.Position.Column
 		} else {
-			// Calculate column where Value starts (1-indexed).
 			col = strings.Index(part, tk.Value) + 1
 		}
 	} else if isFirst && tk.Position != nil && tk.Position.Column > 0 {

@@ -47,10 +47,8 @@ type diffHunk struct {
 
 // lcsLineDiff computes line operations using a simple LCS-based diff.
 func lcsLineDiff(before, after []Line) []lineOp {
-	// Simple O(nm) LCS-based diff algorithm.
 	m, n := len(before), len(after)
 
-	// Build LCS table.
 	dp := make([][]int, m+1)
 	for i := range dp {
 		dp[i] = make([]int, n+1)
@@ -66,8 +64,7 @@ func lcsLineDiff(before, after []Line) []lineOp {
 		}
 	}
 
-	// Backtrack to build operations.
-	// Standard diff convention: deletions come before insertions.
+	// Backtrack: deletions before insertions per diff convention.
 	var ops []lineOp
 
 	i, j := 0, 0
@@ -75,28 +72,16 @@ func lcsLineDiff(before, after []Line) []lineOp {
 	for i < m || j < n {
 		switch {
 		case i < m && j < n && before[i].Content() == after[j].Content():
-			// Equal line - use after's Line.
-			ops = append(ops, lineOp{
-				kind: diffEqual,
-				line: after[j],
-			})
+			ops = append(ops, lineOp{kind: diffEqual, line: after[j]})
 			i++
 			j++
 
 		case i < m && (j >= n || dp[i+1][j] >= dp[i][j+1]):
-			// Delete from before (prefer deletion when tied).
-			ops = append(ops, lineOp{
-				kind: diffDelete,
-				line: before[i],
-			})
+			ops = append(ops, lineOp{kind: diffDelete, line: before[i]})
 			i++
 
 		default:
-			// Insert from after.
-			ops = append(ops, lineOp{
-				kind: diffInsert,
-				line: after[j],
-			})
+			ops = append(ops, lineOp{kind: diffInsert, line: after[j]})
 			j++
 		}
 	}
@@ -105,14 +90,12 @@ func lcsLineDiff(before, after []Line) []lineOp {
 }
 
 // buildHunks groups consecutive included operations into hunks.
-// Each hunk has metadata for generating unified diff headers.
 func buildHunks(ops []lineOp, included []bool) []diffHunk {
 	var (
 		hunks       []diffHunk
 		currentHunk *diffHunk
 	)
 
-	// Track running line numbers in "before" and "after" files.
 	beforeLine := 1
 	afterLine := 1
 
@@ -120,13 +103,11 @@ func buildHunks(ops []lineOp, included []bool) []diffHunk {
 		opBeforeLine := beforeLine
 		opAfterLine := afterLine
 
-		// Advance line counters for all operations, including non-included ones.
 		beforeDelta, afterDelta := op.kind.beforeAfterDeltas()
 		beforeLine += beforeDelta
 		afterLine += afterDelta
 
 		if !included[i] {
-			// End current hunk if we hit a non-included operation.
 			if currentHunk != nil {
 				hunks = append(hunks, *currentHunk)
 				currentHunk = nil
@@ -136,7 +117,6 @@ func buildHunks(ops []lineOp, included []bool) []diffHunk {
 		}
 
 		if currentHunk == nil {
-			// Start a new hunk with the current line numbers.
 			currentHunk = &diffHunk{
 				startIdx: i,
 				fromLine: opBeforeLine,
@@ -144,13 +124,11 @@ func buildHunks(ops []lineOp, included []bool) []diffHunk {
 			}
 		}
 
-		// Extend current hunk.
 		currentHunk.endIdx = i + 1
 		currentHunk.fromCount += beforeDelta
 		currentHunk.toCount += afterDelta
 	}
 
-	// Append final hunk if any.
 	if currentHunk != nil {
 		hunks = append(hunks, *currentHunk)
 	}
@@ -170,8 +148,7 @@ func formatHunkHeader(h diffHunk) string {
 	case h.fromCount > 1:
 		fmt.Fprintf(&b, " -%d,%d", h.fromLine, h.fromCount)
 	case h.fromLine == 1 && h.fromCount == 0:
-		// Match GNU diff -u behavior for adding to empty file.
-		fmt.Fprint(&b, " -0,0")
+		fmt.Fprint(&b, " -0,0") // GNU diff -u behavior for empty file.
 	default:
 		fmt.Fprintf(&b, " -%d", h.fromLine)
 	}
@@ -181,8 +158,7 @@ func formatHunkHeader(h diffHunk) string {
 	case h.toCount > 1:
 		fmt.Fprintf(&b, " +%d,%d", h.toLine, h.toCount)
 	case h.toLine == 1 && h.toCount == 0:
-		// Match GNU diff -u behavior for adding to empty file.
-		fmt.Fprint(&b, " +0,0")
+		fmt.Fprint(&b, " +0,0") // GNU diff -u behavior for empty file.
 	default:
 		fmt.Fprintf(&b, " +%d", h.toLine)
 	}
@@ -193,7 +169,6 @@ func formatHunkHeader(h diffHunk) string {
 }
 
 // selectContextLines returns a boolean slice indicating which operations to include.
-// Each change includes `context` lines before and after.
 func selectContextLines(ops []lineOp, context int) []bool {
 	included := make([]bool, len(ops))
 	n := len(ops)

@@ -89,7 +89,6 @@ func (f *Finder) Find(lines *Lines) []PositionRange {
 		searchStr = f.normalizer.Normalize(f.search)
 	}
 
-	// Find all matches.
 	var results []PositionRange
 
 	offset := 0
