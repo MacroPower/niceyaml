@@ -12,7 +12,7 @@ import (
 type LineIterator interface {
 	EachLine(fn func(idx int, line Line))
 	IsEmpty() bool
-	JoinedPositions(lineNum int) []*token.Position
+	TokenPositions(lineNum, col int) []*token.Position
 }
 
 const wrapOnCharacters = " /-"
@@ -180,7 +180,7 @@ func (p *Printer) PrintErrorToken(tk *token.Token, lines int) (string, int) {
 
 	// Collect all tokens and slice to the range.
 	t := NewLinesFromToken(tk)
-	pos := t.JoinedPositions(curLine)
+	pos := t.TokenPositions(curLine, tk.Position.Column)
 
 	// Always include the current token's content.
 	minLine, maxLine := curLine, curLine
@@ -505,7 +505,7 @@ func (p *Printer) expandTokenStylesForJoins(t LineIterator) {
 	var newStyles []*tokenStyle
 
 	for _, ts := range p.tokenStyles {
-		for _, pos := range t.JoinedPositions(ts.pos.Line) {
+		for _, pos := range t.TokenPositions(ts.pos.Line, ts.pos.Col) {
 			newStyles = append(newStyles, &tokenStyle{
 				style: ts.style,
 				pos:   Position{Line: pos.Line, Col: pos.Column},

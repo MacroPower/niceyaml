@@ -538,10 +538,12 @@ func (t *Lines) Validate() error {
 	return nil
 }
 
-// JoinedPositions returns all token positions that are part of the same
-// joined token group as the given line number. Returns nil if the line
-// is not found or is not part of a join.
-func (t *Lines) JoinedPositions(lineNum int) []*token.Position {
+// TokenPositions returns all token positions that are part of the same
+// joined token group as the token at the given line and column.
+// For non-joined lines, returns a single-element slice with the position of
+// the token at the given column, if found.
+// Returns nil if the line is not found or if no token exists at the column.
+func (t *Lines) TokenPositions(lineNum, col int) []*token.Position {
 	// Find the line index by linear search.
 	lineIdx := -1
 	for i, line := range t.lines {
@@ -556,31 +558,79 @@ func (t *Lines) JoinedPositions(lineNum int) []*token.Position {
 
 	line := t.lines[lineIdx]
 	if !line.joinPrev && !line.joinNext {
+		// For non-joined lines, find and return the token at the given column.
+		for _, tk := range line.value {
+			if colWithinToken(col, tk) {
+				return []*token.Position{tk.Position}
+			}
+		}
+
+		return nil
+	}
+
+	// Find the join token based on flags.
+	joinToken := joinTokenForLine(line)
+	if joinToken == nil || joinToken.Position == nil {
+		return nil
+	}
+
+	// Check if col falls within the join token.
+	if !colWithinToken(col, joinToken) {
 		return nil
 	}
 
 	var positions []*token.Position
 
 	// Add position for the matched line.
-	if len(line.value) > 0 && line.value[0].Position != nil {
-		positions = append(positions, line.value[0].Position)
-	}
+	positions = append(positions, joinToken.Position)
 
 	// Walk backward through JoinPrev lines.
 	for i := lineIdx - 1; i >= 0 && t.lines[i].joinNext; i-- {
-		if len(t.lines[i].value) > 0 && t.lines[i].value[0].Position != nil {
-			positions = append(positions, t.lines[i].value[0].Position)
+		if tk := joinTokenForLine(t.lines[i]); tk != nil && tk.Position != nil {
+			positions = append(positions, tk.Position)
 		}
 	}
 
 	// Walk forward through JoinNext lines.
 	for i := lineIdx + 1; i < len(t.lines) && t.lines[i].joinPrev; i++ {
-		if len(t.lines[i].value) > 0 && t.lines[i].value[0].Position != nil {
-			positions = append(positions, t.lines[i].value[0].Position)
+		if tk := joinTokenForLine(t.lines[i]); tk != nil && tk.Position != nil {
+			positions = append(positions, tk.Position)
 		}
 	}
 
 	return positions
+}
+
+// joinTokenForLine returns the token participating in the join for a given line.
+// JoinPrev means the first token is the continuation from the previous line.
+// JoinNext means the last token continues to the next line.
+// For middle lines (both true), first and last are typically the same token.
+func joinTokenForLine(line Line) *token.Token {
+	if len(line.value) == 0 {
+		return nil
+	}
+
+	if line.joinPrev {
+		return line.value[0]
+	}
+
+	if line.joinNext {
+		return line.value[len(line.value)-1]
+	}
+
+	return nil
+}
+
+// colWithinToken checks if col is within the token's character range.
+func colWithinToken(col int, tk *token.Token) bool {
+	if tk.Position == nil {
+		return false
+	}
+
+	start := tk.Position.Column
+	end := start + len([]rune(strings.TrimSuffix(tk.Origin, "\n")))
+
+	return col >= start && col < end
 }
 
 // linesNextColumn returns the next available column position after existing tokens.
