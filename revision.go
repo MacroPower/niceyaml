@@ -1,4 +1,4 @@
-package tokens
+package niceyaml
 
 // Revision represents [Lines] at one or more revisions.
 // It may form a linked or doubly-linked list to track changes across revisions.

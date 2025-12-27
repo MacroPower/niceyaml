@@ -11,7 +11,6 @@ import (
 	_ "embed"
 
 	"github.com/macropower/niceyaml"
-	"github.com/macropower/niceyaml/tokens"
 )
 
 var (
@@ -48,13 +47,13 @@ func main() {
 		End:   niceyaml.Position{Line: 11, Col: 31},
 	})
 
-	rangeDemo := printer.PrintTokens(tokens.NewLinesFromString(source))
+	rangeDemo := printer.PrintTokens(niceyaml.NewLinesFromString(source))
 	printer.ClearStyles()
 
 	// Show diff between two YAML documents.
-	beforeRev := tokens.NewRevision(tokens.NewLinesFromString(original, tokens.WithName("before")))
-	afterRev := tokens.NewRevision(tokens.NewLinesFromString(modified, tokens.WithName("after")))
-	diff := tokens.NewFullDiff(beforeRev, afterRev)
+	beforeRev := niceyaml.NewRevision(niceyaml.NewLinesFromString(original, niceyaml.WithName("before")))
+	afterRev := niceyaml.NewRevision(niceyaml.NewLinesFromString(modified, niceyaml.WithName("after")))
+	diff := niceyaml.NewFullDiff(beforeRev, afterRev)
 	diffDemo := printer.PrintTokens(diff.Lines())
 	printer.ClearStyles()
 
@@ -68,7 +67,7 @@ func main() {
 		printer.AddStyleToRange(&highlight, m)
 	}
 
-	findDemo := printer.PrintTokens(tokens.NewLinesFromTokens(tks))
+	findDemo := printer.PrintTokens(niceyaml.NewLinesFromTokens(tks))
 	printer.ClearStyles()
 
 	out := lipgloss.NewStyle().

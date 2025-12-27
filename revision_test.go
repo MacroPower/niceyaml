@@ -1,23 +1,23 @@
-package tokens_test
+package niceyaml_test
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/macropower/niceyaml/tokens"
+	"github.com/macropower/niceyaml"
 )
 
 func TestRevision_At(t *testing.T) {
 	t.Parallel()
 
 	// Build a chain of 3 revisions: 0 -> 1 -> 2.
-	rev0 := tokens.NewRevision(tokens.NewLinesFromString("v0: data", tokens.WithName("v0")))
-	rev1 := rev0.Append(tokens.NewLinesFromString("v1: data", tokens.WithName("v1")))
-	rev2 := rev1.Append(tokens.NewLinesFromString("v2: data", tokens.WithName("v2")))
+	rev0 := niceyaml.NewRevision(niceyaml.NewLinesFromString("v0: data", niceyaml.WithName("v0")))
+	rev1 := rev0.Append(niceyaml.NewLinesFromString("v1: data", niceyaml.WithName("v1")))
+	rev2 := rev1.Append(niceyaml.NewLinesFromString("v2: data", niceyaml.WithName("v2")))
 
 	tcs := map[string]struct {
-		startFrom *tokens.Revision
+		startFrom *niceyaml.Revision
 		want      string
 		input     int
 	}{
@@ -81,7 +81,7 @@ func TestRevision_At(t *testing.T) {
 func TestRevision_At_SingleRevision(t *testing.T) {
 	t.Parallel()
 
-	rev := tokens.NewRevision(tokens.NewLinesFromString("only: data", tokens.WithName("only")))
+	rev := niceyaml.NewRevision(niceyaml.NewLinesFromString("only: data", niceyaml.WithName("only")))
 
 	tcs := map[string]struct {
 		want  string

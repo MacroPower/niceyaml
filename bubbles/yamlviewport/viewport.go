@@ -12,7 +12,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/macropower/niceyaml"
-	"github.com/macropower/niceyaml/tokens"
 )
 
 const (
@@ -35,7 +34,7 @@ const (
 // Finder finds matches in tokens for highlighting.
 // The viewport invokes this during rerender to get fresh matches.
 type Finder interface {
-	// FindTokens returns position ranges to highlight in the given tokens.
+	// FindTokens returns position ranges to highlight in the given niceyaml.
 	// Returns nil if no matches.
 	FindTokens(tks token.Tokens) []niceyaml.PositionRange
 }
@@ -102,7 +101,7 @@ type Model struct {
 	KeyMap              KeyMap
 	finder              Finder
 	searchMatches       []niceyaml.PositionRange
-	revision            *tokens.Revision
+	revision            *niceyaml.Revision
 	lines               []string
 	xOffset             int
 	horizontalStep      int
@@ -168,16 +167,16 @@ func (m *Model) SetWidth(w int) {
 
 // SetTokens replaces the revision history with a single revision.
 // This is a convenience method equivalent to ClearRevisions() followed by AppendRevision(lines).
-func (m *Model) SetTokens(lines *tokens.Lines) {
+func (m *Model) SetTokens(lines *niceyaml.Lines) {
 	m.ClearRevisions()
 	m.AppendRevision(lines)
 }
 
 // AppendRevision adds a new revision to the history.
 // After appending, the revision pointer moves to the newly added revision.
-func (m *Model) AppendRevision(lines *tokens.Lines) {
+func (m *Model) AppendRevision(lines *niceyaml.Lines) {
 	if m.revision == nil {
-		m.revision = tokens.NewRevision(lines)
+		m.revision = niceyaml.NewRevision(lines)
 	} else {
 		m.revision = m.revision.Tip().Append(lines)
 	}
@@ -248,9 +247,9 @@ func (m *Model) RevisionCount() int {
 	return m.revision.Count()
 }
 
-// currentRevisionLines returns the [*tokens.Lines] for the currently displayed revision.
-// For diffs, this returns the "after" revision tokens.
-func (m *Model) currentRevisionLines() *tokens.Lines {
+// currentRevisionLines returns the [*niceyaml.Lines] for the currently displayed revision.
+// For diffs, this returns the "after" revision niceyaml.
+func (m *Model) currentRevisionLines() *niceyaml.Lines {
 	if m.revision == nil {
 		return nil
 	}
@@ -258,8 +257,8 @@ func (m *Model) currentRevisionLines() *tokens.Lines {
 	return m.revision.Lines()
 }
 
-// getRevisionLines returns the [*tokens.Lines] for the revision at the given index.
-func (m *Model) getRevisionLines(index int) *tokens.Lines {
+// getRevisionLines returns the [*niceyaml.Lines] for the revision at the given index.
+func (m *Model) getRevisionLines(index int) *niceyaml.Lines {
 	if m.revision == nil {
 		return nil
 	}
@@ -399,7 +398,7 @@ func (m *Model) rerender() {
 
 // getDiffBaseRevision returns the base revision for diff comparison based on the current diff mode.
 // Returns nil if diff mode is None or revision is nil.
-func (m *Model) getDiffBaseRevision() *tokens.Revision {
+func (m *Model) getDiffBaseRevision() *niceyaml.Revision {
 	if m.revision == nil {
 		return nil
 	}
@@ -415,14 +414,14 @@ func (m *Model) getDiffBaseRevision() *tokens.Revision {
 }
 
 func (m *Model) getDiffContent() string {
-	return m.renderDiff(func(base, curr *tokens.Revision) *tokens.Lines {
-		return tokens.NewFullDiff(base, curr).Lines()
+	return m.renderDiff(func(base, curr *niceyaml.Revision) *niceyaml.Lines {
+		return niceyaml.NewFullDiff(base, curr).Lines()
 	})
 }
 
 // renderDiff renders a diff using the provided diff constructor.
 // Returns fallback content when revision is nil, at origin, or base is nil.
-func (m *Model) renderDiff(makeDiff func(base, current *tokens.Revision) *tokens.Lines) string {
+func (m *Model) renderDiff(makeDiff func(base, current *niceyaml.Revision) *niceyaml.Lines) string {
 	if m.revision == nil {
 		return ""
 	}
@@ -878,8 +877,8 @@ func (m Model) ViewSummary(context int) string {
 
 // getSummaryDiffContent returns summary diff content for the current revision.
 func (m *Model) getSummaryDiffContent(context int) string {
-	return m.renderDiff(func(base, curr *tokens.Revision) *tokens.Lines {
-		return tokens.NewSummaryDiff(base, curr, context).Lines()
+	return m.renderDiff(func(base, curr *niceyaml.Revision) *niceyaml.Lines {
+		return niceyaml.NewSummaryDiff(base, curr, context).Lines()
 	})
 }
 

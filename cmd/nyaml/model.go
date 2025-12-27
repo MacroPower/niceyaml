@@ -13,7 +13,6 @@ import (
 
 	"github.com/macropower/niceyaml"
 	"github.com/macropower/niceyaml/bubbles/yamlviewport"
-	"github.com/macropower/niceyaml/tokens"
 )
 
 type modelOptions struct {
@@ -61,7 +60,7 @@ func newModel(opts *modelOptions) model {
 	}
 
 	for i, c := range opts.contents {
-		m.viewport.AppendRevision(tokens.NewLinesFromString(string(c), tokens.WithName(fmt.Sprintf("v%d", i))))
+		m.viewport.AppendRevision(niceyaml.NewLinesFromString(string(c), niceyaml.WithName(fmt.Sprintf("v%d", i))))
 	}
 
 	// Apply initial search if provided.

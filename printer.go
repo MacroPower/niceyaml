@@ -6,13 +6,11 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/goccy/go-yaml/token"
-
-	"github.com/macropower/niceyaml/tokens"
 )
 
 // LineIterator provides line-by-line access to YAML tokens for rendering.
 type LineIterator interface {
-	EachLine(fn func(idx int, line tokens.Line))
+	EachLine(fn func(idx int, line Line))
 	IsEmpty() bool
 	JoinedPositions(lineNum int) []*token.Position
 }
@@ -181,7 +179,7 @@ func (p *Printer) PrintErrorToken(tk *token.Token, lines int) (string, int) {
 	curLine := tk.Position.Line
 
 	// Collect all tokens and slice to the range.
-	t := tokens.NewLinesFromToken(tk)
+	t := NewLinesFromToken(tk)
 	pos := t.JoinedPositions(curLine)
 
 	// Always include the current token's content.
@@ -218,7 +216,7 @@ func (p *Printer) renderLines(t LineIterator, showAnnotations bool) string {
 
 	var sb strings.Builder
 
-	t.EachLine(func(i int, line tokens.Line) {
+	t.EachLine(func(i int, line Line) {
 		hasAnnotation := showAnnotations && line.Annotation.Content != ""
 
 		if hasAnnotation {
@@ -242,11 +240,11 @@ func (p *Printer) renderLines(t LineIterator, showAnnotations bool) string {
 		lineNum := line.Number()
 
 		switch line.Flag {
-		case tokens.FlagDeleted:
+		case FlagDeleted:
 			deleted := p.styles.GetStyle(StyleDiffDeleted)
 			p.writeLine(&sb, p.lineDeletedPrefix, line.Content(), lineNum, deleted, true)
 
-		case tokens.FlagInserted:
+		case FlagInserted:
 			inserted := p.styles.GetStyle(StyleDiffInserted)
 			p.writeLine(&sb, p.lineInsertedPrefix, line.Content(), lineNum, inserted, false)
 
@@ -520,7 +518,7 @@ func (p *Printer) expandTokenStylesForJoins(t LineIterator) {
 
 // renderTokenLine renders a single line's tokens with syntax highlighting.
 // It handles separator (leading whitespace) and content styling, plus range overlays.
-func (p *Printer) renderTokenLine(line tokens.Line) string {
+func (p *Printer) renderTokenLine(line Line) string {
 	if line.IsEmpty() {
 		return ""
 	}

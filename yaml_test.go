@@ -15,7 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/macropower/niceyaml"
-	"github.com/macropower/niceyaml/tokens"
 )
 
 // testBracketStyle returns a style that wraps content in brackets for verification.
@@ -178,11 +177,11 @@ func TestFinderPrinter_Integration(t *testing.T) {
 				printer.AddStyleToRange(testBracketStyle(), rng)
 			}
 
-			got := printer.PrintTokens(tokens.NewLinesFromTokens(tks))
+			got := printer.PrintTokens(niceyaml.NewLinesFromTokens(tks))
 			assert.Equal(t, tc.want, got)
 
 			file := testParseFile(t, tks)
-			gotFile := printer.PrintTokens(tokens.NewLinesFromFile(file))
+			gotFile := printer.PrintTokens(niceyaml.NewLinesFromFile(file))
 			assert.Equal(t, got, gotFile)
 		})
 	}
@@ -232,11 +231,11 @@ func TestFinderPrinter_EdgeCases(t *testing.T) {
 				assert.Empty(t, ranges)
 			}
 
-			got := printer.PrintTokens(tokens.NewLinesFromTokens(tks))
+			got := printer.PrintTokens(niceyaml.NewLinesFromTokens(tks))
 			assert.Equal(t, tc.wantOutput, got)
 
 			file := testParseFile(t, tks)
-			gotFile := printer.PrintTokens(tokens.NewLinesFromFile(file))
+			gotFile := printer.PrintTokens(niceyaml.NewLinesFromFile(file))
 			assert.Equal(t, got, gotFile)
 		})
 	}
@@ -314,11 +313,11 @@ func TestPrinter_Golden(t *testing.T) {
 				tc.setupFunc(printer, tks)
 			}
 
-			output := printer.PrintTokens(tokens.NewLinesFromTokens(tks))
+			output := printer.PrintTokens(niceyaml.NewLinesFromTokens(tks))
 			golden.RequireEqual(t, output)
 
 			file := testParseFile(t, tks)
-			outputFile := printer.PrintTokens(tokens.NewLinesFromFile(file))
+			outputFile := printer.PrintTokens(niceyaml.NewLinesFromFile(file))
 			assert.Equal(t, output, outputFile)
 		})
 	}
@@ -396,7 +395,7 @@ func TestFinderPrinter_JapaneseMatch(t *testing.T) {
 				printer.AddStyleToRange(testBracketStyle(), rng)
 			}
 
-			got := printer.PrintTokens(tokens.NewLinesFromTokens(tks))
+			got := printer.PrintTokens(niceyaml.NewLinesFromTokens(tks))
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -426,7 +425,7 @@ menu:
 		printer.AddStyleToRange(testBracketStyle(), rng)
 	}
 
-	got := printer.PrintTokens(tokens.NewLinesFromTokens(tks))
+	got := printer.PrintTokens(niceyaml.NewLinesFromTokens(tks))
 
 	// The box drawing characters on lines 1 and 4 should NOT be highlighted
 	// Only "日本" on line 3 should be highlighted.
@@ -459,7 +458,7 @@ func TestFinderPrinter_BoxDrawingNotMatched(t *testing.T) {
 		printer.AddStyleToRange(testBracketStyle(), rng)
 	}
 
-	got := printer.PrintTokens(tokens.NewLinesFromTokens(tks))
+	got := printer.PrintTokens(niceyaml.NewLinesFromTokens(tks))
 
 	// Verify the match is properly bracketed.
 	assert.Contains(t, got, "[日本]酒", "日本 should be highlighted")

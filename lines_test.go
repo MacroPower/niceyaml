@@ -1,4 +1,4 @@
-package tokens_test
+package niceyaml_test
 
 import (
 	"os"
@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/macropower/niceyaml/tokens"
+	"github.com/macropower/niceyaml"
 )
 
 // dumpTokens concatenates all token Origins into a single string.
@@ -193,7 +193,7 @@ data:
 			t.Parallel()
 
 			input := lexer.Tokenize(tc.input)
-			result := tokens.NewLinesFromTokens(input, tokens.WithName("test"))
+			result := niceyaml.NewLinesFromTokens(input, niceyaml.WithName("test"))
 			gotTokens := result.Tokens()
 			gotContent := result.Content()
 
@@ -273,7 +273,7 @@ second: 2
 			t.Parallel()
 
 			input := lexer.Tokenize(tc.input)
-			result := tokens.NewLinesFromTokens(input, tokens.WithName("test"))
+			result := niceyaml.NewLinesFromTokens(input, niceyaml.WithName("test"))
 
 			require.Equal(t, len(tc.wantLines), result.LineCount(), "wrong number of lines")
 
@@ -367,7 +367,7 @@ key: value
 				}
 			}
 
-			result := tokens.NewLinesFromTokens(tks, tokens.WithName("test"))
+			result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
 			require.Equal(t, tc.wantLineCount, result.LineCount(), "wrong number of lines")
 
@@ -491,7 +491,7 @@ func TestNewTokens_GappedLineNumbers(t *testing.T) {
 			t.Parallel()
 
 			tks := tc.buildTokens()
-			result := tokens.NewLinesFromTokens(tks, tokens.WithName("test"))
+			result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
 			require.Equal(t, tc.wantLineCount, result.LineCount(), "wrong number of lines")
 
@@ -531,29 +531,29 @@ func TestLine_String_Annotation(t *testing.T) {
 
 	tcs := map[string]struct {
 		want       string
-		annotation tokens.Annotation
+		annotation niceyaml.Annotation
 	}{
 		"no annotation": {
-			annotation: tokens.Annotation{},
+			annotation: niceyaml.Annotation{},
 			want:       "   1 | key: value",
 		},
 		"annotation at column 1": {
-			annotation: tokens.Annotation{Content: "error here", Column: 1},
+			annotation: niceyaml.Annotation{Content: "error here", Column: 1},
 			want: `   1 | key: value
    1 | ^ error here`,
 		},
 		"annotation at column 5": {
-			annotation: tokens.Annotation{Content: "note", Column: 5},
+			annotation: niceyaml.Annotation{Content: "note", Column: 5},
 			want: `   1 | key: value
    1 |     ^ note`,
 		},
 		"annotation at column 0": {
-			annotation: tokens.Annotation{Content: "edge", Column: 0},
+			annotation: niceyaml.Annotation{Content: "edge", Column: 0},
 			want: `   1 | key: value
    1 | ^ edge`,
 		},
 		"large column": {
-			annotation: tokens.Annotation{Content: "far", Column: 20},
+			annotation: niceyaml.Annotation{Content: "far", Column: 20},
 			want: `   1 | key: value
    1 |                    ^ far`,
 		},
@@ -565,7 +565,7 @@ func TestLine_String_Annotation(t *testing.T) {
 
 			// Create a line with a simple token.
 			tks := lexer.Tokenize("key: value\n")
-			result := tokens.NewLinesFromTokens(tks, tokens.WithName("test"))
+			result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 			require.Equal(t, 1, result.LineCount())
 
 			line := result.Line(0)
@@ -581,12 +581,12 @@ func TestTokens_String_Annotation(t *testing.T) {
 
 	tcs := map[string]struct {
 		input       string
-		annotations map[int]tokens.Annotation // Line index -> annotation.
+		annotations map[int]niceyaml.Annotation // Line index -> annotation.
 		want        string
 	}{
 		"single line with annotation": {
 			input: "key: value\n",
-			annotations: map[int]tokens.Annotation{
+			annotations: map[int]niceyaml.Annotation{
 				0: {Content: "error", Column: 1},
 			},
 			want: `   1 | key: value
@@ -596,7 +596,7 @@ func TestTokens_String_Annotation(t *testing.T) {
 			input: `first: 1
 second: 2
 `,
-			annotations: map[int]tokens.Annotation{
+			annotations: map[int]niceyaml.Annotation{
 				1: {Content: "here", Column: 1},
 			},
 			want: `   1 | first: 1
@@ -608,7 +608,7 @@ second: 2
 second: 2
 third: 3
 `,
-			annotations: map[int]tokens.Annotation{
+			annotations: map[int]niceyaml.Annotation{
 				0: {Content: "start", Column: 1},
 				2: {Content: "end", Column: 1},
 			},
@@ -624,7 +624,7 @@ b: 2
 c: 3
 d: 4
 `,
-			annotations: map[int]tokens.Annotation{
+			annotations: map[int]niceyaml.Annotation{
 				1: {Content: "middle", Column: 3},
 			},
 			want: `   1 | a: 1
@@ -640,7 +640,7 @@ d: 4
 			t.Parallel()
 
 			tks := lexer.Tokenize(tc.input)
-			result := tokens.NewLinesFromTokens(tks, tokens.WithName("test"))
+			result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
 			// Apply annotations to specified lines.
 			for idx, ann := range tc.annotations {
@@ -658,11 +658,11 @@ func TestLine_Clone_Annotation(t *testing.T) {
 	t.Parallel()
 
 	tks := lexer.Tokenize("key: value\n")
-	result := tokens.NewLinesFromTokens(tks, tokens.WithName("test"))
+	result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 	require.Equal(t, 1, result.LineCount())
 
 	original := result.Line(0)
-	original.Annotation = tokens.Annotation{Content: "original note", Column: 5}
+	original.Annotation = niceyaml.Annotation{Content: "original note", Column: 5}
 
 	clone := original.Clone()
 
@@ -796,7 +796,7 @@ doc2: value2
 			t.Parallel()
 
 			input := lexer.Tokenize(tc.input)
-			result := tokens.NewLinesFromTokens(input, tokens.WithName("test"))
+			result := niceyaml.NewLinesFromTokens(input, niceyaml.WithName("test"))
 
 			// Call Value() to establish Prev/Next linking across lines.
 			tks := result.Tokens()
@@ -804,7 +804,7 @@ doc2: value2
 
 			// Count total tokens across all lines.
 			totalTokens := 0
-			result.EachLine(func(_ int, line tokens.Line) {
+			result.EachLine(func(_ int, line niceyaml.Line) {
 				totalTokens += len(line.Tokens())
 			})
 
@@ -980,13 +980,13 @@ after: key
 			t.Parallel()
 
 			tks := lexer.Tokenize(tc.input)
-			full := tokens.NewLinesFromTokens(tks, tokens.WithName("test"))
+			full := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
 			sliced := full.Slice(tc.minLine, tc.maxLine)
 
 			// Verify line numbers.
 			gotLineNums := make([]int, sliced.LineCount())
-			sliced.EachLine(func(i int, line tokens.Line) {
+			sliced.EachLine(func(i int, line niceyaml.Line) {
 				gotLineNums[i] = line.Number()
 			})
 
@@ -1005,7 +1005,7 @@ func TestTokens_Slice_Clones(t *testing.T) {
 	t.Parallel()
 
 	tks := lexer.Tokenize("key: value\n")
-	original := tokens.NewLinesFromTokens(tks, tokens.WithName("test"))
+	original := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
 	sliced := original.Slice(-1, -1)
 
@@ -1074,7 +1074,7 @@ next: data
 			t.Parallel()
 
 			tks := lexer.Tokenize(tc.input)
-			result := tokens.NewLinesFromTokens(tks, tokens.WithName("test"))
+			result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
 			// Verify line numbers are strictly increasing.
 			require.NoError(t, result.Validate(), "tokens should be valid")
@@ -1117,7 +1117,7 @@ func TestTokens_Validate(t *testing.T) {
 				t.Parallel()
 
 				tks := lexer.Tokenize(tc.input)
-				result := tokens.NewLinesFromTokens(tks, tokens.WithName("test"))
+				result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
 				// Tokens created through NewTokensFromTokens should always be valid.
 				assert.NoError(t, result.Validate())
@@ -1144,7 +1144,7 @@ func TestTokens_Validate(t *testing.T) {
 			Position: &token.Position{Line: 5, Column: 1}, // Same line number in input.
 		})
 
-		result := tokens.NewLinesFromTokens(tks, tokens.WithName("test"))
+		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
 		// After normalization, line numbers are sequential.
 		require.NoError(t, result.Validate())
@@ -1172,7 +1172,7 @@ func TestTokens_Validate(t *testing.T) {
 			Position: &token.Position{Line: 5, Column: 1}, // Lower line number in input.
 		})
 
-		result := tokens.NewLinesFromTokens(tks, tokens.WithName("test"))
+		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
 		// After normalization, line numbers are sequential.
 		require.NoError(t, result.Validate())
@@ -1199,7 +1199,7 @@ func TestTokens_Validate(t *testing.T) {
 			Position: &token.Position{Line: 1, Column: 5}, // Same column!
 		})
 
-		result := tokens.NewLinesFromTokens(tks, tokens.WithName("test"))
+		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
 		err := result.Validate()
 		require.Error(t, err)
@@ -1223,7 +1223,7 @@ func TestTokens_Validate(t *testing.T) {
 			Position: &token.Position{Line: 1, Column: 5}, // Lower column!
 		})
 
-		result := tokens.NewLinesFromTokens(tks, tokens.WithName("test"))
+		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
 		err := result.Validate()
 		require.Error(t, err)
@@ -1249,7 +1249,7 @@ func TestTokens_Validate(t *testing.T) {
 			Position: &token.Position{Line: 2, Column: 10}, // Different line in input.
 		})
 
-		result := tokens.NewLinesFromTokens(tks, tokens.WithName("test"))
+		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
 		// Both tokens end up on line 1 with normalized positions.
 		require.NoError(t, result.Validate())
@@ -1278,7 +1278,7 @@ func TestTokens_Validate(t *testing.T) {
 			Position: &token.Position{Line: 1, Column: 10},
 		})
 
-		result := tokens.NewLinesFromTokens(tks, tokens.WithName("test"))
+		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
 		// Nil positions are skipped in validation.
 		assert.NoError(t, result.Validate())
@@ -1307,7 +1307,7 @@ func TestTokens_Validate(t *testing.T) {
 			Position: &token.Position{Line: 100, Column: 1},
 		})
 
-		result := tokens.NewLinesFromTokens(tks, tokens.WithName("test"))
+		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
 		assert.NoError(t, result.Validate())
 	})

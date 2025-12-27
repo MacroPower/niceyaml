@@ -1,4 +1,4 @@
-package tokens
+package niceyaml
 
 import (
 	"fmt"
@@ -8,6 +8,25 @@ import (
 	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/token"
 )
+
+// Annotation represents extra content to be added around a line.
+// It can be used to add comments or notes to the rendered output, without being
+// part of the main token stream.
+type Annotation struct {
+	Content string
+	Column  int // Optional, 1-indexed column position for the annotation.
+}
+
+// String returns the annotation as a string, properly padded to the specified column.
+func (a Annotation) String() string {
+	if a.Content == "" {
+		return ""
+	}
+
+	padding := strings.Repeat(" ", max(0, a.Column-1))
+
+	return padding + "^ " + a.Content
+}
 
 // Flag identifies a category for YAML tokens.
 type Flag int
@@ -104,25 +123,6 @@ func (l Line) String() string {
 	}
 
 	return sb.String()
-}
-
-// Annotation represents extra content to be added around a line.
-// It can be used to add comments or notes to the rendered output, without being
-// part of the main token stream.
-type Annotation struct {
-	Content string
-	Column  int // Optional, 1-indexed column position for the annotation.
-}
-
-// String returns the annotation as a string, properly padded to the specified column.
-func (a Annotation) String() string {
-	if a.Content == "" {
-		return ""
-	}
-
-	padding := strings.Repeat(" ", max(0, a.Column-1))
-
-	return padding + "^ " + a.Content
 }
 
 // Lines represents a collection of [token.Tokens] organized into [Line]s with associated metadata.
@@ -289,7 +289,7 @@ func NewLinesFromTokens(tks token.Tokens, opts ...LinesOption) *Lines {
 			)
 
 			if isPureNewline {
-				col = nextColumn(currentLineTokens)
+				col = linesNextColumn(currentLineTokens)
 			} else {
 				col, val = partColumnAndValue(tk, part, isFirstContentPart)
 				isFirstContentPart = false
@@ -395,9 +395,9 @@ func (t *Lines) Annotate(idx int, ann Annotation) {
 	t.lines[idx].Annotation = ann
 }
 
-// Flag sets a [Flag] on the [Line] at the given index.
+// SetFlag sets a [Flag] on the [Line] at the given index.
 // Panics if idx is out of range.
-func (t *Lines) Flag(idx int, flag Flag) {
+func (t *Lines) SetFlag(idx int, flag Flag) {
 	t.lines[idx].Flag = flag
 }
 
@@ -544,8 +544,8 @@ func (t *Lines) JoinedPositions(lineNum int) []*token.Position {
 	return positions
 }
 
-// nextColumn returns the next available column position after existing tokens.
-func nextColumn(tks token.Tokens) int {
+// linesNextColumn returns the next available column position after existing tokens.
+func linesNextColumn(tks token.Tokens) int {
 	col := 1
 	for _, tk := range tks {
 		if tk.Position != nil && tk.Position.Column >= col {
