@@ -167,8 +167,8 @@ func (p *Printer) ClearStyles() {
 }
 
 // PrintTokens prints any [LineIterator].
-func (p *Printer) PrintTokens(t LineIterator) string {
-	content := p.renderLines(t, true)
+func (p *Printer) PrintTokens(lines LineIterator) string {
+	content := p.renderLines(lines, true)
 
 	return p.style.Render(content)
 }

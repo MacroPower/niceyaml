@@ -504,14 +504,15 @@ func (t *Lines) Validate() error {
 // joined token group as the given line number. Returns nil if the line
 // is not found or is not part of a join.
 func (t *Lines) JoinedPositions(lineNum int) []*token.Position {
-	// Build a map from line number to line index.
-	lineNumToIdx := make(map[int]int, len(t.lines))
+	// Find the line index by linear search.
+	lineIdx := -1
 	for i, line := range t.lines {
-		lineNumToIdx[line.Number()] = i
+		if line.Number() == lineNum {
+			lineIdx = i
+			break
+		}
 	}
-
-	lineIdx, found := lineNumToIdx[lineNum]
-	if !found {
+	if lineIdx == -1 {
 		return nil
 	}
 

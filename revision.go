@@ -61,20 +61,22 @@ func (t *Revision) Seek(n int) *Revision {
 
 // Tip goes to the latest revision in the sequence.
 func (t *Revision) Tip() *Revision {
-	if t.next != nil {
-		return t.next.Tip()
+	curr := t
+	for curr.next != nil {
+		curr = curr.next
 	}
 
-	return t
+	return curr
 }
 
 // Origin goes to the original revision in the sequence.
 func (t *Revision) Origin() *Revision {
-	if t.prev != nil {
-		return t.prev.Origin()
+	curr := t
+	for curr.prev != nil {
+		curr = curr.prev
 	}
 
-	return t
+	return curr
 }
 
 // At returns the revision at the given zero-based index.
