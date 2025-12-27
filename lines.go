@@ -384,6 +384,44 @@ func (t *Lines) EachLine(fn func(idx int, line Line)) {
 	}
 }
 
+// EachRune iterates through all runes in all lines with their positions.
+// It calls fn for each rune with its (line, column) position.
+// Position values are 1-indexed to match [token.Position].
+// The iteration order is left-to-right, top-to-bottom across lines.
+func (t *Lines) EachRune(fn func(r rune, pos Position)) {
+	if len(t.lines) == 0 {
+		return
+	}
+
+	// Initialize position from first token.
+	// Adjust column for value offset (Position.Column points to Value, not Origin start).
+	line := 1
+	col := 1
+	if len(t.lines[0].value) > 0 {
+		firstTk := t.lines[0].value[0]
+		if firstTk.Position != nil {
+			line = firstTk.Position.Line
+			col = max(firstTk.Position.Column-tokenValueOffset(firstTk), 1)
+		}
+	}
+
+	// Iterate through all tokens, tracking position as we go.
+	for _, l := range t.lines {
+		for _, tk := range l.value {
+			for _, r := range tk.Origin {
+				fn(r, Position{Line: line, Col: col})
+
+				if r == '\n' {
+					line++
+					col = 1
+				} else {
+					col++
+				}
+			}
+		}
+	}
+}
+
 // Line returns the [Line] at the given index. Panics if idx is out of range.
 func (t *Lines) Line(idx int) Line {
 	return t.lines[idx]

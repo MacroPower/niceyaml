@@ -6,7 +6,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/charmtone"
-	"github.com/goccy/go-yaml/lexer"
 
 	_ "embed"
 
@@ -58,16 +57,16 @@ func main() {
 	printer.ClearStyles()
 
 	// Find and highlight all occurrences of "fe".
-	tks := lexer.Tokenize(find)
+	findLines := niceyaml.NewLinesFromString(find)
 	finder := niceyaml.NewFinder("fe", niceyaml.WithNormalizer(niceyaml.StandardNormalizer{}))
-	matches := finder.FindTokens(tks)
+	matches := finder.Find(findLines)
 
 	highlight := lipgloss.NewStyle().Background(charmtone.Mustard).Foreground(charmtone.Charcoal)
 	for _, m := range matches {
 		printer.AddStyleToRange(&highlight, m)
 	}
 
-	findDemo := printer.PrintTokens(niceyaml.NewLinesFromTokens(tks))
+	findDemo := printer.PrintTokens(findLines)
 	printer.ClearStyles()
 
 	out := lipgloss.NewStyle().

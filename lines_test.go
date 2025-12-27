@@ -1089,6 +1089,147 @@ next: data
 	}
 }
 
+type runePosition struct {
+	R   rune
+	Pos niceyaml.Position
+}
+
+func TestLines_EachRune(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  []runePosition
+	}{
+		"simple key-value": {
+			// Note: lexer strips trailing newline from final simple value.
+			input: "a: b\n",
+			want: []runePosition{
+				{R: 'a', Pos: niceyaml.Position{Line: 1, Col: 1}},
+				{R: ':', Pos: niceyaml.Position{Line: 1, Col: 2}},
+				{R: ' ', Pos: niceyaml.Position{Line: 1, Col: 3}},
+				{R: 'b', Pos: niceyaml.Position{Line: 1, Col: 4}},
+			},
+		},
+		"multi-line": {
+			// Note: lexer strips trailing newline from final value on each line.
+			input: "a: 1\nb: 2\n",
+			want: []runePosition{
+				{R: 'a', Pos: niceyaml.Position{Line: 1, Col: 1}},
+				{R: ':', Pos: niceyaml.Position{Line: 1, Col: 2}},
+				{R: ' ', Pos: niceyaml.Position{Line: 1, Col: 3}},
+				{R: '1', Pos: niceyaml.Position{Line: 1, Col: 4}},
+				{R: '\n', Pos: niceyaml.Position{Line: 1, Col: 5}},
+				{R: 'b', Pos: niceyaml.Position{Line: 2, Col: 1}},
+				{R: ':', Pos: niceyaml.Position{Line: 2, Col: 2}},
+				{R: ' ', Pos: niceyaml.Position{Line: 2, Col: 3}},
+				{R: '2', Pos: niceyaml.Position{Line: 2, Col: 4}},
+			},
+		},
+		"utf8 - multibyte char": {
+			input: "k: ü\n",
+			want: []runePosition{
+				{R: 'k', Pos: niceyaml.Position{Line: 1, Col: 1}},
+				{R: ':', Pos: niceyaml.Position{Line: 1, Col: 2}},
+				{R: ' ', Pos: niceyaml.Position{Line: 1, Col: 3}},
+				{R: 'ü', Pos: niceyaml.Position{Line: 1, Col: 4}},
+			},
+		},
+		"utf8 - japanese": {
+			input: "k: 日本\n",
+			want: []runePosition{
+				{R: 'k', Pos: niceyaml.Position{Line: 1, Col: 1}},
+				{R: ':', Pos: niceyaml.Position{Line: 1, Col: 2}},
+				{R: ' ', Pos: niceyaml.Position{Line: 1, Col: 3}},
+				{R: '日', Pos: niceyaml.Position{Line: 1, Col: 4}},
+				{R: '本', Pos: niceyaml.Position{Line: 1, Col: 5}},
+			},
+		},
+		"nested with indent": {
+			input: "p:\n  c: v\n",
+			want: []runePosition{
+				{R: 'p', Pos: niceyaml.Position{Line: 1, Col: 1}},
+				{R: ':', Pos: niceyaml.Position{Line: 1, Col: 2}},
+				{R: '\n', Pos: niceyaml.Position{Line: 1, Col: 3}},
+				{R: ' ', Pos: niceyaml.Position{Line: 2, Col: 1}},
+				{R: ' ', Pos: niceyaml.Position{Line: 2, Col: 2}},
+				{R: 'c', Pos: niceyaml.Position{Line: 2, Col: 3}},
+				{R: ':', Pos: niceyaml.Position{Line: 2, Col: 4}},
+				{R: ' ', Pos: niceyaml.Position{Line: 2, Col: 5}},
+				{R: 'v', Pos: niceyaml.Position{Line: 2, Col: 6}},
+			},
+		},
+		"empty": {
+			input: "",
+			want:  nil,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tks := lexer.Tokenize(tc.input)
+			lines := niceyaml.NewLinesFromTokens(tks)
+
+			var got []runePosition
+
+			lines.EachRune(func(r rune, pos niceyaml.Position) {
+				got = append(got, runePosition{R: r, Pos: pos})
+			})
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestLines_EachRune_LiteralBlock(t *testing.T) {
+	t.Parallel()
+
+	// Literal blocks have multi-line content.
+	// EachRune should iterate through all content with correct positions.
+	input := "s: |\n  a\n  b\n"
+	tks := lexer.Tokenize(input)
+	lines := niceyaml.NewLinesFromTokens(tks)
+
+	var runes []rune
+
+	var positions []niceyaml.Position
+
+	lines.EachRune(func(r rune, pos niceyaml.Position) {
+		runes = append(runes, r)
+		positions = append(positions, pos)
+	})
+
+	// Verify we iterate through all content.
+	require.NotEmpty(t, runes, "should have runes")
+	require.NotEmpty(t, positions, "should have positions")
+
+	// Verify positions start at line 1.
+	assert.Equal(t, 1, positions[0].Line, "should start at line 1")
+	assert.Equal(t, 1, positions[0].Col, "should start at column 1")
+
+	// Verify positions increase monotonically.
+	prevLine := 0
+
+	prevCol := 0
+
+	for i, pos := range positions {
+		if pos.Line == prevLine {
+			assert.Greater(t, pos.Col, prevCol, "column should increase on same line at index %d", i)
+		} else if pos.Line > prevLine {
+			// Line changed, column should reset to 1.
+			assert.Equal(t, 1, pos.Col, "column should reset to 1 on new line at index %d", i)
+		}
+
+		prevLine = pos.Line
+		prevCol = pos.Col
+	}
+
+	// Verify the last position is on a later line (multi-line content).
+	assert.Greater(t, positions[len(positions)-1].Line, 1, "should have content on multiple lines")
+}
+
 func TestTokens_Validate(t *testing.T) {
 	t.Parallel()
 

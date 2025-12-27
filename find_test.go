@@ -4,9 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/goccy/go-yaml/lexer"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/macropower/niceyaml"
 )
@@ -20,7 +18,7 @@ func (n testNormalizer) Normalize(in string) string {
 	return n.fn(in)
 }
 
-func TestFinder_FindTokens(t *testing.T) {
+func TestFinder_Find(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -202,8 +200,7 @@ func TestFinder_FindTokens(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tokens := lexer.Tokenize(tc.input)
-			require.NotEmpty(t, tokens)
+			lines := niceyaml.NewLinesFromString(tc.input)
 
 			var opts []niceyaml.FinderOption
 			if tc.normalizer != nil {
@@ -212,13 +209,13 @@ func TestFinder_FindTokens(t *testing.T) {
 
 			finder := niceyaml.NewFinder(tc.search, opts...)
 
-			got := finder.FindTokens(tokens)
+			got := finder.Find(lines)
 			assert.Equal(t, tc.want, got)
 		})
 	}
 }
 
-func TestFinder_FindTokens_EdgeCases(t *testing.T) {
+func TestFinder_Find_EdgeCases(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -226,7 +223,7 @@ func TestFinder_FindTokens_EdgeCases(t *testing.T) {
 		search string
 		want   []niceyaml.PositionRange
 	}{
-		"empty tokens": {
+		"empty lines": {
 			input:  "",
 			search: "test",
 			want:   nil,
@@ -252,18 +249,18 @@ func TestFinder_FindTokens_EdgeCases(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tokens := lexer.Tokenize(tc.input)
+			lines := niceyaml.NewLinesFromString(tc.input)
 			finder := niceyaml.NewFinder(tc.search)
-			got := finder.FindTokens(tokens)
+			got := finder.Find(lines)
 			assert.Equal(t, tc.want, got)
 		})
 	}
 }
 
-func TestFinder_FindTokens_NilTokens(t *testing.T) {
+func TestFinder_Find_NilLines(t *testing.T) {
 	t.Parallel()
 
 	finder := niceyaml.NewFinder("test")
-	got := finder.FindTokens(nil)
+	got := finder.Find(nil)
 	assert.Nil(t, got)
 }

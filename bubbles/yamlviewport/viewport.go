@@ -7,7 +7,6 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/goccy/go-yaml/token"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -31,12 +30,12 @@ const (
 	DiffModeNone
 )
 
-// Finder finds matches in tokens for highlighting.
+// Finder finds matches in lines for highlighting.
 // The viewport invokes this during rerender to get fresh matches.
 type Finder interface {
-	// FindTokens returns position ranges to highlight in the given niceyaml.
+	// Find returns position ranges to highlight in the given lines.
 	// Returns nil if no matches.
-	FindTokens(tks token.Tokens) []niceyaml.PositionRange
+	Find(lines *niceyaml.Lines) []niceyaml.PositionRange
 }
 
 // Option is a configuration option that works in conjunction with [New].
@@ -357,8 +356,8 @@ func (m *Model) rerender() {
 
 	// Compute fresh matches if finder is set.
 	if m.finder != nil {
-		tks := m.currentRevisionLines()
-		m.searchMatches = m.finder.FindTokens(tks.Tokens())
+		lines := m.currentRevisionLines()
+		m.searchMatches = m.finder.Find(lines)
 
 		// Adjust search index if matches changed.
 		if len(m.searchMatches) == 0 {
