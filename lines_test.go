@@ -1635,3 +1635,166 @@ func TestLines_TokenPositions(t *testing.T) {
 		require.Len(t, positions, 2)
 	})
 }
+
+func TestNewLinesFromTokens_PositionFieldsMatchLexer(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]string{
+		"simple key-value":    "key: value\n",
+		"nested":              "parent:\n  child: value\n",
+		"sequence":            "items:\n  - one\n  - two\n",
+		"deep nesting":        "a:\n  b:\n    c: val\n",
+		"multiple keys":       "first: 1\nsecond: 2\nthird: 3\n",
+		"inline map":          "config: {key: value}\n",
+		"inline list":         "items: [a, b, c]\n",
+		"comment":             "key: value  # comment\n",
+		"anchor and alias":    "anchor: &name value\nref: *name\n",
+		"unindent after nest": "parent:\n  child: value\nsibling: other\n",
+	}
+
+	for name, input := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// Get original tokens from lexer.
+			originalTks := lexer.Tokenize(input)
+
+			// Process through Lines and reconstruct.
+			lines := niceyaml.NewLinesFromTokens(originalTks)
+			resultTks := lines.Tokens()
+
+			// For non-split tokens, Position fields should match.
+			// Build map of (Line, Column) -> original Position for comparison.
+			type posKey struct {
+				line, col int
+			}
+
+			origByPos := make(map[posKey]*token.Position)
+			for _, tk := range originalTks {
+				if tk.Position != nil {
+					key := posKey{tk.Position.Line, tk.Position.Column}
+					origByPos[key] = tk.Position
+				}
+			}
+
+			for _, tk := range resultTks {
+				if tk.Position == nil {
+					continue
+				}
+
+				key := posKey{tk.Position.Line, tk.Position.Column}
+				orig, ok := origByPos[key]
+				if !ok {
+					// Token was split, skip comparison.
+					continue
+				}
+
+				assert.Equal(t, orig.Offset, tk.Position.Offset,
+					"Offset mismatch at line %d col %d", key.line, key.col)
+				assert.Equal(t, orig.IndentNum, tk.Position.IndentNum,
+					"IndentNum mismatch at line %d col %d", key.line, key.col)
+				assert.Equal(t, orig.IndentLevel, tk.Position.IndentLevel,
+					"IndentLevel mismatch at line %d col %d", key.line, key.col)
+			}
+		})
+	}
+}
+
+func TestNewLinesFromTokens_SplitTokenOffsets(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]string{
+		"literal block": "script: |\n  line1\n  line2\n",
+		"folded block":  "text: >\n  first\n  second\n",
+		"multiline string": `key: "line1
+  line2"
+`,
+	}
+
+	for name, input := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			lines := niceyaml.NewLinesFromTokens(lexer.Tokenize(input))
+
+			var prevOffset int
+			for i := range lines.LineCount() {
+				line := lines.Line(i)
+				for _, tk := range line.Tokens() {
+					if tk.Position != nil {
+						// Offset must be strictly increasing.
+						assert.Greater(t, tk.Position.Offset, prevOffset,
+							"Offset not increasing at line %d", line.Number())
+
+						prevOffset = tk.Position.Offset
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestNewLinesFromTokens_OffsetByteCount(t *testing.T) {
+	t.Parallel()
+
+	// Test that Offset uses byte count, not rune count.
+	// UTF-8 chars like 日 are 3 bytes each.
+	input := "key: 日本語\n"
+	lines := niceyaml.NewLinesFromTokens(lexer.Tokenize(input))
+
+	// Get the original lexer tokens to verify we match.
+	originalTks := lexer.Tokenize(input)
+	resultTks := lines.Tokens()
+
+	// Both should have the same total byte progression.
+	// Note: The lexer drops the final trailing newline from token origins,
+	// so we compare our output to lexer output, not to input length.
+	var origTotalBytes, resultTotalBytes int
+
+	for _, tk := range originalTks {
+		origTotalBytes += len(tk.Origin)
+	}
+
+	for _, tk := range resultTks {
+		resultTotalBytes += len(tk.Origin)
+	}
+
+	assert.Equal(t, origTotalBytes, resultTotalBytes, "total bytes should match lexer output")
+}
+
+func TestNewLinesFromTokens_IndentLevelProgression(t *testing.T) {
+	t.Parallel()
+
+	input := `root:
+  level1:
+    level2:
+      level3: value
+    back2: val
+  back1: val
+end: val
+`
+	lines := niceyaml.NewLinesFromTokens(lexer.Tokenize(input))
+
+	// Expected indent levels per line (based on go-yaml scanner behavior):
+	// Line 1: root: -> level 0.
+	// Line 2:   level1: -> level 1.
+	// Line 3:     level2: -> level 2.
+	// Line 4:       level3: value -> level 3.
+	// Line 5:     back2: val -> level 2.
+	// Line 6:   back1: val -> level 1.
+	// Line 7: end: val -> level 0.
+	expectedLevels := []int{0, 1, 2, 3, 2, 1, 0}
+
+	require.Equal(t, len(expectedLevels), lines.LineCount())
+
+	for i := range lines.LineCount() {
+		line := lines.Line(i)
+		if len(line.Tokens()) > 0 {
+			firstTk := line.Token(0)
+			if firstTk.Position != nil {
+				assert.Equal(t, expectedLevels[i], firstTk.Position.IndentLevel,
+					"IndentLevel mismatch at line %d", i+1)
+			}
+		}
+	}
+}

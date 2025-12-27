@@ -213,6 +213,8 @@ func NewLinesFromToken(tk *token.Token, opts ...LinesOption) *Lines {
 }
 
 // NewLinesFromTokens creates new [Lines] from [token.Tokens].
+//
+//nolint:nestif // TODO: refactor.
 func NewLinesFromTokens(tks token.Tokens, opts ...LinesOption) *Lines {
 	t := &Lines{}
 	for _, opt := range opts {
@@ -228,6 +230,12 @@ func NewLinesFromTokens(tks token.Tokens, opts ...LinesOption) *Lines {
 		currentLineTokens token.Tokens
 		currentLine       int  // Current line number being built.
 		joinFromPrev      bool // Track if the next line should have JoinPrev=true.
+
+		// Position tracking.
+		currentOffset      int // Cumulative byte offset (1-indexed like lexer).
+		currentIndentNum   int // Leading spaces on current line.
+		prevLineIndentNum  int // IndentNum from previous line.
+		currentIndentLevel int // Nesting depth level.
 	)
 
 	// Initialize currentLine from the first token's position.
@@ -235,6 +243,15 @@ func NewLinesFromTokens(tks token.Tokens, opts ...LinesOption) *Lines {
 		currentLine = tks[0].Position.Line
 	} else {
 		currentLine = 1
+	}
+
+	// Initialize position tracking from first token (1-indexed like lexer).
+	if tks[0].Position != nil && tks[0].Position.Offset > 0 {
+		currentOffset = tks[0].Position.Offset
+		currentIndentNum = tks[0].Position.IndentNum
+		currentIndentLevel = tks[0].Position.IndentLevel
+	} else {
+		currentOffset = 1
 	}
 
 	for _, tk := range tks {
@@ -261,6 +278,16 @@ func NewLinesFromTokens(tks token.Tokens, opts ...LinesOption) *Lines {
 			// Only sync forward to handle gaps, never backwards.
 			if len(currentLineTokens) == 0 && tkLine > currentLine {
 				currentLine = tkLine
+
+				// Sync position tracking from token if available.
+				if tk.Position != nil {
+					if tk.Position.Offset > 0 {
+						currentOffset = tk.Position.Offset
+					}
+
+					currentIndentNum = tk.Position.IndentNum
+					currentIndentLevel = tk.Position.IndentLevel
+				}
 			}
 		}
 
@@ -282,6 +309,12 @@ func NewLinesFromTokens(tks token.Tokens, opts ...LinesOption) *Lines {
 		for i, part := range parts {
 			isPureNewline := part == "\n"
 
+			// Update indentation tracking for first content on new line.
+			if len(currentLineTokens) == 0 && !isPureNewline {
+				currentIndentNum = countLeadingSpaces(part)
+				currentIndentLevel = updateIndentLevel(prevLineIndentNum, currentIndentNum, currentIndentLevel)
+			}
+
 			// Calculate column position and value for this part.
 			var (
 				col int
@@ -295,17 +328,41 @@ func NewLinesFromTokens(tks token.Tokens, opts ...LinesOption) *Lines {
 				isFirstContentPart = false
 			}
 
+			// Calculate offset where Value starts within the document.
+			// Offset typically points to Value, not Origin (like the lexer's behavior).
+			// Exception: Comment tokens have Offset pointing to "#" (Origin start).
+			valueOffset := currentOffset
+			if val != "" && tk.Type != token.CommentType {
+				if idx := strings.Index(part, val); idx >= 0 {
+					valueOffset += idx
+				}
+			}
+
 			// Create and add token for this part.
+			//
+			// Position fields (matching go-yaml lexer behavior):
+			//   - Line: 1-indexed line number in the document.
+			//   - Column: 1-indexed column where Value starts (not Origin).
+			//   - Offset: 1-indexed byte position where Value starts in document.
+			//     Exception: Comment tokens point to "#" (Origin start).
+			//   - IndentNum: Number of leading spaces at the start of this line.
+			//   - IndentLevel: Nesting depth based on indentation changes.
 			newTk := &token.Token{
 				Type:   tk.Type,
 				Origin: part,
 				Value:  val,
 				Position: &token.Position{
-					Line:   currentLine,
-					Column: col,
+					Line:        currentLine,
+					Column:      col,
+					Offset:      valueOffset,
+					IndentNum:   currentIndentNum,
+					IndentLevel: currentIndentLevel,
 				},
 			}
 			currentLineTokens.Add(newTk)
+
+			// Advance cumulative position by byte length of this part.
+			currentOffset += len(part)
 
 			// If this part ends with newline, finish the current line.
 			if strings.HasSuffix(part, "\n") {
@@ -320,6 +377,10 @@ func NewLinesFromTokens(tks token.Tokens, opts ...LinesOption) *Lines {
 				joinFromPrev = joinNext
 				currentLineTokens = nil
 				currentLine++
+
+				// Prepare indentation tracking for next line.
+				prevLineIndentNum = currentIndentNum
+				currentIndentNum = 0 // Will be recalculated for next line's first content.
 			}
 		}
 	}
@@ -663,6 +724,32 @@ func partColumnAndValue(tk *token.Token, part string, isFirst bool) (int, string
 	}
 
 	return col, val
+}
+
+// countLeadingSpaces returns the number of leading space/tab characters in s.
+func countLeadingSpaces(s string) int {
+	count := 0
+	for _, r := range s {
+		if r != ' ' && r != '\t' {
+			break
+		}
+
+		count++
+	}
+
+	return count
+}
+
+// updateIndentLevel calculates indent level based on indentation changes.
+// This mirrors the go-yaml scanner's updateIndentLevel logic.
+func updateIndentLevel(prevIndentNum, currentIndentNum, currentLevel int) int {
+	if prevIndentNum < currentIndentNum {
+		return currentLevel + 1
+	} else if prevIndentNum > currentIndentNum && currentLevel > 0 {
+		return currentLevel - 1
+	}
+
+	return currentLevel
 }
 
 func findAnyTokenInFile(f *ast.File) *token.Token {
