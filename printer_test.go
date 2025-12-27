@@ -34,13 +34,48 @@ func testPrinter() *niceyaml.Printer {
 }
 
 // parseFile parses tokens into an ast.File for testing PrintFile.
-func parseFile(t *testing.T, tokens token.Tokens) *ast.File {
+func parseFile(t *testing.T, tks token.Tokens) *ast.File {
 	t.Helper()
 
-	file, err := parser.Parse(tokens, 0)
+	file, err := parser.Parse(tks, 0)
 	require.NoError(t, err)
 
 	return file
+}
+
+// printDiff generates a full-file diff between two YAML strings.
+// It outputs the entire file with markers for inserted and deleted lines.
+// Helper to replace the removed Printer.PrintTokenDiff method in tests.
+func printDiff(p *niceyaml.Printer, before, after string) string {
+	beforeTks := niceyaml.NewLinesFromString(before, niceyaml.WithName("before"))
+	afterTks := niceyaml.NewLinesFromString(after, niceyaml.WithName("after"))
+
+	diff := niceyaml.NewFullDiff(
+		niceyaml.NewRevision(beforeTks),
+		niceyaml.NewRevision(afterTks),
+	)
+
+	return p.PrintTokens(diff.Lines())
+}
+
+// printDiffSummary generates a summary diff showing only changed lines with context.
+// Helper to replace the removed Printer.PrintTokenDiffSummary method in tests.
+func printDiffSummary(p *niceyaml.Printer, before, after string, context int) string {
+	beforeTks := niceyaml.NewLinesFromString(before, niceyaml.WithName("before"))
+	afterTks := niceyaml.NewLinesFromString(after, niceyaml.WithName("after"))
+
+	diff := niceyaml.NewSummaryDiff(
+		niceyaml.NewRevision(beforeTks),
+		niceyaml.NewRevision(afterTks),
+		context,
+	)
+
+	result := diff.Lines()
+	if result.IsEmpty() {
+		return ""
+	}
+
+	return p.PrintTokens(result)
 }
 
 func Test_PrinterErrorToken(t *testing.T) {
@@ -76,10 +111,7 @@ alias: *x
 text: aaaa
 text2: aaaa
  bbbb
- cccc
- dddd
- eeee
-`,
+ cccc`,
 			wantLine: 1,
 		},
 		"basic yaml tokens[4]": {
@@ -107,9 +139,7 @@ text: aaaa
 text2: aaaa
  bbbb
  cccc
- dddd
- eeee
-`,
+ dddd`,
 			wantLine: 1,
 		},
 		"basic yaml tokens[6]": {
@@ -137,14 +167,7 @@ text: aaaa
 text2: aaaa
  bbbb
  cccc
- dddd
- eeee
-text3: ffff
- gggg
- hhhh
- iiii
- jjjj
-`,
+ dddd`,
 			wantLine: 1,
 		},
 		"document header tokens[12]": {
@@ -181,12 +204,10 @@ text3: hello
 `,
 			tokenIndex: 2,
 			want: `
+
 text1: 'aaaa
  bbbb
- cccc'
-text2: "ffff
- gggg
- hhhh"`,
+ cccc'`,
 			wantLine: 1,
 		},
 		"multiline strings tokens[3]": {
@@ -201,13 +222,13 @@ text3: hello
 `,
 			tokenIndex: 3,
 			want: `
+
 text1: 'aaaa
  bbbb
  cccc'
 text2: "ffff
  gggg
- hhhh"
-text3: hello`,
+ hhhh"`,
 			wantLine: 2,
 		},
 		"multiline strings tokens[5]": {
@@ -222,13 +243,13 @@ text3: hello
 `,
 			tokenIndex: 5,
 			want: `
+
 text1: 'aaaa
  bbbb
  cccc'
 text2: "ffff
  gggg
- hhhh"
-text3: hello`,
+ hhhh"`,
 			wantLine: 2,
 		},
 		"multiline strings tokens[6]": {
@@ -243,6 +264,7 @@ text3: hello
 `,
 			tokenIndex: 6,
 			want: `
+ cccc'
 text2: "ffff
  gggg
  hhhh"
@@ -255,11 +277,11 @@ text3: hello`,
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tokens := lexer.Tokenize(tc.input)
+			tks := lexer.Tokenize(tc.input)
 
 			p := testPrinter()
 
-			got, gotLine := p.PrintErrorToken(tokens[tc.tokenIndex], 3)
+			got, gotLine := p.PrintErrorToken(tks[tc.tokenIndex], 3)
 			got = "\n" + got
 
 			assert.Equal(t, tc.want, got)
@@ -274,15 +296,15 @@ func TestPrinter_Anchor(t *testing.T) {
 	input := `
 anchor: &x 1
 alias: *x`
-	tokens := lexer.Tokenize(input)
+	tks := lexer.Tokenize(input)
 
 	p := testPrinter()
 
-	got := p.PrintTokens(tokens)
+	got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
 	assert.Equal(t, input, got)
 
-	file := parseFile(t, tokens)
-	gotFile := p.PrintFile(file)
+	file := parseFile(t, tks)
+	gotFile := p.PrintTokens(niceyaml.NewLinesFromFile(file))
 	assert.Equal(t, got, gotFile)
 }
 
@@ -335,10 +357,10 @@ func TestPrinter_Highlight(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tokens := lexer.Tokenize(tc.input)
+			tks := lexer.Tokenize(tc.input)
 
 			var line, column int
-			for _, tk := range tokens {
+			for _, tk := range tks {
 				if tk.Value == tc.findToken || strings.Contains(tk.Value, tc.findToken) {
 					line = tk.Position.Line
 					column = tk.Position.Column
@@ -352,11 +374,11 @@ func TestPrinter_Highlight(t *testing.T) {
 			p := testPrinter()
 			p.AddStyleToToken(testHighlightStyle(), niceyaml.Position{Line: line, Col: column})
 
-			got := p.PrintTokens(tokens)
+			got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
 			assert.Equal(t, tc.want, got)
 
-			file := parseFile(t, tokens)
-			gotFile := p.PrintFile(file)
+			file := parseFile(t, tks)
+			gotFile := p.PrintTokens(niceyaml.NewLinesFromFile(file))
 			assert.Equal(t, got, gotFile)
 		})
 	}
@@ -426,7 +448,7 @@ func TestPrinter_AddStyleToRange(t *testing.T) {
 				Start: niceyaml.Position{Line: 1, Col: 4},
 				End:   niceyaml.Position{Line: 1, Col: 6},
 			},
-			// Colon and space are separate tokens.
+			// Colon and space are separate niceyaml.
 			want: "key[:][ ]value",
 		},
 	}
@@ -435,15 +457,15 @@ func TestPrinter_AddStyleToRange(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tokens := lexer.Tokenize(tc.input)
+			tks := lexer.Tokenize(tc.input)
 			p := testPrinter()
 			p.AddStyleToRange(testHighlightStyle(), tc.rng)
 
-			got := p.PrintTokens(tokens)
+			got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
 			assert.Equal(t, tc.want, got)
 
-			file := parseFile(t, tokens)
-			gotFile := p.PrintFile(file)
+			file := parseFile(t, tks)
+			gotFile := p.PrintTokens(niceyaml.NewLinesFromFile(file))
 			assert.Equal(t, got, gotFile)
 		})
 	}
@@ -453,7 +475,7 @@ func TestPrinter_AddStyleToRange_Overlapping(t *testing.T) {
 	t.Parallel()
 
 	input := "key: value"
-	tokens := lexer.Tokenize(input)
+	tks := lexer.Tokenize(input)
 
 	innerStyle := lipgloss.NewStyle().Transform(func(s string) string {
 		return "<" + s + ">"
@@ -474,7 +496,7 @@ func TestPrinter_AddStyleToRange_Overlapping(t *testing.T) {
 		End:   niceyaml.Position{Line: 1, Col: 10},
 	})
 
-	got := p.PrintTokens(tokens)
+	got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
 
 	// Overlapping ranges compose transforms.
 	// Col 6: inner only -> <v>.
@@ -488,7 +510,7 @@ func TestPrinter_AddStyleToRange_WithLineNumbers(t *testing.T) {
 	t.Parallel()
 
 	input := "first: 1\nsecond: 2"
-	tokens := lexer.Tokenize(input)
+	tks := lexer.Tokenize(input)
 
 	p := niceyaml.NewPrinter(
 		niceyaml.WithStyles(niceyaml.Styles{}),
@@ -502,7 +524,7 @@ func TestPrinter_AddStyleToRange_WithLineNumbers(t *testing.T) {
 		End:   niceyaml.Position{Line: 1, Col: 9},
 	})
 
-	got := p.PrintTokens(tokens)
+	got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
 
 	// Line numbers added (no padding from empty style), range works.
 	assert.Equal(t, "   1first: [1]\n   2second: 2", got)
@@ -512,7 +534,7 @@ func TestPrinter_ClearStyles_IncludesRanges(t *testing.T) {
 	t.Parallel()
 
 	input := "key: value"
-	tokens := lexer.Tokenize(input)
+	tks := lexer.Tokenize(input)
 
 	p := testPrinter()
 	p.AddStyleToRange(testHighlightStyle(), niceyaml.PositionRange{
@@ -522,23 +544,23 @@ func TestPrinter_ClearStyles_IncludesRanges(t *testing.T) {
 	p.ClearStyles()
 
 	// After clearing, no styles should be applied.
-	assert.Equal(t, "key: value", p.PrintTokens(tokens))
+	assert.Equal(t, "key: value", p.PrintTokens(niceyaml.NewLinesFromTokens(tks)))
 }
 
 func TestPrinter_PrintTokens_EmptyFile(t *testing.T) {
 	t.Parallel()
 
 	// Tokenize an empty string to simulate an empty YAML file.
-	tokens := lexer.Tokenize("")
+	tks := lexer.Tokenize("")
 
 	p := testPrinter()
-	got := p.PrintTokens(tokens)
+	got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
 
 	// Empty file should produce empty output.
 	assert.Empty(t, got)
 
-	file := parseFile(t, tokens)
-	gotFile := p.PrintFile(file)
+	file := parseFile(t, tks)
+	gotFile := p.PrintTokens(niceyaml.NewLinesFromFile(file))
 	assert.Equal(t, got, gotFile)
 }
 
@@ -550,9 +572,9 @@ number: 42
 bool: true
 # comment`
 
-	tokens := lexer.Tokenize(input)
+	tks := lexer.Tokenize(input)
 	p := niceyaml.NewPrinter()
-	got := p.PrintTokens(tokens)
+	got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
 
 	// Should contain ANSI escape codes.
 	assert.Contains(t, got, "\x1b[")
@@ -560,8 +582,8 @@ bool: true
 	assert.Contains(t, got, "key")
 	assert.Contains(t, got, "value")
 
-	file := parseFile(t, tokens)
-	gotFile := p.PrintFile(file)
+	file := parseFile(t, tks)
+	gotFile := p.PrintTokens(niceyaml.NewLinesFromFile(file))
 	assert.Equal(t, got, gotFile)
 }
 
@@ -569,7 +591,7 @@ func TestNewPrinter_WithStyles(t *testing.T) {
 	t.Parallel()
 
 	input := `key: value`
-	tokens := lexer.Tokenize(input)
+	tks := lexer.Tokenize(input)
 
 	s := niceyaml.Styles{
 		niceyaml.StyleKey: lipgloss.NewStyle().Transform(func(s string) string {
@@ -585,11 +607,11 @@ func TestNewPrinter_WithStyles(t *testing.T) {
 		niceyaml.WithLinePrefix(""),
 	)
 
-	got := p.PrintTokens(tokens)
+	got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
 	assert.Equal(t, "<key>key</key>: <str>value</str>", got)
 
-	file := parseFile(t, tokens)
-	gotFile := p.PrintFile(file)
+	file := parseFile(t, tks)
+	gotFile := p.PrintTokens(niceyaml.NewLinesFromFile(file))
 	assert.Equal(t, got, gotFile)
 }
 
@@ -597,19 +619,19 @@ func TestNewPrinter_EmptyStyles(t *testing.T) {
 	t.Parallel()
 
 	input := `key: value`
-	tokens := lexer.Tokenize(input)
+	tks := lexer.Tokenize(input)
 
 	// Empty Styles should not panic.
 	s := niceyaml.Styles{}
 	p := niceyaml.NewPrinter(niceyaml.WithStyles(s))
-	got := p.PrintTokens(tokens)
+	got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
 
 	// Should still contain original content.
 	assert.Contains(t, got, "key")
 	assert.Contains(t, got, "value")
 
-	file := parseFile(t, tokens)
-	gotFile := p.PrintFile(file)
+	file := parseFile(t, tks)
+	gotFile := p.PrintTokens(niceyaml.NewLinesFromFile(file))
 	assert.Equal(t, got, gotFile)
 }
 
@@ -617,7 +639,7 @@ func TestPrinter_BlendColors_OverlayNoColor(t *testing.T) {
 	t.Parallel()
 
 	input := `key: value`
-	tokens := lexer.Tokenize(input)
+	tks := lexer.Tokenize(input)
 
 	// Use Styles with actual colors.
 	s := niceyaml.Styles{
@@ -640,7 +662,7 @@ func TestPrinter_BlendColors_OverlayNoColor(t *testing.T) {
 		End:   niceyaml.Position{Line: 1, Col: 11},
 	})
 
-	got := p.PrintTokens(tokens)
+	got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
 	// The value should be wrapped in brackets from the transform.
 	assert.Contains(t, got, "[value]")
 }
@@ -649,9 +671,8 @@ func TestPrinter_LineNumbers(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		input             string
-		want              string
-		initialLineNumber int
+		input string
+		want  string
 	}{
 		"single line": {
 			input: "key: value",
@@ -660,11 +681,6 @@ func TestPrinter_LineNumbers(t *testing.T) {
 		"multiple lines": {
 			input: "key: value\nnumber: 42",
 			want:  "   1 key: value\n   2 number: 42",
-		},
-		"custom initial line": {
-			input:             "key: value\nnumber: 42",
-			initialLineNumber: 10,
-			want:              "  10 key: value\n  11 number: 42",
 		},
 		"multi-line value": {
 			input: "key: |\n  line1\n  line2",
@@ -676,25 +692,20 @@ func TestPrinter_LineNumbers(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tokens := lexer.Tokenize(tc.input)
+			tks := lexer.Tokenize(tc.input)
 
-			opts := []niceyaml.PrinterOption{
+			p := niceyaml.NewPrinter(
 				niceyaml.WithStyles(niceyaml.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 				niceyaml.WithLineNumbers(),
 				niceyaml.WithLinePrefix(""),
-			}
-			if tc.initialLineNumber > 0 {
-				opts = append(opts, niceyaml.WithInitialLineNumber(tc.initialLineNumber))
-			}
+			)
 
-			p := niceyaml.NewPrinter(opts...)
-
-			got := p.PrintTokens(tokens)
+			got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
 			assert.Equal(t, tc.want, got)
 
-			file := parseFile(t, tokens)
-			gotFile := p.PrintFile(file)
+			file := parseFile(t, tks)
+			gotFile := p.PrintTokens(niceyaml.NewLinesFromFile(file))
 			assert.Equal(t, got, gotFile)
 		})
 	}
@@ -712,7 +723,7 @@ text2: aaaa
  eeee
 text3: ffff`
 
-	tokens := lexer.Tokenize(input)
+	tks := lexer.Tokenize(input)
 
 	p := niceyaml.NewPrinter(
 		niceyaml.WithStyles(niceyaml.Styles{}),
@@ -720,7 +731,7 @@ text3: ffff`
 		niceyaml.WithLineNumbers(),
 	)
 
-	got, gotLine := p.PrintErrorToken(tokens[3], 3)
+	got, gotLine := p.PrintErrorToken(tks[3], 3)
 
 	// Should start from line 1.
 	assert.Equal(t, 1, gotLine)
@@ -811,10 +822,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 				niceyaml.WithStyles(niceyaml.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 			)
-			before := lexer.Tokenize(tc.before)
-			after := lexer.Tokenize(tc.after)
-
-			got := p.PrintTokenDiff(before, after)
+			got := printDiff(p, tc.before, tc.after)
 
 			for _, want := range tc.wantContains {
 				assert.Contains(t, got, want)
@@ -834,7 +842,7 @@ func TestPrinter_PrintTokenDiff_LineOrder(t *testing.T) {
 		niceyaml.WithStyles(niceyaml.Styles{}),
 		niceyaml.WithStyle(lipgloss.NewStyle()),
 	)
-	got := p.PrintTokenDiff(lexer.Tokenize(before), lexer.Tokenize(after))
+	got := printDiff(p, before, after)
 
 	lines := strings.Split(got, "\n")
 
@@ -856,7 +864,7 @@ func TestPrinter_PrintTokenDiff_ModificationOrder(t *testing.T) {
 		niceyaml.WithStyles(niceyaml.Styles{}),
 		niceyaml.WithStyle(lipgloss.NewStyle()),
 	)
-	got := p.PrintTokenDiff(lexer.Tokenize(before), lexer.Tokenize(after))
+	got := printDiff(p, before, after)
 
 	lines := strings.Split(got, "\n")
 
@@ -900,10 +908,7 @@ func TestPrinter_PrintTokenDiff_EmptyFiles(t *testing.T) {
 				niceyaml.WithStyles(niceyaml.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 			)
-			before := lexer.Tokenize(tc.before)
-			after := lexer.Tokenize(tc.after)
-
-			got := p.PrintTokenDiff(before, after)
+			got := printDiff(p, tc.before, tc.after)
 
 			if tc.wantEmpty {
 				assert.Empty(t, got)
@@ -963,7 +968,7 @@ func TestPrinter_WordWrap(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tokens := lexer.Tokenize(tc.input)
+			tks := lexer.Tokenize(tc.input)
 
 			p := niceyaml.NewPrinter(
 				niceyaml.WithStyles(niceyaml.Styles{}),
@@ -974,11 +979,11 @@ func TestPrinter_WordWrap(t *testing.T) {
 				p.SetWidth(tc.width)
 			}
 
-			got := p.PrintTokens(tokens)
+			got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
 			assert.Equal(t, tc.want, got)
 
-			file := parseFile(t, tokens)
-			gotFile := p.PrintFile(file)
+			file := parseFile(t, tks)
+			gotFile := p.PrintTokens(niceyaml.NewLinesFromFile(file))
 			assert.Equal(t, got, gotFile)
 		})
 	}
@@ -1012,7 +1017,7 @@ func TestPrinter_WordWrap_WithLineNumbers(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tokens := lexer.Tokenize(tc.input)
+			tks := lexer.Tokenize(tc.input)
 
 			p := niceyaml.NewPrinter(
 				niceyaml.WithStyles(niceyaml.Styles{}),
@@ -1023,7 +1028,7 @@ func TestPrinter_WordWrap_WithLineNumbers(t *testing.T) {
 			)
 			p.SetWidth(tc.width)
 
-			got := p.PrintTokens(tokens)
+			got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -1079,10 +1084,7 @@ func TestPrinter_PrintTokenDiff_WithWordWrap(t *testing.T) {
 			)
 			p.SetWidth(tc.width)
 
-			before := lexer.Tokenize(tc.before)
-			after := lexer.Tokenize(tc.after)
-
-			got := p.PrintTokenDiff(before, after)
+			got := printDiff(p, tc.before, tc.after)
 
 			for _, want := range tc.wantContains {
 				assert.Contains(t, got, want)
@@ -1152,10 +1154,7 @@ func TestPrinter_PrintTokenDiff_WithLineNumbers(t *testing.T) {
 				niceyaml.WithLineNumbers(),
 			)
 
-			before := lexer.Tokenize(tc.before)
-			after := lexer.Tokenize(tc.after)
-
-			got := p.PrintTokenDiff(before, after)
+			got := printDiff(p, tc.before, tc.after)
 
 			for _, want := range tc.wantContains {
 				assert.Contains(t, got, want)
@@ -1231,10 +1230,7 @@ func TestPrinter_PrintTokenDiff_CustomPrefixes(t *testing.T) {
 				niceyaml.WithLineDeletedPrefix(tc.deletedPrefix),
 			)
 
-			before := lexer.Tokenize(tc.before)
-			after := lexer.Tokenize(tc.after)
-
-			got := p.PrintTokenDiff(before, after)
+			got := printDiff(p, tc.before, tc.after)
 
 			for _, want := range tc.wantContains {
 				assert.Contains(t, got, want)
@@ -1320,55 +1316,32 @@ func TestPrinter_TokenTypes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tokens := lexer.Tokenize(tc.input)
+			tks := lexer.Tokenize(tc.input)
 			p := testPrinter()
 
-			got := p.PrintTokens(tokens)
+			got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
 
 			for _, want := range tc.wantContains {
 				assert.Contains(t, got, want)
 			}
 
-			file := parseFile(t, tokens)
-			gotFile := p.PrintFile(file)
+			file := parseFile(t, tks)
+			gotFile := p.PrintTokens(niceyaml.NewLinesFromFile(file))
 			assert.Equal(t, got, gotFile)
 		})
 	}
-}
-
-func TestPrinter_PrintErrorToken_InitialLineNumberZero(t *testing.T) {
-	t.Parallel()
-
-	input := "line1: a\nline2: b\nline3: c"
-	tokens := lexer.Tokenize(input)
-
-	p := niceyaml.NewPrinter(
-		niceyaml.WithInitialLineNumber(0),
-		niceyaml.WithLineNumbers(),
-		niceyaml.WithStyles(niceyaml.Styles{}),
-		niceyaml.WithStyle(lipgloss.NewStyle()),
-		niceyaml.WithLinePrefix(""),
-	)
-
-	// Error on line 2, show 1 line of context.
-	got, minLine := p.PrintErrorToken(tokens[2], 1)
-
-	// When initialLineNumber < 1, it should fall back to minLine.
-	assert.Equal(t, 1, minLine)
-	// Line numbers should start from minLine (1), not 0.
-	assert.Contains(t, got, "   1")
 }
 
 func TestPrinter_PrintErrorToken_FirstToken(t *testing.T) {
 	t.Parallel()
 
 	input := "key: value\nanother: line"
-	tokens := lexer.Tokenize(input)
+	tks := lexer.Tokenize(input)
 
 	p := testPrinter()
 
-	// Call on the first token - tests extractTokensInRange when Prev is nil.
-	got, minLine := p.PrintErrorToken(tokens[0], 1)
+	// Call on the first token - tests collectAllTokens when Prev is nil.
+	got, minLine := p.PrintErrorToken(tks[0], 1)
 
 	assert.Equal(t, 1, minLine)
 	assert.Contains(t, got, "key")
@@ -1412,14 +1385,14 @@ func TestPrinter_PrintFile_MultiDocument(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tokens := lexer.Tokenize(tc.input)
+			tks := lexer.Tokenize(tc.input)
 			p := testPrinter()
 
-			got := p.PrintTokens(tokens)
+			got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
 			assert.Equal(t, tc.want, got)
 
-			file := parseFile(t, tokens)
-			gotFile := p.PrintFile(file)
+			file := parseFile(t, tks)
+			gotFile := p.PrintTokens(niceyaml.NewLinesFromFile(file))
 			assert.Equal(t, got, gotFile)
 		})
 	}
@@ -1515,10 +1488,7 @@ func TestPrinter_PrintTokenDiff_WithRangeHighlights(t *testing.T) {
 			)
 			p.AddStyleToRange(testHighlightStyle(), tc.rng)
 
-			before := lexer.Tokenize(tc.before)
-			after := lexer.Tokenize(tc.after)
-
-			got := p.PrintTokenDiff(before, after)
+			got := printDiff(p, tc.before, tc.after)
 
 			for _, want := range tc.wantContains {
 				assert.Contains(t, got, want)
@@ -1653,10 +1623,8 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				niceyaml.WithStyles(niceyaml.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 			)
-			before := lexer.Tokenize(tc.before)
-			after := lexer.Tokenize(tc.after)
 
-			got := p.PrintTokenDiffSummary(before, after, tc.context)
+			got := printDiffSummary(p, tc.before, tc.after, tc.context)
 
 			if tc.wantEmpty {
 				assert.Empty(t, got)
@@ -1686,7 +1654,7 @@ func TestPrinter_PrintTokenDiffSummary_WithLineNumbers(t *testing.T) {
 		niceyaml.WithLineNumbers(),
 	)
 
-	got := p.PrintTokenDiffSummary(lexer.Tokenize(before), lexer.Tokenize(after), 1)
+	got := printDiffSummary(p, before, after, 1)
 
 	// Should contain line numbers for included lines.
 	assert.Contains(t, got, "   1  a: 1")

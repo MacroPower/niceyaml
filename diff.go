@@ -1,5 +1,10 @@
 package niceyaml
 
+import (
+	"fmt"
+	"strings"
+)
+
 // diffKind represents the kind of diff operation.
 type diffKind int
 
@@ -26,10 +31,8 @@ func (k diffKind) beforeAfterDeltas() (int, int) {
 
 // lineOp represents a line in the full diff output.
 type lineOp struct {
-	content    string   // Line content without newline.
-	kind       diffKind // One of [diffEqual], [diffDelete], [diffInsert].
-	afterLine  int      // 1-indexed line in "after" (for syntax highlighting).
-	beforeLine int      // 1-indexed line in "before" (for deleted lines).
+	line Line     // Original Line from source.
+	kind diffKind // One of [diffEqual], [diffDelete], [diffInsert].
 }
 
 // diffHunk represents a contiguous group of diff operations.
@@ -43,11 +46,9 @@ type diffHunk struct {
 }
 
 // lcsLineDiff computes line operations using a simple LCS-based diff.
-func lcsLineDiff(beforeLines, afterLines []string) []lineOp {
-	// Simple O(nm) LCS-based diff algorithm.
-	m, n := len(beforeLines), len(afterLines)
+func lcsLineDiff(before, after []Line) []lineOp {
+	m, n := len(before), len(after)
 
-	// Build LCS table.
 	dp := make([][]int, m+1)
 	for i := range dp {
 		dp[i] = make([]int, n+1)
@@ -55,7 +56,7 @@ func lcsLineDiff(beforeLines, afterLines []string) []lineOp {
 
 	for i := m - 1; i >= 0; i-- {
 		for j := n - 1; j >= 0; j-- {
-			if beforeLines[i] == afterLines[j] {
+			if before[i].Content() == after[j].Content() {
 				dp[i][j] = dp[i+1][j+1] + 1
 			} else {
 				dp[i][j] = max(dp[i+1][j], dp[i][j+1])
@@ -63,43 +64,24 @@ func lcsLineDiff(beforeLines, afterLines []string) []lineOp {
 		}
 	}
 
-	// Backtrack to build operations.
-	// Standard diff convention: deletions come before insertions.
+	// Backtrack: deletions before insertions per diff convention.
 	var ops []lineOp
 
 	i, j := 0, 0
 
 	for i < m || j < n {
 		switch {
-		case i < m && j < n && beforeLines[i] == afterLines[j]:
-			// Equal line.
-			ops = append(ops, lineOp{
-				kind:       diffEqual,
-				content:    afterLines[j],
-				afterLine:  j + 1,
-				beforeLine: i + 1,
-			})
+		case i < m && j < n && before[i].Content() == after[j].Content():
+			ops = append(ops, lineOp{kind: diffEqual, line: after[j]})
 			i++
 			j++
 
 		case i < m && (j >= n || dp[i+1][j] >= dp[i][j+1]):
-			// Delete from before (prefer deletion when tied).
-			ops = append(ops, lineOp{
-				kind:       diffDelete,
-				content:    beforeLines[i],
-				afterLine:  0,
-				beforeLine: i + 1,
-			})
+			ops = append(ops, lineOp{kind: diffDelete, line: before[i]})
 			i++
 
 		default:
-			// Insert from after.
-			ops = append(ops, lineOp{
-				kind:       diffInsert,
-				content:    afterLines[j],
-				afterLine:  j + 1,
-				beforeLine: 0,
-			})
+			ops = append(ops, lineOp{kind: diffInsert, line: after[j]})
 			j++
 		}
 	}
@@ -108,14 +90,12 @@ func lcsLineDiff(beforeLines, afterLines []string) []lineOp {
 }
 
 // buildHunks groups consecutive included operations into hunks.
-// Each hunk has metadata for generating unified diff headers.
 func buildHunks(ops []lineOp, included []bool) []diffHunk {
 	var (
 		hunks       []diffHunk
 		currentHunk *diffHunk
 	)
 
-	// Track running line numbers in "before" and "after" files.
 	beforeLine := 1
 	afterLine := 1
 
@@ -123,13 +103,11 @@ func buildHunks(ops []lineOp, included []bool) []diffHunk {
 		opBeforeLine := beforeLine
 		opAfterLine := afterLine
 
-		// Advance line counters for all operations, including non-included ones.
 		beforeDelta, afterDelta := op.kind.beforeAfterDeltas()
 		beforeLine += beforeDelta
 		afterLine += afterDelta
 
 		if !included[i] {
-			// End current hunk if we hit a non-included operation.
 			if currentHunk != nil {
 				hunks = append(hunks, *currentHunk)
 				currentHunk = nil
@@ -139,7 +117,6 @@ func buildHunks(ops []lineOp, included []bool) []diffHunk {
 		}
 
 		if currentHunk == nil {
-			// Start a new hunk with the current line numbers.
 			currentHunk = &diffHunk{
 				startIdx: i,
 				fromLine: opBeforeLine,
@@ -147,13 +124,11 @@ func buildHunks(ops []lineOp, included []bool) []diffHunk {
 			}
 		}
 
-		// Extend current hunk.
 		currentHunk.endIdx = i + 1
 		currentHunk.fromCount += beforeDelta
 		currentHunk.toCount += afterDelta
 	}
 
-	// Append final hunk if any.
 	if currentHunk != nil {
 		hunks = append(hunks, *currentHunk)
 	}
@@ -161,23 +136,162 @@ func buildHunks(ops []lineOp, included []bool) []diffHunk {
 	return hunks
 }
 
-// hunkAfterLineRange computes the [min, max] line range in the "after" file
-// needed for syntax-highlighted equal lines in a hunk.
-// Returns (0, 0) if the hunk has no equal lines.
-func hunkAfterLineRange(ops []lineOp, hunk diffHunk) (int, int) {
-	var minLine, maxLine int
+// formatHunkHeader formats a unified diff hunk header like "@@ -1,3 +1,4 @@".
+// Uses the same edge case handling as go-udiff (unified.go lines 218-235).
+func formatHunkHeader(h diffHunk) string {
+	var b strings.Builder
 
-	for i := hunk.startIdx; i < hunk.endIdx; i++ {
-		if ops[i].kind == diffEqual {
-			line := ops[i].afterLine
-			if minLine == 0 || line < minLine {
-				minLine = line
+	fmt.Fprint(&b, "@@")
+
+	// Format "before" part.
+	switch {
+	case h.fromCount > 1:
+		fmt.Fprintf(&b, " -%d,%d", h.fromLine, h.fromCount)
+	case h.fromLine == 1 && h.fromCount == 0:
+		fmt.Fprint(&b, " -0,0") // GNU diff -u behavior for empty file.
+	default:
+		fmt.Fprintf(&b, " -%d", h.fromLine)
+	}
+
+	// Format "after" part.
+	switch {
+	case h.toCount > 1:
+		fmt.Fprintf(&b, " +%d,%d", h.toLine, h.toCount)
+	case h.toLine == 1 && h.toCount == 0:
+		fmt.Fprint(&b, " +0,0") // GNU diff -u behavior for empty file.
+	default:
+		fmt.Fprintf(&b, " +%d", h.toLine)
+	}
+
+	fmt.Fprint(&b, " @@")
+
+	return b.String()
+}
+
+// selectContextLines returns a boolean slice indicating which operations to include.
+func selectContextLines(ops []lineOp, context int) []bool {
+	included := make([]bool, len(ops))
+	n := len(ops)
+	lastMarked := -1
+
+	for i, op := range ops {
+		if op.kind != diffEqual {
+			start := max(0, i-context)
+			end := min(n-1, i+context)
+
+			// Mark the range [start, end], avoiding re-marking already included lines.
+			for j := max(start, lastMarked+1); j <= end; j++ {
+				included[j] = true
 			}
-			if line > maxLine {
-				maxLine = line
-			}
+
+			lastMarked = max(lastMarked, end)
 		}
 	}
 
-	return minLine, maxLine
+	return included
+}
+
+// FullDiff represents a complete diff between two [Revision]s.
+type FullDiff struct {
+	a, b *Revision
+}
+
+// NewFullDiff creates a new [FullDiff].
+func NewFullDiff(a, b *Revision) *FullDiff {
+	return &FullDiff{a: a, b: b}
+}
+
+// Lines returns the [Lines] representing the diff between the two revisions.
+// The returned Lines contains merged tokens from both revisions:
+// unchanged lines use tokens from b, while changed lines include
+// deleted tokens from a followed by inserted tokens from b.
+// Lines contain flags for deleted/inserted lines.
+func (d *FullDiff) Lines() *Lines {
+	ops := lcsLineDiff(d.a.head.lines, d.b.head.lines)
+
+	lines := make([]Line, 0, len(ops))
+
+	for _, op := range ops {
+		line := op.line.Clone()
+
+		switch op.kind {
+		case diffDelete:
+			line.Flag = FlagDeleted
+		case diffInsert:
+			line.Flag = FlagInserted
+		default:
+			line.Flag = FlagDefault
+		}
+
+		lines = append(lines, line)
+	}
+
+	return &Lines{
+		Name:  fmt.Sprintf("%s..%s", d.a.Name(), d.b.Name()),
+		lines: lines,
+	}
+}
+
+// SummaryDiff represents a summarized diff between two [Revision]s.
+type SummaryDiff struct {
+	a, b    *Revision
+	context int
+}
+
+// NewSummaryDiff creates a new [SummaryDiff] with the specified context lines.
+// A context of 0 shows only the changed lines. Negative values are treated as 0.
+func NewSummaryDiff(a, b *Revision, context int) *SummaryDiff {
+	return &SummaryDiff{a: a, b: b, context: max(0, context)}
+}
+
+// Lines returns [Lines] representing a summarized diff between two revisions.
+// It shows only changed lines with the specified number of context lines around each change.
+// Hunk headers are stored in [Line.Annotation.Content] for each hunk's first line.
+func (d *SummaryDiff) Lines() *Lines {
+	ops := lcsLineDiff(d.a.head.lines, d.b.head.lines)
+	name := fmt.Sprintf("%s..%s", d.a.Name(), d.b.Name())
+
+	if len(ops) == 0 {
+		return &Lines{Name: name}
+	}
+
+	included := selectContextLines(ops, d.context)
+	hunks := buildHunks(ops, included)
+
+	if len(hunks) == 0 {
+		return &Lines{Name: name}
+	}
+
+	var lines []Line
+
+	for _, hunk := range hunks {
+		hunkHeader := formatHunkHeader(hunk)
+		isFirstLineOfHunk := true
+
+		for i := hunk.startIdx; i < hunk.endIdx; i++ {
+			op := ops[i]
+			line := op.line.Clone()
+
+			switch op.kind {
+			case diffDelete:
+				line.Flag = FlagDeleted
+			case diffInsert:
+				line.Flag = FlagInserted
+			default:
+				line.Flag = FlagDefault
+			}
+
+			if isFirstLineOfHunk {
+				line.Annotation = Annotation{Content: hunkHeader}
+				isFirstLineOfHunk = false
+			}
+
+			lines = append(lines, line)
+		}
+	}
+
+	return &Lines{
+		Name:  name,
+		lines: lines,
+	}
 }

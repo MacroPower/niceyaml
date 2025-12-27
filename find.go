@@ -7,7 +7,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/goccy/go-yaml/token"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 	"golang.org/x/text/runes"
@@ -67,18 +66,18 @@ func WithNormalizer(normalizer Normalizer) FinderOption {
 	}
 }
 
-// FindTokens finds all occurrences of the search string in the provided tokens.
+// Find finds all occurrences of the search string in the provided lines.
 // It returns a slice of PositionRange indicating the start and end positions of each match.
-// The slice is provided in the order the matches appear in the tokens.
-func (f *Finder) FindTokens(tokens token.Tokens) []PositionRange {
-	if f.search == "" || len(tokens) == 0 {
+// The slice is provided in the order the matches appear in the lines.
+func (f *Finder) Find(lines *Lines) []PositionRange {
+	if f.search == "" || lines == nil || lines.IsEmpty() {
 		return nil
 	}
 
 	// Build concatenated source and position map.
 	// When a normalizer is set, source is already normalized and posMap maps
 	// normalized character indices to original positions.
-	source, posMap := f.buildSourceAndPositionMap(tokens)
+	source, posMap := f.buildSourceAndPositionMap(lines)
 	if source == "" {
 		return nil
 	}
@@ -90,7 +89,6 @@ func (f *Finder) FindTokens(tokens token.Tokens) []PositionRange {
 		searchStr = f.normalizer.Normalize(f.search)
 	}
 
-	// Find all matches.
 	var results []PositionRange
 
 	offset := 0
@@ -123,41 +121,34 @@ func (f *Finder) FindTokens(tokens token.Tokens) []PositionRange {
 // When a normalizer is set, the returned source is normalized and the position map
 // maps normalized character indices to original positions. This ensures correct
 // position lookup when searching in normalized text.
-func (f *Finder) buildSourceAndPositionMap(tokens token.Tokens) (string, *positionMap) {
+func (f *Finder) buildSourceAndPositionMap(lines *Lines) (string, *positionMap) {
 	var sb strings.Builder
 
 	pm := &positionMap{}
 
-	if len(tokens) == 0 {
+	if lines == nil || lines.IsEmpty() {
 		return "", pm
 	}
 
-	pt := NewPositionTrackerFromTokens(tokens)
 	normalizedCharIndex := 0
 
-	for _, tk := range tokens {
-		for _, r := range tk.Origin {
-			pos := pt.Position()
-
-			// Get normalized form of this rune (or original if no normalizer).
-			var normalized string
-			if f.normalizer != nil {
-				normalized = f.normalizer.Normalize(string(r))
-			} else {
-				normalized = string(r)
-			}
-
-			// Map each normalized char back to original position.
-			for _, nr := range normalized {
-				pm.add(normalizedCharIndex, pos)
-				sb.WriteRune(nr)
-
-				normalizedCharIndex++
-			}
-
-			pt.Advance(r)
+	lines.EachRune(func(r rune, pos Position) {
+		// Get normalized form of this rune (or original if no normalizer).
+		var normalized string
+		if f.normalizer != nil {
+			normalized = f.normalizer.Normalize(string(r))
+		} else {
+			normalized = string(r)
 		}
-	}
+
+		// Map each normalized char back to original position.
+		for _, nr := range normalized {
+			pm.add(normalizedCharIndex, pos)
+			sb.WriteRune(nr)
+
+			normalizedCharIndex++
+		}
+	})
 
 	return sb.String(), pm
 }

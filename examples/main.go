@@ -6,7 +6,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/charmtone"
-	"github.com/goccy/go-yaml/lexer"
 
 	_ "embed"
 
@@ -35,7 +34,6 @@ var (
 func main() {
 	printer := niceyaml.NewPrinter(niceyaml.WithLineNumbers())
 
-	tokens := lexer.Tokenize(source)
 	red := lipgloss.NewStyle().Background(charmtone.Sapphire).Foreground(charmtone.Salt)
 	printer.AddStyleToRange(&red, niceyaml.PositionRange{
 		Start: niceyaml.Position{Line: 10, Col: 5},
@@ -48,26 +46,27 @@ func main() {
 		End:   niceyaml.Position{Line: 11, Col: 31},
 	})
 
-	rangeDemo := printer.PrintTokens(tokens)
+	rangeDemo := printer.PrintTokens(niceyaml.NewLinesFromString(source))
 	printer.ClearStyles()
 
 	// Show diff between two YAML documents.
-	tokens1 := lexer.Tokenize(original)
-	tokens2 := lexer.Tokenize(modified)
-	diffDemo := printer.PrintTokenDiff(tokens1, tokens2)
+	beforeRev := niceyaml.NewRevision(niceyaml.NewLinesFromString(original, niceyaml.WithName("before")))
+	afterRev := niceyaml.NewRevision(niceyaml.NewLinesFromString(modified, niceyaml.WithName("after")))
+	diff := niceyaml.NewFullDiff(beforeRev, afterRev)
+	diffDemo := printer.PrintTokens(diff.Lines())
 	printer.ClearStyles()
 
 	// Find and highlight all occurrences of "fe".
-	tokens = lexer.Tokenize(find)
+	findLines := niceyaml.NewLinesFromString(find)
 	finder := niceyaml.NewFinder("fe", niceyaml.WithNormalizer(niceyaml.StandardNormalizer{}))
-	matches := finder.FindTokens(tokens)
+	matches := finder.Find(findLines)
 
 	highlight := lipgloss.NewStyle().Background(charmtone.Mustard).Foreground(charmtone.Charcoal)
 	for _, m := range matches {
 		printer.AddStyleToRange(&highlight, m)
 	}
 
-	findDemo := printer.PrintTokens(tokens)
+	findDemo := printer.PrintTokens(findLines)
 	printer.ClearStyles()
 
 	out := lipgloss.NewStyle().

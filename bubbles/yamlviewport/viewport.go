@@ -2,15 +2,11 @@ package yamlviewport
 
 import (
 	"cmp"
-	"fmt"
-	"hash/fnv"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/goccy/go-yaml/ast"
-	"github.com/goccy/go-yaml/token"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -34,18 +30,12 @@ const (
 	DiffModeNone
 )
 
-// Finder finds matches in tokens for highlighting.
+// Finder finds matches in lines for highlighting.
 // The viewport invokes this during rerender to get fresh matches.
 type Finder interface {
-	// FindTokens returns position ranges to highlight in the given tokens.
+	// Find returns position ranges to highlight in the given lines.
 	// Returns nil if no matches.
-	FindTokens(tokens token.Tokens) []niceyaml.PositionRange
-}
-
-// Revision holds metadata for a single revision.
-type Revision struct {
-	Name string // Arbitrary name for the revision (e.g., timestamp, commit sha).
-	Hash uint64 // FNV-1a hash of token content for deduplication.
+	Find(lines *niceyaml.Lines) []niceyaml.PositionRange
 }
 
 // Option is a configuration option that works in conjunction with [New].
@@ -110,8 +100,7 @@ type Model struct {
 	KeyMap              KeyMap
 	finder              Finder
 	searchMatches       []niceyaml.PositionRange
-	revisions           []Revision
-	tokensByHash        map[uint64]token.Tokens
+	revision            *niceyaml.Revision
 	lines               []string
 	xOffset             int
 	horizontalStep      int
@@ -121,7 +110,6 @@ type Model struct {
 	yOffset             int
 	longestLineWidth    int
 	height              int
-	revisionIndex       int
 	diffMode            DiffMode
 	FillHeight          bool
 	MouseWheelEnabled   bool
@@ -177,31 +165,21 @@ func (m *Model) SetWidth(w int) {
 }
 
 // SetTokens replaces the revision history with a single revision.
-// This is a convenience method equivalent to ClearRevisions() followed by AppendRevision("", tokens).
-func (m *Model) SetTokens(tokens token.Tokens) {
+// This is a convenience method equivalent to ClearRevisions() followed by AppendRevision(lines).
+func (m *Model) SetTokens(lines *niceyaml.Lines) {
 	m.ClearRevisions()
-	m.AppendRevision("", tokens)
-}
-
-// SetFile replaces the revision history with a single revision from a file.
-// This is a convenience method equivalent to ClearRevisions() followed by AppendFileRevision("", file).
-func (m *Model) SetFile(file *ast.File) {
-	m.ClearRevisions()
-	m.AppendFileRevision("", file)
+	m.AppendRevision(lines)
 }
 
 // AppendRevision adds a new revision to the history.
-// The revision index is set to len(revisions), showing the latest revision without diff.
-func (m *Model) AppendRevision(name string, revision token.Tokens) {
-	hash := hashTokens(revision)
-	m.revisions = append(m.revisions, Revision{Name: name, Hash: hash})
-
-	if m.tokensByHash == nil {
-		m.tokensByHash = make(map[uint64]token.Tokens)
+// After appending, the revision pointer moves to the newly added revision.
+func (m *Model) AppendRevision(lines *niceyaml.Lines) {
+	if m.revision == nil {
+		m.revision = niceyaml.NewRevision(lines)
+	} else {
+		m.revision = m.revision.Tip().Append(lines)
 	}
 
-	m.tokensByHash[hash] = revision
-	m.revisionIndex = len(m.revisions)
 	m.rerender()
 
 	if m.YOffset() > m.maxYOffset() {
@@ -209,106 +187,106 @@ func (m *Model) AppendRevision(name string, revision token.Tokens) {
 	}
 }
 
-// AppendFileRevision adds a new revision from an [*ast.File] to the history.
-// The revision index is set to len(revisions), showing the latest revision without diff.
-func (m *Model) AppendFileRevision(name string, file *ast.File) {
-	tk := findAnyTokenInFile(file)
-	tokens := getAllTokens(tk)
-	m.AppendRevision(name, tokens)
-}
-
 // ClearRevisions removes all revisions from the history.
 func (m *Model) ClearRevisions() {
-	m.revisions = nil
-	m.tokensByHash = nil
-	m.revisionIndex = 0
+	m.revision = nil
 	m.rerender()
 }
 
 // RevisionIndex returns the current revision index.
 // Returns 0 if revisions are empty.
 func (m *Model) RevisionIndex() int {
-	return m.revisionIndex
+	if m.revision == nil {
+		return 0
+	}
+
+	return m.revision.Index()
 }
 
 // RevisionName returns the name of the current revision.
-// Returns empty string if revisions are empty or index is out of range.
+// Returns empty string if revisions are empty.
 func (m *Model) RevisionName() string {
-	if m.revisionIndex < 0 || m.revisionIndex >= len(m.revisions) {
+	if m.revision == nil {
 		return ""
 	}
 
-	return m.revisions[m.revisionIndex].Name
+	return m.revision.Name()
 }
 
 // RevisionNames returns all revision names in order.
 func (m *Model) RevisionNames() []string {
-	names := make([]string, len(m.revisions))
-	for i, rev := range m.revisions {
-		names[i] = rev.Name
+	if m.revision == nil {
+		return nil
 	}
 
-	return names
+	return m.revision.Names()
 }
 
 // GoToRevision sets the current revision index (clamped to valid range).
 // Index 0 shows the first revision without diff.
 // Index 1 to N-1 shows a diff between revisions[index-1] and revisions[index].
-// Index N (len) shows the latest revision without diff.
 func (m *Model) GoToRevision(index int) {
-	maxIndex := len(m.revisions)
-	m.revisionIndex = clamp(index, 0, maxIndex)
+	if m.revision == nil {
+		return
+	}
+
+	maxIndex := m.revision.Count() - 1
+	index = clamp(index, 0, maxIndex)
+	m.revision = m.revision.At(index)
 	m.rerender()
 	m.GotoTop()
 }
 
 // RevisionCount returns the number of revisions in the history.
 func (m *Model) RevisionCount() int {
-	return len(m.revisions)
+	if m.revision == nil {
+		return 0
+	}
+
+	return m.revision.Count()
 }
 
-// currentRevisionTokens returns the tokens for the currently displayed revision.
-// For diffs, this returns the "after" revision tokens.
-func (m *Model) currentRevisionTokens() token.Tokens {
-	n := len(m.revisions)
-	if n == 0 {
+// currentRevisionLines returns the [*niceyaml.Lines] for the currently displayed revision.
+// For diffs, this returns the "after" revision niceyaml.
+func (m *Model) currentRevisionLines() *niceyaml.Lines {
+	if m.revision == nil {
 		return nil
 	}
 
-	switch {
-	case m.revisionIndex == 0:
-		return m.getRevisionTokens(0)
-	case m.revisionIndex >= n:
-		return m.getRevisionTokens(n - 1)
-	default:
-		return m.getRevisionTokens(m.revisionIndex)
-	}
+	return m.revision.Lines()
 }
 
-// getRevisionTokens returns the tokens for the revision at the given index.
-func (m *Model) getRevisionTokens(index int) token.Tokens {
-	if index < 0 || index >= len(m.revisions) {
+// getRevisionLines returns the [*niceyaml.Lines] for the revision at the given index.
+func (m *Model) getRevisionLines(index int) *niceyaml.Lines {
+	if m.revision == nil {
 		return nil
 	}
 
-	return m.tokensByHash[m.revisions[index].Hash]
+	return m.revision.At(index).Lines()
 }
 
 // IsAtFirstRevision returns true if at revision index 0.
 func (m *Model) IsAtFirstRevision() bool {
-	return m.revisionIndex == 0
+	if m.revision == nil {
+		return true
+	}
+
+	return m.revision.AtOrigin()
 }
 
-// IsAtLatestRevision returns true if at the latest revision index (len(revisions)).
+// IsAtLatestRevision returns true if at the latest revision.
 func (m *Model) IsAtLatestRevision() bool {
-	return m.revisionIndex >= len(m.revisions)
+	if m.revision == nil {
+		return true
+	}
+
+	return m.revision.AtTip()
 }
 
 // IsShowingDiff returns true if currently displaying a diff between revisions.
-// This is true when 0 < revisionIndex < len(revisions) and diffMode is not None.
+// This is true when not at the first revision and diffMode is not None.
 func (m *Model) IsShowingDiff() bool {
-	n := len(m.revisions)
-	return n > 0 && m.revisionIndex > 0 && m.revisionIndex < n && m.diffMode != DiffModeNone
+	return m.revision != nil && !m.revision.AtOrigin() && m.diffMode != DiffModeNone
 }
 
 // DiffMode returns the current diff display mode.
@@ -338,28 +316,32 @@ func (m *Model) ToggleDiffMode() {
 
 // NextRevision moves to the next revision in history.
 // If already at the latest, does nothing.
-func (m *Model) NextRevision() {
-	if m.revisionIndex < len(m.revisions) {
-		m.revisionIndex++
-		m.rerender()
-		m.GotoTop()
-	}
-}
+func (m *Model) NextRevision() { m.seekRevision(1) }
 
 // PrevRevision moves to the previous revision in history.
 // If already at the first (index 0), does nothing.
-func (m *Model) PrevRevision() {
-	if m.revisionIndex > 0 {
-		m.revisionIndex--
-		m.rerender()
-		m.GotoTop()
+func (m *Model) PrevRevision() { m.seekRevision(-1) }
+
+// seekRevision moves the revision pointer by delta, with boundary checks.
+func (m *Model) seekRevision(delta int) {
+	if m.revision == nil {
+		return
 	}
+	if delta > 0 && m.revision.AtTip() {
+		return
+	}
+	if delta < 0 && m.revision.AtOrigin() {
+		return
+	}
+
+	m.revision = m.revision.Seek(delta)
+	m.rerender()
+	m.GotoTop()
 }
 
 // rerender renders the tokens using the Printer with current search highlights.
 func (m *Model) rerender() {
-	n := len(m.revisions)
-	if n == 0 {
+	if m.revision == nil {
 		m.lines = nil
 		m.longestLineWidth = 0
 
@@ -374,8 +356,8 @@ func (m *Model) rerender() {
 
 	// Compute fresh matches if finder is set.
 	if m.finder != nil {
-		tokens := m.currentRevisionTokens()
-		m.searchMatches = m.finder.FindTokens(tokens)
+		lines := m.currentRevisionLines()
+		m.searchMatches = m.finder.Find(lines)
 
 		// Adjust search index if matches changed.
 		if len(m.searchMatches) == 0 {
@@ -398,14 +380,14 @@ func (m *Model) rerender() {
 	var content string
 
 	switch {
-	case m.revisionIndex == 0:
+	case m.revision.AtOrigin():
 		// At first position: show first revision without diff.
-		content = m.printer.PrintTokens(m.getRevisionTokens(0))
-	case m.revisionIndex >= n:
-		// At or past latest: show last revision without diff.
-		content = m.printer.PrintTokens(m.getRevisionTokens(n - 1))
+		content = m.printer.PrintTokens(m.getRevisionLines(0))
+	case m.diffMode == DiffModeNone:
+		// Diff disabled: show current revision without diff.
+		content = m.printer.PrintTokens(m.currentRevisionLines())
 	default:
-		// In between: show diff.
+		// Not at first and diff enabled: show diff.
 		content = m.getDiffContent()
 	}
 
@@ -413,25 +395,45 @@ func (m *Model) rerender() {
 	m.longestLineWidth = maxLineWidth(m.lines)
 }
 
-func (m *Model) getDiffContent() string {
-	switch m.diffMode {
-	case DiffModeOrigin:
-		before := m.getRevisionTokens(0)
-		after := m.getRevisionTokens(m.revisionIndex)
-
-		return m.printer.PrintTokenDiff(before, after)
-
-	case DiffModeAdjacent:
-		before := m.getRevisionTokens(m.revisionIndex - 1)
-		after := m.getRevisionTokens(m.revisionIndex)
-
-		return m.printer.PrintTokenDiff(before, after)
-
-	case DiffModeNone:
-		return m.printer.PrintTokens(m.getRevisionTokens(m.revisionIndex))
+// getDiffBaseRevision returns the base revision for diff comparison based on the current diff mode.
+// Returns nil if diff mode is None or revision is nil.
+func (m *Model) getDiffBaseRevision() *niceyaml.Revision {
+	if m.revision == nil {
+		return nil
 	}
 
-	panic("unexpected diff mode")
+	switch m.diffMode {
+	case DiffModeOrigin:
+		return m.revision.Origin()
+	case DiffModeAdjacent:
+		return m.revision.Seek(-1)
+	default:
+		return nil
+	}
+}
+
+func (m *Model) getDiffContent() string {
+	return m.renderDiff(func(base, curr *niceyaml.Revision) *niceyaml.Lines {
+		return niceyaml.NewFullDiff(base, curr).Lines()
+	})
+}
+
+// renderDiff renders a diff using the provided diff constructor.
+// Returns fallback content when revision is nil, at origin, or base is nil.
+func (m *Model) renderDiff(makeDiff func(base, current *niceyaml.Revision) *niceyaml.Lines) string {
+	if m.revision == nil {
+		return ""
+	}
+	if m.revision.AtOrigin() {
+		return m.printer.PrintTokens(m.currentRevisionLines())
+	}
+
+	base := m.getDiffBaseRevision()
+	if base == nil {
+		return m.printer.PrintTokens(m.currentRevisionLines())
+	}
+
+	return m.printer.PrintTokens(makeDiff(base, m.revision))
 }
 
 // AtTop returns whether the viewport is at the top.
@@ -578,37 +580,21 @@ func (m *Model) ScrollUp(n int) {
 
 // PageDown moves the view down by one page.
 func (m *Model) PageDown() {
-	if m.AtBottom() {
-		return
-	}
-
 	m.ScrollDown(m.maxHeight())
 }
 
 // PageUp moves the view up by one page.
 func (m *Model) PageUp() {
-	if m.AtTop() {
-		return
-	}
-
 	m.ScrollUp(m.maxHeight())
 }
 
 // HalfPageDown moves the view down by half a page.
 func (m *Model) HalfPageDown() {
-	if m.AtBottom() {
-		return
-	}
-
 	m.ScrollDown(m.maxHeight() / 2) //nolint:mnd // Half page.
 }
 
 // HalfPageUp moves the view up by half a page.
 func (m *Model) HalfPageUp() {
-	if m.AtTop() {
-		return
-	}
-
 	m.ScrollUp(m.maxHeight() / 2) //nolint:mnd // Half page.
 }
 
@@ -629,10 +615,6 @@ func (m *Model) SetHorizontalStep(n int) {
 
 // GotoTop scrolls to the top.
 func (m *Model) GotoTop() {
-	if m.AtTop() {
-		return
-	}
-
 	m.SetYOffset(0)
 }
 
@@ -676,22 +658,21 @@ func (m *Model) ClearSearch() {
 
 // SearchNext navigates to the next search match.
 func (m *Model) SearchNext() {
-	if len(m.searchMatches) == 0 {
-		return
-	}
-
-	m.searchIndex = (m.searchIndex + 1) % len(m.searchMatches)
-	m.rerender()
-	m.scrollToCurrentMatch()
+	m.navigateSearch(1)
 }
 
 // SearchPrevious navigates to the previous search match.
 func (m *Model) SearchPrevious() {
+	m.navigateSearch(-1)
+}
+
+// navigateSearch moves the search index by delta, wrapping around.
+func (m *Model) navigateSearch(delta int) {
 	if len(m.searchMatches) == 0 {
 		return
 	}
 
-	m.searchIndex = (m.searchIndex - 1 + len(m.searchMatches)) % len(m.searchMatches)
+	m.searchIndex = (m.searchIndex + delta + len(m.searchMatches)) % len(m.searchMatches)
 	m.rerender()
 	m.scrollToCurrentMatch()
 }
@@ -770,23 +751,23 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			break
 		}
 
+		// Handle shift+wheel for horizontal scrolling.
+		if msg.Mod.Contains(tea.ModShift) {
+			switch msg.Button {
+			case tea.MouseWheelDown:
+				m.ScrollRight(m.horizontalStep)
+			case tea.MouseWheelUp:
+				m.ScrollLeft(m.horizontalStep)
+			}
+
+			break
+		}
+
 		switch msg.Button {
 		case tea.MouseWheelDown:
-			if msg.Mod.Contains(tea.ModShift) {
-				m.ScrollRight(m.horizontalStep)
-				break
-			}
-
 			m.ScrollDown(m.MouseWheelDelta)
-
 		case tea.MouseWheelUp:
-			if msg.Mod.Contains(tea.ModShift) {
-				m.ScrollLeft(m.horizontalStep)
-				break
-			}
-
 			m.ScrollUp(m.MouseWheelDelta)
-
 		case tea.MouseWheelLeft:
 			m.ScrollLeft(m.horizontalStep)
 		case tea.MouseWheelRight:
@@ -895,40 +876,9 @@ func (m Model) ViewSummary(context int) string {
 
 // getSummaryDiffContent returns summary diff content for the current revision.
 func (m *Model) getSummaryDiffContent(context int) string {
-	n := len(m.revisions)
-	if n == 0 {
-		return ""
-	}
-
-	// At first or last position, show tokens without diff.
-	// Note: revisionIndex ranges from 0 to n (inclusive), where n = len(revisions).
-	// - Index 0 is "before first revision".
-	// - Indices 1..n-1 show diffs.
-	// - Index n is "after last revision".
-	if m.revisionIndex == 0 || m.revisionIndex >= n {
-		return m.printer.PrintTokens(m.currentRevisionTokens())
-	}
-
-	// In between: show summary diff.
-	switch m.diffMode {
-	case DiffModeOrigin:
-		before := m.getRevisionTokens(0)
-		after := m.getRevisionTokens(m.revisionIndex)
-
-		return m.printer.PrintTokenDiffSummary(before, after, context)
-
-	case DiffModeAdjacent:
-		before := m.getRevisionTokens(m.revisionIndex - 1)
-		after := m.getRevisionTokens(m.revisionIndex)
-
-		return m.printer.PrintTokenDiffSummary(before, after, context)
-
-	case DiffModeNone:
-		return m.printer.PrintTokens(m.getRevisionTokens(m.revisionIndex))
-	}
-
-	// This should be impossible to reach with the above exhaustive switch.
-	panic(fmt.Sprintf("unimplemented diff mode: %+v", m.diffMode))
+	return m.renderDiff(func(base, curr *niceyaml.Revision) *niceyaml.Lines {
+		return niceyaml.NewSummaryDiff(base, curr, context).Lines()
+	})
 }
 
 func clamp[T cmp.Ordered](v, low, high T) T {
@@ -939,15 +889,6 @@ func clamp[T cmp.Ordered](v, low, high T) T {
 	return min(high, max(low, v))
 }
 
-func hashTokens(tokens token.Tokens) uint64 {
-	h := fnv.New64a()
-	for _, tk := range tokens {
-		_, _ = h.Write([]byte(tk.Origin)) // Hash.Hash.Write never returns an error.
-	}
-
-	return h.Sum64()
-}
-
 func maxLineWidth(lines []string) int {
 	result := 0
 	for _, line := range lines {
@@ -955,53 +896,4 @@ func maxLineWidth(lines []string) int {
 	}
 
 	return result
-}
-
-func findAnyTokenInFile(f *ast.File) *token.Token {
-	for _, doc := range f.Docs {
-		if doc.Start != nil {
-			return doc.Start
-		}
-		if doc.Body != nil {
-			return doc.Body.GetToken()
-		}
-		if doc.End != nil {
-			return doc.End
-		}
-	}
-
-	return nil
-}
-
-func getAllTokens(tk *token.Token) token.Tokens {
-	// Walk backward to find the first token.
-	for tk.Prev != nil {
-		tk = tk.Prev
-	}
-
-	// Clone the first token.
-	firstTk := tk.Clone()
-
-	// Preserve leading whitespace from previous token.
-	if firstTk.Prev != nil {
-		prev := firstTk.Prev
-		whiteSpaceLen := len(prev.Origin) - len(strings.TrimRight(prev.Origin, " "))
-		if whiteSpaceLen > 0 {
-			firstTk.Origin = strings.Repeat(" ", whiteSpaceLen) + firstTk.Origin
-		}
-	}
-
-	tokens := token.Tokens{firstTk}
-
-	// Walk forward to collect tokens up to maxLine.
-	for t := tk.Next; t != nil; t = t.Next {
-		// Skip parser-added implicit null tokens to match lexer output.
-		if t.Type == token.ImplicitNullType {
-			continue
-		}
-
-		tokens.Add(t.Clone())
-	}
-
-	return tokens
 }

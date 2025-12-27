@@ -8,8 +8,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
-	"github.com/goccy/go-yaml/lexer"
-	"github.com/goccy/go-yaml/token"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -27,7 +25,6 @@ type modelOptions struct {
 //nolint:recvcheck // tea.Model requires value receivers for Init, Update, View.
 type model struct {
 	searchInput string
-	tokens      token.Tokens
 	viewport    yamlviewport.Model
 	width       int
 	searching   bool
@@ -63,8 +60,7 @@ func newModel(opts *modelOptions) model {
 	}
 
 	for i, c := range opts.contents {
-		m.tokens = lexer.Tokenize(string(c))
-		m.viewport.AppendRevision(fmt.Sprintf("v%d", i), m.tokens)
+		m.viewport.AppendRevision(niceyaml.NewLinesFromString(string(c), niceyaml.WithName(fmt.Sprintf("v%d", i))))
 	}
 
 	// Apply initial search if provided.

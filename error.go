@@ -116,9 +116,9 @@ func WithPrinter(p StyledErrorTokenPrinter) ErrorOption {
 
 // WithTokens sets the YAML tokens for annotating the error.
 // The tokens are used to resolve the error path to a specific token location.
-func WithTokens(tokens token.Tokens) ErrorOption {
+func WithTokens(tks token.Tokens) ErrorOption {
 	return func(e *Error) {
-		e.tokens = tokens
+		e.tokens = tks
 	}
 }
 

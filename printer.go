@@ -5,14 +5,17 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 )
 
-const wrapOnCharacters = " /-"
+// LineIterator provides line-by-line access to YAML tokens for rendering.
+type LineIterator interface {
+	EachLine(fn func(idx int, line Line))
+	IsEmpty() bool
+	TokenPositions(lineNum, col int) []*token.Position
+}
 
-// crlfNormalizer converts Windows (CRLF) and old Mac (CR) line endings to Unix (LF).
-var crlfNormalizer = strings.NewReplacer("\r\n", "\n", "\r", "\n")
+const wrapOnCharacters = " /-"
 
 // Printer renders YAML tokens with syntax highlighting using [lipgloss.Style].
 // It supports custom styles, line numbers, and styled token/range overlays
@@ -26,7 +29,6 @@ type Printer struct {
 	lineDeletedPrefix        string
 	tokenStyles              []*tokenStyle
 	rangeStyles              []*rangeStyle
-	initialLineNumber        int
 	width                    int
 	hasCustomStyle           bool
 	hasCustomLineNumberStyle bool
@@ -41,7 +43,6 @@ func NewPrinter(opts ...PrinterOption) *Printer {
 		linePrefix:         " ",
 		lineInsertedPrefix: "+",
 		lineDeletedPrefix:  "-",
-		initialLineNumber:  1,
 	}
 
 	for _, opt := range opts {
@@ -95,13 +96,6 @@ func WithLineNumberStyle(s lipgloss.Style) PrinterOption {
 	return func(p *Printer) {
 		p.lineNumberStyle = s
 		p.hasCustomLineNumberStyle = true
-	}
-}
-
-// WithInitialLineNumber sets the starting line number (default: 1).
-func WithInitialLineNumber(n int) PrinterOption {
-	return func(p *Printer) {
-		p.initialLineNumber = n
 	}
 }
 
@@ -172,282 +166,94 @@ func (p *Printer) ClearStyles() {
 	p.rangeStyles = nil
 }
 
-// PrintTokens prints [token.Tokens].
-func (p *Printer) PrintTokens(tokens token.Tokens) string {
-	content := p.getTokenString(tokens)
-	content = p.applyLinePrefixes(content, p.initialLineNumber)
-
-	// Apply word wrapping when line numbers are disabled.
-	if !p.lineNumbers && p.width > 0 {
-		content = p.wrapContent(content)
-	}
+// PrintTokens prints any [LineIterator].
+func (p *Printer) PrintTokens(lines LineIterator) string {
+	content := p.renderLines(lines, true)
 
 	return p.style.Render(content)
-}
-
-// PrintFile prints [*ast.File].
-func (p *Printer) PrintFile(f *ast.File) string {
-	if len(f.Docs) == 0 {
-		return ""
-	}
-
-	tk := findAnyTokenInFile(f)
-	if tk == nil {
-		return ""
-	}
-
-	tokens := extractTokensInRange(tk, -1, -1)
-
-	return p.PrintTokens(tokens)
 }
 
 // PrintErrorToken prints the tokens around the error token with context.
 // Returns the formatted string and the starting line number.
 func (p *Printer) PrintErrorToken(tk *token.Token, lines int) (string, int) {
 	curLine := tk.Position.Line
-	curExtLine := curLine + countNewlines(strings.TrimLeft(tk.Origin, "\r\n"))
-	if endsWithNewline(tk.Origin) {
-		curExtLine--
+
+	// Collect all tokens and slice to the range.
+	t := NewLinesFromToken(tk)
+	pos := t.TokenPositions(curLine, tk.Position.Column)
+
+	// Always include the current token's content.
+	minLine, maxLine := curLine, curLine
+	for _, p := range pos {
+		if p.Line < minLine {
+			minLine = p.Line
+		}
+		if p.Line > maxLine {
+			maxLine = p.Line
+		}
 	}
 
-	minLine := max(curLine-lines, 1)
-	maxLine := curExtLine + lines
+	// Expand bounds by context lines.
+	minLine = max(1, minLine-lines)
+	maxLine = max(minLine, maxLine+lines)
 
-	tokens := extractTokensInRange(tk, minLine, maxLine)
-	content := p.getTokenString(tokens)
-
-	startLine := p.initialLineNumber
-	if startLine < 1 {
-		startLine = minLine
-	}
-
-	content = p.applyLinePrefixes(content, startLine)
+	sliced := t.Slice(minLine, maxLine)
+	content := p.renderLines(sliced, true)
 
 	return p.style.Render(content), minLine
 }
 
-// PrintTokenDiff generates a full-file diff between two token collections.
-// It outputs the entire file with markers for inserted and deleted lines.
-// Unchanged lines preserve syntax highlighting; inserted/deleted lines use diff styles.
-func (p *Printer) PrintTokenDiff(before, after token.Tokens) string {
-	ops := lcsLineDiff(
-		buildLinesFromTokens(before),
-		buildLinesFromTokens(after),
-	)
-
-	return p.style.Render(p.renderFullFileDiff(ops, after))
-}
-
-// PrintTokenDiffSummary generates a summary diff showing only changed lines with context.
-// The context parameter specifies how many unchanged lines to show around each change.
-// A context of 0 shows only the changed lines.
-func (p *Printer) PrintTokenDiffSummary(before, after token.Tokens, context int) string {
-	context = max(0, context)
-	ops := lcsLineDiff(
-		buildLinesFromTokens(before),
-		buildLinesFromTokens(after),
-	)
-
-	if len(ops) == 0 {
+// renderLines renders a [LineIterator] line by line with syntax highlighting.
+//
+//nolint:unparam // showAnnotations kept for API flexibility.
+func (p *Printer) renderLines(t LineIterator, showAnnotations bool) string {
+	if t.IsEmpty() {
 		return ""
 	}
 
-	// Find which lines to include based on context.
-	included := p.selectContextLines(ops, context)
+	// Expand token styles across joined lines before rendering.
+	p.expandTokenStylesForJoins(t)
 
-	return p.style.Render(p.renderDiffSummary(ops, after, included))
-}
-
-// formatHunkHeader formats a unified diff hunk header like "@@ -1,3 +1,4 @@".
-// Uses the same edge case handling as go-udiff (unified.go lines 218-235).
-func (p *Printer) formatHunkHeader(h diffHunk) string {
-	var b strings.Builder
-
-	fmt.Fprint(&b, "@@")
-
-	// Format "before" part.
-	switch {
-	case h.fromCount > 1:
-		fmt.Fprintf(&b, " -%d,%d", h.fromLine, h.fromCount)
-	case h.fromLine == 1 && h.fromCount == 0:
-		// Match GNU diff -u behavior for adding to empty file.
-		fmt.Fprint(&b, " -0,0")
-	default:
-		fmt.Fprintf(&b, " -%d", h.fromLine)
-	}
-
-	// Format "after" part.
-	switch {
-	case h.toCount > 1:
-		fmt.Fprintf(&b, " +%d,%d", h.toLine, h.toCount)
-	case h.toLine == 1 && h.toCount == 0:
-		// Match GNU diff -u behavior for adding to empty file.
-		fmt.Fprint(&b, " +0,0")
-	default:
-		fmt.Fprintf(&b, " +%d", h.toLine)
-	}
-
-	fmt.Fprint(&b, " @@")
-
-	return b.String()
-}
-
-// selectContextLines returns a slice indicating which operations to include.
-// Each change includes `context` lines before and after.
-func (p *Printer) selectContextLines(ops []lineOp, context int) []bool {
-	included := make([]bool, len(ops))
-	n := len(ops)
-	lastMarked := -1
-
-	for i, op := range ops {
-		if op.kind != diffEqual {
-			start := max(0, i-context)
-			end := min(n-1, i+context)
-
-			// Mark the range [start, end], avoiding re-marking already included lines.
-			// This should prevent O(n^2) issues in large files with many overlapping hunks.
-			for j := max(start, lastMarked+1); j <= end; j++ {
-				included[j] = true
-			}
-
-			lastMarked = max(lastMarked, end)
-		}
-	}
-
-	return included
-}
-
-// renderDiffSummary renders only the included operations with hunk headers.
-func (p *Printer) renderDiffSummary(ops []lineOp, afterTokens token.Tokens, included []bool) string {
 	var sb strings.Builder
 
-	if len(afterTokens) == 0 {
-		return ""
-	}
+	t.EachLine(func(i int, line Line) {
+		hasAnnotation := showAnnotations && line.Annotation.Content != ""
 
-	// Build hunks from included operations.
-	hunks := buildHunks(ops, included)
-
-	// Get a token to use for range extraction.
-	startToken := afterTokens[0]
-
-	for hunkIdx, hunk := range hunks {
-		// Add newline between hunks.
-		if hunkIdx > 0 {
-			sb.WriteByte('\n')
-		}
-
-		// Render hunk header.
-		header := p.formatHunkHeader(hunk)
-		if p.lineNumbers {
-			sb.WriteString(p.lineNumberStyle.Render("    "))
-		}
-
-		sb.WriteString(p.styles.GetStyle(StyleComment).Render(header))
-		sb.WriteByte('\n')
-
-		// Extract and render only tokens needed for this hunk.
-		minLine, maxLine := hunkAfterLineRange(ops, hunk)
-
-		var (
-			styledLines []string
-			lineOffset  int
-		)
-
-		if minLine > 0 && maxLine > 0 {
-			hunkTokens := extractTokensInRange(startToken, minLine, maxLine)
-			styledHunk := p.getTokenString(hunkTokens)
-			styledLines = strings.Split(styledHunk, "\n")
-			lineOffset = minLine - 1
-		}
-
-		// Render operations within this hunk.
-		for i := hunk.startIdx; i < hunk.endIdx; i++ {
-			if i > hunk.startIdx {
+		if hasAnnotation {
+			// Add newline between hunks (not before first hunk).
+			if i > 0 {
 				sb.WriteByte('\n')
 			}
 
-			op := ops[i]
-
-			switch op.kind {
-			case diffDelete:
-				deleted := p.styles.GetStyle(StyleDiffDeleted)
-				p.writeLine(&sb, p.lineDeletedPrefix, op.content, op.beforeLine, deleted, true)
-
-			case diffInsert:
-				inserted := p.styles.GetStyle(StyleDiffInserted)
-				p.writeLine(&sb, p.lineInsertedPrefix, op.content, op.afterLine, inserted, false)
-
-			default: // Equal.
-				line := styledLines[op.afterLine-1-lineOffset]
-				p.writeLine(&sb, p.linePrefix, line, op.afterLine, nil, false)
+			// Render hunk header.
+			if p.lineNumbers {
+				sb.WriteString(p.lineNumberStyle.Render("    "))
 			}
-		}
-	}
 
-	return sb.String()
-}
-
-// applyLinePrefixes adds line numbers or line prefixes to content.
-func (p *Printer) applyLinePrefixes(content string, startLine int) string {
-	if p.lineNumbers {
-		return p.addLineNumbers(content, startLine)
-	}
-
-	return addLinePrefix(content, p.linePrefix)
-}
-
-// wrapContent wraps each line of content to the configured width.
-func (p *Printer) wrapContent(content string) string {
-	if p.width <= 0 {
-		return content
-	}
-
-	lines := strings.Split(content, "\n")
-
-	var sb strings.Builder
-
-	for i, line := range lines {
-		if i > 0 {
+			sb.WriteString(p.styles.GetStyle(StyleComment).Render(line.Annotation.Content))
+			sb.WriteByte('\n')
+		} else if i > 0 {
+			// Add newline between lines within a hunk.
 			sb.WriteByte('\n')
 		}
 
-		sb.WriteString(lipgloss.Wrap(line, p.width, wrapOnCharacters))
-	}
+		lineNum := line.Number()
 
-	return sb.String()
-}
-
-// renderFullFileDiff renders line operations with appropriate prefixes and styling.
-// Equal lines get syntax highlighting from afterTokens; diff lines use diff styles.
-func (p *Printer) renderFullFileDiff(ops []lineOp, afterTokens token.Tokens) string {
-	var sb strings.Builder
-
-	// Pre-render the after tokens with syntax highlighting.
-	styledAfter := p.getTokenString(afterTokens)
-	styledLines := strings.Split(styledAfter, "\n")
-
-	for i, op := range ops {
-		if i > 0 {
-			sb.WriteByte('\n')
-		}
-
-		switch op.kind {
-		case diffDelete:
+		switch line.Flag {
+		case FlagDeleted:
 			deleted := p.styles.GetStyle(StyleDiffDeleted)
-			p.writeLine(&sb, p.lineDeletedPrefix, op.content, op.beforeLine, deleted, true)
+			p.writeLine(&sb, p.lineDeletedPrefix, line.Content(), lineNum, deleted, true)
 
-		case diffInsert:
+		case FlagInserted:
 			inserted := p.styles.GetStyle(StyleDiffInserted)
-			p.writeLine(&sb, p.lineInsertedPrefix, op.content, op.afterLine, inserted, false)
+			p.writeLine(&sb, p.lineInsertedPrefix, line.Content(), lineNum, inserted, false)
 
-		default: // Equal.
-			// Use syntax-highlighted content from pre-rendered after tokens.
-			// AfterLine is always >= 1 for Equal ops from [lcsLineDiff].
-			line := styledLines[op.afterLine-1]
-			p.writeLine(&sb, p.linePrefix, line, op.afterLine, nil, false)
+		default: // FlagDefault (equal line).
+			// Render with syntax highlighting.
+			styledContent := p.renderTokenLine(line)
+			p.writeLine(&sb, p.linePrefix, styledContent, lineNum, nil, false)
 		}
-	}
+	})
 
 	return sb.String()
 }
@@ -464,8 +270,9 @@ func (p *Printer) writeLine(
 	skipRangeStyles bool,
 ) {
 	renderLine := func(pfx, cnt string, col int) {
-		if contentStyle != nil {
-			// For diff lines: apply diff style to prefix.
+		switch {
+		// For diff lines: apply diff style to prefix.
+		case contentStyle != nil:
 			sb.WriteString(contentStyle.Render(pfx))
 			if skipRangeStyles {
 				// For deleted lines: skip range highlights (they apply to "after" tokens only).
@@ -474,8 +281,15 @@ func (p *Printer) writeLine(
 				// For inserted lines: blend diff style with range highlights.
 				sb.WriteString(p.styleLineWithRanges(cnt, lineNum, col, contentStyle, true))
 			}
-		} else {
+
+		// For equal lines with line numbers: style the prefix with StyleDefault.
+		case p.lineNumbers:
 			sb.WriteString(p.styles.GetStyle(StyleDefault).Render(pfx))
+			sb.WriteString(cnt)
+
+		// For equal lines without line numbers: use raw prefix.
+		default:
+			sb.WriteString(pfx)
 			sb.WriteString(cnt)
 		}
 	}
@@ -513,38 +327,6 @@ func (p *Printer) writeLine(
 
 		col += len([]rune(subLine))
 	}
-}
-
-// buildLinesFromTokens builds lines directly from token Origins,
-// avoiding intermediate string concatenation.
-func buildLinesFromTokens(tokens token.Tokens) []string {
-	if len(tokens) == 0 {
-		return nil
-	}
-
-	var (
-		lines []string
-		sb    strings.Builder
-	)
-	for _, tk := range tokens {
-		origin := crlfNormalizer.Replace(tk.Origin)
-		parts := strings.Split(origin, "\n")
-
-		for i, part := range parts {
-			if i > 0 {
-				lines = append(lines, sb.String())
-				sb.Reset()
-			}
-
-			sb.WriteString(part)
-		}
-	}
-
-	if sb.Len() > 0 {
-		lines = append(lines, sb.String())
-	}
-
-	return lines
 }
 
 // styleForPosition returns the effective style for a character at (line, col),
@@ -711,217 +493,73 @@ func (p *Printer) formatContinuationMarker() string {
 	return p.lineNumberStyle.Render("   -") + p.styles.GetStyle(StyleDefault).Render(p.linePrefix)
 }
 
-// addLineNumbers prepends line numbers to each line of the content.
-// When word wrap is enabled, continuation lines get a "-" marker instead of line numbers.
-func (p *Printer) addLineNumbers(content string, startLine int) string {
-	var sb strings.Builder
-
-	lines := strings.Split(content, "\n")
-	lineNum := startLine
-	styledPrefix := p.styles.GetStyle(StyleDefault).Render(p.linePrefix)
-	wrapWidth := p.contentWidth(0)
-
-	for i, line := range lines {
-		if i > 0 {
-			sb.WriteByte('\n')
-		}
-
-		// Treat non-wrapping as wrapping with a single subLine.
-		subLines := []string{line}
-		if wrapWidth > 0 {
-			subLines = strings.Split(lipgloss.Wrap(line, wrapWidth, wrapOnCharacters), "\n")
-		}
-
-		for j, subLine := range subLines {
-			if j > 0 {
-				sb.WriteByte('\n')
-			}
-
-			if j == 0 {
-				sb.WriteString(p.formatLineNumber(lineNum))
-				sb.WriteString(styledPrefix)
-			} else {
-				sb.WriteString(p.formatContinuationMarker())
-			}
-
-			sb.WriteString(subLine)
-		}
-
-		lineNum++
+// expandTokenStylesForJoins expands token styles to cover all lines that are
+// part of the same split token. When a token is split across multiple lines
+// (indicated by JoinPrev/JoinNext flags), highlighting one part should
+// highlight all connected parts.
+func (p *Printer) expandTokenStylesForJoins(t LineIterator) {
+	if len(p.tokenStyles) == 0 || t.IsEmpty() {
+		return
 	}
 
-	return sb.String()
+	var newStyles []*tokenStyle
+
+	for _, ts := range p.tokenStyles {
+		for _, pos := range t.TokenPositions(ts.pos.Line, ts.pos.Col) {
+			newStyles = append(newStyles, &tokenStyle{
+				style: ts.style,
+				pos:   Position{Line: pos.Line, Col: pos.Column},
+			})
+		}
+	}
+
+	p.tokenStyles = append(p.tokenStyles, newStyles...)
 }
 
-// getTokenString renders tokens with range-aware styling.
-// It tracks column positions cumulatively (character by character) to match
-// how the Finder builds its position map, ensuring consistent highlighting.
-func (p *Printer) getTokenString(tokens token.Tokens) string {
-	if len(tokens) == 0 {
+// renderTokenLine renders a single line's tokens with syntax highlighting.
+// It handles separator (leading whitespace) and content styling, plus range overlays.
+func (p *Printer) renderTokenLine(line Line) string {
+	if line.IsEmpty() {
 		return ""
 	}
 
-	pt := NewPositionTrackerFromTokens(tokens)
+	lineNum := line.Number()
+	col := 1 // Column position, 1-indexed.
 
 	var sb strings.Builder
-	for _, tk := range tokens {
-		tokenStyle := p.styleForToken(tk)
 
-		// TokenValueOffset returns the character offset within the first non-empty line
-		// where Value starts. This is used to detect leading whitespace separators.
+	for _, tk := range line.Tokens() {
+		tokenStyle := p.styleForToken(tk)
 		valueOffset := tokenValueOffset(tk)
 
-		// Process the Origin line by line, character by character.
-		lines := strings.Split(tk.Origin, "\n")
-		firstContentLineProcessed := false
+		// Get the token's origin text.
+		origin := tk.Origin
+		// Strip trailing newline - we add newlines between lines in renderLines.
+		origin = strings.TrimSuffix(origin, "\n")
+		originRunes := []rune(origin)
 
-		for lineIdx, line := range lines {
-			if lineIdx > 0 {
-				sb.WriteByte('\n')
-				pt.AdvanceNewline()
-			}
+		// Calculate separator (leading whitespace before value).
+		separatorRunes := leadingWhitespaceRunes(origin, valueOffset)
 
-			if line == "" {
-				continue
-			}
+		// Part 1: Render separator portion (default style).
+		if separatorRunes > 0 && separatorRunes <= len(originRunes) {
+			sepPart := string(originRunes[:separatorRunes])
+			defaultStyle := p.styles.GetStyle(StyleDefault)
+			sb.WriteString(p.styleLineWithRanges(sepPart, lineNum, col, defaultStyle, false))
 
-			lineRunes := []rune(line)
-			lineStartCol := pt.Col
+			col += separatorRunes
+			originRunes = originRunes[separatorRunes:]
+		}
 
-			// Determine where separator ends within this line.
-			// The separator only applies to the first content line of the token
-			// (not necessarily lineIdx == 0, since Origin may start with newlines).
-			var separatorRunesInLine int
-			if !firstContentLineProcessed {
-				separatorRunesInLine = leadingWhitespaceRunes(line, valueOffset)
-			}
+		// Part 2: Render content portion (token style).
+		if len(originRunes) > 0 {
+			sb.WriteString(p.styleLineWithRanges(string(originRunes), lineNum, col, tokenStyle, false))
 
-			firstContentLineProcessed = true
-
-			// Part 1: Render separator portion (default style).
-			if separatorRunesInLine > 0 && separatorRunesInLine <= len(lineRunes) {
-				sepPart := string(lineRunes[:separatorRunesInLine])
-				defaultStyle := p.styles.GetStyle(StyleDefault)
-				sb.WriteString(p.styleLineWithRanges(sepPart, pt.Line, lineStartCol, defaultStyle, false))
-				pt.AdvanceBy(separatorRunesInLine)
-
-				lineRunes = lineRunes[separatorRunesInLine:]
-			}
-
-			// Part 2: Render content portion (token style).
-			if len(lineRunes) > 0 {
-				contentStartCol := pt.Col
-				sb.WriteString(p.styleLineWithRanges(string(lineRunes), pt.Line, contentStartCol, tokenStyle, false))
-
-				pt.AdvanceBy(len(lineRunes))
-			}
+			col += len(originRunes)
 		}
 	}
 
 	return sb.String()
-}
-
-func findAnyTokenInFile(f *ast.File) *token.Token {
-	for _, doc := range f.Docs {
-		if doc.Start != nil {
-			return doc.Start
-		}
-		if doc.Body != nil {
-			return doc.Body.GetToken()
-		}
-		if doc.End != nil {
-			return doc.End
-		}
-	}
-
-	return nil
-}
-
-// firstTokenAtOrAfter positions tk at the first token at or after minLine.
-// If minLine is negative (unbounded), walks to the start of the token list.
-func firstTokenAtOrAfter(tk *token.Token, minLine int) *token.Token {
-	// Unbounded: walk to start.
-	if minLine < 0 {
-		for tk.Prev != nil {
-			tk = tk.Prev
-		}
-
-		return tk
-	}
-
-	// Before range: walk forward.
-	if tk.Position.Line < minLine {
-		for tk != nil && tk.Position.Line < minLine {
-			tk = tk.Next
-		}
-
-		return tk
-	}
-
-	// At or after range: walk backward to find first token in range.
-	for tk.Prev != nil && tk.Prev.Position.Line >= minLine {
-		tk = tk.Prev
-	}
-
-	return tk
-}
-
-// extractTokensInRange extracts tokens that touch [minLine, maxLine].
-// It clones tokens and adjusts the first token's Origin to remove leading
-// newlines while preserving leading whitespace from the previous token.
-// If either range limit is negative, it is unbounded in that direction.
-func extractTokensInRange(tk *token.Token, minLine, maxLine int) token.Tokens {
-	tk = firstTokenAtOrAfter(tk, minLine)
-
-	// If no tokens in range, return empty.
-	if tk == nil || (maxLine >= 0 && tk.Position.Line > maxLine) {
-		return token.Tokens{}
-	}
-
-	// Clone the first token.
-	firstTk := tk.Clone()
-
-	// Preserve leading whitespace from previous token.
-	if firstTk.Prev != nil {
-		prev := firstTk.Prev
-		whiteSpaceLen := len(prev.Origin) - len(strings.TrimRight(prev.Origin, " "))
-		if whiteSpaceLen > 0 {
-			firstTk.Origin = strings.Repeat(" ", whiteSpaceLen) + firstTk.Origin
-		}
-	}
-
-	// If min is bounded, trim any leading newlines.
-	if minLine >= 0 {
-		firstTk.Origin = strings.TrimLeft(firstTk.Origin, "\r\n")
-	}
-
-	tokens := token.Tokens{firstTk}
-
-	// Walk forward to collect tokens up to maxLine.
-	for t := tk.Next; t != nil && (maxLine < 0 || t.Position.Line <= maxLine); t = t.Next {
-		// Skip parser-added implicit null tokens to match lexer output.
-		if t.Type == token.ImplicitNullType {
-			continue
-		}
-
-		tokens.Add(t.Clone())
-	}
-
-	return tokens
-}
-
-func countNewlines(s string) int {
-	return strings.Count(crlfNormalizer.Replace(s), "\n")
-}
-
-func endsWithNewline(s string) bool {
-	s = strings.TrimRight(s, " ")
-	return strings.HasSuffix(s, "\n") || strings.HasSuffix(s, "\r")
-}
-
-// addLinePrefix prefixes each line with the given string.
-func addLinePrefix(content, prefix string) string {
-	return prefix + strings.ReplaceAll(content, "\n", "\n"+prefix)
 }
 
 // leadingWhitespaceRunes returns the number of runes in the leading whitespace
