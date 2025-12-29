@@ -101,7 +101,8 @@ type Model struct {
 	finder              Finder
 	searchMatches       []niceyaml.PositionRange
 	revision            *niceyaml.Revision
-	lines               []string
+	lines               *niceyaml.Lines
+	renderedLines       []string
 	xOffset             int
 	horizontalStep      int
 	MouseWheelDelta     int
@@ -324,11 +325,14 @@ func (m *Model) seekRevision(delta int) {
 func (m *Model) rerender() {
 	lines := m.getDisplayLines(nil)
 	if lines == nil {
-		m.lines = nil
+		m.renderedLines = nil
 		m.longestLineWidth = 0
+		m.lines = nil
 
 		return
 	}
+
+	m.lines = lines
 
 	if m.printer == nil {
 		m.printer = niceyaml.NewPrinter()
@@ -360,8 +364,24 @@ func (m *Model) rerender() {
 
 	content := m.printer.PrintTokens(lines)
 
-	m.lines = strings.Split(content, "\n")
-	m.longestLineWidth = maxLineWidth(m.lines)
+	m.renderedLines = strings.Split(content, "\n")
+	m.longestLineWidth = maxLineWidth(m.renderedLines)
+}
+
+// rerenderLine re-renders a single line and updates m.renderedLines.
+func (m *Model) rerenderLine(idx int) {
+	if m.lines == nil || idx < 0 || idx >= len(m.renderedLines) {
+		return
+	}
+
+	content := m.printer.PrintSlice(m.lines, idx, idx)
+
+	m.renderedLines[idx] = content
+
+	lineWidth := ansi.StringWidth(content)
+	if lineWidth > m.longestLineWidth {
+		m.longestLineWidth = lineWidth
+	}
 }
 
 // getDiffBaseRevision returns the base revision for diff comparison based on the current diff mode.
@@ -423,7 +443,7 @@ func (m *Model) PastBottom() bool {
 
 // ScrollPercent returns the vertical scroll position as a float between 0 and 1.
 func (m *Model) ScrollPercent() float64 {
-	total := len(m.lines)
+	total := len(m.renderedLines)
 	if m.maxHeight() >= total {
 		return 1.0
 	}
@@ -452,7 +472,7 @@ func (m *Model) HorizontalScrollPercent() float64 {
 
 // maxYOffset returns the maximum Y offset.
 func (m *Model) maxYOffset() int {
-	return max(0, len(m.lines)-m.maxHeight())
+	return max(0, len(m.renderedLines)-m.maxHeight())
 }
 
 // maxXOffset returns the maximum X offset.
@@ -481,7 +501,7 @@ func (m *Model) visibleLines(lines []string) []string {
 	}
 
 	if lines == nil {
-		lines = m.lines
+		lines = m.renderedLines
 	}
 
 	total := len(lines)
@@ -542,7 +562,7 @@ func (m *Model) XOffset() int {
 
 // ScrollDown moves the view down by n lines.
 func (m *Model) ScrollDown(n int) {
-	if m.AtBottom() || n == 0 || len(m.lines) == 0 {
+	if m.AtBottom() || n == 0 || len(m.renderedLines) == 0 {
 		return
 	}
 
@@ -551,7 +571,7 @@ func (m *Model) ScrollDown(n int) {
 
 // ScrollUp moves the view up by n lines.
 func (m *Model) ScrollUp(n int) {
-	if m.AtTop() || n == 0 || len(m.lines) == 0 {
+	if m.AtTop() || n == 0 || len(m.renderedLines) == 0 {
 		return
 	}
 
@@ -605,7 +625,7 @@ func (m *Model) GotoBottom() {
 
 // TotalLineCount returns the total number of lines.
 func (m *Model) TotalLineCount() int {
-	return len(m.lines)
+	return len(m.renderedLines)
 }
 
 // VisibleLineCount returns the number of visible lines.
@@ -652,8 +672,33 @@ func (m *Model) navigateSearch(delta int) {
 		return
 	}
 
+	oldIndex := m.searchIndex
 	m.searchIndex = (m.searchIndex + delta + len(m.searchMatches)) % len(m.searchMatches)
-	m.rerender()
+
+	// Only re-render the affected lines if cache is available.
+	if m.lines != nil && oldIndex >= 0 {
+		m.printer.ClearStyles()
+
+		for i, match := range m.searchMatches {
+			style := m.SearchStyle
+			if i == m.searchIndex {
+				style = m.SelectedSearchStyle
+			}
+
+			m.printer.AddStyleToRange(&style, match)
+		}
+
+		oldLine := m.searchMatches[oldIndex].Start.Line
+		newLine := m.searchMatches[m.searchIndex].Start.Line
+
+		m.rerenderLine(oldLine)
+		if newLine != oldLine {
+			m.rerenderLine(newLine)
+		}
+	} else {
+		m.rerender()
+	}
+
 	m.scrollToCurrentMatch()
 }
 
