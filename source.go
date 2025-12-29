@@ -5,7 +5,6 @@ import (
 	"iter"
 	"strings"
 
-	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/token"
 )
@@ -178,14 +177,6 @@ func NewSourceFromString(src string, opts ...SourceOption) *Source {
 	tks := lexer.Tokenize(src)
 
 	return NewSourceFromTokens(tks, opts...)
-}
-
-// NewSourceFromFile creates new [Source] from an [*ast.File].
-// It uses the [*ast.File]'s Name to name the collection.
-func NewSourceFromFile(f *ast.File) *Source {
-	tk := findAnyTokenInFile(f)
-
-	return NewSourceFromToken(tk, WithName(f.Name))
 }
 
 // NewSourceFromToken creates new [Source] from a seed [*token.Token].
@@ -767,22 +758,6 @@ func updateIndentLevel(prevIndentNum, currentIndentNum, currentLevel int) int {
 	}
 
 	return currentLevel
-}
-
-func findAnyTokenInFile(f *ast.File) *token.Token {
-	for _, doc := range f.Docs {
-		if doc.Start != nil {
-			return doc.Start
-		}
-		if doc.Body != nil {
-			return doc.Body.GetToken()
-		}
-		if doc.End != nil {
-			return doc.End
-		}
-	}
-
-	return nil
 }
 
 // absColForTokenIndex calculates the 0-indexed column where the token at idx starts.

@@ -8,7 +8,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/golden"
 	"github.com/goccy/go-yaml/lexer"
-	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1147,7 +1146,7 @@ new: added`
 				assert.Equal(t, 1, m.RevisionCount())
 				assert.False(t, m.IsShowingDiff())
 				assert.Equal(t, 2, m.TotalLineCount())
-				assert.Empty(t, m.RevisionName()) // SetTokens uses Lines' name (empty from NewSourceFromFile).
+				assert.Empty(t, m.RevisionName()) // SetTokens uses Source's name.
 			},
 		},
 	}
@@ -1161,25 +1160,15 @@ new: added`
 			m.SetHeight(24)
 
 			if tc.beforeYAML != "" && tc.afterYAML != "" {
-				beforeFile, err := parser.ParseBytes([]byte(tc.beforeYAML), parser.ParseComments)
-				require.NoError(t, err)
-
-				afterFile, err := parser.ParseBytes([]byte(tc.afterYAML), parser.ParseComments)
-				require.NoError(t, err)
-
-				beforeLines := niceyaml.NewSourceFromFile(beforeFile)
-				beforeLines.Name = "before"
+				beforeLines := niceyaml.NewSourceFromString(tc.beforeYAML, niceyaml.WithName("before"))
 				m.AppendRevision(beforeLines)
 
-				afterLines := niceyaml.NewSourceFromFile(afterFile)
-				afterLines.Name = "after"
+				afterLines := niceyaml.NewSourceFromString(tc.afterYAML, niceyaml.WithName("after"))
 				m.AppendRevision(afterLines)
 			}
 
 			if tc.yaml != "" {
-				file, err := parser.ParseBytes([]byte(tc.yaml), parser.ParseComments)
-				require.NoError(t, err)
-				m.SetTokens(niceyaml.NewSourceFromFile(file))
+				m.SetTokens(niceyaml.NewSourceFromString(tc.yaml))
 			}
 
 			tc.test(t, &m)

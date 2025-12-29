@@ -7,10 +7,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/golden"
-	"github.com/goccy/go-yaml/ast"
-	"github.com/goccy/go-yaml/lexer"
-	"github.com/goccy/go-yaml/parser"
-	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -24,16 +20,6 @@ func testBracketStyle() *lipgloss.Style {
 	})
 
 	return &style
-}
-
-// testParseFile parses tokens into an ast.File for testing PrintFile.
-func testParseFile(t *testing.T, tks token.Tokens) *ast.File {
-	t.Helper()
-
-	file, err := parser.Parse(tks, 0)
-	require.NoError(t, err)
-
-	return file
 }
 
 // testBasicPrinter returns a Printer configured for testing.
@@ -179,11 +165,6 @@ func TestFinderPrinter_Integration(t *testing.T) {
 
 			got := printer.Print(lines)
 			assert.Equal(t, tc.want, got)
-
-			// Use fresh tokens for parser (Lines tokens are processed/split).
-			file := testParseFile(t, lexer.Tokenize(tc.input))
-			gotFile := printer.Print(niceyaml.NewSourceFromFile(file))
-			assert.Equal(t, got, gotFile)
 		})
 	}
 }
@@ -234,11 +215,6 @@ func TestFinderPrinter_EdgeCases(t *testing.T) {
 
 			got := printer.Print(lines)
 			assert.Equal(t, tc.wantOutput, got)
-
-			// Use fresh tokens for parser (Lines tokens are processed/split).
-			file := testParseFile(t, lexer.Tokenize(tc.input))
-			gotFile := printer.Print(niceyaml.NewSourceFromFile(file))
-			assert.Equal(t, got, gotFile)
 		})
 	}
 }
@@ -315,11 +291,6 @@ func TestPrinter_Golden(t *testing.T) {
 
 			output := printer.Print(lines)
 			golden.RequireEqual(t, output)
-
-			// Use fresh tokens for parser (Lines tokens are processed/split).
-			file := testParseFile(t, lexer.Tokenize(string(input)))
-			outputFile := printer.Print(niceyaml.NewSourceFromFile(file))
-			assert.Equal(t, output, outputFile)
 		})
 	}
 }

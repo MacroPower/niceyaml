@@ -5,10 +5,7 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
-	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/lexer"
-	"github.com/goccy/go-yaml/parser"
-	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -31,16 +28,6 @@ func testPrinter() *niceyaml.Printer {
 		niceyaml.WithStyle(lipgloss.NewStyle()),
 		niceyaml.WithGutter(niceyaml.NoGutter),
 	)
-}
-
-// parseFile parses tokens into an ast.File for testing PrintFile.
-func parseFile(t *testing.T, tks token.Tokens) *ast.File {
-	t.Helper()
-
-	file, err := parser.Parse(tks, 0)
-	require.NoError(t, err)
-
-	return file
 }
 
 // printDiff generates a full-file diff between two YAML strings.
@@ -90,10 +77,6 @@ alias: *x`
 
 	got := p.Print(niceyaml.NewSourceFromTokens(tks))
 	assert.Equal(t, input, got)
-
-	file := parseFile(t, tks)
-	gotFile := p.Print(niceyaml.NewSourceFromFile(file))
-	assert.Equal(t, got, gotFile)
 }
 
 func TestPrinter_AddStyleToRange(t *testing.T) {
@@ -160,10 +143,6 @@ func TestPrinter_AddStyleToRange(t *testing.T) {
 
 			got := p.Print(niceyaml.NewSourceFromTokens(tks))
 			assert.Equal(t, tc.want, got)
-
-			file := parseFile(t, tks)
-			gotFile := p.Print(niceyaml.NewSourceFromFile(file))
-			assert.Equal(t, got, gotFile)
 		})
 	}
 }
@@ -196,10 +175,6 @@ func TestPrinter_PrintTokens_EmptyFile(t *testing.T) {
 
 	// Empty file should produce empty output.
 	assert.Empty(t, got)
-
-	file := parseFile(t, tks)
-	gotFile := p.Print(niceyaml.NewSourceFromFile(file))
-	assert.Equal(t, got, gotFile)
 }
 
 func TestNewPrinter(t *testing.T) {
@@ -219,10 +194,6 @@ bool: true
 	// Should contain original content.
 	assert.Contains(t, got, "key")
 	assert.Contains(t, got, "value")
-
-	file := parseFile(t, tks)
-	gotFile := p.Print(niceyaml.NewSourceFromFile(file))
-	assert.Equal(t, got, gotFile)
 }
 
 func TestNewPrinter_WithStyles(t *testing.T) {
@@ -247,10 +218,6 @@ func TestNewPrinter_WithStyles(t *testing.T) {
 
 	got := p.Print(niceyaml.NewSourceFromTokens(tks))
 	assert.Equal(t, "<key>key</key>: <str>value</str>", got)
-
-	file := parseFile(t, tks)
-	gotFile := p.Print(niceyaml.NewSourceFromFile(file))
-	assert.Equal(t, got, gotFile)
 }
 
 func TestNewPrinter_EmptyStyles(t *testing.T) {
@@ -267,10 +234,6 @@ func TestNewPrinter_EmptyStyles(t *testing.T) {
 	// Should still contain original content.
 	assert.Contains(t, got, "key")
 	assert.Contains(t, got, "value")
-
-	file := parseFile(t, tks)
-	gotFile := p.Print(niceyaml.NewSourceFromFile(file))
-	assert.Equal(t, got, gotFile)
 }
 
 func TestPrinter_LineNumbers(t *testing.T) {
@@ -308,10 +271,6 @@ func TestPrinter_LineNumbers(t *testing.T) {
 
 			got := p.Print(niceyaml.NewSourceFromTokens(tks))
 			assert.Equal(t, tc.want, got)
-
-			file := parseFile(t, tks)
-			gotFile := p.Print(niceyaml.NewSourceFromFile(file))
-			assert.Equal(t, got, gotFile)
 		})
 	}
 }
@@ -666,10 +625,6 @@ func TestPrinter_WordWrap(t *testing.T) {
 
 			got := p.Print(niceyaml.NewSourceFromTokens(tks))
 			assert.Equal(t, tc.want, got)
-
-			file := parseFile(t, tks)
-			gotFile := p.Print(niceyaml.NewSourceFromFile(file))
-			assert.Equal(t, got, gotFile)
 		})
 	}
 }
@@ -1064,10 +1019,6 @@ func TestPrinter_TokenTypes(t *testing.T) {
 			for _, want := range tc.wantContains {
 				assert.Contains(t, got, want)
 			}
-
-			file := parseFile(t, tks)
-			gotFile := p.Print(niceyaml.NewSourceFromFile(file))
-			assert.Equal(t, got, gotFile)
 		})
 	}
 }
@@ -1114,10 +1065,6 @@ func TestPrinter_PrintFile_MultiDocument(t *testing.T) {
 
 			got := p.Print(niceyaml.NewSourceFromTokens(tks))
 			assert.Equal(t, tc.want, got)
-
-			file := parseFile(t, tks)
-			gotFile := p.Print(niceyaml.NewSourceFromFile(file))
-			assert.Equal(t, got, gotFile)
 		})
 	}
 }
