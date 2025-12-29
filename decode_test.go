@@ -120,14 +120,14 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 	}{
 		"simple key": {
 			input:     "key: value",
-			path:      func() *yaml.Path { return niceyaml.NewRootPathBuilder().Child("key").Build() },
+			path:      func() *yaml.Path { return niceyaml.NewPathBuilder().Child("key").Build() },
 			wantVals:  []string{"value"},
 			wantFound: []bool{true},
 		},
 		"nested key": {
 			input: `parent:
   child: nested_value`,
-			path:      func() *yaml.Path { return niceyaml.NewRootPathBuilder().Child("parent").Child("child").Build() },
+			path:      func() *yaml.Path { return niceyaml.NewPathBuilder().Child("parent").Child("child").Build() },
 			wantVals:  []string{"nested_value"},
 			wantFound: []bool{true},
 		},
@@ -136,13 +136,13 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
   - first
   - second
   - third`,
-			path:      func() *yaml.Path { return niceyaml.NewRootPathBuilder().Child("items").Index(1).Build() },
+			path:      func() *yaml.Path { return niceyaml.NewPathBuilder().Child("items").Index(1).Build() },
 			wantVals:  []string{"second"},
 			wantFound: []bool{true},
 		},
 		"missing key returns empty": {
 			input:     "key: value",
-			path:      func() *yaml.Path { return niceyaml.NewRootPathBuilder().Child("nonexistent").Build() },
+			path:      func() *yaml.Path { return niceyaml.NewPathBuilder().Child("nonexistent").Build() },
 			wantVals:  []string{""},
 			wantFound: []bool{false},
 		},
@@ -151,25 +151,25 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 first: 1
 ---
 second: 2`,
-			path:      func() *yaml.Path { return niceyaml.NewRootPathBuilder().Build() },
+			path:      func() *yaml.Path { return niceyaml.NewPathBuilder().Build() },
 			wantVals:  []string{"first: 1", "second: 2"},
 			wantFound: []bool{true, true},
 		},
 		"numeric value": {
 			input:     "count: 42",
-			path:      func() *yaml.Path { return niceyaml.NewRootPathBuilder().Child("count").Build() },
+			path:      func() *yaml.Path { return niceyaml.NewPathBuilder().Child("count").Build() },
 			wantVals:  []string{"42"},
 			wantFound: []bool{true},
 		},
 		"boolean value": {
 			input:     "enabled: true",
-			path:      func() *yaml.Path { return niceyaml.NewRootPathBuilder().Child("enabled").Build() },
+			path:      func() *yaml.Path { return niceyaml.NewPathBuilder().Child("enabled").Build() },
 			wantVals:  []string{"true"},
 			wantFound: []bool{true},
 		},
 		"null value": {
 			input:     "empty: null",
-			path:      func() *yaml.Path { return niceyaml.NewRootPathBuilder().Child("empty").Build() },
+			path:      func() *yaml.Path { return niceyaml.NewPathBuilder().Child("empty").Build() },
 			wantVals:  []string{"null"},
 			wantFound: []bool{true},
 		},
