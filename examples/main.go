@@ -34,27 +34,14 @@ var (
 func main() {
 	printer := niceyaml.NewPrinter(niceyaml.WithLineNumbers())
 
-	red := lipgloss.NewStyle().Background(charmtone.Sapphire).Foreground(charmtone.Salt)
-	printer.AddStyleToRange(&red, niceyaml.PositionRange{
-		Start: niceyaml.Position{Line: 10, Col: 5},
-		End:   niceyaml.Position{Line: 11, Col: 22},
-	})
-
-	blue := lipgloss.NewStyle().Background(charmtone.Cherry).Foreground(charmtone.Salt)
-	printer.AddStyleToRange(&blue, niceyaml.PositionRange{
-		Start: niceyaml.Position{Line: 11, Col: 13},
-		End:   niceyaml.Position{Line: 11, Col: 31},
-	})
-
-	rangeDemo := printer.PrintTokens(niceyaml.NewLinesFromString(source))
-	printer.ClearStyles()
+	// Print YAML with syntax highlighting.
+	syntaxDemo := printer.PrintTokens(niceyaml.NewLinesFromString(source))
 
 	// Show diff between two YAML documents.
 	beforeRev := niceyaml.NewRevision(niceyaml.NewLinesFromString(original, niceyaml.WithName("before")))
 	afterRev := niceyaml.NewRevision(niceyaml.NewLinesFromString(modified, niceyaml.WithName("after")))
 	diff := niceyaml.NewFullDiff(beforeRev, afterRev)
 	diffDemo := printer.PrintTokens(diff.Lines())
-	printer.ClearStyles()
 
 	// Find and highlight all occurrences of "fe".
 	findLines := niceyaml.NewLinesFromString(find)
@@ -76,7 +63,7 @@ func main() {
 		Render(
 			lipgloss.JoinHorizontal(
 				lipgloss.Top,
-				rangeDemo,
+				syntaxDemo,
 				segment.BorderLeft(true).Render(""),
 				diffDemo,
 				segment.BorderLeft(true).Render(""),

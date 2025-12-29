@@ -43,7 +43,7 @@ type StyleGetter interface {
 // TokenStyler styles [token.Tokens].
 type TokenStyler interface {
 	StyleGetter
-	AddStyleToToken(style *lipgloss.Style, pos Position)
+	AddStyleToRange(style *lipgloss.Style, r PositionRange)
 	ClearStyles()
 }
 
@@ -91,13 +91,7 @@ func DefaultStyles() Styles {
 	}
 }
 
-// tokenStyle represents a style to apply at a specific token position.
-type tokenStyle struct {
-	style lipgloss.Style
-	pos   Position
-}
-
-// rangeStyle represents a style to apply to a character range.
+// rangeStyle represents a style to apply to a character range using 0-indexed positions.
 type rangeStyle struct {
 	style lipgloss.Style
 	rng   PositionRange

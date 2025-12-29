@@ -31,30 +31,48 @@ func TestFinder_Find(t *testing.T) {
 			input:  "key: value",
 			search: "value",
 			want: []niceyaml.PositionRange{
-				{Start: niceyaml.Position{Line: 1, Col: 6}, End: niceyaml.Position{Line: 1, Col: 11}},
+				niceyaml.NewPositionRange(
+					niceyaml.NewPosition(0, 5),
+					niceyaml.NewPosition(0, 10),
+				),
 			},
 		},
 		"match key": {
 			input:  "key: value",
 			search: "key",
 			want: []niceyaml.PositionRange{
-				{Start: niceyaml.Position{Line: 1, Col: 1}, End: niceyaml.Position{Line: 1, Col: 4}},
+				niceyaml.NewPositionRange(
+					niceyaml.NewPosition(0, 0),
+					niceyaml.NewPosition(0, 3),
+				),
 			},
 		},
 		"cross-token match": {
 			input:  "key: value",
 			search: ": ",
 			want: []niceyaml.PositionRange{
-				{Start: niceyaml.Position{Line: 1, Col: 4}, End: niceyaml.Position{Line: 1, Col: 6}},
+				niceyaml.NewPositionRange(
+					niceyaml.NewPosition(0, 3),
+					niceyaml.NewPosition(0, 5),
+				),
 			},
 		},
 		"multiple matches": {
 			input:  "a: test\nb: test\nc: test",
 			search: "test",
 			want: []niceyaml.PositionRange{
-				{Start: niceyaml.Position{Line: 1, Col: 4}, End: niceyaml.Position{Line: 1, Col: 8}},
-				{Start: niceyaml.Position{Line: 2, Col: 4}, End: niceyaml.Position{Line: 2, Col: 8}},
-				{Start: niceyaml.Position{Line: 3, Col: 4}, End: niceyaml.Position{Line: 3, Col: 8}},
+				niceyaml.NewPositionRange(
+					niceyaml.NewPosition(0, 3),
+					niceyaml.NewPosition(0, 7),
+				),
+				niceyaml.NewPositionRange(
+					niceyaml.NewPosition(1, 3),
+					niceyaml.NewPosition(1, 7),
+				),
+				niceyaml.NewPositionRange(
+					niceyaml.NewPosition(2, 3),
+					niceyaml.NewPosition(2, 7),
+				),
 			},
 		},
 		"no match": {
@@ -71,14 +89,20 @@ func TestFinder_Find(t *testing.T) {
 			input:  "text: |\n  line1\n  line2",
 			search: "line2",
 			want: []niceyaml.PositionRange{
-				{Start: niceyaml.Position{Line: 3, Col: 3}, End: niceyaml.Position{Line: 3, Col: 8}},
+				niceyaml.NewPositionRange(
+					niceyaml.NewPosition(2, 2),
+					niceyaml.NewPosition(2, 7),
+				),
 			},
 		},
 		"match spans lines": {
 			input:  "a: 1\nb: 2",
 			search: "1\nb",
 			want: []niceyaml.PositionRange{
-				{Start: niceyaml.Position{Line: 1, Col: 4}, End: niceyaml.Position{Line: 2, Col: 2}},
+				niceyaml.NewPositionRange(
+					niceyaml.NewPosition(0, 3),
+					niceyaml.NewPosition(1, 1),
+				),
 			},
 		},
 		"with normalizer - diacritic match": {
@@ -86,7 +110,10 @@ func TestFinder_Find(t *testing.T) {
 			search:     "Thais",
 			normalizer: niceyaml.StandardNormalizer{},
 			want: []niceyaml.PositionRange{
-				{Start: niceyaml.Position{Line: 1, Col: 7}, End: niceyaml.Position{Line: 1, Col: 12}},
+				niceyaml.NewPositionRange(
+					niceyaml.NewPosition(0, 6),
+					niceyaml.NewPosition(0, 11),
+				),
 			},
 		},
 		"with normalizer - search has diacritic": {
@@ -94,7 +121,10 @@ func TestFinder_Find(t *testing.T) {
 			search:     "Thaïs",
 			normalizer: niceyaml.StandardNormalizer{},
 			want: []niceyaml.PositionRange{
-				{Start: niceyaml.Position{Line: 1, Col: 7}, End: niceyaml.Position{Line: 1, Col: 12}},
+				niceyaml.NewPositionRange(
+					niceyaml.NewPosition(0, 6),
+					niceyaml.NewPosition(0, 11),
+				),
 			},
 		},
 		"case sensitive - no match": {
@@ -107,49 +137,70 @@ func TestFinder_Find(t *testing.T) {
 			search:     "value",
 			normalizer: testNormalizer{fn: strings.ToLower},
 			want: []niceyaml.PositionRange{
-				{Start: niceyaml.Position{Line: 1, Col: 6}, End: niceyaml.Position{Line: 1, Col: 11}},
+				niceyaml.NewPositionRange(
+					niceyaml.NewPosition(0, 5),
+					niceyaml.NewPosition(0, 10),
+				),
 			},
 		},
 		"single character match": {
 			input:  "a: b",
 			search: "a",
 			want: []niceyaml.PositionRange{
-				{Start: niceyaml.Position{Line: 1, Col: 1}, End: niceyaml.Position{Line: 1, Col: 2}},
+				niceyaml.NewPositionRange(
+					niceyaml.NewPosition(0, 0),
+					niceyaml.NewPosition(0, 1),
+				),
 			},
 		},
 		"overlapping potential matches": {
 			input:  "aaa",
 			search: "aa",
 			want: []niceyaml.PositionRange{
-				{Start: niceyaml.Position{Line: 1, Col: 1}, End: niceyaml.Position{Line: 1, Col: 3}},
+				niceyaml.NewPositionRange(
+					niceyaml.NewPosition(0, 0),
+					niceyaml.NewPosition(0, 2),
+				),
 			},
 		},
 		"utf8 - search text after multibyte char": {
 			input:  "name: Thaïs test",
 			search: "test",
 			want: []niceyaml.PositionRange{
-				{Start: niceyaml.Position{Line: 1, Col: 13}, End: niceyaml.Position{Line: 1, Col: 17}},
+				niceyaml.NewPositionRange(
+					niceyaml.NewPosition(0, 12),
+					niceyaml.NewPosition(0, 16),
+				),
 			},
 		},
 		"utf8 - search for multibyte char": {
 			input:  "name: Thaïs",
 			search: "ï",
 			want: []niceyaml.PositionRange{
-				{Start: niceyaml.Position{Line: 1, Col: 10}, End: niceyaml.Position{Line: 1, Col: 11}},
+				niceyaml.NewPositionRange(
+					niceyaml.NewPosition(0, 9),
+					niceyaml.NewPosition(0, 10),
+				),
 			},
 		},
 		"utf8 - search spanning multibyte char": {
 			input:  "name: Thaïs",
 			search: "ïs",
 			want: []niceyaml.PositionRange{
-				{Start: niceyaml.Position{Line: 1, Col: 10}, End: niceyaml.Position{Line: 1, Col: 12}},
+				niceyaml.NewPositionRange(
+					niceyaml.NewPosition(0, 9),
+					niceyaml.NewPosition(0, 11),
+				),
 			},
 		},
 		"utf8 - multiple multibyte chars": {
 			input:  "key: über öffentlich",
 			search: "öffentlich",
 			want: []niceyaml.PositionRange{
-				{Start: niceyaml.Position{Line: 1, Col: 11}, End: niceyaml.Position{Line: 1, Col: 21}},
+				niceyaml.NewPositionRange(
+					niceyaml.NewPosition(0, 10),
+					niceyaml.NewPosition(0, 20),
+				),
 			},
 		},
 		"utf8 - normalizer finds diacritic as ascii": {
@@ -157,7 +208,10 @@ func TestFinder_Find(t *testing.T) {
 			search:     "o",
 			normalizer: niceyaml.StandardNormalizer{},
 			want: []niceyaml.PositionRange{
-				{Start: niceyaml.Position{Line: 1, Col: 11}, End: niceyaml.Position{Line: 1, Col: 12}},
+				niceyaml.NewPositionRange(
+					niceyaml.NewPosition(0, 10),
+					niceyaml.NewPosition(0, 11),
+				),
 			},
 		},
 		"utf8 - combined normalizer case and diacritics": {
@@ -165,28 +219,40 @@ func TestFinder_Find(t *testing.T) {
 			search:     "thais",
 			normalizer: niceyaml.StandardNormalizer{},
 			want: []niceyaml.PositionRange{
-				{Start: niceyaml.Position{Line: 1, Col: 7}, End: niceyaml.Position{Line: 1, Col: 12}},
+				niceyaml.NewPositionRange(
+					niceyaml.NewPosition(0, 6),
+					niceyaml.NewPosition(0, 11),
+				),
 			},
 		},
 		"utf8 - japanese characters partial match": {
 			input:  "key: 日本酒",
 			search: "日本",
 			want: []niceyaml.PositionRange{
-				{Start: niceyaml.Position{Line: 1, Col: 6}, End: niceyaml.Position{Line: 1, Col: 8}},
+				niceyaml.NewPositionRange(
+					niceyaml.NewPosition(0, 5),
+					niceyaml.NewPosition(0, 7),
+				),
 			},
 		},
 		"utf8 - japanese after other japanese": {
 			input:  "- 寿司: 日本酒",
 			search: "日本",
 			want: []niceyaml.PositionRange{
-				{Start: niceyaml.Position{Line: 1, Col: 7}, End: niceyaml.Position{Line: 1, Col: 9}},
+				niceyaml.NewPositionRange(
+					niceyaml.NewPosition(0, 6),
+					niceyaml.NewPosition(0, 8),
+				),
 			},
 		},
 		"utf8 - multiline with japanese": {
 			input:  "a: test\n- 寿司: 日本酒",
 			search: "日本",
 			want: []niceyaml.PositionRange{
-				{Start: niceyaml.Position{Line: 2, Col: 7}, End: niceyaml.Position{Line: 2, Col: 9}},
+				niceyaml.NewPositionRange(
+					niceyaml.NewPosition(1, 6),
+					niceyaml.NewPosition(1, 8),
+				),
 			},
 		},
 		"utf8 - box drawing chars not matched by japanese": {
@@ -232,15 +298,24 @@ func TestFinder_Find_EdgeCases(t *testing.T) {
 			input:  "key: value",
 			search: "k",
 			want: []niceyaml.PositionRange{
-				{Start: niceyaml.Position{Line: 1, Col: 1}, End: niceyaml.Position{Line: 1, Col: 2}},
+				niceyaml.NewPositionRange(
+					niceyaml.NewPosition(0, 0),
+					niceyaml.NewPosition(0, 1),
+				),
 			},
 		},
 		"last character": {
 			input:  "key: value",
 			search: "e",
 			want: []niceyaml.PositionRange{
-				{Start: niceyaml.Position{Line: 1, Col: 2}, End: niceyaml.Position{Line: 1, Col: 3}},
-				{Start: niceyaml.Position{Line: 1, Col: 10}, End: niceyaml.Position{Line: 1, Col: 11}},
+				niceyaml.NewPositionRange(
+					niceyaml.NewPosition(0, 1),
+					niceyaml.NewPosition(0, 2),
+				),
+				niceyaml.NewPositionRange(
+					niceyaml.NewPosition(0, 9),
+					niceyaml.NewPosition(0, 10),
+				),
 			},
 		},
 	}
@@ -263,4 +338,65 @@ func TestFinder_Find_NilLines(t *testing.T) {
 	finder := niceyaml.NewFinder("test")
 	got := finder.Find(nil)
 	assert.Nil(t, got)
+}
+
+func TestFinder_Find_DiffBuiltLines(t *testing.T) {
+	t.Parallel()
+
+	// When searching Lines built from a diff, matches should be at the correct
+	// visual line positions, not based on original source Position.Line.
+
+	before := "key: old\n"
+	after := "key: new\n"
+
+	beforeLines := niceyaml.NewLinesFromString(before, niceyaml.WithName("before"))
+	afterLines := niceyaml.NewLinesFromString(after, niceyaml.WithName("after"))
+
+	revBefore := niceyaml.NewRevision(beforeLines)
+	revAfter := niceyaml.NewRevision(afterLines)
+
+	diff := niceyaml.NewFullDiff(revBefore, revAfter)
+	lines := diff.Lines()
+
+	// Diff produces:
+	// Line 0 (idx=0): "key: old" (deleted, Position.Line=1)
+	// Line 1 (idx=1): "key: new" (inserted, Position.Line=1)
+	// Both have same source Position.Line, but different visual indices.
+
+	t.Run("search for 'old' finds match at visual line 0", func(t *testing.T) {
+		t.Parallel()
+
+		finder := niceyaml.NewFinder("old")
+		matches := finder.Find(lines)
+
+		want := []niceyaml.PositionRange{
+			niceyaml.NewPositionRange(niceyaml.NewPosition(0, 5), niceyaml.NewPosition(0, 8)),
+		}
+		assert.Equal(t, want, matches)
+	})
+
+	t.Run("search for 'new' finds match at visual line 1", func(t *testing.T) {
+		t.Parallel()
+
+		finder := niceyaml.NewFinder("new")
+		matches := finder.Find(lines)
+
+		want := []niceyaml.PositionRange{
+			niceyaml.NewPositionRange(niceyaml.NewPosition(1, 5), niceyaml.NewPosition(1, 8)),
+		}
+		assert.Equal(t, want, matches)
+	})
+
+	t.Run("search for 'key' finds matches at both visual lines", func(t *testing.T) {
+		t.Parallel()
+
+		finder := niceyaml.NewFinder("key")
+		matches := finder.Find(lines)
+
+		want := []niceyaml.PositionRange{
+			niceyaml.NewPositionRange(niceyaml.NewPosition(0, 0), niceyaml.NewPosition(0, 3)),
+			niceyaml.NewPositionRange(niceyaml.NewPosition(1, 0), niceyaml.NewPosition(1, 3)),
+		}
+		assert.Equal(t, want, matches)
+	})
 }

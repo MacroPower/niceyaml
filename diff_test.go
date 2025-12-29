@@ -617,8 +617,8 @@ line9: new9
 		assert.Equal(t, "@@ -8,2 +8,2 @@", got.Line(3).Annotation.Content)
 
 		// Other lines should not have annotations.
-		got.EachLine(func(i int, line niceyaml.Line) {
-			if i != 0 && i != 3 {
+		got.EachLine(func(lineIndex int, line niceyaml.Line) {
+			if lineIndex != 0 && lineIndex != 3 {
 				assert.Empty(t, line.Annotation.Content)
 			}
 		})

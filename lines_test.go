@@ -848,179 +848,6 @@ doc2: value2
 	}
 }
 
-func TestTokens_Slice(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input        string
-		wantContent  string
-		wantLineNums []int
-		minLine      int
-		maxLine      int
-	}{
-		"unbounded - all lines": {
-			input: `first: 1
-second: 2
-third: 3
-`,
-			minLine:      -1,
-			maxLine:      -1,
-			wantLineNums: []int{1, 2, 3},
-			wantContent:  "first: 1\nsecond: 2\nthird: 3",
-		},
-		"bounded first half": {
-			input: `first: 1
-second: 2
-third: 3
-fourth: 4
-`,
-			minLine:      1,
-			maxLine:      2,
-			wantLineNums: []int{1, 2},
-			wantContent:  "first: 1\nsecond: 2",
-		},
-		"bounded second half": {
-			input: `first: 1
-second: 2
-third: 3
-fourth: 4
-`,
-			minLine:      3,
-			maxLine:      4,
-			wantLineNums: []int{3, 4},
-			wantContent:  "third: 3\nfourth: 4",
-		},
-		"bounded middle": {
-			input: `first: 1
-second: 2
-third: 3
-fourth: 4
-fifth: 5
-`,
-			minLine:      2,
-			maxLine:      4,
-			wantLineNums: []int{2, 3, 4},
-			wantContent:  "second: 2\nthird: 3\nfourth: 4",
-		},
-		"unbounded min": {
-			input: `first: 1
-second: 2
-third: 3
-`,
-			minLine:      -1,
-			maxLine:      2,
-			wantLineNums: []int{1, 2},
-			wantContent:  "first: 1\nsecond: 2",
-		},
-		"unbounded max": {
-			input: `first: 1
-second: 2
-third: 3
-`,
-			minLine:      2,
-			maxLine:      -1,
-			wantLineNums: []int{2, 3},
-			wantContent:  "second: 2\nthird: 3",
-		},
-		"single line": {
-			input: `first: 1
-second: 2
-third: 3
-`,
-			minLine:      2,
-			maxLine:      2,
-			wantLineNums: []int{2},
-			wantContent:  "second: 2",
-		},
-		"no lines in range": {
-			input: `first: 1
-second: 2
-`,
-			minLine:      10,
-			maxLine:      20,
-			wantLineNums: []int{},
-			wantContent:  "",
-		},
-		"range beyond end": {
-			input: `first: 1
-second: 2
-`,
-			minLine:      1,
-			maxLine:      100,
-			wantLineNums: []int{1, 2},
-			wantContent:  "first: 1\nsecond: 2",
-		},
-		"literal block sliced": {
-			input: `before: key
-script: |
-  line1
-  line2
-after: key
-`,
-			minLine:      2,
-			maxLine:      4,
-			wantLineNums: []int{2, 3, 4},
-			wantContent:  "script: |\n  line1\n  line2",
-		},
-		"nested structure sliced": {
-			input: `parent:
-  child1: val1
-  child2: val2
-  child3: val3
-`,
-			minLine:      2,
-			maxLine:      3,
-			wantLineNums: []int{2, 3},
-			wantContent:  "  child1: val1\n  child2: val2",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			tks := lexer.Tokenize(tc.input)
-			full := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
-
-			sliced := full.Slice(tc.minLine, tc.maxLine)
-
-			// Verify line numbers.
-			gotLineNums := make([]int, sliced.LineCount())
-			sliced.EachLine(func(i int, line niceyaml.Line) {
-				gotLineNums[i] = line.Number()
-			})
-
-			assert.Equal(t, tc.wantLineNums, gotLineNums)
-
-			// Verify content.
-			assert.Equal(t, tc.wantContent, sliced.Content())
-
-			// Verify name is preserved.
-			assert.Equal(t, "test", sliced.Name)
-		})
-	}
-}
-
-func TestTokens_Slice_Clones(t *testing.T) {
-	t.Parallel()
-
-	tks := lexer.Tokenize("key: value\n")
-	original := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
-
-	sliced := original.Slice(-1, -1)
-
-	require.Equal(t, 1, sliced.LineCount())
-
-	// Verify that sliced is independent - modifying a cloned line doesn't affect original.
-	// Since Line() returns a copy, we verify by checking the lines are separate objects.
-	slicedLine := sliced.Line(0)
-	originalLine := original.Line(0)
-
-	// Content should match.
-	assert.Equal(t, originalLine.Content(), slicedLine.Content())
-	assert.Equal(t, originalLine.Number(), slicedLine.Number())
-}
-
 func TestNewTokens_LeadingNewlineTokens(t *testing.T) {
 	t.Parallel()
 
@@ -1105,58 +932,58 @@ func TestLines_EachRune(t *testing.T) {
 			// Note: lexer strips trailing newline from final simple value.
 			input: "a: b\n",
 			want: []runePosition{
-				{R: 'a', Pos: niceyaml.Position{Line: 1, Col: 1}},
-				{R: ':', Pos: niceyaml.Position{Line: 1, Col: 2}},
-				{R: ' ', Pos: niceyaml.Position{Line: 1, Col: 3}},
-				{R: 'b', Pos: niceyaml.Position{Line: 1, Col: 4}},
+				{R: 'a', Pos: niceyaml.NewPosition(0, 0)},
+				{R: ':', Pos: niceyaml.NewPosition(0, 1)},
+				{R: ' ', Pos: niceyaml.NewPosition(0, 2)},
+				{R: 'b', Pos: niceyaml.NewPosition(0, 3)},
 			},
 		},
 		"multi-line": {
 			// Note: lexer strips trailing newline from final value on each line.
 			input: "a: 1\nb: 2\n",
 			want: []runePosition{
-				{R: 'a', Pos: niceyaml.Position{Line: 1, Col: 1}},
-				{R: ':', Pos: niceyaml.Position{Line: 1, Col: 2}},
-				{R: ' ', Pos: niceyaml.Position{Line: 1, Col: 3}},
-				{R: '1', Pos: niceyaml.Position{Line: 1, Col: 4}},
-				{R: '\n', Pos: niceyaml.Position{Line: 1, Col: 5}},
-				{R: 'b', Pos: niceyaml.Position{Line: 2, Col: 1}},
-				{R: ':', Pos: niceyaml.Position{Line: 2, Col: 2}},
-				{R: ' ', Pos: niceyaml.Position{Line: 2, Col: 3}},
-				{R: '2', Pos: niceyaml.Position{Line: 2, Col: 4}},
+				{R: 'a', Pos: niceyaml.NewPosition(0, 0)},
+				{R: ':', Pos: niceyaml.NewPosition(0, 1)},
+				{R: ' ', Pos: niceyaml.NewPosition(0, 2)},
+				{R: '1', Pos: niceyaml.NewPosition(0, 3)},
+				{R: '\n', Pos: niceyaml.NewPosition(0, 4)},
+				{R: 'b', Pos: niceyaml.NewPosition(1, 0)},
+				{R: ':', Pos: niceyaml.NewPosition(1, 1)},
+				{R: ' ', Pos: niceyaml.NewPosition(1, 2)},
+				{R: '2', Pos: niceyaml.NewPosition(1, 3)},
 			},
 		},
 		"utf8 - multibyte char": {
 			input: "k: ü\n",
 			want: []runePosition{
-				{R: 'k', Pos: niceyaml.Position{Line: 1, Col: 1}},
-				{R: ':', Pos: niceyaml.Position{Line: 1, Col: 2}},
-				{R: ' ', Pos: niceyaml.Position{Line: 1, Col: 3}},
-				{R: 'ü', Pos: niceyaml.Position{Line: 1, Col: 4}},
+				{R: 'k', Pos: niceyaml.NewPosition(0, 0)},
+				{R: ':', Pos: niceyaml.NewPosition(0, 1)},
+				{R: ' ', Pos: niceyaml.NewPosition(0, 2)},
+				{R: 'ü', Pos: niceyaml.NewPosition(0, 3)},
 			},
 		},
 		"utf8 - japanese": {
 			input: "k: 日本\n",
 			want: []runePosition{
-				{R: 'k', Pos: niceyaml.Position{Line: 1, Col: 1}},
-				{R: ':', Pos: niceyaml.Position{Line: 1, Col: 2}},
-				{R: ' ', Pos: niceyaml.Position{Line: 1, Col: 3}},
-				{R: '日', Pos: niceyaml.Position{Line: 1, Col: 4}},
-				{R: '本', Pos: niceyaml.Position{Line: 1, Col: 5}},
+				{R: 'k', Pos: niceyaml.NewPosition(0, 0)},
+				{R: ':', Pos: niceyaml.NewPosition(0, 1)},
+				{R: ' ', Pos: niceyaml.NewPosition(0, 2)},
+				{R: '日', Pos: niceyaml.NewPosition(0, 3)},
+				{R: '本', Pos: niceyaml.NewPosition(0, 4)},
 			},
 		},
 		"nested with indent": {
 			input: "p:\n  c: v\n",
 			want: []runePosition{
-				{R: 'p', Pos: niceyaml.Position{Line: 1, Col: 1}},
-				{R: ':', Pos: niceyaml.Position{Line: 1, Col: 2}},
-				{R: '\n', Pos: niceyaml.Position{Line: 1, Col: 3}},
-				{R: ' ', Pos: niceyaml.Position{Line: 2, Col: 1}},
-				{R: ' ', Pos: niceyaml.Position{Line: 2, Col: 2}},
-				{R: 'c', Pos: niceyaml.Position{Line: 2, Col: 3}},
-				{R: ':', Pos: niceyaml.Position{Line: 2, Col: 4}},
-				{R: ' ', Pos: niceyaml.Position{Line: 2, Col: 5}},
-				{R: 'v', Pos: niceyaml.Position{Line: 2, Col: 6}},
+				{R: 'p', Pos: niceyaml.NewPosition(0, 0)},
+				{R: ':', Pos: niceyaml.NewPosition(0, 1)},
+				{R: '\n', Pos: niceyaml.NewPosition(0, 2)},
+				{R: ' ', Pos: niceyaml.NewPosition(1, 0)},
+				{R: ' ', Pos: niceyaml.NewPosition(1, 1)},
+				{R: 'c', Pos: niceyaml.NewPosition(1, 2)},
+				{R: ':', Pos: niceyaml.NewPosition(1, 3)},
+				{R: ' ', Pos: niceyaml.NewPosition(1, 4)},
+				{R: 'v', Pos: niceyaml.NewPosition(1, 5)},
 			},
 		},
 		"empty": {
@@ -1205,21 +1032,21 @@ func TestLines_EachRune_LiteralBlock(t *testing.T) {
 	require.NotEmpty(t, runes, "should have runes")
 	require.NotEmpty(t, positions, "should have positions")
 
-	// Verify positions start at line 1.
-	assert.Equal(t, 1, positions[0].Line, "should start at line 1")
-	assert.Equal(t, 1, positions[0].Col, "should start at column 1")
+	// Verify positions start at line 0 (0-indexed).
+	assert.Equal(t, 0, positions[0].Line, "should start at line 0")
+	assert.Equal(t, 0, positions[0].Col, "should start at column 0")
 
 	// Verify positions increase monotonically.
-	prevLine := 0
+	prevLine := -1
 
-	prevCol := 0
+	prevCol := -1
 
 	for i, pos := range positions {
 		if pos.Line == prevLine {
 			assert.Greater(t, pos.Col, prevCol, "column should increase on same line at index %d", i)
 		} else if pos.Line > prevLine {
-			// Line changed, column should reset to 1.
-			assert.Equal(t, 1, pos.Col, "column should reset to 1 on new line at index %d", i)
+			// Line changed, column should reset to 0.
+			assert.Equal(t, 0, pos.Col, "column should reset to 0 on new line at index %d", i)
 		}
 
 		prevLine = pos.Line
@@ -1227,7 +1054,56 @@ func TestLines_EachRune_LiteralBlock(t *testing.T) {
 	}
 
 	// Verify the last position is on a later line (multi-line content).
-	assert.Greater(t, positions[len(positions)-1].Line, 1, "should have content on multiple lines")
+	assert.Positive(t, positions[len(positions)-1].Line, "should have content on multiple lines")
+}
+
+func TestLines_EachRune_DiffBuiltLines(t *testing.T) {
+	t.Parallel()
+
+	// When Lines are built from a diff, Position.Line should be based on
+	// the visual line index (Line.idx), not the source token position.
+	// This is critical for Finder to work correctly with diffs.
+
+	before := "key: old\n"
+	after := "key: new\n"
+
+	beforeLines := niceyaml.NewLinesFromString(before, niceyaml.WithName("before"))
+	afterLines := niceyaml.NewLinesFromString(after, niceyaml.WithName("after"))
+
+	revBefore := niceyaml.NewRevision(beforeLines)
+	revAfter := niceyaml.NewRevision(afterLines)
+
+	diff := niceyaml.NewFullDiff(revBefore, revAfter)
+	lines := diff.Lines()
+
+	// Diff should produce two lines: deleted (old) and inserted (new).
+	// Both have the same source token line (1), but different visual indices (0, 1).
+	require.Equal(t, 2, lines.LineCount(), "diff should produce 2 lines")
+
+	var positions []struct {
+		line int
+		col  int
+	}
+
+	lines.EachRune(func(r rune, pos niceyaml.Position) {
+		if r == 'k' { // First char of each line.
+			positions = append(positions, struct {
+				line int
+				col  int
+			}{line: pos.Line, col: pos.Col})
+		}
+	})
+
+	// Should have 2 'k' characters, one on each visual line.
+	require.Len(t, positions, 2, "should have 2 lines starting with 'k'")
+
+	// First line should be at visual line 0.
+	assert.Equal(t, 0, positions[0].line, "first line should be at visual line 0")
+	assert.Equal(t, 0, positions[0].col, "first 'k' should be at column 0")
+
+	// Second line should be at visual line 1 (not 0, even though source token line is same).
+	assert.Equal(t, 1, positions[1].line, "second line should be at visual line 1")
+	assert.Equal(t, 0, positions[1].col, "second 'k' should be at column 0")
 }
 
 func TestTokens_Validate(t *testing.T) {
@@ -1454,188 +1330,6 @@ func TestTokens_Validate(t *testing.T) {
 	})
 }
 
-func TestLines_TokenPositions(t *testing.T) {
-	t.Parallel()
-
-	t.Run("literal block content - returns all joined lines", func(t *testing.T) {
-		t.Parallel()
-
-		input := `key: |
-  line1
-  line2
-`
-		tks := lexer.Tokenize(input)
-		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
-
-		require.Equal(t, 3, result.LineCount())
-
-		// Find the actual column of the string token on line 2.
-		line2Token := result.Line(1).Token(0)
-		col := line2Token.Position.Column
-
-		// Query line 2 (first content line) with the token's actual column.
-		positions := result.TokenPositions(2, col)
-		require.NotNil(t, positions, "expected positions for joined literal block")
-		require.Len(t, positions, 2, "expected 2 positions for 2-line literal block content")
-
-		// Collect line numbers from positions.
-		lineNums := make([]int, len(positions))
-		for i, pos := range positions {
-			lineNums[i] = pos.Line
-		}
-
-		assert.ElementsMatch(t, []int{2, 3}, lineNums)
-	})
-
-	t.Run("non-joined line - returns position", func(t *testing.T) {
-		t.Parallel()
-
-		input := "key: value\n"
-		tks := lexer.Tokenize(input)
-		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
-
-		require.Equal(t, 1, result.LineCount())
-
-		// Query line 1, column 1 (the "key" token).
-		positions := result.TokenPositions(1, 1)
-		require.NotNil(t, positions)
-		require.Len(t, positions, 1)
-		assert.Equal(t, 1, positions[0].Line)
-		assert.Equal(t, 1, positions[0].Column)
-	})
-
-	t.Run("query indicator line of literal block - returns position", func(t *testing.T) {
-		t.Parallel()
-
-		input := `key: |
-  line1
-  line2
-`
-		tks := lexer.Tokenize(input)
-		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
-
-		require.Equal(t, 3, result.LineCount())
-
-		// Query line 1 (indicator line), column 1 (the "key" token).
-		// The indicator line itself is not part of the join, but has tokens.
-		positions := result.TokenPositions(1, 1)
-		require.NotNil(t, positions)
-		require.Len(t, positions, 1)
-		assert.Equal(t, 1, positions[0].Line)
-		assert.Equal(t, 1, positions[0].Column)
-	})
-
-	t.Run("query from last line of literal block", func(t *testing.T) {
-		t.Parallel()
-
-		input := `key: |
-  line1
-  line2
-`
-		tks := lexer.Tokenize(input)
-		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
-
-		require.Equal(t, 3, result.LineCount())
-
-		// Find the actual column of the string token on line 3.
-		line3Token := result.Line(2).Token(0)
-		col := line3Token.Position.Column
-
-		// Query line 3 (last content line) with the token's actual column.
-		positions := result.TokenPositions(3, col)
-		require.NotNil(t, positions, "expected positions when querying last joined line")
-		require.Len(t, positions, 2)
-
-		lineNums := make([]int, len(positions))
-		for i, pos := range positions {
-			lineNums[i] = pos.Line
-		}
-
-		assert.ElementsMatch(t, []int{2, 3}, lineNums)
-	})
-
-	t.Run("line not found - returns nil", func(t *testing.T) {
-		t.Parallel()
-
-		input := "key: value\n"
-		tks := lexer.Tokenize(input)
-		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
-
-		// Query non-existent line.
-		positions := result.TokenPositions(999, 1)
-		assert.Nil(t, positions)
-	})
-
-	t.Run("column outside token range - returns nil", func(t *testing.T) {
-		t.Parallel()
-
-		input := `key: |
-  line1
-  line2
-`
-		tks := lexer.Tokenize(input)
-		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
-
-		require.Equal(t, 3, result.LineCount())
-
-		// Query line 2 with a column that's way beyond the token.
-		positions := result.TokenPositions(2, 100)
-		assert.Nil(t, positions, "expected nil for column outside token range")
-	})
-
-	t.Run("three-line literal block", func(t *testing.T) {
-		t.Parallel()
-
-		input := `key: |
-  line1
-  line2
-  line3
-`
-		tks := lexer.Tokenize(input)
-		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
-
-		require.Equal(t, 4, result.LineCount())
-
-		// Find the actual column of the string token on line 3 (middle line).
-		line3Token := result.Line(2).Token(0)
-		col := line3Token.Position.Column
-
-		// Query middle line (line 3) with the token's actual column.
-		positions := result.TokenPositions(3, col)
-		require.NotNil(t, positions)
-		require.Len(t, positions, 3, "expected 3 positions for 3-line literal block content")
-
-		lineNums := make([]int, len(positions))
-		for i, pos := range positions {
-			lineNums[i] = pos.Line
-		}
-
-		assert.ElementsMatch(t, []int{2, 3, 4}, lineNums)
-	})
-
-	t.Run("folded block", func(t *testing.T) {
-		t.Parallel()
-
-		input := `key: >
-  line1
-  line2
-`
-		tks := lexer.Tokenize(input)
-		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
-
-		require.Equal(t, 3, result.LineCount())
-
-		// Find the actual column of the string token on line 2.
-		line2Token := result.Line(1).Token(0)
-		col := line2Token.Position.Column
-
-		// Query line 2 with the token's actual column.
-		positions := result.TokenPositions(2, col)
-		require.NotNil(t, positions)
-		require.Len(t, positions, 2)
-	})
-}
-
 func TestNewLinesFromTokens_PositionFieldsMatchLexer(t *testing.T) {
 	t.Parallel()
 
@@ -1797,4 +1491,414 @@ end: val
 			}
 		}
 	}
+}
+
+func TestLines_TokenPositionRanges(t *testing.T) {
+	t.Parallel()
+
+	t.Run("literal block content - returns all joined lines", func(t *testing.T) {
+		t.Parallel()
+
+		input := `key: |
+  line1
+  line2
+`
+		tks := lexer.Tokenize(input)
+		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
+
+		require.Equal(t, 3, result.LineCount())
+
+		// Query line index 1 (second line), column 0 (start of the string token).
+		// The literal block content starts at column 0 (the indentation spaces are part of Origin).
+		ranges := result.TokenPositionRanges(niceyaml.Position{Line: 1, Col: 0})
+		require.NotNil(t, ranges, "expected ranges for joined literal block")
+		require.Len(t, ranges, 2, "expected 2 ranges for 2-line literal block content")
+
+		// Collect line indices from ranges.
+		lineIdxs := make([]int, len(ranges))
+		for i, r := range ranges {
+			lineIdxs[i] = r.Start.Line
+			// End line should match start line for single-line ranges.
+			assert.Equal(t, r.Start.Line, r.End.Line)
+			// End column should be greater than start column.
+			assert.Greater(t, r.End.Col, r.Start.Col)
+		}
+
+		assert.ElementsMatch(t, []int{1, 2}, lineIdxs)
+	})
+
+	t.Run("non-joined line - returns range", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		tks := lexer.Tokenize(input)
+		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
+
+		require.Equal(t, 1, result.LineCount())
+
+		// Query line index 0, column 0 (the "key" token).
+		ranges := result.TokenPositionRanges(niceyaml.Position{Line: 0, Col: 0})
+		require.NotNil(t, ranges)
+		require.Len(t, ranges, 1)
+		assert.Equal(t, 0, ranges[0].Start.Line)
+		assert.Equal(t, 0, ranges[0].Start.Col)
+		assert.Equal(t, 0, ranges[0].End.Line)
+		assert.Equal(t, 3, ranges[0].End.Col) // "key" is 3 chars.
+	})
+
+	t.Run("non-joined line multiple tokens - returns correct range", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		tks := lexer.Tokenize(input)
+		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
+
+		require.Equal(t, 1, result.LineCount())
+
+		// Find where the last token ("value") actually starts.
+		line := result.Line(0)
+		lastTokenIdx := len(line.Tokens()) - 1
+		require.Positive(t, lastTokenIdx, "expected multiple tokens")
+
+		// Calculate where the last token starts.
+		var expectedCol int
+		for i := range lastTokenIdx {
+			tk := line.Token(i)
+			expectedCol += len([]rune(strings.TrimSuffix(tk.Origin, "\n")))
+		}
+
+		// Query a column within the last token.
+		ranges := result.TokenPositionRanges(niceyaml.Position{Line: 0, Col: expectedCol})
+		require.NotNil(t, ranges)
+		require.Len(t, ranges, 1)
+		assert.Equal(t, 0, ranges[0].Start.Line)
+		assert.Equal(t, expectedCol, ranges[0].Start.Col)
+		assert.Equal(t, 0, ranges[0].End.Line)
+		assert.Greater(t, ranges[0].End.Col, ranges[0].Start.Col)
+	})
+
+	t.Run("query indicator line of literal block - returns range", func(t *testing.T) {
+		t.Parallel()
+
+		input := `key: |
+  line1
+  line2
+`
+		tks := lexer.Tokenize(input)
+		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
+
+		require.Equal(t, 3, result.LineCount())
+
+		// Query line index 0 (indicator line), column 0 (the "key" token).
+		// The indicator line itself is not part of the join, but has tokens.
+		ranges := result.TokenPositionRanges(niceyaml.Position{Line: 0, Col: 0})
+		require.NotNil(t, ranges)
+		require.Len(t, ranges, 1)
+		assert.Equal(t, 0, ranges[0].Start.Line)
+		assert.Equal(t, 0, ranges[0].Start.Col)
+		assert.Equal(t, 0, ranges[0].End.Line)
+		assert.Equal(t, 3, ranges[0].End.Col) // "key" is 3 chars.
+	})
+
+	t.Run("query from last line of literal block", func(t *testing.T) {
+		t.Parallel()
+
+		input := `key: |
+  line1
+  line2
+`
+		tks := lexer.Tokenize(input)
+		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
+
+		require.Equal(t, 3, result.LineCount())
+
+		// Query line index 2 (last content line), column 0.
+		ranges := result.TokenPositionRanges(niceyaml.Position{Line: 2, Col: 0})
+		require.NotNil(t, ranges, "expected ranges when querying last joined line")
+		require.Len(t, ranges, 2)
+
+		lineIdxs := make([]int, len(ranges))
+		for i, r := range ranges {
+			lineIdxs[i] = r.Start.Line
+			assert.Equal(t, r.Start.Line, r.End.Line)
+			assert.Greater(t, r.End.Col, r.Start.Col)
+		}
+
+		assert.ElementsMatch(t, []int{1, 2}, lineIdxs)
+	})
+
+	t.Run("line index out of bounds - returns nil", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		tks := lexer.Tokenize(input)
+		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
+
+		// Query non-existent line index.
+		ranges := result.TokenPositionRanges(niceyaml.Position{Line: 999, Col: 0})
+		assert.Nil(t, ranges)
+
+		// Negative index.
+		ranges = result.TokenPositionRanges(niceyaml.Position{Line: -1, Col: 0})
+		assert.Nil(t, ranges)
+	})
+
+	t.Run("column outside token range - returns nil", func(t *testing.T) {
+		t.Parallel()
+
+		input := `key: |
+  line1
+  line2
+`
+		tks := lexer.Tokenize(input)
+		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
+
+		require.Equal(t, 3, result.LineCount())
+
+		// Query line index 1 with a column that's way beyond the token.
+		ranges := result.TokenPositionRanges(niceyaml.Position{Line: 1, Col: 100})
+		assert.Nil(t, ranges, "expected nil for column outside token range")
+	})
+
+	t.Run("three-line literal block", func(t *testing.T) {
+		t.Parallel()
+
+		input := `key: |
+  line1
+  line2
+  line3
+`
+		tks := lexer.Tokenize(input)
+		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
+
+		require.Equal(t, 4, result.LineCount())
+
+		// Query middle line (line index 2), column 0.
+		ranges := result.TokenPositionRanges(niceyaml.Position{Line: 2, Col: 0})
+		require.NotNil(t, ranges)
+		require.Len(t, ranges, 3, "expected 3 ranges for 3-line literal block content")
+
+		lineIdxs := make([]int, len(ranges))
+		for i, r := range ranges {
+			lineIdxs[i] = r.Start.Line
+			assert.Equal(t, r.Start.Line, r.End.Line)
+			assert.Greater(t, r.End.Col, r.Start.Col)
+		}
+
+		assert.ElementsMatch(t, []int{1, 2, 3}, lineIdxs)
+	})
+
+	t.Run("folded block", func(t *testing.T) {
+		t.Parallel()
+
+		input := `key: >
+  line1
+  line2
+`
+		tks := lexer.Tokenize(input)
+		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
+
+		require.Equal(t, 3, result.LineCount())
+
+		// Query line index 1 (first content line), column 0.
+		ranges := result.TokenPositionRanges(niceyaml.Position{Line: 1, Col: 0})
+		require.NotNil(t, ranges)
+		require.Len(t, ranges, 2)
+
+		lineIdxs := make([]int, len(ranges))
+		for i, r := range ranges {
+			lineIdxs[i] = r.Start.Line
+			assert.Equal(t, r.Start.Line, r.End.Line)
+			assert.Greater(t, r.End.Col, r.Start.Col)
+		}
+
+		assert.ElementsMatch(t, []int{1, 2}, lineIdxs)
+	})
+
+	t.Run("multiple positions - combined results", func(t *testing.T) {
+		t.Parallel()
+
+		input := `first: 1
+second: 2
+`
+		tks := lexer.Tokenize(input)
+		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
+
+		require.Equal(t, 2, result.LineCount())
+
+		// Query two different positions: "first" token on line 0, "second" token on line 1.
+		ranges := result.TokenPositionRanges(
+			niceyaml.Position{Line: 0, Col: 0},
+			niceyaml.Position{Line: 1, Col: 0},
+		)
+		require.NotNil(t, ranges)
+		require.Len(t, ranges, 2)
+
+		lineIdxs := make([]int, len(ranges))
+		for i, r := range ranges {
+			lineIdxs[i] = r.Start.Line
+		}
+
+		assert.ElementsMatch(t, []int{0, 1}, lineIdxs)
+	})
+
+	t.Run("multiple positions - deduplication", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		tks := lexer.Tokenize(input)
+		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
+
+		require.Equal(t, 1, result.LineCount())
+
+		// Query the same position twice.
+		ranges := result.TokenPositionRanges(
+			niceyaml.Position{Line: 0, Col: 0},
+			niceyaml.Position{Line: 0, Col: 0},
+		)
+		require.NotNil(t, ranges)
+		require.Len(t, ranges, 1, "expected duplicates to be removed")
+
+		assert.Equal(t, 0, ranges[0].Start.Line)
+		assert.Equal(t, 0, ranges[0].Start.Col)
+		assert.Equal(t, 0, ranges[0].End.Line)
+		assert.Equal(t, 3, ranges[0].End.Col)
+	})
+
+	t.Run("multiple positions - empty input", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		tks := lexer.Tokenize(input)
+		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
+
+		// Query with no positions.
+		ranges := result.TokenPositionRanges()
+		assert.Nil(t, ranges)
+	})
+
+	t.Run("multiple positions - joined lines deduplication", func(t *testing.T) {
+		t.Parallel()
+
+		input := `key: |
+  line1
+  line2
+`
+		tks := lexer.Tokenize(input)
+		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
+
+		require.Equal(t, 3, result.LineCount())
+
+		// Query both content lines of the same joined block.
+		// Both positions are within the joined block, so they should return
+		// the same ranges (deduplicated).
+		ranges := result.TokenPositionRanges(
+			niceyaml.Position{Line: 1, Col: 0},
+			niceyaml.Position{Line: 2, Col: 0},
+		)
+		require.NotNil(t, ranges)
+		require.Len(t, ranges, 2, "expected 2 unique ranges from joined block")
+
+		lineIdxs := make([]int, len(ranges))
+		for i, r := range ranges {
+			lineIdxs[i] = r.Start.Line
+		}
+
+		assert.ElementsMatch(t, []int{1, 2}, lineIdxs)
+	})
+}
+
+func TestLines_PositionsFromToken(t *testing.T) {
+	t.Parallel()
+
+	t.Run("single occurrence", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		tks := lexer.Tokenize(input)
+		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
+
+		require.Equal(t, 1, result.LineCount())
+
+		// Get the "key" token.
+		tk := result.Line(0).Token(0)
+		positions := result.PositionsFromToken(tk)
+
+		require.Len(t, positions, 1)
+		assert.Equal(t, 0, positions[0].Line)
+		assert.Equal(t, 0, positions[0].Col)
+	})
+
+	t.Run("multiple occurrences - literal block", func(t *testing.T) {
+		t.Parallel()
+
+		input := `key: |
+  line1
+  line2
+`
+		tks := lexer.Tokenize(input)
+		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
+
+		require.Equal(t, 3, result.LineCount())
+
+		// Get the content token from the first content line.
+		tk := result.Line(1).Token(0)
+		positions := result.PositionsFromToken(tk)
+
+		// The same token should appear on multiple lines.
+		require.GreaterOrEqual(t, len(positions), 1)
+
+		// Collect line indices.
+		lineIdxs := make([]int, len(positions))
+		for i, pos := range positions {
+			lineIdxs[i] = pos.Line
+		}
+
+		// Should include at least line 1.
+		assert.Contains(t, lineIdxs, 1)
+	})
+
+	t.Run("nil token", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		tks := lexer.Tokenize(input)
+		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
+
+		positions := result.PositionsFromToken(nil)
+		assert.Nil(t, positions)
+	})
+
+	t.Run("token not in lines", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		tks := lexer.Tokenize(input)
+		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
+
+		// Create a different token that's not in the Lines.
+		otherTks := lexer.Tokenize("other: data\n")
+		externalToken := otherTks[0]
+
+		positions := result.PositionsFromToken(externalToken)
+		assert.Nil(t, positions)
+	})
+
+	t.Run("token with column offset", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		tks := lexer.Tokenize(input)
+		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
+
+		// Get the last token ("value").
+		line := result.Line(0)
+		lastTk := line.Token(len(line.Tokens()) - 1)
+		positions := result.PositionsFromToken(lastTk)
+
+		require.Len(t, positions, 1)
+		assert.Equal(t, 0, positions[0].Line)
+		// Column should be > 0 since it's not the first token.
+		assert.Positive(t, positions[0].Col)
+	})
 }

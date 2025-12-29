@@ -12,13 +12,12 @@ import (
 type LineIterator interface {
 	EachLine(fn func(idx int, line Line))
 	IsEmpty() bool
-	TokenPositions(lineNum, col int) []*token.Position
 }
 
 const wrapOnCharacters = " /-"
 
 // Printer renders YAML tokens with syntax highlighting using [lipgloss.Style].
-// It supports custom styles, line numbers, and styled token/range overlays
+// It supports custom styles, line numbers, and styled range overlays
 // for highlighting specific positions such as errors.
 type Printer struct {
 	styles                   StyleGetter
@@ -27,7 +26,6 @@ type Printer struct {
 	linePrefix               string
 	lineInsertedPrefix       string
 	lineDeletedPrefix        string
-	tokenStyles              []*tokenStyle
 	rangeStyles              []*rangeStyle
 	width                    int
 	hasCustomStyle           bool
@@ -125,23 +123,9 @@ func (p *Printer) SetWidth(width int) {
 	p.width = width
 }
 
-// AddStyleToToken adds a style to apply to the token at the given position.
-// Line and column are 1-indexed, matching [token.Position].
-func (p *Printer) AddStyleToToken(s *lipgloss.Style, pos Position) {
-	style := lipgloss.NewStyle()
-	if s != nil {
-		style = *s
-	}
-
-	p.tokenStyles = append(p.tokenStyles, &tokenStyle{
-		style: style,
-		pos:   pos,
-	})
-}
-
 // AddStyleToRange adds a style to apply to the character range [r.Start, r.End).
 // The range is half-open: Start is inclusive, End is exclusive.
-// Line and column are 1-indexed, matching [token.Position].
+// Line and column are 0-indexed.
 // Overlapping range colors are blended; transforms are composed (overlay wraps base).
 func (p *Printer) AddStyleToRange(s *lipgloss.Style, r PositionRange) {
 	style := lipgloss.NewStyle()
@@ -162,7 +146,6 @@ func (p *Printer) GetStyle(s Style) *lipgloss.Style {
 
 // ClearStyles removes all previously added styles.
 func (p *Printer) ClearStyles() {
-	p.tokenStyles = nil
 	p.rangeStyles = nil
 }
 
@@ -173,55 +156,47 @@ func (p *Printer) PrintTokens(lines LineIterator) string {
 	return p.style.Render(content)
 }
 
-// PrintErrorToken prints the tokens around the error token with context.
-// Returns the formatted string and the starting line number.
-func (p *Printer) PrintErrorToken(tk *token.Token, lines int) (string, int) {
-	curLine := tk.Position.Line
+// PrintSlice returns a rendered string containing only lines where
+// minLine <= line.Number() <= maxLine. Uses absolute 1-indexed line numbers.
+// If minLine < 0, includes from the beginning; if maxLine < 0, includes to the end.
+func (p *Printer) PrintSlice(lines *Lines, minLine, maxLine int) string {
+	content := p.renderLinesInRange(lines, minLine, maxLine, true)
 
-	// Collect all tokens and slice to the range.
-	t := NewLinesFromToken(tk)
-	pos := t.TokenPositions(curLine, tk.Position.Column)
-
-	// Always include the current token's content.
-	minLine, maxLine := curLine, curLine
-	for _, p := range pos {
-		if p.Line < minLine {
-			minLine = p.Line
-		}
-		if p.Line > maxLine {
-			maxLine = p.Line
-		}
-	}
-
-	// Expand bounds by context lines.
-	minLine = max(1, minLine-lines)
-	maxLine = max(minLine, maxLine+lines)
-
-	sliced := t.Slice(minLine, maxLine)
-	content := p.renderLines(sliced, true)
-
-	return p.style.Render(content), minLine
+	return p.style.Render(content)
 }
 
 // renderLines renders a [LineIterator] line by line with syntax highlighting.
+func (p *Printer) renderLines(t LineIterator, showAnnotations bool) string {
+	return p.renderLinesInRange(t, -1, -1, showAnnotations)
+}
+
+// renderLinesInRange renders lines in [minLine, maxLine] using absolute 1-indexed line numbers.
+// If minLine < 0, includes from the beginning; if maxLine < 0, includes to the end.
 //
 //nolint:unparam // showAnnotations kept for API flexibility.
-func (p *Printer) renderLines(t LineIterator, showAnnotations bool) string {
+func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int, showAnnotations bool) string {
 	if t.IsEmpty() {
 		return ""
 	}
 
-	// Expand token styles across joined lines before rendering.
-	p.expandTokenStylesForJoins(t)
+	var (
+		sb  strings.Builder
+		idx int
+	)
 
-	var sb strings.Builder
+	t.EachLine(func(_ int, line Line) {
+		lineNum := line.Number()
 
-	t.EachLine(func(i int, line Line) {
+		// Filter by line number range.
+		if (minLine >= 0 && lineNum < minLine) || (maxLine >= 0 && lineNum > maxLine) {
+			return
+		}
+
 		hasAnnotation := showAnnotations && line.Annotation.Content != ""
 
 		if hasAnnotation {
 			// Add newline between hunks (not before first hunk).
-			if i > 0 {
+			if idx > 0 {
 				sb.WriteByte('\n')
 			}
 
@@ -232,27 +207,27 @@ func (p *Printer) renderLines(t LineIterator, showAnnotations bool) string {
 
 			sb.WriteString(p.styles.GetStyle(StyleComment).Render(line.Annotation.Content))
 			sb.WriteByte('\n')
-		} else if i > 0 {
+		} else if idx > 0 {
 			// Add newline between lines within a hunk.
 			sb.WriteByte('\n')
 		}
 
-		lineNum := line.Number()
-
 		switch line.Flag {
 		case FlagDeleted:
 			deleted := p.styles.GetStyle(StyleDiffDeleted)
-			p.writeLine(&sb, p.lineDeletedPrefix, line.Content(), lineNum, deleted, true)
+			p.writeLine(&sb, p.lineDeletedPrefix, line.Content(), lineNum, idx, deleted)
 
 		case FlagInserted:
 			inserted := p.styles.GetStyle(StyleDiffInserted)
-			p.writeLine(&sb, p.lineInsertedPrefix, line.Content(), lineNum, inserted, false)
+			p.writeLine(&sb, p.lineInsertedPrefix, line.Content(), lineNum, idx, inserted)
 
 		default: // FlagDefault (equal line).
 			// Render with syntax highlighting.
-			styledContent := p.renderTokenLine(line)
-			p.writeLine(&sb, p.linePrefix, styledContent, lineNum, nil, false)
+			styledContent := p.renderTokenLine(idx, line)
+			p.writeLine(&sb, p.linePrefix, styledContent, lineNum, idx, nil)
 		}
+
+		idx++
 	})
 
 	return sb.String()
@@ -261,26 +236,19 @@ func (p *Printer) renderLines(t LineIterator, showAnnotations bool) string {
 // writeLine writes a line with optional word wrapping.
 // If contentStyle is non-nil, applies it to prefix+content together (for diff lines).
 // If contentStyle is nil, styles only the prefix and preserves content styling (for equal lines).
-// If skipRangeStyles is true, range-based highlighting is not applied (used for deleted lines).
+// The lineNum parameter is 1-indexed (for display and rangeStyles), visualLine is 0-indexed (for absoluteRangeStyles).
 func (p *Printer) writeLine(
 	sb *strings.Builder,
 	prefix, content string,
-	lineNum int,
+	lineNum, visualLine int,
 	contentStyle *lipgloss.Style,
-	skipRangeStyles bool,
 ) {
 	renderLine := func(pfx, cnt string, col int) {
 		switch {
 		// For diff lines: apply diff style to prefix.
 		case contentStyle != nil:
 			sb.WriteString(contentStyle.Render(pfx))
-			if skipRangeStyles {
-				// For deleted lines: skip range highlights (they apply to "after" tokens only).
-				sb.WriteString(contentStyle.Render(cnt))
-			} else {
-				// For inserted lines: blend diff style with range highlights.
-				sb.WriteString(p.styleLineWithRanges(cnt, lineNum, col, contentStyle, true))
-			}
+			sb.WriteString(p.styleLineWithRanges(cnt, NewPosition(visualLine, col), contentStyle, true))
 
 		// For equal lines with line numbers: style the prefix with StyleDefault.
 		case p.lineNumbers:
@@ -303,8 +271,8 @@ func (p *Printer) writeLine(
 		subLines = strings.Split(lipgloss.Wrap(content, cw, wrapOnCharacters), "\n")
 	}
 
-	// Track column offset for wrapped lines (1-indexed).
-	col := 1
+	// Track column offset for wrapped lines (0-indexed).
+	col := 0
 
 	for j, subLine := range subLines {
 		if j > 0 {
@@ -329,21 +297,20 @@ func (p *Printer) writeLine(
 	}
 }
 
-// styleForPosition returns the effective style for a character at (line, col),
+// styleForPosition returns the effective style for a character at pos,
 // applying range styles to the base style.
 // If alwaysBlend is false, the first matching range overrides the base style;
 // subsequent ranges blend. If alwaysBlend is true, all ranges blend with base.
-func (p *Printer) styleForPosition(line, col int, style *lipgloss.Style, alwaysBlend bool) *lipgloss.Style {
+// The pos parameter uses 0-indexed line and column values.
+func (p *Printer) styleForPosition(pos Position, style *lipgloss.Style, alwaysBlend bool) *lipgloss.Style {
 	firstRange := true
 
 	for i := range p.rangeStyles {
-		if p.rangeStyles[i].rng.Contains(line, col) {
+		if p.rangeStyles[i].rng.Contains(pos) {
 			if !alwaysBlend && firstRange {
-				// First range overrides base (colors and transforms).
 				style = overrideStyles(style, &p.rangeStyles[i].style)
 				firstRange = false
 			} else {
-				// Subsequent ranges blend (colors and compose transforms).
 				style = blendStyles(style, &p.rangeStyles[i].style)
 			}
 		}
@@ -353,13 +320,6 @@ func (p *Printer) styleForPosition(line, col int, style *lipgloss.Style, alwaysB
 }
 
 func (p *Printer) styleForToken(tk *token.Token) *lipgloss.Style {
-	// Check highlights first.
-	for i := range p.tokenStyles {
-		if tk.Position.Line == p.tokenStyles[i].pos.Line && tk.Position.Column == p.tokenStyles[i].pos.Col {
-			return &p.tokenStyles[i].style
-		}
-	}
-
 	//nolint:exhaustive // Only needed for the current token.
 	switch tk.PreviousType() {
 	case token.AnchorType:
@@ -428,14 +388,9 @@ func (p *Printer) styleForToken(tk *token.Token) *lipgloss.Style {
 
 // styleLineWithRanges styles a line with range-aware styling.
 // It splits the line into spans based on effective styles (base + overlapping ranges).
-// LineNum is 1-indexed, startCol is the column of the first character in src.
+// The pos parameter specifies the 0-indexed visual line and column position.
 // If alwaysBlend is true, range styles always blend with base (used for diff lines).
-func (p *Printer) styleLineWithRanges(
-	src string,
-	lineNum, startCol int,
-	style *lipgloss.Style,
-	alwaysBlend bool,
-) string {
+func (p *Printer) styleLineWithRanges(src string, pos Position, style *lipgloss.Style, alwaysBlend bool) string {
 	if src == "" {
 		return src
 	}
@@ -448,10 +403,11 @@ func (p *Printer) styleLineWithRanges(
 
 	runes := []rune(src)
 	spanStart := 0
-	currentStyle := p.styleForPosition(lineNum, startCol, style, alwaysBlend)
+	currentStyle := p.styleForPosition(pos, style, alwaysBlend)
 
 	for i := 1; i < len(runes); i++ {
-		nextStyle := p.styleForPosition(lineNum, startCol+i, style, alwaysBlend)
+		nextPos := NewPosition(pos.Line, pos.Col+i)
+		nextStyle := p.styleForPosition(nextPos, style, alwaysBlend)
 		if !stylesEqual(currentStyle, nextStyle) {
 			sb.WriteString(currentStyle.Render(string(runes[spanStart:i])))
 
@@ -493,38 +449,15 @@ func (p *Printer) formatContinuationMarker() string {
 	return p.lineNumberStyle.Render("   -") + p.styles.GetStyle(StyleDefault).Render(p.linePrefix)
 }
 
-// expandTokenStylesForJoins expands token styles to cover all lines that are
-// part of the same split token. When a token is split across multiple lines
-// (indicated by JoinPrev/JoinNext flags), highlighting one part should
-// highlight all connected parts.
-func (p *Printer) expandTokenStylesForJoins(t LineIterator) {
-	if len(p.tokenStyles) == 0 || t.IsEmpty() {
-		return
-	}
-
-	var newStyles []*tokenStyle
-
-	for _, ts := range p.tokenStyles {
-		for _, pos := range t.TokenPositions(ts.pos.Line, ts.pos.Col) {
-			newStyles = append(newStyles, &tokenStyle{
-				style: ts.style,
-				pos:   Position{Line: pos.Line, Col: pos.Column},
-			})
-		}
-	}
-
-	p.tokenStyles = append(p.tokenStyles, newStyles...)
-}
-
 // renderTokenLine renders a single line's tokens with syntax highlighting.
 // It handles separator (leading whitespace) and content styling, plus range overlays.
-func (p *Printer) renderTokenLine(line Line) string {
+// The lineIndex parameter is the 0-indexed position in the Lines collection.
+func (p *Printer) renderTokenLine(lineIndex int, line Line) string {
 	if line.IsEmpty() {
 		return ""
 	}
 
-	lineNum := line.Number()
-	col := 1 // Column position, 1-indexed.
+	col := 0 // Column position, 0-indexed.
 
 	var sb strings.Builder
 
@@ -545,7 +478,7 @@ func (p *Printer) renderTokenLine(line Line) string {
 		if separatorRunes > 0 && separatorRunes <= len(originRunes) {
 			sepPart := string(originRunes[:separatorRunes])
 			defaultStyle := p.styles.GetStyle(StyleDefault)
-			sb.WriteString(p.styleLineWithRanges(sepPart, lineNum, col, defaultStyle, false))
+			sb.WriteString(p.styleLineWithRanges(sepPart, NewPosition(lineIndex, col), defaultStyle, false))
 
 			col += separatorRunes
 			originRunes = originRunes[separatorRunes:]
@@ -553,7 +486,7 @@ func (p *Printer) renderTokenLine(line Line) string {
 
 		// Part 2: Render content portion (token style).
 		if len(originRunes) > 0 {
-			sb.WriteString(p.styleLineWithRanges(string(originRunes), lineNum, col, tokenStyle, false))
+			sb.WriteString(p.styleLineWithRanges(string(originRunes), NewPosition(lineIndex, col), tokenStyle, false))
 
 			col += len(originRunes)
 		}

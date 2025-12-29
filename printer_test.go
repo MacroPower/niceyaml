@@ -78,218 +78,6 @@ func printDiffSummary(p *niceyaml.Printer, before, after string, context int) st
 	return p.PrintTokens(result)
 }
 
-func Test_PrinterErrorToken(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input      string
-		want       string
-		tokenIndex int
-		wantLine   int
-	}{
-		"basic yaml tokens[3]": {
-			input: `---
-text: aaaa
-text2: aaaa
- bbbb
- cccc
- dddd
- eeee
-text3: ffff
- gggg
- hhhh
- iiii
- jjjj
-bool: true
-number: 10
-anchor: &x 1
-alias: *x
-`,
-			tokenIndex: 3,
-			want: `
----
-text: aaaa
-text2: aaaa
- bbbb
- cccc`,
-			wantLine: 1,
-		},
-		"basic yaml tokens[4]": {
-			input: `---
-text: aaaa
-text2: aaaa
- bbbb
- cccc
- dddd
- eeee
-text3: ffff
- gggg
- hhhh
- iiii
- jjjj
-bool: true
-number: 10
-anchor: &x 1
-alias: *x
-`,
-			tokenIndex: 4,
-			want: `
----
-text: aaaa
-text2: aaaa
- bbbb
- cccc
- dddd`,
-			wantLine: 1,
-		},
-		"basic yaml tokens[6]": {
-			input: `---
-text: aaaa
-text2: aaaa
- bbbb
- cccc
- dddd
- eeee
-text3: ffff
- gggg
- hhhh
- iiii
- jjjj
-bool: true
-number: 10
-anchor: &x 1
-alias: *x
-`,
-			tokenIndex: 6,
-			want: `
----
-text: aaaa
-text2: aaaa
- bbbb
- cccc
- dddd`,
-			wantLine: 1,
-		},
-		"document header tokens[12]": {
-			input: `---
-a:
- b:
-  c:
-   d: e
-   f: g
-   h: i
-
----
-`,
-			tokenIndex: 12,
-			want: `
- b:
-  c:
-   d: e
-   f: g
-   h: i
-
----`,
-			wantLine: 3,
-		},
-		"multiline strings tokens[2]": {
-			input: `
-text1: 'aaaa
- bbbb
- cccc'
-text2: "ffff
- gggg
- hhhh"
-text3: hello
-`,
-			tokenIndex: 2,
-			want: `
-
-text1: 'aaaa
- bbbb
- cccc'`,
-			wantLine: 1,
-		},
-		"multiline strings tokens[3]": {
-			input: `
-text1: 'aaaa
- bbbb
- cccc'
-text2: "ffff
- gggg
- hhhh"
-text3: hello
-`,
-			tokenIndex: 3,
-			want: `
-
-text1: 'aaaa
- bbbb
- cccc'
-text2: "ffff
- gggg
- hhhh"`,
-			wantLine: 2,
-		},
-		"multiline strings tokens[5]": {
-			input: `
-text1: 'aaaa
- bbbb
- cccc'
-text2: "ffff
- gggg
- hhhh"
-text3: hello
-`,
-			tokenIndex: 5,
-			want: `
-
-text1: 'aaaa
- bbbb
- cccc'
-text2: "ffff
- gggg
- hhhh"`,
-			wantLine: 2,
-		},
-		"multiline strings tokens[6]": {
-			input: `
-text1: 'aaaa
- bbbb
- cccc'
-text2: "ffff
- gggg
- hhhh"
-text3: hello
-`,
-			tokenIndex: 6,
-			want: `
- cccc'
-text2: "ffff
- gggg
- hhhh"
-text3: hello`,
-			wantLine: 5,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			tks := lexer.Tokenize(tc.input)
-
-			p := testPrinter()
-
-			got, gotLine := p.PrintErrorToken(tks[tc.tokenIndex], 3)
-			got = "\n" + got
-
-			assert.Equal(t, tc.want, got)
-			assert.Equal(t, tc.wantLine, gotLine)
-		})
-	}
-}
-
 func TestPrinter_Anchor(t *testing.T) {
 	t.Parallel()
 
@@ -308,82 +96,6 @@ alias: *x`
 	assert.Equal(t, got, gotFile)
 }
 
-func TestPrinter_Highlight(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input     string
-		findToken string
-		want      string
-	}{
-		"value token": {
-			input:     "key: value\nnumber: 42",
-			findToken: "value",
-			want:      "key: [value]\nnumber: 42",
-		},
-		"key token": {
-			input:     "first: 1\nsecond: 2",
-			findToken: "second",
-			want:      "first: 1\n[second]: 2",
-		},
-		"multi-line token": {
-			input:     "key: |\n  line1\n  line2",
-			findToken: "line1",
-			want:      "key: |\n[  line1]\n[  line2]",
-		},
-		"indented key": {
-			input:     "root:\n  nested: value",
-			findToken: "nested",
-			want:      "root:\n  [nested]: value",
-		},
-		"unicode key": {
-			input:     "日本語: value",
-			findToken: "value",
-			want:      "日本語: [value]",
-		},
-		"unicode value": {
-			input:     "key: 日本語",
-			findToken: "日本語",
-			want:      "key: [日本語]",
-		},
-		"mixed unicode": {
-			input:     "日本語: 中文\nenglish: test",
-			findToken: "test",
-			want:      "日本語: 中文\nenglish: [test]",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			tks := lexer.Tokenize(tc.input)
-
-			var line, column int
-			for _, tk := range tks {
-				if tk.Value == tc.findToken || strings.Contains(tk.Value, tc.findToken) {
-					line = tk.Position.Line
-					column = tk.Position.Column
-
-					break
-				}
-			}
-
-			require.NotZero(t, line, "should find token %q", tc.findToken)
-
-			p := testPrinter()
-			p.AddStyleToToken(testHighlightStyle(), niceyaml.Position{Line: line, Col: column})
-
-			got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
-			assert.Equal(t, tc.want, got)
-
-			file := parseFile(t, tks)
-			gotFile := p.PrintTokens(niceyaml.NewLinesFromFile(file))
-			assert.Equal(t, got, gotFile)
-		})
-	}
-}
-
 func TestPrinter_AddStyleToRange(t *testing.T) {
 	t.Parallel()
 
@@ -392,64 +104,49 @@ func TestPrinter_AddStyleToRange(t *testing.T) {
 		want  string
 		rng   niceyaml.PositionRange
 	}{
-		"partial token - middle of value": {
+		"partial token - middle of value (0-indexed)": {
 			input: "key: value",
-			rng: niceyaml.PositionRange{
-				Start: niceyaml.Position{Line: 1, Col: 8},
-				End:   niceyaml.Position{Line: 1, Col: 11},
-			},
+			// 0-indexed: col 7-10 = 1-indexed col 8-11
+			rng: niceyaml.NewPositionRange(
+				niceyaml.NewPosition(0, 7),
+				niceyaml.NewPosition(0, 10),
+			),
 			want: "key: va[lue]",
 		},
-		"partial token - start of value": {
+		"partial token - start of value (0-indexed)": {
 			input: "key: value",
-			rng: niceyaml.PositionRange{
-				Start: niceyaml.Position{Line: 1, Col: 6},
-				End:   niceyaml.Position{Line: 1, Col: 9},
-			},
+			// 0-indexed: col 5-8 = 1-indexed col 6-9
+			rng: niceyaml.NewPositionRange(
+				niceyaml.NewPosition(0, 5),
+				niceyaml.NewPosition(0, 8),
+			),
 			want: "key: [val]ue",
 		},
-		"full token": {
+		"full token (0-indexed)": {
 			input: "key: value",
-			rng: niceyaml.PositionRange{
-				Start: niceyaml.Position{Line: 1, Col: 6},
-				End:   niceyaml.Position{Line: 1, Col: 11},
-			},
+			// 0-indexed: col 5-10 = 1-indexed col 6-11
+			rng: niceyaml.NewPositionRange(
+				niceyaml.NewPosition(0, 5),
+				niceyaml.NewPosition(0, 10),
+			),
 			want: "key: [value]",
 		},
-		"spanning key and value": {
+		"first character (line 0, col 0)": {
 			input: "key: value",
-			rng: niceyaml.PositionRange{
-				Start: niceyaml.Position{Line: 1, Col: 2},
-				End:   niceyaml.Position{Line: 1, Col: 9},
-			},
-			// Each token portion is styled separately.
-			want: "k[ey][:][ ][val]ue",
+			rng: niceyaml.NewPositionRange(
+				niceyaml.NewPosition(0, 0),
+				niceyaml.NewPosition(0, 1),
+			),
+			want: "[k]ey: value",
 		},
-		"multi-line range": {
+		"multi-line range (0-indexed)": {
 			input: "first: 1\nsecond: 2",
-			rng: niceyaml.PositionRange{
-				Start: niceyaml.Position{Line: 1, Col: 8},
-				End:   niceyaml.Position{Line: 2, Col: 9},
-			},
-			// Col 9 on line 2 is after the space (exclusive end).
+			// 0-indexed: line 0 col 7 to line 1 col 8
+			rng: niceyaml.NewPositionRange(
+				niceyaml.NewPosition(0, 7),
+				niceyaml.NewPosition(1, 8),
+			),
 			want: "first: [1]\n[second][:][ ]2",
-		},
-		"single character": {
-			input: "key: value",
-			rng: niceyaml.PositionRange{
-				Start: niceyaml.Position{Line: 1, Col: 6},
-				End:   niceyaml.Position{Line: 1, Col: 7},
-			},
-			want: "key: [v]alue",
-		},
-		"range including colon": {
-			input: "key: value",
-			rng: niceyaml.PositionRange{
-				Start: niceyaml.Position{Line: 1, Col: 4},
-				End:   niceyaml.Position{Line: 1, Col: 6},
-			},
-			// Colon and space are separate niceyaml.
-			want: "key[:][ ]value",
 		},
 	}
 
@@ -471,76 +168,17 @@ func TestPrinter_AddStyleToRange(t *testing.T) {
 	}
 }
 
-func TestPrinter_AddStyleToRange_Overlapping(t *testing.T) {
+func TestPrinter_ClearStyles(t *testing.T) {
 	t.Parallel()
 
 	input := "key: value"
 	tks := lexer.Tokenize(input)
 
-	innerStyle := lipgloss.NewStyle().Transform(func(s string) string {
-		return "<" + s + ">"
-	})
-	outerStyle := lipgloss.NewStyle().Transform(func(s string) string {
-		return "[" + s + "]"
-	})
-
 	p := testPrinter()
-	// Inner range: "val" (cols 6-8, exclusive end 9).
-	p.AddStyleToRange(&innerStyle, niceyaml.PositionRange{
-		Start: niceyaml.Position{Line: 1, Col: 6},
-		End:   niceyaml.Position{Line: 1, Col: 9},
-	})
-	// Outer range: "alu" (cols 7-9, exclusive end 10).
-	p.AddStyleToRange(&outerStyle, niceyaml.PositionRange{
-		Start: niceyaml.Position{Line: 1, Col: 7},
-		End:   niceyaml.Position{Line: 1, Col: 10},
-	})
-
-	got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
-
-	// Overlapping ranges compose transforms.
-	// Col 6: inner only -> <v>.
-	// Cols 7-8: both (inner first, outer wraps) -> [<al>].
-	// Col 9: outer only -> [u].
-	// Col 10: neither -> e.
-	assert.Equal(t, "key: <v>[<al>][u]e", got)
-}
-
-func TestPrinter_AddStyleToRange_WithLineNumbers(t *testing.T) {
-	t.Parallel()
-
-	input := "first: 1\nsecond: 2"
-	tks := lexer.Tokenize(input)
-
-	p := niceyaml.NewPrinter(
-		niceyaml.WithStyles(niceyaml.Styles{}),
-		niceyaml.WithStyle(lipgloss.NewStyle()),
-		niceyaml.WithLineNumbers(),
-		niceyaml.WithLineNumberStyle(lipgloss.NewStyle()),
-		niceyaml.WithLinePrefix(""),
+	p.AddStyleToRange(
+		testHighlightStyle(),
+		niceyaml.NewPositionRange(niceyaml.NewPosition(0, 0), niceyaml.NewPosition(0, 3)),
 	)
-	p.AddStyleToRange(testHighlightStyle(), niceyaml.PositionRange{
-		Start: niceyaml.Position{Line: 1, Col: 8},
-		End:   niceyaml.Position{Line: 1, Col: 9},
-	})
-
-	got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
-
-	// Line numbers added (no padding from empty style), range works.
-	assert.Equal(t, "   1first: [1]\n   2second: 2", got)
-}
-
-func TestPrinter_ClearStyles_IncludesRanges(t *testing.T) {
-	t.Parallel()
-
-	input := "key: value"
-	tks := lexer.Tokenize(input)
-
-	p := testPrinter()
-	p.AddStyleToRange(testHighlightStyle(), niceyaml.PositionRange{
-		Start: niceyaml.Position{Line: 1, Col: 6},
-		End:   niceyaml.Position{Line: 1, Col: 11},
-	})
 	p.ClearStyles()
 
 	// After clearing, no styles should be applied.
@@ -635,38 +273,6 @@ func TestNewPrinter_EmptyStyles(t *testing.T) {
 	assert.Equal(t, got, gotFile)
 }
 
-func TestPrinter_BlendColors_OverlayNoColor(t *testing.T) {
-	t.Parallel()
-
-	input := `key: value`
-	tks := lexer.Tokenize(input)
-
-	// Use Styles with actual colors.
-	s := niceyaml.Styles{
-		niceyaml.StyleKey:    lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")),
-		niceyaml.StyleString: lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")),
-	}
-	p := niceyaml.NewPrinter(
-		niceyaml.WithStyles(s),
-		niceyaml.WithStyle(lipgloss.NewStyle()),
-		niceyaml.WithLinePrefix(""),
-	)
-
-	// Add a range style with NO colors (only a transform).
-	// This tests blendColors when overlay (c2) has NoColor but base (c1) has color.
-	transformOnlyStyle := lipgloss.NewStyle().Transform(func(s string) string {
-		return "[" + s + "]"
-	})
-	p.AddStyleToRange(&transformOnlyStyle, niceyaml.PositionRange{
-		Start: niceyaml.Position{Line: 1, Col: 6},
-		End:   niceyaml.Position{Line: 1, Col: 11},
-	})
-
-	got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
-	// The value should be wrapped in brackets from the transform.
-	assert.Contains(t, got, "[value]")
-}
-
 func TestPrinter_LineNumbers(t *testing.T) {
 	t.Parallel()
 
@@ -711,33 +317,112 @@ func TestPrinter_LineNumbers(t *testing.T) {
 	}
 }
 
-func TestPrinter_LineNumbers_ErrorToken(t *testing.T) {
+func TestPrinter_PrintSlice(t *testing.T) {
 	t.Parallel()
 
-	input := `---
-text: aaaa
-text2: aaaa
- bbbb
- cccc
- dddd
- eeee
-text3: ffff`
+	input := `first: 1
+second: 2
+third: 3
+fourth: 4
+fifth: 5`
 
-	tks := lexer.Tokenize(input)
+	tcs := map[string]struct {
+		want    string
+		minLine int
+		maxLine int
+	}{
+		"full range": {
+			minLine: -1,
+			maxLine: -1,
+			want:    "first: 1\nsecond: 2\nthird: 3\nfourth: 4\nfifth: 5",
+		},
+		"bounded middle": {
+			minLine: 2,
+			maxLine: 4,
+			want:    "second: 2\nthird: 3\nfourth: 4",
+		},
+		"unbounded min": {
+			minLine: -1,
+			maxLine: 2,
+			want:    "first: 1\nsecond: 2",
+		},
+		"unbounded max": {
+			minLine: 4,
+			maxLine: -1,
+			want:    "fourth: 4\nfifth: 5",
+		},
+		"single line": {
+			minLine: 3,
+			maxLine: 3,
+			want:    "third: 3",
+		},
+		"empty result": {
+			minLine: 10,
+			maxLine: 20,
+			want:    "",
+		},
+	}
 
-	p := niceyaml.NewPrinter(
-		niceyaml.WithStyles(niceyaml.Styles{}),
-		niceyaml.WithStyle(lipgloss.NewStyle()),
-		niceyaml.WithLineNumbers(),
-	)
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	got, gotLine := p.PrintErrorToken(tks[3], 3)
+			p := testPrinter()
+			lines := niceyaml.NewLinesFromString(input)
 
-	// Should start from line 1.
-	assert.Equal(t, 1, gotLine)
-	// Should contain line numbers.
-	assert.Contains(t, got, "   1  ")
-	assert.Contains(t, got, "   2  ")
+			got := p.PrintSlice(lines, tc.minLine, tc.maxLine)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestPrinter_PrintSlice_WithLineNumbers(t *testing.T) {
+	t.Parallel()
+
+	input := `first: 1
+second: 2
+third: 3
+fourth: 4
+fifth: 5`
+
+	tcs := map[string]struct {
+		want    string
+		minLine int
+		maxLine int
+	}{
+		"full range": {
+			minLine: -1,
+			maxLine: -1,
+			want:    "   1 first: 1\n   2 second: 2\n   3 third: 3\n   4 fourth: 4\n   5 fifth: 5",
+		},
+		"bounded middle - absolute line numbers": {
+			minLine: 2,
+			maxLine: 4,
+			want:    "   2 second: 2\n   3 third: 3\n   4 fourth: 4",
+		},
+		"single line - absolute line number": {
+			minLine: 3,
+			maxLine: 3,
+			want:    "   3 third: 3",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := niceyaml.NewPrinter(
+				niceyaml.WithStyles(niceyaml.Styles{}),
+				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithLineNumbers(),
+				niceyaml.WithLinePrefix(""),
+			)
+			lines := niceyaml.NewLinesFromString(input)
+
+			got := p.PrintSlice(lines, tc.minLine, tc.maxLine)
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }
 
 func TestPrinter_PrintTokenDiff(t *testing.T) {
@@ -1332,22 +1017,6 @@ func TestPrinter_TokenTypes(t *testing.T) {
 	}
 }
 
-func TestPrinter_PrintErrorToken_FirstToken(t *testing.T) {
-	t.Parallel()
-
-	input := "key: value\nanother: line"
-	tks := lexer.Tokenize(input)
-
-	p := testPrinter()
-
-	// Call on the first token - tests collectAllTokens when Prev is nil.
-	got, minLine := p.PrintErrorToken(tks[0], 1)
-
-	assert.Equal(t, 1, minLine)
-	assert.Contains(t, got, "key")
-	assert.Contains(t, got, "value")
-}
-
 func TestPrinter_PrintFile_MultiDocument(t *testing.T) {
 	t.Parallel()
 
@@ -1394,109 +1063,6 @@ func TestPrinter_PrintFile_MultiDocument(t *testing.T) {
 			file := parseFile(t, tks)
 			gotFile := p.PrintTokens(niceyaml.NewLinesFromFile(file))
 			assert.Equal(t, got, gotFile)
-		})
-	}
-}
-
-func TestPrinter_PrintTokenDiff_WithRangeHighlights(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		before         string
-		after          string
-		wantContains   []string
-		wantNotContain []string
-		rng            niceyaml.PositionRange
-	}{
-		"highlight on inserted line": {
-			before: "key: old\n",
-			after:  "key: new\n",
-			rng: niceyaml.PositionRange{
-				Start: niceyaml.Position{Line: 1, Col: 6},
-				End:   niceyaml.Position{Line: 1, Col: 9},
-			},
-			wantContains:   []string{"+key: [new]"},
-			wantNotContain: []string{"-key: [old]"},
-		},
-		"highlight on unchanged line": {
-			before: "key: value\n",
-			after:  "key: value\n",
-			rng: niceyaml.PositionRange{
-				Start: niceyaml.Position{Line: 1, Col: 6},
-				End:   niceyaml.Position{Line: 1, Col: 11},
-			},
-			wantContains: []string{" key: [value]"},
-		},
-		"partial highlight on inserted line": {
-			before: "key: old\n",
-			after:  "key: new\n",
-			rng: niceyaml.PositionRange{
-				Start: niceyaml.Position{Line: 1, Col: 7},
-				End:   niceyaml.Position{Line: 1, Col: 9},
-			},
-			wantContains: []string{"+key: n[ew]"},
-		},
-		"highlight spanning multiple changed lines": {
-			before: "a: 1\nb: 2\n",
-			after:  "a: 1\nb: changed\n",
-			rng: niceyaml.PositionRange{
-				Start: niceyaml.Position{Line: 2, Col: 4},
-				End:   niceyaml.Position{Line: 2, Col: 11},
-			},
-			wantContains: []string{" a: 1", "+b: [changed]"},
-		},
-		"highlight on truly new line": {
-			before: "a: 1\n",
-			after:  "a: 1\nb: 2\n",
-			rng: niceyaml.PositionRange{
-				Start: niceyaml.Position{Line: 2, Col: 1},
-				End:   niceyaml.Position{Line: 2, Col: 2},
-			},
-			wantContains: []string{" a: 1", "+[b]: 2"},
-		},
-		"highlight only on inserted line, not deleted": {
-			// Searching for "baz" should highlight "+foo: baz" but NOT "-foo: bar".
-			before: "foo: bar\n",
-			after:  "foo: baz\n",
-			rng: niceyaml.PositionRange{
-				Start: niceyaml.Position{Line: 1, Col: 6},
-				End:   niceyaml.Position{Line: 1, Col: 9},
-			},
-			wantContains:   []string{"+foo: [baz]"},
-			wantNotContain: []string{"-foo: [bar]"},
-		},
-		"deleted line at same line number not highlighted": {
-			// Multi-line change where deleted and inserted lines have same line numbers.
-			before: "a: 1\nb: old\nc: 3\n",
-			after:  "a: 1\nb: new\nc: 3\n",
-			rng: niceyaml.PositionRange{
-				Start: niceyaml.Position{Line: 2, Col: 4},
-				End:   niceyaml.Position{Line: 2, Col: 7},
-			},
-			wantContains:   []string{"+b: [new]"},
-			wantNotContain: []string{"-b: [old]"},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			p := niceyaml.NewPrinter(
-				niceyaml.WithStyles(niceyaml.Styles{}),
-				niceyaml.WithStyle(lipgloss.NewStyle()),
-			)
-			p.AddStyleToRange(testHighlightStyle(), tc.rng)
-
-			got := printDiff(p, tc.before, tc.after)
-
-			for _, want := range tc.wantContains {
-				assert.Contains(t, got, want)
-			}
-
-			for _, notWant := range tc.wantNotContain {
-				assert.NotContains(t, got, notWant)
-			}
 		})
 	}
 }

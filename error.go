@@ -12,10 +12,10 @@ import (
 	"github.com/goccy/go-yaml/token"
 )
 
-// StyledErrorTokenPrinter extends [TokenStyler] with error token printing capabilities.
-type StyledErrorTokenPrinter interface {
+// StyledPrinter extends [TokenStyler] with slice printing capabilities.
+type StyledPrinter interface {
 	TokenStyler
-	PrintErrorToken(tk *token.Token, contextLines int) (string, int)
+	PrintSlice(lines *Lines, minLine, maxLine int) string
 }
 
 // ErrorWrapper wraps errors with additional context for [Error] types.
@@ -63,7 +63,7 @@ type Error struct {
 	err         error
 	path        *yaml.Path
 	token       *token.Token
-	printer     StyledErrorTokenPrinter
+	printer     StyledPrinter
 	file        *ast.File
 	tokens      token.Tokens
 	sourceLines int
@@ -108,7 +108,7 @@ func WithErrorToken(tk *token.Token) ErrorOption {
 }
 
 // WithPrinter sets the printer used for formatting the error source.
-func WithPrinter(p StyledErrorTokenPrinter) ErrorOption {
+func WithPrinter(p StyledPrinter) ErrorOption {
 	return func(e *Error) {
 		e.printer = p
 	}
@@ -201,11 +201,30 @@ func (e *Error) printErrorToken(tk *token.Token) string {
 		p = NewPrinter(WithLineNumbers())
 	}
 
-	p.AddStyleToToken(p.GetStyle(StyleError), Position{Line: tk.Position.Line, Col: tk.Position.Column})
+	t := NewLinesFromToken(tk.Clone())
 
-	content, _ := p.PrintErrorToken(tk.Clone(), e.sourceLines)
+	ranges := t.TokenPositionRangesFromToken(tk)
+	for _, rng := range ranges {
+		p.AddStyleToRange(p.GetStyle(StyleError), rng)
+	}
 
-	return content
+	curLine := tk.Position.Line
+	minLine, maxLine := curLine, curLine
+
+	for _, rng := range ranges {
+		lineNum := t.Line(rng.Start.Line).Number()
+		if lineNum < minLine {
+			minLine = lineNum
+		}
+		if lineNum > maxLine {
+			maxLine = lineNum
+		}
+	}
+
+	minLine = max(1, minLine-e.sourceLines)
+	maxLine = max(minLine, maxLine+e.sourceLines)
+
+	return p.PrintSlice(t, minLine, maxLine)
 }
 
 func getTokenFromPath(file *ast.File, path *yaml.Path) (*token.Token, error) {

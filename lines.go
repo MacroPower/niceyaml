@@ -52,7 +52,7 @@ type Line struct {
 	joinNext bool
 }
 
-// Number returns the real line number of this line based on token position.
+// Number returns the 1-indexed line number of this [Line] based on its [token.Position].
 func (l Line) Number() int {
 	if len(l.value) == 0 || l.value[0].Position == nil {
 		return 0
@@ -408,22 +408,6 @@ func (t *Lines) Tokens() token.Tokens {
 	return result
 }
 
-// Slice returns a new [Lines] containing only lines in [minLine, maxLine].
-// If minLine < 0, includes from the beginning; if maxLine < 0, includes to the end.
-// The returned [Lines] contains cloned lines to avoid modifying the original.
-func (t *Lines) Slice(minLine, maxLine int) *Lines {
-	var lines []Line
-
-	for _, line := range t.lines {
-		num := line.Number()
-		if (minLine < 0 || num >= minLine) && (maxLine < 0 || num <= maxLine) {
-			lines = append(lines, line.Clone())
-		}
-	}
-
-	return &Lines{Name: t.Name, lines: lines}
-}
-
 // LineCount returns the number of lines.
 func (t *Lines) LineCount() int {
 	return len(t.lines)
@@ -442,33 +426,15 @@ func (t *Lines) EachLine(fn func(idx int, line Line)) {
 }
 
 // EachRune iterates through all runes in all lines with their positions.
-// Position values are 1-indexed to match [token.Position].
 func (t *Lines) EachRune(fn func(r rune, pos Position)) {
-	if len(t.lines) == 0 {
-		return
-	}
+	for i, line := range t.lines {
+		col := 0
 
-	line := 1
-	col := 1
-	if len(t.lines[0].value) > 0 {
-		firstTk := t.lines[0].value[0]
-		if firstTk.Position != nil {
-			line = firstTk.Position.Line
-			col = max(firstTk.Position.Column-tokenValueOffset(firstTk), 1)
-		}
-	}
-
-	for _, l := range t.lines {
-		for _, tk := range l.value {
+		for _, tk := range line.value {
 			for _, r := range tk.Origin {
-				fn(r, Position{Line: line, Col: col})
+				fn(r, NewPosition(i, col))
 
-				if r == '\n' {
-					line++
-					col = 1
-				} else {
-					col++
-				}
+				col++
 			}
 		}
 	}
@@ -590,96 +556,150 @@ func (t *Lines) Validate() error {
 	return nil
 }
 
-// TokenPositions returns all token positions that are part of the same
-// joined token group as the token at the given line and column.
-// For non-joined lines, returns a single-element slice with the position of
-// the token at the given column, if found.
-// Returns nil if the line is not found or if no token exists at the column.
-func (t *Lines) TokenPositions(lineNum, col int) []*token.Position {
-	// Find the line index by linear search.
-	lineIdx := -1
+// PositionsFromToken returns all positions where the given token appears.
+// A token may appear on multiple lines when split across lines.
+// Returns nil if the token is nil or not found in the Lines.
+func (t *Lines) PositionsFromToken(tk *token.Token) []Position {
+	if tk == nil {
+		return nil
+	}
+
+	var positions []Position
+
 	for i, line := range t.lines {
-		if line.Number() == lineNum {
-			lineIdx = i
-			break
-		}
-	}
-	if lineIdx == -1 {
-		return nil
-	}
-
-	line := t.lines[lineIdx]
-	if !line.joinPrev && !line.joinNext {
-		// For non-joined lines, find and return the token at the given column.
-		for _, tk := range line.value {
-			if colWithinToken(col, tk) {
-				return []*token.Position{tk.Position}
+		for j, lineTk := range line.value {
+			if lineTk == tk {
+				col := absColForTokenIndex(line, j)
+				positions = append(positions, NewPosition(i, col))
 			}
-		}
-
-		return nil
-	}
-
-	joinToken := joinTokenForLine(line)
-	if joinToken == nil || joinToken.Position == nil {
-		return nil
-	}
-
-	if !colWithinToken(col, joinToken) {
-		return nil
-	}
-
-	var positions []*token.Position
-
-	positions = append(positions, joinToken.Position)
-
-	// Walk backward through JoinPrev lines.
-	for i := lineIdx - 1; i >= 0 && t.lines[i].joinNext; i-- {
-		if tk := joinTokenForLine(t.lines[i]); tk != nil && tk.Position != nil {
-			positions = append(positions, tk.Position)
-		}
-	}
-
-	// Walk forward through JoinNext lines.
-	for i := lineIdx + 1; i < len(t.lines) && t.lines[i].joinPrev; i++ {
-		if tk := joinTokenForLine(t.lines[i]); tk != nil && tk.Position != nil {
-			positions = append(positions, tk.Position)
 		}
 	}
 
 	return positions
 }
 
-// joinTokenForLine returns the token participating in the join for a given line.
-// JoinPrev means the first token is the continuation from the previous line.
-// JoinNext means the last token continues to the next line.
-// For middle lines (both true), first and last are typically the same token.
-func joinTokenForLine(line Line) *token.Token {
-	if len(line.value) == 0 {
+// TokenPositionRangesFromToken returns all position ranges for a given token.
+// This is a convenience method that combines [Lines.PositionsFromToken] and [Lines.TokenPositionRanges].
+// Returns nil if the token is nil or not found in the Lines.
+func (t *Lines) TokenPositionRangesFromToken(tk *token.Token) []PositionRange {
+	positions := t.PositionsFromToken(tk)
+	return t.TokenPositionRanges(positions...)
+}
+
+// TokenPositionRanges returns all token position ranges that are part of
+// the same joined token group as the tokens at the given [Position]s.
+// For non-joined lines, returns the range of the token at each given column.
+// Duplicate ranges are removed.
+// Returns nil if no tokens exist at any of the given positions.
+func (t *Lines) TokenPositionRanges(positions ...Position) []PositionRange {
+	var allRanges []PositionRange
+
+	for _, pos := range positions {
+		ranges := t.tokenPositionRangesForPos(pos)
+		allRanges = append(allRanges, ranges...)
+	}
+
+	return deduplicateRanges(allRanges)
+}
+
+// deduplicateRanges removes exact duplicate [PositionRange] entries.
+func deduplicateRanges(ranges []PositionRange) []PositionRange {
+	if len(ranges) == 0 {
 		return nil
 	}
 
-	if line.joinPrev {
-		return line.value[0]
+	seen := make(map[PositionRange]struct{})
+	result := make([]PositionRange, 0, len(ranges))
+
+	for _, r := range ranges {
+		if _, exists := seen[r]; !exists {
+			seen[r] = struct{}{}
+			result = append(result, r)
+		}
 	}
 
-	if line.joinNext {
-		return line.value[len(line.value)-1]
-	}
-
-	return nil
+	return result
 }
 
-// colWithinToken checks if col is within the token's character range.
-func colWithinToken(col int, tk *token.Token) bool {
-	if tk.Position == nil {
-		return false
+// tokenPositionRangesForPos returns all token position ranges for a single [Position].
+func (t *Lines) tokenPositionRangesForPos(pos Position) []PositionRange {
+	if pos.Line < 0 || pos.Line >= len(t.lines) {
+		return nil
 	}
 
-	start := tk.Position.Column
-	end := start + len([]rune(strings.TrimSuffix(tk.Origin, "\n")))
+	line := t.lines[pos.Line]
+	if !line.joinPrev && !line.joinNext {
+		// For non-joined lines, find and return the token at the given column.
+		for i, tk := range line.value {
+			absCol := absColForTokenIndex(line, i)
+			tkLen := len([]rune(strings.TrimSuffix(tk.Origin, "\n")))
+			if pos.Col >= absCol && pos.Col < absCol+tkLen {
+				start := NewPosition(pos.Line, absCol)
+				end := NewPosition(pos.Line, absCol+tkLen)
 
-	return col >= start && col < end
+				return []PositionRange{NewPositionRange(start, end)}
+			}
+		}
+
+		return nil
+	}
+
+	// For joined lines, find the join token index and check if col is within it.
+	joinTokenIdx := -1
+	if line.joinPrev {
+		joinTokenIdx = 0
+	} else if line.joinNext {
+		joinTokenIdx = len(line.value) - 1
+	}
+	if joinTokenIdx == -1 {
+		return nil
+	}
+
+	joinAbsCol := absColForTokenIndex(line, joinTokenIdx)
+	joinTk := line.value[joinTokenIdx]
+	joinTkLen := len([]rune(strings.TrimSuffix(joinTk.Origin, "\n")))
+	if pos.Col < joinAbsCol || pos.Col >= joinAbsCol+joinTkLen {
+		return nil
+	}
+
+	var ranges []PositionRange
+
+	start := NewPosition(pos.Line, joinAbsCol)
+	end := NewPosition(pos.Line, joinAbsCol+joinTkLen)
+	ranges = append(ranges, NewPositionRange(start, end))
+
+	// Walk backward through JoinPrev lines.
+	for i := pos.Line - 1; i >= 0 && t.lines[i].joinNext; i-- {
+		prevLine := t.lines[i]
+		if len(prevLine.value) == 0 {
+			continue
+		}
+		// JoinNext means the last token continues.
+		tkIdx := len(prevLine.value) - 1
+		tk := prevLine.value[tkIdx]
+		absCol := absColForTokenIndex(prevLine, tkIdx)
+		tkLen := len([]rune(strings.TrimSuffix(tk.Origin, "\n")))
+		start := NewPosition(i, absCol)
+		end := NewPosition(i, absCol+tkLen)
+		ranges = append(ranges, NewPositionRange(start, end))
+	}
+
+	// Walk forward through JoinNext lines.
+	for i := pos.Line + 1; i < len(t.lines) && t.lines[i].joinPrev; i++ {
+		nextLine := t.lines[i]
+		if len(nextLine.value) == 0 {
+			continue
+		}
+		// JoinPrev means the first token is the continuation.
+		tk := nextLine.value[0]
+		absCol := absColForTokenIndex(nextLine, 0)
+		tkLen := len([]rune(strings.TrimSuffix(tk.Origin, "\n")))
+		start := NewPosition(i, absCol)
+		end := NewPosition(i, absCol+tkLen)
+		ranges = append(ranges, NewPositionRange(start, end))
+	}
+
+	return ranges
 }
 
 // linesNextColumn returns the next available column position after existing tokens.
@@ -753,4 +773,14 @@ func findAnyTokenInFile(f *ast.File) *token.Token {
 	}
 
 	return nil
+}
+
+// absColForTokenIndex calculates the 0-indexed column where the token at idx starts.
+func absColForTokenIndex(line Line, idx int) int {
+	col := 0
+	for i := range idx {
+		col += len([]rune(strings.TrimSuffix(line.value[i].Origin, "\n")))
+	}
+
+	return col
 }

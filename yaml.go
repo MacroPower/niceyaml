@@ -7,27 +7,40 @@ import (
 	"github.com/goccy/go-yaml/token"
 )
 
-// Position represents a line and column location in YAML source.
-// Line and Col are 1-indexed to match [token.Position].
+// Position represents a 0-indexed line and column location.
+// Note that it is not simply an offset of [token.Position],
+// rather it represents the absolute line and column in the
+// document, including in cases where multiple instances of
+// the same [token.Position] exist (e.g. in diffs).
 type Position struct {
 	Line, Col int
 }
 
-// PositionRange represents a half-open range [Start, End) between two positions.
-// It is used by [Printer.AddStyleToRange] to apply styles across character ranges.
+// NewPosition creates a new [Position].
+func NewPosition(line, col int) Position {
+	return Position{Line: line, Col: col}
+}
+
+// PositionRange represents a half-open range [Start, End)
+// between two [Position]s.
 type PositionRange struct {
 	Start, End Position
 }
 
-// Contains returns true if the given position is within this range.
+// NewPositionRange creates a new [PositionRange].
+func NewPositionRange(start, end Position) PositionRange {
+	return PositionRange{Start: start, End: end}
+}
+
+// Contains returns true if the given [Position] is within this [PositionRange].
 // The range is [Start, End) - Start is inclusive, End is exclusive.
-func (r PositionRange) Contains(line, col int) bool {
+func (r PositionRange) Contains(pos Position) bool {
 	// Before start?
-	if line < r.Start.Line || (line == r.Start.Line && col < r.Start.Col) {
+	if pos.Line < r.Start.Line || (pos.Line == r.Start.Line && pos.Col < r.Start.Col) {
 		return false
 	}
 	// At or after end?
-	if line > r.End.Line || (line == r.End.Line && col >= r.End.Col) {
+	if pos.Line > r.End.Line || (pos.Line == r.End.Line && pos.Col >= r.End.Col) {
 		return false
 	}
 

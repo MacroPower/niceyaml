@@ -396,9 +396,9 @@ menu:
 	ranges := finder.Find(lines)
 	require.Len(t, ranges, 1, "should find exactly one match")
 
-	// Verify the range is on line 3.
-	assert.Equal(t, 3, ranges[0].Start.Line, "match should be on line 3")
-	assert.Equal(t, 3, ranges[0].End.Line, "match end should be on line 3")
+	// Verify the range is on line 2 (0-indexed, which is the 3rd line).
+	assert.Equal(t, 2, ranges[0].Start.Line, "match should be on line 2 (0-indexed)")
+	assert.Equal(t, 2, ranges[0].End.Line, "match end should be on line 2 (0-indexed)")
 
 	for _, rng := range ranges {
 		printer.AddStyleToRange(testBracketStyle(), rng)
@@ -443,4 +443,80 @@ func TestFinderPrinter_BoxDrawingNotMatched(t *testing.T) {
 	assert.Contains(t, got, "[日本]酒", "日本 should be highlighted")
 	assert.NotContains(t, got, "[─", "box drawing should not be highlighted")
 	assert.NotContains(t, got, "─]", "box drawing should not be highlighted")
+}
+
+func TestPositionRange_Contains(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		rng  niceyaml.PositionRange
+		pos  niceyaml.Position
+		want bool
+	}{
+		"within single line range": {
+			rng: niceyaml.NewPositionRange(
+				niceyaml.NewPosition(0, 5),
+				niceyaml.NewPosition(0, 10),
+			),
+			pos:  niceyaml.NewPosition(0, 7),
+			want: true,
+		},
+		"at start (inclusive)": {
+			rng: niceyaml.NewPositionRange(
+				niceyaml.NewPosition(0, 5),
+				niceyaml.NewPosition(0, 10),
+			),
+			pos:  niceyaml.NewPosition(0, 5),
+			want: true,
+		},
+		"at end (exclusive)": {
+			rng: niceyaml.NewPositionRange(
+				niceyaml.NewPosition(0, 5),
+				niceyaml.NewPosition(0, 10),
+			),
+			pos:  niceyaml.NewPosition(0, 10),
+			want: false,
+		},
+		"before start": {
+			rng: niceyaml.NewPositionRange(
+				niceyaml.NewPosition(0, 5),
+				niceyaml.NewPosition(0, 10),
+			),
+			pos:  niceyaml.NewPosition(0, 4),
+			want: false,
+		},
+		"multi-line range - middle line": {
+			rng: niceyaml.NewPositionRange(
+				niceyaml.NewPosition(1, 5),
+				niceyaml.NewPosition(3, 10),
+			),
+			pos:  niceyaml.NewPosition(2, 0),
+			want: true,
+		},
+		"first line (0-indexed)": {
+			rng: niceyaml.NewPositionRange(
+				niceyaml.NewPosition(0, 0),
+				niceyaml.NewPosition(0, 5),
+			),
+			pos:  niceyaml.NewPosition(0, 0),
+			want: true,
+		},
+		"after end line": {
+			rng: niceyaml.NewPositionRange(
+				niceyaml.NewPosition(0, 0),
+				niceyaml.NewPosition(1, 5),
+			),
+			pos:  niceyaml.NewPosition(2, 0),
+			want: false,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := tc.rng.Contains(tc.pos)
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }

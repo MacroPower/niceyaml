@@ -68,7 +68,7 @@ func WithNormalizer(normalizer Normalizer) FinderOption {
 
 // Find finds all occurrences of the search string in the provided lines.
 // It returns a slice of PositionRange indicating the start and end positions of each match.
-// The slice is provided in the order the matches appear in the lines.
+// Positions are 0-indexed. The slice is provided in the order the matches appear in the lines.
 func (f *Finder) Find(lines *Lines) []PositionRange {
 	if f.search == "" || lines == nil || lines.IsEmpty() {
 		return nil
@@ -168,7 +168,7 @@ func (m *positionMap) add(charIndex int, pos Position) {
 // lookup finds the Position for a given character index using binary search.
 func (m *positionMap) lookup(charIndex int) Position {
 	if len(m.indices) == 0 {
-		return Position{Line: 1, Col: 1}
+		return NewPosition(0, 0)
 	}
 
 	// Find the largest index that is <= the target index.

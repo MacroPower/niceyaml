@@ -34,7 +34,7 @@ const (
 // The viewport invokes this during rerender to get fresh matches.
 type Finder interface {
 	// Find returns position ranges to highlight in the given lines.
-	// Returns nil if no matches.
+	// Positions are 0-indexed. Returns nil if no matches.
 	Find(lines *niceyaml.Lines) []niceyaml.PositionRange
 }
 
@@ -354,9 +354,21 @@ func (m *Model) rerender() {
 
 	m.printer.ClearStyles()
 
+	var lines *niceyaml.Lines
+	switch {
+	case m.revision.AtOrigin():
+		// At first position: show first revision without diff.
+		lines = m.getRevisionLines(0)
+	case m.diffMode == DiffModeNone:
+		// Diff disabled: show current revision without diff.
+		lines = m.currentRevisionLines()
+	default:
+		// Not at first and diff enabled: show diff.
+		lines = niceyaml.NewFullDiff(m.getDiffBaseRevision(), m.revision).Lines()
+	}
+
 	// Compute fresh matches if finder is set.
 	if m.finder != nil {
-		lines := m.currentRevisionLines()
 		m.searchMatches = m.finder.Find(lines)
 
 		// Adjust search index if matches changed.
@@ -377,19 +389,7 @@ func (m *Model) rerender() {
 		m.printer.AddStyleToRange(&style, match)
 	}
 
-	var content string
-
-	switch {
-	case m.revision.AtOrigin():
-		// At first position: show first revision without diff.
-		content = m.printer.PrintTokens(m.getRevisionLines(0))
-	case m.diffMode == DiffModeNone:
-		// Diff disabled: show current revision without diff.
-		content = m.printer.PrintTokens(m.currentRevisionLines())
-	default:
-		// Not at first and diff enabled: show diff.
-		content = m.getDiffContent()
-	}
+	content := m.printer.PrintTokens(lines)
 
 	m.lines = strings.Split(content, "\n")
 	m.longestLineWidth = maxLineWidth(m.lines)
@@ -410,12 +410,6 @@ func (m *Model) getDiffBaseRevision() *niceyaml.Revision {
 	default:
 		return nil
 	}
-}
-
-func (m *Model) getDiffContent() string {
-	return m.renderDiff(func(base, curr *niceyaml.Revision) *niceyaml.Lines {
-		return niceyaml.NewFullDiff(base, curr).Lines()
-	})
 }
 
 // renderDiff renders a diff using the provided diff constructor.
@@ -694,8 +688,8 @@ func (m *Model) scrollToCurrentMatch() {
 	}
 
 	match := m.searchMatches[m.searchIndex]
-	// Line is 1-indexed in PositionRange, convert to 0-indexed.
-	line := match.Start.Line - 1
+	// Line is already 0-indexed in PositionRange.
+	line := match.Start.Line
 
 	// Center the match in the viewport.
 	m.SetYOffset(line - m.maxHeight()/2)
