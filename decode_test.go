@@ -2,7 +2,6 @@ package niceyaml_test
 
 import (
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/goccy/go-yaml"
@@ -34,150 +33,14 @@ func failingValidator(err error) *mockValidator {
 	return &mockValidator{shouldFail: true, failErr: err}
 }
 
-// errorReader implements io.Reader that always returns an error.
-type errorReader struct {
-	err error
-}
-
-func (r *errorReader) Read(_ []byte) (int, error) {
-	return 0, r.err
-}
-
-func TestNewParser(t *testing.T) {
-	t.Parallel()
-
-	t.Run("creates parser with reader", func(t *testing.T) {
-		t.Parallel()
-
-		r := strings.NewReader("key: value")
-		p := niceyaml.NewParser(r)
-		require.NotNil(t, p)
-	})
-
-	t.Run("creates parser with nil reader", func(t *testing.T) {
-		t.Parallel()
-
-		p := niceyaml.NewParser(nil)
-		require.NotNil(t, p)
-	})
-}
-
-func TestParser_Parse(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input    string
-		wantDocs int
-	}{
-		"single document": {
-			input:    "key: value",
-			wantDocs: 1,
-		},
-		"multiple documents": {
-			input: `---
-key1: value1
----
-key2: value2
----
-key3: value3`,
-			wantDocs: 3,
-		},
-		"empty input": {
-			input:    "",
-			wantDocs: 1,
-		},
-		"document with comments": {
-			input: `# This is a comment
-key: value`,
-			wantDocs: 1,
-		},
-		"complex nested structure": {
-			input: `metadata:
-  name: test
-  labels:
-    app: myapp
-spec:
-  replicas: 3
-  template:
-    containers:
-      - name: main
-        image: nginx`,
-			wantDocs: 1,
-		},
-		"document with explicit start": {
-			input: `---
-key: value`,
-			wantDocs: 1,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			p := niceyaml.NewParser(strings.NewReader(tc.input))
-			file, err := p.Parse()
-
-			require.NoError(t, err)
-			require.NotNil(t, file)
-			assert.Len(t, file.Docs, tc.wantDocs)
-		})
-	}
-}
-
-func TestParser_Parse_InvalidYAML(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input string
-	}{
-		"unclosed quote": {
-			input: `key: "unclosed`,
-		},
-		"invalid indentation": {
-			input: `parent:
-  child: value
- bad: indent`,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			p := niceyaml.NewParser(strings.NewReader(tc.input))
-			_, err := p.Parse()
-
-			require.Error(t, err)
-
-			var yamlErr *niceyaml.Error
-			require.ErrorAs(t, err, &yamlErr)
-		})
-	}
-}
-
-func TestParser_Parse_ReaderError(t *testing.T) {
-	t.Parallel()
-
-	readErr := errors.New("read failure")
-	r := &errorReader{err: readErr}
-	p := niceyaml.NewParser(r)
-
-	_, err := p.Parse()
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "read")
-	require.ErrorIs(t, err, readErr)
-}
-
 func TestNewDecoder(t *testing.T) {
 	t.Parallel()
 
 	t.Run("creates decoder from ast.File", func(t *testing.T) {
 		t.Parallel()
 
-		p := niceyaml.NewParser(strings.NewReader("key: value"))
-		file, err := p.Parse()
+		source := niceyaml.NewSourceFromString("key: value")
+		file, err := source.Parse()
 		require.NoError(t, err)
 
 		d := niceyaml.NewDecoder(file)
@@ -187,8 +50,8 @@ func TestNewDecoder(t *testing.T) {
 	t.Run("creates decoder from empty file", func(t *testing.T) {
 		t.Parallel()
 
-		p := niceyaml.NewParser(strings.NewReader(""))
-		file, err := p.Parse()
+		source := niceyaml.NewSourceFromString("")
+		file, err := source.Parse()
 		require.NoError(t, err)
 
 		d := niceyaml.NewDecoder(file)
@@ -234,8 +97,8 @@ c: 3`,
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := niceyaml.NewParser(strings.NewReader(tc.input))
-			file, err := p.Parse()
+			source := niceyaml.NewSourceFromString(tc.input)
+			file, err := source.Parse()
 			require.NoError(t, err)
 
 			d := niceyaml.NewDecoder(file)
@@ -246,76 +109,75 @@ c: 3`,
 	}
 }
 
-func TestDecoder_GetValue(t *testing.T) {
+func TestDocumentDecoder_GetValue(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		wantErr error
-		path    func() *yaml.Path
-		input   string
-		want    string
-		doc     int
+		path      func() *yaml.Path
+		input     string
+		wantVals  []string
+		wantFound []bool
 	}{
 		"simple key": {
-			input: "key: value",
-			doc:   0,
-			path:  func() *yaml.Path { return niceyaml.NewRootPath().Child("key").Build() },
-			want:  "value",
+			input:     "key: value",
+			path:      func() *yaml.Path { return niceyaml.NewRootPathBuilder().Child("key").Build() },
+			wantVals:  []string{"value"},
+			wantFound: []bool{true},
 		},
 		"nested key": {
 			input: `parent:
   child: nested_value`,
-			doc:  0,
-			path: func() *yaml.Path { return niceyaml.NewRootPath().Child("parent").Child("child").Build() },
-			want: "nested_value",
+			path:      func() *yaml.Path { return niceyaml.NewRootPathBuilder().Child("parent").Child("child").Build() },
+			wantVals:  []string{"nested_value"},
+			wantFound: []bool{true},
 		},
 		"array index": {
 			input: `items:
   - first
   - second
   - third`,
-			doc:  0,
-			path: func() *yaml.Path { return niceyaml.NewRootPath().Child("items").Index(1).Build() },
-			want: "second",
+			path:      func() *yaml.Path { return niceyaml.NewRootPathBuilder().Child("items").Index(1).Build() },
+			wantVals:  []string{"second"},
+			wantFound: []bool{true},
 		},
 		"missing key returns empty": {
-			input: "key: value",
-			doc:   0,
-			path:  func() *yaml.Path { return niceyaml.NewRootPath().Child("nonexistent").Build() },
-			want:  "",
+			input:     "key: value",
+			path:      func() *yaml.Path { return niceyaml.NewRootPathBuilder().Child("nonexistent").Build() },
+			wantVals:  []string{""},
+			wantFound: []bool{false},
 		},
-		"second document": {
+		"multiple documents": {
 			input: `---
 first: 1
 ---
 second: 2`,
-			doc:  1,
-			path: func() *yaml.Path { return niceyaml.NewRootPath().Child("second").Build() },
-			want: "2",
-		},
-		"document out of range": {
-			input:   "key: value",
-			doc:     5,
-			path:    func() *yaml.Path { return niceyaml.NewRootPath().Child("key").Build() },
-			wantErr: niceyaml.ErrDocumentIndexOutOfRange,
+			path:      func() *yaml.Path { return niceyaml.NewRootPathBuilder().Build() },
+			wantVals:  []string{"first: 1", "second: 2"},
+			wantFound: []bool{true, true},
 		},
 		"numeric value": {
-			input: "count: 42",
-			doc:   0,
-			path:  func() *yaml.Path { return niceyaml.NewRootPath().Child("count").Build() },
-			want:  "42",
+			input:     "count: 42",
+			path:      func() *yaml.Path { return niceyaml.NewRootPathBuilder().Child("count").Build() },
+			wantVals:  []string{"42"},
+			wantFound: []bool{true},
 		},
 		"boolean value": {
-			input: "enabled: true",
-			doc:   0,
-			path:  func() *yaml.Path { return niceyaml.NewRootPath().Child("enabled").Build() },
-			want:  "true",
+			input:     "enabled: true",
+			path:      func() *yaml.Path { return niceyaml.NewRootPathBuilder().Child("enabled").Build() },
+			wantVals:  []string{"true"},
+			wantFound: []bool{true},
 		},
 		"null value": {
-			input: "empty: null",
-			doc:   0,
-			path:  func() *yaml.Path { return niceyaml.NewRootPath().Child("empty").Build() },
-			want:  "null",
+			input:     "empty: null",
+			path:      func() *yaml.Path { return niceyaml.NewRootPathBuilder().Child("empty").Build() },
+			wantVals:  []string{"null"},
+			wantFound: []bool{true},
+		},
+		"nil path returns false": {
+			input:     "key: value",
+			path:      func() *yaml.Path { return nil },
+			wantVals:  []string{""},
+			wantFound: []bool{false},
 		},
 	}
 
@@ -323,28 +185,30 @@ second: 2`,
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := niceyaml.NewParser(strings.NewReader(tc.input))
-			file, err := p.Parse()
+			source := niceyaml.NewSourceFromString(tc.input)
+			file, err := source.Parse()
 			require.NoError(t, err)
 
 			d := niceyaml.NewDecoder(file)
 			path := tc.path()
-			got, err := d.GetValue(tc.doc, *path)
 
-			if tc.wantErr != nil {
-				require.Error(t, err)
-				require.ErrorIs(t, err, tc.wantErr)
+			var gotVals []string
 
-				return
+			var gotFound []bool
+
+			for _, dd := range d.Documents() {
+				val, found := dd.GetValue(path)
+				gotVals = append(gotVals, val)
+				gotFound = append(gotFound, found)
 			}
 
-			require.NoError(t, err)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.wantVals, gotVals)
+			assert.Equal(t, tc.wantFound, gotFound)
 		})
 	}
 }
 
-func TestDecoder_Decode(t *testing.T) {
+func TestDocumentDecoder_Decode(t *testing.T) {
 	t.Parallel()
 
 	type testStruct struct {
@@ -352,228 +216,206 @@ func TestDecoder_Decode(t *testing.T) {
 		Value int    `yaml:"value"`
 	}
 
-	tcs := map[string]struct {
-		wantValue any
-		wantErr   error
-		target    func() any
-		input     string
-		doc       int
-	}{
-		"decode to map": {
-			input:  "key: value",
-			doc:    0,
-			target: func() any { return &map[string]string{} },
-			wantValue: &map[string]string{
-				"key": "value",
-			},
-		},
-		"decode to struct": {
-			input: `name: test
-value: 42`,
-			doc:    0,
-			target: func() any { return &testStruct{} },
-			wantValue: &testStruct{
-				Name:  "test",
-				Value: 42,
-			},
-		},
-		"decode to slice": {
-			input: `- one
+	t.Run("decode to map", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("key: value")
+		file, err := source.Parse()
+		require.NoError(t, err)
+
+		d := niceyaml.NewDecoder(file)
+		for _, dd := range d.Documents() {
+			var result map[string]string
+
+			err := dd.Decode(&result)
+			require.NoError(t, err)
+			assert.Equal(t, map[string]string{"key": "value"}, result)
+		}
+	})
+
+	t.Run("decode to struct", func(t *testing.T) {
+		t.Parallel()
+
+		input := `name: test
+value: 42`
+		source := niceyaml.NewSourceFromString(input)
+		file, err := source.Parse()
+		require.NoError(t, err)
+
+		d := niceyaml.NewDecoder(file)
+		for _, dd := range d.Documents() {
+			var result testStruct
+
+			err := dd.Decode(&result)
+			require.NoError(t, err)
+			assert.Equal(t, testStruct{Name: "test", Value: 42}, result)
+		}
+	})
+
+	t.Run("decode to slice", func(t *testing.T) {
+		t.Parallel()
+
+		input := `- one
 - two
-- three`,
-			doc:    0,
-			target: func() any { return &[]string{} },
-			wantValue: &[]string{
-				"one", "two", "three",
-			},
-		},
-		"decode second document": {
-			input: `---
-first: 1
+- three`
+		source := niceyaml.NewSourceFromString(input)
+		file, err := source.Parse()
+		require.NoError(t, err)
+
+		d := niceyaml.NewDecoder(file)
+		for _, dd := range d.Documents() {
+			var result []string
+
+			err := dd.Decode(&result)
+			require.NoError(t, err)
+			assert.Equal(t, []string{"one", "two", "three"}, result)
+		}
+	})
+
+	t.Run("decode multiple documents", func(t *testing.T) {
+		t.Parallel()
+
+		input := `---
+name: first
+value: 1
 ---
 name: second
-value: 2`,
-			doc:    1,
-			target: func() any { return &testStruct{} },
-			wantValue: &testStruct{
-				Name:  "second",
-				Value: 2,
-			},
-		},
-		"document out of range": {
-			input:   "key: value",
-			doc:     10,
-			target:  func() any { return &map[string]string{} },
-			wantErr: niceyaml.ErrDocumentIndexOutOfRange,
-		},
-	}
+value: 2`
+		source := niceyaml.NewSourceFromString(input)
+		file, err := source.Parse()
+		require.NoError(t, err)
 
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
+		d := niceyaml.NewDecoder(file)
 
-			p := niceyaml.NewParser(strings.NewReader(tc.input))
-			file, err := p.Parse()
+		var results []testStruct
+		for _, dd := range d.Documents() {
+			var result testStruct
+
+			err := dd.Decode(&result)
 			require.NoError(t, err)
 
-			d := niceyaml.NewDecoder(file)
-			target := tc.target()
-			err = d.Decode(tc.doc, target)
+			results = append(results, result)
+		}
 
-			if tc.wantErr != nil {
-				require.Error(t, err)
-				require.ErrorIs(t, err, tc.wantErr)
-
-				return
-			}
-
-			require.NoError(t, err)
-			assert.Equal(t, tc.wantValue, target)
-		})
-	}
+		require.Len(t, results, 2)
+		assert.Equal(t, testStruct{Name: "first", Value: 1}, results[0])
+		assert.Equal(t, testStruct{Name: "second", Value: 2}, results[1])
+	})
 }
 
-func TestDecoder_Decode_TypeMismatch(t *testing.T) {
+func TestDocumentDecoder_Decode_TypeMismatch(t *testing.T) {
 	t.Parallel()
 
-	tcs := map[string]struct {
-		target func() any
-		input  string
-	}{
-		"string to int": {
-			input:  "value: not_a_number",
-			target: func() any { return &struct{ Value int }{} },
-		},
-	}
+	t.Run("string to int", func(t *testing.T) {
+		t.Parallel()
 
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
+		source := niceyaml.NewSourceFromString("value: not_a_number")
+		file, err := source.Parse()
+		require.NoError(t, err)
 
-			p := niceyaml.NewParser(strings.NewReader(tc.input))
-			file, err := p.Parse()
-			require.NoError(t, err)
+		d := niceyaml.NewDecoder(file)
+		for _, dd := range d.Documents() {
+			var target struct{ Value int }
 
-			d := niceyaml.NewDecoder(file)
-			target := tc.target()
-			err = d.Decode(0, target)
+			err := dd.Decode(&target)
 
 			require.Error(t, err)
 
 			var yamlErr *niceyaml.Error
 			require.ErrorAs(t, err, &yamlErr)
-		})
-	}
+		}
+	})
 }
 
-func TestDecoder_DecodeContext(t *testing.T) {
+func TestDocumentDecoder_DecodeContext(t *testing.T) {
 	t.Parallel()
 
 	t.Run("decode with background context", func(t *testing.T) {
 		t.Parallel()
 
-		p := niceyaml.NewParser(strings.NewReader("key: value"))
-		file, err := p.Parse()
+		source := niceyaml.NewSourceFromString("key: value")
+		file, err := source.Parse()
 		require.NoError(t, err)
 
 		d := niceyaml.NewDecoder(file)
+		for _, dd := range d.Documents() {
+			var result map[string]string
 
-		var result map[string]string
+			err := dd.DecodeContext(t.Context(), &result)
 
-		err = d.DecodeContext(t.Context(), 0, &result)
-
-		require.NoError(t, err)
-		assert.Equal(t, "value", result["key"])
+			require.NoError(t, err)
+			assert.Equal(t, "value", result["key"])
+		}
 	})
 }
 
-func TestDecoder_Validate(t *testing.T) {
+func TestDocumentDecoder_Validate(t *testing.T) {
 	t.Parallel()
 
-	tcs := map[string]struct {
-		validator niceyaml.Validator
-		input     string
-		errMsg    string
-		doc       int
-		wantErr   bool
-	}{
-		"passing validation": {
-			input:     "key: value",
-			doc:       0,
-			validator: passingValidator(),
-			wantErr:   false,
-		},
-		"failing validation": {
-			input:     "key: value",
-			doc:       0,
-			validator: failingValidator(errors.New("validation failed")),
-			wantErr:   true,
-			errMsg:    "validation failed",
-		},
-		"document out of range": {
-			input:     "key: value",
-			doc:       5,
-			validator: passingValidator(),
-			wantErr:   true,
-			errMsg:    "document index out of range",
-		},
-	}
+	t.Run("passing validation", func(t *testing.T) {
+		t.Parallel()
 
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
+		source := niceyaml.NewSourceFromString("key: value")
+		file, err := source.Parse()
+		require.NoError(t, err)
 
-			p := niceyaml.NewParser(strings.NewReader(tc.input))
-			file, err := p.Parse()
+		d := niceyaml.NewDecoder(file)
+		for _, dd := range d.Documents() {
+			err := dd.Validate(passingValidator())
 			require.NoError(t, err)
+		}
+	})
 
-			d := niceyaml.NewDecoder(file)
-			err = d.Validate(tc.doc, tc.validator)
+	t.Run("failing validation", func(t *testing.T) {
+		t.Parallel()
 
-			if tc.wantErr {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tc.errMsg)
+		source := niceyaml.NewSourceFromString("key: value")
+		file, err := source.Parse()
+		require.NoError(t, err)
 
-				return
-			}
-
-			require.NoError(t, err)
-		})
-	}
+		d := niceyaml.NewDecoder(file)
+		for _, dd := range d.Documents() {
+			err := dd.Validate(failingValidator(errors.New("validation failed")))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "validation failed")
+		}
+	})
 }
 
-func TestDecoder_ValidateContext(t *testing.T) {
+func TestDocumentDecoder_ValidateContext(t *testing.T) {
 	t.Parallel()
 
 	t.Run("validate with background context", func(t *testing.T) {
 		t.Parallel()
 
-		p := niceyaml.NewParser(strings.NewReader("key: value"))
-		file, err := p.Parse()
+		source := niceyaml.NewSourceFromString("key: value")
+		file, err := source.Parse()
 		require.NoError(t, err)
 
 		d := niceyaml.NewDecoder(file)
-		err = d.ValidateContext(t.Context(), 0, passingValidator())
-
-		require.NoError(t, err)
+		for _, dd := range d.Documents() {
+			err := dd.ValidateContext(t.Context(), passingValidator())
+			require.NoError(t, err)
+		}
 	})
 
 	t.Run("validate with failing validator", func(t *testing.T) {
 		t.Parallel()
 
-		p := niceyaml.NewParser(strings.NewReader("key: value"))
-		file, err := p.Parse()
+		source := niceyaml.NewSourceFromString("key: value")
+		file, err := source.Parse()
 		require.NoError(t, err)
 
 		d := niceyaml.NewDecoder(file)
-		err = d.ValidateContext(t.Context(), 0, failingValidator(errors.New("invalid")))
-
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid document")
+		for _, dd := range d.Documents() {
+			err := dd.ValidateContext(t.Context(), failingValidator(errors.New("invalid")))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "invalid document")
+		}
 	})
 }
 
-func TestDecoder_ValidateDecode(t *testing.T) {
+func TestDocumentDecoder_ValidateDecode(t *testing.T) {
 	t.Parallel()
 
 	type config struct {
@@ -581,67 +423,46 @@ func TestDecoder_ValidateDecode(t *testing.T) {
 		Value int    `yaml:"value"`
 	}
 
-	tcs := map[string]struct {
-		validator niceyaml.Validator
-		input     string
-		errMsg    string
-		want      config
-		doc       int
-		wantErr   bool
-	}{
-		"valid and decode": {
-			input: `name: test
-value: 42`,
-			doc:       0,
-			validator: passingValidator(),
-			want:      config{Name: "test", Value: 42},
-			wantErr:   false,
-		},
-		"validation fails - no decode": {
-			input: `name: test
-value: 42`,
-			doc:       0,
-			validator: failingValidator(errors.New("not allowed")),
-			wantErr:   true,
-			errMsg:    "not allowed",
-		},
-		"document out of range": {
-			input:     "name: test",
-			doc:       99,
-			validator: passingValidator(),
-			wantErr:   true,
-			errMsg:    "document index out of range",
-		},
-	}
+	t.Run("valid and decode", func(t *testing.T) {
+		t.Parallel()
 
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
+		input := `name: test
+value: 42`
+		source := niceyaml.NewSourceFromString(input)
+		file, err := source.Parse()
+		require.NoError(t, err)
 
-			p := niceyaml.NewParser(strings.NewReader(tc.input))
-			file, err := p.Parse()
-			require.NoError(t, err)
-
-			d := niceyaml.NewDecoder(file)
-
+		d := niceyaml.NewDecoder(file)
+		for _, dd := range d.Documents() {
 			var result config
 
-			err = d.ValidateDecode(tc.doc, &result, tc.validator)
-
-			if tc.wantErr {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tc.errMsg)
-
-				return
-			}
-
+			err := dd.ValidateDecode(&result, passingValidator())
 			require.NoError(t, err)
-			assert.Equal(t, tc.want, result)
-		})
-	}
+			assert.Equal(t, config{Name: "test", Value: 42}, result)
+		}
+	})
+
+	t.Run("validation fails - no decode", func(t *testing.T) {
+		t.Parallel()
+
+		input := `name: test
+value: 42`
+		source := niceyaml.NewSourceFromString(input)
+		file, err := source.Parse()
+		require.NoError(t, err)
+
+		d := niceyaml.NewDecoder(file)
+		for _, dd := range d.Documents() {
+			var result config
+
+			err := dd.ValidateDecode(&result, failingValidator(errors.New("not allowed")))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "not allowed")
+		}
+	})
 }
 
-func TestDecoder_ValidateDecodeContext(t *testing.T) {
+func TestDocumentDecoder_ValidateDecodeContext(t *testing.T) {
 	t.Parallel()
 
 	type config struct {
@@ -651,74 +472,134 @@ func TestDecoder_ValidateDecodeContext(t *testing.T) {
 	t.Run("validates and decodes with context", func(t *testing.T) {
 		t.Parallel()
 
-		p := niceyaml.NewParser(strings.NewReader("name: contextual"))
-		file, err := p.Parse()
+		source := niceyaml.NewSourceFromString("name: contextual")
+		file, err := source.Parse()
 		require.NoError(t, err)
 
 		d := niceyaml.NewDecoder(file)
+		for _, dd := range d.Documents() {
+			var result config
 
-		var result config
+			err := dd.ValidateDecodeContext(t.Context(), &result, passingValidator())
 
-		err = d.ValidateDecodeContext(t.Context(), 0, &result, passingValidator())
-
-		require.NoError(t, err)
-		assert.Equal(t, "contextual", result.Name)
+			require.NoError(t, err)
+			assert.Equal(t, "contextual", result.Name)
+		}
 	})
 
 	t.Run("validation failure stops decode", func(t *testing.T) {
 		t.Parallel()
 
-		p := niceyaml.NewParser(strings.NewReader("name: contextual"))
-		file, err := p.Parse()
+		source := niceyaml.NewSourceFromString("name: contextual")
+		file, err := source.Parse()
 		require.NoError(t, err)
 
 		d := niceyaml.NewDecoder(file)
+		for _, dd := range d.Documents() {
+			var result config
 
-		var result config
+			err := dd.ValidateDecodeContext(t.Context(), &result, failingValidator(errors.New("blocked")))
 
-		err = d.ValidateDecodeContext(t.Context(), 0, &result, failingValidator(errors.New("blocked")))
-
-		require.Error(t, err)
-		assert.Empty(t, result.Name)
+			require.Error(t, err)
+			assert.Empty(t, result.Name)
+		}
 	})
 }
 
-func TestErrDocumentIndexOutOfRange(t *testing.T) {
+func TestNewDocumentDecoder(t *testing.T) {
 	t.Parallel()
 
-	t.Run("error message format for GetValue", func(t *testing.T) {
+	t.Run("creates document decoder from ast.File and ast.DocumentNode", func(t *testing.T) {
 		t.Parallel()
 
-		p := niceyaml.NewParser(strings.NewReader("key: value"))
-		file, err := p.Parse()
+		source := niceyaml.NewSourceFromString("key: value")
+		file, err := source.Parse()
+		require.NoError(t, err)
+		require.Len(t, file.Docs, 1)
+
+		dd := niceyaml.NewDocumentDecoder(file, file.Docs[0])
+		require.NotNil(t, dd)
+
+		var result map[string]string
+
+		err = dd.Decode(&result)
+		require.NoError(t, err)
+		assert.Equal(t, "value", result["key"])
+	})
+}
+
+func TestDecoder_Documents(t *testing.T) {
+	t.Parallel()
+
+	t.Run("iterates over single document", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("key: value")
+		file, err := source.Parse()
 		require.NoError(t, err)
 
 		d := niceyaml.NewDecoder(file)
-		_, err = d.GetValue(3, *niceyaml.NewRootPath().Build())
 
-		require.Error(t, err)
-		require.ErrorIs(t, err, niceyaml.ErrDocumentIndexOutOfRange)
-		assert.Contains(t, err.Error(), "4 of 1")
+		var count int
+		for i, dd := range d.Documents() {
+			assert.Equal(t, count, i)
+			require.NotNil(t, dd)
+
+			count++
+		}
+
+		assert.Equal(t, 1, count)
 	})
 
-	t.Run("error message format for Decode", func(t *testing.T) {
+	t.Run("iterates over multiple documents", func(t *testing.T) {
 		t.Parallel()
 
-		p := niceyaml.NewParser(strings.NewReader(`---
+		input := `---
 a: 1
 ---
-b: 2`))
-		file, err := p.Parse()
+b: 2
+---
+c: 3`
+		source := niceyaml.NewSourceFromString(input)
+		file, err := source.Parse()
 		require.NoError(t, err)
 
 		d := niceyaml.NewDecoder(file)
 
-		var result map[string]int
+		var count int
+		for i, dd := range d.Documents() {
+			assert.Equal(t, count, i)
+			require.NotNil(t, dd)
 
-		err = d.Decode(5, &result)
+			count++
+		}
 
-		require.Error(t, err)
-		require.ErrorIs(t, err, niceyaml.ErrDocumentIndexOutOfRange)
-		assert.Contains(t, err.Error(), "6 of 2")
+		assert.Equal(t, 3, count)
+	})
+
+	t.Run("early break stops iteration", func(t *testing.T) {
+		t.Parallel()
+
+		input := `---
+a: 1
+---
+b: 2
+---
+c: 3`
+		source := niceyaml.NewSourceFromString(input)
+		file, err := source.Parse()
+		require.NoError(t, err)
+
+		d := niceyaml.NewDecoder(file)
+
+		var count int
+		for range d.Documents() {
+			count++
+			if count == 2 {
+				break
+			}
+		}
+
+		assert.Equal(t, 2, count)
 	})
 }

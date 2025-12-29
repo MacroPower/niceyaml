@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -88,16 +87,16 @@ func validateFile(yamlPath string, validator *validate.Validator) error {
 		return fmt.Errorf("read file: %w", err)
 	}
 
-	parser := niceyaml.NewParser(bytes.NewReader(yamlData))
+	source := niceyaml.NewSourceFromString(string(yamlData))
 
-	astFile, err := parser.Parse()
+	astFile, err := source.Parse()
 	if err != nil {
 		return err
 	}
 
 	decoder := niceyaml.NewDecoder(astFile)
-	for i := range decoder.DocumentCount() {
-		err := decoder.Validate(i, validator)
+	for _, doc := range decoder.Documents() {
+		err := doc.Validate(validator)
 		if err != nil {
 			return err
 		}

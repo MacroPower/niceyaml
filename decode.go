@@ -5,14 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 )
-
-// ErrDocumentIndexOutOfRange is returned if the document index is greater than
-// or equal to the number of documents in the YAML file.
-var ErrDocumentIndexOutOfRange = errors.New("document index out of range")
 
 // Validator validates arbitrary data, typically used to validate decoded YAML documents.
 type Validator interface {
@@ -40,45 +37,65 @@ func (d *Decoder) DocumentCount() int {
 	return len(d.f.Docs)
 }
 
-// GetValue returns the string value at the given path in the specified document.
-// It returns an empty string if the path does not exist or points to a directive.
-func (d *Decoder) GetValue(doc int, path yaml.Path) (string, error) {
-	if len(d.f.Docs) <= doc {
-		return "", fmt.Errorf("get document %d of %d: %w", doc+1, len(d.f.Docs), ErrDocumentIndexOutOfRange)
+// Documents returns an iterator over all documents in the YAML file.
+func (d *Decoder) Documents() iter.Seq2[int, *DocumentDecoder] {
+	return func(yield func(int, *DocumentDecoder) bool) {
+		for i, doc := range d.f.Docs {
+			if !yield(i, NewDocumentDecoder(d.f, doc)) {
+				return
+			}
+		}
 	}
-
-	docNode := d.f.Docs[doc]
-
-	if docNode.Body != nil && docNode.Body.Type() == ast.DirectiveType {
-		return "", nil
-	}
-
-	node, err := path.FilterNode(docNode.Body)
-	if err != nil {
-		return "", fmt.Errorf("get value at path %s: %w", path.String(), err)
-	}
-	if node == nil {
-		return "", nil
-	}
-
-	return node.String(), nil
 }
 
-// ValidateDecode is a convenience method that calls [Decoder.Validate] and then
-// [Decoder.Decode] if validation succeeds.
-func (d *Decoder) ValidateDecode(doc int, v any, validator Validator) error {
-	return d.ValidateDecodeContext(context.Background(), doc, v, validator)
+// DocumentDecoder validates and decodes a single [*ast.DocumentNode].
+type DocumentDecoder struct {
+	f   *ast.File
+	doc *ast.DocumentNode
 }
 
-// ValidateDecodeContext is a convenience method that calls [Decoder.ValidateContext] and then
-// [Decoder.DecodeContext] if validation succeeds.
-func (d *Decoder) ValidateDecodeContext(ctx context.Context, doc int, v any, validator Validator) error {
-	err := d.ValidateContext(ctx, doc, validator)
+// NewDocumentDecoder creates a new [DocumentDecoder].
+func NewDocumentDecoder(f *ast.File, doc *ast.DocumentNode) *DocumentDecoder {
+	return &DocumentDecoder{
+		f:   f,
+		doc: doc,
+	}
+}
+
+// GetValue returns the value at the given path in the specified document as a string.
+// The boolean return value indicates whether a value was found at the path.
+func (dd *DocumentDecoder) GetValue(path *yaml.Path) (string, bool) {
+	if path == nil {
+		return "", false
+	}
+
+	if dd.doc.Body != nil && dd.doc.Body.Type() == ast.DirectiveType {
+		return "", false
+	}
+
+	node, err := path.FilterNode(dd.doc.Body)
+	if err != nil || node == nil {
+		return "", false
+	}
+
+	return node.String(), true
+}
+
+// ValidateDecode is a convenience method that calls [DocumentDecoder.Validate] and then
+// [DocumentDecoder.Decode] if validation succeeds.
+func (dd *DocumentDecoder) ValidateDecode(v any, validator Validator) error {
+	return dd.ValidateDecodeContext(context.Background(), v, validator)
+}
+
+// ValidateDecodeContext is a convenience method that calls [DocumentDecoder.ValidateContext] and then
+// [DocumentDecoder.DecodeContext] if validation succeeds.
+func (dd *DocumentDecoder) ValidateDecodeContext(ctx context.Context, v any, validator Validator) error {
+	err := dd.ValidateContext(ctx, validator)
 	if err != nil {
 		return err
 	}
 
-	err = d.DecodeContext(ctx, doc, v)
+	err = dd.DecodeContext(ctx, v)
 	if err != nil {
 		return err
 	}
@@ -91,8 +108,8 @@ func (d *Decoder) ValidateDecodeContext(ctx context.Context, doc int, v any, val
 // Any YAML decoding errors are converted to [Error] with source annotations.
 // The validator is responsible for returning an [Error] pointing to the relevant
 // YAML token if validation fails.
-func (d *Decoder) Validate(doc int, validator Validator) error {
-	return d.ValidateContext(context.Background(), doc, validator)
+func (dd *DocumentDecoder) Validate(validator Validator) error {
+	return dd.ValidateContext(context.Background(), validator)
 }
 
 // ValidateContext decodes the document at the specified doc index into [any]
@@ -100,15 +117,15 @@ func (d *Decoder) Validate(doc int, validator Validator) error {
 // Any YAML decoding errors are converted to [Error] with source annotations.
 // The validator is responsible for returning an [Error] pointing to the relevant
 // YAML token if validation fails.
-func (d *Decoder) ValidateContext(ctx context.Context, doc int, validator Validator) error {
+func (dd *DocumentDecoder) ValidateContext(ctx context.Context, validator Validator) error {
 	var v any
 
-	err := d.DecodeContext(ctx, doc, &v)
+	err := dd.DecodeContext(ctx, &v)
 	if err != nil {
 		return err
 	}
 
-	ew := NewErrorWrapper(WithFile(d.f))
+	ew := NewErrorWrapper(WithFile(dd.f))
 	err = validator.Validate(v)
 	if err != nil {
 		return ew.Wrap(fmt.Errorf("invalid document: %w", err))
@@ -119,19 +136,15 @@ func (d *Decoder) ValidateContext(ctx context.Context, doc int, validator Valida
 
 // Decode decodes the specified document into v.
 // Any YAML decoding errors are converted to [Error] with source annotations.
-func (d *Decoder) Decode(doc int, v any) error {
-	return d.DecodeContext(context.Background(), doc, v)
+func (dd *DocumentDecoder) Decode(v any) error {
+	return dd.DecodeContext(context.Background(), v)
 }
 
 // DecodeContext decodes the specified document into v with [context.Context].
 // Any YAML decoding errors are converted to [Error] with source annotations.
-func (d *Decoder) DecodeContext(ctx context.Context, doc int, v any) error {
-	if len(d.f.Docs) <= doc {
-		return fmt.Errorf("get document %d of %d: %w", doc+1, len(d.f.Docs), ErrDocumentIndexOutOfRange)
-	}
-
+func (dd *DocumentDecoder) DecodeContext(ctx context.Context, v any) error {
 	dec := yaml.NewDecoder(bytes.NewReader(nil))
-	err := dec.DecodeFromNodeContext(ctx, d.f.Docs[doc].Body, v)
+	err := dec.DecodeFromNodeContext(ctx, dd.doc.Body, v)
 	if err == nil {
 		return nil
 	}

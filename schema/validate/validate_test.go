@@ -2,7 +2,6 @@ package validate_test
 
 import (
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -662,21 +661,23 @@ users:
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := niceyaml.NewParser(strings.NewReader(tc.input))
-			file, err := p.Parse()
+			source := niceyaml.NewSourceFromString(tc.input)
+			file, err := source.Parse()
 			require.NoError(t, err)
 
 			d := niceyaml.NewDecoder(file)
-			err = d.Validate(0, validator)
+			for _, dd := range d.Documents() {
+				err = dd.Validate(validator)
 
-			if tc.wantErr {
-				require.Error(t, err)
+				if tc.wantErr {
+					require.Error(t, err)
 
-				var validationErr *niceyaml.Error
-				require.ErrorAs(t, err, &validationErr)
-				assert.Equal(t, tc.expectedPath, validationErr.GetPath())
-			} else {
-				require.NoError(t, err)
+					var validationErr *niceyaml.Error
+					require.ErrorAs(t, err, &validationErr)
+					assert.Equal(t, tc.expectedPath, validationErr.GetPath())
+				} else {
+					require.NoError(t, err)
+				}
 			}
 		})
 	}
