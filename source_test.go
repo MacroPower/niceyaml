@@ -798,20 +798,15 @@ doc2: value2
 			input := lexer.Tokenize(tc.input)
 			result := niceyaml.NewSourceFromTokens(input, niceyaml.WithName("test"))
 
-			// Call Value() to establish Prev/Next linking across lines.
+			// Tokens() returns recombined tokens matching the original lexer output.
 			tks := result.Tokens()
 			require.NotEmpty(t, tks, "expected non-empty tokens")
 
-			// Count total tokens across all lines.
-			totalTokens := 0
-			for _, line := range result.Lines() {
-				totalTokens += len(line.Tokens())
-			}
+			// Recombined token count should match original lexer output.
+			assert.Len(t, tks, len(input), "recombined token count should match original")
 
-			// Start from first token in Line(0).Value.
-			firstToken := result.Line(0).Token(0)
-			lastLine := result.Line(result.Count() - 1)
-			lastToken := lastLine.Tokens()[len(lastLine.Tokens())-1]
+			firstToken := tks[0]
+			lastToken := tks[len(tks)-1]
 
 			// First token should have no Prev.
 			assert.Nil(t, firstToken.Prev, "first token Prev should be nil")
@@ -819,21 +814,21 @@ doc2: value2
 			// Last token should have no Next.
 			assert.Nil(t, lastToken.Next, "last token Next should be nil")
 
-			// Verify forward traversal from Lines[0].Value[0] reaches all tokens.
+			// Verify forward traversal reaches all tokens.
 			forwardCount := 0
 			for tk := firstToken; tk != nil; tk = tk.Next {
 				forwardCount++
 			}
 
-			assert.Equal(t, totalTokens, forwardCount, "forward traversal count mismatch")
+			assert.Equal(t, len(tks), forwardCount, "forward traversal count mismatch")
 
-			// Verify backward traversal from last line's last token reaches all tokens.
+			// Verify backward traversal reaches all tokens.
 			backwardCount := 0
 			for tk := lastToken; tk != nil; tk = tk.Prev {
 				backwardCount++
 			}
 
-			assert.Equal(t, totalTokens, backwardCount, "backward traversal count mismatch")
+			assert.Equal(t, len(tks), backwardCount, "backward traversal count mismatch")
 
 			// Verify bidirectional linking integrity.
 			for tk := firstToken; tk != nil; tk = tk.Next {
@@ -1936,5 +1931,98 @@ func TestLines_PositionsFromToken(t *testing.T) {
 		assert.Equal(t, 0, positions[0].Line)
 		// Column should be > 0 since it's not the first token.
 		assert.Positive(t, positions[0].Col)
+	})
+}
+
+func TestSource_Parse(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid YAML", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input        string
+			wantDocCount int
+		}{
+			"simple key-value": {
+				input:        "key: value\n",
+				wantDocCount: 1,
+			},
+			"nested map": {
+				input: `parent:
+  child: value
+`,
+				wantDocCount: 1,
+			},
+			"multiple documents": {
+				input: `---
+doc1: value1
+---
+doc2: value2
+`,
+				wantDocCount: 2,
+			},
+			"list": {
+				input: `items:
+  - one
+  - two
+`,
+				wantDocCount: 1,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				source := niceyaml.NewSourceFromString(tc.input)
+				file, err := source.Parse()
+
+				require.NoError(t, err)
+				require.NotNil(t, file)
+				assert.Len(t, file.Docs, tc.wantDocCount)
+			})
+		}
+	})
+
+	t.Run("empty source", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("")
+		file, err := source.Parse()
+
+		require.NoError(t, err)
+		require.NotNil(t, file)
+		// Go-yaml parser returns 1 doc for empty input (empty document).
+		assert.Len(t, file.Docs, 1)
+	})
+
+	t.Run("invalid YAML returns Error", func(t *testing.T) {
+		t.Parallel()
+
+		// Create invalid YAML by manually constructing malformed tokens.
+		tks := token.Tokens{}
+		tks.Add(&token.Token{
+			Type:     token.MappingValueType,
+			Origin:   ":",
+			Value:    ":",
+			Position: &token.Position{Line: 1, Column: 1},
+		})
+		tks.Add(&token.Token{
+			Type:     token.MappingValueType,
+			Origin:   ":\n",
+			Value:    ":",
+			Position: &token.Position{Line: 1, Column: 2},
+		})
+
+		source := niceyaml.NewSourceFromTokens(tks)
+		file, err := source.Parse()
+
+		require.Error(t, err)
+		assert.Nil(t, file)
+
+		// Verify it's a niceyaml.Error with source annotation.
+		var yamlErr *niceyaml.Error
+		require.ErrorAs(t, err, &yamlErr)
 	})
 }

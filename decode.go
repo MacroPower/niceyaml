@@ -5,11 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
-	"github.com/goccy/go-yaml/parser"
 )
 
 // ErrDocumentIndexOutOfRange is returned if the document index is greater than
@@ -21,64 +19,7 @@ type Validator interface {
 	Validate(v any) error
 }
 
-// Parser parses YAML from an [io.Reader] into an [ast.File].
-type Parser struct {
-	r    io.Reader
-	opts []parser.Option
-}
-
-// NewParser returns a new [Parser] that reads YAML from r.
-func NewParser(r io.Reader, opts ...parser.Option) *Parser {
-	return &Parser{r, opts}
-}
-
-// Parse reads all YAML from the reader and parses it into an [ast.File].
-// Any YAML parsing errors are converted to [Error] with source annotations.
-func (p *Parser) Parse() (*ast.File, error) {
-	b, err := io.ReadAll(p.r)
-	if err != nil {
-		return nil, fmt.Errorf("read: %w", err)
-	}
-
-	file, err := parser.ParseBytes(b, parser.ParseComments, p.opts...)
-	if err == nil {
-		return file, nil
-	}
-
-	var yamlErr yaml.Error
-	if errors.As(err, &yamlErr) {
-		return nil, NewError(
-			errors.New(yamlErr.GetMessage()),
-			WithErrorToken(yamlErr.GetToken()),
-		)
-	}
-
-	//nolint:wrapcheck // Return the original error if it's not a [yaml.Error].
-	return nil, err
-}
-
-// Decoder decodes YAML documents from an AST [ast.File].
-//
-// Usage:
-//
-//	parser := niceyaml.NewParser(yamlReader)
-//	astFile, err := parser.Parse()
-//	if err != nil {
-//		return fmt.Errorf("parse YAML: %w", err)
-//	}
-//	decoder := niceyaml.NewDecoder(astFile)
-//	for i := range decoder.DocumentCount() {
-//		kind := decoder.GetValue(i, niceyaml.RootPath().Key("kind"))
-//		switch kind {
-//		case "Deployment":
-//			var deploy appsv1.Deployment
-//			err := decoder.ValidateDecode(i, &deploy, deploymentValidator)
-//			if err != nil {
-//				return err
-//			}
-//			// Handle deployment...
-//		}
-//	}
+// Decoder decodes YAML documents from an [*ast.File].
 //
 // Note: Both [Decoder.Validate] and [Decoder.Decode] perform decode operations.
 // [Decoder.Validate] to [any] for schema validation, and [Decoder.Decode] to the typed
