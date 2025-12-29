@@ -1,6 +1,6 @@
 package niceyaml
 
-// Revision represents [Lines] at one or more revisions.
+// Revision represents [Source] at one or more revisions.
 // It may form a linked or doubly-linked list to track changes across revisions.
 // It is not required to have multiple revisions; a single revision is valid.
 type Revision struct {
@@ -11,22 +11,22 @@ type Revision struct {
 	// If there is no next revision, it is nil.
 	next *Revision
 	// The collection of [Tokens] at the head.
-	head *Lines
+	head *Source
 }
 
-// NewRevision creates new [Revision]. The provided values form the [Lines] at the head.
+// NewRevision creates new [Revision]. The provided values form the [Source] at the head.
 // You may use [Revision.Append] or [Revision.Prepend] to add more revisions.
 // A builder pattern is supported for values that are known at compile time.
-func NewRevision(tokens *Lines) *Revision {
+func NewRevision(tokens *Source) *Revision {
 	return &Revision{head: tokens}
 }
 
-// Lines returns the [Lines] at the head.
-func (t *Revision) Lines() *Lines {
+// Lines returns the [Source] at the head.
+func (t *Revision) Lines() *Source {
 	return t.head
 }
 
-// Name returns the name of the [Lines] at the head.
+// Name returns the name of the [Source] at the head.
 func (t *Revision) Name() string {
 	return t.head.Name
 }
@@ -145,9 +145,9 @@ func (t *Revision) Count() int {
 	return count + 1
 }
 
-// Append adds a new revision after the [Lines] at the head.
+// Append adds a new revision after the [Source] at the head.
 // Returns the newly added revision.
-func (t *Revision) Append(tokens *Lines) *Revision {
+func (t *Revision) Append(tokens *Source) *Revision {
 	rev := &Revision{
 		prev: t,
 		head: tokens,
@@ -157,9 +157,9 @@ func (t *Revision) Append(tokens *Lines) *Revision {
 	return rev
 }
 
-// Prepend adds a new revision before the [Lines] at the head.
+// Prepend adds a new revision before the [Source] at the head.
 // Returns the newly added revision.
-func (t *Revision) Prepend(tokens *Lines) *Revision {
+func (t *Revision) Prepend(tokens *Source) *Revision {
 	rev := &Revision{
 		next: t,
 		head: tokens,

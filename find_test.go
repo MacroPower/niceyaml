@@ -266,7 +266,7 @@ func TestFinder_Find(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := niceyaml.NewLinesFromString(tc.input)
+			lines := niceyaml.NewSourceFromString(tc.input)
 
 			var opts []niceyaml.FinderOption
 			if tc.normalizer != nil {
@@ -324,7 +324,7 @@ func TestFinder_Find_EdgeCases(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := niceyaml.NewLinesFromString(tc.input)
+			lines := niceyaml.NewSourceFromString(tc.input)
 			finder := niceyaml.NewFinder(tc.search)
 			got := finder.Find(lines)
 			assert.Equal(t, tc.want, got)
@@ -349,8 +349,8 @@ func TestFinder_Find_DiffBuiltLines(t *testing.T) {
 	before := "key: old\n"
 	after := "key: new\n"
 
-	beforeLines := niceyaml.NewLinesFromString(before, niceyaml.WithName("before"))
-	afterLines := niceyaml.NewLinesFromString(after, niceyaml.WithName("after"))
+	beforeLines := niceyaml.NewSourceFromString(before, niceyaml.WithName("before"))
+	afterLines := niceyaml.NewSourceFromString(after, niceyaml.WithName("after"))
 
 	revBefore := niceyaml.NewRevision(beforeLines)
 	revAfter := niceyaml.NewRevision(afterLines)

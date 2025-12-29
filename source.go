@@ -2,6 +2,7 @@ package niceyaml
 
 import (
 	"fmt"
+	"iter"
 	"strings"
 
 	"github.com/goccy/go-yaml/ast"
@@ -39,7 +40,7 @@ const (
 	FlagAnnotation             // Annotation/header lines (no line number).
 )
 
-// Line contains data for a specific line in a [Lines] collection.
+// Line contains data for a specific line in a [Source] collection.
 type Line struct {
 	// Tokens for this line.
 	value token.Tokens
@@ -126,7 +127,7 @@ func (l Line) String() string {
 	return sb.String()
 }
 
-// Lines represents a collection of [token.Tokens] organized into [Line]s with associated metadata.
+// Source represents a collection of [token.Tokens] organized into [Line]s with associated metadata.
 //
 // Input:
 //
@@ -146,7 +147,7 @@ func (l Line) String() string {
 //	│                   │
 //	└───────────────────┘
 //
-// Token streams using [Lines]:
+// Token streams using [Source]:
 //
 //	┌──────┬────────────┐
 //	│String│MappingValue│
@@ -157,41 +158,41 @@ func (l Line) String() string {
 //	└───────────────────┘
 //
 // This enables clean line-by-line processing, while preserving the original token data.
-type Lines struct {
+type Source struct {
 	Name  string
 	lines []Line
 }
 
-// LinesOption configures [Lines] creation.
-type LinesOption func(*Lines)
+// SourceOption configures [Source] creation.
+type SourceOption func(*Source)
 
-// WithName sets the name for the [Lines].
-func WithName(name string) LinesOption {
-	return func(t *Lines) {
+// WithName sets the name for the [Source].
+func WithName(name string) SourceOption {
+	return func(t *Source) {
 		t.Name = name
 	}
 }
 
-// NewLinesFromString calls [lexer.Tokenize] to create new [Lines] from a YAML string.
-func NewLinesFromString(src string, opts ...LinesOption) *Lines {
+// NewSourceFromString calls [lexer.Tokenize] to create new [Source] from a YAML string.
+func NewSourceFromString(src string, opts ...SourceOption) *Source {
 	tks := lexer.Tokenize(src)
 
-	return NewLinesFromTokens(tks, opts...)
+	return NewSourceFromTokens(tks, opts...)
 }
 
-// NewLinesFromFile creates new [Lines] from an [*ast.File].
+// NewSourceFromFile creates new [Source] from an [*ast.File].
 // It uses the [*ast.File]'s Name to name the collection.
-func NewLinesFromFile(f *ast.File) *Lines {
+func NewSourceFromFile(f *ast.File) *Source {
 	tk := findAnyTokenInFile(f)
 
-	return NewLinesFromToken(tk, WithName(f.Name))
+	return NewSourceFromToken(tk, WithName(f.Name))
 }
 
-// NewLinesFromToken creates new [Lines] from a seed [*token.Token].
+// NewSourceFromToken creates new [Source] from a seed [*token.Token].
 // It collects all [token.Tokens] by walking the token chain from start to end.
-func NewLinesFromToken(tk *token.Token, opts ...LinesOption) *Lines {
+func NewSourceFromToken(tk *token.Token, opts ...SourceOption) *Source {
 	if tk == nil {
-		return &Lines{}
+		return &Source{}
 	}
 
 	// Walk to initial token.
@@ -210,14 +211,14 @@ func NewLinesFromToken(tk *token.Token, opts ...LinesOption) *Lines {
 		tks.Add(tk.Clone())
 	}
 
-	return NewLinesFromTokens(tks, opts...)
+	return NewSourceFromTokens(tks, opts...)
 }
 
-// NewLinesFromTokens creates new [Lines] from [token.Tokens].
+// NewSourceFromTokens creates new [Source] from [token.Tokens].
 //
 //nolint:nestif // TODO: refactor.
-func NewLinesFromTokens(tks token.Tokens, opts ...LinesOption) *Lines {
-	t := &Lines{}
+func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
+	t := &Source{}
 	for _, opt := range opts {
 		opt(t)
 	}
@@ -394,7 +395,7 @@ func NewLinesFromTokens(tks token.Tokens, opts ...LinesOption) *Lines {
 
 // Tokens reconstructs and returns the full [token.Tokens] stream from all lines.
 // The returned tokens have their Prev/Next pointers properly connected.
-func (t *Lines) Tokens() token.Tokens {
+func (t *Source) Tokens() token.Tokens {
 	if len(t.lines) == 0 {
 		return nil
 	}
@@ -410,57 +411,65 @@ func (t *Lines) Tokens() token.Tokens {
 }
 
 // Count returns the number of lines.
-func (t *Lines) Count() int {
+func (t *Source) Count() int {
 	return len(t.lines)
 }
 
 // IsEmpty returns true if there are no lines.
-func (t *Lines) IsEmpty() bool {
+func (t *Source) IsEmpty() bool {
 	return len(t.lines) == 0
 }
 
-// EachLine iterates over all lines, calling fn for each.
-func (t *Lines) EachLine(fn func(idx int, line Line)) {
-	for i, line := range t.lines {
-		fn(i, line)
+// Lines returns an iterator over all lines with their positions.
+func (t *Source) Lines() iter.Seq2[Position, Line] {
+	return func(yield func(Position, Line) bool) {
+		for i, line := range t.lines {
+			if !yield(NewPosition(i, 0), line) {
+				return
+			}
+		}
 	}
 }
 
-// EachRune iterates through all runes in all lines with their positions.
-func (t *Lines) EachRune(fn func(r rune, pos Position)) {
-	for i, line := range t.lines {
-		col := 0
+// Runes returns an iterator over all runes with their positions.
+func (t *Source) Runes() iter.Seq2[Position, rune] {
+	return func(yield func(Position, rune) bool) {
+		for i, line := range t.lines {
+			col := 0
 
-		for _, tk := range line.value {
-			for _, r := range tk.Origin {
-				fn(r, NewPosition(i, col))
+			for _, tk := range line.value {
+				for _, r := range tk.Origin {
+					if !yield(NewPosition(i, col), r) {
+						return
+					}
 
-				col++
+					col++
+				}
 			}
 		}
 	}
 }
 
 // Line returns the [Line] at the given index. Panics if idx is out of range.
-func (t *Lines) Line(idx int) Line {
+func (t *Source) Line(idx int) Line {
 	return t.lines[idx]
 }
 
 // Annotate sets an [Annotation] on the [Line] at the given index.
 // Panics if idx is out of range.
-func (t *Lines) Annotate(idx int, ann Annotation) {
+func (t *Source) Annotate(idx int, ann Annotation) {
 	t.lines[idx].Annotation = ann
 }
 
 // SetFlag sets a [Flag] on the [Line] at the given index.
 // Panics if idx is out of range.
-func (t *Lines) SetFlag(idx int, flag Flag) {
+func (t *Source) SetFlag(idx int, flag Flag) {
 	t.lines[idx].Flag = flag
 }
 
 // Content returns the combined content of all [Line]s as a string.
 // [Line]s are joined with newlines.
-func (t *Lines) Content() string {
+func (t *Source) Content() string {
 	if len(t.lines) == 0 {
 		return ""
 	}
@@ -479,7 +488,7 @@ func (t *Lines) Content() string {
 
 // String reconstructs all [Line]s as a string, including any annotations.
 // This should generally only be used for debugging.
-func (t *Lines) String() string {
+func (t *Source) String() string {
 	var sb strings.Builder
 	for i, l := range t.lines {
 		if i > 0 {
@@ -492,14 +501,14 @@ func (t *Lines) String() string {
 	return sb.String()
 }
 
-// Validate checks the integrity of the [Lines]. It ensures that:
+// Validate checks the integrity of the [Source]. It ensures that:
 //   - JoinPrev/JoinNext flags are consistent between adjacent [Line]s
 //   - Line numbers are strictly increasing
 //   - Every token on a given [Line] has an identical line number in its Position
 //   - Every token on a given [Line] has columns that are strictly increasing
 //
 // Returns an error if any validation check fails.
-func (t *Lines) Validate() error {
+func (t *Source) Validate() error {
 	prevLineNum := 0
 
 	for i, line := range t.lines {
@@ -559,8 +568,8 @@ func (t *Lines) Validate() error {
 
 // PositionsFromToken returns all positions where the given token appears.
 // A token may appear on multiple lines when split across lines.
-// Returns nil if the token is nil or not found in the Lines.
-func (t *Lines) PositionsFromToken(tk *token.Token) []Position {
+// Returns nil if the token is nil or not found in the Source.
+func (t *Source) PositionsFromToken(tk *token.Token) []Position {
 	if tk == nil {
 		return nil
 	}
@@ -581,8 +590,8 @@ func (t *Lines) PositionsFromToken(tk *token.Token) []Position {
 
 // TokenPositionRangesFromToken returns all position ranges for a given token.
 // This is a convenience method that combines [Lines.PositionsFromToken] and [Lines.TokenPositionRanges].
-// Returns nil if the token is nil or not found in the Lines.
-func (t *Lines) TokenPositionRangesFromToken(tk *token.Token) []PositionRange {
+// Returns nil if the token is nil or not found in the Source.
+func (t *Source) TokenPositionRangesFromToken(tk *token.Token) []PositionRange {
 	positions := t.PositionsFromToken(tk)
 	return t.TokenPositionRanges(positions...)
 }
@@ -592,7 +601,7 @@ func (t *Lines) TokenPositionRangesFromToken(tk *token.Token) []PositionRange {
 // For non-joined lines, returns the range of the token at each given column.
 // Duplicate ranges are removed.
 // Returns nil if no tokens exist at any of the given positions.
-func (t *Lines) TokenPositionRanges(positions ...Position) []PositionRange {
+func (t *Source) TokenPositionRanges(positions ...Position) []PositionRange {
 	var allRanges []PositionRange
 
 	for _, pos := range positions {
@@ -623,7 +632,7 @@ func deduplicateRanges(ranges []PositionRange) []PositionRange {
 }
 
 // tokenPositionRangesForPos returns all token position ranges for a single [Position].
-func (t *Lines) tokenPositionRangesForPos(pos Position) []PositionRange {
+func (t *Source) tokenPositionRangesForPos(pos Position) []PositionRange {
 	if pos.Line < 0 || pos.Line >= len(t.lines) {
 		return nil
 	}

@@ -2,6 +2,7 @@ package niceyaml
 
 import (
 	"fmt"
+	"iter"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -10,7 +11,7 @@ import (
 
 // LineIterator provides line-by-line access to YAML tokens for rendering.
 type LineIterator interface {
-	EachLine(fn func(idx int, line Line))
+	Lines() iter.Seq2[Position, Line]
 	Count() int
 	IsEmpty() bool
 }
@@ -235,12 +236,12 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 		renderedIdx int
 	)
 
-	t.EachLine(func(idx int, line Line) {
+	for pos, line := range t.Lines() {
 		lineNum := line.Number()
 
 		// Filter by 0-indexed line index.
-		if (minLine >= 0 && idx < minLine) || (maxLine >= 0 && idx > maxLine) {
-			return
+		if (minLine >= 0 && pos.Line < minLine) || (maxLine >= 0 && pos.Line > maxLine) {
+			continue
 		}
 
 		hasAnnotation := p.annotationsEnabled && line.Annotation.Content != ""
@@ -253,7 +254,7 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 
 			// Render hunk header with gutter padding.
 			headerCtx := GutterContext{
-				Index:      idx,
+				Index:      pos.Line,
 				Number:     lineNum,
 				TotalLines: totalLines,
 				Soft:       false,
@@ -269,7 +270,7 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 		}
 
 		gutterCtx := GutterContext{
-			Index:      idx,
+			Index:      pos.Line,
 			Number:     lineNum,
 			TotalLines: totalLines,
 			Soft:       false,
@@ -280,20 +281,20 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 		switch line.Flag {
 		case FlagDeleted:
 			deleted := p.styles.GetStyle(StyleDiffDeleted)
-			p.writeLine(&sb, line.Content(), idx, deleted, gutterCtx)
+			p.writeLine(&sb, line.Content(), pos.Line, deleted, gutterCtx)
 
 		case FlagInserted:
 			inserted := p.styles.GetStyle(StyleDiffInserted)
-			p.writeLine(&sb, line.Content(), idx, inserted, gutterCtx)
+			p.writeLine(&sb, line.Content(), pos.Line, inserted, gutterCtx)
 
 		default: // FlagDefault (equal line).
 			// Render with syntax highlighting.
-			styledContent := p.renderTokenLine(idx, line)
-			p.writeLine(&sb, styledContent, idx, nil, gutterCtx)
+			styledContent := p.renderTokenLine(pos.Line, line)
+			p.writeLine(&sb, styledContent, pos.Line, nil, gutterCtx)
 		}
 
 		renderedIdx++
-	})
+	}
 
 	return sb.String()
 }

@@ -35,16 +35,16 @@ func main() {
 	printer := niceyaml.NewPrinter()
 
 	// Print YAML with syntax highlighting.
-	syntaxDemo := printer.Print(niceyaml.NewLinesFromString(source))
+	syntaxDemo := printer.Print(niceyaml.NewSourceFromString(source))
 
 	// Show diff between two YAML documents.
-	beforeRev := niceyaml.NewRevision(niceyaml.NewLinesFromString(original, niceyaml.WithName("before")))
-	afterRev := niceyaml.NewRevision(niceyaml.NewLinesFromString(modified, niceyaml.WithName("after")))
+	beforeRev := niceyaml.NewRevision(niceyaml.NewSourceFromString(original, niceyaml.WithName("before")))
+	afterRev := niceyaml.NewRevision(niceyaml.NewSourceFromString(modified, niceyaml.WithName("after")))
 	diff := niceyaml.NewFullDiff(beforeRev, afterRev)
 	diffDemo := printer.Print(diff.Lines())
 
 	// Find and highlight all occurrences of "fe".
-	findLines := niceyaml.NewLinesFromString(find)
+	findLines := niceyaml.NewSourceFromString(find)
 	finder := niceyaml.NewFinder("fe", niceyaml.WithNormalizer(niceyaml.StandardNormalizer{}))
 	matches := finder.Find(findLines)
 

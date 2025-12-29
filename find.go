@@ -69,7 +69,7 @@ func WithNormalizer(normalizer Normalizer) FinderOption {
 // Find finds all occurrences of the search string in the provided lines.
 // It returns a slice of PositionRange indicating the start and end positions of each match.
 // Positions are 0-indexed. The slice is provided in the order the matches appear in the lines.
-func (f *Finder) Find(lines *Lines) []PositionRange {
+func (f *Finder) Find(lines *Source) []PositionRange {
 	if f.search == "" || lines == nil || lines.IsEmpty() {
 		return nil
 	}
@@ -121,7 +121,7 @@ func (f *Finder) Find(lines *Lines) []PositionRange {
 // When a normalizer is set, the returned source is normalized and the position map
 // maps normalized character indices to original positions. This ensures correct
 // position lookup when searching in normalized text.
-func (f *Finder) buildSourceAndPositionMap(lines *Lines) (string, *positionMap) {
+func (f *Finder) buildSourceAndPositionMap(lines *Source) (string, *positionMap) {
 	var sb strings.Builder
 
 	pm := &positionMap{}
@@ -132,7 +132,7 @@ func (f *Finder) buildSourceAndPositionMap(lines *Lines) (string, *positionMap) 
 
 	normalizedCharIndex := 0
 
-	lines.EachRune(func(r rune, pos Position) {
+	for pos, r := range lines.Runes() {
 		// Get normalized form of this rune (or original if no normalizer).
 		var normalized string
 		if f.normalizer != nil {
@@ -148,7 +148,7 @@ func (f *Finder) buildSourceAndPositionMap(lines *Lines) (string, *positionMap) 
 
 			normalizedCharIndex++
 		}
-	})
+	}
 
 	return sb.String(), pm
 }

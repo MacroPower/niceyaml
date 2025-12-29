@@ -298,8 +298,8 @@ line15: 15
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			beforeTokens := niceyaml.NewLinesFromString(tc.before, niceyaml.WithName("a"))
-			afterTokens := niceyaml.NewLinesFromString(tc.after, niceyaml.WithName("b"))
+			beforeTokens := niceyaml.NewSourceFromString(tc.before, niceyaml.WithName("a"))
+			afterTokens := niceyaml.NewSourceFromString(tc.after, niceyaml.WithName("b"))
 
 			revA := niceyaml.NewRevision(beforeTokens)
 			revB := niceyaml.NewRevision(afterTokens)
@@ -322,8 +322,8 @@ func TestFullDiff_Lines_Flags(t *testing.T) {
 		before := "a: 1\n"
 		after := "a: 1\nb: 2\n"
 
-		beforeTokens := niceyaml.NewLinesFromString(before, niceyaml.WithName("a"))
-		afterTokens := niceyaml.NewLinesFromString(after, niceyaml.WithName("b"))
+		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
+		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
 
 		revA := niceyaml.NewRevision(beforeTokens)
 		revB := niceyaml.NewRevision(afterTokens)
@@ -333,11 +333,11 @@ func TestFullDiff_Lines_Flags(t *testing.T) {
 
 		// Count lines with non-default flags.
 		flaggedCount := 0
-		got.EachLine(func(_ int, line niceyaml.Line) {
+		for _, line := range got.Lines() {
 			if line.Flag != niceyaml.FlagDefault {
 				flaggedCount++
 			}
-		})
+		}
 
 		assert.Equal(t, 1, flaggedCount)
 		assert.Equal(t, niceyaml.FlagInserted, got.Line(1).Flag)
@@ -349,8 +349,8 @@ func TestFullDiff_Lines_Flags(t *testing.T) {
 		before := "a: 1\nb: 2\n"
 		after := "a: 1\n"
 
-		beforeTokens := niceyaml.NewLinesFromString(before, niceyaml.WithName("a"))
-		afterTokens := niceyaml.NewLinesFromString(after, niceyaml.WithName("b"))
+		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
+		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
 
 		revA := niceyaml.NewRevision(beforeTokens)
 		revB := niceyaml.NewRevision(afterTokens)
@@ -360,11 +360,11 @@ func TestFullDiff_Lines_Flags(t *testing.T) {
 
 		// Count lines with non-default flags.
 		flaggedCount := 0
-		got.EachLine(func(_ int, line niceyaml.Line) {
+		for _, line := range got.Lines() {
 			if line.Flag != niceyaml.FlagDefault {
 				flaggedCount++
 			}
-		})
+		}
 
 		assert.Equal(t, 1, flaggedCount)
 		assert.Equal(t, niceyaml.FlagDeleted, got.Line(1).Flag)
@@ -376,8 +376,8 @@ func TestFullDiff_Lines_Flags(t *testing.T) {
 		before := "key: old\n"
 		after := "key: new\n"
 
-		beforeTokens := niceyaml.NewLinesFromString(before, niceyaml.WithName("a"))
-		afterTokens := niceyaml.NewLinesFromString(after, niceyaml.WithName("b"))
+		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
+		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
 
 		revA := niceyaml.NewRevision(beforeTokens)
 		revB := niceyaml.NewRevision(afterTokens)
@@ -387,11 +387,11 @@ func TestFullDiff_Lines_Flags(t *testing.T) {
 
 		// Count lines with non-default flags.
 		flaggedCount := 0
-		got.EachLine(func(_ int, line niceyaml.Line) {
+		for _, line := range got.Lines() {
 			if line.Flag != niceyaml.FlagDefault {
 				flaggedCount++
 			}
-		})
+		}
 
 		assert.Equal(t, 2, flaggedCount)
 
@@ -414,8 +414,8 @@ second: changed
 third: 3
 `
 
-		beforeTokens := niceyaml.NewLinesFromString(before, niceyaml.WithName("a"))
-		afterTokens := niceyaml.NewLinesFromString(after, niceyaml.WithName("b"))
+		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
+		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
 
 		revA := niceyaml.NewRevision(beforeTokens)
 		revB := niceyaml.NewRevision(afterTokens)
@@ -425,11 +425,11 @@ third: 3
 
 		// Only the changed lines (delete old second, insert new second) should have flags.
 		flaggedCount := 0
-		got.EachLine(func(_ int, line niceyaml.Line) {
+		for _, line := range got.Lines() {
 			if line.Flag != niceyaml.FlagDefault {
 				flaggedCount++
 			}
-		})
+		}
 
 		assert.Equal(t, 2, flaggedCount)
 
@@ -479,8 +479,8 @@ line9: 9
    5 | line5: new
    6 | line6: 6`
 
-		beforeTokens := niceyaml.NewLinesFromString(before, niceyaml.WithName("a"))
-		afterTokens := niceyaml.NewLinesFromString(after, niceyaml.WithName("b"))
+		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
+		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
 
 		revA := niceyaml.NewRevision(beforeTokens)
 		revB := niceyaml.NewRevision(afterTokens)
@@ -513,8 +513,8 @@ line5: 5
    3 | ^ @@ -3 +3 @@
    3 | line3: new`
 
-		beforeTokens := niceyaml.NewLinesFromString(before, niceyaml.WithName("a"))
-		afterTokens := niceyaml.NewLinesFromString(after, niceyaml.WithName("b"))
+		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
+		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
 
 		revA := niceyaml.NewRevision(beforeTokens)
 		revB := niceyaml.NewRevision(afterTokens)
@@ -546,8 +546,8 @@ third: 3
    2 | second: changed
    3 | third: 3`
 
-		beforeTokens := niceyaml.NewLinesFromString(before, niceyaml.WithName("a"))
-		afterTokens := niceyaml.NewLinesFromString(after, niceyaml.WithName("b"))
+		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
+		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
 
 		revA := niceyaml.NewRevision(beforeTokens)
 		revB := niceyaml.NewRevision(afterTokens)
@@ -598,8 +598,8 @@ line9: new9
    9 | line9: old9
    9 | line9: new9`
 
-		beforeTokens := niceyaml.NewLinesFromString(before, niceyaml.WithName("a"))
-		afterTokens := niceyaml.NewLinesFromString(after, niceyaml.WithName("b"))
+		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
+		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
 
 		revA := niceyaml.NewRevision(beforeTokens)
 		revB := niceyaml.NewRevision(afterTokens)
@@ -617,11 +617,11 @@ line9: new9
 		assert.Equal(t, "@@ -8,2 +8,2 @@", got.Line(3).Annotation.Content)
 
 		// Other lines should not have annotations.
-		got.EachLine(func(lineIndex int, line niceyaml.Line) {
-			if lineIndex != 0 && lineIndex != 3 {
+		for pos, line := range got.Lines() {
+			if pos.Line != 0 && pos.Line != 3 {
 				assert.Empty(t, line.Annotation.Content)
 			}
-		})
+		}
 	})
 
 	t.Run("no changes returns empty tokens", func(t *testing.T) {
@@ -630,8 +630,8 @@ line9: new9
 		before := "key: value\n"
 		after := "key: value\n"
 
-		beforeTokens := niceyaml.NewLinesFromString(before, niceyaml.WithName("a"))
-		afterTokens := niceyaml.NewLinesFromString(after, niceyaml.WithName("b"))
+		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
+		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
 
 		revA := niceyaml.NewRevision(beforeTokens)
 		revB := niceyaml.NewRevision(afterTokens)
@@ -651,8 +651,8 @@ line9: new9
 		after := "key: value\n"
 		want := "   1 | key: value\n   1 | ^ @@ -0,0 +1 @@"
 
-		beforeTokens := niceyaml.NewLinesFromString(before, niceyaml.WithName("a"))
-		afterTokens := niceyaml.NewLinesFromString(after, niceyaml.WithName("b"))
+		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
+		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
 
 		revA := niceyaml.NewRevision(beforeTokens)
 		revB := niceyaml.NewRevision(afterTokens)
@@ -673,8 +673,8 @@ line9: new9
 		after := ""
 		want := "   1 | key: value\n   1 | ^ @@ -1 +0,0 @@"
 
-		beforeTokens := niceyaml.NewLinesFromString(before, niceyaml.WithName("a"))
-		afterTokens := niceyaml.NewLinesFromString(after, niceyaml.WithName("b"))
+		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
+		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
 
 		revA := niceyaml.NewRevision(beforeTokens)
 		revB := niceyaml.NewRevision(afterTokens)
@@ -703,8 +703,8 @@ line3: 3
    2 | ^ @@ -2 +2 @@
    2 | line2: new`
 
-		beforeTokens := niceyaml.NewLinesFromString(before, niceyaml.WithName("a"))
-		afterTokens := niceyaml.NewLinesFromString(after, niceyaml.WithName("b"))
+		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
+		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
 
 		revA := niceyaml.NewRevision(beforeTokens)
 		revB := niceyaml.NewRevision(afterTokens)

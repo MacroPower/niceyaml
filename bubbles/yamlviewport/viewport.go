@@ -35,7 +35,7 @@ const (
 type Finder interface {
 	// Find returns position ranges to highlight in the given lines.
 	// Positions are 0-indexed. Returns nil if no matches.
-	Find(lines *niceyaml.Lines) []niceyaml.PositionRange
+	Find(lines *niceyaml.Source) []niceyaml.PositionRange
 }
 
 // Option is a configuration option that works in conjunction with [New].
@@ -101,7 +101,7 @@ type Model struct {
 	finder              Finder
 	searchMatches       []niceyaml.PositionRange
 	revision            *niceyaml.Revision
-	lines               *niceyaml.Lines
+	lines               *niceyaml.Source
 	renderedLines       []string
 	xOffset             int
 	horizontalStep      int
@@ -167,14 +167,14 @@ func (m *Model) SetWidth(w int) {
 
 // SetTokens replaces the revision history with a single revision.
 // This is a convenience method equivalent to ClearRevisions() followed by AppendRevision(lines).
-func (m *Model) SetTokens(lines *niceyaml.Lines) {
+func (m *Model) SetTokens(lines *niceyaml.Source) {
 	m.ClearRevisions()
 	m.AppendRevision(lines)
 }
 
 // AppendRevision adds a new revision to the history.
 // After appending, the revision pointer moves to the newly added revision.
-func (m *Model) AppendRevision(lines *niceyaml.Lines) {
+func (m *Model) AppendRevision(lines *niceyaml.Source) {
 	if m.revision == nil {
 		m.revision = niceyaml.NewRevision(lines)
 	} else {
@@ -403,7 +403,7 @@ func (m *Model) getDiffBaseRevision() *niceyaml.Revision {
 
 // getDisplayLines returns the lines to display based on current revision and diff mode.
 // MakeDiff is called when a diff should be shown; if nil, uses [niceyaml.NewFullDiff].
-func (m *Model) getDisplayLines(makeDiff func(base, current *niceyaml.Revision) *niceyaml.Lines) *niceyaml.Lines {
+func (m *Model) getDisplayLines(makeDiff func(base, current *niceyaml.Revision) *niceyaml.Source) *niceyaml.Source {
 	if m.revision == nil {
 		return nil
 	}
@@ -871,7 +871,7 @@ func (m Model) ViewSummary(context int) string {
 
 // getSummaryDiffContent returns summary diff content for the current revision.
 func (m *Model) getSummaryDiffContent(context int) string {
-	lines := m.getDisplayLines(func(base, curr *niceyaml.Revision) *niceyaml.Lines {
+	lines := m.getDisplayLines(func(base, curr *niceyaml.Revision) *niceyaml.Source {
 		return niceyaml.NewSummaryDiff(base, curr, context).Lines()
 	})
 	if lines == nil {

@@ -12,9 +12,9 @@ func TestRevision_At(t *testing.T) {
 	t.Parallel()
 
 	// Build a chain of 3 revisions: 0 -> 1 -> 2.
-	rev0 := niceyaml.NewRevision(niceyaml.NewLinesFromString("v0: data", niceyaml.WithName("v0")))
-	rev1 := rev0.Append(niceyaml.NewLinesFromString("v1: data", niceyaml.WithName("v1")))
-	rev2 := rev1.Append(niceyaml.NewLinesFromString("v2: data", niceyaml.WithName("v2")))
+	rev0 := niceyaml.NewRevision(niceyaml.NewSourceFromString("v0: data", niceyaml.WithName("v0")))
+	rev1 := rev0.Append(niceyaml.NewSourceFromString("v1: data", niceyaml.WithName("v1")))
+	rev2 := rev1.Append(niceyaml.NewSourceFromString("v2: data", niceyaml.WithName("v2")))
 
 	tcs := map[string]struct {
 		startFrom *niceyaml.Revision
@@ -81,7 +81,7 @@ func TestRevision_At(t *testing.T) {
 func TestRevision_At_SingleRevision(t *testing.T) {
 	t.Parallel()
 
-	rev := niceyaml.NewRevision(niceyaml.NewLinesFromString("only: data", niceyaml.WithName("only")))
+	rev := niceyaml.NewRevision(niceyaml.NewSourceFromString("only: data", niceyaml.WithName("only")))
 
 	tcs := map[string]struct {
 		want  string

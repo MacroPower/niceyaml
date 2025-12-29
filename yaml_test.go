@@ -168,7 +168,7 @@ func TestFinderPrinter_Integration(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := niceyaml.NewLinesFromString(tc.input)
+			lines := niceyaml.NewSourceFromString(tc.input)
 			finder := testFinder(tc.search, tc.normalizer)
 			printer := testBasicPrinter()
 
@@ -182,7 +182,7 @@ func TestFinderPrinter_Integration(t *testing.T) {
 
 			// Use fresh tokens for parser (Lines tokens are processed/split).
 			file := testParseFile(t, lexer.Tokenize(tc.input))
-			gotFile := printer.Print(niceyaml.NewLinesFromFile(file))
+			gotFile := printer.Print(niceyaml.NewSourceFromFile(file))
 			assert.Equal(t, got, gotFile)
 		})
 	}
@@ -221,7 +221,7 @@ func TestFinderPrinter_EdgeCases(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := niceyaml.NewLinesFromString(tc.input)
+			lines := niceyaml.NewSourceFromString(tc.input)
 			finder := testFinder(tc.search, nil)
 			printer := testBasicPrinter()
 
@@ -237,7 +237,7 @@ func TestFinderPrinter_EdgeCases(t *testing.T) {
 
 			// Use fresh tokens for parser (Lines tokens are processed/split).
 			file := testParseFile(t, lexer.Tokenize(tc.input))
-			gotFile := printer.Print(niceyaml.NewLinesFromFile(file))
+			gotFile := printer.Print(niceyaml.NewSourceFromFile(file))
 			assert.Equal(t, got, gotFile)
 		})
 	}
@@ -247,7 +247,7 @@ func TestPrinter_Golden(t *testing.T) {
 	t.Parallel()
 
 	type goldenTest struct {
-		setupFunc func(*niceyaml.Printer, *niceyaml.Lines)
+		setupFunc func(*niceyaml.Printer, *niceyaml.Source)
 		opts      []niceyaml.PrinterOption
 	}
 
@@ -284,7 +284,7 @@ func TestPrinter_Golden(t *testing.T) {
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 				niceyaml.WithGutter(niceyaml.NoGutter),
 			},
-			setupFunc: func(p *niceyaml.Printer, lines *niceyaml.Lines) {
+			setupFunc: func(p *niceyaml.Printer, lines *niceyaml.Source) {
 				// Search for "日本" (Japan) which appears multiple times in full.yaml.
 				finder := niceyaml.NewFinder("日本")
 				highlightStyle := lipgloss.NewStyle().
@@ -306,7 +306,7 @@ func TestPrinter_Golden(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := niceyaml.NewLinesFromString(string(input))
+			lines := niceyaml.NewSourceFromString(string(input))
 			printer := niceyaml.NewPrinter(tc.opts...)
 
 			if tc.setupFunc != nil {
@@ -318,7 +318,7 @@ func TestPrinter_Golden(t *testing.T) {
 
 			// Use fresh tokens for parser (Lines tokens are processed/split).
 			file := testParseFile(t, lexer.Tokenize(string(input)))
-			outputFile := printer.Print(niceyaml.NewLinesFromFile(file))
+			outputFile := printer.Print(niceyaml.NewSourceFromFile(file))
 			assert.Equal(t, output, outputFile)
 		})
 	}
@@ -363,7 +363,7 @@ func TestFinderPrinter_JapaneseMatch(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := niceyaml.NewLinesFromString(tc.input)
+			lines := niceyaml.NewSourceFromString(tc.input)
 			finder := testFinder(tc.search, nil)
 			printer := testBasicPrinter()
 
@@ -387,7 +387,7 @@ menu:
   - 寿司: 日本酒
 # ─────────────────────────`
 
-	lines := niceyaml.NewLinesFromString(input)
+	lines := niceyaml.NewSourceFromString(input)
 	finder := testFinder("日本", nil)
 	printer := testBasicPrinter()
 
@@ -424,7 +424,7 @@ func TestFinderPrinter_BoxDrawingNotMatched(t *testing.T) {
 # │  SPECIAL SECTION                                             │
 # └─────────────────────────────────────────────────────────────┘`
 
-	lines := niceyaml.NewLinesFromString(input)
+	lines := niceyaml.NewSourceFromString(input)
 	finder := testFinder("日本", nil)
 	printer := testBasicPrinter()
 

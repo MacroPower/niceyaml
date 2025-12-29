@@ -206,7 +206,7 @@ func NewFullDiff(a, b *Revision) *FullDiff {
 // unchanged lines use tokens from b, while changed lines include
 // deleted tokens from a followed by inserted tokens from b.
 // Lines contain flags for deleted/inserted lines.
-func (d *FullDiff) Lines() *Lines {
+func (d *FullDiff) Lines() *Source {
 	ops := lcsLineDiff(d.a.head.lines, d.b.head.lines)
 
 	lines := make([]Line, 0, len(ops))
@@ -226,7 +226,7 @@ func (d *FullDiff) Lines() *Lines {
 		lines = append(lines, line)
 	}
 
-	return &Lines{
+	return &Source{
 		Name:  fmt.Sprintf("%s..%s", d.a.Name(), d.b.Name()),
 		lines: lines,
 	}
@@ -247,19 +247,19 @@ func NewSummaryDiff(a, b *Revision, context int) *SummaryDiff {
 // Lines returns [Lines] representing a summarized diff between two revisions.
 // It shows only changed lines with the specified number of context lines around each change.
 // Hunk headers are stored in [Line.Annotation.Content] for each hunk's first line.
-func (d *SummaryDiff) Lines() *Lines {
+func (d *SummaryDiff) Lines() *Source {
 	ops := lcsLineDiff(d.a.head.lines, d.b.head.lines)
 	name := fmt.Sprintf("%s..%s", d.a.Name(), d.b.Name())
 
 	if len(ops) == 0 {
-		return &Lines{Name: name}
+		return &Source{Name: name}
 	}
 
 	included := selectContextLines(ops, d.context)
 	hunks := buildHunks(ops, included)
 
 	if len(hunks) == 0 {
-		return &Lines{Name: name}
+		return &Source{Name: name}
 	}
 
 	var lines []Line
@@ -290,7 +290,7 @@ func (d *SummaryDiff) Lines() *Lines {
 		}
 	}
 
-	return &Lines{
+	return &Source{
 		Name:  name,
 		lines: lines,
 	}

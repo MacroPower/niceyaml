@@ -60,7 +60,7 @@ func newModel(opts *modelOptions) model {
 	}
 
 	for i, c := range opts.contents {
-		m.viewport.AppendRevision(niceyaml.NewLinesFromString(string(c), niceyaml.WithName(fmt.Sprintf("v%d", i))))
+		m.viewport.AppendRevision(niceyaml.NewSourceFromString(string(c), niceyaml.WithName(fmt.Sprintf("v%d", i))))
 	}
 
 	// Apply initial search if provided.

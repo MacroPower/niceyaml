@@ -201,7 +201,7 @@ func (e *Error) printErrorToken(tk *token.Token) string {
 		p = NewPrinter()
 	}
 
-	t := NewLinesFromToken(tk.Clone())
+	t := NewSourceFromToken(tk.Clone())
 
 	ranges := t.TokenPositionRangesFromToken(tk)
 	for _, rng := range ranges {
