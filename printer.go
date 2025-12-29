@@ -11,36 +11,32 @@ import (
 // LineIterator provides line-by-line access to YAML tokens for rendering.
 type LineIterator interface {
 	EachLine(fn func(idx int, line Line))
+	Count() int
 	IsEmpty() bool
 }
 
 const wrapOnCharacters = " /-"
 
 // Printer renders YAML tokens with syntax highlighting using [lipgloss.Style].
-// It supports custom styles, line numbers, and styled range overlays
+// It supports custom styles, gutters, and styled range overlays
 // for highlighting specific positions such as errors.
 type Printer struct {
-	styles                   StyleGetter
-	style                    lipgloss.Style
-	lineNumberStyle          lipgloss.Style
-	linePrefix               string
-	lineInsertedPrefix       string
-	lineDeletedPrefix        string
-	rangeStyles              []*rangeStyle
-	width                    int
-	hasCustomStyle           bool
-	hasCustomLineNumberStyle bool
-	lineNumbers              bool
+	styles             StyleGetter
+	style              lipgloss.Style
+	gutterFunc         GutterFunc
+	rangeStyles        []*rangeStyle
+	width              int
+	hasCustomStyle     bool
+	annotationsEnabled bool
 }
 
 // NewPrinter creates a new [Printer].
-// By default it uses [DefaultStyles].
+// By default it uses [DefaultStyles] and [DefaultGutter].
 func NewPrinter(opts ...PrinterOption) *Printer {
 	p := &Printer{
 		styles:             DefaultStyles(),
-		linePrefix:         " ",
-		lineInsertedPrefix: "+",
-		lineDeletedPrefix:  "-",
+		gutterFunc:         DefaultGutter(),
+		annotationsEnabled: true,
 	}
 
 	for _, opt := range opts {
@@ -51,17 +47,101 @@ func NewPrinter(opts ...PrinterOption) *Printer {
 		p.style = p.styles.GetStyle(StyleDefault).
 			PaddingRight(1)
 	}
-	if !p.hasCustomLineNumberStyle {
-		p.lineNumberStyle = p.styles.GetStyle(StyleDefault).
-			Foreground(p.styles.GetStyle(StyleComment).GetForeground()).
-			PaddingRight(1)
-	}
 
 	return p
 }
 
 // PrinterOption configures a [Printer].
 type PrinterOption func(*Printer)
+
+// GutterContext provides context about the current line for gutter rendering.
+// It is passed to [GutterFunc] to determine the appropriate gutter content.
+type GutterContext struct {
+	Styles     StyleGetter
+	Index      int
+	Number     int
+	TotalLines int
+	Flag       Flag
+	Soft       bool
+}
+
+// GutterFunc returns the gutter content for a line based on [GutterContext].
+// The returned string is rendered as the leftmost content before the line content.
+type GutterFunc func(GutterContext) string
+
+// NoGutter returns an empty gutter for all lines.
+var NoGutter GutterFunc = func(GutterContext) string { return "" }
+
+// DefaultGutter returns a gutter with both line numbers and diff markers.
+// This is the default gutter used by [NewPrinter].
+func DefaultGutter() GutterFunc {
+	return func(ctx GutterContext) string {
+		lineNumStyle := ctx.Styles.GetStyle(StyleDefault).
+			Foreground(ctx.Styles.GetStyle(StyleComment).GetForeground())
+
+		var lineNum string
+
+		switch {
+		case ctx.Flag == FlagAnnotation:
+			lineNum = lineNumStyle.Render("     ")
+		case ctx.Soft:
+			lineNum = lineNumStyle.Render("   - ")
+		default:
+			lineNum = lineNumStyle.Render(fmt.Sprintf("%4d ", ctx.Number))
+		}
+
+		var marker string
+
+		switch ctx.Flag {
+		case FlagInserted:
+			marker = ctx.Styles.GetStyle(StyleDiffInserted).Render("+")
+		case FlagDeleted:
+			marker = ctx.Styles.GetStyle(StyleDiffDeleted).Render("-")
+		default:
+			marker = ctx.Styles.GetStyle(StyleDefault).Render(" ")
+		}
+
+		return lineNum + marker
+	}
+}
+
+// DiffGutter returns a gutter with diff-style markers only (" ", "+", "-").
+// No line numbers are rendered. Uses [StyleDiffInserted] and [StyleDiffDeleted] for styling.
+func DiffGutter() GutterFunc {
+	return func(ctx GutterContext) string {
+		if ctx.Soft {
+			return " "
+		}
+
+		switch ctx.Flag {
+		case FlagInserted:
+			return ctx.Styles.GetStyle(StyleDiffInserted).Render("+")
+		case FlagDeleted:
+			return ctx.Styles.GetStyle(StyleDiffDeleted).Render("-")
+		default:
+			return ctx.Styles.GetStyle(StyleDefault).Render(" ")
+		}
+	}
+}
+
+// LineNumberGutter returns a gutter with styled line numbers only.
+// For soft-wrapped continuation lines, renders "   - " as a continuation marker.
+// No diff markers are rendered. Uses [StyleComment] foreground for styling.
+func LineNumberGutter() GutterFunc {
+	return func(ctx GutterContext) string {
+		lineNumStyle := ctx.Styles.GetStyle(StyleDefault).
+			Foreground(ctx.Styles.GetStyle(StyleComment).GetForeground())
+
+		switch {
+		case ctx.Flag == FlagAnnotation:
+			return lineNumStyle.Render("     ")
+		case ctx.Soft:
+			return lineNumStyle.Render("   - ")
+		default:
+			return lineNumStyle.Render(fmt.Sprintf("%4d ", ctx.Number))
+		}
+	}
+}
 
 // WithStyle configures the printer with the given container style.
 //
@@ -80,47 +160,23 @@ func WithStyles(s StyleGetter) PrinterOption {
 	}
 }
 
-// WithLineNumbers enables line number display.
-func WithLineNumbers() PrinterOption {
+// WithGutter sets the [GutterFunc] for rendering.
+// Pass [NoGutter] to disable gutters entirely, or [DiffGutter] for diff markers only.
+// By default, [DefaultGutter] is used which renders line numbers and diff markers.
+func WithGutter(fn GutterFunc) PrinterOption {
 	return func(p *Printer) {
-		p.lineNumbers = true
-	}
-}
-
-// WithLineNumberStyle sets the style for line numbers.
-//
-//nolint:gocritic // hugeParam: Copying.
-func WithLineNumberStyle(s lipgloss.Style) PrinterOption {
-	return func(p *Printer) {
-		p.lineNumberStyle = s
-		p.hasCustomLineNumberStyle = true
-	}
-}
-
-// WithLinePrefix sets the prefix for normal/equal lines (default: " ").
-func WithLinePrefix(prefix string) PrinterOption {
-	return func(p *Printer) {
-		p.linePrefix = prefix
-	}
-}
-
-// WithLineInsertedPrefix sets the prefix for inserted lines in diffs (default: "+").
-func WithLineInsertedPrefix(prefix string) PrinterOption {
-	return func(p *Printer) {
-		p.lineInsertedPrefix = prefix
-	}
-}
-
-// WithLineDeletedPrefix sets the prefix for deleted lines in diffs (default: "-").
-func WithLineDeletedPrefix(prefix string) PrinterOption {
-	return func(p *Printer) {
-		p.lineDeletedPrefix = prefix
+		p.gutterFunc = fn
 	}
 }
 
 // SetWidth sets the width for word wrapping. A width of 0 disables wrapping.
 func (p *Printer) SetWidth(width int) {
 	p.width = width
+}
+
+// SetAnnotationsEnabled sets whether annotations are rendered. Defaults to true.
+func (p *Printer) SetAnnotationsEnabled(enabled bool) {
+	p.annotationsEnabled = enabled
 }
 
 // AddStyleToRange adds a style to apply to the character range [r.Start, r.End).
@@ -149,35 +205,30 @@ func (p *Printer) ClearStyles() {
 	p.rangeStyles = nil
 }
 
-// PrintTokens prints any [LineIterator].
-func (p *Printer) PrintTokens(lines LineIterator) string {
-	content := p.renderLines(lines, true)
+// Print prints any [LineIterator].
+func (p *Printer) Print(lines LineIterator) string {
+	content := p.renderLinesInRange(lines, -1, -1)
 
 	return p.style.Render(content)
 }
 
-// PrintSlice returns a rendered string containing only lines in the range [minLine, maxLine].
-// Uses 0-indexed line indices into the Lines collection.
+// PrintSlice prints a slice of lines from any [LineIterator].
+// It prints in the range [minLine, maxLine] as defined by the [LineIterator.EachLine] index.
 // If minLine < 0, includes from the beginning; if maxLine < 0, includes to the end.
-func (p *Printer) PrintSlice(lines *Lines, minLine, maxLine int) string {
-	content := p.renderLinesInRange(lines, minLine, maxLine, true)
+func (p *Printer) PrintSlice(lines LineIterator, minLine, maxLine int) string {
+	content := p.renderLinesInRange(lines, minLine, maxLine)
 
 	return p.style.Render(content)
-}
-
-// renderLines renders a [LineIterator] line by line with syntax highlighting.
-func (p *Printer) renderLines(t LineIterator, showAnnotations bool) string {
-	return p.renderLinesInRange(t, -1, -1, showAnnotations)
 }
 
 // renderLinesInRange renders lines in [minLine, maxLine] using 0-indexed line indices.
 // If minLine < 0, includes from the beginning; if maxLine < 0, includes to the end.
-//
-//nolint:unparam // showAnnotations kept for API flexibility.
-func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int, showAnnotations bool) string {
+func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) string {
 	if t.IsEmpty() {
 		return ""
 	}
+
+	totalLines := t.Count()
 
 	var (
 		sb          strings.Builder
@@ -192,7 +243,7 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int, showA
 			return
 		}
 
-		hasAnnotation := showAnnotations && line.Annotation.Content != ""
+		hasAnnotation := p.annotationsEnabled && line.Annotation.Content != ""
 
 		if hasAnnotation {
 			// Add newline between hunks (not before first hunk).
@@ -200,11 +251,16 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int, showA
 				sb.WriteByte('\n')
 			}
 
-			// Render hunk header.
-			if p.lineNumbers {
-				sb.WriteString(p.lineNumberStyle.Render("    "))
+			// Render hunk header with gutter padding.
+			headerCtx := GutterContext{
+				Index:      idx,
+				Number:     lineNum,
+				TotalLines: totalLines,
+				Soft:       false,
+				Flag:       FlagAnnotation,
+				Styles:     p.styles,
 			}
-
+			sb.WriteString(p.gutterFunc(headerCtx))
 			sb.WriteString(p.styles.GetStyle(StyleComment).Render(line.Annotation.Content))
 			sb.WriteByte('\n')
 		} else if renderedIdx > 0 {
@@ -212,19 +268,28 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int, showA
 			sb.WriteByte('\n')
 		}
 
+		gutterCtx := GutterContext{
+			Index:      idx,
+			Number:     lineNum,
+			TotalLines: totalLines,
+			Soft:       false,
+			Flag:       line.Flag,
+			Styles:     p.styles,
+		}
+
 		switch line.Flag {
 		case FlagDeleted:
 			deleted := p.styles.GetStyle(StyleDiffDeleted)
-			p.writeLine(&sb, p.lineDeletedPrefix, line.Content(), lineNum, idx, deleted)
+			p.writeLine(&sb, line.Content(), idx, deleted, gutterCtx)
 
 		case FlagInserted:
 			inserted := p.styles.GetStyle(StyleDiffInserted)
-			p.writeLine(&sb, p.lineInsertedPrefix, line.Content(), lineNum, idx, inserted)
+			p.writeLine(&sb, line.Content(), idx, inserted, gutterCtx)
 
 		default: // FlagDefault (equal line).
 			// Render with syntax highlighting.
 			styledContent := p.renderTokenLine(idx, line)
-			p.writeLine(&sb, p.linePrefix, styledContent, lineNum, idx, nil)
+			p.writeLine(&sb, styledContent, idx, nil, gutterCtx)
 		}
 
 		renderedIdx++
@@ -234,36 +299,18 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int, showA
 }
 
 // writeLine writes a line with optional word wrapping.
-// If contentStyle is non-nil, applies it to prefix+content together (for diff lines).
-// If contentStyle is nil, styles only the prefix and preserves content styling (for equal lines).
-// The lineNum parameter is 1-indexed (for display and rangeStyles), visualLine is 0-indexed (for absoluteRangeStyles).
+// The gutter is generated at write-time for each segment using gutterCtx.
 func (p *Printer) writeLine(
 	sb *strings.Builder,
-	prefix, content string,
-	lineNum, visualLine int,
+	content string,
+	visualLine int,
 	contentStyle *lipgloss.Style,
+	gutterCtx GutterContext,
 ) {
-	renderLine := func(pfx, cnt string, col int) {
-		switch {
-		// For diff lines: apply diff style to prefix.
-		case contentStyle != nil:
-			sb.WriteString(contentStyle.Render(pfx))
-			sb.WriteString(p.styleLineWithRanges(cnt, NewPosition(visualLine, col), contentStyle, true))
-
-		// For equal lines with line numbers: style the prefix with StyleDefault.
-		case p.lineNumbers:
-			sb.WriteString(p.styles.GetStyle(StyleDefault).Render(pfx))
-			sb.WriteString(cnt)
-
-		// For equal lines without line numbers: use raw prefix.
-		default:
-			sb.WriteString(pfx)
-			sb.WriteString(cnt)
-		}
-	}
-
-	cw := p.contentWidth(len(prefix))
-	continuationPrefix := strings.Repeat(" ", len(prefix))
+	// Calculate gutter width for wrapping (use non-soft context for width calculation).
+	sampleGutter := p.gutterFunc(gutterCtx)
+	gutterWidth := lipgloss.Width(sampleGutter)
+	cw := p.contentWidth(gutterWidth)
 
 	// Treat non-wrapping as wrapping with a single subLine.
 	subLines := []string{content}
@@ -279,18 +326,19 @@ func (p *Printer) writeLine(
 			sb.WriteString("\n")
 		}
 
-		if p.lineNumbers && lineNum > 0 {
-			if j == 0 {
-				sb.WriteString(p.formatLineNumber(lineNum))
-			} else {
-				sb.WriteString(p.formatContinuationMarker())
-			}
-		}
+		// Generate gutter at write-time with correct Soft flag.
+		ctx := gutterCtx
+		ctx.Soft = j > 0
+		gutter := p.gutterFunc(ctx)
+		sb.WriteString(gutter)
 
-		if j == 0 {
-			renderLine(prefix, subLine, col)
+		// Write content.
+		if contentStyle != nil {
+			// For diff lines: apply diff style to content.
+			sb.WriteString(p.styleLineWithRanges(subLine, NewPosition(visualLine, col), contentStyle, true))
 		} else {
-			renderLine(continuationPrefix, subLine, col)
+			// For equal lines: content is already styled.
+			sb.WriteString(subLine)
 		}
 
 		col += len([]rune(subLine))
@@ -422,31 +470,14 @@ func (p *Printer) styleLineWithRanges(src string, pos Position, style *lipgloss.
 	return sb.String()
 }
 
-// formatLineNumber formats a line number using consistent 4-char width.
-// It then applies the line number style.
-func (p *Printer) formatLineNumber(lineNum int) string {
-	return p.lineNumberStyle.Render(fmt.Sprintf("%4d", lineNum))
-}
-
 // contentWidth returns the available width for content after accounting for
-// prefix and line numbers. Returns 0 if wrapping is disabled.
-func (p *Printer) contentWidth(prefixWidth int) int {
+// gutter width. Returns 0 if wrapping is disabled.
+func (p *Printer) contentWidth(gutterWidth int) int {
 	if p.width <= 0 {
 		return 0
 	}
 
-	lineNumWidth := 0
-	if p.lineNumbers {
-		lineNumWidth = 6
-	}
-
-	return max(0, p.width-prefixWidth-lineNumWidth)
-}
-
-// formatContinuationMarker formats a continuation marker for wrapped lines.
-// Uses "   -" to match the 4-char width of line numbers.
-func (p *Printer) formatContinuationMarker() string {
-	return p.lineNumberStyle.Render("   -") + p.styles.GetStyle(StyleDefault).Render(p.linePrefix)
+	return max(0, p.width-gutterWidth)
 }
 
 // renderTokenLine renders a single line's tokens with syntax highlighting.

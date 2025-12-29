@@ -34,8 +34,8 @@ func newModel(opts *modelOptions) model {
 	// Create printer with options.
 	var printerOpts []niceyaml.PrinterOption
 
-	if opts.lineNumbers {
-		printerOpts = append(printerOpts, niceyaml.WithLineNumbers())
+	if !opts.lineNumbers {
+		printerOpts = append(printerOpts, niceyaml.WithGutter(niceyaml.DiffGutter()))
 	}
 
 	printer := niceyaml.NewPrinter(printerOpts...)

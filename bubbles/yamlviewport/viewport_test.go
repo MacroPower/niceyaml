@@ -19,21 +19,20 @@ import (
 	"github.com/macropower/niceyaml/bubbles/yamlviewport"
 )
 
-// testPrinter returns a printer without styles for predictable golden output.
+// testPrinter returns a printer without styles or line numbers for predictable golden output.
 func testPrinter() *niceyaml.Printer {
 	return niceyaml.NewPrinter(
 		niceyaml.WithStyles(niceyaml.Styles{}),
 		niceyaml.WithStyle(lipgloss.NewStyle()),
+		niceyaml.WithGutter(niceyaml.DiffGutter()),
 	)
 }
 
-// testPrinterWithLineNumbers returns a printer with line numbers.
+// testPrinterWithLineNumbers returns a printer with line numbers (DefaultGutter).
 func testPrinterWithLineNumbers() *niceyaml.Printer {
 	return niceyaml.NewPrinter(
 		niceyaml.WithStyles(niceyaml.Styles{}),
 		niceyaml.WithStyle(lipgloss.NewStyle()),
-		niceyaml.WithLineNumbers(),
-		niceyaml.WithLineNumberStyle(lipgloss.NewStyle()),
 	)
 }
 

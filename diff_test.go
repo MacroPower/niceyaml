@@ -490,7 +490,7 @@ line9: 9
 		got := diff.Lines()
 
 		assert.Equal(t, "a..b", got.Name)
-		assert.Equal(t, 4, got.LineCount())
+		assert.Equal(t, 4, got.Count())
 		assert.Equal(t, want, got.String())
 	})
 
@@ -523,7 +523,7 @@ line5: 5
 		got := diff.Lines()
 
 		// Only the deleted and inserted lines.
-		assert.Equal(t, 2, got.LineCount())
+		assert.Equal(t, 2, got.Count())
 		assert.Equal(t, niceyaml.FlagDeleted, got.Line(0).Flag)
 		assert.Equal(t, niceyaml.FlagInserted, got.Line(1).Flag)
 		assert.Equal(t, want, got.String())
@@ -561,7 +561,7 @@ third: 3
 		assert.Equal(t, "@@ -1,3 +1,3 @@", got.Line(0).Annotation.Content)
 
 		// Other lines should not have annotation.
-		for i := 1; i < got.LineCount(); i++ {
+		for i := 1; i < got.Count(); i++ {
 			assert.Empty(t, got.Line(i).Annotation.Content)
 		}
 	})
@@ -661,7 +661,7 @@ line9: new9
 		got := diff.Lines()
 
 		assert.Equal(t, "a..b", got.Name)
-		assert.Equal(t, 1, got.LineCount())
+		assert.Equal(t, 1, got.Count())
 		assert.Equal(t, niceyaml.FlagInserted, got.Line(0).Flag)
 		assert.Equal(t, want, got.String())
 	})
@@ -683,7 +683,7 @@ line9: new9
 		got := diff.Lines()
 
 		assert.Equal(t, "a..b", got.Name)
-		assert.Equal(t, 1, got.LineCount())
+		assert.Equal(t, 1, got.Count())
 		assert.Equal(t, niceyaml.FlagDeleted, got.Line(0).Flag)
 		assert.Equal(t, want, got.String())
 	})
@@ -713,7 +713,7 @@ line3: 3
 		got := diff.Lines()
 
 		// Same as context 0: only changed lines.
-		assert.Equal(t, 2, got.LineCount())
+		assert.Equal(t, 2, got.Count())
 		assert.Equal(t, want, got.String())
 	})
 }

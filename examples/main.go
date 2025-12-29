@@ -32,16 +32,16 @@ var (
 )
 
 func main() {
-	printer := niceyaml.NewPrinter(niceyaml.WithLineNumbers())
+	printer := niceyaml.NewPrinter()
 
 	// Print YAML with syntax highlighting.
-	syntaxDemo := printer.PrintTokens(niceyaml.NewLinesFromString(source))
+	syntaxDemo := printer.Print(niceyaml.NewLinesFromString(source))
 
 	// Show diff between two YAML documents.
 	beforeRev := niceyaml.NewRevision(niceyaml.NewLinesFromString(original, niceyaml.WithName("before")))
 	afterRev := niceyaml.NewRevision(niceyaml.NewLinesFromString(modified, niceyaml.WithName("after")))
 	diff := niceyaml.NewFullDiff(beforeRev, afterRev)
-	diffDemo := printer.PrintTokens(diff.Lines())
+	diffDemo := printer.Print(diff.Lines())
 
 	// Find and highlight all occurrences of "fe".
 	findLines := niceyaml.NewLinesFromString(find)
@@ -53,7 +53,7 @@ func main() {
 		printer.AddStyleToRange(&highlight, m)
 	}
 
-	findDemo := printer.PrintTokens(findLines)
+	findDemo := printer.Print(findLines)
 	printer.ClearStyles()
 
 	out := lipgloss.NewStyle().

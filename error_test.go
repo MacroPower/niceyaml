@@ -349,7 +349,6 @@ foo: bar`
 		t.Parallel()
 
 		customPrinter := niceyaml.NewPrinter(
-			niceyaml.WithLineNumbers(),
 			niceyaml.WithStyles(niceyaml.Styles{}),
 			niceyaml.WithStyle(lipgloss.NewStyle()),
 		)

@@ -29,7 +29,7 @@ func testPrinter() *niceyaml.Printer {
 	return niceyaml.NewPrinter(
 		niceyaml.WithStyles(niceyaml.Styles{}),
 		niceyaml.WithStyle(lipgloss.NewStyle()),
-		niceyaml.WithLinePrefix(""),
+		niceyaml.WithGutter(niceyaml.NoGutter),
 	)
 }
 
@@ -55,7 +55,7 @@ func printDiff(p *niceyaml.Printer, before, after string) string {
 		niceyaml.NewRevision(afterTks),
 	)
 
-	return p.PrintTokens(diff.Lines())
+	return p.Print(diff.Lines())
 }
 
 // printDiffSummary generates a summary diff showing only changed lines with context.
@@ -75,7 +75,7 @@ func printDiffSummary(p *niceyaml.Printer, before, after string, context int) st
 		return ""
 	}
 
-	return p.PrintTokens(result)
+	return p.Print(result)
 }
 
 func TestPrinter_Anchor(t *testing.T) {
@@ -88,11 +88,11 @@ alias: *x`
 
 	p := testPrinter()
 
-	got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
+	got := p.Print(niceyaml.NewLinesFromTokens(tks))
 	assert.Equal(t, input, got)
 
 	file := parseFile(t, tks)
-	gotFile := p.PrintTokens(niceyaml.NewLinesFromFile(file))
+	gotFile := p.Print(niceyaml.NewLinesFromFile(file))
 	assert.Equal(t, got, gotFile)
 }
 
@@ -158,11 +158,11 @@ func TestPrinter_AddStyleToRange(t *testing.T) {
 			p := testPrinter()
 			p.AddStyleToRange(testHighlightStyle(), tc.rng)
 
-			got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
+			got := p.Print(niceyaml.NewLinesFromTokens(tks))
 			assert.Equal(t, tc.want, got)
 
 			file := parseFile(t, tks)
-			gotFile := p.PrintTokens(niceyaml.NewLinesFromFile(file))
+			gotFile := p.Print(niceyaml.NewLinesFromFile(file))
 			assert.Equal(t, got, gotFile)
 		})
 	}
@@ -182,7 +182,7 @@ func TestPrinter_ClearStyles(t *testing.T) {
 	p.ClearStyles()
 
 	// After clearing, no styles should be applied.
-	assert.Equal(t, "key: value", p.PrintTokens(niceyaml.NewLinesFromTokens(tks)))
+	assert.Equal(t, "key: value", p.Print(niceyaml.NewLinesFromTokens(tks)))
 }
 
 func TestPrinter_PrintTokens_EmptyFile(t *testing.T) {
@@ -192,13 +192,13 @@ func TestPrinter_PrintTokens_EmptyFile(t *testing.T) {
 	tks := lexer.Tokenize("")
 
 	p := testPrinter()
-	got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
+	got := p.Print(niceyaml.NewLinesFromTokens(tks))
 
 	// Empty file should produce empty output.
 	assert.Empty(t, got)
 
 	file := parseFile(t, tks)
-	gotFile := p.PrintTokens(niceyaml.NewLinesFromFile(file))
+	gotFile := p.Print(niceyaml.NewLinesFromFile(file))
 	assert.Equal(t, got, gotFile)
 }
 
@@ -212,7 +212,7 @@ bool: true
 
 	tks := lexer.Tokenize(input)
 	p := niceyaml.NewPrinter()
-	got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
+	got := p.Print(niceyaml.NewLinesFromTokens(tks))
 
 	// Should contain ANSI escape codes.
 	assert.Contains(t, got, "\x1b[")
@@ -221,7 +221,7 @@ bool: true
 	assert.Contains(t, got, "value")
 
 	file := parseFile(t, tks)
-	gotFile := p.PrintTokens(niceyaml.NewLinesFromFile(file))
+	gotFile := p.Print(niceyaml.NewLinesFromFile(file))
 	assert.Equal(t, got, gotFile)
 }
 
@@ -242,14 +242,14 @@ func TestNewPrinter_WithStyles(t *testing.T) {
 	p := niceyaml.NewPrinter(
 		niceyaml.WithStyles(s),
 		niceyaml.WithStyle(lipgloss.NewStyle()),
-		niceyaml.WithLinePrefix(""),
+		niceyaml.WithGutter(niceyaml.NoGutter),
 	)
 
-	got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
+	got := p.Print(niceyaml.NewLinesFromTokens(tks))
 	assert.Equal(t, "<key>key</key>: <str>value</str>", got)
 
 	file := parseFile(t, tks)
-	gotFile := p.PrintTokens(niceyaml.NewLinesFromFile(file))
+	gotFile := p.Print(niceyaml.NewLinesFromFile(file))
 	assert.Equal(t, got, gotFile)
 }
 
@@ -262,14 +262,14 @@ func TestNewPrinter_EmptyStyles(t *testing.T) {
 	// Empty Styles should not panic.
 	s := niceyaml.Styles{}
 	p := niceyaml.NewPrinter(niceyaml.WithStyles(s))
-	got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
+	got := p.Print(niceyaml.NewLinesFromTokens(tks))
 
 	// Should still contain original content.
 	assert.Contains(t, got, "key")
 	assert.Contains(t, got, "value")
 
 	file := parseFile(t, tks)
-	gotFile := p.PrintTokens(niceyaml.NewLinesFromFile(file))
+	gotFile := p.Print(niceyaml.NewLinesFromFile(file))
 	assert.Equal(t, got, gotFile)
 }
 
@@ -303,15 +303,14 @@ func TestPrinter_LineNumbers(t *testing.T) {
 			p := niceyaml.NewPrinter(
 				niceyaml.WithStyles(niceyaml.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
-				niceyaml.WithLineNumbers(),
-				niceyaml.WithLinePrefix(""),
+				niceyaml.WithGutter(niceyaml.LineNumberGutter()),
 			)
 
-			got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
+			got := p.Print(niceyaml.NewLinesFromTokens(tks))
 			assert.Equal(t, tc.want, got)
 
 			file := parseFile(t, tks)
-			gotFile := p.PrintTokens(niceyaml.NewLinesFromFile(file))
+			gotFile := p.Print(niceyaml.NewLinesFromFile(file))
 			assert.Equal(t, got, gotFile)
 		})
 	}
@@ -414,8 +413,7 @@ fifth: 5`
 			p := niceyaml.NewPrinter(
 				niceyaml.WithStyles(niceyaml.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
-				niceyaml.WithLineNumbers(),
-				niceyaml.WithLinePrefix(""),
+				niceyaml.WithGutter(niceyaml.LineNumberGutter()),
 			)
 			lines := niceyaml.NewLinesFromString(input)
 
@@ -526,6 +524,7 @@ func TestPrinter_PrintTokenDiff_LineOrder(t *testing.T) {
 	p := niceyaml.NewPrinter(
 		niceyaml.WithStyles(niceyaml.Styles{}),
 		niceyaml.WithStyle(lipgloss.NewStyle()),
+		niceyaml.WithGutter(niceyaml.DiffGutter()),
 	)
 	got := printDiff(p, before, after)
 
@@ -548,6 +547,7 @@ func TestPrinter_PrintTokenDiff_ModificationOrder(t *testing.T) {
 	p := niceyaml.NewPrinter(
 		niceyaml.WithStyles(niceyaml.Styles{}),
 		niceyaml.WithStyle(lipgloss.NewStyle()),
+		niceyaml.WithGutter(niceyaml.DiffGutter()),
 	)
 	got := printDiff(p, before, after)
 
@@ -658,17 +658,17 @@ func TestPrinter_WordWrap(t *testing.T) {
 			p := niceyaml.NewPrinter(
 				niceyaml.WithStyles(niceyaml.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
-				niceyaml.WithLinePrefix(""),
+				niceyaml.WithGutter(niceyaml.NoGutter),
 			)
 			if tc.width > 0 {
 				p.SetWidth(tc.width)
 			}
 
-			got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
+			got := p.Print(niceyaml.NewLinesFromTokens(tks))
 			assert.Equal(t, tc.want, got)
 
 			file := parseFile(t, tks)
-			gotFile := p.PrintTokens(niceyaml.NewLinesFromFile(file))
+			gotFile := p.Print(niceyaml.NewLinesFromFile(file))
 			assert.Equal(t, got, gotFile)
 		})
 	}
@@ -686,15 +686,15 @@ func TestPrinter_WordWrap_WithLineNumbers(t *testing.T) {
 			input: "key: this is a very long value",
 			width: 22,
 			// Wraps at word boundaries within width.
-			// Width 22 - 6 (line number) = 16 for content.
-			want: "   1key: this is a\n   -very long value",
+			// Width 22 - 5 (line number gutter) = 17 for content.
+			want: "   1 key: this is a\n   - very long value",
 		},
 		"multiple wrapped lines": {
 			input: "first: short\nsecond: this is a very long line that wraps",
 			width: 30,
 			// First line fits, second line wraps.
-			// Width 30 - 6 (line number) = 24 for content.
-			want: "   1first: short\n   2second: this is a very\n   -long line that wraps",
+			// Width 30 - 5 (line number gutter) = 25 for content.
+			want: "   1 first: short\n   2 second: this is a very\n   - long line that wraps",
 		},
 	}
 
@@ -707,13 +707,11 @@ func TestPrinter_WordWrap_WithLineNumbers(t *testing.T) {
 			p := niceyaml.NewPrinter(
 				niceyaml.WithStyles(niceyaml.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
-				niceyaml.WithLineNumbers(),
-				niceyaml.WithLineNumberStyle(lipgloss.NewStyle()),
-				niceyaml.WithLinePrefix(""),
+				niceyaml.WithGutter(niceyaml.LineNumberGutter()),
 			)
 			p.SetWidth(tc.width)
 
-			got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
+			got := p.Print(niceyaml.NewLinesFromTokens(tks))
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -766,6 +764,7 @@ func TestPrinter_PrintTokenDiff_WithWordWrap(t *testing.T) {
 			p := niceyaml.NewPrinter(
 				niceyaml.WithStyles(niceyaml.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithGutter(niceyaml.DiffGutter()),
 			)
 			p.SetWidth(tc.width)
 
@@ -836,7 +835,6 @@ func TestPrinter_PrintTokenDiff_WithLineNumbers(t *testing.T) {
 			p := niceyaml.NewPrinter(
 				niceyaml.WithStyles(niceyaml.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
-				niceyaml.WithLineNumbers(),
 			)
 
 			got := printDiff(p, tc.before, tc.after)
@@ -848,58 +846,70 @@ func TestPrinter_PrintTokenDiff_WithLineNumbers(t *testing.T) {
 	}
 }
 
-func TestPrinter_PrintTokenDiff_CustomPrefixes(t *testing.T) {
+func TestPrinter_PrintTokenDiff_CustomGutter(t *testing.T) {
 	t.Parallel()
 
+	// Helper to create a gutter function with custom prefixes.
+	makeGutter := func(inserted, deleted, equal string) niceyaml.GutterFunc {
+		return func(ctx niceyaml.GutterContext) string {
+			if ctx.Soft {
+				return strings.Repeat(" ", len(equal))
+			}
+
+			switch ctx.Flag {
+			case niceyaml.FlagInserted:
+				return inserted
+			case niceyaml.FlagDeleted:
+				return deleted
+			default:
+				return equal
+			}
+		}
+	}
+
 	tcs := map[string]struct {
-		insertedPrefix string
-		deletedPrefix  string
+		gutterFunc     niceyaml.GutterFunc
 		before         string
 		after          string
 		wantContains   []string
 		wantNotContain []string
 	}{
 		"custom inserted prefix": {
-			insertedPrefix: ">>",
-			deletedPrefix:  "-",
+			gutterFunc:     makeGutter(">>", "-", " "),
 			before:         "key: old\n",
 			after:          "key: old\nnew: line\n",
 			wantContains:   []string{">>new: line"},
 			wantNotContain: []string{"+new: line"},
 		},
 		"custom deleted prefix": {
-			insertedPrefix: "+",
-			deletedPrefix:  "<<",
+			gutterFunc:     makeGutter("+", "<<", " "),
 			before:         "key: old\nold: line\n",
 			after:          "key: old\n",
 			wantContains:   []string{"<<old: line"},
 			wantNotContain: []string{"-old: line"},
 		},
 		"both custom prefixes": {
-			insertedPrefix: "ADD:",
-			deletedPrefix:  "DEL:",
+			gutterFunc:     makeGutter("ADD:", "DEL:", "    "),
 			before:         "key: old\n",
 			after:          "key: new\n",
 			wantContains:   []string{"DEL:key: old", "ADD:key: new"},
 			wantNotContain: []string{"-key: old", "+key: new"},
 		},
-		"empty prefixes": {
-			insertedPrefix: "",
-			deletedPrefix:  "",
-			before:         "a: 1\n",
-			after:          "a: 2\n",
-			wantContains:   []string{"a: 1", "a: 2"},
+		"no gutter": {
+			gutterFunc:   niceyaml.NoGutter,
+			before:       "a: 1\n",
+			after:        "a: 2\n",
+			wantContains: []string{"a: 1", "a: 2"},
 		},
 		"multi-character prefixes with context": {
-			insertedPrefix: "[+]",
-			deletedPrefix:  "[-]",
-			before:         "line1: a\nline2: b\nline3: c\n",
-			after:          "line1: a\nline2: x\nline3: c\n",
+			gutterFunc: makeGutter("[+]", "[-]", "   "),
+			before:     "line1: a\nline2: b\nline3: c\n",
+			after:      "line1: a\nline2: x\nline3: c\n",
 			wantContains: []string{
-				" line1: a",
+				"   line1: a",
 				"[-]line2: b",
 				"[+]line2: x",
-				" line3: c",
+				"   line3: c",
 			},
 		},
 	}
@@ -911,8 +921,7 @@ func TestPrinter_PrintTokenDiff_CustomPrefixes(t *testing.T) {
 			p := niceyaml.NewPrinter(
 				niceyaml.WithStyles(niceyaml.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
-				niceyaml.WithLineInsertedPrefix(tc.insertedPrefix),
-				niceyaml.WithLineDeletedPrefix(tc.deletedPrefix),
+				niceyaml.WithGutter(tc.gutterFunc),
 			)
 
 			got := printDiff(p, tc.before, tc.after)
@@ -924,6 +933,52 @@ func TestPrinter_PrintTokenDiff_CustomPrefixes(t *testing.T) {
 			for _, notWant := range tc.wantNotContain {
 				assert.NotContains(t, got, notWant)
 			}
+		})
+	}
+}
+
+func TestDiffGutter(t *testing.T) {
+	t.Parallel()
+
+	styles := niceyaml.Styles{}
+	gutter := niceyaml.DiffGutter()
+
+	tcs := map[string]struct {
+		want string
+		ctx  niceyaml.GutterContext
+	}{
+		"default flag": {
+			want: " ",
+			ctx:  niceyaml.GutterContext{Flag: niceyaml.FlagDefault, Styles: styles},
+		},
+		"inserted flag": {
+			want: "+",
+			ctx:  niceyaml.GutterContext{Flag: niceyaml.FlagInserted, Styles: styles},
+		},
+		"deleted flag": {
+			want: "-",
+			ctx:  niceyaml.GutterContext{Flag: niceyaml.FlagDeleted, Styles: styles},
+		},
+		"soft wrap default": {
+			want: " ",
+			ctx:  niceyaml.GutterContext{Flag: niceyaml.FlagDefault, Soft: true, Styles: styles},
+		},
+		"soft wrap inserted": {
+			want: " ",
+			ctx:  niceyaml.GutterContext{Flag: niceyaml.FlagInserted, Soft: true, Styles: styles},
+		},
+		"soft wrap deleted": {
+			want: " ",
+			ctx:  niceyaml.GutterContext{Flag: niceyaml.FlagDeleted, Soft: true, Styles: styles},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := gutter(tc.ctx)
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
@@ -1004,14 +1059,14 @@ func TestPrinter_TokenTypes(t *testing.T) {
 			tks := lexer.Tokenize(tc.input)
 			p := testPrinter()
 
-			got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
+			got := p.Print(niceyaml.NewLinesFromTokens(tks))
 
 			for _, want := range tc.wantContains {
 				assert.Contains(t, got, want)
 			}
 
 			file := parseFile(t, tks)
-			gotFile := p.PrintTokens(niceyaml.NewLinesFromFile(file))
+			gotFile := p.Print(niceyaml.NewLinesFromFile(file))
 			assert.Equal(t, got, gotFile)
 		})
 	}
@@ -1057,11 +1112,11 @@ func TestPrinter_PrintFile_MultiDocument(t *testing.T) {
 			tks := lexer.Tokenize(tc.input)
 			p := testPrinter()
 
-			got := p.PrintTokens(niceyaml.NewLinesFromTokens(tks))
+			got := p.Print(niceyaml.NewLinesFromTokens(tks))
 			assert.Equal(t, tc.want, got)
 
 			file := parseFile(t, tks)
-			gotFile := p.PrintTokens(niceyaml.NewLinesFromFile(file))
+			gotFile := p.Print(niceyaml.NewLinesFromFile(file))
 			assert.Equal(t, got, gotFile)
 		})
 	}
@@ -1217,7 +1272,6 @@ func TestPrinter_PrintTokenDiffSummary_WithLineNumbers(t *testing.T) {
 	p := niceyaml.NewPrinter(
 		niceyaml.WithStyles(niceyaml.Styles{}),
 		niceyaml.WithStyle(lipgloss.NewStyle()),
-		niceyaml.WithLineNumbers(),
 	)
 
 	got := printDiffSummary(p, before, after, 1)

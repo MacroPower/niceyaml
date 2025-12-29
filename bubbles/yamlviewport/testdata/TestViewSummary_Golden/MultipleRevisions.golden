@@ -1,4 +1,4 @@
-@@ -1,5 +1,5 @@                                                                 
+ @@ -1,5 +1,5 @@                                                                
 -name: modified                                                                 
 -count: 20                                                                      
 -enabled: true                                                                  
@@ -8,7 +8,7 @@
 +enabled: false                                                                 
 +description: "This is the final description"                                   
  tags:                                                                          
-@@ -7,4 +7,5 @@                                                                 
+ @@ -7,4 +7,5 @@                                                                
    - gamma                                                                      
 +  - delta                                                                      
  settings:                                                                      

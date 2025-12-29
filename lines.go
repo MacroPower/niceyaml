@@ -33,12 +33,13 @@ type Flag int
 
 // Flag constants for YAML line categories.
 const (
-	FlagDefault  Flag = iota // Default/fallback.
-	FlagInserted             // Lines inserted in diff (+).
-	FlagDeleted              // Lines deleted in diff (-).
+	FlagDefault    Flag = iota // Default/fallback.
+	FlagInserted               // Lines inserted in diff (+).
+	FlagDeleted                // Lines deleted in diff (-).
+	FlagAnnotation             // Annotation/header lines (no line number).
 )
 
-// Line contains metadata about a specific line in a [Lines] collection.
+// Line contains data for a specific line in a [Lines] collection.
 type Line struct {
 	// Tokens for this line.
 	value token.Tokens
@@ -408,8 +409,8 @@ func (t *Lines) Tokens() token.Tokens {
 	return result
 }
 
-// LineCount returns the number of lines.
-func (t *Lines) LineCount() int {
+// Count returns the number of lines.
+func (t *Lines) Count() int {
 	return len(t.lines)
 }
 

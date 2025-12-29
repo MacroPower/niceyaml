@@ -1,11 +1,11 @@
-   1 key: value                                                                 
-   2 number: 42                                                                 
-   3 bool: true                                                                 
-   4 list:                                                                      
-   5   - item1                                                                  
-   6   - item2                                                                  
-   7 nested:                                                                    
-   8   child: data                                                              
+   1  key: value                                                                
+   2  number: 42                                                                
+   3  bool: true                                                                
+   4  list:                                                                     
+   5    - item1                                                                 
+   6    - item2                                                                 
+   7  nested:                                                                   
+   8    child: data                                                             
                                                                                 
                                                                                 
                                                                                 

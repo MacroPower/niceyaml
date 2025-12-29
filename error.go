@@ -15,7 +15,7 @@ import (
 // StyledPrinter extends [TokenStyler] with slice printing capabilities.
 type StyledPrinter interface {
 	TokenStyler
-	PrintSlice(lines *Lines, minLine, maxLine int) string
+	PrintSlice(lines LineIterator, minLine, maxLine int) string
 }
 
 // ErrorWrapper wraps errors with additional context for [Error] types.
@@ -198,7 +198,7 @@ func (e *Error) resolveToken(path *yaml.Path) (*token.Token, error) {
 func (e *Error) printErrorToken(tk *token.Token) string {
 	p := e.printer
 	if p == nil {
-		p = NewPrinter(WithLineNumbers())
+		p = NewPrinter()
 	}
 
 	t := NewLinesFromToken(tk.Clone())

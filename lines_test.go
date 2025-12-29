@@ -275,7 +275,7 @@ second: 2
 			input := lexer.Tokenize(tc.input)
 			result := niceyaml.NewLinesFromTokens(input, niceyaml.WithName("test"))
 
-			require.Equal(t, len(tc.wantLines), result.LineCount(), "wrong number of lines")
+			require.Equal(t, len(tc.wantLines), result.Count(), "wrong number of lines")
 
 			for i, want := range tc.wantLines {
 				assert.Equal(t, want, result.Line(i).String(), "line %d", i)
@@ -369,7 +369,7 @@ key: value
 
 			result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
-			require.Equal(t, tc.wantLineCount, result.LineCount(), "wrong number of lines")
+			require.Equal(t, tc.wantLineCount, result.Count(), "wrong number of lines")
 
 			for i, wantNum := range tc.wantLineNums {
 				assert.Equal(t, wantNum, result.Line(i).Number(), "line %d has wrong number", i)
@@ -493,7 +493,7 @@ func TestNewTokens_GappedLineNumbers(t *testing.T) {
 			tks := tc.buildTokens()
 			result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
-			require.Equal(t, tc.wantLineCount, result.LineCount(), "wrong number of lines")
+			require.Equal(t, tc.wantLineCount, result.Count(), "wrong number of lines")
 
 			for i, wantNum := range tc.wantLineNums {
 				assert.Equal(t, wantNum, result.Line(i).Number(), "line %d has wrong number", i)
@@ -566,7 +566,7 @@ func TestLine_String_Annotation(t *testing.T) {
 			// Create a line with a simple token.
 			tks := lexer.Tokenize("key: value\n")
 			result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
-			require.Equal(t, 1, result.LineCount())
+			require.Equal(t, 1, result.Count())
 
 			line := result.Line(0)
 			line.Annotation = tc.annotation
@@ -644,7 +644,7 @@ d: 4
 
 			// Apply annotations to specified lines.
 			for idx, ann := range tc.annotations {
-				require.Less(t, idx, result.LineCount(), "annotation index out of range")
+				require.Less(t, idx, result.Count(), "annotation index out of range")
 
 				result.Annotate(idx, ann)
 			}
@@ -659,7 +659,7 @@ func TestLine_Clone_Annotation(t *testing.T) {
 
 	tks := lexer.Tokenize("key: value\n")
 	result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
-	require.Equal(t, 1, result.LineCount())
+	require.Equal(t, 1, result.Count())
 
 	original := result.Line(0)
 	original.Annotation = niceyaml.Annotation{Content: "original note", Column: 5}
@@ -810,7 +810,7 @@ doc2: value2
 
 			// Start from first token in Line(0).Value.
 			firstToken := result.Line(0).Token(0)
-			lastLine := result.Line(result.LineCount() - 1)
+			lastLine := result.Line(result.Count() - 1)
 			lastToken := lastLine.Tokens()[len(lastLine.Tokens())-1]
 
 			// First token should have no Prev.
@@ -907,7 +907,7 @@ next: data
 			require.NoError(t, result.Validate(), "tokens should be valid")
 
 			// Verify expected line numbers.
-			require.Equal(t, len(tc.wantLineNums), result.LineCount(), "wrong number of lines")
+			require.Equal(t, len(tc.wantLineNums), result.Count(), "wrong number of lines")
 
 			for i, wantNum := range tc.wantLineNums {
 				assert.Equal(t, wantNum, result.Line(i).Number(), "line %d has wrong number", i)
@@ -1078,7 +1078,7 @@ func TestLines_EachRune_DiffBuiltLines(t *testing.T) {
 
 	// Diff should produce two lines: deleted (old) and inserted (new).
 	// Both have the same source token line (1), but different visual indices (0, 1).
-	require.Equal(t, 2, lines.LineCount(), "diff should produce 2 lines")
+	require.Equal(t, 2, lines.Count(), "diff should produce 2 lines")
 
 	var positions []struct {
 		line int
@@ -1165,7 +1165,7 @@ func TestTokens_Validate(t *testing.T) {
 
 		// After normalization, line numbers are sequential.
 		require.NoError(t, result.Validate())
-		require.Equal(t, 2, result.LineCount())
+		require.Equal(t, 2, result.Count())
 		assert.Equal(t, 5, result.Line(0).Number())
 		assert.Equal(t, 6, result.Line(1).Number())
 	})
@@ -1193,7 +1193,7 @@ func TestTokens_Validate(t *testing.T) {
 
 		// After normalization, line numbers are sequential.
 		require.NoError(t, result.Validate())
-		require.Equal(t, 2, result.LineCount())
+		require.Equal(t, 2, result.Count())
 		assert.Equal(t, 10, result.Line(0).Number())
 		assert.Equal(t, 11, result.Line(1).Number())
 	})
@@ -1270,7 +1270,7 @@ func TestTokens_Validate(t *testing.T) {
 
 		// Both tokens end up on line 1 with normalized positions.
 		require.NoError(t, result.Validate())
-		require.Equal(t, 1, result.LineCount())
+		require.Equal(t, 1, result.Count())
 
 		line := result.Line(0)
 		require.Len(t, line.Tokens(), 2)
@@ -1412,7 +1412,7 @@ func TestNewLinesFromTokens_SplitTokenOffsets(t *testing.T) {
 			lines := niceyaml.NewLinesFromTokens(lexer.Tokenize(input))
 
 			var prevOffset int
-			for i := range lines.LineCount() {
+			for i := range lines.Count() {
 				line := lines.Line(i)
 				for _, tk := range line.Tokens() {
 					if tk.Position != nil {
@@ -1479,9 +1479,9 @@ end: val
 	// Line 7: end: val -> level 0.
 	expectedLevels := []int{0, 1, 2, 3, 2, 1, 0}
 
-	require.Equal(t, len(expectedLevels), lines.LineCount())
+	require.Equal(t, len(expectedLevels), lines.Count())
 
-	for i := range lines.LineCount() {
+	for i := range lines.Count() {
 		line := lines.Line(i)
 		if len(line.Tokens()) > 0 {
 			firstTk := line.Token(0)
@@ -1506,7 +1506,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		tks := lexer.Tokenize(input)
 		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
-		require.Equal(t, 3, result.LineCount())
+		require.Equal(t, 3, result.Count())
 
 		// Query line index 1 (second line), column 0 (start of the string token).
 		// The literal block content starts at column 0 (the indentation spaces are part of Origin).
@@ -1534,7 +1534,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		tks := lexer.Tokenize(input)
 		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
-		require.Equal(t, 1, result.LineCount())
+		require.Equal(t, 1, result.Count())
 
 		// Query line index 0, column 0 (the "key" token).
 		ranges := result.TokenPositionRanges(niceyaml.Position{Line: 0, Col: 0})
@@ -1553,7 +1553,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		tks := lexer.Tokenize(input)
 		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
-		require.Equal(t, 1, result.LineCount())
+		require.Equal(t, 1, result.Count())
 
 		// Find where the last token ("value") actually starts.
 		line := result.Line(0)
@@ -1587,7 +1587,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		tks := lexer.Tokenize(input)
 		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
-		require.Equal(t, 3, result.LineCount())
+		require.Equal(t, 3, result.Count())
 
 		// Query line index 0 (indicator line), column 0 (the "key" token).
 		// The indicator line itself is not part of the join, but has tokens.
@@ -1610,7 +1610,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		tks := lexer.Tokenize(input)
 		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
-		require.Equal(t, 3, result.LineCount())
+		require.Equal(t, 3, result.Count())
 
 		// Query line index 2 (last content line), column 0.
 		ranges := result.TokenPositionRanges(niceyaml.Position{Line: 2, Col: 0})
@@ -1653,7 +1653,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		tks := lexer.Tokenize(input)
 		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
-		require.Equal(t, 3, result.LineCount())
+		require.Equal(t, 3, result.Count())
 
 		// Query line index 1 with a column that's way beyond the token.
 		ranges := result.TokenPositionRanges(niceyaml.Position{Line: 1, Col: 100})
@@ -1671,7 +1671,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		tks := lexer.Tokenize(input)
 		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
-		require.Equal(t, 4, result.LineCount())
+		require.Equal(t, 4, result.Count())
 
 		// Query middle line (line index 2), column 0.
 		ranges := result.TokenPositionRanges(niceyaml.Position{Line: 2, Col: 0})
@@ -1698,7 +1698,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		tks := lexer.Tokenize(input)
 		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
-		require.Equal(t, 3, result.LineCount())
+		require.Equal(t, 3, result.Count())
 
 		// Query line index 1 (first content line), column 0.
 		ranges := result.TokenPositionRanges(niceyaml.Position{Line: 1, Col: 0})
@@ -1724,7 +1724,7 @@ second: 2
 		tks := lexer.Tokenize(input)
 		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
-		require.Equal(t, 2, result.LineCount())
+		require.Equal(t, 2, result.Count())
 
 		// Query two different positions: "first" token on line 0, "second" token on line 1.
 		ranges := result.TokenPositionRanges(
@@ -1749,7 +1749,7 @@ second: 2
 		tks := lexer.Tokenize(input)
 		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
-		require.Equal(t, 1, result.LineCount())
+		require.Equal(t, 1, result.Count())
 
 		// Query the same position twice.
 		ranges := result.TokenPositionRanges(
@@ -1787,7 +1787,7 @@ second: 2
 		tks := lexer.Tokenize(input)
 		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
-		require.Equal(t, 3, result.LineCount())
+		require.Equal(t, 3, result.Count())
 
 		// Query both content lines of the same joined block.
 		// Both positions are within the joined block, so they should return
@@ -1818,7 +1818,7 @@ func TestLines_PositionsFromToken(t *testing.T) {
 		tks := lexer.Tokenize(input)
 		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
-		require.Equal(t, 1, result.LineCount())
+		require.Equal(t, 1, result.Count())
 
 		// Get the "key" token.
 		tk := result.Line(0).Token(0)
@@ -1839,7 +1839,7 @@ func TestLines_PositionsFromToken(t *testing.T) {
 		tks := lexer.Tokenize(input)
 		result := niceyaml.NewLinesFromTokens(tks, niceyaml.WithName("test"))
 
-		require.Equal(t, 3, result.LineCount())
+		require.Equal(t, 3, result.Count())
 
 		// Get the content token from the first content line.
 		tk := result.Line(1).Token(0)

@@ -41,7 +41,7 @@ func testBasicPrinter() *niceyaml.Printer {
 	return niceyaml.NewPrinter(
 		niceyaml.WithStyles(niceyaml.Styles{}),
 		niceyaml.WithStyle(lipgloss.NewStyle()),
-		niceyaml.WithLinePrefix(""),
+		niceyaml.WithGutter(niceyaml.NoGutter),
 	)
 }
 
@@ -177,12 +177,12 @@ func TestFinderPrinter_Integration(t *testing.T) {
 				printer.AddStyleToRange(testBracketStyle(), rng)
 			}
 
-			got := printer.PrintTokens(lines)
+			got := printer.Print(lines)
 			assert.Equal(t, tc.want, got)
 
 			// Use fresh tokens for parser (Lines tokens are processed/split).
 			file := testParseFile(t, lexer.Tokenize(tc.input))
-			gotFile := printer.PrintTokens(niceyaml.NewLinesFromFile(file))
+			gotFile := printer.Print(niceyaml.NewLinesFromFile(file))
 			assert.Equal(t, got, gotFile)
 		})
 	}
@@ -232,12 +232,12 @@ func TestFinderPrinter_EdgeCases(t *testing.T) {
 				assert.Empty(t, ranges)
 			}
 
-			got := printer.PrintTokens(lines)
+			got := printer.Print(lines)
 			assert.Equal(t, tc.wantOutput, got)
 
 			// Use fresh tokens for parser (Lines tokens are processed/split).
 			file := testParseFile(t, lexer.Tokenize(tc.input))
-			gotFile := printer.PrintTokens(niceyaml.NewLinesFromFile(file))
+			gotFile := printer.Print(niceyaml.NewLinesFromFile(file))
 			assert.Equal(t, got, gotFile)
 		})
 	}
@@ -256,35 +256,33 @@ func TestPrinter_Golden(t *testing.T) {
 			opts: []niceyaml.PrinterOption{
 				niceyaml.WithStyles(niceyaml.DefaultStyles()),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
-				niceyaml.WithLinePrefix(""),
+				niceyaml.WithGutter(niceyaml.NoGutter),
 			},
 		},
 		"default colors with line numbers": {
 			opts: []niceyaml.PrinterOption{
 				niceyaml.WithStyles(niceyaml.DefaultStyles()),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
-				niceyaml.WithLineNumbers(),
 			},
 		},
 		"no colors": {
 			opts: []niceyaml.PrinterOption{
 				niceyaml.WithStyles(niceyaml.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
-				niceyaml.WithLinePrefix(""),
+				niceyaml.WithGutter(niceyaml.NoGutter),
 			},
 		},
 		"no colors with line numbers": {
 			opts: []niceyaml.PrinterOption{
 				niceyaml.WithStyles(niceyaml.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
-				niceyaml.WithLineNumbers(),
 			},
 		},
 		"find and highlight": {
 			opts: []niceyaml.PrinterOption{
 				niceyaml.WithStyles(niceyaml.DefaultStyles()),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
-				niceyaml.WithLinePrefix(""),
+				niceyaml.WithGutter(niceyaml.NoGutter),
 			},
 			setupFunc: func(p *niceyaml.Printer, lines *niceyaml.Lines) {
 				// Search for "日本" (Japan) which appears multiple times in full.yaml.
@@ -315,12 +313,12 @@ func TestPrinter_Golden(t *testing.T) {
 				tc.setupFunc(printer, lines)
 			}
 
-			output := printer.PrintTokens(lines)
+			output := printer.Print(lines)
 			golden.RequireEqual(t, output)
 
 			// Use fresh tokens for parser (Lines tokens are processed/split).
 			file := testParseFile(t, lexer.Tokenize(string(input)))
-			outputFile := printer.PrintTokens(niceyaml.NewLinesFromFile(file))
+			outputFile := printer.Print(niceyaml.NewLinesFromFile(file))
 			assert.Equal(t, output, outputFile)
 		})
 	}
@@ -374,7 +372,7 @@ func TestFinderPrinter_JapaneseMatch(t *testing.T) {
 				printer.AddStyleToRange(testBracketStyle(), rng)
 			}
 
-			got := printer.PrintTokens(lines)
+			got := printer.Print(lines)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -404,7 +402,7 @@ menu:
 		printer.AddStyleToRange(testBracketStyle(), rng)
 	}
 
-	got := printer.PrintTokens(lines)
+	got := printer.Print(lines)
 
 	// The box drawing characters on lines 1 and 4 should NOT be highlighted
 	// Only "日本" on line 3 should be highlighted.
@@ -437,7 +435,7 @@ func TestFinderPrinter_BoxDrawingNotMatched(t *testing.T) {
 		printer.AddStyleToRange(testBracketStyle(), rng)
 	}
 
-	got := printer.PrintTokens(lines)
+	got := printer.Print(lines)
 
 	// Verify the match is properly bracketed.
 	assert.Contains(t, got, "[日本]酒", "日本 should be highlighted")

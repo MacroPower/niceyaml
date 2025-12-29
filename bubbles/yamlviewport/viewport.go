@@ -362,7 +362,7 @@ func (m *Model) rerender() {
 		m.printer.AddStyleToRange(&style, match)
 	}
 
-	content := m.printer.PrintTokens(lines)
+	content := m.printer.Print(lines)
 
 	m.renderedLines = strings.Split(content, "\n")
 	m.longestLineWidth = maxLineWidth(m.renderedLines)
@@ -878,7 +878,7 @@ func (m *Model) getSummaryDiffContent(context int) string {
 		return ""
 	}
 
-	return m.printer.PrintTokens(lines)
+	return m.printer.Print(lines)
 }
 
 func clamp[T cmp.Ordered](v, low, high T) T {
