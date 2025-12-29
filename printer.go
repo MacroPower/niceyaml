@@ -156,8 +156,8 @@ func (p *Printer) PrintTokens(lines LineIterator) string {
 	return p.style.Render(content)
 }
 
-// PrintSlice returns a rendered string containing only lines where
-// minLine <= line.Number() <= maxLine. Uses absolute 1-indexed line numbers.
+// PrintSlice returns a rendered string containing only lines in the range [minLine, maxLine].
+// Uses 0-indexed line indices into the Lines collection.
 // If minLine < 0, includes from the beginning; if maxLine < 0, includes to the end.
 func (p *Printer) PrintSlice(lines *Lines, minLine, maxLine int) string {
 	content := p.renderLinesInRange(lines, minLine, maxLine, true)
@@ -170,7 +170,7 @@ func (p *Printer) renderLines(t LineIterator, showAnnotations bool) string {
 	return p.renderLinesInRange(t, -1, -1, showAnnotations)
 }
 
-// renderLinesInRange renders lines in [minLine, maxLine] using absolute 1-indexed line numbers.
+// renderLinesInRange renders lines in [minLine, maxLine] using 0-indexed line indices.
 // If minLine < 0, includes from the beginning; if maxLine < 0, includes to the end.
 //
 //nolint:unparam // showAnnotations kept for API flexibility.
@@ -180,15 +180,15 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int, showA
 	}
 
 	var (
-		sb  strings.Builder
-		idx int
+		sb          strings.Builder
+		renderedIdx int
 	)
 
-	t.EachLine(func(_ int, line Line) {
+	t.EachLine(func(idx int, line Line) {
 		lineNum := line.Number()
 
-		// Filter by line number range.
-		if (minLine >= 0 && lineNum < minLine) || (maxLine >= 0 && lineNum > maxLine) {
+		// Filter by 0-indexed line index.
+		if (minLine >= 0 && idx < minLine) || (maxLine >= 0 && idx > maxLine) {
 			return
 		}
 
@@ -196,7 +196,7 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int, showA
 
 		if hasAnnotation {
 			// Add newline between hunks (not before first hunk).
-			if idx > 0 {
+			if renderedIdx > 0 {
 				sb.WriteByte('\n')
 			}
 
@@ -207,7 +207,7 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int, showA
 
 			sb.WriteString(p.styles.GetStyle(StyleComment).Render(line.Annotation.Content))
 			sb.WriteByte('\n')
-		} else if idx > 0 {
+		} else if renderedIdx > 0 {
 			// Add newline between lines within a hunk.
 			sb.WriteByte('\n')
 		}
@@ -227,7 +227,7 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int, showA
 			p.writeLine(&sb, p.linePrefix, styledContent, lineNum, idx, nil)
 		}
 
-		idx++
+		renderedIdx++
 	})
 
 	return sb.String()

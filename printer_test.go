@@ -337,23 +337,23 @@ fifth: 5`
 			want:    "first: 1\nsecond: 2\nthird: 3\nfourth: 4\nfifth: 5",
 		},
 		"bounded middle": {
-			minLine: 2,
-			maxLine: 4,
+			minLine: 1,
+			maxLine: 3,
 			want:    "second: 2\nthird: 3\nfourth: 4",
 		},
 		"unbounded min": {
 			minLine: -1,
-			maxLine: 2,
+			maxLine: 1,
 			want:    "first: 1\nsecond: 2",
 		},
 		"unbounded max": {
-			minLine: 4,
+			minLine: 3,
 			maxLine: -1,
 			want:    "fourth: 4\nfifth: 5",
 		},
 		"single line": {
-			minLine: 3,
-			maxLine: 3,
+			minLine: 2,
+			maxLine: 2,
 			want:    "third: 3",
 		},
 		"empty result": {
@@ -396,13 +396,13 @@ fifth: 5`
 			want:    "   1 first: 1\n   2 second: 2\n   3 third: 3\n   4 fourth: 4\n   5 fifth: 5",
 		},
 		"bounded middle - absolute line numbers": {
-			minLine: 2,
-			maxLine: 4,
+			minLine: 1,
+			maxLine: 3,
 			want:    "   2 second: 2\n   3 third: 3\n   4 fourth: 4",
 		},
 		"single line - absolute line number": {
-			minLine: 3,
-			maxLine: 3,
+			minLine: 2,
+			maxLine: 2,
 			want:    "   3 third: 3",
 		},
 	}
