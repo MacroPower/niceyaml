@@ -246,25 +246,6 @@ func (m *Model) RevisionCount() int {
 	return m.revision.Count()
 }
 
-// currentRevisionLines returns the [*niceyaml.Lines] for the currently displayed revision.
-// For diffs, this returns the "after" revision niceyaml.
-func (m *Model) currentRevisionLines() *niceyaml.Lines {
-	if m.revision == nil {
-		return nil
-	}
-
-	return m.revision.Lines()
-}
-
-// getRevisionLines returns the [*niceyaml.Lines] for the revision at the given index.
-func (m *Model) getRevisionLines(index int) *niceyaml.Lines {
-	if m.revision == nil {
-		return nil
-	}
-
-	return m.revision.At(index).Lines()
-}
-
 // IsAtFirstRevision returns true if at revision index 0.
 func (m *Model) IsAtFirstRevision() bool {
 	if m.revision == nil {
@@ -341,7 +322,8 @@ func (m *Model) seekRevision(delta int) {
 
 // rerender renders the tokens using the Printer with current search highlights.
 func (m *Model) rerender() {
-	if m.revision == nil {
+	lines := m.getDisplayLines(nil)
+	if lines == nil {
 		m.lines = nil
 		m.longestLineWidth = 0
 
@@ -353,19 +335,6 @@ func (m *Model) rerender() {
 	}
 
 	m.printer.ClearStyles()
-
-	var lines *niceyaml.Lines
-	switch {
-	case m.revision.AtOrigin():
-		// At first position: show first revision without diff.
-		lines = m.getRevisionLines(0)
-	case m.diffMode == DiffModeNone:
-		// Diff disabled: show current revision without diff.
-		lines = m.currentRevisionLines()
-	default:
-		// Not at first and diff enabled: show diff.
-		lines = niceyaml.NewFullDiff(m.getDiffBaseRevision(), m.revision).Lines()
-	}
 
 	// Compute fresh matches if finder is set.
 	if m.finder != nil {
@@ -412,22 +381,29 @@ func (m *Model) getDiffBaseRevision() *niceyaml.Revision {
 	}
 }
 
-// renderDiff renders a diff using the provided diff constructor.
-// Returns fallback content when revision is nil, at origin, or base is nil.
-func (m *Model) renderDiff(makeDiff func(base, current *niceyaml.Revision) *niceyaml.Lines) string {
+// getDisplayLines returns the lines to display based on current revision and diff mode.
+// MakeDiff is called when a diff should be shown; if nil, uses [niceyaml.NewFullDiff].
+func (m *Model) getDisplayLines(makeDiff func(base, current *niceyaml.Revision) *niceyaml.Lines) *niceyaml.Lines {
 	if m.revision == nil {
-		return ""
-	}
-	if m.revision.AtOrigin() {
-		return m.printer.PrintTokens(m.currentRevisionLines())
+		return nil
 	}
 
-	base := m.getDiffBaseRevision()
-	if base == nil {
-		return m.printer.PrintTokens(m.currentRevisionLines())
-	}
+	switch {
+	case m.revision.AtOrigin():
+		return m.revision.Origin().Lines()
+	case m.diffMode == DiffModeNone:
+		return m.revision.Lines()
+	default:
+		base := m.getDiffBaseRevision()
+		if base == nil {
+			return m.revision.Lines()
+		}
+		if makeDiff != nil {
+			return makeDiff(base, m.revision)
+		}
 
-	return m.printer.PrintTokens(makeDiff(base, m.revision))
+		return niceyaml.NewFullDiff(base, m.revision).Lines()
+	}
 }
 
 // AtTop returns whether the viewport is at the top.
@@ -495,7 +471,8 @@ func (m *Model) maxHeight() int {
 }
 
 // visibleLines returns the lines currently visible in the viewport.
-func (m *Model) visibleLines() []string {
+// If lines is nil, uses m.lines.
+func (m *Model) visibleLines(lines []string) []string {
 	maxHeight := m.maxHeight()
 	maxWidth := m.maxWidth()
 
@@ -503,7 +480,12 @@ func (m *Model) visibleLines() []string {
 		return nil
 	}
 
-	total := len(m.lines)
+	if lines == nil {
+		lines = m.lines
+	}
+
+	total := len(lines)
+
 	if total == 0 {
 		if m.FillHeight {
 			return make([]string, maxHeight)
@@ -513,6 +495,10 @@ func (m *Model) visibleLines() []string {
 	}
 
 	start := m.YOffset()
+	if start >= total {
+		start = max(0, total-maxHeight)
+	}
+
 	end := min(start+maxHeight, total)
 
 	// Determine final capacity based on FillHeight.
@@ -521,17 +507,17 @@ func (m *Model) visibleLines() []string {
 		capacity = maxHeight
 	}
 
-	lines := make([]string, capacity)
-	copy(lines, m.lines[start:end])
+	result := make([]string, capacity)
+	copy(result, lines[start:end])
 
-	// Apply horizontal scrolling if content is wider than viewport.
-	if m.xOffset > 0 || m.longestLineWidth > maxWidth {
-		for i := range lines {
-			lines[i] = ansi.Cut(lines[i], m.xOffset, m.xOffset+maxWidth)
+	// Apply horizontal scrolling.
+	if m.xOffset > 0 {
+		for i := range result {
+			result[i] = ansi.Cut(result[i], m.xOffset, m.xOffset+maxWidth)
 		}
 	}
 
-	return lines
+	return result
 }
 
 // SetYOffset sets the Y offset.
@@ -624,7 +610,7 @@ func (m *Model) TotalLineCount() int {
 
 // VisibleLineCount returns the number of visible lines.
 func (m *Model) VisibleLineCount() int {
-	return len(m.visibleLines())
+	return len(m.visibleLines(nil))
 }
 
 // SetFinder sets a finder to be invoked during rerender.
@@ -805,36 +791,6 @@ func (m *Model) renderContent(lines []string, contentW, contentH int) string {
 		Render(contents)
 }
 
-// applyScrolling applies Y and X offset scrolling to a slice of lines.
-func (m *Model) applyScrolling(lines []string) []string {
-	maxHeight := m.maxHeight()
-	maxWidth := m.maxWidth()
-	total := len(lines)
-
-	if total == 0 {
-		return nil
-	}
-
-	start := m.YOffset()
-	end := min(start+maxHeight, total)
-
-	if start >= total {
-		start = max(0, total-maxHeight)
-		end = total
-	}
-
-	visible := make([]string, end-start)
-	copy(visible, lines[start:end])
-
-	if m.xOffset > 0 {
-		for i := range visible {
-			visible[i] = ansi.Cut(visible[i], m.xOffset, m.xOffset+maxWidth)
-		}
-	}
-
-	return visible
-}
-
 // View renders the viewport.
 //
 //nolint:gocritic // hugeParam: required for tea.Model interface compatibility.
@@ -844,7 +800,7 @@ func (m Model) View() string {
 		return ""
 	}
 
-	return m.renderContent(m.visibleLines(), w, h)
+	return m.renderContent(m.visibleLines(nil), w, h)
 }
 
 // ViewSummary renders the viewport with summary diff (changes + context only).
@@ -865,14 +821,19 @@ func (m Model) ViewSummary(context int) string {
 		return ""
 	}
 
-	return m.renderContent(m.applyScrolling(summaryLines), w, h)
+	return m.renderContent(m.visibleLines(summaryLines), w, h)
 }
 
 // getSummaryDiffContent returns summary diff content for the current revision.
 func (m *Model) getSummaryDiffContent(context int) string {
-	return m.renderDiff(func(base, curr *niceyaml.Revision) *niceyaml.Lines {
+	lines := m.getDisplayLines(func(base, curr *niceyaml.Revision) *niceyaml.Lines {
 		return niceyaml.NewSummaryDiff(base, curr, context).Lines()
 	})
+	if lines == nil {
+		return ""
+	}
+
+	return m.printer.PrintTokens(lines)
 }
 
 func clamp[T cmp.Ordered](v, low, high T) T {
