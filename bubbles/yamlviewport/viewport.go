@@ -33,8 +33,8 @@ const (
 // Finder finds matches in lines for highlighting.
 // The viewport invokes this during rerender to get fresh matches.
 type Finder interface {
-	// Find returns position ranges to highlight in the given lines.
-	// Positions are 0-indexed. Returns nil if no matches.
+	// Find returns [niceyaml.PositionRange] values to highlight in the given
+	// [niceyaml.Source]. Positions are 0-indexed. Returns nil if no matches.
 	Find(lines *niceyaml.Source) []niceyaml.PositionRange
 }
 
@@ -93,29 +93,37 @@ func New(opts ...Option) Model {
 //
 //nolint:recvcheck // tea.Model requires value receivers for Init, Update, View.
 type Model struct {
-	Style               lipgloss.Style
+	// Style is the container style applied to the viewport frame.
+	Style lipgloss.Style
+	// SelectedSearchStyle is the style for the currently selected search match.
 	SelectedSearchStyle lipgloss.Style
-	SearchStyle         lipgloss.Style
-	printer             *niceyaml.Printer
-	KeyMap              KeyMap
-	finder              Finder
-	searchMatches       []niceyaml.PositionRange
-	revision            *niceyaml.Revision
-	lines               *niceyaml.Source
-	renderedLines       []string
-	xOffset             int
-	horizontalStep      int
-	MouseWheelDelta     int
-	width               int
-	searchIndex         int
-	yOffset             int
-	longestLineWidth    int
-	height              int
-	diffMode            DiffMode
-	FillHeight          bool
-	MouseWheelEnabled   bool
-	WrapEnabled         bool
-	initialized         bool
+	// SearchStyle is the style for search match highlights.
+	SearchStyle lipgloss.Style
+	printer     *niceyaml.Printer
+	// KeyMap contains the keybindings for viewport navigation.
+	KeyMap         KeyMap
+	finder         Finder
+	searchMatches  []niceyaml.PositionRange
+	revision       *niceyaml.Revision
+	lines          *niceyaml.Source
+	renderedLines  []string
+	xOffset        int
+	horizontalStep int
+	// MouseWheelDelta is the number of lines to scroll per mouse wheel tick. Default: 3.
+	MouseWheelDelta  int
+	width            int
+	searchIndex      int
+	yOffset          int
+	longestLineWidth int
+	height           int
+	diffMode         DiffMode
+	// FillHeight pads output with empty lines to fill the viewport height when true.
+	FillHeight bool
+	// MouseWheelEnabled enables mouse wheel scrolling. Default: true.
+	MouseWheelEnabled bool
+	// WrapEnabled enables line wrapping based on viewport width.
+	WrapEnabled bool
+	initialized bool
 }
 
 func (m *Model) setInitialValues() {
@@ -266,7 +274,7 @@ func (m *Model) IsAtLatestRevision() bool {
 }
 
 // IsShowingDiff returns true if currently displaying a diff between revisions.
-// This is true when not at the first revision and diffMode is not None.
+// This is true when not at the first revision and [DiffMode] is not [DiffModeNone].
 func (m *Model) IsShowingDiff() bool {
 	return m.revision != nil && !m.revision.AtOrigin() && m.diffMode != DiffModeNone
 }
@@ -401,8 +409,8 @@ func (m *Model) getDiffBaseRevision() *niceyaml.Revision {
 	}
 }
 
-// getDisplayLines returns the lines to display based on current revision and diff mode.
-// MakeDiff is called when a diff should be shown; if nil, uses [niceyaml.NewFullDiff].
+// getDisplayLines returns the lines to display based on current revision and [DiffMode].
+// The makeDiff func is called when a diff should be shown; if nil, uses [niceyaml.NewFullDiff].
 func (m *Model) getDisplayLines(makeDiff func(base, current *niceyaml.Revision) *niceyaml.Source) *niceyaml.Source {
 	if m.revision == nil {
 		return nil

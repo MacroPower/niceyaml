@@ -1,4 +1,9 @@
-// Package fangs provides utilities for [github.com/charmbracelet/fang].
+// Package fangs provides utilities for integrating niceyaml with
+// [github.com/charmbracelet/fang], a Cobra companion library.
+//
+// The primary export is [ErrorHandler], a custom error handler that preserves
+// multi-line error formatting. This is particularly useful for niceyaml errors,
+// which include source context and annotations spanning multiple lines.
 package fangs
 
 import (
@@ -10,9 +15,12 @@ import (
 	"github.com/charmbracelet/fang"
 )
 
-// ErrorHandler is an implementation of [fang.ErrorHandler].
-// It is effectively [fang.DefaultErrorHandler], but has been slightly modified
-// to improve compatibility with niceyaml's error types.
+// ErrorHandler is an implementation of [fang.ErrorHandler] that preserves
+// multi-line error formatting. Unlike [fang.DefaultErrorHandler], which wraps
+// errors in a lipgloss style that can break multi-line output, this handler
+// applies styling only to the error header, keeping the error message intact.
+// This allows niceyaml errors with source context and annotations to render
+// correctly.
 //
 //nolint:gocritic // hugeParam: required by [fang.ErrorHandler] signature.
 func ErrorHandler(w io.Writer, styles fang.Styles, err error) {

@@ -201,8 +201,8 @@ func NewFullDiff(a, b *Revision) *FullDiff {
 	return &FullDiff{a: a, b: b}
 }
 
-// Lines returns the [Lines] representing the diff between the two revisions.
-// The returned Lines contains merged tokens from both revisions:
+// Lines returns a [*Source] representing the diff between the two revisions.
+// The returned Source contains merged tokens from both revisions:
 // unchanged lines use tokens from b, while changed lines include
 // deleted tokens from a followed by inserted tokens from b.
 // Lines contain flags for deleted/inserted lines.
@@ -244,7 +244,7 @@ func NewSummaryDiff(a, b *Revision, context int) *SummaryDiff {
 	return &SummaryDiff{a: a, b: b, context: max(0, context)}
 }
 
-// Lines returns [Lines] representing a summarized diff between two revisions.
+// Lines returns a [*Source] representing a summarized diff between two revisions.
 // It shows only changed lines with the specified number of context lines around each change.
 // Hunk headers are stored in [Line.Annotation.Content] for each hunk's first line.
 func (d *SummaryDiff) Lines() *Source {

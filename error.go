@@ -55,8 +55,9 @@ func (ew *ErrorWrapper) Wrap(err error, opts ...ErrorOption) error {
 }
 
 // Error represents a YAML error with optional source annotation.
-// Use [WithErrorToken], [WithPath] and [WithTokens], or [WithPath] and [WithFile],
-// to enable annotated error output that shows the relevant YAML location.
+// To enable annotated error output that shows the relevant YAML location, provide:
+//   - [WithErrorToken] directly specifies the error location, OR
+//   - [WithPath] combined with either [WithTokens] or [WithFile] to resolve the path
 //
 //nolint:recvcheck // Must satisfy error interface.
 type Error struct {

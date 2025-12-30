@@ -11,18 +11,13 @@ import (
 	"github.com/goccy/go-yaml/ast"
 )
 
-// Validator validates arbitrary data, typically used to validate decoded YAML documents.
+// Validator validates any data. Implementers should return an [Error]
+// pointing to the relevant YAML token if validation fails.
 type Validator interface {
 	Validate(v any) error
 }
 
 // Decoder decodes YAML documents from an [*ast.File].
-//
-// Note: Both [Decoder.Validate] and [Decoder.Decode] perform decode operations.
-// [Decoder.Validate] to [any] for schema validation, and [Decoder.Decode] to the typed
-// struct. However, both decodes use the same pre-parsed AST, so there is no overhead
-// from YAML re-parsing. This is necessary because we must construct [any] for our
-// [Validator], prior to decoding into typed structs.
 type Decoder struct {
 	f *ast.File
 }
@@ -49,6 +44,12 @@ func (d *Decoder) Documents() iter.Seq2[int, *DocumentDecoder] {
 }
 
 // DocumentDecoder validates and decodes a single [*ast.DocumentNode].
+//
+// Note: Both [DocumentDecoder.Validate] and [DocumentDecoder.Decode] perform decode
+// operations. [DocumentDecoder.Validate] decodes to [any] for schema validation, and
+// [DocumentDecoder.Decode] decodes to the typed struct. However, both decodes use the
+// same pre-parsed AST, so there is no overhead from YAML re-parsing. This is necessary
+// because we must construct [any] for our [Validator], prior to decoding into typed structs.
 type DocumentDecoder struct {
 	f   *ast.File
 	doc *ast.DocumentNode

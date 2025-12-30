@@ -36,8 +36,10 @@ import (
 )
 
 // LookupCommentFunc is a factory that creates a comment lookup function.
-// It takes a comment map and returns a function that looks up comments by
-// type and field name (empty field name for type-level comments).
+// It receives a comment map where keys follow the pattern "pkg.TypeName" for
+// type comments and "pkg.TypeName.FieldName" for field comments. The returned
+// function looks up comments by type and field name (empty field name for
+// type-level comments).
 type LookupCommentFunc func(commentMap map[string]string) func(t reflect.Type, f string) string
 
 // Generator generates a JSON schema from a Go type using reflection.

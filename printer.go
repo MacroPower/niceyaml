@@ -214,7 +214,7 @@ func (p *Printer) Print(lines LineIterator) string {
 }
 
 // PrintSlice prints a slice of lines from any [LineIterator].
-// It prints in the range [minLine, maxLine] as defined by the [LineIterator.EachLine] index.
+// It prints in the range [minLine, maxLine] as defined by the [LineIterator.Lines] index.
 // If minLine < 0, includes from the beginning; if maxLine < 0, includes to the end.
 func (p *Printer) PrintSlice(lines LineIterator, minLine, maxLine int) string {
 	content := p.renderLinesInRange(lines, minLine, maxLine)

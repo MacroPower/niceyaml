@@ -3,20 +3,30 @@ package yamlviewport
 import "charm.land/bubbles/v2/key"
 
 // KeyMap defines the keybindings for the viewport. Note that you don't
-// necessary need to use keybindings at all; the viewport can be controlled
-// programmatically with methods like Model.LineDown(1). See the GoDocs for
-// details.
+// necessarily need to use keybindings at all; the viewport can be controlled
+// programmatically with methods like [Model.ScrollDown] and [Model.ScrollUp].
 type KeyMap struct {
-	PageDown       key.Binding
-	PageUp         key.Binding
-	HalfPageUp     key.Binding
-	HalfPageDown   key.Binding
-	Down           key.Binding
-	Up             key.Binding
-	Left           key.Binding
-	Right          key.Binding
-	NextRevision   key.Binding
-	PrevRevision   key.Binding
+	// PageDown scrolls down by one page.
+	PageDown key.Binding
+	// PageUp scrolls up by one page.
+	PageUp key.Binding
+	// HalfPageUp scrolls up by half a page.
+	HalfPageUp key.Binding
+	// HalfPageDown scrolls down by half a page.
+	HalfPageDown key.Binding
+	// Down scrolls down by one line.
+	Down key.Binding
+	// Up scrolls up by one line.
+	Up key.Binding
+	// Left scrolls left by the horizontal step.
+	Left key.Binding
+	// Right scrolls right by the horizontal step.
+	Right key.Binding
+	// NextRevision navigates to the next revision.
+	NextRevision key.Binding
+	// PrevRevision navigates to the previous revision.
+	PrevRevision key.Binding
+	// ToggleDiffMode cycles through diff display modes.
 	ToggleDiffMode key.Binding
 }
 

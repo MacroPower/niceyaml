@@ -40,7 +40,7 @@ type StyleGetter interface {
 	GetStyle(s Style) *lipgloss.Style
 }
 
-// TokenStyler styles [token.Tokens].
+// TokenStyler manages style ranges for rendering YAML tokens.
 type TokenStyler interface {
 	StyleGetter
 	AddStyleToRange(style *lipgloss.Style, r PositionRange)

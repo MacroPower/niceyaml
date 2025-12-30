@@ -6,22 +6,36 @@
 //
 // # Line Management
 //
-// The core abstraction is [Lines], which organizes YAML tokens by line number.
-// A [Lines] value can be created from various sources:
+// The core abstraction is [Source], which organizes YAML tokens by line number.
+// A [Source] value can be created from various sources:
 //
-//   - [NewLinesFromString]: Parse YAML from a string
-//   - [NewLinesFromFile]: Extract tokens from an [ast.File]
-//   - [NewLinesFromToken]: Build from a single token
-//   - [NewLinesFromTokens]: Build from a token slice
+//   - [NewSourceFromString]: Parse YAML from a string
+//   - [NewSourceFromToken]: Build from a single token
+//   - [NewSourceFromTokens]: Build from a token slice
+//
+// Use [WithName] to assign a name to [Source] for identification.
+// Use [Source.Parse] to parse tokens into an [ast.File] for further processing.
+//
+// [Source.Lines] and [Source.Runes] provide iterators for traversing
+// lines and individual runes with their positions.
 //
 // Each [Line] contains the tokens for that line, along with optional metadata:
 //
 //   - [Annotation]: Extra content such as error messages or diff headers
-//   - [Flag]: Category markers for diff display ([FlagInserted], [FlagDeleted])
+//   - [Flag]: Category markers ([FlagInserted], [FlagDeleted], [FlagAnnotation])
+//
+// # Position Tracking
+//
+// [Position] represents a 0-indexed line and column location within a document.
+// [PositionRange] defines a half-open range [Start, End) for selecting spans
+// of text. Create positions and ranges using [NewPosition] and [NewPositionRange].
+// Use [PositionRange.Contains] to check if a position falls within a range.
+// These types integrate with the [Printer] for highlighting and with
+// the [Finder] for search results.
 //
 // # Revision Tracking
 //
-// [Revision] represents a version of [Lines] in a doubly-linked chain,
+// [Revision] represents a version of [Source] in a doubly-linked chain,
 // enabling navigation through document history:
 //
 //	origin := niceyaml.NewRevision(original)
@@ -41,11 +55,28 @@
 //
 // The summary output follows unified diff format with hunk headers.
 //
+// # Style System
+//
+// The [Style] type identifies token categories for syntax highlighting.
+// [Styles] maps style identifiers to lipgloss styles. Use [DefaultStyles]
+// for a sensible default palette, or provide a custom [StyleGetter] to
+// the [Printer].
+//
 // # Styled YAML Printing
 //
 // The [Printer] type renders YAML tokens with syntax highlighting via lipgloss.
-// You can customize colors, enable line numbers, highlight specific ranges,
-// and render diffs between documents.
+// Use [Printer.Print] with any [LineIterator] (such as [*Source]) to render output.
+// Configure printers using [PrinterOption] functions:
+//
+//   - [WithStyle]: Set the container style
+//   - [WithStyles]: Provide custom token styles via [StyleGetter]
+//   - [WithGutter]: Set a gutter function for line prefixes
+//
+// Built-in gutter functions include [DefaultGutter], [DiffGutter],
+// [LineNumberGutter], and [NoGutter].
+//
+// Use [Printer.SetWidth] to enable word wrapping, and
+// [Printer.AddStyleToRange] to highlight specific [PositionRange] spans.
 //
 // # Error Formatting
 //
@@ -53,13 +84,46 @@
 // information. When printed, errors display the relevant portion of the source
 // with the error location highlighted.
 //
+// Create errors with [NewError] and configure with [ErrorOption] functions:
+//
+//   - [WithSourceLines]: Number of context lines to display
+//   - [WithPath]: YAML path where the error occurred
+//   - [WithErrorToken]: Token associated with the error
+//
 // Use [ErrorWrapper] to create errors with consistent default options.
 //
 // # String Finding
 //
 // The [Finder] type searches for strings within YAML tokens, returning
 // [PositionRange] values that can be used with [Printer.AddStyleToRange]
-// for highlighting matches.
+// for highlighting matches. Configure search behavior with [WithNormalizer]
+// to apply text normalization such as [StandardNormalizer] for case-insensitive
+// matching.
+//
+// # YAML Utilities
+//
+// [Encoder] and [Decoder] wrap go-yaml functionality for encoding and
+// decoding YAML documents with consistent error handling and
+// validation via the [Validator] interface.
+//
+// [Decoder] provides an iterator-based API via [Decoder.Documents], which
+// yields [DocumentDecoder] instances for each document in a multi-document
+// YAML file:
+//
+//	decoder := niceyaml.NewDecoder(file)
+//	for _, doc := range decoder.Documents() {
+//	    var config Config
+//	    if err := doc.Decode(&config); err != nil {
+//	        return err
+//	    }
+//	}
+//
+// [DocumentDecoder] provides methods for working with individual documents:
+// [DocumentDecoder.GetValue], [DocumentDecoder.Validate], [DocumentDecoder.Decode],
+// and their context-aware variants.
+//
+// [NewPathBuilder] and [NewPath] create [*yaml.Path]s for pointing to specific
+// YAML paths programmatically.
 //
 // # Schema Generation and Validation
 //

@@ -465,7 +465,8 @@ func (s *Source) IsEmpty() bool {
 	return len(s.lines) == 0
 }
 
-// Lines returns an iterator over all lines with their positions.
+// Lines returns an iterator over all lines.
+// Each iteration yields a [Position] and the [Line] at that position.
 func (s *Source) Lines() iter.Seq2[Position, Line] {
 	return func(yield func(Position, Line) bool) {
 		for i, line := range s.lines {
@@ -476,7 +477,8 @@ func (s *Source) Lines() iter.Seq2[Position, Line] {
 	}
 }
 
-// Runes returns an iterator over all runes with their positions.
+// Runes returns an iterator over all runes.
+// Each iteration yields a [Position] and the rune at that position.
 func (s *Source) Runes() iter.Seq2[Position, rune] {
 	return func(yield func(Position, rune) bool) {
 		for i, line := range s.lines {
@@ -634,7 +636,7 @@ func (s *Source) PositionsFromToken(tk *token.Token) []Position {
 }
 
 // TokenPositionRangesFromToken returns all position ranges for a given token.
-// This is a convenience method that combines [Lines.PositionsFromToken] and [Lines.TokenPositionRanges].
+// This is a convenience method that combines [Source.PositionsFromToken] and [Source.TokenPositionRanges].
 // Returns nil if the token is nil or not found in the Source.
 func (s *Source) TokenPositionRangesFromToken(tk *token.Token) []PositionRange {
 	positions := s.PositionsFromToken(tk)

@@ -33,14 +33,16 @@ import (
 	"github.com/macropower/niceyaml"
 )
 
-// Validator validates data against a JSON schema.
-// Uses [github.com/santhosh-tekuri/jsonschema/v6].
+// Validator validates data against a compiled JSON schema and returns errors
+// with YAML path information. Implements the [niceyaml.Validator] interface
+// for use with [niceyaml.DocumentDecoder]. Uses [github.com/santhosh-tekuri/jsonschema/v6].
 type Validator struct {
 	schema *jsonschema.Schema
 }
 
 // NewValidator creates a new [Validator] from JSON schema data.
 // The url parameter is the schema's identifier used for reference resolution.
+// Returns an error if the schema JSON is invalid or fails to compile.
 func NewValidator(url string, schemaData []byte) (*Validator, error) {
 	var schema any
 
@@ -63,7 +65,8 @@ func NewValidator(url string, schemaData []byte) (*Validator, error) {
 	return &Validator{schema: jss}, nil
 }
 
-// MustNewValidator is a [NewValidator] that panics on error.
+// MustNewValidator is like [NewValidator] but panics on error.
+// Use for schemas known to be valid at compile time, such as embedded schemas.
 func MustNewValidator(url string, schemaData []byte) *Validator {
 	v, err := NewValidator(url, schemaData)
 	if err != nil {
@@ -74,7 +77,9 @@ func MustNewValidator(url string, schemaData []byte) *Validator {
 }
 
 // Validate validates the given data against the schema.
-// It returns a [niceyaml.Error] that can be used for precise error reporting.
+// Returns nil if validation succeeds. On validation failure, returns a
+// [niceyaml.Error] containing the YAML path to the invalid field for use
+// with [niceyaml.Printer] for rich error display.
 func (s *Validator) Validate(data any) error {
 	// Validate against schema.
 	err := s.schema.Validate(data)
