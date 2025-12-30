@@ -27,8 +27,8 @@ func NewDecoder(f *ast.File) *Decoder {
 	return &Decoder{f}
 }
 
-// DocumentCount returns the number of YAML documents in the file.
-func (d *Decoder) DocumentCount() int {
+// Count returns the number of YAML documents in the file.
+func (d *Decoder) Count() int {
 	return len(d.f.Docs)
 }
 
