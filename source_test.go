@@ -1,6 +1,7 @@
 package niceyaml_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,116 @@ func dumpTokens(tks token.Tokens) string {
 	var sb strings.Builder
 	for _, tk := range tks {
 		sb.WriteString(tk.Origin)
+	}
+
+	return sb.String()
+}
+
+// assertTokensEqual compares all fields of two token slices.
+func assertTokensEqual(t *testing.T, want, got token.Tokens) {
+	t.Helper()
+
+	if len(want) != len(got) {
+		require.Fail(t, fmt.Sprintf("token count mismatch: want %d, got %d", len(want), len(got)),
+			"want tokens:\n%s\ngot tokens:\n%s", formatTokens(want), formatTokens(got))
+	}
+
+	for i := range want {
+		assertTokenEqual(t, want[i], got[i], fmt.Sprintf("token %d", i))
+	}
+}
+
+// assertTokenEqual compares all fields of two tokens.
+func assertTokenEqual(t *testing.T, want, got *token.Token, prefix string) {
+	t.Helper()
+
+	var diffs []string
+
+	if want.Type != got.Type {
+		diffs = append(diffs, "Type")
+	}
+	if want.Value != got.Value {
+		diffs = append(diffs, "Value")
+	}
+	if want.Origin != got.Origin {
+		diffs = append(diffs, "Origin")
+	}
+	if want.CharacterType != got.CharacterType {
+		diffs = append(diffs, "CharacterType")
+	}
+	if want.Indicator != got.Indicator {
+		diffs = append(diffs, "Indicator")
+	}
+	if !positionsEqual(want.Position, got.Position) {
+		diffs = append(diffs, "Position")
+	}
+
+	if len(diffs) > 0 {
+		assert.Fail(t, prefix+" mismatch",
+			"want:\n%s\ngot:\n%s\ndifferences: %s",
+			formatToken(want), formatToken(got), strings.Join(diffs, ", "))
+	}
+}
+
+// positionsEqual compares two token.Position values for equality.
+func positionsEqual(want, got *token.Position) bool {
+	if want == nil && got == nil {
+		return true
+	}
+	if want == nil || got == nil {
+		return false
+	}
+
+	return want.Line == got.Line &&
+		want.Column == got.Column &&
+		want.Offset == got.Offset &&
+		want.IndentNum == got.IndentNum &&
+		want.IndentLevel == got.IndentLevel
+}
+
+// formatPosition formats a token.Position for debug output.
+func formatPosition(pos *token.Position) string {
+	if pos == nil {
+		return "<nil>"
+	}
+
+	return fmt.Sprintf("%d:%d (Offset: %d, Indent: %d/%d)",
+		pos.Line, pos.Column, pos.Offset, pos.IndentNum, pos.IndentLevel)
+}
+
+// formatToken formats a token.Token for detailed debug output.
+func formatToken(tk *token.Token) string {
+	if tk == nil {
+		return "<nil>"
+	}
+
+	return fmt.Sprintf(`  Type:        %s
+  Value:       %q
+  Origin:      %q
+  Position:    %s
+  Indicator:   %s
+  CharType:    %s`,
+		tk.Type,
+		tk.Value,
+		tk.Origin,
+		formatPosition(tk.Position),
+		tk.Indicator,
+		tk.CharacterType)
+}
+
+// formatTokens formats a slice of tokens for debug output.
+func formatTokens(tks token.Tokens) string {
+	if len(tks) == 0 {
+		return "  <empty>"
+	}
+
+	var sb strings.Builder
+	for i, tk := range tks {
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+
+		sb.WriteString(fmt.Sprintf("[%d]\n%s", i, formatToken(tk)))
 	}
 
 	return sb.String()
@@ -199,6 +310,184 @@ data:
 
 			assert.Equal(t, dumpTokens(input), dumpTokens(gotTokens))
 			assert.Equal(t, strings.TrimSuffix(dumpTokens(input), "\n"), gotContent)
+		})
+	}
+}
+
+func TestNewTokens_FieldRoundtrip(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]string{
+		// Simple cases.
+		"simple key-value": "key: value\n",
+		"multiple keys":    "first: 1\nsecond: 2\nthird: 3\n",
+		"nested map":       "parent:\n  child: value\n",
+		"simple list":      "items:\n  - one\n  - two\n",
+		"inline map":       "config: {key: value}\n",
+		"inline list":      "items: [a, b, c]\n",
+		"boolean values":   "enabled: true\ndisabled: false\n",
+		"numeric values":   "integer: 42\nfloat: 3.14\n",
+		"double quoted":    "message: \"hello world\"\n",
+		"single quoted":    "message: 'hello world'\n",
+		"comment only":     "# This is a comment\n",
+		"inline comment":   "key: value # inline comment\n",
+		"anchor and alias": "defaults: &defaults\n  timeout: 30\nproduction:\n  <<: *defaults\n",
+
+		// Split token cases (literal/folded blocks).
+		"literal block":      "script: |\n  line1\n  line2\n",
+		"folded block":       "desc: >\n  first\n  second\n",
+		"literal block long": "data: |\n  a\n  b\n  c\n  d\n",
+
+		// Block scalar variants.
+		"literal strip":  "text: |-\n  line1\n  line2\n",
+		"literal keep":   "text: |+\n  line1\n  line2\n\n",
+		"folded strip":   "text: >-\n  line1\n  line2\n",
+		"folded keep":    "text: >+\n  line1\n  line2\n\n",
+		"literal indent": "code: |2\n    indented\n    content\n",
+
+		// Document markers.
+		"document start":          "---\nkey: value\n",
+		"document end":            "key: value\n...\n",
+		"multi-document":          "---\ndoc: 1\n...\n---\ndoc: 2\n",
+		"document with directive": "%YAML 1.2\n---\nkey: value\n",
+
+		// Tags.
+		"explicit string tag": "value: !!str 12345\n",
+		"explicit int tag":    "value: !!int \"42\"\n",
+		"explicit float tag":  "value: !!float \"3.14\"\n",
+		"explicit bool tag":   "value: !!bool \"yes\"\n",
+		"explicit null tag":   "value: !!null \"\"\n",
+		"custom tag":          "value: !custom data\n",
+		"tag with flow map":   "price: !money {amount: 10, currency: USD}\n",
+
+		// Numeric formats.
+		"hex number":        "value: 0xFF\n",
+		"octal number":      "value: 0o77\n",
+		"scientific":        "value: 6.022e23\n",
+		"negative float":    "value: -18.5\n",
+		"infinity":          "value: .inf\n",
+		"negative infinity": "value: -.inf\n",
+		"not a number":      "value: .nan\n",
+
+		// Special values.
+		"null tilde":  "value: ~\n",
+		"null word":   "value: null\n",
+		"empty value": "key:\n",
+
+		// Anchors and aliases.
+		"anchor definition":  "base: &base\n  key: value\n",
+		"alias reference":    "ref: *base\n",
+		"merge key":          "merged:\n  <<: *base\n  extra: data\n",
+		"anchor on sequence": "list: &items\n  - one\n  - two\n",
+
+		// Flow styles.
+		"nested flow map":       "data: {outer: {inner: value}}\n",
+		"nested flow list":      "data: [[1, 2], [3, 4]]\n",
+		"mixed flow":            "data: {list: [a, b], map: {k: v}}\n",
+		"flow with anchor":      "data: {key: &val value, ref: *val}\n",
+		"flow map in block seq": "items:\n  - {name: a, value: 1}\n",
+
+		// Complex structures.
+		"deeply nested": "a:\n  b:\n    c:\n      d: value\n",
+		"list of maps":  "items:\n  - name: one\n    value: 1\n  - name: two\n    value: 2\n",
+		"map of lists":  "groups:\n  a: [1, 2]\n  b: [3, 4]\n",
+
+		// Quoted strings with escapes.
+		"double quote escapes": "text: \"line1\\nline2\\ttab\"\n",
+		"unicode escape":       "text: \"\\u65E5\\u672C\"\n",
+		"single quote literal": "text: 'no \\n escape'\n",
+		"quote in single":      "text: 'it''s quoted'\n",
+		"quote in double":      "text: \"say \\\"hello\\\"\"\n",
+
+		// Unicode content.
+		"unicode value":   "name: 日本語\n",
+		"unicode key":     "日本語: value\n",
+		"emoji":           "icon: 🎉\n",
+		"mixed scripts":   "text: Hello 世界 مرحبا\n",
+		"combining marks": "text: Việt Nam\n",
+		"rtl text":        "arabic: مرحبا\n",
+		"emoji sequence":  "family: 👨‍👩‍👧‍👦\n",
+		"flag emoji":      "flag: 🇯🇵\n",
+
+		// Edge cases.
+		"colon in value":     "text: \"Note: important\"\n",
+		"hash in value":      "text: \"Item #1\"\n",
+		"special yaml chars": "text: \"[not] {a} list\"\n",
+		"multiline comment":  "# line 1\n# line 2\nkey: value\n",
+		"blank lines":        "key1: value1\n\nkey2: value2\n",
+		"trailing comment":   "key: value # comment\n",
+
+		// Directives and custom tags.
+		"tag directive":        "%TAG !custom! tag:example.com,2024:\n---\nvalue: !custom!price 10\n",
+		"tag with nested flow": "price: !custom!price { amount: 12.50, currency: EUR }\n",
+
+		// Complex keys.
+		"emoji as key":           "🍣:\n  value: sushi\n",
+		"quoted unicode key":     "\"東京\":\n  flagship: true\n",
+		"explicit key indicator": "? complex key\n: value\n",
+
+		// Advanced numeric formats.
+		"underscore separator": "value: 1_000_000\n",
+		"date":                 "date: 2024-03-15\n",
+		"timestamp timezone":   "time: 2024-11-20T14:30:00+01:00\n",
+
+		// Binary data.
+		"binary tag": "data: !!binary |\n  R0lGODlhAQABAIAAAAAAAP///w==\n",
+
+		// Merge key variants.
+		"merge multiple anchors": "base1: &b1\n  a: 1\nbase2: &b2\n  b: 2\nmerged:\n  <<: [*b1, *b2]\n",
+
+		// Advanced block scalars.
+		"literal indent strip":         "code: |2-\n    indented\n    content\n",
+		"folded indent":                "text: >2\n    folded\n    indented\n",
+		"comment after literal header": "key: | # this is a comment\n  line1\n  line2\n",
+		"comment after folded header":  "key: > # this is a comment\n  line1\n  line2\n",
+		"folded with blank lines":      "text: >\n  first\n\n  second\n",
+
+		// Complex flow structures.
+		"flow map in block seq nested": "items:\n  - Pizza: { size: large, toppings: [a, b, c] }\n",
+		"nested flow with anchors":     "data: { key: &v value, list: [*v, *v] }\n",
+		"deep nested flow":             "a: {b: {c: {d: {e: value}}}}\n",
+
+		// Special unicode characters.
+		"zwsp":                  "text: \"foo\u200Bbar\"\n",
+		"zwnj":                  "text: \"می\u200Cروم\"\n",
+		"zwj emoji":             "icon: 👨\u200D👩\u200D👧\u200D👦\n",
+		"box drawing":           "art: ╔═══╗\n",
+		"math symbols":          "formula: \"E = mc²\"\n",
+		"subscript superscript": "water: H₂O\n",
+		"skin tone emoji":       "wave: 👋🏽\n",
+		"keycap emoji":          "number: 1️⃣\n",
+		"combining zalgo":       "text: \"H̷̭͂ë̶̬l̷̰̐l̴̮̈́o̷̱͝\"\n",
+
+		// Bidirectional text.
+		"bidi mixed":   "text: \"Hello مرحبا World\"\n",
+		"rtl with ltr": "review: \"המסעדה is great!\"\n",
+
+		// Greek letters.
+		"greek text": "letters: [α, β, γ, δ]\n",
+		"greek key":  "Ελληνικά: Greek\n",
+
+		// More edge cases.
+		"ampersand in value":     "text: \"Tom & Jerry\"\n",
+		"asterisk in value":      "rating: \"5* rating\"\n",
+		"pipe in value":          "options: \"A | B\"\n",
+		"greater in value":       "compare: \"A > B\"\n",
+		"question in value":      "ask: \"Why? Because!\"\n",
+		"empty document":         "---\n...\n",
+		"CRLF line endings":      "key: value\r\nother: data\r\n",
+		"plain multiline string": "key: this is\n  a multiline\n  plain string\n",
+	}
+
+	for name, input := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			original := lexer.Tokenize(input)
+			result := niceyaml.NewSourceFromTokens(original, niceyaml.WithName("test"))
+			gotTokens := result.Tokens()
+
+			assertTokensEqual(t, original, gotTokens)
 		})
 	}
 }
@@ -1459,23 +1748,43 @@ func TestNewSourceFromTokens_SplitTokenOffsets(t *testing.T) {
 	}
 }
 
-func TestNewSourceFromTokens_OffsetByteCount(t *testing.T) {
+func TestNewSourceFromTokens_OffsetRuneCount(t *testing.T) {
 	t.Parallel()
 
-	// Test that Offset uses byte count, not rune count.
-	// UTF-8 chars like 日 are 3 bytes each.
-	input := "key: 日本語\n"
-	lines := niceyaml.NewSourceFromTokens(lexer.Tokenize(input))
-
-	// Get the original lexer tokens to verify we match.
+	// Test that Offset uses rune count, not byte count.
+	// The go-yaml lexer increments offset by rune count, not byte count.
+	// UTF-8 chars like 日 are 3 bytes each, but 1 rune each.
+	//
+	// For input "日: value\n":
+	//   - "日" token at offset 1 (first position)
+	//   - ":" token at offset 2 (after 1 rune for 日)
+	//   - "value" token at offset 4 (after 3 runes for "日: ")
+	//
+	// If byte-based, ":" would be at offset 4 (after 3 bytes for 日).
+	input := "日: value\n"
 	originalTks := lexer.Tokenize(input)
+	lines := niceyaml.NewSourceFromTokens(originalTks)
 	resultTks := lines.Tokens()
 
-	// Both should have the same total byte progression.
-	// Note: The lexer drops the final trailing newline from token origins,
-	// so we compare our output to lexer output, not to input length.
-	var origTotalBytes, resultTotalBytes int
+	// Verify the round-trip preserves lexer output exactly.
+	assertTokensEqual(t, originalTks, resultTks)
 
+	// Verify specific offset values that prove rune-based counting.
+	// The ":" (MappingValue) token should be at offset 2, not 4.
+	require.Len(t, resultTks, 3, "expected 3 tokens: key, :, value")
+
+	// Token 0: "日" at offset 1.
+	assert.Equal(t, 1, resultTks[0].Position.Offset, "first token offset should be 1")
+
+	// Token 1: ":" at offset 2 (rune-based) not 4 (byte-based).
+	assert.Equal(t, 2, resultTks[1].Position.Offset,
+		"MappingValue ':' should be at offset 2 (rune-based), not 4 (byte-based)")
+
+	// Token 2: "value" at offset 4 (after "日: " which is 3 runes).
+	assert.Equal(t, 4, resultTks[2].Position.Offset, "value token offset should be 4")
+
+	// Also verify total bytes match for Origin content preservation.
+	var origTotalBytes, resultTotalBytes int
 	for _, tk := range originalTks {
 		origTotalBytes += len(tk.Origin)
 	}
@@ -2024,5 +2333,446 @@ doc2: value2
 		// Verify it's a niceyaml.Error with source annotation.
 		var yamlErr *niceyaml.Error
 		require.ErrorAs(t, err, &yamlErr)
+	})
+}
+
+func TestNewSourceFromTokens_BlockScalarPositionSemantics(t *testing.T) {
+	t.Parallel()
+
+	// The go-yaml lexer places the Position of block scalar content (StringType)
+	// on the LAST line of the content, not the first.
+	// This is critical for round-trip fidelity.
+
+	tcs := map[string]struct {
+		input            string
+		wantContentLine  int // Expected Position.Line of the StringType content token.
+		wantContentLines int // Number of content lines.
+	}{
+		"literal two lines": {
+			input: `key: |
+  line1
+  line2
+`,
+			wantContentLine:  3, // Position should be on last content line.
+			wantContentLines: 2,
+		},
+		"literal three lines": {
+			input: `key: |
+  a
+  b
+  c
+`,
+			wantContentLine:  4,
+			wantContentLines: 3,
+		},
+		"folded two lines": {
+			input: `key: >
+  first
+  second
+`,
+			wantContentLine:  3,
+			wantContentLines: 2,
+		},
+		"literal with strip": {
+			input: `key: |-
+  line1
+  line2
+`,
+			wantContentLine:  3,
+			wantContentLines: 2,
+		},
+		"literal with keep and trailing blank": {
+			input: `key: |+
+  line1
+  line2
+
+`,
+			wantContentLine:  4, // Blank line counts.
+			wantContentLines: 3,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			originalTks := lexer.Tokenize(tc.input)
+			lines := niceyaml.NewSourceFromTokens(originalTks)
+			resultTks := lines.Tokens()
+
+			// Verify round-trip fidelity.
+			assertTokensEqual(t, originalTks, resultTks)
+
+			// Find the StringType token (block scalar content).
+			var contentToken *token.Token
+			for _, tk := range resultTks {
+				if tk.Type == token.StringType && strings.Contains(tk.Origin, "\n") {
+					contentToken = tk
+					break
+				}
+			}
+
+			require.NotNil(t, contentToken, "expected to find block scalar content token")
+			assert.Equal(t, tc.wantContentLine, contentToken.Position.Line,
+				"block scalar content Position.Line should point to LAST line")
+		})
+	}
+}
+
+func TestNewSourceFromTokens_PlainMultilinePositionSemantics(t *testing.T) {
+	t.Parallel()
+
+	// The go-yaml lexer places the Position of plain multiline strings (StringType)
+	// on the FIRST line, not the last. This is different from block scalars.
+	// This is critical for round-trip fidelity.
+
+	tcs := map[string]struct {
+		input           string
+		wantContentLine int // Expected Position.Line of the StringType content token.
+	}{
+		"plain multiline two lines": {
+			input: `key: this is
+  continued
+`,
+			wantContentLine: 1, // Position should be on FIRST line.
+		},
+		"plain multiline three lines": {
+			input: `key: first
+  second
+  third
+`,
+			wantContentLine: 1,
+		},
+		"plain multiline with more indent": {
+			input: `parent:
+  child: line one
+    continued line
+`,
+			wantContentLine: 2, // First line of the value.
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			originalTks := lexer.Tokenize(tc.input)
+			lines := niceyaml.NewSourceFromTokens(originalTks)
+			resultTks := lines.Tokens()
+
+			// Verify round-trip fidelity.
+			assertTokensEqual(t, originalTks, resultTks)
+
+			// Find the multiline StringType token (value with newlines).
+			var contentToken *token.Token
+			for _, tk := range resultTks {
+				if tk.Type == token.StringType && strings.Contains(tk.Origin, "\n") {
+					contentToken = tk
+					break
+				}
+			}
+
+			require.NotNil(t, contentToken, "expected to find plain multiline string token")
+			assert.Equal(t, tc.wantContentLine, contentToken.Position.Line,
+				"plain multiline string Position.Line should point to FIRST line")
+		})
+	}
+}
+
+func TestNewSourceFromTokens_QuotedMultilineActualNewlines(t *testing.T) {
+	t.Parallel()
+
+	// Test quoted strings with actual newlines in the content (not escaped \n).
+	// The go-yaml lexer places the Position at the opening quote line.
+	// The Value normalizes actual newlines to spaces in double-quoted strings.
+
+	tcs := map[string]struct {
+		input         string
+		wantValue     string
+		wantLine      int
+		wantColumn    int
+		wantTokenType token.Type
+	}{
+		"double quoted with actual newline": {
+			input: "key: \"line1\nline2\"\n",
+			// Position should be at opening quote on line 1.
+			wantLine:      1,
+			wantColumn:    6,             // After "key: ".
+			wantValue:     "line1 line2", // Newline becomes space.
+			wantTokenType: token.DoubleQuoteType,
+		},
+		"double quoted with multiple newlines": {
+			input:         "key: \"a\nb\nc\"\n",
+			wantLine:      1,
+			wantColumn:    6,
+			wantValue:     "a b c",
+			wantTokenType: token.DoubleQuoteType,
+		},
+		"single quoted with actual newline": {
+			input:         "key: 'line1\nline2'\n",
+			wantLine:      1,
+			wantColumn:    6,
+			wantValue:     "line1 line2", // Newline becomes space.
+			wantTokenType: token.SingleQuoteType,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			originalTks := lexer.Tokenize(tc.input)
+			lines := niceyaml.NewSourceFromTokens(originalTks)
+			resultTks := lines.Tokens()
+
+			// Verify round-trip fidelity.
+			assertTokensEqual(t, originalTks, resultTks)
+
+			// Find the quoted token.
+			var quotedToken *token.Token
+			for _, tk := range resultTks {
+				if tk.Type == tc.wantTokenType {
+					quotedToken = tk
+					break
+				}
+			}
+
+			require.NotNil(t, quotedToken, "expected to find quoted string token")
+			assert.Equal(t, tc.wantLine, quotedToken.Position.Line,
+				"quoted string Position.Line should point to opening quote line")
+			assert.Equal(t, tc.wantColumn, quotedToken.Position.Column,
+				"quoted string Position.Column should point to opening quote")
+			assert.Equal(t, tc.wantValue, quotedToken.Value,
+				"quoted string Value should have normalized newlines")
+		})
+	}
+}
+
+func TestNewSourceFromTokens_EmptyBlockScalar(t *testing.T) {
+	t.Parallel()
+
+	// Test edge case: block scalar header with no content.
+	// This can happen with "key: |\n" followed by another key or end of document.
+	//
+	// KNOWN LIMITATION: go-yaml lexer produces an empty StringType token
+	// (Origin="", Value="") after block scalar headers when there's no content.
+	// Our implementation does not preserve these empty tokens, so round-trip
+	// fidelity differs from lexer output for this edge case.
+	//
+	// Example lexer output for "key: |\nnext: value\n":
+	//   [0] String "key"
+	//   [1] MappingValue ":"
+	//   [2] Literal "|"
+	//   [3] String "" <- empty block scalar content (Origin="", Value="")
+	//   [4] String "next"
+	//   ...
+	//
+	// Our output omits token [3] because we filter/skip empty tokens.
+
+	tcs := map[string]struct {
+		input string
+	}{
+		"literal empty followed by key": {
+			input: `key: |
+next: value
+`,
+		},
+		"folded empty followed by key": {
+			input: `key: >
+next: value
+`,
+		},
+		"literal empty at end": {
+			input: `key: |
+`,
+		},
+		"literal strip empty": {
+			input: `key: |-
+next: value
+`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			originalTks := lexer.Tokenize(tc.input)
+			lines := niceyaml.NewSourceFromTokens(originalTks)
+			resultTks := lines.Tokens()
+
+			// Verify Source is valid (structure integrity).
+			require.NoError(t, lines.Validate())
+
+			// Document the limitation: empty block scalar tokens are not preserved.
+			// Count empty StringType tokens in original that won't be in result.
+			var emptyCount int
+			for _, tk := range originalTks {
+				if tk.Type == token.StringType && tk.Origin == "" && tk.Value == "" {
+					emptyCount++
+				}
+			}
+
+			// Our implementation produces fewer tokens when empty block scalar
+			// content tokens exist. This is a known limitation.
+			if emptyCount > 0 {
+				assert.Len(t, resultTks, len(originalTks)-emptyCount,
+					"result should have %d fewer tokens due to empty block scalar limitation", emptyCount)
+			} else {
+				// No empty tokens, should be exact match.
+				assertTokensEqual(t, originalTks, resultTks)
+			}
+		})
+	}
+}
+
+func TestNewSourceFromTokens_BlockScalarTrailingBlanks(t *testing.T) {
+	t.Parallel()
+
+	// Test block scalars with trailing blank lines and different chomping indicators.
+	// - strip (-): Remove all trailing newlines.
+	// - clip (default): Keep single trailing newline.
+	// - keep (+): Keep all trailing newlines.
+
+	tcs := map[string]struct {
+		input     string
+		wantValue string // Expected Value after chomping.
+	}{
+		"literal keep with trailing blanks": {
+			input: `key: |+
+  content
+
+`,
+			wantValue: "content\n\n",
+		},
+		"literal strip with content": {
+			input: `key: |-
+  content
+`,
+			wantValue: "content",
+		},
+		"literal clip default": {
+			input: `key: |
+  content
+`,
+			wantValue: "content\n",
+		},
+		"folded keep with trailing blanks": {
+			input: `key: >+
+  line1
+  line2
+
+`,
+			wantValue: "line1 line2\n\n",
+		},
+		"folded strip": {
+			input: `key: >-
+  line1
+  line2
+`,
+			wantValue: "line1 line2",
+		},
+		"literal keep multiple trailing": {
+			input: `key: |+
+  content
+
+
+`,
+			wantValue: "content\n\n\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			originalTks := lexer.Tokenize(tc.input)
+			lines := niceyaml.NewSourceFromTokens(originalTks)
+			resultTks := lines.Tokens()
+
+			// Verify round-trip fidelity.
+			assertTokensEqual(t, originalTks, resultTks)
+
+			// Find the block scalar content token.
+			var contentToken *token.Token
+			for _, tk := range resultTks {
+				if tk.Type == token.StringType && strings.Contains(tk.Origin, "\n") {
+					contentToken = tk
+					break
+				}
+			}
+
+			require.NotNil(t, contentToken, "expected to find block scalar content token")
+			assert.Equal(t, tc.wantValue, contentToken.Value,
+				"block scalar Value should match chomping behavior")
+		})
+	}
+}
+
+func TestNewSourceFromTokens_ColumnPositionAfterSplit(t *testing.T) {
+	t.Parallel()
+
+	// Test that Column positions are correctly calculated when multiline tokens
+	// are split across lines. For block scalars, each split part should have
+	// Column calculated based on the leading whitespace of that line.
+
+	t.Run("block scalar column positions", func(t *testing.T) {
+		t.Parallel()
+
+		input := `key: |
+  line1
+  line2
+`
+		originalTks := lexer.Tokenize(input)
+		lines := niceyaml.NewSourceFromTokens(originalTks)
+
+		// Verify we have the expected number of lines.
+		require.Equal(t, 3, lines.Count())
+
+		// Line 0: "key: |" - should have key, mapping value, and literal indicator.
+		line0 := lines.Line(0)
+		require.GreaterOrEqual(t, len(line0.Tokens()), 3, "line 0 should have at least 3 tokens")
+		assert.Equal(t, 1, line0.Token(0).Position.Column, "key token column should be 1")
+
+		// Line 1: "  line1" - split block scalar content, first content line.
+		line1 := lines.Line(1)
+		require.NotEmpty(t, line1.Tokens(), "line 1 should have tokens")
+		// Column should reflect position within line (content starts at column 1 for split tokens).
+		assert.Positive(t, line1.Token(0).Position.Column, "line 1 token should have positive column")
+
+		// Line 2: "  line2" - split block scalar content, second content line.
+		line2 := lines.Line(2)
+		require.NotEmpty(t, line2.Tokens(), "line 2 should have tokens")
+		assert.Positive(t, line2.Token(0).Position.Column, "line 2 token should have positive column")
+
+		// Verify round-trip produces identical tokens.
+		resultTks := lines.Tokens()
+		assertTokensEqual(t, originalTks, resultTks)
+	})
+
+	t.Run("plain multiline column positions", func(t *testing.T) {
+		t.Parallel()
+
+		input := `key: this is
+  continued
+`
+		originalTks := lexer.Tokenize(input)
+		lines := niceyaml.NewSourceFromTokens(originalTks)
+
+		// Verify we have the expected number of lines.
+		require.Equal(t, 2, lines.Count())
+
+		// Line 0: "key: this is" - key, mapping value, first part of string.
+		line0 := lines.Line(0)
+		require.GreaterOrEqual(t, len(line0.Tokens()), 3, "line 0 should have at least 3 tokens")
+
+		// Line 1: "  continued" - continuation of plain multiline string.
+		line1 := lines.Line(1)
+		require.NotEmpty(t, line1.Tokens(), "line 1 should have tokens")
+		assert.Positive(t, line1.Token(0).Position.Column, "line 1 token should have positive column")
+
+		// Verify round-trip produces identical tokens.
+		resultTks := lines.Tokens()
+		assertTokensEqual(t, originalTks, resultTks)
 	})
 }

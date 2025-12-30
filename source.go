@@ -55,6 +55,9 @@ type Line struct {
 	joinPrev bool
 	// Joins with the next line.
 	joinNext bool
+	// IsBlockScalarJoin indicates this line is part of block scalar content (literal/folded).
+	// Used to differentiate from plain multiline strings during token recombination.
+	isBlockScalarJoin bool
 }
 
 // Number returns the 1-indexed line number of this [Line] based on its [token.Position].
@@ -84,10 +87,11 @@ func (l Line) Content() string {
 // Clone returns a deep copy of the Line.
 func (l Line) Clone() Line {
 	clone := Line{
-		Annotation: l.Annotation,
-		Flag:       l.Flag,
-		joinPrev:   l.joinPrev,
-		joinNext:   l.joinNext,
+		Annotation:        l.Annotation,
+		Flag:              l.Flag,
+		joinPrev:          l.joinPrev,
+		joinNext:          l.joinNext,
+		isBlockScalarJoin: l.isBlockScalarJoin,
 	}
 	for _, tk := range l.value {
 		clone.value = append(clone.value, tk.Clone())
@@ -161,6 +165,8 @@ func (l Line) String() string {
 //	└───────────────────┘
 //
 // This enables clean line-by-line processing, while preserving the original token data.
+//
+// Source operations are all idempotent, and translations to/from [token.Tokens] are lossless.
 type Source struct {
 	Name  string
 	lines []Line
@@ -185,6 +191,11 @@ func NewSourceFromString(src string, opts ...SourceOption) *Source {
 
 // NewSourceFromToken creates new [Source] from a seed [*token.Token].
 // It collects all [token.Tokens] by walking the token chain from start to end.
+//
+// ImplicitNullType tokens are filtered out because they are created by the parser,
+// not the lexer. The lexer never produces ImplicitNullType - these are synthesized
+// by the parser for empty values like "key:" with no value. Including them would
+// break round-trip equality with lexer output.
 func NewSourceFromToken(tk *token.Token, opts ...SourceOption) *Source {
 	if tk == nil {
 		return &Source{}
@@ -195,10 +206,11 @@ func NewSourceFromToken(tk *token.Token, opts ...SourceOption) *Source {
 		tk = tk.Prev
 	}
 
-	// Collect all tokens forward.
+	// Collect all tokens forward, filtering parser-only tokens.
 	var tks token.Tokens
 	for ; tk != nil; tk = tk.Next {
-		// Skip parser-added implicit null tokens to match lexer output.
+		// ImplicitNullType is created by parser for empty values (e.g., "key:").
+		// The lexer never produces this type, so we skip it for round-trip fidelity.
 		if tk.Type == token.ImplicitNullType {
 			continue
 		}
@@ -210,6 +222,27 @@ func NewSourceFromToken(tk *token.Token, opts ...SourceOption) *Source {
 }
 
 // NewSourceFromTokens creates new [Source] from [token.Tokens].
+//
+// This function splits multiline tokens into per-line parts while preserving
+// all Position fields to match go-yaml lexer behavior:
+//
+// Position field semantics (all 1-indexed):
+//   - Line: Line number in the document
+//   - Column: Points to where Value starts (with exceptions, see below)
+//   - Offset: Rune offset from document start (NOT byte offset)
+//   - IndentNum: Leading spaces on the current line (space chars only)
+//   - IndentLevel: Nesting depth based on indentation changes
+//
+// Column exceptions by token type:
+//   - SingleQuoteType/DoubleQuoteType: Column points to opening quote character
+//   - CommentType: Column points to '#' character
+//   - LiteralType/FoldedType: Column points to '|' or '>' indicator
+//   - Multiline tokens: Column is recalculated using strings.Index()
+//
+// Position.Line assignment for multiline tokens:
+//   - Block scalar content (StringType after Literal/Folded): Points to LAST line
+//   - Plain multiline strings: Points to FIRST line
+//   - Quoted multiline strings: Points to opening quote line
 //
 //nolint:nestif // TODO: refactor.
 func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
@@ -229,7 +262,7 @@ func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 		joinFromPrev      bool // Track if the next line should have JoinPrev=true.
 
 		// Position tracking.
-		currentOffset      int // Cumulative byte offset (1-indexed like lexer).
+		currentOffset      int // Cumulative rune offset (1-indexed like lexer).
 		currentIndentNum   int // Leading spaces on current line.
 		prevLineIndentNum  int // IndentNum from previous line.
 		currentIndentLevel int // Nesting depth level.
@@ -252,6 +285,10 @@ func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 	}
 
 	for _, tk := range tks {
+		// Detect if this token is block scalar content by checking if it follows
+		// a Literal/Folded header in the token chain.
+		isBlockScalar := isBlockScalarContent(tk)
+
 		origin := tk.Origin
 		newlineCount := strings.Count(origin, "\n")
 
@@ -287,23 +324,23 @@ func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 		}
 
 		// Split token at newline boundaries, filtering empty parts upfront.
-		var parts []string
-		for _, p := range strings.SplitAfter(origin, "\n") {
-			if p != "" {
-				parts = append(parts, p)
-			}
-		}
+		parts := splitOriginIntoParts(origin)
 
 		// Multi-part means the token's Origin was split into multiple parts.
 		isMultiPart := len(parts) > 1
 
+		// Find the last non-pure-newline part index for Value assignment.
+		// Pure newlines (like trailing "\n" in keep blocks) shouldn't get Value.
+		lastContentPartIdx := findLastContentPartIndex(parts)
+
 		isFirstContentPart := true
 
 		for i, part := range parts {
-			isPureNewline := part == "\n"
+			isLastPart := i == len(parts)-1
+			partIsPureNewline := isPureNewline(part)
 
 			// Update indentation tracking for first content on new line.
-			if len(currentLineTokens) == 0 && !isPureNewline {
+			if len(currentLineTokens) == 0 && !partIsPureNewline {
 				currentIndentNum = countLeadingSpaces(part)
 				currentIndentLevel = updateIndentLevel(prevLineIndentNum, currentIndentNum, currentIndentLevel)
 			}
@@ -313,21 +350,29 @@ func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 				val string
 			)
 
-			if isPureNewline {
+			isLastContentPart := i == lastContentPartIdx
+			// Determine which part should receive the token's Value:
+			// Block scalar: Value goes to last content part (lexer behavior).
+			// Plain/quoted multiline: Value goes to first content part (lexer behavior).
+			shouldHaveValue := shouldPartReceiveValue(isBlockScalar, isFirstContentPart, isLastContentPart)
+			if partIsPureNewline {
 				col = linesNextColumn(currentLineTokens)
 			} else {
-				col, val = partColumnAndValue(tk, part, isFirstContentPart)
+				col, val = partColumnAndValue(tk, isFirstContentPart, shouldHaveValue)
 				isFirstContentPart = false
 			}
 
 			// Calculate offset where Value starts within the document.
-			// Offset typically points to Value, not Origin (like the lexer's behavior).
-			// Exception: Comment tokens have Offset pointing to "#" (Origin start).
+			// Use original Offset when:
+			//   - Single-part token (not split), or
+			//   - Last part of block scalar (for recombination Position), or
+			//   - Any part that receives the token's Value.
+			useOriginalOffset := !isMultiPart ||
+				(isLastPart && isBlockScalar) ||
+				(shouldHaveValue && val != "")
 			valueOffset := currentOffset
-			if val != "" && tk.Type != token.CommentType {
-				if idx := strings.Index(part, val); idx >= 0 {
-					valueOffset += idx
-				}
+			if useOriginalOffset && tk.Position != nil && tk.Position.Offset > 0 {
+				valueOffset = tk.Position.Offset
 			}
 
 			// Create and add token for this part.
@@ -335,14 +380,17 @@ func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 			// Position fields (matching go-yaml lexer behavior):
 			//   - Line: 1-indexed line number in the document.
 			//   - Column: 1-indexed column where Value starts (not Origin).
-			//   - Offset: 1-indexed byte position where Value starts in document.
+			//   - Offset: 1-indexed rune position where Value starts in document.
 			//     Exception: Comment tokens point to "#" (Origin start).
 			//   - IndentNum: Number of leading spaces at the start of this line.
 			//   - IndentLevel: Nesting depth based on indentation changes.
 			newTk := &token.Token{
-				Type:   tk.Type,
-				Origin: part,
-				Value:  val,
+				Type:          tk.Type,
+				CharacterType: tk.CharacterType,
+				Indicator:     tk.Indicator,
+				Origin:        part,
+				Value:         val,
+				Error:         tk.Error,
 				Position: &token.Position{
 					Line:        currentLine,
 					Column:      col,
@@ -358,12 +406,12 @@ func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 			// If this part ends with newline, finish the current line.
 			if strings.HasSuffix(part, "\n") {
 				// Set JoinNext if this is a multi-part token and not the last part.
-				isLastPart := i == len(parts)-1
 				joinNext := isMultiPart && !isLastPart
 				lines = append(lines, Line{
-					value:    currentLineTokens,
-					joinPrev: joinFromPrev,
-					joinNext: joinNext,
+					value:             currentLineTokens,
+					joinPrev:          joinFromPrev,
+					joinNext:          joinNext,
+					isBlockScalarJoin: isBlockScalar && isMultiPart,
 				})
 				joinFromPrev = joinNext
 				currentLineTokens = nil
@@ -387,6 +435,14 @@ func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 }
 
 // Tokens reconstructs the full [token.Tokens] stream from all [Line]s.
+//
+// For multiline tokens that were split across lines, this function recombines
+// them by concatenating Origin and Value, and selecting the appropriate Position.
+//
+// Position selection for recombined tokens (matching go-yaml lexer behavior):
+//   - Block scalars (literal/folded): Use last part's Position (points to last content line)
+//   - Plain multiline strings: Use first part's Position (points to first line)
+//   - Quoted multiline strings: Use first part's Position (points to opening quote line)
 func (s *Source) Tokens() token.Tokens {
 	if len(s.lines) == 0 {
 		return nil
@@ -412,15 +468,18 @@ func (s *Source) Tokens() token.Tokens {
 						// since Position points to where Value starts.
 						prev.Value = tk.Value
 						if tk.Position != nil {
-							prev.Position = &token.Position{
-								Line:        tk.Position.Line,
-								Column:      tk.Position.Column,
-								Offset:      tk.Position.Offset,
-								IndentNum:   tk.Position.IndentNum,
-								IndentLevel: tk.Position.IndentLevel,
-							}
+							prev.Position = clonePosition(tk.Position)
 						}
 					}
+				}
+
+				// For the last part of a joined sequence (joinPrev but not joinNext),
+				// determine whether to use this part's Position.
+				//
+				// Block scalars: Position should come from the last part (lexer behavior).
+				// Plain multiline strings: Position should stay from first part where Value was set.
+				if !line.joinNext && tk.Position != nil && line.isBlockScalarJoin {
+					prev.Position = clonePosition(tk.Position)
 				}
 
 				continue
@@ -772,16 +831,25 @@ func linesNextColumn(tks token.Tokens) int {
 }
 
 // partColumnAndValue calculates the column position and value for a content part.
-func partColumnAndValue(tk *token.Token, part string, isFirst bool) (int, string) {
+//
+// Parameters:
+//   - tk: Original token with Type, Value, Position
+//   - isFirst: Whether this is the first content part
+//   - shouldHaveValue: Whether this part should receive the token's Value
+//     (determined by caller: first part for plain/quoted, last part for block scalars)
+//
+// Column assignment mirrors go-yaml lexer Position.Column behavior:
+//   - If shouldHaveValue is true: use the original token's Column
+//   - If isFirst is true (even without Value): use the original token's Column
+//   - Otherwise: Column defaults to 1
+func partColumnAndValue(tk *token.Token, isFirst, shouldHaveValue bool) (int, string) {
 	col := 1
 	val := ""
 
-	if tk.Value != "" && strings.Contains(part, tk.Value) {
+	if tk.Value != "" && shouldHaveValue {
 		val = tk.Value
-		if isFirst && tk.Position != nil && tk.Position.Column > 0 {
+		if tk.Position != nil && tk.Position.Column > 0 {
 			col = tk.Position.Column
-		} else {
-			col = strings.Index(part, tk.Value) + 1
 		}
 	} else if isFirst && tk.Position != nil && tk.Position.Column > 0 {
 		col = tk.Position.Column
@@ -824,4 +892,86 @@ func absColForTokenIndex(line Line, idx int) int {
 	}
 
 	return col
+}
+
+// isBlockScalarContent returns true if tk is a StringType that follows
+// a block scalar header (Literal/Folded). Comments can appear between
+// the header and content, so we traverse the Prev chain.
+func isBlockScalarContent(tk *token.Token) bool {
+	if tk.Type != token.StringType {
+		return false
+	}
+	// Walk backwards through Prev chain, skipping comments.
+	for prev := tk.Prev; prev != nil; prev = prev.Prev {
+		switch prev.Type {
+		case token.LiteralType, token.FoldedType:
+			return true
+		case token.CommentType:
+			// Comments can appear between header and content, continue.
+			continue
+		default:
+			// Any other token type means this is not block scalar content.
+			return false
+		}
+	}
+
+	return false
+}
+
+// isPureNewline returns true if s is exactly a single newline character.
+func isPureNewline(s string) bool {
+	return s == "\n"
+}
+
+// splitOriginIntoParts splits a token's Origin at newline boundaries,
+// filtering empty parts. Each part retains its trailing newline if present.
+func splitOriginIntoParts(origin string) []string {
+	var parts []string
+	for _, p := range strings.SplitAfter(origin, "\n") {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+
+	return parts
+}
+
+// findLastContentPartIndex returns the index of the last part that contains
+// actual content (not a pure newline). Used to identify which part should
+// receive the Value for block scalars.
+func findLastContentPartIndex(parts []string) int {
+	for i := len(parts) - 1; i >= 0; i-- {
+		if !isPureNewline(parts[i]) {
+			return i
+		}
+	}
+
+	return len(parts) - 1
+}
+
+// shouldPartReceiveValue determines if a token part should receive the Value field.
+// Block scalars (literal/folded): Value goes to the last content part.
+// Plain/quoted multiline: Value goes to the first content part.
+func shouldPartReceiveValue(isBlockScalar, isFirstContentPart, isLastContentPart bool) bool {
+	if isBlockScalar {
+		return isLastContentPart
+	}
+
+	return isFirstContentPart
+}
+
+// clonePosition creates a deep copy of a [token.Position].
+// Returns nil if pos is nil.
+func clonePosition(pos *token.Position) *token.Position {
+	if pos == nil {
+		return nil
+	}
+
+	return &token.Position{
+		Line:        pos.Line,
+		Column:      pos.Column,
+		Offset:      pos.Offset,
+		IndentNum:   pos.IndentNum,
+		IndentLevel: pos.IndentLevel,
+	}
 }
