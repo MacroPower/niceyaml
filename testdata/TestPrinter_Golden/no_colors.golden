@@ -204,7 +204,6 @@ typed_values:
   # Custom tags
   price_eur: !custom!price { amount: 12.50, currency: EUR }
   translation: !custom!i18n
-
     en: "Welcome"
     de: "Willkommen"
     ja: "ようこそ"
@@ -225,7 +224,6 @@ allergens: !!set
 
 # Ordered map (preserves insertion order)
 course_order: !!omap
-
   - appetizer: "Мезе (Meze platter)"
   - soup: "味噌汁"
   - main: "Главное блюдо"
@@ -234,7 +232,6 @@ course_order: !!omap
 
 # Pairs (allows duplicates, unlike maps)
 wine_pairings: !!pairs
-
   - Crêpes: Champagne
   - Crêpes: Riesling # Duplicate key allowed
   - 寿司: 日本酒

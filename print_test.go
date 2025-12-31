@@ -294,12 +294,18 @@ fifth: 5`
 		"full range": {
 			minLine: -1,
 			maxLine: -1,
-			want:    "first: 1\nsecond: 2\nthird: 3\nfourth: 4\nfifth: 5",
+			want: `first: 1
+second: 2
+third: 3
+fourth: 4
+fifth: 5`,
 		},
 		"bounded middle": {
 			minLine: 1,
 			maxLine: 3,
-			want:    "second: 2\nthird: 3\nfourth: 4",
+			want: `second: 2
+third: 3
+fourth: 4`,
 		},
 		"unbounded min": {
 			minLine: -1,
@@ -353,12 +359,18 @@ fifth: 5`
 		"full range": {
 			minLine: -1,
 			maxLine: -1,
-			want:    "   1 first: 1\n   2 second: 2\n   3 third: 3\n   4 fourth: 4\n   5 fifth: 5",
+			want: `   1 first: 1
+   2 second: 2
+   3 third: 3
+   4 fourth: 4
+   5 fifth: 5`,
 		},
 		"bounded middle - absolute line numbers": {
 			minLine: 1,
 			maxLine: 3,
-			want:    "   2 second: 2\n   3 third: 3\n   4 fourth: 4",
+			want: `   2 second: 2
+   3 third: 3
+   4 fourth: 4`,
 		},
 		"single line - absolute line number": {
 			minLine: 2,
@@ -936,6 +948,164 @@ func TestDiffGutter(t *testing.T) {
 
 			got := gutter(tc.ctx)
 			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestDefaultGutter(t *testing.T) {
+	t.Parallel()
+
+	styles := niceyaml.Styles{}
+	gutter := niceyaml.DefaultGutter()
+
+	tcs := map[string]struct {
+		wantContains string
+		ctx          niceyaml.GutterContext
+	}{
+		"annotation flag renders empty line number": {
+			wantContains: "     ",
+			ctx:          niceyaml.GutterContext{Flag: line.FlagAnnotation, Number: 1, Styles: styles},
+		},
+		"soft wrap renders continuation marker": {
+			wantContains: "   - ",
+			ctx:          niceyaml.GutterContext{Flag: line.FlagDefault, Soft: true, Styles: styles},
+		},
+		"normal line renders line number": {
+			wantContains: "   1 ",
+			ctx:          niceyaml.GutterContext{Flag: line.FlagDefault, Number: 1, Styles: styles},
+		},
+		"inserted flag renders + marker": {
+			wantContains: "+",
+			ctx:          niceyaml.GutterContext{Flag: line.FlagInserted, Number: 1, Styles: styles},
+		},
+		"deleted flag renders - marker": {
+			wantContains: "-",
+			ctx:          niceyaml.GutterContext{Flag: line.FlagDeleted, Number: 1, Styles: styles},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := gutter(tc.ctx)
+			assert.Contains(t, got, tc.wantContains)
+		})
+	}
+}
+
+func TestLineNumberGutter(t *testing.T) {
+	t.Parallel()
+
+	styles := niceyaml.Styles{}
+	gutter := niceyaml.LineNumberGutter()
+
+	tcs := map[string]struct {
+		wantContains string
+		ctx          niceyaml.GutterContext
+	}{
+		"annotation flag renders empty": {
+			wantContains: "     ",
+			ctx:          niceyaml.GutterContext{Flag: line.FlagAnnotation, Number: 1, Styles: styles},
+		},
+		"soft wrap renders continuation marker": {
+			wantContains: "   - ",
+			ctx:          niceyaml.GutterContext{Flag: line.FlagDefault, Soft: true, Styles: styles},
+		},
+		"normal line renders line number": {
+			wantContains: "   1 ",
+			ctx:          niceyaml.GutterContext{Flag: line.FlagDefault, Number: 1, Styles: styles},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := gutter(tc.ctx)
+			assert.Contains(t, got, tc.wantContains)
+		})
+	}
+}
+
+func TestPrinter_SetAnnotationsEnabled(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		annotation     string
+		wantContains   string
+		wantNotContain string
+		enabled        bool
+	}{
+		"disabled annotations hides them": {
+			enabled:        false,
+			annotation:     "test annotation",
+			wantContains:   "key: value",
+			wantNotContain: "test annotation",
+		},
+		"enabled annotations shows them": {
+			enabled:      true,
+			annotation:   "@@ -1 +1 @@",
+			wantContains: "@@ -1 +1 @@",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			input := "key: value\n"
+			source := niceyaml.NewSourceFromString(input)
+			source.Annotate(0, line.Annotation{Content: tc.annotation, Column: 1})
+
+			p := testPrinter()
+			p.SetAnnotationsEnabled(tc.enabled)
+
+			got := p.Print(source)
+
+			assert.Contains(t, got, tc.wantContains)
+			if tc.wantNotContain != "" {
+				assert.NotContains(t, got, tc.wantNotContain)
+			}
+		})
+	}
+}
+
+func TestPrinter_GetStyle(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		styles     niceyaml.Styles
+		query      niceyaml.Style
+		wantBold   bool
+		wantItalic bool
+	}{
+		"returns style from styles map": {
+			styles: niceyaml.Styles{
+				niceyaml.StyleKey: lipgloss.NewStyle().Bold(true),
+			},
+			query:    niceyaml.StyleKey,
+			wantBold: true,
+		},
+		"falls back to default for unknown style": {
+			styles: niceyaml.Styles{
+				niceyaml.StyleDefault: lipgloss.NewStyle().Italic(true),
+			},
+			query:      niceyaml.StyleKey,
+			wantItalic: true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := niceyaml.NewPrinter(niceyaml.WithStyles(tc.styles))
+			got := p.GetStyle(tc.query)
+
+			require.NotNil(t, got)
+			assert.Equal(t, tc.wantBold, got.GetBold())
+			assert.Equal(t, tc.wantItalic, got.GetItalic())
 		})
 	}
 }

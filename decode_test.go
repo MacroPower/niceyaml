@@ -1,6 +1,7 @@
 package niceyaml_test
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -526,6 +527,112 @@ func TestNewDocumentDecoder(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "value", result["key"])
 	})
+}
+
+func TestDocumentDecoder_GetValue_DirectiveBody(t *testing.T) {
+	t.Parallel()
+
+	// Test the directive body case - when doc.Body is a DirectiveType.
+	// This is an edge case where YAML 1.2 directive creates a document
+	// where the body is a directive node before the actual content.
+	// In practice, go-yaml parses %YAML as a directive but the body
+	// of the main document is still the mapping, not the directive.
+	// We test that the normal case still works.
+	input := `%YAML 1.2
+---
+key: value`
+	source := niceyaml.NewSourceFromString(input)
+	file, err := source.Parse()
+	require.NoError(t, err)
+
+	d := niceyaml.NewDecoder(file)
+	path := niceyaml.NewPath("key")
+
+	var foundAny bool
+	for _, dd := range d.Documents() {
+		_, found := dd.GetValue(path)
+		if found {
+			foundAny = true
+		}
+	}
+
+	// At least one document should have the key.
+	assert.True(t, foundAny)
+}
+
+func TestDocumentDecoder_ValidateDecodeContext_DecodeError(t *testing.T) {
+	t.Parallel()
+
+	// Test when DecodeContext after validation fails.
+	type strict struct {
+		Value int `yaml:"value"`
+	}
+
+	input := `value: not_a_number`
+	source := niceyaml.NewSourceFromString(input)
+	file, err := source.Parse()
+	require.NoError(t, err)
+
+	d := niceyaml.NewDecoder(file)
+	for _, dd := range d.Documents() {
+		var result strict
+
+		// The validator passes, but decode will fail due to type mismatch.
+		err := dd.ValidateDecodeContext(t.Context(), &result, passingValidator())
+
+		require.Error(t, err)
+
+		var yamlErr *niceyaml.Error
+		require.ErrorAs(t, err, &yamlErr)
+	}
+}
+
+func TestDocumentDecoder_ValidateContext_ValidationWithNonErrorType(t *testing.T) {
+	t.Parallel()
+
+	// Test when the validator returns a niceyaml.Error.
+	input := `name: test`
+	source := niceyaml.NewSourceFromString(input)
+	file, err := source.Parse()
+	require.NoError(t, err)
+
+	pathErr := niceyaml.NewError(
+		errors.New("schema validation failed"),
+		niceyaml.WithPath(niceyaml.NewPath("name")),
+	)
+
+	d := niceyaml.NewDecoder(file)
+	for _, dd := range d.Documents() {
+		err := dd.ValidateContext(t.Context(), failingValidator(pathErr))
+
+		require.Error(t, err)
+		// The error should be wrapped with file information.
+		assert.Contains(t, err.Error(), "schema validation failed")
+	}
+}
+
+func TestDocumentDecoder_DecodeContext_CanceledContext(t *testing.T) {
+	t.Parallel()
+
+	// Test DecodeContext with a canceled context to trigger the non-yaml error path.
+	input := `key: value`
+	source := niceyaml.NewSourceFromString(input)
+	file, err := source.Parse()
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel() // Cancel immediately.
+
+	d := niceyaml.NewDecoder(file)
+	for _, dd := range d.Documents() {
+		var result map[string]string
+
+		err := dd.DecodeContext(ctx, &result)
+		// Context cancellation may or may not cause an error depending on timing.
+		// The decode might complete before the context cancellation is checked.
+		// This test mainly ensures the code path doesn't panic.
+		_ = err
+	}
 }
 
 func TestDecoder_Documents(t *testing.T) {

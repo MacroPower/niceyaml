@@ -346,6 +346,11 @@ func TestFinder_Find_DiffBuiltLines(t *testing.T) {
 
 	// When searching Lines built from a diff, matches should be at the correct
 	// visual line positions, not based on original source Position.Line.
+	//
+	// Diff produces:
+	// Line 0 (idx=0): "key: old" (deleted, Position.Line=1)
+	// Line 1 (idx=1): "key: new" (inserted, Position.Line=1)
+	// Both have same source Position.Line, but different visual indices.
 
 	before := "key: old\n"
 	after := "key: new\n"
@@ -359,45 +364,39 @@ func TestFinder_Find_DiffBuiltLines(t *testing.T) {
 	diff := niceyaml.NewFullDiff(revBefore, revAfter)
 	lines := diff.Lines()
 
-	// Diff produces:
-	// Line 0 (idx=0): "key: old" (deleted, Position.Line=1)
-	// Line 1 (idx=1): "key: new" (inserted, Position.Line=1)
-	// Both have same source Position.Line, but different visual indices.
+	tcs := map[string]struct {
+		search string
+		want   []position.Range
+	}{
+		"search for 'old' finds match at visual line 0": {
+			search: "old",
+			want: []position.Range{
+				position.NewRange(position.New(0, 5), position.New(0, 8)),
+			},
+		},
+		"search for 'new' finds match at visual line 1": {
+			search: "new",
+			want: []position.Range{
+				position.NewRange(position.New(1, 5), position.New(1, 8)),
+			},
+		},
+		"search for 'key' finds matches at both visual lines": {
+			search: "key",
+			want: []position.Range{
+				position.NewRange(position.New(0, 0), position.New(0, 3)),
+				position.NewRange(position.New(1, 0), position.New(1, 3)),
+			},
+		},
+	}
 
-	t.Run("search for 'old' finds match at visual line 0", func(t *testing.T) {
-		t.Parallel()
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		finder := niceyaml.NewFinder("old")
-		matches := finder.Find(lines)
+			finder := niceyaml.NewFinder(tc.search)
+			got := finder.Find(lines)
 
-		want := []position.Range{
-			position.NewRange(position.New(0, 5), position.New(0, 8)),
-		}
-		assert.Equal(t, want, matches)
-	})
-
-	t.Run("search for 'new' finds match at visual line 1", func(t *testing.T) {
-		t.Parallel()
-
-		finder := niceyaml.NewFinder("new")
-		matches := finder.Find(lines)
-
-		want := []position.Range{
-			position.NewRange(position.New(1, 5), position.New(1, 8)),
-		}
-		assert.Equal(t, want, matches)
-	})
-
-	t.Run("search for 'key' finds matches at both visual lines", func(t *testing.T) {
-		t.Parallel()
-
-		finder := niceyaml.NewFinder("key")
-		matches := finder.Find(lines)
-
-		want := []position.Range{
-			position.NewRange(position.New(0, 0), position.New(0, 3)),
-			position.NewRange(position.New(1, 0), position.New(1, 3)),
-		}
-		assert.Equal(t, want, matches)
-	})
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }
