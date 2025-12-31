@@ -409,6 +409,78 @@ another: line`
 	assert.Contains(t, got, "document root error")
 }
 
+func TestError_NilToken(t *testing.T) {
+	t.Parallel()
+
+	// Test getTokenPosition with nil token - should return empty position.
+	err := niceyaml.NewError(
+		errors.New("nil token error"),
+		niceyaml.WithErrorToken(nil),
+	)
+
+	got := err.Error()
+	// Should still work and show the error message.
+	assert.Contains(t, got, "nil token error")
+}
+
+func TestError_NilFile(t *testing.T) {
+	t.Parallel()
+
+	// Test findKeyToken with nil file.
+	err := niceyaml.NewError(
+		errors.New("nil file error"),
+		niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build()),
+		niceyaml.WithFile(nil),
+	)
+
+	got := err.Error()
+	// Should gracefully degrade to path-only error.
+	assert.Contains(t, got, "nil file error")
+	assert.Contains(t, got, "$.key")
+}
+
+func TestError_EmptyDocs(t *testing.T) {
+	t.Parallel()
+
+	// Test with file that has empty Docs slice.
+	tokens := lexer.Tokenize("")
+	file, err := parser.Parse(tokens, 0)
+	require.NoError(t, err)
+
+	// Manually create an error with the empty file.
+	niceyamlErr := niceyaml.NewError(
+		errors.New("empty docs error"),
+		niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build()),
+		niceyaml.WithFile(file),
+	)
+
+	got := niceyamlErr.Error()
+	// Should gracefully handle empty docs.
+	assert.Contains(t, got, "empty docs error")
+}
+
+func TestError_PathWithoutToken(t *testing.T) {
+	t.Parallel()
+
+	// Test resolveToken when path.FilterNode returns nil.
+	source := `key: value`
+	tokens := lexer.Tokenize(source)
+	file, err := parser.Parse(tokens, 0)
+	require.NoError(t, err)
+
+	// Use a path that doesn't exist.
+	niceyamlErr := niceyaml.NewError(
+		errors.New("path not found"),
+		niceyaml.WithPath(niceyaml.NewPathBuilder().Child("nonexistent").Child("deep").Build()),
+		niceyaml.WithFile(file),
+	)
+
+	got := niceyamlErr.Error()
+	// Should show path in error.
+	assert.Contains(t, got, "$.nonexistent.deep")
+	assert.Contains(t, got, "path not found")
+}
+
 func TestError_WithFile(t *testing.T) {
 	t.Parallel()
 

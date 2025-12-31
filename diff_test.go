@@ -317,135 +317,83 @@ line15: 15
 func TestFullDiff_Lines_Flags(t *testing.T) {
 	t.Parallel()
 
-	t.Run("insertion gets flag", func(t *testing.T) {
-		t.Parallel()
-
-		before := "a: 1\n"
-		after := "a: 1\nb: 2\n"
-
-		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
-		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
-
-		revA := niceyaml.NewRevision(beforeTokens)
-		revB := niceyaml.NewRevision(afterTokens)
-		diff := niceyaml.NewFullDiff(revA, revB)
-
-		got := diff.Lines()
-
-		// Count lines with non-default flags.
-		flaggedCount := 0
-		for _, ln := range got.Lines() {
-			if ln.Flag != line.FlagDefault {
-				flaggedCount++
-			}
-		}
-
-		assert.Equal(t, 1, flaggedCount)
-		assert.Equal(t, line.FlagInserted, got.Line(1).Flag)
-	})
-
-	t.Run("deletion gets flag", func(t *testing.T) {
-		t.Parallel()
-
-		before := "a: 1\nb: 2\n"
-		after := "a: 1\n"
-
-		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
-		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
-
-		revA := niceyaml.NewRevision(beforeTokens)
-		revB := niceyaml.NewRevision(afterTokens)
-		diff := niceyaml.NewFullDiff(revA, revB)
-
-		got := diff.Lines()
-
-		// Count lines with non-default flags.
-		flaggedCount := 0
-		for _, ln := range got.Lines() {
-			if ln.Flag != line.FlagDefault {
-				flaggedCount++
-			}
-		}
-
-		assert.Equal(t, 1, flaggedCount)
-		assert.Equal(t, line.FlagDeleted, got.Line(1).Flag)
-	})
-
-	t.Run("modification has delete and insert flags", func(t *testing.T) {
-		t.Parallel()
-
-		before := "key: old\n"
-		after := "key: new\n"
-
-		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
-		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
-
-		revA := niceyaml.NewRevision(beforeTokens)
-		revB := niceyaml.NewRevision(afterTokens)
-		diff := niceyaml.NewFullDiff(revA, revB)
-
-		got := diff.Lines()
-
-		// Count lines with non-default flags.
-		flaggedCount := 0
-		for _, ln := range got.Lines() {
-			if ln.Flag != line.FlagDefault {
-				flaggedCount++
-			}
-		}
-
-		assert.Equal(t, 2, flaggedCount)
-
-		// First line is delete.
-		assert.Equal(t, line.FlagDeleted, got.Line(0).Flag)
-
-		// Second line is insert.
-		assert.Equal(t, line.FlagInserted, got.Line(1).Flag)
-	})
-
-	t.Run("only changed lines get flags", func(t *testing.T) {
-		t.Parallel()
-
-		before := `first: 1
+	tcs := map[string]struct {
+		wantFlags        map[int]line.Flag
+		before           string
+		after            string
+		wantFlaggedCount int
+	}{
+		"insertion gets flag": {
+			before:           "a: 1\n",
+			after:            "a: 1\nb: 2\n",
+			wantFlaggedCount: 1,
+			wantFlags: map[int]line.Flag{
+				1: line.FlagInserted,
+			},
+		},
+		"deletion gets flag": {
+			before:           "a: 1\nb: 2\n",
+			after:            "a: 1\n",
+			wantFlaggedCount: 1,
+			wantFlags: map[int]line.Flag{
+				1: line.FlagDeleted,
+			},
+		},
+		"modification has delete and insert flags": {
+			before:           "key: old\n",
+			after:            "key: new\n",
+			wantFlaggedCount: 2,
+			wantFlags: map[int]line.Flag{
+				0: line.FlagDeleted,
+				1: line.FlagInserted,
+			},
+		},
+		"only changed lines get flags": {
+			before: `first: 1
 second: 2
 third: 3
-`
-		after := `first: 1
+`,
+			after: `first: 1
 second: changed
 third: 3
-`
+`,
+			wantFlaggedCount: 2,
+			wantFlags: map[int]line.Flag{
+				0: line.FlagDefault,
+				1: line.FlagDeleted,
+				2: line.FlagInserted,
+				3: line.FlagDefault,
+			},
+		},
+	}
 
-		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
-		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		revA := niceyaml.NewRevision(beforeTokens)
-		revB := niceyaml.NewRevision(afterTokens)
-		diff := niceyaml.NewFullDiff(revA, revB)
+			beforeTokens := niceyaml.NewSourceFromString(tc.before, niceyaml.WithName("a"))
+			afterTokens := niceyaml.NewSourceFromString(tc.after, niceyaml.WithName("b"))
 
-		got := diff.Lines()
+			revA := niceyaml.NewRevision(beforeTokens)
+			revB := niceyaml.NewRevision(afterTokens)
+			diff := niceyaml.NewFullDiff(revA, revB)
 
-		// Only the changed lines (delete old second, insert new second) should have flags.
-		flaggedCount := 0
-		for _, ln := range got.Lines() {
-			if ln.Flag != line.FlagDefault {
-				flaggedCount++
+			got := diff.Lines()
+
+			flaggedCount := 0
+			for _, ln := range got.Lines() {
+				if ln.Flag != line.FlagDefault {
+					flaggedCount++
+				}
 			}
-		}
 
-		assert.Equal(t, 2, flaggedCount)
+			assert.Equal(t, tc.wantFlaggedCount, flaggedCount)
 
-		// Line 1 is unchanged.
-		assert.Equal(t, line.FlagDefault, got.Line(0).Flag)
-
-		// Line 2 is delete.
-		assert.Equal(t, line.FlagDeleted, got.Line(1).Flag)
-
-		// Line 3 is insert.
-		assert.Equal(t, line.FlagInserted, got.Line(2).Flag)
-
-		// Line 4 is unchanged.
-		assert.Equal(t, line.FlagDefault, got.Line(3).Flag)
-	})
+			for lineIdx, wantFlag := range tc.wantFlags {
+				assert.Equal(t, wantFlag, got.Line(lineIdx).Flag)
+			}
+		})
+	}
 }
 
 func TestSummaryDiff_Lines(t *testing.T) {

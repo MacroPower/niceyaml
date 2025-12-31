@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/goccy/go-yaml/lexer"
+	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -731,6 +732,170 @@ func TestLines_PositionsFromToken(t *testing.T) {
 		// Column should be > 0 since it's not the first token.
 		assert.Positive(t, positions[0].Col)
 	})
+}
+
+func TestNewSourceFromToken_WalksToPrev(t *testing.T) {
+	t.Parallel()
+
+	// Test that NewSourceFromToken walks to the first token when given a middle token.
+	input := "a: 1\nb: 2\n"
+	tks := lexer.Tokenize(input)
+
+	// Get a token that's not at the start (the second key "b").
+	var middleToken *token.Token
+
+	for _, tk := range tks {
+		if tk.Value == "b" {
+			middleToken = tk
+			break
+		}
+	}
+
+	require.NotNil(t, middleToken, "should find 'b' token")
+
+	// Create source from middle token - it should walk to the start.
+	source := niceyaml.NewSourceFromToken(middleToken)
+
+	// Should contain all lines, not just from 'b' onwards.
+	require.Equal(t, 2, source.Count())
+	assert.Contains(t, source.Content(), "a: 1")
+	assert.Contains(t, source.Content(), "b: 2")
+}
+
+func TestNewSourceFromToken_FiltersImplicitNull(t *testing.T) {
+	t.Parallel()
+
+	// Parse YAML with an implicit null (key with no value).
+	// The parser adds ImplicitNullType tokens which should be filtered.
+	input := "key:\n"
+	tks := lexer.Tokenize(input)
+
+	// Parse to get the AST with implicit null tokens.
+	file, err := parser.Parse(tks, 0)
+	require.NoError(t, err)
+	require.Len(t, file.Docs, 1)
+
+	// Get a token from the parsed AST (which may have ImplicitNullType).
+	bodyToken := file.Docs[0].Body.GetToken()
+	require.NotNil(t, bodyToken)
+
+	// Create source from this token chain.
+	source := niceyaml.NewSourceFromToken(bodyToken)
+
+	// Should still work and produce valid output.
+	require.NotNil(t, source)
+	// The content should not be affected by filtering.
+	assert.Contains(t, source.Content(), "key:")
+}
+
+func TestSource_SetFlag(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		flag  line.Flag
+		idx   int
+	}{
+		"set inserted flag": {
+			input: "key: value\n",
+			idx:   0,
+			flag:  line.FlagInserted,
+		},
+		"set deleted flag": {
+			input: "key: value\n",
+			idx:   0,
+			flag:  line.FlagDeleted,
+		},
+		"set flag on second line": {
+			input: "a: 1\nb: 2\n",
+			idx:   1,
+			flag:  line.FlagInserted,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input)
+			source.SetFlag(tc.idx, tc.flag)
+
+			got := source.Line(tc.idx).Flag
+			assert.Equal(t, tc.flag, got)
+		})
+	}
+}
+
+func TestSource_Content(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  string
+	}{
+		"single line": {
+			input: "key: value\n",
+			want:  "key: value",
+		},
+		"multiple lines": {
+			input: "a: 1\nb: 2\nc: 3\n",
+			want:  "a: 1\nb: 2\nc: 3",
+		},
+		"empty": {
+			input: "",
+			want:  "",
+		},
+		"nested yaml": {
+			input: "parent:\n  child: value\n",
+			want:  "parent:\n  child: value",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input)
+			got := source.Content()
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestSource_Validate(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+	}{
+		"valid source": {
+			input: "key: value\n",
+		},
+		"empty source": {
+			input: "",
+		},
+		"multi-line source": {
+			input: "a: 1\nb: 2\nc: 3\n",
+		},
+		"literal block source": {
+			input: `key: |
+  line1
+  line2
+`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input)
+			err := source.Validate()
+
+			assert.NoError(t, err)
+		})
+	}
 }
 
 func TestSource_Parse(t *testing.T) {
