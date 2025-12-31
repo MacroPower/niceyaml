@@ -81,26 +81,31 @@ type Line struct {
 	// IsBlockScalarJoin indicates this line is part of block scalar content (literal/folded).
 	// Used to differentiate from plain multiline strings during token recombination.
 	isBlockScalarJoin bool
+	// The 1-indexed line number used for display purposes.
+	// This may differ from the first token's Position.Line for block scalars.
+	number int
 }
 
-// Number returns the 1-indexed line number of this [Line] based on its [token.Position].
+// Number returns the line number of this [Line].
 func (l Line) Number() int {
+	if l.number != 0 {
+		return l.number
+	}
+
 	if len(l.value) == 0 || l.value[0].Position == nil {
 		return 0
 	}
 
-	// Note: All tokens in a line should have the same line number in their Position.
-	// If this is not the case, it means the tokens were not properly split into [Line]s.
-	// Thus, we return the line number of the first token.
 	return l.value[0].Position.Line
 }
 
 // Content returns the line content as a string.
-// Trailing newlines are stripped for clean comparison.
+// Trailing line endings (LF or CRLF) are stripped for clean comparison.
 func (l Line) Content() string {
 	var sb strings.Builder
 	for _, tk := range l.value {
 		origin := strings.TrimSuffix(tk.Origin, "\n")
+		origin = strings.TrimSuffix(origin, "\r")
 		sb.WriteString(origin)
 	}
 
@@ -180,9 +185,23 @@ type Lines []Line
 //   - Multiline tokens: Column is recalculated using strings.Index()
 //
 // Position.Line assignment for multiline tokens:
-//   - Block scalar content (StringType after Literal/Folded): Points to LAST line
 //   - Plain multiline strings: Points to FIRST line
 //   - Quoted multiline strings: Points to opening quote line
+//   - Block scalar content (StringType after Literal/Folded): See below
+//
+// Block scalar Position has three distinct behaviors:
+//   - Single-line content (any context): Column > 0, Line = content line
+//   - Multi-line with following content: Column = 0 (marker), Line = first content line
+//   - Multi-line standalone/at end: Column > 0, Line = last content line
+//
+// Column=0 is a special marker indicating "first-line position" for multi-line
+// block scalars with following content. This marker is preserved during splitting
+// and used during recombination to select the correct Position.
+//
+// Additional lexer behaviors:
+//   - CRLF (\r\n) is preserved in Origin but normalized to \n in Value
+//   - Blank lines are absorbed into the previous token's Origin
+//   - Comments include the trailing newline in Origin but not in Value
 //
 // Transformation into [Lines] is invertible via [Lines.Tokens].
 //
@@ -193,10 +212,13 @@ func NewLines(tks token.Tokens) Lines {
 	}
 
 	var (
-		lines             []Line
-		currentLineTokens token.Tokens
-		currentLine       int  // Current line number being built.
-		joinFromPrev      bool // Track if the next line should have JoinPrev=true.
+		lines                     []Line
+		currentLineTokens         token.Tokens
+		currentLine               int  // Current line number being built.
+		joinFromPrev              bool // Track if the next line should have JoinPrev=true.
+		blockScalarJoinFromPrev   bool // Track if the join is for a block scalar.
+		currentLineHasBlockScalar bool // Track if current line has any block scalar content.
+		prevTokenEndedWithNewline bool // Track if previous token's Origin ended with "\n".
 
 		// Position tracking.
 		currentOffset      int // Cumulative rune offset (1-indexed like lexer).
@@ -206,8 +228,15 @@ func NewLines(tks token.Tokens) Lines {
 	)
 
 	// Initialize currentLine from the first token's position.
+	// If the first token's Origin has leading newlines, we need to start earlier
+	// because Position.Line points to the content, not the Origin start.
 	if tks[0].Position != nil {
 		currentLine = tks[0].Position.Line
+		// Count leading newlines in first token's Origin and adjust.
+		leadingNewlines := countLeadingNewlines(tks[0].Origin)
+		if leadingNewlines > 0 && currentLine > leadingNewlines {
+			currentLine -= leadingNewlines
+		}
 	} else {
 		currentLine = 1
 	}
@@ -241,7 +270,7 @@ func NewLines(tks token.Tokens) Lines {
 			// If there's a gap (simple token is ahead), flush and sync forward.
 			// Never sync backwards - currentLine must be monotonically increasing.
 			if tkLine > currentLine+1 && len(currentLineTokens) > 0 {
-				lines = append(lines, Line{value: currentLineTokens, joinPrev: joinFromPrev})
+				lines = append(lines, Line{value: currentLineTokens, joinPrev: joinFromPrev, number: currentLine})
 				joinFromPrev = false
 				currentLineTokens = nil
 			}
@@ -276,10 +305,56 @@ func NewLines(tks token.Tokens) Lines {
 			isLastPart := i == len(parts)-1
 			partIsPureNewline := isPureNewline(part)
 
+			// Handle duplicate leading newline: the go-yaml lexer sometimes includes the same
+			// newline character at both the end of one token and the start of the next.
+			// Detect this by checking if we're already at the token's line - if so, processing
+			// the leading "\n" would incorrectly advance us past the token's position.
+			// Instead of skipping it entirely (which would make Origin non-invertible), we append
+			// it to the previous line so the newline is preserved in the Origin but doesn't
+			// cause an extra line advance.
+			isDuplicateNewline := i == 0 && partIsPureNewline && prevTokenEndedWithNewline &&
+				tk.Position != nil && currentLine == tk.Position.Line
+			if isDuplicateNewline && len(lines) > 0 {
+				// Create a token for the duplicate newline and attach to previous line.
+				lastLine := &lines[len(lines)-1]
+				newTk := &token.Token{
+					Type:          tk.Type,
+					CharacterType: tk.CharacterType,
+					Indicator:     tk.Indicator,
+					Origin:        part,
+					Position: &token.Position{
+						Line:        currentLine - 1, // Goes on previous line.
+						Column:      linesNextColumn(lastLine.value),
+						Offset:      currentOffset,
+						IndentNum:   prevLineIndentNum,
+						IndentLevel: currentIndentLevel,
+					},
+				}
+				lastLine.value.Add(newTk)
+
+				lastLine.joinNext = true
+				joinFromPrev = true
+				currentOffset += len(part)
+
+				continue
+			}
+
 			// Update indentation tracking for first content on new line.
+			// Use the token's Position if available (more accurate than counting spaces
+			// in Origin, since some tokens like MappingKey don't include leading spaces).
+			// Exception: multi-part block scalar content has special Position handling,
+			// so calculate indentation for each part to maintain proper tracking.
 			if len(currentLineTokens) == 0 && !partIsPureNewline {
-				currentIndentNum = countLeadingSpaces(part)
-				currentIndentLevel = updateIndentLevel(prevLineIndentNum, currentIndentNum, currentIndentLevel)
+				if i == 0 && tk.Position != nil && (!isBlockScalar || !isMultiPart) {
+					// First part of non-block-scalar, or single-line block scalar:
+					// use the token's Position.
+					currentIndentNum = tk.Position.IndentNum
+					currentIndentLevel = tk.Position.IndentLevel
+				} else {
+					// Subsequent parts, or multi-part block scalars: calculate from Origin.
+					currentIndentNum = countLeadingSpaces(part)
+					currentIndentLevel = updateIndentLevel(prevLineIndentNum, currentIndentNum, currentIndentLevel)
+				}
 			}
 
 			var (
@@ -292,6 +367,8 @@ func NewLines(tks token.Tokens) Lines {
 			// Block scalar: Value goes to last content part (lexer behavior).
 			// Plain/quoted multiline: Value goes to first content part (lexer behavior).
 			shouldHaveValue := shouldPartReceiveValue(isBlockScalar, isFirstContentPart, isLastContentPart)
+			// Capture before it changes for later use.
+			wasFirstContentPart := isFirstContentPart && !partIsPureNewline
 			if partIsPureNewline {
 				col = linesNextColumn(currentLineTokens)
 			} else {
@@ -336,34 +413,83 @@ func NewLines(tks token.Tokens) Lines {
 					IndentLevel: currentIndentLevel,
 				},
 			}
+
+			// For block scalars, preserve the original token's Position.
+			// The go-yaml lexer behavior varies:
+			// - With following content: Position points to first content line (Column=0)
+			// - Standalone: Position points to last content line (Column>0)
+			// We determine which case and put the original Position on the appropriate part.
+			if isBlockScalar && isMultiPart && tk.Position != nil {
+				isFirstLinePosition := tk.Position.Column == 0
+				if (wasFirstContentPart && isFirstLinePosition) || (isLastContentPart && !isFirstLinePosition) {
+					newTk.Position = clonePosition(tk.Position)
+				}
+			}
+
+			// For tokens with a leading blank line (Origin starts with "\n"), preserve
+			// the original Position for the first content part. The lexer's Position
+			// reflects the content line, not the blank line, so we should use it
+			// to ensure round-trip fidelity.
+			// Also update our tracking to match, so subsequent tokens get correct values.
+			hasLeadingBlankLine := isMultiPart && len(parts) > 1 && isPureNewline(parts[0])
+			if hasLeadingBlankLine && wasFirstContentPart && tk.Position != nil {
+				newTk.Position = clonePosition(tk.Position)
+				// Sync our tracking with the original Position to fix subsequent tokens.
+				currentIndentLevel = tk.Position.IndentLevel
+			}
+
 			currentLineTokens.Add(newTk)
+
+			// Track if this line contains block scalar content.
+			if isBlockScalar && isMultiPart {
+				currentLineHasBlockScalar = true
+			}
 
 			currentOffset += len(part)
 
-			// If this part ends with newline, finish the current line.
-			if strings.HasSuffix(part, "\n") {
+			// If this part ends with a line break (\n or \r), finish the current line.
+			// The go-yaml lexer can split CRLF across tokens: comments may end with \r
+			// while the following token starts with \n. Both \r and \n are line breaks.
+			if strings.HasSuffix(part, "\n") || strings.HasSuffix(part, "\r") {
 				// Set JoinNext if this is a multi-part token and not the last part.
 				joinNext := isMultiPart && !isLastPart
+				// Use currentLineHasBlockScalar to capture if ANY part of this line is block scalar content.
+				lineIsBlockScalarJoin := currentLineHasBlockScalar
 				lines = append(lines, Line{
 					value:             currentLineTokens,
 					joinPrev:          joinFromPrev,
 					joinNext:          joinNext,
-					isBlockScalarJoin: isBlockScalar && isMultiPart,
+					isBlockScalarJoin: lineIsBlockScalarJoin,
+					number:            currentLine,
 				})
 				joinFromPrev = joinNext
-				currentLineTokens = nil
-				currentLine++
+				blockScalarJoinFromPrev = lineIsBlockScalarJoin && joinNext
 
 				// Prepare indentation tracking for next line.
 				prevLineIndentNum = currentIndentNum
-				currentIndentNum = 0 // Will be recalculated for next line's first content.
+
+				currentLineTokens = nil
+				currentLineHasBlockScalar = false // Reset for next line.
+				currentIndentNum = 0              // Will be recalculated for next line's first content.
+				currentLine++
 			}
 		}
+
+		// Track whether this token ended with a line break for duplicate detection.
+		// Include both \n and \r since go-yaml can split CRLF across tokens.
+		prevTokenEndedWithNewline = strings.HasSuffix(origin, "\n") || strings.HasSuffix(origin, "\r")
 	}
 
 	// Handle last line (may not end with newline).
 	if len(currentLineTokens) > 0 {
-		lines = append(lines, Line{value: currentLineTokens, joinPrev: joinFromPrev})
+		// Use either the current line's block scalar content OR the inherited join state.
+		lineIsBlockScalarJoin := currentLineHasBlockScalar || blockScalarJoinFromPrev
+		lines = append(lines, Line{
+			value:             currentLineTokens,
+			joinPrev:          joinFromPrev,
+			isBlockScalarJoin: lineIsBlockScalarJoin,
+			number:            currentLine,
+		})
 	}
 
 	return lines
@@ -375,9 +501,17 @@ func NewLines(tks token.Tokens) Lines {
 // them by concatenating Origin and Value, and selecting the appropriate Position.
 //
 // Position selection for recombined tokens (matching go-yaml lexer behavior):
-//   - Block scalars (literal/folded): Use last part's Position (points to last content line)
 //   - Plain multiline strings: Use first part's Position (points to first line)
 //   - Quoted multiline strings: Use first part's Position (points to opening quote line)
+//   - Block scalars: Position selection depends on the Column=0 marker
+//
+// Block scalar Position selection:
+//   - Column=0 (first-line position): Keep first part's Position (multi-line with following)
+//   - Column>0 (last-line position): Use last content part's Position (multi-line standalone)
+//
+// The Column=0 marker from [NewLines] indicates that the lexer originally used
+// first-line position semantics, so we preserve the first part's Position during
+// recombination. Otherwise, we use the last part's Position.
 //
 // This method is tested to perfectly invert [NewLines].
 func (s Lines) Tokens() token.Tokens {
@@ -403,19 +537,20 @@ func (s Lines) Tokens() token.Tokens {
 					} else {
 						// First non-empty Value - use this part's position
 						// since Position points to where Value starts.
+						// Exception: For block scalars with first-line-position (Column=0),
+						// the correct Position was already set from the first part.
 						prev.Value = tk.Value
-						if tk.Position != nil {
+						isFirstLinePosition := prev.Position != nil && prev.Position.Column == 0
+						if tk.Position != nil && (!line.isBlockScalarJoin || !isFirstLinePosition) {
 							prev.Position = clonePosition(tk.Position)
 						}
 					}
 				}
 
-				// For the last part of a joined sequence (joinPrev but not joinNext),
-				// determine whether to use this part's Position.
-				//
-				// Block scalars: Position should come from the last part (lexer behavior).
-				// Plain multiline strings: Position should stay from first part where Value was set.
-				if !line.joinNext && tk.Position != nil && line.isBlockScalarJoin {
+				// For block scalars with last-line-position (Column>0), use the last part's Position.
+				// The last content part has the original lexer Position preserved from NewLines.
+				isFirstLinePosition := prev.Position != nil && prev.Position.Column == 0
+				if !line.joinNext && tk.Position != nil && line.isBlockScalarJoin && !isFirstLinePosition {
 					prev.Position = clonePosition(tk.Position)
 				}
 
@@ -479,17 +614,21 @@ func (s Lines) Validate() error {
 			}
 
 			// Check columns strictly increasing.
-			if tk.Position.Column <= prevCol {
-				return fmt.Errorf(
-					"line at index %d, token %d: column %d not greater than previous %d",
-					i,
-					j,
-					tk.Position.Column,
-					prevCol,
-				)
-			}
+			// Skip check for zero-width tokens (empty Origin) as they don't occupy column space.
+			// The lexer can produce tokens at the same position (e.g., empty block scalar content).
+			if tk.Origin != "" {
+				if tk.Position.Column <= prevCol {
+					return fmt.Errorf(
+						"line at index %d, token %d: column %d not greater than previous %d",
+						i,
+						j,
+						tk.Position.Column,
+						prevCol,
+					)
+				}
 
-			prevCol = tk.Position.Column
+				prevCol = tk.Position.Column
+			}
 		}
 	}
 
@@ -550,6 +689,24 @@ func countLeadingSpaces(s string) int {
 	return count
 }
 
+// countLeadingNewlines returns the number of leading newline characters in s.
+// CR characters are skipped to properly handle CRLF line endings.
+func countLeadingNewlines(s string) int {
+	count := 0
+	for _, r := range s {
+		if r == '\r' {
+			continue // Skip CR in CRLF.
+		}
+		if r != '\n' {
+			break
+		}
+
+		count++
+	}
+
+	return count
+}
+
 // updateIndentLevel calculates indent level based on indentation changes.
 // This mirrors the go-yaml scanner's updateIndentLevel logic.
 func updateIndentLevel(prevIndentNum, currentIndentNum, currentLevel int) int {
@@ -586,14 +743,20 @@ func isBlockScalarContent(tk *token.Token) bool {
 	return false
 }
 
-// isPureNewline returns true if s is exactly a single newline character.
+// isPureNewline returns true if s is exactly a line ending (LF or CRLF).
 func isPureNewline(s string) bool {
-	return s == "\n"
+	return s == "\n" || s == "\r\n"
 }
 
 // splitOriginIntoParts splits a token's Origin at newline boundaries,
 // filtering empty parts. Each part retains its trailing newline if present.
 func splitOriginIntoParts(origin string) []string {
+	// Handle empty origin: preserve as single empty part.
+	// This is semantically significant for empty block scalar content.
+	if origin == "" {
+		return []string{""}
+	}
+
 	var parts []string
 	for _, p := range strings.SplitAfter(origin, "\n") {
 		if p != "" {
