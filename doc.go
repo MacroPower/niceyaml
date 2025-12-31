@@ -19,19 +19,19 @@
 // [Source.Lines] and [Source.Runes] provide iterators for traversing
 // lines and individual runes with their positions.
 //
-// Each [Line] contains the tokens for that line, along with optional metadata:
+// Each [line.Line] contains the tokens for that line, along with optional metadata:
 //
-//   - [Annotation]: Extra content such as error messages or diff headers
-//   - [Flag]: Category markers ([FlagInserted], [FlagDeleted], [FlagAnnotation])
+//   - [line.Annotation]: Extra content such as error messages or diff headers
+//   - [line.Flag]: Category markers ([line.FlagInserted], [line.FlagDeleted], [line.FlagAnnotation])
 //
 // # Position Tracking
 //
 // [position.Position] represents a 0-indexed line and column location within a document.
 // [position.Range] defines a half-open range [Start, End) for selecting spans
 // of text. Create positions and ranges using [position.New] and [position.NewRange].
-// Use [position.Range.Contains] to check if a position falls within a range.
-// These types integrate with the [Printer] for highlighting and with
-// the [Finder] for search results.
+//
+// These types integrate with the [Printer] for highlighting and with the [Finder]
+// for search results.
 //
 // # Revision Tracking
 //
@@ -66,6 +66,8 @@
 //
 // The [Printer] type renders YAML tokens with syntax highlighting via lipgloss.
 // Use [Printer.Print] with any [LineIterator] (such as [*Source]) to render output.
+// Alternatively, use [Printer.PrintSlice] to render a subset of lines.
+//
 // Configure printers using [PrinterOption] functions:
 //
 //   - [WithStyle]: Set the container style
@@ -89,6 +91,7 @@
 //   - [WithSourceLines]: Number of context lines to display
 //   - [WithPath]: YAML path where the error occurred
 //   - [WithErrorToken]: Token associated with the error
+//   - [WithPrinter]: Customize error source formatting
 //
 // Use [ErrorWrapper] to create errors with consistent default options.
 //
@@ -127,5 +130,11 @@
 //
 // # Schema Generation and Validation
 //
-// See the [github.com/macropower/niceyaml/schema] subpackage.
+// The [github.com/macropower/niceyaml/schema/generate] package provides JSON
+// schema generation from Go types. Use [generate.NewGenerator] with options
+// like [generate.WithPackagePaths] to include source comments as descriptions.
+//
+// The [github.com/macropower/niceyaml/schema/validate] package validates data
+// against JSON schemas. Use [validate.NewValidator] to create validators that
+// return [Error] values with precise YAML path information.
 package niceyaml
