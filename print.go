@@ -7,11 +7,13 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/goccy/go-yaml/token"
+
+	"github.com/macropower/niceyaml/line"
 )
 
 // LineIterator provides line-by-line access to YAML tokens for rendering.
 type LineIterator interface {
-	Lines() iter.Seq2[Position, Line]
+	Lines() iter.Seq2[Position, line.Line]
 	Count() int
 	IsEmpty() bool
 }
@@ -62,7 +64,7 @@ type GutterContext struct {
 	Index      int
 	Number     int
 	TotalLines int
-	Flag       Flag
+	Flag       line.Flag
 	Soft       bool
 }
 
@@ -83,7 +85,7 @@ func DefaultGutter() GutterFunc {
 		var lineNum string
 
 		switch {
-		case ctx.Flag == FlagAnnotation:
+		case ctx.Flag == line.FlagAnnotation:
 			lineNum = lineNumStyle.Render("     ")
 		case ctx.Soft:
 			lineNum = lineNumStyle.Render("   - ")
@@ -94,9 +96,9 @@ func DefaultGutter() GutterFunc {
 		var marker string
 
 		switch ctx.Flag {
-		case FlagInserted:
+		case line.FlagInserted:
 			marker = ctx.Styles.GetStyle(StyleDiffInserted).Render("+")
-		case FlagDeleted:
+		case line.FlagDeleted:
 			marker = ctx.Styles.GetStyle(StyleDiffDeleted).Render("-")
 		default:
 			marker = ctx.Styles.GetStyle(StyleDefault).Render(" ")
@@ -115,9 +117,9 @@ func DiffGutter() GutterFunc {
 		}
 
 		switch ctx.Flag {
-		case FlagInserted:
+		case line.FlagInserted:
 			return ctx.Styles.GetStyle(StyleDiffInserted).Render("+")
-		case FlagDeleted:
+		case line.FlagDeleted:
 			return ctx.Styles.GetStyle(StyleDiffDeleted).Render("-")
 		default:
 			return ctx.Styles.GetStyle(StyleDefault).Render(" ")
@@ -134,7 +136,7 @@ func LineNumberGutter() GutterFunc {
 			Foreground(ctx.Styles.GetStyle(StyleComment).GetForeground())
 
 		switch {
-		case ctx.Flag == FlagAnnotation:
+		case ctx.Flag == line.FlagAnnotation:
 			return lineNumStyle.Render("     ")
 		case ctx.Soft:
 			return lineNumStyle.Render("   - ")
@@ -236,15 +238,15 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 		renderedIdx int
 	)
 
-	for pos, line := range t.Lines() {
-		lineNum := line.Number()
+	for pos, ln := range t.Lines() {
+		lineNum := ln.Number()
 
 		// Filter by 0-indexed line index.
 		if (minLine >= 0 && pos.Line < minLine) || (maxLine >= 0 && pos.Line > maxLine) {
 			continue
 		}
 
-		hasAnnotation := p.annotationsEnabled && line.Annotation.Content != ""
+		hasAnnotation := p.annotationsEnabled && ln.Annotation.Content != ""
 
 		if hasAnnotation {
 			// Add newline between hunks (not before first hunk).
@@ -258,11 +260,11 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 				Number:     lineNum,
 				TotalLines: totalLines,
 				Soft:       false,
-				Flag:       FlagAnnotation,
+				Flag:       line.FlagAnnotation,
 				Styles:     p.styles,
 			}
 			sb.WriteString(p.gutterFunc(headerCtx))
-			sb.WriteString(p.styles.GetStyle(StyleComment).Render(line.Annotation.Content))
+			sb.WriteString(p.styles.GetStyle(StyleComment).Render(ln.Annotation.Content))
 			sb.WriteByte('\n')
 		} else if renderedIdx > 0 {
 			// Add newline between lines within a hunk.
@@ -274,22 +276,22 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 			Number:     lineNum,
 			TotalLines: totalLines,
 			Soft:       false,
-			Flag:       line.Flag,
+			Flag:       ln.Flag,
 			Styles:     p.styles,
 		}
 
-		switch line.Flag {
-		case FlagDeleted:
+		switch ln.Flag {
+		case line.FlagDeleted:
 			deleted := p.styles.GetStyle(StyleDiffDeleted)
-			p.writeLine(&sb, line.Content(), pos.Line, deleted, gutterCtx)
+			p.writeLine(&sb, ln.Content(), pos.Line, deleted, gutterCtx)
 
-		case FlagInserted:
+		case line.FlagInserted:
 			inserted := p.styles.GetStyle(StyleDiffInserted)
-			p.writeLine(&sb, line.Content(), pos.Line, inserted, gutterCtx)
+			p.writeLine(&sb, ln.Content(), pos.Line, inserted, gutterCtx)
 
 		default: // FlagDefault (equal line).
 			// Render with syntax highlighting.
-			styledContent := p.renderTokenLine(pos.Line, line)
+			styledContent := p.renderTokenLine(pos.Line, ln)
 			p.writeLine(&sb, styledContent, pos.Line, nil, gutterCtx)
 		}
 
@@ -484,8 +486,8 @@ func (p *Printer) contentWidth(gutterWidth int) int {
 // renderTokenLine renders a single line's tokens with syntax highlighting.
 // It handles separator (leading whitespace) and content styling, plus range overlays.
 // The lineIndex parameter is the 0-indexed position in the Lines collection.
-func (p *Printer) renderTokenLine(lineIndex int, line Line) string {
-	if line.IsEmpty() {
+func (p *Printer) renderTokenLine(lineIndex int, ln line.Line) string {
+	if ln.IsEmpty() {
 		return ""
 	}
 
@@ -493,7 +495,7 @@ func (p *Printer) renderTokenLine(lineIndex int, line Line) string {
 
 	var sb strings.Builder
 
-	for _, tk := range line.Tokens() {
+	for _, tk := range ln.Tokens() {
 		tokenStyle := p.styleForToken(tk)
 		valueOffset := tokenValueOffset(tk)
 
@@ -528,14 +530,14 @@ func (p *Printer) renderTokenLine(lineIndex int, line Line) string {
 }
 
 // leadingWhitespaceRunes returns the number of runes in the leading whitespace
-// portion of line, up to maxBytes. Returns 0 if maxBytes is invalid or if the
+// portion of s, up to maxBytes. Returns 0 if maxBytes is invalid or if the
 // prefix contains non-whitespace characters.
-func leadingWhitespaceRunes(line string, maxBytes int) int {
-	if maxBytes <= 0 || maxBytes > len(line) {
+func leadingWhitespaceRunes(s string, maxBytes int) int {
+	if maxBytes <= 0 || maxBytes > len(s) {
 		return 0
 	}
 
-	prefix := line[:maxBytes]
+	prefix := s[:maxBytes]
 	if strings.TrimLeft(prefix, " \t") != "" {
 		return 0
 	}

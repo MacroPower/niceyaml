@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/macropower/niceyaml"
+	"github.com/macropower/niceyaml/line"
 )
 
 // testHighlightStyle returns a style that wraps content in brackets for easy verification.
@@ -812,9 +813,9 @@ func TestPrinter_PrintTokenDiff_CustomGutter(t *testing.T) {
 			}
 
 			switch ctx.Flag {
-			case niceyaml.FlagInserted:
+			case line.FlagInserted:
 				return inserted
-			case niceyaml.FlagDeleted:
+			case line.FlagDeleted:
 				return deleted
 			default:
 				return equal
@@ -904,27 +905,27 @@ func TestDiffGutter(t *testing.T) {
 	}{
 		"default flag": {
 			want: " ",
-			ctx:  niceyaml.GutterContext{Flag: niceyaml.FlagDefault, Styles: styles},
+			ctx:  niceyaml.GutterContext{Flag: line.FlagDefault, Styles: styles},
 		},
 		"inserted flag": {
 			want: "+",
-			ctx:  niceyaml.GutterContext{Flag: niceyaml.FlagInserted, Styles: styles},
+			ctx:  niceyaml.GutterContext{Flag: line.FlagInserted, Styles: styles},
 		},
 		"deleted flag": {
 			want: "-",
-			ctx:  niceyaml.GutterContext{Flag: niceyaml.FlagDeleted, Styles: styles},
+			ctx:  niceyaml.GutterContext{Flag: line.FlagDeleted, Styles: styles},
 		},
 		"soft wrap default": {
 			want: " ",
-			ctx:  niceyaml.GutterContext{Flag: niceyaml.FlagDefault, Soft: true, Styles: styles},
+			ctx:  niceyaml.GutterContext{Flag: line.FlagDefault, Soft: true, Styles: styles},
 		},
 		"soft wrap inserted": {
 			want: " ",
-			ctx:  niceyaml.GutterContext{Flag: niceyaml.FlagInserted, Soft: true, Styles: styles},
+			ctx:  niceyaml.GutterContext{Flag: line.FlagInserted, Soft: true, Styles: styles},
 		},
 		"soft wrap deleted": {
 			want: " ",
-			ctx:  niceyaml.GutterContext{Flag: niceyaml.FlagDeleted, Soft: true, Styles: styles},
+			ctx:  niceyaml.GutterContext{Flag: line.FlagDeleted, Soft: true, Styles: styles},
 		},
 	}
 

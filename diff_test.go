@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/macropower/niceyaml"
+	"github.com/macropower/niceyaml/line"
 )
 
 func TestFullDiff_Lines(t *testing.T) {
@@ -333,14 +334,14 @@ func TestFullDiff_Lines_Flags(t *testing.T) {
 
 		// Count lines with non-default flags.
 		flaggedCount := 0
-		for _, line := range got.Lines() {
-			if line.Flag != niceyaml.FlagDefault {
+		for _, ln := range got.Lines() {
+			if ln.Flag != line.FlagDefault {
 				flaggedCount++
 			}
 		}
 
 		assert.Equal(t, 1, flaggedCount)
-		assert.Equal(t, niceyaml.FlagInserted, got.Line(1).Flag)
+		assert.Equal(t, line.FlagInserted, got.Line(1).Flag)
 	})
 
 	t.Run("deletion gets flag", func(t *testing.T) {
@@ -360,14 +361,14 @@ func TestFullDiff_Lines_Flags(t *testing.T) {
 
 		// Count lines with non-default flags.
 		flaggedCount := 0
-		for _, line := range got.Lines() {
-			if line.Flag != niceyaml.FlagDefault {
+		for _, ln := range got.Lines() {
+			if ln.Flag != line.FlagDefault {
 				flaggedCount++
 			}
 		}
 
 		assert.Equal(t, 1, flaggedCount)
-		assert.Equal(t, niceyaml.FlagDeleted, got.Line(1).Flag)
+		assert.Equal(t, line.FlagDeleted, got.Line(1).Flag)
 	})
 
 	t.Run("modification has delete and insert flags", func(t *testing.T) {
@@ -387,8 +388,8 @@ func TestFullDiff_Lines_Flags(t *testing.T) {
 
 		// Count lines with non-default flags.
 		flaggedCount := 0
-		for _, line := range got.Lines() {
-			if line.Flag != niceyaml.FlagDefault {
+		for _, ln := range got.Lines() {
+			if ln.Flag != line.FlagDefault {
 				flaggedCount++
 			}
 		}
@@ -396,10 +397,10 @@ func TestFullDiff_Lines_Flags(t *testing.T) {
 		assert.Equal(t, 2, flaggedCount)
 
 		// First line is delete.
-		assert.Equal(t, niceyaml.FlagDeleted, got.Line(0).Flag)
+		assert.Equal(t, line.FlagDeleted, got.Line(0).Flag)
 
 		// Second line is insert.
-		assert.Equal(t, niceyaml.FlagInserted, got.Line(1).Flag)
+		assert.Equal(t, line.FlagInserted, got.Line(1).Flag)
 	})
 
 	t.Run("only changed lines get flags", func(t *testing.T) {
@@ -425,8 +426,8 @@ third: 3
 
 		// Only the changed lines (delete old second, insert new second) should have flags.
 		flaggedCount := 0
-		for _, line := range got.Lines() {
-			if line.Flag != niceyaml.FlagDefault {
+		for _, ln := range got.Lines() {
+			if ln.Flag != line.FlagDefault {
 				flaggedCount++
 			}
 		}
@@ -434,16 +435,16 @@ third: 3
 		assert.Equal(t, 2, flaggedCount)
 
 		// Line 1 is unchanged.
-		assert.Equal(t, niceyaml.FlagDefault, got.Line(0).Flag)
+		assert.Equal(t, line.FlagDefault, got.Line(0).Flag)
 
 		// Line 2 is delete.
-		assert.Equal(t, niceyaml.FlagDeleted, got.Line(1).Flag)
+		assert.Equal(t, line.FlagDeleted, got.Line(1).Flag)
 
 		// Line 3 is insert.
-		assert.Equal(t, niceyaml.FlagInserted, got.Line(2).Flag)
+		assert.Equal(t, line.FlagInserted, got.Line(2).Flag)
 
 		// Line 4 is unchanged.
-		assert.Equal(t, niceyaml.FlagDefault, got.Line(3).Flag)
+		assert.Equal(t, line.FlagDefault, got.Line(3).Flag)
 	})
 }
 
@@ -524,8 +525,8 @@ line5: 5
 
 		// Only the deleted and inserted lines.
 		assert.Equal(t, 2, got.Count())
-		assert.Equal(t, niceyaml.FlagDeleted, got.Line(0).Flag)
-		assert.Equal(t, niceyaml.FlagInserted, got.Line(1).Flag)
+		assert.Equal(t, line.FlagDeleted, got.Line(0).Flag)
+		assert.Equal(t, line.FlagInserted, got.Line(1).Flag)
 		assert.Equal(t, want, got.String())
 	})
 
@@ -662,7 +663,7 @@ line9: new9
 
 		assert.Equal(t, "a..b", got.Name)
 		assert.Equal(t, 1, got.Count())
-		assert.Equal(t, niceyaml.FlagInserted, got.Line(0).Flag)
+		assert.Equal(t, line.FlagInserted, got.Line(0).Flag)
 		assert.Equal(t, want, got.String())
 	})
 
@@ -684,7 +685,7 @@ line9: new9
 
 		assert.Equal(t, "a..b", got.Name)
 		assert.Equal(t, 1, got.Count())
-		assert.Equal(t, niceyaml.FlagDeleted, got.Line(0).Flag)
+		assert.Equal(t, line.FlagDeleted, got.Line(0).Flag)
 		assert.Equal(t, want, got.String())
 	})
 

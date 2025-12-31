@@ -3,6 +3,8 @@ package niceyaml
 import (
 	"fmt"
 	"strings"
+
+	"github.com/macropower/niceyaml/line"
 )
 
 // diffKind represents the kind of diff operation.
@@ -31,8 +33,8 @@ func (k diffKind) beforeAfterDeltas() (int, int) {
 
 // lineOp represents a line in the full diff output.
 type lineOp struct {
-	line Line     // Original Line from source.
-	kind diffKind // One of [diffEqual], [diffDelete], [diffInsert].
+	line line.Line // Original Line from source.
+	kind diffKind  // One of [diffEqual], [diffDelete], [diffInsert].
 }
 
 // diffHunk represents a contiguous group of diff operations.
@@ -46,7 +48,7 @@ type diffHunk struct {
 }
 
 // lcsLineDiff computes line operations using a simple LCS-based diff.
-func lcsLineDiff(before, after []Line) []lineOp {
+func lcsLineDiff(before, after line.Lines) []lineOp {
 	m, n := len(before), len(after)
 
 	dp := make([][]int, m+1)
@@ -209,21 +211,21 @@ func NewFullDiff(a, b *Revision) *FullDiff {
 func (d *FullDiff) Lines() *Source {
 	ops := lcsLineDiff(d.a.head.lines, d.b.head.lines)
 
-	lines := make([]Line, 0, len(ops))
+	lines := make(line.Lines, 0, len(ops))
 
 	for _, op := range ops {
-		line := op.line.Clone()
+		ln := op.line.Clone()
 
 		switch op.kind {
 		case diffDelete:
-			line.Flag = FlagDeleted
+			ln.Flag = line.FlagDeleted
 		case diffInsert:
-			line.Flag = FlagInserted
+			ln.Flag = line.FlagInserted
 		default:
-			line.Flag = FlagDefault
+			ln.Flag = line.FlagDefault
 		}
 
-		lines = append(lines, line)
+		lines = append(lines, ln)
 	}
 
 	return &Source{
@@ -262,7 +264,7 @@ func (d *SummaryDiff) Lines() *Source {
 		return &Source{Name: name}
 	}
 
-	var lines []Line
+	var lines line.Lines
 
 	for _, hunk := range hunks {
 		hunkHeader := formatHunkHeader(hunk)
@@ -270,23 +272,23 @@ func (d *SummaryDiff) Lines() *Source {
 
 		for i := hunk.startIdx; i < hunk.endIdx; i++ {
 			op := ops[i]
-			line := op.line.Clone()
+			ln := op.line.Clone()
 
 			switch op.kind {
 			case diffDelete:
-				line.Flag = FlagDeleted
+				ln.Flag = line.FlagDeleted
 			case diffInsert:
-				line.Flag = FlagInserted
+				ln.Flag = line.FlagInserted
 			default:
-				line.Flag = FlagDefault
+				ln.Flag = line.FlagDefault
 			}
 
 			if isFirstLineOfHunk {
-				line.Annotation = Annotation{Content: hunkHeader}
+				ln.Annotation = line.Annotation{Content: hunkHeader}
 				isFirstLineOfHunk = false
 			}
 
-			lines = append(lines, line)
+			lines = append(lines, ln)
 		}
 	}
 
