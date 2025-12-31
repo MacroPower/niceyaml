@@ -1,10 +1,7 @@
 package niceyaml
 
 import (
-	"strings"
-
 	"github.com/goccy/go-yaml"
-	"github.com/goccy/go-yaml/token"
 )
 
 // NewPathBuilder returns a new [yaml.PathBuilder] initialized to the root path.
@@ -24,23 +21,4 @@ func NewPath(children ...string) *yaml.Path {
 	}
 
 	return pb.Build()
-}
-
-// tokenValueOffset calculates the byte offset where Value starts within the
-// first non-empty line of the token's Origin. This offset is used for string
-// slicing operations.
-func tokenValueOffset(tk *token.Token) int {
-	lines := strings.SplitSeq(tk.Origin, "\n")
-	for line := range lines {
-		if line != "" {
-			idx := strings.Index(line, tk.Value)
-			if idx >= 0 {
-				return idx
-			}
-
-			break
-		}
-	}
-
-	return 0
 }

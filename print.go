@@ -550,3 +550,22 @@ func leadingWhitespaceRunes(s string, maxBytes int) int {
 
 	return len([]rune(prefix))
 }
+
+// tokenValueOffset calculates the byte offset where Value starts within the
+// first non-empty line of the token's Origin. This offset is used for string
+// slicing operations.
+func tokenValueOffset(tk *token.Token) int {
+	lines := strings.SplitSeq(tk.Origin, "\n")
+	for l := range lines {
+		if l != "" {
+			idx := strings.Index(l, tk.Value)
+			if idx >= 0 {
+				return idx
+			}
+
+			break
+		}
+	}
+
+	return 0
+}
