@@ -9,11 +9,12 @@ import (
 	"github.com/goccy/go-yaml/token"
 
 	"github.com/macropower/niceyaml/line"
+	"github.com/macropower/niceyaml/position"
 )
 
 // LineIterator provides line-by-line access to YAML tokens for rendering.
 type LineIterator interface {
-	Lines() iter.Seq2[Position, line.Line]
+	Lines() iter.Seq2[position.Position, line.Line]
 	Count() int
 	IsEmpty() bool
 }
@@ -186,7 +187,7 @@ func (p *Printer) SetAnnotationsEnabled(enabled bool) {
 // The range is half-open: Start is inclusive, End is exclusive.
 // Line and column are 0-indexed.
 // Overlapping range colors are blended; transforms are composed (overlay wraps base).
-func (p *Printer) AddStyleToRange(s *lipgloss.Style, r PositionRange) {
+func (p *Printer) AddStyleToRange(s *lipgloss.Style, r position.Range) {
 	style := lipgloss.NewStyle()
 	if s != nil {
 		style = *s
@@ -338,7 +339,7 @@ func (p *Printer) writeLine(
 		// Write content.
 		if contentStyle != nil {
 			// For diff lines: apply diff style to content.
-			sb.WriteString(p.styleLineWithRanges(subLine, NewPosition(visualLine, col), contentStyle, true))
+			sb.WriteString(p.styleLineWithRanges(subLine, position.New(visualLine, col), contentStyle, true))
 		} else {
 			// For equal lines: content is already styled.
 			sb.WriteString(subLine)
@@ -353,7 +354,7 @@ func (p *Printer) writeLine(
 // If alwaysBlend is false, the first matching range overrides the base style;
 // subsequent ranges blend. If alwaysBlend is true, all ranges blend with base.
 // The pos parameter uses 0-indexed line and column values.
-func (p *Printer) styleForPosition(pos Position, style *lipgloss.Style, alwaysBlend bool) *lipgloss.Style {
+func (p *Printer) styleForPosition(pos position.Position, style *lipgloss.Style, alwaysBlend bool) *lipgloss.Style {
 	firstRange := true
 
 	for i := range p.rangeStyles {
@@ -441,7 +442,12 @@ func (p *Printer) styleForToken(tk *token.Token) *lipgloss.Style {
 // It splits the line into spans based on effective styles (base + overlapping ranges).
 // The pos parameter specifies the 0-indexed visual line and column position.
 // If alwaysBlend is true, range styles always blend with base (used for diff lines).
-func (p *Printer) styleLineWithRanges(src string, pos Position, style *lipgloss.Style, alwaysBlend bool) string {
+func (p *Printer) styleLineWithRanges(
+	src string,
+	pos position.Position,
+	style *lipgloss.Style,
+	alwaysBlend bool,
+) string {
 	if src == "" {
 		return src
 	}
@@ -457,7 +463,7 @@ func (p *Printer) styleLineWithRanges(src string, pos Position, style *lipgloss.
 	currentStyle := p.styleForPosition(pos, style, alwaysBlend)
 
 	for i := 1; i < len(runes); i++ {
-		nextPos := NewPosition(pos.Line, pos.Col+i)
+		nextPos := position.New(pos.Line, pos.Col+i)
 		nextStyle := p.styleForPosition(nextPos, style, alwaysBlend)
 		if !stylesEqual(currentStyle, nextStyle) {
 			sb.WriteString(currentStyle.Render(string(runes[spanStart:i])))
@@ -512,7 +518,7 @@ func (p *Printer) renderTokenLine(lineIndex int, ln line.Line) string {
 		if separatorRunes > 0 && separatorRunes <= len(originRunes) {
 			sepPart := string(originRunes[:separatorRunes])
 			defaultStyle := p.styles.GetStyle(StyleDefault)
-			sb.WriteString(p.styleLineWithRanges(sepPart, NewPosition(lineIndex, col), defaultStyle, false))
+			sb.WriteString(p.styleLineWithRanges(sepPart, position.New(lineIndex, col), defaultStyle, false))
 
 			col += separatorRunes
 			originRunes = originRunes[separatorRunes:]
@@ -520,7 +526,7 @@ func (p *Printer) renderTokenLine(lineIndex int, ln line.Line) string {
 
 		// Part 2: Render content portion (token style).
 		if len(originRunes) > 0 {
-			sb.WriteString(p.styleLineWithRanges(string(originRunes), NewPosition(lineIndex, col), tokenStyle, false))
+			sb.WriteString(p.styleLineWithRanges(string(originRunes), position.New(lineIndex, col), tokenStyle, false))
 
 			col += len(originRunes)
 		}

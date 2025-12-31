@@ -26,10 +26,10 @@
 //
 // # Position Tracking
 //
-// [Position] represents a 0-indexed line and column location within a document.
-// [PositionRange] defines a half-open range [Start, End) for selecting spans
-// of text. Create positions and ranges using [NewPosition] and [NewPositionRange].
-// Use [PositionRange.Contains] to check if a position falls within a range.
+// [position.Position] represents a 0-indexed line and column location within a document.
+// [position.Range] defines a half-open range [Start, End) for selecting spans
+// of text. Create positions and ranges using [position.New] and [position.NewRange].
+// Use [position.Range.Contains] to check if a position falls within a range.
 // These types integrate with the [Printer] for highlighting and with
 // the [Finder] for search results.
 //
@@ -76,7 +76,7 @@
 // [LineNumberGutter], and [NoGutter].
 //
 // Use [Printer.SetWidth] to enable word wrapping, and
-// [Printer.AddStyleToRange] to highlight specific [PositionRange] spans.
+// [Printer.AddStyleToRange] to highlight specific [position.Range] spans.
 //
 // # Error Formatting
 //
@@ -95,7 +95,7 @@
 // # String Finding
 //
 // The [Finder] type searches for strings within YAML tokens, returning
-// [PositionRange] values that can be used with [Printer.AddStyleToRange]
+// [position.Range] values that can be used with [Printer.AddStyleToRange]
 // for highlighting matches. Configure search behavior with [WithNormalizer]
 // to apply text normalization such as [StandardNormalizer] for case-insensitive
 // matching.

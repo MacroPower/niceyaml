@@ -12,6 +12,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 
 	"github.com/macropower/niceyaml/line"
+	"github.com/macropower/niceyaml/position"
 )
 
 // Source represents a collection of [token.Tokens] organized into [line.Lines]
@@ -120,11 +121,11 @@ func (s *Source) IsEmpty() bool {
 }
 
 // Lines returns an iterator over all lines.
-// Each iteration yields a [Position] and the [line.Line] at that position.
-func (s *Source) Lines() iter.Seq2[Position, line.Line] {
-	return func(yield func(Position, line.Line) bool) {
+// Each iteration yields a [position.Position] and the [line.Line] at that position.
+func (s *Source) Lines() iter.Seq2[position.Position, line.Line] {
+	return func(yield func(position.Position, line.Line) bool) {
 		for i, line := range s.lines {
-			if !yield(NewPosition(i, 0), line) {
+			if !yield(position.New(i, 0), line) {
 				return
 			}
 		}
@@ -132,15 +133,15 @@ func (s *Source) Lines() iter.Seq2[Position, line.Line] {
 }
 
 // Runes returns an iterator over all runes.
-// Each iteration yields a [Position] and the rune at that position.
-func (s *Source) Runes() iter.Seq2[Position, rune] {
-	return func(yield func(Position, rune) bool) {
+// Each iteration yields a [position.Position] and the rune at that position.
+func (s *Source) Runes() iter.Seq2[position.Position, rune] {
+	return func(yield func(position.Position, rune) bool) {
 		for i, ln := range s.lines {
 			col := 0
 
 			for _, tk := range ln.Tokens() {
 				for _, r := range tk.Origin {
-					if !yield(NewPosition(i, col), r) {
+					if !yield(position.New(i, col), r) {
 						return
 					}
 
@@ -212,18 +213,18 @@ func (s *Source) Validate() error {
 // PositionsFromToken returns all positions where the given token appears.
 // A token may appear on multiple lines when split across lines.
 // Returns nil if the token is nil or not found in the Source.
-func (s *Source) PositionsFromToken(tk *token.Token) []Position {
+func (s *Source) PositionsFromToken(tk *token.Token) []position.Position {
 	if tk == nil {
 		return nil
 	}
 
-	var positions []Position
+	var positions []position.Position
 
 	for i, ln := range s.lines {
 		col := 0
 		for _, lineTk := range ln.Tokens() {
 			if lineTk == tk {
-				positions = append(positions, NewPosition(i, col))
+				positions = append(positions, position.New(i, col))
 			}
 
 			col += len([]rune(strings.TrimSuffix(lineTk.Origin, "\n")))
@@ -236,49 +237,30 @@ func (s *Source) PositionsFromToken(tk *token.Token) []Position {
 // TokenPositionRangesFromToken returns all position ranges for a given token.
 // This is a convenience method that combines [Source.PositionsFromToken] and [Source.TokenPositionRanges].
 // Returns nil if the token is nil or not found in the Source.
-func (s *Source) TokenPositionRangesFromToken(tk *token.Token) []PositionRange {
+func (s *Source) TokenPositionRangesFromToken(tk *token.Token) []position.Range {
 	positions := s.PositionsFromToken(tk)
 	return s.TokenPositionRanges(positions...)
 }
 
 // TokenPositionRanges returns all token position ranges that are part of
-// the same joined token group as the tokens at the given [Position]s.
+// the same joined token group as the tokens at the given [position.Position]s.
 // For non-joined lines, returns the range of the token at each given column.
 // Duplicate ranges are removed.
 // Returns nil if no tokens exist at any of the given positions.
-func (s *Source) TokenPositionRanges(positions ...Position) []PositionRange {
-	var allRanges []PositionRange
+func (s *Source) TokenPositionRanges(positions ...position.Position) []position.Range {
+	var allRanges []position.Range
 
 	for _, pos := range positions {
 		ranges := s.tokenPositionRangesForPos(pos)
 		allRanges = append(allRanges, ranges...)
 	}
 
-	return deduplicateRanges(allRanges)
+	return position.NewRanges(allRanges...).UniqueValues()
 }
 
-// deduplicateRanges removes exact duplicate [PositionRange] entries.
-func deduplicateRanges(ranges []PositionRange) []PositionRange {
-	if len(ranges) == 0 {
-		return nil
-	}
-
-	seen := make(map[PositionRange]struct{})
-	result := make([]PositionRange, 0, len(ranges))
-
-	for _, r := range ranges {
-		if _, exists := seen[r]; !exists {
-			seen[r] = struct{}{}
-			result = append(result, r)
-		}
-	}
-
-	return result
-}
-
-// tokenPositionRangesForPos returns all token position ranges for a single [Position].
+// tokenPositionRangesForPos returns all token position ranges for a single [position.Position].
 // For multiline tokens, this returns ranges for all lines the token spans.
-func (s *Source) tokenPositionRangesForPos(pos Position) []PositionRange {
+func (s *Source) tokenPositionRangesForPos(pos position.Position) []position.Range {
 	if pos.Line < 0 || pos.Line >= len(s.lines) {
 		return nil
 	}
@@ -333,7 +315,7 @@ func (s *Source) tokenPositionRangesForPos(pos Position) []PositionRange {
 }
 
 // rangesForToken calculates position ranges for all lines a token spans.
-func (s *Source) rangesForToken(tk *token.Token, tokenOffset int, lineOffsets []int) []PositionRange {
+func (s *Source) rangesForToken(tk *token.Token, tokenOffset int, lineOffsets []int) []position.Range {
 	// Find which line the token starts on.
 	startLineIdx := 0
 	for i := range len(lineOffsets) - 1 {
@@ -347,7 +329,7 @@ func (s *Source) rangesForToken(tk *token.Token, tokenOffset int, lineOffsets []
 	startCol := tokenOffset - lineOffsets[startLineIdx]
 
 	// Split origin by newlines and create ranges for each part.
-	var ranges []PositionRange
+	var ranges []position.Range
 
 	lineIdx := startLineIdx
 	col := startCol
@@ -359,9 +341,9 @@ func (s *Source) rangesForToken(tk *token.Token, tokenOffset int, lineOffsets []
 
 		partLen := len([]rune(strings.TrimSuffix(part, "\n")))
 		if partLen > 0 {
-			ranges = append(ranges, NewPositionRange(
-				NewPosition(lineIdx, col),
-				NewPosition(lineIdx, col+partLen),
+			ranges = append(ranges, position.NewRange(
+				position.New(lineIdx, col),
+				position.New(lineIdx, col+partLen),
 			))
 		}
 		if strings.HasSuffix(part, "\n") {

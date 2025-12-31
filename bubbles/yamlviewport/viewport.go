@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/macropower/niceyaml"
+	"github.com/macropower/niceyaml/position"
 )
 
 const (
@@ -33,9 +34,9 @@ const (
 // Finder finds matches in lines for highlighting.
 // The viewport invokes this during rerender to get fresh matches.
 type Finder interface {
-	// Find returns [niceyaml.PositionRange] values to highlight in the given
+	// Find returns [position.PositionRange] values to highlight in the given
 	// [niceyaml.Source]. Positions are 0-indexed. Returns nil if no matches.
-	Find(lines *niceyaml.Source) []niceyaml.PositionRange
+	Find(lines *niceyaml.Source) []position.Range
 }
 
 // Option is a configuration option that works in conjunction with [New].
@@ -103,7 +104,7 @@ type Model struct {
 	// KeyMap contains the keybindings for viewport navigation.
 	KeyMap         KeyMap
 	finder         Finder
-	searchMatches  []niceyaml.PositionRange
+	searchMatches  []position.Range
 	revision       *niceyaml.Revision
 	lines          *niceyaml.Source
 	renderedLines  []string

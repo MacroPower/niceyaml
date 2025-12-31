@@ -6,6 +6,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/lucasb-eyer/go-colorful"
+
+	"github.com/macropower/niceyaml/position"
 )
 
 // Style identifies a style category for YAML highlighting.
@@ -43,7 +45,7 @@ type StyleGetter interface {
 // TokenStyler manages style ranges for rendering YAML tokens.
 type TokenStyler interface {
 	StyleGetter
-	AddStyleToRange(style *lipgloss.Style, r PositionRange)
+	AddStyleToRange(style *lipgloss.Style, r position.Range)
 	ClearStyles()
 }
 
@@ -94,7 +96,7 @@ func DefaultStyles() Styles {
 // rangeStyle represents a style to apply to a character range using 0-indexed positions.
 type rangeStyle struct {
 	style lipgloss.Style
-	rng   PositionRange
+	rng   position.Range
 }
 
 // overrideColor returns the overlay color if valid, otherwise the base color.

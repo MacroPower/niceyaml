@@ -12,6 +12,8 @@ import (
 	"golang.org/x/text/runes"
 	"golang.org/x/text/transform"
 	"golang.org/x/text/unicode/norm"
+
+	"github.com/macropower/niceyaml/position"
 )
 
 // Normalizer transforms strings for comparison (e.g., removing diacritics).
@@ -67,9 +69,9 @@ func WithNormalizer(normalizer Normalizer) FinderOption {
 }
 
 // Find finds all occurrences of the search string in the provided lines.
-// It returns a slice of PositionRange indicating the start and end positions of each match.
+// It returns a slice of [position.Range] indicating the start and end positions of each match.
 // Positions are 0-indexed. The slice is provided in the order the matches appear in the lines.
-func (f *Finder) Find(lines *Source) []PositionRange {
+func (f *Finder) Find(lines *Source) []position.Range {
 	if f.search == "" || lines == nil || lines.IsEmpty() {
 		return nil
 	}
@@ -89,7 +91,7 @@ func (f *Finder) Find(lines *Source) []PositionRange {
 		searchStr = f.normalizer.Normalize(f.search)
 	}
 
-	var results []PositionRange
+	var results []position.Range
 
 	offset := 0
 	for {
@@ -110,7 +112,7 @@ func (f *Finder) Find(lines *Source) []PositionRange {
 		// End column is exclusive, so add 1.
 		endPos.Col++
 
-		results = append(results, PositionRange{Start: startPos, End: endPos})
+		results = append(results, position.Range{Start: startPos, End: endPos})
 		offset = matchEnd
 	}
 
@@ -153,22 +155,22 @@ func (f *Finder) buildSourceAndPositionMap(lines *Source) (string, *positionMap)
 	return sb.String(), pm
 }
 
-// positionMap maps character indices in a concatenated string to original Position values.
+// positionMap maps character indices in a concatenated string to original [position.Position] values.
 type positionMap struct {
 	indices   []int
-	positions []Position
+	positions []position.Position
 }
 
 // add records a character index and its corresponding position.
-func (m *positionMap) add(charIndex int, pos Position) {
+func (m *positionMap) add(charIndex int, pos position.Position) {
 	m.indices = append(m.indices, charIndex)
 	m.positions = append(m.positions, pos)
 }
 
-// lookup finds the Position for a given character index using binary search.
-func (m *positionMap) lookup(charIndex int) Position {
+// lookup finds the [position.Position] for a given character index using binary search.
+func (m *positionMap) lookup(charIndex int) position.Position {
 	if len(m.indices) == 0 {
-		return NewPosition(0, 0)
+		return position.New(0, 0)
 	}
 
 	// Find the largest index that is <= the target index.

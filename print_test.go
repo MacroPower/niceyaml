@@ -11,6 +11,7 @@ import (
 
 	"github.com/macropower/niceyaml"
 	"github.com/macropower/niceyaml/line"
+	"github.com/macropower/niceyaml/position"
 )
 
 // testHighlightStyle returns a style that wraps content in brackets for easy verification.
@@ -86,49 +87,49 @@ func TestPrinter_AddStyleToRange(t *testing.T) {
 	tcs := map[string]struct {
 		input string
 		want  string
-		rng   niceyaml.PositionRange
+		rng   position.Range
 	}{
 		"partial token - middle of value (0-indexed)": {
 			input: "key: value",
 			// 0-indexed: col 7-10 = 1-indexed col 8-11
-			rng: niceyaml.NewPositionRange(
-				niceyaml.NewPosition(0, 7),
-				niceyaml.NewPosition(0, 10),
+			rng: position.NewRange(
+				position.New(0, 7),
+				position.New(0, 10),
 			),
 			want: "key: va[lue]",
 		},
 		"partial token - start of value (0-indexed)": {
 			input: "key: value",
 			// 0-indexed: col 5-8 = 1-indexed col 6-9
-			rng: niceyaml.NewPositionRange(
-				niceyaml.NewPosition(0, 5),
-				niceyaml.NewPosition(0, 8),
+			rng: position.NewRange(
+				position.New(0, 5),
+				position.New(0, 8),
 			),
 			want: "key: [val]ue",
 		},
 		"full token (0-indexed)": {
 			input: "key: value",
 			// 0-indexed: col 5-10 = 1-indexed col 6-11
-			rng: niceyaml.NewPositionRange(
-				niceyaml.NewPosition(0, 5),
-				niceyaml.NewPosition(0, 10),
+			rng: position.NewRange(
+				position.New(0, 5),
+				position.New(0, 10),
 			),
 			want: "key: [value]",
 		},
 		"first character (line 0, col 0)": {
 			input: "key: value",
-			rng: niceyaml.NewPositionRange(
-				niceyaml.NewPosition(0, 0),
-				niceyaml.NewPosition(0, 1),
+			rng: position.NewRange(
+				position.New(0, 0),
+				position.New(0, 1),
 			),
 			want: "[k]ey: value",
 		},
 		"multi-line range (0-indexed)": {
 			input: "first: 1\nsecond: 2",
 			// 0-indexed: line 0 col 7 to line 1 col 8
-			rng: niceyaml.NewPositionRange(
-				niceyaml.NewPosition(0, 7),
-				niceyaml.NewPosition(1, 8),
+			rng: position.NewRange(
+				position.New(0, 7),
+				position.New(1, 8),
 			),
 			want: "first: [1]\n[second][:][ ]2",
 		},
@@ -157,7 +158,7 @@ func TestPrinter_ClearStyles(t *testing.T) {
 	p := testPrinter()
 	p.AddStyleToRange(
 		testHighlightStyle(),
-		niceyaml.NewPositionRange(niceyaml.NewPosition(0, 0), niceyaml.NewPosition(0, 3)),
+		position.NewRange(position.New(0, 0), position.New(0, 3)),
 	)
 	p.ClearStyles()
 

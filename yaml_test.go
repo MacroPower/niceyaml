@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/macropower/niceyaml"
+	"github.com/macropower/niceyaml/position"
 )
 
 // testBracketStyle returns a style that wraps content in brackets for verification.
@@ -418,64 +419,64 @@ func TestPositionRange_Contains(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		rng  niceyaml.PositionRange
-		pos  niceyaml.Position
+		rng  position.Range
+		pos  position.Position
 		want bool
 	}{
 		"within single line range": {
-			rng: niceyaml.NewPositionRange(
-				niceyaml.NewPosition(0, 5),
-				niceyaml.NewPosition(0, 10),
+			rng: position.NewRange(
+				position.New(0, 5),
+				position.New(0, 10),
 			),
-			pos:  niceyaml.NewPosition(0, 7),
+			pos:  position.New(0, 7),
 			want: true,
 		},
 		"at start (inclusive)": {
-			rng: niceyaml.NewPositionRange(
-				niceyaml.NewPosition(0, 5),
-				niceyaml.NewPosition(0, 10),
+			rng: position.NewRange(
+				position.New(0, 5),
+				position.New(0, 10),
 			),
-			pos:  niceyaml.NewPosition(0, 5),
+			pos:  position.New(0, 5),
 			want: true,
 		},
 		"at end (exclusive)": {
-			rng: niceyaml.NewPositionRange(
-				niceyaml.NewPosition(0, 5),
-				niceyaml.NewPosition(0, 10),
+			rng: position.NewRange(
+				position.New(0, 5),
+				position.New(0, 10),
 			),
-			pos:  niceyaml.NewPosition(0, 10),
+			pos:  position.New(0, 10),
 			want: false,
 		},
 		"before start": {
-			rng: niceyaml.NewPositionRange(
-				niceyaml.NewPosition(0, 5),
-				niceyaml.NewPosition(0, 10),
+			rng: position.NewRange(
+				position.New(0, 5),
+				position.New(0, 10),
 			),
-			pos:  niceyaml.NewPosition(0, 4),
+			pos:  position.New(0, 4),
 			want: false,
 		},
 		"multi-line range - middle line": {
-			rng: niceyaml.NewPositionRange(
-				niceyaml.NewPosition(1, 5),
-				niceyaml.NewPosition(3, 10),
+			rng: position.NewRange(
+				position.New(1, 5),
+				position.New(3, 10),
 			),
-			pos:  niceyaml.NewPosition(2, 0),
+			pos:  position.New(2, 0),
 			want: true,
 		},
 		"first line (0-indexed)": {
-			rng: niceyaml.NewPositionRange(
-				niceyaml.NewPosition(0, 0),
-				niceyaml.NewPosition(0, 5),
+			rng: position.NewRange(
+				position.New(0, 0),
+				position.New(0, 5),
 			),
-			pos:  niceyaml.NewPosition(0, 0),
+			pos:  position.New(0, 0),
 			want: true,
 		},
 		"after end line": {
-			rng: niceyaml.NewPositionRange(
-				niceyaml.NewPosition(0, 0),
-				niceyaml.NewPosition(1, 5),
+			rng: position.NewRange(
+				position.New(0, 0),
+				position.New(1, 5),
 			),
-			pos:  niceyaml.NewPosition(2, 0),
+			pos:  position.New(2, 0),
 			want: false,
 		},
 	}

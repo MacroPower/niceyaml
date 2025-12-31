@@ -10,6 +10,7 @@ import (
 
 	"github.com/macropower/niceyaml"
 	"github.com/macropower/niceyaml/line"
+	"github.com/macropower/niceyaml/position"
 )
 
 func TestTokens_String_Annotation(t *testing.T) {
@@ -92,7 +93,7 @@ d: 4
 
 type runePosition struct {
 	R   rune
-	Pos niceyaml.Position
+	Pos position.Position
 }
 
 func TestLines_Runes(t *testing.T) {
@@ -106,58 +107,58 @@ func TestLines_Runes(t *testing.T) {
 			// Note: lexer strips trailing newline from final simple value.
 			input: "a: b\n",
 			want: []runePosition{
-				{R: 'a', Pos: niceyaml.NewPosition(0, 0)},
-				{R: ':', Pos: niceyaml.NewPosition(0, 1)},
-				{R: ' ', Pos: niceyaml.NewPosition(0, 2)},
-				{R: 'b', Pos: niceyaml.NewPosition(0, 3)},
+				{R: 'a', Pos: position.New(0, 0)},
+				{R: ':', Pos: position.New(0, 1)},
+				{R: ' ', Pos: position.New(0, 2)},
+				{R: 'b', Pos: position.New(0, 3)},
 			},
 		},
 		"multi-line": {
 			// Note: lexer strips trailing newline from final value on each line.
 			input: "a: 1\nb: 2\n",
 			want: []runePosition{
-				{R: 'a', Pos: niceyaml.NewPosition(0, 0)},
-				{R: ':', Pos: niceyaml.NewPosition(0, 1)},
-				{R: ' ', Pos: niceyaml.NewPosition(0, 2)},
-				{R: '1', Pos: niceyaml.NewPosition(0, 3)},
-				{R: '\n', Pos: niceyaml.NewPosition(0, 4)},
-				{R: 'b', Pos: niceyaml.NewPosition(1, 0)},
-				{R: ':', Pos: niceyaml.NewPosition(1, 1)},
-				{R: ' ', Pos: niceyaml.NewPosition(1, 2)},
-				{R: '2', Pos: niceyaml.NewPosition(1, 3)},
+				{R: 'a', Pos: position.New(0, 0)},
+				{R: ':', Pos: position.New(0, 1)},
+				{R: ' ', Pos: position.New(0, 2)},
+				{R: '1', Pos: position.New(0, 3)},
+				{R: '\n', Pos: position.New(0, 4)},
+				{R: 'b', Pos: position.New(1, 0)},
+				{R: ':', Pos: position.New(1, 1)},
+				{R: ' ', Pos: position.New(1, 2)},
+				{R: '2', Pos: position.New(1, 3)},
 			},
 		},
 		"utf8 - multibyte char": {
 			input: "k: ü\n",
 			want: []runePosition{
-				{R: 'k', Pos: niceyaml.NewPosition(0, 0)},
-				{R: ':', Pos: niceyaml.NewPosition(0, 1)},
-				{R: ' ', Pos: niceyaml.NewPosition(0, 2)},
-				{R: 'ü', Pos: niceyaml.NewPosition(0, 3)},
+				{R: 'k', Pos: position.New(0, 0)},
+				{R: ':', Pos: position.New(0, 1)},
+				{R: ' ', Pos: position.New(0, 2)},
+				{R: 'ü', Pos: position.New(0, 3)},
 			},
 		},
 		"utf8 - japanese": {
 			input: "k: 日本\n",
 			want: []runePosition{
-				{R: 'k', Pos: niceyaml.NewPosition(0, 0)},
-				{R: ':', Pos: niceyaml.NewPosition(0, 1)},
-				{R: ' ', Pos: niceyaml.NewPosition(0, 2)},
-				{R: '日', Pos: niceyaml.NewPosition(0, 3)},
-				{R: '本', Pos: niceyaml.NewPosition(0, 4)},
+				{R: 'k', Pos: position.New(0, 0)},
+				{R: ':', Pos: position.New(0, 1)},
+				{R: ' ', Pos: position.New(0, 2)},
+				{R: '日', Pos: position.New(0, 3)},
+				{R: '本', Pos: position.New(0, 4)},
 			},
 		},
 		"nested with indent": {
 			input: "p:\n  c: v\n",
 			want: []runePosition{
-				{R: 'p', Pos: niceyaml.NewPosition(0, 0)},
-				{R: ':', Pos: niceyaml.NewPosition(0, 1)},
-				{R: '\n', Pos: niceyaml.NewPosition(0, 2)},
-				{R: ' ', Pos: niceyaml.NewPosition(1, 0)},
-				{R: ' ', Pos: niceyaml.NewPosition(1, 1)},
-				{R: 'c', Pos: niceyaml.NewPosition(1, 2)},
-				{R: ':', Pos: niceyaml.NewPosition(1, 3)},
-				{R: ' ', Pos: niceyaml.NewPosition(1, 4)},
-				{R: 'v', Pos: niceyaml.NewPosition(1, 5)},
+				{R: 'p', Pos: position.New(0, 0)},
+				{R: ':', Pos: position.New(0, 1)},
+				{R: '\n', Pos: position.New(0, 2)},
+				{R: ' ', Pos: position.New(1, 0)},
+				{R: ' ', Pos: position.New(1, 1)},
+				{R: 'c', Pos: position.New(1, 2)},
+				{R: ':', Pos: position.New(1, 3)},
+				{R: ' ', Pos: position.New(1, 4)},
+				{R: 'v', Pos: position.New(1, 5)},
 			},
 		},
 		"empty": {
@@ -195,7 +196,7 @@ func TestLines_Runes_LiteralBlock(t *testing.T) {
 
 	var runes []rune //nolint:prealloc // Size unknown from iterator.
 
-	var positions []niceyaml.Position //nolint:prealloc // Size unknown from iterator.
+	var positions []position.Position //nolint:prealloc // Size unknown from iterator.
 
 	for pos, r := range lines.Runes() {
 		runes = append(runes, r)
@@ -333,7 +334,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 
 		// Query line index 1 (second line), column 0 (start of the string token).
 		// The literal block content starts at column 0 (the indentation spaces are part of Origin).
-		ranges := result.TokenPositionRanges(niceyaml.Position{Line: 1, Col: 0})
+		ranges := result.TokenPositionRanges(position.Position{Line: 1, Col: 0})
 		require.NotNil(t, ranges, "expected ranges for joined literal block")
 		require.Len(t, ranges, 2, "expected 2 ranges for 2-line literal block content")
 
@@ -360,7 +361,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		require.Equal(t, 1, result.Count())
 
 		// Query line index 0, column 0 (the "key" token).
-		ranges := result.TokenPositionRanges(niceyaml.Position{Line: 0, Col: 0})
+		ranges := result.TokenPositionRanges(position.Position{Line: 0, Col: 0})
 		require.NotNil(t, ranges)
 		require.Len(t, ranges, 1)
 		assert.Equal(t, 0, ranges[0].Start.Line)
@@ -397,7 +398,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		}
 
 		// Query a column within the last token.
-		ranges := result.TokenPositionRanges(niceyaml.Position{Line: 0, Col: expectedCol})
+		ranges := result.TokenPositionRanges(position.Position{Line: 0, Col: expectedCol})
 		require.NotNil(t, ranges)
 		require.Len(t, ranges, 1)
 		assert.Equal(t, 0, ranges[0].Start.Line)
@@ -420,7 +421,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 
 		// Query line index 0 (indicator line), column 0 (the "key" token).
 		// The indicator line itself is not part of the join, but has tokens.
-		ranges := result.TokenPositionRanges(niceyaml.Position{Line: 0, Col: 0})
+		ranges := result.TokenPositionRanges(position.Position{Line: 0, Col: 0})
 		require.NotNil(t, ranges)
 		require.Len(t, ranges, 1)
 		assert.Equal(t, 0, ranges[0].Start.Line)
@@ -442,7 +443,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		require.Equal(t, 3, result.Count())
 
 		// Query line index 2 (last content line), column 0.
-		ranges := result.TokenPositionRanges(niceyaml.Position{Line: 2, Col: 0})
+		ranges := result.TokenPositionRanges(position.Position{Line: 2, Col: 0})
 		require.NotNil(t, ranges, "expected ranges when querying last joined line")
 		require.Len(t, ranges, 2)
 
@@ -464,11 +465,11 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		result := niceyaml.NewSourceFromTokens(tks, niceyaml.WithName("test"))
 
 		// Query non-existent line index.
-		ranges := result.TokenPositionRanges(niceyaml.Position{Line: 999, Col: 0})
+		ranges := result.TokenPositionRanges(position.Position{Line: 999, Col: 0})
 		assert.Nil(t, ranges)
 
 		// Negative index.
-		ranges = result.TokenPositionRanges(niceyaml.Position{Line: -1, Col: 0})
+		ranges = result.TokenPositionRanges(position.Position{Line: -1, Col: 0})
 		assert.Nil(t, ranges)
 	})
 
@@ -485,7 +486,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		require.Equal(t, 3, result.Count())
 
 		// Query line index 1 with a column that's way beyond the token.
-		ranges := result.TokenPositionRanges(niceyaml.Position{Line: 1, Col: 100})
+		ranges := result.TokenPositionRanges(position.Position{Line: 1, Col: 100})
 		assert.Nil(t, ranges, "expected nil for column outside token range")
 	})
 
@@ -503,7 +504,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		require.Equal(t, 4, result.Count())
 
 		// Query middle line (line index 2), column 0.
-		ranges := result.TokenPositionRanges(niceyaml.Position{Line: 2, Col: 0})
+		ranges := result.TokenPositionRanges(position.Position{Line: 2, Col: 0})
 		require.NotNil(t, ranges)
 		require.Len(t, ranges, 3, "expected 3 ranges for 3-line literal block content")
 
@@ -530,7 +531,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		require.Equal(t, 3, result.Count())
 
 		// Query line index 1 (first content line), column 0.
-		ranges := result.TokenPositionRanges(niceyaml.Position{Line: 1, Col: 0})
+		ranges := result.TokenPositionRanges(position.Position{Line: 1, Col: 0})
 		require.NotNil(t, ranges)
 		require.Len(t, ranges, 2)
 
@@ -557,8 +558,8 @@ second: 2
 
 		// Query two different positions: "first" token on line 0, "second" token on line 1.
 		ranges := result.TokenPositionRanges(
-			niceyaml.Position{Line: 0, Col: 0},
-			niceyaml.Position{Line: 1, Col: 0},
+			position.Position{Line: 0, Col: 0},
+			position.Position{Line: 1, Col: 0},
 		)
 		require.NotNil(t, ranges)
 		require.Len(t, ranges, 2)
@@ -582,8 +583,8 @@ second: 2
 
 		// Query the same position twice.
 		ranges := result.TokenPositionRanges(
-			niceyaml.Position{Line: 0, Col: 0},
-			niceyaml.Position{Line: 0, Col: 0},
+			position.Position{Line: 0, Col: 0},
+			position.Position{Line: 0, Col: 0},
 		)
 		require.NotNil(t, ranges)
 		require.Len(t, ranges, 1, "expected duplicates to be removed")
@@ -622,8 +623,8 @@ second: 2
 		// Both positions are within the joined block, so they should return
 		// the same ranges (deduplicated).
 		ranges := result.TokenPositionRanges(
-			niceyaml.Position{Line: 1, Col: 0},
-			niceyaml.Position{Line: 2, Col: 0},
+			position.Position{Line: 1, Col: 0},
+			position.Position{Line: 2, Col: 0},
 		)
 		require.NotNil(t, ranges)
 		require.Len(t, ranges, 2, "expected 2 unique ranges from joined block")
