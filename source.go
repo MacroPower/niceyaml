@@ -172,35 +172,13 @@ func (s *Source) SetFlag(idx int, flag line.Flag) {
 // Content returns the combined content of all [Line]s as a string.
 // [Line]s are joined with newlines.
 func (s *Source) Content() string {
-	if len(s.lines) == 0 {
-		return ""
-	}
-
-	sb := strings.Builder{}
-	for i, l := range s.lines {
-		if i > 0 {
-			sb.WriteByte('\n')
-		}
-
-		sb.WriteString(l.Content())
-	}
-
-	return sb.String()
+	return s.lines.Content()
 }
 
 // String reconstructs all [Line]s as a string, including any annotations.
 // This should generally only be used for debugging.
 func (s *Source) String() string {
-	var sb strings.Builder
-	for i, l := range s.lines {
-		if i > 0 {
-			sb.WriteByte('\n')
-		}
-
-		sb.WriteString(l.String())
-	}
-
-	return sb.String()
+	return s.lines.String()
 }
 
 // Validate checks the integrity of the [Source].
@@ -210,35 +188,11 @@ func (s *Source) Validate() error {
 	return s.lines.Validate()
 }
 
-// PositionsFromToken returns all positions where the given token appears.
-// A token may appear on multiple lines when split across lines.
-// Returns nil if the token is nil or not found in the Source.
-func (s *Source) PositionsFromToken(tk *token.Token) []position.Position {
-	if tk == nil {
-		return nil
-	}
-
-	var positions []position.Position
-
-	for i, ln := range s.lines {
-		col := 0
-		for _, lineTk := range ln.Tokens() {
-			if lineTk == tk {
-				positions = append(positions, position.New(i, col))
-			}
-
-			col += len([]rune(strings.TrimSuffix(lineTk.Origin, "\n")))
-		}
-	}
-
-	return positions
-}
-
 // TokenPositionRangesFromToken returns all position ranges for a given token.
-// This is a convenience method that combines [Source.PositionsFromToken] and [Source.TokenPositionRanges].
+// This is a convenience method that combines [line.Lines.TokenPositions] and [Source.TokenPositionRanges].
 // Returns nil if the token is nil or not found in the Source.
 func (s *Source) TokenPositionRangesFromToken(tk *token.Token) []position.Range {
-	positions := s.PositionsFromToken(tk)
+	positions := s.lines.TokenPositions(tk)
 	return s.TokenPositionRanges(positions...)
 }
 
