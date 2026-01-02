@@ -50,15 +50,15 @@ type Ranges struct {
 func NewRanges(ranges ...Range) *Ranges {
 	prs := &Ranges{}
 	for _, r := range ranges {
-		prs.Append(r)
+		prs.Add(r)
 	}
 
 	return prs
 }
 
-// Append appends a new [Range] to the set.
-func (rs *Ranges) Append(r Range) {
-	rs.value = append(rs.value, r)
+// Add adds [Range]s to the set in-place.
+func (rs *Ranges) Add(r ...Range) {
+	rs.value = append(rs.value, r...)
 }
 
 // Values returns all [Range]s in the set as a slice.

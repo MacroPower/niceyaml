@@ -34,16 +34,8 @@
 //
 //   - [Lines]: Collection of document lines created via [NewLines].
 //     Supports round-trip reconstruction: [Lines.Tokens] returns the
-//     original token stream by deduplicating shared [SegmentedToken.Source] pointers.
+//     original token stream by deduplicating segments that share source token pointers.
 //   - [Line]: Single document line with tokens, optional [Annotation], and [Flag].
-//
-// Token segmentation types:
-//
-//   - [SegmentedToken]: Pairs a Source (original token) with a Part (per-line segment).
-//     Multiple SegmentedTokens share the same Source pointer when a multiline token
-//     is split across lines.
-//   - [SegmentedTokens]: Slice type with [SegmentedTokens.SourceTokens] and
-//     [SegmentedTokens.PartTokens] methods.
 //
 // Metadata types for display and diff tracking:
 //

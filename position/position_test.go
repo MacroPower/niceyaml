@@ -197,37 +197,37 @@ func TestNewRanges(t *testing.T) {
 	})
 }
 
-func TestRanges_Append(t *testing.T) {
+func TestRanges_Add(t *testing.T) {
 	t.Parallel()
 
-	t.Run("append to empty", func(t *testing.T) {
+	t.Run("add to empty", func(t *testing.T) {
 		t.Parallel()
 
 		rs := position.NewRanges()
 		r := position.NewRange(position.New(0, 0), position.New(1, 0))
-		rs.Append(r)
+		rs.Add(r)
 		assert.Equal(t, []position.Range{r}, rs.Values())
 	})
 
-	t.Run("append multiple sequentially", func(t *testing.T) {
+	t.Run("add multiple sequentially", func(t *testing.T) {
 		t.Parallel()
 
 		rs := position.NewRanges()
 		r1 := position.NewRange(position.New(0, 0), position.New(1, 0))
 		r2 := position.NewRange(position.New(2, 0), position.New(3, 0))
 
-		rs.Append(r1)
-		rs.Append(r2)
+		rs.Add(r1)
+		rs.Add(r2)
 		assert.Equal(t, []position.Range{r1, r2}, rs.Values())
 	})
 
-	t.Run("append duplicates allowed", func(t *testing.T) {
+	t.Run("add duplicates allowed", func(t *testing.T) {
 		t.Parallel()
 
 		rs := position.NewRanges()
 		r := position.NewRange(position.New(0, 0), position.New(1, 0))
-		rs.Append(r)
-		rs.Append(r)
+		rs.Add(r)
+		rs.Add(r)
 		assert.Equal(t, []position.Range{r, r}, rs.Values())
 	})
 }

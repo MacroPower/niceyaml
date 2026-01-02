@@ -3,7 +3,6 @@ package niceyaml
 import (
 	"errors"
 	"iter"
-	"strings"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -189,7 +188,6 @@ func (s *Source) Validate() error {
 }
 
 // TokenPositionRangesFromToken returns all position ranges for a given token.
-// This is a convenience method that combines [line.Lines.TokenPositions] and [Source.TokenPositionRanges].
 // Returns nil if the token is nil or not found in the Source.
 func (s *Source) TokenPositionRangesFromToken(tk *token.Token) []position.Range {
 	positions := s.lines.TokenPositions(tk)
@@ -202,109 +200,16 @@ func (s *Source) TokenPositionRangesFromToken(tk *token.Token) []position.Range 
 // Duplicate ranges are removed.
 // Returns nil if no tokens exist at any of the given positions.
 func (s *Source) TokenPositionRanges(positions ...position.Position) []position.Range {
-	var allRanges []position.Range
+	allRanges := position.NewRanges()
 
 	for _, pos := range positions {
-		ranges := s.tokenPositionRangesForPos(pos)
-		allRanges = append(allRanges, ranges...)
-	}
-
-	return position.NewRanges(allRanges...).UniqueValues()
-}
-
-// tokenPositionRangesForPos returns all token position ranges for a single [position.Position].
-// For multiline tokens, this returns ranges for all lines the token spans.
-func (s *Source) tokenPositionRangesForPos(pos position.Position) []position.Range {
-	if pos.Line < 0 || pos.Line >= len(s.lines) {
-		return nil
-	}
-
-	// Build cumulative offset map for lines.
-	lineOffsets := make([]int, len(s.lines)+1)
-
-	offset := 0
-	for i, ln := range s.lines {
-		lineOffsets[i] = offset
-		for _, tk := range ln.Tokens() {
-			offset += len([]rune(tk.Origin))
-		}
-	}
-
-	lineOffsets[len(s.lines)] = offset
-
-	// Find the token at (pos.Line, pos.Col) and calculate its offset.
-	ln := s.lines[pos.Line]
-	tks := ln.Tokens()
-	col := 0
-	targetOffset := lineOffsets[pos.Line]
-
-	for _, tk := range tks {
-		tkLen := len([]rune(strings.TrimSuffix(tk.Origin, "\n")))
-		if pos.Col >= col && pos.Col < col+tkLen {
-			// Found the token. Calculate the offset within the document.
-			targetOffset += col
-
-			// Find which recombined token contains this offset.
-			recombined := s.lines.Tokens()
-
-			recOffset := 0
-			for _, rTk := range recombined {
-				rTkLen := len([]rune(rTk.Origin))
-				if recOffset <= targetOffset && targetOffset < recOffset+rTkLen {
-					// This recombined token contains our position.
-					return s.rangesForToken(rTk, recOffset, lineOffsets)
-				}
-
-				recOffset += rTkLen
+		ranges := s.lines.TokenPositionRangesAt(pos)
+		if ranges != nil {
+			for _, r := range ranges.Values() {
+				allRanges.Add(r)
 			}
-
-			break
-		}
-
-		targetOffset += len([]rune(tk.Origin))
-		col += tkLen
-	}
-
-	return nil
-}
-
-// rangesForToken calculates position ranges for all lines a token spans.
-func (s *Source) rangesForToken(tk *token.Token, tokenOffset int, lineOffsets []int) []position.Range {
-	// Find which line the token starts on.
-	startLineIdx := 0
-	for i := range len(lineOffsets) - 1 {
-		if lineOffsets[i] <= tokenOffset && tokenOffset < lineOffsets[i+1] {
-			startLineIdx = i
-			break
 		}
 	}
 
-	// Calculate the column offset within the start line.
-	startCol := tokenOffset - lineOffsets[startLineIdx]
-
-	// Split origin by newlines and create ranges for each part.
-	var ranges []position.Range
-
-	lineIdx := startLineIdx
-	col := startCol
-
-	for _, part := range strings.SplitAfter(tk.Origin, "\n") {
-		if part == "" {
-			continue
-		}
-
-		partLen := len([]rune(strings.TrimSuffix(part, "\n")))
-		if partLen > 0 {
-			ranges = append(ranges, position.NewRange(
-				position.New(lineIdx, col),
-				position.New(lineIdx, col+partLen),
-			))
-		}
-		if strings.HasSuffix(part, "\n") {
-			lineIdx++
-			col = 0
-		}
-	}
-
-	return ranges
+	return allRanges.UniqueValues()
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/macropower/niceyaml/line"
+	"github.com/macropower/niceyaml/position"
 )
 
 // dumpTokens concatenates all token Origins into a single string.
@@ -2203,8 +2204,8 @@ func TestLines_TokenPositions(t *testing.T) {
 
 		require.Len(t, lines, 1)
 
-		// Get the "key" token.
-		tk := lines[0].Token(0)
+		// Use the original "key" token from lexer (TokenPositions does pointer comparison).
+		tk := tks[0]
 		positions := lines.TokenPositions(tk)
 
 		require.Len(t, positions, 1)
@@ -2224,8 +2225,18 @@ func TestLines_TokenPositions(t *testing.T) {
 
 		require.Len(t, lines, 3)
 
-		// Get the content token from the first content line.
-		tk := lines[1].Token(0)
+		// Find the literal content token from original lexer tokens.
+		// It's the StringType token whose Origin contains "line1".
+		var tk *token.Token
+		for _, lexTk := range tks {
+			if lexTk.Type == token.StringType && strings.Contains(lexTk.Origin, "line1") {
+				tk = lexTk
+				break
+			}
+		}
+
+		require.NotNil(t, tk)
+
 		positions := lines.TokenPositions(tk)
 
 		// The same token should appear on multiple lines.
@@ -2274,14 +2285,183 @@ func TestLines_TokenPositions(t *testing.T) {
 		tks := lexer.Tokenize(input)
 		lines := line.NewLines(tks)
 
-		// Get the last token ("value").
-		ln := lines[0]
-		lastTk := ln.Token(len(ln.Tokens()) - 1)
-		positions := lines.TokenPositions(lastTk)
+		// Find the "value" token from original lexer tokens.
+		var tk *token.Token
+		for _, lexTk := range tks {
+			if lexTk.Value == "value" {
+				tk = lexTk
+				break
+			}
+		}
+
+		require.NotNil(t, tk)
+
+		positions := lines.TokenPositions(tk)
 
 		require.Len(t, positions, 1)
 		assert.Equal(t, 0, positions[0].Line)
 		// Column should be > 0 since it's not the first token.
 		assert.Positive(t, positions[0].Col)
+	})
+}
+
+func TestLines_TokenAt(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns token at position", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+
+		// Get token at start of line.
+		tk := lines.TokenAt(position.New(0, 0))
+		require.NotNil(t, tk)
+		assert.Equal(t, "key", tk.Value)
+	})
+
+	t.Run("returns token at column offset", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+
+		// Get token in middle of "value" (column 5 is 'v').
+		tk := lines.TokenAt(position.New(0, 5))
+		require.NotNil(t, tk)
+		assert.Equal(t, "value", tk.Value)
+	})
+
+	t.Run("multiline token returns same source", func(t *testing.T) {
+		t.Parallel()
+
+		input := `key: |
+  line1
+  line2
+`
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+
+		// Get source token from different lines of the literal block.
+		tk1 := lines.TokenAt(position.New(1, 0))
+		tk2 := lines.TokenAt(position.New(2, 0))
+
+		require.NotNil(t, tk1)
+		require.NotNil(t, tk2)
+		// Both should return clones with the same values (TokenAt returns clones).
+		assert.NotSame(t, tk1, tk2)
+		assert.Equal(t, tk1.Value, tk2.Value)
+		assert.Equal(t, tk1.Origin, tk2.Origin)
+		assert.Equal(t, tk1.Type, tk2.Type)
+	})
+
+	t.Run("out of bounds line returns nil", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+
+		assert.Nil(t, lines.TokenAt(position.New(-1, 0)))
+		assert.Nil(t, lines.TokenAt(position.New(999, 0)))
+	})
+
+	t.Run("column outside token range returns nil", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+
+		assert.Nil(t, lines.TokenAt(position.New(0, 100)))
+	})
+}
+
+func TestLines_TokenPositionRanges(t *testing.T) {
+	t.Parallel()
+
+	t.Run("single token range", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+
+		// Use original "key" token from lexer (TokenPositionRanges does pointer comparison).
+		tk := tks[0]
+		ranges := lines.TokenPositionRanges(tk)
+		require.NotNil(t, ranges)
+
+		values := ranges.Values()
+		require.Len(t, values, 1)
+		assert.Equal(t, 0, values[0].Start.Line)
+		assert.Equal(t, 0, values[0].Start.Col)
+		assert.Equal(t, 0, values[0].End.Line)
+		assert.Equal(t, 3, values[0].End.Col)
+	})
+
+	t.Run("multiline token returns multiple ranges", func(t *testing.T) {
+		t.Parallel()
+
+		input := `key: |
+  line1
+  line2
+`
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+
+		// Find the literal content token from original lexer tokens.
+		// It's the StringType token whose Origin contains "line1".
+		var tk *token.Token
+		for _, lexTk := range tks {
+			if lexTk.Type == token.StringType && strings.Contains(lexTk.Origin, "line1") {
+				tk = lexTk
+				break
+			}
+		}
+
+		require.NotNil(t, tk)
+
+		ranges := lines.TokenPositionRanges(tk)
+		require.NotNil(t, ranges)
+
+		values := ranges.Values()
+		require.Len(t, values, 2)
+
+		// Collect line indices.
+		lineIdxs := make([]int, len(values))
+		for i, r := range values {
+			lineIdxs[i] = r.Start.Line
+		}
+
+		assert.Contains(t, lineIdxs, 1)
+		assert.Contains(t, lineIdxs, 2)
+	})
+
+	t.Run("nil token returns nil", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+
+		assert.Nil(t, lines.TokenPositionRanges(nil))
+	})
+
+	t.Run("token not in lines returns empty ranges", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+
+		otherTks := lexer.Tokenize("other: data\n")
+		otherTk := otherTks[0]
+
+		ranges := lines.TokenPositionRanges(otherTk)
+		require.NotNil(t, ranges)
+		assert.Empty(t, ranges.Values())
 	})
 }
