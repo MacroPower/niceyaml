@@ -9,6 +9,7 @@ import (
 
 	"github.com/macropower/niceyaml"
 	"github.com/macropower/niceyaml/schema/validate"
+	"github.com/macropower/niceyaml/yamltest"
 )
 
 func TestValidationError_Error(t *testing.T) {
@@ -471,10 +472,10 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 		wantErr      bool
 	}{
 		"valid data": {
-			input: `
-name: Kallisto
-age: 30
-`,
+			input: yamltest.Input(`
+				name: Kallisto
+				age: 30
+			`),
 			wantErr: false,
 		},
 		"missing required field": {
@@ -483,175 +484,175 @@ age: 30
 			expectedPath: "$",
 		},
 		"wrong type for name": {
-			input: `
-name: 123
-age: 30
-`,
+			input: yamltest.Input(`
+				name: 123
+				age: 30
+			`),
 			wantErr:      true,
 			expectedPath: "$.name",
 		},
 		"wrong type for age": {
-			input: `
-name: Kallisto
-age: thirty
-`,
+			input: yamltest.Input(`
+				name: Kallisto
+				age: thirty
+			`),
 			wantErr:      true,
 			expectedPath: "$.age",
 		},
 		"invalid array item": {
-			input: `
-name: John
-items:
-  - valid
-  - 123
-  - also valid
-`,
+			input: yamltest.Input(`
+				name: John
+				items:
+				  - valid
+				  - 123
+				  - also valid
+			`),
 			wantErr:      true,
 			expectedPath: "$.items[1]",
 		},
 		"nested object validation error": {
-			input: `
-name: Kallisto
-nested:
-  notValue: something
-`,
+			input: yamltest.Input(`
+				name: Kallisto
+				nested:
+				  notValue: something
+			`),
 			wantErr:      true,
 			expectedPath: "$.nested.notValue",
 		},
 		"valid array of objects": {
-			input: `
-name: Kallisto
-users:
-  - id: 1
-    email: kallisto@example.com
-    profile:
-      firstName: Kallisto
-      lastName: Lykaonis
-  - id: 2
-    email: aello@example.com
-    profile:
-      firstName: Jane
-      lastName: Thaumantias
-      preferences:
-        - dark_mode
-        - notifications
-`,
+			input: yamltest.Input(`
+				name: Kallisto
+				users:
+				  - id: 1
+				    email: kallisto@example.com
+				    profile:
+				      firstName: Kallisto
+				      lastName: Lykaonis
+				  - id: 2
+				    email: aello@example.com
+				    profile:
+				      firstName: Jane
+				      lastName: Thaumantias
+				      preferences:
+				        - dark_mode
+				        - notifications
+			`),
 			wantErr: false,
 		},
 		"invalid object in array": {
-			input: `
-name: Kallisto
-users:
-  - id: 1
-    email: kallisto@example.com
-    profile:
-      firstName: Kallisto
-      lastName: Lykaonis
-  - id: invalid
-    email: aello@example.com
-    profile:
-      firstName: Aello
-      lastName: Thaumantias
-`,
+			input: yamltest.Input(`
+				name: Kallisto
+				users:
+				  - id: 1
+				    email: kallisto@example.com
+				    profile:
+				      firstName: Kallisto
+				      lastName: Lykaonis
+				  - id: invalid
+				    email: aello@example.com
+				    profile:
+				      firstName: Aello
+				      lastName: Thaumantias
+			`),
 			wantErr:      true,
 			expectedPath: "$.users[1].id",
 		},
 		"missing required field in nested object within array": {
-			input: `
-name: Kallisto
-users:
-  - id: 1
-    email: kallisto@example.com
-    profile:
-      firstName: Kallisto
-`,
+			input: yamltest.Input(`
+				name: Kallisto
+				users:
+				  - id: 1
+				    email: kallisto@example.com
+				    profile:
+				      firstName: Kallisto
+			`),
 			wantErr:      true,
 			expectedPath: "$.users[0].profile",
 		},
 		"invalid preference in deeply nested array": {
-			input: `
-name: Kallisto
-users:
-  - id: 1
-    email: kallisto@example.com
-    profile:
-      firstName: Kallisto
-      lastName: Lykaonis
-      preferences:
-        - dark_mode
-        - 123
-        - notifications
-`,
+			input: yamltest.Input(`
+				name: Kallisto
+				users:
+				  - id: 1
+				    email: kallisto@example.com
+				    profile:
+				      firstName: Kallisto
+				      lastName: Lykaonis
+				      preferences:
+				        - dark_mode
+				        - 123
+				        - notifications
+			`),
 			wantErr:      true,
 			expectedPath: "$.users[0].profile.preferences[1]",
 		},
 		"valid matrix (2D array)": {
-			input: `
-name: Kallisto
-matrix:
-  - [1, 2, 3]
-  - [4, 5, 6]
-  - [7, 8, 9]
-`,
+			input: yamltest.Input(`
+				name: Kallisto
+				matrix:
+				  - [1, 2, 3]
+				  - [4, 5, 6]
+				  - [7, 8, 9]
+			`),
 			wantErr: false,
 		},
 		"invalid element in 2D array": {
-			input: `
-name: Kallisto
-matrix:
-  - [1, 2, 3]
-  - [4, invalid, 6]
-  - [7, 8, 9]
-`,
+			input: yamltest.Input(`
+				name: Kallisto
+				matrix:
+				  - [1, 2, 3]
+				  - [4, invalid, 6]
+				  - [7, 8, 9]
+			`),
 			wantErr:      true,
 			expectedPath: "$.matrix[1][1]",
 		},
 		"missing email in second user": {
-			input: `
-name: Kallisto
-users:
-  - id: 1
-    email: kallisto@example.com
-    profile:
-      firstName: Kallisto
-      lastName: Lykaonis
-  - id: 2
-    profile:
-      firstName: Aello
-      lastName: Thaumantias
-`,
+			input: yamltest.Input(`
+				name: Kallisto
+				users:
+				  - id: 1
+				    email: kallisto@example.com
+				    profile:
+				      firstName: Kallisto
+				      lastName: Lykaonis
+				  - id: 2
+				    profile:
+				      firstName: Aello
+				      lastName: Thaumantias
+			`),
 			wantErr:      true,
 			expectedPath: "$.users[1]",
 		},
 		"additional property at root": {
-			input: `
-name: John
-extraProp: not allowed
-`,
+			input: yamltest.Input(`
+				name: John
+				extraProp: not allowed
+			`),
 			wantErr:      true,
 			expectedPath: "$.extraProp",
 		},
 		"additional property in nested object": {
-			input: `
-name: Kallisto
-nested:
-  value: valid
-  extraNested: not allowed
-`,
+			input: yamltest.Input(`
+				name: Kallisto
+				nested:
+				  value: valid
+				  extraNested: not allowed
+			`),
 			wantErr:      true,
 			expectedPath: "$.nested.extraNested",
 		},
 		"additional property in array object": {
-			input: `
-name: Kallisto
-users:
-  - id: 1
-    email: kallisto@example.com
-    profile:
-      firstName: Kallisto
-      lastName: Lykaonis
-    extraUserProp: not allowed
-`,
+			input: yamltest.Input(`
+				name: Kallisto
+				users:
+				  - id: 1
+				    email: kallisto@example.com
+				    profile:
+				      firstName: Kallisto
+				      lastName: Lykaonis
+				    extraUserProp: not allowed
+			`),
 			wantErr:      true,
 			expectedPath: "$.users[0].extraUserProp",
 		},

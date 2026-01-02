@@ -2,7 +2,6 @@ package niceyaml_test
 
 import (
 	"os"
-	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/macropower/niceyaml"
 	"github.com/macropower/niceyaml/position"
+	"github.com/macropower/niceyaml/yamltest"
 )
 
 // testBracketStyle returns a style that wraps content in brackets for verification.
@@ -115,12 +115,10 @@ func TestFinderPrinter_Integration(t *testing.T) {
 			want:       "name: [Thaïs]",
 		},
 		"utf8 - case insensitive with diacritics": {
-			input:  "name: THAÏS test",
-			search: "thais",
-			normalizer: testNormalizer{fn: func(s string) string {
-				return strings.ToLower(niceyaml.StandardNormalizer{}.Normalize(s))
-			}},
-			want: "name: [THAÏS] test",
+			input:      "name: THAÏS test",
+			search:     "thais",
+			normalizer: niceyaml.StandardNormalizer{},
+			want:       "name: [THAÏS] test",
 		},
 		"utf8 - search ascii finds normalized diacritic": {
 			input:      "key: über",
@@ -354,10 +352,12 @@ func TestFinderPrinter_LargeDocument(t *testing.T) {
 	t.Parallel()
 
 	// Simulate the failing scenario: Japanese text followed by box drawing.
-	input := `# ─────────────────────────
-menu:
-  - 寿司: 日本酒
-# ─────────────────────────`
+	input := yamltest.Input(`
+		# ─────────────────────────
+		menu:
+		  - 寿司: 日本酒
+		# ─────────────────────────
+	`)
 
 	lines := niceyaml.NewSourceFromString(input)
 	finder := testFinder("日本", nil)
@@ -378,10 +378,12 @@ menu:
 
 	// The box drawing characters on lines 1 and 4 should NOT be highlighted
 	// Only "日本" on line 3 should be highlighted.
-	want := `# ─────────────────────────
-menu:
-  - 寿司: [日本]酒
-# ─────────────────────────`
+	want := yamltest.Input(`
+		# ─────────────────────────
+		menu:
+		  - 寿司: [日本]酒
+		# ─────────────────────────
+	`)
 
 	assert.Equal(t, want, got)
 }
@@ -390,11 +392,13 @@ func TestFinderPrinter_BoxDrawingNotMatched(t *testing.T) {
 	t.Parallel()
 
 	// Test that box drawing characters in comments aren't matched when searching for Japanese text.
-	input := `menu:
-  - 寿司: 日本酒
-# ┌─────────────────────────────────────────────────────────────┐
-# │  SPECIAL SECTION                                             │
-# └─────────────────────────────────────────────────────────────┘`
+	input := yamltest.Input(`
+		menu:
+		  - 寿司: 日本酒
+		# ┌─────────────────────────────────────────────────────────────┐
+		# │  SPECIAL SECTION                                             │
+		# └─────────────────────────────────────────────────────────────┘
+	`)
 
 	lines := niceyaml.NewSourceFromString(input)
 	finder := testFinder("日本", nil)

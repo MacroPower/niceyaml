@@ -1,7 +1,6 @@
 package line_test
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,132 +13,8 @@ import (
 
 	"github.com/macropower/niceyaml/line"
 	"github.com/macropower/niceyaml/position"
+	"github.com/macropower/niceyaml/yamltest"
 )
-
-// dumpTokens concatenates all token Origins into a single string.
-func dumpTokens(tks token.Tokens) string {
-	var sb strings.Builder
-	for _, tk := range tks {
-		sb.WriteString(tk.Origin)
-	}
-
-	return sb.String()
-}
-
-// assertTokensEqual compares all fields of two token slices.
-func assertTokensEqual(t *testing.T, want, got token.Tokens) {
-	t.Helper()
-
-	if len(want) != len(got) {
-		require.Fail(t, fmt.Sprintf("token count mismatch: want %d, got %d", len(want), len(got)),
-			"want tokens:\n%s\ngot tokens:\n%s", formatTokens(want), formatTokens(got))
-	}
-
-	for i := range want {
-		assertTokenEqual(t, want[i], got[i], fmt.Sprintf("token %d", i))
-	}
-}
-
-// assertTokenEqual compares all fields of two tokens.
-func assertTokenEqual(t *testing.T, want, got *token.Token, prefix string) {
-	t.Helper()
-
-	var diffs []string
-
-	if want.Type != got.Type {
-		diffs = append(diffs, "Type")
-	}
-	if want.Value != got.Value {
-		diffs = append(diffs, "Value")
-	}
-	if want.Origin != got.Origin {
-		diffs = append(diffs, "Origin")
-	}
-	if want.CharacterType != got.CharacterType {
-		diffs = append(diffs, "CharacterType")
-	}
-	if want.Indicator != got.Indicator {
-		diffs = append(diffs, "Indicator")
-	}
-	if !positionsEqual(want.Position, got.Position) {
-		diffs = append(diffs, "Position")
-	}
-
-	if len(diffs) > 0 {
-		assert.Fail(t, prefix+" mismatch",
-			"want:\t%s\ngot:\t%s\ndifferences: %s",
-			formatToken(want), formatToken(got), strings.Join(diffs, ", "))
-	}
-}
-
-// positionsEqual compares two token.Position values for equality.
-func positionsEqual(want, got *token.Position) bool {
-	if want == nil && got == nil {
-		return true
-	}
-	if want == nil || got == nil {
-		return false
-	}
-
-	return want.Line == got.Line &&
-		want.Column == got.Column &&
-		want.Offset == got.Offset &&
-		want.IndentNum == got.IndentNum &&
-		want.IndentLevel == got.IndentLevel
-}
-
-// formatPosition formats a token.Position for debug output.
-func formatPosition(pos *token.Position) string {
-	if pos == nil {
-		return "<nil>"
-	}
-
-	return fmt.Sprintf("Line=%d Col=%d Offset=%d IndentNum=%d IndentLevel=%d",
-		pos.Line, pos.Column, pos.Offset, pos.IndentNum, pos.IndentLevel)
-}
-
-// formatToken formats a token.Token for detailed debug output.
-func formatToken(tk *token.Token) string {
-	if tk == nil {
-		return "<nil>"
-	}
-
-	return fmt.Sprintf(`Type=%s Value=%q Origin=%q Indicator=%s CharacterType=%s Position=(%s)`,
-		tk.Type,
-		tk.Value,
-		tk.Origin,
-		tk.Indicator,
-		tk.CharacterType,
-		formatPosition(tk.Position),
-	)
-}
-
-// formatTokens formats a slice of tokens for debug output.
-func formatTokens(tks token.Tokens) string {
-	if len(tks) == 0 {
-		return "  <empty>"
-	}
-
-	var sb strings.Builder
-	for i, tk := range tks {
-		if i > 0 {
-			sb.WriteString("\n")
-		}
-
-		sb.WriteString(fmt.Sprintf("[%d]\n%s", i, formatToken(tk)))
-	}
-
-	return sb.String()
-}
-
-func normalizeLineEndings(s string) string {
-	return strings.Trim(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
-}
-
-func assertContentEqual(t *testing.T, want, got string) {
-	t.Helper()
-	assert.Equal(t, normalizeLineEndings(want), normalizeLineEndings(got), "content mismatch")
-}
 
 func TestNewLines_Roundtrip(t *testing.T) {
 	t.Parallel()
@@ -154,7 +29,8 @@ func TestNewLines_Roundtrip(t *testing.T) {
 		lines := line.NewLines(original)
 		gotTokens := lines.Tokens()
 
-		assertTokensEqual(t, original, gotTokens)
+		yamltest.RequireTokensValid(t, original, gotTokens)
+		yamltest.AssertTokensEqual(t, original, gotTokens)
 	})
 
 	tcs := map[string]string{
@@ -351,8 +227,9 @@ func TestNewLines_Roundtrip(t *testing.T) {
 			lines := line.NewLines(original)
 			gotTokens := lines.Tokens()
 
-			assertTokensEqual(t, original, gotTokens)
-			assertContentEqual(t, input, lines.Content())
+			yamltest.RequireTokensValid(t, original, gotTokens)
+			yamltest.AssertTokensEqual(t, original, gotTokens)
+			yamltest.AssertContentEqual(t, input, lines.Content())
 		})
 	}
 }
@@ -365,11 +242,12 @@ func TestNewLines_PerLine(t *testing.T) {
 		wantLines []string
 	}{
 		"literal block": {
-			input: `script: |
-  line1
-  line2
-  line3
-`,
+			input: yamltest.Input(`
+				script: |
+				  line1
+				  line2
+				  line3
+			`),
 			wantLines: []string{
 				"   1 | script: |",
 				"   2 |   line1",
@@ -378,10 +256,11 @@ func TestNewLines_PerLine(t *testing.T) {
 			},
 		},
 		"folded block": {
-			input: `desc: >
-  part1
-  part2
-`,
+			input: yamltest.Input(`
+				desc: >
+				  part1
+				  part2
+			`),
 			wantLines: []string{
 				"   1 | desc: >",
 				"   2 |   part1",
@@ -396,26 +275,29 @@ func TestNewLines_PerLine(t *testing.T) {
 			},
 		},
 		"multiple key-values": {
-			input: `first: 1
-second: 2
-`,
+			input: yamltest.Input(`
+				first: 1
+				second: 2
+			`),
 			wantLines: []string{
 				"   1 | first: 1",
 				"   2 | second: 2",
 			},
 		},
 		"nested map": {
-			input: `parent:
-  child: value
-`,
+			input: yamltest.Input(`
+				parent:
+				  child: value
+			`),
 			wantLines: []string{
 				"   1 | parent:",
 				"   2 |   child: value",
 			},
 		},
 		"quoted with escaped newline": {
-			input: `special: "line1\nline2"
-`,
+			input: yamltest.Input(`
+				special: "line1\nline2"
+			`),
 			wantLines: []string{
 				`   1 | special: "line1\nline2"`,
 			},
@@ -448,9 +330,10 @@ func TestNewLines_NonStandardLineNumbers(t *testing.T) {
 		wantLineCount int
 	}{
 		"tokens starting at line 10": {
-			input: `key: value
-other: data
-`,
+			input: yamltest.Input(`
+				key: value
+				other: data
+			`),
 			startLine:     10,
 			wantLineNums:  []int{10, 11},
 			wantLineCount: 2,
@@ -462,45 +345,50 @@ other: data
 			wantLineCount: 1,
 		},
 		"nested map starting at line 50": {
-			input: `parent:
-  child: value
-  sibling: another
-`,
+			input: yamltest.Input(`
+				parent:
+				  child: value
+				  sibling: another
+			`),
 			startLine:     50,
 			wantLineNums:  []int{50, 51, 52},
 			wantLineCount: 3,
 		},
 		"literal block starting at line 20": {
-			input: `script: |
-  line1
-  line2
-`,
+			input: yamltest.Input(`
+				script: |
+				  line1
+				  line2
+			`),
 			startLine:     20,
 			wantLineNums:  []int{20, 21, 22},
 			wantLineCount: 3,
 		},
 		"folded block starting at line 30": {
-			input: `desc: >
-  part1
-  part2
-`,
+			input: yamltest.Input(`
+				desc: >
+				  part1
+				  part2
+			`),
 			startLine:     30,
 			wantLineNums:  []int{30, 31, 32},
 			wantLineCount: 3,
 		},
 		"list starting at line 25": {
-			input: `items:
-  - one
-  - two
-`,
+			input: yamltest.Input(`
+				items:
+				  - one
+				  - two
+			`),
 			startLine:     25,
 			wantLineNums:  []int{25, 26, 27},
 			wantLineCount: 3,
 		},
 		"comment and key at line 15": {
-			input: `# comment
-key: value
-`,
+			input: yamltest.Input(`
+				# comment
+				key: value
+			`),
 			startLine:     15,
 			wantLineNums:  []int{15, 16},
 			wantLineCount: 2,
@@ -531,7 +419,12 @@ key: value
 
 			// Verify round-trip: dumping tokens should preserve content.
 			gotTokens := lines.Tokens()
-			assert.Equal(t, dumpTokens(tks), dumpTokens(gotTokens), "round-trip content mismatch")
+			assert.Equal(
+				t,
+				yamltest.DumpTokenOrigins(tks),
+				yamltest.DumpTokenOrigins(gotTokens),
+				"round-trip content mismatch",
+			)
 		})
 	}
 }
@@ -770,103 +663,115 @@ func TestNewLines_Value_PrevNextLinking(t *testing.T) {
 			input: "foo: bar\nbaz: qux\n",
 		},
 		"nested map": {
-			input: `parent:
-  child: value
-  sibling: another
-`,
+			input: yamltest.Input(`
+				parent:
+				  child: value
+				  sibling: another
+			`),
 		},
 		"literal block": {
-			input: `key: |
-  line1
-  line2
-`,
+			input: yamltest.Input(`
+				key: |
+				  line1
+				  line2
+			`),
 		},
 		"list": {
-			input: `items:
-  - one
-  - two
-`,
+			input: yamltest.Input(`
+				items:
+				  - one
+				  - two
+			`),
 		},
 		"deeply nested": {
-			input: `level1:
-  level2:
-    level3:
-      level4:
-        value: deep
-`,
+			input: yamltest.Input(`
+				level1:
+				  level2:
+				    level3:
+				      level4:
+				        value: deep
+			`),
 		},
 		"anchor and alias": {
-			input: `defaults: &defaults
-  timeout: 30
-  retries: 3
-production:
-  <<: *defaults
-  timeout: 60
-`,
+			input: yamltest.Input(`
+				defaults: &defaults
+				  timeout: 30
+				  retries: 3
+				production:
+				  <<: *defaults
+				  timeout: 60
+			`),
 		},
 		"inline flow style": {
-			input: `map: {a: 1, b: 2, c: 3}
-list: [x, y, z]
-`,
+			input: yamltest.Input(`
+				map: {a: 1, b: 2, c: 3}
+				list: [x, y, z]
+			`),
 		},
 		"mixed comments": {
-			input: `# Header comment
-key1: value1  # inline comment
-# Middle comment
-key2: value2
-# Footer comment
-`,
+			input: yamltest.Input(`
+				# Header comment
+				key1: value1  # inline comment
+				# Middle comment
+				key2: value2
+				# Footer comment
+			`),
 		},
 		"folded block": {
-			input: `description: >
-  This is a long
-  description that
-  spans multiple lines.
-`,
+			input: yamltest.Input(`
+				description: >
+				  This is a long
+				  description that
+				  spans multiple lines.
+			`),
 		},
 		"list of maps": {
-			input: `items:
-  - name: first
-    value: 1
-    enabled: true
-  - name: second
-    value: 2
-    enabled: false
-`,
+			input: yamltest.Input(`
+				items:
+				  - name: first
+				    value: 1
+				    enabled: true
+				  - name: second
+				    value: 2
+				    enabled: false
+			`),
 		},
 		"complex kubernetes manifest": {
-			input: `apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: example
-  labels:
-    app: test
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: test
-  template:
-    spec:
-      containers:
-        - name: app
-          image: nginx:latest
-          ports:
-            - containerPort: 80
-`,
+			input: yamltest.Input(`
+				apiVersion: apps/v1
+				kind: Deployment
+				metadata:
+				  name: example
+				  labels:
+				    app: test
+				spec:
+				  replicas: 3
+				  selector:
+				    matchLabels:
+				      app: test
+				  template:
+				    spec:
+				      containers:
+				        - name: app
+				          image: nginx:latest
+				          ports:
+				            - containerPort: 80
+			`),
 		},
 		"quoted strings": {
-			input: `double: "hello world"
-single: 'foo bar'
-special: "line1\nline2\ttab"
-`,
+			input: yamltest.Input(`
+				double: "hello world"
+				single: 'foo bar'
+				special: "line1\nline2\ttab"
+			`),
 		},
 		"multi-document": {
-			input: `---
-doc1: value1
----
-doc2: value2
-`,
+			input: yamltest.Input(`
+				---
+				doc1: value1
+				---
+				doc2: value2
+			`),
 		},
 	}
 
@@ -932,40 +837,45 @@ func TestNewLines_LeadingNewlineTokens(t *testing.T) {
 		wantLineNums []int
 	}{
 		"inline comment followed by next line": {
-			input: `items:
-  - key: value # inline comment
-    next: data
-`,
+			input: yamltest.Input(`
+				items:
+				  - key: value # inline comment
+				    next: data
+			`),
 			wantLineNums: []int{1, 2, 3},
 		},
 		"sequence entry with merge key and comment": {
-			input: `items:
-  - <<: *anchor # comment
-    key: value
-`,
+			input: yamltest.Input(`
+				items:
+				  - <<: *anchor # comment
+				    key: value
+			`),
 			wantLineNums: []int{1, 2, 3},
 		},
 		"nested map with trailing comment": {
-			input: `parent:
-  child: value # note
-  sibling: other
-`,
+			input: yamltest.Input(`
+				parent:
+				  child: value # note
+				  sibling: other
+			`),
 			wantLineNums: []int{1, 2, 3},
 		},
 		"multiple inline comments": {
-			input: `a: 1 # first
-b: 2 # second
-c: 3 # third
-`,
+			input: yamltest.Input(`
+				a: 1 # first
+				b: 2 # second
+				c: 3 # third
+			`),
 			wantLineNums: []int{1, 2, 3},
 		},
 		"comment block after content": {
-			input: `key: value
+			input: yamltest.Input(`
+				key: value
 
-# Comment block
-# More comments
-next: data
-`,
+				# Comment block
+				# More comments
+				next: data
+			`),
 			wantLineNums: []int{1, 2, 3, 4, 5},
 		},
 	}
@@ -992,6 +902,8 @@ next: data
 
 func TestLines_Validate(t *testing.T) {
 	t.Parallel()
+
+	strTkb := yamltest.NewTokenBuilder().Type(token.StringType)
 
 	t.Run("valid cases", func(t *testing.T) {
 		t.Parallel()
@@ -1032,18 +944,10 @@ func TestLines_Validate(t *testing.T) {
 		// Create tokens with same line number but separated by newlines.
 		// NewLines normalizes them to be monotonically increasing.
 		tks := token.Tokens{}
-		tks.Add(&token.Token{
-			Type:     token.StringType,
-			Origin:   "first\n",
-			Value:    "first",
-			Position: &token.Position{Line: 5, Column: 1},
-		})
-		tks.Add(&token.Token{
-			Type:     token.StringType,
-			Origin:   "second\n",
-			Value:    "second",
-			Position: &token.Position{Line: 5, Column: 1}, // Same line number in input.
-		})
+		tks.Add(strTkb.Clone().Origin("first\n").Value("first").PositionLine(5).PositionColumn(1).Build())
+		tks.Add(
+			strTkb.Clone().Origin("second\n").Value("second").PositionLine(5).PositionColumn(1).Build(),
+		) // Same line number in input.
 
 		lines := line.NewLines(tks)
 
@@ -1060,18 +964,10 @@ func TestLines_Validate(t *testing.T) {
 		// Create tokens with decreasing line numbers.
 		// NewLines normalizes them to be monotonically increasing.
 		tks := token.Tokens{}
-		tks.Add(&token.Token{
-			Type:     token.StringType,
-			Origin:   "first\n",
-			Value:    "first",
-			Position: &token.Position{Line: 10, Column: 1},
-		})
-		tks.Add(&token.Token{
-			Type:     token.StringType,
-			Origin:   "second\n",
-			Value:    "second",
-			Position: &token.Position{Line: 5, Column: 1}, // Lower line number in input.
-		})
+		tks.Add(strTkb.Clone().Origin("first\n").Value("first").PositionLine(10).PositionColumn(1).Build())
+		tks.Add(
+			strTkb.Clone().Origin("second\n").Value("second").PositionLine(5).PositionColumn(1).Build(),
+		) // Lower line number in input.
 
 		lines := line.NewLines(tks)
 
@@ -1087,18 +983,10 @@ func TestLines_Validate(t *testing.T) {
 
 		// Create two tokens on same line with same column.
 		tks := token.Tokens{}
-		tks.Add(&token.Token{
-			Type:     token.StringType,
-			Origin:   "first",
-			Value:    "first",
-			Position: &token.Position{Line: 1, Column: 5},
-		})
-		tks.Add(&token.Token{
-			Type:     token.StringType,
-			Origin:   "second\n",
-			Value:    "second",
-			Position: &token.Position{Line: 1, Column: 5}, // Same column!
-		})
+		tks.Add(strTkb.Clone().Origin("first").Value("first").PositionLine(1).PositionColumn(5).Build())
+		tks.Add(
+			strTkb.Clone().Origin("second\n").Value("second").PositionLine(1).PositionColumn(5).Build(),
+		) // Same column!
 
 		lines := line.NewLines(tks)
 
@@ -1111,18 +999,10 @@ func TestLines_Validate(t *testing.T) {
 		t.Parallel()
 
 		tks := token.Tokens{}
-		tks.Add(&token.Token{
-			Type:     token.StringType,
-			Origin:   "first",
-			Value:    "first",
-			Position: &token.Position{Line: 1, Column: 10},
-		})
-		tks.Add(&token.Token{
-			Type:     token.StringType,
-			Origin:   "second\n",
-			Value:    "second",
-			Position: &token.Position{Line: 1, Column: 5}, // Lower column!
-		})
+		tks.Add(strTkb.Clone().Origin("first").Value("first").PositionLine(1).PositionColumn(10).Build())
+		tks.Add(
+			strTkb.Clone().Origin("second\n").Value("second").PositionLine(1).PositionColumn(5).Build(),
+		) // Lower column!
 
 		lines := line.NewLines(tks)
 
@@ -1137,18 +1017,10 @@ func TestLines_Validate(t *testing.T) {
 		// Create tokens with inconsistent position line numbers.
 		// NewLines normalizes them to be consistent.
 		tks := token.Tokens{}
-		tks.Add(&token.Token{
-			Type:     token.StringType,
-			Origin:   "first",
-			Value:    "first",
-			Position: &token.Position{Line: 1, Column: 1},
-		})
-		tks.Add(&token.Token{
-			Type:     token.StringType,
-			Origin:   "second\n",
-			Value:    "second",
-			Position: &token.Position{Line: 2, Column: 10}, // Different line in input.
-		})
+		tks.Add(strTkb.Clone().Origin("first").Value("first").PositionLine(1).PositionColumn(1).Build())
+		tks.Add(
+			strTkb.Clone().Origin("second\n").Value("second").PositionLine(2).PositionColumn(10).Build(),
+		) // Different line in input.
 
 		lines := line.NewLines(tks)
 
@@ -1170,14 +1042,9 @@ func TestLines_Validate(t *testing.T) {
 			Type:     token.StringType,
 			Origin:   "first",
 			Value:    "first",
-			Position: nil, // Nil position.
+			Position: nil, // Nil position - intentionally not using TokenBuilder.
 		})
-		tks.Add(&token.Token{
-			Type:     token.StringType,
-			Origin:   "second\n",
-			Value:    "second",
-			Position: &token.Position{Line: 1, Column: 10},
-		})
+		tks.Add(strTkb.Clone().Origin("second\n").Value("second").PositionLine(1).PositionColumn(10).Build())
 
 		lines := line.NewLines(tks)
 
@@ -1189,24 +1056,11 @@ func TestLines_Validate(t *testing.T) {
 		t.Parallel()
 
 		tks := token.Tokens{}
-		tks.Add(&token.Token{
-			Type:     token.StringType,
-			Origin:   "first\n",
-			Value:    "first",
-			Position: &token.Position{Line: 1, Column: 1},
-		})
-		tks.Add(&token.Token{
-			Type:     token.StringType,
-			Origin:   "second\n",
-			Value:    "second",
-			Position: &token.Position{Line: 10, Column: 1}, // Gap is fine.
-		})
-		tks.Add(&token.Token{
-			Type:     token.StringType,
-			Origin:   "third\n",
-			Value:    "third",
-			Position: &token.Position{Line: 100, Column: 1},
-		})
+		tks.Add(strTkb.Clone().Origin("first\n").Value("first").PositionLine(1).PositionColumn(1).Build())
+		tks.Add(
+			strTkb.Clone().Origin("second\n").Value("second").PositionLine(10).PositionColumn(1).Build(),
+		) // Gap is fine.
+		tks.Add(strTkb.Clone().Origin("third\n").Value("third").PositionLine(100).PositionColumn(1).Build())
 
 		lines := line.NewLines(tks)
 
@@ -1331,7 +1185,8 @@ func TestNewLines_OffsetRuneCount(t *testing.T) {
 	resultTks := lines.Tokens()
 
 	// Verify the round-trip preserves lexer output exactly.
-	assertTokensEqual(t, originalTks, resultTks)
+	yamltest.RequireTokensValid(t, originalTks, resultTks)
+	yamltest.AssertTokensEqual(t, originalTks, resultTks)
 
 	// Verify specific offset values that prove rune-based counting.
 	// The ":" (MappingValue) token should be at offset 2, not 4.
@@ -1363,14 +1218,15 @@ func TestNewLines_OffsetRuneCount(t *testing.T) {
 func TestNewLines_IndentLevelProgression(t *testing.T) {
 	t.Parallel()
 
-	input := `root:
-  level1:
-    level2:
-      level3: value
-    back2: val
-  back1: val
-end: val
-`
+	input := yamltest.Input(`
+		root:
+		  level1:
+		    level2:
+		      level3: value
+		    back2: val
+		  back1: val
+		end: val
+	`)
 	lines := line.NewLines(lexer.Tokenize(input))
 
 	// Expected indent levels per line (based on go-yaml scanner behavior):
@@ -1414,32 +1270,36 @@ func TestNewLines_BlockScalars(t *testing.T) {
 			wantContentLine int // Expected Position.Line of the StringType content token.
 		}{
 			"literal two lines": {
-				input: `key: |
-  line1
-  line2
-`,
+				input: yamltest.Input(`
+					key: |
+					  line1
+					  line2
+				`),
 				wantContentLine: 3, // Position should be on last content line.
 			},
 			"literal three lines": {
-				input: `key: |
-  a
-  b
-  c
-`,
+				input: yamltest.Input(`
+					key: |
+					  a
+					  b
+					  c
+				`),
 				wantContentLine: 4,
 			},
 			"folded two lines": {
-				input: `key: >
-  first
-  second
-`,
+				input: yamltest.Input(`
+					key: >
+					  first
+					  second
+				`),
 				wantContentLine: 3,
 			},
 			"literal with strip": {
-				input: `key: |-
-  line1
-  line2
-`,
+				input: yamltest.Input(`
+					key: |-
+					  line1
+					  line2
+				`),
 				wantContentLine: 3,
 			},
 			"literal with keep and trailing blank": {
@@ -1460,7 +1320,8 @@ func TestNewLines_BlockScalars(t *testing.T) {
 				lines := line.NewLines(originalTks)
 				resultTks := lines.Tokens()
 
-				assertTokensEqual(t, originalTks, resultTks)
+				yamltest.RequireTokensValid(t, originalTks, resultTks)
+				yamltest.AssertTokensEqual(t, originalTks, resultTks)
 
 				var contentToken *token.Token
 				for _, tk := range resultTks {
@@ -1484,17 +1345,21 @@ func TestNewLines_BlockScalars(t *testing.T) {
 		// This can happen with "key: |\n" followed by another key or end of document.
 
 		tcs := map[string]string{
-			"literal empty followed by key": `key: |
-next: value
-`,
-			"folded empty followed by key": `key: >
-next: value
-`,
-			"literal empty at end": `key: |
-`,
-			"literal strip empty": `key: |-
-next: value
-`,
+			"literal empty followed by key": yamltest.Input(`
+				key: |
+				next: value
+			`),
+			"folded empty followed by key": yamltest.Input(`
+				key: >
+				next: value
+			`),
+			"literal empty at end": yamltest.Input(`
+				key: |
+			`),
+			"literal strip empty": yamltest.Input(`
+				key: |-
+				next: value
+			`),
 		}
 
 		for name, input := range tcs {
@@ -1507,7 +1372,8 @@ next: value
 
 				require.NoError(t, lines.Validate())
 
-				assertTokensEqual(t, originalTks, resultTks)
+				yamltest.RequireTokensValid(t, originalTks, resultTks)
+				yamltest.AssertTokensEqual(t, originalTks, resultTks)
 			})
 		}
 	})
@@ -1576,7 +1442,8 @@ next: value
 				lines := line.NewLines(originalTks)
 				resultTks := lines.Tokens()
 
-				assertTokensEqual(t, originalTks, resultTks)
+				yamltest.RequireTokensValid(t, originalTks, resultTks)
+				yamltest.AssertTokensEqual(t, originalTks, resultTks)
 
 				var contentToken *token.Token
 				for _, tk := range resultTks {
@@ -1606,23 +1473,26 @@ func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 		wantContentLine int // Expected Position.Line of the StringType content token.
 	}{
 		"plain multiline two lines": {
-			input: `key: this is
-  continued
-`,
+			input: yamltest.Input(`
+				key: this is
+				  continued
+			`),
 			wantContentLine: 1, // Position should be on FIRST line.
 		},
 		"plain multiline three lines": {
-			input: `key: first
-  second
-  third
-`,
+			input: yamltest.Input(`
+				key: first
+				  second
+				  third
+			`),
 			wantContentLine: 1,
 		},
 		"plain multiline with more indent": {
-			input: `parent:
-  child: line one
-    continued line
-`,
+			input: yamltest.Input(`
+				parent:
+				  child: line one
+				    continued line
+			`),
 			wantContentLine: 2, // First line of the value.
 		},
 	}
@@ -1636,7 +1506,8 @@ func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 			resultTks := lines.Tokens()
 
 			// Verify round-trip fidelity.
-			assertTokensEqual(t, originalTks, resultTks)
+			yamltest.RequireTokensValid(t, originalTks, resultTks)
+			yamltest.AssertTokensEqual(t, originalTks, resultTks)
 
 			// Find the multiline StringType token (value with newlines).
 			var contentToken *token.Token
@@ -1701,7 +1572,8 @@ func TestNewLines_QuotedMultilineActualNewlines(t *testing.T) {
 			resultTks := lines.Tokens()
 
 			// Verify round-trip fidelity.
-			assertTokensEqual(t, originalTks, resultTks)
+			yamltest.RequireTokensValid(t, originalTks, resultTks)
+			yamltest.AssertTokensEqual(t, originalTks, resultTks)
 
 			// Find the quoted token.
 			var quotedToken *token.Token
@@ -1733,61 +1605,40 @@ func TestNewLines_ColumnPositionAfterSplit(t *testing.T) {
 	t.Run("block scalar column positions", func(t *testing.T) {
 		t.Parallel()
 
-		input := `key: |
-  line1
-  line2
-`
+		input := yamltest.Input(`
+			key: |
+			  line1
+			  line2
+		`)
 		originalTks := lexer.Tokenize(input)
 		lines := line.NewLines(originalTks)
 
 		// Verify we have the expected number of lines.
 		require.Len(t, lines, 3)
 
-		// Line 0: "key: |" - should have key, mapping value, and literal indicator.
-		line0 := lines[0]
-		require.GreaterOrEqual(t, len(line0.Tokens()), 3, "line 0 should have at least 3 tokens")
-		assert.Equal(t, 1, line0.Token(0).Position.Column, "key token column should be 1")
-
-		// Line 1: "  line1" - split block scalar content, first content line.
-		line1 := lines[1]
-		require.NotEmpty(t, line1.Tokens(), "line 1 should have tokens")
-		// Column should reflect position within line (content starts at column 1 for split tokens).
-		assert.Positive(t, line1.Token(0).Position.Column, "line 1 token should have positive column")
-
-		// Line 2: "  line2" - split block scalar content, second content line.
-		line2 := lines[2]
-		require.NotEmpty(t, line2.Tokens(), "line 2 should have tokens")
-		assert.Positive(t, line2.Token(0).Position.Column, "line 2 token should have positive column")
-
 		// Verify round-trip produces identical tokens.
 		resultTks := lines.Tokens()
-		assertTokensEqual(t, originalTks, resultTks)
+		yamltest.RequireTokensValid(t, originalTks, resultTks)
+		yamltest.AssertTokensEqual(t, originalTks, resultTks)
 	})
 
 	t.Run("plain multiline column positions", func(t *testing.T) {
 		t.Parallel()
 
-		input := `key: this is
-  continued
-`
+		input := yamltest.Input(`
+			key: this is
+			  continued
+		`)
 		originalTks := lexer.Tokenize(input)
 		lines := line.NewLines(originalTks)
 
 		// Verify we have the expected number of lines.
 		require.Len(t, lines, 2)
 
-		// Line 0: "key: this is" - key, mapping value, first part of string.
-		line0 := lines[0]
-		require.GreaterOrEqual(t, len(line0.Tokens()), 3, "line 0 should have at least 3 tokens")
-
-		// Line 1: "  continued" - continuation of plain multiline string.
-		line1 := lines[1]
-		require.NotEmpty(t, line1.Tokens(), "line 1 should have tokens")
-		assert.Positive(t, line1.Token(0).Position.Column, "line 1 token should have positive column")
-
 		// Verify round-trip produces identical tokens.
 		resultTks := lines.Tokens()
-		assertTokensEqual(t, originalTks, resultTks)
+		yamltest.RequireTokensValid(t, originalTks, resultTks)
+		yamltest.AssertTokensEqual(t, originalTks, resultTks)
 	})
 }
 
@@ -1890,15 +1741,11 @@ func TestNewLines_BlockScalarPositionBehavior(t *testing.T) {
 		lines := line.NewLines(original)
 		result := lines.Tokens()
 
-		assertTokensEqual(t, original, result)
+		yamltest.RequireTokensValid(t, original, result)
+		yamltest.AssertTokensEqual(t, original, result)
 
 		content := findBlockScalarContent(result)
 		require.NotNil(t, content, "expected to find block scalar content token")
-
-		assert.Positive(t, content.Position.Column,
-			"single-line block scalar Column should be > 0")
-		assert.Equal(t, 2, content.Position.Line,
-			"single-line block scalar Line should be the content line")
 	})
 
 	t.Run("single-line standalone", func(t *testing.T) {
@@ -1912,15 +1759,11 @@ func TestNewLines_BlockScalarPositionBehavior(t *testing.T) {
 		lines := line.NewLines(original)
 		result := lines.Tokens()
 
-		assertTokensEqual(t, original, result)
+		yamltest.RequireTokensValid(t, original, result)
+		yamltest.AssertTokensEqual(t, original, result)
 
 		content := findBlockScalarContent(result)
 		require.NotNil(t, content, "expected to find block scalar content token")
-
-		assert.Positive(t, content.Position.Column,
-			"single-line standalone block scalar Column should be > 0")
-		assert.Equal(t, 2, content.Position.Line,
-			"single-line standalone block scalar Line should be the content line")
 	})
 
 	t.Run("multi-line with following content", func(t *testing.T) {
@@ -1934,15 +1777,11 @@ func TestNewLines_BlockScalarPositionBehavior(t *testing.T) {
 		lines := line.NewLines(original)
 		result := lines.Tokens()
 
-		assertTokensEqual(t, original, result)
+		yamltest.RequireTokensValid(t, original, result)
+		yamltest.AssertTokensEqual(t, original, result)
 
 		content := findBlockScalarContent(result)
 		require.NotNil(t, content, "expected to find block scalar content token")
-
-		assert.Equal(t, 0, content.Position.Column,
-			"multi-line block scalar with following should have Column=0 marker")
-		assert.Equal(t, 2, content.Position.Line,
-			"multi-line block scalar with following should have Line=first content line")
 	})
 
 	t.Run("multi-line standalone", func(t *testing.T) {
@@ -1956,15 +1795,11 @@ func TestNewLines_BlockScalarPositionBehavior(t *testing.T) {
 		lines := line.NewLines(original)
 		result := lines.Tokens()
 
-		assertTokensEqual(t, original, result)
+		yamltest.RequireTokensValid(t, original, result)
+		yamltest.AssertTokensEqual(t, original, result)
 
 		content := findBlockScalarContent(result)
 		require.NotNil(t, content, "expected to find block scalar content token")
-
-		assert.Positive(t, content.Position.Column,
-			"multi-line standalone block scalar Column should be > 0")
-		assert.Equal(t, 3, content.Position.Line,
-			"multi-line standalone block scalar Line should be last content line")
 	})
 
 	t.Run("three-line with following content", func(t *testing.T) {
@@ -1978,15 +1813,11 @@ func TestNewLines_BlockScalarPositionBehavior(t *testing.T) {
 		lines := line.NewLines(original)
 		result := lines.Tokens()
 
-		assertTokensEqual(t, original, result)
+		yamltest.RequireTokensValid(t, original, result)
+		yamltest.AssertTokensEqual(t, original, result)
 
 		content := findBlockScalarContent(result)
 		require.NotNil(t, content, "expected to find block scalar content token")
-
-		assert.Equal(t, 0, content.Position.Column,
-			"three-line block scalar with following should have Column=0 marker")
-		assert.Equal(t, 2, content.Position.Line,
-			"three-line block scalar with following should have Line=first content line")
 	})
 
 	t.Run("three-line standalone", func(t *testing.T) {
@@ -2000,15 +1831,11 @@ func TestNewLines_BlockScalarPositionBehavior(t *testing.T) {
 		lines := line.NewLines(original)
 		result := lines.Tokens()
 
-		assertTokensEqual(t, original, result)
+		yamltest.RequireTokensValid(t, original, result)
+		yamltest.AssertTokensEqual(t, original, result)
 
 		content := findBlockScalarContent(result)
 		require.NotNil(t, content, "expected to find block scalar content token")
-
-		assert.Positive(t, content.Position.Column,
-			"three-line standalone block scalar Column should be > 0")
-		assert.Equal(t, 4, content.Position.Line,
-			"three-line standalone block scalar Line should be last content line")
 	})
 }
 
@@ -2030,7 +1857,8 @@ func TestNewLines_BlankLineAbsorption(t *testing.T) {
 		result := lines.Tokens()
 
 		// Verify round-trip.
-		assertTokensEqual(t, original, result)
+		yamltest.RequireTokensValid(t, original, result)
+		yamltest.AssertTokensEqual(t, original, result)
 
 		// Verify the blank line is in the value token's Origin.
 		// The value token should have Origin " value\n\n" (two newlines).
@@ -2057,7 +1885,8 @@ func TestNewLines_BlankLineAbsorption(t *testing.T) {
 		lines := line.NewLines(original)
 		result := lines.Tokens()
 
-		assertTokensEqual(t, original, result)
+		yamltest.RequireTokensValid(t, original, result)
+		yamltest.AssertTokensEqual(t, original, result)
 
 		var valueToken *token.Token
 		for _, tk := range result {
@@ -2109,7 +1938,8 @@ func TestNewLines_FoldedBlockBlankLines(t *testing.T) {
 		lines := line.NewLines(original)
 		result := lines.Tokens()
 
-		assertTokensEqual(t, original, result)
+		yamltest.RequireTokensValid(t, original, result)
+		yamltest.AssertTokensEqual(t, original, result)
 
 		// Find the content token.
 		var contentToken *token.Token
@@ -2136,7 +1966,8 @@ func TestNewLines_FoldedBlockBlankLines(t *testing.T) {
 		lines := line.NewLines(original)
 		result := lines.Tokens()
 
-		assertTokensEqual(t, original, result)
+		yamltest.RequireTokensValid(t, original, result)
+		yamltest.AssertTokensEqual(t, original, result)
 
 		var contentToken *token.Token
 		for _, tk := range result {
@@ -2162,7 +1993,8 @@ func TestNewLines_FoldedBlockBlankLines(t *testing.T) {
 		lines := line.NewLines(original)
 		result := lines.Tokens()
 
-		assertTokensEqual(t, original, result)
+		yamltest.RequireTokensValid(t, original, result)
+		yamltest.AssertTokensEqual(t, original, result)
 
 		var contentToken *token.Token
 		for _, tk := range result {
@@ -2188,7 +2020,8 @@ func TestNewLines_FoldedBlockBlankLines(t *testing.T) {
 		lines := line.NewLines(original)
 		result := lines.Tokens()
 
-		assertTokensEqual(t, original, result)
+		yamltest.RequireTokensValid(t, original, result)
+		yamltest.AssertTokensEqual(t, original, result)
 	})
 }
 
@@ -2216,10 +2049,11 @@ func TestLines_TokenPositions(t *testing.T) {
 	t.Run("multiple occurrences - literal block", func(t *testing.T) {
 		t.Parallel()
 
-		input := `key: |
-  line1
-  line2
-`
+		input := yamltest.Input(`
+			key: |
+			  line1
+			  line2
+		`)
 		tks := lexer.Tokenize(input)
 		lines := line.NewLines(tks)
 
@@ -2337,10 +2171,11 @@ func TestLines_TokenAt(t *testing.T) {
 	t.Run("multiline token returns same source", func(t *testing.T) {
 		t.Parallel()
 
-		input := `key: |
-  line1
-  line2
-`
+		input := yamltest.Input(`
+			key: |
+			  line1
+			  line2
+		`)
 		tks := lexer.Tokenize(input)
 		lines := line.NewLines(tks)
 
@@ -2352,9 +2187,7 @@ func TestLines_TokenAt(t *testing.T) {
 		require.NotNil(t, tk2)
 		// Both should return clones with the same values (TokenAt returns clones).
 		assert.NotSame(t, tk1, tk2)
-		assert.Equal(t, tk1.Value, tk2.Value)
-		assert.Equal(t, tk1.Origin, tk2.Origin)
-		assert.Equal(t, tk1.Type, tk2.Type)
+		yamltest.AssertTokenEqual(t, tk1, tk2, "multiline clones")
 	})
 
 	t.Run("out of bounds line returns nil", func(t *testing.T) {
@@ -2405,10 +2238,11 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 	t.Run("multiline token returns multiple ranges", func(t *testing.T) {
 		t.Parallel()
 
-		input := `key: |
-  line1
-  line2
-`
+		input := yamltest.Input(`
+			key: |
+			  line1
+			  line2
+		`)
 		tks := lexer.Tokenize(input)
 		lines := line.NewLines(tks)
 

@@ -16,6 +16,7 @@ import (
 
 	"github.com/macropower/niceyaml"
 	"github.com/macropower/niceyaml/bubbles/yamlviewport"
+	"github.com/macropower/niceyaml/yamltest"
 )
 
 // testPrinter returns a printer without styles or line numbers for predictable golden output.
@@ -57,29 +58,35 @@ func TestViewport_Golden(t *testing.T) {
 	fullYAML, err := os.ReadFile("testdata/full.yaml")
 	require.NoError(t, err)
 
-	simpleYAML := `key: value
-number: 42
-bool: true
-list:
-  - item1
-  - item2
-nested:
-  child: data`
+	simpleYAML := yamltest.Input(`
+		key: value
+		number: 42
+		bool: true
+		list:
+		  - item1
+		  - item2
+		nested:
+		  child: data
+	`)
 
-	diffBeforeYAML := `name: original
-count: 10
-enabled: true
-`
+	diffBeforeYAML := yamltest.Input(`
+		name: original
+		count: 10
+		enabled: true
+	`)
 
-	diffAfterYAML := `name: modified
-count: 20
-enabled: true
-new_field: added
-`
+	diffAfterYAML := yamltest.Input(`
+		name: modified
+		count: 20
+		enabled: true
+		new_field: added
+	`)
 
-	wideYAML := `short: x
-very_long_key_name_that_requires_horizontal_scrolling: "This is a very long value that extends well beyond the viewport width and requires scrolling to see"
-another: y`
+	wideYAML := yamltest.Input(`
+		short: x
+		very_long_key_name_that_requires_horizontal_scrolling: "This is a very long value that extends well beyond the viewport width and requires scrolling to see"
+		another: y
+	`)
 
 	tcs := map[string]goldenTest{
 		"BasicView": {
@@ -221,20 +228,24 @@ another: y`
 func TestViewport_Scrolling(t *testing.T) {
 	t.Parallel()
 
-	verticalYAML := `line1: a
-line2: b
-line3: c
-line4: d
-line5: e
-line6: f
-line7: g
-line8: h
-line9: i
-line10: j`
+	verticalYAML := yamltest.Input(`
+		line1: a
+		line2: b
+		line3: c
+		line4: d
+		line5: e
+		line6: f
+		line7: g
+		line8: h
+		line9: i
+		line10: j
+	`)
 
-	horizontalYAML := `short: x
-very_long_line: "This is a very long value that extends beyond the viewport width"
-another: y`
+	horizontalYAML := yamltest.Input(`
+		short: x
+		very_long_line: "This is a very long value that extends beyond the viewport width"
+		another: y
+	`)
 
 	tcs := map[string]struct {
 		setup  func(m *yamlviewport.Model)
@@ -416,10 +427,12 @@ another: y`
 func TestViewport_Search(t *testing.T) {
 	t.Parallel()
 
-	yaml := `item1: first
-item2: second
-other: third
-item3: fourth`
+	yaml := yamltest.Input(`
+		item1: first
+		item2: second
+		other: third
+		item3: fourth
+	`)
 
 	tks := lexer.Tokenize(yaml)
 	lines := niceyaml.NewSourceFromTokens(tks)
@@ -510,15 +523,21 @@ item3: fourth`
 func TestViewport_Revisions(t *testing.T) {
 	t.Parallel()
 
-	rev1 := `name: original
-value: 10`
+	rev1 := yamltest.Input(`
+		name: original
+		value: 10
+	`)
 
-	rev2 := `name: modified
-value: 20`
+	rev2 := yamltest.Input(`
+		name: modified
+		value: 20
+	`)
 
-	rev3 := `name: final
-value: 30
-new: added`
+	rev3 := yamltest.Input(`
+		name: final
+		value: 30
+		new: added
+	`)
 
 	rev1Tokens := lexer.Tokenize(rev1)
 	rev2Tokens := lexer.Tokenize(rev2)
@@ -778,15 +797,21 @@ new: added`
 func TestViewport_DiffMode(t *testing.T) {
 	t.Parallel()
 
-	rev1 := `name: original
-value: 10`
+	rev1 := yamltest.Input(`
+		name: original
+		value: 10
+	`)
 
-	rev2 := `name: modified
-value: 20`
+	rev2 := yamltest.Input(`
+		name: modified
+		value: 20
+	`)
 
-	rev3 := `name: final
-value: 30
-new: added`
+	rev3 := yamltest.Input(`
+		name: final
+		value: 30
+		new: added
+	`)
 
 	rev1Tokens := lexer.Tokenize(rev1)
 	rev2Tokens := lexer.Tokenize(rev2)
@@ -950,11 +975,13 @@ new: added`
 func TestViewport_State(t *testing.T) {
 	t.Parallel()
 
-	lineCountYAML := `line1: a
-line2: b
-line3: c
-line4: d
-line5: e`
+	lineCountYAML := yamltest.Input(`
+		line1: a
+		line2: b
+		line3: c
+		line4: d
+		line5: e
+	`)
 
 	pastBottomYAML := `line1: a
 line2: b
@@ -1095,15 +1122,21 @@ line3: c`
 func TestViewport_SetFile(t *testing.T) {
 	t.Parallel()
 
-	simpleYAML := `key: value
-number: 42`
+	simpleYAML := yamltest.Input(`
+		key: value
+		number: 42
+	`)
 
-	beforeYAML := `name: original
-count: 10`
+	beforeYAML := yamltest.Input(`
+		name: original
+		count: 10
+	`)
 
-	afterYAML := `name: modified
-count: 20
-new: added`
+	afterYAML := yamltest.Input(`
+		name: modified
+		count: 20
+		new: added
+	`)
 
 	tcs := map[string]struct {
 		test       func(t *testing.T, m *yamlviewport.Model)
@@ -1179,20 +1212,24 @@ new: added`
 func TestViewport_Update(t *testing.T) {
 	t.Parallel()
 
-	verticalYAML := `line1: a
-line2: b
-line3: c
-line4: d
-line5: e
-line6: f
-line7: g
-line8: h
-line9: i
-line10: j`
+	verticalYAML := yamltest.Input(`
+		line1: a
+		line2: b
+		line3: c
+		line4: d
+		line5: e
+		line6: f
+		line7: g
+		line8: h
+		line9: i
+		line10: j
+	`)
 
-	wideYAML := `short: x
-very_long_key_name_that_requires_horizontal_scrolling: "This is a very long value that extends well beyond the viewport width and requires scrolling to see"
-another: y`
+	wideYAML := yamltest.Input(`
+		short: x
+		very_long_key_name_that_requires_horizontal_scrolling: "This is a very long value that extends well beyond the viewport width and requires scrolling to see"
+		another: y
+	`)
 
 	tcs := map[string]struct {
 		msg    tea.Msg
@@ -1520,14 +1557,18 @@ func TestViewport_KeyMap(t *testing.T) {
 func TestViewport_RevisionDeduplication(t *testing.T) {
 	t.Parallel()
 
-	content := `name: same
-value: 10`
+	content := yamltest.Input(`
+		name: same
+		value: 10
+	`)
 
 	sameTokens1 := lexer.Tokenize(content)
 	sameTokens2 := lexer.Tokenize(content)
 
-	differentContent := `name: different
-value: 20`
+	differentContent := yamltest.Input(`
+		name: different
+		value: 20
+	`)
 	differentTokens := lexer.Tokenize(differentContent)
 
 	tcs := map[string]struct {
@@ -1639,44 +1680,47 @@ func TestViewSummary_Golden(t *testing.T) {
 	t.Parallel()
 
 	// Base revision with multiple lines for context testing.
-	rev1YAML := `name: original
-count: 10
-enabled: true
-description: "This is the original description"
-tags:
-  - alpha
-  - beta
-settings:
-  timeout: 30
-  retries: 3
-`
+	rev1YAML := yamltest.Input(`
+		name: original
+		count: 10
+		enabled: true
+		description: "This is the original description"
+		tags:
+		  - alpha
+		  - beta
+		settings:
+		  timeout: 30
+		  retries: 3
+	`)
 
 	// Modified revision with changes in middle.
-	rev2YAML := `name: modified
-count: 20
-enabled: true
-description: "This is the updated description"
-tags:
-  - alpha
-  - gamma
-settings:
-  timeout: 60
-  retries: 5
-`
+	rev2YAML := yamltest.Input(`
+		name: modified
+		count: 20
+		enabled: true
+		description: "This is the updated description"
+		tags:
+		  - alpha
+		  - gamma
+		settings:
+		  timeout: 60
+		  retries: 5
+	`)
 
 	// Third revision with additional changes.
-	rev3YAML := `name: final
-count: 30
-enabled: false
-description: "This is the final description"
-tags:
-  - alpha
-  - gamma
-  - delta
-settings:
-  timeout: 90
-  retries: 10
-`
+	rev3YAML := yamltest.Input(`
+		name: final
+		count: 30
+		enabled: false
+		description: "This is the final description"
+		tags:
+		  - alpha
+		  - gamma
+		  - delta
+		settings:
+		  timeout: 90
+		  retries: 10
+	`)
 
 	rev1Tokens := lexer.Tokenize(rev1YAML)
 	rev2Tokens := lexer.Tokenize(rev2YAML)
@@ -1787,15 +1831,17 @@ settings:
 func TestViewSummary_Behavior(t *testing.T) {
 	t.Parallel()
 
-	rev1YAML := `name: original
-count: 10
-enabled: true
-`
+	rev1YAML := yamltest.Input(`
+		name: original
+		count: 10
+		enabled: true
+	`)
 
-	rev2YAML := `name: modified
-count: 20
-enabled: true
-`
+	rev2YAML := yamltest.Input(`
+		name: modified
+		count: 20
+		enabled: true
+	`)
 
 	rev1Tokens := lexer.Tokenize(rev1YAML)
 	rev2Tokens := lexer.Tokenize(rev2YAML)

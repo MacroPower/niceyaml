@@ -8,53 +8,28 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/macropower/niceyaml/tokens"
+	"github.com/macropower/niceyaml/yamltest"
 )
 
 func TestNewSegment(t *testing.T) {
 	t.Parallel()
 
-	source := &token.Token{Value: "source", Origin: "source\n", Type: token.StringType}
-	part := &token.Token{Value: "part", Origin: "part", Type: token.StringType}
+	strTkb := yamltest.NewTokenBuilder().Type(token.StringType)
+	source := strTkb.Clone().Value("source").Origin("source\n").Build()
+	part := strTkb.Clone().Value("part").Origin("part").Build()
 
 	seg := tokens.NewSegment(source, part)
 
 	// Part() returns a clone, so check deep equality.
 	gotPart := seg.Part()
 	assert.NotSame(t, part, gotPart) // Should be cloned.
-	assertTokenEqual(t, part, gotPart)
+	yamltest.RequireTokenValid(t, part, gotPart, "part")
+	yamltest.AssertTokenEqual(t, part, gotPart, "part")
 
 	gotSource := seg.Source()
 	assert.NotSame(t, source, gotSource) // Should be cloned.
-	assertTokenEqual(t, source, gotSource)
-}
-
-// assertTokenEqual checks that two tokens have equal field values.
-func assertTokenEqual(t *testing.T, want, got *token.Token) {
-	t.Helper()
-	assert.Equal(t, want.Type, got.Type)
-	assert.Equal(t, want.CharacterType, got.CharacterType)
-	assert.Equal(t, want.Indicator, got.Indicator)
-	assert.Equal(t, want.Value, got.Value)
-	assert.Equal(t, want.Origin, got.Origin)
-	assertPositionEqual(t, want.Position, got.Position)
-}
-
-// assertPositionEqual checks that two token positions have equal field values.
-func assertPositionEqual(t *testing.T, want, got *token.Position) {
-	t.Helper()
-	if want == nil && got == nil {
-		return
-	}
-	if want == nil || got == nil {
-		assert.Equal(t, want, got)
-		return
-	}
-
-	assert.Equal(t, want.Line, got.Line)
-	assert.Equal(t, want.Column, got.Column)
-	assert.Equal(t, want.Offset, got.Offset)
-	assert.Equal(t, want.IndentNum, got.IndentNum)
-	assert.Equal(t, want.IndentLevel, got.IndentLevel)
+	yamltest.RequireTokenValid(t, source, gotSource, "source")
+	yamltest.AssertTokenEqual(t, source, gotSource, "source")
 }
 
 func TestSegment_Source(t *testing.T) {
@@ -63,15 +38,15 @@ func TestSegment_Source(t *testing.T) {
 	t.Run("returns cloned source", func(t *testing.T) {
 		t.Parallel()
 
-		source := &token.Token{Value: "test", Origin: "test\n"}
-		part := &token.Token{Value: "test"}
+		source := yamltest.NewTokenBuilder().Value("test").Origin("test\n").Build()
+		part := yamltest.NewTokenBuilder().Value("test").Build()
 
 		seg := tokens.NewSegment(source, part)
 		got := seg.Source()
 
-		assert.Equal(t, source.Value, got.Value)
-		assert.Equal(t, source.Origin, got.Origin)
 		assert.NotSame(t, source, got) // Should be cloned.
+		yamltest.RequireTokenValid(t, source, got, "source")
+		yamltest.AssertTokenEqual(t, source, got, "source")
 	})
 }
 
@@ -81,9 +56,10 @@ func TestSegment_SourceEquals(t *testing.T) {
 	t.Run("matches source", func(t *testing.T) {
 		t.Parallel()
 
-		source := &token.Token{Value: "source"}
-		part := &token.Token{Value: "part"}
-		other := &token.Token{Value: "other"}
+		tkb := yamltest.NewTokenBuilder()
+		source := tkb.Clone().Value("source").Build()
+		part := tkb.Clone().Value("part").Build()
+		other := tkb.Clone().Value("other").Build()
 
 		seg := tokens.NewSegment(source, part)
 
@@ -94,8 +70,9 @@ func TestSegment_SourceEquals(t *testing.T) {
 	t.Run("does not match part", func(t *testing.T) {
 		t.Parallel()
 
-		source := &token.Token{Value: "source"}
-		part := &token.Token{Value: "part"}
+		tkb := yamltest.NewTokenBuilder()
+		source := tkb.Clone().Value("source").Build()
+		part := tkb.Clone().Value("part").Build()
 
 		seg := tokens.NewSegment(source, part)
 
@@ -148,7 +125,7 @@ func TestSegment_Width(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			seg := tokens.NewSegment(nil, &token.Token{Origin: tc.input})
+			seg := tokens.NewSegment(nil, yamltest.NewTokenBuilder().Origin(tc.input).Build())
 
 			got := seg.Width()
 			assert.Equal(t, tc.want, got)
@@ -162,9 +139,10 @@ func TestSegment_Contains(t *testing.T) {
 	t.Run("matches source", func(t *testing.T) {
 		t.Parallel()
 
-		source := &token.Token{Value: "source"}
-		part := &token.Token{Value: "part"}
-		other := &token.Token{Value: "other"}
+		tkb := yamltest.NewTokenBuilder()
+		source := tkb.Clone().Value("source").Build()
+		part := tkb.Clone().Value("part").Build()
+		other := tkb.Clone().Value("other").Build()
 
 		seg := tokens.NewSegment(source, part)
 
@@ -175,9 +153,10 @@ func TestSegment_Contains(t *testing.T) {
 	t.Run("matches part", func(t *testing.T) {
 		t.Parallel()
 
-		source := &token.Token{Value: "source"}
-		part := &token.Token{Value: "part"}
-		other := &token.Token{Value: "other"}
+		tkb := yamltest.NewTokenBuilder()
+		source := tkb.Clone().Value("source").Build()
+		part := tkb.Clone().Value("part").Build()
+		other := tkb.Clone().Value("other").Build()
 
 		seg := tokens.NewSegment(source, part)
 
@@ -188,8 +167,9 @@ func TestSegment_Contains(t *testing.T) {
 	t.Run("nil token", func(t *testing.T) {
 		t.Parallel()
 
-		source := &token.Token{Value: "source"}
-		part := &token.Token{Value: "part"}
+		tkb := yamltest.NewTokenBuilder()
+		source := tkb.Clone().Value("source").Build()
+		part := tkb.Clone().Value("part").Build()
 
 		seg := tokens.NewSegment(source, part)
 
@@ -200,36 +180,41 @@ func TestSegment_Contains(t *testing.T) {
 func TestSegments_Append(t *testing.T) {
 	t.Parallel()
 
+	strTkb := yamltest.NewTokenBuilder().Type(token.StringType)
+
 	t.Run("append to empty", func(t *testing.T) {
 		t.Parallel()
 
 		var segs tokens.Segments
 
-		source := &token.Token{Value: "source", Origin: "source\n", Type: token.StringType}
-		part := &token.Token{Value: "part", Origin: "part", Type: token.StringType}
+		source := strTkb.Clone().Value("source").Origin("source\n").Build()
+		part := strTkb.Clone().Value("part").Origin("part").Build()
 
 		got := segs.Append(source, part)
 
 		require.Len(t, got, 1)
 		// Part() returns a clone, so check deep equality.
-		assertTokenEqual(t, part, got[0].Part())
+		yamltest.RequireTokenValid(t, part, got[0].Part(), "part")
+		yamltest.AssertTokenEqual(t, part, got[0].Part(), "part")
 	})
 
 	t.Run("append to existing", func(t *testing.T) {
 		t.Parallel()
 
-		source1 := &token.Token{Value: "source1", Origin: "source1\n", Type: token.StringType}
-		part1 := &token.Token{Value: "part1", Origin: "part1", Type: token.StringType}
-		source2 := &token.Token{Value: "source2", Origin: "source2\n", Type: token.StringType}
-		part2 := &token.Token{Value: "part2", Origin: "part2", Type: token.StringType}
+		source1 := strTkb.Clone().Value("source1").Origin("source1\n").Build()
+		part1 := strTkb.Clone().Value("part1").Origin("part1").Build()
+		source2 := strTkb.Clone().Value("source2").Origin("source2\n").Build()
+		part2 := strTkb.Clone().Value("part2").Origin("part2").Build()
 
 		segs := tokens.Segments{tokens.NewSegment(source1, part1)}
 		got := segs.Append(source2, part2)
 
 		require.Len(t, got, 2)
 		// Part() returns a clone, so check deep equality.
-		assertTokenEqual(t, part1, got[0].Part())
-		assertTokenEqual(t, part2, got[1].Part())
+		yamltest.RequireTokenValid(t, part1, got[0].Part(), "part1")
+		yamltest.AssertTokenEqual(t, part1, got[0].Part(), "part1")
+		yamltest.RequireTokenValid(t, part2, got[1].Part(), "part2")
+		yamltest.AssertTokenEqual(t, part2, got[1].Part(), "part2")
 	})
 }
 
@@ -249,22 +234,23 @@ func TestSegments_Clone(t *testing.T) {
 	t.Run("clones segments", func(t *testing.T) {
 		t.Parallel()
 
-		source := &token.Token{Value: "source"}
-		part := &token.Token{Value: "part", Origin: "part\n"}
+		source := yamltest.NewTokenBuilder().Value("source").Build()
+		part := yamltest.NewTokenBuilder().Value("part").Origin("part\n").Build()
 
 		segs := tokens.Segments{tokens.NewSegment(source, part)}
 		got := segs.Clone()
 
 		require.Len(t, got, 1)
-		assert.Equal(t, part.Value, got[0].Part().Value)
 		assert.NotSame(t, part, got[0].Part()) // Part should be cloned.
+		yamltest.RequireTokenValid(t, part, got[0].Part(), "part")
+		yamltest.AssertTokenEqual(t, part, got[0].Part(), "part")
 	})
 
 	t.Run("preserves source reference", func(t *testing.T) {
 		t.Parallel()
 
-		source := &token.Token{Value: "source"}
-		part := &token.Token{Value: "part"}
+		source := yamltest.NewTokenBuilder().Value("source").Build()
+		part := yamltest.NewTokenBuilder().Value("part").Build()
 
 		segs := tokens.Segments{tokens.NewSegment(source, part)}
 		got := segs.Clone()
@@ -289,24 +275,25 @@ func TestSegments_SourceTokens(t *testing.T) {
 	t.Run("single segment", func(t *testing.T) {
 		t.Parallel()
 
-		source := &token.Token{Value: "test", Origin: "test\n"}
-		part := &token.Token{Value: "test", Origin: "test\n"}
+		source := yamltest.NewTokenBuilder().Value("test").Origin("test\n").Build()
+		part := yamltest.NewTokenBuilder().Value("test").Origin("test\n").Build()
 
 		segs := tokens.Segments{tokens.NewSegment(source, part)}
 		got := segs.SourceTokens()
 
 		require.Len(t, got, 1)
-		assert.Equal(t, source.Value, got[0].Value)
 		assert.NotSame(t, source, got[0]) // Should be cloned.
+		yamltest.RequireTokenValid(t, source, got[0], "source")
+		yamltest.AssertTokenEqual(t, source, got[0], "source")
 	})
 
 	t.Run("deduplicates shared source", func(t *testing.T) {
 		t.Parallel()
 
 		// Simulate a multiline token split across lines.
-		source := &token.Token{Value: "multiline", Origin: "line1\nline2\n"}
-		part1 := &token.Token{Value: "", Origin: "line1\n"}
-		part2 := &token.Token{Value: "multiline", Origin: "line2\n"}
+		source := yamltest.NewTokenBuilder().Value("multiline").Origin("line1\nline2\n").Build()
+		part1 := yamltest.NewTokenBuilder().Value("").Origin("line1\n").Build()
+		part2 := yamltest.NewTokenBuilder().Value("multiline").Origin("line2\n").Build()
 
 		segs := tokens.Segments{
 			tokens.NewSegment(source, part1),
@@ -315,27 +302,31 @@ func TestSegments_SourceTokens(t *testing.T) {
 		got := segs.SourceTokens()
 
 		require.Len(t, got, 1) // Should deduplicate.
-		assert.Equal(t, source.Value, got[0].Value)
+		yamltest.RequireTokenValid(t, source, got[0], "source")
+		yamltest.AssertTokenEqual(t, source, got[0], "source")
 	})
 
 	t.Run("preserves order with multiple sources", func(t *testing.T) {
 		t.Parallel()
 
-		source1 := &token.Token{Value: "first"}
-		source2 := &token.Token{Value: "second"}
-		source3 := &token.Token{Value: "third"}
+		source1 := yamltest.NewTokenBuilder().Value("first").Build()
+		source2 := yamltest.NewTokenBuilder().Value("second").Build()
+		source3 := yamltest.NewTokenBuilder().Value("third").Build()
 
 		segs := tokens.Segments{
-			tokens.NewSegment(source1, &token.Token{}),
-			tokens.NewSegment(source2, &token.Token{}),
-			tokens.NewSegment(source3, &token.Token{}),
+			tokens.NewSegment(source1, yamltest.NewTokenBuilder().Build()),
+			tokens.NewSegment(source2, yamltest.NewTokenBuilder().Build()),
+			tokens.NewSegment(source3, yamltest.NewTokenBuilder().Build()),
 		}
 		got := segs.SourceTokens()
 
 		require.Len(t, got, 3)
-		assert.Equal(t, "first", got[0].Value)
-		assert.Equal(t, "second", got[1].Value)
-		assert.Equal(t, "third", got[2].Value)
+		yamltest.RequireTokenValid(t, source1, got[0], "source1")
+		yamltest.AssertTokenEqual(t, source1, got[0], "source1")
+		yamltest.RequireTokenValid(t, source2, got[1], "source2")
+		yamltest.AssertTokenEqual(t, source2, got[1], "source2")
+		yamltest.RequireTokenValid(t, source3, got[2], "source3")
+		yamltest.AssertTokenEqual(t, source3, got[2], "source3")
 	})
 }
 
@@ -355,9 +346,9 @@ func TestSegments_PartTokens(t *testing.T) {
 	t.Run("returns all parts cloned", func(t *testing.T) {
 		t.Parallel()
 
-		source := &token.Token{Value: "source"}
-		part1 := &token.Token{Value: "part1", Origin: "line1\n"}
-		part2 := &token.Token{Value: "part2", Origin: "line2\n"}
+		source := yamltest.NewTokenBuilder().Value("source").Build()
+		part1 := yamltest.NewTokenBuilder().Value("part1").Origin("line1\n").Build()
+		part2 := yamltest.NewTokenBuilder().Value("part2").Origin("line2\n").Build()
 
 		segs := tokens.Segments{
 			tokens.NewSegment(source, part1),
@@ -366,10 +357,12 @@ func TestSegments_PartTokens(t *testing.T) {
 		got := segs.PartTokens()
 
 		require.Len(t, got, 2)
-		assert.Equal(t, "part1", got[0].Value)
-		assert.Equal(t, "part2", got[1].Value)
 		assert.NotSame(t, part1, got[0]) // Should be cloned.
 		assert.NotSame(t, part2, got[1])
+		yamltest.RequireTokenValid(t, part1, got[0], "part1")
+		yamltest.AssertTokenEqual(t, part1, got[0], "part1")
+		yamltest.RequireTokenValid(t, part2, got[1], "part2")
+		yamltest.AssertTokenEqual(t, part2, got[1], "part2")
 	})
 }
 
@@ -390,9 +383,7 @@ func TestSegments_NextColumn(t *testing.T) {
 		t.Parallel()
 
 		segs := tokens.Segments{
-			tokens.NewSegment(nil, &token.Token{
-				Position: &token.Position{Column: 5},
-			}),
+			tokens.NewSegment(nil, yamltest.NewTokenBuilder().PositionColumn(5).Build()),
 		}
 		got := segs.NextColumn()
 
@@ -402,16 +393,11 @@ func TestSegments_NextColumn(t *testing.T) {
 	t.Run("multiple segments", func(t *testing.T) {
 		t.Parallel()
 
+		tkb := yamltest.NewTokenBuilder()
 		segs := tokens.Segments{
-			tokens.NewSegment(nil, &token.Token{
-				Position: &token.Position{Column: 1},
-			}),
-			tokens.NewSegment(nil, &token.Token{
-				Position: &token.Position{Column: 5},
-			}),
-			tokens.NewSegment(nil, &token.Token{
-				Position: &token.Position{Column: 10},
-			}),
+			tokens.NewSegment(nil, tkb.Clone().PositionColumn(1).Build()),
+			tokens.NewSegment(nil, tkb.Clone().PositionColumn(5).Build()),
+			tokens.NewSegment(nil, tkb.Clone().PositionColumn(10).Build()),
 		}
 		got := segs.NextColumn()
 
@@ -447,9 +433,10 @@ func TestSegment_PartEquals(t *testing.T) {
 	t.Run("matches part", func(t *testing.T) {
 		t.Parallel()
 
-		source := &token.Token{Value: "source"}
-		part := &token.Token{Value: "part"}
-		other := &token.Token{Value: "other"}
+		tkb := yamltest.NewTokenBuilder()
+		source := tkb.Clone().Value("source").Build()
+		part := tkb.Clone().Value("part").Build()
+		other := tkb.Clone().Value("other").Build()
 
 		seg := tokens.NewSegment(source, part)
 
@@ -460,8 +447,9 @@ func TestSegment_PartEquals(t *testing.T) {
 	t.Run("does not match source", func(t *testing.T) {
 		t.Parallel()
 
-		source := &token.Token{Value: "source"}
-		part := &token.Token{Value: "part"}
+		tkb := yamltest.NewTokenBuilder()
+		source := tkb.Clone().Value("source").Build()
+		part := tkb.Clone().Value("part").Build()
 
 		seg := tokens.NewSegment(source, part)
 
@@ -472,7 +460,7 @@ func TestSegment_PartEquals(t *testing.T) {
 func TestSegment_Source_NilSource(t *testing.T) {
 	t.Parallel()
 
-	seg := tokens.NewSegment(nil, &token.Token{Value: "part"})
+	seg := tokens.NewSegment(nil, yamltest.NewTokenBuilder().Value("part").Build())
 	got := seg.Source()
 
 	assert.Nil(t, got)
@@ -481,7 +469,7 @@ func TestSegment_Source_NilSource(t *testing.T) {
 func TestSegment_Part_NilPart(t *testing.T) {
 	t.Parallel()
 
-	seg := tokens.NewSegment(&token.Token{Value: "source"}, nil)
+	seg := tokens.NewSegment(yamltest.NewTokenBuilder().Value("source").Build(), nil)
 	got := seg.Part()
 
 	assert.Nil(t, got)
@@ -490,7 +478,7 @@ func TestSegment_Part_NilPart(t *testing.T) {
 func TestSegment_Width_NilPart(t *testing.T) {
 	t.Parallel()
 
-	seg := tokens.NewSegment(&token.Token{Value: "source"}, nil)
+	seg := tokens.NewSegment(yamltest.NewTokenBuilder().Value("source").Build(), nil)
 	got := seg.Width()
 
 	assert.Equal(t, 0, got)
@@ -512,23 +500,29 @@ func TestSegments_SourceTokenAt(t *testing.T) {
 	t.Run("finds token at column", func(t *testing.T) {
 		t.Parallel()
 
-		source1 := &token.Token{Value: "key"}
-		source2 := &token.Token{Value: ":"}
-		source3 := &token.Token{Value: "value"}
+		source1 := yamltest.NewTokenBuilder().Value("key").Build()
+		source2 := yamltest.NewTokenBuilder().Value(":").Build()
+		source3 := yamltest.NewTokenBuilder().Value("value").Build()
 
 		segs := tokens.Segments{
-			tokens.NewSegment(source1, &token.Token{Origin: "key"}),   // Width 3, cols 0-2.
-			tokens.NewSegment(source2, &token.Token{Origin: ": "}),    // Width 2, cols 3-4.
-			tokens.NewSegment(source3, &token.Token{Origin: "value"}), // Width 5, cols 5-9.
+			tokens.NewSegment(source1, yamltest.NewTokenBuilder().Origin("key").Build()),   // Width 3, cols 0-2.
+			tokens.NewSegment(source2, yamltest.NewTokenBuilder().Origin(": ").Build()),    // Width 2, cols 3-4.
+			tokens.NewSegment(source3, yamltest.NewTokenBuilder().Origin("value").Build()), // Width 5, cols 5-9.
 		}
 
 		// SourceTokenAt returns clones, so check deep equality.
-		assertTokenEqual(t, source1, segs.SourceTokenAt(0))
-		assertTokenEqual(t, source1, segs.SourceTokenAt(2))
-		assertTokenEqual(t, source2, segs.SourceTokenAt(3))
-		assertTokenEqual(t, source2, segs.SourceTokenAt(4))
-		assertTokenEqual(t, source3, segs.SourceTokenAt(5))
-		assertTokenEqual(t, source3, segs.SourceTokenAt(9))
+		yamltest.RequireTokenValid(t, source1, segs.SourceTokenAt(0), "source1 at 0")
+		yamltest.AssertTokenEqual(t, source1, segs.SourceTokenAt(0), "source1 at 0")
+		yamltest.RequireTokenValid(t, source1, segs.SourceTokenAt(2), "source1 at 2")
+		yamltest.AssertTokenEqual(t, source1, segs.SourceTokenAt(2), "source1 at 2")
+		yamltest.RequireTokenValid(t, source2, segs.SourceTokenAt(3), "source2 at 3")
+		yamltest.AssertTokenEqual(t, source2, segs.SourceTokenAt(3), "source2 at 3")
+		yamltest.RequireTokenValid(t, source2, segs.SourceTokenAt(4), "source2 at 4")
+		yamltest.AssertTokenEqual(t, source2, segs.SourceTokenAt(4), "source2 at 4")
+		yamltest.RequireTokenValid(t, source3, segs.SourceTokenAt(5), "source3 at 5")
+		yamltest.AssertTokenEqual(t, source3, segs.SourceTokenAt(5), "source3 at 5")
+		yamltest.RequireTokenValid(t, source3, segs.SourceTokenAt(9), "source3 at 9")
+		yamltest.AssertTokenEqual(t, source3, segs.SourceTokenAt(9), "source3 at 9")
 
 		// Verify cloning behavior.
 		assert.NotSame(t, source1, segs.SourceTokenAt(0))
@@ -537,10 +531,10 @@ func TestSegments_SourceTokenAt(t *testing.T) {
 	t.Run("column out of bounds", func(t *testing.T) {
 		t.Parallel()
 
-		source := &token.Token{Value: "key"}
+		source := yamltest.NewTokenBuilder().Value("key").Build()
 
 		segs := tokens.Segments{
-			tokens.NewSegment(source, &token.Token{Origin: "key"}), // Width 3.
+			tokens.NewSegment(source, yamltest.NewTokenBuilder().Origin("key").Build()), // Width 3.
 		}
 
 		assert.Nil(t, segs.SourceTokenAt(3))
@@ -550,10 +544,10 @@ func TestSegments_SourceTokenAt(t *testing.T) {
 	t.Run("negative column", func(t *testing.T) {
 		t.Parallel()
 
-		source := &token.Token{Value: "key"}
+		source := yamltest.NewTokenBuilder().Value("key").Build()
 
 		segs := tokens.Segments{
-			tokens.NewSegment(source, &token.Token{Origin: "key"}),
+			tokens.NewSegment(source, yamltest.NewTokenBuilder().Origin("key").Build()),
 		}
 
 		assert.Nil(t, segs.SourceTokenAt(-1))
@@ -562,18 +556,21 @@ func TestSegments_SourceTokenAt(t *testing.T) {
 	t.Run("unicode width", func(t *testing.T) {
 		t.Parallel()
 
-		source1 := &token.Token{Value: "日本語"}
-		source2 := &token.Token{Value: "end"}
+		source1 := yamltest.NewTokenBuilder().Value("日本語").Build()
+		source2 := yamltest.NewTokenBuilder().Value("end").Build()
 
 		segs := tokens.Segments{
-			tokens.NewSegment(source1, &token.Token{Origin: "日本語"}), // Width 3 (runes).
-			tokens.NewSegment(source2, &token.Token{Origin: "end"}), // Width 3.
+			tokens.NewSegment(source1, yamltest.NewTokenBuilder().Origin("日本語").Build()), // Width 3 (runes).
+			tokens.NewSegment(source2, yamltest.NewTokenBuilder().Origin("end").Build()), // Width 3.
 		}
 
 		// SourceTokenAt returns clones, so check deep equality.
-		assertTokenEqual(t, source1, segs.SourceTokenAt(0))
-		assertTokenEqual(t, source1, segs.SourceTokenAt(2))
-		assertTokenEqual(t, source2, segs.SourceTokenAt(3))
+		yamltest.RequireTokenValid(t, source1, segs.SourceTokenAt(0), "source1 at 0")
+		yamltest.AssertTokenEqual(t, source1, segs.SourceTokenAt(0), "source1 at 0")
+		yamltest.RequireTokenValid(t, source1, segs.SourceTokenAt(2), "source1 at 2")
+		yamltest.AssertTokenEqual(t, source1, segs.SourceTokenAt(2), "source1 at 2")
+		yamltest.RequireTokenValid(t, source2, segs.SourceTokenAt(3), "source2 at 3")
+		yamltest.AssertTokenEqual(t, source2, segs.SourceTokenAt(3), "source2 at 3")
 	})
 }
 
@@ -583,8 +580,8 @@ func TestSegments_Merge(t *testing.T) {
 	t.Run("merge with empty", func(t *testing.T) {
 		t.Parallel()
 
-		source := &token.Token{Value: "source"}
-		part := &token.Token{Value: "part", Origin: "part"}
+		source := yamltest.NewTokenBuilder().Value("source").Build()
+		part := yamltest.NewTokenBuilder().Value("part").Origin("part").Build()
 
 		segs := tokens.Segments{tokens.NewSegment(source, part)}
 
@@ -599,8 +596,8 @@ func TestSegments_Merge(t *testing.T) {
 	t.Run("merge empty with segments", func(t *testing.T) {
 		t.Parallel()
 
-		source := &token.Token{Value: "source"}
-		part := &token.Token{Value: "part", Origin: "part"}
+		source := yamltest.NewTokenBuilder().Value("source").Build()
+		part := yamltest.NewTokenBuilder().Value("part").Origin("part").Build()
 
 		var segs tokens.Segments
 
@@ -615,10 +612,10 @@ func TestSegments_Merge(t *testing.T) {
 	t.Run("merge single segments", func(t *testing.T) {
 		t.Parallel()
 
-		source1 := &token.Token{Value: "source1"}
-		part1 := &token.Token{Value: "part1", Origin: "part1"}
-		source2 := &token.Token{Value: "source2"}
-		part2 := &token.Token{Value: "part2", Origin: "part2"}
+		source1 := yamltest.NewTokenBuilder().Value("source1").Build()
+		part1 := yamltest.NewTokenBuilder().Value("part1").Origin("part1").Build()
+		source2 := yamltest.NewTokenBuilder().Value("source2").Build()
+		part2 := yamltest.NewTokenBuilder().Value("part2").Origin("part2").Build()
 
 		segs1 := tokens.Segments{tokens.NewSegment(source1, part1)}
 		segs2 := tokens.Segments{tokens.NewSegment(source2, part2)}
@@ -633,13 +630,13 @@ func TestSegments_Merge(t *testing.T) {
 	t.Run("merge multiple segments", func(t *testing.T) {
 		t.Parallel()
 
-		source1 := &token.Token{Value: "s1"}
-		source2 := &token.Token{Value: "s2"}
-		source3 := &token.Token{Value: "s3"}
+		source1 := yamltest.NewTokenBuilder().Value("s1").Build()
+		source2 := yamltest.NewTokenBuilder().Value("s2").Build()
+		source3 := yamltest.NewTokenBuilder().Value("s3").Build()
 
-		segs1 := tokens.Segments{tokens.NewSegment(source1, &token.Token{Origin: "p1"})}
-		segs2 := tokens.Segments{tokens.NewSegment(source2, &token.Token{Origin: "p2"})}
-		segs3 := tokens.Segments{tokens.NewSegment(source3, &token.Token{Origin: "p3"})}
+		segs1 := tokens.Segments{tokens.NewSegment(source1, yamltest.NewTokenBuilder().Origin("p1").Build())}
+		segs2 := tokens.Segments{tokens.NewSegment(source2, yamltest.NewTokenBuilder().Origin("p2").Build())}
+		segs3 := tokens.Segments{tokens.NewSegment(source3, yamltest.NewTokenBuilder().Origin("p3").Build())}
 
 		got := segs1.Merge(segs2, segs3)
 
@@ -652,9 +649,9 @@ func TestSegments_Merge(t *testing.T) {
 	t.Run("preserves source pointer identity", func(t *testing.T) {
 		t.Parallel()
 
-		sharedSource := &token.Token{Value: "shared"}
-		part1 := &token.Token{Value: "part1", Origin: "part1"}
-		part2 := &token.Token{Value: "part2", Origin: "part2"}
+		sharedSource := yamltest.NewTokenBuilder().Value("shared").Build()
+		part1 := yamltest.NewTokenBuilder().Value("part1").Origin("part1").Build()
+		part2 := yamltest.NewTokenBuilder().Value("part2").Origin("part2").Build()
 
 		segs1 := tokens.Segments{tokens.NewSegment(sharedSource, part1)}
 		segs2 := tokens.Segments{tokens.NewSegment(sharedSource, part2)}
@@ -674,8 +671,9 @@ func TestSegments2_TokenRangesAt(t *testing.T) {
 	t.Run("negative idx", func(t *testing.T) {
 		t.Parallel()
 
+		tkb := yamltest.NewTokenBuilder()
 		s2 := tokens.Segments2{
-			tokens.Segments{tokens.NewSegment(&token.Token{}, &token.Token{Origin: "test"})},
+			tokens.Segments{tokens.NewSegment(tkb.Clone().Build(), tkb.Clone().Origin("test").Build())},
 		}
 
 		got := s2.TokenRangesAt(-1, 0)
@@ -686,8 +684,9 @@ func TestSegments2_TokenRangesAt(t *testing.T) {
 	t.Run("idx out of bounds", func(t *testing.T) {
 		t.Parallel()
 
+		tkb := yamltest.NewTokenBuilder()
 		s2 := tokens.Segments2{
-			tokens.Segments{tokens.NewSegment(&token.Token{}, &token.Token{Origin: "test"})},
+			tokens.Segments{tokens.NewSegment(tkb.Clone().Build(), tkb.Clone().Origin("test").Build())},
 		}
 
 		got := s2.TokenRangesAt(5, 0)
@@ -698,8 +697,11 @@ func TestSegments2_TokenRangesAt(t *testing.T) {
 	t.Run("no segment at column", func(t *testing.T) {
 		t.Parallel()
 
+		tkb := yamltest.NewTokenBuilder()
 		s2 := tokens.Segments2{
-			tokens.Segments{tokens.NewSegment(&token.Token{}, &token.Token{Origin: "abc"})}, // Width 3, cols 0-2.
+			tokens.Segments{
+				tokens.NewSegment(tkb.Clone().Build(), tkb.Clone().Origin("abc").Build()),
+			}, // Width 3, cols 0-2.
 		}
 
 		got := s2.TokenRangesAt(0, 10) // Column 10 is out of bounds.
@@ -710,9 +712,10 @@ func TestSegments2_TokenRangesAt(t *testing.T) {
 	t.Run("single line single segment", func(t *testing.T) {
 		t.Parallel()
 
-		source := &token.Token{Value: "test"}
+		tkb := yamltest.NewTokenBuilder()
+		source := tkb.Clone().Value("test").Build()
 		s2 := tokens.Segments2{
-			tokens.Segments{tokens.NewSegment(source, &token.Token{Origin: "test"})}, // Width 4.
+			tokens.Segments{tokens.NewSegment(source, tkb.Clone().Origin("test").Build())}, // Width 4.
 		}
 
 		got := s2.TokenRangesAt(0, 0)
@@ -730,15 +733,16 @@ func TestSegments2_TokenRangesAt(t *testing.T) {
 	t.Run("single line multiple segments", func(t *testing.T) {
 		t.Parallel()
 
-		source1 := &token.Token{Value: "key"}
-		source2 := &token.Token{Value: ":"}
-		source3 := &token.Token{Value: "val"}
+		tkb := yamltest.NewTokenBuilder()
+		source1 := tkb.Clone().Value("key").Build()
+		source2 := tkb.Clone().Value(":").Build()
+		source3 := tkb.Clone().Value("val").Build()
 
 		s2 := tokens.Segments2{
 			tokens.Segments{
-				tokens.NewSegment(source1, &token.Token{Origin: "key"}), // Width 3, cols 0-2.
-				tokens.NewSegment(source2, &token.Token{Origin: ": "}),  // Width 2, cols 3-4.
-				tokens.NewSegment(source3, &token.Token{Origin: "val"}), // Width 3, cols 5-7.
+				tokens.NewSegment(source1, tkb.Clone().Origin("key").Build()), // Width 3, cols 0-2.
+				tokens.NewSegment(source2, tkb.Clone().Origin(": ").Build()),  // Width 2, cols 3-4.
+				tokens.NewSegment(source3, tkb.Clone().Origin("val").Build()), // Width 3, cols 5-7.
 			},
 		}
 
@@ -774,12 +778,13 @@ func TestSegments2_TokenRangesAt(t *testing.T) {
 		t.Parallel()
 
 		// Simulate a multiline string spanning 3 lines.
-		sharedSource := &token.Token{Value: "multiline"}
+		tkb := yamltest.NewTokenBuilder()
+		sharedSource := tkb.Clone().Value("multiline").Build()
 
 		s2 := tokens.Segments2{
-			tokens.Segments{tokens.NewSegment(sharedSource, &token.Token{Origin: "line1"})}, // Width 5.
-			tokens.Segments{tokens.NewSegment(sharedSource, &token.Token{Origin: "line2"})}, // Width 5.
-			tokens.Segments{tokens.NewSegment(sharedSource, &token.Token{Origin: "line3"})}, // Width 5.
+			tokens.Segments{tokens.NewSegment(sharedSource, tkb.Clone().Origin("line1").Build())}, // Width 5.
+			tokens.Segments{tokens.NewSegment(sharedSource, tkb.Clone().Origin("line2").Build())}, // Width 5.
+			tokens.Segments{tokens.NewSegment(sharedSource, tkb.Clone().Origin("line3").Build())}, // Width 5.
 		}
 
 		// Click on line 1 should highlight all 3 lines.
@@ -812,11 +817,12 @@ func TestSegments2_TokenRangesAt(t *testing.T) {
 	t.Run("zero width segments skipped", func(t *testing.T) {
 		t.Parallel()
 
-		source := &token.Token{Value: "test"}
+		tkb := yamltest.NewTokenBuilder()
+		source := tkb.Clone().Value("test").Build()
 		s2 := tokens.Segments2{
 			tokens.Segments{
-				tokens.NewSegment(source, &token.Token{Origin: ""}),    // Width 0.
-				tokens.NewSegment(source, &token.Token{Origin: "abc"}), // Width 3.
+				tokens.NewSegment(source, tkb.Clone().Origin("").Build()),    // Width 0.
+				tokens.NewSegment(source, tkb.Clone().Origin("abc").Build()), // Width 3.
 			},
 		}
 

@@ -12,14 +12,17 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/macropower/niceyaml"
+	"github.com/macropower/niceyaml/yamltest"
 )
 
 func TestError(t *testing.T) {
 	t.Parallel()
 
-	source := `a: b
-foo: bar
-key: value`
+	source := yamltest.Input(`
+		a: b
+		foo: bar
+		key: value
+	`)
 	tokens := lexer.Tokenize(source)
 	file, err := parser.Parse(tokens, 0)
 	require.NoError(t, err)
@@ -123,8 +126,10 @@ func TestError_EmptyFile(t *testing.T) {
 func TestErrorWrapper(t *testing.T) {
 	t.Parallel()
 
-	source := `name: test
-value: 123`
+	source := yamltest.Input(`
+		name: test
+		value: 123
+	`)
 	tokens := lexer.Tokenize(source)
 
 	tcs := map[string]struct {
@@ -250,19 +255,30 @@ func TestErrorAnnotation(t *testing.T) {
 		sourceLines  int
 	}{
 		"nested path shows correct key": {
-			source:       "foo:\n  bar: value",
+			source: yamltest.Input(`
+				foo:
+				  bar: value
+			`),
 			pathBuilder:  func() *yaml.Path { return niceyaml.NewPathBuilder().Child("foo").Child("bar").Build() },
 			errMsg:       "nested error",
 			wantContains: []string{"[2:3]", "nested error"},
 		},
 		"array element path - first item": {
-			source:       "items:\n  - first\n  - second",
+			source: yamltest.Input(`
+				items:
+				  - first
+				  - second
+			`),
 			pathBuilder:  func() *yaml.Path { return niceyaml.NewPathBuilder().Child("items").Index(0).Build() },
 			errMsg:       "array error",
 			wantContains: []string{"array error", "first"},
 		},
 		"array element path - nested object in array": {
-			source: "users:\n  - name: alice\n    age: 30",
+			source: yamltest.Input(`
+				users:
+				  - name: alice
+				    age: 30
+			`),
 			pathBuilder: func() *yaml.Path {
 				return niceyaml.NewPathBuilder().Child("users").Index(0).Child("name").Build()
 			},
@@ -282,7 +298,13 @@ func TestErrorAnnotation(t *testing.T) {
 			wantContains: []string{"[1:1]", "top level error"},
 		},
 		"with custom source lines": {
-			source:       "line1: a\nline2: b\nline3: c\nline4: d\nline5: e",
+			source: yamltest.Input(`
+				line1: a
+				line2: b
+				line3: c
+				line4: d
+				line5: e
+			`),
 			pathBuilder:  func() *yaml.Path { return niceyaml.NewPathBuilder().Child("line3").Build() },
 			errMsg:       "middle error",
 			sourceLines:  1,
@@ -317,8 +339,10 @@ func TestErrorAnnotation(t *testing.T) {
 func TestWithPrinter(t *testing.T) {
 	t.Parallel()
 
-	source := `key: value
-foo: bar`
+	source := yamltest.Input(`
+		key: value
+		foo: bar
+	`)
 	tokens := lexer.Tokenize(source)
 
 	t.Run("custom printer is used for error formatting", func(t *testing.T) {
@@ -371,9 +395,11 @@ func TestError_RootLevelArrayPath(t *testing.T) {
 
 	// Path to array element at root level - parent is SequenceNode, not MappingValueNode.
 	// This tests findKeyToken returning nil when parent is not a MappingValueNode.
-	source := `- first
-- second
-- third`
+	source := yamltest.Input(`
+		- first
+		- second
+		- third
+	`)
 	tokens := lexer.Tokenize(source)
 
 	err := niceyaml.NewError(
@@ -394,8 +420,10 @@ func TestError_DocumentRootPath(t *testing.T) {
 
 	// Path to document root - parent is nil.
 	// This tests findKeyToken returning nil when there's no parent.
-	source := `key: value
-another: line`
+	source := yamltest.Input(`
+		key: value
+		another: line
+	`)
 	tokens := lexer.Tokenize(source)
 
 	err := niceyaml.NewError(
@@ -491,19 +519,29 @@ func TestError_WithFile(t *testing.T) {
 		wantContains []string
 	}{
 		"basic path with file": {
-			source:       "foo: bar\nkey: value",
+			source: yamltest.Input(`
+				foo: bar
+				key: value
+			`),
 			pathBuilder:  func() *yaml.Path { return niceyaml.NewPathBuilder().Child("key").Build() },
 			errMsg:       "file error",
 			wantContains: []string{"[2:1]", "file error"},
 		},
 		"nested path with file": {
-			source:       "outer:\n  inner: value",
+			source: yamltest.Input(`
+				outer:
+				  inner: value
+			`),
 			pathBuilder:  func() *yaml.Path { return niceyaml.NewPathBuilder().Child("outer").Child("inner").Build() },
 			errMsg:       "nested file error",
 			wantContains: []string{"[2:3]", "nested file error"},
 		},
 		"array element with file": {
-			source:       "items:\n  - first\n  - second",
+			source: yamltest.Input(`
+				items:
+				  - first
+				  - second
+			`),
 			pathBuilder:  func() *yaml.Path { return niceyaml.NewPathBuilder().Child("items").Index(1).Build() },
 			errMsg:       "array file error",
 			wantContains: []string{"array file error", "second"},

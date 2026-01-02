@@ -12,6 +12,7 @@ import (
 	"github.com/macropower/niceyaml"
 	"github.com/macropower/niceyaml/line"
 	"github.com/macropower/niceyaml/position"
+	"github.com/macropower/niceyaml/yamltest"
 )
 
 func TestTokens_String_Annotation(t *testing.T) {
@@ -31,9 +32,10 @@ func TestTokens_String_Annotation(t *testing.T) {
    1 | ^ error`,
 		},
 		"multiple lines one annotation": {
-			input: `first: 1
-second: 2
-`,
+			input: yamltest.Input(`
+				first: 1
+				second: 2
+			`),
 			annotations: map[int]line.Annotation{
 				1: {Content: "here", Column: 1},
 			},
@@ -42,10 +44,11 @@ second: 2
    2 | ^ here`,
 		},
 		"multiple lines multiple annotations": {
-			input: `first: 1
-second: 2
-third: 3
-`,
+			input: yamltest.Input(`
+				first: 1
+				second: 2
+				third: 3
+			`),
 			annotations: map[int]line.Annotation{
 				0: {Content: "start", Column: 1},
 				2: {Content: "end", Column: 1},
@@ -57,11 +60,12 @@ third: 3
    3 | ^ end`,
 		},
 		"mixed annotated and non-annotated": {
-			input: `a: 1
-b: 2
-c: 3
-d: 4
-`,
+			input: yamltest.Input(`
+				a: 1
+				b: 2
+				c: 3
+				d: 4
+			`),
 			annotations: map[int]line.Annotation{
 				1: {Content: "middle", Column: 3},
 			},
@@ -324,10 +328,11 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 	t.Run("literal block content - returns all joined lines", func(t *testing.T) {
 		t.Parallel()
 
-		input := `key: |
-  line1
-  line2
-`
+		input := yamltest.Input(`
+			key: |
+			  line1
+			  line2
+		`)
 		tks := lexer.Tokenize(input)
 		result := niceyaml.NewSourceFromTokens(tks, niceyaml.WithName("test"))
 
@@ -411,10 +416,11 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 	t.Run("query indicator line of literal block - returns range", func(t *testing.T) {
 		t.Parallel()
 
-		input := `key: |
-  line1
-  line2
-`
+		input := yamltest.Input(`
+			key: |
+			  line1
+			  line2
+		`)
 		tks := lexer.Tokenize(input)
 		result := niceyaml.NewSourceFromTokens(tks, niceyaml.WithName("test"))
 
@@ -434,10 +440,11 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 	t.Run("query from last line of literal block", func(t *testing.T) {
 		t.Parallel()
 
-		input := `key: |
-  line1
-  line2
-`
+		input := yamltest.Input(`
+			key: |
+			  line1
+			  line2
+		`)
 		tks := lexer.Tokenize(input)
 		result := niceyaml.NewSourceFromTokens(tks, niceyaml.WithName("test"))
 
@@ -477,10 +484,11 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 	t.Run("column outside token range - returns nil", func(t *testing.T) {
 		t.Parallel()
 
-		input := `key: |
-  line1
-  line2
-`
+		input := yamltest.Input(`
+			key: |
+			  line1
+			  line2
+		`)
 		tks := lexer.Tokenize(input)
 		result := niceyaml.NewSourceFromTokens(tks, niceyaml.WithName("test"))
 
@@ -494,11 +502,12 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 	t.Run("three-line literal block", func(t *testing.T) {
 		t.Parallel()
 
-		input := `key: |
-  line1
-  line2
-  line3
-`
+		input := yamltest.Input(`
+			key: |
+			  line1
+			  line2
+			  line3
+		`)
 		tks := lexer.Tokenize(input)
 		result := niceyaml.NewSourceFromTokens(tks, niceyaml.WithName("test"))
 
@@ -522,10 +531,11 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 	t.Run("folded block", func(t *testing.T) {
 		t.Parallel()
 
-		input := `key: >
-  line1
-  line2
-`
+		input := yamltest.Input(`
+			key: >
+			  line1
+			  line2
+		`)
 		tks := lexer.Tokenize(input)
 		result := niceyaml.NewSourceFromTokens(tks, niceyaml.WithName("test"))
 
@@ -549,9 +559,10 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 	t.Run("multiple positions - combined results", func(t *testing.T) {
 		t.Parallel()
 
-		input := `first: 1
-second: 2
-`
+		input := yamltest.Input(`
+			first: 1
+			second: 2
+		`)
 		tks := lexer.Tokenize(input)
 		result := niceyaml.NewSourceFromTokens(tks, niceyaml.WithName("test"))
 
@@ -611,10 +622,11 @@ second: 2
 	t.Run("multiple positions - joined lines deduplication", func(t *testing.T) {
 		t.Parallel()
 
-		input := `key: |
-  line1
-  line2
-`
+		input := yamltest.Input(`
+			key: |
+			  line1
+			  line2
+		`)
 		tks := lexer.Tokenize(input)
 		result := niceyaml.NewSourceFromTokens(tks, niceyaml.WithName("test"))
 
@@ -784,10 +796,11 @@ func TestSource_Validate(t *testing.T) {
 			input: "a: 1\nb: 2\nc: 3\n",
 		},
 		"literal block source": {
-			input: `key: |
-  line1
-  line2
-`,
+			input: yamltest.Input(`
+				key: |
+				  line1
+				  line2
+			`),
 		},
 	}
 
@@ -818,24 +831,27 @@ func TestSource_Parse(t *testing.T) {
 				wantDocCount: 1,
 			},
 			"nested map": {
-				input: `parent:
-  child: value
-`,
+				input: yamltest.Input(`
+					parent:
+					  child: value
+				`),
 				wantDocCount: 1,
 			},
 			"multiple documents": {
-				input: `---
-doc1: value1
----
-doc2: value2
-`,
+				input: yamltest.Input(`
+					---
+					doc1: value1
+					---
+					doc2: value2
+				`),
 				wantDocCount: 2,
 			},
 			"list": {
-				input: `items:
-  - one
-  - two
-`,
+				input: yamltest.Input(`
+					items:
+					  - one
+					  - two
+				`),
 				wantDocCount: 1,
 			},
 		}
@@ -870,19 +886,10 @@ doc2: value2
 		t.Parallel()
 
 		// Create invalid YAML by manually constructing malformed tokens.
+		tkb := yamltest.NewTokenBuilder().Type(token.MappingValueType).Value(":").PositionLine(1)
 		tks := token.Tokens{}
-		tks.Add(&token.Token{
-			Type:     token.MappingValueType,
-			Origin:   ":",
-			Value:    ":",
-			Position: &token.Position{Line: 1, Column: 1},
-		})
-		tks.Add(&token.Token{
-			Type:     token.MappingValueType,
-			Origin:   ":\n",
-			Value:    ":",
-			Position: &token.Position{Line: 1, Column: 2},
-		})
+		tks.Add(tkb.Clone().Origin(":").PositionColumn(1).Build())
+		tks.Add(tkb.Clone().Origin(":\n").PositionColumn(2).Build())
 
 		source := niceyaml.NewSourceFromTokens(tks)
 		file, err := source.Parse()

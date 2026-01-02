@@ -7,6 +7,7 @@ import (
 
 	"github.com/macropower/niceyaml"
 	"github.com/macropower/niceyaml/line"
+	"github.com/macropower/niceyaml/yamltest"
 )
 
 func TestFullDiff_Lines(t *testing.T) {
@@ -64,22 +65,24 @@ func TestFullDiff_Lines(t *testing.T) {
    3 | third: 3`,
 		},
 		"change with surrounding context": {
-			before: `header: value
-unchanged1: foo
-unchanged2: bar
-middle: old
-unchanged3: baz
-unchanged4: qux
-footer: end
-`,
-			after: `header: value
-unchanged1: foo
-unchanged2: bar
-middle: new
-unchanged3: baz
-unchanged4: qux
-footer: end
-`,
+			before: yamltest.Input(`
+				header: value
+				unchanged1: foo
+				unchanged2: bar
+				middle: old
+				unchanged3: baz
+				unchanged4: qux
+				footer: end
+			`),
+			after: yamltest.Input(`
+				header: value
+				unchanged1: foo
+				unchanged2: bar
+				middle: new
+				unchanged3: baz
+				unchanged4: qux
+				footer: end
+			`),
 			want: `   1 | header: value
    2 | unchanged1: foo
    3 | unchanged2: bar
@@ -90,18 +93,20 @@ footer: end
    7 | footer: end`,
 		},
 		"multiple scattered changes": {
-			before: `first: 1
-second: 2
-third: 3
-fourth: 4
-fifth: 5
-`,
-			after: `first: changed1
-second: 2
-third: changed3
-fourth: 4
-fifth: changed5
-`,
+			before: yamltest.Input(`
+				first: 1
+				second: 2
+				third: 3
+				fourth: 4
+				fifth: 5
+			`),
+			after: yamltest.Input(`
+				first: changed1
+				second: 2
+				third: changed3
+				fourth: 4
+				fifth: changed5
+			`),
 			want: `   1 | first: 1
    1 | first: changed1
    2 | second: 2
@@ -112,15 +117,17 @@ fifth: changed5
    5 | fifth: changed5`,
 		},
 		"consecutive insertions": {
-			before: `before: 1
-after: 2
-`,
-			after: `before: 1
-new1: a
-new2: b
-new3: c
-after: 2
-`,
+			before: yamltest.Input(`
+				before: 1
+				after: 2
+			`),
+			after: yamltest.Input(`
+				before: 1
+				new1: a
+				new2: b
+				new3: c
+				after: 2
+			`),
 			want: `   1 | before: 1
    2 | new1: a
    3 | new2: b
@@ -128,15 +135,17 @@ after: 2
    5 | after: 2`,
 		},
 		"consecutive deletions": {
-			before: `before: 1
-old1: a
-old2: b
-old3: c
-after: 2
-`,
-			after: `before: 1
-after: 2
-`,
+			before: yamltest.Input(`
+				before: 1
+				old1: a
+				old2: b
+				old3: c
+				after: 2
+			`),
+			after: yamltest.Input(`
+				before: 1
+				after: 2
+			`),
 			want: `   1 | before: 1
    2 | old1: a
    3 | old2: b
@@ -144,22 +153,24 @@ after: 2
    2 | after: 2`,
 		},
 		"nested yaml structure": {
-			before: `metadata:
-  name: myapp
-  namespace: default
-spec:
-  replicas: 3
-  template:
-    image: nginx:1.19
-`,
-			after: `metadata:
-  name: myapp
-  namespace: production
-spec:
-  replicas: 5
-  template:
-    image: nginx:1.21
-`,
+			before: yamltest.Input(`
+				metadata:
+				  name: myapp
+				  namespace: default
+				spec:
+				  replicas: 3
+				  template:
+				    image: nginx:1.19
+			`),
+			after: yamltest.Input(`
+				metadata:
+				  name: myapp
+				  namespace: production
+				spec:
+				  replicas: 5
+				  template:
+				    image: nginx:1.21
+			`),
 			want: `   1 | metadata:
    2 |   name: myapp
    3 |   namespace: default
@@ -172,16 +183,18 @@ spec:
    7 |     image: nginx:1.21`,
 		},
 		"change at beginning": {
-			before: `first: old
-second: 2
-third: 3
-fourth: 4
-`,
-			after: `first: new
-second: 2
-third: 3
-fourth: 4
-`,
+			before: yamltest.Input(`
+				first: old
+				second: 2
+				third: 3
+				fourth: 4
+			`),
+			after: yamltest.Input(`
+				first: new
+				second: 2
+				third: 3
+				fourth: 4
+			`),
 			want: `   1 | first: old
    1 | first: new
    2 | second: 2
@@ -189,16 +202,18 @@ fourth: 4
    4 | fourth: 4`,
 		},
 		"change at end": {
-			before: `first: 1
-second: 2
-third: 3
-fourth: old
-`,
-			after: `first: 1
-second: 2
-third: 3
-fourth: new
-`,
+			before: yamltest.Input(`
+				first: 1
+				second: 2
+				third: 3
+				fourth: old
+			`),
+			after: yamltest.Input(`
+				first: 1
+				second: 2
+				third: 3
+				fourth: new
+			`),
 			want: `   1 | first: 1
    2 | second: 2
    3 | third: 3
@@ -206,18 +221,20 @@ fourth: new
    4 | fourth: new`,
 		},
 		"yaml with list items": {
-			before: `items:
-  - name: item1
-    value: 100
-  - name: item2
-    value: 200
-`,
-			after: `items:
-  - name: item1
-    value: 150
-  - name: item2
-    value: 200
-`,
+			before: yamltest.Input(`
+				items:
+				  - name: item1
+				    value: 100
+				  - name: item2
+				    value: 200
+			`),
+			after: yamltest.Input(`
+				items:
+				  - name: item1
+				    value: 150
+				  - name: item2
+				    value: 200
+			`),
 			want: `   1 | items:
    2 |   - name: item1
    3 |     value: 100
@@ -226,16 +243,18 @@ fourth: new
    5 |     value: 200`,
 		},
 		"insert and delete in same region": {
-			before: `keep1: a
-delete1: x
-delete2: y
-keep2: b
-`,
-			after: `keep1: a
-insert1: p
-insert2: q
-keep2: b
-`,
+			before: yamltest.Input(`
+				keep1: a
+				delete1: x
+				delete2: y
+				keep2: b
+			`),
+			after: yamltest.Input(`
+				keep1: a
+				insert1: p
+				insert2: q
+				keep2: b
+			`),
 			want: `   1 | keep1: a
    2 | delete1: x
    3 | delete2: y
@@ -244,38 +263,40 @@ keep2: b
    4 | keep2: b`,
 		},
 		"large context around small change": {
-			before: `line1: 1
-line2: 2
-line3: 3
-line4: 4
-line5: 5
-line6: 6
-line7: 7
-line8: 8
-line9: 9
-line10: old
-line11: 11
-line12: 12
-line13: 13
-line14: 14
-line15: 15
-`,
-			after: `line1: 1
-line2: 2
-line3: 3
-line4: 4
-line5: 5
-line6: 6
-line7: 7
-line8: 8
-line9: 9
-line10: new
-line11: 11
-line12: 12
-line13: 13
-line14: 14
-line15: 15
-`,
+			before: yamltest.Input(`
+				line1: 1
+				line2: 2
+				line3: 3
+				line4: 4
+				line5: 5
+				line6: 6
+				line7: 7
+				line8: 8
+				line9: 9
+				line10: old
+				line11: 11
+				line12: 12
+				line13: 13
+				line14: 14
+				line15: 15
+			`),
+			after: yamltest.Input(`
+				line1: 1
+				line2: 2
+				line3: 3
+				line4: 4
+				line5: 5
+				line6: 6
+				line7: 7
+				line8: 8
+				line9: 9
+				line10: new
+				line11: 11
+				line12: 12
+				line13: 13
+				line14: 14
+				line15: 15
+			`),
 			want: `   1 | line1: 1
    2 | line2: 2
    3 | line3: 3
@@ -349,14 +370,16 @@ func TestFullDiff_Lines_Flags(t *testing.T) {
 			},
 		},
 		"only changed lines get flags": {
-			before: `first: 1
-second: 2
-third: 3
-`,
-			after: `first: 1
-second: changed
-third: 3
-`,
+			before: yamltest.Input(`
+				first: 1
+				second: 2
+				third: 3
+			`),
+			after: yamltest.Input(`
+				first: 1
+				second: changed
+				third: 3
+			`),
 			wantFlaggedCount: 2,
 			wantFlags: map[int]line.Flag{
 				0: line.FlagDefault,
@@ -402,31 +425,29 @@ func TestSummaryDiff_Lines(t *testing.T) {
 	t.Run("context limits output", func(t *testing.T) {
 		t.Parallel()
 
-		before := `line1: 1
-line2: 2
-line3: 3
-line4: 4
-line5: old
-line6: 6
-line7: 7
-line8: 8
-line9: 9
-`
-		after := `line1: 1
-line2: 2
-line3: 3
-line4: 4
-line5: new
-line6: 6
-line7: 7
-line8: 8
-line9: 9
-`
-		want := `   4 | line4: 4
-   4 | ^ @@ -4,3 +4,3 @@
-   5 | line5: old
-   5 | line5: new
-   6 | line6: 6`
+		before := yamltest.Input(`
+			line1: 1
+			line2: 2
+			line3: 3
+			line4: 4
+			line5: old
+			line6: 6
+			line7: 7
+			line8: 8
+			line9: 9
+		`)
+		after := yamltest.Input(`
+			line1: 1
+			line2: 2
+			line3: 3
+			line4: 4
+			line5: new
+			line6: 6
+			line7: 7
+			line8: 8
+			line9: 9
+		`)
+		want := "   4 | line4: 4\n   4 | ^ @@ -4,3 +4,3 @@\n   5 | line5: old\n   5 | line5: new\n   6 | line6: 6"
 
 		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
 		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
@@ -446,21 +467,21 @@ line9: 9
 	t.Run("context 0 shows only changes", func(t *testing.T) {
 		t.Parallel()
 
-		before := `line1: 1
-line2: 2
-line3: old
-line4: 4
-line5: 5
-`
-		after := `line1: 1
-line2: 2
-line3: new
-line4: 4
-line5: 5
-`
-		want := `   3 | line3: old
-   3 | ^ @@ -3 +3 @@
-   3 | line3: new`
+		before := yamltest.Input(`
+			line1: 1
+			line2: 2
+			line3: old
+			line4: 4
+			line5: 5
+		`)
+		after := yamltest.Input(`
+			line1: 1
+			line2: 2
+			line3: new
+			line4: 4
+			line5: 5
+		`)
+		want := "   3 | line3: old\n   3 | ^ @@ -3 +3 @@\n   3 | line3: new"
 
 		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
 		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
@@ -481,19 +502,17 @@ line5: 5
 	t.Run("hunk header in annotation", func(t *testing.T) {
 		t.Parallel()
 
-		before := `first: 1
-second: 2
-third: 3
-`
-		after := `first: 1
-second: changed
-third: 3
-`
-		want := `   1 | first: 1
-   1 | ^ @@ -1,3 +1,3 @@
-   2 | second: 2
-   2 | second: changed
-   3 | third: 3`
+		before := yamltest.Input(`
+			first: 1
+			second: 2
+			third: 3
+		`)
+		after := yamltest.Input(`
+			first: 1
+			second: changed
+			third: 3
+		`)
+		want := "   1 | first: 1\n   1 | ^ @@ -1,3 +1,3 @@\n   2 | second: 2\n   2 | second: changed\n   3 | third: 3"
 
 		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
 		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
@@ -518,34 +537,29 @@ third: 3
 	t.Run("multiple hunks have separate annotations", func(t *testing.T) {
 		t.Parallel()
 
-		before := `line1: old1
-line2: 2
-line3: 3
-line4: 4
-line5: 5
-line6: 6
-line7: 7
-line8: 8
-line9: old9
-`
-		after := `line1: new1
-line2: 2
-line3: 3
-line4: 4
-line5: 5
-line6: 6
-line7: 7
-line8: 8
-line9: new9
-`
-		want := `   1 | line1: old1
-   1 | ^ @@ -1,2 +1,2 @@
-   1 | line1: new1
-   2 | line2: 2
-   8 | line8: 8
-   8 | ^ @@ -8,2 +8,2 @@
-   9 | line9: old9
-   9 | line9: new9`
+		before := yamltest.Input(`
+			line1: old1
+			line2: 2
+			line3: 3
+			line4: 4
+			line5: 5
+			line6: 6
+			line7: 7
+			line8: 8
+			line9: old9
+		`)
+		after := yamltest.Input(`
+			line1: new1
+			line2: 2
+			line3: 3
+			line4: 4
+			line5: 5
+			line6: 6
+			line7: 7
+			line8: 8
+			line9: new9
+		`)
+		want := "   1 | line1: old1\n   1 | ^ @@ -1,2 +1,2 @@\n   1 | line1: new1\n   2 | line2: 2\n   8 | line8: 8\n   8 | ^ @@ -8,2 +8,2 @@\n   9 | line9: old9\n   9 | line9: new9"
 
 		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
 		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
@@ -640,17 +654,17 @@ line9: new9
 	t.Run("negative context treated as zero", func(t *testing.T) {
 		t.Parallel()
 
-		before := `line1: 1
-line2: old
-line3: 3
-`
-		after := `line1: 1
-line2: new
-line3: 3
-`
-		want := `   2 | line2: old
-   2 | ^ @@ -2 +2 @@
-   2 | line2: new`
+		before := yamltest.Input(`
+			line1: 1
+			line2: old
+			line3: 3
+		`)
+		after := yamltest.Input(`
+			line1: 1
+			line2: new
+			line3: 3
+		`)
+		want := "   2 | line2: old\n   2 | ^ @@ -2 +2 @@\n   2 | line2: new"
 
 		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
 		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))

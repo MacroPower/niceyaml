@@ -10,29 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/macropower/niceyaml"
+	"github.com/macropower/niceyaml/yamltest"
 )
-
-// mockValidator implements niceyaml.Validator for testing.
-type mockValidator struct {
-	failErr    error
-	shouldFail bool
-}
-
-func (v *mockValidator) Validate(_ any) error {
-	if v.shouldFail {
-		return v.failErr
-	}
-
-	return nil
-}
-
-func passingValidator() *mockValidator {
-	return &mockValidator{shouldFail: false}
-}
-
-func failingValidator(err error) *mockValidator {
-	return &mockValidator{shouldFail: true, failErr: err}
-}
 
 func TestNewDecoder(t *testing.T) {
 	t.Parallel()
@@ -77,19 +56,23 @@ func TestDecoder_Count(t *testing.T) {
 			want:  1,
 		},
 		"two documents": {
-			input: `---
-key1: value1
----
-key2: value2`,
+			input: yamltest.Input(`
+				---
+				key1: value1
+				---
+				key2: value2
+			`),
 			want: 2,
 		},
 		"three documents": {
-			input: `---
-a: 1
----
-b: 2
----
-c: 3`,
+			input: yamltest.Input(`
+				---
+				a: 1
+				---
+				b: 2
+				---
+				c: 3
+			`),
 			want: 3,
 		},
 	}
@@ -126,17 +109,21 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 			wantFound: []bool{true},
 		},
 		"nested key": {
-			input: `parent:
-  child: nested_value`,
+			input: yamltest.Input(`
+				parent:
+				  child: nested_value
+			`),
 			path:      func() *yaml.Path { return niceyaml.NewPathBuilder().Child("parent").Child("child").Build() },
 			wantVals:  []string{"nested_value"},
 			wantFound: []bool{true},
 		},
 		"array index": {
-			input: `items:
-  - first
-  - second
-  - third`,
+			input: yamltest.Input(`
+				items:
+				  - first
+				  - second
+				  - third
+			`),
 			path:      func() *yaml.Path { return niceyaml.NewPathBuilder().Child("items").Index(1).Build() },
 			wantVals:  []string{"second"},
 			wantFound: []bool{true},
@@ -148,10 +135,12 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 			wantFound: []bool{false},
 		},
 		"multiple documents": {
-			input: `---
-first: 1
----
-second: 2`,
+			input: yamltest.Input(`
+				---
+				first: 1
+				---
+				second: 2
+			`),
 			path:      func() *yaml.Path { return niceyaml.NewPathBuilder().Build() },
 			wantVals:  []string{"first: 1", "second: 2"},
 			wantFound: []bool{true, true},
@@ -237,8 +226,10 @@ func TestDocumentDecoder_Decode(t *testing.T) {
 	t.Run("decode to struct", func(t *testing.T) {
 		t.Parallel()
 
-		input := `name: test
-value: 42`
+		input := yamltest.Input(`
+			name: test
+			value: 42
+		`)
 		source := niceyaml.NewSourceFromString(input)
 		file, err := source.Parse()
 		require.NoError(t, err)
@@ -256,9 +247,11 @@ value: 42`
 	t.Run("decode to slice", func(t *testing.T) {
 		t.Parallel()
 
-		input := `- one
-- two
-- three`
+		input := yamltest.Input(`
+			- one
+			- two
+			- three
+		`)
 		source := niceyaml.NewSourceFromString(input)
 		file, err := source.Parse()
 		require.NoError(t, err)
@@ -276,12 +269,14 @@ value: 42`
 	t.Run("decode multiple documents", func(t *testing.T) {
 		t.Parallel()
 
-		input := `---
-name: first
-value: 1
----
-name: second
-value: 2`
+		input := yamltest.Input(`
+			---
+			name: first
+			value: 1
+			---
+			name: second
+			value: 2
+		`)
 		source := niceyaml.NewSourceFromString(input)
 		file, err := source.Parse()
 		require.NoError(t, err)
@@ -362,7 +357,7 @@ func TestDocumentDecoder_Validate(t *testing.T) {
 
 		d := niceyaml.NewDecoder(file)
 		for _, dd := range d.Documents() {
-			err := dd.Validate(passingValidator())
+			err := dd.Validate(yamltest.NewPassingValidator())
 			require.NoError(t, err)
 		}
 	})
@@ -376,7 +371,7 @@ func TestDocumentDecoder_Validate(t *testing.T) {
 
 		d := niceyaml.NewDecoder(file)
 		for _, dd := range d.Documents() {
-			err := dd.Validate(failingValidator(errors.New("validation failed")))
+			err := dd.Validate(yamltest.NewFailingValidator(errors.New("validation failed")))
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "validation failed")
 		}
@@ -395,7 +390,7 @@ func TestDocumentDecoder_ValidateContext(t *testing.T) {
 
 		d := niceyaml.NewDecoder(file)
 		for _, dd := range d.Documents() {
-			err := dd.ValidateContext(t.Context(), passingValidator())
+			err := dd.ValidateContext(t.Context(), yamltest.NewPassingValidator())
 			require.NoError(t, err)
 		}
 	})
@@ -409,7 +404,7 @@ func TestDocumentDecoder_ValidateContext(t *testing.T) {
 
 		d := niceyaml.NewDecoder(file)
 		for _, dd := range d.Documents() {
-			err := dd.ValidateContext(t.Context(), failingValidator(errors.New("invalid")))
+			err := dd.ValidateContext(t.Context(), yamltest.NewFailingValidator(errors.New("invalid")))
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "invalid document")
 		}
@@ -427,8 +422,10 @@ func TestDocumentDecoder_ValidateDecode(t *testing.T) {
 	t.Run("valid and decode", func(t *testing.T) {
 		t.Parallel()
 
-		input := `name: test
-value: 42`
+		input := yamltest.Input(`
+			name: test
+			value: 42
+		`)
 		source := niceyaml.NewSourceFromString(input)
 		file, err := source.Parse()
 		require.NoError(t, err)
@@ -437,7 +434,7 @@ value: 42`
 		for _, dd := range d.Documents() {
 			var result config
 
-			err := dd.ValidateDecode(&result, passingValidator())
+			err := dd.ValidateDecode(&result, yamltest.NewPassingValidator())
 			require.NoError(t, err)
 			assert.Equal(t, config{Name: "test", Value: 42}, result)
 		}
@@ -446,8 +443,10 @@ value: 42`
 	t.Run("validation fails - no decode", func(t *testing.T) {
 		t.Parallel()
 
-		input := `name: test
-value: 42`
+		input := yamltest.Input(`
+			name: test
+			value: 42
+		`)
 		source := niceyaml.NewSourceFromString(input)
 		file, err := source.Parse()
 		require.NoError(t, err)
@@ -456,7 +455,7 @@ value: 42`
 		for _, dd := range d.Documents() {
 			var result config
 
-			err := dd.ValidateDecode(&result, failingValidator(errors.New("not allowed")))
+			err := dd.ValidateDecode(&result, yamltest.NewFailingValidator(errors.New("not allowed")))
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "not allowed")
 		}
@@ -481,7 +480,7 @@ func TestDocumentDecoder_ValidateDecodeContext(t *testing.T) {
 		for _, dd := range d.Documents() {
 			var result config
 
-			err := dd.ValidateDecodeContext(t.Context(), &result, passingValidator())
+			err := dd.ValidateDecodeContext(t.Context(), &result, yamltest.NewPassingValidator())
 
 			require.NoError(t, err)
 			assert.Equal(t, "contextual", result.Name)
@@ -499,7 +498,7 @@ func TestDocumentDecoder_ValidateDecodeContext(t *testing.T) {
 		for _, dd := range d.Documents() {
 			var result config
 
-			err := dd.ValidateDecodeContext(t.Context(), &result, failingValidator(errors.New("blocked")))
+			err := dd.ValidateDecodeContext(t.Context(), &result, yamltest.NewFailingValidator(errors.New("blocked")))
 
 			require.Error(t, err)
 			assert.Empty(t, result.Name)
@@ -578,7 +577,7 @@ func TestDocumentDecoder_ValidateDecodeContext_DecodeError(t *testing.T) {
 		var result strict
 
 		// The validator passes, but decode will fail due to type mismatch.
-		err := dd.ValidateDecodeContext(t.Context(), &result, passingValidator())
+		err := dd.ValidateDecodeContext(t.Context(), &result, yamltest.NewPassingValidator())
 
 		require.Error(t, err)
 
@@ -603,7 +602,7 @@ func TestDocumentDecoder_ValidateContext_ValidationWithNonErrorType(t *testing.T
 
 	d := niceyaml.NewDecoder(file)
 	for _, dd := range d.Documents() {
-		err := dd.ValidateContext(t.Context(), failingValidator(pathErr))
+		err := dd.ValidateContext(t.Context(), yamltest.NewFailingValidator(pathErr))
 
 		require.Error(t, err)
 		// The error should be wrapped with file information.
@@ -661,12 +660,14 @@ func TestDecoder_Documents(t *testing.T) {
 	t.Run("iterates over multiple documents", func(t *testing.T) {
 		t.Parallel()
 
-		input := `---
-a: 1
----
-b: 2
----
-c: 3`
+		input := yamltest.Input(`
+			---
+			a: 1
+			---
+			b: 2
+			---
+			c: 3
+		`)
 		source := niceyaml.NewSourceFromString(input)
 		file, err := source.Parse()
 		require.NoError(t, err)
@@ -687,12 +688,14 @@ c: 3`
 	t.Run("early break stops iteration", func(t *testing.T) {
 		t.Parallel()
 
-		input := `---
-a: 1
----
-b: 2
----
-c: 3`
+		input := yamltest.Input(`
+			---
+			a: 1
+			---
+			b: 2
+			---
+			c: 3
+		`)
 		source := niceyaml.NewSourceFromString(input)
 		file, err := source.Parse()
 		require.NoError(t, err)

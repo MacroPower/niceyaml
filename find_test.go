@@ -8,16 +8,8 @@ import (
 
 	"github.com/macropower/niceyaml"
 	"github.com/macropower/niceyaml/position"
+	"github.com/macropower/niceyaml/yamltest"
 )
-
-// testNormalizer wraps a function to implement [niceyaml.Normalizer].
-type testNormalizer struct {
-	fn func(string) string
-}
-
-func (n testNormalizer) Normalize(in string) string {
-	return n.fn(in)
-}
 
 func TestFinder_Find(t *testing.T) {
 	t.Parallel()
@@ -136,7 +128,7 @@ func TestFinder_Find(t *testing.T) {
 		"case insensitive with normalizer": {
 			input:      "key: VALUE",
 			search:     "value",
-			normalizer: testNormalizer{fn: strings.ToLower},
+			normalizer: yamltest.NewCustomNormalizer(strings.ToLower),
 			want: []position.Range{
 				position.NewRange(
 					position.New(0, 5),

@@ -12,6 +12,7 @@ import (
 	"github.com/macropower/niceyaml"
 	"github.com/macropower/niceyaml/line"
 	"github.com/macropower/niceyaml/position"
+	"github.com/macropower/niceyaml/yamltest"
 )
 
 // testHighlightStyle returns a style that wraps content in brackets for easy verification.
@@ -70,9 +71,10 @@ func printDiffSummary(p *niceyaml.Printer, before, after string, context int) st
 func TestPrinter_Anchor(t *testing.T) {
 	t.Parallel()
 
-	input := `
-anchor: &x 1
-alias: *x`
+	input := yamltest.Input(`
+		anchor: &x 1
+		alias: *x
+	`)
 	tks := lexer.Tokenize(input)
 
 	p := testPrinter()
@@ -182,10 +184,12 @@ func TestPrinter_PrintTokens_EmptyFile(t *testing.T) {
 func TestNewPrinter(t *testing.T) {
 	t.Parallel()
 
-	input := `key: value
-number: 42
-bool: true
-# comment`
+	input := yamltest.Input(`
+		key: value
+		number: 42
+		bool: true
+		# comment
+	`)
 
 	tks := lexer.Tokenize(input)
 	p := niceyaml.NewPrinter()
@@ -280,11 +284,13 @@ func TestPrinter_LineNumbers(t *testing.T) {
 func TestPrinter_PrintSlice(t *testing.T) {
 	t.Parallel()
 
-	input := `first: 1
-second: 2
-third: 3
-fourth: 4
-fifth: 5`
+	input := yamltest.Input(`
+		first: 1
+		second: 2
+		third: 3
+		fourth: 4
+		fifth: 5
+	`)
 
 	tcs := map[string]struct {
 		want    string
@@ -345,11 +351,13 @@ fourth: 4`,
 func TestPrinter_PrintSlice_WithLineNumbers(t *testing.T) {
 	t.Parallel()
 
-	input := `first: 1
-second: 2
-third: 3
-fourth: 4
-fifth: 5`
+	input := yamltest.Input(`
+		first: 1
+		second: 2
+		third: 3
+		fourth: 4
+		fifth: 5
+	`)
 
 	tcs := map[string]struct {
 		want    string
