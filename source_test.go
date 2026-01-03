@@ -28,8 +28,10 @@ func TestTokens_String_Annotation(t *testing.T) {
 			annotations: map[int]line.Annotation{
 				0: {Content: "error", Column: 1},
 			},
-			want: `   1 | key: value
-   1 | ^ error`,
+			want: yamltest.JoinLF(
+				"   1 | key: value",
+				"   1 | ^ error",
+			),
 		},
 		"multiple lines one annotation": {
 			input: yamltest.Input(`
@@ -39,9 +41,11 @@ func TestTokens_String_Annotation(t *testing.T) {
 			annotations: map[int]line.Annotation{
 				1: {Content: "here", Column: 1},
 			},
-			want: `   1 | first: 1
-   2 | second: 2
-   2 | ^ here`,
+			want: yamltest.JoinLF(
+				"   1 | first: 1",
+				"   2 | second: 2",
+				"   2 | ^ here",
+			),
 		},
 		"multiple lines multiple annotations": {
 			input: yamltest.Input(`
@@ -53,11 +57,13 @@ func TestTokens_String_Annotation(t *testing.T) {
 				0: {Content: "start", Column: 1},
 				2: {Content: "end", Column: 1},
 			},
-			want: `   1 | first: 1
-   1 | ^ start
-   2 | second: 2
-   3 | third: 3
-   3 | ^ end`,
+			want: yamltest.JoinLF(
+				"   1 | first: 1",
+				"   1 | ^ start",
+				"   2 | second: 2",
+				"   3 | third: 3",
+				"   3 | ^ end",
+			),
 		},
 		"mixed annotated and non-annotated": {
 			input: yamltest.Input(`
@@ -69,11 +75,13 @@ func TestTokens_String_Annotation(t *testing.T) {
 			annotations: map[int]line.Annotation{
 				1: {Content: "middle", Column: 3},
 			},
-			want: `   1 | a: 1
-   2 | b: 2
-   2 |   ^ middle
-   3 | c: 3
-   4 | d: 4`,
+			want: yamltest.JoinLF(
+				"   1 | a: 1",
+				"   2 | b: 2",
+				"   2 |   ^ middle",
+				"   3 | c: 3",
+				"   4 | d: 4",
+			),
 		},
 	}
 
@@ -756,7 +764,11 @@ func TestSource_Content(t *testing.T) {
 		},
 		"multiple lines": {
 			input: "a: 1\nb: 2\nc: 3\n",
-			want:  "a: 1\nb: 2\nc: 3",
+			want: yamltest.JoinLF(
+				"a: 1",
+				"b: 2",
+				"c: 3",
+			),
 		},
 		"empty": {
 			input: "",
@@ -764,7 +776,10 @@ func TestSource_Content(t *testing.T) {
 		},
 		"nested yaml": {
 			input: "parent:\n  child: value\n",
-			want:  "parent:\n  child: value",
+			want: yamltest.JoinLF(
+				"parent:",
+				"  child: value",
+			),
 		},
 	}
 

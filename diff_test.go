@@ -26,20 +26,26 @@ func TestFullDiff_Lines(t *testing.T) {
 		"simple insertion": {
 			before: "a: 1\n",
 			after:  "a: 1\nb: 2\n",
-			want: `   1 | a: 1
-   2 | b: 2`,
+			want: yamltest.JoinLF(
+				"   1 | a: 1",
+				"   2 | b: 2",
+			),
 		},
 		"simple deletion": {
 			before: "a: 1\nb: 2\n",
 			after:  "a: 1\n",
-			want: `   1 | a: 1
-   2 | b: 2`,
+			want: yamltest.JoinLF(
+				"   1 | a: 1",
+				"   2 | b: 2",
+			),
 		},
 		"modification": {
 			before: "key: old\n",
 			after:  "key: new\n",
-			want: `   1 | key: old
-   1 | key: new`,
+			want: yamltest.JoinLF(
+				"   1 | key: old",
+				"   1 | key: new",
+			),
 		},
 		"empty before": {
 			before: "",
@@ -59,10 +65,12 @@ func TestFullDiff_Lines(t *testing.T) {
 		"multi-line modification": {
 			before: "first: 1\nsecond: 2\nthird: 3\n",
 			after:  "first: 1\nsecond: changed\nthird: 3\n",
-			want: `   1 | first: 1
-   2 | second: 2
-   2 | second: changed
-   3 | third: 3`,
+			want: yamltest.JoinLF(
+				"   1 | first: 1",
+				"   2 | second: 2",
+				"   2 | second: changed",
+				"   3 | third: 3",
+			),
 		},
 		"change with surrounding context": {
 			before: yamltest.Input(`
@@ -83,14 +91,16 @@ func TestFullDiff_Lines(t *testing.T) {
 				unchanged4: qux
 				footer: end
 			`),
-			want: `   1 | header: value
-   2 | unchanged1: foo
-   3 | unchanged2: bar
-   4 | middle: old
-   4 | middle: new
-   5 | unchanged3: baz
-   6 | unchanged4: qux
-   7 | footer: end`,
+			want: yamltest.JoinLF(
+				"   1 | header: value",
+				"   2 | unchanged1: foo",
+				"   3 | unchanged2: bar",
+				"   4 | middle: old",
+				"   4 | middle: new",
+				"   5 | unchanged3: baz",
+				"   6 | unchanged4: qux",
+				"   7 | footer: end",
+			),
 		},
 		"multiple scattered changes": {
 			before: yamltest.Input(`
@@ -107,14 +117,16 @@ func TestFullDiff_Lines(t *testing.T) {
 				fourth: 4
 				fifth: changed5
 			`),
-			want: `   1 | first: 1
-   1 | first: changed1
-   2 | second: 2
-   3 | third: 3
-   3 | third: changed3
-   4 | fourth: 4
-   5 | fifth: 5
-   5 | fifth: changed5`,
+			want: yamltest.JoinLF(
+				"   1 | first: 1",
+				"   1 | first: changed1",
+				"   2 | second: 2",
+				"   3 | third: 3",
+				"   3 | third: changed3",
+				"   4 | fourth: 4",
+				"   5 | fifth: 5",
+				"   5 | fifth: changed5",
+			),
 		},
 		"consecutive insertions": {
 			before: yamltest.Input(`
@@ -128,11 +140,13 @@ func TestFullDiff_Lines(t *testing.T) {
 				new3: c
 				after: 2
 			`),
-			want: `   1 | before: 1
-   2 | new1: a
-   3 | new2: b
-   4 | new3: c
-   5 | after: 2`,
+			want: yamltest.JoinLF(
+				"   1 | before: 1",
+				"   2 | new1: a",
+				"   3 | new2: b",
+				"   4 | new3: c",
+				"   5 | after: 2",
+			),
 		},
 		"consecutive deletions": {
 			before: yamltest.Input(`
@@ -146,11 +160,13 @@ func TestFullDiff_Lines(t *testing.T) {
 				before: 1
 				after: 2
 			`),
-			want: `   1 | before: 1
-   2 | old1: a
-   3 | old2: b
-   4 | old3: c
-   2 | after: 2`,
+			want: yamltest.JoinLF(
+				"   1 | before: 1",
+				"   2 | old1: a",
+				"   3 | old2: b",
+				"   4 | old3: c",
+				"   2 | after: 2",
+			),
 		},
 		"nested yaml structure": {
 			before: yamltest.Input(`
@@ -171,16 +187,18 @@ func TestFullDiff_Lines(t *testing.T) {
 				  template:
 				    image: nginx:1.21
 			`),
-			want: `   1 | metadata:
-   2 |   name: myapp
-   3 |   namespace: default
-   3 |   namespace: production
-   4 | spec:
-   5 |   replicas: 3
-   5 |   replicas: 5
-   6 |   template:
-   7 |     image: nginx:1.19
-   7 |     image: nginx:1.21`,
+			want: yamltest.JoinLF(
+				"   1 | metadata:",
+				"   2 |   name: myapp",
+				"   3 |   namespace: default",
+				"   3 |   namespace: production",
+				"   4 | spec:",
+				"   5 |   replicas: 3",
+				"   5 |   replicas: 5",
+				"   6 |   template:",
+				"   7 |     image: nginx:1.19",
+				"   7 |     image: nginx:1.21",
+			),
 		},
 		"change at beginning": {
 			before: yamltest.Input(`
@@ -195,11 +213,13 @@ func TestFullDiff_Lines(t *testing.T) {
 				third: 3
 				fourth: 4
 			`),
-			want: `   1 | first: old
-   1 | first: new
-   2 | second: 2
-   3 | third: 3
-   4 | fourth: 4`,
+			want: yamltest.JoinLF(
+				"   1 | first: old",
+				"   1 | first: new",
+				"   2 | second: 2",
+				"   3 | third: 3",
+				"   4 | fourth: 4",
+			),
 		},
 		"change at end": {
 			before: yamltest.Input(`
@@ -214,11 +234,13 @@ func TestFullDiff_Lines(t *testing.T) {
 				third: 3
 				fourth: new
 			`),
-			want: `   1 | first: 1
-   2 | second: 2
-   3 | third: 3
-   4 | fourth: old
-   4 | fourth: new`,
+			want: yamltest.JoinLF(
+				"   1 | first: 1",
+				"   2 | second: 2",
+				"   3 | third: 3",
+				"   4 | fourth: old",
+				"   4 | fourth: new",
+			),
 		},
 		"yaml with list items": {
 			before: yamltest.Input(`
@@ -235,12 +257,14 @@ func TestFullDiff_Lines(t *testing.T) {
 				  - name: item2
 				    value: 200
 			`),
-			want: `   1 | items:
-   2 |   - name: item1
-   3 |     value: 100
-   3 |     value: 150
-   4 |   - name: item2
-   5 |     value: 200`,
+			want: yamltest.JoinLF(
+				"   1 | items:",
+				"   2 |   - name: item1",
+				"   3 |     value: 100",
+				"   3 |     value: 150",
+				"   4 |   - name: item2",
+				"   5 |     value: 200",
+			),
 		},
 		"insert and delete in same region": {
 			before: yamltest.Input(`
@@ -255,12 +279,14 @@ func TestFullDiff_Lines(t *testing.T) {
 				insert2: q
 				keep2: b
 			`),
-			want: `   1 | keep1: a
-   2 | delete1: x
-   3 | delete2: y
-   2 | insert1: p
-   3 | insert2: q
-   4 | keep2: b`,
+			want: yamltest.JoinLF(
+				"   1 | keep1: a",
+				"   2 | delete1: x",
+				"   3 | delete2: y",
+				"   2 | insert1: p",
+				"   3 | insert2: q",
+				"   4 | keep2: b",
+			),
 		},
 		"large context around small change": {
 			before: yamltest.Input(`
@@ -297,22 +323,24 @@ func TestFullDiff_Lines(t *testing.T) {
 				line14: 14
 				line15: 15
 			`),
-			want: `   1 | line1: 1
-   2 | line2: 2
-   3 | line3: 3
-   4 | line4: 4
-   5 | line5: 5
-   6 | line6: 6
-   7 | line7: 7
-   8 | line8: 8
-   9 | line9: 9
-  10 | line10: old
-  10 | line10: new
-  11 | line11: 11
-  12 | line12: 12
-  13 | line13: 13
-  14 | line14: 14
-  15 | line15: 15`,
+			want: yamltest.JoinLF(
+				"   1 | line1: 1",
+				"   2 | line2: 2",
+				"   3 | line3: 3",
+				"   4 | line4: 4",
+				"   5 | line5: 5",
+				"   6 | line6: 6",
+				"   7 | line7: 7",
+				"   8 | line8: 8",
+				"   9 | line9: 9",
+				"  10 | line10: old",
+				"  10 | line10: new",
+				"  11 | line11: 11",
+				"  12 | line12: 12",
+				"  13 | line13: 13",
+				"  14 | line14: 14",
+				"  15 | line15: 15",
+			),
 		},
 	}
 
@@ -447,7 +475,13 @@ func TestSummaryDiff_Lines(t *testing.T) {
 			line8: 8
 			line9: 9
 		`)
-		want := "   4 | line4: 4\n   4 | ^ @@ -4,3 +4,3 @@\n   5 | line5: old\n   5 | line5: new\n   6 | line6: 6"
+		want := yamltest.JoinLF(
+			"   4 | line4: 4",
+			"   4 | ^ @@ -4,3 +4,3 @@",
+			"   5 | line5: old",
+			"   5 | line5: new",
+			"   6 | line6: 6",
+		)
 
 		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
 		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
@@ -481,7 +515,11 @@ func TestSummaryDiff_Lines(t *testing.T) {
 			line4: 4
 			line5: 5
 		`)
-		want := "   3 | line3: old\n   3 | ^ @@ -3 +3 @@\n   3 | line3: new"
+		want := yamltest.JoinLF(
+			"   3 | line3: old",
+			"   3 | ^ @@ -3 +3 @@",
+			"   3 | line3: new",
+		)
 
 		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
 		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
@@ -512,7 +550,13 @@ func TestSummaryDiff_Lines(t *testing.T) {
 			second: changed
 			third: 3
 		`)
-		want := "   1 | first: 1\n   1 | ^ @@ -1,3 +1,3 @@\n   2 | second: 2\n   2 | second: changed\n   3 | third: 3"
+		want := yamltest.JoinLF(
+			"   1 | first: 1",
+			"   1 | ^ @@ -1,3 +1,3 @@",
+			"   2 | second: 2",
+			"   2 | second: changed",
+			"   3 | third: 3",
+		)
 
 		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
 		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
@@ -559,7 +603,16 @@ func TestSummaryDiff_Lines(t *testing.T) {
 			line8: 8
 			line9: new9
 		`)
-		want := "   1 | line1: old1\n   1 | ^ @@ -1,2 +1,2 @@\n   1 | line1: new1\n   2 | line2: 2\n   8 | line8: 8\n   8 | ^ @@ -8,2 +8,2 @@\n   9 | line9: old9\n   9 | line9: new9"
+		want := yamltest.JoinLF(
+			"   1 | line1: old1",
+			"   1 | ^ @@ -1,2 +1,2 @@",
+			"   1 | line1: new1",
+			"   2 | line2: 2",
+			"   8 | line8: 8",
+			"   8 | ^ @@ -8,2 +8,2 @@",
+			"   9 | line9: old9",
+			"   9 | line9: new9",
+		)
 
 		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
 		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
@@ -612,7 +665,10 @@ func TestSummaryDiff_Lines(t *testing.T) {
 
 		before := ""
 		after := "key: value\n"
-		want := "   1 | key: value\n   1 | ^ @@ -0,0 +1 @@"
+		want := yamltest.JoinLF(
+			"   1 | key: value",
+			"   1 | ^ @@ -0,0 +1 @@",
+		)
 
 		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
 		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
@@ -634,7 +690,10 @@ func TestSummaryDiff_Lines(t *testing.T) {
 
 		before := "key: value\n"
 		after := ""
-		want := "   1 | key: value\n   1 | ^ @@ -1 +0,0 @@"
+		want := yamltest.JoinLF(
+			"   1 | key: value",
+			"   1 | ^ @@ -1 +0,0 @@",
+		)
 
 		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
 		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
@@ -664,7 +723,11 @@ func TestSummaryDiff_Lines(t *testing.T) {
 			line2: new
 			line3: 3
 		`)
-		want := "   2 | line2: old\n   2 | ^ @@ -2 +2 @@\n   2 | line2: new"
+		want := yamltest.JoinLF(
+			"   2 | line2: old",
+			"   2 | ^ @@ -2 +2 @@",
+			"   2 | line2: new",
+		)
 
 		beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
 		afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
