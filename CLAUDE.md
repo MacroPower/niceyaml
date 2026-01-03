@@ -18,13 +18,12 @@ Go library (`github.com/macropower/niceyaml`) provides utilities for working wit
 
 Key types by feature area:
 
-- **Source & Tokens:** `Source`, `Line`, `Annotation`, `Flag` - YAML token organization by line.
+- **Source:** `Source`, `LineIterator` - YAML token organization by line.
 - **Diff System:** `FullDiff`, `SummaryDiff`, `Revision` - LCS-based diffing and version tracking.
 - **Search:** `Finder`, `Normalizer`, `StandardNormalizer` - text search with normalization support.
 - **Error Handling:** `Error`, `ErrorWrapper` - errors with source context and annotations.
 - **YAML Utilities:** `Decoder`, `DocumentDecoder`, `Validator`, `Encoder`, `NewPath`, `NewPathBuilder` - parsing, decoding, and validation.
-- **Printing:** `Printer`, `Style`, `Styles`, `StyleGetter`, `StyledPrinter`, `GutterFunc`, `GutterContext` - syntax highlighting and styled rendering.
-- **Positioning:** `Position`, `PositionRange` - 0-indexed line/column, half-open ranges [Start, End).
+- **Printing:** `Printer`, `Style`, `Styles`, `StyleGetter`, `TokenStyler`, `GutterFunc`, `GutterContext` - syntax highlighting and styled rendering.
 
 ### Bubbles Subpackage (niceyaml/bubbles)
 
@@ -42,6 +41,28 @@ Key types by feature area:
 
 Validator integrates with our core package for improved YAML handling (e.g. supporting error annotations).
 
+### Line Subpackage (niceyaml/line)
+
+- **Line Processing** (`line/`): Line-by-line YAML token organization.
+- Key types: `Line`, `Lines`, `Annotation`, `Flag`.
+
+### Position Subpackage (niceyaml/position)
+
+- **Positioning** (`position/`): 0-indexed position and range tracking.
+- Key types: `Position`, `Range`, `Ranges`.
+- Convention: 0-indexed (line and column start at 0), half-open ranges `[Start, End)`.
+
+### Tokens Subpackage (niceyaml/tokens)
+
+- **Token Segmentation** (`tokens/`): YAML token segmentation for rendering.
+- Key types: `Segment`, `Segments`, `Segments2`.
+
+### YAMLTest Subpackage (niceyaml/yamltest)
+
+- **Testing Utilities** (`yamltest/`): Helpers for testing YAML token operations.
+- Key types: `TokenBuilder`, `MockValidator`, `MockNormalizer`.
+- Key functions: `RequireTokensValid`, `AssertTokensEqual`, `FormatToken`, `FormatTokens`.
+
 ## Code Style
 
 ### Go Conventions
@@ -55,8 +76,8 @@ Validator integrates with our core package for improved YAML handling (e.g. supp
 ### Code Patterns
 
 - Functional options pattern used throughout (e.g., `PrinterOption`, `SourceOption`, `ErrorOption`).
-- 0-indexed positioning convention for `Position` (line and column start at 0).
-- Half-open ranges `[Start, End)` for `PositionRange`.
+- 0-indexed positioning convention for `position.Position` (line and column start at 0).
+- Half-open ranges `[Start, End)` for `position.Range`.
 - Prefer consistency over performance, avoid "fast paths" that could lead to unpredictable behavior.
 
 ### Testing
