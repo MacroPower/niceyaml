@@ -1,0 +1,17 @@
+science:
+  formulas:
+    energy: "E = mc²"
+    water: "H₂O"
+    quadratic: "x = (−b ± √(b²−4ac)) / 2a"
+    integral: "∫f(x)dx"
+     summation: "∑(i=1 to n)"
+
+  units:
+    temperature: "−20°C to 200°C"
+    energy: "kJ·mol⁻¹"
+    area: "500 m²"
+
+  symbols:
+    arrows: [→, ←, ↑, ↓, ↔, ⇒, ⇐, ⇔]
+    math: [±, ×, ÷, ≠, ≈, ≤, ≥, ∞, ∅, ∈, ⊂, ∪, ∩]
+    greek: [α, β, γ, δ, ε, π, θ, λ, μ, σ, φ, ω, Ω]
