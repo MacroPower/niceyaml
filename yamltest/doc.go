@@ -7,4 +7,5 @@
 //   - Mocking validators with [MockValidator] and normalizers with [MockNormalizer]
 //   - Processing test input strings with [Input]
 //   - Normalizing content for string comparison
+//   - Rendering styled output for tests with [XMLStyles]
 package yamltest
