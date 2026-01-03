@@ -60,8 +60,8 @@ Validator integrates with our core package for improved YAML handling (e.g. supp
 ### YAMLTest Subpackage (niceyaml/yamltest)
 
 - **Testing Utilities** (`yamltest/`): Helpers for testing YAML token operations.
-- Key types: `TokenBuilder`, `MockValidator`, `MockNormalizer`.
-- Key functions: `RequireTokensValid`, `AssertTokensEqual`, `FormatToken`, `FormatTokens`.
+- Key types: `TokenBuilder`, `MockValidator`, `MockNormalizer`, `XMLStyles`.
+- Key functions: `RequireTokensValid`, `AssertTokensEqual`, `FormatToken`, `FormatTokens`, `Input`, `JoinLF`, `JoinCRLF`.
 
 ## Code Style
 
@@ -88,7 +88,7 @@ Validator integrates with our core package for improved YAML handling (e.g. supp
 - Always use `t.Parallel()` in all tests.
 - Create test packages (`package foo_test`) testing public API.
 - Use `require.ErrorIs` for error type checking.
-- Use multi-line strings or testdata files, avoid using `\n` in strings when testing >2 lines.
+- Use the `yamltest` helpers whenever possible.
 
 ### Key Dependencies
 

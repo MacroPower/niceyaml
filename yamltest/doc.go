@@ -5,7 +5,7 @@
 //   - Comparing [token.Tokens] field by field
 //   - Formatting tokens for debug output
 //   - Mocking validators with [MockValidator] and normalizers with [MockNormalizer]
-//   - Processing test input strings with [Input]
+//   - Processing test want/got strings with [Input], [JoinLF], and [JoinCRLF]
 //   - Normalizing content for string comparison
 //   - Rendering styled output for tests with [XMLStyles]
 package yamltest

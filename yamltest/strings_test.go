@@ -101,3 +101,89 @@ func TestInput(t *testing.T) {
 		})
 	}
 }
+
+func TestJoinLF(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		want  string
+		input []string
+	}{
+		"empty input": {
+			input: nil,
+			want:  "",
+		},
+		"single string": {
+			input: []string{"hello"},
+			want:  "hello",
+		},
+		"two strings": {
+			input: []string{"a", "b"},
+			want:  "a\nb",
+		},
+		"three strings": {
+			input: []string{"line1", "line2", "line3"},
+			want:  "line1\nline2\nline3",
+		},
+		"with empty string": {
+			input: []string{"a", "", "c"},
+			want:  "a\n\nc",
+		},
+		"already contains newlines": {
+			input: []string{"a\nb", "c"},
+			want:  "a\nb\nc",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := yamltest.JoinLF(tc.input...)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestJoinCRLF(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		want  string
+		input []string
+	}{
+		"empty input": {
+			input: nil,
+			want:  "",
+		},
+		"single string": {
+			input: []string{"hello"},
+			want:  "hello",
+		},
+		"two strings": {
+			input: []string{"a", "b"},
+			want:  "a\r\nb",
+		},
+		"three strings": {
+			input: []string{"line1", "line2", "line3"},
+			want:  "line1\r\nline2\r\nline3",
+		},
+		"with empty string": {
+			input: []string{"a", "", "c"},
+			want:  "a\r\n\r\nc",
+		},
+		"already contains newlines": {
+			input: []string{"a\nb", "c"},
+			want:  "a\nb\r\nc",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := yamltest.JoinCRLF(tc.input...)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
