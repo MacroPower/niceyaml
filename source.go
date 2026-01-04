@@ -40,11 +40,6 @@ func NewSourceFromString(src string, opts ...SourceOption) *Source {
 
 // NewSourceFromToken creates new [Source] from a seed [*token.Token].
 // It collects all [token.Tokens] by walking the token chain from start to end.
-//
-// ImplicitNullType tokens are filtered out because they are created by the parser,
-// not the lexer. The lexer never produces ImplicitNullType - these are synthesized
-// by the parser for empty values like "key:" with no value. Including them would
-// break round-trip equality with lexer output.
 func NewSourceFromToken(tk *token.Token, opts ...SourceOption) *Source {
 	if tk == nil {
 		return &Source{}
@@ -58,13 +53,9 @@ func NewSourceFromToken(tk *token.Token, opts ...SourceOption) *Source {
 	// Collect all tokens forward, filtering parser-only tokens.
 	var tks token.Tokens
 	for ; tk != nil; tk = tk.Next {
-		// ImplicitNullType is created by parser for empty values (e.g., "key:").
-		// The lexer never produces this type, so we skip it for round-trip fidelity.
-		if tk.Type == token.ImplicitNullType {
-			continue
-		}
-
-		tks.Add(tk.Clone())
+		// Avoid calling tks.Add, since it modifies the token's Next/Prev pointers,
+		// which will race with any reads/writes. Clone will also break equality checks.
+		tks = append(tks, tk)
 	}
 
 	return NewSourceFromTokens(tks, opts...)
