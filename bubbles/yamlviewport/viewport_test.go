@@ -153,7 +153,18 @@ func TestViewport_Golden(t *testing.T) {
 			width:  40,
 			height: 10,
 			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
-				m.SetXOffset(20) // Scroll right.
+				m.ToggleWordWrap() // Disable wrap (default is true).
+				m.SetXOffset(20)   // Scroll right.
+			},
+		},
+		"HorizontalScrollNoOffset": {
+			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
+			yaml:   wideYAML,
+			width:  40,
+			height: 10,
+			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+				m.ToggleWordWrap() // Disable wrap (default is true).
+				// XOffset stays at 0 - verifies lines are truncated, not wrapped.
 			},
 		},
 		"FillHeight": {
@@ -359,6 +370,9 @@ func TestViewport_Scrolling(t *testing.T) {
 			yaml:   horizontalYAML,
 			width:  40,
 			height: 10,
+			setup: func(m *yamlviewport.Model) {
+				m.ToggleWordWrap() // Disable wrap.
+			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				assert.Equal(t, 0, m.XOffset())
@@ -372,6 +386,7 @@ func TestViewport_Scrolling(t *testing.T) {
 			width:  40,
 			height: 10,
 			setup: func(m *yamlviewport.Model) {
+				m.ToggleWordWrap() // Disable wrap.
 				m.SetXOffset(20)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -397,6 +412,9 @@ func TestViewport_Scrolling(t *testing.T) {
 			yaml:   horizontalYAML,
 			width:  40,
 			height: 10,
+			setup: func(m *yamlviewport.Model) {
+				m.ToggleWordWrap() // Disable wrap.
+			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				assert.InDelta(t, 0.0, m.HorizontalScrollPercent(), 0.01)
@@ -1293,6 +1311,9 @@ func TestViewport_Update(t *testing.T) {
 			yaml:   wideYAML,
 			width:  40,
 			height: 5,
+			setup: func(m *yamlviewport.Model) {
+				m.ToggleWordWrap() // Disable wrap.
+			},
 			golden: true,
 		},
 		"KeyLeft": {
@@ -1301,6 +1322,7 @@ func TestViewport_Update(t *testing.T) {
 			width:  40,
 			height: 5,
 			setup: func(m *yamlviewport.Model) {
+				m.ToggleWordWrap() // Disable wrap.
 				m.SetXOffset(20)
 			},
 			golden: true,
@@ -1328,6 +1350,9 @@ func TestViewport_Update(t *testing.T) {
 			yaml:   wideYAML,
 			width:  40,
 			height: 10,
+			setup: func(m *yamlviewport.Model) {
+				m.ToggleWordWrap() // Disable wrap.
+			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				assert.Positive(t, m.XOffset())
@@ -1339,6 +1364,7 @@ func TestViewport_Update(t *testing.T) {
 			yaml:  wideYAML,
 			width: 40,
 			setup: func(m *yamlviewport.Model) {
+				m.ToggleWordWrap() // Disable wrap.
 				m.SetXOffset(20)
 			},
 			height: 10,
@@ -1353,6 +1379,7 @@ func TestViewport_Update(t *testing.T) {
 			width:  40,
 			height: 10,
 			setup: func(m *yamlviewport.Model) {
+				m.ToggleWordWrap() // Disable wrap.
 				m.SetXOffset(20)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -1365,6 +1392,9 @@ func TestViewport_Update(t *testing.T) {
 			yaml:   wideYAML,
 			width:  40,
 			height: 10,
+			setup: func(m *yamlviewport.Model) {
+				m.ToggleWordWrap() // Disable wrap.
+			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				assert.Positive(t, m.XOffset())

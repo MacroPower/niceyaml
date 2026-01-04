@@ -12,7 +12,6 @@ import (
 func viewCmd() *cobra.Command {
 	var (
 		lineNumbers bool
-		wrap        bool
 		search      string
 	)
 
@@ -34,7 +33,6 @@ func viewCmd() *cobra.Command {
 
 			opts := modelOptions{
 				lineNumbers: lineNumbers,
-				wrap:        wrap,
 				search:      search,
 				contents:    contents,
 			}
@@ -53,7 +51,6 @@ func viewCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVarP(&lineNumbers, "line-numbers", "n", true, "show line numbers")
-	cmd.Flags().BoolVarP(&wrap, "wrap", "w", false, "wrap long lines")
 	cmd.Flags().StringVarP(&search, "search", "s", "", "initial search term")
 
 	return cmd

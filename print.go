@@ -41,6 +41,7 @@ type Printer struct {
 	width              int
 	hasCustomStyle     bool
 	annotationsEnabled bool
+	wordWrap           bool
 }
 
 // NewPrinter creates a new [Printer].
@@ -50,6 +51,7 @@ func NewPrinter(opts ...PrinterOption) *Printer {
 		styles:             DefaultStyles(),
 		gutterFunc:         DefaultGutter(),
 		annotationsEnabled: true,
+		wordWrap:           true,
 	}
 
 	for _, opt := range opts {
@@ -196,6 +198,12 @@ func (p *Printer) SetWidth(width int) {
 // SetAnnotationsEnabled sets whether annotations are rendered. Defaults to true.
 func (p *Printer) SetAnnotationsEnabled(enabled bool) {
 	p.annotationsEnabled = enabled
+}
+
+// SetWordWrap sets whether word wrapping is enabled. Defaults to true.
+// Word wrapping requires a width to be set via [Printer.SetWidth].
+func (p *Printer) SetWordWrap(enabled bool) {
+	p.wordWrap = enabled
 }
 
 // AddStyleToRange adds a style to apply to the character range [r.Start, r.End).
@@ -594,7 +602,7 @@ func (p *Printer) computeStyleForPoint(
 // contentWidth returns the available width for content after accounting for
 // gutter width. Returns 0 if wrapping is disabled.
 func (p *Printer) contentWidth(gutterWidth int) int {
-	if p.width <= 0 {
+	if !p.wordWrap || p.width <= 0 {
 		return 0
 	}
 

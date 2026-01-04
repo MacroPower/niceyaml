@@ -137,6 +137,7 @@ func (m *Model) setInitialValues() {
 	m.MouseWheelEnabled = true
 	m.MouseWheelDelta = 3
 	m.horizontalStep = defaultHorizontalStep
+	m.WrapEnabled = true
 	m.searchIndex = -1
 
 	if m.printer == nil {
@@ -172,8 +173,8 @@ func (m *Model) Width() int {
 func (m *Model) SetWidth(w int) {
 	if m.width != w {
 		m.width = w
+		m.printer.SetWidth(w)
 		if m.WrapEnabled {
-			m.printer.SetWidth(w)
 			m.rerender()
 		}
 	}
@@ -305,6 +306,18 @@ func (m *Model) ToggleDiffMode() {
 		m.diffMode = DiffModeNone
 	case DiffModeNone:
 		m.diffMode = DiffModeAdjacent
+	}
+
+	m.rerender()
+}
+
+// ToggleWordWrap toggles word wrapping on or off.
+func (m *Model) ToggleWordWrap() {
+	m.WrapEnabled = !m.WrapEnabled
+	m.printer.SetWordWrap(m.WrapEnabled)
+
+	if m.WrapEnabled {
+		m.xOffset = 0
 	}
 
 	m.rerender()
@@ -592,8 +605,10 @@ func (m *Model) visibleLines(lines []string) []string {
 	result := make([]string, capacity)
 	copy(result, lines[start:end])
 
-	// Apply horizontal scrolling.
-	if m.xOffset > 0 {
+	// Apply horizontal scrolling / line truncation.
+	// When wrapping is disabled, lines may exceed viewport width.
+	// Truncate to viewport width to prevent lipgloss from wrapping.
+	if !m.WrapEnabled {
 		for i := range result {
 			result[i] = ansi.Cut(result[i], m.xOffset, m.xOffset+maxWidth)
 		}
@@ -854,6 +869,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 		case key.Matches(msg, m.KeyMap.ToggleDiffMode):
 			m.ToggleDiffMode()
+
+		case key.Matches(msg, m.KeyMap.ToggleWordWrap):
+			m.ToggleWordWrap()
 		}
 
 	case tea.MouseWheelMsg:

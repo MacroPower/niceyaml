@@ -641,21 +641,24 @@ func TestPrinter_WordWrap(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		gutter niceyaml.GutterFunc
-		input  string
-		want   string
-		width  int
+		gutter   niceyaml.GutterFunc
+		input    string
+		want     string
+		width    int
+		wordWrap bool
 	}{
-		"no wrap when disabled": {
-			input:  "key: value",
-			width:  0,
-			gutter: niceyaml.NoGutter,
-			want:   "key: value",
+		"no wrap when width is zero": {
+			input:    "key: value",
+			width:    0,
+			gutter:   niceyaml.NoGutter,
+			wordWrap: true,
+			want:     "key: value",
 		},
 		"simple wrap": {
-			input:  "key: this is a very long value that should wrap",
-			width:  20,
-			gutter: niceyaml.NoGutter,
+			input:    "key: this is a very long value that should wrap",
+			width:    20,
+			gutter:   niceyaml.NoGutter,
+			wordWrap: true,
 			want: yamltest.JoinLF(
 				"key: this is a very",
 				"long value that",
@@ -663,36 +666,40 @@ func TestPrinter_WordWrap(t *testing.T) {
 			),
 		},
 		"wrap on slash": {
-			input:  "path: /usr/local/bin/something",
-			width:  20,
-			gutter: niceyaml.NoGutter,
+			input:    "path: /usr/local/bin/something",
+			width:    20,
+			gutter:   niceyaml.NoGutter,
+			wordWrap: true,
 			want: yamltest.JoinLF(
 				"path: /usr/local/",
 				"bin/something",
 			),
 		},
 		"wrap on hyphen": {
-			input:  "name: very-long-hyphenated-name",
-			width:  20,
-			gutter: niceyaml.NoGutter,
+			input:    "name: very-long-hyphenated-name",
+			width:    20,
+			gutter:   niceyaml.NoGutter,
+			wordWrap: true,
 			want: yamltest.JoinLF(
 				"name: very-long-",
 				"hyphenated-name",
 			),
 		},
 		"short content no wrap": {
-			input:  "key: value",
-			width:  50,
-			gutter: niceyaml.NoGutter,
-			want:   "key: value",
+			input:    "key: value",
+			width:    50,
+			gutter:   niceyaml.NoGutter,
+			wordWrap: true,
+			want:     "key: value",
 		},
 		"multi-line content": {
 			input: yamltest.JoinLF(
 				"key: value",
 				"another: long value that should wrap here",
 			),
-			width:  20,
-			gutter: niceyaml.NoGutter,
+			width:    20,
+			gutter:   niceyaml.NoGutter,
+			wordWrap: true,
 			want: yamltest.JoinLF(
 				"key: value",
 				"another: long value",
@@ -702,9 +709,10 @@ func TestPrinter_WordWrap(t *testing.T) {
 		},
 		// Line number gutter tests.
 		"wrapped line continuation marker": {
-			input:  "key: this is a very long value",
-			width:  22,
-			gutter: niceyaml.LineNumberGutter(),
+			input:    "key: this is a very long value",
+			width:    22,
+			gutter:   niceyaml.LineNumberGutter(),
+			wordWrap: true,
 			// Wraps at word boundaries within width.
 			// Width 22 - 5 (line number gutter) = 17 for content.
 			want: yamltest.JoinLF(
@@ -717,8 +725,9 @@ func TestPrinter_WordWrap(t *testing.T) {
 				"first: short",
 				"second: this is a very long line that wraps",
 			),
-			width:  30,
-			gutter: niceyaml.LineNumberGutter(),
+			width:    30,
+			gutter:   niceyaml.LineNumberGutter(),
+			wordWrap: true,
 			// First line fits, second line wraps.
 			// Width 30 - 5 (line number gutter) = 25 for content.
 			want: yamltest.JoinLF(
@@ -726,6 +735,28 @@ func TestPrinter_WordWrap(t *testing.T) {
 				"   2 second: this is a very",
 				"   - long line that wraps",
 			),
+		},
+		// SetWordWrap(false) tests.
+		"wordWrap disabled with NoGutter": {
+			input:    "key: this is a very long value that should not wrap",
+			width:    25,
+			gutter:   niceyaml.NoGutter,
+			wordWrap: false,
+			want:     "key: this is a very long value that should not wrap",
+		},
+		"wordWrap disabled with LineNumberGutter": {
+			input:    "key: this is a very long value that should not wrap",
+			width:    30,
+			gutter:   niceyaml.LineNumberGutter(),
+			wordWrap: false,
+			want:     "   1 key: this is a very long value that should not wrap",
+		},
+		"wordWrap disabled with DefaultGutter": {
+			input:    "key: this is a very long value that should not wrap",
+			width:    30,
+			gutter:   niceyaml.DefaultGutter(),
+			wordWrap: false,
+			want:     "   1  key: this is a very long value that should not wrap",
 		},
 	}
 
@@ -736,9 +767,8 @@ func TestPrinter_WordWrap(t *testing.T) {
 			tks := lexer.Tokenize(tc.input)
 
 			p := testPrinterWithGutter(tc.gutter)
-			if tc.width > 0 {
-				p.SetWidth(tc.width)
-			}
+			p.SetWidth(tc.width)
+			p.SetWordWrap(tc.wordWrap)
 
 			got := p.Print(niceyaml.NewSourceFromTokens(tks))
 			assert.Equal(t, tc.want, got)

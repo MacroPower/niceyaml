@@ -19,7 +19,6 @@ type modelOptions struct {
 	search      string
 	contents    [][]byte
 	lineNumbers bool
-	wrap        bool
 }
 
 //nolint:recvcheck // tea.Model requires value receivers for Init, Update, View.
@@ -53,8 +52,6 @@ func newModel(opts *modelOptions) model {
 			Foreground(charmtone.Ox),
 		),
 	)
-
-	vp.WrapEnabled = opts.wrap
 
 	m := model{
 		viewport: vp,

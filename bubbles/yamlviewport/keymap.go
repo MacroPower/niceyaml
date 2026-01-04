@@ -28,6 +28,8 @@ type KeyMap struct {
 	PrevRevision key.Binding
 	// ToggleDiffMode cycles through diff display modes.
 	ToggleDiffMode key.Binding
+	// ToggleWordWrap toggles word wrapping.
+	ToggleWordWrap key.Binding
 }
 
 // DefaultKeyMap returns a set of pager-like default keybindings.
@@ -76,6 +78,10 @@ func DefaultKeyMap() KeyMap {
 		ToggleDiffMode: key.NewBinding(
 			key.WithKeys("m"),
 			key.WithHelp("m", "toggle diff mode"),
+		),
+		ToggleWordWrap: key.NewBinding(
+			key.WithKeys("w"),
+			key.WithHelp("w", "toggle word wrap"),
 		),
 	}
 }
