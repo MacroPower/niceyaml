@@ -31,7 +31,7 @@ func ErrorHandler(w io.Writer, styles fang.Styles, err error) {
 		mustN(fmt.Fprintln(w, lipgloss.JoinHorizontal(
 			lipgloss.Left,
 			styles.ErrorText.UnsetWidth().Render("Try"),
-			styles.Program.Flag.Render("--help"),
+			styles.Program.Flag.PaddingLeft(1).Render("--help"),
 			styles.ErrorText.UnsetWidth().UnsetMargins().UnsetTransform().PaddingLeft(1).Render("for usage."),
 		)))
 		mustN(fmt.Fprintln(w))
