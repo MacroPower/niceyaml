@@ -2,6 +2,7 @@ package tokens
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/goccy/go-yaml/token"
 
@@ -31,7 +32,7 @@ type Segment struct {
 func NewSegment(source, part *token.Token) Segment {
 	var w int
 	if part != nil {
-		w = len([]rune(strings.TrimSuffix(part.Origin, "\n")))
+		w = utf8.RuneCountInString(strings.TrimSuffix(part.Origin, "\n"))
 	}
 
 	return Segment{

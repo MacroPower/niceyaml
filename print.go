@@ -374,7 +374,7 @@ func (p *Printer) writeLine(
 			sb.WriteString(subLine)
 		}
 
-		col += len([]rune(subLine))
+		col += utf8.RuneCountInString(subLine)
 	}
 }
 
@@ -660,7 +660,7 @@ func leadingWhitespaceRunes(s string, maxBytes int) int {
 		return 0
 	}
 
-	return len([]rune(prefix))
+	return utf8.RuneCountInString(prefix)
 }
 
 // tokenValueOffset calculates the byte offset where Value starts within the

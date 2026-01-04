@@ -2,6 +2,7 @@ package niceyaml_test
 
 import (
 	"testing"
+	"unicode/utf8"
 
 	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/parser"
@@ -408,7 +409,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 				origin = origin[:len(origin)-1]
 			}
 
-			expectedCol += len([]rune(origin))
+			expectedCol += utf8.RuneCountInString(origin)
 		}
 
 		// Query a column within the last token.
