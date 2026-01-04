@@ -105,7 +105,13 @@ func DefaultGutter() GutterFunc {
 			marker = ctx.Styles.GetStyle(StyleDefault).Render(" ")
 		}
 
-		return lineNum + marker
+		// Use builder to avoid intermediate string allocation from concatenation.
+		var sb strings.Builder
+		sb.Grow(len(lineNum) + len(marker))
+		sb.WriteString(lineNum)
+		sb.WriteString(marker)
+
+		return sb.String()
 	}
 }
 
@@ -234,10 +240,20 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 
 	totalLines := t.Count()
 
+	// Pre-compute gutter width once for consistent wrapping calculations.
+	var gutterWidth int
+	if p.gutterFunc != nil {
+		sampleGutter := p.gutterFunc(GutterContext{Styles: p.styles, TotalLines: totalLines})
+		gutterWidth = lipgloss.Width(sampleGutter)
+	}
+
 	var (
 		sb          strings.Builder
 		renderedIdx int
 	)
+
+	// Pre-allocate buffer for estimated output size (reduces growth allocations).
+	sb.Grow(totalLines * 100)
 
 	for pos, ln := range t.Lines() {
 		lineNum := ln.Number()
@@ -284,16 +300,16 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 		switch ln.Flag {
 		case line.FlagDeleted:
 			deleted := p.styles.GetStyle(StyleDiffDeleted)
-			p.writeLine(&sb, ln.Content(), pos.Line, deleted, gutterCtx)
+			p.writeLine(&sb, ln.Content(), pos.Line, deleted, gutterCtx, gutterWidth)
 
 		case line.FlagInserted:
 			inserted := p.styles.GetStyle(StyleDiffInserted)
-			p.writeLine(&sb, ln.Content(), pos.Line, inserted, gutterCtx)
+			p.writeLine(&sb, ln.Content(), pos.Line, inserted, gutterCtx, gutterWidth)
 
 		default: // FlagDefault (equal line).
 			// Render with syntax highlighting.
 			styledContent := p.renderTokenLine(pos.Line, ln)
-			p.writeLine(&sb, styledContent, pos.Line, nil, gutterCtx)
+			p.writeLine(&sb, styledContent, pos.Line, nil, gutterCtx, gutterWidth)
 		}
 
 		renderedIdx++
@@ -304,16 +320,15 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 
 // writeLine writes a line with optional word wrapping.
 // The gutter is generated at write-time for each segment using gutterCtx.
+// The gutterWidth parameter is pre-computed once per render pass for efficiency.
 func (p *Printer) writeLine(
 	sb *strings.Builder,
 	content string,
 	visualLine int,
 	contentStyle *lipgloss.Style,
 	gutterCtx GutterContext,
+	gutterWidth int,
 ) {
-	// Calculate gutter width for wrapping (use non-soft context for width calculation).
-	sampleGutter := p.gutterFunc(gutterCtx)
-	gutterWidth := lipgloss.Width(sampleGutter)
 	cw := p.contentWidth(gutterWidth)
 
 	// Treat non-wrapping as wrapping with a single subLine.
@@ -457,6 +472,9 @@ func (p *Printer) styleLineWithRanges(
 	}
 
 	var sb strings.Builder
+
+	// Pre-allocate for source + ANSI escape codes overhead.
+	sb.Grow(len(src) * 2)
 
 	runes := []rune(src)
 	spanStart := 0
