@@ -93,12 +93,6 @@ func DefaultStyles() Styles {
 	}
 }
 
-// rangeStyle represents a style to apply to a character range using 0-indexed positions.
-type rangeStyle struct {
-	style lipgloss.Style
-	rng   position.Range
-}
-
 // overrideColor returns the overlay color if valid, otherwise the base color.
 // Unlike blendColors, this does not blend - overlay takes precedence.
 func overrideColor(base, overlay color.Color) color.Color {

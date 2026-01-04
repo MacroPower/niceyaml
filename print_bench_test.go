@@ -70,6 +70,7 @@ func BenchmarkPrinterPrint_WithRanges(b *testing.B) {
 			}
 
 			b.ReportAllocs()
+			b.SetBytes(int64(len(yaml)))
 			b.ResetTimer()
 
 			for b.Loop() {
@@ -98,6 +99,7 @@ func BenchmarkPrinterPrint_WithRanges_IncludingSetup(b *testing.B) {
 	for _, rc := range rangeCounts {
 		b.Run(rc.name, func(b *testing.B) {
 			b.ReportAllocs()
+			b.SetBytes(int64(len(yaml)))
 
 			for b.Loop() {
 				printer := niceyaml.NewPrinter()
@@ -151,6 +153,7 @@ func BenchmarkPrinterPrint_RangesDensity(b *testing.B) {
 			}
 
 			b.ReportAllocs()
+			b.SetBytes(int64(len(yaml)))
 			b.ResetTimer()
 
 			for b.Loop() {
@@ -211,6 +214,7 @@ func BenchmarkPrinterWithGutter(b *testing.B) {
 			printer := niceyaml.NewPrinter(niceyaml.WithGutter(g.gutter))
 
 			b.ReportAllocs()
+			b.SetBytes(int64(len(yaml)))
 			b.ResetTimer()
 
 			for b.Loop() {

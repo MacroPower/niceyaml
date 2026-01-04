@@ -3,11 +3,14 @@ package niceyaml
 import (
 	"fmt"
 	"iter"
+	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
 	"github.com/goccy/go-yaml/token"
 
+	"github.com/macropower/niceyaml/internal/styletree"
 	"github.com/macropower/niceyaml/line"
 	"github.com/macropower/niceyaml/position"
 )
@@ -19,7 +22,13 @@ type LineIterator interface {
 	IsEmpty() bool
 }
 
-const wrapOnCharacters = " /-"
+const (
+	wrapOnCharacters = " /-"
+
+	// MaxCol is the maximum column value used for linearizing 2D positions.
+	// This allows positions to be compared as single integers while preserving ordering.
+	maxCol = 1_000_000
+)
 
 // Printer renders YAML tokens with syntax highlighting using [lipgloss.Style].
 // It supports custom styles, gutters, and styled range overlays
@@ -28,7 +37,7 @@ type Printer struct {
 	styles             StyleGetter
 	style              lipgloss.Style
 	gutterFunc         GutterFunc
-	rangeStyles        []*rangeStyle
+	rangeStyles        *styletree.Tree
 	width              int
 	hasCustomStyle     bool
 	annotationsEnabled bool
@@ -199,10 +208,13 @@ func (p *Printer) AddStyleToRange(s *lipgloss.Style, r position.Range) {
 		style = *s
 	}
 
-	p.rangeStyles = append(p.rangeStyles, &rangeStyle{
-		style: style,
-		rng:   r,
-	})
+	if p.rangeStyles == nil {
+		p.rangeStyles = styletree.New()
+	}
+
+	start := r.Start.Line*maxCol + r.Start.Col
+	end := r.End.Line*maxCol + r.End.Col
+	p.rangeStyles.Insert(start, end, &style)
 }
 
 // GetStyle retrieves the underlying [lipgloss.Style] for the given [Style].
@@ -212,7 +224,9 @@ func (p *Printer) GetStyle(s Style) *lipgloss.Style {
 
 // ClearStyles removes all previously added styles.
 func (p *Printer) ClearStyles() {
-	p.rangeStyles = nil
+	if p.rangeStyles != nil {
+		p.rangeStyles.Clear()
+	}
 }
 
 // Print prints any [LineIterator].
@@ -370,16 +384,20 @@ func (p *Printer) writeLine(
 // subsequent ranges blend. If alwaysBlend is true, all ranges blend with base.
 // The pos parameter uses 0-indexed line and column values.
 func (p *Printer) styleForPosition(pos position.Position, style *lipgloss.Style, alwaysBlend bool) *lipgloss.Style {
-	firstRange := true
+	if p.rangeStyles == nil || p.rangeStyles.Len() == 0 {
+		return style
+	}
 
-	for i := range p.rangeStyles {
-		if p.rangeStyles[i].rng.Contains(pos) {
-			if !alwaysBlend && firstRange {
-				style = overrideStyles(style, &p.rangeStyles[i].style)
-				firstRange = false
-			} else {
-				style = blendStyles(style, &p.rangeStyles[i].style)
-			}
+	point := pos.Line*maxCol + pos.Col
+	matches := p.rangeStyles.Query(point)
+
+	firstRange := true
+	for i := range matches {
+		if !alwaysBlend && firstRange {
+			style = overrideStyles(style, matches[i])
+			firstRange = false
+		} else {
+			style = blendStyles(style, matches[i])
 		}
 	}
 
@@ -467,34 +485,110 @@ func (p *Printer) styleLineWithRanges(
 		return src
 	}
 
-	if len(p.rangeStyles) == 0 {
+	if p.rangeStyles == nil || p.rangeStyles.Len() == 0 {
 		return style.Render(src)
 	}
 
-	var sb strings.Builder
+	// Query all intervals overlapping this line in one batch.
+	lineStart := pos.Line*maxCol + pos.Col
+	lineEnd := lineStart + utf8.RuneCountInString(src)
 
-	// Pre-allocate for source + ANSI escape codes overhead.
-	sb.Grow(len(src) * 2)
+	intervals := p.rangeStyles.QueryRange(lineStart, lineEnd)
+	if len(intervals) == 0 {
+		return style.Render(src)
+	}
 
-	runes := []rune(src)
-	spanStart := 0
-	currentStyle := p.styleForPosition(pos, style, alwaysBlend)
+	// Collect all boundary points where styles might change.
+	// These are interval starts/ends clamped to the line range.
+	boundaries := make([]int, 0, len(intervals)*2+2)
+	boundaries = append(boundaries, lineStart, lineEnd)
 
-	for i := 1; i < len(runes); i++ {
-		nextPos := position.New(pos.Line, pos.Col+i)
-		nextStyle := p.styleForPosition(nextPos, style, alwaysBlend)
-		if !stylesEqual(currentStyle, nextStyle) {
-			sb.WriteString(currentStyle.Render(string(runes[spanStart:i])))
-
-			spanStart = i
-			currentStyle = nextStyle
+	for _, iv := range intervals {
+		if iv.Start > lineStart && iv.Start < lineEnd {
+			boundaries = append(boundaries, iv.Start)
+		}
+		if iv.End > lineStart && iv.End < lineEnd {
+			boundaries = append(boundaries, iv.End)
 		}
 	}
 
+	// Sort and deduplicate boundaries.
+	slices.Sort(boundaries)
+
+	boundaries = slices.Compact(boundaries)
+
+	if len(boundaries) < 2 {
+		// No actual span breaks; render entire line with base style + first interval.
+		return p.styleForPosition(pos, style, alwaysBlend).Render(src)
+	}
+
+	var sb strings.Builder
+	sb.Grow(len(src) * 2)
+
+	runes := []rune(src)
+
+	// Render spans between consecutive boundaries, merging adjacent spans with same style.
+	var currentStyle *lipgloss.Style
+
+	spanStart := 0
+
+	for i := range len(boundaries) - 1 {
+		boundaryStart := boundaries[i] - lineStart // Convert to rune index.
+		boundaryEnd := boundaries[i+1] - lineStart // Convert to rune index.
+		spanPoint := boundaries[i]                 // Point for style lookup.
+
+		if boundaryStart < 0 || boundaryEnd > len(runes) || boundaryStart >= boundaryEnd {
+			continue
+		}
+
+		spanStyle := p.computeStyleForPoint(spanPoint, intervals, style, alwaysBlend)
+
+		// Merge adjacent spans with the same style.
+		if currentStyle == nil {
+			currentStyle = spanStyle
+			spanStart = boundaryStart
+		} else if !stylesEqual(currentStyle, spanStyle) {
+			// Style changed - flush current span.
+			sb.WriteString(currentStyle.Render(string(runes[spanStart:boundaryStart])))
+
+			currentStyle = spanStyle
+			spanStart = boundaryStart
+		}
+		// If styles are equal, continue accumulating the span.
+	}
+
 	// Flush remaining content.
-	sb.WriteString(currentStyle.Render(string(runes[spanStart:])))
+	if currentStyle != nil && spanStart < len(runes) {
+		sb.WriteString(currentStyle.Render(string(runes[spanStart:])))
+	}
 
 	return sb.String()
+}
+
+// computeStyleForPoint computes the effective style at a point given overlapping intervals.
+// This avoids repeated tree queries by using pre-fetched intervals.
+func (p *Printer) computeStyleForPoint(
+	point int,
+	intervals []styletree.Interval,
+	baseStyle *lipgloss.Style,
+	alwaysBlend bool,
+) *lipgloss.Style {
+	result := baseStyle
+	firstRange := true
+
+	for _, iv := range intervals {
+		// Check if this interval contains the point.
+		if point >= iv.Start && point < iv.End {
+			if !alwaysBlend && firstRange {
+				result = overrideStyles(result, iv.Style)
+				firstRange = false
+			} else {
+				result = blendStyles(result, iv.Style)
+			}
+		}
+	}
+
+	return result
 }
 
 // contentWidth returns the available width for content after accounting for
