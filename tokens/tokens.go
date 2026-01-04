@@ -21,23 +21,29 @@ type Segment struct {
 	// It may in some cases contain identical content to the source token,
 	// if there is no segmentation needed (e.g. a single-line token).
 	part *token.Token
+
+	// Width is the cached rune count of part.Origin, excluding trailing newline.
+	// Computed once at creation to avoid repeated allocations.
+	width int
 }
 
 // NewSegment creates a new [Segment].
 func NewSegment(source, part *token.Token) Segment {
+	var w int
+	if part != nil {
+		w = len([]rune(strings.TrimSuffix(part.Origin, "\n")))
+	}
+
 	return Segment{
 		source: source,
 		part:   part,
+		width:  w,
 	}
 }
 
 // Width returns the rune count of this segment's part, excluding any trailing newline.
 func (s Segment) Width() int {
-	if s.part == nil {
-		return 0
-	}
-
-	return len([]rune(strings.TrimSuffix(s.part.Origin, "\n")))
+	return s.width
 }
 
 // Contains returns true if the given [*token.Token] matches the source or part pointer of this Segment.
