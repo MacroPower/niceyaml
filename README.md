@@ -16,7 +16,7 @@ It enables **friendly and predictable handling of YAML documents** in your **CLI
 
 > Also supports all YAML-compatible document formats like KYAML or JSON.
 
-![demo](./examples/demo.png)
+![demo](./docs/assets/view.gif)
 
 ## Features
 
