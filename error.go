@@ -209,7 +209,7 @@ func (e *Error) printErrorToken(tk *token.Token) string {
 		p.AddStyleToRange(p.GetStyle(StyleError), rng)
 	}
 
-	curLine := tk.Position.Line
+	curLine := max(0, tk.Position.Line-1)
 	minLine, maxLine := curLine, curLine
 
 	for _, rng := range ranges {
@@ -222,7 +222,7 @@ func (e *Error) printErrorToken(tk *token.Token) string {
 		}
 	}
 
-	minLine = max(1, minLine-e.sourceLines)
+	minLine = max(0, minLine-e.sourceLines)
 	maxLine = max(minLine, maxLine+e.sourceLines)
 
 	return p.PrintSlice(t, minLine, maxLine)
