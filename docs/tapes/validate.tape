@@ -68,6 +68,10 @@ Hide
   Type `go build -o dist/nyaml ./cmd/nyaml`  Enter
   Type `alias nyaml=./dist/nyaml`  Enter
   Type `clear`  Enter
+  Sleep 1
+  Type `nyaml validate testdata/broken.yaml`  Enter
+  Sleep 1
+  Type `clear`  Enter
   Sleep 500ms
 Show
 
