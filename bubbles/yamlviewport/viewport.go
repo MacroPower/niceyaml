@@ -108,6 +108,7 @@ type Model struct {
 	normalizer     niceyaml.Normalizer // Normalizer for search matching (nil = exact match).
 	searchTerm     string              // Current search query.
 	finder         *niceyaml.Finder    // Preprocessed source for searching.
+	finderSource   *niceyaml.Source    // Source used to build finder (for cache invalidation).
 	searchMatches  []position.Range
 	revision       *niceyaml.Revision
 	lines          *niceyaml.Source
@@ -342,6 +343,7 @@ func (m *Model) rerender() {
 		m.longestLineWidth = 0
 		m.lines = nil
 		m.finder = nil
+		m.finderSource = nil
 
 		return
 	}
@@ -354,27 +356,7 @@ func (m *Model) rerender() {
 
 	m.printer.ClearStyles()
 
-	// Compute fresh matches if we have a search term.
-	// Create a new finder for the current lines (preprocesses source once).
-	if m.searchTerm != "" {
-		var opts []niceyaml.FinderOption
-		if m.normalizer != nil {
-			opts = append(opts, niceyaml.WithNormalizer(m.normalizer))
-		}
-
-		m.finder = niceyaml.NewFinder(lines, opts...)
-		m.searchMatches = m.finder.Find(m.searchTerm)
-
-		// Adjust search index if matches changed.
-		if len(m.searchMatches) == 0 {
-			m.searchIndex = -1
-		} else if m.searchIndex >= len(m.searchMatches) || m.searchIndex < 0 {
-			m.searchIndex = 0
-		}
-	} else {
-		m.finder = nil
-		m.searchMatches = nil
-	}
+	m.updateSearchState(lines)
 
 	// Apply search highlights.
 	for i, match := range m.searchMatches {
@@ -390,6 +372,39 @@ func (m *Model) rerender() {
 
 	m.renderedLines = strings.Split(content, "\n")
 	m.longestLineWidth = maxLineWidth(m.renderedLines)
+}
+
+// updateSearchState updates the finder and search matches for the given lines.
+// Only rebuilds the finder if the source changed (expensive preprocessing).
+func (m *Model) updateSearchState(lines *niceyaml.Source) {
+	if m.searchTerm == "" {
+		m.finder = nil
+		m.finderSource = nil
+		m.searchMatches = nil
+
+		return
+	}
+
+	// Only rebuild finder if source changed.
+	if m.finder == nil || m.finderSource != lines {
+		var opts []niceyaml.FinderOption
+		if m.normalizer != nil {
+			opts = append(opts, niceyaml.WithNormalizer(m.normalizer))
+		}
+
+		m.finder = niceyaml.NewFinder(lines, opts...)
+		m.finderSource = lines
+	}
+
+	m.searchMatches = m.finder.Find(m.searchTerm)
+
+	// Adjust search index if matches changed.
+	switch {
+	case len(m.searchMatches) == 0:
+		m.searchIndex = -1
+	case m.searchIndex >= len(m.searchMatches), m.searchIndex < 0:
+		m.searchIndex = 0
+	}
 }
 
 // rerenderLine re-renders a single line and updates m.renderedLines.
