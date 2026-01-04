@@ -4,7 +4,7 @@ science:
     water: "H₂O"
     quadratic: "x = (−b ± √(b²−4ac)) / 2a"
     integral: "∫f(x)dx"
-     summation: "∑(i=1 to n)"
+   summation: "∑(i=1 to n)"
 
   units:
     temperature: "−20°C to 200°C"

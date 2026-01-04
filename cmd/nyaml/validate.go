@@ -45,7 +45,7 @@ func validateCmd() *cobra.Command {
 			for _, yamlPath := range yamlPaths {
 				err := validateFile(yamlPath, validator)
 				if err != nil {
-					return fmt.Errorf("%s: invalid: %w", yamlPath, err)
+					return fmt.Errorf("%s: %w", yamlPath, err)
 				} else if len(yamlPaths) > 1 {
 					fmt.Printf("%s: valid\n", yamlPath)
 				}
@@ -100,7 +100,7 @@ func validateFile(yamlPath string, validator niceyaml.Validator) error {
 
 	astFile, err := source.Parse()
 	if err != nil {
-		return fmt.Errorf("parse YAML: %w", err)
+		return err
 	}
 
 	if validator != nil {
@@ -108,7 +108,7 @@ func validateFile(yamlPath string, validator niceyaml.Validator) error {
 		for _, doc := range decoder.Documents() {
 			err := doc.Validate(validator)
 			if err != nil {
-				return fmt.Errorf("validate YAML: %w", err)
+				return err
 			}
 		}
 	}
