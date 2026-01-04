@@ -40,19 +40,28 @@ func (StandardNormalizer) Normalize(in string) string {
 
 // Finder searches for strings within YAML tokens.
 // Use [NewFinder] to create an instance with optional configuration.
+// The Finder preprocesses the source once at construction time,
+// allowing efficient repeated searches with different search strings.
 type Finder struct {
 	normalizer Normalizer
-	search     string
+	posMap     *positionMap
+	source     string
 }
 
-// NewFinder creates a new [Finder] with the given search string and options.
-// By default, no normalization is applied to search strings.
-func NewFinder(search string, opts ...FinderOption) *Finder {
-	f := &Finder{search: search}
+// NewFinder creates a new [Finder] that preprocesses the given [Source].
+// The source is processed once at construction time, building a position map
+// that allows efficient repeated searches with different search strings.
+// By default, no normalization is applied. Use [WithNormalizer] to enable
+// case-insensitive or diacritic-insensitive matching.
+func NewFinder(lines *Source, opts ...FinderOption) *Finder {
+	f := &Finder{}
 
 	for _, opt := range opts {
 		opt(f)
 	}
+
+	// Preprocess source and build position map.
+	f.source, f.posMap = f.buildSourceAndPositionMap(lines)
 
 	return f
 }
@@ -68,34 +77,27 @@ func WithNormalizer(normalizer Normalizer) FinderOption {
 	}
 }
 
-// Find finds all occurrences of the search string in the provided lines.
+// Find finds all occurrences of the search string in the preprocessed source.
 // It returns a slice of [position.Range] indicating the start and end positions of each match.
-// Positions are 0-indexed. The slice is provided in the order the matches appear in the lines.
-func (f *Finder) Find(lines *Source) []position.Range {
-	if f.search == "" || lines == nil || lines.IsEmpty() {
-		return nil
-	}
-
-	// Build concatenated source and position map.
-	// When a normalizer is set, source is already normalized and posMap maps
-	// normalized character indices to original positions.
-	source, posMap := f.buildSourceAndPositionMap(lines)
-	if source == "" {
+// Positions are 0-indexed. The slice is provided in the order the matches appear in the source.
+// Returns nil if the search string is empty or the finder has no source data.
+func (f *Finder) Find(search string) []position.Range {
+	if search == "" || f.source == "" {
 		return nil
 	}
 
 	// Normalize search string if normalizer is set.
-	// Source is already normalized by buildSourceAndPositionMap.
-	searchStr := f.search
+	// Source is already normalized during construction.
+	searchStr := search
 	if f.normalizer != nil {
-		searchStr = f.normalizer.Normalize(f.search)
+		searchStr = f.normalizer.Normalize(search)
 	}
 
 	var results []position.Range
 
 	offset := 0
 	for {
-		idx := strings.Index(source[offset:], searchStr)
+		idx := strings.Index(f.source[offset:], searchStr)
 		if idx == -1 {
 			break
 		}
@@ -104,11 +106,11 @@ func (f *Finder) Find(lines *Source) []position.Range {
 		matchEnd := matchStart + len(searchStr)
 
 		// Convert byte offsets to character offsets for position map lookup.
-		matchStartChar := utf8.RuneCountInString(source[:matchStart])
+		matchStartChar := utf8.RuneCountInString(f.source[:matchStart])
 		matchEndChar := matchStartChar + utf8.RuneCountInString(searchStr) - 1
 
-		startPos := posMap.lookup(matchStartChar)
-		endPos := posMap.lookup(matchEndChar)
+		startPos := f.posMap.lookup(matchStartChar)
+		endPos := f.posMap.lookup(matchEndChar)
 		// End column is exclusive, so add 1.
 		endPos.Col++
 

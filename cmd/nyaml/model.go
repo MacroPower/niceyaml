@@ -43,6 +43,7 @@ func newModel(opts *modelOptions) model {
 	// Create viewport.
 	vp := yamlviewport.New(
 		yamlviewport.WithPrinter(printer),
+		yamlviewport.WithNormalizer(niceyaml.StandardNormalizer{}),
 		yamlviewport.WithSearchStyle(lipgloss.NewStyle().
 			Background(lipgloss.Darken(charmtone.Mustard, 0.5)).
 			Foreground(charmtone.Ox),
@@ -145,16 +146,7 @@ func (m *model) updateSearchInput(msg tea.KeyPressMsg) {
 }
 
 func (m *model) applySearch(term string) {
-	if term == "" {
-		m.viewport.SetFinder(nil)
-		return
-	}
-
-	m.viewport.SetFinder(
-		niceyaml.NewFinder(term,
-			niceyaml.WithNormalizer(niceyaml.StandardNormalizer{}),
-		),
-	)
+	m.viewport.SetSearchTerm(term)
 }
 
 //nolint:gocritic // hugeParam: required for tea.Model interface.

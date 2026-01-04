@@ -76,13 +76,13 @@ func printDiffSummary(p *niceyaml.Printer, before, after string, context int) st
 }
 
 // testFinder returns a Finder configured for testing.
-func testFinder(search string, normalizer niceyaml.Normalizer) *niceyaml.Finder {
+func testFinder(lines *niceyaml.Source, normalizer niceyaml.Normalizer) *niceyaml.Finder {
 	var opts []niceyaml.FinderOption
 	if normalizer != nil {
 		opts = append(opts, niceyaml.WithNormalizer(normalizer))
 	}
 
-	return niceyaml.NewFinder(search, opts...)
+	return niceyaml.NewFinder(lines, opts...)
 }
 
 func TestPrinter_Anchor(t *testing.T) {
@@ -1812,10 +1812,10 @@ func TestFinderPrinter_Integration(t *testing.T) {
 			t.Parallel()
 
 			lines := niceyaml.NewSourceFromString(tc.input)
-			finder := testFinder(tc.search, tc.normalizer)
+			finder := testFinder(lines, tc.normalizer)
 			printer := testPrinter()
 
-			ranges := finder.Find(lines)
+			ranges := finder.Find(tc.search)
 
 			if tc.wantNoRanges {
 				assert.Empty(t, ranges)
@@ -1874,12 +1874,12 @@ func TestPrinter_Golden(t *testing.T) {
 			},
 			setupFunc: func(p *niceyaml.Printer, lines *niceyaml.Source) {
 				// Search for "日本" (Japan) which appears multiple times in full.yaml.
-				finder := niceyaml.NewFinder("日本")
+				finder := niceyaml.NewFinder(lines)
 				highlightStyle := lipgloss.NewStyle().
 					Background(lipgloss.Color("#FFFF00")).
 					Foreground(lipgloss.Color("#000000"))
 
-				ranges := finder.Find(lines)
+				ranges := finder.Find("日本")
 				for _, rng := range ranges {
 					p.AddStyleToRange(&highlightStyle, rng)
 				}

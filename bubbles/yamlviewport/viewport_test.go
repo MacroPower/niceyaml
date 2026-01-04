@@ -123,7 +123,7 @@ func TestViewport_Golden(t *testing.T) {
 			width:  80,
 			height: 24,
 			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
-				m.SetFinder(niceyaml.NewFinder("item"))
+				m.SetSearchTerm("item")
 			},
 		},
 		"DiffMode": {
@@ -198,7 +198,7 @@ func TestViewport_Golden(t *testing.T) {
 			width:  80,
 			height: 24,
 			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
-				m.SetFinder(niceyaml.NewFinder("item"))
+				m.SetSearchTerm("item")
 				m.SearchNext() // Move to second match.
 			},
 		},
@@ -437,26 +437,21 @@ func TestViewport_Search(t *testing.T) {
 	tks := lexer.Tokenize(yaml)
 	lines := niceyaml.NewSourceFromTokens(tks)
 
-	// Finder that finds "item" in niceyaml.
-	itemFinder := niceyaml.NewFinder("item")
-
-	// Finder that finds nothing.
-	noMatchFinder := niceyaml.NewFinder("nonexistent")
-
 	tcs := map[string]struct {
-		test   func(t *testing.T, m *yamlviewport.Model)
-		finder yamlviewport.Finder
+		test       func(t *testing.T, m *yamlviewport.Model)
+		searchTerm string
 	}{
-		"SetFinder": {
-			finder: itemFinder,
+		"SetSearchTerm": {
+			searchTerm: "item",
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				assert.Equal(t, 3, m.SearchCount())
 				assert.Equal(t, 0, m.SearchIndex())
+				assert.Equal(t, "item", m.SearchTerm())
 			},
 		},
 		"SearchNext": {
-			finder: itemFinder,
+			searchTerm: "item",
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				m.SearchNext()
@@ -471,7 +466,7 @@ func TestViewport_Search(t *testing.T) {
 			},
 		},
 		"SearchPrevious": {
-			finder: itemFinder,
+			searchTerm: "item",
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				// Wraps around from 0 to last.
@@ -483,16 +478,17 @@ func TestViewport_Search(t *testing.T) {
 			},
 		},
 		"ClearSearch": {
-			finder: itemFinder,
+			searchTerm: "item",
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				m.ClearSearch()
 				assert.Equal(t, 0, m.SearchCount())
 				assert.Equal(t, -1, m.SearchIndex())
+				assert.Empty(t, m.SearchTerm())
 			},
 		},
 		"NoMatches": {
-			finder: noMatchFinder,
+			searchTerm: "nonexistent",
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				assert.Equal(t, 0, m.SearchCount())
@@ -513,7 +509,7 @@ func TestViewport_Search(t *testing.T) {
 			m.SetWidth(80)
 			m.SetHeight(24)
 			m.SetTokens(lines)
-			m.SetFinder(tc.finder)
+			m.SetSearchTerm(tc.searchTerm)
 
 			tc.test(t, &m)
 		})

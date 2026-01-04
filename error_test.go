@@ -505,6 +505,7 @@ func TestErrorAnnotation(t *testing.T) {
 			if tc.useFile {
 				file, parseErr := parser.Parse(tokens, 0)
 				require.NoError(t, parseErr)
+
 				opts = append(opts, niceyaml.WithFile(file))
 			} else {
 				opts = append(opts, niceyaml.WithTokens(tokens))

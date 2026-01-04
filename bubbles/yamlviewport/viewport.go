@@ -31,14 +31,6 @@ const (
 	DiffModeNone
 )
 
-// Finder finds matches in lines for highlighting.
-// The viewport invokes this during rerender to get fresh matches.
-type Finder interface {
-	// Find returns [position.PositionRange] values to highlight in the given
-	// [niceyaml.Source]. Positions are 0-indexed. Returns nil if no matches.
-	Find(lines *niceyaml.Source) []position.Range
-}
-
 // Option is a configuration option that works in conjunction with [New].
 type Option func(*Model)
 
@@ -77,6 +69,16 @@ func WithSelectedSearchStyle(s lipgloss.Style) Option {
 	}
 }
 
+// WithNormalizer sets the [niceyaml.Normalizer] used for search matching.
+// When set, both the source text and search terms are normalized before matching,
+// enabling case-insensitive and diacritic-insensitive search.
+// See [niceyaml.StandardNormalizer] for a common implementation.
+func WithNormalizer(n niceyaml.Normalizer) Option {
+	return func(m *Model) {
+		m.normalizer = n
+	}
+}
+
 // New returns a new model with the given options.
 func New(opts ...Option) Model {
 	var m Model
@@ -103,7 +105,9 @@ type Model struct {
 	printer     *niceyaml.Printer
 	// KeyMap contains the keybindings for viewport navigation.
 	KeyMap         KeyMap
-	finder         Finder
+	normalizer     niceyaml.Normalizer // Normalizer for search matching (nil = exact match).
+	searchTerm     string              // Current search query.
+	finder         *niceyaml.Finder    // Preprocessed source for searching.
 	searchMatches  []position.Range
 	revision       *niceyaml.Revision
 	lines          *niceyaml.Source
@@ -337,6 +341,7 @@ func (m *Model) rerender() {
 		m.renderedLines = nil
 		m.longestLineWidth = 0
 		m.lines = nil
+		m.finder = nil
 
 		return
 	}
@@ -349,9 +354,16 @@ func (m *Model) rerender() {
 
 	m.printer.ClearStyles()
 
-	// Compute fresh matches if finder is set.
-	if m.finder != nil {
-		m.searchMatches = m.finder.Find(lines)
+	// Compute fresh matches if we have a search term.
+	// Create a new finder for the current lines (preprocesses source once).
+	if m.searchTerm != "" {
+		var opts []niceyaml.FinderOption
+		if m.normalizer != nil {
+			opts = append(opts, niceyaml.WithNormalizer(m.normalizer))
+		}
+
+		m.finder = niceyaml.NewFinder(lines, opts...)
+		m.searchMatches = m.finder.Find(m.searchTerm)
 
 		// Adjust search index if matches changed.
 		if len(m.searchMatches) == 0 {
@@ -359,6 +371,9 @@ func (m *Model) rerender() {
 		} else if m.searchIndex >= len(m.searchMatches) || m.searchIndex < 0 {
 			m.searchIndex = 0
 		}
+	} else {
+		m.finder = nil
+		m.searchMatches = nil
 	}
 
 	// Apply search highlights.
@@ -391,6 +406,29 @@ func (m *Model) rerenderLine(idx int) {
 	if lineWidth > m.longestLineWidth {
 		m.longestLineWidth = lineWidth
 	}
+}
+
+// applySearchHighlights applies current search highlights and re-renders all lines.
+func (m *Model) applySearchHighlights() {
+	if m.lines == nil || m.printer == nil {
+		return
+	}
+
+	m.printer.ClearStyles()
+
+	for i, match := range m.searchMatches {
+		style := m.SearchStyle
+		if i == m.searchIndex {
+			style = m.SelectedSearchStyle
+		}
+
+		m.printer.AddStyleToRange(&style, match)
+	}
+
+	content := m.printer.Print(m.lines)
+
+	m.renderedLines = strings.Split(content, "\n")
+	m.longestLineWidth = maxLineWidth(m.renderedLines)
 }
 
 // getDiffBaseRevision returns the base revision for diff comparison based on the current diff mode.
@@ -642,24 +680,47 @@ func (m *Model) VisibleLineCount() int {
 	return len(m.visibleLines(nil))
 }
 
-// SetFinder sets a finder to be invoked during rerender.
-// The finder receives the current revision's tokens and returns ranges to highlight.
-// Pass nil to clear the finder and remove all highlights.
-func (m *Model) SetFinder(finder Finder) {
-	m.finder = finder
-
-	if finder == nil {
-		m.searchMatches = nil
-		m.searchIndex = -1
+// SetSearchTerm sets the search term and updates highlights.
+// If the term is empty, clears all search highlights.
+// If the source hasn't changed since the last search, this uses the
+// preprocessed finder for efficient searching without rebuilding the position map.
+func (m *Model) SetSearchTerm(term string) {
+	if term == "" {
+		m.ClearSearch()
+		return
 	}
 
+	m.searchTerm = term
+
+	// Fast path: if finder already exists (source unchanged), just search.
+	if m.finder != nil {
+		m.searchMatches = m.finder.Find(term)
+
+		if len(m.searchMatches) == 0 {
+			m.searchIndex = -1
+		} else if m.searchIndex >= len(m.searchMatches) || m.searchIndex < 0 {
+			m.searchIndex = 0
+		}
+
+		m.applySearchHighlights()
+		m.scrollToCurrentMatch()
+
+		return
+	}
+
+	// No finder yet, trigger full rerender to create one.
 	m.rerender()
 	m.scrollToCurrentMatch()
 }
 
-// ClearSearch removes all search highlights and clears the finder.
+// SearchTerm returns the current search term.
+func (m *Model) SearchTerm() string {
+	return m.searchTerm
+}
+
+// ClearSearch removes all search highlights and clears the search term.
 func (m *Model) ClearSearch() {
-	m.finder = nil
+	m.searchTerm = ""
 	m.searchMatches = nil
 	m.searchIndex = -1
 	m.rerender()

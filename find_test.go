@@ -266,9 +266,9 @@ func TestFinder_Find(t *testing.T) {
 				opts = append(opts, niceyaml.WithNormalizer(tc.normalizer))
 			}
 
-			finder := niceyaml.NewFinder(tc.search, opts...)
+			finder := niceyaml.NewFinder(lines, opts...)
 
-			got := finder.Find(lines)
+			got := finder.Find(tc.search)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -318,8 +318,8 @@ func TestFinder_Find_EdgeCases(t *testing.T) {
 			t.Parallel()
 
 			lines := niceyaml.NewSourceFromString(tc.input)
-			finder := niceyaml.NewFinder(tc.search)
-			got := finder.Find(lines)
+			finder := niceyaml.NewFinder(lines)
+			got := finder.Find(tc.search)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -328,8 +328,8 @@ func TestFinder_Find_EdgeCases(t *testing.T) {
 func TestFinder_Find_NilLines(t *testing.T) {
 	t.Parallel()
 
-	finder := niceyaml.NewFinder("test")
-	got := finder.Find(nil)
+	finder := niceyaml.NewFinder(nil)
+	got := finder.Find("test")
 	assert.Nil(t, got)
 }
 
@@ -385,8 +385,8 @@ func TestFinder_Find_DiffBuiltLines(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			finder := niceyaml.NewFinder(tc.search)
-			got := finder.Find(lines)
+			finder := niceyaml.NewFinder(lines)
+			got := finder.Find(tc.search)
 
 			assert.Equal(t, tc.want, got)
 		})
