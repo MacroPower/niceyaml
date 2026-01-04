@@ -16,23 +16,30 @@ import (
 
 func validateCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "validate schema file.yaml [file.yaml...]",
-		Short: "Validate YAML files against a JSON schema",
-		Long:  "Validate YAML files against a JSON schema.\nThe schema can be a local file path or a remote URL (http/https).",
-		Args:  cobra.MinimumNArgs(2),
+		Use:   "validate file.yaml [file.yaml...]",
+		Short: "Validate YAML files",
+		Long:  "Validate YAML files.\nOptionally validate against a JSON schema (local file or http/https URL).",
+		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			schemaRef := args[0]
-			yamlPaths := args[1:]
-
-			// Load and compile schema.
-			schemaData, err := loadSchema(cmd.Context(), schemaRef)
+			schemaRef, err := cmd.Flags().GetString("schema")
 			if err != nil {
-				return fmt.Errorf("load schema: %w", err)
+				return fmt.Errorf("get schema flag: %w", err)
 			}
 
-			validator, err := validate.NewValidator(schemaRef, schemaData)
-			if err != nil {
-				return fmt.Errorf("compile schema: %w", err)
+			yamlPaths := args
+
+			var validator niceyaml.Validator
+			if schemaRef != "" {
+				// Load and compile schema.
+				schemaData, err := loadSchema(cmd.Context(), schemaRef)
+				if err != nil {
+					return fmt.Errorf("load schema: %w", err)
+				}
+
+				validator, err = validate.NewValidator(schemaRef, schemaData)
+				if err != nil {
+					return fmt.Errorf("compile schema: %w", err)
+				}
 			}
 
 			for _, yamlPath := range yamlPaths {
@@ -47,6 +54,8 @@ func validateCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.Flags().StringP("schema", "s", "", "JSON schema file path or URL")
 
 	return cmd
 }
@@ -81,7 +90,7 @@ func fetchSchema(ctx context.Context, schemaURL string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-func validateFile(yamlPath string, validator *validate.Validator) error {
+func validateFile(yamlPath string, validator niceyaml.Validator) error {
 	yamlData, err := os.ReadFile(yamlPath) //nolint:gosec // User-provided file paths are intentional.
 	if err != nil {
 		return fmt.Errorf("read file: %w", err)
@@ -91,14 +100,16 @@ func validateFile(yamlPath string, validator *validate.Validator) error {
 
 	astFile, err := source.Parse()
 	if err != nil {
-		return err
+		return fmt.Errorf("parse YAML: %w", err)
 	}
 
-	decoder := niceyaml.NewDecoder(astFile)
-	for _, doc := range decoder.Documents() {
-		err := doc.Validate(validator)
-		if err != nil {
-			return err
+	if validator != nil {
+		decoder := niceyaml.NewDecoder(astFile)
+		for _, doc := range decoder.Documents() {
+			err := doc.Validate(validator)
+			if err != nil {
+				return fmt.Errorf("validate YAML: %w", err)
+			}
 		}
 	}
 
