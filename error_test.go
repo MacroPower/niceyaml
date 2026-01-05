@@ -140,7 +140,6 @@ func TestErrorWrapper(t *testing.T) {
 	tcs := map[string]struct {
 		wrapperOpts func() []niceyaml.ErrorOption
 		inputErr    func() error
-		wrapOpts    func() []niceyaml.ErrorOption
 		wantExact   string
 		wantNil     bool
 		wantSameErr bool
@@ -172,43 +171,16 @@ func TestErrorWrapper(t *testing.T) {
 				"<key>value</key><punctuation>:</punctuation><default> </default><number>123</number>",
 			),
 		},
-		"call-site options override defaults": {
-			wrapperOpts: func() []niceyaml.ErrorOption { return []niceyaml.ErrorOption{niceyaml.WithSourceLines(1)} },
-			inputErr: func() error {
-				return niceyaml.NewError(
-					errors.New("test error"),
-					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("name").Build()),
-				)
-			},
-			wrapOpts: func() []niceyaml.ErrorOption {
-				return []niceyaml.ErrorOption{
-					niceyaml.WithTokens(tokens),
-					niceyaml.WithSourceLines(3),
-					niceyaml.WithPrinter(newXMLPrinter()),
-				}
-			},
-			wantExact: yamltest.JoinLF(
-				"[1:1] test error:",
-				"",
-				"<error>name</error><punctuation>:</punctuation><default> </default><string>test</string>",
-				"<key>value</key><punctuation>:</punctuation><default> </default><number>123</number>",
-			),
-		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			wrapper := niceyaml.NewErrorWrapper(tc.wrapperOpts()...)
+			wrapper := niceyaml.NewErrorContext(tc.wrapperOpts()...)
 			inputErr := tc.inputErr()
 
-			var wrapOpts []niceyaml.ErrorOption
-			if tc.wrapOpts != nil {
-				wrapOpts = tc.wrapOpts()
-			}
-
-			got := wrapper.Wrap(inputErr, wrapOpts...)
+			got := wrapper.Wrap(inputErr)
 
 			if tc.wantNil {
 				assert.NoError(t, got)

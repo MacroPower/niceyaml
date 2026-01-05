@@ -12,28 +12,35 @@ import (
 	"github.com/goccy/go-yaml/token"
 )
 
-// StyledPrinter extends [TokenStyler] with slice printing capabilities.
-type StyledPrinter interface {
+// ErrorWrapper wraps errors with additional context.
+// See [ErrorContext] for an implementation that wraps [Error]s.
+type ErrorWrapper interface {
+	Wrap(err error) error
+}
+
+// StyledSlicePrinter extends [TokenStyler] with slice printing capabilities.
+type StyledSlicePrinter interface {
 	TokenStyler
 	PrintSlice(lines LineIterator, minLine, maxLine int) string
 }
 
-// ErrorWrapper wraps errors with additional context for [Error] types.
-// It holds default options that are applied to all wrapped errors.
-type ErrorWrapper struct {
+// ErrorContext wraps errors with additional context for [Error] types.
+// It holds default [ErrorOption]s that are applied to all wrapped errors.
+// Create instances with [NewErrorContext].
+type ErrorContext struct {
 	opts []ErrorOption
 }
 
-// NewErrorWrapper creates a new [ErrorWrapper] with the given default options.
-func NewErrorWrapper(opts ...ErrorOption) *ErrorWrapper {
-	return &ErrorWrapper{
+// NewErrorContext creates a new [ErrorContext] with the given [ErrorOption]s.
+func NewErrorContext(opts ...ErrorOption) *ErrorContext {
+	return &ErrorContext{
 		opts: opts,
 	}
 }
 
 // Wrap wraps an error with additional context for [Error]s.
 // If the error isn't an [Error], it returns the original error unmodified.
-func (ew *ErrorWrapper) Wrap(err error, opts ...ErrorOption) error {
+func (ew *ErrorContext) Wrap(err error) error {
 	if err == nil {
 		return nil
 	}
@@ -41,10 +48,6 @@ func (ew *ErrorWrapper) Wrap(err error, opts ...ErrorOption) error {
 	var yamlErr *Error
 	if errors.As(err, &yamlErr) {
 		for _, opt := range ew.opts {
-			opt(yamlErr)
-		}
-
-		for _, opt := range opts {
 			opt(yamlErr)
 		}
 
@@ -64,7 +67,7 @@ type Error struct {
 	err         error
 	path        *yaml.Path
 	token       *token.Token
-	printer     StyledPrinter
+	printer     StyledSlicePrinter
 	file        *ast.File
 	tokens      token.Tokens
 	sourceLines int
@@ -109,7 +112,7 @@ func WithErrorToken(tk *token.Token) ErrorOption {
 }
 
 // WithPrinter sets the printer used for formatting the error source.
-func WithPrinter(p StyledPrinter) ErrorOption {
+func WithPrinter(p StyledSlicePrinter) ErrorOption {
 	return func(e *Error) {
 		e.printer = p
 	}

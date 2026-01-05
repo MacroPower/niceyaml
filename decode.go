@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"iter"
 
 	"github.com/goccy/go-yaml"
@@ -19,12 +18,13 @@ type Validator interface {
 
 // Decoder decodes YAML documents from an [*ast.File].
 type Decoder struct {
-	f *ast.File
+	f  *ast.File
+	ew ErrorWrapper
 }
 
-// NewDecoder creates a new [Decoder] for the given [ast.File].
-func NewDecoder(f *ast.File) *Decoder {
-	return &Decoder{f}
+// NewDecoder creates a new [Decoder] for the given [*ast.File].
+func NewDecoder(f *ast.File, ew ErrorWrapper) *Decoder {
+	return &Decoder{f: f, ew: ew}
 }
 
 // Count returns the number of YAML documents in the file.
@@ -36,7 +36,7 @@ func (d *Decoder) Count() int {
 func (d *Decoder) Documents() iter.Seq2[int, *DocumentDecoder] {
 	return func(yield func(int, *DocumentDecoder) bool) {
 		for i, doc := range d.f.Docs {
-			if !yield(i, NewDocumentDecoder(d.f, doc)) {
+			if !yield(i, NewDocumentDecoder(doc, d.ew)) {
 				return
 			}
 		}
@@ -51,15 +51,16 @@ func (d *Decoder) Documents() iter.Seq2[int, *DocumentDecoder] {
 // same pre-parsed AST, so there is no overhead from YAML re-parsing. This is necessary
 // because we must construct [any] for our [Validator], prior to decoding into typed structs.
 type DocumentDecoder struct {
-	f   *ast.File
 	doc *ast.DocumentNode
+	ew  ErrorWrapper
 }
 
 // NewDocumentDecoder creates a new [DocumentDecoder].
-func NewDocumentDecoder(f *ast.File, doc *ast.DocumentNode) *DocumentDecoder {
+// The [ErrorWrapper] is used to wrap any [Error]s, see [ErrorContext] for an implementation.
+func NewDocumentDecoder(doc *ast.DocumentNode, ew ErrorWrapper) *DocumentDecoder {
 	return &DocumentDecoder{
-		f:   f,
 		doc: doc,
+		ew:  ew,
 	}
 }
 
@@ -106,7 +107,7 @@ func (dd *DocumentDecoder) ValidateDecodeContext(ctx context.Context, v any, val
 
 // Validate decodes the document at the specified doc index into [any]
 // and validates it using the given [Validator].
-// Any YAML decoding errors are converted to [Error] with source annotations.
+// Validation [Error]s are wrapped with the provided [ErrorWrapper].
 // The validator is responsible for returning an [Error] pointing to the relevant
 // YAML token if validation fails.
 func (dd *DocumentDecoder) Validate(validator Validator) error {
@@ -115,7 +116,7 @@ func (dd *DocumentDecoder) Validate(validator Validator) error {
 
 // ValidateContext decodes the document at the specified doc index into [any]
 // with [context.Context] and validates it using the given [Validator].
-// Any YAML decoding errors are converted to [Error] with source annotations.
+// Validation [Error]s are wrapped with the provided [ErrorWrapper].
 // The validator is responsible for returning an [Error] pointing to the relevant
 // YAML token if validation fails.
 func (dd *DocumentDecoder) ValidateContext(ctx context.Context, validator Validator) error {
@@ -126,23 +127,24 @@ func (dd *DocumentDecoder) ValidateContext(ctx context.Context, validator Valida
 		return err
 	}
 
-	ew := NewErrorWrapper(WithFile(dd.f))
 	err = validator.Validate(v)
 	if err != nil {
-		return ew.Wrap(fmt.Errorf("invalid document: %w", err))
+		return dd.ew.Wrap(err)
 	}
 
 	return nil
 }
 
 // Decode decodes the specified document into v.
-// Any YAML decoding errors are converted to [Error] with source annotations.
+// Any YAML decoding errors are converted to [Error] with source annotations
+// and wrapped via the provided [ErrorWrapper].
 func (dd *DocumentDecoder) Decode(v any) error {
 	return dd.DecodeContext(context.Background(), v)
 }
 
 // DecodeContext decodes the specified document into v with [context.Context].
-// Any YAML decoding errors are converted to [Error] with source annotations.
+// Any YAML decoding errors are converted to [Error] with source annotations
+// and wrapped via the provided [ErrorWrapper].
 func (dd *DocumentDecoder) DecodeContext(ctx context.Context, v any) error {
 	dec := yaml.NewDecoder(bytes.NewReader(nil))
 	err := dec.DecodeFromNodeContext(ctx, dd.doc.Body, v)
@@ -152,10 +154,12 @@ func (dd *DocumentDecoder) DecodeContext(ctx context.Context, v any) error {
 
 	var yamlErr yaml.Error
 	if errors.As(err, &yamlErr) {
-		return NewError(
+		err = NewError(
 			errors.New(yamlErr.GetMessage()),
 			WithErrorToken(yamlErr.GetToken()),
 		)
+
+		return dd.ew.Wrap(err)
 	}
 
 	//nolint:wrapcheck // Return the original error if it's not a [yaml.Error].

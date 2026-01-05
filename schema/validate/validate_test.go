@@ -666,7 +666,9 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 			file, err := source.Parse()
 			require.NoError(t, err)
 
-			d := niceyaml.NewDecoder(file)
+			ec := niceyaml.NewErrorContext(niceyaml.WithFile(file))
+			d := niceyaml.NewDecoder(file, ec)
+
 			for _, dd := range d.Documents() {
 				err = dd.Validate(validator)
 

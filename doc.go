@@ -93,7 +93,7 @@
 //   - [WithErrorToken]: Token associated with the error
 //   - [WithPrinter]: Customize error source formatting
 //
-// Use [ErrorWrapper] to create errors with consistent default options.
+// Use [ErrorContext] to create errors with consistent default options.
 //
 // # String Finding
 //
@@ -113,7 +113,8 @@
 // yields [DocumentDecoder] instances for each document in a multi-document
 // YAML file:
 //
-//	decoder := niceyaml.NewDecoder(file)
+//	ec := niceyaml.NewErrorContext(niceyaml.WithFile(file))
+//	decoder := niceyaml.NewDecoder(file, ec)
 //	for _, doc := range decoder.Documents() {
 //	    var config Config
 //	    if err := doc.Decode(&config); err != nil {
