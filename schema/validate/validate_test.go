@@ -663,7 +663,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 			t.Parallel()
 
 			source := niceyaml.NewSourceFromString(tc.input)
-			file, err := source.Parse()
+			file, err := source.File()
 			require.NoError(t, err)
 
 			ec := niceyaml.NewErrorContext(niceyaml.WithFile(file))

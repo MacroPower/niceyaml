@@ -3,6 +3,7 @@ package niceyaml
 import (
 	"errors"
 	"iter"
+	"sync"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -17,8 +18,12 @@ import (
 // Source represents a collection of [token.Tokens] organized into [line.Lines]
 // with associated metadata.
 type Source struct {
-	Name  string
-	lines line.Lines
+	Name       string
+	lines      line.Lines
+	file       *ast.File
+	fileErr    error
+	parserOpts []parser.Option
+	fileOnce   sync.Once
 }
 
 // SourceOption configures [Source] creation.
@@ -26,8 +31,17 @@ type SourceOption func(*Source)
 
 // WithName sets the name for the [Source].
 func WithName(name string) SourceOption {
-	return func(t *Source) {
-		t.Name = name
+	return func(s *Source) {
+		s.Name = name
+	}
+}
+
+// WithParserOptions sets the parser options used when parsing the [Source]
+// into an [*ast.File]. These options are passed to [parser.Parse] in addition
+// to [parser.ParseComments], which is always included.
+func WithParserOptions(opts ...parser.Option) SourceOption {
+	return func(s *Source) {
+		s.parserOpts = opts
 	}
 }
 
@@ -80,10 +94,20 @@ func (s *Source) Tokens() token.Tokens {
 	return s.lines.Tokens()
 }
 
-// Parse parses the Source tokens into an [ast.File].
+// File returns an [*ast.File] for the Source tokens. The file is lazily
+// parsed on first call using [parser.Parse] with options provided via
+// [WithParserOptions]. Subsequent calls return the cached result.
 // Any YAML parsing errors are converted to [Error] with source annotations.
-func (s *Source) Parse(opts ...parser.Option) (*ast.File, error) {
-	file, err := parser.Parse(s.Tokens(), parser.ParseComments, opts...)
+func (s *Source) File() (*ast.File, error) {
+	s.fileOnce.Do(func() {
+		s.file, s.fileErr = s.parse()
+	})
+
+	return s.file, s.fileErr
+}
+
+func (s *Source) parse() (*ast.File, error) {
+	file, err := parser.Parse(s.Tokens(), parser.ParseComments, s.parserOpts...)
 	if err == nil {
 		return file, nil
 	}

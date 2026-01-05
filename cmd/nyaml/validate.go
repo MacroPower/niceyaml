@@ -98,7 +98,7 @@ func validateFile(yamlPath string, validator niceyaml.Validator) error {
 
 	source := niceyaml.NewSourceFromString(string(yamlData))
 
-	astFile, err := source.Parse()
+	astFile, err := source.File()
 	if err != nil {
 		return err
 	}

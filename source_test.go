@@ -877,7 +877,7 @@ func TestSource_Parse(t *testing.T) {
 				t.Parallel()
 
 				source := niceyaml.NewSourceFromString(tc.input)
-				file, err := source.Parse()
+				file, err := source.File()
 
 				require.NoError(t, err)
 				require.NotNil(t, file)
@@ -890,7 +890,7 @@ func TestSource_Parse(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString("")
-		file, err := source.Parse()
+		file, err := source.File()
 
 		require.NoError(t, err)
 		require.NotNil(t, file)
@@ -908,7 +908,7 @@ func TestSource_Parse(t *testing.T) {
 		tks.Add(tkb.Clone().Origin(":\n").PositionColumn(2).Build())
 
 		source := niceyaml.NewSourceFromTokens(tks)
-		file, err := source.Parse()
+		file, err := source.File()
 
 		require.Error(t, err)
 		assert.Nil(t, file)
