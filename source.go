@@ -15,10 +15,20 @@ import (
 	"github.com/macropower/niceyaml/position"
 )
 
+// LineIterator provides line-by-line access to YAML tokens.
+// See [Source] for an implementation.
+type LineIterator interface {
+	Lines() iter.Seq2[position.Position, line.Line]
+	Runes() iter.Seq2[position.Position, rune]
+	Len() int
+	IsEmpty() bool
+}
+
 // Source represents a collection of [token.Tokens] organized into [line.Lines]
 // with associated metadata.
+// Create instances with [NewSourceFromString], [NewSourceFromToken], or [NewSourceFromTokens].
 type Source struct {
-	Name       string
+	name       string
 	lines      line.Lines
 	file       *ast.File
 	fileErr    error
@@ -33,7 +43,7 @@ type SourceOption func(*Source)
 // WithName sets the name for the [Source].
 func WithName(name string) SourceOption {
 	return func(s *Source) {
-		s.Name = name
+		s.name = name
 	}
 }
 
@@ -54,14 +64,14 @@ func WithErrorOptions(opts ...ErrorOption) SourceOption {
 	}
 }
 
-// NewSourceFromString calls [lexer.Tokenize] to create new [Source] from a YAML string.
+// NewSourceFromString creates a new [Source] from a YAML string using [lexer.Tokenize].
 func NewSourceFromString(src string, opts ...SourceOption) *Source {
 	tks := lexer.Tokenize(src)
 
 	return NewSourceFromTokens(tks, opts...)
 }
 
-// NewSourceFromToken creates new [Source] from a seed [*token.Token].
+// NewSourceFromToken creates a new [Source] from a seed [*token.Token].
 // It collects all [token.Tokens] by walking the token chain from start to end.
 func NewSourceFromToken(tk *token.Token, opts ...SourceOption) *Source {
 	if tk == nil {
@@ -84,7 +94,7 @@ func NewSourceFromToken(tk *token.Token, opts ...SourceOption) *Source {
 	return NewSourceFromTokens(tks, opts...)
 }
 
-// NewSourceFromTokens creates new [Source] from [token.Tokens].
+// NewSourceFromTokens creates a new [Source] from [token.Tokens].
 // See [line.NewLines] for details on token splitting behavior.
 func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 	t := &Source{}
@@ -95,6 +105,11 @@ func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 	t.lines = line.NewLines(tks)
 
 	return t
+}
+
+// Name returns the name of the Source.
+func (s *Source) Name() string {
+	return s.name
 }
 
 // Tokens reconstructs the full [token.Tokens] stream from all [Line]s.
@@ -152,8 +167,8 @@ func (s *Source) WrapError(err error) error {
 	return err
 }
 
-// Count returns the number of lines.
-func (s *Source) Count() int {
+// Len returns the number of lines.
+func (s *Source) Len() int {
 	return len(s.lines)
 }
 
@@ -205,9 +220,9 @@ func (s *Source) Annotate(idx int, ann line.Annotation) {
 	s.lines[idx].Annotation = ann
 }
 
-// SetFlag sets a [line.Flag] on the [line.Line] at the given index.
+// Flag sets a [line.Flag] on the [line.Line] at the given index.
 // Panics if idx is out of range.
-func (s *Source) SetFlag(idx int, flag line.Flag) {
+func (s *Source) Flag(idx int, flag line.Flag) {
 	s.lines[idx].Flag = flag
 }
 

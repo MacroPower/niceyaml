@@ -6,8 +6,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/lucasb-eyer/go-colorful"
-
-	"github.com/macropower/niceyaml/position"
 )
 
 // Style identifies a style category for YAML highlighting.
@@ -37,22 +35,10 @@ const (
 // Styles defines styles for YAML highlighting.
 type Styles map[Style]lipgloss.Style
 
-// StyleGetter retrieves styles by category.
-type StyleGetter interface {
-	GetStyle(s Style) *lipgloss.Style
-}
-
-// TokenStyler manages style ranges for rendering YAML tokens.
-type TokenStyler interface {
-	StyleGetter
-	AddStyleToRange(style *lipgloss.Style, r position.Range)
-	ClearStyles()
-}
-
-// GetStyle returns the [lipgloss.Style] for the given [Style] category.
+// Style returns the [lipgloss.Style] for the given [Style] category.
 // If the given [Style] is not defined, it returns [StyleDefault].
 // If no [StyleDefault] is defined, it returns an empty [lipgloss.Style].
-func (s Styles) GetStyle(style Style) *lipgloss.Style {
+func (s Styles) Style(style Style) *lipgloss.Style {
 	matchedStyle, ok := s[style]
 	if ok {
 		return &matchedStyle

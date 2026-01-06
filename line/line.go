@@ -139,7 +139,7 @@ func (l Line) String() string {
 }
 
 // Lines represents an ordered collection of [Line]s with associated metadata.
-// Create instances using [NewLines].
+// Create instances with [NewLines].
 type Lines []Line
 
 // NewLines creates new [Lines] from [token.Tokens].

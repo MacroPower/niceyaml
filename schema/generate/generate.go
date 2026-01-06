@@ -45,6 +45,7 @@ type LookupCommentFunc func(commentMap map[string]string) func(t reflect.Type, f
 // Generator generates a JSON schema from a Go type using reflection.
 // When package paths are provided via [WithPackagePaths], it extracts source
 // comments to include as schema descriptions. Uses [github.com/invopop/jsonschema].
+// Create instances with [NewGenerator].
 type Generator struct {
 	reflector         *jsonschema.Reflector
 	lookupCommentFunc LookupCommentFunc

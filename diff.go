@@ -48,8 +48,18 @@ type diffHunk struct {
 }
 
 // lcsLineDiff computes line operations using a simple LCS-based diff.
-func lcsLineDiff(before, after line.Lines) []lineOp {
-	m, n := len(before), len(after)
+func lcsLineDiff(before, after LineIterator) []lineOp {
+	beforeLines := make(line.Lines, 0, before.Len())
+	for _, ln := range before.Lines() {
+		beforeLines = append(beforeLines, ln)
+	}
+
+	afterLines := make(line.Lines, 0, after.Len())
+	for _, ln := range after.Lines() {
+		afterLines = append(afterLines, ln)
+	}
+
+	m, n := len(beforeLines), len(afterLines)
 
 	dp := make([][]int, m+1)
 	for i := range dp {
@@ -58,7 +68,7 @@ func lcsLineDiff(before, after line.Lines) []lineOp {
 
 	for i := m - 1; i >= 0; i-- {
 		for j := n - 1; j >= 0; j-- {
-			if before[i].Content() == after[j].Content() {
+			if beforeLines[i].Content() == afterLines[j].Content() {
 				dp[i][j] = dp[i+1][j+1] + 1
 			} else {
 				dp[i][j] = max(dp[i+1][j], dp[i][j+1])
@@ -73,17 +83,17 @@ func lcsLineDiff(before, after line.Lines) []lineOp {
 
 	for i < m || j < n {
 		switch {
-		case i < m && j < n && before[i].Content() == after[j].Content():
-			ops = append(ops, lineOp{kind: diffEqual, line: after[j]})
+		case i < m && j < n && beforeLines[i].Content() == afterLines[j].Content():
+			ops = append(ops, lineOp{kind: diffEqual, line: afterLines[j]})
 			i++
 			j++
 
 		case i < m && (j >= n || dp[i+1][j] >= dp[i][j+1]):
-			ops = append(ops, lineOp{kind: diffDelete, line: before[i]})
+			ops = append(ops, lineOp{kind: diffDelete, line: beforeLines[i]})
 			i++
 
 		default:
-			ops = append(ops, lineOp{kind: diffInsert, line: after[j]})
+			ops = append(ops, lineOp{kind: diffInsert, line: afterLines[j]})
 			j++
 		}
 	}
@@ -193,23 +203,30 @@ func selectContextLines(ops []lineOp, context int) []bool {
 	return included
 }
 
-// FullDiff represents a complete diff between two [Revision]s.
+// SourceGetter gets a [NamedLineIterator].
+// See [Revision] for an implementation.
+type SourceGetter interface {
+	Source() NamedLineIterator
+}
+
+// FullDiff represents a complete diff between two [SourceGetter]s.
+// Create instances with [NewFullDiff].
 type FullDiff struct {
-	a, b *Revision
+	a, b SourceGetter
 }
 
 // NewFullDiff creates a new [FullDiff].
-func NewFullDiff(a, b *Revision) *FullDiff {
+func NewFullDiff(a, b SourceGetter) *FullDiff {
 	return &FullDiff{a: a, b: b}
 }
 
-// Lines returns a [*Source] representing the diff between the two revisions.
+// Source returns a [*Source] representing the diff between the two [SourceGetter]s.
 // The returned Source contains merged tokens from both revisions:
 // unchanged lines use tokens from b, while changed lines include
 // deleted tokens from a followed by inserted tokens from b.
-// Lines contain flags for deleted/inserted lines.
-func (d *FullDiff) Lines() *Source {
-	ops := lcsLineDiff(d.a.head.lines, d.b.head.lines)
+// Source contains flags for deleted/inserted lines.
+func (d *FullDiff) Source() *Source {
+	ops := lcsLineDiff(d.a.Source(), d.b.Source())
 
 	lines := make(line.Lines, 0, len(ops))
 
@@ -229,39 +246,40 @@ func (d *FullDiff) Lines() *Source {
 	}
 
 	return &Source{
-		Name:  fmt.Sprintf("%s..%s", d.a.Name(), d.b.Name()),
+		name:  fmt.Sprintf("%s..%s", d.a.Source().Name(), d.b.Source().Name()),
 		lines: lines,
 	}
 }
 
-// SummaryDiff represents a summarized diff between two [Revision]s.
+// SummaryDiff represents a summarized diff between two [SourceGetter]s.
+// Create instances with [NewSummaryDiff].
 type SummaryDiff struct {
-	a, b    *Revision
+	a, b    SourceGetter
 	context int
 }
 
 // NewSummaryDiff creates a new [SummaryDiff] with the specified context lines.
 // A context of 0 shows only the changed lines. Negative values are treated as 0.
-func NewSummaryDiff(a, b *Revision, context int) *SummaryDiff {
+func NewSummaryDiff(a, b SourceGetter, context int) *SummaryDiff {
 	return &SummaryDiff{a: a, b: b, context: max(0, context)}
 }
 
-// Lines returns a [*Source] representing a summarized diff between two revisions.
+// Source returns a [*Source] representing a summarized diff between two revisions.
 // It shows only changed lines with the specified number of context lines around each change.
 // Hunk headers are stored in [Line.Annotation.Content] for each hunk's first line.
-func (d *SummaryDiff) Lines() *Source {
-	ops := lcsLineDiff(d.a.head.lines, d.b.head.lines)
-	name := fmt.Sprintf("%s..%s", d.a.Name(), d.b.Name())
+func (d *SummaryDiff) Source() *Source {
+	ops := lcsLineDiff(d.a.Source(), d.b.Source())
+	name := fmt.Sprintf("%s..%s", d.a.Source().Name(), d.b.Source().Name())
 
 	if len(ops) == 0 {
-		return &Source{Name: name}
+		return &Source{name: name}
 	}
 
 	included := selectContextLines(ops, d.context)
 	hunks := buildHunks(ops, included)
 
 	if len(hunks) == 0 {
-		return &Source{Name: name}
+		return &Source{name: name}
 	}
 
 	var lines line.Lines
@@ -293,7 +311,7 @@ func (d *SummaryDiff) Lines() *Source {
 	}
 
 	return &Source{
-		Name:  name,
+		name:  name,
 		lines: lines,
 	}
 }

@@ -12,11 +12,13 @@ import (
 
 // Validator validates any data. Implementers should return an [Error]
 // pointing to the relevant YAML token if validation fails.
+// See [schema/validate.Validator] for an implementation.
 type Validator interface {
 	Validate(v any) error
 }
 
 // Decoder decodes YAML documents from an [*ast.File].
+// Create instances with [NewDecoder].
 type Decoder struct {
 	f *ast.File
 }
@@ -26,8 +28,8 @@ func NewDecoder(f *ast.File) *Decoder {
 	return &Decoder{f: f}
 }
 
-// Count returns the number of YAML documents in the file.
-func (d *Decoder) Count() int {
+// Len returns the number of YAML documents in the file.
+func (d *Decoder) Len() int {
 	return len(d.f.Docs)
 }
 
@@ -43,6 +45,7 @@ func (d *Decoder) Documents() iter.Seq2[int, *DocumentDecoder] {
 }
 
 // DocumentDecoder validates and decodes a single [*ast.DocumentNode].
+// Create instances with [NewDocumentDecoder].
 //
 // Note: Both [DocumentDecoder.Validate] and [DocumentDecoder.Decode] perform decode
 // operations. [DocumentDecoder.Validate] decodes to [any] for schema validation, and
@@ -101,18 +104,16 @@ func (dd *DocumentDecoder) ValidateDecodeContext(ctx context.Context, v any, val
 	return nil
 }
 
-// Validate decodes the document at the specified doc index into [any]
-// and validates it using the given [Validator].
+// Validate decodes the document into [any] and validates it using the given [Validator].
 // The validator is responsible for returning an [Error] pointing to the relevant
 // YAML token if validation fails.
 func (dd *DocumentDecoder) Validate(validator Validator) error {
 	return dd.ValidateContext(context.Background(), validator)
 }
 
-// ValidateContext decodes the document at the specified doc index into [any]
-// with [context.Context] and validates it using the given [Validator].
-// The validator is responsible for returning an [Error] pointing to the relevant
-// YAML token if validation fails.
+// ValidateContext decodes the document into [any] with [context.Context]
+// and validates it using the given [Validator]. The validator is responsible
+// for returning an [Error] pointing to the relevant YAML token if validation fails.
 func (dd *DocumentDecoder) ValidateContext(ctx context.Context, validator Validator) error {
 	var v any
 

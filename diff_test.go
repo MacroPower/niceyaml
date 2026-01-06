@@ -10,7 +10,7 @@ import (
 	"github.com/macropower/niceyaml/yamltest"
 )
 
-func TestFullDiff_Lines(t *testing.T) {
+func TestFullDiff_Source(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -355,15 +355,15 @@ func TestFullDiff_Lines(t *testing.T) {
 			revB := niceyaml.NewRevision(afterTokens)
 			diff := niceyaml.NewFullDiff(revA, revB)
 
-			got := diff.Lines()
+			got := diff.Source()
 
-			assert.Equal(t, "a..b", got.Name)
+			assert.Equal(t, "a..b", got.Name())
 			assert.Equal(t, tc.want, got.String())
 		})
 	}
 }
 
-func TestFullDiff_Lines_Flags(t *testing.T) {
+func TestFullDiff_Source_Flags(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -429,7 +429,7 @@ func TestFullDiff_Lines_Flags(t *testing.T) {
 			revB := niceyaml.NewRevision(afterTokens)
 			diff := niceyaml.NewFullDiff(revA, revB)
 
-			got := diff.Lines()
+			got := diff.Source()
 
 			flaggedCount := 0
 			for _, ln := range got.Lines() {
@@ -447,7 +447,7 @@ func TestFullDiff_Lines_Flags(t *testing.T) {
 	}
 }
 
-func TestSummaryDiff_Lines(t *testing.T) {
+func TestSummaryDiff_Source(t *testing.T) {
 	t.Parallel()
 
 	t.Run("context limits output", func(t *testing.T) {
@@ -491,10 +491,10 @@ func TestSummaryDiff_Lines(t *testing.T) {
 		diff := niceyaml.NewSummaryDiff(revA, revB, 1)
 
 		// Context 1 should include: line4, line5 (delete), line5 (insert), line6.
-		got := diff.Lines()
+		got := diff.Source()
 
-		assert.Equal(t, "a..b", got.Name)
-		assert.Equal(t, 4, got.Count())
+		assert.Equal(t, "a..b", got.Name())
+		assert.Equal(t, 4, got.Len())
 		assert.Equal(t, want, got.String())
 	})
 
@@ -528,10 +528,10 @@ func TestSummaryDiff_Lines(t *testing.T) {
 		revB := niceyaml.NewRevision(afterTokens)
 		diff := niceyaml.NewSummaryDiff(revA, revB, 0)
 
-		got := diff.Lines()
+		got := diff.Source()
 
 		// Only the deleted and inserted lines.
-		assert.Equal(t, 2, got.Count())
+		assert.Equal(t, 2, got.Len())
 		assert.Equal(t, line.FlagDeleted, got.Line(0).Flag)
 		assert.Equal(t, line.FlagInserted, got.Line(1).Flag)
 		assert.Equal(t, want, got.String())
@@ -565,7 +565,7 @@ func TestSummaryDiff_Lines(t *testing.T) {
 		revB := niceyaml.NewRevision(afterTokens)
 		diff := niceyaml.NewSummaryDiff(revA, revB, 1)
 
-		got := diff.Lines()
+		got := diff.Source()
 
 		assert.Equal(t, want, got.String())
 
@@ -573,7 +573,7 @@ func TestSummaryDiff_Lines(t *testing.T) {
 		assert.Equal(t, "@@ -1,3 +1,3 @@", got.Line(0).Annotation.Content)
 
 		// Other lines should not have annotation.
-		for i := 1; i < got.Count(); i++ {
+		for i := 1; i < got.Len(); i++ {
 			assert.Empty(t, got.Line(i).Annotation.Content)
 		}
 	})
@@ -622,7 +622,7 @@ func TestSummaryDiff_Lines(t *testing.T) {
 		diff := niceyaml.NewSummaryDiff(revA, revB, 1)
 
 		// Context 1 should create two separate hunks.
-		got := diff.Lines()
+		got := diff.Source()
 
 		assert.Equal(t, want, got.String())
 
@@ -633,9 +633,9 @@ func TestSummaryDiff_Lines(t *testing.T) {
 		assert.Equal(t, "@@ -8,2 +8,2 @@", got.Line(3).Annotation.Content)
 
 		// Other lines should not have annotations.
-		for pos, line := range got.Lines() {
+		for pos, ln := range got.Lines() {
 			if pos.Line != 0 && pos.Line != 3 {
-				assert.Empty(t, line.Annotation.Content)
+				assert.Empty(t, ln.Annotation.Content)
 			}
 		}
 	})
@@ -653,9 +653,9 @@ func TestSummaryDiff_Lines(t *testing.T) {
 		revB := niceyaml.NewRevision(afterTokens)
 		diff := niceyaml.NewSummaryDiff(revA, revB, 3)
 
-		got := diff.Lines()
+		got := diff.Source()
 
-		assert.Equal(t, "a..b", got.Name)
+		assert.Equal(t, "a..b", got.Name())
 		assert.True(t, got.IsEmpty())
 		assert.Nil(t, got.Tokens())
 	})
@@ -677,10 +677,10 @@ func TestSummaryDiff_Lines(t *testing.T) {
 		revB := niceyaml.NewRevision(afterTokens)
 		diff := niceyaml.NewSummaryDiff(revA, revB, 3)
 
-		got := diff.Lines()
+		got := diff.Source()
 
-		assert.Equal(t, "a..b", got.Name)
-		assert.Equal(t, 1, got.Count())
+		assert.Equal(t, "a..b", got.Name())
+		assert.Equal(t, 1, got.Len())
 		assert.Equal(t, line.FlagInserted, got.Line(0).Flag)
 		assert.Equal(t, want, got.String())
 	})
@@ -702,10 +702,10 @@ func TestSummaryDiff_Lines(t *testing.T) {
 		revB := niceyaml.NewRevision(afterTokens)
 		diff := niceyaml.NewSummaryDiff(revA, revB, 3)
 
-		got := diff.Lines()
+		got := diff.Source()
 
-		assert.Equal(t, "a..b", got.Name)
-		assert.Equal(t, 1, got.Count())
+		assert.Equal(t, "a..b", got.Name())
+		assert.Equal(t, 1, got.Len())
 		assert.Equal(t, line.FlagDeleted, got.Line(0).Flag)
 		assert.Equal(t, want, got.String())
 	})
@@ -736,10 +736,10 @@ func TestSummaryDiff_Lines(t *testing.T) {
 		revB := niceyaml.NewRevision(afterTokens)
 		diff := niceyaml.NewSummaryDiff(revA, revB, -5)
 
-		got := diff.Lines()
+		got := diff.Source()
 
 		// Same as context 0: only changed lines.
-		assert.Equal(t, 2, got.Count())
+		assert.Equal(t, 2, got.Len())
 		assert.Equal(t, want, got.String())
 	})
 }

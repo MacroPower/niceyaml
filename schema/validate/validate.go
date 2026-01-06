@@ -36,6 +36,7 @@ import (
 // Validator validates data against a compiled JSON schema and returns errors
 // with YAML path information. Implements the [niceyaml.Validator] interface
 // for use with [niceyaml.DocumentDecoder]. Uses [github.com/santhosh-tekuri/jsonschema/v6].
+// Create instances with [NewValidator] or [MustNewValidator].
 type Validator struct {
 	schema *jsonschema.Schema
 }

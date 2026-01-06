@@ -14,11 +14,12 @@ var PrettyEncoderOptions = []yaml.EncodeOption{
 }
 
 // Encoder wraps [yaml.Encoder] for convenience.
+// Create instances with [NewEncoder].
 type Encoder struct {
 	e *yaml.Encoder
 }
 
-// NewEncoder wraps [yaml.NewEncoder] to create a new [Encoder].
+// NewEncoder creates a new [Encoder] by wrapping [yaml.NewEncoder].
 // Any provided [yaml.EncodeOption]s are passed to the underlying [yaml.Encoder].
 func NewEncoder(w io.Writer, opts ...yaml.EncodeOption) *Encoder {
 	return &Encoder{

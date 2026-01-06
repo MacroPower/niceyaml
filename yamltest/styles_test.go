@@ -17,7 +17,7 @@ func TestNewXMLStyles(t *testing.T) {
 	assert.NotNil(t, getter)
 }
 
-func TestXMLStyles_GetStyle(t *testing.T) {
+func TestXMLStyles_Style(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
@@ -99,7 +99,7 @@ func TestXMLStyles_GetStyle(t *testing.T) {
 			t.Parallel()
 
 			getter := yamltest.NewXMLStyles()
-			style := getter.GetStyle(tc.input)
+			style := getter.Style(tc.input)
 
 			require.NotNil(t, style)
 
@@ -109,11 +109,11 @@ func TestXMLStyles_GetStyle(t *testing.T) {
 	}
 }
 
-func TestXMLStyles_GetStyle_UnknownStyle(t *testing.T) {
+func TestXMLStyles_Style_UnknownStyle(t *testing.T) {
 	t.Parallel()
 
 	getter := yamltest.NewXMLStyles()
-	style := getter.GetStyle(niceyaml.Style(999))
+	style := getter.Style(niceyaml.Style(999))
 
 	require.NotNil(t, style)
 
@@ -121,11 +121,11 @@ func TestXMLStyles_GetStyle_UnknownStyle(t *testing.T) {
 	assert.Equal(t, "<unknown>test</unknown>", got)
 }
 
-func TestXMLStyles_GetStyle_EmptyContent(t *testing.T) {
+func TestXMLStyles_Style_EmptyContent(t *testing.T) {
 	t.Parallel()
 
 	getter := yamltest.NewXMLStyles()
-	style := getter.GetStyle(niceyaml.StyleKey)
+	style := getter.Style(niceyaml.StyleKey)
 
 	require.NotNil(t, style)
 

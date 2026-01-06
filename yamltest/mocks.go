@@ -1,6 +1,7 @@
 package yamltest
 
 // MockValidator is a test helper that wraps a validation function.
+// Create instances with [NewPassingValidator], [NewFailingValidator], or [NewCustomValidator].
 type MockValidator struct {
 	fn func(input any) error
 }
@@ -34,6 +35,7 @@ func (m *MockValidator) Validate(input any) error {
 }
 
 // MockNormalizer is a test helper that wraps a normalization function.
+// Create instances with [NewIdentityNormalizer], [NewStaticNormalizer], or [NewCustomNormalizer].
 type MockNormalizer struct {
 	fn func(in string) string
 }

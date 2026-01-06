@@ -17,8 +17,8 @@ func NewXMLStyles() XMLStyles {
 	return XMLStyles{}
 }
 
-// GetStyle returns a [*lipgloss.Style] that wraps content in XML tags based on the style category.
-func (x XMLStyles) GetStyle(s niceyaml.Style) *lipgloss.Style {
+// Style returns a [*lipgloss.Style] that wraps content in XML tags based on the style category.
+func (x XMLStyles) Style(s niceyaml.Style) *lipgloss.Style {
 	tag := styleToTag(s)
 	style := lipgloss.NewStyle().Transform(func(content string) string {
 		return "<" + tag + ">" + content + "</" + tag + ">"

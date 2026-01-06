@@ -155,7 +155,7 @@ func BenchmarkSourceLines(b *testing.B) {
 	}
 }
 
-func BenchmarkSourceCount(b *testing.B) {
+func BenchmarkSourceLen(b *testing.B) {
 	yaml := generateYAML(5000)
 	source := niceyaml.NewSourceFromString(yaml)
 
@@ -163,7 +163,7 @@ func BenchmarkSourceCount(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		_ = source.Count()
+		_ = source.Len()
 	}
 }
 

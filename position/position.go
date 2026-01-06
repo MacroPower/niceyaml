@@ -5,6 +5,7 @@ package position
 // Note that it is not simply an offset of go-yaml [token.Position]s, rather it represents
 // the absolute line and column in a document, including in cases where multiple instances
 // of the same token exist (e.g. in diffs).
+// Create instances with [New].
 type Position struct {
 	Line, Col int
 }
@@ -16,6 +17,7 @@ func New(line, col int) Position {
 
 // Range represents a half-open range [Start, End)
 // between two [Position]s.
+// Create instances with [NewRange].
 type Range struct {
 	Start, End Position
 }
@@ -41,7 +43,7 @@ func (r Range) Contains(pos Position) bool {
 }
 
 // Ranges represents a set of [Range]s.
-// Create new instances using [NewRanges].
+// Create instances with [NewRanges].
 type Ranges struct {
 	value []Range
 }

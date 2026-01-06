@@ -14,7 +14,7 @@
 //   - [NewSourceFromTokens]: Build from a token slice
 //
 // Use [WithName] to assign a name to [Source] for identification.
-// Use [Source.Parse] to parse tokens into an [ast.File] for further processing.
+// Use [Source.File] to parse tokens into an [ast.File] for further processing.
 //
 // [Source.Lines] and [Source.Runes] provide iterators for traversing
 // lines and individual runes with their positions.
@@ -48,10 +48,10 @@
 // using a longest common subsequence (LCS) algorithm:
 //
 //	full := niceyaml.NewFullDiff(origin, tip)
-//	full.Lines()  // all lines with inserted/deleted flags
+//	full.Source()  // all lines with inserted/deleted flags
 //
 //	summary := niceyaml.NewSummaryDiff(origin, tip, 3)
-//	summary.Lines()  // changed lines with 3 lines of context
+//	summary.Source()  // changed lines with 3 lines of context
 //
 // The summary output follows unified diff format with hunk headers.
 //

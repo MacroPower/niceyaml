@@ -42,7 +42,11 @@ func newModel(opts *modelOptions) model {
 	// Create viewport.
 	vp := yamlviewport.New(
 		yamlviewport.WithPrinter(printer),
-		yamlviewport.WithNormalizer(niceyaml.StandardNormalizer{}),
+		yamlviewport.WithFinder(
+			niceyaml.NewFinder(
+				niceyaml.WithNormalizer(niceyaml.NewStandardNormalizer()),
+			),
+		),
 		yamlviewport.WithSearchStyle(lipgloss.NewStyle().
 			Background(lipgloss.Darken(charmtone.Mustard, 0.5)).
 			Foreground(charmtone.Ox),

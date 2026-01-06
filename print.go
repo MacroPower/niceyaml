@@ -2,7 +2,6 @@ package niceyaml
 
 import (
 	"fmt"
-	"iter"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -15,11 +14,32 @@ import (
 	"github.com/macropower/niceyaml/position"
 )
 
-// LineIterator provides line-by-line access to YAML tokens for rendering.
-type LineIterator interface {
-	Lines() iter.Seq2[position.Position, line.Line]
-	Count() int
-	IsEmpty() bool
+// StyleGetter retrieves styles by category.
+// See [Styles] for an implementation.
+type StyleGetter interface {
+	Style(s Style) *lipgloss.Style
+}
+
+// TokenStyler manages style ranges for YAML tokens.
+// See [Printer] for an implementation.
+type TokenStyler interface {
+	StyleGetter
+	AddStyleToRange(s *lipgloss.Style, r position.Range)
+	ClearStyles()
+}
+
+// StyledPrinter extends [TokenStyler] with printing capabilities.
+// See [Printer] for an implementation.
+type StyledPrinter interface {
+	TokenStyler
+	Print(lines LineIterator) string
+}
+
+// StyledSlicePrinter extends [TokenStyler] with slice printing capabilities.
+// See [Printer] for an implementation.
+type StyledSlicePrinter interface {
+	TokenStyler
+	PrintSlice(lines LineIterator, minLine, maxLine int) string
 }
 
 const (
@@ -33,6 +53,7 @@ const (
 // Printer renders YAML tokens with syntax highlighting using [lipgloss.Style].
 // It supports custom styles, gutters, and styled range overlays
 // for highlighting specific positions such as errors.
+// Create instances with [NewPrinter].
 type Printer struct {
 	styles             StyleGetter
 	style              lipgloss.Style
@@ -59,7 +80,7 @@ func NewPrinter(opts ...PrinterOption) *Printer {
 	}
 
 	if !p.hasCustomStyle {
-		p.style = p.styles.GetStyle(StyleDefault).
+		p.style = p.styles.Style(StyleDefault).
 			PaddingRight(1)
 	}
 
@@ -91,8 +112,8 @@ var NoGutter GutterFunc = func(GutterContext) string { return "" }
 // This is the default gutter used by [NewPrinter].
 func DefaultGutter() GutterFunc {
 	return func(ctx GutterContext) string {
-		lineNumStyle := ctx.Styles.GetStyle(StyleDefault).
-			Foreground(ctx.Styles.GetStyle(StyleComment).GetForeground())
+		lineNumStyle := ctx.Styles.Style(StyleDefault).
+			Foreground(ctx.Styles.Style(StyleComment).GetForeground())
 
 		var lineNum string
 
@@ -109,11 +130,11 @@ func DefaultGutter() GutterFunc {
 
 		switch ctx.Flag {
 		case line.FlagInserted:
-			marker = ctx.Styles.GetStyle(StyleDiffInserted).Render("+")
+			marker = ctx.Styles.Style(StyleDiffInserted).Render("+")
 		case line.FlagDeleted:
-			marker = ctx.Styles.GetStyle(StyleDiffDeleted).Render("-")
+			marker = ctx.Styles.Style(StyleDiffDeleted).Render("-")
 		default:
-			marker = ctx.Styles.GetStyle(StyleDefault).Render(" ")
+			marker = ctx.Styles.Style(StyleDefault).Render(" ")
 		}
 
 		// Use builder to avoid intermediate string allocation from concatenation.
@@ -136,11 +157,11 @@ func DiffGutter() GutterFunc {
 
 		switch ctx.Flag {
 		case line.FlagInserted:
-			return ctx.Styles.GetStyle(StyleDiffInserted).Render("+")
+			return ctx.Styles.Style(StyleDiffInserted).Render("+")
 		case line.FlagDeleted:
-			return ctx.Styles.GetStyle(StyleDiffDeleted).Render("-")
+			return ctx.Styles.Style(StyleDiffDeleted).Render("-")
 		default:
-			return ctx.Styles.GetStyle(StyleDefault).Render(" ")
+			return ctx.Styles.Style(StyleDefault).Render(" ")
 		}
 	}
 }
@@ -150,8 +171,8 @@ func DiffGutter() GutterFunc {
 // No diff markers are rendered. Uses [StyleComment] foreground for styling.
 func LineNumberGutter() GutterFunc {
 	return func(ctx GutterContext) string {
-		lineNumStyle := ctx.Styles.GetStyle(StyleDefault).
-			Foreground(ctx.Styles.GetStyle(StyleComment).GetForeground())
+		lineNumStyle := ctx.Styles.Style(StyleDefault).
+			Foreground(ctx.Styles.Style(StyleComment).GetForeground())
 
 		switch {
 		case ctx.Flag == line.FlagAnnotation:
@@ -225,9 +246,9 @@ func (p *Printer) AddStyleToRange(s *lipgloss.Style, r position.Range) {
 	p.rangeStyles.Insert(start, end, &style)
 }
 
-// GetStyle retrieves the underlying [lipgloss.Style] for the given [Style].
-func (p *Printer) GetStyle(s Style) *lipgloss.Style {
-	return p.styles.GetStyle(s)
+// Style retrieves the underlying [lipgloss.Style] for the given [Style].
+func (p *Printer) Style(s Style) *lipgloss.Style {
+	return p.styles.Style(s)
 }
 
 // ClearStyles removes all previously added styles.
@@ -260,7 +281,7 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 		return ""
 	}
 
-	totalLines := t.Count()
+	totalLines := t.Len()
 
 	// Pre-compute gutter width once for consistent wrapping calculations.
 	var gutterWidth int
@@ -303,7 +324,7 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 				Styles:     p.styles,
 			}
 			sb.WriteString(p.gutterFunc(headerCtx))
-			sb.WriteString(p.styles.GetStyle(StyleComment).Render(ln.Annotation.Content))
+			sb.WriteString(p.styles.Style(StyleComment).Render(ln.Annotation.Content))
 			sb.WriteByte('\n')
 		} else if renderedIdx > 0 {
 			// Add newline between lines within a hunk.
@@ -321,11 +342,11 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 
 		switch ln.Flag {
 		case line.FlagDeleted:
-			deleted := p.styles.GetStyle(StyleDiffDeleted)
+			deleted := p.styles.Style(StyleDiffDeleted)
 			p.writeLine(&sb, ln.Content(), pos.Line, deleted, gutterCtx, gutterWidth)
 
 		case line.FlagInserted:
-			inserted := p.styles.GetStyle(StyleDiffInserted)
+			inserted := p.styles.Style(StyleDiffInserted)
 			p.writeLine(&sb, ln.Content(), pos.Line, inserted, gutterCtx, gutterWidth)
 
 		default: // FlagDefault (equal line).
@@ -416,67 +437,67 @@ func (p *Printer) styleForToken(tk *token.Token) *lipgloss.Style {
 	//nolint:exhaustive // Only needed for the current token.
 	switch tk.PreviousType() {
 	case token.AnchorType:
-		return p.styles.GetStyle(StyleAnchor)
+		return p.styles.Style(StyleAnchor)
 
 	case token.AliasType:
-		return p.styles.GetStyle(StyleAlias)
+		return p.styles.Style(StyleAlias)
 	}
 
 	//nolint:exhaustive // Only needed for the current token.
 	switch tk.NextType() {
 	case token.MappingValueType:
-		return p.styles.GetStyle(StyleKey)
+		return p.styles.Style(StyleKey)
 	}
 
 	switch tk.Type {
 	case token.BoolType:
-		return p.styles.GetStyle(StyleBool)
+		return p.styles.Style(StyleBool)
 
 	case token.AnchorType:
-		return p.styles.GetStyle(StyleAnchor)
+		return p.styles.Style(StyleAnchor)
 
 	case token.AliasType, token.MergeKeyType:
-		return p.styles.GetStyle(StyleAlias)
+		return p.styles.Style(StyleAlias)
 
 	case token.StringType, token.SingleQuoteType, token.DoubleQuoteType:
-		return p.styles.GetStyle(StyleString)
+		return p.styles.Style(StyleString)
 
 	case token.IntegerType, token.FloatType,
 		token.BinaryIntegerType, token.OctetIntegerType, token.HexIntegerType,
 		token.InfinityType, token.NanType:
-		return p.styles.GetStyle(StyleNumber)
+		return p.styles.Style(StyleNumber)
 
 	case token.NullType, token.ImplicitNullType:
-		return p.styles.GetStyle(StyleNull)
+		return p.styles.Style(StyleNull)
 
 	case token.CommentType:
-		return p.styles.GetStyle(StyleComment)
+		return p.styles.Style(StyleComment)
 
 	case token.TagType:
-		return p.styles.GetStyle(StyleTag)
+		return p.styles.Style(StyleTag)
 
 	case token.DocumentHeaderType, token.DocumentEndType:
-		return p.styles.GetStyle(StyleDocument)
+		return p.styles.Style(StyleDocument)
 
 	case token.DirectiveType:
-		return p.styles.GetStyle(StyleDirective)
+		return p.styles.Style(StyleDirective)
 
 	case token.LiteralType, token.FoldedType:
-		return p.styles.GetStyle(StyleBlockScalar)
+		return p.styles.Style(StyleBlockScalar)
 
 	case token.SequenceEntryType, token.MappingKeyType, token.MappingValueType,
 		token.CollectEntryType, token.SequenceStartType, token.SequenceEndType,
 		token.MappingStartType, token.MappingEndType:
-		return p.styles.GetStyle(StylePunctuation)
+		return p.styles.Style(StylePunctuation)
 
 	case token.UnknownType, token.InvalidType:
-		return p.styles.GetStyle(StyleError)
+		return p.styles.Style(StyleError)
 
 	case token.SpaceType:
-		return p.styles.GetStyle(StyleDefault)
+		return p.styles.Style(StyleDefault)
 	}
 
-	return p.styles.GetStyle(StyleDefault)
+	return p.styles.Style(StyleDefault)
 }
 
 // styleLineWithRanges styles a line with range-aware styling.
@@ -637,7 +658,7 @@ func (p *Printer) renderTokenLine(lineIndex int, ln line.Line) string {
 		// Part 1: Render separator portion (default style).
 		if separatorRunes > 0 && separatorRunes <= len(originRunes) {
 			sepPart := string(originRunes[:separatorRunes])
-			defaultStyle := p.styles.GetStyle(StyleDefault)
+			defaultStyle := p.styles.Style(StyleDefault)
 			sb.WriteString(p.styleLineWithRanges(sepPart, position.New(lineIndex, col), defaultStyle, false))
 
 			col += separatorRunes

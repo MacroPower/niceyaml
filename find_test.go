@@ -101,7 +101,7 @@ func TestFinder_Find(t *testing.T) {
 		"with normalizer - diacritic match": {
 			input:      "name: Thaïs",
 			search:     "Thais",
-			normalizer: niceyaml.StandardNormalizer{},
+			normalizer: niceyaml.NewStandardNormalizer(),
 			want: []position.Range{
 				position.NewRange(
 					position.New(0, 6),
@@ -112,7 +112,7 @@ func TestFinder_Find(t *testing.T) {
 		"with normalizer - search has diacritic": {
 			input:      "name: Thais",
 			search:     "Thaïs",
-			normalizer: niceyaml.StandardNormalizer{},
+			normalizer: niceyaml.NewStandardNormalizer(),
 			want: []position.Range{
 				position.NewRange(
 					position.New(0, 6),
@@ -199,7 +199,7 @@ func TestFinder_Find(t *testing.T) {
 		"utf8 - normalizer finds diacritic as ascii": {
 			input:      "key: über öffentlich",
 			search:     "o",
-			normalizer: niceyaml.StandardNormalizer{},
+			normalizer: niceyaml.NewStandardNormalizer(),
 			want: []position.Range{
 				position.NewRange(
 					position.New(0, 10),
@@ -210,7 +210,7 @@ func TestFinder_Find(t *testing.T) {
 		"utf8 - combined normalizer case and diacritics": {
 			input:      "name: THAÏS test",
 			search:     "thais",
-			normalizer: niceyaml.StandardNormalizer{},
+			normalizer: niceyaml.NewStandardNormalizer(),
 			want: []position.Range{
 				position.NewRange(
 					position.New(0, 6),
@@ -266,7 +266,9 @@ func TestFinder_Find(t *testing.T) {
 				opts = append(opts, niceyaml.WithNormalizer(tc.normalizer))
 			}
 
-			finder := niceyaml.NewFinder(lines, opts...)
+			finder := niceyaml.NewFinder(opts...)
+
+			finder.Load(lines)
 
 			got := finder.Find(tc.search)
 			assert.Equal(t, tc.want, got)
@@ -318,7 +320,9 @@ func TestFinder_Find_EdgeCases(t *testing.T) {
 			t.Parallel()
 
 			lines := niceyaml.NewSourceFromString(tc.input)
-			finder := niceyaml.NewFinder(lines)
+			finder := niceyaml.NewFinder()
+			finder.Load(lines)
+
 			got := finder.Find(tc.search)
 			assert.Equal(t, tc.want, got)
 		})
@@ -328,7 +332,9 @@ func TestFinder_Find_EdgeCases(t *testing.T) {
 func TestFinder_Find_NilLines(t *testing.T) {
 	t.Parallel()
 
-	finder := niceyaml.NewFinder(nil)
+	finder := niceyaml.NewFinder()
+	finder.Load(nil)
+
 	got := finder.Find("test")
 	assert.Nil(t, got)
 }
@@ -354,7 +360,7 @@ func TestFinder_Find_DiffBuiltLines(t *testing.T) {
 	revAfter := niceyaml.NewRevision(afterLines)
 
 	diff := niceyaml.NewFullDiff(revBefore, revAfter)
-	lines := diff.Lines()
+	lines := diff.Source()
 
 	tcs := map[string]struct {
 		search string
@@ -385,7 +391,9 @@ func TestFinder_Find_DiffBuiltLines(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			finder := niceyaml.NewFinder(lines)
+			finder := niceyaml.NewFinder()
+			finder.Load(lines)
+
 			got := finder.Find(tc.search)
 
 			assert.Equal(t, tc.want, got)

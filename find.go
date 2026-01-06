@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 
@@ -17,6 +18,7 @@ import (
 )
 
 // Normalizer transforms strings for comparison (e.g., removing diacritics).
+// See [StandardNormalizer] for an implementation.
 type Normalizer interface {
 	Normalize(in string) string
 }
@@ -24,7 +26,13 @@ type Normalizer interface {
 // StandardNormalizer removes diacritics and lowercases strings for
 // case-insensitive matching. For example, "Ö" becomes "o".
 // Note that [unicode.Mn] is the unicode key for nonspacing marks.
+// Create instances with [NewStandardNormalizer].
 type StandardNormalizer struct{}
+
+// NewStandardNormalizer creates a new [StandardNormalizer].
+func NewStandardNormalizer() StandardNormalizer {
+	return StandardNormalizer{}
+}
 
 // Normalize implements [Normalizer].
 func (StandardNormalizer) Normalize(in string) string {
@@ -39,29 +47,26 @@ func (StandardNormalizer) Normalize(in string) string {
 }
 
 // Finder searches for strings within YAML tokens.
-// Use [NewFinder] to create an instance with optional configuration.
-// The Finder preprocesses the source once at construction time,
+// Create instances with [NewFinder], then call [Finder.Load] to provide
+// the source data. The Finder preprocesses the source when loaded,
 // allowing efficient repeated searches with different search strings.
 type Finder struct {
 	normalizer Normalizer
+	prevLines  LineIterator
 	posMap     *positionMap
 	source     string
+	mu         sync.RWMutex
 }
 
-// NewFinder creates a new [Finder] that preprocesses the given [Source].
-// The source is processed once at construction time, building a position map
-// that allows efficient repeated searches with different search strings.
+// NewFinder creates a new [Finder] with the given options.
+// Call [Finder.Load] to provide a [LineIterator] before searching.
 // By default, no normalization is applied. Use [WithNormalizer] to enable
 // case-insensitive or diacritic-insensitive matching.
-func NewFinder(lines *Source, opts ...FinderOption) *Finder {
+func NewFinder(opts ...FinderOption) *Finder {
 	f := &Finder{}
-
 	for _, opt := range opts {
 		opt(f)
 	}
-
-	// Preprocess source and build position map.
-	f.source, f.posMap = f.buildSourceAndPositionMap(lines)
 
 	return f
 }
@@ -77,11 +82,29 @@ func WithNormalizer(normalizer Normalizer) FinderOption {
 	}
 }
 
+// Load preprocesses the given [LineIterator], building the internal source
+// string and position map for searching. This method must be called
+// before using [Finder.Find].
+func (f *Finder) Load(lines LineIterator) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if f.prevLines == lines {
+		return
+	}
+
+	f.prevLines = lines
+	f.source, f.posMap = f.buildSourceAndPositionMap(lines)
+}
+
 // Find finds all occurrences of the search string in the preprocessed source.
 // It returns a slice of [position.Range] indicating the start and end positions of each match.
 // Positions are 0-indexed. The slice is provided in the order the matches appear in the source.
 // Returns nil if the search string is empty or the finder has no source data.
 func (f *Finder) Find(search string) []position.Range {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
 	if search == "" || f.source == "" {
 		return nil
 	}
@@ -125,7 +148,7 @@ func (f *Finder) Find(search string) []position.Range {
 // When a normalizer is set, the returned source is normalized and the position map
 // maps normalized character indices to original positions. This ensures correct
 // position lookup when searching in normalized text.
-func (f *Finder) buildSourceAndPositionMap(lines *Source) (string, *positionMap) {
+func (f *Finder) buildSourceAndPositionMap(lines LineIterator) (string, *positionMap) {
 	var sb strings.Builder
 
 	pm := &positionMap{}

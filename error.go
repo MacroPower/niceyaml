@@ -11,10 +11,10 @@ import (
 	"github.com/goccy/go-yaml/token"
 )
 
-// StyledSlicePrinter extends [TokenStyler] with slice printing capabilities.
-type StyledSlicePrinter interface {
-	TokenStyler
-	PrintSlice(lines LineIterator, minLine, maxLine int) string
+// FileGetter gets an [*ast.File].
+// See [*Source] for an implementation.
+type FileGetter interface {
+	File() (*ast.File, error)
 }
 
 // Error represents a YAML error with optional source annotation.
@@ -22,13 +22,15 @@ type StyledSlicePrinter interface {
 //   - [WithErrorToken] directly specifies the error location, OR
 //   - [WithPath] combined with [WithSource] to resolve the path
 //
+// Create instances with [NewError].
+//
 //nolint:recvcheck // Must satisfy error interface.
 type Error struct {
 	err         error
 	path        *yaml.Path
 	token       *token.Token
 	printer     StyledSlicePrinter
-	source      *Source
+	source      FileGetter
 	sourceLines int
 }
 
@@ -39,9 +41,7 @@ func NewError(err error, opts ...ErrorOption) *Error {
 		err:         err,
 		sourceLines: 4,
 	}
-	for _, opt := range opts {
-		opt(e)
-	}
+	e.SetOption(opts...)
 
 	return e
 }
@@ -77,8 +77,9 @@ func WithPrinter(p StyledSlicePrinter) ErrorOption {
 	}
 }
 
-// WithSource sets the [Source] for resolving the error path.
-func WithSource(src *Source) ErrorOption {
+// WithSource sets the [FileGetter] for resolving the error path.
+// See [*Source] for an implementation.
+func WithSource(src FileGetter) ErrorOption {
 	return func(e *Error) {
 		e.source = src
 	}
@@ -165,7 +166,7 @@ func (e *Error) printErrorToken(tk *token.Token) string {
 
 	ranges := t.TokenPositionRangesFromToken(tk)
 	for _, rng := range ranges {
-		p.AddStyleToRange(p.GetStyle(StyleError), rng)
+		p.AddStyleToRange(p.Style(StyleError), rng)
 	}
 
 	curLine := max(0, tk.Position.Line-1)

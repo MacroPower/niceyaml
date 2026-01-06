@@ -36,11 +36,11 @@ func TestNewDecoder(t *testing.T) {
 
 		d := niceyaml.NewDecoder(file)
 		require.NotNil(t, d)
-		assert.Equal(t, 1, d.Count())
+		assert.Equal(t, 1, d.Len())
 	})
 }
 
-func TestDecoder_Count(t *testing.T) {
+func TestDecoder_Len(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -86,7 +86,7 @@ func TestDecoder_Count(t *testing.T) {
 			require.NoError(t, err)
 
 			d := niceyaml.NewDecoder(file)
-			got := d.Count()
+			got := d.Len()
 
 			assert.Equal(t, tc.want, got)
 		})

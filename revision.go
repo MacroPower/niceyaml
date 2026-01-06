@@ -1,8 +1,16 @@
 package niceyaml
 
-// Revision represents [Source] at one or more revisions.
+// NamedLineIterator extends [LineIterator] with a Name.
+// See [Source] for an implementation.
+type NamedLineIterator interface {
+	LineIterator
+	Name() string
+}
+
+// Revision represents [NamedLineIterator] at one or more revisions.
 // It may form a linked or doubly-linked list to track changes across revisions.
 // It is not required to have multiple revisions; a single revision is valid.
+// Create instances with [NewRevision].
 type Revision struct {
 	// The previous token collection in the revision sequence.
 	// If there is no previous revision, it is nil.
@@ -10,25 +18,25 @@ type Revision struct {
 	// The next token collection in the revision sequence.
 	// If there is no next revision, it is nil.
 	next *Revision
-	// The collection of [Tokens] at the head.
-	head *Source
+	// The [NamedLineIterator] at the head.
+	head NamedLineIterator
 }
 
-// NewRevision creates new [Revision]. The provided values form the [Source] at the head.
+// NewRevision creates a new [Revision]. The provided values are set at the head.
 // You may use [Revision.Append] or [Revision.Prepend] to add more revisions.
 // A builder pattern is supported for values that are known at compile time.
-func NewRevision(tokens *Source) *Revision {
-	return &Revision{head: tokens}
+func NewRevision(li NamedLineIterator) *Revision {
+	return &Revision{head: li}
 }
 
-// Lines returns the [Source] at the head.
-func (t *Revision) Lines() *Source {
+// Source returns the [NamedLineIterator] at the head.
+func (t *Revision) Source() NamedLineIterator {
 	return t.head
 }
 
-// Name returns the name of the [Source] at the head.
+// Name returns the name of the [NamedLineIterator] at the head.
 func (t *Revision) Name() string {
-	return t.head.Name
+	return t.head.Name()
 }
 
 // Seek moves n revisions forward (n > 0) or backward (n < 0) in the sequence.
@@ -109,7 +117,7 @@ func (t *Revision) Names() []string {
 	// Collect names forward.
 	curr := origin
 	for curr != nil {
-		names = append(names, curr.head.Name)
+		names = append(names, curr.head.Name())
 		curr = curr.next
 	}
 
@@ -130,8 +138,8 @@ func (t *Revision) Index() int {
 	return index
 }
 
-// Count returns the total number of revisions in the sequence.
-func (t *Revision) Count() int {
+// Len returns the total number of revisions in the sequence.
+func (t *Revision) Len() int {
 	// Count previous revisions.
 	count := t.Index()
 
@@ -145,24 +153,24 @@ func (t *Revision) Count() int {
 	return count + 1
 }
 
-// Append adds a new revision after the [Source] at the head.
+// Append adds a new revision after the [NamedLineIterator] at the head.
 // Returns the newly added revision.
-func (t *Revision) Append(tokens *Source) *Revision {
+func (t *Revision) Append(li NamedLineIterator) *Revision {
 	rev := &Revision{
 		prev: t,
-		head: tokens,
+		head: li,
 	}
 	t.next = rev
 
 	return rev
 }
 
-// Prepend adds a new revision before the [Source] at the head.
+// Prepend adds a new revision before the [NamedLineIterator] at the head.
 // Returns the newly added revision.
-func (t *Revision) Prepend(tokens *Source) *Revision {
+func (t *Revision) Prepend(li NamedLineIterator) *Revision {
 	rev := &Revision{
 		next: t,
-		head: tokens,
+		head: li,
 	}
 	t.prev = rev
 

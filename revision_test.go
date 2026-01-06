@@ -111,16 +111,16 @@ func TestRevision_At_SingleRevision(t *testing.T) {
 	}
 }
 
-func TestRevision_Lines(t *testing.T) {
+func TestRevision_Source(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("key: value", niceyaml.WithName("test"))
 	rev := niceyaml.NewRevision(source)
 
-	got := rev.Lines()
+	got := rev.Source()
 
 	assert.Equal(t, source, got)
-	assert.Equal(t, 1, got.Count())
+	assert.Equal(t, 1, got.Len())
 }
 
 func TestRevision_Tip(t *testing.T) {
@@ -318,7 +318,7 @@ func TestRevision_Index(t *testing.T) {
 	}
 }
 
-func TestRevision_Count(t *testing.T) {
+func TestRevision_Len(t *testing.T) {
 	t.Parallel()
 
 	t.Run("single revision", func(t *testing.T) {
@@ -326,7 +326,7 @@ func TestRevision_Count(t *testing.T) {
 
 		rev := niceyaml.NewRevision(niceyaml.NewSourceFromString("only: data", niceyaml.WithName("only")))
 
-		got := rev.Count()
+		got := rev.Len()
 		assert.Equal(t, 1, got)
 	})
 
@@ -338,9 +338,9 @@ func TestRevision_Count(t *testing.T) {
 		rev2 := rev1.Append(niceyaml.NewSourceFromString("v2: data", niceyaml.WithName("v2")))
 
 		// Count should be 3 from any position.
-		assert.Equal(t, 3, rev0.Count())
-		assert.Equal(t, 3, rev1.Count())
-		assert.Equal(t, 3, rev2.Count())
+		assert.Equal(t, 3, rev0.Len())
+		assert.Equal(t, 3, rev1.Len())
+		assert.Equal(t, 3, rev2.Len())
 	})
 }
 
@@ -374,6 +374,6 @@ func TestRevision_Prepend(t *testing.T) {
 
 		// Verify chain order.
 		assert.Equal(t, []string{"v0", "v1", "v2"}, rev0.Names())
-		assert.Equal(t, 3, rev2.Count())
+		assert.Equal(t, 3, rev2.Len())
 	})
 }

@@ -16,6 +16,7 @@ import (
 // the same builder. Build() returns a clone of the current state, so you can
 // call Build() multiple times at different points in the chain to get
 // independent tokens.
+// Create instances with [NewTokenBuilder].
 type TokenBuilder struct {
 	token *token.Token
 }

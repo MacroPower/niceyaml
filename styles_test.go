@@ -10,7 +10,7 @@ import (
 	"github.com/macropower/niceyaml"
 )
 
-func TestStyles_GetStyle(t *testing.T) {
+func TestStyles_Style(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -43,7 +43,7 @@ func TestStyles_GetStyle(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := tc.styles.GetStyle(tc.query)
+			got := tc.styles.Style(tc.query)
 
 			require.NotNil(t, got)
 			assert.Equal(t, tc.wantBold, got.GetBold())

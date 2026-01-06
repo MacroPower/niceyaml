@@ -52,7 +52,7 @@ func printDiff(p *niceyaml.Printer, before, after string) string {
 		niceyaml.NewRevision(afterTks),
 	)
 
-	return p.Print(diff.Lines())
+	return p.Print(diff.Source())
 }
 
 // printDiffSummary generates a summary diff showing only changed lines with context.
@@ -67,7 +67,7 @@ func printDiffSummary(p *niceyaml.Printer, before, after string, context int) st
 		context,
 	)
 
-	result := diff.Lines()
+	result := diff.Source()
 	if result.IsEmpty() {
 		return ""
 	}
@@ -76,13 +76,13 @@ func printDiffSummary(p *niceyaml.Printer, before, after string, context int) st
 }
 
 // testFinder returns a Finder configured for testing.
-func testFinder(lines *niceyaml.Source, normalizer niceyaml.Normalizer) *niceyaml.Finder {
+func testFinder(normalizer niceyaml.Normalizer) *niceyaml.Finder {
 	var opts []niceyaml.FinderOption
 	if normalizer != nil {
 		opts = append(opts, niceyaml.WithNormalizer(normalizer))
 	}
 
-	return niceyaml.NewFinder(lines, opts...)
+	return niceyaml.NewFinder(opts...)
 }
 
 func TestPrinter_Anchor(t *testing.T) {
@@ -1186,7 +1186,7 @@ func TestPrinter_SetAnnotationsEnabled(t *testing.T) {
 	}
 }
 
-func TestPrinter_GetStyle(t *testing.T) {
+func TestPrinter_Style(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -1216,7 +1216,7 @@ func TestPrinter_GetStyle(t *testing.T) {
 			t.Parallel()
 
 			p := niceyaml.NewPrinter(niceyaml.WithStyles(tc.styles))
-			got := p.GetStyle(tc.query)
+			got := p.Style(tc.query)
 
 			require.NotNil(t, got)
 			assert.Equal(t, tc.wantBold, got.GetBold())
@@ -1761,25 +1761,25 @@ func TestFinderPrinter_Integration(t *testing.T) {
 		"utf8 - normalizer diacritic to ascii": {
 			input:      "name: Thaïs",
 			search:     "Thais",
-			normalizer: niceyaml.StandardNormalizer{},
+			normalizer: niceyaml.NewStandardNormalizer(),
 			want:       "name: [Thaïs]",
 		},
 		"utf8 - case insensitive with diacritics": {
 			input:      "name: THAÏS test",
 			search:     "thais",
-			normalizer: niceyaml.StandardNormalizer{},
+			normalizer: niceyaml.NewStandardNormalizer(),
 			want:       "name: [THAÏS] test",
 		},
 		"utf8 - search ascii finds normalized diacritic": {
 			input:      "key: über",
 			search:     "u",
-			normalizer: niceyaml.StandardNormalizer{},
+			normalizer: niceyaml.NewStandardNormalizer(),
 			want:       "key: [ü]ber",
 		},
 		"utf8 - normalizer search after multiple multibyte": {
 			input:      "key: über Yamüll test",
 			search:     "ya",
-			normalizer: niceyaml.StandardNormalizer{},
+			normalizer: niceyaml.NewStandardNormalizer(),
 			want:       "key: über [Ya]müll test",
 		},
 		"utf8 - japanese characters": {
@@ -1842,7 +1842,9 @@ func TestFinderPrinter_Integration(t *testing.T) {
 			t.Parallel()
 
 			lines := niceyaml.NewSourceFromString(tc.input)
-			finder := testFinder(lines, tc.normalizer)
+			finder := testFinder(tc.normalizer)
+			finder.Load(lines)
+
 			printer := testPrinter()
 
 			ranges := finder.Find(tc.search)
@@ -1904,7 +1906,9 @@ func TestPrinter_Golden(t *testing.T) {
 			},
 			setupFunc: func(p *niceyaml.Printer, lines *niceyaml.Source) {
 				// Search for "日本" (Japan) which appears multiple times in full.yaml.
-				finder := niceyaml.NewFinder(lines)
+				finder := niceyaml.NewFinder()
+				finder.Load(lines)
+
 				highlightStyle := lipgloss.NewStyle().
 					Background(lipgloss.Color("#FFFF00")).
 					Foreground(lipgloss.Color("#000000"))

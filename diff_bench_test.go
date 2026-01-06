@@ -8,7 +8,7 @@ import (
 	"github.com/macropower/niceyaml"
 )
 
-func BenchmarkFullDiffLines(b *testing.B) {
+func BenchmarkFullDiffSource(b *testing.B) {
 	sizes := []struct {
 		name  string
 		lines int
@@ -33,7 +33,7 @@ func BenchmarkFullDiffLines(b *testing.B) {
 
 			for b.Loop() {
 				diff := niceyaml.NewFullDiff(revA, revB)
-				_ = diff.Lines()
+				_ = diff.Source()
 			}
 		})
 
@@ -53,7 +53,7 @@ func BenchmarkFullDiffLines(b *testing.B) {
 
 			for b.Loop() {
 				diff := niceyaml.NewFullDiff(revA, revB)
-				_ = diff.Lines()
+				_ = diff.Source()
 			}
 		})
 
@@ -77,13 +77,13 @@ func BenchmarkFullDiffLines(b *testing.B) {
 
 			for b.Loop() {
 				diff := niceyaml.NewFullDiff(revA, revB)
-				_ = diff.Lines()
+				_ = diff.Source()
 			}
 		})
 	}
 }
 
-func BenchmarkSummaryDiffLines(b *testing.B) {
+func BenchmarkSummaryDiffSource(b *testing.B) {
 	sizes := []struct {
 		name  string
 		lines int
@@ -120,14 +120,14 @@ func BenchmarkSummaryDiffLines(b *testing.B) {
 
 				for b.Loop() {
 					diff := niceyaml.NewSummaryDiff(revA, revB, ctx)
-					_ = diff.Lines()
+					_ = diff.Source()
 				}
 			})
 		}
 	}
 }
 
-func BenchmarkFullDiffLines_WorstCase(b *testing.B) {
+func BenchmarkFullDiffSource_WorstCase(b *testing.B) {
 	// Worst case: interleaved insertions/deletions that maximize LCS computation.
 	sizes := []int{100, 500, 1000}
 
@@ -158,13 +158,13 @@ func BenchmarkFullDiffLines_WorstCase(b *testing.B) {
 
 			for b.Loop() {
 				diff := niceyaml.NewFullDiff(revA, revB)
-				_ = diff.Lines()
+				_ = diff.Source()
 			}
 		})
 	}
 }
 
-func BenchmarkFullDiffLines_InsertAtEnd(b *testing.B) {
+func BenchmarkFullDiffSource_InsertAtEnd(b *testing.B) {
 	// Best case for LCS: append-only changes.
 	sizes := []int{100, 500, 1000}
 
@@ -190,7 +190,7 @@ func BenchmarkFullDiffLines_InsertAtEnd(b *testing.B) {
 
 			for b.Loop() {
 				diff := niceyaml.NewFullDiff(revA, revB)
-				_ = diff.Lines()
+				_ = diff.Source()
 			}
 		})
 	}
@@ -224,7 +224,7 @@ func BenchmarkRevisionSeek(b *testing.B) {
 	}
 }
 
-func BenchmarkRevisionCount(b *testing.B) {
+func BenchmarkRevisionLen(b *testing.B) {
 	yaml := generateYAML(50)
 	source := niceyaml.NewSourceFromString(yaml, niceyaml.WithName("v1"))
 	rev := niceyaml.NewRevision(source)
@@ -242,7 +242,7 @@ func BenchmarkRevisionCount(b *testing.B) {
 		b.ResetTimer()
 
 		for b.Loop() {
-			_ = start.Count()
+			_ = start.Len()
 		}
 	})
 
@@ -253,7 +253,7 @@ func BenchmarkRevisionCount(b *testing.B) {
 		b.ResetTimer()
 
 		for b.Loop() {
-			_ = middle.Count()
+			_ = middle.Len()
 		}
 	})
 
@@ -264,7 +264,7 @@ func BenchmarkRevisionCount(b *testing.B) {
 		b.ResetTimer()
 
 		for b.Loop() {
-			_ = tip.Count()
+			_ = tip.Len()
 		}
 	})
 }

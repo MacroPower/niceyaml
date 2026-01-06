@@ -2,6 +2,7 @@ package yamlviewport
 
 import (
 	"cmp"
+	"iter"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -11,12 +12,43 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/macropower/niceyaml"
+	"github.com/macropower/niceyaml/line"
 	"github.com/macropower/niceyaml/position"
 )
 
 const (
 	defaultHorizontalStep = 6
 )
+
+// Printer prints YAML.
+// See [niceyaml.Printer] for an implementation.
+type Printer interface {
+	Print(lines niceyaml.LineIterator) string
+	PrintSlice(lines niceyaml.LineIterator, start, end int) string
+	SetWidth(width int)
+	SetWordWrap(enabled bool)
+	SetAnnotationsEnabled(enabled bool)
+	AddStyleToRange(s *lipgloss.Style, r position.Range)
+	ClearStyles()
+	Style(s niceyaml.Style) *lipgloss.Style
+}
+
+// Finder finds [position.Range]s for a search string.
+// See [niceyaml.Finder] for an implementation.
+type Finder interface {
+	Load(lines niceyaml.LineIterator)
+	Find(search string) []position.Range
+}
+
+// Source represents a text source for the viewport.
+// See [niceyaml.Source] for an implementation.
+type Source interface {
+	Name() string
+	Lines() iter.Seq2[position.Position, line.Line]
+	Runes() iter.Seq2[position.Position, rune]
+	IsEmpty() bool
+	Len() int
+}
 
 // DiffMode specifies how diffs are computed between revisions.
 type DiffMode int
@@ -34,9 +66,9 @@ const (
 // Option is a configuration option that works in conjunction with [New].
 type Option func(*Model)
 
-// WithPrinter sets the [niceyaml.Printer] used for rendering.
-// If not set, a default printer is created.
-func WithPrinter(p *niceyaml.Printer) Option {
+// WithPrinter sets the [Printer] used for rendering.
+// If not set, a default [niceyaml.Printer] is created.
+func WithPrinter(p Printer) Option {
 	return func(m *Model) {
 		m.printer = p
 	}
@@ -69,17 +101,14 @@ func WithSelectedSearchStyle(s lipgloss.Style) Option {
 	}
 }
 
-// WithNormalizer sets the [niceyaml.Normalizer] used for search matching.
-// When set, both the source text and search terms are normalized before matching,
-// enabling case-insensitive and diacritic-insensitive search.
-// See [niceyaml.StandardNormalizer] for a common implementation.
-func WithNormalizer(n niceyaml.Normalizer) Option {
+// WithFinder sets the [Finder].
+func WithFinder(f Finder) Option {
 	return func(m *Model) {
-		m.normalizer = n
+		m.finder = f
 	}
 }
 
-// New returns a new model with the given options.
+// New creates a new [Model] with the given options.
 func New(opts ...Option) Model {
 	var m Model
 
@@ -93,6 +122,7 @@ func New(opts ...Option) Model {
 }
 
 // Model is the Bubble Tea model for the YAML viewport.
+// Create instances with [New].
 //
 //nolint:recvcheck // tea.Model requires value receivers for Init, Update, View.
 type Model struct {
@@ -102,16 +132,14 @@ type Model struct {
 	SelectedSearchStyle lipgloss.Style
 	// SearchStyle is the style for search match highlights.
 	SearchStyle lipgloss.Style
-	printer     *niceyaml.Printer
+	printer     Printer
 	// KeyMap contains the keybindings for viewport navigation.
 	KeyMap         KeyMap
-	normalizer     niceyaml.Normalizer // Normalizer for search matching (nil = exact match).
-	searchTerm     string              // Current search query.
-	finder         *niceyaml.Finder    // Preprocessed source for searching.
-	finderSource   *niceyaml.Source    // Source used to build finder (for cache invalidation).
+	searchTerm     string // Current search query.
+	finder         Finder
 	searchMatches  []position.Range
 	revision       *niceyaml.Revision
-	lines          *niceyaml.Source
+	lines          Source
 	renderedLines  []string
 	xOffset        int
 	horizontalStep int
@@ -142,6 +170,12 @@ func (m *Model) setInitialValues() {
 
 	if m.printer == nil {
 		m.printer = niceyaml.NewPrinter()
+	}
+
+	if m.finder == nil {
+		m.finder = niceyaml.NewFinder(
+			niceyaml.WithNormalizer(niceyaml.NewStandardNormalizer()),
+		)
 	}
 
 	m.initialized = true
@@ -182,14 +216,14 @@ func (m *Model) SetWidth(w int) {
 
 // SetTokens replaces the revision history with a single revision.
 // This is a convenience method equivalent to ClearRevisions() followed by AppendRevision(lines).
-func (m *Model) SetTokens(lines *niceyaml.Source) {
+func (m *Model) SetTokens(lines niceyaml.NamedLineIterator) {
 	m.ClearRevisions()
 	m.AppendRevision(lines)
 }
 
 // AppendRevision adds a new revision to the history.
 // After appending, the revision pointer moves to the newly added revision.
-func (m *Model) AppendRevision(lines *niceyaml.Source) {
+func (m *Model) AppendRevision(lines niceyaml.NamedLineIterator) {
 	if m.revision == nil {
 		m.revision = niceyaml.NewRevision(lines)
 	} else {
@@ -246,7 +280,7 @@ func (m *Model) GoToRevision(index int) {
 		return
 	}
 
-	maxIndex := m.revision.Count() - 1
+	maxIndex := m.revision.Len() - 1
 	index = clamp(index, 0, maxIndex)
 	m.revision = m.revision.At(index)
 	m.rerender()
@@ -259,7 +293,7 @@ func (m *Model) RevisionCount() int {
 		return 0
 	}
 
-	return m.revision.Count()
+	return m.revision.Len()
 }
 
 // IsAtFirstRevision returns true if at revision index 0.
@@ -355,8 +389,6 @@ func (m *Model) rerender() {
 		m.renderedLines = nil
 		m.longestLineWidth = 0
 		m.lines = nil
-		m.finder = nil
-		m.finderSource = nil
 
 		return
 	}
@@ -388,26 +420,14 @@ func (m *Model) rerender() {
 }
 
 // updateSearchState updates the finder and search matches for the given lines.
-// Only rebuilds the finder if the source changed (expensive preprocessing).
-func (m *Model) updateSearchState(lines *niceyaml.Source) {
+func (m *Model) updateSearchState(lines Source) {
 	if m.searchTerm == "" {
-		m.finder = nil
-		m.finderSource = nil
 		m.searchMatches = nil
 
 		return
 	}
 
-	// Only rebuild finder if source changed.
-	if m.finder == nil || m.finderSource != lines {
-		var opts []niceyaml.FinderOption
-		if m.normalizer != nil {
-			opts = append(opts, niceyaml.WithNormalizer(m.normalizer))
-		}
-
-		m.finder = niceyaml.NewFinder(lines, opts...)
-		m.finderSource = lines
-	}
+	m.finder.Load(lines)
 
 	m.searchMatches = m.finder.Find(m.searchTerm)
 
@@ -436,29 +456,6 @@ func (m *Model) rerenderLine(idx int) {
 	}
 }
 
-// applySearchHighlights applies current search highlights and re-renders all lines.
-func (m *Model) applySearchHighlights() {
-	if m.lines == nil || m.printer == nil {
-		return
-	}
-
-	m.printer.ClearStyles()
-
-	for i, match := range m.searchMatches {
-		style := m.SearchStyle
-		if i == m.searchIndex {
-			style = m.SelectedSearchStyle
-		}
-
-		m.printer.AddStyleToRange(&style, match)
-	}
-
-	content := m.printer.Print(m.lines)
-
-	m.renderedLines = strings.Split(content, "\n")
-	m.longestLineWidth = maxLineWidth(m.renderedLines)
-}
-
 // getDiffBaseRevision returns the base revision for diff comparison based on the current diff mode.
 // Returns nil if diff mode is None or revision is nil.
 func (m *Model) getDiffBaseRevision() *niceyaml.Revision {
@@ -478,26 +475,26 @@ func (m *Model) getDiffBaseRevision() *niceyaml.Revision {
 
 // getDisplayLines returns the lines to display based on current revision and [DiffMode].
 // The makeDiff func is called when a diff should be shown; if nil, uses [niceyaml.NewFullDiff].
-func (m *Model) getDisplayLines(makeDiff func(base, current *niceyaml.Revision) *niceyaml.Source) *niceyaml.Source {
+func (m *Model) getDisplayLines(makeDiff func(base, current *niceyaml.Revision) Source) Source {
 	if m.revision == nil {
 		return nil
 	}
 
 	switch {
 	case m.revision.AtOrigin():
-		return m.revision.Origin().Lines()
+		return m.revision.Origin().Source()
 	case m.diffMode == DiffModeNone:
-		return m.revision.Lines()
+		return m.revision.Source()
 	default:
 		base := m.getDiffBaseRevision()
 		if base == nil {
-			return m.revision.Lines()
+			return m.revision.Source()
 		}
 		if makeDiff != nil {
 			return makeDiff(base, m.revision)
 		}
 
-		return niceyaml.NewFullDiff(base, m.revision).Lines()
+		return niceyaml.NewFullDiff(base, m.revision).Source()
 	}
 }
 
@@ -712,8 +709,6 @@ func (m *Model) VisibleLineCount() int {
 
 // SetSearchTerm sets the search term and updates highlights.
 // If the term is empty, clears all search highlights.
-// If the source hasn't changed since the last search, this uses the
-// preprocessed finder for efficient searching without rebuilding the position map.
 func (m *Model) SetSearchTerm(term string) {
 	if term == "" {
 		m.ClearSearch()
@@ -721,24 +716,6 @@ func (m *Model) SetSearchTerm(term string) {
 	}
 
 	m.searchTerm = term
-
-	// Fast path: if finder already exists (source unchanged), just search.
-	if m.finder != nil {
-		m.searchMatches = m.finder.Find(term)
-
-		if len(m.searchMatches) == 0 {
-			m.searchIndex = -1
-		} else if m.searchIndex >= len(m.searchMatches) || m.searchIndex < 0 {
-			m.searchIndex = 0
-		}
-
-		m.applySearchHighlights()
-		m.scrollToCurrentMatch()
-
-		return
-	}
-
-	// No finder yet, trigger full rerender to create one.
 	m.rerender()
 	m.scrollToCurrentMatch()
 }
@@ -820,10 +797,10 @@ func (m *Model) scrollToCurrentMatch() {
 
 	match := m.searchMatches[m.searchIndex]
 	// Line is already 0-indexed in PositionRange.
-	line := match.Start.Line
+	startLine := match.Start.Line
 
 	// Center the match in the viewport.
-	m.SetYOffset(line - m.maxHeight()/2)
+	m.SetYOffset(startLine - m.maxHeight()/2)
 }
 
 // Update handles messages.
@@ -929,7 +906,7 @@ func (m *Model) getViewDimensions() (int, int, bool) {
 
 // renderContent applies styling and renders lines into final output.
 func (m *Model) renderContent(lines []string, contentW, contentH int) string {
-	contents := m.printer.GetStyle(niceyaml.StyleDefault).
+	contents := m.printer.Style(niceyaml.StyleDefault).
 		Width(contentW).
 		Height(contentH).
 		Render(strings.Join(lines, "\n"))
@@ -974,8 +951,8 @@ func (m Model) ViewSummary(context int) string {
 
 // getSummaryDiffContent returns summary diff content for the current revision.
 func (m *Model) getSummaryDiffContent(context int) string {
-	lines := m.getDisplayLines(func(base, curr *niceyaml.Revision) *niceyaml.Source {
-		return niceyaml.NewSummaryDiff(base, curr, context).Lines()
+	lines := m.getDisplayLines(func(base, curr *niceyaml.Revision) Source {
+		return niceyaml.NewSummaryDiff(base, curr, context).Source()
 	})
 	if lines == nil {
 		return ""
@@ -994,8 +971,8 @@ func clamp[T cmp.Ordered](v, low, high T) T {
 
 func maxLineWidth(lines []string) int {
 	result := 0
-	for _, line := range lines {
-		result = max(result, ansi.StringWidth(line))
+	for _, li := range lines {
+		result = max(result, ansi.StringWidth(li))
 	}
 
 	return result
