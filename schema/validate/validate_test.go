@@ -398,7 +398,7 @@ func TestValidator_Validate(t *testing.T) {
 
 				var validationErr *niceyaml.Error
 				require.ErrorAs(t, err, &validationErr)
-				assert.Equal(t, tc.expectedPath, validationErr.GetPath())
+				assert.Equal(t, tc.expectedPath, validationErr.Path())
 			} else {
 				require.NoError(t, err)
 			}
@@ -666,8 +666,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 			file, err := source.File()
 			require.NoError(t, err)
 
-			ec := niceyaml.NewErrorContext(niceyaml.WithFile(file))
-			d := niceyaml.NewDecoder(file, ec)
+			d := niceyaml.NewDecoder(file)
 
 			for _, dd := range d.Documents() {
 				err = dd.Validate(validator)
@@ -677,7 +676,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 
 					var validationErr *niceyaml.Error
 					require.ErrorAs(t, err, &validationErr)
-					assert.Equal(t, tc.expectedPath, validationErr.GetPath())
+					assert.Equal(t, tc.expectedPath, validationErr.Path())
 				} else {
 					require.NoError(t, err)
 				}

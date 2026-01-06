@@ -118,17 +118,24 @@ fmt.Println(printer.Print(diff))
 source := niceyaml.NewSourceFromString(yamlInput)
 
 // Parse into go-yaml AST nodes with niceyaml.Error support.
-file, err := source.Parse()
+file, err := source.File()
 if err != nil {
-	// This is a niceyaml.Error with annotations.
-	return err
+	return source.WrapError(err)
 }
 ```
 
 ### Validating and Decoding YAML Documents
 
 ```go
-// Create a niceyaml.Decoder with your go-yaml *ast.File (created above).
+source := niceyaml.NewSourceFromString(yamlInput)
+
+// Parse into go-yaml AST nodes with niceyaml.Error support.
+file, err := source.File()
+if err != nil {
+	return source.WrapError(err)
+}
+
+// Create a niceyaml.Decoder with your go-yaml *ast.File.
 decoder := niceyaml.NewDecoder(file)
 
 // Create JSON Schema validators for different resource kinds.
@@ -145,24 +152,23 @@ for _, doc := range decoder.Documents() {
 	}
 
 	// Validate and decode based on kind.
-	// All of the errors below are niceyaml.Errors with annotations.
 	switch kind {
 	case "Deployment":
 		if err := doc.Validate(deployValidator); err != nil {
-			return err
+			return source.WrapError(err)
 		}
 		var deploy appsv1.Deployment
 		if err := doc.Decode(&deploy); err != nil {
-			return err
+			return source.WrapError(err)
 		}
 
 	case "Service":
 		if err := doc.Validate(svcValidator); err != nil {
-			return err
+			return source.WrapError(err)
 		}
 		var svc corev1.Service
 		if err := doc.Decode(&svc); err != nil {
-			return err
+			return source.WrapError(err)
 		}
 
 	default:

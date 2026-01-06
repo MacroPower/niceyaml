@@ -21,7 +21,7 @@ Key types by feature area:
 - **Source:** `Source`, `LineIterator` - YAML token organization by line.
 - **Diff System:** `FullDiff`, `SummaryDiff`, `Revision` - LCS-based diffing and version tracking.
 - **Search:** `Finder`, `Normalizer`, `StandardNormalizer` - text search with normalization support.
-- **Error Handling:** `Error`, `ErrorWrapper` - errors with source context and annotations.
+- **Error Handling:** `Error` - errors with source context and annotations.
 - **YAML Utilities:** `Decoder`, `DocumentDecoder`, `Validator`, `Encoder`, `NewPath`, `NewPathBuilder` - parsing, decoding, and validation.
 - **Printing:** `Printer`, `Style`, `Styles`, `StyleGetter`, `TokenStyler`, `GutterFunc`, `GutterContext` - syntax highlighting and styled rendering.
 

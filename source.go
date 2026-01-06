@@ -23,6 +23,7 @@ type Source struct {
 	file       *ast.File
 	fileErr    error
 	parserOpts []parser.Option
+	errorOpts  []ErrorOption
 	fileOnce   sync.Once
 }
 
@@ -42,6 +43,14 @@ func WithName(name string) SourceOption {
 func WithParserOptions(opts ...parser.Option) SourceOption {
 	return func(s *Source) {
 		s.parserOpts = opts
+	}
+}
+
+// WithErrorOptions sets the [ErrorOption]s used when wrapping errors
+// with [Source.WrapError].
+func WithErrorOptions(opts ...ErrorOption) SourceOption {
+	return func(s *Source) {
+		s.errorOpts = opts
 	}
 }
 
@@ -122,6 +131,25 @@ func (s *Source) parse() (*ast.File, error) {
 
 	//nolint:wrapcheck // Return the original error if it's not a [yaml.Error].
 	return nil, err
+}
+
+// WrapError wraps an error with additional context for [Error] types.
+// It applies any [ErrorOption]s provided and sets the source to this [Source].
+// If the error isn't an [Error], it returns the original error unmodified.
+func (s *Source) WrapError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	var yamlErr *Error
+	if errors.As(err, &yamlErr) {
+		yamlErr.SetOption(s.errorOpts...)
+		yamlErr.SetOption(WithSource(s))
+
+		return yamlErr
+	}
+
+	return err
 }
 
 // Count returns the number of lines.

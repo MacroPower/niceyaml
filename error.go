@@ -8,15 +8,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
-	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
 )
-
-// ErrorWrapper wraps errors with additional context.
-// See [ErrorContext] for an implementation that wraps [Error]s.
-type ErrorWrapper interface {
-	Wrap(err error) error
-}
 
 // StyledSlicePrinter extends [TokenStyler] with slice printing capabilities.
 type StyledSlicePrinter interface {
@@ -24,43 +17,10 @@ type StyledSlicePrinter interface {
 	PrintSlice(lines LineIterator, minLine, maxLine int) string
 }
 
-// ErrorContext wraps errors with additional context for [Error] types.
-// It holds default [ErrorOption]s that are applied to all wrapped errors.
-// Create instances with [NewErrorContext].
-type ErrorContext struct {
-	opts []ErrorOption
-}
-
-// NewErrorContext creates a new [ErrorContext] with the given [ErrorOption]s.
-func NewErrorContext(opts ...ErrorOption) *ErrorContext {
-	return &ErrorContext{
-		opts: opts,
-	}
-}
-
-// Wrap wraps an error with additional context for [Error]s.
-// If the error isn't an [Error], it returns the original error unmodified.
-func (ew *ErrorContext) Wrap(err error) error {
-	if err == nil {
-		return nil
-	}
-
-	var yamlErr *Error
-	if errors.As(err, &yamlErr) {
-		for _, opt := range ew.opts {
-			opt(yamlErr)
-		}
-
-		return yamlErr
-	}
-
-	return err
-}
-
 // Error represents a YAML error with optional source annotation.
 // To enable annotated error output that shows the relevant YAML location, provide:
 //   - [WithErrorToken] directly specifies the error location, OR
-//   - [WithPath] combined with either [WithTokens] or [WithFile] to resolve the path
+//   - [WithPath] combined with [WithSource] to resolve the path
 //
 //nolint:recvcheck // Must satisfy error interface.
 type Error struct {
@@ -68,8 +28,7 @@ type Error struct {
 	path        *yaml.Path
 	token       *token.Token
 	printer     StyledSlicePrinter
-	file        *ast.File
-	tokens      token.Tokens
+	source      *Source
 	sourceLines int
 }
 
@@ -118,19 +77,10 @@ func WithPrinter(p StyledSlicePrinter) ErrorOption {
 	}
 }
 
-// WithTokens sets the YAML tokens for annotating the error.
-// The tokens are used to resolve the error path to a specific token location.
-func WithTokens(tks token.Tokens) ErrorOption {
+// WithSource sets the [Source] for resolving the error path.
+func WithSource(src *Source) ErrorOption {
 	return func(e *Error) {
-		e.tokens = tks
-	}
-}
-
-// WithFile sets the parsed AST file for resolving the error path.
-// Use this instead of [WithTokens] when you already have a parsed file.
-func WithFile(file *ast.File) ErrorOption {
-	return func(e *Error) {
-		e.file = file
+		e.source = src
 	}
 }
 
@@ -158,8 +108,15 @@ func (e Error) Error() string {
 	return errMsg
 }
 
-// GetPath returns the YAML path where the error occurred as a string.
-func (e *Error) GetPath() string {
+// SetOption applies the provided [ErrorOption]s to the [Error].
+func (e *Error) SetOption(opts ...ErrorOption) {
+	for _, opt := range opts {
+		opt(e)
+	}
+}
+
+// Path returns the [*yaml.Path] where the error occurred as a string.
+func (e *Error) Path() string {
 	if e.path == nil {
 		return ""
 	}
@@ -186,14 +143,13 @@ func (e *Error) resolveToken(path *yaml.Path) (*token.Token, error) {
 		return e.token, nil
 	}
 
-	file := e.file
-	if file == nil {
-		var err error
+	if e.source == nil {
+		return nil, errors.New("no source provided")
+	}
 
-		file, err = parser.Parse(e.tokens, 0)
-		if err != nil {
-			return nil, fmt.Errorf("parse tokens into ast.File: %w", err)
-		}
+	file, err := e.source.File()
+	if err != nil {
+		return nil, fmt.Errorf("parse source: %w", err)
 	}
 
 	return getTokenFromPath(file, path)

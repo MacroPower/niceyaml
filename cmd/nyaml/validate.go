@@ -104,13 +104,12 @@ func validateFile(yamlPath string, validator niceyaml.Validator) error {
 	}
 
 	if validator != nil {
-		ec := niceyaml.NewErrorContext(niceyaml.WithFile(astFile))
-		decoder := niceyaml.NewDecoder(astFile, ec)
+		decoder := niceyaml.NewDecoder(astFile)
 
 		for _, doc := range decoder.Documents() {
 			err := doc.Validate(validator)
 			if err != nil {
-				return err
+				return source.WrapError(err)
 			}
 		}
 	}

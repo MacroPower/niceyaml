@@ -90,10 +90,11 @@
 //
 //   - [WithSourceLines]: Number of context lines to display
 //   - [WithPath]: YAML path where the error occurred
+//   - [WithSource]: Source for resolving the error path
 //   - [WithErrorToken]: Token associated with the error
 //   - [WithPrinter]: Customize error source formatting
 //
-// Use [ErrorContext] to create errors with consistent default options.
+// Use [Source.WrapError] to wrap errors with source annotations.
 //
 // # String Finding
 //
@@ -113,12 +114,16 @@
 // yields [DocumentDecoder] instances for each document in a multi-document
 // YAML file:
 //
-//	ec := niceyaml.NewErrorContext(niceyaml.WithFile(file))
-//	decoder := niceyaml.NewDecoder(file, ec)
+//	source := niceyaml.NewSourceFromString(yamlContent)
+//	file, err := source.File()
+//	if err != nil {
+//	    return source.WrapError(err)
+//	}
+//	decoder := niceyaml.NewDecoder(file)
 //	for _, doc := range decoder.Documents() {
 //	    var config Config
 //	    if err := doc.Decode(&config); err != nil {
-//	        return err
+//	        return source.WrapError(err)
 //	    }
 //	}
 //

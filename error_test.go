@@ -8,7 +8,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/lexer"
-	"github.com/goccy/go-yaml/parser"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -36,8 +35,6 @@ func TestError(t *testing.T) {
 		key: value
 	`)
 	tokens := lexer.Tokenize(source)
-	file, err := parser.Parse(tokens, 0)
-	require.NoError(t, err)
 
 	tcs := map[string]struct {
 		err  error
@@ -51,30 +48,11 @@ func TestError(t *testing.T) {
 			err:  niceyaml.NewError(errors.New("something went wrong")),
 			want: "something went wrong",
 		},
-		"with path and tokens shows annotated source": {
+		"with path and source shows annotated source": {
 			err: niceyaml.NewError(
 				errors.New("invalid value"),
 				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build()),
-				niceyaml.WithTokens(tokens),
-				niceyaml.WithPrinter(niceyaml.NewPrinter(
-					niceyaml.WithStyles(yamltest.NewXMLStyles()),
-					niceyaml.WithGutter(niceyaml.NoGutter),
-					niceyaml.WithStyle(lipgloss.NewStyle()),
-				)),
-			),
-			want: yamltest.JoinLF(
-				"[3:1] invalid value:",
-				"",
-				"<key>a</key><punctuation>:</punctuation><default> </default><string>b</string>",
-				"<key>foo</key><punctuation>:</punctuation><default> </default><string>bar</string>",
-				"<error>key</error><punctuation>:</punctuation><default> </default><string>value</string>",
-			),
-		},
-		"with path and file shows annotated source": {
-			err: niceyaml.NewError(
-				errors.New("invalid value"),
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build()),
-				niceyaml.WithFile(file),
+				niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
 				niceyaml.WithPrinter(niceyaml.NewPrinter(
 					niceyaml.WithStyles(yamltest.NewXMLStyles()),
 					niceyaml.WithGutter(niceyaml.NoGutter),
@@ -120,14 +98,13 @@ func TestError(t *testing.T) {
 	}
 }
 
-func TestErrorWrapper(t *testing.T) {
+func TestSourceWrapError(t *testing.T) {
 	t.Parallel()
 
-	source := yamltest.Input(`
+	sourceInput := yamltest.Input(`
 		name: test
 		value: 123
 	`)
-	tokens := lexer.Tokenize(source)
 
 	newXMLPrinter := func() *niceyaml.Printer {
 		return niceyaml.NewPrinter(
@@ -138,25 +115,27 @@ func TestErrorWrapper(t *testing.T) {
 	}
 
 	tcs := map[string]struct {
-		wrapperOpts func() []niceyaml.ErrorOption
+		opts        func() []niceyaml.ErrorOption
 		inputErr    func() error
 		wantExact   string
 		wantNil     bool
 		wantSameErr bool
 	}{
 		"wrap nil returns nil": {
-			wrapperOpts: func() []niceyaml.ErrorOption { return nil },
-			inputErr:    func() error { return nil },
-			wantNil:     true,
+			opts:     func() []niceyaml.ErrorOption { return nil },
+			inputErr: func() error { return nil },
+			wantNil:  true,
 		},
 		"wrap non-error type returns unchanged": {
-			wrapperOpts: func() []niceyaml.ErrorOption { return nil },
+			opts:        func() []niceyaml.ErrorOption { return nil },
 			inputErr:    func() error { return errors.New("plain error") },
 			wantSameErr: true,
 		},
-		"wrap error applies default options": {
-			wrapperOpts: func() []niceyaml.ErrorOption {
-				return []niceyaml.ErrorOption{niceyaml.WithTokens(tokens), niceyaml.WithPrinter(newXMLPrinter())}
+		"wrap error applies options and source": {
+			opts: func() []niceyaml.ErrorOption {
+				return []niceyaml.ErrorOption{
+					niceyaml.WithPrinter(newXMLPrinter()),
+				}
 			},
 			inputErr: func() error {
 				return niceyaml.NewError(
@@ -177,10 +156,10 @@ func TestErrorWrapper(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			wrapper := niceyaml.NewErrorContext(tc.wrapperOpts()...)
+			source := niceyaml.NewSourceFromString(sourceInput, niceyaml.WithErrorOptions(tc.opts()...))
 			inputErr := tc.inputErr()
 
-			got := wrapper.Wrap(inputErr)
+			got := source.WrapError(inputErr)
 
 			if tc.wantNil {
 				assert.NoError(t, got)
@@ -231,7 +210,7 @@ func TestGetPath(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := tc.err.GetPath()
+			got := tc.err.Path()
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -243,13 +222,9 @@ func TestError_GracefulDegradation(t *testing.T) {
 	// Create tokens from a simple source for tests that need them.
 	source := `key: value`
 	tokens := lexer.Tokenize(source)
-	file, err := parser.Parse(tokens, 0)
-	require.NoError(t, err)
 
-	// Empty tokens and file for edge case tests.
+	// Empty tokens for edge case tests.
 	emptyTokens := lexer.Tokenize("")
-	emptyFile, err := parser.Parse(emptyTokens, 0)
-	require.NoError(t, err)
 
 	tcs := map[string]struct {
 		err  *niceyaml.Error
@@ -259,46 +234,38 @@ func TestError_GracefulDegradation(t *testing.T) {
 			err: niceyaml.NewError(
 				errors.New("not found"),
 				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("nonexistent").Build()),
-				niceyaml.WithTokens(tokens),
+				niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
 			),
 			want: "error at $.nonexistent: not found",
 		},
-		"path without tokens": {
+		"path without source": {
 			err: niceyaml.NewError(
-				errors.New("missing tokens"),
+				errors.New("missing source"),
 				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build()),
 			),
-			want: "error at $.key: missing tokens",
+			want: "error at $.key: missing source",
 		},
-		"empty file": {
+		"empty source": {
 			err: niceyaml.NewError(
-				errors.New("error in empty file"),
+				errors.New("error in empty source"),
 				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build()),
-				niceyaml.WithTokens(emptyTokens),
+				niceyaml.WithSource(niceyaml.NewSourceFromTokens(emptyTokens)),
 			),
-			want: "error at $.key: error in empty file",
+			want: "error at $.key: error in empty source",
 		},
-		"nil file": {
+		"nil source": {
 			err: niceyaml.NewError(
-				errors.New("nil file error"),
+				errors.New("nil source error"),
 				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build()),
-				niceyaml.WithFile(nil),
+				niceyaml.WithSource(nil),
 			),
-			want: "error at $.key: nil file error",
+			want: "error at $.key: nil source error",
 		},
-		"empty docs": {
-			err: niceyaml.NewError(
-				errors.New("empty docs error"),
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build()),
-				niceyaml.WithFile(emptyFile),
-			),
-			want: "error at $.key: empty docs error",
-		},
-		"nonexistent path in file": {
+		"nonexistent path in source": {
 			err: niceyaml.NewError(
 				errors.New("path not found"),
 				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("nonexistent").Child("deep").Build()),
-				niceyaml.WithFile(file),
+				niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
 			),
 			want: "error at $.nonexistent.deep: path not found",
 		},
@@ -323,7 +290,6 @@ func TestErrorAnnotation(t *testing.T) {
 		errMsg      string
 		wantExact   string
 		sourceLines int
-		useFile     bool // Use WithFile instead of WithTokens.
 	}{
 		"nested path shows correct key": {
 			source: yamltest.Input(`
@@ -411,76 +377,20 @@ func TestErrorAnnotation(t *testing.T) {
 				"<key>line5</key><punctuation>:</punctuation><default> </default><string>e</string>",
 			),
 		},
-		"basic path with file": {
-			source: yamltest.Input(`
-				foo: bar
-				key: value
-			`),
-			path:    niceyaml.NewPathBuilder().Child("key").Build(),
-			errMsg:  "file error",
-			useFile: true,
-			wantExact: yamltest.JoinLF(
-				"[2:1] file error:",
-				"",
-				"<key>foo</key><punctuation>:</punctuation><default> </default><string>bar</string>",
-				"<error>key</error><punctuation>:</punctuation><default> </default><string>value</string>",
-			),
-		},
-		"nested path with file": {
-			source: yamltest.Input(`
-				outer:
-				  inner: value
-			`),
-			path:    niceyaml.NewPathBuilder().Child("outer").Child("inner").Build(),
-			errMsg:  "nested file error",
-			useFile: true,
-			wantExact: yamltest.JoinLF(
-				"[2:3] nested file error:",
-				"",
-				"<key>outer</key><punctuation>:</punctuation>",
-				"<error>  </error><error>inner</error><punctuation>:</punctuation><default> </default><string>value</string>",
-			),
-		},
-		"array element with file": {
-			source: yamltest.Input(`
-				items:
-				  - first
-				  - second
-			`),
-			path:    niceyaml.NewPathBuilder().Child("items").Index(1).Build(),
-			errMsg:  "array file error",
-			useFile: true,
-			wantExact: yamltest.JoinLF(
-				"[3:5] array file error:",
-				"",
-				"<key>items</key><punctuation>:</punctuation>",
-				"<default>  </default><punctuation>-</punctuation><default> </default><string>first</string>",
-				"<string>  </string><punctuation>-</punctuation><error> </error><error>second</error>",
-			),
-		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tokens := lexer.Tokenize(tc.source)
-
 			opts := []niceyaml.ErrorOption{
 				niceyaml.WithPath(tc.path),
+				niceyaml.WithSource(niceyaml.NewSourceFromString(tc.source)),
 				niceyaml.WithPrinter(niceyaml.NewPrinter(
 					niceyaml.WithStyles(yamltest.NewXMLStyles()),
 					niceyaml.WithGutter(niceyaml.NoGutter),
 					niceyaml.WithStyle(lipgloss.NewStyle()),
 				)),
-			}
-			if tc.useFile {
-				file, parseErr := parser.Parse(tokens, 0)
-				require.NoError(t, parseErr)
-
-				opts = append(opts, niceyaml.WithFile(file))
-			} else {
-				opts = append(opts, niceyaml.WithTokens(tokens))
 			}
 			if tc.sourceLines > 0 {
 				opts = append(opts, niceyaml.WithSourceLines(tc.sourceLines))
@@ -578,12 +488,10 @@ func TestError_SpecialParentContext(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tokens := lexer.Tokenize(tc.source)
-
 			err := niceyaml.NewError(
 				errors.New(tc.errMsg),
 				niceyaml.WithPath(tc.path),
-				niceyaml.WithTokens(tokens),
+				niceyaml.WithSource(niceyaml.NewSourceFromString(tc.source)),
 				niceyaml.WithPrinter(newXMLPrinter()),
 			)
 
