@@ -27,17 +27,27 @@ type Normalizer interface {
 // case-insensitive matching. For example, "Ö" becomes "o".
 // Note that [unicode.Mn] is the unicode key for nonspacing marks.
 // Create instances with [NewStandardNormalizer].
-type StandardNormalizer struct{}
+type StandardNormalizer struct {
+	transformer transform.Transformer
+}
 
 // NewStandardNormalizer creates a new [StandardNormalizer].
 func NewStandardNormalizer() StandardNormalizer {
-	return StandardNormalizer{}
+	return StandardNormalizer{
+		transformer: transform.Chain(
+			norm.NFD,
+			runes.Remove(runes.In(unicode.Mn)),
+			norm.NFC,
+			cases.Lower(language.Und),
+		),
+	}
 }
 
 // Normalize implements [Normalizer].
-func (StandardNormalizer) Normalize(in string) string {
-	t := transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC, cases.Lower(language.Und))
-	out, _, err := transform.String(t, in)
+func (n StandardNormalizer) Normalize(in string) string {
+	n.transformer.Reset()
+
+	out, _, err := transform.String(n.transformer, in)
 	if err != nil {
 		slog.Debug("normalize string: %w", slog.Any("error", err))
 		return in
