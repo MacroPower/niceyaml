@@ -68,10 +68,10 @@ Validator integrates with our core package for improved YAML handling (e.g. supp
 ### Go Conventions
 
 - Document all exported items with doc comments.
-- Use `[Name]` syntax for Go doc links.
 - Package documentation in `doc.go` files.
 - Wrap errors with `fmt.Errorf("context: %w", err)`; no "failed" or "error" in messages.
 - Use global error variables for common errors.
+- Use constructors with functional options.
 
 ### Code Patterns
 
@@ -79,6 +79,14 @@ Validator integrates with our core package for improved YAML handling (e.g. supp
 - 0-indexed positioning convention for `position.Position` (line and column start at 0).
 - Half-open ranges `[Start, End)` for `position.Range`.
 - Prefer consistency over performance, avoid "fast paths" that could lead to unpredictable behavior.
+
+### Documentation
+
+- Use `[Name]` syntax for Go doc links.
+- Constructors should always begin: `// NewThing creates a new [Thing].`
+- Types with constructors should always note: `// Create instances with [NewThing].`
+- Interfaces should note: `// See [Thing] for an implementation.`
+- Interfaces should have sensible names: `type Builder interface { Build() Thing } // Builder builds [Thing]s.`
 
 ### Testing
 
