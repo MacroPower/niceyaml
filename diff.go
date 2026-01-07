@@ -61,6 +61,18 @@ func lcsLineDiff(before, after LineIterator) []lineOp {
 
 	m, n := len(beforeLines), len(afterLines)
 
+	// Pre-compute content strings once to avoid repeated string building.
+	// This reduces Content() calls from O(m*n) to O(m+n).
+	beforeContent := make([]string, m)
+	for i := range beforeLines {
+		beforeContent[i] = beforeLines[i].Content()
+	}
+
+	afterContent := make([]string, n)
+	for i := range afterLines {
+		afterContent[i] = afterLines[i].Content()
+	}
+
 	dp := make([][]int, m+1)
 	for i := range dp {
 		dp[i] = make([]int, n+1)
@@ -68,7 +80,7 @@ func lcsLineDiff(before, after LineIterator) []lineOp {
 
 	for i := m - 1; i >= 0; i-- {
 		for j := n - 1; j >= 0; j-- {
-			if beforeLines[i].Content() == afterLines[j].Content() {
+			if beforeContent[i] == afterContent[j] {
 				dp[i][j] = dp[i+1][j+1] + 1
 			} else {
 				dp[i][j] = max(dp[i+1][j], dp[i][j+1])
@@ -77,13 +89,13 @@ func lcsLineDiff(before, after LineIterator) []lineOp {
 	}
 
 	// Backtrack: deletions before insertions per diff convention.
-	var ops []lineOp
+	ops := make([]lineOp, 0, max(m, n))
 
 	i, j := 0, 0
 
 	for i < m || j < n {
 		switch {
-		case i < m && j < n && beforeLines[i].Content() == afterLines[j].Content():
+		case i < m && j < n && beforeContent[i] == afterContent[j]:
 			ops = append(ops, lineOp{kind: diffEqual, line: afterLines[j]})
 			i++
 			j++
