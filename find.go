@@ -55,6 +55,7 @@ type Finder struct {
 	prevLines  LineIterator
 	posMap     *positionMap
 	source     string
+	byteToRune []int
 	mu         sync.RWMutex
 }
 
@@ -95,6 +96,28 @@ func (f *Finder) Load(lines LineIterator) {
 
 	f.prevLines = lines
 	f.source, f.posMap = f.buildSourceAndPositionMap(lines)
+	f.buildByteToRuneIndex()
+}
+
+// buildByteToRuneIndex builds a lookup table mapping byte offsets to rune counts.
+// This enables O(1) byte-to-rune conversion during Find instead of O(n) scanning.
+func (f *Finder) buildByteToRuneIndex() {
+	if f.source == "" {
+		f.byteToRune = nil
+		return
+	}
+
+	f.byteToRune = make([]int, len(f.source)+1)
+	runeCount := 0
+
+	for i := 0; i < len(f.source); {
+		f.byteToRune[i] = runeCount
+		_, size := utf8.DecodeRuneInString(f.source[i:])
+		i += size
+		runeCount++
+	}
+
+	f.byteToRune[len(f.source)] = runeCount
 }
 
 // Find finds all occurrences of the search string in the preprocessed source.
@@ -116,6 +139,8 @@ func (f *Finder) Find(search string) []position.Range {
 		searchStr = f.normalizer.Normalize(search)
 	}
 
+	searchRuneCount := utf8.RuneCountInString(searchStr)
+
 	var results []position.Range
 
 	offset := 0
@@ -129,8 +154,8 @@ func (f *Finder) Find(search string) []position.Range {
 		matchEnd := matchStart + len(searchStr)
 
 		// Convert byte offsets to character offsets for position map lookup.
-		matchStartChar := utf8.RuneCountInString(f.source[:matchStart])
-		matchEndChar := matchStartChar + utf8.RuneCountInString(searchStr) - 1
+		matchStartChar := f.byteToRune[matchStart]
+		matchEndChar := matchStartChar + searchRuneCount - 1
 
 		startPos := f.posMap.lookup(matchStartChar)
 		endPos := f.posMap.lookup(matchEndChar)
