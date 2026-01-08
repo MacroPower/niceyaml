@@ -9,6 +9,7 @@ import (
 
 	_ "embed"
 
+	"github.com/macropower/niceyaml/schema"
 	"github.com/macropower/niceyaml/schema/validator"
 )
 
@@ -40,13 +41,8 @@ func NewConfig() Config {
 
 // JSONSchemaExtend extends the generated JSON schema.
 func (c Config) JSONSchemaExtend(js *jsonschema.Schema) {
-	kind, ok := js.Properties.Get("kind")
-	if !ok {
-		panic("kind property not found in schema")
-	}
-
+	kind := schema.MustGetProperty("kind", js)
 	kind.Const = "Config"
-	js.Properties.Set("kind", kind)
 }
 
 // Validate extends schema-driven validation with custom validation logic.
@@ -64,14 +60,9 @@ type Metadata struct {
 
 // JSONSchemaExtend extends the generated JSON schema.
 func (m Metadata) JSONSchemaExtend(js *jsonschema.Schema) {
-	name, ok := js.Properties.Get("name")
-	if !ok {
-		panic("name property not found in schema")
-	}
-
-	name.MinLength = ptrUint64(1)
-	name.MaxLength = ptrUint64(100)
-	js.Properties.Set("name", name)
+	name := schema.MustGetProperty("name", js)
+	name.MinLength = schema.PtrUint64(1)
+	name.MaxLength = schema.PtrUint64(100)
 }
 
 // Spec is the cafe specification.
@@ -91,13 +82,8 @@ type Spec struct {
 
 // JSONSchemaExtend extends the generated JSON schema.
 func (s Spec) JSONSchemaExtend(js *jsonschema.Schema) {
-	sla, ok := js.Properties.Get("sla")
-	if !ok {
-		panic("sla property not found in schema")
-	}
-
+	sla := schema.MustGetProperty("sla", js)
 	sla.Pattern = `^(\d+d)?(\d+h)?(\d+m)?(\d+s)?$`
-	js.Properties.Set("sla", sla)
 }
 
 // Menu defines the cafe's menu offerings.
@@ -108,13 +94,8 @@ type Menu struct {
 
 // JSONSchemaExtend extends the generated JSON schema.
 func (m Menu) JSONSchemaExtend(js *jsonschema.Schema) {
-	items, ok := js.Properties.Get("items")
-	if !ok {
-		panic("items property not found in schema")
-	}
-
-	items.MinItems = ptrUint64(1)
-	js.Properties.Set("items", items)
+	items := schema.MustGetProperty("items", js)
+	items.MinItems = schema.PtrUint64(1)
 }
 
 // MenuItem represents a single item on the menu.
@@ -135,21 +116,11 @@ type MenuItem struct {
 
 // JSONSchemaExtend extends the generated JSON schema.
 func (m MenuItem) JSONSchemaExtend(js *jsonschema.Schema) {
-	name, ok := js.Properties.Get("name")
-	if !ok {
-		panic("name property not found in schema")
-	}
+	name := schema.MustGetProperty("name", js)
+	name.MinLength = schema.PtrUint64(1)
 
-	name.MinLength = ptrUint64(1)
-	js.Properties.Set("name", name)
-
-	price, ok := js.Properties.Get("price")
-	if !ok {
-		panic("price property not found in schema")
-	}
-
+	price := schema.MustGetProperty("price", js)
 	price.Minimum = json.Number("0")
-	js.Properties.Set("price", price)
 }
 
 // Staff defines staffing requirements.
@@ -162,22 +133,12 @@ type Staff struct {
 
 // JSONSchemaExtend extends the generated JSON schema.
 func (s Staff) JSONSchemaExtend(js *jsonschema.Schema) {
-	baristas, ok := js.Properties.Get("baristas")
-	if !ok {
-		panic("baristas property not found in schema")
-	}
-
+	baristas := schema.MustGetProperty("baristas", js)
 	baristas.Minimum = json.Number("1")
 	baristas.Maximum = json.Number("10")
-	js.Properties.Set("baristas", baristas)
 
-	managers, ok := js.Properties.Get("managers")
-	if !ok {
-		panic("managers property not found in schema")
-	}
-
+	managers := schema.MustGetProperty("managers", js)
 	managers.Minimum = json.Number("1")
-	js.Properties.Set("managers", managers)
 }
 
 // Hours defines operating hours for the cafe.
@@ -194,23 +155,13 @@ type Hours struct {
 func (h Hours) JSONSchemaExtend(js *jsonschema.Schema) {
 	timePattern := `^([01]?[0-9]|2[0-3]):[0-5][0-9]$`
 
-	open, ok := js.Properties.Get("open")
-	if !ok {
-		panic("open property not found in schema")
-	}
-
+	open := schema.MustGetProperty("open", js)
 	open.Pattern = timePattern
 	open.Default = "07:00"
-	js.Properties.Set("open", open)
 
-	closeTime, ok := js.Properties.Get("close")
-	if !ok {
-		panic("close property not found in schema")
-	}
-
+	closeTime := schema.MustGetProperty("close", js)
 	closeTime.Pattern = timePattern
 	closeTime.Default = "19:00"
-	js.Properties.Set("close", closeTime)
 }
 
 // Settings contains optional cafe settings.
@@ -223,9 +174,4 @@ type Settings struct {
 	CustomOptions map[string]string `json:"custom_options,omitempty" jsonschema:"title=Custom Options"`
 	// Theme is the UI theme for digital displays.
 	Theme string `json:"theme,omitempty" jsonschema:"title=Theme,enum=light,enum=dark,enum=auto,default=auto"`
-}
-
-// ptrUint64 returns a pointer to a uint64 value.
-func ptrUint64(v uint64) *uint64 {
-	return &v
 }
