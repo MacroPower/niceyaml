@@ -163,6 +163,9 @@ linters:
       disabled-checks:
         - unnamedResult
         - singleCaseSwitch
+      settings:
+        hugeParam:
+          sizeThreshold: 256
 
     godot:
       scope: all

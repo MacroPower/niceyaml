@@ -86,8 +86,6 @@ func WithSource(src FileGetter) ErrorOption {
 }
 
 // Error returns the error message with source annotation if available.
-//
-//nolint:gocritic // hugeParam: Must satisfy error interface.
 func (e Error) Error() string {
 	if e.err == nil {
 		return ""
