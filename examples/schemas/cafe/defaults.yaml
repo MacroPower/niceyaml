@@ -1,0 +1,92 @@
+# yaml-language-server: $schema=./cafe.v1.json
+kind: Config
+metadata:
+  name: Downtown Cafe
+  description: A cozy neighborhood cafe serving quality coffee and fresh pastries.
+spec:
+  sla: 15m
+  menu:
+    items:
+      - name: Espresso
+        category: coffee
+        price: 3.50
+        description: Rich, bold single shot of espresso.
+        tags:
+          - hot
+          - caffeine
+      - name: Cappuccino
+        category: coffee
+        price: 4.50
+        description: Espresso with steamed milk foam.
+        tags:
+          - hot
+          - caffeine
+          - milk
+      - name: Iced Latte
+        category: coffee
+        price: 5.00
+        tags:
+          - cold
+          - caffeine
+          - milk
+      - name: Green Tea
+        category: tea
+        price: 3.00
+        description: Traditional Japanese green tea.
+        tags:
+          - hot
+          - caffeine
+      - name: Chai Latte
+        category: tea
+        price: 4.50
+        tags:
+          - hot
+          - spiced
+          - milk
+      - name: Croissant
+        category: pastry
+        price: 3.50
+        description: Buttery, flaky French pastry.
+        tags:
+          - baked
+          - butter
+      - name: Blueberry Muffin
+        category: pastry
+        price: 3.00
+        tags:
+          - baked
+          - fruit
+      - name: Turkey Club
+        category: sandwich
+        price: 9.50
+        description: Sliced turkey with bacon, lettuce, and tomato.
+        tags:
+          - lunch
+          - protein
+      - name: Veggie Wrap
+        category: sandwich
+        price: 8.50
+        available: false
+        tags:
+          - lunch
+          - vegetarian
+  staff:
+    baristas: 3
+    managers: 1
+  hours:
+    open: "07:00"
+    close: "19:00"
+    days:
+      - monday
+      - tuesday
+      - wednesday
+      - thursday
+      - friday
+      - saturday
+  settings:
+    wifi: true
+    mobile_ordering: true
+    theme: light
+    custom_options:
+      loyalty_program: enabled
+      outdoor_seating: available

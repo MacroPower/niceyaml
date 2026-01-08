@@ -246,6 +246,9 @@ linters:
       - text: "\\*github\\.com/hashicorp/go-multierror\\.Error"
         linters:
           - wrapcheck
+      - text: "\\*github\\.com/macropower/niceyaml\\.Source"
+        linters:
+          - wrapcheck
       - path: cmd/
         linters:
           - wrapcheck

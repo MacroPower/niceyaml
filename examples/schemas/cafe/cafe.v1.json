@@ -1,0 +1,244 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/macropower/niceyaml/examples/schemas/cafe/config",
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "Config",
+      "title": "Kind",
+      "description": "Kind identifies this configuration type.\n\nConfig.Kind: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Config"
+    },
+    "metadata": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "description": "Name is the name of the cafe.\n\nMetadata.Name: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Metadata"
+        },
+        "description": {
+          "type": "string",
+          "title": "Description",
+          "description": "Description provides additional details about the cafe.\n\nMetadata.Description: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Metadata"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "title": "Metadata",
+      "description": "Metadata contains identifying information about the cafe.\n\nConfig.Metadata: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Config"
+    },
+    "spec": {
+      "properties": {
+        "sla": {
+          "type": "string",
+          "pattern": "^(\\d+d)?(\\d+h)?(\\d+m)?(\\d+s)?$",
+          "title": "SLA",
+          "description": "SLA is the service level agreement duration for order fulfillment.\nDefaults to 15 minutes.\n\nSpec.SLA: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Spec",
+          "default": "15m"
+        },
+        "settings": {
+          "properties": {
+            "wifi": {
+              "type": "boolean",
+              "title": "WiFi",
+              "description": "WiFi indicates whether WiFi is available.\n\nSettings.WiFi: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Settings",
+              "default": true
+            },
+            "mobile_ordering": {
+              "type": "boolean",
+              "title": "Mobile Ordering",
+              "description": "MobileOrdering indicates whether mobile ordering is enabled.\n\nSettings.MobileOrdering: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Settings",
+              "default": false
+            },
+            "custom_options": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object",
+              "title": "Custom Options",
+              "description": "CustomOptions contains additional custom settings.\n\nSettings.CustomOptions: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Settings"
+            },
+            "theme": {
+              "type": "string",
+              "enum": [
+                "light",
+                "dark",
+                "auto"
+              ],
+              "title": "Theme",
+              "description": "Theme is the UI theme for digital displays.\n\nSettings.Theme: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Settings",
+              "default": "auto"
+            }
+          },
+          "additionalProperties": false,
+          "type": "object",
+          "title": "Settings",
+          "description": "Settings contains optional cafe settings.\n\nSpec.Settings: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Spec"
+        },
+        "hours": {
+          "properties": {
+            "open": {
+              "type": "string",
+              "pattern": "^([01]?[0-9]|2[0-3]):[0-5][0-9]$",
+              "title": "Open",
+              "description": "Open is the opening time in HH:MM format (24-hour).\n\nHours.Open: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Hours",
+              "default": "07:00"
+            },
+            "close": {
+              "type": "string",
+              "pattern": "^([01]?[0-9]|2[0-3]):[0-5][0-9]$",
+              "title": "Close",
+              "description": "Close is the closing time in HH:MM format (24-hour).\n\nHours.Close: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Hours",
+              "default": "19:00"
+            },
+            "days": {
+              "items": {
+                "type": "string",
+                "enum": [
+                  "monday",
+                  "tuesday",
+                  "wednesday",
+                  "thursday",
+                  "friday",
+                  "saturday",
+                  "sunday"
+                ]
+              },
+              "type": "array",
+              "title": "Days",
+              "description": "Days lists the days of operation.\n\nHours.Days: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Hours"
+            }
+          },
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "open",
+            "close",
+            "days"
+          ],
+          "title": "Hours",
+          "description": "Hours defines operating hours.\n\nSpec.Hours: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Spec"
+        },
+        "menu": {
+          "properties": {
+            "items": {
+              "items": {
+                "properties": {
+                  "available": {
+                    "type": "boolean",
+                    "title": "Available",
+                    "description": "Available indicates whether the item is currently available.\n\nMenuItem.Available: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#MenuItem",
+                    "default": true
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "title": "Name",
+                    "description": "Name is the name of the menu item.\n\nMenuItem.Name: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#MenuItem"
+                  },
+                  "category": {
+                    "type": "string",
+                    "enum": [
+                      "coffee",
+                      "tea",
+                      "pastry",
+                      "sandwich"
+                    ],
+                    "title": "Category",
+                    "description": "Category is the type of item.\n\nMenuItem.Category: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#MenuItem"
+                  },
+                  "description": {
+                    "type": "string",
+                    "title": "Description",
+                    "description": "Description provides additional details about the item.\n\nMenuItem.Description: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#MenuItem"
+                  },
+                  "tags": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array",
+                    "title": "Tags",
+                    "description": "Tags are optional labels for the item.\n\nMenuItem.Tags: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#MenuItem"
+                  },
+                  "price": {
+                    "type": "number",
+                    "minimum": 0,
+                    "title": "Price",
+                    "description": "Price is the cost of the item in dollars.\n\nMenuItem.Price: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#MenuItem"
+                  }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "name",
+                  "category",
+                  "price"
+                ],
+                "description": "MenuItem represents a single item on the menu.\n\nMenuItem: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#MenuItem"
+              },
+              "type": "array",
+              "minItems": 1,
+              "title": "Items",
+              "description": "Items is the list of menu items.\n\nMenu.Items: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Menu"
+            }
+          },
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "items"
+          ],
+          "title": "Menu",
+          "description": "Menu defines the cafe's menu.\n\nSpec.Menu: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Spec"
+        },
+        "staff": {
+          "properties": {
+            "baristas": {
+              "type": "integer",
+              "maximum": 10,
+              "minimum": 1,
+              "title": "Baristas",
+              "description": "Baristas is the number of baristas on shift.\n\nStaff.Baristas: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Staff",
+              "default": 2
+            },
+            "managers": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Managers",
+              "description": "Managers is the number of managers on shift.\n\nStaff.Managers: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Staff",
+              "default": 1
+            }
+          },
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "baristas",
+            "managers"
+          ],
+          "title": "Staff",
+          "description": "Staff defines staffing requirements.\n\nSpec.Staff: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Spec"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "hours",
+        "menu",
+        "staff"
+      ],
+      "title": "Spec",
+      "description": "Spec contains the cafe specification.\n\nConfig.Spec: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Config"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "description": "Config is the root cafe configuration.\nCreate instances with [NewConfig].\n\nConfig: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Config"
+}
