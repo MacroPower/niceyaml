@@ -10,11 +10,12 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.3
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20251201173703-9f73bfd934ff
 	github.com/charmbracelet/x/exp/golden v0.0.0-20250806222409-83e3a29d542f
-	github.com/goccy/go-yaml v1.19.1
+	github.com/goccy/go-yaml v1.19.2
 	github.com/invopop/jsonschema v0.13.0
 	github.com/lucasb-eyer/go-colorful v1.3.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/spf13/cobra v1.10.2
+	github.com/spf13/pflag v1.0.9
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/text v0.32.0
 	golang.org/x/tools v0.40.0
@@ -44,7 +45,6 @@ require (
 	github.com/muesli/roff v0.1.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
-	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/exp v0.0.0-20240604190554-fc45aab8b7f8 // indirect
