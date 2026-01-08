@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"github.com/macropower/niceyaml/examples/schemas/cafe"
-	"github.com/macropower/niceyaml/schema/generate"
+	"github.com/macropower/niceyaml/schema/generator"
 )
 
 var outFile = flag.String("o", "schema.json", "Output file for the generated schema")
@@ -15,9 +15,9 @@ var outFile = flag.String("o", "schema.json", "Output file for the generated sch
 func main() {
 	flag.Parse()
 
-	gen := generate.NewGenerator(
+	gen := generator.New(
 		cafe.NewConfig(),
-		generate.WithPackagePaths(
+		generator.WithPackagePaths(
 			"github.com/macropower/niceyaml/examples/schemas/cafe",
 		),
 	)

@@ -1,11 +1,11 @@
-// Package generate provides JSON Schema generation from Go types.
+// Package generator provides JSON Schema generation from Go types.
 //
 // The [Generator] type creates JSON schemas from Go structs using reflection.
 // When package paths are provided, it extracts source code comments to use as
 // schema descriptions.
 //
-//	gen := generate.NewGenerator(MyConfig{},
-//	    generate.WithPackagePaths("./..."),
+//	gen := generator.New(MyConfig{},
+//	    generator.WithPackagePaths("./..."),
 //	)
 //	schemaBytes, err := gen.Generate()
 //
@@ -19,7 +19,7 @@
 //
 // If using the generated schema for validation, you should consider embedding
 // it in your binary with [embed].
-package generate
+package generator
 
 import (
 	"encoding/json"
@@ -45,7 +45,7 @@ type LookupCommentFunc func(commentMap map[string]string) func(t reflect.Type, f
 // Generator generates a JSON schema from a Go type using reflection.
 // When package paths are provided via [WithPackagePaths], it extracts source
 // comments to include as schema descriptions. Uses [github.com/invopop/jsonschema].
-// Create instances with [NewGenerator].
+// Create instances with [New].
 type Generator struct {
 	reflector         *jsonschema.Reflector
 	lookupCommentFunc LookupCommentFunc
@@ -85,10 +85,10 @@ func WithTests(include bool) Option {
 	}
 }
 
-// NewGenerator creates a new [Generator].
+// New creates a new [Generator].
 // The reflectTarget is the Go type to generate the schema for.
 // Use [WithPackagePaths] to specify packages for comment lookup.
-func NewGenerator(reflectTarget any, opts ...Option) *Generator {
+func New(reflectTarget any, opts ...Option) *Generator {
 	g := &Generator{
 		reflector:         new(jsonschema.Reflector),
 		lookupCommentFunc: DefaultLookupCommentFunc,

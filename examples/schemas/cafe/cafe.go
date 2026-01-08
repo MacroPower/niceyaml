@@ -9,7 +9,7 @@ import (
 
 	_ "embed"
 
-	"github.com/macropower/niceyaml/schema/validate"
+	"github.com/macropower/niceyaml/schema/validator"
 )
 
 //go:generate go run ./schemagen/main.go -o cafe.v1.json
@@ -19,7 +19,7 @@ var (
 	schemaJSON []byte
 
 	// DefaultValidator validates configuration against the JSON schema.
-	DefaultValidator = validate.MustNewValidator("/cafe.v1.json", schemaJSON)
+	DefaultValidator = validator.MustNew("/cafe.v1.json", schemaJSON)
 )
 
 // Config is the root cafe configuration.

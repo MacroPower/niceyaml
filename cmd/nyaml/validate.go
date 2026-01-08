@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/macropower/niceyaml"
-	"github.com/macropower/niceyaml/schema/validate"
+	"github.com/macropower/niceyaml/schema/validator"
 )
 
 func validateCmd() *cobra.Command {
@@ -28,7 +28,7 @@ func validateCmd() *cobra.Command {
 
 			yamlPaths := args
 
-			var validator niceyaml.Validator
+			var v niceyaml.Validator
 			if schemaRef != "" {
 				// Load and compile schema.
 				schemaData, err := loadSchema(cmd.Context(), schemaRef)
@@ -36,14 +36,14 @@ func validateCmd() *cobra.Command {
 					return fmt.Errorf("load schema: %w", err)
 				}
 
-				validator, err = validate.NewValidator(schemaRef, schemaData)
+				v, err = validator.New(schemaRef, schemaData)
 				if err != nil {
 					return fmt.Errorf("compile schema: %w", err)
 				}
 			}
 
 			for _, yamlPath := range yamlPaths {
-				err := validateFile(yamlPath, validator)
+				err := validateFile(yamlPath, v)
 				if err != nil {
 					return fmt.Errorf("%s: %w", yamlPath, err)
 				} else if len(yamlPaths) > 1 {
@@ -90,7 +90,7 @@ func fetchSchema(ctx context.Context, schemaURL string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-func validateFile(yamlPath string, validator niceyaml.Validator) error {
+func validateFile(yamlPath string, v niceyaml.Validator) error {
 	yamlData, err := os.ReadFile(yamlPath) //nolint:gosec // User-provided file paths are intentional.
 	if err != nil {
 		return fmt.Errorf("read file: %w", err)
@@ -103,11 +103,11 @@ func validateFile(yamlPath string, validator niceyaml.Validator) error {
 		return err
 	}
 
-	if validator != nil {
+	if v != nil {
 		decoder := niceyaml.NewDecoder(astFile)
 
 		for _, doc := range decoder.Documents() {
-			err := doc.Validate(validator)
+			err := doc.Validate(v)
 			if err != nil {
 				return source.WrapError(err)
 			}

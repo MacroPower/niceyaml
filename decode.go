@@ -12,7 +12,7 @@ import (
 
 // Validator validates any data. Implementers should return an [Error]
 // pointing to the relevant YAML token if validation fails.
-// See [schema/validate.Validator] for an implementation.
+// See [schema/validator.Validator] for an implementation.
 type Validator interface {
 	Validate(v any) error
 }

@@ -1,4 +1,4 @@
-package validate_test
+package validator_test
 
 import (
 	"errors"
@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/macropower/niceyaml"
-	"github.com/macropower/niceyaml/schema/validate"
+	"github.com/macropower/niceyaml/schema/validator"
 	"github.com/macropower/niceyaml/yamltest"
 )
 
@@ -84,15 +84,15 @@ func TestNewValidator(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			validator, err := validate.NewValidator("test", tc.schemaData)
+			v, err := validator.New("test", tc.schemaData)
 
 			if tc.wantErr {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tc.errMsg)
-				assert.Nil(t, validator)
+				assert.Nil(t, v)
 			} else {
 				require.NoError(t, err)
-				assert.NotNil(t, validator)
+				assert.NotNil(t, v)
 			}
 		})
 	}
@@ -155,7 +155,7 @@ func TestValidator_Validate(t *testing.T) {
 		"additionalProperties": false
 	}`)
 
-	validator, err := validate.NewValidator("test", schemaData)
+	v, err := validator.New("test", schemaData)
 	require.NoError(t, err)
 
 	tcs := map[string]struct {
@@ -391,7 +391,7 @@ func TestValidator_Validate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := validator.Validate(tc.data)
+			err := v.Validate(tc.data)
 
 			if tc.wantErr {
 				require.Error(t, err)
@@ -463,7 +463,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 		"additionalProperties": false
 	}`)
 
-	validator, err := validate.NewValidator("test", schemaData)
+	v, err := validator.New("test", schemaData)
 	require.NoError(t, err)
 
 	tcs := map[string]struct {
@@ -669,7 +669,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 			d := niceyaml.NewDecoder(file)
 
 			for _, dd := range d.Documents() {
-				err = dd.Validate(validator)
+				err = dd.Validate(v)
 
 				if tc.wantErr {
 					require.Error(t, err)
@@ -718,17 +718,17 @@ func TestMustNewValidator(t *testing.T) {
 
 			if tc.wantPanic {
 				assert.Panics(t, func() {
-					validate.MustNewValidator("test", tc.schemaData)
+					validator.MustNew("test", tc.schemaData)
 				})
 
 				return
 			}
 
-			validator := validate.MustNewValidator("test", tc.schemaData)
-			assert.NotNil(t, validator)
+			v := validator.MustNew("test", tc.schemaData)
+			assert.NotNil(t, v)
 
 			if tc.validateData != nil {
-				err := validator.Validate(tc.validateData)
+				err := v.Validate(tc.validateData)
 				assert.NoError(t, err)
 			}
 		})
@@ -767,10 +767,10 @@ func TestNewValidator_InvalidSchemaTypes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			validator, err := validate.NewValidator("test", tc.schemaData)
+			v, err := validator.New("test", tc.schemaData)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.errMsg)
-			assert.Nil(t, validator)
+			assert.Nil(t, v)
 		})
 	}
 }
@@ -799,12 +799,12 @@ func TestNewValidator_BooleanSchema(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			validator, err := validate.NewValidator("test", tc.schemaData)
+			v, err := validator.New("test", tc.schemaData)
 			require.NoError(t, err)
-			require.NotNil(t, validator)
+			require.NotNil(t, v)
 
 			for _, data := range testData {
-				err := validator.Validate(data)
+				err := v.Validate(data)
 				if tc.acceptsAll {
 					assert.NoError(t, err)
 				} else {

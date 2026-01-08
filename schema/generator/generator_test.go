@@ -1,4 +1,4 @@
-package generate_test
+package generator_test
 
 import (
 	"encoding/json"
@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/macropower/niceyaml/schema/generate"
+	"github.com/macropower/niceyaml/schema/generator"
 )
 
 // Test types for schema generation.
@@ -88,7 +88,7 @@ func TestNewGenerator(t *testing.T) {
 
 	testStruct := TestStruct{}
 
-	gen := generate.NewGenerator(testStruct, generate.WithTests(true))
+	gen := generator.New(testStruct, generator.WithTests(true))
 
 	assert.NotNil(t, gen)
 }
@@ -132,9 +132,9 @@ func TestSchemaGenerator_Generate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			gen := generate.NewGenerator(tc.reflectTarget,
-				generate.WithPackagePaths(tc.packagePaths...),
-				generate.WithTests(true),
+			gen := generator.New(tc.reflectTarget,
+				generator.WithPackagePaths(tc.packagePaths...),
+				generator.WithTests(true),
 			)
 			result, err := gen.Generate()
 
@@ -170,12 +170,12 @@ func TestDefaultLookupCommentFunc(t *testing.T) {
 	t.Parallel()
 
 	commentMap := map[string]string{
-		"generate_test.TestStruct":      "TestStruct is a test structure.",
-		"generate_test.TestStruct.Name": "Name field comment.",
-		"generate_test.TestStruct.Age":  "Age field comment.",
+		"generator_test.TestStruct":      "TestStruct is a test structure.",
+		"generator_test.TestStruct.Name": "Name field comment.",
+		"generator_test.TestStruct.Age":  "Age field comment.",
 	}
 
-	lookupFunc := generate.DefaultLookupCommentFunc(commentMap)
+	lookupFunc := generator.DefaultLookupCommentFunc(commentMap)
 	testType := reflect.TypeFor[TestStruct]()
 
 	tcs := map[string]struct {
@@ -184,19 +184,19 @@ func TestDefaultLookupCommentFunc(t *testing.T) {
 	}{
 		"type comment": {
 			fieldName: "",
-			want:      "TestStruct is a test structure.\n\nTestStruct: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generate_test#TestStruct",
+			want:      "TestStruct is a test structure.\n\nTestStruct: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generator_test#TestStruct",
 		},
 		"field comment for Name": {
 			fieldName: "Name",
-			want:      "Name field comment.\n\nTestStruct.Name: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generate_test#TestStruct",
+			want:      "Name field comment.\n\nTestStruct.Name: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generator_test#TestStruct",
 		},
 		"field comment for Age": {
 			fieldName: "Age",
-			want:      "Age field comment.\n\nTestStruct.Age: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generate_test#TestStruct",
+			want:      "Age field comment.\n\nTestStruct.Age: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generator_test#TestStruct",
 		},
 		"missing field comment": {
 			fieldName: "MissingField",
-			want:      "TestStruct.MissingField: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generate_test#TestStruct",
+			want:      "TestStruct.MissingField: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generator_test#TestStruct",
 		},
 	}
 
@@ -214,7 +214,7 @@ func TestDefaultLookupCommentFunc_EmptyCommentMap(t *testing.T) {
 	t.Parallel()
 
 	commentMap := map[string]string{}
-	lookupFunc := generate.DefaultLookupCommentFunc(commentMap)
+	lookupFunc := generator.DefaultLookupCommentFunc(commentMap)
 	testType := reflect.TypeFor[TestStruct]()
 
 	tcs := map[string]struct {
@@ -223,11 +223,11 @@ func TestDefaultLookupCommentFunc_EmptyCommentMap(t *testing.T) {
 	}{
 		"type without comment": {
 			fieldName: "",
-			want:      "TestStruct: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generate_test#TestStruct",
+			want:      "TestStruct: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generator_test#TestStruct",
 		},
 		"field without comment": {
 			fieldName: "Name",
-			want:      "TestStruct.Name: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generate_test#TestStruct",
+			want:      "TestStruct.Name: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generator_test#TestStruct",
 		},
 	}
 
@@ -251,9 +251,9 @@ func TestGenerator_SetCustomLookupFunc(t *testing.T) {
 		}
 	}
 
-	gen := generate.NewGenerator(TestStruct{},
-		generate.WithLookupCommentFunc(customLookupFunc),
-		generate.WithTests(true),
+	gen := generator.New(TestStruct{},
+		generator.WithLookupCommentFunc(customLookupFunc),
+		generator.WithTests(true),
 	)
 
 	// Test that the custom function works by generating a schema with package paths.
@@ -410,9 +410,9 @@ func TestGenerator_Generate_ComplexStructures(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			gen := generate.NewGenerator(tc.reflectTarget,
-				generate.WithPackagePaths(tc.packagePaths...),
-				generate.WithTests(true),
+			gen := generator.New(tc.reflectTarget,
+				generator.WithPackagePaths(tc.packagePaths...),
+				generator.WithTests(true),
 			)
 			result, err := gen.Generate()
 
@@ -435,17 +435,17 @@ func TestDefaultLookupCommentFunc_ComplexStructures(t *testing.T) {
 	t.Parallel()
 
 	commentMap := map[string]string{
-		"generate_test.ComplexStruct":                "ComplexStruct demonstrates various Go type features.",
-		"generate_test.ComplexStruct.BasicField":     "BasicField is a simple field.",
-		"generate_test.ComplexStruct.SliceField":     "SliceField contains multiple values.",
-		"generate_test.ComplexStruct.MapField":       "MapField contains key-value pairs.",
-		"generate_test.ComplexStruct.NestedStruct":   "NestedStruct contains nested data.",
-		"generate_test.ComplexStruct.PointerField":   "PointerField may be nil.",
-		"generate_test.EmbeddedStruct":               "EmbeddedStruct provides embedded functionality.",
-		"generate_test.EmbeddedStruct.EmbeddedValue": "EmbeddedValue is from an embedded struct.",
+		"generator_test.ComplexStruct":                "ComplexStruct demonstrates various Go type features.",
+		"generator_test.ComplexStruct.BasicField":     "BasicField is a simple field.",
+		"generator_test.ComplexStruct.SliceField":     "SliceField contains multiple values.",
+		"generator_test.ComplexStruct.MapField":       "MapField contains key-value pairs.",
+		"generator_test.ComplexStruct.NestedStruct":   "NestedStruct contains nested data.",
+		"generator_test.ComplexStruct.PointerField":   "PointerField may be nil.",
+		"generator_test.EmbeddedStruct":               "EmbeddedStruct provides embedded functionality.",
+		"generator_test.EmbeddedStruct.EmbeddedValue": "EmbeddedValue is from an embedded struct.",
 	}
 
-	lookupFunc := generate.DefaultLookupCommentFunc(commentMap)
+	lookupFunc := generator.DefaultLookupCommentFunc(commentMap)
 
 	tcs := map[string]struct {
 		structType reflect.Type
@@ -455,37 +455,37 @@ func TestDefaultLookupCommentFunc_ComplexStructures(t *testing.T) {
 		"complex struct type comment": {
 			structType: reflect.TypeFor[ComplexStruct](),
 			fieldName:  "",
-			want:       "ComplexStruct demonstrates various Go type features.\n\nComplexStruct: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generate_test#ComplexStruct",
+			want:       "ComplexStruct demonstrates various Go type features.\n\nComplexStruct: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generator_test#ComplexStruct",
 		},
 		"complex struct basic field": {
 			structType: reflect.TypeFor[ComplexStruct](),
 			fieldName:  "BasicField",
-			want:       "BasicField is a simple field.\n\nComplexStruct.BasicField: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generate_test#ComplexStruct",
+			want:       "BasicField is a simple field.\n\nComplexStruct.BasicField: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generator_test#ComplexStruct",
 		},
 		"complex struct slice field": {
 			structType: reflect.TypeFor[ComplexStruct](),
 			fieldName:  "SliceField",
-			want:       "SliceField contains multiple values.\n\nComplexStruct.SliceField: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generate_test#ComplexStruct",
+			want:       "SliceField contains multiple values.\n\nComplexStruct.SliceField: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generator_test#ComplexStruct",
 		},
 		"complex struct map field": {
 			structType: reflect.TypeFor[ComplexStruct](),
 			fieldName:  "MapField",
-			want:       "MapField contains key-value pairs.\n\nComplexStruct.MapField: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generate_test#ComplexStruct",
+			want:       "MapField contains key-value pairs.\n\nComplexStruct.MapField: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generator_test#ComplexStruct",
 		},
 		"embedded struct type comment": {
 			structType: reflect.TypeFor[EmbeddedStruct](),
 			fieldName:  "",
-			want:       "EmbeddedStruct provides embedded functionality.\n\nEmbeddedStruct: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generate_test#EmbeddedStruct",
+			want:       "EmbeddedStruct provides embedded functionality.\n\nEmbeddedStruct: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generator_test#EmbeddedStruct",
 		},
 		"embedded struct field comment": {
 			structType: reflect.TypeFor[EmbeddedStruct](),
 			fieldName:  "EmbeddedValue",
-			want:       "EmbeddedValue is from an embedded struct.\n\nEmbeddedStruct.EmbeddedValue: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generate_test#EmbeddedStruct",
+			want:       "EmbeddedValue is from an embedded struct.\n\nEmbeddedStruct.EmbeddedValue: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generator_test#EmbeddedStruct",
 		},
 		"missing comment for complex field": {
 			structType: reflect.TypeFor[ComplexStruct](),
 			fieldName:  "UndocumentedField",
-			want:       "ComplexStruct.UndocumentedField: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generate_test#ComplexStruct",
+			want:       "ComplexStruct.UndocumentedField: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generator_test#ComplexStruct",
 		},
 	}
 
@@ -509,19 +509,19 @@ func TestGenerator_Generate_WithPackagePaths(t *testing.T) {
 	}{
 		"complex struct with current package path": {
 			reflectTarget: ComplexStruct{},
-			packagePaths:  []string{"github.com/macropower/niceyaml/schema/generate"},
+			packagePaths:  []string{"github.com/macropower/niceyaml/schema/generator"},
 			expectError:   false,
 		},
 		"nested struct with current package path": {
 			reflectTarget: NestedComplexStruct{},
-			packagePaths:  []string{"github.com/macropower/niceyaml/schema/generate"},
+			packagePaths:  []string{"github.com/macropower/niceyaml/schema/generator"},
 			expectError:   false,
 		},
 		"multiple package paths": {
 			reflectTarget: ComplexStruct{},
 			packagePaths: []string{
 				"github.com/macropower/niceyaml",
-				"github.com/macropower/niceyaml/schema/generate",
+				"github.com/macropower/niceyaml/schema/generator",
 			},
 			expectError: false,
 		},
@@ -536,9 +536,9 @@ func TestGenerator_Generate_WithPackagePaths(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			gen := generate.NewGenerator(tc.reflectTarget,
-				generate.WithPackagePaths(tc.packagePaths...),
-				generate.WithTests(true),
+			gen := generator.New(tc.reflectTarget,
+				generator.WithPackagePaths(tc.packagePaths...),
+				generator.WithTests(true),
 			)
 			result, err := gen.Generate()
 
@@ -611,9 +611,9 @@ func TestGenerator_EdgeCases(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			gen := generate.NewGenerator(tc.reflectTarget,
-				generate.WithPackagePaths(tc.packagePaths...),
-				generate.WithTests(true),
+			gen := generator.New(tc.reflectTarget,
+				generator.WithPackagePaths(tc.packagePaths...),
+				generator.WithTests(true),
 			)
 			result, err := gen.Generate()
 
@@ -640,7 +640,7 @@ func TestGenerator_Generate_CommentExtractionPipeline(t *testing.T) {
 	}{
 		"TestStruct with package path - full pipeline": {
 			reflectTarget: TestStruct{},
-			packagePaths:  []string{"github.com/macropower/niceyaml/schema/generate"},
+			packagePaths:  []string{"github.com/macropower/niceyaml/schema/generator"},
 			checkComments: func(t *testing.T, schemaData map[string]any) {
 				t.Helper()
 
@@ -688,7 +688,7 @@ func TestGenerator_Generate_CommentExtractionPipeline(t *testing.T) {
 		},
 		"ComplexStruct with package path - full pipeline": {
 			reflectTarget: ComplexStruct{},
-			packagePaths:  []string{"github.com/macropower/niceyaml/schema/generate"},
+			packagePaths:  []string{"github.com/macropower/niceyaml/schema/generator"},
 			checkComments: func(t *testing.T, schemaData map[string]any) {
 				t.Helper()
 
@@ -770,9 +770,9 @@ func TestGenerator_Generate_CommentExtractionPipeline(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			gen := generate.NewGenerator(tc.reflectTarget,
-				generate.WithPackagePaths(tc.packagePaths...),
-				generate.WithTests(true),
+			gen := generator.New(tc.reflectTarget,
+				generator.WithPackagePaths(tc.packagePaths...),
+				generator.WithTests(true),
 			)
 			result, err := gen.Generate()
 
@@ -840,9 +840,9 @@ func TestWithReflector(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			gen := generate.NewGenerator(tc.target,
-				generate.WithReflector(tc.reflector),
-				generate.WithTests(true),
+			gen := generator.New(tc.target,
+				generator.WithReflector(tc.reflector),
+				generator.WithTests(true),
 			)
 
 			result, err := gen.Generate()

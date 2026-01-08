@@ -1,25 +1,25 @@
-// Package validate provides JSON Schema validation for data.
+// Package validator provides JSON Schema validation for data.
 //
 // The [Validator] type validates data against a compiled JSON schema and
 // returns errors with precise YAML path information.
 //
-//	validator, err := validate.NewValidator("config", schemaBytes)
+//	v, err := validator.New("config", schemaBytes)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
 //
-//	if err := validator.Validate(data); err != nil {
+//	if err := v.Validate(data); err != nil {
 //	    fmt.Println(err) // Returns niceyaml.Error with path info.
 //	}
 //
-// Use [MustNewValidator] when the schema is known to be valid at compile time:
+// Use [MustNew] when the schema is known to be valid at compile time:
 //
-//	var validator = validate.MustNewValidator("config", schemaBytes)
+//	var v = validator.MustNew("config", schemaBytes)
 //
 // Validation errors are returned as [niceyaml.Error] values, which include
 // the YAML path to the invalid field. This integrates with niceyaml's
 // [niceyaml.Printer] for rich error display with source context.
-package validate
+package validator
 
 import (
 	"encoding/json"
@@ -36,15 +36,15 @@ import (
 // Validator validates data against a compiled JSON schema and returns errors
 // with YAML path information. Implements the [niceyaml.Validator] interface
 // for use with [niceyaml.DocumentDecoder]. Uses [github.com/santhosh-tekuri/jsonschema/v6].
-// Create instances with [NewValidator] or [MustNewValidator].
+// Create instances with [New] or [MustNew].
 type Validator struct {
 	schema *jsonschema.Schema
 }
 
-// NewValidator creates a new [Validator] from JSON schema data.
+// New creates a new [Validator] from JSON schema data.
 // The url parameter is the schema's identifier used for reference resolution.
 // Returns an error if the schema JSON is invalid or fails to compile.
-func NewValidator(url string, schemaData []byte) (*Validator, error) {
+func New(url string, schemaData []byte) (*Validator, error) {
 	var schema any
 
 	err := json.Unmarshal(schemaData, &schema)
@@ -66,10 +66,10 @@ func NewValidator(url string, schemaData []byte) (*Validator, error) {
 	return &Validator{schema: jss}, nil
 }
 
-// MustNewValidator is like [NewValidator] but panics on error.
+// MustNew is like [New] but panics on error.
 // Use for schemas known to be valid at compile time, such as embedded schemas.
-func MustNewValidator(url string, schemaData []byte) *Validator {
-	v, err := NewValidator(url, schemaData)
+func MustNew(url string, schemaData []byte) *Validator {
+	v, err := New(url, schemaData)
 	if err != nil {
 		panic(err)
 	}

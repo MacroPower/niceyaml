@@ -136,11 +136,11 @@
 //
 // # Schema Generation and Validation
 //
-// The [github.com/macropower/niceyaml/schema/generate] package provides JSON
-// schema generation from Go types. Use [generate.NewGenerator] with options
-// like [generate.WithPackagePaths] to include source comments as descriptions.
+// The [github.com/macropower/niceyaml/schema/generator] package provides JSON
+// schema generation from Go types. Use [generator.New] with options
+// like [generator.WithPackagePaths] to include source comments as descriptions.
 //
-// The [github.com/macropower/niceyaml/schema/validate] package validates data
-// against JSON schemas. Use [validate.NewValidator] to create validators that
+// The [github.com/macropower/niceyaml/schema/validator] package validates data
+// against JSON schemas. Use [validator.New] to create validators that
 // return [Error] values with precise YAML path information.
 package niceyaml
