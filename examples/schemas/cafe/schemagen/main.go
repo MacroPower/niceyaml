@@ -19,6 +19,7 @@ func main() {
 		cafe.NewConfig(),
 		generator.WithPackagePaths(
 			"github.com/macropower/niceyaml/examples/schemas/cafe",
+			"github.com/macropower/niceyaml/examples/schemas/cafe/spec",
 		),
 	)
 	jsData, err := gen.Generate()

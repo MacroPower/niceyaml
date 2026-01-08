@@ -37,7 +37,7 @@
           "type": "string",
           "pattern": "^(\\d+d)?(\\d+h)?(\\d+m)?(\\d+s)?$",
           "title": "SLA",
-          "description": "SLA is the service level agreement duration for order fulfillment.\nDefaults to 15 minutes.\n\nSpec.SLA: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Spec",
+          "description": "SLA is the service level agreement duration for order fulfillment.\nDefaults to 15 minutes.\n\nSpec.SLA: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe/spec#Spec",
           "default": "15m"
         },
         "settings": {
@@ -45,13 +45,13 @@
             "wifi": {
               "type": "boolean",
               "title": "WiFi",
-              "description": "WiFi indicates whether WiFi is available.\n\nSettings.WiFi: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Settings",
+              "description": "WiFi indicates whether WiFi is available.\n\nSettings.WiFi: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe/spec#Settings",
               "default": true
             },
             "mobile_ordering": {
               "type": "boolean",
               "title": "Mobile Ordering",
-              "description": "MobileOrdering indicates whether mobile ordering is enabled.\n\nSettings.MobileOrdering: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Settings",
+              "description": "MobileOrdering indicates whether mobile ordering is enabled.\n\nSettings.MobileOrdering: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe/spec#Settings",
               "default": false
             },
             "custom_options": {
@@ -60,7 +60,7 @@
               },
               "type": "object",
               "title": "Custom Options",
-              "description": "CustomOptions contains additional custom settings.\n\nSettings.CustomOptions: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Settings"
+              "description": "CustomOptions contains additional custom settings.\n\nSettings.CustomOptions: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe/spec#Settings"
             },
             "theme": {
               "type": "string",
@@ -70,14 +70,14 @@
                 "auto"
               ],
               "title": "Theme",
-              "description": "Theme is the UI theme for digital displays.\n\nSettings.Theme: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Settings",
+              "description": "Theme is the UI theme for digital displays.\n\nSettings.Theme: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe/spec#Settings",
               "default": "auto"
             }
           },
           "additionalProperties": false,
           "type": "object",
           "title": "Settings",
-          "description": "Settings contains optional cafe settings.\n\nSpec.Settings: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Spec"
+          "description": "Settings contains optional cafe settings.\n\nSpec.Settings: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe/spec#Spec"
         },
         "hours": {
           "properties": {
@@ -85,14 +85,14 @@
               "type": "string",
               "pattern": "^([01]?[0-9]|2[0-3]):[0-5][0-9]$",
               "title": "Open",
-              "description": "Open is the opening time in HH:MM format (24-hour).\n\nHours.Open: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Hours",
+              "description": "Open is the opening time in HH:MM format (24-hour).\n\nHours.Open: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe/spec#Hours",
               "default": "07:00"
             },
             "close": {
               "type": "string",
               "pattern": "^([01]?[0-9]|2[0-3]):[0-5][0-9]$",
               "title": "Close",
-              "description": "Close is the closing time in HH:MM format (24-hour).\n\nHours.Close: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Hours",
+              "description": "Close is the closing time in HH:MM format (24-hour).\n\nHours.Close: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe/spec#Hours",
               "default": "19:00"
             },
             "days": {
@@ -110,7 +110,7 @@
               },
               "type": "array",
               "title": "Days",
-              "description": "Days lists the days of operation.\n\nHours.Days: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Hours"
+              "description": "Days lists the days of operation.\n\nHours.Days: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe/spec#Hours"
             }
           },
           "additionalProperties": false,
@@ -121,7 +121,7 @@
             "days"
           ],
           "title": "Hours",
-          "description": "Hours defines operating hours.\n\nSpec.Hours: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Spec"
+          "description": "Hours defines operating hours.\n\nSpec.Hours: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe/spec#Spec"
         },
         "menu": {
           "properties": {
@@ -131,14 +131,14 @@
                   "available": {
                     "type": "boolean",
                     "title": "Available",
-                    "description": "Available indicates whether the item is currently available.\n\nMenuItem.Available: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#MenuItem",
+                    "description": "Available indicates whether the item is currently available.\n\nMenuItem.Available: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe/spec#MenuItem",
                     "default": true
                   },
                   "name": {
                     "type": "string",
                     "minLength": 1,
                     "title": "Name",
-                    "description": "Name is the name of the menu item.\n\nMenuItem.Name: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#MenuItem"
+                    "description": "Name is the name of the menu item.\n\nMenuItem.Name: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe/spec#MenuItem"
                   },
                   "category": {
                     "type": "string",
@@ -149,12 +149,12 @@
                       "sandwich"
                     ],
                     "title": "Category",
-                    "description": "Category is the type of item.\n\nMenuItem.Category: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#MenuItem"
+                    "description": "Category is the type of item.\n\nMenuItem.Category: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe/spec#MenuItem"
                   },
                   "description": {
                     "type": "string",
                     "title": "Description",
-                    "description": "Description provides additional details about the item.\n\nMenuItem.Description: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#MenuItem"
+                    "description": "Description provides additional details about the item.\n\nMenuItem.Description: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe/spec#MenuItem"
                   },
                   "tags": {
                     "items": {
@@ -162,13 +162,13 @@
                     },
                     "type": "array",
                     "title": "Tags",
-                    "description": "Tags are optional labels for the item.\n\nMenuItem.Tags: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#MenuItem"
+                    "description": "Tags are optional labels for the item.\n\nMenuItem.Tags: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe/spec#MenuItem"
                   },
                   "price": {
                     "type": "number",
                     "minimum": 0,
                     "title": "Price",
-                    "description": "Price is the cost of the item in dollars.\n\nMenuItem.Price: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#MenuItem"
+                    "description": "Price is the cost of the item in dollars.\n\nMenuItem.Price: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe/spec#MenuItem"
                   }
                 },
                 "additionalProperties": false,
@@ -178,12 +178,12 @@
                   "category",
                   "price"
                 ],
-                "description": "MenuItem represents a single item on the menu.\n\nMenuItem: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#MenuItem"
+                "description": "MenuItem represents a single item on the menu.\n\nMenuItem: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe/spec#MenuItem"
               },
               "type": "array",
               "minItems": 1,
               "title": "Items",
-              "description": "Items is the list of menu items.\n\nMenu.Items: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Menu"
+              "description": "Items is the list of menu items.\n\nMenu.Items: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe/spec#Menu"
             }
           },
           "additionalProperties": false,
@@ -192,7 +192,7 @@
             "items"
           ],
           "title": "Menu",
-          "description": "Menu defines the cafe's menu.\n\nSpec.Menu: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Spec"
+          "description": "Menu defines the cafe's menu.\n\nSpec.Menu: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe/spec#Spec"
         },
         "staff": {
           "properties": {
@@ -201,14 +201,14 @@
               "maximum": 10,
               "minimum": 1,
               "title": "Baristas",
-              "description": "Baristas is the number of baristas on shift.\n\nStaff.Baristas: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Staff",
+              "description": "Baristas is the number of baristas on shift.\n\nStaff.Baristas: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe/spec#Staff",
               "default": 2
             },
             "managers": {
               "type": "integer",
               "minimum": 1,
               "title": "Managers",
-              "description": "Managers is the number of managers on shift.\n\nStaff.Managers: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Staff",
+              "description": "Managers is the number of managers on shift.\n\nStaff.Managers: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe/spec#Staff",
               "default": 1
             }
           },
@@ -219,7 +219,7 @@
             "managers"
           ],
           "title": "Staff",
-          "description": "Staff defines staffing requirements.\n\nSpec.Staff: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe#Spec"
+          "description": "Staff defines staffing requirements.\n\nSpec.Staff: https://pkg.go.dev/github.com/macropower/niceyaml/examples/schemas/cafe/spec#Spec"
         }
       },
       "additionalProperties": false,
