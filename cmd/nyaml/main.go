@@ -15,10 +15,17 @@ import (
 )
 
 func main() {
+	profiler := fangs.NewProfiler()
+
 	rootCmd := &cobra.Command{
 		Use:   "nyaml",
 		Short: "A terminal YAML utility with syntax highlighting",
+		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
+			return profiler.Start()
+		},
 	}
+
+	profiler.RegisterFlags(rootCmd.PersistentFlags())
 
 	rootCmd.AddCommand(viewCmd())
 	rootCmd.AddCommand(validateCmd())
@@ -27,6 +34,12 @@ func main() {
 		fang.WithErrorHandler(fangs.ErrorHandler),
 		fang.WithColorSchemeFunc(fangColorScheme),
 	)
+
+	stopErr := profiler.Stop()
+	if stopErr != nil && err == nil {
+		err = stopErr
+	}
+
 	if err != nil {
 		os.Exit(1)
 	}

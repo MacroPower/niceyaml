@@ -38,6 +38,12 @@ func ErrorHandler(w io.Writer, styles fang.Styles, err error) {
 	}
 }
 
+func must(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
 func mustN(_ int, err error) {
 	if err != nil {
 		panic(err)

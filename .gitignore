@@ -27,3 +27,6 @@ dist/
 # Temp files
 .tmp/
 .task/
+
+# Profiles
+*.prof
