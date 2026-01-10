@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/goccy/go-yaml/token"
 
+	"github.com/macropower/niceyaml/internal/colors"
 	"github.com/macropower/niceyaml/internal/styletree"
 	"github.com/macropower/niceyaml/line"
 	"github.com/macropower/niceyaml/position"
@@ -583,10 +584,10 @@ func (p *Printer) computeStyleForPoint(
 		// Check if this interval contains the point.
 		if point >= iv.Start && point < iv.End {
 			if !alwaysBlend && firstRange {
-				result = overrideStyles(result, iv.Style)
+				result = colors.OverrideStyles(result, iv.Style)
 				firstRange = false
 			} else {
-				result = blendStyles(result, iv.Style)
+				result = colors.BlendStyles(result, iv.Style)
 			}
 		}
 	}
