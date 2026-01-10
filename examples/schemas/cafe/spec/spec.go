@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/invopop/jsonschema"
-
 	"github.com/macropower/niceyaml/schema"
 )
 
@@ -26,7 +24,7 @@ type Spec struct {
 }
 
 // JSONSchemaExtend extends the generated JSON schema.
-func (s Spec) JSONSchemaExtend(js *jsonschema.Schema) {
+func (s Spec) JSONSchemaExtend(js *schema.JSON) {
 	sla := schema.MustGetProperty("sla", js)
 	sla.Pattern = `^(\d+d)?(\d+h)?(\d+m)?(\d+s)?$`
 }
@@ -38,7 +36,7 @@ type Menu struct {
 }
 
 // JSONSchemaExtend extends the generated JSON schema.
-func (m Menu) JSONSchemaExtend(js *jsonschema.Schema) {
+func (m Menu) JSONSchemaExtend(js *schema.JSON) {
 	items := schema.MustGetProperty("items", js)
 	items.MinItems = schema.PtrUint64(1)
 }
@@ -60,7 +58,7 @@ type MenuItem struct {
 }
 
 // JSONSchemaExtend extends the generated JSON schema.
-func (m MenuItem) JSONSchemaExtend(js *jsonschema.Schema) {
+func (m MenuItem) JSONSchemaExtend(js *schema.JSON) {
 	name := schema.MustGetProperty("name", js)
 	name.MinLength = schema.PtrUint64(1)
 
@@ -77,7 +75,7 @@ type Staff struct {
 }
 
 // JSONSchemaExtend extends the generated JSON schema.
-func (s Staff) JSONSchemaExtend(js *jsonschema.Schema) {
+func (s Staff) JSONSchemaExtend(js *schema.JSON) {
 	baristas := schema.MustGetProperty("baristas", js)
 	baristas.Minimum = json.Number("1")
 	baristas.Maximum = json.Number("10")
@@ -97,7 +95,7 @@ type Hours struct {
 }
 
 // JSONSchemaExtend extends the generated JSON schema.
-func (h Hours) JSONSchemaExtend(js *jsonschema.Schema) {
+func (h Hours) JSONSchemaExtend(js *schema.JSON) {
 	timePattern := `^([01]?[0-9]|2[0-3]):[0-5][0-9]$`
 
 	open := schema.MustGetProperty("open", js)

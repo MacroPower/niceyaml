@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/invopop/jsonschema"
-
 	_ "embed"
 
 	"github.com/macropower/niceyaml"
@@ -43,7 +41,7 @@ func NewConfig() Config {
 }
 
 // JSONSchemaExtend extends the generated JSON schema.
-func (c Config) JSONSchemaExtend(js *jsonschema.Schema) {
+func (c Config) JSONSchemaExtend(js *schema.JSON) {
 	kind := schema.MustGetProperty("kind", js)
 	kind.Const = "Config"
 }
@@ -96,7 +94,7 @@ type Metadata struct {
 }
 
 // JSONSchemaExtend extends the generated JSON schema.
-func (m Metadata) JSONSchemaExtend(js *jsonschema.Schema) {
+func (m Metadata) JSONSchemaExtend(js *schema.JSON) {
 	name := schema.MustGetProperty("name", js)
 	name.MinLength = schema.PtrUint64(1)
 	name.MaxLength = schema.PtrUint64(100)
