@@ -2087,3 +2087,106 @@ func TestPrinter_BlendStyles(t *testing.T) {
 		})
 	}
 }
+
+func TestPrinter_ColorBlending_Golden(t *testing.T) {
+	t.Parallel()
+
+	// These tests exercise the color blending code paths in blendColors/blendStyles
+	// by using actual lipgloss colors instead of transforms.
+
+	type styleRange struct {
+		style lipgloss.Style
+		start position.Position
+		end   position.Position
+	}
+
+	tcs := map[string]struct {
+		input  string
+		ranges []styleRange
+	}{
+		"ForegroundBlend": {
+			// Two ranges overlap - the overlapping region should blend colors via LAB.
+			input: "key: value",
+			ranges: []styleRange{
+				{lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")), position.New(0, 0), position.New(0, 5)},
+				{lipgloss.NewStyle().Foreground(lipgloss.Color("#0000FF")), position.New(0, 3), position.New(0, 10)},
+			},
+		},
+		"BackgroundBlend": {
+			input: "key: value",
+			ranges: []styleRange{
+				{lipgloss.NewStyle().Background(lipgloss.Color("#00FF00")), position.New(0, 0), position.New(0, 5)},
+				{lipgloss.NewStyle().Background(lipgloss.Color("#FF00FF")), position.New(0, 3), position.New(0, 10)},
+			},
+		},
+		"FirstColorOnly": {
+			// Second style has NoColor - first color should be used directly.
+			input: "key: value",
+			ranges: []styleRange{
+				{lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")), position.New(0, 0), position.New(0, 5)},
+				{lipgloss.NewStyle(), position.New(0, 3), position.New(0, 10)},
+			},
+		},
+		"SecondColorOnly": {
+			// First style has NoColor - second color should be used.
+			input: "key: value",
+			ranges: []styleRange{
+				{lipgloss.NewStyle(), position.New(0, 0), position.New(0, 5)},
+				{lipgloss.NewStyle().Foreground(lipgloss.Color("#0000FF")), position.New(0, 3), position.New(0, 10)},
+			},
+		},
+		"BothNoColor": {
+			// Both styles have NoColor - should result in nil (no color applied).
+			input: "key: value",
+			ranges: []styleRange{
+				{lipgloss.NewStyle(), position.New(0, 0), position.New(0, 5)},
+				{lipgloss.NewStyle(), position.New(0, 3), position.New(0, 10)},
+			},
+		},
+		"ThreeOverlapping": {
+			// Three ranges overlap - all colors should blend together.
+			input: "key: value",
+			ranges: []styleRange{
+				{lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")), position.New(0, 0), position.New(0, 6)},
+				{lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")), position.New(0, 2), position.New(0, 8)},
+				{lipgloss.NewStyle().Foreground(lipgloss.Color("#0000FF")), position.New(0, 4), position.New(0, 10)},
+			},
+		},
+		"MixedFgBg": {
+			// Foreground and background colors should blend independently.
+			input: "key: value",
+			ranges: []styleRange{
+				{
+					lipgloss.NewStyle().
+						Foreground(lipgloss.Color("#FF0000")).
+						Background(lipgloss.Color("#00FF00")),
+					position.New(0, 0),
+					position.New(0, 6),
+				},
+				{
+					lipgloss.NewStyle().
+						Foreground(lipgloss.Color("#0000FF")).
+						Background(lipgloss.Color("#FFFF00")),
+					position.New(0, 3),
+					position.New(0, 10),
+				},
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := testPrinter()
+
+			for _, sr := range tc.ranges {
+				style := sr.style
+				p.AddStyleToRange(&style, position.NewRange(sr.start, sr.end))
+			}
+
+			got := p.Print(niceyaml.NewSourceFromString(tc.input))
+			golden.RequireEqual(t, got)
+		})
+	}
+}

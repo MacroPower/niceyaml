@@ -254,6 +254,190 @@ func TestTree_ZeroLengthInterval(t *testing.T) {
 	assert.Empty(t, tree.Query(11))
 }
 
+func TestTree_AVLRotations(t *testing.T) {
+	t.Parallel()
+
+	t.Run("left-left case triggers rotateRight", func(t *testing.T) {
+		t.Parallel()
+
+		tree := styletree.New()
+		style := lipgloss.NewStyle()
+
+		// Insert in descending order to create left-heavy tree.
+		// After inserting 30: root=30
+		// After inserting 20: root=30, left=20
+		// After inserting 10: balance=2, left-left case triggers rotateRight.
+		tree.Insert(30, 35, &style)
+		tree.Insert(20, 25, &style)
+		tree.Insert(10, 15, &style)
+
+		assert.Equal(t, 3, tree.Len())
+
+		// All intervals should still be queryable after rotation.
+		assert.Len(t, tree.Query(12), 1)
+		assert.Len(t, tree.Query(22), 1)
+		assert.Len(t, tree.Query(32), 1)
+	})
+
+	t.Run("left-right case triggers double rotation", func(t *testing.T) {
+		t.Parallel()
+
+		tree := styletree.New()
+		style := lipgloss.NewStyle()
+
+		// Insert pattern to trigger left-right case:
+		// After inserting 30: root=30
+		// After inserting 10: root=30, left=10
+		// After inserting 20: balance=2, left.balance=-1, left-right case
+		// This triggers rotateLeft(left), then rotateRight(root).
+		tree.Insert(30, 35, &style)
+		tree.Insert(10, 15, &style)
+		tree.Insert(20, 25, &style)
+
+		assert.Equal(t, 3, tree.Len())
+
+		// All intervals should still be queryable after rotations.
+		assert.Len(t, tree.Query(12), 1)
+		assert.Len(t, tree.Query(22), 1)
+		assert.Len(t, tree.Query(32), 1)
+	})
+
+	t.Run("right-left case triggers double rotation", func(t *testing.T) {
+		t.Parallel()
+
+		tree := styletree.New()
+		style := lipgloss.NewStyle()
+
+		// Insert pattern to trigger right-left case:
+		// After inserting 10: root=10
+		// After inserting 30: root=10, right=30
+		// After inserting 20: balance=-2, right.balance=1, right-left case
+		// This triggers rotateRight(right), then rotateLeft(root).
+		tree.Insert(10, 15, &style)
+		tree.Insert(30, 35, &style)
+		tree.Insert(20, 25, &style)
+
+		assert.Equal(t, 3, tree.Len())
+
+		// All intervals should still be queryable after rotations.
+		assert.Len(t, tree.Query(12), 1)
+		assert.Len(t, tree.Query(22), 1)
+		assert.Len(t, tree.Query(32), 1)
+	})
+
+	t.Run("deep left-left rebalancing", func(t *testing.T) {
+		t.Parallel()
+
+		tree := styletree.New()
+		style := lipgloss.NewStyle()
+
+		// Insert many values in descending order to trigger multiple rotateRight calls.
+		for i := 10; i >= 1; i-- {
+			tree.Insert(i*10, i*10+5, &style)
+		}
+
+		assert.Equal(t, 10, tree.Len())
+
+		// Verify all intervals are queryable.
+		for i := 1; i <= 10; i++ {
+			assert.Len(t, tree.Query(i*10+2), 1, "interval %d should be queryable", i)
+		}
+	})
+
+	t.Run("alternating insertions trigger mixed rotations", func(t *testing.T) {
+		t.Parallel()
+
+		tree := styletree.New()
+		style := lipgloss.NewStyle()
+
+		// Insert in a zigzag pattern to trigger various rotation combinations.
+		tree.Insert(50, 55, &style)
+		tree.Insert(25, 30, &style)
+		tree.Insert(75, 80, &style)
+		tree.Insert(10, 15, &style)
+		tree.Insert(30, 35, &style)
+		tree.Insert(60, 65, &style)
+		tree.Insert(90, 95, &style)
+
+		assert.Equal(t, 7, tree.Len())
+
+		// Verify all intervals are queryable.
+		tests := []int{12, 27, 32, 52, 62, 77, 92}
+		for _, point := range tests {
+			assert.Len(t, tree.Query(point), 1, "point %d should match one interval", point)
+		}
+	})
+}
+
+func TestTree_Query_Pruning(t *testing.T) {
+	t.Parallel()
+
+	t.Run("point beyond maxEnd prunes search", func(t *testing.T) {
+		t.Parallel()
+
+		tree := styletree.New()
+		style := lipgloss.NewStyle()
+
+		// Create a tree where querying a high point exercises the maxEnd pruning.
+		tree.Insert(10, 20, &style)
+		tree.Insert(30, 40, &style)
+		tree.Insert(50, 60, &style)
+
+		// Query beyond all intervals - should hit maxEnd pruning.
+		assert.Empty(t, tree.Query(100))
+	})
+
+	t.Run("point before start skips right subtree", func(t *testing.T) {
+		t.Parallel()
+
+		tree := styletree.New()
+		style := lipgloss.NewStyle()
+
+		// Create tree with intervals spread out.
+		tree.Insert(100, 110, &style)
+		tree.Insert(50, 60, &style)
+		tree.Insert(150, 160, &style)
+
+		// Query at point before smallest interval start.
+		assert.Empty(t, tree.Query(40))
+		// Query in gap - exercises right subtree skip logic.
+		assert.Empty(t, tree.Query(70))
+	})
+}
+
+func TestTree_QueryRange_Pruning(t *testing.T) {
+	t.Parallel()
+
+	t.Run("query start beyond maxEnd prunes search", func(t *testing.T) {
+		t.Parallel()
+
+		tree := styletree.New()
+		style := lipgloss.NewStyle()
+
+		tree.Insert(10, 20, &style)
+		tree.Insert(30, 40, &style)
+
+		// Query range starting beyond all interval ends.
+		assert.Empty(t, tree.QueryRange(100, 200))
+	})
+
+	t.Run("query end before node start skips right subtree", func(t *testing.T) {
+		t.Parallel()
+
+		tree := styletree.New()
+		style := lipgloss.NewStyle()
+
+		tree.Insert(100, 110, &style)
+		tree.Insert(50, 60, &style)
+		tree.Insert(150, 160, &style)
+
+		// Query that ends before some intervals start.
+		result := tree.QueryRange(52, 58)
+		assert.Len(t, result, 1)
+		assert.Equal(t, 50, result[0].Start)
+	})
+}
+
 func BenchmarkTree_Insert(b *testing.B) {
 	style := lipgloss.NewStyle()
 

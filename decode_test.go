@@ -852,3 +852,48 @@ func TestDecoder_Documents(t *testing.T) {
 		assert.Equal(t, 2, count)
 	})
 }
+
+func TestDocumentDecoder_ValidateSchema(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid data passes schema validation", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.Input(`
+			name: test
+			count: 42
+		`)
+		source := niceyaml.NewSourceFromString(input)
+		file, err := source.File()
+		require.NoError(t, err)
+
+		d := niceyaml.NewDecoder(file)
+		validator := yamltest.NewPassingSchemaValidator()
+
+		for _, dd := range d.Documents() {
+			err := dd.ValidateSchema(validator)
+			require.NoError(t, err)
+		}
+	})
+
+	t.Run("invalid data fails schema validation", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.Input(`
+			name: test
+			count: not-a-number
+		`)
+		source := niceyaml.NewSourceFromString(input)
+		file, err := source.File()
+		require.NoError(t, err)
+
+		d := niceyaml.NewDecoder(file)
+		validator := yamltest.NewFailingSchemaValidator(errors.New("validation failed"))
+
+		for _, dd := range d.Documents() {
+			err := dd.ValidateSchema(validator)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "validation failed")
+		}
+	})
+}

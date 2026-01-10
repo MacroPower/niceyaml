@@ -918,3 +918,41 @@ func TestSource_Parse(t *testing.T) {
 		require.ErrorAs(t, err, &yamlErr)
 	})
 }
+
+func TestSource_WithParserOptions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("parses with default options", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(
+			"key: value\n",
+			niceyaml.WithParserOptions(),
+		)
+
+		file, err := source.File()
+		require.NoError(t, err)
+		assert.NotNil(t, file)
+	})
+
+	t.Run("parses complex YAML with options", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.Input(`
+			key1: value1
+			key2: value2
+			nested:
+			  child: data
+		`)
+
+		source := niceyaml.NewSourceFromString(
+			input,
+			niceyaml.WithParserOptions(),
+		)
+
+		file, err := source.File()
+		require.NoError(t, err)
+		assert.NotNil(t, file)
+		assert.Len(t, file.Docs, 1)
+	})
+}

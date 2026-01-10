@@ -2299,3 +2299,211 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		assert.Empty(t, ranges.Values())
 	})
 }
+
+func TestLines_TokenPositionRangesAt(t *testing.T) {
+	t.Parallel()
+
+	t.Run("single line token", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+
+		// Query position at the "key" token.
+		ranges := lines.TokenPositionRangesAt(position.New(0, 0))
+		require.NotNil(t, ranges)
+
+		values := ranges.Values()
+		require.Len(t, values, 1)
+		assert.Equal(t, 0, values[0].Start.Line)
+		assert.Equal(t, 0, values[0].Start.Col)
+		assert.Equal(t, 0, values[0].End.Line)
+		assert.Equal(t, 3, values[0].End.Col)
+	})
+
+	t.Run("multiline token returns all ranges", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.Input(`
+			key: |
+			  line1
+			  line2
+		`)
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+
+		// Query position in the literal block content (line 1, column 2).
+		ranges := lines.TokenPositionRangesAt(position.New(1, 2))
+		require.NotNil(t, ranges)
+
+		values := ranges.Values()
+		// Should return ranges for all lines where this token appears.
+		require.Len(t, values, 2)
+
+		lineIdxs := make([]int, len(values))
+		for i, r := range values {
+			lineIdxs[i] = r.Start.Line
+		}
+
+		assert.Contains(t, lineIdxs, 1)
+		assert.Contains(t, lineIdxs, 2)
+	})
+
+	t.Run("position at value token", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+
+		// Query at "value" position (after "key:" which is 4 chars).
+		ranges := lines.TokenPositionRangesAt(position.New(0, 5))
+		require.NotNil(t, ranges)
+
+		values := ranges.Values()
+		require.Len(t, values, 1)
+		// Value token starts at column 4 (0-indexed: "key:" is 4 chars).
+		assert.Equal(t, 4, values[0].Start.Col)
+	})
+
+	t.Run("position outside tokens returns empty", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+
+		// Query at position beyond token content.
+		ranges := lines.TokenPositionRangesAt(position.New(0, 100))
+		assert.Nil(t, ranges)
+	})
+
+	t.Run("line out of bounds returns nil", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+
+		assert.Nil(t, lines.TokenPositionRangesAt(position.New(999, 0)))
+		assert.Nil(t, lines.TokenPositionRangesAt(position.New(-1, 0)))
+	})
+}
+
+func TestLines_String(t *testing.T) {
+	t.Parallel()
+
+	t.Run("single line", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+
+		result := lines.String()
+		assert.Contains(t, result, "key: value")
+		// Should include line number prefix.
+		assert.Contains(t, result, "1 |")
+	})
+
+	t.Run("multiple lines", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.Input(`
+			key1: value1
+			key2: value2
+		`)
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+
+		result := lines.String()
+		assert.Contains(t, result, "key1")
+		assert.Contains(t, result, "value1")
+		assert.Contains(t, result, "key2")
+		assert.Contains(t, result, "value2")
+	})
+
+	t.Run("empty lines", func(t *testing.T) {
+		t.Parallel()
+
+		var lines line.Lines
+
+		result := lines.String()
+		assert.Empty(t, result)
+	})
+
+	t.Run("line with annotation", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+
+		// Add annotation to first line.
+		lines[0].Annotation = line.Annotation{Content: "test annotation"}
+
+		result := lines.String()
+		assert.Contains(t, result, "key: value")
+		assert.Contains(t, result, "test annotation")
+	})
+}
+
+func TestLines_Content_Empty(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil lines returns empty string", func(t *testing.T) {
+		t.Parallel()
+
+		var lines line.Lines
+		assert.Empty(t, lines.Content())
+	})
+
+	t.Run("empty slice returns empty string", func(t *testing.T) {
+		t.Parallel()
+
+		lines := line.Lines{}
+		assert.Empty(t, lines.Content())
+	})
+}
+
+func TestLine_Number_Fallbacks(t *testing.T) {
+	t.Parallel()
+
+	t.Run("line with set number returns that number", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+
+		require.Len(t, lines, 1)
+		// Line number should be 1 (1-indexed from lexer).
+		assert.Equal(t, 1, lines[0].Number())
+	})
+
+	t.Run("empty line returns zero", func(t *testing.T) {
+		t.Parallel()
+
+		// Create an empty Line directly.
+		var ln line.Line
+		assert.Equal(t, 0, ln.Number())
+	})
+
+	t.Run("multiple lines have correct numbers", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.Input(`
+			key1: value1
+			key2: value2
+			key3: value3
+		`)
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+
+		require.Len(t, lines, 3)
+		assert.Equal(t, 1, lines[0].Number())
+		assert.Equal(t, 2, lines[1].Number())
+		assert.Equal(t, 3, lines[2].Number())
+	})
+}

@@ -1984,3 +1984,171 @@ func TestViewSummary_Behavior(t *testing.T) {
 		})
 	}
 }
+
+func TestViewport_WithFinder(t *testing.T) {
+	t.Parallel()
+
+	t.Run("custom finder is used for search", func(t *testing.T) {
+		t.Parallel()
+
+		finder := niceyaml.NewFinder()
+		m := yamlviewport.New(
+			yamlviewport.WithPrinter(testPrinter()),
+			yamlviewport.WithFinder(finder),
+		)
+
+		m.SetWidth(80)
+		m.SetHeight(10)
+
+		tokens := lexer.Tokenize("key: value\n")
+		m.SetTokens(niceyaml.NewSourceFromTokens(tokens))
+
+		m.SetSearchTerm("value")
+
+		assert.Equal(t, "value", m.SearchTerm())
+		assert.Positive(t, m.SearchCount())
+	})
+}
+
+func TestViewport_ScrollEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	t.Run("scroll down with n=0 does nothing", func(t *testing.T) {
+		t.Parallel()
+
+		m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+		m.SetWidth(80)
+		m.SetHeight(10)
+
+		tokens := lexer.Tokenize("line1: value1\nline2: value2\nline3: value3\n")
+		m.SetTokens(niceyaml.NewSourceFromTokens(tokens))
+
+		initialOffset := m.YOffset()
+		m.ScrollDown(0)
+		assert.Equal(t, initialOffset, m.YOffset())
+	})
+
+	t.Run("scroll down with empty lines does nothing", func(t *testing.T) {
+		t.Parallel()
+
+		m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+		m.SetWidth(80)
+		m.SetHeight(10)
+		// No tokens set - empty lines.
+
+		m.ScrollDown(1)
+		assert.Equal(t, 0, m.YOffset())
+	})
+
+	t.Run("scroll up with n=0 does nothing", func(t *testing.T) {
+		t.Parallel()
+
+		m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+		m.SetWidth(80)
+		m.SetHeight(2)
+
+		// Need more lines than viewport height to enable scrolling.
+		tokens := lexer.Tokenize("line1: value1\nline2: value2\nline3: value3\nline4: value4\nline5: value5\n")
+		m.SetTokens(niceyaml.NewSourceFromTokens(tokens))
+
+		m.SetYOffset(2)
+		m.ScrollUp(0)
+		assert.Equal(t, 2, m.YOffset())
+	})
+
+	t.Run("scroll up with empty lines does nothing", func(t *testing.T) {
+		t.Parallel()
+
+		m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+		m.SetWidth(80)
+		m.SetHeight(10)
+		// No tokens set - empty lines.
+
+		m.ScrollUp(1)
+		assert.Equal(t, 0, m.YOffset())
+	})
+}
+
+func TestViewport_RevisionStateEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	t.Run("IsAtFirstRevision with multiple revisions", func(t *testing.T) {
+		t.Parallel()
+
+		m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+		m.SetWidth(80)
+		m.SetHeight(10)
+
+		tokens1 := lexer.Tokenize("v1: value1\n")
+		tokens2 := lexer.Tokenize("v2: value2\n")
+
+		m.AppendRevision(niceyaml.NewSourceFromTokens(tokens1, niceyaml.WithName("rev1")))
+		m.AppendRevision(niceyaml.NewSourceFromTokens(tokens2, niceyaml.WithName("rev2")))
+
+		// At latest revision (rev2), not at first.
+		assert.False(t, m.IsAtFirstRevision())
+		assert.True(t, m.IsAtLatestRevision())
+
+		// Go to first revision.
+		m.GoToRevision(0)
+		assert.True(t, m.IsAtFirstRevision())
+		assert.False(t, m.IsAtLatestRevision())
+	})
+
+	t.Run("IsAtFirstRevision with no revisions", func(t *testing.T) {
+		t.Parallel()
+
+		m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+		m.SetWidth(80)
+		m.SetHeight(10)
+
+		// No revisions - should return true.
+		assert.True(t, m.IsAtFirstRevision())
+		assert.True(t, m.IsAtLatestRevision())
+	})
+}
+
+func TestViewport_ToggleWordWrapResetsXOffset(t *testing.T) {
+	t.Parallel()
+
+	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+	m.SetWidth(20)
+	m.SetHeight(10)
+
+	tokens := lexer.Tokenize("key: very long value that exceeds width\n")
+	m.SetTokens(niceyaml.NewSourceFromTokens(tokens))
+
+	// Disable wrapping first.
+	m.ToggleWordWrap()
+	assert.False(t, m.WrapEnabled)
+
+	// Scroll right.
+	m.ScrollRight(5)
+	assert.Equal(t, 5, m.XOffset())
+
+	// Toggle back to enable wrapping - should reset xOffset.
+	m.ToggleWordWrap()
+	assert.True(t, m.WrapEnabled)
+	assert.Equal(t, 0, m.XOffset())
+}
+
+func TestViewport_SetSearchTermEmpty(t *testing.T) {
+	t.Parallel()
+
+	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+	m.SetWidth(80)
+	m.SetHeight(10)
+
+	tokens := lexer.Tokenize("key: value\n")
+	m.SetTokens(niceyaml.NewSourceFromTokens(tokens))
+
+	// Set a search term first.
+	m.SetSearchTerm("value")
+	assert.Equal(t, "value", m.SearchTerm())
+	assert.Positive(t, m.SearchCount())
+
+	// Clear with empty string.
+	m.SetSearchTerm("")
+	assert.Empty(t, m.SearchTerm())
+	assert.Equal(t, 0, m.SearchCount())
+}

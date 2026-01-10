@@ -269,6 +269,15 @@ func TestError_GracefulDegradation(t *testing.T) {
 			),
 			want: "error at $.nonexistent.deep: path not found",
 		},
+		"empty document source": {
+			// Tests graceful handling when source has no documents (Docs slice is empty).
+			err: niceyaml.NewError(
+				errors.New("empty doc error"),
+				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build()),
+				niceyaml.WithSource(niceyaml.NewSourceFromTokens(emptyTokens)),
+			),
+			want: "error at $.key: empty doc error",
+		},
 	}
 
 	for name, tc := range tcs {
