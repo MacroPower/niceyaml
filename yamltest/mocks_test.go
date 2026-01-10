@@ -9,48 +9,48 @@ import (
 	"github.com/macropower/niceyaml/yamltest"
 )
 
-func TestMockValidator(t *testing.T) {
+func TestMockSchemaValidator(t *testing.T) {
 	t.Parallel()
 
-	t.Run("NewPassingValidator returns nil for any input", func(t *testing.T) {
+	t.Run("NewPassingSchemaValidator returns nil for any input", func(t *testing.T) {
 		t.Parallel()
 
-		v := yamltest.NewPassingValidator()
+		v := yamltest.NewPassingSchemaValidator()
 
-		assert.NoError(t, v.Validate("string"))
-		assert.NoError(t, v.Validate(42))
-		assert.NoError(t, v.Validate(nil))
-		assert.NoError(t, v.Validate(struct{ Name string }{"test"}))
+		assert.NoError(t, v.ValidateSchema("string"))
+		assert.NoError(t, v.ValidateSchema(42))
+		assert.NoError(t, v.ValidateSchema(nil))
+		assert.NoError(t, v.ValidateSchema(struct{ Name string }{"test"}))
 	})
 
-	t.Run("NewFailingValidator returns the specified error", func(t *testing.T) {
+	t.Run("NewFailingSchemaValidator returns the specified error", func(t *testing.T) {
 		t.Parallel()
 
 		expectedErr := assert.AnError
-		v := yamltest.NewFailingValidator(expectedErr)
+		v := yamltest.NewFailingSchemaValidator(expectedErr)
 
-		err := v.Validate("any input")
+		err := v.ValidateSchema("any input")
 		require.ErrorIs(t, err, expectedErr)
 	})
 
-	t.Run("NewCustomValidator calls custom function with input", func(t *testing.T) {
+	t.Run("NewCustomSchemaValidator calls custom function with data", func(t *testing.T) {
 		t.Parallel()
 
-		var receivedInput any
+		var receivedData any
 
-		customFn := func(input any) error {
-			receivedInput = input
+		customFn := func(data any) error {
+			receivedData = data
 			return nil
 		}
 
-		v := yamltest.NewCustomValidator(customFn)
-		err := v.Validate("test input")
+		v := yamltest.NewCustomSchemaValidator(customFn)
+		err := v.ValidateSchema("test data")
 
 		require.NoError(t, err)
-		assert.Equal(t, "test input", receivedInput)
+		assert.Equal(t, "test data", receivedData)
 	})
 
-	t.Run("NewCustomValidator passes through error", func(t *testing.T) {
+	t.Run("NewCustomSchemaValidator passes through error", func(t *testing.T) {
 		t.Parallel()
 
 		expectedErr := assert.AnError
@@ -58,8 +58,8 @@ func TestMockValidator(t *testing.T) {
 			return expectedErr
 		}
 
-		v := yamltest.NewCustomValidator(customFn)
-		err := v.Validate("any")
+		v := yamltest.NewCustomSchemaValidator(customFn)
+		err := v.ValidateSchema("any")
 
 		require.ErrorIs(t, err, expectedErr)
 	})

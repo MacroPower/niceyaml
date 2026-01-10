@@ -22,7 +22,7 @@ Key types by feature area:
 - **Diff System:** `FullDiff`, `SummaryDiff`, `Revision` - LCS-based diffing and version tracking.
 - **Search:** `Finder`, `Normalizer`, `StandardNormalizer` - text search with normalization support.
 - **Error Handling:** `Error` - errors with source context and annotations.
-- **YAML Utilities:** `Decoder`, `DocumentDecoder`, `Validator`, `Encoder`, `NewPath`, `NewPathBuilder` - parsing, decoding, and validation.
+- **YAML Utilities:** `Decoder`, `DocumentDecoder`, `Validator`, `SchemaValidator`, `Encoder`, `NewPath`, `NewPathBuilder` - parsing, decoding, and validation.
 - **Printing:** `Printer`, `Style`, `Styles`, `StyleGetter`, `TokenStyler`, `GutterFunc`, `GutterContext` - syntax highlighting and styled rendering.
 
 ### Bubbles Subpackage (niceyaml/bubbles)
@@ -36,8 +36,8 @@ Key types by feature area:
 
 ### Schema Subpackage (niceyaml/schema)
 
-- **Generator** (`schema/generate/`): Creates JSON schemas from Go types using `github.com/invopop/jsonschema`.
-- **Validator** (`schema/validate/`): Validates data against JSON schemas using `github.com/santhosh-tekuri/jsonschema/v6`.
+- **Generator** (`schema/generator/`): Creates JSON schemas from Go types using `github.com/invopop/jsonschema`.
+- **Validator** (`schema/validator/`): Validates data against JSON schemas using `github.com/santhosh-tekuri/jsonschema/v6`.
 
 Validator integrates with our core package for improved YAML handling (e.g. supporting error annotations).
 
@@ -60,7 +60,7 @@ Validator integrates with our core package for improved YAML handling (e.g. supp
 ### YAMLTest Subpackage (niceyaml/yamltest)
 
 - **Testing Utilities** (`yamltest/`): Helpers for testing YAML token operations.
-- Key types: `TokenBuilder`, `MockValidator`, `MockNormalizer`, `XMLStyles`.
+- Key types: `TokenBuilder`, `MockSchemaValidator`, `MockNormalizer`, `XMLStyles`.
 - Key functions: `RequireTokensValid`, `AssertTokensEqual`, `FormatToken`, `FormatTokens`, `Input`, `JoinLF`, `JoinCRLF`.
 
 ## Code Style

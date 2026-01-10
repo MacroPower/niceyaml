@@ -28,7 +28,7 @@ func validateCmd() *cobra.Command {
 
 			yamlPaths := args
 
-			var v niceyaml.Validator
+			var v niceyaml.SchemaValidator
 			if schemaRef != "" {
 				// Load and compile schema.
 				schemaData, err := loadSchema(cmd.Context(), schemaRef)
@@ -90,7 +90,7 @@ func fetchSchema(ctx context.Context, schemaURL string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-func validateFile(yamlPath string, v niceyaml.Validator) error {
+func validateFile(yamlPath string, v niceyaml.SchemaValidator) error {
 	yamlData, err := os.ReadFile(yamlPath) //nolint:gosec // User-provided file paths are intentional.
 	if err != nil {
 		return fmt.Errorf("read file: %w", err)
@@ -107,7 +107,7 @@ func validateFile(yamlPath string, v niceyaml.Validator) error {
 		decoder := niceyaml.NewDecoder(astFile)
 
 		for _, doc := range decoder.Documents() {
-			err := doc.Validate(v)
+			err := doc.ValidateSchema(v)
 			if err != nil {
 				return source.WrapError(err)
 			}

@@ -154,20 +154,14 @@ for _, doc := range decoder.Documents() {
 	// Validate and decode based on kind.
 	switch kind {
 	case "Deployment":
-		if err := doc.Validate(deployValidator); err != nil {
-			return source.WrapError(err)
-		}
 		var deploy appsv1.Deployment
-		if err := doc.Decode(&deploy); err != nil {
+		if err := doc.Unmarshal(&deploy); err != nil {
 			return source.WrapError(err)
 		}
 
 	case "Service":
-		if err := doc.Validate(svcValidator); err != nil {
-			return source.WrapError(err)
-		}
 		var svc corev1.Service
-		if err := doc.Decode(&svc); err != nil {
+		if err := doc.Unmarshal(&svc); err != nil {
 			return source.WrapError(err)
 		}
 

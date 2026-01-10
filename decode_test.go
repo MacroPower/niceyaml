@@ -350,85 +350,10 @@ func TestDocumentDecoder_DecodeContext(t *testing.T) {
 	})
 }
 
-func TestDocumentDecoder_Validate(t *testing.T) {
+func TestDocumentDecoder_Unmarshal(t *testing.T) {
 	t.Parallel()
 
-	t.Run("passing validation", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString("key: value")
-		file, err := source.File()
-		require.NoError(t, err)
-
-		d := niceyaml.NewDecoder(file)
-
-		for _, dd := range d.Documents() {
-			err := dd.Validate(yamltest.NewPassingValidator())
-			require.NoError(t, err)
-		}
-	})
-
-	t.Run("failing validation", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString("key: value")
-		file, err := source.File()
-		require.NoError(t, err)
-
-		d := niceyaml.NewDecoder(file)
-
-		for _, dd := range d.Documents() {
-			err := dd.Validate(yamltest.NewFailingValidator(errors.New("validation failed")))
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "validation failed")
-		}
-	})
-}
-
-func TestDocumentDecoder_ValidateContext(t *testing.T) {
-	t.Parallel()
-
-	t.Run("validate with background context", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString("key: value")
-		file, err := source.File()
-		require.NoError(t, err)
-
-		d := niceyaml.NewDecoder(file)
-
-		for _, dd := range d.Documents() {
-			err := dd.ValidateContext(t.Context(), yamltest.NewPassingValidator())
-			require.NoError(t, err)
-		}
-	})
-
-	t.Run("validate with failing validator", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString("key: value")
-		file, err := source.File()
-		require.NoError(t, err)
-
-		d := niceyaml.NewDecoder(file)
-
-		for _, dd := range d.Documents() {
-			err := dd.ValidateContext(t.Context(), yamltest.NewFailingValidator(errors.New("invalid")))
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "invalid")
-		}
-	})
-}
-
-func TestDocumentDecoder_ValidateDecode(t *testing.T) {
-	t.Parallel()
-
-	type config struct {
-		Name  string `yaml:"name"`
-		Value int    `yaml:"value"`
-	}
-
-	t.Run("valid and decode", func(t *testing.T) {
+	t.Run("validates and decodes with SchemaValidator", func(t *testing.T) {
 		t.Parallel()
 
 		input := yamltest.Input(`
@@ -442,15 +367,39 @@ func TestDocumentDecoder_ValidateDecode(t *testing.T) {
 		d := niceyaml.NewDecoder(file)
 
 		for _, dd := range d.Documents() {
-			var result config
+			var result schemaValidatorConfig
 
-			err := dd.ValidateDecode(&result, yamltest.NewPassingValidator())
+			err := dd.Unmarshal(&result)
 			require.NoError(t, err)
-			assert.Equal(t, config{Name: "test", Value: 42}, result)
+			assert.Equal(t, "test", result.Name)
+			assert.Equal(t, 42, result.Value)
+			assert.True(t, result.schemaValidated, "ValidateSchema() should have been called")
 		}
 	})
 
-	t.Run("validation fails - no decode", func(t *testing.T) {
+	t.Run("schema validation fails - no decode", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.Input(`
+			name: invalid
+			value: 42
+		`)
+		source := niceyaml.NewSourceFromString(input)
+		file, err := source.File()
+		require.NoError(t, err)
+
+		d := niceyaml.NewDecoder(file)
+
+		for _, dd := range d.Documents() {
+			var result schemaValidatorConfig
+
+			err := dd.Unmarshal(&result)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "schema validation failed")
+		}
+	})
+
+	t.Run("decodes without SchemaValidator", func(t *testing.T) {
 		t.Parallel()
 
 		input := yamltest.Input(`
@@ -464,57 +413,63 @@ func TestDocumentDecoder_ValidateDecode(t *testing.T) {
 		d := niceyaml.NewDecoder(file)
 
 		for _, dd := range d.Documents() {
-			var result config
+			var result plainConfig
 
-			err := dd.ValidateDecode(&result, yamltest.NewFailingValidator(errors.New("not allowed")))
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "not allowed")
+			err := dd.Unmarshal(&result)
+			require.NoError(t, err)
+			assert.Equal(t, "test", result.Name)
+			assert.Equal(t, 42, result.Value)
 		}
 	})
 }
 
-func TestDocumentDecoder_ValidateDecodeContext(t *testing.T) {
+func TestDocumentDecoder_UnmarshalContext(t *testing.T) {
 	t.Parallel()
-
-	type config struct {
-		Name string `yaml:"name"`
-	}
 
 	t.Run("validates and decodes with context", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString("name: contextual")
+		input := yamltest.Input(`
+			name: test
+			value: 42
+		`)
+		source := niceyaml.NewSourceFromString(input)
 		file, err := source.File()
 		require.NoError(t, err)
 
 		d := niceyaml.NewDecoder(file)
 
 		for _, dd := range d.Documents() {
-			var result config
+			var result schemaValidatorConfig
 
-			err := dd.ValidateDecodeContext(t.Context(), &result, yamltest.NewPassingValidator())
+			err := dd.UnmarshalContext(t.Context(), &result)
 
 			require.NoError(t, err)
-			assert.Equal(t, "contextual", result.Name)
+			assert.Equal(t, "test", result.Name)
+			assert.True(t, result.schemaValidated, "ValidateSchema() should have been called")
 		}
 	})
 
-	t.Run("validation failure stops decode", func(t *testing.T) {
+	t.Run("schema validation failure stops decode", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString("name: contextual")
+		input := yamltest.Input(`
+			name: invalid
+			value: 42
+		`)
+		source := niceyaml.NewSourceFromString(input)
 		file, err := source.File()
 		require.NoError(t, err)
 
 		d := niceyaml.NewDecoder(file)
 
 		for _, dd := range d.Documents() {
-			var result config
+			var result schemaValidatorConfig
 
-			err := dd.ValidateDecodeContext(t.Context(), &result, yamltest.NewFailingValidator(errors.New("blocked")))
+			err := dd.UnmarshalContext(t.Context(), &result)
 
 			require.Error(t, err)
-			assert.Empty(t, result.Name)
+			assert.Contains(t, err.Error(), "schema validation failed")
 		}
 	})
 }
@@ -572,14 +527,10 @@ key: value`
 	assert.True(t, foundAny)
 }
 
-func TestDocumentDecoder_ValidateDecodeContext_DecodeError(t *testing.T) {
+func TestDocumentDecoder_UnmarshalContext_DecodeError(t *testing.T) {
 	t.Parallel()
 
 	// Test when DecodeContext after validation fails.
-	type strict struct {
-		Value int `yaml:"value"`
-	}
-
 	input := `value: not_a_number`
 	source := niceyaml.NewSourceFromString(input)
 	file, err := source.File()
@@ -588,40 +539,15 @@ func TestDocumentDecoder_ValidateDecodeContext_DecodeError(t *testing.T) {
 	d := niceyaml.NewDecoder(file)
 
 	for _, dd := range d.Documents() {
-		var result strict
+		var result strictSchemaValidatorConfig
 
-		// The validator passes, but decode will fail due to type mismatch.
-		err := dd.ValidateDecodeContext(t.Context(), &result, yamltest.NewPassingValidator())
+		// Schema validation passes, but decode will fail due to type mismatch.
+		err := dd.UnmarshalContext(t.Context(), &result)
 
 		require.Error(t, err)
 
 		var yamlErr *niceyaml.Error
 		require.ErrorAs(t, err, &yamlErr)
-	}
-}
-
-func TestDocumentDecoder_ValidateContext_ValidationWithNonErrorType(t *testing.T) {
-	t.Parallel()
-
-	// Test when the validator returns a niceyaml.Error.
-	input := `name: test`
-	source := niceyaml.NewSourceFromString(input)
-	file, err := source.File()
-	require.NoError(t, err)
-
-	pathErr := niceyaml.NewError(
-		errors.New("schema validation failed"),
-		niceyaml.WithPath(niceyaml.NewPath("name")),
-	)
-
-	d := niceyaml.NewDecoder(file)
-
-	for _, dd := range d.Documents() {
-		err := dd.ValidateContext(t.Context(), yamltest.NewFailingValidator(pathErr))
-
-		require.Error(t, err)
-		// The error should be wrapped with file information.
-		assert.Contains(t, err.Error(), "schema validation failed")
 	}
 }
 
@@ -648,6 +574,203 @@ func TestDocumentDecoder_DecodeContext_CanceledContext(t *testing.T) {
 		// This test mainly ensures the code path doesn't panic.
 		_ = err
 	}
+}
+
+func TestDocumentDecoder_Decode_Validator(t *testing.T) {
+	t.Parallel()
+
+	t.Run("does not call Validate on Validator struct", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.Input(`
+			name: test
+			value: 42
+		`)
+		source := niceyaml.NewSourceFromString(input)
+		file, err := source.File()
+		require.NoError(t, err)
+
+		d := niceyaml.NewDecoder(file)
+
+		for _, dd := range d.Documents() {
+			var result validatorConfig
+
+			err := dd.Decode(&result)
+			require.NoError(t, err)
+			assert.False(t, result.validated, "Validate() should NOT have been called by Decode()")
+			assert.Equal(t, "test", result.Name)
+			assert.Equal(t, 42, result.Value)
+		}
+	})
+
+	t.Run("struct without Validator decodes normally", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.Input(`
+			name: test
+			value: 42
+		`)
+		source := niceyaml.NewSourceFromString(input)
+		file, err := source.File()
+		require.NoError(t, err)
+
+		d := niceyaml.NewDecoder(file)
+
+		for _, dd := range d.Documents() {
+			var result plainConfig
+
+			err := dd.Decode(&result)
+			require.NoError(t, err)
+			assert.Equal(t, "test", result.Name)
+			assert.Equal(t, 42, result.Value)
+		}
+	})
+
+	t.Run("Unmarshal runs full pipeline", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.Input(`
+			name: test
+			value: 42
+		`)
+		source := niceyaml.NewSourceFromString(input)
+		file, err := source.File()
+		require.NoError(t, err)
+
+		d := niceyaml.NewDecoder(file)
+
+		for _, dd := range d.Documents() {
+			var result bothValidatorConfig
+
+			err := dd.Unmarshal(&result)
+			require.NoError(t, err)
+			assert.True(t, result.schemaValidated, "ValidateSchema() should have been called")
+			assert.True(t, result.validated, "Validate() should have been called after decode")
+		}
+	})
+
+	t.Run("Unmarshal returns Validator error", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.Input(`
+			name: ""
+			value: 42
+		`)
+		source := niceyaml.NewSourceFromString(input)
+		file, err := source.File()
+		require.NoError(t, err)
+
+		d := niceyaml.NewDecoder(file)
+
+		for _, dd := range d.Documents() {
+			var result bothValidatorConfig
+
+			err := dd.Unmarshal(&result)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "name is required")
+		}
+	})
+}
+
+// validatorConfig implements niceyaml.Validator.
+type validatorConfig struct {
+	Name      string `yaml:"name"`
+	Value     int    `yaml:"value"`
+	validated bool
+}
+
+func (c *validatorConfig) Validate() error {
+	c.validated = true
+
+	if c.Name == "" {
+		return niceyaml.NewError(
+			errors.New("name is required"),
+			niceyaml.WithPath(niceyaml.NewPath("name")),
+		)
+	}
+
+	return nil
+}
+
+// plainConfig does not implement niceyaml.Validator or niceyaml.SchemaValidator.
+type plainConfig struct {
+	Name  string `yaml:"name"`
+	Value int    `yaml:"value"`
+}
+
+// schemaValidatorConfig implements niceyaml.SchemaValidator.
+type schemaValidatorConfig struct {
+	Name            string `yaml:"name"`
+	Value           int    `yaml:"value"`
+	schemaValidated bool
+}
+
+func (c *schemaValidatorConfig) ValidateSchema(data any) error {
+	c.schemaValidated = true
+
+	m, ok := data.(map[string]any)
+	if !ok {
+		return errors.New("expected map")
+	}
+
+	if name, ok := m["name"].(string); ok && name == "invalid" {
+		return niceyaml.NewError(
+			errors.New("schema validation failed: name cannot be 'invalid'"),
+			niceyaml.WithPath(niceyaml.NewPath("name")),
+		)
+	}
+
+	return nil
+}
+
+// bothValidatorConfig implements both niceyaml.SchemaValidator and niceyaml.Validator.
+type bothValidatorConfig struct {
+	Name            string `yaml:"name"`
+	Value           int    `yaml:"value"`
+	schemaValidated bool
+	validated       bool
+}
+
+func (c *bothValidatorConfig) ValidateSchema(data any) error {
+	c.schemaValidated = true
+
+	m, ok := data.(map[string]any)
+	if !ok {
+		return errors.New("expected map")
+	}
+
+	if name, ok := m["name"].(string); ok && name == "invalid" {
+		return niceyaml.NewError(
+			errors.New("schema validation failed: name cannot be 'invalid'"),
+			niceyaml.WithPath(niceyaml.NewPath("name")),
+		)
+	}
+
+	return nil
+}
+
+func (c *bothValidatorConfig) Validate() error {
+	c.validated = true
+
+	if c.Name == "" {
+		return niceyaml.NewError(
+			errors.New("name is required"),
+			niceyaml.WithPath(niceyaml.NewPath("name")),
+		)
+	}
+
+	return nil
+}
+
+// strictSchemaValidatorConfig implements niceyaml.SchemaValidator with a strict type.
+// Used to test decode errors after successful schema validation.
+type strictSchemaValidatorConfig struct {
+	Value int `yaml:"value"`
+}
+
+func (c *strictSchemaValidatorConfig) ValidateSchema(_ any) error {
+	// Always passes schema validation.
+	return nil
 }
 
 func TestDecoder_Documents(t *testing.T) {

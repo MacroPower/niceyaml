@@ -1,37 +1,39 @@
 package yamltest
 
-// MockValidator is a test helper that wraps a validation function.
-// Create instances with [NewPassingValidator], [NewFailingValidator], or [NewCustomValidator].
-type MockValidator struct {
-	fn func(input any) error
+// MockSchemaValidator is a test helper that wraps a validation function.
+// Implements [niceyaml.SchemaValidator].
+// Create instances with [NewPassingSchemaValidator], [NewFailingSchemaValidator],
+// or [NewCustomSchemaValidator].
+type MockSchemaValidator struct {
+	fn func(data any) error
 }
 
-// NewPassingValidator creates a new [MockValidator] that always passes validation.
-func NewPassingValidator() *MockValidator {
-	return &MockValidator{
+// NewPassingSchemaValidator creates a new [MockSchemaValidator] that always passes validation.
+func NewPassingSchemaValidator() *MockSchemaValidator {
+	return &MockSchemaValidator{
 		fn: func(_ any) error { return nil },
 	}
 }
 
-// NewFailingValidator creates a new [MockValidator] that always fails validation
+// NewFailingSchemaValidator creates a new [MockSchemaValidator] that always fails validation
 // with the given error.
-func NewFailingValidator(err error) *MockValidator {
-	return &MockValidator{
+func NewFailingSchemaValidator(err error) *MockSchemaValidator {
+	return &MockSchemaValidator{
 		fn: func(_ any) error { return err },
 	}
 }
 
-// NewCustomValidator creates a new [MockValidator] that uses the given function
+// NewCustomSchemaValidator creates a new [MockSchemaValidator] that uses the given function
 // for validation.
-func NewCustomValidator(fn func(input any) error) *MockValidator {
-	return &MockValidator{
+func NewCustomSchemaValidator(fn func(data any) error) *MockSchemaValidator {
+	return &MockSchemaValidator{
 		fn: fn,
 	}
 }
 
-// Validate calls the wrapped validation function.
-func (m *MockValidator) Validate(input any) error {
-	return m.fn(input)
+// ValidateSchema calls the wrapped validation function.
+func (m *MockSchemaValidator) ValidateSchema(data any) error {
+	return m.fn(data)
 }
 
 // MockNormalizer is a test helper that wraps a normalization function.

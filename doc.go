@@ -107,8 +107,11 @@
 // # YAML Utilities
 //
 // [Encoder] and [Decoder] wrap go-yaml functionality for encoding and
-// decoding YAML documents with consistent error handling and
-// validation via the [Validator] interface.
+// decoding YAML documents with consistent error handling and validation.
+// Two validation interfaces are available:
+//
+//   - [Validator]: For self-validation (implemented by decoded types)
+//   - [SchemaValidator]: For schema-based validation (e.g., JSON schema)
 //
 // [Decoder] provides an iterator-based API via [Decoder.Documents], which
 // yields [DocumentDecoder] instances for each document in a multi-document
@@ -122,13 +125,14 @@
 //	decoder := niceyaml.NewDecoder(file)
 //	for _, doc := range decoder.Documents() {
 //	    var config Config
-//	    if err := doc.Decode(&config); err != nil {
+//	    if err := doc.Unmarshal(&config); err != nil {
 //	        return source.WrapError(err)
 //	    }
 //	}
 //
 // [DocumentDecoder] provides methods for working with individual documents:
-// [DocumentDecoder.GetValue], [DocumentDecoder.Validate], [DocumentDecoder.Decode],
+// [DocumentDecoder.Unmarshal] (validates and decodes), [DocumentDecoder.Decode],
+// [DocumentDecoder.ValidateSchema], [DocumentDecoder.GetValue],
 // and their context-aware variants.
 //
 // [NewPathBuilder] and [NewPath] create [*yaml.Path]s for pointing to specific

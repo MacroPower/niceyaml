@@ -20,12 +20,7 @@ func cafeConfig(in string) (*cafe.Config, error) {
 
 	d := niceyaml.NewDecoder(f)
 	for _, doc := range d.Documents() {
-		err := doc.Validate(cafe.DefaultValidator)
-		if err != nil {
-			return nil, src.WrapError(err)
-		}
-
-		err = doc.Decode(&c)
+		err := doc.Unmarshal(&c)
 		if err != nil {
 			return nil, src.WrapError(err)
 		}

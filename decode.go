@@ -10,14 +10,27 @@ import (
 	"github.com/goccy/go-yaml/ast"
 )
 
-// Validator validates any data. Implementers should return an [Error]
-// pointing to the relevant YAML token if validation fails.
-// See [schema/validator.Validator] for an implementation.
+// Validator is implemented by types that validate themselves.
+// If a type implements this interface, [DocumentDecoder.Unmarshal]
+// will automatically call Validate after successful decoding.
 type Validator interface {
-	Validate(v any) error
+	Validate() error
 }
 
-// Decoder decodes YAML documents from an [*ast.File].
+// SchemaValidator is implemented by types that validate arbitrary data
+// against a schema. If a type implements this interface,
+// [DocumentDecoder.Unmarshal] will automatically decode the document
+// to [any] and call ValidateSchema before decoding to the typed struct.
+// See [schema/validator.Validator] for an implementation.
+type SchemaValidator interface {
+	ValidateSchema(data any) error
+}
+
+// Decoder provides iteration over YAML documents in an [*ast.File].
+// It wraps a parsed YAML file and yields [DocumentDecoder] instances
+// for each document, enabling document-by-document processing of
+// both single and multi-document YAML streams.
+//
 // Create instances with [NewDecoder].
 type Decoder struct {
 	f *ast.File
@@ -34,6 +47,8 @@ func (d *Decoder) Len() int {
 }
 
 // Documents returns an iterator over all documents in the YAML file.
+// Each iteration yields the document index and a [DocumentDecoder]
+// for that document.
 func (d *Decoder) Documents() iter.Seq2[int, *DocumentDecoder] {
 	return func(yield func(int, *DocumentDecoder) bool) {
 		for i, doc := range d.f.Docs {
@@ -44,27 +59,35 @@ func (d *Decoder) Documents() iter.Seq2[int, *DocumentDecoder] {
 	}
 }
 
-// DocumentDecoder validates and decodes a single [*ast.DocumentNode].
-// Create instances with [NewDocumentDecoder].
+// DocumentDecoder decodes and validates a single [*ast.DocumentNode].
+// It provides several methods for working with YAML documents:
 //
-// Note: Both [DocumentDecoder.Validate] and [DocumentDecoder.Decode] perform decode
-// operations. [DocumentDecoder.Validate] decodes to [any] for schema validation, and
-// [DocumentDecoder.Decode] decodes to the typed struct. However, both decodes use the
-// same pre-parsed AST, so there is no overhead from YAML re-parsing. This is necessary
-// because we must construct [any] for our [Validator], prior to decoding into typed structs.
+//   - [DocumentDecoder.GetValue]: Extract a value at a path as a string.
+//   - [DocumentDecoder.Decode]: Decode to a typed struct.
+//   - [DocumentDecoder.ValidateSchema]: Validate against a [SchemaValidator].
+//   - [DocumentDecoder.Unmarshal]: Full validation and decoding pipeline.
+//
+// Use [DocumentDecoder.Unmarshal] for types implementing [SchemaValidator]
+// or [Validator] to get automatic validation. Use [DocumentDecoder.Decode]
+// when you only need decoding without validation hooks.
+//
+// All decoding methods convert YAML errors to [Error] with source annotations.
+//
+// Create instances with [NewDocumentDecoder].
 type DocumentDecoder struct {
 	doc *ast.DocumentNode
 }
 
-// NewDocumentDecoder creates a new [DocumentDecoder].
+// NewDocumentDecoder creates a new [DocumentDecoder] for the given [*ast.DocumentNode].
 func NewDocumentDecoder(doc *ast.DocumentNode) *DocumentDecoder {
 	return &DocumentDecoder{
 		doc: doc,
 	}
 }
 
-// GetValue returns the value at the given path in the specified document as a string.
-// The boolean return value indicates whether a value was found at the path.
+// GetValue returns the string representation of the value at the given
+// path, or an empty string and false if the path is nil, the document
+// body is a directive, or no value exists at the path.
 func (dd *DocumentDecoder) GetValue(path *yaml.Path) (string, bool) {
 	if path == nil {
 		return "", false
@@ -82,73 +105,100 @@ func (dd *DocumentDecoder) GetValue(path *yaml.Path) (string, bool) {
 	return node.String(), true
 }
 
-// ValidateDecode is a convenience method that calls [DocumentDecoder.Validate] and then
-// [DocumentDecoder.Decode] if validation succeeds.
-func (dd *DocumentDecoder) ValidateDecode(v any, validator Validator) error {
-	return dd.ValidateDecodeContext(context.Background(), v, validator)
+// ValidateSchema decodes the document to [any] and validates it using sv.
+// This is a convenience wrapper around [DocumentDecoder.ValidateSchemaContext]
+// with [context.Background].
+func (dd *DocumentDecoder) ValidateSchema(sv SchemaValidator) error {
+	return dd.ValidateSchemaContext(context.Background(), sv)
 }
 
-// ValidateDecodeContext is a convenience method that calls [DocumentDecoder.ValidateContext] and then
-// [DocumentDecoder.DecodeContext] if validation succeeds.
-func (dd *DocumentDecoder) ValidateDecodeContext(ctx context.Context, v any, validator Validator) error {
-	err := dd.ValidateContext(ctx, validator)
+// ValidateSchemaContext decodes the document to [any] and validates it using sv with [context.Context].
+// Returns decoding errors or errors from [SchemaValidator.ValidateSchema].
+func (dd *DocumentDecoder) ValidateSchemaContext(ctx context.Context, sv SchemaValidator) error {
+	var untypedData any
+
+	err := dd.decodeNode(ctx, &untypedData)
 	if err != nil {
 		return err
 	}
 
-	err = dd.DecodeContext(ctx, v)
+	err = sv.ValidateSchema(untypedData)
 	if err != nil {
+		//nolint:wrapcheck // SchemaValidator.ValidateSchema should return Error with path info.
 		return err
 	}
 
 	return nil
 }
 
-// Validate decodes the document into [any] and validates it using the given [Validator].
-// The validator is responsible for returning an [Error] pointing to the relevant
-// YAML token if validation fails.
-func (dd *DocumentDecoder) Validate(validator Validator) error {
-	return dd.ValidateContext(context.Background(), validator)
-}
-
-// ValidateContext decodes the document into [any] with [context.Context]
-// and validates it using the given [Validator]. The validator is responsible
-// for returning an [Error] pointing to the relevant YAML token if validation fails.
-func (dd *DocumentDecoder) ValidateContext(ctx context.Context, validator Validator) error {
-	var v any
-
-	err := dd.DecodeContext(ctx, &v)
-	if err != nil {
-		return err
-	}
-
-	//nolint:wrapcheck // Callers should wrap errors with [Source.WrapError] if needed.
-	return validator.Validate(v)
-}
-
-// Decode decodes the specified document into v.
-// Any YAML decoding errors are converted to [Error] with source annotations.
+// Decode decodes the document into v.
+// This is a convenience wrapper around [DocumentDecoder.DecodeContext]
+// with [context.Background].
+//
+// YAML decoding errors are converted to [Error] with source annotations.
 func (dd *DocumentDecoder) Decode(v any) error {
 	return dd.DecodeContext(context.Background(), v)
 }
 
-// DecodeContext decodes the specified document into v with [context.Context].
-// Any YAML decoding errors are converted to [Error] with source annotations.
+// DecodeContext decodes the document into v with [context.Context].
+// YAML decoding errors are converted to [Error] with source annotations.
 func (dd *DocumentDecoder) DecodeContext(ctx context.Context, v any) error {
+	return dd.decodeNode(ctx, v)
+}
+
+// Unmarshal validates and decodes the document into v.
+// This is a convenience wrapper around [DocumentDecoder.UnmarshalContext]
+// with [context.Background].
+//
+// If v implements [SchemaValidator], ValidateSchema is called before decoding.
+// If v implements [Validator], Validate is called after successful decoding.
+func (dd *DocumentDecoder) Unmarshal(v any) error {
+	return dd.UnmarshalContext(context.Background(), v)
+}
+
+// UnmarshalContext validates and decodes the document into v with [context.Context].
+// If v implements [SchemaValidator], ValidateSchema is called before decoding.
+// If v implements [Validator], Validate is called after successful decoding.
+func (dd *DocumentDecoder) UnmarshalContext(ctx context.Context, v any) error {
+	// Validate if type provides schema validation.
+	if sv, ok := v.(SchemaValidator); ok {
+		err := dd.ValidateSchemaContext(ctx, sv)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Decode to typed struct.
+	err := dd.DecodeContext(ctx, v)
+	if err != nil {
+		return err
+	}
+
+	// Self-validation.
+	if validator, ok := v.(Validator); ok {
+		//nolint:wrapcheck // Validator.Validate should return Error with path info.
+		return validator.Validate()
+	}
+
+	return nil
+}
+
+// decodeNode decodes the document body to v and converts YAML errors.
+func (dd *DocumentDecoder) decodeNode(ctx context.Context, v any) error {
 	dec := yaml.NewDecoder(bytes.NewReader(nil))
 	err := dec.DecodeFromNodeContext(ctx, dd.doc.Body, v)
-	if err == nil {
-		return nil
+	if err != nil {
+		var yamlErr yaml.Error
+		if errors.As(err, &yamlErr) {
+			return NewError(
+				errors.New(yamlErr.GetMessage()),
+				WithErrorToken(yamlErr.GetToken()),
+			)
+		}
+
+		//nolint:wrapcheck // Return the original error if it's not a [yaml.Error].
+		return err
 	}
 
-	var yamlErr yaml.Error
-	if errors.As(err, &yamlErr) {
-		return NewError(
-			errors.New(yamlErr.GetMessage()),
-			WithErrorToken(yamlErr.GetToken()),
-		)
-	}
-
-	//nolint:wrapcheck // Return the original error if it's not a [yaml.Error].
-	return err
+	return nil
 }

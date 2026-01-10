@@ -8,7 +8,7 @@
 //	    log.Fatal(err)
 //	}
 //
-//	if err := v.Validate(data); err != nil {
+//	if err := v.ValidateSchema(data); err != nil {
 //	    fmt.Println(err) // Returns niceyaml.Error with path info.
 //	}
 //
@@ -34,7 +34,7 @@ import (
 )
 
 // Validator validates data against a compiled JSON schema and returns errors
-// with YAML path information. Implements the [niceyaml.Validator] interface
+// with YAML path information. Implements the [niceyaml.SchemaValidator] interface
 // for use with [niceyaml.DocumentDecoder]. Uses [github.com/santhosh-tekuri/jsonschema/v6].
 // Create instances with [New] or [MustNew].
 type Validator struct {
@@ -77,11 +77,11 @@ func MustNew(url string, schemaData []byte) *Validator {
 	return v
 }
 
-// Validate validates the given data against the schema.
+// ValidateSchema validates the given data against the schema.
 // Returns nil if validation succeeds. On validation failure, returns a
 // [niceyaml.Error] containing the YAML path to the invalid field for use
 // with [niceyaml.Printer] for rich error display.
-func (s *Validator) Validate(data any) error {
+func (s *Validator) ValidateSchema(data any) error {
 	// Validate against schema.
 	err := s.schema.Validate(data)
 	if err == nil {

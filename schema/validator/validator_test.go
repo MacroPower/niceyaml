@@ -391,7 +391,7 @@ func TestValidator_Validate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := v.Validate(tc.data)
+			err := v.ValidateSchema(tc.data)
 
 			if tc.wantErr {
 				require.Error(t, err)
@@ -669,7 +669,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 			d := niceyaml.NewDecoder(file)
 
 			for _, dd := range d.Documents() {
-				err = dd.Validate(v)
+				err = dd.ValidateSchema(v)
 
 				if tc.wantErr {
 					require.Error(t, err)
@@ -728,7 +728,7 @@ func TestMustNewValidator(t *testing.T) {
 			assert.NotNil(t, v)
 
 			if tc.validateData != nil {
-				err := v.Validate(tc.validateData)
+				err := v.ValidateSchema(tc.validateData)
 				assert.NoError(t, err)
 			}
 		})
@@ -804,7 +804,7 @@ func TestNewValidator_BooleanSchema(t *testing.T) {
 			require.NotNil(t, v)
 
 			for _, data := range testData {
-				err := v.Validate(data)
+				err := v.ValidateSchema(data)
 				if tc.acceptsAll {
 					assert.NoError(t, err)
 				} else {

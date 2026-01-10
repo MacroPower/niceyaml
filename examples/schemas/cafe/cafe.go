@@ -2,10 +2,15 @@
 package cafe
 
 import (
+	"errors"
+	"fmt"
+	"time"
+
 	"github.com/invopop/jsonschema"
 
 	_ "embed"
 
+	"github.com/macropower/niceyaml"
 	"github.com/macropower/niceyaml/examples/schemas/cafe/spec"
 	"github.com/macropower/niceyaml/schema"
 	"github.com/macropower/niceyaml/schema/validator"
@@ -43,8 +48,42 @@ func (c Config) JSONSchemaExtend(js *jsonschema.Schema) {
 	kind.Const = "Config"
 }
 
-// Validate extends schema-driven validation with custom validation logic.
+// ValidateSchema validates arbitrary data against the cafe JSON schema.
+func (c Config) ValidateSchema(data any) error {
+	v, err := validator.New("/cafe.v1.json", schemaJSON)
+	if err != nil {
+		return fmt.Errorf("create validator: %w", err)
+	}
+
+	//nolint:wrapcheck // Validator.ValidateSchema returns niceyaml.Error with path info.
+	return v.ValidateSchema(data)
+}
+
+// Validate performs custom validation after decoding.
 func (c Config) Validate() error {
+	openTime, err := time.Parse("15:04", c.Spec.Hours.Open)
+	if err != nil {
+		return niceyaml.NewError(
+			fmt.Errorf("invalid open time: %w", err),
+			niceyaml.WithPath(niceyaml.NewPath("spec", "hours", "open")),
+		)
+	}
+
+	closeTime, err := time.Parse("15:04", c.Spec.Hours.Close)
+	if err != nil {
+		return niceyaml.NewError(
+			fmt.Errorf("invalid close time: %w", err),
+			niceyaml.WithPath(niceyaml.NewPath("spec", "hours", "close")),
+		)
+	}
+
+	if !openTime.Before(closeTime) {
+		return niceyaml.NewError(
+			errors.New("open must be before close"),
+			niceyaml.WithPath(niceyaml.NewPath("spec", "hours", "open")),
+		)
+	}
+
 	return nil
 }
 
