@@ -407,32 +407,6 @@ func (p *Printer) writeLine(
 	}
 }
 
-// styleForPosition returns the effective style for a character at pos,
-// applying range styles to the base style.
-// If alwaysBlend is false, the first matching range overrides the base style;
-// subsequent ranges blend. If alwaysBlend is true, all ranges blend with base.
-// The pos parameter uses 0-indexed line and column values.
-func (p *Printer) styleForPosition(pos position.Position, style *lipgloss.Style, alwaysBlend bool) *lipgloss.Style {
-	if p.rangeStyles == nil || p.rangeStyles.Len() == 0 {
-		return style
-	}
-
-	point := pos.Line*maxCol + pos.Col
-	matches := p.rangeStyles.Query(point)
-
-	firstRange := true
-	for i := range matches {
-		if !alwaysBlend && firstRange {
-			style = overrideStyles(style, matches[i])
-			firstRange = false
-		} else {
-			style = blendStyles(style, matches[i])
-		}
-	}
-
-	return style
-}
-
 func (p *Printer) styleForToken(tk *token.Token) *lipgloss.Style {
 	//nolint:exhaustive // Only needed for the current token.
 	switch tk.PreviousType() {
@@ -547,8 +521,8 @@ func (p *Printer) styleLineWithRanges(
 	boundaries = slices.Compact(boundaries)
 
 	if len(boundaries) < 2 {
-		// No actual span breaks; render entire line with base style + first interval.
-		return p.styleForPosition(pos, style, alwaysBlend).Render(src)
+		// Boundaries always contains at least [lineStart, lineEnd] for non-empty src.
+		return ""
 	}
 
 	var sb strings.Builder
