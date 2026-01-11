@@ -1,6 +1,7 @@
 package tokens
 
 import (
+	"iter"
 	"strings"
 	"unicode/utf8"
 
@@ -232,4 +233,37 @@ func (s2 Segments2) TokenRangesAt(idx, col int) *position.Ranges {
 	}
 
 	return ranges
+}
+
+// SplitDocuments splits a token stream into multiple token streams,
+// one for each YAML document found (separated by '---' tokens).
+// The returned slices each contain tokens for a single document,
+// preserving original token order and positions.
+// Each document header token ('---') is included at the start of its document.
+func SplitDocuments(tks token.Tokens) iter.Seq2[int, token.Tokens] {
+	return func(yield func(int, token.Tokens) bool) {
+		var (
+			docIdx  int
+			current token.Tokens
+		)
+
+		for _, tk := range tks {
+			if tk.Type == token.DocumentHeaderType && len(current) > 0 {
+				if !yield(docIdx, current) {
+					return
+				}
+
+				current = token.Tokens{}
+				docIdx++
+			}
+
+			current.Add(tk)
+		}
+
+		if len(current) > 0 {
+			if !yield(docIdx, current) {
+				return
+			}
+		}
+	}
 }

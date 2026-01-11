@@ -1,6 +1,7 @@
 package tokens_test
 
 import (
+	"iter"
 	"testing"
 
 	"github.com/goccy/go-yaml/token"
@@ -10,6 +11,16 @@ import (
 	"github.com/macropower/niceyaml/tokens"
 	"github.com/macropower/niceyaml/yamltest"
 )
+
+func collectDocs(seq iter.Seq2[int, token.Tokens]) []token.Tokens {
+	var result []token.Tokens //nolint:prealloc // Size unknown from iterator.
+
+	for _, tks := range seq {
+		result = append(result, tks)
+	}
+
+	return result
+}
 
 func TestNewSegment(t *testing.T) {
 	t.Parallel()
@@ -845,5 +856,141 @@ func TestSegments2_TokenRangesAt(t *testing.T) {
 		got := s2.TokenRangesAt(0, 0)
 
 		assert.Nil(t, got)
+	})
+}
+
+func TestSplitDocuments(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil input", func(t *testing.T) {
+		t.Parallel()
+
+		got := collectDocs(tokens.SplitDocuments(nil))
+
+		assert.Empty(t, got)
+	})
+
+	t.Run("empty slice", func(t *testing.T) {
+		t.Parallel()
+
+		got := collectDocs(tokens.SplitDocuments(token.Tokens{}))
+
+		assert.Empty(t, got)
+	})
+
+	t.Run("single doc no header", func(t *testing.T) {
+		t.Parallel()
+
+		tkb := yamltest.NewTokenBuilder()
+		input := token.Tokens{
+			tkb.Clone().Type(token.StringType).Value("key").Build(),
+			tkb.Clone().Type(token.MappingValueType).Value(":").Build(),
+			tkb.Clone().Type(token.StringType).Value("value").Build(),
+		}
+
+		got := collectDocs(tokens.SplitDocuments(input))
+
+		require.Len(t, got, 1)
+		require.Len(t, got[0], 3)
+		yamltest.AssertTokensEqual(t, input, got[0])
+	})
+
+	t.Run("single doc with header", func(t *testing.T) {
+		t.Parallel()
+
+		tkb := yamltest.NewTokenBuilder()
+		input := token.Tokens{
+			tkb.Clone().Type(token.DocumentHeaderType).Value("---").Build(),
+			tkb.Clone().Type(token.StringType).Value("key").Build(),
+			tkb.Clone().Type(token.MappingValueType).Value(":").Build(),
+			tkb.Clone().Type(token.StringType).Value("value").Build(),
+		}
+
+		got := collectDocs(tokens.SplitDocuments(input))
+
+		require.Len(t, got, 1)
+		require.Len(t, got[0], 4)
+		yamltest.AssertTokensEqual(t, input, got[0])
+	})
+
+	t.Run("two docs", func(t *testing.T) {
+		t.Parallel()
+
+		tkb := yamltest.NewTokenBuilder()
+		key1 := tkb.Clone().Type(token.StringType).Value("key1").Build()
+		colon1 := tkb.Clone().Type(token.MappingValueType).Value(":").Build()
+		value1 := tkb.Clone().Type(token.StringType).Value("v1").Build()
+		header := tkb.Clone().Type(token.DocumentHeaderType).Value("---").Build()
+		key2 := tkb.Clone().Type(token.StringType).Value("key2").Build()
+		colon2 := tkb.Clone().Type(token.MappingValueType).Value(":").Build()
+		value2 := tkb.Clone().Type(token.StringType).Value("v2").Build()
+
+		input := token.Tokens{key1, colon1, value1, header, key2, colon2, value2}
+
+		got := collectDocs(tokens.SplitDocuments(input))
+
+		require.Len(t, got, 2)
+		require.Len(t, got[0], 3)
+		require.Len(t, got[1], 4)
+
+		yamltest.AssertTokensEqual(t, token.Tokens{key1, colon1, value1}, got[0])
+		yamltest.AssertTokensEqual(t, token.Tokens{header, key2, colon2, value2}, got[1])
+	})
+
+	t.Run("three docs with headers", func(t *testing.T) {
+		t.Parallel()
+
+		tkb := yamltest.NewTokenBuilder()
+		header1 := tkb.Clone().Type(token.DocumentHeaderType).Value("---").Build()
+		doc1 := tkb.Clone().Type(token.StringType).Value("doc1").Build()
+		header2 := tkb.Clone().Type(token.DocumentHeaderType).Value("---").Build()
+		doc2 := tkb.Clone().Type(token.StringType).Value("doc2").Build()
+		header3 := tkb.Clone().Type(token.DocumentHeaderType).Value("---").Build()
+		doc3 := tkb.Clone().Type(token.StringType).Value("doc3").Build()
+
+		input := token.Tokens{header1, doc1, header2, doc2, header3, doc3}
+
+		got := collectDocs(tokens.SplitDocuments(input))
+
+		require.Len(t, got, 3)
+		yamltest.AssertTokensEqual(t, token.Tokens{header1, doc1}, got[0])
+		yamltest.AssertTokensEqual(t, token.Tokens{header2, doc2}, got[1])
+		yamltest.AssertTokensEqual(t, token.Tokens{header3, doc3}, got[2])
+	})
+
+	t.Run("doc with end marker", func(t *testing.T) {
+		t.Parallel()
+
+		tkb := yamltest.NewTokenBuilder()
+		input := token.Tokens{
+			tkb.Clone().Type(token.StringType).Value("key").Build(),
+			tkb.Clone().Type(token.MappingValueType).Value(":").Build(),
+			tkb.Clone().Type(token.StringType).Value("value").Build(),
+			tkb.Clone().Type(token.DocumentEndType).Value("...").Build(),
+		}
+
+		got := collectDocs(tokens.SplitDocuments(input))
+
+		require.Len(t, got, 1)
+		require.Len(t, got[0], 4)
+		yamltest.AssertTokensEqual(t, input, got[0])
+	})
+
+	t.Run("doc end followed by new doc", func(t *testing.T) {
+		t.Parallel()
+
+		tkb := yamltest.NewTokenBuilder()
+		doc1 := tkb.Clone().Type(token.StringType).Value("doc1").Build()
+		docEnd := tkb.Clone().Type(token.DocumentEndType).Value("...").Build()
+		header := tkb.Clone().Type(token.DocumentHeaderType).Value("---").Build()
+		doc2 := tkb.Clone().Type(token.StringType).Value("doc2").Build()
+
+		input := token.Tokens{doc1, docEnd, header, doc2}
+
+		got := collectDocs(tokens.SplitDocuments(input))
+
+		require.Len(t, got, 2)
+		yamltest.AssertTokensEqual(t, token.Tokens{doc1, docEnd}, got[0])
+		yamltest.AssertTokensEqual(t, token.Tokens{header, doc2}, got[1])
 	})
 }
