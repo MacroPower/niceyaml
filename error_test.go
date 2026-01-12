@@ -23,7 +23,7 @@ func trimLines(s string) string {
 		lines[i] = strings.TrimRight(line, " \t")
 	}
 
-	return strings.Join(lines, "\n")
+	return yamltest.JoinLF(lines...)
 }
 
 func TestError(t *testing.T) {

@@ -26,11 +26,11 @@ func TestMockSchemaValidator(t *testing.T) {
 	t.Run("NewFailingSchemaValidator returns the specified error", func(t *testing.T) {
 		t.Parallel()
 
-		expectedErr := assert.AnError
-		v := yamltest.NewFailingSchemaValidator(expectedErr)
+		wantErr := assert.AnError
+		v := yamltest.NewFailingSchemaValidator(wantErr)
 
 		err := v.ValidateSchema("any input")
-		require.ErrorIs(t, err, expectedErr)
+		require.ErrorIs(t, err, wantErr)
 	})
 
 	t.Run("NewCustomSchemaValidator calls custom function with data", func(t *testing.T) {
@@ -53,15 +53,15 @@ func TestMockSchemaValidator(t *testing.T) {
 	t.Run("NewCustomSchemaValidator passes through error", func(t *testing.T) {
 		t.Parallel()
 
-		expectedErr := assert.AnError
+		wantErr := assert.AnError
 		customFn := func(_ any) error {
-			return expectedErr
+			return wantErr
 		}
 
 		v := yamltest.NewCustomSchemaValidator(customFn)
 		err := v.ValidateSchema("any")
 
-		require.ErrorIs(t, err, expectedErr)
+		require.ErrorIs(t, err, wantErr)
 	})
 }
 

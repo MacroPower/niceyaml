@@ -332,8 +332,8 @@ func TestRequireTokenValid(t *testing.T) {
 		t.Parallel()
 
 		mockT := &testing.T{}
-		want := &token.Token{Position: &token.Position{}}
-		got := &token.Token{Position: &token.Position{}}
+		want := yamltest.NewTokenBuilder().Build()
+		got := yamltest.NewTokenBuilder().Build()
 
 		yamltest.RequireTokenValid(mockT, want, got, "test")
 		assert.False(t, mockT.Failed())
@@ -350,14 +350,9 @@ func TestRequireTokensValid(t *testing.T) {
 		t.Parallel()
 
 		mockT := &testing.T{}
-		want := token.Tokens{
-			{Position: &token.Position{}},
-			{Position: &token.Position{}},
-		}
-		got := token.Tokens{
-			{Position: &token.Position{}},
-			{Position: &token.Position{}},
-		}
+		tb := yamltest.NewTokenBuilder()
+		want := token.Tokens{tb.Build(), tb.Build()}
+		got := token.Tokens{tb.Build(), tb.Build()}
 
 		yamltest.RequireTokensValid(mockT, want, got)
 		assert.False(t, mockT.Failed())
@@ -382,15 +377,13 @@ func TestAssertTokenEqual(t *testing.T) {
 		t.Parallel()
 
 		mockT := &testing.T{}
-		tk := &token.Token{
-			Type:   token.StringType,
-			Value:  "test",
-			Origin: "test\n",
-			Position: &token.Position{
-				Line:   1,
-				Column: 1,
-			},
-		}
+		tk := yamltest.NewTokenBuilder().
+			Type(token.StringType).
+			Value("test").
+			Origin("test\n").
+			PositionLine(1).
+			PositionColumn(1).
+			Build()
 
 		yamltest.AssertTokenEqual(mockT, tk, tk, "test")
 		assert.False(t, mockT.Failed())
@@ -400,8 +393,8 @@ func TestAssertTokenEqual(t *testing.T) {
 		t.Parallel()
 
 		mockT := &testing.T{}
-		want := &token.Token{Type: token.StringType, Position: &token.Position{}}
-		got := &token.Token{Type: token.IntegerType, Position: &token.Position{}}
+		want := yamltest.NewTokenBuilder().Type(token.StringType).Build()
+		got := yamltest.NewTokenBuilder().Type(token.IntegerType).Build()
 
 		yamltest.AssertTokenEqual(mockT, want, got, "test")
 		assert.True(t, mockT.Failed())
@@ -411,8 +404,8 @@ func TestAssertTokenEqual(t *testing.T) {
 		t.Parallel()
 
 		mockT := &testing.T{}
-		want := &token.Token{Value: "a", Position: &token.Position{}}
-		got := &token.Token{Value: "b", Position: &token.Position{}}
+		want := yamltest.NewTokenBuilder().Value("a").Build()
+		got := yamltest.NewTokenBuilder().Value("b").Build()
 
 		yamltest.AssertTokenEqual(mockT, want, got, "test")
 		assert.True(t, mockT.Failed())
@@ -422,8 +415,8 @@ func TestAssertTokenEqual(t *testing.T) {
 		t.Parallel()
 
 		mockT := &testing.T{}
-		want := &token.Token{Origin: "a\n", Position: &token.Position{}}
-		got := &token.Token{Origin: "b\n", Position: &token.Position{}}
+		want := yamltest.NewTokenBuilder().Origin("a\n").Build()
+		got := yamltest.NewTokenBuilder().Origin("b\n").Build()
 
 		yamltest.AssertTokenEqual(mockT, want, got, "test")
 		assert.True(t, mockT.Failed())
@@ -433,8 +426,8 @@ func TestAssertTokenEqual(t *testing.T) {
 		t.Parallel()
 
 		mockT := &testing.T{}
-		want := &token.Token{Position: &token.Position{Line: 1}}
-		got := &token.Token{Position: &token.Position{Line: 2}}
+		want := yamltest.NewTokenBuilder().PositionLine(1).Build()
+		got := yamltest.NewTokenBuilder().PositionLine(2).Build()
 
 		yamltest.AssertTokenEqual(mockT, want, got, "test")
 		assert.True(t, mockT.Failed())
@@ -448,9 +441,10 @@ func TestAssertTokensEqual(t *testing.T) {
 		t.Parallel()
 
 		mockT := &testing.T{}
+		tb := yamltest.NewTokenBuilder().Type(token.StringType)
 		tks := token.Tokens{
-			{Type: token.StringType, Value: "a", Position: &token.Position{Line: 1}},
-			{Type: token.StringType, Value: "b", Position: &token.Position{Line: 2}},
+			tb.Value("a").PositionLine(1).Build(),
+			tb.Value("b").PositionLine(2).Build(),
 		}
 
 		yamltest.AssertTokensEqual(mockT, tks, tks)
@@ -461,13 +455,14 @@ func TestAssertTokensEqual(t *testing.T) {
 		t.Parallel()
 
 		mockT := &testing.T{}
+		tb := yamltest.NewTokenBuilder()
 		want := token.Tokens{
-			{Value: "a", Position: &token.Position{}},
-			{Value: "b", Position: &token.Position{}},
+			tb.Value("a").Build(),
+			tb.Value("b").Build(),
 		}
 		got := token.Tokens{
-			{Value: "x", Position: &token.Position{}},
-			{Value: "y", Position: &token.Position{}},
+			tb.Value("x").Build(),
+			tb.Value("y").Build(),
 		}
 
 		yamltest.AssertTokensEqual(mockT, want, got)

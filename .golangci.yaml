@@ -202,6 +202,9 @@ linters:
           disabled: true
         - name: max-public-structs
           disabled: true
+        - name: nested-structs
+          exclude:
+            - "**/*_test.go"
         # Needed for future use.
         - name: unused-receiver
           disabled: true
@@ -240,6 +243,8 @@ linters:
           - goconst
           - gosec
           - gosmopolitan
+      - path: _test\.go
+        text: "fieldalignment:"
       - source: "= `"
         linters:
           - grouper

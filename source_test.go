@@ -839,19 +839,19 @@ func TestSource_Parse(t *testing.T) {
 		t.Parallel()
 
 		tcs := map[string]struct {
-			input        string
-			wantDocCount int
+			input string
+			want  int
 		}{
 			"simple key-value": {
-				input:        "key: value\n",
-				wantDocCount: 1,
+				input: "key: value\n",
+				want:  1,
 			},
 			"nested map": {
 				input: yamltest.Input(`
 					parent:
 					  child: value
 				`),
-				wantDocCount: 1,
+				want: 1,
 			},
 			"multiple documents": {
 				input: yamltest.Input(`
@@ -860,7 +860,7 @@ func TestSource_Parse(t *testing.T) {
 					---
 					doc2: value2
 				`),
-				wantDocCount: 2,
+				want: 2,
 			},
 			"list": {
 				input: yamltest.Input(`
@@ -868,7 +868,7 @@ func TestSource_Parse(t *testing.T) {
 					  - one
 					  - two
 				`),
-				wantDocCount: 1,
+				want: 1,
 			},
 		}
 
@@ -881,7 +881,7 @@ func TestSource_Parse(t *testing.T) {
 
 				require.NoError(t, err)
 				require.NotNil(t, file)
-				assert.Len(t, file.Docs, tc.wantDocCount)
+				assert.Len(t, file.Docs, tc.want)
 			})
 		}
 	})

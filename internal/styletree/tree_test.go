@@ -29,7 +29,7 @@ func TestTree_SingleInterval(t *testing.T) {
 
 	assert.Equal(t, 1, tree.Len())
 
-	tests := map[string]struct {
+	tcs := map[string]struct {
 		point int
 		want  int
 	}{
@@ -40,7 +40,7 @@ func TestTree_SingleInterval(t *testing.T) {
 		"after interval":     {point: 25, want: 0},
 	}
 
-	for name, tc := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
@@ -65,7 +65,7 @@ func TestTree_OverlappingIntervals(t *testing.T) {
 
 	assert.Equal(t, 3, tree.Len())
 
-	tests := map[string]struct {
+	tcs := map[string]struct {
 		point int
 		want  int
 	}{
@@ -80,7 +80,7 @@ func TestTree_OverlappingIntervals(t *testing.T) {
 		"point 30 (none, end is excl)": {point: 30, want: 0},
 	}
 
-	for name, tc := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
@@ -142,7 +142,7 @@ func TestTree_DisjointIntervals(t *testing.T) {
 	tree.Insert(20, 30, &style)
 	tree.Insert(40, 50, &style)
 
-	tests := map[string]struct {
+	tcs := map[string]struct {
 		point int
 		want  int
 	}{
@@ -156,7 +156,7 @@ func TestTree_DisjointIntervals(t *testing.T) {
 		"at interval edge": {point: 20, want: 1},
 	}
 
-	for name, tc := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
@@ -197,7 +197,7 @@ func TestTree_NestedIntervals(t *testing.T) {
 	tree.Insert(30, 70, &style)
 	tree.Insert(40, 60, &style)
 
-	tests := map[string]struct {
+	tcs := map[string]struct {
 		point int
 		want  int
 	}{
@@ -213,7 +213,7 @@ func TestTree_NestedIntervals(t *testing.T) {
 		"outside all":     {point: 100, want: 0},
 	}
 
-	for name, tc := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
@@ -493,7 +493,7 @@ func TestTree_QueryRange_NoOverlap(t *testing.T) {
 
 	tree.Insert(10, 20, &style)
 
-	tests := map[string]struct {
+	tcs := map[string]struct {
 		start int
 		end   int
 	}{
@@ -503,7 +503,7 @@ func TestTree_QueryRange_NoOverlap(t *testing.T) {
 		"adjacent end":    {start: 20, end: 25}, // [20,25) doesn't overlap [10,20).
 	}
 
-	for name, tc := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
@@ -521,7 +521,7 @@ func TestTree_QueryRange_SingleInterval(t *testing.T) {
 
 	tree.Insert(10, 20, &style)
 
-	tests := map[string]struct {
+	tcs := map[string]struct {
 		start int
 		end   int
 		want  int
@@ -533,7 +533,7 @@ func TestTree_QueryRange_SingleInterval(t *testing.T) {
 		"query inside":       {start: 12, end: 18, want: 1},
 	}
 
-	for name, tc := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
@@ -555,7 +555,7 @@ func TestTree_QueryRange_MultipleIntervals(t *testing.T) {
 	tree.Insert(20, 30, &style2)
 	tree.Insert(40, 50, &style3)
 
-	tests := map[string]struct {
+	tcs := map[string]struct {
 		start int
 		end   int
 		want  int
@@ -572,7 +572,7 @@ func TestTree_QueryRange_MultipleIntervals(t *testing.T) {
 		"partial overlap": {start: 5, end: 45, want: 3},
 	}
 
-	for name, tc := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
@@ -633,7 +633,7 @@ func TestTree_QueryRange_OverlappingIntervals(t *testing.T) {
 	tree.Insert(10, 20, &style2) // [10, 20)
 	tree.Insert(15, 25, &style3) // [15, 25)
 
-	tests := map[string]struct {
+	tcs := map[string]struct {
 		start int
 		end   int
 		want  int
@@ -645,7 +645,7 @@ func TestTree_QueryRange_OverlappingIntervals(t *testing.T) {
 		"back to one":  {start: 25, end: 30, want: 1},
 	}
 
-	for name, tc := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 

@@ -591,9 +591,9 @@ func TestPrinter_PrintTokenDiff_Ordering(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		before       string
-		after        string
-		wantPrefixes []string
+		before string
+		after  string
+		want   []string
 	}{
 		"deleted lines appear inline": {
 			// Test that deleted lines appear inline where they were removed.
@@ -608,13 +608,13 @@ func TestPrinter_PrintTokenDiff_Ordering(t *testing.T) {
 				"c: 3",
 				"",
 			),
-			wantPrefixes: []string{" ", "-", " "},
+			want: []string{" ", "-", " "},
 		},
 		"modifications show delete before insert": {
 			// Test that modifications show delete before insert.
-			before:       "key: old\n",
-			after:        "key: new\n",
-			wantPrefixes: []string{"-", "+"},
+			before: "key: old\n",
+			after:  "key: new\n",
+			want:   []string{"-", "+"},
 		},
 	}
 
@@ -627,9 +627,9 @@ func TestPrinter_PrintTokenDiff_Ordering(t *testing.T) {
 
 			lines := strings.Split(got, "\n")
 
-			require.Len(t, lines, len(tc.wantPrefixes))
+			require.Len(t, lines, len(tc.want))
 
-			for i, prefix := range tc.wantPrefixes {
+			for i, prefix := range tc.want {
 				assert.True(t, strings.HasPrefix(lines[i], prefix),
 					"line %d should have prefix %q, got %q", i, prefix, lines[i])
 			}
@@ -782,7 +782,7 @@ func TestPrinter_PrintTokenDiff_WithWordWrap(t *testing.T) {
 	tcs := map[string]struct {
 		before       string
 		after        string
-		want         string
+		wantExact    string
 		wantContains []string
 		width        int
 	}{
@@ -790,7 +790,7 @@ func TestPrinter_PrintTokenDiff_WithWordWrap(t *testing.T) {
 			before: "key: short\n",
 			after:  "key: this is a very long value that should wrap\n",
 			width:  30,
-			want: yamltest.JoinLF(
+			wantExact: yamltest.JoinLF(
 				"-key: short",
 				"+key: this is a very long",
 				" value that should wrap",
@@ -800,7 +800,7 @@ func TestPrinter_PrintTokenDiff_WithWordWrap(t *testing.T) {
 			before: "key: original value\n",
 			after:  "key: new very long value that definitely wraps\n",
 			width:  25,
-			want: yamltest.JoinLF(
+			wantExact: yamltest.JoinLF(
 				"-key: original value",
 				"+key: new very long value",
 				" that definitely wraps",
@@ -810,7 +810,7 @@ func TestPrinter_PrintTokenDiff_WithWordWrap(t *testing.T) {
 			before: "name: old-hyphenated-name-value\n",
 			after:  "name: new-hyphenated-name-value\n",
 			width:  20,
-			want: yamltest.JoinLF(
+			wantExact: yamltest.JoinLF(
 				"-name: old-",
 				" hyphenated-name-",
 				" value",
@@ -830,8 +830,8 @@ func TestPrinter_PrintTokenDiff_WithWordWrap(t *testing.T) {
 
 			got := printDiff(p, tc.before, tc.after)
 
-			if tc.want != "" {
-				assert.Equal(t, tc.want, got)
+			if tc.wantExact != "" {
+				assert.Equal(t, tc.wantExact, got)
 				return
 			}
 
@@ -1449,10 +1449,10 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 	tcs := map[string]struct {
 		before         string
 		after          string
-		want           string
+		context        int
+		wantExact      string
 		wantContains   []string
 		wantNotContain []string
-		context        int
 		wantEmpty      bool
 	}{
 		"no changes returns empty": {
@@ -1475,7 +1475,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				"",
 			),
 			context: 0,
-			want: yamltest.JoinLF(
+			wantExact: yamltest.JoinLF(
 				"      @@ -2 +2 @@",
 				"   2 -b: 2",
 				"   2 +b: changed",
@@ -1497,7 +1497,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				"",
 			),
 			context: 1,
-			want: yamltest.JoinLF(
+			wantExact: yamltest.JoinLF(
 				"      @@ -1,3 +1,3 @@",
 				"   1  a: 1",
 				"   2 -b: 2",
@@ -1523,7 +1523,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				"",
 			),
 			context: 1,
-			want: yamltest.JoinLF(
+			wantExact: yamltest.JoinLF(
 				"      @@ -1,2 +1,2 @@",
 				"   1 -a: 1",
 				"   1 +a: X",
@@ -1554,7 +1554,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				"",
 			),
 			context: 0,
-			want: yamltest.JoinLF(
+			wantExact: yamltest.JoinLF(
 				"      @@ -1 +1 @@",
 				"   1 -line1: a",
 				"   1 +line1: X",
@@ -1576,7 +1576,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				"",
 			),
 			context: 1,
-			want: yamltest.JoinLF(
+			wantExact: yamltest.JoinLF(
 				"      @@ -1,2 +1,3 @@",
 				"   1  a: 1",
 				"   2 +b: 2",
@@ -1596,7 +1596,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				"",
 			),
 			context: 1,
-			want: yamltest.JoinLF(
+			wantExact: yamltest.JoinLF(
 				"      @@ -1,3 +1,2 @@",
 				"   1  a: 1",
 				"   2 -b: 2",
@@ -1623,7 +1623,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				"",
 			),
 			context: 100, // Much larger than 3 lines.
-			want: yamltest.JoinLF(
+			wantExact: yamltest.JoinLF(
 				"      @@ -1,3 +1,3 @@",
 				"   1  a: 1",
 				"   2 -b: 2",
@@ -1649,7 +1649,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				"",
 			),
 			context: 1,
-			want: yamltest.JoinLF(
+			wantExact: yamltest.JoinLF(
 				"      @@ -1,3 +1,3 @@",
 				"   1  a: 1",
 				"   2 -b: 2",
@@ -1675,8 +1675,8 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				return
 			}
 
-			if tc.want != "" {
-				assert.Equal(t, tc.want, got)
+			if tc.wantExact != "" {
+				assert.Equal(t, tc.wantExact, got)
 				return
 			}
 

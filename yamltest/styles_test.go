@@ -20,9 +20,9 @@ func TestNewXMLStyles(t *testing.T) {
 func TestXMLStyles_Style(t *testing.T) {
 	t.Parallel()
 
-	tests := map[string]struct {
-		want  string
+	tcs := map[string]struct {
 		input niceyaml.Style
+		want  string
 	}{
 		"StyleDefault": {
 			input: niceyaml.StyleDefault,
@@ -94,7 +94,7 @@ func TestXMLStyles_Style(t *testing.T) {
 		},
 	}
 
-	for name, tc := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
