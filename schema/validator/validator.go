@@ -12,6 +12,14 @@ import (
 	"github.com/macropower/niceyaml"
 )
 
+var (
+	// ErrUnmarshalSchema indicates the schema JSON could not be parsed.
+	ErrUnmarshalSchema = errors.New("unmarshal schema")
+
+	// ErrCompileSchema indicates the schema failed to compile.
+	ErrCompileSchema = errors.New("compile schema")
+)
+
 // Validator validates data against a compiled JSON schema and returns errors
 // with YAML path information. Implements the [niceyaml.SchemaValidator] interface
 // for use with [niceyaml.DocumentDecoder]. Uses [github.com/santhosh-tekuri/jsonschema/v6].
@@ -28,7 +36,7 @@ func New(url string, schemaData []byte) (*Validator, error) {
 
 	err := json.Unmarshal(schemaData, &schema)
 	if err != nil {
-		return nil, fmt.Errorf("unmarshal schema: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrUnmarshalSchema, err)
 	}
 
 	compiler := jsonschema.NewCompiler()
@@ -39,7 +47,7 @@ func New(url string, schemaData []byte) (*Validator, error) {
 
 	jss, err := compiler.Compile(url)
 	if err != nil {
-		return nil, fmt.Errorf("compile schema: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrCompileSchema, err)
 	}
 
 	return &Validator{schema: jss}, nil

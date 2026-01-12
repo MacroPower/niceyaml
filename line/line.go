@@ -1,6 +1,7 @@
 package line
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -8,6 +9,15 @@ import (
 
 	"github.com/macropower/niceyaml/position"
 	"github.com/macropower/niceyaml/tokens"
+)
+
+var (
+	// ErrLineNumberNotIncreasing indicates a line number is not greater than the previous.
+	ErrLineNumberNotIncreasing = errors.New("line number not greater than previous")
+	// ErrLineNumberMismatch indicates a token's line number differs from expected.
+	ErrLineNumberMismatch = errors.New("token line number differs from expected")
+	// ErrColumnNotIncreasing indicates a column is not greater than the previous.
+	ErrColumnNotIncreasing = errors.New("column not greater than previous")
 )
 
 // Line contains data for a specific line in a [Source] collection.
@@ -307,7 +317,13 @@ func (ls Lines) Validate() error {
 		// Check: line numbers strictly increasing.
 		lineNum := line.Number()
 		if lineNum != 0 && lineNum <= prevLineNum {
-			return fmt.Errorf("line at index %d: line number %d not greater than previous %d", i, lineNum, prevLineNum)
+			return fmt.Errorf(
+				"line at index %d: line number %d not greater than previous %d: %w",
+				i,
+				lineNum,
+				prevLineNum,
+				ErrLineNumberNotIncreasing,
+			)
 		}
 		if lineNum != 0 {
 			prevLineNum = lineNum
@@ -328,7 +344,7 @@ func (ls Lines) Validate() error {
 			if expectedLineNum == -1 {
 				expectedLineNum = tk.Position.Line
 			} else if tk.Position.Line != expectedLineNum {
-				return fmt.Errorf("line at index %d, token %d: line number %d differs from expected %d", i, j, tk.Position.Line, expectedLineNum)
+				return fmt.Errorf("line at index %d, token %d: line number %d differs from expected %d: %w", i, j, tk.Position.Line, expectedLineNum, ErrLineNumberMismatch)
 			}
 
 			// Check columns strictly increasing.
@@ -337,11 +353,12 @@ func (ls Lines) Validate() error {
 			if tk.Origin != "" {
 				if tk.Position.Column <= prevCol {
 					return fmt.Errorf(
-						"line at index %d, token %d: column %d not greater than previous %d",
+						"line at index %d, token %d: column %d not greater than previous %d: %w",
 						i,
 						j,
 						tk.Position.Column,
 						prevCol,
+						ErrColumnNotIncreasing,
 					)
 				}
 

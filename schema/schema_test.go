@@ -33,12 +33,10 @@ func TestGetProperty(t *testing.T) {
 		wantErr bool
 	}{
 		"property exists": {
-			input:   "name",
-			wantErr: false,
+			input: "name",
 		},
 		"another property exists": {
-			input:   "age",
-			wantErr: false,
+			input: "age",
 		},
 		"property not found": {
 			input:   "missing",
@@ -53,7 +51,7 @@ func TestGetProperty(t *testing.T) {
 			got, err := schema.GetProperty(tc.input, js)
 
 			if tc.wantErr {
-				require.Error(t, err)
+				require.ErrorIs(t, err, schema.ErrPropertyNotFound)
 				assert.Nil(t, got)
 				assert.Contains(t, err.Error(), tc.input)
 
@@ -72,16 +70,15 @@ func TestMustGetProperty(t *testing.T) {
 	js := newTestSchema()
 
 	tcs := map[string]struct {
-		input       string
-		shouldPanic bool
+		input     string
+		wantPanic bool
 	}{
 		"property exists": {
-			input:       "name",
-			shouldPanic: false,
+			input: "name",
 		},
 		"property not found": {
-			input:       "missing",
-			shouldPanic: true,
+			input:     "missing",
+			wantPanic: true,
 		},
 	}
 
@@ -89,7 +86,7 @@ func TestMustGetProperty(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			if tc.shouldPanic {
+			if tc.wantPanic {
 				assert.Panics(t, func() {
 					schema.MustGetProperty(tc.input, js)
 				})

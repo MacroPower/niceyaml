@@ -32,8 +32,8 @@ type StandardNormalizer struct {
 }
 
 // NewStandardNormalizer creates a new [StandardNormalizer].
-func NewStandardNormalizer() StandardNormalizer {
-	return StandardNormalizer{
+func NewStandardNormalizer() *StandardNormalizer {
+	return &StandardNormalizer{
 		transformer: transform.Chain(
 			norm.NFD,
 			runes.Remove(runes.In(unicode.Mn)),
@@ -44,12 +44,12 @@ func NewStandardNormalizer() StandardNormalizer {
 }
 
 // Normalize implements [Normalizer].
-func (n StandardNormalizer) Normalize(in string) string {
+func (n *StandardNormalizer) Normalize(in string) string {
 	n.transformer.Reset()
 
 	out, _, err := transform.String(n.transformer, in)
 	if err != nil {
-		slog.Debug("normalize string: %w", slog.Any("error", err))
+		slog.Debug("normalize string", slog.Any("error", err))
 		return in
 	}
 

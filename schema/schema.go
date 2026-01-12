@@ -1,10 +1,14 @@
 package schema
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/invopop/jsonschema"
 )
+
+// ErrPropertyNotFound indicates the requested property does not exist in the schema.
+var ErrPropertyNotFound = errors.New("property not found")
 
 // JSON represents a JSON Schema object type.
 // It is an alias for [github.com/invopop/jsonschema.Schema] to allow importing
@@ -23,7 +27,7 @@ type JSON = jsonschema.Schema
 func GetProperty(name string, js *JSON) (*JSON, error) {
 	v, ok := js.Properties.Get(name)
 	if !ok {
-		return nil, fmt.Errorf("property %q not found", name)
+		return nil, fmt.Errorf("property %q: %w", name, ErrPropertyNotFound)
 	}
 
 	return v, nil

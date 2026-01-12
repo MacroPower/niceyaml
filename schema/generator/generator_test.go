@@ -99,32 +99,28 @@ func TestSchemaGenerator_Generate(t *testing.T) {
 	tcs := map[string]struct {
 		reflectTarget any
 		packagePaths  []string
-		wantError     bool
+		wantErr       bool
 	}{
 		"simple struct without package paths": {
 			reflectTarget: SimpleStruct{},
 			packagePaths:  []string{},
-			wantError:     false,
 		},
 		"test struct without package paths": {
 			reflectTarget: TestStruct{},
 			packagePaths:  []string{},
-			wantError:     false,
 		},
 		"complex struct without package paths": {
 			reflectTarget: ComplexStruct{},
 			packagePaths:  []string{},
-			wantError:     false,
 		},
 		"nested complex struct without package paths": {
 			reflectTarget: NestedComplexStruct{},
 			packagePaths:  []string{},
-			wantError:     false,
 		},
 		"with invalid package paths": {
 			reflectTarget: TestStruct{},
 			packagePaths:  []string{"invalid/package/path"},
-			wantError:     false, // Note: packages.Load returns packages with errors, but doesn't return an error itself.
+			// Note: packages.Load returns packages with errors, but doesn't return an error itself.
 		},
 	}
 
@@ -138,7 +134,7 @@ func TestSchemaGenerator_Generate(t *testing.T) {
 			)
 			result, err := gen.Generate()
 
-			if tc.wantError {
+			if tc.wantErr {
 				require.Error(t, err)
 				assert.Nil(t, result)
 			} else {
@@ -505,17 +501,15 @@ func TestGenerator_Generate_WithPackagePaths(t *testing.T) {
 	tcs := map[string]struct {
 		reflectTarget any
 		packagePaths  []string
-		expectError   bool
+		wantErr       bool
 	}{
 		"complex struct with current package path": {
 			reflectTarget: ComplexStruct{},
 			packagePaths:  []string{"github.com/macropower/niceyaml/schema/generator"},
-			expectError:   false,
 		},
 		"nested struct with current package path": {
 			reflectTarget: NestedComplexStruct{},
 			packagePaths:  []string{"github.com/macropower/niceyaml/schema/generator"},
-			expectError:   false,
 		},
 		"multiple package paths": {
 			reflectTarget: ComplexStruct{},
@@ -523,12 +517,10 @@ func TestGenerator_Generate_WithPackagePaths(t *testing.T) {
 				"github.com/macropower/niceyaml",
 				"github.com/macropower/niceyaml/schema/generator",
 			},
-			expectError: false,
 		},
 		"empty package paths with complex struct": {
 			reflectTarget: ComplexStruct{},
 			packagePaths:  []string{},
-			expectError:   false,
 		},
 	}
 
@@ -542,7 +534,7 @@ func TestGenerator_Generate_WithPackagePaths(t *testing.T) {
 			)
 			result, err := gen.Generate()
 
-			if tc.expectError {
+			if tc.wantErr {
 				require.Error(t, err)
 				assert.Nil(t, result)
 			} else {

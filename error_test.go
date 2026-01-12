@@ -236,14 +236,14 @@ func TestError_GracefulDegradation(t *testing.T) {
 				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("nonexistent").Build()),
 				niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
 			),
-			want: "error at $.nonexistent: not found",
+			want: "at $.nonexistent: not found",
 		},
 		"path without source": {
 			err: niceyaml.NewError(
 				errors.New("missing source"),
 				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build()),
 			),
-			want: "error at $.key: missing source",
+			want: "at $.key: missing source",
 		},
 		"empty source": {
 			err: niceyaml.NewError(
@@ -251,7 +251,7 @@ func TestError_GracefulDegradation(t *testing.T) {
 				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build()),
 				niceyaml.WithSource(niceyaml.NewSourceFromTokens(emptyTokens)),
 			),
-			want: "error at $.key: error in empty source",
+			want: "at $.key: error in empty source",
 		},
 		"nil source": {
 			err: niceyaml.NewError(
@@ -259,7 +259,7 @@ func TestError_GracefulDegradation(t *testing.T) {
 				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build()),
 				niceyaml.WithSource(nil),
 			),
-			want: "error at $.key: nil source error",
+			want: "at $.key: nil source error",
 		},
 		"nonexistent path in source": {
 			err: niceyaml.NewError(
@@ -267,7 +267,7 @@ func TestError_GracefulDegradation(t *testing.T) {
 				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("nonexistent").Child("deep").Build()),
 				niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
 			),
-			want: "error at $.nonexistent.deep: path not found",
+			want: "at $.nonexistent.deep: path not found",
 		},
 		"empty document source": {
 			// Tests graceful handling when source has no documents (Docs slice is empty).
@@ -276,7 +276,7 @@ func TestError_GracefulDegradation(t *testing.T) {
 				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build()),
 				niceyaml.WithSource(niceyaml.NewSourceFromTokens(emptyTokens)),
 			),
-			want: "error at $.key: empty doc error",
+			want: "at $.key: empty doc error",
 		},
 	}
 
@@ -297,7 +297,7 @@ func TestErrorAnnotation(t *testing.T) {
 		path        *yaml.Path
 		source      string
 		errMsg      string
-		wantExact   string
+		want        string
 		sourceLines int
 	}{
 		"nested path shows correct key": {
@@ -307,7 +307,7 @@ func TestErrorAnnotation(t *testing.T) {
 			`),
 			path:   niceyaml.NewPathBuilder().Child("foo").Child("bar").Build(),
 			errMsg: "nested error",
-			wantExact: yamltest.JoinLF(
+			want: yamltest.JoinLF(
 				"[2:3] nested error:",
 				"",
 				"<key>foo</key><punctuation>:</punctuation>",
@@ -322,7 +322,7 @@ func TestErrorAnnotation(t *testing.T) {
 			`),
 			path:   niceyaml.NewPathBuilder().Child("items").Index(0).Build(),
 			errMsg: "array error",
-			wantExact: yamltest.JoinLF(
+			want: yamltest.JoinLF(
 				"[2:5] array error:",
 				"",
 				"<key>items</key><punctuation>:</punctuation>",
@@ -338,7 +338,7 @@ func TestErrorAnnotation(t *testing.T) {
 			`),
 			path:   niceyaml.NewPathBuilder().Child("users").Index(0).Child("name").Build(),
 			errMsg: "nested array error",
-			wantExact: yamltest.JoinLF(
+			want: yamltest.JoinLF(
 				"[2:5] nested array error:",
 				"",
 				"<key>users</key><punctuation>:</punctuation>",
@@ -350,7 +350,7 @@ func TestErrorAnnotation(t *testing.T) {
 			source: "key: value",
 			path:   niceyaml.NewPathBuilder().Build(),
 			errMsg: "root error",
-			wantExact: yamltest.JoinLF(
+			want: yamltest.JoinLF(
 				"[1:4] root error:",
 				"",
 				"<key>key</key><error>:</error><default> </default><string>value</string>",
@@ -360,7 +360,7 @@ func TestErrorAnnotation(t *testing.T) {
 			source: "key: value",
 			path:   niceyaml.NewPathBuilder().Child("key").Build(),
 			errMsg: "top level error",
-			wantExact: yamltest.JoinLF(
+			want: yamltest.JoinLF(
 				"[1:1] top level error:",
 				"",
 				"<error>key</error><punctuation>:</punctuation><default> </default><string>value</string>",
@@ -377,7 +377,7 @@ func TestErrorAnnotation(t *testing.T) {
 			path:        niceyaml.NewPathBuilder().Child("line3").Build(),
 			errMsg:      "middle error",
 			sourceLines: 1,
-			wantExact: yamltest.JoinLF(
+			want: yamltest.JoinLF(
 				"[3:1] middle error:",
 				"",
 				"<key>line2</key><punctuation>:</punctuation><default> </default><string>b</string>",
@@ -407,7 +407,7 @@ func TestErrorAnnotation(t *testing.T) {
 
 			err := niceyaml.NewError(errors.New(tc.errMsg), opts...)
 
-			assert.Equal(t, tc.wantExact, trimLines(err.Error()))
+			assert.Equal(t, tc.want, trimLines(err.Error()))
 		})
 	}
 }
@@ -454,10 +454,10 @@ func TestError_SpecialParentContext(t *testing.T) {
 	}
 
 	tcs := map[string]struct {
-		source    string
-		path      *yaml.Path
-		errMsg    string
-		wantExact string
+		source string
+		path   *yaml.Path
+		errMsg string
+		want   string
 	}{
 		"root level array - parent is SequenceNode": {
 			// Tests findKeyToken returning nil when parent is not a MappingValueNode.
@@ -468,7 +468,7 @@ func TestError_SpecialParentContext(t *testing.T) {
 			`),
 			path:   niceyaml.NewPathBuilder().Index(1).Build(),
 			errMsg: "array element error",
-			wantExact: yamltest.JoinLF(
+			want: yamltest.JoinLF(
 				"[2:3] array element error:",
 				"",
 				"<punctuation>-</punctuation><default> </default><string>first</string>",
@@ -484,7 +484,7 @@ func TestError_SpecialParentContext(t *testing.T) {
 			`),
 			path:   niceyaml.NewPathBuilder().Build(),
 			errMsg: "document root error",
-			wantExact: yamltest.JoinLF(
+			want: yamltest.JoinLF(
 				"[1:4] document root error:",
 				"",
 				"<key>key</key><error>:</error><default> </default><string>value</string>",
@@ -504,7 +504,7 @@ func TestError_SpecialParentContext(t *testing.T) {
 				niceyaml.WithPrinter(newXMLPrinter()),
 			)
 
-			assert.Equal(t, tc.wantExact, trimLines(err.Error()))
+			assert.Equal(t, tc.want, trimLines(err.Error()))
 		})
 	}
 }
@@ -521,4 +521,45 @@ func TestError_NilToken(t *testing.T) {
 	got := err.Error()
 	// Should still work and show the error message.
 	assert.Equal(t, "nil token error", got)
+}
+
+func TestError_Unwrap(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input          error
+		wantReturnsNil bool
+	}{
+		"unwraps underlying error": {
+			input: errors.New("underlying error"),
+		},
+		"nil error unwraps to nil": {
+			input:          nil,
+			wantReturnsNil: true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := niceyaml.NewError(tc.input)
+			got := errors.Unwrap(err)
+
+			if tc.wantReturnsNil {
+				assert.NoError(t, got)
+			} else {
+				assert.Equal(t, tc.input, got)
+			}
+		})
+	}
+
+	t.Run("errors.Is works through Error wrapper", func(t *testing.T) {
+		t.Parallel()
+
+		sentinel := errors.New("sentinel error")
+		err := niceyaml.NewError(sentinel)
+
+		require.ErrorIs(t, err, sentinel)
+	})
 }

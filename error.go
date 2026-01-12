@@ -11,6 +11,9 @@ import (
 	"github.com/goccy/go-yaml/token"
 )
 
+// ErrNoSource indicates no source was provided to resolve an error path.
+var ErrNoSource = errors.New("no source provided")
+
 // FileGetter gets an [*ast.File].
 // See [*Source] for an implementation.
 type FileGetter interface {
@@ -96,12 +99,12 @@ func (e Error) Error() string {
 
 	errMsg, srcErr := e.annotateSource(e.path)
 	if srcErr != nil {
-		slog.Debug("failed to annotate yaml",
+		slog.Debug("annotate yaml",
 			slog.String("path", e.path.String()),
 			slog.Any("error", srcErr),
 		)
 		// If we can't annotate the source, just return the error without it.
-		return fmt.Sprintf("error at %s: %v", e.path.String(), e.err)
+		return fmt.Sprintf("at %s: %v", e.path.String(), e.err)
 	}
 
 	return errMsg
@@ -112,6 +115,11 @@ func (e *Error) SetOption(opts ...ErrorOption) {
 	for _, opt := range opts {
 		opt(e)
 	}
+}
+
+// Unwrap returns the underlying error, enabling [errors.Is] and [errors.As].
+func (e *Error) Unwrap() error {
+	return e.err
 }
 
 // Path returns the [*yaml.Path] where the error occurred as a string.
@@ -143,7 +151,7 @@ func (e *Error) resolveToken(path *yaml.Path) (*token.Token, error) {
 	}
 
 	if e.source == nil {
-		return nil, errors.New("no source provided")
+		return nil, ErrNoSource
 	}
 
 	file, err := e.source.File()

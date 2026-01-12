@@ -14,6 +14,9 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
+// ErrGoModNotFound indicates go.mod was not found when searching for module root.
+var ErrGoModNotFound = errors.New("go.mod not found")
+
 // LookupCommentFunc is a factory that creates a comment lookup function.
 // It receives a comment map where keys follow the pattern "pkg.TypeName" for
 // type comments and "pkg.TypeName.FieldName" for field comments. The returned
@@ -201,7 +204,7 @@ func findModuleRoot() (string, error) {
 		dir = parent
 	}
 
-	return "", errors.New("go.mod not found")
+	return "", ErrGoModNotFound
 }
 
 // buildCommentMapForPackage parses Go packages and builds a map of comments for types and fields.

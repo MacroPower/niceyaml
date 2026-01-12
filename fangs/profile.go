@@ -119,7 +119,7 @@ func (c *Profiler) writeSnapshots() error {
 
 		err := c.writeProfile(p.name, p.path)
 		if err != nil {
-			return err
+			return fmt.Errorf("write %s profile: %w", p.name, err)
 		}
 	}
 

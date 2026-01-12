@@ -23,7 +23,7 @@ func TestValidationError_Error(t *testing.T) {
 			err: niceyaml.NewError(errors.New("value is required"),
 				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("field").Child("subfield").Build()),
 			),
-			want: "error at $.field.subfield: value is required",
+			want: "at $.field.subfield: value is required",
 		},
 		"without path": {
 			err:  niceyaml.NewError(errors.New("value is required")),
@@ -49,12 +49,11 @@ func TestNewValidator(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		errMsg     string
-		schemaData []byte
-		wantErr    bool
+		input []byte
+		want  error
 	}{
 		"valid schema": {
-			schemaData: []byte(`{
+			input: []byte(`{
 				"type": "object",
 				"properties": {
 					"name": {"type": "string"},
@@ -62,21 +61,19 @@ func TestNewValidator(t *testing.T) {
 				},
 				"required": ["name"]
 			}`),
-			wantErr: false,
+			want: nil,
 		},
 		"invalid json": {
-			schemaData: []byte(`{"invalid": json}`),
-			wantErr:    true,
-			errMsg:     "unmarshal schema",
+			input: []byte(`{"invalid": json}`),
+			want:  validator.ErrUnmarshalSchema,
 		},
 		"invalid schema": {
-			schemaData: []byte(`{"type": "invalid_type"}`),
-			wantErr:    true,
-			errMsg:     "compile schema",
+			input: []byte(`{"type": "invalid_type"}`),
+			want:  validator.ErrCompileSchema,
 		},
 		"empty schema": {
-			schemaData: []byte(`{}`),
-			wantErr:    false,
+			input: []byte(`{}`),
+			want:  nil,
 		},
 	}
 
@@ -84,11 +81,10 @@ func TestNewValidator(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v, err := validator.New("test", tc.schemaData)
+			v, err := validator.New("test", tc.input)
 
-			if tc.wantErr {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tc.errMsg)
+			if tc.want != nil {
+				require.ErrorIs(t, err, tc.want)
 				assert.Nil(t, v)
 			} else {
 				require.NoError(t, err)
@@ -159,60 +155,59 @@ func TestValidator_Validate(t *testing.T) {
 	require.NoError(t, err)
 
 	tcs := map[string]struct {
-		data         any
-		expectedPath string
-		wantErr      bool
+		input    any
+		wantPath string
+		wantErr  bool
 	}{
 		"valid data": {
-			data: map[string]any{
+			input: map[string]any{
 				"name": "Kallistō",
 				"age":  30,
 			},
-			wantErr: false,
 		},
 		"missing required field": {
-			data: map[string]any{
+			input: map[string]any{
 				"age": 30,
 			},
-			wantErr:      true,
-			expectedPath: "$",
+			wantPath: "$",
+			wantErr:  true,
 		},
 		"wrong type for name": {
-			data: map[string]any{
+			input: map[string]any{
 				"name": 123,
 				"age":  30,
 			},
-			wantErr:      true,
-			expectedPath: "$.name",
+			wantPath: "$.name",
+			wantErr:  true,
 		},
 		"wrong type for age": {
-			data: map[string]any{
+			input: map[string]any{
 				"name": "Kallistō",
 				"age":  "thirty",
 			},
-			wantErr:      true,
-			expectedPath: "$.age",
+			wantPath: "$.age",
+			wantErr:  true,
 		},
 		"invalid array item": {
-			data: map[string]any{
+			input: map[string]any{
 				"name":  "John",
 				"items": []any{"valid", 123, "also valid"},
 			},
-			wantErr:      true,
-			expectedPath: "$.items[1]",
+			wantPath: "$.items[1]",
+			wantErr:  true,
 		},
 		"nested object validation error": {
-			data: map[string]any{
+			input: map[string]any{
 				"name": "Kallistō",
 				"nested": map[string]any{
 					"notValue": "something",
 				},
 			},
-			wantErr:      true,
-			expectedPath: "$.nested.notValue",
+			wantPath: "$.nested.notValue",
+			wantErr:  true,
 		},
 		"valid array of objects": {
-			data: map[string]any{
+			input: map[string]any{
 				"name": "Kallistō",
 				"users": []any{
 					map[string]any{
@@ -234,10 +229,9 @@ func TestValidator_Validate(t *testing.T) {
 					},
 				},
 			},
-			wantErr: false,
 		},
 		"invalid object in array": {
-			data: map[string]any{
+			input: map[string]any{
 				"name": "Kallistō",
 				"users": []any{
 					map[string]any{
@@ -258,11 +252,11 @@ func TestValidator_Validate(t *testing.T) {
 					},
 				},
 			},
-			wantErr:      true,
-			expectedPath: "$.users[1].id",
+			wantPath: "$.users[1].id",
+			wantErr:  true,
 		},
 		"missing required field in nested object within array": {
-			data: map[string]any{
+			input: map[string]any{
 				"name": "Kallistō",
 				"users": []any{
 					map[string]any{
@@ -275,11 +269,11 @@ func TestValidator_Validate(t *testing.T) {
 					},
 				},
 			},
-			wantErr:      true,
-			expectedPath: "$.users[0].profile",
+			wantPath: "$.users[0].profile",
+			wantErr:  true,
 		},
 		"invalid preference in deeply nested array": {
-			data: map[string]any{
+			input: map[string]any{
 				"name": "Kallistō",
 				"users": []any{
 					map[string]any{
@@ -297,11 +291,11 @@ func TestValidator_Validate(t *testing.T) {
 					},
 				},
 			},
-			wantErr:      true,
-			expectedPath: "$.users[0].profile.preferences[1]",
+			wantPath: "$.users[0].profile.preferences[1]",
+			wantErr:  true,
 		},
 		"valid matrix (2D array)": {
-			data: map[string]any{
+			input: map[string]any{
 				"name": "Kallistō",
 				"matrix": []any{
 					[]any{1, 2, 3},
@@ -309,10 +303,9 @@ func TestValidator_Validate(t *testing.T) {
 					[]any{7, 8, 9},
 				},
 			},
-			wantErr: false,
 		},
 		"invalid element in 2D array": {
-			data: map[string]any{
+			input: map[string]any{
 				"name": "Kallistō",
 				"matrix": []any{
 					[]any{1, 2, 3},
@@ -320,11 +313,11 @@ func TestValidator_Validate(t *testing.T) {
 					[]any{7, 8, 9},
 				},
 			},
-			wantErr:      true,
-			expectedPath: "$.matrix[1][1]",
+			wantPath: "$.matrix[1][1]",
+			wantErr:  true,
 		},
 		"missing email in second user": {
-			data: map[string]any{
+			input: map[string]any{
 				"name": "Kallistō",
 				"users": []any{
 					map[string]any{
@@ -345,30 +338,30 @@ func TestValidator_Validate(t *testing.T) {
 					},
 				},
 			},
-			wantErr:      true,
-			expectedPath: "$.users[1]",
+			wantPath: "$.users[1]",
+			wantErr:  true,
 		},
 		"additional property at root": {
-			data: map[string]any{
+			input: map[string]any{
 				"name":      "John",
 				"extraProp": "not allowed",
 			},
-			wantErr:      true,
-			expectedPath: "$.extraProp",
+			wantPath: "$.extraProp",
+			wantErr:  true,
 		},
 		"additional property in nested object": {
-			data: map[string]any{
+			input: map[string]any{
 				"name": "Kallistō",
 				"nested": map[string]any{
 					"value":       "valid",
 					"extraNested": "not allowed",
 				},
 			},
-			wantErr:      true,
-			expectedPath: "$.nested.extraNested",
+			wantPath: "$.nested.extraNested",
+			wantErr:  true,
 		},
 		"additional property in array object": {
-			data: map[string]any{
+			input: map[string]any{
 				"name": "Kallistō",
 				"users": []any{
 					map[string]any{
@@ -382,8 +375,8 @@ func TestValidator_Validate(t *testing.T) {
 					},
 				},
 			},
-			wantErr:      true,
-			expectedPath: "$.users[0].extraUserProp",
+			wantPath: "$.users[0].extraUserProp",
+			wantErr:  true,
 		},
 	}
 
@@ -391,14 +384,14 @@ func TestValidator_Validate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := v.ValidateSchema(tc.data)
+			err := v.ValidateSchema(tc.input)
 
 			if tc.wantErr {
 				require.Error(t, err)
 
 				var validationErr *niceyaml.Error
 				require.ErrorAs(t, err, &validationErr)
-				assert.Equal(t, tc.expectedPath, validationErr.Path())
+				assert.Equal(t, tc.wantPath, validationErr.Path())
 			} else {
 				require.NoError(t, err)
 			}
@@ -467,37 +460,36 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 	require.NoError(t, err)
 
 	tcs := map[string]struct {
-		input        string
-		expectedPath string
-		wantErr      bool
+		input    string
+		wantPath string
+		wantErr  bool
 	}{
 		"valid data": {
 			input: yamltest.Input(`
 				name: Kallisto
 				age: 30
 			`),
-			wantErr: false,
 		},
 		"missing required field": {
-			input:        `age: 30`,
-			wantErr:      true,
-			expectedPath: "$",
+			input:    yamltest.Input(`age: 30`),
+			wantPath: "$",
+			wantErr:  true,
 		},
 		"wrong type for name": {
 			input: yamltest.Input(`
 				name: 123
 				age: 30
 			`),
-			wantErr:      true,
-			expectedPath: "$.name",
+			wantPath: "$.name",
+			wantErr:  true,
 		},
 		"wrong type for age": {
 			input: yamltest.Input(`
 				name: Kallisto
 				age: thirty
 			`),
-			wantErr:      true,
-			expectedPath: "$.age",
+			wantPath: "$.age",
+			wantErr:  true,
 		},
 		"invalid array item": {
 			input: yamltest.Input(`
@@ -507,8 +499,8 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 				  - 123
 				  - also valid
 			`),
-			wantErr:      true,
-			expectedPath: "$.items[1]",
+			wantPath: "$.items[1]",
+			wantErr:  true,
 		},
 		"nested object validation error": {
 			input: yamltest.Input(`
@@ -516,8 +508,8 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 				nested:
 				  notValue: something
 			`),
-			wantErr:      true,
-			expectedPath: "$.nested.notValue",
+			wantPath: "$.nested.notValue",
+			wantErr:  true,
 		},
 		"valid array of objects": {
 			input: yamltest.Input(`
@@ -537,7 +529,6 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 				        - dark_mode
 				        - notifications
 			`),
-			wantErr: false,
 		},
 		"invalid object in array": {
 			input: yamltest.Input(`
@@ -554,8 +545,8 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 				      firstName: Aello
 				      lastName: Thaumantias
 			`),
-			wantErr:      true,
-			expectedPath: "$.users[1].id",
+			wantPath: "$.users[1].id",
+			wantErr:  true,
 		},
 		"missing required field in nested object within array": {
 			input: yamltest.Input(`
@@ -566,8 +557,8 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 				    profile:
 				      firstName: Kallisto
 			`),
-			wantErr:      true,
-			expectedPath: "$.users[0].profile",
+			wantPath: "$.users[0].profile",
+			wantErr:  true,
 		},
 		"invalid preference in deeply nested array": {
 			input: yamltest.Input(`
@@ -583,8 +574,8 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 				        - 123
 				        - notifications
 			`),
-			wantErr:      true,
-			expectedPath: "$.users[0].profile.preferences[1]",
+			wantPath: "$.users[0].profile.preferences[1]",
+			wantErr:  true,
 		},
 		"valid matrix (2D array)": {
 			input: yamltest.Input(`
@@ -594,7 +585,6 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 				  - [4, 5, 6]
 				  - [7, 8, 9]
 			`),
-			wantErr: false,
 		},
 		"invalid element in 2D array": {
 			input: yamltest.Input(`
@@ -604,8 +594,8 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 				  - [4, invalid, 6]
 				  - [7, 8, 9]
 			`),
-			wantErr:      true,
-			expectedPath: "$.matrix[1][1]",
+			wantPath: "$.matrix[1][1]",
+			wantErr:  true,
 		},
 		"missing email in second user": {
 			input: yamltest.Input(`
@@ -621,16 +611,16 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 				      firstName: Aello
 				      lastName: Thaumantias
 			`),
-			wantErr:      true,
-			expectedPath: "$.users[1]",
+			wantPath: "$.users[1]",
+			wantErr:  true,
 		},
 		"additional property at root": {
 			input: yamltest.Input(`
 				name: John
 				extraProp: not allowed
 			`),
-			wantErr:      true,
-			expectedPath: "$.extraProp",
+			wantPath: "$.extraProp",
+			wantErr:  true,
 		},
 		"additional property in nested object": {
 			input: yamltest.Input(`
@@ -639,8 +629,8 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 				  value: valid
 				  extraNested: not allowed
 			`),
-			wantErr:      true,
-			expectedPath: "$.nested.extraNested",
+			wantPath: "$.nested.extraNested",
+			wantErr:  true,
 		},
 		"additional property in array object": {
 			input: yamltest.Input(`
@@ -653,8 +643,8 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 				      lastName: Lykaonis
 				    extraUserProp: not allowed
 			`),
-			wantErr:      true,
-			expectedPath: "$.users[0].extraUserProp",
+			wantPath: "$.users[0].extraUserProp",
+			wantErr:  true,
 		},
 	}
 
@@ -676,7 +666,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 
 					var validationErr *niceyaml.Error
 					require.ErrorAs(t, err, &validationErr)
-					assert.Equal(t, tc.expectedPath, validationErr.Path())
+					assert.Equal(t, tc.wantPath, validationErr.Path())
 				} else {
 					require.NoError(t, err)
 				}
@@ -689,26 +679,24 @@ func TestMustNewValidator(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
+		input        []byte
 		validateData any
-		schemaData   []byte
 		wantPanic    bool
 	}{
 		"valid schema returns validator": {
-			schemaData:   []byte(`{"type": "object", "properties": {"name": {"type": "string"}}}`),
-			wantPanic:    false,
+			input:        []byte(`{"type": "object", "properties": {"name": {"type": "string"}}}`),
 			validateData: map[string]any{"name": "test"},
 		},
 		"panics with invalid json": {
-			schemaData: []byte(`{"invalid": json}`),
-			wantPanic:  true,
+			input:     []byte(`{"invalid": json}`),
+			wantPanic: true,
 		},
 		"panics with invalid schema type": {
-			schemaData: []byte(`{"type": "invalid_type"}`),
-			wantPanic:  true,
+			input:     []byte(`{"type": "invalid_type"}`),
+			wantPanic: true,
 		},
 		"empty schema does not panic": {
-			schemaData: []byte(`{}`),
-			wantPanic:  false,
+			input: []byte(`{}`),
 		},
 	}
 
@@ -718,13 +706,13 @@ func TestMustNewValidator(t *testing.T) {
 
 			if tc.wantPanic {
 				assert.Panics(t, func() {
-					validator.MustNew("test", tc.schemaData)
+					validator.MustNew("test", tc.input)
 				})
 
 				return
 			}
 
-			v := validator.MustNew("test", tc.schemaData)
+			v := validator.MustNew("test", tc.input)
 			assert.NotNil(t, v)
 
 			if tc.validateData != nil {
@@ -742,24 +730,24 @@ func TestNewValidator_InvalidSchemaTypes(t *testing.T) {
 	// JSON Schema must be objects (maps) or booleans - not arrays, strings, numbers, or null.
 	// These fail during schema compilation with metaschema validation.
 	tcs := map[string]struct {
-		errMsg     string
-		schemaData []byte
+		input []byte
+		want  error
 	}{
 		"array as schema": {
-			schemaData: []byte(`["not", "a", "schema"]`),
-			errMsg:     "compile schema",
+			input: []byte(`["not", "a", "schema"]`),
+			want:  validator.ErrCompileSchema,
 		},
 		"string as schema": {
-			schemaData: []byte(`"not a schema"`),
-			errMsg:     "compile schema",
+			input: []byte(`"not a schema"`),
+			want:  validator.ErrCompileSchema,
 		},
 		"number as schema": {
-			schemaData: []byte(`42`),
-			errMsg:     "compile schema",
+			input: []byte(`42`),
+			want:  validator.ErrCompileSchema,
 		},
 		"null as schema": {
-			schemaData: []byte(`null`),
-			errMsg:     "compile schema",
+			input: []byte(`null`),
+			want:  validator.ErrCompileSchema,
 		},
 	}
 
@@ -767,9 +755,8 @@ func TestNewValidator_InvalidSchemaTypes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v, err := validator.New("test", tc.schemaData)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), tc.errMsg)
+			v, err := validator.New("test", tc.input)
+			require.ErrorIs(t, err, tc.want)
 			assert.Nil(t, v)
 		})
 	}
@@ -780,16 +767,15 @@ func TestNewValidator_BooleanSchema(t *testing.T) {
 
 	// Boolean schemas are valid in JSON Schema: true accepts everything, false rejects everything.
 	tcs := map[string]struct {
-		schemaData []byte
-		acceptsAll bool
+		input          []byte
+		wantAcceptsAll bool
 	}{
 		"true schema accepts all data": {
-			schemaData: []byte(`true`),
-			acceptsAll: true,
+			input:          []byte(`true`),
+			wantAcceptsAll: true,
 		},
 		"false schema rejects all data": {
-			schemaData: []byte(`false`),
-			acceptsAll: false,
+			input: []byte(`false`),
 		},
 	}
 
@@ -799,13 +785,13 @@ func TestNewValidator_BooleanSchema(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v, err := validator.New("test", tc.schemaData)
+			v, err := validator.New("test", tc.input)
 			require.NoError(t, err)
 			require.NotNil(t, v)
 
 			for _, data := range testData {
 				err := v.ValidateSchema(data)
-				if tc.acceptsAll {
+				if tc.wantAcceptsAll {
 					assert.NoError(t, err)
 				} else {
 					assert.Error(t, err)

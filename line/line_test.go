@@ -238,8 +238,8 @@ func TestNewLines_PerLine(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		input     string
-		wantLines []string
+		input string
+		want  []string
 	}{
 		"literal block": {
 			input: yamltest.Input(`
@@ -248,7 +248,7 @@ func TestNewLines_PerLine(t *testing.T) {
 				  line2
 				  line3
 			`),
-			wantLines: []string{
+			want: []string{
 				"   1 | script: |",
 				"   2 |   line1",
 				"   3 |   line2",
@@ -261,7 +261,7 @@ func TestNewLines_PerLine(t *testing.T) {
 				  part1
 				  part2
 			`),
-			wantLines: []string{
+			want: []string{
 				"   1 | desc: >",
 				"   2 |   part1",
 				"   3 |   part2",
@@ -270,7 +270,7 @@ func TestNewLines_PerLine(t *testing.T) {
 		"single key-value": {
 			// Note: lexer doesn't preserve trailing newline on final simple values.
 			input: "key: value\n",
-			wantLines: []string{
+			want: []string{
 				"   1 | key: value",
 			},
 		},
@@ -279,7 +279,7 @@ func TestNewLines_PerLine(t *testing.T) {
 				first: 1
 				second: 2
 			`),
-			wantLines: []string{
+			want: []string{
 				"   1 | first: 1",
 				"   2 | second: 2",
 			},
@@ -289,7 +289,7 @@ func TestNewLines_PerLine(t *testing.T) {
 				parent:
 				  child: value
 			`),
-			wantLines: []string{
+			want: []string{
 				"   1 | parent:",
 				"   2 |   child: value",
 			},
@@ -298,7 +298,7 @@ func TestNewLines_PerLine(t *testing.T) {
 			input: yamltest.Input(`
 				special: "line1\nline2"
 			`),
-			wantLines: []string{
+			want: []string{
 				`   1 | special: "line1\nline2"`,
 			},
 		},
@@ -311,9 +311,9 @@ func TestNewLines_PerLine(t *testing.T) {
 			input := lexer.Tokenize(tc.input)
 			lines := line.NewLines(input)
 
-			require.Len(t, lines, len(tc.wantLines), "wrong number of lines")
+			require.Len(t, lines, len(tc.want), "wrong number of lines")
 
-			for i, want := range tc.wantLines {
+			for i, want := range tc.want {
 				assert.Equal(t, want, lines[i].String(), "line %d", i)
 			}
 		})
@@ -833,8 +833,8 @@ func TestNewLines_LeadingNewlineTokens(t *testing.T) {
 	// Test cases for tokens with leading newlines, which should be handled
 	// correctly without creating invalid column ordering.
 	tcs := map[string]struct {
-		input        string
-		wantLineNums []int
+		input string
+		want  []int
 	}{
 		"inline comment followed by next line": {
 			input: yamltest.Input(`
@@ -842,7 +842,7 @@ func TestNewLines_LeadingNewlineTokens(t *testing.T) {
 				  - key: value # inline comment
 				    next: data
 			`),
-			wantLineNums: []int{1, 2, 3},
+			want: []int{1, 2, 3},
 		},
 		"sequence entry with merge key and comment": {
 			input: yamltest.Input(`
@@ -850,7 +850,7 @@ func TestNewLines_LeadingNewlineTokens(t *testing.T) {
 				  - <<: *anchor # comment
 				    key: value
 			`),
-			wantLineNums: []int{1, 2, 3},
+			want: []int{1, 2, 3},
 		},
 		"nested map with trailing comment": {
 			input: yamltest.Input(`
@@ -858,7 +858,7 @@ func TestNewLines_LeadingNewlineTokens(t *testing.T) {
 				  child: value # note
 				  sibling: other
 			`),
-			wantLineNums: []int{1, 2, 3},
+			want: []int{1, 2, 3},
 		},
 		"multiple inline comments": {
 			input: yamltest.Input(`
@@ -866,7 +866,7 @@ func TestNewLines_LeadingNewlineTokens(t *testing.T) {
 				b: 2 # second
 				c: 3 # third
 			`),
-			wantLineNums: []int{1, 2, 3},
+			want: []int{1, 2, 3},
 		},
 		"comment block after content": {
 			input: yamltest.Input(`
@@ -876,7 +876,7 @@ func TestNewLines_LeadingNewlineTokens(t *testing.T) {
 				# More comments
 				next: data
 			`),
-			wantLineNums: []int{1, 2, 3, 4, 5},
+			want: []int{1, 2, 3, 4, 5},
 		},
 	}
 
@@ -891,9 +891,9 @@ func TestNewLines_LeadingNewlineTokens(t *testing.T) {
 			require.NoError(t, lines.Validate(), "tokens should be valid")
 
 			// Verify expected line numbers.
-			require.Len(t, lines, len(tc.wantLineNums), "wrong number of lines")
+			require.Len(t, lines, len(tc.want), "wrong number of lines")
 
-			for i, wantNum := range tc.wantLineNums {
+			for i, wantNum := range tc.want {
 				assert.Equal(t, wantNum, lines[i].Number(), "line %d has wrong number", i)
 			}
 		})
@@ -991,7 +991,7 @@ func TestLines_Validate(t *testing.T) {
 		lines := line.NewLines(tks)
 
 		err := lines.Validate()
-		require.Error(t, err)
+		require.ErrorIs(t, err, line.ErrColumnNotIncreasing)
 		assert.Contains(t, err.Error(), "column 5 not greater than previous 5")
 	})
 
@@ -1007,7 +1007,7 @@ func TestLines_Validate(t *testing.T) {
 		lines := line.NewLines(tks)
 
 		err := lines.Validate()
-		require.Error(t, err)
+		require.ErrorIs(t, err, line.ErrColumnNotIncreasing)
 		assert.Contains(t, err.Error(), "column 5 not greater than previous 10")
 	})
 
@@ -1237,16 +1237,16 @@ func TestNewLines_IndentLevelProgression(t *testing.T) {
 	// Line 5:     back2: val -> level 2.
 	// Line 6:   back1: val -> level 1.
 	// Line 7: end: val -> level 0.
-	expectedLevels := []int{0, 1, 2, 3, 2, 1, 0}
+	wantLevels := []int{0, 1, 2, 3, 2, 1, 0}
 
-	require.Len(t, lines, len(expectedLevels))
+	require.Len(t, lines, len(wantLevels))
 
 	for i := range lines {
 		ln := lines[i]
 		if len(ln.Tokens()) > 0 {
 			firstTk := ln.Token(0)
 			if firstTk.Position != nil {
-				assert.Equal(t, expectedLevels[i], firstTk.Position.IndentLevel,
+				assert.Equal(t, wantLevels[i], firstTk.Position.IndentLevel,
 					"IndentLevel mismatch at line %d", i+1)
 			}
 		}
@@ -1266,8 +1266,8 @@ func TestNewLines_BlockScalars(t *testing.T) {
 		// This is critical for round-trip fidelity.
 
 		tcs := map[string]struct {
-			input           string
-			wantContentLine int // Expected Position.Line of the StringType content token.
+			input string
+			want  int // Expected Position.Line of the StringType content token.
 		}{
 			"literal two lines": {
 				input: yamltest.Input(`
@@ -1275,7 +1275,7 @@ func TestNewLines_BlockScalars(t *testing.T) {
 					  line1
 					  line2
 				`),
-				wantContentLine: 3, // Position should be on last content line.
+				want: 3, // Position should be on last content line.
 			},
 			"literal three lines": {
 				input: yamltest.Input(`
@@ -1284,7 +1284,7 @@ func TestNewLines_BlockScalars(t *testing.T) {
 					  b
 					  c
 				`),
-				wantContentLine: 4,
+				want: 4,
 			},
 			"folded two lines": {
 				input: yamltest.Input(`
@@ -1292,7 +1292,7 @@ func TestNewLines_BlockScalars(t *testing.T) {
 					  first
 					  second
 				`),
-				wantContentLine: 3,
+				want: 3,
 			},
 			"literal with strip": {
 				input: yamltest.Input(`
@@ -1300,7 +1300,7 @@ func TestNewLines_BlockScalars(t *testing.T) {
 					  line1
 					  line2
 				`),
-				wantContentLine: 3,
+				want: 3,
 			},
 			"literal with keep and trailing blank": {
 				input: `key: |+
@@ -1308,7 +1308,7 @@ func TestNewLines_BlockScalars(t *testing.T) {
   line2
 
 `,
-				wantContentLine: 4, // Blank line counts.
+				want: 4, // Blank line counts.
 			},
 		}
 
@@ -1332,7 +1332,7 @@ func TestNewLines_BlockScalars(t *testing.T) {
 				}
 
 				require.NotNil(t, contentToken, "expected to find block scalar content token")
-				assert.Equal(t, tc.wantContentLine, contentToken.Position.Line,
+				assert.Equal(t, tc.want, contentToken.Position.Line,
 					"block scalar content Position.Line should point to LAST line")
 			})
 		}
@@ -1387,27 +1387,27 @@ func TestNewLines_BlockScalars(t *testing.T) {
 		// - keep (+): Keep all trailing newlines.
 
 		tcs := map[string]struct {
-			input     string
-			wantValue string // Expected Value after chomping.
+			input string
+			want  string // Expected Value after chomping.
 		}{
 			"literal keep with trailing blanks": {
 				input: `key: |+
   content
 
 `,
-				wantValue: "content\n\n",
+				want: "content\n\n",
 			},
 			"literal strip with content": {
 				input: `key: |-
   content
 `,
-				wantValue: "content",
+				want: "content",
 			},
 			"literal clip default": {
 				input: `key: |
   content
 `,
-				wantValue: "content\n",
+				want: "content\n",
 			},
 			"folded keep with trailing blanks": {
 				input: `key: >+
@@ -1415,14 +1415,14 @@ func TestNewLines_BlockScalars(t *testing.T) {
   line2
 
 `,
-				wantValue: "line1 line2\n\n",
+				want: "line1 line2\n\n",
 			},
 			"folded strip": {
 				input: `key: >-
   line1
   line2
 `,
-				wantValue: "line1 line2",
+				want: "line1 line2",
 			},
 			"literal keep multiple trailing": {
 				input: `key: |+
@@ -1430,7 +1430,7 @@ func TestNewLines_BlockScalars(t *testing.T) {
 
 
 `,
-				wantValue: "content\n\n\n",
+				want: "content\n\n\n",
 			},
 		}
 
@@ -1454,7 +1454,7 @@ func TestNewLines_BlockScalars(t *testing.T) {
 				}
 
 				require.NotNil(t, contentToken, "expected to find block scalar content token")
-				assert.Equal(t, tc.wantValue, contentToken.Value,
+				assert.Equal(t, tc.want, contentToken.Value,
 					"block scalar Value should match chomping behavior")
 			})
 		}
@@ -1469,15 +1469,15 @@ func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 	// This is critical for round-trip fidelity.
 
 	tcs := map[string]struct {
-		input           string
-		wantContentLine int // Expected Position.Line of the StringType content token.
+		input string
+		want  int // Expected Position.Line of the StringType content token.
 	}{
 		"plain multiline two lines": {
 			input: yamltest.Input(`
 				key: this is
 				  continued
 			`),
-			wantContentLine: 1, // Position should be on FIRST line.
+			want: 1, // Position should be on FIRST line.
 		},
 		"plain multiline three lines": {
 			input: yamltest.Input(`
@@ -1485,7 +1485,7 @@ func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 				  second
 				  third
 			`),
-			wantContentLine: 1,
+			want: 1,
 		},
 		"plain multiline with more indent": {
 			input: yamltest.Input(`
@@ -1493,7 +1493,7 @@ func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 				  child: line one
 				    continued line
 			`),
-			wantContentLine: 2, // First line of the value.
+			want: 2, // First line of the value.
 		},
 	}
 
@@ -1519,7 +1519,7 @@ func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 			}
 
 			require.NotNil(t, contentToken, "expected to find plain multiline string token")
-			assert.Equal(t, tc.wantContentLine, contentToken.Position.Line,
+			assert.Equal(t, tc.want, contentToken.Position.Line,
 				"plain multiline string Position.Line should point to FIRST line")
 		})
 	}

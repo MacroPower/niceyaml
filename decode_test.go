@@ -13,6 +13,12 @@ import (
 	"github.com/macropower/niceyaml/yamltest"
 )
 
+// Test sentinel errors for mock validators.
+var (
+	errSchemaValidationFailed = errors.New("schema validation failed: name cannot be 'invalid'")
+	errNameRequired           = errors.New("name is required")
+)
+
 func TestNewDecoder(t *testing.T) {
 	t.Parallel()
 
@@ -97,14 +103,14 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		path      func() *yaml.Path
+		path      *yaml.Path
 		input     string
 		wantVals  []string
 		wantFound []bool
 	}{
 		"simple key": {
 			input:     "key: value",
-			path:      func() *yaml.Path { return niceyaml.NewPathBuilder().Child("key").Build() },
+			path:      niceyaml.NewPathBuilder().Child("key").Build(),
 			wantVals:  []string{"value"},
 			wantFound: []bool{true},
 		},
@@ -113,7 +119,7 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 				parent:
 				  child: nested_value
 			`),
-			path:      func() *yaml.Path { return niceyaml.NewPathBuilder().Child("parent").Child("child").Build() },
+			path:      niceyaml.NewPathBuilder().Child("parent").Child("child").Build(),
 			wantVals:  []string{"nested_value"},
 			wantFound: []bool{true},
 		},
@@ -124,13 +130,13 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 				  - second
 				  - third
 			`),
-			path:      func() *yaml.Path { return niceyaml.NewPathBuilder().Child("items").Index(1).Build() },
+			path:      niceyaml.NewPathBuilder().Child("items").Index(1).Build(),
 			wantVals:  []string{"second"},
 			wantFound: []bool{true},
 		},
 		"missing key returns empty": {
 			input:     "key: value",
-			path:      func() *yaml.Path { return niceyaml.NewPathBuilder().Child("nonexistent").Build() },
+			path:      niceyaml.NewPathBuilder().Child("nonexistent").Build(),
 			wantVals:  []string{""},
 			wantFound: []bool{false},
 		},
@@ -141,31 +147,31 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 				---
 				second: 2
 			`),
-			path:      func() *yaml.Path { return niceyaml.NewPathBuilder().Build() },
+			path:      niceyaml.NewPathBuilder().Build(),
 			wantVals:  []string{"first: 1", "second: 2"},
 			wantFound: []bool{true, true},
 		},
 		"numeric value": {
 			input:     "count: 42",
-			path:      func() *yaml.Path { return niceyaml.NewPathBuilder().Child("count").Build() },
+			path:      niceyaml.NewPathBuilder().Child("count").Build(),
 			wantVals:  []string{"42"},
 			wantFound: []bool{true},
 		},
 		"boolean value": {
 			input:     "enabled: true",
-			path:      func() *yaml.Path { return niceyaml.NewPathBuilder().Child("enabled").Build() },
+			path:      niceyaml.NewPathBuilder().Child("enabled").Build(),
 			wantVals:  []string{"true"},
 			wantFound: []bool{true},
 		},
 		"null value": {
 			input:     "empty: null",
-			path:      func() *yaml.Path { return niceyaml.NewPathBuilder().Child("empty").Build() },
+			path:      niceyaml.NewPathBuilder().Child("empty").Build(),
 			wantVals:  []string{"null"},
 			wantFound: []bool{true},
 		},
 		"nil path returns false": {
 			input:     "key: value",
-			path:      func() *yaml.Path { return nil },
+			path:      nil,
 			wantVals:  []string{""},
 			wantFound: []bool{false},
 		},
@@ -180,7 +186,7 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 			require.NoError(t, err)
 
 			d := niceyaml.NewDecoder(file)
-			path := tc.path()
+			path := tc.path
 
 			var gotVals []string
 
@@ -394,8 +400,7 @@ func TestDocumentDecoder_Unmarshal(t *testing.T) {
 			var result schemaValidatorConfig
 
 			err := dd.Unmarshal(&result)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "schema validation failed")
+			require.ErrorIs(t, err, errSchemaValidationFailed)
 		}
 	})
 
@@ -468,8 +473,7 @@ func TestDocumentDecoder_UnmarshalContext(t *testing.T) {
 
 			err := dd.UnmarshalContext(t.Context(), &result)
 
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "schema validation failed")
+			require.ErrorIs(t, err, errSchemaValidationFailed)
 		}
 	})
 }
@@ -666,8 +670,7 @@ func TestDocumentDecoder_Decode_Validator(t *testing.T) {
 			var result bothValidatorConfig
 
 			err := dd.Unmarshal(&result)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "name is required")
+			require.ErrorIs(t, err, errNameRequired)
 		}
 	})
 }
@@ -684,7 +687,7 @@ func (c *validatorConfig) Validate() error {
 
 	if c.Name == "" {
 		return niceyaml.NewError(
-			errors.New("name is required"),
+			errNameRequired,
 			niceyaml.WithPath(niceyaml.NewPath("name")),
 		)
 	}
@@ -715,7 +718,7 @@ func (c *schemaValidatorConfig) ValidateSchema(data any) error {
 
 	if name, ok := m["name"].(string); ok && name == "invalid" {
 		return niceyaml.NewError(
-			errors.New("schema validation failed: name cannot be 'invalid'"),
+			errSchemaValidationFailed,
 			niceyaml.WithPath(niceyaml.NewPath("name")),
 		)
 	}
@@ -741,7 +744,7 @@ func (c *bothValidatorConfig) ValidateSchema(data any) error {
 
 	if name, ok := m["name"].(string); ok && name == "invalid" {
 		return niceyaml.NewError(
-			errors.New("schema validation failed: name cannot be 'invalid'"),
+			errSchemaValidationFailed,
 			niceyaml.WithPath(niceyaml.NewPath("name")),
 		)
 	}
@@ -754,7 +757,7 @@ func (c *bothValidatorConfig) Validate() error {
 
 	if c.Name == "" {
 		return niceyaml.NewError(
-			errors.New("name is required"),
+			errNameRequired,
 			niceyaml.WithPath(niceyaml.NewPath("name")),
 		)
 	}
@@ -888,12 +891,12 @@ func TestDocumentDecoder_ValidateSchema(t *testing.T) {
 		require.NoError(t, err)
 
 		d := niceyaml.NewDecoder(file)
-		validator := yamltest.NewFailingSchemaValidator(errors.New("validation failed"))
+		wantErr := errors.New("validation failed")
+		validator := yamltest.NewFailingSchemaValidator(wantErr)
 
 		for _, dd := range d.Documents() {
 			err := dd.ValidateSchema(validator)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "validation failed")
+			require.ErrorIs(t, err, wantErr)
 		}
 	})
 }

@@ -4,6 +4,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/macropower/niceyaml"
 	"github.com/macropower/niceyaml/examples/schemas/cafe"
 )
@@ -33,12 +35,8 @@ func TestCafeDefaultConfig(t *testing.T) {
 	t.Parallel()
 
 	defaults, err := os.ReadFile("defaults.yaml")
-	if err != nil {
-		t.Fatalf("read default config: %v", err)
-	}
+	require.NoError(t, err, "read default config")
 
 	_, err = cafeConfig(string(defaults))
-	if err != nil {
-		t.Fatalf("load default config: %v", err)
-	}
+	require.NoError(t, err, "load default config")
 }
