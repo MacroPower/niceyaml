@@ -1,4 +1,3 @@
-// Package lexers provides helpers for tokenizing YAML strings.
 package lexers
 
 import (

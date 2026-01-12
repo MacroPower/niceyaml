@@ -11,6 +11,7 @@ import (
 )
 
 // Line contains data for a specific line in a [Source] collection.
+// Create instances with [NewLines]; access via [Lines] indexing.
 type Line struct {
 	// Token segments for this line.
 	segments tokens.Segments

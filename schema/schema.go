@@ -1,4 +1,3 @@
-// Package schema provides utilities for working with JSON schemas.
 package schema
 
 import (

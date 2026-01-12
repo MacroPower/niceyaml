@@ -221,7 +221,8 @@ func findKeyToken(file *ast.File, node ast.Node) *token.Token {
 	return nil
 }
 
-// getTokenPosition returns the line and column position of the token.
+// getTokenPosition returns the 1-indexed line and column position of the token.
+// Note: go-yaml uses 1-indexed positions, unlike [position.Position] which is 0-indexed.
 func getTokenPosition(tk *token.Token) (int, int) {
 	if tk == nil {
 		return 0, 0

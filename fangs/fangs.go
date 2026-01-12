@@ -1,9 +1,3 @@
-// Package fangs provides utilities for integrating niceyaml with
-// [github.com/charmbracelet/fang], a Cobra companion library.
-//
-// The primary export is [ErrorHandler], a custom error handler that preserves
-// multi-line error formatting. This is particularly useful for niceyaml errors,
-// which include source context and annotations spanning multiple lines.
 package fangs
 
 import (
@@ -50,7 +44,7 @@ func mustN(_ int, err error) {
 	}
 }
 
-// XXX: this is a hack to detect usage errors.
+// TODO: this is a workaround to detect usage errors.
 // See: https://github.com/spf13/cobra/pull/2266
 func isUsageError(err error) bool {
 	s := err.Error()

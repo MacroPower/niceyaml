@@ -1,4 +1,3 @@
-// Package colors provides utilities for color and style manipulation.
 package colors
 
 import (

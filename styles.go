@@ -6,6 +6,7 @@ import (
 )
 
 // Style identifies a style category for YAML highlighting.
+// Used as keys in [Styles] maps.
 type Style int
 
 // Style constants for YAML highlighting.
@@ -30,6 +31,7 @@ const (
 )
 
 // Styles defines styles for YAML highlighting.
+// See [DefaultStyles] for the default style set.
 type Styles map[Style]lipgloss.Style
 
 // Style returns the [lipgloss.Style] for the given [Style] category.

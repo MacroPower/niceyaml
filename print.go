@@ -106,10 +106,10 @@ type GutterContext struct {
 // The returned string is rendered as the leftmost content before the line content.
 type GutterFunc func(GutterContext) string
 
-// NoGutter returns an empty gutter for all lines.
+// NoGutter is a [GutterFunc] that returns an empty string for all lines.
 var NoGutter GutterFunc = func(GutterContext) string { return "" }
 
-// DefaultGutter returns a gutter with both line numbers and diff markers.
+// DefaultGutter creates a [GutterFunc] that renders both line numbers and diff markers.
 // This is the default gutter used by [NewPrinter].
 func DefaultGutter() GutterFunc {
 	return func(ctx GutterContext) string {
@@ -148,7 +148,7 @@ func DefaultGutter() GutterFunc {
 	}
 }
 
-// DiffGutter returns a gutter with diff-style markers only (" ", "+", "-").
+// DiffGutter creates a [GutterFunc] that renders diff-style markers only (" ", "+", "-").
 // No line numbers are rendered. Uses [StyleDiffInserted] and [StyleDiffDeleted] for styling.
 func DiffGutter() GutterFunc {
 	return func(ctx GutterContext) string {
@@ -167,7 +167,7 @@ func DiffGutter() GutterFunc {
 	}
 }
 
-// LineNumberGutter returns a gutter with styled line numbers only.
+// LineNumberGutter creates a [GutterFunc] that renders styled line numbers only.
 // For soft-wrapped continuation lines, renders "   - " as a continuation marker.
 // No diff markers are rendered. Uses [StyleComment] foreground for styling.
 func LineNumberGutter() GutterFunc {

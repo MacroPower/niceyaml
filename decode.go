@@ -21,7 +21,7 @@ type Validator interface {
 // against a schema. If a type implements this interface,
 // [DocumentDecoder.Unmarshal] will automatically decode the document
 // to [any] and call ValidateSchema before decoding to the typed struct.
-// See [schema/validator.Validator] for an implementation.
+// See [validator.Validator] for an implementation.
 type SchemaValidator interface {
 	ValidateSchema(data any) error
 }

@@ -1,4 +1,3 @@
-// Package position defines line and column positions and ranges within a document.
 package position
 
 // Position represents a 0-indexed line and column location.
