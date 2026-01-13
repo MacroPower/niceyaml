@@ -18,14 +18,13 @@ func Tokenize(src string) token.Tokens {
 // TokenizeDocuments is like [lexer.Tokenize], but splits the YAML string into multiple
 // token streams, one for each YAML document found (separated by '---' tokens).
 func TokenizeDocuments(src string) iter.Seq2[int, token.Tokens] {
-	var s scanner.Scanner
-	s.Init(src)
-
 	return func(yield func(int, token.Tokens) bool) {
 		var (
+			s       scanner.Scanner
 			docIdx  int
 			current token.Tokens
 		)
+		s.Init(src)
 
 		for {
 			subTokens, err := s.Scan()
