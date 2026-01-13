@@ -28,7 +28,7 @@ type Printer interface {
 	SetWidth(width int)
 	SetWordWrap(enabled bool)
 	SetAnnotationsEnabled(enabled bool)
-	AddStyleToRange(s *lipgloss.Style, r position.Range)
+	AddStyleToRange(s *lipgloss.Style, ranges ...position.Range)
 	ClearStyles()
 	Style(s niceyaml.Style) *lipgloss.Style
 }

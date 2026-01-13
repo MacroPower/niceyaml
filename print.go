@@ -25,7 +25,7 @@ type StyleGetter interface {
 // See [Printer] for an implementation.
 type TokenStyler interface {
 	StyleGetter
-	AddStyleToRange(s *lipgloss.Style, r position.Range)
+	AddStyleToRange(s *lipgloss.Style, ranges ...position.Range)
 	ClearStyles()
 }
 
@@ -232,7 +232,7 @@ func (p *Printer) SetWordWrap(enabled bool) {
 // The range is half-open: Start is inclusive, End is exclusive.
 // Line and column are 0-indexed.
 // Overlapping range colors are blended; transforms are composed (overlay wraps base).
-func (p *Printer) AddStyleToRange(s *lipgloss.Style, r position.Range) {
+func (p *Printer) AddStyleToRange(s *lipgloss.Style, ranges ...position.Range) {
 	style := lipgloss.NewStyle()
 	if s != nil {
 		style = *s
@@ -242,9 +242,11 @@ func (p *Printer) AddStyleToRange(s *lipgloss.Style, r position.Range) {
 		p.rangeStyles = styletree.New()
 	}
 
-	start := r.Start.Line*maxCol + r.Start.Col
-	end := r.End.Line*maxCol + r.End.Col
-	p.rangeStyles.Insert(start, end, &style)
+	for _, r := range ranges {
+		start := r.Start.Line*maxCol + r.Start.Col
+		end := r.End.Line*maxCol + r.End.Col
+		p.rangeStyles.Insert(start, end, &style)
+	}
 }
 
 // Style retrieves the underlying [lipgloss.Style] for the given [Style].
