@@ -60,13 +60,14 @@ Output docs/assets/validate.gif
 Set Theme "OneDark"
 Set Shell "bash"
 Set Padding 20
-Set FontSize 22
-Set Width 1200
+Set FontSize 18
+Set Width 1280
 Set Height 800
 
 Hide
   Type `go build -o dist/nyaml ./cmd/nyaml`  Enter
   Type `alias nyaml=./dist/nyaml`  Enter
+  Type `export CAFE="examples/schemas/cafe"`  Enter
   Type `clear`  Enter
   Sleep 1
   Type `nyaml validate testdata/broken.yaml`  Enter
@@ -83,7 +84,7 @@ Sleep 2
 Type `clear`  Sleep 500ms Enter
 Sleep 1
 
-Type `nyaml validate testdata/full.yaml`  Sleep 500ms Enter
+Type `nyaml validate --schema $CAFE/cafe.v1.json $CAFE/broken.yaml`  Sleep 500ms Enter
 Sleep 2
 
 Type `clear`  Sleep 500ms Enter

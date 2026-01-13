@@ -205,6 +205,9 @@ linters:
         - name: nested-structs
           exclude:
             - "**/*_test.go"
+        - name: package-comments
+          exclude:
+            - "**/examples/**"
         # Needed for future use.
         - name: unused-receiver
           disabled: true
@@ -260,3 +263,7 @@ linters:
       - path: internal/
         linters:
           - wrapcheck
+      - path: examples/
+        text: "printf"
+        linters:
+          - govet

@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=./cafe.v1.json
+kind: Config
+metadata:
+  name: Downtown Cafe
+spec:
+  sla: 15m
+  menu:
+    items:
+      - name: Espresso
+        category: coffee
+        price: 3.50
+        description: Rich, bold single shot of espresso.
+        tags:
+          - hot
+          - caffeine
+  staff:
+    baristas: 3
+    managers: 1
+  hours:
+    open: "07:90"
+    close: "19:00"
+    days:
+      - monday
+      - tuesday
+      - wednesday
+      - thursday
+      - friday
+      - saturday
+  settings:
+    wifi: true
+    mobile_ordering: true
+    theme: light
+    custom_options:
+      loyalty_program: enabled
+      outdoor_seating: available

@@ -43,133 +43,42 @@ go get github.com/macropower/niceyaml@latest
 
 ### Core Abstractions
 
-Package `niceyaml` primarily adds two abstractions on top of [go-yaml][goccy/go-yaml]:
+Package `niceyaml` adds a few abstractions on top of [go-yaml][goccy/go-yaml]:
 
 - `Line` - Tokens for a single line of YAML content
-- `Source` - A full YAML document, consisting of multiple `Line`s
+- `Lines` - Collection of `Line`s representing one or more YAML documents
+- `Source` - Manages `Lines` while abstracting away go-yaml lexer/parser details
 
-These abstractions can be considered intermediate constructs between go-yaml's tokens (from lexer) and AST nodes (from parser).
+Most use cases will only need to interact with `Source`. It satisfies most interfaces accepted by other niceyaml utilities.
 
-This intermediate type allows us to build utilities that iterate over lines of tokens, such as pretty printers, diffing systems, search utilities, and error handling. All while maintaining the original token details from the lexer, and avoiding unnecessary work (e.g. re-parsing or re-rendering unnecessary parts of the document).
+These abstractions enable straightforward iteration over arbitrary lines of tokens from one or more YAML documents, while maintaining the original token details from the lexer. It cleanly solves common problems introduced by multi-line and/or overlapping tokens in diffs, partial rendering, and/or search.
 
 ```mermaid
 flowchart LR
-    A["Input"] --> B["Lexer"]
-    B --> C["**Source**"]
-    C --> D["Parser"]
-    D --> E["Decoder"]
-    E --> F["Struct"]
+    A["Input"]
+    subgraph Source
+        B["Lexer"] --> C["Parser"]
+    end
+    A --> Source
+    C --> D["Decoder"]
+    D --> E["Struct"]
 ```
-
-In practice, `niceyaml` exposes some convenience functions to make integration easier.
 
 ### Printing YAML with Lipgloss Styles
 
-```go
-source := niceyaml.NewSourceFromString(`
-foo: bar
-baz: qux
-list:
-  - item1
-  - item2
-`)
-
-printer := niceyaml.NewPrinter(
-  // niceyaml.WithStyles(...),
-)
-
-// Print with syntax highlighting to stdout.
-fmt.Println(printer.Print(source))
-// 1 foo: bar
-// 2 baz: qux
-// 3 list:
-// 4   - item1
-// 5   - item2
-
-// Or, only render the lines you need.
-fmt.Println(printer.PrintSlice(source, 0, 2))
-// 1 foo: bar
-// 2 baz: qux
-```
+- [examples/printer](examples/printer)
 
 ### Printing Diffs Between YAML Revisions
 
-```go
-// Create an initial revision.
-rev := niceyaml.NewRevision(niceyaml.NewSourceFromString("foo: bar"))
+- [examples/diffs](examples/diffs)
 
-// Append a new revision.
-rev = rev.Append(niceyaml.NewSourceFromString("baz: qux"))
+### Searching YAML Content
 
-// Create a full diff between the two revisions.
-diff := niceyaml.NewFullDiff(rev.Origin(), rev.Tip())
+- [examples/finder](examples/finder)
 
-printer := niceyaml.NewPrinter()
+### Schema Generation and Validation
 
-// Print the full diff with syntax highlighting to stdout.
-fmt.Println(printer.Print(diff))
-// 1 - foo: bar
-// 1 + baz: qux
-```
-
-### Parsing YAML Input
-
-```go
-source := niceyaml.NewSourceFromString(yamlInput)
-
-// Parse into go-yaml AST nodes with niceyaml.Error support.
-file, err := source.File()
-if err != nil {
-	return source.WrapError(err)
-}
-```
-
-### Validating and Decoding YAML Documents
-
-```go
-source := niceyaml.NewSourceFromString(yamlInput)
-
-// Parse into go-yaml AST nodes with niceyaml.Error support.
-file, err := source.File()
-if err != nil {
-	return source.WrapError(err)
-}
-
-// Create a niceyaml.Decoder with your go-yaml *ast.File.
-decoder := niceyaml.NewDecoder(file)
-
-// Create JSON Schema validators for different resource kinds.
-deployValidator := validate.MustNewValidator("https://raw.githubusercontent.com/yannh/kubernetes-json-schema/refs/heads/master/master/deployment-apps-v1.json", deployJSONSchema)
-svcValidator := validate.MustNewValidator("https://raw.githubusercontent.com/yannh/kubernetes-json-schema/refs/heads/master/master/service-v1.json", svcJSONSchema)
-
-// Iterate over all documents in the input.
-for _, doc := range decoder.Documents() {
-	// Use GetValue to extract specific fields prior to full decoding.
-	// For example, we can switch on "kind" to decode different Kubernetes resources.
-	kind, ok := doc.GetValue(niceyaml.NewPath("kind"))
-	if !ok {
-		continue
-	}
-
-	// Validate and decode based on kind.
-	switch kind {
-	case "Deployment":
-		var deploy appsv1.Deployment
-		if err := doc.Unmarshal(&deploy); err != nil {
-			return source.WrapError(err)
-		}
-
-	case "Service":
-		var svc corev1.Service
-		if err := doc.Unmarshal(&svc); err != nil {
-			return source.WrapError(err)
-		}
-
-	default:
-		// ...
-	}
-}
-```
+- [examples/schemas/cafe](examples/schemas/cafe)
 
 [goccy/go-yaml]: https://github.com/goccy/go-yaml
 [lipgloss]: https://github.com/charmbracelet/lipgloss

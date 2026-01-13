@@ -1,0 +1,12 @@
+---
+restaurant:
+  name: ☕ Café Yamüll
+  established: &year 2025
+
+menu:
+  breakfast:
+    - item: "Småkakor & Kaffe"
+      price: "200 kr"
+      dietary: [🥛, 🌾]
+
+copyright: *year

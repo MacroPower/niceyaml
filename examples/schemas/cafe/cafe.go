@@ -16,13 +16,8 @@ import (
 
 //go:generate go run ./schemagen/main.go -o cafe.v1.json
 
-var (
-	//go:embed cafe.v1.json
-	schemaJSON []byte
-
-	// DefaultValidator validates configuration against the JSON schema.
-	DefaultValidator = validator.MustNew("/cafe.v1.json", schemaJSON)
-)
+//go:embed cafe.v1.json
+var schemaJSON []byte
 
 // Config is the root cafe configuration.
 // Create instances with [NewConfig].
