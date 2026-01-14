@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"charm.land/lipgloss/v2"
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
@@ -138,10 +137,10 @@ func (e *Error) annotateSource(path *yaml.Path) (string, error) {
 	}
 
 	line, col := getTokenPosition(tk)
-	errMsg := fmt.Sprintf("[%d:%d] %v:", line, col, e.err)
+	errMsg := fmt.Sprintf("[%d:%d] %v:\n", line, col, e.err)
 	errSource := e.printErrorToken(tk)
 
-	return lipgloss.JoinVertical(lipgloss.Top, errMsg, "", errSource), nil
+	return errMsg + "\n" + errSource, nil
 }
 
 // resolveToken returns the error token, resolving it from the path if needed.

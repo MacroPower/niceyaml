@@ -19,7 +19,11 @@ import (
 //nolint:gocritic // hugeParam: required by [fang.ErrorHandler] signature.
 func ErrorHandler(w io.Writer, styles fang.Styles, err error) {
 	mustN(fmt.Fprintln(w, styles.ErrorHeader.String()))
-	mustN(fmt.Fprintln(w, lipgloss.NewStyle().MarginLeft(2).Render(err.Error())))
+	// Apply margin manually to each line to avoid lipgloss block padding.
+	for line := range strings.SplitSeq(err.Error(), "\n") {
+		mustN(fmt.Fprintln(w, "  "+line))
+	}
+
 	mustN(fmt.Fprintln(w))
 	if isUsageError(err) {
 		mustN(fmt.Fprintln(w, lipgloss.JoinHorizontal(
