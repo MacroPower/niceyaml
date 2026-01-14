@@ -4,10 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/santhosh-tekuri/jsonschema/v6/kind"
+	"golang.org/x/text/language"
+	"golang.org/x/text/message"
 
 	"github.com/macropower/niceyaml"
 )
@@ -81,6 +85,19 @@ func (s *Validator) ValidateSchema(data any) error {
 		return fmt.Errorf("schema validation: %w", err)
 	}
 
+	p := message.NewPrinter(language.English)
+
+	var errMsg strings.Builder
+	if _, ok := validationErr.ErrorKind.(*kind.Schema); ok {
+		errMsg.WriteString(fmt.Sprintf("jsonschema validation failed with %q:", filepath.Base(validationErr.SchemaURL)))
+	} else {
+		errMsg.WriteString(validationErr.ErrorKind.LocalizedString(p))
+	}
+
+	for _, cause := range validationErr.Causes {
+		errMsg.WriteString("\n* " + cause.LocalizedError(p))
+	}
+
 	// Build the path from the validation error.
 	path, pathErr := buildYAMLPathFromError(validationErr)
 	if pathErr != nil {
@@ -88,7 +105,7 @@ func (s *Validator) ValidateSchema(data any) error {
 		return niceyaml.NewError(fmt.Errorf("schema validation: %w", validationErr))
 	}
 
-	return niceyaml.NewError(validationErr, niceyaml.WithPath(path))
+	return niceyaml.NewError(errors.New(errMsg.String()), niceyaml.WithPath(path))
 }
 
 // buildYAMLPathFromError creates a [yaml.Path] from the provided
