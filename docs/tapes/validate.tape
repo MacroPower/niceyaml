@@ -60,9 +60,9 @@ Output docs/assets/validate.gif
 Set Theme "OneDark"
 Set Shell "bash"
 Set Padding 20
-Set FontSize 18
-Set Width 1280
-Set Height 800
+Set FontSize 22
+Set Width 1420
+Set Height 600
 
 Hide
   Type `go build -o dist/nyaml ./cmd/nyaml`  Enter
@@ -76,13 +76,13 @@ Hide
   Sleep 500ms
 Show
 
-Sleep 1
+Sleep 500ms
 
 Type `nyaml validate testdata/broken.yaml`  Sleep 500ms Enter
 Sleep 2
 
 Type `clear`  Sleep 500ms Enter
-Sleep 1
+Sleep 500ms
 
 Type `nyaml validate --schema $CAFE/cafe.v1.json $CAFE/broken.yaml`  Sleep 500ms Enter
 Sleep 2

@@ -61,7 +61,7 @@ Set Theme "OneDark"
 Set Shell "bash"
 Set Padding 20
 Set FontSize 22
-Set Width 1200
+Set Width 1420
 Set Height 800
 
 Hide
@@ -75,7 +75,6 @@ Sleep 500ms
 
 Type `nyaml view testdata/full.yaml testdata/full-modified.yaml`  Sleep 500ms Enter
 
-Set TypingSpeed 100ms
 Sleep 2
 
 Type "/" Sleep 1

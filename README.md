@@ -16,8 +16,6 @@ It enables **friendly and predictable handling of YAML documents** in your **CLI
 
 > Also supports all YAML-compatible document formats like KYAML or JSON.
 
-![demo](./docs/assets/view.gif)
-
 ## Features
 
 ### Pretty Printing
@@ -25,6 +23,9 @@ It enables **friendly and predictable handling of YAML documents** in your **CLI
 - Render YAML with syntax highlighting via [lipgloss][lipgloss], directly from tokenized input
 - Wrap YAML errors from go-yaml's parser with fully styled source annotations
 - Supports custom color schemes, style overlays (e.g. highlights), diff rendering, and more
+- Includes a viewport bubble for your Bubble Tea applications
+
+![view](./docs/assets/view.gif)
 
 ### JSON Schema Generation & Validation
 
@@ -32,6 +33,8 @@ It enables **friendly and predictable handling of YAML documents** in your **CLI
 2. Provide generated schemas to users, include them via embedding
 3. Use your JSON schemas to validate the Generators via [santhosh-tekuri/jsonschema][santhosh-tekuri/jsonschema]
 4. Users receive the same feedback from your application and their YAML language server!
+
+![validate](./docs/assets/validate.gif)
 
 ## Installation
 
@@ -79,6 +82,10 @@ flowchart LR
 ### Schema Generation and Validation
 
 - [examples/schemas/cafe](examples/schemas/cafe)
+
+### Full YAML Viewport Example
+
+See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pages, searches, diffs, and validates YAML documents.
 
 [goccy/go-yaml]: https://github.com/goccy/go-yaml
 [lipgloss]: https://github.com/charmbracelet/lipgloss
