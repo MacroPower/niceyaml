@@ -344,7 +344,14 @@ func (ls Lines) Validate() error {
 			if expectedLineNum == -1 {
 				expectedLineNum = tk.Position.Line
 			} else if tk.Position.Line != expectedLineNum {
-				return fmt.Errorf("line at index %d, token %d: line number %d differs from expected %d: %w", i, j, tk.Position.Line, expectedLineNum, ErrLineNumberMismatch)
+				return fmt.Errorf(
+					"line at index %d, token %d: line number %d differs from expected %d: %w",
+					i,
+					j,
+					tk.Position.Line,
+					expectedLineNum,
+					ErrLineNumberMismatch,
+				)
 			}
 
 			// Check columns strictly increasing.
