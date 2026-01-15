@@ -57,8 +57,8 @@
 //
 // # Style System
 //
-// The [Style] type identifies token categories for syntax highlighting.
-// [Styles] maps style identifiers to lipgloss styles. Use [DefaultStyles]
+// The [style.Style] type identifies token categories for syntax highlighting.
+// [style.Styles] maps style identifiers to lipgloss styles. Use [theme.Charm]
 // for a sensible default palette, or provide a custom [StyleGetter] to
 // the [Printer].
 //

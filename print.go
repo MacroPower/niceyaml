@@ -13,12 +13,15 @@ import (
 	"github.com/macropower/niceyaml/internal/styletree"
 	"github.com/macropower/niceyaml/line"
 	"github.com/macropower/niceyaml/position"
+	"github.com/macropower/niceyaml/style"
+	"github.com/macropower/niceyaml/style/theme"
+	"github.com/macropower/niceyaml/tokens"
 )
 
 // StyleGetter retrieves styles by category.
-// See [Styles] for an implementation.
+// See [style.Styles] for an implementation.
 type StyleGetter interface {
-	Style(s Style) *lipgloss.Style
+	Style(s style.Style) *lipgloss.Style
 }
 
 // TokenStyler manages style ranges for YAML tokens.
@@ -67,10 +70,10 @@ type Printer struct {
 }
 
 // NewPrinter creates a new [Printer].
-// By default it uses [DefaultStyles] and [DefaultGutter].
+// By default it uses [theme.Charm] and [DefaultGutter].
 func NewPrinter(opts ...PrinterOption) *Printer {
 	p := &Printer{
-		styles:             DefaultStyles(),
+		styles:             theme.Charm(),
 		gutterFunc:         DefaultGutter(),
 		annotationsEnabled: true,
 		wordWrap:           true,
@@ -81,7 +84,7 @@ func NewPrinter(opts ...PrinterOption) *Printer {
 	}
 
 	if !p.hasCustomStyle {
-		p.style = p.styles.Style(StyleDefault).
+		p.style = p.styles.Style(style.Text).
 			PaddingRight(1)
 	}
 
@@ -113,8 +116,8 @@ var NoGutter GutterFunc = func(GutterContext) string { return "" }
 // This is the default gutter used by [NewPrinter].
 func DefaultGutter() GutterFunc {
 	return func(ctx GutterContext) string {
-		lineNumStyle := ctx.Styles.Style(StyleDefault).
-			Foreground(ctx.Styles.Style(StyleComment).GetForeground())
+		lineNumStyle := ctx.Styles.Style(style.Text).
+			Foreground(ctx.Styles.Style(style.Comment).GetForeground())
 
 		var lineNum string
 
@@ -131,11 +134,11 @@ func DefaultGutter() GutterFunc {
 
 		switch ctx.Flag {
 		case line.FlagInserted:
-			marker = ctx.Styles.Style(StyleDiffInserted).Render("+")
+			marker = ctx.Styles.Style(style.GenericInserted).Render("+")
 		case line.FlagDeleted:
-			marker = ctx.Styles.Style(StyleDiffDeleted).Render("-")
+			marker = ctx.Styles.Style(style.GenericDeleted).Render("-")
 		default:
-			marker = ctx.Styles.Style(StyleDefault).Render(" ")
+			marker = ctx.Styles.Style(style.Text).Render(" ")
 		}
 
 		// Use builder to avoid intermediate string allocation from concatenation.
@@ -149,7 +152,7 @@ func DefaultGutter() GutterFunc {
 }
 
 // DiffGutter creates a [GutterFunc] that renders diff-style markers only (" ", "+", "-").
-// No line numbers are rendered. Uses [StyleDiffInserted] and [StyleDiffDeleted] for styling.
+// No line numbers are rendered. Uses [style.GenericInserted] and [style.GenericDeleted] for styling.
 func DiffGutter() GutterFunc {
 	return func(ctx GutterContext) string {
 		if ctx.Soft {
@@ -158,22 +161,22 @@ func DiffGutter() GutterFunc {
 
 		switch ctx.Flag {
 		case line.FlagInserted:
-			return ctx.Styles.Style(StyleDiffInserted).Render("+")
+			return ctx.Styles.Style(style.GenericInserted).Render("+")
 		case line.FlagDeleted:
-			return ctx.Styles.Style(StyleDiffDeleted).Render("-")
+			return ctx.Styles.Style(style.GenericDeleted).Render("-")
 		default:
-			return ctx.Styles.Style(StyleDefault).Render(" ")
+			return ctx.Styles.Style(style.Text).Render(" ")
 		}
 	}
 }
 
 // LineNumberGutter creates a [GutterFunc] that renders styled line numbers only.
 // For soft-wrapped continuation lines, renders "   - " as a continuation marker.
-// No diff markers are rendered. Uses [StyleComment] foreground for styling.
+// No diff markers are rendered. Uses [style.Comment] foreground for styling.
 func LineNumberGutter() GutterFunc {
 	return func(ctx GutterContext) string {
-		lineNumStyle := ctx.Styles.Style(StyleDefault).
-			Foreground(ctx.Styles.Style(StyleComment).GetForeground())
+		lineNumStyle := ctx.Styles.Style(style.Text).
+			Foreground(ctx.Styles.Style(style.Comment).GetForeground())
 
 		switch {
 		case ctx.Flag == line.FlagAnnotation:
@@ -233,9 +236,9 @@ func (p *Printer) SetWordWrap(enabled bool) {
 // Line and column are 0-indexed.
 // Overlapping range colors are blended; transforms are composed (overlay wraps base).
 func (p *Printer) AddStyleToRange(s *lipgloss.Style, ranges ...position.Range) {
-	style := lipgloss.NewStyle()
+	ls := lipgloss.NewStyle()
 	if s != nil {
-		style = *s
+		ls = *s
 	}
 
 	if p.rangeStyles == nil {
@@ -245,12 +248,12 @@ func (p *Printer) AddStyleToRange(s *lipgloss.Style, ranges ...position.Range) {
 	for _, r := range ranges {
 		start := r.Start.Line*maxCol + r.Start.Col
 		end := r.End.Line*maxCol + r.End.Col
-		p.rangeStyles.Insert(start, end, &style)
+		p.rangeStyles.Insert(start, end, &ls)
 	}
 }
 
-// Style retrieves the underlying [lipgloss.Style] for the given [Style].
-func (p *Printer) Style(s Style) *lipgloss.Style {
+// Style retrieves the underlying [lipgloss.Style] for the given [style.Style].
+func (p *Printer) Style(s style.Style) *lipgloss.Style {
 	return p.styles.Style(s)
 }
 
@@ -327,7 +330,7 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 				Styles:     p.styles,
 			}
 			sb.WriteString(p.gutterFunc(headerCtx))
-			sb.WriteString(p.styles.Style(StyleComment).Render(ln.Annotation.Content))
+			sb.WriteString(p.styles.Style(style.Comment).Render(ln.Annotation.Content))
 			sb.WriteByte('\n')
 		} else if renderedIdx > 0 {
 			// Add newline between lines within a hunk.
@@ -345,11 +348,11 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 
 		switch ln.Flag {
 		case line.FlagDeleted:
-			deleted := p.styles.Style(StyleDiffDeleted)
+			deleted := p.styles.Style(style.GenericDeleted)
 			p.writeLine(&sb, ln.Content(), pos.Line, deleted, gutterCtx, gutterWidth)
 
 		case line.FlagInserted:
-			inserted := p.styles.Style(StyleDiffInserted)
+			inserted := p.styles.Style(style.GenericInserted)
 			p.writeLine(&sb, ln.Content(), pos.Line, inserted, gutterCtx, gutterWidth)
 
 		default: // FlagDefault (equal line).
@@ -410,89 +413,17 @@ func (p *Printer) writeLine(
 	}
 }
 
-func (p *Printer) styleForToken(tk *token.Token) *lipgloss.Style {
-	//nolint:exhaustive // Only needed for the current token.
-	switch tk.PreviousType() {
-	case token.AnchorType:
-		return p.styles.Style(StyleAnchor)
-
-	case token.AliasType:
-		return p.styles.Style(StyleAlias)
-	}
-
-	//nolint:exhaustive // Only needed for the current token.
-	switch tk.NextType() {
-	case token.MappingValueType:
-		return p.styles.Style(StyleKey)
-	}
-
-	switch tk.Type {
-	case token.BoolType:
-		return p.styles.Style(StyleBool)
-
-	case token.AnchorType:
-		return p.styles.Style(StyleAnchor)
-
-	case token.AliasType, token.MergeKeyType:
-		return p.styles.Style(StyleAlias)
-
-	case token.StringType, token.SingleQuoteType, token.DoubleQuoteType:
-		return p.styles.Style(StyleString)
-
-	case token.IntegerType, token.FloatType,
-		token.BinaryIntegerType, token.OctetIntegerType, token.HexIntegerType,
-		token.InfinityType, token.NanType:
-		return p.styles.Style(StyleNumber)
-
-	case token.NullType, token.ImplicitNullType:
-		return p.styles.Style(StyleNull)
-
-	case token.CommentType:
-		return p.styles.Style(StyleComment)
-
-	case token.TagType:
-		return p.styles.Style(StyleTag)
-
-	case token.DocumentHeaderType, token.DocumentEndType:
-		return p.styles.Style(StyleDocument)
-
-	case token.DirectiveType:
-		return p.styles.Style(StyleDirective)
-
-	case token.LiteralType, token.FoldedType:
-		return p.styles.Style(StyleBlockScalar)
-
-	case token.SequenceEntryType, token.MappingKeyType, token.MappingValueType,
-		token.CollectEntryType, token.SequenceStartType, token.SequenceEndType,
-		token.MappingStartType, token.MappingEndType:
-		return p.styles.Style(StylePunctuation)
-
-	case token.UnknownType, token.InvalidType:
-		return p.styles.Style(StyleError)
-
-	case token.SpaceType:
-		return p.styles.Style(StyleDefault)
-	}
-
-	return p.styles.Style(StyleDefault)
-}
-
 // styleLineWithRanges styles a line with range-aware styling.
 // It splits the line into spans based on effective styles (base + overlapping ranges).
 // The pos parameter specifies the 0-indexed visual line and column position.
 // If alwaysBlend is true, range styles always blend with base (used for diff lines).
-func (p *Printer) styleLineWithRanges(
-	src string,
-	pos position.Position,
-	style *lipgloss.Style,
-	alwaysBlend bool,
-) string {
+func (p *Printer) styleLineWithRanges(src string, pos position.Position, s *lipgloss.Style, alwaysBlend bool) string {
 	if src == "" {
 		return src
 	}
 
 	if p.rangeStyles == nil || p.rangeStyles.Len() == 0 {
-		return style.Render(src)
+		return s.Render(src)
 	}
 
 	// Query all intervals overlapping this line in one batch.
@@ -501,7 +432,7 @@ func (p *Printer) styleLineWithRanges(
 
 	intervals := p.rangeStyles.QueryRange(lineStart, lineEnd)
 	if len(intervals) == 0 {
-		return style.Render(src)
+		return s.Render(src)
 	}
 
 	// Collect all boundary points where styles might change.
@@ -547,7 +478,7 @@ func (p *Printer) styleLineWithRanges(
 			continue
 		}
 
-		spanStyle := p.computeStyleForPoint(spanPoint, intervals, style, alwaysBlend)
+		spanStyle := p.computeStyleForPoint(spanPoint, intervals, s, alwaysBlend)
 
 		// Merge adjacent spans with the same style.
 		if currentStyle == nil {
@@ -620,7 +551,7 @@ func (p *Printer) renderTokenLine(lineIndex int, ln line.Line) string {
 	var sb strings.Builder
 
 	for _, tk := range ln.Tokens() {
-		tokenStyle := p.styleForToken(tk)
+		tokenStyle := p.styles.Style(tokens.TypeStyle(tk))
 		valueOffset := tokenValueOffset(tk)
 
 		// Get the token's origin text.
@@ -635,7 +566,7 @@ func (p *Printer) renderTokenLine(lineIndex int, ln line.Line) string {
 		// Part 1: Render separator portion (default style).
 		if separatorRunes > 0 && separatorRunes <= len(originRunes) {
 			sepPart := string(originRunes[:separatorRunes])
-			defaultStyle := p.styles.Style(StyleDefault)
+			defaultStyle := p.styles.Style(style.Text)
 			sb.WriteString(p.styleLineWithRanges(sepPart, position.New(lineIndex, col), defaultStyle, false))
 
 			col += separatorRunes
@@ -686,4 +617,13 @@ func tokenValueOffset(tk *token.Token) int {
 	}
 
 	return 0
+}
+
+// stylesEqual compares two styles for equality (for span grouping purposes).
+// Two styles are equal if they produce the same visual output.
+func stylesEqual(s1, s2 *lipgloss.Style) bool {
+	// Compare rendered output of a test string.
+	// This is a pragmatic approach since lipgloss doesn't expose style internals.
+	const testStr = "x"
+	return s1.Render(testStr) == s2.Render(testStr)
 }

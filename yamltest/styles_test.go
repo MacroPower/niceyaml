@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/macropower/niceyaml"
+	"github.com/macropower/niceyaml/style"
 	"github.com/macropower/niceyaml/yamltest"
 )
 
@@ -21,76 +21,76 @@ func TestXMLStyles_Style(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		input niceyaml.Style
+		input style.Style
 		want  string
 	}{
-		"StyleDefault": {
-			input: niceyaml.StyleDefault,
-			want:  "<default>test</default>",
+		"Text": {
+			input: style.Text,
+			want:  "<text>test</text>",
 		},
-		"StyleKey": {
-			input: niceyaml.StyleKey,
-			want:  "<key>test</key>",
+		"NameTag": {
+			input: style.NameTag,
+			want:  "<name-tag>test</name-tag>",
 		},
-		"StyleString": {
-			input: niceyaml.StyleString,
-			want:  "<string>test</string>",
+		"LiteralString": {
+			input: style.LiteralString,
+			want:  "<literal-string>test</literal-string>",
 		},
-		"StyleNumber": {
-			input: niceyaml.StyleNumber,
-			want:  "<number>test</number>",
+		"LiteralNumberInteger": {
+			input: style.LiteralNumberInteger,
+			want:  "<literal-number-integer>test</literal-number-integer>",
 		},
-		"StyleBool": {
-			input: niceyaml.StyleBool,
-			want:  "<bool>test</bool>",
+		"LiteralBoolean": {
+			input: style.LiteralBoolean,
+			want:  "<literal-boolean>test</literal-boolean>",
 		},
-		"StyleNull": {
-			input: niceyaml.StyleNull,
-			want:  "<null>test</null>",
+		"LiteralNull": {
+			input: style.LiteralNull,
+			want:  "<literal-null>test</literal-null>",
 		},
-		"StyleAnchor": {
-			input: niceyaml.StyleAnchor,
-			want:  "<anchor>test</anchor>",
+		"NameAnchor": {
+			input: style.NameAnchor,
+			want:  "<name-anchor>test</name-anchor>",
 		},
-		"StyleAlias": {
-			input: niceyaml.StyleAlias,
-			want:  "<alias>test</alias>",
+		"NameAlias": {
+			input: style.NameAlias,
+			want:  "<name-alias>test</name-alias>",
 		},
-		"StyleComment": {
-			input: niceyaml.StyleComment,
+		"Comment": {
+			input: style.Comment,
 			want:  "<comment>test</comment>",
 		},
-		"StyleError": {
-			input: niceyaml.StyleError,
-			want:  "<error>test</error>",
+		"GenericError": {
+			input: style.GenericError,
+			want:  "<generic-error>test</generic-error>",
 		},
-		"StyleTag": {
-			input: niceyaml.StyleTag,
-			want:  "<tag>test</tag>",
+		"NameDecorator": {
+			input: style.NameDecorator,
+			want:  "<name-decorator>test</name-decorator>",
 		},
-		"StyleDocument": {
-			input: niceyaml.StyleDocument,
-			want:  "<document>test</document>",
+		"PunctuationHeading": {
+			input: style.PunctuationHeading,
+			want:  "<punctuation-heading>test</punctuation-heading>",
 		},
-		"StyleDirective": {
-			input: niceyaml.StyleDirective,
-			want:  "<directive>test</directive>",
+		"CommentPreproc": {
+			input: style.CommentPreproc,
+			want:  "<comment-preproc>test</comment-preproc>",
 		},
-		"StylePunctuation": {
-			input: niceyaml.StylePunctuation,
-			want:  "<punctuation>test</punctuation>",
+		"PunctuationSequenceEntry": {
+			input: style.PunctuationSequenceEntry,
+			want:  "<punctuation-sequence-entry>test</punctuation-sequence-entry>",
 		},
-		"StyleBlockScalar": {
-			input: niceyaml.StyleBlockScalar,
-			want:  "<block-scalar>test</block-scalar>",
+		"PunctuationBlockLiteral": {
+			input: style.PunctuationBlockLiteral,
+			want:  "<punctuation-block-literal>test</punctuation-block-literal>",
 		},
-		"StyleDiffInserted": {
-			input: niceyaml.StyleDiffInserted,
-			want:  "<diff-inserted>test</diff-inserted>",
+		"GenericInserted": {
+			input: style.GenericInserted,
+			want:  "<generic-inserted>test</generic-inserted>",
 		},
-		"StyleDiffDeleted": {
-			input: niceyaml.StyleDiffDeleted,
-			want:  "<diff-deleted>test</diff-deleted>",
+		"GenericDeleted": {
+			input: style.GenericDeleted,
+			want:  "<generic-deleted>test</generic-deleted>",
 		},
 	}
 
@@ -99,11 +99,11 @@ func TestXMLStyles_Style(t *testing.T) {
 			t.Parallel()
 
 			getter := yamltest.NewXMLStyles()
-			style := getter.Style(tc.input)
+			st := getter.Style(tc.input)
 
-			require.NotNil(t, style)
+			require.NotNil(t, st)
 
-			got := style.Render("test")
+			got := st.Render("test")
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -113,11 +113,11 @@ func TestXMLStyles_Style_UnknownStyle(t *testing.T) {
 	t.Parallel()
 
 	getter := yamltest.NewXMLStyles()
-	style := getter.Style(niceyaml.Style(999))
+	st := getter.Style(style.Style(999))
 
-	require.NotNil(t, style)
+	require.NotNil(t, st)
 
-	got := style.Render("test")
+	got := st.Render("test")
 	assert.Equal(t, "<unknown>test</unknown>", got)
 }
 
@@ -125,10 +125,10 @@ func TestXMLStyles_Style_EmptyContent(t *testing.T) {
 	t.Parallel()
 
 	getter := yamltest.NewXMLStyles()
-	style := getter.Style(niceyaml.StyleKey)
+	st := getter.Style(style.NameTag)
 
-	require.NotNil(t, style)
+	require.NotNil(t, st)
 
-	got := style.Render("")
-	assert.Equal(t, "<key></key>", got)
+	got := st.Render("")
+	assert.Equal(t, "<name-tag></name-tag>", got)
 }

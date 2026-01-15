@@ -14,6 +14,7 @@ import (
 	"github.com/macropower/niceyaml"
 	"github.com/macropower/niceyaml/line"
 	"github.com/macropower/niceyaml/position"
+	"github.com/macropower/niceyaml/style"
 )
 
 const (
@@ -30,7 +31,7 @@ type Printer interface {
 	SetAnnotationsEnabled(enabled bool)
 	AddStyleToRange(s *lipgloss.Style, ranges ...position.Range)
 	ClearStyles()
-	Style(s niceyaml.Style) *lipgloss.Style
+	Style(s style.Style) *lipgloss.Style
 }
 
 // Finder finds [position.Range]s for a search string.
@@ -405,12 +406,12 @@ func (m *Model) rerender() {
 
 	// Apply search highlights.
 	for i, match := range m.searchMatches {
-		style := m.SearchStyle
+		searchStyle := m.SearchStyle
 		if i == m.searchIndex {
-			style = m.SelectedSearchStyle
+			searchStyle = m.SelectedSearchStyle
 		}
 
-		m.printer.AddStyleToRange(&style, match)
+		m.printer.AddStyleToRange(&searchStyle, match)
 	}
 
 	content := m.printer.Print(lines)
@@ -757,12 +758,12 @@ func (m *Model) navigateSearch(delta int) {
 		m.printer.ClearStyles()
 
 		for i, match := range m.searchMatches {
-			style := m.SearchStyle
+			searchStyle := m.SearchStyle
 			if i == m.searchIndex {
-				style = m.SelectedSearchStyle
+				searchStyle = m.SelectedSearchStyle
 			}
 
-			m.printer.AddStyleToRange(&style, match)
+			m.printer.AddStyleToRange(&searchStyle, match)
 		}
 
 		oldLine := m.searchMatches[oldIndex].Start.Line
@@ -906,7 +907,7 @@ func (m *Model) getViewDimensions() (int, int, bool) {
 
 // renderContent applies styling and renders lines into final output.
 func (m *Model) renderContent(lines []string, contentW, contentH int) string {
-	contents := m.printer.Style(niceyaml.StyleDefault).
+	contents := m.printer.Style(style.Text).
 		Width(contentW).
 		Height(contentH).
 		Render(strings.Join(lines, "\n"))

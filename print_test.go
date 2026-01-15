@@ -14,16 +14,18 @@ import (
 	"github.com/macropower/niceyaml"
 	"github.com/macropower/niceyaml/line"
 	"github.com/macropower/niceyaml/position"
+	"github.com/macropower/niceyaml/style"
+	"github.com/macropower/niceyaml/style/theme"
 	"github.com/macropower/niceyaml/yamltest"
 )
 
 // testHighlightStyle returns a style that wraps content in brackets for easy verification.
 func testHighlightStyle() *lipgloss.Style {
-	style := lipgloss.NewStyle().Transform(func(s string) string {
-		return "[" + s + "]"
+	s := lipgloss.NewStyle().Transform(func(str string) string {
+		return "[" + str + "]"
 	})
 
-	return &style
+	return &s
 }
 
 // testPrinter returns a printer without styles or padding for predictable output.
@@ -34,7 +36,7 @@ func testPrinter() *niceyaml.Printer {
 // testPrinterWithGutter returns a printer without styles but with a custom gutter.
 func testPrinterWithGutter(gutter niceyaml.GutterFunc) *niceyaml.Printer {
 	return niceyaml.NewPrinter(
-		niceyaml.WithStyles(niceyaml.Styles{}),
+		niceyaml.WithStyles(style.Styles{}),
 		niceyaml.WithStyle(lipgloss.NewStyle()),
 		niceyaml.WithGutter(gutter),
 	)
@@ -214,7 +216,7 @@ func TestNewPrinter(t *testing.T) {
 	}{
 		"custom styles": {
 			input: "key: value",
-			want:  "<key>key</key><punctuation>:</punctuation><default> </default><string>value</string>",
+			want:  "<name-tag>key</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>value</literal-string>",
 			opts: []niceyaml.PrinterOption{
 				niceyaml.WithStyles(yamltest.NewXMLStyles()),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
@@ -229,9 +231,9 @@ func TestNewPrinter(t *testing.T) {
 				# comment
 			`),
 			want: yamltest.JoinLF(
-				"<key>key</key><punctuation>:</punctuation><default> </default><string>value</string>",
-				"<key>number</key><punctuation>:</punctuation><default> </default><number>42</number>",
-				"<key>bool</key><punctuation>:</punctuation><default> </default><bool>true</bool>",
+				"<name-tag>key</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>value</literal-string>",
+				"<name-tag>number</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-number-integer>42</literal-number-integer>",
+				"<name-tag>bool</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-boolean>true</literal-boolean>",
 				"<comment># comment</comment>",
 			),
 			opts: []niceyaml.PrinterOption{
@@ -244,7 +246,7 @@ func TestNewPrinter(t *testing.T) {
 			input: "key: value",
 			want:  "   1  key: value ",
 			// Default gutter adds line numbers, default style adds trailing padding.
-			opts: []niceyaml.PrinterOption{niceyaml.WithStyles(niceyaml.Styles{})},
+			opts: []niceyaml.PrinterOption{niceyaml.WithStyles(style.Styles{})},
 		},
 	}
 
@@ -577,7 +579,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			t.Parallel()
 
 			p := niceyaml.NewPrinter(
-				niceyaml.WithStyles(niceyaml.Styles{}),
+				niceyaml.WithStyles(style.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 			)
 			got := printDiff(p, tc.before, tc.after)
@@ -934,7 +936,7 @@ func TestPrinter_PrintTokenDiff_WithLineNumbers(t *testing.T) {
 			t.Parallel()
 
 			p := niceyaml.NewPrinter(
-				niceyaml.WithStyles(niceyaml.Styles{}),
+				niceyaml.WithStyles(style.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 			)
 
@@ -1055,7 +1057,7 @@ func TestPrinter_PrintTokenDiff_CustomGutter(t *testing.T) {
 func TestGutterFunctions(t *testing.T) {
 	t.Parallel()
 
-	styles := niceyaml.Styles{}
+	styles := style.Styles{}
 
 	tcs := map[string]struct {
 		gutterFunc func() niceyaml.GutterFunc
@@ -1189,24 +1191,24 @@ func TestPrinter_SetAnnotationsEnabled(t *testing.T) {
 func TestPrinter_Style(t *testing.T) {
 	t.Parallel()
 
+	base := lipgloss.NewStyle()
+
 	tcs := map[string]struct {
-		styles     niceyaml.Styles
-		query      niceyaml.Style
+		styles     style.Styles
+		query      style.Style
 		wantBold   bool
 		wantItalic bool
 	}{
 		"returns style from styles map": {
-			styles: niceyaml.Styles{
-				niceyaml.StyleKey: lipgloss.NewStyle().Bold(true),
-			},
-			query:    niceyaml.StyleKey,
+			styles: style.NewStyles(base,
+				style.Set(style.NameTag, base.Bold(true)),
+			),
+			query:    style.NameTag,
 			wantBold: true,
 		},
-		"falls back to default for unknown style": {
-			styles: niceyaml.Styles{
-				niceyaml.StyleDefault: lipgloss.NewStyle().Italic(true),
-			},
-			query:      niceyaml.StyleKey,
+		"child inherits from parent": {
+			styles:     style.NewStyles(base.Italic(true)),
+			query:      style.NameTag,
 			wantItalic: true,
 		},
 	}
@@ -1234,7 +1236,7 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 	}{
 		"key and string": {
 			input: "key: value",
-			want:  "<key>key</key><punctuation>:</punctuation><default> </default><string>value</string>",
+			want:  "<name-tag>key</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>value</literal-string>",
 		},
 		"null types": {
 			input: yamltest.JoinLF(
@@ -1242,8 +1244,8 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 				"tilde: ~",
 			),
 			want: yamltest.JoinLF(
-				"<key>null</key><punctuation>:</punctuation><default> </default><null>null</null>",
-				"<key>tilde</key><punctuation>:</punctuation><default> </default><null>~</null>",
+				"<name-tag>null</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-null>null</literal-null>",
+				"<name-tag>tilde</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-null>~</literal-null>",
 			),
 		},
 		"boolean types": {
@@ -1252,8 +1254,8 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 				"no: false",
 			),
 			want: yamltest.JoinLF(
-				"<key>yes</key><punctuation>:</punctuation><default> </default><bool>true</bool>",
-				"<key>no</key><punctuation>:</punctuation><default> </default><bool>false</bool>",
+				"<name-tag>yes</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-boolean>true</literal-boolean>",
+				"<name-tag>no</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-boolean>false</literal-boolean>",
 			),
 		},
 		"number types": {
@@ -1262,8 +1264,8 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 				"float: 3.14",
 			),
 			want: yamltest.JoinLF(
-				"<key>int</key><punctuation>:</punctuation><default> </default><number>42</number>",
-				"<key>float</key><punctuation>:</punctuation><default> </default><number>3.14</number>",
+				"<name-tag>int</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-number-integer>42</literal-number-integer>",
+				"<name-tag>float</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-number-float>3.14</literal-number-float>",
 			),
 		},
 		"anchor and alias": {
@@ -1272,17 +1274,17 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 				"alias: *x",
 			),
 			want: yamltest.JoinLF(
-				"<key>anchor</key><punctuation>:</punctuation><default> </default><anchor>&</anchor><anchor>x</anchor><default> </default><number>1</number>",
-				"<key>alias</key><punctuation>:</punctuation><default> </default><alias>*</alias><alias>x</alias>",
+				"<name-tag>anchor</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><name-anchor>&</name-anchor><name-anchor>x</name-anchor><text> </text><literal-number-integer>1</literal-number-integer>",
+				"<name-tag>alias</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><name-alias>*</name-alias><name-alias>x</name-alias>",
 			),
 		},
 		"comment": {
 			input: "key: value # comment",
-			want:  "<key>key</key><punctuation>:</punctuation><default> </default><string>value </string><comment># comment</comment>",
+			want:  "<name-tag>key</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>value </literal-string><comment># comment</comment>",
 		},
 		"tag": {
 			input: "tagged: !custom value",
-			want:  "<key>tagged</key><punctuation>:</punctuation><default> </default><tag>!custom </tag><string>value</string>",
+			want:  "<name-tag>tagged</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><name-decorator>!custom </name-decorator><literal-string>value</literal-string>",
 		},
 		"document markers": {
 			input: yamltest.JoinLF(
@@ -1291,9 +1293,9 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 				"...",
 			),
 			want: yamltest.JoinLF(
-				"<document>---</document>",
-				"<key>key</key><punctuation>:</punctuation><default> </default><string>value</string>",
-				"<document>...</document>",
+				"<punctuation-heading>---</punctuation-heading>",
+				"<name-tag>key</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>value</literal-string>",
+				"<punctuation-heading>...</punctuation-heading>",
 			),
 		},
 		"directive": {
@@ -1303,9 +1305,9 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 				"key: value",
 			),
 			want: yamltest.JoinLF(
-				"<directive>%</directive><string>YAML</string><default> </default><number>1.2</number>",
-				"<document>---</document>",
-				"<key>key</key><punctuation>:</punctuation><default> </default><string>value</string>",
+				"<comment-preproc>%</comment-preproc><literal-string>YAML</literal-string><text> </text><literal-number-float>1.2</literal-number-float>",
+				"<punctuation-heading>---</punctuation-heading>",
+				"<name-tag>key</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>value</literal-string>",
 			),
 		},
 		"block scalar": {
@@ -1315,14 +1317,14 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 				"  line2",
 			),
 			want: yamltest.JoinLF(
-				"<key>text</key><punctuation>:</punctuation><default> </default><block-scalar>|</block-scalar>",
-				"<string>  line1</string>",
-				"<string>  line2</string>",
+				"<name-tag>text</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><punctuation-block-literal>|</punctuation-block-literal>",
+				"<literal-string>  line1</literal-string>",
+				"<literal-string>  line2</literal-string>",
 			),
 		},
 		"punctuation": {
 			input: "key: value",
-			want:  "<key>key</key><punctuation>:</punctuation><default> </default><string>value</string>",
+			want:  "<name-tag>key</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>value</literal-string>",
 		},
 	}
 
@@ -1664,7 +1666,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 			t.Parallel()
 
 			p := niceyaml.NewPrinter(
-				niceyaml.WithStyles(niceyaml.Styles{}),
+				niceyaml.WithStyles(style.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 			)
 
@@ -1874,33 +1876,33 @@ func TestPrinter_Golden(t *testing.T) {
 	tcs := map[string]goldenTest{
 		"default colors": {
 			opts: []niceyaml.PrinterOption{
-				niceyaml.WithStyles(niceyaml.DefaultStyles()),
+				niceyaml.WithStyles(theme.Charm()),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 				niceyaml.WithGutter(niceyaml.NoGutter),
 			},
 		},
 		"default colors with line numbers": {
 			opts: []niceyaml.PrinterOption{
-				niceyaml.WithStyles(niceyaml.DefaultStyles()),
+				niceyaml.WithStyles(theme.Charm()),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 			},
 		},
 		"no colors": {
 			opts: []niceyaml.PrinterOption{
-				niceyaml.WithStyles(niceyaml.Styles{}),
+				niceyaml.WithStyles(style.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 				niceyaml.WithGutter(niceyaml.NoGutter),
 			},
 		},
 		"no colors with line numbers": {
 			opts: []niceyaml.PrinterOption{
-				niceyaml.WithStyles(niceyaml.Styles{}),
+				niceyaml.WithStyles(style.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 			},
 		},
 		"find and highlight": {
 			opts: []niceyaml.PrinterOption{
-				niceyaml.WithStyles(niceyaml.DefaultStyles()),
+				niceyaml.WithStyles(theme.Charm()),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 				niceyaml.WithGutter(niceyaml.NoGutter),
 			},
@@ -2048,10 +2050,10 @@ func TestPrinter_BlendStyles(t *testing.T) {
 		"range covers entire token": {
 			input: "key: value",
 			ranges: []styleRange{
-				{styleWithTag("key"), position.New(0, 0), position.New(0, 3)},
+				{styleWithTag("k"), position.New(0, 0), position.New(0, 3)},
 				{styleWithTag("val"), position.New(0, 5), position.New(0, 10)},
 			},
-			want: "<key>key</key>: <val>value</val>",
+			want: "<k>key</k>: <val>value</val>",
 		},
 		"multi-line with ranges on each line": {
 			input: yamltest.JoinLF("a: 1", "b: 2"),
@@ -2078,8 +2080,8 @@ func TestPrinter_BlendStyles(t *testing.T) {
 			p := testPrinter()
 
 			for _, sr := range tc.ranges {
-				style := sr.style
-				p.AddStyleToRange(&style, position.NewRange(sr.start, sr.end))
+				st := sr.style
+				p.AddStyleToRange(&st, position.NewRange(sr.start, sr.end))
 			}
 
 			got := p.Print(niceyaml.NewSourceFromString(tc.input))
@@ -2181,8 +2183,8 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 			p := testPrinter()
 
 			for _, sr := range tc.ranges {
-				style := sr.style
-				p.AddStyleToRange(&style, position.NewRange(sr.start, sr.end))
+				st := sr.style
+				p.AddStyleToRange(&st, position.NewRange(sr.start, sr.end))
 			}
 
 			got := p.Print(niceyaml.NewSourceFromString(tc.input))

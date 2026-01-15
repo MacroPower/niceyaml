@@ -62,9 +62,9 @@ func TestError(t *testing.T) {
 			want: yamltest.JoinLF(
 				"[3:1] invalid value:",
 				"",
-				"<key>a</key><punctuation>:</punctuation><default> </default><string>b</string>",
-				"<key>foo</key><punctuation>:</punctuation><default> </default><string>bar</string>",
-				"<error>key</error><punctuation>:</punctuation><default> </default><string>value</string>",
+				"<name-tag>a</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>b</literal-string>",
+				"<name-tag>foo</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>bar</literal-string>",
+				"<generic-error>key</generic-error><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>value</literal-string>",
 			),
 		},
 		"with direct token bypasses path resolution": {
@@ -80,9 +80,9 @@ func TestError(t *testing.T) {
 			want: yamltest.JoinLF(
 				"[1:1] bad token:",
 				"",
-				"<error>a</error><punctuation>:</punctuation><default> </default><string>b</string>",
-				"<key>foo</key><punctuation>:</punctuation><default> </default><string>bar</string>",
-				"<key>key</key><punctuation>:</punctuation><default> </default><string>value</string>",
+				"<generic-error>a</generic-error><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>b</literal-string>",
+				"<name-tag>foo</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>bar</literal-string>",
+				"<name-tag>key</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>value</literal-string>",
 			),
 		},
 	}
@@ -146,8 +146,8 @@ func TestSourceWrapError(t *testing.T) {
 			wantExact: yamltest.JoinLF(
 				"[1:1] test error:",
 				"",
-				"<error>name</error><punctuation>:</punctuation><default> </default><string>test</string>",
-				"<key>value</key><punctuation>:</punctuation><default> </default><number>123</number>",
+				"<generic-error>name</generic-error><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>test</literal-string>",
+				"<name-tag>value</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-number-integer>123</literal-number-integer>",
 			),
 		},
 	}
@@ -310,8 +310,8 @@ func TestErrorAnnotation(t *testing.T) {
 			want: yamltest.JoinLF(
 				"[2:3] nested error:",
 				"",
-				"<key>foo</key><punctuation>:</punctuation>",
-				"<error>  </error><error>bar</error><punctuation>:</punctuation><default> </default><string>value</string>",
+				"<name-tag>foo</name-tag><punctuation-mapping-value>:</punctuation-mapping-value>",
+				"<generic-error>  </generic-error><generic-error>bar</generic-error><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>value</literal-string>",
 			),
 		},
 		"array element path - first item": {
@@ -325,9 +325,9 @@ func TestErrorAnnotation(t *testing.T) {
 			want: yamltest.JoinLF(
 				"[2:5] array error:",
 				"",
-				"<key>items</key><punctuation>:</punctuation>",
-				"<default>  </default><punctuation>-</punctuation><error> </error><error>first</error>",
-				"<error>  </error><punctuation>-</punctuation><default> </default><string>second</string>",
+				"<name-tag>items</name-tag><punctuation-mapping-value>:</punctuation-mapping-value>",
+				"<text>  </text><punctuation-sequence-entry>-</punctuation-sequence-entry><generic-error> </generic-error><generic-error>first</generic-error>",
+				"<generic-error>  </generic-error><punctuation-sequence-entry>-</punctuation-sequence-entry><text> </text><literal-string>second</literal-string>",
 			),
 		},
 		"array element path - nested object in array": {
@@ -341,9 +341,9 @@ func TestErrorAnnotation(t *testing.T) {
 			want: yamltest.JoinLF(
 				"[2:5] nested array error:",
 				"",
-				"<key>users</key><punctuation>:</punctuation>",
-				"<default>  </default><punctuation>-</punctuation><error> </error><error>name</error><punctuation>:</punctuation><default> </default><string>alice</string>",
-				"<string>    </string><key>age</key><punctuation>:</punctuation><default> </default><number>30</number>",
+				"<name-tag>users</name-tag><punctuation-mapping-value>:</punctuation-mapping-value>",
+				"<text>  </text><punctuation-sequence-entry>-</punctuation-sequence-entry><generic-error> </generic-error><generic-error>name</generic-error><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>alice</literal-string>",
+				"<literal-string>    </literal-string><name-tag>age</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-number-integer>30</literal-number-integer>",
 			),
 		},
 		"root path": {
@@ -353,7 +353,7 @@ func TestErrorAnnotation(t *testing.T) {
 			want: yamltest.JoinLF(
 				"[1:4] root error:",
 				"",
-				"<key>key</key><error>:</error><default> </default><string>value</string>",
+				"<name-tag>key</name-tag><generic-error>:</generic-error><text> </text><literal-string>value</literal-string>",
 			),
 		},
 		"single top-level key path": {
@@ -363,7 +363,7 @@ func TestErrorAnnotation(t *testing.T) {
 			want: yamltest.JoinLF(
 				"[1:1] top level error:",
 				"",
-				"<error>key</error><punctuation>:</punctuation><default> </default><string>value</string>",
+				"<generic-error>key</generic-error><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>value</literal-string>",
 			),
 		},
 		"with custom source lines": {
@@ -380,10 +380,10 @@ func TestErrorAnnotation(t *testing.T) {
 			want: yamltest.JoinLF(
 				"[3:1] middle error:",
 				"",
-				"<key>line2</key><punctuation>:</punctuation><default> </default><string>b</string>",
-				"<error>line3</error><punctuation>:</punctuation><default> </default><string>c</string>",
-				"<key>line4</key><punctuation>:</punctuation><default> </default><string>d</string>",
-				"<key>line5</key><punctuation>:</punctuation><default> </default><string>e</string>",
+				"<name-tag>line2</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>b</literal-string>",
+				"<generic-error>line3</generic-error><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>c</literal-string>",
+				"<name-tag>line4</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>d</literal-string>",
+				"<name-tag>line5</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>e</literal-string>",
 			),
 		},
 	}
@@ -436,8 +436,8 @@ func TestWithPrinter(t *testing.T) {
 	want := yamltest.JoinLF(
 		"[1:1] test error:",
 		"",
-		"<error>key</error><punctuation>:</punctuation><default> </default><string>value</string>",
-		"<key>foo</key><punctuation>:</punctuation><default> </default><string>bar</string>",
+		"<generic-error>key</generic-error><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>value</literal-string>",
+		"<name-tag>foo</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>bar</literal-string>",
 	)
 	assert.Equal(t, want, trimLines(err.Error()))
 }
@@ -471,9 +471,9 @@ func TestError_SpecialParentContext(t *testing.T) {
 			want: yamltest.JoinLF(
 				"[2:3] array element error:",
 				"",
-				"<punctuation>-</punctuation><default> </default><string>first</string>",
-				"<punctuation>-</punctuation><error> </error><error>second</error>",
-				"<punctuation>-</punctuation><default> </default><string>third</string>",
+				"<punctuation-sequence-entry>-</punctuation-sequence-entry><text> </text><literal-string>first</literal-string>",
+				"<punctuation-sequence-entry>-</punctuation-sequence-entry><generic-error> </generic-error><generic-error>second</generic-error>",
+				"<punctuation-sequence-entry>-</punctuation-sequence-entry><text> </text><literal-string>third</literal-string>",
 			),
 		},
 		"document root - parent is nil": {
@@ -487,8 +487,8 @@ func TestError_SpecialParentContext(t *testing.T) {
 			want: yamltest.JoinLF(
 				"[1:4] document root error:",
 				"",
-				"<key>key</key><error>:</error><default> </default><string>value</string>",
-				"<key>another</key><punctuation>:</punctuation><default> </default><string>line</string>",
+				"<name-tag>key</name-tag><generic-error>:</generic-error><text> </text><literal-string>value</literal-string>",
+				"<name-tag>another</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>line</literal-string>",
 			),
 		},
 	}

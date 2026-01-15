@@ -8,6 +8,8 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
+
+	"github.com/macropower/niceyaml/style"
 )
 
 // ErrNoSource indicates no source was provided to resolve an error path.
@@ -171,7 +173,7 @@ func (e *Error) printErrorToken(tk *token.Token) string {
 
 	ranges := t.TokenPositionRangesFromToken(tk)
 	for _, rng := range ranges {
-		p.AddStyleToRange(p.Style(StyleError), rng)
+		p.AddStyleToRange(p.Style(style.GenericError), rng)
 	}
 
 	curLine := max(0, tk.Position.Line-1)

@@ -6,6 +6,7 @@ import (
 	_ "embed"
 
 	"github.com/macropower/niceyaml"
+	"github.com/macropower/niceyaml/style/theme"
 )
 
 //go:embed demo.yaml
@@ -15,7 +16,7 @@ func main() {
 	source := niceyaml.NewSourceFromString(example)
 
 	printer := niceyaml.NewPrinter(
-		niceyaml.WithStyles(niceyaml.DefaultStyles()),
+		niceyaml.WithStyles(theme.Charm()),
 		niceyaml.WithGutter(niceyaml.DefaultGutter()),
 	)
 
