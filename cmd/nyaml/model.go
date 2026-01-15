@@ -2,11 +2,9 @@ package main
 
 import (
 	"fmt"
-	"strings"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
 
 	tea "charm.land/bubbletea/v2"
@@ -147,12 +145,13 @@ func (m *model) applySearch(term string) {
 
 //nolint:gocritic // hugeParam: required for tea.Model interface.
 func (m model) View() tea.View {
-	var b strings.Builder
-	b.WriteString(m.viewport.View())
-	b.WriteString("\n")
-	b.WriteString(m.statusBar())
-
-	v := tea.NewView(b.String())
+	v := tea.NewView(
+		lipgloss.JoinVertical(
+			lipgloss.Top,
+			m.viewport.View(),
+			m.statusBar(),
+		),
+	)
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
 
@@ -208,12 +207,14 @@ func (m *model) statusBar() string {
 		right = fmt.Sprintf("%d%% ", int(m.viewport.ScrollPercent()*100))
 	}
 
-	// Pad middle.
-	padding := max(0, m.width-ansi.StringWidth(left)-ansi.StringWidth(right))
-
 	style := lipgloss.NewStyle().
 		Background(charmtone.Charcoal).
-		Foreground(charmtone.Salt)
+		Foreground(charmtone.Salt).
+		Inline(true)
 
-	return style.Render(left + strings.Repeat(" ", padding) + right)
+	padding := max(0, lipgloss.Width(left))
+
+	right = lipgloss.PlaceHorizontal(m.width-padding, lipgloss.Right, right)
+
+	return style.Render(left + right)
 }
