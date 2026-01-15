@@ -84,7 +84,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		if m.searching {
 			m.updateSearchInput(msg)
-			break
+			return m, nil
 		}
 
 		switch {
