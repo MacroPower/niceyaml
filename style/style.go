@@ -5,12 +5,25 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
+// Mode represents the color scheme mode of a theme.
+type Mode int
+
+// Color scheme modes.
+//
+//nolint:grouper // Enum.
+const (
+	Light Mode = iota
+	Dark
+)
+
 // Style identifies a style category for YAML highlighting.
 // Used as keys in [Styles] maps.
 type Style int
 
 // Style constants for YAML highlighting.
 // Names follow Pygments token naming conventions where applicable.
+//
+//nolint:grouper // Enum.
 const (
 	Text                     Style = iota // Default/fallback style.
 	Comment                               // Comments.

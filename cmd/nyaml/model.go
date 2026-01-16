@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"slices"
+	"strings"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
@@ -11,6 +13,8 @@ import (
 
 	"github.com/macropower/niceyaml"
 	"github.com/macropower/niceyaml/bubbles/yamlviewport"
+	"github.com/macropower/niceyaml/style"
+	"github.com/macropower/niceyaml/style/theme"
 )
 
 type modelOptions struct {
@@ -21,20 +25,29 @@ type modelOptions struct {
 
 //nolint:recvcheck // tea.Model requires value receivers for Init, Update, View.
 type model struct {
-	searchInput string
-	viewport    yamlviewport.Model
-	width       int
-	searching   bool
+	searchInput   string
+	currentTheme  string
+	previousTheme string
+	themeList     []string
+	viewport      yamlviewport.Model
+	width         int
+	height        int
+	themeIndex    int
+	lineNumbers   bool
+	searching     bool
+	themePicking  bool
 }
 
 func newModel(opts *modelOptions) model {
+	// Get sorted theme list.
+	themeList := theme.List(style.Dark)
+	slices.Sort(themeList)
+
+	// Default theme.
+	defaultTheme := "charm"
+
 	// Create printer with options.
-	var printerOpts []niceyaml.PrinterOption
-
-	if !opts.lineNumbers {
-		printerOpts = append(printerOpts, niceyaml.WithGutter(niceyaml.DiffGutter()))
-	}
-
+	printerOpts := buildPrinterOpts(opts.lineNumbers, defaultTheme)
 	printer := niceyaml.NewPrinter(printerOpts...)
 
 	// Create viewport.
@@ -50,8 +63,15 @@ func newModel(opts *modelOptions) model {
 		),
 	)
 
+	// Find default theme index.
+	themeIndex := max(0, slices.Index(themeList, defaultTheme))
+
 	m := model{
-		viewport: vp,
+		viewport:     vp,
+		themeList:    themeList,
+		themeIndex:   themeIndex,
+		currentTheme: defaultTheme,
+		lineNumbers:  opts.lineNumbers,
 	}
 
 	for i, c := range opts.contents {
@@ -76,10 +96,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
+		m.height = msg.Height
 		m.viewport.SetWidth(msg.Width)
 		m.viewport.SetHeight(msg.Height - 1) // Reserve 1 line for status bar.
 
 	case tea.KeyPressMsg:
+		// Handle theme picker input.
+		if m.themePicking {
+			m.updateThemeInput(msg)
+			return m, nil
+		}
+
 		if m.searching {
 			m.updateSearchInput(msg)
 			return m, nil
@@ -88,6 +115,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("q", "ctrl+c"))):
 			return m, tea.Quit
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("t"))):
+			m.themePicking = true
+			m.previousTheme = m.currentTheme
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("/"))):
 			m.searching = true
@@ -139,19 +170,65 @@ func (m *model) updateSearchInput(msg tea.KeyPressMsg) {
 	}
 }
 
+func (m *model) updateThemeInput(msg tea.KeyPressMsg) {
+	switch {
+	case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+		// Confirm selection and close.
+		m.themePicking = false
+
+	case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
+		// Revert to previous theme and close.
+		m.themePicking = false
+		m.applyTheme(m.previousTheme)
+
+		m.themeIndex = slices.Index(m.themeList, m.previousTheme)
+
+	case key.Matches(msg, key.NewBinding(key.WithKeys("j", "down"))):
+		// Move selection down with live preview.
+		if m.themeIndex < len(m.themeList)-1 {
+			m.themeIndex++
+			m.applyTheme(m.themeList[m.themeIndex])
+		}
+
+	case key.Matches(msg, key.NewBinding(key.WithKeys("k", "up"))):
+		// Move selection up with live preview.
+		if m.themeIndex > 0 {
+			m.themeIndex--
+			m.applyTheme(m.themeList[m.themeIndex])
+		}
+	}
+}
+
 func (m *model) applySearch(term string) {
 	m.viewport.SetSearchTerm(term)
 }
 
 //nolint:gocritic // hugeParam: required for tea.Model interface.
 func (m model) View() tea.View {
-	v := tea.NewView(
-		lipgloss.JoinVertical(
-			lipgloss.Top,
-			m.viewport.View(),
-			m.statusBar(),
-		),
+	base := lipgloss.JoinVertical(
+		lipgloss.Top,
+		m.viewport.View(),
+		m.statusBar(),
 	)
+
+	// Overlay theme picker if active.
+	if m.themePicking {
+		overlay := m.renderThemeOverlay()
+		overlayWidth := lipgloss.Width(overlay)
+		overlayHeight := lipgloss.Height(overlay)
+
+		// Center the overlay.
+		overlayX := (m.width - overlayWidth) / 2
+		overlayY := (m.height - overlayHeight) / 2
+
+		baseLayer := lipgloss.NewLayer(base)
+		overlayLayer := lipgloss.NewLayer(overlay).X(overlayX).Y(overlayY).Z(1)
+
+		compositor := lipgloss.NewCompositor(baseLayer, overlayLayer)
+		base = compositor.Render()
+	}
+
+	v := tea.NewView(base)
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
 
@@ -207,7 +284,7 @@ func (m *model) statusBar() string {
 		right = fmt.Sprintf("%d%% ", int(m.viewport.ScrollPercent()*100))
 	}
 
-	style := lipgloss.NewStyle().
+	barStyle := lipgloss.NewStyle().
 		Background(charmtone.Charcoal).
 		Foreground(charmtone.Salt).
 		Inline(true)
@@ -216,5 +293,95 @@ func (m *model) statusBar() string {
 
 	right = lipgloss.PlaceHorizontal(m.width-padding, lipgloss.Right, right)
 
-	return style.Render(left + right)
+	return barStyle.Render(left + right)
+}
+
+func buildPrinterOpts(lineNumbers bool, themeName string) []niceyaml.PrinterOption {
+	var opts []niceyaml.PrinterOption
+
+	if !lineNumbers {
+		opts = append(opts, niceyaml.WithGutter(niceyaml.DiffGutter()))
+	}
+
+	if styles, ok := theme.Styles(themeName); ok {
+		opts = append(opts, niceyaml.WithStyles(styles))
+	}
+
+	return opts
+}
+
+func (m *model) applyTheme(name string) {
+	m.currentTheme = name
+	printer := niceyaml.NewPrinter(buildPrinterOpts(m.lineNumbers, name)...)
+	m.viewport.SetPrinter(printer)
+}
+
+func (m *model) renderThemeOverlay() string {
+	// Calculate overlay dimensions (roughly 25% of screen).
+	overlayWidth := max(30, m.width/4)
+	overlayHeight := max(10, m.height/4)
+
+	// Calculate visible items (accounting for header, footer, borders).
+	// Ensure odd number for perfect centering.
+	visibleItems := overlayHeight - 4
+	if visibleItems%2 == 0 {
+		visibleItems++
+		overlayHeight++
+	}
+
+	// Calculate scroll offset to keep selection centered when possible.
+	maxScroll := max(0, len(m.themeList)-visibleItems)
+	scrollOffset := min(maxScroll, max(0, m.themeIndex-visibleItems/2))
+
+	// Get current theme styles for the overlay appearance.
+	styles, _ := theme.Styles(m.currentTheme)
+	baseStyle := styles.Style(style.Text)
+	accentStyle := styles.Style(style.NameTag)
+	dimStyle := styles.Style(style.Comment)
+
+	// Build theme list content.
+	var items []string
+	for i := scrollOffset; i < len(m.themeList) && len(items) < visibleItems; i++ {
+		name := m.themeList[i]
+		prefix := "  "
+		if i == m.themeIndex {
+			prefix = "> "
+		}
+		// Truncate name if too long.
+		maxNameLen := overlayWidth - 6
+		if len(name) > maxNameLen {
+			name = name[:maxNameLen-1] + "~"
+		}
+
+		items = append(items, prefix+name)
+	}
+
+	content := strings.Join(items, "\n")
+
+	// Style the overlay using theme colors.
+	overlayStyle := baseStyle.
+		Width(overlayWidth).
+		Height(overlayHeight).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(accentStyle.GetForeground()).
+		BorderBackground(baseStyle.GetBackground()).
+		Padding(0, 1)
+
+	// Content width inside the border and padding.
+	contentWidth := overlayWidth - 4
+
+	headerStyle := accentStyle.Bold(true).Background(baseStyle.GetBackground()).Width(contentWidth)
+	footerStyle := dimStyle.Background(baseStyle.GetBackground()).Width(contentWidth)
+
+	header := headerStyle.Render("Select Theme")
+	footer := footerStyle.Render("enter select · esc cancel")
+
+	return overlayStyle.Render(
+		lipgloss.JoinVertical(
+			lipgloss.Left,
+			header,
+			content,
+			footer,
+		),
+	)
 }

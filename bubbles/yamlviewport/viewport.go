@@ -215,6 +215,13 @@ func (m *Model) SetWidth(w int) {
 	}
 }
 
+// SetPrinter sets the [Printer] used for rendering and triggers a re-render.
+func (m *Model) SetPrinter(p Printer) {
+	m.printer = p
+	m.printer.SetWidth(m.width)
+	m.rerender()
+}
+
 // SetTokens replaces the revision history with a single revision.
 // This is a convenience method equivalent to ClearRevisions() followed by AppendRevision(lines).
 func (m *Model) SetTokens(lines niceyaml.NamedLineIterator) {

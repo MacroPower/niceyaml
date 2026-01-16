@@ -268,3 +268,6 @@ linters:
         text: "printf"
         linters:
           - govet
+      - path: style/theme/
+        linters:
+          - dupl

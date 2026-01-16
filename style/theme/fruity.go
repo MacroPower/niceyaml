@@ -1,0 +1,45 @@
+package theme
+
+import (
+	"charm.land/lipgloss/v2"
+
+	"github.com/macropower/niceyaml/style"
+)
+
+// Fruity returns [style.Styles] using fruity colors.
+func Fruity() style.Styles {
+	base := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#ffffff")).
+		Background(lipgloss.Color("#111111"))
+
+	return style.NewStyles(base,
+		style.Set(
+			style.Comment,
+			base.Foreground(lipgloss.Color("#008800")).Background(lipgloss.Color("#0f140f")).Italic(true),
+		),
+		style.Set(
+			style.LiteralNumber,
+			base.Foreground(lipgloss.Color("#0086f7")).Bold(true),
+		),
+		style.Set(
+			style.LiteralString,
+			base.Foreground(lipgloss.Color("#0086d2")),
+		),
+		style.Set(
+			style.NameTag,
+			base.Foreground(lipgloss.Color("#fb660a")).Bold(true),
+		),
+		style.Set(
+			style.NameDecorator,
+			base.Foreground(lipgloss.Color("#ff0007")).Bold(true),
+		),
+		style.Set(
+			style.Generic,
+			base.Foreground(lipgloss.Color("#ffffff")).Bold(true),
+		),
+		style.Set(
+			style.Name,
+			base.Foreground(lipgloss.Color("#0086d2")),
+		),
+	)
+}

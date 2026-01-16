@@ -27,6 +27,8 @@ It enables **friendly and predictable handling of YAML documents** in your **CLI
 
 ![view](./docs/assets/view.gif)
 
+![themes](./docs/assets/themes.gif)
+
 ### JSON Schema Generation & Validation
 
 1. Generate JSON schemas from structs via [invopop/jsonschema][invopop/jsonschema]
