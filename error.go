@@ -192,12 +192,12 @@ func (e *Error) printErrorToken(tk *token.Token) string {
 	minLine, maxLine := curLine, curLine
 
 	for _, rng := range ranges {
-		lineNum := t.Line(rng.Start.Line).Number()
-		if lineNum < minLine {
-			minLine = lineNum
+		lineIdx := rng.Start.Line
+		if lineIdx < minLine {
+			minLine = lineIdx
 		}
-		if lineNum > maxLine {
-			maxLine = lineNum
+		if lineIdx > maxLine {
+			maxLine = lineIdx
 		}
 	}
 

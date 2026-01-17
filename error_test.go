@@ -386,7 +386,6 @@ func TestErrorAnnotation(t *testing.T) {
 				"<name-tag>line2</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>b</literal-string>",
 				"<generic-error>line3</generic-error><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>c</literal-string>",
 				"<name-tag>line4</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>d</literal-string>",
-				"<name-tag>line5</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>e</literal-string>",
 			),
 		},
 	}
