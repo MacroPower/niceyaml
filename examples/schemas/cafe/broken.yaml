@@ -3,7 +3,7 @@ kind: Config
 metadata:
   name: Downtown Cafe
 spec:
-  sla: m
+  sla: 15M
   menu:
     items:
       - name: Espresso
@@ -17,12 +17,11 @@ spec:
     baristas: 3
     managers: 1
   hours:
-    open: "07:90"
+    open: "07:00"
     close: "19:00"
-    days: {}
+    days: Monday - Friday
   settings:
-    wifi: |
-      true
+    wifi: true
     mobile_ordering: true
     theme: light
     custom_options:

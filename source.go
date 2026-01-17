@@ -214,10 +214,10 @@ func (s *Source) Line(idx int) line.Line {
 	return s.lines[idx]
 }
 
-// Annotate sets a [line.Annotation] on the [line.Line] at the given index.
+// Annotate adds a [line.Annotation] to the [line.Line] at the given index.
 // Panics if idx is out of range.
 func (s *Source) Annotate(idx int, ann line.Annotation) {
-	s.lines[idx].Annotation = ann
+	s.lines[idx].Annotations.Add(ann)
 }
 
 // Flag sets a [line.Flag] on the [line.Line] at the given index.

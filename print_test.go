@@ -1221,21 +1221,21 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			input:     "key: value",
 			lineIndex: 0,
 			annotation: line.Annotation{
-				Content:  "# comment below",
+				Content:  "comment below",
 				Position: line.Below,
 				Col:      0,
 			},
-			want: "key: value\n# comment below",
+			want: "key: value\n^ comment below",
 		},
 		"below annotation with col padding": {
 			input:     "key: value",
 			lineIndex: 0,
 			annotation: line.Annotation{
-				Content:  "^-- error here",
+				Content:  "error here",
 				Position: line.Below,
 				Col:      5,
 			},
-			want: "key: value\n     ^-- error here",
+			want: "key: value\n     ^ error here",
 		},
 		"below annotation on second line": {
 			input: yamltest.JoinLF(
@@ -1244,14 +1244,14 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			),
 			lineIndex: 1,
 			annotation: line.Annotation{
-				Content:  "^-- note",
+				Content:  "note",
 				Position: line.Below,
 				Col:      8,
 			},
 			want: yamltest.JoinLF(
 				"first: 1",
 				"second: 2",
-				"        ^-- note",
+				"        ^ note",
 			),
 		},
 		"above annotation on second line": {
@@ -1311,11 +1311,11 @@ func TestPrinter_AnnotationPosition_WithGutter(t *testing.T) {
 			input:     "key: value",
 			lineIndex: 0,
 			annotation: line.Annotation{
-				Content:  "^-- error",
+				Content:  "error",
 				Position: line.Below,
 				Col:      5,
 			},
-			want: "   1 key: value\n          ^-- error",
+			want: "   1 key: value\n          ^ error",
 		},
 		"below annotation with col padding and line numbers": {
 			input: yamltest.JoinLF(
@@ -1324,13 +1324,13 @@ func TestPrinter_AnnotationPosition_WithGutter(t *testing.T) {
 			),
 			lineIndex: 0,
 			annotation: line.Annotation{
-				Content:  "^-- note",
+				Content:  "note",
 				Position: line.Below,
 				Col:      7,
 			},
 			want: yamltest.JoinLF(
 				"   1 first: 1",
-				"            ^-- note",
+				"            ^ note",
 				"   2 second: 2",
 			),
 		},
@@ -2393,6 +2393,150 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 
 			got := p.Print(niceyaml.NewSourceFromString(tc.input))
 			golden.RequireEqual(t, got)
+		})
+	}
+}
+
+func TestDefaultAnnotation(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		annotations line.Annotations
+		position    line.RelativePosition
+		want        string
+	}{
+		"empty annotations": {
+			annotations: nil,
+			position:    line.Below,
+			want:        "",
+		},
+		"single below annotation": {
+			annotations: line.Annotations{{Content: "error here", Position: line.Below, Col: 0}},
+			position:    line.Below,
+			want:        "^ error here",
+		},
+		"single below annotation with padding": {
+			annotations: line.Annotations{{Content: "error", Position: line.Below, Col: 5}},
+			position:    line.Below,
+			want:        "     ^ error",
+		},
+		"single above annotation": {
+			annotations: line.Annotations{{Content: "@@ hunk @@", Position: line.Above, Col: 0}},
+			position:    line.Above,
+			want:        "@@ hunk @@",
+		},
+		"single above annotation with padding": {
+			annotations: line.Annotations{{Content: "header", Position: line.Above, Col: 3}},
+			position:    line.Above,
+			want:        "   header",
+		},
+		"multiple below annotations": {
+			annotations: line.Annotations{
+				{Content: "first", Position: line.Below, Col: 0},
+				{Content: "second", Position: line.Below, Col: 5},
+			},
+			position: line.Below,
+			want:     "^ first; second",
+		},
+		"multiple below annotations uses min col": {
+			annotations: line.Annotations{
+				{Content: "first", Position: line.Below, Col: 5},
+				{Content: "second", Position: line.Below, Col: 2},
+			},
+			position: line.Below,
+			want:     "  ^ first; second",
+		},
+		"multiple above annotations": {
+			annotations: line.Annotations{
+				{Content: "header1", Position: line.Above, Col: 0},
+				{Content: "header2", Position: line.Above, Col: 0},
+			},
+			position: line.Above,
+			want:     "header1; header2",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			fn := niceyaml.DefaultAnnotation()
+			ctx := niceyaml.AnnotationContext{
+				Annotations: tc.annotations,
+				Position:    tc.position,
+				Styles:      style.Styles{},
+			}
+
+			got := fn(ctx)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestPrinter_WithAnnotationFunc(t *testing.T) {
+	t.Parallel()
+
+	// Custom annotation function that uses different prefixes.
+	customAnnotation := func(ctx niceyaml.AnnotationContext) string {
+		anns := ctx.Annotations
+		if len(anns) == 0 {
+			return ""
+		}
+
+		contents := make([]string, len(anns))
+		for i, ann := range anns {
+			contents[i] = ann.Content
+		}
+
+		if ctx.Position == line.Below {
+			return ">>> " + strings.Join(contents, ", ")
+		}
+
+		return "=== " + strings.Join(contents, ", ")
+	}
+
+	tcs := map[string]struct {
+		annotation line.Annotation
+		lineIndex  int
+		want       string
+	}{
+		"custom below annotation": {
+			lineIndex: 0,
+			annotation: line.Annotation{
+				Content:  "custom error",
+				Position: line.Below,
+				Col:      0,
+			},
+			want: "key: value\n>>> custom error",
+		},
+		"custom above annotation": {
+			lineIndex: 0,
+			annotation: line.Annotation{
+				Content:  "custom header",
+				Position: line.Above,
+				Col:      0,
+			},
+			want: "=== custom header\nkey: value",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			input := "key: value"
+			source := niceyaml.NewSourceFromString(input)
+			source.Annotate(tc.lineIndex, tc.annotation)
+
+			p := niceyaml.NewPrinter(
+				niceyaml.WithStyles(style.Styles{}),
+				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithGutter(niceyaml.NoGutter),
+				niceyaml.WithAnnotationFunc(customAnnotation),
+			)
+
+			got := p.Print(source)
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }

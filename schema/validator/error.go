@@ -34,10 +34,10 @@ func newValidationError(err SchemaError) *niceyaml.Error {
 		// Check if this is a schema-level error for a nicer message.
 		adapter, ok := err.(*jsonschemaValidationError)
 		if ok && adapter.isSchemaKind() {
-			mainMsg = fmt.Sprintf("jsonschema validation failed at %d locations with %q",
+			mainMsg = fmt.Sprintf("validation failed at %d locations with %q",
 				len(concreteErrors), filepath.Base(err.URL()))
 		} else {
-			mainMsg = fmt.Sprintf("jsonschema validation failed at %d locations", len(concreteErrors))
+			mainMsg = fmt.Sprintf("validation failed at %d locations", len(concreteErrors))
 		}
 	}
 

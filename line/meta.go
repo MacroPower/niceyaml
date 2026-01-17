@@ -45,3 +45,62 @@ func (a Annotation) String() string {
 
 	return padding + a.Content
 }
+
+// Annotations is a collection of [Annotation]s.
+//
+//nolint:recvcheck // Add requires pointer receiver; read methods use value receivers.
+type Annotations []Annotation
+
+// Add appends the given [Annotation]s to the collection.
+func (a *Annotations) Add(anns ...Annotation) {
+	*a = append(*a, anns...)
+}
+
+// IsEmpty returns true if there are no annotations.
+func (a Annotations) IsEmpty() bool {
+	return len(a) == 0
+}
+
+// FilterPosition returns annotations matching the given [RelativePosition].
+func (a Annotations) FilterPosition(pos RelativePosition) Annotations {
+	if len(a) == 0 {
+		return nil
+	}
+
+	var result Annotations
+	for _, ann := range a {
+		if ann.Position == pos {
+			result = append(result, ann)
+		}
+	}
+
+	return result
+}
+
+// String returns the combined annotation content for debugging.
+// Same-position annotations are joined by "; " at the minimum column position.
+// For styled rendering, use [Printer] with [AnnotationFunc].
+func (a Annotations) String() string {
+	if len(a) == 0 {
+		return ""
+	}
+
+	if len(a) == 1 {
+		return a[0].String()
+	}
+
+	// Find minimum column and collect content.
+	minCol := a[0].Col
+	contents := make([]string, len(a))
+
+	for i, ann := range a {
+		contents[i] = ann.Content
+		if ann.Col < minCol {
+			minCol = ann.Col
+		}
+	}
+
+	padding := strings.Repeat(" ", max(0, minCol))
+
+	return padding + strings.Join(contents, "; ")
+}

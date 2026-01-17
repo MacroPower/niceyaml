@@ -314,7 +314,8 @@ func (d *SummaryDiff) Source() *Source {
 			}
 
 			if isFirstLineOfHunk {
-				ln.Annotation = line.Annotation{Content: hunkHeader, Position: line.Above}
+				ln.Annotations.Add(line.Annotation{Content: hunkHeader, Position: line.Above})
+
 				isFirstLineOfHunk = false
 			}
 

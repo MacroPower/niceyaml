@@ -62,6 +62,7 @@ type Printer struct {
 	styles             StyleGetter
 	style              lipgloss.Style
 	gutterFunc         GutterFunc
+	annotationFunc     AnnotationFunc
 	rangeStyles        *styletree.Tree
 	width              int
 	hasCustomStyle     bool
@@ -70,11 +71,12 @@ type Printer struct {
 }
 
 // NewPrinter creates a new [Printer].
-// By default it uses [theme.Charm] and [DefaultGutter].
+// By default it uses [theme.Charm], [DefaultGutter], and [DefaultAnnotation].
 func NewPrinter(opts ...PrinterOption) *Printer {
 	p := &Printer{
 		styles:             theme.Charm(),
 		gutterFunc:         DefaultGutter(),
+		annotationFunc:     DefaultAnnotation(),
 		annotationsEnabled: true,
 		wordWrap:           true,
 	}
@@ -111,6 +113,49 @@ type GutterFunc func(GutterContext) string
 
 // NoGutter is a [GutterFunc] that returns an empty string for all lines.
 var NoGutter GutterFunc = func(GutterContext) string { return "" }
+
+// AnnotationContext provides context for annotation rendering.
+// It is passed to [AnnotationFunc] to determine the appropriate annotation content.
+type AnnotationContext struct {
+	Styles      StyleGetter
+	Annotations line.Annotations
+	Position    line.RelativePosition
+}
+
+// AnnotationFunc returns the rendered annotation content based on [AnnotationContext].
+type AnnotationFunc func(AnnotationContext) string
+
+// DefaultAnnotation creates an [AnnotationFunc] that renders annotations with
+// position-based prefixes: "^ " for [line.Below], none for [line.Above].
+func DefaultAnnotation() AnnotationFunc {
+	return func(ctx AnnotationContext) string {
+		anns := ctx.Annotations
+		if len(anns) == 0 {
+			return ""
+		}
+
+		// Find minimum column and collect content.
+		minCol := anns[0].Col
+		contents := make([]string, len(anns))
+
+		for i, ann := range anns {
+			contents[i] = ann.Content
+			if ann.Col < minCol {
+				minCol = ann.Col
+			}
+		}
+
+		padding := strings.Repeat(" ", max(0, minCol))
+		combined := strings.Join(contents, "; ")
+
+		// Add "^ " prefix for Below annotations.
+		if ctx.Position == line.Below {
+			return padding + "^ " + combined
+		}
+
+		return padding + combined
+	}
+}
 
 // DefaultGutter creates a [GutterFunc] that renders both line numbers and diff markers.
 // This is the default gutter used by [NewPrinter].
@@ -215,6 +260,14 @@ func WithGutter(fn GutterFunc) PrinterOption {
 	}
 }
 
+// WithAnnotationFunc sets the [AnnotationFunc] for rendering annotations.
+// By default, [DefaultAnnotation] is used which adds "^ " prefix for [line.Below] annotations.
+func WithAnnotationFunc(fn AnnotationFunc) PrinterOption {
+	return func(p *Printer) {
+		p.annotationFunc = fn
+	}
+}
+
 // SetWidth sets the width for word wrapping. A width of 0 disables wrapping.
 func (p *Printer) SetWidth(width int) {
 	p.width = width
@@ -312,9 +365,14 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 			continue
 		}
 
-		hasAnnotation := p.annotationsEnabled && ln.Annotation.Content != ""
-		hasAboveAnnotation := hasAnnotation && ln.Annotation.Position == line.Above
-		hasBelowAnnotation := hasAnnotation && ln.Annotation.Position == line.Below
+		var (
+			hasAboveAnnotation bool
+			hasBelowAnnotation bool
+		)
+		if p.annotationsEnabled {
+			hasAboveAnnotation = !ln.Annotations.FilterPosition(line.Above).IsEmpty()
+			hasBelowAnnotation = !ln.Annotations.FilterPosition(line.Below).IsEmpty()
+		}
 
 		if hasAboveAnnotation {
 			// Add newline between hunks (not before first hunk).
@@ -323,7 +381,7 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 			}
 
 			// Render annotation above the line.
-			p.renderAnnotation(&sb, ln, pos, lineNum, totalLines)
+			p.renderAnnotation(&sb, ln, pos, lineNum, totalLines, line.Above)
 			sb.WriteByte('\n')
 		} else if renderedIdx > 0 {
 			// Add newline between lines within a hunk.
@@ -356,7 +414,7 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 
 		if hasBelowAnnotation {
 			sb.WriteByte('\n')
-			p.renderAnnotation(&sb, ln, pos, lineNum, totalLines)
+			p.renderAnnotation(&sb, ln, pos, lineNum, totalLines, line.Below)
 		}
 
 		renderedIdx++
@@ -365,10 +423,16 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 	return sb.String()
 }
 
-// renderAnnotation renders an annotation line with gutter padding.
-// The annotation content uses [Annotation.String] which handles Col padding.
-func (p *Printer) renderAnnotation(sb *strings.Builder, ln line.Line, pos position.Position, lineNum, totalLines int) {
-	headerCtx := GutterContext{
+// renderAnnotation renders annotation lines with gutter padding for the given position.
+// The annotation content uses [AnnotationFunc] for rendering.
+func (p *Printer) renderAnnotation(
+	sb *strings.Builder,
+	ln line.Line,
+	pos position.Position,
+	lineNum, totalLines int,
+	relPos line.RelativePosition,
+) {
+	gutterCtx := GutterContext{
 		Index:      pos.Line,
 		Number:     lineNum,
 		TotalLines: totalLines,
@@ -376,9 +440,14 @@ func (p *Printer) renderAnnotation(sb *strings.Builder, ln line.Line, pos positi
 		Flag:       line.FlagAnnotation,
 		Styles:     p.styles,
 	}
-	sb.WriteString(p.gutterFunc(headerCtx))
-	// Use Annotation.String() which handles Col padding.
-	sb.WriteString(p.styles.Style(style.Comment).Render(ln.Annotation.String()))
+	sb.WriteString(p.gutterFunc(gutterCtx))
+
+	annCtx := AnnotationContext{
+		Annotations: ln.Annotations.FilterPosition(relPos),
+		Position:    relPos,
+		Styles:      p.styles,
+	}
+	sb.WriteString(p.styles.Style(style.Comment).Render(p.annotationFunc(annCtx)))
 }
 
 // writeLine writes a line with optional word wrapping.

@@ -580,25 +580,25 @@ func TestLine_Annotation(t *testing.T) {
 		t.Parallel()
 
 		tcs := map[string]struct {
-			want       string
-			annotation line.Annotation
+			want        string
+			annotations line.Annotations
 		}{
 			"no annotation": {
-				annotation: line.Annotation{},
-				want:       "   1 | key: value",
+				annotations: nil,
+				want:        "   1 | key: value",
 			},
 			"annotation below at start": {
-				annotation: line.Annotation{Content: "^ error here", Position: line.Below},
+				annotations: line.Annotations{{Content: "error here", Position: line.Below}},
 				want: `   1 | key: value
    1 | ^ error here`,
 			},
 			"annotation below with padding": {
-				annotation: line.Annotation{Content: "^ note", Position: line.Below, Col: 4},
+				annotations: line.Annotations{{Content: "note", Position: line.Below, Col: 4}},
 				want: `   1 | key: value
    1 |     ^ note`,
 			},
 			"annotation above": {
-				annotation: line.Annotation{Content: "@@ hunk header @@", Position: line.Above},
+				annotations: line.Annotations{{Content: "@@ hunk header @@", Position: line.Above}},
 				want: `   1 | @@ hunk header @@
    1 | key: value`,
 			},
@@ -613,14 +613,14 @@ func TestLine_Annotation(t *testing.T) {
 				require.Len(t, lines, 1)
 
 				ln := lines[0]
-				ln.Annotation = tc.annotation
+				ln.Annotations.Add(tc.annotations...)
 
 				assert.Equal(t, tc.want, ln.String())
 			})
 		}
 	})
 
-	t.Run("Clone preserves annotation", func(t *testing.T) {
+	t.Run("Clone preserves annotations", func(t *testing.T) {
 		t.Parallel()
 
 		tks := lexer.Tokenize("key: value\n")
@@ -628,20 +628,21 @@ func TestLine_Annotation(t *testing.T) {
 		require.Len(t, lines, 1)
 
 		original := lines[0]
-		original.Annotation = line.Annotation{Content: "original note", Position: line.Below}
+		original.Annotations.Add(line.Annotation{Content: "original note", Position: line.Below})
 
 		clone := original.Clone()
 
-		// Verify annotation was copied.
-		assert.Equal(t, original.Annotation.Content, clone.Annotation.Content)
-		assert.Equal(t, original.Annotation.Position, clone.Annotation.Position)
+		// Verify annotations were copied.
+		require.Len(t, clone.Annotations, 1)
+		assert.Equal(t, original.Annotations[0].Content, clone.Annotations[0].Content)
+		assert.Equal(t, original.Annotations[0].Position, clone.Annotations[0].Position)
 
 		// Modify clone and verify original is unchanged.
-		clone.Annotation.Content = "modified"
-		clone.Annotation.Position = line.Above
+		clone.Annotations[0].Content = "modified"
+		clone.Annotations[0].Position = line.Above
 
-		assert.Equal(t, "original note", original.Annotation.Content)
-		assert.Equal(t, line.Below, original.Annotation.Position)
+		assert.Equal(t, "original note", original.Annotations[0].Content)
+		assert.Equal(t, line.Below, original.Annotations[0].Position)
 	})
 }
 
@@ -2422,7 +2423,7 @@ func TestLines_String(t *testing.T) {
 		lines := line.NewLines(tks)
 
 		// Add annotation to first line.
-		lines[0].Annotation = line.Annotation{Content: "test annotation"}
+		lines[0].Annotations.Add(line.Annotation{Content: "test annotation"})
 
 		result := lines.String()
 		assert.Contains(t, result, "key: value")

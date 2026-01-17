@@ -1413,3 +1413,269 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 		assert.Contains(t, got, "error 1; error 2")
 	})
 }
+
+func TestError_HunkDisplay(t *testing.T) {
+	t.Parallel()
+
+	newXMLPrinter := func() *niceyaml.Printer {
+		return niceyaml.NewPrinter(
+			niceyaml.WithStyles(yamltest.NewXMLStyles()),
+			niceyaml.WithGutter(niceyaml.NoGutter),
+			niceyaml.WithStyle(lipgloss.NewStyle()),
+		)
+	}
+
+	t.Run("distant errors show separate hunks with separator", func(t *testing.T) {
+		t.Parallel()
+
+		// Create a source with many lines.
+		source := yamltest.Input(`
+			line1: a
+			line2: b
+			line3: c
+			line4: d
+			line5: e
+			line6: f
+			line7: g
+			line8: h
+			line9: i
+			line10: j
+		`)
+
+		// Errors at line1 and line10 with sourceLines=1 should create separate hunks.
+		err := niceyaml.NewError(
+			"validation error",
+			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+			niceyaml.WithPrinter(newXMLPrinter()),
+			niceyaml.WithSourceLines(1),
+			niceyaml.WithErrors(
+				niceyaml.NewError(
+					"error at start",
+					niceyaml.WithPath(paths.Root().Child("line1").Key()),
+				),
+				niceyaml.NewError(
+					"error at end",
+					niceyaml.WithPath(paths.Root().Child("line10").Key()),
+				),
+			),
+		)
+
+		got := trimLines(err.Error())
+
+		// Should show both errors.
+		assert.Contains(t, got, "error at start")
+		assert.Contains(t, got, "error at end")
+		// Should have "..." separator between hunks.
+		assert.Contains(t, got, "...")
+		// Should show context lines around errors.
+		assert.Contains(t, got, "line1")
+		assert.Contains(t, got, "line2")
+		assert.Contains(t, got, "line9")
+		assert.Contains(t, got, "line10")
+		// Should NOT show middle lines (lines 3-8).
+		assert.NotContains(t, got, "line5")
+	})
+
+	t.Run("close errors merge into single hunk", func(t *testing.T) {
+		t.Parallel()
+
+		source := yamltest.Input(`
+			line1: a
+			line2: b
+			line3: c
+			line4: d
+			line5: e
+		`)
+
+		// Errors at line1 and line3 with sourceLines=1 should merge into one hunk
+		// since they're within 2*sourceLines of each other.
+		err := niceyaml.NewError(
+			"validation error",
+			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+			niceyaml.WithPrinter(newXMLPrinter()),
+			niceyaml.WithSourceLines(1),
+			niceyaml.WithErrors(
+				niceyaml.NewError(
+					"first error",
+					niceyaml.WithPath(paths.Root().Child("line1").Key()),
+				),
+				niceyaml.NewError(
+					"second error",
+					niceyaml.WithPath(paths.Root().Child("line3").Key()),
+				),
+			),
+		)
+
+		got := trimLines(err.Error())
+
+		// Should show both errors.
+		assert.Contains(t, got, "first error")
+		assert.Contains(t, got, "second error")
+		// Should NOT have "..." separator since errors are close.
+		assert.NotContains(t, got, "...")
+	})
+
+	t.Run("nested-only distant errors show separate hunks", func(t *testing.T) {
+		t.Parallel()
+
+		source := yamltest.Input(`
+			line1: a
+			line2: b
+			line3: c
+			line4: d
+			line5: e
+			line6: f
+			line7: g
+			line8: h
+			line9: i
+			line10: j
+		`)
+
+		// No main path, but nested errors at distant locations.
+		err := niceyaml.NewError(
+			"validation failed at 2 locations",
+			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+			niceyaml.WithPrinter(newXMLPrinter()),
+			niceyaml.WithSourceLines(1),
+			niceyaml.WithErrors(
+				niceyaml.NewError(
+					"first location error",
+					niceyaml.WithPath(paths.Root().Child("line1").Key()),
+				),
+				niceyaml.NewError(
+					"second location error",
+					niceyaml.WithPath(paths.Root().Child("line10").Key()),
+				),
+			),
+		)
+
+		got := trimLines(err.Error())
+
+		// Should show both errors.
+		assert.Contains(t, got, "first location error")
+		assert.Contains(t, got, "second location error")
+		// Should have "..." separator.
+		assert.Contains(t, got, "...")
+	})
+
+	t.Run("errors at start and end of file", func(t *testing.T) {
+		t.Parallel()
+
+		source := yamltest.Input(`
+			first: value
+			middle1: a
+			middle2: b
+			middle3: c
+			middle4: d
+			middle5: e
+			last: value
+		`)
+
+		// Errors at first and last lines.
+		err := niceyaml.NewError(
+			"validation error",
+			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+			niceyaml.WithPrinter(newXMLPrinter()),
+			niceyaml.WithSourceLines(1),
+			niceyaml.WithErrors(
+				niceyaml.NewError(
+					"error at first",
+					niceyaml.WithPath(paths.Root().Child("first").Key()),
+				),
+				niceyaml.NewError(
+					"error at last",
+					niceyaml.WithPath(paths.Root().Child("last").Key()),
+				),
+			),
+		)
+
+		got := trimLines(err.Error())
+
+		// Should show both errors with context clipped to valid range.
+		assert.Contains(t, got, "error at first")
+		assert.Contains(t, got, "error at last")
+		assert.Contains(t, got, "first")
+		assert.Contains(t, got, "last")
+		// Should have "..." separator.
+		assert.Contains(t, got, "...")
+	})
+
+	t.Run("main error and nested in different hunks", func(t *testing.T) {
+		t.Parallel()
+
+		source := yamltest.Input(`
+			line1: a
+			line2: b
+			line3: c
+			line4: d
+			line5: e
+			line6: f
+			line7: g
+			line8: h
+			line9: i
+			line10: j
+		`)
+
+		// Main error at line1, nested error at line10.
+		err := niceyaml.NewError(
+			"main error",
+			niceyaml.WithPath(paths.Root().Child("line1").Key()),
+			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+			niceyaml.WithPrinter(newXMLPrinter()),
+			niceyaml.WithSourceLines(1),
+			niceyaml.WithErrors(
+				niceyaml.NewError(
+					"nested error",
+					niceyaml.WithPath(paths.Root().Child("line10").Key()),
+				),
+			),
+		)
+
+		got := trimLines(err.Error())
+
+		// Should show both error locations.
+		assert.Contains(t, got, "<generic-error>line1</generic-error>")
+		assert.Contains(t, got, "<generic-error>line10</generic-error>")
+		// Should show nested error annotation.
+		assert.Contains(t, got, "nested error")
+		// Should have "..." separator.
+		assert.Contains(t, got, "...")
+	})
+
+	t.Run("adjacent errors with no context merge into single hunk", func(t *testing.T) {
+		t.Parallel()
+
+		source := yamltest.Input(`
+			line1: a
+			line2: b
+			line3: c
+		`)
+
+		// With sourceLines=0, errors at line1 and line2 should merge because
+		// they're within threshold (2*0+1=1) of each other.
+		err := niceyaml.NewError(
+			"validation error",
+			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+			niceyaml.WithPrinter(newXMLPrinter()),
+			niceyaml.WithSourceLines(0),
+			niceyaml.WithErrors(
+				niceyaml.NewError(
+					"error at line1",
+					niceyaml.WithPath(paths.Root().Child("line1").Key()),
+				),
+				niceyaml.NewError(
+					"error at line2",
+					niceyaml.WithPath(paths.Root().Child("line2").Key()),
+				),
+			),
+		)
+
+		got := trimLines(err.Error())
+
+		// Should show both error annotations.
+		assert.Contains(t, got, "error at line1")
+		assert.Contains(t, got, "error at line2")
+		// Should NOT have "..." separator since errors are adjacent.
+		assert.NotContains(t, got, "...")
+	})
+}

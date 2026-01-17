@@ -25,8 +25,8 @@ var (
 type Line struct {
 	// Token segments for this line.
 	segments tokens.Segments
-	// Annotation contains any extra content associated with this line.
-	Annotation Annotation
+	// Annotations contains any extra content associated with this line.
+	Annotations Annotations
 	// Flag indicates the optional special category for this line.
 	Flag Flag
 	// The 1-indexed line number used for display purposes.
@@ -69,11 +69,17 @@ func (l Line) Content() string {
 // Clone returns a copy of the Line with cloned Part tokens.
 // Source pointers remain shared since they reference the original unmodified tokens.
 func (l Line) Clone() Line {
+	var anns Annotations
+	if len(l.Annotations) > 0 {
+		anns = make(Annotations, len(l.Annotations))
+		copy(anns, l.Annotations)
+	}
+
 	return Line{
-		Annotation: l.Annotation,
-		Flag:       l.Flag,
-		number:     l.number,
-		segments:   l.segments.Clone(),
+		Annotations: anns,
+		Flag:        l.Flag,
+		number:      l.number,
+		segments:    l.segments.Clone(),
 	}
 }
 
@@ -130,28 +136,46 @@ func (l Line) IsEmpty() bool {
 	return len(l.segments) == 0
 }
 
-// String reconstructs the line as a string, including any annotation.
+// String reconstructs the line as a string, including any annotations.
 // This should generally only be used for debugging.
 func (l Line) String() string {
 	var sb strings.Builder
 
 	prefix := fmt.Sprintf("%4d | ", l.Number())
 
-	// Render annotation above if applicable.
-	if l.Annotation.Content != "" && l.Annotation.Position == Above {
+	// Render annotations above if applicable.
+	above := l.Annotations.FilterPosition(Above)
+	if !above.IsEmpty() {
 		sb.WriteString(prefix)
-		sb.WriteString(l.Annotation.String())
+		sb.WriteString(above.String())
 		sb.WriteByte('\n')
 	}
 
 	sb.WriteString(prefix)
 	sb.WriteString(l.Content())
 
-	// Render annotation below if applicable.
-	if l.Annotation.Content != "" && l.Annotation.Position == Below {
+	// Render annotations below if applicable.
+	// Add "^ " prefix for below annotations (error pointers) in debug output.
+	below := l.Annotations.FilterPosition(Below)
+	if !below.IsEmpty() {
 		sb.WriteByte('\n')
 		sb.WriteString(prefix)
-		sb.WriteString(l.Annotation.String())
+
+		// Find minimum column and collect content (like Annotations.String).
+		minCol := below[0].Col
+		contents := make([]string, len(below))
+
+		for i, ann := range below {
+			contents[i] = ann.Content
+			if ann.Col < minCol {
+				minCol = ann.Col
+			}
+		}
+
+		padding := strings.Repeat(" ", max(0, minCol))
+		sb.WriteString(padding)
+		sb.WriteString("^ ")
+		sb.WriteString(strings.Join(contents, "; "))
 	}
 
 	return sb.String()

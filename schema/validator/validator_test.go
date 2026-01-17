@@ -1306,7 +1306,7 @@ func TestValidator_ErrorMessages(t *testing.T) {
 		require.Error(t, err)
 
 		// Single error should NOT use summary message.
-		assert.NotContains(t, err.Error(), "jsonschema validation failed")
+		assert.NotContains(t, err.Error(), "validation failed")
 		// Should use the actual error message.
 		assert.Contains(t, err.Error(), "got number, want string")
 	})
@@ -1330,7 +1330,7 @@ func TestValidator_ErrorMessages(t *testing.T) {
 		require.Error(t, err)
 
 		// Multiple errors should use summary message.
-		assert.Contains(t, err.Error(), "jsonschema validation failed at 2 locations")
+		assert.Contains(t, err.Error(), "validation failed at 2 locations")
 	})
 
 	t.Run("multiple errors from schema-level error includes schema name", func(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/goccy/go-yaml/ast"
@@ -63,7 +64,7 @@ func NewError(msg string, opts ...ErrorOption) *Error {
 func NewErrorFrom(err error, opts ...ErrorOption) *Error {
 	e := &Error{
 		err:         err,
-		sourceLines: 4,
+		sourceLines: 2,
 	}
 	e.SetOption(opts...)
 
@@ -203,6 +204,15 @@ func (e *Error) SetOption(opts ...ErrorOption) {
 	}
 }
 
+// getPrinter returns the configured printer, or a default if none was set.
+func (e *Error) getPrinter() StyledSlicePrinter {
+	if e.printer != nil {
+		return e.printer
+	}
+
+	return NewPrinter()
+}
+
 // Unwrap returns the underlying errors, enabling [errors.Is] and [errors.As].
 // This implements the Go 1.20+ multi-error unwrap interface.
 func (e *Error) Unwrap() []error {
@@ -319,58 +329,62 @@ func (e *Error) annotateSourceFromNested() (string, error) {
 // printNestedErrors renders nested errors without a main token highlight.
 // Used when the main error has no path but nested errors do.
 func (e *Error) printNestedErrors(refToken *token.Token) string {
-	p := e.printer
-	if p == nil {
-		p = NewPrinter()
-	}
-
+	p := e.getPrinter()
 	t := NewSourceFromToken(refToken)
 
 	// Resolve and process all nested errors.
 	resolved := e.resolveNestedErrors(t)
 
-	// Calculate line range from resolved errors.
-	minLine, maxLine := e.calculateNestedLineRange(resolved)
+	// Collect error line indices and ranges from resolved errors.
+	errorLines := make([]int, 0, len(resolved))
+	nestedRanges := make([]position.Range, 0, len(resolved))
 
-	// Highlight each nested error.
 	for _, r := range resolved {
-		nestedRanges := t.ContentPositionRanges(r.pos)
-		for _, rng := range nestedRanges {
-			p.AddStyleToRange(p.Style(style.GenericError), rng)
-		}
+		errorLines = append(errorLines, r.lineIdx)
+		nestedRanges = append(nestedRanges, t.ContentPositionRanges(r.pos)...)
 	}
-
-	// Add annotations for nested errors.
-	e.addErrorAnnotations(t, resolved)
-
-	minLine = max(0, minLine-e.sourceLines)
-	maxLine = max(minLine, maxLine+e.sourceLines)
 
 	errMsg := fmt.Sprintf("%v:\n", e.err)
 
-	return errMsg + "\n" + p.PrintSlice(t, minLine, maxLine)
-}
+	// Build hunks from error line indices.
+	hunks := e.buildErrorHunks(errorLines)
 
-// calculateNestedLineRange returns the min and max line indices from resolved errors.
-func (e *Error) calculateNestedLineRange(resolved []resolvedError) (int, int) {
-	if len(resolved) == 0 {
-		return 0, 0
-	}
-
-	minLine := resolved[0].lineIdx
-	maxLine := resolved[0].lineIdx
-
-	for _, r := range resolved[1:] {
-		if r.lineIdx < minLine {
-			minLine = r.lineIdx
+	// If single hunk, use simple path (no separator needed).
+	if len(hunks) <= 1 {
+		// Apply error styles with original positions.
+		for _, rng := range nestedRanges {
+			p.AddStyleToRange(p.Style(style.GenericError), rng)
 		}
 
-		if r.lineIdx > maxLine {
-			maxLine = r.lineIdx
+		e.addErrorAnnotations(t, resolved)
+
+		minLine, maxLine := e.calculateHunkRange(hunks)
+		minLine = max(0, minLine-e.sourceLines)
+		maxLine = min(t.Len()-1, maxLine+e.sourceLines)
+
+		return errMsg + "\n" + p.PrintSlice(t, minLine, maxLine)
+	}
+
+	// Multiple hunks: build filtered lines with separators.
+	hunkLines := e.buildHunkLines(t, hunks)
+	indexMap := e.buildLineIndexMap(hunks, t.Len())
+	e.addErrorAnnotationsToHunkLines(hunkLines, hunks, resolved, t.Len())
+
+	// Apply error styles with corrected positions for hunk lines.
+	for _, rng := range nestedRanges {
+		if hunkIdx, exists := indexMap[rng.Start.Line]; exists {
+			correctedRng := position.NewRange(
+				position.New(hunkIdx, rng.Start.Col),
+				position.New(hunkIdx, rng.End.Col),
+			)
+			p.AddStyleToRange(p.Style(style.GenericError), correctedRng)
 		}
 	}
 
-	return minLine, maxLine
+	// Create a new Source from hunk lines and print all of it.
+	filteredSource := &Source{lines: hunkLines}
+
+	return errMsg + "\n" + p.PrintSlice(filteredSource, 0, len(hunkLines)-1)
 }
 
 // resolveToken returns the error token, resolving it from the pathGetter if needed.
@@ -408,57 +422,255 @@ type resolvedError struct {
 	col     int               // 0-indexed column position for annotation.
 }
 
-func (e *Error) printErrorToken(tk *token.Token) string {
-	p := e.printer
-	if p == nil {
-		p = NewPrinter()
+// errorHunk represents a contiguous group of error lines to display.
+type errorHunk struct {
+	startLine int // 0-indexed start line (before context).
+	endLine   int // 0-indexed end line (before context).
+}
+
+// buildErrorHunks groups error line indices into hunks based on proximity.
+// Errors are merged when their context windows would be adjacent or overlapping.
+// This ensures there's always at least one line gap between hunks (for the "..." separator).
+func (e *Error) buildErrorHunks(errorLines []int) []errorHunk {
+	if len(errorLines) == 0 {
+		return nil
 	}
 
+	// Sort error lines.
+	sorted := slices.Clone(errorLines)
+	slices.Sort(sorted)
+
+	// Merge errors when their context windows would be adjacent or overlapping.
+	// Error at E1 has context [E1-S, E1+S], error at E2 has context [E2-S, E2+S].
+	// Merge if E2-S <= E1+S+1, i.e., E2 <= E1 + 2S + 1.
+	threshold := e.sourceLines*2 + 1
+	hunks := []errorHunk{{startLine: sorted[0], endLine: sorted[0]}}
+
+	for _, lineIdx := range sorted[1:] {
+		lastHunk := &hunks[len(hunks)-1]
+		if lineIdx <= lastHunk.endLine+threshold {
+			// Merge into current hunk.
+			lastHunk.endLine = lineIdx
+		} else {
+			// Start a new hunk.
+			hunks = append(hunks, errorHunk{startLine: lineIdx, endLine: lineIdx})
+		}
+	}
+
+	return hunks
+}
+
+// buildHunkLines creates a new line.Lines containing only the lines for the given hunks,
+// with context added and "..." annotations between hunks.
+func (e *Error) buildHunkLines(t *Source, hunks []errorHunk) line.Lines {
+	if len(hunks) == 0 {
+		return nil
+	}
+
+	totalLines := t.Len()
+
+	var result line.Lines
+
+	for i, hunk := range hunks {
+		// Calculate line range with sourceLines context.
+		startLine := max(0, hunk.startLine-e.sourceLines)
+		endLine := min(totalLines-1, hunk.endLine+e.sourceLines)
+
+		isFirstLineOfHunk := true
+
+		for lineIdx := startLine; lineIdx <= endLine; lineIdx++ {
+			ln := t.Line(lineIdx).Clone()
+
+			// Add "..." annotation on first line of non-first hunks.
+			if isFirstLineOfHunk && i > 0 {
+				ln.Annotations.Add(line.Annotation{Content: "...", Position: line.Above})
+			}
+
+			isFirstLineOfHunk = false
+
+			result = append(result, ln)
+		}
+	}
+
+	return result
+}
+
+// buildLineIndexMap creates a mapping from original line indices to hunk line indices.
+func (e *Error) buildLineIndexMap(hunks []errorHunk, totalLines int) map[int]int {
+	indexMap := make(map[int]int)
+	hunkLineIdx := 0
+
+	for _, hunk := range hunks {
+		startLine := max(0, hunk.startLine-e.sourceLines)
+		endLine := min(totalLines-1, hunk.endLine+e.sourceLines)
+
+		for lineIdx := startLine; lineIdx <= endLine; lineIdx++ {
+			indexMap[lineIdx] = hunkLineIdx
+			hunkLineIdx++
+		}
+	}
+
+	return indexMap
+}
+
+// addErrorAnnotationsToHunkLines adds error annotations to the filtered hunk lines,
+// mapping from original source line indices to the new indices in hunkLines.
+func (e *Error) addErrorAnnotationsToHunkLines(
+	hunkLines line.Lines,
+	hunks []errorHunk,
+	resolved []resolvedError,
+	totalLines int,
+) {
+	if len(resolved) == 0 {
+		return
+	}
+
+	// Build a mapping from original line index to hunkLines index.
+	indexMap := e.buildLineIndexMap(hunks, totalLines)
+
+	// Group errors by original line to combine messages.
+	lineAnnotations := make(map[int][]resolvedError)
+	for _, r := range resolved {
+		lineAnnotations[r.lineIdx] = append(lineAnnotations[r.lineIdx], r)
+	}
+
+	// Set annotations for each line.
+	// Note: Error annotations take precedence over "..." separators since
+	// the Line struct only supports one annotation, and error information
+	// is more valuable than visual separators. Line number gaps in the
+	// gutter will still indicate missing lines.
+	for lineIdx, lineErrs := range lineAnnotations {
+		hunkIdx, exists := indexMap[lineIdx]
+		if !exists || hunkIdx < 0 || hunkIdx >= len(hunkLines) {
+			continue
+		}
+
+		// Combine messages and find the leftmost column.
+		var messages []string
+
+		minCol := lineErrs[0].col
+
+		for _, r := range lineErrs {
+			messages = append(messages, r.message)
+			if r.col < minCol {
+				minCol = r.col
+			}
+		}
+
+		combined := strings.Join(messages, "; ")
+		hunkLines[hunkIdx].Annotations.Add(line.Annotation{
+			Content:  combined,
+			Position: line.Below,
+			Col:      minCol,
+		})
+	}
+}
+
+func (e *Error) printErrorToken(tk *token.Token) string {
+	p := e.getPrinter()
 	t := NewSourceFromToken(tk)
 
-	// Highlight the main error token.
-	ranges := t.ContentPositionRangesFromToken(tk)
-	for _, rng := range ranges {
-		p.AddStyleToRange(p.Style(style.GenericError), rng)
-	}
+	// Collect main error token ranges.
+	mainRanges := t.ContentPositionRangesFromToken(tk)
 
+	// Collect all error line indices.
+	errorLineSet := make(map[int]struct{})
 	curLine := max(0, tk.Position.Line-1)
-	minLine, maxLine := curLine, curLine
+	errorLineSet[curLine] = struct{}{}
 
-	for _, rng := range ranges {
-		lineIdx := rng.Start.Line
-		if lineIdx < minLine {
-			minLine = lineIdx
-		}
-		if lineIdx > maxLine {
-			maxLine = lineIdx
-		}
+	for _, rng := range mainRanges {
+		errorLineSet[rng.Start.Line] = struct{}{}
 	}
 
-	// Resolve nested errors and expand line range.
+	// Resolve nested errors and collect their line indices and ranges.
 	resolved := e.resolveNestedErrors(t)
+	nestedRanges := make([]position.Range, 0, len(resolved))
+
 	for _, r := range resolved {
-		// Highlight nested error content at the resolved position.
-		nestedRanges := t.ContentPositionRanges(r.pos)
+		errorLineSet[r.lineIdx] = struct{}{}
+		nestedRanges = append(nestedRanges, t.ContentPositionRanges(r.pos)...)
+	}
+
+	// Convert set to slice.
+	errorLines := make([]int, 0, len(errorLineSet))
+	for lineIdx := range errorLineSet {
+		errorLines = append(errorLines, lineIdx)
+	}
+
+	// Build hunks from error line indices.
+	hunks := e.buildErrorHunks(errorLines)
+
+	// If single hunk, use simple path (no separator needed).
+	if len(hunks) <= 1 {
+		// Apply error styles with original positions.
+		for _, rng := range mainRanges {
+			p.AddStyleToRange(p.Style(style.GenericError), rng)
+		}
+
 		for _, rng := range nestedRanges {
 			p.AddStyleToRange(p.Style(style.GenericError), rng)
 		}
-		// Expand line range to include nested errors.
-		if r.lineIdx < minLine {
-			minLine = r.lineIdx
-		}
-		if r.lineIdx > maxLine {
-			maxLine = r.lineIdx
+
+		e.addErrorAnnotations(t, resolved)
+
+		minLine, maxLine := e.calculateHunkRange(hunks)
+		minLine = max(0, minLine-e.sourceLines)
+		maxLine = min(t.Len()-1, maxLine+e.sourceLines)
+
+		return p.PrintSlice(t, minLine, maxLine)
+	}
+
+	// Multiple hunks: build filtered lines with separators.
+	hunkLines := e.buildHunkLines(t, hunks)
+	indexMap := e.buildLineIndexMap(hunks, t.Len())
+	e.addErrorAnnotationsToHunkLines(hunkLines, hunks, resolved, t.Len())
+
+	// Apply error styles with corrected positions for hunk lines.
+	for _, rng := range mainRanges {
+		if hunkIdx, exists := indexMap[rng.Start.Line]; exists {
+			correctedRng := position.NewRange(
+				position.New(hunkIdx, rng.Start.Col),
+				position.New(hunkIdx, rng.End.Col),
+			)
+			p.AddStyleToRange(p.Style(style.GenericError), correctedRng)
 		}
 	}
 
-	// Add annotations for nested errors.
-	e.addErrorAnnotations(t, resolved)
+	for _, rng := range nestedRanges {
+		if hunkIdx, exists := indexMap[rng.Start.Line]; exists {
+			correctedRng := position.NewRange(
+				position.New(hunkIdx, rng.Start.Col),
+				position.New(hunkIdx, rng.End.Col),
+			)
+			p.AddStyleToRange(p.Style(style.GenericError), correctedRng)
+		}
+	}
 
-	minLine = max(0, minLine-e.sourceLines)
-	maxLine = max(minLine, maxLine+e.sourceLines)
+	// Create a new Source from hunk lines and print all of it.
+	filteredSource := &Source{lines: hunkLines}
 
-	return p.PrintSlice(t, minLine, maxLine)
+	return p.PrintSlice(filteredSource, 0, len(hunkLines)-1)
+}
+
+// calculateHunkRange returns the min and max line indices from hunks.
+func (e *Error) calculateHunkRange(hunks []errorHunk) (int, int) {
+	if len(hunks) == 0 {
+		return 0, 0
+	}
+
+	minLine := hunks[0].startLine
+	maxLine := hunks[0].endLine
+
+	for _, hunk := range hunks[1:] {
+		if hunk.startLine < minLine {
+			minLine = hunk.startLine
+		}
+		if hunk.endLine > maxLine {
+			maxLine = hunk.endLine
+		}
+	}
+
+	return minLine, maxLine
 }
 
 // resolveNestedErrors resolves all nested error paths/tokens and returns
@@ -587,7 +799,7 @@ func (e *Error) addErrorAnnotations(t *Source, resolved []resolvedError) {
 
 		combined := strings.Join(messages, "; ")
 		t.Annotate(lineIdx, line.Annotation{
-			Content:  "^ " + combined,
+			Content:  combined,
 			Position: line.Below,
 			Col:      minCol,
 		})

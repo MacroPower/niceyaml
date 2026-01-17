@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/macropower/niceyaml"
 	"github.com/macropower/niceyaml/line"
@@ -667,13 +668,15 @@ func TestSummaryDiff_Source(t *testing.T) {
 
 			if tc.annotations != nil {
 				for lineIdx, wantAnnotation := range tc.annotations {
-					assert.Equal(t, wantAnnotation, got.Line(lineIdx).Annotation.Content)
+					anns := got.Line(lineIdx).Annotations
+					require.False(t, anns.IsEmpty(), "expected annotation at line %d", lineIdx)
+					assert.Equal(t, wantAnnotation, anns[0].Content)
 				}
 
 				// Verify all other lines have empty annotations.
 				for i := range got.Len() {
 					if _, hasAnnotation := tc.annotations[i]; !hasAnnotation {
-						assert.Empty(t, got.Line(i).Annotation.Content)
+						assert.True(t, got.Line(i).Annotations.IsEmpty())
 					}
 				}
 			}
