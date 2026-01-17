@@ -136,8 +136,8 @@
 // [DocumentDecoder.ValidateSchema], [DocumentDecoder.GetValue],
 // and their context-aware variants.
 //
-// [NewPathBuilder] and [NewPath] create [*niceyaml.Path]s for pointing to specific
-// YAML paths programmatically.
+// The [github.com/macropower/niceyaml/paths] package provides [paths.Root] and
+// [paths.Builder] for constructing YAML paths programmatically.
 //
 // # Schema Generation and Validation
 //

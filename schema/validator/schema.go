@@ -1,6 +1,6 @@
 package validator
 
-import "github.com/macropower/niceyaml"
+import "github.com/macropower/niceyaml/paths"
 
 // Schema validates data against a compiled JSON schema.
 // See [jsonschemaAdapter] for an implementation wrapping
@@ -29,9 +29,9 @@ type SchemaCompiler interface {
 type SchemaError interface {
 	error
 
-	// Path returns the path to the invalid data.
+	// Path returns the path to the invalid data along with the target part.
 	// For additionalProperties errors, this includes the invalid property name.
-	Path() *niceyaml.Path
+	Path() *paths.Path
 
 	// Message returns a human-readable error message.
 	Message() string
@@ -42,9 +42,6 @@ type SchemaError interface {
 	// IsWrapper returns true for structural wrapper errors (allOf, anyOf, etc.)
 	// that should be traversed to find concrete errors.
 	IsWrapper() bool
-
-	// PathTarget returns whether the error should highlight the key or value.
-	PathTarget() niceyaml.PathTarget
 
 	// URL returns the schema URL if available, or empty string.
 	URL() string

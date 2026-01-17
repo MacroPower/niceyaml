@@ -10,18 +10,9 @@ import (
 	"github.com/goccy/go-yaml/token"
 
 	"github.com/macropower/niceyaml/line"
+	"github.com/macropower/niceyaml/paths"
 	"github.com/macropower/niceyaml/position"
 	"github.com/macropower/niceyaml/style"
-)
-
-// PathTarget specifies which part of a mapping entry to highlight when resolving a path.
-type PathTarget int
-
-const (
-	// PathKey highlights the key of a mapping entry.
-	PathKey PathTarget = iota
-	// PathValue highlights the value of a mapping entry.
-	PathValue
 )
 
 // ErrNoSource indicates no source was provided to resolve an error path.
@@ -31,6 +22,14 @@ var ErrNoSource = errors.New("no source provided")
 // See [*Source] for an implementation.
 type FileGetter interface {
 	File() (*ast.File, error)
+}
+
+// PathPartGetter gets a yaml path and its part.
+// See [*paths.Path] for an implementation.
+type PathPartGetter interface {
+	Path() *paths.YAMLPath
+	Part() paths.Part
+	Token(file *ast.File) (*token.Token, error)
 }
 
 // Error represents a YAML error with optional source annotation.
@@ -45,10 +44,9 @@ type Error struct {
 	err         error
 	printer     StyledSlicePrinter
 	source      FileGetter
-	path        *Path
+	pathGetter  PathPartGetter
 	token       *token.Token
 	errors      []*Error // Nested errors with their own paths/tokens.
-	pathTarget  PathTarget
 	sourceLines int
 }
 
@@ -82,11 +80,11 @@ func WithSourceLines(lines int) ErrorOption {
 	}
 }
 
-// WithPath sets the YAML path where the error occurred and which part to highlight.
-func WithPath(path *Path, target PathTarget) ErrorOption {
+// WithPath sets the YAML path where the error occurred.
+// The [PathPartGetter] provides both the path and whether to highlight the key or value.
+func WithPath(ptg PathPartGetter) ErrorOption {
 	return func(e *Error) {
-		e.path = path
-		e.pathTarget = target
+		e.pathGetter = ptg
 	}
 }
 
@@ -127,7 +125,7 @@ func (e Error) Error() string {
 	}
 
 	// If no main path/token but nested errors have paths, use nested-only rendering.
-	if e.path == nil && e.token == nil {
+	if e.pathGetter == nil && e.token == nil {
 		if e.hasNestedPaths() {
 			errMsg, srcErr := e.annotateSourceFromNested()
 			if srcErr != nil {
@@ -144,14 +142,23 @@ func (e Error) Error() string {
 		return e.formatPlainError()
 	}
 
-	errMsg, srcErr := e.annotateSource(e.path)
+	errMsg, srcErr := e.annotateSource()
 	if srcErr != nil {
+		pathStr := ""
+		if e.pathGetter != nil {
+			pathStr = e.pathGetter.Path().String()
+		}
+
 		slog.Debug("annotate yaml",
-			slog.String("path", e.path.String()),
+			slog.String("path", pathStr),
 			slog.Any("error", srcErr),
 		)
 		// If we can't annotate the source, just return the error without it.
-		return fmt.Sprintf("at %s: %v", e.path.String(), e.err)
+		if pathStr != "" {
+			return fmt.Sprintf("at %s: %v", pathStr, e.err)
+		}
+
+		return e.err.Error()
 	}
 
 	return errMsg
@@ -181,7 +188,7 @@ func (e Error) formatPlainError() string {
 // hasNestedPaths returns true if any nested errors have paths or tokens.
 func (e *Error) hasNestedPaths() bool {
 	for _, nested := range e.errors {
-		if nested != nil && (nested.path != nil || nested.token != nil) {
+		if nested != nil && (nested.pathGetter != nil || nested.token != nil) {
 			return true
 		}
 	}
@@ -217,26 +224,27 @@ func (e *Error) Unwrap() []error {
 	return result
 }
 
-// Path returns the [*Path] where the error occurred as a string.
+// Path returns the [*PathTarget] where the error occurred as a string.
 // If the main error has no path but nested errors do, returns the most specific
 // nested error's path, prioritizing key-targeting errors (like additionalProperties).
 func (e *Error) Path() string {
-	if e.path != nil {
-		return e.path.String()
+	if e.pathGetter != nil {
+		return e.pathGetter.Path().String()
 	}
 
 	// Find the most specific nested error's path, prioritizing key-targeting errors.
-	var bestPath string
-
-	var bestIsKey bool
+	var (
+		bestPath  string
+		bestIsKey bool
+	)
 
 	for _, nested := range e.errors {
-		if nested == nil || nested.path == nil {
+		if nested == nil || nested.pathGetter == nil {
 			continue
 		}
 
-		pathStr := nested.path.String()
-		isKey := nested.pathTarget == PathKey
+		pathStr := nested.pathGetter.Path().String()
+		isKey := nested.pathGetter.Part() == paths.PartKey
 
 		// Prefer key-targeting errors, then longer (more specific) paths.
 		if bestPath == "" ||
@@ -250,8 +258,8 @@ func (e *Error) Path() string {
 	return bestPath
 }
 
-func (e *Error) annotateSource(path *Path) (string, error) {
-	tk, err := e.resolveToken(path)
+func (e *Error) annotateSource() (string, error) {
+	tk, err := e.resolveToken()
 	if err != nil {
 		return "", fmt.Errorf("resolve token: %w", err)
 	}
@@ -291,8 +299,8 @@ func (e *Error) annotateSourceFromNested() (string, error) {
 		}
 
 		// Otherwise try to resolve from path.
-		if nested.path != nil {
-			tk, tkErr := getTokenFromPath(file, nested.path, nested.pathTarget)
+		if nested.pathGetter != nil {
+			tk, tkErr := nested.pathGetter.Token(file)
 			if tkErr == nil {
 				refToken = tk
 
@@ -365,10 +373,14 @@ func (e *Error) calculateNestedLineRange(resolved []resolvedError) (int, int) {
 	return minLine, maxLine
 }
 
-// resolveToken returns the error token, resolving it from the path if needed.
-func (e *Error) resolveToken(path *Path) (*token.Token, error) {
+// resolveToken returns the error token, resolving it from the pathGetter if needed.
+func (e *Error) resolveToken() (*token.Token, error) {
 	if e.token != nil {
 		return e.token, nil
+	}
+
+	if e.pathGetter == nil {
+		return nil, errors.New("no path or token")
 	}
 
 	if e.source == nil {
@@ -380,7 +392,12 @@ func (e *Error) resolveToken(path *Path) (*token.Token, error) {
 		return nil, fmt.Errorf("parse source: %w", err)
 	}
 
-	return getTokenFromPath(file, path, e.pathTarget)
+	tk, err := e.pathGetter.Token(file)
+	if err != nil {
+		return nil, fmt.Errorf("resolve token: %w", err)
+	}
+
+	return tk, nil
 }
 
 // resolvedError holds information about a resolved nested error.
@@ -451,7 +468,7 @@ func (e *Error) resolveNestedErrors(t *Source) []resolvedError {
 		return nil
 	}
 
-	var resolved []resolvedError
+	resolved := make([]resolvedError, 0, len(e.errors))
 
 	for _, nested := range e.errors {
 		if nested == nil || nested.err == nil {
@@ -481,14 +498,14 @@ func (e *Error) resolveNestedError(t *Source, nested *Error) (resolvedError, err
 	switch {
 	case nested.token != nil:
 		resolvedTk = nested.token
-	case nested.path != nil:
+	case nested.pathGetter != nil:
 		// Use the parent's source to resolve the nested error's path.
 		file, fileErr := t.File()
 		if fileErr != nil {
 			return resolvedError{}, fmt.Errorf("parse source: %w", fileErr)
 		}
 
-		tk, err := getTokenFromPath(file, nested.path, nested.pathTarget)
+		tk, err := nested.pathGetter.Token(file)
 		if err != nil {
 			return resolvedError{}, fmt.Errorf("resolve path: %w", err)
 		}
@@ -575,40 +592,6 @@ func (e *Error) addErrorAnnotations(t *Source, resolved []resolvedError) {
 			Col:      minCol,
 		})
 	}
-}
-
-func getTokenFromPath(file *ast.File, path *Path, target PathTarget) (*token.Token, error) {
-	node, err := path.FilterFile(file)
-	if err != nil {
-		return nil, fmt.Errorf("filter from ast.File by YAMLPath: %w", err)
-	}
-
-	if target == PathKey {
-		if keyToken := findKeyToken(file, node); keyToken != nil {
-			return keyToken, nil
-		}
-	}
-
-	return node.GetToken(), nil
-}
-
-// findKeyToken finds the KEY token for the given node by looking at its parent.
-// Returns nil if the node is not a value in a mapping (e.g., array element or root).
-func findKeyToken(file *ast.File, node ast.Node) *token.Token {
-	if file == nil || node == nil || len(file.Docs) == 0 {
-		return nil
-	}
-
-	parent := ast.Parent(file.Docs[0].Body, node)
-	if parent == nil {
-		return nil
-	}
-
-	if mv, ok := parent.(*ast.MappingValueNode); ok {
-		return mv.Key.GetToken()
-	}
-
-	return nil
 }
 
 // getTokenPosition returns the 1-indexed line and column position of the token.

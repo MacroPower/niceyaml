@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/macropower/niceyaml"
+	"github.com/macropower/niceyaml/paths"
 	"github.com/macropower/niceyaml/schema/validator"
 	"github.com/macropower/niceyaml/yamltest"
 )
@@ -72,8 +73,7 @@ func TestValidationError_Error(t *testing.T) {
 			err: niceyaml.NewError(
 				"value is required",
 				niceyaml.WithPath(
-					niceyaml.NewPathBuilder().Child("field").Child("subfield").Build(),
-					niceyaml.PathKey,
+					paths.Root().Child("field", "subfield").Key(),
 				),
 			),
 			want: "at $.field.subfield: value is required",
@@ -85,7 +85,7 @@ func TestValidationError_Error(t *testing.T) {
 		"empty error": {
 			err: niceyaml.NewErrorFrom(
 				nil,
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("field").Build(), niceyaml.PathKey),
+				niceyaml.WithPath(paths.Root().Child("field").Key()),
 			),
 			want: "",
 		},

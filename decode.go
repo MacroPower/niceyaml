@@ -8,6 +8,8 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
+
+	"github.com/macropower/niceyaml/paths"
 )
 
 // Validator is implemented by types that validate themselves.
@@ -88,7 +90,7 @@ func NewDocumentDecoder(doc *ast.DocumentNode) *DocumentDecoder {
 // GetValue returns the string representation of the value at the given
 // path, or an empty string and false if the path is nil, the document
 // body is a directive, or no value exists at the path.
-func (dd *DocumentDecoder) GetValue(path *Path) (string, bool) {
+func (dd *DocumentDecoder) GetValue(path *paths.YAMLPath) (string, bool) {
 	if path == nil {
 		return "", false
 	}

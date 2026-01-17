@@ -9,6 +9,7 @@ import (
 
 	"github.com/macropower/niceyaml"
 	"github.com/macropower/niceyaml/examples/schemas/cafe/spec"
+	"github.com/macropower/niceyaml/paths"
 	"github.com/macropower/niceyaml/schema"
 	"github.com/macropower/niceyaml/schema/validator"
 )
@@ -57,7 +58,7 @@ func (c Config) Validate() error {
 	if err != nil {
 		return niceyaml.NewErrorFrom(
 			fmt.Errorf("invalid open time: %w", err),
-			niceyaml.WithPath(niceyaml.NewPath("spec", "hours", "open"), niceyaml.PathKey),
+			niceyaml.WithPath(paths.Root().Child("spec", "hours", "open").Value()),
 		)
 	}
 
@@ -65,14 +66,14 @@ func (c Config) Validate() error {
 	if err != nil {
 		return niceyaml.NewErrorFrom(
 			fmt.Errorf("invalid close time: %w", err),
-			niceyaml.WithPath(niceyaml.NewPath("spec", "hours", "close"), niceyaml.PathKey),
+			niceyaml.WithPath(paths.Root().Child("spec", "hours", "close").Value()),
 		)
 	}
 
 	if !openTime.Before(closeTime) {
 		return niceyaml.NewError(
 			"open must be before close",
-			niceyaml.WithPath(niceyaml.NewPath("spec", "hours", "open"), niceyaml.PathKey),
+			niceyaml.WithPath(paths.Root().Child("spec", "hours", "open").Value()),
 		)
 	}
 

@@ -5,13 +5,13 @@ import (
 	"path/filepath"
 
 	"github.com/macropower/niceyaml"
+	"github.com/macropower/niceyaml/paths"
 )
 
-// concreteError holds a concrete validation error with its computed path and target.
+// concreteError holds a concrete validation error with its computed path.
 type concreteError struct {
-	err    SchemaError
-	path   *niceyaml.Path
-	target niceyaml.PathTarget
+	err  SchemaError
+	path *paths.Path
 }
 
 // newValidationError creates a [niceyaml.Error] from a [SchemaError].
@@ -48,7 +48,7 @@ func newValidationError(err SchemaError) *niceyaml.Error {
 			causes,
 			niceyaml.NewError(
 				concrete.err.Message(),
-				niceyaml.WithPath(concrete.path, concrete.target),
+				niceyaml.WithPath(concrete.path),
 			),
 		)
 	}
@@ -61,7 +61,7 @@ func newValidationError(err SchemaError) *niceyaml.Error {
 }
 
 // collectConcreteErrorsWithPaths recursively collects all concrete (non-wrapper) errors
-// from the validation error tree along with their computed paths and targets.
+// from the validation error tree along with their computed paths.
 func collectConcreteErrorsWithPaths(err SchemaError) []concreteError {
 	var results []concreteError
 
@@ -72,7 +72,7 @@ func collectConcreteErrorsWithPaths(err SchemaError) []concreteError {
 		}
 	} else {
 		// Concrete error kind - collect it with path info.
-		results = append(results, concreteError{err: err, path: err.Path(), target: err.PathTarget()})
+		results = append(results, concreteError{err: err, path: err.Path()})
 	}
 
 	return results

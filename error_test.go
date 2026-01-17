@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/macropower/niceyaml"
+	"github.com/macropower/niceyaml/paths"
 	"github.com/macropower/niceyaml/yamltest"
 )
 
@@ -60,7 +61,7 @@ func TestError(t *testing.T) {
 		"with path and source shows annotated source": {
 			err: niceyaml.NewError(
 				"invalid value",
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathKey),
+				niceyaml.WithPath(paths.Root().Child("key").Key()),
 				niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
 				niceyaml.WithPrinter(niceyaml.NewPrinter(
 					niceyaml.WithStyles(yamltest.NewXMLStyles()),
@@ -149,7 +150,7 @@ func TestSourceWrapError(t *testing.T) {
 			inputErr: func() error {
 				return niceyaml.NewError(
 					"test error",
-					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("name").Build(), niceyaml.PathKey),
+					niceyaml.WithPath(paths.Root().Child("name").Key()),
 				)
 			},
 			wantExact: yamltest.JoinLF(
@@ -202,14 +203,14 @@ func TestGetPath(t *testing.T) {
 		"returns path string when set": {
 			err: niceyaml.NewError(
 				"test",
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("foo").Build(), niceyaml.PathKey),
+				niceyaml.WithPath(paths.Root().Child("foo").Key()),
 			),
 			want: "$.foo",
 		},
 		"nested path": {
 			err: niceyaml.NewError(
 				"test",
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("foo").Child("bar").Build(), niceyaml.PathKey),
+				niceyaml.WithPath(paths.Root().Child("foo").Child("bar").Key()),
 			),
 			want: "$.foo.bar",
 		},
@@ -219,7 +220,7 @@ func TestGetPath(t *testing.T) {
 				niceyaml.WithErrors(
 					niceyaml.NewError(
 						"nested error",
-						niceyaml.WithPath(niceyaml.NewPathBuilder().Child("nested").Build(), niceyaml.PathValue),
+						niceyaml.WithPath(paths.Root().Child("nested").Value()),
 					),
 				),
 			),
@@ -231,11 +232,11 @@ func TestGetPath(t *testing.T) {
 				niceyaml.WithErrors(
 					niceyaml.NewError(
 						"type error",
-						niceyaml.WithPath(niceyaml.NewPathBuilder().Child("value").Build(), niceyaml.PathValue),
+						niceyaml.WithPath(paths.Root().Child("value").Value()),
 					),
 					niceyaml.NewError(
 						"additional property",
-						niceyaml.WithPath(niceyaml.NewPathBuilder().Child("extra").Build(), niceyaml.PathKey),
+						niceyaml.WithPath(paths.Root().Child("extra").Key()),
 					),
 				),
 			),
@@ -247,13 +248,12 @@ func TestGetPath(t *testing.T) {
 				niceyaml.WithErrors(
 					niceyaml.NewError(
 						"short path error",
-						niceyaml.WithPath(niceyaml.NewPathBuilder().Child("a").Build(), niceyaml.PathKey),
+						niceyaml.WithPath(paths.Root().Child("a").Key()),
 					),
 					niceyaml.NewError(
 						"long path error",
 						niceyaml.WithPath(
-							niceyaml.NewPathBuilder().Child("a").Child("b").Child("c").Build(),
-							niceyaml.PathKey,
+							paths.Root().Child("a").Child("b").Child("c").Key(),
 						),
 					),
 				),
@@ -277,7 +277,7 @@ func TestGetPath(t *testing.T) {
 					nil,
 					niceyaml.NewError(
 						"nested error",
-						niceyaml.WithPath(niceyaml.NewPathBuilder().Child("found").Build(), niceyaml.PathKey),
+						niceyaml.WithPath(paths.Root().Child("found").Key()),
 					),
 				),
 			),
@@ -312,7 +312,7 @@ func TestError_GracefulDegradation(t *testing.T) {
 		"invalid path": {
 			err: niceyaml.NewError(
 				"not found",
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("nonexistent").Build(), niceyaml.PathKey),
+				niceyaml.WithPath(paths.Root().Child("nonexistent").Key()),
 				niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
 			),
 			want: "at $.nonexistent: not found",
@@ -320,14 +320,14 @@ func TestError_GracefulDegradation(t *testing.T) {
 		"path without source": {
 			err: niceyaml.NewError(
 				"missing source",
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathKey),
+				niceyaml.WithPath(paths.Root().Child("key").Key()),
 			),
 			want: "at $.key: missing source",
 		},
 		"empty source": {
 			err: niceyaml.NewError(
 				"error in empty source",
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathKey),
+				niceyaml.WithPath(paths.Root().Child("key").Key()),
 				niceyaml.WithSource(niceyaml.NewSourceFromTokens(emptyTokens)),
 			),
 			want: "at $.key: error in empty source",
@@ -335,7 +335,7 @@ func TestError_GracefulDegradation(t *testing.T) {
 		"nil source": {
 			err: niceyaml.NewError(
 				"nil source error",
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathKey),
+				niceyaml.WithPath(paths.Root().Child("key").Key()),
 				niceyaml.WithSource(nil),
 			),
 			want: "at $.key: nil source error",
@@ -344,8 +344,7 @@ func TestError_GracefulDegradation(t *testing.T) {
 			err: niceyaml.NewError(
 				"path not found",
 				niceyaml.WithPath(
-					niceyaml.NewPathBuilder().Child("nonexistent").Child("deep").Build(),
-					niceyaml.PathKey,
+					paths.Root().Child("nonexistent").Child("deep").Key(),
 				),
 				niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
 			),
@@ -355,7 +354,7 @@ func TestError_GracefulDegradation(t *testing.T) {
 			// Tests graceful handling when source has no documents (Docs slice is empty).
 			err: niceyaml.NewError(
 				"empty doc error",
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathKey),
+				niceyaml.WithPath(paths.Root().Child("key").Key()),
 				niceyaml.WithSource(niceyaml.NewSourceFromTokens(emptyTokens)),
 			),
 			want: "at $.key: empty doc error",
@@ -376,7 +375,7 @@ func TestErrorAnnotation(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		path        *niceyaml.Path
+		path        *paths.Path
 		source      string
 		errMsg      string
 		want        string
@@ -387,7 +386,7 @@ func TestErrorAnnotation(t *testing.T) {
 				foo:
 				  bar: value
 			`),
-			path:   niceyaml.NewPathBuilder().Child("foo").Child("bar").Build(),
+			path:   paths.Root().Child("foo", "bar").Key(),
 			errMsg: "nested error",
 			want: yamltest.JoinLF(
 				"[2:3] nested error:",
@@ -402,7 +401,7 @@ func TestErrorAnnotation(t *testing.T) {
 				  - first
 				  - second
 			`),
-			path:   niceyaml.NewPathBuilder().Child("items").Index(0).Build(),
+			path:   paths.Root().Child("items").Index(0).Key(),
 			errMsg: "array error",
 			want: yamltest.JoinLF(
 				"[2:5] array error:",
@@ -418,7 +417,7 @@ func TestErrorAnnotation(t *testing.T) {
 				  - name: alice
 				    age: 30
 			`),
-			path:   niceyaml.NewPathBuilder().Child("users").Index(0).Child("name").Build(),
+			path:   paths.Root().Child("users").Index(0).Child("name").Key(),
 			errMsg: "nested array error",
 			want: yamltest.JoinLF(
 				"[2:5] nested array error:",
@@ -430,7 +429,7 @@ func TestErrorAnnotation(t *testing.T) {
 		},
 		"root path": {
 			source: "key: value",
-			path:   niceyaml.NewPathBuilder().Build(),
+			path:   paths.Root().Key(),
 			errMsg: "root error",
 			want: yamltest.JoinLF(
 				"[1:4] root error:",
@@ -440,7 +439,7 @@ func TestErrorAnnotation(t *testing.T) {
 		},
 		"single top-level key path": {
 			source: "key: value",
-			path:   niceyaml.NewPathBuilder().Child("key").Build(),
+			path:   paths.Root().Child("key").Key(),
 			errMsg: "top level error",
 			want: yamltest.JoinLF(
 				"[1:1] top level error:",
@@ -456,7 +455,7 @@ func TestErrorAnnotation(t *testing.T) {
 				line4: d
 				line5: e
 			`),
-			path:        niceyaml.NewPathBuilder().Child("line3").Build(),
+			path:        paths.Root().Child("line3").Key(),
 			errMsg:      "middle error",
 			sourceLines: 1,
 			want: yamltest.JoinLF(
@@ -474,7 +473,7 @@ func TestErrorAnnotation(t *testing.T) {
 			t.Parallel()
 
 			opts := []niceyaml.ErrorOption{
-				niceyaml.WithPath(tc.path, niceyaml.PathKey),
+				niceyaml.WithPath(tc.path),
 				niceyaml.WithSource(niceyaml.NewSourceFromString(tc.source)),
 				niceyaml.WithPrinter(niceyaml.NewPrinter(
 					niceyaml.WithStyles(yamltest.NewXMLStyles()),
@@ -505,14 +504,14 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 	}
 
 	tcs := map[string]struct {
-		path   *niceyaml.Path
+		path   *paths.Path
 		source string
 		errMsg string
 		want   string
 	}{
 		"value selection highlights value token": {
 			source: "key: value",
-			path:   niceyaml.NewPathBuilder().Child("key").Build(),
+			path:   paths.Root().Child("key").Value(),
 			errMsg: "invalid value",
 			want: yamltest.JoinLF(
 				"[1:6] invalid value:",
@@ -525,7 +524,7 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 				foo:
 				  bar: nested_value
 			`),
-			path:   niceyaml.NewPathBuilder().Child("foo").Child("bar").Build(),
+			path:   paths.Root().Child("foo", "bar").Value(),
 			errMsg: "nested value error",
 			want: yamltest.JoinLF(
 				"[2:8] nested value error:",
@@ -541,7 +540,7 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 				  - first
 				  - second
 			`),
-			path:   niceyaml.NewPathBuilder().Child("items").Index(0).Build(),
+			path:   paths.Root().Child("items").Index(0).Value(),
 			errMsg: "array error",
 			want: yamltest.JoinLF(
 				"[2:5] array error:",
@@ -559,7 +558,7 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 
 			err := niceyaml.NewError(
 				tc.errMsg,
-				niceyaml.WithPath(tc.path, niceyaml.PathValue),
+				niceyaml.WithPath(tc.path),
 				niceyaml.WithSource(niceyaml.NewSourceFromString(tc.source)),
 				niceyaml.WithPrinter(newXMLPrinter()),
 			)
@@ -612,7 +611,7 @@ func TestError_SpecialParentContext(t *testing.T) {
 
 	tcs := map[string]struct {
 		source string
-		path   *niceyaml.Path
+		path   *paths.Path
 		errMsg string
 		want   string
 	}{
@@ -623,7 +622,7 @@ func TestError_SpecialParentContext(t *testing.T) {
 				- second
 				- third
 			`),
-			path:   niceyaml.NewPathBuilder().Index(1).Build(),
+			path:   paths.Root().Index(1).Key(),
 			errMsg: "array element error",
 			want: yamltest.JoinLF(
 				"[2:3] array element error:",
@@ -639,7 +638,7 @@ func TestError_SpecialParentContext(t *testing.T) {
 				key: value
 				another: line
 			`),
-			path:   niceyaml.NewPathBuilder().Build(),
+			path:   paths.Root().Key(),
 			errMsg: "document root error",
 			want: yamltest.JoinLF(
 				"[1:4] document root error:",
@@ -656,7 +655,7 @@ func TestError_SpecialParentContext(t *testing.T) {
 
 			err := niceyaml.NewError(
 				tc.errMsg,
-				niceyaml.WithPath(tc.path, niceyaml.PathKey),
+				niceyaml.WithPath(tc.path),
 				niceyaml.WithSource(niceyaml.NewSourceFromString(tc.source)),
 				niceyaml.WithPrinter(newXMLPrinter()),
 			)
@@ -780,13 +779,13 @@ func TestError_MultiError(t *testing.T) {
 
 		err := niceyaml.NewError(
 			"validation failed",
-			niceyaml.WithPath(niceyaml.NewPathBuilder().Child("name").Build(), niceyaml.PathKey),
+			niceyaml.WithPath(paths.Root().Child("name").Key()),
 			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
 			niceyaml.WithPrinter(newXMLPrinter()),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"invalid type",
-					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("value").Build(), niceyaml.PathValue),
+					niceyaml.WithPath(paths.Root().Child("value").Value()),
 				),
 			),
 		)
@@ -810,17 +809,17 @@ func TestError_MultiError(t *testing.T) {
 
 		err := niceyaml.NewError(
 			"validation failed",
-			niceyaml.WithPath(niceyaml.NewPathBuilder().Child("name").Build(), niceyaml.PathKey),
+			niceyaml.WithPath(paths.Root().Child("name").Key()),
 			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
 			niceyaml.WithPrinter(newXMLPrinter()),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"invalid type",
-					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("value").Build(), niceyaml.PathValue),
+					niceyaml.WithPath(paths.Root().Child("value").Value()),
 				),
 				niceyaml.NewError(
 					"missing field",
-					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("other").Build(), niceyaml.PathKey),
+					niceyaml.WithPath(paths.Root().Child("other").Key()),
 				),
 			),
 		)
@@ -848,11 +847,11 @@ func TestError_MultiError(t *testing.T) {
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"error1",
-					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathKey),
+					niceyaml.WithPath(paths.Root().Child("key").Key()),
 				),
 				niceyaml.NewError(
 					"error2",
-					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathValue),
+					niceyaml.WithPath(paths.Root().Child("key").Value()),
 				),
 			),
 		)
@@ -912,13 +911,13 @@ func TestError_MultiError(t *testing.T) {
 
 		err := niceyaml.NewError(
 			"main error",
-			niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathKey),
+			niceyaml.WithPath(paths.Root().Child("key").Key()),
 			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
 			niceyaml.WithPrinter(newXMLPrinter()),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"nested error",
-					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("nonexistent").Build(), niceyaml.PathKey),
+					niceyaml.WithPath(paths.Root().Child("nonexistent").Key()),
 				),
 			),
 		)
@@ -962,7 +961,7 @@ func TestError_MultiError(t *testing.T) {
 
 		err := niceyaml.NewError(
 			"main error",
-			niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathKey),
+			niceyaml.WithPath(paths.Root().Child("key").Key()),
 			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
 			niceyaml.WithPrinter(newXMLPrinter()),
 			niceyaml.WithErrors(
@@ -1030,7 +1029,7 @@ func TestError_MultiError(t *testing.T) {
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"got number, want string",
-					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("value").Build(), niceyaml.PathValue),
+					niceyaml.WithPath(paths.Root().Child("value").Value()),
 				),
 			),
 		)
@@ -1057,7 +1056,7 @@ func TestError_MultiError(t *testing.T) {
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"nested error",
-					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("value").Build(), niceyaml.PathValue),
+					niceyaml.WithPath(paths.Root().Child("value").Value()),
 				),
 			),
 		)
@@ -1089,11 +1088,11 @@ func TestError_MultiError(t *testing.T) {
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"type error on value",
-					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("value").Build(), niceyaml.PathValue),
+					niceyaml.WithPath(paths.Root().Child("value").Value()),
 				),
 				niceyaml.NewError(
 					"unexpected property",
-					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("other").Build(), niceyaml.PathKey),
+					niceyaml.WithPath(paths.Root().Child("other").Key()),
 				),
 			),
 		)
@@ -1124,11 +1123,11 @@ func TestError_MultiError(t *testing.T) {
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"resolvable error",
-					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("value").Build(), niceyaml.PathValue),
+					niceyaml.WithPath(paths.Root().Child("value").Value()),
 				),
 				niceyaml.NewError(
 					"unresolvable error",
-					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("nonexistent").Build(), niceyaml.PathKey),
+					niceyaml.WithPath(paths.Root().Child("nonexistent").Key()),
 				),
 			),
 		)
@@ -1227,7 +1226,7 @@ func TestError_hasNestedPaths(t *testing.T) {
 				niceyaml.WithErrors(
 					niceyaml.NewError(
 						"nested with path",
-						niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathKey),
+						niceyaml.WithPath(paths.Root().Child("key").Key()),
 					),
 				),
 			),
@@ -1260,7 +1259,7 @@ func TestError_hasNestedPaths(t *testing.T) {
 					niceyaml.NewError("no path"),
 					niceyaml.NewError(
 						"has path",
-						niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathKey),
+						niceyaml.WithPath(paths.Root().Child("key").Key()),
 					),
 					niceyaml.NewError("also no path"),
 				),
@@ -1330,7 +1329,7 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"error at line3",
-					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("line3").Build(), niceyaml.PathKey),
+					niceyaml.WithPath(paths.Root().Child("line3").Key()),
 				),
 			),
 		)
@@ -1363,11 +1362,11 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"error at line1",
-					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("line1").Build(), niceyaml.PathKey),
+					niceyaml.WithPath(paths.Root().Child("line1").Key()),
 				),
 				niceyaml.NewError(
 					"error at line6",
-					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("line6").Build(), niceyaml.PathKey),
+					niceyaml.WithPath(paths.Root().Child("line6").Key()),
 				),
 			),
 		)
@@ -1398,11 +1397,11 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"error 1",
-					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("line2").Build(), niceyaml.PathKey),
+					niceyaml.WithPath(paths.Root().Child("line2").Key()),
 				),
 				niceyaml.NewError(
 					"error 2",
-					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("line2").Build(), niceyaml.PathValue),
+					niceyaml.WithPath(paths.Root().Child("line2").Value()),
 				),
 			),
 		)

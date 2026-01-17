@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/macropower/niceyaml"
+	"github.com/macropower/niceyaml/paths"
 	"github.com/macropower/niceyaml/yamltest"
 )
 
@@ -102,14 +103,14 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		path      *niceyaml.Path
+		path      *paths.YAMLPath
 		input     string
 		wantVals  []string
 		wantFound []bool
 	}{
 		"simple key": {
 			input:     "key: value",
-			path:      niceyaml.NewPathBuilder().Child("key").Build(),
+			path:      paths.Root().Child("key").Path(),
 			wantVals:  []string{"value"},
 			wantFound: []bool{true},
 		},
@@ -118,7 +119,7 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 				parent:
 				  child: nested_value
 			`),
-			path:      niceyaml.NewPathBuilder().Child("parent").Child("child").Build(),
+			path:      paths.Root().Child("parent").Child("child").Path(),
 			wantVals:  []string{"nested_value"},
 			wantFound: []bool{true},
 		},
@@ -129,13 +130,13 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 				  - second
 				  - third
 			`),
-			path:      niceyaml.NewPathBuilder().Child("items").Index(1).Build(),
+			path:      paths.Root().Child("items").Index(1).Path(),
 			wantVals:  []string{"second"},
 			wantFound: []bool{true},
 		},
 		"missing key returns empty": {
 			input:     "key: value",
-			path:      niceyaml.NewPathBuilder().Child("nonexistent").Build(),
+			path:      paths.Root().Child("nonexistent").Path(),
 			wantVals:  []string{""},
 			wantFound: []bool{false},
 		},
@@ -146,25 +147,25 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 				---
 				second: 2
 			`),
-			path:      niceyaml.NewPathBuilder().Build(),
+			path:      paths.Root().Path(),
 			wantVals:  []string{"first: 1", "second: 2"},
 			wantFound: []bool{true, true},
 		},
 		"numeric value": {
 			input:     "count: 42",
-			path:      niceyaml.NewPathBuilder().Child("count").Build(),
+			path:      paths.Root().Child("count").Path(),
 			wantVals:  []string{"42"},
 			wantFound: []bool{true},
 		},
 		"boolean value": {
 			input:     "enabled: true",
-			path:      niceyaml.NewPathBuilder().Child("enabled").Build(),
+			path:      paths.Root().Child("enabled").Path(),
 			wantVals:  []string{"true"},
 			wantFound: []bool{true},
 		},
 		"null value": {
 			input:     "empty: null",
-			path:      niceyaml.NewPathBuilder().Child("empty").Build(),
+			path:      paths.Root().Child("empty").Path(),
 			wantVals:  []string{"null"},
 			wantFound: []bool{true},
 		},
@@ -185,14 +186,14 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 			require.NoError(t, err)
 
 			d := niceyaml.NewDecoder(file)
-			path := tc.path
 
-			var gotVals []string
-
-			var gotFound []bool
+			var (
+				gotVals  []string
+				gotFound []bool
+			)
 
 			for _, dd := range d.Documents() {
-				val, found := dd.GetValue(path)
+				val, found := dd.GetValue(tc.path)
 				gotVals = append(gotVals, val)
 				gotFound = append(gotFound, found)
 			}
@@ -516,7 +517,7 @@ key: value`
 	require.NoError(t, err)
 
 	d := niceyaml.NewDecoder(file)
-	path := niceyaml.NewPath("key")
+	path := paths.Root().Child("key").Path()
 
 	var foundAny bool
 	for _, dd := range d.Documents() {
@@ -687,7 +688,7 @@ func (c *validatorConfig) Validate() error {
 	if c.Name == "" {
 		return niceyaml.NewErrorFrom(
 			errNameRequired,
-			niceyaml.WithPath(niceyaml.NewPath("name"), niceyaml.PathKey),
+			niceyaml.WithPath(paths.Root().Child("name").Key()),
 		)
 	}
 
@@ -718,7 +719,7 @@ func (c *schemaValidatorConfig) ValidateSchema(data any) error {
 	if name, ok := m["name"].(string); ok && name == "invalid" {
 		return niceyaml.NewErrorFrom(
 			errSchemaValidationFailed,
-			niceyaml.WithPath(niceyaml.NewPath("name"), niceyaml.PathKey),
+			niceyaml.WithPath(paths.Root().Child("name").Key()),
 		)
 	}
 
@@ -744,7 +745,7 @@ func (c *bothValidatorConfig) ValidateSchema(data any) error {
 	if name, ok := m["name"].(string); ok && name == "invalid" {
 		return niceyaml.NewErrorFrom(
 			errSchemaValidationFailed,
-			niceyaml.WithPath(niceyaml.NewPath("name"), niceyaml.PathKey),
+			niceyaml.WithPath(paths.Root().Child("name").Key()),
 		)
 	}
 
@@ -757,7 +758,7 @@ func (c *bothValidatorConfig) Validate() error {
 	if c.Name == "" {
 		return niceyaml.NewErrorFrom(
 			errNameRequired,
-			niceyaml.WithPath(niceyaml.NewPath("name"), niceyaml.PathKey),
+			niceyaml.WithPath(paths.Root().Child("name").Key()),
 		)
 	}
 

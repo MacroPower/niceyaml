@@ -9,7 +9,7 @@ import (
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 
-	"github.com/macropower/niceyaml"
+	"github.com/macropower/niceyaml/paths"
 )
 
 // jsonschemaAdapter wraps [*jsonschema.Schema] to implement [Schema].
@@ -54,7 +54,7 @@ func (e *jsonschemaValidationError) Error() string {
 }
 
 // Path implements [SchemaError].
-func (e *jsonschemaValidationError) Path() *niceyaml.Path {
+func (e *jsonschemaValidationError) Path() *paths.Path {
 	location := e.err.InstanceLocation
 
 	// Append additional property name for AdditionalProperties errors.
@@ -62,7 +62,7 @@ func (e *jsonschemaValidationError) Path() *niceyaml.Path {
 		location = append(location, ap.Properties[0])
 	}
 
-	return buildPathFromLocation(location)
+	return buildTargetPath(location, e.targetsKey())
 }
 
 // Message implements [SchemaError].
@@ -94,16 +94,16 @@ func (e *jsonschemaValidationError) IsWrapper() bool {
 	return false
 }
 
-// PathTarget implements [SchemaError].
-func (e *jsonschemaValidationError) PathTarget() niceyaml.PathTarget {
+// targetsKey returns true if the error should highlight the key rather than the value.
+func (e *jsonschemaValidationError) targetsKey() bool {
 	switch e.err.ErrorKind.(type) {
 	case *kind.AdditionalProperties, *kind.PropertyNames, *kind.Required,
 		*kind.MinItems, *kind.MaxItems, *kind.UniqueItems,
 		*kind.Contains, *kind.MinContains, *kind.MaxContains,
 		*kind.MinProperties, *kind.MaxProperties:
-		return niceyaml.PathKey
+		return true
 	default:
-		return niceyaml.PathValue
+		return false
 	}
 }
 
@@ -119,14 +119,9 @@ func (e *jsonschemaValidationError) isSchemaKind() bool {
 	return ok
 }
 
-// buildPathFromLocation converts an InstanceLocation string slice to a [niceyaml.Path].
-func buildPathFromLocation(location []string) *niceyaml.Path {
-	current := niceyaml.NewPathBuilder()
-
-	if len(location) == 0 {
-		// Root level error.
-		return current.Build()
-	}
+// buildTargetPath converts an InstanceLocation string slice to a [*paths.Path].
+func buildTargetPath(location []string, targetsKey bool) *paths.Path {
+	builder := paths.Root()
 
 	for _, part := range location {
 		// Check if this part is a numeric index.
@@ -135,14 +130,18 @@ func buildPathFromLocation(location []string) *niceyaml.Path {
 		_, err := fmt.Sscanf(part, "%d", &index)
 		if err == nil {
 			// This is an array index.
-			current = current.Index(index)
+			builder = builder.Index(index)
 		} else {
 			// Regular property name.
-			current = current.Child(part)
+			builder = builder.Child(part)
 		}
 	}
 
-	return current.Build()
+	if targetsKey {
+		return builder.Key()
+	}
+
+	return builder.Value()
 }
 
 // defaultCompiler wraps [*jsonschema.Compiler] to implement [SchemaCompiler] with the new [Schema] return type.

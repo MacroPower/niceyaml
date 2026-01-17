@@ -22,7 +22,7 @@ Key types by feature area:
 - **Diff System:** `FullDiff`, `SummaryDiff`, `Revision` - LCS-based diffing and version tracking.
 - **Search:** `Finder`, `Normalizer`, `StandardNormalizer` - text search with normalization support.
 - **Error Handling:** `Error` - errors with source context and annotations.
-- **YAML Utilities:** `Decoder`, `DocumentDecoder`, `Validator`, `SchemaValidator`, `Encoder`, `NewPath`, `NewPathBuilder` - parsing, decoding, and validation.
+- **YAML Utilities:** `Decoder`, `DocumentDecoder`, `Validator`, `SchemaValidator`, `Encoder` - parsing, decoding, and validation.
 - **Printing:** `Printer`, `Style`, `Styles`, `StyleGetter`, `TokenStyler`, `GutterFunc`, `GutterContext` - syntax highlighting and styled rendering.
 
 ### Bubbles Subpackage (niceyaml/bubbles)
