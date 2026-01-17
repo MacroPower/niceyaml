@@ -270,6 +270,18 @@ func (ls Lines) TokenPositionRangesAt(pos position.Position) *position.Ranges {
 	return lineSegs.TokenRangesAt(pos.Line, pos.Col)
 }
 
+// ContentPositionRangesAt returns position ranges for content at the given
+// position, excluding leading and trailing spaces.
+// Returns nil if the position is out of bounds or no content exists there.
+func (ls Lines) ContentPositionRangesAt(pos position.Position) *position.Ranges {
+	lineSegs := make(tokens.Segments2, len(ls))
+	for i, l := range ls {
+		lineSegs[i] = l.segments
+	}
+
+	return lineSegs.ContentRangesAt(pos.Line, pos.Col)
+}
+
 // Content returns the combined content of all [Line]s as a string.
 // [Line]s are joined with newlines.
 func (ls Lines) Content() string {

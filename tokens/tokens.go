@@ -235,6 +235,60 @@ func (s2 Segments2) TokenRangesAt(idx, col int) *position.Ranges {
 	return ranges
 }
 
+// countLeadingSpaces returns the number of leading space characters in s.
+func countLeadingSpaces(s string) int {
+	return len(s) - len(strings.TrimLeft(s, " "))
+}
+
+// countTrailingSpaces returns the number of trailing space characters in s.
+func countTrailingSpaces(s string) int {
+	return len(s) - len(strings.TrimRight(s, " "))
+}
+
+// ContentRangesAt returns position ranges for content at the given position,
+// excluding leading and trailing spaces. Returns nil if there is no content
+// at the given position or if the token is all whitespace.
+func (s2 Segments2) ContentRangesAt(idx, col int) *position.Ranges {
+	if idx < 0 || idx >= len(s2) {
+		return nil
+	}
+
+	source := s2[idx].sourceTokenAtPtr(col)
+	if source == nil {
+		return nil
+	}
+
+	ranges := position.NewRanges()
+
+	for i, segs := range s2 {
+		lineCol := 0
+
+		for _, seg := range segs {
+			w := seg.Width()
+			if seg.source == source && w > 0 {
+				part := seg.Part()
+				origin := strings.TrimSuffix(part.Origin, "\n")
+				origin = strings.TrimSuffix(origin, "\r")
+
+				leading := countLeadingSpaces(origin)
+				trailing := countTrailingSpaces(origin)
+				contentWidth := w - leading - trailing
+
+				if contentWidth > 0 {
+					ranges.Add(position.NewRange(
+						position.New(i, lineCol+leading),
+						position.New(i, lineCol+leading+contentWidth),
+					))
+				}
+			}
+
+			lineCol += w
+		}
+	}
+
+	return ranges
+}
+
 // SplitDocuments splits a token stream into multiple token streams,
 // one for each YAML document found (separated by '---' tokens).
 // The returned slices each contain tokens for a single document,

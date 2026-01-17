@@ -171,7 +171,7 @@ func (e *Error) printErrorToken(tk *token.Token) string {
 
 	t := NewSourceFromToken(tk)
 
-	ranges := t.TokenPositionRangesFromToken(tk)
+	ranges := t.ContentPositionRangesFromToken(tk)
 	for _, rng := range ranges {
 		p.AddStyleToRange(p.Style(style.GenericError), rng)
 	}

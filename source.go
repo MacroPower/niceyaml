@@ -271,3 +271,29 @@ func (s *Source) TokenPositionRanges(positions ...position.Position) []position.
 
 	return allRanges.UniqueValues()
 }
+
+// ContentPositionRangesFromToken returns all position ranges for content
+// of the given token, excluding leading and trailing whitespace.
+// Returns nil if the token is nil or not found in the Source.
+func (s *Source) ContentPositionRangesFromToken(tk *token.Token) []position.Range {
+	positions := s.lines.TokenPositions(tk)
+	return s.ContentPositionRanges(positions...)
+}
+
+// ContentPositionRanges returns all position ranges for content at the given
+// positions, excluding leading and trailing whitespace. Duplicate ranges are removed.
+// Returns nil if no content exists at any of the given positions.
+func (s *Source) ContentPositionRanges(positions ...position.Position) []position.Range {
+	allRanges := position.NewRanges()
+
+	for _, pos := range positions {
+		ranges := s.lines.ContentPositionRangesAt(pos)
+		if ranges != nil {
+			for _, r := range ranges.Values() {
+				allRanges.Add(r)
+			}
+		}
+	}
+
+	return allRanges.UniqueValues()
+}
