@@ -6,14 +6,23 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
-	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/lexer"
+	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/macropower/niceyaml"
 	"github.com/macropower/niceyaml/yamltest"
 )
+
+// customTestError is a test error type for errors.As testing.
+type customTestError struct {
+	msg string
+}
+
+func (e *customTestError) Error() string {
+	return e.msg
+}
 
 // trimLines trims trailing whitespace from each line of a string.
 // This is useful for comparing styled output where lipgloss adds padding.
@@ -41,16 +50,16 @@ func TestError(t *testing.T) {
 		want string
 	}{
 		"nil error returns empty string": {
-			err:  niceyaml.NewError(nil),
+			err:  niceyaml.NewErrorFrom(nil),
 			want: "",
 		},
 		"no path or token returns plain error": {
-			err:  niceyaml.NewError(errors.New("something went wrong")),
+			err:  niceyaml.NewError("something went wrong"),
 			want: "something went wrong",
 		},
 		"with path and source shows annotated source": {
 			err: niceyaml.NewError(
-				errors.New("invalid value"),
+				"invalid value",
 				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathKey),
 				niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
 				niceyaml.WithPrinter(niceyaml.NewPrinter(
@@ -69,7 +78,7 @@ func TestError(t *testing.T) {
 		},
 		"with direct token bypasses path resolution": {
 			err: niceyaml.NewError(
-				errors.New("bad token"),
+				"bad token",
 				niceyaml.WithErrorToken(tokens[0]),
 				niceyaml.WithPrinter(niceyaml.NewPrinter(
 					niceyaml.WithStyles(yamltest.NewXMLStyles()),
@@ -139,7 +148,7 @@ func TestSourceWrapError(t *testing.T) {
 			},
 			inputErr: func() error {
 				return niceyaml.NewError(
-					errors.New("test error"),
+					"test error",
 					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("name").Build(), niceyaml.PathKey),
 				)
 			},
@@ -187,22 +196,92 @@ func TestGetPath(t *testing.T) {
 		want string
 	}{
 		"nil path returns empty string": {
-			err:  niceyaml.NewError(errors.New("test")),
+			err:  niceyaml.NewError("test"),
 			want: "",
 		},
 		"returns path string when set": {
 			err: niceyaml.NewError(
-				errors.New("test"),
+				"test",
 				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("foo").Build(), niceyaml.PathKey),
 			),
 			want: "$.foo",
 		},
 		"nested path": {
 			err: niceyaml.NewError(
-				errors.New("test"),
+				"test",
 				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("foo").Child("bar").Build(), niceyaml.PathKey),
 			),
 			want: "$.foo.bar",
+		},
+		"returns first nested path when main path nil": {
+			err: niceyaml.NewError(
+				"test",
+				niceyaml.WithErrors(
+					niceyaml.NewError(
+						"nested error",
+						niceyaml.WithPath(niceyaml.NewPathBuilder().Child("nested").Build(), niceyaml.PathValue),
+					),
+				),
+			),
+			want: "$.nested",
+		},
+		"prefers key-targeting nested errors": {
+			err: niceyaml.NewError(
+				"test",
+				niceyaml.WithErrors(
+					niceyaml.NewError(
+						"type error",
+						niceyaml.WithPath(niceyaml.NewPathBuilder().Child("value").Build(), niceyaml.PathValue),
+					),
+					niceyaml.NewError(
+						"additional property",
+						niceyaml.WithPath(niceyaml.NewPathBuilder().Child("extra").Build(), niceyaml.PathKey),
+					),
+				),
+			),
+			want: "$.extra",
+		},
+		"prefers longer path when same target": {
+			err: niceyaml.NewError(
+				"test",
+				niceyaml.WithErrors(
+					niceyaml.NewError(
+						"short path error",
+						niceyaml.WithPath(niceyaml.NewPathBuilder().Child("a").Build(), niceyaml.PathKey),
+					),
+					niceyaml.NewError(
+						"long path error",
+						niceyaml.WithPath(
+							niceyaml.NewPathBuilder().Child("a").Child("b").Child("c").Build(),
+							niceyaml.PathKey,
+						),
+					),
+				),
+			),
+			want: "$.a.b.c",
+		},
+		"returns empty when nested errors have no paths": {
+			err: niceyaml.NewError(
+				"test",
+				niceyaml.WithErrors(
+					niceyaml.NewError("nested 1"),
+					niceyaml.NewError("nested 2"),
+				),
+			),
+			want: "",
+		},
+		"skips nil nested errors when finding path": {
+			err: niceyaml.NewError(
+				"test",
+				niceyaml.WithErrors(
+					nil,
+					niceyaml.NewError(
+						"nested error",
+						niceyaml.WithPath(niceyaml.NewPathBuilder().Child("found").Build(), niceyaml.PathKey),
+					),
+				),
+			),
+			want: "$.found",
 		},
 	}
 
@@ -232,7 +311,7 @@ func TestError_GracefulDegradation(t *testing.T) {
 	}{
 		"invalid path": {
 			err: niceyaml.NewError(
-				errors.New("not found"),
+				"not found",
 				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("nonexistent").Build(), niceyaml.PathKey),
 				niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
 			),
@@ -240,14 +319,14 @@ func TestError_GracefulDegradation(t *testing.T) {
 		},
 		"path without source": {
 			err: niceyaml.NewError(
-				errors.New("missing source"),
+				"missing source",
 				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathKey),
 			),
 			want: "at $.key: missing source",
 		},
 		"empty source": {
 			err: niceyaml.NewError(
-				errors.New("error in empty source"),
+				"error in empty source",
 				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathKey),
 				niceyaml.WithSource(niceyaml.NewSourceFromTokens(emptyTokens)),
 			),
@@ -255,7 +334,7 @@ func TestError_GracefulDegradation(t *testing.T) {
 		},
 		"nil source": {
 			err: niceyaml.NewError(
-				errors.New("nil source error"),
+				"nil source error",
 				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathKey),
 				niceyaml.WithSource(nil),
 			),
@@ -263,7 +342,7 @@ func TestError_GracefulDegradation(t *testing.T) {
 		},
 		"nonexistent path in source": {
 			err: niceyaml.NewError(
-				errors.New("path not found"),
+				"path not found",
 				niceyaml.WithPath(
 					niceyaml.NewPathBuilder().Child("nonexistent").Child("deep").Build(),
 					niceyaml.PathKey,
@@ -275,7 +354,7 @@ func TestError_GracefulDegradation(t *testing.T) {
 		"empty document source": {
 			// Tests graceful handling when source has no documents (Docs slice is empty).
 			err: niceyaml.NewError(
-				errors.New("empty doc error"),
+				"empty doc error",
 				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathKey),
 				niceyaml.WithSource(niceyaml.NewSourceFromTokens(emptyTokens)),
 			),
@@ -297,7 +376,7 @@ func TestErrorAnnotation(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		path        *yaml.Path
+		path        *niceyaml.Path
 		source      string
 		errMsg      string
 		want        string
@@ -407,7 +486,7 @@ func TestErrorAnnotation(t *testing.T) {
 				opts = append(opts, niceyaml.WithSourceLines(tc.sourceLines))
 			}
 
-			err := niceyaml.NewError(errors.New(tc.errMsg), opts...)
+			err := niceyaml.NewError(tc.errMsg, opts...)
 
 			assert.Equal(t, tc.want, trimLines(err.Error()))
 		})
@@ -426,7 +505,7 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 	}
 
 	tcs := map[string]struct {
-		path   *yaml.Path
+		path   *niceyaml.Path
 		source string
 		errMsg string
 		want   string
@@ -479,7 +558,7 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 			t.Parallel()
 
 			err := niceyaml.NewError(
-				errors.New(tc.errMsg),
+				tc.errMsg,
 				niceyaml.WithPath(tc.path, niceyaml.PathValue),
 				niceyaml.WithSource(niceyaml.NewSourceFromString(tc.source)),
 				niceyaml.WithPrinter(newXMLPrinter()),
@@ -506,7 +585,7 @@ func TestWithPrinter(t *testing.T) {
 	)
 
 	err := niceyaml.NewError(
-		errors.New("test error"),
+		"test error",
 		niceyaml.WithErrorToken(tokens[0]),
 		niceyaml.WithPrinter(customPrinter),
 	)
@@ -533,7 +612,7 @@ func TestError_SpecialParentContext(t *testing.T) {
 
 	tcs := map[string]struct {
 		source string
-		path   *yaml.Path
+		path   *niceyaml.Path
 		errMsg string
 		want   string
 	}{
@@ -576,7 +655,7 @@ func TestError_SpecialParentContext(t *testing.T) {
 			t.Parallel()
 
 			err := niceyaml.NewError(
-				errors.New(tc.errMsg),
+				tc.errMsg,
 				niceyaml.WithPath(tc.path, niceyaml.PathKey),
 				niceyaml.WithSource(niceyaml.NewSourceFromString(tc.source)),
 				niceyaml.WithPrinter(newXMLPrinter()),
@@ -592,7 +671,7 @@ func TestError_NilToken(t *testing.T) {
 
 	// Test getTokenPosition with nil token - should return empty position.
 	err := niceyaml.NewError(
-		errors.New("nil token error"),
+		"nil token error",
 		niceyaml.WithErrorToken(nil),
 	)
 
@@ -604,16 +683,598 @@ func TestError_NilToken(t *testing.T) {
 func TestError_Unwrap(t *testing.T) {
 	t.Parallel()
 
+	t.Run("unwraps underlying error", func(t *testing.T) {
+		t.Parallel()
+
+		underlying := errors.New("underlying error")
+		err := niceyaml.NewErrorFrom(underlying)
+
+		got := err.Unwrap()
+
+		require.Len(t, got, 1)
+		assert.Equal(t, underlying, got[0])
+	})
+
+	t.Run("nil error unwraps to nil", func(t *testing.T) {
+		t.Parallel()
+
+		err := niceyaml.NewErrorFrom(nil)
+
+		got := err.Unwrap()
+
+		assert.Nil(t, got)
+	})
+
+	t.Run("errors.Is works through Error wrapper", func(t *testing.T) {
+		t.Parallel()
+
+		sentinel := errors.New("sentinel error")
+		err := niceyaml.NewErrorFrom(sentinel)
+
+		require.ErrorIs(t, err, sentinel)
+	})
+
+	t.Run("unwraps nested errors", func(t *testing.T) {
+		t.Parallel()
+
+		underlying := errors.New("main error")
+		nested1 := errors.New("nested error 1")
+		nested2 := errors.New("nested error 2")
+
+		err := niceyaml.NewErrorFrom(underlying,
+			niceyaml.WithErrors(
+				niceyaml.NewErrorFrom(nested1),
+				niceyaml.NewErrorFrom(nested2),
+			),
+		)
+
+		got := err.Unwrap()
+
+		require.Len(t, got, 3)
+		assert.Equal(t, underlying, got[0])
+		// Check that nested errors are included.
+		require.ErrorIs(t, err, nested1)
+		require.ErrorIs(t, err, nested2)
+	})
+
+	t.Run("skips nil nested errors", func(t *testing.T) {
+		t.Parallel()
+
+		underlying := errors.New("main error")
+		nested := errors.New("nested error")
+
+		err := niceyaml.NewErrorFrom(underlying,
+			niceyaml.WithErrors(
+				nil,
+				niceyaml.NewErrorFrom(nested),
+				nil,
+			),
+		)
+
+		got := err.Unwrap()
+
+		require.Len(t, got, 2)
+		assert.Equal(t, underlying, got[0])
+	})
+}
+
+func TestError_MultiError(t *testing.T) {
+	t.Parallel()
+
+	newXMLPrinter := func() *niceyaml.Printer {
+		return niceyaml.NewPrinter(
+			niceyaml.WithStyles(yamltest.NewXMLStyles()),
+			niceyaml.WithGutter(niceyaml.NoGutter),
+			niceyaml.WithStyle(lipgloss.NewStyle()),
+		)
+	}
+
+	t.Run("single nested error with path", func(t *testing.T) {
+		t.Parallel()
+
+		source := yamltest.Input(`
+			name: test
+			value: 123
+			other: data
+		`)
+
+		err := niceyaml.NewError(
+			"validation failed",
+			niceyaml.WithPath(niceyaml.NewPathBuilder().Child("name").Build(), niceyaml.PathKey),
+			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+			niceyaml.WithPrinter(newXMLPrinter()),
+			niceyaml.WithErrors(
+				niceyaml.NewError(
+					"invalid type",
+					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("value").Build(), niceyaml.PathValue),
+				),
+			),
+		)
+
+		got := trimLines(err.Error())
+
+		// Should highlight main error token and include annotation for nested error.
+		assert.Contains(t, got, "<generic-error>name</generic-error>")
+		assert.Contains(t, got, "<generic-error>123</generic-error>")
+		assert.Contains(t, got, "^ invalid type")
+	})
+
+	t.Run("multiple nested errors on different lines", func(t *testing.T) {
+		t.Parallel()
+
+		source := yamltest.Input(`
+			name: test
+			value: 123
+			other: data
+		`)
+
+		err := niceyaml.NewError(
+			"validation failed",
+			niceyaml.WithPath(niceyaml.NewPathBuilder().Child("name").Build(), niceyaml.PathKey),
+			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+			niceyaml.WithPrinter(newXMLPrinter()),
+			niceyaml.WithErrors(
+				niceyaml.NewError(
+					"invalid type",
+					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("value").Build(), niceyaml.PathValue),
+				),
+				niceyaml.NewError(
+					"missing field",
+					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("other").Build(), niceyaml.PathKey),
+				),
+			),
+		)
+
+		got := trimLines(err.Error())
+
+		// Should include both annotations.
+		assert.Contains(t, got, "^ invalid type")
+		assert.Contains(t, got, "^ missing field")
+	})
+
+	t.Run("multiple nested errors on same line", func(t *testing.T) {
+		t.Parallel()
+
+		source := yamltest.Input(`
+			key: value
+		`)
+		tokens := lexer.Tokenize(source)
+
+		// Both errors point to the same line.
+		err := niceyaml.NewError(
+			"validation failed",
+			niceyaml.WithErrorToken(tokens[0]),
+			niceyaml.WithPrinter(newXMLPrinter()),
+			niceyaml.WithErrors(
+				niceyaml.NewError(
+					"error1",
+					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathKey),
+				),
+				niceyaml.NewError(
+					"error2",
+					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathValue),
+				),
+			),
+		)
+
+		got := trimLines(err.Error())
+
+		// Errors on same line should be combined with "; ".
+		assert.Contains(t, got, "error1; error2")
+	})
+
+	t.Run("nested error with direct token", func(t *testing.T) {
+		t.Parallel()
+
+		source := yamltest.Input(`
+			key: value
+			foo: bar
+		`)
+		tokens := lexer.Tokenize(source)
+
+		// Find the "foo" token by iterating through tokens.
+		var fooToken *token.Token
+		for _, tk := range tokens {
+			if tk.Value == "foo" {
+				fooToken = tk
+				break
+			}
+		}
+
+		require.NotNil(t, fooToken, "failed to find foo token")
+
+		err := niceyaml.NewError(
+			"main error",
+			niceyaml.WithErrorToken(tokens[0]),
+			niceyaml.WithPrinter(newXMLPrinter()),
+			niceyaml.WithErrors(
+				niceyaml.NewError(
+					"nested with token",
+					niceyaml.WithErrorToken(fooToken),
+				),
+			),
+		)
+
+		got := trimLines(err.Error())
+
+		// Should highlight both tokens.
+		assert.Contains(t, got, "<generic-error>key</generic-error>")
+		assert.Contains(t, got, "<generic-error>foo</generic-error>")
+		assert.Contains(t, got, "^ nested with token")
+	})
+
+	t.Run("failed nested resolution is skipped silently", func(t *testing.T) {
+		t.Parallel()
+
+		source := yamltest.Input(`
+			key: value
+		`)
+
+		err := niceyaml.NewError(
+			"main error",
+			niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathKey),
+			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+			niceyaml.WithPrinter(newXMLPrinter()),
+			niceyaml.WithErrors(
+				niceyaml.NewError(
+					"nested error",
+					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("nonexistent").Build(), niceyaml.PathKey),
+				),
+			),
+		)
+
+		got := trimLines(err.Error())
+
+		// Should still render the main error, nested error is skipped.
+		assert.Contains(t, got, "[1:1] main error:")
+		assert.Contains(t, got, "<generic-error>key</generic-error>")
+		// Should NOT contain annotation for failed nested error.
+		assert.NotContains(t, got, "nested error")
+	})
+
+	t.Run("plain error with nested errors renders bullets", func(t *testing.T) {
+		t.Parallel()
+
+		err := niceyaml.NewError(
+			"main error",
+			niceyaml.WithErrors(
+				niceyaml.NewError("nested 1"),
+				niceyaml.NewError("nested 2"),
+			),
+		)
+
+		got := err.Error()
+
+		want := yamltest.JoinLF(
+			"main error",
+			"  • nested 1",
+			"  • nested 2",
+		)
+		assert.Equal(t, want, got)
+	})
+
+	t.Run("nested error without path or token is skipped", func(t *testing.T) {
+		t.Parallel()
+
+		source := yamltest.Input(`
+			key: value
+		`)
+
+		err := niceyaml.NewError(
+			"main error",
+			niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathKey),
+			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+			niceyaml.WithPrinter(newXMLPrinter()),
+			niceyaml.WithErrors(
+				niceyaml.NewError("no location"),
+			),
+		)
+
+		got := trimLines(err.Error())
+
+		// Should still render main error.
+		assert.Contains(t, got, "[1:1] main error:")
+		// Should NOT contain annotation for nested error without location.
+		assert.NotContains(t, got, "no location")
+	})
+
+	t.Run("errors.Is works with nested errors", func(t *testing.T) {
+		t.Parallel()
+
+		sentinel1 := errors.New("sentinel 1")
+		sentinel2 := errors.New("sentinel 2")
+
+		err := niceyaml.NewError(
+			"main error",
+			niceyaml.WithErrors(
+				niceyaml.NewErrorFrom(sentinel1),
+				niceyaml.NewErrorFrom(sentinel2),
+			),
+		)
+
+		require.ErrorIs(t, err, sentinel1)
+		require.ErrorIs(t, err, sentinel2)
+	})
+
+	t.Run("errors.As works with nested errors", func(t *testing.T) {
+		t.Parallel()
+
+		customErr := &customTestError{msg: "custom error"}
+
+		err := niceyaml.NewError(
+			"main",
+			niceyaml.WithErrors(
+				niceyaml.NewErrorFrom(customErr),
+			),
+		)
+
+		// The errors.As should find the custom error through the nested errors.
+		var target *customTestError
+		require.ErrorAs(t, err, &target)
+		assert.Equal(t, "custom error", target.msg)
+	})
+
+	t.Run("nested-only error renders with annotations", func(t *testing.T) {
+		t.Parallel()
+
+		source := yamltest.Input(`
+			name: test
+			value: 123
+		`)
+
+		// Create error with NO main path, but nested error with path.
+		err := niceyaml.NewError(
+			"validation failed at 1 location",
+			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+			niceyaml.WithPrinter(newXMLPrinter()),
+			niceyaml.WithErrors(
+				niceyaml.NewError(
+					"got number, want string",
+					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("value").Build(), niceyaml.PathValue),
+				),
+			),
+		)
+
+		got := trimLines(err.Error())
+
+		// Should contain the main message.
+		assert.Contains(t, got, "validation failed at 1 location")
+		// Should contain nested error annotation.
+		assert.Contains(t, got, "got number, want string")
+		// Should contain YAML content (not just bullet points).
+		assert.Contains(t, got, "value")
+		assert.Contains(t, got, "123")
+		// Should highlight the nested error value.
+		assert.Contains(t, got, "<generic-error>123</generic-error>")
+	})
+
+	t.Run("nested-only error without source falls back to plain", func(t *testing.T) {
+		t.Parallel()
+
+		// Create error with NO main path, no source, but nested error with path.
+		err := niceyaml.NewError(
+			"validation failed",
+			niceyaml.WithErrors(
+				niceyaml.NewError(
+					"nested error",
+					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("value").Build(), niceyaml.PathValue),
+				),
+			),
+		)
+
+		got := err.Error()
+
+		// Should fall back to plain bullet format since no source is available.
+		want := yamltest.JoinLF(
+			"validation failed",
+			"  • nested error",
+		)
+		assert.Equal(t, want, got)
+	})
+
+	t.Run("nested-only error with multiple lines", func(t *testing.T) {
+		t.Parallel()
+
+		source := yamltest.Input(`
+			name: test
+			value: 123
+			other: data
+		`)
+
+		// Create error with nested errors on different lines.
+		err := niceyaml.NewError(
+			"validation failed at 2 locations",
+			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+			niceyaml.WithPrinter(newXMLPrinter()),
+			niceyaml.WithErrors(
+				niceyaml.NewError(
+					"type error on value",
+					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("value").Build(), niceyaml.PathValue),
+				),
+				niceyaml.NewError(
+					"unexpected property",
+					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("other").Build(), niceyaml.PathKey),
+				),
+			),
+		)
+
+		got := trimLines(err.Error())
+
+		// Should contain both annotations.
+		assert.Contains(t, got, "type error on value")
+		assert.Contains(t, got, "unexpected property")
+		// Should highlight both error locations.
+		assert.Contains(t, got, "<generic-error>123</generic-error>")
+		assert.Contains(t, got, "<generic-error>other</generic-error>")
+	})
+
+	t.Run("nested-only error with resolvable and unresolvable nested errors", func(t *testing.T) {
+		t.Parallel()
+
+		source := yamltest.Input(`
+			name: test
+			value: 123
+		`)
+
+		// Create error with some nested errors that resolve and some that don't.
+		err := niceyaml.NewError(
+			"validation failed",
+			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+			niceyaml.WithPrinter(newXMLPrinter()),
+			niceyaml.WithErrors(
+				niceyaml.NewError(
+					"resolvable error",
+					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("value").Build(), niceyaml.PathValue),
+				),
+				niceyaml.NewError(
+					"unresolvable error",
+					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("nonexistent").Build(), niceyaml.PathKey),
+				),
+			),
+		)
+
+		got := trimLines(err.Error())
+
+		// Should contain the resolvable error annotation.
+		assert.Contains(t, got, "resolvable error")
+		// Should NOT contain the unresolvable error (silently skipped).
+		assert.NotContains(t, got, "unresolvable error")
+	})
+
+	t.Run("nested-only error with nested error that has no path or token", func(t *testing.T) {
+		t.Parallel()
+
+		source := yamltest.Input(`
+			name: test
+			value: 123
+		`)
+
+		// All nested errors lack path/token, so hasNestedPaths returns false
+		// and should fall back to plain bullet rendering.
+		err := niceyaml.NewError(
+			"validation failed",
+			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+			niceyaml.WithErrors(
+				niceyaml.NewError("nested without location"),
+			),
+		)
+
+		got := err.Error()
+
+		// Should fall back to plain bullet format.
+		want := yamltest.JoinLF(
+			"validation failed",
+			"  • nested without location",
+		)
+		assert.Equal(t, want, got)
+	})
+}
+
+func TestError_hasNestedPaths(t *testing.T) {
+	t.Parallel()
+
+	// These tests verify hasNestedPaths behavior indirectly through Error() output.
+	// When hasNestedPaths returns true and source is provided, we get annotated output.
+	// When hasNestedPaths returns false, we get plain bullet output regardless of source.
+
+	newXMLPrinter := func() *niceyaml.Printer {
+		return niceyaml.NewPrinter(
+			niceyaml.WithStyles(yamltest.NewXMLStyles()),
+			niceyaml.WithGutter(niceyaml.NoGutter),
+			niceyaml.WithStyle(lipgloss.NewStyle()),
+		)
+	}
+
+	source := yamltest.Input(`
+		key: value
+		other: data
+	`)
+
 	tcs := map[string]struct {
-		input          error
-		wantReturnsNil bool
+		err        *niceyaml.Error
+		wantYAML   bool // If true, expect YAML output; if false, expect bullet format.
+		wantBullet string
 	}{
-		"unwraps underlying error": {
-			input: errors.New("underlying error"),
+		"returns false when no nested errors": {
+			err: niceyaml.NewError(
+				"main error",
+				niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+			),
+			wantYAML:   false,
+			wantBullet: "main error",
 		},
-		"nil error unwraps to nil": {
-			input:          nil,
-			wantReturnsNil: true,
+		"returns false when nested errors have no paths or tokens": {
+			err: niceyaml.NewError(
+				"main error",
+				niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+				niceyaml.WithErrors(
+					niceyaml.NewError("nested 1"),
+					niceyaml.NewError("nested 2"),
+				),
+			),
+			wantYAML: false,
+			wantBullet: yamltest.JoinLF(
+				"main error",
+				"  • nested 1",
+				"  • nested 2",
+			),
+		},
+		"returns true when nested error has path": {
+			err: niceyaml.NewError(
+				"main error",
+				niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+				niceyaml.WithPrinter(newXMLPrinter()),
+				niceyaml.WithErrors(
+					niceyaml.NewError(
+						"nested with path",
+						niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathKey),
+					),
+				),
+			),
+			wantYAML: true,
+		},
+		"returns true when nested error has token": {
+			err: func() *niceyaml.Error {
+				tokens := lexer.Tokenize(source)
+
+				return niceyaml.NewError(
+					"main error",
+					niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+					niceyaml.WithPrinter(newXMLPrinter()),
+					niceyaml.WithErrors(
+						niceyaml.NewError(
+							"nested with token",
+							niceyaml.WithErrorToken(tokens[0]),
+						),
+					),
+				)
+			}(),
+			wantYAML: true,
+		},
+		"returns true with mix of path and no-path nested errors": {
+			err: niceyaml.NewError(
+				"main error",
+				niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+				niceyaml.WithPrinter(newXMLPrinter()),
+				niceyaml.WithErrors(
+					niceyaml.NewError("no path"),
+					niceyaml.NewError(
+						"has path",
+						niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathKey),
+					),
+					niceyaml.NewError("also no path"),
+				),
+			),
+			wantYAML: true,
+		},
+		"returns false with nil nested errors only": {
+			err: niceyaml.NewError(
+				"main error",
+				niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+				niceyaml.WithErrors(nil, nil),
+			),
+			wantYAML:   false,
+			wantBullet: "main error",
 		},
 	}
 
@@ -621,23 +1282,135 @@ func TestError_Unwrap(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := niceyaml.NewError(tc.input)
-			got := errors.Unwrap(err)
+			got := tc.err.Error()
 
-			if tc.wantReturnsNil {
-				assert.NoError(t, got)
+			if tc.wantYAML {
+				// Should contain YAML-style output (not just bullet points).
+				assert.Contains(t, got, "main error:")
+				assert.Contains(t, got, "key")
 			} else {
-				assert.Equal(t, tc.input, got)
+				// Should be plain bullet format.
+				assert.Equal(t, tc.wantBullet, got)
 			}
 		})
 	}
+}
 
-	t.Run("errors.Is works through Error wrapper", func(t *testing.T) {
+func TestError_calculateNestedLineRange(t *testing.T) {
+	t.Parallel()
+
+	// These tests verify calculateNestedLineRange indirectly through rendered output.
+	// The line range determines which lines are visible in the output.
+
+	newXMLPrinter := func() *niceyaml.Printer {
+		return niceyaml.NewPrinter(
+			niceyaml.WithStyles(yamltest.NewXMLStyles()),
+			niceyaml.WithGutter(niceyaml.NoGutter),
+			niceyaml.WithStyle(lipgloss.NewStyle()),
+		)
+	}
+
+	t.Run("single nested error shows correct context lines", func(t *testing.T) {
 		t.Parallel()
 
-		sentinel := errors.New("sentinel error")
-		err := niceyaml.NewError(sentinel)
+		source := yamltest.Input(`
+			line1: a
+			line2: b
+			line3: c
+			line4: d
+			line5: e
+			line6: f
+		`)
 
-		require.ErrorIs(t, err, sentinel)
+		err := niceyaml.NewError(
+			"validation error",
+			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+			niceyaml.WithPrinter(newXMLPrinter()),
+			niceyaml.WithSourceLines(1),
+			niceyaml.WithErrors(
+				niceyaml.NewError(
+					"error at line3",
+					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("line3").Build(), niceyaml.PathKey),
+				),
+			),
+		)
+
+		got := trimLines(err.Error())
+
+		// Should show context around line3.
+		assert.Contains(t, got, "line2")
+		assert.Contains(t, got, "line3")
+		assert.Contains(t, got, "line4")
+	})
+
+	t.Run("multiple nested errors on different lines expands range", func(t *testing.T) {
+		t.Parallel()
+
+		source := yamltest.Input(`
+			line1: a
+			line2: b
+			line3: c
+			line4: d
+			line5: e
+			line6: f
+		`)
+
+		err := niceyaml.NewError(
+			"validation error",
+			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+			niceyaml.WithPrinter(newXMLPrinter()),
+			niceyaml.WithSourceLines(0), // No extra context.
+			niceyaml.WithErrors(
+				niceyaml.NewError(
+					"error at line1",
+					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("line1").Build(), niceyaml.PathKey),
+				),
+				niceyaml.NewError(
+					"error at line6",
+					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("line6").Build(), niceyaml.PathKey),
+				),
+			),
+		)
+
+		got := trimLines(err.Error())
+
+		// Should show the full range from line1 to line6.
+		assert.Contains(t, got, "line1")
+		assert.Contains(t, got, "line6")
+		assert.Contains(t, got, "error at line1")
+		assert.Contains(t, got, "error at line6")
+	})
+
+	t.Run("nested errors on same line do not expand range", func(t *testing.T) {
+		t.Parallel()
+
+		source := yamltest.Input(`
+			line1: a
+			line2: b
+			line3: c
+		`)
+
+		err := niceyaml.NewError(
+			"validation error",
+			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+			niceyaml.WithPrinter(newXMLPrinter()),
+			niceyaml.WithSourceLines(0),
+			niceyaml.WithErrors(
+				niceyaml.NewError(
+					"error 1",
+					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("line2").Build(), niceyaml.PathKey),
+				),
+				niceyaml.NewError(
+					"error 2",
+					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("line2").Build(), niceyaml.PathValue),
+				),
+			),
+		)
+
+		got := trimLines(err.Error())
+
+		// Should show line2 with combined errors.
+		assert.Contains(t, got, "line2")
+		assert.Contains(t, got, "error 1; error 2")
 	})
 }

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/goccy/go-yaml"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -103,7 +102,7 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		path      *yaml.Path
+		path      *niceyaml.Path
 		input     string
 		wantVals  []string
 		wantFound []bool
@@ -686,7 +685,7 @@ func (c *validatorConfig) Validate() error {
 	c.validated = true
 
 	if c.Name == "" {
-		return niceyaml.NewError(
+		return niceyaml.NewErrorFrom(
 			errNameRequired,
 			niceyaml.WithPath(niceyaml.NewPath("name"), niceyaml.PathKey),
 		)
@@ -717,7 +716,7 @@ func (c *schemaValidatorConfig) ValidateSchema(data any) error {
 	}
 
 	if name, ok := m["name"].(string); ok && name == "invalid" {
-		return niceyaml.NewError(
+		return niceyaml.NewErrorFrom(
 			errSchemaValidationFailed,
 			niceyaml.WithPath(niceyaml.NewPath("name"), niceyaml.PathKey),
 		)
@@ -743,7 +742,7 @@ func (c *bothValidatorConfig) ValidateSchema(data any) error {
 	}
 
 	if name, ok := m["name"].(string); ok && name == "invalid" {
-		return niceyaml.NewError(
+		return niceyaml.NewErrorFrom(
 			errSchemaValidationFailed,
 			niceyaml.WithPath(niceyaml.NewPath("name"), niceyaml.PathKey),
 		)
@@ -756,7 +755,7 @@ func (c *bothValidatorConfig) Validate() error {
 	c.validated = true
 
 	if c.Name == "" {
-		return niceyaml.NewError(
+		return niceyaml.NewErrorFrom(
 			errNameRequired,
 			niceyaml.WithPath(niceyaml.NewPath("name"), niceyaml.PathKey),
 		)

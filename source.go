@@ -139,7 +139,7 @@ func (s *Source) parse() (*ast.File, error) {
 	var yamlErr yaml.Error
 	if errors.As(err, &yamlErr) {
 		return nil, NewError(
-			errors.New(yamlErr.GetMessage()),
+			yamlErr.GetMessage(),
 			WithErrorToken(yamlErr.GetToken()),
 		)
 	}
@@ -243,6 +243,12 @@ func (s *Source) String() string {
 func (s *Source) Validate() error {
 	//nolint:wrapcheck // Pass through validation error directly.
 	return s.lines.Validate()
+}
+
+// TokenAt returns the [*token.Token] at the given position.
+// Returns nil if the position is out of bounds or no token exists there.
+func (s *Source) TokenAt(pos position.Position) *token.Token {
+	return s.lines.TokenAt(pos)
 }
 
 // TokenPositionRangesFromToken returns all position ranges for a given token.

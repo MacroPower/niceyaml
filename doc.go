@@ -86,7 +86,8 @@
 // information. When printed, errors display the relevant portion of the source
 // with the error location highlighted.
 //
-// Create errors with [NewError] and configure with [ErrorOption] functions:
+// Create errors with [NewError] (from a string message) or [NewErrorFrom]
+// (wrapping an existing error), and configure with [ErrorOption] functions:
 //
 //   - [WithSourceLines]: Number of context lines to display
 //   - [WithPath]: YAML path and target (key or value) where the error occurred
@@ -135,7 +136,7 @@
 // [DocumentDecoder.ValidateSchema], [DocumentDecoder.GetValue],
 // and their context-aware variants.
 //
-// [NewPathBuilder] and [NewPath] create [*yaml.Path]s for pointing to specific
+// [NewPathBuilder] and [NewPath] create [*niceyaml.Path]s for pointing to specific
 // YAML paths programmatically.
 //
 // # Schema Generation and Validation

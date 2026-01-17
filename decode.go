@@ -88,7 +88,7 @@ func NewDocumentDecoder(doc *ast.DocumentNode) *DocumentDecoder {
 // GetValue returns the string representation of the value at the given
 // path, or an empty string and false if the path is nil, the document
 // body is a directive, or no value exists at the path.
-func (dd *DocumentDecoder) GetValue(path *yaml.Path) (string, bool) {
+func (dd *DocumentDecoder) GetValue(path *Path) (string, bool) {
 	if path == nil {
 		return "", false
 	}
@@ -191,7 +191,7 @@ func (dd *DocumentDecoder) decodeNode(ctx context.Context, v any) error {
 		var yamlErr yaml.Error
 		if errors.As(err, &yamlErr) {
 			return NewError(
-				errors.New(yamlErr.GetMessage()),
+				yamlErr.GetMessage(),
 				WithErrorToken(yamlErr.GetToken()),
 			)
 		}

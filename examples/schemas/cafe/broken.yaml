@@ -3,7 +3,7 @@ kind: Config
 metadata:
   name: Downtown Cafe
 spec:
-  sla: 15m
+  sla: m
   menu:
     items:
       - name: Espresso
@@ -19,15 +19,10 @@ spec:
   hours:
     open: "07:90"
     close: "19:00"
-    days:
-      - monday
-      - tuesday
-      - wednesday
-      - thursday
-      - friday
-      - saturday
+    days: {}
   settings:
-    wifi: true
+    wifi: |
+      true
     mobile_ordering: true
     theme: light
     custom_options:

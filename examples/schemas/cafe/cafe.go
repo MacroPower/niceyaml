@@ -2,7 +2,6 @@
 package cafe
 
 import (
-	"errors"
 	"fmt"
 	"time"
 
@@ -56,7 +55,7 @@ func (c Config) ValidateSchema(data any) error {
 func (c Config) Validate() error {
 	openTime, err := time.Parse("15:04", c.Spec.Hours.Open)
 	if err != nil {
-		return niceyaml.NewError(
+		return niceyaml.NewErrorFrom(
 			fmt.Errorf("invalid open time: %w", err),
 			niceyaml.WithPath(niceyaml.NewPath("spec", "hours", "open"), niceyaml.PathKey),
 		)
@@ -64,7 +63,7 @@ func (c Config) Validate() error {
 
 	closeTime, err := time.Parse("15:04", c.Spec.Hours.Close)
 	if err != nil {
-		return niceyaml.NewError(
+		return niceyaml.NewErrorFrom(
 			fmt.Errorf("invalid close time: %w", err),
 			niceyaml.WithPath(niceyaml.NewPath("spec", "hours", "close"), niceyaml.PathKey),
 		)
@@ -72,7 +71,7 @@ func (c Config) Validate() error {
 
 	if !openTime.Before(closeTime) {
 		return niceyaml.NewError(
-			errors.New("open must be before close"),
+			"open must be before close",
 			niceyaml.WithPath(niceyaml.NewPath("spec", "hours", "open"), niceyaml.PathKey),
 		)
 	}

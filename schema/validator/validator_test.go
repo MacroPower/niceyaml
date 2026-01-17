@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -11,6 +12,54 @@ import (
 	"github.com/macropower/niceyaml/schema/validator"
 	"github.com/macropower/niceyaml/yamltest"
 )
+
+// mockCompiler implements validator.Compiler for testing.
+type mockCompiler struct {
+	addResourceCalled bool
+	compileCalled     bool
+	addResourceErr    error
+	compileErr        error
+
+	url    string
+	schema any
+}
+
+func (m *mockCompiler) AddResource(url string, doc any) error {
+	m.addResourceCalled = true
+	if m.addResourceErr != nil {
+		return m.addResourceErr
+	}
+
+	m.url = url
+	m.schema = doc
+
+	return nil
+}
+
+func (m *mockCompiler) Compile(_ string) (validator.Schema, error) {
+	m.compileCalled = true
+	if m.compileErr != nil {
+		return nil, m.compileErr
+	}
+
+	c := jsonschema.NewCompiler()
+	// Test helper: panics on unexpected errors since this is for controlled test scenarios.
+	_ = c.AddResource(m.url, m.schema) //nolint:errcheck // test helper
+
+	schema, _ := c.Compile(m.url) //nolint:errcheck // test helper
+
+	return &mockSchema{schema: schema}, nil
+}
+
+// mockSchema implements validator.Schema for testing.
+type mockSchema struct {
+	schema *jsonschema.Schema
+}
+
+func (m *mockSchema) Validate(data any) error {
+	//nolint:wrapcheck // Errors returned must be unwrapped for type assertions.
+	return m.schema.Validate(data)
+}
 
 func TestValidationError_Error(t *testing.T) {
 	t.Parallel()
@@ -21,7 +70,7 @@ func TestValidationError_Error(t *testing.T) {
 	}{
 		"with path": {
 			err: niceyaml.NewError(
-				errors.New("value is required"),
+				"value is required",
 				niceyaml.WithPath(
 					niceyaml.NewPathBuilder().Child("field").Child("subfield").Build(),
 					niceyaml.PathKey,
@@ -30,11 +79,11 @@ func TestValidationError_Error(t *testing.T) {
 			want: "at $.field.subfield: value is required",
 		},
 		"without path": {
-			err:  niceyaml.NewError(errors.New("value is required")),
+			err:  niceyaml.NewError("value is required"),
 			want: "value is required",
 		},
 		"empty error": {
-			err: niceyaml.NewError(
+			err: niceyaml.NewErrorFrom(
 				nil,
 				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("field").Build(), niceyaml.PathKey),
 			),
@@ -769,6 +818,224 @@ func TestNewValidator_InvalidSchemaTypes(t *testing.T) {
 	}
 }
 
+func TestValidator_PathTarget(t *testing.T) {
+	t.Parallel()
+
+	// This test verifies that the validator correctly chooses PathKey vs PathValue
+	// based on the type of validation error. We verify by checking which part of
+	// the YAML gets highlighted with the <generic-error> style.
+
+	newXMLPrinter := func() *niceyaml.Printer {
+		return niceyaml.NewPrinter(
+			niceyaml.WithStyles(yamltest.NewXMLStyles()),
+			niceyaml.WithGutter(niceyaml.NoGutter),
+		)
+	}
+
+	tcs := map[string]struct {
+		schema       string
+		input        string
+		wantKeyErr   bool // True if key should be highlighted, false if value.
+		wantPath     string
+		wantContains string // Substring that should appear in error output.
+	}{
+		"type error highlights value": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"name": {"type": "string"}
+				}
+			}`,
+			input: yamltest.Input(`
+				name: 123
+			`),
+			wantKeyErr:   false,
+			wantPath:     "$.name",
+			wantContains: "<generic-error>123</generic-error>",
+		},
+		"additional property highlights key": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"name": {"type": "string"}
+				},
+				"additionalProperties": false
+			}`,
+			input: yamltest.Input(`
+				name: valid
+				extra: notAllowed
+			`),
+			wantKeyErr:   true,
+			wantPath:     "$.extra",
+			wantContains: "<generic-error>extra</generic-error>",
+		},
+		"required error highlights parent key": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"name": {"type": "string"}
+				},
+				"required": ["name"]
+			}`,
+			input: yamltest.Input(`
+				other: value
+			`),
+			wantKeyErr: true,
+			wantPath:   "$",
+		},
+		"enum error highlights value": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"status": {"enum": ["active", "inactive"]}
+				}
+			}`,
+			input: yamltest.Input(`
+				status: unknown
+			`),
+			wantKeyErr:   false,
+			wantPath:     "$.status",
+			wantContains: "<generic-error>unknown</generic-error>",
+		},
+		"minimum error highlights value": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"age": {"type": "integer", "minimum": 0}
+				}
+			}`,
+			input: yamltest.Input(`
+				age: -5
+			`),
+			wantKeyErr:   false,
+			wantPath:     "$.age",
+			wantContains: "<generic-error>-5</generic-error>",
+		},
+		"pattern error highlights value": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"email": {"type": "string", "pattern": "^[a-z]+@[a-z]+\\.[a-z]+$"}
+				}
+			}`,
+			input: yamltest.Input(`
+				email: notanemail
+			`),
+			wantKeyErr:   false,
+			wantPath:     "$.email",
+			wantContains: "<generic-error>notanemail</generic-error>",
+		},
+		"minItems error highlights key": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"items": {"type": "array", "minItems": 2}
+				}
+			}`,
+			input: yamltest.Input(`
+				items:
+				  - one
+			`),
+			wantKeyErr:   true,
+			wantPath:     "$.items",
+			wantContains: "<generic-error>items</generic-error>",
+		},
+		"maxItems error highlights key": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"items": {"type": "array", "maxItems": 1}
+				}
+			}`,
+			input: yamltest.Input(`
+				items:
+				  - one
+				  - two
+			`),
+			wantKeyErr:   true,
+			wantPath:     "$.items",
+			wantContains: "<generic-error>items</generic-error>",
+		},
+		"nested type error highlights value": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"user": {
+						"type": "object",
+						"properties": {
+							"age": {"type": "integer"}
+						}
+					}
+				}
+			}`,
+			input: yamltest.Input(`
+				user:
+				  age: notanumber
+			`),
+			wantKeyErr:   false,
+			wantPath:     "$.user.age",
+			wantContains: "<generic-error>notanumber</generic-error>",
+		},
+		"array item type error highlights value": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"numbers": {
+						"type": "array",
+						"items": {"type": "integer"}
+					}
+				}
+			}`,
+			input: yamltest.Input(`
+				numbers:
+				  - 1
+				  - notanumber
+				  - 3
+			`),
+			wantKeyErr:   false,
+			wantPath:     "$.numbers[1]",
+			wantContains: "<generic-error>notanumber</generic-error>",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			v, err := validator.New("test", []byte(tc.schema))
+			require.NoError(t, err)
+
+			source := niceyaml.NewSourceFromString(tc.input)
+			file, err := source.File()
+			require.NoError(t, err)
+
+			d := niceyaml.NewDecoder(file)
+
+			for _, dd := range d.Documents() {
+				err = dd.ValidateSchema(v)
+				require.Error(t, err)
+
+				var validationErr *niceyaml.Error
+				require.ErrorAs(t, err, &validationErr)
+				assert.Equal(t, tc.wantPath, validationErr.Path())
+
+				// Apply source and printer to get annotated output.
+				validationErr.SetOption(
+					niceyaml.WithSource(source),
+					niceyaml.WithPrinter(newXMLPrinter()),
+				)
+
+				errOutput := validationErr.Error()
+
+				if tc.wantContains != "" {
+					assert.Contains(t, errOutput, tc.wantContains,
+						"expected error output to contain specific highlighting pattern")
+				}
+			}
+		})
+	}
+}
+
 func TestNewValidator_BooleanSchema(t *testing.T) {
 	t.Parallel()
 
@@ -806,4 +1073,338 @@ func TestNewValidator_BooleanSchema(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidator_SubErrorAnnotations(t *testing.T) {
+	t.Parallel()
+
+	// Test that sub-errors are rendered as annotations with their own paths.
+	tcs := map[string]struct {
+		schema           string
+		input            string
+		wantPath         string
+		wantAnnotations  []string // Substrings that should appear in annotation output.
+		wantNestedErrors int
+	}{
+		"single sub-error annotation": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"name": {"type": "string"}
+				}
+			}`,
+			input: yamltest.Input(`
+				name: 123
+			`),
+			wantPath:         "$.name",
+			wantAnnotations:  []string{"got number, want string"},
+			wantNestedErrors: 1,
+		},
+		"multiple sub-errors from required fields": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"first": {"type": "string"},
+					"second": {"type": "string"}
+				},
+				"required": ["first", "second"]
+			}`,
+			input: yamltest.Input(`
+				other: value
+			`),
+			wantPath:         "$",
+			wantAnnotations:  []string{"missing properties", "first", "second"},
+			wantNestedErrors: 1,
+		},
+		"nested object sub-error": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"user": {
+						"type": "object",
+						"properties": {
+							"age": {"type": "integer"}
+						}
+					}
+				}
+			}`,
+			input: yamltest.Input(`
+				user:
+				  age: notanumber
+			`),
+			wantPath:         "$.user.age",
+			wantAnnotations:  []string{"got string, want integer"},
+			wantNestedErrors: 1,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			v, err := validator.New("test", []byte(tc.schema))
+			require.NoError(t, err)
+
+			source := niceyaml.NewSourceFromString(tc.input)
+			file, err := source.File()
+			require.NoError(t, err)
+
+			d := niceyaml.NewDecoder(file)
+
+			for _, dd := range d.Documents() {
+				err = dd.ValidateSchema(v)
+				require.Error(t, err)
+
+				var validationErr *niceyaml.Error
+				require.ErrorAs(t, err, &validationErr)
+				assert.Equal(t, tc.wantPath, validationErr.Path())
+
+				// Apply source to enable annotation rendering.
+				validationErr.SetOption(niceyaml.WithSource(source))
+
+				errOutput := validationErr.Error()
+
+				// Verify that expected annotations appear.
+				for _, annotation := range tc.wantAnnotations {
+					assert.Contains(t, errOutput, annotation,
+						"expected error output to contain annotation text")
+				}
+
+				// Verify nested error count via Unwrap.
+				// Unwrapped includes main error + nested errors.
+				unwrapped := validationErr.Unwrap()
+				nestedCount := len(unwrapped) - 1
+				assert.Equal(t, tc.wantNestedErrors, nestedCount,
+					"expected %d nested errors, got %d", tc.wantNestedErrors, nestedCount)
+			}
+		})
+	}
+}
+
+func TestNew_WithCompiler(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		compiler          *mockCompiler
+		want              error
+		wantAddResourceOK bool
+		wantCompileOK     bool
+	}{
+		"custom compiler is used": {
+			compiler:          &mockCompiler{},
+			wantAddResourceOK: true,
+			wantCompileOK:     true,
+		},
+		"custom compiler AddResource error": {
+			compiler: &mockCompiler{
+				addResourceErr: errors.New("add resource failed"),
+			},
+			want:              validator.ErrAddResource,
+			wantAddResourceOK: true,
+		},
+		"custom compiler Compile error": {
+			compiler: &mockCompiler{
+				compileErr: errors.New("compile failed"),
+			},
+			want:              validator.ErrCompileSchema,
+			wantAddResourceOK: true,
+			wantCompileOK:     true,
+		},
+	}
+
+	schemaData := []byte(`{"type": "object"}`)
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			v, err := validator.New("test", schemaData, validator.WithCompiler(tc.compiler))
+
+			if tc.want != nil {
+				require.ErrorIs(t, err, tc.want)
+				assert.Nil(t, v)
+			} else {
+				require.NoError(t, err)
+				assert.NotNil(t, v)
+			}
+
+			assert.Equal(t, tc.wantAddResourceOK, tc.compiler.addResourceCalled,
+				"AddResource called mismatch")
+			assert.Equal(t, tc.wantCompileOK, tc.compiler.compileCalled,
+				"Compile called mismatch")
+		})
+	}
+}
+
+func TestNew_DefaultCompiler(t *testing.T) {
+	t.Parallel()
+
+	// Verify that without WithCompiler, the default jsonschema.NewCompiler is used.
+	schemaData := []byte(`{"type": "object", "properties": {"name": {"type": "string"}}}`)
+
+	v, err := validator.New("test", schemaData)
+	require.NoError(t, err)
+	require.NotNil(t, v)
+
+	// Validate that the schema works correctly.
+	err = v.ValidateSchema(map[string]any{"name": "test"})
+	require.NoError(t, err)
+
+	err = v.ValidateSchema(map[string]any{"name": 123})
+	require.Error(t, err)
+}
+
+func TestMustNew_WithCompiler(t *testing.T) {
+	t.Parallel()
+
+	// Test that MustNew passes options through to New.
+	compiler := &mockCompiler{}
+
+	schemaData := []byte(`{"type": "object"}`)
+
+	v := validator.MustNew("test", schemaData, validator.WithCompiler(compiler))
+	assert.NotNil(t, v)
+	assert.True(t, compiler.addResourceCalled, "AddResource should be called")
+	assert.True(t, compiler.compileCalled, "Compile should be called")
+}
+
+func TestMustNew_WithCompiler_Panics(t *testing.T) {
+	t.Parallel()
+
+	// Test that MustNew panics when compiler returns an error.
+	compiler := &mockCompiler{
+		compileErr: errors.New("compile failed"),
+	}
+
+	schemaData := []byte(`{"type": "object"}`)
+
+	assert.Panics(t, func() {
+		validator.MustNew("test", schemaData, validator.WithCompiler(compiler))
+	})
+}
+
+func TestValidator_ErrorMessages(t *testing.T) {
+	t.Parallel()
+
+	// Tests the summary message behavior of validation errors.
+	// Single errors use concrete messages, multiple errors use summary format.
+
+	t.Run("single validation error uses concrete message", func(t *testing.T) {
+		t.Parallel()
+
+		schemaData := []byte(`{
+			"type": "object",
+			"properties": {
+				"name": {"type": "string"}
+			}
+		}`)
+
+		v, err := validator.New("test", schemaData)
+		require.NoError(t, err)
+
+		err = v.ValidateSchema(map[string]any{"name": 123})
+		require.Error(t, err)
+
+		// Single error should NOT use summary message.
+		assert.NotContains(t, err.Error(), "jsonschema validation failed")
+		// Should use the actual error message.
+		assert.Contains(t, err.Error(), "got number, want string")
+	})
+
+	t.Run("multiple validation errors use summary message", func(t *testing.T) {
+		t.Parallel()
+
+		schemaData := []byte(`{
+			"type": "object",
+			"properties": {
+				"name": {"type": "string"},
+				"age": {"type": "number"}
+			}
+		}`)
+
+		v, err := validator.New("test", schemaData)
+		require.NoError(t, err)
+
+		// Both fields have wrong types.
+		err = v.ValidateSchema(map[string]any{"name": 123, "age": "thirty"})
+		require.Error(t, err)
+
+		// Multiple errors should use summary message.
+		assert.Contains(t, err.Error(), "jsonschema validation failed at 2 locations")
+	})
+
+	t.Run("multiple errors from schema-level error includes schema name", func(t *testing.T) {
+		t.Parallel()
+
+		schemaData := []byte(`{
+			"type": "object",
+			"properties": {
+				"first": {"type": "string"},
+				"second": {"type": "string"}
+			},
+			"required": ["first", "second"]
+		}`)
+
+		v, err := validator.New("test.schema.json", schemaData)
+		require.NoError(t, err)
+
+		// Provide wrong types for required fields.
+		err = v.ValidateSchema(map[string]any{"first": 1, "second": 2})
+		require.Error(t, err)
+
+		// Should include schema name in message.
+		assert.Contains(t, err.Error(), "test.schema.json")
+	})
+
+	t.Run("nested errors are included in error unwrap chain", func(t *testing.T) {
+		t.Parallel()
+
+		schemaData := []byte(`{
+			"type": "object",
+			"properties": {
+				"name": {"type": "string"},
+				"value": {"type": "number"}
+			}
+		}`)
+
+		v, err := validator.New("test", schemaData)
+		require.NoError(t, err)
+
+		// Both fields have wrong types.
+		err = v.ValidateSchema(map[string]any{"name": 123, "value": "string"})
+		require.Error(t, err)
+
+		var validationErr *niceyaml.Error
+		require.ErrorAs(t, err, &validationErr)
+
+		// Unwrap should include main + nested errors.
+		unwrapped := validationErr.Unwrap()
+		// At least 3: main error + 2 nested errors.
+		assert.GreaterOrEqual(t, len(unwrapped), 3)
+	})
+
+	t.Run("validation error path comes from nested errors", func(t *testing.T) {
+		t.Parallel()
+
+		schemaData := []byte(`{
+			"type": "object",
+			"properties": {
+				"name": {"type": "string"}
+			},
+			"additionalProperties": false
+		}`)
+
+		v, err := validator.New("test", schemaData)
+		require.NoError(t, err)
+
+		// Additional property should report path to that property.
+		err = v.ValidateSchema(map[string]any{"name": "valid", "extra": "notAllowed"})
+		require.Error(t, err)
+
+		var validationErr *niceyaml.Error
+		require.ErrorAs(t, err, &validationErr)
+
+		// Path should point to the extra property (nested error path).
+		assert.Equal(t, "$.extra", validationErr.Path())
+	})
 }
