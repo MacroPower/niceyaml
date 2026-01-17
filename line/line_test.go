@@ -2507,3 +2507,83 @@ func TestLine_Number_Fallbacks(t *testing.T) {
 		assert.Equal(t, 3, lines[2].Number())
 	})
 }
+
+// TestNewLines_WhitespaceType verifies that pure horizontal whitespace parts are
+// assigned SpaceType for correct styling. This handles cases where the go-yaml lexer
+// bundles trailing whitespace (like next line's indentation) with the previous token.
+func TestNewLines_WhitespaceType(t *testing.T) {
+	t.Parallel()
+
+	t.Run("trailing whitespace becomes SpaceType", func(t *testing.T) {
+		t.Parallel()
+
+		// The lexer may bundle "true\n  " together as a single boolean token.
+		// After splitting, the "  " part should be SpaceType, not BoolType.
+		input := "parent:\n  child: true\n"
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+
+		// Line 2 (index 1) should have the indented "child: true".
+		require.Greater(t, len(lines), 1)
+
+		line2 := lines[1]
+		tokens := line2.Tokens()
+
+		// Find any pure whitespace tokens and verify they are SpaceType.
+		for _, tk := range tokens {
+			if strings.TrimSpace(tk.Origin) == "" && tk.Origin != "" && !strings.Contains(tk.Origin, "\n") {
+				assert.Equal(t, token.SpaceType, tk.Type,
+					"pure horizontal whitespace should be SpaceType, got %s for Origin %q",
+					tk.Type, tk.Origin)
+			}
+		}
+	})
+
+	t.Run("block scalar whitespace preserved as StringType", func(t *testing.T) {
+		t.Parallel()
+
+		// Block scalar content whitespace should retain StringType.
+		input := "text: |\n  line1\n  line2\n"
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+
+		// Lines 2 and 3 contain block scalar content.
+		// Their whitespace should NOT be converted to SpaceType.
+		for i := 1; i < len(lines); i++ {
+			for _, tk := range lines[i].Tokens() {
+				// Check if this is a whitespace-only token from block scalar.
+				if strings.TrimSpace(tk.Origin) == "" && tk.Origin != "" {
+					// Whitespace in block scalar should remain StringType.
+					assert.Equal(t, token.StringType, tk.Type,
+						"block scalar whitespace should remain StringType, got %s for Origin %q on line %d",
+						tk.Type, tk.Origin, i)
+				}
+			}
+		}
+	})
+
+	t.Run("nested indentation with boolean", func(t *testing.T) {
+		t.Parallel()
+
+		// More complex case: nested structure with boolean values.
+		input := yamltest.Input(`
+			root:
+			  nested:
+			    enabled: true
+			    disabled: false
+		`)
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+
+		// Verify all pure horizontal whitespace parts are SpaceType.
+		for i, ln := range lines {
+			for _, tk := range ln.Tokens() {
+				if strings.TrimSpace(tk.Origin) == "" && tk.Origin != "" && !strings.Contains(tk.Origin, "\n") {
+					assert.Equal(t, token.SpaceType, tk.Type,
+						"pure horizontal whitespace should be SpaceType on line %d, got %s for Origin %q",
+						i, tk.Type, tk.Origin)
+				}
+			}
+		}
+	})
+}

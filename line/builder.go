@@ -241,9 +241,18 @@ func (b *linesBuilder) processPart(ctx *partContext) bool {
 		valueOffset = ctx.tk.Position.Offset
 	}
 
+	// Determine token type: use SpaceType for pure horizontal whitespace parts.
+	// This handles cases where the lexer bundles trailing whitespace (like next
+	// line's indentation) with the previous token. Exception: block scalar content
+	// where whitespace is meaningful and should retain the original StringType.
+	tokenType := ctx.tk.Type
+	if isPureHorizontalWhitespace(ctx.part) && val == "" && !ctx.isBlockScalarContent {
+		tokenType = token.SpaceType
+	}
+
 	// Create token for this part.
 	newTk := &token.Token{
-		Type:          ctx.tk.Type,
+		Type:          tokenType,
 		CharacterType: ctx.tk.CharacterType,
 		Indicator:     ctx.tk.Indicator,
 		Origin:        ctx.part,
@@ -433,6 +442,11 @@ func isBlockScalarContent(tk *token.Token) bool {
 // isPureNewline returns true if s is exactly a line ending (LF or CRLF).
 func isPureNewline(s string) bool {
 	return s == "\n" || s == "\r\n"
+}
+
+// isPureHorizontalWhitespace returns true if s contains only spaces and tabs.
+func isPureHorizontalWhitespace(s string) bool {
+	return s != "" && strings.TrimLeft(s, " \t") == ""
 }
 
 // splitOriginIntoParts splits a token's Origin at newline boundaries.

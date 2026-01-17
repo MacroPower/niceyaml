@@ -327,7 +327,7 @@ func TestErrorAnnotation(t *testing.T) {
 				"",
 				"<name-tag>items</name-tag><punctuation-mapping-value>:</punctuation-mapping-value>",
 				"<text>  </text><punctuation-sequence-entry>-</punctuation-sequence-entry><text> </text><generic-error>first</generic-error>",
-				"<literal-string>  </literal-string><punctuation-sequence-entry>-</punctuation-sequence-entry><text> </text><literal-string>second</literal-string>",
+				"<text>  </text><punctuation-sequence-entry>-</punctuation-sequence-entry><text> </text><literal-string>second</literal-string>",
 			),
 		},
 		"array element path - nested object in array": {
@@ -343,7 +343,7 @@ func TestErrorAnnotation(t *testing.T) {
 				"",
 				"<name-tag>users</name-tag><punctuation-mapping-value>:</punctuation-mapping-value>",
 				"<text>  </text><punctuation-sequence-entry>-</punctuation-sequence-entry><text> </text><generic-error>name</generic-error><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>alice</literal-string>",
-				"<literal-string>    </literal-string><name-tag>age</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-number-integer>30</literal-number-integer>",
+				"<text>    </text><name-tag>age</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-number-integer>30</literal-number-integer>",
 			),
 		},
 		"root path": {
