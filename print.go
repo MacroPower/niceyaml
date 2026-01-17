@@ -313,24 +313,17 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 		}
 
 		hasAnnotation := p.annotationsEnabled && ln.Annotation.Content != ""
+		hasAboveAnnotation := hasAnnotation && ln.Annotation.Position == line.Above
+		hasBelowAnnotation := hasAnnotation && ln.Annotation.Position == line.Below
 
-		if hasAnnotation {
+		if hasAboveAnnotation {
 			// Add newline between hunks (not before first hunk).
 			if renderedIdx > 0 {
 				sb.WriteByte('\n')
 			}
 
-			// Render hunk header with gutter padding.
-			headerCtx := GutterContext{
-				Index:      pos.Line,
-				Number:     lineNum,
-				TotalLines: totalLines,
-				Soft:       false,
-				Flag:       line.FlagAnnotation,
-				Styles:     p.styles,
-			}
-			sb.WriteString(p.gutterFunc(headerCtx))
-			sb.WriteString(p.styles.Style(style.Comment).Render(ln.Annotation.Content))
+			// Render annotation above the line.
+			p.renderAnnotation(&sb, ln, pos, lineNum, totalLines)
 			sb.WriteByte('\n')
 		} else if renderedIdx > 0 {
 			// Add newline between lines within a hunk.
@@ -361,10 +354,31 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 			p.writeLine(&sb, styledContent, pos.Line, nil, gutterCtx, gutterWidth)
 		}
 
+		if hasBelowAnnotation {
+			sb.WriteByte('\n')
+			p.renderAnnotation(&sb, ln, pos, lineNum, totalLines)
+		}
+
 		renderedIdx++
 	}
 
 	return sb.String()
+}
+
+// renderAnnotation renders an annotation line with gutter padding.
+// The annotation content uses [Annotation.String] which handles Col padding.
+func (p *Printer) renderAnnotation(sb *strings.Builder, ln line.Line, pos position.Position, lineNum, totalLines int) {
+	headerCtx := GutterContext{
+		Index:      pos.Line,
+		Number:     lineNum,
+		TotalLines: totalLines,
+		Soft:       false,
+		Flag:       line.FlagAnnotation,
+		Styles:     p.styles,
+	}
+	sb.WriteString(p.gutterFunc(headerCtx))
+	// Use Annotation.String() which handles Col padding.
+	sb.WriteString(p.styles.Style(style.Comment).Render(ln.Annotation.String()))
 }
 
 // writeLine writes a line with optional word wrapping.

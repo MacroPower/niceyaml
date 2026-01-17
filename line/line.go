@@ -137,10 +137,18 @@ func (l Line) String() string {
 
 	prefix := fmt.Sprintf("%4d | ", l.Number())
 
+	// Render annotation above if applicable.
+	if l.Annotation.Content != "" && l.Annotation.Position == Above {
+		sb.WriteString(prefix)
+		sb.WriteString(l.Annotation.String())
+		sb.WriteByte('\n')
+	}
+
 	sb.WriteString(prefix)
 	sb.WriteString(l.Content())
 
-	if l.Annotation.Content != "" {
+	// Render annotation below if applicable.
+	if l.Annotation.Content != "" && l.Annotation.Position == Below {
 		sb.WriteByte('\n')
 		sb.WriteString(prefix)
 		sb.WriteString(l.Annotation.String())

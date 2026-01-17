@@ -1176,7 +1176,7 @@ func TestPrinter_SetAnnotationsEnabled(t *testing.T) {
 
 			input := "key: value\n"
 			source := niceyaml.NewSourceFromString(input)
-			source.Annotate(0, line.Annotation{Content: tc.annotation, Column: 1})
+			source.Annotate(0, line.Annotation{Content: tc.annotation})
 
 			p := testPrinter()
 			p.SetAnnotationsEnabled(tc.enabled)
@@ -1184,6 +1184,210 @@ func TestPrinter_SetAnnotationsEnabled(t *testing.T) {
 			got := p.Print(source)
 
 			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestPrinter_AnnotationPosition(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input      string
+		annotation line.Annotation
+		lineIndex  int
+		want       string
+	}{
+		"above annotation at col 0": {
+			input:     "key: value",
+			lineIndex: 0,
+			annotation: line.Annotation{
+				Content:  "# comment",
+				Position: line.Above,
+				Col:      0,
+			},
+			want: "# comment\nkey: value",
+		},
+		"above annotation with col padding": {
+			input:     "key: value",
+			lineIndex: 0,
+			annotation: line.Annotation{
+				Content:  "^-- error here",
+				Position: line.Above,
+				Col:      5,
+			},
+			want: "     ^-- error here\nkey: value",
+		},
+		"below annotation at col 0": {
+			input:     "key: value",
+			lineIndex: 0,
+			annotation: line.Annotation{
+				Content:  "# comment below",
+				Position: line.Below,
+				Col:      0,
+			},
+			want: "key: value\n# comment below",
+		},
+		"below annotation with col padding": {
+			input:     "key: value",
+			lineIndex: 0,
+			annotation: line.Annotation{
+				Content:  "^-- error here",
+				Position: line.Below,
+				Col:      5,
+			},
+			want: "key: value\n     ^-- error here",
+		},
+		"below annotation on second line": {
+			input: yamltest.JoinLF(
+				"first: 1",
+				"second: 2",
+			),
+			lineIndex: 1,
+			annotation: line.Annotation{
+				Content:  "^-- note",
+				Position: line.Below,
+				Col:      8,
+			},
+			want: yamltest.JoinLF(
+				"first: 1",
+				"second: 2",
+				"        ^-- note",
+			),
+		},
+		"above annotation on second line": {
+			input: yamltest.JoinLF(
+				"first: 1",
+				"second: 2",
+			),
+			lineIndex: 1,
+			annotation: line.Annotation{
+				Content:  "@@ -1 +1 @@",
+				Position: line.Above,
+				Col:      0,
+			},
+			want: yamltest.JoinLF(
+				"first: 1",
+				"@@ -1 +1 @@",
+				"second: 2",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input)
+			source.Annotate(tc.lineIndex, tc.annotation)
+
+			p := testPrinter()
+			got := p.Print(source)
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestPrinter_AnnotationPosition_WithGutter(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input      string
+		annotation line.Annotation
+		lineIndex  int
+		want       string
+	}{
+		"above annotation with line numbers": {
+			input:     "key: value",
+			lineIndex: 0,
+			annotation: line.Annotation{
+				Content:  "@@ -1 +1 @@",
+				Position: line.Above,
+				Col:      0,
+			},
+			want: "     @@ -1 +1 @@\n   1 key: value",
+		},
+		"below annotation with line numbers": {
+			input:     "key: value",
+			lineIndex: 0,
+			annotation: line.Annotation{
+				Content:  "^-- error",
+				Position: line.Below,
+				Col:      5,
+			},
+			want: "   1 key: value\n          ^-- error",
+		},
+		"below annotation with col padding and line numbers": {
+			input: yamltest.JoinLF(
+				"first: 1",
+				"second: 2",
+			),
+			lineIndex: 0,
+			annotation: line.Annotation{
+				Content:  "^-- note",
+				Position: line.Below,
+				Col:      7,
+			},
+			want: yamltest.JoinLF(
+				"   1 first: 1",
+				"            ^-- note",
+				"   2 second: 2",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input)
+			source.Annotate(tc.lineIndex, tc.annotation)
+
+			p := testPrinterWithGutter(niceyaml.LineNumberGutter())
+			got := p.Print(source)
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestPrinter_AnnotationPosition_Disabled(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		annotation line.Annotation
+	}{
+		"above annotation disabled": {
+			annotation: line.Annotation{
+				Content:  "# hidden above",
+				Position: line.Above,
+				Col:      0,
+			},
+		},
+		"below annotation disabled": {
+			annotation: line.Annotation{
+				Content:  "# hidden below",
+				Position: line.Below,
+				Col:      5,
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			input := "key: value"
+			source := niceyaml.NewSourceFromString(input)
+			source.Annotate(0, tc.annotation)
+
+			p := testPrinter()
+			p.SetAnnotationsEnabled(false)
+
+			got := p.Print(source)
+
+			// With annotations disabled, only the content should be rendered.
+			assert.Equal(t, "key: value", got)
 		})
 	}
 }

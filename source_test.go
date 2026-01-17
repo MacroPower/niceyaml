@@ -27,7 +27,7 @@ func TestTokens_String_Annotation(t *testing.T) {
 		"single line with annotation": {
 			input: "key: value\n",
 			annotations: map[int]line.Annotation{
-				0: {Content: "error", Column: 1},
+				0: {Content: "^ error", Position: line.Below},
 			},
 			want: yamltest.JoinLF(
 				"   1 | key: value",
@@ -40,7 +40,7 @@ func TestTokens_String_Annotation(t *testing.T) {
 				second: 2
 			`),
 			annotations: map[int]line.Annotation{
-				1: {Content: "here", Column: 1},
+				1: {Content: "^ here", Position: line.Below},
 			},
 			want: yamltest.JoinLF(
 				"   1 | first: 1",
@@ -55,8 +55,8 @@ func TestTokens_String_Annotation(t *testing.T) {
 				third: 3
 			`),
 			annotations: map[int]line.Annotation{
-				0: {Content: "start", Column: 1},
-				2: {Content: "end", Column: 1},
+				0: {Content: "^ start", Position: line.Below},
+				2: {Content: "^ end", Position: line.Below},
 			},
 			want: yamltest.JoinLF(
 				"   1 | first: 1",
@@ -74,7 +74,7 @@ func TestTokens_String_Annotation(t *testing.T) {
 				d: 4
 			`),
 			annotations: map[int]line.Annotation{
-				1: {Content: "middle", Column: 3},
+				1: {Content: "^ middle", Position: line.Below, Col: 2},
 			},
 			want: yamltest.JoinLF(
 				"   1 | a: 1",

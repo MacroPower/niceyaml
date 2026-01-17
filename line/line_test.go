@@ -587,25 +587,20 @@ func TestLine_Annotation(t *testing.T) {
 				annotation: line.Annotation{},
 				want:       "   1 | key: value",
 			},
-			"annotation at column 1": {
-				annotation: line.Annotation{Content: "error here", Column: 1},
+			"annotation below at start": {
+				annotation: line.Annotation{Content: "^ error here", Position: line.Below},
 				want: `   1 | key: value
    1 | ^ error here`,
 			},
-			"annotation at column 5": {
-				annotation: line.Annotation{Content: "note", Column: 5},
+			"annotation below with padding": {
+				annotation: line.Annotation{Content: "^ note", Position: line.Below, Col: 4},
 				want: `   1 | key: value
    1 |     ^ note`,
 			},
-			"annotation at column 0": {
-				annotation: line.Annotation{Content: "edge", Column: 0},
-				want: `   1 | key: value
-   1 | ^ edge`,
-			},
-			"large column": {
-				annotation: line.Annotation{Content: "far", Column: 20},
-				want: `   1 | key: value
-   1 |                    ^ far`,
+			"annotation above": {
+				annotation: line.Annotation{Content: "@@ hunk header @@", Position: line.Above},
+				want: `   1 | @@ hunk header @@
+   1 | key: value`,
 			},
 		}
 
@@ -633,20 +628,20 @@ func TestLine_Annotation(t *testing.T) {
 		require.Len(t, lines, 1)
 
 		original := lines[0]
-		original.Annotation = line.Annotation{Content: "original note", Column: 5}
+		original.Annotation = line.Annotation{Content: "original note", Position: line.Below}
 
 		clone := original.Clone()
 
 		// Verify annotation was copied.
 		assert.Equal(t, original.Annotation.Content, clone.Annotation.Content)
-		assert.Equal(t, original.Annotation.Column, clone.Annotation.Column)
+		assert.Equal(t, original.Annotation.Position, clone.Annotation.Position)
 
 		// Modify clone and verify original is unchanged.
 		clone.Annotation.Content = "modified"
-		clone.Annotation.Column = 10
+		clone.Annotation.Position = line.Above
 
 		assert.Equal(t, "original note", original.Annotation.Content)
-		assert.Equal(t, 5, original.Annotation.Column)
+		assert.Equal(t, line.Below, original.Annotation.Position)
 	})
 }
 
@@ -1644,20 +1639,6 @@ func TestNewLines_ColumnPositionAfterSplit(t *testing.T) {
 
 func TestEmptyAndZeroValues(t *testing.T) {
 	t.Parallel()
-
-	t.Run("Annotation/empty string", func(t *testing.T) {
-		t.Parallel()
-
-		a := line.Annotation{}
-		assert.Empty(t, a.String())
-	})
-
-	t.Run("Annotation/empty content with column", func(t *testing.T) {
-		t.Parallel()
-
-		a := line.Annotation{Content: "", Column: 5}
-		assert.Empty(t, a.String())
-	})
 
 	t.Run("Line/zero value", func(t *testing.T) {
 		t.Parallel()
