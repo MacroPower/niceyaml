@@ -105,7 +105,7 @@ func (s *Validator) ValidateSchema(data any) error {
 		return niceyaml.NewError(fmt.Errorf("schema validation: %w", validationErr))
 	}
 
-	return niceyaml.NewError(errors.New(errMsg.String()), niceyaml.WithPath(path))
+	return niceyaml.NewError(errors.New(errMsg.String()), niceyaml.WithPath(path, niceyaml.PathKey))
 }
 
 // buildYAMLPathFromError creates a [yaml.Path] from the provided

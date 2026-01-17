@@ -12,6 +12,16 @@ import (
 	"github.com/macropower/niceyaml/style"
 )
 
+// PathTarget specifies which part of a mapping entry to highlight when resolving a path.
+type PathTarget int
+
+const (
+	// PathKey highlights the key of a mapping entry.
+	PathKey PathTarget = iota
+	// PathValue highlights the value of a mapping entry.
+	PathValue
+)
+
 // ErrNoSource indicates no source was provided to resolve an error path.
 var ErrNoSource = errors.New("no source provided")
 
@@ -31,10 +41,11 @@ type FileGetter interface {
 //nolint:recvcheck // Must satisfy error interface.
 type Error struct {
 	err         error
-	path        *yaml.Path
-	token       *token.Token
 	printer     StyledSlicePrinter
 	source      FileGetter
+	path        *yaml.Path
+	token       *token.Token
+	pathTarget  PathTarget
 	sourceLines int
 }
 
@@ -60,10 +71,11 @@ func WithSourceLines(lines int) ErrorOption {
 	}
 }
 
-// WithPath sets the YAML path where the error occurred.
-func WithPath(path *yaml.Path) ErrorOption {
+// WithPath sets the YAML path where the error occurred and which part to highlight.
+func WithPath(path *yaml.Path, target PathTarget) ErrorOption {
 	return func(e *Error) {
 		e.path = path
+		e.pathTarget = target
 	}
 }
 
@@ -160,7 +172,7 @@ func (e *Error) resolveToken(path *yaml.Path) (*token.Token, error) {
 		return nil, fmt.Errorf("parse source: %w", err)
 	}
 
-	return getTokenFromPath(file, path)
+	return getTokenFromPath(file, path, e.pathTarget)
 }
 
 func (e *Error) printErrorToken(tk *token.Token) string {
@@ -195,17 +207,16 @@ func (e *Error) printErrorToken(tk *token.Token) string {
 	return p.PrintSlice(t, minLine, maxLine)
 }
 
-func getTokenFromPath(file *ast.File, path *yaml.Path) (*token.Token, error) {
+func getTokenFromPath(file *ast.File, path *yaml.Path, target PathTarget) (*token.Token, error) {
 	node, err := path.FilterFile(file)
 	if err != nil {
 		return nil, fmt.Errorf("filter from ast.File by YAMLPath: %w", err)
 	}
 
-	// Try to find the key token by looking up parent.
-	// This is useful because path.FilterFile returns the VALUE node,
-	// but for error reporting we want to point to the KEY.
-	if keyToken := findKeyToken(file, node); keyToken != nil {
-		return keyToken, nil
+	if target == PathKey {
+		if keyToken := findKeyToken(file, node); keyToken != nil {
+			return keyToken, nil
+		}
 	}
 
 	return node.GetToken(), nil

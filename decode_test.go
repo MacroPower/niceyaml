@@ -688,7 +688,7 @@ func (c *validatorConfig) Validate() error {
 	if c.Name == "" {
 		return niceyaml.NewError(
 			errNameRequired,
-			niceyaml.WithPath(niceyaml.NewPath("name")),
+			niceyaml.WithPath(niceyaml.NewPath("name"), niceyaml.PathKey),
 		)
 	}
 
@@ -719,7 +719,7 @@ func (c *schemaValidatorConfig) ValidateSchema(data any) error {
 	if name, ok := m["name"].(string); ok && name == "invalid" {
 		return niceyaml.NewError(
 			errSchemaValidationFailed,
-			niceyaml.WithPath(niceyaml.NewPath("name")),
+			niceyaml.WithPath(niceyaml.NewPath("name"), niceyaml.PathKey),
 		)
 	}
 
@@ -745,7 +745,7 @@ func (c *bothValidatorConfig) ValidateSchema(data any) error {
 	if name, ok := m["name"].(string); ok && name == "invalid" {
 		return niceyaml.NewError(
 			errSchemaValidationFailed,
-			niceyaml.WithPath(niceyaml.NewPath("name")),
+			niceyaml.WithPath(niceyaml.NewPath("name"), niceyaml.PathKey),
 		)
 	}
 
@@ -758,7 +758,7 @@ func (c *bothValidatorConfig) Validate() error {
 	if c.Name == "" {
 		return niceyaml.NewError(
 			errNameRequired,
-			niceyaml.WithPath(niceyaml.NewPath("name")),
+			niceyaml.WithPath(niceyaml.NewPath("name"), niceyaml.PathKey),
 		)
 	}
 

@@ -89,7 +89,7 @@
 // Create errors with [NewError] and configure with [ErrorOption] functions:
 //
 //   - [WithSourceLines]: Number of context lines to display
-//   - [WithPath]: YAML path where the error occurred
+//   - [WithPath]: YAML path and target (key or value) where the error occurred
 //   - [WithSource]: Source for resolving the error path
 //   - [WithErrorToken]: Token associated with the error
 //   - [WithPrinter]: Customize error source formatting

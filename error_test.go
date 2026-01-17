@@ -51,7 +51,7 @@ func TestError(t *testing.T) {
 		"with path and source shows annotated source": {
 			err: niceyaml.NewError(
 				errors.New("invalid value"),
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build()),
+				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathKey),
 				niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
 				niceyaml.WithPrinter(niceyaml.NewPrinter(
 					niceyaml.WithStyles(yamltest.NewXMLStyles()),
@@ -140,7 +140,7 @@ func TestSourceWrapError(t *testing.T) {
 			inputErr: func() error {
 				return niceyaml.NewError(
 					errors.New("test error"),
-					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("name").Build()),
+					niceyaml.WithPath(niceyaml.NewPathBuilder().Child("name").Build(), niceyaml.PathKey),
 				)
 			},
 			wantExact: yamltest.JoinLF(
@@ -193,14 +193,14 @@ func TestGetPath(t *testing.T) {
 		"returns path string when set": {
 			err: niceyaml.NewError(
 				errors.New("test"),
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("foo").Build()),
+				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("foo").Build(), niceyaml.PathKey),
 			),
 			want: "$.foo",
 		},
 		"nested path": {
 			err: niceyaml.NewError(
 				errors.New("test"),
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("foo").Child("bar").Build()),
+				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("foo").Child("bar").Build(), niceyaml.PathKey),
 			),
 			want: "$.foo.bar",
 		},
@@ -233,7 +233,7 @@ func TestError_GracefulDegradation(t *testing.T) {
 		"invalid path": {
 			err: niceyaml.NewError(
 				errors.New("not found"),
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("nonexistent").Build()),
+				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("nonexistent").Build(), niceyaml.PathKey),
 				niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
 			),
 			want: "at $.nonexistent: not found",
@@ -241,14 +241,14 @@ func TestError_GracefulDegradation(t *testing.T) {
 		"path without source": {
 			err: niceyaml.NewError(
 				errors.New("missing source"),
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build()),
+				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathKey),
 			),
 			want: "at $.key: missing source",
 		},
 		"empty source": {
 			err: niceyaml.NewError(
 				errors.New("error in empty source"),
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build()),
+				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathKey),
 				niceyaml.WithSource(niceyaml.NewSourceFromTokens(emptyTokens)),
 			),
 			want: "at $.key: error in empty source",
@@ -256,7 +256,7 @@ func TestError_GracefulDegradation(t *testing.T) {
 		"nil source": {
 			err: niceyaml.NewError(
 				errors.New("nil source error"),
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build()),
+				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathKey),
 				niceyaml.WithSource(nil),
 			),
 			want: "at $.key: nil source error",
@@ -264,7 +264,10 @@ func TestError_GracefulDegradation(t *testing.T) {
 		"nonexistent path in source": {
 			err: niceyaml.NewError(
 				errors.New("path not found"),
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("nonexistent").Child("deep").Build()),
+				niceyaml.WithPath(
+					niceyaml.NewPathBuilder().Child("nonexistent").Child("deep").Build(),
+					niceyaml.PathKey,
+				),
 				niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
 			),
 			want: "at $.nonexistent.deep: path not found",
@@ -273,7 +276,7 @@ func TestError_GracefulDegradation(t *testing.T) {
 			// Tests graceful handling when source has no documents (Docs slice is empty).
 			err: niceyaml.NewError(
 				errors.New("empty doc error"),
-				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build()),
+				niceyaml.WithPath(niceyaml.NewPathBuilder().Child("key").Build(), niceyaml.PathKey),
 				niceyaml.WithSource(niceyaml.NewSourceFromTokens(emptyTokens)),
 			),
 			want: "at $.key: empty doc error",
@@ -393,7 +396,7 @@ func TestErrorAnnotation(t *testing.T) {
 			t.Parallel()
 
 			opts := []niceyaml.ErrorOption{
-				niceyaml.WithPath(tc.path),
+				niceyaml.WithPath(tc.path, niceyaml.PathKey),
 				niceyaml.WithSource(niceyaml.NewSourceFromString(tc.source)),
 				niceyaml.WithPrinter(niceyaml.NewPrinter(
 					niceyaml.WithStyles(yamltest.NewXMLStyles()),
@@ -406,6 +409,82 @@ func TestErrorAnnotation(t *testing.T) {
 			}
 
 			err := niceyaml.NewError(errors.New(tc.errMsg), opts...)
+
+			assert.Equal(t, tc.want, trimLines(err.Error()))
+		})
+	}
+}
+
+func TestErrorAnnotation_PathTargetValue(t *testing.T) {
+	t.Parallel()
+
+	newXMLPrinter := func() *niceyaml.Printer {
+		return niceyaml.NewPrinter(
+			niceyaml.WithStyles(yamltest.NewXMLStyles()),
+			niceyaml.WithGutter(niceyaml.NoGutter),
+			niceyaml.WithStyle(lipgloss.NewStyle()),
+		)
+	}
+
+	tcs := map[string]struct {
+		path   *yaml.Path
+		source string
+		errMsg string
+		want   string
+	}{
+		"value selection highlights value token": {
+			source: "key: value",
+			path:   niceyaml.NewPathBuilder().Child("key").Build(),
+			errMsg: "invalid value",
+			want: yamltest.JoinLF(
+				"[1:6] invalid value:",
+				"",
+				"<name-tag>key</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><generic-error>value</generic-error>",
+			),
+		},
+		"nested path with value target": {
+			source: yamltest.Input(`
+				foo:
+				  bar: nested_value
+			`),
+			path:   niceyaml.NewPathBuilder().Child("foo").Child("bar").Build(),
+			errMsg: "nested value error",
+			want: yamltest.JoinLF(
+				"[2:8] nested value error:",
+				"",
+				"<name-tag>foo</name-tag><punctuation-mapping-value>:</punctuation-mapping-value>",
+				"<text>  </text><name-tag>bar</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><generic-error>nested_value</generic-error>",
+			),
+		},
+		"array element works same as key target": {
+			// Array elements don't have keys, so both targets return the value token.
+			source: yamltest.Input(`
+				items:
+				  - first
+				  - second
+			`),
+			path:   niceyaml.NewPathBuilder().Child("items").Index(0).Build(),
+			errMsg: "array error",
+			want: yamltest.JoinLF(
+				"[2:5] array error:",
+				"",
+				"<name-tag>items</name-tag><punctuation-mapping-value>:</punctuation-mapping-value>",
+				"<text>  </text><punctuation-sequence-entry>-</punctuation-sequence-entry><text> </text><generic-error>first</generic-error>",
+				"<text>  </text><punctuation-sequence-entry>-</punctuation-sequence-entry><text> </text><literal-string>second</literal-string>",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := niceyaml.NewError(
+				errors.New(tc.errMsg),
+				niceyaml.WithPath(tc.path, niceyaml.PathValue),
+				niceyaml.WithSource(niceyaml.NewSourceFromString(tc.source)),
+				niceyaml.WithPrinter(newXMLPrinter()),
+			)
 
 			assert.Equal(t, tc.want, trimLines(err.Error()))
 		})
@@ -499,7 +578,7 @@ func TestError_SpecialParentContext(t *testing.T) {
 
 			err := niceyaml.NewError(
 				errors.New(tc.errMsg),
-				niceyaml.WithPath(tc.path),
+				niceyaml.WithPath(tc.path, niceyaml.PathKey),
 				niceyaml.WithSource(niceyaml.NewSourceFromString(tc.source)),
 				niceyaml.WithPrinter(newXMLPrinter()),
 			)
