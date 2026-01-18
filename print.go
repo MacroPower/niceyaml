@@ -36,6 +36,7 @@ type TokenStyler interface {
 // See [Printer] for an implementation.
 type StyledPrinter interface {
 	TokenStyler
+	SetWidth(width int)
 	Print(lines LineIterator) string
 }
 
@@ -43,6 +44,7 @@ type StyledPrinter interface {
 // See [Printer] for an implementation.
 type StyledSlicePrinter interface {
 	TokenStyler
+	SetWidth(width int)
 	PrintSlice(lines LineIterator, minLine, maxLine int) string
 }
 
@@ -381,7 +383,7 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 			}
 
 			// Render annotation above the line.
-			p.renderAnnotation(&sb, ln, pos, lineNum, totalLines, line.Above)
+			p.renderAnnotation(&sb, ln, pos, lineNum, totalLines, line.Above, gutterWidth)
 			sb.WriteByte('\n')
 		} else if renderedIdx > 0 {
 			// Add newline between lines within a hunk.
@@ -414,7 +416,7 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 
 		if hasBelowAnnotation {
 			sb.WriteByte('\n')
-			p.renderAnnotation(&sb, ln, pos, lineNum, totalLines, line.Below)
+			p.renderAnnotation(&sb, ln, pos, lineNum, totalLines, line.Below, gutterWidth)
 		}
 
 		renderedIdx++
@@ -425,29 +427,75 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 
 // renderAnnotation renders annotation lines with gutter padding for the given position.
 // The annotation content uses [AnnotationFunc] for rendering.
+// The gutterWidth parameter enables width calculation for wrapping.
 func (p *Printer) renderAnnotation(
 	sb *strings.Builder,
 	ln line.Line,
 	pos position.Position,
 	lineNum, totalLines int,
 	relPos line.RelativePosition,
+	gutterWidth int,
 ) {
-	gutterCtx := GutterContext{
-		Index:      pos.Line,
-		Number:     lineNum,
-		TotalLines: totalLines,
-		Soft:       false,
-		Flag:       line.FlagAnnotation,
-		Styles:     p.styles,
+	anns := ln.Annotations.FilterPosition(relPos)
+	if len(anns) == 0 {
+		return
 	}
-	sb.WriteString(p.gutterFunc(gutterCtx))
 
 	annCtx := AnnotationContext{
-		Annotations: ln.Annotations.FilterPosition(relPos),
+		Annotations: anns,
 		Position:    relPos,
 		Styles:      p.styles,
 	}
-	sb.WriteString(p.styles.Style(style.Comment).Render(p.annotationFunc(annCtx)))
+	content := p.annotationFunc(annCtx)
+	if content == "" {
+		return
+	}
+
+	cw := p.contentWidth(gutterWidth)
+
+	// Wrap annotation content if width is set.
+	subLines := []string{content}
+	if cw > 0 {
+		subLines = strings.Split(lipgloss.Wrap(content, cw, wrapOnCharacters), "\n")
+	}
+
+	// Calculate continuation padding for wrapped lines.
+	// For Below annotations: col spaces + "^ " = col + 2.
+	// For Above annotations: col spaces.
+	minCol := anns[0].Col
+	for _, ann := range anns {
+		if ann.Col < minCol {
+			minCol = ann.Col
+		}
+	}
+
+	continuationPadding := strings.Repeat(" ", minCol)
+	if relPos == line.Below {
+		continuationPadding += "  " // Align with text after "^ ".
+	}
+
+	for j, subLine := range subLines {
+		if j > 0 {
+			sb.WriteByte('\n')
+		}
+
+		gutterCtx := GutterContext{
+			Index:      pos.Line,
+			Number:     lineNum,
+			TotalLines: totalLines,
+			Soft:       j > 0,
+			Flag:       line.FlagAnnotation,
+			Styles:     p.styles,
+		}
+		sb.WriteString(p.gutterFunc(gutterCtx))
+
+		// Add continuation padding for wrapped lines.
+		if j > 0 {
+			sb.WriteString(p.styles.Style(style.Comment).Render(continuationPadding))
+		}
+
+		sb.WriteString(p.styles.Style(style.Comment).Render(subLine))
+	}
 }
 
 // writeLine writes a line with optional word wrapping.

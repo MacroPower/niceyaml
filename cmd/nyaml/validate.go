@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 
+	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
 	"github.com/macropower/niceyaml"
@@ -90,13 +91,29 @@ func fetchSchema(ctx context.Context, schemaURL string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
+func getTerminalWidth() int {
+	if term.IsTerminal(os.Stderr.Fd()) {
+		width, _, err := term.GetSize(os.Stderr.Fd())
+		if err != nil {
+			return max(0, width-4)
+		}
+	}
+
+	return 0
+}
+
 func validateFile(yamlPath string, v niceyaml.SchemaValidator) error {
 	yamlData, err := os.ReadFile(yamlPath) //nolint:gosec // User-provided file paths are intentional.
 	if err != nil {
 		return fmt.Errorf("read file: %w", err)
 	}
 
-	source := niceyaml.NewSourceFromString(string(yamlData))
+	source := niceyaml.NewSourceFromString(
+		string(yamlData),
+		niceyaml.WithErrorOptions(
+			niceyaml.WithWidthFunc(getTerminalWidth),
+		),
+	)
 
 	astFile, err := source.File()
 	if err != nil {

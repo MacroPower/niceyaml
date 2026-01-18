@@ -47,8 +47,10 @@ type Error struct {
 	source      FileGetter
 	pathGetter  PathPartGetter
 	token       *token.Token
-	errors      []*Error // Nested errors with their own paths/tokens.
+	widthFunc   func() int
+	errors      []*Error
 	sourceLines int
+	width       int
 }
 
 // NewError creates a new [Error] with the given message.
@@ -108,6 +110,14 @@ func WithPrinter(p StyledSlicePrinter) ErrorOption {
 func WithSource(src FileGetter) ErrorOption {
 	return func(e *Error) {
 		e.source = src
+	}
+}
+
+// WithWidthFunc sets a function to determine the width for word wrapping.
+// This takes precedence over [SetWidth] when both are configured.
+func WithWidthFunc(fn func() int) ErrorOption {
+	return func(e *Error) {
+		e.widthFunc = fn
 	}
 }
 
@@ -204,13 +214,30 @@ func (e *Error) SetOption(opts ...ErrorOption) {
 	}
 }
 
+// SetWidth sets the width for word wrapping of the error output.
+// A width of 0 disables wrapping.
+func (e *Error) SetWidth(width int) {
+	e.width = width
+}
+
 // getPrinter returns the configured printer, or a default if none was set.
+// If a width is configured, it applies the width to the printer.
 func (e *Error) getPrinter() StyledSlicePrinter {
+	width := e.width
+	if e.widthFunc != nil {
+		width = e.widthFunc()
+	}
+
 	if e.printer != nil {
+		e.printer.SetWidth(width)
+
 		return e.printer
 	}
 
-	return NewPrinter()
+	p := NewPrinter()
+	p.SetWidth(width)
+
+	return p
 }
 
 // Unwrap returns the underlying errors, enabling [errors.Is] and [errors.As].

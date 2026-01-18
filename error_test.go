@@ -13,6 +13,7 @@ import (
 
 	"github.com/macropower/niceyaml"
 	"github.com/macropower/niceyaml/paths"
+	"github.com/macropower/niceyaml/style"
 	"github.com/macropower/niceyaml/yamltest"
 )
 
@@ -1678,4 +1679,303 @@ func TestError_HunkDisplay(t *testing.T) {
 		// Should NOT have "..." separator since errors are adjacent.
 		assert.NotContains(t, got, "...")
 	})
+}
+
+func TestError_SetWidth(t *testing.T) {
+	t.Parallel()
+
+	// Create YAML with a long value that will need wrapping.
+	source := yamltest.Input(`
+		key: this is a very long value that should wrap when width is limited to a small number
+	`)
+	tokens := lexer.Tokenize(source)
+
+	tcs := map[string]struct {
+		width       int
+		wantWrapped bool
+	}{
+		"wraps at narrow width": {
+			width:       40,
+			wantWrapped: true,
+		},
+		"no wrap when width is 0": {
+			width:       0,
+			wantWrapped: false,
+		},
+		"no wrap when width is large": {
+			width:       200,
+			wantWrapped: false,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := niceyaml.NewError("test error",
+				niceyaml.WithErrorToken(tokens[0]),
+				niceyaml.WithPrinter(niceyaml.NewPrinter(
+					niceyaml.WithGutter(niceyaml.NoGutter),
+					niceyaml.WithStyle(lipgloss.NewStyle()),
+				)),
+			)
+			err.SetWidth(tc.width)
+
+			output := err.Error()
+			lines := strings.Split(output, "\n")
+
+			// Skip the header line "[1:1] test error:" and the empty line.
+			contentLines := 0
+			for _, line := range lines {
+				if strings.Contains(line, "key:") || strings.Contains(line, "this is") ||
+					strings.Contains(line, "should wrap") || strings.Contains(line, "limited") {
+					contentLines++
+				}
+			}
+
+			if tc.wantWrapped {
+				// When wrapped, the content should span multiple lines.
+				assert.Greater(t, contentLines, 1, "expected content to wrap into multiple lines")
+			} else {
+				// When not wrapped, the YAML content should be on a single line.
+				assert.Equal(t, 1, contentLines, "expected content on single line")
+			}
+		})
+	}
+}
+
+func TestError_SetWidth_WithCustomPrinter(t *testing.T) {
+	t.Parallel()
+
+	source := yamltest.Input(`
+		key: this is a very long value that should wrap when width is limited
+	`)
+	tokens := lexer.Tokenize(source)
+
+	// Test that SetWidth works with a custom printer.
+	// Word wrap is enabled by default in NewPrinter.
+	customPrinter := niceyaml.NewPrinter(
+		niceyaml.WithStyles(yamltest.NewXMLStyles()),
+		niceyaml.WithGutter(niceyaml.NoGutter),
+		niceyaml.WithStyle(lipgloss.NewStyle()),
+	)
+
+	err := niceyaml.NewError(
+		"test error",
+		niceyaml.WithErrorToken(tokens[0]),
+		niceyaml.WithPrinter(customPrinter),
+	)
+	err.SetWidth(30)
+
+	output := err.Error()
+	lines := strings.Split(output, "\n")
+
+	// Should have multiple content lines due to wrapping.
+	contentLines := 0
+	for _, line := range lines {
+		if strings.Contains(line, "key") || strings.Contains(line, "this is") ||
+			strings.Contains(line, "should wrap") {
+			contentLines++
+		}
+	}
+
+	assert.Greater(t, contentLines, 1, "expected content to wrap into multiple lines with custom printer")
+}
+
+func TestError_SetWidth_DefaultPrinter(t *testing.T) {
+	t.Parallel()
+
+	source := yamltest.Input(`
+		key: this is a very long value that should wrap when width is limited
+	`)
+	tokens := lexer.Tokenize(source)
+
+	// Test that SetWidth works without a custom printer (uses default).
+	err := niceyaml.NewError(
+		"test error",
+		niceyaml.WithErrorToken(tokens[0]),
+	)
+	err.SetWidth(30)
+
+	output := err.Error()
+	lines := strings.Split(output, "\n")
+
+	// Should have multiple content lines due to wrapping.
+	contentLines := 0
+	for _, line := range lines {
+		if strings.Contains(line, "key") || strings.Contains(line, "this is") ||
+			strings.Contains(line, "should wrap") {
+			contentLines++
+		}
+	}
+
+	assert.Greater(t, contentLines, 1, "expected content to wrap into multiple lines with default printer")
+}
+
+func TestError_SetWidth_AnnotationWrapping(t *testing.T) {
+	t.Parallel()
+
+	source := yamltest.Input(`
+		key: value
+		other: data
+	`)
+
+	tcs := map[string]struct {
+		width        int
+		nestedErrMsg string
+		want         string
+	}{
+		"long annotation wraps at narrow width": {
+			width:        40,
+			nestedErrMsg: "this is a very long error message that should definitely wrap when the width is limited",
+			want: yamltest.JoinLF(
+				"[1:1] validation failed:",
+				"",
+				"key: value",
+				"     ^ this is a very long error message",
+				"       that should definitely wrap when the",
+				"       width is limited",
+				"other: data",
+			),
+		},
+		"annotation does not wrap when width is 0": {
+			width:        0,
+			nestedErrMsg: "this is a very long error message that should not wrap",
+			want: yamltest.JoinLF(
+				"[1:1] validation failed:",
+				"",
+				"key: value",
+				"     ^ this is a very long error message that should not wrap",
+				"other: data",
+			),
+		},
+		"short annotation fits on single line": {
+			width:        80,
+			nestedErrMsg: "short error",
+			want: yamltest.JoinLF(
+				"[1:1] validation failed:",
+				"",
+				"key: value",
+				"     ^ short error",
+				"other: data",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := niceyaml.NewError(
+				"validation failed",
+				niceyaml.WithPath(paths.Root().Child("key").Key()),
+				niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+				niceyaml.WithPrinter(niceyaml.NewPrinter(
+					niceyaml.WithStyles(&style.Styles{}),
+					niceyaml.WithGutter(niceyaml.NoGutter),
+					niceyaml.WithStyle(lipgloss.NewStyle()),
+				)),
+				niceyaml.WithErrors(
+					niceyaml.NewError(
+						tc.nestedErrMsg,
+						niceyaml.WithPath(paths.Root().Child("key").Value()),
+					),
+				),
+			)
+			err.SetWidth(tc.width)
+
+			got := trimLines(err.Error())
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestError_SetWidth_MultipleAnnotationsWrapping(t *testing.T) {
+	t.Parallel()
+
+	source := yamltest.Input(`
+		name: test
+		value: 123
+		other: data
+	`)
+
+	// Test multiple nested errors with long messages.
+	err := niceyaml.NewError(
+		"validation failed at 2 locations",
+		niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+		niceyaml.WithPrinter(niceyaml.NewPrinter(
+			niceyaml.WithStyles(&style.Styles{}),
+			niceyaml.WithGutter(niceyaml.NoGutter),
+			niceyaml.WithStyle(lipgloss.NewStyle()),
+		)),
+		niceyaml.WithErrors(
+			niceyaml.NewError(
+				"first error with a very long message that should wrap properly",
+				niceyaml.WithPath(paths.Root().Child("value").Value()),
+			),
+			niceyaml.NewError(
+				"second error also with a long message for testing wrap behavior",
+				niceyaml.WithPath(paths.Root().Child("other").Key()),
+			),
+		),
+	)
+	err.SetWidth(50)
+
+	got := trimLines(err.Error())
+
+	want := yamltest.JoinLF(
+		"validation failed at 2 locations:",
+		"",
+		"name: test",
+		"value: 123",
+		"       ^ first error with a very long message that",
+		"         should wrap properly",
+		"other: data",
+		"^ second error also with a long message for",
+		"  testing wrap behavior",
+	)
+	assert.Equal(t, want, got)
+}
+
+func TestError_SetWidth_CombinedAnnotationsOnSameLine(t *testing.T) {
+	t.Parallel()
+
+	source := yamltest.Input(`
+		key: value
+	`)
+
+	// Multiple errors on same line get combined with "; ".
+	err := niceyaml.NewError(
+		"validation failed",
+		niceyaml.WithPath(paths.Root().Child("key").Key()),
+		niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+		niceyaml.WithPrinter(niceyaml.NewPrinter(
+			niceyaml.WithStyles(&style.Styles{}),
+			niceyaml.WithGutter(niceyaml.NoGutter),
+			niceyaml.WithStyle(lipgloss.NewStyle()),
+		)),
+		niceyaml.WithErrors(
+			niceyaml.NewError(
+				"first error message here",
+				niceyaml.WithPath(paths.Root().Child("key").Key()),
+			),
+			niceyaml.NewError(
+				"second error message here",
+				niceyaml.WithPath(paths.Root().Child("key").Value()),
+			),
+		),
+	)
+	err.SetWidth(40)
+
+	got := trimLines(err.Error())
+
+	want := yamltest.JoinLF(
+		"[1:1] validation failed:",
+		"",
+		"key: value",
+		"^ first error message here; second error",
+		"  message here",
+	)
+	assert.Equal(t, want, got)
 }
