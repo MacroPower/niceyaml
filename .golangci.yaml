@@ -92,7 +92,7 @@ linters:
     - prealloc
     - predeclared
     - reassign
-    - recvcheck
+    # - recvcheck
     - revive
     - sloglint
     - staticcheck

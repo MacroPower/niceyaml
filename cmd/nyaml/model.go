@@ -23,7 +23,6 @@ type modelOptions struct {
 	lineNumbers bool
 }
 
-//nolint:recvcheck // tea.Model requires value receivers for Init, Update, View.
 type model struct {
 	searchInput   string
 	currentTheme  string

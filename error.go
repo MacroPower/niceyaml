@@ -39,8 +39,6 @@ type PathPartGetter interface {
 //   - [WithPath] combined with [WithSource] to resolve the path
 //
 // Create instances with [NewError].
-//
-//nolint:recvcheck // Must satisfy error interface.
 type Error struct {
 	err         error
 	printer     StyledSlicePrinter

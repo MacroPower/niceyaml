@@ -47,8 +47,6 @@ func (a Annotation) String() string {
 }
 
 // Annotations is a collection of [Annotation]s.
-//
-//nolint:recvcheck // Add requires pointer receiver; read methods use value receivers.
 type Annotations []Annotation
 
 // Add appends the given [Annotation]s to the collection.

@@ -124,8 +124,6 @@ func New(opts ...Option) Model {
 
 // Model is the Bubble Tea model for the YAML viewport.
 // Create instances with [New].
-//
-//nolint:recvcheck // tea.Model requires value receivers for Init, Update, View.
 type Model struct {
 	// Style is the container style applied to the viewport frame.
 	Style lipgloss.Style
