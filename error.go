@@ -16,8 +16,19 @@ import (
 	"github.com/macropower/niceyaml/style"
 )
 
-// ErrNoSource indicates no source was provided to resolve an error path.
-var ErrNoSource = errors.New("no source provided")
+var (
+	// ErrNoSource indicates no source was provided to resolve an error path.
+	ErrNoSource = errors.New("no source provided")
+
+	// ErrNoResolvableErrors indicates no nested errors could be resolved to tokens.
+	ErrNoResolvableErrors = errors.New("no resolvable nested errors")
+
+	// ErrNoPathOrToken indicates neither a path nor token was provided.
+	ErrNoPathOrToken = errors.New("no path or token provided")
+
+	// ErrTokenNotFound indicates the token was not found in the source.
+	ErrTokenNotFound = errors.New("token not found in source")
+)
 
 // FileGetter gets an [*ast.File].
 // See [*Source] for an implementation.
@@ -34,11 +45,32 @@ type PathPartGetter interface {
 }
 
 // Error represents a YAML error with optional source annotation.
+//
 // To enable annotated error output that shows the relevant YAML location, provide:
 //   - [WithErrorToken] directly specifies the error location, OR
 //   - [WithPath] combined with [WithSource] to resolve the path
 //
-// Create instances with [NewError].
+// Since these conditions must only be satisfied before calling [Error.Error], you may
+// use [Error.SetOption] to supply them at any time and in any context before then.
+// This means that callers may optionally attach any additional context that original
+// [Error] producers might lack, thus avoiding the need for producers to take on any
+// more responsibility than they need to. For example, a [SchemaValidator] that produces
+// [Error]s will be path-aware, and thus should use [WithPath], but it will likely not
+// have access to the [Source].
+//
+// For convenience, [Source.WrapError] can be used if you only need to add the [Source]
+// without any other [ErrorOption]s.
+//
+// Additional configuration options:
+//   - [WithErrors] adds nested errors rendered as annotations below their lines
+//   - [WithSourceLines] sets context lines shown around errors (default: 2)
+//   - [WithWidthFunc] or [Error.SetWidth] configures word wrapping
+//   - [WithPrinter] sets a custom [StyledSlicePrinter] for output
+//
+// Error implements the error interface. Use [Error.Unwrap] with [errors.Is]
+// and [errors.As] to inspect wrapped errors.
+//
+// Create instances with [NewError] or [NewErrorFrom].
 type Error struct {
 	err         error
 	printer     StyledSlicePrinter
@@ -195,7 +227,7 @@ func (e Error) formatPlainError() string {
 }
 
 // hasNestedPaths returns true if any nested errors have paths or tokens.
-func (e *Error) hasNestedPaths() bool {
+func (e Error) hasNestedPaths() bool {
 	for _, nested := range e.errors {
 		if nested != nil && (nested.pathGetter != nil || nested.token != nil) {
 			return true
@@ -235,11 +267,12 @@ func (e *Error) getPrinter() StyledSlicePrinter {
 	p := NewPrinter()
 	p.SetWidth(width)
 
+	e.printer = p
+
 	return p
 }
 
 // Unwrap returns the underlying errors, enabling [errors.Is] and [errors.As].
-// This implements the Go 1.20+ multi-error unwrap interface.
 func (e *Error) Unwrap() []error {
 	if e.err == nil && len(e.errors) == 0 {
 		return nil
@@ -260,37 +293,12 @@ func (e *Error) Unwrap() []error {
 }
 
 // Path returns the [*PathTarget] where the error occurred as a string.
-// If the main error has no path but nested errors do, returns the most specific
-// nested error's path, prioritizing key-targeting errors (like additionalProperties).
 func (e *Error) Path() string {
 	if e.pathGetter != nil {
 		return e.pathGetter.Path().String()
 	}
 
-	// Find the most specific nested error's path, prioritizing key-targeting errors.
-	var (
-		bestPath  string
-		bestIsKey bool
-	)
-
-	for _, nested := range e.errors {
-		if nested == nil || nested.pathGetter == nil {
-			continue
-		}
-
-		pathStr := nested.pathGetter.Path().String()
-		isKey := nested.pathGetter.Part() == paths.PartKey
-
-		// Prefer key-targeting errors, then longer (more specific) paths.
-		if bestPath == "" ||
-			(isKey && !bestIsKey) ||
-			(isKey == bestIsKey && len(pathStr) > len(bestPath)) {
-			bestPath = pathStr
-			bestIsKey = isKey
-		}
-	}
-
-	return bestPath
+	return ""
 }
 
 func (e *Error) annotateSource() (string, error) {
@@ -345,7 +353,7 @@ func (e *Error) annotateSourceFromNested() (string, error) {
 	}
 
 	if refToken == nil {
-		return "", errors.New("no resolvable nested errors")
+		return "", ErrNoResolvableErrors
 	}
 
 	return e.printNestedErrors(refToken), nil
@@ -419,7 +427,7 @@ func (e *Error) resolveToken() (*token.Token, error) {
 	}
 
 	if e.pathGetter == nil {
-		return nil, errors.New("no path or token")
+		return nil, ErrNoPathOrToken
 	}
 
 	if e.source == nil {
@@ -750,12 +758,12 @@ func (e *Error) resolveNestedError(t *Source, nested *Error) (resolvedError, err
 		resolvedTk = tk
 
 	default:
-		return resolvedError{}, errors.New("nested error has no path or token")
+		return resolvedError{}, ErrNoPathOrToken
 	}
 
 	lineIdx := e.findLineIndex(t, resolvedTk)
 	if lineIdx < 0 {
-		return resolvedError{}, errors.New("token not found in source")
+		return resolvedError{}, ErrTokenNotFound
 	}
 
 	// Calculate column position for annotation (0-indexed).

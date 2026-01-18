@@ -211,9 +211,8 @@ func TestValidator_Validate(t *testing.T) {
 	require.NoError(t, err)
 
 	tcs := map[string]struct {
-		input    any
-		wantPath string
-		wantErr  bool
+		input   any
+		wantErr bool
 	}{
 		"valid data": {
 			input: map[string]any{
@@ -225,32 +224,28 @@ func TestValidator_Validate(t *testing.T) {
 			input: map[string]any{
 				"age": 30,
 			},
-			wantPath: "$",
-			wantErr:  true,
+			wantErr: true,
 		},
 		"wrong type for name": {
 			input: map[string]any{
 				"name": 123,
 				"age":  30,
 			},
-			wantPath: "$.name",
-			wantErr:  true,
+			wantErr: true,
 		},
 		"wrong type for age": {
 			input: map[string]any{
 				"name": "Kallistō",
 				"age":  "thirty",
 			},
-			wantPath: "$.age",
-			wantErr:  true,
+			wantErr: true,
 		},
 		"invalid array item": {
 			input: map[string]any{
 				"name":  "John",
 				"items": []any{"valid", 123, "also valid"},
 			},
-			wantPath: "$.items[1]",
-			wantErr:  true,
+			wantErr: true,
 		},
 		"nested object validation error": {
 			input: map[string]any{
@@ -259,8 +254,7 @@ func TestValidator_Validate(t *testing.T) {
 					"notValue": "something",
 				},
 			},
-			wantPath: "$.nested.notValue",
-			wantErr:  true,
+			wantErr: true,
 		},
 		"valid array of objects": {
 			input: map[string]any{
@@ -308,8 +302,7 @@ func TestValidator_Validate(t *testing.T) {
 					},
 				},
 			},
-			wantPath: "$.users[1].id",
-			wantErr:  true,
+			wantErr: true,
 		},
 		"missing required field in nested object within array": {
 			input: map[string]any{
@@ -325,8 +318,7 @@ func TestValidator_Validate(t *testing.T) {
 					},
 				},
 			},
-			wantPath: "$.users[0].profile",
-			wantErr:  true,
+			wantErr: true,
 		},
 		"invalid preference in deeply nested array": {
 			input: map[string]any{
@@ -347,8 +339,7 @@ func TestValidator_Validate(t *testing.T) {
 					},
 				},
 			},
-			wantPath: "$.users[0].profile.preferences[1]",
-			wantErr:  true,
+			wantErr: true,
 		},
 		"valid matrix (2D array)": {
 			input: map[string]any{
@@ -369,8 +360,7 @@ func TestValidator_Validate(t *testing.T) {
 					[]any{7, 8, 9},
 				},
 			},
-			wantPath: "$.matrix[1][1]",
-			wantErr:  true,
+			wantErr: true,
 		},
 		"missing email in second user": {
 			input: map[string]any{
@@ -394,16 +384,14 @@ func TestValidator_Validate(t *testing.T) {
 					},
 				},
 			},
-			wantPath: "$.users[1]",
-			wantErr:  true,
+			wantErr: true,
 		},
 		"additional property at root": {
 			input: map[string]any{
 				"name":      "John",
 				"extraProp": "not allowed",
 			},
-			wantPath: "$.extraProp",
-			wantErr:  true,
+			wantErr: true,
 		},
 		"additional property in nested object": {
 			input: map[string]any{
@@ -413,8 +401,7 @@ func TestValidator_Validate(t *testing.T) {
 					"extraNested": "not allowed",
 				},
 			},
-			wantPath: "$.nested.extraNested",
-			wantErr:  true,
+			wantErr: true,
 		},
 		"additional property in array object": {
 			input: map[string]any{
@@ -431,8 +418,7 @@ func TestValidator_Validate(t *testing.T) {
 					},
 				},
 			},
-			wantPath: "$.users[0].extraUserProp",
-			wantErr:  true,
+			wantErr: true,
 		},
 	}
 
@@ -447,7 +433,6 @@ func TestValidator_Validate(t *testing.T) {
 
 				var validationErr *niceyaml.Error
 				require.ErrorAs(t, err, &validationErr)
-				assert.Equal(t, tc.wantPath, validationErr.Path())
 			} else {
 				require.NoError(t, err)
 			}
@@ -516,9 +501,8 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 	require.NoError(t, err)
 
 	tcs := map[string]struct {
-		input    string
-		wantPath string
-		wantErr  bool
+		input   string
+		wantErr bool
 	}{
 		"valid data": {
 			input: yamltest.Input(`
@@ -527,25 +511,22 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 			`),
 		},
 		"missing required field": {
-			input:    yamltest.Input(`age: 30`),
-			wantPath: "$",
-			wantErr:  true,
+			input:   yamltest.Input(`age: 30`),
+			wantErr: true,
 		},
 		"wrong type for name": {
 			input: yamltest.Input(`
 				name: 123
 				age: 30
 			`),
-			wantPath: "$.name",
-			wantErr:  true,
+			wantErr: true,
 		},
 		"wrong type for age": {
 			input: yamltest.Input(`
 				name: Kallisto
 				age: thirty
 			`),
-			wantPath: "$.age",
-			wantErr:  true,
+			wantErr: true,
 		},
 		"invalid array item": {
 			input: yamltest.Input(`
@@ -555,8 +536,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 				  - 123
 				  - also valid
 			`),
-			wantPath: "$.items[1]",
-			wantErr:  true,
+			wantErr: true,
 		},
 		"nested object validation error": {
 			input: yamltest.Input(`
@@ -564,8 +544,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 				nested:
 				  notValue: something
 			`),
-			wantPath: "$.nested.notValue",
-			wantErr:  true,
+			wantErr: true,
 		},
 		"valid array of objects": {
 			input: yamltest.Input(`
@@ -601,8 +580,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 				      firstName: Aello
 				      lastName: Thaumantias
 			`),
-			wantPath: "$.users[1].id",
-			wantErr:  true,
+			wantErr: true,
 		},
 		"missing required field in nested object within array": {
 			input: yamltest.Input(`
@@ -613,8 +591,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 				    profile:
 				      firstName: Kallisto
 			`),
-			wantPath: "$.users[0].profile",
-			wantErr:  true,
+			wantErr: true,
 		},
 		"invalid preference in deeply nested array": {
 			input: yamltest.Input(`
@@ -630,8 +607,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 				        - 123
 				        - notifications
 			`),
-			wantPath: "$.users[0].profile.preferences[1]",
-			wantErr:  true,
+			wantErr: true,
 		},
 		"valid matrix (2D array)": {
 			input: yamltest.Input(`
@@ -650,8 +626,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 				  - [4, invalid, 6]
 				  - [7, 8, 9]
 			`),
-			wantPath: "$.matrix[1][1]",
-			wantErr:  true,
+			wantErr: true,
 		},
 		"missing email in second user": {
 			input: yamltest.Input(`
@@ -667,16 +642,14 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 				      firstName: Aello
 				      lastName: Thaumantias
 			`),
-			wantPath: "$.users[1]",
-			wantErr:  true,
+			wantErr: true,
 		},
 		"additional property at root": {
 			input: yamltest.Input(`
 				name: John
 				extraProp: not allowed
 			`),
-			wantPath: "$.extraProp",
-			wantErr:  true,
+			wantErr: true,
 		},
 		"additional property in nested object": {
 			input: yamltest.Input(`
@@ -685,8 +658,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 				  value: valid
 				  extraNested: not allowed
 			`),
-			wantPath: "$.nested.extraNested",
-			wantErr:  true,
+			wantErr: true,
 		},
 		"additional property in array object": {
 			input: yamltest.Input(`
@@ -699,8 +671,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 				      lastName: Lykaonis
 				    extraUserProp: not allowed
 			`),
-			wantPath: "$.users[0].extraUserProp",
-			wantErr:  true,
+			wantErr: true,
 		},
 	}
 
@@ -722,7 +693,6 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 
 					var validationErr *niceyaml.Error
 					require.ErrorAs(t, err, &validationErr)
-					assert.Equal(t, tc.wantPath, validationErr.Path())
 				} else {
 					require.NoError(t, err)
 				}
@@ -835,8 +805,7 @@ func TestValidator_PathTarget(t *testing.T) {
 	tcs := map[string]struct {
 		schema       string
 		input        string
-		wantKeyErr   bool // True if key should be highlighted, false if value.
-		wantPath     string
+		wantKeyErr   bool   // True if key should be highlighted, false if value.
 		wantContains string // Substring that should appear in error output.
 	}{
 		"type error highlights value": {
@@ -850,7 +819,6 @@ func TestValidator_PathTarget(t *testing.T) {
 				name: 123
 			`),
 			wantKeyErr:   false,
-			wantPath:     "$.name",
 			wantContains: "<generic-error>123</generic-error>",
 		},
 		"additional property highlights key": {
@@ -866,7 +834,6 @@ func TestValidator_PathTarget(t *testing.T) {
 				extra: notAllowed
 			`),
 			wantKeyErr:   true,
-			wantPath:     "$.extra",
 			wantContains: "<generic-error>extra</generic-error>",
 		},
 		"required error highlights parent key": {
@@ -881,7 +848,6 @@ func TestValidator_PathTarget(t *testing.T) {
 				other: value
 			`),
 			wantKeyErr: true,
-			wantPath:   "$",
 		},
 		"enum error highlights value": {
 			schema: `{
@@ -894,7 +860,6 @@ func TestValidator_PathTarget(t *testing.T) {
 				status: unknown
 			`),
 			wantKeyErr:   false,
-			wantPath:     "$.status",
 			wantContains: "<generic-error>unknown</generic-error>",
 		},
 		"minimum error highlights value": {
@@ -908,7 +873,6 @@ func TestValidator_PathTarget(t *testing.T) {
 				age: -5
 			`),
 			wantKeyErr:   false,
-			wantPath:     "$.age",
 			wantContains: "<generic-error>-5</generic-error>",
 		},
 		"pattern error highlights value": {
@@ -922,7 +886,6 @@ func TestValidator_PathTarget(t *testing.T) {
 				email: notanemail
 			`),
 			wantKeyErr:   false,
-			wantPath:     "$.email",
 			wantContains: "<generic-error>notanemail</generic-error>",
 		},
 		"minItems error highlights key": {
@@ -937,7 +900,6 @@ func TestValidator_PathTarget(t *testing.T) {
 				  - one
 			`),
 			wantKeyErr:   true,
-			wantPath:     "$.items",
 			wantContains: "<generic-error>items</generic-error>",
 		},
 		"maxItems error highlights key": {
@@ -953,7 +915,6 @@ func TestValidator_PathTarget(t *testing.T) {
 				  - two
 			`),
 			wantKeyErr:   true,
-			wantPath:     "$.items",
 			wantContains: "<generic-error>items</generic-error>",
 		},
 		"nested type error highlights value": {
@@ -973,7 +934,6 @@ func TestValidator_PathTarget(t *testing.T) {
 				  age: notanumber
 			`),
 			wantKeyErr:   false,
-			wantPath:     "$.user.age",
 			wantContains: "<generic-error>notanumber</generic-error>",
 		},
 		"array item type error highlights value": {
@@ -993,7 +953,6 @@ func TestValidator_PathTarget(t *testing.T) {
 				  - 3
 			`),
 			wantKeyErr:   false,
-			wantPath:     "$.numbers[1]",
 			wantContains: "<generic-error>notanumber</generic-error>",
 		},
 	}
@@ -1017,7 +976,6 @@ func TestValidator_PathTarget(t *testing.T) {
 
 				var validationErr *niceyaml.Error
 				require.ErrorAs(t, err, &validationErr)
-				assert.Equal(t, tc.wantPath, validationErr.Path())
 
 				// Apply source and printer to get annotated output.
 				validationErr.SetOption(
@@ -1082,7 +1040,6 @@ func TestValidator_SubErrorAnnotations(t *testing.T) {
 	tcs := map[string]struct {
 		schema           string
 		input            string
-		wantPath         string
 		wantAnnotations  []string // Substrings that should appear in annotation output.
 		wantNestedErrors int
 	}{
@@ -1096,7 +1053,6 @@ func TestValidator_SubErrorAnnotations(t *testing.T) {
 			input: yamltest.Input(`
 				name: 123
 			`),
-			wantPath:         "$.name",
 			wantAnnotations:  []string{"got number, want string"},
 			wantNestedErrors: 1,
 		},
@@ -1112,7 +1068,6 @@ func TestValidator_SubErrorAnnotations(t *testing.T) {
 			input: yamltest.Input(`
 				other: value
 			`),
-			wantPath:         "$",
 			wantAnnotations:  []string{"missing properties", "first", "second"},
 			wantNestedErrors: 1,
 		},
@@ -1132,7 +1087,6 @@ func TestValidator_SubErrorAnnotations(t *testing.T) {
 				user:
 				  age: notanumber
 			`),
-			wantPath:         "$.user.age",
 			wantAnnotations:  []string{"got string, want integer"},
 			wantNestedErrors: 1,
 		},
@@ -1157,7 +1111,6 @@ func TestValidator_SubErrorAnnotations(t *testing.T) {
 
 				var validationErr *niceyaml.Error
 				require.ErrorAs(t, err, &validationErr)
-				assert.Equal(t, tc.wantPath, validationErr.Path())
 
 				// Apply source to enable annotation rendering.
 				validationErr.SetOption(niceyaml.WithSource(source))
@@ -1382,29 +1335,63 @@ func TestValidator_ErrorMessages(t *testing.T) {
 		// At least 3: main error + 2 nested errors.
 		assert.GreaterOrEqual(t, len(unwrapped), 3)
 	})
+}
 
-	t.Run("validation error path comes from nested errors", func(t *testing.T) {
-		t.Parallel()
+func TestValidator_UnwrapSubErrorPaths(t *testing.T) {
+	t.Parallel()
 
-		schemaData := []byte(`{
-			"type": "object",
-			"properties": {
-				"name": {"type": "string"}
-			},
-			"additionalProperties": false
-		}`)
+	// Test that paths can be obtained from sub-errors via Unwrap.
+	tcs := map[string]struct {
+		schema    string
+		input     any
+		wantPaths []string // Expected paths from nested errors.
+	}{
+		"type error has path on sub-error": {
+			schema:    `{"type": "object", "properties": {"name": {"type": "string"}}}`,
+			input:     map[string]any{"name": 123},
+			wantPaths: []string{"$.name"},
+		},
+		"additional property has path on sub-error": {
+			schema:    `{"type": "object", "properties": {"name": {"type": "string"}}, "additionalProperties": false}`,
+			input:     map[string]any{"name": "valid", "extra": "invalid"},
+			wantPaths: []string{"$.extra"},
+		},
+		"nested validation error has path on sub-error": {
+			schema:    `{"type": "object", "properties": {"user": {"type": "object", "properties": {"age": {"type": "integer"}}}}}`,
+			input:     map[string]any{"user": map[string]any{"age": "notanumber"}},
+			wantPaths: []string{"$.user.age"},
+		},
+	}
 
-		v, err := validator.New("test", schemaData)
-		require.NoError(t, err)
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		// Additional property should report path to that property.
-		err = v.ValidateSchema(map[string]any{"name": "valid", "extra": "notAllowed"})
-		require.Error(t, err)
+			v, err := validator.New("test", []byte(tc.schema))
+			require.NoError(t, err)
 
-		var validationErr *niceyaml.Error
-		require.ErrorAs(t, err, &validationErr)
+			err = v.ValidateSchema(tc.input)
+			require.Error(t, err)
 
-		// Path should point to the extra property (nested error path).
-		assert.Equal(t, "$.extra", validationErr.Path())
-	})
+			var validationErr *niceyaml.Error
+			require.ErrorAs(t, err, &validationErr)
+
+			// Top-level error should have empty path.
+			assert.Empty(t, validationErr.Path())
+
+			// Unwrap to get nested errors and check their paths.
+			unwrapped := validationErr.Unwrap()
+			require.NotEmpty(t, unwrapped)
+
+			var gotPaths []string
+			for _, uerr := range unwrapped {
+				var nestedErr *niceyaml.Error
+				if errors.As(uerr, &nestedErr) && nestedErr.Path() != "" {
+					gotPaths = append(gotPaths, nestedErr.Path())
+				}
+			}
+
+			assert.ElementsMatch(t, tc.wantPaths, gotPaths)
+		})
+	}
 }
