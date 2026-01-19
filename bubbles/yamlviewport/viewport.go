@@ -17,20 +17,22 @@ import (
 	"github.com/macropower/niceyaml/style"
 )
 
+const defaultHorizontalStep = 6
+
 const (
-	defaultHorizontalStep = 6
+	// SearchOverlayKind identifies search match highlights.
+	SearchOverlayKind style.Style = iota
+	// SelectedSearchOverlayKind identifies the currently selected search match.
+	SelectedSearchOverlayKind
 )
 
 // Printer prints YAML.
 // See [niceyaml.Printer] for an implementation.
 type Printer interface {
-	Print(lines niceyaml.LineIterator) string
-	PrintSlice(lines niceyaml.LineIterator, start, end int) string
+	Print(lines niceyaml.LineIterator, spans ...position.Span) string
 	SetWidth(width int)
 	SetWordWrap(enabled bool)
 	SetAnnotationsEnabled(enabled bool)
-	AddStyleToRange(s *lipgloss.Style, ranges ...position.Range)
-	ClearStyles()
 	Style(s style.Style) *lipgloss.Style
 }
 
@@ -49,6 +51,8 @@ type Source interface {
 	Runes() iter.Seq2[position.Position, rune]
 	IsEmpty() bool
 	Len() int
+	AddOverlay(s style.Style, ranges ...position.Range)
+	ClearOverlays()
 }
 
 // DiffMode specifies how diffs are computed between revisions.
@@ -168,7 +172,7 @@ func (m *Model) setInitialValues() {
 	m.searchIndex = -1
 
 	if m.printer == nil {
-		m.printer = niceyaml.NewPrinter()
+		m.printer = m.createDefaultPrinter()
 	}
 
 	if m.finder == nil {
@@ -178,6 +182,21 @@ func (m *Model) setInitialValues() {
 	}
 
 	m.initialized = true
+}
+
+// createDefaultPrinter creates a printer with search highlight styles included.
+func (m *Model) createDefaultPrinter() *niceyaml.Printer {
+	return niceyaml.NewPrinter(
+		niceyaml.WithStyles(m.searchStyles()),
+	)
+}
+
+// searchStyles returns styles that include search highlight styling.
+func (m *Model) searchStyles() style.Styles {
+	return style.NewStyles(lipgloss.Style{},
+		style.Set(SearchOverlayKind, m.SearchStyle),
+		style.Set(SelectedSearchOverlayKind, m.SelectedSearchStyle),
+	)
 }
 
 // Init satisfies the [tea.Model] interface.
@@ -402,27 +421,31 @@ func (m *Model) rerender() {
 	m.lines = lines
 
 	if m.printer == nil {
-		m.printer = niceyaml.NewPrinter()
+		m.printer = m.createDefaultPrinter()
 	}
-
-	m.printer.ClearStyles()
 
 	m.updateSearchState(lines)
 
-	// Apply search highlights.
-	for i, match := range m.searchMatches {
-		searchStyle := m.SearchStyle
-		if i == m.searchIndex {
-			searchStyle = m.SelectedSearchStyle
-		}
-
-		m.printer.AddStyleToRange(&searchStyle, match)
-	}
+	// Apply search highlights via overlays.
+	m.applySearchOverlays(lines)
 
 	content := m.printer.Print(lines)
 
 	m.renderedLines = strings.Split(content, "\n")
 	m.longestLineWidth = maxLineWidth(m.renderedLines)
+}
+
+// applySearchOverlays sets overlay highlights for all search matches.
+func (m *Model) applySearchOverlays(lines Source) {
+	lines.ClearOverlays()
+
+	for i, match := range m.searchMatches {
+		if i == m.searchIndex {
+			lines.AddOverlay(SelectedSearchOverlayKind, match)
+		} else {
+			lines.AddOverlay(SearchOverlayKind, match)
+		}
+	}
 }
 
 // updateSearchState updates the finder and search matches for the given lines.
@@ -452,7 +475,7 @@ func (m *Model) rerenderLine(idx int) {
 		return
 	}
 
-	content := m.printer.PrintSlice(m.lines, idx, idx)
+	content := m.printer.Print(m.lines, position.NewSpan(idx, idx+1))
 
 	m.renderedLines[idx] = content
 
@@ -500,7 +523,7 @@ func (m *Model) getDisplayLines(makeDiff func(base, current *niceyaml.Revision) 
 			return makeDiff(base, m.revision)
 		}
 
-		return niceyaml.NewFullDiff(base, m.revision).Source()
+		return niceyaml.NewFullDiff(base, m.revision).Build()
 	}
 }
 
@@ -759,27 +782,21 @@ func (m *Model) navigateSearch(delta int) {
 	m.searchIndex = (m.searchIndex + delta + len(m.searchMatches)) % len(m.searchMatches)
 
 	// Only re-render the affected lines if cache is available.
-	if m.lines != nil && oldIndex >= 0 {
-		m.printer.ClearStyles()
-
-		for i, match := range m.searchMatches {
-			searchStyle := m.SearchStyle
-			if i == m.searchIndex {
-				searchStyle = m.SelectedSearchStyle
-			}
-
-			m.printer.AddStyleToRange(&searchStyle, match)
-		}
-
-		oldLine := m.searchMatches[oldIndex].Start.Line
-		newLine := m.searchMatches[m.searchIndex].Start.Line
-
-		m.rerenderLine(oldLine)
-		if newLine != oldLine {
-			m.rerenderLine(newLine)
-		}
-	} else {
+	if m.lines == nil || oldIndex < 0 {
 		m.rerender()
+		m.scrollToCurrentMatch()
+
+		return
+	}
+
+	m.applySearchOverlays(m.lines)
+
+	oldLine := m.searchMatches[oldIndex].Start.Line
+	newLine := m.searchMatches[m.searchIndex].Start.Line
+
+	m.rerenderLine(oldLine)
+	if newLine != oldLine {
+		m.rerenderLine(newLine)
 	}
 
 	m.scrollToCurrentMatch()
@@ -912,7 +929,12 @@ func (m *Model) getViewDimensions() (int, int, bool) {
 
 // renderContent applies styling and renders lines into final output.
 func (m *Model) renderContent(lines []string, contentW, contentH int) string {
-	contents := m.printer.Style(style.Text).
+	textStyle := lipgloss.Style{}
+	if st := m.printer.Style(style.Text); st != nil {
+		textStyle = *st
+	}
+
+	contents := textStyle.
 		Width(contentW).
 		Height(contentH).
 		Render(strings.Join(lines, "\n"))
@@ -957,14 +979,25 @@ func (m Model) ViewSummary(context int) string {
 
 // getSummaryDiffContent returns summary diff content for the current revision.
 func (m *Model) getSummaryDiffContent(context int) string {
-	lines := m.getDisplayLines(func(base, curr *niceyaml.Revision) Source {
-		return niceyaml.NewSummaryDiff(base, curr, context).Source()
-	})
-	if lines == nil {
+	if m.revision == nil {
 		return ""
 	}
 
-	return m.printer.Print(lines)
+	switch {
+	case m.revision.AtOrigin():
+		return m.printer.Print(m.revision.Origin().Source())
+	case m.diffMode == DiffModeNone:
+		return m.printer.Print(m.revision.Source())
+	default:
+		base := m.getDiffBaseRevision()
+		if base == nil {
+			return m.printer.Print(m.revision.Source())
+		}
+
+		source, ranges := niceyaml.NewSummaryDiff(base, m.revision, context).Build()
+
+		return m.printer.Print(source, ranges...)
+	}
 }
 
 func clamp[T cmp.Ordered](v, low, high T) T {

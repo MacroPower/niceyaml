@@ -1,6 +1,11 @@
 package line
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/macropower/niceyaml/position"
+	"github.com/macropower/niceyaml/style"
+)
 
 // RelativePosition indicates a relative position to a line.
 type RelativePosition int
@@ -46,26 +51,13 @@ func (a Annotation) String() string {
 	return padding + a.Content
 }
 
-// Annotations is a collection of [Annotation]s.
+// Annotations is a slice of [Annotation]s with helper methods.
 type Annotations []Annotation
-
-// Add appends the given [Annotation]s to the collection.
-func (a *Annotations) Add(anns ...Annotation) {
-	*a = append(*a, anns...)
-}
-
-// IsEmpty returns true if there are no annotations.
-func (a Annotations) IsEmpty() bool {
-	return len(a) == 0
-}
 
 // FilterPosition returns annotations matching the given [RelativePosition].
 func (a Annotations) FilterPosition(pos RelativePosition) Annotations {
-	if len(a) == 0 {
-		return nil
-	}
-
 	var result Annotations
+
 	for _, ann := range a {
 		if ann.Position == pos {
 			result = append(result, ann)
@@ -75,9 +67,33 @@ func (a Annotations) FilterPosition(pos RelativePosition) Annotations {
 	return result
 }
 
+// Col returns the minimum column position among all annotations.
+func (a Annotations) Col() int {
+	if len(a) == 0 {
+		return 0
+	}
+
+	col := a[0].Col
+	for _, v := range a[1:] {
+		col = min(col, v.Col)
+	}
+
+	return col
+}
+
+// Contents returns the content strings of all annotations.
+func (a Annotations) Contents() []string {
+	contents := make([]string, len(a))
+
+	for i, v := range a {
+		contents[i] = v.Content
+	}
+
+	return contents
+}
+
 // String returns the combined annotation content for debugging.
 // Same-position annotations are joined by "; " at the minimum column position.
-// For styled rendering, use [Printer] with [AnnotationFunc].
 func (a Annotations) String() string {
 	if len(a) == 0 {
 		return ""
@@ -102,3 +118,12 @@ func (a Annotations) String() string {
 
 	return padding + strings.Join(contents, "; ")
 }
+
+// Overlay represents an overlay spanning a column range within a single line.
+type Overlay struct {
+	Cols position.Span
+	Kind style.Style
+}
+
+// Overlays is a slice of [Overlay]s for a single line.
+type Overlays []Overlay

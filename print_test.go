@@ -19,6 +19,11 @@ import (
 	"github.com/macropower/niceyaml/yamltest"
 )
 
+// testOverlayHighlight is a custom style.Style constant for test highlights.
+//
+//nolint:grouper // Separate const for iota.
+const testOverlayHighlight style.Style = iota
+
 // testHighlightStyle returns a style that wraps content in brackets for easy verification.
 func testHighlightStyle() *lipgloss.Style {
 	s := lipgloss.NewStyle().Transform(func(str string) string {
@@ -36,7 +41,10 @@ func testPrinter() *niceyaml.Printer {
 // testPrinterWithGutter returns a printer without styles but with a custom gutter.
 func testPrinterWithGutter(gutter niceyaml.GutterFunc) *niceyaml.Printer {
 	return niceyaml.NewPrinter(
-		niceyaml.WithStyles(style.Styles{}),
+		niceyaml.WithStyles(style.NewStyles(
+			lipgloss.NewStyle(),
+			style.Set(testOverlayHighlight, *testHighlightStyle()),
+		)),
 		niceyaml.WithStyle(lipgloss.NewStyle()),
 		niceyaml.WithGutter(gutter),
 	)
@@ -54,7 +62,7 @@ func printDiff(p *niceyaml.Printer, before, after string) string {
 		niceyaml.NewRevision(afterTks),
 	)
 
-	return p.Print(diff.Source())
+	return p.Print(diff.Build())
 }
 
 // printDiffSummary generates a summary diff showing only changed lines with context.
@@ -63,18 +71,17 @@ func printDiffSummary(p *niceyaml.Printer, before, after string, context int) st
 	beforeTks := niceyaml.NewSourceFromString(before, niceyaml.WithName("before"))
 	afterTks := niceyaml.NewSourceFromString(after, niceyaml.WithName("after"))
 
-	diff := niceyaml.NewSummaryDiff(
+	source, ranges := niceyaml.NewSummaryDiff(
 		niceyaml.NewRevision(beforeTks),
 		niceyaml.NewRevision(afterTks),
 		context,
-	)
+	).Build()
 
-	result := diff.Source()
-	if result.IsEmpty() {
+	if source.IsEmpty() {
 		return ""
 	}
 
-	return p.Print(result)
+	return p.Print(source, ranges...)
 }
 
 // testFinder returns a Finder configured for testing.
@@ -167,30 +174,34 @@ func TestPrinter_AddStyleToRange(t *testing.T) {
 			t.Parallel()
 
 			tks := lexer.Tokenize(tc.input)
-			p := testPrinter()
-			p.AddStyleToRange(testHighlightStyle(), tc.rng)
+			source := niceyaml.NewSourceFromTokens(tks)
+			source.AddOverlay(testOverlayHighlight, tc.rng)
 
-			got := p.Print(niceyaml.NewSourceFromTokens(tks))
+			p := testPrinter()
+
+			got := p.Print(source)
 			assert.Equal(t, tc.want, got)
 		})
 	}
 }
 
-func TestPrinter_ClearStyles(t *testing.T) {
+func TestPrinter_ClearOverlays(t *testing.T) {
 	t.Parallel()
 
 	input := "key: value"
 	tks := lexer.Tokenize(input)
 
-	p := testPrinter()
-	p.AddStyleToRange(
-		testHighlightStyle(),
+	source := niceyaml.NewSourceFromTokens(tks)
+	source.AddOverlay(
+		testOverlayHighlight,
 		position.NewRange(position.New(0, 0), position.New(0, 3)),
 	)
-	p.ClearStyles()
+	source.ClearOverlays()
+
+	p := testPrinter()
 
 	// After clearing, no styles should be applied.
-	assert.Equal(t, "key: value", p.Print(niceyaml.NewSourceFromTokens(tks)))
+	assert.Equal(t, "key: value", p.Print(source))
 }
 
 func TestPrinter_PrintTokens_EmptyFile(t *testing.T) {
@@ -324,15 +335,13 @@ func TestPrinter_PrintSlice(t *testing.T) {
 	`)
 
 	tcs := map[string]struct {
-		gutter  niceyaml.GutterFunc
-		want    string
-		minLine int
-		maxLine int
+		gutter niceyaml.GutterFunc
+		want   string
+		spans  position.Spans
 	}{
 		"full range": {
-			minLine: -1,
-			maxLine: -1,
-			gutter:  niceyaml.NoGutter,
+			spans:  nil, // Empty variadic prints all lines.
+			gutter: niceyaml.NoGutter,
 			want: yamltest.JoinLF(
 				"first: 1",
 				"second: 2",
@@ -342,9 +351,8 @@ func TestPrinter_PrintSlice(t *testing.T) {
 			),
 		},
 		"full range with line numbers": {
-			minLine: -1,
-			maxLine: -1,
-			gutter:  niceyaml.LineNumberGutter(),
+			spans:  nil,
+			gutter: niceyaml.LineNumberGutter(),
 			want: yamltest.JoinLF(
 				"   1 first: 1",
 				"   2 second: 2",
@@ -354,9 +362,8 @@ func TestPrinter_PrintSlice(t *testing.T) {
 			),
 		},
 		"bounded middle": {
-			minLine: 1,
-			maxLine: 3,
-			gutter:  niceyaml.NoGutter,
+			spans:  position.Spans{position.NewSpan(1, 4)},
+			gutter: niceyaml.NoGutter,
 			want: yamltest.JoinLF(
 				"second: 2",
 				"third: 3",
@@ -364,50 +371,94 @@ func TestPrinter_PrintSlice(t *testing.T) {
 			),
 		},
 		"bounded middle with line numbers": {
-			minLine: 1,
-			maxLine: 3,
-			gutter:  niceyaml.LineNumberGutter(),
+			spans:  position.Spans{position.NewSpan(1, 4)},
+			gutter: niceyaml.LineNumberGutter(),
 			want: yamltest.JoinLF(
 				"   2 second: 2",
 				"   3 third: 3",
 				"   4 fourth: 4",
 			),
 		},
-		"unbounded min": {
-			minLine: -1,
-			maxLine: 1,
-			gutter:  niceyaml.NoGutter,
+		"from start": {
+			spans:  position.Spans{position.NewSpan(0, 2)},
+			gutter: niceyaml.NoGutter,
 			want: yamltest.JoinLF(
 				"first: 1",
 				"second: 2",
 			),
 		},
-		"unbounded max": {
-			minLine: 3,
-			maxLine: -1,
-			gutter:  niceyaml.NoGutter,
+		"to end": {
+			spans:  position.Spans{position.NewSpan(3, 5)},
+			gutter: niceyaml.NoGutter,
 			want: yamltest.JoinLF(
 				"fourth: 4",
 				"fifth: 5",
 			),
 		},
 		"single line": {
-			minLine: 2,
-			maxLine: 2,
-			gutter:  niceyaml.NoGutter,
-			want:    "third: 3",
+			spans:  position.Spans{position.NewSpan(2, 3)},
+			gutter: niceyaml.NoGutter,
+			want:   "third: 3",
 		},
 		"single line with line numbers": {
-			minLine: 2,
-			maxLine: 2,
-			gutter:  niceyaml.LineNumberGutter(),
-			want:    "   3 third: 3",
+			spans:  position.Spans{position.NewSpan(2, 3)},
+			gutter: niceyaml.LineNumberGutter(),
+			want:   "   3 third: 3",
 		},
 		"empty result": {
-			minLine: 10,
-			maxLine: 20,
-			gutter:  niceyaml.NoGutter,
-			want:    "",
+			spans:  position.Spans{position.NewSpan(10, 21)},
+			gutter: niceyaml.NoGutter,
+			want:   "",
+		},
+		"two disjoint spans": {
+			spans: position.Spans{
+				position.NewSpan(0, 1),
+				position.NewSpan(3, 5),
+			},
+			gutter: niceyaml.NoGutter,
+			want: yamltest.JoinLF(
+				"first: 1",
+				"fourth: 4",
+				"fifth: 5",
+			),
+		},
+		"two disjoint spans with line numbers": {
+			spans: position.Spans{
+				position.NewSpan(0, 1),
+				position.NewSpan(3, 5),
+			},
+			gutter: niceyaml.LineNumberGutter(),
+			want: yamltest.JoinLF(
+				"   1 first: 1",
+				"   4 fourth: 4",
+				"   5 fifth: 5",
+			),
+		},
+		"three spans": {
+			spans: position.Spans{
+				position.NewSpan(0, 1),
+				position.NewSpan(2, 3),
+				position.NewSpan(4, 5),
+			},
+			gutter: niceyaml.NoGutter,
+			want: yamltest.JoinLF(
+				"first: 1",
+				"third: 3",
+				"fifth: 5",
+			),
+		},
+		"adjacent spans": {
+			spans: position.Spans{
+				position.NewSpan(0, 2),
+				position.NewSpan(2, 4),
+			},
+			gutter: niceyaml.NoGutter,
+			want: yamltest.JoinLF(
+				"first: 1",
+				"second: 2",
+				"third: 3",
+				"fourth: 4",
+			),
 		},
 	}
 
@@ -418,7 +469,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 			p := testPrinterWithGutter(tc.gutter)
 			lines := niceyaml.NewSourceFromString(input)
 
-			got := p.PrintSlice(lines, tc.minLine, tc.maxLine)
+			got := p.Print(lines, tc.spans...)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -1176,7 +1227,7 @@ func TestPrinter_SetAnnotationsEnabled(t *testing.T) {
 
 			input := "key: value\n"
 			source := niceyaml.NewSourceFromString(input)
-			source.Annotate(0, line.Annotation{Content: tc.annotation})
+			source.Line(0).Annotate(line.Annotation{Content: tc.annotation})
 
 			p := testPrinter()
 			p.SetAnnotationsEnabled(tc.enabled)
@@ -1278,7 +1329,7 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			t.Parallel()
 
 			source := niceyaml.NewSourceFromString(tc.input)
-			source.Annotate(tc.lineIndex, tc.annotation)
+			source.Line(tc.lineIndex).Annotate(tc.annotation)
 
 			p := testPrinter()
 			got := p.Print(source)
@@ -1341,7 +1392,7 @@ func TestPrinter_AnnotationPosition_WithGutter(t *testing.T) {
 			t.Parallel()
 
 			source := niceyaml.NewSourceFromString(tc.input)
-			source.Annotate(tc.lineIndex, tc.annotation)
+			source.Line(tc.lineIndex).Annotate(tc.annotation)
 
 			p := testPrinterWithGutter(niceyaml.LineNumberGutter())
 			got := p.Print(source)
@@ -1379,7 +1430,7 @@ func TestPrinter_AnnotationPosition_Disabled(t *testing.T) {
 
 			input := "key: value"
 			source := niceyaml.NewSourceFromString(input)
-			source.Annotate(0, tc.annotation)
+			source.Line(0).Annotate(tc.annotation)
 
 			p := testPrinter()
 			p.SetAnnotationsEnabled(false)
@@ -1404,7 +1455,8 @@ func TestPrinter_Style(t *testing.T) {
 		wantItalic bool
 	}{
 		"returns style from styles map": {
-			styles: style.NewStyles(base,
+			styles: style.NewStyles(
+				base,
 				style.Set(style.NameTag, base.Bold(true)),
 			),
 			query:    style.NameTag,
@@ -2047,9 +2099,9 @@ func TestFinderPrinter_Integration(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := niceyaml.NewSourceFromString(tc.input)
+			source := niceyaml.NewSourceFromString(tc.input)
 			finder := testFinder(tc.normalizer)
-			finder.Load(lines)
+			finder.Load(source)
 
 			printer := testPrinter()
 
@@ -2059,11 +2111,9 @@ func TestFinderPrinter_Integration(t *testing.T) {
 				assert.Empty(t, ranges)
 			}
 
-			for _, rng := range ranges {
-				printer.AddStyleToRange(testHighlightStyle(), rng)
-			}
+			source.AddOverlay(testOverlayHighlight, ranges...)
 
-			got := printer.Print(lines)
+			got := printer.Print(source)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -2106,23 +2156,21 @@ func TestPrinter_Golden(t *testing.T) {
 		},
 		"find and highlight": {
 			opts: []niceyaml.PrinterOption{
-				niceyaml.WithStyles(theme.Charm()),
+				niceyaml.WithStyles(theme.Charm().With(
+					style.Set(testOverlayHighlight, lipgloss.NewStyle().
+						Background(lipgloss.Color("#FFFF00")).
+						Foreground(lipgloss.Color("#000000"))),
+				)),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 				niceyaml.WithGutter(niceyaml.NoGutter),
 			},
-			setupFunc: func(p *niceyaml.Printer, lines *niceyaml.Source) {
+			setupFunc: func(_ *niceyaml.Printer, source *niceyaml.Source) {
 				// Search for "日本" (Japan) which appears multiple times in full.yaml.
 				finder := niceyaml.NewFinder()
-				finder.Load(lines)
-
-				highlightStyle := lipgloss.NewStyle().
-					Background(lipgloss.Color("#FFFF00")).
-					Foreground(lipgloss.Color("#000000"))
+				finder.Load(source)
 
 				ranges := finder.Find("日本")
-				for _, rng := range ranges {
-					p.AddStyleToRange(&highlightStyle, rng)
-				}
+				source.AddOverlay(testOverlayHighlight, ranges...)
 			},
 		},
 	}
@@ -2157,53 +2205,82 @@ func TestPrinter_BlendStyles(t *testing.T) {
 		})
 	}
 
-	// StyleRange defines a style and its range.
-	type styleRange struct {
-		style lipgloss.Style
+	// OverlayRange defines an overlay kind and its range.
+	type overlayRange struct {
+		kind  style.Style
 		start position.Position
 		end   position.Position
 	}
 
+	// Overlay kinds for the various test tags.
+	const (
+		kindHL style.Style = testOverlayHighlight + iota + 1
+		kindAll
+		kindA
+		kindB
+		kindC
+		kindX
+		kindY
+		kindK
+		kindVal
+		kindSpan
+	)
+
+	// Overlay styler mapping kinds to tag-wrapped styles.
+	testOverlayStyler := style.NewStyles(
+		lipgloss.NewStyle(),
+		style.Set(kindHL, styleWithTag("hl")),
+		style.Set(kindAll, styleWithTag("all")),
+		style.Set(kindA, styleWithTag("a")),
+		style.Set(kindB, styleWithTag("b")),
+		style.Set(kindC, styleWithTag("c")),
+		style.Set(kindX, styleWithTag("x")),
+		style.Set(kindY, styleWithTag("y")),
+		style.Set(kindK, styleWithTag("k")),
+		style.Set(kindVal, styleWithTag("val")),
+		style.Set(kindSpan, styleWithTag("span")),
+	)
+
 	tcs := map[string]struct {
 		input  string
 		want   string
-		ranges []styleRange
+		ranges []overlayRange
 	}{
 		"single range on value": {
 			input: "key: value",
-			ranges: []styleRange{
-				{styleWithTag("hl"), position.New(0, 5), position.New(0, 10)},
+			ranges: []overlayRange{
+				{kindHL, position.New(0, 5), position.New(0, 10)},
 			},
 			want: "key: <hl>value</hl>",
 		},
 		"single range on key": {
 			input: "key: value",
-			ranges: []styleRange{
-				{styleWithTag("hl"), position.New(0, 0), position.New(0, 3)},
+			ranges: []overlayRange{
+				{kindHL, position.New(0, 0), position.New(0, 3)},
 			},
 			want: "<hl>key</hl>: value",
 		},
 		"full line range": {
 			// Each token is styled separately, so transforms apply per-token.
 			input: "key: value",
-			ranges: []styleRange{
-				{styleWithTag("all"), position.New(0, 0), position.New(0, 10)},
+			ranges: []overlayRange{
+				{kindAll, position.New(0, 0), position.New(0, 10)},
 			},
 			want: "<all>key</all><all>:</all><all> </all><all>value</all>",
 		},
 		"non-overlapping ranges": {
 			input: "key: value",
-			ranges: []styleRange{
-				{styleWithTag("a"), position.New(0, 0), position.New(0, 3)},
-				{styleWithTag("b"), position.New(0, 5), position.New(0, 10)},
+			ranges: []overlayRange{
+				{kindA, position.New(0, 0), position.New(0, 3)},
+				{kindB, position.New(0, 5), position.New(0, 10)},
 			},
 			want: "<a>key</a>: <b>value</b>",
 		},
 		"adjacent ranges": {
 			input: "key: value",
-			ranges: []styleRange{
-				{styleWithTag("a"), position.New(0, 0), position.New(0, 3)},
-				{styleWithTag("b"), position.New(0, 3), position.New(0, 4)},
+			ranges: []overlayRange{
+				{kindA, position.New(0, 0), position.New(0, 3)},
+				{kindB, position.New(0, 3), position.New(0, 4)},
 			},
 			want: "<a>key</a><b>:</b> value",
 		},
@@ -2212,9 +2289,9 @@ func TestPrinter_BlendStyles(t *testing.T) {
 			// Blending composes transforms: overlay(base(text)).
 			// Each token is styled separately.
 			input: "key: value",
-			ranges: []styleRange{
-				{styleWithTag("a"), position.New(0, 0), position.New(0, 5)},
-				{styleWithTag("b"), position.New(0, 2), position.New(0, 7)},
+			ranges: []overlayRange{
+				{kindA, position.New(0, 0), position.New(0, 5)},
+				{kindB, position.New(0, 2), position.New(0, 7)},
 			},
 			// Token "key" [0,3): positions 0-1 only <a>, position 2 both <b><a>
 			// Token ":" [3,4): both <b><a>
@@ -2226,10 +2303,10 @@ func TestPrinter_BlendStyles(t *testing.T) {
 			// Ranges: a=[0,6), b=[2,8), c=[4,10)
 			// Each token styled separately with overlapping transforms.
 			input: "key: value",
-			ranges: []styleRange{
-				{styleWithTag("a"), position.New(0, 0), position.New(0, 6)},
-				{styleWithTag("b"), position.New(0, 2), position.New(0, 8)},
-				{styleWithTag("c"), position.New(0, 4), position.New(0, 10)},
+			ranges: []overlayRange{
+				{kindA, position.New(0, 0), position.New(0, 6)},
+				{kindB, position.New(0, 2), position.New(0, 8)},
+				{kindC, position.New(0, 4), position.New(0, 10)},
 			},
 			// Token "key" [0,3): 0-1 <a>, 2 <b><a>
 			// Token ":" [3,4): <b><a>
@@ -2240,9 +2317,9 @@ func TestPrinter_BlendStyles(t *testing.T) {
 		"partial character overlap": {
 			// "abcdef" is a single token, styled character-by-character.
 			input: "abcdef",
-			ranges: []styleRange{
-				{styleWithTag("x"), position.New(0, 1), position.New(0, 4)},
-				{styleWithTag("y"), position.New(0, 3), position.New(0, 5)},
+			ranges: []overlayRange{
+				{kindX, position.New(0, 1), position.New(0, 4)},
+				{kindY, position.New(0, 3), position.New(0, 5)},
 			},
 			// Position 0: no style
 			// Positions 1-2: only <x>
@@ -2253,24 +2330,24 @@ func TestPrinter_BlendStyles(t *testing.T) {
 		},
 		"range covers entire token": {
 			input: "key: value",
-			ranges: []styleRange{
-				{styleWithTag("k"), position.New(0, 0), position.New(0, 3)},
-				{styleWithTag("val"), position.New(0, 5), position.New(0, 10)},
+			ranges: []overlayRange{
+				{kindK, position.New(0, 0), position.New(0, 3)},
+				{kindVal, position.New(0, 5), position.New(0, 10)},
 			},
 			want: "<k>key</k>: <val>value</val>",
 		},
 		"multi-line with ranges on each line": {
 			input: yamltest.JoinLF("a: 1", "b: 2"),
-			ranges: []styleRange{
-				{styleWithTag("x"), position.New(0, 0), position.New(0, 1)},
-				{styleWithTag("y"), position.New(1, 0), position.New(1, 1)},
+			ranges: []overlayRange{
+				{kindX, position.New(0, 0), position.New(0, 1)},
+				{kindY, position.New(1, 0), position.New(1, 1)},
 			},
 			want: yamltest.JoinLF("<x>a</x>: 1", "<y>b</y>: 2"),
 		},
 		"range spanning multiple lines": {
 			input: yamltest.JoinLF("a: 1", "b: 2"),
-			ranges: []styleRange{
-				{styleWithTag("span"), position.New(0, 3), position.New(1, 1)},
+			ranges: []overlayRange{
+				{kindSpan, position.New(0, 3), position.New(1, 1)},
 			},
 			// Range spans from line 0 col 3 to line 1 col 1.
 			want: yamltest.JoinLF("a: <span>1</span>", "<span>b</span>: 2"),
@@ -2281,14 +2358,18 @@ func TestPrinter_BlendStyles(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := testPrinter()
+			source := niceyaml.NewSourceFromString(tc.input)
+			p := niceyaml.NewPrinter(
+				niceyaml.WithStyles(testOverlayStyler),
+				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithGutter(niceyaml.NoGutter),
+			)
 
-			for _, sr := range tc.ranges {
-				st := sr.style
-				p.AddStyleToRange(&st, position.NewRange(sr.start, sr.end))
+			for _, or := range tc.ranges {
+				source.AddOverlay(or.kind, position.NewRange(or.start, or.end))
 			}
 
-			got := p.Print(niceyaml.NewSourceFromString(tc.input))
+			got := p.Print(source)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -2300,27 +2381,34 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 	// These tests exercise the color blending code paths in blendColors/blendStyles
 	// by using actual lipgloss colors instead of transforms.
 
-	type styleRange struct {
+	type overlayDef struct {
 		style lipgloss.Style
 		start position.Position
 		end   position.Position
 	}
 
+	// Overlay kinds for color blending tests.
+	const (
+		colorKind1 style.Style = testOverlayHighlight + 100 + iota
+		colorKind2
+		colorKind3
+	)
+
 	tcs := map[string]struct {
-		input  string
-		ranges []styleRange
+		input    string
+		overlays []overlayDef
 	}{
 		"ForegroundBlend": {
 			// Two ranges overlap - the overlapping region should blend colors via LAB.
 			input: "key: value",
-			ranges: []styleRange{
+			overlays: []overlayDef{
 				{lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")), position.New(0, 0), position.New(0, 5)},
 				{lipgloss.NewStyle().Foreground(lipgloss.Color("#0000FF")), position.New(0, 3), position.New(0, 10)},
 			},
 		},
 		"BackgroundBlend": {
 			input: "key: value",
-			ranges: []styleRange{
+			overlays: []overlayDef{
 				{lipgloss.NewStyle().Background(lipgloss.Color("#00FF00")), position.New(0, 0), position.New(0, 5)},
 				{lipgloss.NewStyle().Background(lipgloss.Color("#FF00FF")), position.New(0, 3), position.New(0, 10)},
 			},
@@ -2328,7 +2416,7 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 		"FirstColorOnly": {
 			// Second style has NoColor - first color should be used directly.
 			input: "key: value",
-			ranges: []styleRange{
+			overlays: []overlayDef{
 				{lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")), position.New(0, 0), position.New(0, 5)},
 				{lipgloss.NewStyle(), position.New(0, 3), position.New(0, 10)},
 			},
@@ -2336,7 +2424,7 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 		"SecondColorOnly": {
 			// First style has NoColor - second color should be used.
 			input: "key: value",
-			ranges: []styleRange{
+			overlays: []overlayDef{
 				{lipgloss.NewStyle(), position.New(0, 0), position.New(0, 5)},
 				{lipgloss.NewStyle().Foreground(lipgloss.Color("#0000FF")), position.New(0, 3), position.New(0, 10)},
 			},
@@ -2344,7 +2432,7 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 		"BothNoColor": {
 			// Both styles have NoColor - should result in nil (no color applied).
 			input: "key: value",
-			ranges: []styleRange{
+			overlays: []overlayDef{
 				{lipgloss.NewStyle(), position.New(0, 0), position.New(0, 5)},
 				{lipgloss.NewStyle(), position.New(0, 3), position.New(0, 10)},
 			},
@@ -2352,7 +2440,7 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 		"ThreeOverlapping": {
 			// Three ranges overlap - all colors should blend together.
 			input: "key: value",
-			ranges: []styleRange{
+			overlays: []overlayDef{
 				{lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")), position.New(0, 0), position.New(0, 6)},
 				{lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")), position.New(0, 2), position.New(0, 8)},
 				{lipgloss.NewStyle().Foreground(lipgloss.Color("#0000FF")), position.New(0, 4), position.New(0, 10)},
@@ -2361,7 +2449,7 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 		"MixedFgBg": {
 			// Foreground and background colors should blend independently.
 			input: "key: value",
-			ranges: []styleRange{
+			overlays: []overlayDef{
 				{
 					lipgloss.NewStyle().
 						Foreground(lipgloss.Color("#FF0000")).
@@ -2384,14 +2472,24 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := testPrinter()
+			source := niceyaml.NewSourceFromString(tc.input)
 
-			for _, sr := range tc.ranges {
-				st := sr.style
-				p.AddStyleToRange(&st, position.NewRange(sr.start, sr.end))
+			// Build overlay styler with styles from test case.
+			kinds := []style.Style{colorKind1, colorKind2, colorKind3}
+
+			overlayOpts := make([]style.StylesOption, 0, len(tc.overlays))
+			for i, od := range tc.overlays {
+				overlayOpts = append(overlayOpts, style.Set(kinds[i], od.style))
+				source.AddOverlay(kinds[i], position.NewRange(od.start, od.end))
 			}
 
-			got := p.Print(niceyaml.NewSourceFromString(tc.input))
+			p := niceyaml.NewPrinter(
+				niceyaml.WithStyles(style.NewStyles(lipgloss.NewStyle(), overlayOpts...)),
+				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithGutter(niceyaml.NoGutter),
+			)
+
+			got := p.Print(source)
 			golden.RequireEqual(t, got)
 		})
 	}
@@ -2406,7 +2504,7 @@ func TestDefaultAnnotation(t *testing.T) {
 		want        string
 	}{
 		"empty annotations": {
-			annotations: nil,
+			annotations: line.Annotations{},
 			position:    line.Below,
 			want:        "",
 		},
@@ -2478,15 +2576,11 @@ func TestPrinter_WithAnnotationFunc(t *testing.T) {
 
 	// Custom annotation function that uses different prefixes.
 	customAnnotation := func(ctx niceyaml.AnnotationContext) string {
-		anns := ctx.Annotations
-		if len(anns) == 0 {
+		if len(ctx.Annotations) == 0 {
 			return ""
 		}
 
-		contents := make([]string, len(anns))
-		for i, ann := range anns {
-			contents[i] = ann.Content
-		}
+		contents := ctx.Annotations.Contents()
 
 		if ctx.Position == line.Below {
 			return ">>> " + strings.Join(contents, ", ")
@@ -2526,7 +2620,7 @@ func TestPrinter_WithAnnotationFunc(t *testing.T) {
 
 			input := "key: value"
 			source := niceyaml.NewSourceFromString(input)
-			source.Annotate(tc.lineIndex, tc.annotation)
+			source.Line(tc.lineIndex).Annotate(tc.annotation)
 
 			p := niceyaml.NewPrinter(
 				niceyaml.WithStyles(style.Styles{}),

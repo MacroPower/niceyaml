@@ -66,7 +66,6 @@
 //
 // The [Printer] type renders YAML tokens with syntax highlighting via lipgloss.
 // Use [Printer.Print] with any [LineIterator] (such as [*Source]) to render output.
-// Alternatively, use [Printer.PrintSlice] to render a subset of lines.
 //
 // Configure printers using [PrinterOption] functions:
 //

@@ -581,24 +581,24 @@ func TestLine_Annotation(t *testing.T) {
 
 		tcs := map[string]struct {
 			want        string
-			annotations line.Annotations
+			annotations []line.Annotation
 		}{
 			"no annotation": {
 				annotations: nil,
 				want:        "   1 | key: value",
 			},
 			"annotation below at start": {
-				annotations: line.Annotations{{Content: "error here", Position: line.Below}},
+				annotations: []line.Annotation{{Content: "error here", Position: line.Below}},
 				want: `   1 | key: value
    1 | ^ error here`,
 			},
 			"annotation below with padding": {
-				annotations: line.Annotations{{Content: "note", Position: line.Below, Col: 4}},
+				annotations: []line.Annotation{{Content: "note", Position: line.Below, Col: 4}},
 				want: `   1 | key: value
    1 |     ^ note`,
 			},
 			"annotation above": {
-				annotations: line.Annotations{{Content: "@@ hunk header @@", Position: line.Above}},
+				annotations: []line.Annotation{{Content: "@@ hunk header @@", Position: line.Above}},
 				want: `   1 | @@ hunk header @@
    1 | key: value`,
 			},
@@ -613,7 +613,7 @@ func TestLine_Annotation(t *testing.T) {
 				require.Len(t, lines, 1)
 
 				ln := lines[0]
-				ln.Annotations.Add(tc.annotations...)
+				ln.Annotate(tc.annotations...)
 
 				assert.Equal(t, tc.want, ln.String())
 			})
@@ -628,21 +628,40 @@ func TestLine_Annotation(t *testing.T) {
 		require.Len(t, lines, 1)
 
 		original := lines[0]
-		original.Annotations.Add(line.Annotation{Content: "original note", Position: line.Below})
+		original.Annotate(line.Annotation{Content: "original note", Position: line.Below})
 
 		clone := original.Clone()
 
 		// Verify annotations were copied.
 		require.Len(t, clone.Annotations, 1)
+		require.Len(t, original.Annotations, len(clone.Annotations))
 		assert.Equal(t, original.Annotations[0].Content, clone.Annotations[0].Content)
-		assert.Equal(t, original.Annotations[0].Position, clone.Annotations[0].Position)
 
-		// Modify clone and verify original is unchanged.
-		clone.Annotations[0].Content = "modified"
-		clone.Annotations[0].Position = line.Above
+		// Verify position by checking filtered results.
+		belowCount := 0
+		for _, ann := range clone.Annotations {
+			if ann.Position == line.Below {
+				belowCount++
+			}
+		}
 
+		assert.Equal(t, 1, belowCount)
+
+		// Modify clone annotations.
+		clone.Annotate(line.Annotation{Content: "modified", Position: line.Above})
+
+		// Verify original is unchanged.
+		require.Len(t, original.Annotations, 1)
 		assert.Equal(t, "original note", original.Annotations[0].Content)
-		assert.Equal(t, line.Below, original.Annotations[0].Position)
+
+		origBelowCount := 0
+		for _, ann := range original.Annotations {
+			if ann.Position == line.Below {
+				origBelowCount++
+			}
+		}
+
+		assert.Equal(t, 1, origBelowCount)
 	})
 }
 
@@ -2423,7 +2442,7 @@ func TestLines_String(t *testing.T) {
 		lines := line.NewLines(tks)
 
 		// Add annotation to first line.
-		lines[0].Annotations.Add(line.Annotation{Content: "test annotation"})
+		lines[0].Annotate(line.Annotation{Content: "test annotation"})
 
 		result := lines.String()
 		assert.Contains(t, result, "key: value")
@@ -2568,4 +2587,263 @@ func TestNewLines_WhitespaceType(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestLine_Annotate(t *testing.T) {
+	t.Parallel()
+
+	t.Run("add single annotation", func(t *testing.T) {
+		t.Parallel()
+
+		tks := lexer.Tokenize("key: value\n")
+		lines := line.NewLines(tks)
+		require.Len(t, lines, 1)
+
+		ln := &lines[0]
+		ln.Annotate(line.Annotation{Content: "note", Position: line.Below})
+
+		require.Len(t, ln.Annotations, 1)
+		assert.Equal(t, "note", ln.Annotations[0].Content)
+		assert.Equal(t, line.Below, ln.Annotations[0].Position)
+	})
+
+	t.Run("add multiple annotations", func(t *testing.T) {
+		t.Parallel()
+
+		tks := lexer.Tokenize("key: value\n")
+		lines := line.NewLines(tks)
+		require.Len(t, lines, 1)
+
+		ln := &lines[0]
+		ln.Annotate(
+			line.Annotation{Content: "first", Position: line.Above},
+			line.Annotation{Content: "second", Position: line.Below},
+		)
+
+		require.Len(t, ln.Annotations, 2)
+		assert.Equal(t, "first", ln.Annotations[0].Content)
+		assert.Equal(t, "second", ln.Annotations[1].Content)
+	})
+
+	t.Run("accumulates annotations", func(t *testing.T) {
+		t.Parallel()
+
+		tks := lexer.Tokenize("key: value\n")
+		lines := line.NewLines(tks)
+		require.Len(t, lines, 1)
+
+		ln := &lines[0]
+		ln.Annotate(line.Annotation{Content: "first"})
+		ln.Annotate(line.Annotation{Content: "second"})
+
+		require.Len(t, ln.Annotations, 2)
+	})
+}
+
+func TestLine_Overlay(t *testing.T) {
+	t.Parallel()
+
+	t.Run("add single overlay", func(t *testing.T) {
+		t.Parallel()
+
+		tks := lexer.Tokenize("key: value\n")
+		lines := line.NewLines(tks)
+		require.Len(t, lines, 1)
+
+		ln := &lines[0]
+		ln.Overlay(line.Overlay{
+			Cols: position.NewSpan(0, 5),
+			Kind: 1,
+		})
+
+		require.Len(t, ln.Overlays, 1)
+		assert.Equal(t, position.NewSpan(0, 5), ln.Overlays[0].Cols)
+		assert.Equal(t, 1, ln.Overlays[0].Kind)
+	})
+
+	t.Run("add multiple overlays", func(t *testing.T) {
+		t.Parallel()
+
+		tks := lexer.Tokenize("key: value\n")
+		lines := line.NewLines(tks)
+		require.Len(t, lines, 1)
+
+		ln := &lines[0]
+		ln.Overlay(
+			line.Overlay{Cols: position.NewSpan(0, 3), Kind: 1},
+			line.Overlay{Cols: position.NewSpan(5, 10), Kind: 2},
+		)
+
+		require.Len(t, ln.Overlays, 2)
+		assert.Equal(t, position.NewSpan(0, 3), ln.Overlays[0].Cols)
+		assert.Equal(t, position.NewSpan(5, 10), ln.Overlays[1].Cols)
+	})
+
+	t.Run("accumulates overlays", func(t *testing.T) {
+		t.Parallel()
+
+		tks := lexer.Tokenize("key: value\n")
+		lines := line.NewLines(tks)
+		require.Len(t, lines, 1)
+
+		ln := &lines[0]
+		ln.Overlay(line.Overlay{Cols: position.NewSpan(0, 3), Kind: 1})
+		ln.Overlay(line.Overlay{Cols: position.NewSpan(5, 10), Kind: 2})
+
+		require.Len(t, ln.Overlays, 2)
+	})
+}
+
+func TestLines_AddOverlay(t *testing.T) {
+	t.Parallel()
+
+	t.Run("single line range", func(t *testing.T) {
+		t.Parallel()
+
+		tks := lexer.Tokenize("key: value\n")
+		lines := line.NewLines(tks)
+		require.Len(t, lines, 1)
+
+		lines.AddOverlay(1, position.NewRange(
+			position.New(0, 0),
+			position.New(0, 5),
+		))
+
+		require.Len(t, lines[0].Overlays, 1)
+		assert.Equal(t, position.NewSpan(0, 5), lines[0].Overlays[0].Cols)
+		assert.Equal(t, 1, lines[0].Overlays[0].Kind)
+	})
+
+	t.Run("multi-line range splits across lines", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.Input(`
+			key1: value1
+			key2: value2
+			key3: value3
+		`)
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+		require.Len(t, lines, 3)
+
+		// Add overlay spanning all three lines.
+		lines.AddOverlay(2, position.NewRange(
+			position.New(0, 3),
+			position.New(2, 5),
+		))
+
+		// First line: col 3 to end of line.
+		require.Len(t, lines[0].Overlays, 1)
+		assert.Equal(t, 3, lines[0].Overlays[0].Cols.Start)
+		assert.Equal(t, 2, lines[0].Overlays[0].Kind)
+
+		// Middle line: full line.
+		require.Len(t, lines[1].Overlays, 1)
+		assert.Equal(t, 0, lines[1].Overlays[0].Cols.Start)
+		assert.Equal(t, 2, lines[1].Overlays[0].Kind)
+
+		// Last line: start to col 5.
+		require.Len(t, lines[2].Overlays, 1)
+		assert.Equal(t, 0, lines[2].Overlays[0].Cols.Start)
+		assert.Equal(t, 5, lines[2].Overlays[0].Cols.End)
+		assert.Equal(t, 2, lines[2].Overlays[0].Kind)
+	})
+
+	t.Run("multiple ranges", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.Input(`
+			key1: value1
+			key2: value2
+		`)
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+		require.Len(t, lines, 2)
+
+		lines.AddOverlay(1,
+			position.NewRange(position.New(0, 0), position.New(0, 4)),
+			position.NewRange(position.New(1, 0), position.New(1, 4)),
+		)
+
+		require.Len(t, lines[0].Overlays, 1)
+		require.Len(t, lines[1].Overlays, 1)
+	})
+
+	t.Run("empty lines no-op", func(t *testing.T) {
+		t.Parallel()
+
+		var lines line.Lines
+		// Should not panic on empty lines.
+		lines.AddOverlay(1, position.NewRange(position.New(0, 0), position.New(0, 5)))
+
+		assert.Empty(t, lines)
+	})
+}
+
+func TestLines_ClearOverlays(t *testing.T) {
+	t.Parallel()
+
+	t.Run("clears all overlays", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.Input(`
+			key1: value1
+			key2: value2
+		`)
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+		require.Len(t, lines, 2)
+
+		// Add overlays to both lines.
+		lines.AddOverlay(1,
+			position.NewRange(position.New(0, 0), position.New(0, 10)),
+			position.NewRange(position.New(1, 0), position.New(1, 10)),
+		)
+
+		require.Len(t, lines[0].Overlays, 1)
+		require.Len(t, lines[1].Overlays, 1)
+
+		// Clear all overlays.
+		lines.ClearOverlays()
+
+		assert.Nil(t, lines[0].Overlays)
+		assert.Nil(t, lines[1].Overlays)
+	})
+
+	t.Run("idempotent on empty", func(t *testing.T) {
+		t.Parallel()
+
+		tks := lexer.Tokenize("key: value\n")
+		lines := line.NewLines(tks)
+		require.Len(t, lines, 1)
+
+		// Clear without any overlays set.
+		lines.ClearOverlays()
+
+		assert.Nil(t, lines[0].Overlays)
+	})
+}
+
+func TestLine_Clone_PreservesOverlays(t *testing.T) {
+	t.Parallel()
+
+	tks := lexer.Tokenize("key: value\n")
+	lines := line.NewLines(tks)
+	require.Len(t, lines, 1)
+
+	original := lines[0]
+	original.Overlay(line.Overlay{Cols: position.NewSpan(0, 5), Kind: 1})
+
+	clone := original.Clone()
+
+	// Verify overlays were copied.
+	require.Len(t, clone.Overlays, 1)
+	assert.Equal(t, original.Overlays[0].Cols, clone.Overlays[0].Cols)
+	assert.Equal(t, original.Overlays[0].Kind, clone.Overlays[0].Kind)
+
+	// Modify clone overlays.
+	clone.Overlay(line.Overlay{Cols: position.NewSpan(5, 10), Kind: 2})
+
+	// Verify original is unchanged.
+	require.Len(t, original.Overlays, 1)
 }

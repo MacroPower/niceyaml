@@ -46,6 +46,18 @@ func testPrinterWithColors() *niceyaml.Printer {
 	)
 }
 
+// testPrinterWithSearch returns a printer with search highlight styles for testing.
+func testPrinterWithSearch() *niceyaml.Printer {
+	return niceyaml.NewPrinter(
+		niceyaml.WithStyles(style.NewStyles(lipgloss.Style{},
+			style.Set(yamlviewport.SearchOverlayKind, lipgloss.NewStyle().Background(lipgloss.Color("11"))),
+			style.Set(yamlviewport.SelectedSearchOverlayKind, lipgloss.NewStyle().Background(lipgloss.Color("9"))),
+		)),
+		niceyaml.WithStyle(lipgloss.NewStyle()),
+		niceyaml.WithGutter(niceyaml.DiffGutter()),
+	)
+}
+
 func TestViewport_Golden(t *testing.T) {
 	t.Parallel()
 
@@ -117,9 +129,7 @@ func TestViewport_Golden(t *testing.T) {
 		},
 		"SearchHighlight": {
 			opts: []yamlviewport.Option{
-				yamlviewport.WithPrinter(testPrinter()),
-				yamlviewport.WithSearchStyle(lipgloss.NewStyle().Background(lipgloss.Color("11"))),
-				yamlviewport.WithSelectedSearchStyle(lipgloss.NewStyle().Background(lipgloss.Color("9"))),
+				yamlviewport.WithPrinter(testPrinterWithSearch()),
 			},
 			yaml:   simpleYAML,
 			width:  80,
@@ -203,9 +213,7 @@ func TestViewport_Golden(t *testing.T) {
 		},
 		"SearchNavigateNext": {
 			opts: []yamlviewport.Option{
-				yamlviewport.WithPrinter(testPrinter()),
-				yamlviewport.WithSearchStyle(lipgloss.NewStyle().Background(lipgloss.Color("11"))),
-				yamlviewport.WithSelectedSearchStyle(lipgloss.NewStyle().Background(lipgloss.Color("9"))),
+				yamlviewport.WithPrinter(testPrinterWithSearch()),
 			},
 			yaml:   simpleYAML,
 			width:  80,

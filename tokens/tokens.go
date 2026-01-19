@@ -289,6 +289,22 @@ func (s2 Segments2) ContentRangesAt(idx, col int) *position.Ranges {
 	return ranges
 }
 
+// ValueOffset calculates the byte offset where Value starts within the
+// first non-empty line of the token's Origin. This offset is used for string
+// slicing operations.
+func ValueOffset(tk *token.Token) int {
+	firstLine, _, _ := strings.Cut(tk.Origin, "\n")
+	if firstLine == "" {
+		return 0
+	}
+
+	if idx := strings.Index(firstLine, tk.Value); idx >= 0 {
+		return idx
+	}
+
+	return 0
+}
+
 // SplitDocuments splits a token stream into multiple token streams,
 // one for each YAML document found (separated by '---' tokens).
 // The returned slices each contain tokens for a single document,

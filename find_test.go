@@ -360,7 +360,7 @@ func TestFinder_Find_DiffBuiltLines(t *testing.T) {
 	revAfter := niceyaml.NewRevision(afterLines)
 
 	diff := niceyaml.NewFullDiff(revBefore, revAfter)
-	lines := diff.Source()
+	lines := diff.Build()
 
 	tcs := map[string]struct {
 		search string

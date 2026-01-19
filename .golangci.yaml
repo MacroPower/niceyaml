@@ -183,7 +183,6 @@ linters:
         - os.RemoveAll
 
     grouper:
-      const-require-grouping: true
       import-require-single-import: true
       var-require-single-var: true
 

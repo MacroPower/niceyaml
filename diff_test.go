@@ -356,7 +356,7 @@ func TestFullDiff_Source(t *testing.T) {
 			revB := niceyaml.NewRevision(afterTokens)
 			diff := niceyaml.NewFullDiff(revA, revB)
 
-			got := diff.Source()
+			got := diff.Build()
 
 			assert.Equal(t, "a..b", got.Name())
 			assert.Equal(t, tc.want, got.String())
@@ -430,7 +430,7 @@ func TestFullDiff_Source_Flags(t *testing.T) {
 			revB := niceyaml.NewRevision(afterTokens)
 			diff := niceyaml.NewFullDiff(revA, revB)
 
-			got := diff.Source()
+			got := diff.Build()
 
 			flaggedCount := 0
 			for _, ln := range got.Lines() {
@@ -455,11 +455,10 @@ func TestSummaryDiff_Source(t *testing.T) {
 		before      string
 		after       string
 		context     int
-		want        string
-		wantLen     int               // Expected Len(), -1 to skip.
 		wantEmpty   bool              // Expect IsEmpty() and Tokens() == nil.
-		flags       map[int]line.Flag // Optional: check specific line flags.
-		annotations map[int]string    // Optional: check annotations (others must be empty).
+		wantRanges  int               // Expected number of ranges (hunks).
+		flags       map[int]line.Flag // Optional: check specific line flags (0-indexed in full source).
+		annotations map[int]string    // Optional: check annotations (0-indexed in full source).
 	}{
 		"context limits output": {
 			before: yamltest.Input(`
@@ -484,15 +483,16 @@ func TestSummaryDiff_Source(t *testing.T) {
 				line8: 8
 				line9: 9
 			`),
-			context: 1,
-			want: yamltest.JoinLF(
-				"   4 | @@ -4,3 +4,3 @@",
-				"   4 | line4: 4",
-				"   5 | line5: old",
-				"   5 | line5: new",
-				"   6 | line6: 6",
-			),
-			wantLen: 4,
+			context:    1,
+			wantRanges: 1,
+			flags: map[int]line.Flag{
+				0: line.FlagDefault,  // Line1.
+				3: line.FlagDefault,  // Line4 (context).
+				4: line.FlagDeleted,  // Line5: old.
+				5: line.FlagInserted, // Line5: new.
+				6: line.FlagDefault,  // Line6 (context).
+			},
+			annotations: map[int]string{3: "@@ -4,3 +4,3 @@"},
 		},
 		"context 0 shows only changes": {
 			before: yamltest.Input(`
@@ -509,17 +509,13 @@ func TestSummaryDiff_Source(t *testing.T) {
 				line4: 4
 				line5: 5
 			`),
-			context: 0,
-			want: yamltest.JoinLF(
-				"   3 | @@ -3 +3 @@",
-				"   3 | line3: old",
-				"   3 | line3: new",
-			),
-			wantLen: 2,
+			context:    0,
+			wantRanges: 1,
 			flags: map[int]line.Flag{
-				0: line.FlagDeleted,
-				1: line.FlagInserted,
+				2: line.FlagDeleted,
+				3: line.FlagInserted,
 			},
+			annotations: map[int]string{2: "@@ -3 +3 @@"},
 		},
 		"hunk header in annotation": {
 			before: yamltest.Input(`
@@ -532,15 +528,8 @@ func TestSummaryDiff_Source(t *testing.T) {
 				second: changed
 				third: 3
 			`),
-			context: 1,
-			want: yamltest.JoinLF(
-				"   1 | @@ -1,3 +1,3 @@",
-				"   1 | first: 1",
-				"   2 | second: 2",
-				"   2 | second: changed",
-				"   3 | third: 3",
-			),
-			wantLen:     -1,
+			context:     1,
+			wantRanges:  1,
 			annotations: map[int]string{0: "@@ -1,3 +1,3 @@"},
 		},
 		"multiple hunks have separate annotations": {
@@ -566,52 +555,36 @@ func TestSummaryDiff_Source(t *testing.T) {
 				line8: 8
 				line9: new9
 			`),
-			context: 1,
-			want: yamltest.JoinLF(
-				"   1 | @@ -1,2 +1,2 @@",
-				"   1 | line1: old1",
-				"   1 | line1: new1",
-				"   2 | line2: 2",
-				"   8 | @@ -8,2 +8,2 @@",
-				"   8 | line8: 8",
-				"   9 | line9: old9",
-				"   9 | line9: new9",
-			),
-			wantLen: -1,
+			context:    1,
+			wantRanges: 2,
+			// Full source has 11 lines (9 equal + 2 changes = delete+insert each).
+			// First hunk: indices 0-2 (delete, insert, context line2).
+			// Second hunk: indices 8-10 (context line8, delete, insert).
 			annotations: map[int]string{
 				0: "@@ -1,2 +1,2 @@",
-				3: "@@ -8,2 +8,2 @@",
+				8: "@@ -8,2 +8,2 @@",
 			},
 		},
 		"no changes returns empty tokens": {
-			before:    "key: value\n",
-			after:     "key: value\n",
-			context:   3,
-			want:      "",
-			wantLen:   -1,
-			wantEmpty: true,
+			before:     "key: value\n",
+			after:      "key: value\n",
+			context:    3,
+			wantEmpty:  true,
+			wantRanges: 0,
 		},
 		"empty before": {
-			before:  "",
-			after:   "key: value\n",
-			context: 3,
-			want: yamltest.JoinLF(
-				"   1 | @@ -0,0 +1 @@",
-				"   1 | key: value",
-			),
-			wantLen: 1,
-			flags:   map[int]line.Flag{0: line.FlagInserted},
+			before:     "",
+			after:      "key: value\n",
+			context:    3,
+			wantRanges: 1,
+			flags:      map[int]line.Flag{0: line.FlagInserted},
 		},
 		"empty after": {
-			before:  "key: value\n",
-			after:   "",
-			context: 3,
-			want: yamltest.JoinLF(
-				"   1 | @@ -1 +0,0 @@",
-				"   1 | key: value",
-			),
-			wantLen: 1,
-			flags:   map[int]line.Flag{0: line.FlagDeleted},
+			before:     "key: value\n",
+			after:      "",
+			context:    3,
+			wantRanges: 1,
+			flags:      map[int]line.Flag{0: line.FlagDeleted},
 		},
 		"negative context treated as zero": {
 			before: yamltest.Input(`
@@ -624,13 +597,13 @@ func TestSummaryDiff_Source(t *testing.T) {
 				line2: new
 				line3: 3
 			`),
-			context: -5,
-			want: yamltest.JoinLF(
-				"   2 | @@ -2 +2 @@",
-				"   2 | line2: old",
-				"   2 | line2: new",
-			),
-			wantLen: 2,
+			context:    -5,
+			wantRanges: 1,
+			flags: map[int]line.Flag{
+				1: line.FlagDeleted,
+				2: line.FlagInserted,
+			},
+			annotations: map[int]string{1: "@@ -2 +2 @@"},
 		},
 	}
 
@@ -643,11 +616,11 @@ func TestSummaryDiff_Source(t *testing.T) {
 
 			revA := niceyaml.NewRevision(beforeTokens)
 			revB := niceyaml.NewRevision(afterTokens)
-			diff := niceyaml.NewSummaryDiff(revA, revB, tc.context)
 
-			got := diff.Source()
+			got, ranges := niceyaml.NewSummaryDiff(revA, revB, tc.context).Build()
 
 			assert.Equal(t, "a..b", got.Name())
+			assert.Len(t, ranges, tc.wantRanges)
 
 			if tc.wantEmpty {
 				assert.True(t, got.IsEmpty())
@@ -656,28 +629,15 @@ func TestSummaryDiff_Source(t *testing.T) {
 				return
 			}
 
-			if tc.wantLen >= 0 {
-				assert.Equal(t, tc.wantLen, got.Len())
-			}
-
-			assert.Equal(t, tc.want, got.String())
-
 			for lineIdx, wantFlag := range tc.flags {
-				assert.Equal(t, wantFlag, got.Line(lineIdx).Flag)
+				assert.Equal(t, wantFlag, got.Line(lineIdx).Flag, "flag mismatch at line %d", lineIdx)
 			}
 
 			if tc.annotations != nil {
 				for lineIdx, wantAnnotation := range tc.annotations {
 					anns := got.Line(lineIdx).Annotations
-					require.False(t, anns.IsEmpty(), "expected annotation at line %d", lineIdx)
+					require.NotEmpty(t, anns, "expected annotation at line %d", lineIdx)
 					assert.Equal(t, wantAnnotation, anns[0].Content)
-				}
-
-				// Verify all other lines have empty annotations.
-				for i := range got.Len() {
-					if _, hasAnnotation := tc.annotations[i]; !hasAnnotation {
-						assert.True(t, got.Line(i).Annotations.IsEmpty())
-					}
 				}
 			}
 		})

@@ -1,10 +1,17 @@
 package niceyaml
 
-// NamedLineIterator extends [LineIterator] with a Name.
+import (
+	"github.com/macropower/niceyaml/position"
+	"github.com/macropower/niceyaml/style"
+)
+
+// NamedLineIterator extends [LineIterator] with a Name and overlay support.
 // See [Source] for an implementation.
 type NamedLineIterator interface {
 	LineIterator
 	Name() string
+	AddOverlay(kind style.Style, ranges ...position.Range)
+	ClearOverlays()
 }
 
 // Revision represents [NamedLineIterator] at one or more revisions.

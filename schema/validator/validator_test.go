@@ -793,7 +793,7 @@ func TestValidator_PathTarget(t *testing.T) {
 
 	// This test verifies that the validator correctly chooses PathKey vs PathValue
 	// based on the type of validation error. We verify by checking which part of
-	// the YAML gets highlighted with the <generic-error> style.
+	// the YAML gets highlighted with the error overlay style.
 
 	newXMLPrinter := func() *niceyaml.Printer {
 		return niceyaml.NewPrinter(

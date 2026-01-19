@@ -32,12 +32,12 @@ func main() {
 	diff := niceyaml.NewFullDiff(rev.Origin(), rev.Tip())
 
 	fmt.Println("\nPrint the full diff:")
-	fmt.Println(printer.Print(diff.Source()))
+	fmt.Println(printer.Print(diff.Build()))
 
 	// Create a summary diff between the two revisions.
 	linesOfContext := 2
-	summaryDiff := niceyaml.NewSummaryDiff(rev.Origin(), rev.Tip(), linesOfContext)
+	source, ranges := niceyaml.NewSummaryDiff(rev.Origin(), rev.Tip(), linesOfContext).Build()
 
 	fmt.Println("\nPrint the summary diff:")
-	fmt.Println(printer.Print(summaryDiff.Source()))
+	fmt.Println(printer.Print(source, ranges...))
 }

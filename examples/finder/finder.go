@@ -8,7 +8,12 @@ import (
 	_ "embed"
 
 	"github.com/macropower/niceyaml"
+	"github.com/macropower/niceyaml/style"
+	"github.com/macropower/niceyaml/style/theme"
 )
+
+// highlightKind is a custom style.Style constant for search highlights.
+const highlightKind style.Style = iota
 
 var (
 	//go:embed demo.yaml
@@ -20,7 +25,12 @@ var (
 func main() {
 	source := niceyaml.NewSourceFromString(example)
 
-	printer := niceyaml.NewPrinter()
+	// Create a printer with styles that include the highlight overlay style.
+	printer := niceyaml.NewPrinter(
+		niceyaml.WithStyles(theme.Charm().With(
+			style.Set(highlightKind, highlight),
+		)),
+	)
 
 	// Create a finder with standard normalization.
 	// The standard normalizer ignores case and diacritics.
@@ -34,8 +44,8 @@ func main() {
 	// Find all occurrences of "cafe" in the source.
 	results := finder.Find("cafe")
 
-	// Highlight all results in the printer.
-	printer.AddStyleToRange(&highlight, results...)
+	// Add overlays for the found ranges.
+	source.AddOverlay(highlightKind, results...)
 
 	fmt.Println("\nPrint with matches highlighted:")
 	fmt.Println(printer.Print(source))

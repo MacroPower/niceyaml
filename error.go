@@ -20,21 +20,12 @@ var (
 	// ErrNoSource indicates no source was provided to resolve an error path.
 	ErrNoSource = errors.New("no source provided")
 
-	// ErrNoResolvableErrors indicates no nested errors could be resolved to tokens.
-	ErrNoResolvableErrors = errors.New("no resolvable nested errors")
-
 	// ErrNoPathOrToken indicates neither a path nor token was provided.
 	ErrNoPathOrToken = errors.New("no path or token provided")
 
 	// ErrTokenNotFound indicates the token was not found in the source.
 	ErrTokenNotFound = errors.New("token not found in source")
 )
-
-// FileGetter gets an [*ast.File].
-// See [*Source] for an implementation.
-type FileGetter interface {
-	File() (*ast.File, error)
-}
 
 // PathPartGetter gets a yaml path and its part.
 // See [*paths.Path] for an implementation.
@@ -65,7 +56,7 @@ type PathPartGetter interface {
 //   - [WithErrors] adds nested errors rendered as annotations below their lines
 //   - [WithSourceLines] sets context lines shown around errors (default: 2)
 //   - [WithWidthFunc] or [Error.SetWidth] configures word wrapping
-//   - [WithPrinter] sets a custom [StyledSlicePrinter] for output
+//   - [WithPrinter] sets a custom [StyledPrinter] for output
 //
 // Error implements the error interface. Use [Error.Unwrap] with [errors.Is]
 // and [errors.As] to inspect wrapped errors.
@@ -73,8 +64,8 @@ type PathPartGetter interface {
 // Create instances with [NewError] or [NewErrorFrom].
 type Error struct {
 	err         error
-	printer     StyledSlicePrinter
-	source      FileGetter
+	printer     StyledPrinter
+	source      *Source
 	pathGetter  PathPartGetter
 	token       *token.Token
 	widthFunc   func() int
@@ -129,15 +120,14 @@ func WithErrorToken(tk *token.Token) ErrorOption {
 }
 
 // WithPrinter sets the printer used for formatting the error source.
-func WithPrinter(p StyledSlicePrinter) ErrorOption {
+func WithPrinter(p StyledPrinter) ErrorOption {
 	return func(e *Error) {
 		e.printer = p
 	}
 }
 
-// WithSource sets the [FileGetter] for resolving the error path.
-// See [*Source] for an implementation.
-func WithSource(src FileGetter) ErrorOption {
+// WithSource sets the [*Source] for resolving the error path.
+func WithSource(src *Source) ErrorOption {
 	return func(e *Error) {
 		e.source = src
 	}
@@ -165,44 +155,42 @@ func (e Error) Error() string {
 		return ""
 	}
 
-	// If no main path/token but nested errors have paths, use nested-only rendering.
-	if e.pathGetter == nil && e.token == nil {
-		if e.hasNestedPaths() {
-			errMsg, srcErr := e.annotateSourceFromNested()
-			if srcErr != nil {
-				slog.Debug("annotate yaml from nested",
-					slog.Any("error", srcErr),
-				)
-
-				return e.formatPlainError()
-			}
-
-			return errMsg
-		}
-
-		return e.formatPlainError()
-	}
-
-	errMsg, srcErr := e.annotateSource()
-	if srcErr != nil {
+	// Try to resolve main token for position display.
+	mainToken, err := e.resolveMainToken()
+	if err != nil {
 		pathStr := ""
 		if e.pathGetter != nil {
 			pathStr = e.pathGetter.Path().String()
 		}
 
-		slog.Debug("annotate yaml",
+		slog.Debug("resolve main token for error",
 			slog.String("path", pathStr),
-			slog.Any("error", srcErr),
+			slog.Any("error", err),
 		)
-		// If we can't annotate the source, just return the error without it.
-		if pathStr != "" {
-			return fmt.Sprintf("at %s: %v", pathStr, e.err)
+
+		// Check if we can still render via nested errors (nested-only case).
+		if e.source == nil || !e.hasResolvableNestedErrors() {
+			if pathStr != "" {
+				return fmt.Sprintf("at %s: %v", pathStr, e.err)
+			}
+
+			return e.formatPlainError()
 		}
 
-		return e.err.Error()
+		// Proceed with nested-only rendering (mainToken stays nil).
 	}
 
-	return errMsg
+	// Build the error header.
+	var header string
+	if mainToken != nil {
+		pos := position.NewFromToken(mainToken)
+		header = fmt.Sprintf("[%s] %v:\n", pos.String(), e.err)
+	} else {
+		header = fmt.Sprintf("%v:\n", e.err)
+	}
+
+	// Render the source with error positions highlighted.
+	return header + "\n" + e.renderErrorSource(mainToken)
 }
 
 // formatPlainError formats the error without source annotation.
@@ -226,10 +214,31 @@ func (e Error) formatPlainError() string {
 	return sb.String()
 }
 
-// hasNestedPaths returns true if any nested errors have paths or tokens.
-func (e Error) hasNestedPaths() bool {
+// resolveMainToken resolves the main error's token for position display.
+// Returns the token or an error if the main error has no resolvable path/token.
+func (e *Error) resolveMainToken() (*token.Token, error) {
+	// Direct token doesn't need file (Source comes from token's Origin).
+	if e.token != nil {
+		return e.token, nil
+	}
+
+	// Path resolution requires a valid file.
+	if e.pathGetter == nil {
+		return nil, ErrNoPathOrToken
+	}
+
+	file, err := e.getFile()
+	if err != nil {
+		return nil, err
+	}
+
+	return resolveToken(file, nil, e.pathGetter)
+}
+
+// hasResolvableNestedErrors checks if any nested error has a path or token.
+func (e *Error) hasResolvableNestedErrors() bool {
 	for _, nested := range e.errors {
-		if nested != nil && (nested.pathGetter != nil || nested.token != nil) {
+		if nested != nil && (nested.token != nil || nested.pathGetter != nil) {
 			return true
 		}
 	}
@@ -250,9 +259,18 @@ func (e *Error) SetWidth(width int) {
 	e.width = width
 }
 
+// getFile returns the parsed AST file from the source.
+func (e *Error) getFile() (*ast.File, error) {
+	if e.source == nil {
+		return nil, ErrNoSource
+	}
+
+	return e.source.File()
+}
+
 // getPrinter returns the configured printer, or a default if none was set.
 // If a width is configured, it applies the width to the printer.
-func (e *Error) getPrinter() StyledSlicePrinter {
+func (e *Error) getPrinter() StyledPrinter {
 	width := e.width
 	if e.widthFunc != nil {
 		width = e.widthFunc()
@@ -301,170 +319,20 @@ func (e *Error) Path() string {
 	return ""
 }
 
-func (e *Error) annotateSource() (string, error) {
-	tk, err := e.resolveToken()
-	if err != nil {
-		return "", fmt.Errorf("resolve token: %w", err)
-	}
-
-	lineNum, col := getTokenPosition(tk)
-	errMsg := fmt.Sprintf("[%d:%d] %v:\n", lineNum, col, e.err)
-	errSource := e.printErrorToken(tk)
-
-	return errMsg + "\n" + errSource, nil
+// errorPosition holds information about a resolved error position.
+// It represents either the main error position (message empty) or a nested
+// error position with annotation text.
+type errorPosition struct {
+	message string            // Error message for annotation (empty for main error).
+	ranges  []position.Range  // Ranges for this error's highlighting.
+	pos     position.Position // 0-indexed position for highlighting and annotation placement.
 }
 
-// annotateSourceFromNested creates an annotated source display using only nested errors.
-// This is used when the main error has no path but nested errors do.
-func (e *Error) annotateSourceFromNested() (string, error) {
-	if e.source == nil {
-		return "", ErrNoSource
-	}
-
-	file, err := e.source.File()
-	if err != nil {
-		return "", fmt.Errorf("parse source: %w", err)
-	}
-
-	// Find a reference token from nested errors to create the Source.
-	var refToken *token.Token
-
-	for _, nested := range e.errors {
-		if nested == nil {
-			continue
-		}
-
-		// First try to use the token directly if available.
-		if nested.token != nil {
-			refToken = nested.token
-
-			break
-		}
-
-		// Otherwise try to resolve from path.
-		if nested.pathGetter != nil {
-			tk, tkErr := nested.pathGetter.Token(file)
-			if tkErr == nil {
-				refToken = tk
-
-				break
-			}
-		}
-	}
-
-	if refToken == nil {
-		return "", ErrNoResolvableErrors
-	}
-
-	return e.printNestedErrors(refToken), nil
-}
-
-// printNestedErrors renders nested errors without a main token highlight.
-// Used when the main error has no path but nested errors do.
-func (e *Error) printNestedErrors(refToken *token.Token) string {
-	p := e.getPrinter()
-	t := NewSourceFromToken(refToken)
-
-	// Resolve and process all nested errors.
-	resolved := e.resolveNestedErrors(t)
-
-	// Collect error line indices and ranges from resolved errors.
-	errorLines := make([]int, 0, len(resolved))
-	nestedRanges := make([]position.Range, 0, len(resolved))
-
-	for _, r := range resolved {
-		errorLines = append(errorLines, r.lineIdx)
-		nestedRanges = append(nestedRanges, t.ContentPositionRanges(r.pos)...)
-	}
-
-	errMsg := fmt.Sprintf("%v:\n", e.err)
-
-	// Build hunks from error line indices.
-	hunks := e.buildErrorHunks(errorLines)
-
-	// If single hunk, use simple path (no separator needed).
-	if len(hunks) <= 1 {
-		// Apply error styles with original positions.
-		for _, rng := range nestedRanges {
-			p.AddStyleToRange(p.Style(style.GenericError), rng)
-		}
-
-		e.addErrorAnnotations(t, resolved)
-
-		minLine, maxLine := e.calculateHunkRange(hunks)
-		minLine = max(0, minLine-e.sourceLines)
-		maxLine = min(t.Len()-1, maxLine+e.sourceLines)
-
-		return errMsg + "\n" + p.PrintSlice(t, minLine, maxLine)
-	}
-
-	// Multiple hunks: build filtered lines with separators.
-	hunkLines := e.buildHunkLines(t, hunks)
-	indexMap := e.buildLineIndexMap(hunks, t.Len())
-	e.addErrorAnnotationsToHunkLines(hunkLines, hunks, resolved, t.Len())
-
-	// Apply error styles with corrected positions for hunk lines.
-	for _, rng := range nestedRanges {
-		if hunkIdx, exists := indexMap[rng.Start.Line]; exists {
-			correctedRng := position.NewRange(
-				position.New(hunkIdx, rng.Start.Col),
-				position.New(hunkIdx, rng.End.Col),
-			)
-			p.AddStyleToRange(p.Style(style.GenericError), correctedRng)
-		}
-	}
-
-	// Create a new Source from hunk lines and print all of it.
-	filteredSource := &Source{lines: hunkLines}
-
-	return errMsg + "\n" + p.PrintSlice(filteredSource, 0, len(hunkLines)-1)
-}
-
-// resolveToken returns the error token, resolving it from the pathGetter if needed.
-func (e *Error) resolveToken() (*token.Token, error) {
-	if e.token != nil {
-		return e.token, nil
-	}
-
-	if e.pathGetter == nil {
-		return nil, ErrNoPathOrToken
-	}
-
-	if e.source == nil {
-		return nil, ErrNoSource
-	}
-
-	file, err := e.source.File()
-	if err != nil {
-		return nil, fmt.Errorf("parse source: %w", err)
-	}
-
-	tk, err := e.pathGetter.Token(file)
-	if err != nil {
-		return nil, fmt.Errorf("resolve token: %w", err)
-	}
-
-	return tk, nil
-}
-
-// resolvedError holds information about a resolved nested error.
-type resolvedError struct {
-	message string            // Error message for annotation.
-	pos     position.Position // Position for highlighting.
-	lineIdx int               // 0-indexed line in Source.
-	col     int               // 0-indexed column position for annotation.
-}
-
-// errorHunk represents a contiguous group of error lines to display.
-type errorHunk struct {
-	startLine int // 0-indexed start line (before context).
-	endLine   int // 0-indexed end line (before context).
-}
-
-// buildErrorHunks groups error line indices into hunks based on proximity.
+// buildHunkSpans groups error line indices into spans based on proximity.
 // Errors are merged when their context windows would be adjacent or overlapping.
 // This ensures there's always at least one line gap between hunks (for the "..." separator).
-func (e *Error) buildErrorHunks(errorLines []int) []errorHunk {
+// Returns spans with sourceLines context applied and clamped to totalLines.
+func (e *Error) buildHunkSpans(errorLines []int, totalLines int) position.Spans {
 	if len(errorLines) == 0 {
 		return nil
 	}
@@ -473,248 +341,92 @@ func (e *Error) buildErrorHunks(errorLines []int) []errorHunk {
 	sorted := slices.Clone(errorLines)
 	slices.Sort(sorted)
 
-	// Merge errors when their context windows would be adjacent or overlapping.
-	// Error at E1 has context [E1-S, E1+S], error at E2 has context [E2-S, E2+S].
-	// Merge if E2-S <= E1+S+1, i.e., E2 <= E1 + 2S + 1.
-	threshold := e.sourceLines*2 + 1
-	hunks := []errorHunk{{startLine: sorted[0], endLine: sorted[0]}}
+	// Group indices, expand by context, clamp to valid range.
+	return position.GroupIndices(sorted, e.sourceLines).
+		Expand(e.sourceLines).
+		Clamp(0, totalLines)
+}
 
-	for _, lineIdx := range sorted[1:] {
-		lastHunk := &hunks[len(hunks)-1]
-		if lineIdx <= lastHunk.endLine+threshold {
-			// Merge into current hunk.
-			lastHunk.endLine = lineIdx
-		} else {
-			// Start a new hunk.
-			hunks = append(hunks, errorHunk{startLine: lineIdx, endLine: lineIdx})
+// prepareLineAnnotations prepares annotations grouped by original line index.
+// Only positions with messages (non-main errors) are included.
+func prepareLineAnnotations(positions []errorPosition) map[int]line.Annotation {
+	// Group errors by line to combine messages.
+	linePositions := make(map[int][]errorPosition)
+
+	for _, pos := range positions {
+		if pos.message != "" {
+			linePositions[pos.pos.Line] = append(linePositions[pos.pos.Line], pos)
 		}
 	}
 
-	return hunks
-}
+	result := make(map[int]line.Annotation)
 
-// buildHunkLines creates a new line.Lines containing only the lines for the given hunks,
-// with context added and "..." annotations between hunks.
-func (e *Error) buildHunkLines(t *Source, hunks []errorHunk) line.Lines {
-	if len(hunks) == 0 {
-		return nil
-	}
+	for lineIdx, lineErrs := range linePositions {
+		messages := make([]string, 0, len(lineErrs))
+		minCol := lineErrs[0].pos.Col
 
-	totalLines := t.Len()
-
-	var result line.Lines
-
-	for i, hunk := range hunks {
-		// Calculate line range with sourceLines context.
-		startLine := max(0, hunk.startLine-e.sourceLines)
-		endLine := min(totalLines-1, hunk.endLine+e.sourceLines)
-
-		isFirstLineOfHunk := true
-
-		for lineIdx := startLine; lineIdx <= endLine; lineIdx++ {
-			ln := t.Line(lineIdx).Clone()
-
-			// Add "..." annotation on first line of non-first hunks.
-			if isFirstLineOfHunk && i > 0 {
-				ln.Annotations.Add(line.Annotation{Content: "...", Position: line.Above})
+		for _, r := range lineErrs {
+			messages = append(messages, r.message)
+			if r.pos.Col < minCol {
+				minCol = r.pos.Col
 			}
+		}
 
-			isFirstLineOfHunk = false
-
-			result = append(result, ln)
+		result[lineIdx] = line.Annotation{
+			Content:  strings.Join(messages, "; "),
+			Position: line.Below,
+			Col:      minCol,
 		}
 	}
 
 	return result
 }
 
-// buildLineIndexMap creates a mapping from original line indices to hunk line indices.
-func (e *Error) buildLineIndexMap(hunks []errorHunk, totalLines int) map[int]int {
-	indexMap := make(map[int]int)
-	hunkLineIdx := 0
-
-	for _, hunk := range hunks {
-		startLine := max(0, hunk.startLine-e.sourceLines)
-		endLine := min(totalLines-1, hunk.endLine+e.sourceLines)
-
-		for lineIdx := startLine; lineIdx <= endLine; lineIdx++ {
-			indexMap[lineIdx] = hunkLineIdx
-			hunkLineIdx++
-		}
+// resolveNestedError resolves a single nested error's path or token.
+func (e *Error) resolveNestedError(t *Source, nested *Error) (errorPosition, error) {
+	file, err := t.File()
+	if err != nil {
+		return errorPosition{}, fmt.Errorf("parse source: %w", err)
 	}
 
-	return indexMap
+	tk, err := resolveToken(file, nested.token, nested.pathGetter)
+	if err != nil {
+		return errorPosition{}, err
+	}
+
+	if tk == nil || tk.Position == nil {
+		return errorPosition{}, ErrTokenNotFound
+	}
+
+	pos := position.NewFromToken(tk)
+	if pos.Line >= t.Len() {
+		return errorPosition{}, ErrTokenNotFound
+	}
+
+	return errorPosition{
+		message: nested.err.Error(),
+		pos:     pos,
+	}, nil
 }
 
-// addErrorAnnotationsToHunkLines adds error annotations to the filtered hunk lines,
-// mapping from original source line indices to the new indices in hunkLines.
-func (e *Error) addErrorAnnotationsToHunkLines(
-	hunkLines line.Lines,
-	hunks []errorHunk,
-	resolved []resolvedError,
-	totalLines int,
-) {
-	if len(resolved) == 0 {
-		return
-	}
+// collectErrorPositions collects all error positions (main and nested) into a unified slice.
+// If mainToken is provided, it becomes the first position without a message.
+// Nested errors are appended with their messages.
+func (e *Error) collectErrorPositions(t *Source, mainToken *token.Token) []errorPosition {
+	var positions []errorPosition
 
-	// Build a mapping from original line index to hunkLines index.
-	indexMap := e.buildLineIndexMap(hunks, totalLines)
-
-	// Group errors by original line to combine messages.
-	lineAnnotations := make(map[int][]resolvedError)
-	for _, r := range resolved {
-		lineAnnotations[r.lineIdx] = append(lineAnnotations[r.lineIdx], r)
-	}
-
-	// Set annotations for each line.
-	// Note: Error annotations take precedence over "..." separators since
-	// the Line struct only supports one annotation, and error information
-	// is more valuable than visual separators. Line number gaps in the
-	// gutter will still indicate missing lines.
-	for lineIdx, lineErrs := range lineAnnotations {
-		hunkIdx, exists := indexMap[lineIdx]
-		if !exists || hunkIdx < 0 || hunkIdx >= len(hunkLines) {
-			continue
-		}
-
-		// Combine messages and find the leftmost column.
-		var messages []string
-
-		minCol := lineErrs[0].col
-
-		for _, r := range lineErrs {
-			messages = append(messages, r.message)
-			if r.col < minCol {
-				minCol = r.col
-			}
-		}
-
-		combined := strings.Join(messages, "; ")
-		hunkLines[hunkIdx].Annotations.Add(line.Annotation{
-			Content:  combined,
-			Position: line.Below,
-			Col:      minCol,
-		})
-	}
-}
-
-func (e *Error) printErrorToken(tk *token.Token) string {
-	p := e.getPrinter()
-	t := NewSourceFromToken(tk)
-
-	// Collect main error token ranges.
-	mainRanges := t.ContentPositionRangesFromToken(tk)
-
-	// Collect all error line indices.
-	errorLineSet := make(map[int]struct{})
-	curLine := max(0, tk.Position.Line-1)
-	errorLineSet[curLine] = struct{}{}
-
-	for _, rng := range mainRanges {
-		errorLineSet[rng.Start.Line] = struct{}{}
-	}
-
-	// Resolve nested errors and collect their line indices and ranges.
-	resolved := e.resolveNestedErrors(t)
-	nestedRanges := make([]position.Range, 0, len(resolved))
-
-	for _, r := range resolved {
-		errorLineSet[r.lineIdx] = struct{}{}
-		nestedRanges = append(nestedRanges, t.ContentPositionRanges(r.pos)...)
-	}
-
-	// Convert set to slice.
-	errorLines := make([]int, 0, len(errorLineSet))
-	for lineIdx := range errorLineSet {
-		errorLines = append(errorLines, lineIdx)
-	}
-
-	// Build hunks from error line indices.
-	hunks := e.buildErrorHunks(errorLines)
-
-	// If single hunk, use simple path (no separator needed).
-	if len(hunks) <= 1 {
-		// Apply error styles with original positions.
-		for _, rng := range mainRanges {
-			p.AddStyleToRange(p.Style(style.GenericError), rng)
-		}
-
-		for _, rng := range nestedRanges {
-			p.AddStyleToRange(p.Style(style.GenericError), rng)
-		}
-
-		e.addErrorAnnotations(t, resolved)
-
-		minLine, maxLine := e.calculateHunkRange(hunks)
-		minLine = max(0, minLine-e.sourceLines)
-		maxLine = min(t.Len()-1, maxLine+e.sourceLines)
-
-		return p.PrintSlice(t, minLine, maxLine)
-	}
-
-	// Multiple hunks: build filtered lines with separators.
-	hunkLines := e.buildHunkLines(t, hunks)
-	indexMap := e.buildLineIndexMap(hunks, t.Len())
-	e.addErrorAnnotationsToHunkLines(hunkLines, hunks, resolved, t.Len())
-
-	// Apply error styles with corrected positions for hunk lines.
-	for _, rng := range mainRanges {
-		if hunkIdx, exists := indexMap[rng.Start.Line]; exists {
-			correctedRng := position.NewRange(
-				position.New(hunkIdx, rng.Start.Col),
-				position.New(hunkIdx, rng.End.Col),
-			)
-			p.AddStyleToRange(p.Style(style.GenericError), correctedRng)
+	// Add main error position if token is provided.
+	if mainToken != nil && mainToken.Position != nil {
+		pos := position.NewFromToken(mainToken)
+		if pos.Line < t.Len() {
+			positions = append(positions, errorPosition{
+				pos:    pos,
+				ranges: t.ContentPositionRangesFromToken(mainToken),
+			})
 		}
 	}
 
-	for _, rng := range nestedRanges {
-		if hunkIdx, exists := indexMap[rng.Start.Line]; exists {
-			correctedRng := position.NewRange(
-				position.New(hunkIdx, rng.Start.Col),
-				position.New(hunkIdx, rng.End.Col),
-			)
-			p.AddStyleToRange(p.Style(style.GenericError), correctedRng)
-		}
-	}
-
-	// Create a new Source from hunk lines and print all of it.
-	filteredSource := &Source{lines: hunkLines}
-
-	return p.PrintSlice(filteredSource, 0, len(hunkLines)-1)
-}
-
-// calculateHunkRange returns the min and max line indices from hunks.
-func (e *Error) calculateHunkRange(hunks []errorHunk) (int, int) {
-	if len(hunks) == 0 {
-		return 0, 0
-	}
-
-	minLine := hunks[0].startLine
-	maxLine := hunks[0].endLine
-
-	for _, hunk := range hunks[1:] {
-		if hunk.startLine < minLine {
-			minLine = hunk.startLine
-		}
-		if hunk.endLine > maxLine {
-			maxLine = hunk.endLine
-		}
-	}
-
-	return minLine, maxLine
-}
-
-// resolveNestedErrors resolves all nested error paths/tokens and returns
-// information needed to annotate them.
-func (e *Error) resolveNestedErrors(t *Source) []resolvedError {
-	if len(e.errors) == 0 {
-		return nil
-	}
-
-	resolved := make([]resolvedError, 0, len(e.errors))
-
+	// Add nested error positions.
 	for _, nested := range e.errors {
 		if nested == nil || nested.err == nil {
 			continue
@@ -729,122 +441,80 @@ func (e *Error) resolveNestedErrors(t *Source) []resolvedError {
 			continue
 		}
 
-		resolved = append(resolved, r)
+		r.ranges = t.ContentPositionRanges(r.pos)
+		positions = append(positions, r)
 	}
 
-	return resolved
+	return positions
 }
 
-// resolveNestedError resolves a single nested error's path or token.
-func (e *Error) resolveNestedError(t *Source, nested *Error) (resolvedError, error) {
-	var resolvedTk *token.Token
+// renderErrorSource renders the error source with all error positions highlighted.
+// MainToken (if provided) is highlighted as the main error without annotation.
+// Source is created from mainToken when available, otherwise from e.source.
+func (e *Error) renderErrorSource(mainToken *token.Token) string {
+	p := e.getPrinter()
 
-	// Try to resolve the nested error's token.
-	switch {
-	case nested.token != nil:
-		resolvedTk = nested.token
-	case nested.pathGetter != nil:
-		// Use the parent's source to resolve the nested error's path.
-		file, fileErr := t.File()
-		if fileErr != nil {
-			return resolvedError{}, fmt.Errorf("parse source: %w", fileErr)
+	var t *Source
+	if mainToken != nil {
+		// Create Source from token to ensure position alignment.
+		t = NewSourceFromToken(mainToken)
+	} else {
+		// Nested-only case: use existing source directly.
+		t = e.source
+	}
+
+	positions := e.collectErrorPositions(t, mainToken)
+
+	// Collect all ranges from positions and apply overlays directly.
+	allRanges := position.NewRanges()
+	for _, pos := range positions {
+		allRanges.Add(pos.ranges...)
+	}
+
+	t.AddOverlay(style.GenericError, allRanges.Values()...)
+
+	// Apply annotations directly to source lines.
+	lineAnnotations := prepareLineAnnotations(positions)
+	for lineIdx, annotation := range lineAnnotations {
+		t.Line(lineIdx).Annotate(annotation)
+	}
+
+	// Build hunk spans from all line indices covered by error ranges.
+	hunkSpans := e.buildHunkSpans(allRanges.LineIndices(), t.Len())
+
+	// Add "..." annotations to first line of each non-first hunk.
+	for i, span := range hunkSpans {
+		if i > 0 {
+			t.Line(span.Start).Annotate(line.Annotation{
+				Content:  "...",
+				Position: line.Above,
+			})
+		}
+	}
+
+	// Print source with all hunk spans.
+	return p.Print(t, hunkSpans...)
+}
+
+// resolveToken resolves a token from either a direct token or pathGetter.
+// The file parameter is required when pg is non-nil.
+func resolveToken(file *ast.File, tk *token.Token, pg PathPartGetter) (*token.Token, error) {
+	if tk != nil {
+		return tk, nil
+	}
+
+	if pg != nil {
+		if file == nil {
+			return nil, ErrNoSource
 		}
 
-		tk, err := nested.pathGetter.Token(file)
+		resolved, err := pg.Token(file)
 		if err != nil {
-			return resolvedError{}, fmt.Errorf("resolve path: %w", err)
+			return nil, fmt.Errorf("path token: %w", err)
 		}
 
-		resolvedTk = tk
-
-	default:
-		return resolvedError{}, ErrNoPathOrToken
+		return resolved, nil
 	}
 
-	lineIdx := e.findLineIndex(t, resolvedTk)
-	if lineIdx < 0 {
-		return resolvedError{}, ErrTokenNotFound
-	}
-
-	// Calculate column position for annotation (0-indexed).
-	col := 0
-	if resolvedTk.Position != nil {
-		col = resolvedTk.Position.Column - 1 // Convert 1-indexed to 0-indexed.
-	}
-
-	pos := position.New(lineIdx, max(0, col))
-
-	return resolvedError{
-		lineIdx: lineIdx,
-		col:     max(0, col),
-		message: nested.err.Error(),
-		pos:     pos,
-	}, nil
-}
-
-// findLineIndex returns the 0-indexed line index for a token in the Source.
-// Returns -1 if the token is not found.
-func (e *Error) findLineIndex(t *Source, tk *token.Token) int {
-	if tk == nil || tk.Position == nil {
-		return -1
-	}
-
-	// Position.Line is 1-indexed, Source uses 0-indexed.
-	lineIdx := tk.Position.Line - 1
-	if lineIdx < 0 || lineIdx >= t.Len() {
-		return -1
-	}
-
-	return lineIdx
-}
-
-// addErrorAnnotations sets annotations on the Source for resolved nested errors.
-// Multiple errors on the same line are combined with "; " separator.
-func (e *Error) addErrorAnnotations(t *Source, resolved []resolvedError) {
-	if len(resolved) == 0 {
-		return
-	}
-
-	// Group errors by line to combine messages.
-	lineAnnotations := make(map[int][]resolvedError)
-
-	for _, r := range resolved {
-		lineAnnotations[r.lineIdx] = append(lineAnnotations[r.lineIdx], r)
-	}
-
-	// Set annotations for each line.
-	for lineIdx, lineErrs := range lineAnnotations {
-		if lineIdx < 0 || lineIdx >= t.Len() {
-			continue
-		}
-
-		// Combine messages and find the leftmost column.
-		var messages []string
-
-		minCol := lineErrs[0].col
-
-		for _, r := range lineErrs {
-			messages = append(messages, r.message)
-			if r.col < minCol {
-				minCol = r.col
-			}
-		}
-
-		combined := strings.Join(messages, "; ")
-		t.Annotate(lineIdx, line.Annotation{
-			Content:  combined,
-			Position: line.Below,
-			Col:      minCol,
-		})
-	}
-}
-
-// getTokenPosition returns the 1-indexed line and column position of the token.
-// Note: go-yaml uses 1-indexed positions, unlike [position.Position] which is 0-indexed.
-func getTokenPosition(tk *token.Token) (int, int) {
-	if tk == nil {
-		return 0, 0
-	}
-
-	return tk.Position.Line, tk.Position.Column
+	return nil, ErrNoPathOrToken
 }

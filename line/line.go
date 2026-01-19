@@ -8,6 +8,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 
 	"github.com/macropower/niceyaml/position"
+	"github.com/macropower/niceyaml/style"
 	"github.com/macropower/niceyaml/tokens"
 )
 
@@ -23,15 +24,24 @@ var (
 // Line contains data for a specific line in a [Source] collection.
 // Create instances with [NewLines]; access via [Lines] indexing.
 type Line struct {
-	// Token segments for this line.
-	segments tokens.Segments
-	// Annotations contains any extra content associated with this line.
 	Annotations Annotations
-	// Flag indicates the optional special category for this line.
-	Flag Flag
+	Overlays    Overlays
+	segments    tokens.Segments
+	Flag        Flag
+
 	// The 1-indexed line number used for display purposes.
 	// This may differ from the first token's Position.Line for block scalars.
 	number int
+}
+
+// Annotate adds the given [Annotation]s to the line.
+func (l *Line) Annotate(ann ...Annotation) {
+	l.Annotations = append(l.Annotations, ann...)
+}
+
+// Overlay adds the given [Overlay]s to the line.
+func (l *Line) Overlay(o ...Overlay) {
+	l.Overlays = append(l.Overlays, o...)
 }
 
 // Number returns the line number of this [Line].
@@ -69,14 +79,21 @@ func (l Line) Content() string {
 // Clone returns a copy of the Line with cloned Part tokens.
 // Source pointers remain shared since they reference the original unmodified tokens.
 func (l Line) Clone() Line {
-	var anns Annotations
+	var ann Annotations
 	if len(l.Annotations) > 0 {
-		anns = make(Annotations, len(l.Annotations))
-		copy(anns, l.Annotations)
+		ann = make(Annotations, len(l.Annotations))
+		copy(ann, l.Annotations)
+	}
+
+	var ovl Overlays
+	if len(l.Overlays) > 0 {
+		ovl = make(Overlays, len(l.Overlays))
+		copy(ovl, l.Overlays)
 	}
 
 	return Line{
-		Annotations: anns,
+		Annotations: ann,
+		Overlays:    ovl,
 		Flag:        l.Flag,
 		number:      l.number,
 		segments:    l.segments.Clone(),
@@ -145,7 +162,7 @@ func (l Line) String() string {
 
 	// Render annotations above if applicable.
 	above := l.Annotations.FilterPosition(Above)
-	if !above.IsEmpty() {
+	if len(above) > 0 {
 		sb.WriteString(prefix)
 		sb.WriteString(above.String())
 		sb.WriteByte('\n')
@@ -157,25 +174,14 @@ func (l Line) String() string {
 	// Render annotations below if applicable.
 	// Add "^ " prefix for below annotations (error pointers) in debug output.
 	below := l.Annotations.FilterPosition(Below)
-	if !below.IsEmpty() {
+	if len(below) > 0 {
 		sb.WriteByte('\n')
 		sb.WriteString(prefix)
 
-		// Find minimum column and collect content (like Annotations.String).
-		minCol := below[0].Col
-		contents := make([]string, len(below))
-
-		for i, ann := range below {
-			contents[i] = ann.Content
-			if ann.Col < minCol {
-				minCol = ann.Col
-			}
-		}
-
-		padding := strings.Repeat(" ", max(0, minCol))
+		padding := strings.Repeat(" ", max(0, below.Col()))
 		sb.WriteString(padding)
 		sb.WriteString("^ ")
-		sb.WriteString(strings.Join(contents, "; "))
+		sb.WriteString(strings.Join(below.Contents(), "; "))
 	}
 
 	return sb.String()
@@ -419,4 +425,35 @@ func (ls Lines) Validate() error {
 	}
 
 	return nil
+}
+
+// AddOverlay adds an overlay of the given kind to the specified ranges.
+// Multi-line ranges are split into per-line overlays automatically.
+// The ranges use 0-indexed positions.
+func (ls *Lines) AddOverlay(kind style.Style, ranges ...position.Range) {
+	if len(*ls) == 0 {
+		return
+	}
+
+	for _, r := range ranges {
+		ls.addOverlayRange(kind, r)
+	}
+}
+
+// addOverlayRange adds a single overlay range, splitting across lines as needed.
+func (ls *Lines) addOverlayRange(kind style.Style, r position.Range) {
+	for _, lineRange := range r.SliceLines() {
+		lineIdx := lineRange.Start.Line
+		(*ls)[lineIdx].Overlay(Overlay{
+			Cols: position.NewSpan(lineRange.Start.Col, lineRange.End.Col),
+			Kind: kind,
+		})
+	}
+}
+
+// ClearOverlays removes all overlays from all lines.
+func (ls *Lines) ClearOverlays() {
+	for i := range *ls {
+		(*ls)[i].Overlays = nil
+	}
 }

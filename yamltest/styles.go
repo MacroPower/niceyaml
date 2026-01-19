@@ -1,6 +1,8 @@
 package yamltest
 
 import (
+	"fmt"
+
 	"charm.land/lipgloss/v2"
 
 	"github.com/macropower/niceyaml/style"
@@ -119,6 +121,6 @@ func styleToTag(s style.Style) string {
 	case style.PunctuationSequence:
 		return "punctuation-sequence"
 	default:
-		return "unknown"
+		return fmt.Sprintf("style-%d", s)
 	}
 }

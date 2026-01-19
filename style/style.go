@@ -2,6 +2,8 @@
 package style
 
 import (
+	"maps"
+
 	"charm.land/lipgloss/v2"
 )
 
@@ -9,8 +11,6 @@ import (
 type Mode int
 
 // Color scheme modes.
-//
-//nolint:grouper // Enum.
 const (
 	Light Mode = iota
 	Dark
@@ -18,12 +18,10 @@ const (
 
 // Style identifies a style category for YAML highlighting.
 // Used as keys in [Styles] maps.
-type Style int
+type Style = int
 
 // Style constants for YAML highlighting.
 // Names follow Pygments token naming conventions where applicable.
-//
-//nolint:grouper // Enum.
 const (
 	Text                     Style = iota // Default/fallback style.
 	Comment                               // Comments.
@@ -71,57 +69,62 @@ const (
 	PunctuationSequenceStart              // Opening bracket ([).
 )
 
-// styleParent defines the inheritance hierarchy for styles.
-// Each style maps to its parent style. [Text] is the root and has no parent.
-var styleParent = map[Style]Style{
-	Comment:                  Text,
-	CommentPreproc:           Comment,
-	Generic:                  Text,
-	GenericDeleted:           Generic,
-	GenericError:             Generic,
-	GenericErrorInvalid:      GenericError,
-	GenericErrorUnknown:      GenericError,
-	GenericInserted:          Generic,
-	Literal:                  Text,
-	LiteralBoolean:           Literal,
-	LiteralNull:              Literal,
-	LiteralNullImplicit:      LiteralNull,
-	LiteralNumber:            Literal,
-	LiteralNumberBin:         LiteralNumber,
-	LiteralNumberFloat:       LiteralNumber,
-	LiteralNumberHex:         LiteralNumber,
-	LiteralNumberInfinity:    LiteralNumber,
-	LiteralNumberInteger:     LiteralNumber,
-	LiteralNumberNaN:         LiteralNumber,
-	LiteralNumberOct:         LiteralNumber,
-	LiteralString:            Literal,
-	LiteralStringDouble:      LiteralString,
-	LiteralStringSingle:      LiteralString,
-	Name:                     Text,
-	NameAlias:                Name,
-	NameAliasMerge:           NameAlias,
-	NameAnchor:               Name,
-	NameDecorator:            NameAnchor,
-	NameTag:                  Name,
-	Punctuation:              Text,
-	PunctuationBlock:         Punctuation,
-	PunctuationBlockFolded:   PunctuationBlock,
-	PunctuationBlockLiteral:  PunctuationBlock,
-	PunctuationCollectEntry:  Punctuation,
-	PunctuationHeading:       Punctuation,
-	PunctuationMapping:       Punctuation,
-	PunctuationMappingEnd:    PunctuationMapping,
-	PunctuationMappingStart:  PunctuationMapping,
-	PunctuationMappingValue:  PunctuationMapping,
-	PunctuationSequence:      Punctuation,
-	PunctuationSequenceEnd:   PunctuationSequence,
-	PunctuationSequenceEntry: PunctuationSequence,
-	PunctuationSequenceStart: PunctuationSequence,
-}
+var (
+	// StyleParent defines the inheritance hierarchy for styles.
+	// Each style maps to its parent style. [Text] is the root and has no parent.
+	styleParent = map[Style]Style{
+		Comment:                  Text,
+		CommentPreproc:           Comment,
+		Generic:                  Text,
+		GenericDeleted:           Generic,
+		GenericError:             Generic,
+		GenericErrorInvalid:      GenericError,
+		GenericErrorUnknown:      GenericError,
+		GenericInserted:          Generic,
+		Literal:                  Text,
+		LiteralBoolean:           Literal,
+		LiteralNull:              Literal,
+		LiteralNullImplicit:      LiteralNull,
+		LiteralNumber:            Literal,
+		LiteralNumberBin:         LiteralNumber,
+		LiteralNumberFloat:       LiteralNumber,
+		LiteralNumberHex:         LiteralNumber,
+		LiteralNumberInfinity:    LiteralNumber,
+		LiteralNumberInteger:     LiteralNumber,
+		LiteralNumberNaN:         LiteralNumber,
+		LiteralNumberOct:         LiteralNumber,
+		LiteralString:            Literal,
+		LiteralStringDouble:      LiteralString,
+		LiteralStringSingle:      LiteralString,
+		Name:                     Text,
+		NameAlias:                Name,
+		NameAliasMerge:           NameAlias,
+		NameAnchor:               Name,
+		NameDecorator:            NameAnchor,
+		NameTag:                  Name,
+		Punctuation:              Text,
+		PunctuationBlock:         Punctuation,
+		PunctuationBlockFolded:   PunctuationBlock,
+		PunctuationBlockLiteral:  PunctuationBlock,
+		PunctuationCollectEntry:  Punctuation,
+		PunctuationHeading:       Punctuation,
+		PunctuationMapping:       Punctuation,
+		PunctuationMappingEnd:    PunctuationMapping,
+		PunctuationMappingStart:  PunctuationMapping,
+		PunctuationMappingValue:  PunctuationMapping,
+		PunctuationSequence:      Punctuation,
+		PunctuationSequenceEnd:   PunctuationSequence,
+		PunctuationSequenceEntry: PunctuationSequence,
+		PunctuationSequenceStart: PunctuationSequence,
+	}
 
-// parent returns the parent [Style] for inheritance lookup.
+	// EmptyStyle is a singleton for missing style lookups.
+	emptyStyle = lipgloss.NewStyle()
+)
+
+// getParent returns the parent [Style] for inheritance lookup.
 // Returns [Text] if no explicit parent is defined.
-func (s Style) parent() Style {
+func getParent(s Style) Style {
 	if p, ok := styleParent[s]; ok {
 		return p
 	}
@@ -149,9 +152,15 @@ func Set(s Style, ls lipgloss.Style) StylesOption {
 // The base style is used for [Text] and inherited by all other styles.
 // Use [Set] options to override specific styles.
 //
+// For predefined styles in the hierarchy (e.g., [Comment], [LiteralString]),
+// styles are resolved using inheritance. Custom style keys (like overlay kinds)
+// are stored directly without inheritance resolution.
+//
 //nolint:gocritic // Value semantics preferred for API ergonomics.
 func NewStyles(base lipgloss.Style, opts ...StylesOption) Styles {
 	overrides := make(map[Style]lipgloss.Style)
+	overrides[Text] = base
+
 	for _, opt := range opts {
 		opt(overrides)
 	}
@@ -168,18 +177,26 @@ func NewStyles(base lipgloss.Style, opts ...StylesOption) Styles {
 				break
 			}
 
-			current = current.parent()
+			current = getParent(current)
 		}
 
 		return base
 	}
 
-	// Resolve all styles.
-	resolved := make(Styles, len(styleParent)+1)
+	// Resolve all predefined styles.
+	resolved := make(Styles, len(styleParent)+1+len(overrides))
 
 	resolved[Text] = resolve(Text)
 	for st := range styleParent {
 		resolved[st] = resolve(st)
+	}
+
+	// Include custom keys (not in styleParent) directly.
+	// This allows NewStyles to be used for overlay styles with arbitrary keys.
+	for st := range overrides {
+		if _, isPredefined := styleParent[st]; !isPredefined && st != Text {
+			resolved[st] = overrides[st]
+		}
 	}
 
 	return resolved
@@ -192,5 +209,19 @@ func (s Styles) Style(st Style) *lipgloss.Style {
 		return &ls
 	}
 
-	return &lipgloss.Style{}
+	return &emptyStyle
+}
+
+// With returns a new [Styles] with the given options applied.
+// This creates a copy; the original [Styles] is not modified.
+// Use [Set] to create options that add or override specific styles.
+func (s Styles) With(opts ...StylesOption) Styles {
+	result := make(Styles, len(s)+len(opts))
+	maps.Copy(result, s)
+
+	for _, opt := range opts {
+		opt(result)
+	}
+
+	return result
 }

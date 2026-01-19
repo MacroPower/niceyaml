@@ -97,7 +97,7 @@ func TestTokens_String_Annotation(t *testing.T) {
 			for idx, ann := range tc.annotations {
 				require.Less(t, idx, result.Len(), "annotation index out of range")
 
-				result.Annotate(idx, ann)
+				result.Line(idx).Annotate(ann)
 			}
 
 			assert.Equal(t, tc.want, result.String())
@@ -263,7 +263,7 @@ func TestLines_Runes_DiffBuiltLines(t *testing.T) {
 	revAfter := niceyaml.NewRevision(afterLines)
 
 	diff := niceyaml.NewFullDiff(revBefore, revAfter)
-	lines := diff.Source()
+	lines := diff.Build()
 
 	// Diff should produce two lines: deleted (old) and inserted (new).
 	// Both have the same source token line (1), but different visual indices (0, 1).
@@ -714,44 +714,6 @@ func TestNewSourceFromToken_FiltersImplicitNull(t *testing.T) {
 	assert.Contains(t, source.Content(), "key:")
 }
 
-func TestSource_SetFlag(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input string
-		flag  line.Flag
-		idx   int
-	}{
-		"set inserted flag": {
-			input: "key: value\n",
-			idx:   0,
-			flag:  line.FlagInserted,
-		},
-		"set deleted flag": {
-			input: "key: value\n",
-			idx:   0,
-			flag:  line.FlagDeleted,
-		},
-		"set flag on second line": {
-			input: "a: 1\nb: 2\n",
-			idx:   1,
-			flag:  line.FlagInserted,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			source := niceyaml.NewSourceFromString(tc.input)
-			source.Flag(tc.idx, tc.flag)
-
-			got := source.Line(tc.idx).Flag
-			assert.Equal(t, tc.flag, got)
-		})
-	}
-}
-
 func TestSource_Content(t *testing.T) {
 	t.Parallel()
 
@@ -954,5 +916,134 @@ func TestSource_WithParserOptions(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, file)
 		assert.Len(t, file.Docs, 1)
+	})
+}
+
+func TestSource_AddOverlay(t *testing.T) {
+	t.Parallel()
+
+	t.Run("single line range", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("key: value\n")
+		require.Equal(t, 1, source.Len())
+
+		source.AddOverlay(1, position.NewRange(
+			position.New(0, 0),
+			position.New(0, 5),
+		))
+
+		ln := source.Line(0)
+		require.Len(t, ln.Overlays, 1)
+		assert.Equal(t, position.NewSpan(0, 5), ln.Overlays[0].Cols)
+		assert.Equal(t, 1, ln.Overlays[0].Kind)
+	})
+
+	t.Run("multi-line range splits across lines", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.Input(`
+			key1: value1
+			key2: value2
+			key3: value3
+		`)
+		source := niceyaml.NewSourceFromString(input)
+		require.Equal(t, 3, source.Len())
+
+		// Add overlay spanning all three lines.
+		source.AddOverlay(2, position.NewRange(
+			position.New(0, 3),
+			position.New(2, 5),
+		))
+
+		// First line: col 3 to end of line.
+		ln0 := source.Line(0)
+		require.Len(t, ln0.Overlays, 1)
+		assert.Equal(t, 3, ln0.Overlays[0].Cols.Start)
+		assert.Equal(t, 2, ln0.Overlays[0].Kind)
+
+		// Middle line: full line.
+		ln1 := source.Line(1)
+		require.Len(t, ln1.Overlays, 1)
+		assert.Equal(t, 0, ln1.Overlays[0].Cols.Start)
+		assert.Equal(t, 2, ln1.Overlays[0].Kind)
+
+		// Last line: start to col 5.
+		ln2 := source.Line(2)
+		require.Len(t, ln2.Overlays, 1)
+		assert.Equal(t, 0, ln2.Overlays[0].Cols.Start)
+		assert.Equal(t, 5, ln2.Overlays[0].Cols.End)
+		assert.Equal(t, 2, ln2.Overlays[0].Kind)
+	})
+
+	t.Run("multiple ranges", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.Input(`
+			key1: value1
+			key2: value2
+		`)
+		source := niceyaml.NewSourceFromString(input)
+		require.Equal(t, 2, source.Len())
+
+		source.AddOverlay(1,
+			position.NewRange(position.New(0, 0), position.New(0, 4)),
+			position.NewRange(position.New(1, 0), position.New(1, 4)),
+		)
+
+		require.Len(t, source.Line(0).Overlays, 1)
+		require.Len(t, source.Line(1).Overlays, 1)
+	})
+
+	t.Run("empty source no-op", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("")
+		// Should not panic on empty source.
+		source.AddOverlay(1, position.NewRange(position.New(0, 0), position.New(0, 5)))
+
+		assert.True(t, source.IsEmpty())
+	})
+}
+
+func TestSource_ClearOverlays(t *testing.T) {
+	t.Parallel()
+
+	t.Run("clears all overlays", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.Input(`
+			key1: value1
+			key2: value2
+		`)
+		source := niceyaml.NewSourceFromString(input)
+		require.Equal(t, 2, source.Len())
+
+		// Add overlays to both lines.
+		source.AddOverlay(1,
+			position.NewRange(position.New(0, 0), position.New(0, 10)),
+			position.NewRange(position.New(1, 0), position.New(1, 10)),
+		)
+
+		require.Len(t, source.Line(0).Overlays, 1)
+		require.Len(t, source.Line(1).Overlays, 1)
+
+		// Clear all overlays.
+		source.ClearOverlays()
+
+		assert.Nil(t, source.Line(0).Overlays)
+		assert.Nil(t, source.Line(1).Overlays)
+	})
+
+	t.Run("idempotent on empty", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("key: value\n")
+		require.Equal(t, 1, source.Len())
+
+		// Clear without any overlays set.
+		source.ClearOverlays()
+
+		assert.Nil(t, source.Line(0).Overlays)
 	})
 }

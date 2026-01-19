@@ -7,10 +7,8 @@ import (
 	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
-	"github.com/goccy/go-yaml/token"
 
 	"github.com/macropower/niceyaml/internal/colors"
-	"github.com/macropower/niceyaml/internal/styletree"
 	"github.com/macropower/niceyaml/line"
 	"github.com/macropower/niceyaml/position"
 	"github.com/macropower/niceyaml/style"
@@ -24,40 +22,21 @@ type StyleGetter interface {
 	Style(s style.Style) *lipgloss.Style
 }
 
-// TokenStyler manages style ranges for YAML tokens.
-// See [Printer] for an implementation.
-type TokenStyler interface {
-	StyleGetter
-	AddStyleToRange(s *lipgloss.Style, ranges ...position.Range)
-	ClearStyles()
-}
-
-// StyledPrinter extends [TokenStyler] with printing capabilities.
+// StyledPrinter provides printing capabilities with style support.
 // See [Printer] for an implementation.
 type StyledPrinter interface {
-	TokenStyler
+	Style(s style.Style) *lipgloss.Style
 	SetWidth(width int)
-	Print(lines LineIterator) string
+	Print(lines LineIterator, spans ...position.Span) string
 }
 
-// StyledSlicePrinter extends [TokenStyler] with slice printing capabilities.
-// See [Printer] for an implementation.
-type StyledSlicePrinter interface {
-	TokenStyler
-	SetWidth(width int)
-	PrintSlice(lines LineIterator, minLine, maxLine int) string
-}
+const wrapOnCharacters = " /-"
 
-const (
-	wrapOnCharacters = " /-"
-
-	// MaxCol is the maximum column value used for linearizing 2D positions.
-	// This allows positions to be compared as single integers while preserving ordering.
-	maxCol = 1_000_000
-)
+// NoGutter is a [GutterFunc] that returns an empty string for all lines.
+var NoGutter GutterFunc = func(GutterContext) string { return "" }
 
 // Printer renders YAML tokens with syntax highlighting using [lipgloss.Style].
-// It supports custom styles, gutters, and styled range overlays
+// It supports custom styles, gutters, and styled overlays
 // for highlighting specific positions such as errors.
 // Create instances with [NewPrinter].
 type Printer struct {
@@ -65,7 +44,6 @@ type Printer struct {
 	style              lipgloss.Style
 	gutterFunc         GutterFunc
 	annotationFunc     AnnotationFunc
-	rangeStyles        *styletree.Tree
 	width              int
 	hasCustomStyle     bool
 	annotationsEnabled bool
@@ -113,9 +91,6 @@ type GutterContext struct {
 // The returned string is rendered as the leftmost content before the line content.
 type GutterFunc func(GutterContext) string
 
-// NoGutter is a [GutterFunc] that returns an empty string for all lines.
-var NoGutter GutterFunc = func(GutterContext) string { return "" }
-
 // AnnotationContext provides context for annotation rendering.
 // It is passed to [AnnotationFunc] to determine the appropriate annotation content.
 type AnnotationContext struct {
@@ -131,24 +106,12 @@ type AnnotationFunc func(AnnotationContext) string
 // position-based prefixes: "^ " for [line.Below], none for [line.Above].
 func DefaultAnnotation() AnnotationFunc {
 	return func(ctx AnnotationContext) string {
-		anns := ctx.Annotations
-		if len(anns) == 0 {
+		if len(ctx.Annotations) == 0 {
 			return ""
 		}
 
-		// Find minimum column and collect content.
-		minCol := anns[0].Col
-		contents := make([]string, len(anns))
-
-		for i, ann := range anns {
-			contents[i] = ann.Content
-			if ann.Col < minCol {
-				minCol = ann.Col
-			}
-		}
-
-		padding := strings.Repeat(" ", max(0, minCol))
-		combined := strings.Join(contents, "; ")
+		padding := strings.Repeat(" ", max(0, ctx.Annotations.Col()))
+		combined := strings.Join(ctx.Annotations.Contents(), "; ")
 
 		// Add "^ " prefix for Below annotations.
 		if ctx.Position == line.Below {
@@ -159,81 +122,56 @@ func DefaultAnnotation() AnnotationFunc {
 	}
 }
 
+// renderLineNumber renders the line number portion of a gutter.
+func renderLineNumber(ctx GutterContext) string {
+	lineNumStyle := ctx.Styles.Style(style.Text).
+		Foreground(ctx.Styles.Style(style.Comment).GetForeground())
+
+	switch {
+	case ctx.Flag == line.FlagAnnotation:
+		return lineNumStyle.Render("     ")
+	case ctx.Soft:
+		return lineNumStyle.Render("   - ")
+	default:
+		return lineNumStyle.Render(fmt.Sprintf("%4d ", ctx.Number))
+	}
+}
+
+// renderDiffMarker renders the diff marker portion of a gutter.
+func renderDiffMarker(ctx GutterContext) string {
+	if ctx.Soft {
+		return " "
+	}
+
+	switch ctx.Flag {
+	case line.FlagInserted:
+		return ctx.Styles.Style(style.GenericInserted).Render("+")
+	case line.FlagDeleted:
+		return ctx.Styles.Style(style.GenericDeleted).Render("-")
+	default:
+		return ctx.Styles.Style(style.Text).Render(" ")
+	}
+}
+
 // DefaultGutter creates a [GutterFunc] that renders both line numbers and diff markers.
 // This is the default gutter used by [NewPrinter].
 func DefaultGutter() GutterFunc {
 	return func(ctx GutterContext) string {
-		lineNumStyle := ctx.Styles.Style(style.Text).
-			Foreground(ctx.Styles.Style(style.Comment).GetForeground())
-
-		var lineNum string
-
-		switch {
-		case ctx.Flag == line.FlagAnnotation:
-			lineNum = lineNumStyle.Render("     ")
-		case ctx.Soft:
-			lineNum = lineNumStyle.Render("   - ")
-		default:
-			lineNum = lineNumStyle.Render(fmt.Sprintf("%4d ", ctx.Number))
-		}
-
-		var marker string
-
-		switch ctx.Flag {
-		case line.FlagInserted:
-			marker = ctx.Styles.Style(style.GenericInserted).Render("+")
-		case line.FlagDeleted:
-			marker = ctx.Styles.Style(style.GenericDeleted).Render("-")
-		default:
-			marker = ctx.Styles.Style(style.Text).Render(" ")
-		}
-
-		// Use builder to avoid intermediate string allocation from concatenation.
-		var sb strings.Builder
-		sb.Grow(len(lineNum) + len(marker))
-		sb.WriteString(lineNum)
-		sb.WriteString(marker)
-
-		return sb.String()
+		return renderLineNumber(ctx) + renderDiffMarker(ctx)
 	}
 }
 
 // DiffGutter creates a [GutterFunc] that renders diff-style markers only (" ", "+", "-").
 // No line numbers are rendered. Uses [style.GenericInserted] and [style.GenericDeleted] for styling.
 func DiffGutter() GutterFunc {
-	return func(ctx GutterContext) string {
-		if ctx.Soft {
-			return " "
-		}
-
-		switch ctx.Flag {
-		case line.FlagInserted:
-			return ctx.Styles.Style(style.GenericInserted).Render("+")
-		case line.FlagDeleted:
-			return ctx.Styles.Style(style.GenericDeleted).Render("-")
-		default:
-			return ctx.Styles.Style(style.Text).Render(" ")
-		}
-	}
+	return renderDiffMarker
 }
 
 // LineNumberGutter creates a [GutterFunc] that renders styled line numbers only.
 // For soft-wrapped continuation lines, renders "   - " as a continuation marker.
 // No diff markers are rendered. Uses [style.Comment] foreground for styling.
 func LineNumberGutter() GutterFunc {
-	return func(ctx GutterContext) string {
-		lineNumStyle := ctx.Styles.Style(style.Text).
-			Foreground(ctx.Styles.Style(style.Comment).GetForeground())
-
-		switch {
-		case ctx.Flag == line.FlagAnnotation:
-			return lineNumStyle.Render("     ")
-		case ctx.Soft:
-			return lineNumStyle.Render("   - ")
-		default:
-			return lineNumStyle.Render(fmt.Sprintf("%4d ", ctx.Number))
-		}
-	}
+	return renderLineNumber
 }
 
 // WithStyle configures the printer with the given container style.
@@ -286,58 +224,38 @@ func (p *Printer) SetWordWrap(enabled bool) {
 	p.wordWrap = enabled
 }
 
-// AddStyleToRange adds a style to apply to the character range [r.Start, r.End).
-// The range is half-open: Start is inclusive, End is exclusive.
-// Line and column are 0-indexed.
-// Overlapping range colors are blended; transforms are composed (overlay wraps base).
-func (p *Printer) AddStyleToRange(s *lipgloss.Style, ranges ...position.Range) {
-	ls := lipgloss.NewStyle()
-	if s != nil {
-		ls = *s
-	}
-
-	if p.rangeStyles == nil {
-		p.rangeStyles = styletree.New()
-	}
-
-	for _, r := range ranges {
-		start := r.Start.Line*maxCol + r.Start.Col
-		end := r.End.Line*maxCol + r.End.Col
-		p.rangeStyles.Insert(start, end, &ls)
-	}
-}
-
-// Style retrieves the underlying [lipgloss.Style] for the given [style.Style].
+// Style retrieves the underlying [*lipgloss.Style] for the given [style.Style],
+// or an empty style if not found.
 func (p *Printer) Style(s style.Style) *lipgloss.Style {
 	return p.styles.Style(s)
 }
 
-// ClearStyles removes all previously added styles.
-func (p *Printer) ClearStyles() {
-	if p.rangeStyles != nil {
-		p.rangeStyles.Clear()
-	}
-}
-
 // Print prints any [LineIterator].
-func (p *Printer) Print(lines LineIterator) string {
-	content := p.renderLinesInRange(lines, -1, -1)
+// It prints lines within the given [position.Span]s, in the supplied order.
+// If no [position.Span]s are provided, all lines are printed.
+func (p *Printer) Print(lines LineIterator, spans ...position.Span) string {
+	if len(spans) == 0 {
+		// No spans specified, print all lines.
+		content := p.renderLinesInSpan(lines, position.NewSpan(0, lines.Len()))
 
-	return p.style.Render(content)
+		return p.style.Render(content)
+	}
+
+	var sb strings.Builder
+
+	for i, span := range spans {
+		if i > 0 {
+			sb.WriteByte('\n')
+		}
+
+		sb.WriteString(p.renderLinesInSpan(lines, span))
+	}
+
+	return p.style.Render(sb.String())
 }
 
-// PrintSlice prints a slice of lines from any [LineIterator].
-// It prints in the range [minLine, maxLine] as defined by the [LineIterator.Lines] index.
-// If minLine < 0, includes from the beginning; if maxLine < 0, includes to the end.
-func (p *Printer) PrintSlice(lines LineIterator, minLine, maxLine int) string {
-	content := p.renderLinesInRange(lines, minLine, maxLine)
-
-	return p.style.Render(content)
-}
-
-// renderLinesInRange renders lines in [minLine, maxLine] using 0-indexed line indices.
-// If minLine < 0, includes from the beginning; if maxLine < 0, includes to the end.
-func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) string {
+// renderLinesInSpan renders lines in the half-open span [span.Start, span.End).
+func (p *Printer) renderLinesInSpan(t LineIterator, span position.Span) string {
 	if t.IsEmpty() {
 		return ""
 	}
@@ -359,11 +277,15 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 	// Pre-allocate buffer for estimated output size (reduces growth allocations).
 	sb.Grow(totalLines * 100)
 
+	// Cache styles outside the loop to avoid repeated lookups.
+	deletedStyle := p.styles.Style(style.GenericDeleted)
+	insertedStyle := p.styles.Style(style.GenericInserted)
+
 	for pos, ln := range t.Lines() {
 		lineNum := ln.Number()
 
-		// Filter by 0-indexed line index.
-		if (minLine >= 0 && pos.Line < minLine) || (maxLine >= 0 && pos.Line > maxLine) {
+		// Filter by 0-indexed line index using half-open span [Start, End).
+		if !span.Contains(pos.Line) {
 			continue
 		}
 
@@ -372,8 +294,8 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 			hasBelowAnnotation bool
 		)
 		if p.annotationsEnabled {
-			hasAboveAnnotation = !ln.Annotations.FilterPosition(line.Above).IsEmpty()
-			hasBelowAnnotation = !ln.Annotations.FilterPosition(line.Below).IsEmpty()
+			hasAboveAnnotation = len(ln.Annotations.FilterPosition(line.Above)) > 0
+			hasBelowAnnotation = len(ln.Annotations.FilterPosition(line.Below)) > 0
 		}
 
 		if hasAboveAnnotation {
@@ -399,20 +321,29 @@ func (p *Printer) renderLinesInRange(t LineIterator, minLine, maxLine int) strin
 			Styles:     p.styles,
 		}
 
+		linePos := position.New(pos.Line, 0)
+
+		var (
+			content      string
+			contentStyle *lipgloss.Style
+		)
+
 		switch ln.Flag {
 		case line.FlagDeleted:
-			deleted := p.styles.Style(style.GenericDeleted)
-			p.writeLine(&sb, ln.Content(), pos.Line, deleted, gutterCtx, gutterWidth)
+			content = ln.Content()
+			contentStyle = deletedStyle
 
 		case line.FlagInserted:
-			inserted := p.styles.Style(style.GenericInserted)
-			p.writeLine(&sb, ln.Content(), pos.Line, inserted, gutterCtx, gutterWidth)
+			content = ln.Content()
+			contentStyle = insertedStyle
 
 		default: // FlagDefault (equal line).
 			// Render with syntax highlighting.
-			styledContent := p.renderTokenLine(pos.Line, ln)
-			p.writeLine(&sb, styledContent, pos.Line, nil, gutterCtx, gutterWidth)
+			content = p.renderTokenLine(pos.Line, ln)
+			contentStyle = nil
 		}
+
+		p.writeLine(&sb, content, linePos, contentStyle, gutterCtx, gutterWidth)
 
 		if hasBelowAnnotation {
 			sb.WriteByte('\n')
@@ -451,25 +382,12 @@ func (p *Printer) renderAnnotation(
 		return
 	}
 
-	cw := p.contentWidth(gutterWidth)
-
-	// Wrap annotation content if width is set.
-	subLines := []string{content}
-	if cw > 0 {
-		subLines = strings.Split(lipgloss.Wrap(content, cw, wrapOnCharacters), "\n")
-	}
+	subLines := p.wrapContent(content, gutterWidth)
 
 	// Calculate continuation padding for wrapped lines.
 	// For Below annotations: col spaces + "^ " = col + 2.
 	// For Above annotations: col spaces.
-	minCol := anns[0].Col
-	for _, ann := range anns {
-		if ann.Col < minCol {
-			minCol = ann.Col
-		}
-	}
-
-	continuationPadding := strings.Repeat(" ", minCol)
+	continuationPadding := strings.Repeat(" ", anns.Col())
 	if relPos == line.Below {
 		continuationPadding += "  " // Align with text after "^ ".
 	}
@@ -504,25 +422,16 @@ func (p *Printer) renderAnnotation(
 func (p *Printer) writeLine(
 	sb *strings.Builder,
 	content string,
-	visualLine int,
+	pos position.Position,
 	contentStyle *lipgloss.Style,
 	gutterCtx GutterContext,
 	gutterWidth int,
 ) {
-	cw := p.contentWidth(gutterWidth)
-
-	// Treat non-wrapping as wrapping with a single subLine.
-	subLines := []string{content}
-	if cw > 0 {
-		subLines = strings.Split(lipgloss.Wrap(content, cw, wrapOnCharacters), "\n")
-	}
-
-	// Track column offset for wrapped lines (0-indexed).
-	col := 0
+	subLines := p.wrapContent(content, gutterWidth)
 
 	for j, subLine := range subLines {
 		if j > 0 {
-			sb.WriteString("\n")
+			sb.WriteByte('\n')
 		}
 
 		// Generate gutter at write-time with correct Soft flag.
@@ -534,13 +443,13 @@ func (p *Printer) writeLine(
 		// Write content.
 		if contentStyle != nil {
 			// For diff lines: apply diff style to content.
-			sb.WriteString(p.styleLineWithRanges(subLine, position.New(visualLine, col), contentStyle, true))
+			sb.WriteString(p.styleLineWithRanges(subLine, pos, contentStyle, true, nil))
 		} else {
 			// For equal lines: content is already styled.
 			sb.WriteString(subLine)
 		}
 
-		col += utf8.RuneCountInString(subLine)
+		pos.Col += utf8.RuneCountInString(subLine)
 	}
 }
 
@@ -548,68 +457,67 @@ func (p *Printer) writeLine(
 // It splits the line into spans based on effective styles (base + overlapping ranges).
 // The pos parameter specifies the 0-indexed visual line and column position.
 // If alwaysBlend is true, range styles always blend with base (used for diff lines).
-func (p *Printer) styleLineWithRanges(src string, pos position.Position, s *lipgloss.Style, alwaysBlend bool) string {
+// The overlays parameter provides style overlays from Line; pass nil if none.
+func (p *Printer) styleLineWithRanges(
+	src string,
+	pos position.Position,
+	s *lipgloss.Style,
+	alwaysBlend bool,
+	overlays line.Overlays,
+) string {
 	if src == "" {
 		return src
 	}
 
-	if p.rangeStyles == nil || p.rangeStyles.Len() == 0 {
+	if len(overlays) == 0 {
 		return s.Render(src)
 	}
 
-	// Query all intervals overlapping this line in one batch.
-	lineStart := pos.Line*maxCol + pos.Col
-	lineEnd := lineStart + utf8.RuneCountInString(src)
+	// Create span for this line segment's column range.
+	cols := position.NewSpan(pos.Col, pos.Col+utf8.RuneCountInString(src))
 
-	intervals := p.rangeStyles.QueryRange(lineStart, lineEnd)
-	if len(intervals) == 0 {
+	// Filter overlays that overlap this column span with resolved styles.
+	var active []overlayWithStyle
+	for _, o := range overlays {
+		if o.Cols.Overlaps(cols) {
+			if st := p.styles.Style(o.Kind); st != nil {
+				active = append(active, overlayWithStyle{
+					cols:  o.Cols,
+					style: st,
+				})
+			}
+		}
+	}
+
+	if len(active) == 0 {
 		return s.Render(src)
 	}
 
-	// Collect all boundary points where styles might change.
-	// These are interval starts/ends clamped to the line range.
-	boundaries := make([]int, 0, len(intervals)*2+2)
-	boundaries = append(boundaries, lineStart, lineEnd)
-
-	for _, iv := range intervals {
-		if iv.Start > lineStart && iv.Start < lineEnd {
-			boundaries = append(boundaries, iv.Start)
-		}
-		if iv.End > lineStart && iv.End < lineEnd {
-			boundaries = append(boundaries, iv.End)
-		}
-	}
-
-	// Sort and deduplicate boundaries.
-	slices.Sort(boundaries)
-
-	boundaries = slices.Compact(boundaries)
-
+	boundaries := computeStyleBoundaries(active, cols)
 	if len(boundaries) < 2 {
-		// Boundaries always contains at least [lineStart, lineEnd] for non-empty src.
 		return ""
 	}
 
+	// Render spans between boundaries, merging adjacent same-styled spans.
 	var sb strings.Builder
 	sb.Grow(len(src) * 2)
 
 	runes := []rune(src)
 
-	// Render spans between consecutive boundaries, merging adjacent spans with same style.
 	var currentStyle *lipgloss.Style
 
 	spanStart := 0
 
 	for i := range len(boundaries) - 1 {
-		boundaryStart := boundaries[i] - lineStart // Convert to rune index.
-		boundaryEnd := boundaries[i+1] - lineStart // Convert to rune index.
-		spanPoint := boundaries[i]                 // Point for style lookup.
+		boundaryStart := boundaries[i] - cols.Start // Convert to rune index.
+		boundaryEnd := boundaries[i+1] - cols.Start // Convert to rune index.
+		spanPoint := boundaries[i]                  // Point for style lookup.
 
 		if boundaryStart < 0 || boundaryEnd > len(runes) || boundaryStart >= boundaryEnd {
 			continue
 		}
 
-		spanStyle := p.computeStyleForPoint(spanPoint, intervals, s, alwaysBlend)
+		spanStyle := p.computeStyleForPoint(spanPoint, active, s, alwaysBlend)
 
 		// Merge adjacent spans with the same style.
 		if currentStyle == nil {
@@ -633,25 +541,51 @@ func (p *Printer) styleLineWithRanges(src string, pos position.Position, s *lipg
 	return sb.String()
 }
 
-// computeStyleForPoint computes the effective style at a point given overlapping intervals.
-// This avoids repeated tree queries by using pre-fetched intervals.
+// computeStyleBoundaries returns sorted, deduplicated boundary points where styles change.
+// The cols span defines the line segment boundaries.
+func computeStyleBoundaries(active []overlayWithStyle, cols position.Span) []int {
+	boundaries := make([]int, 0, len(active)*2+2)
+	boundaries = append(boundaries, cols.Start, cols.End)
+
+	for _, ov := range active {
+		if ov.cols.Start > cols.Start && ov.cols.Start < cols.End {
+			boundaries = append(boundaries, ov.cols.Start)
+		}
+		if ov.cols.End > cols.Start && ov.cols.End < cols.End {
+			boundaries = append(boundaries, ov.cols.End)
+		}
+	}
+
+	slices.Sort(boundaries)
+
+	return slices.Compact(boundaries)
+}
+
+// overlayWithStyle combines overlay column span with its resolved style.
+type overlayWithStyle struct {
+	style *lipgloss.Style
+	cols  position.Span
+}
+
+// computeStyleForPoint computes the effective style at a point given overlapping overlays.
+// This uses pre-filtered overlays from styleLineWithRanges.
 func (p *Printer) computeStyleForPoint(
 	point int,
-	intervals []styletree.Interval,
+	overlays []overlayWithStyle,
 	baseStyle *lipgloss.Style,
 	alwaysBlend bool,
 ) *lipgloss.Style {
 	result := baseStyle
 	firstRange := true
 
-	for _, iv := range intervals {
-		// Check if this interval contains the point.
-		if point >= iv.Start && point < iv.End {
+	for _, ov := range overlays {
+		// Check if this overlay contains the point.
+		if ov.cols.Contains(point) {
 			if !alwaysBlend && firstRange {
-				result = colors.OverrideStyles(result, iv.Style)
+				result = colors.OverrideStyles(result, ov.style)
 				firstRange = false
 			} else {
-				result = colors.BlendStyles(result, iv.Style)
+				result = colors.BlendStyles(result, ov.style)
 			}
 		}
 	}
@@ -669,21 +603,31 @@ func (p *Printer) contentWidth(gutterWidth int) int {
 	return max(0, p.width-gutterWidth)
 }
 
+// wrapContent splits content for word wrapping if enabled.
+func (p *Printer) wrapContent(content string, gutterWidth int) []string {
+	cw := p.contentWidth(gutterWidth)
+	if cw <= 0 {
+		return []string{content}
+	}
+
+	return strings.Split(lipgloss.Wrap(content, cw, wrapOnCharacters), "\n")
+}
+
 // renderTokenLine renders a single line's tokens with syntax highlighting.
-// It handles separator (leading whitespace) and content styling, plus range overlays.
+// It handles separator (leading whitespace) and content styling, plus overlays from the Line.
 // The lineIndex parameter is the 0-indexed position in the Lines collection.
 func (p *Printer) renderTokenLine(lineIndex int, ln line.Line) string {
 	if ln.IsEmpty() {
 		return ""
 	}
 
-	col := 0 // Column position, 0-indexed.
+	pos := position.New(lineIndex, 0)
 
 	var sb strings.Builder
 
 	for _, tk := range ln.Tokens() {
 		tokenStyle := p.styles.Style(tokens.TypeStyle(tk))
-		valueOffset := tokenValueOffset(tk)
+		valueOffset := tokens.ValueOffset(tk)
 
 		// Get the token's origin text.
 		origin := tk.Origin
@@ -698,17 +642,21 @@ func (p *Printer) renderTokenLine(lineIndex int, ln line.Line) string {
 		if separatorRunes > 0 && separatorRunes <= len(originRunes) {
 			sepPart := string(originRunes[:separatorRunes])
 			defaultStyle := p.styles.Style(style.Text)
-			sb.WriteString(p.styleLineWithRanges(sepPart, position.New(lineIndex, col), defaultStyle, false))
+			sb.WriteString(
+				p.styleLineWithRanges(sepPart, pos, defaultStyle, false, ln.Overlays),
+			)
 
-			col += separatorRunes
+			pos.Col += separatorRunes
 			originRunes = originRunes[separatorRunes:]
 		}
 
 		// Part 2: Render content portion (token style).
 		if len(originRunes) > 0 {
-			sb.WriteString(p.styleLineWithRanges(string(originRunes), position.New(lineIndex, col), tokenStyle, false))
+			sb.WriteString(
+				p.styleLineWithRanges(string(originRunes), pos, tokenStyle, false, ln.Overlays),
+			)
 
-			col += len(originRunes)
+			pos.Col += len(originRunes)
 		}
 	}
 
@@ -729,25 +677,6 @@ func leadingWhitespaceRunes(s string, maxBytes int) int {
 	}
 
 	return utf8.RuneCountInString(prefix)
-}
-
-// tokenValueOffset calculates the byte offset where Value starts within the
-// first non-empty line of the token's Origin. This offset is used for string
-// slicing operations.
-func tokenValueOffset(tk *token.Token) int {
-	lines := strings.SplitSeq(tk.Origin, "\n")
-	for l := range lines {
-		if l != "" {
-			idx := strings.Index(l, tk.Value)
-			if idx >= 0 {
-				return idx
-			}
-
-			break
-		}
-	}
-
-	return 0
 }
 
 // stylesEqual compares two styles for equality (for span grouping purposes).

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/macropower/niceyaml/line"
+	"github.com/macropower/niceyaml/position"
 )
 
 // diffKind represents the kind of diff operation.
@@ -31,6 +32,18 @@ func (k diffKind) beforeAfterDeltas() (int, int) {
 	}
 }
 
+// toFlag converts the diffKind to the corresponding [line.Flag].
+func (k diffKind) toFlag() line.Flag {
+	switch k {
+	case diffDelete:
+		return line.FlagDeleted
+	case diffInsert:
+		return line.FlagInserted
+	default:
+		return line.FlagDefault
+	}
+}
+
 // lineOp represents a line in the full diff output.
 type lineOp struct {
 	line line.Line // Original Line from source.
@@ -39,12 +52,11 @@ type lineOp struct {
 
 // diffHunk represents a contiguous group of diff operations.
 type diffHunk struct {
-	startIdx  int // Start index in ops slice.
-	endIdx    int // End index (exclusive) in ops slice.
-	fromLine  int // First line number in "before" file.
-	toLine    int // First line number in "after" file.
-	fromCount int // Number of lines from "before" (equal + deleted).
-	toCount   int // Number of lines from "after" (equal + inserted).
+	opsSpan   position.Span // Half-open range [Start, End) of indices in ops slice.
+	fromLine  int           // First line number in "before" file.
+	toLine    int           // First line number in "after" file.
+	fromCount int           // Number of lines from "before" (equal + deleted).
+	toCount   int           // Number of lines from "after" (equal + inserted).
 }
 
 // lcsLineDiff computes line operations using a simple LCS-based diff.
@@ -113,48 +125,48 @@ func lcsLineDiff(before, after LineIterator) []lineOp {
 	return ops
 }
 
-// buildHunks groups consecutive included operations into hunks.
-func buildHunks(ops []lineOp, included []bool) []diffHunk {
-	var (
-		hunks       []diffHunk
-		currentHunk *diffHunk
-	)
-
-	beforeLine := 1
-	afterLine := 1
-
-	for i, op := range ops {
-		opBeforeLine := beforeLine
-		opAfterLine := afterLine
-
-		beforeDelta, afterDelta := op.kind.beforeAfterDeltas()
-		beforeLine += beforeDelta
-		afterLine += afterDelta
-
-		if !included[i] {
-			if currentHunk != nil {
-				hunks = append(hunks, *currentHunk)
-				currentHunk = nil
-			}
-
-			continue
-		}
-
-		if currentHunk == nil {
-			currentHunk = &diffHunk{
-				startIdx: i,
-				fromLine: opBeforeLine,
-				toLine:   opAfterLine,
-			}
-		}
-
-		currentHunk.endIdx = i + 1
-		currentHunk.fromCount += beforeDelta
-		currentHunk.toCount += afterDelta
+// buildHunks builds hunks from expanded spans of operation indices.
+// Each span defines a half-open range [Start, End) of ops to include.
+// Computes line numbers by tracking before/after positions.
+func buildHunks(ops []lineOp, spans position.Spans) []diffHunk {
+	if len(spans) == 0 {
+		return nil
 	}
 
-	if currentHunk != nil {
-		hunks = append(hunks, *currentHunk)
+	hunks := make([]diffHunk, 0, len(spans))
+
+	// Track before/after line numbers as we iterate through all ops.
+	beforeLine := 1
+	afterLine := 1
+	opIdx := 0
+
+	for _, span := range spans {
+		// Skip ops before this span, tracking line numbers.
+		for opIdx < span.Start {
+			beforeDelta, afterDelta := ops[opIdx].kind.beforeAfterDeltas()
+			beforeLine += beforeDelta
+			afterLine += afterDelta
+			opIdx++
+		}
+
+		// Build hunk for this span.
+		hunk := diffHunk{
+			opsSpan:  span,
+			fromLine: beforeLine,
+			toLine:   afterLine,
+		}
+
+		// Process ops in this span.
+		for opIdx < span.End {
+			beforeDelta, afterDelta := ops[opIdx].kind.beforeAfterDeltas()
+			hunk.fromCount += beforeDelta
+			hunk.toCount += afterDelta
+			beforeLine += beforeDelta
+			afterLine += afterDelta
+			opIdx++
+		}
+
+		hunks = append(hunks, hunk)
 	}
 
 	return hunks
@@ -192,27 +204,25 @@ func formatHunkHeader(h diffHunk) string {
 	return b.String()
 }
 
-// selectContextLines returns a boolean slice indicating which operations to include.
-func selectContextLines(ops []lineOp, context int) []bool {
-	included := make([]bool, len(ops))
-	n := len(ops)
-	lastMarked := -1
-
+// selectHunkSpans collects change indices and groups them into expanded spans.
+// Returns spans representing the op index ranges to include in each hunk.
+func selectHunkSpans(ops []lineOp, context int) position.Spans {
+	// Collect indices of non-equal operations.
+	var changeIndices []int
 	for i, op := range ops {
 		if op.kind != diffEqual {
-			start := max(0, i-context)
-			end := min(n-1, i+context)
-
-			// Mark the range [start, end], avoiding re-marking already included lines.
-			for j := max(start, lastMarked+1); j <= end; j++ {
-				included[j] = true
-			}
-
-			lastMarked = max(lastMarked, end)
+			changeIndices = append(changeIndices, i)
 		}
 	}
 
-	return included
+	if len(changeIndices) == 0 {
+		return nil
+	}
+
+	// Group indices, expand by context, clamp to valid range.
+	return position.GroupIndices(changeIndices, context).
+		Expand(context).
+		Clamp(0, len(ops))
 }
 
 // SourceGetter gets a [NamedLineIterator].
@@ -232,27 +242,19 @@ func NewFullDiff(a, b SourceGetter) *FullDiff {
 	return &FullDiff{a: a, b: b}
 }
 
-// Source returns a [*Source] representing the diff between the two [SourceGetter]s.
+// Build returns a [*Source] representing the diff between the two [SourceGetter]s.
 // The returned Source contains merged tokens from both revisions:
 // unchanged lines use tokens from b, while changed lines include
 // deleted tokens from a followed by inserted tokens from b.
 // Source contains flags for deleted/inserted lines.
-func (d *FullDiff) Source() *Source {
+func (d *FullDiff) Build() *Source {
 	ops := lcsLineDiff(d.a.Source(), d.b.Source())
 
 	lines := make(line.Lines, 0, len(ops))
 
 	for _, op := range ops {
 		ln := op.line.Clone()
-
-		switch op.kind {
-		case diffDelete:
-			ln.Flag = line.FlagDeleted
-		case diffInsert:
-			ln.Flag = line.FlagInserted
-		default:
-			ln.Flag = line.FlagDefault
-		}
+		ln.Flag = op.kind.toFlag()
 
 		lines = append(lines, ln)
 	}
@@ -276,55 +278,47 @@ func NewSummaryDiff(a, b SourceGetter, context int) *SummaryDiff {
 	return &SummaryDiff{a: a, b: b, context: max(0, context)}
 }
 
-// Source returns a [*Source] representing a summarized diff between two revisions.
-// It shows only changed lines with the specified number of context lines around each change.
-// Hunk headers are stored in [Line.Annotation.Content] for each hunk's first line.
-func (d *SummaryDiff) Source() *Source {
+// Build returns a [*Source] and line spans for rendering a summarized diff.
+// The source contains all diff lines with flags for deleted/inserted lines.
+// Hunk headers are stored in [line.Annotation.Content] for each hunk's first line.
+// Pass both to [Printer.Print] to render the summary: printer.Print(source, spans...)
+func (d *SummaryDiff) Build() (*Source, position.Spans) {
 	ops := lcsLineDiff(d.a.Source(), d.b.Source())
 	name := fmt.Sprintf("%s..%s", d.a.Source().Name(), d.b.Source().Name())
 
 	if len(ops) == 0 {
-		return &Source{name: name}
+		return &Source{name: name}, nil
 	}
 
-	included := selectContextLines(ops, d.context)
-	hunks := buildHunks(ops, included)
+	hunkSpans := selectHunkSpans(ops, d.context)
+	hunks := buildHunks(ops, hunkSpans)
 
 	if len(hunks) == 0 {
-		return &Source{name: name}
+		return &Source{name: name}, nil
 	}
 
-	var lines line.Lines
+	// Build full source with flags (like FullDiff).
+	lines := make(line.Lines, 0, len(ops))
+	for _, op := range ops {
+		ln := op.line.Clone()
+		ln.Flag = op.kind.toFlag()
+		lines = append(lines, ln)
+	}
 
+	// Add hunk header annotations to first line of each hunk.
 	for _, hunk := range hunks {
 		hunkHeader := formatHunkHeader(hunk)
-		isFirstLineOfHunk := true
-
-		for i := hunk.startIdx; i < hunk.endIdx; i++ {
-			op := ops[i]
-			ln := op.line.Clone()
-
-			switch op.kind {
-			case diffDelete:
-				ln.Flag = line.FlagDeleted
-			case diffInsert:
-				ln.Flag = line.FlagInserted
-			default:
-				ln.Flag = line.FlagDefault
-			}
-
-			if isFirstLineOfHunk {
-				ln.Annotations.Add(line.Annotation{Content: hunkHeader, Position: line.Above})
-
-				isFirstLineOfHunk = false
-			}
-
-			lines = append(lines, ln)
-		}
+		lines[hunk.opsSpan.Start].Annotate(line.Annotation{
+			Content:  hunkHeader,
+			Position: line.Above,
+		})
 	}
 
-	return &Source{
-		name:  name,
-		lines: lines,
+	// Convert hunks to spans (0-indexed, half-open).
+	spans := make(position.Spans, len(hunks))
+	for i, hunk := range hunks {
+		spans[i] = hunk.opsSpan
 	}
+
+	return &Source{name: name, lines: lines}, spans
 }

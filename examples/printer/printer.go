@@ -6,6 +6,7 @@ import (
 	_ "embed"
 
 	"github.com/macropower/niceyaml"
+	"github.com/macropower/niceyaml/position"
 	"github.com/macropower/niceyaml/style/theme"
 )
 
@@ -23,6 +24,9 @@ func main() {
 	fmt.Println("\nPrint with syntax highlighting:")
 	fmt.Println(printer.Print(source))
 
-	fmt.Println("\nOnly render lines 2-4:")
-	fmt.Println(printer.PrintSlice(source, 1, 3))
+	fmt.Println("\nOnly render lines 2-4, 12-13:")
+
+	hunk1 := position.NewSpan(1, 4)
+	hunk2 := position.NewSpan(11, 13)
+	fmt.Println(printer.Print(source, hunk1, hunk2))
 }

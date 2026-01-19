@@ -118,7 +118,7 @@ func TestXMLStyles_Style_UnknownStyle(t *testing.T) {
 	require.NotNil(t, st)
 
 	got := st.Render("test")
-	assert.Equal(t, "<unknown>test</unknown>", got)
+	assert.Equal(t, "<style-999>test</style-999>", got)
 }
 
 func TestXMLStyles_Style_EmptyContent(t *testing.T) {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/macropower/niceyaml/line"
 	"github.com/macropower/niceyaml/position"
+	"github.com/macropower/niceyaml/style"
 )
 
 // LineIterator provides line-by-line access to YAML tokens.
@@ -210,20 +211,8 @@ func (s *Source) Runes() iter.Seq2[position.Position, rune] {
 }
 
 // Line returns the [line.Line] at the given index. Panics if idx is out of range.
-func (s *Source) Line(idx int) line.Line {
-	return s.lines[idx]
-}
-
-// Annotate adds a [line.Annotation] to the [line.Line] at the given index.
-// Panics if idx is out of range.
-func (s *Source) Annotate(idx int, ann line.Annotation) {
-	s.lines[idx].Annotations.Add(ann)
-}
-
-// Flag sets a [line.Flag] on the [line.Line] at the given index.
-// Panics if idx is out of range.
-func (s *Source) Flag(idx int, flag line.Flag) {
-	s.lines[idx].Flag = flag
+func (s *Source) Line(idx int) *line.Line {
+	return &s.lines[idx]
 }
 
 // Content returns the combined content of all [Line]s as a string.
@@ -302,4 +291,16 @@ func (s *Source) ContentPositionRanges(positions ...position.Position) []positio
 	}
 
 	return allRanges.UniqueValues()
+}
+
+// AddOverlay adds an overlay of the given kind to the specified ranges.
+// Multi-line ranges are split into per-line overlays automatically.
+// The ranges use 0-indexed positions.
+func (s *Source) AddOverlay(kind style.Style, ranges ...position.Range) {
+	s.lines.AddOverlay(kind, ranges...)
+}
+
+// ClearOverlays removes all overlays from all lines.
+func (s *Source) ClearOverlays() {
+	s.lines.ClearOverlays()
 }
