@@ -8,6 +8,92 @@ import (
 	"github.com/macropower/niceyaml/position"
 )
 
+// SourceGetter gets a [NamedLineIterator].
+// See [Revision] for an implementation.
+type SourceGetter interface {
+	Source() NamedLineIterator
+}
+
+// FullDiff represents a complete diff between two [SourceGetter]s.
+// Create instances with [NewFullDiff].
+type FullDiff struct {
+	a, b SourceGetter
+}
+
+// NewFullDiff creates a new [FullDiff].
+func NewFullDiff(a, b SourceGetter) *FullDiff {
+	return &FullDiff{a: a, b: b}
+}
+
+// Build returns a [*Source] representing the diff between the two [SourceGetter]s.
+// The returned Source contains merged tokens from both revisions:
+// unchanged lines use tokens from b, while changed lines include
+// deleted tokens from a followed by inserted tokens from b.
+// Source contains flags for deleted/inserted lines.
+func (d *FullDiff) Build() *Source {
+	ops := lcsLineDiff(d.a.Source(), d.b.Source())
+
+	return &Source{
+		name:  fmt.Sprintf("%s..%s", d.a.Source().Name(), d.b.Source().Name()),
+		lines: lineOps(ops).toLines(),
+	}
+}
+
+// SummaryDiff represents a summarized diff between two [SourceGetter]s.
+// Create instances with [NewSummaryDiff].
+type SummaryDiff struct {
+	a, b    SourceGetter
+	context int
+}
+
+// NewSummaryDiff creates a new [SummaryDiff] with the specified context lines.
+// A context of 0 shows only the changed lines. Negative values are treated as 0.
+func NewSummaryDiff(a, b SourceGetter, context int) *SummaryDiff {
+	return &SummaryDiff{a: a, b: b, context: max(0, context)}
+}
+
+// Build returns a [*Source] and line spans for rendering a summarized diff.
+// The source contains all diff lines with flags for deleted/inserted lines.
+// Hunk headers are stored in [line.Annotation.Content] for each hunk's first line.
+// Pass both to [Printer.Print] to render the summary: printer.Print(source, spans...)
+func (d *SummaryDiff) Build() (*Source, position.Spans) {
+	ops := lcsLineDiff(d.a.Source(), d.b.Source())
+	name := fmt.Sprintf("%s..%s", d.a.Source().Name(), d.b.Source().Name())
+
+	if len(ops) == 0 {
+		return &Source{name: name}, nil
+	}
+
+	hunkSpans := selectHunkSpans(ops, d.context)
+
+	if len(hunkSpans) == 0 {
+		return &Source{name: name}, nil
+	}
+
+	lines := lineOps(ops).toLines()
+
+	// Precompute prefix sums for O(1) line number and count queries.
+	beforeSums := position.NewPrefixSums(len(ops), func(i int) int {
+		d, _ := ops[i].kind.beforeAfterDeltas()
+		return d
+	})
+	afterSums := position.NewPrefixSums(len(ops), func(i int) int {
+		_, d := ops[i].kind.beforeAfterDeltas()
+		return d
+	})
+
+	// Add hunk header annotations to first line of each hunk.
+	for _, span := range hunkSpans {
+		hunkHeader := formatHunkHeader(span, beforeSums, afterSums)
+		lines[span.Start].Annotate(line.Annotation{
+			Content:  hunkHeader,
+			Position: line.Above,
+		})
+	}
+
+	return &Source{name: name, lines: lines}, hunkSpans
+}
+
 // diffKind represents the kind of diff operation.
 type diffKind int
 
@@ -50,13 +136,19 @@ type lineOp struct {
 	kind diffKind  // One of [diffEqual], [diffDelete], [diffInsert].
 }
 
-// diffHunk represents a contiguous group of diff operations.
-type diffHunk struct {
-	opsSpan   position.Span // Half-open range [Start, End) of indices in ops slice.
-	fromLine  int           // First line number in "before" file.
-	toLine    int           // First line number in "after" file.
-	fromCount int           // Number of lines from "before" (equal + deleted).
-	toCount   int           // Number of lines from "after" (equal + inserted).
+// lineOps is a slice of [lineOp]s.
+type lineOps []lineOp
+
+// toLines converts ops to [line.Lines] with appropriate flags set.
+func (ops lineOps) toLines() line.Lines {
+	lines := make(line.Lines, 0, len(ops))
+	for _, op := range ops {
+		ln := op.line.Clone()
+		ln.Flag = op.kind.toFlag()
+		lines = append(lines, ln)
+	}
+
+	return lines
 }
 
 // lcsLineDiff computes line operations using a simple LCS-based diff.
@@ -125,78 +217,36 @@ func lcsLineDiff(before, after LineIterator) []lineOp {
 	return ops
 }
 
-// buildHunks builds hunks from expanded spans of operation indices.
-// Each span defines a half-open range [Start, End) of ops to include.
-// Computes line numbers by tracking before/after positions.
-func buildHunks(ops []lineOp, spans position.Spans) []diffHunk {
-	if len(spans) == 0 {
-		return nil
-	}
-
-	hunks := make([]diffHunk, 0, len(spans))
-
-	// Track before/after line numbers as we iterate through all ops.
-	beforeLine := 1
-	afterLine := 1
-	opIdx := 0
-
-	for _, span := range spans {
-		// Skip ops before this span, tracking line numbers.
-		for opIdx < span.Start {
-			beforeDelta, afterDelta := ops[opIdx].kind.beforeAfterDeltas()
-			beforeLine += beforeDelta
-			afterLine += afterDelta
-			opIdx++
-		}
-
-		// Build hunk for this span.
-		hunk := diffHunk{
-			opsSpan:  span,
-			fromLine: beforeLine,
-			toLine:   afterLine,
-		}
-
-		// Process ops in this span.
-		for opIdx < span.End {
-			beforeDelta, afterDelta := ops[opIdx].kind.beforeAfterDeltas()
-			hunk.fromCount += beforeDelta
-			hunk.toCount += afterDelta
-			beforeLine += beforeDelta
-			afterLine += afterDelta
-			opIdx++
-		}
-
-		hunks = append(hunks, hunk)
-	}
-
-	return hunks
-}
-
 // formatHunkHeader formats a unified diff hunk header like "@@ -1,3 +1,4 @@".
 // Uses the same edge case handling as go-udiff (unified.go lines 218-235).
-func formatHunkHeader(h diffHunk) string {
+func formatHunkHeader(span position.Span, beforeSums, afterSums *position.PrefixSums) string {
+	fromLine := beforeSums.At(span.Start) + 1
+	toLine := afterSums.At(span.Start) + 1
+	fromCount := beforeSums.Range(span)
+	toCount := afterSums.Range(span)
+
 	var b strings.Builder
 
 	fmt.Fprint(&b, "@@")
 
 	// Format "before" part.
 	switch {
-	case h.fromCount > 1:
-		fmt.Fprintf(&b, " -%d,%d", h.fromLine, h.fromCount)
-	case h.fromLine == 1 && h.fromCount == 0:
+	case fromCount > 1:
+		fmt.Fprintf(&b, " -%d,%d", fromLine, fromCount)
+	case fromLine == 1 && fromCount == 0:
 		fmt.Fprint(&b, " -0,0") // GNU diff -u behavior for empty file.
 	default:
-		fmt.Fprintf(&b, " -%d", h.fromLine)
+		fmt.Fprintf(&b, " -%d", fromLine)
 	}
 
 	// Format "after" part.
 	switch {
-	case h.toCount > 1:
-		fmt.Fprintf(&b, " +%d,%d", h.toLine, h.toCount)
-	case h.toLine == 1 && h.toCount == 0:
+	case toCount > 1:
+		fmt.Fprintf(&b, " +%d,%d", toLine, toCount)
+	case toLine == 1 && toCount == 0:
 		fmt.Fprint(&b, " +0,0") // GNU diff -u behavior for empty file.
 	default:
-		fmt.Fprintf(&b, " +%d", h.toLine)
+		fmt.Fprintf(&b, " +%d", toLine)
 	}
 
 	fmt.Fprint(&b, " @@")
@@ -223,102 +273,4 @@ func selectHunkSpans(ops []lineOp, context int) position.Spans {
 	return position.GroupIndices(changeIndices, context).
 		Expand(context).
 		Clamp(0, len(ops))
-}
-
-// SourceGetter gets a [NamedLineIterator].
-// See [Revision] for an implementation.
-type SourceGetter interface {
-	Source() NamedLineIterator
-}
-
-// FullDiff represents a complete diff between two [SourceGetter]s.
-// Create instances with [NewFullDiff].
-type FullDiff struct {
-	a, b SourceGetter
-}
-
-// NewFullDiff creates a new [FullDiff].
-func NewFullDiff(a, b SourceGetter) *FullDiff {
-	return &FullDiff{a: a, b: b}
-}
-
-// Build returns a [*Source] representing the diff between the two [SourceGetter]s.
-// The returned Source contains merged tokens from both revisions:
-// unchanged lines use tokens from b, while changed lines include
-// deleted tokens from a followed by inserted tokens from b.
-// Source contains flags for deleted/inserted lines.
-func (d *FullDiff) Build() *Source {
-	ops := lcsLineDiff(d.a.Source(), d.b.Source())
-
-	lines := make(line.Lines, 0, len(ops))
-
-	for _, op := range ops {
-		ln := op.line.Clone()
-		ln.Flag = op.kind.toFlag()
-
-		lines = append(lines, ln)
-	}
-
-	return &Source{
-		name:  fmt.Sprintf("%s..%s", d.a.Source().Name(), d.b.Source().Name()),
-		lines: lines,
-	}
-}
-
-// SummaryDiff represents a summarized diff between two [SourceGetter]s.
-// Create instances with [NewSummaryDiff].
-type SummaryDiff struct {
-	a, b    SourceGetter
-	context int
-}
-
-// NewSummaryDiff creates a new [SummaryDiff] with the specified context lines.
-// A context of 0 shows only the changed lines. Negative values are treated as 0.
-func NewSummaryDiff(a, b SourceGetter, context int) *SummaryDiff {
-	return &SummaryDiff{a: a, b: b, context: max(0, context)}
-}
-
-// Build returns a [*Source] and line spans for rendering a summarized diff.
-// The source contains all diff lines with flags for deleted/inserted lines.
-// Hunk headers are stored in [line.Annotation.Content] for each hunk's first line.
-// Pass both to [Printer.Print] to render the summary: printer.Print(source, spans...)
-func (d *SummaryDiff) Build() (*Source, position.Spans) {
-	ops := lcsLineDiff(d.a.Source(), d.b.Source())
-	name := fmt.Sprintf("%s..%s", d.a.Source().Name(), d.b.Source().Name())
-
-	if len(ops) == 0 {
-		return &Source{name: name}, nil
-	}
-
-	hunkSpans := selectHunkSpans(ops, d.context)
-	hunks := buildHunks(ops, hunkSpans)
-
-	if len(hunks) == 0 {
-		return &Source{name: name}, nil
-	}
-
-	// Build full source with flags (like FullDiff).
-	lines := make(line.Lines, 0, len(ops))
-	for _, op := range ops {
-		ln := op.line.Clone()
-		ln.Flag = op.kind.toFlag()
-		lines = append(lines, ln)
-	}
-
-	// Add hunk header annotations to first line of each hunk.
-	for _, hunk := range hunks {
-		hunkHeader := formatHunkHeader(hunk)
-		lines[hunk.opsSpan.Start].Annotate(line.Annotation{
-			Content:  hunkHeader,
-			Position: line.Above,
-		})
-	}
-
-	// Convert hunks to spans (0-indexed, half-open).
-	spans := make(position.Spans, len(hunks))
-	for i, hunk := range hunks {
-		spans[i] = hunk.opsSpan
-	}
-
-	return &Source{name: name, lines: lines}, spans
 }

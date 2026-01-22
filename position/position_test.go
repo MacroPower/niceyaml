@@ -1025,3 +1025,92 @@ func TestSpans_Chained(t *testing.T) {
 	got := position.GroupIndices(indices, context).Expand(context).Clamp(0, 20)
 	assert.Equal(t, clamped, got)
 }
+
+func TestNewPrefixSums(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		values []int
+		want   []int // Expected sums at each index 0..n.
+	}{
+		"empty": {
+			values: []int{},
+			want:   []int{0},
+		},
+		"single element": {
+			values: []int{5},
+			want:   []int{0, 5},
+		},
+		"multiple elements": {
+			values: []int{1, 2, 3, 4},
+			want:   []int{0, 1, 3, 6, 10},
+		},
+		"with zeros": {
+			values: []int{1, 0, 2, 0, 3},
+			want:   []int{0, 1, 1, 3, 3, 6},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			ps := position.NewPrefixSums(len(tc.values), func(i int) int {
+				return tc.values[i]
+			})
+			for i, want := range tc.want {
+				assert.Equal(t, want, ps.At(i), "At(%d)", i)
+			}
+		})
+	}
+}
+
+func TestPrefixSums_Range(t *testing.T) {
+	t.Parallel()
+
+	// Values: [1, 2, 3, 4, 5].
+	// Sums:   [0, 1, 3, 6, 10, 15].
+	values := []int{1, 2, 3, 4, 5}
+	ps := position.NewPrefixSums(len(values), func(i int) int {
+		return values[i]
+	})
+
+	tcs := map[string]struct {
+		span position.Span
+		want int
+	}{
+		"full range": {
+			span: position.NewSpan(0, 5),
+			want: 15,
+		},
+		"first half": {
+			span: position.NewSpan(0, 3),
+			want: 6,
+		},
+		"second half": {
+			span: position.NewSpan(2, 5),
+			want: 12,
+		},
+		"single element": {
+			span: position.NewSpan(2, 3),
+			want: 3,
+		},
+		"empty span": {
+			span: position.NewSpan(2, 2),
+			want: 0,
+		},
+		"middle range": {
+			span: position.NewSpan(1, 4),
+			want: 9,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := ps.Range(tc.span)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}

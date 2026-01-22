@@ -299,3 +299,30 @@ func GroupIndices(indices []int, context int) Spans {
 
 	return spans
 }
+
+// PrefixSums holds precomputed prefix sums for O(1) range queries.
+// Create instances with [NewPrefixSums].
+type PrefixSums struct {
+	sums []int // Sums[i] = sum of elements 0..i-1.
+}
+
+// NewPrefixSums creates a [PrefixSums] from n elements.
+// The valueFn returns the value at index i.
+func NewPrefixSums(n int, valueFn func(i int) int) *PrefixSums {
+	sums := make([]int, n+1)
+	for i := range n {
+		sums[i+1] = sums[i] + valueFn(i)
+	}
+
+	return &PrefixSums{sums: sums}
+}
+
+// At returns the cumulative sum up to (but not including) index i.
+func (p *PrefixSums) At(i int) int {
+	return p.sums[i]
+}
+
+// Range returns the sum of elements in the given [Span].
+func (p *PrefixSums) Range(s Span) int {
+	return p.sums[s.End] - p.sums[s.Start]
+}
