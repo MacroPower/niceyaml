@@ -23,50 +23,94 @@ type Style = int
 // Style constants for YAML highlighting.
 // Names follow Pygments token naming conventions where applicable.
 const (
-	Text                     Style = iota // Default/fallback style.
-	Comment                               // Comments.
-	CommentPreproc                        // Preprocessor comments, e.g.: %YAML, %TAG.
-	Generic                               // Generic tokens (parent only).
-	GenericDeleted                        // Lines deleted in diff (-).
-	GenericError                          // Error tokens.
-	GenericErrorInvalid                   // Invalid tokens.
-	GenericErrorUnknown                   // Unknown tokens.
-	GenericInserted                       // Lines inserted in diff (+).
-	Literal                               // Literal values (parent only).
-	LiteralBoolean                        // Boolean values.
-	LiteralNull                           // Null values, e.g.: ~, null.
-	LiteralNullImplicit                   // Implicit null (empty value).
-	LiteralNumber                         // Number values (parent only).
-	LiteralNumberBin                      // Binary integers (0b...).
-	LiteralNumberFloat                    // Float values.
-	LiteralNumberHex                      // Hex integers (0x...).
-	LiteralNumberInfinity                 // Infinity (.inf).
-	LiteralNumberInteger                  // Integer values.
-	LiteralNumberNaN                      // NaN (.nan).
-	LiteralNumberOct                      // Octal integers (0o...).
-	LiteralString                         // Unquoted string values.
-	LiteralStringDouble                   // Double-quoted strings.
-	LiteralStringSingle                   // Single-quoted strings.
-	Name                                  // Names and references (parent only).
-	NameAlias                             // Aliases, e.g.: *.
-	NameAliasMerge                        // Merge key (<<).
-	NameAnchor                            // Anchors, e.g.: &.
-	NameDecorator                         // Tags, e.g.: !tag.
-	NameTag                               // Mapping keys.
-	Punctuation                           // Punctuation (parent only).
-	PunctuationBlock                      // Block scalar punctuation (parent only).
-	PunctuationBlockFolded                // Folded block scalar (>).
-	PunctuationBlockLiteral               // Literal block scalar (|).
-	PunctuationCollectEntry               // Comma (,).
-	PunctuationHeading                    // Document markers (---, ...).
-	PunctuationMapping                    // Mapping punctuation (parent only).
-	PunctuationMappingEnd                 // Closing brace (}).
-	PunctuationMappingStart               // Opening brace ({).
-	PunctuationMappingValue               // Colon (:).
-	PunctuationSequence                   // Sequence punctuation (parent only).
-	PunctuationSequenceEnd                // Closing bracket (]).
-	PunctuationSequenceEntry              // Sequence entry (-).
-	PunctuationSequenceStart              // Opening bracket ([).
+	// Text is a default/fallback style.
+	Text Style = iota + 1000000
+	// Comment styles comments (#).
+	Comment
+	// CommentPreproc styles preprocessor comment, e.g.: %YAML, %TAG.
+	CommentPreproc
+	// Generic is a parent style for generic tokens.
+	Generic
+	// GenericDeleted styles lines deleted in diff (-).
+	GenericDeleted
+	// GenericError styles error tokens.
+	GenericError
+	// GenericErrorInvalid styles invalid tokens.
+	GenericErrorInvalid
+	// GenericErrorUnknown styles unknown tokens.
+	GenericErrorUnknown
+	// GenericInserted styles lines inserted in diff (+).
+	GenericInserted
+	// Literal is a parent style for literal values.
+	Literal
+	// LiteralBoolean styles boolean values (true, false).
+	LiteralBoolean
+	// LiteralNull styles null values (~, null).
+	LiteralNull
+	// LiteralNullImplicit styles implicit null (empty value).
+	LiteralNullImplicit
+	// LiteralNumber is a parent style for number values.
+	LiteralNumber
+	// LiteralNumberBin styles binary integers (0b...).
+	LiteralNumberBin
+	// LiteralNumberFloat styles float values (1.5, 2.0).
+	LiteralNumberFloat
+	// LiteralNumberHex styles hex integers (0x...).
+	LiteralNumberHex
+	// LiteralNumberInfinity styles infinity (.inf).
+	LiteralNumberInfinity
+	// LiteralNumberInteger styles integer values (1, 42).
+	LiteralNumberInteger
+	// LiteralNumberNaN styles NaN (.nan).
+	LiteralNumberNaN
+	// LiteralNumberOct styles octal integers (0o...).
+	LiteralNumberOct
+	// LiteralString styles unquoted string values.
+	LiteralString
+	// LiteralStringDouble styles double-quoted strings ("...").
+	LiteralStringDouble
+	// LiteralStringSingle styles single-quoted strings ('...').
+	LiteralStringSingle
+	// Name is a parent style for names and references.
+	Name
+	// NameAlias styles aliases (*).
+	NameAlias
+	// NameAliasMerge styles merge key (<<).
+	NameAliasMerge
+	// NameAnchor styles anchors (&).
+	NameAnchor
+	// NameDecorator styles tags (!tag).
+	NameDecorator
+	// NameTag styles mapping keys (key:).
+	NameTag
+	// Punctuation is a parent style for punctuation.
+	Punctuation
+	// PunctuationBlock is a parent style for block scalar punctuation.
+	PunctuationBlock
+	// PunctuationBlockFolded styles folded block scalar (>).
+	PunctuationBlockFolded
+	// PunctuationBlockLiteral styles literal block scalar (|).
+	PunctuationBlockLiteral
+	// PunctuationCollectEntry styles comma (,).
+	PunctuationCollectEntry
+	// PunctuationHeading styles document markers (---, ...).
+	PunctuationHeading
+	// PunctuationMapping is a parent style for mapping punctuation.
+	PunctuationMapping
+	// PunctuationMappingEnd styles closing brace (}).
+	PunctuationMappingEnd
+	// PunctuationMappingStart styles opening brace ({).
+	PunctuationMappingStart
+	// PunctuationMappingValue styles colon (:).
+	PunctuationMappingValue
+	// PunctuationSequence is a parent style for sequence punctuation.
+	PunctuationSequence
+	// PunctuationSequenceEnd styles closing bracket (]).
+	PunctuationSequenceEnd
+	// PunctuationSequenceEntry styles sequence entry (-).
+	PunctuationSequenceEntry
+	// PunctuationSequenceStart styles opening bracket ([).
+	PunctuationSequenceStart
 )
 
 var (
