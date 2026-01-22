@@ -93,14 +93,16 @@ func fetchSchema(ctx context.Context, schemaURL string) ([]byte, error) {
 }
 
 func getTerminalWidth() int {
+	width := 90
+
 	if term.IsTerminal(os.Stderr.Fd()) {
-		width, _, err := term.GetSize(os.Stderr.Fd())
-		if err != nil {
-			return max(0, width-4)
+		w, _, err := term.GetSize(os.Stderr.Fd())
+		if err == nil {
+			width = w
 		}
 	}
 
-	return 0
+	return max(0, width-2)
 }
 
 func validateFile(ctx context.Context, yamlPath string, cliValidator niceyaml.SchemaValidator) error {
