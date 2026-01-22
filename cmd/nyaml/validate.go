@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
@@ -44,7 +45,7 @@ func validateCmd() *cobra.Command {
 			}
 
 			for _, yamlPath := range yamlPaths {
-				err := validateFile(yamlPath, v)
+				err := validateFile(cmd.Context(), yamlPath, v)
 				if err != nil {
 					return fmt.Errorf("%s: %w", yamlPath, err)
 				} else if len(yamlPaths) > 1 {
@@ -102,7 +103,7 @@ func getTerminalWidth() int {
 	return 0
 }
 
-func validateFile(yamlPath string, v niceyaml.SchemaValidator) error {
+func validateFile(ctx context.Context, yamlPath string, cliValidator niceyaml.SchemaValidator) error {
 	yamlData, err := os.ReadFile(yamlPath) //nolint:gosec // User-provided file paths are intentional.
 	if err != nil {
 		return fmt.Errorf("read file: %w", err)
@@ -120,16 +121,90 @@ func validateFile(yamlPath string, v niceyaml.SchemaValidator) error {
 		return err
 	}
 
-	if v != nil {
-		decoder := niceyaml.NewDecoder(astFile)
+	// Extract schema directives if no CLI schema provided.
+	var docDirectives validator.DocumentDirectives
+	if cliValidator == nil {
+		docDirectives = validator.ParseDocumentDirectives(source.Tokens())
+	}
 
-		for _, doc := range decoder.Documents() {
-			err := doc.ValidateSchema(v)
-			if err != nil {
-				return source.WrapError(err)
-			}
+	// Schema cache for reuse across documents with the same schema.
+	cache := make(map[string]niceyaml.SchemaValidator)
+
+	decoder := niceyaml.NewDecoder(astFile)
+	docs := decoder.Documents()
+
+	// Base directory for resolving relative schema paths.
+	baseDir := filepath.Dir(yamlPath)
+
+	for i, doc := range docs {
+		v, err := resolveValidator(ctx, baseDir, cliValidator, docDirectives[i], cache)
+		if err != nil {
+			return fmt.Errorf("document %d: %w", i, err)
+		}
+
+		if v == nil {
+			continue
+		}
+
+		err = doc.ValidateSchemaContext(ctx, v)
+		if err != nil {
+			return source.WrapError(err)
 		}
 	}
 
 	return nil
+}
+
+// resolveValidator determines which validator to use for a document.
+// Returns the CLI validator if provided, otherwise loads from directive cache.
+// Returns nil with no error when no validator is configured for the document.
+// The baseDir is used to resolve relative schema paths.
+func resolveValidator(
+	ctx context.Context,
+	baseDir string,
+	cliValidator niceyaml.SchemaValidator,
+	directive *validator.Directive,
+	cache map[string]niceyaml.SchemaValidator,
+) (niceyaml.SchemaValidator, error) {
+	// CLI flag takes precedence over inline directives.
+	if cliValidator != nil {
+		return cliValidator, nil
+	}
+
+	if directive == nil {
+		return nil, nil //nolint:nilnil // nil validator means no validation needed.
+	}
+
+	// Resolve schema path relative to YAML file for non-URL paths.
+	schemaRef := directive.Schema
+	if !isURL(schemaRef) && !filepath.IsAbs(schemaRef) {
+		schemaRef = filepath.Join(baseDir, schemaRef)
+	}
+
+	// Check cache first (use resolved path for cache key).
+	if cached, ok := cache[schemaRef]; ok {
+		return cached, nil
+	}
+
+	// Load and compile schema.
+	schemaData, err := loadSchema(ctx, schemaRef)
+	if err != nil {
+		return nil, fmt.Errorf("load schema %q: %w", directive.Schema, err)
+	}
+
+	v, err := validator.New(schemaRef, schemaData)
+	if err != nil {
+		return nil, fmt.Errorf("compile schema %q: %w", directive.Schema, err)
+	}
+
+	cache[schemaRef] = v
+
+	return v, nil
+}
+
+// isURL returns true if the path looks like an HTTP/HTTPS URL.
+func isURL(path string) bool {
+	u, err := url.Parse(path)
+
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https")
 }
