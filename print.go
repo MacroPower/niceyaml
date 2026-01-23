@@ -8,6 +8,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/macropower/niceyaml/internal/ansi"
 	"github.com/macropower/niceyaml/internal/colors"
 	"github.com/macropower/niceyaml/line"
 	"github.com/macropower/niceyaml/position"
@@ -412,7 +413,7 @@ func (p *Printer) renderAnnotation(
 			sb.WriteString(p.styles.Style(style.Comment).Render(continuationPadding))
 		}
 
-		sb.WriteString(p.styles.Style(style.Comment).Render(subLine))
+		sb.WriteString(p.styles.Style(style.Comment).Render(ansi.Escape(subLine)))
 	}
 }
 
@@ -470,7 +471,7 @@ func (p *Printer) styleLineWithRanges(
 	}
 
 	if len(overlays) == 0 {
-		return s.Render(src)
+		return s.Render(ansi.Escape(src))
 	}
 
 	// Create span for this line segment's column range.
@@ -490,7 +491,7 @@ func (p *Printer) styleLineWithRanges(
 	}
 
 	if len(active) == 0 {
-		return s.Render(src)
+		return s.Render(ansi.Escape(src))
 	}
 
 	boundaries := computeStyleBoundaries(active, cols)
@@ -525,7 +526,7 @@ func (p *Printer) styleLineWithRanges(
 			spanStart = boundaryStart
 		} else if !stylesEqual(currentStyle, spanStyle) {
 			// Style changed - flush current span.
-			sb.WriteString(currentStyle.Render(string(runes[spanStart:boundaryStart])))
+			sb.WriteString(currentStyle.Render(ansi.Escape(string(runes[spanStart:boundaryStart]))))
 
 			currentStyle = spanStyle
 			spanStart = boundaryStart
@@ -535,7 +536,7 @@ func (p *Printer) styleLineWithRanges(
 
 	// Flush remaining content.
 	if currentStyle != nil && spanStart < len(runes) {
-		sb.WriteString(currentStyle.Render(string(runes[spanStart:])))
+		sb.WriteString(currentStyle.Render(ansi.Escape(string(runes[spanStart:]))))
 	}
 
 	return sb.String()
