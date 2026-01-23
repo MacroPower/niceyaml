@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/macropower/niceyaml/internal/diff"
 	"github.com/macropower/niceyaml/line"
 	"github.com/macropower/niceyaml/position"
 )
@@ -74,11 +75,11 @@ func (d *SummaryDiff) Build() (*Source, position.Spans) {
 
 	// Precompute prefix sums for O(1) line number and count queries.
 	beforeSums := position.NewPrefixSums(len(ops), func(i int) int {
-		d, _ := ops[i].kind.beforeAfterDeltas()
+		d, _ := opKindDeltas(ops[i].kind)
 		return d
 	})
 	afterSums := position.NewPrefixSums(len(ops), func(i int) int {
-		_, d := ops[i].kind.beforeAfterDeltas()
+		_, d := opKindDeltas(ops[i].kind)
 		return d
 	})
 
@@ -94,46 +95,24 @@ func (d *SummaryDiff) Build() (*Source, position.Spans) {
 	return &Source{name: name, lines: lines}, hunkSpans
 }
 
-// diffKind represents the kind of diff operation.
-type diffKind int
+// lineOp represents a line in the full diff output.
+type lineOp struct {
+	line line.Line   // Original Line from source.
+	kind diff.OpKind // One of [diff.OpEqual], [diff.OpDelete], [diff.OpInsert].
+}
 
-// Diff operation kinds.
-const (
-	diffEqual diffKind = iota
-	diffDelete
-	diffInsert
-)
-
-// beforeAfterDeltas returns the line count deltas this kind affects in before/after files.
-func (k diffKind) beforeAfterDeltas() (int, int) {
+// opKindDeltas returns the line count deltas this kind affects in before/after files.
+func opKindDeltas(k diff.OpKind) (int, int) {
 	switch k {
-	case diffEqual:
+	case diff.OpEqual:
 		return 1, 1
-	case diffDelete:
+	case diff.OpDelete:
 		return 1, 0
-	case diffInsert:
+	case diff.OpInsert:
 		return 0, 1
 	default:
 		return 0, 0
 	}
-}
-
-// toFlag converts the diffKind to the corresponding [line.Flag].
-func (k diffKind) toFlag() line.Flag {
-	switch k {
-	case diffDelete:
-		return line.FlagDeleted
-	case diffInsert:
-		return line.FlagInserted
-	default:
-		return line.FlagDefault
-	}
-}
-
-// lineOp represents a line in the full diff output.
-type lineOp struct {
-	line line.Line // Original Line from source.
-	kind diffKind  // One of [diffEqual], [diffDelete], [diffInsert].
 }
 
 // lineOps is a slice of [lineOp]s.
@@ -144,14 +123,14 @@ func (ops lineOps) toLines() line.Lines {
 	lines := make(line.Lines, 0, len(ops))
 	for _, op := range ops {
 		ln := op.line.Clone()
-		ln.Flag = op.kind.toFlag()
+		ln.Flag = op.kind.Flag()
 		lines = append(lines, ln)
 	}
 
 	return lines
 }
 
-// lcsLineDiff computes line operations using a simple LCS-based diff.
+// lcsLineDiff computes line operations using Hirschberg's space-optimized LCS algorithm.
 func lcsLineDiff(before, after LineIterator) []lineOp {
 	beforeLines := make(line.Lines, 0, before.Len())
 	for _, ln := range before.Lines() {
@@ -163,54 +142,32 @@ func lcsLineDiff(before, after LineIterator) []lineOp {
 		afterLines = append(afterLines, ln)
 	}
 
-	m, n := len(beforeLines), len(afterLines)
-
 	// Pre-compute content strings once to avoid repeated string building.
-	// This reduces Content() calls from O(m*n) to O(m+n).
-	beforeContent := make([]string, m)
+	beforeContent := make([]string, len(beforeLines))
 	for i := range beforeLines {
 		beforeContent[i] = beforeLines[i].Content()
 	}
 
-	afterContent := make([]string, n)
+	afterContent := make([]string, len(afterLines))
 	for i := range afterLines {
 		afterContent[i] = afterLines[i].Content()
 	}
 
-	dp := make([][]int, m+1)
-	for i := range dp {
-		dp[i] = make([]int, n+1)
-	}
+	// Compute diff using Hirschberg's space-optimized algorithm.
+	h := diff.NewHirschberg(min(len(beforeLines), len(afterLines)) + 1)
+	diffOps := h.Compute(beforeContent, afterContent)
 
-	for i := m - 1; i >= 0; i-- {
-		for j := n - 1; j >= 0; j-- {
-			if beforeContent[i] == afterContent[j] {
-				dp[i][j] = dp[i+1][j+1] + 1
-			} else {
-				dp[i][j] = max(dp[i+1][j], dp[i][j+1])
-			}
-		}
-	}
+	// Convert to lineOps.
+	ops := make([]lineOp, 0, len(diffOps))
 
-	// Backtrack: deletions before insertions per diff convention.
-	ops := make([]lineOp, 0, max(m, n))
-
-	i, j := 0, 0
-
-	for i < m || j < n {
-		switch {
-		case i < m && j < n && beforeContent[i] == afterContent[j]:
-			ops = append(ops, lineOp{kind: diffEqual, line: afterLines[j]})
-			i++
-			j++
-
-		case i < m && (j >= n || dp[i+1][j] >= dp[i][j+1]):
-			ops = append(ops, lineOp{kind: diffDelete, line: beforeLines[i]})
-			i++
-
-		default:
-			ops = append(ops, lineOp{kind: diffInsert, line: afterLines[j]})
-			j++
+	for _, op := range diffOps {
+		switch op.Kind {
+		case diff.OpEqual:
+			ops = append(ops, lineOp{kind: diff.OpEqual, line: afterLines[op.Index]})
+		case diff.OpDelete:
+			ops = append(ops, lineOp{kind: diff.OpDelete, line: beforeLines[op.Index]})
+		case diff.OpInsert:
+			ops = append(ops, lineOp{kind: diff.OpInsert, line: afterLines[op.Index]})
 		}
 	}
 
@@ -260,7 +217,7 @@ func selectHunkSpans(ops []lineOp, context int) position.Spans {
 	// Collect indices of non-equal operations.
 	var changeIndices []int
 	for i, op := range ops {
-		if op.kind != diffEqual {
+		if op.kind != diff.OpEqual {
 			changeIndices = append(changeIndices, i)
 		}
 	}
