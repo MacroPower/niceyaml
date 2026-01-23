@@ -59,6 +59,12 @@ func newLinesBuilder(tks token.Tokens) *linesBuilder {
 		b.currentOffset = 1
 	}
 
+	// Pre-allocate lines slice based on last token's line number.
+	// This provides a reasonable upper bound for expected line count.
+	if last := tks[len(tks)-1]; last.Position != nil {
+		b.lines = make([]Line, 0, last.Position.Line)
+	}
+
 	return b
 }
 
