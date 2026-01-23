@@ -45,6 +45,7 @@ type Printer struct {
 	style              lipgloss.Style
 	gutterFunc         GutterFunc
 	annotationFunc     AnnotationFunc
+	blender            *colors.Blender
 	width              int
 	hasCustomStyle     bool
 	annotationsEnabled bool
@@ -58,6 +59,7 @@ func NewPrinter(opts ...PrinterOption) *Printer {
 		styles:             theme.Charm(),
 		gutterFunc:         DefaultGutter(),
 		annotationFunc:     DefaultAnnotation(),
+		blender:            colors.NewBlender(),
 		annotationsEnabled: true,
 		wordWrap:           true,
 	}
@@ -524,7 +526,7 @@ func (p *Printer) styleLineWithRanges(
 		if currentStyle == nil {
 			currentStyle = spanStyle
 			spanStart = boundaryStart
-		} else if !stylesEqual(currentStyle, spanStyle) {
+		} else if currentStyle != spanStyle {
 			// Style changed - flush current span.
 			sb.WriteString(currentStyle.Render(ansi.Escape(string(runes[spanStart:boundaryStart]))))
 
@@ -570,6 +572,7 @@ type overlayWithStyle struct {
 
 // computeStyleForPoint computes the effective style at a point given overlapping overlays.
 // This uses pre-filtered overlays from styleLineWithRanges.
+// Results are cached so identical style combinations return the same pointer.
 func (p *Printer) computeStyleForPoint(
 	point int,
 	overlays []overlayWithStyle,
@@ -582,12 +585,9 @@ func (p *Printer) computeStyleForPoint(
 	for _, ov := range overlays {
 		// Check if this overlay contains the point.
 		if ov.cols.Contains(point) {
-			if !alwaysBlend && firstRange {
-				result = colors.OverrideStyles(result, ov.style)
-				firstRange = false
-			} else {
-				result = colors.BlendStyles(result, ov.style)
-			}
+			override := !alwaysBlend && firstRange
+			result = p.blender.Blend(result, ov.style, override)
+			firstRange = false
 		}
 	}
 
@@ -678,13 +678,4 @@ func leadingWhitespaceRunes(s string, maxBytes int) int {
 	}
 
 	return utf8.RuneCountInString(prefix)
-}
-
-// stylesEqual compares two styles for equality (for span grouping purposes).
-// Two styles are equal if they produce the same visual output.
-func stylesEqual(s1, s2 *lipgloss.Style) bool {
-	// Compare rendered output of a test string.
-	// This is a pragmatic approach since lipgloss doesn't expose style internals.
-	const testStr = "x"
-	return s1.Render(testStr) == s2.Render(testStr)
 }

@@ -177,18 +177,19 @@ func getParent(s Style) Style {
 }
 
 // Styles defines styles for YAML highlighting.
-type Styles map[Style]lipgloss.Style
+// Stores pointers for stable identity in comparisons.
+type Styles map[Style]*lipgloss.Style
 
 // StylesOption configures a [Styles] map during construction.
 // See [Set] for the primary option.
-type StylesOption func(map[Style]lipgloss.Style)
+type StylesOption func(Styles)
 
 // Set returns a [StylesOption] that overrides the style for the given [Style].
 //
 //nolint:gocritic // Value semantics preferred for API ergonomics.
 func Set(s Style, ls lipgloss.Style) StylesOption {
-	return func(m map[Style]lipgloss.Style) {
-		m[s] = ls
+	return func(m Styles) {
+		m[s] = &ls
 	}
 }
 
@@ -202,15 +203,15 @@ func Set(s Style, ls lipgloss.Style) StylesOption {
 //
 //nolint:gocritic // Value semantics preferred for API ergonomics.
 func NewStyles(base lipgloss.Style, opts ...StylesOption) Styles {
-	overrides := make(map[Style]lipgloss.Style)
-	overrides[Text] = base
+	overrides := make(Styles)
+	overrides[Text] = &base
 
 	for _, opt := range opts {
 		opt(overrides)
 	}
 
 	// Resolve walks up the inheritance chain to find a defined style.
-	resolve := func(s Style) lipgloss.Style {
+	resolve := func(s Style) *lipgloss.Style {
 		current := s
 		for {
 			if ls, ok := overrides[current]; ok {
@@ -224,7 +225,7 @@ func NewStyles(base lipgloss.Style, opts ...StylesOption) Styles {
 			current = getParent(current)
 		}
 
-		return base
+		return &base
 	}
 
 	// Resolve all predefined styles.
@@ -250,7 +251,7 @@ func NewStyles(base lipgloss.Style, opts ...StylesOption) Styles {
 // Returns an empty [lipgloss.Style] if the style is not defined.
 func (s Styles) Style(st Style) *lipgloss.Style {
 	if ls, ok := s[st]; ok {
-		return &ls
+		return ls
 	}
 
 	return &emptyStyle

@@ -340,3 +340,75 @@ func TestOverrideStyles(t *testing.T) {
 func ptr[T any](v T) *T {
 	return &v
 }
+
+func TestBlender_Blend(t *testing.T) {
+	t.Parallel()
+
+	red := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000"))
+	blue := lipgloss.NewStyle().Foreground(lipgloss.Color("#0000FF"))
+
+	t.Run("returns stable pointer for same inputs", func(t *testing.T) {
+		t.Parallel()
+
+		b := colors.NewBlender()
+
+		result1 := b.Blend(&red, &blue, false)
+		result2 := b.Blend(&red, &blue, false)
+
+		// Same inputs should return same pointer.
+		assert.Same(t, result1, result2)
+	})
+
+	t.Run("different override flag returns different results", func(t *testing.T) {
+		t.Parallel()
+
+		b := colors.NewBlender()
+
+		blended := b.Blend(&red, &blue, false)
+		overridden := b.Blend(&red, &blue, true)
+
+		// Different override flag should return different pointers.
+		assert.NotSame(t, blended, overridden)
+	})
+
+	t.Run("blended result can be used in further blends", func(t *testing.T) {
+		t.Parallel()
+
+		green := lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00"))
+		b := colors.NewBlender()
+
+		// Blend red + blue.
+		result1 := b.Blend(&red, &blue, false)
+
+		// Use blended result in another blend.
+		result2 := b.Blend(result1, &green, false)
+
+		// Should work and return stable pointer.
+		result3 := b.Blend(result1, &green, false)
+		assert.Same(t, result2, result3)
+	})
+
+	t.Run("blend produces blended color", func(t *testing.T) {
+		t.Parallel()
+
+		b := colors.NewBlender()
+
+		result := b.Blend(&red, &blue, false)
+
+		// Blended color should be different from both inputs.
+		fg := result.GetForeground()
+		assert.NotEqual(t, red.GetForeground(), fg)
+		assert.NotEqual(t, blue.GetForeground(), fg)
+	})
+
+	t.Run("override produces overlay color", func(t *testing.T) {
+		t.Parallel()
+
+		b := colors.NewBlender()
+
+		result := b.Blend(&red, &blue, true)
+
+		// Override should use overlay's color.
+		assert.Equal(t, blue.GetForeground(), result.GetForeground())
+	})
+}

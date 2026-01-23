@@ -181,7 +181,7 @@ func TestStyles_With(t *testing.T) {
 		assert.Len(t, result, len(original))
 
 		// Modify the copy.
-		result[style.Text] = red
+		result[style.Text] = &red
 
 		// Original map should be unaffected - still has the original Text style.
 		assert.Equal(t, originalTextStyle, original[style.Text])
