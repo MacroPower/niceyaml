@@ -36,6 +36,7 @@ type Source struct {
 	parserOpts []parser.Option
 	errorOpts  []ErrorOption
 	fileOnce   sync.Once
+	overlayMu  sync.RWMutex
 }
 
 // SourceOption configures [Source] creation.
@@ -182,6 +183,9 @@ func (s *Source) IsEmpty() bool {
 // Each iteration yields a [position.Position] and the [line.Line] at that position.
 func (s *Source) Lines() iter.Seq2[position.Position, line.Line] {
 	return func(yield func(position.Position, line.Line) bool) {
+		s.overlayMu.RLock()
+		defer s.overlayMu.RUnlock()
+
 		for i, line := range s.lines {
 			if !yield(position.New(i, 0), line) {
 				return
@@ -194,6 +198,9 @@ func (s *Source) Lines() iter.Seq2[position.Position, line.Line] {
 // Each iteration yields a [position.Position] and the rune at that position.
 func (s *Source) Runes() iter.Seq2[position.Position, rune] {
 	return func(yield func(position.Position, rune) bool) {
+		s.overlayMu.RLock()
+		defer s.overlayMu.RUnlock()
+
 		for i, ln := range s.lines {
 			col := 0
 
@@ -297,10 +304,16 @@ func (s *Source) ContentPositionRanges(positions ...position.Position) []positio
 // Multi-line ranges are split into per-line overlays automatically.
 // The ranges use 0-indexed positions.
 func (s *Source) AddOverlay(kind style.Style, ranges ...position.Range) {
+	s.overlayMu.Lock()
+	defer s.overlayMu.Unlock()
+
 	s.lines.AddOverlay(kind, ranges...)
 }
 
 // ClearOverlays removes all overlays from all lines.
 func (s *Source) ClearOverlays() {
+	s.overlayMu.Lock()
+	defer s.overlayMu.Unlock()
+
 	s.lines.ClearOverlays()
 }
