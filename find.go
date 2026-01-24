@@ -83,9 +83,12 @@ func NewFinder(opts ...FinderOption) *Finder {
 }
 
 // FinderOption configures a [Finder].
+//
+// Available options:
+//   - [WithNormalizer]
 type FinderOption func(*Finder)
 
-// WithNormalizer sets a [Normalizer] applied to both the search string
+// WithNormalizer is a [FinderOption] that sets a [Normalizer] applied to both the search string
 // and source text before matching. See [StandardNormalizer] for an example.
 func WithNormalizer(normalizer Normalizer) FinderOption {
 	return func(f *Finder) {

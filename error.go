@@ -95,16 +95,25 @@ func NewErrorFrom(err error, opts ...ErrorOption) *Error {
 }
 
 // ErrorOption configures an [Error].
+//
+// Available options:
+//   - [WithSourceLines]
+//   - [WithPath]
+//   - [WithErrorToken]
+//   - [WithPrinter]
+//   - [WithSource]
+//   - [WithWidthFunc]
+//   - [WithErrors]
 type ErrorOption func(e *Error)
 
-// WithSourceLines sets the number of context lines to show around the error.
+// WithSourceLines is an [ErrorOption] that sets the number of context lines to show around the error.
 func WithSourceLines(lines int) ErrorOption {
 	return func(e *Error) {
 		e.sourceLines = lines
 	}
 }
 
-// WithPath sets the YAML path where the error occurred.
+// WithPath is an [ErrorOption] that sets the YAML path where the error occurred.
 // The [PathPartGetter] provides both the path and whether to highlight the key or value.
 func WithPath(ptg PathPartGetter) ErrorOption {
 	return func(e *Error) {
@@ -112,28 +121,28 @@ func WithPath(ptg PathPartGetter) ErrorOption {
 	}
 }
 
-// WithErrorToken sets the token where the error occurred.
+// WithErrorToken is an [ErrorOption] that sets the token where the error occurred.
 func WithErrorToken(tk *token.Token) ErrorOption {
 	return func(e *Error) {
 		e.token = tk
 	}
 }
 
-// WithPrinter sets the printer used for formatting the error source.
+// WithPrinter is an [ErrorOption] that sets the printer used for formatting the error source.
 func WithPrinter(p StyledPrinter) ErrorOption {
 	return func(e *Error) {
 		e.printer = p
 	}
 }
 
-// WithSource sets the [*Source] for resolving the error path.
+// WithSource is an [ErrorOption] that sets the [*Source] for resolving the error path.
 func WithSource(src *Source) ErrorOption {
 	return func(e *Error) {
 		e.source = src
 	}
 }
 
-// WithWidthFunc sets a function to determine the width for word wrapping.
+// WithWidthFunc is an [ErrorOption] that sets a function to determine the width for word wrapping.
 // This takes precedence over [SetWidth] when both are configured.
 func WithWidthFunc(fn func() int) ErrorOption {
 	return func(e *Error) {
@@ -141,7 +150,7 @@ func WithWidthFunc(fn func() int) ErrorOption {
 	}
 }
 
-// WithErrors adds nested errors to the [Error]. Each nested error has its own
+// WithErrors is an [ErrorOption] that adds nested errors to the [Error]. Each nested error has its own
 // YAML path or token and will be rendered as an annotation below its resolved line.
 func WithErrors(errs ...*Error) ErrorOption {
 	return func(e *Error) {

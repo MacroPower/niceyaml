@@ -68,10 +68,17 @@ const (
 	DiffModeNone
 )
 
-// Option is a configuration option that works in conjunction with [New].
+// Option configures a [Model].
+//
+// Available options:
+//   - [WithPrinter]
+//   - [WithStyle]
+//   - [WithSearchStyle]
+//   - [WithSelectedSearchStyle]
+//   - [WithFinder]
 type Option func(*Model)
 
-// WithPrinter sets the [Printer] used for rendering.
+// WithPrinter is an [Option] that sets the [Printer] used for rendering.
 // If not set, a default [niceyaml.Printer] is created.
 func WithPrinter(p Printer) Option {
 	return func(m *Model) {
@@ -79,7 +86,7 @@ func WithPrinter(p Printer) Option {
 	}
 }
 
-// WithStyle sets the container style for the viewport.
+// WithStyle is an [Option] that sets the container style for the viewport.
 //
 //nolint:gocritic // hugeParam: Copying.
 func WithStyle(s lipgloss.Style) Option {
@@ -88,7 +95,7 @@ func WithStyle(s lipgloss.Style) Option {
 	}
 }
 
-// WithSearchStyle sets the style for search highlights.
+// WithSearchStyle is an [Option] that sets the style for search highlights.
 //
 //nolint:gocritic // hugeParam: Copying.
 func WithSearchStyle(s lipgloss.Style) Option {
@@ -97,7 +104,7 @@ func WithSearchStyle(s lipgloss.Style) Option {
 	}
 }
 
-// WithSelectedSearchStyle sets the style for the currently selected search match.
+// WithSelectedSearchStyle is an [Option] that sets the style for the currently selected search match.
 //
 //nolint:gocritic // hugeParam: Copying.
 func WithSelectedSearchStyle(s lipgloss.Style) Option {
@@ -106,7 +113,7 @@ func WithSelectedSearchStyle(s lipgloss.Style) Option {
 	}
 }
 
-// WithFinder sets the [Finder].
+// WithFinder is an [Option] that sets the [Finder].
 func WithFinder(f Finder) Option {
 	return func(m *Model) {
 		m.finder = f

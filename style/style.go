@@ -181,10 +181,12 @@ func getParent(s Style) Style {
 type Styles map[Style]*lipgloss.Style
 
 // StylesOption configures a [Styles] map during construction.
-// See [Set] for the primary option.
+//
+// Available options:
+//   - [Set]
 type StylesOption func(Styles)
 
-// Set returns a [StylesOption] that overrides the style for the given [Style].
+// Set is a [StylesOption] that overrides the style for the given [Style].
 //
 //nolint:gocritic // Value semantics preferred for API ergonomics.
 func Set(s Style, ls lipgloss.Style) StylesOption {

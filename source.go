@@ -48,16 +48,21 @@ type Source struct {
 }
 
 // SourceOption configures [Source] creation.
+//
+// Available options:
+//   - [WithName]
+//   - [WithParserOptions]
+//   - [WithErrorOptions]
 type SourceOption func(*Source)
 
-// WithName sets the name for the [Source].
+// WithName is a [SourceOption] that sets the name for the [Source].
 func WithName(name string) SourceOption {
 	return func(s *Source) {
 		s.name = name
 	}
 }
 
-// WithParserOptions sets the parser options used when parsing the [Source]
+// WithParserOptions is a [SourceOption] that sets the parser options used when parsing the [Source]
 // into an [*ast.File]. These options are passed to [parser.Parse] in addition
 // to [parser.ParseComments], which is always included.
 func WithParserOptions(opts ...parser.Option) SourceOption {
@@ -66,7 +71,7 @@ func WithParserOptions(opts ...parser.Option) SourceOption {
 	}
 }
 
-// WithErrorOptions sets the [ErrorOption]s used when wrapping errors
+// WithErrorOptions is a [SourceOption] that sets the [ErrorOption]s used when wrapping errors
 // with [Source.WrapError].
 func WithErrorOptions(opts ...ErrorOption) SourceOption {
 	return func(s *Source) {

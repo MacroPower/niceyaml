@@ -42,6 +42,8 @@ task docs # Print all package docs
 - Types with constructors should always note: `// Create instances with [NewThing].`
 - Interfaces should note: `// See [Thing] for an implementation.`
 - Interfaces should have sensible names: `type Builder interface { Build() Thing } // Builder builds [Thing]s.`
+- Functional option types should have a list linking to all functions of that type.
+- Functional options should always have a link to their type.
 - Package docs should explain concepts and usage patterns; do not just enumerate exports.
 
 ### Testing

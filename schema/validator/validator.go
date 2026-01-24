@@ -27,9 +27,12 @@ type validatorConfig struct {
 }
 
 // Option configures a [Validator].
+//
+// Available options:
+//   - [WithCompiler]
 type Option func(*validatorConfig)
 
-// WithCompiler sets a custom [SchemaCompiler] for schema compilation.
+// WithCompiler is an [Option] that sets a custom [SchemaCompiler] for schema compilation.
 // If not provided, [jsonschema.NewCompiler] is used.
 func WithCompiler(c SchemaCompiler) Option {
 	return func(cfg *validatorConfig) {

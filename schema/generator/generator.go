@@ -37,30 +37,36 @@ type Generator struct {
 }
 
 // Option configures a [Generator].
+//
+// Available options:
+//   - [WithReflector]
+//   - [WithLookupCommentFunc]
+//   - [WithPackagePaths]
+//   - [WithTests]
 type Option func(*Generator)
 
-// WithReflector sets a custom [jsonschema.Reflector].
+// WithReflector is an [Option] that sets a custom [jsonschema.Reflector].
 func WithReflector(r *jsonschema.Reflector) Option {
 	return func(g *Generator) {
 		g.reflector = r
 	}
 }
 
-// WithLookupCommentFunc sets a custom comment lookup function.
+// WithLookupCommentFunc is an [Option] that sets a custom comment lookup function.
 func WithLookupCommentFunc(f LookupCommentFunc) Option {
 	return func(g *Generator) {
 		g.lookupCommentFunc = f
 	}
 }
 
-// WithPackagePaths sets the package paths for comment lookup.
+// WithPackagePaths is an [Option] that sets the package paths for comment lookup.
 func WithPackagePaths(paths ...string) Option {
 	return func(g *Generator) {
 		g.packagePaths = paths
 	}
 }
 
-// WithTests includes test files when loading packages.
+// WithTests is an [Option] that includes test files when loading packages.
 func WithTests(include bool) Option {
 	return func(g *Generator) {
 		g.tests = include

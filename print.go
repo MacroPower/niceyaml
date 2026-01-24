@@ -77,6 +77,12 @@ func NewPrinter(opts ...PrinterOption) *Printer {
 }
 
 // PrinterOption configures a [Printer].
+//
+// Available options:
+//   - [WithStyle]
+//   - [WithStyles]
+//   - [WithGutter]
+//   - [WithAnnotationFunc]
 type PrinterOption func(*Printer)
 
 // GutterContext provides context about the current line for gutter rendering.
@@ -177,7 +183,7 @@ func LineNumberGutter() GutterFunc {
 	return renderLineNumber
 }
 
-// WithStyle configures the printer with the given container style.
+// WithStyle is a [PrinterOption] that configures the printer with the given container style.
 //
 //nolint:gocritic // hugeParam: Copying.
 func WithStyle(s lipgloss.Style) PrinterOption {
@@ -187,14 +193,14 @@ func WithStyle(s lipgloss.Style) PrinterOption {
 	}
 }
 
-// WithStyles configures the printer with the given [StyleGetter].
+// WithStyles is a [PrinterOption] that configures the printer with the given [StyleGetter].
 func WithStyles(s StyleGetter) PrinterOption {
 	return func(p *Printer) {
 		p.styles = s
 	}
 }
 
-// WithGutter sets the [GutterFunc] for rendering.
+// WithGutter is a [PrinterOption] that sets the [GutterFunc] for rendering.
 // Pass [NoGutter] to disable gutters entirely, or [DiffGutter] for diff markers only.
 // By default, [DefaultGutter] is used which renders line numbers and diff markers.
 func WithGutter(fn GutterFunc) PrinterOption {
@@ -203,7 +209,7 @@ func WithGutter(fn GutterFunc) PrinterOption {
 	}
 }
 
-// WithAnnotationFunc sets the [AnnotationFunc] for rendering annotations.
+// WithAnnotationFunc is a [PrinterOption] that sets the [AnnotationFunc] for rendering annotations.
 // By default, [DefaultAnnotation] is used which adds "^ " prefix for [line.Below] annotations.
 func WithAnnotationFunc(fn AnnotationFunc) PrinterOption {
 	return func(p *Printer) {
