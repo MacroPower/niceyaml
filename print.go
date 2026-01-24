@@ -284,13 +284,8 @@ func (p *Printer) renderLinesInSpan(t LineIterator, span position.Span) string {
 	deletedStyle := p.styles.Style(style.GenericDeleted)
 	insertedStyle := p.styles.Style(style.GenericInserted)
 
-	for pos, ln := range t.Lines() {
+	for pos, ln := range t.AllLines(span) {
 		lineNum := ln.Number()
-
-		// Filter by 0-indexed line index using half-open span [Start, End).
-		if !span.Contains(pos.Line) {
-			continue
-		}
 
 		var (
 			hasAboveAnnotation bool

@@ -110,7 +110,7 @@ type runePosition struct {
 	Pos position.Position
 }
 
-func TestLines_Runes(t *testing.T) {
+func TestSource_AllRunes(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -190,7 +190,7 @@ func TestLines_Runes(t *testing.T) {
 
 			var got []runePosition
 
-			for pos, r := range lines.Runes() {
+			for pos, r := range lines.AllRunes() {
 				got = append(got, runePosition{R: r, Pos: pos})
 			}
 
@@ -199,7 +199,7 @@ func TestLines_Runes(t *testing.T) {
 	}
 }
 
-func TestLines_Runes_LiteralBlock(t *testing.T) {
+func TestSource_AllRunes_LiteralBlock(t *testing.T) {
 	t.Parallel()
 
 	// Literal blocks have multi-line content.
@@ -212,7 +212,7 @@ func TestLines_Runes_LiteralBlock(t *testing.T) {
 
 	var positions []position.Position //nolint:prealloc // Size unknown from iterator.
 
-	for pos, r := range lines.Runes() {
+	for pos, r := range lines.AllRunes() {
 		runes = append(runes, r)
 		positions = append(positions, pos)
 	}
@@ -246,7 +246,7 @@ func TestLines_Runes_LiteralBlock(t *testing.T) {
 	assert.Positive(t, positions[len(positions)-1].Line, "should have content on multiple lines")
 }
 
-func TestLines_Runes_DiffBuiltLines(t *testing.T) {
+func TestSource_AllRunes_DiffBuiltLines(t *testing.T) {
 	t.Parallel()
 
 	// When Lines are built from a diff, Position.Line should be based on
@@ -274,7 +274,7 @@ func TestLines_Runes_DiffBuiltLines(t *testing.T) {
 		col  int
 	}
 
-	for pos, r := range lines.Runes() {
+	for pos, r := range lines.AllRunes() {
 		if r == 'k' { // First char of each line.
 			positions = append(positions, struct {
 				line int
@@ -295,7 +295,7 @@ func TestLines_Runes_DiffBuiltLines(t *testing.T) {
 	assert.Equal(t, 0, positions[1].col, "second 'k' should be at column 0")
 }
 
-func TestLines_Lines_EarlyBreak(t *testing.T) {
+func TestSource_AllLines_EarlyBreak(t *testing.T) {
 	t.Parallel()
 
 	input := "a: 1\nb: 2\nc: 3\n"
@@ -303,7 +303,7 @@ func TestLines_Lines_EarlyBreak(t *testing.T) {
 	lines := niceyaml.NewSourceFromTokens(tks)
 
 	var collected []int //nolint:prealloc // Testing early break with unknown iteration count.
-	for pos := range lines.Lines() {
+	for pos := range lines.AllLines() {
 		collected = append(collected, pos.Line)
 		if pos.Line >= 1 {
 			break
@@ -313,7 +313,96 @@ func TestLines_Lines_EarlyBreak(t *testing.T) {
 	assert.Equal(t, []int{0, 1}, collected)
 }
 
-func TestLines_Runes_EarlyBreak(t *testing.T) {
+func TestSource_AllLines_WithSpans(t *testing.T) {
+	t.Parallel()
+
+	input := "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n"
+	source := niceyaml.NewSourceFromString(input)
+
+	require.Equal(t, 5, source.Len())
+
+	t.Run("no spans returns all lines", func(t *testing.T) {
+		t.Parallel()
+
+		var collected []int
+		for pos := range source.AllLines() {
+			collected = append(collected, pos.Line)
+		}
+
+		assert.Equal(t, []int{0, 1, 2, 3, 4}, collected)
+	})
+
+	t.Run("single span filters lines", func(t *testing.T) {
+		t.Parallel()
+
+		var collected []int
+		for pos := range source.AllLines(position.NewSpan(1, 3)) {
+			collected = append(collected, pos.Line)
+		}
+
+		assert.Equal(t, []int{1, 2}, collected)
+	})
+
+	t.Run("multiple spans iterate in order", func(t *testing.T) {
+		t.Parallel()
+
+		var collected []int
+		for pos := range source.AllLines(
+			position.NewSpan(0, 1),
+			position.NewSpan(3, 5),
+		) {
+			collected = append(collected, pos.Line)
+		}
+
+		assert.Equal(t, []int{0, 3, 4}, collected)
+	})
+
+	t.Run("span clamped to bounds", func(t *testing.T) {
+		t.Parallel()
+
+		var collected []int
+		for pos := range source.AllLines(position.NewSpan(-5, 100)) {
+			collected = append(collected, pos.Line)
+		}
+
+		assert.Equal(t, []int{0, 1, 2, 3, 4}, collected)
+	})
+
+	t.Run("empty span yields nothing", func(t *testing.T) {
+		t.Parallel()
+
+		var collected []int
+		for pos := range source.AllLines(position.NewSpan(2, 2)) {
+			collected = append(collected, pos.Line)
+		}
+
+		assert.Nil(t, collected)
+	})
+
+	t.Run("span beyond length yields nothing", func(t *testing.T) {
+		t.Parallel()
+
+		var collected []int
+		for pos := range source.AllLines(position.NewSpan(10, 20)) {
+			collected = append(collected, pos.Line)
+		}
+
+		assert.Nil(t, collected)
+	})
+}
+
+func TestSource_Lines(t *testing.T) {
+	t.Parallel()
+
+	src := niceyaml.NewSourceFromString("key: value\nfoo: bar")
+	lines := src.Lines()
+
+	assert.Len(t, lines, src.Len())
+	assert.Equal(t, "key: value", lines[0].Content())
+	assert.Equal(t, "foo: bar", lines[1].Content())
+}
+
+func TestSource_AllRunes_EarlyBreak(t *testing.T) {
 	t.Parallel()
 
 	input := "abc\n"
@@ -321,7 +410,7 @@ func TestLines_Runes_EarlyBreak(t *testing.T) {
 	lines := niceyaml.NewSourceFromTokens(tks)
 
 	var collected []rune //nolint:prealloc // Testing early break with unknown iteration count.
-	for _, r := range lines.Runes() {
+	for _, r := range lines.AllRunes() {
 		collected = append(collected, r)
 		if r == 'b' {
 			break
@@ -329,6 +418,158 @@ func TestLines_Runes_EarlyBreak(t *testing.T) {
 	}
 
 	assert.Equal(t, []rune{'a', 'b'}, collected)
+}
+
+func TestSource_AllRunes_WithRanges(t *testing.T) {
+	t.Parallel()
+
+	input := "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n"
+	source := niceyaml.NewSourceFromString(input)
+
+	require.Equal(t, 5, source.Len())
+
+	t.Run("no ranges returns all runes", func(t *testing.T) {
+		t.Parallel()
+
+		var collected []runePosition
+		for pos, r := range source.AllRunes() {
+			collected = append(collected, runePosition{R: r, Pos: pos})
+		}
+
+		// Should have all runes from all lines.
+		assert.NotEmpty(t, collected)
+		// First rune should be 'a' at line 0, col 0.
+		assert.Equal(t, 'a', collected[0].R)
+		assert.Equal(t, position.New(0, 0), collected[0].Pos)
+	})
+
+	t.Run("single range filters runes correctly", func(t *testing.T) {
+		t.Parallel()
+
+		// Range covering only "b: 2" on line 1.
+		rng := position.NewRange(position.New(1, 0), position.New(1, 4))
+
+		var collected []runePosition
+		for pos, r := range source.AllRunes(rng) {
+			collected = append(collected, runePosition{R: r, Pos: pos})
+		}
+
+		// Should only have runes from line 1, columns 0-3 (half-open range).
+		require.Len(t, collected, 4)
+		assert.Equal(t, 'b', collected[0].R)
+		assert.Equal(t, position.New(1, 0), collected[0].Pos)
+		assert.Equal(t, ':', collected[1].R)
+		assert.Equal(t, position.New(1, 1), collected[1].Pos)
+		assert.Equal(t, ' ', collected[2].R)
+		assert.Equal(t, position.New(1, 2), collected[2].Pos)
+		assert.Equal(t, '2', collected[3].R)
+		assert.Equal(t, position.New(1, 3), collected[3].Pos)
+	})
+
+	t.Run("range spanning multiple lines", func(t *testing.T) {
+		t.Parallel()
+
+		// Range from middle of line 1 to middle of line 2.
+		rng := position.NewRange(position.New(1, 2), position.New(2, 2))
+
+		var collected []runePosition
+		for pos, r := range source.AllRunes(rng) {
+			collected = append(collected, runePosition{R: r, Pos: pos})
+		}
+
+		// Line 1: cols 2-4 (newline at 4), Line 2: cols 0-1.
+		require.NotEmpty(t, collected)
+
+		// First should be ' ' at line 1, col 2.
+		assert.Equal(t, ' ', collected[0].R)
+		assert.Equal(t, position.New(1, 2), collected[0].Pos)
+
+		// Verify all positions are within the range.
+		for _, rp := range collected {
+			assert.True(t, rng.Contains(rp.Pos), "position %v should be in range", rp.Pos)
+		}
+	})
+
+	t.Run("range clamped to bounds", func(t *testing.T) {
+		t.Parallel()
+
+		// Range that extends beyond source bounds.
+		rng := position.NewRange(position.New(-5, 0), position.New(100, 100))
+
+		var collected []runePosition
+		for pos, r := range source.AllRunes(rng) {
+			collected = append(collected, runePosition{R: r, Pos: pos})
+		}
+
+		// Should return all runes since range encompasses everything.
+		assert.NotEmpty(t, collected)
+		// First should be 'a'.
+		assert.Equal(t, 'a', collected[0].R)
+	})
+
+	t.Run("empty source returns nothing", func(t *testing.T) {
+		t.Parallel()
+
+		emptySource := niceyaml.NewSourceFromString("")
+		rng := position.NewRange(position.New(0, 0), position.New(0, 5))
+
+		var collected []runePosition
+		for pos, r := range emptySource.AllRunes(rng) {
+			collected = append(collected, runePosition{R: r, Pos: pos})
+		}
+
+		assert.Nil(t, collected)
+	})
+
+	t.Run("out-of-range yields nothing", func(t *testing.T) {
+		t.Parallel()
+
+		// Range that's completely beyond the source.
+		rng := position.NewRange(position.New(100, 0), position.New(100, 10))
+
+		var collected []runePosition
+		for pos, r := range source.AllRunes(rng) {
+			collected = append(collected, runePosition{R: r, Pos: pos})
+		}
+
+		assert.Nil(t, collected)
+	})
+
+	t.Run("multiple ranges", func(t *testing.T) {
+		t.Parallel()
+
+		// Two non-overlapping ranges.
+		rng1 := position.NewRange(position.New(0, 0), position.New(0, 1)) // 'a'.
+		rng2 := position.NewRange(position.New(2, 0), position.New(2, 1)) // 'c'.
+
+		var collected []runePosition
+		for pos, r := range source.AllRunes(rng1, rng2) {
+			collected = append(collected, runePosition{R: r, Pos: pos})
+		}
+
+		require.Len(t, collected, 2)
+		assert.Equal(t, 'a', collected[0].R)
+		assert.Equal(t, position.New(0, 0), collected[0].Pos)
+		assert.Equal(t, 'c', collected[1].R)
+		assert.Equal(t, position.New(2, 0), collected[1].Pos)
+	})
+
+	t.Run("early break works with ranges", func(t *testing.T) {
+		t.Parallel()
+
+		rng := position.NewRange(position.New(0, 0), position.New(2, 10))
+
+		var collected []rune //nolint:prealloc // Testing early break.
+		for _, r := range source.AllRunes(rng) {
+			collected = append(collected, r)
+			if r == ':' {
+				break
+			}
+		}
+
+		// Should stop at first colon.
+		assert.Equal(t, []rune{'a', ':'}, collected)
+	})
 }
 
 func TestLines_TokenPositionRanges(t *testing.T) {

@@ -9,10 +9,10 @@ import (
 	"github.com/macropower/niceyaml/position"
 )
 
-// SourceGetter gets a [NamedLineIterator].
+// SourceGetter gets a [NamedLineSource].
 // See [Revision] for an implementation.
 type SourceGetter interface {
-	Source() NamedLineIterator
+	Source() NamedLineSource
 }
 
 // FullDiff represents a complete diff between two [SourceGetter]s.
@@ -131,16 +131,9 @@ func (ops lineOps) toLines() line.Lines {
 }
 
 // lcsLineDiff computes line operations using Hirschberg's space-optimized LCS algorithm.
-func lcsLineDiff(before, after LineIterator) []lineOp {
-	beforeLines := make(line.Lines, 0, before.Len())
-	for _, ln := range before.Lines() {
-		beforeLines = append(beforeLines, ln)
-	}
-
-	afterLines := make(line.Lines, 0, after.Len())
-	for _, ln := range after.Lines() {
-		afterLines = append(afterLines, ln)
-	}
+func lcsLineDiff(before, after LineGetter) []lineOp {
+	beforeLines := before.Lines()
+	afterLines := after.Lines()
 
 	// Pre-compute content strings once to avoid repeated string building.
 	beforeContent := make([]string, len(beforeLines))

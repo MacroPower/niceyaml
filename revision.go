@@ -5,16 +5,17 @@ import (
 	"github.com/macropower/niceyaml/style"
 )
 
-// NamedLineIterator extends [LineIterator] with a Name and overlay support.
+// NamedLineSource extends [LineIterator] with a Name and overlay support.
 // See [Source] for an implementation.
-type NamedLineIterator interface {
+type NamedLineSource interface {
 	LineIterator
+	LineGetter
 	Name() string
 	AddOverlay(kind style.Style, ranges ...position.Range)
 	ClearOverlays()
 }
 
-// Revision represents [NamedLineIterator] at one or more revisions.
+// Revision represents [NamedLineSource] at one or more revisions.
 // It may form a linked or doubly-linked list to track changes across revisions.
 // It is not required to have multiple revisions; a single revision is valid.
 // Create instances with [NewRevision].
@@ -25,23 +26,23 @@ type Revision struct {
 	// The next token collection in the revision sequence.
 	// If there is no next revision, it is nil.
 	next *Revision
-	// The [NamedLineIterator] at the head.
-	head NamedLineIterator
+	// The [NamedLineSource] at the head.
+	head NamedLineSource
 }
 
 // NewRevision creates a new [Revision]. The provided values are set at the head.
 // You may use [Revision.Append] or [Revision.Prepend] to add more revisions.
 // A builder pattern is supported for values that are known at compile time.
-func NewRevision(li NamedLineIterator) *Revision {
+func NewRevision(li NamedLineSource) *Revision {
 	return &Revision{head: li}
 }
 
-// Source returns the [NamedLineIterator] at the head.
-func (t *Revision) Source() NamedLineIterator {
+// Source returns the [NamedLineSource] at the head.
+func (t *Revision) Source() NamedLineSource {
 	return t.head
 }
 
-// Name returns the name of the [NamedLineIterator] at the head.
+// Name returns the name of the [NamedLineSource] at the head.
 func (t *Revision) Name() string {
 	return t.head.Name()
 }
@@ -160,9 +161,9 @@ func (t *Revision) Len() int {
 	return count + 1
 }
 
-// Append adds a new revision after the [NamedLineIterator] at the head.
+// Append adds a new revision after the [NamedLineSource] at the head.
 // Returns the newly added revision.
-func (t *Revision) Append(li NamedLineIterator) *Revision {
+func (t *Revision) Append(li NamedLineSource) *Revision {
 	rev := &Revision{
 		prev: t,
 		head: li,
@@ -172,9 +173,9 @@ func (t *Revision) Append(li NamedLineIterator) *Revision {
 	return rev
 }
 
-// Prepend adds a new revision before the [NamedLineIterator] at the head.
+// Prepend adds a new revision before the [NamedLineSource] at the head.
 // Returns the newly added revision.
-func (t *Revision) Prepend(li NamedLineIterator) *Revision {
+func (t *Revision) Prepend(li NamedLineSource) *Revision {
 	rev := &Revision{
 		next: t,
 		head: li,

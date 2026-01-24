@@ -47,8 +47,8 @@ type Finder interface {
 // See [niceyaml.Source] for an implementation.
 type Source interface {
 	Name() string
-	Lines() iter.Seq2[position.Position, line.Line]
-	Runes() iter.Seq2[position.Position, rune]
+	AllLines(spans ...position.Span) iter.Seq2[position.Position, line.Line]
+	AllRunes(ranges ...position.Range) iter.Seq2[position.Position, rune]
 	IsEmpty() bool
 	Len() int
 	AddOverlay(s style.Style, ranges ...position.Range)
@@ -241,14 +241,14 @@ func (m *Model) SetPrinter(p Printer) {
 
 // SetTokens replaces the revision history with a single revision.
 // This is a convenience method equivalent to ClearRevisions() followed by AppendRevision(lines).
-func (m *Model) SetTokens(lines niceyaml.NamedLineIterator) {
+func (m *Model) SetTokens(lines niceyaml.NamedLineSource) {
 	m.ClearRevisions()
 	m.AppendRevision(lines)
 }
 
 // AppendRevision adds a new revision to the history.
 // After appending, the revision pointer moves to the newly added revision.
-func (m *Model) AppendRevision(lines niceyaml.NamedLineIterator) {
+func (m *Model) AppendRevision(lines niceyaml.NamedLineSource) {
 	if m.revision == nil {
 		m.revision = niceyaml.NewRevision(lines)
 	} else {

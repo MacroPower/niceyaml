@@ -433,7 +433,7 @@ func TestFullDiff_Source_Flags(t *testing.T) {
 			got := diff.Build()
 
 			flaggedCount := 0
-			for _, ln := range got.Lines() {
+			for _, ln := range got.AllLines() {
 				if ln.Flag != line.FlagDefault {
 					flaggedCount++
 				}

@@ -16,11 +16,19 @@ import (
 	"github.com/macropower/niceyaml/style"
 )
 
+// LineGetter provides direct access to lines as a slice.
+// See [Source] for an implementation.
+type LineGetter interface {
+	Lines() line.Lines
+	Len() int
+	IsEmpty() bool
+}
+
 // LineIterator provides line-by-line access to YAML tokens.
 // See [Source] for an implementation.
 type LineIterator interface {
-	Lines() iter.Seq2[position.Position, line.Line]
-	Runes() iter.Seq2[position.Position, rune]
+	AllLines(spans ...position.Span) iter.Seq2[position.Position, line.Line]
+	AllRunes(ranges ...position.Range) iter.Seq2[position.Position, rune]
 	Len() int
 	IsEmpty() bool
 }
@@ -179,38 +187,85 @@ func (s *Source) IsEmpty() bool {
 	return len(s.lines) == 0
 }
 
-// Lines returns an iterator over all lines.
+// AllLines returns an iterator over lines within the given spans.
+// If no spans are provided, all lines are iterated.
 // Each iteration yields a [position.Position] and the [line.Line] at that position.
-func (s *Source) Lines() iter.Seq2[position.Position, line.Line] {
+func (s *Source) AllLines(spans ...position.Span) iter.Seq2[position.Position, line.Line] {
 	return func(yield func(position.Position, line.Line) bool) {
 		s.overlayMu.RLock()
 		defer s.overlayMu.RUnlock()
 
-		for i, line := range s.lines {
-			if !yield(position.New(i, 0), line) {
-				return
+		// No spans = all lines (backwards compatible).
+		if len(spans) == 0 {
+			for i, ln := range s.lines {
+				if !yield(position.New(i, 0), ln) {
+					return
+				}
+			}
+
+			return
+		}
+
+		// Iterate only lines within provided spans.
+		for _, span := range spans {
+			start := max(0, span.Start)
+			end := min(len(s.lines), span.End)
+
+			for i := start; i < end; i++ {
+				if !yield(position.New(i, 0), s.lines[i]) {
+					return
+				}
 			}
 		}
 	}
 }
 
-// Runes returns an iterator over all runes.
+// AllRunes returns an iterator over runes within the given ranges.
+// If no ranges are provided, all runes are iterated.
 // Each iteration yields a [position.Position] and the rune at that position.
-func (s *Source) Runes() iter.Seq2[position.Position, rune] {
+func (s *Source) AllRunes(ranges ...position.Range) iter.Seq2[position.Position, rune] {
 	return func(yield func(position.Position, rune) bool) {
 		s.overlayMu.RLock()
 		defer s.overlayMu.RUnlock()
 
-		for i, ln := range s.lines {
-			col := 0
+		// No ranges = all runes (backwards compatible).
+		if len(ranges) == 0 {
+			for i, ln := range s.lines {
+				col := 0
 
-			for _, tk := range ln.Tokens() {
-				for _, r := range tk.Origin {
-					if !yield(position.New(i, col), r) {
-						return
+				for _, tk := range ln.Tokens() {
+					for _, r := range tk.Origin {
+						if !yield(position.New(i, col), r) {
+							return
+						}
+
+						col++
 					}
+				}
+			}
 
-					col++
+			return
+		}
+
+		// Iterate only runes within provided ranges.
+		for _, rng := range ranges {
+			startLine := max(0, rng.Start.Line)
+			endLine := min(len(s.lines)-1, rng.End.Line)
+
+			for i := startLine; i <= endLine; i++ {
+				col := 0
+
+				for _, tk := range s.lines[i].Tokens() {
+					for _, r := range tk.Origin {
+						pos := position.New(i, col)
+						if rng.Contains(pos) {
+							if !yield(pos, r) {
+								return
+							}
+						}
+
+						col++
+					}
 				}
 			}
 		}
@@ -220,6 +275,12 @@ func (s *Source) Runes() iter.Seq2[position.Position, rune] {
 // Line returns the [line.Line] at the given index. Panics if idx is out of range.
 func (s *Source) Line(idx int) *line.Line {
 	return &s.lines[idx]
+}
+
+// Lines returns all [line.Lines] in the Source.
+// This returns the internal slice for efficiency; callers should not modify it.
+func (s *Source) Lines() line.Lines {
+	return s.lines
 }
 
 // Content returns the combined content of all [Line]s as a string.

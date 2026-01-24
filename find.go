@@ -200,7 +200,7 @@ func (f *Finder) buildSourceAndPositionMap(lines LineIterator) (string, *positio
 		normalizedCache = make(map[rune]string)
 	}
 
-	for pos, r := range lines.Runes() {
+	for pos, r := range lines.AllRunes() {
 		// Get normalized form of this rune (or original if no normalizer).
 		var normalized string
 		if f.normalizer != nil {
