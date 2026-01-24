@@ -29,6 +29,10 @@ tasks:
       - actions-lint
       - prettier-lint
 
+  docs:
+    desc: Runs all docs targets
+    deps: [go-docs]
+
   test:
     desc: Runs all test targets
     deps: [go-test]
@@ -101,6 +105,24 @@ tasks:
       FLAGS: '{{.FLAGS | default ""}}'
     cmds:
       - go test -bench=. -benchmem -tags={{.BUILD_TAGS}} {{.FLAGS}} {{.PKG}}
+
+  go-docs:
+    desc: Prints Go documentation for all packages
+    summary: |
+      Prints Go documentation for all packages.
+
+      Args:
+        PKG: Go package(s) to document (default: ./...)
+        FLAGS: Additional flags to pass to `go doc` (default: "")
+    vars:
+      PKG: '{{.PKG | default "./..."}}'
+      FLAGS: '{{.FLAGS | default ""}}'
+    cmds:
+      - |
+        for pkg in $(go list {{.PKG}} | grep -v -E '/(examples|cmd)(/|$)'); do
+          echo "--------------------------------------------------------------------------------"
+          go doc {{.FLAGS}} "$pkg"
+        done
 
   go-gen:
     desc: Generates Go code

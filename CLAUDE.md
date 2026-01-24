@@ -5,73 +5,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Test Commands
 
 ```bash
-task format
-task lint
-task test
+task format # Format and lint
+task lint   # Lint only
+task test   # Run all tests
 ```
 
 ## Architecture
 
-### Core Package (niceyaml)
-
-Go library (`github.com/macropower/niceyaml`) provides utilities for working with YAML, built on top of `github.com/goccy/go-yaml` and `charm.land/lipgloss/v2`.
-
-Key types by feature area:
-
-- **Source:** `Source`, `LineIterator` - YAML token organization by line.
-- **Diff System:** `FullDiff`, `SummaryDiff`, `Revision` - LCS-based diffing and version tracking.
-- **Search:** `Finder`, `Normalizer`, `StandardNormalizer` - text search with normalization support.
-- **Error Handling:** `Error` - errors with source context and annotations.
-- **YAML Utilities:** `Decoder`, `DocumentDecoder`, `Validator`, `SchemaValidator`, `Encoder` - parsing, decoding, and validation.
-- **Printing:** `Printer`, `Style`, `Styles`, `StyleGetter`, `TokenStyler`, `GutterFunc`, `GutterContext` - syntax highlighting and styled rendering.
-
-### Bubbles Subpackage (niceyaml/bubbles)
-
-- **YAMLViewport** (`bubbles/yamlviewport/`): Bubble Tea component for interactive YAML viewing.
-- Key types: `Model` (implements `tea.Model`), `DiffMode`.
-
-### Fangs Subpackage (niceyaml/fangs)
-
-- **ErrorHandler** (`fangs/`): Custom error handler for Charmbracelet Fang/Cobra integration.
-
-### Schema Subpackage (niceyaml/schema)
-
-- **Generator** (`schema/generator/`): Creates JSON schemas from Go types using `github.com/invopop/jsonschema`.
-- **Validator** (`schema/validator/`): Validates data against JSON schemas using `github.com/santhosh-tekuri/jsonschema/v6`.
-
-Validator integrates with our core package for improved YAML handling (e.g. supporting error annotations).
-
-### Line Subpackage (niceyaml/line)
-
-- **Line Processing** (`line/`): Line-by-line YAML token organization.
-- Key types: `Line`, `Lines`, `Annotation`, `Flag`.
-
-### Position Subpackage (niceyaml/position)
-
-- **Positioning** (`position/`): 0-indexed position and range tracking.
-- Key types: `Position`, `Range`, `Ranges`.
-- Convention: 0-indexed (line and column start at 0), half-open ranges `[Start, End)`.
-
-### Tokens Subpackage (niceyaml/tokens)
-
-- **Token Segmentation** (`tokens/`): YAML token segmentation for rendering.
-- Key types: `Segment`, `Segments`, `Segments2`.
-
-### YAMLTest Subpackage (niceyaml/yamltest)
-
-- **Testing Utilities** (`yamltest/`): Helpers for testing YAML token operations.
-- Key types: `TokenBuilder`, `MockSchemaValidator`, `MockNormalizer`, `XMLStyles`.
-- Key functions: `RequireTokensValid`, `AssertTokensEqual`, `FormatToken`, `FormatTokens`, `Input`, `JoinLF`, `JoinCRLF`.
+```bash
+task docs # Print all package docs
+```
 
 ## Code Style
 
 ### Go Conventions
 
 - Document all exported items with doc comments.
-- Package documentation in `doc.go` files.
-- Wrap errors with `fmt.Errorf("context: %w", err)`; no "failed" or "error" in messages.
+- Package documentation in `doc.go` files, if multiple files exist.
+- Wrap errors with `fmt.Errorf("context: %w", err)`, or `fmt.Errorf("%w: %w", ErrSentinel, err)`.
+- Avoid using "failed" or "error" in library error messages.
 - Use global error variables for common errors.
 - Use constructors with functional options.
+- Accept interfaces, return concrete types.
 
 ### Code Patterns
 
@@ -87,15 +42,18 @@ Validator integrates with our core package for improved YAML handling (e.g. supp
 - Types with constructors should always note: `// Create instances with [NewThing].`
 - Interfaces should note: `// See [Thing] for an implementation.`
 - Interfaces should have sensible names: `type Builder interface { Build() Thing } // Builder builds [Thing]s.`
+- Package docs should explain concepts and usage patterns; do not just enumerate exports.
 
 ### Testing
 
 - Use `github.com/stretchr/testify/assert` and `require`.
 - Table-driven tests with `map[string]struct{}` format.
-- Field names: `input`, `want`, `got`, `err`.
+- Field names: prefer `want` for expected output, `err` for expected errors.
+- For inputs, use clear contextual names (e.g., `before`/`after` for diffs, `line`/`col` for positions).
 - Always use `t.Parallel()` in all tests.
 - Create test packages (`package foo_test`) testing public API.
-- Use `require.ErrorIs` for error type checking.
+- Use `require.ErrorIs` for sentinel error checking.
+- Use `require.ErrorAs` for error type extraction.
 - Use the `yamltest` helpers whenever possible.
 
 ### Key Dependencies
