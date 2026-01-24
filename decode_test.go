@@ -504,10 +504,13 @@ func TestDocumentDecoder_GetValue_DirectiveBody(t *testing.T) {
 	t.Parallel()
 
 	// Test the directive body case - when doc.Body is a DirectiveType.
-	// This is an edge case where YAML 1.2 directive creates a document
-	// where the body is a directive node before the actual content.
-	// In practice, go-yaml parses %YAML as a directive but the body
-	// of the main document is still the mapping, not the directive.
+	//
+	// This is an edge case where YAML 1.2 directive creates a document where the
+	// body is a directive node before the actual content.
+	//
+	// In practice, go-yaml parses %YAML as a directive but the body of the main
+	// document is still the mapping, not the directive.
+	//
 	// We test that the normal case still works.
 	input := `%YAML 1.2
 ---

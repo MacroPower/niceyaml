@@ -11,17 +11,24 @@ import (
 )
 
 // Segment pairs an original source [*token.Token] with a segmented part token.
-// Multiple Segments may share the same Source pointer while having distinct Parts.
+//
+// Multiple [Segment]s may share the same [Segment.Source] pointer while having
+// distinct [Segment.Part]s.
+//
 // Create instances with [NewSegment].
 type Segment struct {
 	// Source is a reference to the original token from the lexer.
-	// Multiple [Segment]s within the same [Segments] may share the same Source pointer.
+	//
+	// Multiple [Segment]s within the same [Segments] may share the same Source
+	// pointer.
+	//
 	// Source must never be modified.
 	source *token.Token
 
 	// Part is a segment of the source token with Position adjusted.
-	// It may in some cases contain identical content to the source token,
-	// if there is no segmentation needed (e.g. a single-line token).
+	//
+	// It may in some cases contain identical content to the source token, if there
+	// is no segmentation needed (e.g. a single-line token).
 	part *token.Token
 
 	// Width is the cached rune count of part.Origin, excluding trailing newline.
@@ -43,27 +50,30 @@ func NewSegment(source, part *token.Token) Segment {
 	}
 }
 
-// Width returns the rune count of this segment's part, excluding any trailing newline.
+// Width returns the rune count of this [Segment]'s part, excluding any
+// trailing newline.
 func (s Segment) Width() int {
 	return s.width
 }
 
-// Contains returns true if the given [*token.Token] matches the source or part pointer of this Segment.
+// Contains reports whether the given [*token.Token] matches the source or part
+// pointer of this [Segment].
 func (s Segment) Contains(tk *token.Token) bool {
 	return s.source == tk || s.part == tk
 }
 
-// SourceEquals returns true if the given [*token.Token] matches the source pointer.
+// SourceEquals reports whether the given [*token.Token] matches the source
+// pointer.
 func (s Segment) SourceEquals(tk *token.Token) bool {
 	return s.source == tk
 }
 
-// PartEquals returns true if the given [*token.Token] matches the part pointer.
+// PartEquals reports whether the given [*token.Token] matches the part pointer.
 func (s Segment) PartEquals(tk *token.Token) bool {
 	return s.part == tk
 }
 
-// Source returns a clone of the Segment's Source token.
+// Source returns a clone of the [Segment]'s source [*token.Token].
 func (s Segment) Source() *token.Token {
 	if s.source == nil {
 		return nil
@@ -72,7 +82,7 @@ func (s Segment) Source() *token.Token {
 	return s.source.Clone()
 }
 
-// Part returns a clone of the Segment's Part token.
+// Part returns a clone of the [Segment]'s part [*token.Token].
 func (s Segment) Part() *token.Token {
 	if s.part == nil {
 		return nil
@@ -81,19 +91,24 @@ func (s Segment) Part() *token.Token {
 	return s.part.Clone()
 }
 
-// Segments is a sequence of [Segment]s.
-// When constructed from a complete token stream, unique Source pointers
-// represent the original tokens (deduplicated via [Segments.SourceTokens]).
-// For multiline tokens, multiple consecutive segments share the same Source pointer.
+// Segments is a sequence of [Segment] values, typically representing a single
+// line's tokens.
+//
+// When constructed from a complete token stream, unique [Segment.Source]
+// pointers represent the original tokens (deduplicated via
+// [Segments.SourceTokens]).
+//
+// For multiline tokens, multiple consecutive [Segment]s share the same
+// [Segment.Source] pointer.
 type Segments []Segment
 
-// Append appends a new Segment to the Segments.
+// Append appends a new [Segment] to the [Segments].
 func (s Segments) Append(source, part *token.Token) Segments {
 	return append(s, NewSegment(source, part))
 }
 
-// Merge combines this Segments with others, preserving source pointer identity.
-// Returns a new Segments containing all segments in order.
+// Merge combines this [Segments] with others, preserving source pointer identity.
+// Returns a new [Segments] containing all [Segment]s in order.
 func (s Segments) Merge(others ...Segments) Segments {
 	for _, o := range others {
 		s = append(s, o...)
@@ -102,8 +117,11 @@ func (s Segments) Merge(others ...Segments) Segments {
 	return s
 }
 
-// Clone returns a copy of the Segments with cloned Parts but shared Source pointers.
-// Sources are intentionally shared since they are immutable references to original tokens.
+// Clone returns a copy of the [Segments] with cloned [Segment.Part]s but shared
+// [Segment.Source] pointers.
+//
+// Sources are intentionally shared since they are immutable references to
+// original tokens.
 func (s Segments) Clone() Segments {
 	if len(s) == 0 {
 		return nil
@@ -118,8 +136,10 @@ func (s Segments) Clone() Segments {
 }
 
 // SourceTokens returns clones of unique source tokens in order.
-// This is the inverse of segmentation: segments that share a Source pointer
-// are deduplicated to return a clone of each original token once.
+//
+// This is the inverse of segmentation: [Segment]s that share a [Segment.Source]
+// pointer are deduplicated to return a clone of each original [*token.Token]
+// once.
 func (s Segments) SourceTokens() token.Tokens {
 	if len(s) == 0 {
 		return nil
@@ -140,7 +160,7 @@ func (s Segments) SourceTokens() token.Tokens {
 	return result
 }
 
-// PartTokens returns clones of all [Segment.Part] tokens in order.
+// PartTokens returns clones of all [Segment.Part] [*token.Token]s in order.
 func (s Segments) PartTokens() token.Tokens {
 	if len(s) == 0 {
 		return nil
@@ -155,8 +175,11 @@ func (s Segments) PartTokens() token.Tokens {
 }
 
 // NextColumn returns the next available column (0-indexed).
-// Note that [*token.Position] is 1-indexed, in which case this value + 1 can be used.
-// Returns 0 if empty or no segment has a valid position.
+//
+// Note that [token.Position] is 1-indexed, in which case this value + 1 can be
+// used.
+//
+// Returns 0 if empty or no [Segment] has a valid position.
 func (s Segments) NextColumn() int {
 	col := 0
 	for _, seg := range s {
@@ -168,7 +191,9 @@ func (s Segments) NextColumn() int {
 	return col
 }
 
-// SourceTokenAt returns a clone of the Source token at the given 0-indexed column.
+// SourceTokenAt returns a clone of the source [*token.Token] at the given
+// 0-indexed column.
+//
 // Returns nil if no token exists at that column.
 func (s Segments) SourceTokenAt(col int) *token.Token {
 	tk := s.sourceTokenAtPtr(col)
@@ -179,8 +204,12 @@ func (s Segments) SourceTokenAt(col int) *token.Token {
 	return tk.Clone()
 }
 
-// sourceTokenAtPtr returns the raw Source token pointer at the given 0-indexed column.
-// This is for internal use where pointer identity is needed for segment matching.
+// sourceTokenAtPtr returns the raw source token pointer at the given 0-indexed
+// column.
+//
+// This is for internal use where pointer identity is needed for
+// [Segment] matching.
+//
 // Returns nil if no token exists at that column.
 func (s Segments) sourceTokenAtPtr(col int) *token.Token {
 	c := 0
@@ -200,10 +229,13 @@ func (s Segments) sourceTokenAtPtr(col int) *token.Token {
 // Each element typically represents one line's [Segments].
 type Segments2 []Segments
 
-// TokenRangesAt returns position ranges for all [Segments] that share the same
-// source token as the segment at the given 0-indexed idx (typically line) and col.
-// Positions are calculated based on segment widths.
-// Returns nil if the position is out of bounds or no segment exists there.
+// TokenRangesAt returns [position.Ranges] for all [Segment]s that share the
+// same source token as the [Segment] at the given 0-indexed idx (typically
+// line) and col.
+//
+// Positions are calculated based on [Segment] widths.
+//
+// Returns nil if the position is out of bounds or no [Segment] exists there.
 func (s2 Segments2) TokenRangesAt(idx, col int) *position.Ranges {
 	if idx < 0 || idx >= len(s2) {
 		return nil
@@ -245,9 +277,11 @@ func countTrailingSpaces(s string) int {
 	return len(s) - len(strings.TrimRight(s, " "))
 }
 
-// ContentRangesAt returns position ranges for content at the given position,
-// excluding leading and trailing spaces. Returns nil if there is no content
-// at the given position or if the token is all whitespace.
+// ContentRangesAt returns [position.Ranges] for content at the given position,
+// excluding leading and trailing spaces.
+//
+// Returns nil if there is no content at the given position or if the token is
+// all whitespace.
 func (s2 Segments2) ContentRangesAt(idx, col int) *position.Ranges {
 	if idx < 0 || idx >= len(s2) {
 		return nil
@@ -289,9 +323,10 @@ func (s2 Segments2) ContentRangesAt(idx, col int) *position.Ranges {
 	return ranges
 }
 
-// ValueOffset calculates the byte offset where Value starts within the
-// first non-empty line of the token's Origin. This offset is used for string
-// slicing operations.
+// ValueOffset calculates the byte offset where Value starts within the first
+// non-empty line of the [*token.Token]'s Origin.
+//
+// This offset is used for string slicing operations.
 func ValueOffset(tk *token.Token) int {
 	firstLine, _, _ := strings.Cut(tk.Origin, "\n")
 	if firstLine == "" {
@@ -305,10 +340,12 @@ func ValueOffset(tk *token.Token) int {
 	return 0
 }
 
-// SplitDocuments splits a token stream into multiple token streams,
-// one for each YAML document found (separated by '---' tokens).
-// The returned slices each contain tokens for a single document,
-// preserving original token order and positions.
+// SplitDocuments splits a token stream into multiple token streams, one for
+// each YAML document found (separated by '---' tokens).
+//
+// The returned slices each contain tokens for a single document, preserving
+// original token order and positions.
+//
 // Each document header token ('---') is included at the start of its document.
 func SplitDocuments(tks token.Tokens) iter.Seq2[int, token.Tokens] {
 	return func(yield func(int, token.Tokens) bool) {

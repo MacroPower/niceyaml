@@ -10,6 +10,7 @@ import (
 
 // linesBuilder constructs [Lines] from [token.Tokens].
 // It encapsulates all state needed during the line-building process.
+// Create instances with [newLinesBuilder].
 type linesBuilder struct {
 	// Result accumulation.
 	lines               []Line
@@ -27,7 +28,7 @@ type linesBuilder struct {
 	currentIndentLevel int // Nesting depth level.
 }
 
-// newLinesBuilder creates a new [linesBuilder] initialized from the first token.
+// newLinesBuilder creates a new [*linesBuilder] initialized from the first token.
 // Returns nil if tks is empty.
 func newLinesBuilder(tks token.Tokens) *linesBuilder {
 	if len(tks) == 0 {
@@ -37,6 +38,7 @@ func newLinesBuilder(tks token.Tokens) *linesBuilder {
 	b := &linesBuilder{}
 
 	// Initialize currentLine from the first token's position.
+	//
 	// If the first token's Origin has leading newlines, we need to start earlier
 	// because Position.Line points to the content, not the Origin start.
 	if tks[0].Position != nil {
@@ -74,8 +76,8 @@ func (b *linesBuilder) AddToken(tk *token.Token) {
 		panic("linesBuilder: cannot add token after Build() has been called")
 	}
 
-	// Detect if this token is block scalar content by checking if it follows
-	// a Literal/Folded header in the token chain.
+	// Detect if this token is block scalar content by checking if it follows a
+	// Literal/Folded header in the token chain.
 	isBlockScalarContent := isBlockScalarContent(tk)
 
 	origin := tk.Origin
@@ -165,13 +167,16 @@ type partContext struct {
 func (b *linesBuilder) processPart(ctx *partContext) bool {
 	partIsPureNewline := isPureNewline(ctx.part)
 
-	// Handle duplicate leading newline: the go-yaml lexer sometimes includes the same
-	// newline character at both the end of one token and the start of the next.
-	// Detect this by checking if we're already at the token's line - if so, processing
-	// the leading "\n" would incorrectly advance us past the token's position.
-	// Instead of skipping it entirely (which would make Origin non-invertible), we append
-	// it to the previous line so the newline is preserved in the Origin but doesn't
-	// cause an extra line advance.
+	// Handle duplicate leading newline: the go-yaml lexer sometimes includes the
+	// same newline character at both the end of one token and the start of the next.
+	//
+	// Detect this by checking if we're already at the token's line - if so,
+	// processing the leading "\n" would incorrectly advance us past the token's
+	// position.
+	//
+	// Instead of skipping it entirely (which would make Origin non-invertible), we
+	// append it to the previous line so the newline is preserved in the Origin but
+	// doesn't cause an extra line advance.
 	isDuplicateNewline := ctx.partIndex == 0 && partIsPureNewline && b.prevTokenEndedWithNewline &&
 		ctx.tk.Position != nil && b.currentLine == ctx.tk.Position.Line
 	if isDuplicateNewline && len(b.lines) > 0 {
@@ -198,10 +203,12 @@ func (b *linesBuilder) processPart(ctx *partContext) bool {
 	}
 
 	// Update indentation tracking for first content on new line.
-	// Use the token's Position if available (more accurate than counting spaces
-	// in Origin, since some tokens like MappingKey don't include leading spaces).
-	// Exception: multi-part block scalar content has special Position handling,
-	// so calculate indentation for each part to maintain proper tracking.
+	//
+	// Use the token's Position if available (more accurate than counting spaces in
+	// Origin, since some tokens like MappingKey don't include leading spaces).
+	//
+	// Exception: multi-part block scalar content has special Position handling, so
+	// calculate indentation for each part to maintain proper tracking.
 	if len(b.currentLineSegments) == 0 && !partIsPureNewline {
 		if ctx.partIndex == 0 && ctx.tk.Position != nil && (!ctx.isBlockScalarContent || !ctx.isMultiPart) {
 			// First part of non-block-scalar, or single-line block scalar:
@@ -248,9 +255,12 @@ func (b *linesBuilder) processPart(ctx *partContext) bool {
 	}
 
 	// Determine token type: use SpaceType for pure horizontal whitespace parts.
+	//
 	// This handles cases where the lexer bundles trailing whitespace (like next
-	// line's indentation) with the previous token. Exception: block scalar content
-	// where whitespace is meaningful and should retain the original StringType.
+	// line's indentation) with the previous token.
+	//
+	// Exception: block scalar content where whitespace is meaningful and should
+	// retain the original StringType.
 	tokenType := ctx.tk.Type
 	if isPureHorizontalWhitespace(ctx.part) && val == "" && !ctx.isBlockScalarContent {
 		tokenType = token.SpaceType
@@ -274,10 +284,13 @@ func (b *linesBuilder) processPart(ctx *partContext) bool {
 	}
 
 	// For block scalars, preserve the original token's Position.
+	//
 	// The go-yaml lexer behavior varies:
 	//   - With following content: Position points to first content line (Column=0)
 	//   - Standalone: Position points to last content line (Column>0)
-	// We determine which case and put the original Position on the appropriate part.
+	//
+	// We determine which case and put the original Position on the appropriate
+	// part.
 	if ctx.isBlockScalarContent && ctx.isMultiPart && ctx.tk.Position != nil {
 		isFirstLinePosition := ctx.tk.Position.Column == 0
 		if (wasFirstContentPart && isFirstLinePosition) || (isLastContentPart && !isFirstLinePosition) {
@@ -285,10 +298,12 @@ func (b *linesBuilder) processPart(ctx *partContext) bool {
 		}
 	}
 
-	// For tokens with a leading blank line (Origin starts with "\n"), preserve
-	// the original Position for the first content part. The lexer's Position
-	// reflects the content line, not the blank line, so we should use it
-	// to ensure round-trip fidelity.
+	// For tokens with a leading blank line (Origin starts with "\n"), preserve the
+	// original Position for the first content part.
+	//
+	// The lexer's Position reflects the content line, not the blank line, so we
+	// should use it to ensure round-trip fidelity.
+	//
 	// Also update our tracking to match, so subsequent tokens get correct values.
 	hasLeadingBlankLine := ctx.isMultiPart && len(ctx.parts) > 1 && isPureNewline(ctx.parts[0])
 	if hasLeadingBlankLine && wasFirstContentPart && ctx.tk.Position != nil {
@@ -302,8 +317,12 @@ func (b *linesBuilder) processPart(ctx *partContext) bool {
 	b.currentOffset += len(ctx.part)
 
 	// If this part ends with a newline, finish the current line.
-	// Only \n terminates lines (per YAML spec). CRLF (\r\n) may be split by
-	// go-yaml across tokens, but we wait for the \n to create a new line.
+	//
+	// Only \n terminates lines (per YAML spec).
+	//
+	// CRLF (\r\n) may be split by go-yaml across tokens, but we wait for the \n to
+	// create a new line.
+	//
 	// The \r is preserved in Content() and stripped during output.
 	if strings.HasSuffix(ctx.part, "\n") {
 		b.finishLine()
@@ -314,6 +333,7 @@ func (b *linesBuilder) processPart(ctx *partContext) bool {
 
 // handleGap detects and handles line number gaps for simple tokens.
 // Simple tokens have no internal newlines (or just a trailing newline).
+//
 // When a gap is detected (token is ahead of currentLine), it flushes the
 // current line and syncs forward to the token's line.
 func (b *linesBuilder) handleGap(tk *token.Token, origin string) {
@@ -355,7 +375,8 @@ func (b *linesBuilder) handleGap(tk *token.Token, origin string) {
 //   - tk: Original token with Type, Value, Position
 //   - isFirst: Whether this is the first content part
 //   - shouldHaveValue: Whether this part should receive the token's Value
-//     (determined by caller: first part for plain/quoted, last part for block scalars)
+//     (determined by caller: first part for plain/quoted, last part for
+//     block scalars)
 //
 // Column assignment mirrors go-yaml lexer Position.Column behavior:
 //   - If shouldHaveValue is true: use the original token's Column
@@ -421,9 +442,11 @@ func updateIndentLevel(prevIndentNum, currentIndentNum, currentLevel int) int {
 	return currentLevel
 }
 
-// isBlockScalarContent returns true if tk is a StringType that follows
-// a block scalar header (Literal/Folded). Comments can appear between
-// the header and content, so we traverse the Prev chain.
+// isBlockScalarContent returns true if tk is a StringType that follows a block
+// scalar header (Literal/Folded).
+//
+// Comments can appear between the header and content, so we traverse the Prev
+// chain.
 func isBlockScalarContent(tk *token.Token) bool {
 	if tk.Type != token.StringType {
 		return false
@@ -456,9 +479,12 @@ func isPureHorizontalWhitespace(s string) bool {
 }
 
 // splitOriginIntoParts splits a token's Origin at newline boundaries.
-// Empty strings from SplitAfter are filtered, but an empty origin is
-// preserved as a single empty part (semantically significant for empty
-// block scalar content). Each part retains its trailing newline if present.
+//
+// Empty strings from SplitAfter are filtered, but an empty origin is preserved
+// as a single empty part (semantically significant for empty block scalar
+// content).
+//
+// Each part retains its trailing newline if present.
 func splitOriginIntoParts(origin string) []string {
 	// Handle empty origin: preserve as single empty part.
 	// This is semantically significant for empty block scalar content.
@@ -477,8 +503,9 @@ func splitOriginIntoParts(origin string) []string {
 }
 
 // findLastContentPartIndex returns the index of the last part that contains
-// actual content (not a pure newline). Used to identify which part should
-// receive the Value for block scalars.
+// actual content (not a pure newline).
+//
+// Used to identify which part should receive the Value for block scalars.
 func findLastContentPartIndex(parts []string) int {
 	for i := len(parts) - 1; i >= 0; i-- {
 		if !isPureNewline(parts[i]) {
@@ -489,7 +516,9 @@ func findLastContentPartIndex(parts []string) int {
 	return len(parts) - 1
 }
 
-// shouldPartReceiveValue determines if a token part should receive the Value field.
+// shouldPartReceiveValue determines if a token part should receive the Value
+// field.
+//
 // Block scalars (literal/folded): Value goes to the last content part.
 // Plain/quoted multiline: Value goes to the first content part.
 func shouldPartReceiveValue(isBlockScalar, isFirstContentPart, isLastContentPart bool) bool {
@@ -500,7 +529,7 @@ func shouldPartReceiveValue(isBlockScalar, isFirstContentPart, isLastContentPart
 	return isFirstContentPart
 }
 
-// clonePosition creates a deep copy of a [token.Position].
+// clonePosition creates a deep copy of a [*token.Position].
 // Returns nil if pos is nil.
 func clonePosition(pos *token.Position) *token.Position {
 	if pos == nil {

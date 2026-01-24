@@ -1,4 +1,3 @@
-// Package ansi provides utilities for handling ANSI control characters.
 package ansi
 
 import "strings"
@@ -29,7 +28,8 @@ const (
 )
 
 // Escape replaces control characters with visible representations:
-//   - C0 controls ([NUL]-[US]) -> Unicode Control Pictures ([NULPicture]-[USPicture])
+//   - C0 controls ([NUL]-[US]) -> Unicode Control Pictures
+//     ([NULPicture]-[USPicture])
 //   - C1 controls ([PAD]-[APC]) -> [ReplacementCharacter]
 //   - [DEL] -> [DELPicture]
 //

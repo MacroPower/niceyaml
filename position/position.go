@@ -9,15 +9,18 @@ import (
 
 const (
 	// Maximum column value used to indicate "end of line" when slicing ranges.
-	// Chosen to be larger than any realistic line length while remaining
-	// easy to read in debug output.
+	//
+	// Chosen to be larger than any realistic line length while remaining easy to
+	// read in debug output.
 	maxCol = 1_000_000
 )
 
 // Position represents a 0-indexed line and column location.
-// Note that it is not simply an offset of go-yaml [token.Position]s, rather it represents
-// the absolute line and column in a document, including in cases where multiple instances
-// of the same token exist (e.g. in diffs).
+//
+// Note that it is not simply an offset of [token.Position]s, rather it
+// represents the absolute line and column in a document, including in cases
+// where multiple instances of the same token exist (e.g. in diffs).
+//
 // Create instances with [New].
 type Position struct {
 	Line, Col int
@@ -28,7 +31,11 @@ func New(line, col int) Position {
 	return Position{Line: line, Col: col}
 }
 
-// NewFromToken creates a new [Position] from a [token.Token].
+// NewFromToken creates a new [Position] from a [*token.Token], converting from
+// the 1-indexed coordinates used by [token.Position] to the 0-indexed
+// coordinates used by this package.
+//
+// Returns the zero position if tk or its position is nil.
 func NewFromToken(tk *token.Token) Position {
 	var line, col int
 
@@ -45,8 +52,7 @@ func (p Position) String() string {
 	return fmt.Sprintf("%d:%d", p.Line+1, p.Col+1)
 }
 
-// Range represents a half-open range [Start, End)
-// between two [Position]s.
+// Range represents a half-open range [Start, End) between two [Position]s.
 // Create instances with [NewRange].
 type Range struct {
 	Start, End Position
@@ -57,8 +63,8 @@ func NewRange(start, end Position) Range {
 	return Range{Start: start, End: end}
 }
 
-// Contains returns true if the given [Position] is within this [Range].
-// The range is [Start, End) - Start is inclusive, End is exclusive.
+// Contains reports whether the given [Position] is within this [Range].
+// The range is half-open [Start, End): Start is inclusive, End is exclusive.
 func (r Range) Contains(pos Position) bool {
 	// Before start?
 	if pos.Line < r.Start.Line || (pos.Line == r.Start.Line && pos.Col < r.Start.Col) {
@@ -72,7 +78,8 @@ func (r Range) Contains(pos Position) bool {
 	return true
 }
 
-// String returns the range in "startLine:startCol-endLine:endCol" format with 1-indexed values.
+// String returns the range in "startLine:startCol-endLine:endCol" format with
+// 1-indexed values.
 func (r Range) String() string {
 	return fmt.Sprintf("%s-%s", r.Start.String(), r.End.String())
 }
@@ -128,12 +135,12 @@ func (s Span) Len() int {
 	return s.End - s.Start
 }
 
-// Contains returns true if v is within this span [Start, End).
+// Contains reports whether v is within this [Span] [Start, End).
 func (s Span) Contains(v int) bool {
 	return v >= s.Start && v < s.End
 }
 
-// Overlaps returns true if this span overlaps with the other span.
+// Overlaps reports whether this [Span] overlaps with another.
 // Empty spans (where Start == End) never overlap with anything.
 func (s Span) Overlaps(other Span) bool {
 	if s.Start >= s.End || other.Start >= other.End {
@@ -191,7 +198,7 @@ type Ranges struct {
 	value []Range
 }
 
-// NewRanges creates new [Ranges].
+// NewRanges creates new [*Ranges].
 func NewRanges(ranges ...Range) *Ranges {
 	prs := &Ranges{}
 	for _, r := range ranges {
@@ -211,7 +218,8 @@ func (rs *Ranges) Values() []Range {
 	return rs.value
 }
 
-// UniqueValues returns all unique [Range]s in the set as a slice.
+// UniqueValues returns all unique [Range] values in the collection,
+// preserving insertion order.
 func (rs *Ranges) UniqueValues() []Range {
 	if len(rs.value) == 0 {
 		return nil
@@ -230,8 +238,9 @@ func (rs *Ranges) UniqueValues() []Range {
 	return result
 }
 
-// LineIndices returns all line indices covered by all ranges.
+// LineIndices returns all line indices covered by all [Range]s.
 // For multi-line ranges, each line within the range is included.
+// Duplicate line indices are returned if covered by multiple ranges.
 func (rs *Ranges) LineIndices() []int {
 	if len(rs.value) == 0 {
 		return nil
@@ -247,7 +256,7 @@ func (rs *Ranges) LineIndices() []int {
 	return result
 }
 
-// String returns all ranges as a comma-separated list.
+// String returns all [Range]s as a comma-separated list.
 func (rs *Ranges) String() string {
 	if len(rs.value) == 0 {
 		return ""
@@ -265,10 +274,13 @@ func (rs *Ranges) String() string {
 	return b.String()
 }
 
-// GroupIndices groups sorted indices into spans where indices within
-// context distance are merged. Uses threshold = 2*context + 1 which
-// ensures indices merge when their context windows would overlap or
-// be adjacent. Returns half-open spans [Start, End).
+// GroupIndices groups sorted indices into [Span]s where indices within context
+// distance are merged.
+//
+// Uses threshold = 2*context + 1 which ensures indices merge when their context
+// windows would overlap or be adjacent.
+//
+// Returns half-open [Spans] [Start, End).
 //
 // For example, with context=2 (threshold=5):
 //   - Indices [0, 4] merge because 4 < 0+1+5 → span [0, 5)
@@ -306,7 +318,7 @@ type PrefixSums struct {
 	sums []int // Sums[i] = sum of elements 0..i-1.
 }
 
-// NewPrefixSums creates a [PrefixSums] from n elements.
+// NewPrefixSums creates a [*PrefixSums] from n elements.
 // The valueFn returns the value at index i.
 func NewPrefixSums(n int, valueFn func(i int) int) *PrefixSums {
 	sums := make([]int, n+1)

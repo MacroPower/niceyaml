@@ -14,7 +14,7 @@ type concreteError struct {
 	path *paths.Path
 }
 
-// newValidationError creates a [niceyaml.Error] from a [SchemaError].
+// newValidationError creates a [*niceyaml.Error] from a [SchemaError].
 func newValidationError(err SchemaError) *niceyaml.Error {
 	// Collect all concrete errors from the cause tree with their paths.
 	concreteErrors := collectConcreteErrorsWithPaths(err)
@@ -60,8 +60,9 @@ func newValidationError(err SchemaError) *niceyaml.Error {
 	)
 }
 
-// collectConcreteErrorsWithPaths recursively collects all concrete (non-wrapper) errors
-// from the validation error tree along with their computed paths.
+// collectConcreteErrorsWithPaths recursively collects all concrete
+// (non-wrapper) errors from the validation error tree along with their
+// computed paths.
 func collectConcreteErrorsWithPaths(err SchemaError) []concreteError {
 	var results []concreteError
 

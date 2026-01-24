@@ -2,9 +2,12 @@ package yamlviewport
 
 import "charm.land/bubbles/v2/key"
 
-// KeyMap defines the keybindings for the viewport. Note that you don't
-// necessarily need to use keybindings at all; the viewport can be controlled
-// programmatically with methods like [Model.ScrollDown] and [Model.ScrollUp].
+// KeyMap defines the keybindings for the viewport.
+//
+// Note that you don't necessarily need to use keybindings at all; the viewport
+// can be controlled programmatically with methods like [Model.ScrollDown] and
+// [Model.ScrollUp].
+//
 // Use [DefaultKeyMap] to get a set of default keybindings.
 type KeyMap struct {
 	// PageDown scrolls down by one page.
@@ -33,7 +36,7 @@ type KeyMap struct {
 	ToggleWordWrap key.Binding
 }
 
-// DefaultKeyMap returns a set of pager-like default keybindings.
+// DefaultKeyMap returns a new [KeyMap] with pager-like default keybindings.
 func DefaultKeyMap() KeyMap {
 	return KeyMap{
 		PageDown: key.NewBinding(

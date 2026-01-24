@@ -1,15 +1,43 @@
-// Package paths provides utilities for building YAML paths with key/value target specifications.
+// Package paths builds YAML paths that distinguish between keys and values.
 //
-// The [Builder] type wraps [*yaml.PathBuilder] and offers a fluent API for
-// constructing paths:
+// Standard YAML paths (like JSONPath) point to nodes in a document, but they
+// cannot distinguish between a mapping's key and its value.
 //
-//	path := paths.Root().Child("metadata", "name").Key()
-//	path.String() // "$.metadata.name.(key)"
+// When a path like `$.metadata.name` resolves to a mapping entry, you get the
+// value node, but for error highlighting or precise editing, you often need the
+// key instead.
 //
-// The [Path] type combines a [*YAMLPath] with a target [Part] (key or value),
-// enabling precise location targeting within YAML documents. Use [Path.Token]
-// to resolve the token at a path location within an [ast.File].
+// This package extends [yaml.Path] with [Part] targeting, so you can specify
+// whether a path refers to the key or value of a mapping entry:
 //
-// [Part] constants [PartKey] and [PartValue] specify whether a path targets
-// the key or value of a mapping entry.
+//	keyPath := paths.Root().Child("metadata", "name").Key()
+//	keyPath.String() // "$.metadata.name.(key)"
+//
+//	valPath := paths.Root().Child("metadata", "name").Value()
+//	valPath.String() // "$.metadata.name.(value)"
+//
+// Both paths resolve to the same YAML node, but [Path.Token] returns different
+// tokens: the key token "name" for the first, the value token for the second.
+//
+// # Integration with niceyaml.Error
+//
+// [*Path] implements [niceyaml.PathPartGetter], making it directly usable with
+// [niceyaml.WithPath] to highlight either keys or values in error messages:
+//
+//	err := niceyaml.NewError(
+//		"invalid value",
+//		niceyaml.WithPath(paths.Root().Child("spec", "replicas").Value()),
+//		niceyaml.WithSource(source),
+//	)
+//
+// # Building Paths
+//
+// Use [Root] to start a [Builder], chain selectors, and finalize with
+// [Builder.Key] or [Builder.Value]:
+//
+//	paths.Root().Child("items").Index(0).Child("name").Key()  // $.items[0].name.(key)
+//	paths.Root().Child("spec").IndexAll().Value()             // $.spec[*].(value)
+//	paths.Root().Recursive("name").Value()                    // $..name.(value)
+//
+// For the underlying [YAMLPath] without targeting, use [Builder.Path].
 package paths

@@ -124,11 +124,14 @@ func TestNewLines_Roundtrip(t *testing.T) {
 		"emoji sequence":  "family: 👨‍👩‍👧‍👦\n",
 		"flag emoji":      "flag: 🇯🇵\n",
 
-		// TODO: go-yaml's scanner does not preserve \u, \U, or \x escape sequences
-		// in the Origin field. See scanner/scanner.go:455-516 - these cases skip
-		// ctx.addOriginBuf() calls, causing Origin to be truncated (e.g., "\u65E5"
-		// becomes "\\"). This makes Content() roundtrip impossible for these escapes.
-		//   "unicode escape": "text: \"\\u65E5\\u672C\"\n"
+		// TODO: go-yaml's scanner does not preserve \u, \U, or \x escape sequences in
+		// the Origin field.
+		//
+		// See scanner/scanner.go:455-516 - these cases skip ctx.addOriginBuf() calls,
+		// causing Origin to be truncated (e.g., "\u65E5" becomes "\\").
+		// This makes Content() roundtrip impossible for these escapes.
+		//
+		//	"unicode escape": "text: \"\\u65E5\\u672C\"\n"
 
 		// Edge cases.
 		"colon in value":     "text: \"Note: important\"\n",
@@ -1479,8 +1482,9 @@ func TestNewLines_BlockScalars(t *testing.T) {
 func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 	t.Parallel()
 
-	// The go-yaml lexer places the Position of plain multiline strings (StringType)
-	// on the FIRST line, not the last. This is different from block scalars.
+	// The go-yaml lexer places the Position of plain multiline strings
+	// (StringType) on the FIRST line, not the last.
+	// This is different from block scalars.
 	// This is critical for round-trip fidelity.
 
 	tcs := map[string]struct {
@@ -1614,8 +1618,10 @@ func TestNewLines_ColumnPositionAfterSplit(t *testing.T) {
 	t.Parallel()
 
 	// Test that Column positions are correctly calculated when multiline tokens
-	// are split across lines. For block scalars, each split part should have
-	// Column calculated based on the leading whitespace of that line.
+	// are split across lines.
+	//
+	// For block scalars, each split part should have Column calculated based on
+	// the leading whitespace of that line.
 
 	t.Run("block scalar column positions", func(t *testing.T) {
 		t.Parallel()
@@ -1712,8 +1718,8 @@ func TestEmptyAndZeroValues(t *testing.T) {
 	})
 }
 
-// TestNewLines_BlockScalarPositionBehavior documents and verifies the three distinct
-// Position behaviors for block scalar content in the go-yaml lexer:
+// TestNewLines_BlockScalarPositionBehavior documents and verifies the three
+// distinct Position behaviors for block scalar content in the go-yaml lexer:
 //   - Single-line content: Column > 0 regardless of context
 //   - Multi-line with following content: Column = 0 (marker for first-line position)
 //   - Multi-line standalone/at end: Column > 0 (last-line position)
@@ -1840,9 +1846,10 @@ func TestNewLines_BlockScalarPositionBehavior(t *testing.T) {
 	})
 }
 
-// TestNewLines_BlankLineAbsorption documents how blank lines are handled by the go-yaml
-// lexer: blank lines are absorbed into the previous token's Origin rather than being
-// separate tokens. This test verifies that NewLines correctly handles this behavior.
+// TestNewLines_BlankLineAbsorption documents how blank lines are handled by the
+// go-yaml lexer: blank lines are absorbed into the previous token's Origin
+// rather than being separate tokens.
+// This test verifies that NewLines correctly handles this behavior.
 func TestNewLines_BlankLineAbsorption(t *testing.T) {
 	t.Parallel()
 
@@ -1921,9 +1928,11 @@ func TestNewLines_BlankLineAbsorption(t *testing.T) {
 	})
 }
 
-// TestNewLines_FoldedBlockBlankLines verifies handling of blank lines within folded
-// block scalars. In folded scalars, blank lines have special semantics - they preserve
-// line breaks instead of folding to spaces.
+// TestNewLines_FoldedBlockBlankLines verifies handling of blank lines within
+// folded block scalars.
+//
+// In folded scalars, blank lines have special semantics - they preserve line
+// breaks instead of folding to spaces.
 func TestNewLines_FoldedBlockBlankLines(t *testing.T) {
 	t.Parallel()
 
@@ -2509,9 +2518,11 @@ func TestLine_Number_Fallbacks(t *testing.T) {
 	})
 }
 
-// TestNewLines_WhitespaceType verifies that pure horizontal whitespace parts are
-// assigned SpaceType for correct styling. This handles cases where the go-yaml lexer
-// bundles trailing whitespace (like next line's indentation) with the previous token.
+// TestNewLines_WhitespaceType verifies that pure horizontal whitespace parts
+// are assigned SpaceType for correct styling.
+//
+// This handles cases where the go-yaml lexer bundles trailing whitespace (like
+// next line's indentation) with the previous token.
 func TestNewLines_WhitespaceType(t *testing.T) {
 	t.Parallel()
 

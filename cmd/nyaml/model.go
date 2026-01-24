@@ -85,11 +85,15 @@ func newModel(opts *modelOptions) model {
 	return m
 }
 
+// Init implements [tea.Model].
+//
 //nolint:gocritic // hugeParam: required for tea.Model interface.
 func (m model) Init() tea.Cmd {
 	return nil
 }
 
+// Update implements [tea.Model].
+//
 //nolint:gocritic // hugeParam: required for tea.Model interface.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -202,6 +206,8 @@ func (m *model) applySearch(term string) {
 	m.viewport.SetSearchTerm(term)
 }
 
+// View implements [tea.Model].
+//
 //nolint:gocritic // hugeParam: required for tea.Model interface.
 func (m model) View() tea.View {
 	base := lipgloss.JoinVertical(

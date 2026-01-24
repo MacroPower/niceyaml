@@ -9,7 +9,7 @@ import (
 )
 
 // Override returns the overlay color if valid, otherwise the base color.
-// Unlike blendColors, this does not blend - overlay takes precedence.
+// Unlike [Blend], this does not blend - overlay takes precedence.
 func Override(base, overlay color.Color) color.Color {
 	_, isNoColor := overlay.(lipgloss.NoColor)
 	if overlay == nil || isNoColor {
@@ -24,8 +24,8 @@ func Override(base, overlay color.Color) color.Color {
 }
 
 // Blend blends two colors using LAB color space (50/50 mix).
-// If both colors are nil/NoColor, it returns nil.
-// If one color is nil/NoColor/invisible, it returns the other.
+// If both colors are nil or [lipgloss.NoColor], it returns nil.
+// If one color is nil, [lipgloss.NoColor], or invisible, it returns the other.
 func Blend(c1, c2 color.Color) color.Color {
 	_, isNoColor1 := c1.(lipgloss.NoColor)
 	_, isNoColor2 := c2.(lipgloss.NoColor)
@@ -56,7 +56,8 @@ func Blend(c1, c2 color.Color) color.Color {
 	return cf1.BlendLab(cf2, 0.5)
 }
 
-// BlendStyles blends two styles: colors via LAB blending, transforms composed (overlay wraps base).
+// BlendStyles blends two [*lipgloss.Style] values: colors via LAB blending,
+// transforms composed (overlay wraps base).
 func BlendStyles(base, overlay *lipgloss.Style) *lipgloss.Style {
 	style := *base
 
@@ -96,7 +97,9 @@ func BlendStyles(base, overlay *lipgloss.Style) *lipgloss.Style {
 	return &style
 }
 
-// OverrideStyles applies overlay on top of base: overlay properties replace base properties.
+// OverrideStyles applies overlay on top of base [*lipgloss.Style]: overlay
+// properties replace base properties.
+//
 // Colors are overridden (not blended), transforms are overridden (not composed).
 func OverrideStyles(base, overlay *lipgloss.Style) *lipgloss.Style {
 	style := *base
@@ -119,9 +122,11 @@ func OverrideStyles(base, overlay *lipgloss.Style) *lipgloss.Style {
 	return &style
 }
 
-// Blender provides cached style blending and overriding operations.
+// Blender provides cached [*lipgloss.Style] blending and overriding operations.
+//
 // It assigns unique keys to all styles (including blended results) so that
 // identical blend operations return the same pointer, enabling pointer equality.
+//
 // Create instances with [NewBlender].
 type Blender struct {
 	keys    map[*lipgloss.Style]uint64 // Pointer to key.
@@ -131,7 +136,7 @@ type Blender struct {
 	mu sync.Mutex
 }
 
-// NewBlender creates a new [Blender].
+// NewBlender creates a new [*Blender].
 func NewBlender() *Blender {
 	return &Blender{
 		keys:    make(map[*lipgloss.Style]uint64),
@@ -165,8 +170,11 @@ func (b *Blender) blendKey(base, overlay *lipgloss.Style, override bool) uint64 
 	return key
 }
 
-// Blend blends two styles, caching the result.
-// If override is true, overlay replaces base; if false, colors are blended.
+// Blend blends two [*lipgloss.Style] values, caching the result.
+//
+// If override is true, overlay replaces base (see [OverrideStyles]); if false,
+// colors are blended (see [BlendStyles]).
+//
 // Returns a stable pointer for identical combinations.
 func (b *Blender) Blend(base, overlay *lipgloss.Style, override bool) *lipgloss.Style {
 	b.mu.Lock()

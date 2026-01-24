@@ -14,19 +14,28 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-// ErrGoModNotFound indicates go.mod was not found when searching for module root.
+// ErrGoModNotFound is returned when go.mod cannot be found when searching for
+// the module root directory.
 var ErrGoModNotFound = errors.New("go.mod not found")
 
-// LookupCommentFunc is a factory that creates a comment lookup function.
-// It receives a comment map where keys follow the pattern "pkg.TypeName" for
-// type comments and "pkg.TypeName.FieldName" for field comments. The returned
-// function looks up comments by type and field name (empty field name for
-// type-level comments).
+// LookupCommentFunc is a factory function that creates a comment lookup
+// function from a comment map.
+//
+// The comment map keys follow the pattern "pkg.TypeName" for type comments and
+// "pkg.TypeName.FieldName" for field comments.
+//
+// The returned function looks up comments by [reflect.Type] and field name
+// (empty field name for type-level comments).
+//
+// See [DefaultLookupCommentFunc] for the default implementation.
 type LookupCommentFunc func(commentMap map[string]string) func(t reflect.Type, f string) string
 
 // Generator generates a JSON schema from a Go type using reflection.
+// The underlying schema generation is handled by [jsonschema].
+//
 // When package paths are provided via [WithPackagePaths], it extracts source
-// comments to include as schema descriptions. Uses [github.com/invopop/jsonschema].
+// comments to include as schema descriptions.
+//
 // Create instances with [New].
 type Generator struct {
 	reflector         *jsonschema.Reflector
@@ -45,37 +54,45 @@ type Generator struct {
 //   - [WithTests]
 type Option func(*Generator)
 
-// WithReflector is an [Option] that sets a custom [jsonschema.Reflector].
+// WithReflector is an [Option] that sets a custom [*jsonschema.Reflector].
 func WithReflector(r *jsonschema.Reflector) Option {
 	return func(g *Generator) {
 		g.reflector = r
 	}
 }
 
-// WithLookupCommentFunc is an [Option] that sets a custom comment lookup function.
+// WithLookupCommentFunc is an [Option] that sets a custom [LookupCommentFunc]
+// for transforming source comments into schema descriptions.
 func WithLookupCommentFunc(f LookupCommentFunc) Option {
 	return func(g *Generator) {
 		g.lookupCommentFunc = f
 	}
 }
 
-// WithPackagePaths is an [Option] that sets the package paths for comment lookup.
+// WithPackagePaths is an [Option] that specifies Go package paths to parse for
+// extracting doc comments as schema descriptions.
+//
+// Paths can use "..." wildcards (e.g., "./config/...").
 func WithPackagePaths(paths ...string) Option {
 	return func(g *Generator) {
 		g.packagePaths = paths
 	}
 }
 
-// WithTests is an [Option] that includes test files when loading packages.
+// WithTests is an [Option] that controls whether test files are included when
+// loading packages for comment extraction.
 func WithTests(include bool) Option {
 	return func(g *Generator) {
 		g.tests = include
 	}
 }
 
-// New creates a new [Generator].
-// The reflectTarget is the Go type to generate the schema for.
-// Use [WithPackagePaths] to specify packages for comment lookup.
+// New creates a new [*Generator] for the given Go type.
+//
+// The reflectTarget should be an instance of the type to generate a schema
+// for (typically a zero value like Config{}).
+//
+// Use [WithPackagePaths] to enable doc comment extraction from source files.
 func New(reflectTarget any, opts ...Option) *Generator {
 	g := &Generator{
 		reflector:         new(jsonschema.Reflector),
@@ -89,7 +106,8 @@ func New(reflectTarget any, opts ...Option) *Generator {
 	return g
 }
 
-// Generate creates a JSON schema from the configured Go type and returns it as JSON.
+// Generate creates a JSON schema from the configured Go type and returns it as
+// indented JSON bytes.
 func (g *Generator) Generate() ([]byte, error) {
 	if len(g.packagePaths) > 0 {
 		err := g.addLookupComment()
@@ -148,8 +166,10 @@ func (g *Generator) addLookupComment() error {
 	return nil
 }
 
-// DefaultLookupCommentFunc returns a comment lookup function that combines
-// source comments with pkg.go.dev documentation URLs.
+// DefaultLookupCommentFunc is the default [LookupCommentFunc] used by [New].
+//
+// It combines source comments with pkg.go.dev documentation URLs, formatting
+// the result as the comment text followed by a link to the type's documentation.
 func DefaultLookupCommentFunc(commentMap map[string]string) func(t reflect.Type, f string) string {
 	return func(t reflect.Type, f string) string {
 		typeName := t.Name()
@@ -188,7 +208,8 @@ func DefaultLookupCommentFunc(commentMap map[string]string) func(t reflect.Type,
 	}
 }
 
-// findModuleRoot searches for the go.mod file starting from the current directory and going up.
+// findModuleRoot searches for the go.mod file starting from the current
+// directory and going up.
 func findModuleRoot() (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {
@@ -213,7 +234,8 @@ func findModuleRoot() (string, error) {
 	return "", ErrGoModNotFound
 }
 
-// buildCommentMapForPackage parses Go packages and builds a map of comments for types and fields.
+// buildCommentMapForPackage parses Go packages and builds a map of comments for
+// types and fields.
 func buildCommentMapForPackage(pkg *packages.Package, commentMap map[string]string) {
 	// Walk through all syntax files to extract type and field comments directly.
 	for _, file := range pkg.Syntax {

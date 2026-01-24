@@ -10,7 +10,7 @@ import (
 )
 
 // Profiler manages runtime profiling for CLI applications.
-// It supports CPU, heap, allocs, goroutine, threadcreate, block, and mutex profiles.
+//
 // Create instances with [NewProfiler].
 type Profiler struct {
 	// Internal state.
@@ -37,7 +37,7 @@ func NewProfiler() Profiler {
 	return Profiler{}
 }
 
-// RegisterFlags adds profiling flags to the given [pflag.FlagSet].
+// RegisterFlags adds profiling flags to the given [*pflag.FlagSet].
 func (c *Profiler) RegisterFlags(flags *pflag.FlagSet) {
 	// Profile output paths.
 	flags.StringVar(&c.CPUProfile, "cpu-profile", "", "write CPU profile to file")
@@ -54,7 +54,8 @@ func (c *Profiler) RegisterFlags(flags *pflag.FlagSet) {
 	flags.IntVar(&c.MutexProfileFraction, "mutex-profile-fraction", 1, "mutex profile fraction (1/N sampling)")
 }
 
-// Start configures runtime rates and starts CPU profiling if enabled.
+// Start configures runtime profiling rates and starts CPU profiling if enabled.
+// Call [Profiler.Stop] when profiling is complete to write snapshot profiles.
 func (c *Profiler) Start() error {
 	// Configure profiling rates.
 	runtime.MemProfileRate = c.MemProfileRate
@@ -83,7 +84,7 @@ func (c *Profiler) Start() error {
 	return nil
 }
 
-// Stop stops CPU profiling and writes snapshot profiles.
+// Stop stops CPU profiling and writes all enabled snapshot profiles.
 func (c *Profiler) Stop() error {
 	// Stop CPU profiling.
 	if c.cpuFile != nil {
@@ -98,7 +99,8 @@ func (c *Profiler) Stop() error {
 	return c.writeSnapshots()
 }
 
-// writeSnapshots writes all enabled snapshot profiles.
+// writeSnapshots writes all enabled snapshot profiles (heap, allocs, goroutine,
+// etc.).
 func (c *Profiler) writeSnapshots() error {
 	profiles := []struct {
 		name string
@@ -126,7 +128,7 @@ func (c *Profiler) writeSnapshots() error {
 	return nil
 }
 
-// writeProfile writes a named profile to a file.
+// writeProfile writes a named pprof profile to the given file path.
 func (c *Profiler) writeProfile(name, path string) error {
 	f, err := os.Create(path) //nolint:gosec // Profile path from CLI flag is expected.
 	if err != nil {

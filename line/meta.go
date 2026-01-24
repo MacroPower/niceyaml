@@ -7,7 +7,7 @@ import (
 	"github.com/macropower/niceyaml/style"
 )
 
-// RelativePosition indicates a relative position to a line.
+// RelativePosition indicates a position relative to a [Line].
 type RelativePosition int
 
 const (
@@ -17,30 +17,33 @@ const (
 	Below
 )
 
-// Flag identifies a category for YAML lines.
+// Flag categorizes a [Line] for rendering.
 type Flag int
 
 const (
-	// FlagDefault is the default/fallback for line categories.
+	// FlagDefault is the default category for normal lines.
 	FlagDefault Flag = iota
-	// FlagInserted indicates lines inserted in diff (+).
+	// FlagInserted marks lines as inserted in a diff (rendered with "+").
 	FlagInserted
-	// FlagDeleted indicates lines deleted in diff (-).
+	// FlagDeleted marks lines as deleted in a diff (rendered with "-").
 	FlagDeleted
-	// FlagAnnotation indicates annotation/header lines (no line number).
+	// FlagAnnotation marks annotation-only lines (no line number).
 	FlagAnnotation
 )
 
-// Annotation represents extra content to be added around a line.
+// Annotation represents extra content added around a [Line].
+//
 // It can be used to add comments or notes to the rendered output, without being
 // part of the main token stream.
+//
+// Add annotations using [Line.Annotate].
 type Annotation struct {
 	Content  string
 	Position RelativePosition
 	Col      int // Optional, 0-indexed column position for the annotation.
 }
 
-// String returns the annotation as a string, properly padded to the specified column.
+// String returns the annotation content padded to the specified column.
 func (a Annotation) String() string {
 	if a.Content == "" {
 		return ""
@@ -81,7 +84,7 @@ func (a Annotations) Col() int {
 	return col
 }
 
-// Contents returns the content strings of all annotations.
+// Contents returns the content of each annotation.
 func (a Annotations) Contents() []string {
 	contents := make([]string, len(a))
 
@@ -119,11 +122,16 @@ func (a Annotations) String() string {
 	return padding + strings.Join(contents, "; ")
 }
 
-// Overlay represents an overlay spanning a column range within a single line.
+// Overlay represents a styled column range within a single [Line].
+//
+// Overlays apply visual styles (highlighting, coloring) to specific portions of
+// a line.
+//
+// Add overlays using [Line.Overlay] or [Lines.AddOverlay].
 type Overlay struct {
 	Cols position.Span
 	Kind style.Style
 }
 
-// Overlays is a slice of [Overlay]s for a single line.
+// Overlays is a slice of [Overlay]s for a single [Line].
 type Overlays []Overlay

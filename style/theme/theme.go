@@ -2,11 +2,17 @@ package theme
 
 import "github.com/macropower/niceyaml/style"
 
-// Theme represents a color theme with its name, mode, and style generator.
+// Theme represents a named color theme with its mode and style generator.
+//
+// This type is used internally by the theme registry. Use [List] to discover
+// available theme names and [Styles] to retrieve a theme by name.
 type Theme struct {
+	// Styles returns the [style.Styles] for this theme.
 	Styles func() style.Styles
-	Name   string
-	Mode   style.Mode
+	// Name is the kebab-case identifier for the theme (e.g., "monokai", "dracula").
+	Name string
+	// Mode indicates whether the theme is designed for light or dark backgrounds.
+	Mode style.Mode
 }
 
 var themes = []Theme{
@@ -82,7 +88,10 @@ var themes = []Theme{
 	{XcodeDark, "xcode-dark", style.Dark},
 }
 
-// List returns theme names matching the given [style.Mode].
+// List returns the names of all themes matching the given [style.Mode].
+//
+// Names are kebab-case identifiers (e.g., "monokai", "catppuccin-mocha")
+// suitable for passing to [Styles].
 func List(m style.Mode) []string {
 	var names []string
 	for _, t := range themes {
@@ -94,7 +103,8 @@ func List(m style.Mode) []string {
 	return names
 }
 
-// Styles returns the [style.Styles] for the given theme name.
+// Styles returns the [style.Styles] for the named theme.
+// The boolean reports whether the theme was found.
 func Styles(name string) (style.Styles, bool) {
 	for _, t := range themes {
 		if t.Name == name {

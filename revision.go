@@ -5,7 +5,8 @@ import (
 	"github.com/macropower/niceyaml/style"
 )
 
-// NamedLineSource extends [LineIterator] with a Name and overlay support.
+// NamedLineSource extends [LineIterator] with a name and overlay support.
+//
 // See [Source] for an implementation.
 type NamedLineSource interface {
 	LineIterator
@@ -15,9 +16,10 @@ type NamedLineSource interface {
 	ClearOverlays()
 }
 
-// Revision represents [NamedLineSource] at one or more revisions.
+// Revision represents a [NamedLineSource] at one or more revisions.
 // It may form a linked or doubly-linked list to track changes across revisions.
-// It is not required to have multiple revisions; a single revision is valid.
+// A single revision is valid; multiple revisions are not required.
+//
 // Create instances with [NewRevision].
 type Revision struct {
 	// The previous token collection in the revision sequence.
@@ -30,8 +32,8 @@ type Revision struct {
 	head NamedLineSource
 }
 
-// NewRevision creates a new [Revision]. The provided values are set at the head.
-// You may use [Revision.Append] or [Revision.Prepend] to add more revisions.
+// NewRevision creates a new [*Revision] with the given source at the head.
+// Use [Revision.Append] or [Revision.Prepend] to add more revisions.
 // A builder pattern is supported for values that are known at compile time.
 func NewRevision(li NamedLineSource) *Revision {
 	return &Revision{head: li}
@@ -75,7 +77,7 @@ func (t *Revision) Seek(n int) *Revision {
 	return curr
 }
 
-// Tip goes to the latest revision in the sequence.
+// Tip returns the latest revision in the sequence.
 func (t *Revision) Tip() *Revision {
 	curr := t
 	for curr.next != nil {
@@ -85,7 +87,7 @@ func (t *Revision) Tip() *Revision {
 	return curr
 }
 
-// Origin goes to the original revision in the sequence.
+// Origin returns the original revision in the sequence.
 func (t *Revision) Origin() *Revision {
 	curr := t
 	for curr.prev != nil {
@@ -102,12 +104,12 @@ func (t *Revision) At(index int) *Revision {
 	return t.Origin().Seek(index)
 }
 
-// AtTip returns true if this is the latest revision in the sequence.
+// AtTip reports whether this is the latest revision in the sequence.
 func (t *Revision) AtTip() bool {
 	return t.next == nil
 }
 
-// AtOrigin returns true if this is the original revision in the sequence.
+// AtOrigin reports whether this is the original revision in the sequence.
 func (t *Revision) AtOrigin() bool {
 	return t.prev == nil
 }

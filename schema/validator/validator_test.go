@@ -792,8 +792,10 @@ func TestValidator_PathTarget(t *testing.T) {
 	t.Parallel()
 
 	// This test verifies that the validator correctly chooses PathKey vs PathValue
-	// based on the type of validation error. We verify by checking which part of
-	// the YAML gets highlighted with the error overlay style.
+	// based on the type of validation error.
+	//
+	// We verify by checking which part of the YAML gets highlighted with the error
+	// overlay style.
 
 	newXMLPrinter := func() *niceyaml.Printer {
 		return niceyaml.NewPrinter(
@@ -997,7 +999,8 @@ func TestValidator_PathTarget(t *testing.T) {
 func TestNewValidator_BooleanSchema(t *testing.T) {
 	t.Parallel()
 
-	// Boolean schemas are valid in JSON Schema: true accepts everything, false rejects everything.
+	// Boolean schemas are valid in JSON Schema: true accepts everything, false
+	// rejects everything.
 	tcs := map[string]struct {
 		input          []byte
 		wantAcceptsAll bool

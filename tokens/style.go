@@ -43,7 +43,11 @@ var tokenTypeStyles = map[token.Type]style.Style{
 	token.UnknownType:        style.GenericErrorUnknown,
 }
 
-// TypeStyle returns the [style.Style] for the given [token.Token]'s [token.Type].
+// TypeStyle returns the [style.Style] for the given [*token.Token]'s [token.Type].
+//
+// It handles context-sensitive styling: a string followed by a colon is styled
+// as a mapping key, and tokens preceded by anchors or aliases inherit that
+// styling.
 func TypeStyle(tk *token.Token) style.Style {
 	tts, ok := tokenTypeStyles[getVisualType(tk)]
 	if ok {

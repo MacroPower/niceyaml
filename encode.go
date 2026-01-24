@@ -13,21 +13,22 @@ var PrettyEncoderOptions = []yaml.EncodeOption{
 	yaml.IndentSequence(true),
 }
 
-// Encoder wraps [yaml.Encoder] for convenience.
+// Encoder wraps [*yaml.Encoder] for convenience.
+//
 // Create instances with [NewEncoder].
 type Encoder struct {
 	e *yaml.Encoder
 }
 
-// NewEncoder creates a new [Encoder] by wrapping [yaml.NewEncoder].
-// Any provided [yaml.EncodeOption]s are passed to the underlying [yaml.Encoder].
+// NewEncoder creates a new [*Encoder] that writes to w.
+// Any provided [yaml.EncodeOption]s are passed to the underlying [*yaml.Encoder].
 func NewEncoder(w io.Writer, opts ...yaml.EncodeOption) *Encoder {
 	return &Encoder{
 		e: yaml.NewEncoder(w, opts...),
 	}
 }
 
-// Encode calls [yaml.Encoder.Encode].
+// Encode encodes v as YAML and writes it to the underlying writer.
 func (e *Encoder) Encode(v any) error {
 	return e.e.Encode(v) //nolint:wrapcheck // Return the original error.
 }

@@ -11,17 +11,23 @@ import (
 )
 
 // TokenBuilder is a helper for constructing test tokens.
-// Chain methods to set fields, and call Build() to get the final token.
+//
+// Chain methods to set fields, and call [TokenBuilder.Build] to get the
+// final token.
+//
 // The builder is mutable: each setter modifies the internal state and returns
-// the same builder. Build() returns a clone of the current state, so you can
-// call Build() multiple times at different points in the chain to get
+// the same builder.
+//
+// [TokenBuilder.Build] returns a clone of the current state, so you can call
+// [TokenBuilder.Build] multiple times at different points in the chain to get
 // independent tokens.
+//
 // Create instances with [NewTokenBuilder].
 type TokenBuilder struct {
 	token *token.Token
 }
 
-// NewTokenBuilder creates a new [TokenBuilder] with default values.
+// NewTokenBuilder creates a new [*TokenBuilder] with default values.
 func NewTokenBuilder() *TokenBuilder {
 	return &TokenBuilder{
 		token: &token.Token{
@@ -30,29 +36,29 @@ func NewTokenBuilder() *TokenBuilder {
 	}
 }
 
-// Clone returns a new [TokenBuilder] with a cloned copy of the current token.
-// Use this to create independent builder branches from a common base.
+// Clone returns a new [*TokenBuilder] with a copy of the current token state.
+// Use this to branch from a common base configuration.
 func (b *TokenBuilder) Clone() *TokenBuilder {
 	return &TokenBuilder{
 		token: b.token.Clone(),
 	}
 }
 
-// Type sets the token type.
+// Type sets the [token.Type].
 func (b *TokenBuilder) Type(t token.Type) *TokenBuilder {
 	b.token.Type = t
 
 	return b
 }
 
-// CharacterType sets the token character type.
+// CharacterType sets the [token.CharacterType].
 func (b *TokenBuilder) CharacterType(ct token.CharacterType) *TokenBuilder {
 	b.token.CharacterType = ct
 
 	return b
 }
 
-// Indicator sets the token indicator.
+// Indicator sets the [token.Indicator].
 func (b *TokenBuilder) Indicator(i token.Indicator) *TokenBuilder {
 	b.token.Indicator = i
 
@@ -80,7 +86,7 @@ func (b *TokenBuilder) Error(e string) *TokenBuilder {
 	return b
 }
 
-// Position sets the token position.
+// Position sets the full [token.Position].
 func (b *TokenBuilder) Position(p token.Position) *TokenBuilder {
 	b.token.Position = &p
 
@@ -127,7 +133,8 @@ func (b *TokenBuilder) Build() *token.Token {
 	return b.token.Clone()
 }
 
-// DumpTokenOrigins concatenates all token Origins into a single string.
+// DumpTokenOrigins concatenates all token Origin fields into a single string,
+// reconstructing the original source text.
 func DumpTokenOrigins(tks token.Tokens) string {
 	var sb strings.Builder
 	for _, tk := range tks {
@@ -138,6 +145,8 @@ func DumpTokenOrigins(tks token.Tokens) string {
 }
 
 // RequireTokensValid checks that all tokens and their positions are non-nil.
+// It fails the test immediately if the token counts differ or any token is
+// invalid.
 func RequireTokensValid(t *testing.T, want, got token.Tokens) {
 	t.Helper()
 
@@ -162,6 +171,8 @@ func AssertTokensEqual(t *testing.T, want, got token.Tokens) {
 }
 
 // RequireTokenValid checks that both tokens and their positions are non-nil.
+// It fails the test immediately if either token or its position is nil.
+// The prefix is included in failure messages for identification.
 func RequireTokenValid(t *testing.T, want, got *token.Token, prefix string) {
 	t.Helper()
 
@@ -222,8 +233,8 @@ func diffTokenFields(want, got *token.Token) []string {
 	return diffs
 }
 
-// AssertContentEqual compares two strings for equality, normalizing line endings
-// and trimming leading/trailing newlines.
+// AssertContentEqual compares two strings for equality, normalizing line
+// endings and trimming leading/trailing newlines.
 func AssertContentEqual(t *testing.T, want, got string) {
 	t.Helper()
 	assert.Equal(t, normalizeContent(want), normalizeContent(got), "content mismatch")

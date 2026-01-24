@@ -6,7 +6,7 @@ import (
 	"github.com/macropower/niceyaml/style"
 )
 
-// AlgolNu returns [style.Styles] using algol_nu colors.
+// AlgolNu returns [style.Styles] using algol-nu colors.
 func AlgolNu() style.Styles {
 	base := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#000000")).

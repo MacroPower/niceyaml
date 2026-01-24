@@ -9,39 +9,39 @@ import (
 	"github.com/goccy/go-yaml/token"
 )
 
-// YAMLPath is an alias for [yaml.Path].
+// YAMLPath is a type alias for [yaml.Path].
 type YAMLPath = yaml.Path
 
 // Part represents a specific part of a mapping entry.
 type Part int
 
 const (
-	// PartKey represents the key part of a mapping entry.
+	// PartKey targets the key of a mapping entry.
 	PartKey Part = iota
-	// PartValue represents the value part of a mapping entry.
+	// PartValue targets the value of a mapping entry.
 	PartValue
 )
 
-// Builder builds YAML paths.
+// Builder constructs YAML paths with method chaining.
 //
-// It provides multiple construction options:
-//   - [Builder.Path] builds the underlying [*YAMLPath] directly.
-//   - [Builder.Key] builds a [*Path] using [PartKey].
-//   - [Builder.Value] builds a [*Path] using [PartValue].
+// It provides multiple finalization options:
+//   - [Builder.Path] returns the underlying [*YAMLPath] directly.
+//   - [Builder.Key] returns a [*Path] targeting [PartKey].
+//   - [Builder.Value] returns a [*Path] targeting [PartValue].
 //
 // Create initialized instances with [Root].
 type Builder struct {
 	pb *yaml.PathBuilder
 }
 
-// Root creates a new [*Builder] initialized to the root path ($).
+// Root creates a new [Builder] starting at the root path ($).
 func Root() *Builder {
 	pb := &yaml.PathBuilder{}
 
 	return &Builder{pb: pb.Root()}
 }
 
-// Child adds `.name` for each name to the path.
+// Child appends `.name` selectors for each name to the path.
 func (b *Builder) Child(name ...string) *Builder {
 	for _, n := range name {
 		b.pb = b.pb.Child(n)
@@ -50,7 +50,7 @@ func (b *Builder) Child(name ...string) *Builder {
 	return b
 }
 
-// Index adds `[idx]` for each index to the path.
+// Index appends `[idx]` selectors for each index to the path.
 func (b *Builder) Index(idx ...uint) *Builder {
 	for _, i := range idx {
 		b.pb = b.pb.Index(i)
@@ -59,14 +59,14 @@ func (b *Builder) Index(idx ...uint) *Builder {
 	return b
 }
 
-// IndexAll adds `[*]` to the path.
+// IndexAll appends a `[*]` wildcard selector to the path.
 func (b *Builder) IndexAll() *Builder {
 	b.pb = b.pb.IndexAll()
 
 	return b
 }
 
-// Recursive adds a recursive descent selector to the path.
+// Recursive appends a `..selector` recursive descent selector to the path.
 func (b *Builder) Recursive(selector string) *Builder {
 	b.pb = b.pb.Recursive(selector)
 
@@ -74,12 +74,14 @@ func (b *Builder) Recursive(selector string) *Builder {
 }
 
 // Path finalizes the builder and returns the underlying [*YAMLPath].
-// Use [Builder.Key] or [Builder.Value] instead to get a [*Path] with target information.
+//
+// Use [Builder.Key] or [Builder.Value] instead to get a [*Path] with
+// [Part] targeting.
 func (b *Builder) Path() *YAMLPath {
 	return b.pb.Build()
 }
 
-// Key finalizes the path targeting the key and returns a [*Path].
+// Key finalizes the builder targeting [PartKey] and returns a [*Path].
 func (b *Builder) Key() *Path {
 	return &Path{
 		path:   b.pb.Build(),
@@ -87,7 +89,7 @@ func (b *Builder) Key() *Path {
 	}
 }
 
-// Value finalizes the path targeting the value and returns a [*Path].
+// Value finalizes the builder targeting [PartValue] and returns a [*Path].
 func (b *Builder) Value() *Path {
 	return &Path{
 		path:   b.pb.Build(),
@@ -95,9 +97,10 @@ func (b *Builder) Value() *Path {
 	}
 }
 
-// Path represents a location in a YAML document, combining a [*YAMLPath]
-// with a target [Part] specification (key or value).
-// Create instances by calling [Builder.Key] or [Builder.Value].
+// Path represents a location in a YAML document, combining a [*YAMLPath] with a
+// target [Part] (key or value).
+//
+// Create instances with [Builder.Key] or [Builder.Value].
 type Path struct {
 	path   *YAMLPath
 	target Part
@@ -112,7 +115,7 @@ func (p *Path) Path() *YAMLPath {
 	return p.path
 }
 
-// Part returns the [Part] (key or value target).
+// Part returns the target [Part] (key or value).
 func (p *Path) Part() Part {
 	if p == nil {
 		return PartValue
@@ -121,7 +124,7 @@ func (p *Path) Part() Part {
 	return p.target
 }
 
-// String returns the string representation of the path.
+// String returns the path as a string with a `.(key)` or `.(value)` suffix.
 func (p *Path) String() string {
 	if p == nil || p.path == nil {
 		return ""
@@ -139,9 +142,10 @@ func (p *Path) String() string {
 	}
 }
 
-// Token resolves the token at this path in the given YAML file.
-// If the target is [PartKey] and the path points to a mapping value, returns the key token.
-// Otherwise, returns the value node's token.
+// Token resolves the [token.Token] at this path in the given file.
+//
+// If the target is [PartKey] and the path points to a mapping value, Token
+// returns the key token. Otherwise, it returns the value node's token.
 func (p *Path) Token(file *ast.File) (*token.Token, error) {
 	if p == nil || p.path == nil {
 		return nil, errors.New("nil path")
@@ -162,7 +166,9 @@ func (p *Path) Token(file *ast.File) (*token.Token, error) {
 }
 
 // findKeyToken finds the KEY token for the given node by looking at its parent.
-// Returns nil if the node is not a value in a mapping (e.g., array element or root).
+//
+// Returns nil if the node is not a value in a mapping (e.g., array element or
+// root).
 func findKeyToken(file *ast.File, node ast.Node) *token.Token {
 	if file == nil || node == nil || len(file.Docs) == 0 {
 		return nil

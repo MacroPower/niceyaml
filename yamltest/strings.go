@@ -2,9 +2,13 @@ package yamltest
 
 import "strings"
 
-// JoinLF is a helper to join multiple strings with LF line endings. Example:
+// JoinLF joins strings with LF (\n) line endings.
+// Use this to construct expected test output with explicit line endings.
+// See also [JoinCRLF] for Windows-style line endings.
 //
-//	want: yamltest.JoinLF(
+// Example:
+//
+//	want := yamltest.JoinLF(
 //		"line1",
 //		"line2",
 //		"line3",
@@ -22,9 +26,14 @@ func JoinLF(ss ...string) string {
 	return sb.String()
 }
 
-// JoinCRLF is a helper to join multiple strings with CRLF line endings. Example:
+// JoinCRLF joins strings with CRLF (\r\n) line endings.
+// Use this to construct expected test output with explicit Windows-style line
+// endings.
+// See also [JoinLF] for Unix-style line endings.
 //
-//	want: yamltest.JoinCRLF(
+// Example:
+//
+//	want := yamltest.JoinCRLF(
 //		"line1",
 //		"line2",
 //		"line3",
@@ -44,8 +53,11 @@ func JoinCRLF(ss ...string) string {
 }
 
 // Input is a helper to normalize test input strings.
-// It dedents the string by removing the common leading whitespace from all lines,
-// allowing test inputs to be indented for readability while producing clean output.
+//
+// It dedents the string by removing the common leading whitespace from all
+// lines, allowing test inputs to be indented for readability while producing
+// clean output.
+//
 // At most one leading newline and one trailing newline are stripped.
 func Input(s string) string {
 	// Strip at most one leading newline (allows backtick strings to start on next line).

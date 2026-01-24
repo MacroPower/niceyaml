@@ -1,4 +1,3 @@
-// Package style provides types and constants for YAML syntax highlighting.
 package style
 
 import (
@@ -8,6 +7,9 @@ import (
 )
 
 // Mode represents the color scheme mode of a theme.
+//
+// Used by theme functions to indicate whether they target light or dark
+// backgrounds.
 type Mode int
 
 // Color scheme modes.
@@ -17,14 +19,16 @@ const (
 )
 
 // Style identifies a style category for YAML highlighting.
-// Used as keys in [Styles] maps.
+//
+// Style constants are used as keys in [Styles] maps to associate token
+// categories with [lipgloss.Style] formatting.
 type Style = int
 
 // Style constants for YAML highlighting.
 // Names follow Pygments token naming conventions where applicable.
 const (
 	// Text is a default/fallback style.
-	Text Style = iota + 1000000
+	Text Style = iota + 1_000_000
 	// Comment styles comments (#).
 	Comment
 	// CommentPreproc styles preprocessor comment, e.g.: %YAML, %TAG.
@@ -115,7 +119,8 @@ const (
 
 var (
 	// StyleParent defines the inheritance hierarchy for styles.
-	// Each style maps to its parent style. [Text] is the root and has no parent.
+	// Each style maps to its parent style.
+	// [Text] is the root and has no parent.
 	styleParent = map[Style]Style{
 		Comment:                  Text,
 		CommentPreproc:           Comment,
@@ -176,8 +181,9 @@ func getParent(s Style) Style {
 	return Text
 }
 
-// Styles defines styles for YAML highlighting.
-// Stores pointers for stable identity in comparisons.
+// Styles maps [Style] categories to [*lipgloss.Style] formatting.
+// Pointers are stored for stable identity in comparisons.
+// Create instances with [NewStyles].
 type Styles map[Style]*lipgloss.Style
 
 // StylesOption configures a [Styles] map during construction.
@@ -186,7 +192,8 @@ type Styles map[Style]*lipgloss.Style
 //   - [Set]
 type StylesOption func(Styles)
 
-// Set is a [StylesOption] that overrides the style for the given [Style].
+// Set returns a [StylesOption] that sets the [lipgloss.Style] for a [Style]
+// category.
 //
 //nolint:gocritic // Value semantics preferred for API ergonomics.
 func Set(s Style, ls lipgloss.Style) StylesOption {
@@ -195,13 +202,14 @@ func Set(s Style, ls lipgloss.Style) StylesOption {
 	}
 }
 
-// NewStyles creates a [Styles] map with pre-computed entries.
-// The base style is used for [Text] and inherited by all other styles.
-// Use [Set] options to override specific styles.
+// NewStyles creates a new [Styles] map with inheritance pre-computed.
 //
-// For predefined styles in the hierarchy (e.g., [Comment], [LiteralString]),
-// styles are resolved using inheritance. Custom style keys (like overlay kinds)
-// are stored directly without inheritance resolution.
+// The base style is used for [Text] and inherited by all other categories.
+// Use [Set] options to override specific categories; child categories inherit
+// from their closest defined parent.
+//
+// Custom style keys (such as overlay kinds) are stored directly without
+// inheritance resolution.
 //
 //nolint:gocritic // Value semantics preferred for API ergonomics.
 func NewStyles(base lipgloss.Style, opts ...StylesOption) Styles {
@@ -249,8 +257,8 @@ func NewStyles(base lipgloss.Style, opts ...StylesOption) Styles {
 	return resolved
 }
 
-// Style returns the [lipgloss.Style] for the given [Style] category.
-// Returns an empty [lipgloss.Style] if the style is not defined.
+// Style returns the [*lipgloss.Style] for the given [Style] category.
+// Returns an empty [*lipgloss.Style] if the style is not defined.
 func (s Styles) Style(st Style) *lipgloss.Style {
 	if ls, ok := s[st]; ok {
 		return ls
@@ -259,9 +267,8 @@ func (s Styles) Style(st Style) *lipgloss.Style {
 	return &emptyStyle
 }
 
-// With returns a new [Styles] with the given options applied.
-// This creates a copy; the original [Styles] is not modified.
-// Use [Set] to create options that add or override specific styles.
+// With returns a copy of the [Styles] with the given options applied.
+// The original is not modified.
 func (s Styles) With(opts ...StylesOption) Styles {
 	result := make(Styles, len(s)+len(opts))
 	maps.Copy(result, s)

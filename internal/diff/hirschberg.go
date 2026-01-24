@@ -1,8 +1,11 @@
 package diff
 
-// Hirschberg computes diff operations using Hirschberg's space-optimized LCS algorithm.
+// Hirschberg computes diff operations using Hirschberg's space-optimized
+// LCS algorithm.
+//
 // Time complexity: O(m*n) where m and n are the sequence lengths.
 // Space complexity: O(min(m,n)) using two-row dynamic programming.
+//
 // Create instances with [NewHirschberg].
 type Hirschberg struct {
 	// Working rows for 2-row LCS computation.
@@ -16,7 +19,7 @@ type Hirschberg struct {
 	ops []Op
 }
 
-// NewHirschberg creates a new [Hirschberg] with preallocated buffers.
+// NewHirschberg creates a new [*Hirschberg] with preallocated buffers.
 // The capacity should be at least min(m,n)+1 for the sequences to be compared.
 func NewHirschberg(capacity int) *Hirschberg {
 	return &Hirschberg{
@@ -28,10 +31,15 @@ func NewHirschberg(capacity int) *Hirschberg {
 	}
 }
 
-// Compute compares two string slices and returns diff operations.
-// For equal operations, Index refers to the after sequence.
-// For delete operations, Index refers to the before sequence.
-// For insert operations, Index refers to the after sequence.
+// Compute compares two string slices and returns a sequence of diff operations.
+// Each [Op] contains an [OpKind] and an index into the appropriate sequence:
+//
+//   - [OpEqual]: The element exists in both sequences (index refers to after)
+//   - [OpDelete]: The element exists only in before (index refers to before)
+//   - [OpInsert]: The element exists only in after (index refers to after)
+//
+// Each [OpKind] can be converted to a [line.Flag] using [OpKind.Flag] for
+// integration with the line package.
 func (h *Hirschberg) Compute(before, after []string) []Op {
 	h.ops = h.ops[:0]
 
@@ -142,8 +150,10 @@ func (h *Hirschberg) singleBeforeLine(before, after []string, bStart, aStart, aE
 }
 
 // forward computes LCS lengths going forward from bStart to bMid.
+//
 // Returns a slice where result[j-aStart] is the LCS length of
 // before[bStart:bMid] and after[aStart:aStart+j-aStart].
+//
 // The returned slice uses an internal buffer and is valid until the next call.
 func (h *Hirschberg) forward(before, after []string, bStart, bMid, aStart, aEnd int) []int {
 	n := aEnd - aStart
@@ -181,8 +191,10 @@ func (h *Hirschberg) forward(before, after []string, bStart, bMid, aStart, aEnd 
 }
 
 // backward computes LCS lengths going backward from bEnd to bMid.
-// Returns a slice where result[aEnd-j] is the LCS length of
-// before[bMid:bEnd] and after[j:aEnd].
+//
+// Returns a slice where result[aEnd-j] is the LCS length of before[bMid:bEnd]
+// and after[j:aEnd].
+//
 // The returned slice uses an internal buffer and is valid until the next call.
 func (h *Hirschberg) backward(before, after []string, bMid, bEnd, aStart, aEnd int) []int {
 	n := aEnd - aStart

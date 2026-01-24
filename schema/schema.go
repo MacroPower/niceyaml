@@ -7,12 +7,14 @@ import (
 	"github.com/invopop/jsonschema"
 )
 
-// ErrPropertyNotFound indicates the requested property does not exist in the schema.
+// ErrPropertyNotFound indicates the requested property does not exist in the
+// schema.
 var ErrPropertyNotFound = errors.New("property not found")
 
-// JSON represents a JSON Schema object type.
-// It is an alias for [github.com/invopop/jsonschema.Schema] to allow importing
-// from this package instead of the underlying library.
+// JSON represents a JSON Schema object.
+//
+// It is an alias for [jsonschema.Schema] to allow importing from this package
+// instead of the underlying library.
 //
 // Types can implement schema extension by defining:
 //
@@ -23,7 +25,8 @@ var ErrPropertyNotFound = errors.New("property not found")
 //	}
 type JSON = jsonschema.Schema
 
-// GetProperty retrieves a property from a JSON schema by name.
+// GetProperty retrieves a property from a [*JSON] schema by name.
+// Returns [ErrPropertyNotFound] if the property does not exist.
 func GetProperty(name string, js *JSON) (*JSON, error) {
 	v, ok := js.Properties.Get(name)
 	if !ok {
@@ -33,7 +36,8 @@ func GetProperty(name string, js *JSON) (*JSON, error) {
 	return v, nil
 }
 
-// MustGetProperty is like [GetProperty] but panics on error.
+// MustGetProperty retrieves a property from a [*JSON] schema by name.
+// It is like [GetProperty] but panics if the property does not exist.
 func MustGetProperty(name string, js *JSON) *JSON {
 	v, err := GetProperty(name, js)
 	if err != nil {

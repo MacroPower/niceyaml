@@ -1,4 +1,3 @@
-// Package diff provides diff algorithms for comparing sequences.
 package diff
 
 import "github.com/macropower/niceyaml/line"
@@ -6,10 +5,13 @@ import "github.com/macropower/niceyaml/line"
 // OpKind represents the kind of diff operation.
 type OpKind int
 
-// Diff operation kinds.
+// [OpKind] constants.
 const (
+	// OpEqual indicates the element exists in both sequences.
 	OpEqual OpKind = iota
+	// OpDelete indicates the element exists only in the before sequence.
 	OpDelete
+	// OpInsert indicates the element exists only in the after sequence.
 	OpInsert
 )
 
@@ -28,5 +30,5 @@ func (k OpKind) Flag() line.Flag {
 // Op represents a diff operation with an index into one of the input sequences.
 type Op struct {
 	Kind  OpKind
-	Index int // Index into before (delete/equal) or after (insert/equal) sequence.
+	Index int // Index into before ([OpDelete]) or after ([OpInsert]/[OpEqual]) sequence.
 }

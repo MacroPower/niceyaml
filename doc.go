@@ -1,150 +1,108 @@
-// Package niceyaml provides utilities for working with YAML documents,
-// built on top of [github.com/goccy/go-yaml].
+// Package niceyaml provides utilities for working with YAML documents.
+// It is built using [yaml] and [lipgloss].
 //
-// It enables consistent, intuitive, and predictable experiences for developers
-// and users when working with YAML and YAML-compatible documents.
+// By directly styling YAML tokens a single time, niceyaml is much more
+// consistent, flexible, and performant, when compared to using multiple
+// distinct styling systems.
 //
-// # Line Management
+// It also provides an alternative implementation of go-yaml's source
+// annotations for errors, as well as adapters for use with JSON schema
+// validation.
 //
-// The core abstraction is [Source], which organizes YAML tokens by line number.
-// A [Source] value can be created from various sources:
+// # Usage
 //
-//   - [NewSourceFromString]: Parse YAML from a string
-//   - [NewSourceFromToken]: Build from a single token
-//   - [NewSourceFromTokens]: Build from a token slice
-//
-// Use [WithName] to assign a name to [Source] for identification.
-// Use [Source.File] to parse tokens into an [ast.File] for further processing.
-//
-// [Source.Lines] and [Source.Runes] provide iterators for traversing
-// lines and individual runes with their positions.
-//
-// Each [line.Line] contains the tokens for that line, along with optional metadata:
-//
-//   - [line.Annotation]: Extra content such as error messages or diff headers
-//   - [line.Flag]: Category markers ([line.FlagInserted], [line.FlagDeleted], [line.FlagAnnotation])
-//
-// # Position Tracking
-//
-// [position.Position] represents a 0-indexed line and column location within a document.
-// [position.Range] defines a half-open range [Start, End) for selecting spans
-// of text. Create positions and ranges using [position.New] and [position.NewRange].
-//
-// These types integrate with the [Printer] for highlighting and with the [Finder]
-// for search results.
-//
-// # Revision Tracking
-//
-// [Revision] represents a version of [Source] in a doubly-linked chain,
-// enabling navigation through document history:
-//
-//	origin := niceyaml.NewRevision(original)
-//	tip := origin.Append(modified)
-//	tip.Origin() // returns origin
-//
-// # Diff Generation
-//
-// [FullDiff] and [SummaryDiff] compute differences between two revisions
-// using a longest common subsequence (LCS) algorithm:
-//
-//	full := niceyaml.NewFullDiff(origin, tip)
-//	full.Source()  // all lines with inserted/deleted flags
-//
-//	summary := niceyaml.NewSummaryDiff(origin, tip, 3)
-//	summary.Source()  // changed lines with 3 lines of context
-//
-// The summary output follows unified diff format with hunk headers.
-//
-// # Style System
-//
-// The [style.Style] type identifies token categories for syntax highlighting.
-// [style.Styles] maps style identifiers to lipgloss styles. Use [theme.Charm]
-// for a sensible default palette, or provide a custom [StyleGetter] to
-// the [Printer].
-//
-// # Styled YAML Printing
-//
-// The [Printer] type renders YAML tokens with syntax highlighting via lipgloss.
-// Use [Printer.Print] with any [LineIterator] (such as [*Source]) to render output.
-//
-// Configure printers using [PrinterOption] functions:
-//
-//   - [WithStyle]: Set the container style
-//   - [WithStyles]: Provide custom token styles via [StyleGetter]
-//   - [WithGutter]: Set a gutter function for line prefixes
-//
-// Built-in gutter functions include [DefaultGutter], [DiffGutter],
-// [LineNumberGutter], and [NoGutter].
-//
-// Use [Printer.SetWidth] to enable word wrapping, and
-// [Printer.AddStyleToRange] to highlight specific [position.Range] spans.
-//
-// # Error Formatting
-//
-// The [Error] type wraps errors with YAML source context and precise location
-// information. When printed, errors display the relevant portion of the source
-// with the error location highlighted.
-//
-// Create errors with [NewError] (from a string message) or [NewErrorFrom]
-// (wrapping an existing error), and configure with [ErrorOption] functions:
-//
-//   - [WithSourceLines]: Number of context lines to display
-//   - [WithPath]: YAML path and target (key or value) where the error occurred
-//   - [WithSource]: Source for resolving the error path
-//   - [WithErrorToken]: Token associated with the error
-//   - [WithPrinter]: Customize error source formatting
-//
-// Use [Source.WrapError] to wrap errors with source annotations.
-//
-// # String Finding
-//
-// The [Finder] type searches for strings within YAML tokens, returning
-// [position.Range] values that can be used with [Printer.AddStyleToRange]
-// for highlighting matches. Configure search behavior with [WithNormalizer]
-// to apply text normalization such as [StandardNormalizer] for case-insensitive
-// matching.
-//
-// # YAML Utilities
-//
-// [Encoder] and [Decoder] wrap go-yaml functionality for encoding and
-// decoding YAML documents with consistent error handling and validation.
-// Two validation interfaces are available:
-//
-//   - [Validator]: For self-validation (implemented by decoded types)
-//   - [SchemaValidator]: For schema-based validation (e.g., JSON schema)
-//
-// [Decoder] provides an iterator-based API via [Decoder.Documents], which
-// yields [DocumentDecoder] instances for each document in a multi-document
-// YAML file:
+// Parse YAML into a [Source], then use a [Printer] to render it with syntax
+// highlighting:
 //
 //	source := niceyaml.NewSourceFromString(yamlContent)
+//	printer := niceyaml.NewPrinter()
+//	fmt.Println(printer.Print(source))
+//
+// When errors occur, wrap them with source context to show users exactly where
+// the problem is:
+//
 //	file, err := source.File()
 //	if err != nil {
-//	    return source.WrapError(err)
+//		// Error displays the YAML with the problematic location highlighted.
+//		fmt.Println(source.WrapError(err))
 //	}
+//
+// # Architecture
+//
+// The package centers on [Source], which organizes YAML tokens from go-yaml
+// into [line.Lines].
+//
+// Each line tracks its tokens plus optional metadata: annotations (error
+// messages, diff headers), flags (inserted/deleted), and overlays (style spans
+// for highlighting).
+//
+// This line-oriented structure enables efficient rendering and precise position
+// tracking.
+//
+// [Printer] renders any [LineIterator] (including [*Source]) with syntax
+// highlighting via lipgloss.
+//
+// It supports customizable gutters (line numbers, diff markers), word wrapping,
+// and annotation rendering.
+//
+// Themes from [github.com/macropower/niceyaml/style/theme] provide color
+// palettes; use [theme.Charm] as a sensible default.
+//
+// [Error] wraps errors with YAML source context.
+//
+// When you know the error location (via token or path), [Error.Error] renders
+// surrounding lines with the error position highlighted.
+//
+// Multiple nested errors appear as annotations below their respective lines,
+// with distant errors displayed in separate hunks.
+//
+// # Validation Pipeline
+//
+// For structured validation, [Decoder] iterates over documents in an
+// [*ast.File] and [DocumentDecoder] provides the validation pipeline:
+//
+//	source := niceyaml.NewSourceFromString(yamlContent)
+//	file, _ := source.File()
 //	decoder := niceyaml.NewDecoder(file)
 //	for _, doc := range decoder.Documents() {
-//	    var config Config
-//	    if err := doc.Unmarshal(&config); err != nil {
-//	        return source.WrapError(err)
-//	    }
+//		var config Config
+//		if err := doc.Unmarshal(&config); err != nil {
+//			return source.WrapError(err)
+//		}
 //	}
 //
-// [DocumentDecoder] provides methods for working with individual documents:
-// [DocumentDecoder.Unmarshal] (validates and decodes), [DocumentDecoder.Decode],
-// [DocumentDecoder.ValidateSchema], [DocumentDecoder.GetValue],
-// and their context-aware variants.
+// [DocumentDecoder.Unmarshal] supports two validation hooks: types implementing
+// [SchemaValidator] are validated against an external schema before decoding,
+// and types implementing [Validator] are self-validated after decoding.
 //
-// The [github.com/macropower/niceyaml/paths] package provides [paths.Root] and
-// [paths.Builder] for constructing YAML paths programmatically.
+// Both produce [Error] values with path information that [Source.WrapError] can
+// annotate with source context.
 //
-// # Schema Generation and Validation
+// # Diffs
 //
-// The [github.com/macropower/niceyaml/schema/generator] package provides JSON
-// schema generation from Go types. Use [generator.New] with options
-// like [generator.WithPackagePaths] to include source comments as descriptions.
+// [Revision] chains document versions in a doubly-linked list.
 //
-// The [github.com/macropower/niceyaml/schema/validator] package validates data
-// against JSON schemas. Use [validator.New] to create validators that
-// return [Error] values with precise YAML path information.
+// [FullDiff] and [SummaryDiff] compute line differences using Hirschberg's LCS
+// algorithm:
+//
+//	revs := niceyaml.NewRevision(original).Append(modified)
+//	source, spans := niceyaml.NewSummaryDiff(revs.Origin(), revs.Tip(), 3).Build()
+//	fmt.Println(printer.Print(source, spans...))
+//
+// The diff output uses [line.Flag] to mark inserted/deleted lines and
+// [line.Annotation] for unified diff hunk headers.
+//
+// # Text Search
+//
+// [Finder] locates strings within tokens, returning [position.Range] values
+// suitable for [Source.AddOverlay].
+//
+// Use [StandardNormalizer] with [WithNormalizer] for case-insensitive,
+// diacritic-insensitive matching:
+//
+//	finder := niceyaml.NewFinder(niceyaml.WithNormalizer(niceyaml.NewStandardNormalizer()))
+//	finder.Load(source)
+//	for _, rng := range finder.Find("search term") {
+//		source.AddOverlay(style.GenericInserted, rng)
+//	}
 package niceyaml

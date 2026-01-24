@@ -27,8 +27,10 @@ var (
 	ErrTokenNotFound = errors.New("token not found in source")
 )
 
-// PathPartGetter gets a yaml path and its part.
-// See [*paths.Path] for an implementation.
+// PathPartGetter retrieves a YAML path, its targeted part, and the corresponding
+// token from a parsed file.
+//
+// See [paths.Path] for an implementation.
 type PathPartGetter interface {
 	Path() *paths.YAMLPath
 	Part() paths.Part
@@ -41,22 +43,20 @@ type PathPartGetter interface {
 //   - [WithErrorToken] directly specifies the error location, OR
 //   - [WithPath] combined with [WithSource] to resolve the path
 //
-// Since these conditions must only be satisfied before calling [Error.Error], you may
-// use [Error.SetOption] to supply them at any time and in any context before then.
-// This means that callers may optionally attach any additional context that original
-// [Error] producers might lack, thus avoiding the need for producers to take on any
-// more responsibility than they need to. For example, a [SchemaValidator] that produces
-// [Error]s will be path-aware, and thus should use [WithPath], but it will likely not
-// have access to the [Source].
+// Since these conditions must only be satisfied before calling [Error.Error],
+// you may use [Error.SetOption] to supply them at any time and in any context
+// before then.
 //
-// For convenience, [Source.WrapError] can be used if you only need to add the [Source]
-// without any other [ErrorOption]s.
+// This means that callers may optionally attach any additional context that
+// original [Error] producers might lack, thus avoiding the need for producers
+// to take on any more responsibility than they need to.
 //
-// Additional configuration options:
-//   - [WithErrors] adds nested errors rendered as annotations below their lines
-//   - [WithSourceLines] sets context lines shown around errors (default: 2)
-//   - [WithWidthFunc] or [Error.SetWidth] configures word wrapping
-//   - [WithPrinter] sets a custom [StyledPrinter] for output
+// For example, a [SchemaValidator] that produces [Error]s will be path-aware,
+// and thus should use [WithPath], but it will likely not have access to the
+// [Source].
+//
+// For convenience, [Source.WrapError] can be used if you only need to add the
+// [Source] without any other [ErrorOption]s.
 //
 // Error implements the error interface. Use [Error.Unwrap] with [errors.Is]
 // and [errors.As] to inspect wrapped errors.
@@ -74,16 +74,14 @@ type Error struct {
 	width       int
 }
 
-// NewError creates a new [Error] with the given message.
-// If wrapping an existing error, use [NewErrorFrom] instead.
-// The [Error] can optionally be further configured with [ErrorOption]s.
+// NewError creates a new [*Error] with the given message.
+// Use [NewErrorFrom] instead if wrapping an existing error.
 func NewError(msg string, opts ...ErrorOption) *Error {
 	return NewErrorFrom(errors.New(msg), opts...)
 }
 
-// NewErrorFrom creates a new [Error] from an existing error.
-// If creating a new error with no wrapping, use [NewError] instead.
-// The [Error] can optionally be further configured with [ErrorOption]s.
+// NewErrorFrom creates a new [*Error] wrapping an existing error.
+// Use [NewError] instead if creating an error from a message string.
 func NewErrorFrom(err error, opts ...ErrorOption) *Error {
 	e := &Error{
 		err:         err,
@@ -106,7 +104,8 @@ func NewErrorFrom(err error, opts ...ErrorOption) *Error {
 //   - [WithErrors]
 type ErrorOption func(e *Error)
 
-// WithSourceLines is an [ErrorOption] that sets the number of context lines to show around the error.
+// WithSourceLines is an [ErrorOption] that sets the number of context lines to
+// show around the error.
 func WithSourceLines(lines int) ErrorOption {
 	return func(e *Error) {
 		e.sourceLines = lines
@@ -114,7 +113,9 @@ func WithSourceLines(lines int) ErrorOption {
 }
 
 // WithPath is an [ErrorOption] that sets the YAML path where the error occurred.
-// The [PathPartGetter] provides both the path and whether to highlight the key or value.
+//
+// The [PathPartGetter] provides both the path and whether to highlight the key
+// or value.
 func WithPath(ptg PathPartGetter) ErrorOption {
 	return func(e *Error) {
 		e.pathGetter = ptg
@@ -128,30 +129,35 @@ func WithErrorToken(tk *token.Token) ErrorOption {
 	}
 }
 
-// WithPrinter is an [ErrorOption] that sets the printer used for formatting the error source.
+// WithPrinter is an [ErrorOption] that sets the [StyledPrinter] used for
+// formatting the error source.
 func WithPrinter(p StyledPrinter) ErrorOption {
 	return func(e *Error) {
 		e.printer = p
 	}
 }
 
-// WithSource is an [ErrorOption] that sets the [*Source] for resolving the error path.
+// WithSource is an [ErrorOption] that sets the [*Source] for resolving the
+// error path.
 func WithSource(src *Source) ErrorOption {
 	return func(e *Error) {
 		e.source = src
 	}
 }
 
-// WithWidthFunc is an [ErrorOption] that sets a function to determine the width for word wrapping.
-// This takes precedence over [SetWidth] when both are configured.
+// WithWidthFunc is an [ErrorOption] that sets a function to determine the width
+// for word wrapping.
+// This takes precedence over [Error.SetWidth] when both are configured.
 func WithWidthFunc(fn func() int) ErrorOption {
 	return func(e *Error) {
 		e.widthFunc = fn
 	}
 }
 
-// WithErrors is an [ErrorOption] that adds nested errors to the [Error]. Each nested error has its own
-// YAML path or token and will be rendered as an annotation below its resolved line.
+// WithErrors is an [ErrorOption] that adds nested errors to the [Error].
+//
+// Each nested error has its own YAML path or token and is rendered as an
+// annotation below its resolved line.
 func WithErrors(errs ...*Error) ErrorOption {
 	return func(e *Error) {
 		e.errors = append(e.errors, errs...)
@@ -319,7 +325,7 @@ func (e *Error) Unwrap() []error {
 	return result
 }
 
-// Path returns the [*PathTarget] where the error occurred as a string.
+// Path returns the [PathPartGetter] path where the error occurred as a string.
 func (e *Error) Path() string {
 	if e.pathGetter != nil {
 		return e.pathGetter.Path().String()
@@ -329,17 +335,21 @@ func (e *Error) Path() string {
 }
 
 // errorPosition holds information about a resolved error position.
+//
 // It represents either the main error position (message empty) or a nested
 // error position with annotation text.
 type errorPosition struct {
 	message string            // Error message for annotation (empty for main error).
 	ranges  []position.Range  // Ranges for this error's highlighting.
-	pos     position.Position // 0-indexed position for highlighting and annotation placement.
+	pos     position.Position // Position for highlighting and annotation placement.
 }
 
 // buildHunkSpans groups error line indices into spans based on proximity.
-// Errors are merged when their context windows would be adjacent or overlapping.
-// This ensures there's always at least one line gap between hunks (for the "..." separator).
+//
+// Errors are merged when their context windows would be adjacent or
+// overlapping. This ensures there's always at least one line gap between
+// hunks for the "..." separator.
+//
 // Returns spans with sourceLines context applied and clamped to totalLines.
 func (e *Error) buildHunkSpans(errorLines []int, totalLines int) position.Spans {
 	if len(errorLines) == 0 {
@@ -418,7 +428,8 @@ func (e *Error) resolveNestedError(t *Source, nested *Error) (errorPosition, err
 	}, nil
 }
 
-// collectErrorPositions collects all error positions (main and nested) into a unified slice.
+// collectErrorPositions collects all error positions (main and nested) into a
+// unified slice.
 // If mainToken is provided, it becomes the first position without a message.
 // Nested errors are appended with their messages.
 func (e *Error) collectErrorPositions(t *Source, mainToken *token.Token) []errorPosition {

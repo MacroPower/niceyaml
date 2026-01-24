@@ -17,13 +17,17 @@ import (
 	"github.com/macropower/niceyaml/tokens"
 )
 
+const wrapOnCharacters = " /-"
+
 // StyleGetter retrieves styles by category.
+//
 // See [style.Styles] for an implementation.
 type StyleGetter interface {
 	Style(s style.Style) *lipgloss.Style
 }
 
 // StyledPrinter provides printing capabilities with style support.
+//
 // See [Printer] for an implementation.
 type StyledPrinter interface {
 	Style(s style.Style) *lipgloss.Style
@@ -31,15 +35,53 @@ type StyledPrinter interface {
 	Print(lines LineIterator, spans ...position.Span) string
 }
 
-const wrapOnCharacters = " /-"
-
 // NoGutter is a [GutterFunc] that returns an empty string for all lines.
 var NoGutter GutterFunc = func(GutterContext) string { return "" }
 
-// Printer renders YAML tokens with syntax highlighting using [lipgloss.Style].
-// It supports custom styles, gutters, and styled overlays
-// for highlighting specific positions such as errors.
+// Printer prints YAML with syntax highlighting for terminal output.
+//
+// It accepts a [LineIterator], normally [Source], and produces styled terminal
+// output using [lipgloss.Style]s. It applies syntax highlighting to YAML
+// tokens, with support for customizable gutters, annotations, styled overlays,
+// and word wrapping.
+//
 // Create instances with [NewPrinter].
+//
+// # Rendering
+//
+// Use [Printer.Print] to render lines. When called without spans, it renders all
+// lines. Pass [position.Span] arguments to render specific line spans, which is
+// useful for showing error context or diff hunks:
+//
+//	printer.Print(source)                   // All lines.
+//	printer.Print(source, span1, span2)     // Specific spans.
+//
+// # Gutters
+//
+// Gutters appear at the left edge of each line and typically show line numbers
+// or diff markers. The printer uses [DefaultGutter] by default, which combines
+// line numbers with diff markers (+/-). Other built-in options include
+// [DiffGutter] (markers only), [LineNumberGutter] (numbers only), and [NoGutter].
+//
+// # Overlays
+//
+// Overlays apply visual highlighting to specific column spans within lines.
+// Add overlays to a [Source] via [Source.AddOverlay], then print normally.
+// The printer blends overlay styles with the underlying token styles. This is
+// how error positions and search results are highlighted.
+//
+// # Annotations
+//
+// Annotations are extra text lines rendered above or below a line, outside the
+// token stream. They display error messages, diff hunk headers, or other
+// contextual notes. The printer renders them via [AnnotationFunc], defaulting
+// to [DefaultAnnotation] which prefixes below-line annotations with "^ ".
+//
+// # Word Wrapping
+//
+// Call [Printer.SetWidth] to enable word wrapping at a given width. The printer
+// accounts for gutter width when calculating available content width. Wrapped
+// continuation lines show a "-" marker in the gutter.
 type Printer struct {
 	styles             StyleGetter
 	style              lipgloss.Style
@@ -52,7 +94,7 @@ type Printer struct {
 	wordWrap           bool
 }
 
-// NewPrinter creates a new [Printer].
+// NewPrinter creates a new [*Printer].
 // By default it uses [theme.Charm], [DefaultGutter], and [DefaultAnnotation].
 func NewPrinter(opts ...PrinterOption) *Printer {
 	p := &Printer{
@@ -98,17 +140,26 @@ type GutterContext struct {
 
 // GutterFunc returns the gutter content for a line based on [GutterContext].
 // The returned string is rendered as the leftmost content before the line content.
+//
+// Available gutters:
+//   - [DefaultGutter]
+//   - [DiffGutter]
+//   - [LineNumberGutter]
+//   - [NoGutter]
 type GutterFunc func(GutterContext) string
 
 // AnnotationContext provides context for annotation rendering.
-// It is passed to [AnnotationFunc] to determine the appropriate annotation content.
+//
+// It is passed to [AnnotationFunc] to determine the appropriate annotation
+// content.
 type AnnotationContext struct {
 	Styles      StyleGetter
 	Annotations line.Annotations
 	Position    line.RelativePosition
 }
 
-// AnnotationFunc returns the rendered annotation content based on [AnnotationContext].
+// AnnotationFunc returns the rendered annotation content based on
+// [AnnotationContext].
 type AnnotationFunc func(AnnotationContext) string
 
 // DefaultAnnotation creates an [AnnotationFunc] that renders annotations with
@@ -162,7 +213,9 @@ func renderDiffMarker(ctx GutterContext) string {
 	}
 }
 
-// DefaultGutter creates a [GutterFunc] that renders both line numbers and diff markers.
+// DefaultGutter creates a [GutterFunc] that renders both line numbers and diff
+// markers.
+//
 // This is the default gutter used by [NewPrinter].
 func DefaultGutter() GutterFunc {
 	return func(ctx GutterContext) string {
@@ -170,20 +223,29 @@ func DefaultGutter() GutterFunc {
 	}
 }
 
-// DiffGutter creates a [GutterFunc] that renders diff-style markers only (" ", "+", "-").
-// No line numbers are rendered. Uses [style.GenericInserted] and [style.GenericDeleted] for styling.
+// DiffGutter creates a [GutterFunc] that renders diff-style markers only
+// (" ", "+", "-").
+//
+// No line numbers are rendered.
+//
+// Uses [style.GenericInserted] and [style.GenericDeleted] for styling.
 func DiffGutter() GutterFunc {
 	return renderDiffMarker
 }
 
 // LineNumberGutter creates a [GutterFunc] that renders styled line numbers only.
-// For soft-wrapped continuation lines, renders "   - " as a continuation marker.
-// No diff markers are rendered. Uses [style.Comment] foreground for styling.
+//
+// For soft-wrapped continuation lines, renders " - " as a continuation marker.
+//
+// No diff markers are rendered.
+//
+// Uses [style.Comment] foreground for styling.
 func LineNumberGutter() GutterFunc {
 	return renderLineNumber
 }
 
-// WithStyle is a [PrinterOption] that configures the printer with the given container style.
+// WithStyle is a [PrinterOption] that configures the printer with the given
+// container style.
 //
 //nolint:gocritic // hugeParam: Copying.
 func WithStyle(s lipgloss.Style) PrinterOption {
@@ -193,7 +255,8 @@ func WithStyle(s lipgloss.Style) PrinterOption {
 	}
 }
 
-// WithStyles is a [PrinterOption] that configures the printer with the given [StyleGetter].
+// WithStyles is a [PrinterOption] that configures the printer with the given
+// [StyleGetter].
 func WithStyles(s StyleGetter) PrinterOption {
 	return func(p *Printer) {
 		p.styles = s
@@ -201,7 +264,6 @@ func WithStyles(s StyleGetter) PrinterOption {
 }
 
 // WithGutter is a [PrinterOption] that sets the [GutterFunc] for rendering.
-// Pass [NoGutter] to disable gutters entirely, or [DiffGutter] for diff markers only.
 // By default, [DefaultGutter] is used which renders line numbers and diff markers.
 func WithGutter(fn GutterFunc) PrinterOption {
 	return func(p *Printer) {
@@ -209,25 +271,31 @@ func WithGutter(fn GutterFunc) PrinterOption {
 	}
 }
 
-// WithAnnotationFunc is a [PrinterOption] that sets the [AnnotationFunc] for rendering annotations.
-// By default, [DefaultAnnotation] is used which adds "^ " prefix for [line.Below] annotations.
+// WithAnnotationFunc is a [PrinterOption] that sets the [AnnotationFunc] for
+// rendering annotations.
+//
+// By default, [DefaultAnnotation] is used which adds "^ " prefix for
+// [line.Below] annotations.
 func WithAnnotationFunc(fn AnnotationFunc) PrinterOption {
 	return func(p *Printer) {
 		p.annotationFunc = fn
 	}
 }
 
-// SetWidth sets the width for word wrapping. A width of 0 disables wrapping.
+// SetWidth sets the width for word wrapping.
+// A width of 0 disables wrapping.
 func (p *Printer) SetWidth(width int) {
 	p.width = width
 }
 
-// SetAnnotationsEnabled sets whether annotations are rendered. Defaults to true.
+// SetAnnotationsEnabled sets whether annotations are rendered.
+// Defaults to true.
 func (p *Printer) SetAnnotationsEnabled(enabled bool) {
 	p.annotationsEnabled = enabled
 }
 
-// SetWordWrap sets whether word wrapping is enabled. Defaults to true.
+// SetWordWrap sets whether word wrapping is enabled.
+// Defaults to true.
 // Word wrapping requires a width to be set via [Printer.SetWidth].
 func (p *Printer) SetWordWrap(enabled bool) {
 	p.wordWrap = enabled
@@ -263,7 +331,7 @@ func (p *Printer) Print(lines LineIterator, spans ...position.Span) string {
 	return p.style.Render(sb.String())
 }
 
-// renderLinesInSpan renders lines in the half-open span [span.Start, span.End).
+// renderLinesInSpan renders lines in the given span.
 func (p *Printer) renderLinesInSpan(t LineIterator, span position.Span) string {
 	if t.IsEmpty() {
 		return ""
@@ -360,8 +428,11 @@ func (p *Printer) renderLinesInSpan(t LineIterator, span position.Span) string {
 	return sb.String()
 }
 
-// renderAnnotation renders annotation lines with gutter padding for the given position.
+// renderAnnotation renders annotation lines with gutter padding for the given
+// position.
+//
 // The annotation content uses [AnnotationFunc] for rendering.
+//
 // The gutterWidth parameter enables width calculation for wrapping.
 func (p *Printer) renderAnnotation(
 	sb *strings.Builder,
@@ -457,11 +528,14 @@ func (p *Printer) writeLine(
 	}
 }
 
-// styleLineWithRanges styles a line with range-aware styling.
-// It splits the line into spans based on effective styles (base + overlapping ranges).
-// The pos parameter specifies the 0-indexed visual line and column position.
-// If alwaysBlend is true, range styles always blend with base (used for diff lines).
-// The overlays parameter provides style overlays from Line; pass nil if none.
+// styleLineWithRanges styles a line with range-aware styling. It splits the
+// line into spans based on effective styles (base + overlapping ranges).
+//
+// The pos parameter specifies the visual line and column position. If
+// alwaysBlend is true, range styles always blend with base (used for diff).
+//
+// The overlays parameter provides style overlays from [line.Line]; pass nil if
+// none.
 func (p *Printer) styleLineWithRanges(
 	src string,
 	pos position.Position,
@@ -545,7 +619,9 @@ func (p *Printer) styleLineWithRanges(
 	return sb.String()
 }
 
-// computeStyleBoundaries returns sorted, deduplicated boundary points where styles change.
+// computeStyleBoundaries returns sorted, deduplicated boundary points where
+// styles change.
+//
 // The cols span defines the line segment boundaries.
 func computeStyleBoundaries(active []overlayWithStyle, cols position.Span) []int {
 	boundaries := make([]int, 0, len(active)*2+2)
@@ -571,8 +647,11 @@ type overlayWithStyle struct {
 	cols  position.Span
 }
 
-// computeStyleForPoint computes the effective style at a point given overlapping overlays.
+// computeStyleForPoint computes the effective style at a point given
+// overlapping overlays.
+//
 // This uses pre-filtered overlays from styleLineWithRanges.
+//
 // Results are cached so identical style combinations return the same pointer.
 func (p *Printer) computeStyleForPoint(
 	point int,
@@ -596,7 +675,9 @@ func (p *Printer) computeStyleForPoint(
 }
 
 // contentWidth returns the available width for content after accounting for
-// gutter width. Returns 0 if wrapping is disabled.
+// gutter width.
+//
+// Returns 0 if wrapping is disabled.
 func (p *Printer) contentWidth(gutterWidth int) int {
 	if !p.wordWrap || p.width <= 0 {
 		return 0
@@ -616,8 +697,12 @@ func (p *Printer) wrapContent(content string, gutterWidth int) []string {
 }
 
 // renderTokenLine renders a single line's tokens with syntax highlighting.
-// It handles separator (leading whitespace) and content styling, plus overlays from the Line.
-// The lineIndex parameter is the 0-indexed position in the Lines collection.
+//
+// It handles separator (leading whitespace) and content styling, plus overlays
+// from the [line.Line].
+//
+// The lineIndex parameter is the 0-indexed position in the [line.Lines]
+// collection.
 func (p *Printer) renderTokenLine(lineIndex int, ln line.Line) string {
 	if ln.IsEmpty() {
 		return ""
@@ -666,8 +751,10 @@ func (p *Printer) renderTokenLine(lineIndex int, ln line.Line) string {
 }
 
 // leadingWhitespaceRunes returns the number of runes in the leading whitespace
-// portion of s, up to maxBytes. Returns 0 if maxBytes is invalid or if the
-// prefix contains non-whitespace characters.
+// portion of s, up to maxBytes.
+//
+// Returns 0 if maxBytes is invalid or if the prefix contains non-whitespace
+// characters.
 func leadingWhitespaceRunes(s string, maxBytes int) int {
 	if maxBytes <= 0 || maxBytes > len(s) {
 		return 0

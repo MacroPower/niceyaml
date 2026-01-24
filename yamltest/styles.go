@@ -8,9 +8,14 @@ import (
 	"github.com/macropower/niceyaml/style"
 )
 
-// XMLStyles implements [niceyaml.StyleGetter] using XML-like tags.
-// Each style category wraps content in descriptive tags, e.g., `<comment># text</comment>`.
-// This is useful for testing styled output without dealing with ANSI escape codes.
+// XMLStyles implements [niceyaml.StyleGetter] using XML tags instead of ANSI
+// escape codes.
+//
+// Each [style.Style] category wraps content in descriptive tags, making styled
+// output easy to compare in tests.
+//
+// For example, a comment renders as `<comment># text</comment>`.
+//
 // Create instances with [NewXMLStyles].
 type XMLStyles struct{}
 
@@ -19,7 +24,8 @@ func NewXMLStyles() XMLStyles {
 	return XMLStyles{}
 }
 
-// Style returns a [*lipgloss.Style] that wraps content in XML tags based on the style category.
+// Style returns a [*lipgloss.Style] that wraps content in XML tags based on
+// the [style.Style] category.
 func (x XMLStyles) Style(s style.Style) *lipgloss.Style {
 	tag := styleToTag(s)
 	st := lipgloss.NewStyle().Transform(func(content string) string {

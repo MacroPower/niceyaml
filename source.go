@@ -33,9 +33,32 @@ type LineIterator interface {
 	IsEmpty() bool
 }
 
-// Source represents a collection of [token.Tokens] organized into [line.Lines]
-// with associated metadata.
-// Create instances with [NewSourceFromString], [NewSourceFromToken], or [NewSourceFromTokens].
+// Source is the central type for parsing, displaying, and annotating YAML.
+// It organizes YAML tokens into lines, enabling precise position tracking
+// and styled rendering through [Printer].
+//
+// Typical use involves creating a Source, then passing it to utilities like
+// [Printer] for rendering or [Finder] for searching:
+//
+//	source := NewSourceFromString(yamlContent)
+//	printer := NewPrinter(WithStyles(theme.Charm()))
+//	fmt.Println(printer.Print(source))
+//
+// The token-based line structure enables features that would be difficult
+// with string-based approaches: partial rendering of specific line ranges,
+// accurate diff computation between YAML revisions, and search highlighting
+// that respects token boundaries.
+//
+// For structured access to the YAML content, use the [Source.File] method,
+// which lazily parses the AST. Any parsing errors can be wrapped with source
+// context using [Source.WrapError] for user-friendly error messages.
+//
+// Overlay operations (for highlighting search results or diagnostics) are
+// thread-safe; a Source can be highlighted from multiple goroutines while
+// being rendered.
+//
+// Create instances with [NewSourceFromString], [NewSourceFromToken], or
+// [NewSourceFromTokens].
 type Source struct {
 	name       string
 	lines      line.Lines
@@ -62,31 +85,34 @@ func WithName(name string) SourceOption {
 	}
 }
 
-// WithParserOptions is a [SourceOption] that sets the parser options used when parsing the [Source]
-// into an [*ast.File]. These options are passed to [parser.Parse] in addition
-// to [parser.ParseComments], which is always included.
+// WithParserOptions is a [SourceOption] that sets the parser options used when
+// parsing the [Source] into an [*ast.File].
+//
+// These options are passed to [parser.Parse] in addition to
+// [parser.ParseComments], which is always included.
 func WithParserOptions(opts ...parser.Option) SourceOption {
 	return func(s *Source) {
 		s.parserOpts = opts
 	}
 }
 
-// WithErrorOptions is a [SourceOption] that sets the [ErrorOption]s used when wrapping errors
-// with [Source.WrapError].
+// WithErrorOptions is a [SourceOption] that sets the [ErrorOption]s used when
+// wrapping errors with [Source.WrapError].
 func WithErrorOptions(opts ...ErrorOption) SourceOption {
 	return func(s *Source) {
 		s.errorOpts = opts
 	}
 }
 
-// NewSourceFromString creates a new [Source] from a YAML string using [lexer.Tokenize].
+// NewSourceFromString creates a new [*Source] from a YAML string using
+// [lexer.Tokenize].
 func NewSourceFromString(src string, opts ...SourceOption) *Source {
 	tks := lexer.Tokenize(src)
 
 	return NewSourceFromTokens(tks, opts...)
 }
 
-// NewSourceFromToken creates a new [Source] from a seed [*token.Token].
+// NewSourceFromToken creates a new [*Source] from a seed [*token.Token].
 // It collects all [token.Tokens] by walking the token chain from start to end.
 func NewSourceFromToken(tk *token.Token, opts ...SourceOption) *Source {
 	if tk == nil {
@@ -102,14 +128,15 @@ func NewSourceFromToken(tk *token.Token, opts ...SourceOption) *Source {
 	var tks token.Tokens
 	for ; tk != nil; tk = tk.Next {
 		// Avoid calling tks.Add, since it modifies the token's Next/Prev pointers,
-		// which will race with any reads/writes. Clone will also break equality checks.
+		// which will race with any reads/writes.
+		// Clone will also break equality checks.
 		tks = append(tks, tk)
 	}
 
 	return NewSourceFromTokens(tks, opts...)
 }
 
-// NewSourceFromTokens creates a new [Source] from [token.Tokens].
+// NewSourceFromTokens creates a new [*Source] from [token.Tokens].
 // See [line.NewLines] for details on token splitting behavior.
 func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 	t := &Source{}
@@ -122,20 +149,22 @@ func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 	return t
 }
 
-// Name returns the name of the Source.
+// Name returns the name of the [Source].
 func (s *Source) Name() string {
 	return s.name
 }
 
-// Tokens reconstructs the full [token.Tokens] stream from all [Line]s.
+// Tokens reconstructs the full [token.Tokens] stream from all [line.Line]s.
 // See [line.Lines.Tokens] for details on token recombination behavior.
 func (s *Source) Tokens() token.Tokens {
 	return s.lines.Tokens()
 }
 
-// File returns an [*ast.File] for the Source tokens. The file is lazily
-// parsed on first call using [parser.Parse] with options provided via
-// [WithParserOptions]. Subsequent calls return the cached result.
+// File returns an [*ast.File] for the [Source] tokens.
+//
+// The file is lazily parsed on first call using [parser.Parse] with options
+// provided via [WithParserOptions]. Subsequent calls return the cached result.
+//
 // Any YAML parsing errors are converted to [Error] with source annotations.
 func (s *Source) File() (*ast.File, error) {
 	s.fileOnce.Do(func() {
@@ -187,14 +216,15 @@ func (s *Source) Len() int {
 	return len(s.lines)
 }
 
-// IsEmpty returns true if there are no lines.
+// IsEmpty reports whether there are no lines.
 func (s *Source) IsEmpty() bool {
 	return len(s.lines) == 0
 }
 
 // AllLines returns an iterator over lines within the given spans.
-// If no spans are provided, all lines are iterated.
-// Each iteration yields a [position.Position] and the [line.Line] at that position.
+//
+// If no spans are provided, all lines are iterated. Each iteration yields a
+// [position.Position] and the [line.Line] at that position.
 func (s *Source) AllLines(spans ...position.Span) iter.Seq2[position.Position, line.Line] {
 	return func(yield func(position.Position, line.Line) bool) {
 		s.overlayMu.RLock()
@@ -277,24 +307,25 @@ func (s *Source) AllRunes(ranges ...position.Range) iter.Seq2[position.Position,
 	}
 }
 
-// Line returns the [line.Line] at the given index. Panics if idx is out of range.
+// Line returns the [*line.Line] at the given index.
+// Panics if idx is out of range.
 func (s *Source) Line(idx int) *line.Line {
 	return &s.lines[idx]
 }
 
-// Lines returns all [line.Lines] in the Source.
+// Lines returns all [line.Lines] in the [Source].
 // This returns the internal slice for efficiency; callers should not modify it.
 func (s *Source) Lines() line.Lines {
 	return s.lines
 }
 
-// Content returns the combined content of all [Line]s as a string.
-// [Line]s are joined with newlines.
+// Content returns the combined content of all [line.Line]s as a string.
+// Lines are joined with newlines.
 func (s *Source) Content() string {
 	return s.lines.Content()
 }
 
-// String reconstructs all [Line]s as a string, including any annotations.
+// String reconstructs all [line.Line]s as a string, including any annotations.
 // This should generally only be used for debugging.
 func (s *Source) String() string {
 	return s.lines.String()
@@ -314,16 +345,18 @@ func (s *Source) TokenAt(pos position.Position) *token.Token {
 }
 
 // TokenPositionRangesFromToken returns all position ranges for a given token.
-// Returns nil if the token is nil or not found in the Source.
+// Returns nil if the token is nil or not found in the [Source].
 func (s *Source) TokenPositionRangesFromToken(tk *token.Token) []position.Range {
 	positions := s.lines.TokenPositions(tk)
 	return s.TokenPositionRanges(positions...)
 }
 
-// TokenPositionRanges returns all token position ranges that are part of
-// the same joined token group as the tokens at the given [position.Position]s.
+// TokenPositionRanges returns all token position ranges that are part of the
+// same joined token group as the tokens at the given [position.Position]s.
+//
 // For non-joined lines, returns the range of the token at each given column.
 // Duplicate ranges are removed.
+//
 // Returns nil if no tokens exist at any of the given positions.
 func (s *Source) TokenPositionRanges(positions ...position.Position) []position.Range {
 	allRanges := position.NewRanges()
@@ -340,16 +373,20 @@ func (s *Source) TokenPositionRanges(positions ...position.Position) []position.
 	return allRanges.UniqueValues()
 }
 
-// ContentPositionRangesFromToken returns all position ranges for content
-// of the given token, excluding leading and trailing whitespace.
-// Returns nil if the token is nil or not found in the Source.
+// ContentPositionRangesFromToken returns all position ranges for content of the
+// given token, excluding leading and trailing whitespace.
+//
+// Returns nil if the token is nil or not found in the [Source].
 func (s *Source) ContentPositionRangesFromToken(tk *token.Token) []position.Range {
 	positions := s.lines.TokenPositions(tk)
 	return s.ContentPositionRanges(positions...)
 }
 
 // ContentPositionRanges returns all position ranges for content at the given
-// positions, excluding leading and trailing whitespace. Duplicate ranges are removed.
+// positions, excluding leading and trailing whitespace.
+//
+// Duplicate ranges are removed.
+//
 // Returns nil if no content exists at any of the given positions.
 func (s *Source) ContentPositionRanges(positions ...position.Position) []position.Range {
 	allRanges := position.NewRanges()
@@ -368,7 +405,6 @@ func (s *Source) ContentPositionRanges(positions ...position.Position) []positio
 
 // AddOverlay adds an overlay of the given kind to the specified ranges.
 // Multi-line ranges are split into per-line overlays automatically.
-// The ranges use 0-indexed positions.
 func (s *Source) AddOverlay(kind style.Style, ranges ...position.Range) {
 	s.overlayMu.Lock()
 	defer s.overlayMu.Unlock()

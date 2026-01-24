@@ -6,7 +6,7 @@ import (
 	"github.com/macropower/niceyaml/style"
 )
 
-// RainbowDash returns [style.Styles] using rainbow_dash colors.
+// RainbowDash returns [style.Styles] using rainbow-dash colors.
 func RainbowDash() style.Styles {
 	base := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#4d4d4d")).

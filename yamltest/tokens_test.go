@@ -281,8 +281,6 @@ func TestTokenBuilder(t *testing.T) {
 	t.Run("chaining modifies builder", func(t *testing.T) {
 		t.Parallel()
 
-		// The builder is mutable - setters modify internal state and return
-		// the same builder. Build() returns clones of the current state.
 		b := yamltest.NewTokenBuilder()
 		b.Value("first")
 

@@ -9,28 +9,33 @@ import (
 	"github.com/macropower/niceyaml/position"
 )
 
-// SourceGetter gets a [NamedLineSource].
+// SourceGetter retrieves a [NamedLineSource].
+//
 // See [Revision] for an implementation.
 type SourceGetter interface {
 	Source() NamedLineSource
 }
 
 // FullDiff represents a complete diff between two [SourceGetter]s.
+//
 // Create instances with [NewFullDiff].
 type FullDiff struct {
 	a, b SourceGetter
 }
 
-// NewFullDiff creates a new [FullDiff].
+// NewFullDiff creates a new [*FullDiff].
 func NewFullDiff(a, b SourceGetter) *FullDiff {
 	return &FullDiff{a: a, b: b}
 }
 
-// Build returns a [*Source] representing the diff between the two [SourceGetter]s.
-// The returned Source contains merged tokens from both revisions:
-// unchanged lines use tokens from b, while changed lines include
-// deleted tokens from a followed by inserted tokens from b.
-// Source contains flags for deleted/inserted lines.
+// Build returns a [*Source] representing the diff between the two
+// [SourceGetter]s.
+//
+// The returned [Source] contains merged tokens from both revisions: unchanged
+// lines use tokens from b, while changed lines include deleted tokens from a
+// followed by inserted tokens from b.
+//
+// [Source] contains flags for deleted/inserted lines.
 func (d *FullDiff) Build() *Source {
 	ops := lcsLineDiff(d.a.Source(), d.b.Source())
 
@@ -41,14 +46,16 @@ func (d *FullDiff) Build() *Source {
 }
 
 // SummaryDiff represents a summarized diff between two [SourceGetter]s.
+//
 // Create instances with [NewSummaryDiff].
 type SummaryDiff struct {
 	a, b    SourceGetter
 	context int
 }
 
-// NewSummaryDiff creates a new [SummaryDiff] with the specified context lines.
-// A context of 0 shows only the changed lines. Negative values are treated as 0.
+// NewSummaryDiff creates a new [*SummaryDiff] with the specified context lines.
+// A context of 0 shows only the changed lines.
+// Negative values are treated as 0.
 func NewSummaryDiff(a, b SourceGetter, context int) *SummaryDiff {
 	return &SummaryDiff{a: a, b: b, context: max(0, context)}
 }
@@ -56,7 +63,10 @@ func NewSummaryDiff(a, b SourceGetter, context int) *SummaryDiff {
 // Build returns a [*Source] and line spans for rendering a summarized diff.
 // The source contains all diff lines with flags for deleted/inserted lines.
 // Hunk headers are stored in [line.Annotation.Content] for each hunk's first line.
-// Pass both to [Printer.Print] to render the summary: printer.Print(source, spans...)
+//
+// Pass both to [Printer.Print] to render the summary:
+//
+//	printer.Print(source, spans...)
 func (d *SummaryDiff) Build() (*Source, position.Spans) {
 	ops := lcsLineDiff(d.a.Source(), d.b.Source())
 	name := fmt.Sprintf("%s..%s", d.a.Source().Name(), d.b.Source().Name())
@@ -97,11 +107,12 @@ func (d *SummaryDiff) Build() (*Source, position.Spans) {
 
 // lineOp represents a line in the full diff output.
 type lineOp struct {
-	line line.Line   // Original Line from source.
+	line line.Line   // Original [line.Line] from source.
 	kind diff.OpKind // One of [diff.OpEqual], [diff.OpDelete], [diff.OpInsert].
 }
 
-// opKindDeltas returns the line count deltas this kind affects in before/after files.
+// opKindDeltas returns the line count deltas this kind affects in before/after
+// files.
 func opKindDeltas(k diff.OpKind) (int, int) {
 	switch k {
 	case diff.OpEqual:
@@ -130,7 +141,8 @@ func (ops lineOps) toLines() line.Lines {
 	return lines
 }
 
-// lcsLineDiff computes line operations using Hirschberg's space-optimized LCS algorithm.
+// lcsLineDiff computes line operations using Hirschberg's space-optimized
+// LCS algorithm.
 func lcsLineDiff(before, after LineGetter) []lineOp {
 	beforeLines := before.Lines()
 	afterLines := after.Lines()

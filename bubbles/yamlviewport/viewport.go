@@ -20,13 +20,20 @@ import (
 const defaultHorizontalStep = 6
 
 const (
-	// SearchOverlayKind identifies search match highlights.
+	// SearchOverlayKind identifies search match highlights in the viewport.
+	//
+	// Configure the style via [WithSearchStyle] or by including it in a
+	// [Printer]'s style set.
 	SearchOverlayKind style.Style = iota
 	// SelectedSearchOverlayKind identifies the currently selected search match.
+	//
+	// Configure the style via [WithSelectedSearchStyle] or by including it in a
+	// [Printer]'s style set.
 	SelectedSearchOverlayKind
 )
 
 // Printer prints YAML.
+//
 // See [niceyaml.Printer] for an implementation.
 type Printer interface {
 	Print(lines niceyaml.LineIterator, spans ...position.Span) string
@@ -37,13 +44,15 @@ type Printer interface {
 }
 
 // Finder finds [position.Range]s for a search string.
+//
 // See [niceyaml.Finder] for an implementation.
 type Finder interface {
 	Load(lines niceyaml.LineIterator)
 	Find(search string) []position.Range
 }
 
-// Source represents a text source for the viewport.
+// Source provides access to YAML content as lines and runes with overlay support.
+//
 // See [niceyaml.Source] for an implementation.
 type Source interface {
 	Name() string
@@ -56,15 +65,22 @@ type Source interface {
 }
 
 // DiffMode specifies how diffs are computed between revisions.
+//
+// Use [Model.SetDiffMode] to change the mode, or [Model.ToggleDiffMode] to
+// cycle through modes.
 type DiffMode int
 
 //nolint:grouper // Separate const block needed for iota.
 const (
-	// DiffModeAdjacent shows diff between consecutive revisions.
+	// DiffModeAdjacent compares the current revision with the immediately
+	// preceding revision.
+	// This is the default mode.
 	DiffModeAdjacent DiffMode = iota
-	// DiffModeOrigin shows diff between first revision and current.
+	// DiffModeOrigin compares the current revision with the first (origin)
+	// revision, showing cumulative changes.
 	DiffModeOrigin
-	// DiffModeNone shows current revision without diff.
+	// DiffModeNone displays the current revision without any diff markers, showing
+	// the plain document content.
 	DiffModeNone
 )
 
@@ -104,7 +120,8 @@ func WithSearchStyle(s lipgloss.Style) Option {
 	}
 }
 
-// WithSelectedSearchStyle is an [Option] that sets the style for the currently selected search match.
+// WithSelectedSearchStyle is an [Option] that sets the style for the currently
+// selected search match.
 //
 //nolint:gocritic // hugeParam: Copying.
 func WithSelectedSearchStyle(s lipgloss.Style) Option {
@@ -153,7 +170,8 @@ type Model struct {
 	renderedLines  []string
 	xOffset        int
 	horizontalStep int
-	// MouseWheelDelta is the number of lines to scroll per mouse wheel tick. Default: 3.
+	// MouseWheelDelta is the number of lines to scroll per mouse wheel tick.
+	// Default: 3.
 	MouseWheelDelta  int
 	width            int
 	searchIndex      int
@@ -163,7 +181,8 @@ type Model struct {
 	diffMode         DiffMode
 	// FillHeight pads output with empty lines to fill the viewport height when true.
 	FillHeight bool
-	// MouseWheelEnabled enables mouse wheel scrolling. Default: true.
+	// MouseWheelEnabled enables mouse wheel scrolling.
+	// Default: true.
 	MouseWheelEnabled bool
 	// WrapEnabled enables line wrapping based on viewport width.
 	WrapEnabled bool
@@ -206,7 +225,8 @@ func (m *Model) searchStyles() style.Styles {
 	)
 }
 
-// Init satisfies the [tea.Model] interface.
+// Init implements the [tea.Model] interface.
+// It returns nil because the viewport requires no initialization commands.
 //
 //nolint:gocritic // hugeParam: required by tea.Model interface.
 func (m Model) Init() tea.Cmd {
@@ -247,7 +267,9 @@ func (m *Model) SetPrinter(p Printer) {
 }
 
 // SetTokens replaces the revision history with a single revision.
-// This is a convenience method equivalent to ClearRevisions() followed by AppendRevision(lines).
+//
+// This is a convenience method equivalent to [Model.ClearRevisions] followed by
+// [Model.AppendRevision].
 func (m *Model) SetTokens(lines niceyaml.NamedLineSource) {
 	m.ClearRevisions()
 	m.AppendRevision(lines)
@@ -304,9 +326,9 @@ func (m *Model) RevisionNames() []string {
 	return m.revision.Names()
 }
 
-// GoToRevision sets the current revision index (clamped to valid range).
-// Index 0 shows the first revision without diff.
-// Index 1 to N-1 shows a diff between revisions[index-1] and revisions[index].
+// GoToRevision navigates to the revision at index, clamped to the valid range.
+// Index 0 always shows the first revision without diff markers.
+// Index 1 to N-1 shows a diff based on the current [DiffMode].
 func (m *Model) GoToRevision(index int) {
 	if m.revision == nil {
 		return
@@ -328,7 +350,7 @@ func (m *Model) RevisionCount() int {
 	return m.revision.Len()
 }
 
-// IsAtFirstRevision returns true if at revision index 0.
+// IsAtFirstRevision reports whether the viewport is at revision index 0.
 func (m *Model) IsAtFirstRevision() bool {
 	if m.revision == nil {
 		return true
@@ -337,7 +359,7 @@ func (m *Model) IsAtFirstRevision() bool {
 	return m.revision.AtOrigin()
 }
 
-// IsAtLatestRevision returns true if at the latest revision.
+// IsAtLatestRevision reports whether the viewport is at the latest revision.
 func (m *Model) IsAtLatestRevision() bool {
 	if m.revision == nil {
 		return true
@@ -346,8 +368,11 @@ func (m *Model) IsAtLatestRevision() bool {
 	return m.revision.AtTip()
 }
 
-// IsShowingDiff returns true if currently displaying a diff between revisions.
-// This is true when not at the first revision and [DiffMode] is not [DiffModeNone].
+// IsShowingDiff reports whether the viewport is displaying a diff between
+// revisions.
+//
+// This is true when not at the first revision and [DiffMode] is not
+// [DiffModeNone].
 func (m *Model) IsShowingDiff() bool {
 	return m.revision != nil && !m.revision.AtOrigin() && m.diffMode != DiffModeNone
 }
@@ -414,7 +439,8 @@ func (m *Model) seekRevision(delta int) {
 	m.GotoTop()
 }
 
-// rerender renders the tokens using the Printer with current search highlights.
+// rerender renders the tokens using the [Printer] with current search
+// highlights.
 func (m *Model) rerender() {
 	lines := m.getDisplayLines(nil)
 	if lines == nil {
@@ -492,8 +518,9 @@ func (m *Model) rerenderLine(idx int) {
 	}
 }
 
-// getDiffBaseRevision returns the base revision for diff comparison based on the current diff mode.
-// Returns nil if diff mode is None or revision is nil.
+// getDiffBaseRevision returns the base revision for diff comparison based on
+// the current [DiffMode].
+// Returns nil if diff mode is [DiffModeNone] or revision is nil.
 func (m *Model) getDiffBaseRevision() *niceyaml.Revision {
 	if m.revision == nil {
 		return nil
@@ -509,8 +536,11 @@ func (m *Model) getDiffBaseRevision() *niceyaml.Revision {
 	}
 }
 
-// getDisplayLines returns the lines to display based on current revision and [DiffMode].
-// The makeDiff func is called when a diff should be shown; if nil, uses [niceyaml.NewFullDiff].
+// getDisplayLines returns the lines to display based on current revision and
+// [DiffMode].
+//
+// The makeDiff func is called when a diff should be shown; if nil, uses
+// [niceyaml.NewFullDiff].
 func (m *Model) getDisplayLines(makeDiff func(base, current *niceyaml.Revision) Source) Source {
 	if m.revision == nil {
 		return nil
@@ -534,17 +564,17 @@ func (m *Model) getDisplayLines(makeDiff func(base, current *niceyaml.Revision) 
 	}
 }
 
-// AtTop returns whether the viewport is at the top.
+// AtTop reports whether the viewport is scrolled to the top.
 func (m *Model) AtTop() bool {
 	return m.YOffset() <= 0
 }
 
-// AtBottom returns whether the viewport is at or past the bottom.
+// AtBottom reports whether the viewport is scrolled to or past the bottom.
 func (m *Model) AtBottom() bool {
 	return m.YOffset() >= m.maxYOffset()
 }
 
-// PastBottom returns whether the viewport is scrolled past the last line.
+// PastBottom reports whether the viewport is scrolled past the last line.
 func (m *Model) PastBottom() bool {
 	return m.YOffset() > m.maxYOffset()
 }
@@ -564,7 +594,8 @@ func (m *Model) ScrollPercent() float64 {
 	return clamp(v, 0, 1)
 }
 
-// HorizontalScrollPercent returns the horizontal scroll position as a float between 0 and 1.
+// HorizontalScrollPercent returns the horizontal scroll position as a float
+// between 0 and 1.
 func (m *Model) HorizontalScrollPercent() float64 {
 	if m.xOffset >= m.longestLineWidth-m.maxWidth() {
 		return 1.0
@@ -809,7 +840,8 @@ func (m *Model) navigateSearch(delta int) {
 	m.scrollToCurrentMatch()
 }
 
-// SearchIndex returns the current search match index (0-based), or -1 if no matches.
+// SearchIndex returns the current search match index (0-based), or -1 if no
+// matches.
 func (m *Model) SearchIndex() int {
 	return m.searchIndex
 }
@@ -826,14 +858,13 @@ func (m *Model) scrollToCurrentMatch() {
 	}
 
 	match := m.searchMatches[m.searchIndex]
-	// Line is already 0-indexed in PositionRange.
 	startLine := match.Start.Line
 
 	// Center the match in the viewport.
 	m.SetYOffset(startLine - m.maxHeight()/2)
 }
 
-// Update handles messages.
+// Update processes Bubble Tea messages and returns the updated model.
 //
 //nolint:gocritic // hugeParam: required for tea.Model interface compatibility.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
@@ -964,8 +995,10 @@ func (m Model) View() string {
 }
 
 // ViewSummary renders the viewport with summary diff (changes + context only).
-// The context parameter specifies how many unchanged lines to show around each change.
-// This is useful for showing a condensed diff view instead of the full file.
+//
+// The context parameter specifies how many unchanged lines to show around each
+// change. This is useful for showing a condensed diff view instead of the full
+// file.
 //
 //nolint:gocritic // hugeParam: required for tea.Model interface compatibility.
 func (m Model) ViewSummary(context int) string {

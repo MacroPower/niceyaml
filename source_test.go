@@ -249,8 +249,8 @@ func TestSource_AllRunes_LiteralBlock(t *testing.T) {
 func TestSource_AllRunes_DiffBuiltLines(t *testing.T) {
 	t.Parallel()
 
-	// When Lines are built from a diff, Position.Line should be based on
-	// the visual line index (Line.idx), not the source token position.
+	// When Lines are built from a diff, Position.Line should be based on the
+	// visual line index (Line.idx), not the source token position.
 	// This is critical for Finder to work correctly with diffs.
 
 	before := "key: old\n"
@@ -883,8 +883,9 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		require.Equal(t, 3, result.Len())
 
 		// Query both content lines of the same joined block.
-		// Both positions are within the joined block, so they should return
-		// the same ranges (deduplicated).
+		//
+		// Both positions are within the joined block, so they should return the same
+		// ranges (deduplicated).
 		ranges := result.TokenPositionRanges(
 			position.Position{Line: 1, Col: 0},
 			position.Position{Line: 2, Col: 0},

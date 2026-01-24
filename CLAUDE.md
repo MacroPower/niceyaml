@@ -37,14 +37,18 @@ task docs # Print all package docs
 
 ### Documentation
 
-- Use `[Name]` syntax for Go doc links.
+- Use `[Name]` syntax for Go doc links. Use `[*Name]` for pointer types.
 - Constructors should always begin: `// NewThing creates a new [Thing].`
 - Types with constructors should always note: `// Create instances with [NewThing].`
 - Interfaces should note: `// See [Thing] for an implementation.`
 - Interfaces should have sensible names: `type Builder interface { Build() Thing } // Builder builds [Thing]s.`
 - Functional option types should have a list linking to all functions of that type.
 - Functional options should always have a link to their type.
-- Package docs should explain concepts and usage patterns; do not just enumerate exports.
+- Package docs should explain concepts and usage patterns; **do not enumerate exports**.
+
+**IMPORTANT:** Clear, accurate, natural, and readable language is far more important
+than achieving perfect compliance with the above. As an example, you would not say
+`NewThings creates a new [Thing]s.`, instead say `NewThings creates new [Thing]s.`
 
 ### Testing
 

@@ -3,29 +3,36 @@ package validator
 import "github.com/macropower/niceyaml/paths"
 
 // Schema validates data against a compiled JSON schema.
-// See [jsonschemaAdapter] for an implementation wrapping
-// [github.com/santhosh-tekuri/jsonschema/v6.Schema].
+//
+// The default implementation wraps [jsonschema.Schema].
+// Provide custom implementations via [SchemaCompiler].
 type Schema interface {
 	// Validate validates the given data against the schema.
 	// Returns nil if validation succeeds.
-	// If validation fails, the error may implement [ValidationError]
-	// to provide detailed information about the failure.
+	//
+	// If validation fails, the error may implement [SchemaError] to provide
+	// detailed information about the failure.
 	Validate(data any) error
 }
 
-// SchemaCompiler compiles [Schema]s.
-// See [defaultCompiler] for an implementation wrapping
-// [github.com/santhosh-tekuri/jsonschema/v6.SchemaCompiler].
+// SchemaCompiler compiles JSON schemas into [Schema] instances for validation.
+//
+// The default implementation wraps [jsonschema.Compiler].
+// Provide custom implementations via [WithCompiler].
 type SchemaCompiler interface {
+	// AddResource adds a schema document as a resource at the given URL.
 	AddResource(url string, doc any) error
+
+	// Compile compiles the schema at the given URL and returns a [Schema].
 	Compile(url string) (Schema, error)
 }
 
 // SchemaError provides details about a schema validation failure.
+//
 // Implementations are optional; [Schema.Validate] may return any error.
 // When implemented, enables rich error details including path highlighting.
-// See [jsonschemaValidationError] for an implementation wrapping
-// [github.com/santhosh-tekuri/jsonschema/v6.SchemaError].
+//
+// The default implementation wraps [jsonschema.ValidationError].
 type SchemaError interface {
 	error
 

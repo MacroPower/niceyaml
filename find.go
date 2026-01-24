@@ -18,6 +18,7 @@ import (
 )
 
 // Normalizer transforms strings for comparison (e.g., removing diacritics).
+//
 // See [StandardNormalizer] for an implementation.
 type Normalizer interface {
 	Normalize(in string) string
@@ -31,7 +32,7 @@ type StandardNormalizer struct {
 	transformer transform.Transformer
 }
 
-// NewStandardNormalizer creates a new [StandardNormalizer].
+// NewStandardNormalizer creates a new [*StandardNormalizer].
 func NewStandardNormalizer() *StandardNormalizer {
 	return &StandardNormalizer{
 		transformer: transform.Chain(
@@ -56,10 +57,46 @@ func (n *StandardNormalizer) Normalize(in string) string {
 	return out
 }
 
-// Finder searches for strings within YAML tokens.
-// Create instances with [NewFinder], then call [Finder.Load] to provide
-// the source data. The Finder preprocesses the source when loaded,
-// allowing efficient repeated searches with different search strings.
+// Finder finds strings within YAML tokens, returning [position.Ranges] that can
+// be used to highlight matches in rendered output.
+//
+// The typical use case is search-as-you-type highlighting: the user views YAML
+// content and types a search term, and matching text is highlighted in place.
+//
+// [Finder] solves the challenge of mapping string matches back to their
+// original line and column positions, even when normalization (case folding,
+// diacritic removal) changes the character count.
+//
+// Finder uses a load-once, search-many design. Call [Finder.Load] once with
+// your source data; this builds an internal index that maps character
+// positions in the searchable text back to [position.Position] values in the
+// original. Subsequent calls to [Finder.Find] use this index for efficient
+// lookups without re-parsing.
+//
+// Finder is safe for concurrent use. Multiple goroutines may call
+// [Finder.Find] simultaneously, and [Finder.Load] uses locking to safely
+// update internal state.
+//
+// Example:
+//
+//	// Create finder with case-insensitive matching.
+//	finder := niceyaml.NewFinder(
+//		niceyaml.WithNormalizer(niceyaml.NewStandardNormalizer()),
+//	)
+//	finder.Load(source)
+//
+//	// Find matches and highlight them.
+//	for _, rng := range finder.Find("search term") {
+//		source.AddOverlay(highlightStyle, rng)
+//	}
+//	fmt.Println(printer.Print(source))
+//
+// By default, searches are exact (case-sensitive, no normalization).
+//
+// Use [WithNormalizer] with [StandardNormalizer] for case-insensitive matching
+// that also ignores diacritics (e.g., "cafe" matches "Café").
+//
+// Create instances with [NewFinder].
 type Finder struct {
 	normalizer Normalizer
 	prevLines  LineIterator
@@ -69,8 +106,9 @@ type Finder struct {
 	mu         sync.RWMutex
 }
 
-// NewFinder creates a new [Finder] with the given options.
+// NewFinder creates a new [*Finder].
 // Call [Finder.Load] to provide a [LineIterator] before searching.
+//
 // By default, no normalization is applied. Use [WithNormalizer] to enable
 // case-insensitive or diacritic-insensitive matching.
 func NewFinder(opts ...FinderOption) *Finder {
@@ -88,8 +126,10 @@ func NewFinder(opts ...FinderOption) *Finder {
 //   - [WithNormalizer]
 type FinderOption func(*Finder)
 
-// WithNormalizer is a [FinderOption] that sets a [Normalizer] applied to both the search string
-// and source text before matching. See [StandardNormalizer] for an example.
+// WithNormalizer is a [FinderOption] that sets a [Normalizer] applied to both
+// the search string and source text before matching.
+//
+// See [StandardNormalizer] for an implementation.
 func WithNormalizer(normalizer Normalizer) FinderOption {
 	return func(f *Finder) {
 		f.normalizer = normalizer
@@ -97,8 +137,9 @@ func WithNormalizer(normalizer Normalizer) FinderOption {
 }
 
 // Load preprocesses the given [LineIterator], building the internal source
-// string and position map for searching. This method must be called
-// before using [Finder.Find].
+// string and position map for searching.
+//
+// This method must be called before using [Finder.Find].
 func (f *Finder) Load(lines LineIterator) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -134,8 +175,11 @@ func (f *Finder) buildByteToRuneIndex() {
 }
 
 // Find finds all occurrences of the search string in the preprocessed source.
-// It returns a slice of [position.Range] indicating the start and end positions of each match.
-// Positions are 0-indexed. The slice is provided in the order the matches appear in the source.
+//
+// It returns a slice of [position.Range] indicating the start and end positions
+// of each match. The slice is provided in the order the matches appear in the
+// source.
+//
 // Returns nil if the search string is empty or the finder has no source data.
 func (f *Finder) Find(search string) []position.Range {
 	f.mu.RLock()
@@ -182,10 +226,13 @@ func (f *Finder) Find(search string) []position.Range {
 	return results
 }
 
-// buildSourceAndPositionMap concatenates all token Origins and builds a position map.
-// When a normalizer is set, the returned source is normalized and the position map
-// maps normalized character indices to original positions. This ensures correct
-// position lookup when searching in normalized text.
+// buildSourceAndPositionMap concatenates all token Origins and builds a
+// position map.
+//
+// When a normalizer is set, the returned source is normalized and the position
+// map maps normalized character indices to original positions.
+//
+// This ensures correct position lookup when searching in normalized text.
 func (f *Finder) buildSourceAndPositionMap(lines LineIterator) (string, *positionMap) {
 	var sb strings.Builder
 
@@ -229,7 +276,8 @@ func (f *Finder) buildSourceAndPositionMap(lines LineIterator) (string, *positio
 	return sb.String(), pm
 }
 
-// positionMap maps character indices in a concatenated string to original [position.Position] values.
+// positionMap maps character indices in a concatenated string to original
+// [position.Position] values in the source lines.
 type positionMap struct {
 	indices   []int
 	positions []position.Position
@@ -241,7 +289,8 @@ func (m *positionMap) add(charIndex int, pos position.Position) {
 	m.positions = append(m.positions, pos)
 }
 
-// lookup finds the [position.Position] for a given character index using binary search.
+// lookup finds the [position.Position] for a given character index using
+// binary search.
 func (m *positionMap) lookup(charIndex int) position.Position {
 	if len(m.indices) == 0 {
 		return position.New(0, 0)

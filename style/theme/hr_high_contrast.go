@@ -6,7 +6,7 @@ import (
 	"github.com/macropower/niceyaml/style"
 )
 
-// HrHighContrast returns [style.Styles] using hr_high_contrast colors.
+// HrHighContrast returns [style.Styles] using hr-high-contrast colors.
 func HrHighContrast() style.Styles {
 	base := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#d5d500")).

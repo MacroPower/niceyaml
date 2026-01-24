@@ -1,16 +1,64 @@
-// Package yamlviewport provides a Bubble Tea component for viewing and
-// navigating YAML data structures.
+// Package yamlviewport provides a Bubble Tea component for viewing YAML with
+// syntax highlighting, revision history, and diff visualization.
 //
-// The main type is [Model], which implements [tea.Model] for use with Bubble
-// Tea applications. It supports:
+// # Usage
 //
-//   - Revision history with navigation between versions
-//   - Three diff modes ([DiffModeAdjacent], [DiffModeOrigin], [DiffModeNone])
-//   - Search highlighting via the [Finder] interface
-//   - Keyboard and mouse navigation via [KeyMap]
-//   - Syntax highlighting via [niceyaml.Printer]
+// Create a viewport, set dimensions, and load content:
 //
-// Create a new viewport with [New] and configure it using functional options
-// like [WithPrinter], [WithStyle], and [WithSearchStyle]. Content is set via
-// [Model.SetTokens] or [Model.AppendRevision] using [niceyaml.Source] values.
+//	m := yamlviewport.New()
+//	m.SetWidth(80)
+//	m.SetHeight(24)
+//	m.SetTokens(niceyaml.NewSourceFromString(yamlContent))
+//
+// The viewport implements [tea.Model], so embed it in your Bubble Tea
+// application and forward messages to [Model.Update].
+//
+// # Revision History
+//
+// The viewport tracks multiple versions of a document using
+// [Model.AppendRevision].
+//
+// Users can navigate between revisions with Tab/Shift+Tab
+// (configurable via [KeyMap]).
+//
+// When viewing revision N>0, the viewport automatically computes and displays
+// a diff.
+//
+//	m.AppendRevision(niceyaml.NewSourceFromString(v1, niceyaml.WithName("v1")))
+//	m.AppendRevision(niceyaml.NewSourceFromString(v2, niceyaml.WithName("v2")))
+//	// Now showing diff between v1 and v2.
+//
+// Three diff modes control how comparisons are made:
+//
+//   - [DiffModeAdjacent]: Compare with the previous revision (default).
+//   - [DiffModeOrigin]: Compare with the first revision.
+//   - [DiffModeNone]: Show current revision without diff markers.
+//
+// Use [Model.ViewSummary] instead of [Model.View] to render a condensed diff
+// showing only changed lines with surrounding context.
+//
+// # Search
+//
+// Call [Model.SetSearchTerm] to highlight matches.
+// Navigate between matches with [Model.SearchNext] and [Model.SearchPrevious].
+// The viewport automatically scrolls to center the current match.
+//
+// Search highlighting uses [SearchOverlayKind] for regular matches and
+// [SelectedSearchOverlayKind] for the current match.
+//
+// Configure these styles via [WithSearchStyle] and [WithSelectedSearchStyle],
+// or by including them in your [Printer]'s style set.
+//
+// # Customization
+//
+// Provide a custom [Printer] via [WithPrinter] to control syntax highlighting,
+// line numbers, and annotations.
+//
+// Provide a custom [Finder] via [WithFinder] for specialized search behavior
+// (e.g., case-insensitive matching).
+//
+// Keybindings are fully configurable through [Model.KeyMap].
+//
+// The viewport supports both keyboard navigation (vim-style by default) and
+// mouse wheel scrolling.
 package yamlviewport

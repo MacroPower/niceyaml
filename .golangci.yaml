@@ -167,6 +167,14 @@ linters:
         hugeParam:
           sizeThreshold: 256
 
+    godoclint:
+      default: all
+      disable:
+        - require-pkg-doc
+      options:
+        max-len:
+          length: 80
+
     godot:
       scope: all
       period: true
@@ -246,6 +254,7 @@ linters:
           - gosec
           - gosmopolitan
           - prealloc
+          - godoclint
       - path: _test\.go
         text: "fieldalignment:"
       - source: "= `"

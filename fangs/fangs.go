@@ -9,12 +9,14 @@ import (
 	"github.com/charmbracelet/fang"
 )
 
-// ErrorHandler is an implementation of [fang.ErrorHandler] that preserves
-// multi-line error formatting. Unlike [fang.DefaultErrorHandler], which wraps
-// errors in a lipgloss style that can break multi-line output, this handler
-// applies styling only to the error header, keeping the error message intact.
-// This allows niceyaml errors with source context and annotations to render
-// correctly.
+// ErrorHandler is an implementation of [fang.ErrorHandler]
+// that preserves multi-line error formatting.
+//
+// Unlike [fang.DefaultErrorHandler], which wraps errors in a lipgloss style
+// that can break multi-line output, this handler applies styling only to the
+// error header, keeping the error message intact.
+//
+// This allows [github.com/macropower/niceyaml.Error]s to render correctly.
 //
 //nolint:gocritic // hugeParam: required by [fang.ErrorHandler] signature.
 func ErrorHandler(w io.Writer, styles fang.Styles, err error) {
@@ -48,7 +50,8 @@ func mustN(_ int, err error) {
 	}
 }
 
-// TODO: this is a workaround to detect usage errors.
+// isUsageError returns true if err appears to be a Cobra usage error.
+// This is a workaround until Cobra exposes a proper usage error type.
 // See: https://github.com/spf13/cobra/pull/2266
 func isUsageError(err error) bool {
 	s := err.Error()

@@ -18,7 +18,7 @@ type jsonschemaAdapter struct {
 }
 
 // Validate implements [Schema].
-// Validation errors are wrapped in [jsonschemaValidationError] to implement [SchemaError].
+// Validation errors are wrapped to implement [SchemaError].
 func (a *jsonschemaAdapter) Validate(data any) error {
 	err := a.schema.Validate(data)
 	if err == nil {
@@ -34,13 +34,15 @@ func (a *jsonschemaAdapter) Validate(data any) error {
 	return err
 }
 
-// jsonschemaValidationError wraps [*jsonschema.ValidationError] to implement [SchemaError].
+// jsonschemaValidationError wraps [*jsonschema.ValidationError] to implement
+// [SchemaError].
 type jsonschemaValidationError struct {
 	err *jsonschema.ValidationError
 	p   *message.Printer
 }
 
-// newJSONSchemaValidationError creates a [SchemaError] from a [*jsonschema.ValidationError].
+// newJSONSchemaValidationError creates a [SchemaError] from a
+// [*jsonschema.ValidationError].
 func newJSONSchemaValidationError(err *jsonschema.ValidationError) *jsonschemaValidationError {
 	return &jsonschemaValidationError{
 		err: err,
@@ -94,7 +96,8 @@ func (e *jsonschemaValidationError) IsWrapper() bool {
 	return false
 }
 
-// targetsKey returns true if the error should highlight the key rather than the value.
+// targetsKey returns true if the error should highlight the key rather than
+// the value.
 func (e *jsonschemaValidationError) targetsKey() bool {
 	switch e.err.ErrorKind.(type) {
 	case *kind.AdditionalProperties, *kind.PropertyNames, *kind.Required,
@@ -144,12 +147,13 @@ func buildTargetPath(location []string, targetsKey bool) *paths.Path {
 	return builder.Value()
 }
 
-// defaultCompiler wraps [*jsonschema.Compiler] to implement [SchemaCompiler] with the new [Schema] return type.
+// defaultCompiler wraps [*jsonschema.Compiler] to implement [SchemaCompiler]
+// with the new [Schema] return type.
 type defaultCompiler struct {
 	c *jsonschema.Compiler
 }
 
-// newDefaultCompiler creates a new [defaultCompiler].
+// newDefaultCompiler creates a new default [SchemaCompiler].
 func newDefaultCompiler() *defaultCompiler {
 	return &defaultCompiler{c: jsonschema.NewCompiler()}
 }

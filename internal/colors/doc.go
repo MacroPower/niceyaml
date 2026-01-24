@@ -1,18 +1,51 @@
-// Package colors provides utilities for color and style manipulation.
+// Package colors provides style combination utilities for layered styling.
 //
-// This package is used internally by [niceyaml.Printer] to handle overlapping
-// style ranges when multiple highlights are applied to the same text region.
+// When rendering styled text, multiple style layers may apply to the same region.
 //
-// # Color Functions
+// For example, a YAML key might have syntax highlighting while also being part
+// of an error highlight.
 //
-// [Override] returns the overlay color if valid, otherwise the base color.
-// [Blend] blends two colors using LAB color space for perceptually uniform
-// results, using [github.com/lucasb-eyer/go-colorful].
+// This package provides strategies for combining these overlapping styles into
+// a coherent visual result.
 //
-// # Style Functions
+// # Combination Strategies
 //
-// [BlendStyles] combines two [lipgloss.Style]s: colors are blended via LAB,
-// and transforms are composed (overlay wraps base).
-// [OverrideStyles] applies overlay on top of base: overlay properties replace
-// base properties without blending.
+// Two strategies are available for combining a base style with an overlay:
+//
+// Blending mixes colors in LAB color space for perceptually uniform results.
+//
+// A red syntax color blended with a yellow error highlight produces an orange
+// that visually represents both.
+//
+// Transforms are composed so both apply:
+//
+//	result := BlendStyles(baseStyle, overlayStyle)
+//	// The result.Foreground is a 50/50 LAB blend.
+//	// The result.Transform applies base then overlay.
+//
+// Overriding replaces properties entirely.
+// This is useful when the newer style should completely supersede the base:
+//
+//	result := OverrideStyles(baseStyle, overlayStyle)
+//	// The result.Foreground is overlay's foreground.
+//	// The result.Transform is overlay's transform only.
+//
+// Both strategies handle nil, invisible, and [lipgloss.NoColor] gracefully,
+// falling back to whichever color is actually visible.
+//
+// # Caching with Blender
+//
+// [Blender] caches combination results and assigns unique keys to each style,
+// including derived styles. This enables pointer equality checks.
+//
+// If you blend the same two styles twice, you get the exact same pointer back:
+//
+//	b := NewBlender()
+//	r1 := b.Blend(base, overlay, false)
+//	r2 := b.Blend(base, overlay, false)
+//	// Via pointer equality, r1 == r2.
+//
+// This is valuable when the same style combinations are computed repeatedly
+// during rendering, as it avoids redundant allocations and allows fast equality
+// comparisons.
 package colors

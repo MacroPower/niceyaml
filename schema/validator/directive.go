@@ -13,7 +13,8 @@ import (
 var schemaDirectiveRE = regexp.MustCompile(`yaml-language-server:\s*\$schema=(.+)`)
 
 // Directive represents a parsed yaml-language-server schema directive.
-// Create instances with [ParseDirective].
+//
+// Create instances with [ParseDirective] or [ParseDocumentDirectives].
 type Directive struct {
 	// Position is the position of the comment containing the directive.
 	Position *token.Position
@@ -39,18 +40,24 @@ func ParseDirective(comment string) *Directive {
 	}
 }
 
-// DocumentDirectives maps document indices to their schema directives.
+// DocumentDirectives maps document indices to their schema [Directive]s.
+//
 // Create instances with [ParseDocumentDirectives].
 type DocumentDirectives map[int]*Directive
 
-// ParseDocumentDirectives extracts schema directives for each document in a token stream.
-// Associates comments with documents based on position relative to
-// document headers (---) and non-comment content.
+// ParseDocumentDirectives extracts schema directives for each document in a
+// token stream.
+//
+// Associates comments with documents based on position relative to document
+// headers (---) and non-comment content.
 //
 // A schema directive must appear before any non-comment content in its document
-// to be associated with that document. Comments appearing after content are ignored.
+// to be associated with that document. Comments appearing after content are
+// ignored.
 //
-// For multi-document streams, each document header (---) starts a new document context.
+// For multi-document streams, each document header (---) starts a new document
+// context.
+//
 // The first document (index 0) may not have an explicit header.
 func ParseDocumentDirectives(tks token.Tokens) DocumentDirectives {
 	directives := make(DocumentDirectives)
@@ -65,7 +72,9 @@ func ParseDocumentDirectives(tks token.Tokens) DocumentDirectives {
 	return directives
 }
 
-// parseDocumentDirective extracts a schema directive from a single document's tokens.
+// parseDocumentDirective extracts a schema directive from a single document's
+// tokens.
+//
 // Returns nil if no directive is found before content.
 func parseDocumentDirective(tks token.Tokens) *Directive {
 	for _, tk := range tks {
