@@ -24,7 +24,7 @@
 //	schemaBytes, err := gen.Generate()
 //
 // The resulting JSON Schema can be used with
-// [github.com/macropower/niceyaml/schema/validator] to validate YAML files
+// [jacobcolvin.com/niceyaml/schema/validator] to validate YAML files
 // against your Go type definitions.
 //
 // # Comment Extraction

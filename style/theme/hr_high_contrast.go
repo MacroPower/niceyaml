@@ -3,7 +3,7 @@ package theme
 import (
 	"charm.land/lipgloss/v2"
 
-	"github.com/macropower/niceyaml/style"
+	"jacobcolvin.com/niceyaml/style"
 )
 
 // HrHighContrast returns [style.Styles] using hr-high-contrast colors.

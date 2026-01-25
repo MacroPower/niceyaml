@@ -1,6 +1,6 @@
 package diff
 
-import "github.com/macropower/niceyaml/line"
+import "jacobcolvin.com/niceyaml/line"
 
 // OpKind represents the kind of diff operation.
 type OpKind int

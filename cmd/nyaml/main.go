@@ -11,7 +11,7 @@ import (
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/spf13/cobra"
 
-	"github.com/macropower/niceyaml/fangs"
+	"jacobcolvin.com/niceyaml/fangs"
 )
 
 func main() {

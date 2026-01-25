@@ -9,7 +9,7 @@ import (
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 
-	"github.com/macropower/niceyaml/paths"
+	"jacobcolvin.com/niceyaml/paths"
 )
 
 // jsonschemaAdapter wraps [*jsonschema.Schema] to implement [Schema].

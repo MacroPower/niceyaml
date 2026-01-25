@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/macropower/niceyaml/internal/ansi"
+	"jacobcolvin.com/niceyaml/internal/ansi"
 )
 
 func TestEscape(t *testing.T) {

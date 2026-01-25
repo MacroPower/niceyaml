@@ -16,7 +16,7 @@ import (
 // that can break multi-line output, this handler applies styling only to the
 // error header, keeping the error message intact.
 //
-// This allows [github.com/macropower/niceyaml.Error]s to render correctly.
+// This allows [jacobcolvin.com/niceyaml.Error]s to render correctly.
 //
 //nolint:gocritic // hugeParam: required by [fang.ErrorHandler] signature.
 func ErrorHandler(w io.Writer, styles fang.Styles, err error) {

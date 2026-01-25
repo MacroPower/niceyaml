@@ -6,8 +6,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/macropower/niceyaml/examples/schemas/cafe"
-	"github.com/macropower/niceyaml/schema/generator"
+	"jacobcolvin.com/niceyaml/examples/schemas/cafe"
+	"jacobcolvin.com/niceyaml/schema/generator"
 )
 
 var outFile = flag.String("o", "schema.json", "Output file for the generated schema")
@@ -18,8 +18,8 @@ func main() {
 	gen := generator.New(
 		cafe.NewConfig(),
 		generator.WithPackagePaths(
-			"github.com/macropower/niceyaml/examples/schemas/cafe",
-			"github.com/macropower/niceyaml/examples/schemas/cafe/spec",
+			"jacobcolvin.com/niceyaml/examples/schemas/cafe",
+			"jacobcolvin.com/niceyaml/examples/schemas/cafe/spec",
 		),
 	)
 	jsData, err := gen.Generate()

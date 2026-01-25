@@ -45,7 +45,7 @@
 // It supports customizable gutters (line numbers, diff markers), word wrapping,
 // and annotation rendering.
 //
-// Themes from [github.com/macropower/niceyaml/style/theme] provide color
+// Themes from [jacobcolvin.com/niceyaml/style/theme] provide color
 // palettes; use [theme.Charm] as a sensible default.
 //
 // [Error] wraps errors with YAML source context.

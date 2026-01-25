@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/macropower/niceyaml/schema"
+	"jacobcolvin.com/niceyaml/schema"
 )
 
 // Spec is the cafe specification.

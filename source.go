@@ -11,9 +11,9 @@ import (
 	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
 
-	"github.com/macropower/niceyaml/line"
-	"github.com/macropower/niceyaml/position"
-	"github.com/macropower/niceyaml/style"
+	"jacobcolvin.com/niceyaml/line"
+	"jacobcolvin.com/niceyaml/position"
+	"jacobcolvin.com/niceyaml/style"
 )
 
 // LineGetter provides direct access to lines as a slice.

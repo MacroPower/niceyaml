@@ -3,7 +3,7 @@ package theme
 import (
 	"charm.land/lipgloss/v2"
 
-	"github.com/macropower/niceyaml/style"
+	"jacobcolvin.com/niceyaml/style"
 )
 
 // Emacs returns [style.Styles] using emacs colors.

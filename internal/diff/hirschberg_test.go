@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/macropower/niceyaml/internal/diff"
+	"jacobcolvin.com/niceyaml/internal/diff"
 )
 
 func TestHirschberg_Compute(t *testing.T) {

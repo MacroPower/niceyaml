@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/macropower/niceyaml"
+	"jacobcolvin.com/niceyaml"
 )
 
 func BenchmarkFinderFind(b *testing.B) {

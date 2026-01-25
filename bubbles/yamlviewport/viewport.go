@@ -11,10 +11,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/macropower/niceyaml"
-	"github.com/macropower/niceyaml/line"
-	"github.com/macropower/niceyaml/position"
-	"github.com/macropower/niceyaml/style"
+	"jacobcolvin.com/niceyaml"
+	"jacobcolvin.com/niceyaml/line"
+	"jacobcolvin.com/niceyaml/position"
+	"jacobcolvin.com/niceyaml/style"
 )
 
 const defaultHorizontalStep = 6

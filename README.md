@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <a href="https://pkg.go.dev/github.com/macropower/niceyaml"><img alt="Go Reference" src="https://pkg.go.dev/badge/github.com/macropower/niceyaml.svg"></a>
-  <a href="https://goreportcard.com/report/github.com/macropower/niceyaml"><img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/macropower/niceyaml"></a>
+  <a href="https://pkg.go.dev/jacobcolvin.com/niceyaml"><img alt="Go Reference" src="https://pkg.go.dev/badge/jacobcolvin.com/niceyaml.svg"></a>
+  <a href="https://goreportcard.com/report/jacobcolvin.com/niceyaml"><img alt="Go Report Card" src="https://goreportcard.com/badge/jacobcolvin.com/niceyaml"></a>
   <a href="https://codecov.io/gh/macropower/niceyaml"><img src="https://codecov.io/gh/macropower/niceyaml/graph/badge.svg?token=4TNYTL2WXV"/></a>
   <a href="#-installation"><img alt="Latest tag" src="https://img.shields.io/github/v/tag/macropower/niceyaml?label=version&sort=semver"></a>
   <a href="https://github.com/macropower/niceyaml/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/macropower/niceyaml"></a>
@@ -48,7 +48,7 @@ We also provide a consistent **positioning system** used throughout `niceyaml`. 
 ## Installation
 
 ```sh
-go get github.com/macropower/niceyaml@latest
+go get jacobcolvin.com/niceyaml@latest
 ```
 
 ## Usage
@@ -101,13 +101,13 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [bubbletea]: https://github.com/charmbracelet/bubbletea
 [invopop/jsonschema]: https://github.com/invopop/jsonschema
 [santhosh-tekuri/jsonschema]: https://github.com/santhosh-tekuri/jsonschema
-[niceyaml.Error]: https://pkg.go.dev/github.com/macropower/niceyaml#Error
-[niceyaml.Finder]: https://pkg.go.dev/github.com/macropower/niceyaml#Finder
-[niceyaml.Printer]: https://pkg.go.dev/github.com/macropower/niceyaml#Printer
-[niceyaml.Revision]: https://pkg.go.dev/github.com/macropower/niceyaml#Revision
-[niceyaml.Source]: https://pkg.go.dev/github.com/macropower/niceyaml#Source
-[niceyaml/style/theme]: https://pkg.go.dev/github.com/macropower/niceyaml/style/theme
-[niceyaml/style.Style]: https://pkg.go.dev/github.com/macropower/niceyaml/style#Style
-[niceyaml/bubbles/yamlviewport]: https://pkg.go.dev/github.com/macropower/niceyaml/bubbles/yamlviewport
-[niceyaml/schema/generator]: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generator
-[niceyaml/schema/validator]: https://pkg.go.dev/github.com/macropower/niceyaml/schema/validator
+[niceyaml.Error]: https://pkg.go.dev/jacobcolvin.com/niceyaml#Error
+[niceyaml.Finder]: https://pkg.go.dev/jacobcolvin.com/niceyaml#Finder
+[niceyaml.Printer]: https://pkg.go.dev/jacobcolvin.com/niceyaml#Printer
+[niceyaml.Revision]: https://pkg.go.dev/jacobcolvin.com/niceyaml#Revision
+[niceyaml.Source]: https://pkg.go.dev/jacobcolvin.com/niceyaml#Source
+[niceyaml/style/theme]: https://pkg.go.dev/jacobcolvin.com/niceyaml/style/theme
+[niceyaml/style.Style]: https://pkg.go.dev/jacobcolvin.com/niceyaml/style#Style
+[niceyaml/bubbles/yamlviewport]: https://pkg.go.dev/jacobcolvin.com/niceyaml/bubbles/yamlviewport
+[niceyaml/schema/generator]: https://pkg.go.dev/jacobcolvin.com/niceyaml/schema/generator
+[niceyaml/schema/validator]: https://pkg.go.dev/jacobcolvin.com/niceyaml/schema/validator

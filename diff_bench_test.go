@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/macropower/niceyaml"
+	"jacobcolvin.com/niceyaml"
 )
 
 func BenchmarkFullDiffSource(b *testing.B) {

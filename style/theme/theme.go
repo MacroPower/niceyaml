@@ -1,6 +1,6 @@
 package theme
 
-import "github.com/macropower/niceyaml/style"
+import "jacobcolvin.com/niceyaml/style"
 
 // Theme represents a named color theme with its mode and style generator.
 //

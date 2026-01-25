@@ -9,11 +9,11 @@ import (
 	"github.com/charmbracelet/fang"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/macropower/niceyaml"
-	"github.com/macropower/niceyaml/fangs"
-	"github.com/macropower/niceyaml/lexers"
-	"github.com/macropower/niceyaml/paths"
-	"github.com/macropower/niceyaml/yamltest"
+	"jacobcolvin.com/niceyaml"
+	"jacobcolvin.com/niceyaml/fangs"
+	"jacobcolvin.com/niceyaml/lexers"
+	"jacobcolvin.com/niceyaml/paths"
+	"jacobcolvin.com/niceyaml/yamltest"
 )
 
 func testStyles() fang.Styles {

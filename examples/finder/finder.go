@@ -7,9 +7,9 @@ import (
 
 	_ "embed"
 
-	"github.com/macropower/niceyaml"
-	"github.com/macropower/niceyaml/style"
-	"github.com/macropower/niceyaml/style/theme"
+	"jacobcolvin.com/niceyaml"
+	"jacobcolvin.com/niceyaml/style"
+	"jacobcolvin.com/niceyaml/style/theme"
 )
 
 // highlightKind is a custom style.Style constant for search highlights.

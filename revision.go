@@ -1,8 +1,8 @@
 package niceyaml
 
 import (
-	"github.com/macropower/niceyaml/position"
-	"github.com/macropower/niceyaml/style"
+	"jacobcolvin.com/niceyaml/position"
+	"jacobcolvin.com/niceyaml/style"
 )
 
 // NamedLineSource extends [LineIterator] with a name and overlay support.

@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/macropower/niceyaml/line"
-	"github.com/macropower/niceyaml/position"
-	"github.com/macropower/niceyaml/yamltest"
+	"jacobcolvin.com/niceyaml/line"
+	"jacobcolvin.com/niceyaml/position"
+	"jacobcolvin.com/niceyaml/yamltest"
 )
 
 func TestNewLines_Roundtrip(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/macropower/niceyaml"
+	"jacobcolvin.com/niceyaml"
 )
 
 // generateYAML creates YAML content with the specified number of lines.

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/macropower/niceyaml/internal/diff"
-	"github.com/macropower/niceyaml/line"
-	"github.com/macropower/niceyaml/position"
+	"jacobcolvin.com/niceyaml/internal/diff"
+	"jacobcolvin.com/niceyaml/line"
+	"jacobcolvin.com/niceyaml/position"
 )
 
 // SourceGetter retrieves a [NamedLineSource].

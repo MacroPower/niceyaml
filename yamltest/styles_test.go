@@ -6,8 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/macropower/niceyaml/style"
-	"github.com/macropower/niceyaml/yamltest"
+	"jacobcolvin.com/niceyaml/style"
+	"jacobcolvin.com/niceyaml/yamltest"
 )
 
 func TestNewXMLStyles(t *testing.T) {

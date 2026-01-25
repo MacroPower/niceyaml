@@ -6,7 +6,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/macropower/niceyaml/style"
+	"jacobcolvin.com/niceyaml/style"
 )
 
 func TestStyles_Style_EmptyStyles(t *testing.T) {

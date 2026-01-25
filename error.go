@@ -10,10 +10,10 @@ import (
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
-	"github.com/macropower/niceyaml/line"
-	"github.com/macropower/niceyaml/paths"
-	"github.com/macropower/niceyaml/position"
-	"github.com/macropower/niceyaml/style"
+	"jacobcolvin.com/niceyaml/line"
+	"jacobcolvin.com/niceyaml/paths"
+	"jacobcolvin.com/niceyaml/position"
+	"jacobcolvin.com/niceyaml/style"
 )
 
 var (

@@ -9,7 +9,7 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 
-	"github.com/macropower/niceyaml/paths"
+	"jacobcolvin.com/niceyaml/paths"
 )
 
 // Validator is implemented by types that validate themselves.
@@ -27,7 +27,7 @@ type Validator interface {
 // automatically decodes the document to [any] and calls ValidateSchema before
 // decoding to the typed struct.
 //
-// See [github.com/macropower/niceyaml/schema/validator.Validator] for an
+// See [jacobcolvin.com/niceyaml/schema/validator.Validator] for an
 // implementation.
 type SchemaValidator interface {
 	ValidateSchema(data any) error

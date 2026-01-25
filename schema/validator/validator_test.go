@@ -8,10 +8,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/macropower/niceyaml"
-	"github.com/macropower/niceyaml/paths"
-	"github.com/macropower/niceyaml/schema/validator"
-	"github.com/macropower/niceyaml/yamltest"
+	"jacobcolvin.com/niceyaml"
+	"jacobcolvin.com/niceyaml/paths"
+	"jacobcolvin.com/niceyaml/schema/validator"
+	"jacobcolvin.com/niceyaml/yamltest"
 )
 
 // mockCompiler implements validator.Compiler for testing.

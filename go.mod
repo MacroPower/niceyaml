@@ -1,4 +1,4 @@
-module github.com/macropower/niceyaml
+module jacobcolvin.com/niceyaml
 
 go 1.25.0
 

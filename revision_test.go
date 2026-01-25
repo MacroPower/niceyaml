@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/macropower/niceyaml"
+	"jacobcolvin.com/niceyaml"
 )
 
 func TestRevision_At(t *testing.T) {

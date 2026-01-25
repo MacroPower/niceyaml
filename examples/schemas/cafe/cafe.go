@@ -7,11 +7,11 @@ import (
 
 	_ "embed"
 
-	"github.com/macropower/niceyaml"
-	"github.com/macropower/niceyaml/examples/schemas/cafe/spec"
-	"github.com/macropower/niceyaml/paths"
-	"github.com/macropower/niceyaml/schema"
-	"github.com/macropower/niceyaml/schema/validator"
+	"jacobcolvin.com/niceyaml"
+	"jacobcolvin.com/niceyaml/examples/schemas/cafe/spec"
+	"jacobcolvin.com/niceyaml/paths"
+	"jacobcolvin.com/niceyaml/schema"
+	"jacobcolvin.com/niceyaml/schema/validator"
 )
 
 //go:generate go run ./schemagen/main.go -o cafe.v1.json

@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/macropower/niceyaml"
-	"github.com/macropower/niceyaml/paths"
+	"jacobcolvin.com/niceyaml"
+	"jacobcolvin.com/niceyaml/paths"
 )
 
 func TestRoot(t *testing.T) {

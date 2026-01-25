@@ -8,13 +8,13 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/macropower/niceyaml/internal/ansi"
-	"github.com/macropower/niceyaml/internal/colors"
-	"github.com/macropower/niceyaml/line"
-	"github.com/macropower/niceyaml/position"
-	"github.com/macropower/niceyaml/style"
-	"github.com/macropower/niceyaml/style/theme"
-	"github.com/macropower/niceyaml/tokens"
+	"jacobcolvin.com/niceyaml/internal/ansi"
+	"jacobcolvin.com/niceyaml/internal/colors"
+	"jacobcolvin.com/niceyaml/line"
+	"jacobcolvin.com/niceyaml/position"
+	"jacobcolvin.com/niceyaml/style"
+	"jacobcolvin.com/niceyaml/style/theme"
+	"jacobcolvin.com/niceyaml/tokens"
 )
 
 const wrapOnCharacters = " /-"

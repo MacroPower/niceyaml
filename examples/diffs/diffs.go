@@ -5,7 +5,7 @@ import (
 
 	_ "embed"
 
-	"github.com/macropower/niceyaml"
+	"jacobcolvin.com/niceyaml"
 )
 
 var (

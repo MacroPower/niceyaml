@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/macropower/niceyaml/line"
+	"jacobcolvin.com/niceyaml/line"
 )
 
 func TestAnnotation_String(t *testing.T) {

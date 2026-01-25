@@ -5,7 +5,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/macropower/niceyaml/style"
+	"jacobcolvin.com/niceyaml/style"
 )
 
 // XMLStyles implements [niceyaml.StyleGetter] using XML tags instead of ANSI

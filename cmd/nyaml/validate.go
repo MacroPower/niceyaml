@@ -12,8 +12,8 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
-	"github.com/macropower/niceyaml"
-	"github.com/macropower/niceyaml/schema/validator"
+	"jacobcolvin.com/niceyaml"
+	"jacobcolvin.com/niceyaml/schema/validator"
 )
 
 func validateCmd() *cobra.Command {

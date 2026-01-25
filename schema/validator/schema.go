@@ -1,6 +1,6 @@
 package validator
 
-import "github.com/macropower/niceyaml/paths"
+import "jacobcolvin.com/niceyaml/paths"
 
 // Schema validates data against a compiled JSON schema.
 //

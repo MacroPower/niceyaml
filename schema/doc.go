@@ -28,11 +28,11 @@
 //
 // # Subpackages
 //
-// The [github.com/macropower/niceyaml/schema/generator] package generates JSON
+// The [jacobcolvin.com/niceyaml/schema/generator] package generates JSON
 // schemas from Go types using reflection, extracting source code comments as
 // descriptions.
 //
-// The [github.com/macropower/niceyaml/schema/validator] package validates data
+// The [jacobcolvin.com/niceyaml/schema/validator] package validates data
 // against compiled JSON schemas, returning errors with YAML path information
 // for integration with niceyaml's error display.
 package schema

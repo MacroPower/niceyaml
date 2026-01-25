@@ -5,9 +5,9 @@ import (
 
 	_ "embed"
 
-	"github.com/macropower/niceyaml"
-	"github.com/macropower/niceyaml/position"
-	"github.com/macropower/niceyaml/style/theme"
+	"jacobcolvin.com/niceyaml"
+	"jacobcolvin.com/niceyaml/position"
+	"jacobcolvin.com/niceyaml/style/theme"
 )
 
 //go:embed demo.yaml

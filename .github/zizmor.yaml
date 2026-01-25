@@ -1,5 +1,6 @@
 rules:
   unpinned-uses:
     ignore:
-      - validate.yaml
+      - pages.yaml
       - renovate.yaml
+      - validate.yaml

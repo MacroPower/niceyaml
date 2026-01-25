@@ -6,9 +6,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/macropower/niceyaml"
-	"github.com/macropower/niceyaml/position"
-	"github.com/macropower/niceyaml/yamltest"
+	"jacobcolvin.com/niceyaml"
+	"jacobcolvin.com/niceyaml/position"
+	"jacobcolvin.com/niceyaml/yamltest"
 )
 
 func TestFinder_Find(t *testing.T) {

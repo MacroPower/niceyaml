@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/macropower/niceyaml/schema"
+	"jacobcolvin.com/niceyaml/schema"
 )
 
 // newTestSchema creates a test schema with "name" and "age" properties.

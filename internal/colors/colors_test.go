@@ -8,7 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/macropower/niceyaml/internal/colors"
+	"jacobcolvin.com/niceyaml/internal/colors"
 )
 
 func TestOverride(t *testing.T) {

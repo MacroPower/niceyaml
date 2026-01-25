@@ -6,9 +6,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/macropower/niceyaml"
-	"github.com/macropower/niceyaml/line"
-	"github.com/macropower/niceyaml/yamltest"
+	"jacobcolvin.com/niceyaml"
+	"jacobcolvin.com/niceyaml/line"
+	"jacobcolvin.com/niceyaml/yamltest"
 )
 
 func TestFullDiff_Source(t *testing.T) {

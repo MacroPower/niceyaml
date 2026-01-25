@@ -11,10 +11,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/macropower/niceyaml"
-	"github.com/macropower/niceyaml/paths"
-	"github.com/macropower/niceyaml/style"
-	"github.com/macropower/niceyaml/yamltest"
+	"jacobcolvin.com/niceyaml"
+	"jacobcolvin.com/niceyaml/paths"
+	"jacobcolvin.com/niceyaml/style"
+	"jacobcolvin.com/niceyaml/yamltest"
 )
 
 // customTestError is a test error type for errors.As testing.
