@@ -29,8 +29,10 @@ func TestNewLines_Roundtrip(t *testing.T) {
 		lines := line.NewLines(original)
 		gotTokens := lines.Tokens()
 
-		yamltest.RequireTokensValid(t, original, gotTokens)
-		yamltest.AssertTokensEqual(t, original, gotTokens)
+		require.NoError(t, yamltest.ValidateTokens(original, gotTokens))
+
+		diff := yamltest.CompareTokenSlices(original, gotTokens)
+		require.True(t, diff.Equal(), diff.String())
 	})
 
 	tcs := map[string]string{
@@ -230,9 +232,13 @@ func TestNewLines_Roundtrip(t *testing.T) {
 			lines := line.NewLines(original)
 			gotTokens := lines.Tokens()
 
-			yamltest.RequireTokensValid(t, original, gotTokens)
-			yamltest.AssertTokensEqual(t, original, gotTokens)
-			yamltest.AssertContentEqual(t, input, lines.Content())
+			require.NoError(t, yamltest.ValidateTokens(original, gotTokens))
+
+			tokensDiff := yamltest.CompareTokenSlices(original, gotTokens)
+			require.True(t, tokensDiff.Equal(), tokensDiff.String())
+
+			contentDiff := yamltest.CompareContent(input, lines.Content())
+			require.True(t, contentDiff.Equal(), contentDiff.String())
 		})
 	}
 }
@@ -1203,8 +1209,10 @@ func TestNewLines_OffsetRuneCount(t *testing.T) {
 	resultTks := lines.Tokens()
 
 	// Verify the round-trip preserves lexer output exactly.
-	yamltest.RequireTokensValid(t, originalTks, resultTks)
-	yamltest.AssertTokensEqual(t, originalTks, resultTks)
+	require.NoError(t, yamltest.ValidateTokens(originalTks, resultTks))
+
+	diff := yamltest.CompareTokenSlices(originalTks, resultTks)
+	require.True(t, diff.Equal(), diff.String())
 
 	// Verify specific offset values that prove rune-based counting.
 	// The ":" (MappingValue) token should be at offset 2, not 4.
@@ -1338,8 +1346,10 @@ func TestNewLines_BlockScalars(t *testing.T) {
 				lines := line.NewLines(originalTks)
 				resultTks := lines.Tokens()
 
-				yamltest.RequireTokensValid(t, originalTks, resultTks)
-				yamltest.AssertTokensEqual(t, originalTks, resultTks)
+				require.NoError(t, yamltest.ValidateTokens(originalTks, resultTks))
+
+				diff := yamltest.CompareTokenSlices(originalTks, resultTks)
+				require.True(t, diff.Equal(), diff.String())
 
 				var contentToken *token.Token
 				for _, tk := range resultTks {
@@ -1390,8 +1400,10 @@ func TestNewLines_BlockScalars(t *testing.T) {
 
 				require.NoError(t, lines.Validate())
 
-				yamltest.RequireTokensValid(t, originalTks, resultTks)
-				yamltest.AssertTokensEqual(t, originalTks, resultTks)
+				require.NoError(t, yamltest.ValidateTokens(originalTks, resultTks))
+
+				diff := yamltest.CompareTokenSlices(originalTks, resultTks)
+				require.True(t, diff.Equal(), diff.String())
 			})
 		}
 	})
@@ -1460,8 +1472,10 @@ func TestNewLines_BlockScalars(t *testing.T) {
 				lines := line.NewLines(originalTks)
 				resultTks := lines.Tokens()
 
-				yamltest.RequireTokensValid(t, originalTks, resultTks)
-				yamltest.AssertTokensEqual(t, originalTks, resultTks)
+				require.NoError(t, yamltest.ValidateTokens(originalTks, resultTks))
+
+				diff := yamltest.CompareTokenSlices(originalTks, resultTks)
+				require.True(t, diff.Equal(), diff.String())
 
 				var contentToken *token.Token
 				for _, tk := range resultTks {
@@ -1525,8 +1539,10 @@ func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 			resultTks := lines.Tokens()
 
 			// Verify round-trip fidelity.
-			yamltest.RequireTokensValid(t, originalTks, resultTks)
-			yamltest.AssertTokensEqual(t, originalTks, resultTks)
+			require.NoError(t, yamltest.ValidateTokens(originalTks, resultTks))
+
+			diff := yamltest.CompareTokenSlices(originalTks, resultTks)
+			require.True(t, diff.Equal(), diff.String())
 
 			// Find the multiline StringType token (value with newlines).
 			var contentToken *token.Token
@@ -1591,8 +1607,10 @@ func TestNewLines_QuotedMultilineActualNewlines(t *testing.T) {
 			resultTks := lines.Tokens()
 
 			// Verify round-trip fidelity.
-			yamltest.RequireTokensValid(t, originalTks, resultTks)
-			yamltest.AssertTokensEqual(t, originalTks, resultTks)
+			require.NoError(t, yamltest.ValidateTokens(originalTks, resultTks))
+
+			diff := yamltest.CompareTokenSlices(originalTks, resultTks)
+			require.True(t, diff.Equal(), diff.String())
 
 			// Find the quoted token.
 			var quotedToken *token.Token
@@ -1639,8 +1657,10 @@ func TestNewLines_ColumnPositionAfterSplit(t *testing.T) {
 
 		// Verify round-trip produces identical tokens.
 		resultTks := lines.Tokens()
-		yamltest.RequireTokensValid(t, originalTks, resultTks)
-		yamltest.AssertTokensEqual(t, originalTks, resultTks)
+		require.NoError(t, yamltest.ValidateTokens(originalTks, resultTks))
+
+		diff := yamltest.CompareTokenSlices(originalTks, resultTks)
+		require.True(t, diff.Equal(), diff.String())
 	})
 
 	t.Run("plain multiline column positions", func(t *testing.T) {
@@ -1658,8 +1678,10 @@ func TestNewLines_ColumnPositionAfterSplit(t *testing.T) {
 
 		// Verify round-trip produces identical tokens.
 		resultTks := lines.Tokens()
-		yamltest.RequireTokensValid(t, originalTks, resultTks)
-		yamltest.AssertTokensEqual(t, originalTks, resultTks)
+		require.NoError(t, yamltest.ValidateTokens(originalTks, resultTks))
+
+		diff := yamltest.CompareTokenSlices(originalTks, resultTks)
+		require.True(t, diff.Equal(), diff.String())
 	})
 }
 
@@ -1748,8 +1770,10 @@ func TestNewLines_BlockScalarPositionBehavior(t *testing.T) {
 		lines := line.NewLines(original)
 		result := lines.Tokens()
 
-		yamltest.RequireTokensValid(t, original, result)
-		yamltest.AssertTokensEqual(t, original, result)
+		require.NoError(t, yamltest.ValidateTokens(original, result))
+
+		diff := yamltest.CompareTokenSlices(original, result)
+		require.True(t, diff.Equal(), diff.String())
 
 		content := findBlockScalarContent(result)
 		require.NotNil(t, content, "expected to find block scalar content token")
@@ -1766,8 +1790,10 @@ func TestNewLines_BlockScalarPositionBehavior(t *testing.T) {
 		lines := line.NewLines(original)
 		result := lines.Tokens()
 
-		yamltest.RequireTokensValid(t, original, result)
-		yamltest.AssertTokensEqual(t, original, result)
+		require.NoError(t, yamltest.ValidateTokens(original, result))
+
+		diff := yamltest.CompareTokenSlices(original, result)
+		require.True(t, diff.Equal(), diff.String())
 
 		content := findBlockScalarContent(result)
 		require.NotNil(t, content, "expected to find block scalar content token")
@@ -1784,8 +1810,10 @@ func TestNewLines_BlockScalarPositionBehavior(t *testing.T) {
 		lines := line.NewLines(original)
 		result := lines.Tokens()
 
-		yamltest.RequireTokensValid(t, original, result)
-		yamltest.AssertTokensEqual(t, original, result)
+		require.NoError(t, yamltest.ValidateTokens(original, result))
+
+		diff := yamltest.CompareTokenSlices(original, result)
+		require.True(t, diff.Equal(), diff.String())
 
 		content := findBlockScalarContent(result)
 		require.NotNil(t, content, "expected to find block scalar content token")
@@ -1802,8 +1830,10 @@ func TestNewLines_BlockScalarPositionBehavior(t *testing.T) {
 		lines := line.NewLines(original)
 		result := lines.Tokens()
 
-		yamltest.RequireTokensValid(t, original, result)
-		yamltest.AssertTokensEqual(t, original, result)
+		require.NoError(t, yamltest.ValidateTokens(original, result))
+
+		diff := yamltest.CompareTokenSlices(original, result)
+		require.True(t, diff.Equal(), diff.String())
 
 		content := findBlockScalarContent(result)
 		require.NotNil(t, content, "expected to find block scalar content token")
@@ -1820,8 +1850,10 @@ func TestNewLines_BlockScalarPositionBehavior(t *testing.T) {
 		lines := line.NewLines(original)
 		result := lines.Tokens()
 
-		yamltest.RequireTokensValid(t, original, result)
-		yamltest.AssertTokensEqual(t, original, result)
+		require.NoError(t, yamltest.ValidateTokens(original, result))
+
+		diff := yamltest.CompareTokenSlices(original, result)
+		require.True(t, diff.Equal(), diff.String())
 
 		content := findBlockScalarContent(result)
 		require.NotNil(t, content, "expected to find block scalar content token")
@@ -1838,8 +1870,10 @@ func TestNewLines_BlockScalarPositionBehavior(t *testing.T) {
 		lines := line.NewLines(original)
 		result := lines.Tokens()
 
-		yamltest.RequireTokensValid(t, original, result)
-		yamltest.AssertTokensEqual(t, original, result)
+		require.NoError(t, yamltest.ValidateTokens(original, result))
+
+		diff := yamltest.CompareTokenSlices(original, result)
+		require.True(t, diff.Equal(), diff.String())
 
 		content := findBlockScalarContent(result)
 		require.NotNil(t, content, "expected to find block scalar content token")
@@ -1865,8 +1899,10 @@ func TestNewLines_BlankLineAbsorption(t *testing.T) {
 		result := lines.Tokens()
 
 		// Verify round-trip.
-		yamltest.RequireTokensValid(t, original, result)
-		yamltest.AssertTokensEqual(t, original, result)
+		require.NoError(t, yamltest.ValidateTokens(original, result))
+
+		diff := yamltest.CompareTokenSlices(original, result)
+		require.True(t, diff.Equal(), diff.String())
 
 		// Verify the blank line is in the value token's Origin.
 		// The value token should have Origin " value\n\n" (two newlines).
@@ -1893,8 +1929,10 @@ func TestNewLines_BlankLineAbsorption(t *testing.T) {
 		lines := line.NewLines(original)
 		result := lines.Tokens()
 
-		yamltest.RequireTokensValid(t, original, result)
-		yamltest.AssertTokensEqual(t, original, result)
+		require.NoError(t, yamltest.ValidateTokens(original, result))
+
+		diff := yamltest.CompareTokenSlices(original, result)
+		require.True(t, diff.Equal(), diff.String())
 
 		var valueToken *token.Token
 		for _, tk := range result {
@@ -1948,8 +1986,10 @@ func TestNewLines_FoldedBlockBlankLines(t *testing.T) {
 		lines := line.NewLines(original)
 		result := lines.Tokens()
 
-		yamltest.RequireTokensValid(t, original, result)
-		yamltest.AssertTokensEqual(t, original, result)
+		require.NoError(t, yamltest.ValidateTokens(original, result))
+
+		diff := yamltest.CompareTokenSlices(original, result)
+		require.True(t, diff.Equal(), diff.String())
 
 		// Find the content token.
 		var contentToken *token.Token
@@ -1976,8 +2016,10 @@ func TestNewLines_FoldedBlockBlankLines(t *testing.T) {
 		lines := line.NewLines(original)
 		result := lines.Tokens()
 
-		yamltest.RequireTokensValid(t, original, result)
-		yamltest.AssertTokensEqual(t, original, result)
+		require.NoError(t, yamltest.ValidateTokens(original, result))
+
+		diff := yamltest.CompareTokenSlices(original, result)
+		require.True(t, diff.Equal(), diff.String())
 
 		var contentToken *token.Token
 		for _, tk := range result {
@@ -2003,8 +2045,10 @@ func TestNewLines_FoldedBlockBlankLines(t *testing.T) {
 		lines := line.NewLines(original)
 		result := lines.Tokens()
 
-		yamltest.RequireTokensValid(t, original, result)
-		yamltest.AssertTokensEqual(t, original, result)
+		require.NoError(t, yamltest.ValidateTokens(original, result))
+
+		diff := yamltest.CompareTokenSlices(original, result)
+		require.True(t, diff.Equal(), diff.String())
 
 		var contentToken *token.Token
 		for _, tk := range result {
@@ -2030,8 +2074,10 @@ func TestNewLines_FoldedBlockBlankLines(t *testing.T) {
 		lines := line.NewLines(original)
 		result := lines.Tokens()
 
-		yamltest.RequireTokensValid(t, original, result)
-		yamltest.AssertTokensEqual(t, original, result)
+		require.NoError(t, yamltest.ValidateTokens(original, result))
+
+		diff := yamltest.CompareTokenSlices(original, result)
+		require.True(t, diff.Equal(), diff.String())
 	})
 }
 
@@ -2197,7 +2243,10 @@ func TestLines_TokenAt(t *testing.T) {
 		require.NotNil(t, tk2)
 		// Both should return clones with the same values (TokenAt returns clones).
 		assert.NotSame(t, tk1, tk2)
-		yamltest.AssertTokenEqual(t, tk1, tk2, "multiline clones")
+		require.NoError(t, yamltest.ValidateTokenPair(tk1, tk2))
+
+		diff := yamltest.CompareTokens(tk1, tk2)
+		require.True(t, diff.Equal(), diff.String())
 	})
 
 	t.Run("out of bounds line returns nil", func(t *testing.T) {

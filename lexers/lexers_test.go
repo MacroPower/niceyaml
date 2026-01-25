@@ -81,7 +81,8 @@ func TestTokenize(t *testing.T) {
 			want := lexer.Tokenize(tc.input)
 			got := lexers.Tokenize(tc.input)
 
-			yamltest.AssertTokensEqual(t, want, got)
+			diff := yamltest.CompareTokenSlices(want, got)
+			require.True(t, diff.Equal(), diff.String())
 		})
 	}
 }
@@ -109,7 +110,8 @@ func TestTokenizeDocuments(t *testing.T) {
 		require.NotEmpty(t, docs[0])
 
 		// Verify tokens match what lexer.Tokenize produces.
-		yamltest.AssertTokensEqual(t, lexer.Tokenize(input), docs[0])
+		diff := yamltest.CompareTokenSlices(lexer.Tokenize(input), docs[0])
+		require.True(t, diff.Equal(), diff.String())
 	})
 
 	t.Run("single doc with header", func(t *testing.T) {

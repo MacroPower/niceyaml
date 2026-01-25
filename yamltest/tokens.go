@@ -1,33 +1,304 @@
 package yamltest
 
 import (
+	"errors"
 	"fmt"
 	"strings"
-	"testing"
 
 	"github.com/goccy/go-yaml/token"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
+
+// Sentinel errors for token validation.
+var (
+	// ErrNilToken indicates a token is nil.
+	ErrNilToken = errors.New("token is nil")
+	// ErrNilPosition indicates a token's position is nil.
+	ErrNilPosition = errors.New("token position is nil")
+)
+
+// TokenValidationError indicates a token failed validation.
+type TokenValidationError struct {
+	Reason error  // [ErrNilToken] or [ErrNilPosition].
+	Which  string // "want" or "got".
+	Index  int    // -1 for single token validation.
+}
+
+// Error implements the [error] interface.
+func (e *TokenValidationError) Error() string {
+	if e.Index < 0 {
+		return fmt.Sprintf("%s: %v", e.Which, e.Reason)
+	}
+
+	return fmt.Sprintf("token %d %s: %v", e.Index, e.Which, e.Reason)
+}
+
+// Unwrap returns the underlying [TokenValidationError.Reason].
+func (e *TokenValidationError) Unwrap() error {
+	return e.Reason
+}
+
+// TokenDiff represents the differences between two tokens.
+//
+// Use [CompareTokens] to create a TokenDiff.
+type TokenDiff struct {
+	Want   *token.Token // Expected token.
+	Got    *token.Token // Actual token.
+	Fields []string     // Field names that differ (see [DiffTokenFields]).
+}
+
+// Equal returns true if the tokens are equal.
+func (d TokenDiff) Equal() bool {
+	return len(d.Fields) == 0
+}
+
+// String returns a human-readable representation of the diff using
+// [FormatToken] to display token details.
+func (d TokenDiff) String() string {
+	if d.Equal() {
+		return "tokens equal"
+	}
+
+	return fmt.Sprintf("token mismatch:\n  want: %s\n  got:  %s\n  differences: %s",
+		FormatToken(d.Want), FormatToken(d.Got), strings.Join(d.Fields, ", "))
+}
+
+// TokensDiff represents the differences between two token slices.
+//
+// Use [CompareTokenSlices] to create a TokensDiff.
+type TokensDiff struct {
+	Diffs         []TokenDiff // Per-token [TokenDiff]s (only populated if counts match).
+	WantCount     int         // Length of want slice.
+	GotCount      int         // Length of got slice.
+	CountMismatch bool        // True if slice lengths differ.
+}
+
+// Equal returns true if all tokens are equal.
+func (d TokensDiff) Equal() bool {
+	if d.CountMismatch {
+		return false
+	}
+
+	for _, diff := range d.Diffs {
+		if !diff.Equal() {
+			return false
+		}
+	}
+
+	return true
+}
+
+// String returns a human-readable representation of the diff.
+func (d TokensDiff) String() string {
+	if d.Equal() {
+		return "token slices equal"
+	}
+
+	if d.CountMismatch {
+		return fmt.Sprintf("token count mismatch: want %d, got %d", d.WantCount, d.GotCount)
+	}
+
+	var sb strings.Builder
+
+	for i, diff := range d.Diffs {
+		if !diff.Equal() {
+			if sb.Len() > 0 {
+				sb.WriteString("\n")
+			}
+
+			sb.WriteString(fmt.Sprintf("token %d: %s", i, diff.String()))
+		}
+	}
+
+	return sb.String()
+}
+
+// ContentDiff represents the difference between two content strings after
+// normalization (line endings converted and leading/trailing newlines trimmed).
+//
+// Use [CompareContent] to create a ContentDiff.
+type ContentDiff struct {
+	Want string // Expected content after normalization.
+	Got  string // Actual content after normalization.
+}
+
+// Equal returns true if the content is equal after normalization.
+func (d ContentDiff) Equal() bool {
+	return d.Want == d.Got
+}
+
+// String returns a human-readable representation of the diff.
+func (d ContentDiff) String() string {
+	if d.Equal() {
+		return "content equal"
+	}
+
+	return fmt.Sprintf("content mismatch:\n  want: %q\n  got:  %q", d.Want, d.Got)
+}
+
+// ValidateTokenPair checks that both tokens and their positions are non-nil.
+// Returns nil if both tokens are valid, or a [*TokenValidationError] if not.
+func ValidateTokenPair(want, got *token.Token) error {
+	if want == nil {
+		return &TokenValidationError{Index: -1, Which: "want", Reason: ErrNilToken}
+	}
+
+	if want.Position == nil {
+		return &TokenValidationError{Index: -1, Which: "want", Reason: ErrNilPosition}
+	}
+
+	if got == nil {
+		return &TokenValidationError{Index: -1, Which: "got", Reason: ErrNilToken}
+	}
+
+	if got.Position == nil {
+		return &TokenValidationError{Index: -1, Which: "got", Reason: ErrNilPosition}
+	}
+
+	return nil
+}
+
+// ValidateTokens checks that all tokens and their positions are non-nil.
+// Returns nil if all tokens are valid, or the first [*TokenValidationError]
+// found. If the slice lengths differ, returns a descriptive error (not a
+// [*TokenValidationError]).
+func ValidateTokens(want, got token.Tokens) error {
+	if len(want) != len(got) {
+		return fmt.Errorf("token count mismatch: want %d, got %d\nwant tokens:\n%s\ngot tokens:\n%s",
+			len(want), len(got), FormatTokens(want), FormatTokens(got))
+	}
+
+	for i := range want {
+		if want[i] == nil {
+			return &TokenValidationError{Index: i, Which: "want", Reason: ErrNilToken}
+		}
+
+		if want[i].Position == nil {
+			return &TokenValidationError{Index: i, Which: "want", Reason: ErrNilPosition}
+		}
+
+		if got[i] == nil {
+			return &TokenValidationError{Index: i, Which: "got", Reason: ErrNilToken}
+		}
+
+		if got[i].Position == nil {
+			return &TokenValidationError{Index: i, Which: "got", Reason: ErrNilPosition}
+		}
+	}
+
+	return nil
+}
+
+// CompareTokens compares all fields of two tokens and returns a [TokenDiff].
+// Assumes both tokens are valid (non-nil with non-nil positions); use
+// [ValidateTokenPair] first to check validity.
+func CompareTokens(want, got *token.Token) TokenDiff {
+	return TokenDiff{
+		Fields: DiffTokenFields(want, got),
+		Want:   want,
+		Got:    got,
+	}
+}
+
+// CompareTokenSlices compares all fields of two token slices and returns a
+// [TokensDiff]. Assumes all tokens are valid (non-nil with non-nil positions);
+// use [ValidateTokens] first to check validity.
+func CompareTokenSlices(want, got token.Tokens) TokensDiff {
+	if len(want) != len(got) {
+		return TokensDiff{
+			CountMismatch: true,
+			WantCount:     len(want),
+			GotCount:      len(got),
+		}
+	}
+
+	diffs := make([]TokenDiff, len(want))
+	for i := range want {
+		diffs[i] = CompareTokens(want[i], got[i])
+	}
+
+	return TokensDiff{
+		WantCount: len(want),
+		GotCount:  len(got),
+		Diffs:     diffs,
+	}
+}
+
+// CompareContent compares two strings for equality and returns a [ContentDiff].
+// Both strings are normalized by converting CRLF to LF and trimming
+// leading/trailing newlines before comparison.
+func CompareContent(want, got string) ContentDiff {
+	return ContentDiff{
+		Want: normalizeContent(want),
+		Got:  normalizeContent(got),
+	}
+}
+
+// DiffTokenFields returns a list of field names that differ between two tokens.
+// Assumes both tokens are valid (non-nil with non-nil positions); use
+// [ValidateTokenPair] first to check validity.
+func DiffTokenFields(want, got *token.Token) []string {
+	var diffs []string
+
+	if want.Type != got.Type {
+		diffs = append(diffs, "Type")
+	}
+
+	if want.Value != got.Value {
+		diffs = append(diffs, "Value")
+	}
+
+	if want.Origin != got.Origin {
+		diffs = append(diffs, "Origin")
+	}
+
+	if want.CharacterType != got.CharacterType {
+		diffs = append(diffs, "CharacterType")
+	}
+
+	if want.Indicator != got.Indicator {
+		diffs = append(diffs, "Indicator")
+	}
+
+	if want.Position.Column != got.Position.Column {
+		diffs = append(diffs, "Position.Column")
+	}
+
+	if want.Position.Line != got.Position.Line {
+		diffs = append(diffs, "Position.Line")
+	}
+
+	if want.Position.Offset != got.Position.Offset {
+		diffs = append(diffs, "Position.Offset")
+	}
+
+	if want.Position.IndentNum != got.Position.IndentNum {
+		diffs = append(diffs, "Position.IndentNum")
+	}
+
+	if want.Position.IndentLevel != got.Position.IndentLevel {
+		diffs = append(diffs, "Position.IndentLevel")
+	}
+
+	return diffs
+}
 
 // TokenBuilder is a helper for constructing test tokens.
 //
-// Chain methods to set fields, and call [TokenBuilder.Build] to get the
-// final token.
+// Chain methods to set fields, then call [TokenBuilder.Build] to get the final
+// token. The builder is mutable: each setter modifies the internal state and
+// returns the same builder for chaining.
 //
-// The builder is mutable: each setter modifies the internal state and returns
-// the same builder.
-//
-// [TokenBuilder.Build] returns a clone of the current state, so you can call
-// [TokenBuilder.Build] multiple times at different points in the chain to get
-// independent tokens.
+// [TokenBuilder.Build] returns a clone, so you can call it multiple times at
+// different points in the chain to produce independent tokens. Use
+// [TokenBuilder.Clone] to branch from a common base configuration.
 //
 // Create instances with [NewTokenBuilder].
 type TokenBuilder struct {
 	token *token.Token
 }
 
-// NewTokenBuilder creates a new [*TokenBuilder] with default values.
+// NewTokenBuilder creates a new [TokenBuilder] with default values.
+// All position fields are initialized to zero values.
 func NewTokenBuilder() *TokenBuilder {
 	return &TokenBuilder{
 		token: &token.Token{
@@ -128,7 +399,8 @@ func (b *TokenBuilder) PositionIndentLevel(indentLevel int) *TokenBuilder {
 	return b
 }
 
-// Build returns a clone of the built token.
+// Build returns a clone of the current token state.
+// You can call Build multiple times to produce independent tokens.
 func (b *TokenBuilder) Build() *token.Token {
 	return b.token.Clone()
 }
@@ -142,102 +414,6 @@ func DumpTokenOrigins(tks token.Tokens) string {
 	}
 
 	return sb.String()
-}
-
-// RequireTokensValid checks that all tokens and their positions are non-nil.
-// It fails the test immediately if the token counts differ or any token is
-// invalid.
-func RequireTokensValid(t *testing.T, want, got token.Tokens) {
-	t.Helper()
-
-	if len(want) != len(got) {
-		require.Fail(t, fmt.Sprintf("token count mismatch: want %d, got %d", len(want), len(got)),
-			"want tokens:\n%s\ngot tokens:\n%s", FormatTokens(want), FormatTokens(got))
-	}
-
-	for i := range want {
-		RequireTokenValid(t, want[i], got[i], fmt.Sprintf("token %d", i))
-	}
-}
-
-// AssertTokensEqual compares all fields of two token slices.
-// Use [RequireTokensValid] first to ensure that tokens are valid.
-func AssertTokensEqual(t *testing.T, want, got token.Tokens) {
-	t.Helper()
-
-	for i := range want {
-		AssertTokenEqual(t, want[i], got[i], fmt.Sprintf("token %d", i))
-	}
-}
-
-// RequireTokenValid checks that both tokens and their positions are non-nil.
-// It fails the test immediately if either token or its position is nil.
-// The prefix is included in failure messages for identification.
-func RequireTokenValid(t *testing.T, want, got *token.Token, prefix string) {
-	t.Helper()
-
-	require.NotNil(t, want, prefix+" want cannot be nil")
-	require.NotNil(t, want.Position, prefix+" want.Position cannot be nil")
-
-	require.NotNil(t, got, prefix+" got cannot be nil")
-	require.NotNil(t, got.Position, prefix+" got.Position cannot be nil")
-}
-
-// AssertTokenEqual compares all fields of two tokens.
-// Use [RequireTokenValid] first to ensure that tokens are valid.
-func AssertTokenEqual(t *testing.T, want, got *token.Token, prefix string) {
-	t.Helper()
-
-	if diffs := diffTokenFields(want, got); len(diffs) > 0 {
-		assert.Fail(t, prefix+" mismatch",
-			"want:\t%s\ngot:\t%s\ndifferences: %s",
-			FormatToken(want), FormatToken(got), strings.Join(diffs, ", "))
-	}
-}
-
-// diffTokenFields returns a list of field names that differ between two tokens.
-func diffTokenFields(want, got *token.Token) []string {
-	var diffs []string
-
-	if want.Type != got.Type {
-		diffs = append(diffs, "Type")
-	}
-	if want.Value != got.Value {
-		diffs = append(diffs, "Value")
-	}
-	if want.Origin != got.Origin {
-		diffs = append(diffs, "Origin")
-	}
-	if want.CharacterType != got.CharacterType {
-		diffs = append(diffs, "CharacterType")
-	}
-	if want.Indicator != got.Indicator {
-		diffs = append(diffs, "Indicator")
-	}
-	if want.Position.Column != got.Position.Column {
-		diffs = append(diffs, "Position.Column")
-	}
-	if want.Position.Line != got.Position.Line {
-		diffs = append(diffs, "Position.Line")
-	}
-	if want.Position.Offset != got.Position.Offset {
-		diffs = append(diffs, "Position.Offset")
-	}
-	if want.Position.IndentNum != got.Position.IndentNum {
-		diffs = append(diffs, "Position.IndentNum")
-	}
-	if want.Position.IndentLevel != got.Position.IndentLevel {
-		diffs = append(diffs, "Position.IndentLevel")
-	}
-
-	return diffs
-}
-
-// AssertContentEqual compares two strings for equality, normalizing line
-// endings and trimming leading/trailing newlines.
-func AssertContentEqual(t *testing.T, want, got string) {
-	t.Helper()
-	assert.Equal(t, normalizeContent(want), normalizeContent(got), "content mismatch")
 }
 
 // FormatTokenPosition formats a [*token.Position] for debug output.

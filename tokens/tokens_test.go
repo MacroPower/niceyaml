@@ -35,13 +35,17 @@ func TestNewSegment(t *testing.T) {
 	// Part() returns a clone, so check deep equality.
 	gotPart := seg.Part()
 	assert.NotSame(t, part, gotPart) // Should be cloned.
-	yamltest.RequireTokenValid(t, part, gotPart, "part")
-	yamltest.AssertTokenEqual(t, part, gotPart, "part")
+	require.NoError(t, yamltest.ValidateTokenPair(part, gotPart))
+
+	partDiff := yamltest.CompareTokens(part, gotPart)
+	require.True(t, partDiff.Equal(), partDiff.String())
 
 	gotSource := seg.Source()
 	assert.NotSame(t, source, gotSource) // Should be cloned.
-	yamltest.RequireTokenValid(t, source, gotSource, "source")
-	yamltest.AssertTokenEqual(t, source, gotSource, "source")
+	require.NoError(t, yamltest.ValidateTokenPair(source, gotSource))
+
+	sourceDiff := yamltest.CompareTokens(source, gotSource)
+	require.True(t, sourceDiff.Equal(), sourceDiff.String())
 }
 
 func TestSegment_Source(t *testing.T) {
@@ -57,8 +61,10 @@ func TestSegment_Source(t *testing.T) {
 		got := seg.Source()
 
 		assert.NotSame(t, source, got) // Should be cloned.
-		yamltest.RequireTokenValid(t, source, got, "source")
-		yamltest.AssertTokenEqual(t, source, got, "source")
+		require.NoError(t, yamltest.ValidateTokenPair(source, got))
+
+		diff := yamltest.CompareTokens(source, got)
+		require.True(t, diff.Equal(), diff.String())
 	})
 }
 
@@ -206,8 +212,12 @@ func TestSegments_Append(t *testing.T) {
 
 		require.Len(t, got, 1)
 		// Part() returns a clone, so check deep equality.
-		yamltest.RequireTokenValid(t, part, got[0].Part(), "part")
-		yamltest.AssertTokenEqual(t, part, got[0].Part(), "part")
+		require.NoError(t, yamltest.ValidateTokenPair(part, got[0].Part()))
+		require.True(
+			t,
+			yamltest.CompareTokens(part, got[0].Part()).Equal(),
+			yamltest.CompareTokens(part, got[0].Part()).String(),
+		)
 	})
 
 	t.Run("append to existing", func(t *testing.T) {
@@ -223,10 +233,18 @@ func TestSegments_Append(t *testing.T) {
 
 		require.Len(t, got, 2)
 		// Part() returns a clone, so check deep equality.
-		yamltest.RequireTokenValid(t, part1, got[0].Part(), "part1")
-		yamltest.AssertTokenEqual(t, part1, got[0].Part(), "part1")
-		yamltest.RequireTokenValid(t, part2, got[1].Part(), "part2")
-		yamltest.AssertTokenEqual(t, part2, got[1].Part(), "part2")
+		require.NoError(t, yamltest.ValidateTokenPair(part1, got[0].Part()))
+		require.True(
+			t,
+			yamltest.CompareTokens(part1, got[0].Part()).Equal(),
+			yamltest.CompareTokens(part1, got[0].Part()).String(),
+		)
+		require.NoError(t, yamltest.ValidateTokenPair(part2, got[1].Part()))
+		require.True(
+			t,
+			yamltest.CompareTokens(part2, got[1].Part()).Equal(),
+			yamltest.CompareTokens(part2, got[1].Part()).String(),
+		)
 	})
 }
 
@@ -254,8 +272,12 @@ func TestSegments_Clone(t *testing.T) {
 
 		require.Len(t, got, 1)
 		assert.NotSame(t, part, got[0].Part()) // Part should be cloned.
-		yamltest.RequireTokenValid(t, part, got[0].Part(), "part")
-		yamltest.AssertTokenEqual(t, part, got[0].Part(), "part")
+		require.NoError(t, yamltest.ValidateTokenPair(part, got[0].Part()))
+		require.True(
+			t,
+			yamltest.CompareTokens(part, got[0].Part()).Equal(),
+			yamltest.CompareTokens(part, got[0].Part()).String(),
+		)
 	})
 
 	t.Run("preserves source reference", func(t *testing.T) {
@@ -295,8 +317,10 @@ func TestSegments_SourceTokens(t *testing.T) {
 
 		require.Len(t, got, 1)
 		assert.NotSame(t, source, got[0]) // Should be cloned.
-		yamltest.RequireTokenValid(t, source, got[0], "source")
-		yamltest.AssertTokenEqual(t, source, got[0], "source")
+		require.NoError(t, yamltest.ValidateTokenPair(source, got[0]))
+
+		diff := yamltest.CompareTokens(source, got[0])
+		require.True(t, diff.Equal(), diff.String())
 	})
 
 	t.Run("deduplicates shared source", func(t *testing.T) {
@@ -314,8 +338,10 @@ func TestSegments_SourceTokens(t *testing.T) {
 		got := segs.SourceTokens()
 
 		require.Len(t, got, 1) // Should deduplicate.
-		yamltest.RequireTokenValid(t, source, got[0], "source")
-		yamltest.AssertTokenEqual(t, source, got[0], "source")
+		require.NoError(t, yamltest.ValidateTokenPair(source, got[0]))
+
+		diff := yamltest.CompareTokens(source, got[0])
+		require.True(t, diff.Equal(), diff.String())
 	})
 
 	t.Run("preserves order with multiple sources", func(t *testing.T) {
@@ -333,12 +359,20 @@ func TestSegments_SourceTokens(t *testing.T) {
 		got := segs.SourceTokens()
 
 		require.Len(t, got, 3)
-		yamltest.RequireTokenValid(t, source1, got[0], "source1")
-		yamltest.AssertTokenEqual(t, source1, got[0], "source1")
-		yamltest.RequireTokenValid(t, source2, got[1], "source2")
-		yamltest.AssertTokenEqual(t, source2, got[1], "source2")
-		yamltest.RequireTokenValid(t, source3, got[2], "source3")
-		yamltest.AssertTokenEqual(t, source3, got[2], "source3")
+		require.NoError(t, yamltest.ValidateTokenPair(source1, got[0]))
+
+		diff0 := yamltest.CompareTokens(source1, got[0])
+		require.True(t, diff0.Equal(), diff0.String())
+
+		require.NoError(t, yamltest.ValidateTokenPair(source2, got[1]))
+
+		diff1 := yamltest.CompareTokens(source2, got[1])
+		require.True(t, diff1.Equal(), diff1.String())
+
+		require.NoError(t, yamltest.ValidateTokenPair(source3, got[2]))
+
+		diff2 := yamltest.CompareTokens(source3, got[2])
+		require.True(t, diff2.Equal(), diff2.String())
 	})
 }
 
@@ -371,10 +405,15 @@ func TestSegments_PartTokens(t *testing.T) {
 		require.Len(t, got, 2)
 		assert.NotSame(t, part1, got[0]) // Should be cloned.
 		assert.NotSame(t, part2, got[1])
-		yamltest.RequireTokenValid(t, part1, got[0], "part1")
-		yamltest.AssertTokenEqual(t, part1, got[0], "part1")
-		yamltest.RequireTokenValid(t, part2, got[1], "part2")
-		yamltest.AssertTokenEqual(t, part2, got[1], "part2")
+		require.NoError(t, yamltest.ValidateTokenPair(part1, got[0]))
+
+		diff0 := yamltest.CompareTokens(part1, got[0])
+		require.True(t, diff0.Equal(), diff0.String())
+
+		require.NoError(t, yamltest.ValidateTokenPair(part2, got[1]))
+
+		diff1 := yamltest.CompareTokens(part2, got[1])
+		require.True(t, diff1.Equal(), diff1.String())
 	})
 }
 
@@ -523,18 +562,42 @@ func TestSegments_SourceTokenAt(t *testing.T) {
 		}
 
 		// SourceTokenAt returns clones, so check deep equality.
-		yamltest.RequireTokenValid(t, source1, segs.SourceTokenAt(0), "source1 at 0")
-		yamltest.AssertTokenEqual(t, source1, segs.SourceTokenAt(0), "source1 at 0")
-		yamltest.RequireTokenValid(t, source1, segs.SourceTokenAt(2), "source1 at 2")
-		yamltest.AssertTokenEqual(t, source1, segs.SourceTokenAt(2), "source1 at 2")
-		yamltest.RequireTokenValid(t, source2, segs.SourceTokenAt(3), "source2 at 3")
-		yamltest.AssertTokenEqual(t, source2, segs.SourceTokenAt(3), "source2 at 3")
-		yamltest.RequireTokenValid(t, source2, segs.SourceTokenAt(4), "source2 at 4")
-		yamltest.AssertTokenEqual(t, source2, segs.SourceTokenAt(4), "source2 at 4")
-		yamltest.RequireTokenValid(t, source3, segs.SourceTokenAt(5), "source3 at 5")
-		yamltest.AssertTokenEqual(t, source3, segs.SourceTokenAt(5), "source3 at 5")
-		yamltest.RequireTokenValid(t, source3, segs.SourceTokenAt(9), "source3 at 9")
-		yamltest.AssertTokenEqual(t, source3, segs.SourceTokenAt(9), "source3 at 9")
+		require.NoError(t, yamltest.ValidateTokenPair(source1, segs.SourceTokenAt(0)))
+		require.True(
+			t,
+			yamltest.CompareTokens(source1, segs.SourceTokenAt(0)).Equal(),
+			yamltest.CompareTokens(source1, segs.SourceTokenAt(0)).String(),
+		)
+		require.NoError(t, yamltest.ValidateTokenPair(source1, segs.SourceTokenAt(2)))
+		require.True(
+			t,
+			yamltest.CompareTokens(source1, segs.SourceTokenAt(2)).Equal(),
+			yamltest.CompareTokens(source1, segs.SourceTokenAt(2)).String(),
+		)
+		require.NoError(t, yamltest.ValidateTokenPair(source2, segs.SourceTokenAt(3)))
+		require.True(
+			t,
+			yamltest.CompareTokens(source2, segs.SourceTokenAt(3)).Equal(),
+			yamltest.CompareTokens(source2, segs.SourceTokenAt(3)).String(),
+		)
+		require.NoError(t, yamltest.ValidateTokenPair(source2, segs.SourceTokenAt(4)))
+		require.True(
+			t,
+			yamltest.CompareTokens(source2, segs.SourceTokenAt(4)).Equal(),
+			yamltest.CompareTokens(source2, segs.SourceTokenAt(4)).String(),
+		)
+		require.NoError(t, yamltest.ValidateTokenPair(source3, segs.SourceTokenAt(5)))
+		require.True(
+			t,
+			yamltest.CompareTokens(source3, segs.SourceTokenAt(5)).Equal(),
+			yamltest.CompareTokens(source3, segs.SourceTokenAt(5)).String(),
+		)
+		require.NoError(t, yamltest.ValidateTokenPair(source3, segs.SourceTokenAt(9)))
+		require.True(
+			t,
+			yamltest.CompareTokens(source3, segs.SourceTokenAt(9)).Equal(),
+			yamltest.CompareTokens(source3, segs.SourceTokenAt(9)).String(),
+		)
 
 		// Verify cloning behavior.
 		assert.NotSame(t, source1, segs.SourceTokenAt(0))
@@ -577,12 +640,24 @@ func TestSegments_SourceTokenAt(t *testing.T) {
 		}
 
 		// SourceTokenAt returns clones, so check deep equality.
-		yamltest.RequireTokenValid(t, source1, segs.SourceTokenAt(0), "source1 at 0")
-		yamltest.AssertTokenEqual(t, source1, segs.SourceTokenAt(0), "source1 at 0")
-		yamltest.RequireTokenValid(t, source1, segs.SourceTokenAt(2), "source1 at 2")
-		yamltest.AssertTokenEqual(t, source1, segs.SourceTokenAt(2), "source1 at 2")
-		yamltest.RequireTokenValid(t, source2, segs.SourceTokenAt(3), "source2 at 3")
-		yamltest.AssertTokenEqual(t, source2, segs.SourceTokenAt(3), "source2 at 3")
+		require.NoError(t, yamltest.ValidateTokenPair(source1, segs.SourceTokenAt(0)))
+		require.True(
+			t,
+			yamltest.CompareTokens(source1, segs.SourceTokenAt(0)).Equal(),
+			yamltest.CompareTokens(source1, segs.SourceTokenAt(0)).String(),
+		)
+		require.NoError(t, yamltest.ValidateTokenPair(source1, segs.SourceTokenAt(2)))
+		require.True(
+			t,
+			yamltest.CompareTokens(source1, segs.SourceTokenAt(2)).Equal(),
+			yamltest.CompareTokens(source1, segs.SourceTokenAt(2)).String(),
+		)
+		require.NoError(t, yamltest.ValidateTokenPair(source2, segs.SourceTokenAt(3)))
+		require.True(
+			t,
+			yamltest.CompareTokens(source2, segs.SourceTokenAt(3)).Equal(),
+			yamltest.CompareTokens(source2, segs.SourceTokenAt(3)).String(),
+		)
 	})
 }
 
@@ -872,7 +947,9 @@ func TestSplitDocuments(t *testing.T) {
 
 		require.Len(t, got, 1)
 		require.Len(t, got[0], 3)
-		yamltest.AssertTokensEqual(t, input, got[0])
+
+		diff := yamltest.CompareTokenSlices(input, got[0])
+		require.True(t, diff.Equal(), diff.String())
 	})
 
 	t.Run("single doc with header", func(t *testing.T) {
@@ -890,7 +967,9 @@ func TestSplitDocuments(t *testing.T) {
 
 		require.Len(t, got, 1)
 		require.Len(t, got[0], 4)
-		yamltest.AssertTokensEqual(t, input, got[0])
+
+		diff := yamltest.CompareTokenSlices(input, got[0])
+		require.True(t, diff.Equal(), diff.String())
 	})
 
 	t.Run("two docs", func(t *testing.T) {
@@ -913,8 +992,11 @@ func TestSplitDocuments(t *testing.T) {
 		require.Len(t, got[0], 3)
 		require.Len(t, got[1], 4)
 
-		yamltest.AssertTokensEqual(t, token.Tokens{key1, colon1, value1}, got[0])
-		yamltest.AssertTokensEqual(t, token.Tokens{header, key2, colon2, value2}, got[1])
+		diff0 := yamltest.CompareTokenSlices(token.Tokens{key1, colon1, value1}, got[0])
+		require.True(t, diff0.Equal(), diff0.String())
+
+		diff1 := yamltest.CompareTokenSlices(token.Tokens{header, key2, colon2, value2}, got[1])
+		require.True(t, diff1.Equal(), diff1.String())
 	})
 
 	t.Run("three docs with headers", func(t *testing.T) {
@@ -933,9 +1015,15 @@ func TestSplitDocuments(t *testing.T) {
 		got := collectDocs(tokens.SplitDocuments(input))
 
 		require.Len(t, got, 3)
-		yamltest.AssertTokensEqual(t, token.Tokens{header1, doc1}, got[0])
-		yamltest.AssertTokensEqual(t, token.Tokens{header2, doc2}, got[1])
-		yamltest.AssertTokensEqual(t, token.Tokens{header3, doc3}, got[2])
+
+		diff0 := yamltest.CompareTokenSlices(token.Tokens{header1, doc1}, got[0])
+		require.True(t, diff0.Equal(), diff0.String())
+
+		diff1 := yamltest.CompareTokenSlices(token.Tokens{header2, doc2}, got[1])
+		require.True(t, diff1.Equal(), diff1.String())
+
+		diff2 := yamltest.CompareTokenSlices(token.Tokens{header3, doc3}, got[2])
+		require.True(t, diff2.Equal(), diff2.String())
 	})
 
 	t.Run("doc with end marker", func(t *testing.T) {
@@ -953,7 +1041,9 @@ func TestSplitDocuments(t *testing.T) {
 
 		require.Len(t, got, 1)
 		require.Len(t, got[0], 4)
-		yamltest.AssertTokensEqual(t, input, got[0])
+
+		diff := yamltest.CompareTokenSlices(input, got[0])
+		require.True(t, diff.Equal(), diff.String())
 	})
 
 	t.Run("doc end followed by new doc", func(t *testing.T) {
@@ -970,8 +1060,12 @@ func TestSplitDocuments(t *testing.T) {
 		got := collectDocs(tokens.SplitDocuments(input))
 
 		require.Len(t, got, 2)
-		yamltest.AssertTokensEqual(t, token.Tokens{doc1, docEnd}, got[0])
-		yamltest.AssertTokensEqual(t, token.Tokens{header, doc2}, got[1])
+
+		diff0 := yamltest.CompareTokenSlices(token.Tokens{doc1, docEnd}, got[0])
+		require.True(t, diff0.Equal(), diff0.String())
+
+		diff1 := yamltest.CompareTokenSlices(token.Tokens{header, doc2}, got[1])
+		require.True(t, diff1.Equal(), diff1.String())
 	})
 
 	t.Run("early termination at first doc", func(t *testing.T) {
@@ -992,7 +1086,9 @@ func TestSplitDocuments(t *testing.T) {
 		}
 
 		require.Len(t, got, 1)
-		yamltest.AssertTokensEqual(t, token.Tokens{doc1}, got[0])
+
+		diff := yamltest.CompareTokenSlices(token.Tokens{doc1}, got[0])
+		require.True(t, diff.Equal(), diff.String())
 	})
 
 	t.Run("early termination at second doc", func(t *testing.T) {
@@ -1019,8 +1115,12 @@ func TestSplitDocuments(t *testing.T) {
 		}
 
 		require.Len(t, got, 2)
-		yamltest.AssertTokensEqual(t, token.Tokens{doc1}, got[0])
-		yamltest.AssertTokensEqual(t, token.Tokens{header1, doc2}, got[1])
+
+		diff0 := yamltest.CompareTokenSlices(token.Tokens{doc1}, got[0])
+		require.True(t, diff0.Equal(), diff0.String())
+
+		diff1 := yamltest.CompareTokenSlices(token.Tokens{header1, doc2}, got[1])
+		require.True(t, diff1.Equal(), diff1.String())
 	})
 
 	t.Run("early termination single doc", func(t *testing.T) {

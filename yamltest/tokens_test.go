@@ -151,31 +151,39 @@ func TestFormatTokens(t *testing.T) {
 	})
 }
 
-func TestAssertContentEqual(t *testing.T) {
+func TestCompareContent(t *testing.T) {
 	t.Parallel()
 
 	t.Run("equal content", func(t *testing.T) {
 		t.Parallel()
 
-		mockT := &testing.T{}
-		yamltest.AssertContentEqual(mockT, "hello", "hello")
-		assert.False(t, mockT.Failed())
+		diff := yamltest.CompareContent("hello", "hello")
+		assert.True(t, diff.Equal())
+		assert.Equal(t, "content equal", diff.String())
 	})
 
 	t.Run("normalizes line endings", func(t *testing.T) {
 		t.Parallel()
 
-		mockT := &testing.T{}
-		yamltest.AssertContentEqual(mockT, "line1\nline2", "line1\r\nline2")
-		assert.False(t, mockT.Failed())
+		diff := yamltest.CompareContent("line1\nline2", "line1\r\nline2")
+		assert.True(t, diff.Equal())
 	})
 
 	t.Run("trims surrounding newlines", func(t *testing.T) {
 		t.Parallel()
 
-		mockT := &testing.T{}
-		yamltest.AssertContentEqual(mockT, "\nhello\n", "hello")
-		assert.False(t, mockT.Failed())
+		diff := yamltest.CompareContent("\nhello\n", "hello")
+		assert.True(t, diff.Equal())
+	})
+
+	t.Run("different content", func(t *testing.T) {
+		t.Parallel()
+
+		diff := yamltest.CompareContent("hello", "world")
+		assert.False(t, diff.Equal())
+		assert.Contains(t, diff.String(), "content mismatch")
+		assert.Contains(t, diff.String(), "hello")
+		assert.Contains(t, diff.String(), "world")
 	})
 }
 
@@ -323,58 +331,145 @@ func TestTokenBuilder(t *testing.T) {
 	})
 }
 
-func TestRequireTokenValid(t *testing.T) {
+func TestValidateTokenPair(t *testing.T) {
 	t.Parallel()
 
 	t.Run("valid tokens pass", func(t *testing.T) {
 		t.Parallel()
 
-		mockT := &testing.T{}
 		want := yamltest.NewTokenBuilder().Build()
 		got := yamltest.NewTokenBuilder().Build()
 
-		yamltest.RequireTokenValid(mockT, want, got, "test")
-		assert.False(t, mockT.Failed())
+		err := yamltest.ValidateTokenPair(want, got)
+		assert.NoError(t, err)
 	})
 
-	// Note: Failure cases for require functions cannot be tested with mock T
-	// because require.NotNil calls t.FailNow() which uses runtime.Goexit().
+	t.Run("nil want token fails", func(t *testing.T) {
+		t.Parallel()
+
+		got := yamltest.NewTokenBuilder().Build()
+
+		err := yamltest.ValidateTokenPair(nil, got)
+		require.Error(t, err)
+		require.ErrorIs(t, err, yamltest.ErrNilToken)
+		assert.Contains(t, err.Error(), "want")
+	})
+
+	t.Run("nil want position fails", func(t *testing.T) {
+		t.Parallel()
+
+		want := &token.Token{}
+		got := yamltest.NewTokenBuilder().Build()
+
+		err := yamltest.ValidateTokenPair(want, got)
+		require.Error(t, err)
+		require.ErrorIs(t, err, yamltest.ErrNilPosition)
+		assert.Contains(t, err.Error(), "want")
+	})
+
+	t.Run("nil got token fails", func(t *testing.T) {
+		t.Parallel()
+
+		want := yamltest.NewTokenBuilder().Build()
+
+		err := yamltest.ValidateTokenPair(want, nil)
+		require.Error(t, err)
+		require.ErrorIs(t, err, yamltest.ErrNilToken)
+		assert.Contains(t, err.Error(), "got")
+	})
+
+	t.Run("nil got position fails", func(t *testing.T) {
+		t.Parallel()
+
+		want := yamltest.NewTokenBuilder().Build()
+		got := &token.Token{}
+
+		err := yamltest.ValidateTokenPair(want, got)
+		require.Error(t, err)
+		require.ErrorIs(t, err, yamltest.ErrNilPosition)
+		assert.Contains(t, err.Error(), "got")
+	})
 }
 
-func TestRequireTokensValid(t *testing.T) {
+func TestValidateTokens(t *testing.T) {
 	t.Parallel()
 
 	t.Run("equal length with valid tokens", func(t *testing.T) {
 		t.Parallel()
 
-		mockT := &testing.T{}
 		tb := yamltest.NewTokenBuilder()
 		want := token.Tokens{tb.Build(), tb.Build()}
 		got := token.Tokens{tb.Build(), tb.Build()}
 
-		yamltest.RequireTokensValid(mockT, want, got)
-		assert.False(t, mockT.Failed())
+		err := yamltest.ValidateTokens(want, got)
+		assert.NoError(t, err)
 	})
 
 	t.Run("empty slices pass", func(t *testing.T) {
 		t.Parallel()
 
-		mockT := &testing.T{}
-		yamltest.RequireTokensValid(mockT, token.Tokens{}, token.Tokens{})
-		assert.False(t, mockT.Failed())
+		err := yamltest.ValidateTokens(token.Tokens{}, token.Tokens{})
+		assert.NoError(t, err)
 	})
 
-	// Note: Failure cases for require functions cannot be tested with mock T
-	// because require.Fail calls t.FailNow() which uses runtime.Goexit().
-}
-
-func TestAssertTokenEqual(t *testing.T) {
-	t.Parallel()
-
-	t.Run("equal tokens pass", func(t *testing.T) {
+	t.Run("count mismatch fails", func(t *testing.T) {
 		t.Parallel()
 
-		mockT := &testing.T{}
+		tb := yamltest.NewTokenBuilder()
+		want := token.Tokens{tb.Build()}
+		got := token.Tokens{tb.Build(), tb.Build()}
+
+		err := yamltest.ValidateTokens(want, got)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "count mismatch")
+	})
+
+	t.Run("nil want token fails", func(t *testing.T) {
+		t.Parallel()
+
+		tb := yamltest.NewTokenBuilder()
+		want := token.Tokens{nil}
+		got := token.Tokens{tb.Build()}
+
+		err := yamltest.ValidateTokens(want, got)
+		require.Error(t, err)
+		require.ErrorIs(t, err, yamltest.ErrNilToken)
+		assert.Contains(t, err.Error(), "token 0 want")
+	})
+
+	t.Run("nil want position fails", func(t *testing.T) {
+		t.Parallel()
+
+		tb := yamltest.NewTokenBuilder()
+		want := token.Tokens{&token.Token{}}
+		got := token.Tokens{tb.Build()}
+
+		err := yamltest.ValidateTokens(want, got)
+		require.Error(t, err)
+		require.ErrorIs(t, err, yamltest.ErrNilPosition)
+		assert.Contains(t, err.Error(), "token 0 want")
+	})
+
+	t.Run("nil got token fails", func(t *testing.T) {
+		t.Parallel()
+
+		tb := yamltest.NewTokenBuilder()
+		want := token.Tokens{tb.Build()}
+		got := token.Tokens{nil}
+
+		err := yamltest.ValidateTokens(want, got)
+		require.Error(t, err)
+		require.ErrorIs(t, err, yamltest.ErrNilToken)
+		assert.Contains(t, err.Error(), "token 0 got")
+	})
+}
+
+func TestCompareTokens(t *testing.T) {
+	t.Parallel()
+
+	t.Run("equal tokens", func(t *testing.T) {
+		t.Parallel()
+
 		tk := yamltest.NewTokenBuilder().
 			Type(token.StringType).
 			Value("test").
@@ -383,76 +478,105 @@ func TestAssertTokenEqual(t *testing.T) {
 			PositionColumn(1).
 			Build()
 
-		yamltest.AssertTokenEqual(mockT, tk, tk, "test")
-		assert.False(t, mockT.Failed())
+		diff := yamltest.CompareTokens(tk, tk)
+		assert.True(t, diff.Equal())
+		assert.Equal(t, "tokens equal", diff.String())
 	})
 
-	t.Run("different Type fails", func(t *testing.T) {
+	t.Run("different Type", func(t *testing.T) {
 		t.Parallel()
 
-		mockT := &testing.T{}
 		want := yamltest.NewTokenBuilder().Type(token.StringType).Build()
 		got := yamltest.NewTokenBuilder().Type(token.IntegerType).Build()
 
-		yamltest.AssertTokenEqual(mockT, want, got, "test")
-		assert.True(t, mockT.Failed())
+		diff := yamltest.CompareTokens(want, got)
+		assert.False(t, diff.Equal())
+		assert.Contains(t, diff.Fields, "Type")
 	})
 
-	t.Run("different Value fails", func(t *testing.T) {
+	t.Run("different Value", func(t *testing.T) {
 		t.Parallel()
 
-		mockT := &testing.T{}
 		want := yamltest.NewTokenBuilder().Value("a").Build()
 		got := yamltest.NewTokenBuilder().Value("b").Build()
 
-		yamltest.AssertTokenEqual(mockT, want, got, "test")
-		assert.True(t, mockT.Failed())
+		diff := yamltest.CompareTokens(want, got)
+		assert.False(t, diff.Equal())
+		assert.Contains(t, diff.Fields, "Value")
 	})
 
-	t.Run("different Origin fails", func(t *testing.T) {
+	t.Run("different Origin", func(t *testing.T) {
 		t.Parallel()
 
-		mockT := &testing.T{}
 		want := yamltest.NewTokenBuilder().Origin("a\n").Build()
 		got := yamltest.NewTokenBuilder().Origin("b\n").Build()
 
-		yamltest.AssertTokenEqual(mockT, want, got, "test")
-		assert.True(t, mockT.Failed())
+		diff := yamltest.CompareTokens(want, got)
+		assert.False(t, diff.Equal())
+		assert.Contains(t, diff.Fields, "Origin")
 	})
 
-	t.Run("different Position.Line fails", func(t *testing.T) {
+	t.Run("different Position.Line", func(t *testing.T) {
 		t.Parallel()
 
-		mockT := &testing.T{}
 		want := yamltest.NewTokenBuilder().PositionLine(1).Build()
 		got := yamltest.NewTokenBuilder().PositionLine(2).Build()
 
-		yamltest.AssertTokenEqual(mockT, want, got, "test")
-		assert.True(t, mockT.Failed())
+		diff := yamltest.CompareTokens(want, got)
+		assert.False(t, diff.Equal())
+		assert.Contains(t, diff.Fields, "Position.Line")
+	})
+
+	t.Run("String() includes details", func(t *testing.T) {
+		t.Parallel()
+
+		want := yamltest.NewTokenBuilder().Value("a").Build()
+		got := yamltest.NewTokenBuilder().Value("b").Build()
+
+		diff := yamltest.CompareTokens(want, got)
+		str := diff.String()
+		assert.Contains(t, str, "token mismatch")
+		assert.Contains(t, str, "want")
+		assert.Contains(t, str, "got")
+		assert.Contains(t, str, "Value")
 	})
 }
 
-func TestAssertTokensEqual(t *testing.T) {
+func TestCompareTokenSlices(t *testing.T) {
 	t.Parallel()
 
-	t.Run("equal token slices pass", func(t *testing.T) {
+	t.Run("equal token slices", func(t *testing.T) {
 		t.Parallel()
 
-		mockT := &testing.T{}
 		tb := yamltest.NewTokenBuilder().Type(token.StringType)
 		tks := token.Tokens{
 			tb.Value("a").PositionLine(1).Build(),
 			tb.Value("b").PositionLine(2).Build(),
 		}
 
-		yamltest.AssertTokensEqual(mockT, tks, tks)
-		assert.False(t, mockT.Failed())
+		diff := yamltest.CompareTokenSlices(tks, tks)
+		assert.True(t, diff.Equal())
+		assert.Equal(t, "token slices equal", diff.String())
+	})
+
+	t.Run("count mismatch", func(t *testing.T) {
+		t.Parallel()
+
+		tb := yamltest.NewTokenBuilder()
+		want := token.Tokens{tb.Build()}
+		got := token.Tokens{tb.Build(), tb.Build()}
+
+		diff := yamltest.CompareTokenSlices(want, got)
+		assert.False(t, diff.Equal())
+		assert.True(t, diff.CountMismatch)
+		assert.Equal(t, 1, diff.WantCount)
+		assert.Equal(t, 2, diff.GotCount)
+		assert.Contains(t, diff.String(), "count mismatch")
 	})
 
 	t.Run("differences reported for each token", func(t *testing.T) {
 		t.Parallel()
 
-		mockT := &testing.T{}
 		tb := yamltest.NewTokenBuilder()
 		want := token.Tokens{
 			tb.Value("a").Build(),
@@ -463,7 +587,143 @@ func TestAssertTokensEqual(t *testing.T) {
 			tb.Value("y").Build(),
 		}
 
-		yamltest.AssertTokensEqual(mockT, want, got)
-		assert.True(t, mockT.Failed())
+		diff := yamltest.CompareTokenSlices(want, got)
+		assert.False(t, diff.Equal())
+		require.Len(t, diff.Diffs, 2)
+		assert.False(t, diff.Diffs[0].Equal())
+		assert.False(t, diff.Diffs[1].Equal())
+	})
+
+	t.Run("empty slices equal", func(t *testing.T) {
+		t.Parallel()
+
+		diff := yamltest.CompareTokenSlices(token.Tokens{}, token.Tokens{})
+		assert.True(t, diff.Equal())
+	})
+}
+
+func TestDiffTokenFields(t *testing.T) {
+	t.Parallel()
+
+	t.Run("all fields equal returns empty", func(t *testing.T) {
+		t.Parallel()
+
+		tk := yamltest.NewTokenBuilder().
+			Type(token.StringType).
+			Value("test").
+			Origin("test\n").
+			CharacterType(token.CharacterTypeMiscellaneous).
+			Indicator(token.NotIndicator).
+			PositionLine(1).
+			PositionColumn(1).
+			PositionOffset(0).
+			PositionIndentNum(0).
+			PositionIndentLevel(0).
+			Build()
+
+		diffs := yamltest.DiffTokenFields(tk, tk)
+		assert.Empty(t, diffs)
+	})
+
+	t.Run("reports all differing fields", func(t *testing.T) {
+		t.Parallel()
+
+		want := yamltest.NewTokenBuilder().
+			Type(token.StringType).
+			Value("a").
+			Origin("a\n").
+			CharacterType(token.CharacterTypeMiscellaneous).
+			Indicator(token.NotIndicator).
+			PositionLine(1).
+			PositionColumn(1).
+			PositionOffset(0).
+			PositionIndentNum(2).
+			PositionIndentLevel(1).
+			Build()
+
+		got := yamltest.NewTokenBuilder().
+			Type(token.IntegerType).
+			Value("b").
+			Origin("b\n").
+			CharacterType(token.CharacterTypeIndicator).
+			Indicator(token.BlockStructureIndicator).
+			PositionLine(2).
+			PositionColumn(2).
+			PositionOffset(10).
+			PositionIndentNum(4).
+			PositionIndentLevel(2).
+			Build()
+
+		diffs := yamltest.DiffTokenFields(want, got)
+		assert.Contains(t, diffs, "Type")
+		assert.Contains(t, diffs, "Value")
+		assert.Contains(t, diffs, "Origin")
+		assert.Contains(t, diffs, "CharacterType")
+		assert.Contains(t, diffs, "Indicator")
+		assert.Contains(t, diffs, "Position.Line")
+		assert.Contains(t, diffs, "Position.Column")
+		assert.Contains(t, diffs, "Position.Offset")
+		assert.Contains(t, diffs, "Position.IndentNum")
+		assert.Contains(t, diffs, "Position.IndentLevel")
+	})
+}
+
+func TestTokenValidationError(t *testing.T) {
+	t.Parallel()
+
+	t.Run("single token error message", func(t *testing.T) {
+		t.Parallel()
+
+		err := &yamltest.TokenValidationError{
+			Index:  -1,
+			Which:  "want",
+			Reason: yamltest.ErrNilToken,
+		}
+		assert.Equal(t, "want: token is nil", err.Error())
+	})
+
+	t.Run("indexed token error message", func(t *testing.T) {
+		t.Parallel()
+
+		err := &yamltest.TokenValidationError{
+			Index:  5,
+			Which:  "got",
+			Reason: yamltest.ErrNilPosition,
+		}
+		assert.Equal(t, "token 5 got: token position is nil", err.Error())
+	})
+
+	t.Run("Unwrap returns reason", func(t *testing.T) {
+		t.Parallel()
+
+		err := &yamltest.TokenValidationError{
+			Index:  -1,
+			Which:  "want",
+			Reason: yamltest.ErrNilToken,
+		}
+		assert.Equal(t, yamltest.ErrNilToken, err.Unwrap())
+	})
+}
+
+func TestTokensDiff_String(t *testing.T) {
+	t.Parallel()
+
+	t.Run("shows all mismatches", func(t *testing.T) {
+		t.Parallel()
+
+		diff := yamltest.TokensDiff{
+			WantCount: 3,
+			GotCount:  3,
+			Diffs: []yamltest.TokenDiff{
+				{Fields: nil}, // Equal.
+				{Fields: []string{"Value"}},
+				{Fields: []string{"Type", "Origin"}},
+			},
+		}
+
+		str := diff.String()
+		assert.Contains(t, str, "token 1")
+		assert.Contains(t, str, "token 2")
+		assert.NotContains(t, str, "token 0") // Equal token not shown.
 	})
 }

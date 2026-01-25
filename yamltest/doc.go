@@ -46,12 +46,30 @@
 //
 // When tokens differ, standard equality checks produce unhelpful output.
 //
-// This package provides assertion helpers that show exactly which fields differ:
+// This package provides pure comparison functions that return detailed diffs:
 //
-//	yamltest.RequireTokensValid(t, want, got)  // Ensures non-nil tokens/positions.
-//	yamltest.AssertTokensEqual(t, want, got)   // Compares all fields with diffs.
+//	// Validate tokens first (returns error if nil tokens or positions)
+//	if err := yamltest.ValidateTokens(want, got); err != nil {
+//		t.Fatalf("invalid tokens: %v", err)
+//	}
 //
-// See [RequireTokensValid] and [AssertTokensEqual] for details.
+//	// Compare tokens and get diff details
+//	if diff := yamltest.CompareTokenSlices(want, got); !diff.Equal() {
+//		t.Errorf("token mismatch: %s", diff)
+//	}
+//
+// [ValidateTokenPair] and [ValidateTokens] check for nil tokens or positions,
+// returning [*TokenValidationError] with the underlying [ErrNilToken] or
+// [ErrNilPosition] reason.
+//
+// [CompareTokens] and [CompareTokenSlices] return [TokenDiff] and [TokensDiff]
+// respectively, providing detailed field-by-field comparison results.
+//
+// For content comparison with normalized line endings, use [CompareContent]:
+//
+//	if diff := yamltest.CompareContent(want, got); !diff.Equal() {
+//		t.Errorf("content mismatch: %s", diff)
+//	}
 //
 // For debugging, [FormatToken] and [FormatTokens] produce readable
 // representations, and [DumpTokenOrigins] reconstructs the original source by
