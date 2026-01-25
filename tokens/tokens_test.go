@@ -730,15 +730,11 @@ func TestSegments2_TokenRangesAt(t *testing.T) {
 		}
 
 		got := s2.TokenRangesAt(0, 0)
-
-		require.NotNil(t, got)
-
-		ranges := got.Values()
-		require.Len(t, ranges, 1)
-		assert.Equal(t, 0, ranges[0].Start.Line)
-		assert.Equal(t, 0, ranges[0].Start.Col)
-		assert.Equal(t, 0, ranges[0].End.Line)
-		assert.Equal(t, 4, ranges[0].End.Col)
+		require.Len(t, got, 1)
+		assert.Equal(t, 0, got[0].Start.Line)
+		assert.Equal(t, 0, got[0].Start.Col)
+		assert.Equal(t, 0, got[0].End.Line)
+		assert.Equal(t, 4, got[0].End.Col)
 	})
 
 	t.Run("single line multiple segments", func(t *testing.T) {
@@ -759,30 +755,21 @@ func TestSegments2_TokenRangesAt(t *testing.T) {
 
 		// Click on "key".
 		got := s2.TokenRangesAt(0, 1)
-		require.NotNil(t, got)
-
-		ranges := got.Values()
-		require.Len(t, ranges, 1)
-		assert.Equal(t, 0, ranges[0].Start.Col)
-		assert.Equal(t, 3, ranges[0].End.Col)
+		require.Len(t, got, 1)
+		assert.Equal(t, 0, got[0].Start.Col)
+		assert.Equal(t, 3, got[0].End.Col)
 
 		// Click on ":".
 		got = s2.TokenRangesAt(0, 3)
-		require.NotNil(t, got)
-
-		ranges = got.Values()
-		require.Len(t, ranges, 1)
-		assert.Equal(t, 3, ranges[0].Start.Col)
-		assert.Equal(t, 5, ranges[0].End.Col)
+		require.Len(t, got, 1)
+		assert.Equal(t, 3, got[0].Start.Col)
+		assert.Equal(t, 5, got[0].End.Col)
 
 		// Click on "val".
 		got = s2.TokenRangesAt(0, 6)
-		require.NotNil(t, got)
-
-		ranges = got.Values()
-		require.Len(t, ranges, 1)
-		assert.Equal(t, 5, ranges[0].Start.Col)
-		assert.Equal(t, 8, ranges[0].End.Col)
+		require.Len(t, got, 1)
+		assert.Equal(t, 5, got[0].Start.Col)
+		assert.Equal(t, 8, got[0].End.Col)
 	})
 
 	t.Run("multiline token shared source", func(t *testing.T) {
@@ -800,29 +787,25 @@ func TestSegments2_TokenRangesAt(t *testing.T) {
 
 		// Click on line 1 should highlight all 3 lines.
 		got := s2.TokenRangesAt(0, 2)
-
-		require.NotNil(t, got)
-
-		ranges := got.Values()
-		require.Len(t, ranges, 3)
+		require.Len(t, got, 3)
 
 		// Line 0.
-		assert.Equal(t, 0, ranges[0].Start.Line)
-		assert.Equal(t, 0, ranges[0].Start.Col)
-		assert.Equal(t, 0, ranges[0].End.Line)
-		assert.Equal(t, 5, ranges[0].End.Col)
+		assert.Equal(t, 0, got[0].Start.Line)
+		assert.Equal(t, 0, got[0].Start.Col)
+		assert.Equal(t, 0, got[0].End.Line)
+		assert.Equal(t, 5, got[0].End.Col)
 
 		// Line 1.
-		assert.Equal(t, 1, ranges[1].Start.Line)
-		assert.Equal(t, 0, ranges[1].Start.Col)
-		assert.Equal(t, 1, ranges[1].End.Line)
-		assert.Equal(t, 5, ranges[1].End.Col)
+		assert.Equal(t, 1, got[1].Start.Line)
+		assert.Equal(t, 0, got[1].Start.Col)
+		assert.Equal(t, 1, got[1].End.Line)
+		assert.Equal(t, 5, got[1].End.Col)
 
 		// Line 2.
-		assert.Equal(t, 2, ranges[2].Start.Line)
-		assert.Equal(t, 0, ranges[2].Start.Col)
-		assert.Equal(t, 2, ranges[2].End.Line)
-		assert.Equal(t, 5, ranges[2].End.Col)
+		assert.Equal(t, 2, got[2].Start.Line)
+		assert.Equal(t, 0, got[2].Start.Col)
+		assert.Equal(t, 2, got[2].End.Line)
+		assert.Equal(t, 5, got[2].End.Col)
 	})
 
 	t.Run("zero width segments skipped", func(t *testing.T) {
@@ -838,14 +821,10 @@ func TestSegments2_TokenRangesAt(t *testing.T) {
 		}
 
 		got := s2.TokenRangesAt(0, 0)
-
-		require.NotNil(t, got)
-
-		ranges := got.Values()
 		// Only the non-zero-width segment should be included.
-		require.Len(t, ranges, 1)
-		assert.Equal(t, 0, ranges[0].Start.Col)
-		assert.Equal(t, 3, ranges[0].End.Col)
+		require.Len(t, got, 1)
+		assert.Equal(t, 0, got[0].Start.Col)
+		assert.Equal(t, 3, got[0].End.Col)
 	})
 
 	t.Run("empty segments2", func(t *testing.T) {

@@ -359,15 +359,11 @@ func (s *Source) TokenPositionRangesFromToken(tk *token.Token) []position.Range 
 //
 // Returns nil if no tokens exist at any of the given positions.
 func (s *Source) TokenPositionRanges(positions ...position.Position) []position.Range {
-	allRanges := position.NewRanges()
+	var allRanges position.Ranges
 
 	for _, pos := range positions {
 		ranges := s.lines.TokenPositionRangesAt(pos)
-		if ranges != nil {
-			for _, r := range ranges.Values() {
-				allRanges.Add(r)
-			}
-		}
+		allRanges = append(allRanges, ranges...)
 	}
 
 	return allRanges.UniqueValues()
@@ -389,15 +385,11 @@ func (s *Source) ContentPositionRangesFromToken(tk *token.Token) []position.Rang
 //
 // Returns nil if no content exists at any of the given positions.
 func (s *Source) ContentPositionRanges(positions ...position.Position) []position.Range {
-	allRanges := position.NewRanges()
+	var allRanges position.Ranges
 
 	for _, pos := range positions {
 		ranges := s.lines.ContentPositionRangesAt(pos)
-		if ranges != nil {
-			for _, r := range ranges.Values() {
-				allRanges.Add(r)
-			}
-		}
+		allRanges = append(allRanges, ranges...)
 	}
 
 	return allRanges.UniqueValues()

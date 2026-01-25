@@ -134,16 +134,16 @@ func (l Line) tokenPositions(lineIdx int, tk *token.Token) []position.Position {
 	return positions
 }
 
-// tokenPositionRanges returns [*position.Ranges] for occurrences of the given
+// tokenPositionRanges returns [position.Ranges] for occurrences of the given
 // [*token.Token] on this line.
-func (l Line) tokenPositionRanges(lineIdx int, tk *token.Token) *position.Ranges {
-	ranges := position.NewRanges()
+func (l Line) tokenPositionRanges(lineIdx int, tk *token.Token) position.Ranges {
+	var ranges position.Ranges
 
 	col := 0
 	for _, seg := range l.segments {
 		w := seg.Width()
 		if seg.Contains(tk) && w > 0 {
-			ranges.Add(position.NewRange(
+			ranges = append(ranges, position.NewRange(
 				position.New(lineIdx, col),
 				position.New(lineIdx, col+w),
 			))
@@ -291,32 +291,32 @@ func (ls Lines) TokenAt(pos position.Position) *token.Token {
 	return ls[pos.Line].segments.SourceTokenAt(pos.Col)
 }
 
-// TokenPositionRanges returns [*position.Ranges] for all occurrences of the
+// TokenPositionRanges returns [position.Ranges] for all occurrences of the
 // given token.
 //
 // For multi-line tokens split across lines, returns one range per line.
 //
 // Returns nil if the token is nil or not found.
-func (ls Lines) TokenPositionRanges(tk *token.Token) *position.Ranges {
+func (ls Lines) TokenPositionRanges(tk *token.Token) position.Ranges {
 	if tk == nil {
 		return nil
 	}
 
-	ranges := position.NewRanges()
+	var ranges position.Ranges
 	for i, l := range ls {
-		ranges.Add(l.tokenPositionRanges(i, tk).Values()...)
+		ranges = append(ranges, l.tokenPositionRanges(i, tk)...)
 	}
 
 	return ranges
 }
 
-// TokenPositionRangesAt returns [*position.Ranges] for all occurrences of the
+// TokenPositionRangesAt returns [position.Ranges] for all occurrences of the
 // token at the given position.
 //
 // For multi-line tokens, returns one range per line.
 //
 // Returns nil if the position is out of bounds or no token exists there.
-func (ls Lines) TokenPositionRangesAt(pos position.Position) *position.Ranges {
+func (ls Lines) TokenPositionRangesAt(pos position.Position) position.Ranges {
 	lineSegs := make(tokens.Segments2, len(ls))
 	for i, l := range ls {
 		lineSegs[i] = l.segments
@@ -329,7 +329,7 @@ func (ls Lines) TokenPositionRangesAt(pos position.Position) *position.Ranges {
 // position, excluding leading and trailing spaces.
 //
 // Returns nil if the position is out of bounds or no content exists there.
-func (ls Lines) ContentPositionRangesAt(pos position.Position) *position.Ranges {
+func (ls Lines) ContentPositionRangesAt(pos position.Position) position.Ranges {
 	lineSegs := make(tokens.Segments2, len(ls))
 	for i, l := range ls {
 		lineSegs[i] = l.segments

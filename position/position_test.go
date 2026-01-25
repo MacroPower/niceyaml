@@ -164,32 +164,32 @@ func TestRanges_String(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		ranges *position.Ranges
+		ranges position.Ranges
 		want   string
 	}{
 		"empty ranges": {
-			ranges: position.NewRanges(),
+			ranges: nil,
 			want:   "",
 		},
 		"single range": {
-			ranges: position.NewRanges(
+			ranges: position.Ranges{
 				position.NewRange(position.New(0, 0), position.New(0, 5)),
-			),
+			},
 			want: "1:1-1:6",
 		},
 		"multiple ranges": {
-			ranges: position.NewRanges(
+			ranges: position.Ranges{
 				position.NewRange(position.New(0, 0), position.New(0, 5)),
 				position.NewRange(position.New(2, 3), position.New(4, 8)),
-			),
+			},
 			want: "1:1-1:6, 3:4-5:9",
 		},
 		"three ranges": {
-			ranges: position.NewRanges(
+			ranges: position.Ranges{
 				position.NewRange(position.New(0, 0), position.New(0, 1)),
 				position.NewRange(position.New(1, 0), position.New(1, 1)),
 				position.NewRange(position.New(2, 0), position.New(2, 1)),
-			),
+			},
 			want: "1:1-1:2, 2:1-2:2, 3:1-3:2",
 		},
 	}
@@ -391,105 +391,13 @@ func TestRange_SliceLines(t *testing.T) {
 	}
 }
 
-func TestNewRanges(t *testing.T) {
-	t.Parallel()
-
-	t.Run("no arguments", func(t *testing.T) {
-		t.Parallel()
-
-		rs := position.NewRanges()
-		assert.Empty(t, rs.Values())
-	})
-
-	t.Run("single range", func(t *testing.T) {
-		t.Parallel()
-
-		r := position.NewRange(position.New(0, 0), position.New(1, 0))
-		rs := position.NewRanges(r)
-		assert.Equal(t, []position.Range{r}, rs.Values())
-	})
-
-	t.Run("multiple ranges", func(t *testing.T) {
-		t.Parallel()
-
-		r1 := position.NewRange(position.New(0, 0), position.New(1, 0))
-		r2 := position.NewRange(position.New(2, 0), position.New(3, 0))
-		r3 := position.NewRange(position.New(4, 0), position.New(5, 0))
-		rs := position.NewRanges(r1, r2, r3)
-		assert.Equal(t, []position.Range{r1, r2, r3}, rs.Values())
-	})
-}
-
-func TestRanges_Add(t *testing.T) {
-	t.Parallel()
-
-	t.Run("add to empty", func(t *testing.T) {
-		t.Parallel()
-
-		rs := position.NewRanges()
-		r := position.NewRange(position.New(0, 0), position.New(1, 0))
-		rs.Add(r)
-		assert.Equal(t, []position.Range{r}, rs.Values())
-	})
-
-	t.Run("add multiple sequentially", func(t *testing.T) {
-		t.Parallel()
-
-		rs := position.NewRanges()
-		r1 := position.NewRange(position.New(0, 0), position.New(1, 0))
-		r2 := position.NewRange(position.New(2, 0), position.New(3, 0))
-
-		rs.Add(r1)
-		rs.Add(r2)
-		assert.Equal(t, []position.Range{r1, r2}, rs.Values())
-	})
-
-	t.Run("add duplicates allowed", func(t *testing.T) {
-		t.Parallel()
-
-		rs := position.NewRanges()
-		r := position.NewRange(position.New(0, 0), position.New(1, 0))
-		rs.Add(r)
-		rs.Add(r)
-		assert.Equal(t, []position.Range{r, r}, rs.Values())
-	})
-}
-
-func TestRanges_Values(t *testing.T) {
-	t.Parallel()
-
-	t.Run("empty ranges returns nil", func(t *testing.T) {
-		t.Parallel()
-
-		rs := position.NewRanges()
-		assert.Nil(t, rs.Values())
-	})
-
-	t.Run("returns all ranges in order", func(t *testing.T) {
-		t.Parallel()
-
-		r1 := position.NewRange(position.New(0, 0), position.New(1, 0))
-		r2 := position.NewRange(position.New(2, 0), position.New(3, 0))
-		rs := position.NewRanges(r1, r2)
-		assert.Equal(t, []position.Range{r1, r2}, rs.Values())
-	})
-
-	t.Run("returns duplicates", func(t *testing.T) {
-		t.Parallel()
-
-		r := position.NewRange(position.New(0, 0), position.New(1, 0))
-		rs := position.NewRanges(r, r)
-		assert.Equal(t, []position.Range{r, r}, rs.Values())
-	})
-}
-
 func TestRanges_UniqueValues(t *testing.T) {
 	t.Parallel()
 
 	t.Run("empty ranges returns nil", func(t *testing.T) {
 		t.Parallel()
 
-		rs := position.NewRanges()
+		var rs position.Ranges
 		assert.Nil(t, rs.UniqueValues())
 	})
 
@@ -497,7 +405,7 @@ func TestRanges_UniqueValues(t *testing.T) {
 		t.Parallel()
 
 		r := position.NewRange(position.New(0, 0), position.New(1, 0))
-		rs := position.NewRanges(r)
+		rs := position.Ranges{r}
 		assert.Equal(t, []position.Range{r}, rs.UniqueValues())
 	})
 
@@ -505,7 +413,7 @@ func TestRanges_UniqueValues(t *testing.T) {
 		t.Parallel()
 
 		r := position.NewRange(position.New(0, 0), position.New(1, 0))
-		rs := position.NewRanges(r, r, r)
+		rs := position.Ranges{r, r, r}
 		assert.Equal(t, []position.Range{r}, rs.UniqueValues())
 	})
 
@@ -514,7 +422,7 @@ func TestRanges_UniqueValues(t *testing.T) {
 
 		r1 := position.NewRange(position.New(0, 0), position.New(1, 0))
 		r2 := position.NewRange(position.New(2, 0), position.New(3, 0))
-		rs := position.NewRanges(r1, r2, r1, r2)
+		rs := position.Ranges{r1, r2, r1, r2}
 		assert.Equal(t, []position.Range{r1, r2}, rs.UniqueValues())
 	})
 
@@ -524,7 +432,7 @@ func TestRanges_UniqueValues(t *testing.T) {
 		r1 := position.NewRange(position.New(0, 0), position.New(1, 0))
 		r2 := position.NewRange(position.New(2, 0), position.New(3, 0))
 		r3 := position.NewRange(position.New(4, 0), position.New(5, 0))
-		rs := position.NewRanges(r3, r1, r2, r1, r3)
+		rs := position.Ranges{r3, r1, r2, r1, r3}
 		assert.Equal(t, []position.Range{r3, r1, r2}, rs.UniqueValues())
 	})
 
@@ -532,7 +440,7 @@ func TestRanges_UniqueValues(t *testing.T) {
 		t.Parallel()
 
 		r := position.NewRange(position.New(5, 5), position.New(10, 10))
-		rs := position.NewRanges(r, r, r, r, r)
+		rs := position.Ranges{r, r, r, r, r}
 		assert.Equal(t, []position.Range{r}, rs.UniqueValues())
 	})
 }
@@ -543,7 +451,7 @@ func TestRanges_LineIndices(t *testing.T) {
 	t.Run("empty ranges returns nil", func(t *testing.T) {
 		t.Parallel()
 
-		rs := position.NewRanges()
+		var rs position.Ranges
 		assert.Nil(t, rs.LineIndices())
 	})
 
@@ -551,7 +459,7 @@ func TestRanges_LineIndices(t *testing.T) {
 		t.Parallel()
 
 		r := position.NewRange(position.New(5, 0), position.New(5, 10))
-		rs := position.NewRanges(r)
+		rs := position.Ranges{r}
 		assert.Equal(t, []int{5}, rs.LineIndices())
 	})
 
@@ -561,7 +469,7 @@ func TestRanges_LineIndices(t *testing.T) {
 		r1 := position.NewRange(position.New(0, 0), position.New(0, 5))
 		r2 := position.NewRange(position.New(3, 0), position.New(4, 0)) // Spans lines 3-4.
 		r3 := position.NewRange(position.New(7, 0), position.New(7, 10))
-		rs := position.NewRanges(r1, r2, r3)
+		rs := position.Ranges{r1, r2, r3}
 		assert.Equal(t, []int{0, 3, 4, 7}, rs.LineIndices())
 	})
 
@@ -570,7 +478,7 @@ func TestRanges_LineIndices(t *testing.T) {
 
 		r1 := position.NewRange(position.New(5, 0), position.New(5, 5))
 		r2 := position.NewRange(position.New(5, 10), position.New(5, 15))
-		rs := position.NewRanges(r1, r2)
+		rs := position.Ranges{r1, r2}
 		assert.Equal(t, []int{5, 5}, rs.LineIndices())
 	})
 }

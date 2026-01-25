@@ -236,7 +236,7 @@ type Segments2 []Segments
 // Positions are calculated based on [Segment] widths.
 //
 // Returns nil if the position is out of bounds or no [Segment] exists there.
-func (s2 Segments2) TokenRangesAt(idx, col int) *position.Ranges {
+func (s2 Segments2) TokenRangesAt(idx, col int) position.Ranges {
 	if idx < 0 || idx >= len(s2) {
 		return nil
 	}
@@ -246,7 +246,7 @@ func (s2 Segments2) TokenRangesAt(idx, col int) *position.Ranges {
 		return nil
 	}
 
-	ranges := position.NewRanges()
+	var ranges position.Ranges
 
 	for i, segs := range s2 {
 		lineCol := 0
@@ -254,7 +254,7 @@ func (s2 Segments2) TokenRangesAt(idx, col int) *position.Ranges {
 		for _, seg := range segs {
 			w := seg.Width()
 			if seg.source == source && w > 0 {
-				ranges.Add(position.NewRange(
+				ranges = append(ranges, position.NewRange(
 					position.New(i, lineCol),
 					position.New(i, lineCol+w),
 				))
@@ -282,7 +282,7 @@ func countTrailingSpaces(s string) int {
 //
 // Returns nil if there is no content at the given position or if the token is
 // all whitespace.
-func (s2 Segments2) ContentRangesAt(idx, col int) *position.Ranges {
+func (s2 Segments2) ContentRangesAt(idx, col int) position.Ranges {
 	if idx < 0 || idx >= len(s2) {
 		return nil
 	}
@@ -292,7 +292,7 @@ func (s2 Segments2) ContentRangesAt(idx, col int) *position.Ranges {
 		return nil
 	}
 
-	ranges := position.NewRanges()
+	var ranges position.Ranges
 
 	for i, segs := range s2 {
 		lineCol := 0
@@ -309,7 +309,7 @@ func (s2 Segments2) ContentRangesAt(idx, col int) *position.Ranges {
 				contentWidth := w - leading - trailing
 
 				if contentWidth > 0 {
-					ranges.Add(position.NewRange(
+					ranges = append(ranges, position.NewRange(
 						position.New(i, lineCol+leading),
 						position.New(i, lineCol+leading+contentWidth),
 					))

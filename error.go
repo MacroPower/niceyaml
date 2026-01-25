@@ -486,12 +486,12 @@ func (e *Error) renderErrorSource(mainToken *token.Token) string {
 	positions := e.collectErrorPositions(t, mainToken)
 
 	// Collect all ranges from positions and apply overlays directly.
-	allRanges := position.NewRanges()
+	var allRanges position.Ranges
 	for _, pos := range positions {
-		allRanges.Add(pos.ranges...)
+		allRanges = append(allRanges, pos.ranges...)
 	}
 
-	t.AddOverlay(style.GenericError, allRanges.Values()...)
+	t.AddOverlay(style.GenericError, allRanges...)
 
 	// Apply annotations directly to source lines.
 	lineAnnotations := prepareLineAnnotations(positions)

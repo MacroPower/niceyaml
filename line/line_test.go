@@ -2235,14 +2235,11 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		// Use original "key" token from lexer (TokenPositionRanges does pointer comparison).
 		tk := tks[0]
 		ranges := lines.TokenPositionRanges(tk)
-		require.NotNil(t, ranges)
-
-		values := ranges.Values()
-		require.Len(t, values, 1)
-		assert.Equal(t, 0, values[0].Start.Line)
-		assert.Equal(t, 0, values[0].Start.Col)
-		assert.Equal(t, 0, values[0].End.Line)
-		assert.Equal(t, 3, values[0].End.Col)
+		require.Len(t, ranges, 1)
+		assert.Equal(t, 0, ranges[0].Start.Line)
+		assert.Equal(t, 0, ranges[0].Start.Col)
+		assert.Equal(t, 0, ranges[0].End.Line)
+		assert.Equal(t, 3, ranges[0].End.Col)
 	})
 
 	t.Run("multiline token returns multiple ranges", func(t *testing.T) {
@@ -2269,14 +2266,11 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		require.NotNil(t, tk)
 
 		ranges := lines.TokenPositionRanges(tk)
-		require.NotNil(t, ranges)
-
-		values := ranges.Values()
-		require.Len(t, values, 2)
+		require.Len(t, ranges, 2)
 
 		// Collect line indices.
-		lineIdxs := make([]int, len(values))
-		for i, r := range values {
+		lineIdxs := make([]int, len(ranges))
+		for i, r := range ranges {
 			lineIdxs[i] = r.Start.Line
 		}
 
@@ -2305,8 +2299,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		otherTk := otherTks[0]
 
 		ranges := lines.TokenPositionRanges(otherTk)
-		require.NotNil(t, ranges)
-		assert.Empty(t, ranges.Values())
+		assert.Empty(t, ranges)
 	})
 }
 
@@ -2322,14 +2315,11 @@ func TestLines_TokenPositionRangesAt(t *testing.T) {
 
 		// Query position at the "key" token.
 		ranges := lines.TokenPositionRangesAt(position.New(0, 0))
-		require.NotNil(t, ranges)
-
-		values := ranges.Values()
-		require.Len(t, values, 1)
-		assert.Equal(t, 0, values[0].Start.Line)
-		assert.Equal(t, 0, values[0].Start.Col)
-		assert.Equal(t, 0, values[0].End.Line)
-		assert.Equal(t, 3, values[0].End.Col)
+		require.Len(t, ranges, 1)
+		assert.Equal(t, 0, ranges[0].Start.Line)
+		assert.Equal(t, 0, ranges[0].Start.Col)
+		assert.Equal(t, 0, ranges[0].End.Line)
+		assert.Equal(t, 3, ranges[0].End.Col)
 	})
 
 	t.Run("multiline token returns all ranges", func(t *testing.T) {
@@ -2345,14 +2335,11 @@ func TestLines_TokenPositionRangesAt(t *testing.T) {
 
 		// Query position in the literal block content (line 1, column 2).
 		ranges := lines.TokenPositionRangesAt(position.New(1, 2))
-		require.NotNil(t, ranges)
-
-		values := ranges.Values()
 		// Should return ranges for all lines where this token appears.
-		require.Len(t, values, 2)
+		require.Len(t, ranges, 2)
 
-		lineIdxs := make([]int, len(values))
-		for i, r := range values {
+		lineIdxs := make([]int, len(ranges))
+		for i, r := range ranges {
 			lineIdxs[i] = r.Start.Line
 		}
 
@@ -2369,12 +2356,9 @@ func TestLines_TokenPositionRangesAt(t *testing.T) {
 
 		// Query at "value" position (after "key:" which is 4 chars).
 		ranges := lines.TokenPositionRangesAt(position.New(0, 5))
-		require.NotNil(t, ranges)
-
-		values := ranges.Values()
-		require.Len(t, values, 1)
+		require.Len(t, ranges, 1)
 		// Value token starts at column 4 (0-indexed: "key:" is 4 chars).
-		assert.Equal(t, 4, values[0].Start.Col)
+		assert.Equal(t, 4, ranges[0].Start.Col)
 	})
 
 	t.Run("position outside tokens returns empty", func(t *testing.T) {

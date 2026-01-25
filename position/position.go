@@ -192,43 +192,20 @@ func (s Spans) Clamp(lower, upper int) Spans {
 	return result
 }
 
-// Ranges represents a set of [Range]s.
-// Create instances with [NewRanges].
-type Ranges struct {
-	value []Range
-}
-
-// NewRanges creates new [*Ranges].
-func NewRanges(ranges ...Range) *Ranges {
-	prs := &Ranges{}
-	for _, r := range ranges {
-		prs.Add(r)
-	}
-
-	return prs
-}
-
-// Add adds [Range]s to the set in-place.
-func (rs *Ranges) Add(r ...Range) {
-	rs.value = append(rs.value, r...)
-}
-
-// Values returns all [Range]s in the set as a slice.
-func (rs *Ranges) Values() []Range {
-	return rs.value
-}
+// Ranges represents a slice of [Range]s.
+type Ranges []Range
 
 // UniqueValues returns all unique [Range] values in the collection,
 // preserving insertion order.
-func (rs *Ranges) UniqueValues() []Range {
-	if len(rs.value) == 0 {
+func (rs Ranges) UniqueValues() []Range {
+	if len(rs) == 0 {
 		return nil
 	}
 
 	seen := make(map[Range]struct{})
-	result := make([]Range, 0, len(rs.value))
+	result := make([]Range, 0, len(rs))
 
-	for _, r := range rs.value {
+	for _, r := range rs {
 		if _, exists := seen[r]; !exists {
 			seen[r] = struct{}{}
 			result = append(result, r)
@@ -241,13 +218,13 @@ func (rs *Ranges) UniqueValues() []Range {
 // LineIndices returns all line indices covered by all [Range]s.
 // For multi-line ranges, each line within the range is included.
 // Duplicate line indices are returned if covered by multiple ranges.
-func (rs *Ranges) LineIndices() []int {
-	if len(rs.value) == 0 {
+func (rs Ranges) LineIndices() []int {
+	if len(rs) == 0 {
 		return nil
 	}
 
 	var result []int
-	for _, r := range rs.value {
+	for _, r := range rs {
 		for line := r.Start.Line; line <= r.End.Line; line++ {
 			result = append(result, line)
 		}
@@ -257,13 +234,13 @@ func (rs *Ranges) LineIndices() []int {
 }
 
 // String returns all [Range]s as a comma-separated list.
-func (rs *Ranges) String() string {
-	if len(rs.value) == 0 {
+func (rs Ranges) String() string {
+	if len(rs) == 0 {
 		return ""
 	}
 
 	var b strings.Builder
-	for i, r := range rs.value {
+	for i, r := range rs {
 		if i > 0 {
 			b.WriteString(", ")
 		}
