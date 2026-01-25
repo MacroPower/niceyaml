@@ -1,0 +1,8 @@
+---
+restaurant:
+  name: ☕ Café Yamüll
+  established: &year 2026
+
+menu:
+  breakfast:
+    - item: Kaffe
