@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 
@@ -16,32 +15,26 @@ func viewCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "view file.yaml [file.yaml...]",
+		Use:   "view file.yaml [pattern...]",
 		Short: "View YAML files with syntax highlighting",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			// Read all files.
-			var contents [][]byte
-			for _, arg := range args {
-				content, err := os.ReadFile(arg) //nolint:gosec // User-provided file paths are intentional.
-				if err != nil {
-					return fmt.Errorf("read file %s: %w", arg, err)
-				}
-
-				contents = append(contents, content)
+			files, err := expandGlobs(args)
+			if err != nil {
+				return err
 			}
 
 			opts := modelOptions{
 				lineNumbers: lineNumbers,
 				search:      search,
-				contents:    contents,
+				files:       files,
 			}
 
 			m := newModel(&opts)
 
 			p := tea.NewProgram(m)
 
-			_, err := p.Run()
+			_, err = p.Run()
 			if err != nil {
 				return fmt.Errorf("run program: %w", err)
 			}

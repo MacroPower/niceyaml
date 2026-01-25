@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -19,7 +20,7 @@ import (
 
 type modelOptions struct {
 	search      string
-	contents    [][]byte
+	files       []fileEntry
 	lineNumbers bool
 }
 
@@ -73,8 +74,11 @@ func newModel(opts *modelOptions) model {
 		lineNumbers:  opts.lineNumbers,
 	}
 
-	for i, c := range opts.contents {
-		m.viewport.AppendRevision(niceyaml.NewSourceFromString(string(c), niceyaml.WithName(fmt.Sprintf("v%d", i))))
+	for _, f := range opts.files {
+		m.viewport.AppendRevision(niceyaml.NewSourceFromString(
+			string(f.content),
+			niceyaml.WithName(filepath.Base(f.path)),
+		))
 	}
 
 	// Apply initial search if provided.
