@@ -12,29 +12,36 @@
 
 Package `niceyaml` combines the powers of [go-yaml][goccy/go-yaml], [bubbletea][bubbletea], and more.
 
-It enables **friendly and predictable handling of YAML documents** in your **CLI** or **TUI** applications.
+It enables **friendly and predictable handling of YAML-compatible documents** in your **CLI** or **TUI** applications, and includes:
 
-> Also supports all YAML-compatible document formats like KYAML or JSON.
+- [`Source`][niceyaml.Source] **style overlay** and **annotation** system
+- Pretty [`Printer`][niceyaml.Printer] with [themes][niceyaml/style/theme]
+- Rich [`Error`][niceyaml.Error] display using the above systems
+- Source [`Revision`][niceyaml.Revision]s for file lineage and **diffs**
+- String [`Finder`][niceyaml.Finder] for load-once, search-many scenarios
+- JSON schema [`generator`][niceyaml/schema/generator] and [`validator`][niceyaml/schema/validator]
+- Bubble [`yamlviewport`][niceyaml/bubbles/yamlviewport] for Bubble Tea
+- Generic building blocks for your own bubbles
+
+We use a **parse-once**, **style-once** approach. This means your users get a snappy UI, and you get a simple API. There's no need to employ multiple lexers, or perform any ANSI manipulation!
+
+We also provide a consistent **positioning system** used throughout `niceyaml`. It enables each cell to be individually addressed, without any complexity being introduced by the specific display mode (e.g. diffs, slices).
 
 ## Features
 
-### Pretty Printing
-
-- Render YAML with syntax highlighting via [lipgloss][lipgloss], directly from tokenized input
-- Wrap YAML errors from go-yaml's parser with fully styled source annotations
-- Supports custom color schemes, style overlays (e.g. highlights), diff rendering, and more
-- Includes a viewport bubble for your Bubble Tea applications
+### Search
 
 ![view](./docs/assets/view.gif)
 
+### Revision Diffs
+
+![revisions](./docs/assets/revisions.gif)
+
+### Themes
+
 ![themes](./docs/assets/themes.gif)
 
-### JSON Schema Generation & Validation
-
-1. Generate JSON schemas from structs via [invopop/jsonschema][invopop/jsonschema]
-2. Provide generated schemas to users, include them via embedding
-3. Use your JSON schemas to validate the Generators via [santhosh-tekuri/jsonschema][santhosh-tekuri/jsonschema]
-4. Users receive the same feedback from your application and their YAML language server!
+### Validation
 
 ![validate](./docs/assets/validate.gif)
 
@@ -94,3 +101,13 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [bubbletea]: https://github.com/charmbracelet/bubbletea
 [invopop/jsonschema]: https://github.com/invopop/jsonschema
 [santhosh-tekuri/jsonschema]: https://github.com/santhosh-tekuri/jsonschema
+[niceyaml.Error]: https://pkg.go.dev/github.com/macropower/niceyaml#Error
+[niceyaml.Finder]: https://pkg.go.dev/github.com/macropower/niceyaml#Finder
+[niceyaml.Printer]: https://pkg.go.dev/github.com/macropower/niceyaml#Printer
+[niceyaml.Revision]: https://pkg.go.dev/github.com/macropower/niceyaml#Revision
+[niceyaml.Source]: https://pkg.go.dev/github.com/macropower/niceyaml#Source
+[niceyaml/style/theme]: https://pkg.go.dev/github.com/macropower/niceyaml/style/theme
+[niceyaml/style.Style]: https://pkg.go.dev/github.com/macropower/niceyaml/style#Style
+[niceyaml/bubbles/yamlviewport]: https://pkg.go.dev/github.com/macropower/niceyaml/bubbles/yamlviewport
+[niceyaml/schema/generator]: https://pkg.go.dev/github.com/macropower/niceyaml/schema/generator
+[niceyaml/schema/validator]: https://pkg.go.dev/github.com/macropower/niceyaml/schema/validator
