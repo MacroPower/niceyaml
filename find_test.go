@@ -253,6 +253,69 @@ func TestFinder_Find(t *testing.T) {
 			search: "日本",
 			want:   nil,
 		},
+		"emoji search": {
+			input:  "icon: 🎉",
+			search: "🎉",
+			want: []position.Range{
+				position.NewRange(
+					position.New(0, 6),
+					position.New(0, 7),
+				),
+			},
+		},
+		"search longer than input": {
+			input:  "a: b",
+			search: "this is a very long search string",
+			want:   nil,
+		},
+		"search equals input": {
+			input:  "key: value",
+			search: "key: value",
+			want: []position.Range{
+				position.NewRange(
+					position.New(0, 0),
+					position.New(0, 10),
+				),
+			},
+		},
+		"whitespace only search": {
+			input:  "key: value",
+			search: " ",
+			want: []position.Range{
+				position.NewRange(
+					position.New(0, 4),
+					position.New(0, 5),
+				),
+			},
+		},
+		"consecutive matches": {
+			input:  "aaa: bbb",
+			search: "a",
+			want: []position.Range{
+				position.NewRange(
+					position.New(0, 0),
+					position.New(0, 1),
+				),
+				position.NewRange(
+					position.New(0, 1),
+					position.New(0, 2),
+				),
+				position.NewRange(
+					position.New(0, 2),
+					position.New(0, 3),
+				),
+			},
+		},
+		"special yaml chars in search": {
+			input:  "text: \"[not] {a} list\"",
+			search: "[not]",
+			want: []position.Range{
+				position.NewRange(
+					position.New(0, 7),
+					position.New(0, 12),
+				),
+			},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -397,6 +460,71 @@ func TestFinder_Find_DiffBuiltLines(t *testing.T) {
 			got := finder.Find(tc.search)
 
 			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestFinder_Reload(t *testing.T) {
+	t.Parallel()
+
+	// Test that a Finder can be reloaded with different sources.
+	t.Run("reload clears previous data", func(t *testing.T) {
+		t.Parallel()
+
+		finder := niceyaml.NewFinder()
+
+		// Load first source.
+		lines1 := niceyaml.NewSourceFromString("first: 1")
+		finder.Load(lines1)
+
+		got1 := finder.Find("first")
+		assert.Len(t, got1, 1)
+
+		// Load second source - should clear previous data.
+		lines2 := niceyaml.NewSourceFromString("second: 2")
+		finder.Load(lines2)
+
+		// Old search should not find anything.
+		gotOld := finder.Find("first")
+		assert.Nil(t, gotOld)
+
+		// New search should work.
+		gotNew := finder.Find("second")
+		assert.Len(t, gotNew, 1)
+	})
+}
+
+func TestFinder_Find_MultipleSearches(t *testing.T) {
+	t.Parallel()
+
+	// Test multiple Find calls on the same loaded source.
+	lines := niceyaml.NewSourceFromString("key: value\nother: data")
+	finder := niceyaml.NewFinder()
+	finder.Load(lines)
+
+	tcs := map[string]struct {
+		search string
+		want   int
+	}{
+		"find key":   {search: "key", want: 1},
+		"find value": {search: "value", want: 1},
+		"find other": {search: "other", want: 1},
+		"find data":  {search: "data", want: 1},
+		"find colon": {search: ":", want: 2},
+		"not found":  {search: "missing", want: 0},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := finder.Find(tc.search)
+
+			if tc.want == 0 {
+				assert.Nil(t, got)
+			} else {
+				assert.Len(t, got, tc.want)
+			}
 		})
 	}
 }

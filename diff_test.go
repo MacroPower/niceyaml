@@ -605,6 +605,84 @@ func TestSummaryDiff_Source(t *testing.T) {
 			},
 			annotations: map[int]string{1: "@@ -2 +2 @@"},
 		},
+		"both empty returns empty": {
+			before:     "",
+			after:      "",
+			context:    3,
+			wantEmpty:  true,
+			wantRanges: 0,
+		},
+		"insertion at beginning": {
+			before: yamltest.Input(`
+				line2: 2
+				line3: 3
+			`),
+			after: yamltest.Input(`
+				line1: 1
+				line2: 2
+				line3: 3
+			`),
+			context:    1,
+			wantRanges: 1,
+			flags: map[int]line.Flag{
+				0: line.FlagInserted,
+				1: line.FlagDefault,
+			},
+			annotations: map[int]string{0: "@@ -1 +1,2 @@"},
+		},
+		"deletion at end": {
+			before: yamltest.Input(`
+				line1: 1
+				line2: 2
+				line3: 3
+			`),
+			after: yamltest.Input(`
+				line1: 1
+				line2: 2
+			`),
+			context:    1,
+			wantRanges: 1,
+			flags: map[int]line.Flag{
+				1: line.FlagDefault,
+				2: line.FlagDeleted,
+			},
+			annotations: map[int]string{1: "@@ -2,2 +2 @@"},
+		},
+		"large context shows all": {
+			before: yamltest.Input(`
+				line1: 1
+				line2: old
+				line3: 3
+			`),
+			after: yamltest.Input(`
+				line1: 1
+				line2: new
+				line3: 3
+			`),
+			context:    100,
+			wantRanges: 1,
+			flags: map[int]line.Flag{
+				0: line.FlagDefault,
+				1: line.FlagDeleted,
+				2: line.FlagInserted,
+				3: line.FlagDefault,
+			},
+			annotations: map[int]string{0: "@@ -1,3 +1,3 @@"},
+		},
+		"adjacent changes form single hunk": {
+			before: yamltest.Input(`
+				line1: old1
+				line2: old2
+				line3: old3
+			`),
+			after: yamltest.Input(`
+				line1: new1
+				line2: new2
+				line3: new3
+			`),
+			context:    1,
+			wantRanges: 1,
+		},
 	}
 
 	for name, tc := range tcs {

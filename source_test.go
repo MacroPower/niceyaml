@@ -1,6 +1,7 @@
 package niceyaml_test
 
 import (
+	"errors"
 	"testing"
 	"unicode/utf8"
 
@@ -1287,5 +1288,361 @@ func TestSource_ClearOverlays(t *testing.T) {
 		source.ClearOverlays()
 
 		assert.Nil(t, source.Line(0).Overlays)
+	})
+}
+
+func TestSource_Name(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		name string
+		want string
+	}{
+		"with name": {
+			name: "test.yaml",
+			want: "test.yaml",
+		},
+		"empty name": {
+			name: "",
+			want: "",
+		},
+		"path-like name": {
+			name: "/path/to/file.yaml",
+			want: "/path/to/file.yaml",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString("key: value", niceyaml.WithName(tc.name))
+			got := source.Name()
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestSource_Len(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  int
+	}{
+		"single line": {
+			input: "key: value\n",
+			want:  1,
+		},
+		"multiple lines": {
+			input: "a: 1\nb: 2\nc: 3\n",
+			want:  3,
+		},
+		"empty": {
+			input: "",
+			want:  0,
+		},
+		"literal block": {
+			input: yamltest.Input(`
+				key: |
+				  line1
+				  line2
+			`),
+			want: 3,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input)
+			got := source.Len()
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestSource_IsEmpty(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  bool
+	}{
+		"empty string": {
+			input: "",
+			want:  true,
+		},
+		"single line": {
+			input: "key: value\n",
+			want:  false,
+		},
+		"multiple lines": {
+			input: "a: 1\nb: 2\n",
+			want:  false,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input)
+			got := source.IsEmpty()
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestSource_TokenAt(t *testing.T) {
+	t.Parallel()
+
+	input := "key: value\n"
+	source := niceyaml.NewSourceFromString(input)
+
+	tcs := map[string]struct {
+		pos       position.Position
+		wantValue string
+		wantNil   bool
+	}{
+		"key token at start": {
+			pos:       position.New(0, 0),
+			wantValue: "key",
+		},
+		"key token at end of key": {
+			pos:       position.New(0, 2),
+			wantValue: "key",
+		},
+		"colon token": {
+			pos:       position.New(0, 3),
+			wantValue: ":",
+		},
+		"value token": {
+			pos:       position.New(0, 5),
+			wantValue: "value",
+		},
+		"out of bounds line": {
+			pos:     position.New(10, 0),
+			wantNil: true,
+		},
+		"negative line": {
+			pos:     position.New(-1, 0),
+			wantNil: true,
+		},
+		"out of bounds column": {
+			pos:     position.New(0, 100),
+			wantNil: true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := source.TokenAt(tc.pos)
+
+			if tc.wantNil {
+				assert.Nil(t, got)
+			} else {
+				require.NotNil(t, got)
+				assert.Equal(t, tc.wantValue, got.Value)
+			}
+		})
+	}
+}
+
+func TestSource_TokenPositionRangesFromToken(t *testing.T) {
+	t.Parallel()
+
+	t.Run("simple token", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		tks := lexer.Tokenize(input)
+		source := niceyaml.NewSourceFromTokens(tks)
+
+		// Find the "key" token.
+		var keyToken *token.Token
+		for _, tk := range tks {
+			if tk.Value == "key" {
+				keyToken = tk
+				break
+			}
+		}
+
+		require.NotNil(t, keyToken)
+
+		ranges := source.TokenPositionRangesFromToken(keyToken)
+
+		require.Len(t, ranges, 1)
+		assert.Equal(t, 0, ranges[0].Start.Line)
+		assert.Equal(t, 0, ranges[0].Start.Col)
+		assert.Equal(t, 0, ranges[0].End.Line)
+		assert.Equal(t, 3, ranges[0].End.Col)
+	})
+
+	t.Run("nil token returns nil", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("key: value\n")
+		ranges := source.TokenPositionRangesFromToken(nil)
+
+		assert.Nil(t, ranges)
+	})
+
+	t.Run("token not in source returns nil", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("key: value\n")
+		otherToken := &token.Token{Value: "other"}
+
+		ranges := source.TokenPositionRangesFromToken(otherToken)
+
+		assert.Nil(t, ranges)
+	})
+}
+
+func TestSource_ContentPositionRanges(t *testing.T) {
+	t.Parallel()
+
+	t.Run("simple content", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		source := niceyaml.NewSourceFromString(input)
+
+		// Query position at "key".
+		ranges := source.ContentPositionRanges(position.New(0, 0))
+
+		require.NotNil(t, ranges)
+		require.Len(t, ranges, 1)
+		assert.Equal(t, 0, ranges[0].Start.Line)
+	})
+
+	t.Run("multiple positions", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.Input(`
+			first: 1
+			second: 2
+		`)
+		source := niceyaml.NewSourceFromString(input)
+
+		ranges := source.ContentPositionRanges(
+			position.New(0, 0), // "first".
+			position.New(1, 0), // "second".
+		)
+
+		require.NotNil(t, ranges)
+		require.Len(t, ranges, 2)
+	})
+
+	t.Run("empty positions returns nil", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("key: value\n")
+		ranges := source.ContentPositionRanges()
+
+		assert.Nil(t, ranges)
+	})
+
+	t.Run("out of bounds position returns nil", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("key: value\n")
+		ranges := source.ContentPositionRanges(position.New(100, 0))
+
+		assert.Nil(t, ranges)
+	})
+}
+
+func TestSource_ContentPositionRangesFromToken(t *testing.T) {
+	t.Parallel()
+
+	t.Run("simple token", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+		tks := lexer.Tokenize(input)
+		source := niceyaml.NewSourceFromTokens(tks)
+
+		// Find the "value" token.
+		var valueToken *token.Token
+		for _, tk := range tks {
+			if tk.Value == "value" {
+				valueToken = tk
+				break
+			}
+		}
+
+		require.NotNil(t, valueToken)
+
+		ranges := source.ContentPositionRangesFromToken(valueToken)
+
+		require.NotNil(t, ranges)
+		require.Len(t, ranges, 1)
+		assert.Equal(t, 0, ranges[0].Start.Line)
+	})
+
+	t.Run("nil token returns nil", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("key: value\n")
+		ranges := source.ContentPositionRangesFromToken(nil)
+
+		assert.Nil(t, ranges)
+	})
+
+	t.Run("token not in source returns nil", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("key: value\n")
+		otherToken := &token.Token{Value: "other"}
+
+		ranges := source.ContentPositionRangesFromToken(otherToken)
+
+		assert.Nil(t, ranges)
+	})
+}
+
+func TestSource_WrapError(t *testing.T) {
+	t.Parallel()
+
+	t.Run("wraps niceyaml.Error", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("key: value\n")
+		yamlErr := niceyaml.NewError("test error")
+
+		wrapped := source.WrapError(yamlErr)
+
+		require.Error(t, wrapped)
+
+		var gotErr *niceyaml.Error
+		require.ErrorAs(t, wrapped, &gotErr)
+	})
+
+	t.Run("returns nil for nil error", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("key: value\n")
+		wrapped := source.WrapError(nil)
+
+		assert.NoError(t, wrapped)
+	})
+
+	t.Run("returns non-Error unchanged", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("key: value\n")
+		stdErr := errors.New("standard error")
+
+		wrapped := source.WrapError(stdErr)
+
+		assert.Equal(t, stdErr, wrapped)
 	})
 }

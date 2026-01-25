@@ -105,6 +105,55 @@ func TestPathBuilder(t *testing.T) {
 			target: paths.PartValue,
 			want:   "$..name.(value)",
 		},
+		"large index": {
+			build: func() *paths.Path {
+				return paths.Root().Child("items").Index(999).Value()
+			},
+			target: paths.PartValue,
+			want:   "$.items[999].(value)",
+		},
+		"deep nested indices": {
+			build: func() *paths.Path {
+				return paths.Root().Child("matrix").Index(0).Index(1).Index(2).Value()
+			},
+			target: paths.PartValue,
+			want:   "$.matrix[0][1][2].(value)",
+		},
+		"recursive with index": {
+			build: func() *paths.Path {
+				return paths.Root().Recursive("items").Index(0).Key()
+			},
+			target: paths.PartKey,
+			want:   "$..items[0].(key)",
+		},
+		"multiple recursive": {
+			build: func() *paths.Path {
+				return paths.Root().Recursive("containers").Recursive("name").Value()
+			},
+			target: paths.PartValue,
+			want:   "$..containers..name.(value)",
+		},
+		"child after index": {
+			build: func() *paths.Path {
+				return paths.Root().Child("items").Index(0).Child("name").Value()
+			},
+			target: paths.PartValue,
+			want:   "$.items[0].name.(value)",
+		},
+		"index all then index": {
+			build: func() *paths.Path {
+				return paths.Root().Child("matrix").IndexAll().Index(0).Value()
+			},
+			target: paths.PartValue,
+			want:   "$.matrix[*][0].(value)",
+		},
+		"special characters in child name are quoted": {
+			build: func() *paths.Path {
+				return paths.Root().Child("kubernetes.io/name").Value()
+			},
+			target: paths.PartValue,
+			want:   "$.'kubernetes.io/name'.(value)",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -255,4 +304,81 @@ func TestPath_Token_InvalidPath(t *testing.T) {
 	_, err = path.Token(file)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "filter from ast.File by YAMLPath")
+}
+
+func TestPath_Token_EmptyDocs(t *testing.T) {
+	t.Parallel()
+
+	// Test findKeyToken edge case where file has no docs.
+	source := niceyaml.NewSourceFromString(``)
+	file, err := source.File()
+	require.NoError(t, err)
+
+	path := paths.Root().Child("name").Key()
+	_, err = path.Token(file)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "filter from ast.File by YAMLPath")
+}
+
+func TestPath_Token_NestedStructures(t *testing.T) {
+	t.Parallel()
+
+	yaml := `
+list:
+  - name: first
+    items:
+      - a
+      - b
+  - name: second
+    items:
+      - c
+      - d
+nested:
+  deep:
+    deeper:
+      value: found
+`
+
+	source := niceyaml.NewSourceFromString(yaml)
+	file, err := source.File()
+	require.NoError(t, err)
+
+	tcs := map[string]struct {
+		path      *paths.Path
+		wantValue string
+		wantType  token.Type
+	}{
+		"nested array first element name": {
+			path:      paths.Root().Child("list").Index(0).Child("name").Value(),
+			wantValue: "first",
+			wantType:  token.StringType,
+		},
+		"nested array second element items first": {
+			path:      paths.Root().Child("list").Index(1).Child("items").Index(0).Value(),
+			wantValue: "c",
+			wantType:  token.StringType,
+		},
+		"deeply nested value": {
+			path:      paths.Root().Child("nested", "deep", "deeper", "value").Value(),
+			wantValue: "found",
+			wantType:  token.StringType,
+		},
+		"deeply nested key": {
+			path:      paths.Root().Child("nested", "deep", "deeper", "value").Key(),
+			wantValue: "value",
+			wantType:  token.StringType,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tk, err := tc.path.Token(file)
+			require.NoError(t, err)
+			require.NotNil(t, tk)
+			assert.Equal(t, tc.wantValue, tk.Value)
+			assert.Equal(t, tc.wantType, tk.Type)
+		})
+	}
 }

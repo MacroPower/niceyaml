@@ -377,3 +377,227 @@ func TestRevision_Prepend(t *testing.T) {
 		assert.Equal(t, 3, rev2.Len())
 	})
 }
+
+func TestRevision_Seek(t *testing.T) {
+	t.Parallel()
+
+	// Build chain: v0 -> v1 -> v2.
+	rev0 := niceyaml.NewRevision(niceyaml.NewSourceFromString("v0: data", niceyaml.WithName("v0")))
+	rev1 := rev0.Append(niceyaml.NewSourceFromString("v1: data", niceyaml.WithName("v1")))
+	rev2 := rev1.Append(niceyaml.NewSourceFromString("v2: data", niceyaml.WithName("v2")))
+
+	tcs := map[string]struct {
+		startFrom *niceyaml.Revision
+		n         int
+		want      string
+	}{
+		"seek forward from origin": {
+			startFrom: rev0,
+			n:         1,
+			want:      "v1",
+		},
+		"seek forward by two": {
+			startFrom: rev0,
+			n:         2,
+			want:      "v2",
+		},
+		"seek backward from tip": {
+			startFrom: rev2,
+			n:         -1,
+			want:      "v1",
+		},
+		"seek backward by two": {
+			startFrom: rev2,
+			n:         -2,
+			want:      "v0",
+		},
+		"seek by zero stays same": {
+			startFrom: rev1,
+			n:         0,
+			want:      "v1",
+		},
+		"seek beyond tip clamps": {
+			startFrom: rev1,
+			n:         100,
+			want:      "v2",
+		},
+		"seek before origin clamps": {
+			startFrom: rev1,
+			n:         -100,
+			want:      "v0",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := tc.startFrom.Seek(tc.n)
+			assert.Equal(t, tc.want, got.Name())
+		})
+	}
+}
+
+func TestRevision_Origin(t *testing.T) {
+	t.Parallel()
+
+	// Build chain: v0 -> v1 -> v2.
+	rev0 := niceyaml.NewRevision(niceyaml.NewSourceFromString("v0: data", niceyaml.WithName("v0")))
+	rev1 := rev0.Append(niceyaml.NewSourceFromString("v1: data", niceyaml.WithName("v1")))
+	rev2 := rev1.Append(niceyaml.NewSourceFromString("v2: data", niceyaml.WithName("v2")))
+
+	tcs := map[string]struct {
+		startFrom *niceyaml.Revision
+		want      string
+	}{
+		"origin from origin": {
+			startFrom: rev0,
+			want:      "v0",
+		},
+		"origin from middle": {
+			startFrom: rev1,
+			want:      "v0",
+		},
+		"origin from tip": {
+			startFrom: rev2,
+			want:      "v0",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := tc.startFrom.Origin()
+			assert.Equal(t, tc.want, got.Name())
+		})
+	}
+}
+
+func TestRevision_Append(t *testing.T) {
+	t.Parallel()
+
+	t.Run("append to single revision", func(t *testing.T) {
+		t.Parallel()
+
+		rev0 := niceyaml.NewRevision(niceyaml.NewSourceFromString("v0: data", niceyaml.WithName("v0")))
+		rev1 := rev0.Append(niceyaml.NewSourceFromString("v1: data", niceyaml.WithName("v1")))
+
+		// Rev0 should still be the origin.
+		assert.True(t, rev0.AtOrigin())
+		assert.False(t, rev0.AtTip())
+
+		// Rev1 should be the new tip.
+		assert.False(t, rev1.AtOrigin())
+		assert.True(t, rev1.AtTip())
+
+		// Verify chain.
+		assert.Equal(t, []string{"v0", "v1"}, rev0.Names())
+		assert.Equal(t, 2, rev0.Len())
+	})
+
+	t.Run("append to tip of chain", func(t *testing.T) {
+		t.Parallel()
+
+		rev0 := niceyaml.NewRevision(niceyaml.NewSourceFromString("v0: data", niceyaml.WithName("v0")))
+		rev1 := rev0.Append(niceyaml.NewSourceFromString("v1: data", niceyaml.WithName("v1")))
+		rev2 := rev1.Append(niceyaml.NewSourceFromString("v2: data", niceyaml.WithName("v2")))
+
+		// Rev1 should no longer be at tip.
+		assert.False(t, rev1.AtTip())
+
+		// Rev2 should be the new tip.
+		assert.True(t, rev2.AtTip())
+
+		// Verify chain.
+		assert.Equal(t, []string{"v0", "v1", "v2"}, rev0.Names())
+	})
+
+	t.Run("append returns new tip", func(t *testing.T) {
+		t.Parallel()
+
+		rev0 := niceyaml.NewRevision(niceyaml.NewSourceFromString("v0: data", niceyaml.WithName("v0")))
+		rev1 := rev0.Append(niceyaml.NewSourceFromString("v1: data", niceyaml.WithName("v1")))
+
+		// The returned revision is the new tip.
+		assert.Same(t, rev0.Tip(), rev1)
+	})
+}
+
+func TestRevision_Name(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		name string
+		want string
+	}{
+		"simple name": {
+			name: "test",
+			want: "test",
+		},
+		"empty name": {
+			name: "",
+			want: "",
+		},
+		"path-like name": {
+			name: "/path/to/file.yaml",
+			want: "/path/to/file.yaml",
+		},
+		"name with special chars": {
+			name: "file-v1.2.3_draft",
+			want: "file-v1.2.3_draft",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString("key: value", niceyaml.WithName(tc.name))
+			rev := niceyaml.NewRevision(source)
+
+			assert.Equal(t, tc.want, rev.Name())
+		})
+	}
+}
+
+func TestRevision_LongChain(t *testing.T) {
+	t.Parallel()
+
+	// Build a chain of 10 revisions.
+	const chainLen = 10
+
+	var revs []*niceyaml.Revision
+
+	for i := range chainLen {
+		name := "v" + string(rune('0'+i))
+		source := niceyaml.NewSourceFromString(name+": data", niceyaml.WithName(name))
+
+		if i == 0 {
+			revs = append(revs, niceyaml.NewRevision(source))
+		} else {
+			revs = append(revs, revs[i-1].Append(source))
+		}
+	}
+
+	// Verify Len works from any position.
+	for i, rev := range revs {
+		assert.Equal(t, chainLen, rev.Len(), "Len() from revision %d", i)
+	}
+
+	// Verify At works from any position.
+	for i := range chainLen {
+		for j := range chainLen {
+			got := revs[i].At(j)
+			want := "v" + string(rune('0'+j))
+			assert.Equal(t, want, got.Name(), "At(%d) from revision %d", j, i)
+		}
+	}
+
+	// Verify Seek works correctly.
+	middle := revs[5]
+	assert.Equal(t, "v3", middle.Seek(-2).Name())
+	assert.Equal(t, "v7", middle.Seek(2).Name())
+	assert.Equal(t, "v0", middle.Seek(-100).Name())
+	assert.Equal(t, "v9", middle.Seek(100).Name())
+}
