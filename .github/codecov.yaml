@@ -5,6 +5,6 @@ coverage:
 
 ignore:
   - "cmd"
-  - "example"
+  - "examples"
   - "internal"
   - "style/theme"
