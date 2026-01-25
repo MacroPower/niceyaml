@@ -433,7 +433,7 @@ func (e *Error) resolveNestedError(t *Source, nested *Error) (errorPosition, err
 // If mainToken is provided, it becomes the first position without a message.
 // Nested errors are appended with their messages.
 func (e *Error) collectErrorPositions(t *Source, mainToken *token.Token) []errorPosition {
-	var positions []errorPosition
+	positions := make([]errorPosition, 0, 1+len(e.errors))
 
 	// Add main error position if token is provided.
 	if mainToken != nil && mainToken.Position != nil {
