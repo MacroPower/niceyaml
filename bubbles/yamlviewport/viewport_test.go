@@ -16,9 +16,9 @@ import (
 
 	"jacobcolvin.com/niceyaml"
 	"jacobcolvin.com/niceyaml/bubbles/yamlviewport"
+	"jacobcolvin.com/niceyaml/internal/yamltest"
 	"jacobcolvin.com/niceyaml/style"
 	"jacobcolvin.com/niceyaml/style/theme"
-	"jacobcolvin.com/niceyaml/yamltest"
 )
 
 // testPrinter returns a printer without styles or line numbers for predictable golden output.

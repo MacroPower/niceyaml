@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"jacobcolvin.com/niceyaml/internal/yamltest"
 	"jacobcolvin.com/niceyaml/lexers"
-	"jacobcolvin.com/niceyaml/yamltest"
 )
 
 func collectDocs(seq iter.Seq2[int, token.Tokens]) []token.Tokens {

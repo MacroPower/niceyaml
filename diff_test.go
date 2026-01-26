@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"jacobcolvin.com/niceyaml"
+	"jacobcolvin.com/niceyaml/internal/yamltest"
 	"jacobcolvin.com/niceyaml/line"
-	"jacobcolvin.com/niceyaml/yamltest"
 )
 
 func TestFullDiff_Source(t *testing.T) {

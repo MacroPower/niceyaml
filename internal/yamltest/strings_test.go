@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"jacobcolvin.com/niceyaml/yamltest"
+	"jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
 func TestInput(t *testing.T) {

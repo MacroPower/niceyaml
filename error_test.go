@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"jacobcolvin.com/niceyaml"
+	"jacobcolvin.com/niceyaml/internal/yamltest"
 	"jacobcolvin.com/niceyaml/paths"
 	"jacobcolvin.com/niceyaml/style"
-	"jacobcolvin.com/niceyaml/yamltest"
 )
 
 // customTestError is a test error type for errors.As testing.

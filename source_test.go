@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"jacobcolvin.com/niceyaml"
+	"jacobcolvin.com/niceyaml/internal/yamltest"
 	"jacobcolvin.com/niceyaml/line"
 	"jacobcolvin.com/niceyaml/position"
-	"jacobcolvin.com/niceyaml/yamltest"
 )
 
 func TestTokens_String_Annotation(t *testing.T) {

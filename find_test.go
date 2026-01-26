@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"jacobcolvin.com/niceyaml"
+	"jacobcolvin.com/niceyaml/internal/yamltest"
 	"jacobcolvin.com/niceyaml/position"
-	"jacobcolvin.com/niceyaml/yamltest"
 )
 
 func TestFinder_Find(t *testing.T) {

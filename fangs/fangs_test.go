@@ -11,9 +11,9 @@ import (
 
 	"jacobcolvin.com/niceyaml"
 	"jacobcolvin.com/niceyaml/fangs"
+	"jacobcolvin.com/niceyaml/internal/yamltest"
 	"jacobcolvin.com/niceyaml/lexers"
 	"jacobcolvin.com/niceyaml/paths"
-	"jacobcolvin.com/niceyaml/yamltest"
 )
 
 func testStyles() fang.Styles {

@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"jacobcolvin.com/niceyaml/internal/yamltest"
 	"jacobcolvin.com/niceyaml/schema/validator"
-	"jacobcolvin.com/niceyaml/yamltest"
 )
 
 func TestParseDirective(t *testing.T) {

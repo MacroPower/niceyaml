@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"jacobcolvin.com/niceyaml/yamltest"
+	"jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
 func TestDumpTokenOrigins(t *testing.T) {

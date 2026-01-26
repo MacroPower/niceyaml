@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"jacobcolvin.com/niceyaml"
+	"jacobcolvin.com/niceyaml/internal/yamltest"
 	"jacobcolvin.com/niceyaml/paths"
 	"jacobcolvin.com/niceyaml/schema/validator"
-	"jacobcolvin.com/niceyaml/yamltest"
 )
 
 // mockCompiler implements validator.Compiler for testing.
