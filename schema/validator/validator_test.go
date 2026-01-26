@@ -800,7 +800,7 @@ func TestValidator_PathTarget(t *testing.T) {
 	newXMLPrinter := func() *niceyaml.Printer {
 		return niceyaml.NewPrinter(
 			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter),
+			niceyaml.WithGutter(niceyaml.NoGutter()),
 		)
 	}
 

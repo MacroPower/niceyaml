@@ -35,9 +35,6 @@ type StyledPrinter interface {
 	Print(lines LineIterator, spans ...position.Span) string
 }
 
-// NoGutter is a [GutterFunc] that returns an empty string for all lines.
-var NoGutter GutterFunc = func(GutterContext) string { return "" }
-
 // Printer prints YAML with syntax highlighting for terminal output.
 //
 // It accepts a [LineIterator], normally [Source], and produces styled terminal
@@ -242,6 +239,11 @@ func DiffGutter() GutterFunc {
 // Uses [style.Comment] foreground for styling.
 func LineNumberGutter() GutterFunc {
 	return renderLineNumber
+}
+
+// NoGutter returns a [GutterFunc] that returns an empty string for all lines.
+func NoGutter() GutterFunc {
+	return func(GutterContext) string { return "" }
 }
 
 // WithStyle is a [PrinterOption] that configures the printer with the given

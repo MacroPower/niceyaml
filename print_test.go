@@ -35,7 +35,7 @@ func testHighlightStyle() *lipgloss.Style {
 
 // testPrinter returns a printer without styles or padding for predictable output.
 func testPrinter() *niceyaml.Printer {
-	return testPrinterWithGutter(niceyaml.NoGutter)
+	return testPrinterWithGutter(niceyaml.NoGutter())
 }
 
 // testPrinterWithGutter returns a printer without styles but with a custom gutter.
@@ -231,7 +231,7 @@ func TestNewPrinter(t *testing.T) {
 			opts: []niceyaml.PrinterOption{
 				niceyaml.WithStyles(yamltest.NewXMLStyles()),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
-				niceyaml.WithGutter(niceyaml.NoGutter),
+				niceyaml.WithGutter(niceyaml.NoGutter()),
 			},
 		},
 		"xml styles with token types": {
@@ -250,7 +250,7 @@ func TestNewPrinter(t *testing.T) {
 			opts: []niceyaml.PrinterOption{
 				niceyaml.WithStyles(yamltest.NewXMLStyles()),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
-				niceyaml.WithGutter(niceyaml.NoGutter),
+				niceyaml.WithGutter(niceyaml.NoGutter()),
 			},
 		},
 		"empty styles": {
@@ -341,7 +341,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 	}{
 		"full range": {
 			spans:  nil, // Empty variadic prints all lines.
-			gutter: niceyaml.NoGutter,
+			gutter: niceyaml.NoGutter(),
 			want: yamltest.JoinLF(
 				"first: 1",
 				"second: 2",
@@ -363,7 +363,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 		},
 		"bounded middle": {
 			spans:  position.Spans{position.NewSpan(1, 4)},
-			gutter: niceyaml.NoGutter,
+			gutter: niceyaml.NoGutter(),
 			want: yamltest.JoinLF(
 				"second: 2",
 				"third: 3",
@@ -381,7 +381,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 		},
 		"from start": {
 			spans:  position.Spans{position.NewSpan(0, 2)},
-			gutter: niceyaml.NoGutter,
+			gutter: niceyaml.NoGutter(),
 			want: yamltest.JoinLF(
 				"first: 1",
 				"second: 2",
@@ -389,7 +389,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 		},
 		"to end": {
 			spans:  position.Spans{position.NewSpan(3, 5)},
-			gutter: niceyaml.NoGutter,
+			gutter: niceyaml.NoGutter(),
 			want: yamltest.JoinLF(
 				"fourth: 4",
 				"fifth: 5",
@@ -397,7 +397,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 		},
 		"single line": {
 			spans:  position.Spans{position.NewSpan(2, 3)},
-			gutter: niceyaml.NoGutter,
+			gutter: niceyaml.NoGutter(),
 			want:   "third: 3",
 		},
 		"single line with line numbers": {
@@ -407,7 +407,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 		},
 		"empty result": {
 			spans:  position.Spans{position.NewSpan(10, 21)},
-			gutter: niceyaml.NoGutter,
+			gutter: niceyaml.NoGutter(),
 			want:   "",
 		},
 		"two disjoint spans": {
@@ -415,7 +415,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 				position.NewSpan(0, 1),
 				position.NewSpan(3, 5),
 			},
-			gutter: niceyaml.NoGutter,
+			gutter: niceyaml.NoGutter(),
 			want: yamltest.JoinLF(
 				"first: 1",
 				"fourth: 4",
@@ -440,7 +440,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 				position.NewSpan(2, 3),
 				position.NewSpan(4, 5),
 			},
-			gutter: niceyaml.NoGutter,
+			gutter: niceyaml.NoGutter(),
 			want: yamltest.JoinLF(
 				"first: 1",
 				"third: 3",
@@ -452,7 +452,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 				position.NewSpan(0, 2),
 				position.NewSpan(2, 4),
 			},
-			gutter: niceyaml.NoGutter,
+			gutter: niceyaml.NoGutter(),
 			want: yamltest.JoinLF(
 				"first: 1",
 				"second: 2",
@@ -703,14 +703,14 @@ func TestPrinter_WordWrap(t *testing.T) {
 		"no wrap when width is zero": {
 			input:    "key: value",
 			width:    0,
-			gutter:   niceyaml.NoGutter,
+			gutter:   niceyaml.NoGutter(),
 			wordWrap: true,
 			want:     "key: value",
 		},
 		"simple wrap": {
 			input:    "key: this is a very long value that should wrap",
 			width:    20,
-			gutter:   niceyaml.NoGutter,
+			gutter:   niceyaml.NoGutter(),
 			wordWrap: true,
 			want: yamltest.JoinLF(
 				"key: this is a very",
@@ -721,7 +721,7 @@ func TestPrinter_WordWrap(t *testing.T) {
 		"wrap on slash": {
 			input:    "path: /usr/local/bin/something",
 			width:    20,
-			gutter:   niceyaml.NoGutter,
+			gutter:   niceyaml.NoGutter(),
 			wordWrap: true,
 			want: yamltest.JoinLF(
 				"path: /usr/local/",
@@ -731,7 +731,7 @@ func TestPrinter_WordWrap(t *testing.T) {
 		"wrap on hyphen": {
 			input:    "name: very-long-hyphenated-name",
 			width:    20,
-			gutter:   niceyaml.NoGutter,
+			gutter:   niceyaml.NoGutter(),
 			wordWrap: true,
 			want: yamltest.JoinLF(
 				"name: very-long-",
@@ -741,7 +741,7 @@ func TestPrinter_WordWrap(t *testing.T) {
 		"short content no wrap": {
 			input:    "key: value",
 			width:    50,
-			gutter:   niceyaml.NoGutter,
+			gutter:   niceyaml.NoGutter(),
 			wordWrap: true,
 			want:     "key: value",
 		},
@@ -751,7 +751,7 @@ func TestPrinter_WordWrap(t *testing.T) {
 				"another: long value that should wrap here",
 			),
 			width:    20,
-			gutter:   niceyaml.NoGutter,
+			gutter:   niceyaml.NoGutter(),
 			wordWrap: true,
 			want: yamltest.JoinLF(
 				"key: value",
@@ -793,7 +793,7 @@ func TestPrinter_WordWrap(t *testing.T) {
 		"wordWrap disabled with NoGutter": {
 			input:    "key: this is a very long value that should not wrap",
 			width:    25,
-			gutter:   niceyaml.NoGutter,
+			gutter:   niceyaml.NoGutter(),
 			wordWrap: false,
 			want:     "key: this is a very long value that should not wrap",
 		},
@@ -1061,7 +1061,7 @@ func TestPrinter_PrintTokenDiff_CustomGutter(t *testing.T) {
 			),
 		},
 		"no gutter": {
-			gutterFunc: niceyaml.NoGutter,
+			gutterFunc: niceyaml.NoGutter(),
 			before:     "a: 1\n",
 			after:      "a: 2\n",
 			want: yamltest.JoinLF(
@@ -1592,7 +1592,7 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 			p := niceyaml.NewPrinter(
 				niceyaml.WithStyles(yamltest.NewXMLStyles()),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
-				niceyaml.WithGutter(niceyaml.NoGutter),
+				niceyaml.WithGutter(niceyaml.NoGutter()),
 			)
 
 			got := p.Print(niceyaml.NewSourceFromTokens(tks))
@@ -2132,7 +2132,7 @@ func TestPrinter_Golden(t *testing.T) {
 			opts: []niceyaml.PrinterOption{
 				niceyaml.WithStyles(theme.Charm()),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
-				niceyaml.WithGutter(niceyaml.NoGutter),
+				niceyaml.WithGutter(niceyaml.NoGutter()),
 			},
 		},
 		"default colors with line numbers": {
@@ -2145,7 +2145,7 @@ func TestPrinter_Golden(t *testing.T) {
 			opts: []niceyaml.PrinterOption{
 				niceyaml.WithStyles(style.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
-				niceyaml.WithGutter(niceyaml.NoGutter),
+				niceyaml.WithGutter(niceyaml.NoGutter()),
 			},
 		},
 		"no colors with line numbers": {
@@ -2162,7 +2162,7 @@ func TestPrinter_Golden(t *testing.T) {
 						Foreground(lipgloss.Color("#000000"))),
 				)),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
-				niceyaml.WithGutter(niceyaml.NoGutter),
+				niceyaml.WithGutter(niceyaml.NoGutter()),
 			},
 			setupFunc: func(_ *niceyaml.Printer, source *niceyaml.Source) {
 				// Search for "日本" (Japan) which appears multiple times in full.yaml.
@@ -2362,7 +2362,7 @@ func TestPrinter_BlendStyles(t *testing.T) {
 			p := niceyaml.NewPrinter(
 				niceyaml.WithStyles(testOverlayStyler),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
-				niceyaml.WithGutter(niceyaml.NoGutter),
+				niceyaml.WithGutter(niceyaml.NoGutter()),
 			)
 
 			for _, or := range tc.ranges {
@@ -2486,7 +2486,7 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 			p := niceyaml.NewPrinter(
 				niceyaml.WithStyles(style.NewStyles(lipgloss.NewStyle(), overlayOpts...)),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
-				niceyaml.WithGutter(niceyaml.NoGutter),
+				niceyaml.WithGutter(niceyaml.NoGutter()),
 			)
 
 			got := p.Print(source)
@@ -2625,7 +2625,7 @@ func TestPrinter_WithAnnotationFunc(t *testing.T) {
 			p := niceyaml.NewPrinter(
 				niceyaml.WithStyles(style.Styles{}),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
-				niceyaml.WithGutter(niceyaml.NoGutter),
+				niceyaml.WithGutter(niceyaml.NoGutter()),
 				niceyaml.WithAnnotationFunc(customAnnotation),
 			)
 

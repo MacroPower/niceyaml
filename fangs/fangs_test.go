@@ -41,7 +41,7 @@ func TestErrorHandler(t *testing.T) {
 		niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
 		niceyaml.WithPrinter(niceyaml.NewPrinter(
 			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter),
+			niceyaml.WithGutter(niceyaml.NoGutter()),
 			niceyaml.WithStyle(lipgloss.NewStyle()),
 		)),
 	)
