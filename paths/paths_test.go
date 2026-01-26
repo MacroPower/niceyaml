@@ -195,17 +195,6 @@ func TestPath_NilHandling(t *testing.T) {
 	})
 }
 
-func TestPath_ImplementsPathPartGetter(t *testing.T) {
-	t.Parallel()
-
-	// Verify that *paths.Path implements niceyaml.PathPartGetter interface.
-	path := paths.Root().Child("foo").Key()
-
-	var ppg niceyaml.PathPartGetter = path
-	assert.NotNil(t, ppg.Path())
-	assert.Equal(t, paths.PartKey, ppg.Part())
-}
-
 func TestPath_Token(t *testing.T) {
 	t.Parallel()
 

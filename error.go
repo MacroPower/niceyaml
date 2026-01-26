@@ -27,16 +27,6 @@ var (
 	ErrTokenNotFound = errors.New("token not found in source")
 )
 
-// PathPartGetter retrieves a YAML path, its targeted part, and the corresponding
-// token from a parsed file.
-//
-// See [paths.Path] for an implementation.
-type PathPartGetter interface {
-	Path() *paths.YAMLPath
-	Part() paths.Part
-	Token(file *ast.File) (*token.Token, error)
-}
-
 // Error represents a YAML error with optional source annotation.
 //
 // To enable annotated error output that shows the relevant YAML location, provide:
@@ -66,7 +56,7 @@ type Error struct {
 	err         error
 	printer     WrappingPrinter
 	source      *Source
-	pathGetter  PathPartGetter
+	path        *paths.Path
 	token       *token.Token
 	widthFunc   func() int
 	errors      []*Error
@@ -114,11 +104,11 @@ func WithSourceLines(lines int) ErrorOption {
 
 // WithPath is an [ErrorOption] that sets the YAML path where the error occurred.
 //
-// The [PathPartGetter] provides both the path and whether to highlight the key
+// The [*paths.Path] provides both the path and whether to highlight the key
 // or value.
-func WithPath(ptg PathPartGetter) ErrorOption {
+func WithPath(p *paths.Path) ErrorOption {
 	return func(e *Error) {
-		e.pathGetter = ptg
+		e.path = p
 	}
 }
 
@@ -174,8 +164,8 @@ func (e Error) Error() string {
 	mainToken, err := e.resolveMainToken()
 	if err != nil {
 		pathStr := ""
-		if e.pathGetter != nil {
-			pathStr = e.pathGetter.Path().String()
+		if e.path != nil {
+			pathStr = e.path.Path().String()
 		}
 
 		slog.Debug("resolve main token for error",
@@ -238,7 +228,7 @@ func (e *Error) resolveMainToken() (*token.Token, error) {
 	}
 
 	// Path resolution requires a valid file.
-	if e.pathGetter == nil {
+	if e.path == nil {
 		return nil, ErrNoPathOrToken
 	}
 
@@ -247,13 +237,13 @@ func (e *Error) resolveMainToken() (*token.Token, error) {
 		return nil, err
 	}
 
-	return resolveToken(file, nil, e.pathGetter)
+	return resolveToken(file, nil, e.path)
 }
 
 // hasResolvableNestedErrors checks if any nested error has a path or token.
 func (e *Error) hasResolvableNestedErrors() bool {
 	for _, nested := range e.errors {
-		if nested != nil && (nested.token != nil || nested.pathGetter != nil) {
+		if nested != nil && (nested.token != nil || nested.path != nil) {
 			return true
 		}
 	}
@@ -325,10 +315,10 @@ func (e *Error) Unwrap() []error {
 	return result
 }
 
-// Path returns the [PathPartGetter] path where the error occurred as a string.
+// Path returns the [*paths.Path] path where the error occurred as a string.
 func (e *Error) Path() string {
-	if e.pathGetter != nil {
-		return e.pathGetter.Path().String()
+	if e.path != nil {
+		return e.path.Path().String()
 	}
 
 	return ""
@@ -408,7 +398,7 @@ func (e *Error) resolveNestedError(t *Source, nested *Error) (errorPosition, err
 		return errorPosition{}, fmt.Errorf("parse source: %w", err)
 	}
 
-	tk, err := resolveToken(file, nested.token, nested.pathGetter)
+	tk, err := resolveToken(file, nested.token, nested.path)
 	if err != nil {
 		return errorPosition{}, err
 	}
@@ -516,19 +506,19 @@ func (e *Error) renderErrorSource(mainToken *token.Token) string {
 	return p.Print(t, hunkSpans...)
 }
 
-// resolveToken resolves a token from either a direct token or pathGetter.
+// resolveToken resolves a token from either a direct token or path.
 // The file parameter is required when pg is non-nil.
-func resolveToken(file *ast.File, tk *token.Token, pg PathPartGetter) (*token.Token, error) {
+func resolveToken(file *ast.File, tk *token.Token, p *paths.Path) (*token.Token, error) {
 	if tk != nil {
 		return tk, nil
 	}
 
-	if pg != nil {
+	if p != nil {
 		if file == nil {
 			return nil, ErrNoSource
 		}
 
-		resolved, err := pg.Token(file)
+		resolved, err := p.Token(file)
 		if err != nil {
 			return nil, fmt.Errorf("path token: %w", err)
 		}

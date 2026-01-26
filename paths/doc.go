@@ -21,8 +21,8 @@
 //
 // # Integration with niceyaml.Error
 //
-// [*Path] implements [niceyaml.PathPartGetter], making it directly usable with
-// [niceyaml.WithPath] to highlight either keys or values in error messages:
+// [Path] is directly usable with [niceyaml.WithPath] to highlight either keys
+// or values in error messages:
 //
 //	err := niceyaml.NewError(
 //		"invalid value",
