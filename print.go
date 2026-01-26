@@ -26,11 +26,10 @@ type StyleGetter interface {
 	Style(s style.Style) *lipgloss.Style
 }
 
-// StyledPrinter provides printing capabilities with style support.
+// WrappingPrinter prints with width-aware word wrapping.
 //
 // See [Printer] for an implementation.
-type StyledPrinter interface {
-	Style(s style.Style) *lipgloss.Style
+type WrappingPrinter interface {
 	SetWidth(width int)
 	Print(lines LineIterator, spans ...position.Span) string
 }

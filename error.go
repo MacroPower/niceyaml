@@ -64,7 +64,7 @@ type PathPartGetter interface {
 // Create instances with [NewError] or [NewErrorFrom].
 type Error struct {
 	err         error
-	printer     StyledPrinter
+	printer     WrappingPrinter
 	source      *Source
 	pathGetter  PathPartGetter
 	token       *token.Token
@@ -129,9 +129,9 @@ func WithErrorToken(tk *token.Token) ErrorOption {
 	}
 }
 
-// WithPrinter is an [ErrorOption] that sets the [StyledPrinter] used for
+// WithPrinter is an [ErrorOption] that sets the [WrappingPrinter] used for
 // formatting the error source.
-func WithPrinter(p StyledPrinter) ErrorOption {
+func WithPrinter(p WrappingPrinter) ErrorOption {
 	return func(e *Error) {
 		e.printer = p
 	}
@@ -285,7 +285,7 @@ func (e *Error) getFile() (*ast.File, error) {
 
 // getPrinter returns the configured printer, or a default if none was set.
 // If a width is configured, it applies the width to the printer.
-func (e *Error) getPrinter() StyledPrinter {
+func (e *Error) getPrinter() WrappingPrinter {
 	width := e.width
 	if e.widthFunc != nil {
 		width = e.widthFunc()
