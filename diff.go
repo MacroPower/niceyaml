@@ -96,7 +96,7 @@ func (d *SummaryDiff) Build() (*Source, position.Spans) {
 	// Add hunk header annotations to first line of each hunk.
 	for _, span := range hunkSpans {
 		hunkHeader := formatHunkHeader(span, beforeSums, afterSums)
-		lines[span.Start].Annotate(line.Annotation{
+		lines[span.Start].AddAnnotation(line.Annotation{
 			Content:  hunkHeader,
 			Position: line.Above,
 		})

@@ -70,7 +70,7 @@
 //
 // [Annotations] are positioned using [Above] or [Below] constants:
 //
-//	l.Annotate(line.Annotation{
+//	l.AddAnnotation(line.Annotation{
 //	    Content:  "missing required field",
 //	    Position: line.Below,
 //	    Col:      4,  // Align with the error location.

@@ -35,13 +35,13 @@ type Line struct {
 	number int
 }
 
-// Annotate adds the given [Annotation]s to this [Line].
-func (l *Line) Annotate(ann ...Annotation) {
+// AddAnnotation adds the given [Annotation]s to this [Line].
+func (l *Line) AddAnnotation(ann ...Annotation) {
 	l.Annotations = append(l.Annotations, ann...)
 }
 
-// Overlay adds the given [Overlay]s to this [Line].
-func (l *Line) Overlay(o ...Overlay) {
+// AddOverlay adds the given [Overlay]s to this [Line].
+func (l *Line) AddOverlay(o ...Overlay) {
 	l.Overlays = append(l.Overlays, o...)
 }
 
@@ -467,7 +467,7 @@ func (ls *Lines) AddOverlay(kind style.Style, ranges ...position.Range) {
 func (ls *Lines) addOverlayRange(kind style.Style, r position.Range) {
 	for _, lineRange := range r.SliceLines() {
 		lineIdx := lineRange.Start.Line
-		(*ls)[lineIdx].Overlay(Overlay{
+		(*ls)[lineIdx].AddOverlay(Overlay{
 			Cols: position.NewSpan(lineRange.Start.Col, lineRange.End.Col),
 			Kind: kind,
 		})

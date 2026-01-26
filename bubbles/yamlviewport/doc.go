@@ -16,7 +16,7 @@
 // # Revision History
 //
 // The viewport tracks multiple versions of a document using
-// [Model.AppendRevision].
+// [Model.AddRevision].
 //
 // Users can navigate between revisions with Tab/Shift+Tab
 // (configurable via [KeyMap]).
@@ -24,8 +24,8 @@
 // When viewing revision N>0, the viewport automatically computes and displays
 // a diff.
 //
-//	m.AppendRevision(niceyaml.NewSourceFromString(v1, niceyaml.WithName("v1")))
-//	m.AppendRevision(niceyaml.NewSourceFromString(v2, niceyaml.WithName("v2")))
+//	m.AddRevision(niceyaml.NewSourceFromString(v1, niceyaml.WithName("v1")))
+//	m.AddRevision(niceyaml.NewSourceFromString(v2, niceyaml.WithName("v2")))
 //	// Now showing diff between v1 and v2.
 //
 // Three diff modes control how comparisons are made:

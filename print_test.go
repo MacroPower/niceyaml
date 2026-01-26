@@ -1227,7 +1227,7 @@ func TestPrinter_SetAnnotationsEnabled(t *testing.T) {
 
 			input := "key: value\n"
 			source := niceyaml.NewSourceFromString(input)
-			source.Line(0).Annotate(line.Annotation{Content: tc.annotation})
+			source.Line(0).AddAnnotation(line.Annotation{Content: tc.annotation})
 
 			p := testPrinter()
 			p.SetAnnotationsEnabled(tc.enabled)
@@ -1329,7 +1329,7 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			t.Parallel()
 
 			source := niceyaml.NewSourceFromString(tc.input)
-			source.Line(tc.lineIndex).Annotate(tc.annotation)
+			source.Line(tc.lineIndex).AddAnnotation(tc.annotation)
 
 			p := testPrinter()
 			got := p.Print(source)
@@ -1392,7 +1392,7 @@ func TestPrinter_AnnotationPosition_WithGutter(t *testing.T) {
 			t.Parallel()
 
 			source := niceyaml.NewSourceFromString(tc.input)
-			source.Line(tc.lineIndex).Annotate(tc.annotation)
+			source.Line(tc.lineIndex).AddAnnotation(tc.annotation)
 
 			p := testPrinterWithGutter(niceyaml.LineNumberGutter())
 			got := p.Print(source)
@@ -1430,7 +1430,7 @@ func TestPrinter_AnnotationPosition_Disabled(t *testing.T) {
 
 			input := "key: value"
 			source := niceyaml.NewSourceFromString(input)
-			source.Line(0).Annotate(tc.annotation)
+			source.Line(0).AddAnnotation(tc.annotation)
 
 			p := testPrinter()
 			p.SetAnnotationsEnabled(false)
@@ -2620,7 +2620,7 @@ func TestPrinter_WithAnnotationFunc(t *testing.T) {
 
 			input := "key: value"
 			source := niceyaml.NewSourceFromString(input)
-			source.Line(tc.lineIndex).Annotate(tc.annotation)
+			source.Line(tc.lineIndex).AddAnnotation(tc.annotation)
 
 			p := niceyaml.NewPrinter(
 				niceyaml.WithStyles(style.Styles{}),

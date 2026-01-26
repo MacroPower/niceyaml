@@ -143,8 +143,8 @@ func TestViewport_Golden(t *testing.T) {
 			yaml: diffAfterYAML,
 			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
 				m.ClearRevisions()
-				m.AppendRevision(niceyaml.NewSourceFromString(diffBeforeYAML, niceyaml.WithName("v1")))
-				m.AppendRevision(niceyaml.NewSourceFromString(diffAfterYAML, niceyaml.WithName("v2")))
+				m.AddRevision(niceyaml.NewSourceFromString(diffBeforeYAML, niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromString(diffAfterYAML, niceyaml.WithName("v2")))
 				m.GoToRevision(1) // Show diff between revision 0 and 1.
 			},
 			width:  80,
@@ -583,9 +583,9 @@ func TestViewport_Revisions(t *testing.T) {
 				assert.Empty(t, m.RevisionName())
 			},
 		},
-		"AppendRevision/Single": {
+		"AddRevision/Single": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -596,11 +596,11 @@ func TestViewport_Revisions(t *testing.T) {
 				assert.Equal(t, "rev1", m.RevisionName())
 			},
 		},
-		"AppendRevision/Multiple": {
+		"AddRevision/Multiple": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -611,10 +611,10 @@ func TestViewport_Revisions(t *testing.T) {
 				assert.Equal(t, "rev3", m.RevisionName())
 			},
 		},
-		"AppendRevision": {
+		"AddRevision": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -625,8 +625,8 @@ func TestViewport_Revisions(t *testing.T) {
 		},
 		"ClearRevisions": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				m.ClearRevisions()
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -638,9 +638,9 @@ func TestViewport_Revisions(t *testing.T) {
 		},
 		"GoToRevision/First": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
 				m.GoToRevision(0)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -653,9 +653,9 @@ func TestViewport_Revisions(t *testing.T) {
 		},
 		"GoToRevision/Middle": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
 				m.GoToRevision(1)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -667,8 +667,8 @@ func TestViewport_Revisions(t *testing.T) {
 		},
 		"GoToRevision/Clamped": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				m.GoToRevision(100) // Should clamp to max (N-1).
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -680,9 +680,9 @@ func TestViewport_Revisions(t *testing.T) {
 		},
 		"NextRevision": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
 				m.GoToRevision(0)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -696,8 +696,8 @@ func TestViewport_Revisions(t *testing.T) {
 		},
 		"NextRevision/AtLatest": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				// Already at latest (index 1).
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -709,9 +709,9 @@ func TestViewport_Revisions(t *testing.T) {
 		},
 		"PrevRevision": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
 				m.GoToRevision(2)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -724,8 +724,8 @@ func TestViewport_Revisions(t *testing.T) {
 		},
 		"PrevRevision/AtFirst": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				m.GoToRevision(0)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -737,9 +737,9 @@ func TestViewport_Revisions(t *testing.T) {
 		},
 		"IsShowingDiff/BoundaryConditions": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -762,8 +762,8 @@ func TestViewport_Revisions(t *testing.T) {
 		},
 		"SetTokensReplacesSingleRevision": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				m.SetTokens(niceyaml.NewSourceFromTokens(rev3Tokens)) // SetTokens uses Lines' name.
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -781,7 +781,7 @@ func TestViewport_Revisions(t *testing.T) {
 		},
 		"RevisionNames/Single": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -790,9 +790,9 @@ func TestViewport_Revisions(t *testing.T) {
 		},
 		"RevisionNames/Multiple": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -847,9 +847,9 @@ func TestViewport_DiffMode(t *testing.T) {
 	}{
 		"DefaultModeIsAdjacent": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -858,8 +858,8 @@ func TestViewport_DiffMode(t *testing.T) {
 		},
 		"SetDiffMode": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				m.SetDiffMode(yamlviewport.DiffModeOrigin)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -869,8 +869,8 @@ func TestViewport_DiffMode(t *testing.T) {
 		},
 		"ToggleDiffMode/AdjacentToOrigin": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				m.ToggleDiffMode()
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -880,8 +880,8 @@ func TestViewport_DiffMode(t *testing.T) {
 		},
 		"ToggleDiffMode/OriginToNone": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				m.SetDiffMode(yamlviewport.DiffModeOrigin)
 				m.ToggleDiffMode()
 			},
@@ -892,8 +892,8 @@ func TestViewport_DiffMode(t *testing.T) {
 		},
 		"ToggleDiffMode/NoneToAdjacent": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				m.SetDiffMode(yamlviewport.DiffModeNone)
 				m.ToggleDiffMode()
 			},
@@ -904,8 +904,8 @@ func TestViewport_DiffMode(t *testing.T) {
 		},
 		"ToggleDiffMode/FullCycle": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -924,8 +924,8 @@ func TestViewport_DiffMode(t *testing.T) {
 		},
 		"SetDiffMode/None": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				m.SetDiffMode(yamlviewport.DiffModeNone)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -935,9 +935,9 @@ func TestViewport_DiffMode(t *testing.T) {
 		},
 		"ModeNone/NotShowingDiff": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
 				m.GoToRevision(1)
 				m.SetDiffMode(yamlviewport.DiffModeNone)
 			},
@@ -950,9 +950,9 @@ func TestViewport_DiffMode(t *testing.T) {
 		},
 		"ModeAtIndex0/NoEffect": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
 				m.GoToRevision(0)
 				m.SetDiffMode(yamlviewport.DiffModeOrigin)
 			},
@@ -965,8 +965,8 @@ func TestViewport_DiffMode(t *testing.T) {
 		},
 		"ModeAtLatest/ShowsDiff": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				// Already at latest (index 1).
 				m.SetDiffMode(yamlviewport.DiffModeOrigin)
 			},
@@ -1177,7 +1177,7 @@ func TestViewport_SetFile(t *testing.T) {
 				assert.False(t, m.IsShowingDiff())
 			},
 		},
-		"AppendRevisionFromFile": {
+		"AddRevisionFromFile": {
 			beforeYAML: beforeYAML,
 			afterYAML:  afterYAML,
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -1218,10 +1218,10 @@ func TestViewport_SetFile(t *testing.T) {
 
 			if tc.beforeYAML != "" && tc.afterYAML != "" {
 				beforeLines := niceyaml.NewSourceFromString(tc.beforeYAML, niceyaml.WithName("before"))
-				m.AppendRevision(beforeLines)
+				m.AddRevision(beforeLines)
 
 				afterLines := niceyaml.NewSourceFromString(tc.afterYAML, niceyaml.WithName("after"))
-				m.AppendRevision(afterLines)
+				m.AddRevision(afterLines)
 			}
 
 			if tc.yaml != "" {
@@ -1444,7 +1444,7 @@ func TestViewport_Update(t *testing.T) {
 			setup: func(m *yamlviewport.Model) {
 				// Add a second revision and go to revision 0.
 				second := lexer.Tokenize("line1: modified\nline2: changed")
-				m.AppendRevision(niceyaml.NewSourceFromTokens(second, niceyaml.WithName("change")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(second, niceyaml.WithName("change")))
 				m.GoToRevision(0)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -1462,7 +1462,7 @@ func TestViewport_Update(t *testing.T) {
 			setup: func(m *yamlviewport.Model) {
 				// Add a second revision (starts at latest index 1).
 				second := lexer.Tokenize("line1: modified\nline2: changed")
-				m.AppendRevision(niceyaml.NewSourceFromTokens(second, niceyaml.WithName("change")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(second, niceyaml.WithName("change")))
 				// Now at index 1 (latest).
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -1480,7 +1480,7 @@ func TestViewport_Update(t *testing.T) {
 			height: 5,
 			setup: func(m *yamlviewport.Model) {
 				second := lexer.Tokenize("line1: modified\nline2: changed")
-				m.AppendRevision(niceyaml.NewSourceFromTokens(second, niceyaml.WithName("change")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(second, niceyaml.WithName("change")))
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -1614,8 +1614,8 @@ func TestViewport_RevisionDeduplication(t *testing.T) {
 		"DuplicateRevisions/CountIsCorrect": {
 			setup: func(m *yamlviewport.Model) {
 				// Add two revisions with identical content.
-				m.AppendRevision(niceyaml.NewSourceFromTokens(sameTokens1, niceyaml.WithName("first")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(sameTokens2, niceyaml.WithName("second")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(sameTokens1, niceyaml.WithName("first")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(sameTokens2, niceyaml.WithName("second")))
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -1627,8 +1627,8 @@ func TestViewport_RevisionDeduplication(t *testing.T) {
 		},
 		"DuplicateRevisions/NavigationWorks": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(sameTokens1, niceyaml.WithName("first")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(sameTokens2, niceyaml.WithName("second")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(sameTokens1, niceyaml.WithName("first")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(sameTokens2, niceyaml.WithName("second")))
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -1651,8 +1651,8 @@ func TestViewport_RevisionDeduplication(t *testing.T) {
 		},
 		"DuplicateRevisions/ContentRendersCorrectly": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(sameTokens1, niceyaml.WithName("first")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(sameTokens2, niceyaml.WithName("second")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(sameTokens1, niceyaml.WithName("first")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(sameTokens2, niceyaml.WithName("second")))
 				m.GoToRevision(0)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -1667,9 +1667,9 @@ func TestViewport_RevisionDeduplication(t *testing.T) {
 		"MixedRevisions/Works": {
 			setup: func(m *yamlviewport.Model) {
 				// Two identical + one different.
-				m.AppendRevision(niceyaml.NewSourceFromTokens(sameTokens1, niceyaml.WithName("first")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(sameTokens2, niceyaml.WithName("second")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(differentTokens, niceyaml.WithName("different")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(sameTokens1, niceyaml.WithName("first")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(sameTokens2, niceyaml.WithName("second")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(differentTokens, niceyaml.WithName("different")))
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -1683,8 +1683,8 @@ func TestViewport_RevisionDeduplication(t *testing.T) {
 		},
 		"AppendDuplicate/Works": {
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(sameTokens1, niceyaml.WithName("first")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(sameTokens2, niceyaml.WithName("second")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(sameTokens1, niceyaml.WithName("first")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(sameTokens2, niceyaml.WithName("second")))
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -1772,8 +1772,8 @@ func TestViewSummary_Golden(t *testing.T) {
 	tcs := map[string]goldenTest{
 		"BasicSummary": {
 			setupFunc: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				m.GoToRevision(1)
 			},
 			context: 1,
@@ -1782,8 +1782,8 @@ func TestViewSummary_Golden(t *testing.T) {
 		},
 		"SummaryWithContext3": {
 			setupFunc: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				m.GoToRevision(1)
 			},
 			context: 3,
@@ -1792,8 +1792,8 @@ func TestViewSummary_Golden(t *testing.T) {
 		},
 		"AtFirstRevision": {
 			setupFunc: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				m.GoToRevision(0)
 			},
 			context: 1,
@@ -1802,8 +1802,8 @@ func TestViewSummary_Golden(t *testing.T) {
 		},
 		"AtLatestRevision": {
 			setupFunc: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				// Default is at latest (index 2).
 			},
 			context: 1,
@@ -1812,9 +1812,9 @@ func TestViewSummary_Golden(t *testing.T) {
 		},
 		"DiffModeOrigin": {
 			setupFunc: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
 				m.GoToRevision(2)
 				m.SetDiffMode(yamlviewport.DiffModeOrigin)
 			},
@@ -1824,8 +1824,8 @@ func TestViewSummary_Golden(t *testing.T) {
 		},
 		"DiffModeNone": {
 			setupFunc: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				m.GoToRevision(1)
 				m.SetDiffMode(yamlviewport.DiffModeNone)
 			},
@@ -1835,9 +1835,9 @@ func TestViewSummary_Golden(t *testing.T) {
 		},
 		"MultipleRevisions": {
 			setupFunc: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
 				m.GoToRevision(2)
 			},
 			context: 1,
@@ -1907,8 +1907,8 @@ func TestViewSummary_Behavior(t *testing.T) {
 			height:  0,
 			context: 1,
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				m.GoToRevision(1)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -1923,8 +1923,8 @@ func TestViewSummary_Behavior(t *testing.T) {
 			height:  24,
 			context: 0,
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				m.GoToRevision(1)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -1940,8 +1940,8 @@ func TestViewSummary_Behavior(t *testing.T) {
 			height:  24,
 			context: 100,
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				m.GoToRevision(1)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -1959,8 +1959,8 @@ func TestViewSummary_Behavior(t *testing.T) {
 			height:  3,
 			context: 1,
 			setup: func(m *yamlviewport.Model) {
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AppendRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				m.GoToRevision(1)
 				m.SetYOffset(1)
 			},
@@ -2092,8 +2092,8 @@ func TestViewport_RevisionStateEdgeCases(t *testing.T) {
 		tokens1 := lexer.Tokenize("v1: value1\n")
 		tokens2 := lexer.Tokenize("v2: value2\n")
 
-		m.AppendRevision(niceyaml.NewSourceFromTokens(tokens1, niceyaml.WithName("rev1")))
-		m.AppendRevision(niceyaml.NewSourceFromTokens(tokens2, niceyaml.WithName("rev2")))
+		m.AddRevision(niceyaml.NewSourceFromTokens(tokens1, niceyaml.WithName("rev1")))
+		m.AddRevision(niceyaml.NewSourceFromTokens(tokens2, niceyaml.WithName("rev2")))
 
 		// At latest revision (rev2), not at first.
 		assert.False(t, m.IsAtFirstRevision())

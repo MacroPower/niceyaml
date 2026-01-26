@@ -269,15 +269,15 @@ func (m *Model) SetPrinter(p Printer) {
 // SetTokens replaces the revision history with a single revision.
 //
 // This is a convenience method equivalent to [Model.ClearRevisions] followed by
-// [Model.AppendRevision].
+// [Model.AddRevision].
 func (m *Model) SetTokens(lines niceyaml.NamedLineSource) {
 	m.ClearRevisions()
-	m.AppendRevision(lines)
+	m.AddRevision(lines)
 }
 
-// AppendRevision adds a new revision to the history.
-// After appending, the revision pointer moves to the newly added revision.
-func (m *Model) AppendRevision(lines niceyaml.NamedLineSource) {
+// AddRevision adds a new revision to the history.
+// After adding, the revision pointer moves to the newly added revision.
+func (m *Model) AddRevision(lines niceyaml.NamedLineSource) {
 	if m.revision == nil {
 		m.revision = niceyaml.NewRevision(lines)
 	} else {

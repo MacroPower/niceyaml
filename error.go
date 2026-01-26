@@ -496,7 +496,7 @@ func (e *Error) renderErrorSource(mainToken *token.Token) string {
 	// Apply annotations directly to source lines.
 	lineAnnotations := prepareLineAnnotations(positions)
 	for lineIdx, annotation := range lineAnnotations {
-		t.Line(lineIdx).Annotate(annotation)
+		t.Line(lineIdx).AddAnnotation(annotation)
 	}
 
 	// Build hunk spans from all line indices covered by error ranges.
@@ -505,7 +505,7 @@ func (e *Error) renderErrorSource(mainToken *token.Token) string {
 	// Add "..." annotations to first line of each non-first hunk.
 	for i, span := range hunkSpans {
 		if i > 0 {
-			t.Line(span.Start).Annotate(line.Annotation{
+			t.Line(span.Start).AddAnnotation(line.Annotation{
 				Content:  "...",
 				Position: line.Above,
 			})

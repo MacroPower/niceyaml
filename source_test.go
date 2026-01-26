@@ -98,7 +98,7 @@ func TestTokens_String_Annotation(t *testing.T) {
 			for idx, ann := range tc.annotations {
 				require.Less(t, idx, result.Len(), "annotation index out of range")
 
-				result.Line(idx).Annotate(ann)
+				result.Line(idx).AddAnnotation(ann)
 			}
 
 			assert.Equal(t, tc.want, result.String())

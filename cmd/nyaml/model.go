@@ -75,7 +75,7 @@ func newModel(opts *modelOptions) model {
 	}
 
 	for _, f := range opts.files {
-		m.viewport.AppendRevision(niceyaml.NewSourceFromString(
+		m.viewport.AddRevision(niceyaml.NewSourceFromString(
 			string(f.content),
 			niceyaml.WithName(filepath.Base(f.path)),
 		))

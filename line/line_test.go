@@ -622,7 +622,7 @@ func TestLine_Annotation(t *testing.T) {
 				require.Len(t, lines, 1)
 
 				ln := lines[0]
-				ln.Annotate(tc.annotations...)
+				ln.AddAnnotation(tc.annotations...)
 
 				assert.Equal(t, tc.want, ln.String())
 			})
@@ -637,7 +637,7 @@ func TestLine_Annotation(t *testing.T) {
 		require.Len(t, lines, 1)
 
 		original := lines[0]
-		original.Annotate(line.Annotation{Content: "original note", Position: line.Below})
+		original.AddAnnotation(line.Annotation{Content: "original note", Position: line.Below})
 
 		clone := original.Clone()
 
@@ -657,7 +657,7 @@ func TestLine_Annotation(t *testing.T) {
 		assert.Equal(t, 1, belowCount)
 
 		// Modify clone annotations.
-		clone.Annotate(line.Annotation{Content: "modified", Position: line.Above})
+		clone.AddAnnotation(line.Annotation{Content: "modified", Position: line.Above})
 
 		// Verify original is unchanged.
 		require.Len(t, original.Annotations, 1)
@@ -2484,7 +2484,7 @@ func TestLines_String(t *testing.T) {
 		lines := line.NewLines(tks)
 
 		// Add annotation to first line.
-		lines[0].Annotate(line.Annotation{Content: "test annotation"})
+		lines[0].AddAnnotation(line.Annotation{Content: "test annotation"})
 
 		result := lines.String()
 		assert.Contains(t, result, "key: value")
@@ -2722,7 +2722,7 @@ func TestLine_Annotate(t *testing.T) {
 		require.Len(t, lines, 1)
 
 		ln := &lines[0]
-		ln.Annotate(line.Annotation{Content: "note", Position: line.Below})
+		ln.AddAnnotation(line.Annotation{Content: "note", Position: line.Below})
 
 		require.Len(t, ln.Annotations, 1)
 		assert.Equal(t, "note", ln.Annotations[0].Content)
@@ -2737,7 +2737,7 @@ func TestLine_Annotate(t *testing.T) {
 		require.Len(t, lines, 1)
 
 		ln := &lines[0]
-		ln.Annotate(
+		ln.AddAnnotation(
 			line.Annotation{Content: "first", Position: line.Above},
 			line.Annotation{Content: "second", Position: line.Below},
 		)
@@ -2755,8 +2755,8 @@ func TestLine_Annotate(t *testing.T) {
 		require.Len(t, lines, 1)
 
 		ln := &lines[0]
-		ln.Annotate(line.Annotation{Content: "first"})
-		ln.Annotate(line.Annotation{Content: "second"})
+		ln.AddAnnotation(line.Annotation{Content: "first"})
+		ln.AddAnnotation(line.Annotation{Content: "second"})
 
 		require.Len(t, ln.Annotations, 2)
 	})
@@ -2773,7 +2773,7 @@ func TestLine_Overlay(t *testing.T) {
 		require.Len(t, lines, 1)
 
 		ln := &lines[0]
-		ln.Overlay(line.Overlay{
+		ln.AddOverlay(line.Overlay{
 			Cols: position.NewSpan(0, 5),
 			Kind: 1,
 		})
@@ -2791,7 +2791,7 @@ func TestLine_Overlay(t *testing.T) {
 		require.Len(t, lines, 1)
 
 		ln := &lines[0]
-		ln.Overlay(
+		ln.AddOverlay(
 			line.Overlay{Cols: position.NewSpan(0, 3), Kind: 1},
 			line.Overlay{Cols: position.NewSpan(5, 10), Kind: 2},
 		)
@@ -2809,8 +2809,8 @@ func TestLine_Overlay(t *testing.T) {
 		require.Len(t, lines, 1)
 
 		ln := &lines[0]
-		ln.Overlay(line.Overlay{Cols: position.NewSpan(0, 3), Kind: 1})
-		ln.Overlay(line.Overlay{Cols: position.NewSpan(5, 10), Kind: 2})
+		ln.AddOverlay(line.Overlay{Cols: position.NewSpan(0, 3), Kind: 1})
+		ln.AddOverlay(line.Overlay{Cols: position.NewSpan(5, 10), Kind: 2})
 
 		require.Len(t, ln.Overlays, 2)
 	})
@@ -2954,7 +2954,7 @@ func TestLine_Clone_PreservesOverlays(t *testing.T) {
 	require.Len(t, lines, 1)
 
 	original := lines[0]
-	original.Overlay(line.Overlay{Cols: position.NewSpan(0, 5), Kind: 1})
+	original.AddOverlay(line.Overlay{Cols: position.NewSpan(0, 5), Kind: 1})
 
 	clone := original.Clone()
 
@@ -2964,7 +2964,7 @@ func TestLine_Clone_PreservesOverlays(t *testing.T) {
 	assert.Equal(t, original.Overlays[0].Kind, clone.Overlays[0].Kind)
 
 	// Modify clone overlays.
-	clone.Overlay(line.Overlay{Cols: position.NewSpan(5, 10), Kind: 2})
+	clone.AddOverlay(line.Overlay{Cols: position.NewSpan(5, 10), Kind: 2})
 
 	// Verify original is unchanged.
 	require.Len(t, original.Overlays, 1)
