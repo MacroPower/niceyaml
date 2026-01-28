@@ -160,6 +160,16 @@ func (l Line) IsEmpty() bool {
 	return len(l.segments) == 0
 }
 
+// Width returns the total rune width of this line's content.
+func (l Line) Width() int {
+	var w int
+	for _, seg := range l.segments {
+		w += seg.Width()
+	}
+
+	return w
+}
+
 // String reconstructs this [Line] as a string, including any annotations.
 // This should generally only be used for debugging.
 func (l Line) String() string {

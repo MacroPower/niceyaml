@@ -411,3 +411,15 @@ func (s *Source) ClearOverlays() {
 
 	s.lines.ClearOverlays()
 }
+
+// Width returns the maximum line width across all lines.
+func (s *Source) Width() int {
+	var maxWidth int
+	for _, l := range s.lines {
+		if w := l.Width(); w > maxWidth {
+			maxWidth = w
+		}
+	}
+
+	return maxWidth
+}

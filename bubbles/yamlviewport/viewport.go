@@ -20,13 +20,11 @@ const defaultHorizontalStep = 6
 const (
 	// SearchOverlayKind identifies search match highlights in the viewport.
 	//
-	// Configure the style via [WithSearchStyle] or by including it in a
-	// [Printer]'s style set.
+	// Configure the style by including it in a [Printer]'s style set.
 	SearchOverlayKind style.Style = iota
 	// SelectedSearchOverlayKind identifies the currently selected search match.
 	//
-	// Configure the style via [WithSelectedSearchStyle] or by including it in a
-	// [Printer]'s style set.
+	// Configure the style by including it in a [Printer]'s style set.
 	SelectedSearchOverlayKind
 )
 
@@ -86,8 +84,6 @@ const (
 // Available options:
 //   - [WithPrinter]
 //   - [WithStyle]
-//   - [WithSearchStyle]
-//   - [WithSelectedSearchStyle]
 //   - [WithFinder]
 type Option func(*Model)
 
@@ -105,25 +101,6 @@ func WithPrinter(p Printer) Option {
 func WithStyle(s lipgloss.Style) Option {
 	return func(m *Model) {
 		m.Style = s
-	}
-}
-
-// WithSearchStyle is an [Option] that sets the style for search highlights.
-//
-//nolint:gocritic // hugeParam: Copying.
-func WithSearchStyle(s lipgloss.Style) Option {
-	return func(m *Model) {
-		m.SearchStyle = s
-	}
-}
-
-// WithSelectedSearchStyle is an [Option] that sets the style for the currently
-// selected search match.
-//
-//nolint:gocritic // hugeParam: Copying.
-func WithSelectedSearchStyle(s lipgloss.Style) Option {
-	return func(m *Model) {
-		m.SelectedSearchStyle = s
 	}
 }
 
@@ -151,34 +128,30 @@ func New(opts ...Option) Model {
 // Create instances with [New].
 type Model struct {
 	// Style is the container style applied to the viewport frame.
-	Style lipgloss.Style
-	// SelectedSearchStyle is the style for the currently selected search match.
-	SelectedSearchStyle lipgloss.Style
-	// SearchStyle is the style for search match highlights.
-	SearchStyle lipgloss.Style
-	printer     Printer
+	Style    lipgloss.Style
+	printer  Printer
+	finder   Finder
+	revision *niceyaml.Revision
+	// Cached diff between base and current revision.
+	diffResult *niceyaml.DiffResult
+	lines      *niceyaml.Source
+	// Current search query.
+	searchTerm string
 	// KeyMap contains the keybindings for viewport navigation.
 	KeyMap         KeyMap
-	searchTerm     string // Current search query.
-	finder         Finder
 	searchMatches  []position.Range
-	revision       *niceyaml.Revision
-	diffResult     *niceyaml.DiffResult // Cached diff between base and current revision.
-	lines          *niceyaml.Source
-	renderedLines  []string
-	xOffset        int
 	horizontalStep int
+	diffMode       DiffMode
 	// MouseWheelDelta is the number of lines to scroll per mouse wheel tick.
 	// Default: 3.
-	MouseWheelDelta  int
-	width            int
-	searchIndex      int
-	yOffset          int
-	longestLineWidth int
-	height           int
-	diffMode         DiffMode
-	viewMode         ViewMode
-	hunkContext      int
+	MouseWheelDelta int
+	width           int
+	searchIndex     int
+	yOffset         int
+	height          int
+	xOffset         int
+	viewMode        ViewMode
+	hunkContext     int
 	// FillHeight pads output with empty lines to fill the viewport height when true.
 	FillHeight bool
 	// MouseWheelEnabled enables mouse wheel scrolling.
@@ -194,12 +167,12 @@ func (m *Model) setInitialValues() {
 	m.MouseWheelEnabled = true
 	m.MouseWheelDelta = 3
 	m.horizontalStep = defaultHorizontalStep
-	m.hunkContext = defaultHunkContext
+	m.hunkContext = 3 // Default context lines around diff hunks.
 	m.WrapEnabled = true
 	m.searchIndex = -1
 
 	if m.printer == nil {
-		m.printer = m.createDefaultPrinter()
+		m.printer = niceyaml.NewPrinter()
 	}
 
 	if m.finder == nil {
@@ -209,21 +182,6 @@ func (m *Model) setInitialValues() {
 	}
 
 	m.initialized = true
-}
-
-// createDefaultPrinter creates a printer with search highlight styles included.
-func (m *Model) createDefaultPrinter() *niceyaml.Printer {
-	return niceyaml.NewPrinter(
-		niceyaml.WithStyles(m.searchStyles()),
-	)
-}
-
-// searchStyles returns styles that include search highlight styling.
-func (m *Model) searchStyles() style.Styles {
-	return style.NewStyles(lipgloss.Style{},
-		style.Set(SearchOverlayKind, m.SearchStyle),
-		style.Set(SelectedSearchOverlayKind, m.SelectedSearchStyle),
-	)
 }
 
 // Init implements the [tea.Model] interface.
@@ -301,7 +259,7 @@ func (m *Model) ClearRevisions() {
 // RevisionIndex returns the current revision index.
 // Returns 0 if revisions are empty.
 func (m *Model) RevisionIndex() int {
-	if m.revision == nil {
+	if !m.hasRevision() {
 		return 0
 	}
 
@@ -311,7 +269,7 @@ func (m *Model) RevisionIndex() int {
 // RevisionName returns the name of the current revision.
 // Returns empty string if revisions are empty.
 func (m *Model) RevisionName() string {
-	if m.revision == nil {
+	if !m.hasRevision() {
 		return ""
 	}
 
@@ -320,7 +278,7 @@ func (m *Model) RevisionName() string {
 
 // RevisionNames returns all revision names in order.
 func (m *Model) RevisionNames() []string {
-	if m.revision == nil {
+	if !m.hasRevision() {
 		return nil
 	}
 
@@ -331,7 +289,7 @@ func (m *Model) RevisionNames() []string {
 // Index 0 always shows the first revision without diff markers.
 // Index 1 to N-1 shows a diff based on the current [DiffMode].
 func (m *Model) GoToRevision(index int) {
-	if m.revision == nil {
+	if !m.hasRevision() {
 		return
 	}
 
@@ -344,7 +302,7 @@ func (m *Model) GoToRevision(index int) {
 
 // RevisionCount returns the number of revisions in the history.
 func (m *Model) RevisionCount() int {
-	if m.revision == nil {
+	if !m.hasRevision() {
 		return 0
 	}
 
@@ -353,7 +311,7 @@ func (m *Model) RevisionCount() int {
 
 // IsAtFirstRevision reports whether the viewport is at revision index 0.
 func (m *Model) IsAtFirstRevision() bool {
-	if m.revision == nil {
+	if !m.hasRevision() {
 		return true
 	}
 
@@ -362,7 +320,7 @@ func (m *Model) IsAtFirstRevision() bool {
 
 // IsAtLatestRevision reports whether the viewport is at the latest revision.
 func (m *Model) IsAtLatestRevision() bool {
-	if m.revision == nil {
+	if !m.hasRevision() {
 		return true
 	}
 
@@ -375,7 +333,7 @@ func (m *Model) IsAtLatestRevision() bool {
 // This is true when not at the first revision and [DiffMode] is not
 // [DiffModeNone].
 func (m *Model) IsShowingDiff() bool {
-	return m.revision != nil && !m.revision.AtOrigin() && m.diffMode != DiffModeNone
+	return m.hasRevision() && !m.revision.AtOrigin() && m.diffMode != DiffModeNone
 }
 
 // DiffStats returns the number of added and removed lines in the current diff.
@@ -459,7 +417,7 @@ func (m *Model) PrevRevision() { m.seekRevision(-1) }
 
 // seekRevision moves the revision pointer by delta, with boundary checks.
 func (m *Model) seekRevision(delta int) {
-	if m.revision == nil {
+	if !m.hasRevision() {
 		return
 	}
 	if delta > 0 && m.revision.AtTip() {
@@ -474,15 +432,13 @@ func (m *Model) seekRevision(delta int) {
 	m.GotoTop()
 }
 
-// rerender renders the tokens using the [Printer] with current search
-// highlights.
+// rerender updates the source lines and search state.
+// Actual rendering is deferred to renderVisible for on-demand rendering.
 func (m *Model) rerender() {
 	m.diffResult = nil // Invalidate cached diff result.
 
-	lines := m.getDisplayLines(nil)
+	lines := m.getDisplayLines()
 	if lines == nil {
-		m.renderedLines = nil
-		m.longestLineWidth = 0
 		m.lines = nil
 
 		return
@@ -490,19 +446,10 @@ func (m *Model) rerender() {
 
 	m.lines = lines
 
-	if m.printer == nil {
-		m.printer = m.createDefaultPrinter()
-	}
-
 	m.updateSearchState(lines)
 
 	// Apply search highlights via overlays.
 	m.applySearchOverlays(lines)
-
-	content := m.printer.Print(lines)
-
-	m.renderedLines = strings.Split(content, "\n")
-	m.longestLineWidth = maxLineWidth(m.renderedLines)
 }
 
 // applySearchOverlays sets overlay highlights for all search matches.
@@ -539,27 +486,29 @@ func (m *Model) updateSearchState(lines *niceyaml.Source) {
 	}
 }
 
-// rerenderLine re-renders a single line and updates m.renderedLines.
-func (m *Model) rerenderLine(idx int) {
-	if m.lines == nil || idx < 0 || idx >= len(m.renderedLines) {
-		return
+// renderVisible renders only the visible slice of lines on demand.
+func (m *Model) renderVisible() []string {
+	if m.lines == nil {
+		return nil
 	}
 
-	content := m.printer.Print(m.lines, position.NewSpan(idx, idx+1))
+	start := m.YOffset()
+	end := min(start+m.maxHeight(), m.lines.Len())
 
-	m.renderedLines[idx] = content
-
-	lineWidth := ansi.StringWidth(content)
-	if lineWidth > m.longestLineWidth {
-		m.longestLineWidth = lineWidth
+	if start >= end {
+		return nil
 	}
+
+	content := m.printer.Print(m.lines, position.NewSpan(start, end))
+
+	return strings.Split(content, "\n")
 }
 
 // getDiffBaseRevision returns the base revision for diff comparison based on
 // the current [DiffMode].
 // Returns nil if diff mode is [DiffModeNone] or revision is nil.
 func (m *Model) getDiffBaseRevision() *niceyaml.Revision {
-	if m.revision == nil {
+	if !m.hasRevision() {
 		return nil
 	}
 
@@ -575,30 +524,12 @@ func (m *Model) getDiffBaseRevision() *niceyaml.Revision {
 
 // getDisplayLines returns the lines to display based on current revision and
 // [DiffMode].
-//
-// The makeDiff func is called when a diff should be shown; if nil, uses
-// [niceyaml.Diff].
-func (m *Model) getDisplayLines(makeDiff func(base, current *niceyaml.Revision) *niceyaml.Source) *niceyaml.Source {
-	if m.revision == nil {
-		return nil
+func (m *Model) getDisplayLines() *niceyaml.Source {
+	if src, needsDiff := m.resolveRevisionSource(); !needsDiff {
+		return src
 	}
 
-	switch {
-	case m.revision.AtOrigin():
-		return m.revision.Origin().Source()
-	case m.diffMode == DiffModeNone:
-		return m.revision.Source()
-	default:
-		base := m.getDiffBaseRevision()
-		if base == nil {
-			return m.revision.Source()
-		}
-		if makeDiff != nil {
-			return makeDiff(base, m.revision)
-		}
-
-		return m.getDiffResult().Full()
-	}
+	return m.getDiffResult().Full()
 }
 
 // getDiffResult returns the cached [niceyaml.DiffResult], computing it if nil.
@@ -610,59 +541,88 @@ func (m *Model) getDiffResult() *niceyaml.DiffResult {
 	return m.diffResult
 }
 
+// resolveRevisionSource determines which source to display for the current
+// revision state.
+//
+// Returns (source, false) for non-diff cases (origin, no diff mode, or no
+// revision), or (nil, true) when a diff should be computed.
+func (m *Model) resolveRevisionSource() (*niceyaml.Source, bool) {
+	if !m.hasRevision() {
+		return nil, false
+	}
+
+	if m.revision.AtOrigin() {
+		return m.revision.Origin().Source(), false
+	}
+
+	if !m.IsShowingDiff() {
+		return m.revision.Source(), false
+	}
+
+	return nil, true
+}
+
 // AtTop reports whether the viewport is scrolled to the top.
 func (m *Model) AtTop() bool {
-	return m.YOffset() <= 0
+	return !m.hasContent() || m.YOffset() <= 0
 }
 
 // AtBottom reports whether the viewport is scrolled to or past the bottom.
 func (m *Model) AtBottom() bool {
-	return m.YOffset() >= m.maxYOffset()
+	return !m.hasContent() || m.YOffset() >= m.maxYOffset()
 }
 
 // PastBottom reports whether the viewport is scrolled past the last line.
 func (m *Model) PastBottom() bool {
-	return m.YOffset() > m.maxYOffset()
+	return m.hasContent() && m.YOffset() > m.maxYOffset()
 }
 
 // ScrollPercent returns the vertical scroll position as a float between 0 and 1.
 func (m *Model) ScrollPercent() float64 {
-	total := len(m.renderedLines)
-	if m.maxHeight() >= total {
+	if m.lines == nil {
 		return 1.0
 	}
 
-	y := float64(m.YOffset())
-	h := float64(m.maxHeight())
-	t := float64(total)
-	v := y / (t - h)
-
-	return clamp(v, 0, 1)
+	return scrollPercent(m.YOffset(), m.maxHeight(), m.lines.Len())
 }
 
 // HorizontalScrollPercent returns the horizontal scroll position as a float
 // between 0 and 1.
 func (m *Model) HorizontalScrollPercent() float64 {
-	if m.xOffset >= m.longestLineWidth-m.maxWidth() {
+	if m.lines == nil {
 		return 1.0
 	}
 
-	x := float64(m.xOffset)
-	w := float64(m.maxWidth())
-	t := float64(m.longestLineWidth)
-	v := x / (t - w)
+	return scrollPercent(m.xOffset, m.maxWidth(), m.lines.Width())
+}
+
+// scrollPercent calculates scroll position as a value between 0 and 1.
+func scrollPercent(offset, visible, total int) float64 {
+	if visible >= total {
+		return 1.0
+	}
+
+	v := float64(offset) / float64(total-visible)
 
 	return clamp(v, 0, 1)
 }
 
 // maxYOffset returns the maximum Y offset.
 func (m *Model) maxYOffset() int {
-	return max(0, len(m.renderedLines)-m.maxHeight())
+	if m.lines == nil {
+		return 0
+	}
+
+	return max(0, m.lines.Len()-m.maxHeight())
 }
 
 // maxXOffset returns the maximum X offset.
 func (m *Model) maxXOffset() int {
-	return max(0, m.longestLineWidth-m.maxWidth())
+	if m.lines == nil {
+		return 0
+	}
+
+	return max(0, m.lines.Width()-m.maxWidth())
 }
 
 // maxWidth returns the content width accounting for frame size.
@@ -675,8 +635,18 @@ func (m *Model) maxHeight() int {
 	return max(0, m.Height()-m.Style.GetVerticalFrameSize())
 }
 
+// hasContent reports whether there is content to display.
+func (m *Model) hasContent() bool {
+	return m.lines != nil && !m.lines.IsEmpty()
+}
+
+// hasRevision reports whether a revision exists.
+func (m *Model) hasRevision() bool {
+	return m.revision != nil
+}
+
 // visibleLines returns the lines currently visible in the viewport.
-// If lines is nil, uses m.lines.
+// If lines is nil, renders the visible portion of m.lines on demand.
 func (m *Model) visibleLines(lines []string) []string {
 	maxHeight := m.maxHeight()
 	maxWidth := m.maxWidth()
@@ -686,12 +656,10 @@ func (m *Model) visibleLines(lines []string) []string {
 	}
 
 	if lines == nil {
-		lines = m.renderedLines
+		lines = m.renderVisible()
 	}
 
-	total := len(lines)
-
-	if total == 0 {
+	if len(lines) == 0 {
 		if m.FillHeight {
 			return make([]string, maxHeight)
 		}
@@ -699,21 +667,21 @@ func (m *Model) visibleLines(lines []string) []string {
 		return nil
 	}
 
-	start := m.YOffset()
-	if start >= total {
-		start = max(0, total-maxHeight)
+	// Truncate to maxHeight if we have more lines than the viewport can show.
+	// This happens when wrapping causes source lines to expand into more
+	// rendered lines.
+	if len(lines) > maxHeight {
+		lines = lines[:maxHeight]
 	}
 
-	end := min(start+maxHeight, total)
-
-	// Determine final capacity based on FillHeight.
-	capacity := end - start
-	if m.FillHeight && capacity < maxHeight {
-		capacity = maxHeight
+	// Determine result length, padding for FillHeight if needed.
+	resultLen := len(lines)
+	if m.FillHeight && resultLen < maxHeight {
+		resultLen = maxHeight
 	}
 
-	result := make([]string, capacity)
-	copy(result, lines[start:end])
+	result := make([]string, resultLen)
+	copy(result, lines)
 
 	// Apply horizontal scrolling / line truncation.
 	// When wrapping is disabled, lines may exceed viewport width.
@@ -749,7 +717,7 @@ func (m *Model) XOffset() int {
 
 // ScrollDown moves the view down by n lines.
 func (m *Model) ScrollDown(n int) {
-	if m.AtBottom() || n == 0 || len(m.renderedLines) == 0 {
+	if m.AtBottom() || n == 0 {
 		return
 	}
 
@@ -758,7 +726,7 @@ func (m *Model) ScrollDown(n int) {
 
 // ScrollUp moves the view up by n lines.
 func (m *Model) ScrollUp(n int) {
-	if m.AtTop() || n == 0 || len(m.renderedLines) == 0 {
+	if m.AtTop() || n == 0 {
 		return
 	}
 
@@ -812,7 +780,11 @@ func (m *Model) GotoBottom() {
 
 // TotalLineCount returns the total number of lines.
 func (m *Model) TotalLineCount() int {
-	return len(m.renderedLines)
+	if m.lines == nil {
+		return 0
+	}
+
+	return m.lines.Len()
 }
 
 // VisibleLineCount returns the number of visible lines.
@@ -862,25 +834,11 @@ func (m *Model) navigateSearch(delta int) {
 		return
 	}
 
-	oldIndex := m.searchIndex
 	m.searchIndex = (m.searchIndex + delta + len(m.searchMatches)) % len(m.searchMatches)
 
-	// Only re-render the affected lines if cache is available.
-	if m.lines == nil || oldIndex < 0 {
-		m.rerender()
-		m.scrollToCurrentMatch()
-
-		return
-	}
-
-	m.applySearchOverlays(m.lines)
-
-	oldLine := m.searchMatches[oldIndex].Start.Line
-	newLine := m.searchMatches[m.searchIndex].Start.Line
-
-	m.rerenderLine(oldLine)
-	if newLine != oldLine {
-		m.rerenderLine(newLine)
+	// Update overlays; rendering happens lazily in View.
+	if m.lines != nil {
+		m.applySearchOverlays(m.lines)
 	}
 
 	m.scrollToCurrentMatch()
@@ -1013,7 +971,7 @@ func (m *Model) getViewDimensions() (int, int, bool) {
 
 // renderContent applies styling and renders lines into final output.
 func (m *Model) renderContent(lines []string, contentW, contentH int) string {
-	textStyle := lipgloss.Style{}
+	textStyle := lipgloss.NewStyle()
 	if st := m.printer.Style(style.Text); st != nil {
 		textStyle = *st
 	}
@@ -1055,44 +1013,21 @@ func (m Model) View() string {
 	return m.renderContent(lines, w, h)
 }
 
-const defaultHunkContext = 3
-
 // getHunksDiffContent returns diff content with context lines for hunks mode.
 func (m *Model) getHunksDiffContent() string {
-	if m.revision == nil {
-		return ""
-	}
-
-	switch {
-	case m.revision.AtOrigin():
-		return m.printer.Print(m.revision.Origin().Source())
-	case m.diffMode == DiffModeNone:
-		return m.printer.Print(m.revision.Source())
-	default:
-		base := m.getDiffBaseRevision()
-		if base == nil {
-			return m.printer.Print(m.revision.Source())
+	if src, needsDiff := m.resolveRevisionSource(); !needsDiff {
+		if src == nil {
+			return ""
 		}
 
-		source, ranges := m.getDiffResult().Hunks(m.hunkContext)
-
-		return m.printer.Print(source, ranges...)
+		return m.printer.Print(src)
 	}
+
+	source, ranges := m.getDiffResult().Hunks(m.hunkContext)
+
+	return m.printer.Print(source, ranges...)
 }
 
 func clamp[T cmp.Ordered](v, low, high T) T {
-	if high < low {
-		low, high = high, low
-	}
-
 	return min(high, max(low, v))
-}
-
-func maxLineWidth(lines []string) int {
-	result := 0
-	for _, li := range lines {
-		result = max(result, ansi.StringWidth(li))
-	}
-
-	return result
 }

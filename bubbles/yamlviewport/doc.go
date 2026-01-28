@@ -46,8 +46,7 @@
 // Search highlighting uses [SearchOverlayKind] for regular matches and
 // [SelectedSearchOverlayKind] for the current match.
 //
-// Configure these styles via [WithSearchStyle] and [WithSelectedSearchStyle],
-// or by including them in your [Printer]'s style set.
+// Configure these styles by including them in your [Printer]'s style set.
 //
 // # Customization
 //
