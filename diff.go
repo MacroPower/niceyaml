@@ -9,11 +9,11 @@ import (
 	"jacobcolvin.com/niceyaml/position"
 )
 
-// SourceGetter retrieves a [NamedLineSource].
+// SourceGetter retrieves a [*Source].
 //
 // See [Revision] for an implementation.
 type SourceGetter interface {
-	Source() NamedLineSource
+	Source() *Source
 }
 
 // Differ computes line differences using a configurable algorithm.

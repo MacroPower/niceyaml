@@ -1,22 +1,6 @@
 package niceyaml
 
-import (
-	"jacobcolvin.com/niceyaml/position"
-	"jacobcolvin.com/niceyaml/style"
-)
-
-// NamedLineSource extends [LineIterator] with a name and overlay support.
-//
-// See [Source] for an implementation.
-type NamedLineSource interface {
-	LineIterator
-	LineGetter
-	Name() string
-	AddOverlay(kind style.Style, ranges ...position.Range)
-	ClearOverlays()
-}
-
-// Revision represents a [NamedLineSource] at one or more revisions.
+// Revision represents a [*Source] at one or more revisions.
 // It may form a linked or doubly-linked list to track changes across revisions.
 // A single revision is valid; multiple revisions are not required.
 //
@@ -28,23 +12,23 @@ type Revision struct {
 	// The next token collection in the revision sequence.
 	// If there is no next revision, it is nil.
 	next *Revision
-	// The [NamedLineSource] at the head.
-	head NamedLineSource
+	// The [*Source] at the head.
+	head *Source
 }
 
-// NewRevision creates a new [*Revision] with the given source at the head.
+// NewRevision creates a new [*Revision] with the given [*Source] at the head.
 // Use [Revision.Append] or [Revision.Prepend] to add more revisions.
 // A builder pattern is supported for values that are known at compile time.
-func NewRevision(li NamedLineSource) *Revision {
-	return &Revision{head: li}
+func NewRevision(s *Source) *Revision {
+	return &Revision{head: s}
 }
 
-// Source returns the [NamedLineSource] at the head.
-func (t *Revision) Source() NamedLineSource {
+// Source returns the [*Source] at the head.
+func (t *Revision) Source() *Source {
 	return t.head
 }
 
-// Name returns the name of the [NamedLineSource] at the head.
+// Name returns the name of the [*Source] at the head.
 func (t *Revision) Name() string {
 	return t.head.Name()
 }
@@ -163,24 +147,24 @@ func (t *Revision) Len() int {
 	return count + 1
 }
 
-// Append adds a new revision after the [NamedLineSource] at the head.
+// Append adds a new revision after the [*Source] at the head.
 // Returns the newly added revision.
-func (t *Revision) Append(li NamedLineSource) *Revision {
+func (t *Revision) Append(s *Source) *Revision {
 	rev := &Revision{
 		prev: t,
-		head: li,
+		head: s,
 	}
 	t.next = rev
 
 	return rev
 }
 
-// Prepend adds a new revision before the [NamedLineSource] at the head.
+// Prepend adds a new revision before the [*Source] at the head.
 // Returns the newly added revision.
-func (t *Revision) Prepend(li NamedLineSource) *Revision {
+func (t *Revision) Prepend(s *Source) *Revision {
 	rev := &Revision{
 		next: t,
-		head: li,
+		head: s,
 	}
 	t.prev = rev
 

@@ -2,7 +2,6 @@ package yamlviewport
 
 import (
 	"cmp"
-	"iter"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -12,7 +11,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"jacobcolvin.com/niceyaml"
-	"jacobcolvin.com/niceyaml/line"
 	"jacobcolvin.com/niceyaml/position"
 	"jacobcolvin.com/niceyaml/style"
 )
@@ -49,19 +47,6 @@ type Printer interface {
 type Finder interface {
 	Load(lines niceyaml.LineIterator)
 	Find(search string) []position.Range
-}
-
-// Source provides access to YAML content as lines and runes with overlay support.
-//
-// See [niceyaml.Source] for an implementation.
-type Source interface {
-	Name() string
-	AllLines(spans ...position.Span) iter.Seq2[position.Position, line.Line]
-	AllRunes(ranges ...position.Range) iter.Seq2[position.Position, rune]
-	IsEmpty() bool
-	Len() int
-	AddOverlay(s style.Style, ranges ...position.Range)
-	ClearOverlays()
 }
 
 // DiffMode specifies how diffs are computed between revisions.
@@ -179,7 +164,7 @@ type Model struct {
 	searchMatches  []position.Range
 	revision       *niceyaml.Revision
 	diffResult     *niceyaml.DiffResult // Cached diff between base and current revision.
-	lines          Source
+	lines          *niceyaml.Source
 	renderedLines  []string
 	xOffset        int
 	horizontalStep int
@@ -286,18 +271,18 @@ func (m *Model) SetPrinter(p Printer) {
 //
 // This is a convenience method equivalent to [Model.ClearRevisions] followed by
 // [Model.AddRevision].
-func (m *Model) SetTokens(lines niceyaml.NamedLineSource) {
+func (m *Model) SetTokens(s *niceyaml.Source) {
 	m.ClearRevisions()
-	m.AddRevision(lines)
+	m.AddRevision(s)
 }
 
 // AddRevision adds a new revision to the history.
 // After adding, the revision pointer moves to the newly added revision.
-func (m *Model) AddRevision(lines niceyaml.NamedLineSource) {
+func (m *Model) AddRevision(s *niceyaml.Source) {
 	if m.revision == nil {
-		m.revision = niceyaml.NewRevision(lines)
+		m.revision = niceyaml.NewRevision(s)
 	} else {
-		m.revision = m.revision.Tip().Append(lines)
+		m.revision = m.revision.Tip().Append(s)
 	}
 
 	m.rerender()
@@ -521,7 +506,7 @@ func (m *Model) rerender() {
 }
 
 // applySearchOverlays sets overlay highlights for all search matches.
-func (m *Model) applySearchOverlays(lines Source) {
+func (m *Model) applySearchOverlays(lines *niceyaml.Source) {
 	lines.ClearOverlays()
 
 	for i, match := range m.searchMatches {
@@ -534,7 +519,7 @@ func (m *Model) applySearchOverlays(lines Source) {
 }
 
 // updateSearchState updates the finder and search matches for the given lines.
-func (m *Model) updateSearchState(lines Source) {
+func (m *Model) updateSearchState(lines *niceyaml.Source) {
 	if m.searchTerm == "" {
 		m.searchMatches = nil
 
@@ -593,7 +578,7 @@ func (m *Model) getDiffBaseRevision() *niceyaml.Revision {
 //
 // The makeDiff func is called when a diff should be shown; if nil, uses
 // [niceyaml.Diff].
-func (m *Model) getDisplayLines(makeDiff func(base, current *niceyaml.Revision) Source) Source {
+func (m *Model) getDisplayLines(makeDiff func(base, current *niceyaml.Revision) *niceyaml.Source) *niceyaml.Source {
 	if m.revision == nil {
 		return nil
 	}
