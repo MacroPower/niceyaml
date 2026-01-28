@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"jacobcolvin.com/niceyaml/internal/diff"
+	"jacobcolvin.com/niceyaml/diff"
 	"jacobcolvin.com/niceyaml/line"
 	"jacobcolvin.com/niceyaml/position"
 )
@@ -16,72 +16,56 @@ type SourceGetter interface {
 	Source() NamedLineSource
 }
 
-// FullDiff represents a complete diff between two [SourceGetter]s.
+// Differ computes line differences using a configurable algorithm.
 //
-// Create instances with [NewFullDiff].
-type FullDiff struct {
-	a, b SourceGetter
+// Differ is not safe for concurrent use because the underlying algorithm
+// maintains reusable buffers. Create separate instances for concurrent
+// operations. The returned [*DiffResult] is safe for concurrent use.
+//
+// Create instances with [NewDiffer].
+type Differ struct {
+	algo diff.Algorithm
 }
 
-// NewFullDiff creates a new [*FullDiff].
-func NewFullDiff(a, b SourceGetter) *FullDiff {
-	return &FullDiff{a: a, b: b}
-}
-
-// Build returns a [*Source] representing the diff between the two
-// [SourceGetter]s.
+// DifferOption configures a [Differ].
 //
-// The returned [Source] contains merged tokens from both revisions: unchanged
-// lines use tokens from b, while changed lines include deleted tokens from a
-// followed by inserted tokens from b.
-//
-// [Source] contains flags for deleted/inserted lines.
-func (d *FullDiff) Build() *Source {
-	ops := lcsLineDiff(d.a.Source(), d.b.Source())
+// Available options:
+//   - [WithAlgorithm]
+type DifferOption func(*Differ)
 
-	return &Source{
-		name:  fmt.Sprintf("%s..%s", d.a.Source().Name(), d.b.Source().Name()),
-		lines: lineOps(ops).toLines(),
+// WithAlgorithm sets the diff algorithm.
+//
+// Default is [diff.Hirschberg].
+func WithAlgorithm(algo diff.Algorithm) DifferOption {
+	return func(d *Differ) {
+		d.algo = algo
 	}
 }
 
-// SummaryDiff represents a summarized diff between two [SourceGetter]s.
+// NewDiffer creates a new [*Differ] with the given options.
 //
-// Create instances with [NewSummaryDiff].
-type SummaryDiff struct {
-	a, b    SourceGetter
-	context int
-}
-
-// NewSummaryDiff creates a new [*SummaryDiff] with the specified context lines.
-// A context of 0 shows only the changed lines.
-// Negative values are treated as 0.
-func NewSummaryDiff(a, b SourceGetter, context int) *SummaryDiff {
-	return &SummaryDiff{a: a, b: b, context: max(0, context)}
-}
-
-// Build returns a [*Source] and line spans for rendering a summarized diff.
-// The source contains all diff lines with flags for deleted/inserted lines.
-// Hunk headers are stored in [line.Annotation.Content] for each hunk's first line.
-//
-// Pass both to [Printer.Print] to render the summary:
-//
-//	printer.Print(source, spans...)
-func (d *SummaryDiff) Build() (*Source, position.Spans) {
-	ops := lcsLineDiff(d.a.Source(), d.b.Source())
-	name := fmt.Sprintf("%s..%s", d.a.Source().Name(), d.b.Source().Name())
-
-	if len(ops) == 0 {
-		return &Source{name: name}, nil
+// If no algorithm is specified, uses [diff.Hirschberg].
+func NewDiffer(opts ...DifferOption) *Differ {
+	d := &Differ{}
+	for _, opt := range opts {
+		opt(d)
 	}
 
-	hunkSpans := selectHunkSpans(ops, d.context)
-
-	if len(hunkSpans) == 0 {
-		return &Source{name: name}, nil
+	if d.algo == nil {
+		d.algo = diff.NewHirschberg()
 	}
 
-	lines := lineOps(ops).toLines()
+	return d
+}
+
+// Diff computes the difference between two sources.
+//
+// The result can be rendered multiple times with [DiffResult.Full] or
+// [DiffResult.Hunks].
+func (d *Differ) Diff(a, b SourceGetter) *DiffResult {
+	aSource := a.Source()
+	bSource := b.Source()
+	ops := d.computeOps(aSource, bSource)
 
 	// Precompute prefix sums for O(1) line number and count queries.
 	beforeSums := position.NewPrefixSums(len(ops), func(i int) int {
@@ -93,16 +77,132 @@ func (d *SummaryDiff) Build() (*Source, position.Spans) {
 		return d
 	})
 
+	return &DiffResult{
+		ops:        ops,
+		name:       fmt.Sprintf("%s..%s", aSource.Name(), bSource.Name()),
+		beforeSums: beforeSums,
+		afterSums:  afterSums,
+	}
+}
+
+// computeOps computes line operations using the configured algorithm.
+func (d *Differ) computeOps(before, after LineGetter) []lineOp {
+	beforeLines := before.Lines()
+	afterLines := after.Lines()
+
+	// Pre-compute content strings once to avoid repeated string building.
+	beforeContent := make([]string, len(beforeLines))
+	for i := range beforeLines {
+		beforeContent[i] = beforeLines[i].Content()
+	}
+
+	afterContent := make([]string, len(afterLines))
+	for i := range afterLines {
+		afterContent[i] = afterLines[i].Content()
+	}
+
+	// Initialize algorithm with input sizes for buffer preallocation.
+	d.algo.Init(len(beforeLines), len(afterLines))
+
+	// Compute diff using the configured algorithm.
+	diffOps := d.algo.Diff(beforeContent, afterContent)
+
+	// Convert to lineOps.
+	ops := make([]lineOp, 0, len(diffOps))
+
+	for _, op := range diffOps {
+		switch op.Kind {
+		case diff.OpEqual:
+			ops = append(ops, lineOp{kind: diff.OpEqual, line: afterLines[op.Index]})
+		case diff.OpDelete:
+			ops = append(ops, lineOp{kind: diff.OpDelete, line: beforeLines[op.Index]})
+		case diff.OpInsert:
+			ops = append(ops, lineOp{kind: diff.OpInsert, line: afterLines[op.Index]})
+		}
+	}
+
+	return ops
+}
+
+// DiffResult holds computed diff operations for rendering.
+//
+// Create instances with [Differ.Diff] or [Diff].
+//
+//nolint:govet // fieldalignment: acceptable for readability.
+type DiffResult struct {
+	ops        []lineOp
+	name       string
+	beforeSums *position.PrefixSums
+	afterSums  *position.PrefixSums
+}
+
+// Full returns a [*Source] representing the complete diff.
+//
+// The returned [Source] contains merged tokens from both revisions: unchanged
+// lines use tokens from the second source, while changed lines include deleted
+// tokens from the first source followed by inserted tokens from the second.
+//
+// [Source] contains flags for deleted/inserted lines.
+func (r *DiffResult) Full() *Source {
+	return &Source{
+		name:  r.name,
+		lines: lineOps(r.ops).toLines(),
+	}
+}
+
+// Hunks returns a [*Source] and line spans for rendering a summarized diff.
+// The context parameter specifies the number of unchanged lines to show around
+// each change. A context of 0 shows only the changed lines.
+// Negative values are treated as 0.
+//
+// The source contains all diff lines with flags for deleted/inserted lines.
+// Hunk headers are stored in [line.Annotation.Content] for each hunk's first line.
+//
+// Pass both to [Printer.Print] to render the hunks:
+//
+//	printer.Print(source, spans...)
+func (r *DiffResult) Hunks(context int) (*Source, position.Spans) {
+	context = max(0, context)
+
+	if len(r.ops) == 0 {
+		return &Source{name: r.name}, nil
+	}
+
+	hunkSpans := selectHunkSpans(r.ops, context)
+
+	if len(hunkSpans) == 0 {
+		return &Source{name: r.name}, nil
+	}
+
+	lines := lineOps(r.ops).toLines()
+
 	// Add hunk header annotations to first line of each hunk.
 	for _, span := range hunkSpans {
-		hunkHeader := formatHunkHeader(span, beforeSums, afterSums)
+		hunkHeader := formatHunkHeader(span, r.beforeSums, r.afterSums)
 		lines[span.Start].AddAnnotation(line.Annotation{
 			Content:  hunkHeader,
 			Position: line.Above,
 		})
 	}
 
-	return &Source{name: name, lines: lines}, hunkSpans
+	return &Source{name: r.name, lines: lines}, hunkSpans
+}
+
+// IsEmpty reports whether the diff contains no lines.
+func (r *DiffResult) IsEmpty() bool {
+	return len(r.ops) == 0
+}
+
+// Name returns the diff name in "a..b" format.
+func (r *DiffResult) Name() string {
+	return r.name
+}
+
+// Diff computes the difference between two sources using the default algorithm.
+//
+// This is a convenience function equivalent to NewDiffer().Diff(a, b).
+func Diff(a, b SourceGetter) *DiffResult {
+	return NewDiffer().Diff(a, b)
 }
 
 // lineOp represents a line in the full diff output.
@@ -139,44 +239,6 @@ func (ops lineOps) toLines() line.Lines {
 	}
 
 	return lines
-}
-
-// lcsLineDiff computes line operations using Hirschberg's space-optimized
-// LCS algorithm.
-func lcsLineDiff(before, after LineGetter) []lineOp {
-	beforeLines := before.Lines()
-	afterLines := after.Lines()
-
-	// Pre-compute content strings once to avoid repeated string building.
-	beforeContent := make([]string, len(beforeLines))
-	for i := range beforeLines {
-		beforeContent[i] = beforeLines[i].Content()
-	}
-
-	afterContent := make([]string, len(afterLines))
-	for i := range afterLines {
-		afterContent[i] = afterLines[i].Content()
-	}
-
-	// Compute diff using Hirschberg's space-optimized algorithm.
-	h := diff.NewHirschberg(min(len(beforeLines), len(afterLines)) + 1)
-	diffOps := h.Compute(beforeContent, afterContent)
-
-	// Convert to lineOps.
-	ops := make([]lineOp, 0, len(diffOps))
-
-	for _, op := range diffOps {
-		switch op.Kind {
-		case diff.OpEqual:
-			ops = append(ops, lineOp{kind: diff.OpEqual, line: afterLines[op.Index]})
-		case diff.OpDelete:
-			ops = append(ops, lineOp{kind: diff.OpDelete, line: beforeLines[op.Index]})
-		case diff.OpInsert:
-			ops = append(ops, lineOp{kind: diff.OpInsert, line: afterLines[op.Index]})
-		}
-	}
-
-	return ops
 }
 
 // formatHunkHeader formats a unified diff hunk header like "@@ -1,3 +1,4 @@".

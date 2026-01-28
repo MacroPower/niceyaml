@@ -1,7 +1,6 @@
 package diff
 
-// Hirschberg computes diff operations using Hirschberg's space-optimized
-// LCS algorithm.
+// Hirschberg implements [Algorithm] using a space-optimized LCS algorithm.
 //
 // Time complexity: O(m*n) where m and n are the sequence lengths.
 // Space complexity: O(min(m,n)) using two-row dynamic programming.
@@ -19,19 +18,37 @@ type Hirschberg struct {
 	ops []Op
 }
 
-// NewHirschberg creates a new [*Hirschberg] with preallocated buffers.
-// The capacity should be at least min(m,n)+1 for the sequences to be compared.
-func NewHirschberg(capacity int) *Hirschberg {
-	return &Hirschberg{
-		row0:      make([]int, capacity),
-		row1:      make([]int, capacity),
-		fwdResult: make([]int, capacity),
-		bwdResult: make([]int, capacity),
-		ops:       make([]Op, 0, capacity*2),
+// NewHirschberg creates a new [*Hirschberg].
+//
+// Use [Hirschberg.Init] to preallocate buffers before calling [Hirschberg.Diff],
+// or let [Hirschberg.Diff] allocate as needed.
+func NewHirschberg() *Hirschberg {
+	return &Hirschberg{}
+}
+
+// Init prepares buffers for inputs of the given sizes.
+//
+// Hirschberg uses min(beforeLen, afterLen) for its row buffers. Calling Init
+// is optional but improves performance when the input sizes are known in
+// advance.
+func (h *Hirschberg) Init(beforeLen, afterLen int) {
+	capacity := min(beforeLen, afterLen) + 1
+	if capacity > cap(h.row0) {
+		h.row0 = make([]int, capacity)
+		h.row1 = make([]int, capacity)
+		h.fwdResult = make([]int, capacity)
+		h.bwdResult = make([]int, capacity)
+	}
+
+	// Preallocate ops: worst case is all deletes + all inserts.
+	opsCapacity := beforeLen + afterLen
+	if opsCapacity > cap(h.ops) {
+		h.ops = make([]Op, 0, opsCapacity)
 	}
 }
 
-// Compute compares two string slices and returns a sequence of diff operations.
+// Diff returns operations transforming before into after.
+//
 // Each [Op] contains an [OpKind] and an index into the appropriate sequence:
 //
 //   - [OpEqual]: The element exists in both sequences (index refers to after)
@@ -40,7 +57,7 @@ func NewHirschberg(capacity int) *Hirschberg {
 //
 // Each [OpKind] can be converted to a [line.Flag] using [OpKind.Flag] for
 // integration with the line package.
-func (h *Hirschberg) Compute(before, after []string) []Op {
+func (h *Hirschberg) Diff(before, after []string) []Op {
 	h.ops = h.ops[:0]
 
 	// Ensure buffers are large enough.

@@ -3,13 +3,14 @@
 // When rendering YAML diffs, the system needs to determine which lines were
 // added, removed, or unchanged between two versions.
 //
-// This package provides an efficient algorithm for computing those differences
-// while minimizing memory allocations during repeated comparisons.
+// This package provides the [Algorithm] interface and a default implementation
+// using Hirschberg's algorithm for computing differences while minimizing memory
+// allocations during repeated comparisons.
 //
-// # Algorithm
+// # Algorithm Interface
 //
-// The package uses Hirschberg's algorithm, which finds the longest common
-// subsequence (LCS) between two sequences.
+// The [Algorithm] interface allows pluggable diff algorithms. [Hirschberg] is
+// the default implementation, using a space-efficient LCS algorithm.
 //
 // Unlike the standard dynamic programming approach that requires O(m*n) space,
 // Hirschberg's divide-and-conquer strategy reduces space complexity to
@@ -24,8 +25,9 @@
 // The instance maintains internal buffers that grow as needed but are never
 // shrunk, avoiding repeated allocations:
 //
-//	h := diff.NewHirschberg(100) // Initial capacity hint.
-//	ops := h.Compute(before, after)
+//	h := diff.NewHirschberg()
+//	h.Init(len(before), len(after)) // Optional: preallocate buffers.
+//	ops := h.Diff(before, after)
 //
 // Each [Op] in the result describes one edit operation with an index into the
 // appropriate input slice.

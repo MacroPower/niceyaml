@@ -5,10 +5,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"jacobcolvin.com/niceyaml/internal/diff"
+	"jacobcolvin.com/niceyaml/diff"
 )
 
-func TestHirschberg_Compute(t *testing.T) {
+func TestHirschberg_Diff(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
@@ -19,7 +19,7 @@ func TestHirschberg_Compute(t *testing.T) {
 		"empty_both": {
 			before: []string{},
 			after:  []string{},
-			want:   []diff.Op{},
+			want:   nil,
 		},
 		"empty_before": {
 			before: []string{},
@@ -163,8 +163,10 @@ func TestHirschberg_Compute(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			h := diff.NewHirschberg(max(len(tc.before), len(tc.after)) + 1)
-			got := h.Compute(tc.before, tc.after)
+			h := diff.NewHirschberg()
+			h.Init(len(tc.before), len(tc.after))
+
+			got := h.Diff(tc.before, tc.after)
 
 			assert.Equal(t, tc.want, got)
 		})
@@ -174,10 +176,10 @@ func TestHirschberg_Compute(t *testing.T) {
 func TestHirschberg_Reuse(t *testing.T) {
 	t.Parallel()
 
-	h := diff.NewHirschberg(10)
+	h := diff.NewHirschberg()
 
 	// First computation.
-	ops1 := h.Compute([]string{"a", "b"}, []string{"a", "c"})
+	ops1 := h.Diff([]string{"a", "b"}, []string{"a", "c"})
 	assert.Equal(t, []diff.Op{
 		{Kind: diff.OpEqual, Index: 0},
 		{Kind: diff.OpDelete, Index: 1},
@@ -185,7 +187,7 @@ func TestHirschberg_Reuse(t *testing.T) {
 	}, ops1)
 
 	// Second computation should work correctly with reused instance.
-	ops2 := h.Compute([]string{"x", "y", "z"}, []string{"x", "z"})
+	ops2 := h.Diff([]string{"x", "y", "z"}, []string{"x", "z"})
 	assert.Equal(t, []diff.Op{
 		{Kind: diff.OpEqual, Index: 0},
 		{Kind: diff.OpDelete, Index: 1},
@@ -193,16 +195,16 @@ func TestHirschberg_Reuse(t *testing.T) {
 	}, ops2)
 }
 
-func TestHirschberg_LargerCapacity(t *testing.T) {
+func TestHirschberg_BufferGrowth(t *testing.T) {
 	t.Parallel()
 
-	// Test that larger inputs work when initial capacity is small.
-	h := diff.NewHirschberg(2)
+	// Test that larger inputs work when buffers are initially empty.
+	h := diff.NewHirschberg()
 
 	before := []string{"a", "b", "c", "d", "e"}
 	after := []string{"a", "x", "c", "y", "e"}
 
-	got := h.Compute(before, after)
+	got := h.Diff(before, after)
 
 	want := []diff.Op{
 		{Kind: diff.OpEqual, Index: 0},

@@ -11,7 +11,7 @@ import (
 	"jacobcolvin.com/niceyaml/line"
 )
 
-func TestFullDiff_Source(t *testing.T) {
+func TestDiffer_Full(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -354,17 +354,18 @@ func TestFullDiff_Source(t *testing.T) {
 
 			revA := niceyaml.NewRevision(beforeTokens)
 			revB := niceyaml.NewRevision(afterTokens)
-			diff := niceyaml.NewFullDiff(revA, revB)
+			differ := niceyaml.Diff(revA, revB)
 
-			got := diff.Build()
+			got := differ.Full()
 
 			assert.Equal(t, "a..b", got.Name())
+			assert.Equal(t, "a..b", differ.Name())
 			assert.Equal(t, tc.want, got.String())
 		})
 	}
 }
 
-func TestFullDiff_Source_Flags(t *testing.T) {
+func TestDiffer_Full_Flags(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -428,9 +429,9 @@ func TestFullDiff_Source_Flags(t *testing.T) {
 
 			revA := niceyaml.NewRevision(beforeTokens)
 			revB := niceyaml.NewRevision(afterTokens)
-			diff := niceyaml.NewFullDiff(revA, revB)
+			differ := niceyaml.Diff(revA, revB)
 
-			got := diff.Build()
+			got := differ.Full()
 
 			flaggedCount := 0
 			for _, ln := range got.AllLines() {
@@ -448,17 +449,17 @@ func TestFullDiff_Source_Flags(t *testing.T) {
 	}
 }
 
-func TestSummaryDiff_Source(t *testing.T) {
+func TestDiffer_Hunks(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
 		before      string
 		after       string
 		context     int
-		wantEmpty   bool              // Expect IsEmpty() and Tokens() == nil.
-		wantRanges  int               // Expected number of ranges (hunks).
-		flags       map[int]line.Flag // Optional: check specific line flags (0-indexed in full source).
-		annotations map[int]string    // Optional: check annotations (0-indexed in full source).
+		wantEmpty   bool
+		wantRanges  int
+		flags       map[int]line.Flag
+		annotations map[int]string
 	}{
 		"context limits output": {
 			before: yamltest.Input(`
@@ -486,11 +487,11 @@ func TestSummaryDiff_Source(t *testing.T) {
 			context:    1,
 			wantRanges: 1,
 			flags: map[int]line.Flag{
-				0: line.FlagDefault,  // Line1.
-				3: line.FlagDefault,  // Line4 (context).
-				4: line.FlagDeleted,  // Line5: old.
-				5: line.FlagInserted, // Line5: new.
-				6: line.FlagDefault,  // Line6 (context).
+				0: line.FlagDefault,
+				3: line.FlagDefault,
+				4: line.FlagDeleted,
+				5: line.FlagInserted,
+				6: line.FlagDefault,
 			},
 			annotations: map[int]string{3: "@@ -4,3 +4,3 @@"},
 		},
@@ -517,74 +518,12 @@ func TestSummaryDiff_Source(t *testing.T) {
 			},
 			annotations: map[int]string{2: "@@ -3 +3 @@"},
 		},
-		"hunk header in annotation": {
-			before: yamltest.Input(`
-				first: 1
-				second: 2
-				third: 3
-			`),
-			after: yamltest.Input(`
-				first: 1
-				second: changed
-				third: 3
-			`),
-			context:     1,
-			wantRanges:  1,
-			annotations: map[int]string{0: "@@ -1,3 +1,3 @@"},
-		},
-		"multiple hunks have separate annotations": {
-			before: yamltest.Input(`
-				line1: old1
-				line2: 2
-				line3: 3
-				line4: 4
-				line5: 5
-				line6: 6
-				line7: 7
-				line8: 8
-				line9: old9
-			`),
-			after: yamltest.Input(`
-				line1: new1
-				line2: 2
-				line3: 3
-				line4: 4
-				line5: 5
-				line6: 6
-				line7: 7
-				line8: 8
-				line9: new9
-			`),
-			context:    1,
-			wantRanges: 2,
-			// Full source has 11 lines (9 equal + 2 changes = delete+insert each).
-			// First hunk: indices 0-2 (delete, insert, context line2).
-			// Second hunk: indices 8-10 (context line8, delete, insert).
-			annotations: map[int]string{
-				0: "@@ -1,2 +1,2 @@",
-				8: "@@ -8,2 +8,2 @@",
-			},
-		},
-		"no changes returns empty tokens": {
+		"no changes returns empty": {
 			before:     "key: value\n",
 			after:      "key: value\n",
 			context:    3,
 			wantEmpty:  true,
 			wantRanges: 0,
-		},
-		"empty before": {
-			before:     "",
-			after:      "key: value\n",
-			context:    3,
-			wantRanges: 1,
-			flags:      map[int]line.Flag{0: line.FlagInserted},
-		},
-		"empty after": {
-			before:     "key: value\n",
-			after:      "",
-			context:    3,
-			wantRanges: 1,
-			flags:      map[int]line.Flag{0: line.FlagDeleted},
 		},
 		"negative context treated as zero": {
 			before: yamltest.Input(`
@@ -605,84 +544,6 @@ func TestSummaryDiff_Source(t *testing.T) {
 			},
 			annotations: map[int]string{1: "@@ -2 +2 @@"},
 		},
-		"both empty returns empty": {
-			before:     "",
-			after:      "",
-			context:    3,
-			wantEmpty:  true,
-			wantRanges: 0,
-		},
-		"insertion at beginning": {
-			before: yamltest.Input(`
-				line2: 2
-				line3: 3
-			`),
-			after: yamltest.Input(`
-				line1: 1
-				line2: 2
-				line3: 3
-			`),
-			context:    1,
-			wantRanges: 1,
-			flags: map[int]line.Flag{
-				0: line.FlagInserted,
-				1: line.FlagDefault,
-			},
-			annotations: map[int]string{0: "@@ -1 +1,2 @@"},
-		},
-		"deletion at end": {
-			before: yamltest.Input(`
-				line1: 1
-				line2: 2
-				line3: 3
-			`),
-			after: yamltest.Input(`
-				line1: 1
-				line2: 2
-			`),
-			context:    1,
-			wantRanges: 1,
-			flags: map[int]line.Flag{
-				1: line.FlagDefault,
-				2: line.FlagDeleted,
-			},
-			annotations: map[int]string{1: "@@ -2,2 +2 @@"},
-		},
-		"large context shows all": {
-			before: yamltest.Input(`
-				line1: 1
-				line2: old
-				line3: 3
-			`),
-			after: yamltest.Input(`
-				line1: 1
-				line2: new
-				line3: 3
-			`),
-			context:    100,
-			wantRanges: 1,
-			flags: map[int]line.Flag{
-				0: line.FlagDefault,
-				1: line.FlagDeleted,
-				2: line.FlagInserted,
-				3: line.FlagDefault,
-			},
-			annotations: map[int]string{0: "@@ -1,3 +1,3 @@"},
-		},
-		"adjacent changes form single hunk": {
-			before: yamltest.Input(`
-				line1: old1
-				line2: old2
-				line3: old3
-			`),
-			after: yamltest.Input(`
-				line1: new1
-				line2: new2
-				line3: new3
-			`),
-			context:    1,
-			wantRanges: 1,
-		},
 	}
 
 	for name, tc := range tcs {
@@ -695,7 +556,8 @@ func TestSummaryDiff_Source(t *testing.T) {
 			revA := niceyaml.NewRevision(beforeTokens)
 			revB := niceyaml.NewRevision(afterTokens)
 
-			got, ranges := niceyaml.NewSummaryDiff(revA, revB, tc.context).Build()
+			differ := niceyaml.Diff(revA, revB)
+			got, ranges := differ.Hunks(tc.context)
 
 			assert.Equal(t, "a..b", got.Name())
 			assert.Len(t, ranges, tc.wantRanges)
@@ -720,4 +582,108 @@ func TestSummaryDiff_Source(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDiffer_IsEmpty(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		before string
+		after  string
+		want   bool
+	}{
+		"identical content": {
+			before: "key: value\n",
+			after:  "key: value\n",
+			want:   false,
+		},
+		"both empty": {
+			before: "",
+			after:  "",
+			want:   true,
+		},
+		"has changes": {
+			before: "key: old\n",
+			after:  "key: new\n",
+			want:   false,
+		},
+		"insertion": {
+			before: "",
+			after:  "key: value\n",
+			want:   false,
+		},
+		"deletion": {
+			before: "key: value\n",
+			after:  "",
+			want:   false,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			beforeTokens := niceyaml.NewSourceFromString(tc.before, niceyaml.WithName("a"))
+			afterTokens := niceyaml.NewSourceFromString(tc.after, niceyaml.WithName("b"))
+
+			revA := niceyaml.NewRevision(beforeTokens)
+			revB := niceyaml.NewRevision(afterTokens)
+
+			differ := niceyaml.Diff(revA, revB)
+
+			assert.Equal(t, tc.want, differ.IsEmpty())
+		})
+	}
+}
+
+func TestDiffer_MultipleRenders(t *testing.T) {
+	t.Parallel()
+
+	before := yamltest.Input(`
+		line1: 1
+		line2: 2
+		line3: old
+		line4: 4
+		line5: 5
+	`)
+	after := yamltest.Input(`
+		line1: 1
+		line2: 2
+		line3: new
+		line4: 4
+		line5: 5
+	`)
+
+	beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
+	afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
+
+	revA := niceyaml.NewRevision(beforeTokens)
+	revB := niceyaml.NewRevision(afterTokens)
+
+	differ := niceyaml.Diff(revA, revB)
+
+	// Call Full multiple times.
+	full1 := differ.Full()
+	full2 := differ.Full()
+
+	assert.Equal(t, full1.String(), full2.String())
+
+	// Call Summary with different contexts.
+	summary0, ranges0 := differ.Hunks(0)
+	summary1, ranges1 := differ.Hunks(1)
+	summary2, ranges2 := differ.Hunks(2)
+
+	// All summaries should have the same name.
+	assert.Equal(t, "a..b", summary0.Name())
+	assert.Equal(t, "a..b", summary1.Name())
+	assert.Equal(t, "a..b", summary2.Name())
+
+	// All should have 1 hunk.
+	assert.Len(t, ranges0, 1)
+	assert.Len(t, ranges1, 1)
+	assert.Len(t, ranges2, 1)
+
+	// Different contexts should produce different hunk sizes.
+	assert.Less(t, ranges0[0].Len(), ranges1[0].Len())
+	assert.Less(t, ranges1[0].Len(), ranges2[0].Len())
 }

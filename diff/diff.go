@@ -2,6 +2,20 @@ package diff
 
 import "jacobcolvin.com/niceyaml/line"
 
+// Algorithm computes a sequence of operations to transform before into after.
+//
+// See [Hirschberg] for the default implementation.
+type Algorithm interface {
+	// Init prepares the algorithm for inputs of the given sizes.
+	// Called before each Diff to allow buffer preallocation.
+	// Algorithms may use beforeLen, afterLen, or both depending on their needs.
+	Init(beforeLen, afterLen int)
+
+	// Diff returns operations transforming before into after.
+	// Operations reference indices in the original slices.
+	Diff(before, after []string) []Op
+}
+
 // OpKind represents the kind of diff operation.
 type OpKind int
 

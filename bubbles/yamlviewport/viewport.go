@@ -166,6 +166,7 @@ type Model struct {
 	finder         Finder
 	searchMatches  []position.Range
 	revision       *niceyaml.Revision
+	diffResult     *niceyaml.DiffResult // Cached diff between base and current revision.
 	lines          Source
 	renderedLines  []string
 	xOffset        int
@@ -442,6 +443,8 @@ func (m *Model) seekRevision(delta int) {
 // rerender renders the tokens using the [Printer] with current search
 // highlights.
 func (m *Model) rerender() {
+	m.diffResult = nil // Invalidate cached diff result.
+
 	lines := m.getDisplayLines(nil)
 	if lines == nil {
 		m.renderedLines = nil
@@ -540,7 +543,7 @@ func (m *Model) getDiffBaseRevision() *niceyaml.Revision {
 // [DiffMode].
 //
 // The makeDiff func is called when a diff should be shown; if nil, uses
-// [niceyaml.NewFullDiff].
+// [niceyaml.Diff].
 func (m *Model) getDisplayLines(makeDiff func(base, current *niceyaml.Revision) Source) Source {
 	if m.revision == nil {
 		return nil
@@ -560,8 +563,17 @@ func (m *Model) getDisplayLines(makeDiff func(base, current *niceyaml.Revision) 
 			return makeDiff(base, m.revision)
 		}
 
-		return niceyaml.NewFullDiff(base, m.revision).Build()
+		return m.getDiffResult().Full()
 	}
+}
+
+// getDiffResult returns the cached [niceyaml.DiffResult], computing it if nil.
+func (m *Model) getDiffResult() *niceyaml.DiffResult {
+	if m.diffResult == nil {
+		m.diffResult = niceyaml.Diff(m.getDiffBaseRevision(), m.revision)
+	}
+
+	return m.diffResult
 }
 
 // AtTop reports whether the viewport is scrolled to the top.
@@ -1034,7 +1046,7 @@ func (m *Model) getSummaryDiffContent(context int) string {
 			return m.printer.Print(m.revision.Source())
 		}
 
-		source, ranges := niceyaml.NewSummaryDiff(base, m.revision, context).Build()
+		source, ranges := m.getDiffResult().Hunks(context)
 
 		return m.printer.Print(source, ranges...)
 	}

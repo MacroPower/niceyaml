@@ -82,12 +82,20 @@
 //
 // [Revision] chains document versions in a doubly-linked list.
 //
-// [FullDiff] and [SummaryDiff] compute line differences using Hirschberg's LCS
-// algorithm:
+// [Differ] computes line differences using the [diff] package.
+// The default [diff.Hirschberg] algorithm is space-efficient for large files:
 //
 //	revs := niceyaml.NewRevision(original).Append(modified)
-//	source, spans := niceyaml.NewSummaryDiff(revs.Origin(), revs.Tip(), 3).Build()
+//	result := niceyaml.Diff(revs.Origin(), revs.Tip())
+//	printer := niceyaml.NewPrinter()
+//	fmt.Println(printer.Print(result.Full()))
+//	source, spans := result.Hunks(3)
 //	fmt.Println(printer.Print(source, spans...))
+//
+// Custom algorithms implement [diff.Algorithm]. For reusable differ instances:
+//
+//	differ := niceyaml.NewDiffer(niceyaml.WithAlgorithm(myAlgo))
+//	result := differ.Diff(revA, revB)
 //
 // The diff output uses [line.Flag] to mark inserted/deleted lines and
 // [line.Annotation] for unified diff hunk headers.

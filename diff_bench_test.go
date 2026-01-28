@@ -32,8 +32,7 @@ func BenchmarkFullDiffSource(b *testing.B) {
 			b.ResetTimer()
 
 			for b.Loop() {
-				diff := niceyaml.NewFullDiff(revA, revB)
-				_ = diff.Build()
+				_ = niceyaml.Diff(revA, revB).Full()
 			}
 		})
 
@@ -52,8 +51,7 @@ func BenchmarkFullDiffSource(b *testing.B) {
 			b.ResetTimer()
 
 			for b.Loop() {
-				diff := niceyaml.NewFullDiff(revA, revB)
-				_ = diff.Build()
+				_ = niceyaml.Diff(revA, revB).Full()
 			}
 		})
 
@@ -76,14 +74,13 @@ func BenchmarkFullDiffSource(b *testing.B) {
 			b.ResetTimer()
 
 			for b.Loop() {
-				diff := niceyaml.NewFullDiff(revA, revB)
-				_ = diff.Build()
+				_ = niceyaml.Diff(revA, revB).Full()
 			}
 		})
 	}
 }
 
-func BenchmarkSummaryDiffSource(b *testing.B) {
+func BenchmarkHunksDiffSource(b *testing.B) {
 	sizes := []struct {
 		name  string
 		lines int
@@ -119,7 +116,7 @@ func BenchmarkSummaryDiffSource(b *testing.B) {
 				b.ReportAllocs()
 
 				for b.Loop() {
-					_, _ = niceyaml.NewSummaryDiff(revA, revB, ctx).Build()
+					_, _ = niceyaml.Diff(revA, revB).Hunks(ctx)
 				}
 			})
 		}
@@ -156,8 +153,7 @@ func BenchmarkFullDiffSource_WorstCase(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				diff := niceyaml.NewFullDiff(revA, revB)
-				_ = diff.Build()
+				_ = niceyaml.Diff(revA, revB).Full()
 			}
 		})
 	}
@@ -188,8 +184,7 @@ func BenchmarkFullDiffSource_InsertAtEnd(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				diff := niceyaml.NewFullDiff(revA, revB)
-				_ = diff.Build()
+				_ = niceyaml.Diff(revA, revB).Full()
 			}
 		})
 	}

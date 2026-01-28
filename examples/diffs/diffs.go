@@ -28,16 +28,14 @@ func main() {
 	// Append a new revision.
 	rev = rev.Append(after)
 
-	// Create a full diff between the two revisions.
-	diff := niceyaml.NewFullDiff(rev.Origin(), rev.Tip())
+	// Create a diff result between the two revisions.
+	result := niceyaml.Diff(rev.Origin(), rev.Tip())
 
 	fmt.Println("\nPrint the full diff:")
-	fmt.Println(printer.Print(diff.Build()))
-
-	// Create a summary diff between the two revisions.
-	linesOfContext := 2
-	source, ranges := niceyaml.NewSummaryDiff(rev.Origin(), rev.Tip(), linesOfContext).Build()
+	fmt.Println(printer.Print(result.Full()))
 
 	fmt.Println("\nPrint the summary diff:")
+
+	source, ranges := result.Hunks(2)
 	fmt.Println(printer.Print(source, ranges...))
 }
