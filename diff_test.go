@@ -636,6 +636,59 @@ func TestDiffer_IsEmpty(t *testing.T) {
 	}
 }
 
+func TestDiffResult_Stats(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		before      string
+		after       string
+		wantAdded   int
+		wantRemoved int
+	}{
+		"no changes": {
+			before:      "a: 1\n",
+			after:       "a: 1\n",
+			wantAdded:   0,
+			wantRemoved: 0,
+		},
+		"additions only": {
+			before:      "a: 1\n",
+			after:       "a: 1\nb: 2\n",
+			wantAdded:   1,
+			wantRemoved: 0,
+		},
+		"removals only": {
+			before:      "a: 1\nb: 2\n",
+			after:       "a: 1\n",
+			wantAdded:   0,
+			wantRemoved: 1,
+		},
+		"mixed changes": {
+			before:      "a: 1\nb: 2\n",
+			after:       "a: 1\nc: 3\n",
+			wantAdded:   1,
+			wantRemoved: 1,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			beforeSrc := niceyaml.NewSourceFromString(tt.before, niceyaml.WithName("a"))
+			afterSrc := niceyaml.NewSourceFromString(tt.after, niceyaml.WithName("b"))
+
+			result := niceyaml.Diff(
+				niceyaml.NewRevision(beforeSrc),
+				niceyaml.NewRevision(afterSrc),
+			)
+			added, removed := result.Stats()
+			assert.Equal(t, tt.wantAdded, added, "added count")
+			assert.Equal(t, tt.wantRemoved, removed, "removed count")
+		})
+	}
+}
+
 func TestDiffer_MultipleRenders(t *testing.T) {
 	t.Parallel()
 

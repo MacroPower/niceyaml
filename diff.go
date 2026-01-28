@@ -188,6 +188,24 @@ func (r *DiffResult) Hunks(context int) (*Source, position.Spans) {
 	return &Source{name: r.name, lines: lines}, hunkSpans
 }
 
+// Stats returns the number of added and removed lines in the diff.
+func (r *DiffResult) Stats() (int, int) {
+	var added, removed int
+
+	for _, op := range r.ops {
+		switch op.kind {
+		case diff.OpInsert:
+			added++
+		case diff.OpDelete:
+			removed++
+		case diff.OpEqual:
+			// No-op: equal lines don't contribute to stats counts.
+		}
+	}
+
+	return added, removed
+}
+
 // IsEmpty reports whether the diff contains no lines.
 func (r *DiffResult) IsEmpty() bool {
 	return len(r.ops) == 0
