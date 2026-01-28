@@ -52,7 +52,7 @@ func (p Position) String() string {
 	return fmt.Sprintf("%d:%d", p.Line+1, p.Col+1)
 }
 
-// Range represents a half-open range [Start, End) between two [Position]s.
+// Range represents a half-open range [Start, End) between two [Position] values.
 // Create instances with [NewRange].
 type Range struct {
 	Start, End Position
@@ -155,7 +155,7 @@ func (s Span) String() string {
 	return fmt.Sprintf("%d-%d", s.Start, s.End)
 }
 
-// Spans represents a slice of [Span]s with chainable transformation methods.
+// Spans represents a slice of [Span] values with chainable transformation methods.
 type Spans []Span
 
 // Expand returns new spans with each span expanded by amount on both sides.
@@ -192,7 +192,7 @@ func (s Spans) Clamp(lower, upper int) Spans {
 	return result
 }
 
-// Ranges represents a slice of [Range]s.
+// Ranges represents a slice of [Range] values.
 type Ranges []Range
 
 // UniqueValues returns all unique [Range] values in the collection,
@@ -215,7 +215,7 @@ func (rs Ranges) UniqueValues() []Range {
 	return result
 }
 
-// LineIndices returns all line indices covered by all [Range]s.
+// LineIndices returns all line indices covered by the [Ranges].
 // For multi-line ranges, each line within the range is included.
 // Duplicate line indices are returned if covered by multiple ranges.
 func (rs Ranges) LineIndices() []int {
@@ -233,7 +233,7 @@ func (rs Ranges) LineIndices() []int {
 	return result
 }
 
-// String returns all [Range]s as a comma-separated list.
+// String returns all [Range] values as a comma-separated list.
 func (rs Ranges) String() string {
 	if len(rs) == 0 {
 		return ""
@@ -251,8 +251,8 @@ func (rs Ranges) String() string {
 	return b.String()
 }
 
-// GroupIndices groups sorted indices into [Span]s where indices within context
-// distance are merged.
+// GroupIndices groups sorted indices into [Span] values where indices within
+// context distance are merged.
 //
 // Uses threshold = 2*context + 1 which ensures indices merge when their context
 // windows would overlap or be adjacent.

@@ -96,8 +96,8 @@ func WithParserOptions(opts ...parser.Option) SourceOption {
 	}
 }
 
-// WithErrorOptions is a [SourceOption] that sets the [ErrorOption]s used when
-// wrapping errors with [Source.WrapError].
+// WithErrorOptions is a [SourceOption] that sets the [ErrorOption] values used
+// when wrapping errors with [Source.WrapError].
 func WithErrorOptions(opts ...ErrorOption) SourceOption {
 	return func(s *Source) {
 		s.errorOpts = opts
@@ -193,7 +193,7 @@ func (s *Source) parse() (*ast.File, error) {
 }
 
 // WrapError wraps an error with additional context for [Error] types.
-// It applies any [ErrorOption]s provided and sets the source to this [Source].
+// It applies any [ErrorOption] values and sets the source to this [Source].
 // If the error isn't an [Error], it returns the original error unmodified.
 func (s *Source) WrapError(err error) error {
 	if err == nil {

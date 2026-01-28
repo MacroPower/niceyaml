@@ -65,7 +65,7 @@
 // [Overlays] define column ranges with associated styles, primarily for
 // highlighting.
 //
-// [Flag]s categorize lines for special handling (inserted, deleted,
+// [Flag] values categorize lines for special handling (inserted, deleted,
 // annotation-only).
 //
 // [Annotations] are positioned using [Above] or [Below] constants:
@@ -81,7 +81,7 @@
 //
 //	lines.AddOverlay(style.GenericError, errorRange)
 //
-// [Flag]s mark lines for diff rendering or annotation-only display:
+// [Flag] values mark lines for diff rendering or annotation-only display:
 //
 //	l.Flag = line.FlagInserted  // Show with "+" prefix.
 //	l.Flag = line.FlagDeleted   // Show with "-" prefix.

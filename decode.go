@@ -128,7 +128,8 @@ func (dd *DocumentDecoder) ValidateSchema(sv SchemaValidator) error {
 // ValidateSchemaContext decodes the document to [any] and validates it using sv
 // with [context.Context].
 //
-// Returns decoding errors or errors from [SchemaValidator.ValidateSchema].
+// Returns decoding errors or errors from the [SchemaValidator] ValidateSchema
+// method.
 func (dd *DocumentDecoder) ValidateSchemaContext(ctx context.Context, sv SchemaValidator) error {
 	var untypedData any
 

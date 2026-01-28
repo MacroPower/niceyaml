@@ -29,7 +29,7 @@ type SchemaCompiler interface {
 
 // SchemaError provides details about a schema validation failure.
 //
-// Implementations are optional; [Schema.Validate] may return any error.
+// Implementations are optional; validation may return any error.
 // When implemented, enables rich error details including path highlighting.
 //
 // The default implementation wraps [jsonschema.ValidationError].

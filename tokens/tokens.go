@@ -12,15 +12,15 @@ import (
 
 // Segment pairs an original source [*token.Token] with a segmented part token.
 //
-// Multiple [Segment]s may share the same [Segment.Source] pointer while having
-// distinct [Segment.Part]s.
+// Multiple [Segment] values may share the same [Segment.Source] pointer while
+// having distinct [Segment.Part] values.
 //
 // Create instances with [NewSegment].
 type Segment struct {
 	// Source is a reference to the original token from the lexer.
 	//
-	// Multiple [Segment]s within the same [Segments] may share the same Source
-	// pointer.
+	// Multiple [Segment] values within the same [Segments] may share the same
+	// Source pointer.
 	//
 	// Source must never be modified.
 	source *token.Token
@@ -98,7 +98,7 @@ func (s Segment) Part() *token.Token {
 // pointers represent the original tokens (deduplicated via
 // [Segments.SourceTokens]).
 //
-// For multiline tokens, multiple consecutive [Segment]s share the same
+// For multiline tokens, multiple consecutive [Segment] values share the same
 // [Segment.Source] pointer.
 type Segments []Segment
 
@@ -108,7 +108,7 @@ func (s Segments) Append(source, part *token.Token) Segments {
 }
 
 // Merge combines this [Segments] with others, preserving source pointer identity.
-// Returns a new [Segments] containing all [Segment]s in order.
+// Returns a new [Segments] containing all [Segment] values in order.
 func (s Segments) Merge(others ...Segments) Segments {
 	for _, o := range others {
 		s = append(s, o...)
@@ -137,9 +137,9 @@ func (s Segments) Clone() Segments {
 
 // SourceTokens returns clones of unique source tokens in order.
 //
-// This is the inverse of segmentation: [Segment]s that share a [Segment.Source]
-// pointer are deduplicated to return a clone of each original [*token.Token]
-// once.
+// This is the inverse of segmentation: [Segment] values that share a
+// [Segment.Source] pointer are deduplicated to return a clone of each original
+// [*token.Token] once.
 func (s Segments) SourceTokens() token.Tokens {
 	if len(s) == 0 {
 		return nil
@@ -225,12 +225,12 @@ func (s Segments) sourceTokenAtPtr(col int) *token.Token {
 	return nil
 }
 
-// Segments2 represents a slice of [Segments], i.e. 2-dimensional [Segment]s.
-// Each element typically represents one line's [Segments].
+// Segments2 represents a slice of [Segments], i.e. a 2-dimensional collection
+// of [Segment] values. Each element typically represents one line's [Segments].
 type Segments2 []Segments
 
-// TokenRangesAt returns [position.Ranges] for all [Segment]s that share the
-// same source token as the [Segment] at the given 0-indexed idx (typically
+// TokenRangesAt returns [position.Ranges] for all [Segment] values that share
+// the same source token as the [Segment] at the given 0-indexed idx (typically
 // line) and col.
 //
 // Positions are calculated based on [Segment] widths.

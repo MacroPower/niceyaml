@@ -242,7 +242,7 @@ func opKindDeltas(k diff.OpKind) (int, int) {
 	}
 }
 
-// lineOps is a slice of [lineOp]s.
+// lineOps is a slice of [lineOp] values.
 type lineOps []lineOp
 
 // toLines converts ops to [line.Lines] with appropriate flags set.

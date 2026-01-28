@@ -35,12 +35,12 @@ type Line struct {
 	number int
 }
 
-// AddAnnotation adds the given [Annotation]s to this [Line].
+// AddAnnotation adds the given [Annotation] values to this [Line].
 func (l *Line) AddAnnotation(ann ...Annotation) {
 	l.Annotations = append(l.Annotations, ann...)
 }
 
-// AddOverlay adds the given [Overlay]s to this [Line].
+// AddOverlay adds the given [Overlay] values to this [Line].
 func (l *Line) AddOverlay(o ...Overlay) {
 	l.Overlays = append(l.Overlays, o...)
 }
@@ -194,7 +194,9 @@ func (l Line) String() string {
 	return sb.String()
 }
 
-// Lines represents an ordered collection of [Line]s with associated metadata.
+// Lines represents an ordered collection of [Line] values with associated
+// metadata.
+//
 // Create instances with [NewLines].
 // Access individual lines via slice indexing.
 type Lines []Line
@@ -245,7 +247,7 @@ func NewLines(tks token.Tokens) Lines {
 	return b.Build()
 }
 
-// Tokens reconstructs the full [token.Tokens] stream from all [Line]s.
+// Tokens reconstructs the full [token.Tokens] stream from all [Line] values.
 //
 // For multiline tokens that were split across lines, this function recombines
 // them by returning clones of the original tokens (via [tokens.Segment.Source]).
@@ -338,8 +340,8 @@ func (ls Lines) ContentPositionRangesAt(pos position.Position) position.Ranges {
 	return lineSegs.ContentRangesAt(pos.Line, pos.Col)
 }
 
-// Content returns the combined content of all [Line]s as a string.
-// [Line]s are joined with newlines.
+// Content returns the combined content of all [Line] values as a string.
+// Lines are joined with newlines.
 func (ls Lines) Content() string {
 	if len(ls) == 0 {
 		return ""
@@ -357,7 +359,7 @@ func (ls Lines) Content() string {
 	return sb.String()
 }
 
-// String reconstructs all [Line]s as a string, including any annotations.
+// String reconstructs all [Line] values as a string, including any annotations.
 // This should generally only be used for debugging.
 func (ls Lines) String() string {
 	var sb strings.Builder
@@ -474,7 +476,7 @@ func (ls *Lines) addOverlayRange(kind style.Style, r position.Range) {
 	}
 }
 
-// ClearOverlays removes all [Overlay]s from all lines.
+// ClearOverlays removes all [Overlay] values from all lines.
 func (ls *Lines) ClearOverlays() {
 	for i := range *ls {
 		(*ls)[i].Overlays = nil

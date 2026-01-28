@@ -36,7 +36,7 @@ const (
 // It can be used to add comments or notes to the rendered output, without being
 // part of the main token stream.
 //
-// Add annotations using [Line.Annotate].
+// Add annotations using [Line.AddAnnotation].
 type Annotation struct {
 	Content  string
 	Position RelativePosition
@@ -54,7 +54,7 @@ func (a Annotation) String() string {
 	return padding + a.Content
 }
 
-// Annotations is a slice of [Annotation]s with helper methods.
+// Annotations is a slice of [Annotation] values with helper methods.
 type Annotations []Annotation
 
 // FilterPosition returns annotations matching the given [RelativePosition].
@@ -127,11 +127,11 @@ func (a Annotations) String() string {
 // Overlays apply visual styles (highlighting, coloring) to specific portions of
 // a line.
 //
-// Add overlays using [Line.Overlay] or [Lines.AddOverlay].
+// Add overlays using [Line.AddOverlay] or [Lines.AddOverlay].
 type Overlay struct {
 	Cols position.Span
 	Kind style.Style
 }
 
-// Overlays is a slice of [Overlay]s for a single [Line].
+// Overlays is a slice of [Overlay] values for a single [Line].
 type Overlays []Overlay

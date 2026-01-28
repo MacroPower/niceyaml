@@ -41,12 +41,12 @@ var (
 // original [Error] producers might lack, thus avoiding the need for producers
 // to take on any more responsibility than they need to.
 //
-// For example, a [SchemaValidator] that produces [Error]s will be path-aware,
-// and thus should use [WithPath], but it will likely not have access to the
-// [Source].
+// For example, a [SchemaValidator] that produces [Error] values will be
+// path-aware, and thus should use [WithPath], but it will likely not have
+// access to the [Source].
 //
 // For convenience, [Source.WrapError] can be used if you only need to add the
-// [Source] without any other [ErrorOption]s.
+// [Source] without any other [ErrorOption] values.
 //
 // Error implements the error interface. Use [Error.Unwrap] with [errors.Is]
 // and [errors.As] to inspect wrapped errors.
@@ -251,7 +251,7 @@ func (e *Error) hasResolvableNestedErrors() bool {
 	return false
 }
 
-// SetOption applies the provided [ErrorOption]s to the [Error].
+// SetOption applies the provided [ErrorOption] values to the [Error].
 func (e *Error) SetOption(opts ...ErrorOption) {
 	for _, opt := range opts {
 		opt(e)

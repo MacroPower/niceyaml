@@ -34,7 +34,7 @@
 //   - [DiffModeOrigin]: Compare with the first revision.
 //   - [DiffModeNone]: Show current revision without diff markers.
 //
-// Use [Model.ViewSummary] instead of [Model.View] to render a condensed diff
+// Set [ViewModeHunks] via [Model.SetViewMode] to render a condensed diff
 // showing only changed lines with surrounding context.
 //
 // # Search
@@ -57,7 +57,7 @@
 // Provide a custom [Finder] via [WithFinder] for specialized search behavior
 // (e.g., case-insensitive matching).
 //
-// Keybindings are fully configurable through [Model.KeyMap].
+// Keybindings are fully configurable through the [KeyMap] field on [Model].
 //
 // The viewport supports both keyboard navigation (vim-style by default) and
 // mouse wheel scrolling.

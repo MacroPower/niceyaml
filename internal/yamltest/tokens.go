@@ -32,7 +32,7 @@ func (e *TokenValidationError) Error() string {
 	return fmt.Sprintf("token %d %s: %v", e.Index, e.Which, e.Reason)
 }
 
-// Unwrap returns the underlying [TokenValidationError.Reason].
+// Unwrap returns the underlying Reason field.
 func (e *TokenValidationError) Unwrap() error {
 	return e.Reason
 }
@@ -66,7 +66,7 @@ func (d TokenDiff) String() string {
 //
 // Use [CompareTokenSlices] to create a TokensDiff.
 type TokensDiff struct {
-	Diffs         []TokenDiff // Per-token [TokenDiff]s (only populated if counts match).
+	Diffs         []TokenDiff // Per-token [TokenDiff] values (only populated if counts match).
 	WantCount     int         // Length of want slice.
 	GotCount      int         // Length of got slice.
 	CountMismatch bool        // True if slice lengths differ.

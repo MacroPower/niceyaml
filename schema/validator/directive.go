@@ -40,7 +40,7 @@ func ParseDirective(comment string) *Directive {
 	}
 }
 
-// DocumentDirectives maps document indices to their schema [Directive]s.
+// DocumentDirectives maps document indices to their schema [Directive] values.
 //
 // Create instances with [ParseDocumentDirectives].
 type DocumentDirectives map[int]*Directive
