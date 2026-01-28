@@ -209,9 +209,10 @@ func TestSource_AllRunes_LiteralBlock(t *testing.T) {
 	tks := lexer.Tokenize(input)
 	lines := niceyaml.NewSourceFromTokens(tks)
 
-	var runes []rune //nolint:prealloc // Size unknown from iterator.
-
-	var positions []position.Position //nolint:prealloc // Size unknown from iterator.
+	var (
+		runes     []rune
+		positions []position.Position
+	)
 
 	for pos, r := range lines.AllRunes() {
 		runes = append(runes, r)
@@ -302,7 +303,7 @@ func TestSource_AllLines_EarlyBreak(t *testing.T) {
 	tks := lexer.Tokenize(input)
 	lines := niceyaml.NewSourceFromTokens(tks)
 
-	var collected []int //nolint:prealloc // Testing early break with unknown iteration count.
+	var collected []int
 	for pos := range lines.AllLines() {
 		collected = append(collected, pos.Line)
 		if pos.Line >= 1 {
@@ -409,7 +410,7 @@ func TestSource_AllRunes_EarlyBreak(t *testing.T) {
 	tks := lexer.Tokenize(input)
 	lines := niceyaml.NewSourceFromTokens(tks)
 
-	var collected []rune //nolint:prealloc // Testing early break with unknown iteration count.
+	var collected []rune
 	for _, r := range lines.AllRunes() {
 		collected = append(collected, r)
 		if r == 'b' {
@@ -559,7 +560,7 @@ func TestSource_AllRunes_WithRanges(t *testing.T) {
 
 		rng := position.NewRange(position.New(0, 0), position.New(2, 10))
 
-		var collected []rune //nolint:prealloc // Testing early break.
+		var collected []rune
 		for _, r := range source.AllRunes(rng) {
 			collected = append(collected, r)
 			if r == ':' {

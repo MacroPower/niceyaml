@@ -70,7 +70,6 @@ type Source interface {
 // cycle through modes.
 type DiffMode int
 
-//nolint:grouper // Separate const block needed for iota.
 const (
 	// DiffModeAdjacent compares the current revision with the immediately
 	// preceding revision.
@@ -793,12 +792,12 @@ func (m *Model) PageUp() {
 
 // HalfPageDown moves the view down by half a page.
 func (m *Model) HalfPageDown() {
-	m.ScrollDown(m.maxHeight() / 2) //nolint:mnd // Half page.
+	m.ScrollDown(m.maxHeight() / 2)
 }
 
 // HalfPageUp moves the view up by half a page.
 func (m *Model) HalfPageUp() {
-	m.ScrollUp(m.maxHeight() / 2) //nolint:mnd // Half page.
+	m.ScrollUp(m.maxHeight() / 2)
 }
 
 // ScrollLeft moves the viewport left by n columns.

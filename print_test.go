@@ -20,8 +20,6 @@ import (
 )
 
 // testOverlayHighlight is a custom style.Style constant for test highlights.
-//
-//nolint:grouper // Separate const for iota.
 const testOverlayHighlight style.Style = iota
 
 // testHighlightStyle returns a style that wraps content in brackets for easy verification.

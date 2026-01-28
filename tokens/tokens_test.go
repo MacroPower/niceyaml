@@ -14,7 +14,7 @@ import (
 )
 
 func collectDocs(seq iter.Seq2[int, token.Tokens]) []token.Tokens {
-	var result []token.Tokens //nolint:prealloc // Size unknown from iterator.
+	var result []token.Tokens
 
 	for _, tks := range seq {
 		result = append(result, tks)

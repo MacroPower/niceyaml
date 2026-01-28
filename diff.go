@@ -127,13 +127,11 @@ func (d *Differ) computeOps(before, after LineGetter) []lineOp {
 // DiffResult holds computed diff operations for rendering.
 //
 // Create instances with [Differ.Diff] or [Diff].
-//
-//nolint:govet // fieldalignment: acceptable for readability.
 type DiffResult struct {
-	ops        []lineOp
-	name       string
 	beforeSums *position.PrefixSums
 	afterSums  *position.PrefixSums
+	name       string
+	ops        []lineOp
 }
 
 // Full returns a [*Source] representing the complete diff.
