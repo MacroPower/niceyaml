@@ -53,14 +53,6 @@ func newModel(opts *modelOptions) model {
 	// Create viewport.
 	vp := yamlviewport.New(
 		yamlviewport.WithPrinter(printer),
-		yamlviewport.WithSearchStyle(lipgloss.NewStyle().
-			Background(lipgloss.Darken(charmtone.Mustard, 0.5)).
-			Foreground(charmtone.Ox),
-		),
-		yamlviewport.WithSelectedSearchStyle(lipgloss.NewStyle().
-			Background(charmtone.Mustard).
-			Foreground(charmtone.Ox),
-		),
 	)
 
 	// Find default theme index.
@@ -313,6 +305,15 @@ func buildPrinterOpts(lineNumbers bool, themeName string) []niceyaml.PrinterOpti
 	}
 
 	if styles, ok := theme.Styles(themeName); ok {
+		// Add search overlay styles to the theme.
+		styles = styles.With(
+			style.Set(yamlviewport.SearchOverlayKind, lipgloss.NewStyle().
+				Background(lipgloss.Darken(charmtone.Mustard, 0.5)).
+				Foreground(charmtone.Ox)),
+			style.Set(yamlviewport.SelectedSearchOverlayKind, lipgloss.NewStyle().
+				Background(charmtone.Mustard).
+				Foreground(charmtone.Ox)),
+		)
 		opts = append(opts, niceyaml.WithStyles(styles))
 	}
 
