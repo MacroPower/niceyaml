@@ -84,6 +84,19 @@ const (
 	DiffModeNone
 )
 
+// ViewMode specifies how the viewport renders diff content.
+//
+// Use [Model.SetViewMode] to change the mode.
+type ViewMode int
+
+const (
+	// ViewModeFull displays all lines including unchanged content.
+	// This is the default mode.
+	ViewModeFull ViewMode = iota
+	// ViewModeHunks displays only changed lines with surrounding context.
+	ViewModeHunks
+)
+
 // Option configures a [Model].
 //
 // Available options:
@@ -180,6 +193,8 @@ type Model struct {
 	longestLineWidth int
 	height           int
 	diffMode         DiffMode
+	viewMode         ViewMode
+	hunkContext      int
 	// FillHeight pads output with empty lines to fill the viewport height when true.
 	FillHeight bool
 	// MouseWheelEnabled enables mouse wheel scrolling.
@@ -195,6 +210,7 @@ func (m *Model) setInitialValues() {
 	m.MouseWheelEnabled = true
 	m.MouseWheelDelta = 3
 	m.horizontalStep = defaultHorizontalStep
+	m.hunkContext = defaultHunkContext
 	m.WrapEnabled = true
 	m.searchIndex = -1
 
@@ -378,6 +394,18 @@ func (m *Model) IsShowingDiff() bool {
 	return m.revision != nil && !m.revision.AtOrigin() && m.diffMode != DiffModeNone
 }
 
+// DiffStats returns the number of added and removed lines in the current diff.
+//
+// Returns (0, 0) if no diff is being shown (at first revision, diff mode is none,
+// or no revisions exist).
+func (m *Model) DiffStats() (int, int) {
+	if !m.IsShowingDiff() {
+		return 0, 0
+	}
+
+	return m.getDiffResult().Stats()
+}
+
 // DiffMode returns the current diff display mode.
 func (m *Model) DiffMode() DiffMode {
 	return m.diffMode
@@ -401,6 +429,28 @@ func (m *Model) ToggleDiffMode() {
 	}
 
 	m.rerender()
+}
+
+// ViewMode returns the current view mode.
+func (m *Model) ViewMode() ViewMode {
+	return m.viewMode
+}
+
+// SetViewMode sets the view mode and rerenders.
+func (m *Model) SetViewMode(mode ViewMode) {
+	m.viewMode = mode
+	m.rerender()
+}
+
+// HunkContext returns the number of context lines shown around diff hunks.
+func (m *Model) HunkContext() int {
+	return m.hunkContext
+}
+
+// SetHunkContext sets the number of context lines shown around diff hunks
+// in [ViewModeHunks]. Default is 3.
+func (m *Model) SetHunkContext(n int) {
+	m.hunkContext = max(0, n)
 }
 
 // ToggleWordWrap toggles word wrapping on or off.
@@ -996,6 +1046,10 @@ func (m *Model) renderContent(lines []string, contentW, contentH int) string {
 
 // View renders the viewport.
 //
+// The rendering behavior depends on the current [ViewMode]:
+//   - [ViewModeFull]: Renders all lines (default behavior).
+//   - [ViewModeHunks]: Renders only changed lines with 3 lines of context.
+//
 //nolint:gocritic // hugeParam: required for tea.Model interface compatibility.
 func (m Model) View() string {
 	w, h, ok := m.getViewDimensions()
@@ -1003,34 +1057,24 @@ func (m Model) View() string {
 		return ""
 	}
 
-	return m.renderContent(m.visibleLines(nil), w, h)
-}
+	var lines []string
 
-// ViewSummary renders the viewport with summary diff (changes + context only).
-//
-// The context parameter specifies how many unchanged lines to show around each
-// change. This is useful for showing a condensed diff view instead of the full
-// file.
-//
-//nolint:gocritic // hugeParam: required for tea.Model interface compatibility.
-func (m Model) ViewSummary(context int) string {
-	w, h, ok := m.getViewDimensions()
-	if !ok {
-		return ""
+	switch m.viewMode {
+	case ViewModeHunks:
+		hunksContent := m.getHunksDiffContent()
+		lines = m.visibleLines(strings.Split(hunksContent, "\n"))
+
+	default:
+		lines = m.visibleLines(nil)
 	}
 
-	summaryContent := m.getSummaryDiffContent(context)
-	summaryLines := strings.Split(summaryContent, "\n")
-
-	if len(summaryLines) == 0 {
-		return ""
-	}
-
-	return m.renderContent(m.visibleLines(summaryLines), w, h)
+	return m.renderContent(lines, w, h)
 }
 
-// getSummaryDiffContent returns summary diff content for the current revision.
-func (m *Model) getSummaryDiffContent(context int) string {
+const defaultHunkContext = 3
+
+// getHunksDiffContent returns diff content with context lines for hunks mode.
+func (m *Model) getHunksDiffContent() string {
 	if m.revision == nil {
 		return ""
 	}
@@ -1046,7 +1090,7 @@ func (m *Model) getSummaryDiffContent(context int) string {
 			return m.printer.Print(m.revision.Source())
 		}
 
-		source, ranges := m.getDiffResult().Hunks(context)
+		source, ranges := m.getDiffResult().Hunks(m.hunkContext)
 
 		return m.printer.Print(source, ranges...)
 	}

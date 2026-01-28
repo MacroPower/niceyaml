@@ -1712,7 +1712,7 @@ func TestViewport_RevisionDeduplication(t *testing.T) {
 	}
 }
 
-func TestViewSummary_Golden(t *testing.T) {
+func TestViewModeHunks_Golden(t *testing.T) {
 	t.Parallel()
 
 	// Base revision with multiple lines for context testing.
@@ -1764,51 +1764,40 @@ func TestViewSummary_Golden(t *testing.T) {
 
 	type goldenTest struct {
 		setupFunc func(m *yamlviewport.Model)
-		context   int
 		width     int
 		height    int
 	}
 
 	tcs := map[string]goldenTest{
-		"BasicSummary": {
+		"BasicHunks": {
 			setupFunc: func(m *yamlviewport.Model) {
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				m.GoToRevision(1)
+				m.SetViewMode(yamlviewport.ViewModeHunks)
 			},
-			context: 1,
-			width:   80,
-			height:  30,
-		},
-		"SummaryWithContext3": {
-			setupFunc: func(m *yamlviewport.Model) {
-				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
-				m.GoToRevision(1)
-			},
-			context: 3,
-			width:   80,
-			height:  30,
+			width:  80,
+			height: 30,
 		},
 		"AtFirstRevision": {
 			setupFunc: func(m *yamlviewport.Model) {
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				m.GoToRevision(0)
+				m.SetViewMode(yamlviewport.ViewModeHunks)
 			},
-			context: 1,
-			width:   80,
-			height:  30,
+			width:  80,
+			height: 30,
 		},
 		"AtLatestRevision": {
 			setupFunc: func(m *yamlviewport.Model) {
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.SetViewMode(yamlviewport.ViewModeHunks)
 				// Default is at latest (index 2).
 			},
-			context: 1,
-			width:   80,
-			height:  30,
+			width:  80,
+			height: 30,
 		},
 		"DiffModeOrigin": {
 			setupFunc: func(m *yamlviewport.Model) {
@@ -1817,10 +1806,10 @@ func TestViewSummary_Golden(t *testing.T) {
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
 				m.GoToRevision(2)
 				m.SetDiffMode(yamlviewport.DiffModeOrigin)
+				m.SetViewMode(yamlviewport.ViewModeHunks)
 			},
-			context: 1,
-			width:   80,
-			height:  30,
+			width:  80,
+			height: 30,
 		},
 		"DiffModeNone": {
 			setupFunc: func(m *yamlviewport.Model) {
@@ -1828,10 +1817,10 @@ func TestViewSummary_Golden(t *testing.T) {
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				m.GoToRevision(1)
 				m.SetDiffMode(yamlviewport.DiffModeNone)
+				m.SetViewMode(yamlviewport.ViewModeHunks)
 			},
-			context: 1,
-			width:   80,
-			height:  30,
+			width:  80,
+			height: 30,
 		},
 		"MultipleRevisions": {
 			setupFunc: func(m *yamlviewport.Model) {
@@ -1839,10 +1828,10 @@ func TestViewSummary_Golden(t *testing.T) {
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
 				m.GoToRevision(2)
+				m.SetViewMode(yamlviewport.ViewModeHunks)
 			},
-			context: 1,
-			width:   80,
-			height:  30,
+			width:  80,
+			height: 30,
 		},
 	}
 
@@ -1858,13 +1847,13 @@ func TestViewSummary_Golden(t *testing.T) {
 				tc.setupFunc(&m)
 			}
 
-			output := m.ViewSummary(tc.context)
+			output := m.View()
 			golden.RequireEqual(t, output)
 		})
 	}
 }
 
-func TestViewSummary_Behavior(t *testing.T) {
+func TestViewMode_Behavior(t *testing.T) {
 	t.Parallel()
 
 	rev1YAML := yamltest.Input(`
@@ -1883,91 +1872,83 @@ func TestViewSummary_Behavior(t *testing.T) {
 	rev2Tokens := lexer.Tokenize(rev2YAML)
 
 	tcs := map[string]struct {
-		setup   func(m *yamlviewport.Model)
-		test    func(t *testing.T, m *yamlviewport.Model)
-		context int
-		width   int
-		height  int
+		setup  func(m *yamlviewport.Model)
+		test   func(t *testing.T, m *yamlviewport.Model)
+		width  int
+		height int
 	}{
-		"EmptyRevisions": {
-			width:   80,
-			height:  24,
-			context: 1,
+		"DefaultViewModeIsFull": {
+			width:  80,
+			height: 24,
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 
-				output := m.ViewSummary(1)
+				assert.Equal(t, yamlviewport.ViewModeFull, m.ViewMode())
+			},
+		},
+		"SetViewModeHunks": {
+			width:  80,
+			height: 24,
+			setup: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.GoToRevision(1)
+				m.SetViewMode(yamlviewport.ViewModeHunks)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				assert.Equal(t, yamlviewport.ViewModeHunks, m.ViewMode())
+
+				output := m.View()
+				assert.NotEmpty(t, output)
+			},
+		},
+		"HunksEmptyRevisions": {
+			width:  80,
+			height: 24,
+			setup: func(m *yamlviewport.Model) {
+				m.SetViewMode(yamlviewport.ViewModeHunks)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				output := m.View()
 				// Viewport returns blank lines for empty content, not empty string.
 				// Check that no YAML keys are present.
 				assert.NotContains(t, output, ":")
 			},
 		},
-		"ZeroDimensions": {
-			width:   0,
-			height:  0,
-			context: 1,
+		"HunksZeroDimensions": {
+			width:  0,
+			height: 0,
 			setup: func(m *yamlviewport.Model) {
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				m.GoToRevision(1)
+				m.SetViewMode(yamlviewport.ViewModeHunks)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 
-				output := m.ViewSummary(1)
+				output := m.View()
 				assert.Empty(t, output)
 			},
 		},
-		"ContextZero": {
-			width:   80,
-			height:  24,
-			context: 0,
-			setup: func(m *yamlviewport.Model) {
-				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
-				m.GoToRevision(1)
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-
-				output := m.ViewSummary(0)
-				// Should still render something (changed lines only).
-				assert.NotEmpty(t, output)
-			},
-		},
-		"LargeContext": {
-			width:   80,
-			height:  24,
-			context: 100,
-			setup: func(m *yamlviewport.Model) {
-				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
-				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
-				m.GoToRevision(1)
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-
-				output := m.ViewSummary(100)
-				// Should include all content with large context.
-				assert.NotEmpty(t, output)
-				assert.Contains(t, output, "name")
-				assert.Contains(t, output, "count")
-			},
-		},
-		"ScrollingApplied": {
-			width:   80,
-			height:  3,
-			context: 1,
+		"HunksScrollingApplied": {
+			width:  80,
+			height: 3,
 			setup: func(m *yamlviewport.Model) {
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				m.GoToRevision(1)
 				m.SetYOffset(1)
+				m.SetViewMode(yamlviewport.ViewModeHunks)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 
-				output := m.ViewSummary(1)
+				output := m.View()
 				// Should have content but be scrolled.
 				assert.NotEmpty(t, output)
 			},
