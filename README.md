@@ -19,6 +19,7 @@ It enables **friendly and predictable handling of YAML-compatible documents** in
 - Rich [`Error`][niceyaml.Error] display using the above systems
 - Source [`Revision`][niceyaml.Revision]s for file lineage and **diffs**
 - String [`Finder`][niceyaml.Finder] for load-once, search-many scenarios
+- Extended [`Encoder`][niceyaml.Encoder] and [`Decoder`][niceyaml.Decoder] wrappers
 - JSON schema [`generator`][niceyaml/schema/generator] and [`validator`][niceyaml/schema/validator]
 - Bubble [`yamlviewport`][niceyaml/bubbles/yamlviewport] for Bubble Tea
 - Generic building blocks for your own bubbles
@@ -102,6 +103,8 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [invopop/jsonschema]: https://github.com/invopop/jsonschema
 [santhosh-tekuri/jsonschema]: https://github.com/santhosh-tekuri/jsonschema
 [niceyaml.Error]: https://pkg.go.dev/jacobcolvin.com/niceyaml#Error
+[niceyaml.Encoder]: https://pkg.go.dev/jacobcolvin.com/niceyaml#Encoder
+[niceyaml.Decoder]: https://pkg.go.dev/jacobcolvin.com/niceyaml#Decoder
 [niceyaml.Finder]: https://pkg.go.dev/jacobcolvin.com/niceyaml#Finder
 [niceyaml.Printer]: https://pkg.go.dev/jacobcolvin.com/niceyaml#Printer
 [niceyaml.Revision]: https://pkg.go.dev/jacobcolvin.com/niceyaml#Revision
