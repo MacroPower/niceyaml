@@ -33,11 +33,17 @@ type SchemaValidator interface {
 	ValidateSchema(data any) error
 }
 
-// Decoder provides iteration over YAML documents in an [*ast.File].
+// Decoder iterates over YAML documents in a parsed [*ast.File].
 //
-// It wraps a parsed YAML file and yields [DocumentDecoder] instances for each
-// document, enabling document-by-document processing of both single and
-// multi-document YAML streams.
+// A single YAML file can contain multiple documents separated by "---".
+// These documents often have different schemas and/or validation requirements.
+// Decoder provides lazy iteration over these documents, providing a
+// [DocumentDecoder] for each.
+//
+//	dec := niceyaml.NewDecoder(file)
+//	for _, dd := range dec.Documents() {
+//		// Each dd is a DocumentDecoder instance.
+//	}
 //
 // Create instances with [NewDecoder].
 type Decoder struct {
@@ -68,21 +74,29 @@ func (d *Decoder) Documents() iter.Seq2[int, *DocumentDecoder] {
 	}
 }
 
-// DocumentDecoder decodes and validates a single [*ast.DocumentNode].
-// It provides several methods for working with YAML documents:
+// DocumentDecoder decodes and validates a single YAML document.
 //
-//   - [DocumentDecoder.GetValue]: Extract a value at a path as a string.
-//   - [DocumentDecoder.Decode]: Decode to a typed struct.
-//   - [DocumentDecoder.ValidateSchema]: Validate against a [SchemaValidator].
-//   - [DocumentDecoder.Unmarshal]: Full validation and decoding pipeline.
+// It separates decoding from document iteration, allowing validation hooks
+// to run at the right time during unmarshaling. Types implementing
+// [SchemaValidator] are validated before decoding, and types implementing
+// [Validator] are validated after. Types may implement both interfaces.
 //
-// Use [DocumentDecoder.Unmarshal] for types implementing [SchemaValidator] or
-// [Validator] to get automatic validation.
+// Use [DocumentDecoder.GetValue] to inspect values without unmarshaling,
+// which is helpful for routing documents based on a discriminator field.
 //
-// Use [DocumentDecoder.Decode] when you only need decoding without validation
-// hooks.
+// For most use cases, call [DocumentDecoder.Unmarshal] to get the full
+// validation pipeline:
 //
-// All decoding methods convert YAML errors to [Error] with source annotations.
+//	for _, doc := range decoder.Documents() {
+//		var config Config
+//		if err := doc.Unmarshal(&config); err != nil {
+//			return err
+//		}
+//	}
+//
+// Use [DocumentDecoder.Decode] directly when you need decoding without
+// validation hooks. All decoding methods convert YAML errors to [Error]
+// with source annotations.
 //
 // Create instances with [NewDocumentDecoder].
 type DocumentDecoder struct {
@@ -97,9 +111,25 @@ func NewDocumentDecoder(doc *ast.DocumentNode) *DocumentDecoder {
 	}
 }
 
-// GetValue returns the string representation of the value at the given path, or
-// an empty string and false if the path is nil, the document body is a
-// directive, or no value exists at the path.
+// GetValue extracts a raw YAML value without unmarshaling.
+//
+// This is useful when you need to inspect document content before deciding how
+// to process it. For example, multi-document files often use a discriminator
+// field like "kind" or "version" to determine which schema applies:
+//
+//	kindPath := paths.Root().Child("kind").Path()
+//	for _, doc := range decoder.Documents() {
+//		kind, _ := doc.GetValue(kindPath)
+//		switch kind {
+//		case "Pod":
+//			// Unmarshal to Pod struct.
+//		case "Service":
+//			// Unmarshal to Service struct.
+//		}
+//	}
+//
+// Returns the string representation of the value at path, or an empty string
+// and false if path is nil, the document is a directive, or no value exists.
 func (dd *DocumentDecoder) GetValue(path *paths.YAMLPath) (string, bool) {
 	if path == nil {
 		return "", false
