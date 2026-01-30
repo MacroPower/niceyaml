@@ -2,12 +2,12 @@
 //
 // # Token Splitting
 //
-// YAML tokens from go-yaml can span multiple lines (block scalars, multiline
-// strings), but many operations—rendering, diffing, error highlighting—need
-// to work line-by-line.
+// YAML tokens can span multiple lines (block scalars, multiline strings), but
+// many operations (e.g. diffing, printing) are much simpler with line-by-line
+// access.
 //
-// This package bridges that gap by organizing tokens into lines while
-// preserving references to the original tokens.
+// This package organizes [token.Tokens] into [Lines] while preserving
+// references to the original [token.Tokens].
 //
 // Consider this YAML input with a block scalar:
 //
