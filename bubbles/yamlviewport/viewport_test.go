@@ -1853,6 +1853,221 @@ func TestViewModeHunks_Golden(t *testing.T) {
 	}
 }
 
+func TestViewModeSideBySide_Golden(t *testing.T) {
+	t.Parallel()
+
+	// Base revision with multiple lines for testing.
+	rev1YAML := yamltest.Input(`
+		name: original
+		count: 10
+		enabled: true
+		description: "This is the original description"
+		tags:
+		  - alpha
+		  - beta
+		settings:
+		  timeout: 30
+		  retries: 3
+		extra:
+		  key1: value1
+		  key2: value2
+	`)
+
+	// Modified revision with changes.
+	rev2YAML := yamltest.Input(`
+		name: modified
+		count: 20
+		enabled: true
+		description: "This is the updated description"
+		tags:
+		  - alpha
+		  - gamma
+		settings:
+		  timeout: 60
+		  retries: 5
+		extra:
+		  key1: changed1
+		  key2: changed2
+	`)
+
+	// Third revision with additional changes.
+	rev3YAML := yamltest.Input(`
+		name: final
+		count: 30
+		enabled: false
+		description: "This is the final description"
+		tags:
+		  - alpha
+		  - gamma
+		  - delta
+		settings:
+		  timeout: 90
+		  retries: 10
+	`)
+
+	rev1Tokens := lexer.Tokenize(rev1YAML)
+	rev2Tokens := lexer.Tokenize(rev2YAML)
+	rev3Tokens := lexer.Tokenize(rev3YAML)
+
+	type goldenTest struct {
+		setupFunc func(m *yamlviewport.Model)
+		width     int
+		height    int
+	}
+
+	tcs := map[string]goldenTest{
+		"SideBySide": {
+			setupFunc: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("v2")))
+				m.GoToRevision(1)
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+			},
+			width:  80,
+			height: 24,
+		},
+		"SideBySideNoChanges": {
+			// Same content on both sides - verifies identical panes.
+			setupFunc: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("v2")))
+				m.GoToRevision(1)
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+			},
+			width:  80,
+			height: 24,
+		},
+		"SideBySideAtOrigin": {
+			// At revision 0 - shows same content on both panes.
+			setupFunc: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("v2")))
+				m.GoToRevision(0)
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+			},
+			width:  80,
+			height: 24,
+		},
+		"SideBySideScrolled": {
+			// Side-by-side with vertical scrolling.
+			setupFunc: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("v2")))
+				m.GoToRevision(1)
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+				m.SetYOffset(3)
+			},
+			width:  80,
+			height: 10,
+		},
+		"SideBySideDiffModeOrigin": {
+			// Side-by-side with origin diff mode (compares to first revision).
+			setupFunc: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("v2")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("v3")))
+				m.GoToRevision(2)
+				m.SetDiffMode(yamlviewport.DiffModeOrigin)
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+			},
+			width:  80,
+			height: 24,
+		},
+		"SideBySideDiffModeNone": {
+			// Side-by-side with no diff mode - shows same content on both panes.
+			setupFunc: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("v2")))
+				m.GoToRevision(1)
+				m.SetDiffMode(yamlviewport.DiffModeNone)
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+			},
+			width:  80,
+			height: 24,
+		},
+		"SideBySideNarrow": {
+			// Narrower viewport to test pane width calculation.
+			setupFunc: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("v2")))
+				m.GoToRevision(1)
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+			},
+			width:  60,
+			height: 16,
+		},
+		"SideBySideMoreDeletions": {
+			// More deletions than insertions - placeholders on the right pane.
+			setupFunc: func(m *yamlviewport.Model) {
+				moreDeletionsBefore := yamltest.Input(`
+					keep: start
+					del1: a
+					del2: b
+					del3: c
+					del4: d
+					keep: end
+				`)
+				moreDeletionsAfter := yamltest.Input(`
+					keep: start
+					ins1: x
+					keep: end
+				`)
+
+				m.ClearRevisions()
+				m.AddRevision(niceyaml.NewSourceFromString(moreDeletionsBefore, niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromString(moreDeletionsAfter, niceyaml.WithName("v2")))
+				m.GoToRevision(1)
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+			},
+			width:  80,
+			height: 16,
+		},
+		"SideBySideMoreInsertions": {
+			// More insertions than deletions - placeholders on the left pane.
+			setupFunc: func(m *yamlviewport.Model) {
+				moreInsertionsBefore := yamltest.Input(`
+					keep: start
+					del1: a
+					keep: end
+				`)
+				moreInsertionsAfter := yamltest.Input(`
+					keep: start
+					ins1: w
+					ins2: x
+					ins3: y
+					ins4: z
+					keep: end
+				`)
+
+				m.ClearRevisions()
+				m.AddRevision(niceyaml.NewSourceFromString(moreInsertionsBefore, niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromString(moreInsertionsAfter, niceyaml.WithName("v2")))
+				m.GoToRevision(1)
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+			},
+			width:  80,
+			height: 16,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+			m.SetWidth(tc.width)
+			m.SetHeight(tc.height)
+
+			if tc.setupFunc != nil {
+				tc.setupFunc(&m)
+			}
+
+			output := m.View()
+			golden.RequireEqual(t, output)
+		})
+	}
+}
+
 func TestViewMode_Behavior(t *testing.T) {
 	t.Parallel()
 

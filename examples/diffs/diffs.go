@@ -32,7 +32,7 @@ func main() {
 	result := niceyaml.Diff(rev.Origin(), rev.Tip())
 
 	fmt.Println("\nPrint the full diff:")
-	fmt.Println(printer.Print(result.Full()))
+	fmt.Println(printer.Print(result.Unified()))
 
 	fmt.Println("\nPrint the summary diff:")
 

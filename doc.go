@@ -88,7 +88,7 @@
 //	revs := niceyaml.NewRevision(original).Append(modified)
 //	result := niceyaml.Diff(revs.Origin(), revs.Tip())
 //	printer := niceyaml.NewPrinter()
-//	fmt.Println(printer.Print(result.Full()))
+//	fmt.Println(printer.Print(result.Unified()))
 //	source, spans := result.Hunks(3)
 //	fmt.Println(printer.Print(source, spans...))
 //

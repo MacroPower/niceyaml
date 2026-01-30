@@ -2,11 +2,19 @@ package niceyaml
 
 import (
 	"fmt"
+	"iter"
 	"strings"
+	"sync"
 
 	"jacobcolvin.com/niceyaml/diff"
 	"jacobcolvin.com/niceyaml/line"
 	"jacobcolvin.com/niceyaml/position"
+)
+
+// Side index constants for diffSideIterator.
+const (
+	sideBefore = 0
+	sideAfter  = 1
 )
 
 // SourceGetter retrieves a [*Source].
@@ -60,7 +68,7 @@ func NewDiffer(opts ...DifferOption) *Differ {
 
 // Diff computes the difference between two sources.
 //
-// The result can be rendered multiple times with [DiffResult.Full] or
+// The result can be rendered multiple times with [DiffResult.Unified] or
 // [DiffResult.Hunks].
 func (d *Differ) Diff(a, b SourceGetter) *DiffResult {
 	aSource := a.Source()
@@ -126,22 +134,37 @@ func (d *Differ) computeOps(before, after LineGetter) []lineOp {
 
 // DiffResult holds computed diff operations for rendering.
 //
+// Rendering methods:
+//   - [DiffResult.Unified] returns all lines in unified diff format.
+//   - [DiffResult.Hunks] returns only changed lines with context.
+//   - [DiffResult.Before] and [DiffResult.After] return aligned iterators
+//     for side-by-side rendering.
+//
 // Create instances with [Differ.Diff] or [Diff].
 type DiffResult struct {
-	beforeSums *position.PrefixSums
-	afterSums  *position.PrefixSums
-	name       string
-	ops        []lineOp
+	beforeSums  *position.PrefixSums
+	afterSums   *position.PrefixSums
+	name        string
+	ops         []lineOp
+	alignedRows []alignedRow // Lazily computed for side-by-side rendering.
+	alignedOnce sync.Once    // Ensures thread-safe lazy initialization.
 }
 
-// Full returns a [*Source] representing the complete diff.
+// alignedRow holds a pair of lines for side-by-side diff rendering.
+// Either field may be the zero value to represent an empty placeholder.
+type alignedRow struct {
+	before line.Line
+	after  line.Line
+}
+
+// Unified returns a [*Source] representing the complete diff.
 //
 // The returned [Source] contains merged tokens from both revisions: unchanged
 // lines use tokens from the second source, while changed lines include deleted
 // tokens from the first source followed by inserted tokens from the second.
 //
 // [Source] contains flags for deleted/inserted lines.
-func (r *DiffResult) Full() *Source {
+func (r *DiffResult) Unified() *Source {
 	return &Source{
 		name:  r.name,
 		lines: lineOps(r.ops).toLines(),
@@ -202,6 +225,239 @@ func (r *DiffResult) Stats() (int, int) {
 	}
 
 	return added, removed
+}
+
+// getAlignedRows returns the lazily computed aligned rows for side-by-side
+// rendering. Lines are aligned so both sides have equal counts:
+//   - Equal lines appear on both sides at the same position.
+//   - Consecutive delete/insert pairs appear on the same row.
+//   - Unmatched deletions have empty placeholders on the right.
+//   - Unmatched insertions have empty placeholders on the left.
+func (r *DiffResult) getAlignedRows() []alignedRow {
+	r.alignedOnce.Do(func() {
+		rows := make([]alignedRow, 0, len(r.ops))
+
+		i := 0
+		for i < len(r.ops) {
+			op := r.ops[i]
+
+			switch op.kind {
+			case diff.OpEqual:
+				// Both sides get the line.
+				ln := op.line.Clone()
+				ln.Flag = line.FlagDefault
+				rows = append(rows, alignedRow{
+					before: ln,
+					after:  ln,
+				})
+				i++
+
+			case diff.OpDelete:
+				// Collect consecutive deletes.
+				deletes := collectConsecutive(r.ops, i, diff.OpDelete)
+				i += len(deletes)
+
+				// Collect consecutive inserts that follow.
+				var inserts []lineOp
+				if i < len(r.ops) && r.ops[i].kind == diff.OpInsert {
+					inserts = collectConsecutive(r.ops, i, diff.OpInsert)
+					i += len(inserts)
+				}
+
+				// Pair deletes with inserts on the same row.
+				maxPairs := max(len(deletes), len(inserts))
+				for j := range maxPairs {
+					var beforeLine, afterLine line.Line
+
+					if j < len(deletes) {
+						beforeLine = deletes[j].line.Clone()
+						beforeLine.Flag = line.FlagDeleted
+					}
+
+					if j < len(inserts) {
+						afterLine = inserts[j].line.Clone()
+						afterLine.Flag = line.FlagInserted
+					}
+
+					rows = append(rows, alignedRow{
+						before: beforeLine,
+						after:  afterLine,
+					})
+				}
+
+			case diff.OpInsert:
+				// Standalone insert (not following a delete).
+				ln := op.line.Clone()
+				ln.Flag = line.FlagInserted
+
+				rows = append(rows, alignedRow{
+					before: line.Line{},
+					after:  ln,
+				})
+				i++
+			}
+		}
+
+		r.alignedRows = rows
+	})
+
+	return r.alignedRows
+}
+
+// diffSideIterator implements [LineIterator] for one side of a side-by-side diff.
+type diffSideIterator struct {
+	result *DiffResult
+	side   int // 0=before, 1=after.
+}
+
+// Before returns a [LineIterator] for the left (before) pane of a side-by-side
+// diff.
+//
+// Lines are aligned with [DiffResult.After] so both iterators have equal line
+// counts. Consecutive delete/insert sequences are paired row-by-row. When there
+// are more insertions than deletions, empty placeholder lines (zero value) fill
+// the remaining rows on this side.
+//
+// Line flags: [line.FlagDeleted] for deleted lines, [line.FlagDefault] for
+// equal lines and empty placeholders.
+func (r *DiffResult) Before() LineIterator {
+	return &diffSideIterator{result: r, side: sideBefore}
+}
+
+// After returns a [LineIterator] for the right (after) pane of a side-by-side
+// diff.
+//
+// Lines are aligned with [DiffResult.Before] so both iterators have equal line
+// counts. Consecutive delete/insert sequences are paired row-by-row. When there
+// are more deletions than insertions, empty placeholder lines (zero value) fill
+// the remaining rows on this side.
+//
+// Line flags: [line.FlagInserted] for inserted lines, [line.FlagDefault] for
+// equal lines and empty placeholders.
+func (r *DiffResult) After() LineIterator {
+	return &diffSideIterator{result: r, side: sideAfter}
+}
+
+// AllLines returns an iterator over lines within the given spans.
+//
+// If no spans are provided, all lines are iterated. Each iteration yields a
+// [position.Position] and the [line.Line] at that position.
+func (d *diffSideIterator) AllLines(spans ...position.Span) iter.Seq2[position.Position, line.Line] {
+	return func(yield func(position.Position, line.Line) bool) {
+		rows := d.result.getAlignedRows()
+
+		// No spans = all lines.
+		if len(spans) == 0 {
+			for i := range rows {
+				ln := rows[i].before
+				if d.side == sideAfter {
+					ln = rows[i].after
+				}
+				if !yield(position.New(i, 0), ln) {
+					return
+				}
+			}
+
+			return
+		}
+
+		// Iterate only lines within provided spans.
+		for _, span := range spans {
+			start := max(0, span.Start)
+			end := min(len(rows), span.End)
+
+			for i := start; i < end; i++ {
+				ln := rows[i].before
+				if d.side == sideAfter {
+					ln = rows[i].after
+				}
+				if !yield(position.New(i, 0), ln) {
+					return
+				}
+			}
+		}
+	}
+}
+
+// AllRunes returns an iterator over runes within the given ranges.
+// If no ranges are provided, all runes are iterated.
+// Each iteration yields a [position.Position] and the rune at that position.
+func (d *diffSideIterator) AllRunes(ranges ...position.Range) iter.Seq2[position.Position, rune] {
+	return func(yield func(position.Position, rune) bool) {
+		rows := d.result.getAlignedRows()
+
+		// No ranges = all runes.
+		if len(ranges) == 0 {
+			for i := range rows {
+				ln := rows[i].before
+				if d.side == sideAfter {
+					ln = rows[i].after
+				}
+
+				col := 0
+				for _, tk := range ln.Tokens() {
+					for _, r := range tk.Origin {
+						if !yield(position.New(i, col), r) {
+							return
+						}
+
+						col++
+					}
+				}
+			}
+
+			return
+		}
+
+		// Iterate only runes within provided ranges.
+		for _, rng := range ranges {
+			startLine := max(0, rng.Start.Line)
+			endLine := min(len(rows)-1, rng.End.Line)
+
+			for i := startLine; i <= endLine; i++ {
+				ln := rows[i].before
+				if d.side == sideAfter {
+					ln = rows[i].after
+				}
+
+				col := 0
+				for _, tk := range ln.Tokens() {
+					for _, r := range tk.Origin {
+						pos := position.New(i, col)
+						if rng.Contains(pos) {
+							if !yield(pos, r) {
+								return
+							}
+						}
+
+						col++
+					}
+				}
+			}
+		}
+	}
+}
+
+// Len returns the number of aligned rows.
+func (d *diffSideIterator) Len() int {
+	return len(d.result.getAlignedRows())
+}
+
+// IsEmpty reports whether there are no aligned rows.
+func (d *diffSideIterator) IsEmpty() bool {
+	return len(d.result.getAlignedRows()) == 0
+}
+
+// collectConsecutive collects consecutive ops of the same kind starting at
+// index i.
+func collectConsecutive(ops []lineOp, i int, kind diff.OpKind) []lineOp {
+	var result []lineOp
+	for i < len(ops) && ops[i].kind == kind {
+		result = append(result, ops[i])
+		i++
+	}
+
+	return result
 }
 
 // IsEmpty reports whether the diff contains no lines.

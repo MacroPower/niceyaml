@@ -58,7 +58,7 @@ func printDiff(p *niceyaml.Printer, before, after string) string {
 	return p.Print(niceyaml.Diff(
 		niceyaml.NewRevision(beforeTks),
 		niceyaml.NewRevision(afterTks),
-	).Full())
+	).Unified())
 }
 
 // printDiffSummary generates a summary diff showing only changed lines with context.

@@ -356,7 +356,7 @@ func TestDiffer_Full(t *testing.T) {
 			revB := niceyaml.NewRevision(afterTokens)
 			differ := niceyaml.Diff(revA, revB)
 
-			got := differ.Full()
+			got := differ.Unified()
 
 			assert.Equal(t, "a..b", got.Name())
 			assert.Equal(t, "a..b", differ.Name())
@@ -431,7 +431,7 @@ func TestDiffer_Full_Flags(t *testing.T) {
 			revB := niceyaml.NewRevision(afterTokens)
 			differ := niceyaml.Diff(revA, revB)
 
-			got := differ.Full()
+			got := differ.Unified()
 
 			flaggedCount := 0
 			for _, ln := range got.AllLines() {
@@ -689,6 +689,280 @@ func TestDiffResult_Stats(t *testing.T) {
 	}
 }
 
+func TestDiffResult_BeforeAfter(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		before      string
+		after       string
+		wantBefore  []wantLine
+		wantAfter   []wantLine
+		wantRowLen  int
+		description string
+	}{
+		"no changes": {
+			before: "key: value\n",
+			after:  "key: value\n",
+			wantBefore: []wantLine{
+				{content: "key: value", flag: line.FlagDefault},
+			},
+			wantAfter: []wantLine{
+				{content: "key: value", flag: line.FlagDefault},
+			},
+			wantRowLen: 1,
+		},
+		"simple insertion": {
+			before: "a: 1\n",
+			after:  "a: 1\nb: 2\n",
+			wantBefore: []wantLine{
+				{content: "a: 1", flag: line.FlagDefault},
+				{content: "", flag: line.FlagDefault, empty: true}, // Placeholder.
+			},
+			wantAfter: []wantLine{
+				{content: "a: 1", flag: line.FlagDefault},
+				{content: "b: 2", flag: line.FlagInserted},
+			},
+			wantRowLen: 2,
+		},
+		"simple deletion": {
+			before: "a: 1\nb: 2\n",
+			after:  "a: 1\n",
+			wantBefore: []wantLine{
+				{content: "a: 1", flag: line.FlagDefault},
+				{content: "b: 2", flag: line.FlagDeleted},
+			},
+			wantAfter: []wantLine{
+				{content: "a: 1", flag: line.FlagDefault},
+				{content: "", flag: line.FlagDefault, empty: true}, // Placeholder.
+			},
+			wantRowLen: 2,
+		},
+		"modification": {
+			before: "key: old\n",
+			after:  "key: new\n",
+			wantBefore: []wantLine{
+				{content: "key: old", flag: line.FlagDeleted},
+			},
+			wantAfter: []wantLine{
+				{content: "key: new", flag: line.FlagInserted},
+			},
+			wantRowLen: 1,
+		},
+		"consecutive insertions": {
+			before: yamltest.Input(`
+				before: 1
+				after: 2
+			`),
+			after: yamltest.Input(`
+				before: 1
+				new1: a
+				new2: b
+				after: 2
+			`),
+			wantBefore: []wantLine{
+				{content: "before: 1", flag: line.FlagDefault},
+				{content: "", flag: line.FlagDefault, empty: true}, // Placeholder for new1.
+				{content: "", flag: line.FlagDefault, empty: true}, // Placeholder for new2.
+				{content: "after: 2", flag: line.FlagDefault},
+			},
+			wantAfter: []wantLine{
+				{content: "before: 1", flag: line.FlagDefault},
+				{content: "new1: a", flag: line.FlagInserted},
+				{content: "new2: b", flag: line.FlagInserted},
+				{content: "after: 2", flag: line.FlagDefault},
+			},
+			wantRowLen: 4,
+		},
+		"consecutive deletions": {
+			before: yamltest.Input(`
+				before: 1
+				old1: a
+				old2: b
+				after: 2
+			`),
+			after: yamltest.Input(`
+				before: 1
+				after: 2
+			`),
+			wantBefore: []wantLine{
+				{content: "before: 1", flag: line.FlagDefault},
+				{content: "old1: a", flag: line.FlagDeleted},
+				{content: "old2: b", flag: line.FlagDeleted},
+				{content: "after: 2", flag: line.FlagDefault},
+			},
+			wantAfter: []wantLine{
+				{content: "before: 1", flag: line.FlagDefault},
+				{content: "", flag: line.FlagDefault, empty: true}, // Placeholder for old1.
+				{content: "", flag: line.FlagDefault, empty: true}, // Placeholder for old2.
+				{content: "after: 2", flag: line.FlagDefault},
+			},
+			wantRowLen: 4,
+		},
+		"mixed changes": {
+			before: yamltest.Input(`
+				keep1: a
+				delete1: x
+				delete2: y
+				keep2: b
+			`),
+			after: yamltest.Input(`
+				keep1: a
+				insert1: p
+				insert2: q
+				keep2: b
+			`),
+			wantBefore: []wantLine{
+				{content: "keep1: a", flag: line.FlagDefault},
+				{content: "delete1: x", flag: line.FlagDeleted},
+				{content: "delete2: y", flag: line.FlagDeleted},
+				{content: "keep2: b", flag: line.FlagDefault},
+			},
+			wantAfter: []wantLine{
+				{content: "keep1: a", flag: line.FlagDefault},
+				{content: "insert1: p", flag: line.FlagInserted},
+				{content: "insert2: q", flag: line.FlagInserted},
+				{content: "keep2: b", flag: line.FlagDefault},
+			},
+			wantRowLen: 4,
+		},
+		"unbalanced delete insert": {
+			// More deletes than inserts: extra rows for placeholders.
+			before: yamltest.Input(`
+				keep: 1
+				del1: a
+				del2: b
+				del3: c
+				end: 2
+			`),
+			after: yamltest.Input(`
+				keep: 1
+				ins1: x
+				end: 2
+			`),
+			wantBefore: []wantLine{
+				{content: "keep: 1", flag: line.FlagDefault},
+				{content: "del1: a", flag: line.FlagDeleted},
+				{content: "del2: b", flag: line.FlagDeleted},
+				{content: "del3: c", flag: line.FlagDeleted},
+				{content: "end: 2", flag: line.FlagDefault},
+			},
+			wantAfter: []wantLine{
+				{content: "keep: 1", flag: line.FlagDefault},
+				{content: "ins1: x", flag: line.FlagInserted},
+				{content: "", flag: line.FlagDefault, empty: true}, // Placeholder.
+				{content: "", flag: line.FlagDefault, empty: true}, // Placeholder.
+				{content: "end: 2", flag: line.FlagDefault},
+			},
+			wantRowLen: 5,
+		},
+		"unbalanced insert delete": {
+			// More inserts than deletes.
+			before: yamltest.Input(`
+				keep: 1
+				del1: a
+				end: 2
+			`),
+			after: yamltest.Input(`
+				keep: 1
+				ins1: x
+				ins2: y
+				ins3: z
+				end: 2
+			`),
+			wantBefore: []wantLine{
+				{content: "keep: 1", flag: line.FlagDefault},
+				{content: "del1: a", flag: line.FlagDeleted},
+				{content: "", flag: line.FlagDefault, empty: true}, // Placeholder.
+				{content: "", flag: line.FlagDefault, empty: true}, // Placeholder.
+				{content: "end: 2", flag: line.FlagDefault},
+			},
+			wantAfter: []wantLine{
+				{content: "keep: 1", flag: line.FlagDefault},
+				{content: "ins1: x", flag: line.FlagInserted},
+				{content: "ins2: y", flag: line.FlagInserted},
+				{content: "ins3: z", flag: line.FlagInserted},
+				{content: "end: 2", flag: line.FlagDefault},
+			},
+			wantRowLen: 5,
+		},
+		"both empty": {
+			before:     "",
+			after:      "",
+			wantBefore: nil,
+			wantAfter:  nil,
+			wantRowLen: 0,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			beforeSrc := niceyaml.NewSourceFromString(tc.before, niceyaml.WithName("a"))
+			afterSrc := niceyaml.NewSourceFromString(tc.after, niceyaml.WithName("b"))
+
+			result := niceyaml.Diff(
+				niceyaml.NewRevision(beforeSrc),
+				niceyaml.NewRevision(afterSrc),
+			)
+
+			beforeIter := result.Before()
+			afterIter := result.After()
+
+			// Both iterators should have the same length.
+			assert.Equal(t, tc.wantRowLen, beforeIter.Len(), "Before Len()")
+			assert.Equal(t, tc.wantRowLen, afterIter.Len(), "After Len()")
+
+			// Check IsEmpty.
+			assert.Equal(t, tc.wantRowLen == 0, beforeIter.IsEmpty(), "Before IsEmpty()")
+			assert.Equal(t, tc.wantRowLen == 0, afterIter.IsEmpty(), "After IsEmpty()")
+
+			// Verify Before iterator lines.
+			var beforeLines []line.Line
+			for _, ln := range beforeIter.AllLines() {
+				beforeLines = append(beforeLines, ln)
+			}
+
+			verifyLines(t, "Before", beforeLines, tc.wantBefore)
+
+			// Verify After iterator lines.
+			var afterLines []line.Line
+			for _, ln := range afterIter.AllLines() {
+				afterLines = append(afterLines, ln)
+			}
+
+			verifyLines(t, "After", afterLines, tc.wantAfter)
+		})
+	}
+}
+
+// wantLine specifies expected line content and flag for testing.
+type wantLine struct {
+	content string
+	flag    line.Flag
+	empty   bool // True if this should be an empty placeholder (zero tokens).
+}
+
+// verifyLines checks that actual lines match expected lines.
+func verifyLines(t *testing.T, side string, actual []line.Line, want []wantLine) {
+	t.Helper()
+
+	require.Len(t, actual, len(want), "%s: line count mismatch", side)
+
+	for i, wantLn := range want {
+		actualLn := actual[i]
+
+		if wantLn.empty {
+			// Empty placeholder: should have no tokens.
+			assert.Empty(t, actualLn.Tokens(), "%s line %d: expected empty placeholder", side, i)
+		} else {
+			assert.Equal(t, wantLn.content, actualLn.Content(), "%s line %d content", side, i)
+		}
+
+		assert.Equal(t, wantLn.flag, actualLn.Flag, "%s line %d flag", side, i)
+	}
+}
+
 func TestDiffer_MultipleRenders(t *testing.T) {
 	t.Parallel()
 
@@ -716,8 +990,8 @@ func TestDiffer_MultipleRenders(t *testing.T) {
 	differ := niceyaml.Diff(revA, revB)
 
 	// Call Full multiple times.
-	full1 := differ.Full()
-	full2 := differ.Full()
+	full1 := differ.Unified()
+	full2 := differ.Unified()
 
 	assert.Equal(t, full1.String(), full2.String())
 

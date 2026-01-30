@@ -1,0 +1,24 @@
+-name: original                       │  +name: modified                        
+-count: 10                            │  +count: 20                             
+ enabled: true                        │   enabled: true                         
+-description: "This is the original   │  +description: "This is the updated     
+ description"                         │   description"                          
+ tags:                                │   tags:                                 
+   - alpha                            │     - alpha                             
+-  - beta                             │  +  - gamma                             
+ settings:                            │   settings:                             
+-  timeout: 30                        │  +  timeout: 60                         
+-  retries: 3                         │  +  retries: 5                          
+ extra:                               │   extra:                                
+-  key1: value1                       │  +  key1: changed1                      
+-  key2: value2                       │  +  key2: changed2                      
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                

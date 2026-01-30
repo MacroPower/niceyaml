@@ -30,8 +30,10 @@ type KeyMap struct {
 	NextRevision key.Binding
 	// PrevRevision navigates to the previous revision.
 	PrevRevision key.Binding
-	// ToggleDiffMode cycles through diff display modes.
+	// ToggleDiffMode cycles through diff computation modes.
 	ToggleDiffMode key.Binding
+	// ToggleViewMode cycles through view rendering modes.
+	ToggleViewMode key.Binding
 	// ToggleWordWrap toggles word wrapping.
 	ToggleWordWrap key.Binding
 }
@@ -82,6 +84,10 @@ func DefaultKeyMap() KeyMap {
 		ToggleDiffMode: key.NewBinding(
 			key.WithKeys("m"),
 			key.WithHelp("m", "toggle diff mode"),
+		),
+		ToggleViewMode: key.NewBinding(
+			key.WithKeys("v"),
+			key.WithHelp("v", "toggle view mode"),
 		),
 		ToggleWordWrap: key.NewBinding(
 			key.WithKeys("w"),

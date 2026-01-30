@@ -68,7 +68,8 @@ const (
 
 // ViewMode specifies how the viewport renders diff content.
 //
-// Use [Model.SetViewMode] to change the mode.
+// Use [Model.SetViewMode] to change the mode, or [Model.ToggleViewMode] to
+// cycle through modes.
 type ViewMode int
 
 const (
@@ -77,6 +78,8 @@ const (
 	ViewModeFull ViewMode = iota
 	// ViewModeHunks displays only changed lines with surrounding context.
 	ViewModeHunks
+	// ViewModeSideBySide displays before and after content in separate panes.
+	ViewModeSideBySide
 )
 
 // Option configures a [Model].
@@ -128,11 +131,11 @@ func New(opts ...Option) Model {
 // Create instances with [New].
 type Model struct {
 	// Style is the container style applied to the viewport frame.
-	Style    lipgloss.Style
-	printer  Printer
-	finder   Finder
-	revision *niceyaml.Revision
+	Style   lipgloss.Style
+	printer Printer
+	finder  Finder
 	// Cached diff between base and current revision.
+	revision   *niceyaml.Revision
 	diffResult *niceyaml.DiffResult
 	lines      *niceyaml.Source
 	// Current search query.
@@ -384,6 +387,18 @@ func (m *Model) SetViewMode(mode ViewMode) {
 	m.rerender()
 }
 
+// ToggleViewMode cycles between view modes.
+func (m *Model) ToggleViewMode() {
+	switch m.viewMode {
+	case ViewModeFull:
+		m.viewMode = ViewModeSideBySide
+	default:
+		m.viewMode = ViewModeFull
+	}
+
+	m.rerender()
+}
+
 // HunkContext returns the number of context lines shown around diff hunks.
 func (m *Model) HunkContext() int {
 	return m.hunkContext
@@ -529,7 +544,7 @@ func (m *Model) getDisplayLines() *niceyaml.Source {
 		return src
 	}
 
-	return m.getDiffResult().Full()
+	return m.getDiffResult().Unified()
 }
 
 // getDiffResult returns the cached [niceyaml.DiffResult], computing it if nil.
@@ -609,11 +624,30 @@ func scrollPercent(offset, visible, total int) float64 {
 
 // maxYOffset returns the maximum Y offset.
 func (m *Model) maxYOffset() int {
+	lineCount := m.lineCount()
+	if lineCount == 0 {
+		return 0
+	}
+
+	return max(0, lineCount-m.maxHeight())
+}
+
+// lineCount returns the line count for the current view mode.
+func (m *Model) lineCount() int {
+	if m.viewMode == ViewModeSideBySide {
+		before := m.getSideBySideIterator()
+		if before != nil {
+			return before.Len()
+		}
+
+		return 0
+	}
+
 	if m.lines == nil {
 		return 0
 	}
 
-	return max(0, m.lines.Len()-m.maxHeight())
+	return m.lines.Len()
 }
 
 // maxXOffset returns the maximum X offset.
@@ -780,11 +814,7 @@ func (m *Model) GotoBottom() {
 
 // TotalLineCount returns the total number of lines.
 func (m *Model) TotalLineCount() int {
-	if m.lines == nil {
-		return 0
-	}
-
-	return m.lines.Len()
+	return m.lineCount()
 }
 
 // VisibleLineCount returns the number of visible lines.
@@ -912,6 +942,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, m.KeyMap.ToggleDiffMode):
 			m.ToggleDiffMode()
 
+		case key.Matches(msg, m.KeyMap.ToggleViewMode):
+			m.ToggleViewMode()
+
 		case key.Matches(msg, m.KeyMap.ToggleWordWrap):
 			m.ToggleWordWrap()
 		}
@@ -991,6 +1024,7 @@ func (m *Model) renderContent(lines []string, contentW, contentH int) string {
 // The rendering behavior depends on the current [ViewMode]:
 //   - [ViewModeFull]: Renders all lines (default behavior).
 //   - [ViewModeHunks]: Renders only changed lines with 3 lines of context.
+//   - [ViewModeSideBySide]: Renders before and after content in separate panes.
 //
 //nolint:gocritic // hugeParam: required for tea.Model interface compatibility.
 func (m Model) View() string {
@@ -1005,6 +1039,9 @@ func (m Model) View() string {
 	case ViewModeHunks:
 		hunksContent := m.getHunksDiffContent()
 		lines = m.visibleLines(strings.Split(hunksContent, "\n"))
+
+	case ViewModeSideBySide:
+		return m.renderSideBySide(w, h)
 
 	default:
 		lines = m.visibleLines(nil)
@@ -1026,6 +1063,116 @@ func (m *Model) getHunksDiffContent() string {
 	source, ranges := m.getDiffResult().Hunks(m.hunkContext)
 
 	return m.printer.Print(source, ranges...)
+}
+
+// sideBySideSeparator is the column divider between panes.
+const sideBySideSeparator = " │ "
+
+// getSideBySideIterator returns a LineIterator for side-by-side mode.
+//
+// When not showing a diff (at origin revision or diff mode none), returns
+// m.lines. When showing a diff, returns the Before iterator from the diff result.
+// Returns nil if there is no content to display.
+func (m *Model) getSideBySideIterator() niceyaml.LineIterator {
+	if src, needsDiff := m.resolveRevisionSource(); !needsDiff {
+		if src == nil {
+			return nil
+		}
+
+		return src
+	}
+
+	return m.getDiffResult().Before()
+}
+
+// renderSideBySide renders the side-by-side view with two panes.
+//
+//nolint:gocritic // hugeParam: required for value receiver compatibility with View().
+func (m Model) renderSideBySide(contentW, contentH int) string {
+	// Get iterators for both panes.
+	var beforeIter, afterIter niceyaml.LineIterator
+	if src, needsDiff := m.resolveRevisionSource(); !needsDiff {
+		// Not showing a diff: show same content on both sides.
+		if src == nil {
+			return m.renderContent(nil, contentW, contentH)
+		}
+
+		beforeIter = src
+		afterIter = src
+	} else {
+		diff := m.getDiffResult()
+		beforeIter = diff.Before()
+		afterIter = diff.After()
+	}
+
+	// Calculate pane width (both panes use the same width).
+	separatorWidth := len(sideBySideSeparator)
+	availableWidth := contentW - separatorWidth
+	paneWidth := availableWidth / 2
+	extraPadding := availableWidth % 2 // Add to separator if odd.
+
+	// Determine visible span.
+	start := m.YOffset()
+	end := min(start+m.maxHeight(), beforeIter.Len())
+
+	if start >= end {
+		return m.renderContent(nil, contentW, contentH)
+	}
+
+	span := position.NewSpan(start, end)
+
+	// Render both panes.
+	m.printer.SetWordWrap(m.WrapEnabled)
+	m.printer.SetWidth(paneWidth)
+
+	leftContent := m.printer.Print(beforeIter, span)
+	rightContent := m.printer.Print(afterIter, span)
+
+	// Split into lines.
+	leftLines := strings.Split(leftContent, "\n")
+	rightLines := strings.Split(rightContent, "\n")
+
+	// Get text style for padding empty areas.
+	textStyle := lipgloss.NewStyle()
+	if st := m.printer.Style(style.Text); st != nil {
+		textStyle = *st
+	}
+
+	// Combine lines with separator, applying horizontal offset.
+	maxLines := max(len(leftLines), len(rightLines))
+	if m.FillHeight && maxLines < contentH {
+		maxLines = contentH
+	}
+
+	combined := make([]string, maxLines)
+	for i := range combined {
+		var left, right string
+		if i < len(leftLines) {
+			left = leftLines[i]
+		}
+		if i < len(rightLines) {
+			right = rightLines[i]
+		}
+
+		// Apply horizontal scrolling.
+		if !m.WrapEnabled {
+			left = ansi.Cut(left, m.xOffset, m.xOffset+paneWidth)
+			right = ansi.Cut(right, m.xOffset, m.xOffset+paneWidth)
+		}
+
+		// Pad left pane to consistent width for alignment.
+		leftPadded := ansi.Truncate(left, paneWidth, "")
+		if padding := paneWidth - ansi.StringWidth(leftPadded); padding > 0 {
+			leftPadded += textStyle.Render(strings.Repeat(" ", padding))
+		}
+
+		// Build separator with any extra padding from odd width.
+		separator := sideBySideSeparator + strings.Repeat(" ", extraPadding)
+
+		combined[i] = leftPadded + textStyle.Render(separator) + right
+	}
+
+	return m.renderContent(combined, contentW, contentH)
 }
 
 func clamp[T cmp.Ordered](v, low, high T) T {
