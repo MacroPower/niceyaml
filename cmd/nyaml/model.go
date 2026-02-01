@@ -18,6 +18,12 @@ import (
 	"jacobcolvin.com/niceyaml/style/theme"
 )
 
+// fileEntry holds a file path and its contents.
+type fileEntry struct {
+	path    string
+	content []byte
+}
+
 type modelOptions struct {
 	search      string
 	files       []fileEntry

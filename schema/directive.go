@@ -1,4 +1,4 @@
-package validator
+package schema
 
 import (
 	"regexp"
@@ -63,7 +63,7 @@ func ParseDocumentDirectives(tks token.Tokens) DocumentDirectives {
 	directives := make(DocumentDirectives)
 
 	for docIdx, docTokens := range tokens.SplitDocuments(tks) {
-		directive := parseDocumentDirective(docTokens)
+		directive := ParseDocumentDirective(docTokens)
 		if directive != nil {
 			directives[docIdx] = directive
 		}
@@ -72,11 +72,11 @@ func ParseDocumentDirectives(tks token.Tokens) DocumentDirectives {
 	return directives
 }
 
-// parseDocumentDirective extracts a schema directive from a single document's
+// ParseDocumentDirective extracts a schema directive from a single document's
 // tokens.
 //
 // Returns nil if no directive is found before content.
-func parseDocumentDirective(tks token.Tokens) *Directive {
+func ParseDocumentDirective(tks token.Tokens) *Directive {
 	for _, tk := range tks {
 		switch tk.Type {
 		case token.DocumentHeaderType:

@@ -1,4 +1,4 @@
-package validator_test
+package schema_test
 
 import (
 	"testing"
@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"jacobcolvin.com/niceyaml/internal/yamltest"
-	"jacobcolvin.com/niceyaml/schema/validator"
+	"jacobcolvin.com/niceyaml/schema"
 )
 
 func TestParseDirective(t *testing.T) {
@@ -17,35 +17,35 @@ func TestParseDirective(t *testing.T) {
 
 	tcs := map[string]struct {
 		input string
-		want  *validator.Directive
+		want  *schema.Directive
 	}{
 		"valid file path": {
 			input: " yaml-language-server: $schema=./schema.json",
-			want:  &validator.Directive{Schema: "./schema.json"},
+			want:  &schema.Directive{Schema: "./schema.json"},
 		},
 		"valid absolute path": {
 			input: " yaml-language-server: $schema=/path/to/schema.json",
-			want:  &validator.Directive{Schema: "/path/to/schema.json"},
+			want:  &schema.Directive{Schema: "/path/to/schema.json"},
 		},
 		"valid http URL": {
 			input: " yaml-language-server: $schema=http://example.com/schema.json",
-			want:  &validator.Directive{Schema: "http://example.com/schema.json"},
+			want:  &schema.Directive{Schema: "http://example.com/schema.json"},
 		},
 		"valid https URL": {
 			input: " yaml-language-server: $schema=https://example.com/schema.json",
-			want:  &validator.Directive{Schema: "https://example.com/schema.json"},
+			want:  &schema.Directive{Schema: "https://example.com/schema.json"},
 		},
 		"path with spaces": {
 			input: " yaml-language-server: $schema=./path with spaces/schema.json",
-			want:  &validator.Directive{Schema: "./path with spaces/schema.json"},
+			want:  &schema.Directive{Schema: "./path with spaces/schema.json"},
 		},
 		"no spaces after colon": {
 			input: " yaml-language-server:$schema=schema.json",
-			want:  &validator.Directive{Schema: "schema.json"},
+			want:  &schema.Directive{Schema: "schema.json"},
 		},
 		"extra spaces": {
 			input: " yaml-language-server:   $schema=schema.json",
-			want:  &validator.Directive{Schema: "schema.json"},
+			want:  &schema.Directive{Schema: "schema.json"},
 		},
 		"empty string": {
 			input: "",
@@ -73,7 +73,7 @@ func TestParseDirective(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := validator.ParseDirective(tc.input)
+			got := schema.ParseDirective(tc.input)
 
 			if tc.want == nil {
 				assert.Nil(t, got)
@@ -221,7 +221,7 @@ func TestParseDocumentDirectives(t *testing.T) {
 			t.Parallel()
 
 			tks := lexer.Tokenize(tc.input)
-			got := validator.ParseDocumentDirectives(tks)
+			got := schema.ParseDocumentDirectives(tks)
 
 			// Check expected directives exist.
 			for docIdx, wantSchema := range tc.want {
@@ -258,7 +258,7 @@ func TestParseDocumentDirectives_TokenBuilder(t *testing.T) {
 			tkb.Clone().Type(token.StringType).Value("value").Build(),
 		}
 
-		got := validator.ParseDocumentDirectives(tks)
+		got := schema.ParseDocumentDirectives(tks)
 
 		require.Len(t, got, 1)
 		require.NotNil(t, got[0])
@@ -286,7 +286,7 @@ func TestParseDocumentDirectives_TokenBuilder(t *testing.T) {
 			tkb.Clone().Type(token.StringType).Value("value2").Build(),
 		}
 
-		got := validator.ParseDocumentDirectives(tks)
+		got := schema.ParseDocumentDirectives(tks)
 
 		require.Len(t, got, 1)
 		require.NotNil(t, got[1])

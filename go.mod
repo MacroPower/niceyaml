@@ -6,6 +6,7 @@ require (
 	charm.land/bubbles/v2 v2.0.0-rc.1
 	charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251212194116-6348bd4b7475
 	charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251205162909-7869489d8971
+	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/charmbracelet/fang v0.4.4
 	github.com/charmbracelet/x/ansi v0.11.4
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20251201173703-9f73bfd934ff

@@ -62,8 +62,7 @@
 // [*ast.File] and [DocumentDecoder] provides the validation pipeline:
 //
 //	source := niceyaml.NewSourceFromString(yamlContent)
-//	file, _ := source.File()
-//	decoder := niceyaml.NewDecoder(file)
+//	decoder, _ := source.Decoder()
 //	for _, doc := range decoder.Documents() {
 //		var config Config
 //		if err := doc.Unmarshal(&config); err != nil {

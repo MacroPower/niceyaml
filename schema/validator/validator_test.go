@@ -680,10 +680,8 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 			t.Parallel()
 
 			source := niceyaml.NewSourceFromString(tc.input)
-			file, err := source.File()
+			d, err := source.Decoder()
 			require.NoError(t, err)
-
-			d := niceyaml.NewDecoder(file)
 
 			for _, dd := range d.Documents() {
 				err = dd.ValidateSchema(v)
@@ -967,10 +965,8 @@ func TestValidator_PathTarget(t *testing.T) {
 			require.NoError(t, err)
 
 			source := niceyaml.NewSourceFromString(tc.input)
-			file, err := source.File()
+			d, err := source.Decoder()
 			require.NoError(t, err)
-
-			d := niceyaml.NewDecoder(file)
 
 			for _, dd := range d.Documents() {
 				err = dd.ValidateSchema(v)
@@ -1103,10 +1099,8 @@ func TestValidator_SubErrorAnnotations(t *testing.T) {
 			require.NoError(t, err)
 
 			source := niceyaml.NewSourceFromString(tc.input)
-			file, err := source.File()
+			d, err := source.Decoder()
 			require.NoError(t, err)
-
-			d := niceyaml.NewDecoder(file)
 
 			for _, dd := range d.Documents() {
 				err = dd.ValidateSchema(v)

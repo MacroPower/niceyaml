@@ -86,6 +86,14 @@
 //	// <name-tag>key</name-tag><punctuation-mapping-value>:</punctuation-mapping-value>\
 //	// <text> </text><literal-string>value</literal-string>
 //
+// # Creating Test Documents
+//
+// [FirstDocument] and [FirstDocumentWithPath] create [*niceyaml.DocumentDecoder]
+// instances for testing schema matchers and validators:
+//
+//	doc := yamltest.FirstDocument(t, "kind: Deployment")
+//	docWithPath := yamltest.FirstDocumentWithPath(t, "on: push", ".github/workflows/ci.yaml")
+//
 // # Mocking Dependencies
 //
 // [MockSchemaValidator] and [MockNormalizer] let you test code paths that

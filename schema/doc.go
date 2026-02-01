@@ -26,6 +26,19 @@
 // [ErrPropertyNotFound] if the property does not exist. Use [MustGetProperty]
 // when the property is known to exist (panics on error).
 //
+// # Schema Directives
+//
+// Schema directives let YAML files declare their own schema, providing IDE
+// integration and explicit validation control. The directive format follows the
+// yaml-language-server convention, making schemas work seamlessly in editors
+// like VS Code:
+//
+//	# yaml-language-server: $schema=./config.schema.json
+//	name: example
+//
+// Use [ParseDirective] to extract the schema path from a single comment, and
+// [ParseDocumentDirectives] to handle multi-document streams.
+//
 // # Subpackages
 //
 // The [jacobcolvin.com/niceyaml/schema/generator] package generates JSON
