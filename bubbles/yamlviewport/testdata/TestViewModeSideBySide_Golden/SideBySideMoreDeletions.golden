@@ -1,9 +1,9 @@
- keep: start                          │   keep: start                           
--del1: a                              │  +ins1: x                               
--del2: b                              │                                         
--del3: c                              │                                         
--del4: d                              │                                         
- keep: end                            │   keep: end                             
+ keep: start                           │   keep: start                          
+-del1: a                               │  +ins1: x                              
+-del2: b                               │                                        
+-del3: c                               │                                        
+-del4: d                               │                                        
+ keep: end                             │   keep: end                            
                                                                                 
                                                                                 
                                                                                 

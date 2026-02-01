@@ -46,12 +46,11 @@ func testPrinterWithColors() *niceyaml.Printer {
 	)
 }
 
-// testPrinterWithSearch returns a printer with search highlight styles for testing.
+// testPrinterWithSearch returns a printer with XML-style search highlights for testing.
 func testPrinterWithSearch() *niceyaml.Printer {
 	return niceyaml.NewPrinter(
-		niceyaml.WithStyles(style.NewStyles(lipgloss.Style{},
-			style.Set(style.Search, lipgloss.NewStyle().Background(lipgloss.Color("11"))),
-			style.Set(style.SearchSelected, lipgloss.NewStyle().Background(lipgloss.Color("9"))),
+		niceyaml.WithStyles(yamltest.NewXMLStyles(
+			yamltest.XMLStyleInclude(style.Search, style.SearchSelected),
 		)),
 		niceyaml.WithStyle(lipgloss.NewStyle()),
 		niceyaml.WithGutter(niceyaml.DiffGutter()),
@@ -1996,6 +1995,28 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			width:  60,
 			height: 16,
 		},
+		"SideBySideTooNarrow": {
+			// Width <=4: renders empty without panic.
+			setupFunc: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("v2")))
+				m.GoToRevision(1)
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+			},
+			width:  0,
+			height: 10,
+		},
+		"SideBySideMinimal": {
+			// Width 5: paneWidth = (5-3)/2 = 1, minimum to render content.
+			setupFunc: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("v2")))
+				m.GoToRevision(1)
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+			},
+			width:  5,
+			height: 10,
+		},
 		"SideBySideMoreDeletions": {
 			// More deletions than insertions - placeholders on the right pane.
 			setupFunc: func(m *yamlviewport.Model) {
@@ -2047,6 +2068,89 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			},
 			width:  80,
 			height: 16,
+		},
+		"SideBySideSearch": {
+			// Verifies search highlights work in side-by-side mode.
+			setupFunc: func(m *yamlviewport.Model) {
+				m.SetPrinter(testPrinterWithSearch())
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("v2")))
+				m.GoToRevision(1)
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+				m.SetSearchTerm("modified")
+			},
+			width:  80,
+			height: 24,
+		},
+		"SideBySideSearchNavigate": {
+			// Verifies search navigation updates highlights in side-by-side mode.
+			setupFunc: func(m *yamlviewport.Model) {
+				m.SetPrinter(testPrinterWithSearch())
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("v2")))
+				m.GoToRevision(1)
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+				m.SetSearchTerm("enabled") // Appears in both revisions.
+				m.SearchNext()             // Navigate to second match.
+			},
+			width:  80,
+			height: 24,
+		},
+		"SideBySideSearchDeletedLine": {
+			// Verifies SearchSelected appears on deleted line (before pane only).
+			setupFunc: func(m *yamlviewport.Model) {
+				m.SetPrinter(testPrinterWithSearch())
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("v2")))
+				m.GoToRevision(1)
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+				m.SetSearchTerm("original") // Only in deleted line.
+			},
+			width:  80,
+			height: 24,
+		},
+		"SideBySideSearchInsertedLine": {
+			// Verifies SearchSelected appears on inserted line (after pane only).
+			setupFunc: func(m *yamlviewport.Model) {
+				m.SetPrinter(testPrinterWithSearch())
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("v2")))
+				m.GoToRevision(1)
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+				m.SetSearchTerm("modified") // Only in inserted line.
+			},
+			width:  80,
+			height: 24,
+		},
+		"SideBySideSearchBothSidesFirstSelected": {
+			// Search term appears on both deleted and inserted lines.
+			// First match (deleted/before) is selected.
+			setupFunc: func(m *yamlviewport.Model) {
+				m.SetPrinter(testPrinterWithSearch())
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("v2")))
+				m.GoToRevision(1)
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+				m.SetSearchTerm("name") // Appears on both deleted and inserted lines.
+				// First match is selected by default (before/deleted line).
+			},
+			width:  80,
+			height: 24,
+		},
+		"SideBySideSearchBothSidesSecondSelected": {
+			// Search term appears on both deleted and inserted lines.
+			// Second match (inserted/after) is selected.
+			setupFunc: func(m *yamlviewport.Model) {
+				m.SetPrinter(testPrinterWithSearch())
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("v2")))
+				m.GoToRevision(1)
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+				m.SetSearchTerm("name") // Appears on both deleted and inserted lines.
+				m.SearchNext()          // Move to second match (after/inserted line).
+			},
+			width:  80,
+			height: 24,
 		},
 	}
 
@@ -2357,4 +2461,53 @@ func TestViewport_SetSearchTermEmpty(t *testing.T) {
 	m.SetSearchTerm("")
 	assert.Empty(t, m.SearchTerm())
 	assert.Equal(t, 0, m.SearchCount())
+}
+
+func TestSideBySideSearch_MatchCounting(t *testing.T) {
+	t.Parallel()
+
+	// Before: "foo: a", "bar: b"
+	// After:  "foo: c", "bar: b"
+	// "foo" appears on deleted + inserted lines = 2 matches.
+	// "bar" appears on equal line = 1 match.
+	beforeYAML := yamltest.Input(`
+		foo: a
+		bar: b
+	`)
+	afterYAML := yamltest.Input(`
+		foo: c
+		bar: b
+	`)
+
+	tcs := map[string]struct {
+		searchTerm string
+		wantCount  int
+	}{
+		"EqualLine": {
+			searchTerm: "bar",
+			wantCount:  1, // Equal lines count as single match.
+		},
+		"DeletedAndInserted": {
+			searchTerm: "foo",
+			wantCount:  2, // Deleted and inserted lines are separate matches.
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+			m.SetWidth(80)
+			m.SetHeight(24)
+
+			m.AddRevision(niceyaml.NewSourceFromString(beforeYAML, niceyaml.WithName("v1")))
+			m.AddRevision(niceyaml.NewSourceFromString(afterYAML, niceyaml.WithName("v2")))
+			m.GoToRevision(1)
+			m.SetViewMode(yamlviewport.ViewModeSideBySide)
+			m.SetSearchTerm(tc.searchTerm)
+
+			assert.Equal(t, tc.wantCount, m.SearchCount())
+		})
+	}
 }

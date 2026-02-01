@@ -1,17 +1,17 @@
- name: original                       │   name: original                        
- count: 10                            │   count: 10                             
- enabled: true                        │   enabled: true                         
- description: "This is the original   │   description: "This is the original    
- description"                         │   description"                          
- tags:                                │   tags:                                 
-   - alpha                            │     - alpha                             
-   - beta                             │     - beta                              
- settings:                            │   settings:                             
-   timeout: 30                        │     timeout: 30                         
-   retries: 3                         │     retries: 3                          
- extra:                               │   extra:                                
-   key1: value1                       │     key1: value1                        
-   key2: value2                       │     key2: value2                        
+ name: original                        │   name: original                       
+ count: 10                             │   count: 10                            
+ enabled: true                         │   enabled: true                        
+ description: "This is the original    │   description: "This is the original   
+ description"                          │   description"                         
+ tags:                                 │   tags:                                
+   - alpha                             │     - alpha                            
+   - beta                              │     - beta                             
+ settings:                             │   settings:                            
+   timeout: 30                         │     timeout: 30                        
+   retries: 3                          │     retries: 3                         
+ extra:                                │   extra:                               
+   key1: value1                        │     key1: value1                       
+   key2: value2                        │     key2: value2                       
                                                                                 
                                                                                 
                                                                                 

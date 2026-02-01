@@ -2,8 +2,8 @@
  number: 42                                                                     
  bool: true                                                                     
  list:                                                                          
-   - [101mitem[m1                                                                      
-   - [103mitem[m2                                                                      
+   - <search-selected>item</search-selected>1                                   
+   - <search>item</search>2                                                     
  nested:                                                                        
    child: data                                                                  
                                                                                 

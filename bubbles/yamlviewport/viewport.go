@@ -2,6 +2,7 @@ package yamlviewport
 
 import (
 	"cmp"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -11,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"jacobcolvin.com/niceyaml"
+	"jacobcolvin.com/niceyaml/line"
 	"jacobcolvin.com/niceyaml/position"
 	"jacobcolvin.com/niceyaml/style"
 )
@@ -126,12 +128,21 @@ type Model struct {
 	// Cached diff between base and current revision.
 	revision   *niceyaml.Revision
 	diffResult *niceyaml.DiffResult
-	lines      *niceyaml.Source
+	// Left holds the source for the left pane or main content.
+	// In ViewModeFull/ViewModeHunks: Unified diff or plain content.
+	// In ViewModeSideBySide with diff: Before source.
+	// In ViewModeSideBySide without diff: plain content (same on both sides).
+	left *niceyaml.Source
+	// Right holds the right pane source for side-by-side diff rendering.
+	// Only populated when viewMode == ViewModeSideBySide and showing a diff.
+	right *niceyaml.Source
 	// Current search query.
 	searchTerm string
 	// KeyMap contains the keybindings for viewport navigation.
 	KeyMap         KeyMap
-	searchMatches  []position.Range
+	searchMatches  []searchMatch
+	leftMatches    []position.Range
+	rightMatches   []position.Range
 	horizontalStep int
 	diffMode       DiffMode
 	// MouseWheelDelta is the number of lines to scroll per mouse wheel tick.
@@ -440,20 +451,32 @@ func (m *Model) seekRevision(delta int) {
 // Actual rendering is deferred to renderVisible for on-demand rendering.
 func (m *Model) rerender() {
 	m.diffResult = nil // Invalidate cached diff result.
+	m.right = nil
 
-	lines := m.getDisplayLines()
-	if lines == nil {
-		m.lines = nil
+	// Handle side-by-side mode with diff specially.
+	if m.viewMode == ViewModeSideBySide {
+		if _, needsDiff := m.resolveRevisionSource(); needsDiff {
+			diff := m.getDiffResult()
+			m.left = diff.Before()
+			m.right = diff.After()
+			m.updateSideBySideSearchState()
+			m.applySideBySideOverlays()
+
+			return
+		}
+	}
+
+	// For other modes, use standard display lines.
+	left := m.getDisplayLines()
+	if left == nil {
+		m.left = nil
 
 		return
 	}
 
-	m.lines = lines
-
-	m.updateSearchState(lines)
-
-	// Apply search highlights via overlays.
-	m.applySearchOverlays(lines)
+	m.left = left
+	m.updateSearchState(left)
+	m.applySearchOverlays(left)
 }
 
 // applySearchOverlays sets overlay highlights for all search matches.
@@ -462,9 +485,140 @@ func (m *Model) applySearchOverlays(lines *niceyaml.Source) {
 
 	for i, match := range m.searchMatches {
 		if i == m.searchIndex {
-			lines.AddOverlay(style.SearchSelected, match)
+			lines.AddOverlay(style.SearchSelected, match.rng)
 		} else {
-			lines.AddOverlay(style.Search, match)
+			lines.AddOverlay(style.Search, match.rng)
+		}
+	}
+}
+
+// searchMatch pairs a match range with its source.
+type searchMatch struct {
+	rng    position.Range
+	inLeft bool
+}
+
+// updateSideBySideSearchState updates search matches for side-by-side mode.
+//
+// Matches are combined from both sources with deduplication: equal lines count
+// as a single match, while deleted/inserted lines are separate matches.
+func (m *Model) updateSideBySideSearchState() {
+	if m.searchTerm == "" {
+		m.searchMatches = nil
+		m.leftMatches = nil
+		m.rightMatches = nil
+
+		return
+	}
+
+	// Search on both sources and cache results for overlay application.
+	m.finder.Load(m.left)
+
+	m.leftMatches = m.finder.Find(m.searchTerm)
+
+	m.finder.Load(m.right)
+
+	m.rightMatches = m.finder.Find(m.searchTerm)
+
+	// Build combined match list. For equal lines, a match appears in both
+	// sources at the same position, so we deduplicate by (row, startCol).
+	// For deleted/inserted lines, the match only appears in one source.
+	//
+	// Track equal-line match positions from left source for deduplication.
+	equalLinePositions := make(map[position.Position]bool)
+	leftLines := m.left.Lines()
+
+	var combined []searchMatch
+
+	for _, match := range m.leftMatches {
+		combined = append(combined, searchMatch{rng: match, inLeft: true})
+
+		// Track equal-line matches for deduplication.
+		if match.Start.Line < len(leftLines) {
+			if leftLines[match.Start.Line].Flag == line.FlagDefault {
+				equalLinePositions[match.Start] = true
+			}
+		}
+	}
+
+	// Add matches from right source, skipping duplicates on equal lines.
+	for _, match := range m.rightMatches {
+		if equalLinePositions[match.Start] {
+			continue
+		}
+
+		combined = append(combined, searchMatch{rng: match, inLeft: false})
+	}
+
+	// Sort by position for consistent navigation order.
+	slices.SortFunc(combined, func(a, b searchMatch) int {
+		if a.rng.Start.Line != b.rng.Start.Line {
+			return cmp.Compare(a.rng.Start.Line, b.rng.Start.Line)
+		}
+
+		return cmp.Compare(a.rng.Start.Col, b.rng.Start.Col)
+	})
+
+	m.searchMatches = combined
+
+	// Adjust search index if matches changed.
+	switch {
+	case len(m.searchMatches) == 0:
+		m.searchIndex = -1
+	case m.searchIndex >= len(m.searchMatches), m.searchIndex < 0:
+		m.searchIndex = 0
+	}
+}
+
+// applySideBySideOverlays applies search highlights to both panes.
+func (m *Model) applySideBySideOverlays() {
+	if m.searchTerm == "" {
+		return
+	}
+
+	// Determine the selected match position and whether it's on an equal line.
+	var (
+		selectedPos                     position.Position
+		selectedInLeft, selectedIsEqual bool
+	)
+
+	if m.searchIndex >= 0 && m.searchIndex < len(m.searchMatches) {
+		selected := m.searchMatches[m.searchIndex]
+		selectedPos = selected.rng.Start
+		selectedInLeft = selected.inLeft
+
+		// Check if selected match is on an equal line.
+		leftLines := m.left.Lines()
+		if selectedPos.Line < len(leftLines) {
+			selectedIsEqual = leftLines[selectedPos.Line].Flag == line.FlagDefault
+		}
+	}
+
+	// Apply overlays to both sources using cached matches.
+	m.applySideBySidePaneOverlays(m.left, m.leftMatches, selectedPos, selectedInLeft || selectedIsEqual)
+	m.applySideBySidePaneOverlays(m.right, m.rightMatches, selectedPos, !selectedInLeft || selectedIsEqual)
+}
+
+// applySideBySidePaneOverlays applies search highlights to a single pane.
+// It uses cached matches and showSelected to determine the selected style.
+func (m *Model) applySideBySidePaneOverlays(
+	src *niceyaml.Source,
+	matches []position.Range,
+	selectedPos position.Position,
+	showSelected bool,
+) {
+	if src == nil {
+		return
+	}
+
+	src.ClearOverlays()
+
+	for _, match := range matches {
+		isSelected := match.Start == selectedPos && showSelected
+		if isSelected {
+			src.AddOverlay(style.SearchSelected, match)
+		} else {
+			src.AddOverlay(style.Search, match)
 		}
 	}
 }
@@ -473,13 +627,21 @@ func (m *Model) applySearchOverlays(lines *niceyaml.Source) {
 func (m *Model) updateSearchState(lines *niceyaml.Source) {
 	if m.searchTerm == "" {
 		m.searchMatches = nil
+		m.leftMatches = nil
+		m.rightMatches = nil
 
 		return
 	}
 
 	m.finder.Load(lines)
 
-	m.searchMatches = m.finder.Find(m.searchTerm)
+	// Convert ranges to searchMatch structs (inLeft is not used in unified mode).
+	ranges := m.finder.Find(m.searchTerm)
+	m.searchMatches = make([]searchMatch, len(ranges))
+
+	for i, rng := range ranges {
+		m.searchMatches[i] = searchMatch{rng: rng}
+	}
 
 	// Adjust search index if matches changed.
 	switch {
@@ -492,18 +654,18 @@ func (m *Model) updateSearchState(lines *niceyaml.Source) {
 
 // renderVisible renders only the visible slice of lines on demand.
 func (m *Model) renderVisible() []string {
-	if m.lines == nil {
+	if m.left == nil {
 		return nil
 	}
 
 	start := m.YOffset()
-	end := min(start+m.maxHeight(), m.lines.Len())
+	end := min(start+m.maxHeight(), m.left.Len())
 
 	if start >= end {
 		return nil
 	}
 
-	content := m.printer.Print(m.lines, position.NewSpan(start, end))
+	content := m.printer.Print(m.left, position.NewSpan(start, end))
 
 	return strings.Split(content, "\n")
 }
@@ -583,21 +745,21 @@ func (m *Model) PastBottom() bool {
 
 // ScrollPercent returns the vertical scroll position as a float between 0 and 1.
 func (m *Model) ScrollPercent() float64 {
-	if m.lines == nil {
+	if m.left == nil {
 		return 1.0
 	}
 
-	return scrollPercent(m.YOffset(), m.maxHeight(), m.lines.Len())
+	return scrollPercent(m.YOffset(), m.maxHeight(), m.left.Len())
 }
 
 // HorizontalScrollPercent returns the horizontal scroll position as a float
 // between 0 and 1.
 func (m *Model) HorizontalScrollPercent() float64 {
-	if m.lines == nil {
+	if m.left == nil {
 		return 1.0
 	}
 
-	return scrollPercent(m.xOffset, m.maxWidth(), m.lines.Width())
+	return scrollPercent(m.xOffset, m.maxWidth(), m.left.Width())
 }
 
 // scrollPercent calculates scroll position as a value between 0 and 1.
@@ -623,29 +785,20 @@ func (m *Model) maxYOffset() int {
 
 // lineCount returns the line count for the current view mode.
 func (m *Model) lineCount() int {
-	if m.viewMode == ViewModeSideBySide {
-		before := m.getSideBySideIterator()
-		if before != nil {
-			return before.Len()
-		}
-
+	if m.left == nil {
 		return 0
 	}
 
-	if m.lines == nil {
-		return 0
-	}
-
-	return m.lines.Len()
+	return m.left.Len()
 }
 
 // maxXOffset returns the maximum X offset.
 func (m *Model) maxXOffset() int {
-	if m.lines == nil {
+	if m.left == nil {
 		return 0
 	}
 
-	return max(0, m.lines.Width()-m.maxWidth())
+	return max(0, m.left.Width()-m.maxWidth())
 }
 
 // maxWidth returns the content width accounting for frame size.
@@ -660,7 +813,7 @@ func (m *Model) maxHeight() int {
 
 // hasContent reports whether there is content to display.
 func (m *Model) hasContent() bool {
-	return m.lines != nil && !m.lines.IsEmpty()
+	return m.left != nil && !m.left.IsEmpty()
 }
 
 // hasRevision reports whether a revision exists.
@@ -669,7 +822,7 @@ func (m *Model) hasRevision() bool {
 }
 
 // visibleLines returns the lines currently visible in the viewport.
-// If lines is nil, renders the visible portion of m.lines on demand.
+// If lines is nil, renders the visible portion of m.left on demand.
 func (m *Model) visibleLines(lines []string) []string {
 	maxHeight := m.maxHeight()
 	maxWidth := m.maxWidth()
@@ -856,8 +1009,10 @@ func (m *Model) navigateSearch(delta int) {
 	m.searchIndex = (m.searchIndex + delta + len(m.searchMatches)) % len(m.searchMatches)
 
 	// Update overlays; rendering happens lazily in View.
-	if m.lines != nil {
-		m.applySearchOverlays(m.lines)
+	if m.viewMode == ViewModeSideBySide && m.right != nil {
+		m.applySideBySideOverlays()
+	} else if m.left != nil {
+		m.applySearchOverlays(m.left)
 	}
 
 	m.scrollToCurrentMatch()
@@ -881,7 +1036,7 @@ func (m *Model) scrollToCurrentMatch() {
 	}
 
 	match := m.searchMatches[m.searchIndex]
-	startLine := match.Start.Line
+	startLine := match.rng.Start.Line
 
 	// Center the match in the viewport.
 	m.SetYOffset(startLine - m.maxHeight()/2)
@@ -1057,52 +1212,41 @@ func (m *Model) getHunksDiffContent() string {
 // sideBySideSeparator is the column divider between panes.
 const sideBySideSeparator = " │ "
 
-// getSideBySideIterator returns a LineIterator for side-by-side mode.
-//
-// When not showing a diff (at origin revision or diff mode none), returns
-// m.lines. When showing a diff, returns the Before iterator from the diff result.
-// Returns nil if there is no content to display.
-func (m *Model) getSideBySideIterator() niceyaml.LineIterator {
-	if src, needsDiff := m.resolveRevisionSource(); !needsDiff {
-		if src == nil {
-			return nil
-		}
-
-		return src
-	}
-
-	return m.getDiffResult().Before()
-}
-
 // renderSideBySide renders the side-by-side view with two panes.
 //
 //nolint:gocritic // hugeParam: required for value receiver compatibility with View().
 func (m Model) renderSideBySide(contentW, contentH int) string {
 	// Get iterators for both panes.
-	var beforeIter, afterIter niceyaml.LineIterator
+	var leftIter, rightIter niceyaml.LineIterator
 	if src, needsDiff := m.resolveRevisionSource(); !needsDiff {
 		// Not showing a diff: show same content on both sides.
 		if src == nil {
 			return m.renderContent(nil, contentW, contentH)
 		}
 
-		beforeIter = src
-		afterIter = src
+		leftIter = src
+		rightIter = src
 	} else {
-		diff := m.getDiffResult()
-		beforeIter = diff.Before()
-		afterIter = diff.After()
+		// Use cached sources which have overlays applied.
+		leftIter = m.left
+		rightIter = m.right
 	}
 
 	// Calculate pane width (both panes use the same width).
-	separatorWidth := len(sideBySideSeparator)
+	separatorWidth := ansi.StringWidth(sideBySideSeparator)
 	availableWidth := contentW - separatorWidth
 	paneWidth := availableWidth / 2
+
+	// Need room for separator plus at least 1 character per pane.
+	if paneWidth < 1 {
+		return m.renderContent(nil, contentW, contentH)
+	}
+
 	extraPadding := availableWidth % 2 // Add to separator if odd.
 
 	// Determine visible span.
 	start := m.YOffset()
-	end := min(start+m.maxHeight(), beforeIter.Len())
+	end := min(start+m.maxHeight(), leftIter.Len())
 
 	if start >= end {
 		return m.renderContent(nil, contentW, contentH)
@@ -1114,8 +1258,8 @@ func (m Model) renderSideBySide(contentW, contentH int) string {
 	m.printer.SetWordWrap(m.WrapEnabled)
 	m.printer.SetWidth(paneWidth)
 
-	leftContent := m.printer.Print(beforeIter, span)
-	rightContent := m.printer.Print(afterIter, span)
+	leftContent := m.printer.Print(leftIter, span)
+	rightContent := m.printer.Print(rightIter, span)
 
 	// Split into lines.
 	leftLines := strings.Split(leftContent, "\n")
