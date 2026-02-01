@@ -2130,6 +2130,16 @@ func TestPrinter_Golden(t *testing.T) {
 				niceyaml.WithGutter(niceyaml.NoGutter()),
 			},
 		},
+		"word wrap with colors": {
+			opts: []niceyaml.PrinterOption{
+				niceyaml.WithStyles(theme.Charm()),
+				niceyaml.WithStyle(lipgloss.NewStyle()),
+			},
+			setupFunc: func(p *niceyaml.Printer, _ *niceyaml.Source) {
+				p.SetWidth(40)
+				p.SetWordWrap(true)
+			},
+		},
 		"default colors with line numbers": {
 			opts: []niceyaml.PrinterOption{
 				niceyaml.WithStyles(theme.Charm()),

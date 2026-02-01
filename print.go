@@ -196,7 +196,14 @@ func renderLineNumber(ctx GutterContext) string {
 // renderDiffMarker renders the diff marker portion of a gutter.
 func renderDiffMarker(ctx GutterContext) string {
 	if ctx.Soft {
-		return " "
+		switch ctx.Flag {
+		case line.FlagInserted:
+			return ctx.Styles.Style(style.GenericInserted).Render(" ")
+		case line.FlagDeleted:
+			return ctx.Styles.Style(style.GenericDeleted).Render(" ")
+		default:
+			return ctx.Styles.Style(style.Text).Render(" ")
+		}
 	}
 
 	switch ctx.Flag {
