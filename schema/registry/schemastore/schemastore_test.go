@@ -70,9 +70,9 @@ func TestSchemaStore_FindMatch(t *testing.T) {
 			filePath: ".github/dependabot.yml",
 			wantName: "Dependabot",
 		},
-		"no match for json schema": {
+		"matches json file": {
 			filePath: "schema.json",
-			wantNil:  true,
+			wantName: "JSON Schema Draft 7",
 		},
 		"no match for unrelated file": {
 			filePath: "config.yaml",

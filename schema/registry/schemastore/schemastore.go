@@ -338,9 +338,9 @@ func (s *SchemaStore) fetchCatalogLocked(ctx context.Context) error {
 	return nil
 }
 
-// filterAndNormalizeEntries filters catalog entries to only those with YAML
-// patterns that pass the configured filter. It also normalizes each entry's
-// FileMatch to contain only YAML-related patterns.
+// filterAndNormalizeEntries filters catalog entries to only those with
+// supported patterns that pass the configured filter. It also normalizes each
+// entry's FileMatch to contain only supported patterns (YAML and JSON files).
 func (s *SchemaStore) filterAndNormalizeEntries(schemas []CatalogEntry) []CatalogEntry {
 	entries := make([]CatalogEntry, 0, len(schemas))
 
@@ -360,27 +360,31 @@ func (s *SchemaStore) filterAndNormalizeEntries(schemas []CatalogEntry) []Catalo
 			continue
 		}
 
-		// Only consider YAML-related patterns.
-		yamlPatterns := filterYAMLPatterns(entry.FileMatch)
-		if len(yamlPatterns) == 0 {
+		// Only consider YAML and JSON patterns.
+		supportedPatterns := filterSupportedPatterns(entry.FileMatch)
+		if len(supportedPatterns) == 0 {
 			continue
 		}
 
-		// Store entry with only YAML patterns.
-		entry.FileMatch = yamlPatterns
+		// Store entry with only supported patterns.
+		entry.FileMatch = supportedPatterns
 		entries = append(entries, entry)
 	}
 
 	return entries
 }
 
-// filterYAMLPatterns returns only patterns that match YAML files.
-func filterYAMLPatterns(patterns []string) []string {
+// filterSupportedPatterns returns patterns that match YAML-compatible files.
+// This includes .yaml, .yml, and .json extensions since JSON is a valid
+// subset of YAML.
+func filterSupportedPatterns(patterns []string) []string {
 	var result []string
 
 	for _, pattern := range patterns {
 		lower := strings.ToLower(pattern)
-		if strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml") {
+		if strings.HasSuffix(lower, ".yaml") ||
+			strings.HasSuffix(lower, ".yml") ||
+			strings.HasSuffix(lower, ".json") {
 			result = append(result, pattern)
 		}
 	}
