@@ -528,7 +528,7 @@ func (m *Model) updateSideBySideSearchState() {
 	equalLinePositions := make(map[position.Position]bool)
 	leftLines := m.left.Lines()
 
-	var combined []searchMatch
+	combined := make([]searchMatch, 0, len(m.leftMatches)+len(m.rightMatches))
 
 	for _, match := range m.leftMatches {
 		combined = append(combined, searchMatch{rng: match, inLeft: true})
