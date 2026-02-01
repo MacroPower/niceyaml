@@ -14,6 +14,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema/loader"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
 	"go.jacobcolvin.com/niceyaml/schema/registry"
+	"go.jacobcolvin.com/niceyaml/schema/registry/schemastore"
 )
 
 func validateCmd() *cobra.Command {
@@ -35,7 +36,7 @@ func validateCmd() *cobra.Command {
 			}
 
 			// Build registry once for all files to enable cross-file schema caching.
-			reg := buildRegistry(schemaRef)
+			reg := buildRegistry(cmd.Context(), schemaRef)
 
 			var errs []error
 
@@ -103,8 +104,9 @@ func validateFile(ctx context.Context, yamlPath string, reg *registry.Registry) 
 // the current working directory.
 //
 // Otherwise, directive-based matching is enabled with per-file resolution
-// (schemas referenced in directives are resolved relative to each YAML file).
-func buildRegistry(schemaRef string) *registry.Registry {
+// (schemas referenced in directives are resolved relative to each YAML file),
+// followed by SchemaStore automatic discovery.
+func buildRegistry(ctx context.Context, schemaRef string) *registry.Registry {
 	reg := registry.New()
 
 	// CLI schema flag takes precedence - register first with always-matching.
@@ -126,6 +128,14 @@ func buildRegistry(schemaRef string) *registry.Registry {
 	// Directive-based matching when no CLI flag provided.
 	// Directive resolves schemas relative to each YAML file.
 	reg.Register(registry.Directive())
+
+	// SchemaStore automatic discovery (best-effort).
+	store, err := schemastore.New(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: schemastore unavailable: %v\n", err)
+	} else {
+		reg.Register(store)
+	}
 
 	return reg
 }
