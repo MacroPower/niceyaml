@@ -22,25 +22,21 @@ var (
 func TestNewDecoder(t *testing.T) {
 	t.Parallel()
 
-	t.Run("creates decoder from ast.File", func(t *testing.T) {
+	t.Run("creates decoder from source", func(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString("key: value")
-		file, err := source.File()
+		d, err := source.Decoder()
 		require.NoError(t, err)
-
-		d := niceyaml.NewDecoder(file)
 		require.NotNil(t, d)
 	})
 
-	t.Run("creates decoder from empty file", func(t *testing.T) {
+	t.Run("creates decoder from empty source", func(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString("")
-		file, err := source.File()
+		d, err := source.Decoder()
 		require.NoError(t, err)
-
-		d := niceyaml.NewDecoder(file)
 		require.NotNil(t, d)
 		assert.Equal(t, 1, d.Len())
 	})
@@ -88,10 +84,9 @@ func TestDecoder_Len(t *testing.T) {
 			t.Parallel()
 
 			source := niceyaml.NewSourceFromString(tc.input)
-			file, err := source.File()
+			d, err := source.Decoder()
 			require.NoError(t, err)
 
-			d := niceyaml.NewDecoder(file)
 			got := d.Len()
 
 			assert.Equal(t, tc.want, got)
@@ -182,10 +177,8 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 			t.Parallel()
 
 			source := niceyaml.NewSourceFromString(tc.input)
-			file, err := source.File()
+			d, err := source.Decoder()
 			require.NoError(t, err)
-
-			d := niceyaml.NewDecoder(file)
 
 			var (
 				gotVals  []string
@@ -216,10 +209,8 @@ func TestDocumentDecoder_Decode(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString("key: value")
-		file, err := source.File()
+		d, err := source.Decoder()
 		require.NoError(t, err)
-
-		d := niceyaml.NewDecoder(file)
 
 		for _, dd := range d.Documents() {
 			var result map[string]string
@@ -238,10 +229,8 @@ func TestDocumentDecoder_Decode(t *testing.T) {
 			value: 42
 		`)
 		source := niceyaml.NewSourceFromString(input)
-		file, err := source.File()
+		d, err := source.Decoder()
 		require.NoError(t, err)
-
-		d := niceyaml.NewDecoder(file)
 
 		for _, dd := range d.Documents() {
 			var result testStruct
@@ -261,10 +250,8 @@ func TestDocumentDecoder_Decode(t *testing.T) {
 			- three
 		`)
 		source := niceyaml.NewSourceFromString(input)
-		file, err := source.File()
+		d, err := source.Decoder()
 		require.NoError(t, err)
-
-		d := niceyaml.NewDecoder(file)
 
 		for _, dd := range d.Documents() {
 			var result []string
@@ -287,10 +274,8 @@ func TestDocumentDecoder_Decode(t *testing.T) {
 			value: 2
 		`)
 		source := niceyaml.NewSourceFromString(input)
-		file, err := source.File()
+		d, err := source.Decoder()
 		require.NoError(t, err)
-
-		d := niceyaml.NewDecoder(file)
 
 		var results []testStruct
 		for _, dd := range d.Documents() {
@@ -315,10 +300,8 @@ func TestDocumentDecoder_Decode_TypeMismatch(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString("value: not_a_number")
-		file, err := source.File()
+		d, err := source.Decoder()
 		require.NoError(t, err)
-
-		d := niceyaml.NewDecoder(file)
 
 		for _, dd := range d.Documents() {
 			var target struct{ Value int }
@@ -340,10 +323,8 @@ func TestDocumentDecoder_DecodeContext(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString("key: value")
-		file, err := source.File()
+		d, err := source.Decoder()
 		require.NoError(t, err)
-
-		d := niceyaml.NewDecoder(file)
 
 		for _, dd := range d.Documents() {
 			var result map[string]string
@@ -367,10 +348,8 @@ func TestDocumentDecoder_Unmarshal(t *testing.T) {
 			value: 42
 		`)
 		source := niceyaml.NewSourceFromString(input)
-		file, err := source.File()
+		d, err := source.Decoder()
 		require.NoError(t, err)
-
-		d := niceyaml.NewDecoder(file)
 
 		for _, dd := range d.Documents() {
 			var result schemaValidatorConfig
@@ -391,10 +370,8 @@ func TestDocumentDecoder_Unmarshal(t *testing.T) {
 			value: 42
 		`)
 		source := niceyaml.NewSourceFromString(input)
-		file, err := source.File()
+		d, err := source.Decoder()
 		require.NoError(t, err)
-
-		d := niceyaml.NewDecoder(file)
 
 		for _, dd := range d.Documents() {
 			var result schemaValidatorConfig
@@ -412,10 +389,8 @@ func TestDocumentDecoder_Unmarshal(t *testing.T) {
 			value: 42
 		`)
 		source := niceyaml.NewSourceFromString(input)
-		file, err := source.File()
+		d, err := source.Decoder()
 		require.NoError(t, err)
-
-		d := niceyaml.NewDecoder(file)
 
 		for _, dd := range d.Documents() {
 			var result plainConfig
@@ -439,10 +414,8 @@ func TestDocumentDecoder_UnmarshalContext(t *testing.T) {
 			value: 42
 		`)
 		source := niceyaml.NewSourceFromString(input)
-		file, err := source.File()
+		d, err := source.Decoder()
 		require.NoError(t, err)
-
-		d := niceyaml.NewDecoder(file)
 
 		for _, dd := range d.Documents() {
 			var result schemaValidatorConfig
@@ -463,10 +436,8 @@ func TestDocumentDecoder_UnmarshalContext(t *testing.T) {
 			value: 42
 		`)
 		source := niceyaml.NewSourceFromString(input)
-		file, err := source.File()
+		d, err := source.Decoder()
 		require.NoError(t, err)
-
-		d := niceyaml.NewDecoder(file)
 
 		for _, dd := range d.Documents() {
 			var result schemaValidatorConfig
@@ -516,10 +487,9 @@ func TestDocumentDecoder_GetValue_DirectiveBody(t *testing.T) {
 ---
 key: value`
 	source := niceyaml.NewSourceFromString(input)
-	file, err := source.File()
+	d, err := source.Decoder()
 	require.NoError(t, err)
 
-	d := niceyaml.NewDecoder(file)
 	path := paths.Root().Child("key").Path()
 
 	var foundAny bool
@@ -540,10 +510,8 @@ func TestDocumentDecoder_UnmarshalContext_DecodeError(t *testing.T) {
 	// Test when DecodeContext after validation fails.
 	input := `value: not_a_number`
 	source := niceyaml.NewSourceFromString(input)
-	file, err := source.File()
+	d, err := source.Decoder()
 	require.NoError(t, err)
-
-	d := niceyaml.NewDecoder(file)
 
 	for _, dd := range d.Documents() {
 		var result strictSchemaValidatorConfig
@@ -564,13 +532,11 @@ func TestDocumentDecoder_DecodeContext_CanceledContext(t *testing.T) {
 	// Test DecodeContext with a canceled context to trigger the non-yaml error path.
 	input := `key: value`
 	source := niceyaml.NewSourceFromString(input)
-	file, err := source.File()
+	d, err := source.Decoder()
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel() // Cancel immediately.
-
-	d := niceyaml.NewDecoder(file)
 
 	for _, dd := range d.Documents() {
 		var result map[string]string
@@ -594,10 +560,8 @@ func TestDocumentDecoder_Decode_Validator(t *testing.T) {
 			value: 42
 		`)
 		source := niceyaml.NewSourceFromString(input)
-		file, err := source.File()
+		d, err := source.Decoder()
 		require.NoError(t, err)
-
-		d := niceyaml.NewDecoder(file)
 
 		for _, dd := range d.Documents() {
 			var result validatorConfig
@@ -618,10 +582,8 @@ func TestDocumentDecoder_Decode_Validator(t *testing.T) {
 			value: 42
 		`)
 		source := niceyaml.NewSourceFromString(input)
-		file, err := source.File()
+		d, err := source.Decoder()
 		require.NoError(t, err)
-
-		d := niceyaml.NewDecoder(file)
 
 		for _, dd := range d.Documents() {
 			var result plainConfig
@@ -641,10 +603,8 @@ func TestDocumentDecoder_Decode_Validator(t *testing.T) {
 			value: 42
 		`)
 		source := niceyaml.NewSourceFromString(input)
-		file, err := source.File()
+		d, err := source.Decoder()
 		require.NoError(t, err)
-
-		d := niceyaml.NewDecoder(file)
 
 		for _, dd := range d.Documents() {
 			var result bothValidatorConfig
@@ -664,10 +624,8 @@ func TestDocumentDecoder_Decode_Validator(t *testing.T) {
 			value: 42
 		`)
 		source := niceyaml.NewSourceFromString(input)
-		file, err := source.File()
+		d, err := source.Decoder()
 		require.NoError(t, err)
-
-		d := niceyaml.NewDecoder(file)
 
 		for _, dd := range d.Documents() {
 			var result bothValidatorConfig
@@ -786,10 +744,8 @@ func TestDecoder_Documents(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString("key: value")
-		file, err := source.File()
+		d, err := source.Decoder()
 		require.NoError(t, err)
-
-		d := niceyaml.NewDecoder(file)
 
 		var count int
 		for i, dd := range d.Documents() {
@@ -814,10 +770,8 @@ func TestDecoder_Documents(t *testing.T) {
 			c: 3
 		`)
 		source := niceyaml.NewSourceFromString(input)
-		file, err := source.File()
+		d, err := source.Decoder()
 		require.NoError(t, err)
-
-		d := niceyaml.NewDecoder(file)
 
 		var count int
 		for i, dd := range d.Documents() {
@@ -842,10 +796,8 @@ func TestDecoder_Documents(t *testing.T) {
 			c: 3
 		`)
 		source := niceyaml.NewSourceFromString(input)
-		file, err := source.File()
+		d, err := source.Decoder()
 		require.NoError(t, err)
-
-		d := niceyaml.NewDecoder(file)
 
 		var count int
 		for range d.Documents() {
@@ -870,10 +822,9 @@ func TestDocumentDecoder_ValidateSchema(t *testing.T) {
 			count: 42
 		`)
 		source := niceyaml.NewSourceFromString(input)
-		file, err := source.File()
+		d, err := source.Decoder()
 		require.NoError(t, err)
 
-		d := niceyaml.NewDecoder(file)
 		validator := yamltest.NewPassingSchemaValidator()
 
 		for _, dd := range d.Documents() {
@@ -890,10 +841,9 @@ func TestDocumentDecoder_ValidateSchema(t *testing.T) {
 			count: not-a-number
 		`)
 		source := niceyaml.NewSourceFromString(input)
-		file, err := source.File()
+		d, err := source.Decoder()
 		require.NoError(t, err)
 
-		d := niceyaml.NewDecoder(file)
 		wantErr := errors.New("validation failed")
 		validator := yamltest.NewFailingSchemaValidator(wantErr)
 

@@ -8,9 +8,18 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/token"
 
 	"jacobcolvin.com/niceyaml/paths"
+	"jacobcolvin.com/niceyaml/tokens"
 )
+
+// SourceDecoder provides access to YAML documents from a [*Source].
+// See [Source] for an implementation.
+type SourceDecoder interface {
+	// Decoder returns a [*Decoder] for iterating over documents.
+	Decoder() (*Decoder, error)
+}
 
 // Validator is implemented by types that validate themselves.
 //
@@ -33,41 +42,80 @@ type SchemaValidator interface {
 	ValidateSchema(data any) error
 }
 
-// Decoder iterates over YAML documents in a parsed [*ast.File].
+// Decoder iterates over YAML documents in a [*Source].
 //
 // A single YAML file can contain multiple documents separated by "---".
 // These documents often have different schemas and/or validation requirements.
 // Decoder provides lazy iteration over these documents, providing a
 // [DocumentDecoder] for each.
 //
-//	dec := niceyaml.NewDecoder(file)
+//	dec, err := source.Decoder()
 //	for _, dd := range dec.Documents() {
 //		// Each dd is a DocumentDecoder instance.
 //	}
 //
-// Create instances with [NewDecoder].
+// Create instances with [Source.Decoder].
 type Decoder struct {
-	f *ast.File
+	source *Source
+	file   *ast.File
 }
 
-// NewDecoder creates a new [*Decoder] for the given [*ast.File].
-func NewDecoder(f *ast.File) *Decoder {
-	return &Decoder{f: f}
+// NewDecoder creates a new [*Decoder] for the given [*Source].
+//
+// Returns an error if the source cannot be parsed.
+func NewDecoder(s *Source) (*Decoder, error) {
+	f, err := s.File()
+	if err != nil {
+		return nil, err
+	}
+
+	return &Decoder{source: s, file: f}, nil
+}
+
+// Source returns the underlying [*Source].
+func (d *Decoder) Source() *Source {
+	return d.source
 }
 
 // Len returns the number of YAML documents in the file.
 func (d *Decoder) Len() int {
-	return len(d.f.Docs)
+	return len(d.file.Docs)
 }
 
 // Documents returns an iterator over all documents in the YAML file.
 //
 // Each iteration yields the document index and a [*DocumentDecoder] for that
-// document.
+// document. The [*DocumentDecoder] receives context from the [*Source]
+// including file path, tokens, and document index.
 func (d *Decoder) Documents() iter.Seq2[int, *DocumentDecoder] {
+	filePath := d.source.FilePath()
+	srcTokens := d.source.Tokens()
+
 	return func(yield func(int, *DocumentDecoder) bool) {
-		for i, doc := range d.f.Docs {
-			if !yield(i, NewDocumentDecoder(doc)) {
+		var (
+			nextTokens func() (int, token.Tokens, bool)
+			stop       func()
+		)
+
+		if srcTokens != nil {
+			nextTokens, stop = iter.Pull2(tokens.SplitDocuments(srcTokens))
+			defer stop()
+		}
+
+		for i, doc := range d.file.Docs {
+			var tks token.Tokens
+			if nextTokens != nil {
+				_, tks, _ = nextTokens()
+			}
+
+			dd := &DocumentDecoder{
+				doc:      doc,
+				index:    i,
+				tokens:   tks,
+				filePath: filePath,
+			}
+
+			if !yield(i, dd) {
 				return
 			}
 		}
@@ -98,17 +146,51 @@ func (d *Decoder) Documents() iter.Seq2[int, *DocumentDecoder] {
 // validation hooks. All decoding methods convert YAML errors to [Error]
 // with source annotations.
 //
-// Create instances with [NewDocumentDecoder].
+// Create instances with [NewDocumentDecoder] or iterate with [Decoder.Documents].
 type DocumentDecoder struct {
-	doc *ast.DocumentNode
+	doc      *ast.DocumentNode
+	filePath string
+	tokens   token.Tokens
+	index    int
 }
 
 // NewDocumentDecoder creates a new [*DocumentDecoder] for the given
 // [*ast.DocumentNode].
+//
+// For full context (index, tokens, file path), use [Decoder.Documents] instead,
+// which propagates context from the [Decoder].
 func NewDocumentDecoder(doc *ast.DocumentNode) *DocumentDecoder {
 	return &DocumentDecoder{
 		doc: doc,
 	}
+}
+
+// Document returns the underlying [*ast.DocumentNode].
+func (dd *DocumentDecoder) Document() *ast.DocumentNode {
+	return dd.doc
+}
+
+// Index returns the 0-indexed position of this document within the file.
+//
+// Returns 0 if created with [NewDocumentDecoder] without context.
+func (dd *DocumentDecoder) Index() int {
+	return dd.index
+}
+
+// Tokens returns the tokens for this document.
+//
+// Returns nil if created with [NewDocumentDecoder] without context or if the
+// [Decoder] was created without tokens.
+func (dd *DocumentDecoder) Tokens() token.Tokens {
+	return dd.tokens
+}
+
+// FilePath returns the file path of the source file.
+//
+// Returns an empty string if created with [NewDocumentDecoder] without context
+// or if the [Decoder] was created without a file path.
+func (dd *DocumentDecoder) FilePath() string {
+	return dd.filePath
 }
 
 // GetValue extracts a raw YAML value without unmarshaling.

@@ -2,7 +2,9 @@ package niceyaml
 
 import (
 	"errors"
+	"fmt"
 	"iter"
+	"os"
 	"sync"
 
 	"github.com/goccy/go-yaml"
@@ -57,10 +59,11 @@ type LineIterator interface {
 // thread-safe; a Source can be highlighted from multiple goroutines while
 // being rendered.
 //
-// Create instances with [NewSourceFromString], [NewSourceFromToken], or
-// [NewSourceFromTokens].
+// Create instances with [NewSourceFromFile], [NewSourceFromString],
+// [NewSourceFromToken], or [NewSourceFromTokens].
 type Source struct {
 	name       string
+	filePath   string
 	lines      line.Lines
 	file       *ast.File
 	fileErr    error
@@ -74,6 +77,7 @@ type Source struct {
 //
 // Available options:
 //   - [WithName]
+//   - [WithFilePath]
 //   - [WithParserOptions]
 //   - [WithErrorOptions]
 type SourceOption func(*Source)
@@ -82,6 +86,20 @@ type SourceOption func(*Source)
 func WithName(name string) SourceOption {
 	return func(s *Source) {
 		s.name = name
+	}
+}
+
+// WithFilePath is a [SourceOption] that sets the file path for the [Source].
+//
+// This is used by [Decoder] to propagate file path context to
+// [DocumentDecoder] instances, enabling schema matchers to route based on
+// file location.
+//
+// For file-based sources, use [NewSourceFromFile] which sets this
+// automatically.
+func WithFilePath(path string) SourceOption {
+	return func(s *Source) {
+		s.filePath = path
 	}
 }
 
@@ -102,6 +120,24 @@ func WithErrorOptions(opts ...ErrorOption) SourceOption {
 	return func(s *Source) {
 		s.errorOpts = opts
 	}
+}
+
+// NewSourceFromFile creates a new [*Source] by reading a file from disk.
+//
+// The file path is automatically set on the [Source], enabling [Decoder] to
+// propagate it to [DocumentDecoder] instances for schema routing.
+//
+// Returns an error if the file cannot be read.
+func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // User-provided file paths are intentional.
+	if err != nil {
+		return nil, fmt.Errorf("read file: %w", err)
+	}
+
+	// Prepend file path option so user options can override if needed.
+	opts = append([]SourceOption{WithFilePath(path), WithName(path)}, opts...)
+
+	return NewSourceFromString(string(data), opts...), nil
 }
 
 // NewSourceFromString creates a new [*Source] from a YAML string using
@@ -154,10 +190,24 @@ func (s *Source) Name() string {
 	return s.name
 }
 
+// FilePath returns the file path of the [Source].
+//
+// Returns an empty string if not set via [WithFilePath] or [NewSourceFromFile].
+func (s *Source) FilePath() string {
+	return s.filePath
+}
+
 // Tokens reconstructs the full [token.Tokens] stream from all [line.Line]s.
 // See [line.Lines.Tokens] for details on token recombination behavior.
 func (s *Source) Tokens() token.Tokens {
 	return s.lines.Tokens()
+}
+
+// Decoder returns a [*Decoder] for iterating over documents in this [Source].
+//
+// Returns an error if the source cannot be parsed.
+func (s *Source) Decoder() (*Decoder, error) {
+	return NewDecoder(s)
 }
 
 // File returns an [*ast.File] for the [Source] tokens.
