@@ -1,6 +1,6 @@
 package validator
 
-import "jacobcolvin.com/niceyaml/paths"
+import "go.jacobcolvin.com/niceyaml/paths"
 
 // Schema validates data against a compiled JSON schema.
 //

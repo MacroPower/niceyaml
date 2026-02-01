@@ -263,7 +263,7 @@ linters:
       - text: "\\*github\\.com/hashicorp/go-multierror\\.Error"
         linters:
           - wrapcheck
-      - text: "\\*jacobcolvin\\.com/niceyaml\\.Source"
+      - text: "\\*go\\.jacobcolvin\\.com/niceyaml\\.Source"
         linters:
           - wrapcheck
       - path: cmd/

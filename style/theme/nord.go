@@ -3,7 +3,7 @@ package theme
 import (
 	"charm.land/lipgloss/v2"
 
-	"jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style"
 )
 
 // Nord returns [style.Styles] using nord colors.

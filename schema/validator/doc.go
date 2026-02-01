@@ -37,9 +37,9 @@
 // documents to schemas based on content, file paths, or embedded directives:
 //
 //	import (
-//	    "jacobcolvin.com/niceyaml/schema/loader"
-//	    "jacobcolvin.com/niceyaml/schema/matcher"
-//	    "jacobcolvin.com/niceyaml/schema/registry"
+//	    "go.jacobcolvin.com/niceyaml/schema/loader"
+//	    "go.jacobcolvin.com/niceyaml/schema/matcher"
+//	    "go.jacobcolvin.com/niceyaml/schema/registry"
 //	)
 //
 //	reg := registry.New()

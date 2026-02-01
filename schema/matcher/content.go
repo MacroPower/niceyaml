@@ -3,8 +3,8 @@ package matcher
 import (
 	"context"
 
-	"jacobcolvin.com/niceyaml"
-	"jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/paths"
 )
 
 // contentMatcher matches documents by a single YAML content value.

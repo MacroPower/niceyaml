@@ -16,9 +16,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"jacobcolvin.com/niceyaml/internal/yamltest"
-	"jacobcolvin.com/niceyaml/schema/registry"
-	"jacobcolvin.com/niceyaml/schema/registry/schemastore"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/schema/registry"
+	"go.jacobcolvin.com/niceyaml/schema/registry/schemastore"
 )
 
 func TestSchemaStore_FindMatch(t *testing.T) {

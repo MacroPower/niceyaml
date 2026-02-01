@@ -3,9 +3,9 @@ package registry
 import (
 	"context"
 
-	"jacobcolvin.com/niceyaml"
-	"jacobcolvin.com/niceyaml/schema/loader"
-	"jacobcolvin.com/niceyaml/schema/matcher"
+	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/schema/loader"
+	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
 
 // MatchLoader combines matching and loading into a single type.

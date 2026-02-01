@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml"
 )
 
 // generateYAML creates YAML content with the specified number of lines.

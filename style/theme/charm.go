@@ -4,7 +4,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/charmtone"
 
-	"jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style"
 )
 
 // Charm returns [style.Styles] using CharmTone colors.

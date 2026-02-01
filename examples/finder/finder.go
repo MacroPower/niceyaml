@@ -7,9 +7,9 @@ import (
 
 	_ "embed"
 
-	"jacobcolvin.com/niceyaml"
-	"jacobcolvin.com/niceyaml/style"
-	"jacobcolvin.com/niceyaml/style/theme"
+	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
 // highlightKind is a custom style.Style constant for search highlights.

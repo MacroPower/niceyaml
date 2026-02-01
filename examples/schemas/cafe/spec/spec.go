@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"jacobcolvin.com/niceyaml/schema"
+	"go.jacobcolvin.com/niceyaml/schema"
 )
 
 // Spec is the cafe specification.

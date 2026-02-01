@@ -5,7 +5,7 @@ import (
 
 	_ "embed"
 
-	"jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml"
 )
 
 var (

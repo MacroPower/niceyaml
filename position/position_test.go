@@ -6,7 +6,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 
-	"jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/position"
 )
 
 const (

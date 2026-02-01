@@ -5,7 +5,7 @@ import (
 
 	"github.com/goccy/go-yaml/token"
 
-	"jacobcolvin.com/niceyaml/tokens"
+	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 // schemaDirectiveRE matches yaml-language-server schema directives.

@@ -5,7 +5,7 @@ import (
 
 	"github.com/goccy/go-yaml/token"
 
-	"jacobcolvin.com/niceyaml/tokens"
+	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 // linesBuilder constructs [Lines] from [token.Tokens].

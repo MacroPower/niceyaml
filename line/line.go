@@ -7,9 +7,9 @@ import (
 
 	"github.com/goccy/go-yaml/token"
 
-	"jacobcolvin.com/niceyaml/position"
-	"jacobcolvin.com/niceyaml/style"
-	"jacobcolvin.com/niceyaml/tokens"
+	"go.jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 var (

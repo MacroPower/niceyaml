@@ -10,10 +10,10 @@ import (
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
-	"jacobcolvin.com/niceyaml/line"
-	"jacobcolvin.com/niceyaml/paths"
-	"jacobcolvin.com/niceyaml/position"
-	"jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/line"
+	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/style"
 )
 
 var (

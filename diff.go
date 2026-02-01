@@ -5,9 +5,9 @@ import (
 	"strings"
 	"sync"
 
-	"jacobcolvin.com/niceyaml/diff"
-	"jacobcolvin.com/niceyaml/line"
-	"jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/diff"
+	"go.jacobcolvin.com/niceyaml/line"
+	"go.jacobcolvin.com/niceyaml/position"
 )
 
 // SourceGetter retrieves a [*Source].

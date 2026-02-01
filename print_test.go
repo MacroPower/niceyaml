@@ -11,12 +11,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"jacobcolvin.com/niceyaml"
-	"jacobcolvin.com/niceyaml/internal/yamltest"
-	"jacobcolvin.com/niceyaml/line"
-	"jacobcolvin.com/niceyaml/position"
-	"jacobcolvin.com/niceyaml/style"
-	"jacobcolvin.com/niceyaml/style/theme"
+	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/line"
+	"go.jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
 // testOverlayHighlight is a custom style.Style constant for test highlights.

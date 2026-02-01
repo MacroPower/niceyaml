@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"jacobcolvin.com/niceyaml"
-	"jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/paths"
 )
 
 // concreteError holds a concrete validation error with its computed path.

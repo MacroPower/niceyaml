@@ -7,11 +7,11 @@ import (
 
 	_ "embed"
 
-	"jacobcolvin.com/niceyaml"
-	"jacobcolvin.com/niceyaml/examples/schemas/cafe/spec"
-	"jacobcolvin.com/niceyaml/paths"
-	"jacobcolvin.com/niceyaml/schema"
-	"jacobcolvin.com/niceyaml/schema/validator"
+	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/examples/schemas/cafe/spec"
+	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/schema"
+	"go.jacobcolvin.com/niceyaml/schema/validator"
 )
 
 //go:generate go run ./schemagen/main.go -o cafe.v1.json

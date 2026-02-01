@@ -6,10 +6,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"jacobcolvin.com/niceyaml"
-	"jacobcolvin.com/niceyaml/internal/yamltest"
-	"jacobcolvin.com/niceyaml/paths"
-	"jacobcolvin.com/niceyaml/schema/matcher"
+	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
 
 // Compile-time interface satisfaction check and path helpers for tests.

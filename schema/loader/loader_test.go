@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"jacobcolvin.com/niceyaml/schema/loader"
-	"jacobcolvin.com/niceyaml/schema/validator"
+	"go.jacobcolvin.com/niceyaml/schema/loader"
+	"go.jacobcolvin.com/niceyaml/schema/validator"
 )
 
 // Compile-time interface satisfaction checks.

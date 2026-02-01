@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"sync"
 
-	"jacobcolvin.com/niceyaml"
-	"jacobcolvin.com/niceyaml/schema"
-	"jacobcolvin.com/niceyaml/schema/loader"
+	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/schema"
+	"go.jacobcolvin.com/niceyaml/schema/loader"
 )
 
 var (

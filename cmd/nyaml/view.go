@@ -8,7 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"jacobcolvin.com/niceyaml/internal/filepaths"
+	"go.jacobcolvin.com/niceyaml/internal/filepaths"
 )
 
 func viewCmd() *cobra.Command {

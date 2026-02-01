@@ -5,9 +5,9 @@ import (
 
 	_ "embed"
 
-	"jacobcolvin.com/niceyaml"
-	"jacobcolvin.com/niceyaml/position"
-	"jacobcolvin.com/niceyaml/style/theme"
+	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
 //go:embed demo.yaml

@@ -14,7 +14,7 @@ import (
 	"golang.org/x/text/transform"
 	"golang.org/x/text/unicode/norm"
 
-	"jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/position"
 )
 
 // Normalizer transforms strings for comparison (e.g., removing diacritics).

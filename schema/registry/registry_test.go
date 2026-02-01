@@ -11,13 +11,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"jacobcolvin.com/niceyaml"
-	"jacobcolvin.com/niceyaml/internal/yamltest"
-	"jacobcolvin.com/niceyaml/paths"
-	"jacobcolvin.com/niceyaml/schema/loader"
-	"jacobcolvin.com/niceyaml/schema/matcher"
-	"jacobcolvin.com/niceyaml/schema/registry"
-	"jacobcolvin.com/niceyaml/schema/validator"
+	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/schema/loader"
+	"go.jacobcolvin.com/niceyaml/schema/matcher"
+	"go.jacobcolvin.com/niceyaml/schema/registry"
+	"go.jacobcolvin.com/niceyaml/schema/validator"
 )
 
 // Path helpers for tests.

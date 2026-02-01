@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"jacobcolvin.com/niceyaml"
-	"jacobcolvin.com/niceyaml/internal/filepaths"
-	"jacobcolvin.com/niceyaml/schema/loader"
+	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/filepaths"
+	"go.jacobcolvin.com/niceyaml/schema/loader"
 )
 
 // Default SchemaStore URLs and timeouts.

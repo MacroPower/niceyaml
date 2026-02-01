@@ -1,4 +1,4 @@
-module jacobcolvin.com/niceyaml
+module go.jacobcolvin.com/niceyaml
 
 go 1.25.0
 

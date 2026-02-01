@@ -3,7 +3,7 @@ package loader
 import (
 	"context"
 
-	"jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml"
 )
 
 // Loader loads schema data for validation.

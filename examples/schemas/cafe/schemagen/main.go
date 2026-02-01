@@ -6,8 +6,8 @@ import (
 	"log"
 	"os"
 
-	"jacobcolvin.com/niceyaml/examples/schemas/cafe"
-	"jacobcolvin.com/niceyaml/schema/generator"
+	"go.jacobcolvin.com/niceyaml/examples/schemas/cafe"
+	"go.jacobcolvin.com/niceyaml/schema/generator"
 )
 
 var outFile = flag.String("o", "schema.json", "Output file for the generated schema")
@@ -18,8 +18,8 @@ func main() {
 	gen := generator.New(
 		cafe.NewConfig(),
 		generator.WithPackagePaths(
-			"jacobcolvin.com/niceyaml/examples/schemas/cafe",
-			"jacobcolvin.com/niceyaml/examples/schemas/cafe/spec",
+			"go.jacobcolvin.com/niceyaml/examples/schemas/cafe",
+			"go.jacobcolvin.com/niceyaml/examples/schemas/cafe/spec",
 		),
 	)
 	jsData, err := gen.Generate()

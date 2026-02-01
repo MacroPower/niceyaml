@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml"
 )
 
 // FirstDocument creates a [*niceyaml.DocumentDecoder] from YAML input for

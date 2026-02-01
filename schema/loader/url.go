@@ -7,7 +7,7 @@ import (
 	"io"
 	"net/http"
 
-	"jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml"
 )
 
 // HTTPOption configures HTTP client settings for loaders that fetch schemas

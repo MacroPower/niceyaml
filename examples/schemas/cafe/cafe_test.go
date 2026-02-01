@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"jacobcolvin.com/niceyaml"
-	"jacobcolvin.com/niceyaml/examples/schemas/cafe"
+	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/examples/schemas/cafe"
 )
 
 func cafeConfig(in string) (*cafe.Config, error) {

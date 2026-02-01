@@ -3,7 +3,7 @@ package loader
 import (
 	"context"
 
-	"jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml"
 )
 
 // Custom creates a [Loader] from a custom function that returns schema bytes

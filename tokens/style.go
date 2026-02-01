@@ -3,7 +3,7 @@ package tokens
 import (
 	"github.com/goccy/go-yaml/token"
 
-	"jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style"
 )
 
 var tokenTypeStyles = map[token.Type]style.Style{

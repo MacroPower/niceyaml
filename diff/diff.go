@@ -1,6 +1,6 @@
 package diff
 
-import "jacobcolvin.com/niceyaml/line"
+import "go.jacobcolvin.com/niceyaml/line"
 
 // Algorithm computes a sequence of operations to transform before into after.
 //

@@ -3,8 +3,8 @@ package line
 import (
 	"strings"
 
-	"jacobcolvin.com/niceyaml/position"
-	"jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/style"
 )
 
 // RelativePosition indicates a position relative to a [Line].

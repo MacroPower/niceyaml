@@ -14,11 +14,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"jacobcolvin.com/niceyaml"
-	"jacobcolvin.com/niceyaml/bubbles/yamlviewport"
-	"jacobcolvin.com/niceyaml/internal/yamltest"
-	"jacobcolvin.com/niceyaml/style"
-	"jacobcolvin.com/niceyaml/style/theme"
+	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/bubbles/yamlviewport"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
 // testPrinter returns a printer without styles or line numbers for predictable golden output.

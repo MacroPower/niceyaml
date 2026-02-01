@@ -3,7 +3,7 @@ package matcher
 import (
 	"context"
 
-	"jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml"
 )
 
 // Matcher determines whether a schema should be applied to a document.

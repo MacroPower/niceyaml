@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml"
 )
 
 // allMatcher matches if all sub-matchers match (AND logic).

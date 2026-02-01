@@ -3,7 +3,7 @@ package matcher
 import (
 	"context"
 
-	"jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml"
 )
 
 // Always creates a new [Matcher] that always matches.

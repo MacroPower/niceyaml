@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"sync"
 
-	"jacobcolvin.com/niceyaml"
-	"jacobcolvin.com/niceyaml/schema/loader"
-	"jacobcolvin.com/niceyaml/schema/matcher"
-	"jacobcolvin.com/niceyaml/schema/validator"
+	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/schema/loader"
+	"go.jacobcolvin.com/niceyaml/schema/matcher"
+	"go.jacobcolvin.com/niceyaml/schema/validator"
 )
 
 var (

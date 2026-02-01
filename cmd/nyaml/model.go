@@ -12,10 +12,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"jacobcolvin.com/niceyaml"
-	"jacobcolvin.com/niceyaml/bubbles/yamlviewport"
-	"jacobcolvin.com/niceyaml/style"
-	"jacobcolvin.com/niceyaml/style/theme"
+	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/bubbles/yamlviewport"
+	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
 // fileEntry holds a file path and its contents.

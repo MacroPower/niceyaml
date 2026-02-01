@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml"
 )
 
 func BenchmarkFullDiffSource(b *testing.B) {

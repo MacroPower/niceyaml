@@ -7,7 +7,7 @@ import (
 
 	"github.com/goccy/go-yaml/token"
 
-	"jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/position"
 )
 
 // Segment pairs an original source [*token.Token] with a segmented part token.

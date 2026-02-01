@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml"
 )
 
 // File creates a [Loader] that reads schema data from a local file.

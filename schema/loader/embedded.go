@@ -3,7 +3,7 @@ package loader
 import (
 	"context"
 
-	"jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml"
 )
 
 // Embedded creates a [Loader] that returns embedded schema bytes.

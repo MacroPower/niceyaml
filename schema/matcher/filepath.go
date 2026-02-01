@@ -3,8 +3,8 @@ package matcher
 import (
 	"context"
 
-	"jacobcolvin.com/niceyaml"
-	"jacobcolvin.com/niceyaml/internal/filepaths"
+	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/filepaths"
 )
 
 // filePathMatcher matches documents by file path glob pattern.

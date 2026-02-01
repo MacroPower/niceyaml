@@ -10,8 +10,8 @@ import (
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
-	"jacobcolvin.com/niceyaml/paths"
-	"jacobcolvin.com/niceyaml/tokens"
+	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 // SourceDecoder provides access to YAML documents from a [*Source].
@@ -36,7 +36,7 @@ type Validator interface {
 // automatically decodes the document to [any] and calls ValidateSchema before
 // decoding to the typed struct.
 //
-// See [jacobcolvin.com/niceyaml/schema/validator.Validator] for an
+// See [go.jacobcolvin.com/niceyaml/schema/validator.Validator] for an
 // implementation.
 type SchemaValidator interface {
 	ValidateSchema(data any) error

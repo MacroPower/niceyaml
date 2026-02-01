@@ -8,13 +8,13 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"jacobcolvin.com/niceyaml/internal/ansi"
-	"jacobcolvin.com/niceyaml/internal/colors"
-	"jacobcolvin.com/niceyaml/line"
-	"jacobcolvin.com/niceyaml/position"
-	"jacobcolvin.com/niceyaml/style"
-	"jacobcolvin.com/niceyaml/style/theme"
-	"jacobcolvin.com/niceyaml/tokens"
+	"go.jacobcolvin.com/niceyaml/internal/ansi"
+	"go.jacobcolvin.com/niceyaml/internal/colors"
+	"go.jacobcolvin.com/niceyaml/line"
+	"go.jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/theme"
+	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 const wrapOnCharacters = " /-"

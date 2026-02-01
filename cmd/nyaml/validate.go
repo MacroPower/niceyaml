@@ -9,11 +9,11 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
-	"jacobcolvin.com/niceyaml"
-	"jacobcolvin.com/niceyaml/internal/filepaths"
-	"jacobcolvin.com/niceyaml/schema/loader"
-	"jacobcolvin.com/niceyaml/schema/matcher"
-	"jacobcolvin.com/niceyaml/schema/registry"
+	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/filepaths"
+	"go.jacobcolvin.com/niceyaml/schema/loader"
+	"go.jacobcolvin.com/niceyaml/schema/matcher"
+	"go.jacobcolvin.com/niceyaml/schema/registry"
 )
 
 func validateCmd() *cobra.Command {

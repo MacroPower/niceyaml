@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"jacobcolvin.com/niceyaml/fangs"
+	"go.jacobcolvin.com/niceyaml/fangs"
 )
 
 func TestNewProfiler(t *testing.T) {
