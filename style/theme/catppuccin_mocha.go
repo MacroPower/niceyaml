@@ -97,5 +97,13 @@ func CatppuccinMocha() style.Styles {
 			style.Punctuation,
 			base.Foreground(lipgloss.Color("#89dceb")).Bold(true),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#1e1e2e"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#1e1e2e"), 0.30)),
+		),
 	)
 }

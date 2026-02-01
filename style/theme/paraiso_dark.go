@@ -61,5 +61,13 @@ func ParaisoDark() style.Styles {
 			style.PunctuationHeading,
 			base.Foreground(lipgloss.Color("#fec418")),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#2f1e2e"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#2f1e2e"), 0.30)),
+		),
 	)
 }

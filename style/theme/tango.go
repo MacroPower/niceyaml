@@ -89,5 +89,13 @@ func Tango() style.Styles {
 			style.PunctuationHeading,
 			base.Foreground(lipgloss.Color("#000000")),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#f8f8f8"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#f8f8f8"), 0.30)),
+		),
 	)
 }

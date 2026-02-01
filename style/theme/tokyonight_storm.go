@@ -97,5 +97,13 @@ func TokyonightStorm() style.Styles {
 			style.Punctuation,
 			base.Foreground(lipgloss.Color("#9ece6a")).Bold(true),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#1a1b26"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#1a1b26"), 0.30)),
+		),
 	)
 }

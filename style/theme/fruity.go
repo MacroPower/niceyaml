@@ -41,5 +41,13 @@ func Fruity() style.Styles {
 			style.Name,
 			base.Foreground(lipgloss.Color("#0086d2")),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#111111"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#111111"), 0.30)),
+		),
 	)
 }

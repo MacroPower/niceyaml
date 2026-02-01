@@ -97,5 +97,13 @@ func TokyonightDay() style.Styles {
 			style.Punctuation,
 			base.Foreground(lipgloss.Color("#587539")).Bold(true),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#e1e2e7"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#e1e2e7"), 0.30)),
+		),
 	)
 }

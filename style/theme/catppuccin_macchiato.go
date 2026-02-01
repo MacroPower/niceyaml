@@ -97,5 +97,13 @@ func CatppuccinMacchiato() style.Styles {
 			style.Punctuation,
 			base.Foreground(lipgloss.Color("#91d7e3")).Bold(true),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#24273a"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#24273a"), 0.30)),
+		),
 	)
 }

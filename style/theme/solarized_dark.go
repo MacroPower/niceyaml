@@ -61,5 +61,13 @@ func SolarizedDark() style.Styles {
 			style.Punctuation,
 			base.Foreground(lipgloss.Color("#719e07")),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#002b36"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#002b36"), 0.30)),
+		),
 	)
 }

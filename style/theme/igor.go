@@ -33,5 +33,13 @@ func Igor() style.Styles {
 			style.Name,
 			base.Foreground(lipgloss.Color("#007575")),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#ffffff"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#ffffff"), 0.30)),
+		),
 	)
 }

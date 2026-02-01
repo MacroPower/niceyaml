@@ -45,5 +45,13 @@ func SolarizedLight() style.Styles {
 			style.Punctuation,
 			base.Foreground(lipgloss.Color("#859900")),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#eee8d5"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#eee8d5"), 0.30)),
+		),
 	)
 }

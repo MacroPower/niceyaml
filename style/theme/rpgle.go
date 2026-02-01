@@ -49,5 +49,13 @@ func Rpgle() style.Styles {
 			style.Generic,
 			base.Italic(true),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#fafafa"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#fafafa"), 0.30)),
+		),
 	)
 }

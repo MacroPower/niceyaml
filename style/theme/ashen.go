@@ -93,5 +93,13 @@ func Ashen() style.Styles {
 			style.PunctuationHeading,
 			base.Foreground(lipgloss.Color("#D87C4A")).Bold(true),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#121212"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#121212"), 0.30)),
+		),
 	)
 }

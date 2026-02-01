@@ -97,5 +97,13 @@ func TokyonightMoon() style.Styles {
 			style.Punctuation,
 			base.Foreground(lipgloss.Color("#c3e88d")).Bold(true),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#222436"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#222436"), 0.30)),
+		),
 	)
 }

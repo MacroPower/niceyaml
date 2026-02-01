@@ -61,5 +61,13 @@ func Evergarden() style.Styles {
 			style.Punctuation,
 			base.Foreground(lipgloss.Color("#7a8478")),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#252B2E"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#252B2E"), 0.30)),
+		),
 	)
 }

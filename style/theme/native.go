@@ -61,5 +61,13 @@ func Native() style.Styles {
 			style.Punctuation,
 			base.Foreground(lipgloss.Color("#6ab825")).Bold(true),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#202020"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#202020"), 0.30)),
+		),
 	)
 }

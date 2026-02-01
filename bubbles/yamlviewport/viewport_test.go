@@ -50,8 +50,8 @@ func testPrinterWithColors() *niceyaml.Printer {
 func testPrinterWithSearch() *niceyaml.Printer {
 	return niceyaml.NewPrinter(
 		niceyaml.WithStyles(style.NewStyles(lipgloss.Style{},
-			style.Set(yamlviewport.SearchOverlayKind, lipgloss.NewStyle().Background(lipgloss.Color("11"))),
-			style.Set(yamlviewport.SelectedSearchOverlayKind, lipgloss.NewStyle().Background(lipgloss.Color("9"))),
+			style.Set(style.Search, lipgloss.NewStyle().Background(lipgloss.Color("11"))),
+			style.Set(style.SearchSelected, lipgloss.NewStyle().Background(lipgloss.Color("9"))),
 		)),
 		niceyaml.WithStyle(lipgloss.NewStyle()),
 		niceyaml.WithGutter(niceyaml.DiffGutter()),

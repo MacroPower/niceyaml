@@ -69,5 +69,13 @@ func XcodeDark() style.Styles {
 			style.LiteralBoolean,
 			base.Foreground(lipgloss.Color("#fc5fa3")),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#1f1f24"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#1f1f24"), 0.30)),
+		),
 	)
 }

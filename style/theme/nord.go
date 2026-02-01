@@ -61,5 +61,13 @@ func Nord() style.Styles {
 			style.PunctuationHeading,
 			base.Foreground(lipgloss.Color("#8fbcbb")),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#2e3440"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#2e3440"), 0.30)),
+		),
 	)
 }

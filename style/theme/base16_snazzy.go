@@ -93,5 +93,13 @@ func Base16Snazzy() style.Styles {
 			style.PunctuationHeading,
 			base.Foreground(lipgloss.Color("#e2e4e5")),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#282a36"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#282a36"), 0.30)),
+		),
 	)
 }

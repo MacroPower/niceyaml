@@ -416,7 +416,7 @@ func (p *Printer) renderLinesInSpan(t LineIterator, span position.Span) string {
 			contentStyle = nil
 		}
 
-		p.writeLine(&sb, content, linePos, contentStyle, gutterCtx, gutterWidth)
+		p.writeLine(&sb, content, linePos, contentStyle, ln.Overlays, gutterCtx, gutterWidth)
 
 		if hasBelowAnnotation {
 			sb.WriteByte('\n')
@@ -500,6 +500,7 @@ func (p *Printer) writeLine(
 	content string,
 	pos position.Position,
 	contentStyle *lipgloss.Style,
+	overlays line.Overlays,
 	gutterCtx GutterContext,
 	gutterWidth int,
 ) {
@@ -519,7 +520,7 @@ func (p *Printer) writeLine(
 		// Write content.
 		if contentStyle != nil {
 			// For diff lines: apply diff style to content.
-			sb.WriteString(p.styleLineWithRanges(subLine, pos, contentStyle, true, nil))
+			sb.WriteString(p.styleLineWithRanges(subLine, pos, contentStyle, true, overlays))
 		} else {
 			// For equal lines: content is already styled.
 			sb.WriteString(subLine)

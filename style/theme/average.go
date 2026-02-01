@@ -93,5 +93,13 @@ func Average() style.Styles {
 			style.PunctuationHeading,
 			base.Foreground(lipgloss.Color("#757575")),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#000000"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#000000"), 0.30)),
+		),
 	)
 }

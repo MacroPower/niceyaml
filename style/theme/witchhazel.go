@@ -57,5 +57,13 @@ func Witchhazel() style.Styles {
 			style.Generic,
 			base.Italic(true),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#433e56"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#433e56"), 0.30)),
+		),
 	)
 }

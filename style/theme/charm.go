@@ -28,5 +28,7 @@ func Charm() style.Styles {
 		style.Set(style.NameTag, base.Foreground(charmtone.Mauve)),
 		style.Set(style.Punctuation, base.Foreground(charmtone.Zest)),
 		style.Set(style.PunctuationHeading, base.Foreground(charmtone.Smoke)),
+		style.Set(style.Search, lipgloss.NewStyle().Background(lipgloss.Lighten(charmtone.Pepper, 0.15))),
+		style.Set(style.SearchSelected, lipgloss.NewStyle().Background(lipgloss.Lighten(charmtone.Pepper, 0.30))),
 	)
 }

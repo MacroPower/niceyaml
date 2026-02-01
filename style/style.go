@@ -115,6 +115,11 @@ const (
 	PunctuationSequenceEntry
 	// PunctuationSequenceStart styles opening bracket ([).
 	PunctuationSequenceStart
+
+	// Search styles search match highlights.
+	Search
+	// SearchSelected styles the currently selected search match.
+	SearchSelected
 )
 
 var (

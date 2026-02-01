@@ -43,10 +43,10 @@
 // Navigate between matches with [Model.SearchNext] and [Model.SearchPrevious].
 // The viewport automatically scrolls to center the current match.
 //
-// Search highlighting uses [SearchOverlayKind] for regular matches and
-// [SelectedSearchOverlayKind] for the current match.
+// Search highlighting uses [style.Search] for regular matches and
+// [style.SearchSelected] for the current match.
 //
-// Configure these styles by including them in your [Printer]'s style set.
+// Configure these styles in your theme (see [theme] package).
 //
 // # Customization
 //

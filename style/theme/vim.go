@@ -53,5 +53,13 @@ func Vim() style.Styles {
 			style.Punctuation,
 			base.Foreground(lipgloss.Color("#3399cc")),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#000000"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#000000"), 0.30)),
+		),
 	)
 }

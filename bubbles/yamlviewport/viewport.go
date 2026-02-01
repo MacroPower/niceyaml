@@ -17,17 +17,6 @@ import (
 
 const defaultHorizontalStep = 6
 
-const (
-	// SearchOverlayKind identifies search match highlights in the viewport.
-	//
-	// Configure the style by including it in a [Printer]'s style set.
-	SearchOverlayKind style.Style = iota
-	// SelectedSearchOverlayKind identifies the currently selected search match.
-	//
-	// Configure the style by including it in a [Printer]'s style set.
-	SelectedSearchOverlayKind
-)
-
 // Printer prints YAML.
 //
 // See [niceyaml.Printer] for an implementation.
@@ -473,9 +462,9 @@ func (m *Model) applySearchOverlays(lines *niceyaml.Source) {
 
 	for i, match := range m.searchMatches {
 		if i == m.searchIndex {
-			lines.AddOverlay(SelectedSearchOverlayKind, match)
+			lines.AddOverlay(style.SearchSelected, match)
 		} else {
-			lines.AddOverlay(SearchOverlayKind, match)
+			lines.AddOverlay(style.Search, match)
 		}
 	}
 }

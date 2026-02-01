@@ -49,5 +49,13 @@ func Rrt() style.Styles {
 			style.Name,
 			base.Foreground(lipgloss.Color("#7fffd4")),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#000000"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#000000"), 0.30)),
+		),
 	)
 }

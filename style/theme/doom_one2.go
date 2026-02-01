@@ -93,5 +93,13 @@ func DoomOne2() style.Styles {
 			style.PunctuationHeading,
 			base.Foreground(lipgloss.Color("#ca72ff")),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#282c34"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#282c34"), 0.30)),
+		),
 	)
 }

@@ -37,5 +37,13 @@ func ModusOperandi() style.Styles {
 			style.Punctuation,
 			base.Foreground(lipgloss.Color("#00538b")),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#ffffff"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#ffffff"), 0.30)),
+		),
 	)
 }

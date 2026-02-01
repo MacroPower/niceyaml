@@ -61,5 +61,13 @@ func GithubDark() style.Styles {
 			style.Punctuation,
 			base.Foreground(lipgloss.Color("#ff7b72")).Bold(true),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#0d1117"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#0d1117"), 0.30)),
+		),
 	)
 }

@@ -97,5 +97,13 @@ func CatppuccinFrappe() style.Styles {
 			style.Punctuation,
 			base.Foreground(lipgloss.Color("#99d1db")).Bold(true),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#303446"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#303446"), 0.30)),
+		),
 	)
 }

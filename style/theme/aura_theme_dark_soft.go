@@ -97,5 +97,13 @@ func AuraThemeDarkSoft() style.Styles {
 			style.PunctuationHeading,
 			base.Foreground(lipgloss.Color("#bdbdbd")),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#15141b"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#15141b"), 0.30)),
+		),
 	)
 }

@@ -61,5 +61,13 @@ func Gruvbox() style.Styles {
 			style.Punctuation,
 			base.Foreground(lipgloss.Color("#fe8019")),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#282828"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#282828"), 0.30)),
+		),
 	)
 }

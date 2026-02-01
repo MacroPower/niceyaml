@@ -61,5 +61,13 @@ func Manni() style.Styles {
 			style.Punctuation,
 			base.Foreground(lipgloss.Color("#555555")),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#f0f3f3"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#f0f3f3"), 0.30)),
+		),
 	)
 }

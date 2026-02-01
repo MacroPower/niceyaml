@@ -53,5 +53,13 @@ func Onedark() style.Styles {
 			style.LiteralBoolean,
 			base.Foreground(lipgloss.Color("#E5C07B")),
 		),
+		style.Set(
+			style.Search,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#282C34"), 0.15)),
+		),
+		style.Set(
+			style.SearchSelected,
+			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#282C34"), 0.30)),
+		),
 	)
 }
