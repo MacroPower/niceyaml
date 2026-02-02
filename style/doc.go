@@ -58,4 +58,49 @@
 // palette.
 //
 // [Mode] indicates whether a theme targets light or dark backgrounds.
+//
+// # Style Strings
+//
+// This package provides encoding and decoding of Pygments-style strings to and
+// from [lipgloss.Style] objects via [Parse], [MustParse], and [Encode].
+//
+// Pygments-style strings are a compact, human-readable format for specifying
+// text styling. They are commonly used in syntax highlighting configurations
+// and theme files.
+//
+// Styles are specified as space-separated tokens. Order is not significant.
+//
+// Colors use hex format:
+//
+//	#rrggbb     - Foreground color (e.g., #ff0000 for red)
+//	#rgb        - Short foreground color (e.g., #f00 for red)
+//	bg:#rrggbb  - Background color
+//
+// Modifiers toggle text attributes:
+//
+//	bold / nobold           - Bold text
+//	italic / noitalic       - Italic text
+//	underline / nounderline - Underlined text
+//
+// Special tokens (ignored for Pygments compatibility):
+//
+//	noinherit
+//	border:#rrggbb
+//
+// Example usage:
+//
+//	// A simple foreground color:
+//	style, err := style.Parse("#ff0000")
+//
+//	// Bold text with a specific color:
+//	style, err := style.Parse("bold #c678dd")
+//
+//	// Full specification with foreground and background:
+//	style, err := style.Parse("#abb2bf bg:#282c34")
+//
+//	// For compile-time constants, use MustParse:
+//	var keywordStyle = style.MustParse("bold #c678dd")
+//
+//	// To convert a style back to a string:
+//	s := style.Encode(style) // "bold #c678dd"
 package style

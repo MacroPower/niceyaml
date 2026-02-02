@@ -129,8 +129,8 @@ func (a Annotations) String() string {
 //
 // Add overlays using [Line.AddOverlay] or [Lines.AddOverlay].
 type Overlay struct {
-	Cols position.Span
 	Kind style.Style
+	Cols position.Span
 }
 
 // Overlays is a slice of [Overlay] values for a single [Line].

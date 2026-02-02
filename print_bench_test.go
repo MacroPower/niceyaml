@@ -12,9 +12,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/style"
 )
 
-const (
-	benchmarkOverlayKind style.Style = iota
-)
+const benchmarkOverlayKind style.Style = "benchmarkOverlayKind"
 
 func BenchmarkPrinterPrint(b *testing.B) {
 	sizes := []struct {

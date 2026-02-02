@@ -13,7 +13,7 @@ import (
 )
 
 // highlightKind is a custom style.Style constant for search highlights.
-const highlightKind style.Style = iota
+const highlightKind style.Style = "highlight"
 
 var (
 	//go:embed demo.yaml

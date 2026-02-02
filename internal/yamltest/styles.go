@@ -1,8 +1,6 @@
 package yamltest
 
 import (
-	"fmt"
-
 	"charm.land/lipgloss/v2"
 
 	"go.jacobcolvin.com/niceyaml/style"
@@ -189,6 +187,6 @@ func styleToTag(s style.Style) string {
 	case style.SearchSelected:
 		return "search-selected"
 	default:
-		return fmt.Sprintf("style-%d", s)
+		return "style-" + s
 	}
 }

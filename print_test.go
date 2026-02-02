@@ -20,7 +20,7 @@ import (
 )
 
 // testOverlayHighlight is a custom style.Style constant for test highlights.
-const testOverlayHighlight style.Style = iota
+const testOverlayHighlight style.Style = "testOverlayHighlight"
 
 // testHighlightStyle returns a style that wraps content in brackets for easy verification.
 func testHighlightStyle() *lipgloss.Style {
@@ -2219,16 +2219,16 @@ func TestPrinter_BlendStyles(t *testing.T) {
 
 	// Overlay kinds for the various test tags.
 	const (
-		kindHL style.Style = testOverlayHighlight + iota + 1
-		kindAll
-		kindA
-		kindB
-		kindC
-		kindX
-		kindY
-		kindK
-		kindVal
-		kindSpan
+		kindHL   style.Style = "kindHL"
+		kindAll  style.Style = "kindAll"
+		kindA    style.Style = "kindA"
+		kindB    style.Style = "kindB"
+		kindC    style.Style = "kindC"
+		kindX    style.Style = "kindX"
+		kindY    style.Style = "kindY"
+		kindK    style.Style = "kindK"
+		kindVal  style.Style = "kindVal"
+		kindSpan style.Style = "kindSpan"
 	)
 
 	// Overlay styler mapping kinds to tag-wrapped styles.
@@ -2394,9 +2394,9 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 
 	// Overlay kinds for color blending tests.
 	const (
-		colorKind1 style.Style = testOverlayHighlight + 100 + iota
-		colorKind2
-		colorKind3
+		colorKind1 style.Style = "colorKind1"
+		colorKind2 style.Style = "colorKind2"
+		colorKind3 style.Style = "colorKind3"
 	)
 
 	tcs := map[string]struct {

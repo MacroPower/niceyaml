@@ -14,6 +14,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/style"
 )
 
 func TestNewLines_Roundtrip(t *testing.T) {
@@ -2775,12 +2776,12 @@ func TestLine_Overlay(t *testing.T) {
 		ln := &lines[0]
 		ln.AddOverlay(line.Overlay{
 			Cols: position.NewSpan(0, 5),
-			Kind: 1,
+			Kind: "test1",
 		})
 
 		require.Len(t, ln.Overlays, 1)
 		assert.Equal(t, position.NewSpan(0, 5), ln.Overlays[0].Cols)
-		assert.Equal(t, 1, ln.Overlays[0].Kind)
+		assert.Equal(t, style.Style("test1"), ln.Overlays[0].Kind)
 	})
 
 	t.Run("add multiple overlays", func(t *testing.T) {
@@ -2792,8 +2793,8 @@ func TestLine_Overlay(t *testing.T) {
 
 		ln := &lines[0]
 		ln.AddOverlay(
-			line.Overlay{Cols: position.NewSpan(0, 3), Kind: 1},
-			line.Overlay{Cols: position.NewSpan(5, 10), Kind: 2},
+			line.Overlay{Cols: position.NewSpan(0, 3), Kind: "test1"},
+			line.Overlay{Cols: position.NewSpan(5, 10), Kind: "test2"},
 		)
 
 		require.Len(t, ln.Overlays, 2)
@@ -2809,8 +2810,8 @@ func TestLine_Overlay(t *testing.T) {
 		require.Len(t, lines, 1)
 
 		ln := &lines[0]
-		ln.AddOverlay(line.Overlay{Cols: position.NewSpan(0, 3), Kind: 1})
-		ln.AddOverlay(line.Overlay{Cols: position.NewSpan(5, 10), Kind: 2})
+		ln.AddOverlay(line.Overlay{Cols: position.NewSpan(0, 3), Kind: "test1"})
+		ln.AddOverlay(line.Overlay{Cols: position.NewSpan(5, 10), Kind: "test2"})
 
 		require.Len(t, ln.Overlays, 2)
 	})
@@ -2826,14 +2827,14 @@ func TestLines_AddOverlay(t *testing.T) {
 		lines := line.NewLines(tks)
 		require.Len(t, lines, 1)
 
-		lines.AddOverlay(1, position.NewRange(
+		lines.AddOverlay("test1", position.NewRange(
 			position.New(0, 0),
 			position.New(0, 5),
 		))
 
 		require.Len(t, lines[0].Overlays, 1)
 		assert.Equal(t, position.NewSpan(0, 5), lines[0].Overlays[0].Cols)
-		assert.Equal(t, 1, lines[0].Overlays[0].Kind)
+		assert.Equal(t, style.Style("test1"), lines[0].Overlays[0].Kind)
 	})
 
 	t.Run("multi-line range splits across lines", func(t *testing.T) {
@@ -2849,7 +2850,7 @@ func TestLines_AddOverlay(t *testing.T) {
 		require.Len(t, lines, 3)
 
 		// Add overlay spanning all three lines.
-		lines.AddOverlay(2, position.NewRange(
+		lines.AddOverlay("test2", position.NewRange(
 			position.New(0, 3),
 			position.New(2, 5),
 		))
@@ -2857,18 +2858,18 @@ func TestLines_AddOverlay(t *testing.T) {
 		// First line: col 3 to end of line.
 		require.Len(t, lines[0].Overlays, 1)
 		assert.Equal(t, 3, lines[0].Overlays[0].Cols.Start)
-		assert.Equal(t, 2, lines[0].Overlays[0].Kind)
+		assert.Equal(t, style.Style("test2"), lines[0].Overlays[0].Kind)
 
 		// Middle line: full line.
 		require.Len(t, lines[1].Overlays, 1)
 		assert.Equal(t, 0, lines[1].Overlays[0].Cols.Start)
-		assert.Equal(t, 2, lines[1].Overlays[0].Kind)
+		assert.Equal(t, style.Style("test2"), lines[1].Overlays[0].Kind)
 
 		// Last line: start to col 5.
 		require.Len(t, lines[2].Overlays, 1)
 		assert.Equal(t, 0, lines[2].Overlays[0].Cols.Start)
 		assert.Equal(t, 5, lines[2].Overlays[0].Cols.End)
-		assert.Equal(t, 2, lines[2].Overlays[0].Kind)
+		assert.Equal(t, style.Style("test2"), lines[2].Overlays[0].Kind)
 	})
 
 	t.Run("multiple ranges", func(t *testing.T) {
@@ -2882,7 +2883,7 @@ func TestLines_AddOverlay(t *testing.T) {
 		lines := line.NewLines(tks)
 		require.Len(t, lines, 2)
 
-		lines.AddOverlay(1,
+		lines.AddOverlay("test1",
 			position.NewRange(position.New(0, 0), position.New(0, 4)),
 			position.NewRange(position.New(1, 0), position.New(1, 4)),
 		)
@@ -2896,7 +2897,7 @@ func TestLines_AddOverlay(t *testing.T) {
 
 		var lines line.Lines
 		// Should not panic on empty lines.
-		lines.AddOverlay(1, position.NewRange(position.New(0, 0), position.New(0, 5)))
+		lines.AddOverlay("test1", position.NewRange(position.New(0, 0), position.New(0, 5)))
 
 		assert.Empty(t, lines)
 	})
@@ -2917,7 +2918,7 @@ func TestLines_ClearOverlays(t *testing.T) {
 		require.Len(t, lines, 2)
 
 		// Add overlays to both lines.
-		lines.AddOverlay(1,
+		lines.AddOverlay("test1",
 			position.NewRange(position.New(0, 0), position.New(0, 10)),
 			position.NewRange(position.New(1, 0), position.New(1, 10)),
 		)
@@ -2954,7 +2955,7 @@ func TestLine_Clone_PreservesOverlays(t *testing.T) {
 	require.Len(t, lines, 1)
 
 	original := lines[0]
-	original.AddOverlay(line.Overlay{Cols: position.NewSpan(0, 5), Kind: 1})
+	original.AddOverlay(line.Overlay{Cols: position.NewSpan(0, 5), Kind: "test1"})
 
 	clone := original.Clone()
 
@@ -2964,7 +2965,7 @@ func TestLine_Clone_PreservesOverlays(t *testing.T) {
 	assert.Equal(t, original.Overlays[0].Kind, clone.Overlays[0].Kind)
 
 	// Modify clone overlays.
-	clone.AddOverlay(line.Overlay{Cols: position.NewSpan(5, 10), Kind: 2})
+	clone.AddOverlay(line.Overlay{Cols: position.NewSpan(5, 10), Kind: "test2"})
 
 	// Verify original is unchanged.
 	require.Len(t, original.Overlays, 1)

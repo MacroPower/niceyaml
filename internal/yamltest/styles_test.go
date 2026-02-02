@@ -113,12 +113,12 @@ func TestXMLStyles_Style_UnknownStyle(t *testing.T) {
 	t.Parallel()
 
 	getter := yamltest.NewXMLStyles()
-	st := getter.Style(style.Style(999))
+	st := getter.Style(style.Style("unknownStyle"))
 
 	require.NotNil(t, st)
 
 	got := st.Render("test")
-	assert.Equal(t, "<style-999>test</style-999>", got)
+	assert.Equal(t, "<style-unknownStyle>test</style-unknownStyle>", got)
 }
 
 func TestXMLStyles_Style_EmptyContent(t *testing.T) {

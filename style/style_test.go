@@ -82,7 +82,7 @@ func TestNewStyles(t *testing.T) {
 
 		for _, s := range stylesToCheck {
 			_, ok := styles[s]
-			assert.True(t, ok, "style %d should be pre-computed in map", s)
+			assert.True(t, ok, "style %q should be pre-computed in map", s)
 		}
 	})
 }
@@ -128,7 +128,7 @@ func TestStyles_With(t *testing.T) {
 	original := style.NewStyles(base, style.Set(style.Comment, green))
 
 	// Custom style key for testing.
-	const customKey style.Style = 1
+	const customKey style.Style = "customKey"
 
 	t.Run("adds new custom style", func(t *testing.T) {
 		t.Parallel()

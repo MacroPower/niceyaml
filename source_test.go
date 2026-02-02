@@ -15,6 +15,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/style"
 )
 
 func TestTokens_String_Annotation(t *testing.T) {
@@ -1171,7 +1172,7 @@ func TestSource_AddOverlay(t *testing.T) {
 		source := niceyaml.NewSourceFromString("key: value\n")
 		require.Equal(t, 1, source.Len())
 
-		source.AddOverlay(1, position.NewRange(
+		source.AddOverlay("test1", position.NewRange(
 			position.New(0, 0),
 			position.New(0, 5),
 		))
@@ -1179,7 +1180,7 @@ func TestSource_AddOverlay(t *testing.T) {
 		ln := source.Line(0)
 		require.Len(t, ln.Overlays, 1)
 		assert.Equal(t, position.NewSpan(0, 5), ln.Overlays[0].Cols)
-		assert.Equal(t, 1, ln.Overlays[0].Kind)
+		assert.Equal(t, style.Style("test1"), ln.Overlays[0].Kind)
 	})
 
 	t.Run("multi-line range splits across lines", func(t *testing.T) {
@@ -1194,7 +1195,7 @@ func TestSource_AddOverlay(t *testing.T) {
 		require.Equal(t, 3, source.Len())
 
 		// Add overlay spanning all three lines.
-		source.AddOverlay(2, position.NewRange(
+		source.AddOverlay("test2", position.NewRange(
 			position.New(0, 3),
 			position.New(2, 5),
 		))
@@ -1203,20 +1204,20 @@ func TestSource_AddOverlay(t *testing.T) {
 		ln0 := source.Line(0)
 		require.Len(t, ln0.Overlays, 1)
 		assert.Equal(t, 3, ln0.Overlays[0].Cols.Start)
-		assert.Equal(t, 2, ln0.Overlays[0].Kind)
+		assert.Equal(t, style.Style("test2"), ln0.Overlays[0].Kind)
 
 		// Middle line: full line.
 		ln1 := source.Line(1)
 		require.Len(t, ln1.Overlays, 1)
 		assert.Equal(t, 0, ln1.Overlays[0].Cols.Start)
-		assert.Equal(t, 2, ln1.Overlays[0].Kind)
+		assert.Equal(t, style.Style("test2"), ln1.Overlays[0].Kind)
 
 		// Last line: start to col 5.
 		ln2 := source.Line(2)
 		require.Len(t, ln2.Overlays, 1)
 		assert.Equal(t, 0, ln2.Overlays[0].Cols.Start)
 		assert.Equal(t, 5, ln2.Overlays[0].Cols.End)
-		assert.Equal(t, 2, ln2.Overlays[0].Kind)
+		assert.Equal(t, style.Style("test2"), ln2.Overlays[0].Kind)
 	})
 
 	t.Run("multiple ranges", func(t *testing.T) {
@@ -1229,7 +1230,7 @@ func TestSource_AddOverlay(t *testing.T) {
 		source := niceyaml.NewSourceFromString(input)
 		require.Equal(t, 2, source.Len())
 
-		source.AddOverlay(1,
+		source.AddOverlay("test1",
 			position.NewRange(position.New(0, 0), position.New(0, 4)),
 			position.NewRange(position.New(1, 0), position.New(1, 4)),
 		)
@@ -1243,7 +1244,7 @@ func TestSource_AddOverlay(t *testing.T) {
 
 		source := niceyaml.NewSourceFromString("")
 		// Should not panic on empty source.
-		source.AddOverlay(1, position.NewRange(position.New(0, 0), position.New(0, 5)))
+		source.AddOverlay("test1", position.NewRange(position.New(0, 0), position.New(0, 5)))
 
 		assert.True(t, source.IsEmpty())
 	})
@@ -1263,7 +1264,7 @@ func TestSource_ClearOverlays(t *testing.T) {
 		require.Equal(t, 2, source.Len())
 
 		// Add overlays to both lines.
-		source.AddOverlay(1,
+		source.AddOverlay("test1",
 			position.NewRange(position.New(0, 0), position.New(0, 10)),
 			position.NewRange(position.New(1, 0), position.New(1, 10)),
 		)

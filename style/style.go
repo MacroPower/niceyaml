@@ -22,104 +22,103 @@ const (
 //
 // Style constants are used as keys in [Styles] maps to associate token
 // categories with [lipgloss.Style] formatting.
-type Style = int
+type Style = string
 
 // Style constants for YAML highlighting.
 // Names follow Pygments token naming conventions where applicable.
 const (
 	// Text is a default/fallback style.
-	Text Style = iota + 1_000_000
+	Text Style = "text"
 	// Comment styles comments (#).
-	Comment
+	Comment Style = "comment"
 	// CommentPreproc styles preprocessor comment, e.g.: %YAML, %TAG.
-	CommentPreproc
+	CommentPreproc Style = "commentPreproc"
 	// Generic is a parent style for generic tokens.
-	Generic
+	Generic Style = "generic"
 	// GenericDeleted styles lines deleted in diff (-).
-	GenericDeleted
+	GenericDeleted Style = "genericDeleted"
 	// GenericError styles error tokens.
-	GenericError
+	GenericError Style = "genericError"
 	// GenericErrorInvalid styles invalid tokens.
-	GenericErrorInvalid
+	GenericErrorInvalid Style = "genericErrorInvalid"
 	// GenericErrorUnknown styles unknown tokens.
-	GenericErrorUnknown
+	GenericErrorUnknown Style = "genericErrorUnknown"
 	// GenericInserted styles lines inserted in diff (+).
-	GenericInserted
+	GenericInserted Style = "genericInserted"
 	// Literal is a parent style for literal values.
-	Literal
+	Literal Style = "literal"
 	// LiteralBoolean styles boolean values (true, false).
-	LiteralBoolean
+	LiteralBoolean Style = "literalBoolean"
 	// LiteralNull styles null values (~, null).
-	LiteralNull
+	LiteralNull Style = "literalNull"
 	// LiteralNullImplicit styles implicit null (empty value).
-	LiteralNullImplicit
+	LiteralNullImplicit Style = "literalNullImplicit"
 	// LiteralNumber is a parent style for number values.
-	LiteralNumber
+	LiteralNumber Style = "literalNumber"
 	// LiteralNumberBin styles binary integers (0b...).
-	LiteralNumberBin
+	LiteralNumberBin Style = "literalNumberBin"
 	// LiteralNumberFloat styles float values (1.5, 2.0).
-	LiteralNumberFloat
+	LiteralNumberFloat Style = "literalNumberFloat"
 	// LiteralNumberHex styles hex integers (0x...).
-	LiteralNumberHex
+	LiteralNumberHex Style = "literalNumberHex"
 	// LiteralNumberInfinity styles infinity (.inf).
-	LiteralNumberInfinity
+	LiteralNumberInfinity Style = "literalNumberInfinity"
 	// LiteralNumberInteger styles integer values (1, 42).
-	LiteralNumberInteger
+	LiteralNumberInteger Style = "literalNumberInteger"
 	// LiteralNumberNaN styles NaN (.nan).
-	LiteralNumberNaN
+	LiteralNumberNaN Style = "literalNumberNaN"
 	// LiteralNumberOct styles octal integers (0o...).
-	LiteralNumberOct
+	LiteralNumberOct Style = "literalNumberOct"
 	// LiteralString styles unquoted string values.
-	LiteralString
+	LiteralString Style = "literalString"
 	// LiteralStringDouble styles double-quoted strings ("...").
-	LiteralStringDouble
+	LiteralStringDouble Style = "literalStringDouble"
 	// LiteralStringSingle styles single-quoted strings ('...').
-	LiteralStringSingle
+	LiteralStringSingle Style = "literalStringSingle"
 	// Name is a parent style for names and references.
-	Name
+	Name Style = "name"
 	// NameAlias styles aliases (*).
-	NameAlias
+	NameAlias Style = "nameAlias"
 	// NameAliasMerge styles merge key (<<).
-	NameAliasMerge
+	NameAliasMerge Style = "nameAliasMerge"
 	// NameAnchor styles anchors (&).
-	NameAnchor
+	NameAnchor Style = "nameAnchor"
 	// NameDecorator styles tags (!tag).
-	NameDecorator
+	NameDecorator Style = "nameDecorator"
 	// NameTag styles mapping keys (key:).
-	NameTag
+	NameTag Style = "nameTag"
 	// Punctuation is a parent style for punctuation.
-	Punctuation
+	Punctuation Style = "punctuation"
 	// PunctuationBlock is a parent style for block scalar punctuation.
-	PunctuationBlock
+	PunctuationBlock Style = "punctuationBlock"
 	// PunctuationBlockFolded styles folded block scalar (>).
-	PunctuationBlockFolded
+	PunctuationBlockFolded Style = "punctuationBlockFolded"
 	// PunctuationBlockLiteral styles literal block scalar (|).
-	PunctuationBlockLiteral
+	PunctuationBlockLiteral Style = "punctuationBlockLiteral"
 	// PunctuationCollectEntry styles comma (,).
-	PunctuationCollectEntry
+	PunctuationCollectEntry Style = "punctuationCollectEntry"
 	// PunctuationHeading styles document markers (---, ...).
-	PunctuationHeading
+	PunctuationHeading Style = "punctuationHeading"
 	// PunctuationMapping is a parent style for mapping punctuation.
-	PunctuationMapping
+	PunctuationMapping Style = "punctuationMapping"
 	// PunctuationMappingEnd styles closing brace (}).
-	PunctuationMappingEnd
+	PunctuationMappingEnd Style = "punctuationMappingEnd"
 	// PunctuationMappingStart styles opening brace ({).
-	PunctuationMappingStart
+	PunctuationMappingStart Style = "punctuationMappingStart"
 	// PunctuationMappingValue styles colon (:).
-	PunctuationMappingValue
+	PunctuationMappingValue Style = "punctuationMappingValue"
 	// PunctuationSequence is a parent style for sequence punctuation.
-	PunctuationSequence
+	PunctuationSequence Style = "punctuationSequence"
 	// PunctuationSequenceEnd styles closing bracket (]).
-	PunctuationSequenceEnd
+	PunctuationSequenceEnd Style = "punctuationSequenceEnd"
 	// PunctuationSequenceEntry styles sequence entry (-).
-	PunctuationSequenceEntry
+	PunctuationSequenceEntry Style = "punctuationSequenceEntry"
 	// PunctuationSequenceStart styles opening bracket ([).
-	PunctuationSequenceStart
-
+	PunctuationSequenceStart Style = "punctuationSequenceStart"
 	// Search styles search match highlights.
-	Search
+	Search Style = "search"
 	// SearchSelected styles the currently selected search match.
-	SearchSelected
+	SearchSelected Style = "searchSelected"
 )
 
 var (
