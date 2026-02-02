@@ -3,15 +3,13 @@ package main
 
 import (
 	"context"
-	"image/color"
 	"os"
 
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/fang"
-	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/spf13/cobra"
 
 	"go.jacobcolvin.com/niceyaml/fangs"
+	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
 func main() {
@@ -30,9 +28,11 @@ func main() {
 	rootCmd.AddCommand(viewCmd())
 	rootCmd.AddCommand(validateCmd())
 
+	styles, _ := theme.Styles("charm")
+
 	err := fang.Execute(context.Background(), rootCmd,
 		fang.WithErrorHandler(fangs.ErrorHandler),
-		fang.WithColorSchemeFunc(fangColorScheme),
+		fang.WithColorSchemeFunc(fangs.ColorSchemeFunc(styles)),
 	)
 
 	stopErr := profiler.Stop()
@@ -42,26 +42,5 @@ func main() {
 
 	if err != nil {
 		os.Exit(1)
-	}
-}
-
-func fangColorScheme(c lipgloss.LightDarkFunc) fang.ColorScheme {
-	return fang.ColorScheme{
-		Base:           c(charmtone.Charcoal, charmtone.Ash),
-		Title:          charmtone.Charple,
-		Codeblock:      c(charmtone.Salt, lipgloss.Color("#2F2E36")),
-		Program:        c(charmtone.Malibu, charmtone.Guppy),
-		Command:        c(charmtone.Pony, charmtone.Cheeky),
-		DimmedArgument: c(charmtone.Squid, charmtone.Oyster),
-		Comment:        c(charmtone.Squid, lipgloss.Color("#747282")),
-		Flag:           c(lipgloss.Color("#0CB37F"), charmtone.Guac),
-		Argument:       c(charmtone.Charcoal, charmtone.Ash),
-		Description:    c(charmtone.Charcoal, charmtone.Ash), // Flag and command descriptions.
-		FlagDefault:    c(charmtone.Smoke, charmtone.Squid),  // Flag default values in descriptions.
-		QuotedString:   c(charmtone.Coral, charmtone.Salmon),
-		ErrorHeader: [2]color.Color{
-			charmtone.Butter,
-			charmtone.Cherry,
-		},
 	}
 }

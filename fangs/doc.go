@@ -16,6 +16,19 @@
 //	    fang.WithErrorHandler(fangs.ErrorHandler),
 //	)
 //
+// # Color Schemes
+//
+// [ColorScheme] and [ColorSchemeFunc] translate [style.Styles] to
+// [fang.ColorScheme], allowing CLI styling to be derived from the existing
+// theme system.
+//
+// This provides consistent colors between the YAML viewer and CLI help output:
+//
+//	styles, _ := theme.Styles("charm")
+//	err := fang.Execute(ctx, rootCmd,
+//	    fang.WithColorSchemeFunc(fangs.ColorSchemeFunc(styles)),
+//	)
+//
 // # Profiling
 //
 // [Profiler] adds runtime profiling capabilities to CLI applications.
