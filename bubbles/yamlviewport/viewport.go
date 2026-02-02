@@ -26,7 +26,7 @@ type Printer interface {
 	Print(lines niceyaml.LineIterator, spans ...position.Span) string
 	SetWidth(width int)
 	SetWordWrap(enabled bool)
-	SetAnnotationsEnabled(enabled bool)
+	SetAnnotations(enabled bool)
 	Style(s style.Style) *lipgloss.Style
 }
 

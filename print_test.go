@@ -1196,7 +1196,7 @@ func TestGutterFunctions(t *testing.T) {
 	}
 }
 
-func TestPrinter_SetAnnotationsEnabled(t *testing.T) {
+func TestPrinter_SetAnnotations(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -1225,7 +1225,7 @@ func TestPrinter_SetAnnotationsEnabled(t *testing.T) {
 			source.Line(0).AddAnnotation(line.Annotation{Content: tc.annotation})
 
 			p := testPrinter()
-			p.SetAnnotationsEnabled(tc.enabled)
+			p.SetAnnotations(tc.enabled)
 
 			got := p.Print(source)
 
@@ -1428,7 +1428,7 @@ func TestPrinter_AnnotationPosition_Disabled(t *testing.T) {
 			source.Line(0).AddAnnotation(tc.annotation)
 
 			p := testPrinter()
-			p.SetAnnotationsEnabled(false)
+			p.SetAnnotations(false)
 
 			got := p.Print(source)
 

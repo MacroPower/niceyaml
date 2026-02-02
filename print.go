@@ -296,9 +296,9 @@ func (p *Printer) SetWidth(width int) {
 	p.width = width
 }
 
-// SetAnnotationsEnabled sets whether annotations are rendered.
+// SetAnnotations sets whether annotations are rendered.
 // Defaults to true.
-func (p *Printer) SetAnnotationsEnabled(enabled bool) {
+func (p *Printer) SetAnnotations(enabled bool) {
 	p.annotationsEnabled = enabled
 }
 
