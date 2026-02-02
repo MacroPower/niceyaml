@@ -73,9 +73,9 @@ func TestError(t *testing.T) {
 			want: yamltest.JoinLF(
 				"[3:1] invalid value:",
 				"",
-				"<name-tag>a</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>b</literal-string>",
-				"<name-tag>foo</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>bar</literal-string>",
-				"<generic-error>key</generic-error><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>value</literal-string>",
+				"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>b</literalString>",
+				"<nameTag>foo</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>bar</literalString>",
+				"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
 			),
 		},
 		"with direct token bypasses path resolution": {
@@ -91,9 +91,9 @@ func TestError(t *testing.T) {
 			want: yamltest.JoinLF(
 				"[1:1] bad token:",
 				"",
-				"<generic-error>a</generic-error><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>b</literal-string>",
-				"<name-tag>foo</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>bar</literal-string>",
-				"<name-tag>key</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>value</literal-string>",
+				"<genericError>a</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>b</literalString>",
+				"<nameTag>foo</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>bar</literalString>",
+				"<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
 			),
 		},
 	}
@@ -157,8 +157,8 @@ func TestSourceWrapError(t *testing.T) {
 			wantExact: yamltest.JoinLF(
 				"[1:1] test error:",
 				"",
-				"<generic-error>name</generic-error><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>test</literal-string>",
-				"<name-tag>value</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-number-integer>123</literal-number-integer>",
+				"<genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
+				"<nameTag>value</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>123</literalNumberInteger>",
 			),
 		},
 	}
@@ -316,8 +316,8 @@ func TestErrorAnnotation(t *testing.T) {
 			want: yamltest.JoinLF(
 				"[2:3] nested error:",
 				"",
-				"<name-tag>foo</name-tag><punctuation-mapping-value>:</punctuation-mapping-value>",
-				"<text>  </text><generic-error>bar</generic-error><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>value</literal-string>",
+				"<nameTag>foo</nameTag><punctuationMappingValue>:</punctuationMappingValue>",
+				"<text>  </text><genericError>bar</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
 			),
 		},
 		"array element path - first item": {
@@ -331,9 +331,9 @@ func TestErrorAnnotation(t *testing.T) {
 			want: yamltest.JoinLF(
 				"[2:5] array error:",
 				"",
-				"<name-tag>items</name-tag><punctuation-mapping-value>:</punctuation-mapping-value>",
-				"<text>  </text><punctuation-sequence-entry>-</punctuation-sequence-entry><text> </text><generic-error>first</generic-error>",
-				"<text>  </text><punctuation-sequence-entry>-</punctuation-sequence-entry><text> </text><literal-string>second</literal-string>",
+				"<nameTag>items</nameTag><punctuationMappingValue>:</punctuationMappingValue>",
+				"<text>  </text><punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><genericError>first</genericError>",
+				"<text>  </text><punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><literalString>second</literalString>",
 			),
 		},
 		"array element path - nested object in array": {
@@ -347,9 +347,9 @@ func TestErrorAnnotation(t *testing.T) {
 			want: yamltest.JoinLF(
 				"[2:5] nested array error:",
 				"",
-				"<name-tag>users</name-tag><punctuation-mapping-value>:</punctuation-mapping-value>",
-				"<text>  </text><punctuation-sequence-entry>-</punctuation-sequence-entry><text> </text><generic-error>name</generic-error><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>alice</literal-string>",
-				"<text>    </text><name-tag>age</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-number-integer>30</literal-number-integer>",
+				"<nameTag>users</nameTag><punctuationMappingValue>:</punctuationMappingValue>",
+				"<text>  </text><punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>alice</literalString>",
+				"<text>    </text><nameTag>age</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>30</literalNumberInteger>",
 			),
 		},
 		"root path": {
@@ -359,7 +359,7 @@ func TestErrorAnnotation(t *testing.T) {
 			want: yamltest.JoinLF(
 				"[1:4] root error:",
 				"",
-				"<name-tag>key</name-tag><generic-error>:</generic-error><text> </text><literal-string>value</literal-string>",
+				"<nameTag>key</nameTag><genericError>:</genericError><text> </text><literalString>value</literalString>",
 			),
 		},
 		"single top-level key path": {
@@ -369,7 +369,7 @@ func TestErrorAnnotation(t *testing.T) {
 			want: yamltest.JoinLF(
 				"[1:1] top level error:",
 				"",
-				"<generic-error>key</generic-error><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>value</literal-string>",
+				"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
 			),
 		},
 		"with custom source lines": {
@@ -386,9 +386,9 @@ func TestErrorAnnotation(t *testing.T) {
 			want: yamltest.JoinLF(
 				"[3:1] middle error:",
 				"",
-				"<name-tag>line2</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>b</literal-string>",
-				"<generic-error>line3</generic-error><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>c</literal-string>",
-				"<name-tag>line4</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>d</literal-string>",
+				"<nameTag>line2</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>b</literalString>",
+				"<genericError>line3</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>c</literalString>",
+				"<nameTag>line4</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>d</literalString>",
 			),
 		},
 	}
@@ -441,7 +441,7 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 			want: yamltest.JoinLF(
 				"[1:6] invalid value:",
 				"",
-				"<name-tag>key</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><generic-error>value</generic-error>",
+				"<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>value</genericError>",
 			),
 		},
 		"nested path with value target": {
@@ -454,8 +454,8 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 			want: yamltest.JoinLF(
 				"[2:8] nested value error:",
 				"",
-				"<name-tag>foo</name-tag><punctuation-mapping-value>:</punctuation-mapping-value>",
-				"<text>  </text><name-tag>bar</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><generic-error>nested_value</generic-error>",
+				"<nameTag>foo</nameTag><punctuationMappingValue>:</punctuationMappingValue>",
+				"<text>  </text><nameTag>bar</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>nested_value</genericError>",
 			),
 		},
 		"array element works same as key target": {
@@ -470,9 +470,9 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 			want: yamltest.JoinLF(
 				"[2:5] array error:",
 				"",
-				"<name-tag>items</name-tag><punctuation-mapping-value>:</punctuation-mapping-value>",
-				"<text>  </text><punctuation-sequence-entry>-</punctuation-sequence-entry><text> </text><generic-error>first</generic-error>",
-				"<text>  </text><punctuation-sequence-entry>-</punctuation-sequence-entry><text> </text><literal-string>second</literal-string>",
+				"<nameTag>items</nameTag><punctuationMappingValue>:</punctuationMappingValue>",
+				"<text>  </text><punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><genericError>first</genericError>",
+				"<text>  </text><punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><literalString>second</literalString>",
 			),
 		},
 	}
@@ -517,8 +517,8 @@ func TestWithPrinter(t *testing.T) {
 	want := yamltest.JoinLF(
 		"[1:1] test error:",
 		"",
-		"<generic-error>key</generic-error><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>value</literal-string>",
-		"<name-tag>foo</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>bar</literal-string>",
+		"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
+		"<nameTag>foo</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>bar</literalString>",
 	)
 	assert.Equal(t, want, trimLines(err.Error()))
 }
@@ -552,9 +552,9 @@ func TestError_SpecialParentContext(t *testing.T) {
 			want: yamltest.JoinLF(
 				"[2:3] array element error:",
 				"",
-				"<punctuation-sequence-entry>-</punctuation-sequence-entry><text> </text><literal-string>first</literal-string>",
-				"<punctuation-sequence-entry>-</punctuation-sequence-entry><text> </text><generic-error>second</generic-error>",
-				"<punctuation-sequence-entry>-</punctuation-sequence-entry><text> </text><literal-string>third</literal-string>",
+				"<punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><literalString>first</literalString>",
+				"<punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><genericError>second</genericError>",
+				"<punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><literalString>third</literalString>",
 			),
 		},
 		"document root - parent is nil": {
@@ -568,8 +568,8 @@ func TestError_SpecialParentContext(t *testing.T) {
 			want: yamltest.JoinLF(
 				"[1:4] document root error:",
 				"",
-				"<name-tag>key</name-tag><generic-error>:</generic-error><text> </text><literal-string>value</literal-string>",
-				"<name-tag>another</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>line</literal-string>",
+				"<nameTag>key</nameTag><genericError>:</genericError><text> </text><literalString>value</literalString>",
+				"<nameTag>another</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>line</literalString>",
 			),
 		},
 	}
@@ -718,8 +718,8 @@ func TestError_MultiError(t *testing.T) {
 		got := trimLines(err.Error())
 
 		// Should highlight main error token and include annotation for nested error.
-		assert.Contains(t, got, "<generic-error>name</generic-error>")
-		assert.Contains(t, got, "<generic-error>123</generic-error>")
+		assert.Contains(t, got, "<genericError>name</genericError>")
+		assert.Contains(t, got, "<genericError>123</genericError>")
 		assert.Contains(t, got, "^ invalid type")
 	})
 
@@ -822,8 +822,8 @@ func TestError_MultiError(t *testing.T) {
 		got := trimLines(err.Error())
 
 		// Should highlight both tokens.
-		assert.Contains(t, got, "<generic-error>key</generic-error>")
-		assert.Contains(t, got, "<generic-error>foo</generic-error>")
+		assert.Contains(t, got, "<genericError>key</genericError>")
+		assert.Contains(t, got, "<genericError>foo</genericError>")
 		assert.Contains(t, got, "^ nested with token")
 	})
 
@@ -851,7 +851,7 @@ func TestError_MultiError(t *testing.T) {
 
 		// Should still render the main error, nested error is skipped.
 		assert.Contains(t, got, "[1:1] main error:")
-		assert.Contains(t, got, "<generic-error>key</generic-error>")
+		assert.Contains(t, got, "<genericError>key</genericError>")
 		// Should NOT contain annotation for failed nested error.
 		assert.NotContains(t, got, "nested error")
 	})
@@ -969,7 +969,7 @@ func TestError_MultiError(t *testing.T) {
 		assert.Contains(t, got, "value")
 		assert.Contains(t, got, "123")
 		// Should highlight the nested error value.
-		assert.Contains(t, got, "<generic-error>123</generic-error>")
+		assert.Contains(t, got, "<genericError>123</genericError>")
 	})
 
 	t.Run("nested-only error without source falls back to plain", func(t *testing.T) {
@@ -1028,8 +1028,8 @@ func TestError_MultiError(t *testing.T) {
 		assert.Contains(t, got, "type error on value")
 		assert.Contains(t, got, "unexpected property")
 		// Should highlight both error locations.
-		assert.Contains(t, got, "<generic-error>123</generic-error>")
-		assert.Contains(t, got, "<generic-error>other</generic-error>")
+		assert.Contains(t, got, "<genericError>123</genericError>")
+		assert.Contains(t, got, "<genericError>other</genericError>")
 	})
 
 	t.Run("nested-only error with resolvable and unresolvable nested errors", func(t *testing.T) {
@@ -1559,8 +1559,8 @@ func TestError_HunkDisplay(t *testing.T) {
 		got := trimLines(err.Error())
 
 		// Should show both error locations.
-		assert.Contains(t, got, "<generic-error>line1</generic-error>")
-		assert.Contains(t, got, "<generic-error>line10</generic-error>")
+		assert.Contains(t, got, "<genericError>line1</genericError>")
+		assert.Contains(t, got, "<genericError>line10</genericError>")
 		// Should show nested error annotation.
 		assert.Contains(t, got, "nested error")
 		// Should have "..." separator.

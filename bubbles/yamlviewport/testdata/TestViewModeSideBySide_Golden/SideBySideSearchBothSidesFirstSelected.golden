@@ -1,4 +1,4 @@
--<search-selected>name</search-selecte │  +<search>name</search>: modified      
+-<searchSelected>name</searchSelected> │  +<search>name</search>: modified      
 -count: 10                             │  +count: 20                            
  enabled: true                         │   enabled: true                        
 -description: "This is the original    │  +description: "This is the updated    

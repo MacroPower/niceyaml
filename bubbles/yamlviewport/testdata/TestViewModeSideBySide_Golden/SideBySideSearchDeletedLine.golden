@@ -1,4 +1,4 @@
--name: <search-selected>original</sear │  +name: modified                       
+-name: <searchSelected>original</searc │  +name: modified                       
 -count: 10                             │  +count: 20                            
  enabled: true                         │   enabled: true                        
 -description: "This is the <search>ori │  +description: "This is the updated    

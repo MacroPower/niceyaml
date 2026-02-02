@@ -819,7 +819,7 @@ func TestValidator_PathTarget(t *testing.T) {
 				name: 123
 			`),
 			wantKeyErr:   false,
-			wantContains: "<generic-error>123</generic-error>",
+			wantContains: "<genericError>123</genericError>",
 		},
 		"additional property highlights key": {
 			schema: `{
@@ -834,7 +834,7 @@ func TestValidator_PathTarget(t *testing.T) {
 				extra: notAllowed
 			`),
 			wantKeyErr:   true,
-			wantContains: "<generic-error>extra</generic-error>",
+			wantContains: "<genericError>extra</genericError>",
 		},
 		"required error highlights parent key": {
 			schema: `{
@@ -860,7 +860,7 @@ func TestValidator_PathTarget(t *testing.T) {
 				status: unknown
 			`),
 			wantKeyErr:   false,
-			wantContains: "<generic-error>unknown</generic-error>",
+			wantContains: "<genericError>unknown</genericError>",
 		},
 		"minimum error highlights value": {
 			schema: `{
@@ -873,7 +873,7 @@ func TestValidator_PathTarget(t *testing.T) {
 				age: -5
 			`),
 			wantKeyErr:   false,
-			wantContains: "<generic-error>-5</generic-error>",
+			wantContains: "<genericError>-5</genericError>",
 		},
 		"pattern error highlights value": {
 			schema: `{
@@ -886,7 +886,7 @@ func TestValidator_PathTarget(t *testing.T) {
 				email: notanemail
 			`),
 			wantKeyErr:   false,
-			wantContains: "<generic-error>notanemail</generic-error>",
+			wantContains: "<genericError>notanemail</genericError>",
 		},
 		"minItems error highlights key": {
 			schema: `{
@@ -900,7 +900,7 @@ func TestValidator_PathTarget(t *testing.T) {
 				  - one
 			`),
 			wantKeyErr:   true,
-			wantContains: "<generic-error>items</generic-error>",
+			wantContains: "<genericError>items</genericError>",
 		},
 		"maxItems error highlights key": {
 			schema: `{
@@ -915,7 +915,7 @@ func TestValidator_PathTarget(t *testing.T) {
 				  - two
 			`),
 			wantKeyErr:   true,
-			wantContains: "<generic-error>items</generic-error>",
+			wantContains: "<genericError>items</genericError>",
 		},
 		"nested type error highlights value": {
 			schema: `{
@@ -934,7 +934,7 @@ func TestValidator_PathTarget(t *testing.T) {
 				  age: notanumber
 			`),
 			wantKeyErr:   false,
-			wantContains: "<generic-error>notanumber</generic-error>",
+			wantContains: "<genericError>notanumber</genericError>",
 		},
 		"array item type error highlights value": {
 			schema: `{
@@ -953,7 +953,7 @@ func TestValidator_PathTarget(t *testing.T) {
 				  - 3
 			`),
 			wantKeyErr:   false,
-			wantContains: "<generic-error>notanumber</generic-error>",
+			wantContains: "<genericError>notanumber</genericError>",
 		},
 	}
 

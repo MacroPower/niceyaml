@@ -83,8 +83,8 @@
 //
 //	styles := yamltest.NewXMLStyles()
 //	// Input "key: value" produces:
-//	// <name-tag>key</name-tag><punctuation-mapping-value>:</punctuation-mapping-value>\
-//	// <text> </text><literal-string>value</literal-string>
+//	// <nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue>\
+//	// <text> </text><literalString>value</literalString>
 //
 // # Creating Test Documents
 //

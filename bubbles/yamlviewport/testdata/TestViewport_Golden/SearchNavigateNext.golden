@@ -3,7 +3,7 @@
  bool: true                                                                     
  list:                                                                          
    - <search>item</search>1                                                     
-   - <search-selected>item</search-selected>2                                   
+   - <searchSelected>item</searchSelected>2                                     
  nested:                                                                        
    child: data                                                                  
                                                                                 

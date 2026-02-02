@@ -1,7 +1,7 @@
 -name: original                        │  +name: modified                       
 -count: 10                             │  +count: 20                            
- <search-selected>enabled</search-     │   <search-selected>enabled</search-    
- selected>: true                       │   selected>: true                      
+ <searchSelected>enabled</             │   <searchSelected>enabled</            
+ searchSelected>: true                 │   searchSelected>: true                
 -description: "This is the original    │  +description: "This is the updated    
  description"                          │   description"                         
  tags:                                 │   tags:                                

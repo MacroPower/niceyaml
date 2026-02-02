@@ -222,7 +222,7 @@ func TestNewPrinter(t *testing.T) {
 	}{
 		"custom styles": {
 			input: "key: value",
-			want:  "<name-tag>key</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>value</literal-string>",
+			want:  "<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
 			opts: []niceyaml.PrinterOption{
 				niceyaml.WithStyles(yamltest.NewXMLStyles()),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
@@ -237,9 +237,9 @@ func TestNewPrinter(t *testing.T) {
 				# comment
 			`),
 			want: yamltest.JoinLF(
-				"<name-tag>key</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>value</literal-string>",
-				"<name-tag>number</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-number-integer>42</literal-number-integer>",
-				"<name-tag>bool</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-boolean>true</literal-boolean>",
+				"<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
+				"<nameTag>number</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>42</literalNumberInteger>",
+				"<nameTag>bool</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalBoolean>true</literalBoolean>",
 				"<comment># comment</comment>",
 			),
 			opts: []niceyaml.PrinterOption{
@@ -1487,7 +1487,7 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 	}{
 		"key and string": {
 			input: "key: value",
-			want:  "<name-tag>key</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>value</literal-string>",
+			want:  "<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
 		},
 		"null types": {
 			input: yamltest.JoinLF(
@@ -1495,8 +1495,8 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 				"tilde: ~",
 			),
 			want: yamltest.JoinLF(
-				"<name-tag>null</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-null>null</literal-null>",
-				"<name-tag>tilde</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-null>~</literal-null>",
+				"<nameTag>null</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNull>null</literalNull>",
+				"<nameTag>tilde</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNull>~</literalNull>",
 			),
 		},
 		"boolean types": {
@@ -1505,8 +1505,8 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 				"no: false",
 			),
 			want: yamltest.JoinLF(
-				"<name-tag>yes</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-boolean>true</literal-boolean>",
-				"<name-tag>no</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-boolean>false</literal-boolean>",
+				"<nameTag>yes</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalBoolean>true</literalBoolean>",
+				"<nameTag>no</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalBoolean>false</literalBoolean>",
 			),
 		},
 		"number types": {
@@ -1515,8 +1515,8 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 				"float: 3.14",
 			),
 			want: yamltest.JoinLF(
-				"<name-tag>int</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-number-integer>42</literal-number-integer>",
-				"<name-tag>float</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-number-float>3.14</literal-number-float>",
+				"<nameTag>int</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>42</literalNumberInteger>",
+				"<nameTag>float</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberFloat>3.14</literalNumberFloat>",
 			),
 		},
 		"anchor and alias": {
@@ -1525,17 +1525,17 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 				"alias: *x",
 			),
 			want: yamltest.JoinLF(
-				"<name-tag>anchor</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><name-anchor>&</name-anchor><name-anchor>x</name-anchor><text> </text><literal-number-integer>1</literal-number-integer>",
-				"<name-tag>alias</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><name-alias>*</name-alias><name-alias>x</name-alias>",
+				"<nameTag>anchor</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><nameAnchor>&</nameAnchor><nameAnchor>x</nameAnchor><text> </text><literalNumberInteger>1</literalNumberInteger>",
+				"<nameTag>alias</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><nameAlias>*</nameAlias><nameAlias>x</nameAlias>",
 			),
 		},
 		"comment": {
 			input: "key: value # comment",
-			want:  "<name-tag>key</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>value </literal-string><comment># comment</comment>",
+			want:  "<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value </literalString><comment># comment</comment>",
 		},
 		"tag": {
 			input: "tagged: !custom value",
-			want:  "<name-tag>tagged</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><name-decorator>!custom </name-decorator><literal-string>value</literal-string>",
+			want:  "<nameTag>tagged</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><nameDecorator>!custom </nameDecorator><literalString>value</literalString>",
 		},
 		"document markers": {
 			input: yamltest.JoinLF(
@@ -1544,9 +1544,9 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 				"...",
 			),
 			want: yamltest.JoinLF(
-				"<punctuation-heading>---</punctuation-heading>",
-				"<name-tag>key</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>value</literal-string>",
-				"<punctuation-heading>...</punctuation-heading>",
+				"<punctuationHeading>---</punctuationHeading>",
+				"<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
+				"<punctuationHeading>...</punctuationHeading>",
 			),
 		},
 		"directive": {
@@ -1556,9 +1556,9 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 				"key: value",
 			),
 			want: yamltest.JoinLF(
-				"<comment-preproc>%</comment-preproc><literal-string>YAML</literal-string><text> </text><literal-number-float>1.2</literal-number-float>",
-				"<punctuation-heading>---</punctuation-heading>",
-				"<name-tag>key</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>value</literal-string>",
+				"<commentPreproc>%</commentPreproc><literalString>YAML</literalString><text> </text><literalNumberFloat>1.2</literalNumberFloat>",
+				"<punctuationHeading>---</punctuationHeading>",
+				"<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
 			),
 		},
 		"block scalar": {
@@ -1568,14 +1568,14 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 				"  line2",
 			),
 			want: yamltest.JoinLF(
-				"<name-tag>text</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><punctuation-block-literal>|</punctuation-block-literal>",
-				"<literal-string>  line1</literal-string>",
-				"<literal-string>  line2</literal-string>",
+				"<nameTag>text</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><punctuationBlockLiteral>|</punctuationBlockLiteral>",
+				"<literalString>  line1</literalString>",
+				"<literalString>  line2</literalString>",
 			),
 		},
 		"punctuation": {
 			input: "key: value",
-			want:  "<name-tag>key</name-tag><punctuation-mapping-value>:</punctuation-mapping-value><text> </text><literal-string>value</literal-string>",
+			want:  "<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
 		},
 	}
 

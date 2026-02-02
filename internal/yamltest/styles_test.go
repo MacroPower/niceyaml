@@ -30,31 +30,31 @@ func TestXMLStyles_Style(t *testing.T) {
 		},
 		"NameTag": {
 			input: style.NameTag,
-			want:  "<name-tag>test</name-tag>",
+			want:  "<nameTag>test</nameTag>",
 		},
 		"LiteralString": {
 			input: style.LiteralString,
-			want:  "<literal-string>test</literal-string>",
+			want:  "<literalString>test</literalString>",
 		},
 		"LiteralNumberInteger": {
 			input: style.LiteralNumberInteger,
-			want:  "<literal-number-integer>test</literal-number-integer>",
+			want:  "<literalNumberInteger>test</literalNumberInteger>",
 		},
 		"LiteralBoolean": {
 			input: style.LiteralBoolean,
-			want:  "<literal-boolean>test</literal-boolean>",
+			want:  "<literalBoolean>test</literalBoolean>",
 		},
 		"LiteralNull": {
 			input: style.LiteralNull,
-			want:  "<literal-null>test</literal-null>",
+			want:  "<literalNull>test</literalNull>",
 		},
 		"NameAnchor": {
 			input: style.NameAnchor,
-			want:  "<name-anchor>test</name-anchor>",
+			want:  "<nameAnchor>test</nameAnchor>",
 		},
 		"NameAlias": {
 			input: style.NameAlias,
-			want:  "<name-alias>test</name-alias>",
+			want:  "<nameAlias>test</nameAlias>",
 		},
 		"Comment": {
 			input: style.Comment,
@@ -62,35 +62,35 @@ func TestXMLStyles_Style(t *testing.T) {
 		},
 		"GenericError": {
 			input: style.GenericError,
-			want:  "<generic-error>test</generic-error>",
+			want:  "<genericError>test</genericError>",
 		},
 		"NameDecorator": {
 			input: style.NameDecorator,
-			want:  "<name-decorator>test</name-decorator>",
+			want:  "<nameDecorator>test</nameDecorator>",
 		},
 		"PunctuationHeading": {
 			input: style.PunctuationHeading,
-			want:  "<punctuation-heading>test</punctuation-heading>",
+			want:  "<punctuationHeading>test</punctuationHeading>",
 		},
 		"CommentPreproc": {
 			input: style.CommentPreproc,
-			want:  "<comment-preproc>test</comment-preproc>",
+			want:  "<commentPreproc>test</commentPreproc>",
 		},
 		"PunctuationSequenceEntry": {
 			input: style.PunctuationSequenceEntry,
-			want:  "<punctuation-sequence-entry>test</punctuation-sequence-entry>",
+			want:  "<punctuationSequenceEntry>test</punctuationSequenceEntry>",
 		},
 		"PunctuationBlockLiteral": {
 			input: style.PunctuationBlockLiteral,
-			want:  "<punctuation-block-literal>test</punctuation-block-literal>",
+			want:  "<punctuationBlockLiteral>test</punctuationBlockLiteral>",
 		},
 		"GenericInserted": {
 			input: style.GenericInserted,
-			want:  "<generic-inserted>test</generic-inserted>",
+			want:  "<genericInserted>test</genericInserted>",
 		},
 		"GenericDeleted": {
 			input: style.GenericDeleted,
-			want:  "<generic-deleted>test</generic-deleted>",
+			want:  "<genericDeleted>test</genericDeleted>",
 		},
 	}
 
@@ -118,7 +118,7 @@ func TestXMLStyles_Style_UnknownStyle(t *testing.T) {
 	require.NotNil(t, st)
 
 	got := st.Render("test")
-	assert.Equal(t, "<style-unknownStyle>test</style-unknownStyle>", got)
+	assert.Equal(t, "<unknownStyle>test</unknownStyle>", got)
 }
 
 func TestXMLStyles_Style_EmptyContent(t *testing.T) {
@@ -130,7 +130,7 @@ func TestXMLStyles_Style_EmptyContent(t *testing.T) {
 	require.NotNil(t, st)
 
 	got := st.Render("")
-	assert.Equal(t, "<name-tag></name-tag>", got)
+	assert.Equal(t, "<nameTag></nameTag>", got)
 }
 
 func TestXMLStyles_XMLStyleInclude(t *testing.T) {
@@ -147,7 +147,7 @@ func TestXMLStyles_XMLStyleInclude(t *testing.T) {
 
 	selectedStyle := getter.Style(style.SearchSelected)
 	require.NotNil(t, selectedStyle)
-	assert.Equal(t, "<search-selected>test</search-selected>", selectedStyle.Render("test"))
+	assert.Equal(t, "<searchSelected>test</searchSelected>", selectedStyle.Render("test"))
 
 	// Non-included styles return empty (no transformation).
 	commentStyle := getter.Style(style.Comment)
