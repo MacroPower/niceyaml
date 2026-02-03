@@ -11,6 +11,10 @@
 // for schema discrimination based on type fields, version numbers, or other
 // identifying markers within the document itself.
 //
+// Use [Exists] to match documents where a path exists with any non-empty value.
+// This is useful when the presence of a field matters more than its specific
+// value.
+//
 // Match documents based on their source file using [FilePath], which tests
 // the document's file path against a regular expression. This works well for
 // directory-based conventions where file location implies schema.
