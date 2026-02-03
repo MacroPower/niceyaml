@@ -161,7 +161,19 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 		"null value": {
 			input:     "empty: null",
 			path:      paths.Root().Child("empty").Path(),
-			wantVals:  []string{"null"},
+			wantVals:  []string{""},
+			wantFound: []bool{true},
+		},
+		"double-quoted empty string": {
+			input:     `kind: ""`,
+			path:      paths.Root().Child("kind").Path(),
+			wantVals:  []string{""},
+			wantFound: []bool{true},
+		},
+		"single-quoted empty string": {
+			input:     `kind: ''`,
+			path:      paths.Root().Child("kind").Path(),
+			wantVals:  []string{""},
 			wantFound: []bool{true},
 		},
 		"nil path returns false": {

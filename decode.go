@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"iter"
 
 	"github.com/goccy/go-yaml"
@@ -193,7 +194,7 @@ func (dd *DocumentDecoder) FilePath() string {
 	return dd.filePath
 }
 
-// GetValue extracts a raw YAML value without unmarshaling.
+// GetValue extracts a YAML value without unmarshaling.
 //
 // This is useful when you need to inspect document content before deciding how
 // to process it. For example, multi-document files often use a discriminator
@@ -210,8 +211,14 @@ func (dd *DocumentDecoder) FilePath() string {
 //		}
 //	}
 //
-// Returns the string representation of the value at path, or an empty string
-// and false if path is nil, the document is a directive, or no value exists.
+// For scalar values (strings, numbers, booleans), returns the semantic value
+// rather than YAML syntax. For example, `kind: ""` returns an empty string,
+// not the literal `""`. Null values return an empty string with found=true.
+//
+// For non-scalar values (mappings, sequences), returns the YAML representation.
+//
+// Returns an empty string and false if path is nil, the document is a
+// directive, or no value exists at the path.
 func (dd *DocumentDecoder) GetValue(path *paths.YAMLPath) (string, bool) {
 	if path == nil {
 		return "", false
@@ -226,6 +233,17 @@ func (dd *DocumentDecoder) GetValue(path *paths.YAMLPath) (string, bool) {
 		return "", false
 	}
 
+	// Use GetValue() for scalar nodes to get the actual semantic value.
+	if scalar, ok := node.(ast.ScalarNode); ok {
+		v := scalar.GetValue()
+		if v == nil {
+			return "", true // NullNode.
+		}
+
+		return fmt.Sprintf("%v", v), true
+	}
+
+	// For non-scalar nodes (mappings, sequences), return YAML representation.
 	return node.String(), true
 }
 
