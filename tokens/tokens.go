@@ -340,6 +340,72 @@ func ValueOffset(tk *token.Token) int {
 	return 0
 }
 
+// SplitDocumentsOption configures [SplitDocuments].
+//
+// Available options:
+//   - [WithResetPositions]
+type SplitDocumentsOption func(*splitDocumentsConfig)
+
+type splitDocumentsConfig struct {
+	resetPositions bool
+}
+
+// WithResetPositions is a [SplitDocumentsOption] that resets token positions
+// so each document starts from line 1, column 1.
+//
+// When enabled, tokens are cloned and their positions adjusted relative to the
+// document's start. By default, positions are preserved from the original source.
+func WithResetPositions() SplitDocumentsOption {
+	return func(cfg *splitDocumentsConfig) {
+		cfg.resetPositions = true
+	}
+}
+
+// CloneWithResetPositions clones tokens and adjusts positions relative to
+// the document's starting position.
+//
+// The first token with a non-nil position determines the starting line, column,
+// and offset. All subsequent token positions are adjusted relative to this start,
+// so the first positioned token ends up at line 1, column 1, offset 0.
+//
+// Tokens with nil positions are cloned but left with nil positions.
+func CloneWithResetPositions(tks token.Tokens) token.Tokens {
+	if len(tks) == 0 {
+		return tks
+	}
+
+	// Find starting position from first token with position.
+	var startLine, startCol, startOffset int
+
+	for _, tk := range tks {
+		if tk != nil && tk.Position != nil {
+			startLine = tk.Position.Line
+			startCol = tk.Position.Column
+			startOffset = tk.Position.Offset
+
+			break
+		}
+	}
+
+	result := make(token.Tokens, 0, len(tks))
+
+	for _, tk := range tks {
+		clone := tk.Clone()
+		if clone.Position != nil {
+			clone.Position.Line = clone.Position.Line - startLine + 1
+			if clone.Position.Line == 1 {
+				clone.Position.Column = clone.Position.Column - startCol + 1
+			}
+
+			clone.Position.Offset -= startOffset
+		}
+
+		result.Add(clone)
+	}
+
+	return result
+}
+
 // SplitDocuments splits a token stream into multiple token streams, one for
 // each YAML document found (separated by '---' tokens).
 //
@@ -347,16 +413,29 @@ func ValueOffset(tk *token.Token) int {
 // original token order and positions.
 //
 // Each document header token ('---') is included at the start of its document.
-func SplitDocuments(tks token.Tokens) iter.Seq2[int, token.Tokens] {
+func SplitDocuments(tks token.Tokens, opts ...SplitDocumentsOption) iter.Seq2[int, token.Tokens] {
+	cfg := &splitDocumentsConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
 	return func(yield func(int, token.Tokens) bool) {
 		var (
 			docIdx  int
 			current token.Tokens
 		)
 
+		yieldDoc := func(doc token.Tokens) bool {
+			if cfg.resetPositions {
+				doc = CloneWithResetPositions(doc)
+			}
+
+			return yield(docIdx, doc)
+		}
+
 		for _, tk := range tks {
 			if tk.Type == token.DocumentHeaderType && len(current) > 0 {
-				if !yield(docIdx, current) {
+				if !yieldDoc(current) {
 					return
 				}
 
@@ -368,7 +447,7 @@ func SplitDocuments(tks token.Tokens) iter.Seq2[int, token.Tokens] {
 		}
 
 		if len(current) > 0 {
-			if !yield(docIdx, current) {
+			if !yieldDoc(current) {
 				return
 			}
 		}

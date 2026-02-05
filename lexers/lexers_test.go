@@ -11,6 +11,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/lexers"
+	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 func collectDocs(seq iter.Seq2[int, token.Tokens]) []token.Tokens {
@@ -259,5 +260,168 @@ func TestTokenizeDocuments(t *testing.T) {
 
 		assert.Equal(t, 0, firstIdx)
 		require.NotEmpty(t, firstDoc)
+	})
+}
+
+func TestTokenizeDocuments_WithResetPositions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("single doc resets to line 1", func(t *testing.T) {
+		t.Parallel()
+
+		// Create input that starts at a non-zero position.
+		input := yamltest.JoinLF(
+			"",
+			"",
+			"key: value",
+		)
+
+		docs := collectDocs(lexers.TokenizeDocuments(input, lexers.WithResetPositions()))
+
+		require.Len(t, docs, 1)
+		require.NotEmpty(t, docs[0])
+
+		// First token should be at line 1.
+		assert.Equal(t, 1, docs[0][0].Position.Line)
+		assert.Equal(t, 1, docs[0][0].Position.Column)
+		assert.Equal(t, 0, docs[0][0].Position.Offset)
+	})
+
+	t.Run("multi doc each starts at line 1", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.JoinLF(
+			"key1: v1",
+			"---",
+			"key2: v2",
+		)
+
+		docs := collectDocs(lexers.TokenizeDocuments(input, lexers.WithResetPositions()))
+
+		require.Len(t, docs, 2)
+
+		// First doc should start at line 1.
+		require.NotEmpty(t, docs[0])
+		assert.Equal(t, 1, docs[0][0].Position.Line)
+		assert.Equal(t, 1, docs[0][0].Position.Column)
+		assert.Equal(t, 0, docs[0][0].Position.Offset)
+
+		// Second doc should also start at line 1 (header token).
+		require.NotEmpty(t, docs[1])
+		assert.Equal(t, 1, docs[1][0].Position.Line)
+		assert.Equal(t, 1, docs[1][0].Position.Column)
+		assert.Equal(t, 0, docs[1][0].Position.Offset)
+	})
+
+	t.Run("preserves original positions when option not used", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.JoinLF(
+			"key1: v1",
+			"---",
+			"key2: v2",
+		)
+
+		docs := collectDocs(lexers.TokenizeDocuments(input))
+
+		require.Len(t, docs, 2)
+
+		// First doc should be at line 1.
+		require.NotEmpty(t, docs[0])
+		assert.Equal(t, 1, docs[0][0].Position.Line)
+
+		// Second doc header should be at line 2 (original position).
+		require.NotEmpty(t, docs[1])
+		assert.Equal(t, 2, docs[1][0].Position.Line)
+	})
+
+	t.Run("clones tokens when reset", func(t *testing.T) {
+		t.Parallel()
+
+		input := "key: value\n"
+
+		// Get original tokens for comparison.
+		original := lexer.Tokenize(input)
+		require.NotEmpty(t, original)
+
+		originalLine := original[0].Position.Line
+
+		docs := collectDocs(lexers.TokenizeDocuments(input, lexers.WithResetPositions()))
+
+		require.Len(t, docs, 1)
+		require.NotEmpty(t, docs[0])
+
+		// Should be different pointers (cloned).
+		assert.NotSame(t, original[0], docs[0][0])
+
+		// Original should be unchanged.
+		assert.Equal(t, originalLine, original[0].Position.Line)
+	})
+
+	t.Run("three docs all reset independently", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.JoinLF(
+			"a: 1",
+			"---",
+			"b: 2",
+			"---",
+			"c: 3",
+		)
+
+		docs := collectDocs(lexers.TokenizeDocuments(input, lexers.WithResetPositions()))
+
+		require.Len(t, docs, 3)
+
+		// Each doc should start at line 1.
+		for i, doc := range docs {
+			require.NotEmpty(t, doc, "doc %d should not be empty", i)
+			assert.Equal(t, 1, doc[0].Position.Line, "doc %d should start at line 1", i)
+			assert.Equal(t, 0, doc[0].Position.Offset, "doc %d should start at offset 0", i)
+		}
+	})
+
+	t.Run("matches SplitDocuments behavior", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.JoinLF(
+			"key1: v1",
+			"---",
+			"key2: v2",
+		)
+
+		// Get results from TokenizeDocuments.
+		tokenizeDocs := collectDocs(lexers.TokenizeDocuments(input, lexers.WithResetPositions()))
+
+		// Get results from SplitDocuments with same option.
+		allTokens := lexer.Tokenize(input)
+		splitDocs := []token.Tokens{}
+
+		for _, tks := range tokens.SplitDocuments(allTokens, tokens.WithResetPositions()) {
+			splitDocs = append(splitDocs, tks)
+		}
+
+		// Both should produce the same number of documents.
+		require.Len(t, tokenizeDocs, len(splitDocs))
+
+		// First tokens of each doc should have the same positions.
+		for i := range tokenizeDocs {
+			require.NotEmpty(t, tokenizeDocs[i])
+			require.NotEmpty(t, splitDocs[i])
+			assert.Equal(t, splitDocs[i][0].Position.Line, tokenizeDocs[i][0].Position.Line,
+				"doc %d line mismatch", i)
+			assert.Equal(t, splitDocs[i][0].Position.Column, tokenizeDocs[i][0].Position.Column,
+				"doc %d column mismatch", i)
+			assert.Equal(t, splitDocs[i][0].Position.Offset, tokenizeDocs[i][0].Position.Offset,
+				"doc %d offset mismatch", i)
+		}
+	})
+
+	t.Run("empty input", func(t *testing.T) {
+		t.Parallel()
+
+		docs := collectDocs(lexers.TokenizeDocuments("", lexers.WithResetPositions()))
+
+		assert.Empty(t, docs)
 	})
 }

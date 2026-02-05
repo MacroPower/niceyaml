@@ -1143,6 +1143,364 @@ func TestSplitDocuments(t *testing.T) {
 	})
 }
 
+func TestSplitDocuments_WithResetPositions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("single doc resets to line 1", func(t *testing.T) {
+		t.Parallel()
+
+		tkb := yamltest.NewTokenBuilder()
+		input := token.Tokens{
+			tkb.Clone().Type(token.StringType).Value("key").
+				PositionLine(5).PositionColumn(3).PositionOffset(100).Build(),
+			tkb.Clone().Type(token.MappingValueType).Value(":").
+				PositionLine(5).PositionColumn(6).PositionOffset(103).Build(),
+			tkb.Clone().Type(token.StringType).Value("value").
+				PositionLine(5).PositionColumn(8).PositionOffset(105).Build(),
+		}
+
+		got := collectDocs(tokens.SplitDocuments(input, tokens.WithResetPositions()))
+
+		require.Len(t, got, 1)
+		require.Len(t, got[0], 3)
+
+		// All tokens should be on line 1 now.
+		assert.Equal(t, 1, got[0][0].Position.Line)
+		assert.Equal(t, 1, got[0][0].Position.Column)
+		assert.Equal(t, 0, got[0][0].Position.Offset)
+
+		assert.Equal(t, 1, got[0][1].Position.Line)
+		assert.Equal(t, 4, got[0][1].Position.Column)
+		assert.Equal(t, 3, got[0][1].Position.Offset)
+
+		assert.Equal(t, 1, got[0][2].Position.Line)
+		assert.Equal(t, 6, got[0][2].Position.Column)
+		assert.Equal(t, 5, got[0][2].Position.Offset)
+	})
+
+	t.Run("multi doc each starts at line 1", func(t *testing.T) {
+		t.Parallel()
+
+		tkb := yamltest.NewTokenBuilder()
+		// First document at line 1.
+		doc1Key := tkb.Clone().Type(token.StringType).Value("key1").
+			PositionLine(1).PositionColumn(1).PositionOffset(0).Build()
+		// Second document starts at line 3.
+		header := tkb.Clone().Type(token.DocumentHeaderType).Value("---").
+			PositionLine(3).PositionColumn(1).PositionOffset(15).Build()
+		doc2Key := tkb.Clone().Type(token.StringType).Value("key2").
+			PositionLine(4).PositionColumn(1).PositionOffset(20).Build()
+
+		input := token.Tokens{doc1Key, header, doc2Key}
+
+		got := collectDocs(tokens.SplitDocuments(input, tokens.WithResetPositions()))
+
+		require.Len(t, got, 2)
+
+		// First document should start at line 1.
+		require.Len(t, got[0], 1)
+		assert.Equal(t, 1, got[0][0].Position.Line)
+		assert.Equal(t, 1, got[0][0].Position.Column)
+		assert.Equal(t, 0, got[0][0].Position.Offset)
+
+		// Second document should also start at line 1.
+		require.Len(t, got[1], 2)
+		assert.Equal(t, 1, got[1][0].Position.Line) // Header.
+		assert.Equal(t, 1, got[1][0].Position.Column)
+		assert.Equal(t, 0, got[1][0].Position.Offset)
+
+		assert.Equal(t, 2, got[1][1].Position.Line) // Key on next line.
+		assert.Equal(t, 1, got[1][1].Position.Column)
+		assert.Equal(t, 5, got[1][1].Position.Offset)
+	})
+
+	t.Run("preserves original tokens when option not used", func(t *testing.T) {
+		t.Parallel()
+
+		tkb := yamltest.NewTokenBuilder()
+		input := token.Tokens{
+			tkb.Clone().Type(token.StringType).Value("key").
+				PositionLine(5).PositionColumn(3).PositionOffset(100).Build(),
+		}
+
+		got := collectDocs(tokens.SplitDocuments(input))
+
+		require.Len(t, got, 1)
+		require.Len(t, got[0], 1)
+
+		// Position should be unchanged.
+		assert.Equal(t, 5, got[0][0].Position.Line)
+		assert.Equal(t, 3, got[0][0].Position.Column)
+		assert.Equal(t, 100, got[0][0].Position.Offset)
+
+		// Should be the same pointer (not cloned).
+		assert.Same(t, input[0], got[0][0])
+	})
+
+	t.Run("clones tokens when reset", func(t *testing.T) {
+		t.Parallel()
+
+		tkb := yamltest.NewTokenBuilder()
+		original := tkb.Clone().Type(token.StringType).Value("key").
+			PositionLine(5).PositionColumn(3).PositionOffset(100).Build()
+		input := token.Tokens{original}
+
+		got := collectDocs(tokens.SplitDocuments(input, tokens.WithResetPositions()))
+
+		require.Len(t, got, 1)
+		require.Len(t, got[0], 1)
+
+		// Should be a different pointer (cloned).
+		assert.NotSame(t, original, got[0][0])
+
+		// Original should be unchanged.
+		assert.Equal(t, 5, original.Position.Line)
+		assert.Equal(t, 3, original.Position.Column)
+		assert.Equal(t, 100, original.Position.Offset)
+	})
+
+	t.Run("handles multiline tokens within doc", func(t *testing.T) {
+		t.Parallel()
+
+		tkb := yamltest.NewTokenBuilder()
+		// A multiline block scalar starting at line 10.
+		blockIndicator := tkb.Clone().Type(token.LiteralType).Value("|").
+			PositionLine(10).PositionColumn(5).PositionOffset(50).Build()
+		blockContent := tkb.Clone().Type(token.StringType).Value("line1\nline2").
+			PositionLine(11).PositionColumn(5).PositionOffset(52).Build()
+
+		input := token.Tokens{blockIndicator, blockContent}
+
+		got := collectDocs(tokens.SplitDocuments(input, tokens.WithResetPositions()))
+
+		require.Len(t, got, 1)
+		require.Len(t, got[0], 2)
+
+		// Block indicator should be at line 1.
+		assert.Equal(t, 1, got[0][0].Position.Line)
+		assert.Equal(t, 1, got[0][0].Position.Column)
+		assert.Equal(t, 0, got[0][0].Position.Offset)
+
+		// Content should be at line 2 (relative to doc start).
+		assert.Equal(t, 2, got[0][1].Position.Line)
+		assert.Equal(t, 5, got[0][1].Position.Column)
+		assert.Equal(t, 2, got[0][1].Position.Offset)
+	})
+
+	t.Run("handles nil position", func(t *testing.T) {
+		t.Parallel()
+
+		// Token with nil position should not cause panic.
+		input := token.Tokens{
+			&token.Token{Type: token.StringType, Value: "test", Position: nil},
+		}
+
+		got := collectDocs(tokens.SplitDocuments(input, tokens.WithResetPositions()))
+
+		require.Len(t, got, 1)
+		require.Len(t, got[0], 1)
+		assert.Nil(t, got[0][0].Position)
+	})
+
+	t.Run("handles empty input", func(t *testing.T) {
+		t.Parallel()
+
+		got := collectDocs(tokens.SplitDocuments(nil, tokens.WithResetPositions()))
+
+		assert.Empty(t, got)
+	})
+
+	t.Run("three docs all reset independently", func(t *testing.T) {
+		t.Parallel()
+
+		tkb := yamltest.NewTokenBuilder()
+		// Doc 1 at line 1.
+		doc1 := tkb.Clone().Type(token.StringType).Value("doc1").
+			PositionLine(1).PositionColumn(1).PositionOffset(0).Build()
+		// Doc 2 at line 5.
+		header2 := tkb.Clone().Type(token.DocumentHeaderType).Value("---").
+			PositionLine(5).PositionColumn(1).PositionOffset(20).Build()
+		doc2 := tkb.Clone().Type(token.StringType).Value("doc2").
+			PositionLine(6).PositionColumn(1).PositionOffset(25).Build()
+		// Doc 3 at line 10.
+		header3 := tkb.Clone().Type(token.DocumentHeaderType).Value("---").
+			PositionLine(10).PositionColumn(1).PositionOffset(40).Build()
+		doc3 := tkb.Clone().Type(token.StringType).Value("doc3").
+			PositionLine(11).PositionColumn(1).PositionOffset(45).Build()
+
+		input := token.Tokens{doc1, header2, doc2, header3, doc3}
+
+		got := collectDocs(tokens.SplitDocuments(input, tokens.WithResetPositions()))
+
+		require.Len(t, got, 3)
+
+		// Doc 1 starts at line 1.
+		assert.Equal(t, 1, got[0][0].Position.Line)
+
+		// Doc 2 starts at line 1 (header) then line 2 (content).
+		assert.Equal(t, 1, got[1][0].Position.Line)
+		assert.Equal(t, 2, got[1][1].Position.Line)
+
+		// Doc 3 starts at line 1 (header) then line 2 (content).
+		assert.Equal(t, 1, got[2][0].Position.Line)
+		assert.Equal(t, 2, got[2][1].Position.Line)
+	})
+}
+
+func TestCloneWithResetPositions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("resets positions to line 1 column 1", func(t *testing.T) {
+		t.Parallel()
+
+		tkb := yamltest.NewTokenBuilder()
+		input := token.Tokens{
+			tkb.Clone().Type(token.StringType).Value("key").
+				PositionLine(5).PositionColumn(3).PositionOffset(100).Build(),
+			tkb.Clone().Type(token.MappingValueType).Value(":").
+				PositionLine(5).PositionColumn(6).PositionOffset(103).Build(),
+			tkb.Clone().Type(token.StringType).Value("value").
+				PositionLine(5).PositionColumn(8).PositionOffset(105).Build(),
+		}
+
+		got := tokens.CloneWithResetPositions(input)
+
+		require.Len(t, got, 3)
+
+		// First token should be at line 1, column 1, offset 0.
+		assert.Equal(t, 1, got[0].Position.Line)
+		assert.Equal(t, 1, got[0].Position.Column)
+		assert.Equal(t, 0, got[0].Position.Offset)
+
+		// Second token: same line, column adjusted relatively.
+		assert.Equal(t, 1, got[1].Position.Line)
+		assert.Equal(t, 4, got[1].Position.Column) // 6 - 3 + 1 = 4
+		assert.Equal(t, 3, got[1].Position.Offset) // 103 - 100 = 3
+
+		// Third token: same line, column adjusted relatively.
+		assert.Equal(t, 1, got[2].Position.Line)
+		assert.Equal(t, 6, got[2].Position.Column) // 8 - 3 + 1 = 6
+		assert.Equal(t, 5, got[2].Position.Offset) // 105 - 100 = 5
+	})
+
+	t.Run("handles multiline tokens", func(t *testing.T) {
+		t.Parallel()
+
+		tkb := yamltest.NewTokenBuilder()
+		input := token.Tokens{
+			tkb.Clone().Type(token.StringType).Value("key").
+				PositionLine(10).PositionColumn(5).PositionOffset(50).Build(),
+			tkb.Clone().Type(token.StringType).Value("value").
+				PositionLine(11).PositionColumn(5).PositionOffset(55).Build(),
+		}
+
+		got := tokens.CloneWithResetPositions(input)
+
+		require.Len(t, got, 2)
+
+		// First token at line 1.
+		assert.Equal(t, 1, got[0].Position.Line)
+		assert.Equal(t, 1, got[0].Position.Column)
+		assert.Equal(t, 0, got[0].Position.Offset)
+
+		// Second token at line 2 (relative).
+		assert.Equal(t, 2, got[1].Position.Line)
+		assert.Equal(t, 5, got[1].Position.Column) // Column preserved for non-first lines.
+		assert.Equal(t, 5, got[1].Position.Offset) // 55 - 50 = 5
+	})
+
+	t.Run("returns original slice for empty input", func(t *testing.T) {
+		t.Parallel()
+
+		input := token.Tokens{}
+		got := tokens.CloneWithResetPositions(input)
+
+		assert.Empty(t, got)
+	})
+
+	t.Run("returns original slice for nil input", func(t *testing.T) {
+		t.Parallel()
+
+		got := tokens.CloneWithResetPositions(nil)
+
+		assert.Nil(t, got)
+	})
+
+	t.Run("clones tokens", func(t *testing.T) {
+		t.Parallel()
+
+		tkb := yamltest.NewTokenBuilder()
+		original := tkb.Clone().Type(token.StringType).Value("key").
+			PositionLine(5).PositionColumn(3).PositionOffset(100).Build()
+		input := token.Tokens{original}
+
+		got := tokens.CloneWithResetPositions(input)
+
+		require.Len(t, got, 1)
+
+		// Should be a different pointer.
+		assert.NotSame(t, original, got[0])
+
+		// Original should be unchanged.
+		assert.Equal(t, 5, original.Position.Line)
+		assert.Equal(t, 3, original.Position.Column)
+		assert.Equal(t, 100, original.Position.Offset)
+	})
+
+	t.Run("handles nil position", func(t *testing.T) {
+		t.Parallel()
+
+		input := token.Tokens{
+			&token.Token{Type: token.StringType, Value: "test", Position: nil},
+		}
+
+		got := tokens.CloneWithResetPositions(input)
+
+		require.Len(t, got, 1)
+		assert.Nil(t, got[0].Position)
+	})
+
+	t.Run("skips tokens with nil position when finding start", func(t *testing.T) {
+		t.Parallel()
+
+		tkb := yamltest.NewTokenBuilder()
+		input := token.Tokens{
+			&token.Token{Type: token.StringType, Value: "nil-pos", Position: nil},
+			tkb.Clone().Type(token.StringType).Value("key").
+				PositionLine(5).PositionColumn(3).PositionOffset(100).Build(),
+		}
+
+		got := tokens.CloneWithResetPositions(input)
+
+		require.Len(t, got, 2)
+
+		// First token still has nil position.
+		assert.Nil(t, got[0].Position)
+
+		// Second token should be reset to line 1.
+		assert.Equal(t, 1, got[1].Position.Line)
+		assert.Equal(t, 1, got[1].Position.Column)
+		assert.Equal(t, 0, got[1].Position.Offset)
+	})
+
+	t.Run("preserves token values", func(t *testing.T) {
+		t.Parallel()
+
+		tkb := yamltest.NewTokenBuilder()
+		input := token.Tokens{
+			tkb.Clone().Type(token.StringType).Value("mykey").Origin("mykey").
+				PositionLine(5).PositionColumn(3).Build(),
+		}
+
+		got := tokens.CloneWithResetPositions(input)
+
+		require.Len(t, got, 1)
+		assert.Equal(t, token.StringType, got[0].Type)
+		assert.Equal(t, "mykey", got[0].Value)
+		assert.Equal(t, "mykey", got[0].Origin)
+	})
+}
+
 func TestTypeStyle(t *testing.T) {
 	t.Parallel()
 
