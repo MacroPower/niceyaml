@@ -214,17 +214,24 @@ func (m *Model) Width() int {
 func (m *Model) SetWidth(w int) {
 	if m.width != w {
 		m.width = w
-		m.printer.SetWidth(w)
+		m.updatePrinterWidth()
 		if m.WrapEnabled {
 			m.rerender()
 		}
 	}
 }
 
+// updatePrinterWidth sets the printer width to the content width (accounting
+// for the style's frame size). This ensures word wrapping produces lines that
+// fit within the actual content area.
+func (m *Model) updatePrinterWidth() {
+	m.printer.SetWidth(m.maxWidth())
+}
+
 // SetPrinter sets the [Printer] used for rendering and triggers a re-render.
 func (m *Model) SetPrinter(p Printer) {
 	m.printer = p
-	m.printer.SetWidth(m.width)
+	m.updatePrinterWidth()
 	m.rerender()
 }
 
@@ -667,7 +674,7 @@ func (m *Model) renderVisible() []string {
 
 	content := m.printer.Print(m.left, position.NewSpan(start, end))
 
-	return strings.Split(content, "\n")
+	return splitLines(content)
 }
 
 // getDiffBaseRevision returns the base revision for diff comparison based on
@@ -1039,7 +1046,10 @@ func (m *Model) scrollToCurrentMatch() {
 	startLine := match.rng.Start.Line
 
 	// Center the match in the viewport.
-	m.SetYOffset(startLine - m.maxHeight()/2)
+	// Use (maxHeight-1)/2 to ensure the match appears at the visual center.
+	// For height 22: (22-1)/2 = 10, placing the match at position 10 (middle).
+	// For height 21: (21-1)/2 = 10, placing the match at position 10 (middle).
+	m.SetYOffset(startLine - (m.maxHeight()-1)/2)
 }
 
 // Update processes Bubble Tea messages and returns the updated model.
@@ -1156,6 +1166,7 @@ func (m *Model) renderContent(lines []string, contentW, contentH int) string {
 	contents := textStyle.
 		Width(contentW).
 		Height(contentH).
+		MaxHeight(contentH).
 		Render(strings.Join(lines, "\n"))
 
 	return m.Style.
@@ -1182,7 +1193,7 @@ func (m Model) View() string {
 	switch m.viewMode {
 	case ViewModeHunks:
 		hunksContent := m.getHunksDiffContent()
-		lines = m.visibleLines(strings.Split(hunksContent, "\n"))
+		lines = m.visibleLines(splitLines(hunksContent))
 
 	case ViewModeSideBySide:
 		return m.renderSideBySide(w, h)
@@ -1262,8 +1273,8 @@ func (m Model) renderSideBySide(contentW, contentH int) string {
 	rightContent := m.printer.Print(rightIter, span)
 
 	// Split into lines.
-	leftLines := strings.Split(leftContent, "\n")
-	rightLines := strings.Split(rightContent, "\n")
+	leftLines := splitLines(leftContent)
+	rightLines := splitLines(rightContent)
 
 	// Get text style for padding empty areas.
 	textStyle := lipgloss.NewStyle()
@@ -1310,4 +1321,15 @@ func (m Model) renderSideBySide(contentW, contentH int) string {
 
 func clamp[T cmp.Ordered](v, low, high T) T {
 	return min(high, max(low, v))
+}
+
+// splitLines splits content by newlines, correctly handling trailing newlines.
+// Unlike [strings.Split], this does not produce an empty trailing element when
+// the content ends with a newline.
+func splitLines(content string) []string {
+	if content == "" {
+		return nil
+	}
+
+	return strings.Split(strings.TrimSuffix(content, "\n"), "\n")
 }

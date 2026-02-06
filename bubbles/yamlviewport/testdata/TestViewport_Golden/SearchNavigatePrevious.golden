@@ -1,0 +1,24 @@
+ key: value                                                                     
+ number: 42                                                                     
+ bool: true                                                                     
+ list:                                                                          
+   - <search>item</search>1                                                     
+   - <searchSelected>item</searchSelected>2                                     
+ nested:                                                                        
+   child: data                                                                  
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                

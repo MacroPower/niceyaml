@@ -222,6 +222,123 @@ func TestViewport_Golden(t *testing.T) {
 				m.SearchNext() // Move to second match.
 			},
 		},
+		"SearchNoMatches": {
+			opts: []yamlviewport.Option{
+				yamlviewport.WithPrinter(testPrinterWithSearch()),
+			},
+			yaml:   simpleYAML,
+			width:  80,
+			height: 24,
+			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+				m.SetSearchTerm("nonexistent")
+			},
+		},
+		"SearchNavigatePrevious": {
+			opts: []yamlviewport.Option{
+				yamlviewport.WithPrinter(testPrinterWithSearch()),
+			},
+			yaml:   simpleYAML,
+			width:  80,
+			height: 24,
+			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+				m.SetSearchTerm("item")
+				m.SearchPrevious() // Wrap from first to last match.
+			},
+		},
+		"SearchWrapAroundNext": {
+			opts: []yamlviewport.Option{
+				yamlviewport.WithPrinter(testPrinterWithSearch()),
+			},
+			yaml:   simpleYAML,
+			width:  80,
+			height: 24,
+			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+				m.SetSearchTerm("item")
+				m.SearchNext() // Second match.
+				m.SearchNext() // Wrap to first match.
+			},
+		},
+		"SearchWrapAroundPrevious": {
+			opts: []yamlviewport.Option{
+				yamlviewport.WithPrinter(testPrinterWithSearch()),
+			},
+			yaml:   simpleYAML,
+			width:  80,
+			height: 24,
+			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+				m.SetSearchTerm("item")
+				m.SearchPrevious() // Wrap to last match.
+				m.SearchPrevious() // Move to first match.
+			},
+		},
+		"SearchMultipleMatchesSameLine": {
+			opts: []yamlviewport.Option{
+				yamlviewport.WithPrinter(testPrinterWithSearch()),
+			},
+			yaml: yamltest.Input(`
+				item: item_value
+				another: data
+			`),
+			width:  80,
+			height: 24,
+			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+				m.SetSearchTerm("item") // Matches twice on the same line.
+			},
+		},
+		"SearchClear": {
+			opts: []yamlviewport.Option{
+				yamlviewport.WithPrinter(testPrinterWithSearch()),
+			},
+			yaml:   simpleYAML,
+			width:  80,
+			height: 24,
+			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+				m.SetSearchTerm("item")
+				m.ClearSearch() // Clear search - no highlights.
+			},
+		},
+		"SearchScrollsToFirstMatch": {
+			// With a small viewport, setting a search term scrolls to the first match.
+			// "timeout" first appears on line 36 in full.yaml.
+			opts: []yamlviewport.Option{
+				yamlviewport.WithPrinter(testPrinterWithSearch()),
+			},
+			yaml:   string(fullYAML),
+			width:  80,
+			height: 10,
+			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+				m.SetSearchTerm("timeout") // First match is on line 36.
+			},
+		},
+		"SearchScrollsToNextMatch": {
+			// Navigating to the next match scrolls the viewport.
+			// "timeout" appears on lines 36 and 41 in full.yaml.
+			opts: []yamlviewport.Option{
+				yamlviewport.WithPrinter(testPrinterWithSearch()),
+			},
+			yaml:   string(fullYAML),
+			width:  80,
+			height: 10,
+			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+				m.SetSearchTerm("timeout")
+				m.SearchNext() // Navigate to second match on line 41.
+			},
+		},
+		"SearchScrollsToPreviousMatch": {
+			// Navigating backwards scrolls to the previous match.
+			// Start at the second "timeout" match, go back to the first.
+			opts: []yamlviewport.Option{
+				yamlviewport.WithPrinter(testPrinterWithSearch()),
+			},
+			yaml:   string(fullYAML),
+			width:  80,
+			height: 10,
+			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+				m.SetSearchTerm("timeout")
+				m.SearchNext()     // Move to second match.
+				m.SearchPrevious() // Move back to first match.
+			},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -1828,6 +1945,31 @@ func TestViewModeHunks_Golden(t *testing.T) {
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")))
 				m.GoToRevision(2)
 				m.SetViewMode(yamlviewport.ViewModeHunks)
+			},
+			width:  80,
+			height: 30,
+		},
+		"HunksSearch": {
+			setupFunc: func(m *yamlviewport.Model) {
+				m.SetPrinter(testPrinterWithSearch())
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.GoToRevision(1)
+				m.SetViewMode(yamlviewport.ViewModeHunks)
+				m.SetSearchTerm("name")
+			},
+			width:  80,
+			height: 30,
+		},
+		"HunksSearchNavigate": {
+			setupFunc: func(m *yamlviewport.Model) {
+				m.SetPrinter(testPrinterWithSearch())
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.GoToRevision(1)
+				m.SetViewMode(yamlviewport.ViewModeHunks)
+				m.SetSearchTerm("name")
+				m.SearchNext() // Navigate to second match.
 			},
 			width:  80,
 			height: 30,

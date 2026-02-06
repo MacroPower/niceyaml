@@ -1,0 +1,10 @@
+   retries: 3                                                                   
+                                                                                
+ production:                                                                    
+   <<: *defaults                                                                
+   <searchSelected>timeout</searchSelected>: 60                                 
+                                                                                
+ # Flow style                                                                   
+ tags: [alpha, beta, gamma]                                                     
+ limits: {cpu: 100m, memory: 256Mi}                                             
+                                                                                
