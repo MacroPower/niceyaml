@@ -50,11 +50,43 @@ func Rrt() style.Styles {
 			base.Foreground(lipgloss.Color("#7fffd4")),
 		),
 		style.Set(
-			style.Search,
+			style.Title,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#000000")).
+				Background(lipgloss.Color("#ff0000")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleAccent,
+			base.Background(lipgloss.Lighten(lipgloss.Color("#000000"), 0.30)).
+				Foreground(lipgloss.Lighten(lipgloss.Color("#f8f8f2"), 0.15)),
+		),
+		style.Set(
+			style.TitleSubtle,
+			base.Background(lipgloss.Lighten(lipgloss.Color("#000000"), 0.15)),
+		),
+		style.Set(
+			style.TextAccent,
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#f8f8f2"), 0.15)),
+		),
+		style.Set(
+			style.TextAccentSelected,
+			base.Foreground(lipgloss.Color("#f8f8f2")),
+		),
+		style.Set(
+			style.TextSubtle,
+			base.Foreground(lipgloss.Darken(lipgloss.Color("#f8f8f2"), 0.15)),
+		),
+		style.Set(
+			style.TextSubtleSelected,
+			base.Foreground(lipgloss.Color("#f8f8f2")),
+		),
+		style.Set(
+			style.Highlight,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#000000"), 0.15)),
 		),
 		style.Set(
-			style.SearchSelected,
+			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#000000"), 0.30)),
 		),
 	)

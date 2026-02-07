@@ -2,7 +2,7 @@
                                                                                 
  production:                                                                    
    <<: *defaults                                                                
-   <searchSelected>timeout</searchSelected>: 60                                 
+   <highlightSelected>timeout</highlightSelected>: 60                           
                                                                                 
  # Flow style                                                                   
  tags: [alpha, beta, gamma]                                                     

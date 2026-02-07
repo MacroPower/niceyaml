@@ -78,12 +78,55 @@ func TestNewStyles(t *testing.T) {
 			style.NameTag,
 			style.Punctuation,
 			style.PunctuationMappingValue,
+			style.TextAccent,
+			style.TextSubtle,
+			style.Title,
 		}
 
 		for _, s := range stylesToCheck {
 			_, ok := styles[s]
 			assert.True(t, ok, "style %q should be pre-computed in map", s)
 		}
+	})
+}
+
+func TestNewStyles_TextStyles(t *testing.T) {
+	t.Parallel()
+
+	base := lipgloss.NewStyle().Foreground(lipgloss.Color("white"))
+
+	t.Run("inherit from Text when not explicitly set", func(t *testing.T) {
+		t.Parallel()
+
+		styles := style.NewStyles(base)
+
+		for _, s := range []style.Style{style.TextAccent, style.TextSubtle, style.Title} {
+			got := styles.Style(s)
+			assert.NotNil(t, got)
+			assert.Equal(t, lipgloss.Color("white"), got.GetForeground(),
+				"style %q should inherit foreground from Text", s)
+		}
+	})
+
+	t.Run("explicit Set overrides inherited default", func(t *testing.T) {
+		t.Parallel()
+
+		accent := base.Foreground(lipgloss.Color("red"))
+		subtle := base.Foreground(lipgloss.Color("gray"))
+		title := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("black")).
+			Background(lipgloss.Color("red"))
+
+		styles := style.NewStyles(base,
+			style.Set(style.TextAccent, accent),
+			style.Set(style.TextSubtle, subtle),
+			style.Set(style.Title, title),
+		)
+
+		assert.Equal(t, lipgloss.Color("red"), styles.Style(style.TextAccent).GetForeground())
+		assert.Equal(t, lipgloss.Color("gray"), styles.Style(style.TextSubtle).GetForeground())
+		assert.Equal(t, lipgloss.Color("black"), styles.Style(style.Title).GetForeground())
+		assert.Equal(t, lipgloss.Color("red"), styles.Style(style.Title).GetBackground())
 	})
 }
 

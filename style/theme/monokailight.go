@@ -50,11 +50,43 @@ func Monokailight() style.Styles {
 			base.Italic(true),
 		),
 		style.Set(
-			style.Search,
+			style.Title,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#fafafa")).
+				Background(lipgloss.Color("#f92672")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleAccent,
+			base.Background(lipgloss.Darken(lipgloss.Color("#fafafa"), 0.30)).
+				Foreground(lipgloss.Darken(lipgloss.Color("#272822"), 0.15)),
+		),
+		style.Set(
+			style.TitleSubtle,
+			base.Background(lipgloss.Darken(lipgloss.Color("#fafafa"), 0.15)),
+		),
+		style.Set(
+			style.TextAccent,
+			base.Foreground(lipgloss.Darken(lipgloss.Color("#272822"), 0.15)),
+		),
+		style.Set(
+			style.TextAccentSelected,
+			base.Foreground(lipgloss.Color("#272822")),
+		),
+		style.Set(
+			style.TextSubtle,
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#272822"), 0.15)),
+		),
+		style.Set(
+			style.TextSubtleSelected,
+			base.Foreground(lipgloss.Color("#272822")),
+		),
+		style.Set(
+			style.Highlight,
 			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#fafafa"), 0.15)),
 		),
 		style.Set(
-			style.SearchSelected,
+			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#fafafa"), 0.30)),
 		),
 	)

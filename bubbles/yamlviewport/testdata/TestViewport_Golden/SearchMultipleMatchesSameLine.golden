@@ -1,4 +1,4 @@
- <searchSelected>item</searchSelected>: <search>item</search>_value             
+ <highlightSelected>item</highlightSelected>: <highlight>item</highlight>_value 
  another: data                                                                  
                                                                                 
                                                                                 

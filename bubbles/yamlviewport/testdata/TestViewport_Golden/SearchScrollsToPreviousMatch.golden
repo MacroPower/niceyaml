@@ -2,9 +2,9 @@
                                                                                 
  # Anchors and aliases                                                          
  defaults: &defaults                                                            
-   <searchSelected>timeout</searchSelected>: 30                                 
+   <highlightSelected>timeout</highlightSelected>: 30                           
    retries: 3                                                                   
                                                                                 
  production:                                                                    
    <<: *defaults                                                                
-   <search>timeout</search>: 60                                                 
+   <highlight>timeout</highlight>: 60                                           

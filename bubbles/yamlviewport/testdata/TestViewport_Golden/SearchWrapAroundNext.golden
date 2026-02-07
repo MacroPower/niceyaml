@@ -2,8 +2,8 @@
  number: 42                                                                     
  bool: true                                                                     
  list:                                                                          
-   - <searchSelected>item</searchSelected>1                                     
-   - <search>item</search>2                                                     
+   - <highlightSelected>item</highlightSelected>1                               
+   - <highlight>item</highlight>2                                               
  nested:                                                                        
    child: data                                                                  
                                                                                 

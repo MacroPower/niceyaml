@@ -54,11 +54,43 @@ func KanagawaLotus() style.Styles {
 			base.Foreground(lipgloss.Color("#545464")),
 		),
 		style.Set(
-			style.Search,
+			style.Title,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#f2ecbc")).
+				Background(lipgloss.Color("#4d699b")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleAccent,
+			base.Background(lipgloss.Darken(lipgloss.Color("#f2ecbc"), 0.30)).
+				Foreground(lipgloss.Darken(lipgloss.Color("#545464"), 0.15)),
+		),
+		style.Set(
+			style.TitleSubtle,
+			base.Background(lipgloss.Darken(lipgloss.Color("#f2ecbc"), 0.15)),
+		),
+		style.Set(
+			style.TextAccent,
+			base.Foreground(lipgloss.Darken(lipgloss.Color("#545464"), 0.15)),
+		),
+		style.Set(
+			style.TextAccentSelected,
+			base.Foreground(lipgloss.Color("#545464")),
+		),
+		style.Set(
+			style.TextSubtle,
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#545464"), 0.15)),
+		),
+		style.Set(
+			style.TextSubtleSelected,
+			base.Foreground(lipgloss.Color("#545464")),
+		),
+		style.Set(
+			style.Highlight,
 			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#f2ecbc"), 0.15)),
 		),
 		style.Set(
-			style.SearchSelected,
+			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#f2ecbc"), 0.30)),
 		),
 	)

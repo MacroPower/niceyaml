@@ -8,7 +8,6 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/exp/charmtone"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -270,7 +269,7 @@ func (m *model) statusBar() string {
 		}
 	}
 
-	left := fmt.Sprintf(" %s[%d]",
+	left := fmt.Sprintf(" %s[%d] ",
 		revisionInfo,
 		m.viewport.YOffset()+1,
 	)
@@ -291,16 +290,15 @@ func (m *model) statusBar() string {
 		right = fmt.Sprintf("%d%% ", int(m.viewport.ScrollPercent()*100))
 	}
 
-	barStyle := lipgloss.NewStyle().
-		Background(charmtone.Charcoal).
-		Foreground(charmtone.Salt).
-		Inline(true)
+	styles, _ := theme.Styles(m.currentTheme)
+	barLeftStyle := styles.Style(style.TitleAccent).Inline(true)
+	barRightStyle := styles.Style(style.TitleSubtle).Inline(true)
 
 	padding := max(0, lipgloss.Width(left))
 
 	right = lipgloss.PlaceHorizontal(m.width-padding, lipgloss.Right, right)
 
-	return barStyle.Render(left + right)
+	return barLeftStyle.Render(left) + barRightStyle.Render(right)
 }
 
 func buildPrinterOpts(lineNumbers bool, themeName string) []niceyaml.PrinterOption {
@@ -343,8 +341,8 @@ func (m *model) renderThemeOverlay() string {
 	// Get current theme styles for the overlay appearance.
 	styles, _ := theme.Styles(m.currentTheme)
 	baseStyle := styles.Style(style.Text)
-	accentStyle := styles.Style(style.NameTag)
-	dimStyle := styles.Style(style.Comment)
+	titleStyle := styles.Style(style.Title)
+	dimStyle := styles.Style(style.TextSubtle)
 
 	// Build theme list content.
 	var items []string
@@ -370,15 +368,15 @@ func (m *model) renderThemeOverlay() string {
 		Width(overlayWidth).
 		Height(overlayHeight).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(accentStyle.GetForeground()).
+		BorderForeground(titleStyle.GetForeground()).
 		BorderBackground(baseStyle.GetBackground()).
 		Padding(0, 1)
 
 	// Content width inside the border and padding.
 	contentWidth := overlayWidth - 4
 
-	headerStyle := accentStyle.Bold(true).Background(baseStyle.GetBackground()).Width(contentWidth)
-	footerStyle := dimStyle.Background(baseStyle.GetBackground()).Width(contentWidth)
+	headerStyle := titleStyle.Width(contentWidth)
+	footerStyle := dimStyle.Width(contentWidth)
 
 	header := headerStyle.Render("Select Theme")
 	footer := footerStyle.Render("enter select · esc cancel")

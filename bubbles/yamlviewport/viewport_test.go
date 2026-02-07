@@ -50,7 +50,7 @@ func testPrinterWithColors() *niceyaml.Printer {
 func testPrinterWithSearch() *niceyaml.Printer {
 	return niceyaml.NewPrinter(
 		niceyaml.WithStyles(yamltest.NewXMLStyles(
-			yamltest.XMLStyleInclude(style.Search, style.SearchSelected),
+			yamltest.XMLStyleInclude(style.Highlight, style.HighlightSelected),
 		)),
 		niceyaml.WithStyle(lipgloss.NewStyle()),
 		niceyaml.WithGutter(niceyaml.DiffGutter()),

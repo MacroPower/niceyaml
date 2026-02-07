@@ -1,5 +1,5 @@
--<search>name</search>: original       │                                        
-+<searchSelected>name</searchSelected>: modified                                
+-<highlight>name</highlight>: original │                                        
++<highlightSelected>name</highlightSelected>: modified                          
 -count: 10                             │  +count: 20                            
  enabled: true                         │   enabled: true                        
 -description: "This is the original    │  +description: "This is the updated    

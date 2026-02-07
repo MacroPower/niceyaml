@@ -62,11 +62,43 @@ func ParaisoDark() style.Styles {
 			base.Foreground(lipgloss.Color("#fec418")),
 		),
 		style.Set(
-			style.Search,
+			style.Title,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#2f1e2e")).
+				Background(lipgloss.Color("#5bc4bf")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleAccent,
+			base.Background(lipgloss.Lighten(lipgloss.Color("#2f1e2e"), 0.30)).
+				Foreground(lipgloss.Lighten(lipgloss.Color("#e7e9db"), 0.15)),
+		),
+		style.Set(
+			style.TitleSubtle,
+			base.Background(lipgloss.Lighten(lipgloss.Color("#2f1e2e"), 0.15)),
+		),
+		style.Set(
+			style.TextAccent,
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#e7e9db"), 0.15)),
+		),
+		style.Set(
+			style.TextAccentSelected,
+			base.Foreground(lipgloss.Color("#e7e9db")),
+		),
+		style.Set(
+			style.TextSubtle,
+			base.Foreground(lipgloss.Darken(lipgloss.Color("#e7e9db"), 0.15)),
+		),
+		style.Set(
+			style.TextSubtleSelected,
+			base.Foreground(lipgloss.Color("#e7e9db")),
+		),
+		style.Set(
+			style.Highlight,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#2f1e2e"), 0.15)),
 		),
 		style.Set(
-			style.SearchSelected,
+			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#2f1e2e"), 0.30)),
 		),
 	)

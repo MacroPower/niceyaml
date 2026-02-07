@@ -115,10 +115,24 @@ const (
 	PunctuationSequenceEntry Style = "punctuationSequenceEntry"
 	// PunctuationSequenceStart styles opening bracket ([).
 	PunctuationSequenceStart Style = "punctuationSequenceStart"
-	// Search styles search match highlights.
-	Search Style = "search"
-	// SearchSelected styles the currently selected search match.
-	SearchSelected Style = "searchSelected"
+	// Highlight styles highlights.
+	Highlight Style = "highlight"
+	// HighlightSelected styles selected highlights.
+	HighlightSelected Style = "highlightSelected"
+	// TextAccent styles accented text.
+	TextAccent Style = "textAccent"
+	// TextAccentSelected styles selected accented text.
+	TextAccentSelected Style = "textAccentSelected"
+	// TextSubtle styles de-emphasized text.
+	TextSubtle Style = "textSubtle"
+	// TextSubtleSelected styles selected de-emphasized text.
+	TextSubtleSelected Style = "textSubtleSelected"
+	// Title styles titles.
+	Title Style = "title"
+	// TitleAccent styles accented titles.
+	TitleAccent Style = "titleAccent"
+	// TitleSubtle styles de-emphasized titles.
+	TitleSubtle Style = "titleSubtle"
 )
 
 var (
@@ -169,6 +183,13 @@ var (
 		PunctuationSequenceEnd:   PunctuationSequence,
 		PunctuationSequenceEntry: PunctuationSequence,
 		PunctuationSequenceStart: PunctuationSequence,
+		TextAccent:               Text,
+		TextAccentSelected:       TextAccent,
+		TextSubtle:               Text,
+		TextSubtleSelected:       TextSubtle,
+		Title:                    Text,
+		TitleAccent:              Title,
+		TitleSubtle:              Title,
 	}
 
 	// EmptyStyle is a singleton for missing style lookups.
