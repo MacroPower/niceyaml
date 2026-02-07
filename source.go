@@ -68,6 +68,7 @@ type Source struct {
 	file       *ast.File
 	fileErr    error
 	parserOpts []parser.Option
+	decodeOpts []yaml.DecodeOption
 	errorOpts  []ErrorOption
 	fileOnce   sync.Once
 	overlayMu  sync.RWMutex
@@ -79,6 +80,7 @@ type Source struct {
 //   - [WithName]
 //   - [WithFilePath]
 //   - [WithParserOptions]
+//   - [WithDecodeOptions]
 //   - [WithErrorOptions]
 type SourceOption func(*Source)
 
@@ -111,6 +113,22 @@ func WithFilePath(path string) SourceOption {
 func WithParserOptions(opts ...parser.Option) SourceOption {
 	return func(s *Source) {
 		s.parserOpts = opts
+	}
+}
+
+// WithDecodeOptions sets [yaml.DecodeOption] values passed to the YAML decoder
+// during [DocumentDecoder.Decode] and [DocumentDecoder.Unmarshal].
+//
+// This allows configuring decoder behavior such as allowing duplicate map keys:
+//
+//	source := niceyaml.NewSourceFromString(data,
+//	    niceyaml.WithDecodeOptions(yaml.AllowDuplicateMapKey()),
+//	)
+//
+// WithDecodeOptions is a [SourceOption].
+func WithDecodeOptions(opts ...yaml.DecodeOption) SourceOption {
+	return func(s *Source) {
+		s.decodeOpts = opts
 	}
 }
 

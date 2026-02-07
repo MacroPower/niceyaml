@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/goccy/go-yaml"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -862,6 +863,134 @@ func TestDocumentDecoder_ValidateSchema(t *testing.T) {
 		for _, dd := range d.Documents() {
 			err := dd.ValidateSchema(validator)
 			require.ErrorIs(t, err, wantErr)
+		}
+	})
+}
+
+func TestWithDecodeOptions(t *testing.T) {
+	t.Parallel()
+
+	type strictConfig struct {
+		Name string `yaml:"name"`
+	}
+
+	t.Run("without option allows unknown fields", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.Input(`
+			name: test
+			extra: field
+		`)
+		source := niceyaml.NewSourceFromString(input)
+		d, err := source.Decoder()
+		require.NoError(t, err)
+
+		for _, dd := range d.Documents() {
+			var result strictConfig
+
+			err := dd.Decode(&result)
+			require.NoError(t, err)
+			assert.Equal(t, "test", result.Name)
+		}
+	})
+
+	t.Run("DisallowUnknownField rejects unknown fields", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.Input(`
+			name: test
+			extra: field
+		`)
+		source := niceyaml.NewSourceFromString(input,
+			niceyaml.WithDecodeOptions(yaml.DisallowUnknownField()),
+		)
+		d, err := source.Decoder()
+		require.NoError(t, err)
+
+		for _, dd := range d.Documents() {
+			var result strictConfig
+
+			err := dd.Decode(&result)
+			require.Error(t, err)
+
+			var yamlErr *niceyaml.Error
+			require.ErrorAs(t, err, &yamlErr)
+		}
+	})
+
+	t.Run("options apply to Unmarshal", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.Input(`
+			name: test
+			extra: field
+		`)
+		source := niceyaml.NewSourceFromString(input,
+			niceyaml.WithDecodeOptions(yaml.DisallowUnknownField()),
+		)
+		d, err := source.Decoder()
+		require.NoError(t, err)
+
+		for _, dd := range d.Documents() {
+			var result strictConfig
+
+			err := dd.Unmarshal(&result)
+			require.Error(t, err)
+
+			var yamlErr *niceyaml.Error
+			require.ErrorAs(t, err, &yamlErr)
+		}
+	})
+
+	t.Run("options apply across multiple documents", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.Input(`
+			---
+			name: first
+			unknown1: a
+			---
+			name: second
+			unknown2: b
+		`)
+		source := niceyaml.NewSourceFromString(input,
+			niceyaml.WithDecodeOptions(yaml.DisallowUnknownField()),
+		)
+		d, err := source.Decoder()
+		require.NoError(t, err)
+
+		var errCount int
+		for _, dd := range d.Documents() {
+			var result strictConfig
+
+			err := dd.Decode(&result)
+			if err != nil {
+				errCount++
+			}
+		}
+
+		assert.Equal(t, 2, errCount)
+	})
+
+	t.Run("no options is the default", func(t *testing.T) {
+		t.Parallel()
+
+		input := yamltest.Input(`
+			name: test
+			extra: field
+		`)
+		source := niceyaml.NewSourceFromString(input,
+			niceyaml.WithDecodeOptions(),
+		)
+		d, err := source.Decoder()
+		require.NoError(t, err)
+
+		for _, dd := range d.Documents() {
+			var result strictConfig
+
+			err := dd.Decode(&result)
+			require.NoError(t, err)
+			assert.Equal(t, "test", result.Name)
 		}
 	})
 }

@@ -110,10 +110,11 @@ func (d *Decoder) Documents() iter.Seq2[int, *DocumentDecoder] {
 			}
 
 			dd := &DocumentDecoder{
-				doc:      doc,
-				index:    i,
-				tokens:   tks,
-				filePath: filePath,
+				doc:        doc,
+				index:      i,
+				tokens:     tks,
+				filePath:   filePath,
+				decodeOpts: d.source.decodeOpts,
 			}
 
 			if !yield(i, dd) {
@@ -149,10 +150,11 @@ func (d *Decoder) Documents() iter.Seq2[int, *DocumentDecoder] {
 //
 // Create instances with [NewDocumentDecoder] or iterate with [Decoder.Documents].
 type DocumentDecoder struct {
-	doc      *ast.DocumentNode
-	filePath string
-	tokens   token.Tokens
-	index    int
+	doc        *ast.DocumentNode
+	filePath   string
+	tokens     token.Tokens
+	decodeOpts []yaml.DecodeOption
+	index      int
 }
 
 // NewDocumentDecoder creates a new [*DocumentDecoder] for the given
@@ -335,7 +337,7 @@ func (dd *DocumentDecoder) UnmarshalContext(ctx context.Context, v any) error {
 
 // decodeNode decodes the document body to v and converts YAML errors.
 func (dd *DocumentDecoder) decodeNode(ctx context.Context, v any) error {
-	dec := yaml.NewDecoder(bytes.NewReader(nil))
+	dec := yaml.NewDecoder(bytes.NewReader(nil), dd.decodeOpts...)
 	err := dec.DecodeFromNodeContext(ctx, dd.doc.Body, v)
 	if err != nil {
 		var yamlErr yaml.Error
