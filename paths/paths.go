@@ -29,9 +29,10 @@ const (
 //   - [Builder.Key] returns a [*Path] targeting [PartKey].
 //   - [Builder.Value] returns a [*Path] targeting [PartValue].
 //
-// Create initialized instances with [Root].
+// Create instances with [Root], [FromString], or [MustFromString].
 type Builder struct {
-	pb *yaml.PathBuilder
+	pb    *yaml.PathBuilder
+	built *YAMLPath // Set by FromString; bypasses pb.Build().
 }
 
 // Root creates a new [Builder] starting at the root path ($).
@@ -73,18 +74,27 @@ func (b *Builder) Recursive(selector string) *Builder {
 	return b
 }
 
+// build returns the underlying [*YAMLPath], using the pre-built path if set.
+func (b *Builder) build() *YAMLPath {
+	if b.built != nil {
+		return b.built
+	}
+
+	return b.pb.Build()
+}
+
 // Path finalizes the builder and returns the underlying [*YAMLPath].
 //
 // Use [Builder.Key] or [Builder.Value] instead to get a [*Path] with
 // [Part] targeting.
 func (b *Builder) Path() *YAMLPath {
-	return b.pb.Build()
+	return b.build()
 }
 
 // Key finalizes the builder targeting [PartKey] and returns a [*Path].
 func (b *Builder) Key() *Path {
 	return &Path{
-		path:   b.pb.Build(),
+		path:   b.build(),
 		target: PartKey,
 	}
 }
@@ -92,9 +102,41 @@ func (b *Builder) Key() *Path {
 // Value finalizes the builder targeting [PartValue] and returns a [*Path].
 func (b *Builder) Value() *Path {
 	return &Path{
-		path:   b.pb.Build(),
+		path:   b.build(),
 		target: PartValue,
 	}
+}
+
+// FromString parses a YAML path expression (e.g., "$.foo.bar") into a [*Builder].
+//
+// The returned builder can be finalized with [Builder.Key] or [Builder.Value]
+// to select the target part:
+//
+//	path, err := paths.FromString("$.metadata.name")
+//	if err != nil {
+//		return err
+//	}
+//	keyPath := path.Key()   // targets the key
+//	valPath := path.Value() // targets the value
+func FromString(expr string) (*Builder, error) {
+	yp, err := yaml.PathString(expr)
+	if err != nil {
+		return nil, fmt.Errorf("parse path %q: %w", expr, err)
+	}
+
+	return &Builder{built: yp}, nil
+}
+
+// MustFromString is like [FromString] but panics if the expression is invalid.
+//
+// Use for path expressions that are known to be valid at compile time.
+func MustFromString(expr string) *Builder {
+	b, err := FromString(expr)
+	if err != nil {
+		panic(err)
+	}
+
+	return b
 }
 
 // Path represents a location in a YAML document, combining a [*YAMLPath] with a

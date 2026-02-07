@@ -30,6 +30,18 @@
 //		niceyaml.WithSource(source),
 //	)
 //
+// # Parsing Path Expressions
+//
+// Use [FromString] to parse a path expression string into a [Builder]:
+//
+//	b, err := paths.FromString("$.metadata.name")
+//	keyPath := b.Key()    // targets the key
+//	valPath := b.Value()  // targets the value
+//
+// [MustFromString] panics on invalid input, useful for compile-time constants:
+//
+//	path := paths.MustFromString("$.items[0].name").Value()
+//
 // # Building Paths
 //
 // Use [Root] to start a [Builder], chain selectors, and finalize with

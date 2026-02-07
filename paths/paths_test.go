@@ -170,6 +170,143 @@ func TestPathBuilder(t *testing.T) {
 	}
 }
 
+func TestFromString(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		expr string
+		want string
+	}{
+		"simple path": {
+			expr: "$.foo",
+			want: "$.foo",
+		},
+		"nested path": {
+			expr: "$.foo.bar.baz",
+			want: "$.foo.bar.baz",
+		},
+		"array index": {
+			expr: "$.items[0]",
+			want: "$.items[0]",
+		},
+		"array wildcard": {
+			expr: "$.items[*]",
+			want: "$.items[*]",
+		},
+		"recursive descent": {
+			expr: "$..name",
+			want: "$..name",
+		},
+		"root only": {
+			expr: "$",
+			want: "$",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			b, err := paths.FromString(tc.expr)
+
+			require.NoError(t, err)
+			require.NotNil(t, b)
+
+			// Finalize as Value and verify.
+			valPath := b.Value()
+			assert.Equal(t, tc.want+".(value)", valPath.String())
+			assert.Equal(t, paths.PartValue, valPath.Part())
+			assert.NotNil(t, valPath.Path())
+		})
+	}
+
+	t.Run("finalize as key", func(t *testing.T) {
+		t.Parallel()
+
+		b, err := paths.FromString("$.metadata.name")
+		require.NoError(t, err)
+
+		keyPath := b.Key()
+		assert.Equal(t, "$.metadata.name.(key)", keyPath.String())
+		assert.Equal(t, paths.PartKey, keyPath.Part())
+	})
+
+	t.Run("finalize as raw path", func(t *testing.T) {
+		t.Parallel()
+
+		b, err := paths.FromString("$.metadata.name")
+		require.NoError(t, err)
+
+		yp := b.Path()
+		require.NotNil(t, yp)
+		assert.Equal(t, "$.metadata.name", yp.String())
+	})
+}
+
+func TestFromString_Invalid(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		expr string
+	}{
+		"no dollar prefix": {
+			expr: "foo",
+		},
+		"leading dot without root": {
+			expr: ".foo",
+		},
+		"trailing dot": {
+			expr: "$.",
+		},
+		"unclosed bracket": {
+			expr: "$[",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			b, err := paths.FromString(tc.expr)
+
+			require.Error(t, err)
+			assert.Nil(t, b)
+			assert.Contains(t, err.Error(), "parse path")
+		})
+	}
+}
+
+func TestMustFromString(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid expression returns builder", func(t *testing.T) {
+		t.Parallel()
+
+		b := paths.MustFromString("$.foo.bar")
+		require.NotNil(t, b)
+
+		path := b.Value()
+		assert.Equal(t, "$.foo.bar.(value)", path.String())
+		assert.Equal(t, paths.PartValue, path.Part())
+	})
+
+	t.Run("can finalize as key", func(t *testing.T) {
+		t.Parallel()
+
+		path := paths.MustFromString("$.foo.bar").Key()
+		assert.Equal(t, "$.foo.bar.(key)", path.String())
+		assert.Equal(t, paths.PartKey, path.Part())
+	})
+
+	t.Run("panics on invalid expression", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Panics(t, func() {
+			paths.MustFromString("not a valid path")
+		})
+	})
+}
+
 func TestPath_NilHandling(t *testing.T) {
 	t.Parallel()
 
