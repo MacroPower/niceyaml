@@ -26,6 +26,17 @@
 //	darkThemes := theme.List(style.Dark)   // ["monokai", "dracula", ...]
 //	lightThemes := theme.List(style.Light) // ["solarized-light", "catppuccin-latte", ...]
 //
+// # Custom Themes
+//
+// Applications can register custom themes at runtime with [Register]:
+//
+//	theme.Register("my-theme", func() style.Styles {
+//		return style.Styles{ /* ... */ }
+//	}, style.Dark)
+//
+// Registered themes become available through [Styles] and [List] alongside
+// built-in themes.
+//
 // # Theme Structure
 //
 // Themes define colors for YAML token categories: keys ([style.NameTag]),
