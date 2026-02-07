@@ -23,6 +23,9 @@
 //
 // The iterator supports early termination if you only need specific documents.
 //
+// To split an existing [token.Tokens] stream rather than raw text, see
+// [tokens.SplitDocuments].
+//
 // # Document Boundaries
 //
 // [TokenizeDocuments] splits on [token.DocumentHeaderType] tokens ("---").

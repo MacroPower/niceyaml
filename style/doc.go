@@ -32,6 +32,16 @@
 // [Style] constants start at 1,000,000 to avoid collisions with user-defined
 // overlay keys (used for highlighting specific positions like errors).
 //
+// # Pointer Identity
+//
+// [Styles] stores [*lipgloss.Style] pointers rather than values. This enables
+// pointer equality comparisons during rendering: the internal color blender
+// caches blend results keyed by style pointers, so identical style
+// combinations always return the same pointer without redundant allocations.
+//
+// Consumers that construct [Styles] values should use [NewStyles] or [Styles.With]
+// to preserve this property.
+//
 // # Creating Style Maps
 //
 // [NewStyles] creates a [Styles] map that pre-computes inherited styles.

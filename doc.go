@@ -56,6 +56,27 @@
 // Multiple nested errors appear as annotations below their respective lines,
 // with distant errors displayed in separate hunks.
 //
+// # Error Configuration
+//
+// Sources can pre-configure error formatting via [WithErrorOptions], which
+// stores [ErrorOption] values applied when [*Source.WrapError] converts errors:
+//
+//	source, _ := niceyaml.NewSourceFromFile("config.yaml",
+//		niceyaml.WithErrorOptions(
+//			niceyaml.WithSourceLines(3),
+//			niceyaml.WithPrinter(myPrinter),
+//		),
+//	)
+//
+//	// Later, WrapError applies the stored options automatically.
+//	if err := validate(source); err != nil {
+//		return source.WrapError(err)
+//	}
+//
+// This separates error production (validators, decoders) from error
+// presentation (source context, formatting), allowing each layer to provide
+// what it knows.
+//
 // # Validation Pipeline
 //
 // For structured validation, [Decoder] iterates over documents in an
