@@ -50,27 +50,27 @@ func Hrdark() style.Styles {
 			base.Background(lipgloss.Lighten(lipgloss.Color("#1d2432"), 0.15)),
 		),
 		style.Set(
-			style.TextAccent,
+			style.TextAccentDim,
 			base.Foreground(lipgloss.Lighten(lipgloss.Color("#ff636f"), 0.15)),
 		),
 		style.Set(
-			style.TextAccentSelected,
+			style.TextAccent,
 			base.Foreground(lipgloss.Color("#ff636f")),
 		),
 		style.Set(
-			style.TextSubtle,
+			style.TextSubtleDim,
 			base.Foreground(lipgloss.Darken(lipgloss.Color("#ffffff"), 0.15)),
 		),
 		style.Set(
-			style.TextSubtleSelected,
+			style.TextSubtle,
 			base.Foreground(lipgloss.Color("#ffffff")),
 		),
 		style.Set(
-			style.Highlight,
+			style.HighlightDim,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#1d2432"), 0.15)),
 		),
 		style.Set(
-			style.HighlightSelected,
+			style.Highlight,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#1d2432"), 0.30)),
 		),
 		style.Set(

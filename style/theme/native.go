@@ -78,27 +78,27 @@ func Native() style.Styles {
 			base.Background(lipgloss.Lighten(lipgloss.Color("#202020"), 0.15)),
 		),
 		style.Set(
-			style.TextAccent,
+			style.TextAccentDim,
 			base.Foreground(lipgloss.Lighten(lipgloss.Color("#6ab825"), 0.15)),
 		),
 		style.Set(
-			style.TextAccentSelected,
+			style.TextAccent,
 			base.Foreground(lipgloss.Color("#6ab825")),
 		),
 		style.Set(
-			style.TextSubtle,
+			style.TextSubtleDim,
 			base.Foreground(lipgloss.Darken(lipgloss.Color("#d0d0d0"), 0.15)),
 		),
 		style.Set(
-			style.TextSubtleSelected,
+			style.TextSubtle,
 			base.Foreground(lipgloss.Color("#d0d0d0")),
 		),
 		style.Set(
-			style.Highlight,
+			style.HighlightDim,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#202020"), 0.15)),
 		),
 		style.Set(
-			style.HighlightSelected,
+			style.Highlight,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#202020"), 0.30)),
 		),
 		style.Set(

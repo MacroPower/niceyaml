@@ -66,27 +66,27 @@ func Github() style.Styles {
 			base.Background(lipgloss.Darken(lipgloss.Color("#f7f7f7"), 0.15)),
 		),
 		style.Set(
-			style.TextAccent,
+			style.TextAccentDim,
 			base.Foreground(lipgloss.Darken(lipgloss.Color("#0550ae"), 0.15)),
 		),
 		style.Set(
-			style.TextAccentSelected,
+			style.TextAccent,
 			base.Foreground(lipgloss.Color("#0550ae")),
 		),
 		style.Set(
-			style.TextSubtle,
+			style.TextSubtleDim,
 			base.Foreground(lipgloss.Lighten(lipgloss.Color("#1f2328"), 0.15)),
 		),
 		style.Set(
-			style.TextSubtleSelected,
+			style.TextSubtle,
 			base.Foreground(lipgloss.Color("#1f2328")),
 		),
 		style.Set(
-			style.Highlight,
+			style.HighlightDim,
 			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#f7f7f7"), 0.15)),
 		),
 		style.Set(
-			style.HighlightSelected,
+			style.Highlight,
 			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#f7f7f7"), 0.30)),
 		),
 		style.Set(

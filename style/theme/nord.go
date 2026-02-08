@@ -78,27 +78,27 @@ func Nord() style.Styles {
 			base.Background(lipgloss.Lighten(lipgloss.Color("#2e3440"), 0.15)),
 		),
 		style.Set(
-			style.TextAccent,
+			style.TextAccentDim,
 			base.Foreground(lipgloss.Lighten(lipgloss.Color("#81a1c1"), 0.15)),
 		),
 		style.Set(
-			style.TextAccentSelected,
+			style.TextAccent,
 			base.Foreground(lipgloss.Color("#81a1c1")),
 		),
 		style.Set(
-			style.TextSubtle,
+			style.TextSubtleDim,
 			base.Foreground(lipgloss.Darken(lipgloss.Color("#d8dee9"), 0.15)),
 		),
 		style.Set(
-			style.TextSubtleSelected,
+			style.TextSubtle,
 			base.Foreground(lipgloss.Color("#d8dee9")),
 		),
 		style.Set(
-			style.Highlight,
+			style.HighlightDim,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#2e3440"), 0.15)),
 		),
 		style.Set(
-			style.HighlightSelected,
+			style.Highlight,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#2e3440"), 0.30)),
 		),
 		style.Set(

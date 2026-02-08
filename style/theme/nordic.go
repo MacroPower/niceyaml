@@ -78,27 +78,27 @@ func Nordic() style.Styles {
 			base.Background(lipgloss.Lighten(lipgloss.Color("#242933"), 0.15)),
 		),
 		style.Set(
-			style.TextAccent,
+			style.TextAccentDim,
 			base.Foreground(lipgloss.Lighten(lipgloss.Color("#5E81AC"), 0.15)),
 		),
 		style.Set(
-			style.TextAccentSelected,
+			style.TextAccent,
 			base.Foreground(lipgloss.Color("#5E81AC")),
 		),
 		style.Set(
-			style.TextSubtle,
+			style.TextSubtleDim,
 			base.Foreground(lipgloss.Darken(lipgloss.Color("#BBC3D4"), 0.15)),
 		),
 		style.Set(
-			style.TextSubtleSelected,
+			style.TextSubtle,
 			base.Foreground(lipgloss.Color("#BBC3D4")),
 		),
 		style.Set(
-			style.Highlight,
+			style.HighlightDim,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#242933"), 0.15)),
 		),
 		style.Set(
-			style.HighlightSelected,
+			style.Highlight,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#242933"), 0.30)),
 		),
 		style.Set(

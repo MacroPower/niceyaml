@@ -78,8 +78,8 @@ func TestNewStyles(t *testing.T) {
 			style.NameTag,
 			style.Punctuation,
 			style.PunctuationMappingValue,
-			style.TextAccent,
-			style.TextSubtle,
+			style.TextAccentDim,
+			style.TextSubtleDim,
 			style.Title,
 		}
 
@@ -100,7 +100,7 @@ func TestNewStyles_TextStyles(t *testing.T) {
 
 		styles := style.NewStyles(base)
 
-		for _, s := range []style.Style{style.TextAccent, style.TextSubtle, style.Title} {
+		for _, s := range []style.Style{style.TextAccentDim, style.TextSubtleDim, style.Title} {
 			got := styles.Style(s)
 			assert.NotNil(t, got)
 			assert.Equal(t, lipgloss.Color("white"), got.GetForeground(),
@@ -118,13 +118,13 @@ func TestNewStyles_TextStyles(t *testing.T) {
 			Background(lipgloss.Color("red"))
 
 		styles := style.NewStyles(base,
-			style.Set(style.TextAccent, accent),
-			style.Set(style.TextSubtle, subtle),
+			style.Set(style.TextAccentDim, accent),
+			style.Set(style.TextSubtleDim, subtle),
 			style.Set(style.Title, title),
 		)
 
-		assert.Equal(t, lipgloss.Color("red"), styles.Style(style.TextAccent).GetForeground())
-		assert.Equal(t, lipgloss.Color("gray"), styles.Style(style.TextSubtle).GetForeground())
+		assert.Equal(t, lipgloss.Color("red"), styles.Style(style.TextAccentDim).GetForeground())
+		assert.Equal(t, lipgloss.Color("gray"), styles.Style(style.TextSubtleDim).GetForeground())
 		assert.Equal(t, lipgloss.Color("black"), styles.Style(style.Title).GetForeground())
 		assert.Equal(t, lipgloss.Color("red"), styles.Style(style.Title).GetBackground())
 	})

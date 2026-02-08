@@ -14,7 +14,7 @@ import (
 )
 
 // highlightKind is a custom style.Style constant for search highlights.
-const highlightKind style.Style = "highlight"
+const highlightKind style.Style = "highlightDim"
 
 var (
 	//go:embed demo.yaml

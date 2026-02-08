@@ -2,8 +2,8 @@
  number: 42                                                                     
  bool: true                                                                     
  list:                                                                          
-   - <highlightSelected>item</highlightSelected>1                               
-   - <highlight>item</highlight>2                                               
+   - <highlight>item</highlight>1                                               
+   - <highlightDim>item</highlightDim>2                                         
  nested:                                                                        
    child: data                                                                  
                                                                                 

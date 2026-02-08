@@ -386,7 +386,7 @@ func (m *model) textLine() string {
 	textStyle := styles.Style(style.Text).Inline(true)
 
 	if m.searching {
-		searchContent := styles.Style(style.TextAccent).Inline(true).
+		searchContent := styles.Style(style.TextAccentDim).Inline(true).
 			Render("/" + m.searchInput)
 
 		remaining := max(0, m.width-lipgloss.Width(searchContent))
@@ -422,16 +422,16 @@ func (m *model) textLine() string {
 	}
 
 	swatches := []swatch{
-		{m.viewport.RevisionName(), style.TextAccent},
-		{searchLabel, style.TextAccentSelected},
+		{m.viewport.RevisionName(), style.TextAccentDim},
+		{searchLabel, style.TextAccent},
 		{m.diffModeLabel(), style.TextOK},
 		{m.viewModeLabel(), style.TextWarn},
 		{wrapLabel, style.TextError},
-		{fmt.Sprintf("%d/%d", m.viewport.VisibleLineCount(), m.viewport.TotalLineCount()), style.TextSubtle},
-		{fmt.Sprintf("col %d", m.viewport.XOffset()), style.TextSubtleSelected},
+		{fmt.Sprintf("%d/%d", m.viewport.VisibleLineCount(), m.viewport.TotalLineCount()), style.TextSubtleDim},
+		{fmt.Sprintf("col %d", m.viewport.XOffset()), style.TextSubtle},
 	}
 
-	sep := styles.Style(style.TextSubtle).Inline(true).Render(" · ")
+	sep := styles.Style(style.TextSubtleDim).Inline(true).Render(" · ")
 
 	var sb strings.Builder
 
@@ -493,7 +493,7 @@ func (m *model) renderThemeOverlay() string {
 	styles, _ := theme.Styles(m.currentTheme)
 	baseStyle := styles.Style(style.Text)
 	titleStyle := styles.Style(style.Title)
-	dimStyle := styles.Style(style.TextSubtle)
+	dimStyle := styles.Style(style.TextSubtleDim)
 
 	// Build theme list content.
 	var items []string

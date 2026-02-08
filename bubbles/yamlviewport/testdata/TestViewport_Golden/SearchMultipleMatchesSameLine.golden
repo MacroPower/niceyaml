@@ -1,4 +1,4 @@
- <highlightSelected>item</highlightSelected>: <highlight>item</highlight>_value 
+ <highlight>item</highlight>: <highlightDim>item</highlightDim>_value           
  another: data                                                                  
                                                                                 
                                                                                 

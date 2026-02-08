@@ -2,7 +2,7 @@
                                                                                 
  production:                                                                    
    <<: *defaults                                                                
-   <highlightSelected>timeout</highlightSelected>: 60                           
+   <highlight>timeout</highlight>: 60                                           
                                                                                 
  # Flow style                                                                   
  tags: [alpha, beta, gamma]                                                     

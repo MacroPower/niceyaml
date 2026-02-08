@@ -117,16 +117,16 @@ const (
 	PunctuationSequenceStart Style = "punctuationSequenceStart"
 	// Highlight styles highlights.
 	Highlight Style = "highlight"
-	// HighlightSelected styles selected highlights.
-	HighlightSelected Style = "highlightSelected"
+	// HighlightDim styles dimmed highlights.
+	HighlightDim Style = "highlightDim"
 	// TextAccent styles accented text.
 	TextAccent Style = "textAccent"
-	// TextAccentSelected styles selected accented text.
-	TextAccentSelected Style = "textAccentSelected"
+	// TextAccentDim styles dimmed accented text.
+	TextAccentDim Style = "textAccentDim"
 	// TextSubtle styles de-emphasized text.
 	TextSubtle Style = "textSubtle"
-	// TextSubtleSelected styles selected de-emphasized text.
-	TextSubtleSelected Style = "textSubtleSelected"
+	// TextSubtleDim styles dimmed de-emphasized text.
+	TextSubtleDim Style = "textSubtleDim"
 	// Title styles titles.
 	Title Style = "title"
 	// TitleAccent styles accented titles.
@@ -196,9 +196,9 @@ var (
 		PunctuationSequenceEntry: PunctuationSequence,
 		PunctuationSequenceStart: PunctuationSequence,
 		TextAccent:               Text,
-		TextAccentSelected:       TextAccent,
+		TextAccentDim:            TextAccent,
 		TextSubtle:               Text,
-		TextSubtleSelected:       TextSubtle,
+		TextSubtleDim:            TextSubtle,
 		Title:                    Text,
 		TitleAccent:              Title,
 		TitleSubtle:              Title,
@@ -208,6 +208,8 @@ var (
 		TextOK:                   Text,
 		TextWarn:                 Text,
 		TextError:                Text,
+		Highlight:                Text,
+		HighlightDim:             Highlight,
 	}
 
 	// EmptyStyle is a singleton for missing style lookups.

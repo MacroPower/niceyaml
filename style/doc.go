@@ -27,9 +27,9 @@
 //     [PunctuationBlock]: Syntax
 //   - [Generic] -> [GenericDeleted], [GenericInserted], [GenericError]: Diff
 //     and error markers
-//   - [Highlight], [HighlightSelected]: Search and selection highlights
-//   - [TextAccent] -> [TextAccentSelected]: Emphasized text
-//   - [TextSubtle] -> [TextSubtleSelected]: De-emphasized text
+//   - [Highlight] -> [HighlightDim]: Search and selection highlights
+//   - [TextAccent] -> [TextAccentDim]: Emphasized text
+//   - [TextSubtle] -> [TextSubtleSim]: De-emphasized text
 //   - [Title] -> [TitleAccent], [TitleSubtle]: Titles
 //
 // [Style] constants start at 1,000,000 to avoid collisions with user-defined

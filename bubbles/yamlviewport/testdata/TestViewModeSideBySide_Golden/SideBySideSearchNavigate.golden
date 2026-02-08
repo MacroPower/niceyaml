@@ -1,7 +1,6 @@
 -name: original                        │  +name: modified                       
 -count: 10                             │  +count: 20                            
- <highlightSelected>enabled</          │   <highlightSelected>enabled</         
- highlightSelected>: true              │   highlightSelected>: true             
+ <highlight>enabled</highlight>: true  │   <highlight>enabled</highlight>: true 
 -description: "This is the original    │  +description: "This is the updated    
  description"                          │   description"                         
  tags:                                 │   tags:                                
@@ -13,6 +12,7 @@
  extra:                                │   extra:                               
 -  key1: value1                        │  +  key1: changed1                     
 -  key2: value2                        │  +  key2: changed2                     
+                                                                                
                                                                                 
                                                                                 
                                                                                 
