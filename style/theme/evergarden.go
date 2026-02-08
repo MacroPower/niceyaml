@@ -101,5 +101,38 @@ func Evergarden() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#252B2E"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#252B2E")).
+				Background(lipgloss.Color("#B2C98F")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#252B2E")).
+				Background(lipgloss.Color("#e6b99d")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#252B2E")).
+				Background(lipgloss.Color("#E67E80")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#B2C98F")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#e6b99d")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#E67E80")),
+		),
 	)
 }

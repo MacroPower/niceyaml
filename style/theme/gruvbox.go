@@ -101,5 +101,38 @@ func Gruvbox() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#282828"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#282828")).
+				Background(lipgloss.Color("#b8bb26")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#282828")).
+				Background(lipgloss.Color("#fabd2f")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#282828")).
+				Background(lipgloss.Color("#fb4934")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#b8bb26")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#fabd2f")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#fb4934")),
+		),
 	)
 }

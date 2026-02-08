@@ -81,5 +81,38 @@ func Fruity() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#111111"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#111111")).
+				Background(lipgloss.Color("#00ff00")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#111111")).
+				Background(lipgloss.Color("#ffb86c")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#111111")).
+				Background(lipgloss.Color("#ff0000")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#00ff00")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#ffb86c")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#ff0000")),
+		),
 	)
 }

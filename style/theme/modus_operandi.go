@@ -77,5 +77,38 @@ func ModusOperandi() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#ffffff"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#ffffff")).
+				Background(lipgloss.Color("#006800")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#ffffff")).
+				Background(lipgloss.Color("#c65614")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#ffffff")).
+				Background(lipgloss.Color("#a60000")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#006800")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#c65614")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#a60000")),
+		),
 	)
 }

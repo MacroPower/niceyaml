@@ -137,5 +137,38 @@ func AuraThemeDarkSoft() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#15141b"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#15141b")).
+				Background(lipgloss.Color("#54c59f")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#15141b")).
+				Background(lipgloss.Color("#ffca85")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#15141b")).
+				Background(lipgloss.Color("#c55858")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#54c59f")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#ffca85")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#c55858")),
+		),
 	)
 }

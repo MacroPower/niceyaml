@@ -137,5 +137,38 @@ func TokyonightNight() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#1a1b26"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#1a1b26")).
+				Background(lipgloss.Color("#9ece6a")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#1a1b26")).
+				Background(lipgloss.Color("#e0af68")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#1a1b26")).
+				Background(lipgloss.Color("#db4b4b")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#9ece6a")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#e0af68")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#db4b4b")),
+		),
 	)
 }

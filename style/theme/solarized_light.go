@@ -85,5 +85,38 @@ func SolarizedLight() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#eee8d5"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#eee8d5")).
+				Background(lipgloss.Color("#719e07")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#eee8d5")).
+				Background(lipgloss.Color("#b58900")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#eee8d5")).
+				Background(lipgloss.Color("#dc322f")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#719e07")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#b58900")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#dc322f")),
+		),
 	)
 }

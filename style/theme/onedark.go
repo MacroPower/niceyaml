@@ -93,5 +93,38 @@ func Onedark() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#282C34"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#282C34")).
+				Background(lipgloss.Color("#98C379")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#282C34")).
+				Background(lipgloss.Color("#e5c07b")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#282C34")).
+				Background(lipgloss.Color("#E06C75")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#98C379")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#e5c07b")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#E06C75")),
+		),
 	)
 }

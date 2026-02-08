@@ -133,5 +133,38 @@ func Vulcan() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#282c34"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#282c34")).
+				Background(lipgloss.Color("#ecbe7b")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#282c34")).
+				Background(lipgloss.Color("#ffb86c")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#282c34")).
+				Background(lipgloss.Color("#cf5967")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#ecbe7b")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#ffb86c")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#cf5967")),
+		),
 	)
 }

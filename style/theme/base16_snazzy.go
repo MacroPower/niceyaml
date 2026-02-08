@@ -133,5 +133,38 @@ func Base16Snazzy() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#282a36"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#282a36")).
+				Background(lipgloss.Color("#5af78e")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#282a36")).
+				Background(lipgloss.Color("#f3f99d")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#282a36")).
+				Background(lipgloss.Color("#ff5c57")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#5af78e")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#f3f99d")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#ff5c57")),
+		),
 	)
 }

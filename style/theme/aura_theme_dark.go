@@ -137,5 +137,38 @@ func AuraThemeDark() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#15141b"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#15141b")).
+				Background(lipgloss.Color("#61ffca")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#15141b")).
+				Background(lipgloss.Color("#ffca85")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#15141b")).
+				Background(lipgloss.Color("#ff6767")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#61ffca")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#ffca85")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#ff6767")),
+		),
 	)
 }

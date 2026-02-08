@@ -105,5 +105,38 @@ func Lovelace() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#ffffff"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#ffffff")).
+				Background(lipgloss.Color("#388038")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#ffffff")).
+				Background(lipgloss.Color("#b07d2b")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#ffffff")).
+				Background(lipgloss.Color("#c02828")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#388038")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#b07d2b")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#c02828")),
+		),
 	)
 }

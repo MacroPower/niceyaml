@@ -129,5 +129,38 @@ func Tango() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#f8f8f8"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#f8f8f8")).
+				Background(lipgloss.Color("#00a000")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#f8f8f8")).
+				Background(lipgloss.Color("#c4a000")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#f8f8f8")).
+				Background(lipgloss.Color("#a40000")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#00a000")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#c4a000")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#a40000")),
+		),
 	)
 }

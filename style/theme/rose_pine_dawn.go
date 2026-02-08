@@ -97,5 +97,38 @@ func RosePineDawn() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#faf4ed"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#faf4ed")).
+				Background(lipgloss.Color("#56949f")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#faf4ed")).
+				Background(lipgloss.Color("#ea9d34")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#faf4ed")).
+				Background(lipgloss.Color("#b4637a")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#56949f")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#ea9d34")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#b4637a")),
+		),
 	)
 }

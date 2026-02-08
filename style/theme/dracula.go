@@ -133,5 +133,38 @@ func Dracula() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#282a36"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#282a36")).
+				Background(lipgloss.Color("#50fa7b")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#282a36")).
+				Background(lipgloss.Color("#f1fa8c")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#282a36")).
+				Background(lipgloss.Color("#ff5555")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#50fa7b")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#f1fa8c")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#ff5555")),
+		),
 	)
 }

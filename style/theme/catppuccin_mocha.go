@@ -137,5 +137,38 @@ func CatppuccinMocha() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#1e1e2e"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#1e1e2e")).
+				Background(lipgloss.Color("#a6e3a1")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#1e1e2e")).
+				Background(lipgloss.Color("#f9e2af")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#1e1e2e")).
+				Background(lipgloss.Color("#f38ba8")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#a6e3a1")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#f9e2af")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#f38ba8")),
+		),
 	)
 }

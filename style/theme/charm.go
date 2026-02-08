@@ -13,7 +13,8 @@ func Charm() style.Styles {
 		Foreground(charmtone.Smoke).
 		Background(charmtone.Pepper)
 
-	return style.NewStyles(base,
+	return style.NewStyles(
+		base,
 		style.Set(style.Comment, base.Foreground(charmtone.Oyster)),
 		style.Set(style.CommentPreproc, base.Foreground(charmtone.Smoke)),
 		style.Set(style.GenericDeleted, base.Foreground(charmtone.Cherry).Background(charmtone.Toast)),
@@ -37,5 +38,20 @@ func Charm() style.Styles {
 		style.Set(style.TextSubtleSelected, base.Foreground(charmtone.Smoke)),
 		style.Set(style.Highlight, lipgloss.NewStyle().Background(charmtone.Iron)),
 		style.Set(style.HighlightSelected, lipgloss.NewStyle().Background(charmtone.Smoke)),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().Foreground(charmtone.Pepper).Background(charmtone.Julep).Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().Foreground(charmtone.Pepper).Background(charmtone.Cumin).Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().Foreground(charmtone.Pepper).Background(charmtone.Cherry).Bold(true),
+		),
+		style.Set(style.TextOK, base.Foreground(charmtone.Julep)),
+		style.Set(style.TextWarn, base.Foreground(charmtone.Cumin)),
+		style.Set(style.TextError, base.Foreground(charmtone.Cherry)),
 	)
 }

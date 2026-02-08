@@ -137,5 +137,38 @@ func CatppuccinFrappe() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#303446"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#303446")).
+				Background(lipgloss.Color("#a6d189")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#303446")).
+				Background(lipgloss.Color("#e5c890")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#303446")).
+				Background(lipgloss.Color("#e78284")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#a6d189")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#e5c890")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#e78284")),
+		),
 	)
 }

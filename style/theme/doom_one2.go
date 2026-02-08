@@ -133,5 +133,38 @@ func DoomOne2() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#282c34"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#282c34")).
+				Background(lipgloss.Color("#a6e22e")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#282c34")).
+				Background(lipgloss.Color("#ecbe7b")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#282c34")).
+				Background(lipgloss.Color("#ff6c6b")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#a6e22e")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#ecbe7b")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#ff6c6b")),
+		),
 	)
 }

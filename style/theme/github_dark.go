@@ -101,5 +101,38 @@ func GithubDark() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#0d1117"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#0d1117")).
+				Background(lipgloss.Color("#56d364")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#0d1117")).
+				Background(lipgloss.Color("#d29922")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#0d1117")).
+				Background(lipgloss.Color("#ffa198")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#56d364")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#d29922")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#ffa198")),
+		),
 	)
 }

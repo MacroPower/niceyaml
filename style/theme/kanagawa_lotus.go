@@ -93,5 +93,38 @@ func KanagawaLotus() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#f2ecbc"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#f2ecbc")).
+				Background(lipgloss.Color("#6e915f")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#f2ecbc")).
+				Background(lipgloss.Color("#cc6d00")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#f2ecbc")).
+				Background(lipgloss.Color("#d7474b")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#6e915f")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#cc6d00")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#d7474b")),
+		),
 	)
 }

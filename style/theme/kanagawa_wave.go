@@ -93,5 +93,38 @@ func KanagawaWave() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#1f1f28"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#1f1f28")).
+				Background(lipgloss.Color("#76946a")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#1f1f28")).
+				Background(lipgloss.Color("#e6c384")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#1f1f28")).
+				Background(lipgloss.Color("#c34043")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#76946a")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#e6c384")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#c34043")),
+		),
 	)
 }

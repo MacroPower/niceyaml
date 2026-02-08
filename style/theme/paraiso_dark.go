@@ -101,5 +101,38 @@ func ParaisoDark() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#2f1e2e"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#2f1e2e")).
+				Background(lipgloss.Color("#48b685")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#2f1e2e")).
+				Background(lipgloss.Color("#f99b15")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#2f1e2e")).
+				Background(lipgloss.Color("#ef6155")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#48b685")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#f99b15")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#ef6155")),
+		),
 	)
 }

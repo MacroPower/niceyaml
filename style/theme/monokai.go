@@ -97,5 +97,38 @@ func Monokai() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#272822"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#272822")).
+				Background(lipgloss.Color("#a6e22e")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#272822")).
+				Background(lipgloss.Color("#e6db74")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#272822")).
+				Background(lipgloss.Color("#f92672")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#a6e22e")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#e6db74")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#f92672")),
+		),
 	)
 }

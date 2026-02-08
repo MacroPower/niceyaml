@@ -137,5 +137,38 @@ func CatppuccinMacchiato() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#24273a"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#24273a")).
+				Background(lipgloss.Color("#a6da95")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#24273a")).
+				Background(lipgloss.Color("#eed49f")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#24273a")).
+				Background(lipgloss.Color("#ed8796")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#a6da95")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#eed49f")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#ed8796")),
+		),
 	)
 }

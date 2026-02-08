@@ -101,5 +101,38 @@ func Friendly() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#f0f0f0"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#f0f0f0")).
+				Background(lipgloss.Color("#00a000")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#f0f0f0")).
+				Background(lipgloss.Color("#b07d2b")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#f0f0f0")).
+				Background(lipgloss.Color("#a00000")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#00a000")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#b07d2b")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#a00000")),
+		),
 	)
 }

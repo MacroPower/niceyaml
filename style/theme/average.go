@@ -133,5 +133,38 @@ func Average() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#000000"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#000000")).
+				Background(lipgloss.Color("#5faf5f")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#000000")).
+				Background(lipgloss.Color("#e5c07b")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#000000")).
+				Background(lipgloss.Color("#ec0000")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#5faf5f")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#e5c07b")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#ec0000")),
+		),
 	)
 }

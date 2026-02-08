@@ -101,5 +101,38 @@ func Nordic() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#242933"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#242933")).
+				Background(lipgloss.Color("#A3BE8C")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#242933")).
+				Background(lipgloss.Color("#ebcb8b")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#242933")).
+				Background(lipgloss.Color("#C5727A")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#A3BE8C")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#ebcb8b")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#C5727A")),
+		),
 	)
 }

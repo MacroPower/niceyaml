@@ -102,7 +102,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.viewport.SetWidth(msg.Width)
-		m.viewport.SetHeight(msg.Height - 1) // Reserve 1 line for status bar.
+		m.viewport.SetHeight(msg.Height - 2) // Reserve 2 lines for status bar.
 
 	case tea.KeyPressMsg:
 		// Handle theme picker input.
@@ -242,7 +242,30 @@ func (m model) View() tea.View {
 }
 
 func (m *model) statusBar() string {
-	// Add revision indicator if multiple revisions.
+	return m.titleLine() + "\n" + m.textLine()
+}
+
+// powerlineSep renders a powerline separator with fg from the previous
+// segment's background and bg from the next segment's background.
+func powerlineSep(from, to *lipgloss.Style) string {
+	return lipgloss.NewStyle().
+		Foreground(from.GetBackground()).
+		Background(to.GetBackground()).
+		Render("\ue0b0")
+}
+
+type titleSegment struct {
+	text     string
+	styleKey style.Style
+}
+
+func (m *model) titleLine() string {
+	styles, _ := theme.Styles(m.currentTheme)
+
+	// Diff stats for OK/Error segments.
+	added, removed := m.viewport.DiffStats()
+
+	// Build revision info text.
 	revisionInfo := ""
 	if m.viewport.RevisionCount() > 1 {
 		idx := m.viewport.RevisionIndex()
@@ -255,50 +278,178 @@ func (m *model) statusBar() string {
 				modeIndicator = " origin"
 			}
 
-			revisionInfo = fmt.Sprintf("[diff %d/%d%s] ", idx, count, modeIndicator)
+			revisionInfo = fmt.Sprintf("diff %d/%d%s", idx, count, modeIndicator)
 
 		case m.viewport.DiffMode() == yamlviewport.DiffModeNone && idx > 0 && idx < count:
-			// None mode at a diff position shows rev with "none" indicator.
-			revisionInfo = fmt.Sprintf("[rev %d/%d none] ", idx+1, count)
+			revisionInfo = fmt.Sprintf("rev %d/%d none", idx+1, count)
 
 		case m.viewport.IsAtLatestRevision():
-			revisionInfo = fmt.Sprintf("[rev %d/%d] ", count, count)
+			revisionInfo = fmt.Sprintf("rev %d/%d", count, count)
 
 		default:
-			revisionInfo = fmt.Sprintf("[rev %d/%d] ", idx+1, count)
+			revisionInfo = fmt.Sprintf("rev %d/%d", idx+1, count)
 		}
 	}
 
-	left := fmt.Sprintf(" %s[%d] ",
-		revisionInfo,
-		m.viewport.YOffset()+1,
+	var titleText string
+	if revisionInfo != "" {
+		titleText = fmt.Sprintf(" %s [%d] ", revisionInfo, m.viewport.YOffset()+1)
+	} else {
+		titleText = fmt.Sprintf(" [%d] ", m.viewport.YOffset()+1)
+	}
+
+	linesText := fmt.Sprintf(" %d lines ", m.viewport.TotalLineCount())
+
+	segments := make([]titleSegment, 0, 6)
+	segments = append(segments,
+		titleSegment{" nyaml ", style.Title},
+		titleSegment{fmt.Sprintf(" +%d ", added), style.TitleOK},
+		titleSegment{fmt.Sprintf(" -%d ", removed), style.TitleError},
+		titleSegment{linesText, style.TitleWarn},
+		titleSegment{titleText, style.TitleAccent},
 	)
 
-	// Right: search status or scroll percent.
-	var right string
+	// Calculate width used by fixed segments (text + 1 separator each).
+	usedWidth := 0
+	for _, seg := range segments {
+		usedWidth += lipgloss.Width(seg.text) + 1 // +1 for separator.
+	}
+
+	subtitleLeft := fmt.Sprintf(" %s ", m.currentTheme)
+
+	var subtitleRight string
 
 	switch {
-	case m.searching:
-		right = "/" + m.searchInput
 	case m.viewport.SearchCount() > 0:
-		right = fmt.Sprintf("%d/%d matches ",
+		subtitleRight = fmt.Sprintf("%d/%d matches ",
 			m.viewport.SearchIndex()+1,
 			m.viewport.SearchCount(),
 		)
 
 	default:
-		right = fmt.Sprintf("%d%% ", int(m.viewport.ScrollPercent()*100))
+		subtitleRight = fmt.Sprintf("%d%% ", int(m.viewport.ScrollPercent()*100))
 	}
 
+	subtitleContent := subtitleLeft + lipgloss.PlaceHorizontal(
+		max(0, m.width-usedWidth-lipgloss.Width(subtitleLeft)),
+		lipgloss.Right,
+		subtitleRight,
+	)
+
+	segments = append(segments, titleSegment{subtitleContent, style.TitleSubtle})
+
+	// Render all segments with powerline separators.
+	var sb strings.Builder
+
+	for i, seg := range segments {
+		s := styles.Style(seg.styleKey)
+		sb.WriteString(s.Inline(true).Render(seg.text))
+
+		if i < len(segments)-1 {
+			next := styles.Style(segments[i+1].styleKey)
+			sb.WriteString(powerlineSep(s, next))
+		}
+	}
+
+	// Trailing separator: transition from last Title bg to Text bg.
+	lastStyle := styles.Style(segments[len(segments)-1].styleKey)
+	textStyle := styles.Style(style.Text)
+	sb.WriteString(powerlineSep(lastStyle, textStyle))
+
+	return sb.String()
+}
+
+func (m *model) diffModeLabel() string {
+	switch m.viewport.DiffMode() {
+	case yamlviewport.DiffModeAdjacent:
+		return "adjacent"
+	case yamlviewport.DiffModeOrigin:
+		return "origin"
+	default:
+		return "no diff"
+	}
+}
+
+func (m *model) viewModeLabel() string {
+	switch m.viewport.ViewMode() {
+	case yamlviewport.ViewModeHunks:
+		return "hunks"
+	case yamlviewport.ViewModeSideBySide:
+		return "side-by-side"
+	default:
+		return "full"
+	}
+}
+
+func (m *model) textLine() string {
 	styles, _ := theme.Styles(m.currentTheme)
-	barLeftStyle := styles.Style(style.TitleAccent).Inline(true)
-	barRightStyle := styles.Style(style.TitleSubtle).Inline(true)
+	textStyle := styles.Style(style.Text).Inline(true)
 
-	padding := max(0, lipgloss.Width(left))
+	if m.searching {
+		searchContent := styles.Style(style.TextAccent).Inline(true).
+			Render("/" + m.searchInput)
 
-	right = lipgloss.PlaceHorizontal(m.width-padding, lipgloss.Right, right)
+		remaining := max(0, m.width-lipgloss.Width(searchContent))
 
-	return barLeftStyle.Render(left) + barRightStyle.Render(right)
+		return searchContent + textStyle.Render(strings.Repeat(" ", remaining))
+	}
+
+	// Build search info label.
+	var searchLabel string
+
+	switch {
+	case m.viewport.SearchCount() > 0:
+		searchLabel = fmt.Sprintf("%d/%d",
+			m.viewport.SearchIndex()+1,
+			m.viewport.SearchCount(),
+		)
+
+	case m.viewport.SearchTerm() != "":
+		searchLabel = "0/0"
+	default:
+		searchLabel = "/"
+	}
+
+	// Wrap status.
+	wrapLabel := "no wrap"
+	if m.viewport.WrapEnabled {
+		wrapLabel = "wrap"
+	}
+
+	type swatch struct {
+		label    string
+		styleKey style.Style
+	}
+
+	swatches := []swatch{
+		{m.viewport.RevisionName(), style.TextAccent},
+		{searchLabel, style.TextAccentSelected},
+		{m.diffModeLabel(), style.TextOK},
+		{m.viewModeLabel(), style.TextWarn},
+		{wrapLabel, style.TextError},
+		{fmt.Sprintf("%d/%d", m.viewport.VisibleLineCount(), m.viewport.TotalLineCount()), style.TextSubtle},
+		{fmt.Sprintf("col %d", m.viewport.XOffset()), style.TextSubtleSelected},
+	}
+
+	sep := styles.Style(style.TextSubtle).Inline(true).Render(" · ")
+
+	var sb strings.Builder
+
+	for i, sw := range swatches {
+		if i > 0 {
+			sb.WriteString(sep)
+		}
+
+		sb.WriteString(styles.Style(sw.styleKey).Inline(true).Render(" " + sw.label + " "))
+	}
+
+	result := sb.String()
+
+	// Right-pad with Text style to fill width.
+	contentWidth := lipgloss.Width(result)
+	remaining := max(0, m.width-contentWidth)
+
+	return result + textStyle.Render(strings.Repeat(" ", remaining))
 }
 
 func buildPrinterOpts(lineNumbers bool, themeName string) []niceyaml.PrinterOption {

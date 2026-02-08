@@ -137,5 +137,38 @@ func CatppuccinLatte() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#eff1f5"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#eff1f5")).
+				Background(lipgloss.Color("#40a02b")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#eff1f5")).
+				Background(lipgloss.Color("#df8e1d")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#eff1f5")).
+				Background(lipgloss.Color("#d20f39")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#40a02b")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#df8e1d")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#d20f39")),
+		),
 	)
 }

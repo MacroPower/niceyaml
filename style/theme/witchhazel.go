@@ -97,5 +97,38 @@ func Witchhazel() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#433e56"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#433e56")).
+				Background(lipgloss.Color("#a6e22e")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#433e56")).
+				Background(lipgloss.Color("#fff352")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#433e56")).
+				Background(lipgloss.Color("#f92672")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#a6e22e")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#fff352")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#f92672")),
+		),
 	)
 }

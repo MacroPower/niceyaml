@@ -101,5 +101,38 @@ func SolarizedDark256() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#1c1c1c"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#1c1c1c")).
+				Background(lipgloss.Color("#5f8700")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#1c1c1c")).
+				Background(lipgloss.Color("#af8700")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#1c1c1c")).
+				Background(lipgloss.Color("#af0000")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#5f8700")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#af8700")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#af0000")),
+		),
 	)
 }

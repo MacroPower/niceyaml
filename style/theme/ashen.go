@@ -133,5 +133,38 @@ func Ashen() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#121212"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#121212")).
+				Background(lipgloss.Color("#b4b4b4")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#121212")).
+				Background(lipgloss.Color("#e8b57e")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#121212")).
+				Background(lipgloss.Color("#C53030")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#b4b4b4")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#e8b57e")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#C53030")),
+		),
 	)
 }

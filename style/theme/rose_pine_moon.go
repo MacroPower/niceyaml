@@ -97,5 +97,38 @@ func RosePineMoon() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#232136"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#232136")).
+				Background(lipgloss.Color("#9ccfd8")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#232136")).
+				Background(lipgloss.Color("#f6c177")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#232136")).
+				Background(lipgloss.Color("#eb6f92")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#9ccfd8")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#f6c177")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#eb6f92")),
+		),
 	)
 }

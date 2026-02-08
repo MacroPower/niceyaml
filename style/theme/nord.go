@@ -101,5 +101,38 @@ func Nord() style.Styles {
 			style.HighlightSelected,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#2e3440"), 0.30)),
 		),
+		style.Set(
+			style.TitleOK,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#2e3440")).
+				Background(lipgloss.Color("#a3be8c")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleWarn,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#2e3440")).
+				Background(lipgloss.Color("#ebcb8b")).
+				Bold(true),
+		),
+		style.Set(
+			style.TitleError,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#2e3440")).
+				Background(lipgloss.Color("#bf616a")).
+				Bold(true),
+		),
+		style.Set(
+			style.TextOK,
+			base.Foreground(lipgloss.Color("#a3be8c")),
+		),
+		style.Set(
+			style.TextWarn,
+			base.Foreground(lipgloss.Color("#ebcb8b")),
+		),
+		style.Set(
+			style.TextError,
+			base.Foreground(lipgloss.Color("#bf616a")),
+		),
 	)
 }

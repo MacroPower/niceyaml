@@ -133,6 +133,18 @@ const (
 	TitleAccent Style = "titleAccent"
 	// TitleSubtle styles de-emphasized titles.
 	TitleSubtle Style = "titleSubtle"
+	// TitleOK styles success/OK titles.
+	TitleOK Style = "titleOK"
+	// TitleWarn styles warning titles.
+	TitleWarn Style = "titleWarn"
+	// TitleError styles error titles.
+	TitleError Style = "titleError"
+	// TextOK styles success/OK text.
+	TextOK Style = "textOK"
+	// TextWarn styles warning text.
+	TextWarn Style = "textWarn"
+	// TextError styles error text.
+	TextError Style = "textError"
 )
 
 var (
@@ -190,6 +202,12 @@ var (
 		Title:                    Text,
 		TitleAccent:              Title,
 		TitleSubtle:              Title,
+		TitleOK:                  Title,
+		TitleWarn:                Title,
+		TitleError:               Title,
+		TextOK:                   Text,
+		TextWarn:                 Text,
+		TextError:                Text,
 	}
 
 	// EmptyStyle is a singleton for missing style lookups.
