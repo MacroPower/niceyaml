@@ -904,6 +904,14 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 	})
 }
 
+func TestNewSourceFromBytes(t *testing.T) {
+	t.Parallel()
+
+	src := []byte("key: value")
+	s := niceyaml.NewSourceFromBytes(src)
+	assert.Equal(t, "key: value", s.Content())
+}
+
 func TestNewSourceFromToken_WalksToPrev(t *testing.T) {
 	t.Parallel()
 

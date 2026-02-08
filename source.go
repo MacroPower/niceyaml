@@ -158,6 +158,11 @@ func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
 	return NewSourceFromString(string(data), opts...), nil
 }
 
+// NewSourceFromBytes creates a new [*Source] from raw YAML bytes.
+func NewSourceFromBytes(data []byte, opts ...SourceOption) *Source {
+	return NewSourceFromString(string(data), opts...)
+}
+
 // NewSourceFromString creates a new [*Source] from a YAML string using
 // [lexer.Tokenize].
 func NewSourceFromString(src string, opts ...SourceOption) *Source {
