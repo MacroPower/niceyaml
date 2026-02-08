@@ -79,11 +79,11 @@ func Evergarden() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#D6CBB4"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#7a8478"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#D6CBB4")),
+			base.Foreground(lipgloss.Color("#7a8478")),
 		),
 		style.Set(
 			style.TextSubtle,

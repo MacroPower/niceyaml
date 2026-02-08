@@ -71,11 +71,11 @@ func KanagawaWave() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#dcd7ba"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#7e9cd8"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#dcd7ba")),
+			base.Foreground(lipgloss.Color("#7e9cd8")),
 		),
 		style.Set(
 			style.TextSubtle,

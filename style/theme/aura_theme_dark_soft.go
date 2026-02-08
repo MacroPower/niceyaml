@@ -115,11 +115,11 @@ func AuraThemeDarkSoft() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#bdbdbd"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#8464c6"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#bdbdbd")),
+			base.Foreground(lipgloss.Color("#8464c6")),
 		),
 		style.Set(
 			style.TextSubtle,

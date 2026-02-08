@@ -115,11 +115,11 @@ func CatppuccinMocha() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#cdd6f4"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#cba6f7"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#cdd6f4")),
+			base.Foreground(lipgloss.Color("#cba6f7")),
 		),
 		style.Set(
 			style.TextSubtle,

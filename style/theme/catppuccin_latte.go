@@ -115,11 +115,11 @@ func CatppuccinLatte() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Darken(lipgloss.Color("#4c4f69"), 0.15)),
+			base.Foreground(lipgloss.Darken(lipgloss.Color("#8839ef"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#4c4f69")),
+			base.Foreground(lipgloss.Color("#8839ef")),
 		),
 		style.Set(
 			style.TextSubtle,

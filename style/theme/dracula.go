@@ -111,11 +111,11 @@ func Dracula() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#f8f8f2"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#ff79c6"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#f8f8f2")),
+			base.Foreground(lipgloss.Color("#ff79c6")),
 		),
 		style.Set(
 			style.TextSubtle,

@@ -79,11 +79,11 @@ func SolarizedDark256() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#8a8a8a"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#0087ff"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#8a8a8a")),
+			base.Foreground(lipgloss.Color("#0087ff")),
 		),
 		style.Set(
 			style.TextSubtle,

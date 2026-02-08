@@ -75,11 +75,11 @@ func RosePineMoon() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#e0def4"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#ea9a97"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#e0def4")),
+			base.Foreground(lipgloss.Color("#ea9a97")),
 		),
 		style.Set(
 			style.TextSubtle,

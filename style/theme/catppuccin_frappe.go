@@ -115,11 +115,11 @@ func CatppuccinFrappe() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#c6d0f5"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#ca9ee6"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#c6d0f5")),
+			base.Foreground(lipgloss.Color("#ca9ee6")),
 		),
 		style.Set(
 			style.TextSubtle,

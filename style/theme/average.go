@@ -111,11 +111,11 @@ func Average() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#757575"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#ec0000"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#757575")),
+			base.Foreground(lipgloss.Color("#ec0000")),
 		),
 		style.Set(
 			style.TextSubtle,

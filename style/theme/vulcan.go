@@ -111,11 +111,11 @@ func Vulcan() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#c9c9c9"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#bc74c4"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#c9c9c9")),
+			base.Foreground(lipgloss.Color("#bc74c4")),
 		),
 		style.Set(
 			style.TextSubtle,

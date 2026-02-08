@@ -59,11 +59,11 @@ func HrHighContrast() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#d5d500"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#467faf"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#d5d500")),
+			base.Foreground(lipgloss.Color("#467faf")),
 		),
 		style.Set(
 			style.TextSubtle,

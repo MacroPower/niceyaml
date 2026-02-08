@@ -115,11 +115,11 @@ func TokyonightMoon() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#c8d3f5"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#c099ff"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#c8d3f5")),
+			base.Foreground(lipgloss.Color("#c099ff")),
 		),
 		style.Set(
 			style.TextSubtle,

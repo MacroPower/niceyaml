@@ -71,11 +71,11 @@ func Onedark() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#ABB2BF"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#E06C75"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#ABB2BF")),
+			base.Foreground(lipgloss.Color("#E06C75")),
 		),
 		style.Set(
 			style.TextSubtle,

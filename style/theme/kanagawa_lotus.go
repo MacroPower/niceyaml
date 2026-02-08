@@ -71,11 +71,11 @@ func KanagawaLotus() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Darken(lipgloss.Color("#545464"), 0.15)),
+			base.Foreground(lipgloss.Darken(lipgloss.Color("#4d699b"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#545464")),
+			base.Foreground(lipgloss.Color("#4d699b")),
 		),
 		style.Set(
 			style.TextSubtle,

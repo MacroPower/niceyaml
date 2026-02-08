@@ -75,11 +75,11 @@ func RainbowDash() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Darken(lipgloss.Color("#4d4d4d"), 0.15)),
+			base.Foreground(lipgloss.Darken(lipgloss.Color("#2c5dcd"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#4d4d4d")),
+			base.Foreground(lipgloss.Color("#2c5dcd")),
 		),
 		style.Set(
 			style.TextSubtle,

@@ -79,11 +79,11 @@ func GithubDark() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#e6edf3"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#7ee787"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#e6edf3")),
+			base.Foreground(lipgloss.Color("#7ee787")),
 		),
 		style.Set(
 			style.TextSubtle,

@@ -111,11 +111,11 @@ func Ashen() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#b4b4b4"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#D87C4A"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#b4b4b4")),
+			base.Foreground(lipgloss.Color("#D87C4A")),
 		),
 		style.Set(
 			style.TextSubtle,

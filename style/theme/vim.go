@@ -71,11 +71,11 @@ func Vim() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#cccccc"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#cdcd00"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#cccccc")),
+			base.Foreground(lipgloss.Color("#cdcd00")),
 		),
 		style.Set(
 			style.TextSubtle,

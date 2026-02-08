@@ -79,11 +79,11 @@ func Native() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#d0d0d0"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#6ab825"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#d0d0d0")),
+			base.Foreground(lipgloss.Color("#6ab825")),
 		),
 		style.Set(
 			style.TextSubtle,

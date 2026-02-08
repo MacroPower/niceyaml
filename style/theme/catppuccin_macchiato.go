@@ -115,11 +115,11 @@ func CatppuccinMacchiato() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#cad3f5"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#c6a0f6"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#cad3f5")),
+			base.Foreground(lipgloss.Color("#c6a0f6")),
 		),
 		style.Set(
 			style.TextSubtle,

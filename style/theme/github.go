@@ -67,11 +67,11 @@ func Github() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Darken(lipgloss.Color("#1f2328"), 0.15)),
+			base.Foreground(lipgloss.Darken(lipgloss.Color("#0550ae"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#1f2328")),
+			base.Foreground(lipgloss.Color("#0550ae")),
 		),
 		style.Set(
 			style.TextSubtle,

@@ -55,11 +55,11 @@ func ModusVivendi() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#ffffff"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#b6a0ff"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#ffffff")),
+			base.Foreground(lipgloss.Color("#b6a0ff")),
 		),
 		style.Set(
 			style.TextSubtle,

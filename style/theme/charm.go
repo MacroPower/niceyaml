@@ -32,10 +32,10 @@ func Charm() style.Styles {
 		style.Set(style.Title, base.Foreground(charmtone.Pepper).Background(charmtone.Mauve).Bold(true)),
 		style.Set(style.TitleAccent, base.Background(charmtone.Iron).Foreground(charmtone.Salt)),
 		style.Set(style.TitleSubtle, base.Background(charmtone.Charcoal)),
-		style.Set(style.TextAccent, base.Foreground(charmtone.Ash)),
-		style.Set(style.TextAccentSelected, base.Foreground(charmtone.Smoke)),
+		style.Set(style.TextAccent, base.Foreground(lipgloss.Lighten(charmtone.Mauve, 0.15))),
+		style.Set(style.TextAccentSelected, base.Foreground(charmtone.Mauve)),
 		style.Set(style.TextSubtle, base.Foreground(charmtone.Iron)),
-		style.Set(style.TextSubtleSelected, base.Foreground(charmtone.Smoke)),
+		style.Set(style.TextSubtleSelected, base.Foreground(charmtone.Oyster)),
 		style.Set(style.Highlight, lipgloss.NewStyle().Background(charmtone.Iron)),
 		style.Set(style.HighlightSelected, lipgloss.NewStyle().Background(charmtone.Smoke)),
 		style.Set(

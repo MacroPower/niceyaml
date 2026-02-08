@@ -79,11 +79,11 @@ func Gruvbox() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#ebdbb2"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#fb4934"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#ebdbb2")),
+			base.Foreground(lipgloss.Color("#fb4934")),
 		),
 		style.Set(
 			style.TextSubtle,

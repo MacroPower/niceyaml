@@ -59,11 +59,11 @@ func Fruity() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#ffffff"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#fb660a"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#ffffff")),
+			base.Foreground(lipgloss.Color("#fb660a")),
 		),
 		style.Set(
 			style.TextSubtle,

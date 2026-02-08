@@ -111,11 +111,11 @@ func DoomOne2() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#b0c4de"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#76a9f9"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#b0c4de")),
+			base.Foreground(lipgloss.Color("#76a9f9")),
 		),
 		style.Set(
 			style.TextSubtle,

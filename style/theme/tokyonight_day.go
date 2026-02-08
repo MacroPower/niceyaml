@@ -115,11 +115,11 @@ func TokyonightDay() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Darken(lipgloss.Color("#3760bf"), 0.15)),
+			base.Foreground(lipgloss.Darken(lipgloss.Color("#9854f1"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#3760bf")),
+			base.Foreground(lipgloss.Color("#9854f1")),
 		),
 		style.Set(
 			style.TextSubtle,

@@ -79,11 +79,11 @@ func Nordic() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#BBC3D4"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#5E81AC"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#BBC3D4")),
+			base.Foreground(lipgloss.Color("#5E81AC")),
 		),
 		style.Set(
 			style.TextSubtle,

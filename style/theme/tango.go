@@ -107,11 +107,11 @@ func Tango() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Darken(lipgloss.Color("#000000"), 0.15)),
+			base.Foreground(lipgloss.Darken(lipgloss.Color("#204a87"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#000000")),
+			base.Foreground(lipgloss.Color("#204a87")),
 		),
 		style.Set(
 			style.TextSubtle,

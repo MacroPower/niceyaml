@@ -111,11 +111,11 @@ func Base16Snazzy() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#e2e4e5"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#ff6ac1"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#e2e4e5")),
+			base.Foreground(lipgloss.Color("#ff6ac1")),
 		),
 		style.Set(
 			style.TextSubtle,

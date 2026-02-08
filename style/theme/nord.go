@@ -79,11 +79,11 @@ func Nord() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#d8dee9"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#81a1c1"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#d8dee9")),
+			base.Foreground(lipgloss.Color("#81a1c1")),
 		),
 		style.Set(
 			style.TextSubtle,

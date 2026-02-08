@@ -71,11 +71,11 @@ func KanagawaDragon() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#c5c9c5"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#8ba4b0"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#c5c9c5")),
+			base.Foreground(lipgloss.Color("#8ba4b0")),
 		),
 		style.Set(
 			style.TextSubtle,

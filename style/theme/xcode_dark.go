@@ -87,11 +87,11 @@ func XcodeDark() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#ffffff"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#fc5fa3"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#ffffff")),
+			base.Foreground(lipgloss.Color("#fc5fa3")),
 		),
 		style.Set(
 			style.TextSubtle,

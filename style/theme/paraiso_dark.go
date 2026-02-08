@@ -79,11 +79,11 @@ func ParaisoDark() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Lighten(lipgloss.Color("#e7e9db"), 0.15)),
+			base.Foreground(lipgloss.Lighten(lipgloss.Color("#5bc4bf"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#e7e9db")),
+			base.Foreground(lipgloss.Color("#5bc4bf")),
 		),
 		style.Set(
 			style.TextSubtle,

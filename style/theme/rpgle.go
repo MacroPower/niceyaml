@@ -67,11 +67,11 @@ func Rpgle() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Darken(lipgloss.Color("#272822"), 0.15)),
+			base.Foreground(lipgloss.Darken(lipgloss.Color("#f92672"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#272822")),
+			base.Foreground(lipgloss.Color("#f92672")),
 		),
 		style.Set(
 			style.TextSubtle,

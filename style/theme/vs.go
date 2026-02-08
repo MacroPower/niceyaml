@@ -59,11 +59,11 @@ func Vs() style.Styles {
 		),
 		style.Set(
 			style.TextAccent,
-			base.Foreground(lipgloss.Darken(lipgloss.Color("#000000"), 0.15)),
+			base.Foreground(lipgloss.Darken(lipgloss.Color("#0000ff"), 0.15)),
 		),
 		style.Set(
 			style.TextAccentSelected,
-			base.Foreground(lipgloss.Color("#000000")),
+			base.Foreground(lipgloss.Color("#0000ff")),
 		),
 		style.Set(
 			style.TextSubtle,
