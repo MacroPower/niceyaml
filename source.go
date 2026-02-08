@@ -265,9 +265,11 @@ func (s *Source) parse() (*ast.File, error) {
 	return nil, err
 }
 
-// WrapError wraps an error with additional context for [Error] types.
-// It applies any [ErrorOption] values and sets the source to this [Source].
-// If the error isn't an [Error], it returns the original error unmodified.
+// WrapError wraps an error with additional context for [*Error] types.
+// It applies any [ErrorOption] values and sets the source to this [*Source].
+//
+// If err is nil, WrapError returns nil. If err is not an [*Error],
+// WrapError returns it unchanged without wrapping.
 func (s *Source) WrapError(err error) error {
 	if err == nil {
 		return nil
