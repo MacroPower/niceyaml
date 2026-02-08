@@ -1,6 +1,7 @@
 package normalizer_test
 
 import (
+	"sync"
 	"testing"
 	"unicode"
 
@@ -120,4 +121,21 @@ func TestNormalize(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
+}
+
+func TestNormalize_Concurrent(t *testing.T) {
+	t.Parallel()
+
+	n := normalizer.New()
+
+	var wg sync.WaitGroup
+
+	for range 100 {
+		wg.Go(func() {
+			got := n.Normalize("Café")
+			assert.Equal(t, "cafe", got)
+		})
+	}
+
+	wg.Wait()
 }

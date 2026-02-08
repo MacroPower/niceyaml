@@ -2,6 +2,7 @@ package normalizer
 
 import (
 	"log/slog"
+	"sync"
 	"unicode"
 
 	"golang.org/x/text/cases"
@@ -15,9 +16,12 @@ import (
 // transformations. The pipeline is built once at construction time from the
 // provided [Option] values.
 //
+// Normalizer is safe for concurrent use.
+//
 // Create instances with [New].
 type Normalizer struct {
 	transformer transform.Transformer
+	mu          sync.Mutex
 }
 
 // Option configures a [Normalizer].
@@ -121,6 +125,9 @@ func WithWidthFold(enabled bool) Option {
 // Normalize applies the configured transformations to the input string.
 // If the transformation fails, the original string is returned unchanged.
 func (n *Normalizer) Normalize(in string) string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
 	n.transformer.Reset()
 
 	out, _, err := transform.String(n.transformer, in)
