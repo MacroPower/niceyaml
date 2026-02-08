@@ -13,6 +13,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/line"
+	"go.jacobcolvin.com/niceyaml/normalizer"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style"
 )
@@ -180,7 +181,7 @@ func (m *Model) setInitialValues() {
 
 	if m.finder == nil {
 		m.finder = niceyaml.NewFinder(
-			niceyaml.WithNormalizer(niceyaml.NewStandardNormalizer()),
+			niceyaml.WithNormalizer(normalizer.New()),
 		)
 	}
 

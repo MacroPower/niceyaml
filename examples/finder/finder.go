@@ -8,6 +8,7 @@ import (
 	_ "embed"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/normalizer"
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
@@ -35,7 +36,7 @@ func main() {
 	// Create a finder with standard normalization.
 	// The standard normalizer ignores case and diacritics.
 	finder := niceyaml.NewFinder(
-		niceyaml.WithNormalizer(niceyaml.NewStandardNormalizer()),
+		niceyaml.WithNormalizer(normalizer.New()),
 	)
 
 	// Load the source to build an internal index.

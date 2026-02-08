@@ -8,6 +8,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/normalizer"
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
@@ -101,7 +102,7 @@ func TestFinder_Find(t *testing.T) {
 		"with normalizer - diacritic match": {
 			input:      "name: Thaïs",
 			search:     "Thais",
-			normalizer: niceyaml.NewStandardNormalizer(),
+			normalizer: normalizer.New(),
 			want: []position.Range{
 				position.NewRange(
 					position.New(0, 6),
@@ -112,7 +113,7 @@ func TestFinder_Find(t *testing.T) {
 		"with normalizer - search has diacritic": {
 			input:      "name: Thais",
 			search:     "Thaïs",
-			normalizer: niceyaml.NewStandardNormalizer(),
+			normalizer: normalizer.New(),
 			want: []position.Range{
 				position.NewRange(
 					position.New(0, 6),
@@ -199,7 +200,7 @@ func TestFinder_Find(t *testing.T) {
 		"utf8 - normalizer finds diacritic as ascii": {
 			input:      "key: über öffentlich",
 			search:     "o",
-			normalizer: niceyaml.NewStandardNormalizer(),
+			normalizer: normalizer.New(),
 			want: []position.Range{
 				position.NewRange(
 					position.New(0, 10),
@@ -210,7 +211,7 @@ func TestFinder_Find(t *testing.T) {
 		"utf8 - combined normalizer case and diacritics": {
 			input:      "name: THAÏS test",
 			search:     "thais",
-			normalizer: niceyaml.NewStandardNormalizer(),
+			normalizer: normalizer.New(),
 			want: []position.Range{
 				position.NewRange(
 					position.New(0, 6),

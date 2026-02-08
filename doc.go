@@ -125,10 +125,10 @@
 // [Finder] locates strings within tokens, returning [position.Range] values
 // suitable for [Source.AddOverlay].
 //
-// Use [StandardNormalizer] with [WithNormalizer] for case-insensitive,
+// Use [normalizer.New] with [WithNormalizer] for case-insensitive,
 // diacritic-insensitive matching:
 //
-//	finder := niceyaml.NewFinder(niceyaml.WithNormalizer(niceyaml.NewStandardNormalizer()))
+//	finder := niceyaml.NewFinder(niceyaml.WithNormalizer(normalizer.New()))
 //	finder.Load(source)
 //	for _, rng := range finder.Find("search term") {
 //		source.AddOverlay(style.GenericInserted, rng)

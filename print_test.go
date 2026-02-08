@@ -14,6 +14,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
+	"go.jacobcolvin.com/niceyaml/normalizer"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/theme"
@@ -80,10 +81,10 @@ func printDiffSummary(p *niceyaml.Printer, before, after string, context int) st
 }
 
 // testFinder returns a Finder configured for testing.
-func testFinder(normalizer niceyaml.Normalizer) *niceyaml.Finder {
+func testFinder(norm niceyaml.Normalizer) *niceyaml.Finder {
 	var opts []niceyaml.FinderOption
-	if normalizer != nil {
-		opts = append(opts, niceyaml.WithNormalizer(normalizer))
+	if norm != nil {
+		opts = append(opts, niceyaml.WithNormalizer(norm))
 	}
 
 	return niceyaml.NewFinder(opts...)
@@ -2014,25 +2015,25 @@ func TestFinderPrinter_Integration(t *testing.T) {
 		"utf8 - normalizer diacritic to ascii": {
 			input:      "name: Thaïs",
 			search:     "Thais",
-			normalizer: niceyaml.NewStandardNormalizer(),
+			normalizer: normalizer.New(),
 			want:       "name: [Thaïs]",
 		},
 		"utf8 - case insensitive with diacritics": {
 			input:      "name: THAÏS test",
 			search:     "thais",
-			normalizer: niceyaml.NewStandardNormalizer(),
+			normalizer: normalizer.New(),
 			want:       "name: [THAÏS] test",
 		},
 		"utf8 - search ascii finds normalized diacritic": {
 			input:      "key: über",
 			search:     "u",
-			normalizer: niceyaml.NewStandardNormalizer(),
+			normalizer: normalizer.New(),
 			want:       "key: [ü]ber",
 		},
 		"utf8 - normalizer search after multiple multibyte": {
 			input:      "key: über Yamüll test",
 			search:     "ya",
-			normalizer: niceyaml.NewStandardNormalizer(),
+			normalizer: normalizer.New(),
 			want:       "key: über [Ya]müll test",
 		},
 		"utf8 - japanese characters": {

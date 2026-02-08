@@ -1,60 +1,19 @@
 package niceyaml
 
 import (
-	"log/slog"
 	"sort"
 	"strings"
 	"sync"
-	"unicode"
 	"unicode/utf8"
-
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
-	"golang.org/x/text/runes"
-	"golang.org/x/text/transform"
-	"golang.org/x/text/unicode/norm"
 
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
 // Normalizer transforms strings for comparison (e.g., removing diacritics).
 //
-// See [StandardNormalizer] for an implementation.
+// See [normalizer.Normalizer] for an implementation.
 type Normalizer interface {
 	Normalize(in string) string
-}
-
-// StandardNormalizer removes diacritics and lowercases strings for
-// case-insensitive matching. For example, "Ö" becomes "o".
-// Note that [unicode.Mn] is the unicode key for nonspacing marks.
-// Create instances with [NewStandardNormalizer].
-type StandardNormalizer struct {
-	transformer transform.Transformer
-}
-
-// NewStandardNormalizer creates a new [*StandardNormalizer].
-func NewStandardNormalizer() *StandardNormalizer {
-	return &StandardNormalizer{
-		transformer: transform.Chain(
-			norm.NFD,
-			runes.Remove(runes.In(unicode.Mn)),
-			norm.NFC,
-			cases.Lower(language.Und),
-		),
-	}
-}
-
-// Normalize implements [Normalizer].
-func (n *StandardNormalizer) Normalize(in string) string {
-	n.transformer.Reset()
-
-	out, _, err := transform.String(n.transformer, in)
-	if err != nil {
-		slog.Debug("normalize string", slog.Any("error", err))
-		return in
-	}
-
-	return out
 }
 
 // Finder finds strings within YAML tokens, returning [position.Ranges] that can
@@ -81,7 +40,7 @@ func (n *StandardNormalizer) Normalize(in string) string {
 //
 //	// Create finder with case-insensitive matching.
 //	finder := niceyaml.NewFinder(
-//		niceyaml.WithNormalizer(niceyaml.NewStandardNormalizer()),
+//		niceyaml.WithNormalizer(normalizer.New()),
 //	)
 //	finder.Load(source)
 //
@@ -93,8 +52,8 @@ func (n *StandardNormalizer) Normalize(in string) string {
 //
 // By default, searches are exact (case-sensitive, no normalization).
 //
-// Use [WithNormalizer] with [StandardNormalizer] for case-insensitive matching
-// that also ignores diacritics (e.g., "cafe" matches "Café").
+// Use [WithNormalizer] with [normalizer.Normalizer] for case-insensitive
+// matching that also ignores diacritics (e.g., "cafe" matches "Café").
 //
 // Create instances with [NewFinder].
 type Finder struct {
@@ -129,7 +88,7 @@ type FinderOption func(*Finder)
 // WithNormalizer is a [FinderOption] that sets a [Normalizer] applied to both
 // the search string and source text before matching.
 //
-// See [StandardNormalizer] for an implementation.
+// See [normalizer.Normalizer] for an implementation.
 func WithNormalizer(normalizer Normalizer) FinderOption {
 	return func(f *Finder) {
 		f.normalizer = normalizer

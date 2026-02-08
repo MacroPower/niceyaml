@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/normalizer"
 )
 
 func BenchmarkFinderFind(b *testing.B) {
@@ -98,7 +99,7 @@ func BenchmarkFinderFind_WithNormalizer(b *testing.B) {
 
 		b.Run(sz.name+"/with_normalizer", func(b *testing.B) {
 			finder := niceyaml.NewFinder(
-				niceyaml.WithNormalizer(niceyaml.NewStandardNormalizer()),
+				niceyaml.WithNormalizer(normalizer.New()),
 			)
 			finder.Load(source)
 
@@ -162,7 +163,7 @@ func BenchmarkFinderFind_UnicodeContent(b *testing.B) {
 	b.Run("with_normalizer", func(b *testing.B) {
 		// StandardNormalizer converts "Héllo" -> "hello".
 		finder := niceyaml.NewFinder(
-			niceyaml.WithNormalizer(niceyaml.NewStandardNormalizer()),
+			niceyaml.WithNormalizer(normalizer.New()),
 		)
 		finder.Load(source)
 
@@ -176,8 +177,8 @@ func BenchmarkFinderFind_UnicodeContent(b *testing.B) {
 	})
 }
 
-func BenchmarkStandardNormalizerNormalize(b *testing.B) {
-	normalizer := niceyaml.NewStandardNormalizer()
+func BenchmarkNormalizerNormalize(b *testing.B) {
+	n := normalizer.New()
 
 	inputs := []struct {
 		name  string
@@ -196,7 +197,7 @@ func BenchmarkStandardNormalizerNormalize(b *testing.B) {
 			b.SetBytes(int64(len(in.input)))
 
 			for b.Loop() {
-				_ = normalizer.Normalize(in.input)
+				_ = n.Normalize(in.input)
 			}
 		})
 	}
@@ -220,7 +221,7 @@ func BenchmarkFinderCreate(b *testing.B) {
 
 		for b.Loop() {
 			finder := niceyaml.NewFinder(
-				niceyaml.WithNormalizer(niceyaml.NewStandardNormalizer()),
+				niceyaml.WithNormalizer(normalizer.New()),
 			)
 			finder.Load(source)
 		}
