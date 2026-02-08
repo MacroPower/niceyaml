@@ -128,7 +128,7 @@ func buildTargetPath(location []string, targetsKey bool) *paths.Path {
 
 	for _, part := range location {
 		// Check if this part is a numeric index.
-		var index uint
+		var index int
 
 		_, err := fmt.Sscanf(part, "%d", &index)
 		if err == nil {

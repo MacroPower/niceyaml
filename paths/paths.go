@@ -52,9 +52,9 @@ func (b *Builder) Child(name ...string) *Builder {
 }
 
 // Index appends `[idx]` selectors for each index to the path.
-func (b *Builder) Index(idx ...uint) *Builder {
+func (b *Builder) Index(idx ...int) *Builder {
 	for _, i := range idx {
-		b.pb = b.pb.Index(i)
+		b.pb = b.pb.Index(uint(i)) //nolint:gosec // Indices are non-negative.
 	}
 
 	return b
