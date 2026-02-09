@@ -7,23 +7,27 @@ import (
 
 	"github.com/charmbracelet/fang"
 	"github.com/spf13/cobra"
+	"go.jacobcolvin.com/x/profile"
 
 	"go.jacobcolvin.com/niceyaml/fangs"
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
 func main() {
-	profiler := fangs.NewProfiler()
+	cfg := profile.NewConfig()
+	p := cfg.NewProfiler()
 
 	rootCmd := &cobra.Command{
 		Use:   "nyaml",
 		Short: "A terminal YAML utility with syntax highlighting",
 		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
-			return profiler.Start()
+			return p.Start()
 		},
 	}
 
-	profiler.RegisterFlags(rootCmd.PersistentFlags())
+	cfg.RegisterFlags(rootCmd.PersistentFlags())
+
+	_ = cfg.RegisterCompletions(rootCmd) //nolint:errcheck // Best-effort completions.
 
 	rootCmd.AddCommand(viewCmd())
 	rootCmd.AddCommand(validateCmd())
@@ -35,7 +39,7 @@ func main() {
 		fang.WithColorSchemeFunc(fangs.ColorSchemeFunc(styles)),
 	)
 
-	stopErr := profiler.Stop()
+	stopErr := p.Stop()
 	if stopErr != nil && err == nil {
 		err = stopErr
 	}
