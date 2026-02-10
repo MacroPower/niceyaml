@@ -18,7 +18,7 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
-	go.jacobcolvin.com/x v0.0.0-20260208230929-0664789a1fa6
+	go.jacobcolvin.com/x v0.0.0-20260210025446-2fafe26c365e
 	golang.org/x/text v0.34.0
 	golang.org/x/tools v0.41.0
 )
@@ -52,6 +52,6 @@ require (
 	golang.org/x/exp v0.0.0-20240604190554-fc45aab8b7f8 // indirect
 	golang.org/x/mod v0.32.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
+	golang.org/x/sys v0.41.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
