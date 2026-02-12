@@ -62,19 +62,19 @@ func Gruvbox() style.Styles {
 			base.Foreground(lipgloss.Color("#fe8019")),
 		),
 		style.Set(
-			style.Title,
+			style.GenericHeading,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#282828")).
 				Background(lipgloss.Color("#fb4934")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleAccent,
+			style.GenericHeadingAccent,
 			base.Background(lipgloss.Lighten(lipgloss.Color("#282828"), 0.30)).
 				Foreground(lipgloss.Lighten(lipgloss.Color("#ebdbb2"), 0.15)),
 		),
 		style.Set(
-			style.TitleSubtle,
+			style.GenericHeadingSubtle,
 			base.Background(lipgloss.Lighten(lipgloss.Color("#282828"), 0.15)),
 		),
 		style.Set(
@@ -94,29 +94,29 @@ func Gruvbox() style.Styles {
 			base.Foreground(lipgloss.Color("#ebdbb2")),
 		),
 		style.Set(
-			style.HighlightDim,
+			style.GenericHighlightDim,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#282828"), 0.15)),
 		),
 		style.Set(
-			style.Highlight,
+			style.GenericHighlight,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#282828"), 0.30)),
 		),
 		style.Set(
-			style.TitleOK,
+			style.GenericHeadingOK,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#282828")).
 				Background(lipgloss.Color("#b8bb26")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleWarn,
+			style.GenericHeadingWarn,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#282828")).
 				Background(lipgloss.Color("#fabd2f")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleError,
+			style.GenericHeadingError,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#282828")).
 				Background(lipgloss.Color("#fb4934")).

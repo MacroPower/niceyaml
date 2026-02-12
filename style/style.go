@@ -29,6 +29,20 @@ type Style = string
 const (
 	// Text is a default/fallback style.
 	Text Style = "text"
+	// TextAccent styles accented text.
+	TextAccent Style = "textAccent"
+	// TextAccentDim styles dimmed accented text.
+	TextAccentDim Style = "textAccentDim"
+	// TextSubtle styles de-emphasized text.
+	TextSubtle Style = "textSubtle"
+	// TextSubtleDim styles dimmed de-emphasized text.
+	TextSubtleDim Style = "textSubtleDim"
+	// TextOK styles success/OK text.
+	TextOK Style = "textOK"
+	// TextWarn styles warning text.
+	TextWarn Style = "textWarn"
+	// TextError styles error text.
+	TextError Style = "textError"
 	// Comment styles comments (#).
 	Comment Style = "comment"
 	// CommentPreproc styles preprocessor comment, e.g.: %YAML, %TAG.
@@ -45,6 +59,22 @@ const (
 	GenericErrorUnknown Style = "genericErrorUnknown"
 	// GenericInserted styles lines inserted in diff (+).
 	GenericInserted Style = "genericInserted"
+	// GenericHighlight styles highlights.
+	GenericHighlight Style = "genericHighlight"
+	// GenericHighlightDim styles dimmed highlights.
+	GenericHighlightDim Style = "genericHighlightDim"
+	// GenericHeading styles titles.
+	GenericHeading Style = "genericHeading"
+	// GenericHeadingAccent styles accented titles.
+	GenericHeadingAccent Style = "genericHeadingAccent"
+	// GenericHeadingSubtle styles de-emphasized titles.
+	GenericHeadingSubtle Style = "genericHeadingSubtle"
+	// GenericHeadingOK styles success/OK titles.
+	GenericHeadingOK Style = "genericHeadingOK"
+	// GenericHeadingWarn styles warning titles.
+	GenericHeadingWarn Style = "genericHeadingWarn"
+	// GenericHeadingError styles error titles.
+	GenericHeadingError Style = "genericHeadingError"
 	// Literal is a parent style for literal values.
 	Literal Style = "literal"
 	// LiteralBoolean styles boolean values (true, false).
@@ -115,36 +145,6 @@ const (
 	PunctuationSequenceEntry Style = "punctuationSequenceEntry"
 	// PunctuationSequenceStart styles opening bracket ([).
 	PunctuationSequenceStart Style = "punctuationSequenceStart"
-	// Highlight styles highlights.
-	Highlight Style = "highlight"
-	// HighlightDim styles dimmed highlights.
-	HighlightDim Style = "highlightDim"
-	// TextAccent styles accented text.
-	TextAccent Style = "textAccent"
-	// TextAccentDim styles dimmed accented text.
-	TextAccentDim Style = "textAccentDim"
-	// TextSubtle styles de-emphasized text.
-	TextSubtle Style = "textSubtle"
-	// TextSubtleDim styles dimmed de-emphasized text.
-	TextSubtleDim Style = "textSubtleDim"
-	// Title styles titles.
-	Title Style = "title"
-	// TitleAccent styles accented titles.
-	TitleAccent Style = "titleAccent"
-	// TitleSubtle styles de-emphasized titles.
-	TitleSubtle Style = "titleSubtle"
-	// TitleOK styles success/OK titles.
-	TitleOK Style = "titleOK"
-	// TitleWarn styles warning titles.
-	TitleWarn Style = "titleWarn"
-	// TitleError styles error titles.
-	TitleError Style = "titleError"
-	// TextOK styles success/OK text.
-	TextOK Style = "textOK"
-	// TextWarn styles warning text.
-	TextWarn Style = "textWarn"
-	// TextError styles error text.
-	TextError Style = "textError"
 )
 
 var (
@@ -159,6 +159,14 @@ var (
 		GenericError:             Generic,
 		GenericErrorInvalid:      GenericError,
 		GenericErrorUnknown:      GenericError,
+		GenericHeading:           Generic,
+		GenericHeadingAccent:     GenericHeading,
+		GenericHeadingError:      GenericHeading,
+		GenericHeadingOK:         GenericHeading,
+		GenericHeadingSubtle:     GenericHeading,
+		GenericHeadingWarn:       GenericHeading,
+		GenericHighlight:         Generic,
+		GenericHighlightDim:      GenericHighlight,
 		GenericInserted:          Generic,
 		Literal:                  Text,
 		LiteralBoolean:           Literal,
@@ -197,19 +205,11 @@ var (
 		PunctuationSequenceStart: PunctuationSequence,
 		TextAccent:               Text,
 		TextAccentDim:            TextAccent,
+		TextError:                Text,
+		TextOK:                   Text,
 		TextSubtle:               Text,
 		TextSubtleDim:            TextSubtle,
-		Title:                    Text,
-		TitleAccent:              Title,
-		TitleSubtle:              Title,
-		TitleOK:                  Title,
-		TitleWarn:                Title,
-		TitleError:               Title,
-		TextOK:                   Text,
 		TextWarn:                 Text,
-		TextError:                Text,
-		Highlight:                Text,
-		HighlightDim:             Highlight,
 	}
 
 	// EmptyStyle is a singleton for missing style lookups.

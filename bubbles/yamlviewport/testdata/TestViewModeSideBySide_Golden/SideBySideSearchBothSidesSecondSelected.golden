@@ -1,4 +1,5 @@
--<highlightDim>name</highlightDim>: or │  +<highlight>name</highlight>: modified
+-<genericHighlightDim>name</genericHig │                                        
++<genericHighlight>name</genericHighlight>: modified                            
 -count: 10                             │  +count: 20                            
  enabled: true                         │   enabled: true                        
 -description: "This is the original    │  +description: "This is the updated    
@@ -12,7 +13,6 @@
  extra:                                │   extra:                               
 -  key1: value1                        │  +  key1: changed1                     
 -  key2: value2                        │  +  key2: changed2                     
-                                                                                
                                                                                 
                                                                                 
                                                                                 

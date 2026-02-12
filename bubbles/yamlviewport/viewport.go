@@ -493,9 +493,9 @@ func (m *Model) applySearchOverlays(lines *niceyaml.Source) {
 
 	for i, match := range m.searchMatches {
 		if i == m.searchIndex {
-			lines.AddOverlay(style.Highlight, match.rng)
+			lines.AddOverlay(style.GenericHighlight, match.rng)
 		} else {
-			lines.AddOverlay(style.HighlightDim, match.rng)
+			lines.AddOverlay(style.GenericHighlightDim, match.rng)
 		}
 	}
 }
@@ -624,9 +624,9 @@ func (m *Model) applySideBySidePaneOverlays(
 	for _, match := range matches {
 		isSelected := match.Start == selectedPos && showSelected
 		if isSelected {
-			src.AddOverlay(style.Highlight, match)
+			src.AddOverlay(style.GenericHighlight, match)
 		} else {
-			src.AddOverlay(style.HighlightDim, match)
+			src.AddOverlay(style.GenericHighlightDim, match)
 		}
 	}
 }

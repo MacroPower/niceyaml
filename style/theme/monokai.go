@@ -58,19 +58,19 @@ func Monokai() style.Styles {
 			base.Italic(true),
 		),
 		style.Set(
-			style.Title,
+			style.GenericHeading,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#272822")).
 				Background(lipgloss.Color("#f92672")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleAccent,
+			style.GenericHeadingAccent,
 			base.Background(lipgloss.Lighten(lipgloss.Color("#272822"), 0.30)).
 				Foreground(lipgloss.Lighten(lipgloss.Color("#f8f8f2"), 0.15)),
 		),
 		style.Set(
-			style.TitleSubtle,
+			style.GenericHeadingSubtle,
 			base.Background(lipgloss.Lighten(lipgloss.Color("#272822"), 0.15)),
 		),
 		style.Set(
@@ -90,29 +90,29 @@ func Monokai() style.Styles {
 			base.Foreground(lipgloss.Color("#f8f8f2")),
 		),
 		style.Set(
-			style.HighlightDim,
+			style.GenericHighlightDim,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#272822"), 0.15)),
 		),
 		style.Set(
-			style.Highlight,
+			style.GenericHighlight,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#272822"), 0.30)),
 		),
 		style.Set(
-			style.TitleOK,
+			style.GenericHeadingOK,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#272822")).
 				Background(lipgloss.Color("#a6e22e")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleWarn,
+			style.GenericHeadingWarn,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#272822")).
 				Background(lipgloss.Color("#e6db74")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleError,
+			style.GenericHeadingError,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#272822")).
 				Background(lipgloss.Color("#f92672")).

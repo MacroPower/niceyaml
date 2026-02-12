@@ -70,19 +70,19 @@ func XcodeDark() style.Styles {
 			base.Foreground(lipgloss.Color("#fc5fa3")),
 		),
 		style.Set(
-			style.Title,
+			style.GenericHeading,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#1f1f24")).
 				Background(lipgloss.Color("#fc5fa3")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleAccent,
+			style.GenericHeadingAccent,
 			base.Background(lipgloss.Lighten(lipgloss.Color("#1f1f24"), 0.30)).
 				Foreground(lipgloss.Lighten(lipgloss.Color("#ffffff"), 0.15)),
 		),
 		style.Set(
-			style.TitleSubtle,
+			style.GenericHeadingSubtle,
 			base.Background(lipgloss.Lighten(lipgloss.Color("#1f1f24"), 0.15)),
 		),
 		style.Set(
@@ -102,29 +102,29 @@ func XcodeDark() style.Styles {
 			base.Foreground(lipgloss.Color("#ffffff")),
 		),
 		style.Set(
-			style.HighlightDim,
+			style.GenericHighlightDim,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#1f1f24"), 0.15)),
 		),
 		style.Set(
-			style.Highlight,
+			style.GenericHighlight,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#1f1f24"), 0.30)),
 		),
 		style.Set(
-			style.TitleOK,
+			style.GenericHeadingOK,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#1f1f24")).
 				Background(lipgloss.Color("#4eb400")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleWarn,
+			style.GenericHeadingWarn,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#1f1f24")).
 				Background(lipgloss.Color("#d0a946")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleError,
+			style.GenericHeadingError,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#1f1f24")).
 				Background(lipgloss.Color("#ff0000")).

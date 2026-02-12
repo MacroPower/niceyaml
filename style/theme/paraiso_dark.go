@@ -62,19 +62,19 @@ func ParaisoDark() style.Styles {
 			base.Foreground(lipgloss.Color("#fec418")),
 		),
 		style.Set(
-			style.Title,
+			style.GenericHeading,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#2f1e2e")).
 				Background(lipgloss.Color("#5bc4bf")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleAccent,
+			style.GenericHeadingAccent,
 			base.Background(lipgloss.Lighten(lipgloss.Color("#2f1e2e"), 0.30)).
 				Foreground(lipgloss.Lighten(lipgloss.Color("#e7e9db"), 0.15)),
 		),
 		style.Set(
-			style.TitleSubtle,
+			style.GenericHeadingSubtle,
 			base.Background(lipgloss.Lighten(lipgloss.Color("#2f1e2e"), 0.15)),
 		),
 		style.Set(
@@ -94,29 +94,29 @@ func ParaisoDark() style.Styles {
 			base.Foreground(lipgloss.Color("#e7e9db")),
 		),
 		style.Set(
-			style.HighlightDim,
+			style.GenericHighlightDim,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#2f1e2e"), 0.15)),
 		),
 		style.Set(
-			style.Highlight,
+			style.GenericHighlight,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#2f1e2e"), 0.30)),
 		),
 		style.Set(
-			style.TitleOK,
+			style.GenericHeadingOK,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#2f1e2e")).
 				Background(lipgloss.Color("#48b685")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleWarn,
+			style.GenericHeadingWarn,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#2f1e2e")).
 				Background(lipgloss.Color("#f99b15")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleError,
+			style.GenericHeadingError,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#2f1e2e")).
 				Background(lipgloss.Color("#ef6155")).

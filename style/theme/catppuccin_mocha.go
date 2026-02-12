@@ -98,19 +98,19 @@ func CatppuccinMocha() style.Styles {
 			base.Foreground(lipgloss.Color("#89dceb")).Bold(true),
 		),
 		style.Set(
-			style.Title,
+			style.GenericHeading,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#1e1e2e")).
 				Background(lipgloss.Color("#cba6f7")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleAccent,
+			style.GenericHeadingAccent,
 			base.Background(lipgloss.Lighten(lipgloss.Color("#1e1e2e"), 0.30)).
 				Foreground(lipgloss.Lighten(lipgloss.Color("#cdd6f4"), 0.15)),
 		),
 		style.Set(
-			style.TitleSubtle,
+			style.GenericHeadingSubtle,
 			base.Background(lipgloss.Lighten(lipgloss.Color("#1e1e2e"), 0.15)),
 		),
 		style.Set(
@@ -130,29 +130,29 @@ func CatppuccinMocha() style.Styles {
 			base.Foreground(lipgloss.Color("#cdd6f4")),
 		),
 		style.Set(
-			style.HighlightDim,
+			style.GenericHighlightDim,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#1e1e2e"), 0.15)),
 		),
 		style.Set(
-			style.Highlight,
+			style.GenericHighlight,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#1e1e2e"), 0.30)),
 		),
 		style.Set(
-			style.TitleOK,
+			style.GenericHeadingOK,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#1e1e2e")).
 				Background(lipgloss.Color("#a6e3a1")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleWarn,
+			style.GenericHeadingWarn,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#1e1e2e")).
 				Background(lipgloss.Color("#f9e2af")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleError,
+			style.GenericHeadingError,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#1e1e2e")).
 				Background(lipgloss.Color("#f38ba8")).

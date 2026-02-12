@@ -98,19 +98,19 @@ func CatppuccinMacchiato() style.Styles {
 			base.Foreground(lipgloss.Color("#91d7e3")).Bold(true),
 		),
 		style.Set(
-			style.Title,
+			style.GenericHeading,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#24273a")).
 				Background(lipgloss.Color("#c6a0f6")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleAccent,
+			style.GenericHeadingAccent,
 			base.Background(lipgloss.Lighten(lipgloss.Color("#24273a"), 0.30)).
 				Foreground(lipgloss.Lighten(lipgloss.Color("#cad3f5"), 0.15)),
 		),
 		style.Set(
-			style.TitleSubtle,
+			style.GenericHeadingSubtle,
 			base.Background(lipgloss.Lighten(lipgloss.Color("#24273a"), 0.15)),
 		),
 		style.Set(
@@ -130,29 +130,29 @@ func CatppuccinMacchiato() style.Styles {
 			base.Foreground(lipgloss.Color("#cad3f5")),
 		),
 		style.Set(
-			style.HighlightDim,
+			style.GenericHighlightDim,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#24273a"), 0.15)),
 		),
 		style.Set(
-			style.Highlight,
+			style.GenericHighlight,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#24273a"), 0.30)),
 		),
 		style.Set(
-			style.TitleOK,
+			style.GenericHeadingOK,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#24273a")).
 				Background(lipgloss.Color("#a6da95")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleWarn,
+			style.GenericHeadingWarn,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#24273a")).
 				Background(lipgloss.Color("#eed49f")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleError,
+			style.GenericHeadingError,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#24273a")).
 				Background(lipgloss.Color("#ed8796")).

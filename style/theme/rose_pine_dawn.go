@@ -58,19 +58,19 @@ func RosePineDawn() style.Styles {
 			base.Italic(true),
 		),
 		style.Set(
-			style.Title,
+			style.GenericHeading,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#faf4ed")).
 				Background(lipgloss.Color("#d7827e")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleAccent,
+			style.GenericHeadingAccent,
 			base.Background(lipgloss.Darken(lipgloss.Color("#faf4ed"), 0.30)).
 				Foreground(lipgloss.Darken(lipgloss.Color("#575279"), 0.15)),
 		),
 		style.Set(
-			style.TitleSubtle,
+			style.GenericHeadingSubtle,
 			base.Background(lipgloss.Darken(lipgloss.Color("#faf4ed"), 0.15)),
 		),
 		style.Set(
@@ -90,29 +90,29 @@ func RosePineDawn() style.Styles {
 			base.Foreground(lipgloss.Color("#575279")),
 		),
 		style.Set(
-			style.HighlightDim,
+			style.GenericHighlightDim,
 			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#faf4ed"), 0.15)),
 		),
 		style.Set(
-			style.Highlight,
+			style.GenericHighlight,
 			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#faf4ed"), 0.30)),
 		),
 		style.Set(
-			style.TitleOK,
+			style.GenericHeadingOK,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#faf4ed")).
 				Background(lipgloss.Color("#56949f")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleWarn,
+			style.GenericHeadingWarn,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#faf4ed")).
 				Background(lipgloss.Color("#ea9d34")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleError,
+			style.GenericHeadingError,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#faf4ed")).
 				Background(lipgloss.Color("#b4637a")).

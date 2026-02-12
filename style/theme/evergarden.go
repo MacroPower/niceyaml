@@ -62,19 +62,19 @@ func Evergarden() style.Styles {
 			base.Foreground(lipgloss.Color("#7a8478")),
 		),
 		style.Set(
-			style.Title,
+			style.GenericHeading,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#252B2E")).
 				Background(lipgloss.Color("#7a8478")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleAccent,
+			style.GenericHeadingAccent,
 			base.Background(lipgloss.Lighten(lipgloss.Color("#252B2E"), 0.30)).
 				Foreground(lipgloss.Lighten(lipgloss.Color("#D6CBB4"), 0.15)),
 		),
 		style.Set(
-			style.TitleSubtle,
+			style.GenericHeadingSubtle,
 			base.Background(lipgloss.Lighten(lipgloss.Color("#252B2E"), 0.15)),
 		),
 		style.Set(
@@ -94,29 +94,29 @@ func Evergarden() style.Styles {
 			base.Foreground(lipgloss.Color("#D6CBB4")),
 		),
 		style.Set(
-			style.HighlightDim,
+			style.GenericHighlightDim,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#252B2E"), 0.15)),
 		),
 		style.Set(
-			style.Highlight,
+			style.GenericHighlight,
 			lipgloss.NewStyle().Background(lipgloss.Lighten(lipgloss.Color("#252B2E"), 0.30)),
 		),
 		style.Set(
-			style.TitleOK,
+			style.GenericHeadingOK,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#252B2E")).
 				Background(lipgloss.Color("#B2C98F")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleWarn,
+			style.GenericHeadingWarn,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#252B2E")).
 				Background(lipgloss.Color("#e6b99d")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleError,
+			style.GenericHeadingError,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#252B2E")).
 				Background(lipgloss.Color("#E67E80")).

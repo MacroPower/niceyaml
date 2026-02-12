@@ -302,11 +302,11 @@ func (m *model) titleLine() string {
 
 	segments := make([]titleSegment, 0, 6)
 	segments = append(segments,
-		titleSegment{" nyaml ", style.Title},
-		titleSegment{fmt.Sprintf(" +%d ", added), style.TitleOK},
-		titleSegment{fmt.Sprintf(" -%d ", removed), style.TitleError},
-		titleSegment{linesText, style.TitleWarn},
-		titleSegment{titleText, style.TitleAccent},
+		titleSegment{" nyaml ", style.GenericHeading},
+		titleSegment{fmt.Sprintf(" +%d ", added), style.GenericHeadingOK},
+		titleSegment{fmt.Sprintf(" -%d ", removed), style.GenericHeadingError},
+		titleSegment{linesText, style.GenericHeadingWarn},
+		titleSegment{titleText, style.GenericHeadingAccent},
 	)
 
 	// Calculate width used by fixed segments (text + 1 separator each).
@@ -336,7 +336,7 @@ func (m *model) titleLine() string {
 		subtitleRight,
 	)
 
-	segments = append(segments, titleSegment{subtitleContent, style.TitleSubtle})
+	segments = append(segments, titleSegment{subtitleContent, style.GenericHeadingSubtle})
 
 	// Render all segments with powerline separators.
 	var sb strings.Builder
@@ -492,7 +492,7 @@ func (m *model) renderThemeOverlay() string {
 	// Get current theme styles for the overlay appearance.
 	styles, _ := theme.Styles(m.currentTheme)
 	baseStyle := styles.Style(style.Text)
-	titleStyle := styles.Style(style.Title)
+	titleStyle := styles.Style(style.GenericHeading)
 	dimStyle := styles.Style(style.TextSubtleDim)
 
 	// Build theme list content.

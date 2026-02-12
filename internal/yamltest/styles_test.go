@@ -137,17 +137,17 @@ func TestXMLStyles_XMLStyleInclude(t *testing.T) {
 	t.Parallel()
 
 	getter := yamltest.NewXMLStyles(
-		yamltest.XMLStyleInclude(style.HighlightDim, style.Highlight),
+		yamltest.XMLStyleInclude(style.GenericHighlightDim, style.GenericHighlight),
 	)
 
 	// Included styles get XML tags.
-	searchStyle := getter.Style(style.HighlightDim)
+	searchStyle := getter.Style(style.GenericHighlightDim)
 	require.NotNil(t, searchStyle)
-	assert.Equal(t, "<highlightDim>test</highlightDim>", searchStyle.Render("test"))
+	assert.Equal(t, "<genericHighlightDim>test</genericHighlightDim>", searchStyle.Render("test"))
 
-	selectedStyle := getter.Style(style.Highlight)
+	selectedStyle := getter.Style(style.GenericHighlight)
 	require.NotNil(t, selectedStyle)
-	assert.Equal(t, "<highlight>test</highlight>", selectedStyle.Render("test"))
+	assert.Equal(t, "<genericHighlight>test</genericHighlight>", selectedStyle.Render("test"))
 
 	// Non-included styles return empty (no transformation).
 	commentStyle := getter.Style(style.Comment)
@@ -172,7 +172,7 @@ func TestXMLStyles_XMLStyleExclude(t *testing.T) {
 	assert.Equal(t, "test", commentStyle.Render("test"))
 
 	// Non-excluded styles get XML tags.
-	searchStyle := getter.Style(style.HighlightDim)
+	searchStyle := getter.Style(style.GenericHighlightDim)
 	require.NotNil(t, searchStyle)
-	assert.Equal(t, "<highlightDim>test</highlightDim>", searchStyle.Render("test"))
+	assert.Equal(t, "<genericHighlightDim>test</genericHighlightDim>", searchStyle.Render("test"))
 }

@@ -18,22 +18,20 @@
 //
 // The hierarchy is organized into major groups:
 //
-//   - [Text]: Base style inherited by all others
+//   - [Text] -> [TextOK], [TextWarn], [TextError]: Base text styles
 //   - [Comment], [CommentPreproc]: Comments and directives
 //   - [Literal] -> [LiteralString], [LiteralNumber], [LiteralBoolean],
 //     [LiteralNull]: Values
-//   - [Name] -> [NameTag], [NameAnchor], [NameAlias], [NameDecorator]: Identifiers
+//   - [Name] -> [NameTag], [NameAnchor], [NameAlias]: Identifiers
 //   - [Punctuation] -> [PunctuationMapping], [PunctuationSequence],
 //     [PunctuationBlock]: Syntax
 //   - [Generic] -> [GenericDeleted], [GenericInserted], [GenericError]: Diff
 //     and error markers
-//   - [Highlight] -> [HighlightDim]: Search and selection highlights
+//   - [GenericHighlight] -> [GenericHighlightDim]: Search and selection highlights
 //   - [TextAccent] -> [TextAccentDim]: Emphasized text
-//   - [TextSubtle] -> [TextSubtleSim]: De-emphasized text
-//   - [Title] -> [TitleAccent], [TitleSubtle]: Titles
-//
-// [Style] constants start at 1,000,000 to avoid collisions with user-defined
-// overlay keys (used for highlighting specific positions like errors).
+//   - [TextSubtle] -> [TextSubtleDim]: De-emphasized text
+//   - [GenericHeading] -> [GenericHeadingAccent], [GenericHeadingSubtle],
+//     [GenericHeadingOK], [GenericHeadingWarn], [GenericHeadingError]: Headings
 //
 // # Pointer Identity
 //

@@ -1,6 +1,6 @@
- <highlight>item</highlight>: <highlightDim>item</highlightDim>_value           
+ <genericHighlight>item</genericHighlight>: <genericHighlightDim>item</         
+ genericHighlightDim>_value                                                     
  another: data                                                                  
-                                                                                
                                                                                 
                                                                                 
                                                                                 

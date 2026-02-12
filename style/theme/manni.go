@@ -62,19 +62,19 @@ func Manni() style.Styles {
 			base.Foreground(lipgloss.Color("#555555")),
 		),
 		style.Set(
-			style.Title,
+			style.GenericHeading,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#f0f3f3")).
 				Background(lipgloss.Color("#330099")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleAccent,
+			style.GenericHeadingAccent,
 			base.Background(lipgloss.Darken(lipgloss.Color("#f0f3f3"), 0.30)).
 				Foreground(lipgloss.Darken(lipgloss.Color("#000000"), 0.15)),
 		),
 		style.Set(
-			style.TitleSubtle,
+			style.GenericHeadingSubtle,
 			base.Background(lipgloss.Darken(lipgloss.Color("#f0f3f3"), 0.15)),
 		),
 		style.Set(
@@ -94,29 +94,29 @@ func Manni() style.Styles {
 			base.Foreground(lipgloss.Color("#000000")),
 		),
 		style.Set(
-			style.HighlightDim,
+			style.GenericHighlightDim,
 			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#f0f3f3"), 0.15)),
 		),
 		style.Set(
-			style.Highlight,
+			style.GenericHighlight,
 			lipgloss.NewStyle().Background(lipgloss.Darken(lipgloss.Color("#f0f3f3"), 0.30)),
 		),
 		style.Set(
-			style.TitleOK,
+			style.GenericHeadingOK,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#f0f3f3")).
 				Background(lipgloss.Color("#22863a")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleWarn,
+			style.GenericHeadingWarn,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#f0f3f3")).
 				Background(lipgloss.Color("#b07d2b")).
 				Bold(true),
 		),
 		style.Set(
-			style.TitleError,
+			style.GenericHeadingError,
 			lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#f0f3f3")).
 				Background(lipgloss.Color("#cb2431")).
