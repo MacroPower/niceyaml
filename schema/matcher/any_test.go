@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
@@ -19,7 +20,7 @@ func TestAny(t *testing.T) {
 			matcher.Content(kindPath, "Deployment"),
 			matcher.Content(kindPath, "Service"),
 		)
-		doc := yamltest.FirstDocument(t, yamltest.Input(`kind: Deployment`))
+		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
 
 		got := m.Match(t.Context(), doc)
 		assert.True(t, got)
@@ -32,7 +33,7 @@ func TestAny(t *testing.T) {
 			matcher.Content(kindPath, "Deployment"),
 			matcher.Content(kindPath, "Service"),
 		)
-		doc := yamltest.FirstDocument(t, yamltest.Input(`kind: Service`))
+		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
 
 		got := m.Match(t.Context(), doc)
 		assert.True(t, got)
@@ -45,7 +46,7 @@ func TestAny(t *testing.T) {
 			matcher.Content(kindPath, "Deployment"),
 			matcher.Content(kindPath, "Service"),
 		)
-		doc := yamltest.FirstDocument(t, yamltest.Input(`kind: ConfigMap`))
+		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: ConfigMap`))
 
 		got := m.Match(t.Context(), doc)
 		assert.False(t, got)
@@ -55,7 +56,7 @@ func TestAny(t *testing.T) {
 		t.Parallel()
 
 		m := matcher.Any()
-		doc := yamltest.FirstDocument(t, yamltest.Input(`kind: Deployment`))
+		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
 
 		got := m.Match(t.Context(), doc)
 		assert.False(t, got)

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
@@ -17,35 +18,35 @@ func TestExists(t *testing.T) {
 		want  bool
 	}{
 		"field exists with value": {
-			input: yamltest.Input(`kind: Deployment`),
+			input: stringtest.Input(`kind: Deployment`),
 			want:  true,
 		},
 		"field missing": {
-			input: yamltest.Input(`apiVersion: v1`),
+			input: stringtest.Input(`apiVersion: v1`),
 			want:  false,
 		},
 		"field empty unquoted": {
-			input: yamltest.Input(`kind:`),
+			input: stringtest.Input(`kind:`),
 			want:  false,
 		},
 		"field empty double quoted": {
-			input: yamltest.Input(`kind: ""`),
+			input: stringtest.Input(`kind: ""`),
 			want:  false,
 		},
 		"field empty single quoted": {
-			input: yamltest.Input(`kind: ''`),
+			input: stringtest.Input(`kind: ''`),
 			want:  false,
 		},
 		"field with whitespace value": {
-			input: yamltest.Input(`kind: " "`),
+			input: stringtest.Input(`kind: " "`),
 			want:  true,
 		},
 		"field with numeric value": {
-			input: yamltest.Input(`kind: 123`),
+			input: stringtest.Input(`kind: 123`),
 			want:  true,
 		},
 		"field with boolean value": {
-			input: yamltest.Input(`kind: true`),
+			input: stringtest.Input(`kind: true`),
 			want:  true,
 		},
 	}
@@ -66,7 +67,7 @@ func TestExists(t *testing.T) {
 		t.Parallel()
 
 		m := matcher.Exists(metadataName)
-		doc := yamltest.FirstDocument(t, yamltest.Input(`
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
 			kind: Deployment
 			metadata:
 			  name: my-app
@@ -80,7 +81,7 @@ func TestExists(t *testing.T) {
 		t.Parallel()
 
 		m := matcher.Exists(metadataName)
-		doc := yamltest.FirstDocument(t, yamltest.Input(`
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
 			kind: Deployment
 			metadata:
 			  namespace: default
@@ -109,7 +110,7 @@ func TestExists_WithAll(t *testing.T) {
 			matcher.Exists(kindPath),
 			matcher.Exists(apiVersionPath),
 		)
-		doc := yamltest.FirstDocument(t, yamltest.Input(`
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
 			kind: Deployment
 			apiVersion: apps/v1
 		`))
@@ -125,7 +126,7 @@ func TestExists_WithAll(t *testing.T) {
 			matcher.Exists(kindPath),
 			matcher.Exists(apiVersionPath),
 		)
-		doc := yamltest.FirstDocument(t, yamltest.Input(`kind: Deployment`))
+		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
 
 		got := m.Match(t.Context(), doc)
 		assert.False(t, got)
@@ -138,7 +139,7 @@ func TestExists_WithAll(t *testing.T) {
 			matcher.Exists(kindPath),
 			matcher.Exists(apiVersionPath),
 		)
-		doc := yamltest.FirstDocument(t, yamltest.Input(`
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
 			kind: Deployment
 			apiVersion: ""
 		`))

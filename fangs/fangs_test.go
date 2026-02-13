@@ -8,6 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/fang"
 	"github.com/stretchr/testify/assert"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/fangs"
@@ -30,7 +31,7 @@ func TestErrorHandler(t *testing.T) {
 	t.Parallel()
 
 	// Set up source and tokens for niceyaml.Error test case.
-	source := yamltest.Input(`
+	source := stringtest.Input(`
 		name: test
 		value: 123
 	`)
@@ -52,7 +53,7 @@ func TestErrorHandler(t *testing.T) {
 	}{
 		"simple error": {
 			err: errors.New("something went wrong"),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"Error",
 				"  something went wrong",
 				"",
@@ -61,7 +62,7 @@ func TestErrorHandler(t *testing.T) {
 		},
 		"multi-line error": {
 			err: errors.New("line1\nline2\nline3"),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"Error",
 				"  line1",
 				"  line2",
@@ -72,7 +73,7 @@ func TestErrorHandler(t *testing.T) {
 		},
 		"usage error flag needs argument": {
 			err: errors.New("flag needs an argument: --config"),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"Error",
 				"  flag needs an argument: --config",
 				"",
@@ -83,7 +84,7 @@ func TestErrorHandler(t *testing.T) {
 		},
 		"usage error unknown flag": {
 			err: errors.New("unknown flag: --foo"),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"Error",
 				"  unknown flag: --foo",
 				"",
@@ -94,7 +95,7 @@ func TestErrorHandler(t *testing.T) {
 		},
 		"usage error unknown shorthand flag": {
 			err: errors.New("unknown shorthand flag: 'x' in -xyz"),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"Error",
 				"  unknown shorthand flag: 'x' in -xyz",
 				"",
@@ -105,7 +106,7 @@ func TestErrorHandler(t *testing.T) {
 		},
 		"usage error unknown command": {
 			err: errors.New(`unknown command "foo" for "nyaml"`),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"Error",
 				`  unknown command "foo" for "nyaml"`,
 				"",
@@ -116,7 +117,7 @@ func TestErrorHandler(t *testing.T) {
 		},
 		"usage error invalid argument": {
 			err: errors.New(`invalid argument "foo" for "--count"`),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"Error",
 				`  invalid argument "foo" for "--count"`,
 				"",
@@ -127,7 +128,7 @@ func TestErrorHandler(t *testing.T) {
 		},
 		"non-usage error with flag word": {
 			err: errors.New("flagged as incorrect"),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"Error",
 				"  flagged as incorrect",
 				"",
@@ -136,7 +137,7 @@ func TestErrorHandler(t *testing.T) {
 		},
 		"niceyaml error with source": {
 			err: niceyamlErr,
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"Error",
 				"  [1:1] invalid name:",
 				"  ",

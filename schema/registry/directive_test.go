@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -93,7 +94,7 @@ func TestDirective_Match(t *testing.T) {
 				t.Helper()
 
 				// NewDocumentDecoder creates a decoder without tokens.
-				return firstDocumentWithNilTokens(t, yamltest.Input(`kind: Deployment`))
+				return firstDocumentWithNilTokens(t, stringtest.Input(`kind: Deployment`))
 			},
 			want: false,
 		},
@@ -207,7 +208,7 @@ func TestDirective_Load(t *testing.T) {
 		t.Parallel()
 
 		// NewDocumentDecoder creates a decoder without tokens.
-		doc := firstDocumentWithNilTokens(t, yamltest.Input(`kind: Deployment`))
+		doc := firstDocumentWithNilTokens(t, stringtest.Input(`kind: Deployment`))
 		ml := registry.Directive()
 		_, err := ml.Load(t.Context(), doc)
 		require.ErrorIs(t, err, registry.ErrNoDirective)
@@ -217,7 +218,7 @@ func TestDirective_Load(t *testing.T) {
 		t.Parallel()
 
 		// Create a document with a directive but no file path (from string input).
-		doc := yamltest.FirstDocument(t, yamltest.Input(`
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
 			# yaml-language-server: $schema=./schema.json
 			kind: Deployment
 		`))

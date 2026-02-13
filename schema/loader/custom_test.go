@@ -7,9 +7,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema/loader"
 )
@@ -31,7 +31,7 @@ func TestCustom(t *testing.T) {
 			return schemaData, kind + ".json", nil
 		})
 
-		input := yamltest.Input(`kind: Deployment`)
+		input := stringtest.Input(`kind: Deployment`)
 		source := niceyaml.NewSourceFromString(input)
 		decoder, err := source.Decoder()
 		require.NoError(t, err)

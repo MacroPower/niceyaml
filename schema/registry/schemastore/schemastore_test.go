@@ -15,6 +15,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema/registry"
@@ -629,7 +630,7 @@ func TestSchemaStore_MatchLoader(t *testing.T) {
 		store, err := schemastore.New(t.Context(), schemastore.WithCatalogURL(server.URL))
 		require.NoError(t, err)
 
-		doc := yamltest.FirstDocumentWithPath(t, yamltest.Input(`on: push`), ".github/workflows/ci.yaml")
+		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`on: push`), ".github/workflows/ci.yaml")
 		assert.True(t, store.Match(t.Context(), doc))
 	})
 
@@ -652,7 +653,7 @@ func TestSchemaStore_MatchLoader(t *testing.T) {
 		store, err := schemastore.New(t.Context(), schemastore.WithCatalogURL(server.URL))
 		require.NoError(t, err)
 
-		doc := yamltest.FirstDocumentWithPath(t, yamltest.Input(`key: value`), "random.yaml")
+		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "random.yaml")
 		assert.False(t, store.Match(t.Context(), doc))
 	})
 
@@ -681,7 +682,7 @@ func TestSchemaStore_MatchLoader(t *testing.T) {
 		store, err := schemastore.New(t.Context(), schemastore.WithCatalogURL(catalogServer.URL))
 		require.NoError(t, err)
 
-		doc := yamltest.FirstDocumentWithPath(t, yamltest.Input(`key: value`), "config.yaml")
+		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
 
 		// Match first, then Load.
 		require.True(t, store.Match(t.Context(), doc))
@@ -711,7 +712,7 @@ func TestSchemaStore_MatchLoader(t *testing.T) {
 		store, err := schemastore.New(t.Context(), schemastore.WithCatalogURL(catalogServer.URL))
 		require.NoError(t, err)
 
-		doc := yamltest.FirstDocumentWithPath(t, yamltest.Input(`key: value`), "config.yaml")
+		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
 
 		// Match succeeds but Load fails because schema URL is unreachable.
 		require.True(t, store.Match(t.Context(), doc))
@@ -745,7 +746,7 @@ func TestSchemaStore_MatchLoader(t *testing.T) {
 		store, err := schemastore.New(t.Context(), schemastore.WithCatalogURL(catalogServer.URL))
 		require.NoError(t, err)
 
-		doc := yamltest.FirstDocumentWithPath(t, yamltest.Input(`key: value`), "config.yaml")
+		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
 
 		// Load can be called without prior Match.
 		result, err := store.Load(t.Context(), doc)
@@ -773,7 +774,7 @@ func TestSchemaStore_MatchLoader(t *testing.T) {
 		require.NoError(t, err)
 
 		// Document path doesn't match any schema pattern.
-		doc := yamltest.FirstDocumentWithPath(t, yamltest.Input(`key: value`), "random.yaml")
+		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "random.yaml")
 
 		_, err = store.Load(t.Context(), doc)
 		require.ErrorIs(t, err, schemastore.ErrNoCatalogMatch)
@@ -820,7 +821,7 @@ func TestIntegration(t *testing.T) {
 		reg := registry.New()
 		reg.Register(store)
 
-		doc := yamltest.FirstDocumentWithPath(t, yamltest.Input(`on: push`), ".github/workflows/ci.yaml")
+		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`on: push`), ".github/workflows/ci.yaml")
 
 		err = reg.ValidateDocument(t.Context(), doc)
 		require.NoError(t, err)
@@ -854,7 +855,7 @@ func TestIntegration(t *testing.T) {
 		reg := registry.New()
 		reg.Register(store)
 
-		doc := yamltest.FirstDocumentWithPath(t, yamltest.Input(`name: test`), ".github/workflows/ci.yaml")
+		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`name: test`), ".github/workflows/ci.yaml")
 
 		err = reg.ValidateDocument(t.Context(), doc)
 		require.Error(t, err)
@@ -882,7 +883,7 @@ func TestIntegration(t *testing.T) {
 		reg := registry.New()
 		reg.Register(store)
 
-		doc := yamltest.FirstDocumentWithPath(t, yamltest.Input(`key: value`), "random.yaml")
+		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "random.yaml")
 
 		err = reg.ValidateDocument(t.Context(), doc)
 		require.ErrorIs(t, err, registry.ErrNoMatch)

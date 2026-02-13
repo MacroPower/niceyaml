@@ -8,6 +8,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/lexers"
@@ -49,14 +50,14 @@ func TestTokenize(t *testing.T) {
 			input: "key: value\n",
 		},
 		"multi-line": {
-			input: yamltest.JoinLF(
+			input: stringtest.JoinLF(
 				"key1: value1",
 				"key2: value2",
 				"key3: value3",
 			),
 		},
 		"nested structure": {
-			input: yamltest.JoinLF(
+			input: stringtest.JoinLF(
 				"parent:",
 				"  child1: value1",
 				"  child2: value2",
@@ -66,7 +67,7 @@ func TestTokenize(t *testing.T) {
 			input: "greeting: こんにちは\n",
 		},
 		"list": {
-			input: yamltest.JoinLF(
+			input: stringtest.JoinLF(
 				"items:",
 				"  - one",
 				"  - two",
@@ -118,7 +119,7 @@ func TestTokenizeDocuments(t *testing.T) {
 	t.Run("single doc with header", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.JoinLF(
+		input := stringtest.JoinLF(
 			"---",
 			"key: value",
 		)
@@ -134,7 +135,7 @@ func TestTokenizeDocuments(t *testing.T) {
 	t.Run("two docs", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.JoinLF(
+		input := stringtest.JoinLF(
 			"key1: v1",
 			"---",
 			"key2: v2",
@@ -157,7 +158,7 @@ func TestTokenizeDocuments(t *testing.T) {
 	t.Run("three docs", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.JoinLF(
+		input := stringtest.JoinLF(
 			"a: 1",
 			"---",
 			"b: 2",
@@ -178,7 +179,7 @@ func TestTokenizeDocuments(t *testing.T) {
 	t.Run("header at start creates single doc", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.JoinLF(
+		input := stringtest.JoinLF(
 			"---",
 			"key: value",
 		)
@@ -193,7 +194,7 @@ func TestTokenizeDocuments(t *testing.T) {
 	t.Run("multiple headers at start", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.JoinLF(
+		input := stringtest.JoinLF(
 			"---",
 			"doc1: value1",
 			"---",
@@ -213,7 +214,7 @@ func TestTokenizeDocuments(t *testing.T) {
 	t.Run("doc with end marker", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.JoinLF(
+		input := stringtest.JoinLF(
 			"key: value",
 			"...",
 		)
@@ -238,7 +239,7 @@ func TestTokenizeDocuments(t *testing.T) {
 	t.Run("early termination", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.JoinLF(
+		input := stringtest.JoinLF(
 			"doc1: v1",
 			"---",
 			"doc2: v2",
@@ -270,7 +271,7 @@ func TestTokenizeDocuments_WithResetPositions(t *testing.T) {
 		t.Parallel()
 
 		// Create input that starts at a non-zero position.
-		input := yamltest.JoinLF(
+		input := stringtest.JoinLF(
 			"",
 			"",
 			"key: value",
@@ -290,7 +291,7 @@ func TestTokenizeDocuments_WithResetPositions(t *testing.T) {
 	t.Run("multi doc each starts at line 1", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.JoinLF(
+		input := stringtest.JoinLF(
 			"key1: v1",
 			"---",
 			"key2: v2",
@@ -316,7 +317,7 @@ func TestTokenizeDocuments_WithResetPositions(t *testing.T) {
 	t.Run("preserves original positions when option not used", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.JoinLF(
+		input := stringtest.JoinLF(
 			"key1: v1",
 			"---",
 			"key2: v2",
@@ -361,7 +362,7 @@ func TestTokenizeDocuments_WithResetPositions(t *testing.T) {
 	t.Run("three docs all reset independently", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.JoinLF(
+		input := stringtest.JoinLF(
 			"a: 1",
 			"---",
 			"b: 2",
@@ -384,7 +385,7 @@ func TestTokenizeDocuments_WithResetPositions(t *testing.T) {
 	t.Run("matches SplitDocuments behavior", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.JoinLF(
+		input := stringtest.JoinLF(
 			"key1: v1",
 			"---",
 			"key2: v2",

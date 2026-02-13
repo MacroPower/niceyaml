@@ -10,6 +10,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
@@ -252,7 +253,7 @@ func TestNewLines_PerLine(t *testing.T) {
 		want  []string
 	}{
 		"literal block": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				script: |
 				  line1
 				  line2
@@ -266,7 +267,7 @@ func TestNewLines_PerLine(t *testing.T) {
 			},
 		},
 		"folded block": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				desc: >
 				  part1
 				  part2
@@ -285,7 +286,7 @@ func TestNewLines_PerLine(t *testing.T) {
 			},
 		},
 		"multiple key-values": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				first: 1
 				second: 2
 			`),
@@ -295,7 +296,7 @@ func TestNewLines_PerLine(t *testing.T) {
 			},
 		},
 		"nested map": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				parent:
 				  child: value
 			`),
@@ -305,7 +306,7 @@ func TestNewLines_PerLine(t *testing.T) {
 			},
 		},
 		"quoted with escaped newline": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				special: "line1\nline2"
 			`),
 			want: []string{
@@ -340,7 +341,7 @@ func TestNewLines_NonStandardLineNumbers(t *testing.T) {
 		wantLineCount int
 	}{
 		"tokens starting at line 10": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				key: value
 				other: data
 			`),
@@ -355,7 +356,7 @@ func TestNewLines_NonStandardLineNumbers(t *testing.T) {
 			wantLineCount: 1,
 		},
 		"nested map starting at line 50": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				parent:
 				  child: value
 				  sibling: another
@@ -365,7 +366,7 @@ func TestNewLines_NonStandardLineNumbers(t *testing.T) {
 			wantLineCount: 3,
 		},
 		"literal block starting at line 20": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				script: |
 				  line1
 				  line2
@@ -375,7 +376,7 @@ func TestNewLines_NonStandardLineNumbers(t *testing.T) {
 			wantLineCount: 3,
 		},
 		"folded block starting at line 30": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				desc: >
 				  part1
 				  part2
@@ -385,7 +386,7 @@ func TestNewLines_NonStandardLineNumbers(t *testing.T) {
 			wantLineCount: 3,
 		},
 		"list starting at line 25": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				items:
 				  - one
 				  - two
@@ -395,7 +396,7 @@ func TestNewLines_NonStandardLineNumbers(t *testing.T) {
 			wantLineCount: 3,
 		},
 		"comment and key at line 15": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				# comment
 				key: value
 			`),
@@ -688,28 +689,28 @@ func TestNewLines_Value_PrevNextLinking(t *testing.T) {
 			input: "foo: bar\nbaz: qux\n",
 		},
 		"nested map": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				parent:
 				  child: value
 				  sibling: another
 			`),
 		},
 		"literal block": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				key: |
 				  line1
 				  line2
 			`),
 		},
 		"list": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				items:
 				  - one
 				  - two
 			`),
 		},
 		"deeply nested": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				level1:
 				  level2:
 				    level3:
@@ -718,7 +719,7 @@ func TestNewLines_Value_PrevNextLinking(t *testing.T) {
 			`),
 		},
 		"anchor and alias": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				defaults: &defaults
 				  timeout: 30
 				  retries: 3
@@ -728,13 +729,13 @@ func TestNewLines_Value_PrevNextLinking(t *testing.T) {
 			`),
 		},
 		"inline flow style": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				map: {a: 1, b: 2, c: 3}
 				list: [x, y, z]
 			`),
 		},
 		"mixed comments": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				# Header comment
 				key1: value1  # inline comment
 				# Middle comment
@@ -743,7 +744,7 @@ func TestNewLines_Value_PrevNextLinking(t *testing.T) {
 			`),
 		},
 		"folded block": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				description: >
 				  This is a long
 				  description that
@@ -751,7 +752,7 @@ func TestNewLines_Value_PrevNextLinking(t *testing.T) {
 			`),
 		},
 		"list of maps": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				items:
 				  - name: first
 				    value: 1
@@ -762,7 +763,7 @@ func TestNewLines_Value_PrevNextLinking(t *testing.T) {
 			`),
 		},
 		"complex kubernetes manifest": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				apiVersion: apps/v1
 				kind: Deployment
 				metadata:
@@ -784,14 +785,14 @@ func TestNewLines_Value_PrevNextLinking(t *testing.T) {
 			`),
 		},
 		"quoted strings": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				double: "hello world"
 				single: 'foo bar'
 				special: "line1\nline2\ttab"
 			`),
 		},
 		"multi-document": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				---
 				doc1: value1
 				---
@@ -862,7 +863,7 @@ func TestNewLines_LeadingNewlineTokens(t *testing.T) {
 		want  []int
 	}{
 		"inline comment followed by next line": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				items:
 				  - key: value # inline comment
 				    next: data
@@ -870,7 +871,7 @@ func TestNewLines_LeadingNewlineTokens(t *testing.T) {
 			want: []int{1, 2, 3},
 		},
 		"sequence entry with merge key and comment": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				items:
 				  - <<: *anchor # comment
 				    key: value
@@ -878,7 +879,7 @@ func TestNewLines_LeadingNewlineTokens(t *testing.T) {
 			want: []int{1, 2, 3},
 		},
 		"nested map with trailing comment": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				parent:
 				  child: value # note
 				  sibling: other
@@ -886,7 +887,7 @@ func TestNewLines_LeadingNewlineTokens(t *testing.T) {
 			want: []int{1, 2, 3},
 		},
 		"multiple inline comments": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				a: 1 # first
 				b: 2 # second
 				c: 3 # third
@@ -894,7 +895,7 @@ func TestNewLines_LeadingNewlineTokens(t *testing.T) {
 			want: []int{1, 2, 3},
 		},
 		"comment block after content": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				key: value
 
 				# Comment block
@@ -1245,7 +1246,7 @@ func TestNewLines_OffsetRuneCount(t *testing.T) {
 func TestNewLines_IndentLevelProgression(t *testing.T) {
 	t.Parallel()
 
-	input := yamltest.Input(`
+	input := stringtest.Input(`
 		root:
 		  level1:
 		    level2:
@@ -1297,7 +1298,7 @@ func TestNewLines_BlockScalars(t *testing.T) {
 			want  int // Expected Position.Line of the StringType content token.
 		}{
 			"literal two lines": {
-				input: yamltest.Input(`
+				input: stringtest.Input(`
 					key: |
 					  line1
 					  line2
@@ -1305,7 +1306,7 @@ func TestNewLines_BlockScalars(t *testing.T) {
 				want: 3, // Position should be on last content line.
 			},
 			"literal three lines": {
-				input: yamltest.Input(`
+				input: stringtest.Input(`
 					key: |
 					  a
 					  b
@@ -1314,7 +1315,7 @@ func TestNewLines_BlockScalars(t *testing.T) {
 				want: 4,
 			},
 			"folded two lines": {
-				input: yamltest.Input(`
+				input: stringtest.Input(`
 					key: >
 					  first
 					  second
@@ -1322,7 +1323,7 @@ func TestNewLines_BlockScalars(t *testing.T) {
 				want: 3,
 			},
 			"literal with strip": {
-				input: yamltest.Input(`
+				input: stringtest.Input(`
 					key: |-
 					  line1
 					  line2
@@ -1374,18 +1375,18 @@ func TestNewLines_BlockScalars(t *testing.T) {
 		// This can happen with "key: |\n" followed by another key or end of document.
 
 		tcs := map[string]string{
-			"literal empty followed by key": yamltest.Input(`
+			"literal empty followed by key": stringtest.Input(`
 				key: |
 				next: value
 			`),
-			"folded empty followed by key": yamltest.Input(`
+			"folded empty followed by key": stringtest.Input(`
 				key: >
 				next: value
 			`),
-			"literal empty at end": yamltest.Input(`
+			"literal empty at end": stringtest.Input(`
 				key: |
 			`),
-			"literal strip empty": yamltest.Input(`
+			"literal strip empty": stringtest.Input(`
 				key: |-
 				next: value
 			`),
@@ -1507,14 +1508,14 @@ func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 		want  int // Expected Position.Line of the StringType content token.
 	}{
 		"plain multiline two lines": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				key: this is
 				  continued
 			`),
 			want: 1, // Position should be on FIRST line.
 		},
 		"plain multiline three lines": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				key: first
 				  second
 				  third
@@ -1522,7 +1523,7 @@ func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 			want: 1,
 		},
 		"plain multiline with more indent": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				parent:
 				  child: line one
 				    continued line
@@ -1645,7 +1646,7 @@ func TestNewLines_ColumnPositionAfterSplit(t *testing.T) {
 	t.Run("block scalar column positions", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			key: |
 			  line1
 			  line2
@@ -1667,7 +1668,7 @@ func TestNewLines_ColumnPositionAfterSplit(t *testing.T) {
 	t.Run("plain multiline column positions", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			key: this is
 			  continued
 		`)
@@ -2106,7 +2107,7 @@ func TestLines_TokenPositions(t *testing.T) {
 	t.Run("multiple occurrences - literal block", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			key: |
 			  line1
 			  line2
@@ -2228,7 +2229,7 @@ func TestLines_TokenAt(t *testing.T) {
 	t.Run("multiline token returns same source", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			key: |
 			  line1
 			  line2
@@ -2295,7 +2296,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 	t.Run("multiline token returns multiple ranges", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			key: |
 			  line1
 			  line2
@@ -2375,7 +2376,7 @@ func TestLines_TokenPositionRangesAt(t *testing.T) {
 	t.Run("multiline token returns all ranges", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			key: |
 			  line1
 			  line2
@@ -2454,7 +2455,7 @@ func TestLines_String(t *testing.T) {
 	t.Run("multiple lines", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			key1: value1
 			key2: value2
 		`)
@@ -2537,7 +2538,7 @@ func TestLine_Number_Fallbacks(t *testing.T) {
 	t.Run("multiple lines have correct numbers", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			key1: value1
 			key2: value2
 			key3: value3
@@ -2690,7 +2691,7 @@ func TestNewLines_WhitespaceType(t *testing.T) {
 		t.Parallel()
 
 		// More complex case: nested structure with boolean values.
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			root:
 			  nested:
 			    enabled: true
@@ -2840,7 +2841,7 @@ func TestLines_AddOverlay(t *testing.T) {
 	t.Run("multi-line range splits across lines", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			key1: value1
 			key2: value2
 			key3: value3
@@ -2875,7 +2876,7 @@ func TestLines_AddOverlay(t *testing.T) {
 	t.Run("multiple ranges", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			key1: value1
 			key2: value2
 		`)
@@ -2909,7 +2910,7 @@ func TestLines_ClearOverlays(t *testing.T) {
 	t.Run("clears all overlays", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			key1: value1
 			key2: value2
 		`)
@@ -2993,7 +2994,7 @@ func TestLines_ContentPositionRangesAt(t *testing.T) {
 	t.Run("multiline token returns all ranges", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			key: |
 			  line1
 			  line2

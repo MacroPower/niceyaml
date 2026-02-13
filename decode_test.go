@@ -8,6 +8,7 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -59,7 +60,7 @@ func TestDecoder_Len(t *testing.T) {
 			want:  1,
 		},
 		"two documents": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				---
 				key1: value1
 				---
@@ -68,7 +69,7 @@ func TestDecoder_Len(t *testing.T) {
 			want: 2,
 		},
 		"three documents": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				---
 				a: 1
 				---
@@ -111,7 +112,7 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 			wantFound: []bool{true},
 		},
 		"nested key": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				parent:
 				  child: nested_value
 			`),
@@ -120,7 +121,7 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 			wantFound: []bool{true},
 		},
 		"array index": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				items:
 				  - first
 				  - second
@@ -137,7 +138,7 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 			wantFound: []bool{false},
 		},
 		"multiple documents": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				---
 				first: 1
 				---
@@ -237,7 +238,7 @@ func TestDocumentDecoder_Decode(t *testing.T) {
 	t.Run("decode to struct", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			name: test
 			value: 42
 		`)
@@ -257,7 +258,7 @@ func TestDocumentDecoder_Decode(t *testing.T) {
 	t.Run("decode to slice", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			- one
 			- two
 			- three
@@ -278,7 +279,7 @@ func TestDocumentDecoder_Decode(t *testing.T) {
 	t.Run("decode multiple documents", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			---
 			name: first
 			value: 1
@@ -356,7 +357,7 @@ func TestDocumentDecoder_Unmarshal(t *testing.T) {
 	t.Run("validates and decodes with SchemaValidator", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			name: test
 			value: 42
 		`)
@@ -378,7 +379,7 @@ func TestDocumentDecoder_Unmarshal(t *testing.T) {
 	t.Run("schema validation fails - no decode", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			name: invalid
 			value: 42
 		`)
@@ -397,7 +398,7 @@ func TestDocumentDecoder_Unmarshal(t *testing.T) {
 	t.Run("decodes without SchemaValidator", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			name: test
 			value: 42
 		`)
@@ -422,7 +423,7 @@ func TestDocumentDecoder_UnmarshalContext(t *testing.T) {
 	t.Run("validates and decodes with context", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			name: test
 			value: 42
 		`)
@@ -444,7 +445,7 @@ func TestDocumentDecoder_UnmarshalContext(t *testing.T) {
 	t.Run("schema validation failure stops decode", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			name: invalid
 			value: 42
 		`)
@@ -568,7 +569,7 @@ func TestDocumentDecoder_Decode_Validator(t *testing.T) {
 	t.Run("does not call Validate on Validator struct", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			name: test
 			value: 42
 		`)
@@ -590,7 +591,7 @@ func TestDocumentDecoder_Decode_Validator(t *testing.T) {
 	t.Run("struct without Validator decodes normally", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			name: test
 			value: 42
 		`)
@@ -611,7 +612,7 @@ func TestDocumentDecoder_Decode_Validator(t *testing.T) {
 	t.Run("Unmarshal runs full pipeline", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			name: test
 			value: 42
 		`)
@@ -632,7 +633,7 @@ func TestDocumentDecoder_Decode_Validator(t *testing.T) {
 	t.Run("Unmarshal returns Validator error", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			name: ""
 			value: 42
 		`)
@@ -774,7 +775,7 @@ func TestDecoder_Documents(t *testing.T) {
 	t.Run("iterates over multiple documents", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			---
 			a: 1
 			---
@@ -800,7 +801,7 @@ func TestDecoder_Documents(t *testing.T) {
 	t.Run("early break stops iteration", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			---
 			a: 1
 			---
@@ -830,7 +831,7 @@ func TestDocumentDecoder_ValidateSchema(t *testing.T) {
 	t.Run("valid data passes schema validation", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			name: test
 			count: 42
 		`)
@@ -849,7 +850,7 @@ func TestDocumentDecoder_ValidateSchema(t *testing.T) {
 	t.Run("invalid data fails schema validation", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			name: test
 			count: not-a-number
 		`)
@@ -877,7 +878,7 @@ func TestWithDecodeOptions(t *testing.T) {
 	t.Run("without option allows unknown fields", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			name: test
 			extra: field
 		`)
@@ -897,7 +898,7 @@ func TestWithDecodeOptions(t *testing.T) {
 	t.Run("DisallowUnknownField rejects unknown fields", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			name: test
 			extra: field
 		`)
@@ -921,7 +922,7 @@ func TestWithDecodeOptions(t *testing.T) {
 	t.Run("options apply to Unmarshal", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			name: test
 			extra: field
 		`)
@@ -945,7 +946,7 @@ func TestWithDecodeOptions(t *testing.T) {
 	t.Run("options apply across multiple documents", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			---
 			name: first
 			unknown1: a
@@ -975,7 +976,7 @@ func TestWithDecodeOptions(t *testing.T) {
 	t.Run("no options is the default", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			name: test
 			extra: field
 		`)

@@ -5,26 +5,6 @@
 // fixtures is verbose, and comparing styled output cluttered with ANSI escape
 // codes is difficult to read. This package addresses both.
 //
-// # Writing Readable Test Inputs
-//
-// [Input] strips common indentation from heredoc-style strings, letting you
-// write YAML naturally within Go test code:
-//
-//	got := someFunction(yamltest.Input(`
-//		key: value
-//		nested:
-//		  child: data
-//	`))
-//
-// For expected output, [JoinLF] and [JoinCRLF] construct multi-line strings
-// with explicit line endings:
-//
-//	want := yamltest.JoinLF(
-//		"line1",
-//		"line2",
-//		"line3",
-//	)
-//
 // # Building Token Fixtures
 //
 // [token.Token] has many fields that must be populated for tests.

@@ -10,6 +10,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -31,27 +32,27 @@ func TestTokens_String_Annotation(t *testing.T) {
 			annotations: map[int]line.Annotation{
 				0: {Content: "error", Position: line.Below},
 			},
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 | key: value",
 				"   1 | ^ error",
 			),
 		},
 		"multiple lines one annotation": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				first: 1
 				second: 2
 			`),
 			annotations: map[int]line.Annotation{
 				1: {Content: "here", Position: line.Below},
 			},
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 | first: 1",
 				"   2 | second: 2",
 				"   2 | ^ here",
 			),
 		},
 		"multiple lines multiple annotations": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				first: 1
 				second: 2
 				third: 3
@@ -60,7 +61,7 @@ func TestTokens_String_Annotation(t *testing.T) {
 				0: {Content: "start", Position: line.Below},
 				2: {Content: "end", Position: line.Below},
 			},
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 | first: 1",
 				"   1 | ^ start",
 				"   2 | second: 2",
@@ -69,7 +70,7 @@ func TestTokens_String_Annotation(t *testing.T) {
 			),
 		},
 		"mixed annotated and non-annotated": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				a: 1
 				b: 2
 				c: 3
@@ -78,7 +79,7 @@ func TestTokens_String_Annotation(t *testing.T) {
 			annotations: map[int]line.Annotation{
 				1: {Content: "middle", Position: line.Below, Col: 2},
 			},
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 | a: 1",
 				"   2 | b: 2",
 				"   2 |   ^ middle",
@@ -580,7 +581,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 	t.Run("literal block content - returns all joined lines", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			key: |
 			  line1
 			  line2
@@ -668,7 +669,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 	t.Run("query indicator line of literal block - returns range", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			key: |
 			  line1
 			  line2
@@ -692,7 +693,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 	t.Run("query from last line of literal block", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			key: |
 			  line1
 			  line2
@@ -736,7 +737,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 	t.Run("column outside token range - returns nil", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			key: |
 			  line1
 			  line2
@@ -754,7 +755,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 	t.Run("three-line literal block", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			key: |
 			  line1
 			  line2
@@ -783,7 +784,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 	t.Run("folded block", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			key: >
 			  line1
 			  line2
@@ -811,7 +812,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 	t.Run("multiple positions - combined results", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			first: 1
 			second: 2
 		`)
@@ -874,7 +875,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 	t.Run("multiple positions - joined lines deduplication", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			key: |
 			  line1
 			  line2
@@ -979,7 +980,7 @@ func TestSource_Content(t *testing.T) {
 		},
 		"multiple lines": {
 			input: "a: 1\nb: 2\nc: 3\n",
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"a: 1",
 				"b: 2",
 				"c: 3",
@@ -991,7 +992,7 @@ func TestSource_Content(t *testing.T) {
 		},
 		"nested yaml": {
 			input: "parent:\n  child: value\n",
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"parent:",
 				"  child: value",
 			),
@@ -1026,7 +1027,7 @@ func TestSource_Validate(t *testing.T) {
 			input: "a: 1\nb: 2\nc: 3\n",
 		},
 		"literal block source": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				key: |
 				  line1
 				  line2
@@ -1061,14 +1062,14 @@ func TestSource_Parse(t *testing.T) {
 				want:  1,
 			},
 			"nested map": {
-				input: yamltest.Input(`
+				input: stringtest.Input(`
 					parent:
 					  child: value
 				`),
 				want: 1,
 			},
 			"multiple documents": {
-				input: yamltest.Input(`
+				input: stringtest.Input(`
 					---
 					doc1: value1
 					---
@@ -1077,7 +1078,7 @@ func TestSource_Parse(t *testing.T) {
 				want: 2,
 			},
 			"list": {
-				input: yamltest.Input(`
+				input: stringtest.Input(`
 					items:
 					  - one
 					  - two
@@ -1152,7 +1153,7 @@ func TestSource_WithParserOptions(t *testing.T) {
 	t.Run("parses complex YAML with options", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			key1: value1
 			key2: value2
 			nested:
@@ -1194,7 +1195,7 @@ func TestSource_AddOverlay(t *testing.T) {
 	t.Run("multi-line range splits across lines", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			key1: value1
 			key2: value2
 			key3: value3
@@ -1231,7 +1232,7 @@ func TestSource_AddOverlay(t *testing.T) {
 	t.Run("multiple ranges", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			key1: value1
 			key2: value2
 		`)
@@ -1264,7 +1265,7 @@ func TestSource_ClearOverlays(t *testing.T) {
 	t.Run("clears all overlays", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			key1: value1
 			key2: value2
 		`)
@@ -1353,7 +1354,7 @@ func TestSource_Len(t *testing.T) {
 			want:  0,
 		},
 		"literal block": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				key: |
 				  line1
 				  line2
@@ -1535,7 +1536,7 @@ func TestSource_ContentPositionRanges(t *testing.T) {
 	t.Run("multiple positions", func(t *testing.T) {
 		t.Parallel()
 
-		input := yamltest.Input(`
+		input := stringtest.Input(`
 			first: 1
 			second: 2
 		`)

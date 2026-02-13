@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -45,7 +46,7 @@ func TestRegistry_Lookup(t *testing.T) {
 			loader.Embedded("fallback.json", schemaData),
 		)
 
-		doc := yamltest.FirstDocument(t, yamltest.Input(`kind: Deployment`))
+		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
 		v, err := reg.Lookup(t.Context(), doc)
 		require.NoError(t, err)
 		require.NotNil(t, v)
@@ -60,7 +61,7 @@ func TestRegistry_Lookup(t *testing.T) {
 			loader.Embedded("deployment.json", schemaData),
 		)
 
-		doc := yamltest.FirstDocument(t, yamltest.Input(`kind: Service`))
+		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
 		_, err := reg.Lookup(t.Context(), doc)
 		require.ErrorIs(t, err, registry.ErrNoMatch)
 	})
@@ -75,7 +76,7 @@ func TestRegistry_Lookup(t *testing.T) {
 			loader.Validator("test.json", v),
 		)
 
-		doc := yamltest.FirstDocument(t, yamltest.Input(`kind: Deployment`))
+		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
 		gotV, err := reg.Lookup(t.Context(), doc)
 		require.NoError(t, err)
 		assert.Equal(t, v, gotV)
@@ -95,7 +96,7 @@ func TestRegistry_ValidateDocument(t *testing.T) {
 			loader.Embedded("test.json", schemaData),
 		)
 
-		doc := yamltest.FirstDocument(t, yamltest.Input(`kind: Deployment`))
+		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
 		err := reg.ValidateDocument(t.Context(), doc)
 		require.NoError(t, err)
 	})
@@ -110,7 +111,7 @@ func TestRegistry_ValidateDocument(t *testing.T) {
 			loader.Embedded("test.json", schemaData),
 		)
 
-		doc := yamltest.FirstDocument(t, yamltest.Input(`kind: Deployment`))
+		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
 		err := reg.ValidateDocument(t.Context(), doc)
 		require.Error(t, err)
 	})
@@ -126,7 +127,7 @@ func TestRegistry_ValidateDocument(t *testing.T) {
 		)
 
 		// Service doesn't match, returns ErrNoMatch.
-		doc := yamltest.FirstDocument(t, yamltest.Input(`kind: Service`))
+		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
 		err := reg.ValidateDocument(t.Context(), doc)
 		require.ErrorIs(t, err, registry.ErrNoMatch)
 	})
@@ -147,12 +148,12 @@ func TestRegistry_Caching(t *testing.T) {
 		)
 
 		// First lookup compiles and caches.
-		doc1 := yamltest.FirstDocument(t, yamltest.Input(`kind: Deployment`))
+		doc1 := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
 		v1, err := reg.Lookup(t.Context(), doc1)
 		require.NoError(t, err)
 
 		// Second lookup uses cache.
-		doc2 := yamltest.FirstDocument(t, yamltest.Input(`kind: Deployment`))
+		doc2 := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
 		v2, err := reg.Lookup(t.Context(), doc2)
 		require.NoError(t, err)
 
@@ -176,14 +177,14 @@ func TestRegistry_Caching(t *testing.T) {
 		)
 
 		// First lookup should miss cache and call Set.
-		doc1 := yamltest.FirstDocument(t, yamltest.Input(`kind: Deployment`))
+		doc1 := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
 		v1, err := reg.Lookup(t.Context(), doc1)
 		require.NoError(t, err)
 		assert.Equal(t, 1, cache.getCalls)
 		assert.Equal(t, 1, cache.setCalls)
 
 		// Second lookup should hit cache.
-		doc2 := yamltest.FirstDocument(t, yamltest.Input(`kind: Deployment`))
+		doc2 := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
 		v2, err := reg.Lookup(t.Context(), doc2)
 		require.NoError(t, err)
 		assert.Equal(t, 2, cache.getCalls)
@@ -215,14 +216,14 @@ func TestRegistry_Caching(t *testing.T) {
 		)
 
 		// First lookup should miss cache and compile, but NOT set.
-		doc1 := yamltest.FirstDocument(t, yamltest.Input(`key: value`))
+		doc1 := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
 		_, err := reg.Lookup(t.Context(), doc1)
 		require.NoError(t, err)
 		assert.Equal(t, 1, cache.getCalls)
 		assert.Equal(t, 0, cache.setCalls, "empty URL should not be cached")
 
 		// Second lookup should also miss cache and compile again.
-		doc2 := yamltest.FirstDocument(t, yamltest.Input(`key: value`))
+		doc2 := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
 		_, err = reg.Lookup(t.Context(), doc2)
 		require.NoError(t, err)
 		assert.Equal(t, 2, cache.getCalls)
@@ -242,7 +243,7 @@ func TestRegistry_Caching(t *testing.T) {
 		// Pre-create documents outside goroutines to avoid assertion issues.
 		docs := make([]*niceyaml.DocumentDecoder, 100)
 		for i := range docs {
-			docs[i] = yamltest.FirstDocument(t, yamltest.Input(`kind: Deployment`))
+			docs[i] = yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
 		}
 
 		var wg sync.WaitGroup
@@ -294,12 +295,12 @@ func TestRegistry_DynamicLoader(t *testing.T) {
 		)
 
 		// Deployment should validate.
-		doc := yamltest.FirstDocument(t, yamltest.Input(`kind: Deployment`))
+		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
 		err := reg.ValidateDocument(t.Context(), doc)
 		require.NoError(t, err)
 
 		// Service should validate.
-		doc = yamltest.FirstDocument(t, yamltest.Input(`kind: Service`))
+		doc = yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
 		err = reg.ValidateDocument(t.Context(), doc)
 		require.NoError(t, err)
 	})
@@ -346,7 +347,7 @@ func TestRegistry_WithValidatorOptions(t *testing.T) {
 		loader.Embedded("test.json", schemaData),
 	)
 
-	doc := yamltest.FirstDocument(t, yamltest.Input(`kind: Deployment`))
+	doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
 	v, err := reg.Lookup(t.Context(), doc)
 	require.NoError(t, err)
 	assert.NotNil(t, v)
@@ -393,7 +394,7 @@ func TestRegistry_DoubleCheckLock(t *testing.T) {
 	// Pre-create documents outside goroutines.
 	docs := make([]*niceyaml.DocumentDecoder, goroutines)
 	for i := range docs {
-		docs[i] = yamltest.FirstDocument(t, yamltest.Input(`key: value`))
+		docs[i] = yamltest.FirstDocument(t, stringtest.Input(`key: value`))
 	}
 
 	for i := range goroutines {
@@ -428,7 +429,7 @@ func TestRegistry_ErrorCases(t *testing.T) {
 			}),
 		)
 
-		doc := yamltest.FirstDocument(t, yamltest.Input(`key: value`))
+		doc := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
 		err := reg.ValidateDocument(t.Context(), doc)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "load failed")
@@ -449,7 +450,7 @@ func TestRegistry_ErrorCases(t *testing.T) {
 			}),
 		)
 
-		doc := yamltest.FirstDocument(t, yamltest.Input(`key: value`))
+		doc := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
 		v, err := reg.Lookup(t.Context(), doc)
 		require.NoError(t, err)
 		assert.Equal(t, customValidator, v)
@@ -465,7 +466,7 @@ func TestRegistry_ErrorCases(t *testing.T) {
 			loader.Embedded("bad.json", invalidSchemaData),
 		)
 
-		doc := yamltest.FirstDocument(t, yamltest.Input(`key: value`))
+		doc := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
 		_, err := reg.Lookup(t.Context(), doc)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "compile schema")
@@ -490,7 +491,7 @@ func TestRegistry_MultipleDocuments(t *testing.T) {
 		loader.Embedded("service.json", serviceSchema),
 	)
 
-	input := yamltest.Input(`
+	input := stringtest.Input(`
 		kind: Deployment
 		---
 		kind: Service

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
@@ -19,17 +20,17 @@ func TestContent(t *testing.T) {
 	}{
 		"single condition match": {
 			value: "Deployment",
-			input: yamltest.Input(`kind: Deployment`),
+			input: stringtest.Input(`kind: Deployment`),
 			want:  true,
 		},
 		"single condition no match": {
 			value: "Deployment",
-			input: yamltest.Input(`kind: Service`),
+			input: stringtest.Input(`kind: Service`),
 			want:  false,
 		},
 		"missing field": {
 			value: "value",
-			input: yamltest.Input(`kind: Deployment`),
+			input: stringtest.Input(`kind: Deployment`),
 			want:  false,
 		},
 	}
@@ -55,7 +56,7 @@ func TestContent(t *testing.T) {
 		t.Parallel()
 
 		m := matcher.Content(metadataName, "my-app")
-		doc := yamltest.FirstDocument(t, yamltest.Input(`
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
 			kind: Deployment
 			metadata:
 			  name: my-app
@@ -84,7 +85,7 @@ func TestContent_WithAll(t *testing.T) {
 			matcher.Content(kindPath, "Deployment"),
 			matcher.Content(apiVersionPath, "apps/v1"),
 		)
-		doc := yamltest.FirstDocument(t, yamltest.Input(`
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
 			kind: Deployment
 			apiVersion: apps/v1
 		`))
@@ -100,7 +101,7 @@ func TestContent_WithAll(t *testing.T) {
 			matcher.Content(kindPath, "Deployment"),
 			matcher.Content(apiVersionPath, "apps/v1"),
 		)
-		doc := yamltest.FirstDocument(t, yamltest.Input(`
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
 			kind: Deployment
 			apiVersion: v1
 		`))

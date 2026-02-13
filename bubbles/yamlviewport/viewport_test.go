@@ -11,6 +11,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -71,7 +72,7 @@ func TestViewport_Golden(t *testing.T) {
 	fullYAML, err := os.ReadFile("testdata/full.yaml")
 	require.NoError(t, err)
 
-	simpleYAML := yamltest.Input(`
+	simpleYAML := stringtest.Input(`
 		key: value
 		number: 42
 		bool: true
@@ -82,20 +83,20 @@ func TestViewport_Golden(t *testing.T) {
 		  child: data
 	`)
 
-	diffBeforeYAML := yamltest.Input(`
+	diffBeforeYAML := stringtest.Input(`
 		name: original
 		count: 10
 		enabled: true
 	`)
 
-	diffAfterYAML := yamltest.Input(`
+	diffAfterYAML := stringtest.Input(`
 		name: modified
 		count: 20
 		enabled: true
 		new_field: added
 	`)
 
-	wideYAML := yamltest.Input(`
+	wideYAML := stringtest.Input(`
 		short: x
 		very_long_key_name_that_requires_horizontal_scrolling: "This is a very long value that extends well beyond the viewport width and requires scrolling to see"
 		another: y
@@ -275,7 +276,7 @@ func TestViewport_Golden(t *testing.T) {
 			opts: []yamlviewport.Option{
 				yamlviewport.WithPrinter(testPrinterWithSearch()),
 			},
-			yaml: yamltest.Input(`
+			yaml: stringtest.Input(`
 				item: item_value
 				another: data
 			`),
@@ -365,7 +366,7 @@ func TestViewport_Golden(t *testing.T) {
 func TestViewport_Scrolling(t *testing.T) {
 	t.Parallel()
 
-	verticalYAML := yamltest.Input(`
+	verticalYAML := stringtest.Input(`
 		line1: a
 		line2: b
 		line3: c
@@ -378,7 +379,7 @@ func TestViewport_Scrolling(t *testing.T) {
 		line10: j
 	`)
 
-	horizontalYAML := yamltest.Input(`
+	horizontalYAML := stringtest.Input(`
 		short: x
 		very_long_line: "This is a very long value that extends beyond the viewport width"
 		another: y
@@ -571,7 +572,7 @@ func TestViewport_Scrolling(t *testing.T) {
 func TestViewport_Search(t *testing.T) {
 	t.Parallel()
 
-	yaml := yamltest.Input(`
+	yaml := stringtest.Input(`
 		item1: first
 		item2: second
 		other: third
@@ -663,17 +664,17 @@ func TestViewport_Search(t *testing.T) {
 func TestViewport_Revisions(t *testing.T) {
 	t.Parallel()
 
-	rev1 := yamltest.Input(`
+	rev1 := stringtest.Input(`
 		name: original
 		value: 10
 	`)
 
-	rev2 := yamltest.Input(`
+	rev2 := stringtest.Input(`
 		name: modified
 		value: 20
 	`)
 
-	rev3 := yamltest.Input(`
+	rev3 := stringtest.Input(`
 		name: final
 		value: 30
 		new: added
@@ -937,17 +938,17 @@ func TestViewport_Revisions(t *testing.T) {
 func TestViewport_DiffMode(t *testing.T) {
 	t.Parallel()
 
-	rev1 := yamltest.Input(`
+	rev1 := stringtest.Input(`
 		name: original
 		value: 10
 	`)
 
-	rev2 := yamltest.Input(`
+	rev2 := stringtest.Input(`
 		name: modified
 		value: 20
 	`)
 
-	rev3 := yamltest.Input(`
+	rev3 := stringtest.Input(`
 		name: final
 		value: 30
 		new: added
@@ -1115,7 +1116,7 @@ func TestViewport_DiffMode(t *testing.T) {
 func TestViewport_State(t *testing.T) {
 	t.Parallel()
 
-	lineCountYAML := yamltest.Input(`
+	lineCountYAML := stringtest.Input(`
 		line1: a
 		line2: b
 		line3: c
@@ -1262,17 +1263,17 @@ line3: c`
 func TestViewport_SetFile(t *testing.T) {
 	t.Parallel()
 
-	simpleYAML := yamltest.Input(`
+	simpleYAML := stringtest.Input(`
 		key: value
 		number: 42
 	`)
 
-	beforeYAML := yamltest.Input(`
+	beforeYAML := stringtest.Input(`
 		name: original
 		count: 10
 	`)
 
-	afterYAML := yamltest.Input(`
+	afterYAML := stringtest.Input(`
 		name: modified
 		count: 20
 		new: added
@@ -1352,7 +1353,7 @@ func TestViewport_SetFile(t *testing.T) {
 func TestViewport_Update(t *testing.T) {
 	t.Parallel()
 
-	verticalYAML := yamltest.Input(`
+	verticalYAML := stringtest.Input(`
 		line1: a
 		line2: b
 		line3: c
@@ -1365,7 +1366,7 @@ func TestViewport_Update(t *testing.T) {
 		line10: j
 	`)
 
-	wideYAML := yamltest.Input(`
+	wideYAML := stringtest.Input(`
 		short: x
 		very_long_key_name_that_requires_horizontal_scrolling: "This is a very long value that extends well beyond the viewport width and requires scrolling to see"
 		another: y
@@ -1709,7 +1710,7 @@ func TestViewport_KeyMap(t *testing.T) {
 func TestViewport_RevisionDeduplication(t *testing.T) {
 	t.Parallel()
 
-	content := yamltest.Input(`
+	content := stringtest.Input(`
 		name: same
 		value: 10
 	`)
@@ -1717,7 +1718,7 @@ func TestViewport_RevisionDeduplication(t *testing.T) {
 	sameTokens1 := lexer.Tokenize(content)
 	sameTokens2 := lexer.Tokenize(content)
 
-	differentContent := yamltest.Input(`
+	differentContent := stringtest.Input(`
 		name: different
 		value: 20
 	`)
@@ -1832,7 +1833,7 @@ func TestViewModeHunks_Golden(t *testing.T) {
 	t.Parallel()
 
 	// Base revision with multiple lines for context testing.
-	rev1YAML := yamltest.Input(`
+	rev1YAML := stringtest.Input(`
 		name: original
 		count: 10
 		enabled: true
@@ -1846,7 +1847,7 @@ func TestViewModeHunks_Golden(t *testing.T) {
 	`)
 
 	// Modified revision with changes in middle.
-	rev2YAML := yamltest.Input(`
+	rev2YAML := stringtest.Input(`
 		name: modified
 		count: 20
 		enabled: true
@@ -1860,7 +1861,7 @@ func TestViewModeHunks_Golden(t *testing.T) {
 	`)
 
 	// Third revision with additional changes.
-	rev3YAML := yamltest.Input(`
+	rev3YAML := stringtest.Input(`
 		name: final
 		count: 30
 		enabled: false
@@ -1998,7 +1999,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 	t.Parallel()
 
 	// Base revision with multiple lines for testing.
-	rev1YAML := yamltest.Input(`
+	rev1YAML := stringtest.Input(`
 		name: original
 		count: 10
 		enabled: true
@@ -2015,7 +2016,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 	`)
 
 	// Modified revision with changes.
-	rev2YAML := yamltest.Input(`
+	rev2YAML := stringtest.Input(`
 		name: modified
 		count: 20
 		enabled: true
@@ -2032,7 +2033,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 	`)
 
 	// Third revision with additional changes.
-	rev3YAML := yamltest.Input(`
+	rev3YAML := stringtest.Input(`
 		name: final
 		count: 30
 		enabled: false
@@ -2162,7 +2163,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 		"SideBySideMoreDeletions": {
 			// More deletions than insertions - placeholders on the right pane.
 			setupFunc: func(m *yamlviewport.Model) {
-				moreDeletionsBefore := yamltest.Input(`
+				moreDeletionsBefore := stringtest.Input(`
 					keep: start
 					del1: a
 					del2: b
@@ -2170,7 +2171,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 					del4: d
 					keep: end
 				`)
-				moreDeletionsAfter := yamltest.Input(`
+				moreDeletionsAfter := stringtest.Input(`
 					keep: start
 					ins1: x
 					keep: end
@@ -2188,12 +2189,12 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 		"SideBySideMoreInsertions": {
 			// More insertions than deletions - placeholders on the left pane.
 			setupFunc: func(m *yamlviewport.Model) {
-				moreInsertionsBefore := yamltest.Input(`
+				moreInsertionsBefore := stringtest.Input(`
 					keep: start
 					del1: a
 					keep: end
 				`)
-				moreInsertionsAfter := yamltest.Input(`
+				moreInsertionsAfter := stringtest.Input(`
 					keep: start
 					ins1: w
 					ins2: x
@@ -2317,13 +2318,13 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 func TestViewMode_Behavior(t *testing.T) {
 	t.Parallel()
 
-	rev1YAML := yamltest.Input(`
+	rev1YAML := stringtest.Input(`
 		name: original
 		count: 10
 		enabled: true
 	`)
 
-	rev2YAML := yamltest.Input(`
+	rev2YAML := stringtest.Input(`
 		name: modified
 		count: 20
 		enabled: true
@@ -2612,11 +2613,11 @@ func TestSideBySideSearch_MatchCounting(t *testing.T) {
 	// After:  "foo: c", "bar: b"
 	// "foo" appears on deleted + inserted lines = 2 matches.
 	// "bar" appears on equal line = 1 match.
-	beforeYAML := yamltest.Input(`
+	beforeYAML := stringtest.Input(`
 		foo: a
 		bar: b
 	`)
-	afterYAML := yamltest.Input(`
+	afterYAML := stringtest.Input(`
 		foo: c
 		bar: b
 	`)

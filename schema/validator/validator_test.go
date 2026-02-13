@@ -7,6 +7,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -505,31 +506,31 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 		wantErr bool
 	}{
 		"valid data": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				name: Kallisto
 				age: 30
 			`),
 		},
 		"missing required field": {
-			input:   yamltest.Input(`age: 30`),
+			input:   stringtest.Input(`age: 30`),
 			wantErr: true,
 		},
 		"wrong type for name": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				name: 123
 				age: 30
 			`),
 			wantErr: true,
 		},
 		"wrong type for age": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				name: Kallisto
 				age: thirty
 			`),
 			wantErr: true,
 		},
 		"invalid array item": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				name: John
 				items:
 				  - valid
@@ -539,7 +540,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 			wantErr: true,
 		},
 		"nested object validation error": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				name: Kallisto
 				nested:
 				  notValue: something
@@ -547,7 +548,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 			wantErr: true,
 		},
 		"valid array of objects": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				name: Kallisto
 				users:
 				  - id: 1
@@ -566,7 +567,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 			`),
 		},
 		"invalid object in array": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				name: Kallisto
 				users:
 				  - id: 1
@@ -583,7 +584,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 			wantErr: true,
 		},
 		"missing required field in nested object within array": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				name: Kallisto
 				users:
 				  - id: 1
@@ -594,7 +595,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 			wantErr: true,
 		},
 		"invalid preference in deeply nested array": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				name: Kallisto
 				users:
 				  - id: 1
@@ -610,7 +611,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 			wantErr: true,
 		},
 		"valid matrix (2D array)": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				name: Kallisto
 				matrix:
 				  - [1, 2, 3]
@@ -619,7 +620,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 			`),
 		},
 		"invalid element in 2D array": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				name: Kallisto
 				matrix:
 				  - [1, 2, 3]
@@ -629,7 +630,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 			wantErr: true,
 		},
 		"missing email in second user": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				name: Kallisto
 				users:
 				  - id: 1
@@ -645,14 +646,14 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 			wantErr: true,
 		},
 		"additional property at root": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				name: John
 				extraProp: not allowed
 			`),
 			wantErr: true,
 		},
 		"additional property in nested object": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				name: Kallisto
 				nested:
 				  value: valid
@@ -661,7 +662,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 			wantErr: true,
 		},
 		"additional property in array object": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				name: Kallisto
 				users:
 				  - id: 1
@@ -815,7 +816,7 @@ func TestValidator_PathTarget(t *testing.T) {
 					"name": {"type": "string"}
 				}
 			}`,
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				name: 123
 			`),
 			wantKeyErr:   false,
@@ -829,7 +830,7 @@ func TestValidator_PathTarget(t *testing.T) {
 				},
 				"additionalProperties": false
 			}`,
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				name: valid
 				extra: notAllowed
 			`),
@@ -844,7 +845,7 @@ func TestValidator_PathTarget(t *testing.T) {
 				},
 				"required": ["name"]
 			}`,
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				other: value
 			`),
 			wantKeyErr: true,
@@ -856,7 +857,7 @@ func TestValidator_PathTarget(t *testing.T) {
 					"status": {"enum": ["active", "inactive"]}
 				}
 			}`,
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				status: unknown
 			`),
 			wantKeyErr:   false,
@@ -869,7 +870,7 @@ func TestValidator_PathTarget(t *testing.T) {
 					"age": {"type": "integer", "minimum": 0}
 				}
 			}`,
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				age: -5
 			`),
 			wantKeyErr:   false,
@@ -882,7 +883,7 @@ func TestValidator_PathTarget(t *testing.T) {
 					"email": {"type": "string", "pattern": "^[a-z]+@[a-z]+\\.[a-z]+$"}
 				}
 			}`,
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				email: notanemail
 			`),
 			wantKeyErr:   false,
@@ -895,7 +896,7 @@ func TestValidator_PathTarget(t *testing.T) {
 					"items": {"type": "array", "minItems": 2}
 				}
 			}`,
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				items:
 				  - one
 			`),
@@ -909,7 +910,7 @@ func TestValidator_PathTarget(t *testing.T) {
 					"items": {"type": "array", "maxItems": 1}
 				}
 			}`,
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				items:
 				  - one
 				  - two
@@ -929,7 +930,7 @@ func TestValidator_PathTarget(t *testing.T) {
 					}
 				}
 			}`,
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				user:
 				  age: notanumber
 			`),
@@ -946,7 +947,7 @@ func TestValidator_PathTarget(t *testing.T) {
 					}
 				}
 			}`,
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				numbers:
 				  - 1
 				  - notanumber
@@ -1049,7 +1050,7 @@ func TestValidator_SubErrorAnnotations(t *testing.T) {
 					"name": {"type": "string"}
 				}
 			}`,
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				name: 123
 			`),
 			wantAnnotations:  []string{"got number, want string"},
@@ -1064,7 +1065,7 @@ func TestValidator_SubErrorAnnotations(t *testing.T) {
 				},
 				"required": ["first", "second"]
 			}`,
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				other: value
 			`),
 			wantAnnotations:  []string{"missing properties", "first", "second"},
@@ -1082,7 +1083,7 @@ func TestValidator_SubErrorAnnotations(t *testing.T) {
 					}
 				}
 			}`,
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				user:
 				  age: notanumber
 			`),

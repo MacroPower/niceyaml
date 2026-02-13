@@ -10,6 +10,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -34,13 +35,13 @@ func trimLines(s string) string {
 		lines[i] = strings.TrimRight(line, " \t")
 	}
 
-	return yamltest.JoinLF(lines...)
+	return stringtest.JoinLF(lines...)
 }
 
 func TestError(t *testing.T) {
 	t.Parallel()
 
-	source := yamltest.Input(`
+	source := stringtest.Input(`
 		a: b
 		foo: bar
 		key: value
@@ -70,7 +71,7 @@ func TestError(t *testing.T) {
 					niceyaml.WithStyle(lipgloss.NewStyle()),
 				)),
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"[3:1] invalid value:",
 				"",
 				"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>b</literalString>",
@@ -88,7 +89,7 @@ func TestError(t *testing.T) {
 					niceyaml.WithStyle(lipgloss.NewStyle()),
 				)),
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"[1:1] bad token:",
 				"",
 				"<genericError>a</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>b</literalString>",
@@ -112,7 +113,7 @@ func TestError(t *testing.T) {
 func TestSourceWrapError(t *testing.T) {
 	t.Parallel()
 
-	sourceInput := yamltest.Input(`
+	sourceInput := stringtest.Input(`
 		name: test
 		value: 123
 	`)
@@ -154,7 +155,7 @@ func TestSourceWrapError(t *testing.T) {
 					niceyaml.WithPath(paths.Root().Child("name").Key()),
 				)
 			},
-			wantExact: yamltest.JoinLF(
+			wantExact: stringtest.JoinLF(
 				"[1:1] test error:",
 				"",
 				"<genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
@@ -307,13 +308,13 @@ func TestErrorAnnotation(t *testing.T) {
 		sourceLines int
 	}{
 		"nested path shows correct key": {
-			source: yamltest.Input(`
+			source: stringtest.Input(`
 				foo:
 				  bar: value
 			`),
 			path:   paths.Root().Child("foo", "bar").Key(),
 			errMsg: "nested error",
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"[2:3] nested error:",
 				"",
 				"<nameTag>foo</nameTag><punctuationMappingValue>:</punctuationMappingValue>",
@@ -321,14 +322,14 @@ func TestErrorAnnotation(t *testing.T) {
 			),
 		},
 		"array element path - first item": {
-			source: yamltest.Input(`
+			source: stringtest.Input(`
 				items:
 				  - first
 				  - second
 			`),
 			path:   paths.Root().Child("items").Index(0).Key(),
 			errMsg: "array error",
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"[2:5] array error:",
 				"",
 				"<nameTag>items</nameTag><punctuationMappingValue>:</punctuationMappingValue>",
@@ -337,14 +338,14 @@ func TestErrorAnnotation(t *testing.T) {
 			),
 		},
 		"array element path - nested object in array": {
-			source: yamltest.Input(`
+			source: stringtest.Input(`
 				users:
 				  - name: alice
 				    age: 30
 			`),
 			path:   paths.Root().Child("users").Index(0).Child("name").Key(),
 			errMsg: "nested array error",
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"[2:5] nested array error:",
 				"",
 				"<nameTag>users</nameTag><punctuationMappingValue>:</punctuationMappingValue>",
@@ -356,7 +357,7 @@ func TestErrorAnnotation(t *testing.T) {
 			source: "key: value",
 			path:   paths.Root().Key(),
 			errMsg: "root error",
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"[1:4] root error:",
 				"",
 				"<nameTag>key</nameTag><genericError>:</genericError><text> </text><literalString>value</literalString>",
@@ -366,14 +367,14 @@ func TestErrorAnnotation(t *testing.T) {
 			source: "key: value",
 			path:   paths.Root().Child("key").Key(),
 			errMsg: "top level error",
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"[1:1] top level error:",
 				"",
 				"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
 			),
 		},
 		"with custom source lines": {
-			source: yamltest.Input(`
+			source: stringtest.Input(`
 				line1: a
 				line2: b
 				line3: c
@@ -383,7 +384,7 @@ func TestErrorAnnotation(t *testing.T) {
 			path:        paths.Root().Child("line3").Key(),
 			errMsg:      "middle error",
 			sourceLines: 1,
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"[3:1] middle error:",
 				"",
 				"<nameTag>line2</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>b</literalString>",
@@ -438,20 +439,20 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 			source: "key: value",
 			path:   paths.Root().Child("key").Value(),
 			errMsg: "invalid value",
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"[1:6] invalid value:",
 				"",
 				"<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>value</genericError>",
 			),
 		},
 		"nested path with value target": {
-			source: yamltest.Input(`
+			source: stringtest.Input(`
 				foo:
 				  bar: nested_value
 			`),
 			path:   paths.Root().Child("foo", "bar").Value(),
 			errMsg: "nested value error",
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"[2:8] nested value error:",
 				"",
 				"<nameTag>foo</nameTag><punctuationMappingValue>:</punctuationMappingValue>",
@@ -460,14 +461,14 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 		},
 		"array element works same as key target": {
 			// Array elements don't have keys, so both targets return the value token.
-			source: yamltest.Input(`
+			source: stringtest.Input(`
 				items:
 				  - first
 				  - second
 			`),
 			path:   paths.Root().Child("items").Index(0).Value(),
 			errMsg: "array error",
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"[2:5] array error:",
 				"",
 				"<nameTag>items</nameTag><punctuationMappingValue>:</punctuationMappingValue>",
@@ -496,7 +497,7 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 func TestWithPrinter(t *testing.T) {
 	t.Parallel()
 
-	source := yamltest.Input(`
+	source := stringtest.Input(`
 		key: value
 		foo: bar
 	`)
@@ -514,7 +515,7 @@ func TestWithPrinter(t *testing.T) {
 		niceyaml.WithPrinter(customPrinter),
 	)
 
-	want := yamltest.JoinLF(
+	want := stringtest.JoinLF(
 		"[1:1] test error:",
 		"",
 		"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
@@ -542,14 +543,14 @@ func TestError_SpecialParentContext(t *testing.T) {
 	}{
 		"root level array - parent is SequenceNode": {
 			// Tests findKeyToken returning nil when parent is not a MappingValueNode.
-			source: yamltest.Input(`
+			source: stringtest.Input(`
 				- first
 				- second
 				- third
 			`),
 			path:   paths.Root().Index(1).Key(),
 			errMsg: "array element error",
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"[2:3] array element error:",
 				"",
 				"<punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><literalString>first</literalString>",
@@ -559,13 +560,13 @@ func TestError_SpecialParentContext(t *testing.T) {
 		},
 		"document root - parent is nil": {
 			// Tests findKeyToken returning nil when there's no parent.
-			source: yamltest.Input(`
+			source: stringtest.Input(`
 				key: value
 				another: line
 			`),
 			path:   paths.Root().Key(),
 			errMsg: "document root error",
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"[1:4] document root error:",
 				"",
 				"<nameTag>key</nameTag><genericError>:</genericError><text> </text><literalString>value</literalString>",
@@ -696,7 +697,7 @@ func TestError_MultiError(t *testing.T) {
 	t.Run("single nested error with path", func(t *testing.T) {
 		t.Parallel()
 
-		source := yamltest.Input(`
+		source := stringtest.Input(`
 			name: test
 			value: 123
 			other: data
@@ -726,7 +727,7 @@ func TestError_MultiError(t *testing.T) {
 	t.Run("multiple nested errors on different lines", func(t *testing.T) {
 		t.Parallel()
 
-		source := yamltest.Input(`
+		source := stringtest.Input(`
 			name: test
 			value: 123
 			other: data
@@ -759,7 +760,7 @@ func TestError_MultiError(t *testing.T) {
 	t.Run("multiple nested errors on same line", func(t *testing.T) {
 		t.Parallel()
 
-		source := yamltest.Input(`
+		source := stringtest.Input(`
 			key: value
 		`)
 		tokens := lexer.Tokenize(source)
@@ -790,7 +791,7 @@ func TestError_MultiError(t *testing.T) {
 	t.Run("nested error with direct token", func(t *testing.T) {
 		t.Parallel()
 
-		source := yamltest.Input(`
+		source := stringtest.Input(`
 			key: value
 			foo: bar
 		`)
@@ -830,7 +831,7 @@ func TestError_MultiError(t *testing.T) {
 	t.Run("failed nested resolution is skipped silently", func(t *testing.T) {
 		t.Parallel()
 
-		source := yamltest.Input(`
+		source := stringtest.Input(`
 			key: value
 		`)
 
@@ -869,7 +870,7 @@ func TestError_MultiError(t *testing.T) {
 
 		got := err.Error()
 
-		want := yamltest.JoinLF(
+		want := stringtest.JoinLF(
 			"main error",
 			"  • nested 1",
 			"  • nested 2",
@@ -880,7 +881,7 @@ func TestError_MultiError(t *testing.T) {
 	t.Run("nested error without path or token is skipped", func(t *testing.T) {
 		t.Parallel()
 
-		source := yamltest.Input(`
+		source := stringtest.Input(`
 			key: value
 		`)
 
@@ -941,7 +942,7 @@ func TestError_MultiError(t *testing.T) {
 	t.Run("nested-only error renders with annotations", func(t *testing.T) {
 		t.Parallel()
 
-		source := yamltest.Input(`
+		source := stringtest.Input(`
 			name: test
 			value: 123
 		`)
@@ -989,7 +990,7 @@ func TestError_MultiError(t *testing.T) {
 		got := err.Error()
 
 		// Should fall back to plain bullet format since no source is available.
-		want := yamltest.JoinLF(
+		want := stringtest.JoinLF(
 			"validation failed",
 			"  • nested error",
 		)
@@ -999,7 +1000,7 @@ func TestError_MultiError(t *testing.T) {
 	t.Run("nested-only error with multiple lines", func(t *testing.T) {
 		t.Parallel()
 
-		source := yamltest.Input(`
+		source := stringtest.Input(`
 			name: test
 			value: 123
 			other: data
@@ -1035,7 +1036,7 @@ func TestError_MultiError(t *testing.T) {
 	t.Run("nested-only error with resolvable and unresolvable nested errors", func(t *testing.T) {
 		t.Parallel()
 
-		source := yamltest.Input(`
+		source := stringtest.Input(`
 			name: test
 			value: 123
 		`)
@@ -1068,7 +1069,7 @@ func TestError_MultiError(t *testing.T) {
 	t.Run("nested-only error with nested error that has no path or token", func(t *testing.T) {
 		t.Parallel()
 
-		source := yamltest.Input(`
+		source := stringtest.Input(`
 			name: test
 			value: 123
 		`)
@@ -1086,7 +1087,7 @@ func TestError_MultiError(t *testing.T) {
 		got := err.Error()
 
 		// Should fall back to plain bullet format.
-		want := yamltest.JoinLF(
+		want := stringtest.JoinLF(
 			"validation failed",
 			"  • nested without location",
 		)
@@ -1109,7 +1110,7 @@ func TestError_hasNestedPaths(t *testing.T) {
 		)
 	}
 
-	source := yamltest.Input(`
+	source := stringtest.Input(`
 		key: value
 		other: data
 	`)
@@ -1137,7 +1138,7 @@ func TestError_hasNestedPaths(t *testing.T) {
 				),
 			),
 			wantYAML: false,
-			wantBullet: yamltest.JoinLF(
+			wantBullet: stringtest.JoinLF(
 				"main error",
 				"  • nested 1",
 				"  • nested 2",
@@ -1237,7 +1238,7 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 	t.Run("single nested error shows correct context lines", func(t *testing.T) {
 		t.Parallel()
 
-		source := yamltest.Input(`
+		source := stringtest.Input(`
 			line1: a
 			line2: b
 			line3: c
@@ -1270,7 +1271,7 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 	t.Run("multiple nested errors on different lines expands range", func(t *testing.T) {
 		t.Parallel()
 
-		source := yamltest.Input(`
+		source := stringtest.Input(`
 			line1: a
 			line2: b
 			line3: c
@@ -1308,7 +1309,7 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 	t.Run("nested errors on same line do not expand range", func(t *testing.T) {
 		t.Parallel()
 
-		source := yamltest.Input(`
+		source := stringtest.Input(`
 			line1: a
 			line2: b
 			line3: c
@@ -1354,7 +1355,7 @@ func TestError_HunkDisplay(t *testing.T) {
 		t.Parallel()
 
 		// Create a source with many lines.
-		source := yamltest.Input(`
+		source := stringtest.Input(`
 			line1: a
 			line2: b
 			line3: c
@@ -1404,7 +1405,7 @@ func TestError_HunkDisplay(t *testing.T) {
 	t.Run("close errors merge into single hunk", func(t *testing.T) {
 		t.Parallel()
 
-		source := yamltest.Input(`
+		source := stringtest.Input(`
 			line1: a
 			line2: b
 			line3: c
@@ -1443,7 +1444,7 @@ func TestError_HunkDisplay(t *testing.T) {
 	t.Run("nested-only distant errors show separate hunks", func(t *testing.T) {
 		t.Parallel()
 
-		source := yamltest.Input(`
+		source := stringtest.Input(`
 			line1: a
 			line2: b
 			line3: c
@@ -1486,7 +1487,7 @@ func TestError_HunkDisplay(t *testing.T) {
 	t.Run("errors at start and end of file", func(t *testing.T) {
 		t.Parallel()
 
-		source := yamltest.Input(`
+		source := stringtest.Input(`
 			first: value
 			middle1: a
 			middle2: b
@@ -1528,7 +1529,7 @@ func TestError_HunkDisplay(t *testing.T) {
 	t.Run("main error and nested in different hunks", func(t *testing.T) {
 		t.Parallel()
 
-		source := yamltest.Input(`
+		source := stringtest.Input(`
 			line1: a
 			line2: b
 			line3: c
@@ -1570,7 +1571,7 @@ func TestError_HunkDisplay(t *testing.T) {
 	t.Run("adjacent errors with no context merge into single hunk", func(t *testing.T) {
 		t.Parallel()
 
-		source := yamltest.Input(`
+		source := stringtest.Input(`
 			line1: a
 			line2: b
 			line3: c
@@ -1609,7 +1610,7 @@ func TestError_SetWidth(t *testing.T) {
 	t.Parallel()
 
 	// Create YAML with a long value that will need wrapping.
-	source := yamltest.Input(`
+	source := stringtest.Input(`
 		key: this is a very long value that should wrap when width is limited to a small number
 	`)
 	tokens := lexer.Tokenize(source)
@@ -1671,7 +1672,7 @@ func TestError_SetWidth(t *testing.T) {
 func TestError_SetWidth_WithCustomPrinter(t *testing.T) {
 	t.Parallel()
 
-	source := yamltest.Input(`
+	source := stringtest.Input(`
 		key: this is a very long value that should wrap when width is limited
 	`)
 	tokens := lexer.Tokenize(source)
@@ -1709,7 +1710,7 @@ func TestError_SetWidth_WithCustomPrinter(t *testing.T) {
 func TestError_SetWidth_DefaultPrinter(t *testing.T) {
 	t.Parallel()
 
-	source := yamltest.Input(`
+	source := stringtest.Input(`
 		key: this is a very long value that should wrap when width is limited
 	`)
 	tokens := lexer.Tokenize(source)
@@ -1739,7 +1740,7 @@ func TestError_SetWidth_DefaultPrinter(t *testing.T) {
 func TestError_SetWidth_AnnotationWrapping(t *testing.T) {
 	t.Parallel()
 
-	source := yamltest.Input(`
+	source := stringtest.Input(`
 		key: value
 		other: data
 	`)
@@ -1752,7 +1753,7 @@ func TestError_SetWidth_AnnotationWrapping(t *testing.T) {
 		"long annotation wraps at narrow width": {
 			width:        40,
 			nestedErrMsg: "this is a very long error message that should definitely wrap when the width is limited",
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"[1:1] validation failed:",
 				"",
 				"key: value",
@@ -1765,7 +1766,7 @@ func TestError_SetWidth_AnnotationWrapping(t *testing.T) {
 		"annotation does not wrap when width is 0": {
 			width:        0,
 			nestedErrMsg: "this is a very long error message that should not wrap",
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"[1:1] validation failed:",
 				"",
 				"key: value",
@@ -1776,7 +1777,7 @@ func TestError_SetWidth_AnnotationWrapping(t *testing.T) {
 		"short annotation fits on single line": {
 			width:        80,
 			nestedErrMsg: "short error",
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"[1:1] validation failed:",
 				"",
 				"key: value",
@@ -1818,7 +1819,7 @@ func TestError_SetWidth_AnnotationWrapping(t *testing.T) {
 func TestError_SetWidth_MultipleAnnotationsWrapping(t *testing.T) {
 	t.Parallel()
 
-	source := yamltest.Input(`
+	source := stringtest.Input(`
 		name: test
 		value: 123
 		other: data
@@ -1848,7 +1849,7 @@ func TestError_SetWidth_MultipleAnnotationsWrapping(t *testing.T) {
 
 	got := trimLines(err.Error())
 
-	want := yamltest.JoinLF(
+	want := stringtest.JoinLF(
 		"validation failed at 2 locations:",
 		"",
 		"name: test",
@@ -1865,7 +1866,7 @@ func TestError_SetWidth_MultipleAnnotationsWrapping(t *testing.T) {
 func TestError_SetWidth_CombinedAnnotationsOnSameLine(t *testing.T) {
 	t.Parallel()
 
-	source := yamltest.Input(`
+	source := stringtest.Input(`
 		key: value
 	`)
 
@@ -1894,7 +1895,7 @@ func TestError_SetWidth_CombinedAnnotationsOnSameLine(t *testing.T) {
 
 	got := trimLines(err.Error())
 
-	want := yamltest.JoinLF(
+	want := stringtest.JoinLF(
 		"[1:1] validation failed:",
 		"",
 		"key: value",

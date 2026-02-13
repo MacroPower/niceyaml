@@ -5,9 +5,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
 )
 
@@ -27,7 +27,7 @@ func TestDiffer_Full(t *testing.T) {
 		"simple insertion": {
 			before: "a: 1\n",
 			after:  "a: 1\nb: 2\n",
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 | a: 1",
 				"   2 | b: 2",
 			),
@@ -35,7 +35,7 @@ func TestDiffer_Full(t *testing.T) {
 		"simple deletion": {
 			before: "a: 1\nb: 2\n",
 			after:  "a: 1\n",
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 | a: 1",
 				"   2 | b: 2",
 			),
@@ -43,7 +43,7 @@ func TestDiffer_Full(t *testing.T) {
 		"modification": {
 			before: "key: old\n",
 			after:  "key: new\n",
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 | key: old",
 				"   1 | key: new",
 			),
@@ -66,7 +66,7 @@ func TestDiffer_Full(t *testing.T) {
 		"multi-line modification": {
 			before: "first: 1\nsecond: 2\nthird: 3\n",
 			after:  "first: 1\nsecond: changed\nthird: 3\n",
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 | first: 1",
 				"   2 | second: 2",
 				"   2 | second: changed",
@@ -74,7 +74,7 @@ func TestDiffer_Full(t *testing.T) {
 			),
 		},
 		"change with surrounding context": {
-			before: yamltest.Input(`
+			before: stringtest.Input(`
 				header: value
 				unchanged1: foo
 				unchanged2: bar
@@ -83,7 +83,7 @@ func TestDiffer_Full(t *testing.T) {
 				unchanged4: qux
 				footer: end
 			`),
-			after: yamltest.Input(`
+			after: stringtest.Input(`
 				header: value
 				unchanged1: foo
 				unchanged2: bar
@@ -92,7 +92,7 @@ func TestDiffer_Full(t *testing.T) {
 				unchanged4: qux
 				footer: end
 			`),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 | header: value",
 				"   2 | unchanged1: foo",
 				"   3 | unchanged2: bar",
@@ -104,21 +104,21 @@ func TestDiffer_Full(t *testing.T) {
 			),
 		},
 		"multiple scattered changes": {
-			before: yamltest.Input(`
+			before: stringtest.Input(`
 				first: 1
 				second: 2
 				third: 3
 				fourth: 4
 				fifth: 5
 			`),
-			after: yamltest.Input(`
+			after: stringtest.Input(`
 				first: changed1
 				second: 2
 				third: changed3
 				fourth: 4
 				fifth: changed5
 			`),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 | first: 1",
 				"   1 | first: changed1",
 				"   2 | second: 2",
@@ -130,18 +130,18 @@ func TestDiffer_Full(t *testing.T) {
 			),
 		},
 		"consecutive insertions": {
-			before: yamltest.Input(`
+			before: stringtest.Input(`
 				before: 1
 				after: 2
 			`),
-			after: yamltest.Input(`
+			after: stringtest.Input(`
 				before: 1
 				new1: a
 				new2: b
 				new3: c
 				after: 2
 			`),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 | before: 1",
 				"   2 | new1: a",
 				"   3 | new2: b",
@@ -150,18 +150,18 @@ func TestDiffer_Full(t *testing.T) {
 			),
 		},
 		"consecutive deletions": {
-			before: yamltest.Input(`
+			before: stringtest.Input(`
 				before: 1
 				old1: a
 				old2: b
 				old3: c
 				after: 2
 			`),
-			after: yamltest.Input(`
+			after: stringtest.Input(`
 				before: 1
 				after: 2
 			`),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 | before: 1",
 				"   2 | old1: a",
 				"   3 | old2: b",
@@ -170,7 +170,7 @@ func TestDiffer_Full(t *testing.T) {
 			),
 		},
 		"nested yaml structure": {
-			before: yamltest.Input(`
+			before: stringtest.Input(`
 				metadata:
 				  name: myapp
 				  namespace: default
@@ -179,7 +179,7 @@ func TestDiffer_Full(t *testing.T) {
 				  template:
 				    image: nginx:1.19
 			`),
-			after: yamltest.Input(`
+			after: stringtest.Input(`
 				metadata:
 				  name: myapp
 				  namespace: production
@@ -188,7 +188,7 @@ func TestDiffer_Full(t *testing.T) {
 				  template:
 				    image: nginx:1.21
 			`),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 | metadata:",
 				"   2 |   name: myapp",
 				"   3 |   namespace: default",
@@ -202,19 +202,19 @@ func TestDiffer_Full(t *testing.T) {
 			),
 		},
 		"change at beginning": {
-			before: yamltest.Input(`
+			before: stringtest.Input(`
 				first: old
 				second: 2
 				third: 3
 				fourth: 4
 			`),
-			after: yamltest.Input(`
+			after: stringtest.Input(`
 				first: new
 				second: 2
 				third: 3
 				fourth: 4
 			`),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 | first: old",
 				"   1 | first: new",
 				"   2 | second: 2",
@@ -223,19 +223,19 @@ func TestDiffer_Full(t *testing.T) {
 			),
 		},
 		"change at end": {
-			before: yamltest.Input(`
+			before: stringtest.Input(`
 				first: 1
 				second: 2
 				third: 3
 				fourth: old
 			`),
-			after: yamltest.Input(`
+			after: stringtest.Input(`
 				first: 1
 				second: 2
 				third: 3
 				fourth: new
 			`),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 | first: 1",
 				"   2 | second: 2",
 				"   3 | third: 3",
@@ -244,21 +244,21 @@ func TestDiffer_Full(t *testing.T) {
 			),
 		},
 		"yaml with list items": {
-			before: yamltest.Input(`
+			before: stringtest.Input(`
 				items:
 				  - name: item1
 				    value: 100
 				  - name: item2
 				    value: 200
 			`),
-			after: yamltest.Input(`
+			after: stringtest.Input(`
 				items:
 				  - name: item1
 				    value: 150
 				  - name: item2
 				    value: 200
 			`),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 | items:",
 				"   2 |   - name: item1",
 				"   3 |     value: 100",
@@ -268,19 +268,19 @@ func TestDiffer_Full(t *testing.T) {
 			),
 		},
 		"insert and delete in same region": {
-			before: yamltest.Input(`
+			before: stringtest.Input(`
 				keep1: a
 				delete1: x
 				delete2: y
 				keep2: b
 			`),
-			after: yamltest.Input(`
+			after: stringtest.Input(`
 				keep1: a
 				insert1: p
 				insert2: q
 				keep2: b
 			`),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 | keep1: a",
 				"   2 | delete1: x",
 				"   3 | delete2: y",
@@ -290,7 +290,7 @@ func TestDiffer_Full(t *testing.T) {
 			),
 		},
 		"large context around small change": {
-			before: yamltest.Input(`
+			before: stringtest.Input(`
 				line1: 1
 				line2: 2
 				line3: 3
@@ -307,7 +307,7 @@ func TestDiffer_Full(t *testing.T) {
 				line14: 14
 				line15: 15
 			`),
-			after: yamltest.Input(`
+			after: stringtest.Input(`
 				line1: 1
 				line2: 2
 				line3: 3
@@ -324,7 +324,7 @@ func TestDiffer_Full(t *testing.T) {
 				line14: 14
 				line15: 15
 			`),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 | line1: 1",
 				"   2 | line2: 2",
 				"   3 | line3: 3",
@@ -400,12 +400,12 @@ func TestDiffer_Full_Flags(t *testing.T) {
 			},
 		},
 		"only changed lines get flags": {
-			before: yamltest.Input(`
+			before: stringtest.Input(`
 				first: 1
 				second: 2
 				third: 3
 			`),
-			after: yamltest.Input(`
+			after: stringtest.Input(`
 				first: 1
 				second: changed
 				third: 3
@@ -462,7 +462,7 @@ func TestDiffer_Hunks(t *testing.T) {
 		annotations map[int]string
 	}{
 		"context limits output": {
-			before: yamltest.Input(`
+			before: stringtest.Input(`
 				line1: 1
 				line2: 2
 				line3: 3
@@ -473,7 +473,7 @@ func TestDiffer_Hunks(t *testing.T) {
 				line8: 8
 				line9: 9
 			`),
-			after: yamltest.Input(`
+			after: stringtest.Input(`
 				line1: 1
 				line2: 2
 				line3: 3
@@ -496,14 +496,14 @@ func TestDiffer_Hunks(t *testing.T) {
 			annotations: map[int]string{3: "@@ -4,3 +4,3 @@"},
 		},
 		"context 0 shows only changes": {
-			before: yamltest.Input(`
+			before: stringtest.Input(`
 				line1: 1
 				line2: 2
 				line3: old
 				line4: 4
 				line5: 5
 			`),
-			after: yamltest.Input(`
+			after: stringtest.Input(`
 				line1: 1
 				line2: 2
 				line3: new
@@ -526,12 +526,12 @@ func TestDiffer_Hunks(t *testing.T) {
 			wantRanges: 0,
 		},
 		"negative context treated as zero": {
-			before: yamltest.Input(`
+			before: stringtest.Input(`
 				line1: 1
 				line2: old
 				line3: 3
 			`),
-			after: yamltest.Input(`
+			after: stringtest.Input(`
 				line1: 1
 				line2: new
 				line3: 3
@@ -749,11 +749,11 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 			wantRowLen: 1,
 		},
 		"consecutive insertions": {
-			before: yamltest.Input(`
+			before: stringtest.Input(`
 				before: 1
 				after: 2
 			`),
-			after: yamltest.Input(`
+			after: stringtest.Input(`
 				before: 1
 				new1: a
 				new2: b
@@ -774,13 +774,13 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 			wantRowLen: 4,
 		},
 		"consecutive deletions": {
-			before: yamltest.Input(`
+			before: stringtest.Input(`
 				before: 1
 				old1: a
 				old2: b
 				after: 2
 			`),
-			after: yamltest.Input(`
+			after: stringtest.Input(`
 				before: 1
 				after: 2
 			`),
@@ -799,13 +799,13 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 			wantRowLen: 4,
 		},
 		"mixed changes": {
-			before: yamltest.Input(`
+			before: stringtest.Input(`
 				keep1: a
 				delete1: x
 				delete2: y
 				keep2: b
 			`),
-			after: yamltest.Input(`
+			after: stringtest.Input(`
 				keep1: a
 				insert1: p
 				insert2: q
@@ -827,14 +827,14 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 		},
 		"unbalanced delete insert": {
 			// More deletes than inserts: extra rows for placeholders.
-			before: yamltest.Input(`
+			before: stringtest.Input(`
 				keep: 1
 				del1: a
 				del2: b
 				del3: c
 				end: 2
 			`),
-			after: yamltest.Input(`
+			after: stringtest.Input(`
 				keep: 1
 				ins1: x
 				end: 2
@@ -857,12 +857,12 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 		},
 		"unbalanced insert delete": {
 			// More inserts than deletes.
-			before: yamltest.Input(`
+			before: stringtest.Input(`
 				keep: 1
 				del1: a
 				end: 2
 			`),
-			after: yamltest.Input(`
+			after: stringtest.Input(`
 				keep: 1
 				ins1: x
 				ins2: y
@@ -966,14 +966,14 @@ func verifyLines(t *testing.T, side string, actual []line.Line, want []wantLine)
 func TestDiffer_MultipleRenders(t *testing.T) {
 	t.Parallel()
 
-	before := yamltest.Input(`
+	before := stringtest.Input(`
 		line1: 1
 		line2: 2
 		line3: old
 		line4: 4
 		line5: 5
 	`)
-	after := yamltest.Input(`
+	after := stringtest.Input(`
 		line1: 1
 		line2: 2
 		line3: new

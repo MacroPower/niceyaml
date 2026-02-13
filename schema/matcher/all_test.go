@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/filepaths"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -22,7 +23,7 @@ func TestAll(t *testing.T) {
 			matcher.Content(kindPath, "Deployment"),
 			matcher.FilePath(k8sPattern),
 		)
-		doc := yamltest.FirstDocumentWithPath(t, yamltest.Input(`kind: Deployment`), "deploy/k8s/app.yaml")
+		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`kind: Deployment`), "deploy/k8s/app.yaml")
 
 		got := m.Match(t.Context(), doc)
 		assert.True(t, got)
@@ -35,7 +36,7 @@ func TestAll(t *testing.T) {
 			matcher.Content(kindPath, "Deployment"),
 			matcher.FilePath(k8sPattern),
 		)
-		doc := yamltest.FirstDocumentWithPath(t, yamltest.Input(`kind: Deployment`), "deploy/other/app.yaml")
+		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`kind: Deployment`), "deploy/other/app.yaml")
 
 		got := m.Match(t.Context(), doc)
 		assert.False(t, got)
@@ -48,7 +49,7 @@ func TestAll(t *testing.T) {
 			matcher.Content(kindPath, "Deployment"),
 			matcher.FilePath(k8sPattern),
 		)
-		doc := yamltest.FirstDocumentWithPath(t, yamltest.Input(`kind: Service`), "deploy/k8s/app.yaml")
+		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`kind: Service`), "deploy/k8s/app.yaml")
 
 		got := m.Match(t.Context(), doc)
 		assert.False(t, got)
@@ -61,7 +62,7 @@ func TestAll(t *testing.T) {
 			matcher.Content(kindPath, "Deployment"),
 			matcher.FilePath(k8sPattern),
 		)
-		doc := yamltest.FirstDocumentWithPath(t, yamltest.Input(`kind: Service`), "deploy/other/app.yaml")
+		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`kind: Service`), "deploy/other/app.yaml")
 
 		got := m.Match(t.Context(), doc)
 		assert.False(t, got)
@@ -71,7 +72,7 @@ func TestAll(t *testing.T) {
 		t.Parallel()
 
 		m := matcher.All()
-		doc := yamltest.FirstDocument(t, yamltest.Input(`kind: Deployment`))
+		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
 
 		got := m.Match(t.Context(), doc)
 		assert.True(t, got)

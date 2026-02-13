@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
@@ -16,10 +17,10 @@ func TestAlways(t *testing.T) {
 		input string
 	}{
 		"simple document": {
-			input: yamltest.Input(`kind: Test`),
+			input: stringtest.Input(`kind: Test`),
 		},
 		"complex document": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				apiVersion: v1
 				kind: ConfigMap
 				metadata:
@@ -29,7 +30,7 @@ func TestAlways(t *testing.T) {
 			`),
 		},
 		"empty document": {
-			input: yamltest.Input(`{}`),
+			input: stringtest.Input(`{}`),
 		},
 	}
 

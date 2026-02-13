@@ -7,6 +7,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema"
@@ -93,14 +94,14 @@ func TestParseDocumentDirectives(t *testing.T) {
 		want  map[int]string
 	}{
 		"single document with directive": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				# yaml-language-server: $schema=./schema.json
 				key: value
 			`),
 			want: map[int]string{0: "./schema.json"},
 		},
 		"single document without directive": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				# just a comment
 				key: value
 			`),
@@ -115,14 +116,14 @@ func TestParseDocumentDirectives(t *testing.T) {
 			want:  map[int]string{0: "./schema.json"},
 		},
 		"directive after content is ignored": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				key: value
 				# yaml-language-server: $schema=./schema.json
 			`),
 			want: map[int]string{},
 		},
 		"multi-document with directives in each": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				# yaml-language-server: $schema=./schema1.json
 				doc1: data
 				---
@@ -135,7 +136,7 @@ func TestParseDocumentDirectives(t *testing.T) {
 			},
 		},
 		"multi-document with directive only in first": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				# yaml-language-server: $schema=./schema.json
 				doc1: data
 				---
@@ -144,7 +145,7 @@ func TestParseDocumentDirectives(t *testing.T) {
 			want: map[int]string{0: "./schema.json"},
 		},
 		"multi-document with directive only in second": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				doc1: data
 				---
 				# yaml-language-server: $schema=./schema.json
@@ -153,7 +154,7 @@ func TestParseDocumentDirectives(t *testing.T) {
 			want: map[int]string{1: "./schema.json"},
 		},
 		"multi-document with directive only in middle": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				doc1: data
 				---
 				# yaml-language-server: $schema=./schema.json
@@ -164,7 +165,7 @@ func TestParseDocumentDirectives(t *testing.T) {
 			want: map[int]string{1: "./schema.json"},
 		},
 		"three documents with different schemas": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				# yaml-language-server: $schema=./a.json
 				a: 1
 				---
@@ -181,7 +182,7 @@ func TestParseDocumentDirectives(t *testing.T) {
 			},
 		},
 		"directive with comment before it": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				# Some description
 				# yaml-language-server: $schema=./schema.json
 				key: value
@@ -189,7 +190,7 @@ func TestParseDocumentDirectives(t *testing.T) {
 			want: map[int]string{0: "./schema.json"},
 		},
 		"first directive wins": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				# yaml-language-server: $schema=./first.json
 				# yaml-language-server: $schema=./second.json
 				key: value
@@ -197,7 +198,7 @@ func TestParseDocumentDirectives(t *testing.T) {
 			want: map[int]string{0: "./first.json"},
 		},
 		"explicit header in first document": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				---
 				# yaml-language-server: $schema=./schema.json
 				key: value
@@ -205,7 +206,7 @@ func TestParseDocumentDirectives(t *testing.T) {
 			want: map[int]string{0: "./schema.json"},
 		},
 		"comment between header and content": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				key1: value1
 				---
 				# yaml-language-server: $schema=./schema.json

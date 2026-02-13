@@ -10,6 +10,7 @@ import (
 	"github.com/goccy/go-yaml/lexer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -93,7 +94,7 @@ func testFinder(norm niceyaml.Normalizer) *niceyaml.Finder {
 func TestPrinter_Anchor(t *testing.T) {
 	t.Parallel()
 
-	input := yamltest.Input(`
+	input := stringtest.Input(`
 		anchor: &x 1
 		alias: *x
 	`)
@@ -149,11 +150,11 @@ func TestPrinter_AddStyleToRange(t *testing.T) {
 			),
 		},
 		"multi-line range (0-indexed)": {
-			input: yamltest.JoinLF(
+			input: stringtest.JoinLF(
 				"first: 1",
 				"second: 2",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"first: [1]",
 				"[second][:][ ]2",
 			),
@@ -231,13 +232,13 @@ func TestNewPrinter(t *testing.T) {
 			},
 		},
 		"xml styles with token types": {
-			input: yamltest.Input(`
+			input: stringtest.Input(`
 				key: value
 				number: 42
 				bool: true
 				# comment
 			`),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
 				"<nameTag>number</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>42</literalNumberInteger>",
 				"<nameTag>bool</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalBoolean>true</literalBoolean>",
@@ -282,22 +283,22 @@ func TestPrinter_LineNumbers(t *testing.T) {
 			want:  "   1 key: value",
 		},
 		"multiple lines": {
-			input: yamltest.JoinLF(
+			input: stringtest.JoinLF(
 				"key: value",
 				"number: 42",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 key: value",
 				"   2 number: 42",
 			),
 		},
 		"multi-line value": {
-			input: yamltest.JoinLF(
+			input: stringtest.JoinLF(
 				"key: |",
 				"  line1",
 				"  line2",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 key: |",
 				"   2   line1",
 				"   3   line2",
@@ -322,7 +323,7 @@ func TestPrinter_LineNumbers(t *testing.T) {
 func TestPrinter_PrintSlice(t *testing.T) {
 	t.Parallel()
 
-	input := yamltest.Input(`
+	input := stringtest.Input(`
 		first: 1
 		second: 2
 		third: 3
@@ -338,7 +339,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 		"full range": {
 			spans:  nil, // Empty variadic prints all lines.
 			gutter: niceyaml.NoGutter(),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"first: 1",
 				"second: 2",
 				"third: 3",
@@ -349,7 +350,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 		"full range with line numbers": {
 			spans:  nil,
 			gutter: niceyaml.LineNumberGutter(),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 first: 1",
 				"   2 second: 2",
 				"   3 third: 3",
@@ -360,7 +361,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 		"bounded middle": {
 			spans:  position.Spans{position.NewSpan(1, 4)},
 			gutter: niceyaml.NoGutter(),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"second: 2",
 				"third: 3",
 				"fourth: 4",
@@ -369,7 +370,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 		"bounded middle with line numbers": {
 			spans:  position.Spans{position.NewSpan(1, 4)},
 			gutter: niceyaml.LineNumberGutter(),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   2 second: 2",
 				"   3 third: 3",
 				"   4 fourth: 4",
@@ -378,7 +379,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 		"from start": {
 			spans:  position.Spans{position.NewSpan(0, 2)},
 			gutter: niceyaml.NoGutter(),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"first: 1",
 				"second: 2",
 			),
@@ -386,7 +387,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 		"to end": {
 			spans:  position.Spans{position.NewSpan(3, 5)},
 			gutter: niceyaml.NoGutter(),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"fourth: 4",
 				"fifth: 5",
 			),
@@ -412,7 +413,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 				position.NewSpan(3, 5),
 			},
 			gutter: niceyaml.NoGutter(),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"first: 1",
 				"fourth: 4",
 				"fifth: 5",
@@ -424,7 +425,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 				position.NewSpan(3, 5),
 			},
 			gutter: niceyaml.LineNumberGutter(),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 first: 1",
 				"   4 fourth: 4",
 				"   5 fifth: 5",
@@ -437,7 +438,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 				position.NewSpan(4, 5),
 			},
 			gutter: niceyaml.NoGutter(),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"first: 1",
 				"third: 3",
 				"fifth: 5",
@@ -449,7 +450,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 				position.NewSpan(2, 4),
 			},
 			gutter: niceyaml.NoGutter(),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"first: 1",
 				"second: 2",
 				"third: 3",
@@ -486,24 +487,24 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 		},
 		"simple addition": {
 			before: "key: value\n",
-			after: yamltest.JoinLF(
+			after: stringtest.JoinLF(
 				"key: value",
 				"new: line",
 				"",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1  key: value",
 				"   2 +new: line",
 			),
 		},
 		"simple deletion": {
-			before: yamltest.JoinLF(
+			before: stringtest.JoinLF(
 				"key: value",
 				"old: line",
 				"",
 			),
 			after: "key: value\n",
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1  key: value",
 				"   2 -old: line",
 			),
@@ -511,56 +512,56 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 		"modification": {
 			before: "key: old\n",
 			after:  "key: new\n",
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 -key: old",
 				"   1 +key: new",
 			),
 		},
 		"addition with context": {
-			before: yamltest.JoinLF(
+			before: stringtest.JoinLF(
 				"line1: a",
 				"line3: c",
 				"",
 			),
-			after: yamltest.JoinLF(
+			after: stringtest.JoinLF(
 				"line1: a",
 				"line2: b",
 				"line3: c",
 				"",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1  line1: a",
 				"   2 +line2: b",
 				"   3  line3: c",
 			),
 		},
 		"deletion with context": {
-			before: yamltest.JoinLF(
+			before: stringtest.JoinLF(
 				"line1: a",
 				"line2: b",
 				"line3: c",
 				"",
 			),
-			after: yamltest.JoinLF(
+			after: stringtest.JoinLF(
 				"line1: a",
 				"line3: c",
 				"",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1  line1: a",
 				"   2 -line2: b",
 				"   2  line3: c",
 			),
 		},
 		"multiline yaml modification": {
-			before: yamltest.JoinLF(
+			before: stringtest.JoinLF(
 				"apiVersion: v1",
 				"kind: Pod",
 				"metadata:",
 				"  name: test",
 				"",
 			),
-			after: yamltest.JoinLF(
+			after: stringtest.JoinLF(
 				"apiVersion: v1",
 				"kind: Pod",
 				"metadata:",
@@ -569,7 +570,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 				"    app: test",
 				"",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1  apiVersion: v1",
 				"   2  kind: Pod",
 				"   3  metadata:",
@@ -580,14 +581,14 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			),
 		},
 		"multiple scattered changes": {
-			before: yamltest.JoinLF(
+			before: stringtest.JoinLF(
 				"a: 1",
 				"b: 2",
 				"c: 3",
 				"d: 4",
 				"",
 			),
-			after: yamltest.JoinLF(
+			after: stringtest.JoinLF(
 				"a: 1",
 				"b: changed",
 				"c: 3",
@@ -595,7 +596,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 				"e: 5",
 				"",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1  a: 1",
 				"   2 -b: 2",
 				"   2 +b: changed",
@@ -646,13 +647,13 @@ func TestPrinter_PrintTokenDiff_Ordering(t *testing.T) {
 	}{
 		"deleted lines appear inline": {
 			// Test that deleted lines appear inline where they were removed.
-			before: yamltest.JoinLF(
+			before: stringtest.JoinLF(
 				"a: 1",
 				"b: 2",
 				"c: 3",
 				"",
 			),
-			after: yamltest.JoinLF(
+			after: stringtest.JoinLF(
 				"a: 1",
 				"c: 3",
 				"",
@@ -708,7 +709,7 @@ func TestPrinter_WordWrap(t *testing.T) {
 			width:    20,
 			gutter:   niceyaml.NoGutter(),
 			wordWrap: true,
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"key: this is a very",
 				"long value that",
 				"should wrap",
@@ -719,7 +720,7 @@ func TestPrinter_WordWrap(t *testing.T) {
 			width:    20,
 			gutter:   niceyaml.NoGutter(),
 			wordWrap: true,
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"path: /usr/local/",
 				"bin/something",
 			),
@@ -729,7 +730,7 @@ func TestPrinter_WordWrap(t *testing.T) {
 			width:    20,
 			gutter:   niceyaml.NoGutter(),
 			wordWrap: true,
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"name: very-long-",
 				"hyphenated-name",
 			),
@@ -742,14 +743,14 @@ func TestPrinter_WordWrap(t *testing.T) {
 			want:     "key: value",
 		},
 		"multi-line content": {
-			input: yamltest.JoinLF(
+			input: stringtest.JoinLF(
 				"key: value",
 				"another: long value that should wrap here",
 			),
 			width:    20,
 			gutter:   niceyaml.NoGutter(),
 			wordWrap: true,
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"key: value",
 				"another: long value",
 				"that should wrap",
@@ -764,13 +765,13 @@ func TestPrinter_WordWrap(t *testing.T) {
 			wordWrap: true,
 			// Wraps at word boundaries within width.
 			// Width 22 - 5 (line number gutter) = 17 for content.
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 key: this is a",
 				"   - very long value",
 			),
 		},
 		"multiple wrapped lines": {
-			input: yamltest.JoinLF(
+			input: stringtest.JoinLF(
 				"first: short",
 				"second: this is a very long line that wraps",
 			),
@@ -779,7 +780,7 @@ func TestPrinter_WordWrap(t *testing.T) {
 			wordWrap: true,
 			// First line fits, second line wraps.
 			// Width 30 - 5 (line number gutter) = 25 for content.
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 first: short",
 				"   2 second: this is a very",
 				"   - long line that wraps",
@@ -839,7 +840,7 @@ func TestPrinter_PrintTokenDiff_WithWordWrap(t *testing.T) {
 			before: "key: short\n",
 			after:  "key: this is a very long value that should wrap\n",
 			width:  30,
-			wantExact: yamltest.JoinLF(
+			wantExact: stringtest.JoinLF(
 				"-key: short",
 				"+key: this is a very long",
 				" value that should wrap",
@@ -849,7 +850,7 @@ func TestPrinter_PrintTokenDiff_WithWordWrap(t *testing.T) {
 			before: "key: original value\n",
 			after:  "key: new very long value that definitely wraps\n",
 			width:  25,
-			wantExact: yamltest.JoinLF(
+			wantExact: stringtest.JoinLF(
 				"-key: original value",
 				"+key: new very long value",
 				" that definitely wraps",
@@ -859,7 +860,7 @@ func TestPrinter_PrintTokenDiff_WithWordWrap(t *testing.T) {
 			before: "name: old-hyphenated-name-value\n",
 			after:  "name: new-hyphenated-name-value\n",
 			width:  20,
-			wantExact: yamltest.JoinLF(
+			wantExact: stringtest.JoinLF(
 				"-name: old-",
 				" hyphenated-name-",
 				" value",
@@ -901,17 +902,17 @@ func TestPrinter_PrintTokenDiff_WithLineNumbers(t *testing.T) {
 	}{
 		"modification shows correct line numbers": {
 			// Delete shows beforeLine (2), insert shows afterLine (2).
-			before: yamltest.JoinLF(
+			before: stringtest.JoinLF(
 				"key: value",
 				"old: line",
 				"",
 			),
-			after: yamltest.JoinLF(
+			after: stringtest.JoinLF(
 				"key: value",
 				"new: line",
 				"",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1  key: value",
 				"   2 -old: line",
 				"   2 +new: line",
@@ -919,18 +920,18 @@ func TestPrinter_PrintTokenDiff_WithLineNumbers(t *testing.T) {
 		},
 		"addition shows afterLine numbers": {
 			// Equal lines show afterLine, inserted line shows afterLine.
-			before: yamltest.JoinLF(
+			before: stringtest.JoinLF(
 				"a: 1",
 				"c: 3",
 				"",
 			),
-			after: yamltest.JoinLF(
+			after: stringtest.JoinLF(
 				"a: 1",
 				"b: 2",
 				"c: 3",
 				"",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1  a: 1",
 				"   2 +b: 2",
 				"   3  c: 3",
@@ -938,37 +939,37 @@ func TestPrinter_PrintTokenDiff_WithLineNumbers(t *testing.T) {
 		},
 		"deletion shows beforeLine numbers": {
 			// Equal lines show afterLine, deleted line shows beforeLine.
-			before: yamltest.JoinLF(
+			before: stringtest.JoinLF(
 				"a: 1",
 				"b: 2",
 				"c: 3",
 				"",
 			),
-			after: yamltest.JoinLF(
+			after: stringtest.JoinLF(
 				"a: 1",
 				"c: 3",
 				"",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1  a: 1",
 				"   2 -b: 2",
 				"   2  c: 3",
 			),
 		},
 		"multiple changes track line numbers correctly": {
-			before: yamltest.JoinLF(
+			before: stringtest.JoinLF(
 				"line1: a",
 				"line2: b",
 				"line3: c",
 				"",
 			),
-			after: yamltest.JoinLF(
+			after: stringtest.JoinLF(
 				"line1: x",
 				"line2: b",
 				"line3: y",
 				"",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 -line1: a",
 				"   1 +line1: x",
 				"   2  line2: b",
@@ -1024,25 +1025,25 @@ func TestPrinter_PrintTokenDiff_CustomGutter(t *testing.T) {
 		"custom inserted prefix": {
 			gutterFunc: makeGutter(">>", "-", " "),
 			before:     "key: old\n",
-			after: yamltest.JoinLF(
+			after: stringtest.JoinLF(
 				"key: old",
 				"new: line",
 				"",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				" key: old",
 				">>new: line",
 			),
 		},
 		"custom deleted prefix": {
 			gutterFunc: makeGutter("+", "<<", " "),
-			before: yamltest.JoinLF(
+			before: stringtest.JoinLF(
 				"key: old",
 				"old: line",
 				"",
 			),
 			after: "key: old\n",
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				" key: old",
 				"<<old: line",
 			),
@@ -1051,7 +1052,7 @@ func TestPrinter_PrintTokenDiff_CustomGutter(t *testing.T) {
 			gutterFunc: makeGutter("ADD:", "DEL:", "    "),
 			before:     "key: old\n",
 			after:      "key: new\n",
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"DEL:key: old",
 				"ADD:key: new",
 			),
@@ -1060,26 +1061,26 @@ func TestPrinter_PrintTokenDiff_CustomGutter(t *testing.T) {
 			gutterFunc: niceyaml.NoGutter(),
 			before:     "a: 1\n",
 			after:      "a: 2\n",
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"a: 1",
 				"a: 2",
 			),
 		},
 		"multi-character prefixes with context": {
 			gutterFunc: makeGutter("[+]", "[-]", "   "),
-			before: yamltest.JoinLF(
+			before: stringtest.JoinLF(
 				"line1: a",
 				"line2: b",
 				"line3: c",
 				"",
 			),
-			after: yamltest.JoinLF(
+			after: stringtest.JoinLF(
 				"line1: a",
 				"line2: x",
 				"line3: c",
 				"",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   line1: a",
 				"[-]line2: b",
 				"[+]line2: x",
@@ -1285,7 +1286,7 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			want: "key: value\n     ^ error here",
 		},
 		"below annotation on second line": {
-			input: yamltest.JoinLF(
+			input: stringtest.JoinLF(
 				"first: 1",
 				"second: 2",
 			),
@@ -1295,14 +1296,14 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 				Position: line.Below,
 				Col:      8,
 			},
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"first: 1",
 				"second: 2",
 				"        ^ note",
 			),
 		},
 		"above annotation on second line": {
-			input: yamltest.JoinLF(
+			input: stringtest.JoinLF(
 				"first: 1",
 				"second: 2",
 			),
@@ -1312,7 +1313,7 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 				Position: line.Above,
 				Col:      0,
 			},
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"first: 1",
 				"@@ -1 +1 @@",
 				"second: 2",
@@ -1365,7 +1366,7 @@ func TestPrinter_AnnotationPosition_WithGutter(t *testing.T) {
 			want: "   1 key: value\n          ^ error",
 		},
 		"below annotation with col padding and line numbers": {
-			input: yamltest.JoinLF(
+			input: stringtest.JoinLF(
 				"first: 1",
 				"second: 2",
 			),
@@ -1375,7 +1376,7 @@ func TestPrinter_AnnotationPosition_WithGutter(t *testing.T) {
 				Position: line.Below,
 				Col:      7,
 			},
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"   1 first: 1",
 				"            ^ note",
 				"   2 second: 2",
@@ -1491,41 +1492,41 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 			want:  "<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
 		},
 		"null types": {
-			input: yamltest.JoinLF(
+			input: stringtest.JoinLF(
 				"null: null",
 				"tilde: ~",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"<nameTag>null</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNull>null</literalNull>",
 				"<nameTag>tilde</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNull>~</literalNull>",
 			),
 		},
 		"boolean types": {
-			input: yamltest.JoinLF(
+			input: stringtest.JoinLF(
 				"yes: true",
 				"no: false",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"<nameTag>yes</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalBoolean>true</literalBoolean>",
 				"<nameTag>no</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalBoolean>false</literalBoolean>",
 			),
 		},
 		"number types": {
-			input: yamltest.JoinLF(
+			input: stringtest.JoinLF(
 				"int: 42",
 				"float: 3.14",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"<nameTag>int</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>42</literalNumberInteger>",
 				"<nameTag>float</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberFloat>3.14</literalNumberFloat>",
 			),
 		},
 		"anchor and alias": {
-			input: yamltest.JoinLF(
+			input: stringtest.JoinLF(
 				"anchor: &x 1",
 				"alias: *x",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"<nameTag>anchor</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><nameAnchor>&</nameAnchor><nameAnchor>x</nameAnchor><text> </text><literalNumberInteger>1</literalNumberInteger>",
 				"<nameTag>alias</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><nameAlias>*</nameAlias><nameAlias>x</nameAlias>",
 			),
@@ -1539,36 +1540,36 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 			want:  "<nameTag>tagged</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><nameDecorator>!custom </nameDecorator><literalString>value</literalString>",
 		},
 		"document markers": {
-			input: yamltest.JoinLF(
+			input: stringtest.JoinLF(
 				"---",
 				"key: value",
 				"...",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"<punctuationHeading>---</punctuationHeading>",
 				"<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
 				"<punctuationHeading>...</punctuationHeading>",
 			),
 		},
 		"directive": {
-			input: yamltest.JoinLF(
+			input: stringtest.JoinLF(
 				"%YAML 1.2",
 				"---",
 				"key: value",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"<commentPreproc>%</commentPreproc><literalString>YAML</literalString><text> </text><literalNumberFloat>1.2</literalNumberFloat>",
 				"<punctuationHeading>---</punctuationHeading>",
 				"<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
 			),
 		},
 		"block scalar": {
-			input: yamltest.JoinLF(
+			input: stringtest.JoinLF(
 				"text: |",
 				"  line1",
 				"  line2",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"<nameTag>text</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><punctuationBlockLiteral>|</punctuationBlockLiteral>",
 				"<literalString>  line1</literalString>",
 				"<literalString>  line2</literalString>",
@@ -1605,26 +1606,26 @@ func TestPrinter_PrintFile_MultiDocument(t *testing.T) {
 		want  string
 	}{
 		"two documents": {
-			input: yamltest.JoinLF(
+			input: stringtest.JoinLF(
 				"doc1: value1",
 				"---",
 				"doc2: value2",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"doc1: value1",
 				"---",
 				"doc2: value2",
 			),
 		},
 		"three documents": {
-			input: yamltest.JoinLF(
+			input: stringtest.JoinLF(
 				"first: 1",
 				"---",
 				"second: 2",
 				"---",
 				"third: 3",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"first: 1",
 				"---",
 				"second: 2",
@@ -1633,39 +1634,39 @@ func TestPrinter_PrintFile_MultiDocument(t *testing.T) {
 			),
 		},
 		"documents with header": {
-			input: yamltest.JoinLF(
+			input: stringtest.JoinLF(
 				"---",
 				"key: value",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"---",
 				"key: value",
 			),
 		},
 		"documents with footer": {
-			input: yamltest.JoinLF(
+			input: stringtest.JoinLF(
 				"key: value",
 				"...",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"key: value",
 				"...",
 			),
 		},
 		"document with header and footer": {
-			input: yamltest.JoinLF(
+			input: stringtest.JoinLF(
 				"---",
 				"key: value",
 				"...",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"---",
 				"key: value",
 				"...",
 			),
 		},
 		"multiple docs with headers and footers": {
-			input: yamltest.JoinLF(
+			input: stringtest.JoinLF(
 				"---",
 				"doc1: value1",
 				"...",
@@ -1673,7 +1674,7 @@ func TestPrinter_PrintFile_MultiDocument(t *testing.T) {
 				"doc2: value2",
 				"...",
 			),
-			want: yamltest.JoinLF(
+			want: stringtest.JoinLF(
 				"---",
 				"doc1: value1",
 				"...",
@@ -1716,34 +1717,34 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 			wantEmpty: true,
 		},
 		"simple change no context": {
-			before: yamltest.JoinLF(
+			before: stringtest.JoinLF(
 				"a: 1",
 				"b: 2",
 				"c: 3",
 				"",
 			),
-			after: yamltest.JoinLF(
+			after: stringtest.JoinLF(
 				"a: 1",
 				"b: changed",
 				"c: 3",
 				"",
 			),
 			context: 0,
-			wantExact: yamltest.JoinLF(
+			wantExact: stringtest.JoinLF(
 				"      @@ -2 +2 @@",
 				"   2 -b: 2",
 				"   2 +b: changed",
 			),
 		},
 		"simple change with context 1": {
-			before: yamltest.JoinLF(
+			before: stringtest.JoinLF(
 				"a: 1",
 				"b: 2",
 				"c: 3",
 				"d: 4",
 				"",
 			),
-			after: yamltest.JoinLF(
+			after: stringtest.JoinLF(
 				"a: 1",
 				"b: changed",
 				"c: 3",
@@ -1751,7 +1752,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				"",
 			),
 			context: 1,
-			wantExact: yamltest.JoinLF(
+			wantExact: stringtest.JoinLF(
 				"      @@ -1,3 +1,3 @@",
 				"   1  a: 1",
 				"   2 -b: 2",
@@ -1760,7 +1761,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 			),
 		},
 		"multiple scattered changes with context": {
-			before: yamltest.JoinLF(
+			before: stringtest.JoinLF(
 				"a: 1",
 				"b: 2",
 				"c: 3",
@@ -1768,7 +1769,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				"e: 5",
 				"",
 			),
-			after: yamltest.JoinLF(
+			after: stringtest.JoinLF(
 				"a: X",
 				"b: 2",
 				"c: 3",
@@ -1777,7 +1778,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				"",
 			),
 			context: 1,
-			wantExact: yamltest.JoinLF(
+			wantExact: stringtest.JoinLF(
 				"      @@ -1,2 +1,2 @@",
 				"   1 -a: 1",
 				"   1 +a: X",
@@ -1789,7 +1790,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 			),
 		},
 		"gap separator between non-adjacent changes": {
-			before: yamltest.JoinLF(
+			before: stringtest.JoinLF(
 				"line1: a",
 				"line2: b",
 				"line3: c",
@@ -1798,7 +1799,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				"line6: f",
 				"",
 			),
-			after: yamltest.JoinLF(
+			after: stringtest.JoinLF(
 				"line1: X",
 				"line2: b",
 				"line3: c",
@@ -1808,7 +1809,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				"",
 			),
 			context: 0,
-			wantExact: yamltest.JoinLF(
+			wantExact: stringtest.JoinLF(
 				"      @@ -1 +1 @@",
 				"   1 -line1: a",
 				"   1 +line1: X",
@@ -1818,19 +1819,19 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 			),
 		},
 		"addition only": {
-			before: yamltest.JoinLF(
+			before: stringtest.JoinLF(
 				"a: 1",
 				"c: 3",
 				"",
 			),
-			after: yamltest.JoinLF(
+			after: stringtest.JoinLF(
 				"a: 1",
 				"b: 2",
 				"c: 3",
 				"",
 			),
 			context: 1,
-			wantExact: yamltest.JoinLF(
+			wantExact: stringtest.JoinLF(
 				"      @@ -1,2 +1,3 @@",
 				"   1  a: 1",
 				"   2 +b: 2",
@@ -1838,19 +1839,19 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 			),
 		},
 		"deletion only": {
-			before: yamltest.JoinLF(
+			before: stringtest.JoinLF(
 				"a: 1",
 				"b: 2",
 				"c: 3",
 				"",
 			),
-			after: yamltest.JoinLF(
+			after: stringtest.JoinLF(
 				"a: 1",
 				"c: 3",
 				"",
 			),
 			context: 1,
-			wantExact: yamltest.JoinLF(
+			wantExact: stringtest.JoinLF(
 				"      @@ -1,3 +1,2 @@",
 				"   1  a: 1",
 				"   2 -b: 2",
@@ -1864,20 +1865,20 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 			wantEmpty: true,
 		},
 		"context larger than ops length includes all lines": {
-			before: yamltest.JoinLF(
+			before: stringtest.JoinLF(
 				"a: 1",
 				"b: 2",
 				"c: 3",
 				"",
 			),
-			after: yamltest.JoinLF(
+			after: stringtest.JoinLF(
 				"a: 1",
 				"b: changed",
 				"c: 3",
 				"",
 			),
 			context: 100, // Much larger than 3 lines.
-			wantExact: yamltest.JoinLF(
+			wantExact: stringtest.JoinLF(
 				"      @@ -1,3 +1,3 @@",
 				"   1  a: 1",
 				"   2 -b: 2",
@@ -1886,7 +1887,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 			),
 		},
 		"line numbers with hunk alignment": {
-			before: yamltest.JoinLF(
+			before: stringtest.JoinLF(
 				"a: 1",
 				"b: 2",
 				"c: 3",
@@ -1894,7 +1895,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				"e: 5",
 				"",
 			),
-			after: yamltest.JoinLF(
+			after: stringtest.JoinLF(
 				"a: 1",
 				"b: changed",
 				"c: 3",
@@ -1903,7 +1904,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				"",
 			),
 			context: 1,
-			wantExact: yamltest.JoinLF(
+			wantExact: stringtest.JoinLF(
 				"      @@ -1,3 +1,3 @@",
 				"   1  a: 1",
 				"   2 -b: 2",
@@ -2343,20 +2344,20 @@ func TestPrinter_BlendStyles(t *testing.T) {
 			want: "<k>key</k>: <val>value</val>",
 		},
 		"multi-line with ranges on each line": {
-			input: yamltest.JoinLF("a: 1", "b: 2"),
+			input: stringtest.JoinLF("a: 1", "b: 2"),
 			ranges: []overlayRange{
 				{kindX, position.New(0, 0), position.New(0, 1)},
 				{kindY, position.New(1, 0), position.New(1, 1)},
 			},
-			want: yamltest.JoinLF("<x>a</x>: 1", "<y>b</y>: 2"),
+			want: stringtest.JoinLF("<x>a</x>: 1", "<y>b</y>: 2"),
 		},
 		"range spanning multiple lines": {
-			input: yamltest.JoinLF("a: 1", "b: 2"),
+			input: stringtest.JoinLF("a: 1", "b: 2"),
 			ranges: []overlayRange{
 				{kindSpan, position.New(0, 3), position.New(1, 1)},
 			},
 			// Range spans from line 0 col 3 to line 1 col 1.
-			want: yamltest.JoinLF("a: <span>1</span>", "<span>b</span>: 2"),
+			want: stringtest.JoinLF("a: <span>1</span>", "<span>b</span>: 2"),
 		},
 	}
 
