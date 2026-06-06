@@ -10,7 +10,7 @@ require (
 	github.com/charmbracelet/fang v0.4.4
 	github.com/charmbracelet/x/ansi v0.11.6
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20251201173703-9f73bfd934ff
-	github.com/charmbracelet/x/exp/golden v0.0.0-20250806222409-83e3a29d542f
+	github.com/charmbracelet/x/exp/golden v0.0.0-20260602025833-85a30b5e440a
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/goccy/go-yaml v1.19.2
 	github.com/invopop/jsonschema v0.14.0
@@ -25,7 +25,7 @@ require (
 )
 
 require (
-	github.com/aymanbagabas/go-udiff v0.3.1 // indirect
+	github.com/aymanbagabas/go-udiff v0.4.1 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/charmbracelet/colorprofile v0.4.1 // indirect
