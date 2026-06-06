@@ -18,7 +18,8 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
-	go.jacobcolvin.com/x v0.0.0-20260208230929-0664789a1fa6
+	go.jacobcolvin.com/x/profile v0.0.0-20260606030626-0add6a0111c9
+	go.jacobcolvin.com/x/stringtest v0.1.0
 	golang.org/x/text v0.37.0
 	golang.org/x/tools v0.45.0
 )
