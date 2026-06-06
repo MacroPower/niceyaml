@@ -3,7 +3,7 @@ module go.jacobcolvin.com/niceyaml
 go 1.25.0
 
 require (
-	charm.land/bubbles/v2 v2.0.0-rc.1
+	charm.land/bubbles/v2 v2.1.0
 	charm.land/bubbletea/v2 v2.0.7
 	charm.land/lipgloss/v2 v2.0.3
 	github.com/bmatcuk/doublestar/v4 v4.10.0
