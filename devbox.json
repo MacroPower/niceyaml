@@ -12,7 +12,7 @@
     "bashInteractive": "5.2p37",
     "tmux": "3.5",
     "renovate": "42.83.1",
-    "lefthook": "2.1.0"
+    "lefthook": "2.1.5"
   },
   "shell": {
     "init_hook": ["echo 'Welcome to devbox!' > /dev/null"]
