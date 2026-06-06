@@ -3,8 +3,8 @@ package fangs
 import (
 	"image/color"
 
+	"charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/fang"
 
 	"go.jacobcolvin.com/niceyaml/style"
 )
