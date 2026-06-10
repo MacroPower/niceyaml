@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"go.jacobcolvin.com/x/jsonschema"
 )
 
 var (
@@ -37,7 +39,7 @@ type Option func(*validatorConfig)
 // WithCompiler is an [Option] that sets a custom [SchemaCompiler] for schema
 // compilation.
 //
-// If not provided, a default [jsonschema.Compiler] is used.
+// If not provided, a default compiler backed by [jsonschema.Compile] is used.
 func WithCompiler(c SchemaCompiler) Option {
 	return func(cfg *validatorConfig) {
 		cfg.compiler = c
@@ -53,6 +55,7 @@ func WithCompiler(c SchemaCompiler) Option {
 // Create instances with [New] or [MustNew].
 type Validator struct {
 	schema Schema
+	url    string
 }
 
 // New creates a new [*Validator] from JSON schema data.
@@ -72,6 +75,14 @@ func New(url string, schemaData []byte, opts ...Option) (*Validator, error) {
 		return nil, fmt.Errorf("%w: %w", ErrUnmarshalSchema, err)
 	}
 
+	// A JSON Schema document must be an object or a boolean. Reject other
+	// top-level JSON values (arrays, strings, numbers, null) before compilation.
+	switch schema.(type) {
+	case map[string]any, bool:
+	default:
+		return nil, fmt.Errorf("%w: schema must be a JSON object or boolean", ErrCompileSchema)
+	}
+
 	compiler := cfg.compiler
 	if compiler == nil {
 		compiler = newDefaultCompiler()
@@ -87,7 +98,7 @@ func New(url string, schemaData []byte, opts ...Option) (*Validator, error) {
 		return nil, fmt.Errorf("%w: %w", ErrCompileSchema, err)
 	}
 
-	return &Validator{schema: s}, nil
+	return &Validator{schema: s, url: url}, nil
 }
 
 // MustNew is like [New] but panics on error.
@@ -112,12 +123,13 @@ func (s *Validator) ValidateSchema(data any) error {
 		return nil
 	}
 
-	// Check if error implements ValidationError interface (for rich error details).
-	var validationErr SchemaError
+	// A structured validation failure carries per-location paths; convert it to
+	// a niceyaml.Error. Anything else is an unexpected internal error.
+	var validationErr *jsonschema.ValidationError
+
 	if errors.As(err, &validationErr) {
-		return newValidationError(validationErr)
+		return newValidationError(validationErr, s.url)
 	}
 
-	// Unknown error type - wrap without path information.
 	return fmt.Errorf("%w: %w", ErrValidateSchema, err)
 }

@@ -68,5 +68,4 @@ than achieving perfect compliance with the above. As an example, you would not s
 - `charm.land/lipgloss/v2`: Terminal styling.
 - `charm.land/bubbletea/v2`: Terminal UI framework.
 - `charm.land/bubbles/v2`: UI components for Bubble Tea.
-- `github.com/invopop/jsonschema`: JSON schema generation from Go types.
-- `github.com/santhosh-tekuri/jsonschema/v6`: JSON schema validation.
+- `go.jacobcolvin.com/x/jsonschema`: JSON schema generation from Go types and validation.

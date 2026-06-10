@@ -1,12 +1,15 @@
 package validator_test
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"testing"
 
-	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
@@ -15,24 +18,22 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema/validator"
 )
 
-// mockCompiler implements validator.Compiler for testing.
+// mockCompiler implements validator.SchemaCompiler for testing.
 type mockCompiler struct {
 	addResourceCalled bool
 	compileCalled     bool
 	addResourceErr    error
 	compileErr        error
 
-	url    string
 	schema any
 }
 
-func (m *mockCompiler) AddResource(url string, doc any) error {
+func (m *mockCompiler) AddResource(_ string, doc any) error {
 	m.addResourceCalled = true
 	if m.addResourceErr != nil {
 		return m.addResourceErr
 	}
 
-	m.url = url
 	m.schema = doc
 
 	return nil
@@ -44,23 +45,25 @@ func (m *mockCompiler) Compile(_ string) (validator.Schema, error) {
 		return nil, m.compileErr
 	}
 
-	c := jsonschema.NewCompiler()
-	// Test helper: panics on unexpected errors since this is for controlled test scenarios.
-	_ = c.AddResource(m.url, m.schema) //nolint:errcheck // test helper
+	raw, err := json.Marshal(m.schema)
+	if err != nil {
+		return nil, fmt.Errorf("marshal schema: %w", err)
+	}
 
-	schema, _ := c.Compile(m.url) //nolint:errcheck // test helper
+	var s jsonschema.Schema
 
-	return &mockSchema{schema: schema}, nil
-}
+	err = json.Unmarshal(raw, &s)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshal schema: %w", err)
+	}
 
-// mockSchema implements validator.Schema for testing.
-type mockSchema struct {
-	schema *jsonschema.Schema
-}
+	// The compiled *jsonschema.Validator satisfies validator.Schema directly.
+	v, err := jsonschema.Compile(&s)
+	if err != nil {
+		return nil, fmt.Errorf("compile schema: %w", err)
+	}
 
-func (m *mockSchema) Validate(data any) error {
-	//nolint:wrapcheck // Errors returned must be unwrapped for type assertions.
-	return m.schema.Validate(data)
+	return v, nil
 }
 
 func TestValidationError_Error(t *testing.T) {
@@ -125,6 +128,7 @@ func TestNewValidator(t *testing.T) {
 			want:  validator.ErrUnmarshalSchema,
 		},
 		"invalid schema": {
+			// An unrecognized "type" name is rejected at compile time.
 			input: []byte(`{"type": "invalid_type"}`),
 			want:  validator.ErrCompileSchema,
 		},
@@ -433,6 +437,7 @@ func TestValidator_Validate(t *testing.T) {
 				require.Error(t, err)
 
 				var validationErr *niceyaml.Error
+
 				require.ErrorAs(t, err, &validationErr)
 			} else {
 				require.NoError(t, err)
@@ -691,6 +696,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 					require.Error(t, err)
 
 					var validationErr *niceyaml.Error
+
 					require.ErrorAs(t, err, &validationErr)
 				} else {
 					require.NoError(t, err)
@@ -956,6 +962,40 @@ func TestValidator_PathTarget(t *testing.T) {
 			wantKeyErr:   false,
 			wantContains: "<genericError>notanumber</genericError>",
 		},
+		"propertyNames error highlights the offending key": {
+			// The library reports a propertyNames violation at the offending
+			// property with keyword "propertyNames", so the bad key is targeted.
+			schema: `{
+				"type": "object",
+				"properties": {
+					"config": {
+						"type": "object",
+						"propertyNames": {"pattern": "^[a-z]+$"}
+					}
+				}
+			}`,
+			input: stringtest.Input(`
+				config:
+				  BadKey: 1
+			`),
+			wantKeyErr:   true,
+			wantContains: "<genericError>BadKey</genericError>",
+		},
+		"false subschema on a keyword-named property highlights value": {
+			// A property named like a key-targeting keyword ("contains") must
+			// still highlight the value, not the key.
+			schema: `{
+				"type": "object",
+				"properties": {
+					"contains": false
+				}
+			}`,
+			input: stringtest.Input(`
+				contains: 5
+			`),
+			wantKeyErr:   false,
+			wantContains: "<genericError>5</genericError>",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -974,6 +1014,7 @@ func TestValidator_PathTarget(t *testing.T) {
 				require.Error(t, err)
 
 				var validationErr *niceyaml.Error
+
 				require.ErrorAs(t, err, &validationErr)
 
 				// Apply source and printer to get annotated output.
@@ -989,6 +1030,33 @@ func TestValidator_PathTarget(t *testing.T) {
 						"expected error output to contain specific highlighting pattern")
 				}
 			}
+		})
+	}
+}
+
+func TestValidator_NonFiniteFloats(t *testing.T) {
+	t.Parallel()
+
+	// YAML decodes .nan/.inf into non-finite float64 values. These are not
+	// JSON-encodable, but the validator treats them as numbers rather than
+	// surfacing an opaque marshaling error.
+	v, err := validator.New("test", []byte(`{
+		"type": "object",
+		"properties": {"x": {"type": "number"}}
+	}`))
+	require.NoError(t, err)
+
+	for name, value := range map[string]float64{
+		"NaN":          math.NaN(),
+		"positive inf": math.Inf(1),
+		"negative inf": math.Inf(-1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := v.ValidateSchema(map[string]any{"x": value})
+			require.NoError(t, err)
+			assert.NotErrorIs(t, err, validator.ErrValidateSchema)
 		})
 	}
 }
@@ -1053,7 +1121,7 @@ func TestValidator_SubErrorAnnotations(t *testing.T) {
 			input: stringtest.Input(`
 				name: 123
 			`),
-			wantAnnotations:  []string{"got number, want string"},
+			wantAnnotations:  []string{`expected "string", got "integer"`},
 			wantNestedErrors: 1,
 		},
 		"multiple sub-errors from required fields": {
@@ -1068,8 +1136,8 @@ func TestValidator_SubErrorAnnotations(t *testing.T) {
 			input: stringtest.Input(`
 				other: value
 			`),
-			wantAnnotations:  []string{"missing properties", "first", "second"},
-			wantNestedErrors: 1,
+			wantAnnotations:  []string{"missing required property", "first", "second"},
+			wantNestedErrors: 2,
 		},
 		"nested object sub-error": {
 			schema: `{
@@ -1087,7 +1155,7 @@ func TestValidator_SubErrorAnnotations(t *testing.T) {
 				user:
 				  age: notanumber
 			`),
-			wantAnnotations:  []string{"got string, want integer"},
+			wantAnnotations:  []string{`expected "integer", got "string"`},
 			wantNestedErrors: 1,
 		},
 	}
@@ -1108,6 +1176,7 @@ func TestValidator_SubErrorAnnotations(t *testing.T) {
 				require.Error(t, err)
 
 				var validationErr *niceyaml.Error
+
 				require.ErrorAs(t, err, &validationErr)
 
 				// Apply source to enable annotation rendering.
@@ -1190,7 +1259,7 @@ func TestNew_WithCompiler(t *testing.T) {
 func TestNew_DefaultCompiler(t *testing.T) {
 	t.Parallel()
 
-	// Verify that without WithCompiler, the default jsonschema.NewCompiler is used.
+	// Verify that without WithCompiler, the default jsonschema.Compile-backed compiler is used.
 	schemaData := []byte(`{"type": "object", "properties": {"name": {"type": "string"}}}`)
 
 	v, err := validator.New("test", schemaData)
@@ -1259,7 +1328,7 @@ func TestValidator_ErrorMessages(t *testing.T) {
 		// Single error should NOT use summary message.
 		assert.NotContains(t, err.Error(), "validation failed")
 		// Should use the actual error message.
-		assert.Contains(t, err.Error(), "got number, want string")
+		assert.Contains(t, err.Error(), `expected "string", got "integer"`)
 	})
 
 	t.Run("multiple validation errors use summary message", func(t *testing.T) {
@@ -1326,6 +1395,7 @@ func TestValidator_ErrorMessages(t *testing.T) {
 		require.Error(t, err)
 
 		var validationErr *niceyaml.Error
+
 		require.ErrorAs(t, err, &validationErr)
 
 		// Unwrap should include main + nested errors.
@@ -1372,6 +1442,7 @@ func TestValidator_UnwrapSubErrorPaths(t *testing.T) {
 			require.Error(t, err)
 
 			var validationErr *niceyaml.Error
+
 			require.ErrorAs(t, err, &validationErr)
 
 			// Top-level error should have empty path.
@@ -1382,8 +1453,10 @@ func TestValidator_UnwrapSubErrorPaths(t *testing.T) {
 			require.NotEmpty(t, unwrapped)
 
 			var gotPaths []string
+
 			for _, uerr := range unwrapped {
 				var nestedErr *niceyaml.Error
+
 				if errors.As(uerr, &nestedErr) && nestedErr.Path() != "" {
 					gotPaths = append(gotPaths, nestedErr.Path())
 				}

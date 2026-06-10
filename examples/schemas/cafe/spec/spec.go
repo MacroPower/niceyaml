@@ -5,14 +5,14 @@ import (
 	"encoding/json"
 	"time"
 
-	"go.jacobcolvin.com/niceyaml/schema"
+	"go.jacobcolvin.com/x/jsonschema"
 )
 
 // Spec is the cafe specification.
 type Spec struct {
 	// SLA is the service level agreement duration for order fulfillment.
 	// Defaults to 15 minutes.
-	SLA *time.Duration `json:"sla,omitempty" jsonschema:"title=SLA,type=string,default=15m"`
+	SLA *time.Duration `json:"sla,omitempty" jsonschema:"title=SLA,type=string"`
 	// Settings contains optional cafe settings.
 	Settings *Settings `json:"settings,omitempty" jsonschema:"title=Settings"`
 	// Hours defines operating hours.
@@ -24,9 +24,13 @@ type Spec struct {
 }
 
 // JSONSchemaExtend extends the generated JSON schema.
-func (s Spec) JSONSchemaExtend(js *schema.JSON) {
-	sla := schema.MustGetProperty("sla", js)
+//
+// The type= tag already makes sla a string; the pattern and default are richer
+// than the tag grammar expresses, so they are set here.
+func (s Spec) JSONSchemaExtend(js *jsonschema.Schema) {
+	sla := js.Properties["sla"]
 	sla.Pattern = `^(\d+d)?(\d+h)?(\d+m)?(\d+s)?$`
+	sla.Default = json.RawMessage(`"15m"`)
 }
 
 // Menu defines the cafe's menu offerings.
@@ -36,9 +40,8 @@ type Menu struct {
 }
 
 // JSONSchemaExtend extends the generated JSON schema.
-func (m Menu) JSONSchemaExtend(js *schema.JSON) {
-	items := schema.MustGetProperty("items", js)
-	items.MinItems = schema.PtrUint64(1)
+func (m Menu) JSONSchemaExtend(js *jsonschema.Schema) {
+	js.Properties["items"].MinItems = jsonschema.Ptr(1)
 }
 
 // MenuItem represents a single item on the menu.
@@ -48,7 +51,7 @@ type MenuItem struct {
 	// Name is the name of the menu item.
 	Name string `json:"name" jsonschema:"title=Name"`
 	// Category is the type of item.
-	Category string `json:"category" jsonschema:"title=Category,enum=coffee,enum=tea,enum=pastry,enum=sandwich"`
+	Category string `json:"category" jsonschema:"title=Category,enum=coffee|tea|pastry|sandwich"`
 	// Description provides additional details about the item.
 	Description string `json:"description,omitempty" jsonschema:"title=Description"`
 	// Tags are optional labels for the item.
@@ -58,12 +61,9 @@ type MenuItem struct {
 }
 
 // JSONSchemaExtend extends the generated JSON schema.
-func (m MenuItem) JSONSchemaExtend(js *schema.JSON) {
-	name := schema.MustGetProperty("name", js)
-	name.MinLength = schema.PtrUint64(1)
-
-	price := schema.MustGetProperty("price", js)
-	price.Minimum = json.Number("0")
+func (m MenuItem) JSONSchemaExtend(js *jsonschema.Schema) {
+	js.Properties["name"].MinLength = jsonschema.Ptr(1)
+	js.Properties["price"].Minimum = jsonschema.Ptr(0.0)
 }
 
 // Staff defines staffing requirements.
@@ -75,13 +75,12 @@ type Staff struct {
 }
 
 // JSONSchemaExtend extends the generated JSON schema.
-func (s Staff) JSONSchemaExtend(js *schema.JSON) {
-	baristas := schema.MustGetProperty("baristas", js)
-	baristas.Minimum = json.Number("1")
-	baristas.Maximum = json.Number("10")
+func (s Staff) JSONSchemaExtend(js *jsonschema.Schema) {
+	baristas := js.Properties["baristas"]
+	baristas.Minimum = jsonschema.Ptr(1.0)
+	baristas.Maximum = jsonschema.Ptr(10.0)
 
-	managers := schema.MustGetProperty("managers", js)
-	managers.Minimum = json.Number("1")
+	js.Properties["managers"].Minimum = jsonschema.Ptr(1.0)
 }
 
 // Hours defines operating hours for the cafe.
@@ -91,20 +90,20 @@ type Hours struct {
 	// Close is the closing time in HH:MM format (24-hour).
 	Close string `json:"close" jsonschema:"title=Close"`
 	// Days lists the days of operation.
-	Days []string `json:"days" jsonschema:"title=Days,enum=monday,enum=tuesday,enum=wednesday,enum=thursday,enum=friday,enum=saturday,enum=sunday"`
+	Days []string `json:"days" jsonschema:"title=Days,enum=monday|tuesday|wednesday|thursday|friday|saturday|sunday"`
 }
 
 // JSONSchemaExtend extends the generated JSON schema.
-func (h Hours) JSONSchemaExtend(js *schema.JSON) {
+func (h Hours) JSONSchemaExtend(js *jsonschema.Schema) {
 	timePattern := `^([01]?[0-9]|2[0-3]):[0-5][0-9]$`
 
-	open := schema.MustGetProperty("open", js)
+	open := js.Properties["open"]
 	open.Pattern = timePattern
-	open.Default = "07:00"
+	open.Default = json.RawMessage(`"07:00"`)
 
-	closeTime := schema.MustGetProperty("close", js)
+	closeTime := js.Properties["close"]
 	closeTime.Pattern = timePattern
-	closeTime.Default = "19:00"
+	closeTime.Default = json.RawMessage(`"19:00"`)
 }
 
 // Settings contains optional cafe settings.
@@ -116,5 +115,5 @@ type Settings struct {
 	// CustomOptions contains additional custom settings.
 	CustomOptions map[string]string `json:"custom_options,omitempty" jsonschema:"title=Custom Options"`
 	// Theme is the UI theme for digital displays.
-	Theme string `json:"theme,omitempty" jsonschema:"title=Theme,enum=light,enum=dark,enum=auto,default=auto"`
+	Theme string `json:"theme,omitempty" jsonschema:"title=Theme,enum=light|dark|auto,default=auto"`
 }

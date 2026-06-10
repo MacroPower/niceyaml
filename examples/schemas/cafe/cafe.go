@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"time"
 
+	"go.jacobcolvin.com/x/jsonschema"
+
 	_ "embed"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/examples/schemas/cafe/spec"
 	"go.jacobcolvin.com/niceyaml/paths"
-	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/validator"
 )
 
@@ -36,9 +37,8 @@ func NewConfig() Config {
 }
 
 // JSONSchemaExtend extends the generated JSON schema.
-func (c Config) JSONSchemaExtend(js *schema.JSON) {
-	kind := schema.MustGetProperty("kind", js)
-	kind.Const = "Config"
+func (c Config) JSONSchemaExtend(js *jsonschema.Schema) {
+	js.Properties["kind"].Const = jsonschema.Ptr[any]("Config")
 }
 
 // ValidateSchema validates arbitrary data against the cafe JSON schema.
@@ -89,8 +89,8 @@ type Metadata struct {
 }
 
 // JSONSchemaExtend extends the generated JSON schema.
-func (m Metadata) JSONSchemaExtend(js *schema.JSON) {
-	name := schema.MustGetProperty("name", js)
-	name.MinLength = schema.PtrUint64(1)
-	name.MaxLength = schema.PtrUint64(100)
+func (m Metadata) JSONSchemaExtend(js *jsonschema.Schema) {
+	name := js.Properties["name"]
+	name.MinLength = jsonschema.Ptr(1)
+	name.MaxLength = jsonschema.Ptr(100)
 }

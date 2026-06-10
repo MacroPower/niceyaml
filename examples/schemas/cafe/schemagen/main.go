@@ -2,12 +2,14 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"log"
 	"os"
 
+	"go.jacobcolvin.com/x/jsonschema"
+
 	"go.jacobcolvin.com/niceyaml/examples/schemas/cafe"
-	"go.jacobcolvin.com/niceyaml/schema/generator"
 )
 
 var outFile = flag.String("o", "schema.json", "Output file for the generated schema")
@@ -15,19 +17,16 @@ var outFile = flag.String("o", "schema.json", "Output file for the generated sch
 func main() {
 	flag.Parse()
 
-	gen := generator.New(
-		cafe.NewConfig(),
-		generator.WithPackagePaths(
-			"go.jacobcolvin.com/niceyaml/examples/schemas/cafe",
-			"go.jacobcolvin.com/niceyaml/examples/schemas/cafe/spec",
-		),
-	)
-	jsData, err := gen.Generate()
+	js, err := jsonschema.GenerateFor[cafe.Config](jsonschema.WithComments(true))
 	if err != nil {
 		log.Fatalf("generate JSON schema: %v", err)
 	}
 
-	// Write schema.json file.
+	jsData, err := json.MarshalIndent(js, "", "  ")
+	if err != nil {
+		log.Fatalf("marshal JSON schema: %v", err)
+	}
+
 	err = os.WriteFile(*outFile, jsData, 0o600)
 	if err != nil {
 		log.Fatalf("write schema file: %v", err)
