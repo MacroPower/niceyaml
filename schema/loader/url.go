@@ -2,7 +2,6 @@ package loader
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -65,21 +64,15 @@ func URL(schemaURL string, opts ...HTTPOption) Loader {
 			return Result{}, fmt.Errorf("fetch %s: status %d", schemaURL, resp.StatusCode)
 		}
 
-		data, err := io.ReadAll(io.LimitReader(resp.Body, maxSchemaSize))
+		// Read one byte past the limit so an over-size response reads as
+		// maxSchemaSize+1 bytes; anything at or under the limit is the whole body.
+		data, err := io.ReadAll(io.LimitReader(resp.Body, maxSchemaSize+1))
 		if err != nil {
 			return Result{}, fmt.Errorf("read response from %s: %w", schemaURL, err)
 		}
 
-		// If we read exactly maxSchemaSize bytes, try reading one more to detect
-		// if the response was truncated. If we can read another byte (err == nil)
-		// or get any error other than EOF, the actual size exceeds our limit.
-		if int64(len(data)) == maxSchemaSize {
-			var extra [1]byte
-
-			_, err = resp.Body.Read(extra[:])
-			if err == nil || !errors.Is(err, io.EOF) {
-				return Result{}, fmt.Errorf("fetch %s: schema exceeds %d bytes", schemaURL, maxSchemaSize)
-			}
+		if int64(len(data)) > maxSchemaSize {
+			return Result{}, fmt.Errorf("fetch %s: schema exceeds %d bytes", schemaURL, maxSchemaSize)
 		}
 
 		return NewResult(schemaURL, data), nil

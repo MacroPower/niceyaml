@@ -37,7 +37,7 @@ type Validator interface {
 // automatically decodes the document to [any] and calls ValidateSchema before
 // decoding to the typed struct.
 //
-// See [go.jacobcolvin.com/niceyaml/schema/validator.Validator] for an
+// See [go.jacobcolvin.com/niceyaml/schema.NewValidator] for an
 // implementation.
 type SchemaValidator interface {
 	ValidateSchema(data any) error

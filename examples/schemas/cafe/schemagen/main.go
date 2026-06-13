@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"log"
@@ -17,7 +18,10 @@ var outFile = flag.String("o", "schema.json", "Output file for the generated sch
 func main() {
 	flag.Parse()
 
-	js, err := jsonschema.GenerateFor[cafe.Config](jsonschema.WithComments(true))
+	js, err := jsonschema.GenerateFor[cafe.Config](
+		context.Background(),
+		jsonschema.WithDescriptionProvider(jsonschema.NewGoCommentProvider()),
+	)
 	if err != nil {
 		log.Fatalf("generate JSON schema: %v", err)
 	}

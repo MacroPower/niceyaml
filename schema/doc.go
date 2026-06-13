@@ -1,4 +1,5 @@
-// Package schema provides JSON Schema directive parsing for YAML documents.
+// Package schema provides JSON Schema directive parsing and validation for
+// YAML documents.
 //
 // # Schema Directives
 //
@@ -19,13 +20,22 @@
 // [go.jacobcolvin.com/x/jsonschema] directly; a type customizes its generated
 // schema by implementing a JSONSchemaExtend method that the library calls:
 //
-//	func (t MyType) JSONSchemaExtend(js *jsonschema.Schema) {
-//	    f := js.Properties["myField"]
+//	func (t MyType) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
+//	    f := s.Properties["myField"]
 //	    f.Description = "Custom description"
 //	    f.MinLength = jsonschema.Ptr(1)
+//
+//	    return nil
 //	}
 //
-// The [go.jacobcolvin.com/niceyaml/schema/validator] package validates data
-// against compiled JSON schemas, returning errors with YAML path information
-// for integration with niceyaml's error display.
+// Compile a schema with [go.jacobcolvin.com/x/jsonschema.CompileJSON] (or
+// [go.jacobcolvin.com/x/jsonschema.MustCompileJSON] for embedded schemas) and
+// wrap it with [NewValidator] to obtain a
+// [go.jacobcolvin.com/niceyaml.SchemaValidator] that reports failures as errors
+// carrying YAML path information for integration with niceyaml's error display:
+//
+//	v := schema.NewValidator(jsonschema.MustCompileJSON(schemaBytes))
+//	if err := doc.ValidateSchema(v); err != nil {
+//	    // err is *niceyaml.Error with path info for highlighting.
+//	}
 package schema

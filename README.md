@@ -20,7 +20,7 @@ It enables **friendly and predictable handling of YAML-compatible documents** in
 - Source [`Revision`][niceyaml.Revision]s for file lineage and **diffs**
 - String [`Finder`][niceyaml.Finder] for load-once, search-many scenarios
 - Extended [`Encoder`][niceyaml.Encoder] and [`Decoder`][niceyaml.Decoder] wrappers
-- JSON schema [`validator`][niceyaml/schema/validator] with YAML path errors
+- JSON schema [validation][niceyaml/schema.NewValidator] with YAML path errors
 - Bubble [`yamlviewport`][niceyaml/bubbles/yamlviewport] for Bubble Tea
 - Generic building blocks for your own bubbles
 
@@ -111,4 +111,4 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [niceyaml/style/theme]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/style/theme
 [niceyaml/style.Style]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/style#Style
 [niceyaml/bubbles/yamlviewport]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/bubbles/yamlviewport
-[niceyaml/schema/validator]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/schema/validator
+[niceyaml/schema.NewValidator]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/schema#NewValidator

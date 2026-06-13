@@ -2,6 +2,7 @@
 package spec
 
 import (
+	"context"
 	"encoding/json"
 	"time"
 
@@ -27,10 +28,12 @@ type Spec struct {
 //
 // The type= tag already makes sla a string; the pattern and default are richer
 // than the tag grammar expresses, so they are set here.
-func (s Spec) JSONSchemaExtend(js *jsonschema.Schema) {
+func (s Spec) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, js *jsonschema.Schema) error {
 	sla := js.Properties["sla"]
 	sla.Pattern = `^(\d+d)?(\d+h)?(\d+m)?(\d+s)?$`
 	sla.Default = json.RawMessage(`"15m"`)
+
+	return nil
 }
 
 // Menu defines the cafe's menu offerings.
@@ -40,8 +43,10 @@ type Menu struct {
 }
 
 // JSONSchemaExtend extends the generated JSON schema.
-func (m Menu) JSONSchemaExtend(js *jsonschema.Schema) {
+func (m Menu) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, js *jsonschema.Schema) error {
 	js.Properties["items"].MinItems = new(1)
+
+	return nil
 }
 
 // MenuItem represents a single item on the menu.
@@ -61,9 +66,11 @@ type MenuItem struct {
 }
 
 // JSONSchemaExtend extends the generated JSON schema.
-func (m MenuItem) JSONSchemaExtend(js *jsonschema.Schema) {
+func (m MenuItem) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, js *jsonschema.Schema) error {
 	js.Properties["name"].MinLength = new(1)
 	js.Properties["price"].Minimum = new(0.0)
+
+	return nil
 }
 
 // Staff defines staffing requirements.
@@ -75,12 +82,14 @@ type Staff struct {
 }
 
 // JSONSchemaExtend extends the generated JSON schema.
-func (s Staff) JSONSchemaExtend(js *jsonschema.Schema) {
+func (s Staff) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, js *jsonschema.Schema) error {
 	baristas := js.Properties["baristas"]
 	baristas.Minimum = new(1.0)
 	baristas.Maximum = new(10.0)
 
 	js.Properties["managers"].Minimum = new(1.0)
+
+	return nil
 }
 
 // Hours defines operating hours for the cafe.
@@ -94,7 +103,7 @@ type Hours struct {
 }
 
 // JSONSchemaExtend extends the generated JSON schema.
-func (h Hours) JSONSchemaExtend(js *jsonschema.Schema) {
+func (h Hours) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, js *jsonschema.Schema) error {
 	timePattern := `^([01]?[0-9]|2[0-3]):[0-5][0-9]$`
 
 	open := js.Properties["open"]
@@ -104,6 +113,8 @@ func (h Hours) JSONSchemaExtend(js *jsonschema.Schema) {
 	closeTime := js.Properties["close"]
 	closeTime.Pattern = timePattern
 	closeTime.Default = json.RawMessage(`"19:00"`)
+
+	return nil
 }
 
 // Settings contains optional cafe settings.

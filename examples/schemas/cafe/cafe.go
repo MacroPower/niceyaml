@@ -2,6 +2,7 @@
 package cafe
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -12,13 +13,17 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/examples/schemas/cafe/spec"
 	"go.jacobcolvin.com/niceyaml/paths"
-	"go.jacobcolvin.com/niceyaml/schema/validator"
+	"go.jacobcolvin.com/niceyaml/schema"
 )
 
 //go:generate go run ./schemagen/main.go -o cafe.v1.json
 
-//go:embed cafe.v1.json
-var schemaJSON []byte
+var (
+	//go:embed cafe.v1.json
+	schemaJSON []byte
+
+	configValidator = schema.NewValidator(jsonschema.MustCompileJSON(schemaJSON))
+)
 
 // Config is the root cafe configuration.
 // Create instances with [NewConfig].
@@ -37,19 +42,16 @@ func NewConfig() Config {
 }
 
 // JSONSchemaExtend extends the generated JSON schema.
-func (c Config) JSONSchemaExtend(js *jsonschema.Schema) {
+func (c Config) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, js *jsonschema.Schema) error {
 	js.Properties["kind"].Const = jsonschema.Ptr[any]("Config")
+
+	return nil
 }
 
 // ValidateSchema validates arbitrary data against the cafe JSON schema.
 func (c Config) ValidateSchema(data any) error {
-	v, err := validator.New("/cafe.v1.json", schemaJSON)
-	if err != nil {
-		return fmt.Errorf("create validator: %w", err)
-	}
-
 	//nolint:wrapcheck // Validator.ValidateSchema returns niceyaml.Error with path info.
-	return v.ValidateSchema(data)
+	return configValidator.ValidateSchema(data)
 }
 
 // Validate performs custom validation after decoding.
@@ -89,8 +91,10 @@ type Metadata struct {
 }
 
 // JSONSchemaExtend extends the generated JSON schema.
-func (m Metadata) JSONSchemaExtend(js *jsonschema.Schema) {
+func (m Metadata) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, js *jsonschema.Schema) error {
 	name := js.Properties["name"]
 	name.MinLength = new(1)
 	name.MaxLength = new(100)
+
+	return nil
 }

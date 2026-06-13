@@ -11,8 +11,8 @@ import (
 // All loaders receive the document for consistency, though static loaders
 // may ignore it.
 //
-// See [Embedded], [File], [URL], [Validator], [Ref], [Custom], and [Func]
-// for implementations.
+// See [Embedded], [File], [URL], [Validator], [Ref], and [Func] for
+// implementations.
 type Loader interface {
 	// Load returns schema data or a pre-compiled validator for the document.
 	Load(ctx context.Context, doc *niceyaml.DocumentDecoder) (Result, error)

@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"sync"
 
+	"go.jacobcolvin.com/x/jsonschema"
+
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/loader"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
-	"go.jacobcolvin.com/niceyaml/schema/validator"
 )
 
 var (
@@ -84,14 +86,14 @@ func (c *mapCache) Set(url string, v niceyaml.SchemaValidator) {
 type Registry struct {
 	cache         Cache
 	matchLoaders  []MatchLoader
-	validatorOpts []validator.Option
+	validatorOpts []jsonschema.ValidateOption
 }
 
 // Option configures [Registry] creation.
 //
 // Available options:
 //   - [WithCache]
-//   - [WithValidatorOptions]
+//   - [WithValidateOptions]
 type Option func(*Registry)
 
 // WithCache is an [Option] that sets a custom [Cache] implementation.
@@ -105,9 +107,9 @@ func WithCache(c Cache) Option {
 	}
 }
 
-// WithValidatorOptions is an [Option] that sets options passed to
-// [validator.New] when compiling validators.
-func WithValidatorOptions(opts ...validator.Option) Option {
+// WithValidateOptions is an [Option] that sets options passed to
+// [jsonschema.CompileJSON] when compiling validators.
+func WithValidateOptions(opts ...jsonschema.ValidateOption) Option {
 	return func(r *Registry) {
 		r.validatorOpts = opts
 	}
@@ -220,13 +222,13 @@ func (r *Registry) loadValidator(
 		// Pre-compiled validator provided.
 		v = result.Validator
 	} else {
-		// Compile validator from data.
-		var compileErr error
-
-		v, compileErr = validator.New(result.URL, result.Data, r.validatorOpts...)
+		// Compile a validator from the schema data.
+		compiled, compileErr := jsonschema.CompileJSON(ctx, result.Data, r.validatorOpts...)
 		if compileErr != nil {
 			return nil, fmt.Errorf("%w: %q: %w", ErrCompile, result.URL, compileErr)
 		}
+
+		v = schema.NewValidator(compiled)
 	}
 
 	// Cache validator by URL. Skip caching for empty URLs to avoid cache

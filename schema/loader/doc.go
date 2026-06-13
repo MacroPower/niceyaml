@@ -21,10 +21,13 @@
 // Example dynamic loader that selects schema based on document content:
 //
 //	kindPath := paths.Root().Child("kind").Path()
-//	l := loader.Custom(func(ctx context.Context, doc *niceyaml.DocumentDecoder) ([]byte, string, error) {
+//	l := loader.Func(func(ctx context.Context, doc *niceyaml.DocumentDecoder) (loader.Result, error) {
 //	    kind, _ := doc.GetValue(kindPath)
 //	    schemaPath := fmt.Sprintf("schemas/%s.json", strings.ToLower(kind))
 //	    data, err := schemaFS.ReadFile(schemaPath)
-//	    return data, schemaPath, err
+//	    if err != nil {
+//	        return loader.Result{}, err
+//	    }
+//	    return loader.NewResult(schemaPath, data), nil
 //	})
 package loader

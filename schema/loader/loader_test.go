@@ -4,9 +4,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.jacobcolvin.com/x/jsonschema"
 
+	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/loader"
-	"go.jacobcolvin.com/niceyaml/schema/validator"
 )
 
 // Compile-time interface satisfaction checks.
@@ -50,7 +51,7 @@ func TestNewResultWithValidator(t *testing.T) {
 	t.Run("valid validator", func(t *testing.T) {
 		t.Parallel()
 
-		v := validator.MustNew("test", []byte(`{}`))
+		v := schema.NewValidator(jsonschema.MustCompileJSON([]byte(`{}`)))
 		result := loader.NewResultWithValidator("schema.json", v)
 
 		assert.Equal(t, "schema.json", result.URL)

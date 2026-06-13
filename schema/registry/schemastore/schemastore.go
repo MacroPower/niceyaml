@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -172,9 +171,11 @@ func New(ctx context.Context, opts ...Option) (*SchemaStore, error) {
 		opt(store)
 	}
 
-	err := store.fetchCatalog(ctx)
+	// The zero lastFetch is never within the TTL, so this performs the initial
+	// load; the failure is already wrapped with ErrFetchCatalog.
+	err := store.ensureCatalog(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrFetchCatalog, err)
+		return nil, err
 	}
 
 	return store, nil
@@ -237,7 +238,9 @@ func (s *SchemaStore) FindMatch(ctx context.Context, filePath string) (CatalogEn
 	defer s.mu.RUnlock()
 
 	for _, entry := range s.entries {
-		if matchGlobPatterns(filePath, entry.FileMatch) {
+		// Match against both the full path and the base name, since SchemaStore
+		// patterns may or may not include directory components.
+		if filepaths.MatchAnyWithBase(filePath, entry.FileMatch) {
 			return entry, true
 		}
 	}
@@ -273,61 +276,21 @@ func (s *SchemaStore) ensureCatalog(ctx context.Context) error {
 	return nil
 }
 
-// fetchCatalog retrieves the catalog from the configured URL and stores
-// the filtered entries. Acquires the write lock internally.
-func (s *SchemaStore) fetchCatalog(ctx context.Context) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Double-check after acquiring write lock.
-	if s.entries != nil && s.cacheTTL > 0 && time.Since(s.lastFetch) < s.cacheTTL {
-		return nil
-	}
-
-	return s.fetchCatalogLocked(ctx)
-}
-
-// maxCatalogSize is the maximum size of the catalog response body.
-const maxCatalogSize = 10 * 1024 * 1024 // 10 MB.
-
 // fetchCatalogLocked retrieves the catalog from the configured URL and stores
 // the filtered entries. Caller must hold the write lock.
+//
+// The fetch (HTTP GET with a size limit) is shared with [loader.URL]; only the
+// catalog JSON parsing is specific to SchemaStore.
 func (s *SchemaStore) fetchCatalogLocked(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.catalogURL, http.NoBody)
+	result, err := loader.URL(s.catalogURL, loader.WithHTTPClient(s.client)).Load(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("create request for %s: %w", s.catalogURL, err)
-	}
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("fetch %s: %w", s.catalogURL, err)
-	}
-	defer resp.Body.Close() //nolint:errcheck // Best-effort close.
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("fetch %s: status %d", s.catalogURL, resp.StatusCode)
-	}
-
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxCatalogSize))
-	if err != nil {
-		return fmt.Errorf("read response from %s: %w", s.catalogURL, err)
-	}
-
-	// If we read exactly maxCatalogSize bytes, try reading one more to detect
-	// if the response was truncated. If we can read another byte (err == nil)
-	// or get any error other than EOF, the actual size exceeds our limit.
-	if int64(len(data)) == maxCatalogSize {
-		var extra [1]byte
-
-		_, err = resp.Body.Read(extra[:])
-		if err == nil || !errors.Is(err, io.EOF) {
-			return fmt.Errorf("fetch %s: catalog exceeds %d bytes", s.catalogURL, maxCatalogSize)
-		}
+		//nolint:wrapcheck // loader.URL already wraps errors with the catalog URL.
+		return err
 	}
 
 	var catalog Catalog
 
-	err = json.Unmarshal(data, &catalog)
+	err = json.Unmarshal(result.Data, &catalog)
 	if err != nil {
 		return fmt.Errorf("parse catalog from %s: %w", s.catalogURL, err)
 	}
@@ -391,11 +354,4 @@ func filterSupportedPatterns(patterns []string) []string {
 	}
 
 	return result
-}
-
-// matchGlobPatterns checks if a file path matches any of the given glob patterns.
-// Patterns are matched against both the full path and the base name to handle
-// SchemaStore patterns that may or may not include directory components.
-func matchGlobPatterns(filePath string, patterns []string) bool {
-	return filepaths.MatchAnyWithBase(filePath, patterns)
 }

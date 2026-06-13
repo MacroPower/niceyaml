@@ -10,15 +10,16 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/loader"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
 	"go.jacobcolvin.com/niceyaml/schema/registry"
-	"go.jacobcolvin.com/niceyaml/schema/validator"
 )
 
 // Path helpers for tests.
@@ -69,7 +70,7 @@ func TestRegistry_Lookup(t *testing.T) {
 	t.Run("with precompiled validator", func(t *testing.T) {
 		t.Parallel()
 
-		v := validator.MustNew("test.json", schemaData)
+		v := schema.NewValidator(jsonschema.MustCompileJSON(schemaData))
 		reg := registry.New()
 		reg.RegisterFunc(
 			matcher.Content(kindPath, "Deployment"),
@@ -284,13 +285,17 @@ func TestRegistry_DynamicLoader(t *testing.T) {
 				kind, ok := doc.GetValue(kindPath)
 				return ok && (kind == "Deployment" || kind == "Service")
 			}),
-			loader.Custom(func(_ context.Context, doc *niceyaml.DocumentDecoder) ([]byte, string, error) {
+			loader.Func(func(_ context.Context, doc *niceyaml.DocumentDecoder) (loader.Result, error) {
 				kind, _ := doc.GetValue(kindPath)
 				schemaPath := filepath.Join(tmpDir, kind+".json")
-				data, err := os.ReadFile(schemaPath) //nolint:gosec // Test code.
 
-				//nolint:wrapcheck // Test code.
-				return data, schemaPath, err
+				data, err := os.ReadFile(schemaPath) //nolint:gosec // Test code.
+				if err != nil {
+					//nolint:wrapcheck // Test code.
+					return loader.Result{}, err
+				}
+
+				return loader.NewResult(schemaPath, data), nil
 			}),
 		)
 
@@ -334,13 +339,13 @@ func TestRegistry_DynamicLoader(t *testing.T) {
 	})
 }
 
-func TestRegistry_WithValidatorOptions(t *testing.T) {
+func TestRegistry_WithValidateOptions(t *testing.T) {
 	t.Parallel()
 
-	// Create a registry with custom validator options.
+	// Create a registry with custom validate options.
 	schemaData := []byte(`{"type": "object"}`)
 	reg := registry.New(
-		registry.WithValidatorOptions(), // Empty options, just testing it's passed through.
+		registry.WithValidateOptions(), // Empty options, just testing they pass through.
 	)
 	reg.RegisterFunc(
 		matcher.Content(kindPath, "Deployment"),
