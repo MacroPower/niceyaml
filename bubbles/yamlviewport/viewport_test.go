@@ -176,6 +176,7 @@ func TestViewport_Golden(t *testing.T) {
 			height: 10,
 			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
 				m.ToggleWordWrap() // Disable wrap (default is true).
+
 				// XOffset stays at 0 - verifies lines are truncated, not wrapped.
 			},
 		},
@@ -815,6 +816,7 @@ func TestViewport_Revisions(t *testing.T) {
 			setup: func(m *yamlviewport.Model) {
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+
 				// Already at latest (index 1).
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -1244,9 +1246,11 @@ line3: c`
 			if tc.width > 0 {
 				m.SetWidth(tc.width)
 			}
+
 			if tc.height > 0 {
 				m.SetHeight(tc.height)
 			}
+
 			if tc.yaml != "" {
 				m.SetTokens(niceyaml.NewSourceFromTokens(lexer.Tokenize(tc.yaml)))
 			}
@@ -1580,6 +1584,7 @@ func TestViewport_Update(t *testing.T) {
 				// Add a second revision (starts at latest index 1).
 				second := lexer.Tokenize("line1: modified\nline2: changed")
 				m.AddRevision(niceyaml.NewSourceFromTokens(second, niceyaml.WithName("change")))
+
 				// Now at index 1 (latest).
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -1626,6 +1631,7 @@ func TestViewport_Update(t *testing.T) {
 			if tc.golden {
 				golden.RequireEqual(t, updated.View())
 			}
+
 			if tc.test != nil {
 				tc.test(t, &updated)
 			}
@@ -1667,6 +1673,7 @@ func TestViewport_KeyMap(t *testing.T) {
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
+
 				// Default 'j' should not work anymore (since we changed the binding).
 				updated, _ := m.Update(tea.KeyPressMsg{Code: 'j'})
 				assert.Equal(t, 0, updated.YOffset())
@@ -1682,6 +1689,7 @@ func TestViewport_KeyMap(t *testing.T) {
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
+
 				// 'j' should not work.
 				updated, _ := m.Update(tea.KeyPressMsg{Code: 'j'})
 				assert.Equal(t, 0, updated.YOffset())
@@ -1774,6 +1782,7 @@ func TestViewport_RevisionDeduplication(t *testing.T) {
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
+
 				// Content should render (not crash).
 				view := m.View()
 				assert.Contains(t, view, "name")
@@ -1911,6 +1920,7 @@ func TestViewModeHunks_Golden(t *testing.T) {
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				m.SetViewMode(yamlviewport.ViewModeHunks)
+
 				// Default is at latest (index 2).
 			},
 			width:  80,
@@ -2275,6 +2285,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 				m.GoToRevision(1)
 				m.SetViewMode(yamlviewport.ViewModeSideBySide)
 				m.SetSearchTerm("name") // Appears on both deleted and inserted lines.
+
 				// First match is selected by default (before/deleted line).
 			},
 			width:  80,
@@ -2425,6 +2436,7 @@ func TestViewMode_Behavior(t *testing.T) {
 			if tc.width > 0 {
 				m.SetWidth(tc.width)
 			}
+
 			if tc.height > 0 {
 				m.SetHeight(tc.height)
 			}

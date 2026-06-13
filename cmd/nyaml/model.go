@@ -108,11 +108,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle theme picker input.
 		if m.themePicking {
 			m.updateThemeInput(msg)
+
 			return m, nil
 		}
 
 		if m.searching {
 			m.updateSearchInput(msg)
+
 			return m, nil
 		}
 
@@ -292,6 +294,7 @@ func (m *model) titleLine() string {
 	}
 
 	var titleText string
+
 	if revisionInfo != "" {
 		titleText = fmt.Sprintf(" %s [%d] ", revisionInfo, m.viewport.YOffset()+1)
 	} else {
@@ -497,12 +500,14 @@ func (m *model) renderThemeOverlay() string {
 
 	// Build theme list content.
 	var items []string
+
 	for i := scrollOffset; i < len(m.themeList) && len(items) < visibleItems; i++ {
 		name := m.themeList[i]
 		prefix := "  "
 		if i == m.themeIndex {
 			prefix = "> "
 		}
+
 		// Truncate name if too long.
 		maxNameLen := overlayWidth - 6
 		if len(name) > maxNameLen {

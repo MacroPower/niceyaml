@@ -84,6 +84,7 @@ func printDiffSummary(p *niceyaml.Printer, before, after string, context int) st
 // testFinder returns a Finder configured for testing.
 func testFinder(norm niceyaml.Normalizer) *niceyaml.Finder {
 	var opts []niceyaml.FinderOption
+
 	if norm != nil {
 		opts = append(opts, niceyaml.WithNormalizer(norm))
 	}
@@ -882,6 +883,7 @@ func TestPrinter_PrintTokenDiff_WithWordWrap(t *testing.T) {
 
 			if tc.wantExact != "" {
 				assert.Equal(t, tc.wantExact, got)
+
 				return
 			}
 
@@ -1927,11 +1929,13 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 
 			if tc.wantEmpty {
 				assert.Empty(t, got)
+
 				return
 			}
 
 			if tc.wantExact != "" {
 				assert.Equal(t, tc.wantExact, got)
+
 				return
 			}
 

@@ -26,6 +26,7 @@ func FirstDocumentWithPath(t *testing.T, input, filePath string) *niceyaml.Docum
 	t.Helper()
 
 	var opts []niceyaml.SourceOption
+
 	if filePath != "" {
 		opts = append(opts, niceyaml.WithFilePath(filePath))
 	}

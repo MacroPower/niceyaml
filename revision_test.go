@@ -267,6 +267,7 @@ func TestRevision_Names(t *testing.T) {
 
 			// Build the revision chain.
 			var revs []*niceyaml.Revision
+
 			for i, revName := range tc.revisions {
 				source := niceyaml.NewSourceFromString(revName+": data", niceyaml.WithName(revName))
 				if i == 0 {

@@ -12,6 +12,7 @@ import (
 // Each line is a simple key-value pair: "key_N: value_N".
 func generateYAML(lines int) string {
 	var sb strings.Builder
+
 	sb.Grow(lines * 25) // Approximate bytes per line.
 
 	for i := range lines {

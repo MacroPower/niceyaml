@@ -39,6 +39,7 @@ func BenchmarkFullDiffSource(b *testing.B) {
 		b.Run(sz.name+"/all_changed", func(b *testing.B) {
 			// Generate completely different content.
 			var sb strings.Builder
+
 			for i := range sz.lines {
 				fmt.Fprintf(&sb, "different_key_%d: different_value_%d\n", i, i)
 			}
@@ -58,6 +59,7 @@ func BenchmarkFullDiffSource(b *testing.B) {
 		b.Run(sz.name+"/partial_changes", func(b *testing.B) {
 			// Change 10% of lines.
 			var sb strings.Builder
+
 			for i := range sz.lines {
 				if i%10 == 0 {
 					fmt.Fprintf(&sb, "modified_key_%d: modified_value_%d\n", i, i)
@@ -99,6 +101,7 @@ func BenchmarkHunksDiffSource(b *testing.B) {
 
 		// Create B with 10% changed lines.
 		var sb strings.Builder
+
 		for i := range sz.lines {
 			if i%10 == 0 {
 				fmt.Fprintf(&sb, "modified_key_%d: modified_value_%d\n", i, i)
@@ -130,6 +133,7 @@ func BenchmarkFullDiffSource_WorstCase(b *testing.B) {
 	for _, size := range sizes {
 		// Before: even numbers.
 		var sbA strings.Builder
+
 		for i := 0; i < size; i += 2 {
 			fmt.Fprintf(&sbA, "line_%d: value_%d\n", i, i)
 		}
@@ -138,6 +142,7 @@ func BenchmarkFullDiffSource_WorstCase(b *testing.B) {
 
 		// After: odd numbers.
 		var sbB strings.Builder
+
 		for i := 1; i < size; i += 2 {
 			fmt.Fprintf(&sbB, "line_%d: value_%d\n", i, i)
 		}
@@ -170,6 +175,7 @@ func BenchmarkFullDiffSource_InsertAtEnd(b *testing.B) {
 
 		// Same content + 10% more at the end.
 		var sb strings.Builder
+
 		sb.WriteString(yamlA)
 
 		for i := size; i < size+size/10; i++ {

@@ -8,6 +8,12 @@ import (
 	"github.com/goccy/go-yaml/token"
 )
 
+// Names for the two sides of a token comparison.
+const (
+	whichWant = "want"
+	whichGot  = "got"
+)
+
 // Sentinel errors for token validation.
 var (
 	// ErrNilToken indicates a token is nil.
@@ -105,7 +111,7 @@ func (d TokensDiff) String() string {
 				sb.WriteString("\n")
 			}
 
-			sb.WriteString(fmt.Sprintf("token %d: %s", i, diff.String()))
+			fmt.Fprintf(&sb, "token %d: %s", i, diff.String())
 		}
 	}
 
@@ -139,19 +145,19 @@ func (d ContentDiff) String() string {
 // Returns nil if both tokens are valid, or a [*TokenValidationError] if not.
 func ValidateTokenPair(want, got *token.Token) error {
 	if want == nil {
-		return &TokenValidationError{Index: -1, Which: "want", Reason: ErrNilToken}
+		return &TokenValidationError{Index: -1, Which: whichWant, Reason: ErrNilToken}
 	}
 
 	if want.Position == nil {
-		return &TokenValidationError{Index: -1, Which: "want", Reason: ErrNilPosition}
+		return &TokenValidationError{Index: -1, Which: whichWant, Reason: ErrNilPosition}
 	}
 
 	if got == nil {
-		return &TokenValidationError{Index: -1, Which: "got", Reason: ErrNilToken}
+		return &TokenValidationError{Index: -1, Which: whichGot, Reason: ErrNilToken}
 	}
 
 	if got.Position == nil {
-		return &TokenValidationError{Index: -1, Which: "got", Reason: ErrNilPosition}
+		return &TokenValidationError{Index: -1, Which: whichGot, Reason: ErrNilPosition}
 	}
 
 	return nil
@@ -169,19 +175,19 @@ func ValidateTokens(want, got token.Tokens) error {
 
 	for i := range want {
 		if want[i] == nil {
-			return &TokenValidationError{Index: i, Which: "want", Reason: ErrNilToken}
+			return &TokenValidationError{Index: i, Which: whichWant, Reason: ErrNilToken}
 		}
 
 		if want[i].Position == nil {
-			return &TokenValidationError{Index: i, Which: "want", Reason: ErrNilPosition}
+			return &TokenValidationError{Index: i, Which: whichWant, Reason: ErrNilPosition}
 		}
 
 		if got[i] == nil {
-			return &TokenValidationError{Index: i, Which: "got", Reason: ErrNilToken}
+			return &TokenValidationError{Index: i, Which: whichGot, Reason: ErrNilToken}
 		}
 
 		if got[i].Position == nil {
-			return &TokenValidationError{Index: i, Which: "got", Reason: ErrNilPosition}
+			return &TokenValidationError{Index: i, Which: whichGot, Reason: ErrNilPosition}
 		}
 	}
 
@@ -409,6 +415,7 @@ func (b *TokenBuilder) Build() *token.Token {
 // reconstructing the original source text.
 func DumpTokenOrigins(tks token.Tokens) string {
 	var sb strings.Builder
+
 	for _, tk := range tks {
 		sb.WriteString(tk.Origin)
 	}
@@ -449,12 +456,13 @@ func FormatTokens(tks token.Tokens) string {
 	}
 
 	var sb strings.Builder
+
 	for i, tk := range tks {
 		if i > 0 {
 			sb.WriteString("\n")
 		}
 
-		sb.WriteString(fmt.Sprintf("[%d]\n%s", i, FormatToken(tk)))
+		fmt.Fprintf(&sb, "[%d]\n%s", i, FormatToken(tk))
 	}
 
 	return sb.String()

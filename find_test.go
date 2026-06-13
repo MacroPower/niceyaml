@@ -326,6 +326,7 @@ func TestFinder_Find(t *testing.T) {
 			lines := niceyaml.NewSourceFromString(tc.input)
 
 			var opts []niceyaml.FinderOption
+
 			if tc.normalizer != nil {
 				opts = append(opts, niceyaml.WithNormalizer(tc.normalizer))
 			}

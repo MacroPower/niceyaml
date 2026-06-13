@@ -252,6 +252,7 @@ func (r *DiffResult) getAlignedRows() []alignedRow {
 
 				// Collect consecutive inserts that follow.
 				var inserts []lineOp
+
 				if i < len(r.ops) && r.ops[i].kind == diff.OpInsert {
 					inserts = collectConsecutive(r.ops, i, diff.OpInsert)
 					i += len(inserts)
@@ -348,6 +349,7 @@ func (r *DiffResult) After() *Source {
 // index i.
 func collectConsecutive(ops []lineOp, i int, kind diff.OpKind) []lineOp {
 	var result []lineOp
+
 	for i < len(ops) && ops[i].kind == kind {
 		result = append(result, ops[i])
 		i++
@@ -451,6 +453,7 @@ func formatHunkHeader(span position.Span, beforeSums, afterSums *position.Prefix
 func selectHunkSpans(ops []lineOp, context int) position.Spans {
 	// Collect indices of non-equal operations.
 	var changeIndices []int
+
 	for i, op := range ops {
 		if op.kind != diff.OpEqual {
 			changeIndices = append(changeIndices, i)

@@ -457,6 +457,7 @@ func TestNewLines_GappedLineNumbers(t *testing.T) {
 						tk.Position.Line += 9 // Shift to lines 10, 11.
 					}
 				}
+
 				// Build tokens for lines 40-41.
 				tks2 := lexer.Tokenize("key3: value3\nkey4: value4\n")
 				for _, tk := range tks2 {
@@ -464,6 +465,7 @@ func TestNewLines_GappedLineNumbers(t *testing.T) {
 						tk.Position.Line += 39 // Shift to lines 40, 41.
 					}
 				}
+
 				// Combine them.
 				combined := token.Tokens{}
 
@@ -845,6 +847,7 @@ func TestNewLines_Value_PrevNextLinking(t *testing.T) {
 				if tk.Next != nil {
 					assert.Equal(t, tk, tk.Next.Prev, "Next.Prev should point back")
 				}
+
 				if tk.Prev != nil {
 					assert.Equal(t, tk, tk.Prev.Next, "Prev.Next should point forward")
 				}
@@ -1176,6 +1179,7 @@ func TestNewLines_SplitTokenOffsets(t *testing.T) {
 			lines := line.NewLines(lexer.Tokenize(input))
 
 			var prevOffset int
+
 			for i := range lines {
 				ln := lines[i]
 				for _, tk := range ln.Tokens() {
@@ -1232,6 +1236,7 @@ func TestNewLines_OffsetRuneCount(t *testing.T) {
 
 	// Also verify total bytes match for Origin content preservation.
 	var origTotalBytes, resultTotalBytes int
+
 	for _, tk := range originalTks {
 		origTotalBytes += len(tk.Origin)
 	}
@@ -1354,6 +1359,7 @@ func TestNewLines_BlockScalars(t *testing.T) {
 				require.True(t, diff.Equal(), diff.String())
 
 				var contentToken *token.Token
+
 				for _, tk := range resultTks {
 					if tk.Type == token.StringType && strings.Contains(tk.Origin, "\n") {
 						contentToken = tk
@@ -1480,6 +1486,7 @@ func TestNewLines_BlockScalars(t *testing.T) {
 				require.True(t, diff.Equal(), diff.String())
 
 				var contentToken *token.Token
+
 				for _, tk := range resultTks {
 					if tk.Type == token.StringType && strings.Contains(tk.Origin, "\n") {
 						contentToken = tk
@@ -1548,6 +1555,7 @@ func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 
 			// Find the multiline StringType token (value with newlines).
 			var contentToken *token.Token
+
 			for _, tk := range resultTks {
 				if tk.Type == token.StringType && strings.Contains(tk.Origin, "\n") {
 					contentToken = tk
@@ -1616,6 +1624,7 @@ func TestNewLines_QuotedMultilineActualNewlines(t *testing.T) {
 
 			// Find the quoted token.
 			var quotedToken *token.Token
+
 			for _, tk := range resultTks {
 				if tk.Type == tc.wantTokenType {
 					quotedToken = tk
@@ -1694,6 +1703,7 @@ func TestEmptyAndZeroValues(t *testing.T) {
 		t.Parallel()
 
 		var l line.Line
+
 		assert.Equal(t, 0, l.Number())
 		assert.True(t, l.IsEmpty())
 		assert.Empty(t, l.Content())
@@ -1715,6 +1725,7 @@ func TestEmptyAndZeroValues(t *testing.T) {
 		t.Parallel()
 
 		var lines line.Lines
+
 		assert.Nil(t, lines.Tokens())
 		assert.NoError(t, lines.Validate())
 	})
@@ -1909,6 +1920,7 @@ func TestNewLines_BlankLineAbsorption(t *testing.T) {
 		// Verify the blank line is in the value token's Origin.
 		// The value token should have Origin " value\n\n" (two newlines).
 		var valueToken *token.Token
+
 		for _, tk := range result {
 			if tk.Value == "value" {
 				valueToken = tk
@@ -1937,6 +1949,7 @@ func TestNewLines_BlankLineAbsorption(t *testing.T) {
 		require.True(t, diff.Equal(), diff.String())
 
 		var valueToken *token.Token
+
 		for _, tk := range result {
 			if tk.Value == "value" {
 				valueToken = tk
@@ -1995,6 +2008,7 @@ func TestNewLines_FoldedBlockBlankLines(t *testing.T) {
 
 		// Find the content token.
 		var contentToken *token.Token
+
 		for _, tk := range result {
 			if tk.Type == token.StringType && strings.Contains(tk.Origin, "first") {
 				contentToken = tk
@@ -2024,6 +2038,7 @@ func TestNewLines_FoldedBlockBlankLines(t *testing.T) {
 		require.True(t, diff.Equal(), diff.String())
 
 		var contentToken *token.Token
+
 		for _, tk := range result {
 			if tk.Type == token.StringType && strings.Contains(tk.Origin, "first") {
 				contentToken = tk
@@ -2053,6 +2068,7 @@ func TestNewLines_FoldedBlockBlankLines(t *testing.T) {
 		require.True(t, diff.Equal(), diff.String())
 
 		var contentToken *token.Token
+
 		for _, tk := range result {
 			if tk.Type == token.StringType && strings.Contains(tk.Origin, "first") {
 				contentToken = tk
@@ -2120,6 +2136,7 @@ func TestLines_TokenPositions(t *testing.T) {
 		// Find the literal content token from original lexer tokens.
 		// It's the StringType token whose Origin contains "line1".
 		var tk *token.Token
+
 		for _, lexTk := range tks {
 			if lexTk.Type == token.StringType && strings.Contains(lexTk.Origin, "line1") {
 				tk = lexTk
@@ -2179,6 +2196,7 @@ func TestLines_TokenPositions(t *testing.T) {
 
 		// Find the "value" token from original lexer tokens.
 		var tk *token.Token
+
 		for _, lexTk := range tks {
 			if lexTk.Value == "value" {
 				tk = lexTk
@@ -2307,6 +2325,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		// Find the literal content token from original lexer tokens.
 		// It's the StringType token whose Origin contains "line1".
 		var tk *token.Token
+
 		for _, lexTk := range tks {
 			if lexTk.Type == token.StringType && strings.Contains(lexTk.Origin, "line1") {
 				tk = lexTk
@@ -2501,6 +2520,7 @@ func TestLines_Content_Empty(t *testing.T) {
 		t.Parallel()
 
 		var lines line.Lines
+
 		assert.Empty(t, lines.Content())
 	})
 
@@ -2532,6 +2552,7 @@ func TestLine_Number_Fallbacks(t *testing.T) {
 
 		// Create an empty Line directly.
 		var ln line.Line
+
 		assert.Equal(t, 0, ln.Number())
 	})
 
@@ -2897,6 +2918,7 @@ func TestLines_AddOverlay(t *testing.T) {
 		t.Parallel()
 
 		var lines line.Lines
+
 		// Should not panic on empty lines.
 		lines.AddOverlay("test1", position.NewRange(position.New(0, 0), position.New(0, 5)))
 
@@ -3087,6 +3109,7 @@ func TestLines_ContentPositionRangesAt(t *testing.T) {
 		t.Parallel()
 
 		var lines line.Lines
+
 		assert.Nil(t, lines.ContentPositionRangesAt(position.New(0, 0)))
 	})
 

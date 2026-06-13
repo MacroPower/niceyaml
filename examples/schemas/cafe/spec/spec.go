@@ -41,7 +41,7 @@ type Menu struct {
 
 // JSONSchemaExtend extends the generated JSON schema.
 func (m Menu) JSONSchemaExtend(js *jsonschema.Schema) {
-	js.Properties["items"].MinItems = jsonschema.Ptr(1)
+	js.Properties["items"].MinItems = new(1)
 }
 
 // MenuItem represents a single item on the menu.
@@ -62,8 +62,8 @@ type MenuItem struct {
 
 // JSONSchemaExtend extends the generated JSON schema.
 func (m MenuItem) JSONSchemaExtend(js *jsonschema.Schema) {
-	js.Properties["name"].MinLength = jsonschema.Ptr(1)
-	js.Properties["price"].Minimum = jsonschema.Ptr(0.0)
+	js.Properties["name"].MinLength = new(1)
+	js.Properties["price"].Minimum = new(0.0)
 }
 
 // Staff defines staffing requirements.
@@ -77,10 +77,10 @@ type Staff struct {
 // JSONSchemaExtend extends the generated JSON schema.
 func (s Staff) JSONSchemaExtend(js *jsonschema.Schema) {
 	baristas := js.Properties["baristas"]
-	baristas.Minimum = jsonschema.Ptr(1.0)
-	baristas.Maximum = jsonschema.Ptr(10.0)
+	baristas.Minimum = new(1.0)
+	baristas.Maximum = new(10.0)
 
-	js.Properties["managers"].Minimum = jsonschema.Ptr(1.0)
+	js.Properties["managers"].Minimum = new(1.0)
 }
 
 // Hours defines operating hours for the cafe.

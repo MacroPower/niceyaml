@@ -75,6 +75,7 @@ func New(opts ...Option) *Normalizer {
 	transformers = append(transformers, cfg.transformers...)
 
 	var t transform.Transformer
+
 	switch len(transformers) {
 	case 0:
 		t = transform.Nop
@@ -133,6 +134,7 @@ func (n *Normalizer) Normalize(in string) string {
 	out, _, err := transform.String(n.transformer, in)
 	if err != nil {
 		slog.Debug("normalize string", slog.Any("error", err))
+
 		return in
 	}
 

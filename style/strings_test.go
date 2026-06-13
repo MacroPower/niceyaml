@@ -191,10 +191,12 @@ func TestParse(t *testing.T) {
 			s, err := style.Parse(tt.input)
 			if tt.err != nil {
 				require.ErrorIs(t, err, tt.err)
+
 				return
 			}
 
 			require.NoError(t, err)
+
 			if tt.check != nil {
 				tt.check(t, s)
 			}

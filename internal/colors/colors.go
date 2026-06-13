@@ -39,6 +39,7 @@ func Blend(c1, c2 color.Color) color.Color {
 	if noColor1 {
 		return c2
 	}
+
 	if noColor2 {
 		return c1
 	}
@@ -49,6 +50,7 @@ func Blend(c1, c2 color.Color) color.Color {
 	if !visible1 {
 		return c2
 	}
+
 	if !visible2 {
 		return c1
 	}
@@ -187,6 +189,7 @@ func (b *Blender) Blend(base, overlay *lipgloss.Style, override bool) *lipgloss.
 	}
 
 	var result *lipgloss.Style
+
 	if override {
 		result = OverrideStyles(base, overlay)
 	} else {

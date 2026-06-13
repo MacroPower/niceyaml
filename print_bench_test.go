@@ -232,6 +232,7 @@ func BenchmarkPrinterWithGutter(b *testing.B) {
 func BenchmarkPrinterWithWrapping(b *testing.B) {
 	// Generate YAML with long lines.
 	var sb strings.Builder
+
 	for i := range 200 {
 		fmt.Fprintf(&sb, "long_key_%d: \"%s\"\n", i, strings.Repeat("x", 200))
 	}

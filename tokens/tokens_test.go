@@ -1079,6 +1079,7 @@ func TestSplitDocuments(t *testing.T) {
 		input := token.Tokens{doc1, header, doc2}
 
 		var got []token.Tokens
+
 		for _, tks := range tokens.SplitDocuments(input) {
 			got = append(got, tks)
 
@@ -1132,6 +1133,7 @@ func TestSplitDocuments(t *testing.T) {
 		}
 
 		var got []token.Tokens
+
 		for _, tks := range tokens.SplitDocuments(input) {
 			got = append(got, tks)
 

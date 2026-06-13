@@ -216,6 +216,7 @@ func (m *Model) SetWidth(w int) {
 	if m.width != w {
 		m.width = w
 		m.updatePrinterWidth()
+
 		if m.WrapEnabled {
 			m.rerender()
 		}
@@ -443,9 +444,11 @@ func (m *Model) seekRevision(delta int) {
 	if !m.hasRevision() {
 		return
 	}
+
 	if delta > 0 && m.revision.AtTip() {
 		return
 	}
+
 	if delta < 0 && m.revision.AtOrigin() {
 		return
 	}
@@ -977,6 +980,7 @@ func (m *Model) VisibleLineCount() int {
 func (m *Model) SetSearchTerm(term string) {
 	if term == "" {
 		m.ClearSearch()
+
 		return
 	}
 
@@ -1143,6 +1147,7 @@ func (m *Model) getViewDimensions() (int, int, bool) {
 	if sw := m.Style.GetWidth(); sw != 0 {
 		w = min(w, sw)
 	}
+
 	if sh := m.Style.GetHeight(); sh != 0 {
 		h = min(h, sh)
 	}
@@ -1230,6 +1235,7 @@ const sideBySideSeparator = " │ "
 func (m Model) renderSideBySide(contentW, contentH int) string {
 	// Get iterators for both panes.
 	var leftIter, rightIter niceyaml.LineIterator
+
 	if src, needsDiff := m.resolveRevisionSource(); !needsDiff {
 		// Not showing a diff: show same content on both sides.
 		if src == nil {
@@ -1292,9 +1298,11 @@ func (m Model) renderSideBySide(contentW, contentH int) string {
 	combined := make([]string, maxLines)
 	for i := range combined {
 		var left, right string
+
 		if i < len(leftLines) {
 			left = leftLines[i]
 		}
+
 		if i < len(rightLines) {
 			right = rightLines[i]
 		}

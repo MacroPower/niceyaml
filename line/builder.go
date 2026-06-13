@@ -1,6 +1,7 @@
 package line
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/goccy/go-yaml/token"
@@ -420,6 +421,7 @@ func countLeadingNewlines(s string) int {
 		if r == '\r' {
 			continue // Skip CR in CRLF.
 		}
+
 		if r != '\n' {
 			break
 		}
@@ -451,6 +453,7 @@ func isBlockScalarContent(tk *token.Token) bool {
 	if tk.Type != token.StringType {
 		return false
 	}
+
 	// Walk backwards through Prev chain, skipping comments.
 	for prev := tk.Prev; prev != nil; prev = prev.Prev {
 		switch prev.Type {
@@ -493,6 +496,7 @@ func splitOriginIntoParts(origin string) []string {
 	}
 
 	var parts []string
+
 	for _, p := range strings.SplitAfter(origin, "\n") {
 		if p != "" {
 			parts = append(parts, p)
@@ -507,8 +511,8 @@ func splitOriginIntoParts(origin string) []string {
 //
 // Used to identify which part should receive the Value for block scalars.
 func findLastContentPartIndex(parts []string) int {
-	for i := len(parts) - 1; i >= 0; i-- {
-		if !isPureNewline(parts[i]) {
+	for i, v := range slices.Backward(parts) {
+		if !isPureNewline(v) {
 			return i
 		}
 	}

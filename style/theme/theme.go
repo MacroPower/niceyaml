@@ -123,6 +123,7 @@ func Register(name string, fn func() style.Styles, mode style.Mode) {
 // The returned list includes both built-in and registered custom themes.
 func List(m style.Mode) []string {
 	var names []string
+
 	for _, t := range themes {
 		if t.Mode == m {
 			names = append(names, t.Name)
@@ -148,8 +149,10 @@ func List(m style.Mode) []string {
 // themes with the same name.
 func Styles(name string) (style.Styles, bool) {
 	customMu.RLock()
+
 	if t, ok := customThemes[name]; ok {
 		customMu.RUnlock()
+
 		return t.Styles(), true
 	}
 

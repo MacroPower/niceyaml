@@ -215,6 +215,7 @@ func (r *Registry) loadValidator(
 
 	// Get or compile validator.
 	var v niceyaml.SchemaValidator
+
 	if result.Validator != nil {
 		// Pre-compiled validator provided.
 		v = result.Validator

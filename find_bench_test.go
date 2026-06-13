@@ -140,6 +140,7 @@ func BenchmarkFinderFind_SearchLength(b *testing.B) {
 func BenchmarkFinderFind_UnicodeContent(b *testing.B) {
 	// Generate YAML with unicode content.
 	var sb strings.Builder
+
 	for i := range 500 {
 		fmt.Fprintf(&sb, "key_%d: \"Héllo Wörld Ñoño %d\"\n", i, i)
 	}
@@ -242,6 +243,7 @@ func BenchmarkFinderFind_MatchDensity(b *testing.B) {
 
 	for _, d := range densities {
 		var sb strings.Builder
+
 		for i := range 1000 {
 			if i%d.matchEveryN == 0 {
 				fmt.Fprintf(&sb, "key_%d: FINDME_%d\n", i, i)

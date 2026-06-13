@@ -58,6 +58,7 @@ func TokenizeDocuments(src string, opts ...TokenizeDocumentsOption) iter.Seq2[in
 			docIdx  int
 			current token.Tokens
 		)
+
 		s.Init(src)
 
 		yieldDoc := func(doc token.Tokens) bool {

@@ -248,6 +248,7 @@ func (s *SchemaStore) FindMatch(ctx context.Context, filePath string) (CatalogEn
 // ensureCatalog refreshes the catalog if the cache has expired.
 func (s *SchemaStore) ensureCatalog(ctx context.Context) error {
 	s.mu.RLock()
+
 	if s.cacheTTL > 0 && time.Since(s.lastFetch) < s.cacheTTL {
 		s.mu.RUnlock()
 

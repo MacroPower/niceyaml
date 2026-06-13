@@ -37,6 +37,7 @@ func TestCustom(t *testing.T) {
 		require.NoError(t, err)
 
 		var doc *niceyaml.DocumentDecoder
+
 		for _, d := range decoder.Documents() {
 			doc = d
 

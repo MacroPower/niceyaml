@@ -398,6 +398,7 @@ func TestRanges_UniqueValues(t *testing.T) {
 		t.Parallel()
 
 		var rs position.Ranges
+
 		assert.Nil(t, rs.UniqueValues())
 	})
 
@@ -452,6 +453,7 @@ func TestRanges_LineIndices(t *testing.T) {
 		t.Parallel()
 
 		var rs position.Ranges
+
 		assert.Nil(t, rs.LineIndices())
 	})
 

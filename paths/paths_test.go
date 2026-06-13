@@ -314,6 +314,7 @@ func TestPath_NilHandling(t *testing.T) {
 		t.Parallel()
 
 		var path *paths.Path
+
 		assert.Empty(t, path.String())
 	})
 
@@ -321,6 +322,7 @@ func TestPath_NilHandling(t *testing.T) {
 		t.Parallel()
 
 		var path *paths.Path
+
 		assert.Equal(t, paths.PartValue, path.Part())
 	})
 
@@ -328,6 +330,7 @@ func TestPath_NilHandling(t *testing.T) {
 		t.Parallel()
 
 		var path *paths.Path
+
 		assert.Nil(t, path.Path())
 	})
 }

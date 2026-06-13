@@ -69,6 +69,7 @@ func (l Line) Number() int {
 // single-line representation.
 func (l Line) Content() string {
 	var sb strings.Builder
+
 	for _, seg := range l.segments {
 		part := seg.Part()
 		origin := strings.TrimSuffix(part.Origin, "\n")
@@ -85,12 +86,14 @@ func (l Line) Content() string {
 // unmodified tokens.
 func (l Line) Clone() Line {
 	var ann Annotations
+
 	if len(l.Annotations) > 0 {
 		ann = make(Annotations, len(l.Annotations))
 		copy(ann, l.Annotations)
 	}
 
 	var ovl Overlays
+
 	if len(l.Overlays) > 0 {
 		ovl = make(Overlays, len(l.Overlays))
 		copy(ovl, l.Overlays)
@@ -163,6 +166,7 @@ func (l Line) IsEmpty() bool {
 // Width returns the total rune width of this line's content.
 func (l Line) Width() int {
 	var w int
+
 	for _, seg := range l.segments {
 		w += seg.Width()
 	}
@@ -268,6 +272,7 @@ func (ls Lines) Tokens() token.Tokens {
 	}
 
 	var combined tokens.Segments
+
 	for _, line := range ls {
 		combined = combined.Merge(line.segments)
 	}
@@ -286,6 +291,7 @@ func (ls Lines) TokenPositions(tk *token.Token) []position.Position {
 	}
 
 	var positions []position.Position
+
 	for i, l := range ls {
 		positions = append(positions, l.tokenPositions(i, tk)...)
 	}
@@ -315,6 +321,7 @@ func (ls Lines) TokenPositionRanges(tk *token.Token) position.Ranges {
 	}
 
 	var ranges position.Ranges
+
 	for i, l := range ls {
 		ranges = append(ranges, l.tokenPositionRanges(i, tk)...)
 	}
@@ -373,6 +380,7 @@ func (ls Lines) Content() string {
 // This should generally only be used for debugging.
 func (ls Lines) String() string {
 	var sb strings.Builder
+
 	for i, l := range ls {
 		if i > 0 {
 			sb.WriteByte('\n')
@@ -407,6 +415,7 @@ func (ls Lines) Validate() error {
 				ErrLineNumberNotIncreasing,
 			)
 		}
+
 		if lineNum != 0 {
 			prevLineNum = lineNum
 		}
@@ -416,6 +425,7 @@ func (ls Lines) Validate() error {
 			expectedLineNum = -1
 			prevCol         = 0
 		)
+
 		for j, seg := range line.segments {
 			tk := seg.Part()
 			if tk == nil || tk.Position == nil {

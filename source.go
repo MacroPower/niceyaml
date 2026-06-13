@@ -185,6 +185,7 @@ func NewSourceFromToken(tk *token.Token, opts ...SourceOption) *Source {
 
 	// Collect all tokens forward, filtering parser-only tokens.
 	var tks token.Tokens
+
 	for ; tk != nil; tk = tk.Next {
 		// Avoid calling tks.Add, since it modifies the token's Next/Prev pointers,
 		// which will race with any reads/writes.
@@ -254,6 +255,7 @@ func (s *Source) parse() (*ast.File, error) {
 	}
 
 	var yamlErr yaml.Error
+
 	if errors.As(err, &yamlErr) {
 		return nil, NewError(
 			yamlErr.GetMessage(),
@@ -276,6 +278,7 @@ func (s *Source) WrapError(err error) error {
 	}
 
 	var yamlErr *Error
+
 	if errors.As(err, &yamlErr) {
 		yamlErr.SetOption(s.errorOpts...)
 		yamlErr.SetOption(WithSource(s))
@@ -490,6 +493,7 @@ func (s *Source) ClearOverlays() {
 // Width returns the maximum line width across all lines.
 func (s *Source) Width() int {
 	var maxWidth int
+
 	for _, l := range s.lines {
 		if w := l.Width(); w > maxWidth {
 			maxWidth = w

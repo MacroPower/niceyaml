@@ -105,6 +105,7 @@ func (d *Decoder) Documents() iter.Seq2[int, *DocumentDecoder] {
 
 		for i, doc := range d.file.Docs {
 			var tks token.Tokens
+
 			if nextTokens != nil {
 				_, tks, _ = nextTokens()
 			}
@@ -341,6 +342,7 @@ func (dd *DocumentDecoder) decodeNode(ctx context.Context, v any) error {
 	err := dec.DecodeFromNodeContext(ctx, dd.doc.Body, v)
 	if err != nil {
 		var yamlErr yaml.Error
+
 		if errors.As(err, &yamlErr) {
 			return NewError(
 				yamlErr.GetMessage(),

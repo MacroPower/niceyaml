@@ -222,6 +222,7 @@ func TestTokenizeDocuments(t *testing.T) {
 		docs := collectDocs(lexers.TokenizeDocuments(input))
 
 		require.Len(t, docs, 1)
+
 		// Should contain the end marker token.
 		hasEndMarker := false
 

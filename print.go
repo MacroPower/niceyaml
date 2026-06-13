@@ -349,6 +349,7 @@ func (p *Printer) renderLinesInSpan(t LineIterator, span position.Span) string {
 
 	// Pre-compute gutter width once for consistent wrapping calculations.
 	var gutterWidth int
+
 	if p.gutterFunc != nil {
 		sampleGutter := p.gutterFunc(GutterContext{Styles: p.styles, TotalLines: totalLines})
 		gutterWidth = lipgloss.Width(sampleGutter)
@@ -373,6 +374,7 @@ func (p *Printer) renderLinesInSpan(t LineIterator, span position.Span) string {
 			hasAboveAnnotation bool
 			hasBelowAnnotation bool
 		)
+
 		if p.annotationsEnabled {
 			hasAboveAnnotation = len(ln.Annotations.FilterPosition(line.Above)) > 0
 			hasBelowAnnotation = len(ln.Annotations.FilterPosition(line.Below)) > 0
@@ -565,6 +567,7 @@ func (p *Printer) styleLineWithRanges(
 
 	// Filter overlays that overlap this column span with resolved styles.
 	var active []overlayWithStyle
+
 	for _, o := range overlays {
 		if o.Cols.Overlaps(cols) {
 			if st := p.styles.Style(o.Kind); st != nil {
@@ -587,6 +590,7 @@ func (p *Printer) styleLineWithRanges(
 
 	// Render spans between boundaries, merging adjacent same-styled spans.
 	var sb strings.Builder
+
 	sb.Grow(len(src) * 2)
 
 	runes := []rune(src)
@@ -617,6 +621,7 @@ func (p *Printer) styleLineWithRanges(
 			currentStyle = spanStyle
 			spanStart = boundaryStart
 		}
+
 		// If styles are equal, continue accumulating the span.
 	}
 
@@ -640,6 +645,7 @@ func computeStyleBoundaries(active []overlayWithStyle, cols position.Span) []int
 		if ov.cols.Start > cols.Start && ov.cols.Start < cols.End {
 			boundaries = append(boundaries, ov.cols.Start)
 		}
+
 		if ov.cols.End > cols.Start && ov.cols.End < cols.End {
 			boundaries = append(boundaries, ov.cols.End)
 		}

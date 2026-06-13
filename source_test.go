@@ -306,6 +306,7 @@ func TestSource_AllLines_EarlyBreak(t *testing.T) {
 	lines := niceyaml.NewSourceFromTokens(tks)
 
 	var collected []int
+
 	for pos := range lines.AllLines() {
 		collected = append(collected, pos.Line)
 		if pos.Line >= 1 {
@@ -328,6 +329,7 @@ func TestSource_AllLines_WithSpans(t *testing.T) {
 		t.Parallel()
 
 		var collected []int
+
 		for pos := range source.AllLines() {
 			collected = append(collected, pos.Line)
 		}
@@ -339,6 +341,7 @@ func TestSource_AllLines_WithSpans(t *testing.T) {
 		t.Parallel()
 
 		var collected []int
+
 		for pos := range source.AllLines(position.NewSpan(1, 3)) {
 			collected = append(collected, pos.Line)
 		}
@@ -350,6 +353,7 @@ func TestSource_AllLines_WithSpans(t *testing.T) {
 		t.Parallel()
 
 		var collected []int
+
 		for pos := range source.AllLines(
 			position.NewSpan(0, 1),
 			position.NewSpan(3, 5),
@@ -364,6 +368,7 @@ func TestSource_AllLines_WithSpans(t *testing.T) {
 		t.Parallel()
 
 		var collected []int
+
 		for pos := range source.AllLines(position.NewSpan(-5, 100)) {
 			collected = append(collected, pos.Line)
 		}
@@ -375,6 +380,7 @@ func TestSource_AllLines_WithSpans(t *testing.T) {
 		t.Parallel()
 
 		var collected []int
+
 		for pos := range source.AllLines(position.NewSpan(2, 2)) {
 			collected = append(collected, pos.Line)
 		}
@@ -386,6 +392,7 @@ func TestSource_AllLines_WithSpans(t *testing.T) {
 		t.Parallel()
 
 		var collected []int
+
 		for pos := range source.AllLines(position.NewSpan(10, 20)) {
 			collected = append(collected, pos.Line)
 		}
@@ -413,6 +420,7 @@ func TestSource_AllRunes_EarlyBreak(t *testing.T) {
 	lines := niceyaml.NewSourceFromTokens(tks)
 
 	var collected []rune
+
 	for _, r := range lines.AllRunes() {
 		collected = append(collected, r)
 		if r == 'b' {
@@ -435,6 +443,7 @@ func TestSource_AllRunes_WithRanges(t *testing.T) {
 		t.Parallel()
 
 		var collected []runePosition
+
 		for pos, r := range source.AllRunes() {
 			collected = append(collected, runePosition{R: r, Pos: pos})
 		}
@@ -453,6 +462,7 @@ func TestSource_AllRunes_WithRanges(t *testing.T) {
 		rng := position.NewRange(position.New(1, 0), position.New(1, 4))
 
 		var collected []runePosition
+
 		for pos, r := range source.AllRunes(rng) {
 			collected = append(collected, runePosition{R: r, Pos: pos})
 		}
@@ -476,6 +486,7 @@ func TestSource_AllRunes_WithRanges(t *testing.T) {
 		rng := position.NewRange(position.New(1, 2), position.New(2, 2))
 
 		var collected []runePosition
+
 		for pos, r := range source.AllRunes(rng) {
 			collected = append(collected, runePosition{R: r, Pos: pos})
 		}
@@ -500,6 +511,7 @@ func TestSource_AllRunes_WithRanges(t *testing.T) {
 		rng := position.NewRange(position.New(-5, 0), position.New(100, 100))
 
 		var collected []runePosition
+
 		for pos, r := range source.AllRunes(rng) {
 			collected = append(collected, runePosition{R: r, Pos: pos})
 		}
@@ -517,6 +529,7 @@ func TestSource_AllRunes_WithRanges(t *testing.T) {
 		rng := position.NewRange(position.New(0, 0), position.New(0, 5))
 
 		var collected []runePosition
+
 		for pos, r := range emptySource.AllRunes(rng) {
 			collected = append(collected, runePosition{R: r, Pos: pos})
 		}
@@ -531,6 +544,7 @@ func TestSource_AllRunes_WithRanges(t *testing.T) {
 		rng := position.NewRange(position.New(100, 0), position.New(100, 10))
 
 		var collected []runePosition
+
 		for pos, r := range source.AllRunes(rng) {
 			collected = append(collected, runePosition{R: r, Pos: pos})
 		}
@@ -546,6 +560,7 @@ func TestSource_AllRunes_WithRanges(t *testing.T) {
 		rng2 := position.NewRange(position.New(2, 0), position.New(2, 1)) // 'c'.
 
 		var collected []runePosition
+
 		for pos, r := range source.AllRunes(rng1, rng2) {
 			collected = append(collected, runePosition{R: r, Pos: pos})
 		}
@@ -563,6 +578,7 @@ func TestSource_AllRunes_WithRanges(t *testing.T) {
 		rng := position.NewRange(position.New(0, 0), position.New(2, 10))
 
 		var collected []rune
+
 		for _, r := range source.AllRunes(rng) {
 			collected = append(collected, r)
 			if r == ':' {
@@ -645,6 +661,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 
 		// Calculate where the last token starts.
 		var expectedCol int
+
 		for i := range lastTokenIdx {
 			tk := ln.Token(i)
 			origin := tk.Origin
@@ -1130,6 +1147,7 @@ func TestSource_Parse(t *testing.T) {
 
 		// Verify it's a niceyaml.Error with source annotation.
 		var yamlErr *niceyaml.Error
+
 		require.ErrorAs(t, err, &yamlErr)
 	})
 }
@@ -1477,6 +1495,7 @@ func TestSource_TokenPositionRangesFromToken(t *testing.T) {
 
 		// Find the "key" token.
 		var keyToken *token.Token
+
 		for _, tk := range tks {
 			if tk.Value == "key" {
 				keyToken = tk
@@ -1582,6 +1601,7 @@ func TestSource_ContentPositionRangesFromToken(t *testing.T) {
 
 		// Find the "value" token.
 		var valueToken *token.Token
+
 		for _, tk := range tks {
 			if tk.Value == "value" {
 				valueToken = tk
@@ -1633,6 +1653,7 @@ func TestSource_WrapError(t *testing.T) {
 		require.Error(t, wrapped)
 
 		var gotErr *niceyaml.Error
+
 		require.ErrorAs(t, wrapped, &gotErr)
 	})
 

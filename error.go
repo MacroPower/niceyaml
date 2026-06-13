@@ -187,6 +187,7 @@ func (e Error) Error() string {
 
 	// Build the error header.
 	var header string
+
 	if mainToken != nil {
 		pos := position.NewFromToken(mainToken)
 		header = fmt.Sprintf("[%s] %v:\n", pos.String(), e.err)
@@ -465,6 +466,7 @@ func (e *Error) renderErrorSource(mainToken *token.Token) string {
 	p := e.getPrinter()
 
 	var t *Source
+
 	if mainToken != nil {
 		// Create Source from token to ensure position alignment.
 		t = NewSourceFromToken(mainToken)
@@ -477,6 +479,7 @@ func (e *Error) renderErrorSource(mainToken *token.Token) string {
 
 	// Collect all ranges from positions and apply overlays directly.
 	var allRanges position.Ranges
+
 	for _, pos := range positions {
 		allRanges = append(allRanges, pos.ranges...)
 	}

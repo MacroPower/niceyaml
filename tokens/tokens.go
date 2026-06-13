@@ -39,6 +39,7 @@ type Segment struct {
 // NewSegment creates a new [Segment].
 func NewSegment(source, part *token.Token) Segment {
 	var w int
+
 	if part != nil {
 		w = utf8.RuneCountInString(strings.TrimSuffix(part.Origin, "\n"))
 	}

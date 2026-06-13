@@ -175,10 +175,13 @@ func TestSourceWrapError(t *testing.T) {
 
 			if tc.wantNil {
 				assert.NoError(t, got)
+
 				return
 			}
+
 			if tc.wantSameErr {
 				assert.Equal(t, inputErr, got)
+
 				return
 			}
 
@@ -799,6 +802,7 @@ func TestError_MultiError(t *testing.T) {
 
 		// Find the "foo" token by iterating through tokens.
 		var fooToken *token.Token
+
 		for _, tk := range tokens {
 			if tk.Value == "foo" {
 				fooToken = tk
@@ -935,6 +939,7 @@ func TestError_MultiError(t *testing.T) {
 
 		// The errors.As should find the custom error through the nested errors.
 		var target *customTestError
+
 		require.ErrorAs(t, err, &target)
 		assert.Equal(t, "custom error", target.msg)
 	})

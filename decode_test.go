@@ -292,6 +292,7 @@ func TestDocumentDecoder_Decode(t *testing.T) {
 		require.NoError(t, err)
 
 		var results []testStruct
+
 		for _, dd := range d.Documents() {
 			var result testStruct
 
@@ -325,6 +326,7 @@ func TestDocumentDecoder_Decode_TypeMismatch(t *testing.T) {
 			require.Error(t, err)
 
 			var yamlErr *niceyaml.Error
+
 			require.ErrorAs(t, err, &yamlErr)
 		}
 	})
@@ -507,6 +509,7 @@ key: value`
 	path := paths.Root().Child("key").Path()
 
 	var foundAny bool
+
 	for _, dd := range d.Documents() {
 		_, found := dd.GetValue(path)
 		if found {
@@ -536,6 +539,7 @@ func TestDocumentDecoder_UnmarshalContext_DecodeError(t *testing.T) {
 		require.Error(t, err)
 
 		var yamlErr *niceyaml.Error
+
 		require.ErrorAs(t, err, &yamlErr)
 	}
 }
@@ -762,6 +766,7 @@ func TestDecoder_Documents(t *testing.T) {
 		require.NoError(t, err)
 
 		var count int
+
 		for i, dd := range d.Documents() {
 			assert.Equal(t, count, i)
 			require.NotNil(t, dd)
@@ -788,6 +793,7 @@ func TestDecoder_Documents(t *testing.T) {
 		require.NoError(t, err)
 
 		var count int
+
 		for i, dd := range d.Documents() {
 			assert.Equal(t, count, i)
 			require.NotNil(t, dd)
@@ -814,6 +820,7 @@ func TestDecoder_Documents(t *testing.T) {
 		require.NoError(t, err)
 
 		var count int
+
 		for range d.Documents() {
 			count++
 			if count == 2 {
@@ -915,6 +922,7 @@ func TestWithDecodeOptions(t *testing.T) {
 			require.Error(t, err)
 
 			var yamlErr *niceyaml.Error
+
 			require.ErrorAs(t, err, &yamlErr)
 		}
 	})
@@ -939,6 +947,7 @@ func TestWithDecodeOptions(t *testing.T) {
 			require.Error(t, err)
 
 			var yamlErr *niceyaml.Error
+
 			require.ErrorAs(t, err, &yamlErr)
 		}
 	})
@@ -961,6 +970,7 @@ func TestWithDecodeOptions(t *testing.T) {
 		require.NoError(t, err)
 
 		var errCount int
+
 		for _, dd := range d.Documents() {
 			var result strictConfig
 

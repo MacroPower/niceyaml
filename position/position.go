@@ -70,6 +70,7 @@ func (r Range) Contains(pos Position) bool {
 	if pos.Line < r.Start.Line || (pos.Line == r.Start.Line && pos.Col < r.Start.Col) {
 		return false
 	}
+
 	// At or after end?
 	if pos.Line > r.End.Line || (pos.Line == r.End.Line && pos.Col >= r.End.Col) {
 		return false
@@ -224,6 +225,7 @@ func (rs Ranges) LineIndices() []int {
 	}
 
 	var result []int
+
 	for _, r := range rs {
 		for line := r.Start.Line; line <= r.End.Line; line++ {
 			result = append(result, line)
@@ -240,6 +242,7 @@ func (rs Ranges) String() string {
 	}
 
 	var b strings.Builder
+
 	for i, r := range rs {
 		if i > 0 {
 			b.WriteString(", ")

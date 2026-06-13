@@ -205,6 +205,7 @@ func (f *Finder) buildSourceAndPositionMap(lines LineIterator) (string, *positio
 
 	// Cache normalized forms per unique rune to avoid repeated transform calls.
 	var normalizedCache map[rune]string
+
 	if f.normalizer != nil {
 		normalizedCache = make(map[rune]string)
 	}
@@ -212,6 +213,7 @@ func (f *Finder) buildSourceAndPositionMap(lines LineIterator) (string, *positio
 	for pos, r := range lines.AllRunes() {
 		// Get normalized form of this rune (or original if no normalizer).
 		var normalized string
+
 		if f.normalizer != nil {
 			if cached, ok := normalizedCache[r]; ok {
 				normalized = cached

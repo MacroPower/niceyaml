@@ -91,6 +91,6 @@ type Metadata struct {
 // JSONSchemaExtend extends the generated JSON schema.
 func (m Metadata) JSONSchemaExtend(js *jsonschema.Schema) {
 	name := js.Properties["name"]
-	name.MinLength = jsonschema.Ptr(1)
-	name.MaxLength = jsonschema.Ptr(100)
+	name.MinLength = new(1)
+	name.MaxLength = new(100)
 }

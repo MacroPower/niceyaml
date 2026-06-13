@@ -161,52 +161,52 @@ func TestBlendStyles(t *testing.T) {
 		wantTransform string
 	}{
 		"blends foreground colors": {
-			base:         ptr(lipgloss.NewStyle().Foreground(red)),
-			overlay:      ptr(lipgloss.NewStyle().Foreground(blue)),
+			base:         new(lipgloss.NewStyle().Foreground(red)),
+			overlay:      new(lipgloss.NewStyle().Foreground(blue)),
 			checkFgBlend: true,
 		},
 		"blends background colors": {
-			base:         ptr(lipgloss.NewStyle().Background(red)),
-			overlay:      ptr(lipgloss.NewStyle().Background(blue)),
+			base:         new(lipgloss.NewStyle().Background(red)),
+			overlay:      new(lipgloss.NewStyle().Background(blue)),
 			checkBgBlend: true,
 		},
 		"only base has foreground": {
-			base:    ptr(lipgloss.NewStyle().Foreground(red)),
-			overlay: ptr(lipgloss.NewStyle()),
+			base:    new(lipgloss.NewStyle().Foreground(red)),
+			overlay: new(lipgloss.NewStyle()),
 			wantFg:  red,
 		},
 		"only overlay has foreground": {
-			base:    ptr(lipgloss.NewStyle()),
-			overlay: ptr(lipgloss.NewStyle().Foreground(blue)),
+			base:    new(lipgloss.NewStyle()),
+			overlay: new(lipgloss.NewStyle().Foreground(blue)),
 			wantFg:  blue,
 		},
 		"composes transforms overlay wraps base": {
-			base:          ptr(lipgloss.NewStyle().Transform(lowerTransform)),
-			overlay:       ptr(lipgloss.NewStyle().Transform(upperTransform)),
+			base:          new(lipgloss.NewStyle().Transform(lowerTransform)),
+			overlay:       new(lipgloss.NewStyle().Transform(upperTransform)),
 			transformIn:   "Hello",
 			wantTransform: "HELLO",
 		},
 		"only base has transform": {
-			base:          ptr(lipgloss.NewStyle().Transform(upperTransform)),
-			overlay:       ptr(lipgloss.NewStyle()),
+			base:          new(lipgloss.NewStyle().Transform(upperTransform)),
+			overlay:       new(lipgloss.NewStyle()),
 			transformIn:   "Hello",
 			wantTransform: "HELLO",
 		},
 		"only overlay has transform": {
-			base:          ptr(lipgloss.NewStyle()),
-			overlay:       ptr(lipgloss.NewStyle().Transform(lowerTransform)),
+			base:          new(lipgloss.NewStyle()),
+			overlay:       new(lipgloss.NewStyle().Transform(lowerTransform)),
 			transformIn:   "Hello",
 			wantTransform: "hello",
 		},
 		"neither has transform": {
-			base:          ptr(lipgloss.NewStyle()),
-			overlay:       ptr(lipgloss.NewStyle()),
+			base:          new(lipgloss.NewStyle()),
+			overlay:       new(lipgloss.NewStyle()),
 			transformIn:   "Hello",
 			wantTransform: "Hello",
 		},
 		"full integration": {
-			base:          ptr(lipgloss.NewStyle().Foreground(red).Background(green).Transform(lowerTransform)),
-			overlay:       ptr(lipgloss.NewStyle().Foreground(blue).Background(yellow).Transform(upperTransform)),
+			base:          new(lipgloss.NewStyle().Foreground(red).Background(green).Transform(lowerTransform)),
+			overlay:       new(lipgloss.NewStyle().Foreground(blue).Background(yellow).Transform(upperTransform)),
 			transformIn:   "Hello",
 			checkFgBlend:  true,
 			checkBgBlend:  true,
@@ -272,40 +272,40 @@ func TestOverrideStyles(t *testing.T) {
 		wantTransform string
 	}{
 		"overlay foreground replaces base": {
-			base:    ptr(lipgloss.NewStyle().Foreground(red)),
-			overlay: ptr(lipgloss.NewStyle().Foreground(blue)),
+			base:    new(lipgloss.NewStyle().Foreground(red)),
+			overlay: new(lipgloss.NewStyle().Foreground(blue)),
 			wantFg:  blue,
 		},
 		"overlay background replaces base": {
-			base:    ptr(lipgloss.NewStyle().Background(red)),
-			overlay: ptr(lipgloss.NewStyle().Background(blue)),
+			base:    new(lipgloss.NewStyle().Background(red)),
+			overlay: new(lipgloss.NewStyle().Background(blue)),
 			wantBg:  blue,
 		},
 		"overlay transform replaces base": {
-			base:          ptr(lipgloss.NewStyle().Transform(upperTransform)),
-			overlay:       ptr(lipgloss.NewStyle().Transform(lowerTransform)),
+			base:          new(lipgloss.NewStyle().Transform(upperTransform)),
+			overlay:       new(lipgloss.NewStyle().Transform(lowerTransform)),
 			transformIn:   "Hello",
 			wantTransform: "hello",
 		},
 		"no overlay foreground keeps base": {
-			base:    ptr(lipgloss.NewStyle().Foreground(red)),
-			overlay: ptr(lipgloss.NewStyle()),
+			base:    new(lipgloss.NewStyle().Foreground(red)),
+			overlay: new(lipgloss.NewStyle()),
 			wantFg:  red,
 		},
 		"no overlay background keeps base": {
-			base:    ptr(lipgloss.NewStyle().Background(green)),
-			overlay: ptr(lipgloss.NewStyle()),
+			base:    new(lipgloss.NewStyle().Background(green)),
+			overlay: new(lipgloss.NewStyle()),
 			wantBg:  green,
 		},
 		"no overlay transform keeps base": {
-			base:          ptr(lipgloss.NewStyle().Transform(upperTransform)),
-			overlay:       ptr(lipgloss.NewStyle()),
+			base:          new(lipgloss.NewStyle().Transform(upperTransform)),
+			overlay:       new(lipgloss.NewStyle()),
 			transformIn:   "Hello",
 			wantTransform: "HELLO",
 		},
 		"full override": {
-			base:          ptr(lipgloss.NewStyle().Foreground(red).Background(green).Transform(upperTransform)),
-			overlay:       ptr(lipgloss.NewStyle().Foreground(blue).Background(yellow).Transform(lowerTransform)),
+			base:          new(lipgloss.NewStyle().Foreground(red).Background(green).Transform(upperTransform)),
+			overlay:       new(lipgloss.NewStyle().Foreground(blue).Background(yellow).Transform(lowerTransform)),
 			transformIn:   "Hello",
 			wantFg:        blue,
 			wantBg:        yellow,
@@ -335,10 +335,6 @@ func TestOverrideStyles(t *testing.T) {
 			}
 		})
 	}
-}
-
-func ptr[T any](v T) *T {
-	return &v
 }
 
 func TestBlender_Blend(t *testing.T) {

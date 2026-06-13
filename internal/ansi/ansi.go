@@ -37,6 +37,7 @@ const (
 // For example, an ANSI escape sequence like "\x1b[31m" becomes "␛[31m".
 func Escape(s string) string {
 	var sb strings.Builder
+
 	sb.Grow(len(s))
 
 	for _, r := range s {
