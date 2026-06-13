@@ -1,0 +1,103 @@
+{
+  "name": "niceyaml",
+  "engineVersion": "v0.21.4",
+  "toolchains": [
+    {
+      "name": "go",
+      "source": "github.com/MacroPower/x/toolchains/go@main",
+      "pin": "8660ae3bdb29a92728d6b9f4cc03776af38bad62",
+      "customizations": [
+        {
+          "argument": "source",
+          "ignore": [
+            ".git",
+            ".claude",
+            ".worktrees",
+            ".devbox",
+            ".task",
+            ".test",
+            ".tmp",
+            "dist"
+          ]
+        },
+        {
+          "argument": "race",
+          "default": "true"
+        },
+        {
+          "argument": "cacheNamespace",
+          "default": "go.jacobcolvin.com/niceyaml/toolchains/go"
+        }
+      ]
+    },
+    {
+      "name": "security",
+      "source": "github.com/MacroPower/x/toolchains/security@main",
+      "pin": "8660ae3bdb29a92728d6b9f4cc03776af38bad62",
+      "customizations": [
+        {
+          "argument": "source",
+          "ignore": [
+            ".git",
+            ".claude",
+            ".worktrees",
+            ".devbox",
+            ".task",
+            ".test",
+            ".tmp",
+            "dist"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "prettier",
+      "source": "github.com/MacroPower/x/toolchains/prettier@main",
+      "pin": "8660ae3bdb29a92728d6b9f4cc03776af38bad62",
+      "customizations": [
+        {
+          "argument": "source",
+          "ignore": [
+            ".git",
+            ".claude",
+            ".worktrees",
+            ".devbox",
+            ".task",
+            ".test",
+            ".tmp",
+            "dist"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "zizmor",
+      "source": "github.com/MacroPower/x/toolchains/zizmor@main",
+      "pin": "8660ae3bdb29a92728d6b9f4cc03776af38bad62",
+      "customizations": [
+        {
+          "argument": "source",
+          "ignore": [
+            ".git",
+            ".claude",
+            ".worktrees",
+            ".devbox",
+            ".task",
+            ".test",
+            ".tmp",
+            "dist"
+          ]
+        },
+        {
+          "argument": "configPath",
+          "default": ".github/zizmor.yaml"
+        }
+      ]
+    },
+    {
+      "name": "commitlint",
+      "source": "github.com/MacroPower/x/toolchains/commitlint@main",
+      "pin": "8660ae3bdb29a92728d6b9f4cc03776af38bad62"
+    }
+  ]
+}
