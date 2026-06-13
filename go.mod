@@ -19,7 +19,7 @@ require (
 	go.jacobcolvin.com/x/jsonschema v0.0.0-20260613001826-8660ae3bdb29
 	go.jacobcolvin.com/x/profile v0.0.0-20260606030626-0add6a0111c9
 	go.jacobcolvin.com/x/stringtest v0.1.0
-	golang.org/x/text v0.37.0
+	golang.org/x/text v0.38.0
 )
 
 require (
@@ -46,7 +46,7 @@ require (
 	golang.org/x/exp v0.0.0-20240604190554-fc45aab8b7f8 // indirect
 	golang.org/x/mod v0.36.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
+	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/tools v0.45.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
