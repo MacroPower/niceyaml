@@ -1,7 +1,6 @@
 package cafe_test
 
 import (
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -33,10 +32,7 @@ func cafeConfig(in string) (*cafe.Config, error) {
 func TestCafeDefaultConfig(t *testing.T) {
 	t.Parallel()
 
-	defaults, err := os.ReadFile("defaults.yaml")
-	require.NoError(t, err, "read default config")
-
-	cfg, err := cafeConfig(string(defaults))
+	cfg, err := cafeConfig(cafe.DefaultYAML)
 	require.NoError(t, err, "load default config")
 	require.NotNil(t, cfg)
 
@@ -46,4 +42,11 @@ func TestCafeDefaultConfig(t *testing.T) {
 	require.NotEmpty(t, cfg.Spec.Menu.Items)
 	require.Equal(t, "07:00", cfg.Spec.Hours.Open)
 	require.Equal(t, "19:00", cfg.Spec.Hours.Close)
+}
+
+func TestCafeBrokenConfig(t *testing.T) {
+	t.Parallel()
+
+	_, err := cafeConfig(cafe.BrokenYAML)
+	require.Error(t, err, "broken config should fail schema validation")
 }

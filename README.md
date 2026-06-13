@@ -93,6 +93,8 @@ flowchart LR
 
 - [examples/schemas/cafe](examples/schemas/cafe)
 
+Types declare their constraints with `jsonschema` struct tags; `schemagen` turns them into [cafe.v1.json](examples/schemas/cafe/cafe.v1.json). Run `go run ./examples/schemas/cafe/demo` to validate a config against that schema and render any failures as source-annotated errors.
+
 ### Full YAML Viewport Example
 
 See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pages, searches, diffs, and validates YAML documents.

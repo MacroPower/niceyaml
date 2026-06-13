@@ -1,19 +1,13 @@
 // Package spec defines the cafe specification schema.
 package spec
 
-import (
-	"context"
-	"encoding/json"
-	"time"
-
-	"go.jacobcolvin.com/x/jsonschema"
-)
+import "time"
 
 // Spec is the cafe specification.
 type Spec struct {
 	// SLA is the service level agreement duration for order fulfillment.
 	// Defaults to 15 minutes.
-	SLA *time.Duration `json:"sla,omitempty" jsonschema:"title=SLA,type=string"`
+	SLA *time.Duration `json:"sla,omitempty" jsonschema:"title=SLA,type=string,pattern=^(\\d+d)?(\\d+h)?(\\d+m)?(\\d+s)?$,default=15m,examples=15m|1h|90s"`
 	// Settings contains optional cafe settings.
 	Settings *Settings `json:"settings,omitempty" jsonschema:"title=Settings"`
 	// Hours defines operating hours.
@@ -24,29 +18,10 @@ type Spec struct {
 	Staff Staff `json:"staff" jsonschema:"title=Staff"`
 }
 
-// JSONSchemaExtend extends the generated JSON schema.
-//
-// The type= tag already makes sla a string; the pattern and default are richer
-// than the tag grammar expresses, so they are set here.
-func (s Spec) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, js *jsonschema.Schema) error {
-	sla := js.Properties["sla"]
-	sla.Pattern = `^(\d+d)?(\d+h)?(\d+m)?(\d+s)?$`
-	sla.Default = json.RawMessage(`"15m"`)
-
-	return nil
-}
-
 // Menu defines the cafe's menu offerings.
 type Menu struct {
 	// Items is the list of menu items.
-	Items []MenuItem `json:"items" jsonschema:"title=Items"`
-}
-
-// JSONSchemaExtend extends the generated JSON schema.
-func (m Menu) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, js *jsonschema.Schema) error {
-	js.Properties["items"].MinItems = new(1)
-
-	return nil
+	Items []MenuItem `json:"items" jsonschema:"title=Items,minItems=1"`
 }
 
 // MenuItem represents a single item on the menu.
@@ -54,7 +29,7 @@ type MenuItem struct {
 	// Available indicates whether the item is currently available.
 	Available *bool `json:"available,omitempty" jsonschema:"title=Available,default=true"`
 	// Name is the name of the menu item.
-	Name string `json:"name" jsonschema:"title=Name"`
+	Name string `json:"name" jsonschema:"title=Name,minLength=1"`
 	// Category is the type of item.
 	Category string `json:"category" jsonschema:"title=Category,enum=coffee|tea|pastry|sandwich"`
 	// Description provides additional details about the item.
@@ -62,59 +37,25 @@ type MenuItem struct {
 	// Tags are optional labels for the item.
 	Tags []string `json:"tags,omitempty" jsonschema:"title=Tags"`
 	// Price is the cost of the item in dollars.
-	Price float64 `json:"price" jsonschema:"title=Price"`
-}
-
-// JSONSchemaExtend extends the generated JSON schema.
-func (m MenuItem) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, js *jsonschema.Schema) error {
-	js.Properties["name"].MinLength = new(1)
-	js.Properties["price"].Minimum = new(0.0)
-
-	return nil
+	Price float64 `json:"price" jsonschema:"title=Price,minimum=0"`
 }
 
 // Staff defines staffing requirements.
 type Staff struct {
 	// Baristas is the number of baristas on shift.
-	Baristas int `json:"baristas" jsonschema:"title=Baristas,default=2"`
+	Baristas int `json:"baristas" jsonschema:"title=Baristas,default=2,minimum=1,maximum=10"`
 	// Managers is the number of managers on shift.
-	Managers int `json:"managers" jsonschema:"title=Managers,default=1"`
-}
-
-// JSONSchemaExtend extends the generated JSON schema.
-func (s Staff) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, js *jsonschema.Schema) error {
-	baristas := js.Properties["baristas"]
-	baristas.Minimum = new(1.0)
-	baristas.Maximum = new(10.0)
-
-	js.Properties["managers"].Minimum = new(1.0)
-
-	return nil
+	Managers int `json:"managers" jsonschema:"title=Managers,default=1,minimum=1"`
 }
 
 // Hours defines operating hours for the cafe.
 type Hours struct {
 	// Open is the opening time in HH:MM format (24-hour).
-	Open string `json:"open" jsonschema:"title=Open"`
+	Open string `json:"open" jsonschema:"title=Open,pattern=^([01]?[0-9]|2[0-3]):[0-5][0-9]$,default=07:00"`
 	// Close is the closing time in HH:MM format (24-hour).
-	Close string `json:"close" jsonschema:"title=Close"`
+	Close string `json:"close" jsonschema:"title=Close,pattern=^([01]?[0-9]|2[0-3]):[0-5][0-9]$,default=19:00"`
 	// Days lists the days of operation.
 	Days []string `json:"days" jsonschema:"title=Days,enum=monday|tuesday|wednesday|thursday|friday|saturday|sunday"`
-}
-
-// JSONSchemaExtend extends the generated JSON schema.
-func (h Hours) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, js *jsonschema.Schema) error {
-	timePattern := `^([01]?[0-9]|2[0-3]):[0-5][0-9]$`
-
-	open := js.Properties["open"]
-	open.Pattern = timePattern
-	open.Default = json.RawMessage(`"07:00"`)
-
-	closeTime := js.Properties["close"]
-	closeTime.Pattern = timePattern
-	closeTime.Default = json.RawMessage(`"19:00"`)
-
-	return nil
 }
 
 // Settings contains optional cafe settings.

@@ -21,6 +21,7 @@ func main() {
 	js, err := jsonschema.GenerateFor[cafe.Config](
 		context.Background(),
 		jsonschema.WithDescriptionProvider(jsonschema.NewGoCommentProvider()),
+		jsonschema.WithRootTitle(true),
 	)
 	if err != nil {
 		log.Fatalf("generate JSON schema: %v", err)

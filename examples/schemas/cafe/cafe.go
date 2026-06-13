@@ -2,7 +2,6 @@
 package cafe
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -23,13 +22,22 @@ var (
 	schemaJSON []byte
 
 	configValidator = schema.NewValidator(jsonschema.MustCompileJSON(schemaJSON))
+
+	// DefaultYAML is a valid cafe configuration, used by the demo and tests.
+	//go:embed defaults.yaml
+	DefaultYAML string
+
+	// BrokenYAML is an invalid cafe configuration that trips several schema
+	// constraints, used by the demo and tests to show validation errors.
+	//go:embed broken.yaml
+	BrokenYAML string
 )
 
 // Config is the root cafe configuration.
 // Create instances with [NewConfig].
 type Config struct {
 	// Kind identifies this configuration type.
-	Kind string `json:"kind" jsonschema:"title=Kind"`
+	Kind string `json:"kind" jsonschema:"title=Kind,const=Config"`
 	// Metadata contains identifying information about the cafe.
 	Metadata Metadata `json:"metadata" jsonschema:"title=Metadata"`
 	// Spec contains the cafe specification.
@@ -39,13 +47,6 @@ type Config struct {
 // NewConfig creates a new [Config].
 func NewConfig() Config {
 	return Config{}
-}
-
-// JSONSchemaExtend extends the generated JSON schema.
-func (c Config) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, js *jsonschema.Schema) error {
-	js.Properties["kind"].Const = jsonschema.Ptr[any]("Config")
-
-	return nil
 }
 
 // ValidateSchema validates arbitrary data against the cafe JSON schema.
@@ -85,16 +86,7 @@ func (c Config) Validate() error {
 // Metadata contains identifying information about the cafe.
 type Metadata struct {
 	// Name is the name of the cafe.
-	Name string `json:"name" jsonschema:"title=Name"`
+	Name string `json:"name" jsonschema:"title=Name,minLength=1,maxLength=100"`
 	// Description provides additional details about the cafe.
 	Description string `json:"description,omitempty" jsonschema:"title=Description"`
-}
-
-// JSONSchemaExtend extends the generated JSON schema.
-func (m Metadata) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, js *jsonschema.Schema) error {
-	name := js.Properties["name"]
-	name.MinLength = new(1)
-	name.MaxLength = new(100)
-
-	return nil
 }

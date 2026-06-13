@@ -237,6 +237,11 @@
           "title": "SLA",
           "description": "SLA is the service level agreement duration for order fulfillment.\nDefaults to 15 minutes.",
           "default": "15m",
+          "examples": [
+            "15m",
+            "1h",
+            "90s"
+          ],
           "pattern": "^(\\d+d)?(\\d+h)?(\\d+m)?(\\d+s)?$"
         },
         "settings": {
@@ -302,6 +307,7 @@
       "additionalProperties": false
     }
   },
+  "title": "Config",
   "description": "Config is the root cafe configuration.\nCreate instances with [NewConfig].",
   "required": [
     "kind",
