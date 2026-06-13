@@ -1,0 +1,8 @@
+# Dagger module configs are managed by `dagger develop`.
+**/dagger.json
+
+# Test fixtures, some intentionally malformed for negative tests.
+**/testdata/**
+
+# Emitted by examples/schemas/cafe/schemagen; go:generate owns its formatting.
+examples/schemas/cafe/cafe.v1.json
