@@ -71,8 +71,8 @@ github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e h1:JVG44RsyaB9T2KIHavM
 github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e/go.mod h1:RbqR21r5mrJuqunuUZ/Dhy/avygyECGrLceyNeo4LiM=
 go.jacobcolvin.com/x/jsonschema v0.0.0-20260613001826-8660ae3bdb29 h1:JnWjBqngbFnbYpDlZ88oR7R4TrAguOWiKxyOMJuxfN0=
 go.jacobcolvin.com/x/jsonschema v0.0.0-20260613001826-8660ae3bdb29/go.mod h1:5Dvbp9UJFj6hKRPNGjQqpqFZX/RSSgt2kp6dRJtyJnE=
-go.jacobcolvin.com/x/profile v0.0.0-20260606030626-0add6a0111c9 h1:ypqjj2PckKl/Hr/ykXGI9Vo4R6W8qDGCLUEKguMk8KA=
-go.jacobcolvin.com/x/profile v0.0.0-20260606030626-0add6a0111c9/go.mod h1:cVSHvYabCqcsbT2PmRR6ZNJIdf89196dw6UBvgzyOnw=
+go.jacobcolvin.com/x/profile v0.0.0-20260606134820-eecb281ad7af h1:ygl/wfSGjwqZwaud8NXJr3jmCRwzQEiuNOlX2JJdmUs=
+go.jacobcolvin.com/x/profile v0.0.0-20260606134820-eecb281ad7af/go.mod h1:cVSHvYabCqcsbT2PmRR6ZNJIdf89196dw6UBvgzyOnw=
 go.jacobcolvin.com/x/stringtest v0.1.0 h1:CokQSICcFmywBapU5p1SsA2YBD+aSL3R/EPM1FRv5IM=
 go.jacobcolvin.com/x/stringtest v0.1.0/go.mod h1:hXDTRkMBRvOXc4e02XRL2b9F1Te1OWJ/NgjIOn+jmMY=
 go.yaml.in/yaml/v3 v3.0.4/go.mod h1:DhzuOOF2ATzADvBadXxruRBLzYTpT36CKvDb3+aBEFg=
