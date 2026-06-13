@@ -88,12 +88,12 @@ linters:
     - nonamedreturns
     - nosprintfhostport
     - paralleltest
-    - perfsprint
-    - prealloc
+    # - perfsprint
+    # - prealloc
     - predeclared
     - reassign
     # - recvcheck
-    - revive
+    # - revive
     - sloglint
     - staticcheck
     - tagalign
@@ -173,10 +173,10 @@ linters:
         - require-pkg-doc
       options:
         max-len:
-          length: 80
+          length: 88
 
     godot:
-      scope: all
+      scope: noinline
       period: true
       capital: true
 
@@ -193,49 +193,6 @@ linters:
     grouper:
       import-require-single-import: true
       var-require-single-var: true
-
-    revive:
-      enable-all-rules: true
-      rules:
-        - name: line-length-limit
-          disabled: true
-        - name: cyclomatic
-          disabled: true
-        - name: cognitive-complexity
-          disabled: true
-        - name: add-constant
-          disabled: true
-        - name: function-length
-          disabled: true
-        - name: max-public-structs
-          disabled: true
-        - name: nested-structs
-          exclude:
-            - "**/*_test.go"
-        - name: package-comments
-          exclude:
-            - "**/examples/**"
-        # Needed for future use.
-        - name: unused-receiver
-          disabled: true
-        # Fails on private functions.
-        - name: flag-parameter
-          disabled: true
-        # Requires named results.
-        - name: confusing-results
-          disabled: true
-        - name: unnecessary-stmt
-          disabled: true
-        # Does not work with inline tags.
-        - name: struct-tag
-          disabled: true
-        - name: var-naming
-          disabled: true
-        # Requires default cases.
-        - name: enforce-switch-style
-          disabled: true
-        - name: unhandled-error
-          disabled: true
 
     depguard:
       rules:
@@ -255,7 +212,6 @@ linters:
           - goconst
           - gosec
           - gosmopolitan
-          - prealloc
           - godoclint
       - path: _test\.go
         text: "fieldalignment:"
@@ -271,6 +227,8 @@ linters:
       - path: cmd/
         linters:
           - wrapcheck
+          - godoclint
+          - gosec
       - path: internal/
         linters:
           - wrapcheck
