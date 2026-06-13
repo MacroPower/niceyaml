@@ -5,10 +5,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Test Commands
 
 ```bash
-task format # Format and lint
-task lint   # Lint only
-task test   # Run all tests
+task format # Format, tidy, and generate (dagger generate --auto-apply)
+task lint   # Lint only (dagger check, lint checks)
+task test   # Run all tests (dagger call go test)
+task check  # Everything CI runs (dagger check)
 ```
+
+Quality gates run through Dagger toolchains consumed from
+github.com/MacroPower/x (pinned in `dagger.json`); the `dagger` CLI must
+be on PATH and match the pinned `engineVersion`.
 
 ## Architecture
 

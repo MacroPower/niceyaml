@@ -1,0 +1,18 @@
+version: "3"
+
+set: [errexit, nounset, pipefail]
+shopt: [globstar]
+
+tasks:
+  actions:lint:
+    internal: true
+    desc: Lints GitHub Actions workflows via Dagger
+    cmds:
+      - dagger check zizmor:lint
+
+  # Renovate config linting has no Dagger check here; the renovate
+  # workflow itself validates the configuration.
+  lint:
+    desc: Lints GitHub configuration via Dagger
+    cmds:
+      - dagger check zizmor:lint

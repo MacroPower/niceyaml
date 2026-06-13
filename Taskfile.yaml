@@ -1,180 +1,70 @@
 version: "3"
 
-vars:
-  GO_FILES_CMD: >-
-    go list -f {{"{{.Dir}}"}} ./... | xargs -I {} find {} -name "*.go"
-  PRETTIER_TARGETS: "*.{yaml,md,json}"
+set: [errexit, nounset, pipefail]
+shopt: [globstar]
 
-env:
-  HOSTNAME:
-    sh: hostname
+# The .taskfiles/ segmentation is intentional, even where a namespace holds
+# only thin Dagger wrappers — do not flatten it into this file.
+includes:
+  dagger: ./.taskfiles/dagger/Taskfile.yaml
+  dev: ./.taskfiles/dev/Taskfile.yaml
+  fmt: ./.taskfiles/fmt/Taskfile.yaml
+  gh: ./.taskfiles/gh/Taskfile.yaml
+  git: ./.taskfiles/git/Taskfile.yaml
+  go: ./.taskfiles/go/Taskfile.yaml
 
 tasks:
   default:
+    cmd: task -l
+
+  format:
+    desc: Formats, tidies, and generates code via Dagger
+    summary: |
+      Runs every registered Dagger generator (go:tidy, go:generate) and
+      applies the changes. Supersedes go:format and fmt:format, which
+      remain for selective runs.
+    cmds:
+      - dagger generate --auto-apply
+
+  lint:
+    desc: Runs all lint targets
+    deps: [go:lint, gh:lint, fmt:lint]
+
+  docs:
+    desc: Runs all docs targets
+    deps: [go:docs]
+
+  test:
+    desc: Runs all test targets
+    deps: [go:test]
+
+  check:
+    desc: Runs all checks via Dagger
+    cmds:
+      - dagger check
+
+  scan:
+    desc: Scans source dependencies for vulnerabilities via Dagger
+    cmds:
+      - dagger call security scan-source
+
+  pre-commit:
+    desc: Runs all pre-commit targets
     cmds:
       - task: format
       - task: lint
       - task: test
-      - task: build
-
-  format:
-    desc: Runs all format targets
-    deps: [go-format, prettier-format]
-
-  lint:
-    desc: Runs all lint targets
-    deps:
-      - go-lint
-      - renovate-lint
-      - actions-lint
-      - prettier-lint
-
-  docs:
-    desc: Runs all docs targets
-    deps: [go-docs]
-
-  test:
-    desc: Runs all test targets
-    deps: [go-test]
-
-  pre-commit:
-    desc: Runs all pre-commit targets
-    deps: [lint, test]
-
-  build:
-    desc: Runs all build targets
-    deps: [go-build]
-
-  dev-install:
-    desc: Installs development dependencies
-    cmds:
-      - devbox install
-      - nix-collect-garbage
 
   install:
-    desc: Builds and installs binaries
+    desc: Runs all install targets
+    deps: [dev:install, git:hooks:install, install:nyaml]
+
+  install:nyaml:
+    desc: Builds and installs the nyaml binary
     cmds:
-      - goreleaser build --snapshot --clean --single-target
+      - go install ./cmd/nyaml
 
-  go-format:
-    desc: Formats Go code including imports
+  clean:
+    desc: Removes build artifacts and caches
     cmds:
-      - golangci-lint run --fix
-
-  go-lint:
-    desc: Lints Go code
-    cmds:
-      - golangci-lint run
-
-  go-test:
-    desc: Run Go tests
-    summary: |
-      Run Go tests
-
-      Args:
-        PKG: Go package to test (default: ./...)
-        FLAGS: Additional flags to pass to `go test` (default: "")
-        PKG_FLAGS: Additional flags to pass to test packages (default: "")
-    vars:
-      PKG: '{{.PKG | default "./..."}}'
-      FLAGS: '{{.FLAGS | default ""}}'
-      PKG_FLAGS: '{{.PKG_FLAGS | default ""}}'
-    cmds:
-      - go test {{.FLAGS}} {{.PKG}} {{.PKG_FLAGS}}
-
-  go-cover:
-    desc: Runs Go tests with coverage
-    cmds:
-      - cmd: mkdir -p .test/
-        silent: true
-      - go test -coverprofile=.test/cover.out ./...
-
-  go-bench:
-    desc: Run Go benchmarks
-    summary: |
-      Run Go benchmarks
-
-      Args:
-        PKG: Go package to test (default: ./...)
-        FLAGS: Additional flags to pass to `go test` (default: "")
-
-      Examples:
-        task go-bench PKG=./pkg/helm FLAGS="-cpuprofile profile.out -run=^\$"
-    vars:
-      PKG: '{{.PKG | default "./..."}}'
-      FLAGS: '{{.FLAGS | default ""}}'
-    cmds:
-      - go test -bench=. -benchmem -tags={{.BUILD_TAGS}} {{.FLAGS}} {{.PKG}}
-
-  go-docs:
-    desc: Prints Go documentation for all packages
-    summary: |
-      Prints Go documentation for all packages.
-
-      Args:
-        PKG: Go package(s) to document (default: ./...)
-        FLAGS: Additional flags to pass to `go doc` (default: "")
-    vars:
-      PKG: '{{.PKG | default "./..."}}'
-      FLAGS: '{{.FLAGS | default ""}}'
-    cmds:
-      - |
-        for pkg in $(go list {{.PKG}} | grep -v -E '/(examples|cmd)(/|$)'); do
-          echo "--------------------------------------------------------------------------------"
-          go doc {{.FLAGS}} "$pkg"
-        done
-
-  go-gen:
-    desc: Generates Go code
-    cmds:
-      - go generate ./...
-
-  go-build:
-    desc: Builds Go binaries
-    vars:
-      FLAGS: '{{.FLAGS | default "--skip=docker,homebrew"}}'
-    cmds:
-      - goreleaser release --snapshot --clean {{ .FLAGS }}
-
-  prettier-format:
-    desc: Formats YAML, JSON, and Markdown files
-    cmds:
-      - prettier --config ./.prettierrc.yaml -w {{.PRETTIER_TARGETS}}
-
-  prettier-lint:
-    desc: Lints YAML, JSON, and Markdown files
-    cmds:
-      - prettier --config ./.prettierrc.yaml --check {{.PRETTIER_TARGETS}}
-
-  go-deadcode:
-    desc: Finds dead code in Go
-    summary: |
-      Finds dead code in Go.
-
-      Args:
-        PKG: Go package(s) to evaluate (default: ./...)
-        FLAGS: Additional flags to pass to `deadcode` (default: "")
-
-      Examples:
-        task go-deadcode FLAGS="-test -generated"
-    vars:
-      PKG: '{{.PKG | default "./..."}}'
-      FLAGS: '{{.FLAGS | default ""}}'
-    cmds:
-      - go install golang.org/x/tools/cmd/deadcode@latest
-      - deadcode {{.FLAGS}} {{.PKG}}
-
-  renovate-lint:
-    desc: Lints Renovate configuration
-    cmds:
-      - renovate-config-validator .github/renovate.json5
-
-  actions-lint:
-    desc: Lints GitHub Actions
-    cmds:
-      - zizmor .github/workflows --config .github/zizmor.yaml
-
-  install-hooks:
-    desc: Install git hooks
-    cmds:
-      - lefthook install
+      - rm -rf dist/ .test/ .task/ .tmp/
