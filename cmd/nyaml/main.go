@@ -7,7 +7,7 @@ import (
 
 	"charm.land/fang/v2"
 	"github.com/spf13/cobra"
-	"go.jacobcolvin.com/x/profile"
+	"go.jacobcolvin.com/x/cobras/profile"
 
 	"go.jacobcolvin.com/niceyaml/fangs"
 	"go.jacobcolvin.com/niceyaml/style/theme"
@@ -27,7 +27,7 @@ func main() {
 
 	cfg.RegisterFlags(rootCmd.PersistentFlags())
 
-	_ = cfg.RegisterCompletions(rootCmd) //nolint:errcheck // Best-effort completions.
+	cfg.MustRegisterCompletions(rootCmd)
 
 	rootCmd.AddCommand(viewCmd())
 	rootCmd.AddCommand(validateCmd())
