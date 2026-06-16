@@ -21,6 +21,7 @@ rules:
     - 2
     - always
     - - bubbles
+      - ci
       - cmd
       - deps
       - dev

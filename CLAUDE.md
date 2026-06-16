@@ -5,15 +5,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Test Commands
 
 ```bash
-task format # Format, tidy, and generate (dagger generate --auto-apply)
-task lint   # Lint only (dagger check, lint checks)
-task test   # Run all tests (dagger call go test)
-task check  # Everything CI runs (dagger check)
+task format    # Format and tidy code, run generators
+task lint      # golangci-lint, go mod tidy check, prettier
+task test      # Run all tests (unit + integration)
+task check     # Local gate: lint + test (tools on the devbox PATH, no Dagger)
+task check:all # Everything CI runs (adds security + GitHub config, via Dagger)
 ```
 
-Quality gates run through Dagger toolchains consumed from
-github.com/MacroPower/x (pinned in `dagger.json`); the `dagger` CLI must
-be on PATH and match the pinned `engineVersion`.
+Devbox provides all required tools on PATH automatically.
+
+CI runs these same tasks inside the devbox environment via the `ci` Dagger
+toolchain (`dagger call ci <task>`), so local and CI execute identical commands.
+The `ci` module composes the shared toolchains from github.com/MacroPower/x
+(devbox, security, zizmor), pinned in `ci/dagger.json` and the root
+`dagger.json`; the `dagger` CLI must be on PATH and match the pinned
+`engineVersion`.
 
 ## Architecture
 
