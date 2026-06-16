@@ -24,9 +24,15 @@ dist/
 # Devbox
 .devbox/
 
+# Worktrees
+.worktrees/
+
 # Temp files
 .tmp/
 .task/
 
 # Profiles
 *.prof
+
+# SARIF scan output (from `task security:sarif-source`)
+*.sarif
