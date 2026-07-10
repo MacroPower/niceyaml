@@ -229,7 +229,7 @@ func TestValidator_Validate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := v.ValidateSchema(tc.input)
+			err := v.ValidateSchema(t.Context(), tc.input)
 
 			if tc.wantErr {
 				require.Error(t, err)
@@ -546,7 +546,7 @@ func TestValidator_NonFiniteFloats(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := v.ValidateSchema(map[string]any{"x": value})
+			err := v.ValidateSchema(t.Context(), map[string]any{"x": value})
 			require.NoError(t, err)
 			assert.NotErrorIs(t, err, schema.ErrValidate)
 		})
@@ -580,7 +580,7 @@ func TestValidator_BooleanSchema(t *testing.T) {
 			v := newValidator(t, tc.input)
 
 			for _, data := range testData {
-				err := v.ValidateSchema(data)
+				err := v.ValidateSchema(t.Context(), data)
 				if tc.wantAcceptsAll {
 					assert.NoError(t, err)
 				} else {
@@ -702,7 +702,7 @@ func TestValidator_ErrorMessages(t *testing.T) {
 			}
 		}`))
 
-		err := v.ValidateSchema(map[string]any{"name": 123})
+		err := v.ValidateSchema(t.Context(), map[string]any{"name": 123})
 		require.Error(t, err)
 
 		assert.NotContains(t, err.Error(), "validation failed")
@@ -720,7 +720,7 @@ func TestValidator_ErrorMessages(t *testing.T) {
 			}
 		}`))
 
-		err := v.ValidateSchema(map[string]any{"name": 123, "age": "thirty"})
+		err := v.ValidateSchema(t.Context(), map[string]any{"name": 123, "age": "thirty"})
 		require.Error(t, err)
 
 		assert.Contains(t, err.Error(), "validation failed at 2 locations")
@@ -759,7 +759,7 @@ func TestValidator_UnwrapSubErrorPaths(t *testing.T) {
 
 			v := newValidator(t, []byte(tc.schema))
 
-			err := v.ValidateSchema(tc.input)
+			err := v.ValidateSchema(t.Context(), tc.input)
 			require.Error(t, err)
 
 			var validationErr *niceyaml.Error

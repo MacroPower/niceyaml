@@ -687,7 +687,7 @@ type schemaValidatorConfig struct {
 	schemaValidated bool
 }
 
-func (c *schemaValidatorConfig) ValidateSchema(data any) error {
+func (c *schemaValidatorConfig) ValidateSchema(_ context.Context, data any) error {
 	c.schemaValidated = true
 
 	m, ok := data.(map[string]any)
@@ -713,7 +713,7 @@ type bothValidatorConfig struct {
 	validated       bool
 }
 
-func (c *bothValidatorConfig) ValidateSchema(data any) error {
+func (c *bothValidatorConfig) ValidateSchema(_ context.Context, data any) error {
 	c.schemaValidated = true
 
 	m, ok := data.(map[string]any)
@@ -750,7 +750,7 @@ type strictSchemaValidatorConfig struct {
 	Value int `yaml:"value"`
 }
 
-func (c *strictSchemaValidatorConfig) ValidateSchema(_ any) error {
+func (c *strictSchemaValidatorConfig) ValidateSchema(_ context.Context, _ any) error {
 	// Always passes schema validation.
 	return nil
 }

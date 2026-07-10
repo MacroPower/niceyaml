@@ -93,7 +93,7 @@ flowchart LR
 
 - [examples/schemas/cafe](examples/schemas/cafe)
 
-Types declare their constraints with `jsonschema` struct tags; `schemagen` turns them into [cafe.v1.json](examples/schemas/cafe/cafe.v1.json). Run `go run ./examples/schemas/cafe/demo` to validate a config against that schema and render any failures as source-annotated errors.
+Types declare their constraints with `jsonschema` struct tags; the `jsonschemagen` tool from [go.jacobcolvin.com/x/jsonschema](https://pkg.go.dev/go.jacobcolvin.com/x/jsonschema) turns them into [cafe.v1.json](examples/schemas/cafe/cafe.v1.json). Run `go run ./examples/schemas/cafe/demo` to validate a config against that schema and render any failures as source-annotated errors.
 
 ### Full YAML Viewport Example
 

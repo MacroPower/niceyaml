@@ -1,5 +1,7 @@
 package yamltest
 
+import "context"
+
 // MockSchemaValidator implements [niceyaml.SchemaValidator] for testing.
 //
 // It wraps a validation function that can be configured to pass, fail, or
@@ -8,14 +10,14 @@ package yamltest
 // Create instances with [NewPassingSchemaValidator],
 // [NewFailingSchemaValidator], or [NewCustomSchemaValidator].
 type MockSchemaValidator struct {
-	fn func(data any) error
+	fn func(ctx context.Context, data any) error
 }
 
 // NewPassingSchemaValidator creates a new [*MockSchemaValidator] that always
 // passes validation by returning nil.
 func NewPassingSchemaValidator() *MockSchemaValidator {
 	return &MockSchemaValidator{
-		fn: func(_ any) error { return nil },
+		fn: func(_ context.Context, _ any) error { return nil },
 	}
 }
 
@@ -23,21 +25,21 @@ func NewPassingSchemaValidator() *MockSchemaValidator {
 // fails validation with the given error.
 func NewFailingSchemaValidator(err error) *MockSchemaValidator {
 	return &MockSchemaValidator{
-		fn: func(_ any) error { return err },
+		fn: func(_ context.Context, _ any) error { return err },
 	}
 }
 
 // NewCustomSchemaValidator creates a new [*MockSchemaValidator] that uses the
 // given function for validation.
-func NewCustomSchemaValidator(fn func(data any) error) *MockSchemaValidator {
+func NewCustomSchemaValidator(fn func(ctx context.Context, data any) error) *MockSchemaValidator {
 	return &MockSchemaValidator{
 		fn: fn,
 	}
 }
 
 // ValidateSchema calls the wrapped validation function.
-func (m *MockSchemaValidator) ValidateSchema(data any) error {
-	return m.fn(data)
+func (m *MockSchemaValidator) ValidateSchema(ctx context.Context, data any) error {
+	return m.fn(ctx, data)
 }
 
 // MockNormalizer implements [niceyaml.Normalizer] for testing.

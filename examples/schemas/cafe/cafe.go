@@ -2,6 +2,7 @@
 package cafe
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -15,7 +16,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
-//go:generate go run ./schemagen/main.go -o cafe.v1.json
+//go:generate go tool jsonschemagen -type Config -comments -o cafe.v1.json
 
 var (
 	//go:embed cafe.v1.json
@@ -50,9 +51,9 @@ func NewConfig() Config {
 }
 
 // ValidateSchema validates arbitrary data against the cafe JSON schema.
-func (c Config) ValidateSchema(data any) error {
+func (c Config) ValidateSchema(ctx context.Context, data any) error {
 	//nolint:wrapcheck // Validator.ValidateSchema returns niceyaml.Error with path info.
-	return configValidator.ValidateSchema(data)
+	return configValidator.ValidateSchema(ctx, data)
 }
 
 // Validate performs custom validation after decoding.

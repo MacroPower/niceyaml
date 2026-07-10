@@ -1,6 +1,7 @@
 package yamltest_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,10 +18,10 @@ func TestMockSchemaValidator(t *testing.T) {
 
 		v := yamltest.NewPassingSchemaValidator()
 
-		assert.NoError(t, v.ValidateSchema("string"))
-		assert.NoError(t, v.ValidateSchema(42))
-		assert.NoError(t, v.ValidateSchema(nil))
-		assert.NoError(t, v.ValidateSchema(struct{ Name string }{"test"}))
+		assert.NoError(t, v.ValidateSchema(t.Context(), "string"))
+		assert.NoError(t, v.ValidateSchema(t.Context(), 42))
+		assert.NoError(t, v.ValidateSchema(t.Context(), nil))
+		assert.NoError(t, v.ValidateSchema(t.Context(), struct{ Name string }{"test"}))
 	})
 
 	t.Run("NewFailingSchemaValidator returns the specified error", func(t *testing.T) {
@@ -29,7 +30,7 @@ func TestMockSchemaValidator(t *testing.T) {
 		wantErr := assert.AnError
 		v := yamltest.NewFailingSchemaValidator(wantErr)
 
-		err := v.ValidateSchema("any input")
+		err := v.ValidateSchema(t.Context(), "any input")
 		require.ErrorIs(t, err, wantErr)
 	})
 
@@ -38,13 +39,13 @@ func TestMockSchemaValidator(t *testing.T) {
 
 		var receivedData any
 
-		customFn := func(data any) error {
+		customFn := func(_ context.Context, data any) error {
 			receivedData = data
 			return nil
 		}
 
 		v := yamltest.NewCustomSchemaValidator(customFn)
-		err := v.ValidateSchema("test data")
+		err := v.ValidateSchema(t.Context(), "test data")
 
 		require.NoError(t, err)
 		assert.Equal(t, "test data", receivedData)
@@ -54,12 +55,12 @@ func TestMockSchemaValidator(t *testing.T) {
 		t.Parallel()
 
 		wantErr := assert.AnError
-		customFn := func(_ any) error {
+		customFn := func(_ context.Context, _ any) error {
 			return wantErr
 		}
 
 		v := yamltest.NewCustomSchemaValidator(customFn)
-		err := v.ValidateSchema("any")
+		err := v.ValidateSchema(t.Context(), "any")
 
 		require.ErrorIs(t, err, wantErr)
 	})

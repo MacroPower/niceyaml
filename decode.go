@@ -35,12 +35,14 @@ type Validator interface {
 //
 // If a type implements this interface, [DocumentDecoder.Unmarshal]
 // automatically decodes the document to [any] and calls ValidateSchema before
-// decoding to the typed struct.
+// decoding to the typed struct. The context carries cancellation and deadlines
+// to validators doing cancellable work, such as remote schema reference
+// resolution.
 //
 // See [go.jacobcolvin.com/niceyaml/schema.NewValidator] for an
 // implementation.
 type SchemaValidator interface {
-	ValidateSchema(data any) error
+	ValidateSchema(ctx context.Context, data any) error
 }
 
 // Decoder iterates over YAML documents in a [*Source].
@@ -271,7 +273,7 @@ func (dd *DocumentDecoder) ValidateSchemaContext(ctx context.Context, sv SchemaV
 		return err
 	}
 
-	err = sv.ValidateSchema(untypedData)
+	err = sv.ValidateSchema(ctx, untypedData)
 	if err != nil {
 		//nolint:wrapcheck // SchemaValidator.ValidateSchema should return Error with path info.
 		return err

@@ -37,9 +37,11 @@ type validator struct {
 //
 // Returns nil when data conforms. On a constraint violation, returns a
 // [*niceyaml.Error] whose nested errors each carry the YAML path to a failing
-// location. Any other failure wraps [ErrValidate].
-func (v *validator) ValidateSchema(data any) error {
-	err := v.schema.Validate(context.Background(), data)
+// location. Any other failure wraps [ErrValidate]. The context is passed to
+// the underlying [jsonschema.Validator], where remote reference resolution
+// honors its cancellation and deadlines.
+func (v *validator) ValidateSchema(ctx context.Context, data any) error {
+	err := v.schema.Validate(ctx, data)
 	if err == nil {
 		return nil
 	}
