@@ -75,6 +75,6 @@ func URL(schemaURL string, opts ...HTTPOption) Loader {
 			return Result{}, fmt.Errorf("fetch %s: schema exceeds %d bytes", schemaURL, maxSchemaSize)
 		}
 
-		return NewResult(schemaURL, data), nil
+		return Result{URL: schemaURL, Data: data}, nil
 	})
 }

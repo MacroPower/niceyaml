@@ -25,44 +25,6 @@ var (
 	ErrCompile = errors.New("compile schema")
 )
 
-// Cache stores and retrieves compiled validators by URL.
-//
-// The default implementation is an unbounded thread-safe map. Provide a custom
-// implementation via [WithCache] for alternative caching strategies (LRU, TTL,
-// external cache, etc.).
-type Cache interface {
-	Get(url string) (niceyaml.SchemaValidator, bool)
-	Set(url string, v niceyaml.SchemaValidator)
-}
-
-// mapCache is the default [Cache] implementation using an unbounded map.
-type mapCache struct {
-	cache map[string]niceyaml.SchemaValidator
-	mu    sync.RWMutex
-}
-
-func newMapCache() *mapCache {
-	return &mapCache{cache: make(map[string]niceyaml.SchemaValidator)}
-}
-
-// Get retrieves a validator from the cache.
-func (c *mapCache) Get(url string) (niceyaml.SchemaValidator, bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	v, ok := c.cache[url]
-
-	return v, ok
-}
-
-// Set stores a validator in the cache.
-func (c *mapCache) Set(url string, v niceyaml.SchemaValidator) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.cache[url] = v
-}
-
 // Registry maps YAML documents to schemas using pluggable matchers.
 //
 // Registrations are evaluated in order; first match wins. Compiled validators
@@ -84,28 +46,17 @@ func (c *mapCache) Set(url string, v niceyaml.SchemaValidator) {
 //
 // Create instances with [New].
 type Registry struct {
-	cache         Cache
+	cache         map[string]niceyaml.SchemaValidator // compiled validators by schema URL
 	matchLoaders  []MatchLoader
 	validatorOpts []jsonschema.ValidateOption
+	mu            sync.RWMutex
 }
 
 // Option configures [Registry] creation.
 //
 // Available options:
-//   - [WithCache]
 //   - [WithValidateOptions]
 type Option func(*Registry)
-
-// WithCache is an [Option] that sets a custom [Cache] implementation.
-//
-// By default, the registry uses an unbounded thread-safe map cache. Provide a
-// custom implementation for alternative caching strategies (LRU, TTL, external
-// cache, etc.).
-func WithCache(c Cache) Option {
-	return func(r *Registry) {
-		r.cache = c
-	}
-}
 
 // WithValidateOptions is an [Option] that sets options passed to
 // [jsonschema.CompileJSON] when compiling validators.
@@ -118,7 +69,7 @@ func WithValidateOptions(opts ...jsonschema.ValidateOption) Option {
 // New creates a new [*Registry].
 func New(opts ...Option) *Registry {
 	r := &Registry{
-		cache: newMapCache(),
+		cache: make(map[string]niceyaml.SchemaValidator),
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -211,30 +162,29 @@ func (r *Registry) loadValidator(
 	}
 
 	// Check cache.
-	if v, ok := r.cache.Get(result.URL); ok {
+	r.mu.RLock()
+
+	v, ok := r.cache[result.URL]
+	r.mu.RUnlock()
+
+	if ok {
 		return v, nil
 	}
 
-	// Get or compile validator.
-	var v niceyaml.SchemaValidator
-
-	if result.Validator != nil {
-		// Pre-compiled validator provided.
-		v = result.Validator
-	} else {
-		// Compile a validator from the schema data.
-		compiled, compileErr := jsonschema.CompileJSON(ctx, result.Data, r.validatorOpts...)
-		if compileErr != nil {
-			return nil, fmt.Errorf("%w: %q: %w", ErrCompile, result.URL, compileErr)
-		}
-
-		v = schema.NewValidator(compiled)
+	compiled, err := jsonschema.CompileJSON(ctx, result.Data, r.validatorOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %q: %w", ErrCompile, result.URL, err)
 	}
+
+	v = schema.NewValidator(compiled)
 
 	// Cache validator by URL. Skip caching for empty URLs to avoid cache
 	// collisions where different schemas would share a single cache entry.
 	if result.URL != "" {
-		r.cache.Set(result.URL, v)
+		r.mu.Lock()
+
+		r.cache[result.URL] = v
+		r.mu.Unlock()
 	}
 
 	return v, nil

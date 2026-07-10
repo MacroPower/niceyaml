@@ -46,9 +46,7 @@ func (v *validator) ValidateSchema(data any) error {
 
 	// A structured validation failure carries per-location paths; convert it to
 	// a niceyaml.Error. Anything else is an unexpected internal failure.
-	var ve *jsonschema.ValidationError
-
-	if errors.As(err, &ve) {
+	if ve, ok := errors.AsType[*jsonschema.ValidationError](err); ok {
 		return newValidationError(ve)
 	}
 

@@ -16,6 +16,6 @@ import (
 //	l := loader.Embedded("schema.json", schemaBytes)
 func Embedded(schemaURL string, data []byte) Loader {
 	return Func(func(_ context.Context, _ *niceyaml.DocumentDecoder) (Result, error) {
-		return NewResult(schemaURL, data), nil
+		return Result{URL: schemaURL, Data: data}, nil
 	})
 }

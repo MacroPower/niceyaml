@@ -10,13 +10,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
-	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/loader"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
 	"go.jacobcolvin.com/niceyaml/schema/registry"
@@ -65,22 +63,6 @@ func TestRegistry_Lookup(t *testing.T) {
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
 		_, err := reg.Lookup(t.Context(), doc)
 		require.ErrorIs(t, err, registry.ErrNoMatch)
-	})
-
-	t.Run("with precompiled validator", func(t *testing.T) {
-		t.Parallel()
-
-		v := schema.NewValidator(jsonschema.MustCompileJSON(schemaData))
-		reg := registry.New()
-		reg.RegisterFunc(
-			matcher.Content(kindPath, "Deployment"),
-			loader.Validator("test.json", v),
-		)
-
-		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
-		gotV, err := reg.Lookup(t.Context(), doc)
-		require.NoError(t, err)
-		assert.Equal(t, v, gotV)
 	})
 }
 
@@ -161,49 +143,12 @@ func TestRegistry_Caching(t *testing.T) {
 		assert.Equal(t, v1, v2, "validators should be the same instance")
 	})
 
-	t.Run("custom cache implementation", func(t *testing.T) {
-		t.Parallel()
-
-		schemaData := []byte(`{"type": "object"}`)
-
-		// Create a custom cache that tracks calls.
-		cache := &trackingCache{
-			validators: make(map[string]niceyaml.SchemaValidator),
-		}
-
-		reg := registry.New(registry.WithCache(cache))
-		reg.RegisterFunc(
-			matcher.Content(kindPath, "Deployment"),
-			loader.Embedded("test.json", schemaData),
-		)
-
-		// First lookup should miss cache and call Set.
-		doc1 := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
-		v1, err := reg.Lookup(t.Context(), doc1)
-		require.NoError(t, err)
-		assert.Equal(t, 1, cache.getCalls)
-		assert.Equal(t, 1, cache.setCalls)
-
-		// Second lookup should hit cache.
-		doc2 := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
-		v2, err := reg.Lookup(t.Context(), doc2)
-		require.NoError(t, err)
-		assert.Equal(t, 2, cache.getCalls)
-		assert.Equal(t, 1, cache.setCalls) // No new Set call.
-		assert.Equal(t, v1, v2, "should return cached validator")
-	})
-
 	t.Run("empty URL validators are not cached", func(t *testing.T) {
 		t.Parallel()
 
 		schemaData := []byte(`{"type": "object"}`)
 
-		// Create a custom cache that tracks calls.
-		cache := &trackingCache{
-			validators: make(map[string]niceyaml.SchemaValidator),
-		}
-
-		reg := registry.New(registry.WithCache(cache))
+		reg := registry.New()
 
 		// Use a loader that returns an empty URL.
 		reg.RegisterFunc(
@@ -216,19 +161,16 @@ func TestRegistry_Caching(t *testing.T) {
 			}),
 		)
 
-		// First lookup should miss cache and compile, but NOT set.
+		// Each lookup compiles fresh, so the validators are distinct instances.
 		doc1 := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
-		_, err := reg.Lookup(t.Context(), doc1)
+		v1, err := reg.Lookup(t.Context(), doc1)
 		require.NoError(t, err)
-		assert.Equal(t, 1, cache.getCalls)
-		assert.Equal(t, 0, cache.setCalls, "empty URL should not be cached")
 
-		// Second lookup should also miss cache and compile again.
 		doc2 := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
-		_, err = reg.Lookup(t.Context(), doc2)
+		v2, err := reg.Lookup(t.Context(), doc2)
 		require.NoError(t, err)
-		assert.Equal(t, 2, cache.getCalls)
-		assert.Equal(t, 0, cache.setCalls, "empty URL should still not be cached")
+
+		assert.NotSame(t, v1, v2, "empty URL should not be cached")
 	})
 
 	t.Run("concurrent access is safe", func(t *testing.T) {
@@ -295,7 +237,7 @@ func TestRegistry_DynamicLoader(t *testing.T) {
 					return loader.Result{}, err
 				}
 
-				return loader.NewResult(schemaPath, data), nil
+				return loader.Result{URL: schemaPath, Data: data}, nil
 			}),
 		)
 
@@ -358,12 +300,11 @@ func TestRegistry_WithValidateOptions(t *testing.T) {
 	assert.NotNil(t, v)
 }
 
-func TestRegistry_DoubleCheckLock(t *testing.T) {
+func TestRegistry_ConcurrentCompile(t *testing.T) {
 	t.Parallel()
 
-	// This test exercises the double-check lock path in loadValidator.
-	// When two goroutines try to compile the same schema simultaneously,
-	// the second one should find it in cache after acquiring the write lock.
+	// When multiple goroutines look up the same schema simultaneously, each
+	// may compile it, but lookups must stay safe and produce a valid result.
 	schemaData := []byte(`{"type": "object"}`)
 	reg := registry.New()
 
@@ -440,27 +381,6 @@ func TestRegistry_ErrorCases(t *testing.T) {
 		assert.Contains(t, err.Error(), "load failed")
 	})
 
-	t.Run("custom SchemaValidator returned directly", func(t *testing.T) {
-		t.Parallel()
-
-		customValidator := yamltest.NewPassingSchemaValidator()
-		reg := registry.New()
-		reg.RegisterFunc(
-			matcher.Always(),
-			loader.Func(func(_ context.Context, _ *niceyaml.DocumentDecoder) (loader.Result, error) {
-				return loader.Result{
-					Validator: customValidator,
-					URL:       "test.json",
-				}, nil
-			}),
-		)
-
-		doc := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
-		v, err := reg.Lookup(t.Context(), doc)
-		require.NoError(t, err)
-		assert.Equal(t, customValidator, v)
-	})
-
 	t.Run("compile error propagates", func(t *testing.T) {
 		t.Parallel()
 
@@ -526,31 +446,4 @@ func TestRegistry_MultipleDocuments(t *testing.T) {
 
 	assert.True(t, validated["Deployment"])
 	assert.True(t, validated["Service"])
-}
-
-// trackingCache is a test [registry.Cache] that tracks method calls.
-type trackingCache struct {
-	mu         sync.Mutex
-	validators map[string]niceyaml.SchemaValidator
-	getCalls   int
-	setCalls   int
-}
-
-func (c *trackingCache) Get(url string) (niceyaml.SchemaValidator, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.getCalls++
-
-	v, ok := c.validators[url]
-
-	return v, ok
-}
-
-func (c *trackingCache) Set(url string, v niceyaml.SchemaValidator) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.setCalls++
-	c.validators[url] = v
 }

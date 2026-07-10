@@ -23,7 +23,7 @@
 //	func (t MyType) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
 //	    f := s.Properties["myField"]
 //	    f.Description = "Custom description"
-//	    f.MinLength = jsonschema.Ptr(1)
+//	    f.MinLength = new(1)
 //
 //	    return nil
 //	}

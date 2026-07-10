@@ -22,6 +22,6 @@ func File(path string) Loader {
 			return Result{}, fmt.Errorf("read %s: %w", path, err)
 		}
 
-		return NewResult(path, data), nil
+		return Result{URL: path, Data: data}, nil
 	})
 }

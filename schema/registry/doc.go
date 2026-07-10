@@ -40,10 +40,7 @@
 //
 // # Schema Caching
 //
-// Compiled validators are cached by schema URL to avoid recompilation. By
-// default, an unbounded thread-safe map is used. For custom caching strategies
-// (LRU, TTL, external cache), implement the [Cache] interface and provide it
-// via [WithCache].
+// Compiled validators are cached by schema URL to avoid recompilation.
 //
 // # SchemaStore Integration
 //

@@ -2,8 +2,8 @@
 //
 // Loaders retrieve schema data from various sources and return it for
 // compilation by [registry.Registry]. A [Loader] receives the document being
-// validated and returns a [Result] containing either raw schema bytes or a
-// pre-compiled validator.
+// validated and returns a [Result] containing the schema bytes and the URL
+// identifying them.
 //
 // Loaders fall into two categories: static and dynamic. Static loaders return
 // the same schema regardless of the document content—useful when you know
@@ -28,6 +28,6 @@
 //	    if err != nil {
 //	        return loader.Result{}, err
 //	    }
-//	    return loader.NewResult(schemaPath, data), nil
+//	    return loader.Result{URL: schemaPath, Data: data}, nil
 //	})
 package loader
