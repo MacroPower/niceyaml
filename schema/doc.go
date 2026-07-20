@@ -36,7 +36,7 @@
 // carrying YAML path information for integration with niceyaml's error display:
 //
 //	v := schema.NewValidator(jsonschema.MustCompileJSON(schemaBytes))
-//	if err := doc.ValidateSchema(v); err != nil {
+//	if err := doc.ValidateSchema(ctx, v); err != nil {
 //	    // err is *niceyaml.Error with path info for highlighting.
 //	}
 package schema

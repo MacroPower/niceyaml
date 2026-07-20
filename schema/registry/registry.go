@@ -142,7 +142,7 @@ func (r *Registry) ValidateDocument(ctx context.Context, doc *niceyaml.DocumentD
 	}
 
 	//nolint:wrapcheck // Validation errors should be returned directly.
-	return doc.ValidateSchemaContext(ctx, v)
+	return doc.ValidateSchema(ctx, v)
 }
 
 // loadValidator loads and compiles a validator, using cache when possible.

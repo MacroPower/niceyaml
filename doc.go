@@ -86,7 +86,7 @@
 //	decoder, _ := source.Decoder()
 //	for _, doc := range decoder.Documents() {
 //		var config Config
-//		if err := doc.Unmarshal(&config); err != nil {
+//		if err := doc.Unmarshal(ctx, &config); err != nil {
 //			return source.WrapError(err)
 //		}
 //	}

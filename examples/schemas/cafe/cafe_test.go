@@ -1,6 +1,7 @@
 package cafe_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -9,7 +10,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/examples/schemas/cafe"
 )
 
-func cafeConfig(in string) (*cafe.Config, error) {
+func cafeConfig(ctx context.Context, in string) (*cafe.Config, error) {
 	src := niceyaml.NewSourceFromString(in)
 
 	d, err := src.Decoder()
@@ -20,7 +21,7 @@ func cafeConfig(in string) (*cafe.Config, error) {
 	c := cafe.NewConfig()
 
 	for _, doc := range d.Documents() {
-		err := doc.Unmarshal(&c)
+		err := doc.Unmarshal(ctx, &c)
 		if err != nil {
 			return nil, src.WrapError(err)
 		}
@@ -32,7 +33,7 @@ func cafeConfig(in string) (*cafe.Config, error) {
 func TestCafeDefaultConfig(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := cafeConfig(cafe.DefaultYAML)
+	cfg, err := cafeConfig(t.Context(), cafe.DefaultYAML)
 	require.NoError(t, err, "load default config")
 	require.NotNil(t, cfg)
 
@@ -47,6 +48,6 @@ func TestCafeDefaultConfig(t *testing.T) {
 func TestCafeBrokenConfig(t *testing.T) {
 	t.Parallel()
 
-	_, err := cafeConfig(cafe.BrokenYAML)
+	_, err := cafeConfig(t.Context(), cafe.BrokenYAML)
 	require.Error(t, err, "broken config should fail schema validation")
 }

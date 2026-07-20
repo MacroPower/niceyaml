@@ -229,7 +229,7 @@ func TestDocumentDecoder_Decode(t *testing.T) {
 		for _, dd := range d.Documents() {
 			var result map[string]string
 
-			err := dd.Decode(&result)
+			err := dd.Decode(t.Context(), &result)
 			require.NoError(t, err)
 			assert.Equal(t, map[string]string{"key": "value"}, result)
 		}
@@ -249,7 +249,7 @@ func TestDocumentDecoder_Decode(t *testing.T) {
 		for _, dd := range d.Documents() {
 			var result testStruct
 
-			err := dd.Decode(&result)
+			err := dd.Decode(t.Context(), &result)
 			require.NoError(t, err)
 			assert.Equal(t, testStruct{Name: "test", Value: 42}, result)
 		}
@@ -270,7 +270,7 @@ func TestDocumentDecoder_Decode(t *testing.T) {
 		for _, dd := range d.Documents() {
 			var result []string
 
-			err := dd.Decode(&result)
+			err := dd.Decode(t.Context(), &result)
 			require.NoError(t, err)
 			assert.Equal(t, []string{"one", "two", "three"}, result)
 		}
@@ -296,7 +296,7 @@ func TestDocumentDecoder_Decode(t *testing.T) {
 		for _, dd := range d.Documents() {
 			var result testStruct
 
-			err := dd.Decode(&result)
+			err := dd.Decode(t.Context(), &result)
 			require.NoError(t, err)
 
 			results = append(results, result)
@@ -321,34 +321,13 @@ func TestDocumentDecoder_Decode_TypeMismatch(t *testing.T) {
 		for _, dd := range d.Documents() {
 			var target struct{ Value int }
 
-			err := dd.Decode(&target)
+			err := dd.Decode(t.Context(), &target)
 
 			require.Error(t, err)
 
 			var yamlErr *niceyaml.Error
 
 			require.ErrorAs(t, err, &yamlErr)
-		}
-	})
-}
-
-func TestDocumentDecoder_DecodeContext(t *testing.T) {
-	t.Parallel()
-
-	t.Run("decode with background context", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString("key: value")
-		d, err := source.Decoder()
-		require.NoError(t, err)
-
-		for _, dd := range d.Documents() {
-			var result map[string]string
-
-			err := dd.DecodeContext(t.Context(), &result)
-
-			require.NoError(t, err)
-			assert.Equal(t, "value", result["key"])
 		}
 	})
 }
@@ -370,7 +349,7 @@ func TestDocumentDecoder_Unmarshal(t *testing.T) {
 		for _, dd := range d.Documents() {
 			var result schemaValidatorConfig
 
-			err := dd.Unmarshal(&result)
+			err := dd.Unmarshal(t.Context(), &result)
 			require.NoError(t, err)
 			assert.Equal(t, "test", result.Name)
 			assert.Equal(t, 42, result.Value)
@@ -392,7 +371,7 @@ func TestDocumentDecoder_Unmarshal(t *testing.T) {
 		for _, dd := range d.Documents() {
 			var result schemaValidatorConfig
 
-			err := dd.Unmarshal(&result)
+			err := dd.Unmarshal(t.Context(), &result)
 			require.ErrorIs(t, err, errSchemaValidationFailed)
 		}
 	})
@@ -411,56 +390,10 @@ func TestDocumentDecoder_Unmarshal(t *testing.T) {
 		for _, dd := range d.Documents() {
 			var result plainConfig
 
-			err := dd.Unmarshal(&result)
+			err := dd.Unmarshal(t.Context(), &result)
 			require.NoError(t, err)
 			assert.Equal(t, "test", result.Name)
 			assert.Equal(t, 42, result.Value)
-		}
-	})
-}
-
-func TestDocumentDecoder_UnmarshalContext(t *testing.T) {
-	t.Parallel()
-
-	t.Run("validates and decodes with context", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			name: test
-			value: 42
-		`)
-		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Decoder()
-		require.NoError(t, err)
-
-		for _, dd := range d.Documents() {
-			var result schemaValidatorConfig
-
-			err := dd.UnmarshalContext(t.Context(), &result)
-
-			require.NoError(t, err)
-			assert.Equal(t, "test", result.Name)
-			assert.True(t, result.schemaValidated, "ValidateSchema() should have been called")
-		}
-	})
-
-	t.Run("schema validation failure stops decode", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			name: invalid
-			value: 42
-		`)
-		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Decoder()
-		require.NoError(t, err)
-
-		for _, dd := range d.Documents() {
-			var result schemaValidatorConfig
-
-			err := dd.UnmarshalContext(t.Context(), &result)
-
-			require.ErrorIs(t, err, errSchemaValidationFailed)
 		}
 	})
 }
@@ -481,7 +414,7 @@ func TestNewDocumentDecoder(t *testing.T) {
 
 		var result map[string]string
 
-		err = dd.Decode(&result)
+		err = dd.Decode(t.Context(), &result)
 		require.NoError(t, err)
 		assert.Equal(t, "value", result["key"])
 	})
@@ -521,10 +454,10 @@ key: value`
 	assert.True(t, foundAny)
 }
 
-func TestDocumentDecoder_UnmarshalContext_DecodeError(t *testing.T) {
+func TestDocumentDecoder_Unmarshal_DecodeError(t *testing.T) {
 	t.Parallel()
 
-	// Test when DecodeContext after validation fails.
+	// Test when the decode after validation fails.
 	input := `value: not_a_number`
 	source := niceyaml.NewSourceFromString(input)
 	d, err := source.Decoder()
@@ -534,7 +467,7 @@ func TestDocumentDecoder_UnmarshalContext_DecodeError(t *testing.T) {
 		var result strictSchemaValidatorConfig
 
 		// Schema validation passes, but decode will fail due to type mismatch.
-		err := dd.UnmarshalContext(t.Context(), &result)
+		err := dd.Unmarshal(t.Context(), &result)
 
 		require.Error(t, err)
 
@@ -544,10 +477,10 @@ func TestDocumentDecoder_UnmarshalContext_DecodeError(t *testing.T) {
 	}
 }
 
-func TestDocumentDecoder_DecodeContext_CanceledContext(t *testing.T) {
+func TestDocumentDecoder_Decode_CanceledContext(t *testing.T) {
 	t.Parallel()
 
-	// Test DecodeContext with a canceled context to trigger the non-yaml error path.
+	// Test Decode with a canceled context to trigger the non-yaml error path.
 	input := `key: value`
 	source := niceyaml.NewSourceFromString(input)
 	d, err := source.Decoder()
@@ -559,7 +492,7 @@ func TestDocumentDecoder_DecodeContext_CanceledContext(t *testing.T) {
 	for _, dd := range d.Documents() {
 		var result map[string]string
 
-		err := dd.DecodeContext(ctx, &result)
+		err := dd.Decode(ctx, &result)
 		// Context cancellation may or may not cause an error depending on timing.
 		// The decode might complete before the context cancellation is checked.
 		// This test mainly ensures the code path doesn't panic.
@@ -584,7 +517,7 @@ func TestDocumentDecoder_Decode_Validator(t *testing.T) {
 		for _, dd := range d.Documents() {
 			var result validatorConfig
 
-			err := dd.Decode(&result)
+			err := dd.Decode(t.Context(), &result)
 			require.NoError(t, err)
 			assert.False(t, result.validated, "Validate() should NOT have been called by Decode()")
 			assert.Equal(t, "test", result.Name)
@@ -606,7 +539,7 @@ func TestDocumentDecoder_Decode_Validator(t *testing.T) {
 		for _, dd := range d.Documents() {
 			var result plainConfig
 
-			err := dd.Decode(&result)
+			err := dd.Decode(t.Context(), &result)
 			require.NoError(t, err)
 			assert.Equal(t, "test", result.Name)
 			assert.Equal(t, 42, result.Value)
@@ -627,7 +560,7 @@ func TestDocumentDecoder_Decode_Validator(t *testing.T) {
 		for _, dd := range d.Documents() {
 			var result bothValidatorConfig
 
-			err := dd.Unmarshal(&result)
+			err := dd.Unmarshal(t.Context(), &result)
 			require.NoError(t, err)
 			assert.True(t, result.schemaValidated, "ValidateSchema() should have been called")
 			assert.True(t, result.validated, "Validate() should have been called after decode")
@@ -648,7 +581,7 @@ func TestDocumentDecoder_Decode_Validator(t *testing.T) {
 		for _, dd := range d.Documents() {
 			var result bothValidatorConfig
 
-			err := dd.Unmarshal(&result)
+			err := dd.Unmarshal(t.Context(), &result)
 			require.ErrorIs(t, err, errNameRequired)
 		}
 	})
@@ -849,7 +782,7 @@ func TestDocumentDecoder_ValidateSchema(t *testing.T) {
 		validator := yamltest.NewPassingSchemaValidator()
 
 		for _, dd := range d.Documents() {
-			err := dd.ValidateSchema(validator)
+			err := dd.ValidateSchema(t.Context(), validator)
 			require.NoError(t, err)
 		}
 	})
@@ -869,7 +802,7 @@ func TestDocumentDecoder_ValidateSchema(t *testing.T) {
 		validator := yamltest.NewFailingSchemaValidator(wantErr)
 
 		for _, dd := range d.Documents() {
-			err := dd.ValidateSchema(validator)
+			err := dd.ValidateSchema(t.Context(), validator)
 			require.ErrorIs(t, err, wantErr)
 		}
 	})
@@ -896,7 +829,7 @@ func TestWithDecodeOptions(t *testing.T) {
 		for _, dd := range d.Documents() {
 			var result strictConfig
 
-			err := dd.Decode(&result)
+			err := dd.Decode(t.Context(), &result)
 			require.NoError(t, err)
 			assert.Equal(t, "test", result.Name)
 		}
@@ -918,7 +851,7 @@ func TestWithDecodeOptions(t *testing.T) {
 		for _, dd := range d.Documents() {
 			var result strictConfig
 
-			err := dd.Decode(&result)
+			err := dd.Decode(t.Context(), &result)
 			require.Error(t, err)
 
 			var yamlErr *niceyaml.Error
@@ -943,7 +876,7 @@ func TestWithDecodeOptions(t *testing.T) {
 		for _, dd := range d.Documents() {
 			var result strictConfig
 
-			err := dd.Unmarshal(&result)
+			err := dd.Unmarshal(t.Context(), &result)
 			require.Error(t, err)
 
 			var yamlErr *niceyaml.Error
@@ -974,7 +907,7 @@ func TestWithDecodeOptions(t *testing.T) {
 		for _, dd := range d.Documents() {
 			var result strictConfig
 
-			err := dd.Decode(&result)
+			err := dd.Decode(t.Context(), &result)
 			if err != nil {
 				errCount++
 			}
@@ -999,7 +932,7 @@ func TestWithDecodeOptions(t *testing.T) {
 		for _, dd := range d.Documents() {
 			var result strictConfig
 
-			err := dd.Decode(&result)
+			err := dd.Decode(t.Context(), &result)
 			require.NoError(t, err)
 			assert.Equal(t, "test", result.Name)
 		}

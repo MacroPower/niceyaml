@@ -314,7 +314,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 			require.NoError(t, err)
 
 			for _, dd := range d.Documents() {
-				err = dd.ValidateSchema(v)
+				err = dd.ValidateSchema(t.Context(), v)
 
 				if tc.wantErr {
 					require.Error(t, err)
@@ -508,7 +508,7 @@ func TestValidator_PathTarget(t *testing.T) {
 			require.NoError(t, err)
 
 			for _, dd := range d.Documents() {
-				err = dd.ValidateSchema(v)
+				err = dd.ValidateSchema(t.Context(), v)
 				require.Error(t, err)
 
 				var validationErr *niceyaml.Error
@@ -661,7 +661,7 @@ func TestValidator_SubErrorAnnotations(t *testing.T) {
 			require.NoError(t, err)
 
 			for _, dd := range d.Documents() {
-				err = dd.ValidateSchema(v)
+				err = dd.ValidateSchema(t.Context(), v)
 				require.Error(t, err)
 
 				var validationErr *niceyaml.Error

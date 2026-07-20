@@ -142,7 +142,7 @@ func (d *Decoder) Documents() iter.Seq2[int, *DocumentDecoder] {
 //
 //	for _, doc := range decoder.Documents() {
 //		var config Config
-//		if err := doc.Unmarshal(&config); err != nil {
+//		if err := doc.Unmarshal(ctx, &config); err != nil {
 //			return err
 //		}
 //	}
@@ -254,18 +254,9 @@ func (dd *DocumentDecoder) GetValue(path *paths.YAMLPath) (string, bool) {
 
 // ValidateSchema decodes the document to [any] and validates it using sv.
 //
-// This is a convenience wrapper around [DocumentDecoder.ValidateSchemaContext]
-// with [context.Background].
-func (dd *DocumentDecoder) ValidateSchema(sv SchemaValidator) error {
-	return dd.ValidateSchemaContext(context.Background(), sv)
-}
-
-// ValidateSchemaContext decodes the document to [any] and validates it using sv
-// with [context.Context].
-//
 // Returns decoding errors or errors from the [SchemaValidator] ValidateSchema
 // method.
-func (dd *DocumentDecoder) ValidateSchemaContext(ctx context.Context, sv SchemaValidator) error {
+func (dd *DocumentDecoder) ValidateSchema(ctx context.Context, sv SchemaValidator) error {
 	var untypedData any
 
 	err := dd.decodeNode(ctx, &untypedData)
@@ -284,47 +275,26 @@ func (dd *DocumentDecoder) ValidateSchemaContext(ctx context.Context, sv SchemaV
 
 // Decode decodes the document into v.
 //
-// This is a convenience wrapper around [DocumentDecoder.DecodeContext] with
-// [context.Background].
-//
 // YAML decoding errors are converted to [Error] with source annotations.
-func (dd *DocumentDecoder) Decode(v any) error {
-	return dd.DecodeContext(context.Background(), v)
-}
-
-// DecodeContext decodes the document into v with [context.Context].
-// YAML decoding errors are converted to [Error] with source annotations.
-func (dd *DocumentDecoder) DecodeContext(ctx context.Context, v any) error {
+func (dd *DocumentDecoder) Decode(ctx context.Context, v any) error {
 	return dd.decodeNode(ctx, v)
 }
 
 // Unmarshal validates and decodes the document into v.
 //
-// This is a convenience wrapper around [DocumentDecoder.UnmarshalContext] with
-// [context.Background].
-//
 // If v implements [SchemaValidator], ValidateSchema is called before decoding.
 // If v implements [Validator], Validate is called after successful decoding.
-func (dd *DocumentDecoder) Unmarshal(v any) error {
-	return dd.UnmarshalContext(context.Background(), v)
-}
-
-// UnmarshalContext validates and decodes the document into v
-// with [context.Context].
-//
-// If v implements [SchemaValidator], ValidateSchema is called before decoding.
-// If v implements [Validator], Validate is called after successful decoding.
-func (dd *DocumentDecoder) UnmarshalContext(ctx context.Context, v any) error {
+func (dd *DocumentDecoder) Unmarshal(ctx context.Context, v any) error {
 	// Validate if type provides schema validation.
 	if sv, ok := v.(SchemaValidator); ok {
-		err := dd.ValidateSchemaContext(ctx, sv)
+		err := dd.ValidateSchema(ctx, sv)
 		if err != nil {
 			return err
 		}
 	}
 
 	// Decode to typed struct.
-	err := dd.DecodeContext(ctx, v)
+	err := dd.Decode(ctx, v)
 	if err != nil {
 		return err
 	}

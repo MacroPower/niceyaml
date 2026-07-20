@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 
 	"go.jacobcolvin.com/niceyaml"
@@ -44,7 +45,7 @@ func load(in string) (*cafe.Config, error) {
 	cfg := cafe.NewConfig()
 
 	for _, doc := range decoder.Documents() {
-		err := doc.Unmarshal(&cfg)
+		err := doc.Unmarshal(context.Background(), &cfg)
 		if err != nil {
 			return nil, source.WrapError(err)
 		}
