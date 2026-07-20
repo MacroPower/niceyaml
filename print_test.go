@@ -1,6 +1,7 @@
 package niceyaml_test
 
 import (
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -213,6 +214,52 @@ func TestPrinter_PrintTokens_EmptyFile(t *testing.T) {
 
 	// Empty file should produce empty output.
 	assert.Empty(t, got)
+}
+
+func TestPrinter_Fprint(t *testing.T) {
+	t.Parallel()
+
+	t.Run("writes same output as Print", func(t *testing.T) {
+		t.Parallel()
+
+		input := stringtest.Input(`
+			key: value
+			list:
+			  - one
+			  - two
+		`)
+		source := niceyaml.NewSourceFromString(input)
+		p := testPrinter()
+
+		var sb strings.Builder
+
+		n, err := p.Fprint(&sb, source)
+
+		require.NoError(t, err)
+		assert.Equal(t, p.Print(source), sb.String())
+		assert.Equal(t, len(sb.String()), n)
+	})
+
+	t.Run("returns write errors", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("key: value")
+		p := testPrinter()
+
+		_, err := p.Fprint(failingWriter{}, source)
+
+		require.ErrorIs(t, err, errWriteFailed)
+	})
+}
+
+// errWriteFailed is the sentinel returned by failingWriter.
+var errWriteFailed = errors.New("write failed")
+
+// failingWriter always fails, for exercising Fprint error paths.
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) {
+	return 0, errWriteFailed
 }
 
 func TestNewPrinter(t *testing.T) {

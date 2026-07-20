@@ -2,6 +2,7 @@ package niceyaml
 
 import (
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -51,6 +52,11 @@ type WrappingPrinter interface {
 //
 //	printer.Print(source)                   // All lines.
 //	printer.Print(source, span1, span2)     // Specific spans.
+//
+// Use [Printer.Fprint] to write the rendered output to an [io.Writer] instead
+// of returning it as a string:
+//
+//	printer.Fprint(os.Stdout, source)
 //
 // # Gutters
 //
@@ -313,6 +319,20 @@ func (p *Printer) SetWordWrap(enabled bool) {
 // or an empty style if not found.
 func (p *Printer) Style(s style.Style) *lipgloss.Style {
 	return p.styles.Style(s)
+}
+
+// Fprint renders lines to w. It renders lines within the given
+// [position.Span]s, in the supplied order. If no [position.Span]s are
+// provided, all lines are rendered.
+//
+// It returns the number of bytes written and any write error encountered.
+func (p *Printer) Fprint(w io.Writer, lines LineIterator, spans ...position.Span) (int, error) {
+	n, err := io.WriteString(w, p.Print(lines, spans...))
+	if err != nil {
+		return n, fmt.Errorf("write rendered output: %w", err)
+	}
+
+	return n, nil
 }
 
 // Print prints any [LineIterator].
