@@ -170,6 +170,42 @@ func TestPathBuilder(t *testing.T) {
 	}
 }
 
+func TestPathBuilder_Immutable(t *testing.T) {
+	t.Parallel()
+
+	t.Run("shared prefix is not aliased", func(t *testing.T) {
+		t.Parallel()
+
+		spec := paths.Root().Child("spec")
+		replicas := spec.Child("replicas").Value()
+		image := spec.Child("image").Value()
+
+		assert.Equal(t, "$.spec.replicas.(value)", replicas.String())
+		assert.Equal(t, "$.spec.image.(value)", image.String())
+		assert.Equal(t, "$.spec.(value)", spec.Value().String())
+	})
+
+	t.Run("finalizing does not consume the builder", func(t *testing.T) {
+		t.Parallel()
+
+		b := paths.Root().Child("metadata", "name")
+
+		assert.Equal(t, "$.metadata.name.(key)", b.Key().String())
+		assert.Equal(t, "$.metadata.name.(value)", b.Value().String())
+		assert.Equal(t, "$.metadata.name.labels.(value)", b.Child("labels").Value().String())
+	})
+}
+
+func TestFromString_ExtendPanics(t *testing.T) {
+	t.Parallel()
+
+	b := paths.MustFromString("$.metadata")
+
+	assert.Panics(t, func() {
+		b.Child("name")
+	})
+}
+
 func TestFromString(t *testing.T) {
 	t.Parallel()
 

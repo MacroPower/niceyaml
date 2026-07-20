@@ -51,5 +51,11 @@
 //	paths.Root().Child("spec").IndexAll().Value()             // $.spec[*].(value)
 //	paths.Root().Recursive("name").Value()                    // $..name.(value)
 //
+// Builders are immutable, so a common prefix can be shared safely:
+//
+//	spec := paths.Root().Child("spec")
+//	replicas := spec.Child("replicas").Value()  // $.spec.replicas.(value)
+//	image := spec.Child("image").Value()        // $.spec.image.(value)
+//
 // For the underlying [YAMLPath] without targeting, use [Builder.Path].
 package paths

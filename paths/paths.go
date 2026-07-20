@@ -24,6 +24,14 @@ const (
 
 // Builder constructs YAML paths with method chaining.
 //
+// Builders are immutable: each selector method returns a new Builder,
+// leaving the receiver unchanged. This makes it safe to share a Builder as
+// a common prefix:
+//
+//	spec := paths.Root().Child("spec")
+//	replicas := spec.Child("replicas").Value() // $.spec.replicas.(value)
+//	image := spec.Child("image").Value()       // $.spec.image.(value)
+//
 // It provides multiple finalization options:
 //   - [Builder.Path] returns the underlying [*YAMLPath] directly.
 //   - [Builder.Key] returns a [*Path] targeting [PartKey].
@@ -31,47 +39,67 @@ const (
 //
 // Create instances with [Root], [FromString], or [MustFromString].
 type Builder struct {
-	pb    *yaml.PathBuilder
-	built *YAMLPath // Set by FromString; bypasses pb.Build().
+	built *YAMLPath // Set by FromString; bypasses ops.
+	ops   []func(*yaml.PathBuilder) *yaml.PathBuilder
 }
 
 // Root creates a new [Builder] starting at the root path ($).
 func Root() *Builder {
-	pb := &yaml.PathBuilder{}
+	return &Builder{}
+}
 
-	return &Builder{pb: pb.Root()}
+// extend returns a new [Builder] with the receiver's selectors plus ops.
+//
+// Panics if the receiver was created by [FromString], since a parsed
+// [*YAMLPath] cannot be extended with additional selectors.
+func (b *Builder) extend(ops ...func(*yaml.PathBuilder) *yaml.PathBuilder) *Builder {
+	if b.built != nil {
+		panic("paths: cannot extend a Builder created by FromString")
+	}
+
+	merged := make([]func(*yaml.PathBuilder) *yaml.PathBuilder, 0, len(b.ops)+len(ops))
+	merged = append(merged, b.ops...)
+	merged = append(merged, ops...)
+
+	return &Builder{ops: merged}
 }
 
 // Child appends `.name` selectors for each name to the path.
 func (b *Builder) Child(name ...string) *Builder {
+	ops := make([]func(*yaml.PathBuilder) *yaml.PathBuilder, 0, len(name))
 	for _, n := range name {
-		b.pb = b.pb.Child(n)
+		ops = append(ops, func(pb *yaml.PathBuilder) *yaml.PathBuilder {
+			return pb.Child(n)
+		})
 	}
 
-	return b
+	return b.extend(ops...)
 }
 
 // Index appends `[idx]` selectors for each index to the path.
 func (b *Builder) Index(idx ...int) *Builder {
+	ops := make([]func(*yaml.PathBuilder) *yaml.PathBuilder, 0, len(idx))
 	for _, i := range idx {
-		b.pb = b.pb.Index(uint(i)) //nolint:gosec // Indices are non-negative.
+		ops = append(ops, func(pb *yaml.PathBuilder) *yaml.PathBuilder {
+			return pb.Index(uint(i)) //nolint:gosec // Indices are non-negative.
+		})
 	}
 
-	return b
+	return b.extend(ops...)
 }
 
 // IndexAll appends a `[*]` wildcard selector to the path.
 func (b *Builder) IndexAll() *Builder {
-	b.pb = b.pb.IndexAll()
-
-	return b
+	return b.extend(func(pb *yaml.PathBuilder) *yaml.PathBuilder {
+		return pb.IndexAll()
+	})
 }
 
 // Recursive appends a `..selector` recursive descent selector to the path.
 func (b *Builder) Recursive(selector string) *Builder {
-	b.pb = b.pb.Recursive(selector)
-
-	return b
+	return b.extend(func(pb *yaml.PathBuilder) *yaml.PathBuilder {
+		return pb.Recursive(selector)
+	})
 }
 
 // build returns the underlying [*YAMLPath], using the pre-built path if set.
@@ -80,7 +108,12 @@ func (b *Builder) build() *YAMLPath {
 		return b.built
 	}
 
-	return b.pb.Build()
+	pb := (&yaml.PathBuilder{}).Root()
+	for _, op := range b.ops {
+		pb = op(pb)
+	}
+
+	return pb.Build()
 }
 
 // Path finalizes the builder and returns the underlying [*YAMLPath].
@@ -118,6 +151,9 @@ func (b *Builder) Value() *Path {
 //	}
 //	keyPath := path.Key()   // targets the key
 //	valPath := path.Value() // targets the value
+//
+// The returned builder holds an already-parsed path and cannot be extended
+// with selector methods like [Builder.Child]; those methods panic.
 func FromString(expr string) (*Builder, error) {
 	yp, err := yaml.PathString(expr)
 	if err != nil {
