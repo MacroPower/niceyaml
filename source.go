@@ -214,6 +214,14 @@ func (s *Source) Name() string {
 	return s.name
 }
 
+// Source returns the receiver, implementing [SourceGetter].
+//
+// This allows a [*Source] to be passed directly to [Diff] and [Differ.Diff]
+// without wrapping it in a [Revision].
+func (s *Source) Source() *Source {
+	return s
+}
+
 // FilePath returns the file path of the [Source].
 //
 // Returns an empty string if not set via [WithFilePath] or [NewSourceFromFile].

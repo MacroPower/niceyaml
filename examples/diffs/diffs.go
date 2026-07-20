@@ -22,14 +22,8 @@ func main() {
 
 	printer := niceyaml.NewPrinter()
 
-	// Create an initial revision.
-	rev := niceyaml.NewRevision(before)
-
-	// Append a new revision.
-	rev = rev.Append(after)
-
-	// Create a diff result between the two revisions.
-	result := niceyaml.Diff(rev.Origin(), rev.Tip())
+	// Create a diff result between the two sources.
+	result := niceyaml.Diff(before, after)
 
 	fmt.Println("\nPrint the full diff:")
 	fmt.Println(printer.Print(result.Unified()))

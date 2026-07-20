@@ -11,6 +11,11 @@ import (
 	"go.jacobcolvin.com/niceyaml/line"
 )
 
+var (
+	_ niceyaml.SourceGetter = (*niceyaml.Source)(nil)
+	_ niceyaml.SourceGetter = (*niceyaml.Revision)(nil)
+)
+
 func TestDiffer_Full(t *testing.T) {
 	t.Parallel()
 
@@ -352,9 +357,7 @@ func TestDiffer_Full(t *testing.T) {
 			beforeTokens := niceyaml.NewSourceFromString(tc.before, niceyaml.WithName("a"))
 			afterTokens := niceyaml.NewSourceFromString(tc.after, niceyaml.WithName("b"))
 
-			revA := niceyaml.NewRevision(beforeTokens)
-			revB := niceyaml.NewRevision(afterTokens)
-			differ := niceyaml.Diff(revA, revB)
+			differ := niceyaml.Diff(beforeTokens, afterTokens)
 
 			got := differ.Unified()
 

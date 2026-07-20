@@ -12,7 +12,9 @@ import (
 
 // SourceGetter retrieves a [*Source].
 //
-// See [Revision] for an implementation.
+// [Source] implements it by returning itself, so a plain [*Source] can be
+// used anywhere a SourceGetter is expected. [Revision] implements it by
+// returning the source at its head.
 type SourceGetter interface {
 	Source() *Source
 }
