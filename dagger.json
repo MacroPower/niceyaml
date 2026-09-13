@@ -1,6 +1,6 @@
 {
   "name": "niceyaml",
-  "engineVersion": "v0.21.4",
+  "engineVersion": "v0.21.9",
   "toolchains": [
     {
       "name": "ci",
@@ -24,7 +24,7 @@
     {
       "name": "devbox",
       "source": "github.com/MacroPower/x/toolchains/devbox@main",
-      "pin": "8990610a338bb60f9aa8708d5fa89e1c3c6725dc",
+      "pin": "2bc664dbb746234f0aa15333198e5a7f7caaf17d",
       "customizations": [
         {
           "argument": "source",
@@ -48,7 +48,7 @@
     {
       "name": "commitlint",
       "source": "github.com/MacroPower/x/toolchains/commitlint@main",
-      "pin": "8990610a338bb60f9aa8708d5fa89e1c3c6725dc"
+      "pin": "2bc664dbb746234f0aa15333198e5a7f7caaf17d"
     }
   ]
 }
