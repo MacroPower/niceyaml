@@ -1,7 +1,5 @@
 package diff
 
-import "go.jacobcolvin.com/niceyaml/line"
-
 // Algorithm computes a sequence of operations to transform before into after.
 //
 // See [Hirschberg] for the default implementation.
@@ -28,18 +26,6 @@ const (
 	// OpInsert indicates the element exists only in the after sequence.
 	OpInsert
 )
-
-// Flag converts the OpKind to the corresponding [line.Flag].
-func (k OpKind) Flag() line.Flag {
-	switch k {
-	case OpDelete:
-		return line.FlagDeleted
-	case OpInsert:
-		return line.FlagInserted
-	default:
-		return line.FlagDefault
-	}
-}
 
 // Op represents a diff operation with an index into one of the input sequences.
 type Op struct {

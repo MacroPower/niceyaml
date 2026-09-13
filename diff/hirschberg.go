@@ -54,9 +54,6 @@ func (h *Hirschberg) Init(beforeLen, afterLen int) {
 //   - [OpEqual]: The element exists in both sequences (index refers to after)
 //   - [OpDelete]: The element exists only in before (index refers to before)
 //   - [OpInsert]: The element exists only in after (index refers to after)
-//
-// Each [OpKind] can be converted to a [line.Flag] using [OpKind.Flag] for
-// integration with the line package.
 func (h *Hirschberg) Diff(before, after []string) []Op {
 	h.ops = h.ops[:0]
 

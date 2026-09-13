@@ -38,13 +38,8 @@
 //   - [OpDelete]: Line only in before (index into before).
 //   - [OpInsert]: Line only in after (index into after).
 //
-// # Integration with line Package
-//
-// The [OpKind.Flag] method converts operations to [line.Flag] values for
-// rendering. This allows the diff results to flow directly into the line
-// rendering system:
-//
-//	for _, op := range ops {
-//	    flag := op.Kind.Flag() // Returns FlagDefault, FlagDeleted, or FlagInserted.
-//	}
+// The package has no dependencies on the rest of niceyaml, so an [Algorithm]
+// can be developed and tested on plain string slices. The root package maps
+// each [OpKind] to a line flag when it builds rendering views from the
+// operations.
 package diff

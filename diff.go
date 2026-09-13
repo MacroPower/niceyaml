@@ -401,6 +401,18 @@ func opKindDeltas(k diff.OpKind) (int, int) {
 	}
 }
 
+// opKindFlag returns the [line.Flag] that marks a line produced by k.
+func opKindFlag(k diff.OpKind) line.Flag {
+	switch k {
+	case diff.OpDelete:
+		return line.FlagDeleted
+	case diff.OpInsert:
+		return line.FlagInserted
+	default:
+		return line.FlagDefault
+	}
+}
+
 // lineOps is a slice of [lineOp] values.
 type lineOps []lineOp
 
@@ -409,7 +421,7 @@ func (ops lineOps) toLines() line.Lines {
 	lines := make(line.Lines, 0, len(ops))
 	for _, op := range ops {
 		ln := op.line.Clone()
-		ln.Flag = op.kind.Flag()
+		ln.Flag = opKindFlag(op.kind)
 		lines = append(lines, ln)
 	}
 
