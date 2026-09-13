@@ -37,10 +37,10 @@ type WrappingPrinter interface {
 
 // Printer prints YAML with syntax highlighting for terminal output.
 //
-// It accepts a [LineIterator], normally [Source], and produces styled terminal
-// output using [lipgloss.Style]s. It applies syntax highlighting to YAML
-// tokens, with support for customizable gutters, annotations, styled overlays,
-// and word wrapping.
+// It accepts a [LineIterator], either a [*Source] or a [line.Lines] view, and
+// produces styled terminal output using [lipgloss.Style]s. It applies syntax
+// highlighting to YAML tokens, with support for customizable gutters,
+// annotations, styled overlays, and word wrapping.
 //
 // Create instances with [NewPrinter].
 //

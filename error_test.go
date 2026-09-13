@@ -304,11 +304,11 @@ func TestErrorAnnotation(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		path        *paths.Path
-		source      string
-		errMsg      string
-		want        string
-		sourceLines int
+		path         *paths.Path
+		source       string
+		errMsg       string
+		want         string
+		contextLines int
 	}{
 		"nested path shows correct key": {
 			source: stringtest.Input(`
@@ -384,9 +384,9 @@ func TestErrorAnnotation(t *testing.T) {
 				line4: d
 				line5: e
 			`),
-			path:        paths.Root().Child("line3").Key(),
-			errMsg:      "middle error",
-			sourceLines: 1,
+			path:         paths.Root().Child("line3").Key(),
+			errMsg:       "middle error",
+			contextLines: 1,
 			want: stringtest.JoinLF(
 				"[3:1] middle error:",
 				"",
@@ -410,8 +410,8 @@ func TestErrorAnnotation(t *testing.T) {
 					niceyaml.WithStyle(lipgloss.NewStyle()),
 				)),
 			}
-			if tc.sourceLines > 0 {
-				opts = append(opts, niceyaml.WithSourceLines(tc.sourceLines))
+			if tc.contextLines > 0 {
+				opts = append(opts, niceyaml.WithContextLines(tc.contextLines))
 			}
 
 			err := niceyaml.NewError(tc.errMsg, opts...)
@@ -1256,7 +1256,7 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 			"validation error",
 			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
 			niceyaml.WithPrinter(newXMLPrinter()),
-			niceyaml.WithSourceLines(1),
+			niceyaml.WithContextLines(1),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"error at line3",
@@ -1289,7 +1289,7 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 			"validation error",
 			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
 			niceyaml.WithPrinter(newXMLPrinter()),
-			niceyaml.WithSourceLines(0), // No extra context.
+			niceyaml.WithContextLines(0), // No extra context.
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"error at line1",
@@ -1324,7 +1324,7 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 			"validation error",
 			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
 			niceyaml.WithPrinter(newXMLPrinter()),
-			niceyaml.WithSourceLines(0),
+			niceyaml.WithContextLines(0),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"error 1",
@@ -1373,12 +1373,12 @@ func TestError_HunkDisplay(t *testing.T) {
 			line10: j
 		`)
 
-		// Errors at line1 and line10 with sourceLines=1 should create separate hunks.
+		// Errors at line1 and line10 with contextLines=1 should create separate hunks.
 		err := niceyaml.NewError(
 			"validation error",
 			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
 			niceyaml.WithPrinter(newXMLPrinter()),
-			niceyaml.WithSourceLines(1),
+			niceyaml.WithContextLines(1),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"error at start",
@@ -1418,13 +1418,13 @@ func TestError_HunkDisplay(t *testing.T) {
 			line5: e
 		`)
 
-		// Errors at line1 and line3 with sourceLines=1 should merge into one hunk
-		// since they're within 2*sourceLines of each other.
+		// Errors at line1 and line3 with contextLines=1 should merge into one hunk
+		// since they're within 2*contextLines of each other.
 		err := niceyaml.NewError(
 			"validation error",
 			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
 			niceyaml.WithPrinter(newXMLPrinter()),
-			niceyaml.WithSourceLines(1),
+			niceyaml.WithContextLines(1),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"first error",
@@ -1467,7 +1467,7 @@ func TestError_HunkDisplay(t *testing.T) {
 			"validation failed at 2 locations",
 			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
 			niceyaml.WithPrinter(newXMLPrinter()),
-			niceyaml.WithSourceLines(1),
+			niceyaml.WithContextLines(1),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"first location error",
@@ -1507,7 +1507,7 @@ func TestError_HunkDisplay(t *testing.T) {
 			"validation error",
 			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
 			niceyaml.WithPrinter(newXMLPrinter()),
-			niceyaml.WithSourceLines(1),
+			niceyaml.WithContextLines(1),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"error at first",
@@ -1553,7 +1553,7 @@ func TestError_HunkDisplay(t *testing.T) {
 			niceyaml.WithPath(paths.Root().Child("line1").Key()),
 			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
 			niceyaml.WithPrinter(newXMLPrinter()),
-			niceyaml.WithSourceLines(1),
+			niceyaml.WithContextLines(1),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"nested error",
@@ -1582,13 +1582,13 @@ func TestError_HunkDisplay(t *testing.T) {
 			line3: c
 		`)
 
-		// With sourceLines=0, errors at line1 and line2 should merge because
+		// With contextLines=0, errors at line1 and line2 should merge because
 		// they're within threshold (2*0+1=1) of each other.
 		err := niceyaml.NewError(
 			"validation error",
 			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
 			niceyaml.WithPrinter(newXMLPrinter()),
-			niceyaml.WithSourceLines(0),
+			niceyaml.WithContextLines(0),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"error at line1",

@@ -8,7 +8,7 @@
 //	m := yamlviewport.New()
 //	m.SetWidth(80)
 //	m.SetHeight(24)
-//	m.SetTokens(niceyaml.NewSourceFromString(yamlContent))
+//	m.SetSource(niceyaml.NewSourceFromString(yamlContent))
 //
 // The viewport implements [tea.Model], so embed it in your Bubble Tea
 // application and forward messages to [Model.Update].

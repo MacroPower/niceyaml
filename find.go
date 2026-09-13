@@ -27,10 +27,9 @@ type Normalizer interface {
 // diacritic removal) changes the character count.
 //
 // Finder uses a load-once, search-many design. Call [Finder.Load] once with
-// your source data; this builds an internal index that maps character
-// positions in the searchable text back to [position.Position] values in the
-// original. Subsequent calls to [Finder.Find] use this index for efficient
-// lookups without re-parsing.
+// the lines to search. Load builds an index that maps character positions in
+// the search text back to [position.Position] values in the original lines,
+// and [Finder.Find] uses that index on every call without re-parsing.
 //
 // Finder is safe for concurrent use. Multiple goroutines may call
 // [Finder.Find] simultaneously, and [Finder.Load] uses locking to safely
@@ -59,7 +58,7 @@ type Normalizer interface {
 type Finder struct {
 	normalizer Normalizer
 	posMap     *positionMap
-	source     string
+	text       string
 	byteToRune []int
 	mu         sync.RWMutex
 }
@@ -85,7 +84,7 @@ func NewFinder(opts ...FinderOption) *Finder {
 type FinderOption func(*Finder)
 
 // WithNormalizer is a [FinderOption] that sets a [Normalizer] applied to both
-// the search string and source text before matching.
+// the search string and the loaded text before matching.
 //
 // See [normalizer.Normalizer] for an implementation.
 func WithNormalizer(normalizer Normalizer) FinderOption {
@@ -94,8 +93,8 @@ func WithNormalizer(normalizer Normalizer) FinderOption {
 	}
 }
 
-// Load preprocesses the given [LineIterator], building the internal source
-// string and position map for searching.
+// Load preprocesses the given [LineIterator], building the search text and
+// position map.
 //
 // Every call rebuilds the index, so call Load once per distinct content and
 // [Finder.Find] as many times as needed. Overlays do not affect the index, so
@@ -106,43 +105,42 @@ func (f *Finder) Load(lines LineIterator) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	f.source, f.posMap = f.buildSourceAndPositionMap(lines)
+	f.text, f.posMap = f.buildTextAndPositionMap(lines)
 	f.buildByteToRuneIndex()
 }
 
 // buildByteToRuneIndex builds a lookup table mapping byte offsets to rune counts.
 // This enables O(1) byte-to-rune conversion during Find instead of O(n) scanning.
 func (f *Finder) buildByteToRuneIndex() {
-	if f.source == "" {
+	if f.text == "" {
 		f.byteToRune = nil
 		return
 	}
 
-	f.byteToRune = make([]int, len(f.source)+1)
+	f.byteToRune = make([]int, len(f.text)+1)
 	runeCount := 0
 
-	for i := 0; i < len(f.source); {
+	for i := 0; i < len(f.text); {
 		f.byteToRune[i] = runeCount
-		_, size := utf8.DecodeRuneInString(f.source[i:])
+		_, size := utf8.DecodeRuneInString(f.text[i:])
 		i += size
 		runeCount++
 	}
 
-	f.byteToRune[len(f.source)] = runeCount
+	f.byteToRune[len(f.text)] = runeCount
 }
 
-// Find finds all occurrences of the search string in the preprocessed source.
+// Find finds all occurrences of the search string in the loaded text.
 //
 // It returns a slice of [position.Range] indicating the start and end positions
-// of each match. The slice is provided in the order the matches appear in the
-// source.
+// of each match, in the order the matches appear in the text.
 //
-// Returns nil if the search string is empty or the finder has no source data.
+// Returns nil if the search string is empty or the finder has no loaded text.
 func (f *Finder) Find(search string) []position.Range {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	if search == "" || f.source == "" {
+	if search == "" || f.text == "" {
 		return nil
 	}
 
@@ -159,7 +157,7 @@ func (f *Finder) Find(search string) []position.Range {
 
 	offset := 0
 	for {
-		idx := strings.Index(f.source[offset:], searchStr)
+		idx := strings.Index(f.text[offset:], searchStr)
 		if idx == -1 {
 			break
 		}
@@ -183,14 +181,13 @@ func (f *Finder) Find(search string) []position.Range {
 	return results
 }
 
-// buildSourceAndPositionMap concatenates all token Origins and builds a
-// position map.
+// buildTextAndPositionMap concatenates all token Origins into the search text
+// and builds a position map.
 //
-// When a normalizer is set, the returned source is normalized and the position
-// map maps normalized character indices to original positions.
-//
-// This ensures correct position lookup when searching in normalized text.
-func (f *Finder) buildSourceAndPositionMap(lines LineIterator) (string, *positionMap) {
+// When a normalizer is set, it normalizes the returned text, and the position
+// map maps normalized character indices to original positions so lookups in
+// normalized text resolve to the right place.
+func (f *Finder) buildTextAndPositionMap(lines LineIterator) (string, *positionMap) {
 	var sb strings.Builder
 
 	pm := &positionMap{}
@@ -236,7 +233,7 @@ func (f *Finder) buildSourceAndPositionMap(lines LineIterator) (string, *positio
 }
 
 // positionMap maps character indices in a concatenated string to original
-// [position.Position] values in the source lines.
+// [position.Position] values in the loaded lines.
 type positionMap struct {
 	indices   []int
 	positions []position.Position

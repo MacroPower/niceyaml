@@ -70,7 +70,7 @@
 //
 //	source, _ := niceyaml.NewSourceFromFile("config.yaml",
 //		niceyaml.WithErrorOptions(
-//			niceyaml.WithSourceLines(3),
+//			niceyaml.WithContextLines(3),
 //			niceyaml.WithPrinter(myPrinter),
 //		),
 //	)

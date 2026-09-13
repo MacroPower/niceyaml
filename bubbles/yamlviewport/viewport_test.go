@@ -353,7 +353,7 @@ func TestViewport_Golden(t *testing.T) {
 			m := yamlviewport.New(tc.opts...)
 			m.SetWidth(tc.width)
 			m.SetHeight(tc.height)
-			m.SetTokens(niceyaml.NewSourceFromTokens(tks))
+			m.SetSource(niceyaml.NewSourceFromTokens(tks))
 
 			if tc.setupFunc != nil {
 				tc.setupFunc(&m, tks)
@@ -560,7 +560,7 @@ func TestViewport_Scrolling(t *testing.T) {
 			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
 			m.SetWidth(tc.width)
 			m.SetHeight(tc.height)
-			m.SetTokens(niceyaml.NewSourceFromTokens(tks))
+			m.SetSource(niceyaml.NewSourceFromTokens(tks))
 
 			if tc.setup != nil {
 				tc.setup(&m)
@@ -655,7 +655,7 @@ func TestViewport_Search(t *testing.T) {
 			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
 			m.SetWidth(80)
 			m.SetHeight(24)
-			m.SetTokens(lines)
+			m.SetSource(lines)
 			m.SetSearchTerm(tc.searchTerm)
 
 			tc.test(t, &m)
@@ -884,7 +884,7 @@ func TestViewport_Revisions(t *testing.T) {
 			setup: func(m *yamlviewport.Model) {
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
-				m.SetTokens(niceyaml.NewSourceFromTokens(rev3Tokens)) // SetTokens uses Lines' name.
+				m.SetSource(niceyaml.NewSourceFromTokens(rev3Tokens)) // SetSource uses the Source's name.
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -1253,7 +1253,7 @@ line3: c`
 			}
 
 			if tc.yaml != "" {
-				m.SetTokens(niceyaml.NewSourceFromTokens(lexer.Tokenize(tc.yaml)))
+				m.SetSource(niceyaml.NewSourceFromTokens(lexer.Tokenize(tc.yaml)))
 			}
 
 			if tc.setup != nil {
@@ -1321,11 +1321,11 @@ func TestViewport_SetFile(t *testing.T) {
 			yaml:       simpleYAML,
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
-				// After SetTokens, revisions should be replaced with single file.
+				// After SetSource, revisions should be replaced with single file.
 				assert.Equal(t, 1, m.RevisionCount())
 				assert.False(t, m.IsShowingDiff())
 				assert.Equal(t, 2, m.TotalLineCount())
-				assert.Empty(t, m.RevisionName()) // SetTokens uses Source's name.
+				assert.Empty(t, m.RevisionName()) // SetSource uses Source's name.
 			},
 		},
 	}
@@ -1347,7 +1347,7 @@ func TestViewport_SetFile(t *testing.T) {
 			}
 
 			if tc.yaml != "" {
-				m.SetTokens(niceyaml.NewSourceFromString(tc.yaml))
+				m.SetSource(niceyaml.NewSourceFromString(tc.yaml))
 			}
 
 			tc.test(t, &m)
@@ -1590,10 +1590,10 @@ func TestViewport_Update(t *testing.T) {
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
-				// After PrevRevision, we're at index 0 (the original SetTokens revision).
+				// After PrevRevision, we're at index 0 (the original SetSource revision).
 				assert.Equal(t, 0, m.RevisionIndex())
 				assert.False(t, m.IsShowingDiff()) // First revision, no diff.
-				assert.Empty(t, m.RevisionName())  // SetTokens uses empty name.
+				assert.Empty(t, m.RevisionName())  // SetSource uses empty name.
 			},
 		},
 		"Behavior/MToggleDiffMode": {
@@ -1621,7 +1621,7 @@ func TestViewport_Update(t *testing.T) {
 			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
 			m.SetWidth(tc.width)
 			m.SetHeight(tc.height)
-			m.SetTokens(niceyaml.NewSourceFromTokens(tks))
+			m.SetSource(niceyaml.NewSourceFromTokens(tks))
 
 			if tc.setup != nil {
 				tc.setup(&m)
@@ -1705,7 +1705,7 @@ func TestViewport_KeyMap(t *testing.T) {
 			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
 			m.SetWidth(80)
 			m.SetHeight(2)
-			m.SetTokens(lines)
+			m.SetSource(lines)
 
 			if tc.setup != nil {
 				tc.setup(&m)
@@ -2467,7 +2467,7 @@ func TestViewport_WithFinder(t *testing.T) {
 		m.SetHeight(10)
 
 		tokens := lexer.Tokenize("key: value\n")
-		m.SetTokens(niceyaml.NewSourceFromTokens(tokens))
+		m.SetSource(niceyaml.NewSourceFromTokens(tokens))
 
 		m.SetSearchTerm("value")
 
@@ -2487,7 +2487,7 @@ func TestViewport_ScrollEdgeCases(t *testing.T) {
 		m.SetHeight(10)
 
 		tokens := lexer.Tokenize("line1: value1\nline2: value2\nline3: value3\n")
-		m.SetTokens(niceyaml.NewSourceFromTokens(tokens))
+		m.SetSource(niceyaml.NewSourceFromTokens(tokens))
 
 		initialOffset := m.YOffset()
 		m.ScrollDown(0)
@@ -2515,7 +2515,7 @@ func TestViewport_ScrollEdgeCases(t *testing.T) {
 
 		// Need more lines than viewport height to enable scrolling.
 		tokens := lexer.Tokenize("line1: value1\nline2: value2\nline3: value3\nline4: value4\nline5: value5\n")
-		m.SetTokens(niceyaml.NewSourceFromTokens(tokens))
+		m.SetSource(niceyaml.NewSourceFromTokens(tokens))
 
 		m.SetYOffset(2)
 		m.ScrollUp(0)
@@ -2582,7 +2582,7 @@ func TestViewport_ToggleWordWrapResetsXOffset(t *testing.T) {
 	m.SetHeight(10)
 
 	tokens := lexer.Tokenize("key: very long value that exceeds width\n")
-	m.SetTokens(niceyaml.NewSourceFromTokens(tokens))
+	m.SetSource(niceyaml.NewSourceFromTokens(tokens))
 
 	// Disable wrapping first.
 	m.ToggleWordWrap()
@@ -2606,7 +2606,7 @@ func TestViewport_SetSearchTermEmpty(t *testing.T) {
 	m.SetHeight(10)
 
 	tokens := lexer.Tokenize("key: value\n")
-	m.SetTokens(niceyaml.NewSourceFromTokens(tokens))
+	m.SetSource(niceyaml.NewSourceFromTokens(tokens))
 
 	// Set a search term first.
 	m.SetSearchTerm("value")
@@ -2681,7 +2681,7 @@ func TestViewport_DoesNotMutateSource(t *testing.T) {
 		position.New(0, 3),
 	))
 
-	m.SetTokens(source)
+	m.SetSource(source)
 	m.SetSearchTerm("value")
 	require.Positive(t, m.SearchCount())
 

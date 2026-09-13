@@ -243,7 +243,7 @@ func (m *Model) SetPrinter(p Printer) {
 	m.rerender()
 }
 
-// SetTokens replaces the revision history with a single revision.
+// SetSource replaces the revision history with a single revision.
 //
 // This is a convenience method equivalent to [Model.ClearRevisions] followed by
 // [Model.AddRevision].
@@ -251,7 +251,7 @@ func (m *Model) SetPrinter(p Printer) {
 // The viewport renders a private copy of the source's lines. It does not
 // display overlays the caller adds to s afterward, and its search highlights
 // never modify s.
-func (m *Model) SetTokens(s *niceyaml.Source) {
+func (m *Model) SetSource(s *niceyaml.Source) {
 	m.ClearRevisions()
 	m.AddRevision(s)
 }

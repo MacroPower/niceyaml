@@ -53,15 +53,15 @@ var (
 //
 // Create instances with [NewError] or [NewErrorFrom].
 type Error struct {
-	err         error
-	printer     WrappingPrinter
-	source      *Source
-	path        *paths.Path
-	token       *token.Token
-	widthFunc   func() int
-	errors      []*Error
-	sourceLines int
-	width       int
+	err          error
+	printer      WrappingPrinter
+	source       *Source
+	path         *paths.Path
+	token        *token.Token
+	widthFunc    func() int
+	errors       []*Error
+	contextLines int
+	width        int
 }
 
 // NewError creates a new [*Error] with the given message.
@@ -74,8 +74,8 @@ func NewError(msg string, opts ...ErrorOption) *Error {
 // Use [NewError] instead if creating an error from a message string.
 func NewErrorFrom(err error, opts ...ErrorOption) *Error {
 	e := &Error{
-		err:         err,
-		sourceLines: 2,
+		err:          err,
+		contextLines: 2,
 	}
 	e.SetOption(opts...)
 
@@ -85,7 +85,7 @@ func NewErrorFrom(err error, opts ...ErrorOption) *Error {
 // ErrorOption configures an [Error].
 //
 // Available options:
-//   - [WithSourceLines]
+//   - [WithContextLines]
 //   - [WithPath]
 //   - [WithErrorToken]
 //   - [WithPrinter]
@@ -94,11 +94,11 @@ func NewErrorFrom(err error, opts ...ErrorOption) *Error {
 //   - [WithErrors]
 type ErrorOption func(e *Error)
 
-// WithSourceLines is an [ErrorOption] that sets the number of context lines to
+// WithContextLines is an [ErrorOption] that sets the number of context lines to
 // show around the error.
-func WithSourceLines(lines int) ErrorOption {
+func WithContextLines(lines int) ErrorOption {
 	return func(e *Error) {
-		e.sourceLines = lines
+		e.contextLines = lines
 	}
 }
 
@@ -341,7 +341,7 @@ type errorPosition struct {
 // overlapping. This ensures there's always at least one line gap between
 // hunks for the "..." separator.
 //
-// Returns spans with sourceLines context applied and clamped to totalLines.
+// Returns spans with contextLines context applied and clamped to totalLines.
 func (e *Error) buildHunkSpans(errorLines []int, totalLines int) position.Spans {
 	if len(errorLines) == 0 {
 		return nil
@@ -352,8 +352,8 @@ func (e *Error) buildHunkSpans(errorLines []int, totalLines int) position.Spans 
 	slices.Sort(sorted)
 
 	// Group indices, expand by context, clamp to valid range.
-	return position.GroupIndices(sorted, e.sourceLines).
-		Expand(e.sourceLines).
+	return position.GroupIndices(sorted, e.contextLines).
+		Expand(e.contextLines).
 		Clamp(0, totalLines)
 }
 
