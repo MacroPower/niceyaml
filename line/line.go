@@ -3,6 +3,7 @@ package line
 import (
 	"errors"
 	"fmt"
+	"iter"
 	"strings"
 
 	"github.com/goccy/go-yaml/token"
@@ -208,12 +209,140 @@ func (l Line) String() string {
 	return sb.String()
 }
 
-// Lines represents an ordered collection of [Line] values with associated
-// metadata.
+// Lines is an ordered collection of [Line] values and the unit that rendering
+// utilities consume.
+//
+// Lines carries only what rendering needs, which is the tokens split per
+// line plus the overlays, annotations, and flags attached to each line. It has
+// no knowledge of YAML documents, parsing, or files. A [Lines] value may
+// therefore describe content that is not a YAML document at all, such as a
+// diff that interleaves lines from two revisions.
+//
+// Lines is not safe for concurrent mutation. Add overlays and annotations from
+// one goroutine at a time, and do not mutate while another goroutine iterates.
 //
 // Create instances with [NewLines].
 // Access individual lines via slice indexing.
 type Lines []Line
+
+// Len returns the number of lines.
+func (ls Lines) Len() int {
+	return len(ls)
+}
+
+// IsEmpty reports whether there are no lines.
+func (ls Lines) IsEmpty() bool {
+	return len(ls) == 0
+}
+
+// Width returns the maximum [Line.Width] across all lines.
+func (ls Lines) Width() int {
+	var maxWidth int
+
+	for _, l := range ls {
+		if w := l.Width(); w > maxWidth {
+			maxWidth = w
+		}
+	}
+
+	return maxWidth
+}
+
+// Clone returns a deep copy of the [Lines].
+//
+// Clone copies each [Line] with [Line.Clone], so overlays and annotations
+// added to the copy do not affect the original.
+func (ls Lines) Clone() Lines {
+	if len(ls) == 0 {
+		return nil
+	}
+
+	result := make(Lines, len(ls))
+	for i, l := range ls {
+		result[i] = l.Clone()
+	}
+
+	return result
+}
+
+// AllLines returns an iterator over lines within the given spans.
+//
+// Without spans, AllLines yields every line. Each iteration yields a
+// [position.Position] at column 0 and the [Line] at that position. AllLines
+// clamps spans to the available lines.
+func (ls Lines) AllLines(spans ...position.Span) iter.Seq2[position.Position, Line] {
+	return func(yield func(position.Position, Line) bool) {
+		if len(spans) == 0 {
+			for i, ln := range ls {
+				if !yield(position.New(i, 0), ln) {
+					return
+				}
+			}
+
+			return
+		}
+
+		for _, span := range spans {
+			start := max(0, span.Start)
+			end := min(len(ls), span.End)
+
+			for i := start; i < end; i++ {
+				if !yield(position.New(i, 0), ls[i]) {
+					return
+				}
+			}
+		}
+	}
+}
+
+// AllRunes returns an iterator over runes within the given ranges.
+//
+// Without ranges, AllRunes yields every rune. Each iteration yields a
+// [position.Position] and the rune at that position. The iteration includes
+// line endings, so a newline occupies the column after the last visible rune.
+func (ls Lines) AllRunes(ranges ...position.Range) iter.Seq2[position.Position, rune] {
+	return func(yield func(position.Position, rune) bool) {
+		if len(ranges) == 0 {
+			for i, ln := range ls {
+				col := 0
+
+				for _, tk := range ln.Tokens() {
+					for _, r := range tk.Origin {
+						if !yield(position.New(i, col), r) {
+							return
+						}
+
+						col++
+					}
+				}
+			}
+
+			return
+		}
+
+		for _, rng := range ranges {
+			startLine := max(0, rng.Start.Line)
+			endLine := min(len(ls)-1, rng.End.Line)
+
+			for i := startLine; i <= endLine; i++ {
+				col := 0
+
+				for _, tk := range ls[i].Tokens() {
+					for _, r := range tk.Origin {
+						pos := position.New(i, col)
+						if rng.Contains(pos) {
+							if !yield(pos, r) {
+								return
+							}
+						}
+
+						col++
+					}
+				}
+			}
+		}
+	}
+}
 
 // NewLines creates new [Lines] from [token.Tokens].
 //
@@ -357,6 +486,29 @@ func (ls Lines) ContentPositionRangesAt(pos position.Position) position.Ranges {
 	return lineSegs.ContentRangesAt(pos.Line, pos.Col)
 }
 
+// ContentPositionRanges returns position ranges for content at each of the
+// given positions, excluding leading and trailing spaces. It removes duplicate
+// ranges.
+//
+// Returns nil if no content exists at any of the given positions.
+func (ls Lines) ContentPositionRanges(positions ...position.Position) []position.Range {
+	var allRanges position.Ranges
+
+	for _, pos := range positions {
+		allRanges = append(allRanges, ls.ContentPositionRangesAt(pos)...)
+	}
+
+	return allRanges.UniqueValues()
+}
+
+// ContentPositionRangesFromToken returns position ranges for content of the
+// given token, excluding leading and trailing spaces.
+//
+// Returns nil if the token is nil or not found.
+func (ls Lines) ContentPositionRangesFromToken(tk *token.Token) []position.Range {
+	return ls.ContentPositionRanges(ls.TokenPositions(tk)...)
+}
+
 // Content returns the combined content of all [Line] values as a string.
 // Lines are joined with newlines.
 func (ls Lines) Content() string {
@@ -475,8 +627,10 @@ func (ls Lines) Validate() error {
 
 // AddOverlay adds an overlay with the given style to the specified ranges.
 // Multi-line ranges are split into per-line overlays automatically.
-func (ls *Lines) AddOverlay(kind style.Style, ranges ...position.Range) {
-	if len(*ls) == 0 {
+//
+// Panics if a range refers to a line index outside the collection.
+func (ls Lines) AddOverlay(kind style.Style, ranges ...position.Range) {
+	if len(ls) == 0 {
 		return
 	}
 
@@ -486,10 +640,10 @@ func (ls *Lines) AddOverlay(kind style.Style, ranges ...position.Range) {
 }
 
 // addOverlayRange adds a single overlay range, splitting across lines as needed.
-func (ls *Lines) addOverlayRange(kind style.Style, r position.Range) {
+func (ls Lines) addOverlayRange(kind style.Style, r position.Range) {
 	for _, lineRange := range r.SliceLines() {
 		lineIdx := lineRange.Start.Line
-		(*ls)[lineIdx].AddOverlay(Overlay{
+		ls[lineIdx].AddOverlay(Overlay{
 			Cols: position.NewSpan(lineRange.Start.Col, lineRange.End.Col),
 			Kind: kind,
 		})
@@ -497,8 +651,8 @@ func (ls *Lines) addOverlayRange(kind style.Style, r position.Range) {
 }
 
 // ClearOverlays removes all [Overlay] values from all lines.
-func (ls *Lines) ClearOverlays() {
-	for i := range *ls {
-		(*ls)[i].Overlays = nil
+func (ls Lines) ClearOverlays() {
+	for i := range ls {
+		ls[i].Overlays = nil
 	}
 }

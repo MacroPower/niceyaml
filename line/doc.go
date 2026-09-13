@@ -39,6 +39,18 @@
 //	│String             │
 //	└───────────────────┘
 //
+// # Rendering View
+//
+// [Lines] is the view that rendering utilities consume. It implements the
+// iteration methods those utilities need ([Lines.AllLines], [Lines.AllRunes],
+// [Lines.Len], [Lines.IsEmpty]) and carries per-line rendering metadata, but
+// it knows nothing about parsing or YAML documents. A [Lines] value can
+// therefore describe content that is not a document, such as a diff.
+//
+// Rendering utilities mutate a view by adding overlays and annotations. Use
+// [Lines.Clone] to render the same content two different ways without the
+// highlights interfering.
+//
 // # Usage
 //
 // Create a [Lines] collection from tokens, then access individual lines:

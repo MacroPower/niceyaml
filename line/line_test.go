@@ -3153,3 +3153,154 @@ func TestLines_ContentPositionRangesAt(t *testing.T) {
 		}
 	})
 }
+
+func TestLines_View(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.Input(`
+		key: value
+		list:
+		  - one
+	`)
+
+	t.Run("Len and IsEmpty", func(t *testing.T) {
+		t.Parallel()
+
+		lines := line.NewLines(lexer.Tokenize(input))
+
+		assert.Equal(t, 3, lines.Len())
+		assert.False(t, lines.IsEmpty())
+	})
+
+	t.Run("Width is the widest line", func(t *testing.T) {
+		t.Parallel()
+
+		lines := line.NewLines(lexer.Tokenize(input))
+
+		assert.Equal(t, len("key: value"), lines.Width())
+	})
+
+	t.Run("AllLines yields every line at column zero", func(t *testing.T) {
+		t.Parallel()
+
+		lines := line.NewLines(lexer.Tokenize(input))
+
+		var (
+			positions []position.Position
+			contents  []string
+		)
+
+		for pos, ln := range lines.AllLines() {
+			positions = append(positions, pos)
+			contents = append(contents, ln.Content())
+		}
+
+		assert.Equal(t, []position.Position{
+			position.New(0, 0),
+			position.New(1, 0),
+			position.New(2, 0),
+		}, positions)
+		assert.Equal(t, []string{"key: value", "list:", "  - one"}, contents)
+	})
+
+	t.Run("AllLines clamps spans", func(t *testing.T) {
+		t.Parallel()
+
+		lines := line.NewLines(lexer.Tokenize(input))
+
+		var positions []position.Position
+
+		for pos := range lines.AllLines(position.NewSpan(1, 99)) {
+			positions = append(positions, pos)
+		}
+
+		assert.Equal(t, []position.Position{position.New(1, 0), position.New(2, 0)}, positions)
+	})
+
+	t.Run("AllRunes round-trips the input", func(t *testing.T) {
+		t.Parallel()
+
+		lines := line.NewLines(lexer.Tokenize(input))
+
+		var sb strings.Builder
+
+		for _, r := range lines.AllRunes() {
+			sb.WriteRune(r)
+		}
+
+		assert.Equal(t, input, sb.String())
+	})
+
+	t.Run("Clone is independent", func(t *testing.T) {
+		t.Parallel()
+
+		lines := line.NewLines(lexer.Tokenize(input))
+		clone := lines.Clone()
+
+		clone.AddOverlay(style.GenericHighlight, position.NewRange(
+			position.New(0, 0),
+			position.New(0, 3),
+		))
+		clone[1].AddAnnotation(line.Annotation{Content: "note", Position: line.Below})
+
+		clone[2].Flag = line.FlagInserted
+
+		require.Len(t, clone, 3)
+		assert.Equal(t, lines.Content(), clone.Content())
+
+		assert.Empty(t, lines[0].Overlays)
+		assert.Empty(t, lines[1].Annotations)
+		assert.Equal(t, line.FlagDefault, lines[2].Flag)
+	})
+
+	t.Run("empty", func(t *testing.T) {
+		t.Parallel()
+
+		var lines line.Lines
+
+		assert.Equal(t, 0, lines.Len())
+		assert.True(t, lines.IsEmpty())
+		assert.Equal(t, 0, lines.Width())
+		assert.Nil(t, lines.Clone())
+
+		for range lines.AllLines() {
+			t.Fatal("expected no lines")
+		}
+
+		for range lines.AllRunes() {
+			t.Fatal("expected no runes")
+		}
+	})
+}
+
+func TestLines_ContentPositionRanges(t *testing.T) {
+	t.Parallel()
+
+	tks := lexer.Tokenize("key:   value  \n")
+	lines := line.NewLines(tks)
+	require.Len(t, lines, 1)
+	require.Len(t, tks, 3)
+
+	t.Run("by position excludes surrounding spaces", func(t *testing.T) {
+		t.Parallel()
+
+		got := lines.ContentPositionRanges(position.New(0, 6), position.New(0, 7))
+
+		assert.Equal(t, []position.Range{
+			position.NewRange(position.New(0, 7), position.New(0, 12)),
+		}, got)
+	})
+
+	t.Run("by token", func(t *testing.T) {
+		t.Parallel()
+
+		// Lookup is by pointer identity, so pass the lexer's token rather than a
+		// clone from TokenAt or Line.Token.
+		got := lines.ContentPositionRangesFromToken(tks[2])
+		assert.Equal(t, []position.Range{
+			position.NewRange(position.New(0, 7), position.New(0, 12)),
+		}, got)
+
+		assert.Nil(t, lines.ContentPositionRangesFromToken(nil))
+	})
+}
