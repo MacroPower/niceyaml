@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
@@ -1911,6 +1912,57 @@ func TestError_SetWidth_CombinedAnnotationsOnSameLine(t *testing.T) {
 		"  message here",
 	)
 	assert.Equal(t, want, got)
+}
+
+func TestError_TokenRendersFromSource(t *testing.T) {
+	t.Parallel()
+
+	newXMLPrinter := func() *niceyaml.Printer {
+		return niceyaml.NewPrinter(
+			niceyaml.WithStyles(yamltest.NewXMLStyles()),
+			niceyaml.WithGutter(niceyaml.NoGutter()),
+			niceyaml.WithStyle(lipgloss.NewStyle()),
+		)
+	}
+
+	source := niceyaml.NewSourceFromString(stringtest.Input(`
+		a: 1
+		# note
+		b: |
+		  two
+		  lines
+		c: 3
+	`))
+
+	// A parsed token is a clone of the lexer's token, so it shares position
+	// but not identity with the tokens the source's view was built from.
+	file, err := source.File()
+	require.NoError(t, err)
+
+	node, err := paths.Root().Child("b").Path().FilterNode(file.Docs[0].Body)
+	require.NoError(t, err)
+
+	literal, ok := node.(*ast.LiteralNode)
+	require.True(t, ok, "want *ast.LiteralNode, got %T", node)
+
+	tk := literal.Value.GetToken()
+
+	got := trimLines(source.WrapError(niceyaml.NewError(
+		"bad block",
+		niceyaml.WithErrorToken(tk),
+		niceyaml.WithPrinter(newXMLPrinter()),
+		niceyaml.WithErrors(
+			niceyaml.NewError("bad c", niceyaml.WithPath(paths.Root().Child("c").Value())),
+		),
+	)).Error())
+
+	// Both lines of the block scalar are highlighted, comments keep their
+	// place, and the nested path resolves in the same source.
+	assert.Contains(t, got, "<genericError>two</genericError>")
+	assert.Contains(t, got, "<genericError>lines</genericError>")
+	assert.Contains(t, got, "<comment># note</comment>")
+	assert.Contains(t, got, "<genericError>3</genericError>")
+	assert.Contains(t, got, "^ bad c")
 }
 
 func TestError_DocumentIndex(t *testing.T) {

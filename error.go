@@ -152,8 +152,12 @@ func WithPrinter(p *Printer) ErrorOption {
 	}
 }
 
-// WithSource is an [ErrorOption] that sets the [*Source] for resolving the
-// error path.
+// WithSource is an [ErrorOption] that sets the [*Source] the error renders
+// from. Paths resolve against it, and tokens are located in it by position.
+//
+// Without a source, an error that carries a token renders from the token's
+// own chain instead, which re-lexes the document on every [Error.Error]
+// call.
 func WithSource(src *Source) ErrorOption {
 	return func(e *Error) {
 		e.source = src
@@ -469,13 +473,15 @@ func (e *Error) resolveNestedError(src *Source, view line.Lines, nested *Error) 
 func (e *Error) collectErrorPositions(src *Source, view line.Lines, mainToken *token.Token) []errorPosition {
 	positions := make([]errorPosition, 0, 1+len(e.errors))
 
-	// Add main error position if token is provided.
+	// Add main error position if token is provided. The token is located by
+	// position rather than identity, since a token from the parsed AST is a
+	// clone of the one the view was built from.
 	if mainToken != nil && mainToken.Position != nil {
 		pos := position.NewFromToken(mainToken)
 		if pos.Line < view.Len() {
 			positions = append(positions, errorPosition{
 				pos:    pos,
-				ranges: view.ContentPositionRangesFromToken(mainToken),
+				ranges: view.ContentPositionRanges(pos),
 			})
 		}
 	}
@@ -506,29 +512,19 @@ func (e *Error) collectErrorPositions(src *Source, view line.Lines, mainToken *t
 // highlighted. It highlights mainToken, when provided, as the main error
 // without an annotation.
 //
-// Rendering happens on a private [line.Lines] view. When mainToken is
-// provided, renderErrorSource builds the view from its token chain so that
-// token identity lines up with the ranges. Otherwise the view is a clone of
-// e.source's lines. Either way, renderErrorSource never mutates e.source, so
-// calling [Error.Error] repeatedly renders the same output.
+// Rendering happens on a clone of the source's [line.Lines] view, so
+// renderErrorSource never mutates e.source and calling [Error.Error]
+// repeatedly renders the same output. Without a source, the view is rebuilt
+// from mainToken's chain, which costs a lex per call.
 func (e *Error) renderErrorSource(mainToken *token.Token) string {
 	p := e.getPrinter()
 
-	var (
-		src  *Source
-		view line.Lines
-	)
-
-	if mainToken != nil {
-		// Build from the token chain to ensure position alignment.
+	src := e.source
+	if src == nil {
 		src = NewSourceFromToken(mainToken)
-		view = src.Lines()
-	} else {
-		// Without a main token, resolve against the caller's source and render on
-		// a copy.
-		src = e.source
-		view = src.Lines().Clone()
 	}
+
+	view := src.Lines().Clone()
 
 	positions := e.collectErrorPositions(src, view, mainToken)
 
