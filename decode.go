@@ -19,13 +19,6 @@ import (
 // the document. [DocumentDecoder.Get] returns it wrapped with the path.
 var ErrValueNotFound = errors.New("value not found")
 
-// SourceDecoder provides access to YAML documents from a [*Source].
-// See [Source] for an implementation.
-type SourceDecoder interface {
-	// Decoder returns a [*Decoder] for iterating over documents.
-	Decoder() (*Decoder, error)
-}
-
 // Validator is implemented by types that validate themselves.
 //
 // If a type implements this interface, [DocumentDecoder.Unmarshal]
