@@ -1909,3 +1909,39 @@ func TestError_SetWidth_CombinedAnnotationsOnSameLine(t *testing.T) {
 	)
 	assert.Equal(t, want, got)
 }
+
+func TestError_DoesNotMutateSource(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString(stringtest.Input(`
+		a: 1
+		b: 2
+		c: 3
+	`))
+
+	err := source.WrapError(niceyaml.NewError(
+		"main",
+		niceyaml.WithPrinter(niceyaml.NewPrinter(
+			niceyaml.WithStyles(yamltest.NewXMLStyles()),
+			niceyaml.WithGutter(niceyaml.NoGutter()),
+			niceyaml.WithStyle(lipgloss.NewStyle()),
+		)),
+		niceyaml.WithErrors(
+			niceyaml.NewError("nested", niceyaml.WithPath(paths.Root().Child("b").Value())),
+		),
+	))
+
+	first := err.Error()
+	second := err.Error()
+
+	// Rendering is idempotent.
+	assert.Equal(t, first, second)
+	assert.Equal(t, 1, strings.Count(second, "^ nested"))
+	assert.Equal(t, 1, strings.Count(second, "<genericError>2</genericError>"))
+
+	// The caller's Source is untouched.
+	for _, ln := range source.Lines() {
+		assert.Empty(t, ln.Overlays)
+		assert.Empty(t, ln.Annotations)
+	}
+}

@@ -392,9 +392,10 @@ func prepareLineAnnotations(positions []errorPosition) map[int]line.Annotation {
 	return result
 }
 
-// resolveNestedError resolves a single nested error's path or token.
-func (e *Error) resolveNestedError(t *Source, nested *Error) (errorPosition, error) {
-	file, err := t.File()
+// resolveNestedError resolves a single nested error's path or token against
+// src, and checks that the resulting position falls within view.
+func (e *Error) resolveNestedError(src *Source, view line.Lines, nested *Error) (errorPosition, error) {
+	file, err := src.File()
 	if err != nil {
 		return errorPosition{}, fmt.Errorf("parse source: %w", err)
 	}
@@ -409,7 +410,7 @@ func (e *Error) resolveNestedError(t *Source, nested *Error) (errorPosition, err
 	}
 
 	pos := position.NewFromToken(tk)
-	if pos.Line >= t.Len() {
+	if pos.Line >= view.Len() {
 		return errorPosition{}, ErrTokenNotFound
 	}
 
@@ -421,18 +422,20 @@ func (e *Error) resolveNestedError(t *Source, nested *Error) (errorPosition, err
 
 // collectErrorPositions collects all error positions (main and nested) into a
 // unified slice.
-// If mainToken is provided, it becomes the first position without a message.
-// Nested errors are appended with their messages.
-func (e *Error) collectErrorPositions(t *Source, mainToken *token.Token) []errorPosition {
+//
+// Paths resolve against src, and view supplies the ranges. If mainToken is
+// provided, it becomes the first position without a message. Nested errors
+// follow with their messages.
+func (e *Error) collectErrorPositions(src *Source, view line.Lines, mainToken *token.Token) []errorPosition {
 	positions := make([]errorPosition, 0, 1+len(e.errors))
 
 	// Add main error position if token is provided.
 	if mainToken != nil && mainToken.Position != nil {
 		pos := position.NewFromToken(mainToken)
-		if pos.Line < t.Len() {
+		if pos.Line < view.Len() {
 			positions = append(positions, errorPosition{
 				pos:    pos,
-				ranges: t.ContentPositionRangesFromToken(mainToken),
+				ranges: view.ContentPositionRangesFromToken(mainToken),
 			})
 		}
 	}
@@ -443,7 +446,7 @@ func (e *Error) collectErrorPositions(t *Source, mainToken *token.Token) []error
 			continue
 		}
 
-		r, resolveErr := e.resolveNestedError(t, nested)
+		r, resolveErr := e.resolveNestedError(src, view, nested)
 		if resolveErr != nil {
 			slog.Debug("resolve nested error",
 				slog.Any("error", resolveErr),
@@ -452,61 +455,73 @@ func (e *Error) collectErrorPositions(t *Source, mainToken *token.Token) []error
 			continue
 		}
 
-		r.ranges = t.ContentPositionRanges(r.pos)
+		r.ranges = view.ContentPositionRanges(r.pos)
 		positions = append(positions, r)
 	}
 
 	return positions
 }
 
-// renderErrorSource renders the error source with all error positions highlighted.
-// MainToken (if provided) is highlighted as the main error without annotation.
-// Source is created from mainToken when available, otherwise from e.source.
+// renderErrorSource renders the error source with all error positions
+// highlighted. It highlights mainToken, when provided, as the main error
+// without an annotation.
+//
+// Rendering happens on a private [line.Lines] view. When mainToken is
+// provided, renderErrorSource builds the view from its token chain so that
+// token identity lines up with the ranges. Otherwise the view is a clone of
+// e.source's lines. Either way, renderErrorSource never mutates e.source, so
+// calling [Error.Error] repeatedly renders the same output.
 func (e *Error) renderErrorSource(mainToken *token.Token) string {
 	p := e.getPrinter()
 
-	var t *Source
+	var (
+		src  *Source
+		view line.Lines
+	)
 
 	if mainToken != nil {
-		// Create Source from token to ensure position alignment.
-		t = NewSourceFromToken(mainToken)
+		// Build from the token chain to ensure position alignment.
+		src = NewSourceFromToken(mainToken)
+		view = src.Lines()
 	} else {
-		// Nested-only case: use existing source directly.
-		t = e.source
+		// Without a main token, resolve against the caller's source and render on
+		// a copy.
+		src = e.source
+		view = src.Lines().Clone()
 	}
 
-	positions := e.collectErrorPositions(t, mainToken)
+	positions := e.collectErrorPositions(src, view, mainToken)
 
-	// Collect all ranges from positions and apply overlays directly.
+	// Collect all ranges from positions and apply overlays to the view.
 	var allRanges position.Ranges
 
 	for _, pos := range positions {
 		allRanges = append(allRanges, pos.ranges...)
 	}
 
-	t.AddOverlay(style.GenericError, allRanges...)
+	view.AddOverlay(style.GenericError, allRanges...)
 
-	// Apply annotations directly to source lines.
+	// Apply annotations to the view's lines.
 	lineAnnotations := prepareLineAnnotations(positions)
 	for lineIdx, annotation := range lineAnnotations {
-		t.Line(lineIdx).AddAnnotation(annotation)
+		view[lineIdx].AddAnnotation(annotation)
 	}
 
 	// Build hunk spans from all line indices covered by error ranges.
-	hunkSpans := e.buildHunkSpans(allRanges.LineIndices(), t.Len())
+	hunkSpans := e.buildHunkSpans(allRanges.LineIndices(), view.Len())
 
 	// Add "..." annotations to first line of each non-first hunk.
 	for i, span := range hunkSpans {
 		if i > 0 {
-			t.Line(span.Start).AddAnnotation(line.Annotation{
+			view[span.Start].AddAnnotation(line.Annotation{
 				Content:  "...",
 				Position: line.Above,
 			})
 		}
 	}
 
-	// Print source with all hunk spans.
-	return p.Print(t, hunkSpans...)
+	// Print the view with all hunk spans.
+	return p.Print(view, hunkSpans...)
 }
 
 // resolveToken resolves a token from either a direct token or path.
