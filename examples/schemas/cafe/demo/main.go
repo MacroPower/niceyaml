@@ -42,10 +42,10 @@ func load(in string) (*cafe.Config, error) {
 		return nil, err
 	}
 
-	cfg := cafe.NewConfig()
+	var cfg cafe.Config
 
 	for _, doc := range decoder.Documents() {
-		err := doc.Unmarshal(context.Background(), &cfg)
+		cfg, err = doc.Unmarshal[cafe.Config](context.Background())
 		if err != nil {
 			return nil, source.WrapError(err)
 		}

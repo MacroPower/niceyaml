@@ -18,10 +18,10 @@ func cafeConfig(ctx context.Context, in string) (*cafe.Config, error) {
 		return nil, err
 	}
 
-	c := cafe.NewConfig()
+	var c cafe.Config
 
 	for _, doc := range d.Documents() {
-		err := doc.Unmarshal(ctx, &c)
+		c, err = doc.Unmarshal[cafe.Config](ctx)
 		if err != nil {
 			return nil, src.WrapError(err)
 		}

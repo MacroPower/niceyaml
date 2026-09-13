@@ -141,15 +141,17 @@ func (d *Decoder) Documents() iter.Seq2[int, *DocumentDecoder] {
 // validation pipeline:
 //
 //	for _, doc := range decoder.Documents() {
-//		var config Config
-//		if err := doc.Unmarshal(ctx, &config); err != nil {
+//		config, err := doc.Unmarshal[Config](ctx)
+//		if err != nil {
 //			return err
 //		}
 //	}
 //
 // Use [DocumentDecoder.Decode] directly when you need decoding without
-// validation hooks. All decoding methods convert YAML errors to [Error]
-// with source annotations.
+// validation hooks. [DocumentDecoder.UnmarshalInto] and
+// [DocumentDecoder.DecodeInto] fill a value you already hold, such as one
+// pre-populated with defaults. All decoding methods convert YAML errors to
+// [Error] with source annotations.
 //
 // Create instances with [NewDocumentDecoder] or iterate with [Decoder.Documents].
 type DocumentDecoder struct {
@@ -259,7 +261,7 @@ func (dd *DocumentDecoder) GetValue(path *paths.YAMLPath) (string, bool) {
 func (dd *DocumentDecoder) ValidateSchema(ctx context.Context, sv SchemaValidator) error {
 	var untypedData any
 
-	err := dd.decodeNode(ctx, &untypedData)
+	err := dd.decodeNode(ctx, dd.doc.Body, &untypedData)
 	if err != nil {
 		return err
 	}
@@ -273,18 +275,65 @@ func (dd *DocumentDecoder) ValidateSchema(ctx context.Context, sv SchemaValidato
 	return nil
 }
 
-// Decode decodes the document into v.
+// Decode decodes the document into a new T.
 //
-// YAML decoding errors are converted to [Error] with source annotations.
-func (dd *DocumentDecoder) Decode(ctx context.Context, v any) error {
-	return dd.decodeNode(ctx, v)
+// YAML decoding errors are converted to [Error] with source annotations. On
+// error, the returned T is the zero value.
+//
+// To decode into a value you already hold, use [DocumentDecoder.DecodeInto].
+func (dd *DocumentDecoder) Decode[T any](ctx context.Context) (T, error) {
+	var v T
+
+	err := dd.DecodeInto(ctx, &v)
+	if err != nil {
+		var zero T
+
+		return zero, err
+	}
+
+	return v, nil
 }
 
-// Unmarshal validates and decodes the document into v.
+// DecodeInto decodes the document into v, which must be a pointer.
+//
+// Fields absent from the document keep their existing values, so v may be
+// pre-populated with defaults. YAML decoding errors are converted to [Error]
+// with source annotations.
+func (dd *DocumentDecoder) DecodeInto(ctx context.Context, v any) error {
+	return dd.decodeNode(ctx, dd.doc.Body, v)
+}
+
+// Unmarshal validates and decodes the document into a new T.
+//
+// If *T implements [SchemaValidator], ValidateSchema is called before decoding.
+// If *T implements [Validator], Validate is called after successful decoding.
+// Methods declared on T itself are included in the method set of *T, so both
+// value and pointer receivers participate. On error, the returned T is the
+// zero value.
+//
+// To unmarshal into a value you already hold, use
+// [DocumentDecoder.UnmarshalInto].
+func (dd *DocumentDecoder) Unmarshal[T any](ctx context.Context) (T, error) {
+	var v T
+
+	err := dd.UnmarshalInto(ctx, &v)
+	if err != nil {
+		var zero T
+
+		return zero, err
+	}
+
+	return v, nil
+}
+
+// UnmarshalInto validates and decodes the document into v, which must be a
+// pointer.
 //
 // If v implements [SchemaValidator], ValidateSchema is called before decoding.
 // If v implements [Validator], Validate is called after successful decoding.
-func (dd *DocumentDecoder) Unmarshal(ctx context.Context, v any) error {
+// Fields absent from the document keep their existing values, so v may be
+// pre-populated with defaults.
+func (dd *DocumentDecoder) UnmarshalInto(ctx context.Context, v any) error {
 	// Validate if type provides schema validation.
 	if sv, ok := v.(SchemaValidator); ok {
 		err := dd.ValidateSchema(ctx, sv)
@@ -294,7 +343,7 @@ func (dd *DocumentDecoder) Unmarshal(ctx context.Context, v any) error {
 	}
 
 	// Decode to typed struct.
-	err := dd.Decode(ctx, v)
+	err := dd.DecodeInto(ctx, v)
 	if err != nil {
 		return err
 	}
@@ -308,10 +357,10 @@ func (dd *DocumentDecoder) Unmarshal(ctx context.Context, v any) error {
 	return nil
 }
 
-// decodeNode decodes the document body to v and converts YAML errors.
-func (dd *DocumentDecoder) decodeNode(ctx context.Context, v any) error {
+// decodeNode decodes node to v and converts YAML errors.
+func (dd *DocumentDecoder) decodeNode(ctx context.Context, node ast.Node, v any) error {
 	dec := yaml.NewDecoder(bytes.NewReader(nil), dd.decodeOpts...)
-	err := dec.DecodeFromNodeContext(ctx, dd.doc.Body, v)
+	err := dec.DecodeFromNodeContext(ctx, node, v)
 	if err != nil {
 		if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
 			return NewError(
