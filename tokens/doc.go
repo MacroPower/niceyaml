@@ -46,8 +46,8 @@
 //
 // # Multi-Document YAML
 //
-// [SplitDocuments] splits a token stream at document headers ("---"), returning
-// an iterator over separate token streams for each YAML document. Use
-// [WithResetPositions] to reset token positions so each document starts from
-// line 1, column 1.
+// [SplitDocuments] splits a token stream at document headers ("---") and
+// document end markers ("..."), returning an iterator over separate token
+// streams for each YAML document. Use [WithResetPositions] to reset token
+// positions so each document starts from line 1, column 1.
 package tokens

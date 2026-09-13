@@ -956,6 +956,52 @@ func TestSplitDocuments(t *testing.T) {
 		require.True(t, diff.Equal(), diff.String())
 	})
 
+	t.Run("end marker closes a document", func(t *testing.T) {
+		t.Parallel()
+
+		tkb := yamltest.NewTokenBuilder()
+		input := token.Tokens{
+			tkb.Clone().Type(token.StringType).Value("a").Build(),
+			tkb.Clone().Type(token.MappingValueType).Value(":").Build(),
+			tkb.Clone().Type(token.StringType).Value("1").Build(),
+			tkb.Clone().Type(token.DocumentEndType).Value("...").Build(),
+			tkb.Clone().Type(token.StringType).Value("b").Build(),
+			tkb.Clone().Type(token.MappingValueType).Value(":").Build(),
+			tkb.Clone().Type(token.StringType).Value("2").Build(),
+		}
+
+		got := collectDocs(tokens.SplitDocuments(input))
+
+		require.Len(t, got, 2)
+		require.Len(t, got[0], 4)
+		require.Len(t, got[1], 3)
+
+		diff := yamltest.CompareTokenSlices(input[:4], got[0])
+		require.True(t, diff.Equal(), diff.String())
+
+		diff = yamltest.CompareTokenSlices(input[4:], got[1])
+		require.True(t, diff.Equal(), diff.String())
+	})
+
+	t.Run("end marker followed by header", func(t *testing.T) {
+		t.Parallel()
+
+		tkb := yamltest.NewTokenBuilder()
+		input := token.Tokens{
+			tkb.Clone().Type(token.StringType).Value("a").Build(),
+			tkb.Clone().Type(token.DocumentEndType).Value("...").Build(),
+			tkb.Clone().Type(token.DocumentHeaderType).Value("---").Build(),
+			tkb.Clone().Type(token.StringType).Value("b").Build(),
+		}
+
+		got := collectDocs(tokens.SplitDocuments(input))
+
+		require.Len(t, got, 2)
+		require.Len(t, got[0], 2)
+		require.Len(t, got[1], 2)
+		assert.Equal(t, token.DocumentHeaderType, got[1][0].Type)
+	})
+
 	t.Run("two docs", func(t *testing.T) {
 		t.Parallel()
 

@@ -397,15 +397,20 @@ func CloneWithResetPositions(tks token.Tokens) token.Tokens {
 }
 
 // SplitDocuments splits a token stream into multiple token streams, one for
-// each YAML document found (separated by '---' tokens).
+// each YAML document.
+//
+// A document header token ('---') starts a new document and is included at
+// the start of it. A document end token ('...') closes the current document
+// and is included at the end of it, so content that follows without a header
+// forms a new document. These are the same boundaries the go-yaml parser
+// uses, so the yielded documents pair by index with the documents in a
+// parsed [github.com/goccy/go-yaml/ast.File].
 //
 // The returned slices each contain tokens for a single document, preserving
 // original token order and positions. The tokens are the caller's, not
 // copies, and they keep the Next and Prev links of the full stream, so a
 // document's first token still links back to the previous document. Pass
 // [WithResetPositions] to receive clones instead.
-//
-// Each document header token ('---') is included at the start of its document.
 func SplitDocuments(tks token.Tokens, opts ...SplitDocumentsOption) iter.Seq2[int, token.Tokens] {
 	cfg := &splitDocumentsConfig{}
 	for _, opt := range opts {
@@ -437,6 +442,15 @@ func SplitDocuments(tks token.Tokens, opts ...SplitDocumentsOption) iter.Seq2[in
 			}
 
 			current = append(current, tk)
+
+			if tk.Type == token.DocumentEndType {
+				if !yieldDoc(current) {
+					return
+				}
+
+				current = token.Tokens{}
+				docIdx++
+			}
 		}
 
 		if len(current) > 0 {

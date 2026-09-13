@@ -755,6 +755,47 @@ func TestDecoder_Documents(t *testing.T) {
 		assert.Equal(t, 3, count)
 	})
 
+	t.Run("pairs tokens with documents closed by an end marker", func(t *testing.T) {
+		t.Parallel()
+
+		input := stringtest.Input(`
+			kind: A
+			...
+			kind: B
+		`)
+		source := niceyaml.NewSourceFromString(input)
+		d, err := source.Decoder()
+		require.NoError(t, err)
+		require.Equal(t, 2, d.Len())
+
+		kindPath := paths.Root().Child("kind").Path()
+
+		for i, dd := range d.Documents() {
+			kind, ok := dd.GetValue(kindPath)
+			require.True(t, ok)
+
+			tks := dd.Tokens()
+			require.NotEmpty(t, tks, "document %d has no tokens", i)
+
+			var want string
+
+			switch i {
+			case 0:
+				want = "A"
+
+				assert.Equal(t, token.DocumentEndType, tks[len(tks)-1].Type)
+
+			case 1:
+				want = "B"
+
+				assert.NotEqual(t, token.DocumentEndType, tks[len(tks)-1].Type)
+			}
+
+			assert.Equal(t, want, kind)
+			assert.Contains(t, tks[0].Origin, "kind")
+		}
+	})
+
 	t.Run("early break stops iteration", func(t *testing.T) {
 		t.Parallel()
 
