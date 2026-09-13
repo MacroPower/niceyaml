@@ -58,7 +58,6 @@ type Normalizer interface {
 // Create instances with [NewFinder].
 type Finder struct {
 	normalizer Normalizer
-	prevLines  LineIterator
 	posMap     *positionMap
 	source     string
 	byteToRune []int
@@ -98,16 +97,15 @@ func WithNormalizer(normalizer Normalizer) FinderOption {
 // Load preprocesses the given [LineIterator], building the internal source
 // string and position map for searching.
 //
+// Every call rebuilds the index, so call Load once per distinct content and
+// [Finder.Find] as many times as needed. Overlays do not affect the index, so
+// highlighting matches does not require reloading.
+//
 // This method must be called before using [Finder.Find].
 func (f *Finder) Load(lines LineIterator) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	if f.prevLines == lines {
-		return
-	}
-
-	f.prevLines = lines
 	f.source, f.posMap = f.buildSourceAndPositionMap(lines)
 	f.buildByteToRuneIndex()
 }
