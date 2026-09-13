@@ -291,23 +291,29 @@ func (s *Source) parse() (*ast.File, error) {
 	return nil, err
 }
 
-// WrapError attaches this [*Source] to the first [*Error] in err's chain and
-// applies any [ErrorOption] values from [WithErrorOptions] to it.
+// WrapError wraps err in a new [*Error] that carries this [*Source] and any
+// [ErrorOption] values from [WithErrorOptions], when err's chain holds an
+// [*Error]. The returned error renders the location of that inner Error
+// against this source, and context added around it with [fmt.Errorf] is
+// preserved in the message.
 //
-// WrapError returns err itself, so wrapping context added around the
-// [*Error] with [fmt.Errorf] is preserved. If err is nil, WrapError returns
-// nil. If err's chain holds no [*Error], WrapError returns it unchanged.
+// If err is nil, WrapError returns nil. If err's chain holds no [*Error],
+// WrapError returns it unchanged. Nothing in err is modified.
 func (s *Source) WrapError(err error) error {
 	if err == nil {
 		return nil
 	}
 
-	if yamlErr, ok := errors.AsType[*Error](err); ok {
-		yamlErr.SetOption(s.errorOpts...)
-		yamlErr.SetOption(WithSource(s))
+	yamlErr, ok := errors.AsType[*Error](err)
+	if !ok || yamlErr == nil {
+		return err
 	}
 
-	return err
+	opts := make([]ErrorOption, 0, len(s.errorOpts)+1)
+	opts = append(opts, s.errorOpts...)
+	opts = append(opts, WithSource(s))
+
+	return NewErrorFrom(err, opts...)
 }
 
 // Lines returns the [line.Lines] view of the [Source].

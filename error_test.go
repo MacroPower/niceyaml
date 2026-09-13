@@ -1619,7 +1619,7 @@ func TestError_HunkDisplay(t *testing.T) {
 	})
 }
 
-func TestError_SetWidth(t *testing.T) {
+func TestError_Width(t *testing.T) {
 	t.Parallel()
 
 	// Create YAML with a long value that will need wrapping.
@@ -1655,9 +1655,9 @@ func TestError_SetWidth(t *testing.T) {
 				niceyaml.WithPrinter(niceyaml.NewPrinter(
 					niceyaml.WithGutter(niceyaml.NoGutter()),
 					niceyaml.WithStyle(lipgloss.NewStyle()),
+					niceyaml.WithWidth(tc.width),
 				)),
 			)
-			err.SetWidth(tc.width)
 
 			output := render(err)
 			lines := strings.Split(output, "\n")
@@ -1682,7 +1682,7 @@ func TestError_SetWidth(t *testing.T) {
 	}
 }
 
-func TestError_SetWidth_WithCustomPrinter(t *testing.T) {
+func TestError_Width_WithCustomPrinter(t *testing.T) {
 	t.Parallel()
 
 	source := stringtest.Input(`
@@ -1690,8 +1690,8 @@ func TestError_SetWidth_WithCustomPrinter(t *testing.T) {
 	`)
 	tokens := lexer.Tokenize(source)
 
-	// Test that SetWidth works with a custom printer.
-	// Word wrap is enabled by default in NewPrinter.
+	// Width comes from the printer. Word wrap is enabled by default in
+	// NewPrinter.
 	customPrinter := niceyaml.NewPrinter(
 		niceyaml.WithStyles(yamltest.NewXMLStyles()),
 		niceyaml.WithGutter(niceyaml.NoGutter()),
@@ -1701,9 +1701,8 @@ func TestError_SetWidth_WithCustomPrinter(t *testing.T) {
 	err := niceyaml.NewError(
 		"test error",
 		niceyaml.WithErrorToken(tokens[0]),
-		niceyaml.WithPrinter(customPrinter),
+		niceyaml.WithPrinter(customPrinter.With(niceyaml.WithWidth(30))),
 	)
-	err.SetWidth(30)
 
 	output := render(err)
 	lines := strings.Split(output, "\n")
@@ -1723,7 +1722,7 @@ func TestError_SetWidth_WithCustomPrinter(t *testing.T) {
 	assert.Equal(t, 0, customPrinter.Width())
 }
 
-func TestError_SetWidth_DefaultPrinter(t *testing.T) {
+func TestError_Width_DefaultPrinter(t *testing.T) {
 	t.Parallel()
 
 	source := stringtest.Input(`
@@ -1731,12 +1730,12 @@ func TestError_SetWidth_DefaultPrinter(t *testing.T) {
 	`)
 	tokens := lexer.Tokenize(source)
 
-	// Test that SetWidth works without a custom printer (uses default).
+	// A printer with only a width keeps the default styles and gutter.
 	err := niceyaml.NewError(
 		"test error",
 		niceyaml.WithErrorToken(tokens[0]),
+		niceyaml.WithPrinter(niceyaml.NewPrinter(niceyaml.WithWidth(30))),
 	)
-	err.SetWidth(30)
 
 	output := render(err)
 	lines := strings.Split(output, "\n")
@@ -1753,7 +1752,7 @@ func TestError_SetWidth_DefaultPrinter(t *testing.T) {
 	assert.Greater(t, contentLines, 1, "expected content to wrap into multiple lines with default printer")
 }
 
-func TestError_SetWidth_AnnotationWrapping(t *testing.T) {
+func TestError_Width_AnnotationWrapping(t *testing.T) {
 	t.Parallel()
 
 	source := stringtest.Input(`
@@ -1815,6 +1814,7 @@ func TestError_SetWidth_AnnotationWrapping(t *testing.T) {
 					niceyaml.WithStyles(&style.Styles{}),
 					niceyaml.WithGutter(niceyaml.NoGutter()),
 					niceyaml.WithStyle(lipgloss.NewStyle()),
+					niceyaml.WithWidth(tc.width),
 				)),
 				niceyaml.WithErrors(
 					niceyaml.NewError(
@@ -1823,7 +1823,6 @@ func TestError_SetWidth_AnnotationWrapping(t *testing.T) {
 					),
 				),
 			)
-			err.SetWidth(tc.width)
 
 			got := trimLines(render(err))
 
@@ -1832,7 +1831,7 @@ func TestError_SetWidth_AnnotationWrapping(t *testing.T) {
 	}
 }
 
-func TestError_SetWidth_MultipleAnnotationsWrapping(t *testing.T) {
+func TestError_Width_MultipleAnnotationsWrapping(t *testing.T) {
 	t.Parallel()
 
 	source := stringtest.Input(`
@@ -1849,6 +1848,7 @@ func TestError_SetWidth_MultipleAnnotationsWrapping(t *testing.T) {
 			niceyaml.WithStyles(&style.Styles{}),
 			niceyaml.WithGutter(niceyaml.NoGutter()),
 			niceyaml.WithStyle(lipgloss.NewStyle()),
+			niceyaml.WithWidth(50),
 		)),
 		niceyaml.WithErrors(
 			niceyaml.NewError(
@@ -1861,8 +1861,6 @@ func TestError_SetWidth_MultipleAnnotationsWrapping(t *testing.T) {
 			),
 		),
 	)
-	err.SetWidth(50)
-
 	got := trimLines(render(err))
 
 	want := stringtest.JoinLF(
@@ -1879,7 +1877,7 @@ func TestError_SetWidth_MultipleAnnotationsWrapping(t *testing.T) {
 	assert.Equal(t, want, got)
 }
 
-func TestError_SetWidth_CombinedAnnotationsOnSameLine(t *testing.T) {
+func TestError_Width_CombinedAnnotationsOnSameLine(t *testing.T) {
 	t.Parallel()
 
 	source := stringtest.Input(`
@@ -1895,6 +1893,7 @@ func TestError_SetWidth_CombinedAnnotationsOnSameLine(t *testing.T) {
 			niceyaml.WithStyles(&style.Styles{}),
 			niceyaml.WithGutter(niceyaml.NoGutter()),
 			niceyaml.WithStyle(lipgloss.NewStyle()),
+			niceyaml.WithWidth(40),
 		)),
 		niceyaml.WithErrors(
 			niceyaml.NewError(
@@ -1907,8 +1906,6 @@ func TestError_SetWidth_CombinedAnnotationsOnSameLine(t *testing.T) {
 			),
 		),
 	)
-	err.SetWidth(40)
-
 	got := trimLines(render(err))
 
 	want := stringtest.JoinLF(
@@ -2092,4 +2089,196 @@ func TestError_DoesNotMutateSource(t *testing.T) {
 		assert.Empty(t, ln.Overlays)
 		assert.Empty(t, ln.Annotations)
 	}
+}
+
+func TestError_With(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("key: value\n")
+	base := niceyaml.NewError("bad key", niceyaml.WithPath(paths.Root().Child("key").Key()))
+
+	located := base.With(niceyaml.WithSource(source))
+
+	// The receiver is unchanged and the copy resolves against the source.
+	assert.Equal(t, "at $.key: bad key", base.Error())
+	assert.Equal(t, "[1:1] bad key", located.Error())
+	assert.Empty(t, base.Detail())
+	assert.NotEmpty(t, located.Detail())
+}
+
+func TestError_WrappedContext(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("name: first\n---\nname: second\n")
+	inner := niceyaml.NewError(
+		"bad name",
+		niceyaml.WithPath(paths.Root().Child("name").Value()),
+		niceyaml.WithDocumentIndex(1),
+	)
+
+	wrapped := source.WrapError(fmt.Errorf("document 1: %w", inner))
+
+	// The message keeps the outer context, and the location comes from the
+	// inner Error.
+	assert.Equal(t, "document 1: at $.name: bad name", wrapped.Error())
+	require.ErrorIs(t, wrapped, inner)
+
+	var got *niceyaml.Error
+
+	require.ErrorAs(t, wrapped, &got)
+	assert.Equal(t, "$.name", got.Path())
+
+	idx, set := got.DocumentIndex()
+	assert.True(t, set)
+	assert.Equal(t, 1, idx)
+
+	detail := got.Detail()
+	assert.Contains(t, detail, "second")
+	assert.NotContains(t, detail, "^")
+
+	// Wrapping a direct Error resolves its position in the message.
+	direct := source.WrapError(inner)
+	assert.Equal(t, "[3:7] bad name", direct.Error())
+
+	// Wrapping twice renders the same output.
+	twice := source.WrapError(direct)
+	assert.Equal(t, direct.Error(), twice.Error())
+	assert.Equal(t, fmt.Sprintf("%+v", direct), fmt.Sprintf("%+v", twice))
+}
+
+func TestError_DocumentIndexAboveLocation(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("name: first\n---\nname: second\n")
+
+	// A producer that wraps its own Error with context, the way a Validator
+	// does, leaves the document index to the caller above that wrapping.
+	located := niceyaml.NewError(
+		"bad name",
+		niceyaml.WithPath(paths.Root().Child("name").Value()),
+		niceyaml.WithPrinter(niceyaml.NewPrinter(
+			niceyaml.WithStyles(yamltest.NewXMLStyles()),
+			niceyaml.WithGutter(niceyaml.NoGutter()),
+			niceyaml.WithStyle(lipgloss.NewStyle()),
+		)),
+	)
+	indexed := niceyaml.NewErrorFrom(
+		fmt.Errorf("validate: %w", located),
+		niceyaml.WithDocumentIndex(1),
+	)
+
+	wrapped := source.WrapError(indexed)
+
+	var got *niceyaml.Error
+
+	require.ErrorAs(t, wrapped, &got)
+
+	// The index survives the extra layer, so the path resolves in document 1.
+	idx, set := got.DocumentIndex()
+	assert.True(t, set)
+	assert.Equal(t, 1, idx)
+
+	// The highlight lands on the second document's value, not the first's.
+	detail := got.Detail()
+	assert.Contains(t, detail, "<genericError>second</genericError>")
+	assert.NotContains(t, detail, "<genericError>first</genericError>")
+}
+
+func TestError_FormatDropsNestedBullets(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
+	inner := niceyaml.NewError(
+		"validation failed at 2 locations",
+		niceyaml.WithErrors(
+			niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a").Value())),
+			niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b").Value())),
+		),
+		niceyaml.WithPrinter(niceyaml.NewPrinter(
+			niceyaml.WithStyles(style.Styles{}),
+			niceyaml.WithGutter(niceyaml.NoGutter()),
+			niceyaml.WithStyle(lipgloss.NewStyle()),
+		)),
+	)
+
+	wrapped := source.WrapError(fmt.Errorf("document 0: %w", inner))
+
+	// Error keeps the bullets, since nothing else carries the nested messages.
+	assert.Contains(t, wrapped.Error(), "\n  • at $.a: bad a")
+
+	// The %+v form renders them as annotations instead, so the bullets would
+	// only repeat what the detail already shows.
+	got := trimLines(fmt.Sprintf("%+v", wrapped))
+
+	assert.Equal(t, "document 0: validation failed at 2 locations", strings.SplitN(got, "\n", 2)[0])
+	assert.NotContains(t, got, "•")
+	assert.Contains(t, got, "^ bad a")
+	assert.Contains(t, got, "^ bad b")
+}
+
+func TestError_NestedMessageSpansLines(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
+	err := source.WrapError(niceyaml.NewError(
+		"validation failed",
+		niceyaml.WithErrors(
+			niceyaml.NewError(
+				"bad a\n  see docs for details",
+				niceyaml.WithPath(paths.Root().Child("a").Value()),
+			),
+		),
+	))
+
+	// The bullet carries the whole nested message, continuation line included.
+	assert.Contains(t, err.Error(), "\n  • [1:4] bad a\n  see docs for details")
+
+	// The %+v headline drops the bullet whole, rather than leaving the lines
+	// below its marker behind.
+	got := trimLines(render(err))
+	headline, _, _ := strings.Cut(got, "\n\n")
+
+	assert.Equal(t, "validation failed", headline)
+	assert.NotContains(t, headline, "see docs for details")
+}
+
+func TestError_MessageKeepsItsOwnBulletMarker(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
+	inner := niceyaml.NewError(
+		"validation failed\n  • see the schema docs",
+		niceyaml.WithErrors(
+			niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a").Value())),
+		),
+	)
+
+	err := source.WrapError(fmt.Errorf("document 0: %w", inner))
+
+	// The %+v headline drops only the bullets Error appended, so a marker the
+	// message carries on its own survives.
+	got := trimLines(render(err))
+	headline, _, _ := strings.Cut(got, "\n\n")
+
+	assert.Equal(t, "document 0: validation failed\n  • see the schema docs", headline)
+	assert.Contains(t, got, "^ bad a")
+	assert.NotContains(t, got, "at $.a: bad a")
+}
+
+func TestError_ResolvesThroughErrorWrappers(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("name: first\n---\nname: second\n")
+	located := niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name").Value()))
+
+	// Error wrappers add no message text of their own, so the source attached
+	// above them still resolves the location in the message.
+	wrapped := source.WrapError(niceyaml.NewErrorFrom(located))
+
+	assert.Equal(t, "[1:7] bad name", wrapped.Error())
+
+	var got *niceyaml.Error
+
+	require.ErrorAs(t, wrapped, &got)
+	assert.NotEmpty(t, got.Detail())
 }

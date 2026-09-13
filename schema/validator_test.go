@@ -516,7 +516,7 @@ func TestValidator_PathTarget(t *testing.T) {
 
 				require.ErrorAs(t, err, &validationErr)
 
-				validationErr.SetOption(
+				validationErr = validationErr.With(
 					niceyaml.WithSource(source),
 					niceyaml.WithPrinter(newXMLPrinter()),
 				)
@@ -669,7 +669,7 @@ func TestValidator_SubErrorAnnotations(t *testing.T) {
 
 				require.ErrorAs(t, err, &validationErr)
 
-				validationErr.SetOption(niceyaml.WithSource(source))
+				validationErr = validationErr.With(niceyaml.WithSource(source))
 
 				errOutput := fmt.Sprintf("%+v", validationErr)
 

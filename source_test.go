@@ -1676,7 +1676,7 @@ func TestSource_WrapError(t *testing.T) {
 
 		wrapped := source.WrapError(outer)
 
-		assert.Equal(t, outer, wrapped)
+		require.ErrorIs(t, wrapped, outer)
 		assert.Contains(t, wrapped.Error(), "document 3: ")
 	})
 

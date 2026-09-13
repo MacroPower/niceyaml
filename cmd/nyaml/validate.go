@@ -38,10 +38,14 @@ func validateCmd() *cobra.Command {
 			// Build registry once for all files to enable cross-file schema caching.
 			reg := buildRegistry(cmd.Context(), schemaRef)
 
+			// Build the error printer once: it carries the terminal width and
+			// a full theme, neither of which changes between files.
+			errPrinter := niceyaml.NewPrinter(niceyaml.WithWidth(getTerminalWidth()))
+
 			var errs []error
 
 			for _, yamlPath := range yamlPaths {
-				err := validateFile(cmd.Context(), yamlPath, reg)
+				err := validateFile(cmd.Context(), yamlPath, reg, errPrinter)
 				if err != nil {
 					errs = append(errs, fmt.Errorf("%s: %w", yamlPath, err))
 				} else {
@@ -71,11 +75,16 @@ func getTerminalWidth() int {
 	return max(0, width-2)
 }
 
-func validateFile(ctx context.Context, yamlPath string, reg *registry.Registry) error {
+func validateFile(
+	ctx context.Context,
+	yamlPath string,
+	reg *registry.Registry,
+	errPrinter *niceyaml.Printer,
+) error {
 	source, err := niceyaml.NewSourceFromFile(
 		yamlPath,
 		niceyaml.WithErrorOptions(
-			niceyaml.WithWidthFunc(getTerminalWidth),
+			niceyaml.WithPrinter(errPrinter),
 		),
 	)
 	if err != nil {

@@ -18,6 +18,14 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
+// silentError wraps another error without adding a message of its own, which
+// is what makes the [niceyaml.Error] holding it render an empty message while
+// still resolving a detail.
+type silentError struct{ err error }
+
+func (s silentError) Error() string { return "" }
+func (s silentError) Unwrap() error { return s.err }
+
 func testStyles() fang.Styles {
 	return fang.Styles{
 		ErrorHeader: lipgloss.NewStyle().SetString("Error"),
@@ -66,6 +74,12 @@ func TestErrorHandler(t *testing.T) {
 	badValue := niceyaml.NewError(
 		"bad value",
 		niceyaml.WithPath(paths.Root().Child("value").Value()),
+		niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
+		niceyaml.WithPrinter(xmlPrinter()),
+	)
+
+	emptyMessageErr := niceyaml.NewErrorFrom(
+		silentError{niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name").Key()))},
 		niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
 		niceyaml.WithPrinter(xmlPrinter()),
 	)
@@ -194,6 +208,18 @@ func TestErrorHandler(t *testing.T) {
 				"  <comment>^ bad name</comment>",
 				"  <nameTag>value</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>123</genericError>",
 				"  <comment>       ^ bad value</comment>",
+				"",
+				"",
+			),
+		},
+		"niceyaml error with an empty message keeps the wrapper text": {
+			err: fmt.Errorf("document 0: %w", emptyMessageErr),
+			want: stringtest.JoinLF(
+				"Error",
+				"  document 0: ",
+				"  ",
+				"  <genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
+				"  <nameTag>value</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>123</literalNumberInteger>",
 				"",
 				"",
 			),

@@ -331,21 +331,31 @@ func (dd *DocumentDecoder) ValidateSchema(ctx context.Context, sv SchemaValidato
 	return nil
 }
 
-// locate stamps err with this document's index when err is an [*Error] that
-// has none, so its paths resolve in the right document of a multi-document
-// source. Other errors pass through unchanged.
+// locate attaches this document's index to err when its chain holds an
+// [*Error] without one, so its paths resolve in the right document of a
+// multi-document source. A direct [*Error] is copied with the index; an
+// Error behind other wrapping is wrapped in a new Error that carries it.
+// Other errors pass through unchanged.
 func (dd *DocumentDecoder) locate(err error) error {
 	if err == nil {
 		return nil
 	}
 
 	yamlErr, ok := errors.AsType[*Error](err)
-	if ok && !yamlErr.hasDocIndex {
-		yamlErr.SetOption(WithDocumentIndex(dd.index))
+	if !ok {
+		return err
 	}
 
-	//nolint:wrapcheck // The producer already returns Error with path info.
-	return err
+	if _, set := yamlErr.DocumentIndex(); set {
+		//nolint:wrapcheck // The producer already returns Error with path info.
+		return err
+	}
+
+	if direct, ok := err.(*Error); ok { //nolint:errorlint // A direct Error is copied; a wrapped one is wrapped again.
+		return direct.With(WithDocumentIndex(dd.index))
+	}
+
+	return NewErrorFrom(err, WithDocumentIndex(dd.index))
 }
 
 // Decode decodes the document into a new T.

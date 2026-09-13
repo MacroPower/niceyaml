@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
@@ -31,6 +32,9 @@ var (
 	// ErrDocumentNotFound indicates the error's document index is outside the
 	// documents the source parsed into.
 	ErrDocumentNotFound = errors.New("document not found in source")
+
+	// Shared [Printer] used when no [WithPrinter] is configured.
+	defaultPrinter = sync.OnceValue(func() *Printer { return NewPrinter() })
 )
 
 // Error represents a YAML error with optional source annotation.
@@ -44,20 +48,18 @@ var (
 // sets the index on every error it returns, and nested errors without an
 // index of their own inherit the index of the error that holds them.
 //
-// Since these conditions must only be satisfied before calling
-// [Error.Detail], you may use [Error.SetOption] to supply them at any time and
-// in any context before then.
+// An Error is immutable once created. Since these conditions must only be
+// satisfied before calling [Error.Detail], callers attach what they know
+// later with [Error.With], which returns a copy, or with [Source.WrapError],
+// which wraps the error in a new Error that carries the source. Rendering
+// looks through that wrapping to find the Error holding the location, so
+// context added with [fmt.Errorf] between the two is preserved.
 //
 // This means that callers may optionally attach any additional context that
 // original [Error] producers might lack, thus avoiding the need for producers
-// to take on any more responsibility than they need to.
-//
-// For example, a [SchemaValidator] that produces [Error] values will be
-// path-aware, and thus should use [WithPath], but it will likely not have
-// access to the [Source].
-//
-// For convenience, [Source.WrapError] can be used if you only need to add the
-// [Source] without any other [ErrorOption] values.
+// to take on any more responsibility than they need to. For example, a
+// [SchemaValidator] that produces [Error] values will be path-aware, and thus
+// should use [WithPath], but it will likely not have access to the [Source].
 //
 // [Error.Error] returns a plain, single-purpose message with the location,
 // suitable for logs. [Error.Detail] renders the annotated source excerpt,
@@ -70,17 +72,16 @@ var (
 //
 // Create instances with [NewError] or [NewErrorFrom].
 type Error struct {
-	err          error
-	printer      *Printer
-	source       *Source
-	path         *paths.Path
-	token        *token.Token
-	widthFunc    func() int
-	errors       []*Error
-	contextLines int
-	width        int
-	docIndex     int
-	hasDocIndex  bool
+	err             error
+	printer         *Printer
+	source          *Source
+	path            *paths.Path
+	token           *token.Token
+	errors          []*Error
+	contextLines    int
+	docIndex        int
+	hasContextLines bool
+	hasDocIndex     bool
 }
 
 // NewError creates a new [*Error] with the given message.
@@ -92,13 +93,28 @@ func NewError(msg string, opts ...ErrorOption) *Error {
 // NewErrorFrom creates a new [*Error] wrapping an existing error.
 // Use [NewError] instead if creating an error from a message string.
 func NewErrorFrom(err error, opts ...ErrorOption) *Error {
-	e := &Error{
-		err:          err,
-		contextLines: 2,
+	e := &Error{err: err}
+	for _, opt := range opts {
+		opt(e)
 	}
-	e.SetOption(opts...)
 
 	return e
+}
+
+// With returns a copy of the [Error] with the given options applied. The
+// receiver is unchanged, so an Error shared between callers can be
+// specialized per use:
+//
+//	fmt.Printf("%+v\n", err.With(niceyaml.WithSource(source)))
+func (e *Error) With(opts ...ErrorOption) *Error {
+	c := *e
+	c.errors = slices.Clone(e.errors)
+
+	for _, opt := range opts {
+		opt(&c)
+	}
+
+	return &c
 }
 
 // ErrorOption configures an [Error].
@@ -110,15 +126,19 @@ func NewErrorFrom(err error, opts ...ErrorOption) *Error {
 //   - [WithErrorToken]
 //   - [WithPrinter]
 //   - [WithSource]
-//   - [WithWidthFunc]
 //   - [WithErrors]
 type ErrorOption func(e *Error)
 
+// defaultContextLines is the number of context lines shown around an error
+// when [WithContextLines] is not set.
+const defaultContextLines = 2
+
 // WithContextLines is an [ErrorOption] that sets the number of context lines to
-// show around the error.
+// show around the error. The default is 2.
 func WithContextLines(lines int) ErrorOption {
 	return func(e *Error) {
 		e.contextLines = lines
+		e.hasContextLines = true
 	}
 }
 
@@ -152,8 +172,8 @@ func WithErrorToken(tk *token.Token) ErrorOption {
 }
 
 // WithPrinter is an [ErrorOption] that sets the [*Printer] used for
-// formatting the error source. The Error never modifies it; when a width is
-// configured, rendering uses a copy from [Printer.With].
+// formatting the error source. The printer's width, set with [WithWidth],
+// controls word wrapping of the rendered detail.
 func WithPrinter(p *Printer) ErrorOption {
 	return func(e *Error) {
 		e.printer = p
@@ -171,15 +191,6 @@ func WithSource(src *Source) ErrorOption {
 	}
 }
 
-// WithWidthFunc is an [ErrorOption] that sets a function to determine the width
-// for word wrapping.
-// This takes precedence over [Error.SetWidth] when both are configured.
-func WithWidthFunc(fn func() int) ErrorOption {
-	return func(e *Error) {
-		e.widthFunc = fn
-	}
-}
-
 // WithErrors is an [ErrorOption] that adds nested errors to the [Error].
 //
 // Each nested error has its own YAML path or token and is rendered as an
@@ -189,6 +200,13 @@ func WithErrors(errs ...*Error) ErrorOption {
 		e.errors = append(e.errors, errs...)
 	}
 }
+
+// bulletMarker opens a nested error line in [Error.Error], and bulletPrefix
+// is the same marker with the newline that separates it from the line above.
+const (
+	bulletMarker = "  \u2022 "
+	bulletPrefix = "\n" + bulletMarker
+)
 
 // Error returns the error message prefixed with its location.
 //
@@ -206,26 +224,146 @@ func (e *Error) Error() string {
 		return ""
 	}
 
+	// When the located Error sits behind foreign wrapping, that wrapping
+	// already renders it.
+	a, direct := e.located()
+	if !direct {
+		return e.err.Error()
+	}
+
+	src := e.effectiveSource()
+
+	return e.headline(a, src) + e.bullets(a, src)
+}
+
+// bullets renders the nested errors of a, the located Error, as the indented
+// lines [Error.Error] appends after the headline. Returns an empty string when
+// a holds none.
+func (e *Error) bullets(a *Error, src *Source) string {
 	var sb strings.Builder
 
-	sb.WriteString(e.headline(e))
-
-	for _, nested := range e.errors {
+	for _, nested := range a.errors {
 		if nested == nil || nested.err == nil {
 			continue
 		}
 
-		sb.WriteString("\n  \u2022 ")
-		sb.WriteString(e.headline(nested))
+		sb.WriteString(bulletPrefix)
+		sb.WriteString(e.headline(nested, src))
 	}
 
 	return sb.String()
 }
 
+// message returns [Error.Error] without the nested bullet lines: the headline
+// plus whatever context wraps it. The %+v form renders those nested errors as
+// annotations in [Error.Detail] instead, so repeating them would be noise.
+func (e *Error) message() string {
+	if e.err == nil {
+		return ""
+	}
+
+	a, direct := e.located()
+	if direct {
+		return e.headline(a, e.effectiveSource())
+	}
+
+	// Foreign wrapping rendered an Error of its own, bullets and all. Strip
+	// exactly the bullets that Error appended rather than cutting at the first
+	// bullet marker, which a message can carry on its own. A wrapper that added
+	// text after the error leaves no such suffix, so the message keeps its
+	// bullets.
+	msg := e.err.Error()
+
+	rendered, ok := errors.AsType[*Error](e.err)
+	if !ok {
+		return msg
+	}
+
+	suffix, found := strings.CutPrefix(rendered.Error(), rendered.message())
+	if !found || suffix == "" {
+		return msg
+	}
+
+	trimmed, cut := strings.CutSuffix(msg, suffix)
+	if !cut {
+		return msg
+	}
+
+	return trimmed
+}
+
+// located returns the anchor and whether e renders it itself, which is the
+// case when the anchor is e or e wraps it with nothing in between.
+func (e *Error) located() (*Error, bool) {
+	a := e.anchor()
+
+	return a, a == e || e.wrapsDirectly(a)
+}
+
+// find returns the first [Error] in e's chain that satisfies pred, walking
+// from e inward and looking through foreign wrapping. The walk ends at the
+// [Error] that carries the location, since the ones below it describe no
+// position to configure. Returns nil when none matches.
+func (e *Error) find(pred func(*Error) bool) *Error {
+	for cur := e; ; {
+		if pred(cur) {
+			return cur
+		}
+
+		if cur.hasLocation() {
+			return nil
+		}
+
+		inner, ok := errors.AsType[*Error](cur.err)
+		if !ok {
+			return nil
+		}
+
+		cur = inner
+	}
+}
+
+// anchor returns the [Error] that carries the location: e itself when it has
+// a token, path, or nested errors, otherwise the nearest such Error wrapped
+// inside e. Falls back to e when none carries a location.
+func (e *Error) anchor() *Error {
+	a := e.find((*Error).hasLocation)
+	if a == nil {
+		return e
+	}
+
+	return a
+}
+
+// hasLocation reports whether e carries a token, a path, or nested errors.
+func (e *Error) hasLocation() bool {
+	return e.token != nil || e.path != nil || len(e.errors) > 0
+}
+
+// wrapsDirectly reports whether target is reachable from e through [Error]
+// wrappers alone, with no foreign wrapping in between. Such wrappers
+// contribute no message text of their own, so e renders target itself and
+// resolves it against its own source rather than delegating.
+func (e *Error) wrapsDirectly(target *Error) bool {
+	for cur := e; ; {
+		inner, ok := cur.err.(*Error) //nolint:errorlint // Identity of the direct child, not a chain search.
+		if !ok {
+			return false
+		}
+
+		if inner == target {
+			return true
+		}
+
+		cur = inner
+	}
+}
+
 // headline returns target's message prefixed with its location. Paths resolve
-// against e's source and document index when target has none of its own.
-func (e *Error) headline(target *Error) string {
-	tk, err := e.resolveIn(target, e.source)
+// against src, which is e's effective source, and against e's document index
+// when target has none of its own.
+func (e *Error) headline(target *Error, src *Source) string {
+	tk, err := e.resolveIn(target, src)
 	if err == nil && tk != nil && tk.Position != nil {
 		return fmt.Sprintf("[%s] %v", position.NewFromToken(tk), target.err)
 	}
@@ -249,20 +387,56 @@ func (e *Error) Detail() string {
 		return ""
 	}
 
-	mainToken, err := e.resolveIn(e, e.source)
+	a := e.anchor()
+	src := e.effectiveSource()
+
+	mainToken, err := e.resolveIn(a, src)
 	if err != nil {
 		slog.Debug("resolve main token for error",
-			slog.String("path", e.Path()),
+			slog.String("path", a.pathString()),
 			slog.Any("error", err),
 		)
 
 		// Nested errors can still render on their own when a source is present.
-		if e.source == nil || !e.hasResolvableNestedErrors() {
+		if src == nil || !a.hasResolvableNestedErrors() {
 			return ""
 		}
 	}
 
-	return e.renderErrorSource(mainToken)
+	return e.renderErrorSource(a, src, mainToken)
+}
+
+// effectiveSource returns the outermost source set in e's chain, or nil when
+// none is set.
+func (e *Error) effectiveSource() *Source {
+	a := e.find(func(c *Error) bool { return c.source != nil })
+	if a == nil {
+		return nil
+	}
+
+	return a.source
+}
+
+// effectivePrinter returns the outermost printer set in e's chain, or the
+// default.
+func (e *Error) effectivePrinter() *Printer {
+	a := e.find(func(c *Error) bool { return c.printer != nil })
+	if a == nil {
+		return defaultPrinter()
+	}
+
+	return a.printer
+}
+
+// effectiveContextLines returns the outermost context lines set in e's chain,
+// or the default.
+func (e *Error) effectiveContextLines() int {
+	a := e.find(func(c *Error) bool { return c.hasContextLines })
+	if a == nil {
+		return defaultContextLines
+	}
+
+	return a.contextLines
 }
 
 // Format implements [fmt.Formatter].
@@ -280,7 +454,7 @@ func (e *Error) Format(f fmt.State, verb rune) {
 			return
 		}
 
-		writeString(f, e.headline(e))
+		writeString(f, e.message())
 		writeString(f, "\n\n")
 		writeString(f, detail)
 
@@ -320,7 +494,7 @@ func (e *Error) resolveIn(target *Error, src *Source) (*token.Token, error) {
 		return nil, err
 	}
 
-	return resolveToken(file, nil, target.path, target.documentIndex(e.documentIndex(0)))
+	return resolveToken(file, nil, target.path, target.documentIndex(e.defaultDocumentIndex()))
 }
 
 // documentIndex returns the document index to resolve paths in, or fallback
@@ -333,6 +507,14 @@ func (e *Error) documentIndex(fallback int) int {
 	return fallback
 }
 
+// defaultDocumentIndex returns the document index nested errors inherit: the
+// outermost one set in e's chain, or 0.
+func (e *Error) defaultDocumentIndex() int {
+	index, _ := e.DocumentIndex()
+
+	return index
+}
+
 // hasResolvableNestedErrors checks if any nested error has a path or token.
 func (e *Error) hasResolvableNestedErrors() bool {
 	for _, nested := range e.errors {
@@ -342,40 +524,6 @@ func (e *Error) hasResolvableNestedErrors() bool {
 	}
 
 	return false
-}
-
-// SetOption applies the provided [ErrorOption] values to the [Error].
-func (e *Error) SetOption(opts ...ErrorOption) {
-	for _, opt := range opts {
-		opt(e)
-	}
-}
-
-// SetWidth sets the width for word wrapping of the error output.
-// A width of 0 disables wrapping.
-func (e *Error) SetWidth(width int) {
-	e.width = width
-}
-
-// getPrinter returns the printer to render with: the configured one or a
-// default, specialized with the configured width. The configured printer is
-// left untouched.
-func (e *Error) getPrinter() *Printer {
-	width := e.width
-	if e.widthFunc != nil {
-		width = e.widthFunc()
-	}
-
-	p := e.printer
-	if p == nil {
-		p = NewPrinter()
-	}
-
-	if p.Width() == width {
-		return p
-	}
-
-	return p.With(WithWidth(width))
 }
 
 // Unwrap returns the underlying errors, enabling [errors.Is] and [errors.As].
@@ -399,18 +547,33 @@ func (e *Error) Unwrap() []error {
 }
 
 // Path returns the [*paths.Path] path where the error occurred as a string.
+// It looks through wrapping to the [Error] that carries the location.
 func (e *Error) Path() string {
-	if e.path != nil {
-		return e.path.Path().String()
+	return e.anchor().pathString()
+}
+
+// pathString returns e's own path as a string, or an empty string when it
+// carries none.
+func (e *Error) pathString() string {
+	if e.path == nil {
+		return ""
 	}
 
-	return ""
+	return e.path.Path().String()
 }
 
 // DocumentIndex returns the 0-indexed document the error's path resolves in
-// and whether one was set with [WithDocumentIndex].
+// and whether one was set with [WithDocumentIndex], on this Error or on any
+// Error it wraps down to the one that carries the location. The outermost
+// index wins, so context added between the two with [fmt.Errorf] never hides
+// it.
 func (e *Error) DocumentIndex() (int, bool) {
-	return e.docIndex, e.hasDocIndex
+	a := e.find(func(c *Error) bool { return c.hasDocIndex })
+	if a == nil {
+		return 0, false
+	}
+
+	return a.docIndex, true
 }
 
 // errorPosition holds information about a resolved error position.
@@ -440,8 +603,10 @@ func (e *Error) buildHunkSpans(errorLines []int, totalLines int) position.Spans 
 	slices.Sort(sorted)
 
 	// Group indices, expand by context, clamp to valid range.
-	return position.GroupIndices(sorted, e.contextLines).
-		Expand(e.contextLines).
+	context := e.effectiveContextLines()
+
+	return position.GroupIndices(sorted, context).
+		Expand(context).
 		Clamp(0, totalLines)
 }
 
@@ -507,10 +672,10 @@ func (e *Error) resolveNestedError(src *Source, view line.Lines, nested *Error) 
 // unified slice.
 //
 // Paths resolve against src, and view supplies the ranges. If mainToken is
-// provided, it becomes the first position without a message. Nested errors
-// follow with their messages.
-func (e *Error) collectErrorPositions(src *Source, view line.Lines, mainToken *token.Token) []errorPosition {
-	positions := make([]errorPosition, 0, 1+len(e.errors))
+// provided, it becomes the first position without a message. The nested
+// errors of a, the located Error, follow with their messages.
+func (e *Error) collectErrorPositions(a *Error, src *Source, view line.Lines, mainToken *token.Token) []errorPosition {
+	positions := make([]errorPosition, 0, 1+len(a.errors))
 
 	// Add main error position if token is provided. The token is located by
 	// position rather than identity, since a token from the parsed AST is a
@@ -526,7 +691,7 @@ func (e *Error) collectErrorPositions(src *Source, view line.Lines, mainToken *t
 	}
 
 	// Add nested error positions.
-	for _, nested := range e.errors {
+	for _, nested := range a.errors {
 		if nested == nil || nested.err == nil {
 			continue
 		}
@@ -547,25 +712,24 @@ func (e *Error) collectErrorPositions(src *Source, view line.Lines, mainToken *t
 	return positions
 }
 
-// renderErrorSource renders the error source with all error positions
-// highlighted. It highlights mainToken, when provided, as the main error
-// without an annotation.
+// renderErrorSource renders src with all error positions highlighted. It
+// highlights mainToken, when provided, as the main error without an
+// annotation, and annotates the nested errors of a, the located Error.
 //
 // Rendering happens on a clone of the source's [line.Lines] view, so
-// renderErrorSource never mutates e.source and calling [Error.Detail]
+// renderErrorSource never mutates the source and calling [Error.Detail]
 // repeatedly renders the same output. Without a source, the view is rebuilt
-// from mainToken's chain, which costs a lex per call.
-func (e *Error) renderErrorSource(mainToken *token.Token) string {
-	p := e.getPrinter()
+// from mainToken's chain on every call.
+func (e *Error) renderErrorSource(a *Error, src *Source, mainToken *token.Token) string {
+	p := e.effectivePrinter()
 
-	src := e.source
 	if src == nil {
 		src = NewSourceFromToken(mainToken)
 	}
 
 	view := src.Lines().Clone()
 
-	positions := e.collectErrorPositions(src, view, mainToken)
+	positions := e.collectErrorPositions(a, src, view, mainToken)
 
 	// Collect all ranges from positions and apply overlays to the view.
 	var allRanges position.Ranges
