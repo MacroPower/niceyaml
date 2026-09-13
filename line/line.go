@@ -81,10 +81,10 @@ func (l Line) Content() string {
 	return sb.String()
 }
 
-// Clone returns a copy of this [Line] with cloned Part tokens.
+// Clone returns a copy of this [Line] with its own annotations and overlays.
 //
-// Source pointers remain shared since they reference the original
-// unmodified tokens.
+// The copy shares the underlying tokens with the original, since the line
+// never modifies them.
 func (l Line) Clone() Line {
 	var ann Annotations
 
@@ -110,12 +110,17 @@ func (l Line) Clone() Line {
 }
 
 // Tokens returns the [token.Tokens] for this [Line] with line-adjusted
-// positions.
+// positions. Each token links to its neighbors on the line through Next and
+// Prev, and the chain stops at the line boundary.
+//
+// The slice is new, but the tokens are shared with the line. Treat them as
+// read-only.
 func (l Line) Tokens() token.Tokens {
 	return l.segments.PartTokens()
 }
 
-// Token returns the [*token.Token] at the given index.
+// Token returns the [*token.Token] at the given index. The token is shared
+// with the line, so treat it as read-only.
 // Panics if idx is out of range.
 func (l Line) Token(idx int) *token.Token {
 	return l.segments[idx].Part()
@@ -392,9 +397,10 @@ func NewLines(tks token.Tokens) Lines {
 
 // Tokens reconstructs the full [token.Tokens] stream from all [Line] values.
 //
-// For multiline tokens that were split across lines, this function recombines
-// them by returning clones of the original tokens (via [tokens.Segment.Source]).
-// Segments that share a Source pointer are collapsed to a single token.
+// For multiline tokens that were split across lines, Tokens recombines them by
+// returning the original token once (via [tokens.Segment.Source]). Segments
+// that share a Source pointer collapse to a single token. The slice is new,
+// but the tokens are the originals. Treat them as read-only.
 func (ls Lines) Tokens() token.Tokens {
 	if len(ls) == 0 {
 		return nil
@@ -428,7 +434,12 @@ func (ls Lines) TokenPositions(tk *token.Token) []position.Position {
 	return positions
 }
 
-// TokenAt returns the [*token.Token] at the given position.
+// TokenAt returns the original [*token.Token] at the given position.
+//
+// The token is the one the lexer produced, so it can be passed back to
+// [Lines.TokenPositionRangesFromToken] or [Lines.ContentPositionRangesFromToken]
+// to find every range it occupies. Treat it as read-only.
+//
 // Returns nil if the position is out of bounds or no token exists there.
 func (ls Lines) TokenAt(pos position.Position) *token.Token {
 	if pos.Line < 0 || pos.Line >= len(ls) {

@@ -15,6 +15,10 @@ import (
 // Multiple [Segment] values may share the same [Segment.Source] pointer while
 // having distinct [Segment.Part] values.
 //
+// A Segment never modifies its tokens, and its accessors return the stored
+// pointers rather than copies. Treat the returned tokens as read-only, and
+// call [token.Token.Clone] before changing one.
+//
 // Create instances with [NewSegment].
 type Segment struct {
 	// Source is a reference to the original token from the lexer.
@@ -32,7 +36,7 @@ type Segment struct {
 	part *token.Token
 
 	// Width is the cached rune count of part.Origin, excluding trailing newline.
-	// Computed once at creation to avoid repeated allocations.
+	// NewSegment computes it once.
 	width int
 }
 
@@ -74,22 +78,19 @@ func (s Segment) PartEquals(tk *token.Token) bool {
 	return s.part == tk
 }
 
-// Source returns a clone of the [Segment]'s source [*token.Token].
+// Source returns the [Segment]'s source [*token.Token].
+//
+// The token is shared with every other Segment cut from it and with the
+// caller that supplied it. Treat it as read-only.
 func (s Segment) Source() *token.Token {
-	if s.source == nil {
-		return nil
-	}
-
-	return s.source.Clone()
+	return s.source
 }
 
-// Part returns a clone of the [Segment]'s part [*token.Token].
+// Part returns the [Segment]'s part [*token.Token].
+//
+// The token is shared with every copy of this Segment. Treat it as read-only.
 func (s Segment) Part() *token.Token {
-	if s.part == nil {
-		return nil
-	}
-
-	return s.part.Clone()
+	return s.part
 }
 
 // Segments is a sequence of [Segment] values, typically representing a single
@@ -118,29 +119,28 @@ func (s Segments) Merge(others ...Segments) Segments {
 	return s
 }
 
-// Clone returns a copy of the [Segments] with cloned [Segment.Part]s but shared
-// [Segment.Source] pointers.
+// Clone returns a copy of the [Segments] slice.
 //
-// Sources are intentionally shared since they are immutable references to
-// original tokens.
+// The copy shares the source and part tokens with the original, since neither
+// is modified after segmentation. Appending to one copy does not affect the
+// other.
 func (s Segments) Clone() Segments {
 	if len(s) == 0 {
 		return nil
 	}
 
-	result := make(Segments, 0, len(s))
-	for _, seg := range s {
-		result = append(result, NewSegment(seg.source, seg.Part()))
-	}
+	result := make(Segments, len(s))
+	copy(result, s)
 
 	return result
 }
 
-// SourceTokens returns clones of unique source tokens in order.
+// SourceTokens returns the unique source tokens in order.
 //
-// This is the inverse of segmentation: [Segment] values that share a
-// [Segment.Source] pointer are deduplicated to return a clone of each original
-// [*token.Token] once.
+// This is the inverse of segmentation. [Segment] values that share a
+// [Segment.Source] pointer collapse to that original [*token.Token], which
+// appears once. The slice is new, but the tokens are shared and keep the Next
+// and Prev links the lexer gave them. Treat them as read-only.
 func (s Segments) SourceTokens() token.Tokens {
 	if len(s) == 0 {
 		return nil
@@ -152,7 +152,7 @@ func (s Segments) SourceTokens() token.Tokens {
 
 	for _, seg := range s {
 		if seg.source != lastSource {
-			result.Add(seg.Source())
+			result = append(result, seg.source)
 
 			lastSource = seg.source
 		}
@@ -161,7 +161,9 @@ func (s Segments) SourceTokens() token.Tokens {
 	return result
 }
 
-// PartTokens returns clones of all [Segment.Part] [*token.Token]s in order.
+// PartTokens returns all [Segment.Part] [*token.Token]s in order.
+//
+// The slice is new, but the tokens are shared. Treat them as read-only.
 func (s Segments) PartTokens() token.Tokens {
 	if len(s) == 0 {
 		return nil
@@ -169,7 +171,7 @@ func (s Segments) PartTokens() token.Tokens {
 
 	result := make(token.Tokens, 0, len(s))
 	for _, seg := range s {
-		result.Add(seg.Part())
+		result = append(result, seg.part)
 	}
 
 	return result
@@ -192,27 +194,14 @@ func (s Segments) NextColumn() int {
 	return col
 }
 
-// SourceTokenAt returns a clone of the source [*token.Token] at the given
-// 0-indexed column.
+// SourceTokenAt returns the source [*token.Token] at the given 0-indexed
+// column.
+//
+// The token is the shared original, so it compares equal by pointer to the
+// token the lexer produced and to [Segment.Source]. Treat it as read-only.
 //
 // Returns nil if no token exists at that column.
 func (s Segments) SourceTokenAt(col int) *token.Token {
-	tk := s.sourceTokenAtPtr(col)
-	if tk == nil {
-		return nil
-	}
-
-	return tk.Clone()
-}
-
-// sourceTokenAtPtr returns the raw source token pointer at the given 0-indexed
-// column.
-//
-// This is for internal use where pointer identity is needed for
-// [Segment] matching.
-//
-// Returns nil if no token exists at that column.
-func (s Segments) sourceTokenAtPtr(col int) *token.Token {
 	c := 0
 	for _, seg := range s {
 		w := seg.Width()
@@ -242,7 +231,7 @@ func (s2 Segments2) TokenRangesAt(idx, col int) position.Ranges {
 		return nil
 	}
 
-	source := s2[idx].sourceTokenAtPtr(col)
+	source := s2[idx].SourceTokenAt(col)
 	if source == nil {
 		return nil
 	}
@@ -288,7 +277,7 @@ func (s2 Segments2) ContentRangesAt(idx, col int) position.Ranges {
 		return nil
 	}
 
-	source := s2[idx].sourceTokenAtPtr(col)
+	source := s2[idx].SourceTokenAt(col)
 	if source == nil {
 		return nil
 	}
@@ -411,7 +400,10 @@ func CloneWithResetPositions(tks token.Tokens) token.Tokens {
 // each YAML document found (separated by '---' tokens).
 //
 // The returned slices each contain tokens for a single document, preserving
-// original token order and positions.
+// original token order and positions. The tokens are the caller's, not
+// copies, and they keep the Next and Prev links of the full stream, so a
+// document's first token still links back to the previous document. Pass
+// [WithResetPositions] to receive clones instead.
 //
 // Each document header token ('---') is included at the start of its document.
 func SplitDocuments(tks token.Tokens, opts ...SplitDocumentsOption) iter.Seq2[int, token.Tokens] {
@@ -444,7 +436,7 @@ func SplitDocuments(tks token.Tokens, opts ...SplitDocumentsOption) iter.Seq2[in
 				docIdx++
 			}
 
-			current.Add(tk)
+			current = append(current, tk)
 		}
 
 		if len(current) > 0 {

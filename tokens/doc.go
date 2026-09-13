@@ -28,11 +28,15 @@
 // token occupies across lines, which is useful for highlighting all parts of
 // a token (e.g. for errors).
 //
-// # Pointer Safety
+// # Token Sharing
 //
-// Source pointers are shared internally for equality checks and deduplication,
-// but [Segment.Source] and [Segment.Part] return clones to prevent accidental
-// modification. Use [Segment.SourceEquals] for pointer comparisons.
+// Segments never copy tokens. [Segment.Source] returns the lexer's original
+// token, shared by every segment cut from it, and [Segment.Part] returns the
+// part token shared by every copy of the segment. Because the pointers are
+// stable, a token obtained from [Segments.SourceTokenAt] can be passed back
+// to [Segments2.TokenRangesAt] or compared with [Segment.SourceEquals] and
+// will match. In exchange, callers must treat every returned token as
+// read-only and call [token.Token.Clone] before modifying one.
 //
 // # Syntax Highlighting
 //

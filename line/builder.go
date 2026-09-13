@@ -14,6 +14,7 @@ import (
 // Create instances with [newLinesBuilder].
 type linesBuilder struct {
 	// Result accumulation.
+	lastPart            *token.Token // Most recent part on the current line, for linking.
 	lines               []Line
 	currentLineSegments tokens.Segments
 	currentLine         int // Current line number being built.
@@ -140,6 +141,8 @@ func (b *linesBuilder) finishLine() {
 		number:   b.currentLine,
 	})
 
+	b.lastPart = nil
+
 	// Prepare indentation tracking for next line.
 	b.prevLineIndentNum = b.currentIndentNum
 
@@ -196,6 +199,10 @@ func (b *linesBuilder) processPart(ctx *partContext) bool {
 				IndentLevel: b.currentIndentLevel,
 			},
 		}
+		if n := len(lastLine.segments); n > 0 {
+			linkParts(lastLine.segments[n-1].Part(), newTk)
+		}
+
 		lastLine.segments = lastLine.segments.Append(ctx.tk, newTk)
 
 		b.currentOffset += len(ctx.part)
@@ -312,6 +319,10 @@ func (b *linesBuilder) processPart(ctx *partContext) bool {
 		// Sync our tracking with the original Position to fix subsequent tokens.
 		b.currentIndentLevel = ctx.tk.Position.IndentLevel
 	}
+
+	linkParts(b.lastPart, newTk)
+
+	b.lastPart = newTk
 
 	b.currentLineSegments = b.currentLineSegments.Append(ctx.tk, newTk)
 
@@ -547,4 +558,17 @@ func clonePosition(pos *token.Position) *token.Position {
 		IndentNum:   pos.IndentNum,
 		IndentLevel: pos.IndentLevel,
 	}
+}
+
+// linkParts chains next after prev so that [token.Token.NextType] and
+// [token.Token.PreviousType] see the neighboring parts on the same line. The
+// chain stops at line boundaries, so the last part on a line has no Next. A nil
+// prev leaves next unlinked.
+func linkParts(prev, next *token.Token) {
+	if prev == nil {
+		return
+	}
+
+	prev.Next = next
+	next.Prev = prev
 }

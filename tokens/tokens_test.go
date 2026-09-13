@@ -32,39 +32,30 @@ func TestNewSegment(t *testing.T) {
 
 	seg := tokens.NewSegment(source, part)
 
-	// Part() returns a clone, so check deep equality.
-	gotPart := seg.Part()
-	assert.NotSame(t, part, gotPart) // Should be cloned.
-	require.NoError(t, yamltest.ValidateTokenPair(part, gotPart))
-
-	partDiff := yamltest.CompareTokens(part, gotPart)
-	require.True(t, partDiff.Equal(), partDiff.String())
-
-	gotSource := seg.Source()
-	assert.NotSame(t, source, gotSource) // Should be cloned.
-	require.NoError(t, yamltest.ValidateTokenPair(source, gotSource))
-
-	sourceDiff := yamltest.CompareTokens(source, gotSource)
-	require.True(t, sourceDiff.Equal(), sourceDiff.String())
+	assert.Same(t, part, seg.Part())
+	assert.Same(t, source, seg.Source())
 }
 
 func TestSegment_Source(t *testing.T) {
 	t.Parallel()
 
-	t.Run("returns cloned source", func(t *testing.T) {
+	t.Run("returns shared source", func(t *testing.T) {
 		t.Parallel()
 
 		source := yamltest.NewTokenBuilder().Value("test").Origin("test\n").Build()
 		part := yamltest.NewTokenBuilder().Value("test").Build()
 
 		seg := tokens.NewSegment(source, part)
-		got := seg.Source()
 
-		assert.NotSame(t, source, got) // Should be cloned.
-		require.NoError(t, yamltest.ValidateTokenPair(source, got))
+		assert.Same(t, source, seg.Source())
+	})
 
-		diff := yamltest.CompareTokens(source, got)
-		require.True(t, diff.Equal(), diff.String())
+	t.Run("nil source", func(t *testing.T) {
+		t.Parallel()
+
+		seg := tokens.NewSegment(nil, yamltest.NewTokenBuilder().Value("test").Build())
+
+		assert.Nil(t, seg.Source())
 	})
 }
 
@@ -211,7 +202,6 @@ func TestSegments_Append(t *testing.T) {
 		got := segs.Append(source, part)
 
 		require.Len(t, got, 1)
-		// Part() returns a clone, so check deep equality.
 		require.NoError(t, yamltest.ValidateTokenPair(part, got[0].Part()))
 		require.True(
 			t,
@@ -232,7 +222,6 @@ func TestSegments_Append(t *testing.T) {
 		got := segs.Append(source2, part2)
 
 		require.Len(t, got, 2)
-		// Part() returns a clone, so check deep equality.
 		require.NoError(t, yamltest.ValidateTokenPair(part1, got[0].Part()))
 		require.True(
 			t,
@@ -261,7 +250,7 @@ func TestSegments_Clone(t *testing.T) {
 		assert.Nil(t, got)
 	})
 
-	t.Run("clones segments", func(t *testing.T) {
+	t.Run("copies the slice and shares tokens", func(t *testing.T) {
 		t.Parallel()
 
 		source := yamltest.NewTokenBuilder().Value("source").Build()
@@ -271,13 +260,14 @@ func TestSegments_Clone(t *testing.T) {
 		got := segs.Clone()
 
 		require.Len(t, got, 1)
-		assert.NotSame(t, part, got[0].Part()) // Part should be cloned.
-		require.NoError(t, yamltest.ValidateTokenPair(part, got[0].Part()))
-		require.True(
-			t,
-			yamltest.CompareTokens(part, got[0].Part()).Equal(),
-			yamltest.CompareTokens(part, got[0].Part()).String(),
-		)
+		assert.Same(t, part, got[0].Part())
+		assert.Same(t, source, got[0].Source())
+
+		// Appending to the copy leaves the original untouched.
+		got = got.Append(source, part)
+
+		assert.Len(t, segs, 1)
+		assert.Len(t, got, 2)
 	})
 
 	t.Run("preserves source reference", func(t *testing.T) {
@@ -316,11 +306,7 @@ func TestSegments_SourceTokens(t *testing.T) {
 		got := segs.SourceTokens()
 
 		require.Len(t, got, 1)
-		assert.NotSame(t, source, got[0]) // Should be cloned.
-		require.NoError(t, yamltest.ValidateTokenPair(source, got[0]))
-
-		diff := yamltest.CompareTokens(source, got[0])
-		require.True(t, diff.Equal(), diff.String())
+		assert.Same(t, source, got[0])
 	})
 
 	t.Run("deduplicates shared source", func(t *testing.T) {
@@ -389,7 +375,7 @@ func TestSegments_PartTokens(t *testing.T) {
 		assert.Nil(t, got)
 	})
 
-	t.Run("returns all parts cloned", func(t *testing.T) {
+	t.Run("returns all parts", func(t *testing.T) {
 		t.Parallel()
 
 		source := yamltest.NewTokenBuilder().Value("source").Build()
@@ -403,8 +389,8 @@ func TestSegments_PartTokens(t *testing.T) {
 		got := segs.PartTokens()
 
 		require.Len(t, got, 2)
-		assert.NotSame(t, part1, got[0]) // Should be cloned.
-		assert.NotSame(t, part2, got[1])
+		assert.Same(t, part1, got[0])
+		assert.Same(t, part2, got[1])
 		require.NoError(t, yamltest.ValidateTokenPair(part1, got[0]))
 
 		diff0 := yamltest.CompareTokens(part1, got[0])
@@ -561,7 +547,6 @@ func TestSegments_SourceTokenAt(t *testing.T) {
 			tokens.NewSegment(source3, yamltest.NewTokenBuilder().Origin("value").Build()), // Width 5, cols 5-9.
 		}
 
-		// SourceTokenAt returns clones, so check deep equality.
 		require.NoError(t, yamltest.ValidateTokenPair(source1, segs.SourceTokenAt(0)))
 		require.True(
 			t,
@@ -599,8 +584,8 @@ func TestSegments_SourceTokenAt(t *testing.T) {
 			yamltest.CompareTokens(source3, segs.SourceTokenAt(9)).String(),
 		)
 
-		// Verify cloning behavior.
-		assert.NotSame(t, source1, segs.SourceTokenAt(0))
+		// The returned token is the shared original.
+		assert.Same(t, source1, segs.SourceTokenAt(0))
 	})
 
 	t.Run("column out of bounds", func(t *testing.T) {
@@ -639,7 +624,6 @@ func TestSegments_SourceTokenAt(t *testing.T) {
 			tokens.NewSegment(source2, yamltest.NewTokenBuilder().Origin("end").Build()), // Width 3.
 		}
 
-		// SourceTokenAt returns clones, so check deep equality.
 		require.NoError(t, yamltest.ValidateTokenPair(source1, segs.SourceTokenAt(0)))
 		require.True(
 			t,

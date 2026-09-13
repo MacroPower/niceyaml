@@ -103,8 +103,10 @@
 // The [Lines.Tokens] method reconstructs the original token stream.
 //
 // Tokens that were split across lines are deduplicated using shared source
-// pointers from the internal [tokens.Segment] representation.
+// pointers from the internal [tokens.Segment] representation, so the result
+// holds the lexer's original tokens in their original order.
 //
-// This enables modifications at the line level while preserving valid YAML
-// output.
+// Every token the package hands out, from [Lines.Tokens], [Lines.TokenAt],
+// [Line.Tokens], or [Line.Token], is shared with the lines. Treat them as
+// read-only and call [token.Token.Clone] before modifying one.
 package line

@@ -2261,12 +2261,9 @@ func TestLines_TokenAt(t *testing.T) {
 
 		require.NotNil(t, tk1)
 		require.NotNil(t, tk2)
-		// Both should return clones with the same values (TokenAt returns clones).
-		assert.NotSame(t, tk1, tk2)
-		require.NoError(t, yamltest.ValidateTokenPair(tk1, tk2))
-
-		diff := yamltest.CompareTokens(tk1, tk2)
-		require.True(t, diff.Equal(), diff.String())
+		// Both lines belong to the same source token, so TokenAt returns the
+		// same original pointer for each.
+		assert.Same(t, tk1, tk2)
 	})
 
 	t.Run("out of bounds line returns nil", func(t *testing.T) {
@@ -3294,9 +3291,12 @@ func TestLines_ContentPositionRanges(t *testing.T) {
 	t.Run("by token", func(t *testing.T) {
 		t.Parallel()
 
-		// Lookup is by pointer identity, so pass the lexer's token rather than a
-		// clone from TokenAt or Line.Token.
-		got := lines.ContentPositionRangesFromToken(tks[2])
+		// TokenAt returns the lexer's original token, so the lookup by pointer
+		// identity finds it.
+		tk := lines.TokenAt(position.New(0, 7))
+		require.Same(t, tks[2], tk)
+
+		got := lines.ContentPositionRangesFromToken(tk)
 		assert.Equal(t, []position.Range{
 			position.NewRange(position.New(0, 7), position.New(0, 12)),
 		}, got)
