@@ -899,6 +899,120 @@ func TestWithDecodeOptions(t *testing.T) {
 	})
 }
 
+func TestDocumentDecoder_Get(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.Input(`
+		kind: Deployment
+		version: 2
+		enabled: true
+		empty: null
+		tags:
+		  - a
+		  - b
+		meta:
+		  name: app
+	`)
+
+	t.Run("string", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		got, err := dd.Get[string](t.Context(), paths.Root().Child("kind").Path())
+		require.NoError(t, err)
+		assert.Equal(t, "Deployment", got)
+	})
+
+	t.Run("int", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		got, err := dd.Get[int](t.Context(), paths.Root().Child("version").Path())
+		require.NoError(t, err)
+		assert.Equal(t, 2, got)
+	})
+
+	t.Run("bool", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		got, err := dd.Get[bool](t.Context(), paths.Root().Child("enabled").Path())
+		require.NoError(t, err)
+		assert.True(t, got)
+	})
+
+	t.Run("null decodes to zero value", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		got, err := dd.Get[string](t.Context(), paths.Root().Child("empty").Path())
+		require.NoError(t, err)
+		assert.Empty(t, got)
+	})
+
+	t.Run("slice", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		got, err := dd.Get[[]string](t.Context(), paths.Root().Child("tags").Path())
+		require.NoError(t, err)
+		assert.Equal(t, []string{"a", "b"}, got)
+	})
+
+	t.Run("struct", func(t *testing.T) {
+		t.Parallel()
+
+		type meta struct {
+			Name string `yaml:"name"`
+		}
+
+		dd := yamltest.FirstDocument(t, input)
+
+		got, err := dd.Get[meta](t.Context(), paths.Root().Child("meta").Path())
+		require.NoError(t, err)
+		assert.Equal(t, meta{Name: "app"}, got)
+	})
+
+	t.Run("missing path returns ErrValueNotFound", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		got, err := dd.Get[string](t.Context(), paths.Root().Child("nonexistent").Path())
+		require.ErrorIs(t, err, niceyaml.ErrValueNotFound)
+		assert.Empty(t, got)
+	})
+
+	t.Run("nil path returns ErrValueNotFound", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		got, err := dd.Get[string](t.Context(), nil)
+		require.ErrorIs(t, err, niceyaml.ErrValueNotFound)
+		assert.Empty(t, got)
+	})
+
+	t.Run("type mismatch returns Error", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		got, err := dd.Get[int](t.Context(), paths.Root().Child("kind").Path())
+		require.Error(t, err)
+
+		var yamlErr *niceyaml.Error
+
+		require.ErrorAs(t, err, &yamlErr)
+		assert.Zero(t, got)
+	})
+}
+
 func TestDocumentDecoder_DecodeInto(t *testing.T) {
 	t.Parallel()
 

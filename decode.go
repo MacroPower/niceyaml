@@ -15,6 +15,10 @@ import (
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
+// ErrValueNotFound indicates that a YAML path did not resolve to a node in
+// the document. [DocumentDecoder.Get] returns it wrapped with the path.
+var ErrValueNotFound = errors.New("value not found")
+
 // SourceDecoder provides access to YAML documents from a [*Source].
 // See [Source] for an implementation.
 type SourceDecoder interface {
@@ -134,8 +138,9 @@ func (d *Decoder) Documents() iter.Seq2[int, *DocumentDecoder] {
 // [SchemaValidator] are validated before decoding, and types implementing
 // [Validator] are validated after. Types may implement both interfaces.
 //
-// Use [DocumentDecoder.GetValue] to inspect values without unmarshaling,
-// which is helpful for routing documents based on a discriminator field.
+// Use [DocumentDecoder.Get] or [DocumentDecoder.GetValue] to inspect values
+// without unmarshaling, which is helpful for routing documents based on a
+// discriminator field.
 //
 // For most use cases, call [DocumentDecoder.Unmarshal] to get the full
 // validation pipeline:
@@ -201,7 +206,48 @@ func (dd *DocumentDecoder) FilePath() string {
 	return dd.filePath
 }
 
-// GetValue extracts a YAML value without unmarshaling.
+// Get decodes the YAML value at path into a T without unmarshaling the whole
+// document.
+//
+// This is useful when you need a typed field before deciding how to process
+// the document, such as a version number or a list of tags:
+//
+//	versionPath := paths.Root().Child("version").Path()
+//	for _, doc := range decoder.Documents() {
+//		version, err := doc.Get[int](ctx, versionPath)
+//		if errors.Is(err, niceyaml.ErrValueNotFound) {
+//			version = 1
+//		} else if err != nil {
+//			return err
+//		}
+//	}
+//
+// Returns [ErrValueNotFound] if path is nil, the document is a directive, or
+// no value exists at the path. YAML decoding errors, including a value that
+// cannot be represented as T, are converted to [Error] with source
+// annotations.
+//
+// For a string view of any node, including mappings and sequences, use
+// [DocumentDecoder.GetValue].
+func (dd *DocumentDecoder) Get[T any](ctx context.Context, path *paths.YAMLPath) (T, error) {
+	var zero T
+
+	node := dd.node(path)
+	if node == nil {
+		return zero, fmt.Errorf("%w: %s", ErrValueNotFound, path)
+	}
+
+	var v T
+
+	err := dd.decodeNode(ctx, node, &v)
+	if err != nil {
+		return zero, err
+	}
+
+	return v, nil
+}
+
+// GetValue extracts a YAML value as a string without unmarshaling.
 //
 // This is useful when you need to inspect document content before deciding how
 // to process it. For example, multi-document files often use a discriminator
@@ -226,17 +272,11 @@ func (dd *DocumentDecoder) FilePath() string {
 //
 // Returns an empty string and false if path is nil, the document is a
 // directive, or no value exists at the path.
+//
+// For a typed value, use [DocumentDecoder.Get].
 func (dd *DocumentDecoder) GetValue(path *paths.YAMLPath) (string, bool) {
-	if path == nil {
-		return "", false
-	}
-
-	if dd.doc.Body != nil && dd.doc.Body.Type() == ast.DirectiveType {
-		return "", false
-	}
-
-	node, err := path.FilterNode(dd.doc.Body)
-	if err != nil || node == nil {
+	node := dd.node(path)
+	if node == nil {
 		return "", false
 	}
 
@@ -252,6 +292,27 @@ func (dd *DocumentDecoder) GetValue(path *paths.YAMLPath) (string, bool) {
 
 	// For non-scalar nodes (mappings, sequences), return YAML representation.
 	return node.String(), true
+}
+
+// node resolves path against the document body.
+//
+// Returns nil if path is nil, the document is a directive, or no node exists
+// at the path.
+func (dd *DocumentDecoder) node(path *paths.YAMLPath) ast.Node {
+	if path == nil {
+		return nil
+	}
+
+	if dd.doc.Body != nil && dd.doc.Body.Type() == ast.DirectiveType {
+		return nil
+	}
+
+	node, err := path.FilterNode(dd.doc.Body)
+	if err != nil || node == nil {
+		return nil
+	}
+
+	return node
 }
 
 // ValidateSchema decodes the document to [any] and validates it using sv.
