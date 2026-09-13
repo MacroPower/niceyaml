@@ -6,7 +6,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.jacobcolvin.com/x/stringtest"
 
-	"go.jacobcolvin.com/niceyaml/internal/filepaths"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
@@ -14,14 +13,14 @@ import (
 func TestAll(t *testing.T) {
 	t.Parallel()
 
-	k8sPattern := filepaths.MustPattern("**/k8s/*.yaml")
+	k8sPattern := matcher.MustFilePath("**/k8s/*.yaml")
 
 	t.Run("all match", func(t *testing.T) {
 		t.Parallel()
 
 		m := matcher.All(
 			matcher.Content(kindPath, "Deployment"),
-			matcher.FilePath(k8sPattern),
+			k8sPattern,
 		)
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`kind: Deployment`), "deploy/k8s/app.yaml")
 
@@ -34,7 +33,7 @@ func TestAll(t *testing.T) {
 
 		m := matcher.All(
 			matcher.Content(kindPath, "Deployment"),
-			matcher.FilePath(k8sPattern),
+			k8sPattern,
 		)
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`kind: Deployment`), "deploy/other/app.yaml")
 
@@ -47,7 +46,7 @@ func TestAll(t *testing.T) {
 
 		m := matcher.All(
 			matcher.Content(kindPath, "Deployment"),
-			matcher.FilePath(k8sPattern),
+			k8sPattern,
 		)
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`kind: Service`), "deploy/k8s/app.yaml")
 
@@ -60,7 +59,7 @@ func TestAll(t *testing.T) {
 
 		m := matcher.All(
 			matcher.Content(kindPath, "Deployment"),
-			matcher.FilePath(k8sPattern),
+			k8sPattern,
 		)
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`kind: Service`), "deploy/other/app.yaml")
 

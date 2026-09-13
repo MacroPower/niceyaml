@@ -37,9 +37,9 @@
 // first (directives), then content-based matching, then file path
 // conventions:
 //
-//	reg.Register(registry.Directive())                           // Explicit user intent.
-//	reg.RegisterFunc(matcher.Content(...), loader.Embedded(...)) // By content.
-//	reg.RegisterFunc(matcher.FilePath(...), loader.File(...))    // By path.
+//	reg.Register(registry.Directive())                            // Explicit user intent.
+//	reg.RegisterFunc(matcher.Content(...), loader.Embedded(...))  // By content.
+//	reg.RegisterFunc(matcher.MustFilePath(...), loader.File(...)) // By path.
 //
 // # Schema Caching
 //
