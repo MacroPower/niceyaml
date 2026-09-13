@@ -3,6 +3,11 @@ version: "3"
 set: [errexit, nounset, pipefail]
 shopt: [globstar]
 
+# Recursive `sources` globs reach into hidden and build directories, so
+# fingerprints exclude whatever .gitignore excludes (.devbox/, .task/, .test/,
+# .tmp/, .worktrees/, dist/).
+use_gitignore: true
+
 # The .taskfiles/ segmentation is intentional, even where a namespace holds
 # only thin Dagger wrappers — do not flatten it into this file.
 includes:
