@@ -1,6 +1,7 @@
 package registry_test
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,11 +21,11 @@ import (
 func TestDirective(t *testing.T) {
 	t.Parallel()
 
-	t.Run("returns MatchLoader implementation", func(t *testing.T) {
+	t.Run("returns Resolver implementation", func(t *testing.T) {
 		t.Parallel()
 
-		ml := registry.Directive()
-		assert.NotNil(t, ml)
+		res := registry.Directive()
+		assert.NotNil(t, res)
 	})
 
 	t.Run("options are passed through", func(t *testing.T) {
@@ -45,18 +46,20 @@ func TestDirective(t *testing.T) {
 		require.NoError(t, err)
 
 		customClient := &http.Client{}
-		ml := registry.Directive(loader.WithHTTPClient(customClient))
+		res := registry.Directive(loader.WithHTTPClient(customClient))
 
 		doc := firstDocumentFromFile(t, yamlPath)
-		result, err := ml.Load(t.Context(), doc)
+		result, err := res.Resolve(t.Context(), doc)
 		require.NoError(t, err)
 		assert.Equal(t, []byte(schemaData), result.Data)
 	})
 }
 
-func TestDirective_Match(t *testing.T) {
+func TestDirective_Resolve_Match(t *testing.T) {
 	t.Parallel()
 
+	// A resolver "matches" when it reports anything other than ErrNoMatch.
+	// Loading the named schema may still fail, which is a match.
 	tests := map[string]struct {
 		setup func(t *testing.T) *niceyaml.DocumentDecoder
 		want  bool
@@ -133,14 +136,20 @@ func TestDirective_Match(t *testing.T) {
 			t.Parallel()
 
 			doc := tt.setup(t)
-			ml := registry.Directive()
-			got := ml.Match(t.Context(), doc)
+			res := registry.Directive()
+			_, err := res.Resolve(t.Context(), doc)
+
+			got := !errors.Is(err, registry.ErrNoMatch)
 			assert.Equal(t, tt.want, got)
+
+			if !tt.want {
+				require.ErrorIs(t, err, registry.ErrNoDirective)
+			}
 		})
 	}
 }
 
-func TestDirective_Load(t *testing.T) {
+func TestDirective_Resolve(t *testing.T) {
 	t.Parallel()
 
 	t.Run("successfully loads schema from file directive", func(t *testing.T) {
@@ -157,8 +166,8 @@ func TestDirective_Load(t *testing.T) {
 		require.NoError(t, err)
 
 		doc := firstDocumentFromFile(t, yamlPath)
-		ml := registry.Directive()
-		result, err := ml.Load(t.Context(), doc)
+		res := registry.Directive()
+		result, err := res.Resolve(t.Context(), doc)
 		require.NoError(t, err)
 		assert.Equal(t, schemaData, result.Data)
 		assert.Equal(t, filepath.Join(tmpDir, "schema.json"), result.URL)
@@ -182,8 +191,8 @@ func TestDirective_Load(t *testing.T) {
 		require.NoError(t, err)
 
 		doc := firstDocumentFromFile(t, yamlPath)
-		ml := registry.Directive()
-		result, err := ml.Load(t.Context(), doc)
+		res := registry.Directive()
+		result, err := res.Resolve(t.Context(), doc)
 		require.NoError(t, err)
 		assert.Equal(t, []byte(schemaData), result.Data)
 		assert.Equal(t, server.URL+"/schema.json", result.URL)
@@ -199,9 +208,10 @@ func TestDirective_Load(t *testing.T) {
 		require.NoError(t, err)
 
 		doc := firstDocumentFromFile(t, yamlPath)
-		ml := registry.Directive()
-		_, err = ml.Load(t.Context(), doc)
+		res := registry.Directive()
+		_, err = res.Resolve(t.Context(), doc)
 		require.ErrorIs(t, err, registry.ErrNoDirective)
+		require.ErrorIs(t, err, registry.ErrNoMatch)
 	})
 
 	t.Run("returns ErrNoDirective when tokens are nil", func(t *testing.T) {
@@ -209,8 +219,8 @@ func TestDirective_Load(t *testing.T) {
 
 		// NewDocumentDecoder creates a decoder without tokens.
 		doc := firstDocumentWithNilTokens(t, stringtest.Input(`kind: Deployment`))
-		ml := registry.Directive()
-		_, err := ml.Load(t.Context(), doc)
+		res := registry.Directive()
+		_, err := res.Resolve(t.Context(), doc)
 		require.ErrorIs(t, err, registry.ErrNoDirective)
 	})
 
@@ -222,9 +232,10 @@ func TestDirective_Load(t *testing.T) {
 			# yaml-language-server: $schema=./schema.json
 			kind: Deployment
 		`))
-		ml := registry.Directive()
-		_, err := ml.Load(t.Context(), doc)
+		res := registry.Directive()
+		_, err := res.Resolve(t.Context(), doc)
 		require.ErrorIs(t, err, registry.ErrNoFilePath)
+		require.NotErrorIs(t, err, registry.ErrNoMatch)
 	})
 
 	t.Run("resolves relative paths against document directory", func(t *testing.T) {
@@ -251,8 +262,8 @@ func TestDirective_Load(t *testing.T) {
 		require.NoError(t, err)
 
 		doc := firstDocumentFromFile(t, yamlPath)
-		ml := registry.Directive()
-		result, err := ml.Load(t.Context(), doc)
+		res := registry.Directive()
+		result, err := res.Resolve(t.Context(), doc)
 		require.NoError(t, err)
 		assert.Equal(t, schemaData, result.Data)
 	})
@@ -267,96 +278,11 @@ func TestDirective_Load(t *testing.T) {
 		require.NoError(t, err)
 
 		doc := firstDocumentFromFile(t, yamlPath)
-		ml := registry.Directive()
-		_, err = ml.Load(t.Context(), doc)
+		res := registry.Directive()
+		_, err = res.Resolve(t.Context(), doc)
 		require.ErrorIs(t, err, os.ErrNotExist)
 		require.ErrorContains(t, err, "read")
 		require.ErrorContains(t, err, "nonexistent.json")
-	})
-}
-
-func TestDirective_CacheInvalidation(t *testing.T) {
-	t.Parallel()
-
-	t.Run("different doc pointers trigger reparse", func(t *testing.T) {
-		t.Parallel()
-
-		schemaData := `{"type": "object"}`
-
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(schemaData))
-		}))
-		defer server.Close()
-
-		// Create two separate files with directives.
-		tmpDir := t.TempDir()
-
-		yaml1Path := filepath.Join(tmpDir, "config1.yaml")
-		yaml1Data := []byte("# yaml-language-server: $schema=" + server.URL + "/schema.json\nkind: Deployment\n")
-		err := os.WriteFile(yaml1Path, yaml1Data, 0o600)
-		require.NoError(t, err)
-
-		yaml2Path := filepath.Join(tmpDir, "config2.yaml")
-		yaml2Data := []byte("# yaml-language-server: $schema=" + server.URL + "/other-schema.json\nkind: Service\n")
-		err = os.WriteFile(yaml2Path, yaml2Data, 0o600)
-		require.NoError(t, err)
-
-		ml := registry.Directive()
-
-		// First document should match.
-		doc1 := firstDocumentFromFile(t, yaml1Path)
-		assert.True(t, ml.Match(t.Context(), doc1))
-
-		result1, err := ml.Load(t.Context(), doc1)
-		require.NoError(t, err)
-		assert.Equal(t, server.URL+"/schema.json", result1.URL)
-
-		// Second document with different pointer should also match and return
-		// different URL (proving cache was invalidated).
-		doc2 := firstDocumentFromFile(t, yaml2Path)
-		assert.True(t, ml.Match(t.Context(), doc2))
-
-		result2, err := ml.Load(t.Context(), doc2)
-		require.NoError(t, err)
-		assert.Equal(t, server.URL+"/other-schema.json", result2.URL)
-
-		// Verify the URLs are different (cache was properly invalidated).
-		assert.NotEqual(t, result1.URL, result2.URL)
-	})
-
-	t.Run("same doc pointer uses cached directive", func(t *testing.T) {
-		t.Parallel()
-
-		schemaData := `{"type": "object"}`
-
-		var fetchCount int
-
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			fetchCount++
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(schemaData))
-		}))
-		defer server.Close()
-
-		tmpDir := t.TempDir()
-		yamlPath := filepath.Join(tmpDir, "config.yaml")
-		yamlData := []byte("# yaml-language-server: $schema=" + server.URL + "/schema.json\nkind: Deployment\n")
-		err := os.WriteFile(yamlPath, yamlData, 0o600)
-		require.NoError(t, err)
-
-		ml := registry.Directive()
-		doc := firstDocumentFromFile(t, yamlPath)
-
-		// Call Match then Load on same doc (simulating Registry behavior).
-		assert.True(t, ml.Match(t.Context(), doc))
-
-		result, err := ml.Load(t.Context(), doc)
-		require.NoError(t, err)
-		assert.Equal(t, server.URL+"/schema.json", result.URL)
-
-		// Only one schema fetch should have occurred (directive was cached).
-		assert.Equal(t, 1, fetchCount)
 	})
 }
 

@@ -25,10 +25,11 @@ var (
 	ErrCompile = errors.New("compile schema")
 )
 
-// Registry maps YAML documents to schemas using pluggable matchers.
+// Registry maps YAML documents to schemas using pluggable resolvers.
 //
-// Registrations are evaluated in order; first match wins. Compiled validators
-// are cached by schema URL to avoid recompilation.
+// Registrations are evaluated in order; the first [Resolver] that does not
+// report [ErrNoMatch] wins. Compiled validators are cached by schema URL to
+// avoid recompilation.
 //
 // Example:
 //
@@ -47,7 +48,7 @@ var (
 // Create instances with [New].
 type Registry struct {
 	cache         map[string]niceyaml.SchemaValidator // compiled validators by schema URL
-	matchLoaders  []MatchLoader
+	resolvers     []Resolver
 	validatorOpts []jsonschema.ValidateOption
 	mu            sync.RWMutex
 }
@@ -78,42 +79,47 @@ func New(opts ...Option) *Registry {
 	return r
 }
 
-// Register adds a [MatchLoader] to the registry.
+// Register adds a [Resolver] to the registry.
 //
-// Registrations are evaluated in order; first match wins.
+// Registrations are evaluated in order; the first resolver that does not
+// report [ErrNoMatch] wins.
 //
-// For stateless [matcher.Matcher] and [loader.Loader] implementations, use
-// [RegisterFunc].
-func (r *Registry) Register(ml MatchLoader) {
-	r.matchLoaders = append(r.matchLoaders, ml)
+// For a separate [matcher.Matcher] and [loader.Loader], use [RegisterFunc].
+func (r *Registry) Register(res Resolver) {
+	r.resolvers = append(r.resolvers, res)
 }
 
 // RegisterFunc adds a [matcher.Matcher] and [loader.Loader] pair to the
-// registry.
+// registry as one [Resolver] that loads through l when m matches.
 //
-// This is a convenience method for registering separate Matcher and Loader
-// implementations. The matcher and loader do not share state; for stateful
-// implementations, implement [MatchLoader] directly and use [Register].
+// This suits matchers and loaders that share no state. A resolver that
+// decides and loads from the same parse implements [Resolver] directly and
+// uses [Register].
 //
 // Registrations are evaluated in order; first match wins.
 func (r *Registry) RegisterFunc(m matcher.Matcher, l loader.Loader) {
-	r.Register(&matchLoaderWrapper{matcher: m, loader: l})
+	r.Register(&pair{matcher: m, loader: l})
 }
 
 // Lookup finds the validator for a document.
 //
-// Returns [ErrNoMatch] if no matcher matches the document. Returns other
+// Returns [ErrNoMatch] if no resolver matches the document. Returns other
 // errors if schema loading or compilation fails.
 //
 // For most use cases, prefer [ValidateDocument] which combines lookup and
 // validation. Use Lookup when you need the validator for custom processing.
 func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.DocumentDecoder) (niceyaml.SchemaValidator, error) {
-	for _, ml := range r.matchLoaders {
-		if !ml.Match(ctx, doc) {
+	for _, res := range r.resolvers {
+		result, err := res.Resolve(ctx, doc)
+		if errors.Is(err, ErrNoMatch) {
 			continue
 		}
 
-		return r.loadValidator(ctx, doc, ml)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrLoad, err)
+		}
+
+		return r.compileValidator(ctx, result)
 	}
 
 	return nil, fmt.Errorf("%w: %q", ErrNoMatch, doc.FilePath())
@@ -145,22 +151,12 @@ func (r *Registry) ValidateDocument(ctx context.Context, doc *niceyaml.DocumentD
 	return doc.ValidateSchema(ctx, v)
 }
 
-// loadValidator loads and compiles a validator, using cache when possible.
+// compileValidator compiles a validator for result, using cache when possible.
 //
 // Under concurrent load, multiple goroutines may compile the same schema before
 // one caches it. This is intentional to avoid lock contention; the overhead of
 // occasional duplicate compilation is acceptable.
-func (r *Registry) loadValidator(
-	ctx context.Context,
-	doc *niceyaml.DocumentDecoder,
-	ml MatchLoader,
-) (niceyaml.SchemaValidator, error) {
-	// Load schema.
-	result, err := ml.Load(ctx, doc)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrLoad, err)
-	}
-
+func (r *Registry) compileValidator(ctx context.Context, result loader.Result) (niceyaml.SchemaValidator, error) {
 	// Check cache.
 	r.mu.RLock()
 

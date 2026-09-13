@@ -13,6 +13,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/filepaths"
 	"go.jacobcolvin.com/niceyaml/schema/loader"
+	"go.jacobcolvin.com/niceyaml/schema/registry"
 )
 
 // Default SchemaStore URLs and timeouts.
@@ -26,8 +27,10 @@ var (
 	// ErrFetchCatalog indicates the SchemaStore catalog could not be fetched.
 	ErrFetchCatalog = errors.New("fetch schema catalog")
 
-	// ErrNoCatalogMatch indicates no catalog entry matches the document's file path.
-	ErrNoCatalogMatch = errors.New("no catalog entry matches")
+	// ErrNoCatalogMatch indicates no catalog entry matches the document's file
+	// path. It wraps [registry.ErrNoMatch], so a [registry.Registry] moves on
+	// to the next resolver.
+	ErrNoCatalogMatch = fmt.Errorf("%w: no catalog entry matches", registry.ErrNoMatch)
 )
 
 // Catalog represents the SchemaStore.org catalog structure returned by
@@ -52,7 +55,7 @@ type CatalogEntry struct {
 // SchemaStore manages the SchemaStore.org catalog with caching.
 //
 // The catalog is fetched during construction and cached for the configured TTL.
-// SchemaStore implements [registry.MatchLoader] and can be registered directly
+// SchemaStore implements [registry.Resolver] and can be registered directly
 // with a [registry.Registry]. Create instances with [New].
 //
 // Example:
@@ -181,27 +184,11 @@ func New(ctx context.Context, opts ...Option) (*SchemaStore, error) {
 	return store, nil
 }
 
-// Match reports whether a document matches a SchemaStore catalog pattern.
+// Resolve fetches the schema for the catalog entry matching the document's
+// file path. A document that matches no entry reports [ErrNoCatalogMatch].
 //
-// Implements [registry.MatchLoader].
-//
-// Note: Match and Load both call [SchemaStore.FindMatch] independently
-// rather than caching the result between calls. This is intentional:
-// FindMatch only does cheap glob matching on already-cached catalog entries,
-// so caching would add complexity (mutex operations, pointer identity
-// contracts) for negligible benefit. The expensive catalog fetch is already
-// cached via ensureCatalog with TTL. This differs from [Directive] which
-// caches because token parsing is more expensive than glob matching.
-func (s *SchemaStore) Match(ctx context.Context, doc *niceyaml.DocumentDecoder) bool {
-	_, ok := s.FindMatch(ctx, doc.FilePath())
-
-	return ok
-}
-
-// Load fetches the schema for a matching document from SchemaStore.
-//
-// Implements [registry.MatchLoader].
-func (s *SchemaStore) Load(ctx context.Context, doc *niceyaml.DocumentDecoder) (loader.Result, error) {
+// Implements [registry.Resolver].
+func (s *SchemaStore) Resolve(ctx context.Context, doc *niceyaml.DocumentDecoder) (loader.Result, error) {
 	entry, ok := s.FindMatch(ctx, doc.FilePath())
 	if !ok {
 		return loader.Result{}, fmt.Errorf("%w: %q", ErrNoCatalogMatch, doc.FilePath())

@@ -606,7 +606,7 @@ func TestSchemaStore_SkipsEntriesWithoutURL(t *testing.T) {
 	assert.Equal(t, "Has URL", entry.Name)
 }
 
-func TestSchemaStore_MatchLoader(t *testing.T) {
+func TestSchemaStore_Resolve(t *testing.T) {
 	t.Parallel()
 
 	schemaData := `{"type": "object"}`
@@ -631,7 +631,8 @@ func TestSchemaStore_MatchLoader(t *testing.T) {
 		require.NoError(t, err)
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`on: push`), ".github/workflows/ci.yaml")
-		assert.True(t, store.Match(t.Context(), doc))
+		_, err = store.Resolve(t.Context(), doc)
+		require.NotErrorIs(t, err, registry.ErrNoMatch)
 	})
 
 	t.Run("no match for unknown file", func(t *testing.T) {
@@ -654,10 +655,11 @@ func TestSchemaStore_MatchLoader(t *testing.T) {
 		require.NoError(t, err)
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "random.yaml")
-		assert.False(t, store.Match(t.Context(), doc))
+		_, err = store.Resolve(t.Context(), doc)
+		require.ErrorIs(t, err, registry.ErrNoMatch)
 	})
 
-	t.Run("loads matching schema after match", func(t *testing.T) {
+	t.Run("loads matching schema", func(t *testing.T) {
 		t.Parallel()
 
 		schemaServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -684,10 +686,7 @@ func TestSchemaStore_MatchLoader(t *testing.T) {
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
 
-		// Match first, then Load.
-		require.True(t, store.Match(t.Context(), doc))
-
-		result, err := store.Load(t.Context(), doc)
+		result, err := store.Resolve(t.Context(), doc)
 		require.NoError(t, err)
 		assert.Equal(t, []byte(schemaData), result.Data)
 		assert.Equal(t, schemaServer.URL+"/schema.json", result.URL)
@@ -714,44 +713,11 @@ func TestSchemaStore_MatchLoader(t *testing.T) {
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
 
-		// Match succeeds but Load fails because schema URL is unreachable.
-		require.True(t, store.Match(t.Context(), doc))
-
-		_, err = store.Load(t.Context(), doc)
+		// The path matches, but the schema URL is unreachable, which is not a
+		// no-match.
+		_, err = store.Resolve(t.Context(), doc)
 		require.ErrorContains(t, err, "fetch https://example.com/schema.json: status 404")
-	})
-
-	t.Run("load without prior match", func(t *testing.T) {
-		t.Parallel()
-
-		schemaServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(schemaData))
-		}))
-		t.Cleanup(schemaServer.Close)
-
-		catalog := schemastore.Catalog{
-			Schemas: []schemastore.CatalogEntry{
-				{
-					Name:      "Test Schema",
-					URL:       schemaServer.URL + "/schema.json",
-					FileMatch: []string{"*.yaml"},
-				},
-			},
-		}
-
-		catalogServer := newCatalogServer(t, catalog)
-		t.Cleanup(catalogServer.Close)
-
-		store, err := schemastore.New(t.Context(), schemastore.WithCatalogURL(catalogServer.URL))
-		require.NoError(t, err)
-
-		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
-
-		// Load can be called without prior Match.
-		result, err := store.Load(t.Context(), doc)
-		require.NoError(t, err)
-		assert.Equal(t, []byte(schemaData), result.Data)
+		require.NotErrorIs(t, err, registry.ErrNoMatch)
 	})
 
 	t.Run("error when no matching schema", func(t *testing.T) {
@@ -776,8 +742,9 @@ func TestSchemaStore_MatchLoader(t *testing.T) {
 		// Document path doesn't match any schema pattern.
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "random.yaml")
 
-		_, err = store.Load(t.Context(), doc)
+		_, err = store.Resolve(t.Context(), doc)
 		require.ErrorIs(t, err, schemastore.ErrNoCatalogMatch)
+		require.ErrorIs(t, err, registry.ErrNoMatch)
 		require.ErrorContains(t, err, "random.yaml")
 	})
 }
