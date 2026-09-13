@@ -291,11 +291,12 @@ func (s *Source) parse() (*ast.File, error) {
 	return nil, err
 }
 
-// WrapError wraps an error with additional context for [*Error] types.
-// It applies any [ErrorOption] values and sets the source to this [*Source].
+// WrapError attaches this [*Source] to the first [*Error] in err's chain and
+// applies any [ErrorOption] values from [WithErrorOptions] to it.
 //
-// If err is nil, WrapError returns nil. If err is not an [*Error],
-// WrapError returns it unchanged without wrapping.
+// WrapError returns err itself, so wrapping context added around the
+// [*Error] with [fmt.Errorf] is preserved. If err is nil, WrapError returns
+// nil. If err's chain holds no [*Error], WrapError returns it unchanged.
 func (s *Source) WrapError(err error) error {
 	if err == nil {
 		return nil
@@ -304,8 +305,6 @@ func (s *Source) WrapError(err error) error {
 	if yamlErr, ok := errors.AsType[*Error](err); ok {
 		yamlErr.SetOption(s.errorOpts...)
 		yamlErr.SetOption(WithSource(s))
-
-		return yamlErr
 	}
 
 	return err

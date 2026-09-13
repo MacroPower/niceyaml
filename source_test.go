@@ -2,6 +2,7 @@ package niceyaml_test
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"unicode/utf8"
 
@@ -1664,6 +1665,19 @@ func TestSource_WrapError(t *testing.T) {
 		wrapped := source.WrapError(nil)
 
 		assert.NoError(t, wrapped)
+	})
+
+	t.Run("keeps context wrapped around the Error", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("key: value\n")
+		yamlErr := niceyaml.NewError("test error")
+		outer := fmt.Errorf("document 3: %w", yamlErr)
+
+		wrapped := source.WrapError(outer)
+
+		assert.Equal(t, outer, wrapped)
+		assert.Contains(t, wrapped.Error(), "document 3: ")
 	})
 
 	t.Run("returns non-Error unchanged", func(t *testing.T) {
