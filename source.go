@@ -262,9 +262,7 @@ func (s *Source) parse() (*ast.File, error) {
 		return file, nil
 	}
 
-	var yamlErr yaml.Error
-
-	if errors.As(err, &yamlErr) {
+	if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
 		return nil, NewError(
 			yamlErr.GetMessage(),
 			WithErrorToken(yamlErr.GetToken()),
@@ -285,9 +283,7 @@ func (s *Source) WrapError(err error) error {
 		return nil
 	}
 
-	var yamlErr *Error
-
-	if errors.As(err, &yamlErr) {
+	if yamlErr, ok := errors.AsType[*Error](err); ok {
 		yamlErr.SetOption(s.errorOpts...)
 		yamlErr.SetOption(WithSource(s))
 

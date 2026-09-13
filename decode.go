@@ -313,9 +313,7 @@ func (dd *DocumentDecoder) decodeNode(ctx context.Context, v any) error {
 	dec := yaml.NewDecoder(bytes.NewReader(nil), dd.decodeOpts...)
 	err := dec.DecodeFromNodeContext(ctx, dd.doc.Body, v)
 	if err != nil {
-		var yamlErr yaml.Error
-
-		if errors.As(err, &yamlErr) {
+		if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
 			return NewError(
 				yamlErr.GetMessage(),
 				WithErrorToken(yamlErr.GetToken()),
