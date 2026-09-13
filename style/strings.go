@@ -77,17 +77,13 @@ func Encode(style lipgloss.Style) string {
 	}
 
 	// Foreground color.
-	if fg := style.GetForeground(); fg != nil {
-		if hex := colorToHex(fg); hex != "" {
-			parts = append(parts, hex)
-		}
+	if hex := colorToHex(style.GetForeground()); hex != "" {
+		parts = append(parts, hex)
 	}
 
 	// Background color.
-	if bg := style.GetBackground(); bg != nil {
-		if hex := colorToHex(bg); hex != "" {
-			parts = append(parts, "bg:"+hex)
-		}
+	if hex := colorToHex(style.GetBackground()); hex != "" {
+		parts = append(parts, "bg:"+hex)
 	}
 
 	return strings.Join(parts, " ")
@@ -166,9 +162,14 @@ func isHexDigit(c rune) bool {
 	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 }
 
-// isColorSet checks if a color is set (not NoColor).
+// isColorSet checks if a color is set (not nil and not NoColor).
 func isColorSet(c color.Color) bool {
+	if c == nil {
+		return false
+	}
+
 	_, isNoColor := c.(lipgloss.NoColor)
+
 	return !isNoColor
 }
 
