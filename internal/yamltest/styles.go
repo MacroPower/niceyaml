@@ -83,8 +83,10 @@ func (x *XMLStyles) Style(s style.Style) *lipgloss.Style {
 		return &x.empty
 	}
 
+	tag := string(s)
+
 	st := lipgloss.NewStyle().Transform(func(content string) string {
-		return "<" + s + ">" + content + "</" + s + ">"
+		return "<" + tag + ">" + content + "</" + tag + ">"
 	})
 
 	return &st

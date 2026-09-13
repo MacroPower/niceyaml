@@ -21,8 +21,9 @@ const (
 // Style identifies a style category for YAML highlighting.
 //
 // Style constants are used as keys in [Styles] maps to associate token
-// categories with [lipgloss.Style] formatting.
-type Style = string
+// categories with [lipgloss.Style] formatting. Custom keys, such as overlay
+// kinds, are conversions of a string: style.Style("mine").
+type Style string
 
 // Style constants for YAML highlighting.
 // Names follow Pygments token naming conventions where applicable.
