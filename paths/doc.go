@@ -34,15 +34,16 @@
 //
 // # Parsing Path Expressions
 //
-// Use [FromString] to parse a path expression string into a [Builder]:
+// Use [Parse] to parse a path expression string into a [*YAMLPath], and
+// [NewPath] to pair it with the [Part] to target:
 //
-//	b, err := paths.FromString("$.metadata.name")
-//	keyPath := b.Key()    // targets the key
-//	valPath := b.Value()  // targets the value
+//	yp, err := paths.Parse("$.metadata.name")
+//	keyPath := paths.NewPath(yp, paths.PartKey)     // targets the key
+//	valPath := paths.NewPath(yp, paths.PartValue)   // targets the value
 //
-// [MustFromString] panics on invalid input, useful for compile-time constants:
+// [MustParse] panics on invalid input, useful for compile-time constants:
 //
-//	path := paths.MustFromString("$.items[0].name").Value()
+//	path := paths.NewPath(paths.MustParse("$.items[0].name"), paths.PartValue)
 //
 // # Building Paths
 //

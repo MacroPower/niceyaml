@@ -198,17 +198,7 @@ func TestPathBuilder_Immutable(t *testing.T) {
 	})
 }
 
-func TestFromString_ExtendPanics(t *testing.T) {
-	t.Parallel()
-
-	b := paths.MustFromString("$.metadata")
-
-	assert.Panics(t, func() {
-		b.Child("name")
-	})
-}
-
-func TestFromString(t *testing.T) {
+func TestParse(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -245,43 +235,25 @@ func TestFromString(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			b, err := paths.FromString(tc.expr)
+			yp, err := paths.Parse(tc.expr)
 
 			require.NoError(t, err)
-			require.NotNil(t, b)
+			require.NotNil(t, yp)
+			assert.Equal(t, tc.want, yp.String())
 
-			// Finalize as Value and verify.
-			valPath := b.Value()
+			valPath := paths.NewPath(yp, paths.PartValue)
 			assert.Equal(t, tc.want+".(value)", valPath.String())
 			assert.Equal(t, paths.PartValue, valPath.Part())
-			assert.NotNil(t, valPath.Path())
+			assert.Same(t, yp, valPath.Path())
+
+			keyPath := paths.NewPath(yp, paths.PartKey)
+			assert.Equal(t, tc.want+".(key)", keyPath.String())
+			assert.Equal(t, paths.PartKey, keyPath.Part())
 		})
 	}
-
-	t.Run("finalize as key", func(t *testing.T) {
-		t.Parallel()
-
-		b, err := paths.FromString("$.metadata.name")
-		require.NoError(t, err)
-
-		keyPath := b.Key()
-		assert.Equal(t, "$.metadata.name.(key)", keyPath.String())
-		assert.Equal(t, paths.PartKey, keyPath.Part())
-	})
-
-	t.Run("finalize as raw path", func(t *testing.T) {
-		t.Parallel()
-
-		b, err := paths.FromString("$.metadata.name")
-		require.NoError(t, err)
-
-		yp := b.Path()
-		require.NotNil(t, yp)
-		assert.Equal(t, "$.metadata.name", yp.String())
-	})
 }
 
-func TestFromString_Invalid(t *testing.T) {
+func TestParse_Invalid(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -305,42 +277,31 @@ func TestFromString_Invalid(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			b, err := paths.FromString(tc.expr)
+			yp, err := paths.Parse(tc.expr)
 
 			require.Error(t, err)
-			assert.Nil(t, b)
+			assert.Nil(t, yp)
 			assert.Contains(t, err.Error(), "parse path")
 		})
 	}
 }
 
-func TestMustFromString(t *testing.T) {
+func TestMustParse(t *testing.T) {
 	t.Parallel()
 
-	t.Run("valid expression returns builder", func(t *testing.T) {
+	t.Run("valid expression returns path", func(t *testing.T) {
 		t.Parallel()
 
-		b := paths.MustFromString("$.foo.bar")
-		require.NotNil(t, b)
-
-		path := b.Value()
-		assert.Equal(t, "$.foo.bar.(value)", path.String())
-		assert.Equal(t, paths.PartValue, path.Part())
-	})
-
-	t.Run("can finalize as key", func(t *testing.T) {
-		t.Parallel()
-
-		path := paths.MustFromString("$.foo.bar").Key()
-		assert.Equal(t, "$.foo.bar.(key)", path.String())
-		assert.Equal(t, paths.PartKey, path.Part())
+		yp := paths.MustParse("$.foo.bar")
+		require.NotNil(t, yp)
+		assert.Equal(t, "$.foo.bar", yp.String())
 	})
 
 	t.Run("panics on invalid expression", func(t *testing.T) {
 		t.Parallel()
 
 		assert.Panics(t, func() {
-			paths.MustFromString("not a valid path")
+			paths.MustParse("not a valid path")
 		})
 	})
 }

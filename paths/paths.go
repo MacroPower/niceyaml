@@ -45,10 +45,12 @@ const (
 //   - [Builder.Key] returns a [*Path] targeting [PartKey].
 //   - [Builder.Value] returns a [*Path] targeting [PartValue].
 //
-// Create instances with [Root], [FromString], or [MustFromString].
+// To start from a path expression string instead, parse it with [Parse] and
+// pass the result to [NewPath].
+//
+// Create instances with [Root].
 type Builder struct {
-	built *YAMLPath // Set by FromString; bypasses ops.
-	ops   []func(*yaml.PathBuilder) *yaml.PathBuilder
+	ops []func(*yaml.PathBuilder) *yaml.PathBuilder
 }
 
 // Root creates a new [Builder] starting at the root path ($).
@@ -57,14 +59,7 @@ func Root() *Builder {
 }
 
 // extend returns a new [Builder] with the receiver's selectors plus ops.
-//
-// Panics if the receiver was created by [FromString], since a parsed
-// [*YAMLPath] cannot be extended with additional selectors.
 func (b *Builder) extend(ops ...func(*yaml.PathBuilder) *yaml.PathBuilder) *Builder {
-	if b.built != nil {
-		panic("paths: cannot extend a Builder created by FromString")
-	}
-
 	merged := make([]func(*yaml.PathBuilder) *yaml.PathBuilder, 0, len(b.ops)+len(ops))
 	merged = append(merged, b.ops...)
 	merged = append(merged, ops...)
@@ -110,12 +105,8 @@ func (b *Builder) Recursive(selector string) *Builder {
 	})
 }
 
-// build returns the underlying [*YAMLPath], using the pre-built path if set.
+// build returns the [*YAMLPath] the selectors describe.
 func (b *Builder) build() *YAMLPath {
-	if b.built != nil {
-		return b.built
-	}
-
 	pb := (&yaml.PathBuilder{}).Root()
 	for _, op := range b.ops {
 		pb = op(pb)
@@ -134,62 +125,61 @@ func (b *Builder) Path() *YAMLPath {
 
 // Key finalizes the builder targeting [PartKey] and returns a [*Path].
 func (b *Builder) Key() *Path {
-	return &Path{
-		path:   b.build(),
-		target: PartKey,
-	}
+	return NewPath(b.build(), PartKey)
 }
 
 // Value finalizes the builder targeting [PartValue] and returns a [*Path].
 func (b *Builder) Value() *Path {
-	return &Path{
-		path:   b.build(),
-		target: PartValue,
-	}
+	return NewPath(b.build(), PartValue)
 }
 
-// FromString parses a YAML path expression (e.g., "$.foo.bar") into a [*Builder].
+// Parse parses a YAML path expression (e.g., "$.foo.bar") into a
+// [*YAMLPath].
 //
-// The returned builder can be finalized with [Builder.Key] or [Builder.Value]
-// to select the target part:
+// Pair the result with a [Part] through [NewPath] to use it where a [*Path]
+// is expected:
 //
-//	path, err := paths.FromString("$.metadata.name")
+//	yp, err := paths.Parse("$.metadata.name")
 //	if err != nil {
 //		return err
 //	}
-//	keyPath := path.Key()   // targets the key
-//	valPath := path.Value() // targets the value
-//
-// The returned builder holds an already-parsed path and cannot be extended
-// with selector methods like [Builder.Child]; those methods panic.
-func FromString(expr string) (*Builder, error) {
+//	keyPath := paths.NewPath(yp, paths.PartKey)
+func Parse(expr string) (*YAMLPath, error) {
 	yp, err := yaml.PathString(expr)
 	if err != nil {
 		return nil, fmt.Errorf("parse path %q: %w", expr, err)
 	}
 
-	return &Builder{built: yp}, nil
+	return yp, nil
 }
 
-// MustFromString is like [FromString] but panics if the expression is invalid.
+// MustParse is like [Parse] but panics if the expression is invalid.
 //
 // Use for path expressions that are known to be valid at compile time.
-func MustFromString(expr string) *Builder {
-	b, err := FromString(expr)
+func MustParse(expr string) *YAMLPath {
+	yp, err := Parse(expr)
 	if err != nil {
 		panic(err)
 	}
 
-	return b
+	return yp
 }
 
 // Path represents a location in a YAML document, combining a [*YAMLPath] with a
 // target [Part] (key or value).
 //
-// Create instances with [Builder.Key] or [Builder.Value].
+// Create instances with [NewPath], [Builder.Key], or [Builder.Value].
 type Path struct {
 	path   *YAMLPath
 	target Part
+}
+
+// NewPath creates a new [*Path] that targets part of the mapping entry at p.
+func NewPath(p *YAMLPath, part Part) *Path {
+	return &Path{
+		path:   p,
+		target: part,
+	}
 }
 
 // Path returns the underlying [*YAMLPath].
