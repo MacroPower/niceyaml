@@ -9,6 +9,8 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/line"
+	"go.jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/style"
 )
 
 var (
@@ -361,7 +363,6 @@ func TestDiffer_Full(t *testing.T) {
 
 			got := differ.Unified()
 
-			assert.Equal(t, "a..b", got.Name())
 			assert.Equal(t, "a..b", differ.Name())
 			assert.Equal(t, tc.want, got.String())
 		})
@@ -446,7 +447,7 @@ func TestDiffer_Full_Flags(t *testing.T) {
 			assert.Equal(t, tc.wantFlaggedCount, flaggedCount)
 
 			for lineIdx, wantFlag := range tc.wantFlags {
-				assert.Equal(t, wantFlag, got.Line(lineIdx).Flag)
+				assert.Equal(t, wantFlag, got[lineIdx].Flag)
 			}
 		})
 	}
@@ -562,7 +563,6 @@ func TestDiffer_Hunks(t *testing.T) {
 			differ := niceyaml.Diff(revA, revB)
 			got, ranges := differ.Hunks(tc.context)
 
-			assert.Equal(t, "a..b", got.Name())
 			assert.Len(t, ranges, tc.wantRanges)
 
 			if tc.wantEmpty {
@@ -573,12 +573,12 @@ func TestDiffer_Hunks(t *testing.T) {
 			}
 
 			for lineIdx, wantFlag := range tc.flags {
-				assert.Equal(t, wantFlag, got.Line(lineIdx).Flag, "flag mismatch at line %d", lineIdx)
+				assert.Equal(t, wantFlag, got[lineIdx].Flag, "flag mismatch at line %d", lineIdx)
 			}
 
 			if tc.annotations != nil {
 				for lineIdx, wantAnnotation := range tc.annotations {
-					anns := got.Line(lineIdx).Annotations
+					anns := got[lineIdx].Annotations
 					require.NotEmpty(t, anns, "expected annotation at line %d", lineIdx)
 					assert.Equal(t, wantAnnotation, anns[0].Content)
 				}
@@ -1005,10 +1005,9 @@ func TestDiffer_MultipleRenders(t *testing.T) {
 	summary1, ranges1 := differ.Hunks(1)
 	summary2, ranges2 := differ.Hunks(2)
 
-	// All summaries should have the same name.
-	assert.Equal(t, "a..b", summary0.Name())
-	assert.Equal(t, "a..b", summary1.Name())
-	assert.Equal(t, "a..b", summary2.Name())
+	// All summaries cover the full diff; only the spans differ.
+	assert.Equal(t, summary0.Len(), summary1.Len())
+	assert.Equal(t, summary1.Len(), summary2.Len())
 
 	// All should have 1 hunk.
 	assert.Len(t, ranges0, 1)
@@ -1018,4 +1017,54 @@ func TestDiffer_MultipleRenders(t *testing.T) {
 	// Different contexts should produce different hunk sizes.
 	assert.Less(t, ranges0[0].Len(), ranges1[0].Len())
 	assert.Less(t, ranges1[0].Len(), ranges2[0].Len())
+}
+
+func TestDiffResult_ViewsAreIndependent(t *testing.T) {
+	t.Parallel()
+
+	before := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("a"))
+	after := niceyaml.NewSourceFromString("a: 1\nb: 3\n", niceyaml.WithName("b"))
+	result := niceyaml.Diff(before, after)
+
+	highlight := position.NewRange(position.New(0, 0), position.New(0, 1))
+
+	t.Run("Unified", func(t *testing.T) {
+		t.Parallel()
+
+		first := result.Unified()
+		first.AddOverlay(style.GenericHighlight, highlight)
+
+		second := result.Unified()
+		assert.Empty(t, second[0].Overlays)
+	})
+
+	t.Run("Before and After", func(t *testing.T) {
+		t.Parallel()
+
+		left := result.Before()
+		right := result.After()
+
+		left.AddOverlay(style.GenericHighlight, highlight)
+
+		assert.Empty(t, right[0].Overlays)
+		assert.Empty(t, result.Before()[0].Overlays)
+	})
+
+	t.Run("Hunks without changes", func(t *testing.T) {
+		t.Parallel()
+
+		lines, spans := niceyaml.Diff(before, before).Hunks(1)
+
+		assert.Nil(t, lines)
+		assert.Nil(t, spans)
+	})
+
+	t.Run("inputs are untouched", func(t *testing.T) {
+		t.Parallel()
+
+		result.Unified().AddOverlay(style.GenericHighlight, highlight)
+
+		assert.Empty(t, before.Line(0).Overlays)
+		assert.Empty(t, after.Line(0).Overlays)
+	})
 }

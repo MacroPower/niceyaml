@@ -1677,3 +1677,63 @@ func TestSource_WrapError(t *testing.T) {
 		assert.Equal(t, stdErr, wrapped)
 	})
 }
+
+// A [line.Lines] view satisfies the same iterator contract as a [*niceyaml.Source].
+var _ niceyaml.LineIterator = line.Lines(nil)
+
+func TestSource_Lines_SharedView(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("key: value\n")
+	view := source.Lines()
+
+	// Overlays added through the Source are visible through the view.
+	source.AddOverlay(style.GenericHighlight, position.NewRange(
+		position.New(0, 0),
+		position.New(0, 3),
+	))
+	require.Len(t, view[0].Overlays, 1)
+
+	// And overlays added through the view are visible through the Source.
+	view.AddOverlay(style.GenericError, position.NewRange(
+		position.New(0, 5),
+		position.New(0, 10),
+	))
+	require.Len(t, source.Line(0).Overlays, 2)
+
+	// A clone is detached from both.
+	clone := view.Clone()
+
+	source.ClearOverlays()
+	assert.Empty(t, view[0].Overlays)
+	assert.Len(t, clone[0].Overlays, 2)
+}
+
+func TestSource_AddOverlay_WhileIterating(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("key: value\n")
+
+	// Highlighting from inside an iteration must not block.
+	for pos, r := range source.AllRunes() {
+		if r == 'v' {
+			source.AddOverlay(style.GenericHighlight, position.NewRange(
+				pos,
+				position.New(pos.Line, pos.Col+1),
+			))
+		}
+	}
+
+	for _, ln := range source.AllLines() {
+		if ln.Content() == "key: value" {
+			source.AddOverlay(style.GenericError, position.NewRange(
+				position.New(0, 0),
+				position.New(0, 3),
+			))
+		}
+	}
+
+	require.Len(t, source.Line(0).Overlays, 2)
+	assert.Equal(t, position.NewSpan(5, 6), source.Line(0).Overlays[0].Cols)
+	assert.Equal(t, position.NewSpan(0, 3), source.Line(0).Overlays[1].Cols)
+}

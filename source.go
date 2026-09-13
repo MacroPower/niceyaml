@@ -18,16 +18,10 @@ import (
 	"go.jacobcolvin.com/niceyaml/style"
 )
 
-// LineGetter provides direct access to lines as a slice.
-// See [Source] for an implementation.
-type LineGetter interface {
-	Lines() line.Lines
-	Len() int
-	IsEmpty() bool
-}
-
 // LineIterator provides line-by-line access to YAML tokens.
-// See [Source] for an implementation.
+//
+// [line.Lines] implements it directly, and [Source] implements it by
+// delegating to its view.
 type LineIterator interface {
 	AllLines(spans ...position.Span) iter.Seq2[position.Position, line.Line]
 	AllRunes(ranges ...position.Range) iter.Seq2[position.Position, rune]
@@ -35,32 +29,37 @@ type LineIterator interface {
 	IsEmpty() bool
 }
 
-// Source is the central type for parsing, displaying, and annotating YAML.
-// It organizes YAML tokens into lines, enabling precise position tracking
-// and styled rendering through [Printer].
+// Source is a YAML document. It holds the tokens the document was lexed from,
+// the [*ast.File] they parse into, and the settings for parsing, decoding, and
+// reporting errors.
 //
-// Typical use involves creating a Source, then passing it to utilities like
-// [Printer] for rendering or [Finder] for searching:
+// Source separates two concerns. Parsing and decoding live on Source itself,
+// where [Source.File] lazily parses the AST, [Source.Decoder] iterates the
+// documents, and [Source.WrapError] attaches source context to errors.
+// Rendering lives in a [line.Lines] view, available from [Source.Lines], which
+// organizes the tokens into lines and carries the overlays, annotations, and
+// flags that [Printer] renders. Utilities that only render or search, such as
+// [Printer], [Finder], and [Differ], accept either a Source or a view.
+//
+// Typical use creates a Source and passes it straight to a [Printer]:
 //
 //	source := NewSourceFromString(yamlContent)
 //	printer := NewPrinter(WithStyles(theme.Charm()))
 //	fmt.Println(printer.Print(source))
 //
-// The token-based line structure enables features that would be difficult
-// with string-based approaches: partial rendering of specific line ranges,
-// accurate diff computation between YAML revisions, and search highlighting
-// that respects token boundaries.
+// The view methods on Source ([Source.AddOverlay], [Source.AllLines], and the
+// position queries) delegate to the same [line.Lines] value that
+// [Source.Lines] returns, so highlighting through either path renders
+// identically. Callers that need an independent copy, for instance to
+// highlight the same document two different ways, clone the view with
+// [line.Lines.Clone].
 //
-// For structured access to the YAML content, use the [Source.File] method,
-// which lazily parses the AST. Any parsing errors can be wrapped with source
-// context using [Source.WrapError] for user-friendly error messages.
+// A Source is not safe for concurrent mutation. Add overlays from one
+// goroutine at a time, and do not add them while another goroutine renders.
+// Parsing through [Source.File] is safe to call concurrently.
 //
-// Overlay operations (for highlighting search results or diagnostics) are
-// thread-safe; a Source can be highlighted from multiple goroutines while
-// being rendered.
-//
-// Create instances with [NewSourceFromFile], [NewSourceFromString],
-// [NewSourceFromToken], or [NewSourceFromTokens].
+// Create instances with [NewSourceFromFile], [NewSourceFromBytes],
+// [NewSourceFromString], [NewSourceFromToken], or [NewSourceFromTokens].
 type Source struct {
 	name       string
 	filePath   string
@@ -71,7 +70,6 @@ type Source struct {
 	decodeOpts []yaml.DecodeOption
 	errorOpts  []ErrorOption
 	fileOnce   sync.Once
-	overlayMu  sync.RWMutex
 }
 
 // SourceOption configures [Source] creation.
@@ -174,8 +172,14 @@ func NewSourceFromString(src string, opts ...SourceOption) *Source {
 // NewSourceFromToken creates a new [*Source] from a seed [*token.Token].
 // It collects all [token.Tokens] by walking the token chain from start to end.
 func NewSourceFromToken(tk *token.Token, opts ...SourceOption) *Source {
+	return NewSourceFromTokens(tokenChain(tk), opts...)
+}
+
+// tokenChain collects every token linked to tk, from the first to the last.
+// Returns nil if tk is nil.
+func tokenChain(tk *token.Token) token.Tokens {
 	if tk == nil {
-		return &Source{}
+		return nil
 	}
 
 	// Walk to initial token.
@@ -183,7 +187,7 @@ func NewSourceFromToken(tk *token.Token, opts ...SourceOption) *Source {
 		tk = tk.Prev
 	}
 
-	// Collect all tokens forward, filtering parser-only tokens.
+	// Collect all tokens forward.
 	var tks token.Tokens
 
 	for ; tk != nil; tk = tk.Next {
@@ -193,7 +197,7 @@ func NewSourceFromToken(tk *token.Token, opts ...SourceOption) *Source {
 		tks = append(tks, tk)
 	}
 
-	return NewSourceFromTokens(tks, opts...)
+	return tks
 }
 
 // NewSourceFromTokens creates a new [*Source] from [token.Tokens].
@@ -293,112 +297,41 @@ func (s *Source) WrapError(err error) error {
 	return err
 }
 
+// Lines returns the [line.Lines] view of the [Source].
+//
+// Lines returns the shared view rather than a copy, so overlays and
+// annotations added to it are visible through every other view method on the
+// Source. Use [line.Lines.Clone] for an independent copy.
+func (s *Source) Lines() line.Lines {
+	return s.lines
+}
+
 // Len returns the number of lines.
 func (s *Source) Len() int {
-	return len(s.lines)
+	return s.lines.Len()
 }
 
 // IsEmpty reports whether there are no lines.
 func (s *Source) IsEmpty() bool {
-	return len(s.lines) == 0
+	return s.lines.IsEmpty()
 }
 
 // AllLines returns an iterator over lines within the given spans.
-//
-// If no spans are provided, all lines are iterated. Each iteration yields a
-// [position.Position] and the [line.Line] at that position.
+// See [line.Lines.AllLines].
 func (s *Source) AllLines(spans ...position.Span) iter.Seq2[position.Position, line.Line] {
-	return func(yield func(position.Position, line.Line) bool) {
-		s.overlayMu.RLock()
-		defer s.overlayMu.RUnlock()
-
-		// No spans = all lines (backwards compatible).
-		if len(spans) == 0 {
-			for i, ln := range s.lines {
-				if !yield(position.New(i, 0), ln) {
-					return
-				}
-			}
-
-			return
-		}
-
-		// Iterate only lines within provided spans.
-		for _, span := range spans {
-			start := max(0, span.Start)
-			end := min(len(s.lines), span.End)
-
-			for i := start; i < end; i++ {
-				if !yield(position.New(i, 0), s.lines[i]) {
-					return
-				}
-			}
-		}
-	}
+	return s.lines.AllLines(spans...)
 }
 
 // AllRunes returns an iterator over runes within the given ranges.
-// If no ranges are provided, all runes are iterated.
-// Each iteration yields a [position.Position] and the rune at that position.
+// See [line.Lines.AllRunes].
 func (s *Source) AllRunes(ranges ...position.Range) iter.Seq2[position.Position, rune] {
-	return func(yield func(position.Position, rune) bool) {
-		s.overlayMu.RLock()
-		defer s.overlayMu.RUnlock()
-
-		// No ranges = all runes (backwards compatible).
-		if len(ranges) == 0 {
-			for i, ln := range s.lines {
-				col := 0
-
-				for _, tk := range ln.Tokens() {
-					for _, r := range tk.Origin {
-						if !yield(position.New(i, col), r) {
-							return
-						}
-
-						col++
-					}
-				}
-			}
-
-			return
-		}
-
-		// Iterate only runes within provided ranges.
-		for _, rng := range ranges {
-			startLine := max(0, rng.Start.Line)
-			endLine := min(len(s.lines)-1, rng.End.Line)
-
-			for i := startLine; i <= endLine; i++ {
-				col := 0
-
-				for _, tk := range s.lines[i].Tokens() {
-					for _, r := range tk.Origin {
-						pos := position.New(i, col)
-						if rng.Contains(pos) {
-							if !yield(pos, r) {
-								return
-							}
-						}
-
-						col++
-					}
-				}
-			}
-		}
-	}
+	return s.lines.AllRunes(ranges...)
 }
 
 // Line returns the [*line.Line] at the given index.
 // Panics if idx is out of range.
 func (s *Source) Line(idx int) *line.Line {
 	return &s.lines[idx]
-}
-
-// Lines returns all [line.Lines] in the [Source].
-// This returns the internal slice for efficiency; callers should not modify it.
-func (s *Source) Lines() line.Lines {
-	return s.lines
 }
 
 // Content returns the combined content of all [line.Line]s as a string.
@@ -456,8 +389,7 @@ func (s *Source) TokenPositionRanges(positions ...position.Position) []position.
 //
 // Returns nil if the token is nil or not found in the [Source].
 func (s *Source) ContentPositionRangesFromToken(tk *token.Token) []position.Range {
-	positions := s.lines.TokenPositions(tk)
-	return s.ContentPositionRanges(positions...)
+	return s.lines.ContentPositionRangesFromToken(tk)
 }
 
 // ContentPositionRanges returns all position ranges for content at the given
@@ -467,42 +399,21 @@ func (s *Source) ContentPositionRangesFromToken(tk *token.Token) []position.Rang
 //
 // Returns nil if no content exists at any of the given positions.
 func (s *Source) ContentPositionRanges(positions ...position.Position) []position.Range {
-	var allRanges position.Ranges
-
-	for _, pos := range positions {
-		ranges := s.lines.ContentPositionRangesAt(pos)
-		allRanges = append(allRanges, ranges...)
-	}
-
-	return allRanges.UniqueValues()
+	return s.lines.ContentPositionRanges(positions...)
 }
 
 // AddOverlay adds an overlay of the given kind to the specified ranges.
-// Multi-line ranges are split into per-line overlays automatically.
+// See [line.Lines.AddOverlay].
 func (s *Source) AddOverlay(kind style.Style, ranges ...position.Range) {
-	s.overlayMu.Lock()
-	defer s.overlayMu.Unlock()
-
 	s.lines.AddOverlay(kind, ranges...)
 }
 
 // ClearOverlays removes all overlays from all lines.
 func (s *Source) ClearOverlays() {
-	s.overlayMu.Lock()
-	defer s.overlayMu.Unlock()
-
 	s.lines.ClearOverlays()
 }
 
 // Width returns the maximum line width across all lines.
 func (s *Source) Width() int {
-	var maxWidth int
-
-	for _, l := range s.lines {
-		if w := l.Width(); w > maxWidth {
-			maxWidth = w
-		}
-	}
-
-	return maxWidth
+	return s.lines.Width()
 }

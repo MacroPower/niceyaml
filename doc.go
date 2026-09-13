@@ -29,18 +29,25 @@
 //
 // # Architecture
 //
-// The package centers on [Source], which organizes YAML tokens from go-yaml
-// into [line.Lines].
+// The package separates a YAML document from its rendering.
 //
-// Each line tracks its tokens plus optional metadata: annotations (error
-// messages, diff headers), flags (inserted/deleted), and overlays (style spans
-// for highlighting).
+// [Source] is the document. It owns the tokens from go-yaml, lazily parses
+// them into an AST with [Source.File], iterates documents with
+// [Source.Decoder], and attaches source context to errors with
+// [Source.WrapError].
 //
-// This line-oriented structure enables efficient rendering and precise position
-// tracking.
+// [line.Lines] is the view. It organizes tokens into lines, and each line
+// carries optional metadata for rendering. Annotations hold error messages
+// and diff headers, flags mark inserted and deleted lines, and overlays apply
+// style spans for highlighting. A Source exposes its view through
+// [Source.Lines] and delegates the view methods, so highlighting through
+// either path renders identically.
 //
-// [Printer] renders any [LineIterator] (including [*Source]) with syntax
-// highlighting via lipgloss.
+// A view need not be a YAML document. Diffs, for example, interleave lines
+// from two revisions and are plain [line.Lines] values.
+//
+// [Printer] renders any [LineIterator], which both [*Source] and [line.Lines]
+// satisfy, with syntax highlighting via lipgloss.
 //
 // It supports customizable gutters (line numbers, diff markers), word wrapping,
 // and annotation rendering.
@@ -108,8 +115,8 @@
 //	result := niceyaml.Diff(original, modified)
 //	printer := niceyaml.NewPrinter()
 //	fmt.Println(printer.Print(result.Unified()))
-//	source, spans := result.Hunks(3)
-//	fmt.Println(printer.Print(source, spans...))
+//	lines, spans := result.Hunks(3)
+//	fmt.Println(printer.Print(lines, spans...))
 //
 // [Revision] chains document versions in a doubly-linked list, useful for
 // tracking history across many versions. Any two revisions can be diffed:
@@ -122,13 +129,14 @@
 //	differ := niceyaml.NewDiffer(niceyaml.WithAlgorithm(myAlgo))
 //	result := differ.Diff(before, after)
 //
-// The diff output uses [line.Flag] to mark inserted/deleted lines and
-// [line.Annotation] for unified diff hunk headers.
+// Diff output is a [line.Lines] view rather than a [Source], since the
+// interleaved lines do not form a YAML document. It uses [line.Flag] to mark
+// inserted/deleted lines and [line.Annotation] for unified diff hunk headers.
 //
 // # Text Search
 //
 // [Finder] locates strings within tokens, returning [position.Range] values
-// suitable for [Source.AddOverlay].
+// suitable for [Source.AddOverlay] or [line.Lines.AddOverlay].
 //
 // Use [normalizer.New] with [WithNormalizer] for case-insensitive,
 // diacritic-insensitive matching:

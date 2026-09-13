@@ -89,7 +89,7 @@ func (d *Differ) Diff(a, b SourceGetter) *DiffResult {
 }
 
 // computeOps computes line operations using the configured algorithm.
-func (d *Differ) computeOps(before, after LineGetter) []lineOp {
+func (d *Differ) computeOps(before, after *Source) []lineOp {
 	beforeLines := before.Lines()
 	afterLines := after.Lines()
 
@@ -129,10 +129,12 @@ func (d *Differ) computeOps(before, after LineGetter) []lineOp {
 
 // DiffResult holds computed diff operations for rendering.
 //
-// Rendering methods:
+// Rendering methods each return a fresh [line.Lines] view that [Printer]
+// accepts directly. A diff is not a YAML document, so the views carry no
+// parsing or decoding behavior:
 //   - [DiffResult.Unified] returns all lines in unified diff format.
 //   - [DiffResult.Hunks] returns only changed lines with context.
-//   - [DiffResult.Before] and [DiffResult.After] return aligned iterators
+//   - [DiffResult.Before] and [DiffResult.After] return aligned views
 //     for side-by-side rendering.
 //
 // Create instances with [Differ.Diff] or [Diff].
@@ -152,42 +154,42 @@ type alignedRow struct {
 	after  line.Line
 }
 
-// Unified returns a [*Source] representing the complete diff.
+// Unified returns a [line.Lines] view of the complete diff.
 //
-// The returned [Source] contains merged tokens from both revisions: unchanged
-// lines use tokens from the second source, while changed lines include deleted
-// tokens from the first source followed by inserted tokens from the second.
+// The view interleaves lines from both revisions. Unchanged lines come from
+// the second source, and changed lines include deleted lines from the first
+// source followed by inserted lines from the second. Each line carries a
+// [line.Flag] marking it as deleted, inserted, or unchanged.
 //
-// [Source] contains flags for deleted/inserted lines.
-func (r *DiffResult) Unified() *Source {
-	return &Source{
-		name:  r.name,
-		lines: lineOps(r.ops).toLines(),
-	}
+// Each call returns an independent copy, so overlays added to one result do
+// not affect another.
+func (r *DiffResult) Unified() line.Lines {
+	return lineOps(r.ops).toLines()
 }
 
-// Hunks returns a [*Source] and line spans for rendering a summarized diff.
-// The context parameter specifies the number of unchanged lines to show around
-// each change. A context of 0 shows only the changed lines.
-// Negative values are treated as 0.
+// Hunks returns a [line.Lines] view and the line spans that make up a
+// summarized diff. The context parameter specifies the number of unchanged
+// lines to show around each change. A context of 0 shows only the changed
+// lines, and Hunks treats negative values as 0.
 //
-// The source contains all diff lines with flags for deleted/inserted lines.
-// Hunk headers are stored in [line.Annotation.Content] for each hunk's first line.
+// The view contains all diff lines with flags for deleted/inserted lines.
+// The first line of each hunk carries a [line.Above] annotation holding the
+// unified hunk header. Returns nil and nil when the diff has no changes.
 //
 // Pass both to [Printer.Print] to render the hunks:
 //
-//	printer.Print(source, spans...)
-func (r *DiffResult) Hunks(context int) (*Source, position.Spans) {
+//	printer.Print(lines, spans...)
+func (r *DiffResult) Hunks(context int) (line.Lines, position.Spans) {
 	context = max(0, context)
 
 	if len(r.ops) == 0 {
-		return &Source{name: r.name}, nil
+		return nil, nil
 	}
 
 	hunkSpans := selectHunkSpans(r.ops, context)
 
 	if len(hunkSpans) == 0 {
-		return &Source{name: r.name}, nil
+		return nil, nil
 	}
 
 	lines := lineOps(r.ops).toLines()
@@ -201,7 +203,7 @@ func (r *DiffResult) Hunks(context int) (*Source, position.Spans) {
 		})
 	}
 
-	return &Source{name: r.name, lines: lines}, hunkSpans
+	return lines, hunkSpans
 }
 
 // Stats returns the number of added and removed lines in the diff.
@@ -238,7 +240,7 @@ func (r *DiffResult) getAlignedRows() []alignedRow {
 
 			switch op.kind {
 			case diff.OpEqual:
-				// Equal lines appear on both sides (same instance, not copied).
+				// Equal lines appear on both sides. Before and After clone per call.
 				ln := op.line.Clone()
 				ln.Flag = line.FlagDefault
 				rows = append(rows, alignedRow{
@@ -300,51 +302,52 @@ func (r *DiffResult) getAlignedRows() []alignedRow {
 	return r.alignedRows
 }
 
-// Before returns a [*Source] for the left (before) pane of a side-by-side
-// diff.
+// Before returns a [line.Lines] view for the left (before) pane of a
+// side-by-side diff.
 //
-// Lines are aligned with [DiffResult.After] so both sources have equal line
-// counts. Consecutive delete/insert sequences are paired row-by-row. When there
+// Before aligns its lines with [DiffResult.After] so both views have equal
+// line counts. Consecutive delete/insert sequences are paired row-by-row. When there
 // are more insertions than deletions, empty placeholder lines (zero value) fill
 // the remaining rows on this side.
 //
 // Line flags: [line.FlagDeleted] for deleted lines, [line.FlagDefault] for
 // equal lines and empty placeholders.
 //
-// The returned [*Source] shares the underlying [line.Line] instances from
-// [DiffResult.getAlignedRows], so overlays added to it modify the shared lines.
-func (r *DiffResult) Before() *Source {
+// Each call returns an independent copy, so overlays added to one result do
+// not affect another or the paired [DiffResult.After] view.
+func (r *DiffResult) Before() line.Lines {
 	rows := r.getAlignedRows()
 
 	lines := make(line.Lines, len(rows))
 	for i := range rows {
-		lines[i] = rows[i].before
+		lines[i] = rows[i].before.Clone()
 	}
 
-	return &Source{name: r.name, lines: lines}
+	return lines
 }
 
-// After returns a [*Source] for the right (after) pane of a side-by-side diff.
+// After returns a [line.Lines] view for the right (after) pane of a
+// side-by-side diff.
 //
-// Lines are aligned with [DiffResult.Before] so both sources have equal line
-// counts. Consecutive delete/insert sequences are paired row-by-row. When there
+// After aligns its lines with [DiffResult.Before] so both views have equal
+// line counts. Consecutive delete/insert sequences are paired row-by-row. When there
 // are more deletions than insertions, empty placeholder lines (zero value) fill
 // the remaining rows on this side.
 //
 // Line flags: [line.FlagInserted] for inserted lines, [line.FlagDefault] for
 // equal lines and empty placeholders.
 //
-// The returned [*Source] shares the underlying [line.Line] instances from
-// [DiffResult.getAlignedRows], so overlays added to it modify the shared lines.
-func (r *DiffResult) After() *Source {
+// Each call returns an independent copy, so overlays added to one result do
+// not affect another or the paired [DiffResult.Before] view.
+func (r *DiffResult) After() line.Lines {
 	rows := r.getAlignedRows()
 
 	lines := make(line.Lines, len(rows))
 	for i := range rows {
-		lines[i] = rows[i].after
+		lines[i] = rows[i].after.Clone()
 	}
 
-	return &Source{name: r.name, lines: lines}
+	return lines
 }
 
 // collectConsecutive collects consecutive ops of the same kind starting at

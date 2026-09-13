@@ -59,10 +59,10 @@ go get go.jacobcolvin.com/niceyaml@latest
 Package `niceyaml` adds a few abstractions on top of [go-yaml][goccy/go-yaml]:
 
 - `Line` - Tokens for a single line of YAML content
-- `Lines` - Collection of `Line`s representing one or more YAML documents
-- `Source` - Manages `Lines` while abstracting away go-yaml lexer/parser details
+- `Lines` - A collection of `Line`s with overlays, annotations, and flags, which is the view that rendering utilities consume
+- `Source` - A YAML document, which parses, decodes, wraps errors, and exposes its `Lines` view
 
-Most use cases will only need to interact with `Source`. It satisfies most interfaces accepted by other niceyaml utilities.
+Most use cases will only need to interact with `Source`. It delegates to its view, so it satisfies the interfaces that other niceyaml utilities accept. Diffs return plain `Lines`, since interleaved lines from two revisions are not a YAML document.
 
 These abstractions enable straightforward iteration over arbitrary lines of tokens from one or more YAML documents, while maintaining the original token details from the lexer. It cleanly solves common problems introduced by multi-line and/or overlapping tokens in diffs, partial rendering, and/or search.
 

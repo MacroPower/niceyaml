@@ -30,6 +30,6 @@ func main() {
 
 	fmt.Println("\nPrint the summary diff:")
 
-	source, ranges := result.Hunks(2)
-	fmt.Println(printer.Print(source, ranges...))
+	lines, spans := result.Hunks(2)
+	fmt.Println(printer.Print(lines, spans...))
 }

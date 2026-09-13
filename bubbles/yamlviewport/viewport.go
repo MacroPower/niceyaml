@@ -129,14 +129,18 @@ type Model struct {
 	// Cached diff between base and current revision.
 	revision   *niceyaml.Revision
 	diffResult *niceyaml.DiffResult
-	// Left holds the source for the left pane or main content.
+	// Left holds the view for the left pane or main content.
 	// In ViewModeFull/ViewModeHunks: Unified diff or plain content.
-	// In ViewModeSideBySide with diff: Before source.
+	// In ViewModeSideBySide with diff: Before view.
 	// In ViewModeSideBySide without diff: plain content (same on both sides).
-	left *niceyaml.Source
-	// Right holds the right pane source for side-by-side diff rendering.
+	//
+	// The model always owns the view, either a clone of the revision's lines
+	// or a fresh diff result, so search overlays never touch the caller's
+	// Source.
+	left line.Lines
+	// Right holds the right pane view for side-by-side diff rendering.
 	// Only populated when viewMode == ViewModeSideBySide and showing a diff.
-	right *niceyaml.Source
+	right line.Lines
 	// Current search query.
 	searchTerm string
 	// KeyMap contains the keybindings for viewport navigation.
@@ -158,6 +162,8 @@ type Model struct {
 	hunkContext     int
 	// FillHeight pads output with empty lines to fill the viewport height when true.
 	FillHeight bool
+	// Reports that left changed since the finder last loaded it.
+	finderStale bool
 	// MouseWheelEnabled enables mouse wheel scrolling.
 	// Default: true.
 	MouseWheelEnabled bool
@@ -241,6 +247,10 @@ func (m *Model) SetPrinter(p Printer) {
 //
 // This is a convenience method equivalent to [Model.ClearRevisions] followed by
 // [Model.AddRevision].
+//
+// The viewport renders a private copy of the source's lines. It does not
+// display overlays the caller adds to s afterward, and its search highlights
+// never modify s.
 func (m *Model) SetTokens(s *niceyaml.Source) {
 	m.ClearRevisions()
 	m.AddRevision(s)
@@ -458,11 +468,14 @@ func (m *Model) seekRevision(delta int) {
 	m.GotoTop()
 }
 
-// rerender updates the source lines and search state.
+// rerender rebuilds the displayed views from the revision state and refreshes
+// the search state.
 // Actual rendering is deferred to renderVisible for on-demand rendering.
 func (m *Model) rerender() {
 	m.diffResult = nil // Invalidate cached diff result.
+	m.left = nil
 	m.right = nil
+	m.finderStale = true
 
 	// Handle side-by-side mode with diff specially.
 	if m.viewMode == ViewModeSideBySide {
@@ -470,28 +483,37 @@ func (m *Model) rerender() {
 			diff := m.getDiffResult()
 			m.left = diff.Before()
 			m.right = diff.After()
-			m.updateSideBySideSearchState()
-			m.applySideBySideOverlays()
-
-			return
 		}
 	}
 
 	// For other modes, use standard display lines.
-	left := m.getDisplayLines()
-	if left == nil {
-		m.left = nil
+	if m.left == nil {
+		m.left = m.getDisplayLines()
+	}
+
+	m.refreshSearch()
+}
+
+// refreshSearch recomputes search matches and overlays for the current views
+// without rebuilding them.
+func (m *Model) refreshSearch() {
+	if m.left == nil {
+		return
+	}
+
+	if m.viewMode == ViewModeSideBySide && m.right != nil {
+		m.updateSideBySideSearchState()
+		m.applySideBySideOverlays()
 
 		return
 	}
 
-	m.left = left
-	m.updateSearchState(left)
-	m.applySearchOverlays(left)
+	m.updateSearchState(m.left)
+	m.applySearchOverlays(m.left)
 }
 
 // applySearchOverlays sets overlay highlights for all search matches.
-func (m *Model) applySearchOverlays(lines *niceyaml.Source) {
+func (m *Model) applySearchOverlays(lines line.Lines) {
 	lines.ClearOverlays()
 
 	for i, match := range m.searchMatches {
@@ -537,7 +559,7 @@ func (m *Model) updateSideBySideSearchState() {
 	//
 	// Track equal-line match positions from left source for deduplication.
 	equalLinePositions := make(map[position.Position]bool)
-	leftLines := m.left.Lines()
+	leftLines := m.left
 
 	combined := make([]searchMatch, 0, len(m.leftMatches)+len(m.rightMatches))
 
@@ -599,7 +621,7 @@ func (m *Model) applySideBySideOverlays() {
 		selectedInLeft = selected.inLeft
 
 		// Check if selected match is on an equal line.
-		leftLines := m.left.Lines()
+		leftLines := m.left
 		if selectedPos.Line < len(leftLines) {
 			selectedIsEqual = leftLines[selectedPos.Line].Flag == line.FlagDefault
 		}
@@ -613,29 +635,32 @@ func (m *Model) applySideBySideOverlays() {
 // applySideBySidePaneOverlays applies search highlights to a single pane.
 // It uses cached matches and showSelected to determine the selected style.
 func (m *Model) applySideBySidePaneOverlays(
-	src *niceyaml.Source,
+	view line.Lines,
 	matches []position.Range,
 	selectedPos position.Position,
 	showSelected bool,
 ) {
-	if src == nil {
+	if view == nil {
 		return
 	}
 
-	src.ClearOverlays()
+	view.ClearOverlays()
 
 	for _, match := range matches {
 		isSelected := match.Start == selectedPos && showSelected
 		if isSelected {
-			src.AddOverlay(style.GenericHighlight, match)
+			view.AddOverlay(style.GenericHighlight, match)
 		} else {
-			src.AddOverlay(style.GenericHighlightDim, match)
+			view.AddOverlay(style.GenericHighlightDim, match)
 		}
 	}
 }
 
 // updateSearchState updates the finder and search matches for the given lines.
-func (m *Model) updateSearchState(lines *niceyaml.Source) {
+//
+// It reloads the finder only when the lines changed since the last load, so
+// typing a search term does not rebuild the index on every keystroke.
+func (m *Model) updateSearchState(lines line.Lines) {
 	if m.searchTerm == "" {
 		m.searchMatches = nil
 		m.leftMatches = nil
@@ -644,7 +669,11 @@ func (m *Model) updateSearchState(lines *niceyaml.Source) {
 		return
 	}
 
-	m.finder.Load(lines)
+	if m.finderStale {
+		m.finder.Load(lines)
+
+		m.finderStale = false
+	}
 
 	// Convert ranges to searchMatch structs (inLeft is not used in unified mode).
 	ranges := m.finder.Find(m.searchTerm)
@@ -699,14 +728,22 @@ func (m *Model) getDiffBaseRevision() *niceyaml.Revision {
 	}
 }
 
-// getDisplayLines returns the lines to display based on current revision and
+// getDisplayLines returns the view to display based on current revision and
 // [DiffMode].
-func (m *Model) getDisplayLines() *niceyaml.Source {
-	if src, needsDiff := m.resolveRevisionSource(); !needsDiff {
-		return src
+//
+// The model always owns the result, either a clone of the revision's lines
+// or a fresh unified diff. Returns nil when there is no revision.
+func (m *Model) getDisplayLines() line.Lines {
+	src, needsDiff := m.resolveRevisionSource()
+	if needsDiff {
+		return m.getDiffResult().Unified()
 	}
 
-	return m.getDiffResult().Unified()
+	if src == nil {
+		return nil
+	}
+
+	return src.Lines().Clone()
 }
 
 // getDiffResult returns the cached [niceyaml.DiffResult], computing it if nil.
@@ -985,7 +1022,7 @@ func (m *Model) SetSearchTerm(term string) {
 	}
 
 	m.searchTerm = term
-	m.rerender()
+	m.refreshSearch()
 	m.scrollToCurrentMatch()
 }
 
@@ -999,7 +1036,7 @@ func (m *Model) ClearSearch() {
 	m.searchTerm = ""
 	m.searchMatches = nil
 	m.searchIndex = -1
-	m.rerender()
+	m.refreshSearch()
 }
 
 // SearchNext navigates to the next search match.
@@ -1213,17 +1250,20 @@ func (m Model) View() string {
 
 // getHunksDiffContent returns diff content with context lines for hunks mode.
 func (m *Model) getHunksDiffContent() string {
-	if src, needsDiff := m.resolveRevisionSource(); !needsDiff {
-		if src == nil {
+	if _, needsDiff := m.resolveRevisionSource(); !needsDiff {
+		if m.left == nil {
 			return ""
 		}
 
-		return m.printer.Print(src)
+		return m.printer.Print(m.left)
 	}
 
-	source, ranges := m.getDiffResult().Hunks(m.hunkContext)
+	lines, ranges := m.getDiffResult().Hunks(m.hunkContext)
+	if lines == nil {
+		return ""
+	}
 
-	return m.printer.Print(source, ranges...)
+	return m.printer.Print(lines, ranges...)
 }
 
 // sideBySideSeparator is the column divider between panes.
@@ -1233,21 +1273,15 @@ const sideBySideSeparator = " │ "
 //
 //nolint:gocritic // hugeParam: required for value receiver compatibility with View().
 func (m Model) renderSideBySide(contentW, contentH int) string {
-	// Get iterators for both panes.
-	var leftIter, rightIter niceyaml.LineIterator
+	// Get views for both panes. The model owns both, with overlays applied.
+	if m.left == nil {
+		return m.renderContent(nil, contentW, contentH)
+	}
 
-	if src, needsDiff := m.resolveRevisionSource(); !needsDiff {
+	leftIter, rightIter := m.left, m.right
+	if rightIter == nil {
 		// Not showing a diff: show same content on both sides.
-		if src == nil {
-			return m.renderContent(nil, contentW, contentH)
-		}
-
-		leftIter = src
-		rightIter = src
-	} else {
-		// Use cached sources which have overlays applied.
-		leftIter = m.left
-		rightIter = m.right
+		rightIter = m.left
 	}
 
 	// Calculate pane width (both panes use the same width).

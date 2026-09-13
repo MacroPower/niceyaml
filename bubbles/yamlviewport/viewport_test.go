@@ -18,6 +18,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/bubbles/yamlviewport"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
@@ -2665,4 +2666,52 @@ func TestSideBySideSearch_MatchCounting(t *testing.T) {
 			assert.Equal(t, tc.wantCount, m.SearchCount())
 		})
 	}
+}
+
+func TestViewport_DoesNotMutateSource(t *testing.T) {
+	t.Parallel()
+
+	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+	m.SetWidth(80)
+	m.SetHeight(10)
+
+	source := niceyaml.NewSourceFromString("key: value\n")
+	source.AddOverlay(style.GenericError, position.NewRange(
+		position.New(0, 0),
+		position.New(0, 3),
+	))
+
+	m.SetTokens(source)
+	m.SetSearchTerm("value")
+	require.Positive(t, m.SearchCount())
+
+	_ = m.View()
+
+	m.SetSearchTerm("")
+
+	_ = m.View()
+
+	// The caller's overlay survives search highlighting and clearing.
+	require.Len(t, source.Line(0).Overlays, 1)
+	assert.Equal(t, style.GenericError, source.Line(0).Overlays[0].Kind)
+}
+
+func TestViewport_SearchAcrossRevisions(t *testing.T) {
+	t.Parallel()
+
+	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+	m.SetWidth(80)
+	m.SetHeight(10)
+
+	m.AddRevision(niceyaml.NewSourceFromString("key: alpha\n", niceyaml.WithName("v1")))
+	m.SetSearchTerm("alpha")
+	assert.Equal(t, 1, m.SearchCount())
+
+	// A new revision changes the displayed content, so matches are recomputed
+	// against the diff rather than the stale index.
+	m.AddRevision(niceyaml.NewSourceFromString("key: alpha\nother: alpha\n", niceyaml.WithName("v2")))
+	assert.Equal(t, 2, m.SearchCount())
+
+	m.SetSearchTerm("other")
+	assert.Equal(t, 1, m.SearchCount())
 }
