@@ -65,9 +65,16 @@ type SchemaValidator interface {
 type Decoder struct {
 	source *Source
 	file   *ast.File
+	// Tokens for each document, split once at construction and paired with
+	// file.Docs by index.
+	docTokens []token.Tokens
 }
 
 // NewDecoder creates a new [*Decoder] for the given [*Source].
+//
+// NewDecoder parses the source and splits its tokens by document once, so
+// [Decoder.Documents] can be iterated any number of times without repeating
+// either step.
 //
 // Returns an error if the source cannot be parsed.
 func NewDecoder(s *Source) (*Decoder, error) {
@@ -76,7 +83,13 @@ func NewDecoder(s *Source) (*Decoder, error) {
 		return nil, err
 	}
 
-	return &Decoder{source: s, file: f}, nil
+	var docTokens []token.Tokens
+
+	for _, tks := range tokens.SplitDocuments(s.Tokens()) {
+		docTokens = append(docTokens, tks)
+	}
+
+	return &Decoder{source: s, file: f, docTokens: docTokens}, nil
 }
 
 // Source returns the underlying [*Source].
@@ -93,27 +106,17 @@ func (d *Decoder) Len() int {
 //
 // Each iteration yields the document index and a [*DocumentDecoder] for that
 // document. The [*DocumentDecoder] receives context from the [*Source]
-// including file path, tokens, and document index.
+// including file path, tokens, and document index. The tokens were split at
+// construction, so each call yields the same slices.
 func (d *Decoder) Documents() iter.Seq2[int, *DocumentDecoder] {
 	filePath := d.source.FilePath()
-	srcTokens := d.source.Tokens()
 
 	return func(yield func(int, *DocumentDecoder) bool) {
-		var (
-			nextTokens func() (int, token.Tokens, bool)
-			stop       func()
-		)
-
-		if srcTokens != nil {
-			nextTokens, stop = iter.Pull2(tokens.SplitDocuments(srcTokens))
-			defer stop()
-		}
-
 		for i, doc := range d.file.Docs {
 			var tks token.Tokens
 
-			if nextTokens != nil {
-				_, tks, _ = nextTokens()
+			if i < len(d.docTokens) {
+				tks = d.docTokens[i]
 			}
 
 			dd := &DocumentDecoder{

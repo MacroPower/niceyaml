@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/goccy/go-yaml"
+	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
@@ -678,6 +679,53 @@ func TestDecoder_Documents(t *testing.T) {
 		}
 
 		assert.Equal(t, 1, count)
+	})
+
+	t.Run("yields the same tokens on every pass", func(t *testing.T) {
+		t.Parallel()
+
+		input := stringtest.Input(`
+			---
+			a: 1
+			---
+			b: 2
+		`)
+		source := niceyaml.NewSourceFromString(input)
+		d, err := source.Decoder()
+		require.NoError(t, err)
+
+		var first, second [][]int
+
+		collect := func() []int {
+			var lens []int
+
+			for _, dd := range d.Documents() {
+				lens = append(lens, len(dd.Tokens()))
+			}
+
+			return lens
+		}
+
+		first = append(first, collect())
+		second = append(second, collect())
+		assert.Equal(t, first, second)
+		assert.Equal(t, [][]int{{4, 4}}, first)
+
+		// The tokens are the source's originals, not copies, so the first token
+		// of the second document is the same pointer on each pass.
+		var passes []*token.Token
+
+		for range 2 {
+			for i, dd := range d.Documents() {
+				if i == 1 {
+					passes = append(passes, dd.Tokens()[0])
+				}
+			}
+		}
+
+		require.Len(t, passes, 2)
+		assert.Same(t, passes[0], passes[1])
+		assert.Same(t, source.Tokens()[4], passes[0])
 	})
 
 	t.Run("iterates over multiple documents", func(t *testing.T) {
