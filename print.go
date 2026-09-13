@@ -27,20 +27,18 @@ type StyleGetter interface {
 	Style(s style.Style) *lipgloss.Style
 }
 
-// WrappingPrinter prints with width-aware word wrapping.
-//
-// See [Printer] for an implementation.
-type WrappingPrinter interface {
-	SetWidth(width int)
-	Print(lines LineIterator, spans ...position.Span) string
-}
-
 // Printer prints YAML with syntax highlighting for terminal output.
 //
 // It accepts a [LineIterator], either a [*Source] or a [line.Lines] view, and
 // produces styled terminal output using [lipgloss.Style]s. It applies syntax
 // highlighting to YAML tokens, with support for customizable gutters,
 // annotations, styled overlays, and word wrapping.
+//
+// A Printer is immutable after construction and safe for concurrent use.
+// Every setting is a [PrinterOption]; to change one on an existing Printer,
+// derive a copy with [Printer.With]:
+//
+//	narrow := printer.With(niceyaml.WithWidth(40))
 //
 // Create instances with [NewPrinter].
 //
@@ -81,9 +79,10 @@ type WrappingPrinter interface {
 //
 // # Word Wrapping
 //
-// Call [Printer.SetWidth] to enable word wrapping at a given width. The printer
+// Pass [WithWidth] to enable word wrapping at a given width. The printer
 // accounts for gutter width when calculating available content width. Wrapped
-// continuation lines show a "-" marker in the gutter.
+// continuation lines show a "-" marker in the gutter. [WithWordWrap] turns
+// wrapping off while keeping the width.
 type Printer struct {
 	styles             StyleGetter
 	style              lipgloss.Style
@@ -108,6 +107,27 @@ func NewPrinter(opts ...PrinterOption) *Printer {
 		wordWrap:           true,
 	}
 
+	p.apply(opts)
+
+	return p
+}
+
+// With returns a copy of the [Printer] with the given options applied. The
+// receiver is unchanged, so a shared Printer can be specialized per call:
+//
+//	wrapped := printer.With(niceyaml.WithWidth(80))
+//
+// The copy shares the receiver's style cache, which is safe for concurrent
+// use.
+func (p *Printer) With(opts ...PrinterOption) *Printer {
+	c := *p
+	c.apply(opts)
+
+	return &c
+}
+
+// apply runs opts and recomputes the derived container style.
+func (p *Printer) apply(opts []PrinterOption) {
 	for _, opt := range opts {
 		opt(p)
 	}
@@ -116,8 +136,6 @@ func NewPrinter(opts ...PrinterOption) *Printer {
 		p.style = p.styles.Style(style.Text).
 			PaddingRight(1)
 	}
-
-	return p
 }
 
 // PrinterOption configures a [Printer].
@@ -127,6 +145,9 @@ func NewPrinter(opts ...PrinterOption) *Printer {
 //   - [WithStyles]
 //   - [WithGutter]
 //   - [WithAnnotationFunc]
+//   - [WithWidth]
+//   - [WithWordWrap]
+//   - [WithAnnotations]
 type PrinterOption func(*Printer)
 
 // GutterContext provides context about the current line for gutter rendering.
@@ -296,23 +317,35 @@ func WithAnnotationFunc(fn AnnotationFunc) PrinterOption {
 	}
 }
 
-// SetWidth sets the width for word wrapping.
-// A width of 0 disables wrapping.
-func (p *Printer) SetWidth(width int) {
-	p.width = width
+// WithWidth is a [PrinterOption] that sets the width for word wrapping.
+// A width of 0, the default, disables wrapping.
+func WithWidth(width int) PrinterOption {
+	return func(p *Printer) {
+		p.width = width
+	}
 }
 
-// SetAnnotations sets whether annotations are rendered.
-// Defaults to true.
-func (p *Printer) SetAnnotations(enabled bool) {
-	p.annotationsEnabled = enabled
+// WithWordWrap is a [PrinterOption] that sets whether word wrapping is
+// enabled. Defaults to true. Wrapping only happens when [WithWidth] also
+// sets a width.
+func WithWordWrap(enabled bool) PrinterOption {
+	return func(p *Printer) {
+		p.wordWrap = enabled
+	}
 }
 
-// SetWordWrap sets whether word wrapping is enabled.
-// Defaults to true.
-// Word wrapping requires a width to be set via [Printer.SetWidth].
-func (p *Printer) SetWordWrap(enabled bool) {
-	p.wordWrap = enabled
+// WithAnnotations is a [PrinterOption] that sets whether annotations are
+// rendered. Defaults to true.
+func WithAnnotations(enabled bool) PrinterOption {
+	return func(p *Printer) {
+		p.annotationsEnabled = enabled
+	}
+}
+
+// Width returns the width used for word wrapping, or 0 when wrapping is
+// disabled.
+func (p *Printer) Width() int {
+	return p.width
 }
 
 // Style retrieves the underlying [*lipgloss.Style] for the given [style.Style],

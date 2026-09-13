@@ -50,8 +50,8 @@
 //
 // # Customization
 //
-// Provide a custom [Printer] via [WithPrinter] to control syntax highlighting,
-// line numbers, and annotations.
+// Provide a custom [niceyaml.Printer] via [WithPrinter] to control syntax
+// highlighting, line numbers, and annotations.
 //
 // Provide a custom [Finder] via [WithFinder] for specialized search behavior
 // (e.g., case-insensitive matching).

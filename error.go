@@ -63,7 +63,7 @@ var (
 // Create instances with [NewError] or [NewErrorFrom].
 type Error struct {
 	err          error
-	printer      WrappingPrinter
+	printer      *Printer
 	source       *Source
 	path         *paths.Path
 	token        *token.Token
@@ -143,9 +143,10 @@ func WithErrorToken(tk *token.Token) ErrorOption {
 	}
 }
 
-// WithPrinter is an [ErrorOption] that sets the [WrappingPrinter] used for
-// formatting the error source.
-func WithPrinter(p WrappingPrinter) ErrorOption {
+// WithPrinter is an [ErrorOption] that sets the [*Printer] used for
+// formatting the error source. The Error never modifies it; when a width is
+// configured, rendering uses a copy from [Printer.With].
+func WithPrinter(p *Printer) ErrorOption {
 	return func(e *Error) {
 		e.printer = p
 	}
@@ -308,26 +309,25 @@ func (e *Error) getFile() (*ast.File, error) {
 	return e.source.File()
 }
 
-// getPrinter returns the configured printer, or a default if none was set.
-// If a width is configured, it applies the width to the printer.
-func (e *Error) getPrinter() WrappingPrinter {
+// getPrinter returns the printer to render with: the configured one or a
+// default, specialized with the configured width. The configured printer is
+// left untouched.
+func (e *Error) getPrinter() *Printer {
 	width := e.width
 	if e.widthFunc != nil {
 		width = e.widthFunc()
 	}
 
-	if e.printer != nil {
-		e.printer.SetWidth(width)
-
-		return e.printer
+	p := e.printer
+	if p == nil {
+		p = NewPrinter()
 	}
 
-	p := NewPrinter()
-	p.SetWidth(width)
+	if p.Width() == width {
+		return p
+	}
 
-	e.printer = p
-
-	return p
+	return p.With(WithWidth(width))
 }
 
 // Unwrap returns the underlying errors, enabling [errors.Is] and [errors.As].

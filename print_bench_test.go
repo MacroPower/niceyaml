@@ -252,8 +252,7 @@ func BenchmarkPrinterWithWrapping(b *testing.B) {
 
 	for _, w := range widths {
 		b.Run(w.name, func(b *testing.B) {
-			printer := niceyaml.NewPrinter()
-			printer.SetWidth(w.width)
+			printer := niceyaml.NewPrinter(niceyaml.WithWidth(w.width))
 
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))

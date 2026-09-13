@@ -1710,6 +1710,9 @@ func TestError_SetWidth_WithCustomPrinter(t *testing.T) {
 	}
 
 	assert.Greater(t, contentLines, 1, "expected content to wrap into multiple lines with custom printer")
+
+	// The caller's printer keeps its own width.
+	assert.Equal(t, 0, customPrinter.Width())
 }
 
 func TestError_SetWidth_DefaultPrinter(t *testing.T) {

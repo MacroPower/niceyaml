@@ -834,7 +834,7 @@ func TestPrinter_WordWrap(t *testing.T) {
 				"   - long line that wraps",
 			),
 		},
-		// SetWordWrap(false) tests.
+		// WithWordWrap(false) tests.
 		"wordWrap disabled with NoGutter": {
 			input:    "key: this is a very long value that should not wrap",
 			width:    25,
@@ -864,9 +864,10 @@ func TestPrinter_WordWrap(t *testing.T) {
 
 			tks := lexer.Tokenize(tc.input)
 
-			p := testPrinterWithGutter(tc.gutter)
-			p.SetWidth(tc.width)
-			p.SetWordWrap(tc.wordWrap)
+			p := testPrinterWithGutter(tc.gutter).With(
+				niceyaml.WithWidth(tc.width),
+				niceyaml.WithWordWrap(tc.wordWrap),
+			)
 
 			got := p.Print(niceyaml.NewSourceFromTokens(tks))
 			assert.Equal(t, tc.want, got)
@@ -923,8 +924,7 @@ func TestPrinter_PrintTokenDiff_WithWordWrap(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := testPrinterWithGutter(niceyaml.DiffGutter())
-			p.SetWidth(tc.width)
+			p := testPrinterWithGutter(niceyaml.DiffGutter()).With(niceyaml.WithWidth(tc.width))
 
 			got := printDiff(p, tc.before, tc.after)
 
@@ -1247,7 +1247,7 @@ func TestGutterFunctions(t *testing.T) {
 	}
 }
 
-func TestPrinter_SetAnnotations(t *testing.T) {
+func TestPrinter_WithAnnotations(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -1275,8 +1275,7 @@ func TestPrinter_SetAnnotations(t *testing.T) {
 			source := niceyaml.NewSourceFromString(input)
 			source.Lines()[0].AddAnnotation(line.Annotation{Content: tc.annotation})
 
-			p := testPrinter()
-			p.SetAnnotations(tc.enabled)
+			p := testPrinter().With(niceyaml.WithAnnotations(tc.enabled))
 
 			got := p.Print(source)
 
@@ -1478,8 +1477,7 @@ func TestPrinter_AnnotationPosition_Disabled(t *testing.T) {
 			source := niceyaml.NewSourceFromString(input)
 			source.Lines()[0].AddAnnotation(tc.annotation)
 
-			p := testPrinter()
-			p.SetAnnotations(false)
+			p := testPrinter().With(niceyaml.WithAnnotations(false))
 
 			got := p.Print(source)
 
@@ -2167,11 +2165,36 @@ func TestFinderPrinter_Integration(t *testing.T) {
 	}
 }
 
+func TestPrinter_With(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("key: this is a very long value that should wrap")
+
+	base := testPrinterWithGutter(niceyaml.NoGutter())
+	narrow := base.With(niceyaml.WithWidth(20))
+
+	assert.Equal(t, 0, base.Width())
+	assert.Equal(t, 20, narrow.Width())
+
+	// The receiver still renders on one line; the copy wraps.
+	assert.Equal(t, "key: this is a very long value that should wrap", base.Print(source))
+	assert.Equal(t, stringtest.JoinLF(
+		"key: this is a very",
+		"long value that",
+		"should wrap",
+	), narrow.Print(source))
+
+	// A copy can switch styles and gets its own container style.
+	styled := base.With(niceyaml.WithStyles(yamltest.NewXMLStyles()))
+	assert.Contains(t, styled.Print(source), "<nameTag>key</nameTag>")
+	assert.NotContains(t, base.Print(source), "<nameTag>")
+}
+
 func TestPrinter_Golden(t *testing.T) {
 	t.Parallel()
 
 	type goldenTest struct {
-		setupFunc func(*niceyaml.Printer, *niceyaml.Source)
+		setupFunc func(*niceyaml.Source)
 		opts      []niceyaml.PrinterOption
 	}
 
@@ -2187,10 +2210,8 @@ func TestPrinter_Golden(t *testing.T) {
 			opts: []niceyaml.PrinterOption{
 				niceyaml.WithStyles(theme.Charm()),
 				niceyaml.WithStyle(lipgloss.NewStyle()),
-			},
-			setupFunc: func(p *niceyaml.Printer, _ *niceyaml.Source) {
-				p.SetWidth(40)
-				p.SetWordWrap(true)
+				niceyaml.WithWidth(40),
+				niceyaml.WithWordWrap(true),
 			},
 		},
 		"default colors with line numbers": {
@@ -2222,7 +2243,7 @@ func TestPrinter_Golden(t *testing.T) {
 				niceyaml.WithStyle(lipgloss.NewStyle()),
 				niceyaml.WithGutter(niceyaml.NoGutter()),
 			},
-			setupFunc: func(_ *niceyaml.Printer, source *niceyaml.Source) {
+			setupFunc: func(source *niceyaml.Source) {
 				// Search for "日本" (Japan) which appears multiple times in full.yaml.
 				finder := niceyaml.NewFinder()
 				finder.Load(source)
@@ -2244,7 +2265,7 @@ func TestPrinter_Golden(t *testing.T) {
 			printer := niceyaml.NewPrinter(tc.opts...)
 
 			if tc.setupFunc != nil {
-				tc.setupFunc(printer, lines)
+				tc.setupFunc(lines)
 			}
 
 			output := printer.Print(lines)

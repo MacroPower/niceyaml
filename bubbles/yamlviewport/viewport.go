@@ -20,17 +20,6 @@ import (
 
 const defaultHorizontalStep = 6
 
-// Printer prints YAML.
-//
-// See [niceyaml.Printer] for an implementation.
-type Printer interface {
-	Print(lines niceyaml.LineIterator, spans ...position.Span) string
-	SetWidth(width int)
-	SetWordWrap(enabled bool)
-	SetAnnotations(enabled bool)
-	Style(s style.Style) *lipgloss.Style
-}
-
 // Finder finds [position.Range]s for a search string.
 //
 // See [niceyaml.Finder] for an implementation.
@@ -82,9 +71,13 @@ const (
 //   - [WithFinder]
 type Option func(*Model)
 
-// WithPrinter is an [Option] that sets the [Printer] used for rendering.
-// If not set, a default [niceyaml.Printer] is created.
-func WithPrinter(p Printer) Option {
+// WithPrinter is an [Option] that sets the [*niceyaml.Printer] used for
+// rendering. If not set, a default [niceyaml.Printer] is created.
+//
+// The viewport never modifies the printer. Each render derives a copy with
+// [niceyaml.Printer.With], applying the viewport's width and word wrap
+// setting, so the same printer can be shared with other renderers.
+func WithPrinter(p *niceyaml.Printer) Option {
 	return func(m *Model) {
 		m.printer = p
 	}
@@ -124,7 +117,7 @@ func New(opts ...Option) Model {
 type Model struct {
 	// Style is the container style applied to the viewport frame.
 	Style   lipgloss.Style
-	printer Printer
+	printer *niceyaml.Printer
 	finder  Finder
 	// Cached diff between base and current revision.
 	revision   *niceyaml.Revision
@@ -221,7 +214,6 @@ func (m *Model) Width() int {
 func (m *Model) SetWidth(w int) {
 	if m.width != w {
 		m.width = w
-		m.updatePrinterWidth()
 
 		if m.WrapEnabled {
 			m.rerender()
@@ -229,17 +221,20 @@ func (m *Model) SetWidth(w int) {
 	}
 }
 
-// updatePrinterWidth sets the printer width to the content width (accounting
-// for the style's frame size). This ensures word wrapping produces lines that
-// fit within the actual content area.
-func (m *Model) updatePrinterWidth() {
-	m.printer.SetWidth(m.maxWidth())
+// renderPrinter returns the printer to render with: the configured printer
+// specialized to the given content width and the viewport's word wrap
+// setting, so wrapped lines fit the content area.
+func (m *Model) renderPrinter(width int) *niceyaml.Printer {
+	return m.printer.With(
+		niceyaml.WithWidth(width),
+		niceyaml.WithWordWrap(m.WrapEnabled),
+	)
 }
 
-// SetPrinter sets the [Printer] used for rendering and triggers a re-render.
-func (m *Model) SetPrinter(p Printer) {
+// SetPrinter sets the [*niceyaml.Printer] used for rendering and triggers a
+// re-render. See [WithPrinter].
+func (m *Model) SetPrinter(p *niceyaml.Printer) {
 	m.printer = p
-	m.updatePrinterWidth()
 	m.rerender()
 }
 
@@ -432,7 +427,6 @@ func (m *Model) SetHunkContext(n int) {
 // ToggleWordWrap toggles word wrapping on or off.
 func (m *Model) ToggleWordWrap() {
 	m.WrapEnabled = !m.WrapEnabled
-	m.printer.SetWordWrap(m.WrapEnabled)
 
 	if m.WrapEnabled {
 		m.xOffset = 0
@@ -705,7 +699,7 @@ func (m *Model) renderVisible() []string {
 		return nil
 	}
 
-	content := m.printer.Print(m.left, position.NewSpan(start, end))
+	content := m.renderPrinter(m.maxWidth()).Print(m.left, position.NewSpan(start, end))
 
 	return splitLines(content)
 }
@@ -1255,7 +1249,7 @@ func (m *Model) getHunksDiffContent() string {
 			return ""
 		}
 
-		return m.printer.Print(m.left)
+		return m.renderPrinter(m.maxWidth()).Print(m.left)
 	}
 
 	lines, ranges := m.getDiffResult().Hunks(m.hunkContext)
@@ -1263,7 +1257,7 @@ func (m *Model) getHunksDiffContent() string {
 		return ""
 	}
 
-	return m.printer.Print(lines, ranges...)
+	return m.renderPrinter(m.maxWidth()).Print(lines, ranges...)
 }
 
 // sideBySideSeparator is the column divider between panes.
@@ -1307,11 +1301,10 @@ func (m Model) renderSideBySide(contentW, contentH int) string {
 	span := position.NewSpan(start, end)
 
 	// Render both panes.
-	m.printer.SetWordWrap(m.WrapEnabled)
-	m.printer.SetWidth(paneWidth)
+	printer := m.renderPrinter(paneWidth)
 
-	leftContent := m.printer.Print(leftIter, span)
-	rightContent := m.printer.Print(rightIter, span)
+	leftContent := printer.Print(leftIter, span)
+	rightContent := printer.Print(rightIter, span)
 
 	// Split into lines.
 	leftLines := splitLines(leftContent)
