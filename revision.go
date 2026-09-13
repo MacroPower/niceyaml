@@ -147,25 +147,43 @@ func (t *Revision) Len() int {
 	return count + 1
 }
 
-// Append adds a new revision after the [*Source] at the head.
-// Returns the newly added revision.
+// Append inserts a new revision directly after this one and returns it.
+//
+// Revisions that already follow this one move after the new revision, so
+// appending to a revision in the middle of the sequence never drops the rest.
+// Use [Revision.Tip] first to add at the end.
 func (t *Revision) Append(s *Source) *Revision {
 	rev := &Revision{
 		prev: t,
+		next: t.next,
 		head: s,
 	}
+
+	if t.next != nil {
+		t.next.prev = rev
+	}
+
 	t.next = rev
 
 	return rev
 }
 
-// Prepend adds a new revision before the [*Source] at the head.
-// Returns the newly added revision.
+// Prepend inserts a new revision directly before this one and returns it.
+//
+// Revisions that already precede this one move before the new revision, so
+// prepending to a revision in the middle of the sequence never drops the
+// rest. Use [Revision.Origin] first to add at the start.
 func (t *Revision) Prepend(s *Source) *Revision {
 	rev := &Revision{
+		prev: t.prev,
 		next: t,
 		head: s,
 	}
+
+	if t.prev != nil {
+		t.prev.next = rev
+	}
+
 	t.prev = rev
 
 	return rev

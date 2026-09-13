@@ -523,6 +523,40 @@ func TestRevision_Append(t *testing.T) {
 		// The returned revision is the new tip.
 		assert.Same(t, rev0.Tip(), rev1)
 	})
+
+	t.Run("append to middle of chain keeps later revisions", func(t *testing.T) {
+		t.Parallel()
+
+		rev0 := niceyaml.NewRevision(niceyaml.NewSourceFromString("v0: data", niceyaml.WithName("v0")))
+		rev2 := rev0.Append(niceyaml.NewSourceFromString("v2: data", niceyaml.WithName("v2")))
+		rev1 := rev0.Append(niceyaml.NewSourceFromString("v1: data", niceyaml.WithName("v1")))
+
+		// Every revision sees the same chain.
+		assert.Equal(t, []string{"v0", "v1", "v2"}, rev0.Names())
+		assert.Equal(t, []string{"v0", "v1", "v2"}, rev2.Names())
+		assert.Equal(t, 3, rev0.Len())
+		assert.Equal(t, 3, rev2.Len())
+
+		assert.Equal(t, 1, rev1.Index())
+		assert.Equal(t, 2, rev2.Index())
+		assert.True(t, rev2.AtTip())
+		assert.Same(t, rev2, rev1.Seek(1))
+		assert.Same(t, rev1, rev2.Seek(-1))
+	})
+
+	t.Run("prepend to middle of chain keeps earlier revisions", func(t *testing.T) {
+		t.Parallel()
+
+		rev0 := niceyaml.NewRevision(niceyaml.NewSourceFromString("v0: data", niceyaml.WithName("v0")))
+		rev2 := rev0.Append(niceyaml.NewSourceFromString("v2: data", niceyaml.WithName("v2")))
+		rev1 := rev2.Prepend(niceyaml.NewSourceFromString("v1: data", niceyaml.WithName("v1")))
+
+		assert.Equal(t, []string{"v0", "v1", "v2"}, rev0.Names())
+		assert.Equal(t, 3, rev1.Len())
+		assert.True(t, rev0.AtOrigin())
+		assert.Same(t, rev0, rev1.Seek(-1))
+		assert.Same(t, rev1, rev0.Seek(1))
+	})
 }
 
 func TestRevision_Name(t *testing.T) {
