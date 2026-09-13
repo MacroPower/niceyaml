@@ -188,7 +188,7 @@ func BenchmarkSourceContent(b *testing.B) {
 			b.ResetTimer()
 
 			for b.Loop() {
-				_ = source.Content()
+				_ = source.Lines().Content()
 			}
 		})
 	}

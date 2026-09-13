@@ -65,7 +65,7 @@
 // Position-based token lookup uses [position.Position] values:
 //
 //	tk := lines.TokenAt(position.New(2, 4))  // Line 2, column 4.
-//	ranges := lines.TokenPositionRanges(tk)  // Find all occurrences.
+//	ranges := lines.TokenPositionRangesFromToken(tk)  // Find all occurrences.
 //
 // # Rendering Metadata
 //

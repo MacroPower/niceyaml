@@ -438,26 +438,6 @@ func (ls Lines) TokenAt(pos position.Position) *token.Token {
 	return ls[pos.Line].segments.SourceTokenAt(pos.Col)
 }
 
-// TokenPositionRanges returns [position.Ranges] for all occurrences of the
-// given token.
-//
-// For multi-line tokens split across lines, returns one range per line.
-//
-// Returns nil if the token is nil or not found.
-func (ls Lines) TokenPositionRanges(tk *token.Token) position.Ranges {
-	if tk == nil {
-		return nil
-	}
-
-	var ranges position.Ranges
-
-	for i, l := range ls {
-		ranges = append(ranges, l.tokenPositionRanges(i, tk)...)
-	}
-
-	return ranges
-}
-
 // TokenPositionRangesAt returns [position.Ranges] for all occurrences of the
 // token at the given position.
 //
@@ -471,6 +451,41 @@ func (ls Lines) TokenPositionRangesAt(pos position.Position) position.Ranges {
 	}
 
 	return lineSegs.TokenRangesAt(pos.Line, pos.Col)
+}
+
+// TokenPositionRanges returns position ranges for the tokens at each of the
+// given positions. For a token split across lines, it returns one range per
+// line of the token. It removes duplicate ranges.
+//
+// Returns nil if no tokens exist at any of the given positions.
+func (ls Lines) TokenPositionRanges(positions ...position.Position) []position.Range {
+	var allRanges position.Ranges
+
+	for _, pos := range positions {
+		allRanges = append(allRanges, ls.TokenPositionRangesAt(pos)...)
+	}
+
+	return allRanges.UniqueValues()
+}
+
+// TokenPositionRangesFromToken returns position ranges for all occurrences of
+// the given token.
+//
+// For multi-line tokens split across lines, returns one range per line.
+//
+// Returns nil if the token is nil or not found.
+func (ls Lines) TokenPositionRangesFromToken(tk *token.Token) []position.Range {
+	if tk == nil {
+		return nil
+	}
+
+	var ranges position.Ranges
+
+	for i, l := range ls {
+		ranges = append(ranges, l.tokenPositionRanges(i, tk)...)
+	}
+
+	return ranges
 }
 
 // ContentPositionRangesAt returns position ranges for content at the given

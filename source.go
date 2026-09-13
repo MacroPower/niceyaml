@@ -47,12 +47,16 @@ type LineIterator interface {
 //	printer := NewPrinter(WithStyles(theme.Charm()))
 //	fmt.Println(printer.Print(source))
 //
-// The view methods on Source ([Source.AddOverlay], [Source.AllLines], and the
-// position queries) delegate to the same [line.Lines] value that
+// Source keeps a small set of view methods for the common case. The
+// [LineIterator] methods let a Source go straight to a [Printer] or [Finder],
+// and [Source.AddOverlay], [Source.ClearOverlays], and [Source.Width] cover
+// highlighting. All of them delegate to the same [line.Lines] value that
 // [Source.Lines] returns, so highlighting through either path renders
-// identically. Callers that need an independent copy, for instance to
-// highlight the same document two different ways, clone the view with
-// [line.Lines.Clone].
+// identically. Everything else about the view, such as token lookup by
+// position or the debugging [line.Lines.String], lives on [line.Lines] and is
+// reached through [Source.Lines]. Callers that need an independent copy, for
+// instance to highlight the same document two different ways, clone the view
+// with [line.Lines.Clone].
 //
 // A Source is not safe for concurrent mutation. Add overlays from one
 // goroutine at a time, and do not add them while another goroutine renders.
@@ -326,80 +330,6 @@ func (s *Source) AllLines(spans ...position.Span) iter.Seq2[position.Position, l
 // See [line.Lines.AllRunes].
 func (s *Source) AllRunes(ranges ...position.Range) iter.Seq2[position.Position, rune] {
 	return s.lines.AllRunes(ranges...)
-}
-
-// Line returns the [*line.Line] at the given index.
-// Panics if idx is out of range.
-func (s *Source) Line(idx int) *line.Line {
-	return &s.lines[idx]
-}
-
-// Content returns the combined content of all [line.Line]s as a string.
-// Lines are joined with newlines.
-func (s *Source) Content() string {
-	return s.lines.Content()
-}
-
-// String reconstructs all [line.Line]s as a string, including any annotations.
-// This should generally only be used for debugging.
-func (s *Source) String() string {
-	return s.lines.String()
-}
-
-// Validate checks the integrity of the [Source].
-// See [line.Lines.Validate] for details on validation checks.
-func (s *Source) Validate() error {
-	//nolint:wrapcheck // Pass through validation error directly.
-	return s.lines.Validate()
-}
-
-// TokenAt returns the [*token.Token] at the given position.
-// Returns nil if the position is out of bounds or no token exists there.
-func (s *Source) TokenAt(pos position.Position) *token.Token {
-	return s.lines.TokenAt(pos)
-}
-
-// TokenPositionRangesFromToken returns all position ranges for a given token.
-// Returns nil if the token is nil or not found in the [Source].
-func (s *Source) TokenPositionRangesFromToken(tk *token.Token) []position.Range {
-	positions := s.lines.TokenPositions(tk)
-	return s.TokenPositionRanges(positions...)
-}
-
-// TokenPositionRanges returns all token position ranges that are part of the
-// same joined token group as the tokens at the given [position.Position]s.
-//
-// For non-joined lines, returns the range of the token at each given column.
-// Duplicate ranges are removed.
-//
-// Returns nil if no tokens exist at any of the given positions.
-func (s *Source) TokenPositionRanges(positions ...position.Position) []position.Range {
-	var allRanges position.Ranges
-
-	for _, pos := range positions {
-		ranges := s.lines.TokenPositionRangesAt(pos)
-		allRanges = append(allRanges, ranges...)
-	}
-
-	return allRanges.UniqueValues()
-}
-
-// ContentPositionRangesFromToken returns all position ranges for content of the
-// given token, excluding leading and trailing whitespace.
-//
-// Returns nil if the token is nil or not found in the [Source].
-func (s *Source) ContentPositionRangesFromToken(tk *token.Token) []position.Range {
-	return s.lines.ContentPositionRangesFromToken(tk)
-}
-
-// ContentPositionRanges returns all position ranges for content at the given
-// positions, excluding leading and trailing whitespace.
-//
-// Duplicate ranges are removed.
-//
-// Returns nil if no content exists at any of the given positions.
-func (s *Source) ContentPositionRanges(positions ...position.Position) []position.Range {
-	return s.lines.ContentPositionRanges(positions...)
 }
 
 // AddOverlay adds an overlay of the given kind to the specified ranges.

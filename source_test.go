@@ -100,10 +100,10 @@ func TestTokens_String_Annotation(t *testing.T) {
 			for idx, ann := range tc.annotations {
 				require.Less(t, idx, result.Len(), "annotation index out of range")
 
-				result.Line(idx).AddAnnotation(ann)
+				result.Lines()[idx].AddAnnotation(ann)
 			}
 
-			assert.Equal(t, tc.want, result.String())
+			assert.Equal(t, tc.want, result.Lines().String())
 		})
 	}
 }
@@ -609,7 +609,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 
 		// Query line index 1 (second line), column 0 (start of the string token).
 		// The literal block content starts at column 0 (the indentation spaces are part of Origin).
-		ranges := result.TokenPositionRanges(position.Position{Line: 1, Col: 0})
+		ranges := result.Lines().TokenPositionRanges(position.Position{Line: 1, Col: 0})
 		require.NotNil(t, ranges, "expected ranges for joined literal block")
 		require.Len(t, ranges, 2, "expected 2 ranges for 2-line literal block content")
 
@@ -636,7 +636,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		require.Equal(t, 1, result.Len())
 
 		// Query line index 0, column 0 (the "key" token).
-		ranges := result.TokenPositionRanges(position.Position{Line: 0, Col: 0})
+		ranges := result.Lines().TokenPositionRanges(position.Position{Line: 0, Col: 0})
 		require.NotNil(t, ranges)
 		require.Len(t, ranges, 1)
 		assert.Equal(t, 0, ranges[0].Start.Line)
@@ -655,7 +655,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		require.Equal(t, 1, result.Len())
 
 		// Find where the last token ("value") actually starts.
-		ln := result.Line(0)
+		ln := result.Lines()[0]
 		lastTokenIdx := len(ln.Tokens()) - 1
 		require.Positive(t, lastTokenIdx, "expected multiple tokens")
 
@@ -674,7 +674,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		}
 
 		// Query a column within the last token.
-		ranges := result.TokenPositionRanges(position.Position{Line: 0, Col: expectedCol})
+		ranges := result.Lines().TokenPositionRanges(position.Position{Line: 0, Col: expectedCol})
 		require.NotNil(t, ranges)
 		require.Len(t, ranges, 1)
 		assert.Equal(t, 0, ranges[0].Start.Line)
@@ -698,7 +698,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 
 		// Query line index 0 (indicator line), column 0 (the "key" token).
 		// The indicator line itself is not part of the join, but has tokens.
-		ranges := result.TokenPositionRanges(position.Position{Line: 0, Col: 0})
+		ranges := result.Lines().TokenPositionRanges(position.Position{Line: 0, Col: 0})
 		require.NotNil(t, ranges)
 		require.Len(t, ranges, 1)
 		assert.Equal(t, 0, ranges[0].Start.Line)
@@ -721,7 +721,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		require.Equal(t, 3, result.Len())
 
 		// Query line index 2 (last content line), column 0.
-		ranges := result.TokenPositionRanges(position.Position{Line: 2, Col: 0})
+		ranges := result.Lines().TokenPositionRanges(position.Position{Line: 2, Col: 0})
 		require.NotNil(t, ranges, "expected ranges when querying last joined line")
 		require.Len(t, ranges, 2)
 
@@ -743,11 +743,11 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		result := niceyaml.NewSourceFromTokens(tks, niceyaml.WithName("test"))
 
 		// Query non-existent line index.
-		ranges := result.TokenPositionRanges(position.Position{Line: 999, Col: 0})
+		ranges := result.Lines().TokenPositionRanges(position.Position{Line: 999, Col: 0})
 		assert.Nil(t, ranges)
 
 		// Negative index.
-		ranges = result.TokenPositionRanges(position.Position{Line: -1, Col: 0})
+		ranges = result.Lines().TokenPositionRanges(position.Position{Line: -1, Col: 0})
 		assert.Nil(t, ranges)
 	})
 
@@ -765,7 +765,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		require.Equal(t, 3, result.Len())
 
 		// Query line index 1 with a column that's way beyond the token.
-		ranges := result.TokenPositionRanges(position.Position{Line: 1, Col: 100})
+		ranges := result.Lines().TokenPositionRanges(position.Position{Line: 1, Col: 100})
 		assert.Nil(t, ranges, "expected nil for column outside token range")
 	})
 
@@ -784,7 +784,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		require.Equal(t, 4, result.Len())
 
 		// Query middle line (line index 2), column 0.
-		ranges := result.TokenPositionRanges(position.Position{Line: 2, Col: 0})
+		ranges := result.Lines().TokenPositionRanges(position.Position{Line: 2, Col: 0})
 		require.NotNil(t, ranges)
 		require.Len(t, ranges, 3, "expected 3 ranges for 3-line literal block content")
 
@@ -812,7 +812,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		require.Equal(t, 3, result.Len())
 
 		// Query line index 1 (first content line), column 0.
-		ranges := result.TokenPositionRanges(position.Position{Line: 1, Col: 0})
+		ranges := result.Lines().TokenPositionRanges(position.Position{Line: 1, Col: 0})
 		require.NotNil(t, ranges)
 		require.Len(t, ranges, 2)
 
@@ -839,7 +839,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		require.Equal(t, 2, result.Len())
 
 		// Query two different positions: "first" token on line 0, "second" token on line 1.
-		ranges := result.TokenPositionRanges(
+		ranges := result.Lines().TokenPositionRanges(
 			position.Position{Line: 0, Col: 0},
 			position.Position{Line: 1, Col: 0},
 		)
@@ -864,7 +864,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		require.Equal(t, 1, result.Len())
 
 		// Query the same position twice.
-		ranges := result.TokenPositionRanges(
+		ranges := result.Lines().TokenPositionRanges(
 			position.Position{Line: 0, Col: 0},
 			position.Position{Line: 0, Col: 0},
 		)
@@ -885,7 +885,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		result := niceyaml.NewSourceFromTokens(tks, niceyaml.WithName("test"))
 
 		// Query with no positions.
-		ranges := result.TokenPositionRanges()
+		ranges := result.Lines().TokenPositionRanges()
 		assert.Nil(t, ranges)
 	})
 
@@ -906,7 +906,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		//
 		// Both positions are within the joined block, so they should return the same
 		// ranges (deduplicated).
-		ranges := result.TokenPositionRanges(
+		ranges := result.Lines().TokenPositionRanges(
 			position.Position{Line: 1, Col: 0},
 			position.Position{Line: 2, Col: 0},
 		)
@@ -927,7 +927,7 @@ func TestNewSourceFromBytes(t *testing.T) {
 
 	src := []byte("key: value")
 	s := niceyaml.NewSourceFromBytes(src)
-	assert.Equal(t, "key: value", s.Content())
+	assert.Equal(t, "key: value", s.Lines().Content())
 }
 
 func TestNewSourceFromToken_WalksToPrev(t *testing.T) {
@@ -954,8 +954,8 @@ func TestNewSourceFromToken_WalksToPrev(t *testing.T) {
 
 	// Should contain all lines, not just from 'b' onwards.
 	require.Equal(t, 2, source.Len())
-	assert.Contains(t, source.Content(), "a: 1")
-	assert.Contains(t, source.Content(), "b: 2")
+	assert.Contains(t, source.Lines().Content(), "a: 1")
+	assert.Contains(t, source.Lines().Content(), "b: 2")
 }
 
 func TestNewSourceFromToken_FiltersImplicitNull(t *testing.T) {
@@ -981,7 +981,7 @@ func TestNewSourceFromToken_FiltersImplicitNull(t *testing.T) {
 	// Should still work and produce valid output.
 	require.NotNil(t, source)
 	// The content should not be affected by filtering.
-	assert.Contains(t, source.Content(), "key:")
+	assert.Contains(t, source.Lines().Content(), "key:")
 }
 
 func TestSource_Content(t *testing.T) {
@@ -1021,7 +1021,7 @@ func TestSource_Content(t *testing.T) {
 			t.Parallel()
 
 			source := niceyaml.NewSourceFromString(tc.input)
-			got := source.Content()
+			got := source.Lines().Content()
 
 			assert.Equal(t, tc.want, got)
 		})
@@ -1057,7 +1057,7 @@ func TestSource_Validate(t *testing.T) {
 			t.Parallel()
 
 			source := niceyaml.NewSourceFromString(tc.input)
-			err := source.Validate()
+			err := source.Lines().Validate()
 
 			assert.NoError(t, err)
 		})
@@ -1204,7 +1204,7 @@ func TestSource_AddOverlay(t *testing.T) {
 			position.New(0, 5),
 		))
 
-		ln := source.Line(0)
+		ln := source.Lines()[0]
 		require.Len(t, ln.Overlays, 1)
 		assert.Equal(t, position.NewSpan(0, 5), ln.Overlays[0].Cols)
 		assert.Equal(t, style.Style("test1"), ln.Overlays[0].Kind)
@@ -1228,19 +1228,19 @@ func TestSource_AddOverlay(t *testing.T) {
 		))
 
 		// First line: col 3 to end of line.
-		ln0 := source.Line(0)
+		ln0 := source.Lines()[0]
 		require.Len(t, ln0.Overlays, 1)
 		assert.Equal(t, 3, ln0.Overlays[0].Cols.Start)
 		assert.Equal(t, style.Style("test2"), ln0.Overlays[0].Kind)
 
 		// Middle line: full line.
-		ln1 := source.Line(1)
+		ln1 := source.Lines()[1]
 		require.Len(t, ln1.Overlays, 1)
 		assert.Equal(t, 0, ln1.Overlays[0].Cols.Start)
 		assert.Equal(t, style.Style("test2"), ln1.Overlays[0].Kind)
 
 		// Last line: start to col 5.
-		ln2 := source.Line(2)
+		ln2 := source.Lines()[2]
 		require.Len(t, ln2.Overlays, 1)
 		assert.Equal(t, 0, ln2.Overlays[0].Cols.Start)
 		assert.Equal(t, 5, ln2.Overlays[0].Cols.End)
@@ -1262,8 +1262,8 @@ func TestSource_AddOverlay(t *testing.T) {
 			position.NewRange(position.New(1, 0), position.New(1, 4)),
 		)
 
-		require.Len(t, source.Line(0).Overlays, 1)
-		require.Len(t, source.Line(1).Overlays, 1)
+		require.Len(t, source.Lines()[0].Overlays, 1)
+		require.Len(t, source.Lines()[1].Overlays, 1)
 	})
 
 	t.Run("empty source no-op", func(t *testing.T) {
@@ -1296,14 +1296,14 @@ func TestSource_ClearOverlays(t *testing.T) {
 			position.NewRange(position.New(1, 0), position.New(1, 10)),
 		)
 
-		require.Len(t, source.Line(0).Overlays, 1)
-		require.Len(t, source.Line(1).Overlays, 1)
+		require.Len(t, source.Lines()[0].Overlays, 1)
+		require.Len(t, source.Lines()[1].Overlays, 1)
 
 		// Clear all overlays.
 		source.ClearOverlays()
 
-		assert.Nil(t, source.Line(0).Overlays)
-		assert.Nil(t, source.Line(1).Overlays)
+		assert.Nil(t, source.Lines()[0].Overlays)
+		assert.Nil(t, source.Lines()[1].Overlays)
 	})
 
 	t.Run("idempotent on empty", func(t *testing.T) {
@@ -1315,7 +1315,7 @@ func TestSource_ClearOverlays(t *testing.T) {
 		// Clear without any overlays set.
 		source.ClearOverlays()
 
-		assert.Nil(t, source.Line(0).Overlays)
+		assert.Nil(t, source.Lines()[0].Overlays)
 	})
 }
 
@@ -1471,7 +1471,7 @@ func TestSource_TokenAt(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := source.TokenAt(tc.pos)
+			got := source.Lines().TokenAt(tc.pos)
 
 			if tc.wantNil {
 				assert.Nil(t, got)
@@ -1505,7 +1505,7 @@ func TestSource_TokenPositionRangesFromToken(t *testing.T) {
 
 		require.NotNil(t, keyToken)
 
-		ranges := source.TokenPositionRangesFromToken(keyToken)
+		ranges := source.Lines().TokenPositionRangesFromToken(keyToken)
 
 		require.Len(t, ranges, 1)
 		assert.Equal(t, 0, ranges[0].Start.Line)
@@ -1518,7 +1518,7 @@ func TestSource_TokenPositionRangesFromToken(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString("key: value\n")
-		ranges := source.TokenPositionRangesFromToken(nil)
+		ranges := source.Lines().TokenPositionRangesFromToken(nil)
 
 		assert.Nil(t, ranges)
 	})
@@ -1529,7 +1529,7 @@ func TestSource_TokenPositionRangesFromToken(t *testing.T) {
 		source := niceyaml.NewSourceFromString("key: value\n")
 		otherToken := &token.Token{Value: "other"}
 
-		ranges := source.TokenPositionRangesFromToken(otherToken)
+		ranges := source.Lines().TokenPositionRangesFromToken(otherToken)
 
 		assert.Nil(t, ranges)
 	})
@@ -1545,7 +1545,7 @@ func TestSource_ContentPositionRanges(t *testing.T) {
 		source := niceyaml.NewSourceFromString(input)
 
 		// Query position at "key".
-		ranges := source.ContentPositionRanges(position.New(0, 0))
+		ranges := source.Lines().ContentPositionRanges(position.New(0, 0))
 
 		require.NotNil(t, ranges)
 		require.Len(t, ranges, 1)
@@ -1561,7 +1561,7 @@ func TestSource_ContentPositionRanges(t *testing.T) {
 		`)
 		source := niceyaml.NewSourceFromString(input)
 
-		ranges := source.ContentPositionRanges(
+		ranges := source.Lines().ContentPositionRanges(
 			position.New(0, 0), // "first".
 			position.New(1, 0), // "second".
 		)
@@ -1574,7 +1574,7 @@ func TestSource_ContentPositionRanges(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString("key: value\n")
-		ranges := source.ContentPositionRanges()
+		ranges := source.Lines().ContentPositionRanges()
 
 		assert.Nil(t, ranges)
 	})
@@ -1583,7 +1583,7 @@ func TestSource_ContentPositionRanges(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString("key: value\n")
-		ranges := source.ContentPositionRanges(position.New(100, 0))
+		ranges := source.Lines().ContentPositionRanges(position.New(100, 0))
 
 		assert.Nil(t, ranges)
 	})
@@ -1611,7 +1611,7 @@ func TestSource_ContentPositionRangesFromToken(t *testing.T) {
 
 		require.NotNil(t, valueToken)
 
-		ranges := source.ContentPositionRangesFromToken(valueToken)
+		ranges := source.Lines().ContentPositionRangesFromToken(valueToken)
 
 		require.NotNil(t, ranges)
 		require.Len(t, ranges, 1)
@@ -1622,7 +1622,7 @@ func TestSource_ContentPositionRangesFromToken(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString("key: value\n")
-		ranges := source.ContentPositionRangesFromToken(nil)
+		ranges := source.Lines().ContentPositionRangesFromToken(nil)
 
 		assert.Nil(t, ranges)
 	})
@@ -1633,7 +1633,7 @@ func TestSource_ContentPositionRangesFromToken(t *testing.T) {
 		source := niceyaml.NewSourceFromString("key: value\n")
 		otherToken := &token.Token{Value: "other"}
 
-		ranges := source.ContentPositionRangesFromToken(otherToken)
+		ranges := source.Lines().ContentPositionRangesFromToken(otherToken)
 
 		assert.Nil(t, ranges)
 	})
@@ -1699,7 +1699,7 @@ func TestSource_Lines_SharedView(t *testing.T) {
 		position.New(0, 5),
 		position.New(0, 10),
 	))
-	require.Len(t, source.Line(0).Overlays, 2)
+	require.Len(t, source.Lines()[0].Overlays, 2)
 
 	// A clone is detached from both.
 	clone := view.Clone()
@@ -1733,7 +1733,7 @@ func TestSource_AddOverlay_WhileIterating(t *testing.T) {
 		}
 	}
 
-	require.Len(t, source.Line(0).Overlays, 2)
-	assert.Equal(t, position.NewSpan(5, 6), source.Line(0).Overlays[0].Cols)
-	assert.Equal(t, position.NewSpan(0, 3), source.Line(0).Overlays[1].Cols)
+	require.Len(t, source.Lines()[0].Overlays, 2)
+	assert.Equal(t, position.NewSpan(5, 6), source.Lines()[0].Overlays[0].Cols)
+	assert.Equal(t, position.NewSpan(0, 3), source.Lines()[0].Overlays[1].Cols)
 }

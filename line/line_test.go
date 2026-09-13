@@ -2291,7 +2291,7 @@ func TestLines_TokenAt(t *testing.T) {
 	})
 }
 
-func TestLines_TokenPositionRanges(t *testing.T) {
+func TestLines_TokenPositionRangesFromToken(t *testing.T) {
 	t.Parallel()
 
 	t.Run("single token range", func(t *testing.T) {
@@ -2301,9 +2301,9 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		tks := lexer.Tokenize(input)
 		lines := line.NewLines(tks)
 
-		// Use original "key" token from lexer (TokenPositionRanges does pointer comparison).
+		// Use original "key" token from lexer (TokenPositionRangesFromToken does pointer comparison).
 		tk := tks[0]
-		ranges := lines.TokenPositionRanges(tk)
+		ranges := lines.TokenPositionRangesFromToken(tk)
 		require.Len(t, ranges, 1)
 		assert.Equal(t, 0, ranges[0].Start.Line)
 		assert.Equal(t, 0, ranges[0].Start.Col)
@@ -2335,7 +2335,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 
 		require.NotNil(t, tk)
 
-		ranges := lines.TokenPositionRanges(tk)
+		ranges := lines.TokenPositionRangesFromToken(tk)
 		require.Len(t, ranges, 2)
 
 		// Collect line indices.
@@ -2355,7 +2355,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		tks := lexer.Tokenize(input)
 		lines := line.NewLines(tks)
 
-		assert.Nil(t, lines.TokenPositionRanges(nil))
+		assert.Nil(t, lines.TokenPositionRangesFromToken(nil))
 	})
 
 	t.Run("token not in lines returns empty ranges", func(t *testing.T) {
@@ -2368,7 +2368,7 @@ func TestLines_TokenPositionRanges(t *testing.T) {
 		otherTks := lexer.Tokenize("other: data\n")
 		otherTk := otherTks[0]
 
-		ranges := lines.TokenPositionRanges(otherTk)
+		ranges := lines.TokenPositionRangesFromToken(otherTk)
 		assert.Empty(t, ranges)
 	})
 }

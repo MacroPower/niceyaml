@@ -1064,7 +1064,7 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 
 		result.Unified().AddOverlay(style.GenericHighlight, highlight)
 
-		assert.Empty(t, before.Line(0).Overlays)
-		assert.Empty(t, after.Line(0).Overlays)
+		assert.Empty(t, before.Lines()[0].Overlays)
+		assert.Empty(t, after.Lines()[0].Overlays)
 	})
 }
