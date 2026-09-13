@@ -3,6 +3,8 @@ package paths_test
 import (
 	"testing"
 
+	"github.com/goccy/go-yaml"
+	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -374,7 +376,7 @@ func TestPath_NilHandling(t *testing.T) {
 func TestPath_Token(t *testing.T) {
 	t.Parallel()
 
-	yaml := `
+	input := `
 name: test
 kind: Service
 metadata:
@@ -385,7 +387,7 @@ items:
   - second
 `
 
-	source := niceyaml.NewSourceFromString(yaml)
+	source := niceyaml.NewSourceFromString(input)
 	file, err := source.File()
 	require.NoError(t, err)
 
@@ -435,7 +437,7 @@ items:
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tk, err := tc.path.Token(file)
+			tk, err := tc.path.Token(file.Docs[0])
 			require.NoError(t, err)
 			require.NotNil(t, tk)
 			assert.Equal(t, tc.wantValue, tk.Value)
@@ -453,9 +455,8 @@ func TestPath_Token_NilPath(t *testing.T) {
 
 	var path *paths.Path
 
-	_, err = path.Token(file)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "nil path")
+	_, err = path.Token(file.Docs[0])
+	require.ErrorIs(t, err, paths.ErrNilPath)
 }
 
 func TestPath_Token_InvalidPath(t *testing.T) {
@@ -466,29 +467,45 @@ func TestPath_Token_InvalidPath(t *testing.T) {
 	require.NoError(t, err)
 
 	path := paths.Root().Child("nonexistent").Value()
-	_, err = path.Token(file)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "filter from ast.File by YAMLPath")
+	_, err = path.Token(file.Docs[0])
+	require.ErrorIs(t, err, yaml.ErrNotFoundNode)
 }
 
-func TestPath_Token_EmptyDocs(t *testing.T) {
+func TestPath_Token_NoDocument(t *testing.T) {
 	t.Parallel()
 
-	// Test findKeyToken edge case where file has no docs.
-	source := niceyaml.NewSourceFromString(``)
+	path := paths.Root().Child("name").Key()
+
+	_, err := path.Token(nil)
+	require.ErrorIs(t, err, paths.ErrNoDocument)
+
+	_, err = path.Token(&ast.DocumentNode{})
+	require.ErrorIs(t, err, paths.ErrNoDocument)
+}
+
+func TestPath_Token_MultipleDocuments(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("name: first\n---\nname: second\n")
 	file, err := source.File()
 	require.NoError(t, err)
+	require.Len(t, file.Docs, 2)
 
-	path := paths.Root().Child("name").Key()
-	_, err = path.Token(file)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "filter from ast.File by YAMLPath")
+	path := paths.Root().Child("name").Value()
+
+	tk, err := path.Token(file.Docs[0])
+	require.NoError(t, err)
+	assert.Equal(t, "first", tk.Value)
+
+	tk, err = path.Token(file.Docs[1])
+	require.NoError(t, err)
+	assert.Equal(t, "second", tk.Value)
 }
 
 func TestPath_Token_NestedStructures(t *testing.T) {
 	t.Parallel()
 
-	yaml := `
+	input := `
 list:
   - name: first
     items:
@@ -504,7 +521,7 @@ nested:
       value: found
 `
 
-	source := niceyaml.NewSourceFromString(yaml)
+	source := niceyaml.NewSourceFromString(input)
 	file, err := source.File()
 	require.NoError(t, err)
 
@@ -539,7 +556,7 @@ nested:
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tk, err := tc.path.Token(file)
+			tk, err := tc.path.Token(file.Docs[0])
 			require.NoError(t, err)
 			require.NotNil(t, tk)
 			assert.Equal(t, tc.wantValue, tk.Value)

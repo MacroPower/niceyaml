@@ -1910,6 +1910,92 @@ func TestError_SetWidth_CombinedAnnotationsOnSameLine(t *testing.T) {
 	assert.Equal(t, want, got)
 }
 
+func TestError_DocumentIndex(t *testing.T) {
+	t.Parallel()
+
+	newXMLPrinter := func() *niceyaml.Printer {
+		return niceyaml.NewPrinter(
+			niceyaml.WithStyles(yamltest.NewXMLStyles()),
+			niceyaml.WithGutter(niceyaml.NoGutter()),
+			niceyaml.WithStyle(lipgloss.NewStyle()),
+		)
+	}
+
+	source := niceyaml.NewSourceFromString("name: first\n---\nname: second\n")
+	namePath := paths.Root().Child("name").Value()
+
+	t.Run("path resolves in the selected document", func(t *testing.T) {
+		t.Parallel()
+
+		err := niceyaml.NewError(
+			"bad name",
+			niceyaml.WithPath(namePath),
+			niceyaml.WithDocumentIndex(1),
+			niceyaml.WithSource(source),
+			niceyaml.WithPrinter(newXMLPrinter()),
+		)
+
+		got := trimLines(err.Error())
+
+		assert.True(t, strings.HasPrefix(got, "[3:7] bad name:"), got)
+		assert.Contains(t, got, "<genericError>second</genericError>")
+		assert.NotContains(t, got, "<genericError>first</genericError>")
+	})
+
+	t.Run("path resolves in the first document by default", func(t *testing.T) {
+		t.Parallel()
+
+		err := niceyaml.NewError(
+			"bad name",
+			niceyaml.WithPath(namePath),
+			niceyaml.WithSource(source),
+			niceyaml.WithPrinter(newXMLPrinter()),
+		)
+
+		got := trimLines(err.Error())
+
+		assert.True(t, strings.HasPrefix(got, "[1:7] bad name:"), got)
+		assert.Contains(t, got, "<genericError>first</genericError>")
+
+		_, set := err.DocumentIndex()
+		assert.False(t, set)
+	})
+
+	t.Run("nested errors inherit the document index", func(t *testing.T) {
+		t.Parallel()
+
+		err := niceyaml.NewError(
+			"validation failed",
+			niceyaml.WithDocumentIndex(1),
+			niceyaml.WithSource(source),
+			niceyaml.WithPrinter(newXMLPrinter()),
+			niceyaml.WithErrors(
+				niceyaml.NewError("bad name", niceyaml.WithPath(namePath)),
+			),
+		)
+
+		got := trimLines(err.Error())
+
+		assert.Contains(t, got, "<genericError>second</genericError>")
+		assert.Contains(t, got, "^ bad name")
+		assert.NotContains(t, got, "<genericError>first</genericError>")
+	})
+
+	t.Run("out of range index degrades to a plain message", func(t *testing.T) {
+		t.Parallel()
+
+		err := niceyaml.NewError(
+			"bad name",
+			niceyaml.WithPath(namePath),
+			niceyaml.WithDocumentIndex(5),
+			niceyaml.WithSource(source),
+			niceyaml.WithPrinter(newXMLPrinter()),
+		)
+
+		assert.Equal(t, "at $.name: bad name", err.Error())
+	})
+}
+
 func TestError_DoesNotMutateSource(t *testing.T) {
 	t.Parallel()
 

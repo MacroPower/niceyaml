@@ -25,6 +25,10 @@ var (
 
 	// ErrTokenNotFound indicates the token was not found in the source.
 	ErrTokenNotFound = errors.New("token not found in source")
+
+	// ErrDocumentNotFound indicates the error's document index is outside the
+	// documents the source parsed into.
+	ErrDocumentNotFound = errors.New("document not found in source")
 )
 
 // Error represents a YAML error with optional source annotation.
@@ -32,6 +36,11 @@ var (
 // To enable annotated error output that shows the relevant YAML location, provide:
 //   - [WithErrorToken] directly specifies the error location, OR
 //   - [WithPath] combined with [WithSource] to resolve the path
+//
+// A path resolves within one document of the source. [WithDocumentIndex]
+// selects which; without it the first document is used. [DocumentDecoder]
+// sets the index on every error it returns, and nested errors without an
+// index of their own inherit the index of the error that holds them.
 //
 // Since these conditions must only be satisfied before calling [Error.Error],
 // you may use [Error.SetOption] to supply them at any time and in any context
@@ -62,6 +71,8 @@ type Error struct {
 	errors       []*Error
 	contextLines int
 	width        int
+	docIndex     int
+	hasDocIndex  bool
 }
 
 // NewError creates a new [*Error] with the given message.
@@ -87,6 +98,7 @@ func NewErrorFrom(err error, opts ...ErrorOption) *Error {
 // Available options:
 //   - [WithContextLines]
 //   - [WithPath]
+//   - [WithDocumentIndex]
 //   - [WithErrorToken]
 //   - [WithPrinter]
 //   - [WithSource]
@@ -109,6 +121,18 @@ func WithContextLines(lines int) ErrorOption {
 func WithPath(p *paths.Path) ErrorOption {
 	return func(e *Error) {
 		e.path = p
+	}
+}
+
+// WithDocumentIndex is an [ErrorOption] that sets the 0-indexed document
+// the error's path resolves in. It matters only for multi-document sources.
+//
+// [DocumentDecoder] applies it to the errors it returns, so callers only need
+// it when they build path errors for a specific document by hand.
+func WithDocumentIndex(index int) ErrorOption {
+	return func(e *Error) {
+		e.docIndex = index
+		e.hasDocIndex = true
 	}
 }
 
@@ -238,7 +262,17 @@ func (e *Error) resolveMainToken() (*token.Token, error) {
 		return nil, err
 	}
 
-	return resolveToken(file, nil, e.path)
+	return resolveToken(file, nil, e.path, e.documentIndex(0))
+}
+
+// documentIndex returns the document index to resolve paths in, or fallback
+// when none was set with [WithDocumentIndex].
+func (e *Error) documentIndex(fallback int) int {
+	if e.hasDocIndex {
+		return e.docIndex
+	}
+
+	return fallback
 }
 
 // hasResolvableNestedErrors checks if any nested error has a path or token.
@@ -325,6 +359,12 @@ func (e *Error) Path() string {
 	return ""
 }
 
+// DocumentIndex returns the 0-indexed document the error's path resolves in
+// and whether one was set with [WithDocumentIndex].
+func (e *Error) DocumentIndex() (int, bool) {
+	return e.docIndex, e.hasDocIndex
+}
+
 // errorPosition holds information about a resolved error position.
 //
 // It represents either the main error position (message empty) or a nested
@@ -400,7 +440,7 @@ func (e *Error) resolveNestedError(src *Source, view line.Lines, nested *Error) 
 		return errorPosition{}, fmt.Errorf("parse source: %w", err)
 	}
 
-	tk, err := resolveToken(file, nested.token, nested.path)
+	tk, err := resolveToken(file, nested.token, nested.path, nested.documentIndex(e.documentIndex(0)))
 	if err != nil {
 		return errorPosition{}, err
 	}
@@ -525,8 +565,10 @@ func (e *Error) renderErrorSource(mainToken *token.Token) string {
 }
 
 // resolveToken resolves a token from either a direct token or path.
-// The file parameter is required when pg is non-nil.
-func resolveToken(file *ast.File, tk *token.Token, p *paths.Path) (*token.Token, error) {
+//
+// A path resolves in document docIndex of file, which is required when p is
+// non-nil.
+func resolveToken(file *ast.File, tk *token.Token, p *paths.Path, docIndex int) (*token.Token, error) {
 	if tk != nil {
 		return tk, nil
 	}
@@ -536,7 +578,11 @@ func resolveToken(file *ast.File, tk *token.Token, p *paths.Path) (*token.Token,
 			return nil, ErrNoSource
 		}
 
-		resolved, err := p.Token(file)
+		if docIndex < 0 || docIndex >= len(file.Docs) {
+			return nil, fmt.Errorf("%w: index %d of %d", ErrDocumentNotFound, docIndex, len(file.Docs))
+		}
+
+		resolved, err := p.Token(file.Docs[docIndex])
 		if err != nil {
 			return nil, fmt.Errorf("path token: %w", err)
 		}

@@ -12,6 +12,14 @@ import (
 // YAMLPath is a type alias for [yaml.Path].
 type YAMLPath = yaml.Path
 
+var (
+	// ErrNilPath indicates a nil [*Path] was asked to resolve a token.
+	ErrNilPath = errors.New("nil path")
+
+	// ErrNoDocument indicates a nil document or a document without a body.
+	ErrNoDocument = errors.New("no document")
+)
+
 // Part represents a specific part of a mapping entry.
 type Part int
 
@@ -220,22 +228,35 @@ func (p *Path) String() string {
 	}
 }
 
-// Token resolves the [token.Token] at this path in the given file.
+// Token resolves the [token.Token] at this path in the given document.
+//
+// The path is resolved against the document body only, so the same path
+// resolves to different tokens in different documents of one file. Returns
+// [ErrNilPath] for a nil Path, [ErrNoDocument] when doc or its body is nil,
+// and wraps [yaml.ErrNotFoundNode] when nothing exists at the path.
 //
 // If the target is [PartKey] and the path points to a mapping value, Token
 // returns the key token. Otherwise, it returns the value node's token.
-func (p *Path) Token(file *ast.File) (*token.Token, error) {
+func (p *Path) Token(doc *ast.DocumentNode) (*token.Token, error) {
 	if p == nil || p.path == nil {
-		return nil, errors.New("nil path")
+		return nil, ErrNilPath
 	}
 
-	node, err := p.path.FilterFile(file)
+	if doc == nil || doc.Body == nil {
+		return nil, ErrNoDocument
+	}
+
+	node, err := p.path.FilterNode(doc.Body)
 	if err != nil {
-		return nil, fmt.Errorf("filter from ast.File by YAMLPath: %w", err)
+		return nil, fmt.Errorf("filter document by YAMLPath: %w", err)
+	}
+
+	if node == nil {
+		return nil, fmt.Errorf("filter document by YAMLPath ( %s ): %w", p.path, yaml.ErrNotFoundNode)
 	}
 
 	if p.target == PartKey {
-		if keyToken := findKeyToken(file, node); keyToken != nil {
+		if keyToken := findKeyToken(doc, node); keyToken != nil {
 			return keyToken, nil
 		}
 	}
@@ -247,12 +268,8 @@ func (p *Path) Token(file *ast.File) (*token.Token, error) {
 //
 // Returns nil if the node is not a value in a mapping (e.g., array element or
 // root).
-func findKeyToken(file *ast.File, node ast.Node) *token.Token {
-	if file == nil || node == nil || len(file.Docs) == 0 {
-		return nil
-	}
-
-	parent := ast.Parent(file.Docs[0].Body, node)
+func findKeyToken(doc *ast.DocumentNode, node ast.Node) *token.Token {
+	parent := ast.Parent(doc.Body, node)
 	if parent == nil {
 		return nil
 	}

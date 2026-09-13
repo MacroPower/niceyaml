@@ -18,6 +18,8 @@
 //
 // Both paths resolve to the same YAML node, but [Path.Token] returns different
 // tokens: the key token "name" for the first, the value token for the second.
+// Token resolves within a single document, so callers working with
+// multi-document files pick the document first.
 //
 // # Integration with niceyaml.Error
 //

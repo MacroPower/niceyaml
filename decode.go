@@ -332,11 +332,27 @@ func (dd *DocumentDecoder) ValidateSchema(ctx context.Context, sv SchemaValidato
 
 	err = sv.ValidateSchema(ctx, untypedData)
 	if err != nil {
-		//nolint:wrapcheck // SchemaValidator.ValidateSchema should return Error with path info.
-		return err
+		return dd.locate(err)
 	}
 
 	return nil
+}
+
+// locate stamps err with this document's index when err is an [*Error] that
+// has none, so its paths resolve in the right document of a multi-document
+// source. Other errors pass through unchanged.
+func (dd *DocumentDecoder) locate(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	yamlErr, ok := errors.AsType[*Error](err)
+	if ok && !yamlErr.hasDocIndex {
+		yamlErr.SetOption(WithDocumentIndex(dd.index))
+	}
+
+	//nolint:wrapcheck // The producer already returns Error with path info.
+	return err
 }
 
 // Decode decodes the document into a new T.
@@ -414,8 +430,7 @@ func (dd *DocumentDecoder) UnmarshalInto(ctx context.Context, v any) error {
 
 	// Self-validation.
 	if validator, ok := v.(Validator); ok {
-		//nolint:wrapcheck // Validator.Validate should return Error with path info.
-		return validator.Validate()
+		return dd.locate(validator.Validate())
 	}
 
 	return nil
@@ -430,6 +445,7 @@ func (dd *DocumentDecoder) decodeNode(ctx context.Context, node ast.Node, v any)
 			return NewError(
 				yamlErr.GetMessage(),
 				WithErrorToken(yamlErr.GetToken()),
+				WithDocumentIndex(dd.index),
 			)
 		}
 

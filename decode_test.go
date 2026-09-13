@@ -3,6 +3,7 @@ package niceyaml_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/goccy/go-yaml"
@@ -864,6 +865,118 @@ func TestDocumentDecoder_ValidateSchema(t *testing.T) {
 			err := dd.ValidateSchema(t.Context(), validator)
 			require.ErrorIs(t, err, wantErr)
 		}
+	})
+}
+
+// failingValidator always fails self-validation with a path error.
+type failingValidator struct {
+	Name string `yaml:"name"`
+}
+
+func (failingValidator) Validate() error {
+	return niceyaml.NewError("rejected", niceyaml.WithPath(paths.Root().Child("name").Value()))
+}
+
+func TestDocumentDecoder_DocumentIndex(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.Input(`
+		name: first
+		---
+		name: second
+	`)
+	namePath := paths.Root().Child("name").Value()
+
+	requireIndex := func(t *testing.T, err error, want int) {
+		t.Helper()
+
+		yamlErr, ok := errors.AsType[*niceyaml.Error](err)
+		require.True(t, ok, "want *niceyaml.Error, got %T", err)
+
+		got, set := yamlErr.DocumentIndex()
+		require.True(t, set)
+		assert.Equal(t, want, got)
+	}
+
+	t.Run("schema validation errors carry the document index", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(input)
+		d, err := source.Decoder()
+		require.NoError(t, err)
+
+		validator := yamltest.NewCustomSchemaValidator(func(_ context.Context, _ any) error {
+			return niceyaml.NewError("bad name", niceyaml.WithPath(namePath))
+		})
+
+		for i, dd := range d.Documents() {
+			requireIndex(t, dd.ValidateSchema(t.Context(), validator), i)
+		}
+	})
+
+	t.Run("self validation errors carry the document index", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(input)
+		d, err := source.Decoder()
+		require.NoError(t, err)
+
+		for i, dd := range d.Documents() {
+			_, err := dd.Unmarshal[failingValidator](t.Context())
+			requireIndex(t, err, i)
+		}
+	})
+
+	t.Run("decode errors carry the document index", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(input)
+		d, err := source.Decoder()
+		require.NoError(t, err)
+
+		for i, dd := range d.Documents() {
+			_, err := dd.Decode[struct {
+				Name int `yaml:"name"`
+			}](t.Context())
+			requireIndex(t, err, i)
+		}
+	})
+
+	t.Run("an explicit index is kept", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(input)
+		d, err := source.Decoder()
+		require.NoError(t, err)
+
+		validator := yamltest.NewCustomSchemaValidator(func(_ context.Context, _ any) error {
+			return niceyaml.NewError("bad name", niceyaml.WithDocumentIndex(7))
+		})
+
+		for _, dd := range d.Documents() {
+			requireIndex(t, dd.ValidateSchema(t.Context(), validator), 7)
+		}
+	})
+
+	t.Run("wrapped errors resolve in their own document", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(input)
+		d, err := source.Decoder()
+		require.NoError(t, err)
+
+		validator := yamltest.NewCustomSchemaValidator(func(_ context.Context, _ any) error {
+			return niceyaml.NewError("bad name", niceyaml.WithPath(namePath))
+		})
+
+		var got []string
+
+		for _, dd := range d.Documents() {
+			err := source.WrapError(dd.ValidateSchema(t.Context(), validator))
+			got = append(got, strings.SplitN(err.Error(), "\n", 2)[0])
+		}
+
+		assert.Equal(t, []string{"[1:7] bad name:", "[3:7] bad name:"}, got)
 	})
 }
 
