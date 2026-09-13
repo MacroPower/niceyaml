@@ -95,7 +95,7 @@ linters:
     # - prealloc
     - predeclared
     - reassign
-    # - recvcheck
+    - recvcheck
     # - revive
     - sloglint
     - staticcheck
@@ -121,6 +121,14 @@ linters:
 
     exhaustive:
       default-signifies-exhaustive: true
+
+    recvcheck:
+      # Bubble Tea requires value receivers on tea.Model methods, while the
+      # rest of a model mutates through a pointer.
+      exclusions:
+        - "*.Init"
+        - "*.Update"
+        - "*.View"
 
     wsl_v5:
       allow-whole-block: true

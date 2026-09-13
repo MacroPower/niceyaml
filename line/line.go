@@ -47,7 +47,7 @@ func (l *Line) AddOverlay(o ...Overlay) {
 }
 
 // Number returns the 1-indexed line number of this [Line].
-func (l Line) Number() int {
+func (l *Line) Number() int {
 	if l.number != 0 {
 		return l.number
 	}
@@ -68,7 +68,7 @@ func (l Line) Number() int {
 //
 // Line endings (LF or CRLF) are stripped from each segment for a clean
 // single-line representation.
-func (l Line) Content() string {
+func (l *Line) Content() string {
 	var sb strings.Builder
 
 	for _, seg := range l.segments {
@@ -85,7 +85,7 @@ func (l Line) Content() string {
 //
 // The copy shares the underlying tokens with the original, since the line
 // never modifies them.
-func (l Line) Clone() Line {
+func (l *Line) Clone() Line {
 	var ann Annotations
 
 	if len(l.Annotations) > 0 {
@@ -115,20 +115,20 @@ func (l Line) Clone() Line {
 //
 // The slice is new, but the tokens are shared with the line. Treat them as
 // read-only.
-func (l Line) Tokens() token.Tokens {
+func (l *Line) Tokens() token.Tokens {
 	return l.segments.PartTokens()
 }
 
 // Token returns the [*token.Token] at the given index. The token is shared
 // with the line, so treat it as read-only.
 // Panics if idx is out of range.
-func (l Line) Token(idx int) *token.Token {
+func (l *Line) Token(idx int) *token.Token {
 	return l.segments[idx].Part()
 }
 
 // tokenPositions returns the [position.Position]s where the given
 // [*token.Token] appears on this line.
-func (l Line) tokenPositions(lineIdx int, tk *token.Token) []position.Position {
+func (l *Line) tokenPositions(lineIdx int, tk *token.Token) []position.Position {
 	var positions []position.Position
 
 	col := 0
@@ -145,7 +145,7 @@ func (l Line) tokenPositions(lineIdx int, tk *token.Token) []position.Position {
 
 // tokenPositionRanges returns [position.Ranges] for occurrences of the given
 // [*token.Token] on this line.
-func (l Line) tokenPositionRanges(lineIdx int, tk *token.Token) position.Ranges {
+func (l *Line) tokenPositionRanges(lineIdx int, tk *token.Token) position.Ranges {
 	var ranges position.Ranges
 
 	col := 0
@@ -165,12 +165,12 @@ func (l Line) tokenPositionRanges(lineIdx int, tk *token.Token) position.Ranges 
 }
 
 // IsEmpty returns true if there are no tokens on this [Line].
-func (l Line) IsEmpty() bool {
+func (l *Line) IsEmpty() bool {
 	return len(l.segments) == 0
 }
 
 // Width returns the total rune width of this line's content.
-func (l Line) Width() int {
+func (l *Line) Width() int {
 	var w int
 
 	for _, seg := range l.segments {
@@ -182,7 +182,7 @@ func (l Line) Width() int {
 
 // String reconstructs this [Line] as a string, including any annotations.
 // This should generally only be used for debugging.
-func (l Line) String() string {
+func (l *Line) String() string {
 	var sb strings.Builder
 
 	prefix := fmt.Sprintf("%4d | ", l.Number())

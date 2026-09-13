@@ -1264,9 +1264,7 @@ func (m *Model) getHunksDiffContent() string {
 const sideBySideSeparator = " │ "
 
 // renderSideBySide renders the side-by-side view with two panes.
-//
-//nolint:gocritic // hugeParam: required for value receiver compatibility with View().
-func (m Model) renderSideBySide(contentW, contentH int) string {
+func (m *Model) renderSideBySide(contentW, contentH int) string {
 	// Get views for both panes. The model owns both, with overlays applied.
 	if m.left == nil {
 		return m.renderContent(nil, contentW, contentH)

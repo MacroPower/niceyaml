@@ -184,7 +184,7 @@ func WithErrors(errs ...*Error) ErrorOption {
 }
 
 // Error returns the error message with source annotation if available.
-func (e Error) Error() string {
+func (e *Error) Error() string {
 	if e.err == nil {
 		return ""
 	}
@@ -230,7 +230,7 @@ func (e Error) Error() string {
 
 // formatPlainError formats the error without source annotation.
 // Nested errors are rendered as bullet points if present.
-func (e Error) formatPlainError() string {
+func (e *Error) formatPlainError() string {
 	if len(e.errors) == 0 {
 		return e.err.Error()
 	}
