@@ -3,8 +3,10 @@ package niceyaml
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/goccy/go-yaml/ast"
@@ -42,9 +44,9 @@ var (
 // sets the index on every error it returns, and nested errors without an
 // index of their own inherit the index of the error that holds them.
 //
-// Since these conditions must only be satisfied before calling [Error.Error],
-// you may use [Error.SetOption] to supply them at any time and in any context
-// before then.
+// Since these conditions must only be satisfied before calling
+// [Error.Detail], you may use [Error.SetOption] to supply them at any time and
+// in any context before then.
 //
 // This means that callers may optionally attach any additional context that
 // original [Error] producers might lack, thus avoiding the need for producers
@@ -56,6 +58,12 @@ var (
 //
 // For convenience, [Source.WrapError] can be used if you only need to add the
 // [Source] without any other [ErrorOption] values.
+//
+// [Error.Error] returns a plain, single-purpose message with the location,
+// suitable for logs. [Error.Detail] renders the annotated source excerpt,
+// and the %+v verb prints both:
+//
+//	fmt.Printf("%+v\n", source.WrapError(err))
 //
 // Error implements the error interface. Use [Error.Unwrap] with [errors.Is]
 // and [errors.As] to inspect wrapped errors.
@@ -156,8 +164,7 @@ func WithPrinter(p *Printer) ErrorOption {
 // from. Paths resolve against it, and tokens are located in it by position.
 //
 // Without a source, an error that carries a token renders from the token's
-// own chain instead, which re-lexes the document on every [Error.Error]
-// call.
+// own chain instead, which rebuilds the view on every [Error.Detail] call.
 func WithSource(src *Source) ErrorOption {
 	return func(e *Error) {
 		e.source = src
@@ -183,91 +190,137 @@ func WithErrors(errs ...*Error) ErrorOption {
 	}
 }
 
-// Error returns the error message with source annotation if available.
+// Error returns the error message prefixed with its location.
+//
+// The location is the token position as "[line:col]" when the error carries
+// a token or its path resolves against the attached [Source], the path as
+// "at $.path" when it does not, and nothing when the error has neither.
+// Nested errors follow on their own lines as indented bullets, each with its
+// own location.
+//
+// The result is plain text and never includes source lines, so it is safe to
+// log or compare. Use [Error.Detail] or the %+v verb for the annotated
+// source excerpt.
 func (e *Error) Error() string {
 	if e.err == nil {
 		return ""
 	}
 
-	// Try to resolve main token for position display.
-	mainToken, err := e.resolveMainToken()
-	if err != nil {
-		pathStr := ""
-		if e.path != nil {
-			pathStr = e.path.Path().String()
-		}
-
-		slog.Debug("resolve main token for error",
-			slog.String("path", pathStr),
-			slog.Any("error", err),
-		)
-
-		// Check if we can still render via nested errors (nested-only case).
-		if e.source == nil || !e.hasResolvableNestedErrors() {
-			if pathStr != "" {
-				return fmt.Sprintf("at %s: %v", pathStr, e.err)
-			}
-
-			return e.formatPlainError()
-		}
-
-		// Proceed with nested-only rendering (mainToken stays nil).
-	}
-
-	// Build the error header.
-	var header string
-
-	if mainToken != nil {
-		pos := position.NewFromToken(mainToken)
-		header = fmt.Sprintf("[%s] %v:\n", pos.String(), e.err)
-	} else {
-		header = fmt.Sprintf("%v:\n", e.err)
-	}
-
-	// Render the source with error positions highlighted.
-	return header + "\n" + e.renderErrorSource(mainToken)
-}
-
-// formatPlainError formats the error without source annotation.
-// Nested errors are rendered as bullet points if present.
-func (e *Error) formatPlainError() string {
-	if len(e.errors) == 0 {
-		return e.err.Error()
-	}
-
 	var sb strings.Builder
 
-	sb.WriteString(e.err.Error())
+	sb.WriteString(e.headline(e))
 
 	for _, nested := range e.errors {
-		if nested != nil && nested.err != nil {
-			sb.WriteString("\n  • ")
-			sb.WriteString(nested.err.Error())
+		if nested == nil || nested.err == nil {
+			continue
 		}
+
+		sb.WriteString("\n  \u2022 ")
+		sb.WriteString(e.headline(nested))
 	}
 
 	return sb.String()
 }
 
-// resolveMainToken resolves the main error's token for position display.
-// Returns the token or an error if the main error has no resolvable path/token.
-func (e *Error) resolveMainToken() (*token.Token, error) {
-	// Direct token doesn't need file (Source comes from token's Origin).
-	if e.token != nil {
-		return e.token, nil
+// headline returns target's message prefixed with its location. Paths resolve
+// against e's source and document index when target has none of its own.
+func (e *Error) headline(target *Error) string {
+	tk, err := e.resolveIn(target, e.source)
+	if err == nil && tk != nil && tk.Position != nil {
+		return fmt.Sprintf("[%s] %v", position.NewFromToken(tk), target.err)
 	}
 
-	// Path resolution requires a valid file.
-	if e.path == nil {
+	if target.path != nil {
+		return fmt.Sprintf("at %s: %v", target.path.Path(), target.err)
+	}
+
+	return target.err.Error()
+}
+
+// Detail renders the source around the error's location with the location
+// highlighted. Nested errors appear as annotations below their own lines, and
+// distant locations render as separate hunks.
+//
+// Detail returns an empty string when no location resolves. Rendering uses the
+// [Printer] from [WithPrinter], or a default one, and never modifies the
+// [Source].
+func (e *Error) Detail() string {
+	if e.err == nil {
+		return ""
+	}
+
+	mainToken, err := e.resolveIn(e, e.source)
+	if err != nil {
+		slog.Debug("resolve main token for error",
+			slog.String("path", e.Path()),
+			slog.Any("error", err),
+		)
+
+		// Nested errors can still render on their own when a source is present.
+		if e.source == nil || !e.hasResolvableNestedErrors() {
+			return ""
+		}
+	}
+
+	return e.renderErrorSource(mainToken)
+}
+
+// Format implements [fmt.Formatter].
+//
+// The %v and %s verbs print [Error.Error]. The %+v verb prints the headline
+// followed by a blank line and [Error.Detail], falling back to [Error.Error]
+// when there is no detail to show. The %q verb quotes [Error.Error].
+func (e *Error) Format(f fmt.State, verb rune) {
+	switch {
+	case verb == 'v' && f.Flag('+'):
+		detail := e.Detail()
+		if detail == "" {
+			writeString(f, e.Error())
+
+			return
+		}
+
+		writeString(f, e.headline(e))
+		writeString(f, "\n\n")
+		writeString(f, detail)
+
+	case verb == 'q':
+		writeString(f, strconv.Quote(e.Error()))
+
+	default:
+		writeString(f, e.Error())
+	}
+}
+
+// writeString writes s to f. Write errors are dropped, as [fmt] itself does
+// for a [fmt.Formatter].
+func writeString(f fmt.State, s string) {
+	_, _ = io.WriteString(f, s) //nolint:errcheck // Formatter has no error channel.
+}
+
+// resolveIn resolves target's location against src, which is always the
+// source the rendered view is built from, so a resolved position indexes the
+// lines it will highlight. A token is used directly. A path resolves in the
+// document selected by target's index, or e's index when target has none.
+func (e *Error) resolveIn(target *Error, src *Source) (*token.Token, error) {
+	if target.token != nil {
+		return target.token, nil
+	}
+
+	if target.path == nil {
 		return nil, ErrNoPathOrToken
 	}
 
-	file, err := e.getFile()
+	if src == nil {
+		return nil, ErrNoSource
+	}
+
+	file, err := src.File()
 	if err != nil {
 		return nil, err
 	}
 
-	return resolveToken(file, nil, e.path, e.documentIndex(0))
+	return resolveToken(file, nil, target.path, target.documentIndex(e.documentIndex(0)))
 }
 
 // documentIndex returns the document index to resolve paths in, or fallback
@@ -302,15 +355,6 @@ func (e *Error) SetOption(opts ...ErrorOption) {
 // A width of 0 disables wrapping.
 func (e *Error) SetWidth(width int) {
 	e.width = width
-}
-
-// getFile returns the parsed AST file from the source.
-func (e *Error) getFile() (*ast.File, error) {
-	if e.source == nil {
-		return nil, ErrNoSource
-	}
-
-	return e.source.File()
 }
 
 // getPrinter returns the printer to render with: the configured one or a
@@ -439,12 +483,7 @@ func prepareLineAnnotations(positions []errorPosition) map[int]line.Annotation {
 // resolveNestedError resolves a single nested error's path or token against
 // src, and checks that the resulting position falls within view.
 func (e *Error) resolveNestedError(src *Source, view line.Lines, nested *Error) (errorPosition, error) {
-	file, err := src.File()
-	if err != nil {
-		return errorPosition{}, fmt.Errorf("parse source: %w", err)
-	}
-
-	tk, err := resolveToken(file, nested.token, nested.path, nested.documentIndex(e.documentIndex(0)))
+	tk, err := e.resolveIn(nested, src)
 	if err != nil {
 		return errorPosition{}, err
 	}
@@ -513,7 +552,7 @@ func (e *Error) collectErrorPositions(src *Source, view line.Lines, mainToken *t
 // without an annotation.
 //
 // Rendering happens on a clone of the source's [line.Lines] view, so
-// renderErrorSource never mutates e.source and calling [Error.Error]
+// renderErrorSource never mutates e.source and calling [Error.Detail]
 // repeatedly renders the same output. Without a source, the view is rebuilt
 // from mainToken's chain, which costs a lex per call.
 func (e *Error) renderErrorSource(mainToken *token.Token) string {

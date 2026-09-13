@@ -2,6 +2,7 @@ package schema_test
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"testing"
 
@@ -520,7 +521,7 @@ func TestValidator_PathTarget(t *testing.T) {
 					niceyaml.WithPrinter(newXMLPrinter()),
 				)
 
-				assert.Contains(t, validationErr.Error(), tc.wantContains,
+				assert.Contains(t, fmt.Sprintf("%+v", validationErr), tc.wantContains,
 					"expected error output to contain specific highlighting pattern")
 			}
 		})
@@ -670,7 +671,7 @@ func TestValidator_SubErrorAnnotations(t *testing.T) {
 
 				validationErr.SetOption(niceyaml.WithSource(source))
 
-				errOutput := validationErr.Error()
+				errOutput := fmt.Sprintf("%+v", validationErr)
 
 				for _, annotation := range tc.wantAnnotations {
 					assert.Contains(t, errOutput, annotation,

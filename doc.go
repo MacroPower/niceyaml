@@ -23,8 +23,9 @@
 //
 //	file, err := source.File()
 //	if err != nil {
-//		// Error displays the YAML with the problematic location highlighted.
-//		fmt.Println(source.WrapError(err))
+//		// The %+v verb displays the YAML with the problematic location
+//		// highlighted; plain %v prints the message and position only.
+//		fmt.Printf("%+v\n", source.WrapError(err))
 //	}
 //
 // # Architecture
@@ -57,8 +58,9 @@
 //
 // [Error] wraps errors with YAML source context.
 //
-// When you know the error location (via token or path), [Error.Error] renders
-// surrounding lines with the error position highlighted.
+// [Error.Error] returns the message with its position, and [Error.Detail]
+// renders the surrounding lines with the error position highlighted. The %+v
+// verb prints both.
 //
 // Multiple nested errors appear as annotations below their respective lines,
 // with distant errors displayed in separate hunks.

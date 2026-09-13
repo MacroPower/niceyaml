@@ -3,6 +3,7 @@ package fangs_test
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"testing"
 
 	"charm.land/fang/v2"
@@ -40,6 +41,42 @@ func TestErrorHandler(t *testing.T) {
 		"invalid name",
 		niceyaml.WithPath(paths.Root().Child("name").Key()),
 		niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
+		niceyaml.WithPrinter(niceyaml.NewPrinter(
+			niceyaml.WithStyles(yamltest.NewXMLStyles()),
+			niceyaml.WithGutter(niceyaml.NoGutter()),
+			niceyaml.WithStyle(lipgloss.NewStyle()),
+		)),
+	)
+
+	xmlPrinter := func() *niceyaml.Printer {
+		return niceyaml.NewPrinter(
+			niceyaml.WithStyles(yamltest.NewXMLStyles()),
+			niceyaml.WithGutter(niceyaml.NoGutter()),
+			niceyaml.WithStyle(lipgloss.NewStyle()),
+		)
+	}
+
+	badName := niceyaml.NewError(
+		"bad name",
+		niceyaml.WithPath(paths.Root().Child("name").Key()),
+		niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
+		niceyaml.WithPrinter(xmlPrinter()),
+	)
+
+	badValue := niceyaml.NewError(
+		"bad value",
+		niceyaml.WithPath(paths.Root().Child("value").Value()),
+		niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
+		niceyaml.WithPrinter(xmlPrinter()),
+	)
+
+	nestedErr := niceyaml.NewError(
+		"two problems",
+		niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
+		niceyaml.WithErrors(
+			niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name").Key())),
+			niceyaml.NewError("bad value", niceyaml.WithPath(paths.Root().Child("value").Value())),
+		),
 		niceyaml.WithPrinter(niceyaml.NewPrinter(
 			niceyaml.WithStyles(yamltest.NewXMLStyles()),
 			niceyaml.WithGutter(niceyaml.NoGutter()),
@@ -139,10 +176,43 @@ func TestErrorHandler(t *testing.T) {
 			err: niceyamlErr,
 			want: stringtest.JoinLF(
 				"Error",
-				"  [1:1] invalid name:",
+				"  [1:1] invalid name",
 				"  ",
 				"  <genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
 				"  <nameTag>value</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>123</literalNumberInteger>",
+				"",
+				"",
+			),
+		},
+		"wrapped niceyaml error keeps context and annotates once": {
+			err: fmt.Errorf("document 0: %w", nestedErr),
+			want: stringtest.JoinLF(
+				"Error",
+				"  document 0: two problems",
+				"  ",
+				"  <genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
+				"  <comment>^ bad name</comment>",
+				"  <nameTag>value</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>123</genericError>",
+				"  <comment>       ^ bad value</comment>",
+				"",
+				"",
+			),
+		},
+		"every joined niceyaml error annotates": {
+			err: errors.Join(
+				fmt.Errorf("a.yaml: %w", badName),
+				fmt.Errorf("b.yaml: %w", badValue),
+			),
+			want: stringtest.JoinLF(
+				"Error",
+				"  a.yaml: [1:1] bad name",
+				"  ",
+				"  <genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
+				"  <nameTag>value</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>123</literalNumberInteger>",
+				"  b.yaml: [2:8] bad value",
+				"  ",
+				"  <nameTag>name</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
+				"  <nameTag>value</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>123</genericError>",
 				"",
 				"",
 			),
