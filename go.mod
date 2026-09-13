@@ -17,7 +17,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
 	go.jacobcolvin.com/x/cobras v0.1.0
-	go.jacobcolvin.com/x/jsonschema v0.2.0
+	go.jacobcolvin.com/x/jsonschema v0.3.0
 	go.jacobcolvin.com/x/stringtest v0.2.0
 	golang.org/x/text v0.42.0
 )
@@ -50,4 +50,4 @@ require (
 	golang.org/x/tools v0.50.0 // indirect
 )
 
-tool go.jacobcolvin.com/x/jsonschema/cmd/jsonschemagen
+tool go.jacobcolvin.com/x/jsonschema/cmd/gen

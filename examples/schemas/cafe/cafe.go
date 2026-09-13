@@ -16,7 +16,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
-//go:generate go tool jsonschemagen -type Config -comments -o cafe.v1.json
+//go:generate go tool go.jacobcolvin.com/x/jsonschema/cmd/gen -type Config -comments -o cafe.v1.json
 
 var (
 	//go:embed cafe.v1.json

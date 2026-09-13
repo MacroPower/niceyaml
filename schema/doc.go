@@ -18,11 +18,11 @@
 //
 // Generate JSON schemas from Go types with
 // [go.jacobcolvin.com/x/jsonschema] directly, or at build time with its
-// jsonschemagen go:generate tool; a type customizes its generated schema by
+// `cmd/gen` go:generate tool; a type customizes its generated schema by
 // implementing a JSONSchemaExtend method that the library calls:
 //
-//	func (t MyType) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
-//	    f := s.Properties["myField"]
+//	func (t MyType) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+//	    f := ts.Value.Properties["myField"]
 //	    f.Description = "Custom description"
 //	    f.MinLength = new(1)
 //

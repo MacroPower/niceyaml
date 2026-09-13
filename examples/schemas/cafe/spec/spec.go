@@ -1,13 +1,16 @@
 // Package spec defines the cafe specification schema.
 package spec
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // Spec is the cafe specification.
 type Spec struct {
 	// SLA is the service level agreement duration for order fulfillment.
 	// Defaults to 15 minutes.
-	SLA *time.Duration `json:"sla,omitempty" jsonschema:"title=SLA,type=string,pattern=^(\\d+d)?(\\d+h)?(\\d+m)?(\\d+s)?$,default=15m,examples=15m|1h|90s"`
+	SLA *Duration `json:"sla,omitempty" jsonschema:"title=SLA,type=string,pattern=^(\\d+d)?(\\d+h)?(\\d+m)?(\\d+s)?$,default=15m,examples=15m|1h|90s"`
 	// Settings contains optional cafe settings.
 	Settings *Settings `json:"settings,omitempty" jsonschema:"title=Settings"`
 	// Hours defines operating hours.
@@ -68,4 +71,26 @@ type Settings struct {
 	CustomOptions map[string]string `json:"custom_options,omitempty" jsonschema:"title=Custom Options"`
 	// Theme is the UI theme for digital displays.
 	Theme string `json:"theme,omitempty" jsonschema:"title=Theme,enum=light|dark|auto,default=auto"`
+}
+
+// Duration is a [time.Duration] that marshals as its Go string form, such as
+// "15m". A bare [time.Duration] has no encoding/json/v2 representation, so the
+// schema generator refuses it; the text form keeps the field a string.
+type Duration time.Duration
+
+// MarshalText formats the duration with [time.Duration.String].
+func (d Duration) MarshalText() ([]byte, error) {
+	return []byte(time.Duration(d).String()), nil
+}
+
+// UnmarshalText parses the duration with [time.ParseDuration].
+func (d *Duration) UnmarshalText(b []byte) error {
+	v, err := time.ParseDuration(string(b))
+	if err != nil {
+		return fmt.Errorf("parse duration: %w", err)
+	}
+
+	*d = Duration(v)
+
+	return nil
 }
