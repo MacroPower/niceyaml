@@ -110,3 +110,101 @@ func TestRegisterConcurrent(t *testing.T) {
 
 	wg.Wait()
 }
+
+func TestGet(t *testing.T) {
+	t.Parallel()
+
+	t.Run("built-in theme", func(t *testing.T) {
+		t.Parallel()
+
+		got, ok := theme.Get("dracula")
+		require.True(t, ok)
+		assert.Equal(t, "dracula", got.Name)
+		assert.Equal(t, style.Dark, got.Mode)
+		assert.NotNil(t, got.Styles)
+	})
+
+	t.Run("unknown theme", func(t *testing.T) {
+		t.Parallel()
+
+		_, ok := theme.Get("no-such-theme")
+		assert.False(t, ok)
+	})
+
+	t.Run("custom theme takes precedence", func(t *testing.T) {
+		t.Parallel()
+
+		theme.Register("test-get-override", func() style.Styles {
+			return style.Styles{style.Comment: {}}
+		}, style.Light)
+
+		got, ok := theme.Get("test-get-override")
+		require.True(t, ok)
+		assert.Equal(t, style.Light, got.Mode)
+	})
+}
+
+func TestAll(t *testing.T) {
+	t.Parallel()
+
+	theme.Register("test-all-custom", func() style.Styles {
+		return style.Styles{}
+	}, style.Dark)
+
+	all := theme.All()
+
+	names := make([]string, 0, len(all))
+	for _, th := range all {
+		names = append(names, th.Name)
+	}
+
+	// Built-in themes lead and stay sorted; custom themes follow.
+	assert.Equal(t, "abap", names[0])
+	assert.Contains(t, names, "test-all-custom")
+	assert.Greater(t, slices.Index(names, "test-all-custom"), slices.Index(names, "xcode-dark"))
+
+	// Every entry is complete.
+	for _, th := range all {
+		assert.NotEmpty(t, th.Name)
+		assert.NotNil(t, th.Styles, th.Name)
+	}
+
+	// List filters All by mode.
+	for _, name := range theme.List(style.Dark) {
+		th, ok := theme.Get(name)
+		require.True(t, ok, name)
+		assert.Equal(t, style.Dark, th.Mode, name)
+	}
+}
+
+func TestAll_ReplacesBuiltIn(t *testing.T) {
+	t.Parallel()
+
+	// Keep the built-in mode so the parallel mode assertions in TestAll hold.
+	theme.Register("vulcan", func() style.Styles {
+		return style.Styles{style.NameTag: {}}
+	}, style.Dark)
+
+	all := theme.All()
+
+	names := make([]string, 0, len(all))
+	count := 0
+
+	for _, th := range all {
+		names = append(names, th.Name)
+
+		if th.Name == "vulcan" {
+			count++
+		}
+	}
+
+	// The custom theme takes the built-in's place instead of adding a second
+	// entry under the same name.
+	assert.Equal(t, 1, count)
+	assert.Less(t, slices.Index(names, "vulcan"), slices.Index(names, "xcode-dark"))
+
+	styles, ok := theme.Styles("vulcan")
+	require.True(t, ok)
+	assert.Contains(t, styles, style.NameTag)
+	assert.NotContains(t, styles, style.Comment)
+}

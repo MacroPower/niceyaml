@@ -6,10 +6,11 @@ import (
 	"go.jacobcolvin.com/niceyaml/style"
 )
 
-// Theme represents a named color theme with its mode and style generator.
+// Theme is a registry entry: a named color theme with its mode and style
+// generator.
 //
-// This type is used internally by the theme registry. Use [List] to discover
-// available theme names and [Styles] to retrieve a theme by name.
+// Look one up by name with [Get], enumerate them with [All], or use the
+// [Styles] and [List] shortcuts when only the styles or the names are needed.
 type Theme struct {
 	// Styles returns the [style.Styles] for this theme.
 	Styles func() style.Styles
@@ -22,6 +23,18 @@ type Theme struct {
 var (
 	customMu     sync.RWMutex
 	customThemes = map[string]Theme{}
+	// Names in registration order, so All is deterministic.
+	customOrder []string
+
+	// Indexes the built-in themes by name.
+	builtinIndex = func() map[string]Theme {
+		m := make(map[string]Theme, len(themes))
+		for _, t := range themes {
+			m[t.Name] = t
+		}
+
+		return m
+	}()
 
 	themes = []Theme{
 		{Abap, "abap", style.Light},
@@ -112,28 +125,77 @@ func Register(name string, fn func() style.Styles, mode style.Mode) {
 	customMu.Lock()
 	defer customMu.Unlock()
 
+	if _, exists := customThemes[name]; !exists {
+		customOrder = append(customOrder, name)
+	}
+
 	customThemes[name] = Theme{Styles: fn, Name: name, Mode: mode}
 }
 
-// List returns the names of all themes matching the given [style.Mode].
+// Get returns the [Theme] registered under name. The boolean reports whether
+// one was found.
 //
-// Names are kebab-case identifiers (e.g., "monokai", "catppuccin-mocha")
-// suitable for passing to [Styles].
-//
-// The returned list includes both built-in and registered custom themes.
-func List(m style.Mode) []string {
-	var names []string
-
-	for _, t := range themes {
-		if t.Mode == m {
-			names = append(names, t.Name)
-		}
+// Custom themes registered with [Register] take precedence over built-in
+// themes with the same name.
+func Get(name string) (Theme, bool) {
+	if t, ok := lookupCustom(name); ok {
+		return t, true
 	}
 
+	t, ok := builtinIndex[name]
+
+	return t, ok
+}
+
+// lookupCustom returns the custom theme registered under name.
+func lookupCustom(name string) (Theme, bool) {
 	customMu.RLock()
 	defer customMu.RUnlock()
 
-	for _, t := range customThemes {
+	t, ok := customThemes[name]
+
+	return t, ok
+}
+
+// All returns every registered [Theme], built-in ones first in alphabetical
+// order followed by custom ones in registration order. A custom theme that
+// shares a built-in name replaces it in the result.
+func All() []Theme {
+	customMu.RLock()
+	defer customMu.RUnlock()
+
+	result := make([]Theme, 0, len(themes)+len(customThemes))
+
+	for _, t := range themes {
+		if custom, ok := customThemes[t.Name]; ok {
+			result = append(result, custom)
+
+			continue
+		}
+
+		result = append(result, t)
+	}
+
+	for _, name := range customOrder {
+		if _, builtin := builtinIndex[name]; builtin {
+			continue
+		}
+
+		result = append(result, customThemes[name])
+	}
+
+	return result
+}
+
+// List returns the names of all themes matching the given [style.Mode], in
+// the order of [All].
+//
+// Names are kebab-case identifiers (e.g., "monokai", "catppuccin-mocha")
+// suitable for passing to [Styles] or [Get].
+func List(m style.Mode) []string {
+	var names []string
+
+	for _, t := range All() {
 		if t.Mode == m {
 			names = append(names, t.Name)
 		}
@@ -145,24 +207,12 @@ func List(m style.Mode) []string {
 // Styles returns the [style.Styles] for the named theme.
 // The boolean reports whether the theme was found.
 //
-// Custom themes registered with [Register] take precedence over built-in
-// themes with the same name.
+// Styles is shorthand for [Get] followed by calling [Theme.Styles].
 func Styles(name string) (style.Styles, bool) {
-	customMu.RLock()
-
-	if t, ok := customThemes[name]; ok {
-		customMu.RUnlock()
-
-		return t.Styles(), true
+	t, ok := Get(name)
+	if !ok {
+		return style.Styles{}, false
 	}
 
-	customMu.RUnlock()
-
-	for _, t := range themes {
-		if t.Name == name {
-			return t.Styles(), true
-		}
-	}
-
-	return style.Styles{}, false
+	return t.Styles(), true
 }

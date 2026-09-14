@@ -26,6 +26,13 @@
 //	darkThemes := theme.List(style.Dark)   // ["monokai", "dracula", ...]
 //	lightThemes := theme.List(style.Light) // ["solarized-light", "catppuccin-latte", ...]
 //
+// [Get] and [All] return the [Theme] entries themselves, with the name and
+// mode alongside the styles, for building a picker:
+//
+//	for _, t := range theme.All() {
+//		fmt.Println(t.Name, t.Mode)
+//	}
+//
 // # Custom Themes
 //
 // Applications can register custom themes at runtime with [Register]:
