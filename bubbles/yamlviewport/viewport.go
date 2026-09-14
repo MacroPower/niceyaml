@@ -84,11 +84,12 @@ func WithPrinter(p *niceyaml.Printer) Option {
 }
 
 // WithStyle is an [Option] that sets the container style for the viewport.
+// See [Model.SetStyle].
 //
 //nolint:gocritic // hugeParam: Copying.
 func WithStyle(s lipgloss.Style) Option {
 	return func(m *Model) {
-		m.Style = s
+		m.style = s
 	}
 }
 
@@ -115,8 +116,8 @@ func New(opts ...Option) Model {
 // Model is the Bubble Tea model for the YAML viewport.
 // Create instances with [New].
 type Model struct {
-	// Style is the container style applied to the viewport frame.
-	Style   lipgloss.Style
+	// The container style applied to the viewport frame.
+	style   lipgloss.Style
 	printer *niceyaml.Printer
 	finder  Finder
 	// Revision history; revIndex below selects the revision on display.
@@ -162,8 +163,8 @@ type Model struct {
 	// MouseWheelEnabled enables mouse wheel scrolling.
 	// Default: true.
 	MouseWheelEnabled bool
-	// WrapEnabled enables line wrapping based on viewport width.
-	WrapEnabled bool
+	// Wraps lines to the viewport width when true.
+	wrapEnabled bool
 	initialized bool
 }
 
@@ -173,7 +174,7 @@ func (m *Model) setInitialValues() {
 	m.MouseWheelDelta = 3
 	m.horizontalStep = defaultHorizontalStep
 	m.hunkContext = 3 // Default context lines around diff hunks.
-	m.WrapEnabled = true
+	m.wrapEnabled = true
 	m.searchIndex = -1
 
 	if m.printer == nil {
@@ -217,7 +218,7 @@ func (m *Model) SetWidth(w int) {
 	if m.width != w {
 		m.width = w
 
-		if m.WrapEnabled {
+		if m.wrapEnabled {
 			m.rerender()
 		}
 	}
@@ -229,7 +230,7 @@ func (m *Model) SetWidth(w int) {
 func (m *Model) renderPrinter(width int) *niceyaml.Printer {
 	return m.printer.With(
 		niceyaml.WithWidth(width),
-		niceyaml.WithWordWrap(m.WrapEnabled),
+		niceyaml.WithWordWrap(m.wrapEnabled),
 	)
 }
 
@@ -402,14 +403,40 @@ func (m *Model) SetHunkContext(n int) {
 	m.hunkContext = max(0, n)
 }
 
-// ToggleWordWrap toggles word wrapping on or off.
-func (m *Model) ToggleWordWrap() {
-	m.WrapEnabled = !m.WrapEnabled
+// WordWrap reports whether lines wrap to the viewport width.
+func (m *Model) WordWrap() bool {
+	return m.wrapEnabled
+}
 
-	if m.WrapEnabled {
+// SetWordWrap turns word wrapping on or off and rerenders. Enabling it
+// resets the horizontal scroll offset, since wrapped lines never overflow.
+// The default is on.
+func (m *Model) SetWordWrap(enabled bool) {
+	m.wrapEnabled = enabled
+
+	if enabled {
 		m.xOffset = 0
 	}
 
+	m.rerender()
+}
+
+// ToggleWordWrap toggles word wrapping on or off. See [Model.SetWordWrap].
+func (m *Model) ToggleWordWrap() {
+	m.SetWordWrap(!m.wrapEnabled)
+}
+
+// Style returns the container style applied to the viewport frame.
+func (m *Model) Style() lipgloss.Style {
+	return m.style
+}
+
+// SetStyle sets the container style applied to the viewport frame and
+// rerenders, since the frame size changes the content width.
+//
+//nolint:gocritic // hugeParam: Copying.
+func (m *Model) SetStyle(s lipgloss.Style) {
+	m.style = s
 	m.rerender()
 }
 
@@ -834,12 +861,12 @@ func (m *Model) maxXOffset() int {
 
 // maxWidth returns the content width accounting for frame size.
 func (m *Model) maxWidth() int {
-	return max(0, m.Width()-m.Style.GetHorizontalFrameSize())
+	return max(0, m.Width()-m.style.GetHorizontalFrameSize())
 }
 
 // maxHeight returns the content height accounting for frame size.
 func (m *Model) maxHeight() int {
-	return max(0, m.Height()-m.Style.GetVerticalFrameSize())
+	return max(0, m.Height()-m.style.GetVerticalFrameSize())
 }
 
 // hasContent reports whether there is content to display.
@@ -893,7 +920,7 @@ func (m *Model) visibleLines(lines []string) []string {
 	// Apply horizontal scrolling / line truncation.
 	// When wrapping is disabled, lines may exceed viewport width.
 	// Truncate to viewport width to prevent lipgloss from wrapping.
-	if !m.WrapEnabled {
+	if !m.wrapEnabled {
 		for i := range result {
 			result[i] = ansi.Cut(result[i], m.xOffset, m.xOffset+maxWidth)
 		}
@@ -1164,11 +1191,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 // If ok is false, the viewport has zero dimensions and should not render.
 func (m *Model) getViewDimensions() (int, int, bool) {
 	w, h := m.Width(), m.Height()
-	if sw := m.Style.GetWidth(); sw != 0 {
+	if sw := m.style.GetWidth(); sw != 0 {
 		w = min(w, sw)
 	}
 
-	if sh := m.Style.GetHeight(); sh != 0 {
+	if sh := m.style.GetHeight(); sh != 0 {
 		h = min(h, sh)
 	}
 
@@ -1176,8 +1203,8 @@ func (m *Model) getViewDimensions() (int, int, bool) {
 		return 0, 0, false
 	}
 
-	contentW := w - m.Style.GetHorizontalFrameSize()
-	contentH := h - m.Style.GetVerticalFrameSize()
+	contentW := w - m.style.GetHorizontalFrameSize()
+	contentH := h - m.style.GetVerticalFrameSize()
 
 	return contentW, contentH, true
 }
@@ -1195,7 +1222,7 @@ func (m *Model) renderContent(lines []string, contentW, contentH int) string {
 		MaxHeight(contentH).
 		Render(strings.Join(lines, "\n"))
 
-	return m.Style.
+	return m.style.
 		UnsetWidth().UnsetHeight().
 		Render(contents)
 }
@@ -1322,7 +1349,7 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 		}
 
 		// Apply horizontal scrolling.
-		if !m.WrapEnabled {
+		if !m.wrapEnabled {
 			left = ansi.Cut(left, m.xOffset, m.xOffset+paneWidth)
 			right = ansi.Cut(right, m.xOffset, m.xOffset+paneWidth)
 		}

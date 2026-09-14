@@ -2586,7 +2586,7 @@ func TestViewport_ToggleWordWrapResetsXOffset(t *testing.T) {
 
 	// Disable wrapping first.
 	m.ToggleWordWrap()
-	assert.False(t, m.WrapEnabled)
+	assert.False(t, m.WordWrap())
 
 	// Scroll right.
 	m.ScrollRight(5)
@@ -2594,7 +2594,7 @@ func TestViewport_ToggleWordWrapResetsXOffset(t *testing.T) {
 
 	// Toggle back to enable wrapping - should reset xOffset.
 	m.ToggleWordWrap()
-	assert.True(t, m.WrapEnabled)
+	assert.True(t, m.WordWrap())
 	assert.Equal(t, 0, m.XOffset())
 }
 

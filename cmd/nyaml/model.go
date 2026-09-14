@@ -415,7 +415,7 @@ func (m *model) textLine() string {
 
 	// Wrap status.
 	wrapLabel := "no wrap"
-	if m.viewport.WrapEnabled {
+	if m.viewport.WordWrap() {
 		wrapLabel = "wrap"
 	}
 
