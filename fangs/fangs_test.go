@@ -52,7 +52,7 @@ func TestErrorHandler(t *testing.T) {
 		niceyaml.WithPrinter(niceyaml.NewPrinter(
 			niceyaml.WithStyles(yamltest.NewXMLStyles()),
 			niceyaml.WithGutter(niceyaml.NoGutter()),
-			niceyaml.WithStyle(lipgloss.NewStyle()),
+			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 		)),
 	)
 
@@ -60,7 +60,7 @@ func TestErrorHandler(t *testing.T) {
 		return niceyaml.NewPrinter(
 			niceyaml.WithStyles(yamltest.NewXMLStyles()),
 			niceyaml.WithGutter(niceyaml.NoGutter()),
-			niceyaml.WithStyle(lipgloss.NewStyle()),
+			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 		)
 	}
 
@@ -94,7 +94,7 @@ func TestErrorHandler(t *testing.T) {
 		niceyaml.WithPrinter(niceyaml.NewPrinter(
 			niceyaml.WithStyles(yamltest.NewXMLStyles()),
 			niceyaml.WithGutter(niceyaml.NoGutter()),
-			niceyaml.WithStyle(lipgloss.NewStyle()),
+			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 		)),
 	)
 

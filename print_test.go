@@ -46,7 +46,7 @@ func testPrinterWithGutter(gutter niceyaml.GutterFunc) *niceyaml.Printer {
 			lipgloss.NewStyle(),
 			style.Set(testOverlayHighlight, *testHighlightStyle()),
 		)),
-		niceyaml.WithStyle(lipgloss.NewStyle()),
+		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 		niceyaml.WithGutter(gutter),
 	)
 }
@@ -269,7 +269,7 @@ func TestNewPrinter(t *testing.T) {
 			want:  "<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
 			opts: []niceyaml.PrinterOption{
 				niceyaml.WithStyles(yamltest.NewXMLStyles()),
-				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 				niceyaml.WithGutter(niceyaml.NoGutter()),
 			},
 		},
@@ -288,7 +288,7 @@ func TestNewPrinter(t *testing.T) {
 			),
 			opts: []niceyaml.PrinterOption{
 				niceyaml.WithStyles(yamltest.NewXMLStyles()),
-				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 				niceyaml.WithGutter(niceyaml.NoGutter()),
 			},
 		},
@@ -670,7 +670,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 
 			p := niceyaml.NewPrinter(
 				niceyaml.WithStyles(style.Styles{}),
-				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 			)
 			got := printDiff(p, tc.before, tc.after)
 
@@ -1028,7 +1028,7 @@ func TestPrinter_PrintTokenDiff_WithLineNumbers(t *testing.T) {
 
 			p := niceyaml.NewPrinter(
 				niceyaml.WithStyles(style.Styles{}),
-				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 			)
 
 			got := printDiff(p, tc.before, tc.after)
@@ -1629,7 +1629,7 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 			tks := lexer.Tokenize(tc.input)
 			p := niceyaml.NewPrinter(
 				niceyaml.WithStyles(yamltest.NewXMLStyles()),
-				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 				niceyaml.WithGutter(niceyaml.NoGutter()),
 			)
 
@@ -1961,7 +1961,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 
 			p := niceyaml.NewPrinter(
 				niceyaml.WithStyles(style.Styles{}),
-				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 			)
 
 			got := printDiffSummary(p, tc.before, tc.after, tc.context)
@@ -2196,14 +2196,14 @@ func TestPrinter_Golden(t *testing.T) {
 		"default colors": {
 			opts: []niceyaml.PrinterOption{
 				niceyaml.WithStyles(theme.Charm()),
-				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 				niceyaml.WithGutter(niceyaml.NoGutter()),
 			},
 		},
 		"word wrap with colors": {
 			opts: []niceyaml.PrinterOption{
 				niceyaml.WithStyles(theme.Charm()),
-				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 				niceyaml.WithWidth(40),
 				niceyaml.WithWordWrap(true),
 			},
@@ -2211,20 +2211,20 @@ func TestPrinter_Golden(t *testing.T) {
 		"default colors with line numbers": {
 			opts: []niceyaml.PrinterOption{
 				niceyaml.WithStyles(theme.Charm()),
-				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 			},
 		},
 		"no colors": {
 			opts: []niceyaml.PrinterOption{
 				niceyaml.WithStyles(style.Styles{}),
-				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 				niceyaml.WithGutter(niceyaml.NoGutter()),
 			},
 		},
 		"no colors with line numbers": {
 			opts: []niceyaml.PrinterOption{
 				niceyaml.WithStyles(style.Styles{}),
-				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 			},
 		},
 		"find and highlight": {
@@ -2234,7 +2234,7 @@ func TestPrinter_Golden(t *testing.T) {
 						Background(lipgloss.Color("#FFFF00")).
 						Foreground(lipgloss.Color("#000000"))),
 				)),
-				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 				niceyaml.WithGutter(niceyaml.NoGutter()),
 			},
 			setupFunc: func(source *niceyaml.Source) {
@@ -2434,7 +2434,7 @@ func TestPrinter_BlendStyles(t *testing.T) {
 			source := niceyaml.NewSourceFromString(tc.input)
 			p := niceyaml.NewPrinter(
 				niceyaml.WithStyles(testOverlayStyler),
-				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 				niceyaml.WithGutter(niceyaml.NoGutter()),
 			)
 
@@ -2558,7 +2558,7 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 
 			p := niceyaml.NewPrinter(
 				niceyaml.WithStyles(style.NewStyles(lipgloss.NewStyle(), overlayOpts...)),
-				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 				niceyaml.WithGutter(niceyaml.NoGutter()),
 			)
 
@@ -2697,7 +2697,7 @@ func TestPrinter_WithAnnotationFunc(t *testing.T) {
 
 			p := niceyaml.NewPrinter(
 				niceyaml.WithStyles(style.Styles{}),
-				niceyaml.WithStyle(lipgloss.NewStyle()),
+				niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 				niceyaml.WithGutter(niceyaml.NoGutter()),
 				niceyaml.WithAnnotationFunc(customAnnotation),
 			)

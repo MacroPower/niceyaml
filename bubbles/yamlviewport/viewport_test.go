@@ -27,7 +27,7 @@ import (
 func testPrinter() *niceyaml.Printer {
 	return niceyaml.NewPrinter(
 		niceyaml.WithStyles(style.Styles{}),
-		niceyaml.WithStyle(lipgloss.NewStyle()),
+		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 		niceyaml.WithGutter(niceyaml.DiffGutter()),
 	)
 }
@@ -36,7 +36,7 @@ func testPrinter() *niceyaml.Printer {
 func testPrinterWithLineNumbers() *niceyaml.Printer {
 	return niceyaml.NewPrinter(
 		niceyaml.WithStyles(style.Styles{}),
-		niceyaml.WithStyle(lipgloss.NewStyle()),
+		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 	)
 }
 
@@ -44,7 +44,7 @@ func testPrinterWithLineNumbers() *niceyaml.Printer {
 func testPrinterWithColors() *niceyaml.Printer {
 	return niceyaml.NewPrinter(
 		niceyaml.WithStyles(theme.Charm()),
-		niceyaml.WithStyle(lipgloss.NewStyle()),
+		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 	)
 }
 
@@ -54,7 +54,7 @@ func testPrinterWithSearch() *niceyaml.Printer {
 		niceyaml.WithStyles(yamltest.NewXMLStyles(
 			yamltest.XMLStyleInclude(style.GenericHighlightDim, style.GenericHighlight),
 		)),
-		niceyaml.WithStyle(lipgloss.NewStyle()),
+		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 		niceyaml.WithGutter(niceyaml.DiffGutter()),
 	)
 }

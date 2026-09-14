@@ -141,8 +141,8 @@ func (p *Printer) apply(opts []PrinterOption) {
 // PrinterOption configures a [Printer].
 //
 // Available options:
-//   - [WithStyle]
 //   - [WithStyles]
+//   - [WithContainerStyle]
 //   - [WithGutter]
 //   - [WithAnnotationFunc]
 //   - [WithWidth]
@@ -279,19 +279,25 @@ func NoGutter() GutterFunc {
 	return func(GutterContext) string { return "" }
 }
 
-// WithStyle is a [PrinterOption] that configures the printer with the given
-// container style.
+// WithContainerStyle is a [PrinterOption] that sets the [lipgloss.Style]
+// wrapped around the whole rendered output. By default the container is the
+// theme's [style.Text] style with one cell of right padding.
+//
+// To set the theme, which styles the tokens inside, use [WithStyles].
 //
 //nolint:gocritic // hugeParam: Copying.
-func WithStyle(s lipgloss.Style) PrinterOption {
+func WithContainerStyle(s lipgloss.Style) PrinterOption {
 	return func(p *Printer) {
 		p.style = s
 		p.hasCustomStyle = true
 	}
 }
 
-// WithStyles is a [PrinterOption] that configures the printer with the given
-// [StyleGetter].
+// WithStyles is a [PrinterOption] that sets the [StyleGetter], typically a
+// theme from [go.jacobcolvin.com/niceyaml/style/theme], that styles tokens,
+// gutters, and annotations.
+//
+// To style the frame around the output, use [WithContainerStyle].
 func WithStyles(s StyleGetter) PrinterOption {
 	return func(p *Printer) {
 		p.styles = s
