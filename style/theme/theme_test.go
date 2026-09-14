@@ -23,7 +23,7 @@ func TestRegister(t *testing.T) {
 			setup: func() {
 				theme.Register("test-custom", func() style.Styles {
 					return style.Styles{style.Comment: {}}
-				}, style.Dark)
+				}, theme.Dark)
 			},
 			check: func(t *testing.T) {
 				t.Helper()
@@ -37,12 +37,12 @@ func TestRegister(t *testing.T) {
 			setup: func() {
 				theme.Register("test-listed", func() style.Styles {
 					return style.Styles{}
-				}, style.Dark)
+				}, theme.Dark)
 			},
 			check: func(t *testing.T) {
 				t.Helper()
 
-				names := theme.List(style.Dark)
+				names := theme.List(theme.Dark)
 				assert.True(t, slices.Contains(names, "test-listed"))
 			},
 		},
@@ -50,10 +50,10 @@ func TestRegister(t *testing.T) {
 			setup: func() {
 				theme.Register("test-replace", func() style.Styles {
 					return style.Styles{style.Comment: {}}
-				}, style.Dark)
+				}, theme.Dark)
 				theme.Register("test-replace", func() style.Styles {
 					return style.Styles{style.NameTag: {}}
-				}, style.Dark)
+				}, theme.Dark)
 			},
 			check: func(t *testing.T) {
 				t.Helper()
@@ -68,13 +68,13 @@ func TestRegister(t *testing.T) {
 			setup: func() {
 				theme.Register("test-dark-only", func() style.Styles {
 					return style.Styles{}
-				}, style.Dark)
+				}, theme.Dark)
 			},
 			check: func(t *testing.T) {
 				t.Helper()
 
-				dark := theme.List(style.Dark)
-				light := theme.List(style.Light)
+				dark := theme.List(theme.Dark)
+				light := theme.List(theme.Light)
 
 				assert.True(t, slices.Contains(dark, "test-dark-only"))
 				assert.False(t, slices.Contains(light, "test-dark-only"))
@@ -102,9 +102,9 @@ func TestRegisterConcurrent(t *testing.T) {
 
 			theme.Register(name, func() style.Styles {
 				return style.Styles{}
-			}, style.Dark)
+			}, theme.Dark)
 			theme.Styles(name)
-			theme.List(style.Dark)
+			theme.List(theme.Dark)
 		})
 	}
 
@@ -120,7 +120,7 @@ func TestGet(t *testing.T) {
 		got, ok := theme.Get("dracula")
 		require.True(t, ok)
 		assert.Equal(t, "dracula", got.Name)
-		assert.Equal(t, style.Dark, got.Mode)
+		assert.Equal(t, theme.Dark, got.Mode)
 		assert.NotNil(t, got.Styles)
 	})
 
@@ -136,11 +136,11 @@ func TestGet(t *testing.T) {
 
 		theme.Register("test-get-override", func() style.Styles {
 			return style.Styles{style.Comment: {}}
-		}, style.Light)
+		}, theme.Light)
 
 		got, ok := theme.Get("test-get-override")
 		require.True(t, ok)
-		assert.Equal(t, style.Light, got.Mode)
+		assert.Equal(t, theme.Light, got.Mode)
 	})
 }
 
@@ -149,7 +149,7 @@ func TestAll(t *testing.T) {
 
 	theme.Register("test-all-custom", func() style.Styles {
 		return style.Styles{}
-	}, style.Dark)
+	}, theme.Dark)
 
 	all := theme.All()
 
@@ -170,10 +170,10 @@ func TestAll(t *testing.T) {
 	}
 
 	// List filters All by mode.
-	for _, name := range theme.List(style.Dark) {
+	for _, name := range theme.List(theme.Dark) {
 		th, ok := theme.Get(name)
 		require.True(t, ok, name)
-		assert.Equal(t, style.Dark, th.Mode, name)
+		assert.Equal(t, theme.Dark, th.Mode, name)
 	}
 }
 
@@ -183,7 +183,7 @@ func TestAll_ReplacesBuiltIn(t *testing.T) {
 	// Keep the built-in mode so the parallel mode assertions in TestAll hold.
 	theme.Register("vulcan", func() style.Styles {
 		return style.Styles{style.NameTag: {}}
-	}, style.Dark)
+	}, theme.Dark)
 
 	all := theme.All()
 

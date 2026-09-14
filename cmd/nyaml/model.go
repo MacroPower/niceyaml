@@ -45,7 +45,7 @@ type model struct {
 
 func newModel(opts *modelOptions) model {
 	// Get sorted theme list.
-	themeList := theme.List(style.Dark)
+	themeList := theme.List(theme.Dark)
 	slices.Sort(themeList)
 
 	// Default theme.

@@ -21,10 +21,10 @@
 //		// Use styles
 //	}
 //
-// Filter available themes by [style.Mode] with [List]:
+// Filter available themes by [Mode] with [List]:
 //
-//	darkThemes := theme.List(style.Dark)   // ["monokai", "dracula", ...]
-//	lightThemes := theme.List(style.Light) // ["solarized-light", "catppuccin-latte", ...]
+//	darkThemes := theme.List(theme.Dark)   // ["monokai", "dracula", ...]
+//	lightThemes := theme.List(theme.Light) // ["solarized-light", "catppuccin-latte", ...]
 //
 // [Get] and [All] return the [Theme] entries themselves, with the name and
 // mode alongside the styles, for building a picker:
@@ -39,7 +39,7 @@
 //
 //	theme.Register("my-theme", func() style.Styles {
 //		return style.Styles{ /* ... */ }
-//	}, style.Dark)
+//	}, theme.Dark)
 //
 // Registered themes become available through [Styles] and [List] alongside
 // built-in themes.

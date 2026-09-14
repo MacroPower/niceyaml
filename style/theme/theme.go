@@ -6,6 +6,17 @@ import (
 	"go.jacobcolvin.com/niceyaml/style"
 )
 
+// Mode is the color scheme a theme targets.
+type Mode int
+
+// Color scheme modes.
+const (
+	// Light marks themes designed for light backgrounds.
+	Light Mode = iota
+	// Dark marks themes designed for dark backgrounds.
+	Dark
+)
+
 // Theme is a registry entry: a named color theme with its mode and style
 // generator.
 //
@@ -17,7 +28,7 @@ type Theme struct {
 	// Name is the kebab-case identifier for the theme (e.g., "monokai", "dracula").
 	Name string
 	// Mode indicates whether the theme is designed for light or dark backgrounds.
-	Mode style.Mode
+	Mode Mode
 }
 
 var (
@@ -37,80 +48,80 @@ var (
 	}()
 
 	themes = []Theme{
-		{Abap, "abap", style.Light},
-		{Algol, "algol", style.Light},
-		{AlgolNu, "algol-nu", style.Light},
-		{Arduino, "arduino", style.Light},
-		{Ashen, "ashen", style.Dark},
-		{AuraThemeDark, "aura-theme-dark", style.Dark},
-		{AuraThemeDarkSoft, "aura-theme-dark-soft", style.Dark},
-		{Autumn, "autumn", style.Light},
-		{Average, "average", style.Dark},
-		{Base16Snazzy, "base16-snazzy", style.Dark},
-		{Borland, "borland", style.Light},
-		{Bw, "bw", style.Light},
-		{CatppuccinFrappe, "catppuccin-frappe", style.Dark},
-		{CatppuccinLatte, "catppuccin-latte", style.Light},
-		{CatppuccinMacchiato, "catppuccin-macchiato", style.Dark},
-		{CatppuccinMocha, "catppuccin-mocha", style.Dark},
-		{Charm, "charm", style.Dark},
-		{Colorful, "colorful", style.Light},
-		{DoomOne, "doom-one", style.Dark},
-		{DoomOne2, "doom-one2", style.Dark},
-		{Dracula, "dracula", style.Dark},
-		{Emacs, "emacs", style.Light},
-		{Evergarden, "evergarden", style.Dark},
-		{Friendly, "friendly", style.Light},
-		{Fruity, "fruity", style.Dark},
-		{Github, "github", style.Light},
-		{GithubDark, "github-dark", style.Dark},
-		{Gruvbox, "gruvbox", style.Dark},
-		{GruvboxLight, "gruvbox-light", style.Light},
-		{HrHighContrast, "hr-high-contrast", style.Dark},
-		{Hrdark, "hrdark", style.Dark},
-		{Igor, "igor", style.Light},
-		{KanagawaDragon, "kanagawa-dragon", style.Dark},
-		{KanagawaLotus, "kanagawa-lotus", style.Light},
-		{KanagawaWave, "kanagawa-wave", style.Dark},
-		{Lovelace, "lovelace", style.Light},
-		{Manni, "manni", style.Light},
-		{ModusOperandi, "modus-operandi", style.Light},
-		{ModusVivendi, "modus-vivendi", style.Dark},
-		{Monokai, "monokai", style.Dark},
-		{Monokailight, "monokailight", style.Light},
-		{Murphy, "murphy", style.Light},
-		{Native, "native", style.Dark},
-		{Nord, "nord", style.Dark},
-		{Nordic, "nordic", style.Dark},
-		{Onedark, "onedark", style.Dark},
-		{Onesenterprise, "onesenterprise", style.Light},
-		{ParaisoDark, "paraiso-dark", style.Dark},
-		{ParaisoLight, "paraiso-light", style.Light},
-		{Pastie, "pastie", style.Light},
-		{Perldoc, "perldoc", style.Light},
-		{Pygments, "pygments", style.Light},
-		{RainbowDash, "rainbow-dash", style.Light},
-		{RosePine, "rose-pine", style.Dark},
-		{RosePineDawn, "rose-pine-dawn", style.Light},
-		{RosePineMoon, "rose-pine-moon", style.Dark},
-		{Rpgle, "rpgle", style.Light},
-		{Rrt, "rrt", style.Dark},
-		{SolarizedDark, "solarized-dark", style.Dark},
-		{SolarizedDark256, "solarized-dark256", style.Dark},
-		{SolarizedLight, "solarized-light", style.Light},
-		{Swapoff, "swapoff", style.Dark},
-		{Tango, "tango", style.Light},
-		{TokyonightDay, "tokyonight-day", style.Light},
-		{TokyonightMoon, "tokyonight-moon", style.Dark},
-		{TokyonightNight, "tokyonight-night", style.Dark},
-		{TokyonightStorm, "tokyonight-storm", style.Dark},
-		{Trac, "trac", style.Light},
-		{Vim, "vim", style.Dark},
-		{Vs, "vs", style.Light},
-		{Vulcan, "vulcan", style.Dark},
-		{Witchhazel, "witchhazel", style.Dark},
-		{Xcode, "xcode", style.Light},
-		{XcodeDark, "xcode-dark", style.Dark},
+		{Abap, "abap", Light},
+		{Algol, "algol", Light},
+		{AlgolNu, "algol-nu", Light},
+		{Arduino, "arduino", Light},
+		{Ashen, "ashen", Dark},
+		{AuraThemeDark, "aura-theme-dark", Dark},
+		{AuraThemeDarkSoft, "aura-theme-dark-soft", Dark},
+		{Autumn, "autumn", Light},
+		{Average, "average", Dark},
+		{Base16Snazzy, "base16-snazzy", Dark},
+		{Borland, "borland", Light},
+		{Bw, "bw", Light},
+		{CatppuccinFrappe, "catppuccin-frappe", Dark},
+		{CatppuccinLatte, "catppuccin-latte", Light},
+		{CatppuccinMacchiato, "catppuccin-macchiato", Dark},
+		{CatppuccinMocha, "catppuccin-mocha", Dark},
+		{Charm, "charm", Dark},
+		{Colorful, "colorful", Light},
+		{DoomOne, "doom-one", Dark},
+		{DoomOne2, "doom-one2", Dark},
+		{Dracula, "dracula", Dark},
+		{Emacs, "emacs", Light},
+		{Evergarden, "evergarden", Dark},
+		{Friendly, "friendly", Light},
+		{Fruity, "fruity", Dark},
+		{Github, "github", Light},
+		{GithubDark, "github-dark", Dark},
+		{Gruvbox, "gruvbox", Dark},
+		{GruvboxLight, "gruvbox-light", Light},
+		{HrHighContrast, "hr-high-contrast", Dark},
+		{Hrdark, "hrdark", Dark},
+		{Igor, "igor", Light},
+		{KanagawaDragon, "kanagawa-dragon", Dark},
+		{KanagawaLotus, "kanagawa-lotus", Light},
+		{KanagawaWave, "kanagawa-wave", Dark},
+		{Lovelace, "lovelace", Light},
+		{Manni, "manni", Light},
+		{ModusOperandi, "modus-operandi", Light},
+		{ModusVivendi, "modus-vivendi", Dark},
+		{Monokai, "monokai", Dark},
+		{Monokailight, "monokailight", Light},
+		{Murphy, "murphy", Light},
+		{Native, "native", Dark},
+		{Nord, "nord", Dark},
+		{Nordic, "nordic", Dark},
+		{Onedark, "onedark", Dark},
+		{Onesenterprise, "onesenterprise", Light},
+		{ParaisoDark, "paraiso-dark", Dark},
+		{ParaisoLight, "paraiso-light", Light},
+		{Pastie, "pastie", Light},
+		{Perldoc, "perldoc", Light},
+		{Pygments, "pygments", Light},
+		{RainbowDash, "rainbow-dash", Light},
+		{RosePine, "rose-pine", Dark},
+		{RosePineDawn, "rose-pine-dawn", Light},
+		{RosePineMoon, "rose-pine-moon", Dark},
+		{Rpgle, "rpgle", Light},
+		{Rrt, "rrt", Dark},
+		{SolarizedDark, "solarized-dark", Dark},
+		{SolarizedDark256, "solarized-dark256", Dark},
+		{SolarizedLight, "solarized-light", Light},
+		{Swapoff, "swapoff", Dark},
+		{Tango, "tango", Light},
+		{TokyonightDay, "tokyonight-day", Light},
+		{TokyonightMoon, "tokyonight-moon", Dark},
+		{TokyonightNight, "tokyonight-night", Dark},
+		{TokyonightStorm, "tokyonight-storm", Dark},
+		{Trac, "trac", Light},
+		{Vim, "vim", Dark},
+		{Vs, "vs", Light},
+		{Vulcan, "vulcan", Dark},
+		{Witchhazel, "witchhazel", Dark},
+		{Xcode, "xcode", Light},
+		{XcodeDark, "xcode-dark", Dark},
 	}
 )
 
@@ -121,7 +132,7 @@ var (
 // it is replaced.
 //
 // Register is safe for concurrent use.
-func Register(name string, fn func() style.Styles, mode style.Mode) {
+func Register(name string, fn func() style.Styles, mode Mode) {
 	customMu.Lock()
 	defer customMu.Unlock()
 
@@ -187,12 +198,12 @@ func All() []Theme {
 	return result
 }
 
-// List returns the names of all themes matching the given [style.Mode], in
+// List returns the names of all themes matching the given [Mode], in
 // the order of [All].
 //
 // Names are kebab-case identifiers (e.g., "monokai", "catppuccin-mocha")
 // suitable for passing to [Styles] or [Get].
-func List(m style.Mode) []string {
+func List(m Mode) []string {
 	var names []string
 
 	for _, t := range All() {

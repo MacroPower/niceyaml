@@ -68,8 +68,6 @@
 // Each theme is a function returning [Styles] with colors appropriate for that
 // palette.
 //
-// [Mode] indicates whether a theme targets light or dark backgrounds.
-//
 // # Style Strings
 //
 // This package provides encoding and decoding of Pygments-style strings to and

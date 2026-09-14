@@ -6,18 +6,6 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// Mode represents the color scheme mode of a theme.
-//
-// Used by theme functions to indicate whether they target light or dark
-// backgrounds.
-type Mode int
-
-// Color scheme modes.
-const (
-	Light Mode = iota
-	Dark
-)
-
 // Style identifies a style category for YAML highlighting.
 //
 // Style constants are used as keys in [Styles] maps to associate token
