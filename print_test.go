@@ -58,10 +58,7 @@ func printDiff(p *niceyaml.Printer, before, after string) string {
 	beforeTks := niceyaml.NewSourceFromString(before, niceyaml.WithName("before"))
 	afterTks := niceyaml.NewSourceFromString(after, niceyaml.WithName("after"))
 
-	return p.Print(niceyaml.Diff(
-		niceyaml.NewRevision(beforeTks),
-		niceyaml.NewRevision(afterTks),
-	).Unified())
+	return p.Print(niceyaml.Diff(beforeTks, afterTks).Unified())
 }
 
 // printDiffSummary generates a summary diff showing only changed lines with context.
@@ -70,10 +67,7 @@ func printDiffSummary(p *niceyaml.Printer, before, after string, context int) st
 	beforeTks := niceyaml.NewSourceFromString(before, niceyaml.WithName("before"))
 	afterTks := niceyaml.NewSourceFromString(after, niceyaml.WithName("after"))
 
-	source, ranges := niceyaml.Diff(
-		niceyaml.NewRevision(beforeTks),
-		niceyaml.NewRevision(afterTks),
-	).Hunks(context)
+	source, ranges := niceyaml.Diff(beforeTks, afterTks).Hunks(context)
 
 	if source.IsEmpty() {
 		return ""

@@ -21,18 +21,16 @@ func BenchmarkFullDiffSource(b *testing.B) {
 	for _, sz := range sizes {
 		yamlA := generateYAML(sz.lines)
 		sourceA := niceyaml.NewSourceFromString(yamlA, niceyaml.WithName("a"))
-		revA := niceyaml.NewRevision(sourceA)
 
 		b.Run(sz.name+"/identical", func(b *testing.B) {
 			yamlB := generateYAML(sz.lines)
 			sourceB := niceyaml.NewSourceFromString(yamlB, niceyaml.WithName("b"))
-			revB := niceyaml.NewRevision(sourceB)
 
 			b.ReportAllocs()
 			b.ResetTimer()
 
 			for b.Loop() {
-				_ = niceyaml.Diff(revA, revB).Unified()
+				_ = niceyaml.Diff(sourceA, sourceB).Unified()
 			}
 		})
 
@@ -46,13 +44,12 @@ func BenchmarkFullDiffSource(b *testing.B) {
 
 			yamlB := sb.String()
 			sourceB := niceyaml.NewSourceFromString(yamlB, niceyaml.WithName("b"))
-			revB := niceyaml.NewRevision(sourceB)
 
 			b.ReportAllocs()
 			b.ResetTimer()
 
 			for b.Loop() {
-				_ = niceyaml.Diff(revA, revB).Unified()
+				_ = niceyaml.Diff(sourceA, sourceB).Unified()
 			}
 		})
 
@@ -70,13 +67,12 @@ func BenchmarkFullDiffSource(b *testing.B) {
 
 			yamlB := sb.String()
 			sourceB := niceyaml.NewSourceFromString(yamlB, niceyaml.WithName("b"))
-			revB := niceyaml.NewRevision(sourceB)
 
 			b.ReportAllocs()
 			b.ResetTimer()
 
 			for b.Loop() {
-				_ = niceyaml.Diff(revA, revB).Unified()
+				_ = niceyaml.Diff(sourceA, sourceB).Unified()
 			}
 		})
 	}
@@ -97,7 +93,6 @@ func BenchmarkHunksDiffSource(b *testing.B) {
 	for _, sz := range sizes {
 		yamlA := generateYAML(sz.lines)
 		sourceA := niceyaml.NewSourceFromString(yamlA, niceyaml.WithName("a"))
-		revA := niceyaml.NewRevision(sourceA)
 
 		// Create B with 10% changed lines.
 		var sb strings.Builder
@@ -112,14 +107,13 @@ func BenchmarkHunksDiffSource(b *testing.B) {
 
 		yamlB := sb.String()
 		sourceB := niceyaml.NewSourceFromString(yamlB, niceyaml.WithName("b"))
-		revB := niceyaml.NewRevision(sourceB)
 
 		for _, ctx := range contexts {
 			b.Run(fmt.Sprintf("%s/context_%d", sz.name, ctx), func(b *testing.B) {
 				b.ReportAllocs()
 
 				for b.Loop() {
-					_, _ = niceyaml.Diff(revA, revB).Hunks(ctx)
+					_, _ = niceyaml.Diff(sourceA, sourceB).Hunks(ctx)
 				}
 			})
 		}
@@ -151,14 +145,12 @@ func BenchmarkFullDiffSource_WorstCase(b *testing.B) {
 
 		sourceA := niceyaml.NewSourceFromString(yamlA, niceyaml.WithName("a"))
 		sourceB := niceyaml.NewSourceFromString(yamlB, niceyaml.WithName("b"))
-		revA := niceyaml.NewRevision(sourceA)
-		revB := niceyaml.NewRevision(sourceB)
 
 		b.Run(fmt.Sprintf("interleaved_%d", size), func(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				_ = niceyaml.Diff(revA, revB).Unified()
+				_ = niceyaml.Diff(sourceA, sourceB).Unified()
 			}
 		})
 	}
@@ -171,7 +163,6 @@ func BenchmarkFullDiffSource_InsertAtEnd(b *testing.B) {
 	for _, size := range sizes {
 		yamlA := generateYAML(size)
 		sourceA := niceyaml.NewSourceFromString(yamlA, niceyaml.WithName("a"))
-		revA := niceyaml.NewRevision(sourceA)
 
 		// Same content + 10% more at the end.
 		var sb strings.Builder
@@ -184,103 +175,26 @@ func BenchmarkFullDiffSource_InsertAtEnd(b *testing.B) {
 
 		yamlB := sb.String()
 		sourceB := niceyaml.NewSourceFromString(yamlB, niceyaml.WithName("b"))
-		revB := niceyaml.NewRevision(sourceB)
 
 		b.Run(fmt.Sprintf("append_%d", size), func(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				_ = niceyaml.Diff(revA, revB).Unified()
+				_ = niceyaml.Diff(sourceA, sourceB).Unified()
 			}
 		})
 	}
 }
 
-func BenchmarkRevisionSeek(b *testing.B) {
-	// Build a chain of revisions.
+func BenchmarkRevisionsNames(b *testing.B) {
 	yaml := generateYAML(50)
-	source := niceyaml.NewSourceFromString(yaml, niceyaml.WithName("v1"))
-	rev := niceyaml.NewRevision(source)
-
-	// Add 100 more revisions.
-	for i := 2; i <= 100; i++ {
-		s := niceyaml.NewSourceFromString(yaml, niceyaml.WithName(fmt.Sprintf("v%d", i)))
-		rev = rev.Append(s)
-	}
-
-	seekDistances := []int{1, 10, 50, 99}
-
-	for _, dist := range seekDistances {
-		b.Run(fmt.Sprintf("seek_%d", dist), func(b *testing.B) {
-			start := rev.Origin()
-
-			b.ReportAllocs()
-			b.ResetTimer()
-
-			for b.Loop() {
-				_ = start.Seek(dist)
-			}
-		})
-	}
-}
-
-func BenchmarkRevisionLen(b *testing.B) {
-	yaml := generateYAML(50)
-	source := niceyaml.NewSourceFromString(yaml, niceyaml.WithName("v1"))
-	rev := niceyaml.NewRevision(source)
-
-	// Add 100 more revisions.
-	for i := 2; i <= 100; i++ {
-		s := niceyaml.NewSourceFromString(yaml, niceyaml.WithName(fmt.Sprintf("v%d", i)))
-		rev = rev.Append(s)
-	}
-
-	b.Run("from_origin", func(b *testing.B) {
-		start := rev.Origin()
-
-		b.ReportAllocs()
-		b.ResetTimer()
-
-		for b.Loop() {
-			_ = start.Len()
-		}
-	})
-
-	b.Run("from_middle", func(b *testing.B) {
-		middle := rev.At(50)
-
-		b.ReportAllocs()
-		b.ResetTimer()
-
-		for b.Loop() {
-			_ = middle.Len()
-		}
-	})
-
-	b.Run("from_tip", func(b *testing.B) {
-		tip := rev.Tip()
-
-		b.ReportAllocs()
-		b.ResetTimer()
-
-		for b.Loop() {
-			_ = tip.Len()
-		}
-	})
-}
-
-func BenchmarkRevisionNames(b *testing.B) {
-	yaml := generateYAML(50)
-	source := niceyaml.NewSourceFromString(yaml, niceyaml.WithName("v1"))
-	rev := niceyaml.NewRevision(source)
 
 	counts := []int{10, 50, 100}
 
 	for _, count := range counts {
-		r := rev
-		for i := 2; i <= count; i++ {
-			s := niceyaml.NewSourceFromString(yaml, niceyaml.WithName(fmt.Sprintf("v%d", i)))
-			r = r.Append(s)
+		revs := make(niceyaml.Revisions, 0, count)
+		for i := 1; i <= count; i++ {
+			revs = append(revs, niceyaml.NewSourceFromString(yaml, niceyaml.WithName(fmt.Sprintf("v%d", i))))
 		}
 
 		b.Run(fmt.Sprintf("%d_revisions", count), func(b *testing.B) {
@@ -288,7 +202,7 @@ func BenchmarkRevisionNames(b *testing.B) {
 			b.ResetTimer()
 
 			for b.Loop() {
-				_ = r.Names()
+				_ = revs.Names()
 			}
 		})
 	}

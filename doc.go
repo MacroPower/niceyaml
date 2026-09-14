@@ -120,11 +120,11 @@
 //	lines, spans := result.Hunks(3)
 //	fmt.Println(printer.Print(lines, spans...))
 //
-// [Revision] chains document versions in a doubly-linked list, useful for
-// tracking history across many versions. Any two revisions can be diffed:
+// [Revisions] keeps the versions of a document in order, from the original
+// to the latest. Any two revisions can be diffed:
 //
-//	revs := niceyaml.NewRevision(original).Append(modified)
-//	result := niceyaml.Diff(revs.Origin(), revs.Tip())
+//	revs := niceyaml.Revisions{original, modified}
+//	result := niceyaml.Diff(revs[0], revs[1])
 //
 // Custom algorithms implement [diff.Algorithm]. For reusable differ instances:
 //

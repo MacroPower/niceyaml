@@ -421,10 +421,7 @@ func TestFinder_Find_DiffBuiltLines(t *testing.T) {
 	beforeLines := niceyaml.NewSourceFromString(before, niceyaml.WithName("before"))
 	afterLines := niceyaml.NewSourceFromString(after, niceyaml.WithName("after"))
 
-	revBefore := niceyaml.NewRevision(beforeLines)
-	revAfter := niceyaml.NewRevision(afterLines)
-
-	lines := niceyaml.Diff(revBefore, revAfter).Unified()
+	lines := niceyaml.Diff(beforeLines, afterLines).Unified()
 
 	tcs := map[string]struct {
 		search string

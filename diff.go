@@ -10,15 +10,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
-// SourceGetter retrieves a [*Source].
-//
-// [Source] implements it by returning itself, so a plain [*Source] can be
-// used anywhere a SourceGetter is expected. [Revision] implements it by
-// returning the source at its head.
-type SourceGetter interface {
-	Source() *Source
-}
-
 // Differ computes line differences using a configurable algorithm.
 //
 // Differ is not safe for concurrent use because the underlying algorithm
@@ -65,10 +56,8 @@ func NewDiffer(opts ...DifferOption) *Differ {
 //
 // The result can be rendered multiple times with [DiffResult.Unified] or
 // [DiffResult.Hunks].
-func (d *Differ) Diff(a, b SourceGetter) *DiffResult {
-	aSource := a.Source()
-	bSource := b.Source()
-	ops := d.computeOps(aSource, bSource)
+func (d *Differ) Diff(a, b *Source) *DiffResult {
+	ops := d.computeOps(a, b)
 
 	// Precompute prefix sums for O(1) line number and count queries.
 	beforeSums := position.NewPrefixSums(len(ops), func(i int) int {
@@ -82,7 +71,7 @@ func (d *Differ) Diff(a, b SourceGetter) *DiffResult {
 
 	return &DiffResult{
 		ops:        ops,
-		name:       fmt.Sprintf("%s..%s", aSource.Name(), bSource.Name()),
+		name:       fmt.Sprintf("%s..%s", a.Name(), b.Name()),
 		beforeSums: beforeSums,
 		afterSums:  afterSums,
 	}
@@ -376,7 +365,7 @@ func (r *DiffResult) Name() string {
 // Diff computes the difference between two sources using the default algorithm.
 //
 // This is a convenience function equivalent to NewDiffer().Diff(a, b).
-func Diff(a, b SourceGetter) *DiffResult {
+func Diff(a, b *Source) *DiffResult {
 	return NewDiffer().Diff(a, b)
 }
 

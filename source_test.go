@@ -264,10 +264,7 @@ func TestSource_AllRunes_DiffBuiltLines(t *testing.T) {
 	beforeLines := niceyaml.NewSourceFromString(before, niceyaml.WithName("before"))
 	afterLines := niceyaml.NewSourceFromString(after, niceyaml.WithName("after"))
 
-	revBefore := niceyaml.NewRevision(beforeLines)
-	revAfter := niceyaml.NewRevision(afterLines)
-
-	lines := niceyaml.Diff(revBefore, revAfter).Unified()
+	lines := niceyaml.Diff(beforeLines, afterLines).Unified()
 
 	// Diff should produce two lines: deleted (old) and inserted (new).
 	// Both have the same source token line (1), but different visual indices (0, 1).

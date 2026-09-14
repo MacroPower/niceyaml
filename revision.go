@@ -1,190 +1,42 @@
 package niceyaml
 
-// Revision represents a [*Source] at one or more revisions.
-// It may form a linked or doubly-linked list to track changes across revisions.
-// A single revision is valid; multiple revisions are not required.
+// Revisions is the ordered history of one document. Index 0 holds the
+// original [*Source] and the last element holds the latest. It is a plain
+// slice, so append adds a revision and indexing reads one:
 //
-// Create instances with [NewRevision].
-type Revision struct {
-	// The previous token collection in the revision sequence.
-	// If there is no previous revision, it is nil.
-	prev *Revision
-	// The next token collection in the revision sequence.
-	// If there is no next revision, it is nil.
-	next *Revision
-	// The [*Source] at the head.
-	head *Source
+//	revs := niceyaml.Revisions{original}
+//	revs = append(revs, modified)
+//	result := niceyaml.Diff(revs[0], revs[1])
+//
+// A single revision is valid; multiple revisions are not required.
+type Revisions []*Source
+
+// Len returns the number of revisions.
+func (r Revisions) Len() int {
+	return len(r)
 }
 
-// NewRevision creates a new [*Revision] with the given [*Source] at the head.
-// Use [Revision.Append] or [Revision.Prepend] to add more revisions.
-// A builder pattern is supported for values that are known at compile time.
-func NewRevision(s *Source) *Revision {
-	return &Revision{head: s}
-}
-
-// Source returns the [*Source] at the head.
-func (t *Revision) Source() *Source {
-	return t.head
-}
-
-// Name returns the name of the [*Source] at the head.
-func (t *Revision) Name() string {
-	return t.head.Name()
-}
-
-// Seek moves n revisions forward (n > 0) or backward (n < 0) in the sequence.
-// If n exceeds the available revisions, it stops at the end.
-func (t *Revision) Seek(n int) *Revision {
-	curr := t
-
-	if n > 0 {
-		for range n {
-			if curr.next == nil {
-				break
-			}
-
-			curr = curr.next
-		}
+// At returns the revision at the given zero-based index, clamped to the
+// available revisions. Returns nil when there are no revisions.
+func (r Revisions) At(index int) *Source {
+	if len(r) == 0 {
+		return nil
 	}
 
-	if n < 0 {
-		for range -n {
-			if curr.prev == nil {
-				break
-			}
+	return r[min(max(index, 0), len(r)-1)]
+}
 
-			curr = curr.prev
-		}
+// Names returns the names of all revisions in order from the original to the
+// latest.
+func (r Revisions) Names() []string {
+	if len(r) == 0 {
+		return nil
 	}
 
-	return curr
-}
-
-// Tip returns the latest revision in the sequence.
-func (t *Revision) Tip() *Revision {
-	curr := t
-	for curr.next != nil {
-		curr = curr.next
-	}
-
-	return curr
-}
-
-// Origin returns the original revision in the sequence.
-func (t *Revision) Origin() *Revision {
-	curr := t
-	for curr.prev != nil {
-		curr = curr.prev
-	}
-
-	return curr
-}
-
-// At returns the revision at the given zero-based index.
-// If index exceeds the available revisions, it stops at the last one.
-// This is equivalent to Origin().Seek(index).
-func (t *Revision) At(index int) *Revision {
-	return t.Origin().Seek(index)
-}
-
-// AtTip reports whether this is the latest revision in the sequence.
-func (t *Revision) AtTip() bool {
-	return t.next == nil
-}
-
-// AtOrigin reports whether this is the original revision in the sequence.
-func (t *Revision) AtOrigin() bool {
-	return t.prev == nil
-}
-
-// Names returns the names of all revisions in order from origin to latest.
-func (t *Revision) Names() []string {
-	var names []string
-
-	// Walk to origin.
-	origin := t
-	for origin.prev != nil {
-		origin = origin.prev
-	}
-
-	// Collect names forward.
-	curr := origin
-	for curr != nil {
-		names = append(names, curr.head.Name())
-		curr = curr.next
+	names := make([]string, len(r))
+	for i, s := range r {
+		names[i] = s.Name()
 	}
 
 	return names
-}
-
-// Index returns the zero-based index of the [Revision] at the head.
-func (t *Revision) Index() int {
-	index := 0
-
-	// Count previous revisions.
-	curr := t
-	for curr.prev != nil {
-		index++
-		curr = curr.prev
-	}
-
-	return index
-}
-
-// Len returns the total number of revisions in the sequence.
-func (t *Revision) Len() int {
-	// Count previous revisions.
-	count := t.Index()
-
-	// Count next revisions.
-	curr := t
-	for curr.next != nil {
-		count++
-		curr = curr.next
-	}
-
-	return count + 1
-}
-
-// Append inserts a new revision directly after this one and returns it.
-//
-// Revisions that already follow this one move after the new revision, so
-// appending to a revision in the middle of the sequence never drops the rest.
-// Use [Revision.Tip] first to add at the end.
-func (t *Revision) Append(s *Source) *Revision {
-	rev := &Revision{
-		prev: t,
-		next: t.next,
-		head: s,
-	}
-
-	if t.next != nil {
-		t.next.prev = rev
-	}
-
-	t.next = rev
-
-	return rev
-}
-
-// Prepend inserts a new revision directly before this one and returns it.
-//
-// Revisions that already precede this one move before the new revision, so
-// prepending to a revision in the middle of the sequence never drops the
-// rest. Use [Revision.Origin] first to add at the start.
-func (t *Revision) Prepend(s *Source) *Revision {
-	rev := &Revision{
-		prev: t.prev,
-		next: t,
-		head: s,
-	}
-
-	if t.prev != nil {
-		t.prev.next = rev
-	}
-
-	t.prev = rev
-
-	return rev
 }

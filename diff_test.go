@@ -13,11 +13,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/style"
 )
 
-var (
-	_ niceyaml.SourceGetter = (*niceyaml.Source)(nil)
-	_ niceyaml.SourceGetter = (*niceyaml.Revision)(nil)
-)
-
 func TestDiffer_Full(t *testing.T) {
 	t.Parallel()
 
@@ -431,9 +426,7 @@ func TestDiffer_Full_Flags(t *testing.T) {
 			beforeTokens := niceyaml.NewSourceFromString(tc.before, niceyaml.WithName("a"))
 			afterTokens := niceyaml.NewSourceFromString(tc.after, niceyaml.WithName("b"))
 
-			revA := niceyaml.NewRevision(beforeTokens)
-			revB := niceyaml.NewRevision(afterTokens)
-			differ := niceyaml.Diff(revA, revB)
+			differ := niceyaml.Diff(beforeTokens, afterTokens)
 
 			got := differ.Unified()
 
@@ -557,10 +550,7 @@ func TestDiffer_Hunks(t *testing.T) {
 			beforeTokens := niceyaml.NewSourceFromString(tc.before, niceyaml.WithName("a"))
 			afterTokens := niceyaml.NewSourceFromString(tc.after, niceyaml.WithName("b"))
 
-			revA := niceyaml.NewRevision(beforeTokens)
-			revB := niceyaml.NewRevision(afterTokens)
-
-			differ := niceyaml.Diff(revA, revB)
+			differ := niceyaml.Diff(beforeTokens, afterTokens)
 			got, ranges := differ.Hunks(tc.context)
 
 			assert.Len(t, ranges, tc.wantRanges)
@@ -629,10 +619,7 @@ func TestDiffer_IsEmpty(t *testing.T) {
 			beforeTokens := niceyaml.NewSourceFromString(tc.before, niceyaml.WithName("a"))
 			afterTokens := niceyaml.NewSourceFromString(tc.after, niceyaml.WithName("b"))
 
-			revA := niceyaml.NewRevision(beforeTokens)
-			revB := niceyaml.NewRevision(afterTokens)
-
-			differ := niceyaml.Diff(revA, revB)
+			differ := niceyaml.Diff(beforeTokens, afterTokens)
 
 			assert.Equal(t, tc.want, differ.IsEmpty())
 		})
@@ -682,8 +669,8 @@ func TestDiffResult_Stats(t *testing.T) {
 			afterSrc := niceyaml.NewSourceFromString(tt.after, niceyaml.WithName("b"))
 
 			result := niceyaml.Diff(
-				niceyaml.NewRevision(beforeSrc),
-				niceyaml.NewRevision(afterSrc),
+				beforeSrc,
+				afterSrc,
 			)
 			added, removed := result.Stats()
 			assert.Equal(t, tt.wantAdded, added, "added count")
@@ -905,8 +892,8 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 			afterSrc := niceyaml.NewSourceFromString(tc.after, niceyaml.WithName("b"))
 
 			result := niceyaml.Diff(
-				niceyaml.NewRevision(beforeSrc),
-				niceyaml.NewRevision(afterSrc),
+				beforeSrc,
+				afterSrc,
 			)
 
 			beforeIter := result.Before()
@@ -989,10 +976,7 @@ func TestDiffer_MultipleRenders(t *testing.T) {
 	beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
 	afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
 
-	revA := niceyaml.NewRevision(beforeTokens)
-	revB := niceyaml.NewRevision(afterTokens)
-
-	differ := niceyaml.Diff(revA, revB)
+	differ := niceyaml.Diff(beforeTokens, afterTokens)
 
 	// Call Full multiple times.
 	full1 := differ.Unified()
