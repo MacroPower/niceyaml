@@ -2839,6 +2839,33 @@ func TestLine_Overlay(t *testing.T) {
 func TestLines_AddOverlay(t *testing.T) {
 	t.Parallel()
 
+	t.Run("out of range lines are skipped", func(t *testing.T) {
+		t.Parallel()
+
+		tks := lexer.Tokenize("a: 1\nb: 2\n")
+		lines := line.NewLines(tks)
+		require.Len(t, lines, 2)
+
+		// A range that starts before the first line and ends past the last
+		// applies only to the lines that exist.
+		lines.AddOverlay("test1", position.NewRange(
+			position.New(-1, 0),
+			position.New(5, 3),
+		))
+
+		require.Len(t, lines[0].Overlays, 1)
+		require.Len(t, lines[1].Overlays, 1)
+
+		// A range entirely outside the collection is a no-op.
+		lines.AddOverlay("test2", position.NewRange(
+			position.New(7, 0),
+			position.New(7, 3),
+		))
+
+		assert.Len(t, lines[0].Overlays, 1)
+		assert.Len(t, lines[1].Overlays, 1)
+	})
+
 	t.Run("single line range", func(t *testing.T) {
 		t.Parallel()
 

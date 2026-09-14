@@ -654,7 +654,9 @@ func (ls Lines) Validate() error {
 // AddOverlay adds an overlay with the given style to the specified ranges.
 // Multi-line ranges are split into per-line overlays automatically.
 //
-// Panics if a range refers to a line index outside the collection.
+// Lines outside the collection are skipped, the same way [Lines.AllLines]
+// clamps its spans, so a range computed against a longer view is safe to
+// apply.
 func (ls Lines) AddOverlay(kind style.Style, ranges ...position.Range) {
 	if len(ls) == 0 {
 		return
@@ -665,10 +667,15 @@ func (ls Lines) AddOverlay(kind style.Style, ranges ...position.Range) {
 	}
 }
 
-// addOverlayRange adds a single overlay range, splitting across lines as needed.
+// addOverlayRange adds a single overlay range, splitting across lines as
+// needed and skipping lines outside the collection.
 func (ls Lines) addOverlayRange(kind style.Style, r position.Range) {
 	for _, lineRange := range r.SliceLines() {
 		lineIdx := lineRange.Start.Line
+		if lineIdx < 0 || lineIdx >= len(ls) {
+			continue
+		}
+
 		ls[lineIdx].AddOverlay(Overlay{
 			Cols: position.NewSpan(lineRange.Start.Col, lineRange.End.Col),
 			Kind: kind,
