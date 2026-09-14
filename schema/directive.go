@@ -42,6 +42,12 @@ func ParseDirective(comment string) *Directive {
 
 // DocumentDirectives maps document indices to their schema [Directive] values.
 //
+// A key indexes the token groups [tokens.SplitDocuments] yields. The go-yaml
+// parser can split a stream into fewer documents than that, so a key does not
+// always name the parsed document at the same index. Pass one document's own
+// tokens to [ParseDocumentDirective] to pair a directive with a parsed
+// document.
+//
 // Create instances with [ParseDocumentDirectives].
 type DocumentDirectives map[int]*Directive
 

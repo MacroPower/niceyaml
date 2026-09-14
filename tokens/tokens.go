@@ -402,9 +402,10 @@ func CloneWithResetPositions(tks token.Tokens) token.Tokens {
 // A document header token ('---') starts a new document and is included at
 // the start of it. A document end token ('...') closes the current document
 // and is included at the end of it, so content that follows without a header
-// forms a new document. These are the same boundaries the go-yaml parser
-// uses, so the yielded documents pair by index with the documents in a
-// parsed [github.com/goccy/go-yaml/ast.File].
+// forms a new document. These are the boundaries the go-yaml parser uses for
+// well-formed streams. The parser may produce fewer documents than this
+// function yields, for example when consecutive headers collapse, so pair
+// the two by token offset rather than by index.
 //
 // The returned slices each contain tokens for a single document, preserving
 // original token order and positions. The tokens are the caller's, not

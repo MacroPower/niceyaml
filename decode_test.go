@@ -797,6 +797,64 @@ func TestDecoder_Documents(t *testing.T) {
 		}
 	})
 
+	t.Run("pairs each document with the token group it starts in", func(t *testing.T) {
+		t.Parallel()
+
+		// A leading comment forms its own document, and the header that follows
+		// starts the second. Each document's tokens begin at its own anchor.
+		input := stringtest.Input(`
+			# top
+
+			---
+			b: 2
+		`)
+		source := niceyaml.NewSourceFromString(input)
+		d, err := source.Decoder()
+		require.NoError(t, err)
+		require.Equal(t, 2, d.Len())
+
+		var types [][]token.Type
+
+		for _, dd := range d.Documents() {
+			var docTypes []token.Type
+
+			for _, tk := range dd.Tokens() {
+				docTypes = append(docTypes, tk.Type)
+			}
+
+			types = append(types, docTypes)
+		}
+
+		assert.Equal(t, [][]token.Type{
+			{token.CommentType},
+			{token.DocumentHeaderType, token.StringType, token.MappingValueType, token.IntegerType},
+		}, types)
+	})
+
+	t.Run("pairs by offset when the parser collapses consecutive headers", func(t *testing.T) {
+		t.Parallel()
+
+		// The go-yaml parser folds everything after consecutive headers into
+		// one empty document anchored at the first header, so that document
+		// takes only the first header's token group.
+		input := stringtest.Input(`
+			---
+			---
+			b: 2
+		`)
+		source := niceyaml.NewSourceFromString(input)
+		d, err := source.Decoder()
+		require.NoError(t, err)
+		require.Equal(t, 1, d.Len())
+
+		for _, dd := range d.Documents() {
+			tks := dd.Tokens()
+			require.Len(t, tks, 1)
+			assert.Equal(t, token.DocumentHeaderType, tks[0].Type)
+			assert.Same(t, source.Tokens()[0], tks[0])
+		}
+	})
+
 	t.Run("early break stops iteration", func(t *testing.T) {
 		t.Parallel()
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"sort"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -58,16 +59,16 @@ type SchemaValidator interface {
 type Decoder struct {
 	source *Source
 	file   *ast.File
-	// Tokens for each document, split once at construction and paired with
-	// file.Docs by index.
+	// Tokens for each document, aligned with file.Docs by index at
+	// construction. See alignDocumentTokens.
 	docTokens []token.Tokens
 }
 
 // NewDecoder creates a new [*Decoder] for the given [*Source].
 //
-// NewDecoder parses the source and splits its tokens by document once, so
-// [Decoder.Documents] can be iterated any number of times without repeating
-// either step.
+// NewDecoder parses the source and pairs each parsed document with its
+// tokens once, so [Decoder.Documents] can be iterated any number of times
+// without repeating either step.
 //
 // Returns an error if the source cannot be parsed.
 func NewDecoder(s *Source) (*Decoder, error) {
@@ -76,13 +77,67 @@ func NewDecoder(s *Source) (*Decoder, error) {
 		return nil, err
 	}
 
-	var docTokens []token.Tokens
+	return &Decoder{source: s, file: f, docTokens: alignDocumentTokens(f, s.Tokens())}, nil
+}
 
-	for _, tks := range tokens.SplitDocuments(s.Tokens()) {
-		docTokens = append(docTokens, tks)
+// alignDocumentTokens pairs every document in file with the token group it
+// starts in, returning one entry per document in file order.
+//
+// The groups come from [tokens.SplitDocuments]. Each document is anchored by
+// the offset of its header token, or of its body's first token when it has
+// no header, and takes the last group that starts at or before that offset.
+// Matching by offset rather than by index keeps a document paired with its
+// own tokens when the parser and the splitter disagree on boundaries, which
+// happens for streams such as consecutive empty headers. A document with no
+// anchor gets nil tokens.
+func alignDocumentTokens(file *ast.File, tks token.Tokens) []token.Tokens {
+	var (
+		groups []token.Tokens
+		starts []int
+	)
+
+	for _, group := range tokens.SplitDocuments(tks) {
+		if len(group) == 0 || group[0].Position == nil {
+			continue
+		}
+
+		groups = append(groups, group)
+		starts = append(starts, group[0].Position.Offset)
 	}
 
-	return &Decoder{source: s, file: f, docTokens: docTokens}, nil
+	result := make([]token.Tokens, len(file.Docs))
+
+	for i, doc := range file.Docs {
+		offset, ok := documentOffset(doc)
+		if !ok {
+			continue
+		}
+
+		// Index of the last group that starts at or before offset.
+		idx := sort.Search(len(starts), func(j int) bool { return starts[j] > offset }) - 1
+		if idx >= 0 {
+			result[i] = groups[idx]
+		}
+	}
+
+	return result
+}
+
+// documentOffset returns the offset of the token that anchors doc: its header
+// token, or its body's first token when it has no header. The boolean is
+// false when doc has neither.
+func documentOffset(doc *ast.DocumentNode) (int, bool) {
+	if doc.Start != nil && doc.Start.Position != nil {
+		return doc.Start.Position.Offset, true
+	}
+
+	if doc.Body != nil {
+		if tk := doc.Body.GetToken(); tk != nil && tk.Position != nil {
+			return tk.Position.Offset, true
+		}
+	}
+
+	return 0, false
 }
 
 // Source returns the underlying [*Source].
@@ -99,23 +154,17 @@ func (d *Decoder) Len() int {
 //
 // Each iteration yields the document index and a [*DocumentDecoder] for that
 // document. The [*DocumentDecoder] receives context from the [*Source]
-// including file path, tokens, and document index. The tokens were split at
+// including file path, tokens, and document index. The tokens were paired at
 // construction, so each call yields the same slices.
 func (d *Decoder) Documents() iter.Seq2[int, *DocumentDecoder] {
 	filePath := d.source.FilePath()
 
 	return func(yield func(int, *DocumentDecoder) bool) {
 		for i, doc := range d.file.Docs {
-			var tks token.Tokens
-
-			if i < len(d.docTokens) {
-				tks = d.docTokens[i]
-			}
-
 			dd := &DocumentDecoder{
 				doc:        doc,
 				index:      i,
-				tokens:     tks,
+				tokens:     d.docTokens[i],
 				filePath:   filePath,
 				decodeOpts: d.source.decodeOpts,
 			}
