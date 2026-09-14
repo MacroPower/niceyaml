@@ -13,15 +13,15 @@ import (
 )
 
 // Normalizer transforms strings by applying a configurable pipeline of Unicode
-// transformations. The pipeline is built once at construction time from the
+// transformations. The pipeline is defined once at construction time from the
 // provided [Option] values.
 //
-// Normalizer is safe for concurrent use.
+// Normalizer is safe for concurrent use. Each call borrows a pipeline
+// instance from a pool, so concurrent calls never wait on each other.
 //
 // Create instances with [New].
 type Normalizer struct {
-	transformer transform.Transformer
-	mu          sync.Mutex
+	pool sync.Pool
 }
 
 // Option configures a [Normalizer].
@@ -34,7 +34,7 @@ type Normalizer struct {
 type Option func(*config)
 
 type config struct {
-	transformers []transform.Transformer
+	transformers []func() transform.Transformer
 	caseFold     bool
 	diacritics   bool
 	widthFold    bool
@@ -54,13 +54,24 @@ func New(opts ...Option) *Normalizer {
 		opt(&cfg)
 	}
 
+	n := &Normalizer{}
+	n.pool.New = func() any {
+		return cfg.build()
+	}
+
+	return n
+}
+
+// build constructs a fresh pipeline. Transformers carry state between calls,
+// so every pooled instance gets its own.
+func (c *config) build() transform.Transformer {
 	var transformers []transform.Transformer
 
-	if cfg.widthFold {
+	if c.widthFold {
 		transformers = append(transformers, width.Fold)
 	}
 
-	if cfg.diacritics {
+	if c.diacritics {
 		transformers = append(transformers,
 			norm.NFD,
 			runes.Remove(runes.In(unicode.Mn)),
@@ -68,24 +79,22 @@ func New(opts ...Option) *Normalizer {
 		)
 	}
 
-	if cfg.caseFold {
+	if c.caseFold {
 		transformers = append(transformers, cases.Fold())
 	}
 
-	transformers = append(transformers, cfg.transformers...)
-
-	var t transform.Transformer
+	for _, newTransformer := range c.transformers {
+		transformers = append(transformers, newTransformer())
+	}
 
 	switch len(transformers) {
 	case 0:
-		t = transform.Nop
+		return transform.Nop
 	case 1:
-		t = transformers[0]
+		return transformers[0]
 	default:
-		t = transform.Chain(transformers...)
+		return transform.Chain(transformers...)
 	}
-
-	return &Normalizer{transformer: t}
 }
 
 // WithCaseFold is an [Option] that toggles Unicode case folding.
@@ -107,10 +116,19 @@ func WithDiacriticFold(enabled bool) Option {
 }
 
 // WithTransformer is an [Option] that appends custom transformers to the end
-// of the pipeline. Can be called multiple times to add additional transformers.
-func WithTransformer(t ...transform.Transformer) Option {
+// of the pipeline. Can be called multiple times to add additional
+// transformers.
+//
+// Each argument is a constructor rather than an instance, because a
+// [transform.Transformer] carries state between calls and the Normalizer
+// keeps one pipeline per concurrent caller:
+//
+//	normalizer.WithTransformer(func() transform.Transformer {
+//		return runes.Remove(runes.In(unicode.Zs))
+//	})
+func WithTransformer(newTransformer ...func() transform.Transformer) Option {
 	return func(c *config) {
-		c.transformers = append(c.transformers, t...)
+		c.transformers = append(c.transformers, newTransformer...)
 	}
 }
 
@@ -126,12 +144,14 @@ func WithWidthFold(enabled bool) Option {
 // Normalize applies the configured transformations to the input string.
 // If the transformation fails, the original string is returned unchanged.
 func (n *Normalizer) Normalize(in string) string {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	t, ok := n.pool.Get().(transform.Transformer)
+	if !ok {
+		return in
+	}
 
-	n.transformer.Reset()
+	defer n.pool.Put(t)
 
-	out, _, err := transform.String(n.transformer, in)
+	out, _, err := transform.String(t, in)
 	if err != nil {
 		slog.Debug("normalize string", slog.Any("error", err))
 

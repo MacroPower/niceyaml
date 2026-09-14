@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/text/runes"
+	"golang.org/x/text/transform"
 
 	"go.jacobcolvin.com/niceyaml/normalizer"
 )
@@ -83,13 +84,15 @@ func TestNormalize(t *testing.T) {
 			opts: []normalizer.Option{
 				normalizer.WithCaseFold(false),
 				normalizer.WithDiacriticFold(false),
-				normalizer.WithTransformer(runes.Map(func(r rune) rune {
-					if r == 'a' {
-						return 'x'
-					}
+				normalizer.WithTransformer(func() transform.Transformer {
+					return runes.Map(func(r rune) rune {
+						if r == 'a' {
+							return 'x'
+						}
 
-					return r
-				})),
+						return r
+					})
+				}),
 			},
 			in:   "abc",
 			want: "xbc",
@@ -98,14 +101,18 @@ func TestNormalize(t *testing.T) {
 			opts: []normalizer.Option{
 				normalizer.WithCaseFold(false),
 				normalizer.WithDiacriticFold(false),
-				normalizer.WithTransformer(runes.Map(func(r rune) rune {
-					if r == 'a' {
-						return 'b'
-					}
+				normalizer.WithTransformer(func() transform.Transformer {
+					return runes.Map(func(r rune) rune {
+						if r == 'a' {
+							return 'b'
+						}
 
-					return r
-				})),
-				normalizer.WithTransformer(runes.Remove(runes.In(unicode.Zs))),
+						return r
+					})
+				}),
+				normalizer.WithTransformer(func() transform.Transformer {
+					return runes.Remove(runes.In(unicode.Zs))
+				}),
 			},
 			in:   "a b c",
 			want: "bbc",

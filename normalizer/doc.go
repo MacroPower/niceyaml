@@ -8,8 +8,8 @@
 // counterparts.
 //
 // A [Normalizer] solves this by chaining Unicode transformations into a
-// pipeline that is built once at construction time. Transformations run in a
-// fixed order: width folding, diacritics removal, case folding, then any
+// pipeline that is defined once at construction time. Transformations run in
+// a fixed order: width folding, diacritics removal, case folding, then any
 // custom transformers. This ensures results are deterministic regardless of
 // option order.
 //
