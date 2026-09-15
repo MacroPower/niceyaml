@@ -25,16 +25,16 @@ func TestRevisions_At(t *testing.T) {
 		index int
 		want  string
 	}{
-		"first":               {revs: newRevisions("v0", "v1", "v2"), index: 0, want: "v0"},
-		"middle":              {revs: newRevisions("v0", "v1", "v2"), index: 1, want: "v1"},
-		"last":                {revs: newRevisions("v0", "v1", "v2"), index: 2, want: "v2"},
-		"past end clamps":     {revs: newRevisions("v0", "v1", "v2"), index: 10, want: "v2"},
-		"negative clamps":     {revs: newRevisions("v0", "v1", "v2"), index: -1, want: "v0"},
-		"single past end":     {revs: newRevisions("only"), index: 5, want: "only"},
-		"single negative":     {revs: newRevisions("only"), index: -5, want: "only"},
-		"single exact":        {revs: newRevisions("only"), index: 0, want: "only"},
-		"empty returns nil":   {revs: nil, index: 0, want: ""},
-		"empty clamps to nil": {revs: niceyaml.Revisions{}, index: 3, want: ""},
+		"first":             {revs: newRevisions("v0", "v1", "v2"), index: 0, want: "v0"},
+		"middle":            {revs: newRevisions("v0", "v1", "v2"), index: 1, want: "v1"},
+		"last":              {revs: newRevisions("v0", "v1", "v2"), index: 2, want: "v2"},
+		"past end is nil":   {revs: newRevisions("v0", "v1", "v2"), index: 10, want: ""},
+		"negative is nil":   {revs: newRevisions("v0", "v1", "v2"), index: -1, want: ""},
+		"single past end":   {revs: newRevisions("only"), index: 5, want: ""},
+		"single negative":   {revs: newRevisions("only"), index: -5, want: ""},
+		"single exact":      {revs: newRevisions("only"), index: 0, want: "only"},
+		"empty returns nil": {revs: nil, index: 0, want: ""},
+		"empty past end":    {revs: niceyaml.Revisions{}, index: 3, want: ""},
 	}
 
 	for name, tc := range tcs {

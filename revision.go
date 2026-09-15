@@ -16,14 +16,14 @@ func (r Revisions) Len() int {
 	return len(r)
 }
 
-// At returns the revision at the given zero-based index, clamped to the
-// available revisions. Returns nil when there are no revisions.
+// At returns the revision at the given zero-based index, or nil when the
+// index is outside the history.
 func (r Revisions) At(index int) *Source {
-	if len(r) == 0 {
+	if index < 0 || index >= len(r) {
 		return nil
 	}
 
-	return r[min(max(index, 0), len(r)-1)]
+	return r[index]
 }
 
 // Names returns the names of all revisions in order from the original to the
