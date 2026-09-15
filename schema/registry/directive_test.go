@@ -254,7 +254,7 @@ func TestDirective_Resolve(t *testing.T) {
 		require.ErrorIs(t, err, registry.ErrNoDirective)
 	})
 
-	t.Run("returns ErrNoFilePath when document has no file path", func(t *testing.T) {
+	t.Run("returns ErrNoFilePath for a relative path without a file path", func(t *testing.T) {
 		t.Parallel()
 
 		// Create a document with a directive but no file path (from string input).
@@ -265,7 +265,42 @@ func TestDirective_Resolve(t *testing.T) {
 		res := registry.Directive()
 		_, err := res.Resolve(t.Context(), doc)
 		require.ErrorIs(t, err, registry.ErrNoFilePath)
+		require.ErrorIs(t, err, loader.ErrNoBaseDir)
 		require.NotErrorIs(t, err, schema.ErrNoMatch)
+	})
+
+	t.Run("resolves a URL without a file path", func(t *testing.T) {
+		t.Parallel()
+
+		schemaData := `{"type": "object"}`
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			//nolint:errcheck // Test helper.
+			w.Write([]byte(schemaData))
+		}))
+		defer server.Close()
+
+		input := "# yaml-language-server: $schema=" + server.URL + "/schema.json\nkind: Deployment\n"
+
+		doc := yamltest.FirstDocument(t, input)
+		url, data := resolveAndLoad(t, registry.Directive(), doc)
+		assert.Equal(t, server.URL+"/schema.json", url)
+		assert.Equal(t, []byte(schemaData), data)
+	})
+
+	t.Run("resolves an absolute path without a file path", func(t *testing.T) {
+		t.Parallel()
+
+		tmpDir := t.TempDir()
+		schemaPath := filepath.Join(tmpDir, "schema.json")
+		schemaData := []byte(`{"type": "object"}`)
+		err := os.WriteFile(schemaPath, schemaData, 0o600)
+		require.NoError(t, err)
+
+		doc := yamltest.FirstDocument(t, "# yaml-language-server: $schema="+schemaPath+"\nkind: Deployment\n")
+		url, data := resolveAndLoad(t, registry.Directive(), doc)
+		assert.Equal(t, schemaPath, url)
+		assert.Equal(t, schemaData, data)
 	})
 
 	t.Run("resolves relative paths against document directory", func(t *testing.T) {

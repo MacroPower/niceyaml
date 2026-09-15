@@ -31,9 +31,11 @@ type directiveResolver struct {
 // directives.
 //
 // Resolve parses the document's tokens for a directive comment and names
-// the schema it references through [loader.FileOrURL], relative to the
-// document's file path. A document without a directive reports
-// [ErrNoDirective]; one without a file path reports [ErrNoFilePath].
+// the schema it references through [loader.FileOrURL]. A relative path is
+// resolved against the directory of the document's file, so a document
+// without a file path reports [ErrNoFilePath] for a relative path; a URL or
+// an absolute path needs no file and resolves either way. A document
+// without a directive reports [ErrNoDirective].
 //
 //	reg.Register(registry.Directive())
 func Directive(opts ...loader.HTTPOption) schema.Resolver {
@@ -47,11 +49,17 @@ func (r *directiveResolver) Resolve(ctx context.Context, doc *niceyaml.DocumentD
 		return schema.Ref{}, ErrNoDirective
 	}
 
-	filePath := doc.FilePath()
-	if filePath == "" {
-		return schema.Ref{}, ErrNoFilePath
+	var baseDir string
+
+	if filePath := doc.FilePath(); filePath != "" {
+		baseDir = filepath.Dir(filePath)
+	}
+
+	ref, err := loader.FileOrURL(baseDir, directive.Schema, r.opts...).Resolve(ctx, doc)
+	if errors.Is(err, loader.ErrNoBaseDir) {
+		return schema.Ref{}, fmt.Errorf("%w: %w", ErrNoFilePath, err)
 	}
 
 	//nolint:wrapcheck // Loader errors already carry the reference.
-	return loader.FileOrURL(filepath.Dir(filePath), directive.Schema, r.opts...).Resolve(ctx, doc)
+	return ref, err
 }
