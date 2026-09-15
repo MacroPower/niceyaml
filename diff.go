@@ -52,11 +52,14 @@ func NewDiffer(opts ...DifferOption) *Differ {
 	return d
 }
 
-// Diff computes the difference between two sources.
+// Diff computes the difference between two views, such as two [*Source]
+// values or two [Lines] collections.
 //
-// The result can be rendered multiple times with [DiffResult.Unified] or
+// The lines of the result are copies, so the overlays and annotations on
+// the input lines come along, and the flags come from the diff. The result
+// can be rendered multiple times with [DiffResult.Unified] or
 // [DiffResult.Hunks].
-func (d *Differ) Diff(a, b *Source) *DiffResult {
+func (d *Differ) Diff(a, b View) *DiffResult {
 	ops := d.computeOps(a, b)
 
 	// Precompute prefix sums for O(1) line number and count queries.
@@ -71,18 +74,43 @@ func (d *Differ) Diff(a, b *Source) *DiffResult {
 
 	return &DiffResult{
 		ops:        ops,
-		name:       fmt.Sprintf("%s..%s", a.Name(), b.Name()),
+		name:       fmt.Sprintf("%s..%s", viewName(a), viewName(b)),
 		beforeSums: beforeSums,
 		afterSums:  afterSums,
 	}
 }
 
+// namer is a [View] with a name, such as a [*Source].
+type namer interface {
+	Name() string
+}
+
+// viewName returns the name of v, or an empty string for a [View] without
+// one.
+func viewName(v View) string {
+	if n, ok := v.(namer); ok {
+		return n.Name()
+	}
+
+	return ""
+}
+
+// collectLines returns the lines of v in order. The lines share their tokens
+// with v, and both toLines and getAlignedRows clone each line before a
+// caller sees it.
+func collectLines(v View) []line.Line {
+	lines := make([]line.Line, 0, v.Len())
+	for _, l := range v.AllLines() {
+		lines = append(lines, l)
+	}
+
+	return lines
+}
+
 // computeOps computes line operations using the configured algorithm.
-func (d *Differ) computeOps(before, after *Source) []lineOp {
-	// Read the sources' lines directly instead of copying them. Both toLines
-	// and getAlignedRows clone each line before a caller sees it.
-	beforeLines := before.lines
-	afterLines := after.lines
+func (d *Differ) computeOps(before, after View) []lineOp {
+	beforeLines := collectLines(before)
+	afterLines := collectLines(after)
 
 	// Pre-compute content strings once to avoid repeated string building.
 	beforeContent := make([]string, len(beforeLines))
@@ -358,15 +386,18 @@ func (r *DiffResult) IsEmpty() bool {
 	return len(r.ops) == 0
 }
 
-// Name returns the diff name in "a..b" format.
+// Name returns the diff name in "a..b" format, from the names of the two
+// views. A view without a Name method, such as [Lines], contributes an
+// empty string.
 func (r *DiffResult) Name() string {
 	return r.name
 }
 
-// Diff computes the difference between two sources using the default algorithm.
+// Diff computes the difference between two views using the default
+// algorithm. See [Differ.Diff].
 //
 // This is a convenience function equivalent to NewDiffer().Diff(a, b).
-func Diff(a, b *Source) *DiffResult {
+func Diff(a, b View) *DiffResult {
 	return NewDiffer().Diff(a, b)
 }
 

@@ -13,6 +13,34 @@ import (
 	"go.jacobcolvin.com/niceyaml/style"
 )
 
+func TestDiffer_Views(t *testing.T) {
+	t.Parallel()
+
+	before := niceyaml.NewSourceFromString("a: 1\nb: 2\n").Lines()
+	after := niceyaml.NewSourceFromString("a: 1\nb: 3\n").Lines()
+
+	// An overlay on a view comes along into the diff, since the result
+	// copies the lines it is given.
+	after.AddOverlay(style.GenericHighlight, position.NewRange(position.New(1, 0), position.New(1, 1)))
+
+	result := niceyaml.Diff(before, after)
+
+	// Lines has no name, so the name holds only the separator.
+	assert.Equal(t, "..", result.Name())
+
+	got := result.Unified()
+	require.Len(t, got, 3)
+	assert.Equal(t, line.FlagDefault, got[0].Flag)
+	assert.Equal(t, line.FlagDeleted, got[1].Flag)
+	assert.Equal(t, line.FlagInserted, got[2].Flag)
+	assert.Empty(t, got[1].Overlays)
+	assert.Len(t, got[2].Overlays, 1)
+
+	// The diff of a diff is a view of a view.
+	again := niceyaml.Diff(got, got)
+	assert.Equal(t, 3, again.Unified().Len())
+}
+
 func TestDiffer_Full(t *testing.T) {
 	t.Parallel()
 
