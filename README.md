@@ -52,6 +52,8 @@ We also provide a consistent **positioning system** used throughout `niceyaml`. 
 go get go.jacobcolvin.com/niceyaml@latest
 ```
 
+`niceyaml` requires Go 1.27 or later.
+
 ## Usage
 
 ### Core Abstractions
