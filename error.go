@@ -496,56 +496,72 @@ func resolveToken(file *ast.File, p *paths.Path, docIndex int) (*token.Token, er
 // Nested errors appear as annotations below their own lines, and distant
 // locations render as separate hunks.
 //
-// The [Printer] and the number of context lines come from the source's
-// [WithErrorOptions]. A SourceError implements the error interface and
-// unwraps to the error it was created from, so [errors.Is] and [errors.As]
-// see through it.
+// [SourceError.Render] returns what %+v prints, and both it and
+// [SourceError.Detail] accept [DetailOption] values for the [Printer] and the
+// number of context lines, so the caller that renders the error decides how
+// it looks. A SourceError implements the error interface and unwraps to the
+// error it was created from, so [errors.Is] and [errors.As] see through it.
 //
 // Create instances with [Source.WrapError].
 type SourceError struct {
-	err          error
-	source       *Source
-	printer      *Printer
-	contextLines int
+	err    error
+	source *Source
 }
 
-// SourceErrorOption configures how a [SourceError] renders. Set them on a
-// [Source] with [WithErrorOptions].
+// DetailOption configures how [SourceError.Detail] and [SourceError.Render]
+// render the source excerpt.
 //
 // Available options:
 //   - [WithPrinter]
 //   - [WithContextLines]
-type SourceErrorOption func(*SourceError)
+type DetailOption func(*detailConfig)
+
+// detailConfig holds the settings a [DetailOption] configures.
+type detailConfig struct {
+	printer      *Printer
+	contextLines int
+}
+
+// newDetailConfig applies opts over the defaults: the shared default
+// [Printer] and [defaultContextLines].
+func newDetailConfig(opts []DetailOption) detailConfig {
+	c := detailConfig{contextLines: defaultContextLines}
+	for _, opt := range opts {
+		opt(&c)
+	}
+
+	if c.printer == nil {
+		c.printer = defaultPrinter()
+	}
+
+	return c
+}
 
 // defaultContextLines is the number of context lines shown around an error
 // when [WithContextLines] is not set.
 const defaultContextLines = 2
 
-// WithContextLines is a [SourceErrorOption] that sets the number of context
-// lines shown around each error location. The default is 2.
-func WithContextLines(lines int) SourceErrorOption {
-	return func(e *SourceError) {
-		e.contextLines = lines
+// WithContextLines is a [DetailOption] that sets the number of context lines
+// shown around each error location. The default is 2.
+func WithContextLines(lines int) DetailOption {
+	return func(c *detailConfig) {
+		c.contextLines = lines
 	}
 }
 
-// WithPrinter is a [SourceErrorOption] that sets the [*Printer] that renders
-// the error detail. The printer's width, set with [WithWidth], controls word
-// wrapping of the rendered detail.
-func WithPrinter(p *Printer) SourceErrorOption {
-	return func(e *SourceError) {
-		e.printer = p
+// WithPrinter is a [DetailOption] that sets the [*Printer] that renders the
+// source excerpt. The printer's width, set with [WithWidth], controls word
+// wrapping, and its styles color the highlighted locations. The default is a
+// [Printer] from [NewPrinter].
+func WithPrinter(p *Printer) DetailOption {
+	return func(c *detailConfig) {
+		c.printer = p
 	}
 }
 
-// newSourceError binds err to src and applies opts.
-func newSourceError(err error, src *Source, opts []SourceErrorOption) *SourceError {
-	e := &SourceError{err: err, source: src, contextLines: defaultContextLines}
-	for _, opt := range opts {
-		opt(e)
-	}
-
-	return e
+// newSourceError binds err to src.
+func newSourceError(err error, src *Source) *SourceError {
+	return &SourceError{err: err, source: src}
 }
 
 // Source returns the [*Source] the error is bound to.
@@ -612,23 +628,13 @@ func (e *SourceError) message() string {
 
 // Format implements [fmt.Formatter].
 //
-// The %v and %s verbs print [SourceError.Error]. The %+v verb prints the
-// message followed by a blank line and [SourceError.Detail], falling back to
-// [SourceError.Error] when no location resolves. The %q verb quotes
+// The %v and %s verbs print [SourceError.Error]. The %+v verb prints
+// [SourceError.Render] with the default options. The %q verb quotes
 // [SourceError.Error].
 func (e *SourceError) Format(f fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && f.Flag('+'):
-		detail, err := e.Detail()
-		if err != nil {
-			writeString(f, e.Error())
-
-			return
-		}
-
-		writeString(f, e.message())
-		writeString(f, "\n\n")
-		writeString(f, detail)
+		writeString(f, e.Render())
 
 	case verb == 'q':
 		writeString(f, strconv.Quote(e.Error()))
@@ -685,9 +691,9 @@ func (e *SourceError) rangeOf(loc location) position.Range {
 // Detail renders every location that resolves and returns an error only
 // when none does: the errors [SourceError.Location] returns, joined with
 // those of the nested errors, or [ErrOutOfRange] for a location past the
-// last line. Rendering uses the [Printer] from [WithPrinter], or a default
-// one, and works on a private view of the source.
-func (e *SourceError) Detail() (string, error) {
+// last line. The [Printer] and the number of context lines come from opts,
+// and rendering works on a private view of the source.
+func (e *SourceError) Detail(opts ...DetailOption) (string, error) {
 	root, a, _ := e.located()
 	if a == nil {
 		return "", ErrNoLocation
@@ -700,7 +706,21 @@ func (e *SourceError) Detail() (string, error) {
 		return "", err
 	}
 
-	return e.render(view, positions), nil
+	return e.render(newDetailConfig(opts), view, positions), nil
+}
+
+// Render returns the message followed by a blank line and
+// [SourceError.Detail] rendered with opts, which is what the %+v verb
+// prints. Nested errors appear in the detail as annotations rather than in
+// the message as bullets. When no location resolves, Render returns
+// [SourceError.Error].
+func (e *SourceError) Render(opts ...DetailOption) string {
+	detail, err := e.Detail(opts...)
+	if err != nil {
+		return e.Error()
+	}
+
+	return e.message() + "\n\n" + detail
 }
 
 // errorPosition holds a resolved error position: the main error position
@@ -717,7 +737,7 @@ type errorPosition struct {
 //
 // Rendering happens on a private view of the source, so calling
 // [SourceError.Detail] repeatedly renders the same output.
-func (e *SourceError) render(view line.Lines, positions []errorPosition) string {
+func (e *SourceError) render(cfg detailConfig, view line.Lines, positions []errorPosition) string {
 	// Collect all ranges from positions and apply overlays to the view.
 	var allRanges position.Ranges
 
@@ -732,7 +752,7 @@ func (e *SourceError) render(view line.Lines, positions []errorPosition) string 
 	}
 
 	// Build hunk spans from all line indices covered by error ranges.
-	hunkSpans := e.hunkSpans(allRanges.LineIndices(), view.Len())
+	hunkSpans := hunkSpans(allRanges.LineIndices(), cfg.contextLines, view.Len())
 
 	// Add "..." annotations to first line of each non-first hunk.
 	for i, span := range hunkSpans {
@@ -744,12 +764,7 @@ func (e *SourceError) render(view line.Lines, positions []errorPosition) string 
 		}
 	}
 
-	p := e.printer
-	if p == nil {
-		p = defaultPrinter()
-	}
-
-	return p.Print(view, hunkSpans...)
+	return cfg.printer.Print(view, hunkSpans...)
 }
 
 // collectPositions resolves the main location of a and the locations of its
@@ -823,16 +838,17 @@ func highlightRanges(view line.Lines, loc location) position.Ranges {
 }
 
 // hunkSpans groups error line indices into spans based on proximity, with
-// the context lines applied and clamped to totalLines. Errors merge when
-// their context windows would be adjacent or overlapping, so there is
-// always at least one line gap between hunks for the "..." separator.
-func (e *SourceError) hunkSpans(errorLines []int, totalLines int) position.Spans {
+// contextLines lines of context applied and clamped to totalLines. Errors
+// merge when their context windows would be adjacent or overlapping, so
+// there is always at least one line gap between hunks for the "..."
+// separator.
+func hunkSpans(errorLines []int, contextLines, totalLines int) position.Spans {
 	if len(errorLines) == 0 {
 		return nil
 	}
 
-	return position.GroupIndices(errorLines, e.contextLines).
-		Expand(e.contextLines).
+	return position.GroupIndices(errorLines, contextLines).
+		Expand(contextLines).
 		Clamp(0, totalLines)
 }
 

@@ -52,10 +52,7 @@ func TestErrorHandler(t *testing.T) {
 		)
 	}
 
-	src := niceyaml.NewSourceFromTokens(
-		lexers.Tokenize(source),
-		niceyaml.WithErrorOptions(niceyaml.WithPrinter(xmlPrinter())),
-	)
+	src := niceyaml.NewSourceFromTokens(lexers.Tokenize(source))
 
 	niceyamlErr := src.WrapError(niceyaml.NewError(
 		"invalid name",
@@ -238,7 +235,7 @@ func TestErrorHandler(t *testing.T) {
 			var buf bytes.Buffer
 
 			styles := testStyles()
-			fangs.ErrorHandler(&buf, styles, tc.err)
+			fangs.NewErrorHandler(niceyaml.WithPrinter(xmlPrinter()))(&buf, styles, tc.err)
 
 			assert.Equal(t, tc.want, buf.String())
 		})

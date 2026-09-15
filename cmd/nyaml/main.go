@@ -6,9 +6,11 @@ import (
 	"os"
 
 	"charm.land/fang/v2"
+	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 	"go.jacobcolvin.com/x/cobras/profile"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/cmd/nyaml/fangs"
 	"go.jacobcolvin.com/niceyaml/style"
 )
@@ -32,8 +34,12 @@ func main() {
 	rootCmd.AddCommand(viewCmd())
 	rootCmd.AddCommand(validateCmd())
 
+	// The error printer carries the terminal width so annotated source
+	// excerpts wrap to it.
+	errPrinter := niceyaml.NewPrinter(niceyaml.WithWidth(terminalWidth()))
+
 	err := fang.Execute(context.Background(), rootCmd,
-		fang.WithErrorHandler(fangs.ErrorHandler),
+		fang.WithErrorHandler(fangs.NewErrorHandler(niceyaml.WithPrinter(errPrinter))),
 		fang.WithColorSchemeFunc(fangs.ColorSchemeFunc(style.Default())),
 	)
 
@@ -45,4 +51,20 @@ func main() {
 	if err != nil {
 		os.Exit(1)
 	}
+}
+
+// terminalWidth returns the width error output wraps to: the width of the
+// terminal on stderr less the handler's margin, or 88 when stderr is not a
+// terminal.
+func terminalWidth() int {
+	width := 90
+
+	if term.IsTerminal(os.Stderr.Fd()) {
+		w, _, err := term.GetSize(os.Stderr.Fd())
+		if err == nil {
+			width = w
+		}
+	}
+
+	return max(0, width-2)
 }

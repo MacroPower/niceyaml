@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
 	"go.jacobcolvin.com/niceyaml"
@@ -37,14 +36,10 @@ func validateCmd() *cobra.Command {
 			// Build registry once for all files to enable cross-file schema caching.
 			reg := buildRegistry(schemaRef)
 
-			// Build the error printer once: it carries the terminal width and
-			// a full theme, neither of which changes between files.
-			errPrinter := niceyaml.NewPrinter(niceyaml.WithWidth(getTerminalWidth()))
-
 			var errs []error
 
 			for _, yamlPath := range yamlPaths {
-				err := validateFile(cmd.Context(), yamlPath, reg, errPrinter)
+				err := validateFile(cmd.Context(), yamlPath, reg)
 				if err != nil {
 					errs = append(errs, fmt.Errorf("%s: %w", yamlPath, err))
 				} else {
@@ -61,31 +56,11 @@ func validateCmd() *cobra.Command {
 	return cmd
 }
 
-func getTerminalWidth() int {
-	width := 90
-
-	if term.IsTerminal(os.Stderr.Fd()) {
-		w, _, err := term.GetSize(os.Stderr.Fd())
-		if err == nil {
-			width = w
-		}
-	}
-
-	return max(0, width-2)
-}
-
-func validateFile(
-	ctx context.Context,
-	yamlPath string,
-	reg *registry.Registry,
-	errPrinter *niceyaml.Printer,
-) error {
-	source, err := niceyaml.NewSourceFromFile(
-		yamlPath,
-		niceyaml.WithErrorOptions(
-			niceyaml.WithPrinter(errPrinter),
-		),
-	)
+// validateFile validates every document of the file at yamlPath against the
+// registry. Errors come back bound to the source, and the error handler in
+// main renders them with the terminal width.
+func validateFile(ctx context.Context, yamlPath string, reg *registry.Registry) error {
+	source, err := niceyaml.NewSourceFromFile(yamlPath)
 	if err != nil {
 		return err
 	}

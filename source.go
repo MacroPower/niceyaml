@@ -68,7 +68,6 @@ type Source struct {
 	fileErr    error
 	parserOpts []parser.Option
 	decodeOpts []yaml.DecodeOption
-	errorOpts  []SourceErrorOption
 	fileOnce   sync.Once
 }
 
@@ -81,7 +80,6 @@ type Source struct {
 //   - [WithDisallowUnknownFields]
 //   - [WithYAMLParserOptions]
 //   - [WithYAMLDecodeOptions]
-//   - [WithErrorOptions]
 type SourceOption func(*Source)
 
 // WithName is a [SourceOption] that sets the name for the [Source].
@@ -140,14 +138,6 @@ func WithYAMLParserOptions(opts ...parser.Option) SourceOption {
 func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) SourceOption {
 	return func(s *Source) {
 		s.decodeOpts = append(s.decodeOpts, opts...)
-	}
-}
-
-// WithErrorOptions is a [SourceOption] that sets the [SourceErrorOption]
-// values applied to every [*SourceError] that [Source.WrapError] returns.
-func WithErrorOptions(opts ...SourceErrorOption) SourceOption {
-	return func(s *Source) {
-		s.errorOpts = opts
 	}
 }
 
@@ -264,9 +254,10 @@ func (s *Source) parse() (*ast.File, error) {
 
 // WrapError binds err to this [*Source] when err's chain holds an [*Error].
 // The returned [*SourceError] resolves the location of that inner Error
-// against this source and renders it with the [SourceErrorOption] values
-// from [WithErrorOptions]. Context added around the Error with [fmt.Errorf]
-// is preserved in the message.
+// against this source, and its [SourceError.Render] and
+// [SourceError.Detail] accept [DetailOption] values for how the excerpt
+// looks. Context added around the Error with [fmt.Errorf] is preserved in
+// the message.
 //
 // If err is nil, WrapError returns nil. If err's chain holds no [*Error],
 // WrapError returns it unchanged. Nothing in err is modified.
@@ -279,7 +270,7 @@ func (s *Source) WrapError(err error) error {
 		return err
 	}
 
-	return newSourceError(err, s, s.errorOpts)
+	return newSourceError(err, s)
 }
 
 // Lines returns a [line.Lines] view of the [Source].

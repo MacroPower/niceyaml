@@ -67,27 +67,25 @@
 // below their respective lines, with distant errors displayed in separate
 // hunks.
 //
-// # Error Configuration
+// # Error Presentation
 //
-// Sources configure error rendering with [WithErrorOptions], which stores
-// [SourceErrorOption] values applied to every error [Source.WrapError]
-// returns:
+// The %+v verb renders a [SourceError] with a default [Printer] and two
+// lines of context. The code that prints the error chooses anything else,
+// through [DetailOption] values passed to [SourceError.Render] or
+// [SourceError.Detail]:
 //
-//	source, _ := niceyaml.NewSourceFromFile("config.yaml",
-//		niceyaml.WithErrorOptions(
+//	var bound *niceyaml.SourceError
+//	if errors.As(err, &bound) {
+//		fmt.Println(bound.Render(
+//			niceyaml.WithPrinter(printer),
 //			niceyaml.WithContextLines(3),
-//			niceyaml.WithPrinter(myPrinter),
-//		),
-//	)
-//
-//	// Later, WrapError applies the stored options automatically.
-//	if err := validate(source); err != nil {
-//		return source.WrapError(err)
+//		))
 //	}
 //
 // This separates error production (validators, decoders) from error
 // presentation (source context, formatting), allowing each layer to provide
-// what it knows.
+// what it knows: a validator the path, a source the document, and the
+// caller that prints the terminal width and theme.
 //
 // # Validation Pipeline
 //
