@@ -2026,9 +2026,10 @@ func TestError_WrappedContext(t *testing.T) {
 
 	wrapped := source.WrapError(fmt.Errorf("document 1: %w", inner))
 
-	// The message keeps the outer context, and the location comes from the
-	// inner Error.
-	assert.Equal(t, "document 1: at $.name: bad name", wrapped.Error())
+	// The message keeps the outer context around the inner Error's location,
+	// resolved against the source.
+	assert.Equal(t, "document 1: [3:7] bad name", wrapped.Error())
+	assert.Equal(t, "document 1: [3:7] bad name", fmt.Sprintf("%v", wrapped))
 	require.ErrorIs(t, wrapped, inner)
 
 	var got *niceyaml.Error
@@ -2085,6 +2086,9 @@ func TestError_DocumentIndexAboveLocation(t *testing.T) {
 	idx, set := got.DocumentIndex()
 	assert.True(t, set)
 	assert.Equal(t, 1, idx)
+
+	// The headline keeps the producer's context around the resolved location.
+	assert.Equal(t, "validate: [3:7] bad name", wrapped.Error())
 
 	// The highlight lands on the second document's value, not the first's.
 	var bound *niceyaml.SourceError

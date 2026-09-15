@@ -194,8 +194,8 @@ func (e *Error) Error() string {
 //
 // An Error without a position of its own that directly wraps another Error
 // adds no text, so the headline is the inner Error's, resolved the same
-// way. Foreign wrapping in between renders the inner Error itself, with its
-// position unresolved.
+// way. Foreign wrapping in between keeps its text around the inner Error's
+// headline, resolved the same way.
 func (e *Error) headline(src *Source, doc int) string {
 	if e.err == nil {
 		return ""
@@ -216,7 +216,27 @@ func (e *Error) headline(src *Source, doc int) string {
 		return fmt.Sprintf("at %s: %v", e.path, e.err)
 	}
 
-	return e.err.Error()
+	return resolveMessage(e.err, src, doc)
+}
+
+// resolveMessage returns the message of err with the location of the first
+// [Error] in its chain resolved against src, in document doc. When err is
+// that Error, the result is its headline. When wrapping sits between, such
+// as [fmt.Errorf] with the %w verb, the Error's unresolved text inside the
+// message gives way to its resolved headline, and the text around it stays.
+// A wrapper that does not embed the Error's text leaves the message as it
+// is. When the chain holds no Error, the result is err's own message.
+func resolveMessage(err error, src *Source, doc int) string {
+	if direct, ok := err.(*Error); ok { //nolint:errorlint // Identity of the direct child, not a chain search.
+		return direct.headline(src, doc)
+	}
+
+	inner, ok := firstError(err)
+	if !ok {
+		return err.Error()
+	}
+
+	return strings.Replace(err.Error(), inner.Error(), inner.headline(src, doc), 1)
 }
 
 // find returns the first [Error] in e's chain that satisfies pred, walking
@@ -502,20 +522,20 @@ func (e *SourceError) Unwrap() error {
 // Error returns the error message with its location resolved against the
 // source: "[line:col]" for a token, range, or resolvable path, "at $.path"
 // for a path that does not resolve. Context added around the [Error] with
-// [fmt.Errorf] is kept, in which case the inner Error renders its own
-// unresolved location. Nested errors are not part of the message; see
-// [SourceError.Detail].
+// [fmt.Errorf] is kept around the resolved location, so wrapping before
+// [Source.WrapError] and after it read the same. Nested errors are not part
+// of the message; see [SourceError.Detail].
 //
 // The result is plain text and never includes source lines, so it is safe to
 // log or compare. Use [SourceError.Detail] or the %+v verb for the annotated
 // source excerpt.
 func (e *SourceError) Error() string {
-	root, ok := e.err.(*Error) //nolint:errorlint // Identity of the direct child, not a chain search.
+	root, ok := firstError(e.err)
 	if !ok {
 		return e.err.Error()
 	}
 
-	return root.headline(e.source, root.defaultDocumentIndex())
+	return resolveMessage(e.err, e.source, root.defaultDocumentIndex())
 }
 
 // located returns the outermost [*Error] in the chain and the anchor that
