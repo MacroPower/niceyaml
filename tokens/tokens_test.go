@@ -505,7 +505,16 @@ func TestSplitDocuments_WithResetPositions(t *testing.T) {
 	})
 }
 
-func TestCloneWithResetPositions(t *testing.T) {
+// resetOne splits tks as a single document with reset positions.
+func resetOne(tks token.Tokens) token.Tokens {
+	for _, doc := range tokens.SplitDocuments(tks, tokens.WithResetPositions()) {
+		return doc
+	}
+
+	return nil
+}
+
+func TestSplitDocuments_ResetPositions(t *testing.T) {
 	t.Parallel()
 
 	t.Run("matches a fresh tokenize of the same text", func(t *testing.T) {
@@ -542,7 +551,7 @@ func TestCloneWithResetPositions(t *testing.T) {
 				PositionLine(5).PositionColumn(8).PositionOffset(105).Build(),
 		}
 
-		got := tokens.CloneWithResetPositions(input)
+		got := resetOne(input)
 
 		require.Len(t, got, 3)
 
@@ -573,7 +582,7 @@ func TestCloneWithResetPositions(t *testing.T) {
 				PositionLine(11).PositionColumn(5).PositionOffset(55).Build(),
 		}
 
-		got := tokens.CloneWithResetPositions(input)
+		got := resetOne(input)
 
 		require.Len(t, got, 2)
 
@@ -592,7 +601,7 @@ func TestCloneWithResetPositions(t *testing.T) {
 		t.Parallel()
 
 		input := token.Tokens{}
-		got := tokens.CloneWithResetPositions(input)
+		got := resetOne(input)
 
 		assert.Empty(t, got)
 	})
@@ -600,7 +609,7 @@ func TestCloneWithResetPositions(t *testing.T) {
 	t.Run("returns original slice for nil input", func(t *testing.T) {
 		t.Parallel()
 
-		got := tokens.CloneWithResetPositions(nil)
+		got := resetOne(nil)
 
 		assert.Nil(t, got)
 	})
@@ -613,7 +622,7 @@ func TestCloneWithResetPositions(t *testing.T) {
 			PositionLine(5).PositionColumn(3).PositionOffset(100).Build()
 		input := token.Tokens{original}
 
-		got := tokens.CloneWithResetPositions(input)
+		got := resetOne(input)
 
 		require.Len(t, got, 1)
 
@@ -633,7 +642,7 @@ func TestCloneWithResetPositions(t *testing.T) {
 			&token.Token{Type: token.StringType, Value: "test", Position: nil},
 		}
 
-		got := tokens.CloneWithResetPositions(input)
+		got := resetOne(input)
 
 		require.Len(t, got, 1)
 		assert.Nil(t, got[0].Position)
@@ -649,7 +658,7 @@ func TestCloneWithResetPositions(t *testing.T) {
 				PositionLine(5).PositionColumn(3).PositionOffset(100).Build(),
 		}
 
-		got := tokens.CloneWithResetPositions(input)
+		got := resetOne(input)
 
 		require.Len(t, got, 2)
 
@@ -671,7 +680,7 @@ func TestCloneWithResetPositions(t *testing.T) {
 				PositionLine(5).PositionColumn(3).Build(),
 		}
 
-		got := tokens.CloneWithResetPositions(input)
+		got := resetOne(input)
 
 		require.Len(t, got, 1)
 		assert.Equal(t, token.StringType, got[0].Type)

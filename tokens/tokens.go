@@ -51,7 +51,7 @@ func WithResetPositions() SplitDocumentsOption {
 	}
 }
 
-// CloneWithResetPositions clones tokens and adjusts positions relative to
+// cloneWithResetPositions clones tokens and adjusts positions relative to
 // the document's starting position.
 //
 // The first token with a non-nil position determines the starting line, column,
@@ -60,7 +60,7 @@ func WithResetPositions() SplitDocumentsOption {
 // where the lexer places the first token of a fresh stream.
 //
 // Tokens with nil positions are cloned but left with nil positions.
-func CloneWithResetPositions(tks token.Tokens) token.Tokens {
+func cloneWithResetPositions(tks token.Tokens) token.Tokens {
 	if len(tks) == 0 {
 		return tks
 	}
@@ -127,7 +127,7 @@ func SplitDocuments(tks token.Tokens, opts ...SplitDocumentsOption) iter.Seq2[in
 
 		yieldDoc := func(doc token.Tokens) bool {
 			if cfg.resetPositions {
-				doc = CloneWithResetPositions(doc)
+				doc = cloneWithResetPositions(doc)
 			}
 
 			return yield(docIdx, doc)

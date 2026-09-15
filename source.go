@@ -9,10 +9,10 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
-	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
 
+	"go.jacobcolvin.com/niceyaml/lexers"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style"
@@ -166,9 +166,9 @@ func NewSourceFromBytes(data []byte, opts ...SourceOption) *Source {
 }
 
 // NewSourceFromString creates a new [*Source] from a YAML string using
-// [lexer.Tokenize].
+// [lexers.Tokenize].
 func NewSourceFromString(src string, opts ...SourceOption) *Source {
-	tks := lexer.Tokenize(src)
+	tks := lexers.Tokenize(src)
 
 	return NewSourceFromTokens(tks, opts...)
 }
