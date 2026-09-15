@@ -136,6 +136,10 @@ func New(opts ...Option) Model {
 // ([Model.TotalRowCount], [Model.VisibleRowCount]) count rows; methods named
 // after lines ([Model.TotalLineCount], [Model.VisibleLineCount]) count the
 // lines of the view.
+//
+// A layout change, such as a new width, style, printer, or wrap setting,
+// keeps the same line at the top of the view. The top row stays at the same
+// row of that line, or at its last row if the line no longer has that many.
 type Model struct {
 	// The container style applied to the viewport frame.
 	style    lipgloss.Style
@@ -182,6 +186,11 @@ type Model struct {
 	xOffset         int
 	viewMode        ViewMode
 	hunkContext     int
+	// The line at the top of the view and the row within it when a layout
+	// change dropped the row counts. A negative row lies in the container
+	// frame above the first line.
+	anchorLine int
+	anchorRow  int
 	// FillHeight pads output with empty lines to fill the viewport height when true.
 	FillHeight bool
 	// Reports that left changed since the searcher last loaded it.
@@ -191,6 +200,9 @@ type Model struct {
 	MouseWheelEnabled bool
 	// Wraps lines to the viewport width when true.
 	wrapEnabled bool
+	// Reports that anchorLine and anchorRow wait for ensureRows to restore
+	// them.
+	anchored bool
 }
 
 func (m *Model) setInitialValues() {
@@ -253,7 +265,20 @@ func (m *Model) SetWidth(w int) {
 // gives the Model an empty row count cache and leaves any copy that shares
 // the old cache untouched. The next read of the scroll bounds fills the new
 // cache.
+//
+// Row offsets from the old cache point at other lines once the rows reflow,
+// so relayout records the line at the top of the view and the row within it,
+// and ensureRows scrolls back to them. An anchor that ensureRows has not
+// restored yet stays, so several changes in a row keep the original top line.
 func (m *Model) relayout() {
+	if !m.anchored && m.rows != nil && len(m.rows.left) > 0 {
+		first, _ := m.rowWindow()
+
+		m.anchorLine = min(first, len(m.rows.left)-1)
+		m.anchorRow = m.yOffset - m.rows.sums[m.anchorLine]
+		m.anchored = true
+	}
+
 	m.rows = &rowCache{}
 }
 
@@ -857,9 +882,10 @@ func (c *rowCache) total() int {
 	return c.sums[len(c.sums)-1] + c.bottom
 }
 
-// ensureRows fills the row count cache when it is empty and clamps both
-// scroll offsets to its bounds. It clamps on every call, because a copy of
-// the Model can fill a shared cache without clamping this Model's offsets.
+// ensureRows fills the row count cache when it is empty, scrolls back to the
+// row that relayout recorded, and clamps both scroll offsets to the cache's
+// bounds. It checks on every call, because a copy of the Model can fill a
+// shared cache without restoring or clamping this Model's offsets.
 func (m *Model) ensureRows() {
 	if m.rows == nil {
 		m.rows = &rowCache{}
@@ -867,6 +893,17 @@ func (m *Model) ensureRows() {
 
 	if m.rows.sums == nil {
 		m.fillRows()
+	}
+
+	if m.anchored {
+		m.anchored = false
+
+		// The anchored row keeps its place in the line, up to the line's new
+		// last row.
+		if n := len(m.rows.left); n > 0 {
+			k := min(m.anchorLine, n-1)
+			m.yOffset = m.rows.sums[k] + min(m.anchorRow, max(0, m.lineRows(k)-1))
+		}
 	}
 
 	m.yOffset = clamp(m.yOffset, 0, max(0, m.rows.total()-m.maxHeight()))

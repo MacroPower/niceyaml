@@ -721,6 +721,122 @@ func TestViewport_RowScrolling(t *testing.T) {
 	})
 }
 
+func TestViewport_LayoutChangesKeepTopLine(t *testing.T) {
+	t.Parallel()
+
+	// The first 50 lines wrap to two rows at width 30 and fit one row at
+	// width 60, so line k100 starts at row 150 when they wrap and at row 100
+	// when they do not.
+	var src strings.Builder
+
+	for i := range 200 {
+		value := "v"
+		if i < 50 {
+			value = strings.TrimSpace(strings.Repeat("word ", 8))
+		}
+
+		fmt.Fprintf(&src, "k%d: %s\n", i, value)
+	}
+
+	tcs := map[string]struct {
+		change     func(m *yamlviewport.Model)
+		wantTop    string
+		offset     int
+		wantOffset int
+	}{
+		"wrap off": {
+			offset:     150,
+			change:     func(m *yamlviewport.Model) { m.SetWordWrap(false) },
+			wantOffset: 100,
+			wantTop:    "k100:",
+		},
+		"wider width": {
+			offset:     150,
+			change:     func(m *yamlviewport.Model) { m.SetWidth(60) },
+			wantOffset: 100,
+			wantTop:    "k100:",
+		},
+		"several changes before a read": {
+			offset: 150,
+			change: func(m *yamlviewport.Model) {
+				m.SetWordWrap(false)
+				m.SetWidth(60)
+				m.SetWordWrap(true)
+			},
+			wantOffset: 100,
+			wantTop:    "k100:",
+		},
+		"view renders first": {
+			offset: 150,
+			change: func(m *yamlviewport.Model) {
+				m.SetWordWrap(false)
+
+				// View has a value receiver, so the copy it runs on fills the
+				// row counts that m shares.
+				_ = m.View()
+			},
+			wantOffset: 100,
+			wantTop:    "k100:",
+		},
+		"second row of a wrapped line with the same layout": {
+			offset:     21,
+			change:     func(m *yamlviewport.Model) { m.SetPrinter(testPrinter()) },
+			wantOffset: 21,
+		},
+		"second row of a line that stops wrapping": {
+			offset:     21,
+			change:     func(m *yamlviewport.Model) { m.SetWordWrap(false) },
+			wantOffset: 10,
+			wantTop:    "k10:",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+			m.SetWidth(30)
+			m.SetHeight(5)
+			m.SetSource(niceyaml.NewSourceFromString(src.String()))
+			require.Equal(t, 250, m.TotalRowCount())
+
+			m.SetYOffset(tc.offset)
+			tc.change(&m)
+
+			assert.Equal(t, tc.wantOffset, m.YOffset())
+
+			if tc.wantTop != "" {
+				top, _, _ := strings.Cut(m.View(), "\n")
+				assert.Contains(t, top, tc.wantTop)
+			}
+		})
+	}
+}
+
+func TestViewport_SearchBeforeSize(t *testing.T) {
+	t.Parallel()
+
+	// A program sets the search term before its first window size message.
+	// The match stays on screen once the lines wrap to that size.
+	var src strings.Builder
+
+	for i := range 60 {
+		fmt.Fprintf(&src, "k%d: %s\n", i, strings.TrimSpace(strings.Repeat("word ", 8)))
+	}
+
+	src.WriteString("needle: here\n")
+
+	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+	m.SetSource(niceyaml.NewSourceFromString(src.String()))
+	m.SetSearchTerm("needle")
+
+	m.SetWidth(30)
+	m.SetHeight(10)
+
+	assert.Contains(t, m.View(), "needle: here")
+}
+
 func TestViewport_ContainerFrame(t *testing.T) {
 	t.Parallel()
 
