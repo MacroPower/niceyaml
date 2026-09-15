@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/registry"
@@ -1019,6 +1020,27 @@ func TestIntegration(t *testing.T) {
 		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
 		require.ErrorIs(t, err, registry.ErrResolve)
 		require.NotErrorIs(t, err, schema.ErrNoMatch)
+	})
+
+	t.Run("stops before resolvers registered after an unreachable catalog", func(t *testing.T) {
+		t.Parallel()
+
+		var fallbackCalls atomic.Int32
+
+		fallback := schema.ResolverFunc(func(context.Context, *niceyaml.DocumentDecoder) (schema.Ref, error) {
+			fallbackCalls.Add(1)
+
+			return schema.Ref{}, schema.ErrNoMatch
+		})
+
+		reg := registry.New()
+		reg.Register(schemastore.New(schemastore.WithCatalogURL("http://localhost:1")), fallback)
+
+		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
+
+		err := reg.ValidateDocument(t.Context(), doc)
+		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+		assert.Zero(t, fallbackCalls.Load(), "the registry should not try resolvers after the store")
 	})
 }
 
