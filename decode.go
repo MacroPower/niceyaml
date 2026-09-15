@@ -16,10 +16,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
-// ErrValueNotFound indicates that a YAML path did not resolve to a node in
-// the document. [DocumentDecoder.Get] returns it wrapped with the path.
-var ErrValueNotFound = errors.New("value not found")
-
 // Validator is implemented by types that validate themselves.
 //
 // [DocumentDecoder.Decode] and [DocumentDecoder.DecodeInto] call Validate
@@ -260,16 +256,20 @@ func (dd *DocumentDecoder) FilePath() string {
 //	versionPath := paths.Root().Child("version")
 //	for _, doc := range decoder.Documents() {
 //		version, err := doc.Get[int](ctx, versionPath)
-//		if errors.Is(err, niceyaml.ErrValueNotFound) {
+//		if errors.Is(err, paths.ErrNotFound) {
 //			version = 1
 //		} else if err != nil {
 //			return err
 //		}
 //	}
 //
-// Returns [ErrValueNotFound] if the document is a directive or no value
-// exists at the path. YAML decoding errors, including a value that
-// cannot be represented as T, are converted to [Error] with source
+// Path resolution errors come from [paths.Path.Node]: an error wrapping
+// [paths.ErrNotFound] when nothing exists at the path, which also wraps
+// [paths.ErrNoDocument] when the document has no content at all, such as an
+// empty document or one holding only directives; [paths.ErrAlias] when an
+// alias on the path does not resolve; and [paths.ErrWildcard] for a path
+// that could match several nodes. YAML decoding errors, including a value
+// that cannot be represented as T, are converted to [Error] with source
 // annotations.
 //
 // For a string view of any node, including mappings and sequences, use
@@ -277,14 +277,14 @@ func (dd *DocumentDecoder) FilePath() string {
 func (dd *DocumentDecoder) Get[T any](ctx context.Context, path paths.Path) (T, error) {
 	var zero T
 
-	node := dd.node(path)
-	if node == nil {
-		return zero, fmt.Errorf("%w: %s", ErrValueNotFound, path)
+	node, err := dd.node(path)
+	if err != nil {
+		return zero, err
 	}
 
 	var v T
 
-	err := dd.decodeNode(ctx, node, &v)
+	err = dd.decodeNode(ctx, node, &v)
 	if err != nil {
 		return zero, err
 	}
@@ -300,7 +300,11 @@ func (dd *DocumentDecoder) Get[T any](ctx context.Context, path paths.Path) (T, 
 //
 //	kindPath := paths.Root().Child("kind")
 //	for _, doc := range decoder.Documents() {
-//		kind, _ := doc.GetValue(kindPath)
+//		kind, err := doc.GetValue(kindPath)
+//		if err != nil {
+//			return err
+//		}
+//
 //		switch kind {
 //		case "Pod":
 //			// Decode to Pod struct.
@@ -311,49 +315,41 @@ func (dd *DocumentDecoder) Get[T any](ctx context.Context, path paths.Path) (T, 
 //
 // For scalar values (strings, numbers, booleans), returns the semantic value
 // rather than YAML syntax. For example, `kind: ""` returns an empty string,
-// not the literal `""`. Null values return an empty string with found=true.
+// not the literal `""`. Null values return an empty string with a nil error.
 //
 // For non-scalar values (mappings, sequences), returns the YAML representation.
 //
-// Returns an empty string and false if the document is a directive or no
-// value exists at the path.
+// Returns the same resolution errors as [DocumentDecoder.Get], so
+// [paths.ErrNotFound] means nothing exists at the path and any other error
+// means the path could not be resolved.
 //
 // For a typed value, use [DocumentDecoder.Get].
-func (dd *DocumentDecoder) GetValue(path paths.Path) (string, bool) {
-	node := dd.node(path)
-	if node == nil {
-		return "", false
+func (dd *DocumentDecoder) GetValue(path paths.Path) (string, error) {
+	node, err := dd.node(path)
+	if err != nil {
+		return "", err
 	}
 
 	// Use GetValue() for scalar nodes to get the actual semantic value.
 	if scalar, ok := node.(ast.ScalarNode); ok {
 		v := scalar.GetValue()
 		if v == nil {
-			return "", true // NullNode.
+			return "", nil // NullNode.
 		}
 
-		return fmt.Sprintf("%v", v), true
+		return fmt.Sprintf("%v", v), nil
 	}
 
 	// For non-scalar nodes (mappings, sequences), return YAML representation.
-	return node.String(), true
+	return node.String(), nil
 }
 
 // node resolves path against the document body, ignoring the path's
-// [paths.Part].
-//
-// Returns nil if the document is a directive or no node exists at the path.
-func (dd *DocumentDecoder) node(path paths.Path) ast.Node {
-	if dd.doc.Body != nil && dd.doc.Body.Type() == ast.DirectiveType {
-		return nil
-	}
-
-	node, err := path.Node(dd.doc)
-	if err != nil {
-		return nil
-	}
-
-	return node
+// [paths.Part]. Errors come from [paths.Path.Node] as they are, since they
+// already name the path.
+func (dd *DocumentDecoder) node(path paths.Path) (ast.Node, error) {
+	//nolint:wrapcheck // The paths error already names the path.
+	return path.Node(dd.doc)
 }
 
 // ValidateSchema decodes the document to [any] and validates it using sv.

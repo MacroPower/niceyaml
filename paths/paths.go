@@ -12,11 +12,18 @@ import (
 )
 
 var (
-	// ErrNoDocument indicates a nil document or a document without a body.
-	ErrNoDocument = errors.New("no document")
+	// ErrNoDocument indicates a document with no content to resolve in: a
+	// nil document, a document without a body, or a document holding only
+	// directives. Errors that wrap it also wrap [ErrNotFound], since nothing
+	// exists at any path in such a document.
+	ErrNoDocument = errors.New("document has no content")
 
 	// ErrNotFound indicates that nothing exists at the path in the document.
 	ErrNotFound = errors.New("not found")
+
+	// ErrAlias indicates an alias on the path that names no anchor or that
+	// leads back to itself, so the content it stands for cannot be reached.
+	ErrAlias = errors.New("alias does not resolve")
 
 	// ErrWildcard indicates a request for a single node or token from a path
 	// with a `[*]` or `..` selector. Use [Path.Nodes] for such paths.
@@ -245,10 +252,11 @@ func (p Path) wildcard() bool {
 
 // matches resolves the path in doc and returns every match.
 //
-// Returns [ErrNoDocument] when doc or its body is nil.
+// Returns an error wrapping [ErrNotFound] and [ErrNoDocument] when doc or
+// its body is nil or the body is a directive.
 func (p Path) matches(doc *ast.DocumentNode) ([]match, error) {
-	if doc == nil || doc.Body == nil {
-		return nil, ErrNoDocument
+	if doc == nil || doc.Body == nil || doc.Body.Type() == ast.DirectiveType {
+		return nil, fmt.Errorf("resolve %s: %w: %w", p, ErrNotFound, ErrNoDocument)
 	}
 
 	found, err := newResolver(doc).resolve(doc.Body, p.segments)
@@ -288,7 +296,9 @@ func (p Path) single(doc *ast.DocumentNode) (match, error) {
 // path names. Selectors follow aliases to their anchor and see the entries a
 // `<<` merge key brings into a mapping.
 //
-// Returns [ErrNoDocument] when doc or its body is nil.
+// Wraps [ErrNoDocument], together with [ErrNotFound], when the document has
+// no content to resolve in, and [ErrAlias] when an alias on the path does
+// not resolve.
 func (p Path) Nodes(doc *ast.DocumentNode) ([]ast.Node, error) {
 	found, err := p.matches(doc)
 	if err != nil {
@@ -316,9 +326,10 @@ func (p Path) Nodes(doc *ast.DocumentNode) ([]ast.Node, error) {
 // path names. Selectors follow aliases to their anchor and see the entries a
 // `<<` merge key brings into a mapping.
 //
-// Returns [ErrNoDocument] when doc or its body is nil, [ErrWildcard] for a
-// path with a `[*]` or `..` selector (use [Path.Nodes] for those), and wraps
-// [ErrNotFound] when nothing exists at the path.
+// Returns [ErrWildcard] for a path with a `[*]` or `..` selector (use
+// [Path.Nodes] for those), and wraps [ErrNotFound] when nothing exists at
+// the path, together with [ErrNoDocument] when the document has no content
+// to resolve in, and [ErrAlias] when an alias on the path does not resolve.
 func (p Path) Node(doc *ast.DocumentNode) (ast.Node, error) {
 	m, err := p.single(doc)
 	if err != nil {

@@ -29,11 +29,14 @@
 // When several anchors share a name, an alias refers to the last one before
 // it, which is the anchor the goccy/go-yaml decoder uses. An alias with no
 // anchor of its name before it, or one that leads back to itself, has no
-// content, so resolving through it returns an error wrapping [ErrNotFound].
+// content, so resolving through it returns an error wrapping [ErrAlias].
 //
 // The wildcard selectors `[*]` and `..name` select any number of nodes, so
 // [Path.Token] and [Path.Node] reject them with [ErrWildcard]; use
-// [Path.Nodes] to list every match.
+// [Path.Nodes] to list every match. [ErrNotFound] means nothing exists at
+// the path, and [ErrAlias] means an alias on the path names no anchor or
+// forms a cycle. When the document has no content to resolve in, the error
+// wraps [ErrNoDocument] along with ErrNotFound.
 //
 // # Integration with niceyaml.Error
 //

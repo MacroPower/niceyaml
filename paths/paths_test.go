@@ -538,9 +538,36 @@ func TestPath_Token_NoDocument(t *testing.T) {
 
 	_, err := path.Token(nil)
 	require.ErrorIs(t, err, paths.ErrNoDocument)
+	require.ErrorIs(t, err, paths.ErrNotFound)
 
 	_, err = path.Token(&ast.DocumentNode{})
 	require.ErrorIs(t, err, paths.ErrNoDocument)
+	require.ErrorIs(t, err, paths.ErrNotFound)
+	assert.Contains(t, err.Error(), "$.name")
+}
+
+func TestPath_DirectiveDocument(t *testing.T) {
+	t.Parallel()
+
+	// The directive parses as a document of its own, ahead of the content.
+	source := niceyaml.NewSourceFromString("%YAML 1.2\n---\nkey: v\n")
+	file, err := source.File()
+	require.NoError(t, err)
+	require.Len(t, file.Docs, 2)
+
+	_, err = paths.Root().Node(file.Docs[0])
+	require.ErrorIs(t, err, paths.ErrNoDocument)
+	require.ErrorIs(t, err, paths.ErrNotFound)
+
+	_, err = paths.Root().Child("key").Token(file.Docs[0])
+	require.ErrorIs(t, err, paths.ErrNoDocument)
+
+	_, err = paths.Root().Nodes(file.Docs[0])
+	require.ErrorIs(t, err, paths.ErrNoDocument)
+
+	node, err := paths.Root().Child("key").Node(file.Docs[1])
+	require.NoError(t, err)
+	assert.Equal(t, "v", node.String())
 }
 
 func TestPath_Token_MultipleDocuments(t *testing.T) {
@@ -838,37 +865,38 @@ func TestPath_UnknownAlias(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = paths.Root().Child("other", "a").Value().Token(file.Docs[0])
-	require.ErrorIs(t, err, paths.ErrNotFound)
+	require.ErrorIs(t, err, paths.ErrAlias)
+	require.NotErrorIs(t, err, paths.ErrNotFound)
 	assert.Contains(t, err.Error(), "*nope")
 
 	_, err = paths.Root().Child("other").Node(file.Docs[0])
-	require.ErrorIs(t, err, paths.ErrNotFound)
+	require.ErrorIs(t, err, paths.ErrAlias)
 }
 
 func TestPath_AliasCycle(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		path  paths.Path
 		input string
 		want  string
+		path  paths.Path
 	}{
 		"alias inside its own anchor through a tag": {
 			input: "a: &x !t *x\n",
 			path:  paths.Root().Child("a", "c").Value(),
-			want:  "alias *x forms a cycle",
+			want:  "*x forms a cycle",
 		},
 		"merge key through an alias inside its own anchor": {
 			input: "a: &x !t *x\nm:\n  <<: *x\n",
 			path:  paths.Root().Child("m", "c").Value(),
-			want:  "alias *x forms a cycle",
+			want:  "*x forms a cycle",
 		},
 		"anchors whose tags alias each other": {
 			// The *y on line 1 comes before &y, so it names no anchor and
 			// resolution stops there.
 			input: "a: &x !t *y\nb: &y !t *x\n",
 			path:  paths.Root().Child("b", "c").Value(),
-			want:  "alias *y has no anchor before it",
+			want:  "*y has no anchor before it",
 		},
 	}
 
@@ -900,7 +928,8 @@ func TestPath_AliasCycle(t *testing.T) {
 			for range 3 {
 				select {
 				case err := <-errs:
-					require.ErrorIs(t, err, paths.ErrNotFound)
+					require.ErrorIs(t, err, paths.ErrAlias)
+					require.NotErrorIs(t, err, paths.ErrNotFound)
 					assert.Contains(t, err.Error(), tc.want)
 
 				case <-time.After(10 * time.Second):
@@ -970,8 +999,8 @@ func TestPath_RedefinedAnchor(t *testing.T) {
 		assert.Equal(t, map[string]any{"a": "v1", "b": "v1", "c": "v2", "d": "v2"}, decoded)
 
 		for _, key := range []string{"b", "d"} {
-			got, found := dd.GetValue(paths.Root().Child(key))
-			require.True(t, found)
+			got, err := dd.GetValue(paths.Root().Child(key))
+			require.NoError(t, err)
 			assert.Equal(t, decoded[key], got)
 		}
 	})
@@ -984,11 +1013,12 @@ func TestPath_RedefinedAnchor(t *testing.T) {
 		require.NoError(t, err)
 
 		_, err = paths.Root().Child("b", "v").Value().Token(forwardFile.Docs[0])
-		require.ErrorIs(t, err, paths.ErrNotFound)
-		assert.Contains(t, err.Error(), "alias *x has no anchor before it")
+		require.ErrorIs(t, err, paths.ErrAlias)
+		require.NotErrorIs(t, err, paths.ErrNotFound)
+		assert.Contains(t, err.Error(), "*x has no anchor before it")
 
 		_, err = paths.Root().Child("b").Node(forwardFile.Docs[0])
-		require.ErrorIs(t, err, paths.ErrNotFound)
+		require.ErrorIs(t, err, paths.ErrAlias)
 	})
 }
 

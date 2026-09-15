@@ -617,8 +617,8 @@ func TestRegistry_DynamicResolver(t *testing.T) {
 
 		reg := registry.New()
 		reg.Register(schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.DocumentDecoder) (schema.Ref, error) {
-			kind, ok := doc.GetValue(kindPath)
-			if !ok || (kind != "Deployment" && kind != "Service") {
+			kind, err := doc.GetValue(kindPath)
+			if err != nil || (kind != "Deployment" && kind != "Service") {
 				return schema.Ref{}, schema.ErrNoMatch
 			}
 
@@ -769,8 +769,10 @@ func TestRegistry_MultipleDocuments(t *testing.T) {
 	// Track validation results.
 	validated := make(map[string]bool)
 	for _, doc := range decoder.Documents() {
-		kind, _ := doc.GetValue(kindPath)
-		err := reg.ValidateDocument(t.Context(), doc)
+		kind, err := doc.GetValue(kindPath)
+		require.NoError(t, err)
+
+		err = reg.ValidateDocument(t.Context(), doc)
 
 		if kind == "Deployment" || kind == "Service" {
 			require.NoError(t, err, "expected %s to validate", kind)

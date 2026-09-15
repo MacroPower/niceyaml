@@ -71,7 +71,7 @@ func (b *aliasBinder) Visit(node ast.Node) ast.Visitor {
 
 // deref looks through anchors and aliases to the content node they carry.
 //
-// Returns an error wrapping [ErrNotFound] for an alias with no anchor of its
+// Returns an error wrapping [ErrAlias] for an alias with no anchor of its
 // name before it, or for an alias that leads back to itself.
 func (r *resolver) deref(node ast.Node) (ast.Node, error) {
 	return r.follow(node, map[*ast.AliasNode]bool{})
@@ -82,7 +82,7 @@ func (r *resolver) deref(node ast.Node) (ast.Node, error) {
 //
 // It tracks the aliases it follows across every tag it strips, so an alias
 // that leads back to itself through a tag returns an error wrapping
-// [ErrNotFound].
+// [ErrAlias].
 func (r *resolver) unwrap(node ast.Node) (ast.Node, error) {
 	followed := map[*ast.AliasNode]bool{}
 
@@ -102,7 +102,7 @@ func (r *resolver) unwrap(node ast.Node) (ast.Node, error) {
 }
 
 // follow looks through anchors and aliases from node and adds each alias it
-// follows to followed. It returns an error wrapping [ErrNotFound] when it
+// follows to followed. It returns an error wrapping [ErrAlias] when it
 // reaches an alias already in followed or an alias with no anchor.
 func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.Node, error) {
 	for {
@@ -113,14 +113,14 @@ func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.
 			name := n.Value.GetToken().Value
 
 			if followed[n] {
-				return nil, fmt.Errorf("%w: alias *%s forms a cycle", ErrNotFound, name)
+				return nil, fmt.Errorf("%w: *%s forms a cycle", ErrAlias, name)
 			}
 
 			followed[n] = true
 
 			target, ok := r.targets[n]
 			if !ok {
-				return nil, fmt.Errorf("%w: alias *%s has no anchor before it", ErrNotFound, name)
+				return nil, fmt.Errorf("%w: *%s has no anchor before it", ErrAlias, name)
 			}
 
 			node = target

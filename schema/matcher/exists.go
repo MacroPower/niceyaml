@@ -41,7 +41,7 @@ func Exists(path paths.Path) Matcher {
 
 // Match implements [Matcher].
 func (m *existsMatcher) Match(_ context.Context, doc *niceyaml.DocumentDecoder) bool {
-	v, ok := doc.GetValue(m.path)
+	v, err := doc.GetValue(m.path)
 
-	return ok && v != ""
+	return err == nil && v != ""
 }

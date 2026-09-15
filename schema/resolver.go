@@ -60,8 +60,8 @@ type Resolver interface {
 //
 //	kindPath := paths.Root().Child("kind")
 //	r := schema.ResolverFunc(func(_ context.Context, doc *niceyaml.DocumentDecoder) (schema.Ref, error) {
-//	    kind, ok := doc.GetValue(kindPath)
-//	    if !ok {
+//	    kind, err := doc.GetValue(kindPath)
+//	    if err != nil {
 //	        return schema.Ref{}, schema.ErrNoMatch
 //	    }
 //

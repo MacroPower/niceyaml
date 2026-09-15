@@ -101,25 +101,25 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		path      paths.Path
-		input     string
-		wantVals  []string
-		wantFound []bool
+		path     paths.Path
+		input    string
+		wantVals []string
+		wantErrs []error
 	}{
 		"simple key": {
-			input:     "key: value",
-			path:      paths.Root().Child("key"),
-			wantVals:  []string{"value"},
-			wantFound: []bool{true},
+			input:    "key: value",
+			path:     paths.Root().Child("key"),
+			wantVals: []string{"value"},
+			wantErrs: []error{nil},
 		},
 		"nested key": {
 			input: stringtest.Input(`
 				parent:
 				  child: nested_value
 			`),
-			path:      paths.Root().Child("parent").Child("child"),
-			wantVals:  []string{"nested_value"},
-			wantFound: []bool{true},
+			path:     paths.Root().Child("parent").Child("child"),
+			wantVals: []string{"nested_value"},
+			wantErrs: []error{nil},
 		},
 		"array index": {
 			input: stringtest.Input(`
@@ -128,15 +128,27 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 				  - second
 				  - third
 			`),
-			path:      paths.Root().Child("items").Index(1),
-			wantVals:  []string{"second"},
-			wantFound: []bool{true},
+			path:     paths.Root().Child("items").Index(1),
+			wantVals: []string{"second"},
+			wantErrs: []error{nil},
 		},
-		"missing key returns empty": {
-			input:     "key: value",
-			path:      paths.Root().Child("nonexistent"),
-			wantVals:  []string{""},
-			wantFound: []bool{false},
+		"missing key returns ErrNotFound": {
+			input:    "key: value",
+			path:     paths.Root().Child("nonexistent"),
+			wantVals: []string{""},
+			wantErrs: []error{paths.ErrNotFound},
+		},
+		"alias without anchor returns ErrAlias": {
+			input:    "kind: *nope",
+			path:     paths.Root().Child("kind"),
+			wantVals: []string{""},
+			wantErrs: []error{paths.ErrAlias},
+		},
+		"wildcard path returns ErrWildcard": {
+			input:    "items: [a, b]",
+			path:     paths.Root().Child("items").IndexAll(),
+			wantVals: []string{""},
+			wantErrs: []error{paths.ErrWildcard},
 		},
 		"multiple documents": {
 			input: stringtest.Input(`
@@ -145,63 +157,63 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 				---
 				second: 2
 			`),
-			path:      paths.Root(),
-			wantVals:  []string{"first: 1", "second: 2"},
-			wantFound: []bool{true, true},
+			path:     paths.Root(),
+			wantVals: []string{"first: 1", "second: 2"},
+			wantErrs: []error{nil, nil},
 		},
 		"numeric value": {
-			input:     "count: 42",
-			path:      paths.Root().Child("count"),
-			wantVals:  []string{"42"},
-			wantFound: []bool{true},
+			input:    "count: 42",
+			path:     paths.Root().Child("count"),
+			wantVals: []string{"42"},
+			wantErrs: []error{nil},
 		},
 		"boolean value": {
-			input:     "enabled: true",
-			path:      paths.Root().Child("enabled"),
-			wantVals:  []string{"true"},
-			wantFound: []bool{true},
+			input:    "enabled: true",
+			path:     paths.Root().Child("enabled"),
+			wantVals: []string{"true"},
+			wantErrs: []error{nil},
 		},
 		"null value": {
-			input:     "empty: null",
-			path:      paths.Root().Child("empty"),
-			wantVals:  []string{""},
-			wantFound: []bool{true},
+			input:    "empty: null",
+			path:     paths.Root().Child("empty"),
+			wantVals: []string{""},
+			wantErrs: []error{nil},
 		},
 		"double-quoted empty string": {
-			input:     `kind: ""`,
-			path:      paths.Root().Child("kind"),
-			wantVals:  []string{""},
-			wantFound: []bool{true},
+			input:    `kind: ""`,
+			path:     paths.Root().Child("kind"),
+			wantVals: []string{""},
+			wantErrs: []error{nil},
 		},
 		"single-quoted empty string": {
-			input:     `kind: ''`,
-			path:      paths.Root().Child("kind"),
-			wantVals:  []string{""},
-			wantFound: []bool{true},
+			input:    `kind: ''`,
+			path:     paths.Root().Child("kind"),
+			wantVals: []string{""},
+			wantErrs: []error{nil},
 		},
 		"anchored value": {
-			input:     "kind: &k Pod",
-			path:      paths.Root().Child("kind"),
-			wantVals:  []string{"Pod"},
-			wantFound: []bool{true},
+			input:    "kind: &k Pod",
+			path:     paths.Root().Child("kind"),
+			wantVals: []string{"Pod"},
+			wantErrs: []error{nil},
 		},
 		"aliased value": {
 			input: stringtest.Input(`
 				base: &b Pod
 				kind: *b
 			`),
-			path:      paths.Root().Child("kind"),
-			wantVals:  []string{"Pod"},
-			wantFound: []bool{true},
+			path:     paths.Root().Child("kind"),
+			wantVals: []string{"Pod"},
+			wantErrs: []error{nil},
 		},
 		"key through alias": {
 			input: stringtest.Input(`
 				base: &b {kind: Pod}
 				spec: *b
 			`),
-			path:      paths.Root().Child("spec", "kind"),
-			wantVals:  []string{"Pod"},
-			wantFound: []bool{true},
+			path:     paths.Root().Child("spec", "kind"),
+			wantVals: []string{"Pod"},
+			wantErrs: []error{nil},
 		},
 		"key through merge": {
 			input: stringtest.Input(`
@@ -210,9 +222,9 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 				  <<: *b
 				  name: x
 			`),
-			path:      paths.Root().Child("spec", "kind"),
-			wantVals:  []string{"Pod"},
-			wantFound: []bool{true},
+			path:     paths.Root().Child("spec", "kind"),
+			wantVals: []string{"Pod"},
+			wantErrs: []error{nil},
 		},
 	}
 
@@ -224,19 +236,20 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 			d, err := source.Decoder()
 			require.NoError(t, err)
 
-			var (
-				gotVals  []string
-				gotFound []bool
-			)
+			var gotVals []string
 
-			for _, dd := range d.Documents() {
-				val, found := dd.GetValue(tc.path)
+			for i, dd := range d.Documents() {
+				val, err := dd.GetValue(tc.path)
 				gotVals = append(gotVals, val)
-				gotFound = append(gotFound, found)
+
+				if tc.wantErrs[i] == nil {
+					require.NoError(t, err)
+				} else {
+					require.ErrorIs(t, err, tc.wantErrs[i])
+				}
 			}
 
 			assert.Equal(t, tc.wantVals, gotVals)
-			assert.Equal(t, tc.wantFound, gotFound)
 		})
 	}
 }
@@ -468,15 +481,8 @@ func TestNewDocumentDecoder(t *testing.T) {
 func TestDocumentDecoder_GetValue_DirectiveBody(t *testing.T) {
 	t.Parallel()
 
-	// Test the directive body case - when doc.Body is a DirectiveType.
-	//
-	// This is an edge case where YAML 1.2 directive creates a document where the
-	// body is a directive node before the actual content.
-	//
-	// In practice, go-yaml parses %YAML as a directive but the body of the main
-	// document is still the mapping, not the directive.
-	//
-	// We test that the normal case still works.
+	// A %YAML directive parses as a document of its own whose body is the
+	// directive node, followed by the document with the content.
 	input := `%YAML 1.2
 ---
 key: value`
@@ -485,18 +491,21 @@ key: value`
 	require.NoError(t, err)
 
 	path := paths.Root().Child("key")
+	got := make(map[int]string)
 
-	var foundAny bool
+	for i, dd := range d.Documents() {
+		v, err := dd.GetValue(path)
+		if err != nil {
+			require.ErrorIs(t, err, paths.ErrNotFound)
+			require.ErrorIs(t, err, paths.ErrNoDocument)
 
-	for _, dd := range d.Documents() {
-		_, found := dd.GetValue(path)
-		if found {
-			foundAny = true
+			continue
 		}
+
+		got[i] = v
 	}
 
-	// At least one document should have the key.
-	assert.True(t, foundAny)
+	assert.Equal(t, map[int]string{1: "value"}, got)
 }
 
 func TestDocumentDecoder_Decode_SchemaThenDecodeError(t *testing.T) {
@@ -836,8 +845,8 @@ func TestDecoder_Documents(t *testing.T) {
 		kindPath := paths.Root().Child("kind")
 
 		for i, dd := range d.Documents() {
-			kind, ok := dd.GetValue(kindPath)
-			require.True(t, ok)
+			kind, err := dd.GetValue(kindPath)
+			require.NoError(t, err)
 
 			tks := dd.Tokens()
 			require.NotEmpty(t, tks, "document %d has no tokens", i)
@@ -1302,13 +1311,49 @@ func TestDocumentDecoder_Get(t *testing.T) {
 		assert.Equal(t, meta{Name: "app"}, got)
 	})
 
-	t.Run("missing path returns ErrValueNotFound", func(t *testing.T) {
+	t.Run("missing path returns ErrNotFound", func(t *testing.T) {
 		t.Parallel()
 
 		dd := yamltest.FirstDocument(t, input)
 
 		got, err := dd.Get[string](t.Context(), paths.Root().Child("nonexistent"))
-		require.ErrorIs(t, err, niceyaml.ErrValueNotFound)
+		require.ErrorIs(t, err, paths.ErrNotFound)
+		require.NotErrorIs(t, err, paths.ErrAlias)
+		assert.Empty(t, got)
+	})
+
+	t.Run("empty document returns ErrNotFound and ErrNoDocument", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "---\n")
+
+		got, err := dd.Get[string](t.Context(), paths.Root().Child("key"))
+		require.ErrorIs(t, err, paths.ErrNotFound)
+		require.ErrorIs(t, err, paths.ErrNoDocument)
+		assert.Contains(t, err.Error(), "$.key")
+		assert.Empty(t, got)
+	})
+
+	t.Run("alias without anchor returns ErrAlias", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "kind: *nope")
+
+		got, err := dd.Get[string](t.Context(), paths.Root().Child("kind"))
+		require.ErrorIs(t, err, paths.ErrAlias)
+		require.NotErrorIs(t, err, paths.ErrNotFound)
+		assert.Contains(t, err.Error(), "*nope")
+		assert.Empty(t, got)
+	})
+
+	t.Run("wildcard path returns ErrWildcard", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "tags: [a, b]")
+
+		got, err := dd.Get[[]string](t.Context(), paths.Root().Child("tags").IndexAll())
+		require.ErrorIs(t, err, paths.ErrWildcard)
+		require.NotErrorIs(t, err, paths.ErrNotFound)
 		assert.Empty(t, got)
 	})
 
