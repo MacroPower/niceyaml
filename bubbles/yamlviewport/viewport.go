@@ -118,6 +118,10 @@ func New(opts ...Option) Model {
 
 // Model is the Bubble Tea model for the YAML viewport.
 // Create instances with [New].
+//
+// A zero Model has no printer, keymap, or searcher. Its [Model.View] returns
+// "" and its other methods make no promises, so construct every Model with
+// [New] and its [Option]s.
 type Model struct {
 	// The container style applied to the viewport frame.
 	style    lipgloss.Style
@@ -168,7 +172,6 @@ type Model struct {
 	MouseWheelEnabled bool
 	// Wraps lines to the viewport width when true.
 	wrapEnabled bool
-	initialized bool
 }
 
 func (m *Model) setInitialValues() {
@@ -189,8 +192,6 @@ func (m *Model) setInitialValues() {
 			niceyaml.WithNormalizer(normalizer.New()),
 		)
 	}
-
-	m.initialized = true
 }
 
 // Init implements the [tea.Model] interface.
@@ -1113,10 +1114,6 @@ func (m *Model) scrollToCurrentMatch() {
 //
 //nolint:gocritic // hugeParam: required for tea.Model interface compatibility.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
-	if !m.initialized {
-		m.setInitialValues()
-	}
-
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		switch {
@@ -1232,7 +1229,8 @@ func (m *Model) renderContent(lines []string, contentW, contentH int) string {
 		Render(contents)
 }
 
-// View renders the viewport.
+// View renders the viewport. A zero Model, one not created with [New],
+// renders "".
 //
 // The rendering behavior depends on the current [ViewMode]:
 //   - [ViewModeFull]: Renders all lines (default behavior).
@@ -1241,6 +1239,10 @@ func (m *Model) renderContent(lines []string, contentW, contentH int) string {
 //
 //nolint:gocritic // hugeParam: required for tea.Model interface compatibility.
 func (m Model) View() string {
+	if m.printer == nil {
+		return ""
+	}
+
 	w, h, ok := m.getViewDimensions()
 	if !ok {
 		return ""

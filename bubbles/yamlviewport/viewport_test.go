@@ -2450,6 +2450,24 @@ func TestViewMode_Behavior(t *testing.T) {
 	}
 }
 
+func TestViewport_ZeroValue(t *testing.T) {
+	t.Parallel()
+
+	// A Model not created with New has no printer; View renders nothing
+	// instead of panicking, and Update passes messages through.
+	var m yamlviewport.Model
+
+	m.SetHeight(3)
+	m.SetWidth(20)
+	m.SetSource(niceyaml.NewSourceFromString("key: value\n"))
+
+	assert.Empty(t, m.View())
+
+	m, cmd := m.Update(tea.KeyPressMsg{Code: 'j'})
+	assert.Nil(t, cmd)
+	assert.Empty(t, m.View())
+}
+
 func TestViewport_WithSearcher(t *testing.T) {
 	t.Parallel()
 
