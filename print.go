@@ -465,36 +465,21 @@ func (p *Printer) renderLine(idx int, ln *line.Line, totalLines, gutterWidth int
 		Styles:     p.styles,
 	}
 
-	var (
-		content      string
-		contentStyle style.Style
-		styled       bool
-	)
+	var content string
 
 	switch ln.Flag {
 	case line.FlagDeleted:
-		content = ln.Content()
-		contentStyle = style.GenericDeleted
+		content = p.styleLineWithRanges(ln.Content(), position.New(idx, 0), style.GenericDeleted, ln.Overlays)
 
 	case line.FlagInserted:
-		content = ln.Content()
-		contentStyle = style.GenericInserted
+		content = p.styleLineWithRanges(ln.Content(), position.New(idx, 0), style.GenericInserted, ln.Overlays)
 
 	default: // line.FlagDefault (equal line).
 		// Render with syntax highlighting.
 		content = p.renderTokenLine(idx, ln)
-		styled = true
 	}
 
-	rows = append(rows, p.contentRows(
-		content,
-		position.New(idx, 0),
-		contentStyle,
-		styled,
-		ln.Overlays,
-		gutterCtx,
-		gutterWidth,
-	)...)
+	rows = append(rows, p.contentRows(content, gutterCtx, gutterWidth)...)
 
 	if p.annotationsEnabled {
 		rows = append(rows, p.renderAnnotation(ln, idx, totalLines, line.Below, gutterWidth)...)
@@ -563,43 +548,22 @@ func (p *Printer) renderAnnotation(
 	return rows
 }
 
-// contentRows renders a line's content as rows, wrapping to the printer
-// width, with the gutter generated for each row from gutterCtx.
+// contentRows wraps a line's rendered content to the printer width and
+// returns the rows, each with the gutter generated from gutterCtx.
 //
-// When styled is set the content already carries its styles, as a token
-// line does; otherwise contentRows applies contentStyle to the content with
-// its overlays.
-func (p *Printer) contentRows(
-	content string,
-	pos position.Position,
-	contentStyle style.Style,
-	styled bool,
-	overlays line.Overlays,
-	gutterCtx GutterContext,
-	gutterWidth int,
-) []string {
+// Callers style and escape the whole line first, overlays included, so the
+// wrap measures the text the terminal shows and each overlay covers the
+// columns it names in the source line.
+func (p *Printer) contentRows(content string, gutterCtx GutterContext, gutterWidth int) []string {
 	subLines := p.wrapContent(content, gutterWidth)
 	rows := make([]string, 0, len(subLines))
 
 	for j, subLine := range subLines {
-		var sb strings.Builder
-
 		// Generate gutter at write-time with correct Soft flag.
 		ctx := gutterCtx
 		ctx.Soft = j > 0
-		sb.WriteString(p.gutterFunc(ctx))
 
-		if styled {
-			// For equal lines: content is already styled.
-			sb.WriteString(subLine)
-		} else {
-			// For diff lines: apply diff style to content.
-			sb.WriteString(p.styleLineWithRanges(subLine, pos, contentStyle, overlays))
-		}
-
-		pos.Col += utf8.RuneCountInString(subLine)
-
-		rows = append(rows, sb.String())
+		rows = append(rows, p.gutterFunc(ctx)+subLine)
 	}
 
 	return rows

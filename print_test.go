@@ -956,8 +956,49 @@ func TestPrinter_PrintTokenDiff_Wrapping(t *testing.T) {
 		after        string
 		wantExact    string
 		wantContains []string
+		overlays     []position.Range
 		width        int
 	}{
+		// Line 1 is the inserted line. The overlay covers "dddd", which
+		// wraps to the third row.
+		"overlay on a continuation row": {
+			before:   "key: x\n",
+			after:    "key: aaaa bbbb cccc dddd\n",
+			overlays: []position.Range{position.NewRange(position.New(1, 20), position.New(1, 24))},
+			width:    13,
+			wantExact: stringtest.JoinLF(
+				"-key: x",
+				"+key: aaaa",
+				" bbbb cccc",
+				" [dddd]",
+			),
+		},
+		// Each ESC byte prints as a control picture one column wide.
+		"escape sequence": {
+			before: "b: x\n",
+			after:  "b: \"\x1b[31mred\x1b[0m and more words here\"\n",
+			width:  13,
+			wantExact: stringtest.JoinLF(
+				"-b: x",
+				"+b:",
+				" \"␛[31mred␛[0",
+				" m and more",
+				" words here\"",
+			),
+		},
+		// Each tab prints as a control picture, so a wrap point cannot drop
+		// the run as whitespace.
+		"tab run": {
+			before: "b: x\n",
+			after:  "b: \"x\t\t\t\t\t\t\t\t\t\ty\tz\tw\"\n",
+			width:  13,
+			wantExact: stringtest.JoinLF(
+				"-b: x",
+				"+b:",
+				" \"x␉␉␉␉␉␉␉␉␉␉",
+				" y␉z␉w\"",
+			),
+		},
 		"diff lines wrap correctly": {
 			before: "key: short\n",
 			after:  "key: this is a very long value that should wrap\n",
@@ -999,7 +1040,17 @@ func TestPrinter_PrintTokenDiff_Wrapping(t *testing.T) {
 
 			p := testPrinterWithGutter(niceyaml.DiffGutter).With(niceyaml.WithWidth(tc.width))
 
-			got := printDiff(p, tc.before, tc.after)
+			view := niceyaml.Diff(
+				niceyaml.NewSourceFromString(tc.before),
+				niceyaml.NewSourceFromString(tc.after),
+			).Unified()
+			view.AddOverlay(testOverlayHighlight, tc.overlays...)
+
+			got := p.Print(view)
+
+			for row := range strings.SplitSeq(got, "\n") {
+				assert.LessOrEqual(t, lipgloss.Width(row), tc.width, row)
+			}
 
 			if tc.wantExact != "" {
 				assert.Equal(t, tc.wantExact, got)

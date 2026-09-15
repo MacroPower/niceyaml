@@ -1,5 +1,5 @@
--<genericHighlight>name</genericHighli │                                        
-+<genericHighlightDim>name</genericHighlightDim>: modified                      
+-<genericHighlight>name</              │  +<genericHighlightDim>name</          
+ genericHighlight>: original           │   genericHighlightDim>: modified       
 -count: 10                             │  +count: 20                            
  enabled: true                         │   enabled: true                        
 -description: "This is the original    │  +description: "This is the updated    

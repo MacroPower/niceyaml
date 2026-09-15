@@ -1,5 +1,5 @@
--name: original                        │  +name:                                
-<genericHighlight>modified</genericHighlight>                                   
+-name: original                        │  +name: <genericHighlight>modified</   
+                                       │   genericHighlight>                    
 -count: 10                             │  +count: 20                            
  enabled: true                         │   enabled: true                        
 -description: "This is the original    │  +description: "This is the updated    

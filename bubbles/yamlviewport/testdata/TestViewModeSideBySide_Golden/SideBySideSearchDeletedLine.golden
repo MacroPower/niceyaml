@@ -1,8 +1,10 @@
--name: <genericHighlight>original</gen │  +name: modified                       
+-name: <genericHighlight>original</    │  +name: modified                       
+ genericHighlight>                     │                                        
 -count: 10                             │  +count: 20                            
  enabled: true                         │   enabled: true                        
--description: "This is the <genericHig │  +description: "This is the updated    
- description"                          │   description"                         
+-description: "This is the             │  +description: "This is the updated    
+ <genericHighlightDim>original</       │   description"                         
+ genericHighlightDim> description"     │                                        
  tags:                                 │   tags:                                
    - alpha                             │     - alpha                            
 -  - beta                              │  +  - gamma                            
@@ -12,8 +14,6 @@
  extra:                                │   extra:                               
 -  key1: value1                        │  +  key1: changed1                     
 -  key2: value2                        │  +  key2: changed2                     
-                                                                                
-                                                                                
                                                                                 
                                                                                 
                                                                                 
