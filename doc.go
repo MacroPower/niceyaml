@@ -151,4 +151,27 @@
 //	view := source.Lines()
 //	view.AddOverlay(style.GenericHighlight, finder.Find("search term")...)
 //	fmt.Println(printer.Print(view))
+//
+// # Dependencies
+//
+// niceyaml is a facade over go-yaml. The exported API names go-yaml types
+// only where niceyaml wraps the document model rather than hiding it: the
+// [*ast.File] and [*ast.DocumentNode] a [Source] parses into, the
+// [token.Tokens] it lexes, and [ast.Node] and [*token.Token] as results of
+// resolving a [paths.Path]. Positions, ranges, lines, errors, and styles are
+// niceyaml's own types, and [paths.Path.YAMLPath] converts to go-yaml's
+// path type when a caller needs it.
+//
+// Every go-yaml setting has a named option, such as [WithAllowDuplicateKeys]
+// or [WithIndent]. The options that pass go-yaml values through carry a YAML
+// prefix, as in [WithYAMLDecodeOptions] and [WithYAMLEncodeOptions], so a
+// caller can tell at the call site when the go-yaml dependency shows. A test
+// in this package enforces both rules on every exported declaration.
+//
+// Rendering builds on lipgloss, and the [style] package exposes its Style
+// type directly since a theme is a set of lipgloss styles. The
+// [go.jacobcolvin.com/niceyaml/fangs] and
+// [go.jacobcolvin.com/niceyaml/bubbles/yamlviewport] packages are adapters
+// for the charm libraries they build on and expose those libraries' types by
+// design.
 package niceyaml
