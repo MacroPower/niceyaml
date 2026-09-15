@@ -2443,7 +2443,7 @@ func TestPrinter_BlendStyles(t *testing.T) {
 
 			view := source.Lines()
 			for _, or := range tc.ranges {
-				view.AddOverlay(or.kind, position.NewRange(or.start, or.end))
+				view.BlendOverlay(or.kind, position.NewRange(or.start, or.end))
 			}
 
 			got := p.Print(view)
@@ -2557,7 +2557,7 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 			overlayOpts := make([]style.StylesOption, 0, len(tc.overlays))
 			for i, od := range tc.overlays {
 				overlayOpts = append(overlayOpts, style.Set(kinds[i], od.style))
-				view.AddOverlay(kinds[i], position.NewRange(od.start, od.end))
+				view.BlendOverlay(kinds[i], position.NewRange(od.start, od.end))
 			}
 
 			p := niceyaml.NewPrinter(

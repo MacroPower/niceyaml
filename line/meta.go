@@ -131,6 +131,9 @@ func (a Annotations) String() string {
 type Overlay struct {
 	Style style.Style
 	Cols  position.Span
+	// Blend mixes the overlay style with the style underneath it instead of
+	// replacing it, so a highlight keeps the token or diff color it covers.
+	Blend bool
 }
 
 // Overlays is a slice of [Overlay] values for a single [Line].

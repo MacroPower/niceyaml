@@ -576,25 +576,32 @@ func (ls Lines) Validate() error {
 }
 
 // AddOverlay adds an overlay with the given style to the specified ranges.
-// Multi-line ranges are split into per-line overlays automatically, and each
-// overlay's columns are clamped to its line's width.
+// The overlay replaces the style underneath it; use [Lines.BlendOverlay] to
+// mix with it instead.
 //
-// Lines outside the collection are skipped, the same way [Lines.AllLines]
-// clamps its spans, so a range computed against a longer view is safe to
-// apply. A range that covers no columns of a line adds no overlay to it.
+// It splits multi-line ranges into per-line overlays and clamps each
+// overlay's columns to its line's width. It skips lines outside the
+// collection, the same way [Lines.AllLines] clamps its spans, so a range
+// computed against a longer view is safe to apply. A range that
+// covers no columns of a line adds no overlay to it.
 func (ls Lines) AddOverlay(s style.Style, ranges ...position.Range) {
-	if len(ls) == 0 {
-		return
-	}
-
 	for _, r := range ranges {
-		ls.addOverlayRange(s, r)
+		ls.addOverlayRange(s, false, r)
+	}
+}
+
+// BlendOverlay adds an overlay like [Lines.AddOverlay], but one that blends
+// with the style underneath it. A search highlight added this way keeps the
+// token or diff color of the text it covers.
+func (ls Lines) BlendOverlay(s style.Style, ranges ...position.Range) {
+	for _, r := range ranges {
+		ls.addOverlayRange(s, true, r)
 	}
 }
 
 // addOverlayRange adds a single overlay range, splitting across lines as
 // needed and skipping lines outside the collection.
-func (ls Lines) addOverlayRange(s style.Style, r position.Range) {
+func (ls Lines) addOverlayRange(s style.Style, blend bool, r position.Range) {
 	for _, lineRange := range r.SliceLines() {
 		lineIdx := lineRange.Start.Line
 		if lineIdx < 0 || lineIdx >= len(ls) {
@@ -609,7 +616,7 @@ func (ls Lines) addOverlayRange(s style.Style, r position.Range) {
 			continue
 		}
 
-		ls[lineIdx].AddOverlay(Overlay{Cols: cols, Style: s})
+		ls[lineIdx].AddOverlay(Overlay{Cols: cols, Style: s, Blend: blend})
 	}
 }
 

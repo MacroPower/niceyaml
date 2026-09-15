@@ -518,9 +518,9 @@ func (m *Model) applySearchOverlays(lines line.Lines) {
 
 	for i, match := range m.searchMatches {
 		if i == m.searchIndex {
-			lines.AddOverlay(style.GenericHighlight, match.rng)
+			lines.BlendOverlay(style.GenericHighlight, match.rng)
 		} else {
-			lines.AddOverlay(style.GenericHighlightDim, match.rng)
+			lines.BlendOverlay(style.GenericHighlightDim, match.rng)
 		}
 	}
 }
@@ -649,9 +649,9 @@ func (m *Model) applySideBySidePaneOverlays(
 	for _, match := range matches {
 		isSelected := match.Start == selectedPos && showSelected
 		if isSelected {
-			view.AddOverlay(style.GenericHighlight, match)
+			view.BlendOverlay(style.GenericHighlight, match)
 		} else {
-			view.AddOverlay(style.GenericHighlightDim, match)
+			view.BlendOverlay(style.GenericHighlightDim, match)
 		}
 	}
 }

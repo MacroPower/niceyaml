@@ -89,10 +89,12 @@
 //	    Col:      4,  // Align with the error location.
 //	})
 //
-// [Overlays] apply styles to column ranges.
-// Use [Lines.AddOverlay] for multi-line ranges that need automatic splitting:
+// [Overlays] apply styles to column ranges. [Lines.AddOverlay] replaces the
+// style underneath and [Lines.BlendOverlay] mixes with it; both split
+// multi-line ranges into per-line overlays:
 //
 //	lines.AddOverlay(style.GenericError, errorRange)
+//	lines.BlendOverlay(style.GenericHighlight, matches...)
 //
 // [Flag] values mark lines for diff rendering or annotation-only display:
 //
