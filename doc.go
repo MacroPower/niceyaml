@@ -137,16 +137,16 @@
 //	source := niceyaml.NewSourceFromString(yamlContent)
 //	decoder, _ := source.Decoder()
 //	for _, doc := range decoder.Documents() {
-//		config, err := doc.Unmarshal[Config](ctx, niceyaml.WithSchema(validator))
+//		config, err := doc.Decode[Config](ctx, niceyaml.WithSchema(validator))
 //		if err != nil {
 //			return source.WrapError(err)
 //		}
 //	}
 //
-// [DocumentDecoder.Unmarshal] supports two validation hooks: a
+// [DocumentDecoder.Decode] supports two validation hooks: a
 // [SchemaValidator] passed with [WithSchema] checks the document against an
 // external schema before decoding, and a type implementing [Validator]
-// validates itself after decoding. [DocumentDecoder.UnmarshalInto] runs the
+// validates itself after decoding. [DocumentDecoder.DecodeInto] runs the
 // same pipeline on a value you already hold, such as one pre-populated with
 // defaults.
 //

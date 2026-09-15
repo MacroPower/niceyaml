@@ -41,7 +41,7 @@
 //	}
 //
 // To validate and decode in one step, pass the validator to
-// [go.jacobcolvin.com/niceyaml.DocumentDecoder.Unmarshal] with
+// [go.jacobcolvin.com/niceyaml.DocumentDecoder.Decode] with
 // [go.jacobcolvin.com/niceyaml.WithSchema].
 //
 // # Resolution

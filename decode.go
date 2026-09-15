@@ -22,8 +22,9 @@ var ErrValueNotFound = errors.New("value not found")
 
 // Validator is implemented by types that validate themselves.
 //
-// If a type implements this interface, [DocumentDecoder.Unmarshal]
-// automatically calls Validate after successful decoding.
+// [DocumentDecoder.Decode] and [DocumentDecoder.DecodeInto] call Validate
+// after decoding into a value that implements it, unless
+// [WithoutValidator] switches that off.
 type Validator interface {
 	Validate() error
 }
@@ -31,9 +32,9 @@ type Validator interface {
 // SchemaValidator is implemented by types that validate arbitrary data against
 // a schema.
 //
-// Pass one to [DocumentDecoder.Unmarshal] with [WithSchema], and it decodes
-// the document to [any] and calls ValidateSchema before decoding to the
-// typed struct. [DocumentDecoder.ValidateSchema] runs one on its own. The
+// Pass one to [DocumentDecoder.Decode] with [WithSchema], and it decodes the
+// document to [any] and calls ValidateSchema before decoding to the typed
+// struct. [DocumentDecoder.ValidateSchema] runs one on its own. The
 // context carries cancellation and deadlines to validators doing cancellable
 // work, such as remote schema reference resolution.
 //
@@ -62,22 +63,6 @@ type Decoder struct {
 	// Tokens for each document, aligned with file.Docs by index at
 	// construction. See alignDocumentTokens.
 	docTokens []token.Tokens
-}
-
-// NewDecoder creates a new [*Decoder] for the given [*Source].
-//
-// NewDecoder parses the source and pairs each parsed document with its
-// tokens once, so [Decoder.Documents] can be iterated any number of times
-// without repeating either step.
-//
-// Returns an error if the source cannot be parsed.
-func NewDecoder(s *Source) (*Decoder, error) {
-	f, err := s.File()
-	if err != nil {
-		return nil, err
-	}
-
-	return &Decoder{source: s, file: f, docTokens: alignDocumentTokens(f, s.Tokens())}, nil
 }
 
 // alignDocumentTokens pairs every document in file with the token group it
@@ -177,30 +162,26 @@ func (d *Decoder) Documents() iter.Seq2[int, *DocumentDecoder] {
 
 // DocumentDecoder decodes and validates a single YAML document.
 //
-// It separates decoding from document iteration, allowing validation hooks
-// to run at the right time during unmarshaling. A [SchemaValidator] given
-// with [WithSchema] runs before decoding, and a type implementing
-// [Validator] validates itself after.
-//
-// Use [DocumentDecoder.Get] or [DocumentDecoder.GetValue] to inspect values
-// without unmarshaling, which is helpful for routing documents based on a
-// discriminator field.
-//
-// For most use cases, call [DocumentDecoder.Unmarshal] to get the full
-// validation pipeline:
+// [DocumentDecoder.Decode] returns a new value and
+// [DocumentDecoder.DecodeInto] fills one the caller already holds, such as
+// one pre-populated with defaults. Both run the same pipeline: each
+// [SchemaValidator] given with [WithSchema] checks the document before
+// decoding, and a value that implements [Validator] validates itself after,
+// unless [WithoutValidator] is given.
 //
 //	for _, doc := range decoder.Documents() {
-//		config, err := doc.Unmarshal[Config](ctx, niceyaml.WithSchema(validator))
+//		config, err := doc.Decode[Config](ctx, niceyaml.WithSchema(validator))
 //		if err != nil {
 //			return err
 //		}
 //	}
 //
-// Use [DocumentDecoder.Decode] directly when you need decoding without
-// validation hooks. [DocumentDecoder.UnmarshalInto] and
-// [DocumentDecoder.DecodeInto] fill a value you already hold, such as one
-// pre-populated with defaults. All decoding methods convert YAML errors to
-// [Error] with source annotations.
+// Use [DocumentDecoder.Get] or [DocumentDecoder.GetValue] to inspect values
+// without decoding the whole document, which is helpful for routing
+// documents based on a discriminator field.
+//
+// All decoding methods convert YAML errors to [Error] with source
+// annotations.
 //
 // Create instances with [NewDocumentDecoder] or iterate with [Decoder.Documents].
 type DocumentDecoder struct {
@@ -322,9 +303,9 @@ func (dd *DocumentDecoder) Get[T any](ctx context.Context, path paths.Path) (T, 
 //		kind, _ := doc.GetValue(kindPath)
 //		switch kind {
 //		case "Pod":
-//			// Unmarshal to Pod struct.
+//			// Decode to Pod struct.
 //		case "Service":
-//			// Unmarshal to Service struct.
+//			// Decode to Service struct.
 //		}
 //	}
 //
@@ -422,73 +403,56 @@ func (dd *DocumentDecoder) locate(err error) error {
 	return NewErrorFrom(err, WithDocumentIndex(dd.index))
 }
 
-// Decode decodes the document into a new T.
-//
-// YAML decoding errors are converted to [Error] with source annotations. On
-// error, the returned T is the zero value.
-//
-// To decode into a value you already hold, use [DocumentDecoder.DecodeInto].
-func (dd *DocumentDecoder) Decode[T any](ctx context.Context) (T, error) {
-	var v T
-
-	err := dd.DecodeInto(ctx, &v)
-	if err != nil {
-		var zero T
-
-		return zero, err
-	}
-
-	return v, nil
-}
-
-// DecodeInto decodes the document into v, which must be a pointer.
-//
-// Fields absent from the document keep their existing values, so v may be
-// pre-populated with defaults. YAML decoding errors are converted to [Error]
-// with source annotations.
-func (dd *DocumentDecoder) DecodeInto(ctx context.Context, v any) error {
-	return dd.decodeNode(ctx, dd.doc.Body, v)
-}
-
-// UnmarshalOption configures [DocumentDecoder.Unmarshal] and
-// [DocumentDecoder.UnmarshalInto].
+// DecodeOption configures [DocumentDecoder.Decode] and
+// [DocumentDecoder.DecodeInto].
 //
 // Available options:
 //   - [WithSchema]
-type UnmarshalOption func(*unmarshalConfig)
+//   - [WithoutValidator]
+type DecodeOption func(*decodeConfig)
 
-// unmarshalConfig holds the settings an [UnmarshalOption] configures.
-type unmarshalConfig struct {
-	schemas []SchemaValidator
+// decodeConfig holds the settings a [DecodeOption] configures.
+type decodeConfig struct {
+	schemas          []SchemaValidator
+	withoutValidator bool
 }
 
-// WithSchema is an [UnmarshalOption] that validates the document against sv
+// WithSchema is a [DecodeOption] that validates the document against sv
 // before decoding it. The document is decoded to [any] and handed to
-// ValidateSchema, and a validation error ends the unmarshal before any typed
+// ValidateSchema, and a validation error ends the decode before any typed
 // decoding. Several schemas run in the order given, stopping at the first
 // that fails:
 //
-//	config, err := doc.Unmarshal[Config](ctx, niceyaml.WithSchema(validator))
-func WithSchema(sv SchemaValidator) UnmarshalOption {
-	return func(c *unmarshalConfig) {
+//	config, err := doc.Decode[Config](ctx, niceyaml.WithSchema(validator))
+func WithSchema(sv SchemaValidator) DecodeOption {
+	return func(c *decodeConfig) {
 		c.schemas = append(c.schemas, sv)
 	}
 }
 
-// Unmarshal validates and decodes the document into a new T.
+// WithoutValidator is a [DecodeOption] that skips the Validate method of a
+// decoded value that implements [Validator]. Schemas given with [WithSchema]
+// still run.
+func WithoutValidator() DecodeOption {
+	return func(c *decodeConfig) {
+		c.withoutValidator = true
+	}
+}
+
+// Decode validates and decodes the document into a new T.
 //
 // Each [SchemaValidator] from [WithSchema] runs before decoding. If *T
-// implements [Validator], Validate is called after successful decoding.
-// Methods declared on T itself are included in the method set of *T, so both
-// value and pointer receivers participate. On error, the returned T is the
-// zero value.
+// implements [Validator], Validate is called after successful decoding
+// unless [WithoutValidator] is given. Methods declared on T itself are
+// included in the method set of *T, so both value and pointer receivers
+// participate. YAML decoding errors are converted to [Error] with source
+// annotations. On error, the returned T is the zero value.
 //
-// To unmarshal into a value you already hold, use
-// [DocumentDecoder.UnmarshalInto].
-func (dd *DocumentDecoder) Unmarshal[T any](ctx context.Context, opts ...UnmarshalOption) (T, error) {
+// To decode into a value you already hold, use [DocumentDecoder.DecodeInto].
+func (dd *DocumentDecoder) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
 	var v T
 
-	err := dd.UnmarshalInto(ctx, &v, opts...)
+	err := dd.DecodeInto(ctx, &v, opts...)
 	if err != nil {
 		var zero T
 
@@ -498,15 +462,16 @@ func (dd *DocumentDecoder) Unmarshal[T any](ctx context.Context, opts ...Unmarsh
 	return v, nil
 }
 
-// UnmarshalInto validates and decodes the document into v, which must be a
+// DecodeInto validates and decodes the document into v, which must be a
 // pointer.
 //
 // Each [SchemaValidator] from [WithSchema] runs before decoding. If v
-// implements [Validator], Validate is called after successful decoding.
-// Fields absent from the document keep their existing values, so v may be
-// pre-populated with defaults.
-func (dd *DocumentDecoder) UnmarshalInto(ctx context.Context, v any, opts ...UnmarshalOption) error {
-	var cfg unmarshalConfig
+// implements [Validator], Validate is called after successful decoding
+// unless [WithoutValidator] is given. Fields absent from the document keep
+// their existing values, so v may be pre-populated with defaults. YAML
+// decoding errors are converted to [Error] with source annotations.
+func (dd *DocumentDecoder) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
+	var cfg decodeConfig
 
 	for _, opt := range opts {
 		opt(&cfg)
@@ -519,13 +484,15 @@ func (dd *DocumentDecoder) UnmarshalInto(ctx context.Context, v any, opts ...Unm
 		}
 	}
 
-	// Decode to typed struct.
-	err := dd.DecodeInto(ctx, v)
+	err := dd.decodeNode(ctx, dd.doc.Body, v)
 	if err != nil {
 		return err
 	}
 
-	// Self-validation.
+	if cfg.withoutValidator {
+		return nil
+	}
+
 	if validator, ok := v.(Validator); ok {
 		return dd.locate(validator.Validate())
 	}

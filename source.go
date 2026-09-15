@@ -133,7 +133,7 @@ func WithYAMLParserOptions(opts ...parser.Option) SourceOption {
 
 // WithYAMLDecodeOptions is a [SourceOption] that passes [yaml.DecodeOption]
 // values to the go-yaml decoder in [DocumentDecoder.Decode] and
-// [DocumentDecoder.Unmarshal]. It is the escape hatch for decoder settings
+// [DocumentDecoder.DecodeInto]. It is the escape hatch for decoder settings
 // that have no option of their own, such as [WithAllowDuplicateKeys].
 func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) SourceOption {
 	return func(s *Source) {
@@ -205,9 +205,18 @@ func (s *Source) Tokens() token.Tokens {
 
 // Decoder returns a [*Decoder] for iterating over documents in this [Source].
 //
+// Decoder parses the source and pairs each parsed document with its tokens
+// once, so [Decoder.Documents] can be iterated any number of times without
+// repeating either step.
+//
 // Returns an error if the source cannot be parsed.
 func (s *Source) Decoder() (*Decoder, error) {
-	return NewDecoder(s)
+	f, err := s.File()
+	if err != nil {
+		return nil, err
+	}
+
+	return &Decoder{source: s, file: f, docTokens: alignDocumentTokens(f, s.Tokens())}, nil
 }
 
 // File returns an [*ast.File] for the [Source] tokens.
