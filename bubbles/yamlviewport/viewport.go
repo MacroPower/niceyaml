@@ -120,9 +120,10 @@ func New(opts ...Option) Model {
 // Model is the Bubble Tea model for the YAML viewport.
 // Create instances with [New].
 //
-// A zero Model has no printer, keymap, or searcher. Its [Model.View] returns
-// "" and its other methods make no promises, so construct every Model with
-// [New] and its [Option]s.
+// A zero Model has no printer, keymap, or searcher. It counts no rows, so
+// [Model.View] returns "" and both scroll offsets stay at 0. Searching needs
+// the searcher that [New] creates, so construct every Model with [New] and
+// its [Option]s.
 //
 // # Rows and Lines
 //
@@ -866,12 +867,13 @@ func (m *Model) ensureRows() {
 	m.xOffset = clamp(m.xOffset, 0, m.maxXOffset())
 }
 
-// fillRows computes the row counts of the view into the cache.
+// fillRows computes the row counts of the view into the cache. A Model
+// without a printer, such as a zero Model, has no rows.
 func (m *Model) fillRows() {
 	c := m.rows
 	c.left, c.right = nil, nil
 
-	if m.left != nil {
+	if m.left != nil && m.printer != nil {
 		printer := m.renderPrinter(m.paneWidth())
 
 		c.left = printer.Rows(m.left)

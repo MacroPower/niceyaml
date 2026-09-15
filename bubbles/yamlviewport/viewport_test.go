@@ -2796,14 +2796,53 @@ func TestViewMode_Behavior(t *testing.T) {
 func TestViewport_ZeroValue(t *testing.T) {
 	t.Parallel()
 
-	// A Model not created with New has no printer; View renders nothing
-	// instead of panicking, and Update passes messages through.
+	// A Model not created with New has no printer. It renders nothing and
+	// counts no rows instead of panicking, and Update passes messages
+	// through.
 	var m yamlviewport.Model
 
 	m.SetHeight(3)
 	m.SetWidth(20)
 	m.SetSource(niceyaml.NewSourceFromString("key: value\n"))
 
+	assert.Empty(t, m.View())
+
+	assert.Equal(t, 0, m.YOffset())
+	assert.Equal(t, 0, m.XOffset())
+	assert.Equal(t, 1, m.TotalLineCount())
+	assert.Equal(t, 0, m.TotalRowCount())
+	assert.Equal(t, 0, m.VisibleLineCount())
+	assert.Equal(t, 0, m.VisibleRowCount())
+	assert.InDelta(t, 1.0, m.ScrollPercent(), 0.01)
+	assert.InDelta(t, 1.0, m.HorizontalScrollPercent(), 0.01)
+	assert.True(t, m.AtTop())
+	assert.True(t, m.AtBottom())
+	assert.False(t, m.PastBottom())
+
+	m.ScrollDown(1)
+	m.PageDown()
+	m.HalfPageDown()
+	m.GotoBottom()
+	m.ScrollRight(1)
+	assert.Equal(t, 0, m.YOffset())
+	assert.Equal(t, 0, m.XOffset())
+
+	m.ScrollUp(1)
+	m.PageUp()
+	m.HalfPageUp()
+	m.GotoTop()
+	m.ScrollLeft(1)
+	m.SetYOffset(1)
+	assert.Equal(t, 0, m.YOffset())
+
+	m.AddRevision(niceyaml.NewSourceFromString("key: other\n"))
+	m.PrevRevision()
+	m.NextRevision()
+	m.ToggleDiffMode()
+	m.ToggleViewMode()
+	m.ToggleWordWrap()
+	assert.Equal(t, 0, m.YOffset())
+	assert.Equal(t, 0, m.TotalRowCount())
 	assert.Empty(t, m.View())
 
 	m, cmd := m.Update(tea.KeyPressMsg{Code: 'j'})
