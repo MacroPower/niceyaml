@@ -6,3 +6,6 @@
 
 # Emitted by go:generate in examples/schemas/cafe, which owns its formatting.
 examples/schemas/cafe/cafe.v1.json
+
+# Claude Code worktrees checked out under the repo carry their own copies.
+.claude/
