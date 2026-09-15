@@ -16,6 +16,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/loader"
+	"go.jacobcolvin.com/niceyaml/schema/matcher"
 	"go.jacobcolvin.com/niceyaml/schema/registry"
 )
 
@@ -32,6 +33,16 @@ func resolveAndLoad(t *testing.T, res schema.Resolver, doc *niceyaml.DocumentDec
 	require.NoError(t, err)
 
 	return ref.URL, data
+}
+
+// fileURL returns the URL that [loader.File] names for path.
+func fileURL(t *testing.T, path string) string {
+	t.Helper()
+
+	ref, err := loader.File(path).Resolve(t.Context(), nil)
+	require.NoError(t, err)
+
+	return ref.URL
 }
 
 func TestDirective(t *testing.T) {
@@ -183,7 +194,7 @@ func TestDirective_Resolve(t *testing.T) {
 		doc := firstDocumentFromFile(t, yamlPath)
 		url, data := resolveAndLoad(t, registry.Directive(), doc)
 		assert.Equal(t, schemaData, data)
-		assert.Equal(t, filepath.Join(tmpDir, "schema.json"), url)
+		assert.Equal(t, fileURL(t, filepath.Join(tmpDir, "schema.json")), url)
 	})
 
 	t.Run("trims trailing whitespace from the directive", func(t *testing.T) {
@@ -202,7 +213,7 @@ func TestDirective_Resolve(t *testing.T) {
 		doc := firstDocumentFromFile(t, yamlPath)
 		url, data := resolveAndLoad(t, registry.Directive(), doc)
 		assert.Equal(t, schemaData, data)
-		assert.Equal(t, filepath.Join(tmpDir, "schema.json"), url)
+		assert.Equal(t, fileURL(t, filepath.Join(tmpDir, "schema.json")), url)
 	})
 
 	t.Run("successfully loads schema from URL directive", func(t *testing.T) {
@@ -299,7 +310,7 @@ func TestDirective_Resolve(t *testing.T) {
 
 		doc := yamltest.FirstDocument(t, "# yaml-language-server: $schema="+schemaPath+"\nkind: Deployment\n")
 		url, data := resolveAndLoad(t, registry.Directive(), doc)
-		assert.Equal(t, schemaPath, url)
+		assert.Equal(t, fileURL(t, schemaPath), url)
 		assert.Equal(t, schemaData, data)
 	})
 
@@ -344,13 +355,63 @@ func TestDirective_Resolve(t *testing.T) {
 		res := registry.Directive()
 		ref, err := res.Resolve(t.Context(), doc)
 		require.NoError(t, err)
-		assert.Equal(t, filepath.Join(tmpDir, "nonexistent.json"), ref.URL)
+		assert.Equal(t, fileURL(t, filepath.Join(tmpDir, "nonexistent.json")), ref.URL)
 
 		_, err = ref.Load(t.Context())
 		require.ErrorIs(t, err, os.ErrNotExist)
 		require.ErrorContains(t, err, "read")
 		require.ErrorContains(t, err, "nonexistent.json")
 	})
+}
+
+func TestDirective_EmbeddedNameMatchesPath(t *testing.T) {
+	t.Parallel()
+
+	// A document in testdata names schemas/name.json in its directive, which
+	// joins to testdata/schemas/name.json. An embedded schema uses that joined
+	// path as its name. The file requires a string name and the embedded schema
+	// requires an integer, so each document passes only when the registry
+	// validates it against its own schema.
+	embedded := []byte(`{"type": "object", "properties": {"name": {"type": "integer"}}}`)
+
+	tests := map[string]struct {
+		order []string
+	}{
+		"embedded document first": {
+			order: []string{"embedded", "directive"},
+		},
+		"directive document first": {
+			order: []string{"directive", "embedded"},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			reg := registry.New()
+			reg.Register(
+				registry.Directive(),
+				registry.When(
+					matcher.Content(kindPath, "Embedded"),
+					loader.Embedded(filepath.Join("testdata", "schemas", "name.json"), embedded),
+				),
+			)
+
+			docs := map[string]*niceyaml.DocumentDecoder{
+				"embedded": yamltest.FirstDocument(t, "kind: Embedded\nname: 1\n"),
+				"directive": yamltest.FirstDocumentWithPath(t,
+					"# yaml-language-server: $schema=schemas/name.json\nname: text\n",
+					filepath.Join("testdata", "config.yaml"),
+				),
+			}
+
+			for _, key := range tt.order {
+				err := reg.ValidateDocument(t.Context(), docs[key])
+				require.NoError(t, err, "%s document", key)
+			}
+		})
+	}
 }
 
 // firstDocumentFromFile creates a DocumentDecoder from a YAML file path.

@@ -30,7 +30,7 @@ func TestFileOrURL(t *testing.T) {
 		url, data, err := load(t, loader.FileOrURL(tmpDir, "schema.json"))
 		require.NoError(t, err)
 		assert.Equal(t, schemaData, data)
-		assert.Equal(t, schemaPath, url)
+		assert.Equal(t, fileURL(t, schemaPath), url)
 	})
 
 	t.Run("relative path without base directory", func(t *testing.T) {
@@ -56,7 +56,7 @@ func TestFileOrURL(t *testing.T) {
 		url, data, err := load(t, loader.FileOrURL("/some/other/dir", schemaPath))
 		require.NoError(t, err)
 		assert.Equal(t, schemaData, data)
-		assert.Equal(t, schemaPath, url)
+		assert.Equal(t, fileURL(t, schemaPath), url)
 	})
 
 	t.Run("absolute path without base directory", func(t *testing.T) {
@@ -71,7 +71,7 @@ func TestFileOrURL(t *testing.T) {
 		url, data, err := load(t, loader.FileOrURL("", schemaPath))
 		require.NoError(t, err)
 		assert.Equal(t, schemaData, data)
-		assert.Equal(t, schemaPath, url)
+		assert.Equal(t, fileURL(t, schemaPath), url)
 	})
 
 	t.Run("URL schema", func(t *testing.T) {
@@ -145,7 +145,7 @@ func TestFileOrURL(t *testing.T) {
 		url, data, err := load(t, loader.FileOrURL("/some/other/dir", "file://"+schemaPath))
 		require.NoError(t, err)
 		assert.Equal(t, schemaData, data)
-		assert.Equal(t, schemaPath, url)
+		assert.Equal(t, fileURL(t, schemaPath), url)
 	})
 
 	t.Run("file URL scheme in upper case", func(t *testing.T) {
@@ -176,7 +176,7 @@ func TestFileOrURL(t *testing.T) {
 		url, data, err := load(t, loader.FileOrURL("/some/other/dir", encoded))
 		require.NoError(t, err)
 		assert.Equal(t, schemaData, data)
-		assert.Equal(t, schemaPath, url)
+		assert.Equal(t, fileURL(t, schemaPath), url)
 	})
 
 	t.Run("URL with custom client", func(t *testing.T) {

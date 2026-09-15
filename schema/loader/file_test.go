@@ -24,10 +24,9 @@ func TestFile(t *testing.T) {
 		err := os.WriteFile(schemaPath, schemaData, 0o600)
 		require.NoError(t, err)
 
-		url, data, err := load(t, loader.File(schemaPath))
+		_, data, err := load(t, loader.File(schemaPath))
 		require.NoError(t, err)
 		assert.Equal(t, schemaData, data)
-		assert.Equal(t, schemaPath, url)
 	})
 
 	t.Run("missing file", func(t *testing.T) {
@@ -35,8 +34,53 @@ func TestFile(t *testing.T) {
 
 		// Resolve names the file without touching it; only Load reads it.
 		url, _, err := load(t, loader.File("/nonexistent/path/schema.json"))
-		assert.Equal(t, "/nonexistent/path/schema.json", url)
+		assert.Equal(t, "file:///nonexistent/path/schema.json", url)
 		require.ErrorIs(t, err, os.ErrNotExist)
 		require.ErrorContains(t, err, "read /nonexistent/path/schema.json")
 	})
+}
+
+func TestFile_URL(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		path string
+		want string
+	}{
+		"absolute path": {
+			path: "/schemas/config.json",
+			want: "file:///schemas/config.json",
+		},
+		"unclean absolute path": {
+			path: "/schemas/../schemas/./config.json",
+			want: "file:///schemas/config.json",
+		},
+		"space in path": {
+			path: "/schemas/my config.json",
+			want: "file:///schemas/my%20config.json",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tt.want, fileURL(t, tt.path))
+		})
+	}
+}
+
+func TestFile_RelativePath(t *testing.T) {
+	t.Parallel()
+
+	// A relative path names the same schema as the absolute path it resolves
+	// to against the working directory.
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+
+	want := fileURL(t, filepath.Join(wd, "schemas", "config.json"))
+
+	for _, path := range []string{"schemas/config.json", "./schemas/config.json"} {
+		assert.Equal(t, want, fileURL(t, path), path)
+	}
 }
