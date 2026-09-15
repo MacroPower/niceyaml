@@ -74,7 +74,7 @@ const (
 type Option func(*Model)
 
 // WithPrinter is an [Option] that sets the [*niceyaml.Printer] used for
-// rendering. If not set, a default [niceyaml.Printer] is created.
+// rendering. Without it, the viewport creates a default [niceyaml.Printer].
 //
 // The viewport never modifies the printer. Each render derives a copy with
 // [niceyaml.Printer.With] and the viewport's wrap width, so other renderers

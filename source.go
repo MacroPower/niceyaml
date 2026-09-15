@@ -237,7 +237,7 @@ func (s *Source) File() (*ast.File, error) {
 
 // parse hands a private copy of the tokens to the parser. The go-yaml parser
 // relinks Next and Prev while it moves comment tokens, and the Source's own
-// tokens are shared with its lines and with the caller, so they stay untouched.
+// tokens, which its lines and the caller share, stay untouched.
 func (s *Source) parse() (*ast.File, error) {
 	shared := s.Tokens()
 

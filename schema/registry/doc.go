@@ -45,7 +45,7 @@
 //
 // # Registration Order
 //
-// Registrations are evaluated in order; the first resolver that does not
+// The registry tries registrations in order; the first resolver that does not
 // report [go.jacobcolvin.com/niceyaml/schema.ErrNoMatch] wins. A common
 // pattern prioritizes explicit user intent first (directives), then
 // content-based matching, then file path conventions:
