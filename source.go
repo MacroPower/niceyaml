@@ -259,14 +259,15 @@ func (s *Source) parse() (*ast.File, error) {
 // looks. Context added around the Error with [fmt.Errorf] is preserved in
 // the message.
 //
-// If err is nil, WrapError returns nil. If err's chain holds no [*Error],
-// WrapError returns it unchanged. Nothing in err is modified.
+// If err is nil, WrapError returns nil. If err's chain holds no [*Error], or
+// the first one it holds is a nil pointer, WrapError returns err unchanged.
+// WrapError never modifies err.
 func (s *Source) WrapError(err error) error {
 	if err == nil {
 		return nil
 	}
 
-	if _, ok := errors.AsType[*Error](err); !ok { //nolint:errcheck // Presence check, not a value extraction.
+	if _, ok := firstError(err); !ok { //nolint:errcheck // Presence check, not a value extraction.
 		return err
 	}
 

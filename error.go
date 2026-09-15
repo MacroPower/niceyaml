@@ -596,23 +596,30 @@ func (e *SourceError) Error() string {
 
 // located returns the outermost [*Error] in the chain, the anchor that
 // carries the location, and whether the chain reaches the anchor through
-// Error values alone so that the SourceError renders it itself.
+// Error values alone so that the SourceError renders it itself. Both Errors
+// are nil when the chain holds no Error or its first Error is a nil pointer.
 func (e *SourceError) located() (*Error, *Error, bool) {
-	root, ok := e.err.(*Error) //nolint:errorlint // Identity of the direct child, not a chain search.
+	outer, ok := firstError(e.err)
 	if !ok {
-		inner, found := errors.AsType[*Error](e.err)
-		if !found {
-			return nil, nil, false
-		}
-
-		anchor := inner.anchor()
-
-		return inner, anchor, false
+		return nil, nil, false
 	}
 
-	anchor := root.anchor()
+	anchor := outer.anchor()
 
-	return root, anchor, root == anchor || root.wrapsDirectly(anchor)
+	if _, direct := e.err.(*Error); !direct { //nolint:errorlint // Identity of the direct child, not a chain search.
+		return outer, anchor, false
+	}
+
+	return outer, anchor, outer == anchor || outer.wrapsDirectly(anchor)
+}
+
+// firstError returns the first [*Error] in err's chain. It reports false when
+// the chain holds none or when that Error is a nil pointer, which has no
+// message or location to render.
+func firstError(err error) (*Error, bool) {
+	e, ok := errors.AsType[*Error](err)
+
+	return e, ok && e != nil
 }
 
 // message returns [SourceError.Error] without the nested bullet lines, since

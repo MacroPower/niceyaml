@@ -1064,6 +1064,34 @@ func TestSource_WrapError(t *testing.T) {
 
 		assert.Equal(t, stdErr, wrapped)
 	})
+
+	t.Run("returns a nil Error unchanged", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("key: value\n")
+
+		var nilErr *niceyaml.Error
+
+		err := error(nilErr)
+
+		assert.Equal(t, err, source.WrapError(err))
+	})
+
+	t.Run("returns context around a nil Error unchanged", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("key: value\n")
+
+		var nilErr *niceyaml.Error
+
+		outer := fmt.Errorf("document 3: %w", nilErr)
+
+		wrapped := source.WrapError(outer)
+
+		require.Equal(t, outer, wrapped)
+		assert.Equal(t, "document 3: <nil>", wrapped.Error())
+		assert.Equal(t, "document 3: <nil>", fmt.Sprintf("%+v", wrapped))
+	})
 }
 
 // A [niceyaml.Lines] view satisfies the same iterator contract as a [*niceyaml.Source].
