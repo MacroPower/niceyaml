@@ -202,8 +202,9 @@ type DocumentContext struct {
 	// relative to the document.
 	Tokens token.Tokens
 
-	// YAMLDecodeOptions reach the go-yaml decoder the way
-	// [WithYAMLDecodeOptions] sends them for a Source.
+	// YAMLDecodeOptions reach the go-yaml decoder on every decode of the
+	// document, ahead of the [DecodeOption] values given per call. A
+	// [Source] sends the decoder half of [WithAllowDuplicateKeys] this way.
 	YAMLDecodeOptions []yaml.DecodeOption
 
 	// Index is the 0-indexed position of the document within the file.
@@ -272,9 +273,15 @@ func (dd *DocumentDecoder) FilePath() string {
 // that cannot be represented as T, are converted to [Error] with source
 // annotations.
 //
+// The opts run the pipeline of [DocumentDecoder.DecodeInto] on the value at
+// path rather than on the whole document: each [SchemaValidator] from
+// [WithSchema] checks the value before decoding, a *T that implements
+// [Validator] validates itself after, and [WithDisallowUnknownFields] and
+// [WithYAMLDecodeOptions] configure the decoder.
+//
 // For a string view of any node, including mappings and sequences, use
 // [DocumentDecoder.GetValue].
-func (dd *DocumentDecoder) Get[T any](ctx context.Context, path paths.Path) (T, error) {
+func (dd *DocumentDecoder) Get[T any](ctx context.Context, path paths.Path, opts ...DecodeOption) (T, error) {
 	var zero T
 
 	node, err := dd.node(path)
@@ -284,7 +291,7 @@ func (dd *DocumentDecoder) Get[T any](ctx context.Context, path paths.Path) (T, 
 
 	var v T
 
-	err = dd.decodeNode(ctx, node, &v)
+	err = dd.decodeInto(ctx, node, &v, opts)
 	if err != nil {
 		return zero, err
 	}
@@ -357,9 +364,17 @@ func (dd *DocumentDecoder) node(path paths.Path) (ast.Node, error) {
 // Returns decoding errors or errors from the [SchemaValidator] ValidateSchema
 // method.
 func (dd *DocumentDecoder) ValidateSchema(ctx context.Context, sv SchemaValidator) error {
+	return dd.validateSchema(ctx, dd.doc.Body, sv, nil)
+}
+
+// validateSchema decodes node to [any] with yamlOpts and validates it using
+// sv, attaching the document index to a validation error.
+func (dd *DocumentDecoder) validateSchema(
+	ctx context.Context, node ast.Node, sv SchemaValidator, yamlOpts []yaml.DecodeOption,
+) error {
 	var untypedData any
 
-	err := dd.decodeNode(ctx, dd.doc.Body, &untypedData)
+	err := dd.decodeNode(ctx, node, &untypedData, yamlOpts)
 	if err != nil {
 		return err
 	}
@@ -399,17 +414,20 @@ func (dd *DocumentDecoder) locate(err error) error {
 	return NewErrorFrom(err, WithDocumentIndex(dd.index))
 }
 
-// DecodeOption configures [DocumentDecoder.Decode] and
-// [DocumentDecoder.DecodeInto].
+// DecodeOption configures [DocumentDecoder.Decode],
+// [DocumentDecoder.DecodeInto], and [DocumentDecoder.Get].
 //
 // Available options:
 //   - [WithSchema]
 //   - [WithoutValidator]
+//   - [WithDisallowUnknownFields]
+//   - [WithYAMLDecodeOptions]
 type DecodeOption func(*decodeConfig)
 
 // decodeConfig holds the settings a [DecodeOption] configures.
 type decodeConfig struct {
 	schemas          []SchemaValidator
+	yamlOpts         []yaml.DecodeOption
 	withoutValidator bool
 }
 
@@ -432,6 +450,23 @@ func WithSchema(sv SchemaValidator) DecodeOption {
 func WithoutValidator() DecodeOption {
 	return func(c *decodeConfig) {
 		c.withoutValidator = true
+	}
+}
+
+// WithDisallowUnknownFields is a [DecodeOption] that rejects a mapping key
+// that has no field in the target struct. Without it unknown keys are
+// ignored.
+func WithDisallowUnknownFields() DecodeOption {
+	return WithYAMLDecodeOptions(yaml.DisallowUnknownField())
+}
+
+// WithYAMLDecodeOptions is a [DecodeOption] that passes [yaml.DecodeOption]
+// values to the go-yaml decoder for this call, after the ones the [Source]
+// sends for every decode. It is the escape hatch for decoder settings that
+// have no option of their own.
+func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
+	return func(c *decodeConfig) {
+		c.yamlOpts = append(c.yamlOpts, opts...)
 	}
 }
 
@@ -467,6 +502,13 @@ func (dd *DocumentDecoder) Decode[T any](ctx context.Context, opts ...DecodeOpti
 // their existing values, so v may be pre-populated with defaults. YAML
 // decoding errors are converted to [Error] with source annotations.
 func (dd *DocumentDecoder) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
+	return dd.decodeInto(ctx, dd.doc.Body, v, opts)
+}
+
+// decodeInto runs the decode pipeline on node: the schemas from opts check
+// it, the decoder fills v with the options from the [Source] and from opts,
+// and v validates itself unless opts switch that off.
+func (dd *DocumentDecoder) decodeInto(ctx context.Context, node ast.Node, v any, opts []DecodeOption) error {
 	var cfg decodeConfig
 
 	for _, opt := range opts {
@@ -474,13 +516,13 @@ func (dd *DocumentDecoder) DecodeInto(ctx context.Context, v any, opts ...Decode
 	}
 
 	for _, sv := range cfg.schemas {
-		err := dd.ValidateSchema(ctx, sv)
+		err := dd.validateSchema(ctx, node, sv, cfg.yamlOpts)
 		if err != nil {
 			return err
 		}
 	}
 
-	err := dd.decodeNode(ctx, dd.doc.Body, v)
+	err := dd.decodeNode(ctx, node, v, cfg.yamlOpts)
 	if err != nil {
 		return err
 	}
@@ -496,9 +538,14 @@ func (dd *DocumentDecoder) DecodeInto(ctx context.Context, v any, opts ...Decode
 	return nil
 }
 
-// decodeNode decodes node to v and converts YAML errors.
-func (dd *DocumentDecoder) decodeNode(ctx context.Context, node ast.Node, v any) error {
-	dec := yaml.NewDecoder(bytes.NewReader(nil), dd.decodeOpts...)
+// decodeNode decodes node to v with the document's decode options followed
+// by yamlOpts, and converts YAML errors.
+func (dd *DocumentDecoder) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []yaml.DecodeOption) error {
+	decodeOpts := make([]yaml.DecodeOption, 0, len(dd.decodeOpts)+len(yamlOpts))
+	decodeOpts = append(decodeOpts, dd.decodeOpts...)
+	decodeOpts = append(decodeOpts, yamlOpts...)
+
+	dec := yaml.NewDecoder(bytes.NewReader(nil), decodeOpts...)
 	err := dec.DecodeFromNodeContext(ctx, node, v)
 	if err != nil {
 		if yamlErr, ok := errors.AsType[yaml.Error](err); ok {

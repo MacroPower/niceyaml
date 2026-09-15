@@ -1136,21 +1136,19 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 		}
 	})
 
-	t.Run("DisallowUnknownField rejects unknown fields", func(t *testing.T) {
+	t.Run("option rejects unknown fields", func(t *testing.T) {
 		t.Parallel()
 
 		input := stringtest.Input(`
 			name: test
 			extra: field
 		`)
-		source := niceyaml.NewSourceFromString(input,
-			niceyaml.WithDisallowUnknownFields(),
-		)
+		source := niceyaml.NewSourceFromString(input)
 		d, err := source.Decoder()
 		require.NoError(t, err)
 
 		for _, dd := range d.Documents() {
-			_, err := dd.Decode[strictConfig](t.Context())
+			_, err := dd.Decode[strictConfig](t.Context(), niceyaml.WithDisallowUnknownFields())
 			require.Error(t, err)
 
 			var yamlErr *niceyaml.Error
@@ -1159,30 +1157,58 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 		}
 	})
 
-	t.Run("options apply with the Validator hook", func(t *testing.T) {
+	t.Run("option applies per call", func(t *testing.T) {
 		t.Parallel()
 
 		input := stringtest.Input(`
 			name: test
 			extra: field
 		`)
-		source := niceyaml.NewSourceFromString(input,
-			niceyaml.WithDisallowUnknownFields(),
-		)
+		source := niceyaml.NewSourceFromString(input)
 		d, err := source.Decoder()
 		require.NoError(t, err)
 
+		// The same document decodes strictly on one call and loosely on the
+		// next, so the option belongs to the call rather than the Source.
 		for _, dd := range d.Documents() {
-			_, err := dd.Decode[strictConfig](t.Context())
+			_, err := dd.Decode[strictConfig](t.Context(), niceyaml.WithDisallowUnknownFields())
+			require.Error(t, err)
+
+			result, err := dd.Decode[strictConfig](t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, "test", result.Name)
+		}
+	})
+
+	t.Run("option applies to Get", func(t *testing.T) {
+		t.Parallel()
+
+		input := stringtest.Input(`
+			inner:
+			  name: test
+			  extra: field
+		`)
+		source := niceyaml.NewSourceFromString(input)
+		d, err := source.Decoder()
+		require.NoError(t, err)
+
+		innerPath := paths.Root().Child("inner")
+
+		for _, dd := range d.Documents() {
+			_, err := dd.Get[strictConfig](t.Context(), innerPath, niceyaml.WithDisallowUnknownFields())
 			require.Error(t, err)
 
 			var yamlErr *niceyaml.Error
 
 			require.ErrorAs(t, err, &yamlErr)
+
+			result, err := dd.Get[strictConfig](t.Context(), innerPath)
+			require.NoError(t, err)
+			assert.Equal(t, "test", result.Name)
 		}
 	})
 
-	t.Run("options apply across multiple documents", func(t *testing.T) {
+	t.Run("option applies across multiple documents", func(t *testing.T) {
 		t.Parallel()
 
 		input := stringtest.Input(`
@@ -1193,16 +1219,14 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 			name: second
 			unknown2: b
 		`)
-		source := niceyaml.NewSourceFromString(input,
-			niceyaml.WithDisallowUnknownFields(),
-		)
+		source := niceyaml.NewSourceFromString(input)
 		d, err := source.Decoder()
 		require.NoError(t, err)
 
 		var errCount int
 
 		for _, dd := range d.Documents() {
-			_, err := dd.Decode[strictConfig](t.Context())
+			_, err := dd.Decode[strictConfig](t.Context(), niceyaml.WithDisallowUnknownFields())
 			if err != nil {
 				errCount++
 			}
@@ -1218,14 +1242,12 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 			name: test
 			extra: field
 		`)
-		source := niceyaml.NewSourceFromString(input,
-			niceyaml.WithYAMLDecodeOptions(),
-		)
+		source := niceyaml.NewSourceFromString(input)
 		d, err := source.Decoder()
 		require.NoError(t, err)
 
 		for _, dd := range d.Documents() {
-			result, err := dd.Decode[strictConfig](t.Context())
+			result, err := dd.Decode[strictConfig](t.Context(), niceyaml.WithYAMLDecodeOptions())
 			require.NoError(t, err)
 			assert.Equal(t, "test", result.Name)
 		}

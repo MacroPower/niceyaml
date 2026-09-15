@@ -81,9 +81,10 @@ type Source struct {
 //   - [WithName]
 //   - [WithFilePath]
 //   - [WithAllowDuplicateKeys]
-//   - [WithDisallowUnknownFields]
 //   - [WithYAMLParserOptions]
-//   - [WithYAMLDecodeOptions]
+//
+// Settings that only affect decoding, such as [WithDisallowUnknownFields],
+// are [DecodeOption] values passed to [DocumentDecoder.Decode].
 type SourceOption func(*Source)
 
 // WithName is a [SourceOption] that sets the name for the [Source].
@@ -118,13 +119,6 @@ func WithAllowDuplicateKeys() SourceOption {
 	}
 }
 
-// WithDisallowUnknownFields is a [SourceOption] that makes [DocumentDecoder]
-// reject a mapping key that has no field in the target struct. Without it
-// unknown keys are ignored.
-func WithDisallowUnknownFields() SourceOption {
-	return WithYAMLDecodeOptions(yaml.DisallowUnknownField())
-}
-
 // WithYAMLParserOptions is a [SourceOption] that passes [parser.Option]
 // values to the go-yaml parser when [Source.File] parses the document. It is
 // the escape hatch for parser settings that have no option of their own;
@@ -132,16 +126,6 @@ func WithDisallowUnknownFields() SourceOption {
 func WithYAMLParserOptions(opts ...parser.Option) SourceOption {
 	return func(s *Source) {
 		s.parserOpts = append(s.parserOpts, opts...)
-	}
-}
-
-// WithYAMLDecodeOptions is a [SourceOption] that passes [yaml.DecodeOption]
-// values to the go-yaml decoder in [DocumentDecoder.Decode] and
-// [DocumentDecoder.DecodeInto]. It is the escape hatch for decoder settings
-// that have no option of their own, such as [WithAllowDuplicateKeys].
-func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) SourceOption {
-	return func(s *Source) {
-		s.decodeOpts = append(s.decodeOpts, opts...)
 	}
 }
 
