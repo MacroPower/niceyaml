@@ -74,8 +74,11 @@ type CatalogEntry struct {
 // later lookups.
 //
 // SchemaStore implements [schema.Resolver] and can be registered directly
-// with a [go.jacobcolvin.com/niceyaml/schema/registry.Registry]. Create
-// instances with [New].
+// with a [go.jacobcolvin.com/niceyaml/schema/registry.Registry].
+// [ErrFetchCatalog] does not wrap [schema.ErrNoMatch], so while no catalog
+// has loaded, the registry stops at the store and does not try the resolvers
+// registered after it. Register the store after any resolver that should
+// still apply without the catalog. Create instances with [New].
 //
 // Example:
 //

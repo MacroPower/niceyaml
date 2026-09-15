@@ -56,6 +56,13 @@
 //	    registry.When(matcher.MustFilePath(...), loader.File(...)),    // By path.
 //	)
 //
+// A resolver error that does not wrap
+// [go.jacobcolvin.com/niceyaml/schema.ErrNoMatch] ends the lookup, and the
+// resolvers registered after it do not run. While no catalog has loaded, a
+// [go.jacobcolvin.com/niceyaml/schema/registry/schemastore.SchemaStore] that
+// cannot reach SchemaStore.org ends the lookup this way, so register it after
+// any resolver that should still apply without the catalog.
+//
 // # Schema Caching
 //
 // A resolver returns a [go.jacobcolvin.com/niceyaml/schema.Ref] that names
