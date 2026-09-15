@@ -34,7 +34,7 @@ type StyleGetter interface {
 
 // Printer prints YAML with syntax highlighting for terminal output.
 //
-// It accepts a [LineIterator], either a [*Source] or a [line.Lines] view, and
+// It accepts a [LineIterator], either a [*Source] or a [Lines] view, and
 // produces styled terminal output using [lipgloss.Style]s. It applies syntax
 // highlighting to YAML tokens, with support for customizable gutters,
 // annotations, styled overlays, and word wrapping.
@@ -71,8 +71,8 @@ type StyleGetter interface {
 // # Overlays
 //
 // Overlays apply visual highlighting to specific column spans within lines.
-// Add them to a view from [Source.Lines] with [line.Lines.AddOverlay], which
-// replaces the style underneath, or [line.Lines.BlendOverlay], which mixes
+// Add them to a view from [Source.Lines] with [Lines.AddOverlay], which
+// replaces the style underneath, or [Lines.BlendOverlay], which mixes
 // with it, then print the view. Error positions use the first and search
 // highlights the second, so a match keeps the token or diff color it covers.
 //
@@ -480,7 +480,7 @@ func (p *Printer) renderLine(idx int, ln *line.Line, totalLines, gutterWidth int
 		content = ln.Content()
 		contentStyle = style.GenericInserted
 
-	default: // FlagDefault (equal line).
+	default: // line.FlagDefault (equal line).
 		// Render with syntax highlighting.
 		content = p.renderTokenLine(idx, ln)
 		styled = true
@@ -843,7 +843,7 @@ func (p *Printer) wrapContent(content string, gutterWidth int) []string {
 // It handles separator (leading whitespace) and content styling, plus overlays
 // from the [line.Line].
 //
-// The lineIndex parameter is the 0-indexed position in the [line.Lines]
+// The lineIndex parameter is the 0-indexed position in the [Lines]
 // collection.
 func (p *Printer) renderTokenLine(lineIndex int, ln *line.Line) string {
 	if ln.IsEmpty() {

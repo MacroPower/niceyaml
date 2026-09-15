@@ -117,7 +117,7 @@ func (d *Differ) computeOps(before, after *Source) []lineOp {
 
 // DiffResult holds computed diff operations for rendering.
 //
-// Rendering methods each return a fresh [line.Lines] view that [Printer]
+// Rendering methods each return a fresh [Lines] view that [Printer]
 // accepts directly. A diff is not a YAML document, so the views carry no
 // parsing or decoding behavior:
 //   - [DiffResult.Unified] returns all lines in unified diff format.
@@ -142,7 +142,7 @@ type alignedRow struct {
 	after  line.Line
 }
 
-// Unified returns a [line.Lines] view of the complete diff.
+// Unified returns a [Lines] view of the complete diff.
 //
 // The view interleaves lines from both revisions. Unchanged lines come from
 // the second source, and changed lines include deleted lines from the first
@@ -151,11 +151,11 @@ type alignedRow struct {
 //
 // Each call returns an independent copy, so overlays added to one result do
 // not affect another.
-func (r *DiffResult) Unified() line.Lines {
+func (r *DiffResult) Unified() Lines {
 	return lineOps(r.ops).toLines()
 }
 
-// Hunks returns a [line.Lines] view of the summarized diff: the changed
+// Hunks returns a [Lines] view of the summarized diff: the changed
 // lines with context lines of unchanged content around each change, and
 // nothing else. A context of 0 shows only the changed lines, and Hunks
 // treats negative values as 0.
@@ -167,7 +167,7 @@ func (r *DiffResult) Unified() line.Lines {
 //
 // Each call returns an independent copy, so overlays added to one result do
 // not affect another.
-func (r *DiffResult) Hunks(context int) line.Lines {
+func (r *DiffResult) Hunks(context int) Lines {
 	context = max(0, context)
 
 	if len(r.ops) == 0 {
@@ -180,7 +180,7 @@ func (r *DiffResult) Hunks(context int) line.Lines {
 		return nil
 	}
 
-	var lines line.Lines
+	var lines Lines
 
 	for _, span := range hunkSpans {
 		start := len(lines)
@@ -292,7 +292,7 @@ func (r *DiffResult) getAlignedRows() []alignedRow {
 	return r.alignedRows
 }
 
-// Before returns a [line.Lines] view for the left (before) pane of a
+// Before returns a [Lines] view for the left (before) pane of a
 // side-by-side diff.
 //
 // Before aligns its lines with [DiffResult.After] so both views have equal
@@ -305,10 +305,10 @@ func (r *DiffResult) getAlignedRows() []alignedRow {
 //
 // Each call returns an independent copy, so overlays added to one result do
 // not affect another or the paired [DiffResult.After] view.
-func (r *DiffResult) Before() line.Lines {
+func (r *DiffResult) Before() Lines {
 	rows := r.getAlignedRows()
 
-	lines := make(line.Lines, len(rows))
+	lines := make(Lines, len(rows))
 	for i := range rows {
 		lines[i] = rows[i].before.Clone()
 	}
@@ -316,7 +316,7 @@ func (r *DiffResult) Before() line.Lines {
 	return lines
 }
 
-// After returns a [line.Lines] view for the right (after) pane of a
+// After returns a [Lines] view for the right (after) pane of a
 // side-by-side diff.
 //
 // After aligns its lines with [DiffResult.Before] so both views have equal
@@ -329,10 +329,10 @@ func (r *DiffResult) Before() line.Lines {
 //
 // Each call returns an independent copy, so overlays added to one result do
 // not affect another or the paired [DiffResult.Before] view.
-func (r *DiffResult) After() line.Lines {
+func (r *DiffResult) After() Lines {
 	rows := r.getAlignedRows()
 
-	lines := make(line.Lines, len(rows))
+	lines := make(Lines, len(rows))
 	for i := range rows {
 		lines[i] = rows[i].after.Clone()
 	}
@@ -406,9 +406,9 @@ func opKindFlag(k diff.OpKind) line.Flag {
 // lineOps is a slice of [lineOp] values.
 type lineOps []lineOp
 
-// toLines converts ops to [line.Lines] with appropriate flags set.
-func (ops lineOps) toLines() line.Lines {
-	lines := make(line.Lines, 0, len(ops))
+// toLines converts ops to [Lines] with appropriate flags set.
+func (ops lineOps) toLines() Lines {
+	lines := make(Lines, 0, len(ops))
 	for _, op := range ops {
 		ln := op.line.Clone()
 		ln.Flag = opKindFlag(op.kind)

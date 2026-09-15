@@ -2190,7 +2190,7 @@ func TestPrinter_Golden(t *testing.T) {
 	t.Parallel()
 
 	type goldenTest struct {
-		setupFunc func(line.Lines)
+		setupFunc func(niceyaml.Lines)
 		opts      []niceyaml.PrinterOption
 	}
 
@@ -2238,7 +2238,7 @@ func TestPrinter_Golden(t *testing.T) {
 				niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 				niceyaml.WithGutter(niceyaml.NoGutter),
 			},
-			setupFunc: func(view line.Lines) {
+			setupFunc: func(view niceyaml.Lines) {
 				// Search for "日本" (Japan) which appears multiple times in full.yaml.
 				finder := niceyaml.NewFinder()
 				finder.Load(view)

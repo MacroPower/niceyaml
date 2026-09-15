@@ -1046,7 +1046,7 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 
 // hunkCount returns the number of hunks in a view from [niceyaml.DiffResult.Hunks],
 // which is the number of lines carrying a hunk header above them.
-func hunkCount(lines line.Lines) int {
+func hunkCount(lines niceyaml.Lines) int {
 	count := 0
 
 	for _, l := range lines {

@@ -151,10 +151,10 @@ type Model struct {
 	// The model always owns the view, either a clone of the revision's lines
 	// or a fresh diff result, so search overlays never touch the caller's
 	// Source.
-	left line.Lines
+	left niceyaml.Lines
 	// Right holds the right pane view for side-by-side diff rendering.
 	// Only populated when viewMode == ViewModeSideBySide and showing a diff.
-	right line.Lines
+	right niceyaml.Lines
 	// Rendered row counts of the view. Copies of the Model share one cache
 	// until a layout change gives a copy its own, so the counts that the
 	// value-receiver View fills in stay filled for the Model it copied.
@@ -568,7 +568,7 @@ func (m *Model) refreshSearch() {
 }
 
 // applySearchOverlays sets overlay highlights for all search matches.
-func (m *Model) applySearchOverlays(lines line.Lines) {
+func (m *Model) applySearchOverlays(lines niceyaml.Lines) {
 	lines.ClearOverlays()
 
 	for i, match := range m.searchMatches {
@@ -690,7 +690,7 @@ func (m *Model) applySideBySideOverlays() {
 // applySideBySidePaneOverlays applies search highlights to a single pane.
 // It uses cached matches and showSelected to determine the selected style.
 func (m *Model) applySideBySidePaneOverlays(
-	view line.Lines,
+	view niceyaml.Lines,
 	matches position.Ranges,
 	selectedPos position.Position,
 	showSelected bool,
@@ -716,7 +716,7 @@ func (m *Model) applySideBySidePaneOverlays(
 //
 // It reloads the searcher only when the lines changed since the last load, so
 // typing a search term does not rebuild the index on every keystroke.
-func (m *Model) updateSearchState(lines line.Lines) {
+func (m *Model) updateSearchState(lines niceyaml.Lines) {
 	if m.searchTerm == "" {
 		m.searchMatches = nil
 		m.leftMatches = nil
@@ -776,7 +776,7 @@ func (m *Model) currentRevision() *niceyaml.Source {
 //
 // The model always owns the result, either a clone of the revision's lines
 // or a fresh unified diff. Returns nil when there is no revision.
-func (m *Model) getDisplayLines() line.Lines {
+func (m *Model) getDisplayLines() niceyaml.Lines {
 	src, needsDiff := m.resolveRevisionSource()
 	if needsDiff {
 		return m.getDiffResult().Unified()

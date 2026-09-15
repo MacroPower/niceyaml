@@ -737,7 +737,7 @@ type errorPosition struct {
 //
 // Rendering happens on a private view of the source, so calling
 // [SourceError.Detail] repeatedly renders the same output.
-func (e *SourceError) render(cfg detailConfig, view line.Lines, positions []errorPosition) string {
+func (e *SourceError) render(cfg detailConfig, view Lines, positions []errorPosition) string {
 	// Collect all ranges from positions and apply overlays to the view.
 	var allRanges position.Ranges
 
@@ -771,7 +771,7 @@ func (e *SourceError) render(cfg detailConfig, view line.Lines, positions []erro
 // nested errors within view, with the ranges each highlights. The error
 // joins the resolution failures, so it is nil when every location resolved
 // and, when none did, says why.
-func (e *SourceError) collectPositions(a *Error, doc int, view line.Lines) ([]errorPosition, error) {
+func (e *SourceError) collectPositions(a *Error, doc int, view Lines) ([]errorPosition, error) {
 	positions := make([]errorPosition, 0, 1+len(a.errors))
 
 	var errs []error
@@ -818,7 +818,7 @@ func (e *SourceError) collectPositions(a *Error, doc int, view line.Lines) ([]er
 
 // checkInRange reports [ErrOutOfRange] when loc starts past the last line
 // of view.
-func (e *SourceError) checkInRange(loc location, view line.Lines) error {
+func (e *SourceError) checkInRange(loc location, view Lines) error {
 	if loc.pos.Line >= view.Len() {
 		return fmt.Errorf("%w: line %d of %d", ErrOutOfRange, loc.pos.Line+1, view.Len())
 	}
@@ -829,7 +829,7 @@ func (e *SourceError) checkInRange(loc location, view line.Lines) error {
 // highlightRanges returns the ranges to highlight for loc: the range itself
 // when the error carried one, otherwise the content of the token at its
 // position.
-func highlightRanges(view line.Lines, loc location) position.Ranges {
+func highlightRanges(view Lines, loc location) position.Ranges {
 	if loc.rng != nil {
 		return position.Ranges{*loc.rng}
 	}

@@ -37,7 +37,7 @@
 // [Source.Decoder], and attaches source context to errors with
 // [Source.WrapError].
 //
-// [line.Lines] is the view. It organizes tokens into lines, and each line
+// [Lines] is the view. It organizes tokens into lines, and each [line.Line]
 // carries optional metadata for rendering. Annotations hold error messages
 // and diff headers, flags mark inserted and deleted lines, and overlays apply
 // style spans for highlighting. A Source exposes its view through
@@ -45,9 +45,9 @@
 // either path renders identically.
 //
 // A view need not be a YAML document. Diffs, for example, interleave lines
-// from two revisions and are plain [line.Lines] values.
+// from two revisions and are plain [Lines] values.
 //
-// [Printer] renders any [LineIterator], which both [*Source] and [line.Lines]
+// [Printer] renders any [LineIterator], which both [*Source] and [Lines]
 // satisfy, with syntax highlighting via lipgloss.
 //
 // It supports customizable gutters (line numbers, diff markers), word wrapping,
@@ -66,6 +66,48 @@
 // highlighted. The %+v verb prints both. Nested errors appear as annotations
 // below their respective lines, with distant errors displayed in separate
 // hunks.
+//
+// # Lines
+//
+// YAML tokens can span multiple lines, as block scalars and multiline
+// strings do, while diffing, printing, and searching are much simpler with
+// line-by-line access. [NewLines] splits multiline tokens at line boundaries
+// into one part per line and keeps a reference to the original token every
+// part was cut from:
+//
+//	tks := lexers.Tokenize(input)
+//	lines := niceyaml.NewLines(tks)
+//
+//	for _, l := range lines {
+//		fmt.Printf("%d: %s\n", l.Number(), l.Content())
+//	}
+//
+// Position-based token lookup uses [position.Position] values:
+//
+//	tk := lines.TokenAt(position.New(2, 4))  // Line 2, column 4.
+//	ranges := lines.TokenRanges(tk)          // Every line the token occupies.
+//	content := lines.ContentRanges(tk)       // The same without surrounding spaces.
+//
+// [Lines.Tokens] reverses the split. Tokens that were cut across lines
+// collapse back to one, and the result holds the lexer's original tokens in
+// their original order. Every token the package hands out, from
+// [Lines.Tokens], [Lines.TokenAt], [line.Line.Tokens], or [line.Line.Token], is
+// shared with the lines. Treat them as read-only and call
+// [token.Token.Clone] before modifying one.
+//
+// Each [line.Line] carries metadata for rendering, defined in the [line]
+// package. [line.Annotations] add extra content above or below a line,
+// [line.Overlays] apply styles to column ranges, and [line.Flag] values mark
+// lines as inserted, deleted, or annotation-only. [Lines.AddOverlay] and
+// [Lines.BlendOverlay] add overlays across a range of lines; the first
+// replaces the style underneath and the second mixes with it:
+//
+//	lines.AddOverlay(style.GenericError, errorRange)
+//	lines.BlendOverlay(style.GenericHighlight, matches...)
+//
+// Rendering utilities mutate a view by adding overlays and annotations. Use
+// [Lines.Clone] to render the same content two different ways without the
+// highlights interfering.
 //
 // # Error Presentation
 //
@@ -132,14 +174,14 @@
 //	differ := niceyaml.NewDiffer(niceyaml.WithAlgorithm(myAlgo))
 //	result := differ.Diff(before, after)
 //
-// Diff output is a [line.Lines] view rather than a [Source], since the
+// Diff output is a [Lines] view rather than a [Source], since the
 // interleaved lines do not form a YAML document. It uses [line.Flag] to mark
 // inserted/deleted lines and [line.Annotation] for unified diff hunk headers.
 //
 // # Text Search
 //
 // [Finder] locates strings within tokens, returning [position.Range] values
-// suitable for [Source.AddOverlay] or [line.Lines.AddOverlay].
+// suitable for [Source.AddOverlay] or [Lines.AddOverlay].
 //
 // Use [normalizer.New] with [WithNormalizer] for case-insensitive,
 // diacritic-insensitive matching:

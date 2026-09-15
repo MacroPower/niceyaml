@@ -1,4 +1,4 @@
-// Package line provides abstractions for line-by-line go-yaml Token processing.
+// Package line provides line-by-line access to go-yaml tokens.
 //
 // # Token Splitting
 //
@@ -6,8 +6,8 @@
 // many operations (e.g. diffing, printing) are much simpler with line-by-line
 // access.
 //
-// This package organizes [token.Tokens] into [Lines] while preserving
-// references to the original [token.Tokens].
+// [Split] cuts [token.Tokens] into one [Line] per source line while
+// preserving references to the original tokens.
 //
 // Consider this YAML input with a block scalar:
 //
@@ -28,8 +28,8 @@
 //	│                   │
 //	└───────────────────┘
 //
-// Using [NewLines], tokens are split at line boundaries while preserving source
-// references:
+// [Split] cuts the tokens at line boundaries while every part keeps a
+// reference to its source token:
 //
 //	┌──────┬────────────┐
 //	│String│MappingValue│
@@ -39,77 +39,56 @@
 //	│String             │
 //	└───────────────────┘
 //
-// # Rendering View
-//
-// [Lines] is the view that rendering utilities consume. It implements the
-// iteration methods those utilities need ([Lines.AllLines], [Lines.AllRunes],
-// [Lines.Len], [Lines.IsEmpty]) and carries per-line rendering metadata, but
-// it knows nothing about parsing or YAML documents. A [Lines] value can
-// therefore describe content that is not a document, such as a diff.
-//
-// Rendering utilities mutate a view by adding overlays and annotations. Use
-// [Lines.Clone] to render the same content two different ways without the
-// highlights interfering.
-//
 // # Usage
 //
-// Create a [Lines] collection from tokens, then access individual lines:
+// Most callers receive [Line] values from a niceyaml Lines view or Source
+// rather than calling [Split] directly:
 //
-//	tks := lexers.Tokenize(input)
-//	lines := line.NewLines(tks)
-//
-//	for _, l := range lines {
+//	for _, l := range niceyaml.NewLines(tks) {
 //	    fmt.Printf("%d: %s\n", l.Number(), l.Content())
 //	}
 //
-// Position-based token lookup uses [position.Position] values:
+// A [Line] exposes its tokens in two forms. [Line.Tokens] returns the
+// per-line parts, whose positions describe this line. [Line.SourceTokens]
+// returns the lexer's original tokens, so a token cut across several lines
+// comes back from every line it touches. [Line.TokenAt] looks up the source
+// token at a column, and [Line.TokenSpan] and [Line.ContentSpan] find the
+// columns a token occupies on the line.
 //
-//	tk := lines.TokenAt(position.New(2, 4))  // Line 2, column 4.
-//	ranges := lines.TokenRanges(tk)          // Every line the token occupies.
-//	content := lines.ContentRanges(tk)       // The same without surrounding spaces.
+// [Line.Runes] iterates the line's runes by column. It yields the line ending
+// as a single '\n' whether the source used LF or CRLF, so the columns it
+// reports match [Line.Width].
+//
+// Every token the package hands out is shared with the line. Treat them as
+// read-only and call [token.Token.Clone] before modifying one.
 //
 // # Rendering Metadata
 //
 // Each [Line] can carry metadata for rendering.
 //
 // [Annotations] add extra content above or below a line, which is useful for
-// error messages, hints, or context.
-//
-// [Overlays] define column ranges with associated styles, primarily for
-// highlighting.
-//
-// [Flag] values categorize lines for special handling (inserted, deleted,
-// annotation-only).
-//
-// [Annotations] are positioned using [Above] or [Below] constants:
+// error messages, hints, or context. An [Annotation] is positioned with
+// [Above] or [Below]:
 //
 //	l.AddAnnotation(line.Annotation{
-//	    Content:  "missing required field",
+//	    Content:   "missing required field",
 //	    Placement: line.Below,
-//	    Col:      4,  // Align with the error location.
+//	    Col:       4, // Align with the error location.
 //	})
 //
-// [Overlays] apply styles to column ranges. [Lines.AddOverlay] replaces the
-// style underneath and [Lines.BlendOverlay] mixes with it; both split
-// multi-line ranges into per-line overlays:
+// [Overlays] define column ranges with associated styles, primarily for
+// highlighting. An [Overlay] either replaces the style underneath it or, with
+// Blend set, mixes with it so a search highlight keeps the token color it
+// covers.
 //
-//	lines.AddOverlay(style.GenericError, errorRange)
-//	lines.BlendOverlay(style.GenericHighlight, matches...)
+// [Flag] values categorize lines for special handling. A diff marks lines with
+// [FlagInserted] and [FlagDeleted], and [FlagAnnotation] marks lines that hold
+// only an annotation and no line number:
 //
-// [Flag] values mark lines for diff rendering or annotation-only display:
+//	l.Flag = line.FlagInserted // Show with "+" prefix.
+//	l.Flag = line.FlagDeleted  // Show with "-" prefix.
 //
-//	l.Flag = line.FlagInserted  // Show with "+" prefix.
-//	l.Flag = line.FlagDeleted   // Show with "-" prefix.
-//
-// # Round-Trip Support
-//
-// The [Lines.Tokens] method reconstructs the original token stream.
-//
-// Each line keeps a reference to the original token every part was cut
-// from, so tokens that were split across lines collapse back to one and the
-// result holds the lexer's original tokens in their original order.
-//
-// Every token the package hands out, from [Lines.Tokens], [Lines.TokenAt],
-// [Line.Tokens], or [Line.Token], is shared with the lines. Treat them as
-// read-only and call [token.Token.Clone] before modifying one.
+// Rendering utilities mutate lines by adding overlays and annotations. Use
+// [Line.Clone] to render the same content two different ways without the
+// highlights interfering.
 package line

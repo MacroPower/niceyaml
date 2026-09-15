@@ -19,7 +19,7 @@ import (
 
 // LineIterator provides line-by-line access to YAML tokens.
 //
-// [line.Lines] implements it directly, and [Source] implements it by
+// [Lines] implements it directly, and [Source] implements it by
 // delegating to its view.
 type LineIterator interface {
 	AllLines(spans ...position.Span) iter.Seq2[int, *line.Line]
@@ -35,7 +35,7 @@ type LineIterator interface {
 // Source separates two concerns. Parsing and decoding live on Source itself,
 // where [Source.File] lazily parses the AST, [Source.Decoder] iterates the
 // documents, and [Source.WrapError] attaches source context to errors.
-// Rendering lives in a [line.Lines] view, available from [Source.Lines], which
+// Rendering lives in a [Lines] view, available from [Source.Lines], which
 // organizes the tokens into lines and carries the overlays, annotations, and
 // flags that [Printer] renders. Utilities that only render or search, such as
 // [Printer], [Finder], and [Differ], accept either a Source or a view.
@@ -63,7 +63,7 @@ type LineIterator interface {
 type Source struct {
 	name       string
 	filePath   string
-	lines      line.Lines
+	lines      Lines
 	file       *ast.File
 	fileErr    error
 	parserOpts []parser.Option
@@ -173,14 +173,14 @@ func NewSourceFromString(src string, opts ...SourceOption) *Source {
 }
 
 // NewSourceFromTokens creates a new [*Source] from [token.Tokens].
-// See [line.NewLines] for details on token splitting behavior.
+// See [NewLines] for details on token splitting behavior.
 func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 	t := &Source{}
 	for _, opt := range opts {
 		opt(t)
 	}
 
-	t.lines = line.NewLines(tks)
+	t.lines = NewLines(tks)
 
 	return t
 }
@@ -198,7 +198,7 @@ func (s *Source) FilePath() string {
 }
 
 // Tokens reconstructs the full [token.Tokens] stream from all [line.Line]s.
-// See [line.Lines.Tokens] for details on token recombination behavior.
+// See [Lines.Tokens] for details on token recombination behavior.
 func (s *Source) Tokens() token.Tokens {
 	return s.lines.Tokens()
 }
@@ -273,12 +273,12 @@ func (s *Source) WrapError(err error) error {
 	return newSourceError(err, s)
 }
 
-// Lines returns a [line.Lines] view of the [Source].
+// Lines returns a [Lines] view of the [Source].
 //
 // Each call returns an independent copy, so overlays and annotations added to
 // one view never reach the Source or another view. Render the view to see
 // them.
-func (s *Source) Lines() line.Lines {
+func (s *Source) Lines() Lines {
 	return s.lines.Clone()
 }
 
@@ -293,7 +293,7 @@ func (s *Source) IsEmpty() bool {
 }
 
 // AllLines returns an iterator over lines within the given spans.
-// See [line.Lines.AllLines].
+// See [Lines.AllLines].
 //
 // Each yielded [*line.Line] is a copy, so annotations or overlays added
 // through it do not change the Source.
@@ -309,7 +309,7 @@ func (s *Source) AllLines(spans ...position.Span) iter.Seq2[int, *line.Line] {
 }
 
 // AllRunes returns an iterator over runes within the given ranges.
-// See [line.Lines.AllRunes].
+// See [Lines.AllRunes].
 func (s *Source) AllRunes(ranges ...position.Range) iter.Seq2[position.Position, rune] {
 	return s.lines.AllRunes(ranges...)
 }
