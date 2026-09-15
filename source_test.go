@@ -792,7 +792,7 @@ func TestSource_Parse(t *testing.T) {
 	})
 }
 
-func TestSource_WithParserOptions(t *testing.T) {
+func TestSource_WithYAMLParserOptions(t *testing.T) {
 	t.Parallel()
 
 	t.Run("parses with default options", func(t *testing.T) {
@@ -800,7 +800,7 @@ func TestSource_WithParserOptions(t *testing.T) {
 
 		source := niceyaml.NewSourceFromString(
 			"key: value\n",
-			niceyaml.WithParserOptions(),
+			niceyaml.WithYAMLParserOptions(),
 		)
 
 		file, err := source.File()
@@ -820,7 +820,7 @@ func TestSource_WithParserOptions(t *testing.T) {
 
 		source := niceyaml.NewSourceFromString(
 			input,
-			niceyaml.WithParserOptions(),
+			niceyaml.WithYAMLParserOptions(),
 		)
 
 		file, err := source.File()

@@ -77,8 +77,10 @@ type Source struct {
 // Available options:
 //   - [WithName]
 //   - [WithFilePath]
-//   - [WithParserOptions]
-//   - [WithDecodeOptions]
+//   - [WithAllowDuplicateKeys]
+//   - [WithDisallowUnknownFields]
+//   - [WithYAMLParserOptions]
+//   - [WithYAMLDecodeOptions]
 //   - [WithErrorOptions]
 type SourceOption func(*Source)
 
@@ -103,30 +105,41 @@ func WithFilePath(path string) SourceOption {
 	}
 }
 
-// WithParserOptions is a [SourceOption] that sets the parser options used when
-// parsing the [Source] into an [*ast.File].
-//
-// These options are passed to [parser.Parse] in addition to
-// [parser.ParseComments], which is always included.
-func WithParserOptions(opts ...parser.Option) SourceOption {
+// WithAllowDuplicateKeys is a [SourceOption] that accepts a mapping with the
+// same key twice, both when [Source.File] parses the document and when
+// [DocumentDecoder] decodes it. The last value wins. Without it a duplicate
+// key is an error.
+func WithAllowDuplicateKeys() SourceOption {
 	return func(s *Source) {
-		s.parserOpts = opts
+		s.parserOpts = append(s.parserOpts, parser.AllowDuplicateMapKey())
+		s.decodeOpts = append(s.decodeOpts, yaml.AllowDuplicateMapKey())
 	}
 }
 
-// WithDecodeOptions sets [yaml.DecodeOption] values passed to the YAML decoder
-// during [DocumentDecoder.Decode] and [DocumentDecoder.Unmarshal].
-//
-// This allows configuring decoder behavior such as allowing duplicate map keys:
-//
-//	source := niceyaml.NewSourceFromString(data,
-//	    niceyaml.WithDecodeOptions(yaml.AllowDuplicateMapKey()),
-//	)
-//
-// WithDecodeOptions is a [SourceOption].
-func WithDecodeOptions(opts ...yaml.DecodeOption) SourceOption {
+// WithDisallowUnknownFields is a [SourceOption] that makes [DocumentDecoder]
+// reject a mapping key that has no field in the target struct. Without it
+// unknown keys are ignored.
+func WithDisallowUnknownFields() SourceOption {
+	return WithYAMLDecodeOptions(yaml.DisallowUnknownField())
+}
+
+// WithYAMLParserOptions is a [SourceOption] that passes [parser.Option]
+// values to the go-yaml parser when [Source.File] parses the document. It is
+// the escape hatch for parser settings that have no option of their own;
+// comments are always parsed.
+func WithYAMLParserOptions(opts ...parser.Option) SourceOption {
 	return func(s *Source) {
-		s.decodeOpts = opts
+		s.parserOpts = append(s.parserOpts, opts...)
+	}
+}
+
+// WithYAMLDecodeOptions is a [SourceOption] that passes [yaml.DecodeOption]
+// values to the go-yaml decoder in [DocumentDecoder.Decode] and
+// [DocumentDecoder.Unmarshal]. It is the escape hatch for decoder settings
+// that have no option of their own, such as [WithAllowDuplicateKeys].
+func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) SourceOption {
+	return func(s *Source) {
+		s.decodeOpts = append(s.decodeOpts, opts...)
 	}
 }
 
@@ -210,7 +223,7 @@ func (s *Source) Decoder() (*Decoder, error) {
 // File returns an [*ast.File] for the [Source] tokens.
 //
 // The file is lazily parsed on first call using [parser.Parse] with options
-// provided via [WithParserOptions]. Subsequent calls return the cached result.
+// provided via [WithYAMLParserOptions]. Subsequent calls return the cached result.
 //
 // A YAML syntax error comes back as an [*Error] that carries the offending
 // token. Wrap it with [Source.WrapError] to render it against the source.

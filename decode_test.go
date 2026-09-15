@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1073,7 +1072,7 @@ func TestDocumentDecoder_DocumentIndex(t *testing.T) {
 	})
 }
 
-func TestWithDecodeOptions(t *testing.T) {
+func TestWithDisallowUnknownFields(t *testing.T) {
 	t.Parallel()
 
 	type strictConfig struct {
@@ -1106,7 +1105,7 @@ func TestWithDecodeOptions(t *testing.T) {
 			extra: field
 		`)
 		source := niceyaml.NewSourceFromString(input,
-			niceyaml.WithDecodeOptions(yaml.DisallowUnknownField()),
+			niceyaml.WithDisallowUnknownFields(),
 		)
 		d, err := source.Decoder()
 		require.NoError(t, err)
@@ -1129,7 +1128,7 @@ func TestWithDecodeOptions(t *testing.T) {
 			extra: field
 		`)
 		source := niceyaml.NewSourceFromString(input,
-			niceyaml.WithDecodeOptions(yaml.DisallowUnknownField()),
+			niceyaml.WithDisallowUnknownFields(),
 		)
 		d, err := source.Decoder()
 		require.NoError(t, err)
@@ -1156,7 +1155,7 @@ func TestWithDecodeOptions(t *testing.T) {
 			unknown2: b
 		`)
 		source := niceyaml.NewSourceFromString(input,
-			niceyaml.WithDecodeOptions(yaml.DisallowUnknownField()),
+			niceyaml.WithDisallowUnknownFields(),
 		)
 		d, err := source.Decoder()
 		require.NoError(t, err)
@@ -1181,7 +1180,7 @@ func TestWithDecodeOptions(t *testing.T) {
 			extra: field
 		`)
 		source := niceyaml.NewSourceFromString(input,
-			niceyaml.WithDecodeOptions(),
+			niceyaml.WithYAMLDecodeOptions(),
 		)
 		d, err := source.Decoder()
 		require.NoError(t, err)
@@ -1425,4 +1424,38 @@ func (c valueValidatorConfig) Validate() error {
 	}
 
 	return nil
+}
+
+func TestWithAllowDuplicateKeys(t *testing.T) {
+	t.Parallel()
+
+	type config struct {
+		Name string `yaml:"name"`
+	}
+
+	input := stringtest.Input(`
+		name: first
+		name: second
+	`)
+
+	t.Run("without option the parser rejects duplicate keys", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := niceyaml.NewSourceFromString(input).Decoder()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `mapping key "name" already defined`)
+	})
+
+	t.Run("with option the last value wins", func(t *testing.T) {
+		t.Parallel()
+
+		d, err := niceyaml.NewSourceFromString(input, niceyaml.WithAllowDuplicateKeys()).Decoder()
+		require.NoError(t, err)
+
+		for _, dd := range d.Documents() {
+			result, err := dd.Decode[config](t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, "second", result.Name)
+		}
+	})
 }
