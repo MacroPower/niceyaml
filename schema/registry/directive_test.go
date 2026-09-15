@@ -39,7 +39,7 @@ func resolveAndLoad(t *testing.T, res schema.Resolver, doc *niceyaml.Document) (
 func fileURL(t *testing.T, path string) string {
 	t.Helper()
 
-	ref, err := loader.File(path).Resolve(t.Context(), nil)
+	ref, err := loader.File(path).Resolve(t.Context(), yamltest.FirstDocument(t, "key: value\n"))
 	require.NoError(t, err)
 
 	return ref.URL

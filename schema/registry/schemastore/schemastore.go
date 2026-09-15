@@ -12,6 +12,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/filepaths"
+	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/loader"
 )
@@ -379,18 +380,12 @@ func (s *SchemaStore) staleLocked(cause error) ([]CatalogEntry, error) {
 // filtered entries. It holds no lock, so a slow catalog server blocks only
 // the lookups waiting on this fetch.
 //
-// The fetch (HTTP GET with a size limit) is shared with [loader.URL]; only the
+// The HTTP GET and its size limit are the ones [loader.URL] uses; only the
 // catalog JSON parsing is specific to SchemaStore.
 func (s *SchemaStore) fetch(ctx context.Context) ([]CatalogEntry, error) {
-	ref, err := loader.URL(s.catalogURL, loader.WithHTTPClient(s.client)).Resolve(ctx, nil)
+	data, err := httpfetch.Get(ctx, s.client, s.catalogURL)
 	if err != nil {
-		//nolint:wrapcheck // loader.URL already wraps errors with the catalog URL.
-		return nil, err
-	}
-
-	data, err := ref.Load(ctx)
-	if err != nil {
-		//nolint:wrapcheck // loader.URL already wraps errors with the catalog URL.
+		//nolint:wrapcheck // The error already names the catalog URL.
 		return nil, err
 	}
 

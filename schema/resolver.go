@@ -44,7 +44,8 @@ type Ref struct {
 // schema in the same call. Any other error stops the lookup.
 //
 // A resolver may inspect the document's content, file path, or tokens, or
-// ignore the document and always name the same schema. The loaders in
+// ignore the document and always name the same schema. The document is
+// never nil, so a resolver reads it without checking. The loaders in
 // [go.jacobcolvin.com/niceyaml/schema/loader] are resolvers of the second
 // kind, and [go.jacobcolvin.com/niceyaml/schema/registry.When] guards any
 // resolver with a [go.jacobcolvin.com/niceyaml/schema/matcher.Matcher].

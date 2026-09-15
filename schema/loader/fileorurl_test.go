@@ -37,7 +37,7 @@ func TestFileOrURL(t *testing.T) {
 		t.Parallel()
 
 		r := loader.FileOrURL("", "schema.json")
-		_, err := r.Resolve(t.Context(), nil)
+		_, err := r.Resolve(t.Context(), document(t))
 		require.ErrorIs(t, err, loader.ErrNoBaseDir)
 		require.ErrorContains(t, err, `"schema.json"`)
 	})

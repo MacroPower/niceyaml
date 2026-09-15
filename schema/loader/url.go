@@ -2,11 +2,10 @@ package loader
 
 import (
 	"context"
-	"fmt"
-	"io"
 	"net/http"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
@@ -24,9 +23,6 @@ type HTTPOption func(*httpConfig)
 type httpConfig struct {
 	client *http.Client
 }
-
-// maxSchemaSize is the maximum size of a schema response body.
-const maxSchemaSize = 10 * 1024 * 1024 // 10 MB.
 
 // WithHTTPClient is an [HTTPOption] that sets a custom HTTP client.
 //
@@ -57,40 +53,8 @@ func URL(schemaURL string, opts ...HTTPOption) schema.Resolver {
 		return schema.Ref{
 			URL: schemaURL,
 			Load: func(ctx context.Context) ([]byte, error) {
-				return fetch(ctx, cfg.client, schemaURL)
+				return httpfetch.Get(ctx, cfg.client, schemaURL)
 			},
 		}, nil
 	})
-}
-
-// fetch performs an HTTP GET for schemaURL and returns the body, rejecting
-// non-200 responses and bodies over maxSchemaSize.
-func fetch(ctx context.Context, client *http.Client, schemaURL string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, schemaURL, http.NoBody)
-	if err != nil {
-		return nil, fmt.Errorf("create request for %s: %w", schemaURL, err)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("fetch %s: %w", schemaURL, err)
-	}
-	defer resp.Body.Close() //nolint:errcheck // Best-effort close.
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("fetch %s: status %d", schemaURL, resp.StatusCode)
-	}
-
-	// Read one byte past the limit so an over-size response reads as
-	// maxSchemaSize+1 bytes; anything at or under the limit is the whole body.
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxSchemaSize+1))
-	if err != nil {
-		return nil, fmt.Errorf("read response from %s: %w", schemaURL, err)
-	}
-
-	if int64(len(data)) > maxSchemaSize {
-		return nil, fmt.Errorf("fetch %s: schema exceeds %d bytes", schemaURL, maxSchemaSize)
-	}
-
-	return data, nil
 }

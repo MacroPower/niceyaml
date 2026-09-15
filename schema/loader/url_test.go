@@ -59,7 +59,7 @@ func TestURL(t *testing.T) {
 		}))
 		defer server.Close()
 
-		ref, err := loader.URL(server.URL+"/schema.json").Resolve(t.Context(), nil)
+		ref, err := loader.URL(server.URL+"/schema.json").Resolve(t.Context(), document(t))
 		require.NoError(t, err)
 		assert.Equal(t, server.URL+"/schema.json", ref.URL)
 		assert.Equal(t, 0, requests, "Resolve should name the schema without fetching it")
@@ -111,7 +111,7 @@ func TestURL(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel() // Cancel immediately.
 
-		ref, err := loader.URL(server.URL+"/schema.json").Resolve(ctx, nil)
+		ref, err := loader.URL(server.URL+"/schema.json").Resolve(ctx, document(t))
 		require.NoError(t, err)
 
 		_, err = ref.Load(ctx)
@@ -151,7 +151,7 @@ func TestURL(t *testing.T) {
 	t.Run("schema exceeds size limit", func(t *testing.T) {
 		t.Parallel()
 
-		const maxSchemaSize = 10 * 1024 * 1024 // Must match loader.maxSchemaSize.
+		const maxSchemaSize = 10 * 1024 * 1024 // Must match httpfetch.MaxSize.
 
 		// Create a reader that provides data beyond the limit.
 		client := &http.Client{
@@ -165,7 +165,7 @@ func TestURL(t *testing.T) {
 		}
 
 		_, _, err := load(t, loader.URL("http://example.com/schema.json", loader.WithHTTPClient(client)))
-		require.ErrorContains(t, err, "schema exceeds")
+		require.ErrorContains(t, err, "response exceeds")
 	})
 }
 
