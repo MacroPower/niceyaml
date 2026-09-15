@@ -520,21 +520,37 @@ func TestSplitDocuments_ResetPositions(t *testing.T) {
 	t.Run("matches a fresh tokenize of the same text", func(t *testing.T) {
 		t.Parallel()
 
-		var second token.Tokens
-
-		for i, doc := range tokens.SplitDocuments(lexer.Tokenize("a: 1\n---\nb: 2\n"), tokens.WithResetPositions()) {
-			if i == 1 {
-				second = doc
-			}
+		tcs := map[string]struct {
+			input string
+		}{
+			"after document header":        {input: "a: 1\n---\nb: 2\n"},
+			"after document end":           {input: "a: 1\n...\nb: 2\n"},
+			"comment after document end":   {input: "a: 1\n...\n# c\nb: 2\n"},
+			"comment on document end line": {input: "a: 1\n... # c\nb: 2\n"},
+			"indented after document end":  {input: "a: 1\n...\n  b: 2\n"},
+			"header after document end":    {input: "a: 1\n...\n---\nb: 2\n"},
+			"header after directive":       {input: "%YAML 1.2\n---\na: 1\n"},
+			"leading blank lines":          {input: "\n\na: 1\n"},
+			"crlf after document end":      {input: "a: 1\r\n...\r\nb: 2\r\n"},
 		}
 
-		fresh := lexer.Tokenize("---\nb: 2\n")
-		require.Len(t, second, len(fresh))
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		for i := range fresh {
-			assert.Equal(t, fresh[i].Position.Line, second[i].Position.Line, "token %d line", i)
-			assert.Equal(t, fresh[i].Position.Column, second[i].Position.Column, "token %d column", i)
-			assert.Equal(t, fresh[i].Position.Offset, second[i].Position.Offset, "token %d offset", i)
+				for i, doc := range tokens.SplitDocuments(lexer.Tokenize(tc.input), tokens.WithResetPositions()) {
+					// A document's text is the Origins of its tokens.
+					fresh := lexer.Tokenize(yamltest.DumpTokenOrigins(doc))
+					require.Len(t, doc, len(fresh), "document %d", i)
+
+					for j, want := range fresh {
+						got := doc[j].Position
+						assert.Equal(t, want.Position.Line, got.Line, "document %d token %d line", i, j)
+						assert.Equal(t, want.Position.Column, got.Column, "document %d token %d column", i, j)
+						assert.Equal(t, want.Position.Offset, got.Offset, "document %d token %d offset", i, j)
+					}
+				}
+			})
 		}
 	})
 

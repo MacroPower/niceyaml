@@ -1,7 +1,9 @@
 package lexers_test
 
 import (
+	"fmt"
 	"iter"
+	"strings"
 	"testing"
 
 	"github.com/goccy/go-yaml/lexer"
@@ -10,10 +12,31 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/lexers"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
+
+// describeLines renders each line as its number and content followed by the
+// line, column, and offset of every token on it.
+func describeLines(lines niceyaml.Lines) []string {
+	out := make([]string, 0, len(lines))
+
+	for i := range lines {
+		var sb strings.Builder
+
+		fmt.Fprintf(&sb, "%d %q", lines[i].Number(), lines[i].Content())
+
+		for _, tk := range lines[i].Tokens() {
+			fmt.Fprintf(&sb, " %d:%d@%d", tk.Position.Line, tk.Position.Column, tk.Position.Offset)
+		}
+
+		out = append(out, sb.String())
+	}
+
+	return out
+}
 
 func collectDocs(seq iter.Seq2[int, token.Tokens]) []token.Tokens {
 	result := []token.Tokens{}
@@ -268,10 +291,11 @@ func TestTokenizeDocuments(t *testing.T) {
 func TestTokenizeDocuments_WithResetPositions(t *testing.T) {
 	t.Parallel()
 
-	t.Run("single doc resets to line 1", func(t *testing.T) {
+	t.Run("single doc keeps its leading blank lines", func(t *testing.T) {
 		t.Parallel()
 
-		// Create input that starts at a non-zero position.
+		// The blank lines sit in the first token's Origin, so the token stays
+		// below them, where a fresh tokenize places it.
 		input := stringtest.JoinLF(
 			"",
 			"",
@@ -283,10 +307,35 @@ func TestTokenizeDocuments_WithResetPositions(t *testing.T) {
 		require.Len(t, docs, 1)
 		require.NotEmpty(t, docs[0])
 
-		// First token should be at line 1.
-		assert.Equal(t, 1, docs[0][0].Position.Line)
+		assert.Equal(t, 3, docs[0][0].Position.Line)
 		assert.Equal(t, 1, docs[0][0].Position.Column)
-		assert.Equal(t, 1, docs[0][0].Position.Offset)
+		assert.Equal(t, 3, docs[0][0].Position.Offset)
+	})
+
+	t.Run("documents build the lines of a fresh tokenize", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+		}{
+			"after document end":         {input: "a: 1\n...\nb: 2\n"},
+			"comment after document end": {input: "a: 1\n...\n# c\nb: 2\n"},
+			"header after directive":     {input: "%YAML 1.2\n---\na: 1\n"},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				for i, doc := range lexers.TokenizeDocuments(tc.input, lexers.WithResetPositions()) {
+					got := niceyaml.NewLines(doc)
+					want := niceyaml.NewLines(lexers.Tokenize(yamltest.DumpTokenOrigins(doc)))
+
+					require.NoError(t, got.Validate(), "document %d", i)
+					assert.Equal(t, describeLines(want), describeLines(got), "document %d", i)
+				}
+			})
+		}
 	})
 
 	t.Run("multi doc each starts at line 1", func(t *testing.T) {

@@ -41,7 +41,10 @@ type splitDocumentsConfig struct {
 }
 
 // WithResetPositions is a [SplitDocumentsOption] that resets token positions
-// so each document starts from line 1, column 1.
+// so they match a fresh tokenize of each document's text, which starts from
+// line 1, column 1. A first token whose Origin opens with a line break, such
+// as the one after a "..." marker, starts below line 1, where a fresh
+// tokenize places it.
 //
 // When enabled, tokens are cloned and their positions adjusted relative to the
 // document's start. By default, positions are preserved from the original source.
@@ -51,13 +54,16 @@ func WithResetPositions() SplitDocumentsOption {
 	}
 }
 
-// cloneWithResetPositions clones tokens and adjusts positions relative to
-// the document's starting position.
+// cloneWithResetPositions clones tokens and shifts their positions to where a
+// fresh tokenize of their text would put them.
 //
-// The first token with a non-nil position determines the starting line, column,
-// and offset. All subsequent token positions are adjusted relative to this start,
-// so the first positioned token ends up at line 1, column 1, offset 1, which is
-// where the lexer places the first token of a fresh stream.
+// The text starts with the Origin of the first token with a non-nil position.
+// That Origin can open with whitespace and line breaks, such as the line break
+// that ends a preceding "..." line, and a fresh tokenize places the token after
+// them. The token lands at line 1, column 1, offset 1, where the lexer places
+// the first token of a fresh stream, only when its Origin opens with neither.
+// Every token moves by the same number of lines and the same offset distance,
+// and tokens on the first line also move by the same number of columns.
 //
 // Tokens with nil positions are cloned but left with nil positions.
 func cloneWithResetPositions(tks token.Tokens) token.Tokens {
@@ -65,17 +71,24 @@ func cloneWithResetPositions(tks token.Tokens) token.Tokens {
 		return tks
 	}
 
-	// Find starting position from first token with position.
+	// Find where the text starts from the first token with a position.
 	var startLine, startCol, startOffset int
 
 	for _, tk := range tks {
-		if tk != nil && tk.Position != nil {
-			startLine = tk.Position.Line
-			startCol = tk.Position.Column
-			startOffset = tk.Position.Offset
-
-			break
+		if tk == nil || tk.Position == nil {
+			continue
 		}
+
+		// The position points past the whitespace and line breaks that open
+		// the Origin, and the text still holds them.
+		lead := tk.Origin[:len(tk.Origin)-len(strings.TrimLeft(tk.Origin, " \t\r\n"))]
+		lastLine := lead[strings.LastIndexByte(lead, '\n')+1:]
+
+		startLine = tk.Position.Line - strings.Count(lead, "\n")
+		startCol = tk.Position.Column - len(lastLine)
+		startOffset = tk.Position.Offset - len(lead)
+
+		break
 	}
 
 	result := make(token.Tokens, 0, len(tks))

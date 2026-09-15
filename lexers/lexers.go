@@ -25,7 +25,7 @@ func Tokenize(src string) token.Tokens {
 type TokenizeDocumentsOption = tokens.SplitDocumentsOption
 
 // WithResetPositions is a [TokenizeDocumentsOption] that resets token
-// positions so each document starts from line 1, column 1. It is
+// positions so they match a fresh [Tokenize] of each document's text. It is
 // [tokens.WithResetPositions] under another name.
 func WithResetPositions() TokenizeDocumentsOption {
 	return tokens.WithResetPositions()

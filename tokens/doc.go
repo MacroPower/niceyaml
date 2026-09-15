@@ -18,6 +18,7 @@
 // [SplitDocuments] splits a token stream at document headers ("---") and
 // document end markers ("..."), returning an iterator over separate token
 // streams for each YAML document. Use [WithResetPositions] to receive clones
-// whose positions start from line 1, column 1. To tokenize and split text in
-// one step, use [lexers.TokenizeDocuments], which is built on it.
+// whose positions match a fresh tokenize of each document's text. To tokenize
+// and split text in one step, use [lexers.TokenizeDocuments], which is built
+// on it.
 package tokens
