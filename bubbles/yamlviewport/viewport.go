@@ -1460,10 +1460,7 @@ func (m *Model) getViewDimensions() (int, int, bool) {
 
 // renderContent applies styling and renders lines into final output.
 func (m *Model) renderContent(lines []string, contentW, contentH int) string {
-	textStyle := lipgloss.NewStyle()
-	if st := m.printer.Style(style.Text); st != nil {
-		textStyle = *st
-	}
+	textStyle := m.printer.Style(style.Text)
 
 	contents := textStyle.
 		Width(contentW).
@@ -1538,10 +1535,7 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 	rightRows := splitLines(printer.Print(right, spans...))
 
 	// Get text style for padding empty areas.
-	textStyle := lipgloss.NewStyle()
-	if st := m.printer.Style(style.Text); st != nil {
-		textStyle = *st
-	}
+	textStyle := m.printer.Style(style.Text)
 
 	// Build separator with any extra padding from odd width.
 	separatorWidth := ansi.StringWidth(sideBySideSeparator)

@@ -33,13 +33,6 @@
 //   - [GenericHeading] -> [GenericHeadingAccent], [GenericHeadingSubtle],
 //     [GenericHeadingOK], [GenericHeadingWarn], [GenericHeadingError]: Headings
 //
-// # Pointer Identity
-//
-// [Styles.Style] returns [*lipgloss.Style] pointers that stay the same for a
-// given category for the life of the value. Renderers compare and cache
-// blended styles by pointer, so identical combinations reuse one result.
-// [Styles.With] keeps the pointers of every category it leaves untouched.
-//
 // # Creating Styles
 //
 // [NewStyles] creates a [Styles] value that resolves inherited styles.

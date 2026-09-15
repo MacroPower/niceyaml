@@ -2,7 +2,6 @@ package colors
 
 import (
 	"image/color"
-	"sync"
 
 	"charm.land/lipgloss/v2"
 	"github.com/lucasb-eyer/go-colorful"
@@ -58,10 +57,12 @@ func Blend(c1, c2 color.Color) color.Color {
 	return cf1.BlendLab(cf2, 0.5)
 }
 
-// BlendStyles blends two [*lipgloss.Style] values: colors via LAB blending,
+// BlendStyles blends two [lipgloss.Style] values: colors via LAB blending,
 // transforms composed (overlay wraps base).
-func BlendStyles(base, overlay *lipgloss.Style) *lipgloss.Style {
-	style := *base
+//
+//nolint:gocritic // hugeParam: value semantics match lipgloss.
+func BlendStyles(base, overlay lipgloss.Style) lipgloss.Style {
+	style := base
 
 	// Blend foreground colors.
 	baseFg := style.GetForeground()
@@ -96,15 +97,17 @@ func BlendStyles(base, overlay *lipgloss.Style) *lipgloss.Style {
 		// Base transform is nil: keep base's transform (already in result).
 	}
 
-	return &style
+	return style
 }
 
-// OverrideStyles applies overlay on top of base [*lipgloss.Style]: overlay
+// OverrideStyles applies overlay on top of base [lipgloss.Style]: overlay
 // properties replace base properties.
 //
 // Colors are overridden (not blended), transforms are overridden (not composed).
-func OverrideStyles(base, overlay *lipgloss.Style) *lipgloss.Style {
-	style := *base
+//
+//nolint:gocritic // hugeParam: value semantics match lipgloss.
+func OverrideStyles(base, overlay lipgloss.Style) lipgloss.Style {
+	style := base
 
 	// Override foreground if overlay has one.
 	if fg := Override(style.GetForeground(), overlay.GetForeground()); fg != nil {
@@ -121,84 +124,5 @@ func OverrideStyles(base, overlay *lipgloss.Style) *lipgloss.Style {
 		style = style.Transform(overlayTransform)
 	}
 
-	return &style
-}
-
-// Blender provides cached [*lipgloss.Style] blending and overriding operations.
-//
-// It assigns unique keys to all styles (including blended results) so that
-// identical blend operations return the same pointer, enabling pointer equality.
-//
-// Create instances with [NewBlender].
-type Blender struct {
-	keys    map[*lipgloss.Style]uint64 // Pointer to key.
-	styles  map[uint64]*lipgloss.Style // Computed blend key to result.
-	nextKey uint64                     // Counter for assigning keys.
-
-	mu sync.Mutex
-}
-
-// NewBlender creates a new [*Blender].
-func NewBlender() *Blender {
-	return &Blender{
-		keys:    make(map[*lipgloss.Style]uint64),
-		styles:  make(map[uint64]*lipgloss.Style),
-		nextKey: 1,
-	}
-}
-
-// key returns the unique key for a style, assigning one if needed.
-func (b *Blender) key(s *lipgloss.Style) uint64 {
-	if k, ok := b.keys[s]; ok {
-		return k
-	}
-
-	k := b.nextKey
-	b.nextKey++
-	b.keys[s] = k
-
-	return k
-}
-
-// blendKey computes a cache key for a blend operation.
-func (b *Blender) blendKey(base, overlay *lipgloss.Style, override bool) uint64 {
-	baseKey := b.key(base)
-	overlayKey := b.key(overlay)
-	key := baseKey<<32 | overlayKey
-	if override {
-		key |= 1 << 63 // Use high bit for override flag.
-	}
-
-	return key
-}
-
-// Blend blends two [*lipgloss.Style] values, caching the result.
-//
-// If override is true, overlay replaces base (see [OverrideStyles]); if false,
-// colors are blended (see [BlendStyles]).
-//
-// Returns a stable pointer for identical combinations.
-func (b *Blender) Blend(base, overlay *lipgloss.Style, override bool) *lipgloss.Style {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	key := b.blendKey(base, overlay, override)
-
-	if cached, ok := b.styles[key]; ok {
-		return cached
-	}
-
-	var result *lipgloss.Style
-
-	if override {
-		result = OverrideStyles(base, overlay)
-	} else {
-		result = BlendStyles(base, overlay)
-	}
-
-	b.styles[key] = result
-	b.keys[result] = b.nextKey
-	b.nextKey++
-
-	return result
+	return style
 }

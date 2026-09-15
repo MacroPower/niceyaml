@@ -202,7 +202,7 @@ func TestThemeStyles(t *testing.T) {
 
 		assert.Equal(t, int32(1), calls.Load())
 		assert.True(t, isMarked(first, style.Comment))
-		assert.Same(t, first.Style(style.Comment), second.Style(style.Comment))
+		assert.True(t, isMarked(second, style.Comment))
 	})
 
 	t.Run("zero value", func(t *testing.T) {

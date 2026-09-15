@@ -254,7 +254,9 @@ func (m *model) statusBar() string {
 
 // powerlineSep renders a powerline separator with fg from the previous
 // segment's background and bg from the next segment's background.
-func powerlineSep(from, to *lipgloss.Style) string {
+//
+//nolint:gocritic // hugeParam: value semantics match lipgloss.
+func powerlineSep(from, to lipgloss.Style) string {
 	return lipgloss.NewStyle().
 		Foreground(from.GetBackground()).
 		Background(to.GetBackground()).

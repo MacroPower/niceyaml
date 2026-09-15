@@ -16,8 +16,7 @@ func TestStyles_Style_EmptyStyles(t *testing.T) {
 	got := styles.Style(style.LiteralNumberInteger)
 
 	// Should return an empty style when nothing is defined.
-	assert.NotNil(t, got)
-	assert.Equal(t, lipgloss.Style{}, *got)
+	assert.Equal(t, lipgloss.Style{}, got)
 }
 
 func TestNewStyles(t *testing.T) {
@@ -83,8 +82,8 @@ func TestNewStyles(t *testing.T) {
 			style.GenericHeading,
 		}
 
-		// Every category resolves to the pointer of its closest set ancestor.
-		set := []*lipgloss.Style{
+		// Every category resolves to the style of its closest set ancestor.
+		set := []lipgloss.Style{
 			styles.Style(style.Text),
 			styles.Style(style.LiteralNumber),
 			styles.Style(style.Comment),
@@ -210,7 +209,7 @@ func TestStyles_With(t *testing.T) {
 		// Custom key should return empty style (not found) in original.
 		got := original.Style(customKey)
 		assert.NotNil(t, got)
-		assert.Equal(t, lipgloss.Style{}, *got)
+		assert.Equal(t, lipgloss.Style{}, got)
 
 		// Comment should still be green in original.
 		got = original.Style(style.Comment)
@@ -228,13 +227,13 @@ func TestStyles_With(t *testing.T) {
 		assert.Equal(t, lipgloss.Color("white"), original.Style(style.LiteralNumberFloat).GetForeground())
 	})
 
-	t.Run("keeps pointers of untouched categories", func(t *testing.T) {
+	t.Run("keeps untouched categories", func(t *testing.T) {
 		t.Parallel()
 
 		result := original.With(style.Set(customKey, red))
 
-		assert.Same(t, original.Style(style.Comment), result.Style(style.Comment))
-		assert.Same(t, original.Style(style.Text), result.Style(style.Text))
+		assert.Equal(t, original.Style(style.Comment), result.Style(style.Comment))
+		assert.Equal(t, original.Style(style.Text), result.Style(style.Text))
 	})
 
 	t.Run("empty options returns an equal copy", func(t *testing.T) {
@@ -252,18 +251,17 @@ func TestStyles_With(t *testing.T) {
 		result := style.Styles{}.With(style.Set(style.Comment, yellow))
 
 		assert.Equal(t, lipgloss.Color("yellow"), result.Style(style.Comment).GetForeground())
-		assert.Equal(t, lipgloss.Style{}, *result.Style(style.Text))
+		assert.Equal(t, lipgloss.Style{}, result.Style(style.Text))
 	})
 }
 
-func TestStyles_StablePointers(t *testing.T) {
+func TestStyles_UnsetCategories(t *testing.T) {
 	t.Parallel()
 
-	styles := style.NewStyles(lipgloss.NewStyle())
+	styles := style.NewStyles(lipgloss.NewStyle().Foreground(lipgloss.Color("white")))
 
-	first := styles.Style(style.NameTag)
-	second := styles.Style(style.NameTag)
-	assert.Same(t, first, second)
-	assert.Same(t, styles.Style(style.Text), styles.Style(style.NameTag))
-	assert.NotNil(t, styles.Style("never-set"))
+	// An unset predefined category inherits the base, and an unknown key is
+	// an empty style.
+	assert.Equal(t, styles.Style(style.Text), styles.Style(style.NameTag))
+	assert.Equal(t, lipgloss.NewStyle(), styles.Style("never-set"))
 }

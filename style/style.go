@@ -215,15 +215,12 @@ func getParent(s Style) Style {
 	return Text
 }
 
-// Styles resolves [Style] categories to [*lipgloss.Style] formatting.
+// Styles resolves [Style] categories to [lipgloss.Style] formatting.
 //
 // A Styles value holds a base style plus explicit overrides, and resolves every
-// predefined category through the inheritance hierarchy when it is built.
-// Custom keys, such as overlay styles, are stored as given.
-//
-// The pointer returned by [Styles.Style] for a category is stable for the life
-// of the value, and [Styles.With] keeps the pointers of every category it
-// leaves untouched. Renderers rely on that to cache blended styles by pointer.
+// predefined category through the inheritance hierarchy when it is built, so
+// [Styles.Style] is a map lookup. Custom keys, such as overlay styles, are
+// stored as given.
 //
 // The zero value resolves every category to an empty style. Create instances
 // with [NewStyles].
@@ -300,16 +297,15 @@ func resolveStyles(overrides map[Style]*lipgloss.Style) map[Style]*lipgloss.Styl
 	return resolved
 }
 
-// Style returns the [*lipgloss.Style] for the given [Style] category.
+// Style returns the [lipgloss.Style] for the given [Style] category.
 //
-// A category that is neither predefined nor set returns an empty style. The
-// result is never nil.
-func (s Styles) Style(st Style) *lipgloss.Style {
+// A category that is neither predefined nor set returns an empty style.
+func (s Styles) Style(st Style) lipgloss.Style {
 	if ls, ok := s.resolved[st]; ok && ls != nil {
-		return ls
+		return *ls
 	}
 
-	return &emptyStyle
+	return emptyStyle
 }
 
 // With returns a copy of the [Styles] with the given options applied and

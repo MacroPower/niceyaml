@@ -32,20 +32,4 @@
 //
 // Both strategies handle nil, invisible, and [lipgloss.NoColor] gracefully,
 // falling back to whichever color is actually visible.
-//
-// # Caching with Blender
-//
-// [Blender] caches combination results and assigns unique keys to each style,
-// including derived styles. This enables pointer equality checks.
-//
-// If you blend the same two styles twice, you get the exact same pointer back:
-//
-//	b := NewBlender()
-//	r1 := b.Blend(base, overlay, false)
-//	r2 := b.Blend(base, overlay, false)
-//	// Via pointer equality, r1 == r2.
-//
-// This is valuable when the same style combinations are computed repeatedly
-// during rendering, as it avoids redundant allocations and allows fast equality
-// comparisons.
 package colors

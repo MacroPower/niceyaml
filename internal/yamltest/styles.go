@@ -1,8 +1,6 @@
 package yamltest
 
 import (
-	"sync"
-
 	"charm.land/lipgloss/v2"
 
 	"go.jacobcolvin.com/niceyaml/style"
@@ -20,11 +18,6 @@ import (
 type XMLStyles struct {
 	only    map[style.Style]bool // If non-nil, only these styles get XML tags.
 	exclude map[style.Style]bool // Styles to exclude from XML tagging.
-	// Built styles by category, so Style returns a stable pointer per
-	// category as [niceyaml.StyleGetter] requires.
-	built map[style.Style]*lipgloss.Style
-	empty lipgloss.Style // Returned for excluded/non-matching styles.
-	mu    sync.Mutex     // Guards built.
 }
 
 // XMLStylesOption configures [XMLStyles].
@@ -73,39 +66,25 @@ func NewXMLStyles(opts ...XMLStylesOption) *XMLStyles {
 	return x
 }
 
-// Style returns a [*lipgloss.Style] that wraps content in XML tags based on
+// Style returns a [lipgloss.Style] that wraps content in XML tags based on
 // the [style.Style] category.
 //
 // If the style is excluded or not in the "only" list (when configured),
 // returns an empty style.
-func (x *XMLStyles) Style(s style.Style) *lipgloss.Style {
+func (x *XMLStyles) Style(s style.Style) lipgloss.Style {
 	// Check if style should be excluded.
 	if x.exclude != nil && x.exclude[s] {
-		return &x.empty
+		return lipgloss.NewStyle()
 	}
 
 	// Check if only specific styles are allowed.
 	if x.only != nil && !x.only[s] {
-		return &x.empty
-	}
-
-	x.mu.Lock()
-	defer x.mu.Unlock()
-
-	if st, ok := x.built[s]; ok {
-		return st
-	}
-
-	if x.built == nil {
-		x.built = make(map[style.Style]*lipgloss.Style)
+		return lipgloss.NewStyle()
 	}
 
 	tag := string(s)
 
-	st := lipgloss.NewStyle().Transform(func(content string) string {
+	return lipgloss.NewStyle().Transform(func(content string) string {
 		return "<" + tag + ">" + content + "</" + tag + ">"
 	})
-	x.built[s] = &st
-
-	return &st
 }

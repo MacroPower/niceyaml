@@ -26,12 +26,10 @@ import (
 const testOverlayHighlight style.Style = "testOverlayHighlight"
 
 // testHighlightStyle returns a style that wraps content in brackets for easy verification.
-func testHighlightStyle() *lipgloss.Style {
-	s := lipgloss.NewStyle().Transform(func(str string) string {
+func testHighlightStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Transform(func(str string) string {
 		return "[" + str + "]"
 	})
-
-	return &s
 }
 
 // testPrinter returns a printer without styles or padding for predictable output.
@@ -44,7 +42,7 @@ func testPrinterWithGutter(gutter niceyaml.GutterFunc) *niceyaml.Printer {
 	return niceyaml.NewPrinter(
 		niceyaml.WithStyles(style.NewStyles(
 			lipgloss.NewStyle(),
-			style.Set(testOverlayHighlight, *testHighlightStyle()),
+			style.Set(testOverlayHighlight, testHighlightStyle()),
 		)),
 		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 		niceyaml.WithGutter(gutter),

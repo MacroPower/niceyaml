@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
@@ -22,13 +23,13 @@ const wrapOnCharacters = " /-"
 
 // StyleGetter retrieves styles by category.
 //
-// Implementations must return a stable pointer for a given category, since
-// the printer caches blended styles by pointer and a fresh pointer per call
-// grows that cache without bound. The result must not be nil.
+// A [Printer] asks for each category as it renders and caches the styles it
+// blends for overlays by the category names involved, so Style should return
+// the same style for a category for the life of the value.
 //
 // See [style.Styles] for an implementation.
 type StyleGetter interface {
-	Style(s style.Style) *lipgloss.Style
+	Style(s style.Style) lipgloss.Style
 }
 
 // Printer prints YAML with syntax highlighting for terminal output.
@@ -89,11 +90,13 @@ type StyleGetter interface {
 // continuation lines show a "-" marker in the gutter. A width of 0 turns
 // wrapping off.
 type Printer struct {
-	styles             StyleGetter
-	style              lipgloss.Style
-	gutterFunc         GutterFunc
-	annotationFunc     AnnotationFunc
-	blender            *colors.Blender
+	styles         StyleGetter
+	style          lipgloss.Style
+	gutterFunc     GutterFunc
+	annotationFunc AnnotationFunc
+	// Blended styles by the categories that produce them. WithStyles
+	// replaces it, since the categories then resolve to other styles.
+	blends             *blendCache
 	width              int
 	hasCustomStyle     bool
 	annotationsEnabled bool
@@ -106,7 +109,7 @@ func NewPrinter(opts ...PrinterOption) *Printer {
 		styles:             style.Default(),
 		gutterFunc:         DefaultGutter,
 		annotationFunc:     DefaultAnnotation,
-		blender:            colors.NewBlender(),
+		blends:             newBlendCache(),
 		annotationsEnabled: true,
 	}
 
@@ -120,8 +123,8 @@ func NewPrinter(opts ...PrinterOption) *Printer {
 //
 //	wrapped := printer.With(niceyaml.WithWidth(80))
 //
-// The copy shares the receiver's style cache, which is safe for concurrent
-// use.
+// The copy shares the receiver's cache of blended styles unless [WithStyles]
+// is among the options; the cache is safe for concurrent use.
 func (p *Printer) With(opts ...PrinterOption) *Printer {
 	c := *p
 	c.apply(opts)
@@ -290,6 +293,7 @@ func WithContainerStyle(s lipgloss.Style) PrinterOption {
 func WithStyles(s StyleGetter) PrinterOption {
 	return func(p *Printer) {
 		p.styles = s
+		p.blends = newBlendCache()
 	}
 }
 
@@ -334,9 +338,9 @@ func (p *Printer) Width() int {
 	return p.width
 }
 
-// Style retrieves the underlying [*lipgloss.Style] for the given [style.Style],
-// or an empty style if not found.
-func (p *Printer) Style(s style.Style) *lipgloss.Style {
+// Style retrieves the [lipgloss.Style] for the given [style.Style] from the
+// printer's [StyleGetter].
+func (p *Printer) Style(s style.Style) lipgloss.Style {
 	return p.styles.Style(s)
 }
 
@@ -463,27 +467,30 @@ func (p *Printer) renderLine(idx int, ln *line.Line, totalLines, gutterWidth int
 
 	var (
 		content      string
-		contentStyle *lipgloss.Style
+		contentStyle style.Style
+		styled       bool
 	)
 
 	switch ln.Flag {
 	case line.FlagDeleted:
 		content = ln.Content()
-		contentStyle = p.styles.Style(style.GenericDeleted)
+		contentStyle = style.GenericDeleted
 
 	case line.FlagInserted:
 		content = ln.Content()
-		contentStyle = p.styles.Style(style.GenericInserted)
+		contentStyle = style.GenericInserted
 
 	default: // FlagDefault (equal line).
 		// Render with syntax highlighting.
 		content = p.renderTokenLine(idx, ln)
+		styled = true
 	}
 
 	rows = append(rows, p.contentRows(
 		content,
 		position.New(idx, 0),
 		contentStyle,
+		styled,
 		ln.Overlays,
 		gutterCtx,
 		gutterWidth,
@@ -559,12 +566,14 @@ func (p *Printer) renderAnnotation(
 // contentRows renders a line's content as rows, wrapping to the printer
 // width, with the gutter generated for each row from gutterCtx.
 //
-// A nil contentStyle means content is already styled, as a token line is;
-// otherwise it applies the style to the content with its overlays.
+// When styled is set the content already carries its styles, as a token
+// line does; otherwise contentRows applies contentStyle to the content with
+// its overlays.
 func (p *Printer) contentRows(
 	content string,
 	pos position.Position,
-	contentStyle *lipgloss.Style,
+	contentStyle style.Style,
+	styled bool,
 	overlays line.Overlays,
 	gutterCtx GutterContext,
 	gutterWidth int,
@@ -580,12 +589,12 @@ func (p *Printer) contentRows(
 		ctx.Soft = j > 0
 		sb.WriteString(p.gutterFunc(ctx))
 
-		if contentStyle != nil {
-			// For diff lines: apply diff style to content.
-			sb.WriteString(p.styleLineWithRanges(subLine, pos, contentStyle, overlays))
-		} else {
+		if styled {
 			// For equal lines: content is already styled.
 			sb.WriteString(subLine)
+		} else {
+			// For diff lines: apply diff style to content.
+			sb.WriteString(p.styleLineWithRanges(subLine, pos, contentStyle, overlays))
 		}
 
 		pos.Col += utf8.RuneCountInString(subLine)
@@ -608,7 +617,7 @@ func (p *Printer) contentRows(
 func (p *Printer) styleLineWithRanges(
 	src string,
 	pos position.Position,
-	s *lipgloss.Style,
+	base style.Style,
 	overlays line.Overlays,
 ) string {
 	if src == "" {
@@ -616,29 +625,23 @@ func (p *Printer) styleLineWithRanges(
 	}
 
 	if len(overlays) == 0 {
-		return s.Render(escape.Control(src))
+		return p.styles.Style(base).Render(escape.Control(src))
 	}
 
 	// Create span for this line segment's column range.
 	cols := position.NewSpan(pos.Col, pos.Col+utf8.RuneCountInString(src))
 
-	// Filter overlays that overlap this column span with resolved styles.
-	var active []overlayWithStyle
+	// Keep the overlays that overlap this column span.
+	var active line.Overlays
 
 	for _, o := range overlays {
 		if o.Cols.Overlaps(cols) {
-			if st := p.styles.Style(o.Style); st != nil {
-				active = append(active, overlayWithStyle{
-					cols:  o.Cols,
-					style: st,
-					blend: o.Blend,
-				})
-			}
+			active = append(active, o)
 		}
 	}
 
 	if len(active) == 0 {
-		return s.Render(escape.Control(src))
+		return p.styles.Style(base).Render(escape.Control(src))
 	}
 
 	boundaries := computeStyleBoundaries(active, cols)
@@ -653,7 +656,10 @@ func (p *Printer) styleLineWithRanges(
 
 	runes := []rune(src)
 
-	var currentStyle *lipgloss.Style
+	var (
+		currentKey   string
+		currentPoint int
+	)
 
 	spanStart := 0
 
@@ -666,17 +672,18 @@ func (p *Printer) styleLineWithRanges(
 			continue
 		}
 
-		spanStyle := p.computeStyleForPoint(spanPoint, active, s)
+		spanKey := blendKey(base, active, spanPoint)
 
 		// Merge adjacent spans with the same style.
-		if currentStyle == nil {
-			currentStyle = spanStyle
+		if currentKey == "" {
+			currentKey, currentPoint = spanKey, spanPoint
 			spanStart = boundaryStart
-		} else if currentStyle != spanStyle {
+		} else if currentKey != spanKey {
 			// Style changed - flush current span.
-			sb.WriteString(currentStyle.Render(escape.Control(string(runes[spanStart:boundaryStart]))))
+			st := p.blended(currentKey, base, active, currentPoint)
+			sb.WriteString(st.Render(escape.Control(string(runes[spanStart:boundaryStart]))))
 
-			currentStyle = spanStyle
+			currentKey, currentPoint = spanKey, spanPoint
 			spanStart = boundaryStart
 		}
 
@@ -684,8 +691,9 @@ func (p *Printer) styleLineWithRanges(
 	}
 
 	// Flush remaining content.
-	if currentStyle != nil && spanStart < len(runes) {
-		sb.WriteString(currentStyle.Render(escape.Control(string(runes[spanStart:]))))
+	if currentKey != "" && spanStart < len(runes) {
+		st := p.blended(currentKey, base, active, currentPoint)
+		sb.WriteString(st.Render(escape.Control(string(runes[spanStart:]))))
 	}
 
 	return sb.String()
@@ -695,17 +703,17 @@ func (p *Printer) styleLineWithRanges(
 // styles change.
 //
 // The cols span defines the line segment boundaries.
-func computeStyleBoundaries(active []overlayWithStyle, cols position.Span) []int {
+func computeStyleBoundaries(active line.Overlays, cols position.Span) []int {
 	boundaries := make([]int, 0, len(active)*2+2)
 	boundaries = append(boundaries, cols.Start, cols.End)
 
 	for _, ov := range active {
-		if ov.cols.Start > cols.Start && ov.cols.Start < cols.End {
-			boundaries = append(boundaries, ov.cols.Start)
+		if ov.Cols.Start > cols.Start && ov.Cols.Start < cols.End {
+			boundaries = append(boundaries, ov.Cols.Start)
 		}
 
-		if ov.cols.End > cols.Start && ov.cols.End < cols.End {
-			boundaries = append(boundaries, ov.cols.End)
+		if ov.Cols.End > cols.Start && ov.Cols.End < cols.End {
+			boundaries = append(boundaries, ov.Cols.End)
 		}
 	}
 
@@ -714,34 +722,98 @@ func computeStyleBoundaries(active []overlayWithStyle, cols position.Span) []int
 	return slices.Compact(boundaries)
 }
 
-// overlayWithStyle combines overlay column span with its resolved style.
-type overlayWithStyle struct {
-	style *lipgloss.Style
-	cols  position.Span
-	blend bool
-}
-
-// computeStyleForPoint computes the effective style at a point given
-// overlapping overlays, applied in order. A blending overlay mixes with the
-// result so far, and any other replaces it.
-//
-// This uses pre-filtered overlays from styleLineWithRanges.
-//
-// Results are cached so identical style combinations return the same pointer.
-func (p *Printer) computeStyleForPoint(
-	point int,
-	overlays []overlayWithStyle,
-	baseStyle *lipgloss.Style,
-) *lipgloss.Style {
-	result := baseStyle
+// blendKey returns the cache key of the effective style at point: the base
+// category followed by each overlay that covers the point, in order, marked
+// by whether it blends with or replaces the style underneath. Two points
+// with the same key render with the same style.
+func blendKey(base style.Style, overlays line.Overlays, point int) string {
+	var sb strings.Builder
 
 	for _, ov := range overlays {
-		if ov.cols.Contains(point) {
-			result = p.blender.Blend(result, ov.style, !ov.blend)
+		if !ov.Cols.Contains(point) {
+			continue
+		}
+
+		if sb.Len() == 0 {
+			sb.WriteString(string(base))
+		}
+
+		if ov.Blend {
+			sb.WriteString("+")
+		} else {
+			sb.WriteString("!")
+		}
+
+		sb.WriteString(string(ov.Style))
+	}
+
+	// A point no overlay covers keeps the base style, with no key to build.
+	if sb.Len() == 0 {
+		return string(base)
+	}
+
+	return sb.String()
+}
+
+// blended returns the style for key, which [blendKey] built from base and
+// the overlays that cover point. It computes the style on the first request
+// and serves the cache after that. The overlays apply in order: a blending
+// overlay mixes with the result so far, and any other replaces it.
+func (p *Printer) blended(key string, base style.Style, overlays line.Overlays, point int) lipgloss.Style {
+	if st, ok := p.blends.get(key); ok {
+		return st
+	}
+
+	result := p.styles.Style(base)
+
+	for _, ov := range overlays {
+		if !ov.Cols.Contains(point) {
+			continue
+		}
+
+		if ov.Blend {
+			result = colors.BlendStyles(result, p.styles.Style(ov.Style))
+		} else {
+			result = colors.OverrideStyles(result, p.styles.Style(ov.Style))
 		}
 	}
 
-	return result
+	return p.blends.put(key, result)
+}
+
+// blendCache holds the styles a [Printer] blends for overlays, keyed by
+// [blendKey]. Copies of a Printer share one cache until [WithStyles] gives
+// a copy its own, so it is safe for concurrent use.
+type blendCache struct {
+	styles map[string]lipgloss.Style
+	mu     sync.RWMutex
+}
+
+// newBlendCache creates a new [*blendCache].
+func newBlendCache() *blendCache {
+	return &blendCache{styles: make(map[string]lipgloss.Style)}
+}
+
+// get returns the cached style for key.
+func (c *blendCache) get(key string) (lipgloss.Style, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	st, ok := c.styles[key]
+
+	return st, ok
+}
+
+// put stores st under key and returns it.
+//
+//nolint:gocritic // hugeParam: value semantics match lipgloss.
+func (c *blendCache) put(key string, st lipgloss.Style) lipgloss.Style {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.styles[key] = st
+
+	return st
 }
 
 // contentWidth returns the available width for content after accounting for
@@ -783,7 +855,7 @@ func (p *Printer) renderTokenLine(lineIndex int, ln *line.Line) string {
 	var sb strings.Builder
 
 	for _, tk := range ln.Tokens() {
-		tokenStyle := p.styles.Style(tokens.TypeStyle(tk))
+		tokenStyle := tokens.TypeStyle(tk)
 		valueOffset := tokens.ValueOffset(tk)
 
 		// Get the token's origin text.
@@ -798,9 +870,8 @@ func (p *Printer) renderTokenLine(lineIndex int, ln *line.Line) string {
 		// Part 1: Render separator portion (default style).
 		if separatorRunes > 0 && separatorRunes <= len(originRunes) {
 			sepPart := string(originRunes[:separatorRunes])
-			defaultStyle := p.styles.Style(style.Text)
 			sb.WriteString(
-				p.styleLineWithRanges(sepPart, pos, defaultStyle, ln.Overlays),
+				p.styleLineWithRanges(sepPart, pos, style.Text, ln.Overlays),
 			)
 
 			pos.Col += separatorRunes
