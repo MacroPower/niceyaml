@@ -194,6 +194,73 @@ func TestPrinter_ClearOverlays(t *testing.T) {
 	assert.Equal(t, "key: value", p.Print(view))
 }
 
+func TestPrinter_CRLF(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input       string
+		want        string
+		wantOverlay string
+	}{
+		"mapping": {
+			input:       "a: b\r\nc: d\r\n",
+			want:        stringtest.JoinLF("a: b", "c: d"),
+			wantOverlay: stringtest.JoinLF("[a][:][ ][b]", "[c][:][ ][d]"),
+		},
+		"blank line": {
+			input:       "a: b\r\n\r\nc: d\r\n",
+			want:        stringtest.JoinLF("a: b", "", "c: d"),
+			wantOverlay: stringtest.JoinLF("[a][:][ ][b]", "", "[c][:][ ][d]"),
+		},
+		// The lexer ends the comment token with the CR and starts the next
+		// token with the LF.
+		"comment ending in CR": {
+			input:       "a: b # c\r\nd: e\r\n",
+			want:        stringtest.JoinLF("a: b # c", "d: e"),
+			wantOverlay: stringtest.JoinLF("[a][:][ ][b ][# c]", "[d][:][ ][e]"),
+		},
+		// The lexer gives the CRLF after a quoted value a token of its own.
+		"line ending token": {
+			input:       "a: 'x'\r\nb: 'y'\r\n",
+			want:        stringtest.JoinLF("a: 'x'", "b: 'y'"),
+			wantOverlay: stringtest.JoinLF("[a][:][ 'x']", "[b][:][ 'y']"),
+		},
+		"block scalar": {
+			input:       "a: |\r\n  x\r\n  y\r\n",
+			want:        stringtest.JoinLF("a: |", "  x", "  y"),
+			wantOverlay: stringtest.JoinLF("[a][:][ ][|]", "[  x]", "[  y]"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := testPrinter()
+			view := niceyaml.NewSourceFromString(tc.input).Lines()
+
+			got := p.Print(view)
+			assert.Equal(t, tc.want, got)
+
+			// Highlight every visible column of every line.
+			for i := range view {
+				view.AddOverlay(testOverlayHighlight, position.NewRange(
+					position.New(i, 0),
+					position.New(i, view[i].Width()),
+				))
+			}
+
+			gotOverlay := p.Print(view)
+			assert.Equal(t, tc.wantOverlay, gotOverlay)
+
+			for _, out := range []string{got, gotOverlay} {
+				assert.NotContains(t, out, "\r")
+				assert.NotContains(t, out, "␍", "CR control picture")
+			}
+		})
+	}
+}
+
 func TestPrinter_PrintTokens_EmptyFile(t *testing.T) {
 	t.Parallel()
 
@@ -658,6 +725,15 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			before: "key: value\n",
 			after:  "",
 			want:   "   1 -key: value",
+		},
+		"CRLF line endings": {
+			before: "key: value\r\nold: line\r\n",
+			after:  "key: value\r\nnew: line\r\n",
+			want: stringtest.JoinLF(
+				"   1  key: value",
+				"   2 -old: line",
+				"   2 +new: line",
+			),
 		},
 	}
 

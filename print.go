@@ -858,10 +858,9 @@ func (p *Printer) renderTokenLine(lineIndex int, ln *line.Line) string {
 		tokenStyle := tokens.TypeStyle(tk)
 		valueOffset := tokens.ValueOffset(tk)
 
-		// Get the token's origin text.
-		origin := tk.Origin
-		// Strip trailing newline - we add newlines between lines in renderLines.
-		origin = strings.TrimSuffix(origin, "\n")
+		// Drop the line ending, CR included, as Line.Content does. Print
+		// joins the rows with newlines.
+		origin := tokens.TrimLineEnding(tk.Origin)
 		originRunes := []rune(origin)
 
 		// Calculate separator (leading whitespace before value).
