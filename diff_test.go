@@ -911,7 +911,7 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 			var beforeLines []line.Line
 
 			for _, ln := range beforeIter.AllLines() {
-				beforeLines = append(beforeLines, ln)
+				beforeLines = append(beforeLines, *ln)
 			}
 
 			verifyLines(t, "Before", beforeLines, tc.wantBefore)
@@ -920,7 +920,7 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 			var afterLines []line.Line
 
 			for _, ln := range afterIter.AllLines() {
-				afterLines = append(afterLines, ln)
+				afterLines = append(afterLines, *ln)
 			}
 
 			verifyLines(t, "After", afterLines, tc.wantAfter)

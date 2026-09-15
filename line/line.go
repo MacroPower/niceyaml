@@ -219,14 +219,15 @@ func (ls Lines) Clone() Lines {
 
 // AllLines returns an iterator over lines within the given spans.
 //
-// Without spans, AllLines yields every line. Each iteration yields a
-// [position.Position] at column 0 and the [Line] at that position. AllLines
-// clamps spans to the available lines.
-func (ls Lines) AllLines(spans ...position.Span) iter.Seq2[position.Position, Line] {
-	return func(yield func(position.Position, Line) bool) {
+// Without spans, AllLines yields every line. Each iteration yields the
+// 0-indexed line index and a pointer to the [Line] at that index, so
+// annotations and overlays added through the pointer land on the collection.
+// AllLines clamps spans to the available lines.
+func (ls Lines) AllLines(spans ...position.Span) iter.Seq2[int, *Line] {
+	return func(yield func(int, *Line) bool) {
 		if len(spans) == 0 {
-			for i, ln := range ls {
-				if !yield(position.New(i, 0), ln) {
+			for i := range ls {
+				if !yield(i, &ls[i]) {
 					return
 				}
 			}
@@ -239,7 +240,7 @@ func (ls Lines) AllLines(spans ...position.Span) iter.Seq2[position.Position, Li
 			end := min(len(ls), span.End)
 
 			for i := start; i < end; i++ {
-				if !yield(position.New(i, 0), ls[i]) {
+				if !yield(i, &ls[i]) {
 					return
 				}
 			}

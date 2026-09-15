@@ -23,7 +23,7 @@ import (
 // [line.Lines] implements it directly, and [Source] implements it by
 // delegating to its view.
 type LineIterator interface {
-	AllLines(spans ...position.Span) iter.Seq2[position.Position, line.Line]
+	AllLines(spans ...position.Span) iter.Seq2[int, *line.Line]
 	AllRunes(ranges ...position.Range) iter.Seq2[position.Position, rune]
 	Len() int
 	IsEmpty() bool
@@ -329,7 +329,7 @@ func (s *Source) IsEmpty() bool {
 
 // AllLines returns an iterator over lines within the given spans.
 // See [line.Lines.AllLines].
-func (s *Source) AllLines(spans ...position.Span) iter.Seq2[position.Position, line.Line] {
+func (s *Source) AllLines(spans ...position.Span) iter.Seq2[int, *line.Line] {
 	return s.lines.AllLines(spans...)
 }
 

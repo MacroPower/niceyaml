@@ -2965,26 +2965,22 @@ func TestLines_View(t *testing.T) {
 		assert.Equal(t, len("key: value"), lines.Width())
 	})
 
-	t.Run("AllLines yields every line at column zero", func(t *testing.T) {
+	t.Run("AllLines yields every index and line", func(t *testing.T) {
 		t.Parallel()
 
 		lines := line.NewLines(lexer.Tokenize(input))
 
 		var (
-			positions []position.Position
-			contents  []string
+			indices  []int
+			contents []string
 		)
 
-		for pos, ln := range lines.AllLines() {
-			positions = append(positions, pos)
+		for i, ln := range lines.AllLines() {
+			indices = append(indices, i)
 			contents = append(contents, ln.Content())
 		}
 
-		assert.Equal(t, []position.Position{
-			position.New(0, 0),
-			position.New(1, 0),
-			position.New(2, 0),
-		}, positions)
+		assert.Equal(t, []int{0, 1, 2}, indices)
 		assert.Equal(t, []string{"key: value", "list:", "  - one"}, contents)
 	})
 
@@ -2993,13 +2989,28 @@ func TestLines_View(t *testing.T) {
 
 		lines := line.NewLines(lexer.Tokenize(input))
 
-		var positions []position.Position
+		var indices []int
 
-		for pos := range lines.AllLines(position.NewSpan(1, 99)) {
-			positions = append(positions, pos)
+		for i := range lines.AllLines(position.NewSpan(1, 99)) {
+			indices = append(indices, i)
 		}
 
-		assert.Equal(t, []position.Position{position.New(1, 0), position.New(2, 0)}, positions)
+		assert.Equal(t, []int{1, 2}, indices)
+	})
+
+	t.Run("AllLines yields pointers into the collection", func(t *testing.T) {
+		t.Parallel()
+
+		lines := line.NewLines(lexer.Tokenize(input))
+
+		for i, ln := range lines.AllLines() {
+			if i == 1 {
+				ln.AddAnnotation(line.Annotation{Content: "note", Placement: line.Below})
+			}
+		}
+
+		require.Len(t, lines[1].Annotations, 1)
+		assert.Equal(t, "note", lines[1].Annotations[0].Content)
 	})
 
 	t.Run("AllRunes round-trips the input", func(t *testing.T) {

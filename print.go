@@ -426,7 +426,7 @@ func (p *Printer) renderLinesInSpan(t LineIterator, span position.Span) string {
 	deletedStyle := p.styles.Style(style.GenericDeleted)
 	insertedStyle := p.styles.Style(style.GenericInserted)
 
-	for pos, ln := range t.AllLines(span) {
+	for idx, ln := range t.AllLines(span) {
 		lineNum := ln.Number()
 
 		var (
@@ -446,7 +446,7 @@ func (p *Printer) renderLinesInSpan(t LineIterator, span position.Span) string {
 			}
 
 			// Render annotation above the line.
-			p.renderAnnotation(&sb, ln, pos, lineNum, totalLines, line.Above, gutterWidth)
+			p.renderAnnotation(&sb, ln, idx, lineNum, totalLines, line.Above, gutterWidth)
 			sb.WriteByte('\n')
 		} else if renderedIdx > 0 {
 			// Add newline between lines within a hunk.
@@ -454,7 +454,7 @@ func (p *Printer) renderLinesInSpan(t LineIterator, span position.Span) string {
 		}
 
 		gutterCtx := GutterContext{
-			Index:      pos.Line,
+			Index:      idx,
 			Number:     lineNum,
 			TotalLines: totalLines,
 			Soft:       false,
@@ -462,7 +462,7 @@ func (p *Printer) renderLinesInSpan(t LineIterator, span position.Span) string {
 			Styles:     p.styles,
 		}
 
-		linePos := position.New(pos.Line, 0)
+		linePos := position.New(idx, 0)
 
 		var (
 			content      string
@@ -480,7 +480,7 @@ func (p *Printer) renderLinesInSpan(t LineIterator, span position.Span) string {
 
 		default: // FlagDefault (equal line).
 			// Render with syntax highlighting.
-			content = p.renderTokenLine(pos.Line, ln)
+			content = p.renderTokenLine(idx, ln)
 			contentStyle = nil
 		}
 
@@ -488,7 +488,7 @@ func (p *Printer) renderLinesInSpan(t LineIterator, span position.Span) string {
 
 		if hasBelowAnnotation {
 			sb.WriteByte('\n')
-			p.renderAnnotation(&sb, ln, pos, lineNum, totalLines, line.Below, gutterWidth)
+			p.renderAnnotation(&sb, ln, idx, lineNum, totalLines, line.Below, gutterWidth)
 		}
 
 		renderedIdx++
@@ -505,8 +505,8 @@ func (p *Printer) renderLinesInSpan(t LineIterator, span position.Span) string {
 // The gutterWidth parameter enables width calculation for wrapping.
 func (p *Printer) renderAnnotation(
 	sb *strings.Builder,
-	ln line.Line,
-	pos position.Position,
+	ln *line.Line,
+	idx int,
 	lineNum, totalLines int,
 	relPos line.Placement,
 	gutterWidth int,
@@ -542,7 +542,7 @@ func (p *Printer) renderAnnotation(
 		}
 
 		gutterCtx := GutterContext{
-			Index:      pos.Line,
+			Index:      idx,
 			Number:     lineNum,
 			TotalLines: totalLines,
 			Soft:       j > 0,
@@ -777,7 +777,7 @@ func (p *Printer) wrapContent(content string, gutterWidth int) []string {
 //
 // The lineIndex parameter is the 0-indexed position in the [line.Lines]
 // collection.
-func (p *Printer) renderTokenLine(lineIndex int, ln line.Line) string {
+func (p *Printer) renderTokenLine(lineIndex int, ln *line.Line) string {
 	if ln.IsEmpty() {
 		return ""
 	}

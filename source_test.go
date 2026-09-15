@@ -304,9 +304,9 @@ func TestSource_AllLines_EarlyBreak(t *testing.T) {
 
 	var collected []int
 
-	for pos := range lines.AllLines() {
-		collected = append(collected, pos.Line)
-		if pos.Line >= 1 {
+	for idx := range lines.AllLines() {
+		collected = append(collected, idx)
+		if idx >= 1 {
 			break
 		}
 	}
@@ -327,8 +327,8 @@ func TestSource_AllLines_WithSpans(t *testing.T) {
 
 		var collected []int
 
-		for pos := range source.AllLines() {
-			collected = append(collected, pos.Line)
+		for idx := range source.AllLines() {
+			collected = append(collected, idx)
 		}
 
 		assert.Equal(t, []int{0, 1, 2, 3, 4}, collected)
@@ -339,8 +339,8 @@ func TestSource_AllLines_WithSpans(t *testing.T) {
 
 		var collected []int
 
-		for pos := range source.AllLines(position.NewSpan(1, 3)) {
-			collected = append(collected, pos.Line)
+		for idx := range source.AllLines(position.NewSpan(1, 3)) {
+			collected = append(collected, idx)
 		}
 
 		assert.Equal(t, []int{1, 2}, collected)
@@ -351,11 +351,11 @@ func TestSource_AllLines_WithSpans(t *testing.T) {
 
 		var collected []int
 
-		for pos := range source.AllLines(
+		for idx := range source.AllLines(
 			position.NewSpan(0, 1),
 			position.NewSpan(3, 5),
 		) {
-			collected = append(collected, pos.Line)
+			collected = append(collected, idx)
 		}
 
 		assert.Equal(t, []int{0, 3, 4}, collected)
@@ -366,8 +366,8 @@ func TestSource_AllLines_WithSpans(t *testing.T) {
 
 		var collected []int
 
-		for pos := range source.AllLines(position.NewSpan(-5, 100)) {
-			collected = append(collected, pos.Line)
+		for idx := range source.AllLines(position.NewSpan(-5, 100)) {
+			collected = append(collected, idx)
 		}
 
 		assert.Equal(t, []int{0, 1, 2, 3, 4}, collected)
@@ -378,8 +378,8 @@ func TestSource_AllLines_WithSpans(t *testing.T) {
 
 		var collected []int
 
-		for pos := range source.AllLines(position.NewSpan(2, 2)) {
-			collected = append(collected, pos.Line)
+		for idx := range source.AllLines(position.NewSpan(2, 2)) {
+			collected = append(collected, idx)
 		}
 
 		assert.Nil(t, collected)
@@ -390,8 +390,8 @@ func TestSource_AllLines_WithSpans(t *testing.T) {
 
 		var collected []int
 
-		for pos := range source.AllLines(position.NewSpan(10, 20)) {
-			collected = append(collected, pos.Line)
+		for idx := range source.AllLines(position.NewSpan(10, 20)) {
+			collected = append(collected, idx)
 		}
 
 		assert.Nil(t, collected)
