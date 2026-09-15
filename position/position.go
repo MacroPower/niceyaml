@@ -2,6 +2,7 @@ package position
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/goccy/go-yaml/token"
@@ -86,25 +87,33 @@ func (r Range) String() string {
 }
 
 // SliceLines splits a multi-line range into per-line ranges.
-func (r Range) SliceLines() []Range {
+//
+// Every line but the last extends to the end of the line. A range that ends
+// at column 0 of a later line covers nothing on that line, so SliceLines
+// stops at the line before it.
+func (r Range) SliceLines() Ranges {
 	if r.Start.Line == r.End.Line {
-		return []Range{r}
+		return Ranges{r}
 	}
 
 	lineCount := r.End.Line - r.Start.Line + 1
-	result := make([]Range, lineCount)
+	if r.End.Col == 0 {
+		lineCount--
+	}
+
+	result := make(Ranges, lineCount)
 
 	for i := range lineCount {
 		line := r.Start.Line + i
 
 		var start, end Position
 
-		switch i {
-		case 0:
+		switch {
+		case i == 0:
 			start = Position{Line: line, Col: r.Start.Col}
 			end = Position{Line: line, Col: maxCol}
 
-		case lineCount - 1:
+		case line == r.End.Line:
 			start = Position{Line: line, Col: 0}
 			end = Position{Line: line, Col: r.End.Col}
 
@@ -198,13 +207,13 @@ type Ranges []Range
 
 // UniqueValues returns all unique [Range] values in the collection,
 // preserving insertion order.
-func (rs Ranges) UniqueValues() []Range {
+func (rs Ranges) UniqueValues() Ranges {
 	if len(rs) == 0 {
 		return nil
 	}
 
 	seen := make(map[Range]struct{})
-	result := make([]Range, 0, len(rs))
+	result := make(Ranges, 0, len(rs))
 
 	for _, r := range rs {
 		if _, exists := seen[r]; !exists {
@@ -217,7 +226,8 @@ func (rs Ranges) UniqueValues() []Range {
 }
 
 // LineIndices returns all line indices covered by the [Ranges].
-// For multi-line ranges, each line within the range is included.
+// A multi-line range contributes each line within it, except an end line it
+// touches only at column 0, which holds none of it.
 // Duplicate line indices are returned if covered by multiple ranges.
 func (rs Ranges) LineIndices() []int {
 	if len(rs) == 0 {
@@ -227,7 +237,12 @@ func (rs Ranges) LineIndices() []int {
 	var result []int
 
 	for _, r := range rs {
-		for line := r.Start.Line; line <= r.End.Line; line++ {
+		last := r.End.Line
+		if r.End.Col == 0 && last > r.Start.Line {
+			last--
+		}
+
+		for line := r.Start.Line; line <= last; line++ {
 			result = append(result, line)
 		}
 	}
@@ -254,8 +269,8 @@ func (rs Ranges) String() string {
 	return b.String()
 }
 
-// GroupIndices groups sorted indices into [Span] values where indices within
-// context distance are merged.
+// GroupIndices groups indices into [Span] values. Indices within context
+// distance of each other share a span. The indices need not be sorted.
 //
 // Uses threshold = 2*context + 1 which ensures indices merge when their context
 // windows would overlap or be adjacent.
@@ -275,6 +290,9 @@ func GroupIndices(indices []int, context int) Spans {
 	// Merge if I2-C <= I1+C+1, i.e., I2 < I1 + 2C + 2.
 	// Since spans are half-open [Start, End), we use End (which is I1+1) + threshold.
 	threshold := context*2 + 1
+
+	indices = slices.Clone(indices)
+	slices.Sort(indices)
 
 	spans := Spans{NewSpan(indices[0], indices[0]+1)}
 

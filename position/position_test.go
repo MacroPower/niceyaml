@@ -334,46 +334,51 @@ func TestRange_SliceLines(t *testing.T) {
 
 	tcs := map[string]struct {
 		input position.Range
-		want  []position.Range
+		want  position.Ranges
 	}{
 		"single line range": {
 			input: position.NewRange(position.New(1, 5), position.New(1, 10)),
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(position.New(1, 5), position.New(1, 10)),
 			},
 		},
 		"empty range": {
 			input: position.NewRange(position.New(2, 3), position.New(2, 3)),
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(position.New(2, 3), position.New(2, 3)),
 			},
 		},
 		"two line range": {
 			input: position.NewRange(position.New(1, 5), position.New(2, 10)),
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(position.New(1, 5), position.New(1, maxCol)),
 				position.NewRange(position.New(2, 0), position.New(2, 10)),
 			},
 		},
 		"three line range": {
 			input: position.NewRange(position.New(1, 5), position.New(3, 10)),
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(position.New(1, 5), position.New(1, maxCol)),
 				position.NewRange(position.New(2, 0), position.New(2, maxCol)),
 				position.NewRange(position.New(3, 0), position.New(3, 10)),
 			},
 		},
-		"multi-line range with zero end col": {
+		"multi-line range with zero end col stops before end line": {
 			input: position.NewRange(position.New(0, 10), position.New(2, 0)),
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(position.New(0, 10), position.New(0, maxCol)),
 				position.NewRange(position.New(1, 0), position.New(1, maxCol)),
-				position.NewRange(position.New(2, 0), position.New(2, 0)),
+			},
+		},
+		"two line range with zero end col": {
+			input: position.NewRange(position.New(0, 10), position.New(1, 0)),
+			want: position.Ranges{
+				position.NewRange(position.New(0, 10), position.New(0, maxCol)),
 			},
 		},
 		"range starting at col 0": {
 			input: position.NewRange(position.New(5, 0), position.New(7, 15)),
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(position.New(5, 0), position.New(5, maxCol)),
 				position.NewRange(position.New(6, 0), position.New(6, maxCol)),
 				position.NewRange(position.New(7, 0), position.New(7, 15)),
@@ -407,7 +412,7 @@ func TestRanges_UniqueValues(t *testing.T) {
 
 		r := position.NewRange(position.New(0, 0), position.New(1, 0))
 		rs := position.Ranges{r}
-		assert.Equal(t, []position.Range{r}, rs.UniqueValues())
+		assert.Equal(t, position.Ranges{r}, rs.UniqueValues())
 	})
 
 	t.Run("removes adjacent duplicates", func(t *testing.T) {
@@ -415,7 +420,7 @@ func TestRanges_UniqueValues(t *testing.T) {
 
 		r := position.NewRange(position.New(0, 0), position.New(1, 0))
 		rs := position.Ranges{r, r, r}
-		assert.Equal(t, []position.Range{r}, rs.UniqueValues())
+		assert.Equal(t, position.Ranges{r}, rs.UniqueValues())
 	})
 
 	t.Run("removes scattered duplicates", func(t *testing.T) {
@@ -424,7 +429,7 @@ func TestRanges_UniqueValues(t *testing.T) {
 		r1 := position.NewRange(position.New(0, 0), position.New(1, 0))
 		r2 := position.NewRange(position.New(2, 0), position.New(3, 0))
 		rs := position.Ranges{r1, r2, r1, r2}
-		assert.Equal(t, []position.Range{r1, r2}, rs.UniqueValues())
+		assert.Equal(t, position.Ranges{r1, r2}, rs.UniqueValues())
 	})
 
 	t.Run("preserves insertion order", func(t *testing.T) {
@@ -434,7 +439,7 @@ func TestRanges_UniqueValues(t *testing.T) {
 		r2 := position.NewRange(position.New(2, 0), position.New(3, 0))
 		r3 := position.NewRange(position.New(4, 0), position.New(5, 0))
 		rs := position.Ranges{r3, r1, r2, r1, r3}
-		assert.Equal(t, []position.Range{r3, r1, r2}, rs.UniqueValues())
+		assert.Equal(t, position.Ranges{r3, r1, r2}, rs.UniqueValues())
 	})
 
 	t.Run("all duplicates returns single item", func(t *testing.T) {
@@ -442,7 +447,7 @@ func TestRanges_UniqueValues(t *testing.T) {
 
 		r := position.NewRange(position.New(5, 5), position.New(10, 10))
 		rs := position.Ranges{r, r, r, r, r}
-		assert.Equal(t, []position.Range{r}, rs.UniqueValues())
+		assert.Equal(t, position.Ranges{r}, rs.UniqueValues())
 	})
 }
 
@@ -469,10 +474,18 @@ func TestRanges_LineIndices(t *testing.T) {
 		t.Parallel()
 
 		r1 := position.NewRange(position.New(0, 0), position.New(0, 5))
-		r2 := position.NewRange(position.New(3, 0), position.New(4, 0)) // Spans lines 3-4.
+		r2 := position.NewRange(position.New(3, 0), position.New(4, 5)) // Spans lines 3-4.
 		r3 := position.NewRange(position.New(7, 0), position.New(7, 10))
 		rs := position.Ranges{r1, r2, r3}
 		assert.Equal(t, []int{0, 3, 4, 7}, rs.LineIndices())
+	})
+
+	t.Run("excludes end line touched only at column 0", func(t *testing.T) {
+		t.Parallel()
+
+		r := position.NewRange(position.New(3, 2), position.New(5, 0))
+		rs := position.Ranges{r}
+		assert.Equal(t, []int{3, 4}, rs.LineIndices())
 	})
 
 	t.Run("includes duplicate lines from overlapping ranges", func(t *testing.T) {
@@ -788,6 +801,11 @@ func TestGroupIndices(t *testing.T) {
 			indices: []int{5, 5, 5},
 			context: 2,
 			want:    position.Spans{position.NewSpan(5, 6)},
+		},
+		"unsorted indices are sorted first": {
+			indices: []int{12, 0, 10, 2},
+			context: 2,
+			want:    position.Spans{position.NewSpan(0, 3), position.NewSpan(10, 13)},
 		},
 	}
 
