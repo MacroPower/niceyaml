@@ -3,6 +3,7 @@ package yamlviewport
 import (
 	"cmp"
 	"slices"
+	"sort"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -122,6 +123,16 @@ func New(opts ...Option) Model {
 // A zero Model has no printer, keymap, or searcher. Its [Model.View] returns
 // "" and its other methods make no promises, so construct every Model with
 // [New] and its [Option]s.
+//
+// # Rows and Lines
+//
+// The viewport scrolls by rendered row, not by source line. A line that
+// wraps to the viewport width or carries an annotation takes several rows,
+// and the vertical offset ([Model.YOffset], [Model.SetYOffset], and the
+// scroll methods) counts those rows, so every row of the view is reachable.
+// Methods named after rows ([Model.TotalRowCount], [Model.VisibleRowCount])
+// count rows; methods named after lines ([Model.TotalLineCount],
+// [Model.VisibleLineCount]) count the lines of the view.
 type Model struct {
 	// The container style applied to the viewport frame.
 	style    lipgloss.Style
@@ -132,7 +143,9 @@ type Model struct {
 	// Cached diff between base and current revision.
 	diffResult *niceyaml.DiffResult
 	// Left holds the view for the left pane or main content.
-	// In ViewModeFull/ViewModeHunks: Unified diff or plain content.
+	// In ViewModeFull: Unified diff or plain content.
+	// In ViewModeHunks with diff: Unified diff with hunk headers; spans
+	// below selects the hunks.
 	// In ViewModeSideBySide with diff: Before view.
 	// In ViewModeSideBySide without diff: plain content (same on both sides).
 	//
@@ -143,6 +156,12 @@ type Model struct {
 	// Right holds the right pane view for side-by-side diff rendering.
 	// Only populated when viewMode == ViewModeSideBySide and showing a diff.
 	right line.Lines
+	// Spans of left that the view renders, in order. Nil renders every line.
+	spans position.Spans
+	// Rendered row counts of the view. Copies of the Model share one cache
+	// until a layout change gives a copy its own, so the counts that the
+	// value-receiver View fills in stay filled for the Model it copied.
+	rows *rowCache
 	// Current search query.
 	searchTerm string
 	// KeyMap contains the keybindings for viewport navigation.
@@ -153,7 +172,7 @@ type Model struct {
 	horizontalStep int
 	revIndex       int
 	diffMode       DiffMode
-	// MouseWheelDelta is the number of lines to scroll per mouse wheel tick.
+	// MouseWheelDelta is the number of rows to scroll per mouse wheel tick.
 	// Default: 3.
 	MouseWheelDelta int
 	width           int
@@ -192,6 +211,8 @@ func (m *Model) setInitialValues() {
 			niceyaml.WithNormalizer(normalizer.New()),
 		)
 	}
+
+	m.relayout()
 }
 
 // Init implements the [tea.Model] interface.
@@ -210,8 +231,9 @@ func (m *Model) Height() int {
 // SetHeight sets the height of the viewport and clamps the scroll offsets to
 // the new bounds.
 func (m *Model) SetHeight(h int) {
+	// Row counts do not depend on the height, so the cache stays, and
+	// ensureRows clamps the offsets on their next read.
 	m.height = h
-	m.clampOffsets()
 }
 
 // Width returns the width of the viewport.
@@ -228,16 +250,11 @@ func (m *Model) SetWidth(w int) {
 
 // relayout responds to a change in how the view is laid out, such as a new
 // printer, style, wrap setting, or width, without rebuilding the view. It
-// clamps both scroll offsets to the bounds of the new layout.
+// gives the Model an empty row count cache and leaves any copy that shares
+// the old cache untouched. The next read of the scroll bounds fills the new
+// cache.
 func (m *Model) relayout() {
-	m.clampOffsets()
-}
-
-// clampOffsets pulls both scroll offsets back inside the bounds of the
-// current view and dimensions.
-func (m *Model) clampOffsets() {
-	m.yOffset = clamp(m.yOffset, 0, m.maxYOffset())
-	m.xOffset = clamp(m.xOffset, 0, m.maxXOffset())
+	m.rows = &rowCache{}
 }
 
 // renderPrinter returns the printer to render with: the configured printer
@@ -484,30 +501,34 @@ func (m *Model) seekRevision(delta int) {
 }
 
 // rebuildViews rebuilds the displayed views from the revision, diff mode, and
-// view mode, then refreshes the search state and clamps the scroll offsets.
+// view mode, then refreshes the search state and drops the cached row counts.
 // Rendering itself waits for View, which renders only the visible window.
 func (m *Model) rebuildViews() {
 	m.diffResult = nil // Invalidate cached diff result.
 	m.left = nil
 	m.right = nil
+	m.spans = nil
 	m.searcherStale = true
 
-	// Handle side-by-side mode with diff specially.
-	if m.viewMode == ViewModeSideBySide {
-		if _, needsDiff := m.resolveRevisionSource(); needsDiff {
-			diff := m.getDiffResult()
-			m.left = diff.Before()
-			m.right = diff.After()
-		}
-	}
+	_, needsDiff := m.resolveRevisionSource()
 
-	// For other modes, use standard display lines.
-	if m.left == nil {
+	switch {
+	case m.viewMode == ViewModeSideBySide && needsDiff:
+		diff := m.getDiffResult()
+		m.left = diff.Before()
+		m.right = diff.After()
+
+	case m.viewMode == ViewModeHunks && needsDiff:
+		// Hunks returns nil lines when the diff has no changes, which leaves
+		// the view empty.
+		m.left, m.spans = m.getDiffResult().Hunks(m.hunkContext)
+
+	default:
 		m.left = m.getDisplayLines()
 	}
 
 	m.refreshSearch()
-	m.clampOffsets()
+	m.relayout()
 }
 
 // refreshSearch recomputes search matches and overlays for the current views
@@ -681,7 +702,9 @@ func (m *Model) applySideBySidePaneOverlays(
 // lines.
 //
 // It reloads the searcher only when the lines changed since the last load, so
-// typing a search term does not rebuild the index on every keystroke.
+// typing a search term does not rebuild the index on every keystroke. Matches
+// on lines the view does not render, such as lines outside every hunk, are
+// dropped.
 func (m *Model) updateSearchState(lines line.Lines) {
 	if m.searchTerm == "" {
 		m.searchMatches = nil
@@ -699,10 +722,14 @@ func (m *Model) updateSearchState(lines line.Lines) {
 
 	// Convert ranges to searchMatch structs (inLeft is not used in unified mode).
 	ranges := m.searcher.Find(m.searchTerm)
-	m.searchMatches = make([]searchMatch, len(ranges))
+	m.searchMatches = make([]searchMatch, 0, len(ranges))
 
-	for i, rng := range ranges {
-		m.searchMatches[i] = searchMatch{rng: rng}
+	for _, rng := range ranges {
+		if _, rendered := m.renderedIndex(rng.Start.Line); !rendered {
+			continue
+		}
+
+		m.searchMatches = append(m.searchMatches, searchMatch{rng: rng})
 	}
 
 	// Adjust search index if matches changed.
@@ -712,24 +739,6 @@ func (m *Model) updateSearchState(lines line.Lines) {
 	case m.searchIndex >= len(m.searchMatches), m.searchIndex < 0:
 		m.searchIndex = 0
 	}
-}
-
-// renderVisible renders only the visible slice of lines on demand.
-func (m *Model) renderVisible() []string {
-	if m.left == nil {
-		return nil
-	}
-
-	start := m.YOffset()
-	end := min(start+m.maxHeight(), m.left.Len())
-
-	if start >= end {
-		return nil
-	}
-
-	content := m.renderPrinter(m.maxWidth()).Print(m.left, position.NewSpan(start, end))
-
-	return splitLines(content)
 }
 
 // getDiffBase returns the revision the current one is compared against
@@ -809,6 +818,159 @@ func (m *Model) resolveRevisionSource() (*niceyaml.Source, bool) {
 	return nil, true
 }
 
+// viewSpans returns the spans of left that the view renders, in order.
+func (m *Model) viewSpans() position.Spans {
+	if m.spans != nil {
+		return m.spans
+	}
+
+	return position.Spans{position.NewSpan(0, m.left.Len())}
+}
+
+// renderedIndex returns the position of the given line of left among the
+// lines the view renders, and whether the view renders it at all.
+func (m *Model) renderedIndex(lineIdx int) (int, bool) {
+	if m.left == nil {
+		return 0, false
+	}
+
+	offset := 0
+
+	for _, span := range m.viewSpans() {
+		if span.Contains(lineIdx) {
+			return offset + lineIdx - span.Start, true
+		}
+
+		offset += span.Len()
+	}
+
+	return 0, false
+}
+
+// windowSpans returns the spans of left that render the lines [first, last)
+// of the view, in render order.
+func (m *Model) windowSpans(first, last int) position.Spans {
+	var spans position.Spans
+
+	offset := 0
+
+	for _, span := range m.viewSpans() {
+		lo := max(first, offset)
+		hi := min(last, offset+span.Len())
+
+		if lo < hi {
+			spans = append(spans, position.NewSpan(span.Start+lo-offset, span.Start+hi-offset))
+		}
+
+		offset += span.Len()
+	}
+
+	return spans
+}
+
+// paneWidth returns the width lines wrap to: the content width, or in
+// side-by-side mode the width of one pane.
+func (m *Model) paneWidth() int {
+	if m.viewMode == ViewModeSideBySide {
+		return max(0, (m.maxWidth()-ansi.StringWidth(sideBySideSeparator))/2)
+	}
+
+	return m.maxWidth()
+}
+
+// rowCache holds the rendered row counts of a view.
+type rowCache struct {
+	// Row counts of each line the view renders, in span order, for the left
+	// and right panes. The right counts are nil outside side-by-side diffs.
+	left, right []int
+	// Prefix sums of the taller pane, so sums[k] is the first row of the k-th
+	// rendered line and the last entry is the total. Nil until filled.
+	sums []int
+}
+
+// total returns the number of rows in a filled cache.
+func (c *rowCache) total() int {
+	return c.sums[len(c.sums)-1]
+}
+
+// ensureRows fills the row count cache when it is empty and clamps both
+// scroll offsets to its bounds. It clamps on every call, because a copy of
+// the Model can fill a shared cache without clamping this Model's offsets.
+func (m *Model) ensureRows() {
+	if m.rows == nil {
+		m.rows = &rowCache{}
+	}
+
+	if m.rows.sums == nil {
+		m.fillRows()
+	}
+
+	m.yOffset = clamp(m.yOffset, 0, max(0, m.rows.total()-m.maxHeight()))
+	m.xOffset = clamp(m.xOffset, 0, m.maxXOffset())
+}
+
+// fillRows computes the row counts of the view into the cache.
+func (m *Model) fillRows() {
+	c := m.rows
+	c.left, c.right = nil, nil
+
+	if m.left != nil {
+		spans := m.viewSpans()
+		printer := m.renderPrinter(m.paneWidth())
+
+		c.left = printer.Rows(m.left, spans...)
+
+		if m.viewMode == ViewModeSideBySide && m.right != nil {
+			c.right = printer.Rows(m.right, spans...)
+		}
+	}
+
+	sums := make([]int, len(c.left)+1)
+
+	for k, rows := range c.left {
+		if c.right != nil {
+			rows = max(rows, c.right[k])
+		}
+
+		sums[k+1] = sums[k] + rows
+	}
+
+	c.sums = sums
+}
+
+// lineRows returns the number of rows the k-th rendered line takes, which is
+// the taller of its two panes in side-by-side mode.
+func (m *Model) lineRows(k int) int {
+	return m.rows.sums[k+1] - m.rows.sums[k]
+}
+
+// rowWindow returns the rendered lines [first, last) that own the rows of the
+// visible window, which starts at the vertical offset and is one content
+// height tall.
+func (m *Model) rowWindow() (int, int) {
+	m.ensureRows()
+
+	n := len(m.rows.sums) - 1
+	top := m.yOffset
+	bottom := top + m.maxHeight()
+
+	// The last line starting at or above the top row, and the first line
+	// starting at or below the bottom row.
+	first := clamp(sort.SearchInts(m.rows.sums, top+1)-1, 0, n)
+	last := clamp(sort.SearchInts(m.rows.sums, bottom), first, n)
+
+	return first, last
+}
+
+// trimWindow drops the rows above and below the visible window from rows,
+// which hold the rendered lines starting at the first line of the window.
+func (m *Model) trimWindow(rows []string, first int) []string {
+	skip := min(m.yOffset-m.rows.sums[first], len(rows))
+	rows = rows[skip:]
+
+	return rows[:min(len(rows), m.maxHeight())]
+}
+
 // AtTop reports whether the viewport is scrolled to the top.
 func (m *Model) AtTop() bool {
 	return !m.hasContent() || m.YOffset() <= 0
@@ -819,7 +981,7 @@ func (m *Model) AtBottom() bool {
 	return !m.hasContent() || m.YOffset() >= m.maxYOffset()
 }
 
-// PastBottom reports whether the viewport is scrolled past the last line.
+// PastBottom reports whether the offset lies past the last row.
 func (m *Model) PastBottom() bool {
 	return m.hasContent() && m.YOffset() > m.maxYOffset()
 }
@@ -830,7 +992,7 @@ func (m *Model) ScrollPercent() float64 {
 		return 1.0
 	}
 
-	return scrollPercent(m.YOffset(), m.maxHeight(), m.left.Len())
+	return scrollPercent(m.YOffset(), m.maxHeight(), m.TotalRowCount())
 }
 
 // HorizontalScrollPercent returns the horizontal scroll position as a float
@@ -840,7 +1002,7 @@ func (m *Model) HorizontalScrollPercent() float64 {
 		return 1.0
 	}
 
-	return scrollPercent(m.xOffset, m.maxWidth(), m.left.Width())
+	return scrollPercent(m.XOffset(), m.maxWidth(), m.left.Width())
 }
 
 // scrollPercent calculates scroll position as a value between 0 and 1.
@@ -854,23 +1016,26 @@ func scrollPercent(offset, visible, total int) float64 {
 	return clamp(v, 0, 1)
 }
 
-// maxYOffset returns the maximum Y offset.
+// maxYOffset returns the maximum Y offset, in rows.
 func (m *Model) maxYOffset() int {
-	lineCount := m.lineCount()
-	if lineCount == 0 {
-		return 0
-	}
+	m.ensureRows()
 
-	return max(0, lineCount-m.maxHeight())
+	return max(0, m.rows.total()-m.maxHeight())
 }
 
-// lineCount returns the line count for the current view mode.
+// lineCount returns the number of lines the view renders.
 func (m *Model) lineCount() int {
 	if m.left == nil {
 		return 0
 	}
 
-	return m.left.Len()
+	count := 0
+
+	for _, span := range m.viewSpans() {
+		count += span.Len()
+	}
+
+	return count
 }
 
 // maxXOffset returns the maximum X offset.
@@ -882,19 +1047,38 @@ func (m *Model) maxXOffset() int {
 	return max(0, m.left.Width()-m.maxWidth())
 }
 
+// outerSize returns the width and height of the viewport frame: the set
+// dimensions, capped by any fixed size on the container style.
+func (m *Model) outerSize() (int, int) {
+	w, h := m.Width(), m.Height()
+	if sw := m.style.GetWidth(); sw != 0 {
+		w = min(w, sw)
+	}
+
+	if sh := m.style.GetHeight(); sh != 0 {
+		h = min(h, sh)
+	}
+
+	return w, h
+}
+
 // maxWidth returns the content width accounting for frame size.
 func (m *Model) maxWidth() int {
-	return max(0, m.Width()-m.style.GetHorizontalFrameSize())
+	w, _ := m.outerSize()
+
+	return max(0, w-m.style.GetHorizontalFrameSize())
 }
 
 // maxHeight returns the content height accounting for frame size.
 func (m *Model) maxHeight() int {
-	return max(0, m.Height()-m.style.GetVerticalFrameSize())
+	_, h := m.outerSize()
+
+	return max(0, h-m.style.GetVerticalFrameSize())
 }
 
 // hasContent reports whether there is content to display.
 func (m *Model) hasContent() bool {
-	return m.left != nil && !m.left.IsEmpty()
+	return m.lineCount() > 0
 }
 
 // hasRevision reports whether a revision exists.
@@ -902,63 +1086,68 @@ func (m *Model) hasRevision() bool {
 	return m.revisions.Len() > 0
 }
 
-// visibleLines returns the lines currently visible in the viewport.
-// If lines is nil, renders the visible portion of m.left on demand.
-func (m *Model) visibleLines(lines []string) []string {
-	maxHeight := m.maxHeight()
-	maxWidth := m.maxWidth()
-
-	if maxHeight == 0 || maxWidth == 0 {
-		return nil
-	}
-
-	if lines == nil {
-		lines = m.renderVisible()
-	}
-
-	if len(lines) == 0 {
-		if m.FillHeight {
-			return make([]string, maxHeight)
-		}
-
-		return nil
-	}
-
-	// Truncate to maxHeight if we have more lines than the viewport can show.
-	// This happens when wrapping causes source lines to expand into more
-	// rendered lines.
-	if len(lines) > maxHeight {
-		lines = lines[:maxHeight]
-	}
-
-	// Determine result length, padding for FillHeight if needed.
-	resultLen := len(lines)
-	if m.FillHeight && resultLen < maxHeight {
-		resultLen = maxHeight
-	}
-
-	result := make([]string, resultLen)
-	copy(result, lines)
-
-	// Apply horizontal scrolling / line truncation.
-	// When wrapping is disabled, lines may exceed viewport width.
-	// Truncate to viewport width to prevent lipgloss from wrapping.
-	if !m.wrapEnabled {
-		for i := range result {
-			result[i] = ansi.Cut(result[i], m.xOffset, m.xOffset+maxWidth)
-		}
-	}
-
-	return result
+// canRender reports whether the content area has room for any rows.
+func (m *Model) canRender() bool {
+	return m.maxHeight() > 0 && m.maxWidth() > 0
 }
 
-// SetYOffset sets the Y offset.
+// visibleRows renders the rows of the visible window, trimmed to the content
+// height and without FillHeight padding.
+func (m *Model) visibleRows() []string {
+	if !m.canRender() || !m.hasContent() {
+		return nil
+	}
+
+	first, last := m.rowWindow()
+	if first >= last {
+		return nil
+	}
+
+	printer := m.renderPrinter(m.maxWidth())
+	rows := splitLines(printer.Print(m.left, m.windowSpans(first, last)...))
+	rows = m.trimWindow(rows, first)
+
+	// Without wrapping, lines may exceed the viewport width. Cut them to the
+	// horizontal window so lipgloss does not wrap them.
+	if !m.wrapEnabled {
+		maxWidth := m.maxWidth()
+
+		for i := range rows {
+			rows[i] = ansi.Cut(rows[i], m.xOffset, m.xOffset+maxWidth)
+		}
+	}
+
+	return rows
+}
+
+// padRows pads rows with empty rows up to the content height when FillHeight
+// is set.
+func (m *Model) padRows(rows []string) []string {
+	if !m.canRender() {
+		return nil
+	}
+
+	if maxHeight := m.maxHeight(); m.FillHeight && len(rows) < maxHeight {
+		padded := make([]string, maxHeight)
+		copy(padded, rows)
+
+		return padded
+	}
+
+	return rows
+}
+
+// SetYOffset sets the vertical offset, in rows, clamped to the scrollable
+// range.
 func (m *Model) SetYOffset(n int) {
 	m.yOffset = clamp(n, 0, m.maxYOffset())
 }
 
-// YOffset returns the current Y offset.
+// YOffset returns the vertical offset, the index of the rendered row at the
+// top of the viewport.
 func (m *Model) YOffset() int {
+	m.ensureRows()
+
 	return m.yOffset
 }
 
@@ -969,10 +1158,12 @@ func (m *Model) SetXOffset(n int) {
 
 // XOffset returns the current X offset.
 func (m *Model) XOffset() int {
+	m.ensureRows()
+
 	return m.xOffset
 }
 
-// ScrollDown moves the view down by n lines.
+// ScrollDown moves the view down by n rows.
 func (m *Model) ScrollDown(n int) {
 	if m.AtBottom() || n == 0 {
 		return
@@ -981,7 +1172,7 @@ func (m *Model) ScrollDown(n int) {
 	m.SetYOffset(m.YOffset() + n)
 }
 
-// ScrollUp moves the view up by n lines.
+// ScrollUp moves the view up by n rows.
 func (m *Model) ScrollUp(n int) {
 	if m.AtTop() || n == 0 {
 		return
@@ -1012,12 +1203,12 @@ func (m *Model) HalfPageUp() {
 
 // ScrollLeft moves the viewport left by n columns.
 func (m *Model) ScrollLeft(n int) {
-	m.SetXOffset(m.xOffset - n)
+	m.SetXOffset(m.XOffset() - n)
 }
 
 // ScrollRight moves the viewport right by n columns.
 func (m *Model) ScrollRight(n int) {
-	m.SetXOffset(m.xOffset + n)
+	m.SetXOffset(m.XOffset() + n)
 }
 
 // SetHorizontalStep sets the horizontal scroll step size.
@@ -1035,14 +1226,41 @@ func (m *Model) GotoBottom() {
 	m.SetYOffset(m.maxYOffset())
 }
 
-// TotalLineCount returns the total number of lines.
+// TotalLineCount returns the number of lines in the view. In [ViewModeHunks]
+// that is the lines inside a hunk, not the whole diff.
 func (m *Model) TotalLineCount() int {
 	return m.lineCount()
 }
 
-// VisibleLineCount returns the number of visible lines.
+// VisibleLineCount returns the number of lines with at least one row on
+// screen.
 func (m *Model) VisibleLineCount() int {
-	return len(m.visibleLines(nil))
+	if !m.canRender() || !m.hasContent() {
+		return 0
+	}
+
+	first, last := m.rowWindow()
+
+	return last - first
+}
+
+// TotalRowCount returns the number of rendered rows in the view. It counts
+// the rows of every line, wrapped to the viewport width, plus their
+// annotations.
+func (m *Model) TotalRowCount() int {
+	m.ensureRows()
+
+	return m.rows.total()
+}
+
+// VisibleRowCount returns the number of rendered rows on screen, without any
+// FillHeight padding.
+func (m *Model) VisibleRowCount() int {
+	if !m.canRender() {
+		return 0
+	}
+
+	return clamp(m.TotalRowCount()-m.YOffset(), 0, m.maxHeight())
 }
 
 // SetSearchTerm sets the search term and updates highlights.
@@ -1111,20 +1329,27 @@ func (m *Model) SearchCount() int {
 	return len(m.searchMatches)
 }
 
-// scrollToCurrentMatch scrolls to center the current search match in the viewport.
+// scrollToCurrentMatch scrolls to center the current search match in the
+// viewport.
 func (m *Model) scrollToCurrentMatch() {
 	if m.searchIndex < 0 || m.searchIndex >= len(m.searchMatches) {
 		return
 	}
 
 	match := m.searchMatches[m.searchIndex]
-	startLine := match.rng.Start.Line
 
-	// Center the match in the viewport.
+	k, ok := m.renderedIndex(match.rng.Start.Line)
+	if !ok {
+		return
+	}
+
+	m.ensureRows()
+
+	// Center the first row of the matched line in the viewport.
 	// Use (maxHeight-1)/2 to ensure the match appears at the visual center.
 	// For height 22: (22-1)/2 = 10, placing the match at position 10 (middle).
 	// For height 21: (21-1)/2 = 10, placing the match at position 10 (middle).
-	m.SetYOffset(startLine - (m.maxHeight()-1)/2)
+	m.SetYOffset(m.rows.sums[k] - (m.maxHeight()-1)/2)
 }
 
 // Update processes Bubble Tea messages and returns the updated model.
@@ -1209,23 +1434,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 // getViewDimensions returns (width, height, ok).
 // If ok is false, the viewport has zero dimensions and should not render.
 func (m *Model) getViewDimensions() (int, int, bool) {
-	w, h := m.Width(), m.Height()
-	if sw := m.style.GetWidth(); sw != 0 {
-		w = min(w, sw)
-	}
-
-	if sh := m.style.GetHeight(); sh != 0 {
-		h = min(h, sh)
-	}
-
-	if w == 0 || h == 0 {
+	if w, h := m.outerSize(); w == 0 || h == 0 {
 		return 0, 0, false
 	}
 
-	contentW := w - m.style.GetHorizontalFrameSize()
-	contentH := h - m.style.GetVerticalFrameSize()
-
-	return contentW, contentH, true
+	return m.maxWidth(), m.maxHeight(), true
 }
 
 // renderContent applies styling and renders lines into final output.
@@ -1251,7 +1464,8 @@ func (m *Model) renderContent(lines []string, contentW, contentH int) string {
 //
 // The rendering behavior depends on the current [ViewMode]:
 //   - [ViewModeFull]: Renders all lines (default behavior).
-//   - [ViewModeHunks]: Renders only changed lines with 3 lines of context.
+//   - [ViewModeHunks]: Renders only changed lines, with [Model.HunkContext]
+//     lines of context around each change.
 //   - [ViewModeSideBySide]: Renders before and after content in separate panes.
 //
 //nolint:gocritic // hugeParam: required for tea.Model interface compatibility.
@@ -1265,39 +1479,11 @@ func (m Model) View() string {
 		return ""
 	}
 
-	var lines []string
-
-	switch m.viewMode {
-	case ViewModeHunks:
-		hunksContent := m.getHunksDiffContent()
-		lines = m.visibleLines(splitLines(hunksContent))
-
-	case ViewModeSideBySide:
+	if m.viewMode == ViewModeSideBySide {
 		return m.renderSideBySide(w, h)
-
-	default:
-		lines = m.visibleLines(nil)
 	}
 
-	return m.renderContent(lines, w, h)
-}
-
-// getHunksDiffContent returns diff content with context lines for hunks mode.
-func (m *Model) getHunksDiffContent() string {
-	if _, needsDiff := m.resolveRevisionSource(); !needsDiff {
-		if m.left == nil {
-			return ""
-		}
-
-		return m.renderPrinter(m.maxWidth()).Print(m.left)
-	}
-
-	lines, ranges := m.getDiffResult().Hunks(m.hunkContext)
-	if lines == nil {
-		return ""
-	}
-
-	return m.renderPrinter(m.maxWidth()).Print(lines, ranges...)
+	return m.renderContent(m.padRows(m.visibleRows()), w, h)
 }
 
 // sideBySideSeparator is the column divider between panes.
@@ -1306,47 +1492,33 @@ const sideBySideSeparator = " │ "
 // renderSideBySide renders the side-by-side view with two panes.
 func (m *Model) renderSideBySide(contentW, contentH int) string {
 	// Get views for both panes. The model owns both, with overlays applied.
-	if m.left == nil {
-		return m.renderContent(nil, contentW, contentH)
+	if !m.hasContent() {
+		return m.renderContent(m.padRows(nil), contentW, contentH)
 	}
 
-	leftIter, rightIter := m.left, m.right
-	if rightIter == nil {
+	right := m.right
+	if right == nil {
 		// Not showing a diff: show same content on both sides.
-		rightIter = m.left
+		right = m.left
 	}
-
-	// Calculate pane width (both panes use the same width).
-	separatorWidth := ansi.StringWidth(sideBySideSeparator)
-	availableWidth := contentW - separatorWidth
-	paneWidth := availableWidth / 2
 
 	// Need room for separator plus at least 1 character per pane.
+	paneWidth := m.paneWidth()
 	if paneWidth < 1 {
 		return m.renderContent(nil, contentW, contentH)
 	}
 
-	extraPadding := availableWidth % 2 // Add to separator if odd.
-
-	// Determine visible span.
-	start := m.YOffset()
-	end := min(start+m.maxHeight(), leftIter.Len())
-
-	if start >= end {
-		return m.renderContent(nil, contentW, contentH)
+	first, last := m.rowWindow()
+	if first >= last {
+		return m.renderContent(m.padRows(nil), contentW, contentH)
 	}
 
-	span := position.NewSpan(start, end)
-
-	// Render both panes.
+	// Render the lines of the window in both panes.
+	spans := m.windowSpans(first, last)
 	printer := m.renderPrinter(paneWidth)
 
-	leftContent := printer.Print(leftIter, span)
-	rightContent := printer.Print(rightIter, span)
-
-	// Split into lines.
-	leftLines := splitLines(leftContent)
-	rightLines := splitLines(rightContent)
+	leftRows := splitLines(printer.Print(m.left, spans...))
+	rightRows := splitLines(printer.Print(right, spans...))
 
 	// Get text style for padding empty areas.
 	textStyle := lipgloss.NewStyle()
@@ -1354,43 +1526,57 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 		textStyle = *st
 	}
 
-	// Combine lines with separator, applying horizontal offset.
-	maxLines := max(len(leftLines), len(rightLines))
-	if m.FillHeight && maxLines < contentH {
-		maxLines = contentH
+	// Build separator with any extra padding from odd width.
+	separatorWidth := ansi.StringWidth(sideBySideSeparator)
+	extraPadding := (contentW - separatorWidth) % 2
+	separator := textStyle.Render(sideBySideSeparator + strings.Repeat(" ", extraPadding))
+
+	// Zip the panes line by line. A line that wraps taller in one pane gets
+	// blank rows in the other, so the panes stay aligned.
+	combined := make([]string, 0, m.rows.sums[last]-m.rows.sums[first])
+
+	var li, ri int
+
+	for k := first; k < last; k++ {
+		leftCount := m.rows.left[k]
+
+		rightCount := leftCount
+		if m.rows.right != nil {
+			rightCount = m.rows.right[k]
+		}
+
+		for i := range m.lineRows(k) {
+			var left, right string
+
+			if i < leftCount && li < len(leftRows) {
+				left = leftRows[li]
+				li++
+			}
+
+			if i < rightCount && ri < len(rightRows) {
+				right = rightRows[ri]
+				ri++
+			}
+
+			// Apply horizontal scrolling.
+			if !m.wrapEnabled {
+				left = ansi.Cut(left, m.xOffset, m.xOffset+paneWidth)
+				right = ansi.Cut(right, m.xOffset, m.xOffset+paneWidth)
+			}
+
+			// Pad left pane to consistent width for alignment.
+			leftPadded := ansi.Truncate(left, paneWidth, "")
+			if padding := paneWidth - ansi.StringWidth(leftPadded); padding > 0 {
+				leftPadded += textStyle.Render(strings.Repeat(" ", padding))
+			}
+
+			combined = append(combined, leftPadded+separator+right)
+		}
 	}
 
-	combined := make([]string, maxLines)
-	for i := range combined {
-		var left, right string
+	combined = m.trimWindow(combined, first)
 
-		if i < len(leftLines) {
-			left = leftLines[i]
-		}
-
-		if i < len(rightLines) {
-			right = rightLines[i]
-		}
-
-		// Apply horizontal scrolling.
-		if !m.wrapEnabled {
-			left = ansi.Cut(left, m.xOffset, m.xOffset+paneWidth)
-			right = ansi.Cut(right, m.xOffset, m.xOffset+paneWidth)
-		}
-
-		// Pad left pane to consistent width for alignment.
-		leftPadded := ansi.Truncate(left, paneWidth, "")
-		if padding := paneWidth - ansi.StringWidth(leftPadded); padding > 0 {
-			leftPadded += textStyle.Render(strings.Repeat(" ", padding))
-		}
-
-		// Build separator with any extra padding from odd width.
-		separator := sideBySideSeparator + strings.Repeat(" ", extraPadding)
-
-		combined[i] = leftPadded + textStyle.Render(separator) + right
-	}
-
-	return m.renderContent(combined, contentW, contentH)
+	return m.renderContent(m.padRows(combined), contentW, contentH)
 }
 
 func clamp[T cmp.Ordered](v, low, high T) T {

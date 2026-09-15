@@ -1,0 +1,8 @@
+ name: original         │   name: original        
+-description: "a long   │  +description: short    
+ description that wraps │                         
+ inside a narrow pane"  │                         
+ enabled: true          │   enabled: true         
+                                                  
+                                                  
+                                                  

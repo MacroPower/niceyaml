@@ -2,6 +2,7 @@ package yamlviewport_test
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"charm.land/bubbles/v2/key"
@@ -102,7 +103,42 @@ func TestViewport_Golden(t *testing.T) {
 		another: y
 	`)
 
+	wrapYAML := stringtest.Input(`
+		line1: a
+		line2: b
+		line3: c
+		line4: d
+		line5: "a value long enough to wrap onto several rows of a narrow viewport"
+		line6: f
+		line7: g
+		line8: h
+		line9: i
+		line10: j
+	`)
+
 	tcs := map[string]goldenTest{
+		"WrapScrolledToBottom": {
+			// Line 5 wraps to several rows. Scrolling by row reaches the
+			// last line, which line-based scrolling pushed off the bottom.
+			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
+			yaml:   wrapYAML,
+			width:  30,
+			height: 5,
+			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+				m.GotoBottom()
+			},
+		},
+		"WrapScrolledIntoLine": {
+			// An offset inside the wrapped line starts the view on one of its
+			// continuation rows.
+			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
+			yaml:   wrapYAML,
+			width:  30,
+			height: 5,
+			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+				m.SetYOffset(6)
+			},
+		},
 		"BasicView": {
 			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
 			yaml:   simpleYAML,
@@ -568,6 +604,120 @@ func TestViewport_Scrolling(t *testing.T) {
 			tc.test(t, &m)
 		})
 	}
+}
+
+func TestViewport_RowScrolling(t *testing.T) {
+	t.Parallel()
+
+	wrapYAML := stringtest.Input(`
+		line1: a
+		line2: b
+		line3: c
+		line4: d
+		line5: "a value long enough to wrap onto several rows of a narrow viewport"
+		line6: f
+		line7: g
+		line8: h
+		line9: i
+		line10: j
+	`)
+
+	newModel := func(t *testing.T) *yamlviewport.Model {
+		t.Helper()
+
+		m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+		m.SetWidth(30)
+		m.SetHeight(5)
+		m.SetSource(niceyaml.NewSourceFromString(wrapYAML))
+
+		return &m
+	}
+
+	firstRow := func(view string) string {
+		row, _, _ := strings.Cut(view, "\n")
+
+		return row
+	}
+
+	lastRow := func(view string) string {
+		rows := strings.Split(view, "\n")
+
+		return rows[len(rows)-1]
+	}
+
+	t.Run("counts rows and lines separately", func(t *testing.T) {
+		t.Parallel()
+
+		m := newModel(t)
+
+		assert.Equal(t, 10, m.TotalLineCount())
+		assert.Greater(t, m.TotalRowCount(), 10)
+		assert.Equal(t, 5, m.VisibleRowCount())
+		assert.Equal(t, 5, m.VisibleLineCount())
+
+		// Wrapping off, every line is one row again.
+		m.SetWordWrap(false)
+		assert.Equal(t, 10, m.TotalRowCount())
+	})
+
+	t.Run("bottom shows the last line", func(t *testing.T) {
+		t.Parallel()
+
+		m := newModel(t)
+		m.GotoBottom()
+
+		assert.Equal(t, m.TotalRowCount()-5, m.YOffset())
+		assert.True(t, m.AtBottom())
+		assert.False(t, m.PastBottom())
+		assert.InDelta(t, 1.0, m.ScrollPercent(), 0.01)
+		assert.Contains(t, lastRow(m.View()), "line10")
+
+		// One row up still ends inside the document, not past it.
+		m.ScrollUp(1)
+		assert.False(t, m.AtBottom())
+		assert.Contains(t, lastRow(m.View()), "line9")
+	})
+
+	t.Run("scrolls through a wrapped line one row at a time", func(t *testing.T) {
+		t.Parallel()
+
+		m := newModel(t)
+		m.SetYOffset(4) // Line 5 starts at row 4.
+
+		assert.Contains(t, firstRow(m.View()), "line5")
+
+		m.ScrollDown(1)
+		assert.Equal(t, 5, m.YOffset())
+
+		top := firstRow(m.View())
+		assert.NotContains(t, top, "line5")
+		assert.NotContains(t, top, "line6")
+		assert.Equal(t, 5, m.VisibleRowCount())
+	})
+
+	t.Run("mouse wheel scrolls by rows", func(t *testing.T) {
+		t.Parallel()
+
+		m := newModel(t)
+		m.SetYOffset(4)
+
+		updated, _ := m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+		assert.Equal(t, 4+updated.MouseWheelDelta, updated.YOffset())
+	})
+
+	t.Run("resize keeps the offset inside the rows", func(t *testing.T) {
+		t.Parallel()
+
+		m := newModel(t)
+		m.GotoBottom()
+
+		// A wider viewport wraps less, so the maximum offset drops and the
+		// offset follows it.
+		m.SetWidth(200)
+		assert.Equal(t, 10, m.TotalRowCount())
+		assert.Equal(t, 5, m.YOffset())
+		assert.False(t, m.PastBottom())
+	})
 }
 
 func TestViewport_Search(t *testing.T) {
@@ -2007,6 +2157,29 @@ func TestViewModeHunks_Golden(t *testing.T) {
 			width:  80,
 			height: 30,
 		},
+		"HunksScrolled": {
+			// The offset counts rows, and the hunk header is a row.
+			setupFunc: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.GoToRevision(1)
+				m.SetViewMode(yamlviewport.ViewModeHunks)
+				m.SetYOffset(2)
+			},
+			width:  80,
+			height: 5,
+		},
+		"HunksScrolledToBottom": {
+			setupFunc: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.GoToRevision(1)
+				m.SetViewMode(yamlviewport.ViewModeHunks)
+				m.GotoBottom()
+			},
+			width:  80,
+			height: 5,
+		},
 		"HunksSearch": {
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetPrinter(testPrinterWithSearch())
@@ -2338,6 +2511,27 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			width:  80,
 			height: 24,
 		},
+		"SideBySideWrapAligned": {
+			// The before pane wraps a long line that the after pane replaced
+			// with a short one. The after pane gets blank rows so the lines
+			// below stay level.
+			setupFunc: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromString(stringtest.Input(`
+					name: original
+					description: "a long description that wraps inside a narrow pane"
+					enabled: true
+				`), niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromString(stringtest.Input(`
+					name: original
+					description: short
+					enabled: true
+				`), niceyaml.WithName("v2")))
+				m.GoToRevision(1)
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+			},
+			width:  50,
+			height: 8,
+		},
 		"SideBySideSearchBothSidesSecondSelected": {
 			// Search term appears on both deleted and inserted lines.
 			// Second match (inserted/after) is selected.
@@ -2462,15 +2656,64 @@ func TestViewMode_Behavior(t *testing.T) {
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
 				m.GoToRevision(1)
-				m.SetYOffset(1)
 				m.SetViewMode(yamlviewport.ViewModeHunks)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 
-				output := m.View()
-				// Should have content but be scrolled.
-				assert.NotEmpty(t, output)
+				top := m.View()
+				require.NotEmpty(t, top)
+
+				// The hunk header, two deleted lines, and two inserted lines
+				// make 6 rows, so the view scrolls.
+				assert.Equal(t, 6, m.TotalRowCount())
+				assert.Equal(t, 5, m.TotalLineCount())
+
+				m.ScrollDown(1)
+				assert.Equal(t, 1, m.YOffset())
+				assert.NotEqual(t, top, m.View())
+
+				m.GotoBottom()
+				assert.Equal(t, 3, m.YOffset())
+				assert.True(t, m.AtBottom())
+				assert.Contains(t, m.View(), " enabled: true")
+			},
+		},
+		"HunksSearchStaysInsideHunks": {
+			width:  80,
+			height: 5,
+			setup: func(m *yamlviewport.Model) {
+				m.SetHunkContext(1)
+				m.AddRevision(niceyaml.NewSourceFromString(stringtest.Input(`
+					first: one
+					second: two
+					third: three
+					fourth: four
+					fifth: five
+				`), niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromString(stringtest.Input(`
+					first: one
+					second: two
+					third: three
+					fourth: four
+					fifth: changed
+				`), niceyaml.WithName("v2")))
+				m.GoToRevision(1)
+				m.SetViewMode(yamlviewport.ViewModeHunks)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				// One context line, the deleted line, and the inserted line.
+				assert.Equal(t, 3, m.TotalLineCount())
+
+				// "first" is in the diff but outside every hunk.
+				m.SetSearchTerm("first")
+				assert.Equal(t, 0, m.SearchCount())
+
+				m.SetSearchTerm("fifth")
+				assert.Equal(t, 2, m.SearchCount())
+				assert.Equal(t, 0, m.YOffset())
 			},
 		},
 	}

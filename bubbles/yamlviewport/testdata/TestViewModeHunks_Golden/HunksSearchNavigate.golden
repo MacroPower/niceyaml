@@ -1,7 +1,7 @@
  @@ -1,10 +1,10 @@                                                              
--name: original                                                                 
+-<genericHighlightDim>name</genericHighlightDim>: original                      
 -count: 10                                                                      
-+name: modified                                                                 
++<genericHighlight>name</genericHighlight>: modified                            
 +count: 20                                                                      
  enabled: true                                                                  
 -description: "This is the original description"                                
