@@ -497,7 +497,7 @@ func TestNewDocument(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, file.Docs, 1)
 
-		dd := niceyaml.NewDocument(file.Docs[0], niceyaml.DocumentContext{})
+		dd := niceyaml.NewDocument(file.Docs[0], niceyaml.DocumentInfo{})
 		require.NotNil(t, dd)
 
 		result, err := dd.Decode[map[string]string](t.Context())
@@ -1556,7 +1556,7 @@ func TestNewDocument_Context(t *testing.T) {
 	file, err := source.File()
 	require.NoError(t, err)
 
-	dd := niceyaml.NewDocument(file.Docs[0], niceyaml.DocumentContext{
+	dd := niceyaml.NewDocument(file.Docs[0], niceyaml.DocumentInfo{
 		Index:    3,
 		FilePath: "config.yaml",
 	})

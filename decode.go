@@ -160,7 +160,7 @@ func (d *Documents) All() iter.Seq2[int, *Document] {
 // document builds the [*Document] at index with the context of the
 // [*Source].
 func (d *Documents) document(index int) *Document {
-	return NewDocument(d.file.Docs[index], DocumentContext{
+	return NewDocument(d.file.Docs[index], DocumentInfo{
 		Index:             index,
 		FilePath:          d.source.FilePath(),
 		Tokens:            d.docTokens[index],
@@ -200,12 +200,11 @@ type Document struct {
 	index      int
 }
 
-// DocumentContext is what a [Document] knows about its document
-// beyond the AST: where it sits in the file, the tokens it came from, and
-// how to decode it. [Documents.All] fills it in from the
-// [Source]; callers that build a [Document] by hand pass what they
-// have and leave the rest zero.
-type DocumentContext struct {
+// DocumentInfo is what a [Document] knows about its document beyond the
+// AST: where it sits in the file, the tokens it came from, and how to decode
+// it. [Documents.All] fills it in from the [Source]; callers that build a
+// [Document] by hand pass what they have and leave the rest zero.
+type DocumentInfo struct {
 	// FilePath is the path of the file the document came from. Schema
 	// matchers route on it.
 	FilePath string
@@ -224,16 +223,16 @@ type DocumentContext struct {
 	Index int
 }
 
-// NewDocument creates a new [*Document] for doc with the given
-// context. [Documents.All] is the usual way to get one, since it fills
-// the context in from the [Source].
-func NewDocument(doc *ast.DocumentNode, ctx DocumentContext) *Document {
+// NewDocument creates a new [*Document] for doc with the given info.
+// [Documents.All] is the usual way to get one, since it fills the info in
+// from the [Source].
+func NewDocument(doc *ast.DocumentNode, info DocumentInfo) *Document {
 	return &Document{
 		doc:        doc,
-		index:      ctx.Index,
-		tokens:     ctx.Tokens,
-		filePath:   ctx.FilePath,
-		decodeOpts: ctx.YAMLDecodeOptions,
+		index:      info.Index,
+		tokens:     info.Tokens,
+		filePath:   info.FilePath,
+		decodeOpts: info.YAMLDecodeOptions,
 	}
 }
 
@@ -243,19 +242,19 @@ func (dd *Document) Node() *ast.DocumentNode {
 }
 
 // Index returns the 0-indexed position of this document within the file,
-// from [DocumentContext.Index].
+// from [DocumentInfo.Index].
 func (dd *Document) Index() int {
 	return dd.index
 }
 
 // Tokens returns the tokens for this document, from
-// [DocumentContext.Tokens]. Returns nil when none were given.
+// [DocumentInfo.Tokens]. Returns nil when none were given.
 func (dd *Document) Tokens() token.Tokens {
 	return dd.tokens
 }
 
 // FilePath returns the path of the file the document came from, from
-// [DocumentContext.FilePath]. Returns an empty string when none was given.
+// [DocumentInfo.FilePath]. Returns an empty string when none was given.
 func (dd *Document) FilePath() string {
 	return dd.filePath
 }
