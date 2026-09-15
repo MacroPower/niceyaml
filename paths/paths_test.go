@@ -16,13 +16,23 @@ import (
 func TestRoot(t *testing.T) {
 	t.Parallel()
 
+	t.Run("empty path targets the node", func(t *testing.T) {
+		t.Parallel()
+
+		path := paths.Root().Path()
+
+		require.NotNil(t, path)
+		assert.Equal(t, "$", path.String())
+		assert.Equal(t, paths.PartNode, path.Part())
+	})
+
 	t.Run("empty path with value target", func(t *testing.T) {
 		t.Parallel()
 
 		path := paths.Root().Value()
 
 		require.NotNil(t, path)
-		assert.Equal(t, "$.(value)", path.String())
+		assert.Equal(t, "$", path.String())
 		assert.Equal(t, paths.PartValue, path.Part())
 	})
 
@@ -32,7 +42,7 @@ func TestRoot(t *testing.T) {
 		path := paths.Root().Child("kind").Key()
 
 		require.NotNil(t, path)
-		assert.Equal(t, "$.kind.(key)", path.String())
+		assert.Equal(t, "$.kind", path.String())
 		assert.Equal(t, paths.PartKey, path.Part())
 	})
 
@@ -42,119 +52,88 @@ func TestRoot(t *testing.T) {
 		path := paths.Root().Child("metadata", "name").Value()
 
 		require.NotNil(t, path)
-		assert.Equal(t, "$.metadata.name.(value)", path.String())
+		assert.Equal(t, "$.metadata.name", path.String())
 		assert.Equal(t, paths.PartValue, path.Part())
-	})
-
-	t.Run("deeply nested path with key target", func(t *testing.T) {
-		t.Parallel()
-
-		path := paths.Root().Child("spec", "template", "spec", "containers").Key()
-
-		require.NotNil(t, path)
-		assert.Equal(t, "$.spec.template.spec.containers.(key)", path.String())
-		assert.Equal(t, paths.PartKey, path.Part())
 	})
 }
 
-func TestPathBuilder(t *testing.T) {
+func TestBuilder(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		want   string
-		target paths.Part
-		build  func() *paths.Path
+		build func() *paths.Path
+		want  string
+		part  paths.Part
 	}{
-		"returns root path": {
-			build: func() *paths.Path {
-				return paths.Root().Value()
-			},
-			target: paths.PartValue,
-			want:   "$.(value)",
+		"root path": {
+			build: func() *paths.Path { return paths.Root().Path() },
+			part:  paths.PartNode,
+			want:  "$",
 		},
-		"can chain children": {
-			build: func() *paths.Path {
-				return paths.Root().Child("metadata", "labels").Key()
-			},
-			target: paths.PartKey,
-			want:   "$.metadata.labels.(key)",
+		"chained children": {
+			build: func() *paths.Path { return paths.Root().Child("metadata", "labels").Key() },
+			part:  paths.PartKey,
+			want:  "$.metadata.labels",
 		},
-		"can chain index": {
-			build: func() *paths.Path {
-				return paths.Root().Child("items").Index(0).Value()
-			},
-			target: paths.PartValue,
-			want:   "$.items[0].(value)",
+		"child then index": {
+			build: func() *paths.Path { return paths.Root().Child("items").Index(0).Value() },
+			part:  paths.PartValue,
+			want:  "$.items[0]",
 		},
 		"variadic index": {
-			build: func() *paths.Path {
-				return paths.Root().Child("matrix").Index(0, 1).Value()
-			},
-			target: paths.PartValue,
-			want:   "$.matrix[0][1].(value)",
+			build: func() *paths.Path { return paths.Root().Child("matrix").Index(0, 1).Path() },
+			part:  paths.PartNode,
+			want:  "$.matrix[0][1]",
 		},
 		"index all": {
-			build: func() *paths.Path {
-				return paths.Root().Child("items").IndexAll().Key()
-			},
-			target: paths.PartKey,
-			want:   "$.items[*].(key)",
+			build: func() *paths.Path { return paths.Root().Child("items").IndexAll().Key() },
+			part:  paths.PartKey,
+			want:  "$.items[*]",
 		},
 		"recursive descent": {
-			build: func() *paths.Path {
-				return paths.Root().Recursive("name").Value()
-			},
-			target: paths.PartValue,
-			want:   "$..name.(value)",
+			build: func() *paths.Path { return paths.Root().Recursive("name").Value() },
+			part:  paths.PartValue,
+			want:  "$..name",
 		},
 		"large index": {
-			build: func() *paths.Path {
-				return paths.Root().Child("items").Index(999).Value()
-			},
-			target: paths.PartValue,
-			want:   "$.items[999].(value)",
-		},
-		"deep nested indices": {
-			build: func() *paths.Path {
-				return paths.Root().Child("matrix").Index(0).Index(1).Index(2).Value()
-			},
-			target: paths.PartValue,
-			want:   "$.matrix[0][1][2].(value)",
+			build: func() *paths.Path { return paths.Root().Child("items").Index(999).Value() },
+			part:  paths.PartValue,
+			want:  "$.items[999]",
 		},
 		"recursive with index": {
-			build: func() *paths.Path {
-				return paths.Root().Recursive("items").Index(0).Key()
-			},
-			target: paths.PartKey,
-			want:   "$..items[0].(key)",
+			build: func() *paths.Path { return paths.Root().Recursive("items").Index(0).Key() },
+			part:  paths.PartKey,
+			want:  "$..items[0]",
 		},
 		"multiple recursive": {
-			build: func() *paths.Path {
-				return paths.Root().Recursive("containers").Recursive("name").Value()
-			},
-			target: paths.PartValue,
-			want:   "$..containers..name.(value)",
+			build: func() *paths.Path { return paths.Root().Recursive("containers").Recursive("name").Value() },
+			part:  paths.PartValue,
+			want:  "$..containers..name",
 		},
 		"child after index": {
-			build: func() *paths.Path {
-				return paths.Root().Child("items").Index(0).Child("name").Value()
-			},
-			target: paths.PartValue,
-			want:   "$.items[0].name.(value)",
+			build: func() *paths.Path { return paths.Root().Child("items").Index(0).Child("name").Value() },
+			part:  paths.PartValue,
+			want:  "$.items[0].name",
 		},
 		"index all then index": {
-			build: func() *paths.Path {
-				return paths.Root().Child("matrix").IndexAll().Index(0).Value()
-			},
-			target: paths.PartValue,
-			want:   "$.matrix[*][0].(value)",
+			build: func() *paths.Path { return paths.Root().Child("matrix").IndexAll().Index(0).Value() },
+			part:  paths.PartValue,
+			want:  "$.matrix[*][0]",
 		},
-		"special characters in child name are quoted": {
-			build: func() *paths.Path {
-				return paths.Root().Child("kubernetes.io/name").Value()
-			},
-			target: paths.PartValue,
-			want:   "$.'kubernetes.io/name'.(value)",
+		"dotted child name is quoted": {
+			build: func() *paths.Path { return paths.Root().Child("kubernetes.io/name").Value() },
+			part:  paths.PartValue,
+			want:  "$.'kubernetes.io/name'",
+		},
+		"child name with quote is quoted and escaped": {
+			build: func() *paths.Path { return paths.Root().Child("it's").Path() },
+			part:  paths.PartNode,
+			want:  `$.'it\'s'`,
+		},
+		"child name with brackets is quoted": {
+			build: func() *paths.Path { return paths.Root().Child("a[0]").Path() },
+			part:  paths.PartNode,
+			want:  "$.'a[0]'",
 		},
 	}
 
@@ -166,13 +145,13 @@ func TestPathBuilder(t *testing.T) {
 
 			require.NotNil(t, path)
 			assert.Equal(t, tc.want, path.String())
-			assert.Equal(t, tc.target, path.Part())
-			assert.NotNil(t, path.Path()) // Underlying yaml.Path should be accessible.
+			assert.Equal(t, tc.part, path.Part())
+			assert.Equal(t, tc.want, path.YAMLPath().String())
 		})
 	}
 }
 
-func TestPathBuilder_Immutable(t *testing.T) {
+func TestBuilder_Immutable(t *testing.T) {
 	t.Parallel()
 
 	t.Run("shared prefix is not aliased", func(t *testing.T) {
@@ -182,9 +161,9 @@ func TestPathBuilder_Immutable(t *testing.T) {
 		replicas := spec.Child("replicas").Value()
 		image := spec.Child("image").Value()
 
-		assert.Equal(t, "$.spec.replicas.(value)", replicas.String())
-		assert.Equal(t, "$.spec.image.(value)", image.String())
-		assert.Equal(t, "$.spec.(value)", spec.Value().String())
+		assert.Equal(t, "$.spec.replicas", replicas.String())
+		assert.Equal(t, "$.spec.image", image.String())
+		assert.Equal(t, "$.spec", spec.Value().String())
 	})
 
 	t.Run("finalizing does not consume the builder", func(t *testing.T) {
@@ -192,10 +171,47 @@ func TestPathBuilder_Immutable(t *testing.T) {
 
 		b := paths.Root().Child("metadata", "name")
 
-		assert.Equal(t, "$.metadata.name.(key)", b.Key().String())
-		assert.Equal(t, "$.metadata.name.(value)", b.Value().String())
-		assert.Equal(t, "$.metadata.name.labels.(value)", b.Child("labels").Value().String())
+		assert.Equal(t, paths.PartKey, b.Key().Part())
+		assert.Equal(t, paths.PartValue, b.Value().Part())
+		assert.Equal(t, "$.metadata.name.labels", b.Child("labels").Value().String())
 	})
+}
+
+func TestPath_KeyValue(t *testing.T) {
+	t.Parallel()
+
+	t.Run("derives copies with a different part", func(t *testing.T) {
+		t.Parallel()
+
+		node := paths.MustParse("$.a.b")
+		key := node.Key()
+		value := node.Value()
+
+		assert.Equal(t, paths.PartNode, node.Part())
+		assert.Equal(t, paths.PartKey, key.Part())
+		assert.Equal(t, paths.PartValue, value.Part())
+		assert.Equal(t, "$.a.b", key.String())
+		assert.Equal(t, "$.a.b", value.String())
+		assert.Equal(t, paths.PartKey, value.Key().Part())
+	})
+
+	t.Run("nil receiver returns nil", func(t *testing.T) {
+		t.Parallel()
+
+		var path *paths.Path
+
+		assert.Nil(t, path.Key())
+		assert.Nil(t, path.Value())
+	})
+}
+
+func TestPart_String(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "node", paths.PartNode.String())
+	assert.Equal(t, "key", paths.PartKey.String())
+	assert.Equal(t, "value", paths.PartValue.String())
+	assert.Equal(t, "Part(7)", paths.Part(7).String())
 }
 
 func TestParse(t *testing.T) {
@@ -229,26 +245,38 @@ func TestParse(t *testing.T) {
 			expr: "$",
 			want: "$",
 		},
+		"root index": {
+			expr: "$[2]",
+			want: "$[2]",
+		},
+		"quoted key": {
+			expr: "$.'kubernetes.io/name'",
+			want: "$.'kubernetes.io/name'",
+		},
+		"quoted key without reserved characters is unquoted": {
+			expr: "$.'plain'",
+			want: "$.plain",
+		},
+		"quoted key with escaped quote": {
+			expr: `$.'it\'s'`,
+			want: `$.'it\'s'`,
+		},
+		"quoted key followed by index": {
+			expr: "$.'a.b'[1].c",
+			want: "$.'a.b'[1].c",
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			yp, err := paths.Parse(tc.expr)
+			p, err := paths.Parse(tc.expr)
 
 			require.NoError(t, err)
-			require.NotNil(t, yp)
-			assert.Equal(t, tc.want, yp.String())
-
-			valPath := paths.NewPath(yp, paths.PartValue)
-			assert.Equal(t, tc.want+".(value)", valPath.String())
-			assert.Equal(t, paths.PartValue, valPath.Part())
-			assert.Same(t, yp, valPath.Path())
-
-			keyPath := paths.NewPath(yp, paths.PartKey)
-			assert.Equal(t, tc.want+".(key)", keyPath.String())
-			assert.Equal(t, paths.PartKey, keyPath.Part())
+			require.NotNil(t, p)
+			assert.Equal(t, tc.want, p.String())
+			assert.Equal(t, paths.PartNode, p.Part())
 		})
 	}
 }
@@ -259,6 +287,9 @@ func TestParse_Invalid(t *testing.T) {
 	tcs := map[string]struct {
 		expr string
 	}{
+		"empty": {
+			expr: "",
+		},
 		"no dollar prefix": {
 			expr: "foo",
 		},
@@ -271,17 +302,75 @@ func TestParse_Invalid(t *testing.T) {
 		"unclosed bracket": {
 			expr: "$[",
 		},
+		"empty index": {
+			expr: "$[]",
+		},
+		"negative index": {
+			expr: "$[-1]",
+		},
+		"non-numeric index": {
+			expr: "$[a]",
+		},
+		"wildcard child": {
+			expr: "$.*",
+		},
+		"unterminated quote": {
+			expr: "$.'foo",
+		},
+		"empty quoted key": {
+			expr: "$.''",
+		},
+		"bare text after root": {
+			expr: "$foo",
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			yp, err := paths.Parse(tc.expr)
+			p, err := paths.Parse(tc.expr)
 
-			require.Error(t, err)
-			assert.Nil(t, yp)
+			require.ErrorIs(t, err, paths.ErrInvalidPath)
+			assert.Nil(t, p)
 			assert.Contains(t, err.Error(), "parse path")
+		})
+	}
+}
+
+func TestParse_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]*paths.Path{
+		"root":             paths.Root().Path(),
+		"children":         paths.Root().Child("a", "b").Key(),
+		"index":            paths.Root().Child("items").Index(3).Value(),
+		"wildcards":        paths.Root().Child("items").IndexAll().Recursive("name").Path(),
+		"dotted name":      paths.Root().Child("kubernetes.io/name").Value(),
+		"quote in name":    paths.Root().Child("it's").Path(),
+		"backslash":        paths.Root().Child(`a\b.c`).Path(),
+		"brackets":         paths.Root().Child("a[0]").Path(),
+		"dollar":           paths.Root().Child("$ref").Path(),
+		"star":             paths.Root().Child("*").Path(),
+		"numeric name":     paths.Root().Child("1").Path(),
+		"space in name":    paths.Root().Child("has space").Path(),
+		"only reserved":    paths.Root().Child(".").Path(),
+		"goccy compatible": paths.Root().Child("a.b").Index(1).Child("c").Path(),
+	}
+
+	for name, want := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := paths.Parse(want.String())
+			require.NoError(t, err)
+
+			assert.Equal(t, want.String(), got.String())
+			assert.Equal(t, paths.PartNode, got.Part())
+
+			// The goccy parser accepts the same expression.
+			_, err = yaml.PathString(want.String())
+			require.NoError(t, err)
 		})
 	}
 }
@@ -292,9 +381,9 @@ func TestMustParse(t *testing.T) {
 	t.Run("valid expression returns path", func(t *testing.T) {
 		t.Parallel()
 
-		yp := paths.MustParse("$.foo.bar")
-		require.NotNil(t, yp)
-		assert.Equal(t, "$.foo.bar", yp.String())
+		p := paths.MustParse("$.foo.bar")
+		require.NotNil(t, p)
+		assert.Equal(t, "$.foo.bar", p.String())
 	})
 
 	t.Run("panics on invalid expression", func(t *testing.T) {
@@ -317,21 +406,37 @@ func TestPath_NilHandling(t *testing.T) {
 		assert.Empty(t, path.String())
 	})
 
-	t.Run("nil path returns Value target", func(t *testing.T) {
+	t.Run("nil path targets the node", func(t *testing.T) {
 		t.Parallel()
 
 		var path *paths.Path
 
-		assert.Equal(t, paths.PartValue, path.Part())
+		assert.Equal(t, paths.PartNode, path.Part())
 	})
 
-	t.Run("nil path returns nil underlying path", func(t *testing.T) {
+	t.Run("nil path returns nil YAMLPath", func(t *testing.T) {
 		t.Parallel()
 
 		var path *paths.Path
 
-		assert.Nil(t, path.Path())
+		assert.Nil(t, path.YAMLPath())
 	})
+}
+
+func TestPath_YAMLPath(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a:\n  'b.c': [x, y]\n")
+	file, err := source.File()
+	require.NoError(t, err)
+
+	yp := paths.Root().Child("a", "b.c").Index(1).Value().YAMLPath()
+	require.NotNil(t, yp)
+	assert.Equal(t, "$.a.'b.c'[1]", yp.String())
+
+	node, err := yp.FilterNode(file.Docs[0].Body)
+	require.NoError(t, err)
+	assert.Equal(t, "y", node.GetToken().Value)
 }
 
 func TestPath_Token(t *testing.T) {
@@ -369,6 +474,11 @@ items:
 		},
 		"simple value target returns value token": {
 			path:      paths.Root().Child("name").Value(),
+			wantValue: "test",
+			wantType:  token.StringType,
+		},
+		"node target returns value token": {
+			path:      paths.Root().Child("name").Path(),
 			wantValue: "test",
 			wantType:  token.StringType,
 		},
@@ -417,6 +527,9 @@ func TestPath_Token_NilPath(t *testing.T) {
 	var path *paths.Path
 
 	_, err = path.Token(file.Docs[0])
+	require.ErrorIs(t, err, paths.ErrNilPath)
+
+	_, err = path.Node(file.Docs[0])
 	require.ErrorIs(t, err, paths.ErrNilPath)
 }
 
@@ -523,5 +636,27 @@ nested:
 			assert.Equal(t, tc.wantValue, tk.Value)
 			assert.Equal(t, tc.wantType, tk.Type)
 		})
+	}
+}
+
+func TestPath_Node(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a:\n  b: [1, 2]\n")
+	file, err := source.File()
+	require.NoError(t, err)
+
+	// The part does not affect the resolved node.
+	for _, path := range []*paths.Path{
+		paths.Root().Child("a", "b").Path(),
+		paths.Root().Child("a", "b").Key(),
+		paths.Root().Child("a", "b").Value(),
+	} {
+		node, err := path.Node(file.Docs[0])
+		require.NoError(t, err)
+
+		seq, ok := node.(*ast.SequenceNode)
+		require.True(t, ok, "want *ast.SequenceNode, got %T", node)
+		assert.Len(t, seq.Values, 2)
 	}
 }

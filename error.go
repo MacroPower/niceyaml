@@ -369,7 +369,7 @@ func (e *Error) headline(target *Error, src *Source) string {
 	}
 
 	if target.path != nil {
-		return fmt.Sprintf("at %s: %v", target.path.Path(), target.err)
+		return fmt.Sprintf("at %s: %v", target.path, target.err)
 	}
 
 	return target.err.Error()
@@ -559,7 +559,7 @@ func (e *Error) pathString() string {
 		return ""
 	}
 
-	return e.path.Path().String()
+	return e.path.String()
 }
 
 // DocumentIndex returns the 0-indexed document the error's path resolves in

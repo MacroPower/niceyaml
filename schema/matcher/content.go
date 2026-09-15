@@ -9,7 +9,7 @@ import (
 
 // contentMatcher matches documents by a single YAML content value.
 type contentMatcher struct {
-	path  *paths.YAMLPath
+	path  *paths.Path
 	value string
 }
 
@@ -39,7 +39,7 @@ type contentMatcher struct {
 //	    matcher.Content(paths.Root().Child("kind").Path(), "Deployment"),
 //	    matcher.Content(paths.Root().Child("apiVersion").Path(), "apps/v1"),
 //	)
-func Content(path *paths.YAMLPath, value string) Matcher {
+func Content(path *paths.Path, value string) Matcher {
 	if path == nil {
 		panic("matcher.Content: path is nil")
 	}

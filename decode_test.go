@@ -102,7 +102,7 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		path      *paths.YAMLPath
+		path      *paths.Path
 		input     string
 		wantVals  []string
 		wantFound []bool

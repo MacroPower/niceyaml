@@ -274,7 +274,7 @@ func (dd *DocumentDecoder) FilePath() string {
 //
 // For a string view of any node, including mappings and sequences, use
 // [DocumentDecoder.GetValue].
-func (dd *DocumentDecoder) Get[T any](ctx context.Context, path *paths.YAMLPath) (T, error) {
+func (dd *DocumentDecoder) Get[T any](ctx context.Context, path *paths.Path) (T, error) {
 	var zero T
 
 	node := dd.node(path)
@@ -319,7 +319,7 @@ func (dd *DocumentDecoder) Get[T any](ctx context.Context, path *paths.YAMLPath)
 // directive, or no value exists at the path.
 //
 // For a typed value, use [DocumentDecoder.Get].
-func (dd *DocumentDecoder) GetValue(path *paths.YAMLPath) (string, bool) {
+func (dd *DocumentDecoder) GetValue(path *paths.Path) (string, bool) {
 	node := dd.node(path)
 	if node == nil {
 		return "", false
@@ -339,11 +339,12 @@ func (dd *DocumentDecoder) GetValue(path *paths.YAMLPath) (string, bool) {
 	return node.String(), true
 }
 
-// node resolves path against the document body.
+// node resolves path against the document body, ignoring the path's
+// [paths.Part].
 //
 // Returns nil if path is nil, the document is a directive, or no node exists
 // at the path.
-func (dd *DocumentDecoder) node(path *paths.YAMLPath) ast.Node {
+func (dd *DocumentDecoder) node(path *paths.Path) ast.Node {
 	if path == nil {
 		return nil
 	}
@@ -352,8 +353,8 @@ func (dd *DocumentDecoder) node(path *paths.YAMLPath) ast.Node {
 		return nil
 	}
 
-	node, err := path.FilterNode(dd.doc.Body)
-	if err != nil || node == nil {
+	node, err := path.Node(dd.doc)
+	if err != nil {
 		return nil
 	}
 

@@ -1,25 +1,20 @@
-// Package paths builds YAML paths that distinguish between keys and values.
+// Package paths locates nodes and tokens in a YAML document.
 //
-// Standard YAML paths (like JSONPath) point to nodes in a document, but they
-// cannot distinguish between a mapping's key and its value.
-//
-// When a path like `$.metadata.name` resolves to a mapping entry, you get the
-// value node, but for error highlighting or precise editing, you often need the
-// key instead.
-//
-// This package extends [yaml.Path] with [Part] targeting, so you can specify
-// whether a path refers to the key or value of a mapping entry:
+// A [Path] is a sequence of selectors from the document root, written in the
+// YAMLPath syntax that goccy/go-yaml uses (`$.metadata.name`,
+// `$.items[0]`), plus a [Part]. Standard path expressions point at nodes, but
+// error highlighting and precise editing often need one token of a mapping
+// entry rather than the whole node, so the Part says whether a path refers to
+// the node itself, the entry's key, or the entry's value:
 //
 //	keyPath := paths.Root().Child("metadata", "name").Key()
-//	keyPath.String() // "$.metadata.name.(key)"
-//
 //	valPath := paths.Root().Child("metadata", "name").Value()
-//	valPath.String() // "$.metadata.name.(value)"
 //
-// Both paths resolve to the same YAML node, but [Path.Token] returns different
-// tokens: the key token "name" for the first, the value token for the second.
-// Token resolves within a single document, so callers working with
-// multi-document files pick the document first.
+// Both paths print as `$.metadata.name` and resolve to the same node, but
+// [Path.Token] returns different tokens: the key token "name" for the first
+// and the value token for the second. [Path.Node] ignores the Part and
+// returns the node. Both resolve within a single document, so callers
+// working with multi-document files pick the document first.
 //
 // # Integration with niceyaml.Error
 //
@@ -34,31 +29,35 @@
 //
 // # Parsing Path Expressions
 //
-// Use [Parse] to parse a path expression string into a [*YAMLPath], and
-// [NewPath] to pair it with the [Part] to target:
+// Use [Parse] to read a path expression. The result targets [PartNode];
+// derive the other parts with [Path.Key] and [Path.Value]:
 //
-//	yp, err := paths.Parse("$.metadata.name")
-//	keyPath := paths.NewPath(yp, paths.PartKey)     // targets the key
-//	valPath := paths.NewPath(yp, paths.PartValue)   // targets the value
+//	p, err := paths.Parse("$.metadata.name")
+//	keyPath := p.Key()     // targets the key
+//	valPath := p.Value()   // targets the value
 //
-// [MustParse] panics on invalid input, useful for compile-time constants:
+// [MustParse] panics on invalid input, useful for package-level variables:
 //
-//	path := paths.NewPath(paths.MustParse("$.items[0].name"), paths.PartValue)
+//	var namePath = paths.MustParse("$.items[0].name").Value()
+//
+// [Path.String] returns the expression without the part, so
+// Parse(p.String()) yields a path with the same selectors.
 //
 // # Building Paths
 //
 // Use [Root] to start a [Builder], chain selectors, and finalize with
-// [Builder.Key] or [Builder.Value]:
+// [Builder.Path], [Builder.Key], or [Builder.Value]:
 //
-//	paths.Root().Child("items").Index(0).Child("name").Key()  // $.items[0].name.(key)
-//	paths.Root().Child("spec").IndexAll().Value()             // $.spec[*].(value)
-//	paths.Root().Recursive("name").Value()                    // $..name.(value)
+//	paths.Root().Child("items").Index(0).Child("name").Key()  // $.items[0].name
+//	paths.Root().Child("spec").IndexAll().Value()             // $.spec[*]
+//	paths.Root().Recursive("name").Value()                    // $..name
 //
 // Builders are immutable, so a common prefix can be shared safely:
 //
 //	spec := paths.Root().Child("spec")
-//	replicas := spec.Child("replicas").Value()  // $.spec.replicas.(value)
-//	image := spec.Child("image").Value()        // $.spec.image.(value)
+//	replicas := spec.Child("replicas").Value()  // $.spec.replicas
+//	image := spec.Child("image").Value()        // $.spec.image
 //
-// For the underlying [YAMLPath] without targeting, use [Builder.Path].
+// For the goccy/go-yaml API, [Path.YAMLPath] converts the selectors to a
+// [*yaml.Path].
 package paths

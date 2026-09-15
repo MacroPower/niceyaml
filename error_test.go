@@ -1943,7 +1943,7 @@ func TestError_TokenRendersFromSource(t *testing.T) {
 	file, err := source.File()
 	require.NoError(t, err)
 
-	node, err := paths.Root().Child("b").Path().FilterNode(file.Docs[0].Body)
+	node, err := paths.Root().Child("b").Path().Node(file.Docs[0])
 	require.NoError(t, err)
 
 	literal, ok := node.(*ast.LiteralNode)

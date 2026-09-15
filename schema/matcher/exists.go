@@ -10,7 +10,7 @@ import (
 // existsMatcher matches documents where a YAML path exists with a non-empty
 // value.
 type existsMatcher struct {
-	path *paths.YAMLPath
+	path *paths.Path
 }
 
 // Exists creates a new [Matcher] that matches documents where the specified
@@ -37,7 +37,7 @@ type existsMatcher struct {
 //	    matcher.Exists(paths.Root().Child("apiVersion").Path()),
 //	    matcher.Exists(paths.Root().Child("kind").Path()),
 //	)
-func Exists(path *paths.YAMLPath) Matcher {
+func Exists(path *paths.Path) Matcher {
 	if path == nil {
 		panic("matcher.Exists: path is nil")
 	}
