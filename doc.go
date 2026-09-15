@@ -210,8 +210,9 @@
 //
 // Rendering builds on lipgloss, and the [style] package exposes its Style
 // type directly since a theme is a set of lipgloss styles. The
-// [go.jacobcolvin.com/niceyaml/cmd/nyaml/fangs] and
+// [go.jacobcolvin.com/niceyaml/fangs] and
 // [go.jacobcolvin.com/niceyaml/bubbles/yamlviewport] packages are adapters
 // for the charm libraries they build on and expose those libraries' types by
-// design.
+// design. The fangs package is a module of its own, so fang and cobra stay
+// out of this module's dependencies.
 package niceyaml

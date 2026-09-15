@@ -11,7 +11,7 @@ import (
 	"go.jacobcolvin.com/x/cobras/profile"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/cmd/nyaml/fangs"
+	"go.jacobcolvin.com/niceyaml/fangs"
 	"go.jacobcolvin.com/niceyaml/style"
 )
 

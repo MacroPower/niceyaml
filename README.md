@@ -22,6 +22,7 @@ It enables **friendly and predictable handling of YAML-compatible documents** in
 - Extended [`Encoder`][niceyaml.Encoder] and [`Document`][niceyaml.Document] decoding wrappers
 - JSON schema [validation][niceyaml/schema.NewValidator] with YAML path errors
 - Bubble [`yamlviewport`][niceyaml/bubbles/yamlviewport] for Bubble Tea
+- [`fangs`][niceyaml/fangs] adapters for CLIs built with fang, in a module of their own
 - Generic building blocks for your own bubbles
 
 We use a **parse-once**, **style-once** approach. This means your users get a snappy UI, and you get a simple API. There's no need to employ multiple lexers, or perform any ANSI manipulation!
@@ -115,4 +116,5 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [niceyaml/style/theme]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/style/theme
 [niceyaml/style.Style]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/style#Style
 [niceyaml/bubbles/yamlviewport]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/bubbles/yamlviewport
+[niceyaml/fangs]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/fangs
 [niceyaml/schema.NewValidator]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/schema#NewValidator
