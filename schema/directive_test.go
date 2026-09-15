@@ -10,6 +10,7 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
@@ -248,8 +249,6 @@ func TestParseDocumentDirective(t *testing.T) {
 					continue
 				}
 
-				assert.NotNil(t, directive.Position, "document %d position", docIdx)
-
 				got[docIdx] = directive.Schema
 			}
 
@@ -268,8 +267,8 @@ func TestParseDocumentDirective_TokenBuilder(t *testing.T) {
 		tks := token.Tokens{
 			tkb.Clone().Type(token.CommentType).
 				Value(" yaml-language-server: $schema=./schema.json").
-				PositionLine(1).
-				PositionColumn(1).
+				PositionLine(3).
+				PositionColumn(5).
 				Build(),
 			tkb.Clone().Type(token.StringType).Value("key").Build(),
 			tkb.Clone().Type(token.MappingValueType).Value(":").Build(),
@@ -280,8 +279,8 @@ func TestParseDocumentDirective_TokenBuilder(t *testing.T) {
 
 		require.NotNil(t, got)
 		assert.Equal(t, "./schema.json", got.Schema)
-		assert.Equal(t, 1, got.Position.Line)
-		assert.Equal(t, 1, got.Position.Column)
+		// The token counts from 1 and the directive from 0.
+		assert.Equal(t, position.New(2, 4), got.Position)
 	})
 
 	t.Run("document header precedes the directive", func(t *testing.T) {

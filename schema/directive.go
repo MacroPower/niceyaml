@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/goccy/go-yaml/token"
+
+	"go.jacobcolvin.com/niceyaml/position"
 )
 
 // schemaDirectiveRE matches yaml-language-server schema directives.
@@ -15,12 +17,14 @@ var schemaDirectiveRE = regexp.MustCompile(`yaml-language-server:\s*\$schema=(.+
 //
 // Create instances with [ParseDirective] or [ParseDocumentDirective].
 type Directive struct {
-	// Position is the position of the comment containing the directive.
-	Position *token.Position
-
 	// Schema is the schema path extracted from the directive.
 	// This may be a file path or URL.
 	Schema string
+
+	// Position is the 0-indexed position of the comment holding the
+	// directive. [ParseDocumentDirective] fills it from the comment token;
+	// [ParseDirective] reads a bare string and leaves it at the zero value.
+	Position position.Position
 }
 
 // ParseDirective extracts a schema directive from comment text.
@@ -65,7 +69,7 @@ func ParseDocumentDirective(tks token.Tokens) *Directive {
 		case token.CommentType:
 			directive := ParseDirective(tk.Value)
 			if directive != nil {
-				directive.Position = tk.Position
+				directive.Position = position.NewFromToken(tk)
 
 				return directive
 			}
