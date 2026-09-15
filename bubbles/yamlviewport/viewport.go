@@ -207,9 +207,11 @@ func (m *Model) Height() int {
 	return m.height
 }
 
-// SetHeight sets the height of the viewport.
+// SetHeight sets the height of the viewport and clamps the scroll offsets to
+// the new bounds.
 func (m *Model) SetHeight(h int) {
 	m.height = h
+	m.clampOffsets()
 }
 
 // Width returns the width of the viewport.
@@ -217,7 +219,8 @@ func (m *Model) Width() int {
 	return m.width
 }
 
-// SetWidth sets the width of the viewport.
+// SetWidth sets the width of the viewport and clamps the scroll offsets to
+// the new bounds.
 func (m *Model) SetWidth(w int) {
 	if m.width != w {
 		m.width = w
@@ -226,6 +229,15 @@ func (m *Model) SetWidth(w int) {
 			m.rerender()
 		}
 	}
+
+	m.clampOffsets()
+}
+
+// clampOffsets pulls both scroll offsets back inside the bounds of the
+// current view and dimensions.
+func (m *Model) clampOffsets() {
+	m.yOffset = clamp(m.yOffset, 0, m.maxYOffset())
+	m.xOffset = clamp(m.xOffset, 0, m.maxXOffset())
 }
 
 // renderPrinter returns the printer to render with: the configured printer
@@ -502,6 +514,11 @@ func (m *Model) rerender() {
 // without rebuilding them.
 func (m *Model) refreshSearch() {
 	if m.left == nil {
+		m.searchMatches = nil
+		m.leftMatches = nil
+		m.rightMatches = nil
+		m.searchIndex = -1
+
 		return
 	}
 

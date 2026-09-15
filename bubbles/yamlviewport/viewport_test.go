@@ -1236,6 +1236,53 @@ line3: c`
 				assert.True(t, m.AtBottom())
 			},
 		},
+		"PastBottom/SetHeightReclamps": {
+			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
+			yaml:   lineCountYAML,
+			width:  80,
+			height: 3,
+			setup: func(m *yamlviewport.Model) {
+				m.GotoBottom()
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, 2, m.YOffset())
+
+				// Growing the viewport lowers the maximum offset, so the
+				// offset follows it instead of overshooting the content.
+				m.SetHeight(4)
+				assert.Equal(t, 1, m.YOffset())
+				assert.False(t, m.PastBottom())
+				assert.True(t, m.AtBottom())
+
+				m.SetHeight(10)
+				assert.Equal(t, 0, m.YOffset())
+			},
+		},
+		"Search/ClearRevisionsResetsMatches": {
+			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
+			yaml:   lineCountYAML,
+			width:  80,
+			height: 24,
+			setup: func(m *yamlviewport.Model) {
+				m.SetSearchTerm("line")
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, 5, m.SearchCount())
+
+				m.ClearRevisions()
+				assert.Equal(t, 0, m.TotalLineCount())
+				assert.Equal(t, 0, m.SearchCount())
+				assert.Equal(t, -1, m.SearchIndex())
+				assert.Equal(t, "line", m.SearchTerm())
+
+				// The term survives, so the search runs again on new content.
+				m.SetSource(niceyaml.NewSourceFromString("line: a\n"))
+				assert.Equal(t, 1, m.SearchCount())
+				assert.Equal(t, 0, m.SearchIndex())
+			},
+		},
 	}
 
 	for name, tc := range tcs {
