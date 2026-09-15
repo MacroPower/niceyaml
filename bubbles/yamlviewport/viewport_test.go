@@ -1,6 +1,7 @@
 package yamlviewport_test
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -3095,6 +3096,57 @@ func TestViewport_DoesNotMutateSource(t *testing.T) {
 
 	// Search highlighting never reaches the caller's Source.
 	assert.Empty(t, source.Lines()[0].Overlays)
+}
+
+func TestViewport_RevisionNavigationResetsSearch(t *testing.T) {
+	t.Parallel()
+
+	// Build a document with matches on lines 20 and 30, and a second
+	// revision that changes line 5 and keeps both matches.
+	var v1, v2 strings.Builder
+
+	for i := range 40 {
+		value := "value"
+		if i == 20 || i == 30 {
+			value = "needle"
+		}
+
+		fmt.Fprintf(&v1, "key%d: %s\n", i, value)
+
+		if i == 5 {
+			value = "changed"
+		}
+
+		fmt.Fprintf(&v2, "key%d: %s\n", i, value)
+	}
+
+	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+	m.SetWidth(80)
+	m.SetHeight(5)
+	m.AddRevision(niceyaml.NewSourceFromString(v1.String(), niceyaml.WithName("v1")))
+	m.AddRevision(niceyaml.NewSourceFromString(v2.String(), niceyaml.WithName("v2")))
+
+	m.SetSearchTerm("needle")
+	m.SearchNext()
+	require.Equal(t, 1, m.SearchIndex())
+
+	// Moving to another revision starts over at the first match and
+	// scrolls to it rather than keeping an index into the old content.
+	m.PrevRevision()
+	assert.Equal(t, 2, m.SearchCount())
+	assert.Equal(t, 0, m.SearchIndex())
+	assert.Equal(t, 20-2, m.YOffset())
+	assert.Contains(t, m.View(), "key20: needle")
+
+	m.SearchNext()
+	m.GoToRevision(1)
+	assert.Equal(t, 0, m.SearchIndex())
+	assert.Contains(t, m.View(), "key20: needle")
+
+	// Without a search term, navigation returns to the top.
+	m.ClearSearch()
+	m.PrevRevision()
+	assert.Equal(t, 0, m.YOffset())
 }
 
 func TestViewport_SearchAcrossRevisions(t *testing.T) {

@@ -337,8 +337,7 @@ func (m *Model) GoToRevision(index int) {
 	}
 
 	m.revIndex = clamp(index, 0, m.revisions.Len()-1)
-	m.rebuildViews()
-	m.GotoTop()
+	m.showRevision()
 }
 
 // RevisionCount returns the number of revisions in the history.
@@ -504,8 +503,18 @@ func (m *Model) seekRevision(delta int) {
 	}
 
 	m.revIndex = clamp(m.revIndex+delta, 0, m.revisions.Len()-1)
+	m.showRevision()
+}
+
+// showRevision rebuilds the view for the selected revision and scrolls to
+// the top. With a search term set, the current match becomes the first match
+// in the new content and the view scrolls to it instead, since a match index
+// carried over from the previous revision points at an arbitrary line.
+func (m *Model) showRevision() {
+	m.searchIndex = -1
 	m.rebuildViews()
 	m.GotoTop()
+	m.scrollToCurrentMatch()
 }
 
 // rebuildViews rebuilds the displayed views from the revision, diff mode, and
