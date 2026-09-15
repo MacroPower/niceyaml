@@ -14,62 +14,80 @@ type match struct {
 	entry *ast.MappingValueNode
 }
 
-// resolver walks a document for the selectors of a [Path].
+// resolver walks a document for the selectors of a [Path]. Its targets map
+// holds the content of the anchor each alias refers to.
 //
 // Create instances with [newResolver].
 type resolver struct {
-	anchors map[string]ast.Node
+	targets map[*ast.AliasNode]ast.Node
 }
 
-// newResolver creates a new [*resolver] for doc, indexing its anchors so
-// aliases and merge keys resolve to their content.
+// newResolver creates a new [*resolver] for doc.
+//
+// It binds each alias to the last anchor of its name before it in doc, which
+// is the anchor the goccy/go-yaml decoder uses for that alias.
 func newResolver(doc *ast.DocumentNode) *resolver {
-	r := &resolver{anchors: map[string]ast.Node{}}
-
-	for _, node := range ast.Filter(ast.AnchorType, doc.Body) {
-		anchor, ok := node.(*ast.AnchorNode)
-		if !ok || anchor.Name == nil {
-			continue
-		}
-
-		r.anchors[anchor.Name.GetToken().Value] = anchor.Value
+	b := &aliasBinder{
+		anchors: map[string]ast.Node{},
+		targets: map[*ast.AliasNode]ast.Node{},
 	}
 
-	return r
+	ast.Walk(b, doc.Body)
+
+	return &resolver{targets: b.targets}
+}
+
+// aliasBinder binds aliases to anchors while [ast.Walk] visits a document in
+// order. The anchors map holds the content of the last anchor of each name
+// visited so far, and the targets map holds the content each visited alias
+// refers to. Walk visits an anchor before its content, so an alias inside
+// that content refers to the anchor around it.
+type aliasBinder struct {
+	anchors map[string]ast.Node
+	targets map[*ast.AliasNode]ast.Node
+}
+
+// Visit records an anchor or binds an alias, then returns b so [ast.Walk]
+// continues into the children of node.
+func (b *aliasBinder) Visit(node ast.Node) ast.Visitor {
+	switch n := node.(type) {
+	case *ast.AnchorNode:
+		if n.Name != nil {
+			b.anchors[n.Name.GetToken().Value] = n.Value
+		}
+
+	case *ast.AliasNode:
+		if n.Value == nil {
+			return b
+		}
+
+		if target, ok := b.anchors[n.Value.GetToken().Value]; ok {
+			b.targets[n] = target
+		}
+	}
+
+	return b
 }
 
 // deref looks through anchors and aliases to the content node they carry.
 //
-// Returns an error wrapping [ErrNotFound] for an alias without a matching
-// anchor.
+// Returns an error wrapping [ErrNotFound] for an alias with no anchor of its
+// name before it, or for an alias that leads back to itself.
 func (r *resolver) deref(node ast.Node) (ast.Node, error) {
-	for range len(r.anchors) + 1 {
-		switch n := node.(type) {
-		case *ast.AnchorNode:
-			node = n.Value
-		case *ast.AliasNode:
-			name := n.Value.GetToken().Value
-
-			target, ok := r.anchors[name]
-			if !ok {
-				return nil, fmt.Errorf("%w: alias *%s has no anchor", ErrNotFound, name)
-			}
-
-			node = target
-
-		default:
-			return node, nil
-		}
-	}
-
-	return nil, fmt.Errorf("%w: alias cycle", ErrNotFound)
+	return r.follow(node, map[*ast.AliasNode]bool{})
 }
 
 // unwrap is [resolver.deref] followed by stripping tags, so the result is a
 // mapping, sequence, or scalar that selectors can apply to.
+//
+// It tracks the aliases it follows across every tag it strips, so an alias
+// that leads back to itself through a tag returns an error wrapping
+// [ErrNotFound].
 func (r *resolver) unwrap(node ast.Node) (ast.Node, error) {
+	followed := map[*ast.AliasNode]bool{}
+
 	for {
-		content, err := r.deref(node)
+		content, err := r.follow(node, followed)
 		if err != nil {
 			return nil, err
 		}
@@ -80,6 +98,36 @@ func (r *resolver) unwrap(node ast.Node) (ast.Node, error) {
 		}
 
 		node = tag.Value
+	}
+}
+
+// follow looks through anchors and aliases from node and adds each alias it
+// follows to followed. It returns an error wrapping [ErrNotFound] when it
+// reaches an alias already in followed or an alias with no anchor.
+func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.Node, error) {
+	for {
+		switch n := node.(type) {
+		case *ast.AnchorNode:
+			node = n.Value
+		case *ast.AliasNode:
+			name := n.Value.GetToken().Value
+
+			if followed[n] {
+				return nil, fmt.Errorf("%w: alias *%s forms a cycle", ErrNotFound, name)
+			}
+
+			followed[n] = true
+
+			target, ok := r.targets[n]
+			if !ok {
+				return nil, fmt.Errorf("%w: alias *%s has no anchor before it", ErrNotFound, name)
+			}
+
+			node = target
+
+		default:
+			return node, nil
+		}
 	}
 }
 

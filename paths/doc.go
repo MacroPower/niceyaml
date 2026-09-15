@@ -26,6 +26,11 @@
 // found through an alias or merge key sits where the anchor defines it,
 // which is where the offending text is.
 //
+// When several anchors share a name, an alias refers to the last one before
+// it, which is the anchor the goccy/go-yaml decoder uses. An alias with no
+// anchor of its name before it, or one that leads back to itself, has no
+// content, so resolving through it returns an error wrapping [ErrNotFound].
+//
 // The wildcard selectors `[*]` and `..name` select any number of nodes, so
 // [Path.Token] and [Path.Node] reject them with [ErrWildcard]; use
 // [Path.Nodes] to list every match.

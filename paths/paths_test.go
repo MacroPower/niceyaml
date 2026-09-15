@@ -2,6 +2,7 @@ package paths_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -10,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -706,11 +708,11 @@ merged:
   c: 3
 multi:
   <<: [*b, *f]
-chain:
-  <<: *m
 m: &m
   <<: *b
   d: 4
+chain:
+  <<: *m
 `
 
 	source := niceyaml.NewSourceFromString(input)
@@ -805,7 +807,7 @@ m: &m
 		"merge of a merged mapping own key": {
 			path:      paths.Root().Child("chain", "d").Value(),
 			wantValue: "4",
-			wantLine:  22,
+			wantLine:  20,
 		},
 	}
 
@@ -882,6 +884,153 @@ func TestPath_UnknownAlias(t *testing.T) {
 
 	_, err = paths.Root().Child("other").Path().Node(file.Docs[0])
 	require.ErrorIs(t, err, paths.ErrNotFound)
+}
+
+func TestPath_AliasCycle(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		path  *paths.Path
+		input string
+		want  string
+	}{
+		"alias inside its own anchor through a tag": {
+			input: "a: &x !t *x\n",
+			path:  paths.Root().Child("a", "c").Value(),
+			want:  "alias *x forms a cycle",
+		},
+		"merge key through an alias inside its own anchor": {
+			input: "a: &x !t *x\nm:\n  <<: *x\n",
+			path:  paths.Root().Child("m", "c").Value(),
+			want:  "alias *x forms a cycle",
+		},
+		"anchors whose tags alias each other": {
+			// The *y on line 1 comes before &y, so it names no anchor and
+			// resolution stops there.
+			input: "a: &x !t *y\nb: &y !t *x\n",
+			path:  paths.Root().Child("b", "c").Value(),
+			want:  "alias *y has no anchor before it",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input)
+			file, err := source.File()
+			require.NoError(t, err)
+
+			doc := file.Docs[0]
+
+			// Resolve in a goroutine so a loop that never returns fails this
+			// test instead of stalling the run.
+			errs := make(chan error, 3)
+
+			go func() {
+				_, err := tc.path.Token(doc)
+				errs <- err
+
+				_, err = tc.path.Node(doc)
+				errs <- err
+
+				_, err = tc.path.Nodes(doc)
+				errs <- err
+			}()
+
+			for range 3 {
+				select {
+				case err := <-errs:
+					require.ErrorIs(t, err, paths.ErrNotFound)
+					assert.Contains(t, err.Error(), tc.want)
+
+				case <-time.After(10 * time.Second):
+					require.FailNow(t, "path resolution did not return within 10s")
+				}
+			}
+		})
+	}
+}
+
+func TestPath_RedefinedAnchor(t *testing.T) {
+	t.Parallel()
+
+	// An alias refers to the last anchor of its name before it, so the *x on
+	// line 3 reaches `v: 1` and the *x on line 6 reaches `v: 2`.
+	source := niceyaml.NewSourceFromString("a: &x\n  v: 1\nb: *x\nc: &x\n  v: 2\nd: *x\n")
+	file, err := source.File()
+	require.NoError(t, err)
+
+	tcs := map[string]struct {
+		key       string
+		wantValue string
+		wantLine  int
+	}{
+		"alias before the second anchor": {
+			key:       "b",
+			wantValue: "1",
+			wantLine:  2,
+		},
+		"alias after the second anchor": {
+			key:       "d",
+			wantValue: "2",
+			wantLine:  5,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tk, err := paths.Root().Child(tc.key, "v").Value().Token(file.Docs[0])
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantValue, tk.Value)
+			assert.Equal(t, tc.wantLine, tk.Position.Line)
+
+			node, err := paths.Root().Child(tc.key).Path().Node(file.Docs[0])
+			require.NoError(t, err)
+
+			mapping, ok := node.(*ast.MappingNode)
+			require.True(t, ok, "want *ast.MappingNode, got %T", node)
+			require.Len(t, mapping.Values, 1)
+
+			value := mapping.Values[0].Value.GetToken()
+			assert.Equal(t, tc.wantValue, value.Value)
+			assert.Equal(t, tc.wantLine, value.Position.Line)
+		})
+	}
+
+	t.Run("document decoder value matches the decoded document", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "a: &x v1\nb: *x\nc: &x v2\nd: *x\n")
+
+		var decoded map[string]any
+
+		require.NoError(t, dd.DecodeInto(t.Context(), &decoded))
+		assert.Equal(t, map[string]any{"a": "v1", "b": "v1", "c": "v2", "d": "v2"}, decoded)
+
+		for _, key := range []string{"b", "d"} {
+			got, found := dd.GetValue(paths.Root().Child(key).Path())
+			require.True(t, found)
+			assert.Equal(t, decoded[key], got)
+		}
+	})
+
+	t.Run("alias before any anchor of its name", func(t *testing.T) {
+		t.Parallel()
+
+		forward := niceyaml.NewSourceFromString("b: *x\na: &x\n  v: 1\n")
+		forwardFile, err := forward.File()
+		require.NoError(t, err)
+
+		_, err = paths.Root().Child("b", "v").Value().Token(forwardFile.Docs[0])
+		require.ErrorIs(t, err, paths.ErrNotFound)
+		assert.Contains(t, err.Error(), "alias *x has no anchor before it")
+
+		_, err = paths.Root().Child("b").Path().Node(forwardFile.Docs[0])
+		require.ErrorIs(t, err, paths.ErrNotFound)
+	})
 }
 
 func TestPath_Token_NotFound(t *testing.T) {
