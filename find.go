@@ -132,11 +132,11 @@ func (f *Finder) buildByteToRuneIndex() {
 
 // Find finds all occurrences of the search string in the loaded text.
 //
-// It returns a slice of [position.Range] indicating the start and end positions
-// of each match, in the order the matches appear in the text.
+// It returns the [position.Ranges] of each match, in the order the matches
+// appear in the text.
 //
 // Returns nil if the search string is empty or the finder has no loaded text.
-func (f *Finder) Find(search string) []position.Range {
+func (f *Finder) Find(search string) position.Ranges {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
@@ -153,7 +153,7 @@ func (f *Finder) Find(search string) []position.Range {
 
 	searchRuneCount := utf8.RuneCountInString(searchStr)
 
-	var results []position.Range
+	var results position.Ranges
 
 	offset := 0
 	for {

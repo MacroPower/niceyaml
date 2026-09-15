@@ -28,7 +28,7 @@ var (
 type Line struct {
 	Annotations Annotations
 	Overlays    Overlays
-	segments    tokens.Segments
+	segments    segments
 	Flag        Flag
 
 	// The 1-indexed line number used for display purposes.
@@ -121,44 +121,6 @@ func (l *Line) Tokens() token.Tokens {
 // Panics if idx is out of range.
 func (l *Line) Token(idx int) *token.Token {
 	return l.segments[idx].Part()
-}
-
-// tokenPositions returns the [position.Position]s where the given
-// [*token.Token] appears on this line.
-func (l *Line) tokenPositions(lineIdx int, tk *token.Token) []position.Position {
-	var positions []position.Position
-
-	col := 0
-	for _, seg := range l.segments {
-		if seg.Contains(tk) {
-			positions = append(positions, position.New(lineIdx, col))
-		}
-
-		col += seg.Width()
-	}
-
-	return positions
-}
-
-// tokenPositionRanges returns [position.Ranges] for occurrences of the given
-// [*token.Token] on this line.
-func (l *Line) tokenPositionRanges(lineIdx int, tk *token.Token) position.Ranges {
-	var ranges position.Ranges
-
-	col := 0
-	for _, seg := range l.segments {
-		w := seg.Width()
-		if seg.Contains(tk) && w > 0 {
-			ranges = append(ranges, position.NewRange(
-				position.New(lineIdx, col),
-				position.New(lineIdx, col+w),
-			))
-		}
-
-		col += w
-	}
-
-	return ranges
 }
 
 // IsEmpty returns true if there are no tokens on this [Line].
@@ -420,9 +382,8 @@ func NewLines(tks token.Tokens) Lines {
 // Tokens reconstructs the full [token.Tokens] stream from all [Line] values.
 //
 // For multiline tokens that were split across lines, Tokens recombines them by
-// returning the original token once (via [tokens.Segment.Source]). Segments
-// that share a Source pointer collapse to a single token. The slice is new,
-// but the tokens are the originals. Treat them as read-only.
+// returning the original token once. The slice is new, but the tokens are the
+// originals. Treat them as read-only.
 func (ls Lines) Tokens() token.Tokens {
 	if len(ls) == 0 {
 		return nil
@@ -444,30 +405,11 @@ func (ls Lines) Tokens() token.Tokens {
 	return result
 }
 
-// TokenPositions returns all positions where the given token appears across all
-// lines.
-//
-// A token may appear on multiple lines when split across lines.
-// Returns nil if the token is nil or not found.
-func (ls Lines) TokenPositions(tk *token.Token) []position.Position {
-	if tk == nil {
-		return nil
-	}
-
-	var positions []position.Position
-
-	for i, l := range ls {
-		positions = append(positions, l.tokenPositions(i, tk)...)
-	}
-
-	return positions
-}
-
-// TokenAt returns the original [*token.Token] at the given position.
+// TokenAt returns the original [*token.Token] covering the given position.
 //
 // The token is the one the lexer produced, so it can be passed back to
-// [Lines.TokenPositionRangesFromToken] or [Lines.ContentPositionRangesFromToken]
-// to find every range it occupies. Treat it as read-only.
+// [Lines.TokenRanges] or [Lines.ContentRanges] to find every range it
+// occupies. Treat it as read-only.
 //
 // Returns nil if the position is out of bounds or no token exists there.
 func (ls Lines) TokenAt(pos position.Position) *token.Token {
@@ -478,90 +420,54 @@ func (ls Lines) TokenAt(pos position.Position) *token.Token {
 	return ls[pos.Line].segments.SourceTokenAt(pos.Col)
 }
 
-// TokenPositionRangesAt returns [position.Ranges] for all occurrences of the
-// token at the given position.
+// TokenRanges returns the ranges tk occupies, one per line it appears on.
 //
-// For multi-line tokens, returns one range per line.
-//
-// Returns nil if the position is out of bounds or no token exists there.
-func (ls Lines) TokenPositionRangesAt(pos position.Position) position.Ranges {
-	lineSegs := make(tokens.Segments2, len(ls))
-	for i, l := range ls {
-		lineSegs[i] = l.segments
-	}
-
-	return lineSegs.TokenRangesAt(pos.Line, pos.Col)
+// The token may be a lexer token, as returned by [Lines.TokenAt] or
+// [Lines.Tokens], or one of the per-line parts from [Line.Tokens]. Returns
+// nil if tk is nil or not found.
+func (ls Lines) TokenRanges(tk *token.Token) position.Ranges {
+	return ls.ranges(tk, func(seg segment) position.Span {
+		return position.NewSpan(0, seg.Width())
+	})
 }
 
-// TokenPositionRanges returns position ranges for the tokens at each of the
-// given positions. For a token split across lines, it returns one range per
-// line of the token. It removes duplicate ranges.
+// ContentRanges returns the ranges of tk's content, one per line it appears
+// on, excluding leading and trailing spaces. A line where tk holds only
+// spaces contributes no range.
 //
-// Returns nil if no tokens exist at any of the given positions.
-func (ls Lines) TokenPositionRanges(positions ...position.Position) []position.Range {
-	var allRanges position.Ranges
-
-	for _, pos := range positions {
-		allRanges = append(allRanges, ls.TokenPositionRangesAt(pos)...)
-	}
-
-	return allRanges.UniqueValues()
+// The token may be a lexer token or one of the per-line parts, as for
+// [Lines.TokenRanges]. Returns nil if tk is nil or not found.
+func (ls Lines) ContentRanges(tk *token.Token) position.Ranges {
+	return ls.ranges(tk, segment.contentSpan)
 }
 
-// TokenPositionRangesFromToken returns position ranges for all occurrences of
-// the given token.
-//
-// For multi-line tokens split across lines, returns one range per line.
-//
-// Returns nil if the token is nil or not found.
-func (ls Lines) TokenPositionRangesFromToken(tk *token.Token) []position.Range {
+// ranges collects one range per segment that contains tk, using span to
+// pick the columns within the segment.
+func (ls Lines) ranges(tk *token.Token, span func(segment) position.Span) position.Ranges {
 	if tk == nil {
 		return nil
 	}
 
-	var ranges position.Ranges
+	var result position.Ranges
 
 	for i, l := range ls {
-		ranges = append(ranges, l.tokenPositionRanges(i, tk)...)
+		col := 0
+
+		for _, seg := range l.segments {
+			if seg.Contains(tk) {
+				if sp := span(seg); sp.Len() > 0 {
+					result = append(result, position.NewRange(
+						position.New(i, col+sp.Start),
+						position.New(i, col+sp.End),
+					))
+				}
+			}
+
+			col += seg.Width()
+		}
 	}
 
-	return ranges
-}
-
-// ContentPositionRangesAt returns position ranges for content at the given
-// position, excluding leading and trailing spaces.
-//
-// Returns nil if the position is out of bounds or no content exists there.
-func (ls Lines) ContentPositionRangesAt(pos position.Position) position.Ranges {
-	lineSegs := make(tokens.Segments2, len(ls))
-	for i, l := range ls {
-		lineSegs[i] = l.segments
-	}
-
-	return lineSegs.ContentRangesAt(pos.Line, pos.Col)
-}
-
-// ContentPositionRanges returns position ranges for content at each of the
-// given positions, excluding leading and trailing spaces. It removes duplicate
-// ranges.
-//
-// Returns nil if no content exists at any of the given positions.
-func (ls Lines) ContentPositionRanges(positions ...position.Position) []position.Range {
-	var allRanges position.Ranges
-
-	for _, pos := range positions {
-		allRanges = append(allRanges, ls.ContentPositionRangesAt(pos)...)
-	}
-
-	return allRanges.UniqueValues()
-}
-
-// ContentPositionRangesFromToken returns position ranges for content of the
-// given token, excluding leading and trailing spaces.
-//
-// Returns nil if the token is nil or not found.
-func (ls Lines) ContentPositionRangesFromToken(tk *token.Token) []position.Range {
-	return ls.ContentPositionRanges(ls.TokenPositions(tk)...)
+	return result
 }
 
 // Content returns the combined content of all [Line] values as a string.

@@ -1,42 +1,11 @@
-// Package tokens provides segmentation for multiline YAML tokens and utilities
-// for syntax highlighting.
+// Package tokens provides utilities for working with go-yaml token streams:
+// document splitting, syntax highlighting categories, and line ending handling.
 //
-// # Token Segments
+// # Line Endings
 //
-// YAML lexers produce tokens that may span multiple lines (block scalars,
-// multiline strings, folded content).
-//
-// When rendering YAML line-by-line for display or editing, each line needs its
-// portion of such tokens while still knowing which original token it came from.
-// This package bridges that gap.
-//
-// A [Segment] pairs an original source token with a "part" token representing
-// one line's portion.
-//
-// For a three-line block scalar, you get three Segments that share the same
-// source pointer but have different parts.
-//
-// This shared pointer enables efficient deduplication: call
-// [Segments.SourceTokens] to recover the original tokens without duplicates.
-//
-// # Building Line-Based Views
-//
-// The [line] package uses [Segments] to represent a single line's worth of
-// tokens and [Segments2] for multiple lines.
-//
-// Position-based queries like [Segments2.TokenRangesAt] find all ranges a
-// token occupies across lines, which is useful for highlighting all parts of
-// a token (e.g. for errors).
-//
-// # Token Sharing
-//
-// Segments never copy tokens. [Segment.Source] returns the lexer's original
-// token, shared by every segment cut from it, and [Segment.Part] returns the
-// part token shared by every copy of the segment. Because the pointers are
-// stable, a token obtained from [Segments.SourceTokenAt] can be passed back
-// to [Segments2.TokenRangesAt] or compared with [Segment.SourceEquals] and
-// will match. In exchange, callers must treat every returned token as
-// read-only and call [token.Token.Clone] before modifying one.
+// The go-yaml lexer keeps line endings in a token's Origin and may split a
+// CRLF ending across two tokens. [TrimLineEnding] strips whichever form a
+// token carries so callers can measure and compare content consistently.
 //
 // # Syntax Highlighting
 //

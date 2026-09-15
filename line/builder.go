@@ -6,8 +6,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/goccy/go-yaml/token"
-
-	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 // linesBuilder constructs [Lines] from [token.Tokens].
@@ -17,7 +15,7 @@ type linesBuilder struct {
 	// Result accumulation.
 	lastPart            *token.Token // Most recent part on the current line, for linking.
 	lines               []Line
-	currentLineSegments tokens.Segments
+	currentLineSegments segments
 	currentLine         int // Current line number being built.
 	built               bool
 
@@ -194,7 +192,7 @@ func (b *linesBuilder) processPart(ctx *partContext) bool {
 			Origin:        ctx.part,
 			Position: &token.Position{
 				Line:        b.currentLine - 1, // Goes on previous line.
-				Column:      lastLine.segments.NextColumn() + 1,
+				Column:      lastLine.segments.lastColumn() + 1,
 				Offset:      b.currentOffset,
 				IndentNum:   b.prevLineIndentNum,
 				IndentLevel: b.currentIndentLevel,
@@ -204,7 +202,7 @@ func (b *linesBuilder) processPart(ctx *partContext) bool {
 			linkParts(lastLine.segments[n-1].Part(), newTk)
 		}
 
-		lastLine.segments = append(lastLine.segments, tokens.NewSegment(ctx.tk, newTk))
+		lastLine.segments = append(lastLine.segments, newSegment(ctx.tk, newTk))
 
 		b.currentOffset += utf8.RuneCountInString(ctx.part)
 
@@ -244,7 +242,7 @@ func (b *linesBuilder) processPart(ctx *partContext) bool {
 	// Capture before it changes for later use.
 	wasFirstContentPart := *ctx.isFirstContentPart && !partIsPureNewline
 	if partIsPureNewline {
-		col = b.currentLineSegments.NextColumn() + 1
+		col = b.currentLineSegments.lastColumn() + 1
 	} else {
 		col, val = partColumnAndValue(ctx.tk, *ctx.isFirstContentPart, shouldHaveValue)
 		*ctx.isFirstContentPart = false
@@ -325,7 +323,7 @@ func (b *linesBuilder) processPart(ctx *partContext) bool {
 
 	b.lastPart = newTk
 
-	b.currentLineSegments = append(b.currentLineSegments, tokens.NewSegment(ctx.tk, newTk))
+	b.currentLineSegments = append(b.currentLineSegments, newSegment(ctx.tk, newTk))
 
 	b.currentOffset += utf8.RuneCountInString(ctx.part)
 

@@ -685,7 +685,7 @@ func (e *Error) collectErrorPositions(a *Error, src *Source, view line.Lines, ma
 		if pos.Line < view.Len() {
 			positions = append(positions, errorPosition{
 				pos:    pos,
-				ranges: view.ContentPositionRanges(pos),
+				ranges: view.ContentRanges(view.TokenAt(pos)),
 			})
 		}
 	}
@@ -705,7 +705,7 @@ func (e *Error) collectErrorPositions(a *Error, src *Source, view line.Lines, ma
 			continue
 		}
 
-		r.ranges = view.ContentPositionRanges(r.pos)
+		r.ranges = view.ContentRanges(view.TokenAt(r.pos))
 		positions = append(positions, r)
 	}
 

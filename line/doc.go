@@ -65,7 +65,8 @@
 // Position-based token lookup uses [position.Position] values:
 //
 //	tk := lines.TokenAt(position.New(2, 4))  // Line 2, column 4.
-//	ranges := lines.TokenPositionRangesFromToken(tk)  // Find all occurrences.
+//	ranges := lines.TokenRanges(tk)          // Every line the token occupies.
+//	content := lines.ContentRanges(tk)       // The same without surrounding spaces.
 //
 // # Rendering Metadata
 //
@@ -102,9 +103,9 @@
 //
 // The [Lines.Tokens] method reconstructs the original token stream.
 //
-// Tokens that were split across lines are deduplicated using shared source
-// pointers from the internal [tokens.Segment] representation, so the result
-// holds the lexer's original tokens in their original order.
+// Each line keeps a reference to the original token every part was cut
+// from, so tokens that were split across lines collapse back to one and the
+// result holds the lexer's original tokens in their original order.
 //
 // Every token the package hands out, from [Lines.Tokens], [Lines.TokenAt],
 // [Line.Tokens], or [Line.Token], is shared with the lines. Treat them as

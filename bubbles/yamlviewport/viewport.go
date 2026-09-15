@@ -25,7 +25,7 @@ const defaultHorizontalStep = 6
 // See [niceyaml.Finder] for an implementation.
 type Finder interface {
 	Load(lines niceyaml.LineIterator)
-	Find(search string) []position.Range
+	Find(search string) position.Ranges
 }
 
 // DiffMode specifies how diffs are computed between revisions.
@@ -141,8 +141,8 @@ type Model struct {
 	// KeyMap contains the keybindings for viewport navigation.
 	KeyMap         KeyMap
 	searchMatches  []searchMatch
-	leftMatches    []position.Range
-	rightMatches   []position.Range
+	leftMatches    position.Ranges
+	rightMatches   position.Ranges
 	horizontalStep int
 	revIndex       int
 	diffMode       DiffMode
@@ -635,7 +635,7 @@ func (m *Model) applySideBySideOverlays() {
 // It uses cached matches and showSelected to determine the selected style.
 func (m *Model) applySideBySidePaneOverlays(
 	view line.Lines,
-	matches []position.Range,
+	matches position.Ranges,
 	selectedPos position.Position,
 	showSelected bool,
 ) {

@@ -19,12 +19,12 @@ func TestFinder_Find(t *testing.T) {
 		input      string
 		search     string
 		normalizer niceyaml.Normalizer
-		want       []position.Range
+		want       position.Ranges
 	}{
 		"single token match": {
 			input:  "key: value",
 			search: "value",
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 5),
 					position.New(0, 10),
@@ -34,7 +34,7 @@ func TestFinder_Find(t *testing.T) {
 		"match key": {
 			input:  "key: value",
 			search: "key",
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 0),
 					position.New(0, 3),
@@ -44,7 +44,7 @@ func TestFinder_Find(t *testing.T) {
 		"cross-token match": {
 			input:  "key: value",
 			search: ": ",
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 3),
 					position.New(0, 5),
@@ -54,7 +54,7 @@ func TestFinder_Find(t *testing.T) {
 		"multiple matches": {
 			input:  "a: test\nb: test\nc: test",
 			search: "test",
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 3),
 					position.New(0, 7),
@@ -82,7 +82,7 @@ func TestFinder_Find(t *testing.T) {
 		"multi-line value": {
 			input:  "text: |\n  line1\n  line2",
 			search: "line2",
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(2, 2),
 					position.New(2, 7),
@@ -92,7 +92,7 @@ func TestFinder_Find(t *testing.T) {
 		"match spans lines": {
 			input:  "a: 1\nb: 2",
 			search: "1\nb",
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 3),
 					position.New(1, 1),
@@ -103,7 +103,7 @@ func TestFinder_Find(t *testing.T) {
 			input:      "name: Thaïs",
 			search:     "Thais",
 			normalizer: normalizer.New(),
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 6),
 					position.New(0, 11),
@@ -114,7 +114,7 @@ func TestFinder_Find(t *testing.T) {
 			input:      "name: Thais",
 			search:     "Thaïs",
 			normalizer: normalizer.New(),
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 6),
 					position.New(0, 11),
@@ -130,7 +130,7 @@ func TestFinder_Find(t *testing.T) {
 			input:      "key: VALUE",
 			search:     "value",
 			normalizer: yamltest.NewCustomNormalizer(strings.ToLower),
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 5),
 					position.New(0, 10),
@@ -140,7 +140,7 @@ func TestFinder_Find(t *testing.T) {
 		"single character match": {
 			input:  "a: b",
 			search: "a",
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 0),
 					position.New(0, 1),
@@ -150,7 +150,7 @@ func TestFinder_Find(t *testing.T) {
 		"overlapping potential matches": {
 			input:  "aaa",
 			search: "aa",
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 0),
 					position.New(0, 2),
@@ -160,7 +160,7 @@ func TestFinder_Find(t *testing.T) {
 		"utf8 - search text after multibyte char": {
 			input:  "name: Thaïs test",
 			search: "test",
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 12),
 					position.New(0, 16),
@@ -170,7 +170,7 @@ func TestFinder_Find(t *testing.T) {
 		"utf8 - search for multibyte char": {
 			input:  "name: Thaïs",
 			search: "ï",
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 9),
 					position.New(0, 10),
@@ -180,7 +180,7 @@ func TestFinder_Find(t *testing.T) {
 		"utf8 - search spanning multibyte char": {
 			input:  "name: Thaïs",
 			search: "ïs",
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 9),
 					position.New(0, 11),
@@ -190,7 +190,7 @@ func TestFinder_Find(t *testing.T) {
 		"utf8 - multiple multibyte chars": {
 			input:  "key: über öffentlich",
 			search: "öffentlich",
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 10),
 					position.New(0, 20),
@@ -201,7 +201,7 @@ func TestFinder_Find(t *testing.T) {
 			input:      "key: über öffentlich",
 			search:     "o",
 			normalizer: normalizer.New(),
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 10),
 					position.New(0, 11),
@@ -212,7 +212,7 @@ func TestFinder_Find(t *testing.T) {
 			input:      "name: THAÏS test",
 			search:     "thais",
 			normalizer: normalizer.New(),
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 6),
 					position.New(0, 11),
@@ -222,7 +222,7 @@ func TestFinder_Find(t *testing.T) {
 		"utf8 - japanese characters partial match": {
 			input:  "key: 日本酒",
 			search: "日本",
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 5),
 					position.New(0, 7),
@@ -232,7 +232,7 @@ func TestFinder_Find(t *testing.T) {
 		"utf8 - japanese after other japanese": {
 			input:  "- 寿司: 日本酒",
 			search: "日本",
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 6),
 					position.New(0, 8),
@@ -242,7 +242,7 @@ func TestFinder_Find(t *testing.T) {
 		"utf8 - multiline with japanese": {
 			input:  "a: test\n- 寿司: 日本酒",
 			search: "日本",
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(1, 6),
 					position.New(1, 8),
@@ -257,7 +257,7 @@ func TestFinder_Find(t *testing.T) {
 		"emoji search": {
 			input:  "icon: 🎉",
 			search: "🎉",
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 6),
 					position.New(0, 7),
@@ -272,7 +272,7 @@ func TestFinder_Find(t *testing.T) {
 		"search equals input": {
 			input:  "key: value",
 			search: "key: value",
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 0),
 					position.New(0, 10),
@@ -282,7 +282,7 @@ func TestFinder_Find(t *testing.T) {
 		"whitespace only search": {
 			input:  "key: value",
 			search: " ",
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 4),
 					position.New(0, 5),
@@ -292,7 +292,7 @@ func TestFinder_Find(t *testing.T) {
 		"consecutive matches": {
 			input:  "aaa: bbb",
 			search: "a",
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 0),
 					position.New(0, 1),
@@ -310,7 +310,7 @@ func TestFinder_Find(t *testing.T) {
 		"special yaml chars in search": {
 			input:  "text: \"[not] {a} list\"",
 			search: "[not]",
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 7),
 					position.New(0, 12),
@@ -347,7 +347,7 @@ func TestFinder_Find_EdgeCases(t *testing.T) {
 	tcs := map[string]struct {
 		input  string
 		search string
-		want   []position.Range
+		want   position.Ranges
 	}{
 		"empty lines": {
 			input:  "",
@@ -357,7 +357,7 @@ func TestFinder_Find_EdgeCases(t *testing.T) {
 		"first character": {
 			input:  "key: value",
 			search: "k",
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 0),
 					position.New(0, 1),
@@ -367,7 +367,7 @@ func TestFinder_Find_EdgeCases(t *testing.T) {
 		"last character": {
 			input:  "key: value",
 			search: "e",
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 1),
 					position.New(0, 2),
@@ -425,23 +425,23 @@ func TestFinder_Find_DiffBuiltLines(t *testing.T) {
 
 	tcs := map[string]struct {
 		search string
-		want   []position.Range
+		want   position.Ranges
 	}{
 		"search for 'old' finds match at visual line 0": {
 			search: "old",
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(position.New(0, 5), position.New(0, 8)),
 			},
 		},
 		"search for 'new' finds match at visual line 1": {
 			search: "new",
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(position.New(1, 5), position.New(1, 8)),
 			},
 		},
 		"search for 'key' finds matches at both visual lines": {
 			search: "key",
-			want: []position.Range{
+			want: position.Ranges{
 				position.NewRange(position.New(0, 0), position.New(0, 3)),
 				position.NewRange(position.New(1, 0), position.New(1, 3)),
 			},
