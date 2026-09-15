@@ -166,13 +166,12 @@ func TestPrinter_AddStyleToRange(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tks := lexer.Tokenize(tc.input)
-			source := niceyaml.NewSourceFromTokens(tks)
-			source.AddOverlay(testOverlayHighlight, tc.rng)
+			view := niceyaml.NewSourceFromTokens(lexer.Tokenize(tc.input)).Lines()
+			view.AddOverlay(testOverlayHighlight, tc.rng)
 
 			p := testPrinter()
 
-			got := p.Print(source)
+			got := p.Print(view)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -184,17 +183,17 @@ func TestPrinter_ClearOverlays(t *testing.T) {
 	input := "key: value"
 	tks := lexer.Tokenize(input)
 
-	source := niceyaml.NewSourceFromTokens(tks)
-	source.AddOverlay(
+	view := niceyaml.NewSourceFromTokens(tks).Lines()
+	view.AddOverlay(
 		testOverlayHighlight,
 		position.NewRange(position.New(0, 0), position.New(0, 3)),
 	)
-	source.ClearOverlays()
+	view.ClearOverlays()
 
 	p := testPrinter()
 
 	// After clearing, no styles should be applied.
-	assert.Equal(t, "key: value", p.Print(source))
+	assert.Equal(t, "key: value", p.Print(view))
 }
 
 func TestPrinter_PrintTokens_EmptyFile(t *testing.T) {
@@ -1265,13 +1264,12 @@ func TestPrinter_WithAnnotations(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			input := "key: value\n"
-			source := niceyaml.NewSourceFromString(input)
-			source.Lines()[0].AddAnnotation(line.Annotation{Content: tc.annotation})
+			view := niceyaml.NewSourceFromString("key: value\n").Lines()
+			view[0].AddAnnotation(line.Annotation{Content: tc.annotation})
 
 			p := testPrinter().With(niceyaml.WithAnnotations(tc.enabled))
 
-			got := p.Print(source)
+			got := p.Print(view)
 
 			assert.Equal(t, tc.want, got)
 		})
@@ -1367,11 +1365,11 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			source := niceyaml.NewSourceFromString(tc.input)
-			source.Lines()[tc.lineIndex].AddAnnotation(tc.annotation)
+			view := niceyaml.NewSourceFromString(tc.input).Lines()
+			view[tc.lineIndex].AddAnnotation(tc.annotation)
 
 			p := testPrinter()
-			got := p.Print(source)
+			got := p.Print(view)
 
 			assert.Equal(t, tc.want, got)
 		})
@@ -1430,11 +1428,11 @@ func TestPrinter_AnnotationPosition_WithGutter(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			source := niceyaml.NewSourceFromString(tc.input)
-			source.Lines()[tc.lineIndex].AddAnnotation(tc.annotation)
+			view := niceyaml.NewSourceFromString(tc.input).Lines()
+			view[tc.lineIndex].AddAnnotation(tc.annotation)
 
 			p := testPrinterWithGutter(niceyaml.LineNumberGutter())
-			got := p.Print(source)
+			got := p.Print(view)
 
 			assert.Equal(t, tc.want, got)
 		})
@@ -1467,13 +1465,12 @@ func TestPrinter_AnnotationPosition_Disabled(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			input := "key: value"
-			source := niceyaml.NewSourceFromString(input)
-			source.Lines()[0].AddAnnotation(tc.annotation)
+			view := niceyaml.NewSourceFromString("key: value").Lines()
+			view[0].AddAnnotation(tc.annotation)
 
 			p := testPrinter().With(niceyaml.WithAnnotations(false))
 
-			got := p.Print(source)
+			got := p.Print(view)
 
 			// With annotations disabled, only the content should be rendered.
 			assert.Equal(t, "key: value", got)
@@ -2151,9 +2148,10 @@ func TestFinderPrinter_Integration(t *testing.T) {
 				assert.Empty(t, ranges)
 			}
 
-			source.AddOverlay(testOverlayHighlight, ranges...)
+			view := source.Lines()
+			view.AddOverlay(testOverlayHighlight, ranges...)
 
-			got := printer.Print(source)
+			got := printer.Print(view)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -2188,7 +2186,7 @@ func TestPrinter_Golden(t *testing.T) {
 	t.Parallel()
 
 	type goldenTest struct {
-		setupFunc func(*niceyaml.Source)
+		setupFunc func(line.Lines)
 		opts      []niceyaml.PrinterOption
 	}
 
@@ -2237,13 +2235,13 @@ func TestPrinter_Golden(t *testing.T) {
 				niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 				niceyaml.WithGutter(niceyaml.NoGutter()),
 			},
-			setupFunc: func(source *niceyaml.Source) {
+			setupFunc: func(view line.Lines) {
 				// Search for "日本" (Japan) which appears multiple times in full.yaml.
 				finder := niceyaml.NewFinder()
-				finder.Load(source)
+				finder.Load(view)
 
 				ranges := finder.Find("日本")
-				source.AddOverlay(testOverlayHighlight, ranges...)
+				view.AddOverlay(testOverlayHighlight, ranges...)
 			},
 		},
 	}
@@ -2255,7 +2253,7 @@ func TestPrinter_Golden(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := niceyaml.NewSourceFromString(string(input))
+			lines := niceyaml.NewSourceFromString(string(input)).Lines()
 			printer := niceyaml.NewPrinter(tc.opts...)
 
 			if tc.setupFunc != nil {
@@ -2438,11 +2436,12 @@ func TestPrinter_BlendStyles(t *testing.T) {
 				niceyaml.WithGutter(niceyaml.NoGutter()),
 			)
 
+			view := source.Lines()
 			for _, or := range tc.ranges {
-				source.AddOverlay(or.kind, position.NewRange(or.start, or.end))
+				view.AddOverlay(or.kind, position.NewRange(or.start, or.end))
 			}
 
-			got := p.Print(source)
+			got := p.Print(view)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -2545,7 +2544,7 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			source := niceyaml.NewSourceFromString(tc.input)
+			view := niceyaml.NewSourceFromString(tc.input).Lines()
 
 			// Build overlay styler with styles from test case.
 			kinds := []style.Style{colorKind1, colorKind2, colorKind3}
@@ -2553,7 +2552,7 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 			overlayOpts := make([]style.StylesOption, 0, len(tc.overlays))
 			for i, od := range tc.overlays {
 				overlayOpts = append(overlayOpts, style.Set(kinds[i], od.style))
-				source.AddOverlay(kinds[i], position.NewRange(od.start, od.end))
+				view.AddOverlay(kinds[i], position.NewRange(od.start, od.end))
 			}
 
 			p := niceyaml.NewPrinter(
@@ -2562,7 +2561,7 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 				niceyaml.WithGutter(niceyaml.NoGutter()),
 			)
 
-			got := p.Print(source)
+			got := p.Print(view)
 			golden.RequireEqual(t, got)
 		})
 	}
@@ -2691,9 +2690,8 @@ func TestPrinter_WithAnnotationFunc(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			input := "key: value"
-			source := niceyaml.NewSourceFromString(input)
-			source.Lines()[tc.lineIndex].AddAnnotation(tc.annotation)
+			view := niceyaml.NewSourceFromString("key: value").Lines()
+			view[tc.lineIndex].AddAnnotation(tc.annotation)
 
 			p := niceyaml.NewPrinter(
 				niceyaml.WithStyles(style.Styles{}),
@@ -2702,7 +2700,7 @@ func TestPrinter_WithAnnotationFunc(t *testing.T) {
 				niceyaml.WithAnnotationFunc(customAnnotation),
 			)
 
-			got := p.Print(source)
+			got := p.Print(view)
 			assert.Equal(t, tc.want, got)
 		})
 	}

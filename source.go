@@ -15,7 +15,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/lexers"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
-	"go.jacobcolvin.com/niceyaml/style"
 )
 
 // LineIterator provides line-by-line access to YAML tokens.
@@ -47,20 +46,17 @@ type LineIterator interface {
 //	printer := NewPrinter(WithStyles(theme.Dracula()))
 //	fmt.Println(printer.Print(source))
 //
-// Source keeps a small set of view methods for the common case. The
-// [LineIterator] methods let a Source go straight to a [Printer] or [Finder],
-// and [Source.AddOverlay], [Source.ClearOverlays], and [Source.Width] cover
-// highlighting. All of them delegate to the same [line.Lines] value that
-// [Source.Lines] returns, so highlighting through either path renders
-// identically. Everything else about the view, such as token lookup by
-// position or the debugging [line.Lines.String], lives on [line.Lines] and is
-// reached through [Source.Lines]. Callers that need an independent copy, for
-// instance to highlight the same document two different ways, clone the view
-// with [line.Lines.Clone].
+// A Source never changes after creation. It implements [LineIterator] over
+// its pristine lines, so printing a Source always renders the document as
+// parsed. To highlight or annotate, take a view with [Source.Lines], which
+// returns an independent copy each call, and render the view instead:
 //
-// A Source is not safe for concurrent mutation. Add overlays from one
-// goroutine at a time, and do not add them while another goroutine renders.
-// Parsing through [Source.File] is safe to call concurrently.
+//	view := source.Lines()
+//	view.AddOverlay(style.GenericHighlight, ranges...)
+//	fmt.Println(printer.Print(view))
+//
+// Since nothing mutates a Source, it is safe for concurrent use, and every
+// view taken from it is a private copy.
 //
 // Create instances with [NewSourceFromFile], [NewSourceFromBytes],
 // [NewSourceFromString], [NewSourceFromToken], or [NewSourceFromTokens].
@@ -308,13 +304,13 @@ func (s *Source) WrapError(err error) error {
 	return NewErrorFrom(err, opts...)
 }
 
-// Lines returns the [line.Lines] view of the [Source].
+// Lines returns a [line.Lines] view of the [Source].
 //
-// Lines returns the shared view rather than a copy, so overlays and
-// annotations added to it are visible through every other view method on the
-// Source. Use [line.Lines.Clone] for an independent copy.
+// Each call returns an independent copy, so overlays and annotations added to
+// one view never reach the Source or another view. Render the view to see
+// them.
 func (s *Source) Lines() line.Lines {
-	return s.lines
+	return s.lines.Clone()
 }
 
 // Len returns the number of lines.
@@ -329,28 +325,22 @@ func (s *Source) IsEmpty() bool {
 
 // AllLines returns an iterator over lines within the given spans.
 // See [line.Lines.AllLines].
+//
+// Each yielded [*line.Line] is a copy, so annotations or overlays added
+// through it do not change the Source.
 func (s *Source) AllLines(spans ...position.Span) iter.Seq2[int, *line.Line] {
-	return s.lines.AllLines(spans...)
+	return func(yield func(int, *line.Line) bool) {
+		for i, ln := range s.lines.AllLines(spans...) {
+			c := *ln
+			if !yield(i, &c) {
+				return
+			}
+		}
+	}
 }
 
 // AllRunes returns an iterator over runes within the given ranges.
 // See [line.Lines.AllRunes].
 func (s *Source) AllRunes(ranges ...position.Range) iter.Seq2[position.Position, rune] {
 	return s.lines.AllRunes(ranges...)
-}
-
-// AddOverlay adds an overlay of the given kind to the specified ranges.
-// See [line.Lines.AddOverlay].
-func (s *Source) AddOverlay(kind style.Style, ranges ...position.Range) {
-	s.lines.AddOverlay(kind, ranges...)
-}
-
-// ClearOverlays removes all overlays from all lines.
-func (s *Source) ClearOverlays() {
-	s.lines.ClearOverlays()
-}
-
-// Width returns the maximum line width across all lines.
-func (s *Source) Width() int {
-	return s.lines.Width()
 }

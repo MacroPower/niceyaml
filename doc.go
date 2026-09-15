@@ -145,7 +145,7 @@
 //
 //	finder := niceyaml.NewFinder(niceyaml.WithNormalizer(normalizer.New()))
 //	finder.Load(source)
-//	for _, rng := range finder.Find("search term") {
-//		source.AddOverlay(style.GenericInserted, rng)
-//	}
+//	view := source.Lines()
+//	view.AddOverlay(style.GenericHighlight, finder.Find("search term")...)
+//	fmt.Println(printer.Print(view))
 package niceyaml

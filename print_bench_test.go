@@ -60,7 +60,7 @@ func BenchmarkPrinterPrint_WithOverlays(b *testing.B) {
 
 	for _, rc := range rangeCounts {
 		b.Run(rc.name, func(b *testing.B) {
-			source := niceyaml.NewSourceFromString(yaml)
+			source := niceyaml.NewSourceFromString(yaml).Lines()
 			printer := niceyaml.NewPrinter(niceyaml.WithStyles(overlayStyler))
 
 			// Pre-configure overlays before measurement.
@@ -106,7 +106,7 @@ func BenchmarkPrinterPrint_WithOverlays_IncludingSetup(b *testing.B) {
 			b.SetBytes(int64(len(yaml)))
 
 			for b.Loop() {
-				source := niceyaml.NewSourceFromString(yaml)
+				source := niceyaml.NewSourceFromString(yaml).Lines()
 				printer := niceyaml.NewPrinter(niceyaml.WithStyles(overlayStyler))
 
 				// Distribute overlays across lines.
@@ -143,7 +143,7 @@ func BenchmarkPrinterPrint_OverlaysDensity(b *testing.B) {
 
 	for _, d := range densities {
 		b.Run(d.name, func(b *testing.B) {
-			source := niceyaml.NewSourceFromString(yaml)
+			source := niceyaml.NewSourceFromString(yaml).Lines()
 			printer := niceyaml.NewPrinter(niceyaml.WithStyles(overlayStyler))
 
 			// Pre-configure overlays before measurement.
@@ -274,7 +274,7 @@ func BenchmarkSourceClearOverlays(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				source := niceyaml.NewSourceFromString(yaml)
+				source := niceyaml.NewSourceFromString(yaml).Lines()
 
 				for i := range count {
 					r := position.Range{
@@ -290,14 +290,14 @@ func BenchmarkSourceClearOverlays(b *testing.B) {
 	}
 }
 
-func BenchmarkSourceAddOverlay(b *testing.B) {
+func BenchmarkLinesAddOverlay(b *testing.B) {
 	yaml := generateYAML(100)
 
 	b.ReportAllocs()
 	b.ResetTimer()
 
 	for b.Loop() {
-		source := niceyaml.NewSourceFromString(yaml)
+		source := niceyaml.NewSourceFromString(yaml).Lines()
 
 		for i := range 100 {
 			r := position.Range{

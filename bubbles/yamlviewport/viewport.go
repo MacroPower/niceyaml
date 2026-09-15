@@ -747,7 +747,7 @@ func (m *Model) getDisplayLines() line.Lines {
 		return nil
 	}
 
-	return src.Lines().Clone()
+	return src.Lines()
 }
 
 // getDiffResult returns the cached [niceyaml.DiffResult], computing it if nil.

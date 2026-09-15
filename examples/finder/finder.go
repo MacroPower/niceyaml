@@ -45,9 +45,10 @@ func main() {
 	// Find all occurrences of "cafe" in the source.
 	results := finder.Find("cafe")
 
-	// Add overlays for the found ranges.
-	source.AddOverlay(highlightKind, results...)
+	// Highlight the matches on a view of the source.
+	view := source.Lines()
+	view.AddOverlay(highlightKind, results...)
 
 	fmt.Println("\nPrint with matches highlighted:")
-	fmt.Println(printer.Print(source))
+	fmt.Println(printer.Print(view))
 }

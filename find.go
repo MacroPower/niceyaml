@@ -43,11 +43,10 @@ type Normalizer interface {
 //	)
 //	finder.Load(source)
 //
-//	// Find matches and highlight them.
-//	for _, rng := range finder.Find("search term") {
-//		source.AddOverlay(highlightStyle, rng)
-//	}
-//	fmt.Println(printer.Print(source))
+//	// Find matches and highlight them on a view of the source.
+//	view := source.Lines()
+//	view.AddOverlay(highlightStyle, finder.Find("search term")...)
+//	fmt.Println(printer.Print(view))
 //
 // By default, searches are exact (case-sensitive, no normalization).
 //

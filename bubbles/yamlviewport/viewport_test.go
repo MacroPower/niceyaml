@@ -18,7 +18,6 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/bubbles/yamlviewport"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
-	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
@@ -2676,10 +2675,6 @@ func TestViewport_DoesNotMutateSource(t *testing.T) {
 	m.SetHeight(10)
 
 	source := niceyaml.NewSourceFromString("key: value\n")
-	source.AddOverlay(style.GenericError, position.NewRange(
-		position.New(0, 0),
-		position.New(0, 3),
-	))
 
 	m.SetSource(source)
 	m.SetSearchTerm("value")
@@ -2691,9 +2686,8 @@ func TestViewport_DoesNotMutateSource(t *testing.T) {
 
 	_ = m.View()
 
-	// The caller's overlay survives search highlighting and clearing.
-	require.Len(t, source.Lines()[0].Overlays, 1)
-	assert.Equal(t, style.GenericError, source.Lines()[0].Overlays[0].Style)
+	// Search highlighting never reaches the caller's Source.
+	assert.Empty(t, source.Lines()[0].Overlays)
 }
 
 func TestViewport_SearchAcrossRevisions(t *testing.T) {

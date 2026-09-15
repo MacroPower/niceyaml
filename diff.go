@@ -79,8 +79,10 @@ func (d *Differ) Diff(a, b *Source) *DiffResult {
 
 // computeOps computes line operations using the configured algorithm.
 func (d *Differ) computeOps(before, after *Source) []lineOp {
-	beforeLines := before.Lines()
-	afterLines := after.Lines()
+	// Read the sources' lines directly instead of copying them. Both toLines
+	// and getAlignedRows clone each line before a caller sees it.
+	beforeLines := before.lines
+	afterLines := after.lines
 
 	// Pre-compute content strings once to avoid repeated string building.
 	beforeContent := make([]string, len(beforeLines))

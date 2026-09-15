@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
@@ -94,16 +95,16 @@ func TestTokens_String_Annotation(t *testing.T) {
 			t.Parallel()
 
 			tks := lexer.Tokenize(tc.input)
-			result := niceyaml.NewSourceFromTokens(tks, niceyaml.WithName("test"))
+			view := niceyaml.NewSourceFromTokens(tks, niceyaml.WithName("test")).Lines()
 
 			// Apply annotations to specified lines.
 			for idx, ann := range tc.annotations {
-				require.Less(t, idx, result.Len(), "annotation index out of range")
+				require.Less(t, idx, view.Len(), "annotation index out of range")
 
-				result.Lines()[idx].AddAnnotation(ann)
+				view[idx].AddAnnotation(ann)
 			}
 
-			assert.Equal(t, tc.want, result.Lines().String())
+			assert.Equal(t, tc.want, view.String())
 		})
 	}
 }
@@ -884,133 +885,24 @@ func TestSource_WithParserOptions(t *testing.T) {
 	})
 }
 
-func TestSource_AddOverlay(t *testing.T) {
+func TestSource_Lines_IndependentViews(t *testing.T) {
 	t.Parallel()
 
-	t.Run("single line range", func(t *testing.T) {
-		t.Parallel()
+	source := niceyaml.NewSourceFromString("key: value\n")
 
-		source := niceyaml.NewSourceFromString("key: value\n")
-		require.Equal(t, 1, source.Len())
+	first := source.Lines()
+	first.AddOverlay("test1", position.NewRange(position.New(0, 0), position.New(0, 5)))
+	first[0].AddAnnotation(line.Annotation{Content: "note", Placement: line.Below})
 
-		source.AddOverlay("test1", position.NewRange(
-			position.New(0, 0),
-			position.New(0, 5),
-		))
+	// A second view starts from the pristine document.
+	second := source.Lines()
+	assert.Empty(t, second[0].Overlays)
+	assert.Empty(t, second[0].Annotations)
 
-		ln := source.Lines()[0]
-		require.Len(t, ln.Overlays, 1)
-		assert.Equal(t, position.NewSpan(0, 5), ln.Overlays[0].Cols)
-		assert.Equal(t, style.Style("test1"), ln.Overlays[0].Style)
-	})
-
-	t.Run("multi-line range splits across lines", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			key1: value1
-			key2: value2
-			key3: value3
-		`)
-		source := niceyaml.NewSourceFromString(input)
-		require.Equal(t, 3, source.Len())
-
-		// Add overlay spanning all three lines.
-		source.AddOverlay("test2", position.NewRange(
-			position.New(0, 3),
-			position.New(2, 5),
-		))
-
-		// First line: col 3 to end of line.
-		ln0 := source.Lines()[0]
-		require.Len(t, ln0.Overlays, 1)
-		assert.Equal(t, 3, ln0.Overlays[0].Cols.Start)
-		assert.Equal(t, style.Style("test2"), ln0.Overlays[0].Style)
-
-		// Middle line: full line.
-		ln1 := source.Lines()[1]
-		require.Len(t, ln1.Overlays, 1)
-		assert.Equal(t, 0, ln1.Overlays[0].Cols.Start)
-		assert.Equal(t, style.Style("test2"), ln1.Overlays[0].Style)
-
-		// Last line: start to col 5.
-		ln2 := source.Lines()[2]
-		require.Len(t, ln2.Overlays, 1)
-		assert.Equal(t, 0, ln2.Overlays[0].Cols.Start)
-		assert.Equal(t, 5, ln2.Overlays[0].Cols.End)
-		assert.Equal(t, style.Style("test2"), ln2.Overlays[0].Style)
-	})
-
-	t.Run("multiple ranges", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			key1: value1
-			key2: value2
-		`)
-		source := niceyaml.NewSourceFromString(input)
-		require.Equal(t, 2, source.Len())
-
-		source.AddOverlay("test1",
-			position.NewRange(position.New(0, 0), position.New(0, 4)),
-			position.NewRange(position.New(1, 0), position.New(1, 4)),
-		)
-
-		require.Len(t, source.Lines()[0].Overlays, 1)
-		require.Len(t, source.Lines()[1].Overlays, 1)
-	})
-
-	t.Run("empty source no-op", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString("")
-		// Should not panic on empty source.
-		source.AddOverlay("test1", position.NewRange(position.New(0, 0), position.New(0, 5)))
-
-		assert.True(t, source.IsEmpty())
-	})
-}
-
-func TestSource_ClearOverlays(t *testing.T) {
-	t.Parallel()
-
-	t.Run("clears all overlays", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			key1: value1
-			key2: value2
-		`)
-		source := niceyaml.NewSourceFromString(input)
-		require.Equal(t, 2, source.Len())
-
-		// Add overlays to both lines.
-		source.AddOverlay("test1",
-			position.NewRange(position.New(0, 0), position.New(0, 10)),
-			position.NewRange(position.New(1, 0), position.New(1, 10)),
-		)
-
-		require.Len(t, source.Lines()[0].Overlays, 1)
-		require.Len(t, source.Lines()[1].Overlays, 1)
-
-		// Clear all overlays.
-		source.ClearOverlays()
-
-		assert.Nil(t, source.Lines()[0].Overlays)
-		assert.Nil(t, source.Lines()[1].Overlays)
-	})
-
-	t.Run("idempotent on empty", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString("key: value\n")
-		require.Equal(t, 1, source.Len())
-
-		// Clear without any overlays set.
-		source.ClearOverlays()
-
-		assert.Nil(t, source.Lines()[0].Overlays)
-	})
+	// The first view keeps what was added to it.
+	require.Len(t, first[0].Overlays, 1)
+	assert.Equal(t, style.Style("test1"), first[0].Overlays[0].Style)
+	assert.Equal(t, "key: value", first.Content())
 }
 
 func TestSource_Name(t *testing.T) {
@@ -1232,59 +1124,26 @@ func TestSource_WrapError(t *testing.T) {
 // A [line.Lines] view satisfies the same iterator contract as a [*niceyaml.Source].
 var _ niceyaml.LineIterator = line.Lines(nil)
 
-func TestSource_Lines_SharedView(t *testing.T) {
-	t.Parallel()
-
-	source := niceyaml.NewSourceFromString("key: value\n")
-	view := source.Lines()
-
-	// Overlays added through the Source are visible through the view.
-	source.AddOverlay(style.GenericHighlight, position.NewRange(
-		position.New(0, 0),
-		position.New(0, 3),
-	))
-	require.Len(t, view[0].Overlays, 1)
-
-	// And overlays added through the view are visible through the Source.
-	view.AddOverlay(style.GenericError, position.NewRange(
-		position.New(0, 5),
-		position.New(0, 10),
-	))
-	require.Len(t, source.Lines()[0].Overlays, 2)
-
-	// A clone is detached from both.
-	clone := view.Clone()
-
-	source.ClearOverlays()
-	assert.Empty(t, view[0].Overlays)
-	assert.Len(t, clone[0].Overlays, 2)
-}
-
-func TestSource_AddOverlay_WhileIterating(t *testing.T) {
+func TestSource_AllLines_YieldsCopies(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("key: value\n")
 
-	// Highlighting from inside an iteration must not block.
-	for pos, r := range source.AllRunes() {
-		if r == 'v' {
-			source.AddOverlay(style.GenericHighlight, position.NewRange(
-				pos,
-				position.New(pos.Line, pos.Col+1),
-			))
-		}
-	}
-
+	// Mutating a line yielded by the Source's own iterator leaves the
+	// document untouched.
 	for _, ln := range source.AllLines() {
-		if ln.Content() == "key: value" {
-			source.AddOverlay(style.GenericError, position.NewRange(
-				position.New(0, 0),
-				position.New(0, 3),
-			))
-		}
+		ln.AddAnnotation(line.Annotation{Content: "note", Placement: line.Below})
+		ln.AddOverlay(line.Overlay{Cols: position.NewSpan(0, 3), Style: style.GenericError})
 	}
 
-	require.Len(t, source.Lines()[0].Overlays, 2)
-	assert.Equal(t, position.NewSpan(5, 6), source.Lines()[0].Overlays[0].Cols)
-	assert.Equal(t, position.NewSpan(0, 3), source.Lines()[0].Overlays[1].Cols)
+	assert.Empty(t, source.Lines()[0].Annotations)
+	assert.Empty(t, source.Lines()[0].Overlays)
+
+	// Printing the Source renders the pristine document.
+	plain := niceyaml.NewPrinter(
+		niceyaml.WithStyles(style.Styles{}),
+		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
+		niceyaml.WithGutter(niceyaml.NoGutter()),
+	)
+	assert.Equal(t, "key: value", plain.Print(source))
 }
