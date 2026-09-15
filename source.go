@@ -30,7 +30,6 @@ type View interface {
 	AllLines(spans ...position.Span) iter.Seq2[int, line.Line]
 	AllRunes(ranges ...position.Range) iter.Seq2[position.Position, rune]
 	Len() int
-	IsEmpty() bool
 }
 
 // Source is a YAML document. It holds the tokens the document was lexed from,

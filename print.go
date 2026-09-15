@@ -438,11 +438,11 @@ func (p *Printer) gutterWidth(totalLines int) int {
 
 // renderSpan renders the lines of span as rows.
 func (p *Printer) renderSpan(t View, span position.Span) []string {
-	if t.IsEmpty() {
+	totalLines := t.Len()
+	if totalLines == 0 {
 		return nil
 	}
 
-	totalLines := t.Len()
 	gutterWidth := p.gutterWidth(totalLines)
 
 	var rows []string

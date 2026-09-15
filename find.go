@@ -191,7 +191,7 @@ func (f *Finder) buildTextAndPositionMap(lines View) (string, *positionMap) {
 
 	pm := &positionMap{}
 
-	if lines == nil || lines.IsEmpty() {
+	if lines == nil || lines.Len() == 0 {
 		return "", pm
 	}
 
