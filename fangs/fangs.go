@@ -12,13 +12,14 @@ import (
 )
 
 // ErrorHandler is an implementation of [fang.ErrorHandler] that renders
-// [niceyaml.Error] values with their annotated source.
+// [niceyaml.SourceError] values with their annotated source.
 //
-// It prints err with the %+v verb, which a [niceyaml.Error] renders as its
-// message followed by [niceyaml.Error.Detail]. An Error behind other wrapping
-// never reaches its own [fmt.Formatter], so expandYAMLErrors substitutes that
-// form in place. It does so for every Error in the tree, so a joined error
-// annotates each failure it holds. Unlike [fang.DefaultErrorHandler], which
+// It prints err with the %+v verb, which a [niceyaml.SourceError] renders as
+// its message followed by [niceyaml.SourceError.Detail]. A SourceError behind
+// other wrapping never reaches its own [fmt.Formatter], so expandYAMLErrors
+// substitutes that form in place. It does so for every SourceError in the
+// tree, so a joined error annotates each failure it holds. Unlike
+// [fang.DefaultErrorHandler], which
 // wraps errors in a lipgloss style that can break multi-line output, this
 // handler applies styling only to the error header, keeping the rendered lines
 // intact.
@@ -30,7 +31,7 @@ func ErrorHandler(w io.Writer, styles fang.Styles, err error) {
 	msg := fmt.Sprintf("%+v", err)
 
 	//nolint:errorlint // Identity of the top-level error, not a chain search.
-	if _, top := err.(*niceyaml.Error); !top {
+	if _, top := err.(*niceyaml.SourceError); !top {
 		msg = expandYAMLErrors(msg, yamlErrors(err))
 	}
 
@@ -58,18 +59,19 @@ func mustN(_ int, err error) {
 	}
 }
 
-// yamlErrors returns the outermost [niceyaml.Error] values in err's tree, in
-// the order their messages appear in the rendered text. It stops at each Error
-// it finds, because an Error renders the errors it holds.
-func yamlErrors(err error) []*niceyaml.Error {
-	var found []*niceyaml.Error
+// yamlErrors returns the outermost [niceyaml.SourceError] values in err's
+// tree, in the order their messages appear in the rendered text. It stops at
+// each SourceError it finds, because a SourceError renders the errors it
+// holds.
+func yamlErrors(err error) []*niceyaml.SourceError {
+	var found []*niceyaml.SourceError
 
 	var walk func(error)
 
 	walk = func(cur error) {
 		for cur != nil {
 			//nolint:errorlint // Identity at this level, not a chain search.
-			if yamlErr, ok := cur.(*niceyaml.Error); ok {
+			if yamlErr, ok := cur.(*niceyaml.SourceError); ok {
 				found = append(found, yamlErr)
 
 				return
@@ -107,7 +109,7 @@ func yamlErrors(err error) []*niceyaml.Error {
 // Falls back to appending the detail when msg does not hold an error's
 // rendering verbatim, which happens when a wrapper reformats the message it
 // wraps.
-func expandYAMLErrors(msg string, errs []*niceyaml.Error) string {
+func expandYAMLErrors(msg string, errs []*niceyaml.SourceError) string {
 	var (
 		sb       strings.Builder
 		rest     = msg

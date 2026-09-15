@@ -56,19 +56,22 @@
 // Themes from [go.jacobcolvin.com/niceyaml/style/theme] provide color
 // palettes. Without one, [Printer] renders with [style.Default].
 //
-// [Error] wraps errors with YAML source context.
+// [Error] points at a location in a YAML document: a path, a token, or a
+// range. [Error.Error] returns the message with that location, and nothing
+// more, so a validator can build one without holding the source.
 //
-// [Error.Error] returns the message with its position, and [Error.Detail]
-// renders the surrounding lines with the error position highlighted. The %+v
-// verb prints both.
-//
-// Multiple nested errors appear as annotations below their respective lines,
-// with distant errors displayed in separate hunks.
+// [SourceError] binds an Error to its [Source]. [Source.WrapError] creates
+// one, [SourceError.Error] reports the location as a resolved position, and
+// [SourceError.Detail] renders the surrounding lines with the location
+// highlighted. The %+v verb prints both. Nested errors appear as annotations
+// below their respective lines, with distant errors displayed in separate
+// hunks.
 //
 // # Error Configuration
 //
-// Sources can pre-configure error formatting via [WithErrorOptions], which
-// stores [ErrorOption] values applied when [*Source.WrapError] converts errors:
+// Sources configure error rendering with [WithErrorOptions], which stores
+// [SourceErrorOption] values applied to every error [Source.WrapError]
+// returns:
 //
 //	source, _ := niceyaml.NewSourceFromFile("config.yaml",
 //		niceyaml.WithErrorOptions(

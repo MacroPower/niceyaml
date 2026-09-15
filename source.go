@@ -59,7 +59,7 @@ type LineIterator interface {
 // view taken from it is a private copy.
 //
 // Create instances with [NewSourceFromFile], [NewSourceFromBytes],
-// [NewSourceFromString], [NewSourceFromToken], or [NewSourceFromTokens].
+// [NewSourceFromString], or [NewSourceFromTokens].
 type Source struct {
 	name       string
 	filePath   string
@@ -68,7 +68,7 @@ type Source struct {
 	fileErr    error
 	parserOpts []parser.Option
 	decodeOpts []yaml.DecodeOption
-	errorOpts  []ErrorOption
+	errorOpts  []SourceErrorOption
 	fileOnce   sync.Once
 }
 
@@ -130,9 +130,9 @@ func WithDecodeOptions(opts ...yaml.DecodeOption) SourceOption {
 	}
 }
 
-// WithErrorOptions is a [SourceOption] that sets the [ErrorOption] values used
-// when wrapping errors with [Source.WrapError].
-func WithErrorOptions(opts ...ErrorOption) SourceOption {
+// WithErrorOptions is a [SourceOption] that sets the [SourceErrorOption]
+// values applied to every [*SourceError] that [Source.WrapError] returns.
+func WithErrorOptions(opts ...SourceErrorOption) SourceOption {
 	return func(s *Source) {
 		s.errorOpts = opts
 	}
@@ -167,37 +167,6 @@ func NewSourceFromString(src string, opts ...SourceOption) *Source {
 	tks := lexers.Tokenize(src)
 
 	return NewSourceFromTokens(tks, opts...)
-}
-
-// NewSourceFromToken creates a new [*Source] from a seed [*token.Token].
-// It collects all [token.Tokens] by walking the token chain from start to end.
-func NewSourceFromToken(tk *token.Token, opts ...SourceOption) *Source {
-	return NewSourceFromTokens(tokenChain(tk), opts...)
-}
-
-// tokenChain collects every token linked to tk, from the first to the last.
-// Returns nil if tk is nil.
-func tokenChain(tk *token.Token) token.Tokens {
-	if tk == nil {
-		return nil
-	}
-
-	// Walk to initial token.
-	for tk.Prev != nil {
-		tk = tk.Prev
-	}
-
-	// Collect all tokens forward.
-	var tks token.Tokens
-
-	for ; tk != nil; tk = tk.Next {
-		// Avoid calling tks.Add, since it modifies the token's Next/Prev pointers,
-		// which will race with any reads/writes.
-		// Clone will also break equality checks.
-		tks = append(tks, tk)
-	}
-
-	return tks
 }
 
 // NewSourceFromTokens creates a new [*Source] from [token.Tokens].
@@ -243,7 +212,8 @@ func (s *Source) Decoder() (*Decoder, error) {
 // The file is lazily parsed on first call using [parser.Parse] with options
 // provided via [WithParserOptions]. Subsequent calls return the cached result.
 //
-// Any YAML parsing errors are converted to [Error] with source annotations.
+// A YAML syntax error comes back as an [*Error] that carries the offending
+// token. Wrap it with [Source.WrapError] to render it against the source.
 func (s *Source) File() (*ast.File, error) {
 	s.fileOnce.Do(func() {
 		s.file, s.fileErr = s.parse()
@@ -279,11 +249,11 @@ func (s *Source) parse() (*ast.File, error) {
 	return nil, err
 }
 
-// WrapError wraps err in a new [*Error] that carries this [*Source] and any
-// [ErrorOption] values from [WithErrorOptions], when err's chain holds an
-// [*Error]. The returned error renders the location of that inner Error
-// against this source, and context added around it with [fmt.Errorf] is
-// preserved in the message.
+// WrapError binds err to this [*Source] when err's chain holds an [*Error].
+// The returned [*SourceError] resolves the location of that inner Error
+// against this source and renders it with the [SourceErrorOption] values
+// from [WithErrorOptions]. Context added around the Error with [fmt.Errorf]
+// is preserved in the message.
 //
 // If err is nil, WrapError returns nil. If err's chain holds no [*Error],
 // WrapError returns it unchanged. Nothing in err is modified.
@@ -292,16 +262,11 @@ func (s *Source) WrapError(err error) error {
 		return nil
 	}
 
-	yamlErr, ok := errors.AsType[*Error](err)
-	if !ok || yamlErr == nil {
+	if _, ok := errors.AsType[*Error](err); !ok { //nolint:errcheck // Presence check, not a value extraction.
 		return err
 	}
 
-	opts := make([]ErrorOption, 0, len(s.errorOpts)+1)
-	opts = append(opts, s.errorOpts...)
-	opts = append(opts, WithSource(s))
-
-	return NewErrorFrom(err, opts...)
+	return newSourceError(err, s, s.errorOpts)
 }
 
 // Lines returns a [line.Lines] view of the [Source].

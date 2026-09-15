@@ -17,6 +17,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style"
 )
 
@@ -33,6 +34,24 @@ func (e *customTestError) Error() string {
 // error resolves to a location and the plain message otherwise.
 func render(err error) string {
 	return fmt.Sprintf("%+v", err)
+}
+
+// newXMLPrinter creates a [*niceyaml.Printer] that marks styles with XML
+// tags and renders no gutter or container, so tests can assert on plain text.
+func newXMLPrinter() *niceyaml.Printer {
+	return niceyaml.NewPrinter(
+		niceyaml.WithStyles(yamltest.NewXMLStyles()),
+		niceyaml.WithGutter(niceyaml.NoGutter),
+		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
+	)
+}
+
+// xmlSource creates a [*niceyaml.Source] whose errors render with
+// [newXMLPrinter] and opts.
+func xmlSource(input string, opts ...niceyaml.SourceErrorOption) *niceyaml.Source {
+	opts = append([]niceyaml.SourceErrorOption{niceyaml.WithPrinter(newXMLPrinter())}, opts...)
+
+	return niceyaml.NewSourceFromString(input, niceyaml.WithErrorOptions(opts...))
 }
 
 // trimLines trims trailing whitespace from each line of a string.
@@ -69,16 +88,10 @@ func TestError(t *testing.T) {
 			want: "something went wrong",
 		},
 		"with path and source shows annotated source": {
-			err: niceyaml.NewError(
+			err: xmlSource(source).WrapError(niceyaml.NewError(
 				"invalid value",
 				niceyaml.WithPath(paths.Root().Child("key").Key()),
-				niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
-				niceyaml.WithPrinter(niceyaml.NewPrinter(
-					niceyaml.WithStyles(yamltest.NewXMLStyles()),
-					niceyaml.WithGutter(niceyaml.NoGutter),
-					niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-				)),
-			),
+			)),
 			want: stringtest.JoinLF(
 				"[3:1] invalid value",
 				"",
@@ -88,15 +101,10 @@ func TestError(t *testing.T) {
 			),
 		},
 		"with direct token bypasses path resolution": {
-			err: niceyaml.NewError(
+			err: xmlSource(source).WrapError(niceyaml.NewError(
 				"bad token",
 				niceyaml.WithErrorToken(tokens[0]),
-				niceyaml.WithPrinter(niceyaml.NewPrinter(
-					niceyaml.WithStyles(yamltest.NewXMLStyles()),
-					niceyaml.WithGutter(niceyaml.NoGutter),
-					niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-				)),
-			),
+			)),
 			want: stringtest.JoinLF(
 				"[1:1] bad token",
 				"",
@@ -126,34 +134,26 @@ func TestSourceWrapError(t *testing.T) {
 		value: 123
 	`)
 
-	newXMLPrinter := func() *niceyaml.Printer {
-		return niceyaml.NewPrinter(
-			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter),
-			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-		)
-	}
-
 	tcs := map[string]struct {
-		opts        func() []niceyaml.ErrorOption
+		opts        func() []niceyaml.SourceErrorOption
 		inputErr    func() error
 		wantExact   string
 		wantNil     bool
 		wantSameErr bool
 	}{
 		"wrap nil returns nil": {
-			opts:     func() []niceyaml.ErrorOption { return nil },
+			opts:     func() []niceyaml.SourceErrorOption { return nil },
 			inputErr: func() error { return nil },
 			wantNil:  true,
 		},
 		"wrap non-error type returns unchanged": {
-			opts:        func() []niceyaml.ErrorOption { return nil },
+			opts:        func() []niceyaml.SourceErrorOption { return nil },
 			inputErr:    func() error { return errors.New("plain error") },
 			wantSameErr: true,
 		},
 		"wrap error applies options and source": {
-			opts: func() []niceyaml.ErrorOption {
-				return []niceyaml.ErrorOption{
+			opts: func() []niceyaml.SourceErrorOption {
+				return []niceyaml.SourceErrorOption{
 					niceyaml.WithPrinter(newXMLPrinter()),
 				}
 			},
@@ -235,23 +235,20 @@ func TestGetPath(t *testing.T) {
 func TestError_GracefulDegradation(t *testing.T) {
 	t.Parallel()
 
-	// Create tokens from a simple source for tests that need them.
 	source := `key: value`
-	tokens := lexer.Tokenize(source)
 
 	// Empty tokens for edge case tests.
 	emptyTokens := lexer.Tokenize("")
 
 	tcs := map[string]struct {
-		err  *niceyaml.Error
+		err  error
 		want string
 	}{
 		"invalid path": {
-			err: niceyaml.NewError(
+			err: niceyaml.NewSourceFromString(source).WrapError(niceyaml.NewError(
 				"not found",
 				niceyaml.WithPath(paths.Root().Child("nonexistent").Key()),
-				niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
-			),
+			)),
 			want: "at $.nonexistent: not found",
 		},
 		"path without source": {
@@ -262,38 +259,27 @@ func TestError_GracefulDegradation(t *testing.T) {
 			want: "at $.key: missing source",
 		},
 		"empty source": {
-			err: niceyaml.NewError(
+			err: niceyaml.NewSourceFromTokens(emptyTokens).WrapError(niceyaml.NewError(
 				"error in empty source",
 				niceyaml.WithPath(paths.Root().Child("key").Key()),
-				niceyaml.WithSource(niceyaml.NewSourceFromTokens(emptyTokens)),
-			),
+			)),
 			want: "at $.key: error in empty source",
 		},
-		"nil source": {
-			err: niceyaml.NewError(
-				"nil source error",
-				niceyaml.WithPath(paths.Root().Child("key").Key()),
-				niceyaml.WithSource(nil),
-			),
-			want: "at $.key: nil source error",
-		},
 		"nonexistent path in source": {
-			err: niceyaml.NewError(
+			err: niceyaml.NewSourceFromString(source).WrapError(niceyaml.NewError(
 				"path not found",
 				niceyaml.WithPath(
 					paths.Root().Child("nonexistent").Child("deep").Key(),
 				),
-				niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
-			),
+			)),
 			want: "at $.nonexistent.deep: path not found",
 		},
 		"empty document source": {
 			// Tests graceful handling when source has no documents (Docs slice is empty).
-			err: niceyaml.NewError(
+			err: niceyaml.NewSourceFromTokens(emptyTokens).WrapError(niceyaml.NewError(
 				"empty doc error",
 				niceyaml.WithPath(paths.Root().Child("key").Key()),
-				niceyaml.WithSource(niceyaml.NewSourceFromTokens(emptyTokens)),
-			),
+			)),
 			want: "at $.key: empty doc error",
 		},
 	}
@@ -409,20 +395,15 @@ func TestErrorAnnotation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			opts := []niceyaml.ErrorOption{
-				niceyaml.WithPath(tc.path),
-				niceyaml.WithSource(niceyaml.NewSourceFromString(tc.source)),
-				niceyaml.WithPrinter(niceyaml.NewPrinter(
-					niceyaml.WithStyles(yamltest.NewXMLStyles()),
-					niceyaml.WithGutter(niceyaml.NoGutter),
-					niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-				)),
-			}
+			var opts []niceyaml.SourceErrorOption
+
 			if tc.contextLines > 0 {
 				opts = append(opts, niceyaml.WithContextLines(tc.contextLines))
 			}
 
-			err := niceyaml.NewError(tc.errMsg, opts...)
+			err := xmlSource(tc.source, opts...).WrapError(
+				niceyaml.NewError(tc.errMsg, niceyaml.WithPath(tc.path)),
+			)
 
 			assert.Equal(t, tc.want, trimLines(render(err)))
 		})
@@ -431,14 +412,6 @@ func TestErrorAnnotation(t *testing.T) {
 
 func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 	t.Parallel()
-
-	newXMLPrinter := func() *niceyaml.Printer {
-		return niceyaml.NewPrinter(
-			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter),
-			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-		)
-	}
 
 	tcs := map[string]struct {
 		path   *paths.Path
@@ -493,12 +466,10 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := niceyaml.NewError(
+			err := xmlSource(tc.source).WrapError(niceyaml.NewError(
 				tc.errMsg,
 				niceyaml.WithPath(tc.path),
-				niceyaml.WithSource(niceyaml.NewSourceFromString(tc.source)),
-				niceyaml.WithPrinter(newXMLPrinter()),
-			)
+			))
 
 			assert.Equal(t, tc.want, trimLines(render(err)))
 		})
@@ -520,11 +491,12 @@ func TestWithPrinter(t *testing.T) {
 		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 	)
 
-	err := niceyaml.NewError(
+	err := niceyaml.NewSourceFromString(source, niceyaml.WithErrorOptions(
+		niceyaml.WithPrinter(customPrinter),
+	)).WrapError(niceyaml.NewError(
 		"test error",
 		niceyaml.WithErrorToken(tokens[0]),
-		niceyaml.WithPrinter(customPrinter),
-	)
+	))
 
 	want := stringtest.JoinLF(
 		"[1:1] test error",
@@ -537,14 +509,6 @@ func TestWithPrinter(t *testing.T) {
 
 func TestError_SpecialParentContext(t *testing.T) {
 	t.Parallel()
-
-	newXMLPrinter := func() *niceyaml.Printer {
-		return niceyaml.NewPrinter(
-			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter),
-			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-		)
-	}
 
 	tcs := map[string]struct {
 		source string
@@ -590,12 +554,10 @@ func TestError_SpecialParentContext(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := niceyaml.NewError(
+			err := xmlSource(tc.source).WrapError(niceyaml.NewError(
 				tc.errMsg,
 				niceyaml.WithPath(tc.path),
-				niceyaml.WithSource(niceyaml.NewSourceFromString(tc.source)),
-				niceyaml.WithPrinter(newXMLPrinter()),
-			)
+			))
 
 			assert.Equal(t, tc.want, trimLines(render(err)))
 		})
@@ -697,14 +659,6 @@ func TestError_Unwrap(t *testing.T) {
 func TestError_MultiError(t *testing.T) {
 	t.Parallel()
 
-	newXMLPrinter := func() *niceyaml.Printer {
-		return niceyaml.NewPrinter(
-			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter),
-			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-		)
-	}
-
 	t.Run("single nested error with path", func(t *testing.T) {
 		t.Parallel()
 
@@ -714,18 +668,16 @@ func TestError_MultiError(t *testing.T) {
 			other: data
 		`)
 
-		err := niceyaml.NewError(
+		err := xmlSource(source).WrapError(niceyaml.NewError(
 			"validation failed",
 			niceyaml.WithPath(paths.Root().Child("name").Key()),
-			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
-			niceyaml.WithPrinter(newXMLPrinter()),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"invalid type",
 					niceyaml.WithPath(paths.Root().Child("value").Value()),
 				),
 			),
-		)
+		))
 
 		got := trimLines(render(err))
 
@@ -744,11 +696,9 @@ func TestError_MultiError(t *testing.T) {
 			other: data
 		`)
 
-		err := niceyaml.NewError(
+		err := xmlSource(source).WrapError(niceyaml.NewError(
 			"validation failed",
 			niceyaml.WithPath(paths.Root().Child("name").Key()),
-			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
-			niceyaml.WithPrinter(newXMLPrinter()),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"invalid type",
@@ -759,7 +709,7 @@ func TestError_MultiError(t *testing.T) {
 					niceyaml.WithPath(paths.Root().Child("other").Key()),
 				),
 			),
-		)
+		))
 
 		got := trimLines(render(err))
 
@@ -777,10 +727,9 @@ func TestError_MultiError(t *testing.T) {
 		tokens := lexer.Tokenize(source)
 
 		// Both errors point to the same line.
-		err := niceyaml.NewError(
+		err := xmlSource(source).WrapError(niceyaml.NewError(
 			"validation failed",
 			niceyaml.WithErrorToken(tokens[0]),
-			niceyaml.WithPrinter(newXMLPrinter()),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"error1",
@@ -791,7 +740,7 @@ func TestError_MultiError(t *testing.T) {
 					niceyaml.WithPath(paths.Root().Child("key").Value()),
 				),
 			),
-		)
+		))
 
 		got := trimLines(render(err))
 
@@ -820,17 +769,16 @@ func TestError_MultiError(t *testing.T) {
 
 		require.NotNil(t, fooToken, "failed to find foo token")
 
-		err := niceyaml.NewError(
+		err := xmlSource(source).WrapError(niceyaml.NewError(
 			"main error",
 			niceyaml.WithErrorToken(tokens[0]),
-			niceyaml.WithPrinter(newXMLPrinter()),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"nested with token",
 					niceyaml.WithErrorToken(fooToken),
 				),
 			),
-		)
+		))
 
 		got := trimLines(render(err))
 
@@ -847,18 +795,16 @@ func TestError_MultiError(t *testing.T) {
 			key: value
 		`)
 
-		err := niceyaml.NewError(
+		err := xmlSource(source).WrapError(niceyaml.NewError(
 			"main error",
 			niceyaml.WithPath(paths.Root().Child("key").Key()),
-			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
-			niceyaml.WithPrinter(newXMLPrinter()),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"nested error",
 					niceyaml.WithPath(paths.Root().Child("nonexistent").Key()),
 				),
 			),
-		)
+		))
 
 		got := trimLines(render(err))
 
@@ -897,15 +843,13 @@ func TestError_MultiError(t *testing.T) {
 			key: value
 		`)
 
-		err := niceyaml.NewError(
+		err := xmlSource(source).WrapError(niceyaml.NewError(
 			"main error",
 			niceyaml.WithPath(paths.Root().Child("key").Key()),
-			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
-			niceyaml.WithPrinter(newXMLPrinter()),
 			niceyaml.WithErrors(
 				niceyaml.NewError("no location"),
 			),
-		)
+		))
 
 		got := trimLines(render(err))
 
@@ -961,17 +905,15 @@ func TestError_MultiError(t *testing.T) {
 		`)
 
 		// Create error with NO main path, but nested error with path.
-		err := niceyaml.NewError(
+		err := xmlSource(source).WrapError(niceyaml.NewError(
 			"validation failed at 1 location",
-			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
-			niceyaml.WithPrinter(newXMLPrinter()),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"got number, want string",
 					niceyaml.WithPath(paths.Root().Child("value").Value()),
 				),
 			),
-		)
+		))
 
 		got := trimLines(render(err))
 
@@ -1020,10 +962,8 @@ func TestError_MultiError(t *testing.T) {
 		`)
 
 		// Create error with nested errors on different lines.
-		err := niceyaml.NewError(
+		err := xmlSource(source).WrapError(niceyaml.NewError(
 			"validation failed at 2 locations",
-			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
-			niceyaml.WithPrinter(newXMLPrinter()),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"type error on value",
@@ -1034,7 +974,7 @@ func TestError_MultiError(t *testing.T) {
 					niceyaml.WithPath(paths.Root().Child("other").Key()),
 				),
 			),
-		)
+		))
 
 		got := trimLines(render(err))
 
@@ -1055,10 +995,8 @@ func TestError_MultiError(t *testing.T) {
 		`)
 
 		// Create error with some nested errors that resolve and some that don't.
-		err := niceyaml.NewError(
+		err := xmlSource(source).WrapError(niceyaml.NewError(
 			"validation failed",
-			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
-			niceyaml.WithPrinter(newXMLPrinter()),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"resolvable error",
@@ -1069,7 +1007,7 @@ func TestError_MultiError(t *testing.T) {
 					niceyaml.WithPath(paths.Root().Child("nonexistent").Key()),
 				),
 			),
-		)
+		))
 
 		got := trimLines(render(err))
 
@@ -1089,13 +1027,12 @@ func TestError_MultiError(t *testing.T) {
 
 		// All nested errors lack path/token, so hasNestedPaths returns false
 		// and should fall back to plain bullet rendering.
-		err := niceyaml.NewError(
+		err := niceyaml.NewSourceFromString(source).WrapError(niceyaml.NewError(
 			"validation failed",
-			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
 			niceyaml.WithErrors(
 				niceyaml.NewError("nested without location"),
 			),
-		)
+		))
 
 		got := render(err)
 
@@ -1115,41 +1052,31 @@ func TestError_hasNestedPaths(t *testing.T) {
 	// When hasNestedPaths returns true and source is provided, we get annotated output.
 	// When hasNestedPaths returns false, we get plain bullet output regardless of source.
 
-	newXMLPrinter := func() *niceyaml.Printer {
-		return niceyaml.NewPrinter(
-			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter),
-			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-		)
-	}
-
 	source := stringtest.Input(`
 		key: value
 		other: data
 	`)
 
 	tcs := map[string]struct {
-		err        *niceyaml.Error
+		err        error
 		wantYAML   bool // If true, expect YAML output; if false, expect bullet format.
 		wantBullet string
 	}{
 		"returns false when no nested errors": {
-			err: niceyaml.NewError(
+			err: niceyaml.NewSourceFromString(source).WrapError(niceyaml.NewError(
 				"main error",
-				niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
-			),
+			)),
 			wantYAML:   false,
 			wantBullet: "main error",
 		},
 		"returns false when nested errors have no paths or tokens": {
-			err: niceyaml.NewError(
+			err: niceyaml.NewSourceFromString(source).WrapError(niceyaml.NewError(
 				"main error",
-				niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
 				niceyaml.WithErrors(
 					niceyaml.NewError("nested 1"),
 					niceyaml.NewError("nested 2"),
 				),
-			),
+			)),
 			wantYAML: false,
 			wantBullet: stringtest.JoinLF(
 				"main error",
@@ -1158,42 +1085,36 @@ func TestError_hasNestedPaths(t *testing.T) {
 			),
 		},
 		"returns true when nested error has path": {
-			err: niceyaml.NewError(
+			err: xmlSource(source).WrapError(niceyaml.NewError(
 				"main error",
-				niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
-				niceyaml.WithPrinter(newXMLPrinter()),
 				niceyaml.WithErrors(
 					niceyaml.NewError(
 						"nested with path",
 						niceyaml.WithPath(paths.Root().Child("key").Key()),
 					),
 				),
-			),
+			)),
 			wantYAML: true,
 		},
 		"returns true when nested error has token": {
-			err: func() *niceyaml.Error {
+			err: func() error {
 				tokens := lexer.Tokenize(source)
 
-				return niceyaml.NewError(
+				return xmlSource(source).WrapError(niceyaml.NewError(
 					"main error",
-					niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
-					niceyaml.WithPrinter(newXMLPrinter()),
 					niceyaml.WithErrors(
 						niceyaml.NewError(
 							"nested with token",
 							niceyaml.WithErrorToken(tokens[0]),
 						),
 					),
-				)
+				))
 			}(),
 			wantYAML: true,
 		},
 		"returns true with mix of path and no-path nested errors": {
-			err: niceyaml.NewError(
+			err: xmlSource(source).WrapError(niceyaml.NewError(
 				"main error",
-				niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
-				niceyaml.WithPrinter(newXMLPrinter()),
 				niceyaml.WithErrors(
 					niceyaml.NewError("no path"),
 					niceyaml.NewError(
@@ -1202,15 +1123,14 @@ func TestError_hasNestedPaths(t *testing.T) {
 					),
 					niceyaml.NewError("also no path"),
 				),
-			),
+			)),
 			wantYAML: true,
 		},
 		"returns false with nil nested errors only": {
-			err: niceyaml.NewError(
+			err: niceyaml.NewSourceFromString(source).WrapError(niceyaml.NewError(
 				"main error",
-				niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
 				niceyaml.WithErrors(nil, nil),
-			),
+			)),
 			wantYAML:   false,
 			wantBullet: "main error",
 		},
@@ -1240,14 +1160,6 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 	// These tests verify calculateNestedLineRange indirectly through rendered output.
 	// The line range determines which lines are visible in the output.
 
-	newXMLPrinter := func() *niceyaml.Printer {
-		return niceyaml.NewPrinter(
-			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter),
-			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-		)
-	}
-
 	t.Run("single nested error shows correct context lines", func(t *testing.T) {
 		t.Parallel()
 
@@ -1260,18 +1172,15 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 			line6: f
 		`)
 
-		err := niceyaml.NewError(
+		err := xmlSource(source, niceyaml.WithContextLines(1)).WrapError(niceyaml.NewError(
 			"validation error",
-			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
-			niceyaml.WithPrinter(newXMLPrinter()),
-			niceyaml.WithContextLines(1),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"error at line3",
 					niceyaml.WithPath(paths.Root().Child("line3").Key()),
 				),
 			),
-		)
+		))
 
 		got := trimLines(render(err))
 
@@ -1293,11 +1202,8 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 			line6: f
 		`)
 
-		err := niceyaml.NewError(
-			"validation error",
-			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
-			niceyaml.WithPrinter(newXMLPrinter()),
-			niceyaml.WithContextLines(0), // No extra context.
+		err := xmlSource(source, niceyaml.WithContextLines(0)).WrapError(niceyaml.NewError(
+			"validation error", // No extra context.
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"error at line1",
@@ -1308,7 +1214,7 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 					niceyaml.WithPath(paths.Root().Child("line6").Key()),
 				),
 			),
-		)
+		))
 
 		got := trimLines(render(err))
 
@@ -1328,11 +1234,8 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 			line3: c
 		`)
 
-		err := niceyaml.NewError(
+		err := xmlSource(source, niceyaml.WithContextLines(0)).WrapError(niceyaml.NewError(
 			"validation error",
-			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
-			niceyaml.WithPrinter(newXMLPrinter()),
-			niceyaml.WithContextLines(0),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"error 1",
@@ -1343,7 +1246,7 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 					niceyaml.WithPath(paths.Root().Child("line2").Value()),
 				),
 			),
-		)
+		))
 
 		got := trimLines(render(err))
 
@@ -1355,14 +1258,6 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 
 func TestError_HunkDisplay(t *testing.T) {
 	t.Parallel()
-
-	newXMLPrinter := func() *niceyaml.Printer {
-		return niceyaml.NewPrinter(
-			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter),
-			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-		)
-	}
 
 	t.Run("distant errors show separate hunks with separator", func(t *testing.T) {
 		t.Parallel()
@@ -1382,11 +1277,8 @@ func TestError_HunkDisplay(t *testing.T) {
 		`)
 
 		// Errors at line1 and line10 with contextLines=1 should create separate hunks.
-		err := niceyaml.NewError(
+		err := xmlSource(source, niceyaml.WithContextLines(1)).WrapError(niceyaml.NewError(
 			"validation error",
-			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
-			niceyaml.WithPrinter(newXMLPrinter()),
-			niceyaml.WithContextLines(1),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"error at start",
@@ -1397,7 +1289,7 @@ func TestError_HunkDisplay(t *testing.T) {
 					niceyaml.WithPath(paths.Root().Child("line10").Key()),
 				),
 			),
-		)
+		))
 
 		got := trimLines(render(err))
 
@@ -1428,11 +1320,8 @@ func TestError_HunkDisplay(t *testing.T) {
 
 		// Errors at line1 and line3 with contextLines=1 should merge into one hunk
 		// since they're within 2*contextLines of each other.
-		err := niceyaml.NewError(
+		err := xmlSource(source, niceyaml.WithContextLines(1)).WrapError(niceyaml.NewError(
 			"validation error",
-			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
-			niceyaml.WithPrinter(newXMLPrinter()),
-			niceyaml.WithContextLines(1),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"first error",
@@ -1443,7 +1332,7 @@ func TestError_HunkDisplay(t *testing.T) {
 					niceyaml.WithPath(paths.Root().Child("line3").Key()),
 				),
 			),
-		)
+		))
 
 		got := trimLines(render(err))
 
@@ -1471,11 +1360,8 @@ func TestError_HunkDisplay(t *testing.T) {
 		`)
 
 		// No main path, but nested errors at distant locations.
-		err := niceyaml.NewError(
+		err := xmlSource(source, niceyaml.WithContextLines(1)).WrapError(niceyaml.NewError(
 			"validation failed at 2 locations",
-			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
-			niceyaml.WithPrinter(newXMLPrinter()),
-			niceyaml.WithContextLines(1),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"first location error",
@@ -1486,7 +1372,7 @@ func TestError_HunkDisplay(t *testing.T) {
 					niceyaml.WithPath(paths.Root().Child("line10").Key()),
 				),
 			),
-		)
+		))
 
 		got := trimLines(render(err))
 
@@ -1511,11 +1397,8 @@ func TestError_HunkDisplay(t *testing.T) {
 		`)
 
 		// Errors at first and last lines.
-		err := niceyaml.NewError(
+		err := xmlSource(source, niceyaml.WithContextLines(1)).WrapError(niceyaml.NewError(
 			"validation error",
-			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
-			niceyaml.WithPrinter(newXMLPrinter()),
-			niceyaml.WithContextLines(1),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"error at first",
@@ -1526,7 +1409,7 @@ func TestError_HunkDisplay(t *testing.T) {
 					niceyaml.WithPath(paths.Root().Child("last").Key()),
 				),
 			),
-		)
+		))
 
 		got := trimLines(render(err))
 
@@ -1556,19 +1439,16 @@ func TestError_HunkDisplay(t *testing.T) {
 		`)
 
 		// Main error at line1, nested error at line10.
-		err := niceyaml.NewError(
+		err := xmlSource(source, niceyaml.WithContextLines(1)).WrapError(niceyaml.NewError(
 			"main error",
 			niceyaml.WithPath(paths.Root().Child("line1").Key()),
-			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
-			niceyaml.WithPrinter(newXMLPrinter()),
-			niceyaml.WithContextLines(1),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"nested error",
 					niceyaml.WithPath(paths.Root().Child("line10").Key()),
 				),
 			),
-		)
+		))
 
 		got := trimLines(render(err))
 
@@ -1592,11 +1472,8 @@ func TestError_HunkDisplay(t *testing.T) {
 
 		// With contextLines=0, errors at line1 and line2 should merge because
 		// they're within threshold (2*0+1=1) of each other.
-		err := niceyaml.NewError(
+		err := xmlSource(source, niceyaml.WithContextLines(0)).WrapError(niceyaml.NewError(
 			"validation error",
-			niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
-			niceyaml.WithPrinter(newXMLPrinter()),
-			niceyaml.WithContextLines(0),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"error at line1",
@@ -1607,7 +1484,7 @@ func TestError_HunkDisplay(t *testing.T) {
 					niceyaml.WithPath(paths.Root().Child("line2").Key()),
 				),
 			),
-		)
+		))
 
 		got := trimLines(render(err))
 
@@ -1650,14 +1527,15 @@ func TestError_Width(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := niceyaml.NewError("test error",
-				niceyaml.WithErrorToken(tokens[0]),
+			err := niceyaml.NewSourceFromString(source, niceyaml.WithErrorOptions(
 				niceyaml.WithPrinter(niceyaml.NewPrinter(
 					niceyaml.WithGutter(niceyaml.NoGutter),
 					niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 					niceyaml.WithWidth(tc.width),
 				)),
-			)
+			)).WrapError(niceyaml.NewError("test error",
+				niceyaml.WithErrorToken(tokens[0]),
+			))
 
 			output := render(err)
 			lines := strings.Split(output, "\n")
@@ -1698,11 +1576,12 @@ func TestError_Width_WithCustomPrinter(t *testing.T) {
 		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 	)
 
-	err := niceyaml.NewError(
+	err := niceyaml.NewSourceFromString(source, niceyaml.WithErrorOptions(
+		niceyaml.WithPrinter(customPrinter.With(niceyaml.WithWidth(30))),
+	)).WrapError(niceyaml.NewError(
 		"test error",
 		niceyaml.WithErrorToken(tokens[0]),
-		niceyaml.WithPrinter(customPrinter.With(niceyaml.WithWidth(30))),
-	)
+	))
 
 	output := render(err)
 	lines := strings.Split(output, "\n")
@@ -1731,11 +1610,12 @@ func TestError_Width_DefaultPrinter(t *testing.T) {
 	tokens := lexer.Tokenize(source)
 
 	// A printer with only a width keeps the default styles and gutter.
-	err := niceyaml.NewError(
+	err := niceyaml.NewSourceFromString(source, niceyaml.WithErrorOptions(
+		niceyaml.WithPrinter(niceyaml.NewPrinter(niceyaml.WithWidth(30))),
+	)).WrapError(niceyaml.NewError(
 		"test error",
 		niceyaml.WithErrorToken(tokens[0]),
-		niceyaml.WithPrinter(niceyaml.NewPrinter(niceyaml.WithWidth(30))),
-	)
+	))
 
 	output := render(err)
 	lines := strings.Split(output, "\n")
@@ -1806,23 +1686,23 @@ func TestError_Width_AnnotationWrapping(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := niceyaml.NewError(
-				"validation failed",
-				niceyaml.WithPath(paths.Root().Child("key").Key()),
-				niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+			err := niceyaml.NewSourceFromString(source, niceyaml.WithErrorOptions(
 				niceyaml.WithPrinter(niceyaml.NewPrinter(
 					niceyaml.WithStyles(&style.Styles{}),
 					niceyaml.WithGutter(niceyaml.NoGutter),
 					niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 					niceyaml.WithWidth(tc.width),
 				)),
+			)).WrapError(niceyaml.NewError(
+				"validation failed",
+				niceyaml.WithPath(paths.Root().Child("key").Key()),
 				niceyaml.WithErrors(
 					niceyaml.NewError(
 						tc.nestedErrMsg,
 						niceyaml.WithPath(paths.Root().Child("key").Value()),
 					),
 				),
-			)
+			))
 
 			got := trimLines(render(err))
 
@@ -1841,15 +1721,15 @@ func TestError_Width_MultipleAnnotationsWrapping(t *testing.T) {
 	`)
 
 	// Test multiple nested errors with long messages.
-	err := niceyaml.NewError(
-		"validation failed at 2 locations",
-		niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+	err := niceyaml.NewSourceFromString(source, niceyaml.WithErrorOptions(
 		niceyaml.WithPrinter(niceyaml.NewPrinter(
 			niceyaml.WithStyles(&style.Styles{}),
 			niceyaml.WithGutter(niceyaml.NoGutter),
 			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 			niceyaml.WithWidth(50),
 		)),
+	)).WrapError(niceyaml.NewError(
+		"validation failed at 2 locations",
 		niceyaml.WithErrors(
 			niceyaml.NewError(
 				"first error with a very long message that should wrap properly",
@@ -1860,7 +1740,7 @@ func TestError_Width_MultipleAnnotationsWrapping(t *testing.T) {
 				niceyaml.WithPath(paths.Root().Child("other").Key()),
 			),
 		),
-	)
+	))
 	got := trimLines(render(err))
 
 	want := stringtest.JoinLF(
@@ -1885,16 +1765,16 @@ func TestError_Width_CombinedAnnotationsOnSameLine(t *testing.T) {
 	`)
 
 	// Multiple errors on same line get combined with "; ".
-	err := niceyaml.NewError(
-		"validation failed",
-		niceyaml.WithPath(paths.Root().Child("key").Key()),
-		niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
+	err := niceyaml.NewSourceFromString(source, niceyaml.WithErrorOptions(
 		niceyaml.WithPrinter(niceyaml.NewPrinter(
 			niceyaml.WithStyles(&style.Styles{}),
 			niceyaml.WithGutter(niceyaml.NoGutter),
 			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 			niceyaml.WithWidth(40),
 		)),
+	)).WrapError(niceyaml.NewError(
+		"validation failed",
+		niceyaml.WithPath(paths.Root().Child("key").Key()),
 		niceyaml.WithErrors(
 			niceyaml.NewError(
 				"first error message here",
@@ -1905,7 +1785,7 @@ func TestError_Width_CombinedAnnotationsOnSameLine(t *testing.T) {
 				niceyaml.WithPath(paths.Root().Child("key").Value()),
 			),
 		),
-	)
+	))
 	got := trimLines(render(err))
 
 	want := stringtest.JoinLF(
@@ -1921,15 +1801,7 @@ func TestError_Width_CombinedAnnotationsOnSameLine(t *testing.T) {
 func TestError_TokenRendersFromSource(t *testing.T) {
 	t.Parallel()
 
-	newXMLPrinter := func() *niceyaml.Printer {
-		return niceyaml.NewPrinter(
-			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter),
-			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-		)
-	}
-
-	source := niceyaml.NewSourceFromString(stringtest.Input(`
+	source := xmlSource(stringtest.Input(`
 		a: 1
 		# note
 		b: |
@@ -1954,7 +1826,6 @@ func TestError_TokenRendersFromSource(t *testing.T) {
 	got := trimLines(render(source.WrapError(niceyaml.NewError(
 		"bad block",
 		niceyaml.WithErrorToken(tk),
-		niceyaml.WithPrinter(newXMLPrinter()),
 		niceyaml.WithErrors(
 			niceyaml.NewError("bad c", niceyaml.WithPath(paths.Root().Child("c").Value())),
 		),
@@ -1972,27 +1843,17 @@ func TestError_TokenRendersFromSource(t *testing.T) {
 func TestError_DocumentIndex(t *testing.T) {
 	t.Parallel()
 
-	newXMLPrinter := func() *niceyaml.Printer {
-		return niceyaml.NewPrinter(
-			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter),
-			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-		)
-	}
-
-	source := niceyaml.NewSourceFromString("name: first\n---\nname: second\n")
+	source := xmlSource("name: first\n---\nname: second\n")
 	namePath := paths.Root().Child("name").Value()
 
 	t.Run("path resolves in the selected document", func(t *testing.T) {
 		t.Parallel()
 
-		err := niceyaml.NewError(
+		err := source.WrapError(niceyaml.NewError(
 			"bad name",
 			niceyaml.WithPath(namePath),
 			niceyaml.WithDocumentIndex(1),
-			niceyaml.WithSource(source),
-			niceyaml.WithPrinter(newXMLPrinter()),
-		)
+		))
 
 		got := trimLines(render(err))
 
@@ -2004,34 +1865,28 @@ func TestError_DocumentIndex(t *testing.T) {
 	t.Run("path resolves in the first document by default", func(t *testing.T) {
 		t.Parallel()
 
-		err := niceyaml.NewError(
-			"bad name",
-			niceyaml.WithPath(namePath),
-			niceyaml.WithSource(source),
-			niceyaml.WithPrinter(newXMLPrinter()),
-		)
+		inner := niceyaml.NewError("bad name", niceyaml.WithPath(namePath))
+		err := source.WrapError(inner)
 
 		got := trimLines(render(err))
 
 		assert.True(t, strings.HasPrefix(got, "[1:7] bad name"), got)
 		assert.Contains(t, got, "<genericError>first</genericError>")
 
-		_, set := err.DocumentIndex()
+		_, set := inner.DocumentIndex()
 		assert.False(t, set)
 	})
 
 	t.Run("nested errors inherit the document index", func(t *testing.T) {
 		t.Parallel()
 
-		err := niceyaml.NewError(
+		err := source.WrapError(niceyaml.NewError(
 			"validation failed",
 			niceyaml.WithDocumentIndex(1),
-			niceyaml.WithSource(source),
-			niceyaml.WithPrinter(newXMLPrinter()),
 			niceyaml.WithErrors(
 				niceyaml.NewError("bad name", niceyaml.WithPath(namePath)),
 			),
-		)
+		))
 
 		got := trimLines(render(err))
 
@@ -2043,13 +1898,11 @@ func TestError_DocumentIndex(t *testing.T) {
 	t.Run("out of range index degrades to a plain message", func(t *testing.T) {
 		t.Parallel()
 
-		err := niceyaml.NewError(
+		err := source.WrapError(niceyaml.NewError(
 			"bad name",
 			niceyaml.WithPath(namePath),
 			niceyaml.WithDocumentIndex(5),
-			niceyaml.WithSource(source),
-			niceyaml.WithPrinter(newXMLPrinter()),
-		)
+		))
 
 		assert.Equal(t, "at $.name: bad name", render(err))
 	})
@@ -2058,7 +1911,7 @@ func TestError_DocumentIndex(t *testing.T) {
 func TestError_DoesNotMutateSource(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString(stringtest.Input(`
+	source := xmlSource(stringtest.Input(`
 		a: 1
 		b: 2
 		c: 3
@@ -2066,11 +1919,6 @@ func TestError_DoesNotMutateSource(t *testing.T) {
 
 	err := source.WrapError(niceyaml.NewError(
 		"main",
-		niceyaml.WithPrinter(niceyaml.NewPrinter(
-			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter),
-			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-		)),
 		niceyaml.WithErrors(
 			niceyaml.NewError("nested", niceyaml.WithPath(paths.Root().Child("b").Value())),
 		),
@@ -2094,16 +1942,19 @@ func TestError_DoesNotMutateSource(t *testing.T) {
 func TestError_With(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("key: value\n")
 	base := niceyaml.NewError("bad key", niceyaml.WithPath(paths.Root().Child("key").Key()))
 
-	located := base.With(niceyaml.WithSource(source))
+	indexed := base.With(niceyaml.WithDocumentIndex(1))
 
-	// The receiver is unchanged and the copy resolves against the source.
-	assert.Equal(t, "at $.key: bad key", base.Error())
-	assert.Equal(t, "[1:1] bad key", located.Error())
-	assert.Empty(t, base.Detail())
-	assert.NotEmpty(t, located.Detail())
+	// The copy carries the new option and the receiver keeps its own.
+	_, set := base.DocumentIndex()
+	assert.False(t, set)
+
+	idx, set := indexed.DocumentIndex()
+	assert.True(t, set)
+	assert.Equal(t, 1, idx)
+
+	assert.Equal(t, base.Error(), indexed.Error())
 }
 
 func TestError_WrappedContext(t *testing.T) {
@@ -2132,7 +1983,11 @@ func TestError_WrappedContext(t *testing.T) {
 	assert.True(t, set)
 	assert.Equal(t, 1, idx)
 
-	detail := got.Detail()
+	var bound *niceyaml.SourceError
+
+	require.ErrorAs(t, wrapped, &bound)
+
+	detail := bound.Detail()
 	assert.Contains(t, detail, "second")
 	assert.NotContains(t, detail, "^")
 
@@ -2149,18 +2004,13 @@ func TestError_WrappedContext(t *testing.T) {
 func TestError_DocumentIndexAboveLocation(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("name: first\n---\nname: second\n")
+	source := xmlSource("name: first\n---\nname: second\n")
 
 	// A producer that wraps its own Error with context, the way a Validator
 	// does, leaves the document index to the caller above that wrapping.
 	located := niceyaml.NewError(
 		"bad name",
 		niceyaml.WithPath(paths.Root().Child("name").Value()),
-		niceyaml.WithPrinter(niceyaml.NewPrinter(
-			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter),
-			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-		)),
 	)
 	indexed := niceyaml.NewErrorFrom(
 		fmt.Errorf("validate: %w", located),
@@ -2179,7 +2029,11 @@ func TestError_DocumentIndexAboveLocation(t *testing.T) {
 	assert.Equal(t, 1, idx)
 
 	// The highlight lands on the second document's value, not the first's.
-	detail := got.Detail()
+	var bound *niceyaml.SourceError
+
+	require.ErrorAs(t, wrapped, &bound)
+
+	detail := bound.Detail()
 	assert.Contains(t, detail, "<genericError>second</genericError>")
 	assert.NotContains(t, detail, "<genericError>first</genericError>")
 }
@@ -2187,18 +2041,19 @@ func TestError_DocumentIndexAboveLocation(t *testing.T) {
 func TestError_FormatDropsNestedBullets(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithErrorOptions(
+		niceyaml.WithPrinter(niceyaml.NewPrinter(
+			niceyaml.WithStyles(style.Styles{}),
+			niceyaml.WithGutter(niceyaml.NoGutter),
+			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
+		)),
+	))
 	inner := niceyaml.NewError(
 		"validation failed at 2 locations",
 		niceyaml.WithErrors(
 			niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a").Value())),
 			niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b").Value())),
 		),
-		niceyaml.WithPrinter(niceyaml.NewPrinter(
-			niceyaml.WithStyles(style.Styles{}),
-			niceyaml.WithGutter(niceyaml.NoGutter),
-			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-		)),
 	)
 
 	wrapped := source.WrapError(fmt.Errorf("document 0: %w", inner))
@@ -2277,8 +2132,31 @@ func TestError_ResolvesThroughErrorWrappers(t *testing.T) {
 
 	assert.Equal(t, "[1:7] bad name", wrapped.Error())
 
-	var got *niceyaml.Error
+	var got *niceyaml.SourceError
 
 	require.ErrorAs(t, wrapped, &got)
 	assert.NotEmpty(t, got.Detail())
+}
+
+func TestError_Range(t *testing.T) {
+	t.Parallel()
+
+	source := xmlSource("key: some value\n")
+	rng := position.NewRange(position.New(0, 5), position.New(0, 9))
+
+	err := source.WrapError(niceyaml.NewError("bad word", niceyaml.WithErrorRange(rng)))
+
+	// The headline is 1-indexed, and the highlight covers the range rather
+	// than the token under it.
+	got := trimLines(render(err))
+
+	assert.Equal(t, stringtest.JoinLF(
+		"[1:6] bad word",
+		"",
+		"<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>some</genericError><literalString> value</literalString>",
+	), got)
+
+	// A range needs no source to report its position.
+	bare := niceyaml.NewError("bad word", niceyaml.WithErrorRange(rng))
+	assert.Equal(t, "[1:6] bad word", bare.Error())
 }

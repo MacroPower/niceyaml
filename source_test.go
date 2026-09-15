@@ -7,7 +7,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/goccy/go-yaml/lexer"
-	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -623,60 +622,6 @@ func TestNewSourceFromBytes(t *testing.T) {
 	src := []byte("key: value")
 	s := niceyaml.NewSourceFromBytes(src)
 	assert.Equal(t, "key: value", s.Lines().Content())
-}
-
-func TestNewSourceFromToken_WalksToPrev(t *testing.T) {
-	t.Parallel()
-
-	// Test that NewSourceFromToken walks to the first token when given a middle token.
-	input := "a: 1\nb: 2\n"
-	tks := lexer.Tokenize(input)
-
-	// Get a token that's not at the start (the second key "b").
-	var middleToken *token.Token
-
-	for _, tk := range tks {
-		if tk.Value == "b" {
-			middleToken = tk
-			break
-		}
-	}
-
-	require.NotNil(t, middleToken, "should find 'b' token")
-
-	// Create source from middle token - it should walk to the start.
-	source := niceyaml.NewSourceFromToken(middleToken)
-
-	// Should contain all lines, not just from 'b' onwards.
-	require.Equal(t, 2, source.Len())
-	assert.Contains(t, source.Lines().Content(), "a: 1")
-	assert.Contains(t, source.Lines().Content(), "b: 2")
-}
-
-func TestNewSourceFromToken_FiltersImplicitNull(t *testing.T) {
-	t.Parallel()
-
-	// Parse YAML with an implicit null (key with no value).
-	// The parser adds ImplicitNullType tokens which should be filtered.
-	input := "key:\n"
-	tks := lexer.Tokenize(input)
-
-	// Parse to get the AST with implicit null tokens.
-	file, err := parser.Parse(tks, 0)
-	require.NoError(t, err)
-	require.Len(t, file.Docs, 1)
-
-	// Get a token from the parsed AST (which may have ImplicitNullType).
-	bodyToken := file.Docs[0].Body.GetToken()
-	require.NotNil(t, bodyToken)
-
-	// Create source from this token chain.
-	source := niceyaml.NewSourceFromToken(bodyToken)
-
-	// Should still work and produce valid output.
-	require.NotNil(t, source)
-	// The content should not be affected by filtering.
-	assert.Contains(t, source.Lines().Content(), "key:")
 }
 
 func TestSource_Content(t *testing.T) {

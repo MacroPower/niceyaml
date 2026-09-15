@@ -93,7 +93,7 @@ func validateFile(
 
 	decoder, err := source.Decoder()
 	if err != nil {
-		return err
+		return source.WrapError(err)
 	}
 
 	for i, doc := range decoder.Documents() {

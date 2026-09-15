@@ -19,8 +19,8 @@ import (
 )
 
 // silentError wraps another error without adding a message of its own, which
-// is what makes the [niceyaml.Error] holding it render an empty message while
-// still resolving a detail.
+// is what makes the [niceyaml.SourceError] holding it render an empty message
+// while still resolving a detail.
 type silentError struct{ err error }
 
 func (s silentError) Error() string { return "" }
@@ -39,23 +39,11 @@ func testStyles() fang.Styles {
 func TestErrorHandler(t *testing.T) {
 	t.Parallel()
 
-	// Set up source and tokens for niceyaml.Error test case.
+	// Set up the source the niceyaml error cases render against.
 	source := stringtest.Input(`
 		name: test
 		value: 123
 	`)
-	tokens := lexers.Tokenize(source)
-	niceyamlErr := niceyaml.NewError(
-		"invalid name",
-		niceyaml.WithPath(paths.Root().Child("name").Key()),
-		niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
-		niceyaml.WithPrinter(niceyaml.NewPrinter(
-			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter),
-			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-		)),
-	)
-
 	xmlPrinter := func() *niceyaml.Printer {
 		return niceyaml.NewPrinter(
 			niceyaml.WithStyles(yamltest.NewXMLStyles()),
@@ -64,39 +52,37 @@ func TestErrorHandler(t *testing.T) {
 		)
 	}
 
-	badName := niceyaml.NewError(
+	src := niceyaml.NewSourceFromTokens(
+		lexers.Tokenize(source),
+		niceyaml.WithErrorOptions(niceyaml.WithPrinter(xmlPrinter())),
+	)
+
+	niceyamlErr := src.WrapError(niceyaml.NewError(
+		"invalid name",
+		niceyaml.WithPath(paths.Root().Child("name").Key()),
+	))
+
+	badName := src.WrapError(niceyaml.NewError(
 		"bad name",
 		niceyaml.WithPath(paths.Root().Child("name").Key()),
-		niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
-		niceyaml.WithPrinter(xmlPrinter()),
-	)
+	))
 
-	badValue := niceyaml.NewError(
+	badValue := src.WrapError(niceyaml.NewError(
 		"bad value",
 		niceyaml.WithPath(paths.Root().Child("value").Value()),
-		niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
-		niceyaml.WithPrinter(xmlPrinter()),
-	)
+	))
 
-	emptyMessageErr := niceyaml.NewErrorFrom(
+	emptyMessageErr := src.WrapError(niceyaml.NewErrorFrom(
 		silentError{niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name").Key()))},
-		niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
-		niceyaml.WithPrinter(xmlPrinter()),
-	)
+	))
 
-	nestedErr := niceyaml.NewError(
+	nestedErr := src.WrapError(niceyaml.NewError(
 		"two problems",
-		niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
 		niceyaml.WithErrors(
 			niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name").Key())),
 			niceyaml.NewError("bad value", niceyaml.WithPath(paths.Root().Child("value").Value())),
 		),
-		niceyaml.WithPrinter(niceyaml.NewPrinter(
-			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter),
-			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-		)),
-	)
+	))
 
 	tcs := map[string]struct {
 		err  error

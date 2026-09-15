@@ -33,13 +33,14 @@
 // # Integration with niceyaml.Error
 //
 // [Path] is directly usable with [niceyaml.WithPath] to highlight either keys
-// or values in error messages:
+// or values in error messages. The error carries the path, and
+// [niceyaml.Source.WrapError] resolves it against the document:
 //
 //	err := niceyaml.NewError(
 //		"invalid value",
 //		niceyaml.WithPath(paths.Root().Child("spec", "replicas").Value()),
-//		niceyaml.WithSource(source),
 //	)
+//	fmt.Printf("%+v\n", source.WrapError(err))
 //
 // # Parsing Path Expressions
 //

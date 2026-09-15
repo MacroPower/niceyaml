@@ -537,7 +537,10 @@ func TestValidator_PathTarget(t *testing.T) {
 
 			v := newValidator(t, []byte(tc.schema))
 
-			source := niceyaml.NewSourceFromString(tc.input)
+			source := niceyaml.NewSourceFromString(
+				tc.input,
+				niceyaml.WithErrorOptions(niceyaml.WithPrinter(newXMLPrinter())),
+			)
 			d, err := source.Decoder()
 			require.NoError(t, err)
 
@@ -549,12 +552,9 @@ func TestValidator_PathTarget(t *testing.T) {
 
 				require.ErrorAs(t, err, &validationErr)
 
-				validationErr = validationErr.With(
-					niceyaml.WithSource(source),
-					niceyaml.WithPrinter(newXMLPrinter()),
-				)
+				rendered := source.WrapError(validationErr)
 
-				assert.Contains(t, fmt.Sprintf("%+v", validationErr), tc.wantContains,
+				assert.Contains(t, fmt.Sprintf("%+v", rendered), tc.wantContains,
 					"expected error output to contain specific highlighting pattern")
 			}
 		})
@@ -702,9 +702,7 @@ func TestValidator_SubErrorAnnotations(t *testing.T) {
 
 				require.ErrorAs(t, err, &validationErr)
 
-				validationErr = validationErr.With(niceyaml.WithSource(source))
-
-				errOutput := fmt.Sprintf("%+v", validationErr)
+				errOutput := fmt.Sprintf("%+v", source.WrapError(validationErr))
 
 				for _, annotation := range tc.wantAnnotations {
 					assert.Contains(t, errOutput, annotation,
