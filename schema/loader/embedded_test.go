@@ -13,10 +13,10 @@ func TestEmbedded(t *testing.T) {
 	t.Parallel()
 
 	schemaData := []byte(`{"type": "object"}`)
-	l := loader.Embedded("test.json", schemaData)
+	r := loader.Embedded("test.json", schemaData)
 
-	result, err := l.Load(t.Context(), nil)
+	url, data, err := load(t, r)
 	require.NoError(t, err)
-	assert.Equal(t, schemaData, result.Data)
-	assert.Equal(t, "test.json", result.URL)
+	assert.Equal(t, schemaData, data)
+	assert.Equal(t, "test.json", url)
 }

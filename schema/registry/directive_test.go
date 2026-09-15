@@ -14,9 +14,25 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/loader"
 	"go.jacobcolvin.com/niceyaml/schema/registry"
 )
+
+// resolveAndLoad resolves doc through res and loads the schema it names,
+// returning the ref's URL alongside the loaded bytes. Both steps must
+// succeed.
+func resolveAndLoad(t *testing.T, res schema.Resolver, doc *niceyaml.DocumentDecoder) (string, []byte) {
+	t.Helper()
+
+	ref, err := res.Resolve(t.Context(), doc)
+	require.NoError(t, err)
+
+	data, err := ref.Load(t.Context())
+	require.NoError(t, err)
+
+	return ref.URL, data
+}
 
 func TestDirective(t *testing.T) {
 	t.Parallel()
@@ -49,9 +65,8 @@ func TestDirective(t *testing.T) {
 		res := registry.Directive(loader.WithHTTPClient(customClient))
 
 		doc := firstDocumentFromFile(t, yamlPath)
-		result, err := res.Resolve(t.Context(), doc)
-		require.NoError(t, err)
-		assert.Equal(t, []byte(schemaData), result.Data)
+		_, data := resolveAndLoad(t, res, doc)
+		assert.Equal(t, []byte(schemaData), data)
 	})
 }
 
@@ -139,7 +154,7 @@ func TestDirective_Resolve_Match(t *testing.T) {
 			res := registry.Directive()
 			_, err := res.Resolve(t.Context(), doc)
 
-			got := !errors.Is(err, registry.ErrNoMatch)
+			got := !errors.Is(err, schema.ErrNoMatch)
 			assert.Equal(t, tt.want, got)
 
 			if !tt.want {
@@ -166,11 +181,28 @@ func TestDirective_Resolve(t *testing.T) {
 		require.NoError(t, err)
 
 		doc := firstDocumentFromFile(t, yamlPath)
-		res := registry.Directive()
-		result, err := res.Resolve(t.Context(), doc)
+		url, data := resolveAndLoad(t, registry.Directive(), doc)
+		assert.Equal(t, schemaData, data)
+		assert.Equal(t, filepath.Join(tmpDir, "schema.json"), url)
+	})
+
+	t.Run("trims trailing whitespace from the directive", func(t *testing.T) {
+		t.Parallel()
+
+		tmpDir := t.TempDir()
+		schemaData := []byte(`{"type": "object"}`)
+		err := os.WriteFile(filepath.Join(tmpDir, "schema.json"), schemaData, 0o600)
 		require.NoError(t, err)
-		assert.Equal(t, schemaData, result.Data)
-		assert.Equal(t, filepath.Join(tmpDir, "schema.json"), result.URL)
+
+		yamlPath := filepath.Join(tmpDir, "config.yaml")
+		yamlData := []byte("# yaml-language-server: $schema=./schema.json   \nkind: Deployment\n")
+		err = os.WriteFile(yamlPath, yamlData, 0o600)
+		require.NoError(t, err)
+
+		doc := firstDocumentFromFile(t, yamlPath)
+		url, data := resolveAndLoad(t, registry.Directive(), doc)
+		assert.Equal(t, schemaData, data)
+		assert.Equal(t, filepath.Join(tmpDir, "schema.json"), url)
 	})
 
 	t.Run("successfully loads schema from URL directive", func(t *testing.T) {
@@ -191,11 +223,9 @@ func TestDirective_Resolve(t *testing.T) {
 		require.NoError(t, err)
 
 		doc := firstDocumentFromFile(t, yamlPath)
-		res := registry.Directive()
-		result, err := res.Resolve(t.Context(), doc)
-		require.NoError(t, err)
-		assert.Equal(t, []byte(schemaData), result.Data)
-		assert.Equal(t, server.URL+"/schema.json", result.URL)
+		url, data := resolveAndLoad(t, registry.Directive(), doc)
+		assert.Equal(t, []byte(schemaData), data)
+		assert.Equal(t, server.URL+"/schema.json", url)
 	})
 
 	t.Run("returns ErrNoDirective when no directive present", func(t *testing.T) {
@@ -211,7 +241,7 @@ func TestDirective_Resolve(t *testing.T) {
 		res := registry.Directive()
 		_, err = res.Resolve(t.Context(), doc)
 		require.ErrorIs(t, err, registry.ErrNoDirective)
-		require.ErrorIs(t, err, registry.ErrNoMatch)
+		require.ErrorIs(t, err, schema.ErrNoMatch)
 	})
 
 	t.Run("returns ErrNoDirective when tokens are nil", func(t *testing.T) {
@@ -235,7 +265,7 @@ func TestDirective_Resolve(t *testing.T) {
 		res := registry.Directive()
 		_, err := res.Resolve(t.Context(), doc)
 		require.ErrorIs(t, err, registry.ErrNoFilePath)
-		require.NotErrorIs(t, err, registry.ErrNoMatch)
+		require.NotErrorIs(t, err, schema.ErrNoMatch)
 	})
 
 	t.Run("resolves relative paths against document directory", func(t *testing.T) {
@@ -262,13 +292,11 @@ func TestDirective_Resolve(t *testing.T) {
 		require.NoError(t, err)
 
 		doc := firstDocumentFromFile(t, yamlPath)
-		res := registry.Directive()
-		result, err := res.Resolve(t.Context(), doc)
-		require.NoError(t, err)
-		assert.Equal(t, schemaData, result.Data)
+		_, data := resolveAndLoad(t, registry.Directive(), doc)
+		assert.Equal(t, schemaData, data)
 	})
 
-	t.Run("returns error when schema file not found", func(t *testing.T) {
+	t.Run("names a missing schema file and fails on load", func(t *testing.T) {
 		t.Parallel()
 
 		tmpDir := t.TempDir()
@@ -279,7 +307,11 @@ func TestDirective_Resolve(t *testing.T) {
 
 		doc := firstDocumentFromFile(t, yamlPath)
 		res := registry.Directive()
-		_, err = res.Resolve(t.Context(), doc)
+		ref, err := res.Resolve(t.Context(), doc)
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join(tmpDir, "nonexistent.json"), ref.URL)
+
+		_, err = ref.Load(t.Context())
 		require.ErrorIs(t, err, os.ErrNotExist)
 		require.ErrorContains(t, err, "read")
 		require.ErrorContains(t, err, "nonexistent.json")

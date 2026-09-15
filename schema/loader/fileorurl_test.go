@@ -14,7 +14,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema/loader"
 )
 
-func TestRef(t *testing.T) {
+func TestFileOrURL(t *testing.T) {
 	t.Parallel()
 
 	t.Run("relative path", func(t *testing.T) {
@@ -27,11 +27,19 @@ func TestRef(t *testing.T) {
 		err := os.WriteFile(schemaPath, schemaData, 0o600)
 		require.NoError(t, err)
 
-		l := loader.Ref(tmpDir, "schema.json")
-		result, err := l.Load(t.Context(), nil)
+		url, data, err := load(t, loader.FileOrURL(tmpDir, "schema.json"))
 		require.NoError(t, err)
-		assert.Equal(t, schemaData, result.Data)
-		assert.Equal(t, schemaPath, result.URL)
+		assert.Equal(t, schemaData, data)
+		assert.Equal(t, schemaPath, url)
+	})
+
+	t.Run("relative path without base directory", func(t *testing.T) {
+		t.Parallel()
+
+		r := loader.FileOrURL("", "schema.json")
+		_, err := r.Resolve(t.Context(), nil)
+		require.ErrorIs(t, err, loader.ErrNoBaseDir)
+		require.ErrorContains(t, err, `"schema.json"`)
 	})
 
 	t.Run("absolute path", func(t *testing.T) {
@@ -45,11 +53,25 @@ func TestRef(t *testing.T) {
 		require.NoError(t, err)
 
 		// BaseDir is ignored for absolute paths.
-		l := loader.Ref("/some/other/dir", schemaPath)
-		result, err := l.Load(t.Context(), nil)
+		url, data, err := load(t, loader.FileOrURL("/some/other/dir", schemaPath))
 		require.NoError(t, err)
-		assert.Equal(t, schemaData, result.Data)
-		assert.Equal(t, schemaPath, result.URL)
+		assert.Equal(t, schemaData, data)
+		assert.Equal(t, schemaPath, url)
+	})
+
+	t.Run("absolute path without base directory", func(t *testing.T) {
+		t.Parallel()
+
+		tmpDir := t.TempDir()
+		schemaPath := filepath.Join(tmpDir, "schema.json")
+		schemaData := []byte(`{"type": "object"}`)
+		err := os.WriteFile(schemaPath, schemaData, 0o600)
+		require.NoError(t, err)
+
+		url, data, err := load(t, loader.FileOrURL("", schemaPath))
+		require.NoError(t, err)
+		assert.Equal(t, schemaData, data)
+		assert.Equal(t, schemaPath, url)
 	})
 
 	t.Run("URL schema", func(t *testing.T) {
@@ -66,11 +88,29 @@ func TestRef(t *testing.T) {
 		schemaURL := server.URL + "/schema.json"
 
 		// BaseDir is ignored for URLs.
-		l := loader.Ref("/some/dir", schemaURL)
-		result, err := l.Load(t.Context(), nil)
+		url, data, err := load(t, loader.FileOrURL("/some/dir", schemaURL))
 		require.NoError(t, err)
-		assert.Equal(t, []byte(schemaData), result.Data)
-		assert.Equal(t, schemaURL, result.URL)
+		assert.Equal(t, []byte(schemaData), data)
+		assert.Equal(t, schemaURL, url)
+	})
+
+	t.Run("URL without base directory", func(t *testing.T) {
+		t.Parallel()
+
+		schemaData := `{"type": "object"}`
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			//nolint:errcheck // Test helper.
+			w.Write([]byte(schemaData))
+		}))
+		defer server.Close()
+
+		schemaURL := server.URL + "/schema.json"
+
+		url, data, err := load(t, loader.FileOrURL("", schemaURL))
+		require.NoError(t, err)
+		assert.Equal(t, []byte(schemaData), data)
+		assert.Equal(t, schemaURL, url)
 	})
 
 	t.Run("URL scheme in upper case", func(t *testing.T) {
@@ -86,11 +126,10 @@ func TestRef(t *testing.T) {
 
 		schemaURL := "HTTP://" + strings.TrimPrefix(server.URL, "http://") + "/schema.json"
 
-		l := loader.Ref("/some/dir", schemaURL)
-		result, err := l.Load(t.Context(), nil)
+		url, data, err := load(t, loader.FileOrURL("/some/dir", schemaURL))
 		require.NoError(t, err)
-		assert.Equal(t, []byte(schemaData), result.Data)
-		assert.Equal(t, schemaURL, result.URL)
+		assert.Equal(t, []byte(schemaData), data)
+		assert.Equal(t, schemaURL, url)
 	})
 
 	t.Run("file URL", func(t *testing.T) {
@@ -103,11 +142,10 @@ func TestRef(t *testing.T) {
 		require.NoError(t, err)
 
 		// BaseDir is ignored for file URLs, which name an absolute path.
-		l := loader.Ref("/some/other/dir", "file://"+schemaPath)
-		result, err := l.Load(t.Context(), nil)
+		url, data, err := load(t, loader.FileOrURL("/some/other/dir", "file://"+schemaPath))
 		require.NoError(t, err)
-		assert.Equal(t, schemaData, result.Data)
-		assert.Equal(t, schemaPath, result.URL)
+		assert.Equal(t, schemaData, data)
+		assert.Equal(t, schemaPath, url)
 	})
 
 	t.Run("file URL scheme in upper case", func(t *testing.T) {
@@ -119,10 +157,9 @@ func TestRef(t *testing.T) {
 		err := os.WriteFile(schemaPath, schemaData, 0o600)
 		require.NoError(t, err)
 
-		l := loader.Ref("/some/other/dir", "FILE://"+schemaPath)
-		result, err := l.Load(t.Context(), nil)
+		_, data, err := load(t, loader.FileOrURL("/some/other/dir", "FILE://"+schemaPath))
 		require.NoError(t, err)
-		assert.Equal(t, schemaData, result.Data)
+		assert.Equal(t, schemaData, data)
 	})
 
 	t.Run("file URL with percent-encoded path", func(t *testing.T) {
@@ -134,11 +171,12 @@ func TestRef(t *testing.T) {
 		err := os.WriteFile(schemaPath, schemaData, 0o600)
 		require.NoError(t, err)
 
-		l := loader.Ref("/some/other/dir", "file://"+filepath.Join(tmpDir, "my%20schema.json"))
-		result, err := l.Load(t.Context(), nil)
+		encoded := "file://" + filepath.Join(tmpDir, "my%20schema.json")
+
+		url, data, err := load(t, loader.FileOrURL("/some/other/dir", encoded))
 		require.NoError(t, err)
-		assert.Equal(t, schemaData, result.Data)
-		assert.Equal(t, schemaPath, result.URL)
+		assert.Equal(t, schemaData, data)
+		assert.Equal(t, schemaPath, url)
 	})
 
 	t.Run("URL with custom client", func(t *testing.T) {
@@ -153,17 +191,17 @@ func TestRef(t *testing.T) {
 		defer server.Close()
 
 		customClient := &http.Client{}
-		l := loader.Ref("/dir", server.URL+"/schema.json", loader.WithHTTPClient(customClient))
-		result, err := l.Load(t.Context(), nil)
+		r := loader.FileOrURL("/dir", server.URL+"/schema.json", loader.WithHTTPClient(customClient))
+
+		_, data, err := load(t, r)
 		require.NoError(t, err)
-		assert.Equal(t, []byte(schemaData), result.Data)
+		assert.Equal(t, []byte(schemaData), data)
 	})
 
 	t.Run("missing file", func(t *testing.T) {
 		t.Parallel()
 
-		l := loader.Ref("/some/dir", "nonexistent.json")
-		_, err := l.Load(t.Context(), nil)
+		_, _, err := load(t, loader.FileOrURL("/some/dir", "nonexistent.json"))
 		require.ErrorIs(t, err, os.ErrNotExist)
 		require.ErrorContains(t, err, "read /some/dir/nonexistent.json")
 	})

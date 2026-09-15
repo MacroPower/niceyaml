@@ -24,18 +24,18 @@ func TestFile(t *testing.T) {
 		err := os.WriteFile(schemaPath, schemaData, 0o600)
 		require.NoError(t, err)
 
-		l := loader.File(schemaPath)
-		result, err := l.Load(t.Context(), nil)
+		url, data, err := load(t, loader.File(schemaPath))
 		require.NoError(t, err)
-		assert.Equal(t, schemaData, result.Data)
-		assert.Equal(t, schemaPath, result.URL)
+		assert.Equal(t, schemaData, data)
+		assert.Equal(t, schemaPath, url)
 	})
 
 	t.Run("missing file", func(t *testing.T) {
 		t.Parallel()
 
-		l := loader.File("/nonexistent/path/schema.json")
-		_, err := l.Load(t.Context(), nil)
+		// Resolve names the file without touching it; only Load reads it.
+		url, _, err := load(t, loader.File("/nonexistent/path/schema.json"))
+		assert.Equal(t, "/nonexistent/path/schema.json", url)
 		require.ErrorIs(t, err, os.ErrNotExist)
 		require.ErrorContains(t, err, "read /nonexistent/path/schema.json")
 	})

@@ -12,8 +12,8 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/filepaths"
+	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/loader"
-	"go.jacobcolvin.com/niceyaml/schema/registry"
 )
 
 // Default SchemaStore URLs and timeouts.
@@ -28,9 +28,10 @@ var (
 	ErrFetchCatalog = errors.New("fetch schema catalog")
 
 	// ErrNoCatalogMatch indicates no catalog entry matches the document's file
-	// path. It wraps [registry.ErrNoMatch], so a [registry.Registry] moves on
-	// to the next resolver.
-	ErrNoCatalogMatch = fmt.Errorf("%w: no catalog entry matches", registry.ErrNoMatch)
+	// path. It wraps [schema.ErrNoMatch], so a
+	// [go.jacobcolvin.com/niceyaml/schema/registry.Registry] moves on to the
+	// next resolver.
+	ErrNoCatalogMatch = fmt.Errorf("%w: no catalog entry matches", schema.ErrNoMatch)
 )
 
 // Catalog represents the SchemaStore.org catalog structure returned by
@@ -54,9 +55,10 @@ type CatalogEntry struct {
 
 // SchemaStore manages the SchemaStore.org catalog with caching.
 //
-// The catalog is fetched during construction and cached for the configured TTL.
-// SchemaStore implements [registry.Resolver] and can be registered directly
-// with a [registry.Registry]. Create instances with [New].
+// The catalog is fetched during construction and cached for the configured
+// TTL. SchemaStore implements [schema.Resolver] and can be registered
+// directly with a [go.jacobcolvin.com/niceyaml/schema/registry.Registry].
+// Create instances with [New].
 //
 // Example:
 //
@@ -184,18 +186,20 @@ func New(ctx context.Context, opts ...Option) (*SchemaStore, error) {
 	return store, nil
 }
 
-// Resolve fetches the schema for the catalog entry matching the document's
-// file path. A document that matches no entry reports [ErrNoCatalogMatch].
+// Resolve names the schema for the catalog entry matching the document's
+// file path. The returned [schema.Ref] fetches the schema from the entry's
+// URL when loaded. A document that matches no entry reports
+// [ErrNoCatalogMatch].
 //
-// Implements [registry.Resolver].
-func (s *SchemaStore) Resolve(ctx context.Context, doc *niceyaml.DocumentDecoder) (loader.Result, error) {
+// Implements [schema.Resolver].
+func (s *SchemaStore) Resolve(ctx context.Context, doc *niceyaml.DocumentDecoder) (schema.Ref, error) {
 	entry, ok := s.FindMatch(ctx, doc.FilePath())
 	if !ok {
-		return loader.Result{}, fmt.Errorf("%w: %q", ErrNoCatalogMatch, doc.FilePath())
+		return schema.Ref{}, fmt.Errorf("%w: %q", ErrNoCatalogMatch, doc.FilePath())
 	}
 
-	//nolint:wrapcheck // URLLoader already wraps errors with context.
-	return loader.URL(entry.URL, loader.WithHTTPClient(s.client)).Load(ctx, doc)
+	//nolint:wrapcheck // The URL loader already wraps errors with context.
+	return loader.URL(entry.URL, loader.WithHTTPClient(s.client)).Resolve(ctx, doc)
 }
 
 // FindMatch finds a matching catalog entry for a file path.
@@ -269,7 +273,13 @@ func (s *SchemaStore) ensureCatalog(ctx context.Context) error {
 // The fetch (HTTP GET with a size limit) is shared with [loader.URL]; only the
 // catalog JSON parsing is specific to SchemaStore.
 func (s *SchemaStore) fetchCatalogLocked(ctx context.Context) error {
-	result, err := loader.URL(s.catalogURL, loader.WithHTTPClient(s.client)).Load(ctx, nil)
+	ref, err := loader.URL(s.catalogURL, loader.WithHTTPClient(s.client)).Resolve(ctx, nil)
+	if err != nil {
+		//nolint:wrapcheck // loader.URL already wraps errors with the catalog URL.
+		return err
+	}
+
+	data, err := ref.Load(ctx)
 	if err != nil {
 		//nolint:wrapcheck // loader.URL already wraps errors with the catalog URL.
 		return err
@@ -277,7 +287,7 @@ func (s *SchemaStore) fetchCatalogLocked(ctx context.Context) error {
 
 	var catalog Catalog
 
-	err = json.Unmarshal(result.Data, &catalog)
+	err = json.Unmarshal(data, &catalog)
 	if err != nil {
 		return fmt.Errorf("parse catalog from %s: %w", s.catalogURL, err)
 	}

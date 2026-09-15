@@ -1,8 +1,12 @@
-// Package matcher provides strategies for matching YAML documents to schemas.
+// Package matcher provides predicates that decide whether a schema applies
+// to a YAML document.
 //
-// Matchers determine whether a schema should be applied to a document. They
-// are evaluated in registration order by [registry.Registry]; the first matcher
-// that returns true wins, and its associated schema is used for validation.
+// A [Matcher] guards a [go.jacobcolvin.com/niceyaml/schema.Resolver] through
+// [go.jacobcolvin.com/niceyaml/schema/registry.When]: the guarded resolver
+// names its schema only for documents the matcher accepts and reports
+// [go.jacobcolvin.com/niceyaml/schema.ErrNoMatch] for the rest, so a
+// [go.jacobcolvin.com/niceyaml/schema/registry.Registry] moves on to its
+// next registration.
 //
 // # Matching Strategies
 //
@@ -16,11 +20,8 @@
 // value.
 //
 // Match documents based on their source file using [FilePath], which tests
-// the document's file path against a regular expression. This works well for
+// the document's file path against a glob pattern. This works well for
 // directory-based conventions where file location implies schema.
-//
-// Use [Always] as a fallback matcher at the end of a registry to provide a
-// default schema when no other matchers apply.
 //
 // # Composing Matchers
 //

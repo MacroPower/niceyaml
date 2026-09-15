@@ -12,7 +12,6 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/filepaths"
 	"go.jacobcolvin.com/niceyaml/schema/loader"
-	"go.jacobcolvin.com/niceyaml/schema/matcher"
 	"go.jacobcolvin.com/niceyaml/schema/registry"
 	"go.jacobcolvin.com/niceyaml/schema/registry/schemastore"
 )
@@ -108,9 +107,9 @@ func validateFile(
 
 // buildRegistry creates a schema registry based on CLI flags.
 //
-// If schemaRef is provided, it's registered first with a matcher that always
-// matches (CLI flag takes precedence). The schema ref is resolved relative to
-// the current working directory.
+// When schemaRef is set, it is the only registration, so every document
+// validates against it (the CLI flag takes precedence). The schema ref
+// resolves relative to the current working directory.
 //
 // Otherwise, directive-based matching is enabled with per-file resolution
 // (schemas referenced in directives are resolved relative to each YAML file),
@@ -118,7 +117,7 @@ func validateFile(
 func buildRegistry(ctx context.Context, schemaRef string) *registry.Registry {
 	reg := registry.New()
 
-	// CLI schema flag takes precedence - register first with always-matching.
+	// A loader applies to every document, so the CLI schema needs no matcher.
 	// Resolve relative to current working directory. If cwd fails, use ".".
 	if schemaRef != "" {
 		cwd, err := os.Getwd()
@@ -126,10 +125,7 @@ func buildRegistry(ctx context.Context, schemaRef string) *registry.Registry {
 			cwd = "."
 		}
 
-		reg.RegisterFunc(
-			matcher.Always(),
-			loader.Ref(cwd, schemaRef),
-		)
+		reg.Register(loader.FileOrURL(cwd, schemaRef))
 
 		return reg
 	}

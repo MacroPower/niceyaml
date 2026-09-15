@@ -1,33 +1,32 @@
-// Package loader provides strategies for loading schema data for validation.
+// Package loader provides resolvers that load schema data from a fixed
+// source.
 //
-// Loaders retrieve schema data from various sources and return it for
-// compilation by [registry.Registry]. A [Loader] receives the document being
-// validated and returns a [Result] containing the schema bytes and the URL
-// identifying them.
+// Each loader is a [go.jacobcolvin.com/niceyaml/schema.Resolver] that names
+// the same schema for every document and never reports
+// [go.jacobcolvin.com/niceyaml/schema.ErrNoMatch]. Register one directly
+// with a [go.jacobcolvin.com/niceyaml/schema/registry.Registry] to validate
+// every document against it, or wrap it with
+// [go.jacobcolvin.com/niceyaml/schema/registry.When] to apply it only to
+// documents a [go.jacobcolvin.com/niceyaml/schema/matcher.Matcher] accepts.
 //
-// Loaders fall into two categories: static and dynamic. Static loaders return
-// the same schema regardless of the document content—useful when you know
-// exactly which schema applies. Dynamic loaders inspect the document to
-// determine which schema to load, enabling scenarios like selecting a schema
-// based on a "kind" field or resolving an inline schema directive.
+// A loader's Resolve call is cheap. It returns a
+// [go.jacobcolvin.com/niceyaml/schema.Ref] whose URL identifies the schema
+// and whose Load reads the bytes. The registry checks its cache by URL first,
+// so a file is read or a URL fetched once per registry, however many
+// documents name it.
 //
-// Example static loader with embedded schema:
+// Embed a schema in the binary with go:embed:
 //
 //	//go:embed schema.json
 //	var schemaBytes []byte
 //
-//	l := loader.Embedded("schema.json", schemaBytes)
+//	reg.Register(loader.Embedded("example.com/config/schema.json", schemaBytes))
 //
-// Example dynamic loader that selects schema based on document content:
+// Read a schema from disk or over HTTP:
 //
-//	kindPath := paths.Root().Child("kind").Path()
-//	l := loader.Func(func(ctx context.Context, doc *niceyaml.DocumentDecoder) (loader.Result, error) {
-//	    kind, _ := doc.GetValue(kindPath)
-//	    schemaPath := fmt.Sprintf("schemas/%s.json", strings.ToLower(kind))
-//	    data, err := schemaFS.ReadFile(schemaPath)
-//	    if err != nil {
-//	        return loader.Result{}, err
-//	    }
-//	    return loader.Result{URL: schemaPath, Data: data}, nil
-//	})
+//	reg.Register(loader.File("./schemas/config.json"))
+//	reg.Register(loader.URL("https://example.com/schema.json"))
+//
+// Route a reference as written in a directive or on a command line, which
+// may be a file path or a URL, with [FileOrURL].
 package loader

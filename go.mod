@@ -15,6 +15,7 @@ require (
 	github.com/stretchr/testify v1.12.1
 	go.jacobcolvin.com/x/jsonschema v0.3.0
 	go.jacobcolvin.com/x/stringtest v0.2.0
+	golang.org/x/sync v0.23.0
 	golang.org/x/text v0.42.0
 )
 
@@ -36,7 +37,6 @@ require (
 	golang.org/x/exp v0.0.0-20240604190554-fc45aab8b7f8 // indirect
 	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/net v0.59.0 // indirect
-	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/tools v0.50.0 // indirect
 )

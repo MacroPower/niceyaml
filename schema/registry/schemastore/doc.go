@@ -7,7 +7,8 @@
 //
 // # Usage
 //
-// Create a [*SchemaStore] and register it with a [registry.Registry]:
+// Create a [*SchemaStore] and register it with a
+// [go.jacobcolvin.com/niceyaml/schema/registry.Registry]:
 //
 //	store, err := schemastore.New(ctx)
 //	if err != nil {

@@ -8,9 +8,10 @@ import (
 
 // Matcher determines whether a schema should be applied to a document.
 //
-// Matchers are evaluated in registration order; first match wins.
+// A Matcher guards a [go.jacobcolvin.com/niceyaml/schema.Resolver] through
+// [go.jacobcolvin.com/niceyaml/schema/registry.When].
 //
-// See [Content], [FilePath], [Any], [All], [Always], and [Func] for
+// See [Content], [Exists], [FilePath], [Any], [All], and [Func] for
 // implementations.
 type Matcher interface {
 	// Match returns true if the matcher's criteria are satisfied by the document.

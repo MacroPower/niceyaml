@@ -39,4 +39,16 @@
 //	if err := doc.ValidateSchema(ctx, v); err != nil {
 //	    // err is *niceyaml.Error with path info for highlighting.
 //	}
+//
+// # Resolution
+//
+// When a document's schema is unknown ahead of time, a [Resolver]
+// finds it. Resolve inspects the document and returns a [Ref], which names
+// the schema by URL and loads its bytes on demand, or reports [ErrNoMatch]
+// when the resolver does not apply. The
+// [go.jacobcolvin.com/niceyaml/schema/registry] package tries resolvers in
+// order, caches compiled validators by URL, and validates documents against
+// the first schema found; the
+// [go.jacobcolvin.com/niceyaml/schema/loader] package supplies resolvers
+// that read a fixed schema from memory, disk, or HTTP.
 package schema

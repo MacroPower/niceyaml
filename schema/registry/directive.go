@@ -13,8 +13,9 @@ import (
 
 var (
 	// ErrNoDirective indicates no schema directive was found in the document.
-	// It wraps [ErrNoMatch], so [Registry] moves on to the next resolver.
-	ErrNoDirective = fmt.Errorf("%w: no schema directive", ErrNoMatch)
+	// It wraps [schema.ErrNoMatch], so [Registry] moves on to the next
+	// resolver.
+	ErrNoDirective = fmt.Errorf("%w: no schema directive", schema.ErrNoMatch)
 
 	// ErrNoFilePath indicates a document has no file path, which is required
 	// for resolving relative schema paths in directives.
@@ -26,32 +27,31 @@ type directiveResolver struct {
 	opts []loader.HTTPOption
 }
 
-// Directive creates a new [Resolver] for yaml-language-server schema
+// Directive creates a new [schema.Resolver] for yaml-language-server schema
 // directives.
 //
-// Resolve parses the document's tokens for a directive comment and loads the
-// schema it names, relative to the document's file path. A document without
-// a directive reports [ErrNoDirective].
+// Resolve parses the document's tokens for a directive comment and names
+// the schema it references through [loader.FileOrURL], relative to the
+// document's file path. A document without a directive reports
+// [ErrNoDirective]; one without a file path reports [ErrNoFilePath].
 //
 //	reg.Register(registry.Directive())
-func Directive(opts ...loader.HTTPOption) Resolver {
+func Directive(opts ...loader.HTTPOption) schema.Resolver {
 	return &directiveResolver{opts: opts}
 }
 
-// Resolve implements [Resolver].
-func (r *directiveResolver) Resolve(ctx context.Context, doc *niceyaml.DocumentDecoder) (loader.Result, error) {
+// Resolve implements [schema.Resolver].
+func (r *directiveResolver) Resolve(ctx context.Context, doc *niceyaml.DocumentDecoder) (schema.Ref, error) {
 	directive := schema.ParseDocumentDirective(doc.Tokens())
 	if directive == nil {
-		return loader.Result{}, ErrNoDirective
+		return schema.Ref{}, ErrNoDirective
 	}
 
 	filePath := doc.FilePath()
 	if filePath == "" {
-		return loader.Result{}, ErrNoFilePath
+		return schema.Ref{}, ErrNoFilePath
 	}
 
-	baseDir := filepath.Dir(filePath)
-
-	//nolint:wrapcheck // Loader errors already wrapped with context.
-	return loader.Ref(baseDir, directive.Schema, r.opts...).Load(ctx, doc)
+	//nolint:wrapcheck // Loader errors already carry the reference.
+	return loader.FileOrURL(filepath.Dir(filePath), directive.Schema, r.opts...).Resolve(ctx, doc)
 }

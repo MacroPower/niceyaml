@@ -1,0 +1,90 @@
+package loader
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/url"
+	"path/filepath"
+	"strings"
+
+	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/schema"
+)
+
+// ErrNoBaseDir reports a relative file path given to [FileOrURL] with an
+// empty baseDir, which leaves nothing to resolve the path against.
+var ErrNoBaseDir = errors.New("relative schema path has no base directory")
+
+// FileOrURL creates a [schema.Resolver] for a schema reference as written in
+// a directive or on a command line, routing to [URL] for HTTP/HTTPS
+// references and [File] for file paths. Use [URL] or [File] directly when
+// you know the reference type at construction time.
+//
+// Schemes match case-insensitively. A file:// URL resolves to the local
+// path it names. A file:// URL with a host other than localhost names no
+// local path, so FileOrURL treats the whole reference as a relative file
+// path, which then fails to resolve or read. A relative file path joins
+// baseDir; an absolute path or an HTTP/HTTPS URL ignores baseDir. When
+// baseDir is empty and the path is relative, Resolve reports
+// [ErrNoBaseDir]. HTTPOptions apply when ref is an HTTP/HTTPS URL and do
+// nothing for file paths.
+//
+//	// Relative path resolved against baseDir.
+//	r := loader.FileOrURL("/configs", "schema.json")
+//
+//	// Absolute path used directly.
+//	r := loader.FileOrURL("/configs", "/schemas/config.json")
+//
+//	// URL fetched directly.
+//	r := loader.FileOrURL("/configs", "https://example.com/schema.json")
+func FileOrURL(baseDir, ref string, opts ...HTTPOption) schema.Resolver {
+	// Check for an HTTP/HTTPS URL by string prefix, so a malformed URL that
+	// fails to parse does not fall through as a file path.
+	if isHTTPURL(ref) {
+		return URL(ref, opts...)
+	}
+
+	path := ref
+	if hasScheme(ref, "file") {
+		path = fileURLPath(ref)
+	}
+
+	if filepath.IsAbs(path) {
+		return File(path)
+	}
+
+	if baseDir == "" {
+		return schema.ResolverFunc(func(_ context.Context, _ *niceyaml.DocumentDecoder) (schema.Ref, error) {
+			return schema.Ref{}, fmt.Errorf("%w: %q", ErrNoBaseDir, ref)
+		})
+	}
+
+	return File(filepath.Join(baseDir, path))
+}
+
+// isHTTPURL reports whether ref starts with http:// or https://, in any
+// letter case.
+func isHTTPURL(ref string) bool {
+	return hasScheme(ref, "http") || hasScheme(ref, "https")
+}
+
+// hasScheme reports whether ref starts with scheme followed by "://",
+// compared case-insensitively.
+func hasScheme(ref, scheme string) bool {
+	prefix := scheme + "://"
+
+	return len(ref) >= len(prefix) && strings.EqualFold(ref[:len(prefix)], prefix)
+}
+
+// fileURLPath returns the local path a file:// URL names. A URL that does
+// not parse, names a host other than localhost, or names no path comes back
+// unchanged, so resolving or reading the reference reports it.
+func fileURLPath(ref string) string {
+	u, err := url.Parse(ref)
+	if err != nil || u.Path == "" || (u.Host != "" && !strings.EqualFold(u.Host, "localhost")) {
+		return ref
+	}
+
+	return u.Path
+}

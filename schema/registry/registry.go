@@ -7,16 +7,24 @@ import (
 	"sync"
 
 	"go.jacobcolvin.com/x/jsonschema"
+	"golang.org/x/sync/singleflight"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/schema"
-	"go.jacobcolvin.com/niceyaml/schema/loader"
-	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
 
 var (
-	// ErrNoMatch indicates no matcher matched the document.
-	ErrNoMatch = errors.New("no matching schema")
+	// ErrResolve indicates a resolver applied to the document but could not
+	// name its schema.
+	ErrResolve = errors.New("resolve schema")
+
+	// ErrNoURL indicates a resolver returned a [schema.Ref] with an empty URL,
+	// which leaves the registry no key to cache the schema under.
+	ErrNoURL = errors.New("schema ref has no URL")
+
+	// ErrNoLoad indicates a resolver returned a [schema.Ref] without a Load
+	// function, which leaves the registry no way to read the schema.
+	ErrNoLoad = errors.New("schema ref has no Load function")
 
 	// ErrLoad indicates the schema could not be loaded.
 	ErrLoad = errors.New("load schema")
@@ -27,9 +35,10 @@ var (
 
 // Registry maps YAML documents to schemas using pluggable resolvers.
 //
-// Registrations are evaluated in order; the first [Resolver] that does not
-// report [ErrNoMatch] wins. Compiled validators are cached by schema URL to
-// avoid recompilation.
+// Lookup tries registrations in order; the first [schema.Resolver] that
+// does not report [schema.ErrNoMatch] wins. The registry caches compiled
+// validators by schema URL and consults that cache before loading, so it
+// loads and compiles each schema once however many documents name it.
 //
 // Example:
 //
@@ -40,15 +49,16 @@ var (
 //
 //	// Content-based matching.
 //	kindPath := paths.Root().Child("kind").Path()
-//	reg.RegisterFunc(
+//	reg.Register(registry.When(
 //	    matcher.Content(kindPath, "Deployment"),
-//	    loader.Embedded("deployment.json", deploymentSchema),
-//	)
+//	    loader.Embedded("example.com/k8s/deployment.json", deploymentSchema),
+//	))
 //
 // Create instances with [New].
 type Registry struct {
-	cache         map[string]niceyaml.SchemaValidator // compiled validators by schema URL
-	resolvers     []Resolver
+	group         singleflight.Group           // one load and compile in flight per URL
+	cache         map[string]*schema.Validator // compiled validators by schema URL
+	resolvers     []schema.Resolver
 	validatorOpts []jsonschema.ValidateOption
 	mu            sync.RWMutex
 }
@@ -59,8 +69,11 @@ type Registry struct {
 //   - [WithValidateOptions]
 type Option func(*Registry)
 
-// WithValidateOptions is an [Option] that sets options passed to
-// [jsonschema.CompileJSON] when compiling validators.
+// WithValidateOptions is an [Option] that sets the [jsonschema.ValidateOption]
+// values the registry passes to [jsonschema.CompileJSON]. They apply when a
+// schema is compiled, which happens once per schema URL, so an option such
+// as a format validator takes effect for every document validated against
+// that schema.
 func WithValidateOptions(opts ...jsonschema.ValidateOption) Option {
 	return func(r *Registry) {
 		r.validatorOpts = opts
@@ -70,7 +83,7 @@ func WithValidateOptions(opts ...jsonschema.ValidateOption) Option {
 // New creates a new [*Registry].
 func New(opts ...Option) *Registry {
 	r := &Registry{
-		cache: make(map[string]niceyaml.SchemaValidator),
+		cache: make(map[string]*schema.Validator),
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -79,50 +92,47 @@ func New(opts ...Option) *Registry {
 	return r
 }
 
-// Register adds a [Resolver] to the registry.
+// Register appends resolvers to the end of the lookup order.
 //
 // Registrations are evaluated in order; the first resolver that does not
-// report [ErrNoMatch] wins.
-//
-// For a separate [matcher.Matcher] and [loader.Loader], use [RegisterFunc].
-func (r *Registry) Register(res Resolver) {
-	r.resolvers = append(r.resolvers, res)
-}
+// report [schema.ErrNoMatch] wins. Register is safe to call concurrently
+// with [Lookup] and [ValidateDocument]; a lookup already in progress keeps
+// the resolver list it started with.
+func (r *Registry) Register(res ...schema.Resolver) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
-// RegisterFunc adds a [matcher.Matcher] and [loader.Loader] pair to the
-// registry as one [Resolver] that loads through l when m matches.
-//
-// This suits matchers and loaders that share no state. A resolver that
-// decides and loads from the same parse implements [Resolver] directly and
-// uses [Register].
-//
-// Registrations are evaluated in order; first match wins.
-func (r *Registry) RegisterFunc(m matcher.Matcher, l loader.Loader) {
-	r.Register(&pair{matcher: m, loader: l})
+	r.resolvers = append(r.resolvers, res...)
 }
 
 // Lookup finds the validator for a document.
 //
-// Returns [ErrNoMatch] if no resolver matches the document. Returns other
-// errors if schema loading or compilation fails.
+// Returns [schema.ErrNoMatch] if no resolver applies to the document,
+// [ErrResolve] if a resolver applied but could not name the schema, and
+// [ErrLoad] or [ErrCompile] if loading or compiling the schema fails.
 //
 // For most use cases, prefer [ValidateDocument] which combines lookup and
 // validation. Use Lookup when you need the validator for custom processing.
-func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.DocumentDecoder) (niceyaml.SchemaValidator, error) {
-	for _, res := range r.resolvers {
-		result, err := res.Resolve(ctx, doc)
-		if errors.Is(err, ErrNoMatch) {
+func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.DocumentDecoder) (*schema.Validator, error) {
+	r.mu.RLock()
+
+	resolvers := r.resolvers
+	r.mu.RUnlock()
+
+	for _, res := range resolvers {
+		ref, err := res.Resolve(ctx, doc)
+		if errors.Is(err, schema.ErrNoMatch) {
 			continue
 		}
 
 		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrLoad, err)
+			return nil, fmt.Errorf("%w: %w", ErrResolve, err)
 		}
 
-		return r.compileValidator(ctx, result)
+		return r.validator(ctx, ref)
 	}
 
-	return nil, fmt.Errorf("%w: %q", ErrNoMatch, doc.FilePath())
+	return nil, fmt.Errorf("%w: %q", schema.ErrNoMatch, doc.FilePath())
 }
 
 // ValidateDocument validates a document using the first matching schema.
@@ -131,16 +141,17 @@ func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.DocumentDecoder) (n
 // lookup and validation into a single call. Use [Lookup] when you need the
 // validator for custom processing.
 //
-// Returns [ErrNoMatch] if no matcher matches the document. Callers can check
-// for this error to allow unmatched documents:
+// Returns [schema.ErrNoMatch] if no resolver applies to the document.
+// Callers can check for this error to allow unmatched documents:
 //
 //	err := reg.ValidateDocument(ctx, doc)
-//	if err != nil && !errors.Is(err, registry.ErrNoMatch) {
+//	if err != nil && !errors.Is(err, schema.ErrNoMatch) {
 //	    return err
 //	}
 //
 // Returns validation errors if the document doesn't conform to the schema.
-// Returns loading/compilation errors if schema preparation fails.
+// Returns resolution, loading, or compilation errors if schema preparation
+// fails.
 func (r *Registry) ValidateDocument(ctx context.Context, doc *niceyaml.DocumentDecoder) error {
 	v, err := r.Lookup(ctx, doc)
 	if err != nil {
@@ -151,37 +162,97 @@ func (r *Registry) ValidateDocument(ctx context.Context, doc *niceyaml.DocumentD
 	return doc.ValidateSchema(ctx, v)
 }
 
-// compileValidator compiles a validator for result, using cache when possible.
+// validator returns the compiled validator for ref, loading and compiling
+// the schema on the first request for its URL and serving the cached
+// validator after that.
 //
-// Under concurrent load, multiple goroutines may compile the same schema before
-// one caches it. This is intentional to avoid lock contention; the overhead of
-// occasional duplicate compilation is acceptable.
-func (r *Registry) compileValidator(ctx context.Context, result loader.Result) (niceyaml.SchemaValidator, error) {
-	// Check cache.
-	r.mu.RLock()
+// Concurrent requests for one URL share a single load and compile through
+// the singleflight group. The shared load runs under the context of the
+// caller that started it. When the shared load ends with a context error,
+// such as that caller's cancellation, a caller that joined it with a live
+// context of its own loads again instead of returning that error.
+func (r *Registry) validator(ctx context.Context, ref schema.Ref) (*schema.Validator, error) {
+	if ref.URL == "" {
+		return nil, fmt.Errorf("%w: %w", ErrResolve, ErrNoURL)
+	}
 
-	v, ok := r.cache[result.URL]
-	r.mu.RUnlock()
+	if ref.Load == nil {
+		return nil, fmt.Errorf("%w: %q: %w", ErrResolve, ref.URL, ErrNoLoad)
+	}
 
-	if ok {
+	if v, ok := r.cached(ref.URL); ok {
 		return v, nil
 	}
 
-	compiled, err := jsonschema.CompileJSON(ctx, result.Data, r.validatorOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %q: %w", ErrCompile, result.URL, err)
+	for {
+		// Set only when this call runs the load rather than joining one.
+		ran := false
+
+		_, err, _ := r.group.Do(ref.URL, func() (any, error) {
+			ran = true
+
+			return nil, r.compile(ctx, ref)
+		})
+		if err == nil {
+			break
+		}
+
+		if !ran && ctx.Err() == nil && isContextError(err) {
+			continue
+		}
+
+		//nolint:wrapcheck // compile already wraps its errors with the sentinel and URL.
+		return nil, err
 	}
 
-	v = schema.NewValidator(compiled)
-
-	// Cache validator by URL. Skip caching for empty URLs to avoid cache
-	// collisions where different schemas would share a single cache entry.
-	if result.URL != "" {
-		r.mu.Lock()
-
-		r.cache[result.URL] = v
-		r.mu.Unlock()
+	v, ok := r.cached(ref.URL)
+	if !ok {
+		return nil, fmt.Errorf("%w: %q: validator missing after compile", ErrCompile, ref.URL)
 	}
 
 	return v, nil
+}
+
+// isContextError reports whether err comes from a canceled or expired
+// context.
+func isContextError(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// cached returns the validator cached under url, if any.
+func (r *Registry) cached(url string) (*schema.Validator, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	v, ok := r.cache[url]
+
+	return v, ok
+}
+
+// compile loads and compiles the schema ref names and caches the result
+// under its URL. A cache entry stored by an earlier call is left in place,
+// so every caller sees one validator per URL.
+func (r *Registry) compile(ctx context.Context, ref schema.Ref) error {
+	if _, ok := r.cached(ref.URL); ok {
+		return nil
+	}
+
+	data, err := ref.Load(ctx)
+	if err != nil {
+		return fmt.Errorf("%w: %q: %w", ErrLoad, ref.URL, err)
+	}
+
+	compiled, err := jsonschema.CompileJSON(ctx, data, r.validatorOpts...)
+	if err != nil {
+		return fmt.Errorf("%w: %q: %w", ErrCompile, ref.URL, err)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.cache[ref.URL]; !ok {
+		r.cache[ref.URL] = schema.NewValidator(compiled)
+	}
+
+	return nil
 }

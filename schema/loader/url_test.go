@@ -40,11 +40,33 @@ func TestURL(t *testing.T) {
 		}))
 		defer server.Close()
 
-		l := loader.URL(server.URL + "/schema.json")
-		result, err := l.Load(t.Context(), nil)
+		url, data, err := load(t, loader.URL(server.URL+"/schema.json"))
 		require.NoError(t, err)
-		assert.Equal(t, []byte(schemaData), result.Data)
-		assert.Equal(t, server.URL+"/schema.json", result.URL)
+		assert.Equal(t, []byte(schemaData), data)
+		assert.Equal(t, server.URL+"/schema.json", url)
+	})
+
+	t.Run("resolve does not fetch", func(t *testing.T) {
+		t.Parallel()
+
+		var requests int
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			requests++
+
+			//nolint:errcheck // Test helper.
+			w.Write([]byte(`{}`))
+		}))
+		defer server.Close()
+
+		ref, err := loader.URL(server.URL+"/schema.json").Resolve(t.Context(), nil)
+		require.NoError(t, err)
+		assert.Equal(t, server.URL+"/schema.json", ref.URL)
+		assert.Equal(t, 0, requests, "Resolve should name the schema without fetching it")
+
+		_, err = ref.Load(t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, 1, requests)
 	})
 
 	t.Run("not found", func(t *testing.T) {
@@ -55,8 +77,7 @@ func TestURL(t *testing.T) {
 		}))
 		defer server.Close()
 
-		l := loader.URL(server.URL + "/schema.json")
-		_, err := l.Load(t.Context(), nil)
+		_, _, err := load(t, loader.URL(server.URL+"/schema.json"))
 		require.ErrorContains(t, err, "fetch "+server.URL+"/schema.json: status 404")
 	})
 
@@ -72,10 +93,10 @@ func TestURL(t *testing.T) {
 		defer server.Close()
 
 		customClient := &http.Client{}
-		l := loader.URL(server.URL+"/schema.json", loader.WithHTTPClient(customClient))
-		result, err := l.Load(t.Context(), nil)
+
+		_, data, err := load(t, loader.URL(server.URL+"/schema.json", loader.WithHTTPClient(customClient)))
 		require.NoError(t, err)
-		assert.Equal(t, []byte(schemaData), result.Data)
+		assert.Equal(t, []byte(schemaData), data)
 	})
 
 	t.Run("context cancellation", func(t *testing.T) {
@@ -90,24 +111,24 @@ func TestURL(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel() // Cancel immediately.
 
-		l := loader.URL(server.URL + "/schema.json")
-		_, err := l.Load(ctx, nil)
+		ref, err := loader.URL(server.URL+"/schema.json").Resolve(ctx, nil)
+		require.NoError(t, err)
+
+		_, err = ref.Load(ctx)
 		require.Error(t, err)
 	})
 
 	t.Run("invalid url", func(t *testing.T) {
 		t.Parallel()
 
-		l := loader.URL("\x00") // Control char makes URL invalid.
-		_, err := l.Load(t.Context(), nil)
+		_, _, err := load(t, loader.URL("\x00")) // Control char makes URL invalid.
 		require.ErrorContains(t, err, "create request for")
 	})
 
 	t.Run("client error", func(t *testing.T) {
 		t.Parallel()
 
-		l := loader.URL("http://localhost:0/schema.json") // Port 0 = connection refused.
-		_, err := l.Load(t.Context(), nil)
+		_, _, err := load(t, loader.URL("http://localhost:0/schema.json")) // Port 0 = connection refused.
 		require.ErrorContains(t, err, "fetch http://localhost:0/schema.json")
 	})
 
@@ -123,8 +144,7 @@ func TestURL(t *testing.T) {
 			}),
 		}
 
-		l := loader.URL("http://example.com/schema.json", loader.WithHTTPClient(client))
-		_, err := l.Load(t.Context(), nil)
+		_, _, err := load(t, loader.URL("http://example.com/schema.json", loader.WithHTTPClient(client)))
 		require.ErrorContains(t, err, "read response from http://example.com/schema.json")
 	})
 
@@ -144,8 +164,7 @@ func TestURL(t *testing.T) {
 			}),
 		}
 
-		l := loader.URL("http://example.com/schema.json", loader.WithHTTPClient(client))
-		_, err := l.Load(t.Context(), nil)
+		_, _, err := load(t, loader.URL("http://example.com/schema.json", loader.WithHTTPClient(client)))
 		require.ErrorContains(t, err, "schema exceeds")
 	})
 }

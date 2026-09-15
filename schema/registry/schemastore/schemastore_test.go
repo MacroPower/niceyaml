@@ -18,6 +18,7 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/registry"
 	"go.jacobcolvin.com/niceyaml/schema/registry/schemastore"
 )
@@ -632,7 +633,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`on: push`), ".github/workflows/ci.yaml")
 		_, err = store.Resolve(t.Context(), doc)
-		require.NotErrorIs(t, err, registry.ErrNoMatch)
+		require.NotErrorIs(t, err, schema.ErrNoMatch)
 	})
 
 	t.Run("no match for unknown file", func(t *testing.T) {
@@ -656,7 +657,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "random.yaml")
 		_, err = store.Resolve(t.Context(), doc)
-		require.ErrorIs(t, err, registry.ErrNoMatch)
+		require.ErrorIs(t, err, schema.ErrNoMatch)
 	})
 
 	t.Run("loads matching schema", func(t *testing.T) {
@@ -686,10 +687,13 @@ func TestSchemaStore_Resolve(t *testing.T) {
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
 
-		result, err := store.Resolve(t.Context(), doc)
+		ref, err := store.Resolve(t.Context(), doc)
 		require.NoError(t, err)
-		assert.Equal(t, []byte(schemaData), result.Data)
-		assert.Equal(t, schemaServer.URL+"/schema.json", result.URL)
+		assert.Equal(t, schemaServer.URL+"/schema.json", ref.URL)
+
+		data, err := ref.Load(t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, []byte(schemaData), data)
 	})
 
 	t.Run("error when schema URL unreachable", func(t *testing.T) {
@@ -713,11 +717,15 @@ func TestSchemaStore_Resolve(t *testing.T) {
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
 
-		// The path matches, but the schema URL is unreachable, which is not a
-		// no-match.
-		_, err = store.Resolve(t.Context(), doc)
+		// The path matches, so Resolve names the schema; only loading it fails,
+		// which is not a no-match.
+		ref, err := store.Resolve(t.Context(), doc)
+		require.NoError(t, err)
+		assert.Equal(t, "https://example.com/schema.json", ref.URL)
+
+		_, err = ref.Load(t.Context())
 		require.ErrorContains(t, err, "fetch https://example.com/schema.json: status 404")
-		require.NotErrorIs(t, err, registry.ErrNoMatch)
+		require.NotErrorIs(t, err, schema.ErrNoMatch)
 	})
 
 	t.Run("error when no matching schema", func(t *testing.T) {
@@ -744,7 +752,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 
 		_, err = store.Resolve(t.Context(), doc)
 		require.ErrorIs(t, err, schemastore.ErrNoCatalogMatch)
-		require.ErrorIs(t, err, registry.ErrNoMatch)
+		require.ErrorIs(t, err, schema.ErrNoMatch)
 		require.ErrorContains(t, err, "random.yaml")
 	})
 }
@@ -853,7 +861,7 @@ func TestIntegration(t *testing.T) {
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "random.yaml")
 
 		err = reg.ValidateDocument(t.Context(), doc)
-		require.ErrorIs(t, err, registry.ErrNoMatch)
+		require.ErrorIs(t, err, schema.ErrNoMatch)
 	})
 }
 

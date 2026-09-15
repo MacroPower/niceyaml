@@ -66,7 +66,7 @@ func TestAny(t *testing.T) {
 		t.Parallel()
 
 		assert.PanicsWithValue(t, "matcher.Any: matcher at index 0 is nil", func() {
-			matcher.Any(nil, matcher.Always())
+			matcher.Any(nil, matcher.Content(kindPath, "Test"))
 		})
 	})
 }
