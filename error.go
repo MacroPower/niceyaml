@@ -195,18 +195,17 @@ func (e *Error) Error() string {
 // against src when one is given, in document doc. An Error built from a nil
 // error has an empty headline.
 //
-// An Error without a position of its own that directly wraps another Error
-// adds no text, so the headline is the inner Error's, resolved the same
-// way. Foreign wrapping in between keeps its text around the inner Error's
-// headline, resolved the same way.
+// An Error without a position of its own adds no text, so its headline is
+// the message of the error it wraps, with every Error inside resolved the
+// same way by [resolveMessage]. Foreign wrapping in between keeps its text
+// around the inner headlines.
 func (e *Error) headline(src *Source, doc int) string {
 	if e.err == nil {
 		return ""
 	}
 
-	inner, ok := e.err.(*Error) //nolint:errorlint // Identity of the direct child, not a chain search.
-	if ok && !e.hasPosition() {
-		return inner.headline(src, doc)
+	if !e.hasPosition() {
+		return resolveMessage(e.err, src, doc, true)
 	}
 
 	loc, err := e.locate(src, doc)
@@ -225,27 +224,72 @@ func (e *Error) headline(src *Source, doc int) string {
 		return fmt.Sprintf("at %s: %v", e.path, e.err)
 	}
 
-	return resolveMessage(e.err, src, doc)
+	return resolveMessage(e.err, src, doc, true)
 }
 
-// resolveMessage returns the message of err with the location of the first
-// [Error] in its chain resolved against src, in document doc. When err is
-// that Error, the result is its headline. When wrapping sits between, such
-// as [fmt.Errorf] with the %w verb, the Error's unresolved text inside the
-// message gives way to its resolved headline, and the text around it stays.
-// A wrapper that does not embed the Error's text leaves the message as it
-// is. When the chain holds no Error, the result is err's own message.
-func resolveMessage(err error, src *Source, doc int) string {
-	if direct, ok := err.(*Error); ok { //nolint:errorlint // Identity of the direct child, not a chain search.
-		return direct.headline(src, doc)
+// resolveMessage returns the message of err with the location of every
+// [Error] in its tree resolved against src.
+//
+// It rebuilds the message one level at a time. An Error contributes its
+// headline. Any other error keeps its own text, with the text of each child
+// whose message changed swapped for the child's resolved message, so the
+// context a wrapper such as [fmt.Errorf] adds stays around the resolved
+// location. A level that does not hold a child's text verbatim, as a wrapper
+// that reformats the message it wraps does, keeps its text as it is, and a
+// child with an empty message is left alone since there is nothing to find.
+//
+// Paths resolve in document doc. When docSet is false, no level above chose
+// the document, and the first Error on each branch picks the index its own
+// chain carries.
+func resolveMessage(err error, src *Source, doc int, docSet bool) string {
+	if e, ok := err.(*Error); ok { //nolint:errorlint // Identity of this level, not a chain search.
+		if e == nil {
+			return ""
+		}
+
+		if !docSet {
+			if idx, set := e.DocumentIndex(); set {
+				doc = idx
+			}
+		}
+
+		return e.headline(src, doc)
 	}
 
-	inner, ok := firstError(err)
-	if !ok {
-		return err.Error()
+	msg := err.Error()
+
+	for _, child := range children(err) {
+		plain := child.Error()
+		if plain == "" {
+			continue
+		}
+
+		resolved := resolveMessage(child, src, doc, docSet)
+		if resolved == plain {
+			continue
+		}
+
+		msg = strings.Replace(msg, plain, resolved, 1)
 	}
 
-	return strings.Replace(err.Error(), inner.Error(), inner.headline(src, doc), 1)
+	return msg
+}
+
+// children returns the errors err wraps directly: the one from an Unwrap
+// method returning error, or all from one returning a slice.
+func children(err error) []error {
+	switch x := err.(type) { //nolint:errorlint // Unwrap shape of this level, not a target match.
+	case interface{ Unwrap() error }:
+		child := x.Unwrap()
+		if child != nil {
+			return []error{child}
+		}
+
+	case interface{ Unwrap() []error }:
+		return x.Unwrap()
+	}
+
+	return nil
 }
 
 // find returns the first [Error] in e's chain that satisfies pred, walking
@@ -531,21 +575,16 @@ func (e *SourceError) Unwrap() error {
 // Error returns the error message with its location resolved against the
 // source: "[line:col]" for a token or range, "[line:col] $.path" for a path
 // that resolves, and "at $.path" for one that does not. Context added
-// around the [Error] with
-// [fmt.Errorf] is kept around the resolved location, so wrapping before
-// [Source.WrapError] and after it read the same. Nested errors are not part
-// of the message; see [SourceError.Detail].
+// around the [Error] with [fmt.Errorf] or [errors.Join] is kept around the
+// resolved location, and every Error the tree holds resolves, so wrapping
+// before [Source.WrapError] and after it read the same. Nested errors are
+// not part of the message; see [SourceError.Detail].
 //
 // The result is plain text and never includes source lines, so it is safe to
 // log or compare. Use [SourceError.Detail] or the %+v verb for the annotated
 // source excerpt.
 func (e *SourceError) Error() string {
-	root, ok := firstError(e.err)
-	if !ok {
-		return e.err.Error()
-	}
-
-	return resolveMessage(e.err, e.source, root.defaultDocumentIndex())
+	return resolveMessage(e.err, e.source, 0, false)
 }
 
 // located returns the outermost [*Error] in the chain and the anchor that

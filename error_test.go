@@ -2162,6 +2162,59 @@ func TestError_NestedMessageSpansLines(t *testing.T) {
 	assert.Contains(t, detail, "see docs for details")
 }
 
+// reformatError wraps another error without embedding its text, the way a
+// wrapper that rewrites the message it wraps does.
+type reformatError struct{ err error }
+
+func (r reformatError) Error() string { return "rewritten" }
+func (r reformatError) Unwrap() error { return r.err }
+
+func TestError_ResolvesEveryWrappedError(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("name: first\n---\nname: second\n")
+	namePath := paths.Root().Child("name").Value()
+
+	t.Run("nested wrappers keep their context", func(t *testing.T) {
+		t.Parallel()
+
+		inner := niceyaml.NewError("bad name", niceyaml.WithPath(namePath))
+		wrapped := source.WrapError(fmt.Errorf("outer: %w", fmt.Errorf("inner: %w", inner)))
+
+		assert.Equal(t, "outer: inner: [1:7] $.name: bad name", wrapped.Error())
+	})
+
+	t.Run("every joined error resolves", func(t *testing.T) {
+		t.Parallel()
+
+		first := niceyaml.NewError("bad first", niceyaml.WithPath(namePath))
+		second := niceyaml.NewError(
+			"bad second",
+			niceyaml.WithPath(namePath),
+			niceyaml.WithDocumentIndex(1),
+		)
+		wrapped := source.WrapError(errors.Join(
+			fmt.Errorf("a: %w", first),
+			fmt.Errorf("b: %w", second),
+		))
+
+		// Each branch resolves in the document its own Error names.
+		assert.Equal(t, "a: [1:7] $.name: bad first\nb: [3:7] $.name: bad second", wrapped.Error())
+	})
+
+	t.Run("a wrapper that rewrites the message keeps its text", func(t *testing.T) {
+		t.Parallel()
+
+		inner := niceyaml.NewError("bad name", niceyaml.WithPath(namePath))
+		wrapped := source.WrapError(fmt.Errorf("outer: %w", reformatError{inner}))
+
+		// The rewritten text holds no trace of the inner message, so there
+		// is nothing to resolve in place and nothing is inserted.
+		assert.Equal(t, "outer: rewritten", wrapped.Error())
+		require.ErrorIs(t, wrapped, inner)
+	})
+}
+
 func TestError_ResolvesThroughErrorWrappers(t *testing.T) {
 	t.Parallel()
 
