@@ -123,8 +123,7 @@ func yamlErrors(err error) []*niceyaml.SourceError {
 
 // expandYAMLErrors replaces the plain rendering of each error in errs inside
 // msg with its [niceyaml.SourceError.Render] form under opts, so the
-// annotated source appears where the error does and no nested message shows
-// up as both a bullet and an annotation.
+// annotated source appears where the error does.
 //
 // Each expansion consumes msg up to and including the text it replaced, so two
 // errors that render identically expand one after the other instead of both

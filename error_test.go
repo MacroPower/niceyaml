@@ -792,7 +792,7 @@ func TestError_MultiError(t *testing.T) {
 		assert.Contains(t, got, "^ nested with token")
 	})
 
-	t.Run("failed nested resolution is skipped silently", func(t *testing.T) {
+	t.Run("nested error that does not resolve is listed after the excerpt", func(t *testing.T) {
 		t.Parallel()
 
 		source := stringtest.Input(`
@@ -812,35 +812,29 @@ func TestError_MultiError(t *testing.T) {
 
 		got := trimLines(render(err))
 
-		// Should still render the main error, nested error is skipped.
 		assert.Contains(t, got, "[1:1] main error")
 		assert.Contains(t, got, "<genericError>key</genericError>")
-		// Should NOT contain annotation for failed nested error.
-		assert.NotContains(t, got, "nested error")
+		// The nested error has no line to annotate, so it follows the
+		// excerpt with its unresolved location.
+		assert.NotContains(t, got, "^ nested error")
+		assert.True(t, strings.HasSuffix(got, "\n\nat $.nonexistent: nested error"), got)
 	})
 
-	t.Run("plain error with nested errors renders bullets", func(t *testing.T) {
+	t.Run("plain error with nested errors renders the headline only", func(t *testing.T) {
 		t.Parallel()
 
-		err := niceyaml.NewError(
-			"main error",
-			niceyaml.WithErrors(
-				niceyaml.NewError("nested 1"),
-				niceyaml.NewError("nested 2"),
-			),
-		)
+		nested1 := niceyaml.NewError("nested 1")
+		nested2 := niceyaml.NewError("nested 2")
+		err := niceyaml.NewError("main error", niceyaml.WithErrors(nested1, nested2))
 
-		got := render(err)
+		assert.Equal(t, "main error", render(err))
 
-		want := stringtest.JoinLF(
-			"main error",
-			"  • nested 1",
-			"  • nested 2",
-		)
-		assert.Equal(t, want, got)
+		// The nested errors surface through Unwrap instead.
+		require.ErrorIs(t, err, nested1)
+		require.ErrorIs(t, err, nested2)
 	})
 
-	t.Run("nested error without path or token is skipped", func(t *testing.T) {
+	t.Run("nested error without path or token is listed after the excerpt", func(t *testing.T) {
 		t.Parallel()
 
 		source := stringtest.Input(`
@@ -857,10 +851,9 @@ func TestError_MultiError(t *testing.T) {
 
 		got := trimLines(render(err))
 
-		// Should still render main error.
 		assert.Contains(t, got, "[1:1] main error")
-		// Should NOT contain annotation for nested error without location.
-		assert.NotContains(t, got, "no location")
+		assert.NotContains(t, got, "^ no location")
+		assert.True(t, strings.HasSuffix(got, "\n\nno location"), got)
 	})
 
 	t.Run("errors.Is works with nested errors", func(t *testing.T) {
@@ -946,14 +939,8 @@ func TestError_MultiError(t *testing.T) {
 			),
 		)
 
-		got := render(err)
-
-		// Should fall back to plain bullet format since no source is available.
-		want := stringtest.JoinLF(
-			"validation failed",
-			"  • at $.value: nested error",
-		)
-		assert.Equal(t, want, got)
+		// Without a source, only the headline renders.
+		assert.Equal(t, "validation failed", render(err))
 	})
 
 	t.Run("nested-only error with multiple lines", func(t *testing.T) {
@@ -1015,10 +1002,10 @@ func TestError_MultiError(t *testing.T) {
 
 		got := trimLines(render(err))
 
-		// Should contain the resolvable error annotation.
-		assert.Contains(t, got, "resolvable error")
-		// Should NOT contain the unresolvable error (silently skipped).
-		assert.NotContains(t, got, "unresolvable error")
+		assert.Contains(t, got, "^ resolvable error")
+		// The unresolvable error follows the excerpt instead of annotating it.
+		assert.NotContains(t, got, "^ unresolvable error")
+		assert.True(t, strings.HasSuffix(got, "\n\nat $.nonexistent: unresolvable error"), got)
 	})
 
 	t.Run("nested-only error with nested error that has no path or token", func(t *testing.T) {
@@ -1029,8 +1016,8 @@ func TestError_MultiError(t *testing.T) {
 			value: 123
 		`)
 
-		// All nested errors lack path/token, so hasNestedPaths returns false
-		// and should fall back to plain bullet rendering.
+		// No nested error has a location, so nothing annotates the source
+		// and the nested error follows the headline as a line of its own.
 		err := niceyaml.NewSourceFromString(source).WrapError(niceyaml.NewError(
 			"validation failed",
 			niceyaml.WithErrors(
@@ -1038,23 +1025,15 @@ func TestError_MultiError(t *testing.T) {
 			),
 		))
 
-		got := render(err)
-
-		// Should fall back to plain bullet format.
-		want := stringtest.JoinLF(
-			"validation failed",
-			"  • nested without location",
-		)
-		assert.Equal(t, want, got)
+		assert.Equal(t, "validation failed\n\nnested without location", render(err))
 	})
 }
 
-func TestError_hasNestedPaths(t *testing.T) {
+func TestSourceError_Render_NestedLocations(t *testing.T) {
 	t.Parallel()
 
-	// These tests verify hasNestedPaths behavior indirectly through Error() output.
-	// When hasNestedPaths returns true and source is provided, we get annotated output.
-	// When hasNestedPaths returns false, we get plain bullet output regardless of source.
+	// A nested error with a location annotates the source excerpt. A nested
+	// error without one follows the headline as a line of its own.
 
 	source := stringtest.Input(`
 		key: value
@@ -1063,17 +1042,16 @@ func TestError_hasNestedPaths(t *testing.T) {
 
 	tcs := map[string]struct {
 		err        error
-		wantYAML   bool // If true, expect YAML output; if false, expect bullet format.
-		wantBullet string
+		want       string
+		wantDetail bool
 	}{
-		"returns false when no nested errors": {
+		"no nested errors": {
 			err: niceyaml.NewSourceFromString(source).WrapError(niceyaml.NewError(
 				"main error",
 			)),
-			wantYAML:   false,
-			wantBullet: "main error",
+			want: "main error",
 		},
-		"returns false when nested errors have no paths or tokens": {
+		"nested errors without locations": {
 			err: niceyaml.NewSourceFromString(source).WrapError(niceyaml.NewError(
 				"main error",
 				niceyaml.WithErrors(
@@ -1081,14 +1059,9 @@ func TestError_hasNestedPaths(t *testing.T) {
 					niceyaml.NewError("nested 2"),
 				),
 			)),
-			wantYAML: false,
-			wantBullet: stringtest.JoinLF(
-				"main error",
-				"  • nested 1",
-				"  • nested 2",
-			),
+			want: "main error\n\nnested 1\nnested 2",
 		},
-		"returns true when nested error has path": {
+		"nested error with path": {
 			err: xmlSource(source).WrapError(niceyaml.NewError(
 				"main error",
 				niceyaml.WithErrors(
@@ -1098,9 +1071,9 @@ func TestError_hasNestedPaths(t *testing.T) {
 					),
 				),
 			)),
-			wantYAML: true,
+			wantDetail: true,
 		},
-		"returns true when nested error has token": {
+		"nested error with token": {
 			err: func() error {
 				tokens := lexer.Tokenize(source)
 
@@ -1114,9 +1087,9 @@ func TestError_hasNestedPaths(t *testing.T) {
 					),
 				))
 			}(),
-			wantYAML: true,
+			wantDetail: true,
 		},
-		"returns true with mix of path and no-path nested errors": {
+		"mix of located and unlocated nested errors": {
 			err: xmlSource(source).WrapError(niceyaml.NewError(
 				"main error",
 				niceyaml.WithErrors(
@@ -1128,15 +1101,14 @@ func TestError_hasNestedPaths(t *testing.T) {
 					niceyaml.NewError("also no path"),
 				),
 			)),
-			wantYAML: true,
+			wantDetail: true,
 		},
-		"returns false with nil nested errors only": {
+		"nil nested errors only": {
 			err: niceyaml.NewSourceFromString(source).WrapError(niceyaml.NewError(
 				"main error",
 				niceyaml.WithErrors(nil, nil),
 			)),
-			wantYAML:   false,
-			wantBullet: "main error",
+			want: "main error",
 		},
 	}
 
@@ -1146,16 +1118,97 @@ func TestError_hasNestedPaths(t *testing.T) {
 
 			got := render(tc.err)
 
-			if tc.wantYAML {
-				// Should contain YAML-style output (not just bullet points).
+			if tc.wantDetail {
 				assert.Contains(t, got, "main error")
 				assert.Contains(t, got, "key")
 			} else {
-				// Should be plain bullet format.
-				assert.Equal(t, tc.wantBullet, got)
+				assert.Equal(t, tc.want, got)
 			}
 		})
 	}
+}
+
+func TestSourceError_Render_ListsUnresolvedNested(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\n")
+	err := source.WrapError(niceyaml.NewError(
+		"2 schema violations",
+		niceyaml.WithErrors(
+			niceyaml.NewError("bad x", niceyaml.WithPath(paths.Root().Child("x").Value())),
+			niceyaml.NewError("bad y", niceyaml.WithPath(paths.Root().Child("y").Value())),
+		),
+	))
+
+	// No location resolves, so the message is the headline alone and the
+	// %+v form lists each nested error with its unresolved location.
+	assert.Equal(t, "2 schema violations", err.Error())
+	assert.Equal(t, "2 schema violations\n\nat $.x: bad x\nat $.y: bad y", render(err))
+}
+
+func TestError_NilInnerError(t *testing.T) {
+	t.Parallel()
+
+	err := niceyaml.NewErrorFrom(niceyaml.NewErrorFrom(nil))
+	assert.Empty(t, err.Error())
+
+	wrapped := niceyaml.NewSourceFromString("a: 1\n").WrapError(err)
+	assert.Empty(t, wrapped.Error())
+	assert.Empty(t, render(wrapped))
+}
+
+func TestError_NestedErrorsKeepInnerPosition(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
+	inner := niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a").Value()))
+	nested := niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b").Value()))
+
+	// Nested errors on the wrapper add annotations, and the wrapper still
+	// takes its position from the Error it wraps.
+	wrapped := source.WrapError(niceyaml.NewErrorFrom(inner, niceyaml.WithErrors(nested)))
+	assert.Equal(t, "[1:4] bad a", wrapped.Error())
+
+	var bound *niceyaml.SourceError
+
+	require.ErrorAs(t, wrapped, &bound)
+
+	rng, err := bound.Location()
+	require.NoError(t, err)
+	assert.Equal(t, 0, rng.Start.Line)
+	assert.Equal(t, 3, rng.Start.Col)
+
+	got := trimLines(render(wrapped))
+	assert.Contains(t, got, "<genericError>1</genericError>")
+	assert.Contains(t, got, "^ bad b")
+}
+
+func TestError_OutermostDocumentIndexResolves(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("x: 1\n---\nx: 2\n")
+	inner := niceyaml.NewError("bad x",
+		niceyaml.WithPath(paths.Root().Child("x").Value()),
+		niceyaml.WithDocumentIndex(0),
+	)
+	outer := niceyaml.NewErrorFrom(inner, niceyaml.WithDocumentIndex(1))
+
+	// The outermost index is the one reported, so it is also the one the
+	// path resolves in.
+	index, ok := outer.DocumentIndex()
+	require.True(t, ok)
+	assert.Equal(t, 1, index)
+
+	wrapped := source.WrapError(outer)
+	assert.Equal(t, "[3:4] bad x", wrapped.Error())
+
+	var bound *niceyaml.SourceError
+
+	require.ErrorAs(t, wrapped, &bound)
+
+	rng, err := bound.Location()
+	require.NoError(t, err)
+	assert.Equal(t, 2, rng.Start.Line)
 }
 
 func TestError_calculateNestedLineRange(t *testing.T) {
@@ -2044,7 +2097,7 @@ func TestError_DocumentIndexAboveLocation(t *testing.T) {
 	assert.NotContains(t, detail, "<genericError>first</genericError>")
 }
 
-func TestError_FormatDropsNestedBullets(t *testing.T) {
+func TestError_NestedErrorsRenderAsAnnotations(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
@@ -2053,21 +2106,21 @@ func TestError_FormatDropsNestedBullets(t *testing.T) {
 		niceyaml.WithGutter(niceyaml.NoGutter),
 		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 	)
+	badA := niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a").Value()))
+	badB := niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b").Value()))
 	inner := niceyaml.NewError(
 		"validation failed at 2 locations",
-		niceyaml.WithErrors(
-			niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a").Value())),
-			niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b").Value())),
-		),
+		niceyaml.WithErrors(badA, badB),
 	)
 
 	wrapped := source.WrapError(fmt.Errorf("document 0: %w", inner))
 
-	// Error keeps the bullets, since nothing else carries the nested messages.
-	assert.Contains(t, wrapped.Error(), "\n  • at $.a: bad a")
+	// The message is the headline alone. The nested errors are reachable
+	// through Unwrap and appear in the %+v form as annotations.
+	assert.Equal(t, "document 0: validation failed at 2 locations", wrapped.Error())
+	require.ErrorIs(t, wrapped, badA)
+	require.ErrorIs(t, wrapped, badB)
 
-	// The %+v form renders them as annotations instead, so the bullets would
-	// only repeat what the detail already shows.
 	var bound *niceyaml.SourceError
 
 	require.ErrorAs(t, wrapped, &bound)
@@ -2075,7 +2128,7 @@ func TestError_FormatDropsNestedBullets(t *testing.T) {
 	got := trimLines(bound.Render(niceyaml.WithPrinter(plain)))
 
 	assert.Equal(t, "document 0: validation failed at 2 locations", strings.SplitN(got, "\n", 2)[0])
-	assert.NotContains(t, got, "•")
+	assert.NotContains(t, got, "at $.a")
 	assert.Contains(t, got, "^ bad a")
 	assert.Contains(t, got, "^ bad b")
 }
@@ -2094,39 +2147,15 @@ func TestError_NestedMessageSpansLines(t *testing.T) {
 		),
 	))
 
-	// The bullet carries the whole nested message, continuation line included.
-	assert.Contains(t, err.Error(), "\n  • [1:4] bad a\n  see docs for details")
+	// The nested message stays out of the headline whole, continuation line
+	// included, and appears only in the annotation.
+	assert.Equal(t, "validation failed", err.Error())
 
-	// The %+v headline drops the bullet whole, rather than leaving the lines
-	// below its marker behind.
 	got := trimLines(render(err))
-	headline, _, _ := strings.Cut(got, "\n\n")
+	headline, detail, _ := strings.Cut(got, "\n\n")
 
 	assert.Equal(t, "validation failed", headline)
-	assert.NotContains(t, headline, "see docs for details")
-}
-
-func TestError_MessageKeepsItsOwnBulletMarker(t *testing.T) {
-	t.Parallel()
-
-	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
-	inner := niceyaml.NewError(
-		"validation failed\n  • see the schema docs",
-		niceyaml.WithErrors(
-			niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a").Value())),
-		),
-	)
-
-	err := source.WrapError(fmt.Errorf("document 0: %w", inner))
-
-	// The %+v headline drops only the bullets Error appended, so a marker the
-	// message carries on its own survives.
-	got := trimLines(render(err))
-	headline, _, _ := strings.Cut(got, "\n\n")
-
-	assert.Equal(t, "document 0: validation failed\n  • see the schema docs", headline)
-	assert.Contains(t, got, "^ bad a")
-	assert.NotContains(t, got, "at $.a: bad a")
+	assert.Contains(t, detail, "see docs for details")
 }
 
 func TestError_ResolvesThroughErrorWrappers(t *testing.T) {
@@ -2284,29 +2313,34 @@ func TestSourceError_Detail_Errors(t *testing.T) {
 	source := xmlSource("name: test\nvalue: 123\n")
 
 	tcs := map[string]struct {
-		err *niceyaml.Error
-		is  error
+		err        *niceyaml.Error
+		is         error
+		wantRender string
 	}{
 		"no location": {
-			err: niceyaml.NewError("bad"),
-			is:  niceyaml.ErrNoLocation,
+			err:        niceyaml.NewError("bad"),
+			is:         niceyaml.ErrNoLocation,
+			wantRender: "bad",
 		},
 		"path that does not resolve": {
-			err: niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("missing").Value())),
-			is:  paths.ErrNotFound,
+			err:        niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("missing").Value())),
+			is:         paths.ErrNotFound,
+			wantRender: "at $.missing: bad",
 		},
 		"range past the last line": {
 			err: niceyaml.NewError("bad",
 				niceyaml.WithErrorRange(position.NewRange(position.New(9, 0), position.New(9, 3))),
 			),
-			is: niceyaml.ErrOutOfRange,
+			is:         niceyaml.ErrOutOfRange,
+			wantRender: "[10:1] bad",
 		},
 		"every nested error unresolved": {
 			err: niceyaml.NewError("bad", niceyaml.WithErrors(
 				niceyaml.NewError("first", niceyaml.WithPath(paths.Root().Child("missing").Value())),
 				niceyaml.NewError("second", niceyaml.WithErrorToken(&token.Token{})),
 			)),
-			is: niceyaml.ErrTokenNotFound,
+			is:         niceyaml.ErrTokenNotFound,
+			wantRender: "bad\n\nat $.missing: first\nsecond",
 		},
 	}
 
@@ -2322,8 +2356,9 @@ func TestSourceError_Detail_Errors(t *testing.T) {
 			require.ErrorIs(t, err, tc.is)
 			assert.Empty(t, got)
 
-			// The %+v verb falls back to the plain message.
-			assert.Equal(t, bound.Error(), render(bound))
+			// The %+v verb has no excerpt to show, so it prints the message
+			// and any nested errors the excerpt would have annotated.
+			assert.Equal(t, tc.wantRender, render(bound))
 		})
 	}
 
