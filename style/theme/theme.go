@@ -1,6 +1,8 @@
 package theme
 
 import (
+	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -19,21 +21,45 @@ const (
 	Dark
 )
 
-// Theme is a registry entry: a named color theme with its mode and style
-// generator.
+// Theme is a named color theme with its mode and a lazily built
+// [style.Styles].
 //
-// Look one up by name with [Get], enumerate them with [All], or use the
-// [Styles] and [List] shortcuts when only the styles or the names are needed.
+// Look one up by name with [Get] or enumerate them with [All]. Create custom
+// themes with [New] and add them to the registry with [Register].
 type Theme struct {
-	// Styles returns the [style.Styles] for this theme.
-	Styles func() style.Styles
-	// Name is the kebab-case identifier for the theme (e.g., "monokai", "dracula").
+	// Memoized builder for the [style.Styles]: the first call builds them
+	// and copies of the Theme share the result. Nil for the zero value.
+	styles func() style.Styles
+	// Name is the kebab-case identifier for the theme (e.g., "monokai",
+	// "dracula").
 	Name string
-	// Mode indicates whether the theme is designed for light or dark backgrounds.
+	// Mode indicates whether the theme is designed for light or dark
+	// backgrounds.
 	Mode Mode
 }
 
+// New creates a new [Theme] whose [Theme.Styles] calls build at most once
+// and returns the same value afterwards.
+func New(name string, mode Mode, build func() style.Styles) Theme {
+	return Theme{styles: sync.OnceValue(build), Name: name, Mode: mode}
+}
+
+// Styles returns the [style.Styles] for the theme. The first call builds it
+// and every later call, on this value or a copy of it, returns the same
+// result. The zero Theme returns a zero [style.Styles].
+func (t Theme) Styles() style.Styles {
+	if t.styles == nil {
+		return style.Styles{}
+	}
+
+	return t.styles()
+}
+
 var (
+	// ErrRegistered is returned by [Register] when a theme with the same name
+	// already exists.
+	ErrRegistered = errors.New("theme already registered")
+
 	customMu     sync.RWMutex
 	customThemes = map[string]Theme{}
 	// Names in registration order, so All is deterministic.
@@ -53,10 +79,10 @@ var (
 	themes = func() []Theme {
 		result := make([]Theme, 0, len(catalog)+1)
 		for name, p := range catalog {
-			result = append(result, Theme{Styles: p.styles, Name: name, Mode: p.Mode})
+			result = append(result, New(name, p.Mode, p.styles))
 		}
 
-		result = append(result, Theme{Styles: Charm, Name: "charm", Mode: Dark})
+		result = append(result, New("charm", Dark, Charm))
 
 		slices.SortFunc(result, func(a, b Theme) int {
 			return strings.Compare(a.Name, b.Name)
@@ -66,41 +92,36 @@ var (
 	}()
 )
 
-// Register registers a custom theme by name.
-//
-// Registered themes become available through [Styles] and [List].
-// If a theme with the same name already exists (built-in or custom),
-// it is replaced.
+// Register adds a custom theme to the registry, where [Get] and [All] find
+// it. It returns [ErrRegistered] when a built-in or an earlier custom theme
+// already has the same name and leaves the registry unchanged in that case.
 //
 // Register is safe for concurrent use.
-func Register(name string, fn func() style.Styles, mode Mode) {
+func Register(t Theme) error {
+	if _, builtin := builtinIndex[t.Name]; builtin {
+		return fmt.Errorf("%w: %q", ErrRegistered, t.Name)
+	}
+
 	customMu.Lock()
 	defer customMu.Unlock()
 
-	if _, exists := customThemes[name]; !exists {
-		customOrder = append(customOrder, name)
+	if _, exists := customThemes[t.Name]; exists {
+		return fmt.Errorf("%w: %q", ErrRegistered, t.Name)
 	}
 
-	customThemes[name] = Theme{Styles: fn, Name: name, Mode: mode}
+	customThemes[t.Name] = t
+	customOrder = append(customOrder, t.Name)
+
+	return nil
 }
 
 // Get returns the [Theme] registered under name. The boolean reports whether
 // one was found.
-//
-// Custom themes registered with [Register] take precedence over built-in
-// themes with the same name.
 func Get(name string) (Theme, bool) {
-	if t, ok := lookupCustom(name); ok {
+	if t, ok := builtinIndex[name]; ok {
 		return t, true
 	}
 
-	t, ok := builtinIndex[name]
-
-	return t, ok
-}
-
-// lookupCustom returns the custom theme registered under name.
-func lookupCustom(name string) (Theme, bool) {
 	customMu.RLock()
 	defer customMu.RUnlock()
 
@@ -110,61 +131,18 @@ func lookupCustom(name string) (Theme, bool) {
 }
 
 // All returns every registered [Theme], built-in ones first in alphabetical
-// order followed by custom ones in registration order. A custom theme that
-// shares a built-in name replaces it in the result.
+// order followed by custom ones in registration order. Filter by
+// [Theme.Mode] to list the themes for one background.
 func All() []Theme {
 	customMu.RLock()
 	defer customMu.RUnlock()
 
-	result := make([]Theme, 0, len(themes)+len(customThemes))
-
-	for _, t := range themes {
-		if custom, ok := customThemes[t.Name]; ok {
-			result = append(result, custom)
-
-			continue
-		}
-
-		result = append(result, t)
-	}
+	result := make([]Theme, 0, len(themes)+len(customOrder))
+	result = append(result, themes...)
 
 	for _, name := range customOrder {
-		if _, builtin := builtinIndex[name]; builtin {
-			continue
-		}
-
 		result = append(result, customThemes[name])
 	}
 
 	return result
-}
-
-// List returns the names of all themes matching the given [Mode], in
-// the order of [All].
-//
-// Names are kebab-case identifiers (e.g., "monokai", "catppuccin-mocha")
-// suitable for passing to [Styles] or [Get].
-func List(m Mode) []string {
-	var names []string
-
-	for _, t := range All() {
-		if t.Mode == m {
-			names = append(names, t.Name)
-		}
-	}
-
-	return names
-}
-
-// Styles returns the [style.Styles] for the named theme.
-// The boolean reports whether the theme was found.
-//
-// Styles is shorthand for [Get] followed by calling [Theme.Styles].
-func Styles(name string) (style.Styles, bool) {
-	t, ok := Get(name)
-	if !ok {
-		return style.Styles{}, false
-	}
-
-	return t.Styles(), true
 }

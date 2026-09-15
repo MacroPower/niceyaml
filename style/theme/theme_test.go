@@ -1,8 +1,10 @@
 package theme_test
 
 import (
+	"errors"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"charm.land/lipgloss/v2"
@@ -17,74 +19,85 @@ func TestRegister(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
-		setup func()
 		check func(t *testing.T)
 	}{
-		"retrieve registered theme via Styles": {
-			setup: func() {
-				theme.Register("test-custom", func() style.Styles {
-					return marked(style.Comment)
-				}, theme.Dark)
-			},
+		"registered theme is returned by Get": {
 			check: func(t *testing.T) {
 				t.Helper()
 
-				got, ok := theme.Styles("test-custom")
+				err := theme.Register(theme.New("test-custom", theme.Dark, marked(style.Comment)))
+				require.NoError(t, err)
+
+				got, ok := theme.Get("test-custom")
 				require.True(t, ok)
-				assert.True(t, isMarked(got, style.Comment))
+				assert.Equal(t, "test-custom", got.Name)
+				assert.Equal(t, theme.Dark, got.Mode)
+				assert.True(t, isMarked(got.Styles(), style.Comment))
 			},
 		},
-		"registered theme appears in List": {
-			setup: func() {
-				theme.Register("test-listed", func() style.Styles {
-					return style.NewStyles(lipgloss.NewStyle())
-				}, theme.Dark)
-			},
+		"registered theme appears in All with its mode": {
 			check: func(t *testing.T) {
 				t.Helper()
 
-				names := theme.List(theme.Dark)
-				assert.True(t, slices.Contains(names, "test-listed"))
+				err := theme.Register(theme.New("test-listed", theme.Light, empty))
+				require.NoError(t, err)
+
+				var got theme.Theme
+
+				for _, th := range theme.All() {
+					if th.Name == "test-listed" {
+						got = th
+					}
+				}
+
+				assert.Equal(t, "test-listed", got.Name)
+				assert.Equal(t, theme.Light, got.Mode)
 			},
 		},
-		"replace existing custom theme": {
-			setup: func() {
-				theme.Register("test-replace", func() style.Styles {
-					return marked(style.Comment)
-				}, theme.Dark)
-				theme.Register("test-replace", func() style.Styles {
-					return marked(style.NameTag)
-				}, theme.Dark)
-			},
+		"second registration of a custom name is rejected": {
 			check: func(t *testing.T) {
 				t.Helper()
 
-				got, ok := theme.Styles("test-replace")
+				err := theme.Register(theme.New("test-replace", theme.Dark, marked(style.Comment)))
+				require.NoError(t, err)
+
+				err = theme.Register(theme.New("test-replace", theme.Light, marked(style.NameTag)))
+				require.ErrorIs(t, err, theme.ErrRegistered)
+
+				// The first registration stands.
+				got, ok := theme.Get("test-replace")
 				require.True(t, ok)
-				assert.True(t, isMarked(got, style.NameTag))
-				assert.False(t, isMarked(got, style.Comment))
+				assert.Equal(t, theme.Dark, got.Mode)
+				assert.True(t, isMarked(got.Styles(), style.Comment))
+				assert.False(t, isMarked(got.Styles(), style.NameTag))
 			},
 		},
-		"dark theme not in light list": {
-			setup: func() {
-				theme.Register("test-dark-only", func() style.Styles {
-					return style.NewStyles(lipgloss.NewStyle())
-				}, theme.Dark)
-			},
+		"built-in name is rejected": {
 			check: func(t *testing.T) {
 				t.Helper()
 
-				dark := theme.List(theme.Dark)
-				light := theme.List(theme.Light)
+				err := theme.Register(theme.New("vulcan", theme.Dark, marked(style.NameTag)))
+				require.ErrorIs(t, err, theme.ErrRegistered)
 
-				assert.True(t, slices.Contains(dark, "test-dark-only"))
-				assert.False(t, slices.Contains(light, "test-dark-only"))
+				got, ok := theme.Get("vulcan")
+				require.True(t, ok)
+				assert.False(t, isMarked(got.Styles(), style.NameTag))
+
+				// No second entry is added.
+				count := 0
+
+				for _, th := range theme.All() {
+					if th.Name == "vulcan" {
+						count++
+					}
+				}
+
+				assert.Equal(t, 1, count)
 			},
 		},
 	}
 
 	for name, tt := range tests {
-		tt.setup()
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			tt.check(t)
@@ -101,11 +114,17 @@ func TestRegisterConcurrent(t *testing.T) {
 		wg.Go(func() {
 			name := "concurrent-" + string(rune('a'+i%26))
 
-			theme.Register(name, func() style.Styles {
-				return style.NewStyles(lipgloss.NewStyle())
-			}, theme.Dark)
-			theme.Styles(name)
-			theme.List(theme.Dark)
+			// Names repeat across goroutines, so a rejection is the only
+			// acceptable error.
+			err := theme.Register(theme.New(name, theme.Dark, empty))
+			if err != nil && !errors.Is(err, theme.ErrRegistered) {
+				t.Errorf("Register(%q) = %v", name, err)
+			}
+
+			_, ok := theme.Get(name)
+			assert.True(t, ok)
+
+			theme.All()
 		})
 	}
 
@@ -122,7 +141,7 @@ func TestGet(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, "dracula", got.Name)
 		assert.Equal(t, theme.Dark, got.Mode)
-		assert.NotNil(t, got.Styles)
+		assert.NotNil(t, got.Styles().Style(style.Text))
 	})
 
 	t.Run("unknown theme", func(t *testing.T) {
@@ -131,26 +150,13 @@ func TestGet(t *testing.T) {
 		_, ok := theme.Get("no-such-theme")
 		assert.False(t, ok)
 	})
-
-	t.Run("custom theme takes precedence", func(t *testing.T) {
-		t.Parallel()
-
-		theme.Register("test-get-override", func() style.Styles {
-			return marked(style.Comment)
-		}, theme.Light)
-
-		got, ok := theme.Get("test-get-override")
-		require.True(t, ok)
-		assert.Equal(t, theme.Light, got.Mode)
-	})
 }
 
 func TestAll(t *testing.T) {
 	t.Parallel()
 
-	theme.Register("test-all-custom", func() style.Styles {
-		return style.NewStyles(lipgloss.NewStyle())
-	}, theme.Dark)
+	err := theme.Register(theme.New("test-all-custom", theme.Dark, empty))
+	require.NoError(t, err)
 
 	all := theme.All()
 
@@ -161,63 +167,67 @@ func TestAll(t *testing.T) {
 
 	// Built-in themes lead and stay sorted; custom themes follow.
 	assert.Equal(t, "abap", names[0])
+	assert.Contains(t, names, "charm")
 	assert.Contains(t, names, "test-all-custom")
 	assert.Greater(t, slices.Index(names, "test-all-custom"), slices.Index(names, "xcode-dark"))
+
+	builtin := names[:slices.Index(names, "xcode-dark")+1]
+	assert.True(t, slices.IsSorted(builtin))
 
 	// Every entry is complete and builds.
 	for _, th := range all {
 		assert.NotEmpty(t, th.Name)
-		require.NotNil(t, th.Styles, th.Name)
 		assert.NotNil(t, th.Styles().Style(style.Text), th.Name)
-	}
-
-	// List filters All by mode.
-	for _, name := range theme.List(theme.Dark) {
-		th, ok := theme.Get(name)
-		require.True(t, ok, name)
-		assert.Equal(t, theme.Dark, th.Mode, name)
 	}
 }
 
-func TestAll_ReplacesBuiltIn(t *testing.T) {
+func TestThemeStyles(t *testing.T) {
 	t.Parallel()
 
-	// Keep the built-in mode so the parallel mode assertions in TestAll hold.
-	theme.Register("vulcan", func() style.Styles {
-		return marked(style.NameTag)
-	}, theme.Dark)
+	t.Run("builds once and shares across copies", func(t *testing.T) {
+		t.Parallel()
 
-	all := theme.All()
+		var calls atomic.Int32
 
-	names := make([]string, 0, len(all))
-	count := 0
+		th := theme.New("test-memo", theme.Dark, func() style.Styles {
+			calls.Add(1)
 
-	for _, th := range all {
-		names = append(names, th.Name)
+			return marked(style.Comment)()
+		})
 
-		if th.Name == "vulcan" {
-			count++
-		}
-	}
+		first := th.Styles()
 
-	// The custom theme takes the built-in's place instead of adding a second
-	// entry under the same name.
-	assert.Equal(t, 1, count)
-	assert.Less(t, slices.Index(names, "vulcan"), slices.Index(names, "xcode-dark"))
+		duplicate := th
+		second := duplicate.Styles()
 
-	styles, ok := theme.Styles("vulcan")
-	require.True(t, ok)
-	assert.True(t, isMarked(styles, style.NameTag))
-	assert.False(t, isMarked(styles, style.Comment))
+		assert.Equal(t, int32(1), calls.Load())
+		assert.True(t, isMarked(first, style.Comment))
+		assert.Same(t, first.Style(style.Comment), second.Style(style.Comment))
+	})
+
+	t.Run("zero value", func(t *testing.T) {
+		t.Parallel()
+
+		var th theme.Theme
+
+		assert.NotNil(t, th.Styles().Style(style.Text))
+	})
 }
 
 // marker is the foreground that marked gives one category, so a test can tell
 // which dummy theme a lookup returned.
 var marker = lipgloss.Color("#123456")
 
-// marked returns a theme whose only set category is s.
-func marked(s style.Style) style.Styles {
-	return style.NewStyles(lipgloss.NewStyle(), style.Set(s, lipgloss.NewStyle().Foreground(marker)))
+// empty builds a theme with no categories set.
+func empty() style.Styles {
+	return style.NewStyles(lipgloss.NewStyle())
+}
+
+// marked returns a builder for a theme whose only set category is s.
+func marked(s style.Style) func() style.Styles {
+	return func() style.Styles {
+		return style.NewStyles(lipgloss.NewStyle(), style.Set(s, lipgloss.NewStyle().Foreground(marker)))
+	}
 }
 
 // isMarked reports whether s carries the marker in styles.

@@ -9,34 +9,38 @@
 //
 // # Using Themes
 //
-// Themes are looked up by kebab-case name. [Styles] returns a ready-to-use
-// [style.Styles]:
+// [Get] looks a [Theme] up by its kebab-case name, and [Theme.Styles] returns
+// a ready-to-use [style.Styles]. A theme builds its styles on the first call
+// and returns the same value afterwards:
 //
-//	if styles, ok := theme.Styles("dracula"); ok {
-//		printer := niceyaml.NewPrinter(niceyaml.WithStyles(styles))
+//	if t, ok := theme.Get("dracula"); ok {
+//		printer := niceyaml.NewPrinter(niceyaml.WithStyles(t.Styles()))
 //	}
 //
-// Filter available themes by [Mode] with [List]:
-//
-//	darkThemes := theme.List(theme.Dark)   // ["monokai", "dracula", ...]
-//	lightThemes := theme.List(theme.Light) // ["solarized-light", "catppuccin-latte", ...]
-//
-// [Get] and [All] return the [Theme] entries themselves, with the name and
-// mode alongside the styles, for building a picker:
+// [All] returns every theme, built-in ones first in alphabetical order, with
+// the name and [Mode] alongside the styles for building a picker. Filter by
+// [Theme.Mode] to list the themes for one background:
 //
 //	for _, t := range theme.All() {
-//		fmt.Println(t.Name, t.Mode)
+//		if t.Mode == theme.Dark {
+//			fmt.Println(t.Name)
+//		}
 //	}
 //
 // # Custom Themes
 //
-// Applications can register custom themes at runtime with [Register]:
+// Applications create custom themes with [New] and add them to the registry
+// with [Register]. Register returns [ErrRegistered] when a theme with the
+// same name already exists, so a custom theme cannot replace a built-in one:
 //
-//	theme.Register("my-theme", func() style.Styles {
+//	custom := theme.New("my-theme", theme.Dark, func() style.Styles {
 //		return style.NewStyles(lipgloss.NewStyle() /* , style.Set(...) */)
-//	}, theme.Dark)
+//	})
+//	if err := theme.Register(custom); err != nil {
+//		// The name is taken.
+//	}
 //
-// Registered themes become available through [Styles] and [List] alongside
+// Registered themes become available through [Get] and [All] alongside
 // built-in themes.
 //
 // # Theme Structure

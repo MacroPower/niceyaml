@@ -10,7 +10,7 @@ import (
 	"go.jacobcolvin.com/x/cobras/profile"
 
 	"go.jacobcolvin.com/niceyaml/fangs"
-	"go.jacobcolvin.com/niceyaml/style/theme"
+	"go.jacobcolvin.com/niceyaml/style"
 )
 
 func main() {
@@ -32,11 +32,9 @@ func main() {
 	rootCmd.AddCommand(viewCmd())
 	rootCmd.AddCommand(validateCmd())
 
-	styles, _ := theme.Styles("charm")
-
 	err := fang.Execute(context.Background(), rootCmd,
 		fang.WithErrorHandler(fangs.ErrorHandler),
-		fang.WithColorSchemeFunc(fangs.ColorSchemeFunc(styles)),
+		fang.WithColorSchemeFunc(fangs.ColorSchemeFunc(style.Default())),
 	)
 
 	stopErr := p.Stop()

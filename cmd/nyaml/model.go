@@ -34,25 +34,29 @@ type model struct {
 	currentTheme  string
 	previousTheme string
 	themeList     []string
-	viewport      yamlviewport.Model
-	width         int
-	height        int
-	themeIndex    int
-	lineNumbers   bool
-	searching     bool
-	themePicking  bool
+	// Styles of the current theme, built once per theme switch and shared by
+	// the printer, the status bar, and the theme picker.
+	styles       style.Styles
+	viewport     yamlviewport.Model
+	width        int
+	height       int
+	themeIndex   int
+	lineNumbers  bool
+	searching    bool
+	themePicking bool
 }
 
 func newModel(opts *modelOptions) model {
 	// Get sorted theme list.
-	themeList := theme.List(theme.Dark)
+	themeList := darkThemeNames()
 	slices.Sort(themeList)
 
 	// Default theme.
 	defaultTheme := "charm"
+	styles := themeStyles(defaultTheme)
 
 	// Create printer with options.
-	printerOpts := buildPrinterOpts(opts.lineNumbers, defaultTheme)
+	printerOpts := buildPrinterOpts(opts.lineNumbers, styles)
 	printer := niceyaml.NewPrinter(printerOpts...)
 
 	// Create viewport.
@@ -68,6 +72,7 @@ func newModel(opts *modelOptions) model {
 		themeList:    themeList,
 		themeIndex:   themeIndex,
 		currentTheme: defaultTheme,
+		styles:       styles,
 		lineNumbers:  opts.lineNumbers,
 	}
 
@@ -262,8 +267,6 @@ type titleSegment struct {
 }
 
 func (m *model) titleLine() string {
-	styles, _ := theme.Styles(m.currentTheme)
-
 	// Diff stats for OK/Error segments.
 	added, removed := m.viewport.DiffStats()
 
@@ -345,18 +348,18 @@ func (m *model) titleLine() string {
 	var sb strings.Builder
 
 	for i, seg := range segments {
-		s := styles.Style(seg.styleKey)
+		s := m.styles.Style(seg.styleKey)
 		sb.WriteString(s.Inline(true).Render(seg.text))
 
 		if i < len(segments)-1 {
-			next := styles.Style(segments[i+1].styleKey)
+			next := m.styles.Style(segments[i+1].styleKey)
 			sb.WriteString(powerlineSep(s, next))
 		}
 	}
 
 	// Trailing separator: transition from last Title bg to Text bg.
-	lastStyle := styles.Style(segments[len(segments)-1].styleKey)
-	textStyle := styles.Style(style.Text)
+	lastStyle := m.styles.Style(segments[len(segments)-1].styleKey)
+	textStyle := m.styles.Style(style.Text)
 	sb.WriteString(powerlineSep(lastStyle, textStyle))
 
 	return sb.String()
@@ -385,11 +388,10 @@ func (m *model) viewModeLabel() string {
 }
 
 func (m *model) textLine() string {
-	styles, _ := theme.Styles(m.currentTheme)
-	textStyle := styles.Style(style.Text).Inline(true)
+	textStyle := m.styles.Style(style.Text).Inline(true)
 
 	if m.searching {
-		searchContent := styles.Style(style.TextAccentDim).Inline(true).
+		searchContent := m.styles.Style(style.TextAccentDim).Inline(true).
 			Render("/" + m.searchInput)
 
 		remaining := max(0, m.width-lipgloss.Width(searchContent))
@@ -434,7 +436,7 @@ func (m *model) textLine() string {
 		{fmt.Sprintf("col %d", m.viewport.XOffset()), style.TextSubtle},
 	}
 
-	sep := styles.Style(style.TextSubtleDim).Inline(true).Render(" · ")
+	sep := m.styles.Style(style.TextSubtleDim).Inline(true).Render(" · ")
 
 	var sb strings.Builder
 
@@ -443,7 +445,7 @@ func (m *model) textLine() string {
 			sb.WriteString(sep)
 		}
 
-		sb.WriteString(styles.Style(sw.styleKey).Inline(true).Render(" " + sw.label + " "))
+		sb.WriteString(m.styles.Style(sw.styleKey).Inline(true).Render(" " + sw.label + " "))
 	}
 
 	result := sb.String()
@@ -455,23 +457,43 @@ func (m *model) textLine() string {
 	return result + textStyle.Render(strings.Repeat(" ", remaining))
 }
 
-func buildPrinterOpts(lineNumbers bool, themeName string) []niceyaml.PrinterOption {
-	var opts []niceyaml.PrinterOption
+func buildPrinterOpts(lineNumbers bool, styles style.Styles) []niceyaml.PrinterOption {
+	opts := []niceyaml.PrinterOption{niceyaml.WithStyles(styles)}
 
 	if !lineNumbers {
 		opts = append(opts, niceyaml.WithGutter(niceyaml.DiffGutter))
 	}
 
-	if styles, ok := theme.Styles(themeName); ok {
-		opts = append(opts, niceyaml.WithStyles(styles))
+	return opts
+}
+
+// darkThemeNames returns the names of every registered dark theme.
+func darkThemeNames() []string {
+	var names []string
+
+	for _, t := range theme.All() {
+		if t.Mode == theme.Dark {
+			names = append(names, t.Name)
+		}
 	}
 
-	return opts
+	return names
+}
+
+// themeStyles returns the styles of the named theme, or the default styles
+// when no theme has that name.
+func themeStyles(name string) style.Styles {
+	if t, ok := theme.Get(name); ok {
+		return t.Styles()
+	}
+
+	return style.Default()
 }
 
 func (m *model) applyTheme(name string) {
 	m.currentTheme = name
-	printer := niceyaml.NewPrinter(buildPrinterOpts(m.lineNumbers, name)...)
+	m.styles = themeStyles(name)
+	printer := niceyaml.NewPrinter(buildPrinterOpts(m.lineNumbers, m.styles)...)
 	m.viewport.SetPrinter(printer)
 }
 
@@ -492,11 +514,10 @@ func (m *model) renderThemeOverlay() string {
 	maxScroll := max(0, len(m.themeList)-visibleItems)
 	scrollOffset := min(maxScroll, max(0, m.themeIndex-visibleItems/2))
 
-	// Get current theme styles for the overlay appearance.
-	styles, _ := theme.Styles(m.currentTheme)
-	baseStyle := styles.Style(style.Text)
-	titleStyle := styles.Style(style.GenericHeading)
-	dimStyle := styles.Style(style.TextSubtleDim)
+	// Use the current theme styles for the overlay appearance.
+	baseStyle := m.styles.Style(style.Text)
+	titleStyle := m.styles.Style(style.GenericHeading)
+	dimStyle := m.styles.Style(style.TextSubtleDim)
 
 	// Build theme list content.
 	var items []string

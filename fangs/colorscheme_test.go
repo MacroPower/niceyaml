@@ -13,8 +13,10 @@ import (
 func TestColorScheme(t *testing.T) {
 	t.Parallel()
 
-	styles, ok := theme.Styles("charm")
+	th, ok := theme.Get("charm")
 	require.True(t, ok, "charm theme should exist")
+
+	styles := th.Styles()
 
 	cs := fangs.ColorScheme(styles)
 
@@ -39,8 +41,10 @@ func TestColorScheme(t *testing.T) {
 func TestColorSchemeFunc(t *testing.T) {
 	t.Parallel()
 
-	styles, ok := theme.Styles("charm")
+	th, ok := theme.Get("charm")
 	require.True(t, ok, "charm theme should exist")
+
+	styles := th.Styles()
 
 	csFunc := fangs.ColorSchemeFunc(styles)
 
