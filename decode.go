@@ -161,13 +161,12 @@ func (d *Decoder) Documents() iter.Seq2[int, *DocumentDecoder] {
 
 	return func(yield func(int, *DocumentDecoder) bool) {
 		for i, doc := range d.file.Docs {
-			dd := &DocumentDecoder{
-				doc:        doc,
-				index:      i,
-				tokens:     d.docTokens[i],
-				filePath:   filePath,
-				decodeOpts: d.source.decodeOpts,
-			}
+			dd := NewDocumentDecoder(doc, DocumentContext{
+				Index:             i,
+				FilePath:          filePath,
+				Tokens:            d.docTokens[i],
+				YAMLDecodeOptions: d.source.decodeOpts,
+			})
 
 			if !yield(i, dd) {
 				return
@@ -212,14 +211,39 @@ type DocumentDecoder struct {
 	index      int
 }
 
-// NewDocumentDecoder creates a new [*DocumentDecoder] for the given
-// [*ast.DocumentNode].
-//
-// For full context (index, tokens, file path), use [Decoder.Documents] instead,
-// which propagates context from the [Decoder].
-func NewDocumentDecoder(doc *ast.DocumentNode) *DocumentDecoder {
+// DocumentContext is what a [DocumentDecoder] knows about its document
+// beyond the AST: where it sits in the file, the tokens it came from, and
+// how to decode it. [Decoder.Documents] fills it in from the
+// [Source]; callers that build a [DocumentDecoder] by hand pass what they
+// have and leave the rest zero.
+type DocumentContext struct {
+	// FilePath is the path of the file the document came from. Schema
+	// matchers route on it.
+	FilePath string
+
+	// Tokens are the tokens the document came from, with positions
+	// relative to the document.
+	Tokens token.Tokens
+
+	// YAMLDecodeOptions reach the go-yaml decoder the way
+	// [WithYAMLDecodeOptions] sends them for a Source.
+	YAMLDecodeOptions []yaml.DecodeOption
+
+	// Index is the 0-indexed position of the document within the file.
+	// Errors from the decoder carry it as their document index.
+	Index int
+}
+
+// NewDocumentDecoder creates a new [*DocumentDecoder] for doc with the given
+// context. [Decoder.Documents] is the usual way to get one, since it fills
+// the context in from the [Source].
+func NewDocumentDecoder(doc *ast.DocumentNode, ctx DocumentContext) *DocumentDecoder {
 	return &DocumentDecoder{
-		doc: doc,
+		doc:        doc,
+		index:      ctx.Index,
+		tokens:     ctx.Tokens,
+		filePath:   ctx.FilePath,
+		decodeOpts: ctx.YAMLDecodeOptions,
 	}
 }
 
@@ -228,25 +252,20 @@ func (dd *DocumentDecoder) Document() *ast.DocumentNode {
 	return dd.doc
 }
 
-// Index returns the 0-indexed position of this document within the file.
-//
-// Returns 0 if created with [NewDocumentDecoder] without context.
+// Index returns the 0-indexed position of this document within the file,
+// from [DocumentContext.Index].
 func (dd *DocumentDecoder) Index() int {
 	return dd.index
 }
 
-// Tokens returns the tokens for this document.
-//
-// Returns nil if created with [NewDocumentDecoder] without context or if the
-// [Decoder] was created without tokens.
+// Tokens returns the tokens for this document, from
+// [DocumentContext.Tokens]. Returns nil when none were given.
 func (dd *DocumentDecoder) Tokens() token.Tokens {
 	return dd.tokens
 }
 
-// FilePath returns the file path of the source file.
-//
-// Returns an empty string if created with [NewDocumentDecoder] without context
-// or if the [Decoder] was created without a file path.
+// FilePath returns the path of the file the document came from, from
+// [DocumentContext.FilePath]. Returns an empty string when none was given.
 func (dd *DocumentDecoder) FilePath() string {
 	return dd.filePath
 }

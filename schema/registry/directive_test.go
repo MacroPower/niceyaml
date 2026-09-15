@@ -314,5 +314,5 @@ func firstDocumentWithNilTokens(t *testing.T, input string) *niceyaml.DocumentDe
 	require.NoError(t, err)
 	require.NotEmpty(t, file.Docs)
 
-	return niceyaml.NewDocumentDecoder(file.Docs[0])
+	return niceyaml.NewDocumentDecoder(file.Docs[0], niceyaml.DocumentContext{})
 }

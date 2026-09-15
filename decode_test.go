@@ -429,7 +429,7 @@ func TestNewDocumentDecoder(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, file.Docs, 1)
 
-		dd := niceyaml.NewDocumentDecoder(file.Docs[0])
+		dd := niceyaml.NewDocumentDecoder(file.Docs[0], niceyaml.DocumentContext{})
 		require.NotNil(t, dd)
 
 		result, err := dd.Decode[map[string]string](t.Context())
@@ -1458,4 +1458,21 @@ func TestWithAllowDuplicateKeys(t *testing.T) {
 			assert.Equal(t, "second", result.Name)
 		}
 	})
+}
+
+func TestNewDocumentDecoder_Context(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("key: value")
+	file, err := source.File()
+	require.NoError(t, err)
+
+	dd := niceyaml.NewDocumentDecoder(file.Docs[0], niceyaml.DocumentContext{
+		Index:    3,
+		FilePath: "config.yaml",
+	})
+
+	assert.Equal(t, 3, dd.Index())
+	assert.Equal(t, "config.yaml", dd.FilePath())
+	assert.Nil(t, dd.Tokens())
 }
