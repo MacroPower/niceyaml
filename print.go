@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -103,8 +104,8 @@ type Printer struct {
 func NewPrinter(opts ...PrinterOption) *Printer {
 	p := &Printer{
 		styles:             style.Default(),
-		gutterFunc:         DefaultGutter(),
-		annotationFunc:     DefaultAnnotation(),
+		gutterFunc:         DefaultGutter,
+		annotationFunc:     DefaultAnnotation,
 		blender:            colors.NewBlender(),
 		annotationsEnabled: true,
 		wordWrap:           true,
@@ -167,11 +168,8 @@ type GutterContext struct {
 // GutterFunc returns the gutter content for a line based on [GutterContext].
 // The returned string is rendered as the leftmost content before the line content.
 //
-// Available gutters:
-//   - [DefaultGutter]
-//   - [DiffGutter]
-//   - [LineNumberGutter]
-//   - [NoGutter]
+// [DefaultGutter], [DiffGutter], [LineNumberGutter], and [NoGutter] are
+// ready-made gutters; pass one to [WithGutter].
 type GutterFunc func(GutterContext) string
 
 // AnnotationContext provides context for annotation rendering.
@@ -188,38 +186,41 @@ type AnnotationContext struct {
 // [AnnotationContext].
 type AnnotationFunc func(AnnotationContext) string
 
-// DefaultAnnotation creates an [AnnotationFunc] that renders annotations with
-// position-based prefixes: "^ " for [line.Below], none for [line.Above].
-func DefaultAnnotation() AnnotationFunc {
-	return func(ctx AnnotationContext) string {
-		if len(ctx.Annotations) == 0 {
-			return ""
-		}
-
-		padding := strings.Repeat(" ", max(0, ctx.Annotations.Col()))
-		combined := strings.Join(ctx.Annotations.Contents(), "; ")
-
-		// Add "^ " prefix for Below annotations.
-		if ctx.Placement == line.Below {
-			return padding + "^ " + combined
-		}
-
-		return padding + combined
+// DefaultAnnotation is the [AnnotationFunc] [NewPrinter] uses. It joins the
+// annotations with "; ", pads them to their column, and prefixes [line.Below]
+// annotations with "^ ".
+func DefaultAnnotation(ctx AnnotationContext) string {
+	if len(ctx.Annotations) == 0 {
+		return ""
 	}
+
+	padding := strings.Repeat(" ", max(0, ctx.Annotations.Col()))
+	combined := strings.Join(ctx.Annotations.Contents(), "; ")
+
+	// Add "^ " prefix for Below annotations.
+	if ctx.Placement == line.Below {
+		return padding + "^ " + combined
+	}
+
+	return padding + combined
 }
 
-// renderLineNumber renders the line number portion of a gutter.
+// renderLineNumber renders the line number portion of a gutter. The number
+// column is at least four wide and grows to fit the total line count, so
+// every row of a document lines up.
 func renderLineNumber(ctx GutterContext) string {
 	lineNumStyle := ctx.Styles.Style(style.Text).
 		Foreground(ctx.Styles.Style(style.Comment).GetForeground())
 
+	width := max(4, len(strconv.Itoa(ctx.TotalLines)))
+
 	switch {
 	case ctx.Flag == line.FlagAnnotation:
-		return lineNumStyle.Render("     ")
+		return lineNumStyle.Render(strings.Repeat(" ", width+1))
 	case ctx.Soft:
-		return lineNumStyle.Render("   - ")
+		return lineNumStyle.Render(strings.Repeat(" ", width-1) + "- ")
 	default:
-		return lineNumStyle.Render(fmt.Sprintf("%4d ", ctx.Number))
+		return lineNumStyle.Render(fmt.Sprintf("%*d ", width, ctx.Number))
 	}
 }
 
@@ -246,40 +247,27 @@ func renderDiffMarker(ctx GutterContext) string {
 	}
 }
 
-// DefaultGutter creates a [GutterFunc] that renders both line numbers and diff
-// markers.
-//
-// This is the default gutter used by [NewPrinter].
-func DefaultGutter() GutterFunc {
-	return func(ctx GutterContext) string {
-		return renderLineNumber(ctx) + renderDiffMarker(ctx)
-	}
+// DefaultGutter is the [GutterFunc] [NewPrinter] uses. It renders the line
+// number followed by the diff marker.
+func DefaultGutter(ctx GutterContext) string {
+	return renderLineNumber(ctx) + renderDiffMarker(ctx)
 }
 
-// DiffGutter creates a [GutterFunc] that renders diff-style markers only
-// (" ", "+", "-").
-//
-// No line numbers are rendered.
-//
-// Uses [style.GenericInserted] and [style.GenericDeleted] for styling.
-func DiffGutter() GutterFunc {
-	return renderDiffMarker
+// DiffGutter is a [GutterFunc] that renders diff markers only (" ", "+",
+// "-"), styled with [style.GenericInserted] and [style.GenericDeleted].
+func DiffGutter(ctx GutterContext) string {
+	return renderDiffMarker(ctx)
 }
 
-// LineNumberGutter creates a [GutterFunc] that renders styled line numbers only.
-//
-// For soft-wrapped continuation lines, renders " - " as a continuation marker.
-//
-// No diff markers are rendered.
-//
-// Uses [style.Comment] foreground for styling.
-func LineNumberGutter() GutterFunc {
-	return renderLineNumber
+// LineNumberGutter is a [GutterFunc] that renders line numbers only, in the
+// [style.Comment] foreground. Soft-wrapped continuation lines show " - ".
+func LineNumberGutter(ctx GutterContext) string {
+	return renderLineNumber(ctx)
 }
 
-// NoGutter returns a [GutterFunc] that returns an empty string for all lines.
-func NoGutter() GutterFunc {
-	return func(GutterContext) string { return "" }
+// NoGutter is a [GutterFunc] that renders nothing.
+func NoGutter(GutterContext) string {
+	return ""
 }
 
 // WithContainerStyle is a [PrinterOption] that sets the [lipgloss.Style]
@@ -308,7 +296,7 @@ func WithStyles(s StyleGetter) PrinterOption {
 }
 
 // WithGutter is a [PrinterOption] that sets the [GutterFunc] for rendering.
-// By default, [DefaultGutter] is used which renders line numbers and diff markers.
+// By default, [DefaultGutter] renders line numbers and diff markers.
 func WithGutter(fn GutterFunc) PrinterOption {
 	return func(p *Printer) {
 		p.gutterFunc = fn
@@ -410,10 +398,16 @@ func (p *Printer) renderLinesInSpan(t LineIterator, span position.Span) string {
 	totalLines := t.Len()
 
 	// Pre-compute gutter width once for consistent wrapping calculations.
+	// The widest gutter carries the largest line number, so sample with it.
 	var gutterWidth int
 
 	if p.gutterFunc != nil {
-		sampleGutter := p.gutterFunc(GutterContext{Styles: p.styles, TotalLines: totalLines})
+		sampleGutter := p.gutterFunc(GutterContext{
+			Styles:     p.styles,
+			Index:      totalLines - 1,
+			Number:     totalLines,
+			TotalLines: totalLines,
+		})
 		gutterWidth = lipgloss.Width(sampleGutter)
 	}
 

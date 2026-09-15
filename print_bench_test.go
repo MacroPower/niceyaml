@@ -205,10 +205,10 @@ func BenchmarkPrinterWithGutter(b *testing.B) {
 		gutter niceyaml.GutterFunc
 		name   string
 	}{
-		{niceyaml.NoGutter(), "no_gutter"},
-		{niceyaml.DefaultGutter(), "default_gutter"},
-		{niceyaml.DiffGutter(), "diff_gutter"},
-		{niceyaml.LineNumberGutter(), "line_number_gutter"},
+		{niceyaml.NoGutter, "no_gutter"},
+		{niceyaml.DefaultGutter, "default_gutter"},
+		{niceyaml.DiffGutter, "diff_gutter"},
+		{niceyaml.LineNumberGutter, "line_number_gutter"},
 	}
 
 	yaml := generateYAML(500)

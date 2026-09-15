@@ -27,7 +27,7 @@ func testPrinter() *niceyaml.Printer {
 	return niceyaml.NewPrinter(
 		niceyaml.WithStyles(style.Styles{}),
 		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-		niceyaml.WithGutter(niceyaml.DiffGutter()),
+		niceyaml.WithGutter(niceyaml.DiffGutter),
 	)
 }
 
@@ -54,7 +54,7 @@ func testPrinterWithSearch() *niceyaml.Printer {
 			yamltest.XMLStyleInclude(style.GenericHighlightDim, style.GenericHighlight),
 		)),
 		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-		niceyaml.WithGutter(niceyaml.DiffGutter()),
+		niceyaml.WithGutter(niceyaml.DiffGutter),
 	)
 }
 

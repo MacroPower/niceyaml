@@ -18,7 +18,7 @@ func main() {
 
 	printer := niceyaml.NewPrinter(
 		niceyaml.WithStyles(theme.Charm()),
-		niceyaml.WithGutter(niceyaml.DefaultGutter()),
+		niceyaml.WithGutter(niceyaml.DefaultGutter),
 	)
 
 	fmt.Println("\nPrint with syntax highlighting:")

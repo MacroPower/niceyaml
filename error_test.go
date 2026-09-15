@@ -75,7 +75,7 @@ func TestError(t *testing.T) {
 				niceyaml.WithSource(niceyaml.NewSourceFromTokens(tokens)),
 				niceyaml.WithPrinter(niceyaml.NewPrinter(
 					niceyaml.WithStyles(yamltest.NewXMLStyles()),
-					niceyaml.WithGutter(niceyaml.NoGutter()),
+					niceyaml.WithGutter(niceyaml.NoGutter),
 					niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 				)),
 			),
@@ -93,7 +93,7 @@ func TestError(t *testing.T) {
 				niceyaml.WithErrorToken(tokens[0]),
 				niceyaml.WithPrinter(niceyaml.NewPrinter(
 					niceyaml.WithStyles(yamltest.NewXMLStyles()),
-					niceyaml.WithGutter(niceyaml.NoGutter()),
+					niceyaml.WithGutter(niceyaml.NoGutter),
 					niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 				)),
 			),
@@ -129,7 +129,7 @@ func TestSourceWrapError(t *testing.T) {
 	newXMLPrinter := func() *niceyaml.Printer {
 		return niceyaml.NewPrinter(
 			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter()),
+			niceyaml.WithGutter(niceyaml.NoGutter),
 			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 		)
 	}
@@ -414,7 +414,7 @@ func TestErrorAnnotation(t *testing.T) {
 				niceyaml.WithSource(niceyaml.NewSourceFromString(tc.source)),
 				niceyaml.WithPrinter(niceyaml.NewPrinter(
 					niceyaml.WithStyles(yamltest.NewXMLStyles()),
-					niceyaml.WithGutter(niceyaml.NoGutter()),
+					niceyaml.WithGutter(niceyaml.NoGutter),
 					niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 				)),
 			}
@@ -435,7 +435,7 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 	newXMLPrinter := func() *niceyaml.Printer {
 		return niceyaml.NewPrinter(
 			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter()),
+			niceyaml.WithGutter(niceyaml.NoGutter),
 			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 		)
 	}
@@ -516,7 +516,7 @@ func TestWithPrinter(t *testing.T) {
 
 	customPrinter := niceyaml.NewPrinter(
 		niceyaml.WithStyles(yamltest.NewXMLStyles()),
-		niceyaml.WithGutter(niceyaml.NoGutter()),
+		niceyaml.WithGutter(niceyaml.NoGutter),
 		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 	)
 
@@ -541,7 +541,7 @@ func TestError_SpecialParentContext(t *testing.T) {
 	newXMLPrinter := func() *niceyaml.Printer {
 		return niceyaml.NewPrinter(
 			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter()),
+			niceyaml.WithGutter(niceyaml.NoGutter),
 			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 		)
 	}
@@ -700,7 +700,7 @@ func TestError_MultiError(t *testing.T) {
 	newXMLPrinter := func() *niceyaml.Printer {
 		return niceyaml.NewPrinter(
 			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter()),
+			niceyaml.WithGutter(niceyaml.NoGutter),
 			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 		)
 	}
@@ -1118,7 +1118,7 @@ func TestError_hasNestedPaths(t *testing.T) {
 	newXMLPrinter := func() *niceyaml.Printer {
 		return niceyaml.NewPrinter(
 			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter()),
+			niceyaml.WithGutter(niceyaml.NoGutter),
 			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 		)
 	}
@@ -1243,7 +1243,7 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 	newXMLPrinter := func() *niceyaml.Printer {
 		return niceyaml.NewPrinter(
 			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter()),
+			niceyaml.WithGutter(niceyaml.NoGutter),
 			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 		)
 	}
@@ -1359,7 +1359,7 @@ func TestError_HunkDisplay(t *testing.T) {
 	newXMLPrinter := func() *niceyaml.Printer {
 		return niceyaml.NewPrinter(
 			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter()),
+			niceyaml.WithGutter(niceyaml.NoGutter),
 			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 		)
 	}
@@ -1653,7 +1653,7 @@ func TestError_Width(t *testing.T) {
 			err := niceyaml.NewError("test error",
 				niceyaml.WithErrorToken(tokens[0]),
 				niceyaml.WithPrinter(niceyaml.NewPrinter(
-					niceyaml.WithGutter(niceyaml.NoGutter()),
+					niceyaml.WithGutter(niceyaml.NoGutter),
 					niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 					niceyaml.WithWidth(tc.width),
 				)),
@@ -1694,7 +1694,7 @@ func TestError_Width_WithCustomPrinter(t *testing.T) {
 	// NewPrinter.
 	customPrinter := niceyaml.NewPrinter(
 		niceyaml.WithStyles(yamltest.NewXMLStyles()),
-		niceyaml.WithGutter(niceyaml.NoGutter()),
+		niceyaml.WithGutter(niceyaml.NoGutter),
 		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 	)
 
@@ -1812,7 +1812,7 @@ func TestError_Width_AnnotationWrapping(t *testing.T) {
 				niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
 				niceyaml.WithPrinter(niceyaml.NewPrinter(
 					niceyaml.WithStyles(&style.Styles{}),
-					niceyaml.WithGutter(niceyaml.NoGutter()),
+					niceyaml.WithGutter(niceyaml.NoGutter),
 					niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 					niceyaml.WithWidth(tc.width),
 				)),
@@ -1846,7 +1846,7 @@ func TestError_Width_MultipleAnnotationsWrapping(t *testing.T) {
 		niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
 		niceyaml.WithPrinter(niceyaml.NewPrinter(
 			niceyaml.WithStyles(&style.Styles{}),
-			niceyaml.WithGutter(niceyaml.NoGutter()),
+			niceyaml.WithGutter(niceyaml.NoGutter),
 			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 			niceyaml.WithWidth(50),
 		)),
@@ -1891,7 +1891,7 @@ func TestError_Width_CombinedAnnotationsOnSameLine(t *testing.T) {
 		niceyaml.WithSource(niceyaml.NewSourceFromString(source)),
 		niceyaml.WithPrinter(niceyaml.NewPrinter(
 			niceyaml.WithStyles(&style.Styles{}),
-			niceyaml.WithGutter(niceyaml.NoGutter()),
+			niceyaml.WithGutter(niceyaml.NoGutter),
 			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 			niceyaml.WithWidth(40),
 		)),
@@ -1924,7 +1924,7 @@ func TestError_TokenRendersFromSource(t *testing.T) {
 	newXMLPrinter := func() *niceyaml.Printer {
 		return niceyaml.NewPrinter(
 			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter()),
+			niceyaml.WithGutter(niceyaml.NoGutter),
 			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 		)
 	}
@@ -1975,7 +1975,7 @@ func TestError_DocumentIndex(t *testing.T) {
 	newXMLPrinter := func() *niceyaml.Printer {
 		return niceyaml.NewPrinter(
 			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter()),
+			niceyaml.WithGutter(niceyaml.NoGutter),
 			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 		)
 	}
@@ -2068,7 +2068,7 @@ func TestError_DoesNotMutateSource(t *testing.T) {
 		"main",
 		niceyaml.WithPrinter(niceyaml.NewPrinter(
 			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter()),
+			niceyaml.WithGutter(niceyaml.NoGutter),
 			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 		)),
 		niceyaml.WithErrors(
@@ -2158,7 +2158,7 @@ func TestError_DocumentIndexAboveLocation(t *testing.T) {
 		niceyaml.WithPath(paths.Root().Child("name").Value()),
 		niceyaml.WithPrinter(niceyaml.NewPrinter(
 			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter()),
+			niceyaml.WithGutter(niceyaml.NoGutter),
 			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 		)),
 	)
@@ -2196,7 +2196,7 @@ func TestError_FormatDropsNestedBullets(t *testing.T) {
 		),
 		niceyaml.WithPrinter(niceyaml.NewPrinter(
 			niceyaml.WithStyles(style.Styles{}),
-			niceyaml.WithGutter(niceyaml.NoGutter()),
+			niceyaml.WithGutter(niceyaml.NoGutter),
 			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
 		)),
 	)

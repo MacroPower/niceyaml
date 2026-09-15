@@ -1143,7 +1143,7 @@ func TestSource_AllLines_YieldsCopies(t *testing.T) {
 	plain := niceyaml.NewPrinter(
 		niceyaml.WithStyles(style.Styles{}),
 		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-		niceyaml.WithGutter(niceyaml.NoGutter()),
+		niceyaml.WithGutter(niceyaml.NoGutter),
 	)
 	assert.Equal(t, "key: value", plain.Print(source))
 }

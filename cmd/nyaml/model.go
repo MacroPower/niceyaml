@@ -459,7 +459,7 @@ func buildPrinterOpts(lineNumbers bool, themeName string) []niceyaml.PrinterOpti
 	var opts []niceyaml.PrinterOption
 
 	if !lineNumbers {
-		opts = append(opts, niceyaml.WithGutter(niceyaml.DiffGutter()))
+		opts = append(opts, niceyaml.WithGutter(niceyaml.DiffGutter))
 	}
 
 	if styles, ok := theme.Styles(themeName); ok {
