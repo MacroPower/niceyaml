@@ -5,8 +5,6 @@ import (
 	"strings"
 
 	"github.com/goccy/go-yaml/token"
-
-	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 // schemaDirectiveRE matches yaml-language-server schema directives.
@@ -15,7 +13,7 @@ var schemaDirectiveRE = regexp.MustCompile(`yaml-language-server:\s*\$schema=(.+
 
 // Directive represents a parsed yaml-language-server schema directive.
 //
-// Create instances with [ParseDirective] or [ParseDocumentDirectives].
+// Create instances with [ParseDirective] or [ParseDocumentDirective].
 type Directive struct {
 	// Position is the position of the comment containing the directive.
 	Position *token.Position
@@ -50,48 +48,13 @@ func ParseDirective(comment string) *Directive {
 	}
 }
 
-// DocumentDirectives maps document indices to their schema [Directive] values.
-//
-// A key indexes the token groups [tokens.SplitDocuments] yields. The go-yaml
-// parser can split a stream into fewer documents than that, so a key does not
-// always name the parsed document at the same index. Pass one document's own
-// tokens to [ParseDocumentDirective] to pair a directive with a parsed
-// document.
-//
-// Create instances with [ParseDocumentDirectives].
-type DocumentDirectives map[int]*Directive
-
-// ParseDocumentDirectives extracts schema directives for each document in a
-// token stream.
-//
-// Associates comments with documents based on position relative to document
-// headers (---) and non-comment content.
-//
-// A schema directive must appear before any non-comment content in its document
-// to be associated with that document. Comments appearing after content are
-// ignored.
-//
-// For multi-document streams, each document header (---) starts a new document
-// context.
-//
-// The first document (index 0) may not have an explicit header.
-func ParseDocumentDirectives(tks token.Tokens) DocumentDirectives {
-	directives := make(DocumentDirectives)
-
-	for docIdx, docTokens := range tokens.SplitDocuments(tks) {
-		directive := ParseDocumentDirective(docTokens)
-		if directive != nil {
-			directives[docIdx] = directive
-		}
-	}
-
-	return directives
-}
-
 // ParseDocumentDirective extracts a schema directive from a single document's
-// tokens.
+// tokens, such as those [go.jacobcolvin.com/niceyaml.DocumentDecoder.Tokens]
+// returns.
 //
-// Returns nil if no directive is found before content.
+// The directive must appear before any non-comment content in the document;
+// a document header (---) may precede it. The first directive wins. Returns
+// nil if no directive is found before content.
 func ParseDocumentDirective(tks token.Tokens) *Directive {
 	for _, tk := range tks {
 		switch tk.Type {

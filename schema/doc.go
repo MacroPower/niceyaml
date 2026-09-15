@@ -12,7 +12,7 @@
 //	name: example
 //
 // Use [ParseDirective] to extract the schema path from a single comment, and
-// [ParseDocumentDirectives] to handle multi-document streams.
+// [ParseDocumentDirective] to find the directive in one document's tokens.
 //
 // # Generation and Validation
 //

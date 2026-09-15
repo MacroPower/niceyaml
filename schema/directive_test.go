@@ -11,6 +11,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema"
+	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 func TestParseDirective(t *testing.T) {
@@ -98,9 +99,11 @@ func TestParseDirective(t *testing.T) {
 	}
 }
 
-func TestParseDocumentDirectives(t *testing.T) {
+func TestParseDocumentDirective(t *testing.T) {
 	t.Parallel()
 
+	// Each case is a token stream that tokens.SplitDocuments divides into
+	// documents; want maps a document index to the schema its directive names.
 	tcs := map[string]struct {
 		input string
 		want  map[int]string
@@ -125,6 +128,10 @@ func TestParseDocumentDirectives(t *testing.T) {
 		},
 		"only comment with directive": {
 			input: "# yaml-language-server: $schema=./schema.json\n",
+			want:  map[int]string{0: "./schema.json"},
+		},
+		"directive with trailing spaces": {
+			input: "# yaml-language-server: $schema=./schema.json   \nkey: value\n",
 			want:  map[int]string{0: "./schema.json"},
 		},
 		"directive after content is ignored": {
@@ -233,27 +240,25 @@ func TestParseDocumentDirectives(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tks := lexer.Tokenize(tc.input)
-			got := schema.ParseDocumentDirectives(tks)
+			got := make(map[int]string)
 
-			// Check expected directives exist.
-			for docIdx, wantSchema := range tc.want {
-				directive, ok := got[docIdx]
-				require.True(t, ok, "expected directive for document %d", docIdx)
-				assert.Equal(t, wantSchema, directive.Schema, "document %d schema", docIdx)
+			for docIdx, docTokens := range tokens.SplitDocuments(lexer.Tokenize(tc.input)) {
+				directive := schema.ParseDocumentDirective(docTokens)
+				if directive == nil {
+					continue
+				}
+
 				assert.NotNil(t, directive.Position, "document %d position", docIdx)
+
+				got[docIdx] = directive.Schema
 			}
 
-			// Check no unexpected directives.
-			for docIdx := range got {
-				_, ok := tc.want[docIdx]
-				assert.True(t, ok, "unexpected directive for document %d", docIdx)
-			}
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
 
-func TestParseDocumentDirectives_TokenBuilder(t *testing.T) {
+func TestParseDocumentDirective_TokenBuilder(t *testing.T) {
 	t.Parallel()
 
 	t.Run("directive position is set from token", func(t *testing.T) {
@@ -271,38 +276,53 @@ func TestParseDocumentDirectives_TokenBuilder(t *testing.T) {
 			tkb.Clone().Type(token.StringType).Value("value").Build(),
 		}
 
-		got := schema.ParseDocumentDirectives(tks)
+		got := schema.ParseDocumentDirective(tks)
 
-		require.Len(t, got, 1)
-		require.NotNil(t, got[0])
-		assert.Equal(t, "./schema.json", got[0].Schema)
-		assert.Equal(t, 1, got[0].Position.Line)
-		assert.Equal(t, 1, got[0].Position.Column)
+		require.NotNil(t, got)
+		assert.Equal(t, "./schema.json", got.Schema)
+		assert.Equal(t, 1, got.Position.Line)
+		assert.Equal(t, 1, got.Position.Column)
 	})
 
-	t.Run("document header creates new document context", func(t *testing.T) {
+	t.Run("document header precedes the directive", func(t *testing.T) {
 		t.Parallel()
 
 		tkb := yamltest.NewTokenBuilder()
 		tks := token.Tokens{
-			// Document 0.
-			tkb.Clone().Type(token.StringType).Value("key1").Build(),
-			tkb.Clone().Type(token.MappingValueType).Value(":").Build(),
-			tkb.Clone().Type(token.StringType).Value("value1").Build(),
-			// Document 1.
 			tkb.Clone().Type(token.DocumentHeaderType).Value("---").Build(),
 			tkb.Clone().Type(token.CommentType).
-				Value(" yaml-language-server: $schema=./doc2.json").
+				Value(" yaml-language-server: $schema=./doc.json").
 				Build(),
-			tkb.Clone().Type(token.StringType).Value("key2").Build(),
+			tkb.Clone().Type(token.StringType).Value("key").Build(),
 			tkb.Clone().Type(token.MappingValueType).Value(":").Build(),
-			tkb.Clone().Type(token.StringType).Value("value2").Build(),
+			tkb.Clone().Type(token.StringType).Value("value").Build(),
 		}
 
-		got := schema.ParseDocumentDirectives(tks)
+		got := schema.ParseDocumentDirective(tks)
 
-		require.Len(t, got, 1)
-		require.NotNil(t, got[1])
-		assert.Equal(t, "./doc2.json", got[1].Schema)
+		require.NotNil(t, got)
+		assert.Equal(t, "./doc.json", got.Schema)
+	})
+
+	t.Run("content before the directive yields nil", func(t *testing.T) {
+		t.Parallel()
+
+		tkb := yamltest.NewTokenBuilder()
+		tks := token.Tokens{
+			tkb.Clone().Type(token.StringType).Value("key").Build(),
+			tkb.Clone().Type(token.MappingValueType).Value(":").Build(),
+			tkb.Clone().Type(token.StringType).Value("value").Build(),
+			tkb.Clone().Type(token.CommentType).
+				Value(" yaml-language-server: $schema=./doc.json").
+				Build(),
+		}
+
+		assert.Nil(t, schema.ParseDocumentDirective(tks))
+	})
+
+	t.Run("nil tokens yield nil", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Nil(t, schema.ParseDocumentDirective(nil))
 	})
 }
