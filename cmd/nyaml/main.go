@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.jacobcolvin.com/x/cobras/profile"
 
-	"go.jacobcolvin.com/niceyaml/fangs"
+	"go.jacobcolvin.com/niceyaml/cmd/nyaml/fangs"
 	"go.jacobcolvin.com/niceyaml/style"
 )
 
