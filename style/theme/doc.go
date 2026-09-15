@@ -38,7 +38,7 @@
 // Applications can register custom themes at runtime with [Register]:
 //
 //	theme.Register("my-theme", func() style.Styles {
-//		return style.Styles{ /* ... */ }
+//		return style.NewStyles(lipgloss.NewStyle() /* , style.Set(...) */)
 //	}, theme.Dark)
 //
 // Registered themes become available through [Styles] and [List] alongside

@@ -35,17 +35,14 @@
 //
 // # Pointer Identity
 //
-// [Styles] stores [*lipgloss.Style] pointers rather than values. This enables
-// pointer equality comparisons during rendering: the internal color blender
-// caches blend results keyed by style pointers, so identical style
-// combinations always return the same pointer without redundant allocations.
+// [Styles.Style] returns [*lipgloss.Style] pointers that stay the same for a
+// given category for the life of the value. Renderers compare and cache
+// blended styles by pointer, so identical combinations reuse one result.
+// [Styles.With] keeps the pointers of every category it leaves untouched.
 //
-// Consumers that construct [Styles] values should use [NewStyles] or [Styles.With]
-// to preserve this property.
+// # Creating Styles
 //
-// # Creating Style Maps
-//
-// [NewStyles] creates a [Styles] map that pre-computes inherited styles.
+// [NewStyles] creates a [Styles] value that resolves inherited styles.
 //
 // Provide a base [lipgloss.Style] and use [Set] to override specific
 // categories:
@@ -58,7 +55,9 @@
 //
 // With this configuration, [LiteralNumberFloat] and [LiteralNumberInteger]
 // inherit the cyan foreground from [LiteralNumber], while [LiteralString] falls
-// back to white.
+// back to white. [Styles.With] derives a new value with more overrides and
+// resolves inheritance again, so overriding a parent later reaches its
+// children too.
 //
 // # Themes
 //

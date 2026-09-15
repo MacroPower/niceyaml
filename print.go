@@ -22,6 +22,10 @@ const wrapOnCharacters = " /-"
 
 // StyleGetter retrieves styles by category.
 //
+// Implementations must return a stable pointer for a given category, since
+// the printer caches blended styles by pointer and a fresh pointer per call
+// grows that cache without bound. The result must not be nil.
+//
 // See [style.Styles] for an implementation.
 type StyleGetter interface {
 	Style(s style.Style) *lipgloss.Style

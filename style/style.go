@@ -137,9 +137,8 @@ const (
 )
 
 var (
-	// StyleParent defines the inheritance hierarchy for styles.
-	// Each style maps to its parent style.
-	// [Text] is the root and has no parent.
+	// The inheritance hierarchy for styles. Each style maps to its parent,
+	// and [Text] is the root with no parent.
 	styleParent = map[Style]Style{
 		Comment:                  Text,
 		CommentPreproc:           Comment,
@@ -201,7 +200,8 @@ var (
 		TextWarn:                 Text,
 	}
 
-	// EmptyStyle is a singleton for missing style lookups.
+	// A shared empty style, returned for lookups of categories that are
+	// neither predefined nor set.
 	emptyStyle = lipgloss.NewStyle()
 )
 
@@ -215,76 +215,85 @@ func getParent(s Style) Style {
 	return Text
 }
 
-// Styles maps [Style] categories to [*lipgloss.Style] formatting.
-// Pointers are stored for stable identity in comparisons.
-// Create instances with [NewStyles].
-type Styles map[Style]*lipgloss.Style
+// Styles resolves [Style] categories to [*lipgloss.Style] formatting.
+//
+// A Styles value holds a base style plus explicit overrides, and resolves every
+// predefined category through the inheritance hierarchy when it is built.
+// Custom keys, such as overlay styles, are stored as given.
+//
+// The pointer returned by [Styles.Style] for a category is stable for the life
+// of the value, and [Styles.With] keeps the pointers of every category it
+// leaves untouched. Renderers rely on that to cache blended styles by pointer.
+//
+// The zero value resolves every category to an empty style. Create instances
+// with [NewStyles].
+type Styles struct {
+	overrides map[Style]*lipgloss.Style
+	resolved  map[Style]*lipgloss.Style
+}
 
-// StylesOption configures a [Styles] map during construction.
+// StylesOption configures a [Styles] value during construction.
 //
 // Available options:
 //   - [Set]
-type StylesOption func(Styles)
+type StylesOption func(*Styles)
 
 // Set returns a [StylesOption] that sets the [lipgloss.Style] for a [Style]
-// category.
+// category. Categories below it in the hierarchy inherit it unless they are
+// set themselves.
 //
 //nolint:gocritic // Value semantics preferred for API ergonomics.
 func Set(s Style, ls lipgloss.Style) StylesOption {
-	return func(m Styles) {
-		m[s] = &ls
+	return func(st *Styles) {
+		st.overrides[s] = &ls
 	}
 }
 
-// NewStyles creates a new [Styles] map with inheritance pre-computed.
+// NewStyles creates a new [Styles] value with inheritance resolved.
 //
-// The base style is used for [Text] and inherited by all other categories.
+// The base style is used for [Text] and inherited by every other category.
 // Use [Set] options to override specific categories; child categories inherit
-// from their closest defined parent.
-//
-// Custom style keys (such as overlay kinds) are stored directly without
-// inheritance resolution.
+// from their closest set ancestor.
 //
 //nolint:gocritic // Value semantics preferred for API ergonomics.
 func NewStyles(base lipgloss.Style, opts ...StylesOption) Styles {
-	overrides := make(Styles)
-	overrides[Text] = &base
+	st := Styles{overrides: map[Style]*lipgloss.Style{Text: &base}}
 
 	for _, opt := range opts {
-		opt(overrides)
+		opt(&st)
 	}
 
-	// Resolve walks up the inheritance chain to find a defined style.
-	resolve := func(s Style) *lipgloss.Style {
-		current := s
-		for {
+	st.resolved = resolveStyles(st.overrides)
+
+	return st
+}
+
+// resolveStyles walks the hierarchy for every predefined category and returns
+// the map of category to its closest set ancestor. Custom keys outside the
+// hierarchy resolve to themselves. The overrides must hold [Text].
+func resolveStyles(overrides map[Style]*lipgloss.Style) map[Style]*lipgloss.Style {
+	lookup := func(st Style) *lipgloss.Style {
+		for current := st; ; current = getParent(current) {
 			if ls, ok := overrides[current]; ok {
 				return ls
 			}
 
 			if current == Text {
-				break
+				return overrides[Text]
 			}
-
-			current = getParent(current)
 		}
-
-		return &base
 	}
 
-	// Resolve all predefined styles.
-	resolved := make(Styles, len(styleParent)+1+len(overrides))
+	resolved := make(map[Style]*lipgloss.Style, len(styleParent)+1+len(overrides))
+	resolved[Text] = lookup(Text)
 
-	resolved[Text] = resolve(Text)
 	for st := range styleParent {
-		resolved[st] = resolve(st)
+		resolved[st] = lookup(st)
 	}
 
-	// Include custom keys (not in styleParent) directly.
-	// This allows NewStyles to be used for overlay styles with arbitrary keys.
-	for st := range overrides {
-		if _, isPredefined := styleParent[st]; !isPredefined && st != Text {
-			resolved[st] = overrides[st]
+	for st, ls := range overrides {
+		if _, predefined := styleParent[st]; !predefined {
+			resolved[st] = ls
 		}
 	}
 
@@ -292,24 +301,33 @@ func NewStyles(base lipgloss.Style, opts ...StylesOption) Styles {
 }
 
 // Style returns the [*lipgloss.Style] for the given [Style] category.
-// Returns an empty [*lipgloss.Style] if the style is not defined.
+//
+// A category that is neither predefined nor set returns an empty style. The
+// result is never nil.
 func (s Styles) Style(st Style) *lipgloss.Style {
-	if ls, ok := s[st]; ok {
+	if ls, ok := s.resolved[st]; ok && ls != nil {
 		return ls
 	}
 
 	return &emptyStyle
 }
 
-// With returns a copy of the [Styles] with the given options applied.
-// The original is not modified.
+// With returns a copy of the [Styles] with the given options applied and
+// inheritance resolved again, so overriding a parent category also changes
+// the children that inherit from it. The receiver is unchanged.
 func (s Styles) With(opts ...StylesOption) Styles {
-	result := make(Styles, len(s)+len(opts))
-	maps.Copy(result, s)
+	c := Styles{overrides: make(map[Style]*lipgloss.Style, len(s.overrides)+len(opts))}
+	maps.Copy(c.overrides, s.overrides)
 
-	for _, opt := range opts {
-		opt(result)
+	if _, ok := c.overrides[Text]; !ok {
+		c.overrides[Text] = &emptyStyle
 	}
 
-	return result
+	for _, opt := range opts {
+		opt(&c)
+	}
+
+	c.resolved = resolveStyles(c.overrides)
+
+	return c
 }

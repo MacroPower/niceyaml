@@ -83,9 +83,15 @@ func TestNewStyles(t *testing.T) {
 			style.GenericHeading,
 		}
 
+		// Every category resolves to the pointer of its closest set ancestor.
+		set := []*lipgloss.Style{
+			styles.Style(style.Text),
+			styles.Style(style.LiteralNumber),
+			styles.Style(style.Comment),
+		}
+
 		for _, s := range stylesToCheck {
-			_, ok := styles[s]
-			assert.True(t, ok, "style %q should be pre-computed in map", s)
+			assert.Contains(t, set, styles.Style(s), "style %q should resolve to a set ancestor", s)
 		}
 	})
 }
@@ -212,24 +218,52 @@ func TestStyles_With(t *testing.T) {
 		assert.Equal(t, lipgloss.Color("green"), got.GetForeground())
 	})
 
-	t.Run("empty options returns copy", func(t *testing.T) {
+	t.Run("re-resolves inheritance", func(t *testing.T) {
 		t.Parallel()
 
-		// Capture original Text style before calling With.
-		originalTextStyle := original[style.Text]
+		// Overriding a parent category reaches the children that inherit it.
+		result := original.With(style.Set(style.LiteralNumber, red))
+
+		assert.Equal(t, lipgloss.Color("red"), result.Style(style.LiteralNumberFloat).GetForeground())
+		assert.Equal(t, lipgloss.Color("white"), original.Style(style.LiteralNumberFloat).GetForeground())
+	})
+
+	t.Run("keeps pointers of untouched categories", func(t *testing.T) {
+		t.Parallel()
+
+		result := original.With(style.Set(customKey, red))
+
+		assert.Same(t, original.Style(style.Comment), result.Style(style.Comment))
+		assert.Same(t, original.Style(style.Text), result.Style(style.Text))
+	})
+
+	t.Run("empty options returns an equal copy", func(t *testing.T) {
+		t.Parallel()
 
 		result := original.With()
 
-		// Should be equal in content.
-		assert.Len(t, result, len(original))
-
-		// Modify the copy.
-		result[style.Text] = &red
-
-		// Original map should be unaffected - still has the original Text style.
-		assert.Equal(t, originalTextStyle, original[style.Text])
-
-		// Result should have the new value.
-		assert.Equal(t, lipgloss.Color("red"), result[style.Text].GetForeground())
+		assert.Equal(t, lipgloss.Color("green"), result.Style(style.Comment).GetForeground())
+		assert.Equal(t, lipgloss.Color("white"), result.Style(style.Text).GetForeground())
 	})
+
+	t.Run("zero value can be extended", func(t *testing.T) {
+		t.Parallel()
+
+		result := style.Styles{}.With(style.Set(style.Comment, yellow))
+
+		assert.Equal(t, lipgloss.Color("yellow"), result.Style(style.Comment).GetForeground())
+		assert.Equal(t, lipgloss.Style{}, *result.Style(style.Text))
+	})
+}
+
+func TestStyles_StablePointers(t *testing.T) {
+	t.Parallel()
+
+	styles := style.NewStyles(lipgloss.NewStyle())
+
+	first := styles.Style(style.NameTag)
+	second := styles.Style(style.NameTag)
+	assert.Same(t, first, second)
+	assert.Same(t, styles.Style(style.Text), styles.Style(style.NameTag))
+	assert.NotNil(t, styles.Style("never-set"))
 }

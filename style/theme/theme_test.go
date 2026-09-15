@@ -5,6 +5,7 @@ import (
 	"sync"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -22,7 +23,7 @@ func TestRegister(t *testing.T) {
 		"retrieve registered theme via Styles": {
 			setup: func() {
 				theme.Register("test-custom", func() style.Styles {
-					return style.Styles{style.Comment: {}}
+					return marked(style.Comment)
 				}, theme.Dark)
 			},
 			check: func(t *testing.T) {
@@ -30,13 +31,13 @@ func TestRegister(t *testing.T) {
 
 				got, ok := theme.Styles("test-custom")
 				require.True(t, ok)
-				assert.Contains(t, got, style.Comment)
+				assert.True(t, isMarked(got, style.Comment))
 			},
 		},
 		"registered theme appears in List": {
 			setup: func() {
 				theme.Register("test-listed", func() style.Styles {
-					return style.Styles{}
+					return style.NewStyles(lipgloss.NewStyle())
 				}, theme.Dark)
 			},
 			check: func(t *testing.T) {
@@ -49,10 +50,10 @@ func TestRegister(t *testing.T) {
 		"replace existing custom theme": {
 			setup: func() {
 				theme.Register("test-replace", func() style.Styles {
-					return style.Styles{style.Comment: {}}
+					return marked(style.Comment)
 				}, theme.Dark)
 				theme.Register("test-replace", func() style.Styles {
-					return style.Styles{style.NameTag: {}}
+					return marked(style.NameTag)
 				}, theme.Dark)
 			},
 			check: func(t *testing.T) {
@@ -60,14 +61,14 @@ func TestRegister(t *testing.T) {
 
 				got, ok := theme.Styles("test-replace")
 				require.True(t, ok)
-				assert.Contains(t, got, style.NameTag)
-				assert.NotContains(t, got, style.Comment)
+				assert.True(t, isMarked(got, style.NameTag))
+				assert.False(t, isMarked(got, style.Comment))
 			},
 		},
 		"dark theme not in light list": {
 			setup: func() {
 				theme.Register("test-dark-only", func() style.Styles {
-					return style.Styles{}
+					return style.NewStyles(lipgloss.NewStyle())
 				}, theme.Dark)
 			},
 			check: func(t *testing.T) {
@@ -101,7 +102,7 @@ func TestRegisterConcurrent(t *testing.T) {
 			name := "concurrent-" + string(rune('a'+i%26))
 
 			theme.Register(name, func() style.Styles {
-				return style.Styles{}
+				return style.NewStyles(lipgloss.NewStyle())
 			}, theme.Dark)
 			theme.Styles(name)
 			theme.List(theme.Dark)
@@ -135,7 +136,7 @@ func TestGet(t *testing.T) {
 		t.Parallel()
 
 		theme.Register("test-get-override", func() style.Styles {
-			return style.Styles{style.Comment: {}}
+			return marked(style.Comment)
 		}, theme.Light)
 
 		got, ok := theme.Get("test-get-override")
@@ -148,7 +149,7 @@ func TestAll(t *testing.T) {
 	t.Parallel()
 
 	theme.Register("test-all-custom", func() style.Styles {
-		return style.Styles{}
+		return style.NewStyles(lipgloss.NewStyle())
 	}, theme.Dark)
 
 	all := theme.All()
@@ -182,7 +183,7 @@ func TestAll_ReplacesBuiltIn(t *testing.T) {
 
 	// Keep the built-in mode so the parallel mode assertions in TestAll hold.
 	theme.Register("vulcan", func() style.Styles {
-		return style.Styles{style.NameTag: {}}
+		return marked(style.NameTag)
 	}, theme.Dark)
 
 	all := theme.All()
@@ -205,6 +206,20 @@ func TestAll_ReplacesBuiltIn(t *testing.T) {
 
 	styles, ok := theme.Styles("vulcan")
 	require.True(t, ok)
-	assert.Contains(t, styles, style.NameTag)
-	assert.NotContains(t, styles, style.Comment)
+	assert.True(t, isMarked(styles, style.NameTag))
+	assert.False(t, isMarked(styles, style.Comment))
+}
+
+// marker is the foreground that marked gives one category, so a test can tell
+// which dummy theme a lookup returned.
+var marker = lipgloss.Color("#123456")
+
+// marked returns a theme whose only set category is s.
+func marked(s style.Style) style.Styles {
+	return style.NewStyles(lipgloss.NewStyle(), style.Set(s, lipgloss.NewStyle().Foreground(marker)))
+}
+
+// isMarked reports whether s carries the marker in styles.
+func isMarked(styles style.Styles, s style.Style) bool {
+	return styles.Style(s).GetForeground() == marker
 }
