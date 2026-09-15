@@ -3,11 +3,14 @@ package registry_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -387,6 +390,182 @@ func TestRegistry_ConcurrentLoad(t *testing.T) {
 	for i := 1; i < goroutines; i++ {
 		assert.Same(t, validators[0], validators[i])
 	}
+}
+
+func TestRegistry_SharedLoad(t *testing.T) {
+	t.Parallel()
+
+	schemaData := []byte(`{"type": "object"}`)
+
+	t.Run("load that times out on its own runs once", func(t *testing.T) {
+		t.Parallel()
+
+		synctest.Test(t, func(t *testing.T) {
+			// Load wraps context.DeadlineExceeded the way an http.Client timeout
+			// does while every caller's context stays live, so the callers share
+			// the one failed load.
+			const goroutines = 5
+
+			release := make(chan struct{})
+
+			var loads atomic.Int32
+
+			reg := registry.New()
+			reg.Register(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.DocumentDecoder) (schema.Ref, error) {
+				return schema.Ref{
+					URL: "slow.json",
+					Load: func(_ context.Context) ([]byte, error) {
+						loads.Add(1)
+						<-release
+
+						return nil, fmt.Errorf("fetch slow.json: %w", context.DeadlineExceeded)
+					},
+				}, nil
+			}))
+
+			doc := yamltest.FirstDocument(t, `key: value`)
+			errs := make([]error, goroutines)
+
+			var wg sync.WaitGroup
+
+			for i := range goroutines {
+				wg.Go(func() {
+					_, errs[i] = reg.Lookup(t.Context(), doc)
+				})
+			}
+
+			// Wait until every caller is waiting on the one load in flight.
+			synctest.Wait()
+			close(release)
+			wg.Wait()
+
+			assert.Equal(t, int32(1), loads.Load(), "callers should share the failed load")
+
+			for _, err := range errs {
+				require.ErrorIs(t, err, registry.ErrLoad)
+				require.ErrorIs(t, err, context.DeadlineExceeded)
+			}
+		})
+	})
+
+	t.Run("joiner returns when its own deadline passes", func(t *testing.T) {
+		t.Parallel()
+
+		synctest.Test(t, func(t *testing.T) {
+			release := make(chan struct{})
+
+			reg := registry.New()
+			reg.Register(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.DocumentDecoder) (schema.Ref, error) {
+				return schema.Ref{
+					URL: "slow.json",
+					Load: func(_ context.Context) ([]byte, error) {
+						<-release
+
+						return schemaData, nil
+					},
+				}, nil
+			}))
+
+			doc := yamltest.FirstDocument(t, `key: value`)
+
+			var (
+				wg        sync.WaitGroup
+				leaderErr error
+				joinerErr error
+			)
+
+			wg.Go(func() {
+				_, leaderErr = reg.Lookup(t.Context(), doc)
+			})
+
+			// Start the joiner once the leader's load is in flight.
+			synctest.Wait()
+
+			ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+			defer cancel()
+
+			joinerDone := make(chan struct{})
+
+			go func() {
+				defer close(joinerDone)
+
+				_, joinerErr = reg.Lookup(ctx, doc)
+			}()
+
+			time.Sleep(time.Second)
+			synctest.Wait()
+
+			select {
+			case <-joinerDone:
+			default:
+				assert.Fail(t, "joiner should return at its deadline, before the load finishes")
+			}
+
+			close(release)
+			wg.Wait()
+			<-joinerDone
+
+			require.NoError(t, leaderErr)
+			require.ErrorIs(t, joinerErr, registry.ErrLoad)
+			require.ErrorIs(t, joinerErr, context.DeadlineExceeded)
+		})
+	})
+
+	t.Run("joiner loads again after the starting caller cancels", func(t *testing.T) {
+		t.Parallel()
+
+		synctest.Test(t, func(t *testing.T) {
+			var loads atomic.Int32
+
+			reg := registry.New()
+			reg.Register(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.DocumentDecoder) (schema.Ref, error) {
+				return schema.Ref{
+					URL: "slow.json",
+					Load: func(ctx context.Context) ([]byte, error) {
+						if loads.Add(1) == 1 {
+							// The first load runs under the starting caller's context
+							// and ends with its cancellation.
+							<-ctx.Done()
+
+							return nil, fmt.Errorf("fetch slow.json: %w", ctx.Err())
+						}
+
+						return schemaData, nil
+					},
+				}, nil
+			}))
+
+			doc := yamltest.FirstDocument(t, `key: value`)
+
+			leaderCtx, cancelLeader := context.WithCancel(t.Context())
+			defer cancelLeader()
+
+			var (
+				wg        sync.WaitGroup
+				leaderErr error
+				joinerErr error
+			)
+
+			wg.Go(func() {
+				_, leaderErr = reg.Lookup(leaderCtx, doc)
+			})
+
+			synctest.Wait()
+
+			wg.Go(func() {
+				_, joinerErr = reg.Lookup(t.Context(), doc)
+			})
+
+			// Cancel the leader once the joiner is waiting on its load.
+			synctest.Wait()
+			cancelLeader()
+			wg.Wait()
+
+			require.ErrorIs(t, leaderErr, context.Canceled)
+			require.NoError(t, joinerErr)
+			assert.Equal(t, int32(2), loads.Load())
+		})
+	})
 }
 
 func TestRegistry_Register_Concurrent(t *testing.T) {

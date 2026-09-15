@@ -109,7 +109,9 @@ func (r *Registry) Register(res ...schema.Resolver) {
 //
 // Returns [schema.ErrNoMatch] if no resolver applies to the document,
 // [ErrResolve] if a resolver applied but could not name the schema, and
-// [ErrLoad] or [ErrCompile] if loading or compiling the schema fails.
+// [ErrLoad] or [ErrCompile] if loading or compiling the schema fails. When
+// ctx ends before the schema loads, Lookup returns [ErrLoad] wrapping the
+// context's error without waiting for the load to finish.
 //
 // For most use cases, prefer [ValidateDocument] which combines lookup and
 // validation. Use Lookup when you need the validator for custom processing.
@@ -167,10 +169,12 @@ func (r *Registry) ValidateDocument(ctx context.Context, doc *niceyaml.DocumentD
 // validator after that.
 //
 // Concurrent requests for one URL share a single load and compile through
-// the singleflight group. The shared load runs under the context of the
-// caller that started it. When the shared load ends with a context error,
-// such as that caller's cancellation, a caller that joined it with a live
-// context of its own loads again instead of returning that error.
+// the singleflight group, and each caller waits for it only while its own
+// context is live. The shared load runs under the context of the caller
+// that started it and reports whether that context had ended when the load
+// failed. A caller that joined with a live context loads again only in that
+// case. Any other failure reaches every caller that shared the load,
+// including a timeout inside the load whose error wraps a context error.
 func (r *Registry) validator(ctx context.Context, ref schema.Ref) (*schema.Validator, error) {
 	if ref.URL == "" {
 		return nil, fmt.Errorf("%w: %w", ErrResolve, ErrNoURL)
@@ -185,24 +189,34 @@ func (r *Registry) validator(ctx context.Context, ref schema.Ref) (*schema.Valid
 	}
 
 	for {
-		// Set only when this call runs the load rather than joining one.
-		ran := false
+		ch := r.group.DoChan(ref.URL, func() (any, error) {
+			err := r.compile(ctx, ref)
 
-		_, err, _ := r.group.Do(ref.URL, func() (any, error) {
-			ran = true
-
-			return nil, r.compile(ctx, ref)
+			// Report whether this caller's context had ended when the load
+			// failed, so a joiner can tell that cancellation apart from a
+			// failure of the load itself.
+			return err != nil && ctx.Err() != nil, err
 		})
-		if err == nil {
+
+		var res singleflight.Result
+
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("%w: %q: %w", ErrLoad, ref.URL, ctx.Err())
+
+		case res = <-ch:
+		}
+
+		if res.Err == nil {
 			break
 		}
 
-		if !ran && ctx.Err() == nil && isContextError(err) {
+		if starterEnded, ok := res.Val.(bool); ok && starterEnded && ctx.Err() == nil {
 			continue
 		}
 
 		//nolint:wrapcheck // compile already wraps its errors with the sentinel and URL.
-		return nil, err
+		return nil, res.Err
 	}
 
 	v, ok := r.cached(ref.URL)
@@ -211,12 +225,6 @@ func (r *Registry) validator(ctx context.Context, ref schema.Ref) (*schema.Valid
 	}
 
 	return v, nil
-}
-
-// isContextError reports whether err comes from a canceled or expired
-// context.
-func isContextError(err error) bool {
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // cached returns the validator cached under url, if any.
