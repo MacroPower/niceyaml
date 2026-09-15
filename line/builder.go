@@ -3,6 +3,7 @@ package line
 import (
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/goccy/go-yaml/token"
 
@@ -205,7 +206,7 @@ func (b *linesBuilder) processPart(ctx *partContext) bool {
 
 		lastLine.segments = lastLine.segments.Append(ctx.tk, newTk)
 
-		b.currentOffset += len(ctx.part)
+		b.currentOffset += utf8.RuneCountInString(ctx.part)
 
 		return false
 	}
@@ -326,7 +327,7 @@ func (b *linesBuilder) processPart(ctx *partContext) bool {
 
 	b.currentLineSegments = b.currentLineSegments.Append(ctx.tk, newTk)
 
-	b.currentOffset += len(ctx.part)
+	b.currentOffset += utf8.RuneCountInString(ctx.part)
 
 	// If this part ends with a newline, finish the current line.
 	//

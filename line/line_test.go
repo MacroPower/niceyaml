@@ -1248,6 +1248,25 @@ func TestNewLines_OffsetRuneCount(t *testing.T) {
 	assert.Equal(t, origTotalBytes, resultTotalBytes, "total bytes should match lexer output")
 }
 
+func TestNewLines_OffsetRuneCount_Continuation(t *testing.T) {
+	t.Parallel()
+
+	// Continuation parts of a multi-line token take their offset from the
+	// builder's running count, which must advance by runes like the lexer.
+	// "key: héllo\n" is 11 runes, so the continuation starts at offset 12.
+	input := "key: h\u00e9llo\n  w\u00f6rld\nnext: v\n"
+	lines := line.NewLines(lexer.Tokenize(input))
+	require.Len(t, lines, 3)
+
+	continuation := lines[1].Token(0)
+	assert.Equal(t, "  w\u00f6rld\n", continuation.Origin)
+	assert.Equal(t, 12, continuation.Position.Offset)
+
+	next := lines[2].Token(0)
+	assert.Equal(t, "next", next.Value)
+	assert.Equal(t, 20, next.Position.Offset)
+}
+
 func TestNewLines_IndentLevelProgression(t *testing.T) {
 	t.Parallel()
 
