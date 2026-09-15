@@ -64,7 +64,14 @@ type CatalogEntry struct {
 // any catalog has loaded reports [ErrFetchCatalog]. After a failed fetch the
 // store waits the retry interval before contacting the catalog URL again,
 // so an unreachable catalog costs one timeout per interval rather than one
-// per lookup. Concurrent lookups share a single fetch.
+// per lookup.
+//
+// Concurrent lookups share a single fetch. A lookup that arrives while a
+// refresh is running uses the previous catalog without waiting. The lookup
+// that starts a fetch, and any lookup with no catalog to fall back on, waits
+// for the fetch to finish or for its own context to end. A lookup that stops
+// waiting leaves the fetch running, so the fetched catalog still reaches
+// later lookups.
 //
 // SchemaStore implements [schema.Resolver] and can be registered directly
 // with a [go.jacobcolvin.com/niceyaml/schema/registry.Registry]. Create
@@ -78,14 +85,22 @@ type SchemaStore struct {
 	lastAttempt    time.Time // Last fetch, successful or not.
 	client         *http.Client
 	filter         func(CatalogEntry) bool
-	lastErr        error // Error from the last fetch, or nil when it succeeded.
+	inflight       *fetchCall // Fetch in progress, or nil when none is running.
+	lastErr        error      // Error from the last fetch, or nil when it succeeded.
 	catalogURL     string
 	entries        []CatalogEntry
 	cacheTTL       time.Duration
 	refreshTimeout time.Duration
 	retryAfter     time.Duration
-	mu             sync.RWMutex // Guards entries, lastFetch, lastAttempt, and lastErr.
-	fetchMu        sync.Mutex   // Serializes fetches so concurrent lookups share one.
+	mu             sync.Mutex // Guards entries, inflight, lastFetch, lastAttempt, and lastErr.
+}
+
+// fetchCall is a catalog fetch in progress. The fetch sets entries and err
+// before it closes done.
+type fetchCall struct {
+	done    chan struct{}
+	err     error
+	entries []CatalogEntry
 }
 
 // Option configures [SchemaStore] creation.
@@ -131,7 +146,9 @@ func WithCacheTTL(ttl time.Duration) Option {
 // A lookup that finds the cache expired fetches the catalog under this
 // timeout. If the fetch fails or times out, the lookup uses the previous
 // catalog when one exists, so a temporarily unreachable SchemaStore.org
-// degrades to stale matches rather than errors.
+// degrades to stale matches rather than errors. The fetch does not inherit
+// the cancellation or deadline of the lookup that started it, so this
+// timeout alone bounds how long it runs.
 //
 // Defaults to 10 seconds.
 func WithRefreshTimeout(timeout time.Duration) Option {
@@ -220,8 +237,8 @@ func (s *SchemaStore) Resolve(ctx context.Context, doc *niceyaml.DocumentDecoder
 // FindMatch finds the catalog entry matching a file path.
 //
 // Returns [ErrNoCatalogMatch] when no entry matches, which includes an
-// empty file path, and [ErrFetchCatalog] when the catalog could not be
-// fetched and no earlier fetch succeeded.
+// empty file path, and [ErrFetchCatalog] when no catalog has loaded, either
+// because the fetch failed or because ctx ended before it finished.
 func (s *SchemaStore) FindMatch(ctx context.Context, filePath string) (CatalogEntry, error) {
 	if filePath == "" {
 		return CatalogEntry{}, fmt.Errorf("%w: document has no file path", ErrNoCatalogMatch)
@@ -246,94 +263,102 @@ func (s *SchemaStore) FindMatch(ctx context.Context, filePath string) (CatalogEn
 // catalog returns the catalog entries, fetching or refreshing them first
 // when the cache is empty or expired.
 //
-// A refresh that fails leaves the previous entries in use. A fetch that
-// fails before any has succeeded reports ErrFetchCatalog, as does a lookup
-// during the retry interval after such a failure.
+// A lookup that waits for a fetch stops waiting when ctx ends. When the
+// fetch fails or the wait ends early, the lookup falls back to the previous
+// entries, or reports ErrFetchCatalog when none exist.
 func (s *SchemaStore) catalog(ctx context.Context) ([]CatalogEntry, error) {
-	if entries, ok := s.fresh(); ok {
-		return entries, nil
-	}
-
-	// Serialize fetches, so a lookup that arrives while another is fetching
-	// waits for it, then finds the cache fresh and returns without a second
-	// request.
-	s.fetchMu.Lock()
-	defer s.fetchMu.Unlock()
-
-	if entries, ok := s.fresh(); ok {
-		return entries, nil
-	}
-
-	if entries, err, ok := s.backingOff(); ok {
+	call, entries, err := s.join(ctx)
+	if call == nil {
 		return entries, err
 	}
 
-	err := ctx.Err()
-	if err != nil {
-		// Do not count a caller's canceled context as a failed attempt.
-		return s.stale(err)
+	select {
+	case <-call.done:
+		if call.err != nil {
+			return s.stale(call.err)
+		}
+
+		return call.entries, nil
+
+	case <-ctx.Done():
+		return s.stale(ctx.Err())
+	}
+}
+
+// join decides under the lock whether a lookup can answer without waiting
+// for a fetch. It returns the entries or error to report when the lookup
+// can, and otherwise the fetch to wait on, starting one when none is
+// running.
+func (s *SchemaStore) join(ctx context.Context) (*fetchCall, []CatalogEntry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	loaded := !s.lastFetch.IsZero()
+
+	switch {
+	case loaded && s.cacheTTL > 0 && time.Since(s.lastFetch) < s.cacheTTL:
+		return nil, s.entries, nil
+
+	case s.lastErr != nil && time.Since(s.lastAttempt) < s.retryAfter:
+		// The last fetch failed within the retry interval, so leave the
+		// catalog URL alone.
+		entries, err := s.staleLocked(s.lastErr)
+
+		return nil, entries, err
+
+	case ctx.Err() != nil:
+		// A lookup whose context has ended starts no fetch.
+		entries, err := s.staleLocked(ctx.Err())
+
+		return nil, entries, err
+
+	case loaded && s.inflight != nil:
+		// Another lookup is refreshing the catalog, so use the previous one
+		// rather than wait for the request.
+		return nil, s.entries, nil
 	}
 
-	fetchCtx, cancel := context.WithTimeout(ctx, s.refreshTimeout)
+	if s.inflight == nil {
+		s.inflight = &fetchCall{done: make(chan struct{})}
+
+		go s.refresh(ctx, s.inflight)
+	}
+
+	return s.inflight, nil, nil
+}
+
+// refresh fetches the catalog for call, records the outcome, and closes
+// call.done. The fetch drops the cancellation and deadline of ctx, which
+// belongs to the lookup that started it, so a lookup that stops waiting
+// does not cancel a fetch that other lookups share; the refresh timeout
+// bounds it instead.
+func (s *SchemaStore) refresh(ctx context.Context, call *fetchCall) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.refreshTimeout)
 	defer cancel()
 
-	entries, err := s.fetch(fetchCtx)
-	if err != nil && ctx.Err() != nil {
-		// The caller's context ended the fetch, which says nothing about the
-		// catalog server, so the failure does not start the retry interval.
-		return s.stale(err)
-	}
+	entries, err := s.fetch(ctx)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.inflight = nil
 	s.lastAttempt = time.Now()
 	s.lastErr = err
 
-	if err != nil {
-		return s.staleLocked(err)
+	if err == nil {
+		s.entries = entries
+		s.lastFetch = s.lastAttempt
 	}
 
-	s.entries = entries
-	s.lastFetch = s.lastAttempt
-
-	return entries, nil
-}
-
-// fresh returns the cached entries when a fetch has succeeded and the cache
-// has not expired.
-func (s *SchemaStore) fresh() ([]CatalogEntry, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if s.lastFetch.IsZero() || s.cacheTTL <= 0 || time.Since(s.lastFetch) >= s.cacheTTL {
-		return nil, false
-	}
-
-	return s.entries, true
-}
-
-// backingOff reports whether the last fetch failed within the retry
-// interval, in which case it returns what a lookup should see without a
-// new fetch: the stale entries, or ErrFetchCatalog when none exist.
-func (s *SchemaStore) backingOff() ([]CatalogEntry, error, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if s.lastErr == nil || time.Since(s.lastAttempt) >= s.retryAfter {
-		return nil, nil, false
-	}
-
-	entries, err := s.staleLocked(s.lastErr)
-
-	return entries, err, true
+	call.entries, call.err = entries, err
+	close(call.done)
 }
 
 // stale returns the previous entries when a fetch has ever succeeded and
 // otherwise wraps cause in ErrFetchCatalog.
 func (s *SchemaStore) stale(cause error) ([]CatalogEntry, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	return s.staleLocked(cause)
 }
