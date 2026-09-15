@@ -113,7 +113,7 @@ func BenchmarkHunksDiffSource(b *testing.B) {
 				b.ReportAllocs()
 
 				for b.Loop() {
-					_, _ = niceyaml.Diff(sourceA, sourceB).Hunks(ctx)
+					_ = niceyaml.Diff(sourceA, sourceB).Hunks(ctx)
 				}
 			})
 		}

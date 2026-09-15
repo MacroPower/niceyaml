@@ -144,8 +144,7 @@ type Model struct {
 	diffResult *niceyaml.DiffResult
 	// Left holds the view for the left pane or main content.
 	// In ViewModeFull: Unified diff or plain content.
-	// In ViewModeHunks with diff: Unified diff with hunk headers; spans
-	// below selects the hunks.
+	// In ViewModeHunks with diff: the hunks of the diff with their headers.
 	// In ViewModeSideBySide with diff: Before view.
 	// In ViewModeSideBySide without diff: plain content (same on both sides).
 	//
@@ -156,8 +155,6 @@ type Model struct {
 	// Right holds the right pane view for side-by-side diff rendering.
 	// Only populated when viewMode == ViewModeSideBySide and showing a diff.
 	right line.Lines
-	// Spans of left that the view renders, in order. Nil renders every line.
-	spans position.Spans
 	// Rendered row counts of the view. Copies of the Model share one cache
 	// until a layout change gives a copy its own, so the counts that the
 	// value-receiver View fills in stay filled for the Model it copied.
@@ -524,7 +521,6 @@ func (m *Model) rebuildViews() {
 	m.diffResult = nil // Invalidate cached diff result.
 	m.left = nil
 	m.right = nil
-	m.spans = nil
 	m.searcherStale = true
 
 	_, needsDiff := m.resolveRevisionSource()
@@ -536,9 +532,9 @@ func (m *Model) rebuildViews() {
 		m.right = diff.After()
 
 	case m.viewMode == ViewModeHunks && needsDiff:
-		// Hunks returns nil lines when the diff has no changes, which leaves
-		// the view empty.
-		m.left, m.spans = m.getDiffResult().Hunks(m.hunkContext)
+		// Hunks returns nil when the diff has no changes, which leaves the
+		// view empty.
+		m.left = m.getDiffResult().Hunks(m.hunkContext)
 
 	default:
 		m.left = m.getDisplayLines()
@@ -719,9 +715,7 @@ func (m *Model) applySideBySidePaneOverlays(
 // lines.
 //
 // It reloads the searcher only when the lines changed since the last load, so
-// typing a search term does not rebuild the index on every keystroke. Matches
-// on lines the view does not render, such as lines outside every hunk, are
-// dropped.
+// typing a search term does not rebuild the index on every keystroke.
 func (m *Model) updateSearchState(lines line.Lines) {
 	if m.searchTerm == "" {
 		m.searchMatches = nil
@@ -742,10 +736,6 @@ func (m *Model) updateSearchState(lines line.Lines) {
 	m.searchMatches = make([]searchMatch, 0, len(ranges))
 
 	for _, rng := range ranges {
-		if _, rendered := m.renderedIndex(rng.Start.Line); !rendered {
-			continue
-		}
-
 		m.searchMatches = append(m.searchMatches, searchMatch{rng: rng})
 	}
 
@@ -835,56 +825,6 @@ func (m *Model) resolveRevisionSource() (*niceyaml.Source, bool) {
 	return nil, true
 }
 
-// viewSpans returns the spans of left that the view renders, in order.
-func (m *Model) viewSpans() position.Spans {
-	if m.spans != nil {
-		return m.spans
-	}
-
-	return position.Spans{position.NewSpan(0, m.left.Len())}
-}
-
-// renderedIndex returns the position of the given line of left among the
-// lines the view renders, and whether the view renders it at all.
-func (m *Model) renderedIndex(lineIdx int) (int, bool) {
-	if m.left == nil {
-		return 0, false
-	}
-
-	offset := 0
-
-	for _, span := range m.viewSpans() {
-		if span.Contains(lineIdx) {
-			return offset + lineIdx - span.Start, true
-		}
-
-		offset += span.Len()
-	}
-
-	return 0, false
-}
-
-// windowSpans returns the spans of left that render the lines [first, last)
-// of the view, in render order.
-func (m *Model) windowSpans(first, last int) position.Spans {
-	var spans position.Spans
-
-	offset := 0
-
-	for _, span := range m.viewSpans() {
-		lo := max(first, offset)
-		hi := min(last, offset+span.Len())
-
-		if lo < hi {
-			spans = append(spans, position.NewSpan(span.Start+lo-offset, span.Start+hi-offset))
-		}
-
-		offset += span.Len()
-	}
-
-	return spans
-}
-
 // paneWidth returns the width lines wrap to: the content width, or in
 // side-by-side mode the width of one pane.
 func (m *Model) paneWidth() int {
@@ -932,13 +872,12 @@ func (m *Model) fillRows() {
 	c.left, c.right = nil, nil
 
 	if m.left != nil {
-		spans := m.viewSpans()
 		printer := m.renderPrinter(m.paneWidth())
 
-		c.left = printer.Rows(m.left, spans...)
+		c.left = printer.Rows(m.left)
 
 		if m.viewMode == ViewModeSideBySide && m.right != nil {
-			c.right = printer.Rows(m.right, spans...)
+			c.right = printer.Rows(m.right)
 		}
 	}
 
@@ -1042,17 +981,7 @@ func (m *Model) maxYOffset() int {
 
 // lineCount returns the number of lines the view renders.
 func (m *Model) lineCount() int {
-	if m.left == nil {
-		return 0
-	}
-
-	count := 0
-
-	for _, span := range m.viewSpans() {
-		count += span.Len()
-	}
-
-	return count
+	return m.left.Len()
 }
 
 // maxXOffset returns the maximum X offset.
@@ -1121,7 +1050,7 @@ func (m *Model) visibleRows() []string {
 	}
 
 	printer := m.renderPrinter(m.maxWidth())
-	rows := splitLines(printer.Print(m.left, m.windowSpans(first, last)...))
+	rows := splitLines(printer.Print(m.left, position.NewSpan(first, last)))
 	rows = m.trimWindow(rows, first)
 
 	// Without wrapping, lines may exceed the viewport width. Cut them to the
@@ -1353,12 +1282,7 @@ func (m *Model) scrollToCurrentMatch() {
 		return
 	}
 
-	match := m.searchMatches[m.searchIndex]
-
-	k, ok := m.renderedIndex(match.rng.Start.Line)
-	if !ok {
-		return
-	}
+	k := m.searchMatches[m.searchIndex].rng.Start.Line
 
 	m.ensureRows()
 
@@ -1528,11 +1452,11 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 	}
 
 	// Render the lines of the window in both panes.
-	spans := m.windowSpans(first, last)
+	window := position.NewSpan(first, last)
 	printer := m.renderPrinter(paneWidth)
 
-	leftRows := splitLines(printer.Print(m.left, spans...))
-	rightRows := splitLines(printer.Print(right, spans...))
+	leftRows := splitLines(printer.Print(m.left, window))
+	rightRows := splitLines(printer.Print(right, window))
 
 	// Get text style for padding empty areas.
 	textStyle := m.printer.Style(style.Text)

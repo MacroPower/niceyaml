@@ -119,8 +119,7 @@
 //	result := niceyaml.Diff(original, modified)
 //	printer := niceyaml.NewPrinter()
 //	fmt.Println(printer.Print(result.Unified()))
-//	lines, spans := result.Hunks(3)
-//	fmt.Println(printer.Print(lines, spans...))
+//	fmt.Println(printer.Print(result.Hunks(3)))
 //
 // [Revisions] keeps the versions of a document in order, from the original
 // to the latest. Any two revisions can be diffed:

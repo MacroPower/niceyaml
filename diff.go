@@ -121,7 +121,7 @@ func (d *Differ) computeOps(before, after *Source) []lineOp {
 // accepts directly. A diff is not a YAML document, so the views carry no
 // parsing or decoding behavior:
 //   - [DiffResult.Unified] returns all lines in unified diff format.
-//   - [DiffResult.Hunks] returns only changed lines with context.
+//   - [DiffResult.Hunks] returns only the changed lines with context.
 //   - [DiffResult.Before] and [DiffResult.After] return aligned views
 //     for side-by-side rendering.
 //
@@ -155,43 +155,45 @@ func (r *DiffResult) Unified() line.Lines {
 	return lineOps(r.ops).toLines()
 }
 
-// Hunks returns a [line.Lines] view and the line spans that make up a
-// summarized diff. The context parameter specifies the number of unchanged
-// lines to show around each change. A context of 0 shows only the changed
-// lines, and Hunks treats negative values as 0.
+// Hunks returns a [line.Lines] view of the summarized diff: the changed
+// lines with context lines of unchanged content around each change, and
+// nothing else. A context of 0 shows only the changed lines, and Hunks
+// treats negative values as 0.
 //
-// The view contains all diff lines with flags for deleted/inserted lines.
-// The first line of each hunk carries a [line.Above] annotation holding the
-// unified hunk header. Returns nil and nil when the diff has no changes.
+// Each line carries the flag and the line number it has in
+// [DiffResult.Unified], so the view prints with the same numbers, and the
+// first line of each hunk carries a [line.Above] annotation holding the
+// unified hunk header. Returns nil when the diff has no changes.
 //
-// Pass both to [Printer.Print] to render the hunks:
-//
-//	printer.Print(lines, spans...)
-func (r *DiffResult) Hunks(context int) (line.Lines, position.Spans) {
+// Each call returns an independent copy, so overlays added to one result do
+// not affect another.
+func (r *DiffResult) Hunks(context int) line.Lines {
 	context = max(0, context)
 
 	if len(r.ops) == 0 {
-		return nil, nil
+		return nil
 	}
 
 	hunkSpans := selectHunkSpans(r.ops, context)
 
 	if len(hunkSpans) == 0 {
-		return nil, nil
+		return nil
 	}
 
-	lines := lineOps(r.ops).toLines()
+	var lines line.Lines
 
-	// Add hunk header annotations to first line of each hunk.
 	for _, span := range hunkSpans {
-		hunkHeader := formatHunkHeader(span, r.beforeSums, r.afterSums)
-		lines[span.Start].AddAnnotation(line.Annotation{
-			Content:   hunkHeader,
+		start := len(lines)
+		lines = append(lines, lineOps(r.ops[span.Start:span.End]).toLines()...)
+
+		// The hunk header goes above the first line of the hunk.
+		lines[start].AddAnnotation(line.Annotation{
+			Content:   formatHunkHeader(span, r.beforeSums, r.afterSums),
 			Placement: line.Above,
 		})
 	}
 
-	return lines, hunkSpans
+	return lines
 }
 
 // Stats returns the number of added and removed lines in the diff.

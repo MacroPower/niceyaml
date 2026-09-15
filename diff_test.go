@@ -454,7 +454,7 @@ func TestDiffer_Hunks(t *testing.T) {
 		after       string
 		context     int
 		wantEmpty   bool
-		wantRanges  int
+		wantLen     int
 		flags       map[int]line.Flag
 		annotations map[int]string
 	}{
@@ -481,16 +481,15 @@ func TestDiffer_Hunks(t *testing.T) {
 				line8: 8
 				line9: 9
 			`),
-			context:    1,
-			wantRanges: 1,
+			context: 1,
+			wantLen: 4,
 			flags: map[int]line.Flag{
 				0: line.FlagDefault,
+				1: line.FlagDeleted,
+				2: line.FlagInserted,
 				3: line.FlagDefault,
-				4: line.FlagDeleted,
-				5: line.FlagInserted,
-				6: line.FlagDefault,
 			},
-			annotations: map[int]string{3: "@@ -4,3 +4,3 @@"},
+			annotations: map[int]string{0: "@@ -4,3 +4,3 @@"},
 		},
 		"context 0 shows only changes": {
 			before: stringtest.Input(`
@@ -507,20 +506,19 @@ func TestDiffer_Hunks(t *testing.T) {
 				line4: 4
 				line5: 5
 			`),
-			context:    0,
-			wantRanges: 1,
+			context: 0,
+			wantLen: 2,
 			flags: map[int]line.Flag{
-				2: line.FlagDeleted,
-				3: line.FlagInserted,
+				0: line.FlagDeleted,
+				1: line.FlagInserted,
 			},
-			annotations: map[int]string{2: "@@ -3 +3 @@"},
+			annotations: map[int]string{0: "@@ -3 +3 @@"},
 		},
 		"no changes returns empty": {
-			before:     "key: value\n",
-			after:      "key: value\n",
-			context:    3,
-			wantEmpty:  true,
-			wantRanges: 0,
+			before:    "key: value\n",
+			after:     "key: value\n",
+			context:   3,
+			wantEmpty: true,
 		},
 		"negative context treated as zero": {
 			before: stringtest.Input(`
@@ -533,13 +531,13 @@ func TestDiffer_Hunks(t *testing.T) {
 				line2: new
 				line3: 3
 			`),
-			context:    -5,
-			wantRanges: 1,
+			context: -5,
+			wantLen: 2,
 			flags: map[int]line.Flag{
-				1: line.FlagDeleted,
-				2: line.FlagInserted,
+				0: line.FlagDeleted,
+				1: line.FlagInserted,
 			},
-			annotations: map[int]string{1: "@@ -2 +2 @@"},
+			annotations: map[int]string{0: "@@ -2 +2 @@"},
 		},
 	}
 
@@ -551,9 +549,7 @@ func TestDiffer_Hunks(t *testing.T) {
 			afterTokens := niceyaml.NewSourceFromString(tc.after, niceyaml.WithName("b"))
 
 			differ := niceyaml.Diff(beforeTokens, afterTokens)
-			got, ranges := differ.Hunks(tc.context)
-
-			assert.Len(t, ranges, tc.wantRanges)
+			got := differ.Hunks(tc.context)
 
 			if tc.wantEmpty {
 				assert.True(t, got.IsEmpty())
@@ -561,6 +557,8 @@ func TestDiffer_Hunks(t *testing.T) {
 
 				return
 			}
+
+			assert.Len(t, got, tc.wantLen)
 
 			for lineIdx, wantFlag := range tc.flags {
 				assert.Equal(t, wantFlag, got[lineIdx].Flag, "flag mismatch at line %d", lineIdx)
@@ -985,22 +983,18 @@ func TestDiffer_MultipleRenders(t *testing.T) {
 	assert.Equal(t, full1.String(), full2.String())
 
 	// Call Summary with different contexts.
-	summary0, ranges0 := differ.Hunks(0)
-	summary1, ranges1 := differ.Hunks(1)
-	summary2, ranges2 := differ.Hunks(2)
-
-	// All summaries cover the full diff; only the spans differ.
-	assert.Equal(t, summary0.Len(), summary1.Len())
-	assert.Equal(t, summary1.Len(), summary2.Len())
+	summary0 := differ.Hunks(0)
+	summary1 := differ.Hunks(1)
+	summary2 := differ.Hunks(2)
 
 	// All should have 1 hunk.
-	assert.Len(t, ranges0, 1)
-	assert.Len(t, ranges1, 1)
-	assert.Len(t, ranges2, 1)
+	assert.Equal(t, 1, hunkCount(summary0))
+	assert.Equal(t, 1, hunkCount(summary1))
+	assert.Equal(t, 1, hunkCount(summary2))
 
 	// Different contexts should produce different hunk sizes.
-	assert.Less(t, ranges0[0].Len(), ranges1[0].Len())
-	assert.Less(t, ranges1[0].Len(), ranges2[0].Len())
+	assert.Less(t, summary0.Len(), summary1.Len())
+	assert.Less(t, summary1.Len(), summary2.Len())
 }
 
 func TestDiffResult_ViewsAreIndependent(t *testing.T) {
@@ -1037,10 +1031,7 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 	t.Run("Hunks without changes", func(t *testing.T) {
 		t.Parallel()
 
-		lines, spans := niceyaml.Diff(before, before).Hunks(1)
-
-		assert.Nil(t, lines)
-		assert.Nil(t, spans)
+		assert.Nil(t, niceyaml.Diff(before, before).Hunks(1))
 	})
 
 	t.Run("inputs are untouched", func(t *testing.T) {
@@ -1051,4 +1042,18 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 		assert.Empty(t, before.Lines()[0].Overlays)
 		assert.Empty(t, after.Lines()[0].Overlays)
 	})
+}
+
+// hunkCount returns the number of hunks in a view from [niceyaml.DiffResult.Hunks],
+// which is the number of lines carrying a hunk header above them.
+func hunkCount(lines line.Lines) int {
+	count := 0
+
+	for _, l := range lines {
+		if len(l.Annotations.Filter(line.Above)) > 0 {
+			count++
+		}
+	}
+
+	return count
 }

@@ -65,13 +65,13 @@ func printDiffSummary(p *niceyaml.Printer, before, after string, context int) st
 	beforeTks := niceyaml.NewSourceFromString(before, niceyaml.WithName("before"))
 	afterTks := niceyaml.NewSourceFromString(after, niceyaml.WithName("after"))
 
-	source, ranges := niceyaml.Diff(beforeTks, afterTks).Hunks(context)
+	source := niceyaml.Diff(beforeTks, afterTks).Hunks(context)
 
 	if source.IsEmpty() {
 		return ""
 	}
 
-	return p.Print(source, ranges...)
+	return p.Print(source)
 }
 
 // testFinder returns a Finder configured for testing.
