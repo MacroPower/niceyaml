@@ -124,6 +124,18 @@ func TestSegment_Width(t *testing.T) {
 			input: "\n",
 			want:  0,
 		},
+		"crlf ending": {
+			input: "hello\r\n",
+			want:  5,
+		},
+		"only crlf": {
+			input: "\r\n",
+			want:  0,
+		},
+		"bare carriage return is a line ending": {
+			input: "hello\r",
+			want:  5,
+		},
 		"mixed content": {
 			input: "key: 日本語\n",
 			want:  8,
@@ -2090,8 +2102,7 @@ func TestContentRangesAt(t *testing.T) {
 		tkb := yamltest.NewTokenBuilder()
 		source := tkb.Clone().Value("test").Build()
 		// NewSegment computes width as 5 ("test\r" after stripping only "\n").
-		// ContentRangesAt strips both \r and \n from origin but uses the segment's
-		// pre-computed width for content width calculation.
+		// Both the segment width and the content range exclude the CRLF.
 		s2 := tokens.Segments2{
 			tokens.Segments{tokens.NewSegment(source, tkb.Clone().Origin("test\r\n").Build())},
 		}
@@ -2100,8 +2111,7 @@ func TestContentRangesAt(t *testing.T) {
 
 		require.Len(t, got, 1)
 		assert.Equal(t, 0, got[0].Start.Col)
-		// End col is 5 because width comes from NewSegment which keeps the \r.
-		assert.Equal(t, 5, got[0].End.Col)
+		assert.Equal(t, 4, got[0].End.Col)
 	})
 
 	t.Run("empty segments2", func(t *testing.T) {

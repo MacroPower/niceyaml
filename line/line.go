@@ -72,10 +72,7 @@ func (l *Line) Content() string {
 	var sb strings.Builder
 
 	for _, seg := range l.segments {
-		part := seg.Part()
-		origin := strings.TrimSuffix(part.Origin, "\n")
-		origin = strings.TrimSuffix(origin, "\r")
-		sb.WriteString(origin)
+		sb.WriteString(tokens.TrimLineEnding(seg.Part().Origin))
 	}
 
 	return sb.String()
@@ -304,21 +301,15 @@ func (ls Lines) AllLines(spans ...position.Span) iter.Seq2[position.Position, Li
 //
 // Without ranges, AllRunes yields every rune. Each iteration yields a
 // [position.Position] and the rune at that position. The iteration includes
-// line endings, so a newline occupies the column after the last visible rune.
+// line endings as a single '\n', so a newline occupies the column after the
+// last visible rune whether the source used LF or CRLF, and columns match
+// [Line.Width].
 func (ls Lines) AllRunes(ranges ...position.Range) iter.Seq2[position.Position, rune] {
 	return func(yield func(position.Position, rune) bool) {
 		if len(ranges) == 0 {
 			for i, ln := range ls {
-				col := 0
-
-				for _, tk := range ln.Tokens() {
-					for _, r := range tk.Origin {
-						if !yield(position.New(i, col), r) {
-							return
-						}
-
-						col++
-					}
+				if !ln.yieldRunes(i, nil, yield) {
+					return
 				}
 			}
 
@@ -330,23 +321,54 @@ func (ls Lines) AllRunes(ranges ...position.Range) iter.Seq2[position.Position, 
 			endLine := min(len(ls)-1, rng.End.Line)
 
 			for i := startLine; i <= endLine; i++ {
-				col := 0
-
-				for _, tk := range ls[i].Tokens() {
-					for _, r := range tk.Origin {
-						pos := position.New(i, col)
-						if rng.Contains(pos) {
-							if !yield(pos, r) {
-								return
-							}
-						}
-
-						col++
-					}
+				if !ls[i].yieldRunes(i, &rng, yield) {
+					return
 				}
 			}
 		}
 	}
+}
+
+// yieldRunes yields every rune of the line at index lineIdx, with the line
+// ending collapsed to a single '\n'. When rng is non-nil, it yields only the
+// runes inside it. Returns false when yield stops the iteration.
+//
+// A segment ending in "\n" always yields the newline. The lexer may leave a
+// line's last segment ending in a bare "\r", with the "\n" moved into the
+// next token or dropped at the end of input, so the last segment also yields
+// a newline for a bare "\r".
+func (l *Line) yieldRunes(lineIdx int, rng *position.Range, yield func(position.Position, rune) bool) bool {
+	col := 0
+
+	emit := func(r rune) bool {
+		pos := position.New(lineIdx, col)
+		col++
+
+		if rng != nil && !rng.Contains(pos) {
+			return true
+		}
+
+		return yield(pos, r)
+	}
+
+	for i, seg := range l.segments {
+		origin := seg.Part().Origin
+
+		for _, r := range tokens.TrimLineEnding(origin) {
+			if !emit(r) {
+				return false
+			}
+		}
+
+		last := i == len(l.segments)-1
+		endsLine := strings.HasSuffix(origin, "\n") || (last && strings.HasSuffix(origin, "\r"))
+
+		if endsLine && !emit('\n') {
+			return false
+		}
+	}
+
+	return true
 }
 
 // NewLines creates new [Lines] from [token.Tokens].

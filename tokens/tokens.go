@@ -35,8 +35,8 @@ type Segment struct {
 	// is no segmentation needed (e.g. a single-line token).
 	part *token.Token
 
-	// Width is the cached rune count of part.Origin, excluding trailing newline.
-	// NewSegment computes it once.
+	// Width is the cached rune count of part.Origin, excluding the line
+	// ending. NewSegment computes it once.
 	width int
 }
 
@@ -45,7 +45,7 @@ func NewSegment(source, part *token.Token) Segment {
 	var w int
 
 	if part != nil {
-		w = utf8.RuneCountInString(strings.TrimSuffix(part.Origin, "\n"))
+		w = utf8.RuneCountInString(TrimLineEnding(part.Origin))
 	}
 
 	return Segment{
@@ -56,7 +56,7 @@ func NewSegment(source, part *token.Token) Segment {
 }
 
 // Width returns the rune count of this [Segment]'s part, excluding any
-// trailing newline.
+// trailing line ending (LF or CRLF).
 func (s Segment) Width() int {
 	return s.width
 }
@@ -290,9 +290,7 @@ func (s2 Segments2) ContentRangesAt(idx, col int) position.Ranges {
 		for _, seg := range segs {
 			w := seg.Width()
 			if seg.source == source && w > 0 {
-				part := seg.Part()
-				origin := strings.TrimSuffix(part.Origin, "\n")
-				origin = strings.TrimSuffix(origin, "\r")
+				origin := TrimLineEnding(seg.Part().Origin)
 
 				leading := countLeadingSpaces(origin)
 				trailing := countTrailingSpaces(origin)
@@ -311,6 +309,13 @@ func (s2 Segments2) ContentRangesAt(idx, col int) position.Ranges {
 	}
 
 	return ranges
+}
+
+// TrimLineEnding returns s without its trailing line ending: "\n", "\r\n",
+// or a bare "\r". The go-yaml lexer splits CRLF endings across tokens, so a
+// token may end with the "\r" alone while the "\n" opens the next one.
+func TrimLineEnding(s string) string {
+	return strings.TrimSuffix(strings.TrimSuffix(s, "\n"), "\r")
 }
 
 // ValueOffset calculates the byte offset where Value starts within the first

@@ -3255,6 +3255,26 @@ func TestLines_View(t *testing.T) {
 		assert.Equal(t, input, sb.String())
 	})
 
+	t.Run("CRLF endings do not count toward width or runes", func(t *testing.T) {
+		t.Parallel()
+
+		lines := line.NewLines(lexer.Tokenize("key: value\r\nother: data\r\n"))
+
+		assert.Equal(t, len("other: data"), lines.Width())
+
+		var sb strings.Builder
+
+		for pos, r := range lines.AllRunes() {
+			if r == '\n' {
+				assert.Equal(t, lines[pos.Line].Width(), pos.Col)
+			}
+
+			sb.WriteRune(r)
+		}
+
+		assert.Equal(t, "key: value\nother: data\n", sb.String())
+	})
+
 	t.Run("Clone is independent", func(t *testing.T) {
 		t.Parallel()
 
