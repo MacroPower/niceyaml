@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/goccy/go-yaml"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -115,4 +116,19 @@ func TestPrettyEncoderOptions(t *testing.T) {
 	got := buf.String()
 	want := "items:\n  - one\n  - two\n"
 	assert.Equal(t, want, got)
+}
+
+func TestWithYAMLEncodeOptions(t *testing.T) {
+	t.Parallel()
+
+	type config struct {
+		Items []string `yaml:"items"`
+	}
+
+	var buf bytes.Buffer
+
+	enc := niceyaml.NewEncoder(&buf, niceyaml.WithYAMLEncodeOptions(yaml.Flow(true)))
+
+	require.NoError(t, enc.Encode(config{Items: []string{"one", "two"}}))
+	assert.Equal(t, "{items: [one, two]}\n", buf.String())
 }
