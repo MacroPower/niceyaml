@@ -36,10 +36,12 @@ type validator struct {
 // ValidateSchema implements [niceyaml.SchemaValidator].
 //
 // Returns nil when data conforms. On a constraint violation, returns a
-// [*niceyaml.Error] whose nested errors each carry the YAML path to a failing
-// location. Any other failure wraps [ErrValidate]. The context is passed to
-// the underlying [jsonschema.Validator], where remote reference resolution
-// honors its cancellation and deadlines.
+// [*niceyaml.Error]: a single violation carries its YAML path on the error
+// itself, and several violations become a count summary whose nested errors
+// each carry the path to one failing location. Any other failure wraps
+// [ErrValidate]. The context is passed to the underlying
+// [jsonschema.Validator], where remote reference resolution honors its
+// cancellation and deadlines.
 func (v *validator) ValidateSchema(ctx context.Context, data any) error {
 	err := v.schema.Validate(ctx, data)
 	if err == nil {
@@ -56,36 +58,42 @@ func (v *validator) ValidateSchema(ctx context.Context, data any) error {
 }
 
 // newValidationError converts a [*jsonschema.ValidationError] into a
-// [*niceyaml.Error] whose nested errors each carry the YAML path to a failing
-// location.
+// [*niceyaml.Error].
 //
 // The error tree is flattened to its concrete failures with
 // [jsonschema.ValidationError.Leaves]. A single failure becomes the main
-// message; several become a count summary.
+// error, carrying its own path so the printer highlights that location and
+// [niceyaml.Error.Path] reports it. Several failures become a count summary
+// with no path of its own; each nested error carries the path to one
+// failing location.
 func newValidationError(ve *jsonschema.ValidationError) *niceyaml.Error {
 	leaves := ve.Leaves()
 
-	var mainMsg string
-
 	switch len(leaves) {
 	case 0:
-		mainMsg = ve.Message
+		return niceyaml.NewError(ve.Message)
 	case 1:
-		mainMsg = leaves[0].Message
-	default:
-		mainMsg = fmt.Sprintf("validation failed at %d locations", len(leaves))
+		return leafError(leaves[0])
 	}
 
 	causes := make([]*niceyaml.Error, 0, len(leaves))
 	for _, leaf := range leaves {
-		causes = append(causes, niceyaml.NewError(
-			leaf.Message,
-			niceyaml.WithPath(buildTargetPath(leaf.InstanceSegments(), leaf.TargetsKey())),
-		))
+		causes = append(causes, leafError(leaf))
 	}
 
-	// Don't set a main path; the nested errors handle highlighting.
-	return niceyaml.NewError(mainMsg, niceyaml.WithErrors(causes...))
+	return niceyaml.NewError(
+		fmt.Sprintf("%d schema violations", len(leaves)),
+		niceyaml.WithErrors(causes...),
+	)
+}
+
+// leafError converts one concrete failure into a [*niceyaml.Error] carrying
+// the YAML path to the failing location.
+func leafError(leaf *jsonschema.ValidationError) *niceyaml.Error {
+	return niceyaml.NewError(
+		leaf.Message,
+		niceyaml.WithPath(buildTargetPath(leaf.InstanceSegments(), leaf.TargetsKey())),
+	)
 }
 
 // buildTargetPath converts instance-location segments to a [*paths.Path],

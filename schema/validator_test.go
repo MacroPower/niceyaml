@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -628,14 +629,15 @@ func TestValidator_BooleanSchema(t *testing.T) {
 func TestValidator_SubErrorAnnotations(t *testing.T) {
 	t.Parallel()
 
-	// Sub-errors are rendered as annotations with their own paths.
+	// A single violation is the main error itself; several violations render
+	// as annotations with their own paths.
 	tcs := map[string]struct {
 		schema           string
 		input            string
 		wantAnnotations  []string // Substrings that should appear in annotation output.
 		wantNestedErrors int
 	}{
-		"single sub-error annotation": {
+		"single violation has no nested errors": {
 			schema: `{
 				"type": "object",
 				"properties": {
@@ -646,7 +648,7 @@ func TestValidator_SubErrorAnnotations(t *testing.T) {
 				name: 123
 			`),
 			wantAnnotations:  []string{`expected "string", got "integer"`},
-			wantNestedErrors: 1,
+			wantNestedErrors: 0,
 		},
 		"multiple sub-errors from required fields": {
 			schema: `{
@@ -680,7 +682,7 @@ func TestValidator_SubErrorAnnotations(t *testing.T) {
 				  age: notanumber
 			`),
 			wantAnnotations:  []string{`expected "integer", got "string"`},
-			wantNestedErrors: 1,
+			wantNestedErrors: 0,
 		},
 	}
 
@@ -722,9 +724,9 @@ func TestValidator_SubErrorAnnotations(t *testing.T) {
 func TestValidator_ErrorMessages(t *testing.T) {
 	t.Parallel()
 
-	// A single failure uses the concrete message; several use a summary.
+	// A single failure uses the concrete message once; several use a summary.
 
-	t.Run("single validation error uses concrete message", func(t *testing.T) {
+	t.Run("single validation error uses concrete message once", func(t *testing.T) {
 		t.Parallel()
 
 		v := newValidator(t, []byte(`{
@@ -737,8 +739,10 @@ func TestValidator_ErrorMessages(t *testing.T) {
 		err := v.ValidateSchema(t.Context(), map[string]any{"name": 123})
 		require.Error(t, err)
 
-		assert.NotContains(t, err.Error(), "validation failed")
-		assert.Contains(t, err.Error(), `expected "string", got "integer"`)
+		const msg = `expected "string", got "integer"`
+
+		assert.Equal(t, 1, strings.Count(err.Error(), msg), "message should appear once: %q", err.Error())
+		assert.NotContains(t, err.Error(), "violations")
 	})
 
 	t.Run("multiple validation errors use summary message", func(t *testing.T) {
@@ -755,33 +759,42 @@ func TestValidator_ErrorMessages(t *testing.T) {
 		err := v.ValidateSchema(t.Context(), map[string]any{"name": 123, "age": "thirty"})
 		require.Error(t, err)
 
-		assert.Contains(t, err.Error(), "validation failed at 2 locations")
+		assert.Contains(t, err.Error(), "2 schema violations")
+		assert.NotContains(t, err.Error(), "failed")
 	})
 }
 
-func TestValidator_UnwrapSubErrorPaths(t *testing.T) {
+func TestValidator_ErrorPaths(t *testing.T) {
 	t.Parallel()
 
-	// Paths can be obtained from sub-errors via Unwrap.
+	// A single violation puts its path on the main error. Several violations
+	// leave the main error without a path and expose one path per nested
+	// error through Unwrap.
 	tcs := map[string]struct {
-		schema    string
-		input     any
-		wantPaths []string // Expected paths from nested errors.
+		schema          string
+		input           any
+		wantPath        string   // Expected path on the main error.
+		wantNestedPaths []string // Expected paths from nested errors.
 	}{
-		"type error has path on sub-error": {
-			schema:    `{"type": "object", "properties": {"name": {"type": "string"}}}`,
-			input:     map[string]any{"name": 123},
-			wantPaths: []string{"$.name"},
+		"type error has path on main error": {
+			schema:   `{"type": "object", "properties": {"name": {"type": "string"}}}`,
+			input:    map[string]any{"name": 123},
+			wantPath: "$.name",
 		},
-		"additional property has path on sub-error": {
-			schema:    `{"type": "object", "properties": {"name": {"type": "string"}}, "additionalProperties": false}`,
-			input:     map[string]any{"name": "valid", "extra": "invalid"},
-			wantPaths: []string{"$.extra"},
+		"additional property has path on main error": {
+			schema:   `{"type": "object", "properties": {"name": {"type": "string"}}, "additionalProperties": false}`,
+			input:    map[string]any{"name": "valid", "extra": "invalid"},
+			wantPath: "$.extra",
 		},
-		"nested validation error has path on sub-error": {
-			schema:    `{"type": "object", "properties": {"user": {"type": "object", "properties": {"age": {"type": "integer"}}}}}`,
-			input:     map[string]any{"user": map[string]any{"age": "notanumber"}},
-			wantPaths: []string{"$.user.age"},
+		"nested validation error has path on main error": {
+			schema:   `{"type": "object", "properties": {"user": {"type": "object", "properties": {"age": {"type": "integer"}}}}}`,
+			input:    map[string]any{"user": map[string]any{"age": "notanumber"}},
+			wantPath: "$.user.age",
+		},
+		"several violations have paths on nested errors": {
+			schema:          `{"type": "object", "properties": {"name": {"type": "string"}, "age": {"type": "number"}}}`,
+			input:           map[string]any{"name": 123, "age": "thirty"},
+			wantNestedPaths: []string{"$.name", "$.age"},
 		},
 	}
 
@@ -797,24 +810,17 @@ func TestValidator_UnwrapSubErrorPaths(t *testing.T) {
 			var validationErr *niceyaml.Error
 
 			require.ErrorAs(t, err, &validationErr)
+			assert.Equal(t, tc.wantPath, validationErr.Path())
 
-			// The top-level error carries no path; the nested errors do.
-			assert.Empty(t, validationErr.Path())
+			var gotNestedPaths []string
 
-			unwrapped := validationErr.Unwrap()
-			require.NotEmpty(t, unwrapped)
-
-			var gotPaths []string
-
-			for _, uerr := range unwrapped {
-				var nestedErr *niceyaml.Error
-
-				if errors.As(uerr, &nestedErr) && nestedErr.Path() != "" {
-					gotPaths = append(gotPaths, nestedErr.Path())
+			for _, uerr := range validationErr.Unwrap() {
+				if nestedErr, ok := errors.AsType[*niceyaml.Error](uerr); ok {
+					gotNestedPaths = append(gotNestedPaths, nestedErr.Path())
 				}
 			}
 
-			assert.ElementsMatch(t, tc.wantPaths, gotPaths)
+			assert.ElementsMatch(t, tc.wantNestedPaths, gotNestedPaths)
 		})
 	}
 }
