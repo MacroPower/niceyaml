@@ -1987,7 +1987,8 @@ func TestError_WrappedContext(t *testing.T) {
 
 	require.ErrorAs(t, wrapped, &bound)
 
-	detail := bound.Detail()
+	detail, err := bound.Detail()
+	require.NoError(t, err)
 	assert.Contains(t, detail, "second")
 	assert.NotContains(t, detail, "^")
 
@@ -2033,7 +2034,8 @@ func TestError_DocumentIndexAboveLocation(t *testing.T) {
 
 	require.ErrorAs(t, wrapped, &bound)
 
-	detail := bound.Detail()
+	detail, err := bound.Detail()
+	require.NoError(t, err)
 	assert.Contains(t, detail, "<genericError>second</genericError>")
 	assert.NotContains(t, detail, "<genericError>first</genericError>")
 }
@@ -2135,7 +2137,10 @@ func TestError_ResolvesThroughErrorWrappers(t *testing.T) {
 	var got *niceyaml.SourceError
 
 	require.ErrorAs(t, wrapped, &got)
-	assert.NotEmpty(t, got.Detail())
+
+	detail, err := got.Detail()
+	require.NoError(t, err)
+	assert.NotEmpty(t, detail)
 }
 
 func TestError_Range(t *testing.T) {
@@ -2159,4 +2164,175 @@ func TestError_Range(t *testing.T) {
 	// A range needs no source to report its position.
 	bare := niceyaml.NewError("bad word", niceyaml.WithErrorRange(rng))
 	assert.Equal(t, "[1:6] bad word", bare.Error())
+}
+
+func TestSourceError_Location(t *testing.T) {
+	t.Parallel()
+
+	source := xmlSource(stringtest.Input(`
+		name: test
+		value: 123
+		---
+		name: second
+	`))
+
+	tcs := map[string]struct {
+		err  *niceyaml.Error
+		want position.Range
+		is   error
+	}{
+		"path targets the value token": {
+			err:  niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("value").Value())),
+			want: position.NewRange(position.New(1, 7), position.New(1, 10)),
+		},
+		"path targets the key token": {
+			err:  niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("value").Key())),
+			want: position.NewRange(position.New(1, 0), position.New(1, 5)),
+		},
+		"path resolves in the indexed document": {
+			err: niceyaml.NewError("bad",
+				niceyaml.WithPath(paths.Root().Child("name").Value()),
+				niceyaml.WithDocumentIndex(1),
+			),
+			want: position.NewRange(position.New(3, 6), position.New(3, 12)),
+		},
+		"range is returned as given": {
+			err: niceyaml.NewError("bad",
+				niceyaml.WithErrorRange(position.NewRange(position.New(0, 1), position.New(0, 3))),
+			),
+			want: position.NewRange(position.New(0, 1), position.New(0, 3)),
+		},
+		"token covers its content": {
+			err: niceyaml.NewError("bad", niceyaml.WithErrorToken(&token.Token{
+				Position: &token.Position{Line: 1, Column: 7},
+			})),
+			want: position.NewRange(position.New(0, 6), position.New(0, 10)),
+		},
+		"no location": {
+			err: niceyaml.NewError("bad"),
+			is:  niceyaml.ErrNoLocation,
+		},
+		"token without position": {
+			err: niceyaml.NewError("bad", niceyaml.WithErrorToken(&token.Token{})),
+			is:  niceyaml.ErrTokenNotFound,
+		},
+		"document index outside the source": {
+			err: niceyaml.NewError("bad",
+				niceyaml.WithPath(paths.Root().Child("name").Value()),
+				niceyaml.WithDocumentIndex(5),
+			),
+			is: niceyaml.ErrDocumentNotFound,
+		},
+		"path that does not resolve": {
+			err: niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("missing").Value())),
+			is:  paths.ErrNotFound,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, source.WrapError(tc.err), &bound)
+
+			got, err := bound.Location()
+			if tc.is != nil {
+				require.ErrorIs(t, err, tc.is)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestSourceError_Location_MultiLineToken(t *testing.T) {
+	t.Parallel()
+
+	source := xmlSource(stringtest.Input(`
+		text: first
+		  second
+	`))
+
+	var bound *niceyaml.SourceError
+
+	require.ErrorAs(t, source.WrapError(niceyaml.NewError("bad",
+		niceyaml.WithPath(paths.Root().Child("text").Value()),
+	)), &bound)
+
+	got, err := bound.Location()
+	require.NoError(t, err)
+
+	// The plain scalar continues on the second line, so the range ends there.
+	assert.Equal(t, position.NewRange(position.New(0, 6), position.New(1, 8)), got)
+}
+
+func TestSourceError_Detail_Errors(t *testing.T) {
+	t.Parallel()
+
+	source := xmlSource("name: test\nvalue: 123\n")
+
+	tcs := map[string]struct {
+		err *niceyaml.Error
+		is  error
+	}{
+		"no location": {
+			err: niceyaml.NewError("bad"),
+			is:  niceyaml.ErrNoLocation,
+		},
+		"path that does not resolve": {
+			err: niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("missing").Value())),
+			is:  paths.ErrNotFound,
+		},
+		"range past the last line": {
+			err: niceyaml.NewError("bad",
+				niceyaml.WithErrorRange(position.NewRange(position.New(9, 0), position.New(9, 3))),
+			),
+			is: niceyaml.ErrOutOfRange,
+		},
+		"every nested error unresolved": {
+			err: niceyaml.NewError("bad", niceyaml.WithErrors(
+				niceyaml.NewError("first", niceyaml.WithPath(paths.Root().Child("missing").Value())),
+				niceyaml.NewError("second", niceyaml.WithErrorToken(&token.Token{})),
+			)),
+			is: niceyaml.ErrTokenNotFound,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, source.WrapError(tc.err), &bound)
+
+			got, err := bound.Detail()
+			require.ErrorIs(t, err, tc.is)
+			assert.Empty(t, got)
+
+			// The %+v verb falls back to the plain message.
+			assert.Equal(t, bound.Error(), render(bound))
+		})
+	}
+
+	t.Run("one resolved location renders without error", func(t *testing.T) {
+		t.Parallel()
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, source.WrapError(niceyaml.NewError("bad", niceyaml.WithErrors(
+			niceyaml.NewError("first", niceyaml.WithPath(paths.Root().Child("missing").Value())),
+			niceyaml.NewError("second", niceyaml.WithPath(paths.Root().Child("value").Value())),
+		))), &bound)
+
+		got, err := bound.Detail()
+		require.NoError(t, err)
+		assert.Contains(t, got, "^ second")
+		assert.NotContains(t, got, "first")
+	})
 }

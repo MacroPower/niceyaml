@@ -125,7 +125,8 @@ func expandYAMLErrors(msg string, errs []*niceyaml.SourceError) string {
 		}
 
 		if at < 0 {
-			if detail := yamlErr.Detail(); detail != "" {
+			detail, err := yamlErr.Detail()
+			if err == nil {
 				appended = append(appended, detail)
 			}
 

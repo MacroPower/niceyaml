@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"slices"
 	"strconv"
 	"strings"
@@ -20,19 +19,28 @@ import (
 )
 
 var (
-	// ErrNoSource indicates no source was provided to resolve an error path.
-	ErrNoSource = errors.New("no source provided")
-
 	// ErrNoLocation indicates the error carries neither a path, a token, nor
-	// a range.
+	// a range. [SourceError.Location] and [SourceError.Detail] return it.
 	ErrNoLocation = errors.New("no location provided")
 
-	// ErrTokenNotFound indicates the token was not found in the source.
+	// ErrTokenNotFound indicates the error's token, or the token its path
+	// resolves to, carries no position. [SourceError.Location] and
+	// [SourceError.Detail] return it.
 	ErrTokenNotFound = errors.New("token not found in source")
 
 	// ErrDocumentNotFound indicates the error's document index is outside the
-	// documents the source parsed into.
+	// documents the source parsed into. [SourceError.Location] and
+	// [SourceError.Detail] return it.
 	ErrDocumentNotFound = errors.New("document not found in source")
+
+	// ErrOutOfRange indicates the error's location lies past the last line
+	// of the source, which happens when a token or range came from other
+	// text. [SourceError.Detail] returns it.
+	ErrOutOfRange = errors.New("location outside source")
+
+	// The resolution error for a path location with no source to resolve it
+	// in, which is the case in [Error.Error].
+	errNoSource = errors.New("no source provided")
 
 	// Shared [Printer] used when no [WithPrinter] is configured.
 	defaultPrinter = sync.OnceValue(func() *Printer { return NewPrinter() })
@@ -408,18 +416,6 @@ func (e *Error) defaultDocumentIndex() int {
 	return index
 }
 
-// hasResolvableNestedErrors reports whether any nested error carries a
-// location of its own.
-func (e *Error) hasResolvableNestedErrors() bool {
-	for _, nested := range e.errors {
-		if nested != nil && (nested.token != nil || nested.rng != nil || nested.path != nil) {
-			return true
-		}
-	}
-
-	return false
-}
-
 // location is a resolved error location: the position the headline reports,
 // and the range to highlight when the error carried one.
 type location struct {
@@ -444,7 +440,7 @@ func (e *Error) locate(src *Source, doc int) (location, error) {
 
 	case e.path != nil:
 		if src == nil {
-			return location{}, ErrNoSource
+			return location{}, errNoSource
 		}
 
 		file, err := src.File()
@@ -471,7 +467,7 @@ func (e *Error) locate(src *Source, doc int) (location, error) {
 // resolveToken resolves p to a token in document docIndex of file.
 func resolveToken(file *ast.File, p *paths.Path, docIndex int) (*token.Token, error) {
 	if file == nil {
-		return nil, ErrNoSource
+		return nil, errNoSource
 	}
 
 	if docIndex < 0 || docIndex >= len(file.Docs) {
@@ -490,9 +486,10 @@ func resolveToken(file *ast.File, p *paths.Path, docIndex int) (*token.Token, er
 //
 // [Source.WrapError] creates one around any error whose chain holds an
 // [*Error]. It resolves the Error's location against the source, so
-// [SourceError.Error] reports paths as "[line:col]" positions, and
+// [SourceError.Error] reports paths as "[line:col]" positions,
+// [SourceError.Location] returns the resolved range, and
 // [SourceError.Detail] renders the surrounding lines with the location
-// highlighted. The %+v verb prints both:
+// highlighted. The %+v verb prints the message and the detail:
 //
 //	fmt.Printf("%+v\n", source.WrapError(err))
 //
@@ -617,13 +614,13 @@ func (e *SourceError) message() string {
 //
 // The %v and %s verbs print [SourceError.Error]. The %+v verb prints the
 // message followed by a blank line and [SourceError.Detail], falling back to
-// [SourceError.Error] when there is no detail to show. The %q verb quotes
+// [SourceError.Error] when no location resolves. The %q verb quotes
 // [SourceError.Error].
 func (e *SourceError) Format(f fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && f.Flag('+'):
-		detail := e.Detail()
-		if detail == "" {
+		detail, err := e.Detail()
+		if err != nil {
 			writeString(f, e.Error())
 
 			return
@@ -647,37 +644,63 @@ func writeString(f fmt.State, s string) {
 	_, _ = io.WriteString(f, s) //nolint:errcheck // Formatter has no error channel.
 }
 
+// Location returns the range in the source that the error points at: the
+// range it carries, or the content of the token it carries or its path
+// resolves to. A token that spans several lines yields a range across them.
+//
+// It returns [ErrNoLocation] when the error carries no location,
+// [ErrTokenNotFound] when the token has no position, [ErrDocumentNotFound]
+// when the document index is outside the source, and the resolution error
+// from [go.jacobcolvin.com/niceyaml/paths] when a path does not resolve.
+func (e *SourceError) Location() (position.Range, error) {
+	root, a, _ := e.located()
+	if a == nil {
+		return position.Range{}, ErrNoLocation
+	}
+
+	loc, err := a.locate(e.source, root.defaultDocumentIndex())
+	if err != nil {
+		return position.Range{}, err
+	}
+
+	return e.rangeOf(loc), nil
+}
+
+// rangeOf returns the range loc covers in the source: the range it carries,
+// or the content of the token at its position, which spans several lines
+// for a multi-line token. A position with no token yields an empty range.
+func (e *SourceError) rangeOf(loc location) position.Range {
+	ranges := highlightRanges(e.source.lines, loc)
+	if len(ranges) == 0 {
+		return position.NewRange(loc.pos, loc.pos)
+	}
+
+	return position.NewRange(ranges[0].Start, ranges[len(ranges)-1].End)
+}
+
 // Detail renders the source around the error's location with the location
 // highlighted. Nested errors appear as annotations below their own lines, and
 // distant locations render as separate hunks.
 //
-// Detail returns an empty string when no location resolves. Rendering uses
-// the [Printer] from [WithPrinter], or a default one, and works on a private
-// view of the source.
-func (e *SourceError) Detail() string {
+// Detail renders every location that resolves and returns an error only
+// when none does: the errors [SourceError.Location] returns, joined with
+// those of the nested errors, or [ErrOutOfRange] for a location past the
+// last line. Rendering uses the [Printer] from [WithPrinter], or a default
+// one, and works on a private view of the source.
+func (e *SourceError) Detail() (string, error) {
 	root, a, _ := e.located()
 	if a == nil {
-		return ""
+		return "", ErrNoLocation
 	}
 
-	doc := root.defaultDocumentIndex()
+	view := e.source.Lines()
 
-	main, err := a.locate(e.source, doc)
-	if err != nil {
-		slog.Debug("resolve main location for error",
-			slog.String("path", a.pathString()),
-			slog.Any("error", err),
-		)
-
-		// Nested errors can still render on their own.
-		if !a.hasResolvableNestedErrors() {
-			return ""
-		}
-
-		return e.render(a, doc, nil)
+	positions, err := e.collectPositions(a, root.defaultDocumentIndex(), view)
+	if len(positions) == 0 {
+		return "", err
 	}
 
-	return e.render(a, doc, &main)
+	return e.render(view, positions), nil
 }
 
 // errorPosition holds a resolved error position: the main error position
@@ -688,16 +711,13 @@ type errorPosition struct {
 	pos     position.Position
 }
 
-// render renders the source with every resolved location of a highlighted:
-// main, when given, as the main error without an annotation, and the nested
-// errors of a with their messages.
+// render renders view with every position highlighted, the nested ones
+// annotated with their messages, and the lines around them grouped into
+// hunks.
 //
 // Rendering happens on a private view of the source, so calling
 // [SourceError.Detail] repeatedly renders the same output.
-func (e *SourceError) render(a *Error, doc int, main *location) string {
-	view := e.source.Lines()
-	positions := e.collectPositions(a, doc, view, main)
-
+func (e *SourceError) render(view line.Lines, positions []errorPosition) string {
 	// Collect all ranges from positions and apply overlays to the view.
 	var allRanges position.Ranges
 
@@ -732,17 +752,26 @@ func (e *SourceError) render(a *Error, doc int, main *location) string {
 	return p.Print(view, hunkSpans...)
 }
 
-// collectPositions collects the main and nested positions of a that fall
-// within view, with the ranges each highlights.
-func (e *SourceError) collectPositions(
-	a *Error, doc int, view line.Lines, main *location,
-) []errorPosition {
+// collectPositions resolves the main location of a and the locations of its
+// nested errors within view, with the ranges each highlights. The error
+// joins the resolution failures, so it is nil when every location resolved
+// and, when none did, says why.
+func (e *SourceError) collectPositions(a *Error, doc int, view line.Lines) ([]errorPosition, error) {
 	positions := make([]errorPosition, 0, 1+len(a.errors))
 
-	if main != nil && main.pos.Line < view.Len() {
+	var errs []error
+
+	loc, err := a.locate(e.source, doc)
+	if err == nil {
+		err = e.checkInRange(loc, view)
+	}
+
+	if err != nil {
+		errs = append(errs, err)
+	} else {
 		positions = append(positions, errorPosition{
-			pos:    main.pos,
-			ranges: highlightRanges(view, *main),
+			pos:    loc.pos,
+			ranges: highlightRanges(view, loc),
 		})
 	}
 
@@ -752,13 +781,13 @@ func (e *SourceError) collectPositions(
 		}
 
 		loc, err := nested.locate(e.source, doc)
-		if err != nil {
-			slog.Debug("resolve nested error", slog.Any("error", err))
-
-			continue
+		if err == nil {
+			err = e.checkInRange(loc, view)
 		}
 
-		if loc.pos.Line >= view.Len() {
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%w: %w", nested.err, err))
+
 			continue
 		}
 
@@ -769,7 +798,17 @@ func (e *SourceError) collectPositions(
 		})
 	}
 
-	return positions
+	return positions, errors.Join(errs...)
+}
+
+// checkInRange reports [ErrOutOfRange] when loc starts past the last line
+// of view.
+func (e *SourceError) checkInRange(loc location, view line.Lines) error {
+	if loc.pos.Line >= view.Len() {
+		return fmt.Errorf("%w: line %d of %d", ErrOutOfRange, loc.pos.Line+1, view.Len())
+	}
+
+	return nil
 }
 
 // highlightRanges returns the ranges to highlight for loc: the range itself
