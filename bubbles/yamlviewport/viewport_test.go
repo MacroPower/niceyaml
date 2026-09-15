@@ -721,6 +721,93 @@ func TestViewport_RowScrolling(t *testing.T) {
 	})
 }
 
+func TestViewport_ContainerFrame(t *testing.T) {
+	t.Parallel()
+
+	var src strings.Builder
+
+	for i := 1; i <= 10; i++ {
+		fmt.Fprintf(&src, "line%d: v\n", i)
+	}
+
+	// The frame of the printer's container style adds rows above the first
+	// line and below the last. Each offset shows the frame and line rows it
+	// covers, so the frame stays visible and every line stays reachable.
+	tcs := map[string]struct {
+		container lipgloss.Style
+		edge      string
+		top       int
+		bottom    int
+		mode      yamlviewport.ViewMode
+	}{
+		"vertical padding": {
+			container: lipgloss.NewStyle().Padding(1, 0),
+			top:       1,
+			bottom:    1,
+		},
+		"top padding": {
+			container: lipgloss.NewStyle().PaddingTop(2),
+			top:       2,
+		},
+		"border": {
+			container: lipgloss.NewStyle().Border(lipgloss.NormalBorder()),
+			edge:      "─",
+			top:       1,
+			bottom:    1,
+		},
+		"border side by side": {
+			container: lipgloss.NewStyle().Border(lipgloss.NormalBorder()),
+			edge:      "─",
+			top:       1,
+			bottom:    1,
+			mode:      yamlviewport.ViewModeSideBySide,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			const (
+				height = 5
+				lines  = 10
+			)
+
+			printer := testPrinter().With(niceyaml.WithContainerStyle(tc.container))
+			m := yamlviewport.New(yamlviewport.WithPrinter(printer))
+			m.SetWidth(40)
+			m.SetHeight(height)
+			m.SetViewMode(tc.mode)
+			m.SetSource(niceyaml.NewSourceFromString(src.String()))
+
+			total := tc.top + lines + tc.bottom
+			require.Equal(t, total, m.TotalRowCount())
+
+			m.GotoBottom()
+			require.Equal(t, total-height, m.YOffset())
+
+			for offset := range total - height + 1 {
+				m.SetYOffset(offset)
+
+				rows := strings.Split(m.View(), "\n")
+				require.Len(t, rows, height)
+
+				for i, row := range rows {
+					r := offset + i
+					if r < tc.top || r >= tc.top+lines {
+						assert.NotContains(t, row, "line", "offset %d, row %d", offset, i)
+						assert.Contains(t, row, tc.edge, "offset %d, row %d", offset, i)
+
+						continue
+					}
+
+					assert.Contains(t, row, fmt.Sprintf("line%d:", r-tc.top+1), "offset %d, row %d", offset, i)
+				}
+			}
+		})
+	}
+}
+
 func TestViewport_Search(t *testing.T) {
 	t.Parallel()
 

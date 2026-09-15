@@ -338,6 +338,12 @@ func (p *Printer) Width() int {
 	return p.width
 }
 
+// ContainerStyle returns the [lipgloss.Style] wrapped around the whole
+// rendered output. See [WithContainerStyle].
+func (p *Printer) ContainerStyle() lipgloss.Style {
+	return p.style
+}
+
 // Style retrieves the [lipgloss.Style] for the given [style.Style] from the
 // printer's [StyleGetter].
 func (p *Printer) Style(s style.Style) lipgloss.Style {

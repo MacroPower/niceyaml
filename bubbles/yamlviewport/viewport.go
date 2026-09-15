@@ -131,9 +131,11 @@ func New(opts ...Option) Model {
 // wraps to the viewport width or carries an annotation takes several rows,
 // and the vertical offset ([Model.YOffset], [Model.SetYOffset], and the
 // scroll methods) counts those rows, so every row of the view is reachable.
-// Methods named after rows ([Model.TotalRowCount], [Model.VisibleRowCount])
-// count rows; methods named after lines ([Model.TotalLineCount],
-// [Model.VisibleLineCount]) count the lines of the view.
+// The frame of the printer's container style ([niceyaml.WithContainerStyle])
+// adds rows above the first line and below the last. Methods named after rows
+// ([Model.TotalRowCount], [Model.VisibleRowCount]) count rows; methods named
+// after lines ([Model.TotalLineCount], [Model.VisibleLineCount]) count the
+// lines of the view.
 type Model struct {
 	// The container style applied to the viewport frame.
 	style    lipgloss.Style
@@ -841,14 +843,18 @@ type rowCache struct {
 	// Row counts of each line the view renders, in span order, for the left
 	// and right panes. The right counts are nil outside side-by-side diffs.
 	left, right []int
-	// Prefix sums of the taller pane, so sums[k] is the first row of the k-th
-	// rendered line and the last entry is the total. Nil until filled.
+	// Prefix sums of the taller pane after the top frame, so sums[k] is the
+	// first row of the k-th rendered line and the last entry is the first row
+	// of the bottom frame. Nil until filled.
 	sums []int
+	// Rows of the printer's container frame above the first line and below
+	// the last. A view without lines has no frame rows.
+	top, bottom int
 }
 
 // total returns the number of rows in a filled cache.
 func (c *rowCache) total() int {
-	return c.sums[len(c.sums)-1]
+	return c.sums[len(c.sums)-1] + c.bottom
 }
 
 // ensureRows fills the row count cache when it is empty and clamps both
@@ -872,6 +878,7 @@ func (m *Model) ensureRows() {
 func (m *Model) fillRows() {
 	c := m.rows
 	c.left, c.right = nil, nil
+	c.top, c.bottom = 0, 0
 
 	if m.left != nil && m.printer != nil {
 		printer := m.renderPrinter(m.paneWidth())
@@ -881,9 +888,18 @@ func (m *Model) fillRows() {
 		if m.viewMode == ViewModeSideBySide && m.right != nil {
 			c.right = printer.Rows(m.right)
 		}
+
+		// Rows counts the rows before the container style applies. Print adds
+		// the container's frame above and below the lines it renders.
+		if len(c.left) > 0 {
+			frame := printer.ContainerStyle()
+			c.top = frame.GetMarginTop() + frame.GetBorderTopSize() + frame.GetPaddingTop()
+			c.bottom = frame.GetPaddingBottom() + frame.GetBorderBottomSize() + frame.GetMarginBottom()
+		}
 	}
 
 	sums := make([]int, len(c.left)+1)
+	sums[0] = c.top
 
 	for k, rows := range c.left {
 		if c.right != nil {
@@ -921,12 +937,33 @@ func (m *Model) rowWindow() (int, int) {
 }
 
 // trimWindow drops the rows above and below the visible window from rows,
-// which hold the rendered lines starting at the first line of the window.
+// which hold the rendered lines starting at the first line of the window. For
+// the first line of the view, rows start with the top frame.
 func (m *Model) trimWindow(rows []string, first int) []string {
-	skip := min(m.yOffset-m.rows.sums[first], len(rows))
+	start := m.rows.sums[first]
+	if first == 0 {
+		start = 0
+	}
+
+	skip := min(m.yOffset-start, len(rows))
 	rows = rows[skip:]
 
 	return rows[:min(len(rows), m.maxHeight())]
+}
+
+// trimFrame drops the container frame rows that Print adds around the lines
+// [first, last) in rows, except the top frame above the first line of the
+// view and the bottom frame below its last line.
+func (m *Model) trimFrame(rows []string, first, last int) []string {
+	if first > 0 {
+		rows = rows[min(m.rows.top, len(rows)):]
+	}
+
+	if last < len(m.rows.left) {
+		rows = rows[:max(0, len(rows)-m.rows.bottom)]
+	}
+
+	return rows
 }
 
 // AtTop reports whether the viewport is scrolled to the top.
@@ -1053,7 +1090,7 @@ func (m *Model) visibleRows() []string {
 
 	printer := m.renderPrinter(m.maxWidth())
 	rows := splitLines(printer.Print(m.left, position.NewSpan(first, last)))
-	rows = m.trimWindow(rows, first)
+	rows = m.trimWindow(m.trimFrame(rows, first, last), first)
 
 	// Without wrapping, lines may exceed the viewport width. Cut them to the
 	// horizontal window so lipgloss does not wrap them.
@@ -1194,7 +1231,7 @@ func (m *Model) VisibleLineCount() int {
 
 // TotalRowCount returns the number of rendered rows in the view. It counts
 // the rows of every line, wrapped to the viewport width, plus their
-// annotations.
+// annotations and the frame of the printer's container style.
 func (m *Model) TotalRowCount() int {
 	m.ensureRows()
 
@@ -1457,8 +1494,8 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 	window := position.NewSpan(first, last)
 	printer := m.renderPrinter(paneWidth)
 
-	leftRows := splitLines(printer.Print(m.left, window))
-	rightRows := splitLines(printer.Print(right, window))
+	leftRows := m.trimFrame(splitLines(printer.Print(m.left, window)), first, last)
+	rightRows := m.trimFrame(splitLines(printer.Print(right, window)), first, last)
 
 	// Get text style for padding empty areas.
 	textStyle := m.printer.Style(style.Text)
@@ -1468,21 +1505,14 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 	extraPadding := (contentW - separatorWidth) % 2
 	separator := textStyle.Render(sideBySideSeparator + strings.Repeat(" ", extraPadding))
 
-	// Zip the panes line by line. A line that wraps taller in one pane gets
-	// blank rows in the other, so the panes stay aligned.
 	combined := make([]string, 0, m.rows.sums[last]-m.rows.sums[first])
 
 	var li, ri int
 
-	for k := first; k < last; k++ {
-		leftCount := m.rows.left[k]
-
-		rightCount := leftCount
-		if m.rows.right != nil {
-			rightCount = m.rows.right[k]
-		}
-
-		for i := range m.lineRows(k) {
+	// Join the next count rows of the panes, taking at most leftCount rows
+	// from the left pane and rightCount from the right.
+	appendRows := func(count, leftCount, rightCount int) {
+		for i := range count {
 			var left, right string
 
 			if i < leftCount && li < len(leftRows) {
@@ -1509,6 +1539,27 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 
 			combined = append(combined, leftPadded+separator+right)
 		}
+	}
+
+	if first == 0 {
+		appendRows(m.rows.top, m.rows.top, m.rows.top)
+	}
+
+	// Zip the panes line by line. A line that wraps taller in one pane gets
+	// blank rows in the other, so the panes stay aligned.
+	for k := first; k < last; k++ {
+		leftCount := m.rows.left[k]
+
+		rightCount := leftCount
+		if m.rows.right != nil {
+			rightCount = m.rows.right[k]
+		}
+
+		appendRows(m.lineRows(k), leftCount, rightCount)
+	}
+
+	if last == len(m.rows.left) {
+		appendRows(m.rows.bottom, m.rows.bottom, m.rows.bottom)
 	}
 
 	combined = m.trimWindow(combined, first)
