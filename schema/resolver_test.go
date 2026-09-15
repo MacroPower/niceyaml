@@ -20,7 +20,7 @@ var _ schema.Resolver = schema.ResolverFunc(nil)
 func TestResolverFunc(t *testing.T) {
 	t.Parallel()
 
-	kindPath := paths.Root().Child("kind").Path()
+	kindPath := paths.Root().Child("kind")
 
 	// A resolver that names a schema per kind and reports ErrNoMatch for
 	// documents without one.

@@ -65,14 +65,6 @@ func TestContent(t *testing.T) {
 		got := m.Match(t.Context(), doc)
 		assert.True(t, got)
 	})
-
-	t.Run("nil path panics", func(t *testing.T) {
-		t.Parallel()
-
-		assert.PanicsWithValue(t, "matcher.Content: path is nil", func() {
-			matcher.Content(nil, "value")
-		})
-	})
 }
 
 func TestContent_WithAll(t *testing.T) {

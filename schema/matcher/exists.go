@@ -10,7 +10,7 @@ import (
 // existsMatcher matches documents where a YAML path exists with a non-empty
 // value.
 type existsMatcher struct {
-	path *paths.Path
+	path paths.Path
 }
 
 // Exists creates a new [Matcher] that matches documents where the specified
@@ -25,23 +25,17 @@ type existsMatcher struct {
 // regardless of its specific value. For matching specific values, use [Content]
 // instead.
 //
-// Panics if path is nil.
-//
 //	// Matches documents that have a kind field with any non-empty value.
-//	matcher.Exists(paths.Root().Child("kind").Path())
+//	matcher.Exists(paths.Root().Child("kind"))
 //
 // For requiring multiple fields, combine with [All]:
 //
 //	// Matches Kubernetes manifests (documents with both apiVersion and kind).
 //	matcher.All(
-//	    matcher.Exists(paths.Root().Child("apiVersion").Path()),
-//	    matcher.Exists(paths.Root().Child("kind").Path()),
+//	    matcher.Exists(paths.Root().Child("apiVersion")),
+//	    matcher.Exists(paths.Root().Child("kind")),
 //	)
-func Exists(path *paths.Path) Matcher {
-	if path == nil {
-		panic("matcher.Exists: path is nil")
-	}
-
+func Exists(path paths.Path) Matcher {
 	return &existsMatcher{path: path}
 }
 

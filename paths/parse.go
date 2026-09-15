@@ -10,7 +10,7 @@ import (
 // ErrInvalidPath indicates a path expression that [Parse] cannot read.
 var ErrInvalidPath = errors.New("invalid path")
 
-// Parse parses a path expression into a [*Path] targeting [PartNode].
+// Parse parses a path expression into a [Path] targeting [PartNode].
 //
 // An expression starts with `$` for the document root, followed by any number
 // of selectors:
@@ -32,19 +32,19 @@ var ErrInvalidPath = errors.New("invalid path")
 //	keyPath := p.Key()
 //
 // Returns an error wrapping [ErrInvalidPath] for a malformed expression.
-func Parse(expr string) (*Path, error) {
+func Parse(expr string) (Path, error) {
 	segs, err := parseSegments(expr)
 	if err != nil {
-		return nil, fmt.Errorf("parse path %q: %w: %w", expr, ErrInvalidPath, err)
+		return Path{}, fmt.Errorf("parse path %q: %w: %w", expr, ErrInvalidPath, err)
 	}
 
-	return &Path{segments: segs}, nil
+	return Path{segments: segs}, nil
 }
 
 // MustParse is like [Parse] but panics if the expression is invalid.
 //
 // Use it for path expressions known to be valid at compile time.
-func MustParse(expr string) *Path {
+func MustParse(expr string) Path {
 	p, err := Parse(expr)
 	if err != nil {
 		panic(err)

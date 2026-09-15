@@ -16,10 +16,10 @@ import (
 var (
 	_ matcher.Matcher = matcher.Func(nil)
 
-	kindPath       = paths.Root().Child("kind").Path()
-	apiVersionPath = paths.Root().Child("apiVersion").Path()
-	metadataName   = paths.Root().Child("metadata").Child("name").Path()
-	missingPath    = paths.Root().Child("missing").Path()
+	kindPath       = paths.Root().Child("kind")
+	apiVersionPath = paths.Root().Child("apiVersion")
+	metadataName   = paths.Root().Child("metadata").Child("name")
+	missingPath    = paths.Root().Child("missing")
 )
 
 func TestFunc(t *testing.T) {

@@ -21,7 +21,7 @@ type guarded struct {
 // This pairs a loader, which applies to every document, with a matcher that
 // decides which documents it should apply to:
 //
-//	kindPath := paths.Root().Child("kind").Path()
+//	kindPath := paths.Root().Child("kind")
 //	reg.Register(registry.When(
 //	    matcher.Content(kindPath, "Deployment"),
 //	    loader.Embedded("example.com/k8s/deployment.json", deploymentSchema),

@@ -100,24 +100,24 @@ func leafError(leaf *jsonschema.ValidationError) *niceyaml.Error {
 	)
 }
 
-// buildTargetPath converts instance-location segments to a [*paths.Path],
+// buildTargetPath converts instance-location segments to a [paths.Path],
 // pointing at the key when targetsKey is set and the value otherwise. Each
 // [jsonschema.Segment] already distinguishes an array index from a property
 // name, so no numeric guessing is needed.
-func buildTargetPath(segments []jsonschema.Segment, targetsKey bool) *paths.Path {
-	builder := paths.Root()
+func buildTargetPath(segments []jsonschema.Segment, targetsKey bool) paths.Path {
+	path := paths.Root()
 
 	for _, seg := range segments {
 		if seg.IsIndex {
-			builder = builder.Index(seg.Index)
+			path = path.Index(seg.Index)
 		} else {
-			builder = builder.Child(seg.Key)
+			path = path.Child(seg.Key)
 		}
 	}
 
 	if targetsKey {
-		return builder.Key()
+		return path.Key()
 	}
 
-	return builder.Value()
+	return path.Value()
 }

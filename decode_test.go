@@ -101,14 +101,14 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		path      *paths.Path
+		path      paths.Path
 		input     string
 		wantVals  []string
 		wantFound []bool
 	}{
 		"simple key": {
 			input:     "key: value",
-			path:      paths.Root().Child("key").Path(),
+			path:      paths.Root().Child("key"),
 			wantVals:  []string{"value"},
 			wantFound: []bool{true},
 		},
@@ -117,7 +117,7 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 				parent:
 				  child: nested_value
 			`),
-			path:      paths.Root().Child("parent").Child("child").Path(),
+			path:      paths.Root().Child("parent").Child("child"),
 			wantVals:  []string{"nested_value"},
 			wantFound: []bool{true},
 		},
@@ -128,13 +128,13 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 				  - second
 				  - third
 			`),
-			path:      paths.Root().Child("items").Index(1).Path(),
+			path:      paths.Root().Child("items").Index(1),
 			wantVals:  []string{"second"},
 			wantFound: []bool{true},
 		},
 		"missing key returns empty": {
 			input:     "key: value",
-			path:      paths.Root().Child("nonexistent").Path(),
+			path:      paths.Root().Child("nonexistent"),
 			wantVals:  []string{""},
 			wantFound: []bool{false},
 		},
@@ -145,49 +145,43 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 				---
 				second: 2
 			`),
-			path:      paths.Root().Path(),
+			path:      paths.Root(),
 			wantVals:  []string{"first: 1", "second: 2"},
 			wantFound: []bool{true, true},
 		},
 		"numeric value": {
 			input:     "count: 42",
-			path:      paths.Root().Child("count").Path(),
+			path:      paths.Root().Child("count"),
 			wantVals:  []string{"42"},
 			wantFound: []bool{true},
 		},
 		"boolean value": {
 			input:     "enabled: true",
-			path:      paths.Root().Child("enabled").Path(),
+			path:      paths.Root().Child("enabled"),
 			wantVals:  []string{"true"},
 			wantFound: []bool{true},
 		},
 		"null value": {
 			input:     "empty: null",
-			path:      paths.Root().Child("empty").Path(),
+			path:      paths.Root().Child("empty"),
 			wantVals:  []string{""},
 			wantFound: []bool{true},
 		},
 		"double-quoted empty string": {
 			input:     `kind: ""`,
-			path:      paths.Root().Child("kind").Path(),
+			path:      paths.Root().Child("kind"),
 			wantVals:  []string{""},
 			wantFound: []bool{true},
 		},
 		"single-quoted empty string": {
 			input:     `kind: ''`,
-			path:      paths.Root().Child("kind").Path(),
+			path:      paths.Root().Child("kind"),
 			wantVals:  []string{""},
 			wantFound: []bool{true},
 		},
-		"nil path returns false": {
-			input:     "key: value",
-			path:      nil,
-			wantVals:  []string{""},
-			wantFound: []bool{false},
-		},
 		"anchored value": {
 			input:     "kind: &k Pod",
-			path:      paths.Root().Child("kind").Path(),
+			path:      paths.Root().Child("kind"),
 			wantVals:  []string{"Pod"},
 			wantFound: []bool{true},
 		},
@@ -196,7 +190,7 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 				base: &b Pod
 				kind: *b
 			`),
-			path:      paths.Root().Child("kind").Path(),
+			path:      paths.Root().Child("kind"),
 			wantVals:  []string{"Pod"},
 			wantFound: []bool{true},
 		},
@@ -205,7 +199,7 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 				base: &b {kind: Pod}
 				spec: *b
 			`),
-			path:      paths.Root().Child("spec", "kind").Path(),
+			path:      paths.Root().Child("spec", "kind"),
 			wantVals:  []string{"Pod"},
 			wantFound: []bool{true},
 		},
@@ -216,7 +210,7 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 				  <<: *b
 				  name: x
 			`),
-			path:      paths.Root().Child("spec", "kind").Path(),
+			path:      paths.Root().Child("spec", "kind"),
 			wantVals:  []string{"Pod"},
 			wantFound: []bool{true},
 		},
@@ -490,7 +484,7 @@ key: value`
 	d, err := source.Decoder()
 	require.NoError(t, err)
 
-	path := paths.Root().Child("key").Path()
+	path := paths.Root().Child("key")
 
 	var foundAny bool
 
@@ -817,7 +811,7 @@ func TestDecoder_Documents(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 2, d.Len())
 
-		kindPath := paths.Root().Child("kind").Path()
+		kindPath := paths.Root().Child("kind")
 
 		for i, dd := range d.Documents() {
 			kind, ok := dd.GetValue(kindPath)
@@ -1227,7 +1221,7 @@ func TestDocumentDecoder_Get(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		got, err := dd.Get[string](t.Context(), paths.Root().Child("kind").Path())
+		got, err := dd.Get[string](t.Context(), paths.Root().Child("kind"))
 		require.NoError(t, err)
 		assert.Equal(t, "Deployment", got)
 	})
@@ -1237,7 +1231,7 @@ func TestDocumentDecoder_Get(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		got, err := dd.Get[int](t.Context(), paths.Root().Child("version").Path())
+		got, err := dd.Get[int](t.Context(), paths.Root().Child("version"))
 		require.NoError(t, err)
 		assert.Equal(t, 2, got)
 	})
@@ -1247,7 +1241,7 @@ func TestDocumentDecoder_Get(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		got, err := dd.Get[bool](t.Context(), paths.Root().Child("enabled").Path())
+		got, err := dd.Get[bool](t.Context(), paths.Root().Child("enabled"))
 		require.NoError(t, err)
 		assert.True(t, got)
 	})
@@ -1257,7 +1251,7 @@ func TestDocumentDecoder_Get(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		got, err := dd.Get[string](t.Context(), paths.Root().Child("empty").Path())
+		got, err := dd.Get[string](t.Context(), paths.Root().Child("empty"))
 		require.NoError(t, err)
 		assert.Empty(t, got)
 	})
@@ -1267,7 +1261,7 @@ func TestDocumentDecoder_Get(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		got, err := dd.Get[[]string](t.Context(), paths.Root().Child("tags").Path())
+		got, err := dd.Get[[]string](t.Context(), paths.Root().Child("tags"))
 		require.NoError(t, err)
 		assert.Equal(t, []string{"a", "b"}, got)
 	})
@@ -1281,7 +1275,7 @@ func TestDocumentDecoder_Get(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		got, err := dd.Get[meta](t.Context(), paths.Root().Child("meta").Path())
+		got, err := dd.Get[meta](t.Context(), paths.Root().Child("meta"))
 		require.NoError(t, err)
 		assert.Equal(t, meta{Name: "app"}, got)
 	})
@@ -1291,17 +1285,7 @@ func TestDocumentDecoder_Get(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		got, err := dd.Get[string](t.Context(), paths.Root().Child("nonexistent").Path())
-		require.ErrorIs(t, err, niceyaml.ErrValueNotFound)
-		assert.Empty(t, got)
-	})
-
-	t.Run("nil path returns ErrValueNotFound", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, input)
-
-		got, err := dd.Get[string](t.Context(), nil)
+		got, err := dd.Get[string](t.Context(), paths.Root().Child("nonexistent"))
 		require.ErrorIs(t, err, niceyaml.ErrValueNotFound)
 		assert.Empty(t, got)
 	})
@@ -1311,7 +1295,7 @@ func TestDocumentDecoder_Get(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		got, err := dd.Get[int](t.Context(), paths.Root().Child("kind").Path())
+		got, err := dd.Get[int](t.Context(), paths.Root().Child("kind"))
 		require.Error(t, err)
 
 		var yamlErr *niceyaml.Error

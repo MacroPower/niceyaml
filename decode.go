@@ -276,7 +276,7 @@ func (dd *DocumentDecoder) FilePath() string {
 // This is useful when you need a typed field before deciding how to process
 // the document, such as a version number or a list of tags:
 //
-//	versionPath := paths.Root().Child("version").Path()
+//	versionPath := paths.Root().Child("version")
 //	for _, doc := range decoder.Documents() {
 //		version, err := doc.Get[int](ctx, versionPath)
 //		if errors.Is(err, niceyaml.ErrValueNotFound) {
@@ -286,14 +286,14 @@ func (dd *DocumentDecoder) FilePath() string {
 //		}
 //	}
 //
-// Returns [ErrValueNotFound] if path is nil, the document is a directive, or
-// no value exists at the path. YAML decoding errors, including a value that
+// Returns [ErrValueNotFound] if the document is a directive or no value
+// exists at the path. YAML decoding errors, including a value that
 // cannot be represented as T, are converted to [Error] with source
 // annotations.
 //
 // For a string view of any node, including mappings and sequences, use
 // [DocumentDecoder.GetValue].
-func (dd *DocumentDecoder) Get[T any](ctx context.Context, path *paths.Path) (T, error) {
+func (dd *DocumentDecoder) Get[T any](ctx context.Context, path paths.Path) (T, error) {
 	var zero T
 
 	node := dd.node(path)
@@ -317,7 +317,7 @@ func (dd *DocumentDecoder) Get[T any](ctx context.Context, path *paths.Path) (T,
 // to process it. For example, multi-document files often use a discriminator
 // field like "kind" or "version" to determine which schema applies:
 //
-//	kindPath := paths.Root().Child("kind").Path()
+//	kindPath := paths.Root().Child("kind")
 //	for _, doc := range decoder.Documents() {
 //		kind, _ := doc.GetValue(kindPath)
 //		switch kind {
@@ -334,11 +334,11 @@ func (dd *DocumentDecoder) Get[T any](ctx context.Context, path *paths.Path) (T,
 //
 // For non-scalar values (mappings, sequences), returns the YAML representation.
 //
-// Returns an empty string and false if path is nil, the document is a
-// directive, or no value exists at the path.
+// Returns an empty string and false if the document is a directive or no
+// value exists at the path.
 //
 // For a typed value, use [DocumentDecoder.Get].
-func (dd *DocumentDecoder) GetValue(path *paths.Path) (string, bool) {
+func (dd *DocumentDecoder) GetValue(path paths.Path) (string, bool) {
 	node := dd.node(path)
 	if node == nil {
 		return "", false
@@ -361,13 +361,8 @@ func (dd *DocumentDecoder) GetValue(path *paths.Path) (string, bool) {
 // node resolves path against the document body, ignoring the path's
 // [paths.Part].
 //
-// Returns nil if path is nil, the document is a directive, or no node exists
-// at the path.
-func (dd *DocumentDecoder) node(path *paths.Path) ast.Node {
-	if path == nil {
-		return nil
-	}
-
+// Returns nil if the document is a directive or no node exists at the path.
+func (dd *DocumentDecoder) node(path paths.Path) ast.Node {
 	if dd.doc.Body != nil && dd.doc.Body.Type() == ast.DirectiveType {
 		return nil
 	}

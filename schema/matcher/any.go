@@ -21,7 +21,7 @@ type anyMatcher struct {
 //
 // This is useful for matching multiple document types with the same schema:
 //
-//	kindPath := paths.Root().Child("kind").Path()
+//	kindPath := paths.Root().Child("kind")
 //	matcher.Any(
 //	    matcher.Content(kindPath, "Deployment"),
 //	    matcher.Content(kindPath, "StatefulSet"),

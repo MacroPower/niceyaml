@@ -29,8 +29,8 @@
 // matching conditions. For example, validating Kubernetes resources often
 // requires matching both apiVersion and kind:
 //
-//	apiVersion := paths.Root().Child("apiVersion").Path()
-//	kind := paths.Root().Child("kind").Path()
+//	apiVersion := paths.Root().Child("apiVersion")
+//	kind := paths.Root().Child("kind")
 //	m := matcher.All(
 //	    matcher.Content(apiVersion, "apps/v1"),
 //	    matcher.Content(kind, "Deployment"),

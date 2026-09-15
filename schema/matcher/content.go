@@ -9,8 +9,8 @@ import (
 
 // contentMatcher matches documents by a single YAML content value.
 type contentMatcher struct {
-	path  *paths.Path
 	value string
+	path  paths.Path
 }
 
 // Content creates a new [Matcher] that matches documents based on a YAML
@@ -27,23 +27,17 @@ type contentMatcher struct {
 // Note that quoted and unquoted values are equivalent: both version: "2" and
 // version: 2 will match "2". The comparison is case-sensitive.
 //
-// Panics if path is nil.
-//
 //	// Matches documents with kind: Deployment.
-//	matcher.Content(paths.Root().Child("kind").Path(), "Deployment")
+//	matcher.Content(paths.Root().Child("kind"), "Deployment")
 //
 // For multiple conditions, use [All] (AND) or [Any] (OR):
 //
 //	// Matches documents with kind: Deployment AND apiVersion: apps/v1.
 //	matcher.All(
-//	    matcher.Content(paths.Root().Child("kind").Path(), "Deployment"),
-//	    matcher.Content(paths.Root().Child("apiVersion").Path(), "apps/v1"),
+//	    matcher.Content(paths.Root().Child("kind"), "Deployment"),
+//	    matcher.Content(paths.Root().Child("apiVersion"), "apps/v1"),
 //	)
-func Content(path *paths.Path, value string) Matcher {
-	if path == nil {
-		panic("matcher.Content: path is nil")
-	}
-
+func Content(path paths.Path, value string) Matcher {
 	return &contentMatcher{path: path, value: value}
 }
 

@@ -26,7 +26,7 @@ import (
 )
 
 // Path helpers for tests.
-var kindPath = paths.Root().Child("kind").Path()
+var kindPath = paths.Root().Child("kind")
 
 // countingLoader returns a resolver that names url and serves data, counting
 // how many times its Load runs.

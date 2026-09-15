@@ -215,7 +215,7 @@ func TestGetPath(t *testing.T) {
 		err  *niceyaml.Error
 		want string
 	}{
-		"nil path returns empty string": {
+		"no path returns empty string": {
 			err:  niceyaml.NewError("test"),
 			want: "",
 		},
@@ -304,7 +304,7 @@ func TestErrorAnnotation(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		path         *paths.Path
+		path         paths.Path
 		source       string
 		errMsg       string
 		want         string
@@ -420,7 +420,7 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		path   *paths.Path
+		path   paths.Path
 		source string
 		errMsg string
 		want   string
@@ -516,7 +516,7 @@ func TestError_SpecialParentContext(t *testing.T) {
 
 	tcs := map[string]struct {
 		source string
-		path   *paths.Path
+		path   paths.Path
 		errMsg string
 		want   string
 	}{
@@ -1872,7 +1872,7 @@ func TestError_TokenRendersFromSource(t *testing.T) {
 	file, err := source.File()
 	require.NoError(t, err)
 
-	node, err := paths.Root().Child("b").Path().Node(file.Docs[0])
+	node, err := paths.Root().Child("b").Node(file.Docs[0])
 	require.NoError(t, err)
 
 	literal, ok := node.(*ast.LiteralNode)

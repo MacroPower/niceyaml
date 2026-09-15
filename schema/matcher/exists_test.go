@@ -90,14 +90,6 @@ func TestExists(t *testing.T) {
 		got := m.Match(t.Context(), doc)
 		assert.False(t, got)
 	})
-
-	t.Run("nil path panics", func(t *testing.T) {
-		t.Parallel()
-
-		assert.PanicsWithValue(t, "matcher.Exists: path is nil", func() {
-			matcher.Exists(nil)
-		})
-	})
 }
 
 func TestExists_WithAll(t *testing.T) {

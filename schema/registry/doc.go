@@ -17,7 +17,7 @@
 //	reg.Register(registry.Directive())
 //
 //	// Content-based matching.
-//	kindPath := paths.Root().Child("kind").Path()
+//	kindPath := paths.Root().Child("kind")
 //	reg.Register(registry.When(
 //	    matcher.Content(kindPath, "Deployment"),
 //	    loader.Embedded("example.com/k8s/deployment.json", deploymentSchema),

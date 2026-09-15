@@ -48,7 +48,7 @@ var (
 
 // Error is an error that points at a location in a YAML document.
 //
-// The location is a [*paths.Path], a [*token.Token], or a [position.Range],
+// The location is a [paths.Path], a [*token.Token], or a [position.Range],
 // set with [WithPath], [WithErrorToken], or [WithErrorRange]. A path resolves
 // within one document of a source. [WithDocumentIndex] selects which; without
 // it the first document is used. [DocumentDecoder] sets the index on every
@@ -129,11 +129,11 @@ type ErrorOption func(e *Error)
 
 // WithPath is an [ErrorOption] that sets the YAML path where the error occurred.
 //
-// The [*paths.Path] provides both the path and whether to highlight the key
+// The [paths.Path] provides both the path and whether to highlight the key
 // or value.
-func WithPath(p *paths.Path) ErrorOption {
+func WithPath(p paths.Path) ErrorOption {
 	return func(e *Error) {
-		e.path = p
+		e.path = &p
 	}
 }
 
@@ -368,7 +368,7 @@ func (e *Error) locate(src *Source, doc int) (location, error) {
 			return location{}, err
 		}
 
-		tk, err := resolveToken(file, e.path, doc)
+		tk, err := resolveToken(file, *e.path, doc)
 		if err != nil {
 			return location{}, err
 		}
@@ -390,7 +390,7 @@ func (e *Error) locate(src *Source, doc int) (location, error) {
 }
 
 // resolveToken resolves p to a token in document docIndex of file.
-func resolveToken(file *ast.File, p *paths.Path, docIndex int) (*token.Token, error) {
+func resolveToken(file *ast.File, p paths.Path, docIndex int) (*token.Token, error) {
 	if file == nil {
 		return nil, errNoSource
 	}

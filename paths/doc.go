@@ -65,14 +65,16 @@
 //
 // # Building Paths
 //
-// Use [Root] to start a [Builder], chain selectors, and finalize with
-// [Builder.Path], [Builder.Key], or [Builder.Value]:
+// Use [Root] to start at the document root and chain selectors. The result
+// targets [PartNode] until [Path.Key] or [Path.Value] picks a part:
 //
-//	paths.Root().Child("items").Index(0).Child("name").Key()  // $.items[0].name
+//	paths.Root().Child("items").Index(0).Child("name")        // $.items[0].name
+//	paths.Root().Child("items").Index(0).Child("name").Key()  // the same, key token
 //	paths.Root().Child("spec").IndexAll().Value()             // $.spec[*]
 //	paths.Root().Recursive("name").Value()                    // $..name
 //
-// Builders are immutable, so a common prefix can be shared safely:
+// A Path is a value that never changes, so a common prefix can be shared
+// safely:
 //
 //	spec := paths.Root().Child("spec")
 //	replicas := spec.Child("replicas").Value()  // $.spec.replicas
