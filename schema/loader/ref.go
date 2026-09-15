@@ -1,6 +1,7 @@
 package loader
 
 import (
+	"net/url"
 	"path/filepath"
 	"strings"
 )
@@ -11,9 +12,13 @@ import (
 // or [File] for file paths. Use [URL] or [File] directly when the reference
 // type is known at construction time.
 //
-// The baseDir is used to resolve relative file paths. If schemaRef is an
-// absolute path or URL (http/https), baseDir is ignored. HTTPOptions are used
-// when schemaRef is a URL; ignored for file paths.
+// Schemes match case-insensitively. A file:// URL is read as the local path
+// it names. A file:// URL with a host other than localhost names no local
+// path, so Ref treats the whole reference as a relative file path and joins
+// it to baseDir, where the read fails. The baseDir is used to resolve
+// relative file paths. If schemaRef is an absolute path or an HTTP/HTTPS
+// URL, baseDir is ignored. HTTPOptions are used when schemaRef is an
+// HTTP/HTTPS URL; ignored for file paths.
 //
 //	// Relative path resolved against baseDir.
 //	l := loader.Ref("/configs", "schema.json")
@@ -30,16 +35,41 @@ func Ref(baseDir, schemaRef string, opts ...HTTPOption) Loader {
 		return URL(schemaRef, opts...)
 	}
 
-	// Resolve relative path against baseDir.
 	path := schemaRef
-	if !filepath.IsAbs(schemaRef) {
-		path = filepath.Join(baseDir, schemaRef)
+	if hasScheme(schemaRef, "file") {
+		path = fileURLPath(schemaRef)
+	}
+
+	// Resolve relative path against baseDir.
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(baseDir, path)
 	}
 
 	return File(path)
 }
 
-// isHTTPURL reports whether ref starts with http:// or https://.
+// isHTTPURL reports whether ref starts with http:// or https://, in any
+// letter case.
 func isHTTPURL(ref string) bool {
-	return strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://")
+	return hasScheme(ref, "http") || hasScheme(ref, "https")
+}
+
+// hasScheme reports whether ref starts with scheme followed by "://",
+// compared case-insensitively.
+func hasScheme(ref, scheme string) bool {
+	prefix := scheme + "://"
+
+	return len(ref) >= len(prefix) && strings.EqualFold(ref[:len(prefix)], prefix)
+}
+
+// fileURLPath returns the local path a file:// URL names. A URL that does
+// not parse, names a host other than localhost, or names no path is returned
+// unchanged so the file read reports it.
+func fileURLPath(ref string) string {
+	u, err := url.Parse(ref)
+	if err != nil || u.Path == "" || (u.Host != "" && !strings.EqualFold(u.Host, "localhost")) {
+		return ref
+	}
+
+	return u.Path
 }

@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -70,6 +71,74 @@ func TestRef(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []byte(schemaData), result.Data)
 		assert.Equal(t, schemaURL, result.URL)
+	})
+
+	t.Run("URL scheme in upper case", func(t *testing.T) {
+		t.Parallel()
+
+		schemaData := `{"type": "object"}`
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			//nolint:errcheck // Test helper.
+			w.Write([]byte(schemaData))
+		}))
+		defer server.Close()
+
+		schemaURL := "HTTP://" + strings.TrimPrefix(server.URL, "http://") + "/schema.json"
+
+		l := loader.Ref("/some/dir", schemaURL)
+		result, err := l.Load(t.Context(), nil)
+		require.NoError(t, err)
+		assert.Equal(t, []byte(schemaData), result.Data)
+		assert.Equal(t, schemaURL, result.URL)
+	})
+
+	t.Run("file URL", func(t *testing.T) {
+		t.Parallel()
+
+		tmpDir := t.TempDir()
+		schemaPath := filepath.Join(tmpDir, "schema.json")
+		schemaData := []byte(`{"type": "object"}`)
+		err := os.WriteFile(schemaPath, schemaData, 0o600)
+		require.NoError(t, err)
+
+		// BaseDir is ignored for file URLs, which name an absolute path.
+		l := loader.Ref("/some/other/dir", "file://"+schemaPath)
+		result, err := l.Load(t.Context(), nil)
+		require.NoError(t, err)
+		assert.Equal(t, schemaData, result.Data)
+		assert.Equal(t, schemaPath, result.URL)
+	})
+
+	t.Run("file URL scheme in upper case", func(t *testing.T) {
+		t.Parallel()
+
+		tmpDir := t.TempDir()
+		schemaPath := filepath.Join(tmpDir, "schema.json")
+		schemaData := []byte(`{"type": "object"}`)
+		err := os.WriteFile(schemaPath, schemaData, 0o600)
+		require.NoError(t, err)
+
+		l := loader.Ref("/some/other/dir", "FILE://"+schemaPath)
+		result, err := l.Load(t.Context(), nil)
+		require.NoError(t, err)
+		assert.Equal(t, schemaData, result.Data)
+	})
+
+	t.Run("file URL with percent-encoded path", func(t *testing.T) {
+		t.Parallel()
+
+		tmpDir := t.TempDir()
+		schemaPath := filepath.Join(tmpDir, "my schema.json")
+		schemaData := []byte(`{"type": "object"}`)
+		err := os.WriteFile(schemaPath, schemaData, 0o600)
+		require.NoError(t, err)
+
+		l := loader.Ref("/some/other/dir", "file://"+filepath.Join(tmpDir, "my%20schema.json"))
+		result, err := l.Load(t.Context(), nil)
+		require.NoError(t, err)
+		assert.Equal(t, schemaData, result.Data)
+		assert.Equal(t, schemaPath, result.URL)
 	})
 
 	t.Run("URL with custom client", func(t *testing.T) {
