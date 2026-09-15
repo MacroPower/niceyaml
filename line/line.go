@@ -46,22 +46,10 @@ func (l *Line) AddOverlay(o ...Overlay) {
 	l.Overlays = append(l.Overlays, o...)
 }
 
-// Number returns the 1-indexed line number of this [Line].
+// Number returns the 1-indexed line number of this [Line], or 0 for the
+// zero value.
 func (l *Line) Number() int {
-	if l.number != 0 {
-		return l.number
-	}
-
-	if len(l.segments) == 0 {
-		return 0
-	}
-
-	part := l.segments[0].Part()
-	if part == nil || part.Position == nil {
-		return 0
-	}
-
-	return part.Position.Line
+	return l.number
 }
 
 // Content returns this [Line]'s content as a string.
@@ -147,7 +135,7 @@ func (l *Line) String() string {
 	prefix := fmt.Sprintf("%4d | ", l.Number())
 
 	// Render annotations above if applicable.
-	above := l.Annotations.FilterPosition(Above)
+	above := l.Annotations.Filter(Above)
 	if len(above) > 0 {
 		sb.WriteString(prefix)
 		sb.WriteString(above.String())
@@ -159,7 +147,7 @@ func (l *Line) String() string {
 
 	// Render annotations below if applicable.
 	// Add "^ " prefix for below annotations (error pointers) in debug output.
-	below := l.Annotations.FilterPosition(Below)
+	below := l.Annotations.Filter(Below)
 	if len(below) > 0 {
 		sb.WriteByte('\n')
 		sb.WriteString(prefix)
@@ -587,34 +575,40 @@ func (ls Lines) Validate() error {
 }
 
 // AddOverlay adds an overlay with the given style to the specified ranges.
-// Multi-line ranges are split into per-line overlays automatically.
+// Multi-line ranges are split into per-line overlays automatically, and each
+// overlay's columns are clamped to its line's width.
 //
 // Lines outside the collection are skipped, the same way [Lines.AllLines]
 // clamps its spans, so a range computed against a longer view is safe to
-// apply.
-func (ls Lines) AddOverlay(kind style.Style, ranges ...position.Range) {
+// apply. A range that covers no columns of a line adds no overlay to it.
+func (ls Lines) AddOverlay(s style.Style, ranges ...position.Range) {
 	if len(ls) == 0 {
 		return
 	}
 
 	for _, r := range ranges {
-		ls.addOverlayRange(kind, r)
+		ls.addOverlayRange(s, r)
 	}
 }
 
 // addOverlayRange adds a single overlay range, splitting across lines as
 // needed and skipping lines outside the collection.
-func (ls Lines) addOverlayRange(kind style.Style, r position.Range) {
+func (ls Lines) addOverlayRange(s style.Style, r position.Range) {
 	for _, lineRange := range r.SliceLines() {
 		lineIdx := lineRange.Start.Line
 		if lineIdx < 0 || lineIdx >= len(ls) {
 			continue
 		}
 
-		ls[lineIdx].AddOverlay(Overlay{
-			Cols: position.NewSpan(lineRange.Start.Col, lineRange.End.Col),
-			Kind: kind,
-		})
+		cols := position.NewSpan(
+			max(0, lineRange.Start.Col),
+			min(lineRange.End.Col, ls[lineIdx].Width()),
+		)
+		if cols.Len() <= 0 {
+			continue
+		}
+
+		ls[lineIdx].AddOverlay(Overlay{Cols: cols, Style: s})
 	}
 }
 

@@ -1291,9 +1291,9 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			input:     "key: value",
 			lineIndex: 0,
 			annotation: line.Annotation{
-				Content:  "# comment",
-				Position: line.Above,
-				Col:      0,
+				Content:   "# comment",
+				Placement: line.Above,
+				Col:       0,
 			},
 			want: "# comment\nkey: value",
 		},
@@ -1301,9 +1301,9 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			input:     "key: value",
 			lineIndex: 0,
 			annotation: line.Annotation{
-				Content:  "^-- error here",
-				Position: line.Above,
-				Col:      5,
+				Content:   "^-- error here",
+				Placement: line.Above,
+				Col:       5,
 			},
 			want: "     ^-- error here\nkey: value",
 		},
@@ -1311,9 +1311,9 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			input:     "key: value",
 			lineIndex: 0,
 			annotation: line.Annotation{
-				Content:  "comment below",
-				Position: line.Below,
-				Col:      0,
+				Content:   "comment below",
+				Placement: line.Below,
+				Col:       0,
 			},
 			want: "key: value\n^ comment below",
 		},
@@ -1321,9 +1321,9 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			input:     "key: value",
 			lineIndex: 0,
 			annotation: line.Annotation{
-				Content:  "error here",
-				Position: line.Below,
-				Col:      5,
+				Content:   "error here",
+				Placement: line.Below,
+				Col:       5,
 			},
 			want: "key: value\n     ^ error here",
 		},
@@ -1334,9 +1334,9 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			),
 			lineIndex: 1,
 			annotation: line.Annotation{
-				Content:  "note",
-				Position: line.Below,
-				Col:      8,
+				Content:   "note",
+				Placement: line.Below,
+				Col:       8,
 			},
 			want: stringtest.JoinLF(
 				"first: 1",
@@ -1351,9 +1351,9 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			),
 			lineIndex: 1,
 			annotation: line.Annotation{
-				Content:  "@@ -1 +1 @@",
-				Position: line.Above,
-				Col:      0,
+				Content:   "@@ -1 +1 @@",
+				Placement: line.Above,
+				Col:       0,
 			},
 			want: stringtest.JoinLF(
 				"first: 1",
@@ -1391,9 +1391,9 @@ func TestPrinter_AnnotationPosition_WithGutter(t *testing.T) {
 			input:     "key: value",
 			lineIndex: 0,
 			annotation: line.Annotation{
-				Content:  "@@ -1 +1 @@",
-				Position: line.Above,
-				Col:      0,
+				Content:   "@@ -1 +1 @@",
+				Placement: line.Above,
+				Col:       0,
 			},
 			want: "     @@ -1 +1 @@\n   1 key: value",
 		},
@@ -1401,9 +1401,9 @@ func TestPrinter_AnnotationPosition_WithGutter(t *testing.T) {
 			input:     "key: value",
 			lineIndex: 0,
 			annotation: line.Annotation{
-				Content:  "error",
-				Position: line.Below,
-				Col:      5,
+				Content:   "error",
+				Placement: line.Below,
+				Col:       5,
 			},
 			want: "   1 key: value\n          ^ error",
 		},
@@ -1414,9 +1414,9 @@ func TestPrinter_AnnotationPosition_WithGutter(t *testing.T) {
 			),
 			lineIndex: 0,
 			annotation: line.Annotation{
-				Content:  "note",
-				Position: line.Below,
-				Col:      7,
+				Content:   "note",
+				Placement: line.Below,
+				Col:       7,
 			},
 			want: stringtest.JoinLF(
 				"   1 first: 1",
@@ -1449,16 +1449,16 @@ func TestPrinter_AnnotationPosition_Disabled(t *testing.T) {
 	}{
 		"above annotation disabled": {
 			annotation: line.Annotation{
-				Content:  "# hidden above",
-				Position: line.Above,
-				Col:      0,
+				Content:   "# hidden above",
+				Placement: line.Above,
+				Col:       0,
 			},
 		},
 		"below annotation disabled": {
 			annotation: line.Annotation{
-				Content:  "# hidden below",
-				Position: line.Below,
-				Col:      5,
+				Content:   "# hidden below",
+				Placement: line.Below,
+				Col:       5,
 			},
 		},
 	}
@@ -2573,7 +2573,7 @@ func TestDefaultAnnotation(t *testing.T) {
 
 	tcs := map[string]struct {
 		annotations line.Annotations
-		position    line.RelativePosition
+		position    line.Placement
 		want        string
 	}{
 		"empty annotations": {
@@ -2582,45 +2582,45 @@ func TestDefaultAnnotation(t *testing.T) {
 			want:        "",
 		},
 		"single below annotation": {
-			annotations: line.Annotations{{Content: "error here", Position: line.Below, Col: 0}},
+			annotations: line.Annotations{{Content: "error here", Placement: line.Below, Col: 0}},
 			position:    line.Below,
 			want:        "^ error here",
 		},
 		"single below annotation with padding": {
-			annotations: line.Annotations{{Content: "error", Position: line.Below, Col: 5}},
+			annotations: line.Annotations{{Content: "error", Placement: line.Below, Col: 5}},
 			position:    line.Below,
 			want:        "     ^ error",
 		},
 		"single above annotation": {
-			annotations: line.Annotations{{Content: "@@ hunk @@", Position: line.Above, Col: 0}},
+			annotations: line.Annotations{{Content: "@@ hunk @@", Placement: line.Above, Col: 0}},
 			position:    line.Above,
 			want:        "@@ hunk @@",
 		},
 		"single above annotation with padding": {
-			annotations: line.Annotations{{Content: "header", Position: line.Above, Col: 3}},
+			annotations: line.Annotations{{Content: "header", Placement: line.Above, Col: 3}},
 			position:    line.Above,
 			want:        "   header",
 		},
 		"multiple below annotations": {
 			annotations: line.Annotations{
-				{Content: "first", Position: line.Below, Col: 0},
-				{Content: "second", Position: line.Below, Col: 5},
+				{Content: "first", Placement: line.Below, Col: 0},
+				{Content: "second", Placement: line.Below, Col: 5},
 			},
 			position: line.Below,
 			want:     "^ first; second",
 		},
 		"multiple below annotations uses min col": {
 			annotations: line.Annotations{
-				{Content: "first", Position: line.Below, Col: 5},
-				{Content: "second", Position: line.Below, Col: 2},
+				{Content: "first", Placement: line.Below, Col: 5},
+				{Content: "second", Placement: line.Below, Col: 2},
 			},
 			position: line.Below,
 			want:     "  ^ first; second",
 		},
 		"multiple above annotations": {
 			annotations: line.Annotations{
-				{Content: "header1", Position: line.Above, Col: 0},
-				{Content: "header2", Position: line.Above, Col: 0},
+				{Content: "header1", Placement: line.Above, Col: 0},
+				{Content: "header2", Placement: line.Above, Col: 0},
 			},
 			position: line.Above,
 			want:     "header1; header2",
@@ -2634,7 +2634,7 @@ func TestDefaultAnnotation(t *testing.T) {
 			fn := niceyaml.DefaultAnnotation()
 			ctx := niceyaml.AnnotationContext{
 				Annotations: tc.annotations,
-				Position:    tc.position,
+				Placement:   tc.position,
 				Styles:      style.Styles{},
 			}
 
@@ -2655,7 +2655,7 @@ func TestPrinter_WithAnnotationFunc(t *testing.T) {
 
 		contents := ctx.Annotations.Contents()
 
-		if ctx.Position == line.Below {
+		if ctx.Placement == line.Below {
 			return ">>> " + strings.Join(contents, ", ")
 		}
 
@@ -2670,18 +2670,18 @@ func TestPrinter_WithAnnotationFunc(t *testing.T) {
 		"custom below annotation": {
 			lineIndex: 0,
 			annotation: line.Annotation{
-				Content:  "custom error",
-				Position: line.Below,
-				Col:      0,
+				Content:   "custom error",
+				Placement: line.Below,
+				Col:       0,
 			},
 			want: "key: value\n>>> custom error",
 		},
 		"custom above annotation": {
 			lineIndex: 0,
 			annotation: line.Annotation{
-				Content:  "custom header",
-				Position: line.Above,
-				Col:      0,
+				Content:   "custom header",
+				Placement: line.Above,
+				Col:       0,
 			},
 			want: "=== custom header\nkey: value",
 		},

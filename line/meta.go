@@ -7,12 +7,12 @@ import (
 	"go.jacobcolvin.com/niceyaml/style"
 )
 
-// RelativePosition indicates a position relative to a [Line].
-type RelativePosition int
+// Placement says where an [Annotation] sits relative to its [Line].
+type Placement int
 
 const (
 	// Above indicates content should appear above the line.
-	Above RelativePosition = iota
+	Above Placement = iota
 	// Below indicates content should appear below the line.
 	Below
 )
@@ -38,9 +38,9 @@ const (
 //
 // Add annotations using [Line.AddAnnotation].
 type Annotation struct {
-	Content  string
-	Position RelativePosition
-	Col      int // Optional, 0-indexed column position for the annotation.
+	Content   string
+	Placement Placement
+	Col       int // Optional, 0-indexed column position for the annotation.
 }
 
 // String returns the annotation content padded to the specified column.
@@ -57,12 +57,12 @@ func (a Annotation) String() string {
 // Annotations is a slice of [Annotation] values with helper methods.
 type Annotations []Annotation
 
-// FilterPosition returns annotations matching the given [RelativePosition].
-func (a Annotations) FilterPosition(pos RelativePosition) Annotations {
+// Filter returns the annotations with the given [Placement].
+func (a Annotations) Filter(p Placement) Annotations {
 	var result Annotations
 
 	for _, ann := range a {
-		if ann.Position == pos {
+		if ann.Placement == p {
 			result = append(result, ann)
 		}
 	}
@@ -129,8 +129,8 @@ func (a Annotations) String() string {
 //
 // Add overlays using [Line.AddOverlay] or [Lines.AddOverlay].
 type Overlay struct {
-	Kind style.Style
-	Cols position.Span
+	Style style.Style
+	Cols  position.Span
 }
 
 // Overlays is a slice of [Overlay] values for a single [Line].

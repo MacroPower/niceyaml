@@ -187,8 +187,8 @@ func (r *DiffResult) Hunks(context int) (line.Lines, position.Spans) {
 	for _, span := range hunkSpans {
 		hunkHeader := formatHunkHeader(span, r.beforeSums, r.afterSums)
 		lines[span.Start].AddAnnotation(line.Annotation{
-			Content:  hunkHeader,
-			Position: line.Above,
+			Content:   hunkHeader,
+			Placement: line.Above,
 		})
 	}
 

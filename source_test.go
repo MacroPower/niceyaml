@@ -30,7 +30,7 @@ func TestTokens_String_Annotation(t *testing.T) {
 		"single line with annotation": {
 			input: "key: value\n",
 			annotations: map[int]line.Annotation{
-				0: {Content: "error", Position: line.Below},
+				0: {Content: "error", Placement: line.Below},
 			},
 			want: stringtest.JoinLF(
 				"   1 | key: value",
@@ -43,7 +43,7 @@ func TestTokens_String_Annotation(t *testing.T) {
 				second: 2
 			`),
 			annotations: map[int]line.Annotation{
-				1: {Content: "here", Position: line.Below},
+				1: {Content: "here", Placement: line.Below},
 			},
 			want: stringtest.JoinLF(
 				"   1 | first: 1",
@@ -58,8 +58,8 @@ func TestTokens_String_Annotation(t *testing.T) {
 				third: 3
 			`),
 			annotations: map[int]line.Annotation{
-				0: {Content: "start", Position: line.Below},
-				2: {Content: "end", Position: line.Below},
+				0: {Content: "start", Placement: line.Below},
+				2: {Content: "end", Placement: line.Below},
 			},
 			want: stringtest.JoinLF(
 				"   1 | first: 1",
@@ -77,7 +77,7 @@ func TestTokens_String_Annotation(t *testing.T) {
 				d: 4
 			`),
 			annotations: map[int]line.Annotation{
-				1: {Content: "middle", Position: line.Below, Col: 2},
+				1: {Content: "middle", Placement: line.Below, Col: 2},
 			},
 			want: stringtest.JoinLF(
 				"   1 | a: 1",
@@ -901,7 +901,7 @@ func TestSource_AddOverlay(t *testing.T) {
 		ln := source.Lines()[0]
 		require.Len(t, ln.Overlays, 1)
 		assert.Equal(t, position.NewSpan(0, 5), ln.Overlays[0].Cols)
-		assert.Equal(t, style.Style("test1"), ln.Overlays[0].Kind)
+		assert.Equal(t, style.Style("test1"), ln.Overlays[0].Style)
 	})
 
 	t.Run("multi-line range splits across lines", func(t *testing.T) {
@@ -925,20 +925,20 @@ func TestSource_AddOverlay(t *testing.T) {
 		ln0 := source.Lines()[0]
 		require.Len(t, ln0.Overlays, 1)
 		assert.Equal(t, 3, ln0.Overlays[0].Cols.Start)
-		assert.Equal(t, style.Style("test2"), ln0.Overlays[0].Kind)
+		assert.Equal(t, style.Style("test2"), ln0.Overlays[0].Style)
 
 		// Middle line: full line.
 		ln1 := source.Lines()[1]
 		require.Len(t, ln1.Overlays, 1)
 		assert.Equal(t, 0, ln1.Overlays[0].Cols.Start)
-		assert.Equal(t, style.Style("test2"), ln1.Overlays[0].Kind)
+		assert.Equal(t, style.Style("test2"), ln1.Overlays[0].Style)
 
 		// Last line: start to col 5.
 		ln2 := source.Lines()[2]
 		require.Len(t, ln2.Overlays, 1)
 		assert.Equal(t, 0, ln2.Overlays[0].Cols.Start)
 		assert.Equal(t, 5, ln2.Overlays[0].Cols.End)
-		assert.Equal(t, style.Style("test2"), ln2.Overlays[0].Kind)
+		assert.Equal(t, style.Style("test2"), ln2.Overlays[0].Style)
 	})
 
 	t.Run("multiple ranges", func(t *testing.T) {

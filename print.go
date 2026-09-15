@@ -178,7 +178,7 @@ type GutterFunc func(GutterContext) string
 type AnnotationContext struct {
 	Styles      StyleGetter
 	Annotations line.Annotations
-	Position    line.RelativePosition
+	Placement   line.Placement
 }
 
 // AnnotationFunc returns the rendered annotation content based on
@@ -197,7 +197,7 @@ func DefaultAnnotation() AnnotationFunc {
 		combined := strings.Join(ctx.Annotations.Contents(), "; ")
 
 		// Add "^ " prefix for Below annotations.
-		if ctx.Position == line.Below {
+		if ctx.Placement == line.Below {
 			return padding + "^ " + combined
 		}
 
@@ -435,8 +435,8 @@ func (p *Printer) renderLinesInSpan(t LineIterator, span position.Span) string {
 		)
 
 		if p.annotationsEnabled {
-			hasAboveAnnotation = len(ln.Annotations.FilterPosition(line.Above)) > 0
-			hasBelowAnnotation = len(ln.Annotations.FilterPosition(line.Below)) > 0
+			hasAboveAnnotation = len(ln.Annotations.Filter(line.Above)) > 0
+			hasBelowAnnotation = len(ln.Annotations.Filter(line.Below)) > 0
 		}
 
 		if hasAboveAnnotation {
@@ -508,17 +508,17 @@ func (p *Printer) renderAnnotation(
 	ln line.Line,
 	pos position.Position,
 	lineNum, totalLines int,
-	relPos line.RelativePosition,
+	relPos line.Placement,
 	gutterWidth int,
 ) {
-	anns := ln.Annotations.FilterPosition(relPos)
+	anns := ln.Annotations.Filter(relPos)
 	if len(anns) == 0 {
 		return
 	}
 
 	annCtx := AnnotationContext{
 		Annotations: anns,
-		Position:    relPos,
+		Placement:   relPos,
 		Styles:      p.styles,
 	}
 	content := p.annotationFunc(annCtx)
@@ -629,7 +629,7 @@ func (p *Printer) styleLineWithRanges(
 
 	for _, o := range overlays {
 		if o.Cols.Overlaps(cols) {
-			if st := p.styles.Style(o.Kind); st != nil {
+			if st := p.styles.Style(o.Style); st != nil {
 				active = append(active, overlayWithStyle{
 					cols:  o.Cols,
 					style: st,

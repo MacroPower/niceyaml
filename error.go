@@ -636,9 +636,9 @@ func prepareLineAnnotations(positions []errorPosition) map[int]line.Annotation {
 		}
 
 		result[lineIdx] = line.Annotation{
-			Content:  strings.Join(messages, "; "),
-			Position: line.Below,
-			Col:      minCol,
+			Content:   strings.Join(messages, "; "),
+			Placement: line.Below,
+			Col:       minCol,
 		}
 	}
 
@@ -753,8 +753,8 @@ func (e *Error) renderErrorSource(a *Error, src *Source, mainToken *token.Token)
 	for i, span := range hunkSpans {
 		if i > 0 {
 			view[span.Start].AddAnnotation(line.Annotation{
-				Content:  "...",
-				Position: line.Above,
+				Content:   "...",
+				Placement: line.Above,
 			})
 		}
 	}

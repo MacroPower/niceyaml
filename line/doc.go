@@ -85,7 +85,7 @@
 //
 //	l.AddAnnotation(line.Annotation{
 //	    Content:  "missing required field",
-//	    Position: line.Below,
+//	    Placement: line.Below,
 //	    Col:      4,  // Align with the error location.
 //	})
 //

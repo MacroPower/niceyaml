@@ -2693,7 +2693,7 @@ func TestViewport_DoesNotMutateSource(t *testing.T) {
 
 	// The caller's overlay survives search highlighting and clearing.
 	require.Len(t, source.Lines()[0].Overlays, 1)
-	assert.Equal(t, style.GenericError, source.Lines()[0].Overlays[0].Kind)
+	assert.Equal(t, style.GenericError, source.Lines()[0].Overlays[0].Style)
 }
 
 func TestViewport_SearchAcrossRevisions(t *testing.T) {

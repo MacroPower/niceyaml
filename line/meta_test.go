@@ -141,7 +141,7 @@ func TestAnnotations_FilterPosition(t *testing.T) {
 
 	tcs := map[string]struct {
 		anns     line.Annotations
-		position line.RelativePosition
+		position line.Placement
 		want     line.Annotations
 	}{
 		"empty annotations": {
@@ -151,44 +151,44 @@ func TestAnnotations_FilterPosition(t *testing.T) {
 		},
 		"filter above from mixed": {
 			anns: line.Annotations{
-				{Content: "above1", Position: line.Above},
-				{Content: "below1", Position: line.Below},
-				{Content: "above2", Position: line.Above},
+				{Content: "above1", Placement: line.Above},
+				{Content: "below1", Placement: line.Below},
+				{Content: "above2", Placement: line.Above},
 			},
 			position: line.Above,
 			want: line.Annotations{
-				{Content: "above1", Position: line.Above},
-				{Content: "above2", Position: line.Above},
+				{Content: "above1", Placement: line.Above},
+				{Content: "above2", Placement: line.Above},
 			},
 		},
 		"filter below from mixed": {
 			anns: line.Annotations{
-				{Content: "above1", Position: line.Above},
-				{Content: "below1", Position: line.Below},
-				{Content: "below2", Position: line.Below},
+				{Content: "above1", Placement: line.Above},
+				{Content: "below1", Placement: line.Below},
+				{Content: "below2", Placement: line.Below},
 			},
 			position: line.Below,
 			want: line.Annotations{
-				{Content: "below1", Position: line.Below},
-				{Content: "below2", Position: line.Below},
+				{Content: "below1", Placement: line.Below},
+				{Content: "below2", Placement: line.Below},
 			},
 		},
 		"no matches": {
 			anns: line.Annotations{
-				{Content: "below", Position: line.Below},
+				{Content: "below", Placement: line.Below},
 			},
 			position: line.Above,
 			want:     nil,
 		},
 		"all match": {
 			anns: line.Annotations{
-				{Content: "a", Position: line.Above},
-				{Content: "b", Position: line.Above},
+				{Content: "a", Placement: line.Above},
+				{Content: "b", Placement: line.Above},
 			},
 			position: line.Above,
 			want: line.Annotations{
-				{Content: "a", Position: line.Above},
-				{Content: "b", Position: line.Above},
+				{Content: "a", Placement: line.Above},
+				{Content: "b", Placement: line.Above},
 			},
 		},
 	}
@@ -197,7 +197,7 @@ func TestAnnotations_FilterPosition(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := tc.anns.FilterPosition(tc.position)
+			got := tc.anns.Filter(tc.position)
 			assert.Equal(t, tc.want, got)
 		})
 	}
