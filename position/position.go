@@ -48,7 +48,9 @@ func NewFromToken(tk *token.Token) Position {
 	return Position{Line: line, Col: col}
 }
 
-// String returns the position in "line:col" format with 1-indexed values.
+// String returns the position in "line:col" format with 1-indexed values,
+// which is how editors count, so the output suits people. The fields
+// themselves stay 0-indexed.
 func (p Position) String() string {
 	return fmt.Sprintf("%d:%d", p.Line+1, p.Col+1)
 }
@@ -81,7 +83,7 @@ func (r Range) Contains(pos Position) bool {
 }
 
 // String returns the range in "startLine:startCol-endLine:endCol" format with
-// 1-indexed values.
+// 1-indexed values, as [Position.String] does.
 func (r Range) String() string {
 	return fmt.Sprintf("%s-%s", r.Start.String(), r.End.String())
 }
