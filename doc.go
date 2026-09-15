@@ -181,7 +181,7 @@
 // # Text Search
 //
 // [Finder] locates strings within tokens, returning [position.Range] values
-// suitable for [Source.AddOverlay] or [Lines.AddOverlay].
+// suitable for [Lines.AddOverlay] and [Lines.BlendOverlay].
 //
 // Use [normalizer.New] with [WithNormalizer] for case-insensitive,
 // diacritic-insensitive matching:
