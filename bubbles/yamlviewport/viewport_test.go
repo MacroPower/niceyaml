@@ -2515,6 +2515,53 @@ func TestViewport_ZeroValue(t *testing.T) {
 	assert.Empty(t, m.View())
 }
 
+// countingSearcher wraps a [niceyaml.Finder] and counts its Load calls.
+type countingSearcher struct {
+	*niceyaml.Finder
+
+	loads int
+}
+
+func (c *countingSearcher) Load(lines niceyaml.LineIterator) {
+	c.loads++
+	c.Finder.Load(lines)
+}
+
+func TestViewport_LayoutChangesKeepSearchIndex(t *testing.T) {
+	t.Parallel()
+
+	searcher := &countingSearcher{Finder: niceyaml.NewFinder()}
+	m := yamlviewport.New(
+		yamlviewport.WithPrinter(testPrinter()),
+		yamlviewport.WithSearcher(searcher),
+	)
+	m.SetWidth(80)
+	m.SetHeight(10)
+	m.AddRevision(niceyaml.NewSourceFromString("key: alpha\n", niceyaml.WithName("v1")))
+	m.AddRevision(niceyaml.NewSourceFromString("key: alpha\nother: alpha\n", niceyaml.WithName("v2")))
+
+	m.SetSearchTerm("alpha")
+	require.Equal(t, 2, m.SearchCount())
+	require.Equal(t, 1, searcher.loads)
+
+	// Printer, style, wrap, and dimension changes leave the view alone, so
+	// the searcher keeps its index and the matches survive.
+	m.SetPrinter(testPrinterWithColors())
+	m.SetStyle(lipgloss.NewStyle().Padding(1))
+	m.SetWordWrap(false)
+	m.SetWidth(60)
+	m.SetHeight(5)
+
+	assert.Equal(t, 1, searcher.loads)
+	assert.Equal(t, 2, m.SearchCount())
+	assert.NotEmpty(t, m.View())
+
+	// A revision change rebuilds the view and reloads the searcher.
+	m.PrevRevision()
+	assert.Equal(t, 2, searcher.loads)
+	assert.Equal(t, 1, m.SearchCount())
+}
+
 func TestViewport_WithSearcher(t *testing.T) {
 	t.Parallel()
 

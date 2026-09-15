@@ -222,14 +222,14 @@ func (m *Model) Width() int {
 // SetWidth sets the width of the viewport and clamps the scroll offsets to
 // the new bounds.
 func (m *Model) SetWidth(w int) {
-	if m.width != w {
-		m.width = w
+	m.width = w
+	m.relayout()
+}
 
-		if m.wrapEnabled {
-			m.rerender()
-		}
-	}
-
+// relayout responds to a change in how the view is laid out, such as a new
+// printer, style, wrap setting, or width, without rebuilding the view. It
+// clamps both scroll offsets to the bounds of the new layout.
+func (m *Model) relayout() {
 	m.clampOffsets()
 }
 
@@ -251,11 +251,14 @@ func (m *Model) renderPrinter(width int) *niceyaml.Printer {
 	return m.printer.With(niceyaml.WithWidth(width))
 }
 
-// SetPrinter sets the [*niceyaml.Printer] used for rendering and triggers a
-// re-render. See [WithPrinter].
+// SetPrinter sets the [*niceyaml.Printer] used for rendering. See
+// [WithPrinter].
+//
+// The view, its diff, and its search matches stay as they are, so switching
+// themes costs one render and no diff or search index rebuild.
 func (m *Model) SetPrinter(p *niceyaml.Printer) {
 	m.printer = p
-	m.rerender()
+	m.relayout()
 }
 
 // SetSource replaces the revision history with a single revision.
@@ -277,18 +280,14 @@ func (m *Model) AddRevision(s *niceyaml.Source) {
 	m.revisions = append(m.revisions, s)
 	m.revIndex = m.revisions.Len() - 1
 
-	m.rerender()
-
-	if m.YOffset() > m.maxYOffset() {
-		m.GotoBottom()
-	}
+	m.rebuildViews()
 }
 
 // ClearRevisions removes all revisions from the history.
 func (m *Model) ClearRevisions() {
 	m.revisions = nil
 	m.revIndex = 0
-	m.rerender()
+	m.rebuildViews()
 }
 
 // RevisionIndex returns the current revision index.
@@ -321,7 +320,7 @@ func (m *Model) GoToRevision(index int) {
 	}
 
 	m.revIndex = clamp(index, 0, m.revisions.Len()-1)
-	m.rerender()
+	m.rebuildViews()
 	m.GotoTop()
 }
 
@@ -366,10 +365,10 @@ func (m *Model) DiffMode() DiffMode {
 	return m.diffMode
 }
 
-// SetDiffMode sets the diff display mode and rerenders.
+// SetDiffMode sets the diff display mode and rebuilds the view.
 func (m *Model) SetDiffMode(mode DiffMode) {
 	m.diffMode = mode
-	m.rerender()
+	m.rebuildViews()
 }
 
 // ToggleDiffMode cycles between diff modes.
@@ -383,7 +382,7 @@ func (m *Model) ToggleDiffMode() {
 		m.diffMode = DiffModeAdjacent
 	}
 
-	m.rerender()
+	m.rebuildViews()
 }
 
 // ViewMode returns the current view mode.
@@ -391,10 +390,10 @@ func (m *Model) ViewMode() ViewMode {
 	return m.viewMode
 }
 
-// SetViewMode sets the view mode and rerenders.
+// SetViewMode sets the view mode and rebuilds the view.
 func (m *Model) SetViewMode(mode ViewMode) {
 	m.viewMode = mode
-	m.rerender()
+	m.rebuildViews()
 }
 
 // ToggleViewMode cycles between view modes.
@@ -406,7 +405,7 @@ func (m *Model) ToggleViewMode() {
 		m.viewMode = ViewModeFull
 	}
 
-	m.rerender()
+	m.rebuildViews()
 }
 
 // HunkContext returns the number of context lines shown around diff hunks.
@@ -425,9 +424,9 @@ func (m *Model) WordWrap() bool {
 	return m.wrapEnabled
 }
 
-// SetWordWrap turns word wrapping on or off and rerenders. Enabling it
-// resets the horizontal scroll offset, since wrapped lines never overflow.
-// The default is on.
+// SetWordWrap turns word wrapping on or off. Enabling it resets the
+// horizontal scroll offset, since wrapped lines never overflow. The default
+// is on.
 func (m *Model) SetWordWrap(enabled bool) {
 	m.wrapEnabled = enabled
 
@@ -435,7 +434,7 @@ func (m *Model) SetWordWrap(enabled bool) {
 		m.xOffset = 0
 	}
 
-	m.rerender()
+	m.relayout()
 }
 
 // ToggleWordWrap toggles word wrapping on or off. See [Model.SetWordWrap].
@@ -448,13 +447,13 @@ func (m *Model) Style() lipgloss.Style {
 	return m.style
 }
 
-// SetStyle sets the container style applied to the viewport frame and
-// rerenders, since the frame size changes the content width.
+// SetStyle sets the container style applied to the viewport frame. The frame
+// size changes the content area, so the scroll offsets clamp to it.
 //
 //nolint:gocritic // hugeParam: Copying.
 func (m *Model) SetStyle(s lipgloss.Style) {
 	m.style = s
-	m.rerender()
+	m.relayout()
 }
 
 // NextRevision moves to the next revision in history.
@@ -480,14 +479,14 @@ func (m *Model) seekRevision(delta int) {
 	}
 
 	m.revIndex = clamp(m.revIndex+delta, 0, m.revisions.Len()-1)
-	m.rerender()
+	m.rebuildViews()
 	m.GotoTop()
 }
 
-// rerender rebuilds the displayed views from the revision state and refreshes
-// the search state.
-// Actual rendering is deferred to renderVisible for on-demand rendering.
-func (m *Model) rerender() {
+// rebuildViews rebuilds the displayed views from the revision, diff mode, and
+// view mode, then refreshes the search state and clamps the scroll offsets.
+// Rendering itself waits for View, which renders only the visible window.
+func (m *Model) rebuildViews() {
 	m.diffResult = nil // Invalidate cached diff result.
 	m.left = nil
 	m.right = nil
@@ -508,6 +507,7 @@ func (m *Model) rerender() {
 	}
 
 	m.refreshSearch()
+	m.clampOffsets()
 }
 
 // refreshSearch recomputes search matches and overlays for the current views
