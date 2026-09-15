@@ -462,10 +462,35 @@ items:
 		wantValue string
 		wantType  token.Type
 	}{
-		"root value returns mapping separator": {
+		"root value returns the first key": {
 			path:      paths.Root().Value(),
-			wantValue: ":",
-			wantType:  token.MappingValueType,
+			wantValue: "name",
+			wantType:  token.StringType,
+		},
+		"root key returns the first key": {
+			path:      paths.Root().Key(),
+			wantValue: "name",
+			wantType:  token.StringType,
+		},
+		"mapping value target returns its first key": {
+			path:      paths.Root().Child("metadata").Value(),
+			wantValue: "labels",
+			wantType:  token.StringType,
+		},
+		"mapping key target returns the entry key": {
+			path:      paths.Root().Child("metadata").Key(),
+			wantValue: "metadata",
+			wantType:  token.StringType,
+		},
+		"sequence value target returns its first element": {
+			path:      paths.Root().Child("items").Value(),
+			wantValue: "first",
+			wantType:  token.StringType,
+		},
+		"sequence key target returns the entry key": {
+			path:      paths.Root().Child("items").Key(),
+			wantValue: "items",
+			wantType:  token.StringType,
 		},
 		"simple key target returns key token": {
 			path:      paths.Root().Child("name").Key(),
@@ -542,7 +567,7 @@ func TestPath_Token_InvalidPath(t *testing.T) {
 
 	path := paths.Root().Child("nonexistent").Value()
 	_, err = path.Token(file.Docs[0])
-	require.ErrorIs(t, err, yaml.ErrNotFoundNode)
+	require.ErrorIs(t, err, paths.ErrNotFound)
 }
 
 func TestPath_Token_NoDocument(t *testing.T) {
@@ -658,5 +683,404 @@ func TestPath_Node(t *testing.T) {
 		seq, ok := node.(*ast.SequenceNode)
 		require.True(t, ok, "want *ast.SequenceNode, got %T", node)
 		assert.Len(t, seq.Values, 2)
+	}
+}
+
+func TestPath_Token_Anchors(t *testing.T) {
+	t.Parallel()
+
+	input := `
+base: &b
+  a: 1
+  b: 2
+flow: &f {x: 10}
+other: *b
+list: &l
+  - one
+  - two
+copy: *l
+tagged: !!str 5
+merged:
+  <<: *b
+  b: 20
+  c: 3
+multi:
+  <<: [*b, *f]
+chain:
+  <<: *m
+m: &m
+  <<: *b
+  d: 4
+`
+
+	source := niceyaml.NewSourceFromString(input)
+	file, err := source.File()
+	require.NoError(t, err)
+
+	tcs := map[string]struct {
+		path      *paths.Path
+		wantValue string
+		wantLine  int
+	}{
+		"child of anchored mapping": {
+			path:      paths.Root().Child("base", "a").Value(),
+			wantValue: "1",
+			wantLine:  3,
+		},
+		"key of anchored mapping entry": {
+			path:      paths.Root().Child("base", "a").Key(),
+			wantValue: "a",
+			wantLine:  3,
+		},
+		"anchored mapping value target skips the anchor": {
+			path:      paths.Root().Child("base").Value(),
+			wantValue: "a",
+			wantLine:  3,
+		},
+		"child through alias lands in the anchor": {
+			path:      paths.Root().Child("other", "b").Value(),
+			wantValue: "2",
+			wantLine:  4,
+		},
+		"alias value target is the alias token": {
+			path:      paths.Root().Child("other").Value(),
+			wantValue: "*",
+			wantLine:  6,
+		},
+		"alias key target is its key": {
+			path:      paths.Root().Child("other").Key(),
+			wantValue: "other",
+			wantLine:  6,
+		},
+		"index through anchored sequence": {
+			path:      paths.Root().Child("list").Index(1).Value(),
+			wantValue: "two",
+			wantLine:  9,
+		},
+		"index through aliased sequence": {
+			path:      paths.Root().Child("copy").Index(0).Value(),
+			wantValue: "one",
+			wantLine:  8,
+		},
+		"tagged scalar value target skips the tag": {
+			path:      paths.Root().Child("tagged").Value(),
+			wantValue: "5",
+			wantLine:  11,
+		},
+		"merged key resolves to the anchor": {
+			path:      paths.Root().Child("merged", "a").Value(),
+			wantValue: "1",
+			wantLine:  3,
+		},
+		"merged key target resolves to the anchor key": {
+			path:      paths.Root().Child("merged", "a").Key(),
+			wantValue: "a",
+			wantLine:  3,
+		},
+		"own key wins over merged key": {
+			path:      paths.Root().Child("merged", "b").Value(),
+			wantValue: "20",
+			wantLine:  14,
+		},
+		"own key next to merge": {
+			path:      paths.Root().Child("merged", "c").Value(),
+			wantValue: "3",
+			wantLine:  15,
+		},
+		"merge sequence first source": {
+			path:      paths.Root().Child("multi", "a").Value(),
+			wantValue: "1",
+			wantLine:  3,
+		},
+		"merge sequence second source": {
+			path:      paths.Root().Child("multi", "x").Value(),
+			wantValue: "10",
+			wantLine:  5,
+		},
+		"merge of a merged mapping": {
+			path:      paths.Root().Child("chain", "a").Value(),
+			wantValue: "1",
+			wantLine:  3,
+		},
+		"merge of a merged mapping own key": {
+			path:      paths.Root().Child("chain", "d").Value(),
+			wantValue: "4",
+			wantLine:  22,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tk, err := tc.path.Token(file.Docs[0])
+			require.NoError(t, err)
+			require.NotNil(t, tk)
+			assert.Equal(t, tc.wantValue, tk.Value)
+			assert.Equal(t, tc.wantLine, tk.Position.Line)
+		})
+	}
+
+	t.Run("merged key not present", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := paths.Root().Child("merged", "zzz").Value().Token(file.Docs[0])
+		require.ErrorIs(t, err, paths.ErrNotFound)
+	})
+
+	t.Run("merge key entry itself is addressable", func(t *testing.T) {
+		t.Parallel()
+
+		tk, err := paths.Root().Child("merged", "<<").Key().Token(file.Docs[0])
+		require.NoError(t, err)
+		assert.Equal(t, "<<", tk.Value)
+	})
+}
+
+func TestPath_Node_Anchors(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("base: &b {a: 1}\nother: *b\ntagged: !!str 5\n")
+	file, err := source.File()
+	require.NoError(t, err)
+
+	t.Run("anchor is looked through", func(t *testing.T) {
+		t.Parallel()
+
+		node, err := paths.Root().Child("base").Path().Node(file.Docs[0])
+		require.NoError(t, err)
+		assert.IsType(t, &ast.MappingNode{}, node)
+	})
+
+	t.Run("alias is looked through", func(t *testing.T) {
+		t.Parallel()
+
+		node, err := paths.Root().Child("other").Path().Node(file.Docs[0])
+		require.NoError(t, err)
+		assert.IsType(t, &ast.MappingNode{}, node)
+	})
+
+	t.Run("tag is kept", func(t *testing.T) {
+		t.Parallel()
+
+		node, err := paths.Root().Child("tagged").Path().Node(file.Docs[0])
+		require.NoError(t, err)
+		assert.IsType(t, &ast.TagNode{}, node)
+	})
+}
+
+func TestPath_UnknownAlias(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("base: &b {a: 1}\nother: *nope\n")
+	file, err := source.File()
+	require.NoError(t, err)
+
+	_, err = paths.Root().Child("other", "a").Value().Token(file.Docs[0])
+	require.ErrorIs(t, err, paths.ErrNotFound)
+	assert.Contains(t, err.Error(), "*nope")
+
+	_, err = paths.Root().Child("other").Path().Node(file.Docs[0])
+	require.ErrorIs(t, err, paths.ErrNotFound)
+}
+
+func TestPath_Token_NotFound(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("name: test\nitems: [a, b]\n")
+	file, err := source.File()
+	require.NoError(t, err)
+
+	tcs := map[string]*paths.Path{
+		"missing key":              paths.Root().Child("nope").Value(),
+		"child of scalar":          paths.Root().Child("name", "x").Value(),
+		"index of mapping":         paths.Root().Index(0).Value(),
+		"index of scalar":          paths.Root().Child("name").Index(0).Value(),
+		"index out of range":       paths.Root().Child("items").Index(2).Value(),
+		"negative index":           paths.Root().Child("items").Index(-1).Value(),
+		"child of sequence":        paths.Root().Child("items", "a").Value(),
+		"missing key then index":   paths.Root().Child("nope").Index(0).Value(),
+		"missing key then child":   paths.Root().Child("nope", "deeper").Key(),
+		"index then missing child": paths.Root().Child("items").Index(0).Child("x").Key(),
+	}
+
+	for name, path := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := path.Token(file.Docs[0])
+			require.ErrorIs(t, err, paths.ErrNotFound)
+			assert.Contains(t, err.Error(), path.String())
+
+			_, err = path.Node(file.Docs[0])
+			require.ErrorIs(t, err, paths.ErrNotFound)
+
+			nodes, err := path.Nodes(file.Docs[0])
+			require.NoError(t, err)
+			assert.Empty(t, nodes)
+		})
+	}
+}
+
+func TestPath_Wildcards(t *testing.T) {
+	t.Parallel()
+
+	input := `
+items:
+  - name: a
+    tags: [x, y]
+  - name: b
+    tags: [z]
+meta:
+  name: c
+  nested:
+    name: d
+ref: &r
+  name: e
+alias: *r
+`
+
+	source := niceyaml.NewSourceFromString(input)
+	file, err := source.File()
+	require.NoError(t, err)
+
+	tcs := map[string]struct {
+		path *paths.Path
+		want []string
+	}{
+		"index all": {
+			path: paths.Root().Child("items").IndexAll().Child("name").Path(),
+			want: []string{"a", "b"},
+		},
+		"index all then index all": {
+			path: paths.Root().Child("items").IndexAll().Child("tags").IndexAll().Path(),
+			want: []string{"x", "y", "z"},
+		},
+		"index all on a mapping matches nothing": {
+			path: paths.Root().Child("meta").IndexAll().Path(),
+			want: []string{},
+		},
+		"recursive visits anchors once and skips aliases": {
+			path: paths.Root().Recursive("name").Path(),
+			want: []string{"a", "b", "c", "d", "e"},
+		},
+		"recursive below a child": {
+			path: paths.Root().Child("meta").Recursive("name").Path(),
+			want: []string{"c", "d"},
+		},
+		"recursive then index": {
+			path: paths.Root().Recursive("tags").Index(0).Path(),
+			want: []string{"x", "z"},
+		},
+		"single match": {
+			path: paths.Root().Child("meta", "name").Path(),
+			want: []string{"c"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			nodes, err := tc.path.Nodes(file.Docs[0])
+			require.NoError(t, err)
+
+			got := make([]string, 0, len(nodes))
+			for _, n := range nodes {
+				got = append(got, n.GetToken().Value)
+			}
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+
+	t.Run("token and node refuse wildcards", func(t *testing.T) {
+		t.Parallel()
+
+		path := paths.Root().Child("items").IndexAll().Child("name").Value()
+
+		_, err := path.Token(file.Docs[0])
+		require.ErrorIs(t, err, paths.ErrWildcard)
+
+		_, err = path.Node(file.Docs[0])
+		require.ErrorIs(t, err, paths.ErrWildcard)
+
+		_, err = paths.Root().Recursive("name").Key().Token(file.Docs[0])
+		require.ErrorIs(t, err, paths.ErrWildcard)
+	})
+
+	t.Run("nodes rejects nil path and document", func(t *testing.T) {
+		t.Parallel()
+
+		var path *paths.Path
+
+		_, err := path.Nodes(file.Docs[0])
+		require.ErrorIs(t, err, paths.ErrNilPath)
+
+		_, err = paths.Root().Path().Nodes(nil)
+		require.ErrorIs(t, err, paths.ErrNoDocument)
+	})
+}
+
+func TestPath_Token_Keys(t *testing.T) {
+	t.Parallel()
+
+	input := `
+"quoted key": 1
+'single': 2
+plain.dotted: 3
+7: 4
+? complex
+: 5
+empty: {}
+none: []
+`
+
+	source := niceyaml.NewSourceFromString(input)
+	file, err := source.File()
+	require.NoError(t, err)
+
+	tcs := map[string]struct {
+		path      *paths.Path
+		wantValue string
+	}{
+		"double quoted key": {
+			path:      paths.Root().Child("quoted key").Value(),
+			wantValue: "1",
+		},
+		"single quoted key": {
+			path:      paths.Root().Child("single").Value(),
+			wantValue: "2",
+		},
+		"dotted key": {
+			path:      paths.Root().Child("plain.dotted").Value(),
+			wantValue: "3",
+		},
+		"integer key": {
+			path:      paths.Root().Child("7").Value(),
+			wantValue: "4",
+		},
+		"explicit key": {
+			path:      paths.Root().Child("complex").Value(),
+			wantValue: "5",
+		},
+		"empty flow mapping value target": {
+			path:      paths.Root().Child("empty").Value(),
+			wantValue: "{",
+		},
+		"empty flow sequence value target": {
+			path:      paths.Root().Child("none").Value(),
+			wantValue: "[",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tk, err := tc.path.Token(file.Docs[0])
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantValue, tk.Value)
+		})
 	}
 }

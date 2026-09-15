@@ -16,6 +16,20 @@
 // returns the node. Both resolve within a single document, so callers
 // working with multi-document files pick the document first.
 //
+// # Resolution
+//
+// Selectors apply to the content of a node, so an anchor (`&name`) or tag
+// (`!!map`) on a value is transparent, an alias (`*name`) resolves to the
+// anchor it names, and a mapping key lookup sees the entries a `<<` merge
+// key brings in. A key the mapping defines itself wins over a merged one,
+// and when `<<` lists several sources the earlier source wins. A token
+// found through an alias or merge key sits where the anchor defines it,
+// which is where the offending text is.
+//
+// The wildcard selectors `[*]` and `..name` select any number of nodes, so
+// [Path.Token] and [Path.Node] reject them with [ErrWildcard]; use
+// [Path.Nodes] to list every match.
+//
 // # Integration with niceyaml.Error
 //
 // [Path] is directly usable with [niceyaml.WithPath] to highlight either keys

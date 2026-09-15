@@ -397,6 +397,39 @@ func TestValidator_PathTarget(t *testing.T) {
 			`),
 			wantContains: "<genericError>user</genericError>",
 		},
+		"error behind a merge key highlights the anchored value": {
+			// The validator sees merged data, so the path leads through the
+			// merge key to the anchor that defines the offending value.
+			schema: `{
+				"type": "object",
+				"properties": {
+					"user": {
+						"type": "object",
+						"properties": {
+							"age": {"type": "integer"}
+						}
+					}
+				}
+			}`,
+			input: stringtest.Input(`
+				base: &b
+				  age: old
+				user:
+				  <<: *b
+				  name: x
+			`),
+			wantContains: "<genericError>old</genericError>",
+		},
+		"required error on the root highlights the first key": {
+			schema: `{
+				"type": "object",
+				"required": ["name"]
+			}`,
+			input: stringtest.Input(`
+				other: x
+			`),
+			wantContains: "<genericError>other</genericError>",
+		},
 		"enum error highlights value": {
 			schema: `{
 				"type": "object",

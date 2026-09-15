@@ -12,11 +12,18 @@ import (
 )
 
 var (
-	// ErrNilPath indicates a nil [*Path] was asked to resolve a token.
+	// ErrNilPath indicates a resolve call on a nil [*Path].
 	ErrNilPath = errors.New("nil path")
 
 	// ErrNoDocument indicates a nil document or a document without a body.
 	ErrNoDocument = errors.New("no document")
+
+	// ErrNotFound indicates that nothing exists at the path in the document.
+	ErrNotFound = errors.New("not found")
+
+	// ErrWildcard indicates a request for a single node or token from a path
+	// with a `[*]` or `..` selector. Use [Path.Nodes] for such paths.
+	ErrWildcard = errors.New("wildcard path matches any number of nodes")
 )
 
 // Part selects which token of a resolved node a [Path] refers to.
@@ -278,11 +285,22 @@ func (p *Path) YAMLPath() *yaml.Path {
 	return pb.Build()
 }
 
-// Node resolves the node at the path in doc, ignoring the [Part].
+// wildcard reports whether any selector can match more than one node.
+func (p *Path) wildcard() bool {
+	for _, seg := range p.segments {
+		if seg.kind == segmentIndexAll || seg.kind == segmentRecursive {
+			return true
+		}
+	}
+
+	return false
+}
+
+// matches resolves the path in doc and returns every match.
 //
-// Returns [ErrNilPath] for a nil Path, [ErrNoDocument] when doc or its body
-// is nil, and wraps [yaml.ErrNotFoundNode] when nothing exists at the path.
-func (p *Path) Node(doc *ast.DocumentNode) (ast.Node, error) {
+// Returns [ErrNilPath] for a nil Path and [ErrNoDocument] when doc or its
+// body is nil.
+func (p *Path) matches(doc *ast.DocumentNode) ([]match, error) {
 	if p == nil {
 		return nil, ErrNilPath
 	}
@@ -291,13 +309,85 @@ func (p *Path) Node(doc *ast.DocumentNode) (ast.Node, error) {
 		return nil, ErrNoDocument
 	}
 
-	node, err := p.YAMLPath().FilterNode(doc.Body)
+	found, err := newResolver(doc).resolve(doc.Body, p.segments)
 	if err != nil {
 		return nil, fmt.Errorf("resolve %s: %w", p, err)
 	}
 
-	if node == nil {
-		return nil, fmt.Errorf("resolve %s: %w", p, yaml.ErrNotFoundNode)
+	return found, nil
+}
+
+// single resolves the path in doc to exactly one match.
+//
+// Returns [ErrWildcard] for a path with a `[*]` or `..` selector and wraps
+// [ErrNotFound] when nothing exists at the path.
+func (p *Path) single(doc *ast.DocumentNode) (match, error) {
+	if p != nil && p.wildcard() {
+		return match{}, fmt.Errorf("resolve %s: %w", p, ErrWildcard)
+	}
+
+	found, err := p.matches(doc)
+	if err != nil {
+		return match{}, err
+	}
+
+	if len(found) == 0 {
+		return match{}, fmt.Errorf("resolve %s: %w", p, ErrNotFound)
+	}
+
+	return found[0], nil
+}
+
+// Nodes resolves every node the path selects in doc, in document order,
+// ignoring the [Part]. A path without `[*]` or `..` selectors yields at most
+// one node; an empty result means nothing exists at the path.
+//
+// It looks through anchors and aliases, so each node is the content the
+// path names. Selectors follow aliases to their anchor and see the entries a
+// `<<` merge key brings into a mapping.
+//
+// Returns [ErrNilPath] for a nil Path and [ErrNoDocument] when doc or its
+// body is nil.
+func (p *Path) Nodes(doc *ast.DocumentNode) ([]ast.Node, error) {
+	found, err := p.matches(doc)
+	if err != nil {
+		return nil, err
+	}
+
+	r := newResolver(doc)
+	nodes := make([]ast.Node, 0, len(found))
+
+	for _, m := range found {
+		node, err := r.deref(m.node)
+		if err != nil {
+			return nil, fmt.Errorf("resolve %s: %w", p, err)
+		}
+
+		nodes = append(nodes, node)
+	}
+
+	return nodes, nil
+}
+
+// Node resolves the node at the path in doc, ignoring the [Part].
+//
+// It looks through anchors and aliases, so the result is the content the
+// path names. Selectors follow aliases to their anchor and see the entries a
+// `<<` merge key brings into a mapping.
+//
+// Returns [ErrNilPath] for a nil Path, [ErrNoDocument] when doc or its body
+// is nil, [ErrWildcard] for a path with a `[*]` or `..` selector (use
+// [Path.Nodes] for those), and wraps [ErrNotFound] when nothing exists at
+// the path.
+func (p *Path) Node(doc *ast.DocumentNode) (ast.Node, error) {
+	m, err := p.single(doc)
+	if err != nil {
+		return nil, err
+	}
+
+	node, err := newResolver(doc).deref(m.node)
+	if err != nil {
+		return nil, fmt.Errorf("resolve %s: %w", p, err)
 	}
 
 	return node, nil
@@ -305,41 +395,26 @@ func (p *Path) Node(doc *ast.DocumentNode) (ast.Node, error) {
 
 // Token resolves the [*token.Token] the path refers to in doc.
 //
-// The path is resolved against the document body only, so the same path
+// The path resolves against the document body only, so the same path
 // resolves to different tokens in different documents of one file. Returns
-// [ErrNilPath] for a nil Path, [ErrNoDocument] when doc or its body is nil,
-// and wraps [yaml.ErrNotFoundNode] when nothing exists at the path.
+// the same errors as [Path.Node].
 //
-// If the target is [PartKey] and the path points to a mapping value, Token
-// returns the key token. Otherwise, it returns the resolved node's token.
+// For [PartKey], Token returns the key token of the mapping entry the last
+// selector picked. For [PartValue] and [PartNode], and for PartKey when the
+// path ends at a sequence element or the root, Token returns the token that
+// starts the resolved node: a scalar's own token, the first key of a
+// mapping, or the first element of a sequence. An alias resolves to its own
+// token rather than the anchor's content, since that is where the path
+// points in the source.
 func (p *Path) Token(doc *ast.DocumentNode) (*token.Token, error) {
-	node, err := p.Node(doc)
+	m, err := p.single(doc)
 	if err != nil {
 		return nil, err
 	}
 
-	if p.part == PartKey {
-		if keyToken := findKeyToken(doc, node); keyToken != nil {
-			return keyToken, nil
-		}
+	if p.part == PartKey && m.entry != nil {
+		return m.entry.Key.GetToken(), nil
 	}
 
-	return node.GetToken(), nil
-}
-
-// findKeyToken finds the KEY token for the given node by looking at its parent.
-//
-// Returns nil if the node is not a value in a mapping (e.g., array element or
-// root).
-func findKeyToken(doc *ast.DocumentNode, node ast.Node) *token.Token {
-	parent := ast.Parent(doc.Body, node)
-	if parent == nil {
-		return nil
-	}
-
-	if mv, ok := parent.(*ast.MappingValueNode); ok {
-		return mv.Key.GetToken()
-	}
-
-	return nil
+	return firstToken(m.node), nil
 }

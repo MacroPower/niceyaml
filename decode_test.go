@@ -186,6 +186,41 @@ func TestDocumentDecoder_GetValue(t *testing.T) {
 			wantVals:  []string{""},
 			wantFound: []bool{false},
 		},
+		"anchored value": {
+			input:     "kind: &k Pod",
+			path:      paths.Root().Child("kind").Path(),
+			wantVals:  []string{"Pod"},
+			wantFound: []bool{true},
+		},
+		"aliased value": {
+			input: stringtest.Input(`
+				base: &b Pod
+				kind: *b
+			`),
+			path:      paths.Root().Child("kind").Path(),
+			wantVals:  []string{"Pod"},
+			wantFound: []bool{true},
+		},
+		"key through alias": {
+			input: stringtest.Input(`
+				base: &b {kind: Pod}
+				spec: *b
+			`),
+			path:      paths.Root().Child("spec", "kind").Path(),
+			wantVals:  []string{"Pod"},
+			wantFound: []bool{true},
+		},
+		"key through merge": {
+			input: stringtest.Input(`
+				base: &b {kind: Pod}
+				spec:
+				  <<: *b
+				  name: x
+			`),
+			path:      paths.Root().Child("spec", "kind").Path(),
+			wantVals:  []string{"Pod"},
+			wantFound: []bool{true},
+		},
 	}
 
 	for name, tc := range tcs {

@@ -364,14 +364,14 @@ func TestErrorAnnotation(t *testing.T) {
 				"<text>    </text><nameTag>age</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>30</literalNumberInteger>",
 			),
 		},
-		"root path": {
+		"root path highlights the first key": {
 			source: "key: value",
 			path:   paths.Root().Key(),
 			errMsg: "root error",
 			want: stringtest.JoinLF(
-				"[1:4] root error",
+				"[1:1] root error",
 				"",
-				"<nameTag>key</nameTag><genericError>:</genericError><text> </text><literalString>value</literalString>",
+				"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
 			),
 		},
 		"single top-level key path": {
@@ -552,8 +552,8 @@ func TestError_SpecialParentContext(t *testing.T) {
 		errMsg string
 		want   string
 	}{
-		"root level array - parent is SequenceNode": {
-			// Tests findKeyToken returning nil when parent is not a MappingValueNode.
+		"root level array - element has no key": {
+			// A key target on a sequence element falls back to the element.
 			source: stringtest.Input(`
 				- first
 				- second
@@ -569,8 +569,8 @@ func TestError_SpecialParentContext(t *testing.T) {
 				"<punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><literalString>third</literalString>",
 			),
 		},
-		"document root - parent is nil": {
-			// Tests findKeyToken returning nil when there's no parent.
+		"document root - no entry selected": {
+			// A key target on the root falls back to the mapping's first key.
 			source: stringtest.Input(`
 				key: value
 				another: line
@@ -578,9 +578,9 @@ func TestError_SpecialParentContext(t *testing.T) {
 			path:   paths.Root().Key(),
 			errMsg: "document root error",
 			want: stringtest.JoinLF(
-				"[1:4] document root error",
+				"[1:1] document root error",
 				"",
-				"<nameTag>key</nameTag><genericError>:</genericError><text> </text><literalString>value</literalString>",
+				"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
 				"<nameTag>another</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>line</literalString>",
 			),
 		},
