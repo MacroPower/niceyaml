@@ -66,9 +66,12 @@ var (
 // options applied.
 //
 // [Error.Error] returns the message with its location: the token or range
-// position as "[line:col]", or the path as "at $.path". Nested errors from
-// [WithErrors] are not part of the message. They surface through
-// [Error.Unwrap], and [SourceError.Detail] renders them as annotations.
+// position as "[line:col]", or the path as "at $.path". Once
+// [Source.WrapError] resolves the path, the message reads
+// "[line:col] $.path", so the field name stays alongside the position.
+// Nested errors from [WithErrors] are not part of the message. They surface
+// through [Error.Unwrap], and [SourceError.Detail] renders them as
+// annotations.
 //
 // Error implements the error interface. Use [Error.Unwrap] with [errors.Is]
 // and [errors.As] to inspect wrapped errors.
@@ -209,6 +212,12 @@ func (e *Error) headline(src *Source, doc int) string {
 	loc, err := e.locate(src, doc)
 	if err == nil {
 		// Editors count from 1, so the headline uses 1-indexed coordinates.
+		// A path stays in the headline, since it names the field where the
+		// position alone does not.
+		if e.path != nil {
+			return fmt.Sprintf("[%d:%d] %s: %v", loc.pos.Line+1, loc.pos.Col+1, e.path, e.err)
+		}
+
 		return fmt.Sprintf("[%d:%d] %v", loc.pos.Line+1, loc.pos.Col+1, e.err)
 	}
 
@@ -431,7 +440,7 @@ func resolveToken(file *ast.File, p paths.Path, docIndex int) (*token.Token, err
 //
 // [Source.WrapError] creates one around any error whose chain holds an
 // [*Error]. It resolves the Error's location against the source, so
-// [SourceError.Error] reports paths as "[line:col]" positions,
+// [SourceError.Error] reports a path as "[line:col] $.path",
 // [SourceError.Location] returns the resolved range, and
 // [SourceError.Detail] renders the surrounding lines with the location
 // highlighted. The %+v verb prints the message and the detail:
@@ -520,8 +529,9 @@ func (e *SourceError) Unwrap() error {
 }
 
 // Error returns the error message with its location resolved against the
-// source: "[line:col]" for a token, range, or resolvable path, "at $.path"
-// for a path that does not resolve. Context added around the [Error] with
+// source: "[line:col]" for a token or range, "[line:col] $.path" for a path
+// that resolves, and "at $.path" for one that does not. Context added
+// around the [Error] with
 // [fmt.Errorf] is kept around the resolved location, so wrapping before
 // [Source.WrapError] and after it read the same. Nested errors are not part
 // of the message; see [SourceError.Detail].

@@ -1135,7 +1135,7 @@ func TestDocument_DocumentIndex(t *testing.T) {
 			got = append(got, strings.SplitN(err.Error(), "\n", 2)[0])
 		}
 
-		assert.Equal(t, []string{"[1:7] bad name", "[3:7] bad name"}, got)
+		assert.Equal(t, []string{"[1:7] $.name: bad name", "[3:7] $.name: bad name"}, got)
 	})
 }
 

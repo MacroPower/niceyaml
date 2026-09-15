@@ -173,7 +173,7 @@ func TestErrorHandler(t *testing.T) {
 			err: niceyamlErr,
 			want: stringtest.JoinLF(
 				"Error",
-				"  [1:1] invalid name",
+				"  [1:1] $.name: invalid name",
 				"  ",
 				"  <genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
 				"  <nameTag>value</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>123</literalNumberInteger>",
@@ -214,11 +214,11 @@ func TestErrorHandler(t *testing.T) {
 			),
 			want: stringtest.JoinLF(
 				"Error",
-				"  a.yaml: [1:1] bad name",
+				"  a.yaml: [1:1] $.name: bad name",
 				"  ",
 				"  <genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
 				"  <nameTag>value</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>123</literalNumberInteger>",
-				"  b.yaml: [2:8] bad value",
+				"  b.yaml: [2:8] $.value: bad value",
 				"  ",
 				"  <nameTag>name</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
 				"  <nameTag>value</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>123</genericError>",

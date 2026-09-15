@@ -99,7 +99,7 @@ func TestError(t *testing.T) {
 				niceyaml.WithPath(paths.Root().Child("key").Key()),
 			)),
 			want: stringtest.JoinLF(
-				"[3:1] invalid value",
+				"[3:1] $.key: invalid value",
 				"",
 				"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>b</literalString>",
 				"<nameTag>foo</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>bar</literalString>",
@@ -170,7 +170,7 @@ func TestSourceWrapError(t *testing.T) {
 				)
 			},
 			wantExact: stringtest.JoinLF(
-				"[1:1] test error",
+				"[1:1] $.name: test error",
 				"",
 				"<genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
 				"<nameTag>value</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>123</literalNumberInteger>",
@@ -318,7 +318,7 @@ func TestErrorAnnotation(t *testing.T) {
 			path:   paths.Root().Child("foo", "bar").Key(),
 			errMsg: "nested error",
 			want: stringtest.JoinLF(
-				"[2:3] nested error",
+				"[2:3] $.foo.bar: nested error",
 				"",
 				"<nameTag>foo</nameTag><punctuationMappingValue>:</punctuationMappingValue>",
 				"<text>  </text><genericError>bar</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
@@ -333,7 +333,7 @@ func TestErrorAnnotation(t *testing.T) {
 			path:   paths.Root().Child("items").Index(0).Key(),
 			errMsg: "array error",
 			want: stringtest.JoinLF(
-				"[2:5] array error",
+				"[2:5] $.items[0]: array error",
 				"",
 				"<nameTag>items</nameTag><punctuationMappingValue>:</punctuationMappingValue>",
 				"<text>  </text><punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><genericError>first</genericError>",
@@ -349,7 +349,7 @@ func TestErrorAnnotation(t *testing.T) {
 			path:   paths.Root().Child("users").Index(0).Child("name").Key(),
 			errMsg: "nested array error",
 			want: stringtest.JoinLF(
-				"[2:5] nested array error",
+				"[2:5] $.users[0].name: nested array error",
 				"",
 				"<nameTag>users</nameTag><punctuationMappingValue>:</punctuationMappingValue>",
 				"<text>  </text><punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>alice</literalString>",
@@ -361,7 +361,7 @@ func TestErrorAnnotation(t *testing.T) {
 			path:   paths.Root().Key(),
 			errMsg: "root error",
 			want: stringtest.JoinLF(
-				"[1:1] root error",
+				"[1:1] $: root error",
 				"",
 				"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
 			),
@@ -371,7 +371,7 @@ func TestErrorAnnotation(t *testing.T) {
 			path:   paths.Root().Child("key").Key(),
 			errMsg: "top level error",
 			want: stringtest.JoinLF(
-				"[1:1] top level error",
+				"[1:1] $.key: top level error",
 				"",
 				"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
 			),
@@ -388,7 +388,7 @@ func TestErrorAnnotation(t *testing.T) {
 			errMsg:       "middle error",
 			contextLines: 1,
 			want: stringtest.JoinLF(
-				"[3:1] middle error",
+				"[3:1] $.line3: middle error",
 				"",
 				"<nameTag>line2</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>b</literalString>",
 				"<genericError>line3</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>c</literalString>",
@@ -430,7 +430,7 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 			path:   paths.Root().Child("key").Value(),
 			errMsg: "invalid value",
 			want: stringtest.JoinLF(
-				"[1:6] invalid value",
+				"[1:6] $.key: invalid value",
 				"",
 				"<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>value</genericError>",
 			),
@@ -443,7 +443,7 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 			path:   paths.Root().Child("foo", "bar").Value(),
 			errMsg: "nested value error",
 			want: stringtest.JoinLF(
-				"[2:8] nested value error",
+				"[2:8] $.foo.bar: nested value error",
 				"",
 				"<nameTag>foo</nameTag><punctuationMappingValue>:</punctuationMappingValue>",
 				"<text>  </text><nameTag>bar</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>nested_value</genericError>",
@@ -459,7 +459,7 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 			path:   paths.Root().Child("items").Index(0).Value(),
 			errMsg: "array error",
 			want: stringtest.JoinLF(
-				"[2:5] array error",
+				"[2:5] $.items[0]: array error",
 				"",
 				"<nameTag>items</nameTag><punctuationMappingValue>:</punctuationMappingValue>",
 				"<text>  </text><punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><genericError>first</genericError>",
@@ -530,7 +530,7 @@ func TestError_SpecialParentContext(t *testing.T) {
 			path:   paths.Root().Index(1).Key(),
 			errMsg: "array element error",
 			want: stringtest.JoinLF(
-				"[2:3] array element error",
+				"[2:3] $[1]: array element error",
 				"",
 				"<punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><literalString>first</literalString>",
 				"<punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><genericError>second</genericError>",
@@ -546,7 +546,7 @@ func TestError_SpecialParentContext(t *testing.T) {
 			path:   paths.Root().Key(),
 			errMsg: "document root error",
 			want: stringtest.JoinLF(
-				"[1:1] document root error",
+				"[1:1] $: document root error",
 				"",
 				"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
 				"<nameTag>another</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>line</literalString>",
@@ -812,7 +812,7 @@ func TestError_MultiError(t *testing.T) {
 
 		got := trimLines(render(err))
 
-		assert.Contains(t, got, "[1:1] main error")
+		assert.Contains(t, got, "[1:1] $.key: main error")
 		assert.Contains(t, got, "<genericError>key</genericError>")
 		// The nested error has no line to annotate, so it follows the
 		// excerpt with its unresolved location.
@@ -851,7 +851,7 @@ func TestError_MultiError(t *testing.T) {
 
 		got := trimLines(render(err))
 
-		assert.Contains(t, got, "[1:1] main error")
+		assert.Contains(t, got, "[1:1] $.key: main error")
 		assert.NotContains(t, got, "^ no location")
 		assert.True(t, strings.HasSuffix(got, "\n\nno location"), got)
 	})
@@ -1167,7 +1167,7 @@ func TestError_NestedErrorsKeepInnerPosition(t *testing.T) {
 	// Nested errors on the wrapper add annotations, and the wrapper still
 	// takes its position from the Error it wraps.
 	wrapped := source.WrapError(niceyaml.NewErrorFrom(inner, niceyaml.WithErrors(nested)))
-	assert.Equal(t, "[1:4] bad a", wrapped.Error())
+	assert.Equal(t, "[1:4] $.a: bad a", wrapped.Error())
 
 	var bound *niceyaml.SourceError
 
@@ -1200,7 +1200,7 @@ func TestError_OutermostDocumentIndexResolves(t *testing.T) {
 	assert.Equal(t, 1, index)
 
 	wrapped := source.WrapError(outer)
-	assert.Equal(t, "[3:4] bad x", wrapped.Error())
+	assert.Equal(t, "[3:4] $.x: bad x", wrapped.Error())
 
 	var bound *niceyaml.SourceError
 
@@ -1597,7 +1597,7 @@ func TestError_Width(t *testing.T) {
 			output := render(err, niceyaml.WithPrinter(errPrinter))
 			lines := strings.Split(output, "\n")
 
-			// Skip the header line "[1:1] test error:" and the empty line.
+			// Skip the header line "[1:1] $.name: test error:" and the empty line.
 			contentLines := 0
 			for _, line := range lines {
 				if strings.Contains(line, "key:") || strings.Contains(line, "this is") ||
@@ -1706,7 +1706,7 @@ func TestError_Width_AnnotationWrapping(t *testing.T) {
 			width:        40,
 			nestedErrMsg: "this is a very long error message that should definitely wrap when the width is limited",
 			want: stringtest.JoinLF(
-				"[1:1] validation failed",
+				"[1:1] $.key: validation failed",
 				"",
 				"key: value",
 				"     ^ this is a very long error message",
@@ -1719,7 +1719,7 @@ func TestError_Width_AnnotationWrapping(t *testing.T) {
 			width:        0,
 			nestedErrMsg: "this is a very long error message that should not wrap",
 			want: stringtest.JoinLF(
-				"[1:1] validation failed",
+				"[1:1] $.key: validation failed",
 				"",
 				"key: value",
 				"     ^ this is a very long error message that should not wrap",
@@ -1730,7 +1730,7 @@ func TestError_Width_AnnotationWrapping(t *testing.T) {
 			width:        80,
 			nestedErrMsg: "short error",
 			want: stringtest.JoinLF(
-				"[1:1] validation failed",
+				"[1:1] $.key: validation failed",
 				"",
 				"key: value",
 				"     ^ short error",
@@ -1846,7 +1846,7 @@ func TestError_Width_CombinedAnnotationsOnSameLine(t *testing.T) {
 	got := trimLines(render(err, niceyaml.WithPrinter(errPrinter)))
 
 	want := stringtest.JoinLF(
-		"[1:1] validation failed",
+		"[1:1] $.key: validation failed",
 		"",
 		"key: value",
 		"^ first error message here; second error",
@@ -1914,7 +1914,7 @@ func TestError_DocumentIndex(t *testing.T) {
 
 		got := trimLines(render(err))
 
-		assert.True(t, strings.HasPrefix(got, "[3:7] bad name"), got)
+		assert.True(t, strings.HasPrefix(got, "[3:7] $.name: bad name"), got)
 		assert.Contains(t, got, "<genericError>second</genericError>")
 		assert.NotContains(t, got, "<genericError>first</genericError>")
 	})
@@ -1927,7 +1927,7 @@ func TestError_DocumentIndex(t *testing.T) {
 
 		got := trimLines(render(err))
 
-		assert.True(t, strings.HasPrefix(got, "[1:7] bad name"), got)
+		assert.True(t, strings.HasPrefix(got, "[1:7] $.name: bad name"), got)
 		assert.Contains(t, got, "<genericError>first</genericError>")
 
 		_, set := inner.DocumentIndex()
@@ -2028,8 +2028,8 @@ func TestError_WrappedContext(t *testing.T) {
 
 	// The message keeps the outer context around the inner Error's location,
 	// resolved against the source.
-	assert.Equal(t, "document 1: [3:7] bad name", wrapped.Error())
-	assert.Equal(t, "document 1: [3:7] bad name", fmt.Sprintf("%v", wrapped))
+	assert.Equal(t, "document 1: [3:7] $.name: bad name", wrapped.Error())
+	assert.Equal(t, "document 1: [3:7] $.name: bad name", fmt.Sprintf("%v", wrapped))
 	require.ErrorIs(t, wrapped, inner)
 
 	var got *niceyaml.Error
@@ -2052,7 +2052,7 @@ func TestError_WrappedContext(t *testing.T) {
 
 	// Wrapping a direct Error resolves its position in the message.
 	direct := source.WrapError(inner)
-	assert.Equal(t, "[3:7] bad name", direct.Error())
+	assert.Equal(t, "[3:7] $.name: bad name", direct.Error())
 
 	// Wrapping twice renders the same output.
 	twice := source.WrapError(direct)
@@ -2088,7 +2088,7 @@ func TestError_DocumentIndexAboveLocation(t *testing.T) {
 	assert.Equal(t, 1, idx)
 
 	// The headline keeps the producer's context around the resolved location.
-	assert.Equal(t, "validate: [3:7] bad name", wrapped.Error())
+	assert.Equal(t, "validate: [3:7] $.name: bad name", wrapped.Error())
 
 	// The highlight lands on the second document's value, not the first's.
 	var bound *niceyaml.SourceError
@@ -2172,7 +2172,7 @@ func TestError_ResolvesThroughErrorWrappers(t *testing.T) {
 	// above them still resolves the location in the message.
 	wrapped := source.WrapError(niceyaml.NewErrorFrom(located))
 
-	assert.Equal(t, "[1:7] bad name", wrapped.Error())
+	assert.Equal(t, "[1:7] $.name: bad name", wrapped.Error())
 
 	var got *niceyaml.SourceError
 
