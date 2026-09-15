@@ -1,4 +1,4 @@
-package ansi
+package escape
 
 import "strings"
 
@@ -27,7 +27,7 @@ const (
 	ReplacementCharacter = 0xFFFD
 )
 
-// Escape replaces control characters with visible representations:
+// Control replaces control characters with visible representations:
 //   - C0 controls ([NUL]-[US]) -> Unicode Control Pictures
 //     ([NULPicture]-[USPicture])
 //   - C1 controls ([PAD]-[APC]) -> [ReplacementCharacter]
@@ -35,7 +35,7 @@ const (
 //
 // This makes invisible control characters visible in terminal output.
 // For example, an ANSI escape sequence like "\x1b[31m" becomes "␛[31m".
-func Escape(s string) string {
+func Control(s string) string {
 	var sb strings.Builder
 
 	sb.Grow(len(s))

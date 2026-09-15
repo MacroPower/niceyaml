@@ -1,4 +1,4 @@
-package ansi_test
+package escape_test
 
 import (
 	"testing"
@@ -6,10 +6,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"go.jacobcolvin.com/niceyaml/internal/ansi"
+	"go.jacobcolvin.com/niceyaml/internal/escape"
 )
 
-func TestEscape(t *testing.T) {
+func TestControl(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
@@ -127,13 +127,13 @@ func TestEscape(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := ansi.Escape(tt.input)
+			got := escape.Control(tt.input)
 			assert.Equal(t, tt.want, got)
 		})
 	}
 }
 
-func TestEscape_PreservesRuneCount(t *testing.T) {
+func TestControl_PreservesRuneCount(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
@@ -178,7 +178,7 @@ func TestEscape_PreservesRuneCount(t *testing.T) {
 			t.Parallel()
 
 			input := tt.input
-			got := ansi.Escape(input)
+			got := escape.Control(input)
 
 			inputRuneCount := utf8.RuneCountInString(input)
 			gotRuneCount := utf8.RuneCountInString(got)

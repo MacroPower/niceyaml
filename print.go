@@ -10,8 +10,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"go.jacobcolvin.com/niceyaml/internal/ansi"
 	"go.jacobcolvin.com/niceyaml/internal/colors"
+	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style"
@@ -548,7 +548,7 @@ func (p *Printer) renderAnnotation(
 			sb.WriteString(p.styles.Style(style.Comment).Render(continuationPadding))
 		}
 
-		sb.WriteString(p.styles.Style(style.Comment).Render(ansi.Escape(subLine)))
+		sb.WriteString(p.styles.Style(style.Comment).Render(escape.Control(subLine)))
 
 		rows = append(rows, sb.String())
 	}
@@ -616,7 +616,7 @@ func (p *Printer) styleLineWithRanges(
 	}
 
 	if len(overlays) == 0 {
-		return s.Render(ansi.Escape(src))
+		return s.Render(escape.Control(src))
 	}
 
 	// Create span for this line segment's column range.
@@ -638,7 +638,7 @@ func (p *Printer) styleLineWithRanges(
 	}
 
 	if len(active) == 0 {
-		return s.Render(ansi.Escape(src))
+		return s.Render(escape.Control(src))
 	}
 
 	boundaries := computeStyleBoundaries(active, cols)
@@ -674,7 +674,7 @@ func (p *Printer) styleLineWithRanges(
 			spanStart = boundaryStart
 		} else if currentStyle != spanStyle {
 			// Style changed - flush current span.
-			sb.WriteString(currentStyle.Render(ansi.Escape(string(runes[spanStart:boundaryStart]))))
+			sb.WriteString(currentStyle.Render(escape.Control(string(runes[spanStart:boundaryStart]))))
 
 			currentStyle = spanStyle
 			spanStart = boundaryStart
@@ -685,7 +685,7 @@ func (p *Printer) styleLineWithRanges(
 
 	// Flush remaining content.
 	if currentStyle != nil && spanStart < len(runes) {
-		sb.WriteString(currentStyle.Render(ansi.Escape(string(runes[spanStart:]))))
+		sb.WriteString(currentStyle.Render(escape.Control(string(runes[spanStart:]))))
 	}
 
 	return sb.String()
