@@ -1,9 +1,15 @@
 package diff
 
+import "slices"
+
 // Hirschberg implements [Algorithm] using a space-optimized LCS algorithm.
 //
 // Time complexity: O(m*n) where m and n are the sequence lengths.
-// Space complexity: O(min(m,n)) using two-row dynamic programming.
+// Space complexity: O(n) where n is the length of after, using two-row
+// dynamic programming over the after sequence.
+//
+// A Hirschberg keeps its working buffers between calls, so one instance is
+// not safe for concurrent use. Each call returns a fresh slice.
 //
 // Create instances with [NewHirschberg].
 type Hirschberg struct {
@@ -18,42 +24,14 @@ type Hirschberg struct {
 	ops []Op
 }
 
-// NewHirschberg creates a new [*Hirschberg].
-//
-// Use [Hirschberg.Init] to preallocate buffers before calling [Hirschberg.Diff],
-// or let [Hirschberg.Diff] allocate as needed.
+// NewHirschberg creates a new [*Hirschberg]. Buffers grow on the first call
+// to [Hirschberg.Diff] and stay for later calls.
 func NewHirschberg() *Hirschberg {
 	return &Hirschberg{}
 }
 
-// Init prepares buffers for inputs of the given sizes.
-//
-// Hirschberg uses min(beforeLen, afterLen) for its row buffers. Calling Init
-// is optional but improves performance when the input sizes are known in
-// advance.
-func (h *Hirschberg) Init(beforeLen, afterLen int) {
-	capacity := min(beforeLen, afterLen) + 1
-	if capacity > cap(h.row0) {
-		h.row0 = make([]int, capacity)
-		h.row1 = make([]int, capacity)
-		h.fwdResult = make([]int, capacity)
-		h.bwdResult = make([]int, capacity)
-	}
-
-	// Preallocate ops: worst case is all deletes + all inserts.
-	opsCapacity := beforeLen + afterLen
-	if opsCapacity > cap(h.ops) {
-		h.ops = make([]Op, 0, opsCapacity)
-	}
-}
-
-// Diff returns operations transforming before into after.
-//
-// Each [Op] contains an [OpKind] and an index into the appropriate sequence:
-//
-//   - [OpEqual]: The element exists in both sequences (index refers to after)
-//   - [OpDelete]: The element exists only in before (index refers to before)
-//   - [OpInsert]: The element exists only in after (index refers to after)
+// Diff returns operations transforming before into after. The returned slice
+// is a copy, so it stays valid across later calls.
 func (h *Hirschberg) Diff(before, after []string) []Op {
 	h.ops = h.ops[:0]
 
@@ -66,9 +44,17 @@ func (h *Hirschberg) Diff(before, after []string) []Op {
 		h.bwdResult = make([]int, needed)
 	}
 
+	if worst := len(before) + len(after); cap(h.ops) < worst {
+		h.ops = make([]Op, 0, worst)
+	}
+
 	h.recurse(before, after, 0, len(before), 0, len(after))
 
-	return h.ops
+	if len(h.ops) == 0 {
+		return nil
+	}
+
+	return slices.Clone(h.ops)
 }
 
 // recurse recursively finds the LCS using divide-and-conquer.
@@ -80,7 +66,7 @@ func (h *Hirschberg) recurse(before, after []string, bStart, bEnd, aStart, aEnd 
 	// Base case: no before lines - all after lines are insertions.
 	if m == 0 {
 		for j := aStart; j < aEnd; j++ {
-			h.ops = append(h.ops, Op{Kind: OpInsert, Index: j})
+			h.ops = append(h.ops, Op{Kind: OpInsert, Before: -1, After: j})
 		}
 
 		return
@@ -89,7 +75,7 @@ func (h *Hirschberg) recurse(before, after []string, bStart, bEnd, aStart, aEnd 
 	// Base case: no after lines - all before lines are deletions.
 	if n == 0 {
 		for i := bStart; i < bEnd; i++ {
-			h.ops = append(h.ops, Op{Kind: OpDelete, Index: i})
+			h.ops = append(h.ops, Op{Kind: OpDelete, Before: i, After: -1})
 		}
 
 		return
@@ -144,21 +130,21 @@ func (h *Hirschberg) singleBeforeLine(before, after []string, bStart, aStart, aE
 
 	if matchIdx < 0 {
 		// No match: delete before line, then insert all after lines.
-		h.ops = append(h.ops, Op{Kind: OpDelete, Index: bStart})
+		h.ops = append(h.ops, Op{Kind: OpDelete, Before: bStart, After: -1})
 
 		for j := aStart; j < aEnd; j++ {
-			h.ops = append(h.ops, Op{Kind: OpInsert, Index: j})
+			h.ops = append(h.ops, Op{Kind: OpInsert, Before: -1, After: j})
 		}
 	} else {
 		// Match found: insert lines before match, equal at match, insert lines after.
 		for j := aStart; j < matchIdx; j++ {
-			h.ops = append(h.ops, Op{Kind: OpInsert, Index: j})
+			h.ops = append(h.ops, Op{Kind: OpInsert, Before: -1, After: j})
 		}
 
-		h.ops = append(h.ops, Op{Kind: OpEqual, Index: matchIdx})
+		h.ops = append(h.ops, Op{Kind: OpEqual, Before: bStart, After: matchIdx})
 
 		for j := matchIdx + 1; j < aEnd; j++ {
-			h.ops = append(h.ops, Op{Kind: OpInsert, Index: j})
+			h.ops = append(h.ops, Op{Kind: OpInsert, Before: -1, After: j})
 		}
 	}
 }

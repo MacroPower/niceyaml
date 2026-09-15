@@ -2,15 +2,11 @@ package diff
 
 // Algorithm computes a sequence of operations to transform before into after.
 //
-// See [Hirschberg] for the default implementation.
+// See [*Hirschberg] for the default implementation.
 type Algorithm interface {
-	// Init prepares the algorithm for inputs of the given sizes.
-	// Called before each Diff to allow buffer preallocation.
-	// Algorithms may use beforeLen, afterLen, or both depending on their needs.
-	Init(beforeLen, afterLen int)
-
-	// Diff returns operations transforming before into after.
-	// Operations reference indices in the original slices.
+	// Diff returns operations transforming before into after. Operations
+	// reference indices in the original slices, and the returned slice is the
+	// caller's to keep.
 	Diff(before, after []string) []Op
 }
 
@@ -27,8 +23,14 @@ const (
 	OpInsert
 )
 
-// Op represents a diff operation with an index into one of the input sequences.
+// Op represents a diff operation with its index in each input sequence.
+//
+// Before is the index into the before sequence and After the index into the
+// after sequence. The side an operation does not touch holds -1: an [OpInsert]
+// has no Before and an [OpDelete] has no After, while an [OpEqual] carries
+// both.
 type Op struct {
-	Kind  OpKind
-	Index int // Index into before ([OpDelete]) or after ([OpInsert]/[OpEqual]) sequence.
+	Kind   OpKind
+	Before int
+	After  int
 }

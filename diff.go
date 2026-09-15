@@ -93,9 +93,6 @@ func (d *Differ) computeOps(before, after *Source) []lineOp {
 		afterContent[i] = afterLines[i].Content()
 	}
 
-	// Initialize algorithm with input sizes for buffer preallocation.
-	d.algo.Init(len(beforeLines), len(afterLines))
-
 	// Compute diff using the configured algorithm.
 	diffOps := d.algo.Diff(beforeContent, afterContent)
 
@@ -105,11 +102,11 @@ func (d *Differ) computeOps(before, after *Source) []lineOp {
 	for _, op := range diffOps {
 		switch op.Kind {
 		case diff.OpEqual:
-			ops = append(ops, lineOp{kind: diff.OpEqual, line: afterLines[op.Index]})
+			ops = append(ops, lineOp{kind: diff.OpEqual, line: afterLines[op.After]})
 		case diff.OpDelete:
-			ops = append(ops, lineOp{kind: diff.OpDelete, line: beforeLines[op.Index]})
+			ops = append(ops, lineOp{kind: diff.OpDelete, line: beforeLines[op.Before]})
 		case diff.OpInsert:
-			ops = append(ops, lineOp{kind: diff.OpInsert, line: afterLines[op.Index]})
+			ops = append(ops, lineOp{kind: diff.OpInsert, line: afterLines[op.After]})
 		}
 	}
 
