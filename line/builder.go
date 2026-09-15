@@ -204,7 +204,7 @@ func (b *linesBuilder) processPart(ctx *partContext) bool {
 			linkParts(lastLine.segments[n-1].Part(), newTk)
 		}
 
-		lastLine.segments = lastLine.segments.Append(ctx.tk, newTk)
+		lastLine.segments = append(lastLine.segments, tokens.NewSegment(ctx.tk, newTk))
 
 		b.currentOffset += utf8.RuneCountInString(ctx.part)
 
@@ -325,7 +325,7 @@ func (b *linesBuilder) processPart(ctx *partContext) bool {
 
 	b.lastPart = newTk
 
-	b.currentLineSegments = b.currentLineSegments.Append(ctx.tk, newTk)
+	b.currentLineSegments = append(b.currentLineSegments, tokens.NewSegment(ctx.tk, newTk))
 
 	b.currentOffset += utf8.RuneCountInString(ctx.part)
 

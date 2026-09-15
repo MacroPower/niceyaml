@@ -199,57 +199,6 @@ func TestSegment_Contains(t *testing.T) {
 	})
 }
 
-func TestSegments_Append(t *testing.T) {
-	t.Parallel()
-
-	strTkb := yamltest.NewTokenBuilder().Type(token.StringType)
-
-	t.Run("append to empty", func(t *testing.T) {
-		t.Parallel()
-
-		var segs tokens.Segments
-
-		source := strTkb.Clone().Value("source").Origin("source\n").Build()
-		part := strTkb.Clone().Value("part").Origin("part").Build()
-
-		got := segs.Append(source, part)
-
-		require.Len(t, got, 1)
-		require.NoError(t, yamltest.ValidateTokenPair(part, got[0].Part()))
-		require.True(
-			t,
-			yamltest.CompareTokens(part, got[0].Part()).Equal(),
-			yamltest.CompareTokens(part, got[0].Part()).String(),
-		)
-	})
-
-	t.Run("append to existing", func(t *testing.T) {
-		t.Parallel()
-
-		source1 := strTkb.Clone().Value("source1").Origin("source1\n").Build()
-		part1 := strTkb.Clone().Value("part1").Origin("part1").Build()
-		source2 := strTkb.Clone().Value("source2").Origin("source2\n").Build()
-		part2 := strTkb.Clone().Value("part2").Origin("part2").Build()
-
-		segs := tokens.Segments{tokens.NewSegment(source1, part1)}
-		got := segs.Append(source2, part2)
-
-		require.Len(t, got, 2)
-		require.NoError(t, yamltest.ValidateTokenPair(part1, got[0].Part()))
-		require.True(
-			t,
-			yamltest.CompareTokens(part1, got[0].Part()).Equal(),
-			yamltest.CompareTokens(part1, got[0].Part()).String(),
-		)
-		require.NoError(t, yamltest.ValidateTokenPair(part2, got[1].Part()))
-		require.True(
-			t,
-			yamltest.CompareTokens(part2, got[1].Part()).Equal(),
-			yamltest.CompareTokens(part2, got[1].Part()).String(),
-		)
-	})
-}
-
 func TestSegments_Clone(t *testing.T) {
 	t.Parallel()
 
@@ -277,7 +226,7 @@ func TestSegments_Clone(t *testing.T) {
 		assert.Same(t, source, got[0].Source())
 
 		// Appending to the copy leaves the original untouched.
-		got = got.Append(source, part)
+		got = append(got, tokens.NewSegment(source, part))
 
 		assert.Len(t, segs, 1)
 		assert.Len(t, got, 2)
@@ -655,97 +604,6 @@ func TestSegments_SourceTokenAt(t *testing.T) {
 			yamltest.CompareTokens(source2, segs.SourceTokenAt(3)).Equal(),
 			yamltest.CompareTokens(source2, segs.SourceTokenAt(3)).String(),
 		)
-	})
-}
-
-func TestSegments_Merge(t *testing.T) {
-	t.Parallel()
-
-	t.Run("merge with empty", func(t *testing.T) {
-		t.Parallel()
-
-		source := yamltest.NewTokenBuilder().Value("source").Build()
-		part := yamltest.NewTokenBuilder().Value("part").Origin("part").Build()
-
-		segs := tokens.Segments{tokens.NewSegment(source, part)}
-
-		var empty tokens.Segments
-
-		got := segs.Merge(empty)
-
-		require.Len(t, got, 1)
-		assert.True(t, got[0].SourceEquals(source))
-	})
-
-	t.Run("merge empty with segments", func(t *testing.T) {
-		t.Parallel()
-
-		source := yamltest.NewTokenBuilder().Value("source").Build()
-		part := yamltest.NewTokenBuilder().Value("part").Origin("part").Build()
-
-		var segs tokens.Segments
-
-		other := tokens.Segments{tokens.NewSegment(source, part)}
-
-		got := segs.Merge(other)
-
-		require.Len(t, got, 1)
-		assert.True(t, got[0].SourceEquals(source))
-	})
-
-	t.Run("merge single segments", func(t *testing.T) {
-		t.Parallel()
-
-		source1 := yamltest.NewTokenBuilder().Value("source1").Build()
-		part1 := yamltest.NewTokenBuilder().Value("part1").Origin("part1").Build()
-		source2 := yamltest.NewTokenBuilder().Value("source2").Build()
-		part2 := yamltest.NewTokenBuilder().Value("part2").Origin("part2").Build()
-
-		segs1 := tokens.Segments{tokens.NewSegment(source1, part1)}
-		segs2 := tokens.Segments{tokens.NewSegment(source2, part2)}
-
-		got := segs1.Merge(segs2)
-
-		require.Len(t, got, 2)
-		assert.True(t, got[0].SourceEquals(source1))
-		assert.True(t, got[1].SourceEquals(source2))
-	})
-
-	t.Run("merge multiple segments", func(t *testing.T) {
-		t.Parallel()
-
-		source1 := yamltest.NewTokenBuilder().Value("s1").Build()
-		source2 := yamltest.NewTokenBuilder().Value("s2").Build()
-		source3 := yamltest.NewTokenBuilder().Value("s3").Build()
-
-		segs1 := tokens.Segments{tokens.NewSegment(source1, yamltest.NewTokenBuilder().Origin("p1").Build())}
-		segs2 := tokens.Segments{tokens.NewSegment(source2, yamltest.NewTokenBuilder().Origin("p2").Build())}
-		segs3 := tokens.Segments{tokens.NewSegment(source3, yamltest.NewTokenBuilder().Origin("p3").Build())}
-
-		got := segs1.Merge(segs2, segs3)
-
-		require.Len(t, got, 3)
-		assert.True(t, got[0].SourceEquals(source1))
-		assert.True(t, got[1].SourceEquals(source2))
-		assert.True(t, got[2].SourceEquals(source3))
-	})
-
-	t.Run("preserves source pointer identity", func(t *testing.T) {
-		t.Parallel()
-
-		sharedSource := yamltest.NewTokenBuilder().Value("shared").Build()
-		part1 := yamltest.NewTokenBuilder().Value("part1").Origin("part1").Build()
-		part2 := yamltest.NewTokenBuilder().Value("part2").Origin("part2").Build()
-
-		segs1 := tokens.Segments{tokens.NewSegment(sharedSource, part1)}
-		segs2 := tokens.Segments{tokens.NewSegment(sharedSource, part2)}
-
-		got := segs1.Merge(segs2)
-
-		require.Len(t, got, 2)
-		// Both segments should share the same source pointer.
-		assert.True(t, got[0].SourceEquals(sharedSource))
-		assert.True(t, got[1].SourceEquals(sharedSource))
 	})
 }
 

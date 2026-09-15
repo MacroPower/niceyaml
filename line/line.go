@@ -428,13 +428,20 @@ func (ls Lines) Tokens() token.Tokens {
 		return nil
 	}
 
-	var combined tokens.Segments
+	result := token.Tokens{}
+
+	var lastSource *token.Token
 
 	for _, line := range ls {
-		combined = combined.Merge(line.segments)
+		for _, seg := range line.segments {
+			if src := seg.Source(); src != lastSource {
+				result = append(result, src)
+				lastSource = src
+			}
+		}
 	}
 
-	return combined.SourceTokens()
+	return result
 }
 
 // TokenPositions returns all positions where the given token appears across all

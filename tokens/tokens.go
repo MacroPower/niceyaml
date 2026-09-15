@@ -104,21 +104,6 @@ func (s Segment) Part() *token.Token {
 // [Segment.Source] pointer.
 type Segments []Segment
 
-// Append appends a new [Segment] to the [Segments].
-func (s Segments) Append(source, part *token.Token) Segments {
-	return append(s, NewSegment(source, part))
-}
-
-// Merge combines this [Segments] with others, preserving source pointer identity.
-// Returns a new [Segments] containing all [Segment] values in order.
-func (s Segments) Merge(others ...Segments) Segments {
-	for _, o := range others {
-		s = append(s, o...)
-	}
-
-	return s
-}
-
 // Clone returns a copy of the [Segments] slice.
 //
 // The copy shares the source and part tokens with the original, since neither
