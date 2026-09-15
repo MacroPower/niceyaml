@@ -413,10 +413,13 @@ func (m *Model) SetViewMode(mode ViewMode) {
 	m.rebuildViews()
 }
 
-// ToggleViewMode cycles between view modes.
+// ToggleViewMode cycles through the view modes in the order [ViewModeFull],
+// [ViewModeHunks], [ViewModeSideBySide].
 func (m *Model) ToggleViewMode() {
 	switch m.viewMode {
 	case ViewModeFull:
+		m.viewMode = ViewModeHunks
+	case ViewModeHunks:
 		m.viewMode = ViewModeSideBySide
 	default:
 		m.viewMode = ViewModeFull
@@ -431,9 +434,14 @@ func (m *Model) HunkContext() int {
 }
 
 // SetHunkContext sets the number of context lines shown around diff hunks
-// in [ViewModeHunks]. Default is 3.
+// in [ViewModeHunks], rebuilding the view when that mode is active. Default
+// is 3.
 func (m *Model) SetHunkContext(n int) {
 	m.hunkContext = max(0, n)
+
+	if m.viewMode == ViewModeHunks {
+		m.rebuildViews()
+	}
 }
 
 // WordWrap reports whether lines wrap to the viewport width.

@@ -2679,6 +2679,58 @@ func TestViewMode_Behavior(t *testing.T) {
 				assert.Contains(t, m.View(), " enabled: true")
 			},
 		},
+		"ToggleCyclesThroughHunks": {
+			width:  80,
+			height: 24,
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				m.ToggleViewMode()
+				assert.Equal(t, yamlviewport.ViewModeHunks, m.ViewMode())
+
+				m.ToggleViewMode()
+				assert.Equal(t, yamlviewport.ViewModeSideBySide, m.ViewMode())
+
+				m.ToggleViewMode()
+				assert.Equal(t, yamlviewport.ViewModeFull, m.ViewMode())
+			},
+		},
+		"SetHunkContextRebuildsHunks": {
+			width:  80,
+			height: 24,
+			setup: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromString(stringtest.Input(`
+					first: one
+					second: two
+					third: three
+					fourth: four
+					fifth: five
+				`), niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromString(stringtest.Input(`
+					first: one
+					second: two
+					third: three
+					fourth: four
+					fifth: changed
+				`), niceyaml.WithName("v2")))
+				m.GoToRevision(1)
+				m.SetViewMode(yamlviewport.ViewModeHunks)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				// Three context lines, the deleted line, and the inserted line.
+				assert.Equal(t, 5, m.TotalLineCount())
+
+				m.SetHunkContext(0)
+				assert.Equal(t, 0, m.HunkContext())
+				assert.Equal(t, 2, m.TotalLineCount())
+				assert.NotContains(t, m.View(), "fourth")
+
+				m.SetHunkContext(-1)
+				assert.Equal(t, 0, m.HunkContext())
+			},
+		},
 		"HunksSearchStaysInsideHunks": {
 			width:  80,
 			height: 5,

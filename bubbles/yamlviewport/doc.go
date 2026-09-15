@@ -35,7 +35,9 @@
 //   - [DiffModeNone]: Show current revision without diff markers.
 //
 // Set [ViewModeHunks] via [Model.SetViewMode] to render a condensed diff
-// showing only changed lines with surrounding context.
+// showing only changed lines with surrounding context, or
+// [ViewModeSideBySide] to render the before and after content in two
+// panes. [Model.ToggleViewMode] cycles through all three modes.
 //
 // # Search
 //
