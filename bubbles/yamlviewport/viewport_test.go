@@ -2450,16 +2450,16 @@ func TestViewMode_Behavior(t *testing.T) {
 	}
 }
 
-func TestViewport_WithFinder(t *testing.T) {
+func TestViewport_WithSearcher(t *testing.T) {
 	t.Parallel()
 
-	t.Run("custom finder is used for search", func(t *testing.T) {
+	t.Run("custom searcher is used for search", func(t *testing.T) {
 		t.Parallel()
 
 		finder := niceyaml.NewFinder()
 		m := yamlviewport.New(
 			yamlviewport.WithPrinter(testPrinter()),
-			yamlviewport.WithFinder(finder),
+			yamlviewport.WithSearcher(finder),
 		)
 
 		m.SetWidth(80)

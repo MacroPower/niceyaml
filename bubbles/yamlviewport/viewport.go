@@ -20,10 +20,11 @@ import (
 
 const defaultHorizontalStep = 6
 
-// Finder finds [position.Range]s for a search string.
+// Searcher loads a document and finds the [position.Range]s that match a
+// search string in it.
 //
 // See [niceyaml.Finder] for an implementation.
-type Finder interface {
+type Searcher interface {
 	Load(lines niceyaml.LineIterator)
 	Find(search string) position.Ranges
 }
@@ -68,7 +69,7 @@ const (
 // Available options:
 //   - [WithPrinter]
 //   - [WithStyle]
-//   - [WithFinder]
+//   - [WithSearcher]
 type Option func(*Model)
 
 // WithPrinter is an [Option] that sets the [*niceyaml.Printer] used for
@@ -93,10 +94,12 @@ func WithStyle(s lipgloss.Style) Option {
 	}
 }
 
-// WithFinder is an [Option] that sets the [Finder].
-func WithFinder(f Finder) Option {
+// WithSearcher is an [Option] that sets the [Searcher] that search terms run
+// through. Without it, the viewport creates a [niceyaml.Finder] with a
+// default [normalizer.Normalizer].
+func WithSearcher(s Searcher) Option {
 	return func(m *Model) {
-		m.finder = f
+		m.searcher = s
 	}
 }
 
@@ -117,9 +120,9 @@ func New(opts ...Option) Model {
 // Create instances with [New].
 type Model struct {
 	// The container style applied to the viewport frame.
-	style   lipgloss.Style
-	printer *niceyaml.Printer
-	finder  Finder
+	style    lipgloss.Style
+	printer  *niceyaml.Printer
+	searcher Searcher
 	// Revision history; revIndex below selects the revision on display.
 	revisions niceyaml.Revisions
 	// Cached diff between base and current revision.
@@ -158,8 +161,8 @@ type Model struct {
 	hunkContext     int
 	// FillHeight pads output with empty lines to fill the viewport height when true.
 	FillHeight bool
-	// Reports that left changed since the finder last loaded it.
-	finderStale bool
+	// Reports that left changed since the searcher last loaded it.
+	searcherStale bool
 	// MouseWheelEnabled enables mouse wheel scrolling.
 	// Default: true.
 	MouseWheelEnabled bool
@@ -181,8 +184,8 @@ func (m *Model) setInitialValues() {
 		m.printer = niceyaml.NewPrinter()
 	}
 
-	if m.finder == nil {
-		m.finder = niceyaml.NewFinder(
+	if m.searcher == nil {
+		m.searcher = niceyaml.NewFinder(
 			niceyaml.WithNormalizer(normalizer.New()),
 		)
 	}
@@ -475,7 +478,7 @@ func (m *Model) rerender() {
 	m.diffResult = nil // Invalidate cached diff result.
 	m.left = nil
 	m.right = nil
-	m.finderStale = true
+	m.searcherStale = true
 
 	// Handle side-by-side mode with diff specially.
 	if m.viewMode == ViewModeSideBySide {
@@ -545,13 +548,13 @@ func (m *Model) updateSideBySideSearchState() {
 	}
 
 	// Search on both sources and cache results for overlay application.
-	m.finder.Load(m.left)
+	m.searcher.Load(m.left)
 
-	m.leftMatches = m.finder.Find(m.searchTerm)
+	m.leftMatches = m.searcher.Find(m.searchTerm)
 
-	m.finder.Load(m.right)
+	m.searcher.Load(m.right)
 
-	m.rightMatches = m.finder.Find(m.searchTerm)
+	m.rightMatches = m.searcher.Find(m.searchTerm)
 
 	// Build combined match list. For equal lines, a match appears in both
 	// sources at the same position, so we deduplicate by (row, startCol).
@@ -656,9 +659,10 @@ func (m *Model) applySideBySidePaneOverlays(
 	}
 }
 
-// updateSearchState updates the finder and search matches for the given lines.
+// updateSearchState updates the searcher and search matches for the given
+// lines.
 //
-// It reloads the finder only when the lines changed since the last load, so
+// It reloads the searcher only when the lines changed since the last load, so
 // typing a search term does not rebuild the index on every keystroke.
 func (m *Model) updateSearchState(lines line.Lines) {
 	if m.searchTerm == "" {
@@ -669,14 +673,14 @@ func (m *Model) updateSearchState(lines line.Lines) {
 		return
 	}
 
-	if m.finderStale {
-		m.finder.Load(lines)
+	if m.searcherStale {
+		m.searcher.Load(lines)
 
-		m.finderStale = false
+		m.searcherStale = false
 	}
 
 	// Convert ranges to searchMatch structs (inLeft is not used in unified mode).
-	ranges := m.finder.Find(m.searchTerm)
+	ranges := m.searcher.Find(m.searchTerm)
 	m.searchMatches = make([]searchMatch, len(ranges))
 
 	for i, rng := range ranges {

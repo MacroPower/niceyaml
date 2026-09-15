@@ -53,8 +53,8 @@
 // Provide a custom [niceyaml.Printer] via [WithPrinter] to control syntax
 // highlighting, line numbers, and annotations.
 //
-// Provide a custom [Finder] via [WithFinder] for specialized search behavior
-// (e.g., case-insensitive matching).
+// Provide a custom [Searcher] via [WithSearcher] for specialized search
+// behavior (e.g., case-insensitive matching).
 //
 // Keybindings are fully configurable through the [KeyMap] field on [Model].
 //
