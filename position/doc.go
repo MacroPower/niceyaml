@@ -52,13 +52,4 @@
 //
 // [GroupIndices] is particularly useful for creating context windows around
 // matched lines, merging adjacent matches when their context would overlap.
-//
-// # Range Sum Queries
-//
-// [PrefixSums] enables O(1) range sum queries over a sequence, useful for
-// computing cumulative widths or offsets:
-//
-//	widths := []int{3, 5, 2, 8}
-//	ps := position.NewPrefixSums(len(widths), func(i int) int { return widths[i] })
-//	total := ps.Range(position.NewSpan(1, 3)) // Sum of widths[1:3] = 5 + 2 = 7.
 package position

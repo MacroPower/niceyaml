@@ -60,11 +60,11 @@ func (d *Differ) Diff(a, b *Source) *DiffResult {
 	ops := d.computeOps(a, b)
 
 	// Precompute prefix sums for O(1) line number and count queries.
-	beforeSums := position.NewPrefixSums(len(ops), func(i int) int {
+	beforeSums := newPrefixSums(len(ops), func(i int) int {
 		d, _ := opKindDeltas(ops[i].kind)
 		return d
 	})
-	afterSums := position.NewPrefixSums(len(ops), func(i int) int {
+	afterSums := newPrefixSums(len(ops), func(i int) int {
 		_, d := opKindDeltas(ops[i].kind)
 		return d
 	})
@@ -128,8 +128,8 @@ func (d *Differ) computeOps(before, after *Source) []lineOp {
 //
 // Create instances with [Differ.Diff] or [Diff].
 type DiffResult struct {
-	beforeSums  *position.PrefixSums
-	afterSums   *position.PrefixSums
+	beforeSums  *prefixSums
+	afterSums   *prefixSums
 	name        string
 	ops         []lineOp
 	alignedRows []alignedRow // Lazily computed for side-by-side rendering.
@@ -419,7 +419,7 @@ func (ops lineOps) toLines() line.Lines {
 
 // formatHunkHeader formats a unified diff hunk header like "@@ -1,3 +1,4 @@".
 // Uses the same edge case handling as go-udiff (unified.go lines 218-235).
-func formatHunkHeader(span position.Span, beforeSums, afterSums *position.PrefixSums) string {
+func formatHunkHeader(span position.Span, beforeSums, afterSums *prefixSums) string {
 	fromLine := beforeSums.At(span.Start) + 1
 	toLine := afterSums.At(span.Start) + 1
 	fromCount := beforeSums.Range(span)
