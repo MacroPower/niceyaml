@@ -9,16 +9,11 @@
 //
 // # Using Themes
 //
-// Each theme is exported as a function (e.g., [Monokai], [Dracula]) that
-// returns a ready-to-use [style.Styles]:
-//
-//	styles := theme.Monokai()
-//	printer := niceyaml.NewPrinter(niceyaml.WithStyles(styles))
-//
-// For user-selectable themes, look up by name with [Styles]:
+// Themes are looked up by kebab-case name. [Styles] returns a ready-to-use
+// [style.Styles]:
 //
 //	if styles, ok := theme.Styles("dracula"); ok {
-//		// Use styles
+//		printer := niceyaml.NewPrinter(niceyaml.WithStyles(styles))
 //	}
 //
 // Filter available themes by [Mode] with [List]:
@@ -53,6 +48,12 @@
 // The [style] package's inheritance system means themes only need to specify
 // the categories they want to customize; undefined categories fall back to
 // their parent style.
+//
+// Each built-in theme is a small palette: a base foreground and background,
+// an accent color, OK, warning, and error colors, and the token categories it
+// colors. The package derives the remaining categories, such as headings,
+// highlights, and dimmed text, from those colors, so every theme presents the
+// same set of categories.
 //
 // Most themes in this package are derived from the Chroma syntax highlighter:
 // https://github.com/alecthomas/chroma

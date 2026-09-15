@@ -62,10 +62,8 @@
 // # Themes
 //
 // The [go.jacobcolvin.com/niceyaml/style/theme] subpackage provides
-// predefined themes (Monokai, Dracula, Catppuccin, etc.).
-//
-// Each theme is a function returning [Styles] with colors appropriate for that
-// palette.
+// predefined themes (Monokai, Dracula, Catppuccin, etc.), looked up by name,
+// each returning [Styles] with colors appropriate for that palette.
 //
 // # Style Strings
 //

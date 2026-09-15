@@ -43,7 +43,7 @@ type LineIterator interface {
 // Typical use creates a Source and passes it straight to a [Printer]:
 //
 //	source := NewSourceFromString(yamlContent)
-//	printer := NewPrinter(WithStyles(theme.Dracula()))
+//	printer := NewPrinter()
 //	fmt.Println(printer.Print(source))
 //
 // A Source never changes after creation. It implements [LineIterator] over

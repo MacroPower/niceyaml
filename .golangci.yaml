@@ -250,3 +250,5 @@ linters:
       - path: style/theme/
         linters:
           - dupl
+          # The catalog repeats hex colors across palettes by design.
+          - goconst

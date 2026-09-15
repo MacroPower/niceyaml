@@ -1,6 +1,8 @@
 package theme
 
 import (
+	"slices"
+	"strings"
 	"sync"
 
 	"go.jacobcolvin.com/niceyaml/style"
@@ -47,82 +49,21 @@ var (
 		return m
 	}()
 
-	themes = []Theme{
-		{Abap, "abap", Light},
-		{Algol, "algol", Light},
-		{AlgolNu, "algol-nu", Light},
-		{Arduino, "arduino", Light},
-		{Ashen, "ashen", Dark},
-		{AuraThemeDark, "aura-theme-dark", Dark},
-		{AuraThemeDarkSoft, "aura-theme-dark-soft", Dark},
-		{Autumn, "autumn", Light},
-		{Average, "average", Dark},
-		{Base16Snazzy, "base16-snazzy", Dark},
-		{Borland, "borland", Light},
-		{Bw, "bw", Light},
-		{CatppuccinFrappe, "catppuccin-frappe", Dark},
-		{CatppuccinLatte, "catppuccin-latte", Light},
-		{CatppuccinMacchiato, "catppuccin-macchiato", Dark},
-		{CatppuccinMocha, "catppuccin-mocha", Dark},
-		{Charm, "charm", Dark},
-		{Colorful, "colorful", Light},
-		{DoomOne, "doom-one", Dark},
-		{DoomOne2, "doom-one2", Dark},
-		{Dracula, "dracula", Dark},
-		{Emacs, "emacs", Light},
-		{Evergarden, "evergarden", Dark},
-		{Friendly, "friendly", Light},
-		{Fruity, "fruity", Dark},
-		{Github, "github", Light},
-		{GithubDark, "github-dark", Dark},
-		{Gruvbox, "gruvbox", Dark},
-		{GruvboxLight, "gruvbox-light", Light},
-		{HrHighContrast, "hr-high-contrast", Dark},
-		{Hrdark, "hrdark", Dark},
-		{Igor, "igor", Light},
-		{KanagawaDragon, "kanagawa-dragon", Dark},
-		{KanagawaLotus, "kanagawa-lotus", Light},
-		{KanagawaWave, "kanagawa-wave", Dark},
-		{Lovelace, "lovelace", Light},
-		{Manni, "manni", Light},
-		{ModusOperandi, "modus-operandi", Light},
-		{ModusVivendi, "modus-vivendi", Dark},
-		{Monokai, "monokai", Dark},
-		{Monokailight, "monokailight", Light},
-		{Murphy, "murphy", Light},
-		{Native, "native", Dark},
-		{Nord, "nord", Dark},
-		{Nordic, "nordic", Dark},
-		{Onedark, "onedark", Dark},
-		{Onesenterprise, "onesenterprise", Light},
-		{ParaisoDark, "paraiso-dark", Dark},
-		{ParaisoLight, "paraiso-light", Light},
-		{Pastie, "pastie", Light},
-		{Perldoc, "perldoc", Light},
-		{Pygments, "pygments", Light},
-		{RainbowDash, "rainbow-dash", Light},
-		{RosePine, "rose-pine", Dark},
-		{RosePineDawn, "rose-pine-dawn", Light},
-		{RosePineMoon, "rose-pine-moon", Dark},
-		{Rpgle, "rpgle", Light},
-		{Rrt, "rrt", Dark},
-		{SolarizedDark, "solarized-dark", Dark},
-		{SolarizedDark256, "solarized-dark256", Dark},
-		{SolarizedLight, "solarized-light", Light},
-		{Swapoff, "swapoff", Dark},
-		{Tango, "tango", Light},
-		{TokyonightDay, "tokyonight-day", Light},
-		{TokyonightMoon, "tokyonight-moon", Dark},
-		{TokyonightNight, "tokyonight-night", Dark},
-		{TokyonightStorm, "tokyonight-storm", Dark},
-		{Trac, "trac", Light},
-		{Vim, "vim", Dark},
-		{Vs, "vs", Light},
-		{Vulcan, "vulcan", Dark},
-		{Witchhazel, "witchhazel", Dark},
-		{Xcode, "xcode", Light},
-		{XcodeDark, "xcode-dark", Dark},
-	}
+	// The built-in themes in name order: every catalog palette plus charm.
+	themes = func() []Theme {
+		result := make([]Theme, 0, len(catalog)+1)
+		for name, p := range catalog {
+			result = append(result, Theme{Styles: p.styles, Name: name, Mode: p.Mode})
+		}
+
+		result = append(result, Theme{Styles: Charm, Name: "charm", Mode: Dark})
+
+		slices.SortFunc(result, func(a, b Theme) int {
+			return strings.Compare(a.Name, b.Name)
+		})
+
+		return result
+	}()
 )
 
 // Register registers a custom theme by name.

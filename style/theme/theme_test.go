@@ -164,10 +164,11 @@ func TestAll(t *testing.T) {
 	assert.Contains(t, names, "test-all-custom")
 	assert.Greater(t, slices.Index(names, "test-all-custom"), slices.Index(names, "xcode-dark"))
 
-	// Every entry is complete.
+	// Every entry is complete and builds.
 	for _, th := range all {
 		assert.NotEmpty(t, th.Name)
-		assert.NotNil(t, th.Styles, th.Name)
+		require.NotNil(t, th.Styles, th.Name)
+		assert.NotNil(t, th.Styles().Style(style.Text), th.Name)
 	}
 
 	// List filters All by mode.
