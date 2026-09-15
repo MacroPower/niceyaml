@@ -361,7 +361,8 @@ func WithResetPositions() SplitDocumentsOption {
 //
 // The first token with a non-nil position determines the starting line, column,
 // and offset. All subsequent token positions are adjusted relative to this start,
-// so the first positioned token ends up at line 1, column 1, offset 0.
+// so the first positioned token ends up at line 1, column 1, offset 1, which is
+// where the lexer places the first token of a fresh stream.
 //
 // Tokens with nil positions are cloned but left with nil positions.
 func CloneWithResetPositions(tks token.Tokens) token.Tokens {
@@ -392,7 +393,7 @@ func CloneWithResetPositions(tks token.Tokens) token.Tokens {
 				clone.Position.Column = clone.Position.Column - startCol + 1
 			}
 
-			clone.Position.Offset -= startOffset
+			clone.Position.Offset = clone.Position.Offset - startOffset + 1
 		}
 
 		result.Add(clone)

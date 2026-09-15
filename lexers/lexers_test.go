@@ -286,7 +286,7 @@ func TestTokenizeDocuments_WithResetPositions(t *testing.T) {
 		// First token should be at line 1.
 		assert.Equal(t, 1, docs[0][0].Position.Line)
 		assert.Equal(t, 1, docs[0][0].Position.Column)
-		assert.Equal(t, 0, docs[0][0].Position.Offset)
+		assert.Equal(t, 1, docs[0][0].Position.Offset)
 	})
 
 	t.Run("multi doc each starts at line 1", func(t *testing.T) {
@@ -306,13 +306,13 @@ func TestTokenizeDocuments_WithResetPositions(t *testing.T) {
 		require.NotEmpty(t, docs[0])
 		assert.Equal(t, 1, docs[0][0].Position.Line)
 		assert.Equal(t, 1, docs[0][0].Position.Column)
-		assert.Equal(t, 0, docs[0][0].Position.Offset)
+		assert.Equal(t, 1, docs[0][0].Position.Offset)
 
 		// Second doc should also start at line 1 (header token).
 		require.NotEmpty(t, docs[1])
 		assert.Equal(t, 1, docs[1][0].Position.Line)
 		assert.Equal(t, 1, docs[1][0].Position.Column)
-		assert.Equal(t, 0, docs[1][0].Position.Offset)
+		assert.Equal(t, 1, docs[1][0].Position.Offset)
 	})
 
 	t.Run("preserves original positions when option not used", func(t *testing.T) {
@@ -379,7 +379,7 @@ func TestTokenizeDocuments_WithResetPositions(t *testing.T) {
 		for i, doc := range docs {
 			require.NotEmpty(t, doc, "doc %d should not be empty", i)
 			assert.Equal(t, 1, doc[0].Position.Line, "doc %d should start at line 1", i)
-			assert.Equal(t, 0, doc[0].Position.Offset, "doc %d should start at offset 0", i)
+			assert.Equal(t, 1, doc[0].Position.Offset, "doc %d should start at offset 1", i)
 		}
 	})
 

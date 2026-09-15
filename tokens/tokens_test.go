@@ -4,6 +4,7 @@ import (
 	"iter"
 	"testing"
 
+	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1211,15 +1212,15 @@ func TestSplitDocuments_WithResetPositions(t *testing.T) {
 		// All tokens should be on line 1 now.
 		assert.Equal(t, 1, got[0][0].Position.Line)
 		assert.Equal(t, 1, got[0][0].Position.Column)
-		assert.Equal(t, 0, got[0][0].Position.Offset)
+		assert.Equal(t, 1, got[0][0].Position.Offset)
 
 		assert.Equal(t, 1, got[0][1].Position.Line)
 		assert.Equal(t, 4, got[0][1].Position.Column)
-		assert.Equal(t, 3, got[0][1].Position.Offset)
+		assert.Equal(t, 4, got[0][1].Position.Offset)
 
 		assert.Equal(t, 1, got[0][2].Position.Line)
 		assert.Equal(t, 6, got[0][2].Position.Column)
-		assert.Equal(t, 5, got[0][2].Position.Offset)
+		assert.Equal(t, 6, got[0][2].Position.Offset)
 	})
 
 	t.Run("multi doc each starts at line 1", func(t *testing.T) {
@@ -1245,17 +1246,17 @@ func TestSplitDocuments_WithResetPositions(t *testing.T) {
 		require.Len(t, got[0], 1)
 		assert.Equal(t, 1, got[0][0].Position.Line)
 		assert.Equal(t, 1, got[0][0].Position.Column)
-		assert.Equal(t, 0, got[0][0].Position.Offset)
+		assert.Equal(t, 1, got[0][0].Position.Offset)
 
 		// Second document should also start at line 1.
 		require.Len(t, got[1], 2)
 		assert.Equal(t, 1, got[1][0].Position.Line) // Header.
 		assert.Equal(t, 1, got[1][0].Position.Column)
-		assert.Equal(t, 0, got[1][0].Position.Offset)
+		assert.Equal(t, 1, got[1][0].Position.Offset)
 
 		assert.Equal(t, 2, got[1][1].Position.Line) // Key on next line.
 		assert.Equal(t, 1, got[1][1].Position.Column)
-		assert.Equal(t, 5, got[1][1].Position.Offset)
+		assert.Equal(t, 6, got[1][1].Position.Offset)
 	})
 
 	t.Run("preserves original tokens when option not used", func(t *testing.T) {
@@ -1323,12 +1324,12 @@ func TestSplitDocuments_WithResetPositions(t *testing.T) {
 		// Block indicator should be at line 1.
 		assert.Equal(t, 1, got[0][0].Position.Line)
 		assert.Equal(t, 1, got[0][0].Position.Column)
-		assert.Equal(t, 0, got[0][0].Position.Offset)
+		assert.Equal(t, 1, got[0][0].Position.Offset)
 
 		// Content should be at line 2 (relative to doc start).
 		assert.Equal(t, 2, got[0][1].Position.Line)
 		assert.Equal(t, 5, got[0][1].Position.Column)
-		assert.Equal(t, 2, got[0][1].Position.Offset)
+		assert.Equal(t, 3, got[0][1].Position.Offset)
 	})
 
 	t.Run("handles nil position", func(t *testing.T) {
@@ -1394,6 +1395,27 @@ func TestSplitDocuments_WithResetPositions(t *testing.T) {
 func TestCloneWithResetPositions(t *testing.T) {
 	t.Parallel()
 
+	t.Run("matches a fresh tokenize of the same text", func(t *testing.T) {
+		t.Parallel()
+
+		var second token.Tokens
+
+		for i, doc := range tokens.SplitDocuments(lexer.Tokenize("a: 1\n---\nb: 2\n"), tokens.WithResetPositions()) {
+			if i == 1 {
+				second = doc
+			}
+		}
+
+		fresh := lexer.Tokenize("---\nb: 2\n")
+		require.Len(t, second, len(fresh))
+
+		for i := range fresh {
+			assert.Equal(t, fresh[i].Position.Line, second[i].Position.Line, "token %d line", i)
+			assert.Equal(t, fresh[i].Position.Column, second[i].Position.Column, "token %d column", i)
+			assert.Equal(t, fresh[i].Position.Offset, second[i].Position.Offset, "token %d offset", i)
+		}
+	})
+
 	t.Run("resets positions to line 1 column 1", func(t *testing.T) {
 		t.Parallel()
 
@@ -1414,17 +1436,17 @@ func TestCloneWithResetPositions(t *testing.T) {
 		// First token should be at line 1, column 1, offset 0.
 		assert.Equal(t, 1, got[0].Position.Line)
 		assert.Equal(t, 1, got[0].Position.Column)
-		assert.Equal(t, 0, got[0].Position.Offset)
+		assert.Equal(t, 1, got[0].Position.Offset)
 
 		// Second token: same line, column adjusted relatively.
 		assert.Equal(t, 1, got[1].Position.Line)
-		assert.Equal(t, 4, got[1].Position.Column) // 6 - 3 + 1 = 4
-		assert.Equal(t, 3, got[1].Position.Offset) // 103 - 100 = 3
+		assert.Equal(t, 4, got[1].Position.Column) // Offset 6 relative to start 3, plus the 1-based origin.
+		assert.Equal(t, 4, got[1].Position.Offset) // Offset 103 relative to start 100, plus the 1-based origin.
 
 		// Third token: same line, column adjusted relatively.
 		assert.Equal(t, 1, got[2].Position.Line)
-		assert.Equal(t, 6, got[2].Position.Column) // 8 - 3 + 1 = 6
-		assert.Equal(t, 5, got[2].Position.Offset) // 105 - 100 = 5
+		assert.Equal(t, 6, got[2].Position.Column) // Offset 8 relative to start 3, plus the 1-based origin.
+		assert.Equal(t, 6, got[2].Position.Offset) // Offset 105 relative to start 100, plus the 1-based origin.
 	})
 
 	t.Run("handles multiline tokens", func(t *testing.T) {
@@ -1445,12 +1467,12 @@ func TestCloneWithResetPositions(t *testing.T) {
 		// First token at line 1.
 		assert.Equal(t, 1, got[0].Position.Line)
 		assert.Equal(t, 1, got[0].Position.Column)
-		assert.Equal(t, 0, got[0].Position.Offset)
+		assert.Equal(t, 1, got[0].Position.Offset)
 
 		// Second token at line 2 (relative).
 		assert.Equal(t, 2, got[1].Position.Line)
 		assert.Equal(t, 5, got[1].Position.Column) // Column preserved for non-first lines.
-		assert.Equal(t, 5, got[1].Position.Offset) // 55 - 50 = 5
+		assert.Equal(t, 6, got[1].Position.Offset) // Offset 55 relative to start 50, plus the 1-based origin.
 	})
 
 	t.Run("returns original slice for empty input", func(t *testing.T) {
@@ -1524,7 +1546,7 @@ func TestCloneWithResetPositions(t *testing.T) {
 		// Second token should be reset to line 1.
 		assert.Equal(t, 1, got[1].Position.Line)
 		assert.Equal(t, 1, got[1].Position.Column)
-		assert.Equal(t, 0, got[1].Position.Offset)
+		assert.Equal(t, 1, got[1].Position.Offset)
 	})
 
 	t.Run("preserves token values", func(t *testing.T) {
