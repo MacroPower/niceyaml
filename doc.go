@@ -47,8 +47,8 @@
 // A view need not be a YAML document. Diffs, for example, interleave lines
 // from two revisions and are plain [Lines] values.
 //
-// [Printer] renders any [LineIterator], which both [*Source] and [Lines]
-// satisfy, with syntax highlighting via lipgloss.
+// [Printer] renders any [View], which both [*Source] and [Lines] satisfy,
+// with syntax highlighting via lipgloss.
 //
 // It supports customizable gutters (line numbers, diff markers), word wrapping,
 // and annotation rendering.

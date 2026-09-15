@@ -3017,16 +3017,21 @@ func TestLines_View(t *testing.T) {
 		assert.Equal(t, []int{1, 2}, indices)
 	})
 
-	t.Run("AllLines yields pointers into the collection", func(t *testing.T) {
+	t.Run("AllLines yields copies", func(t *testing.T) {
 		t.Parallel()
 
 		lines := niceyaml.NewLines(lexer.Tokenize(input))
 
-		for i, ln := range lines.AllLines() {
-			if i == 1 {
-				ln.AddAnnotation(line.Annotation{Content: "note", Placement: line.Below})
-			}
+		for _, ln := range lines.AllLines() {
+			ln.AddAnnotation(line.Annotation{Content: "note", Placement: line.Below})
 		}
+
+		for _, ln := range lines {
+			assert.Empty(t, ln.Annotations)
+		}
+
+		// Mutation goes through the collection itself.
+		lines[1].AddAnnotation(line.Annotation{Content: "note", Placement: line.Below})
 
 		require.Len(t, lines[1].Annotations, 1)
 		assert.Equal(t, "note", lines[1].Annotations[0].Content)

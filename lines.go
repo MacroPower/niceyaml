@@ -91,14 +91,15 @@ func (ls Lines) Clone() Lines {
 // AllLines returns an iterator over lines within the given spans.
 //
 // Without spans, AllLines yields every line. Each iteration yields the
-// 0-indexed line index and a pointer to the [line.Line] at that index, so
-// annotations and overlays added through the pointer land on the collection.
-// AllLines clamps spans to the available lines.
-func (ls Lines) AllLines(spans ...position.Span) iter.Seq2[int, *line.Line] {
-	return func(yield func(int, *line.Line) bool) {
+// 0-indexed line index and the [line.Line] at that index by value, so a
+// change to the yielded line reaches nothing. To add overlays or
+// annotations, use [Lines.AddOverlay] and the other Lines methods, or index
+// the collection directly. AllLines clamps spans to the available lines.
+func (ls Lines) AllLines(spans ...position.Span) iter.Seq2[int, line.Line] {
+	return func(yield func(int, line.Line) bool) {
 		if len(spans) == 0 {
 			for i := range ls {
-				if !yield(i, &ls[i]) {
+				if !yield(i, ls[i]) {
 					return
 				}
 			}
@@ -111,7 +112,7 @@ func (ls Lines) AllLines(spans ...position.Span) iter.Seq2[int, *line.Line] {
 			end := min(len(ls), span.End)
 
 			for i := start; i < end; i++ {
-				if !yield(i, &ls[i]) {
+				if !yield(i, ls[i]) {
 					return
 				}
 			}

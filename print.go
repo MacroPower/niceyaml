@@ -34,7 +34,7 @@ type StyleGetter interface {
 
 // Printer prints YAML with syntax highlighting for terminal output.
 //
-// It accepts a [LineIterator], either a [*Source] or a [Lines] view, and
+// It accepts a [View], either a [*Source] or a [Lines] collection, and
 // produces styled terminal output using [lipgloss.Style]s. It applies syntax
 // highlighting to YAML tokens, with support for customizable gutters,
 // annotations, styled overlays, and word wrapping.
@@ -355,7 +355,7 @@ func (p *Printer) Style(s style.Style) lipgloss.Style {
 // provided, all lines are rendered.
 //
 // It returns the number of bytes written and any write error encountered.
-func (p *Printer) Fprint(w io.Writer, lines LineIterator, spans ...position.Span) (int, error) {
+func (p *Printer) Fprint(w io.Writer, lines View, spans ...position.Span) (int, error) {
 	n, err := io.WriteString(w, p.Print(lines, spans...))
 	if err != nil {
 		return n, fmt.Errorf("write rendered output: %w", err)
@@ -364,10 +364,10 @@ func (p *Printer) Fprint(w io.Writer, lines LineIterator, spans ...position.Span
 	return n, nil
 }
 
-// Print prints any [LineIterator].
+// Print prints any [View].
 // It prints lines within the given [position.Span]s, in the supplied order.
 // If no [position.Span]s are provided, all lines are printed.
-func (p *Printer) Print(lines LineIterator, spans ...position.Span) string {
+func (p *Printer) Print(lines View, spans ...position.Span) string {
 	if len(spans) == 0 {
 		spans = position.Spans{position.NewSpan(0, lines.Len())}
 	}
@@ -402,7 +402,7 @@ func (p *Printer) Print(lines LineIterator, spans ...position.Span) string {
 //
 // Viewers that scroll by rendered row use Rows to map a window of rows back
 // to the lines that fill it.
-func (p *Printer) Rows(lines LineIterator, spans ...position.Span) []int {
+func (p *Printer) Rows(lines View, spans ...position.Span) []int {
 	if len(spans) == 0 {
 		spans = position.Spans{position.NewSpan(0, lines.Len())}
 	}
@@ -413,7 +413,7 @@ func (p *Printer) Rows(lines LineIterator, spans ...position.Span) []int {
 		gutterWidth := p.gutterWidth(lines.Len())
 
 		for idx, ln := range lines.AllLines(span) {
-			rows = append(rows, len(p.renderLine(idx, ln, lines.Len(), gutterWidth)))
+			rows = append(rows, len(p.renderLine(idx, &ln, lines.Len(), gutterWidth)))
 		}
 	}
 
@@ -437,7 +437,7 @@ func (p *Printer) gutterWidth(totalLines int) int {
 }
 
 // renderSpan renders the lines of span as rows.
-func (p *Printer) renderSpan(t LineIterator, span position.Span) []string {
+func (p *Printer) renderSpan(t View, span position.Span) []string {
 	if t.IsEmpty() {
 		return nil
 	}
@@ -448,7 +448,7 @@ func (p *Printer) renderSpan(t LineIterator, span position.Span) []string {
 	var rows []string
 
 	for idx, ln := range t.AllLines(span) {
-		rows = append(rows, p.renderLine(idx, ln, totalLines, gutterWidth)...)
+		rows = append(rows, p.renderLine(idx, &ln, totalLines, gutterWidth)...)
 	}
 
 	return rows

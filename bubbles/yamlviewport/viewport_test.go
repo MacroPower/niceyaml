@@ -3060,7 +3060,7 @@ type countingSearcher struct {
 	loads int
 }
 
-func (c *countingSearcher) Load(lines niceyaml.LineIterator) {
+func (c *countingSearcher) Load(lines niceyaml.View) {
 	c.loads++
 	c.Finder.Load(lines)
 }

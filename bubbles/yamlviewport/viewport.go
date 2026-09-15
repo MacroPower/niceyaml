@@ -26,7 +26,7 @@ const defaultHorizontalStep = 6
 //
 // See [niceyaml.Finder] for an implementation.
 type Searcher interface {
-	Load(lines niceyaml.LineIterator)
+	Load(lines niceyaml.View)
 	Find(search string) position.Ranges
 }
 

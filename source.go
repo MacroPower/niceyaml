@@ -17,12 +17,17 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
-// LineIterator provides line-by-line access to YAML tokens.
+// View is read-only, line-by-line access to content that [Printer] renders
+// and [Finder] searches.
 //
-// [Lines] implements it directly, and [Source] implements it by
-// delegating to its view.
-type LineIterator interface {
-	AllLines(spans ...position.Span) iter.Seq2[int, *line.Line]
+// AllLines yields each [line.Line] by value, so a change to a yielded line
+// reaches nothing. Overlays and annotations go through the [Lines] methods
+// and through indexing a [Lines] collection directly.
+//
+// [Lines] implements View directly, and [*Source] implements it over its
+// pristine lines.
+type View interface {
+	AllLines(spans ...position.Span) iter.Seq2[int, line.Line]
 	AllRunes(ranges ...position.Range) iter.Seq2[position.Position, rune]
 	Len() int
 	IsEmpty() bool
@@ -46,8 +51,8 @@ type LineIterator interface {
 //	printer := NewPrinter()
 //	fmt.Println(printer.Print(source))
 //
-// A Source never changes after creation. It implements [LineIterator] over
-// its pristine lines, so printing a Source always renders the document as
+// A Source never changes after creation. It implements [View] over its
+// pristine lines, so printing a Source always renders the document as
 // parsed. To highlight or annotate, take a view with [Source.Lines], which
 // returns an independent copy each call, and render the view instead:
 //
@@ -304,18 +309,8 @@ func (s *Source) IsEmpty() bool {
 
 // AllLines returns an iterator over lines within the given spans.
 // See [Lines.AllLines].
-//
-// Each yielded [*line.Line] is a copy, so annotations or overlays added
-// through it do not change the Source.
-func (s *Source) AllLines(spans ...position.Span) iter.Seq2[int, *line.Line] {
-	return func(yield func(int, *line.Line) bool) {
-		for i, ln := range s.lines.AllLines(spans...) {
-			c := *ln
-			if !yield(i, &c) {
-				return
-			}
-		}
-	}
+func (s *Source) AllLines(spans ...position.Span) iter.Seq2[int, line.Line] {
+	return s.lines.AllLines(spans...)
 }
 
 // AllRunes returns an iterator over runes within the given ranges.

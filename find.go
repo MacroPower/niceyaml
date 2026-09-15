@@ -63,7 +63,7 @@ type Finder struct {
 }
 
 // NewFinder creates a new [*Finder].
-// Call [Finder.Load] to provide a [LineIterator] before searching.
+// Call [Finder.Load] to provide a [View] before searching.
 //
 // By default, no normalization is applied. Use [WithNormalizer] to enable
 // case-insensitive or diacritic-insensitive matching.
@@ -92,7 +92,7 @@ func WithNormalizer(normalizer Normalizer) FinderOption {
 	}
 }
 
-// Load preprocesses the given [LineIterator], building the search text and
+// Load preprocesses the given [View], building the search text and
 // position map.
 //
 // Every call rebuilds the index, so call Load once per distinct content and
@@ -100,7 +100,7 @@ func WithNormalizer(normalizer Normalizer) FinderOption {
 // highlighting matches does not require reloading.
 //
 // This method must be called before using [Finder.Find].
-func (f *Finder) Load(lines LineIterator) {
+func (f *Finder) Load(lines View) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -186,7 +186,7 @@ func (f *Finder) Find(search string) position.Ranges {
 // When a normalizer is set, it normalizes the returned text, and the position
 // map maps normalized character indices to original positions so lookups in
 // normalized text resolve to the right place.
-func (f *Finder) buildTextAndPositionMap(lines LineIterator) (string, *positionMap) {
+func (f *Finder) buildTextAndPositionMap(lines View) (string, *positionMap) {
 	var sb strings.Builder
 
 	pm := &positionMap{}

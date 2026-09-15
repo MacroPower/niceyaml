@@ -1094,8 +1094,11 @@ func TestSource_WrapError(t *testing.T) {
 	})
 }
 
-// A [niceyaml.Lines] view satisfies the same iterator contract as a [*niceyaml.Source].
-var _ niceyaml.LineIterator = niceyaml.Lines(nil)
+// Both a [niceyaml.Lines] collection and a [*niceyaml.Source] are a [niceyaml.View].
+var (
+	_ niceyaml.View = niceyaml.Lines(nil)
+	_ niceyaml.View = (*niceyaml.Source)(nil)
+)
 
 func TestSource_AllLines_YieldsCopies(t *testing.T) {
 	t.Parallel()
