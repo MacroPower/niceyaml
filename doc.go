@@ -213,6 +213,6 @@
 // [go.jacobcolvin.com/niceyaml/fangs] and
 // [go.jacobcolvin.com/niceyaml/bubbles/yamlviewport] packages are adapters
 // for the charm libraries they build on and expose those libraries' types by
-// design. The fangs package is a module of its own, so fang and cobra stay
+// design. Each is a module of its own, so bubbletea, fang, and cobra stay
 // out of this module's dependencies.
 package niceyaml

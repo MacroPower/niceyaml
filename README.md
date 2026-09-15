@@ -21,7 +21,7 @@ It enables **friendly and predictable handling of YAML-compatible documents** in
 - String [`Finder`][niceyaml.Finder] for load-once, search-many scenarios
 - Extended [`Encoder`][niceyaml.Encoder] and [`Document`][niceyaml.Document] decoding wrappers
 - JSON schema [validation][niceyaml/schema.NewValidator] with YAML path errors
-- Bubble [`yamlviewport`][niceyaml/bubbles/yamlviewport] for Bubble Tea
+- Bubble [`yamlviewport`][niceyaml/bubbles/yamlviewport] for Bubble Tea, in a module of its own
 - [`fangs`][niceyaml/fangs] adapters for CLIs built with fang, in a module of their own
 - Generic building blocks for your own bubbles
 

@@ -5,13 +5,14 @@ shopt: [globstar]
 
 # Go tasks call the local toolchain (go, golangci-lint) directly; devbox
 # provides both on PATH. The repo is a Go workspace (go.work) holding the
-# library module at the root, the fangs adapter module under fangs, and the
-# nyaml CLI module under cmd/nyaml. The ./... pattern stops at a nested
-# module, so GO_PKGS names every tree. go mod tidy ignores the workspace, so
-# the tidy tasks visit each module directory in GO_MODULES.
+# library module at the root, the bubbles and fangs adapter modules under
+# bubbles and fangs, and the nyaml CLI module under cmd/nyaml. The ./...
+# pattern stops at a nested module, so GO_PKGS names every tree. go mod tidy
+# ignores the workspace, so the tidy tasks visit each module directory in
+# GO_MODULES.
 vars:
-  GO_PKGS: ./... ./fangs/... ./cmd/nyaml/...
-  GO_MODULES: [".", "fangs", "cmd/nyaml"]
+  GO_PKGS: ./... ./bubbles/... ./fangs/... ./cmd/nyaml/...
+  GO_MODULES: [".", "bubbles", "fangs", "cmd/nyaml"]
   TEST_TIMEOUT: 30m
   # Test names matching this regex are integration tests: test skips them,
   # test:integration selects them.

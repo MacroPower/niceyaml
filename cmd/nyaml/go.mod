@@ -4,6 +4,7 @@ go 1.27.0
 
 replace (
 	go.jacobcolvin.com/niceyaml => ../..
+	go.jacobcolvin.com/niceyaml/bubbles => ../../bubbles
 	go.jacobcolvin.com/niceyaml/fangs => ../../fangs
 )
 
@@ -15,6 +16,7 @@ require (
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/spf13/cobra v1.10.2
 	go.jacobcolvin.com/niceyaml v0.0.0-00010101000000-000000000000
+	go.jacobcolvin.com/niceyaml/bubbles v0.0.0-00010101000000-000000000000
 	go.jacobcolvin.com/niceyaml/fangs v0.0.0-00010101000000-000000000000
 	go.jacobcolvin.com/x/cobras v0.1.0
 )
