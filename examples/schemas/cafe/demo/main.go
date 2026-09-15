@@ -30,10 +30,10 @@ func main() {
 	}
 }
 
-// load parses a cafe configuration and validates it. Because [cafe.Config]
-// implements both schema and self validation, a single Unmarshal runs the JSON
-// schema first, then the custom open-before-close check. Failures are wrapped
-// against the source so they print with the offending lines highlighted.
+// load parses a cafe configuration and validates it. A single Unmarshal runs
+// the JSON schema from [cafe.Schema] first, then the custom open-before-close
+// check that [cafe.Config] implements. Failures are wrapped against the
+// source so they print with the offending lines highlighted.
 func load(in string) (*cafe.Config, error) {
 	source := niceyaml.NewSourceFromString(in)
 
@@ -45,7 +45,7 @@ func load(in string) (*cafe.Config, error) {
 	var cfg cafe.Config
 
 	for _, doc := range decoder.Documents() {
-		cfg, err = doc.Unmarshal[cafe.Config](context.Background())
+		cfg, err = doc.Unmarshal[cafe.Config](context.Background(), niceyaml.WithSchema(cafe.Schema))
 		if err != nil {
 			return nil, source.WrapError(err)
 		}

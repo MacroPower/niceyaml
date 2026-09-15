@@ -361,7 +361,7 @@ func TestDocumentDecoder_Decode_TypeMismatch(t *testing.T) {
 func TestDocumentDecoder_Unmarshal(t *testing.T) {
 	t.Parallel()
 
-	t.Run("validates and decodes with SchemaValidator", func(t *testing.T) {
+	t.Run("validates and decodes with a schema", func(t *testing.T) {
 		t.Parallel()
 
 		input := stringtest.Input(`
@@ -373,12 +373,45 @@ func TestDocumentDecoder_Unmarshal(t *testing.T) {
 		require.NoError(t, err)
 
 		for _, dd := range d.Documents() {
-			result, err := dd.Unmarshal[schemaValidatorConfig](t.Context())
+			var called bool
+
+			result, err := dd.Unmarshal[plainConfig](t.Context(), niceyaml.WithSchema(nameSchema(&called)))
 			require.NoError(t, err)
 			assert.Equal(t, "test", result.Name)
 			assert.Equal(t, 42, result.Value)
-			assert.True(t, result.schemaValidated, "ValidateSchema() should have been called")
+			assert.True(t, called, "ValidateSchema() should have been called")
 		}
+	})
+
+	t.Run("runs every schema in order and stops at the first failure", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "name: invalid")
+
+		var (
+			first, third bool
+			order        []string
+		)
+
+		record := func(name string, called *bool) niceyaml.SchemaValidator {
+			return yamltest.NewCustomSchemaValidator(func(_ context.Context, _ any) error {
+				*called = true
+
+				order = append(order, name)
+
+				return nil
+			})
+		}
+
+		_, err := dd.Unmarshal[plainConfig](t.Context(),
+			niceyaml.WithSchema(record("first", &first)),
+			niceyaml.WithSchema(nameSchema(nil)),
+			niceyaml.WithSchema(record("third", &third)),
+		)
+		require.ErrorIs(t, err, errSchemaValidationFailed)
+		assert.True(t, first)
+		assert.False(t, third, "a failing schema stops the pipeline")
+		assert.Equal(t, []string{"first"}, order)
 	})
 
 	t.Run("schema validation fails - no decode", func(t *testing.T) {
@@ -393,12 +426,12 @@ func TestDocumentDecoder_Unmarshal(t *testing.T) {
 		require.NoError(t, err)
 
 		for _, dd := range d.Documents() {
-			_, err := dd.Unmarshal[schemaValidatorConfig](t.Context())
+			_, err := dd.Unmarshal[plainConfig](t.Context(), niceyaml.WithSchema(nameSchema(nil)))
 			require.ErrorIs(t, err, errSchemaValidationFailed)
 		}
 	})
 
-	t.Run("decodes without SchemaValidator", func(t *testing.T) {
+	t.Run("decodes without a schema", func(t *testing.T) {
 		t.Parallel()
 
 		input := stringtest.Input(`
@@ -483,7 +516,9 @@ func TestDocumentDecoder_Unmarshal_DecodeError(t *testing.T) {
 
 	for _, dd := range d.Documents() {
 		// Schema validation passes, but decode will fail due to type mismatch.
-		_, err := dd.Unmarshal[strictSchemaValidatorConfig](t.Context())
+		_, err := dd.Unmarshal[strictValueConfig](t.Context(),
+			niceyaml.WithSchema(yamltest.NewPassingSchemaValidator()),
+		)
 
 		require.Error(t, err)
 
@@ -568,9 +603,11 @@ func TestDocumentDecoder_Decode_Validator(t *testing.T) {
 		require.NoError(t, err)
 
 		for _, dd := range d.Documents() {
-			result, err := dd.Unmarshal[bothValidatorConfig](t.Context())
+			var called bool
+
+			result, err := dd.Unmarshal[bothValidatorConfig](t.Context(), niceyaml.WithSchema(nameSchema(&called)))
 			require.NoError(t, err)
-			assert.True(t, result.schemaValidated, "ValidateSchema() should have been called")
+			assert.True(t, called, "ValidateSchema() should have been called")
 			assert.True(t, result.validated, "Validate() should have been called after decode")
 		}
 	})
@@ -613,61 +650,43 @@ func (c *validatorConfig) Validate() error {
 	return nil
 }
 
-// plainConfig does not implement niceyaml.Validator or niceyaml.SchemaValidator.
+// plainConfig does not implement niceyaml.Validator.
 type plainConfig struct {
 	Name  string `yaml:"name"`
 	Value int    `yaml:"value"`
 }
 
-// schemaValidatorConfig implements niceyaml.SchemaValidator.
-type schemaValidatorConfig struct {
-	Name            string `yaml:"name"`
-	Value           int    `yaml:"value"`
-	schemaValidated bool
+// nameSchema returns a [niceyaml.SchemaValidator] that rejects a document
+// whose name is "invalid" with a path error, and records each call in called
+// when it is not nil.
+func nameSchema(called *bool) niceyaml.SchemaValidator {
+	return yamltest.NewCustomSchemaValidator(func(_ context.Context, data any) error {
+		if called != nil {
+			*called = true
+		}
+
+		m, ok := data.(map[string]any)
+		if !ok {
+			return errors.New("expected map")
+		}
+
+		if name, ok := m["name"].(string); ok && name == "invalid" {
+			return niceyaml.NewErrorFrom(
+				errSchemaValidationFailed,
+				niceyaml.WithPath(paths.Root().Child("name").Key()),
+			)
+		}
+
+		return nil
+	})
 }
 
-func (c *schemaValidatorConfig) ValidateSchema(_ context.Context, data any) error {
-	c.schemaValidated = true
-
-	m, ok := data.(map[string]any)
-	if !ok {
-		return errors.New("expected map")
-	}
-
-	if name, ok := m["name"].(string); ok && name == "invalid" {
-		return niceyaml.NewErrorFrom(
-			errSchemaValidationFailed,
-			niceyaml.WithPath(paths.Root().Child("name").Key()),
-		)
-	}
-
-	return nil
-}
-
-// bothValidatorConfig implements both niceyaml.SchemaValidator and niceyaml.Validator.
+// bothValidatorConfig implements niceyaml.Validator and is unmarshaled with
+// a schema, so tests of the full pipeline use it.
 type bothValidatorConfig struct {
-	Name            string `yaml:"name"`
-	Value           int    `yaml:"value"`
-	schemaValidated bool
-	validated       bool
-}
-
-func (c *bothValidatorConfig) ValidateSchema(_ context.Context, data any) error {
-	c.schemaValidated = true
-
-	m, ok := data.(map[string]any)
-	if !ok {
-		return errors.New("expected map")
-	}
-
-	if name, ok := m["name"].(string); ok && name == "invalid" {
-		return niceyaml.NewErrorFrom(
-			errSchemaValidationFailed,
-			niceyaml.WithPath(paths.Root().Child("name").Key()),
-		)
-	}
-
-	return nil
+	Name      string `yaml:"name"`
+	Value     int    `yaml:"value"`
+	validated bool
 }
 
 func (c *bothValidatorConfig) Validate() error {
@@ -683,15 +702,10 @@ func (c *bothValidatorConfig) Validate() error {
 	return nil
 }
 
-// strictSchemaValidatorConfig implements niceyaml.SchemaValidator with a strict type.
-// Used to test decode errors after successful schema validation.
-type strictSchemaValidatorConfig struct {
+// strictValueConfig has a typed field, so decoding a mismatched value fails
+// after schema validation passes.
+type strictValueConfig struct {
 	Value int `yaml:"value"`
-}
-
-func (c *strictSchemaValidatorConfig) ValidateSchema(_ context.Context, _ any) error {
-	// Always passes schema validation.
-	return nil
 }
 
 func TestDecoder_Documents(t *testing.T) {
@@ -1345,11 +1359,13 @@ func TestDocumentDecoder_UnmarshalInto(t *testing.T) {
 
 		result := bothValidatorConfig{Value: 7}
 
-		err := dd.UnmarshalInto(t.Context(), &result)
+		var called bool
+
+		err := dd.UnmarshalInto(t.Context(), &result, niceyaml.WithSchema(nameSchema(&called)))
 		require.NoError(t, err)
 		assert.Equal(t, "test", result.Name)
 		assert.Equal(t, 7, result.Value)
-		assert.True(t, result.schemaValidated, "ValidateSchema() should have been called")
+		assert.True(t, called, "ValidateSchema() should have been called")
 		assert.True(t, result.validated, "Validate() should have been called")
 	})
 
@@ -1387,35 +1403,11 @@ func TestDocumentDecoder_Unmarshal_ValueReceivers(t *testing.T) {
 		require.ErrorIs(t, err, errNameRequired)
 		assert.Zero(t, result)
 	})
-
-	t.Run("returns value receiver ValidateSchema error", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, "name: invalid")
-
-		result, err := dd.Unmarshal[valueValidatorConfig](t.Context())
-		require.ErrorIs(t, err, errSchemaValidationFailed)
-		assert.Zero(t, result)
-	})
 }
 
-// valueValidatorConfig implements niceyaml.SchemaValidator and
-// niceyaml.Validator with value receivers.
+// valueValidatorConfig implements niceyaml.Validator with a value receiver.
 type valueValidatorConfig struct {
 	Name string `yaml:"name"`
-}
-
-func (c valueValidatorConfig) ValidateSchema(_ context.Context, data any) error {
-	m, ok := data.(map[string]any)
-	if !ok {
-		return errors.New("expected map")
-	}
-
-	if name, ok := m["name"].(string); ok && name == "invalid" {
-		return errSchemaValidationFailed
-	}
-
-	return nil
 }
 
 func (c valueValidatorConfig) Validate() error {

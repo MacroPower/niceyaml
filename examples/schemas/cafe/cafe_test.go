@@ -21,7 +21,7 @@ func cafeConfig(ctx context.Context, in string) (*cafe.Config, error) {
 	var c cafe.Config
 
 	for _, doc := range d.Documents() {
-		c, err = doc.Unmarshal[cafe.Config](ctx)
+		c, err = doc.Unmarshal[cafe.Config](ctx, niceyaml.WithSchema(cafe.Schema))
 		if err != nil {
 			return nil, src.WrapError(err)
 		}

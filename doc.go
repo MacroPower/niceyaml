@@ -95,17 +95,18 @@
 //	source := niceyaml.NewSourceFromString(yamlContent)
 //	decoder, _ := source.Decoder()
 //	for _, doc := range decoder.Documents() {
-//		config, err := doc.Unmarshal[Config](ctx)
+//		config, err := doc.Unmarshal[Config](ctx, niceyaml.WithSchema(validator))
 //		if err != nil {
 //			return source.WrapError(err)
 //		}
 //	}
 //
-// [DocumentDecoder.Unmarshal] supports two validation hooks: types implementing
-// [SchemaValidator] are validated against an external schema before decoding,
-// and types implementing [Validator] are self-validated after decoding.
-// [DocumentDecoder.UnmarshalInto] runs the same pipeline on a value you already
-// hold, such as one pre-populated with defaults.
+// [DocumentDecoder.Unmarshal] supports two validation hooks: a
+// [SchemaValidator] passed with [WithSchema] checks the document against an
+// external schema before decoding, and a type implementing [Validator]
+// validates itself after decoding. [DocumentDecoder.UnmarshalInto] runs the
+// same pipeline on a value you already hold, such as one pre-populated with
+// defaults.
 //
 // Both produce [Error] values with path information that [Source.WrapError] can
 // annotate with source context.

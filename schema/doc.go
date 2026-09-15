@@ -40,6 +40,10 @@
 //	    // err is *niceyaml.Error with path info for highlighting.
 //	}
 //
+// To validate and decode in one step, pass the validator to
+// [go.jacobcolvin.com/niceyaml.DocumentDecoder.Unmarshal] with
+// [go.jacobcolvin.com/niceyaml.WithSchema].
+//
 // # Resolution
 //
 // When a document's schema is unknown ahead of time, a [Resolver]

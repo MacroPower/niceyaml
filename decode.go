@@ -31,11 +31,11 @@ type Validator interface {
 // SchemaValidator is implemented by types that validate arbitrary data against
 // a schema.
 //
-// If a type implements this interface, [DocumentDecoder.Unmarshal]
-// automatically decodes the document to [any] and calls ValidateSchema before
-// decoding to the typed struct. The context carries cancellation and deadlines
-// to validators doing cancellable work, such as remote schema reference
-// resolution.
+// Pass one to [DocumentDecoder.Unmarshal] with [WithSchema], and it decodes
+// the document to [any] and calls ValidateSchema before decoding to the
+// typed struct. [DocumentDecoder.ValidateSchema] runs one on its own. The
+// context carries cancellation and deadlines to validators doing cancellable
+// work, such as remote schema reference resolution.
 //
 // See [go.jacobcolvin.com/niceyaml/schema.NewValidator] for an
 // implementation.
@@ -178,9 +178,9 @@ func (d *Decoder) Documents() iter.Seq2[int, *DocumentDecoder] {
 // DocumentDecoder decodes and validates a single YAML document.
 //
 // It separates decoding from document iteration, allowing validation hooks
-// to run at the right time during unmarshaling. Types implementing
-// [SchemaValidator] are validated before decoding, and types implementing
-// [Validator] are validated after. Types may implement both interfaces.
+// to run at the right time during unmarshaling. A [SchemaValidator] given
+// with [WithSchema] runs before decoding, and a type implementing
+// [Validator] validates itself after.
 //
 // Use [DocumentDecoder.Get] or [DocumentDecoder.GetValue] to inspect values
 // without unmarshaling, which is helpful for routing documents based on a
@@ -190,7 +190,7 @@ func (d *Decoder) Documents() iter.Seq2[int, *DocumentDecoder] {
 // validation pipeline:
 //
 //	for _, doc := range decoder.Documents() {
-//		config, err := doc.Unmarshal[Config](ctx)
+//		config, err := doc.Unmarshal[Config](ctx, niceyaml.WithSchema(validator))
 //		if err != nil {
 //			return err
 //		}
@@ -455,20 +455,45 @@ func (dd *DocumentDecoder) DecodeInto(ctx context.Context, v any) error {
 	return dd.decodeNode(ctx, dd.doc.Body, v)
 }
 
+// UnmarshalOption configures [DocumentDecoder.Unmarshal] and
+// [DocumentDecoder.UnmarshalInto].
+//
+// Available options:
+//   - [WithSchema]
+type UnmarshalOption func(*unmarshalConfig)
+
+// unmarshalConfig holds the settings an [UnmarshalOption] configures.
+type unmarshalConfig struct {
+	schemas []SchemaValidator
+}
+
+// WithSchema is an [UnmarshalOption] that validates the document against sv
+// before decoding it. The document is decoded to [any] and handed to
+// ValidateSchema, and a validation error ends the unmarshal before any typed
+// decoding. Several schemas run in the order given, stopping at the first
+// that fails:
+//
+//	config, err := doc.Unmarshal[Config](ctx, niceyaml.WithSchema(validator))
+func WithSchema(sv SchemaValidator) UnmarshalOption {
+	return func(c *unmarshalConfig) {
+		c.schemas = append(c.schemas, sv)
+	}
+}
+
 // Unmarshal validates and decodes the document into a new T.
 //
-// If *T implements [SchemaValidator], ValidateSchema is called before decoding.
-// If *T implements [Validator], Validate is called after successful decoding.
+// Each [SchemaValidator] from [WithSchema] runs before decoding. If *T
+// implements [Validator], Validate is called after successful decoding.
 // Methods declared on T itself are included in the method set of *T, so both
 // value and pointer receivers participate. On error, the returned T is the
 // zero value.
 //
 // To unmarshal into a value you already hold, use
 // [DocumentDecoder.UnmarshalInto].
-func (dd *DocumentDecoder) Unmarshal[T any](ctx context.Context) (T, error) {
+func (dd *DocumentDecoder) Unmarshal[T any](ctx context.Context, opts ...UnmarshalOption) (T, error) {
 	var v T
 
-	err := dd.UnmarshalInto(ctx, &v)
+	err := dd.UnmarshalInto(ctx, &v, opts...)
 	if err != nil {
 		var zero T
 
@@ -481,13 +506,18 @@ func (dd *DocumentDecoder) Unmarshal[T any](ctx context.Context) (T, error) {
 // UnmarshalInto validates and decodes the document into v, which must be a
 // pointer.
 //
-// If v implements [SchemaValidator], ValidateSchema is called before decoding.
-// If v implements [Validator], Validate is called after successful decoding.
+// Each [SchemaValidator] from [WithSchema] runs before decoding. If v
+// implements [Validator], Validate is called after successful decoding.
 // Fields absent from the document keep their existing values, so v may be
 // pre-populated with defaults.
-func (dd *DocumentDecoder) UnmarshalInto(ctx context.Context, v any) error {
-	// Validate if type provides schema validation.
-	if sv, ok := v.(SchemaValidator); ok {
+func (dd *DocumentDecoder) UnmarshalInto(ctx context.Context, v any, opts ...UnmarshalOption) error {
+	var cfg unmarshalConfig
+
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	for _, sv := range cfg.schemas {
 		err := dd.ValidateSchema(ctx, sv)
 		if err != nil {
 			return err

@@ -2,7 +2,6 @@
 package cafe
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -22,7 +21,9 @@ var (
 	//go:embed cafe.v1.json
 	schemaJSON []byte
 
-	configValidator = schema.NewValidator(jsonschema.MustCompileJSON(schemaJSON))
+	// Schema validates a decoded document against the cafe JSON schema. Pass
+	// it to Unmarshal with [niceyaml.WithSchema].
+	Schema = schema.NewValidator(jsonschema.MustCompileJSON(schemaJSON))
 
 	// DefaultYAML is a valid cafe configuration, used by the demo and tests.
 	//go:embed defaults.yaml
@@ -48,12 +49,6 @@ type Config struct {
 // NewConfig creates a new [Config].
 func NewConfig() Config {
 	return Config{}
-}
-
-// ValidateSchema validates arbitrary data against the cafe JSON schema.
-func (c Config) ValidateSchema(ctx context.Context, data any) error {
-	//nolint:wrapcheck // Validator.ValidateSchema returns niceyaml.Error with path info.
-	return configValidator.ValidateSchema(ctx, data)
 }
 
 // Validate performs custom validation after decoding.
