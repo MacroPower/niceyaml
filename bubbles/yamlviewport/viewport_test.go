@@ -3391,6 +3391,76 @@ func TestViewport_RevisionNavigationResetsSearch(t *testing.T) {
 	assert.Equal(t, 0, m.YOffset())
 }
 
+func TestViewport_ContentChangesResetSearch(t *testing.T) {
+	t.Parallel()
+
+	// Build a document with matches on lines 20 and 30. The changed version
+	// also changes line 5 and keeps both matches.
+	doc := func(changed bool) string {
+		var sb strings.Builder
+
+		for i := range 40 {
+			value := "value"
+
+			switch {
+			case i == 20, i == 30:
+				value = "needle"
+			case i == 5 && changed:
+				value = "changed"
+			}
+
+			fmt.Fprintf(&sb, "key%d: %s\n", i, value)
+		}
+
+		return sb.String()
+	}
+
+	tcs := map[string]struct {
+		change func(m *yamlviewport.Model)
+	}{
+		"add revision": {
+			change: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromString(doc(false), niceyaml.WithName("v3")))
+			},
+		},
+		"set source": {
+			change: func(m *yamlviewport.Model) {
+				m.SetSource(niceyaml.NewSourceFromString(doc(true)))
+			},
+		},
+		"diff mode": {
+			change: func(m *yamlviewport.Model) { m.SetDiffMode(yamlviewport.DiffModeNone) },
+		},
+		"view mode": {
+			change: func(m *yamlviewport.Model) { m.SetViewMode(yamlviewport.ViewModeSideBySide) },
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+			m.SetWidth(80)
+			m.SetHeight(5)
+			m.AddRevision(niceyaml.NewSourceFromString(doc(false), niceyaml.WithName("v1")))
+			m.AddRevision(niceyaml.NewSourceFromString(doc(true), niceyaml.WithName("v2")))
+
+			m.SetSearchTerm("needle")
+			m.SearchNext()
+			require.Equal(t, 1, m.SearchIndex())
+
+			// New content starts over at its first match and scrolls to it. An
+			// index into the old content points at an arbitrary line.
+			tc.change(&m)
+
+			assert.Equal(t, 2, m.SearchCount())
+			assert.Equal(t, 0, m.SearchIndex())
+			assert.Contains(t, m.View(), "key20: needle")
+		})
+	}
+}
+
 func TestViewport_SearchAcrossRevisions(t *testing.T) {
 	t.Parallel()
 

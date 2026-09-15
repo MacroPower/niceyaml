@@ -532,24 +532,28 @@ func (m *Model) seekRevision(delta int) {
 }
 
 // showRevision rebuilds the view for the selected revision and scrolls to
-// the top. With a search term set, the current match becomes the first match
-// in the new content and the view scrolls to it instead, since a match index
-// carried over from the previous revision points at an arbitrary line.
+// the top, or to the first search match when the search term has one.
 func (m *Model) showRevision() {
-	m.searchIndex = -1
 	m.rebuildViews()
-	m.GotoTop()
-	m.scrollToCurrentMatch()
+
+	if m.searchIndex < 0 {
+		m.GotoTop()
+	}
 }
 
 // rebuildViews rebuilds the displayed views from the revision, diff mode, and
 // view mode, then refreshes the search state and drops the cached row counts.
 // Rendering itself waits for View, which renders only the visible window.
+//
+// Every change of content goes through rebuildViews. A match index carried
+// over from the old content points at an arbitrary line, so the first match
+// in the new content becomes the current match and the view scrolls to it.
 func (m *Model) rebuildViews() {
 	m.diffResult = nil // Invalidate cached diff result.
 	m.left = nil
 	m.right = nil
 	m.searcherStale = true
+	m.searchIndex = -1
 
 	_, needsDiff := m.resolveRevisionSource()
 
@@ -570,6 +574,7 @@ func (m *Model) rebuildViews() {
 
 	m.refreshSearch()
 	m.relayout()
+	m.scrollToCurrentMatch()
 }
 
 // refreshSearch recomputes search matches and overlays for the current views
@@ -1287,6 +1292,10 @@ func (m *Model) VisibleRowCount() int {
 
 // SetSearchTerm sets the search term and updates highlights.
 // If the term is empty, clears all search highlights.
+//
+// The term stays set across content changes. A new revision, diff mode, or
+// view mode starts the search over at the first match in the new content and
+// scrolls to it.
 func (m *Model) SetSearchTerm(term string) {
 	if term == "" {
 		m.ClearSearch()
