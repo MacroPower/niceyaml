@@ -23,6 +23,17 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema/registry/schemastore"
 )
 
+// testCatalog is a one-entry catalog whose pattern matches every YAML file.
+var testCatalog = schemastore.Catalog{
+	Schemas: []schemastore.CatalogEntry{
+		{
+			Name:      "Test",
+			URL:       "https://example.com/test.json",
+			FileMatch: []string{"*.yaml"},
+		},
+	},
+}
+
 func TestSchemaStore_FindMatch(t *testing.T) {
 	t.Parallel()
 
@@ -54,7 +65,7 @@ func TestSchemaStore_FindMatch(t *testing.T) {
 	tcs := map[string]struct {
 		filePath string
 		wantName string
-		wantNil  bool
+		err      error
 	}{
 		"matches github workflow yaml": {
 			filePath: ".github/workflows/ci.yaml",
@@ -78,11 +89,11 @@ func TestSchemaStore_FindMatch(t *testing.T) {
 		},
 		"no match for unrelated file": {
 			filePath: "config.yaml",
-			wantNil:  true,
+			err:      schemastore.ErrNoCatalogMatch,
 		},
 		"empty file path": {
 			filePath: "",
-			wantNil:  true,
+			err:      schemastore.ErrNoCatalogMatch,
 		},
 	}
 
@@ -94,61 +105,42 @@ func TestSchemaStore_FindMatch(t *testing.T) {
 			server := newCatalogServer(t, catalog)
 			t.Cleanup(server.Close)
 
-			store, err := schemastore.New(t.Context(), schemastore.WithCatalogURL(server.URL))
-			require.NoError(t, err)
+			store := schemastore.New(schemastore.WithCatalogURL(server.URL))
 
-			entry, ok := store.FindMatch(t.Context(), tc.filePath)
+			entry, err := store.FindMatch(t.Context(), tc.filePath)
 
-			if tc.wantNil {
-				assert.False(t, ok)
-			} else {
-				require.True(t, ok)
-				assert.Equal(t, tc.wantName, entry.Name)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+				require.ErrorIs(t, err, schema.ErrNoMatch)
+
+				return
 			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantName, entry.Name)
 		})
 	}
 }
 
-func TestSchemaStore_EagerLoading(t *testing.T) {
+func TestSchemaStore_LazyLoading(t *testing.T) {
 	t.Parallel()
 
-	var fetchCount atomic.Int32
+	server, fetchCount := newCountingCatalogServer(t, testCatalog)
 
-	catalog := schemastore.Catalog{
-		Schemas: []schemastore.CatalogEntry{
-			{
-				Name:      "Test",
-				URL:       "https://example.com/test.json",
-				FileMatch: []string{"*.yaml"},
-			},
-		},
-	}
+	// New performs no I/O.
+	store := schemastore.New(schemastore.WithCatalogURL(server.URL))
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fetchCount.Add(1)
+	assert.Equal(t, int32(0), fetchCount.Load())
 
-		//nolint:errcheck // Test data is static and valid.
-		data, _ := json.Marshal(catalog)
-
-		//nolint:errcheck // Test helper.
-		w.Write(data)
-	}))
-	defer server.Close()
-
-	// Fetch happens during construction.
-	store, err := schemastore.New(t.Context(), schemastore.WithCatalogURL(server.URL))
+	// First lookup fetches.
+	entry, err := store.FindMatch(t.Context(), "config.yaml")
 	require.NoError(t, err)
-	assert.Equal(t, int32(1), fetchCount.Load())
-
-	// First lookup uses cache.
-	entry, ok := store.FindMatch(t.Context(), "config.yaml")
-	require.True(t, ok)
 	assert.NotEmpty(t, entry.Name)
 	assert.Equal(t, int32(1), fetchCount.Load())
 
 	// Second lookup uses cache.
-	entry, ok = store.FindMatch(t.Context(), "other.yaml")
-	require.True(t, ok)
+	entry, err = store.FindMatch(t.Context(), "other.yaml")
+	require.NoError(t, err)
 	assert.NotEmpty(t, entry.Name)
 	assert.Equal(t, int32(1), fetchCount.Load())
 }
@@ -156,96 +148,97 @@ func TestSchemaStore_EagerLoading(t *testing.T) {
 func TestSchemaStore_CacheTTL(t *testing.T) {
 	t.Parallel()
 
-	var fetchCount atomic.Int32
-
-	catalog := schemastore.Catalog{
-		Schemas: []schemastore.CatalogEntry{
-			{
-				Name:      "Test",
-				URL:       "https://example.com/test.json",
-				FileMatch: []string{"*.yaml"},
-			},
-		},
-	}
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fetchCount.Add(1)
-
-		//nolint:errcheck // Test data is static and valid.
-		data, _ := json.Marshal(catalog)
-
-		//nolint:errcheck // Test helper.
-		w.Write(data)
-	}))
-	defer server.Close()
+	server, fetchCount := newCountingCatalogServer(t, testCatalog)
 
 	// Use a very short TTL for testing.
-	store, err := schemastore.New(
-		t.Context(),
+	store := schemastore.New(
 		schemastore.WithCatalogURL(server.URL),
 		schemastore.WithCacheTTL(10*time.Millisecond),
 	)
-	require.NoError(t, err)
 
-	// Construction triggers fetch.
+	// First lookup fetches.
+	_, err := store.FindMatch(t.Context(), "config.yaml")
+	require.NoError(t, err)
 	assert.Equal(t, int32(1), fetchCount.Load())
 
 	// Wait for cache to expire.
 	time.Sleep(20 * time.Millisecond)
 
 	// Lookup triggers refetch due to expired cache.
-	_, _ = store.FindMatch(t.Context(), "config.yaml")
+	_, err = store.FindMatch(t.Context(), "config.yaml")
+	require.NoError(t, err)
 	assert.Equal(t, int32(2), fetchCount.Load())
 }
 
 func TestSchemaStore_NoCaching(t *testing.T) {
 	t.Parallel()
 
+	server, fetchCount := newCountingCatalogServer(t, testCatalog)
+
+	// TTL of 0 should disable caching (fetch on every lookup).
+	store := schemastore.New(
+		schemastore.WithCatalogURL(server.URL),
+		schemastore.WithCacheTTL(0),
+	)
+
+	for i := range 3 {
+		_, err := store.FindMatch(t.Context(), "config.yaml")
+		require.NoError(t, err)
+		assert.Equal(t, int32(i+1), fetchCount.Load())
+	}
+}
+
+func TestSchemaStore_ConcurrentFirstFetch(t *testing.T) {
+	t.Parallel()
+
+	// Concurrent lookups before the catalog has loaded share one fetch.
+	const goroutines = 10
+
 	var fetchCount atomic.Int32
 
-	catalog := schemastore.Catalog{
-		Schemas: []schemastore.CatalogEntry{
-			{
-				Name:      "Test",
-				URL:       "https://example.com/test.json",
-				FileMatch: []string{"*.yaml"},
-			},
-		},
-	}
+	release := make(chan struct{})
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		fetchCount.Add(1)
+		<-release // Hold the fetch open until every goroutine has looked up.
 
-		//nolint:errcheck // Test data is static and valid.
-		data, _ := json.Marshal(catalog)
+		data, err := json.Marshal(testCatalog)
+		if err != nil {
+			t.Errorf("marshal catalog: %v", err)
+		}
 
 		//nolint:errcheck // Test helper.
 		w.Write(data)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
-	// TTL of 0 should disable caching (fetch on every lookup).
-	store, err := schemastore.New(
-		t.Context(),
-		schemastore.WithCatalogURL(server.URL),
-		schemastore.WithCacheTTL(0),
+	store := schemastore.New(schemastore.WithCatalogURL(server.URL))
+
+	var (
+		started sync.WaitGroup
+		done    sync.WaitGroup
 	)
-	require.NoError(t, err)
 
-	// Construction triggers initial fetch.
-	assert.Equal(t, int32(1), fetchCount.Load())
+	started.Add(goroutines)
+	done.Add(goroutines)
 
-	// First lookup should refetch (no caching).
-	_, _ = store.FindMatch(t.Context(), "config.yaml")
-	assert.Equal(t, int32(2), fetchCount.Load())
+	for range goroutines {
+		go func() {
+			defer done.Done()
 
-	// Second lookup should also refetch.
-	_, _ = store.FindMatch(t.Context(), "other.yaml")
-	assert.Equal(t, int32(3), fetchCount.Load())
+			started.Done()
 
-	// Third lookup should also refetch.
-	_, _ = store.FindMatch(t.Context(), "another.yaml")
-	assert.Equal(t, int32(4), fetchCount.Load())
+			entry, err := store.FindMatch(t.Context(), "config.yaml")
+			assert.NoError(t, err)
+			assert.Equal(t, "Test", entry.Name)
+		}()
+	}
+
+	started.Wait()
+	close(release)
+	done.Wait()
+
+	assert.Equal(t, int32(1), fetchCount.Load(), "concurrent lookups should share one fetch")
 }
 
 func TestSchemaStore_ConcurrentAccess(t *testing.T) {
@@ -275,12 +268,10 @@ func TestSchemaStore_ConcurrentAccess(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	// Use short TTL to trigger concurrent cache refreshes.
-	store, err := schemastore.New(
-		t.Context(),
+	store := schemastore.New(
 		schemastore.WithCatalogURL(server.URL),
 		schemastore.WithCacheTTL(1*time.Millisecond),
 	)
-	require.NoError(t, err)
 
 	// Run multiple goroutines calling FindMatch concurrently.
 	const numGoroutines = 10
@@ -305,7 +296,7 @@ func TestSchemaStore_ConcurrentAccess(t *testing.T) {
 
 			for range numIterations {
 				for _, path := range filePaths {
-					_, _ = store.FindMatch(t.Context(), path)
+					_, _ = store.FindMatch(t.Context(), path) //nolint:errcheck // Only the race matters here.
 				}
 			}
 		}()
@@ -336,23 +327,21 @@ func TestSchemaStore_Filter(t *testing.T) {
 	defer server.Close()
 
 	// Filter to only GitHub schemas.
-	store, err := schemastore.New(
-		t.Context(),
+	store := schemastore.New(
 		schemastore.WithCatalogURL(server.URL),
 		schemastore.WithFilter(func(e schemastore.CatalogEntry) bool {
 			return strings.Contains(strings.ToLower(e.Name), "github")
 		}),
 	)
-	require.NoError(t, err)
 
 	// GitHub workflow should match.
-	entry, ok := store.FindMatch(t.Context(), ".github/workflows/ci.yaml")
-	require.True(t, ok)
+	entry, err := store.FindMatch(t.Context(), ".github/workflows/ci.yaml")
+	require.NoError(t, err)
 	assert.Equal(t, "GitHub Workflow", entry.Name)
 
 	// Docker Compose should not match due to filter.
-	_, ok = store.FindMatch(t.Context(), "docker-compose.yaml")
-	assert.False(t, ok)
+	_, err = store.FindMatch(t.Context(), "docker-compose.yaml")
+	require.ErrorIs(t, err, schemastore.ErrNoCatalogMatch)
 }
 
 func TestSchemaStore_HTTPClient(t *testing.T) {
@@ -360,21 +349,11 @@ func TestSchemaStore_HTTPClient(t *testing.T) {
 
 	var headerReceived string
 
-	catalog := schemastore.Catalog{
-		Schemas: []schemastore.CatalogEntry{
-			{
-				Name:      "Test",
-				URL:       "https://example.com/test.json",
-				FileMatch: []string{"*.yaml"},
-			},
-		},
-	}
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		headerReceived = r.Header.Get("X-Custom-Header")
 
 		//nolint:errcheck // Test data is static and valid.
-		data, _ := json.Marshal(catalog)
+		data, _ := json.Marshal(testCatalog)
 
 		//nolint:errcheck // Test helper.
 		w.Write(data)
@@ -389,11 +368,12 @@ func TestSchemaStore_HTTPClient(t *testing.T) {
 		}},
 	}
 
-	_, err := schemastore.New(
-		t.Context(),
+	store := schemastore.New(
 		schemastore.WithCatalogURL(server.URL),
 		schemastore.WithHTTPClient(client),
 	)
+
+	_, err := store.FindMatch(t.Context(), "config.yaml")
 	require.NoError(t, err)
 	assert.Equal(t, "test-value", headerReceived)
 }
@@ -401,66 +381,123 @@ func TestSchemaStore_HTTPClient(t *testing.T) {
 func TestSchemaStore_FetchError(t *testing.T) {
 	t.Parallel()
 
-	t.Run("server error", func(t *testing.T) {
-		t.Parallel()
+	// With no catalog ever loaded, a failed fetch surfaces from the lookup.
+	tcs := map[string]struct {
+		setup func(t *testing.T) []schemastore.Option
+	}{
+		"server error": {
+			setup: func(t *testing.T) []schemastore.Option {
+				t.Helper()
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusInternalServerError)
-		}))
-		defer server.Close()
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(http.StatusInternalServerError)
+				}))
+				t.Cleanup(server.Close)
 
-		_, err := schemastore.New(t.Context(), schemastore.WithCatalogURL(server.URL))
-		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
-	})
+				return []schemastore.Option{schemastore.WithCatalogURL(server.URL)}
+			},
+		},
+		"invalid json": {
+			setup: func(t *testing.T) []schemastore.Option {
+				t.Helper()
 
-	t.Run("invalid json", func(t *testing.T) {
-		t.Parallel()
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					//nolint:errcheck // Test helper.
+					w.Write([]byte("not json"))
+				}))
+				t.Cleanup(server.Close)
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			//nolint:errcheck // Test helper.
-			w.Write([]byte("not json"))
-		}))
-		defer server.Close()
+				return []schemastore.Option{schemastore.WithCatalogURL(server.URL)}
+			},
+		},
+		"invalid URL": {
+			setup: func(t *testing.T) []schemastore.Option {
+				t.Helper()
 
-		_, err := schemastore.New(t.Context(), schemastore.WithCatalogURL(server.URL))
-		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
-	})
+				// URL with control character triggers http.NewRequestWithContext error.
+				return []schemastore.Option{schemastore.WithCatalogURL("http://\x00invalid")}
+			},
+		},
+		"connection refused": {
+			setup: func(t *testing.T) []schemastore.Option {
+				t.Helper()
 
-	t.Run("invalid URL", func(t *testing.T) {
-		t.Parallel()
+				// Port 1 is a privileged port that won't be listening.
+				return []schemastore.Option{schemastore.WithCatalogURL("http://localhost:1")}
+			},
+		},
+		"read body error": {
+			setup: func(t *testing.T) []schemastore.Option {
+				t.Helper()
 
-		// URL with control character triggers http.NewRequestWithContext error.
-		_, err := schemastore.New(t.Context(), schemastore.WithCatalogURL("http://\x00invalid"))
-		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
-	})
+				client := &http.Client{
+					Transport: &roundTripperFunc{fn: func(_ *http.Request) (*http.Response, error) {
+						return &http.Response{
+							StatusCode: http.StatusOK,
+							Body:       io.NopCloser(&errorReader{}),
+						}, nil
+					}},
+				}
 
-	t.Run("connection refused", func(t *testing.T) {
-		t.Parallel()
+				return []schemastore.Option{
+					schemastore.WithCatalogURL("http://example.com/catalog.json"),
+					schemastore.WithHTTPClient(client),
+				}
+			},
+		},
+	}
 
-		// Port 1 is a privileged port that won't be listening.
-		_, err := schemastore.New(t.Context(), schemastore.WithCatalogURL("http://localhost:1"))
-		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
-	})
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	t.Run("read body error", func(t *testing.T) {
-		t.Parallel()
+			store := schemastore.New(tc.setup(t)...)
 
-		client := &http.Client{
-			Transport: &roundTripperFunc{fn: func(_ *http.Request) (*http.Response, error) {
-				return &http.Response{
-					StatusCode: http.StatusOK,
-					Body:       io.NopCloser(&errorReader{}),
-				}, nil
-			}},
-		}
+			_, err := store.FindMatch(t.Context(), "config.yaml")
+			require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+			require.NotErrorIs(t, err, schema.ErrNoMatch)
 
-		_, err := schemastore.New(
-			t.Context(),
-			schemastore.WithCatalogURL("http://example.com/catalog.json"),
-			schemastore.WithHTTPClient(client),
-		)
-		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
-	})
+			doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
+			_, err = store.Resolve(t.Context(), doc)
+			require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+			require.NotErrorIs(t, err, schema.ErrNoMatch)
+		})
+	}
+}
+
+func TestSchemaStore_RetryAfter(t *testing.T) {
+	t.Parallel()
+
+	var fetchCount atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fetchCount.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+
+	store := schemastore.New(
+		schemastore.WithCatalogURL(server.URL),
+		schemastore.WithRetryAfter(20*time.Millisecond),
+	)
+
+	// The first lookup fetches and fails.
+	_, err := store.FindMatch(t.Context(), "config.yaml")
+	require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+	assert.Equal(t, int32(1), fetchCount.Load())
+
+	// A lookup inside the retry interval reports the same failure without
+	// contacting the server again.
+	_, err = store.FindMatch(t.Context(), "config.yaml")
+	require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+	assert.Equal(t, int32(1), fetchCount.Load())
+
+	// Once the interval passes, the next lookup tries again.
+	time.Sleep(30 * time.Millisecond)
+
+	_, err = store.FindMatch(t.Context(), "config.yaml")
+	require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+	assert.Equal(t, int32(2), fetchCount.Load())
 }
 
 func TestSchemaStore_EmptyCatalog(t *testing.T) {
@@ -473,65 +510,72 @@ func TestSchemaStore_EmptyCatalog(t *testing.T) {
 	server := newCatalogServer(t, catalog)
 	t.Cleanup(server.Close)
 
-	store, err := schemastore.New(t.Context(), schemastore.WithCatalogURL(server.URL))
-	require.NoError(t, err)
+	store := schemastore.New(schemastore.WithCatalogURL(server.URL))
 
 	// No schemas in catalog means no matches.
-	_, ok := store.FindMatch(t.Context(), "config.yaml")
-	assert.False(t, ok)
+	_, err := store.FindMatch(t.Context(), "config.yaml")
+	require.ErrorIs(t, err, schemastore.ErrNoCatalogMatch)
 }
 
 func TestSchemaStore_CanceledContext(t *testing.T) {
 	t.Parallel()
 
-	catalog := schemastore.Catalog{
-		Schemas: []schemastore.CatalogEntry{
-			{
-				Name:      "Test",
-				URL:       "https://example.com/test.json",
-				FileMatch: []string{"*.yaml"},
-			},
-		},
-	}
+	t.Run("uses cached data without refreshing", func(t *testing.T) {
+		t.Parallel()
 
-	server := newCatalogServer(t, catalog)
-	t.Cleanup(server.Close)
+		server, fetchCount := newCountingCatalogServer(t, testCatalog)
 
-	// Use short TTL so cache expires quickly.
-	store, err := schemastore.New(
-		t.Context(),
-		schemastore.WithCatalogURL(server.URL),
-		schemastore.WithCacheTTL(10*time.Millisecond),
-	)
-	require.NoError(t, err)
+		// Use short TTL so cache expires quickly.
+		store := schemastore.New(
+			schemastore.WithCatalogURL(server.URL),
+			schemastore.WithCacheTTL(10*time.Millisecond),
+		)
 
-	// Wait for cache to expire.
-	time.Sleep(20 * time.Millisecond)
+		_, err := store.FindMatch(t.Context(), "config.yaml")
+		require.NoError(t, err)
 
-	// Create a canceled context.
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
+		// Wait for cache to expire.
+		time.Sleep(20 * time.Millisecond)
 
-	// FindMatch should skip refresh with canceled context but still return cached data.
-	entry, ok := store.FindMatch(ctx, "config.yaml")
-	require.True(t, ok)
-	assert.Equal(t, "Test", entry.Name)
+		// Create a canceled context.
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		// FindMatch skips the refresh with a canceled context but still
+		// returns cached data.
+		entry, err := store.FindMatch(ctx, "config.yaml")
+		require.NoError(t, err)
+		assert.Equal(t, "Test", entry.Name)
+		assert.Equal(t, int32(1), fetchCount.Load())
+	})
+
+	t.Run("reports the cancellation without cached data", func(t *testing.T) {
+		t.Parallel()
+
+		server, fetchCount := newCountingCatalogServer(t, testCatalog)
+
+		store := schemastore.New(schemastore.WithCatalogURL(server.URL))
+
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		_, err := store.FindMatch(ctx, "config.yaml")
+		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+		require.ErrorIs(t, err, context.Canceled)
+		assert.Equal(t, int32(0), fetchCount.Load())
+
+		// A cancellation is not a failed attempt, so the next lookup fetches.
+		entry, err := store.FindMatch(t.Context(), "config.yaml")
+		require.NoError(t, err)
+		assert.Equal(t, "Test", entry.Name)
+		assert.Equal(t, int32(1), fetchCount.Load())
+	})
 }
 
 func TestSchemaStore_RefetchFails(t *testing.T) {
 	t.Parallel()
 
 	var requestCount atomic.Int32
-
-	catalog := schemastore.Catalog{
-		Schemas: []schemastore.CatalogEntry{
-			{
-				Name:      "Test",
-				URL:       "https://example.com/test.json",
-				FileMatch: []string{"*.yaml"},
-			},
-		},
-	}
 
 	// Server succeeds first time, fails on subsequent requests.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -543,7 +587,7 @@ func TestSchemaStore_RefetchFails(t *testing.T) {
 		}
 
 		//nolint:errcheck // Test data is static and valid.
-		data, _ := json.Marshal(catalog)
+		data, _ := json.Marshal(testCatalog)
 
 		//nolint:errcheck // Test helper.
 		w.Write(data)
@@ -551,25 +595,31 @@ func TestSchemaStore_RefetchFails(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	// Use short TTL so cache expires quickly.
-	store, err := schemastore.New(
-		t.Context(),
+	store := schemastore.New(
 		schemastore.WithCatalogURL(server.URL),
 		schemastore.WithCacheTTL(10*time.Millisecond),
 	)
-	require.NoError(t, err)
 
-	// First fetch succeeded.
+	// First fetch succeeds.
+	_, err := store.FindMatch(t.Context(), "config.yaml")
+	require.NoError(t, err)
 	assert.Equal(t, int32(1), requestCount.Load())
 
 	// Wait for cache to expire.
 	time.Sleep(20 * time.Millisecond)
 
-	// FindMatch triggers refetch which fails, but still returns cached data.
-	entry, ok := store.FindMatch(t.Context(), "config.yaml")
-	require.True(t, ok)
+	// FindMatch triggers a refetch which fails, but still returns cached data.
+	entry, err := store.FindMatch(t.Context(), "config.yaml")
+	require.NoError(t, err)
 	assert.Equal(t, "Test", entry.Name)
 
 	// Verify refetch was attempted.
+	assert.Equal(t, int32(2), requestCount.Load())
+
+	// Inside the retry interval the stale data serves without a request.
+	entry, err = store.FindMatch(t.Context(), "config.yaml")
+	require.NoError(t, err)
+	assert.Equal(t, "Test", entry.Name)
 	assert.Equal(t, int32(2), requestCount.Load())
 }
 
@@ -594,16 +644,15 @@ func TestSchemaStore_SkipsEntriesWithoutURL(t *testing.T) {
 	server := newCatalogServer(t, catalog)
 	t.Cleanup(server.Close)
 
-	store, err := schemastore.New(t.Context(), schemastore.WithCatalogURL(server.URL))
-	require.NoError(t, err)
+	store := schemastore.New(schemastore.WithCatalogURL(server.URL))
 
 	// Entry without URL should be skipped, so random.yaml won't match.
-	_, ok := store.FindMatch(t.Context(), "random.yaml")
-	assert.False(t, ok)
+	_, err := store.FindMatch(t.Context(), "random.yaml")
+	require.ErrorIs(t, err, schemastore.ErrNoCatalogMatch)
 
 	// Entry with URL should still match.
-	entry, ok := store.FindMatch(t.Context(), "config.yaml")
-	require.True(t, ok)
+	entry, err := store.FindMatch(t.Context(), "config.yaml")
+	require.NoError(t, err)
 	assert.Equal(t, "Has URL", entry.Name)
 }
 
@@ -628,12 +677,12 @@ func TestSchemaStore_Resolve(t *testing.T) {
 		server := newCatalogServer(t, catalog)
 		t.Cleanup(server.Close)
 
-		store, err := schemastore.New(t.Context(), schemastore.WithCatalogURL(server.URL))
-		require.NoError(t, err)
+		store := schemastore.New(schemastore.WithCatalogURL(server.URL))
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`on: push`), ".github/workflows/ci.yaml")
-		_, err = store.Resolve(t.Context(), doc)
-		require.NotErrorIs(t, err, schema.ErrNoMatch)
+		ref, err := store.Resolve(t.Context(), doc)
+		require.NoError(t, err)
+		assert.Equal(t, "https://json.schemastore.org/github-workflow.json", ref.URL)
 	})
 
 	t.Run("no match for unknown file", func(t *testing.T) {
@@ -652,12 +701,13 @@ func TestSchemaStore_Resolve(t *testing.T) {
 		server := newCatalogServer(t, catalog)
 		t.Cleanup(server.Close)
 
-		store, err := schemastore.New(t.Context(), schemastore.WithCatalogURL(server.URL))
-		require.NoError(t, err)
+		store := schemastore.New(schemastore.WithCatalogURL(server.URL))
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "random.yaml")
-		_, err = store.Resolve(t.Context(), doc)
+		_, err := store.Resolve(t.Context(), doc)
+		require.ErrorIs(t, err, schemastore.ErrNoCatalogMatch)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
+		require.ErrorContains(t, err, "random.yaml")
 	})
 
 	t.Run("loads matching schema", func(t *testing.T) {
@@ -682,8 +732,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 		catalogServer := newCatalogServer(t, catalog)
 		t.Cleanup(catalogServer.Close)
 
-		store, err := schemastore.New(t.Context(), schemastore.WithCatalogURL(catalogServer.URL))
-		require.NoError(t, err)
+		store := schemastore.New(schemastore.WithCatalogURL(catalogServer.URL))
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
 
@@ -712,8 +761,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 		catalogServer := newCatalogServer(t, catalog)
 		t.Cleanup(catalogServer.Close)
 
-		store, err := schemastore.New(t.Context(), schemastore.WithCatalogURL(catalogServer.URL))
-		require.NoError(t, err)
+		store := schemastore.New(schemastore.WithCatalogURL(catalogServer.URL))
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
 
@@ -726,34 +774,6 @@ func TestSchemaStore_Resolve(t *testing.T) {
 		_, err = ref.Load(t.Context())
 		require.ErrorContains(t, err, "fetch https://example.com/schema.json: status 404")
 		require.NotErrorIs(t, err, schema.ErrNoMatch)
-	})
-
-	t.Run("error when no matching schema", func(t *testing.T) {
-		t.Parallel()
-
-		catalog := schemastore.Catalog{
-			Schemas: []schemastore.CatalogEntry{
-				{
-					Name:      "GitHub Workflow",
-					URL:       "https://json.schemastore.org/github-workflow.json",
-					FileMatch: []string{".github/workflows/*.yaml"},
-				},
-			},
-		}
-
-		server := newCatalogServer(t, catalog)
-		t.Cleanup(server.Close)
-
-		store, err := schemastore.New(t.Context(), schemastore.WithCatalogURL(server.URL))
-		require.NoError(t, err)
-
-		// Document path doesn't match any schema pattern.
-		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "random.yaml")
-
-		_, err = store.Resolve(t.Context(), doc)
-		require.ErrorIs(t, err, schemastore.ErrNoCatalogMatch)
-		require.ErrorIs(t, err, schema.ErrNoMatch)
-		require.ErrorContains(t, err, "random.yaml")
 	})
 }
 
@@ -790,16 +810,52 @@ func TestIntegration(t *testing.T) {
 		catalogServer := newCatalogServer(t, catalog)
 		t.Cleanup(catalogServer.Close)
 
-		store, err := schemastore.New(t.Context(), schemastore.WithCatalogURL(catalogServer.URL))
-		require.NoError(t, err)
-
 		reg := registry.New()
-		reg.Register(store)
+		reg.Register(schemastore.New(schemastore.WithCatalogURL(catalogServer.URL)))
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`on: push`), ".github/workflows/ci.yaml")
 
-		err = reg.ValidateDocument(t.Context(), doc)
+		err := reg.ValidateDocument(t.Context(), doc)
 		require.NoError(t, err)
+	})
+
+	t.Run("fetches each schema once", func(t *testing.T) {
+		t.Parallel()
+
+		var schemaFetches atomic.Int32
+
+		schemaServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			schemaFetches.Add(1)
+
+			//nolint:errcheck // Test helper.
+			w.Write([]byte(schemaData))
+		}))
+		t.Cleanup(schemaServer.Close)
+
+		catalog := schemastore.Catalog{
+			Schemas: []schemastore.CatalogEntry{
+				{
+					Name:      "GitHub Workflow",
+					URL:       schemaServer.URL + "/github-workflow.json",
+					FileMatch: []string{".github/workflows/*.yaml"},
+				},
+			},
+		}
+
+		catalogServer, catalogFetches := newCountingCatalogServer(t, catalog)
+
+		reg := registry.New()
+		reg.Register(schemastore.New(schemastore.WithCatalogURL(catalogServer.URL)))
+
+		for _, name := range []string{"ci.yaml", "release.yaml", "lint.yaml"} {
+			doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`on: push`), ".github/workflows/"+name)
+
+			err := reg.ValidateDocument(t.Context(), doc)
+			require.NoError(t, err)
+		}
+
+		assert.Equal(t, int32(1), catalogFetches.Load())
+		assert.Equal(t, int32(1), schemaFetches.Load(), "the registry should fetch the schema once")
 	})
 
 	t.Run("rejects invalid document", func(t *testing.T) {
@@ -824,15 +880,12 @@ func TestIntegration(t *testing.T) {
 		catalogServer := newCatalogServer(t, catalog)
 		t.Cleanup(catalogServer.Close)
 
-		store, err := schemastore.New(t.Context(), schemastore.WithCatalogURL(catalogServer.URL))
-		require.NoError(t, err)
-
 		reg := registry.New()
-		reg.Register(store)
+		reg.Register(schemastore.New(schemastore.WithCatalogURL(catalogServer.URL)))
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`name: test`), ".github/workflows/ci.yaml")
 
-		err = reg.ValidateDocument(t.Context(), doc)
+		err := reg.ValidateDocument(t.Context(), doc)
 		require.Error(t, err)
 	})
 
@@ -852,16 +905,27 @@ func TestIntegration(t *testing.T) {
 		catalogServer := newCatalogServer(t, catalog)
 		t.Cleanup(catalogServer.Close)
 
-		store, err := schemastore.New(t.Context(), schemastore.WithCatalogURL(catalogServer.URL))
-		require.NoError(t, err)
-
 		reg := registry.New()
-		reg.Register(store)
+		reg.Register(schemastore.New(schemastore.WithCatalogURL(catalogServer.URL)))
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "random.yaml")
 
-		err = reg.ValidateDocument(t.Context(), doc)
+		err := reg.ValidateDocument(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
+	})
+
+	t.Run("reports an unreachable catalog through the registry", func(t *testing.T) {
+		t.Parallel()
+
+		reg := registry.New()
+		reg.Register(schemastore.New(schemastore.WithCatalogURL("http://localhost:1")))
+
+		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
+
+		err := reg.ValidateDocument(t.Context(), doc)
+		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+		require.ErrorIs(t, err, registry.ErrResolve)
+		require.NotErrorIs(t, err, schema.ErrNoMatch)
 	})
 }
 
@@ -873,12 +937,35 @@ func newCatalogServer(t *testing.T, catalog schemastore.Catalog) *httptest.Serve
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		data, err := json.Marshal(catalog)
 		if err != nil {
-			t.Fatalf("marshal catalog: %v", err)
+			t.Errorf("marshal catalog: %v", err)
 		}
 
 		//nolint:errcheck // Test helper.
 		w.Write(data)
 	}))
+}
+
+// newCountingCatalogServer serves catalog and counts the requests it
+// receives. The server closes with the test.
+func newCountingCatalogServer(t *testing.T, catalog schemastore.Catalog) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+
+	var fetchCount atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fetchCount.Add(1)
+
+		data, err := json.Marshal(catalog)
+		if err != nil {
+			t.Errorf("marshal catalog: %v", err)
+		}
+
+		//nolint:errcheck // Test helper.
+		w.Write(data)
+	}))
+	t.Cleanup(server.Close)
+
+	return server, &fetchCount
 }
 
 type roundTripperFunc struct {

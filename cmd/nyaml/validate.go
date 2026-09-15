@@ -35,7 +35,7 @@ func validateCmd() *cobra.Command {
 			}
 
 			// Build registry once for all files to enable cross-file schema caching.
-			reg := buildRegistry(cmd.Context(), schemaRef)
+			reg := buildRegistry(schemaRef)
 
 			// Build the error printer once: it carries the terminal width and
 			// a full theme, neither of which changes between files.
@@ -113,8 +113,10 @@ func validateFile(
 //
 // Otherwise, directive-based matching is enabled with per-file resolution
 // (schemas referenced in directives are resolved relative to each YAML file),
-// followed by SchemaStore automatic discovery.
-func buildRegistry(ctx context.Context, schemaRef string) *registry.Registry {
+// followed by SchemaStore automatic discovery. The SchemaStore catalog is
+// fetched on the first document that reaches it, and a file it cannot
+// match, or cannot fetch the catalog for, reports that in the file's error.
+func buildRegistry(schemaRef string) *registry.Registry {
 	reg := registry.New()
 
 	// A loader applies to every document, so the CLI schema needs no matcher.
@@ -130,17 +132,10 @@ func buildRegistry(ctx context.Context, schemaRef string) *registry.Registry {
 		return reg
 	}
 
-	// Directive-based matching when no CLI flag provided.
-	// Directive resolves schemas relative to each YAML file.
-	reg.Register(registry.Directive())
-
-	// SchemaStore automatic discovery (best-effort).
-	store, err := schemastore.New(ctx)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: schemastore unavailable: %v\n", err)
-	} else {
-		reg.Register(store)
-	}
+	reg.Register(
+		registry.Directive(), // Resolves schemas relative to each YAML file.
+		schemastore.New(),    // Automatic discovery by file path.
+	)
 
 	return reg
 }

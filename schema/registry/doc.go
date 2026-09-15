@@ -69,6 +69,5 @@
 // [go.jacobcolvin.com/niceyaml/schema/registry/schemastore] package, whose
 // SchemaStore type is a resolver:
 //
-//	store, _ := schemastore.New(ctx)
-//	reg.Register(store)
+//	reg.Register(schemastore.New())
 package registry
