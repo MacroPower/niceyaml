@@ -2,6 +2,7 @@ package schema
 
 import (
 	"regexp"
+	"strings"
 
 	"github.com/goccy/go-yaml/token"
 
@@ -29,14 +30,23 @@ type Directive struct {
 //
 // The comment text should not include the '#' prefix.
 // Example input: " yaml-language-server: $schema=./schema.json".
+//
+// The YAML parser keeps trailing spaces in a comment's value, so
+// ParseDirective trims whitespace around the schema reference. A directive
+// with nothing after the equals sign yields nil.
 func ParseDirective(comment string) *Directive {
 	matches := schemaDirectiveRE.FindStringSubmatch(comment)
 	if len(matches) < 2 {
 		return nil
 	}
 
+	ref := strings.TrimSpace(matches[1])
+	if ref == "" {
+		return nil
+	}
+
 	return &Directive{
-		Schema: matches[1],
+		Schema: ref,
 	}
 }
 

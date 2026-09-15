@@ -48,6 +48,18 @@ func TestParseDirective(t *testing.T) {
 			input: " yaml-language-server:   $schema=schema.json",
 			want:  &schema.Directive{Schema: "schema.json"},
 		},
+		"trailing whitespace": {
+			input: " yaml-language-server: $schema=./schema.json   ",
+			want:  &schema.Directive{Schema: "./schema.json"},
+		},
+		"trailing tab": {
+			input: " yaml-language-server: $schema=./schema.json\t",
+			want:  &schema.Directive{Schema: "./schema.json"},
+		},
+		"only whitespace after equals": {
+			input: " yaml-language-server: $schema=   ",
+			want:  nil,
+		},
 		"empty string": {
 			input: "",
 			want:  nil,
