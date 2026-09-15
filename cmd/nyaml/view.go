@@ -7,8 +7,6 @@ import (
 	"github.com/spf13/cobra"
 
 	tea "charm.land/bubbletea/v2"
-
-	"go.jacobcolvin.com/niceyaml/internal/filepaths"
 )
 
 func viewCmd() *cobra.Command {
@@ -22,7 +20,7 @@ func viewCmd() *cobra.Command {
 		Short: "View YAML files with syntax highlighting",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			paths, err := filepaths.Expand(args...)
+			paths, err := expandPaths(args...)
 			if err != nil {
 				return err
 			}

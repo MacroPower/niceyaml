@@ -1,4 +1,4 @@
-package filepaths_test
+package main
 
 import (
 	"os"
@@ -7,8 +7,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"go.jacobcolvin.com/niceyaml/internal/filepaths"
 )
 
 func TestContainsGlobChars(t *testing.T) {
@@ -52,7 +50,7 @@ func TestContainsGlobChars(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := filepaths.ContainsGlobChars(tc.input)
+			got := containsGlobChars(tc.input)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -124,7 +122,7 @@ func TestExpand(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			paths, err := filepaths.Expand(tc.args...)
+			paths, err := expandPaths(tc.args...)
 
 			if tc.err != "" {
 				require.Error(t, err)
@@ -226,7 +224,7 @@ func TestGlob(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			matches, err := filepaths.Glob(tc.pattern)
+			matches, err := glob(tc.pattern)
 			if tc.err != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tc.err)

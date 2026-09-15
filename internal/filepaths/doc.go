@@ -1,8 +1,9 @@
-// Package filepaths provides standardized glob pattern matching for file paths.
+// Package filepaths matches file paths against glob patterns.
 //
-// This package wraps [github.com/bmatcuk/doublestar] to provide consistent glob
-// pattern matching throughout the codebase. It supports extended glob patterns
-// including `**` for recursive directory matching, unlike [path/filepath.Glob].
+// This package wraps [github.com/bmatcuk/doublestar] so the schema matchers
+// and the SchemaStore catalog agree on pattern syntax. It supports extended
+// glob patterns including `**` for recursive directory matching, unlike
+// [path/filepath.Match].
 //
 // # Pattern Matching
 //
@@ -21,11 +22,4 @@
 //	*.yaml         # Matches YAML files in root only.
 //	**/k8s/*.yaml  # Matches YAML files in any k8s directory.
 //	config.yaml    # Matches exactly "config.yaml".
-//
-// # File System Globbing
-//
-// Use [Glob] to expand patterns against the file system, supporting ** for
-// recursive directory matching unlike [path/filepath.Glob].
-//
-// Use [ContainsGlobChars] to detect whether a string contains glob metacharacters.
 package filepaths

@@ -1,4 +1,4 @@
-package filepaths
+package main
 
 import (
 	"fmt"
@@ -8,12 +8,10 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 )
 
-// Glob returns file paths matching the pattern.
+// glob returns the file paths matching pattern.
 //
 // Unlike [path/filepath.Glob], this supports ** for recursive directory
-// matching.
-//
-// The pattern syntax follows doublestar conventions:
+// matching. The pattern syntax follows doublestar conventions:
 //   - `*` matches any sequence of non-separator characters.
 //   - `**` matches any sequence including separators (recursive).
 //   - `?` matches any single non-separator character.
@@ -21,7 +19,7 @@ import (
 //   - `[a-z]` matches any character in the range.
 //
 // Returns an error if the pattern syntax is invalid.
-func Glob(pattern string) ([]string, error) {
+func glob(pattern string) ([]string, error) {
 	matches, err := doublestar.FilepathGlob(pattern)
 	if err != nil {
 		return nil, fmt.Errorf("glob %q: %w", pattern, err)
@@ -30,25 +28,25 @@ func Glob(pattern string) ([]string, error) {
 	return matches, nil
 }
 
-// ContainsGlobChars reports whether s contains glob metacharacters.
-func ContainsGlobChars(s string) bool {
+// containsGlobChars reports whether s contains glob metacharacters.
+func containsGlobChars(s string) bool {
 	return strings.ContainsAny(s, "*?[")
 }
 
-// Expand expands arguments containing glob patterns into a sorted list
+// expandPaths expands arguments containing glob patterns into a sorted list
 // of file paths. Arguments without glob metacharacters are included as-is.
-// Returns an error if a glob pattern matches no files.
-func Expand(paths ...string) ([]string, error) {
+// Returns an error if a pattern is invalid.
+func expandPaths(args ...string) ([]string, error) {
 	var result []string
 
-	for _, path := range paths {
-		if !ContainsGlobChars(path) {
-			result = append(result, path)
+	for _, arg := range args {
+		if !containsGlobChars(arg) {
+			result = append(result, arg)
 
 			continue
 		}
 
-		matches, err := Glob(path)
+		matches, err := glob(arg)
 		if err != nil {
 			return nil, err
 		}

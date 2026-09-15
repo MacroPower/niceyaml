@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/internal/filepaths"
 	"go.jacobcolvin.com/niceyaml/schema/loader"
 	"go.jacobcolvin.com/niceyaml/schema/registry"
 	"go.jacobcolvin.com/niceyaml/schema/registry/schemastore"
@@ -28,7 +27,7 @@ func validateCmd() *cobra.Command {
 			}
 
 			// Expand glob patterns.
-			yamlPaths, err := filepaths.Expand(args...)
+			yamlPaths, err := expandPaths(args...)
 			if err != nil {
 				return err
 			}
