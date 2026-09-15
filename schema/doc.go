@@ -31,7 +31,7 @@
 //
 // Compile a schema with [go.jacobcolvin.com/x/jsonschema.CompileJSON] (or
 // [go.jacobcolvin.com/x/jsonschema.MustCompileJSON] for embedded schemas) and
-// wrap it with [NewValidator] to obtain a
+// wrap it with [NewValidator] to obtain a [*Validator], a
 // [go.jacobcolvin.com/niceyaml.SchemaValidator] that reports failures as errors
 // carrying YAML path information for integration with niceyaml's error display:
 //

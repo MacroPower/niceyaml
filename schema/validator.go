@@ -17,19 +17,23 @@ import (
 // instead of wrapping this sentinel.
 var ErrValidate = errors.New("validate schema")
 
-// NewValidator adapts a compiled [*jsonschema.Validator] to a
+// NewValidator creates a new [*Validator] from a compiled
+// [*jsonschema.Validator].
+//
+// Compile the schema with [jsonschema.CompileJSON], or
+// [jsonschema.MustCompileJSON] for embedded schemas known valid at build time.
+func NewValidator(v *jsonschema.Validator) *Validator {
+	return &Validator{schema: v}
+}
+
+// Validator adapts a compiled [*jsonschema.Validator] to
 // [niceyaml.SchemaValidator], reporting constraint violations as
 // [*niceyaml.Error] values that carry the YAML path to each failing location
 // for display by [niceyaml.Printer].
 //
-// Compile the schema with [jsonschema.CompileJSON], or
-// [jsonschema.MustCompileJSON] for embedded schemas known valid at build time.
-func NewValidator(v *jsonschema.Validator) niceyaml.SchemaValidator {
-	return &validator{schema: v}
-}
-
-// validator is the [niceyaml.SchemaValidator] returned by [NewValidator].
-type validator struct {
+// A Validator is safe for concurrent use. Create instances with
+// [NewValidator].
+type Validator struct {
 	schema *jsonschema.Validator
 }
 
@@ -42,7 +46,7 @@ type validator struct {
 // [ErrValidate]. The context is passed to the underlying
 // [jsonschema.Validator], where remote reference resolution honors its
 // cancellation and deadlines.
-func (v *validator) ValidateSchema(ctx context.Context, data any) error {
+func (v *Validator) ValidateSchema(ctx context.Context, data any) error {
 	err := v.schema.Validate(ctx, data)
 	if err == nil {
 		return nil

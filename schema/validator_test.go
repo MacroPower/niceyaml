@@ -17,9 +17,9 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
-// newValidator compiles schemaData and wraps it as a [niceyaml.SchemaValidator],
+// newValidator compiles schemaData and wraps it in a [*schema.Validator],
 // failing the test if the schema does not compile.
-func newValidator(t *testing.T, schemaData []byte) niceyaml.SchemaValidator {
+func newValidator(t *testing.T, schemaData []byte) *schema.Validator {
 	t.Helper()
 
 	v, err := jsonschema.CompileJSON(t.Context(), schemaData)
