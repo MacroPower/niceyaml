@@ -2789,6 +2789,24 @@ func TestLines_AddOverlay(t *testing.T) {
 		require.Len(t, lines[1].Overlays, 1)
 	})
 
+	t.Run("inverted ranges add nothing", func(t *testing.T) {
+		t.Parallel()
+
+		lines := niceyaml.NewLines(lexer.Tokenize("a: 1\nb: 2\nc: 3\n"))
+		require.Len(t, lines, 3)
+
+		// Both ranges end on the line before they start, one at column 0 and
+		// one past it.
+		lines.AddOverlay("test1",
+			position.NewRange(position.New(2, 0), position.New(1, 0)),
+			position.NewRange(position.New(2, 0), position.New(1, 3)),
+		)
+
+		for i := range lines {
+			assert.Empty(t, lines[i].Overlays, "line %d", i)
+		}
+	})
+
 	t.Run("empty lines no-op", func(t *testing.T) {
 		t.Parallel()
 

@@ -384,6 +384,18 @@ func TestRange_SliceLines(t *testing.T) {
 				position.NewRange(position.New(7, 0), position.New(7, 15)),
 			},
 		},
+		"inverted range with zero end col": {
+			input: position.NewRange(position.New(2, 0), position.New(1, 0)),
+			want:  nil,
+		},
+		"inverted range with nonzero end col": {
+			input: position.NewRange(position.New(2, 0), position.New(1, 5)),
+			want:  nil,
+		},
+		"inverted range across several lines": {
+			input: position.NewRange(position.New(5, 3), position.New(1, 4)),
+			want:  nil,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -486,6 +498,16 @@ func TestRanges_LineIndices(t *testing.T) {
 		r := position.NewRange(position.New(3, 2), position.New(5, 0))
 		rs := position.Ranges{r}
 		assert.Equal(t, []int{3, 4}, rs.LineIndices())
+	})
+
+	t.Run("inverted ranges cover no lines", func(t *testing.T) {
+		t.Parallel()
+
+		rs := position.Ranges{
+			position.NewRange(position.New(2, 0), position.New(1, 0)),
+			position.NewRange(position.New(2, 0), position.New(1, 5)),
+		}
+		assert.Empty(t, rs.LineIndices())
 	})
 
 	t.Run("includes duplicate lines from overlapping ranges", func(t *testing.T) {

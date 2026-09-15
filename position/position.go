@@ -88,19 +88,32 @@ func (r Range) String() string {
 	return fmt.Sprintf("%s-%s", r.Start.String(), r.End.String())
 }
 
+// lastLine returns the last line r covers. A multi-line range that ends at
+// column 0 holds nothing on its end line, so it stops at the line before. For
+// a range that ends before its start line, lastLine returns a line before
+// r.Start.Line, so the range covers none.
+func (r Range) lastLine() int {
+	if r.End.Col == 0 && r.End.Line > r.Start.Line {
+		return r.End.Line - 1
+	}
+
+	return r.End.Line
+}
+
 // SliceLines splits a multi-line range into per-line ranges.
 //
 // Every line but the last extends to the end of the line. A range that ends
 // at column 0 of a later line covers nothing on that line, so SliceLines
-// stops at the line before it.
+// stops at the line before it. A range that ends on a line before its start
+// line covers no lines, and SliceLines returns nil for it.
 func (r Range) SliceLines() Ranges {
 	if r.Start.Line == r.End.Line {
 		return Ranges{r}
 	}
 
-	lineCount := r.End.Line - r.Start.Line + 1
-	if r.End.Col == 0 {
-		lineCount--
+	lineCount := r.lastLine() - r.Start.Line + 1
+	if lineCount <= 0 {
+		return nil
 	}
 
 	result := make(Ranges, lineCount)
@@ -229,7 +242,8 @@ func (rs Ranges) UniqueValues() Ranges {
 
 // LineIndices returns all line indices covered by the [Ranges].
 // A multi-line range contributes each line within it, except an end line it
-// touches only at column 0, which holds none of it.
+// touches only at column 0, which holds none of it. A range that ends on a
+// line before its start line contributes none.
 // Duplicate line indices are returned if covered by multiple ranges.
 func (rs Ranges) LineIndices() []int {
 	if len(rs) == 0 {
@@ -239,11 +253,7 @@ func (rs Ranges) LineIndices() []int {
 	var result []int
 
 	for _, r := range rs {
-		last := r.End.Line
-		if r.End.Col == 0 && last > r.Start.Line {
-			last--
-		}
-
+		last := r.lastLine()
 		for line := r.Start.Line; line <= last; line++ {
 			result = append(result, line)
 		}
