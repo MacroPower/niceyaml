@@ -394,6 +394,18 @@ func TestFinder_Find_EdgeCases(t *testing.T) {
 	}
 }
 
+func TestFinder_Find_NormalizesToEmpty(t *testing.T) {
+	t.Parallel()
+
+	// A search of only combining marks normalizes to an empty string, which
+	// must yield no matches rather than match at every offset.
+	finder := niceyaml.NewFinder(niceyaml.WithNormalizer(normalizer.New()))
+	finder.Load(niceyaml.NewSourceFromString("key: value\n"))
+
+	got := finder.Find("́")
+	assert.Nil(t, got)
+}
+
 func TestFinder_Find_NilLines(t *testing.T) {
 	t.Parallel()
 

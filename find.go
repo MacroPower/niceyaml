@@ -134,7 +134,8 @@ func (f *Finder) buildByteToRuneIndex() {
 // It returns the [position.Ranges] of each match, in the order the matches
 // appear in the text.
 //
-// Returns nil if the search string is empty or the finder has no loaded text.
+// Returns nil if the search string is empty, or normalizes to empty, or the
+// finder has no loaded text.
 func (f *Finder) Find(search string) position.Ranges {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -148,6 +149,12 @@ func (f *Finder) Find(search string) position.Ranges {
 	searchStr := search
 	if f.normalizer != nil {
 		searchStr = f.normalizer.Normalize(search)
+	}
+
+	// A search of only combining marks normalizes to nothing, and an empty
+	// needle would match at every offset without advancing.
+	if searchStr == "" {
+		return nil
 	}
 
 	searchRuneCount := utf8.RuneCountInString(searchStr)
