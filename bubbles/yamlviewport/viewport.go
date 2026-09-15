@@ -75,8 +75,8 @@ type Option func(*Model)
 // rendering. If not set, a default [niceyaml.Printer] is created.
 //
 // The viewport never modifies the printer. Each render derives a copy with
-// [niceyaml.Printer.With], applying the viewport's width and word wrap
-// setting, so the same printer can be shared with other renderers.
+// [niceyaml.Printer.With] and the viewport's wrap width, so other renderers
+// can share the same printer.
 func WithPrinter(p *niceyaml.Printer) Option {
 	return func(m *Model) {
 		m.printer = p
@@ -228,10 +228,11 @@ func (m *Model) SetWidth(w int) {
 // specialized to the given content width and the viewport's word wrap
 // setting, so wrapped lines fit the content area.
 func (m *Model) renderPrinter(width int) *niceyaml.Printer {
-	return m.printer.With(
-		niceyaml.WithWidth(width),
-		niceyaml.WithWordWrap(m.wrapEnabled),
-	)
+	if !m.wrapEnabled {
+		width = 0
+	}
+
+	return m.printer.With(niceyaml.WithWidth(width))
 }
 
 // SetPrinter sets the [*niceyaml.Printer] used for rendering and triggers a

@@ -85,8 +85,8 @@ type StyleGetter interface {
 //
 // Pass [WithWidth] to enable word wrapping at a given width. The printer
 // accounts for gutter width when calculating available content width. Wrapped
-// continuation lines show a "-" marker in the gutter. [WithWordWrap] turns
-// wrapping off while keeping the width.
+// continuation lines show a "-" marker in the gutter. A width of 0 turns
+// wrapping off.
 type Printer struct {
 	styles             StyleGetter
 	style              lipgloss.Style
@@ -96,7 +96,6 @@ type Printer struct {
 	width              int
 	hasCustomStyle     bool
 	annotationsEnabled bool
-	wordWrap           bool
 }
 
 // NewPrinter creates a new [*Printer].
@@ -108,7 +107,6 @@ func NewPrinter(opts ...PrinterOption) *Printer {
 		annotationFunc:     DefaultAnnotation,
 		blender:            colors.NewBlender(),
 		annotationsEnabled: true,
-		wordWrap:           true,
 	}
 
 	p.apply(opts)
@@ -150,7 +148,6 @@ func (p *Printer) apply(opts []PrinterOption) {
 //   - [WithGutter]
 //   - [WithAnnotationFunc]
 //   - [WithWidth]
-//   - [WithWordWrap]
 //   - [WithAnnotations]
 type PrinterOption func(*Printer)
 
@@ -319,15 +316,6 @@ func WithAnnotationFunc(fn AnnotationFunc) PrinterOption {
 func WithWidth(width int) PrinterOption {
 	return func(p *Printer) {
 		p.width = width
-	}
-}
-
-// WithWordWrap is a [PrinterOption] that sets whether word wrapping is
-// enabled. Defaults to true. Wrapping only happens when [WithWidth] also
-// sets a width.
-func WithWordWrap(enabled bool) PrinterOption {
-	return func(p *Printer) {
-		p.wordWrap = enabled
 	}
 }
 
@@ -750,7 +738,7 @@ func (p *Printer) computeStyleForPoint(
 //
 // Returns 0 if wrapping is disabled.
 func (p *Printer) contentWidth(gutterWidth int) int {
-	if !p.wordWrap || p.width <= 0 {
+	if p.width <= 0 {
 		return 0
 	}
 
