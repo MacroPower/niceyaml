@@ -54,7 +54,7 @@
 // and annotation rendering.
 //
 // Themes from [go.jacobcolvin.com/niceyaml/style/theme] provide color
-// palettes; use [theme.Charm] as a sensible default.
+// palettes. Without one, [Printer] renders with [style.Default].
 //
 // [Error] wraps errors with YAML source context.
 //

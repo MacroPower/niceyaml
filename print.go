@@ -14,7 +14,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style"
-	"go.jacobcolvin.com/niceyaml/style/theme"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
@@ -100,10 +99,10 @@ type Printer struct {
 }
 
 // NewPrinter creates a new [*Printer].
-// By default it uses [theme.Charm], [DefaultGutter], and [DefaultAnnotation].
+// By default it uses [style.Default], [DefaultGutter], and [DefaultAnnotation].
 func NewPrinter(opts ...PrinterOption) *Printer {
 	p := &Printer{
-		styles:             theme.Charm(),
+		styles:             style.Default(),
 		gutterFunc:         DefaultGutter(),
 		annotationFunc:     DefaultAnnotation(),
 		blender:            colors.NewBlender(),
