@@ -35,7 +35,7 @@ func All(matchers ...Matcher) Matcher {
 }
 
 // Match implements [Matcher].
-func (m *allMatcher) Match(ctx context.Context, doc *niceyaml.DocumentDecoder) bool {
+func (m *allMatcher) Match(ctx context.Context, doc *niceyaml.Document) bool {
 	for _, matcher := range m.matchers {
 		if !matcher.Match(ctx, doc) {
 			return false

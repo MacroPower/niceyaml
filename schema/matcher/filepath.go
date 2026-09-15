@@ -59,7 +59,7 @@ func MustFilePath(pattern string) Matcher {
 }
 
 // Match implements [Matcher].
-func (m *filePathMatcher) Match(_ context.Context, doc *niceyaml.DocumentDecoder) bool {
+func (m *filePathMatcher) Match(_ context.Context, doc *niceyaml.Document) bool {
 	filePath := doc.FilePath()
 	if filePath == "" {
 		return false

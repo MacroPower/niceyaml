@@ -20,7 +20,7 @@ import (
 // collides when two packages each embed their own "schema.json", so prefix
 // it with something package-specific, such as the module path.
 func Embedded(schemaURL string, data []byte) schema.Resolver {
-	return schema.ResolverFunc(func(_ context.Context, _ *niceyaml.DocumentDecoder) (schema.Ref, error) {
+	return schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
 		return schema.Ref{
 			URL: schemaURL,
 			Load: func(_ context.Context) ([]byte, error) {

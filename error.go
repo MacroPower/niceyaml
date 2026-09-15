@@ -51,7 +51,7 @@ var (
 // The location is a [paths.Path], a [*token.Token], or a [position.Range],
 // set with [WithPath], [WithErrorToken], or [WithErrorRange]. A path resolves
 // within one document of a source. [WithDocumentIndex] selects which; without
-// it the first document is used. [DocumentDecoder] sets the index on every
+// it the first document is used. [Document] sets the index on every
 // error it returns, and nested errors without an index of their own inherit
 // the index of the error that holds them.
 //
@@ -140,7 +140,7 @@ func WithPath(p paths.Path) ErrorOption {
 // WithDocumentIndex is an [ErrorOption] that sets the 0-indexed document
 // the error's path resolves in. It matters only for multi-document sources.
 //
-// [DocumentDecoder] applies it to the errors it returns, so callers only need
+// [Document] applies it to the errors it returns, so callers only need
 // it when they build path errors for a specific document by hand.
 func WithDocumentIndex(index int) ErrorOption {
 	return func(e *Error) {

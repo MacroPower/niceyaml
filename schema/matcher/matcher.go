@@ -15,13 +15,13 @@ import (
 // implementations.
 type Matcher interface {
 	// Match returns true if the matcher's criteria are satisfied by the document.
-	Match(ctx context.Context, doc *niceyaml.DocumentDecoder) bool
+	Match(ctx context.Context, doc *niceyaml.Document) bool
 }
 
 // Func adapts a function to the [Matcher] interface.
-type Func func(ctx context.Context, doc *niceyaml.DocumentDecoder) bool
+type Func func(ctx context.Context, doc *niceyaml.Document) bool
 
 // Match implements [Matcher].
-func (f Func) Match(ctx context.Context, doc *niceyaml.DocumentDecoder) bool {
+func (f Func) Match(ctx context.Context, doc *niceyaml.Document) bool {
 	return f(ctx, doc)
 }

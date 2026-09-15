@@ -18,7 +18,7 @@ import (
 
 // Validator is implemented by types that validate themselves.
 //
-// [DocumentDecoder.Decode] and [DocumentDecoder.DecodeInto] call Validate
+// [Document.Decode] and [Document.DecodeInto] call Validate
 // after decoding into a value that implements it, unless
 // [WithoutValidator] switches that off.
 type Validator interface {
@@ -28,9 +28,9 @@ type Validator interface {
 // SchemaValidator is implemented by types that validate arbitrary data against
 // a schema.
 //
-// Pass one to [DocumentDecoder.Decode] with [WithSchema], and it decodes the
+// Pass one to [Document.Decode] with [WithSchema], and it decodes the
 // document to [any] and calls ValidateSchema before decoding to the typed
-// struct. [DocumentDecoder.ValidateSchema] runs one on its own. The
+// struct. [Document.ValidateSchema] runs one on its own. The
 // context carries cancellation and deadlines to validators doing cancellable
 // work, such as remote schema reference resolution.
 //
@@ -40,20 +40,20 @@ type SchemaValidator interface {
 	ValidateSchema(ctx context.Context, data any) error
 }
 
-// Decoder iterates over YAML documents in a [*Source].
+// Documents is the sequence of YAML documents in a [*Source].
 //
-// A single YAML file can contain multiple documents separated by "---".
-// These documents often have different schemas and/or validation requirements.
-// Decoder provides lazy iteration over these documents, providing a
-// [DocumentDecoder] for each.
+// A single YAML file can hold several documents separated by "---", often
+// with different schemas and validation requirements. Documents pairs each
+// parsed document with its tokens once, and [Documents.All] yields a
+// [*Document] for each:
 //
-//	dec, err := source.Decoder()
-//	for _, dd := range dec.Documents() {
-//		// Each dd is a DocumentDecoder instance.
+//	docs, err := source.Documents()
+//	for _, doc := range docs.All() {
+//		// Each doc is a Document.
 //	}
 //
-// Create instances with [Source.Decoder].
-type Decoder struct {
+// Create instances with [Source.Documents].
+type Documents struct {
 	source *Source
 	file   *ast.File
 	// Tokens for each document, aligned with file.Docs by index at
@@ -122,65 +122,77 @@ func documentOffset(doc *ast.DocumentNode) (int, bool) {
 }
 
 // Source returns the underlying [*Source].
-func (d *Decoder) Source() *Source {
+func (d *Documents) Source() *Source {
 	return d.source
 }
 
 // Len returns the number of YAML documents in the file.
-func (d *Decoder) Len() int {
+func (d *Documents) Len() int {
 	return len(d.file.Docs)
 }
 
-// Documents returns an iterator over all documents in the YAML file.
+// At returns the [*Document] at the given zero-based index, or nil when the
+// index is outside the file.
+func (d *Documents) At(index int) *Document {
+	if index < 0 || index >= len(d.file.Docs) {
+		return nil
+	}
+
+	return d.document(index)
+}
+
+// All returns an iterator over the documents in the file, in order.
 //
-// Each iteration yields the document index and a [*DocumentDecoder] for that
-// document. The [*DocumentDecoder] receives context from the [*Source]
-// including file path, tokens, and document index. The tokens were paired at
-// construction, so each call yields the same slices.
-func (d *Decoder) Documents() iter.Seq2[int, *DocumentDecoder] {
-	filePath := d.source.FilePath()
-
-	return func(yield func(int, *DocumentDecoder) bool) {
-		for i, doc := range d.file.Docs {
-			dd := NewDocumentDecoder(doc, DocumentContext{
-				Index:             i,
-				FilePath:          filePath,
-				Tokens:            d.docTokens[i],
-				YAMLDecodeOptions: d.source.decodeOpts,
-			})
-
-			if !yield(i, dd) {
+// Each iteration yields the document index and a [*Document] for that
+// document, built with the file path, tokens, and decode options of the
+// [*Source]. The tokens were paired at construction, so each call yields
+// the same slices.
+func (d *Documents) All() iter.Seq2[int, *Document] {
+	return func(yield func(int, *Document) bool) {
+		for i := range d.file.Docs {
+			if !yield(i, d.document(i)) {
 				return
 			}
 		}
 	}
 }
 
-// DocumentDecoder decodes and validates a single YAML document.
+// document builds the [*Document] at index with the context of the
+// [*Source].
+func (d *Documents) document(index int) *Document {
+	return NewDocument(d.file.Docs[index], DocumentContext{
+		Index:             index,
+		FilePath:          d.source.FilePath(),
+		Tokens:            d.docTokens[index],
+		YAMLDecodeOptions: d.source.decodeOpts,
+	})
+}
+
+// Document decodes and validates a single YAML document.
 //
-// [DocumentDecoder.Decode] returns a new value and
-// [DocumentDecoder.DecodeInto] fills one the caller already holds, such as
+// [Document.Decode] returns a new value and
+// [Document.DecodeInto] fills one the caller already holds, such as
 // one pre-populated with defaults. Both run the same pipeline: each
 // [SchemaValidator] given with [WithSchema] checks the document before
 // decoding, and a value that implements [Validator] validates itself after,
 // unless [WithoutValidator] is given.
 //
-//	for _, doc := range decoder.Documents() {
+//	for _, doc := range docs.All() {
 //		config, err := doc.Decode[Config](ctx, niceyaml.WithSchema(validator))
 //		if err != nil {
 //			return err
 //		}
 //	}
 //
-// Use [DocumentDecoder.Get] or [DocumentDecoder.GetValue] to inspect values
+// Use [Document.Get] or [Document.GetValue] to inspect values
 // without decoding the whole document, which is helpful for routing
 // documents based on a discriminator field.
 //
 // All decoding methods convert YAML errors to [Error] with source
 // annotations.
 //
-// Create instances with [NewDocumentDecoder] or iterate with [Decoder.Documents].
-type DocumentDecoder struct {
+// Create instances with [NewDocument] or iterate with [Documents.All].
+type Document struct {
 	doc        *ast.DocumentNode
 	filePath   string
 	tokens     token.Tokens
@@ -188,10 +200,10 @@ type DocumentDecoder struct {
 	index      int
 }
 
-// DocumentContext is what a [DocumentDecoder] knows about its document
+// DocumentContext is what a [Document] knows about its document
 // beyond the AST: where it sits in the file, the tokens it came from, and
-// how to decode it. [Decoder.Documents] fills it in from the
-// [Source]; callers that build a [DocumentDecoder] by hand pass what they
+// how to decode it. [Documents.All] fills it in from the
+// [Source]; callers that build a [Document] by hand pass what they
 // have and leave the rest zero.
 type DocumentContext struct {
 	// FilePath is the path of the file the document came from. Schema
@@ -212,11 +224,11 @@ type DocumentContext struct {
 	Index int
 }
 
-// NewDocumentDecoder creates a new [*DocumentDecoder] for doc with the given
-// context. [Decoder.Documents] is the usual way to get one, since it fills
+// NewDocument creates a new [*Document] for doc with the given
+// context. [Documents.All] is the usual way to get one, since it fills
 // the context in from the [Source].
-func NewDocumentDecoder(doc *ast.DocumentNode, ctx DocumentContext) *DocumentDecoder {
-	return &DocumentDecoder{
+func NewDocument(doc *ast.DocumentNode, ctx DocumentContext) *Document {
+	return &Document{
 		doc:        doc,
 		index:      ctx.Index,
 		tokens:     ctx.Tokens,
@@ -225,26 +237,26 @@ func NewDocumentDecoder(doc *ast.DocumentNode, ctx DocumentContext) *DocumentDec
 	}
 }
 
-// Document returns the underlying [*ast.DocumentNode].
-func (dd *DocumentDecoder) Document() *ast.DocumentNode {
+// Node returns the underlying [*ast.DocumentNode].
+func (dd *Document) Node() *ast.DocumentNode {
 	return dd.doc
 }
 
 // Index returns the 0-indexed position of this document within the file,
 // from [DocumentContext.Index].
-func (dd *DocumentDecoder) Index() int {
+func (dd *Document) Index() int {
 	return dd.index
 }
 
 // Tokens returns the tokens for this document, from
 // [DocumentContext.Tokens]. Returns nil when none were given.
-func (dd *DocumentDecoder) Tokens() token.Tokens {
+func (dd *Document) Tokens() token.Tokens {
 	return dd.tokens
 }
 
 // FilePath returns the path of the file the document came from, from
 // [DocumentContext.FilePath]. Returns an empty string when none was given.
-func (dd *DocumentDecoder) FilePath() string {
+func (dd *Document) FilePath() string {
 	return dd.filePath
 }
 
@@ -255,7 +267,7 @@ func (dd *DocumentDecoder) FilePath() string {
 // the document, such as a version number or a list of tags:
 //
 //	versionPath := paths.Root().Child("version")
-//	for _, doc := range decoder.Documents() {
+//	for _, doc := range docs.All() {
 //		version, err := doc.Get[int](ctx, versionPath)
 //		if errors.Is(err, paths.ErrNotFound) {
 //			version = 1
@@ -273,15 +285,15 @@ func (dd *DocumentDecoder) FilePath() string {
 // that cannot be represented as T, are converted to [Error] with source
 // annotations.
 //
-// The opts run the pipeline of [DocumentDecoder.DecodeInto] on the value at
+// The opts run the pipeline of [Document.DecodeInto] on the value at
 // path rather than on the whole document: each [SchemaValidator] from
 // [WithSchema] checks the value before decoding, a *T that implements
 // [Validator] validates itself after, and [WithDisallowUnknownFields] and
 // [WithYAMLDecodeOptions] configure the decoder.
 //
 // For a string view of any node, including mappings and sequences, use
-// [DocumentDecoder.GetValue].
-func (dd *DocumentDecoder) Get[T any](ctx context.Context, path paths.Path, opts ...DecodeOption) (T, error) {
+// [Document.GetValue].
+func (dd *Document) Get[T any](ctx context.Context, path paths.Path, opts ...DecodeOption) (T, error) {
 	var zero T
 
 	node, err := dd.node(path)
@@ -306,7 +318,7 @@ func (dd *DocumentDecoder) Get[T any](ctx context.Context, path paths.Path, opts
 // field like "kind" or "version" to determine which schema applies:
 //
 //	kindPath := paths.Root().Child("kind")
-//	for _, doc := range decoder.Documents() {
+//	for _, doc := range docs.All() {
 //		kind, err := doc.GetValue(kindPath)
 //		if err != nil {
 //			return err
@@ -326,12 +338,12 @@ func (dd *DocumentDecoder) Get[T any](ctx context.Context, path paths.Path, opts
 //
 // For non-scalar values (mappings, sequences), returns the YAML representation.
 //
-// Returns the same resolution errors as [DocumentDecoder.Get], so
+// Returns the same resolution errors as [Document.Get], so
 // [paths.ErrNotFound] means nothing exists at the path and any other error
 // means the path could not be resolved.
 //
-// For a typed value, use [DocumentDecoder.Get].
-func (dd *DocumentDecoder) GetValue(path paths.Path) (string, error) {
+// For a typed value, use [Document.Get].
+func (dd *Document) GetValue(path paths.Path) (string, error) {
 	node, err := dd.node(path)
 	if err != nil {
 		return "", err
@@ -354,7 +366,7 @@ func (dd *DocumentDecoder) GetValue(path paths.Path) (string, error) {
 // node resolves path against the document body, ignoring the path's
 // [paths.Part]. Errors come from [paths.Path.Node] as they are, since they
 // already name the path.
-func (dd *DocumentDecoder) node(path paths.Path) (ast.Node, error) {
+func (dd *Document) node(path paths.Path) (ast.Node, error) {
 	//nolint:wrapcheck // The paths error already names the path.
 	return path.Node(dd.doc)
 }
@@ -363,13 +375,13 @@ func (dd *DocumentDecoder) node(path paths.Path) (ast.Node, error) {
 //
 // Returns decoding errors or errors from the [SchemaValidator] ValidateSchema
 // method.
-func (dd *DocumentDecoder) ValidateSchema(ctx context.Context, sv SchemaValidator) error {
+func (dd *Document) ValidateSchema(ctx context.Context, sv SchemaValidator) error {
 	return dd.validateSchema(ctx, dd.doc.Body, sv, nil)
 }
 
 // validateSchema decodes node to [any] with yamlOpts and validates it using
 // sv, attaching the document index to a validation error.
-func (dd *DocumentDecoder) validateSchema(
+func (dd *Document) validateSchema(
 	ctx context.Context, node ast.Node, sv SchemaValidator, yamlOpts []yaml.DecodeOption,
 ) error {
 	var untypedData any
@@ -392,7 +404,7 @@ func (dd *DocumentDecoder) validateSchema(
 // multi-document source. A direct [*Error] is copied with the index; an
 // Error behind other wrapping is wrapped in a new Error that carries it.
 // Other errors pass through unchanged.
-func (dd *DocumentDecoder) locate(err error) error {
+func (dd *Document) locate(err error) error {
 	if err == nil {
 		return nil
 	}
@@ -414,8 +426,8 @@ func (dd *DocumentDecoder) locate(err error) error {
 	return NewErrorFrom(err, WithDocumentIndex(dd.index))
 }
 
-// DecodeOption configures [DocumentDecoder.Decode],
-// [DocumentDecoder.DecodeInto], and [DocumentDecoder.Get].
+// DecodeOption configures [Document.Decode],
+// [Document.DecodeInto], and [Document.Get].
 //
 // Available options:
 //   - [WithSchema]
@@ -479,8 +491,8 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 // participate. YAML decoding errors are converted to [Error] with source
 // annotations. On error, the returned T is the zero value.
 //
-// To decode into a value you already hold, use [DocumentDecoder.DecodeInto].
-func (dd *DocumentDecoder) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
+// To decode into a value you already hold, use [Document.DecodeInto].
+func (dd *Document) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
 	var v T
 
 	err := dd.DecodeInto(ctx, &v, opts...)
@@ -501,14 +513,14 @@ func (dd *DocumentDecoder) Decode[T any](ctx context.Context, opts ...DecodeOpti
 // unless [WithoutValidator] is given. Fields absent from the document keep
 // their existing values, so v may be pre-populated with defaults. YAML
 // decoding errors are converted to [Error] with source annotations.
-func (dd *DocumentDecoder) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
+func (dd *Document) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
 	return dd.decodeInto(ctx, dd.doc.Body, v, opts)
 }
 
 // decodeInto runs the decode pipeline on node: the schemas from opts check
 // it, the decoder fills v with the options from the [Source] and from opts,
 // and v validates itself unless opts switch that off.
-func (dd *DocumentDecoder) decodeInto(ctx context.Context, node ast.Node, v any, opts []DecodeOption) error {
+func (dd *Document) decodeInto(ctx context.Context, node ast.Node, v any, opts []DecodeOption) error {
 	var cfg decodeConfig
 
 	for _, opt := range opts {
@@ -540,7 +552,7 @@ func (dd *DocumentDecoder) decodeInto(ctx context.Context, node ast.Node, v any,
 
 // decodeNode decodes node to v with the document's decode options followed
 // by yamlOpts, and converts YAML errors.
-func (dd *DocumentDecoder) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []yaml.DecodeOption) error {
+func (dd *Document) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []yaml.DecodeOption) error {
 	decodeOpts := make([]yaml.DecodeOption, 0, len(dd.decodeOpts)+len(yamlOpts))
 	decodeOpts = append(decodeOpts, dd.decodeOpts...)
 	decodeOpts = append(decodeOpts, yamlOpts...)

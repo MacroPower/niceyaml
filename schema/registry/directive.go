@@ -43,7 +43,7 @@ func Directive(opts ...loader.HTTPOption) schema.Resolver {
 }
 
 // Resolve implements [schema.Resolver].
-func (r *directiveResolver) Resolve(ctx context.Context, doc *niceyaml.DocumentDecoder) (schema.Ref, error) {
+func (r *directiveResolver) Resolve(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
 	directive := schema.ParseDocumentDirective(doc.Tokens())
 	if directive == nil {
 		return schema.Ref{}, ErrNoDirective

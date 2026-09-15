@@ -29,7 +29,7 @@ import (
 //
 //	r := loader.File("./schemas/config.json")
 func File(path string) schema.Resolver {
-	return schema.ResolverFunc(func(_ context.Context, _ *niceyaml.DocumentDecoder) (schema.Ref, error) {
+	return schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
 		abs, err := filepath.Abs(path)
 		if err != nil {
 			return schema.Ref{}, fmt.Errorf("resolve %s: %w", path, err)

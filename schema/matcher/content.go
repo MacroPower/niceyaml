@@ -42,7 +42,7 @@ func Content(path paths.Path, value string) Matcher {
 }
 
 // Match implements [Matcher].
-func (m *contentMatcher) Match(_ context.Context, doc *niceyaml.DocumentDecoder) bool {
+func (m *contentMatcher) Match(_ context.Context, doc *niceyaml.Document) bool {
 	v, err := doc.GetValue(m.path)
 
 	return err == nil && v == m.value

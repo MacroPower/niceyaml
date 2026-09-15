@@ -53,7 +53,7 @@ func ParseDirective(comment string) *Directive {
 }
 
 // ParseDocumentDirective extracts a schema directive from a single document's
-// tokens, such as those [go.jacobcolvin.com/niceyaml.DocumentDecoder.Tokens]
+// tokens, such as those [go.jacobcolvin.com/niceyaml.Document.Tokens]
 // returns.
 //
 // The directive must appear before any non-comment content in the document;

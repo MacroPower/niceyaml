@@ -24,8 +24,8 @@
 //	))
 //
 //	// Validate documents.
-//	for _, doc := range decoder.Documents() {
-//	    if err := reg.ValidateDocument(ctx, doc); err != nil {
+//	for _, doc := range docs.All() {
+//	    if err := reg.Validate(ctx, doc); err != nil {
 //	        return err
 //	    }
 //	}

@@ -44,7 +44,7 @@ func When(m matcher.Matcher, r schema.Resolver) schema.Resolver {
 }
 
 // Resolve implements [schema.Resolver].
-func (g *guarded) Resolve(ctx context.Context, doc *niceyaml.DocumentDecoder) (schema.Ref, error) {
+func (g *guarded) Resolve(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
 	if !g.matcher.Match(ctx, doc) {
 		return schema.Ref{}, schema.ErrNoMatch
 	}

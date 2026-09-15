@@ -53,13 +53,13 @@ type Ref struct {
 // and [go.jacobcolvin.com/niceyaml/schema/registry/schemastore.SchemaStore]
 // for implementations.
 type Resolver interface {
-	Resolve(ctx context.Context, doc *niceyaml.DocumentDecoder) (Ref, error)
+	Resolve(ctx context.Context, doc *niceyaml.Document) (Ref, error)
 }
 
 // ResolverFunc adapts a function to the [Resolver] interface.
 //
 //	kindPath := paths.Root().Child("kind")
-//	r := schema.ResolverFunc(func(_ context.Context, doc *niceyaml.DocumentDecoder) (schema.Ref, error) {
+//	r := schema.ResolverFunc(func(_ context.Context, doc *niceyaml.Document) (schema.Ref, error) {
 //	    kind, err := doc.GetValue(kindPath)
 //	    if err != nil {
 //	        return schema.Ref{}, schema.ErrNoMatch
@@ -72,9 +72,9 @@ type Resolver interface {
 //	        Load: func(context.Context) ([]byte, error) { return schemaFS.ReadFile(name) },
 //	    }, nil
 //	})
-type ResolverFunc func(ctx context.Context, doc *niceyaml.DocumentDecoder) (Ref, error)
+type ResolverFunc func(ctx context.Context, doc *niceyaml.Document) (Ref, error)
 
 // Resolve implements [Resolver].
-func (f ResolverFunc) Resolve(ctx context.Context, doc *niceyaml.DocumentDecoder) (Ref, error) {
+func (f ResolverFunc) Resolve(ctx context.Context, doc *niceyaml.Document) (Ref, error) {
 	return f(ctx, doc)
 }

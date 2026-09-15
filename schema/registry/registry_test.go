@@ -33,7 +33,7 @@ var kindPath = paths.Root().Child("kind")
 func countingLoader(url string, data []byte) (schema.Resolver, *atomic.Int32) {
 	var loads atomic.Int32
 
-	r := schema.ResolverFunc(func(_ context.Context, _ *niceyaml.DocumentDecoder) (schema.Ref, error) {
+	r := schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
 		return schema.Ref{
 			URL: url,
 			Load: func(_ context.Context) ([]byte, error) {
@@ -128,7 +128,7 @@ func TestRegistry_Lookup(t *testing.T) {
 	})
 }
 
-func TestRegistry_ValidateDocument(t *testing.T) {
+func TestRegistry_Validate(t *testing.T) {
 	t.Parallel()
 
 	t.Run("valid document", func(t *testing.T) {
@@ -142,7 +142,7 @@ func TestRegistry_ValidateDocument(t *testing.T) {
 		))
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
-		err := reg.ValidateDocument(t.Context(), doc)
+		err := reg.Validate(t.Context(), doc)
 		require.NoError(t, err)
 	})
 
@@ -157,7 +157,7 @@ func TestRegistry_ValidateDocument(t *testing.T) {
 		))
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
-		err := reg.ValidateDocument(t.Context(), doc)
+		err := reg.Validate(t.Context(), doc)
 		require.Error(t, err)
 
 		var validationErr *niceyaml.Error
@@ -178,7 +178,7 @@ func TestRegistry_ValidateDocument(t *testing.T) {
 
 		// Service doesn't match, returns ErrNoMatch.
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
-		err := reg.ValidateDocument(t.Context(), doc)
+		err := reg.Validate(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 	})
 }
@@ -221,7 +221,7 @@ func TestRegistry_Caching(t *testing.T) {
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
 
 		for range 5 {
-			err := reg.ValidateDocument(t.Context(), doc)
+			err := reg.Validate(t.Context(), doc)
 			require.NoError(t, err)
 		}
 
@@ -242,7 +242,7 @@ func TestRegistry_Caching(t *testing.T) {
 
 		for _, input := range []string{`kind: Deployment`, `kind: Service`, `kind: Deployment`, `kind: Service`} {
 			doc := yamltest.FirstDocument(t, stringtest.Input(input))
-			err := reg.ValidateDocument(t.Context(), doc)
+			err := reg.Validate(t.Context(), doc)
 			require.NoError(t, err)
 		}
 
@@ -271,7 +271,7 @@ func TestRegistry_Caching(t *testing.T) {
 		var loads atomic.Int32
 
 		reg := registry.New()
-		reg.Register(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.DocumentDecoder) (schema.Ref, error) {
+		reg.Register(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
 			return schema.Ref{
 				URL: "flaky.json",
 				Load: func(_ context.Context) ([]byte, error) {
@@ -306,7 +306,7 @@ func TestRegistry_Caching(t *testing.T) {
 		))
 
 		// Pre-create documents outside goroutines to avoid assertion issues.
-		docs := make([]*niceyaml.DocumentDecoder, 100)
+		docs := make([]*niceyaml.Document, 100)
 		for i := range docs {
 			docs[i] = yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
 		}
@@ -340,7 +340,7 @@ func TestRegistry_ConcurrentLoad(t *testing.T) {
 	var loads atomic.Int32
 
 	reg := registry.New()
-	reg.Register(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.DocumentDecoder) (schema.Ref, error) {
+	reg.Register(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
 		return schema.Ref{
 			URL: "test.json",
 			Load: func(_ context.Context) ([]byte, error) {
@@ -353,7 +353,7 @@ func TestRegistry_ConcurrentLoad(t *testing.T) {
 	}))
 
 	// Pre-create documents outside goroutines.
-	docs := make([]*niceyaml.DocumentDecoder, goroutines)
+	docs := make([]*niceyaml.Document, goroutines)
 	for i := range docs {
 		docs[i] = yamltest.FirstDocument(t, stringtest.Input(`key: value`))
 	}
@@ -411,7 +411,7 @@ func TestRegistry_SharedLoad(t *testing.T) {
 			var loads atomic.Int32
 
 			reg := registry.New()
-			reg.Register(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.DocumentDecoder) (schema.Ref, error) {
+			reg.Register(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
 				return schema.Ref{
 					URL: "slow.json",
 					Load: func(_ context.Context) ([]byte, error) {
@@ -455,7 +455,7 @@ func TestRegistry_SharedLoad(t *testing.T) {
 			release := make(chan struct{})
 
 			reg := registry.New()
-			reg.Register(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.DocumentDecoder) (schema.Ref, error) {
+			reg.Register(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
 				return schema.Ref{
 					URL: "slow.json",
 					Load: func(_ context.Context) ([]byte, error) {
@@ -518,7 +518,7 @@ func TestRegistry_SharedLoad(t *testing.T) {
 			var loads atomic.Int32
 
 			reg := registry.New()
-			reg.Register(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.DocumentDecoder) (schema.Ref, error) {
+			reg.Register(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
 				return schema.Ref{
 					URL: "slow.json",
 					Load: func(ctx context.Context) ([]byte, error) {
@@ -616,7 +616,7 @@ func TestRegistry_DynamicResolver(t *testing.T) {
 		}
 
 		reg := registry.New()
-		reg.Register(schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.DocumentDecoder) (schema.Ref, error) {
+		reg.Register(schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
 			kind, err := doc.GetValue(kindPath)
 			if err != nil || (kind != "Deployment" && kind != "Service") {
 				return schema.Ref{}, schema.ErrNoMatch
@@ -627,17 +627,17 @@ func TestRegistry_DynamicResolver(t *testing.T) {
 
 		// Deployment should validate.
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
-		err := reg.ValidateDocument(t.Context(), doc)
+		err := reg.Validate(t.Context(), doc)
 		require.NoError(t, err)
 
 		// Service should validate.
 		doc = yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
-		err = reg.ValidateDocument(t.Context(), doc)
+		err = reg.Validate(t.Context(), doc)
 		require.NoError(t, err)
 
 		// ConfigMap has no schema.
 		doc = yamltest.FirstDocument(t, stringtest.Input(`kind: ConfigMap`))
-		err = reg.ValidateDocument(t.Context(), doc)
+		err = reg.Validate(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 	})
 
@@ -660,11 +660,11 @@ func TestRegistry_DynamicResolver(t *testing.T) {
 		source, err := niceyaml.NewSourceFromFile(yamlPath)
 		require.NoError(t, err)
 
-		decoder, err := source.Decoder()
+		docs, err := source.Documents()
 		require.NoError(t, err)
 
-		for _, doc := range decoder.Documents() {
-			err = reg.ValidateDocument(t.Context(), doc)
+		for _, doc := range docs.All() {
+			err = reg.Validate(t.Context(), doc)
 			require.NoError(t, err)
 		}
 	})
@@ -696,21 +696,21 @@ func TestRegistry_ErrorCases(t *testing.T) {
 		t.Parallel()
 
 		reg := registry.New()
-		reg.Register(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.DocumentDecoder) (schema.Ref, error) {
+		reg.Register(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
 			return schema.Ref{}, errors.New("cannot decide")
 		}))
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
-		err := reg.ValidateDocument(t.Context(), doc)
+		err := reg.Validate(t.Context(), doc)
 		require.ErrorIs(t, err, registry.ErrResolve)
 		assert.Contains(t, err.Error(), "cannot decide")
 	})
 
-	t.Run("load error propagates through ValidateDocument", func(t *testing.T) {
+	t.Run("load error propagates through Validate", func(t *testing.T) {
 		t.Parallel()
 
 		reg := registry.New()
-		reg.Register(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.DocumentDecoder) (schema.Ref, error) {
+		reg.Register(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
 			return schema.Ref{
 				URL: "broken.json",
 				Load: func(_ context.Context) ([]byte, error) {
@@ -720,7 +720,7 @@ func TestRegistry_ErrorCases(t *testing.T) {
 		}))
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
-		err := reg.ValidateDocument(t.Context(), doc)
+		err := reg.Validate(t.Context(), doc)
 		require.ErrorIs(t, err, registry.ErrLoad)
 		assert.Contains(t, err.Error(), "disk on fire")
 		assert.Contains(t, err.Error(), "broken.json")
@@ -763,16 +763,16 @@ func TestRegistry_MultipleDocuments(t *testing.T) {
 	`)
 
 	source := niceyaml.NewSourceFromString(input)
-	decoder, err := source.Decoder()
+	docs, err := source.Documents()
 	require.NoError(t, err)
 
 	// Track validation results.
 	validated := make(map[string]bool)
-	for _, doc := range decoder.Documents() {
+	for _, doc := range docs.All() {
 		kind, err := doc.GetValue(kindPath)
 		require.NoError(t, err)
 
-		err = reg.ValidateDocument(t.Context(), doc)
+		err = reg.Validate(t.Context(), doc)
 
 		if kind == "Deployment" || kind == "Service" {
 			require.NoError(t, err, "expected %s to validate", kind)

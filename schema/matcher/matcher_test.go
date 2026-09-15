@@ -26,7 +26,7 @@ func TestFunc(t *testing.T) {
 	t.Parallel()
 
 	called := false
-	m := matcher.Func(func(_ context.Context, _ *niceyaml.DocumentDecoder) bool {
+	m := matcher.Func(func(_ context.Context, _ *niceyaml.Document) bool {
 		called = true
 
 		return true

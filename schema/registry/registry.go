@@ -96,7 +96,7 @@ func New(opts ...Option) *Registry {
 //
 // Registrations are evaluated in order; the first resolver that does not
 // report [schema.ErrNoMatch] wins. Register is safe to call concurrently
-// with [Lookup] and [ValidateDocument]; a lookup already in progress keeps
+// with [Lookup] and [Validate]; a lookup already in progress keeps
 // the resolver list it started with.
 func (r *Registry) Register(res ...schema.Resolver) {
 	r.mu.Lock()
@@ -113,9 +113,9 @@ func (r *Registry) Register(res ...schema.Resolver) {
 // ctx ends before the schema loads, Lookup returns [ErrLoad] wrapping the
 // context's error without waiting for the load to finish.
 //
-// For most use cases, prefer [ValidateDocument] which combines lookup and
+// For most use cases, prefer [Validate] which combines lookup and
 // validation. Use Lookup when you need the validator for custom processing.
-func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.DocumentDecoder) (*schema.Validator, error) {
+func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.Document) (*schema.Validator, error) {
 	r.mu.RLock()
 
 	resolvers := r.resolvers
@@ -137,7 +137,7 @@ func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.DocumentDecoder) (*
 	return nil, fmt.Errorf("%w: %q", schema.ErrNoMatch, doc.FilePath())
 }
 
-// ValidateDocument validates a document using the first matching schema.
+// Validate validates a document using the first matching schema.
 //
 // This is the primary entry point for schema validation. It combines schema
 // lookup and validation into a single call. Use [Lookup] when you need the
@@ -146,7 +146,7 @@ func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.DocumentDecoder) (*
 // Returns [schema.ErrNoMatch] if no resolver applies to the document.
 // Callers can check for this error to allow unmatched documents:
 //
-//	err := reg.ValidateDocument(ctx, doc)
+//	err := reg.Validate(ctx, doc)
 //	if err != nil && !errors.Is(err, schema.ErrNoMatch) {
 //	    return err
 //	}
@@ -154,7 +154,7 @@ func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.DocumentDecoder) (*
 // Returns validation errors if the document doesn't conform to the schema.
 // Returns resolution, loading, or compilation errors if schema preparation
 // fails.
-func (r *Registry) ValidateDocument(ctx context.Context, doc *niceyaml.DocumentDecoder) error {
+func (r *Registry) Validate(ctx context.Context, doc *niceyaml.Document) error {
 	v, err := r.Lookup(ctx, doc)
 	if err != nil {
 		return err

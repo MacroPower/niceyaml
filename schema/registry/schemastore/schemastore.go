@@ -227,7 +227,7 @@ func New(opts ...Option) *SchemaStore {
 // [ErrFetchCatalog].
 //
 // Implements [schema.Resolver].
-func (s *SchemaStore) Resolve(ctx context.Context, doc *niceyaml.DocumentDecoder) (schema.Ref, error) {
+func (s *SchemaStore) Resolve(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
 	entry, err := s.FindMatch(ctx, doc.FilePath())
 	if err != nil {
 		return schema.Ref{}, err

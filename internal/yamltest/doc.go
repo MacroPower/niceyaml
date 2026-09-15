@@ -68,7 +68,7 @@
 //
 // # Creating Test Documents
 //
-// [FirstDocument] and [FirstDocumentWithPath] create [*niceyaml.DocumentDecoder]
+// [FirstDocument] and [FirstDocumentWithPath] create [*niceyaml.Document]
 // instances for testing schema matchers and validators:
 //
 //	doc := yamltest.FirstDocument(t, "kind: Deployment")

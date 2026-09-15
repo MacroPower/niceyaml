@@ -34,7 +34,7 @@
 //
 // [Source] is the document. It owns the tokens from go-yaml, lazily parses
 // them into an AST with [Source.File], iterates documents with
-// [Source.Decoder], and attaches source context to errors with
+// [Source.Documents], and attaches source context to errors with
 // [Source.WrapError].
 //
 // [Lines] is the view. It organizes tokens into lines, and each [line.Line]
@@ -131,22 +131,22 @@
 //
 // # Validation Pipeline
 //
-// For structured validation, [Decoder] iterates over documents in an
-// [*ast.File] and [DocumentDecoder] provides the validation pipeline:
+// For structured validation, [Documents] iterates over documents in an
+// [*ast.File] and [Document] provides the validation pipeline:
 //
 //	source := niceyaml.NewSourceFromString(yamlContent)
-//	decoder, _ := source.Decoder()
-//	for _, doc := range decoder.Documents() {
+//	docs, _ := source.Documents()
+//	for _, doc := range docs.All() {
 //		config, err := doc.Decode[Config](ctx, niceyaml.WithSchema(validator))
 //		if err != nil {
 //			return source.WrapError(err)
 //		}
 //	}
 //
-// [DocumentDecoder.Decode] supports two validation hooks: a
+// [Document.Decode] supports two validation hooks: a
 // [SchemaValidator] passed with [WithSchema] checks the document against an
 // external schema before decoding, and a type implementing [Validator]
-// validates itself after decoding. [DocumentDecoder.DecodeInto] runs the
+// validates itself after decoding. [Document.DecodeInto] runs the
 // same pipeline on a value you already hold, such as one pre-populated with
 // defaults.
 //

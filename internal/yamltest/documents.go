@@ -8,21 +8,21 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 )
 
-// FirstDocument creates a [*niceyaml.DocumentDecoder] from YAML input for
+// FirstDocument creates a [*niceyaml.Document] from YAML input for
 // testing. It returns the first document in the input.
 //
 // If the input contains no documents, the test fails.
-func FirstDocument(t *testing.T, input string) *niceyaml.DocumentDecoder {
+func FirstDocument(t *testing.T, input string) *niceyaml.Document {
 	t.Helper()
 
 	return FirstDocumentWithPath(t, input, "")
 }
 
-// FirstDocumentWithPath creates a [*niceyaml.DocumentDecoder] with file path
+// FirstDocumentWithPath creates a [*niceyaml.Document] with file path
 // context for testing. It returns the first document in the input.
 //
 // If the input contains no documents, the test fails.
-func FirstDocumentWithPath(t *testing.T, input, filePath string) *niceyaml.DocumentDecoder {
+func FirstDocumentWithPath(t *testing.T, input, filePath string) *niceyaml.Document {
 	t.Helper()
 
 	var opts []niceyaml.SourceOption
@@ -32,10 +32,10 @@ func FirstDocumentWithPath(t *testing.T, input, filePath string) *niceyaml.Docum
 	}
 
 	source := niceyaml.NewSourceFromString(input, opts...)
-	decoder, err := source.Decoder()
+	docs, err := source.Documents()
 	require.NoError(t, err)
 
-	for _, doc := range decoder.Documents() {
+	for _, doc := range docs.All() {
 		return doc
 	}
 

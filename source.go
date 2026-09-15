@@ -37,7 +37,7 @@ type View interface {
 // reporting errors.
 //
 // Source separates two concerns. Parsing and decoding live on Source itself,
-// where [Source.File] lazily parses the AST, [Source.Decoder] iterates the
+// where [Source.File] lazily parses the AST, [Source.Documents] iterates the
 // documents, and [Source.WrapError] attaches source context to errors.
 // Rendering lives in a [Lines] view, available from [Source.Lines], which
 // organizes the tokens into lines and carries the overlays, annotations, and
@@ -84,7 +84,7 @@ type Source struct {
 //   - [WithYAMLParserOptions]
 //
 // Settings that only affect decoding, such as [WithDisallowUnknownFields],
-// are [DecodeOption] values passed to [DocumentDecoder.Decode].
+// are [DecodeOption] values passed to [Document.Decode].
 type SourceOption func(*Source)
 
 // WithName is a [SourceOption] that sets the name for the [Source].
@@ -96,8 +96,8 @@ func WithName(name string) SourceOption {
 
 // WithFilePath is a [SourceOption] that sets the file path for the [Source].
 //
-// This is used by [Decoder] to propagate file path context to
-// [DocumentDecoder] instances, enabling schema matchers to route based on
+// This is used by [Documents] to propagate file path context to
+// [Document] instances, enabling schema matchers to route based on
 // file location.
 //
 // For file-based sources, use [NewSourceFromFile] which sets this
@@ -110,7 +110,7 @@ func WithFilePath(path string) SourceOption {
 
 // WithAllowDuplicateKeys is a [SourceOption] that accepts a mapping with the
 // same key twice, both when [Source.File] parses the document and when
-// [DocumentDecoder] decodes it. The last value wins. Without it a duplicate
+// [Document] decodes it. The last value wins. Without it a duplicate
 // key is an error.
 func WithAllowDuplicateKeys() SourceOption {
 	return func(s *Source) {
@@ -131,8 +131,8 @@ func WithYAMLParserOptions(opts ...parser.Option) SourceOption {
 
 // NewSourceFromFile creates a new [*Source] by reading a file from disk.
 //
-// The file path is automatically set on the [Source], enabling [Decoder] to
-// propagate it to [DocumentDecoder] instances for schema routing.
+// The file path is automatically set on the [Source], enabling [Documents] to
+// propagate it to [Document] instances for schema routing.
 //
 // Returns an error if the file cannot be read.
 func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
@@ -191,20 +191,20 @@ func (s *Source) Tokens() token.Tokens {
 	return s.lines.Tokens()
 }
 
-// Decoder returns a [*Decoder] for iterating over documents in this [Source].
+// Documents returns the [*Documents] of this [Source].
 //
-// Decoder parses the source and pairs each parsed document with its tokens
-// once, so [Decoder.Documents] can be iterated any number of times without
-// repeating either step.
+// It parses the source and pairs each parsed document with its tokens once,
+// so [Documents.All] can be iterated any number of times without repeating
+// either step.
 //
 // Returns an error if the source cannot be parsed.
-func (s *Source) Decoder() (*Decoder, error) {
+func (s *Source) Documents() (*Documents, error) {
 	f, err := s.File()
 	if err != nil {
 		return nil, err
 	}
 
-	return &Decoder{source: s, file: f, docTokens: alignDocumentTokens(f, s.Tokens())}, nil
+	return &Documents{source: s, file: f, docTokens: alignDocumentTokens(f, s.Tokens())}, nil
 }
 
 // File returns an [*ast.File] for the [Source] tokens.

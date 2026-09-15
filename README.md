@@ -19,7 +19,7 @@ It enables **friendly and predictable handling of YAML-compatible documents** in
 - Rich [`Error`][niceyaml.Error] display using the above systems
 - Source [`Revisions`][niceyaml.Revisions] for file lineage and **diffs**
 - String [`Finder`][niceyaml.Finder] for load-once, search-many scenarios
-- Extended [`Encoder`][niceyaml.Encoder] and [`Decoder`][niceyaml.Decoder] wrappers
+- Extended [`Encoder`][niceyaml.Encoder] and [`Document`][niceyaml.Document] decoding wrappers
 - JSON schema [validation][niceyaml/schema.NewValidator] with YAML path errors
 - Bubble [`yamlviewport`][niceyaml/bubbles/yamlviewport] for Bubble Tea
 - Generic building blocks for your own bubbles
@@ -107,7 +107,7 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [go.jacobcolvin.com/x/jsonschema]: https://github.com/MacroPower/x/tree/main/jsonschema
 [niceyaml.Error]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Error
 [niceyaml.Encoder]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Encoder
-[niceyaml.Decoder]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Decoder
+[niceyaml.Document]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Document
 [niceyaml.Finder]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Finder
 [niceyaml.Printer]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Printer
 [niceyaml.Revisions]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Revisions

@@ -23,7 +23,7 @@ import (
 // resolveAndLoad resolves doc through res and loads the schema it names,
 // returning the ref's URL alongside the loaded bytes. Both steps must
 // succeed.
-func resolveAndLoad(t *testing.T, res schema.Resolver, doc *niceyaml.DocumentDecoder) (string, []byte) {
+func resolveAndLoad(t *testing.T, res schema.Resolver, doc *niceyaml.Document) (string, []byte) {
 	t.Helper()
 
 	ref, err := res.Resolve(t.Context(), doc)
@@ -87,11 +87,11 @@ func TestDirective_Resolve_Match(t *testing.T) {
 	// A resolver "matches" when it reports anything other than ErrNoMatch.
 	// Loading the named schema may still fail, which is a match.
 	tests := map[string]struct {
-		setup func(t *testing.T) *niceyaml.DocumentDecoder
+		setup func(t *testing.T) *niceyaml.Document
 		want  bool
 	}{
 		"returns true when document has valid schema directive": {
-			setup: func(t *testing.T) *niceyaml.DocumentDecoder {
+			setup: func(t *testing.T) *niceyaml.Document {
 				t.Helper()
 
 				tmpDir := t.TempDir()
@@ -105,7 +105,7 @@ func TestDirective_Resolve_Match(t *testing.T) {
 			want: true,
 		},
 		"returns false when document has no directive": {
-			setup: func(t *testing.T) *niceyaml.DocumentDecoder {
+			setup: func(t *testing.T) *niceyaml.Document {
 				t.Helper()
 
 				tmpDir := t.TempDir()
@@ -119,16 +119,16 @@ func TestDirective_Resolve_Match(t *testing.T) {
 			want: false,
 		},
 		"returns false when document has nil tokens": {
-			setup: func(t *testing.T) *niceyaml.DocumentDecoder {
+			setup: func(t *testing.T) *niceyaml.Document {
 				t.Helper()
 
-				// NewDocumentDecoder creates a decoder without tokens.
+				// NewDocument creates a decoder without tokens.
 				return firstDocumentWithNilTokens(t, stringtest.Input(`kind: Deployment`))
 			},
 			want: false,
 		},
 		"returns false when directive appears after content": {
-			setup: func(t *testing.T) *niceyaml.DocumentDecoder {
+			setup: func(t *testing.T) *niceyaml.Document {
 				t.Helper()
 
 				tmpDir := t.TempDir()
@@ -142,7 +142,7 @@ func TestDirective_Resolve_Match(t *testing.T) {
 			want: false,
 		},
 		"returns true when directive follows document header": {
-			setup: func(t *testing.T) *niceyaml.DocumentDecoder {
+			setup: func(t *testing.T) *niceyaml.Document {
 				t.Helper()
 
 				tmpDir := t.TempDir()
@@ -258,7 +258,7 @@ func TestDirective_Resolve(t *testing.T) {
 	t.Run("returns ErrNoDirective when tokens are nil", func(t *testing.T) {
 		t.Parallel()
 
-		// NewDocumentDecoder creates a decoder without tokens.
+		// NewDocument creates a decoder without tokens.
 		doc := firstDocumentWithNilTokens(t, stringtest.Input(`kind: Deployment`))
 		res := registry.Directive()
 		_, err := res.Resolve(t.Context(), doc)
@@ -398,7 +398,7 @@ func TestDirective_EmbeddedNameMatchesPath(t *testing.T) {
 				),
 			)
 
-			docs := map[string]*niceyaml.DocumentDecoder{
+			docs := map[string]*niceyaml.Document{
 				"embedded": yamltest.FirstDocument(t, "kind: Embedded\nname: 1\n"),
 				"directive": yamltest.FirstDocumentWithPath(t,
 					"# yaml-language-server: $schema=schemas/name.json\nname: text\n",
@@ -407,24 +407,24 @@ func TestDirective_EmbeddedNameMatchesPath(t *testing.T) {
 			}
 
 			for _, key := range tt.order {
-				err := reg.ValidateDocument(t.Context(), docs[key])
+				err := reg.Validate(t.Context(), docs[key])
 				require.NoError(t, err, "%s document", key)
 			}
 		})
 	}
 }
 
-// firstDocumentFromFile creates a DocumentDecoder from a YAML file path.
-func firstDocumentFromFile(t *testing.T, path string) *niceyaml.DocumentDecoder {
+// firstDocumentFromFile creates a Document from a YAML file path.
+func firstDocumentFromFile(t *testing.T, path string) *niceyaml.Document {
 	t.Helper()
 
 	source, err := niceyaml.NewSourceFromFile(path)
 	require.NoError(t, err)
 
-	decoder, err := source.Decoder()
+	docs, err := source.Documents()
 	require.NoError(t, err)
 
-	for _, doc := range decoder.Documents() {
+	for _, doc := range docs.All() {
 		return doc
 	}
 
@@ -433,8 +433,8 @@ func firstDocumentFromFile(t *testing.T, path string) *niceyaml.DocumentDecoder 
 	return nil
 }
 
-// firstDocumentWithNilTokens creates a DocumentDecoder with nil tokens for testing.
-func firstDocumentWithNilTokens(t *testing.T, input string) *niceyaml.DocumentDecoder {
+// firstDocumentWithNilTokens creates a Document with nil tokens for testing.
+func firstDocumentWithNilTokens(t *testing.T, input string) *niceyaml.Document {
 	t.Helper()
 
 	source := niceyaml.NewSourceFromString(input)
@@ -442,5 +442,5 @@ func firstDocumentWithNilTokens(t *testing.T, input string) *niceyaml.DocumentDe
 	require.NoError(t, err)
 	require.NotEmpty(t, file.Docs)
 
-	return niceyaml.NewDocumentDecoder(file.Docs[0], niceyaml.DocumentContext{})
+	return niceyaml.NewDocument(file.Docs[0], niceyaml.DocumentContext{})
 }

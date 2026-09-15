@@ -53,7 +53,7 @@ func URL(schemaURL string, opts ...HTTPOption) schema.Resolver {
 		opt(cfg)
 	}
 
-	return schema.ResolverFunc(func(_ context.Context, _ *niceyaml.DocumentDecoder) (schema.Ref, error) {
+	return schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
 		return schema.Ref{
 			URL: schemaURL,
 			Load: func(ctx context.Context) ([]byte, error) {

@@ -65,13 +65,13 @@ func validateFile(ctx context.Context, yamlPath string, reg *registry.Registry) 
 		return err
 	}
 
-	decoder, err := source.Decoder()
+	docs, err := source.Documents()
 	if err != nil {
 		return source.WrapError(err)
 	}
 
-	for i, doc := range decoder.Documents() {
-		err = reg.ValidateDocument(ctx, doc)
+	for i, doc := range docs.All() {
+		err = reg.Validate(ctx, doc)
 		if err != nil {
 			return source.WrapError(fmt.Errorf("document %d: %w", i, err))
 		}

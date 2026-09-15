@@ -37,14 +37,14 @@ func main() {
 func load(in string) (*cafe.Config, error) {
 	source := niceyaml.NewSourceFromString(in)
 
-	decoder, err := source.Decoder()
+	docs, err := source.Documents()
 	if err != nil {
 		return nil, err
 	}
 
 	var cfg cafe.Config
 
-	for _, doc := range decoder.Documents() {
+	for _, doc := range docs.All() {
 		cfg, err = doc.Decode[cafe.Config](context.Background(), niceyaml.WithSchema(cafe.Schema))
 		if err != nil {
 			return nil, source.WrapError(err)

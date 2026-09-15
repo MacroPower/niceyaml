@@ -55,7 +55,7 @@ func FileOrURL(baseDir, ref string, opts ...HTTPOption) schema.Resolver {
 	}
 
 	if baseDir == "" {
-		return schema.ResolverFunc(func(_ context.Context, _ *niceyaml.DocumentDecoder) (schema.Ref, error) {
+		return schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
 			return schema.Ref{}, fmt.Errorf("%w: %q", ErrNoBaseDir, ref)
 		})
 	}

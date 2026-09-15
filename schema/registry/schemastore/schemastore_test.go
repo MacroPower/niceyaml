@@ -909,7 +909,7 @@ func TestIntegration(t *testing.T) {
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`on: push`), ".github/workflows/ci.yaml")
 
-		err := reg.ValidateDocument(t.Context(), doc)
+		err := reg.Validate(t.Context(), doc)
 		require.NoError(t, err)
 	})
 
@@ -944,7 +944,7 @@ func TestIntegration(t *testing.T) {
 		for _, name := range []string{"ci.yaml", "release.yaml", "lint.yaml"} {
 			doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`on: push`), ".github/workflows/"+name)
 
-			err := reg.ValidateDocument(t.Context(), doc)
+			err := reg.Validate(t.Context(), doc)
 			require.NoError(t, err)
 		}
 
@@ -979,7 +979,7 @@ func TestIntegration(t *testing.T) {
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`name: test`), ".github/workflows/ci.yaml")
 
-		err := reg.ValidateDocument(t.Context(), doc)
+		err := reg.Validate(t.Context(), doc)
 		require.Error(t, err)
 	})
 
@@ -1004,7 +1004,7 @@ func TestIntegration(t *testing.T) {
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "random.yaml")
 
-		err := reg.ValidateDocument(t.Context(), doc)
+		err := reg.Validate(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 	})
 
@@ -1016,7 +1016,7 @@ func TestIntegration(t *testing.T) {
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
 
-		err := reg.ValidateDocument(t.Context(), doc)
+		err := reg.Validate(t.Context(), doc)
 		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
 		require.ErrorIs(t, err, registry.ErrResolve)
 		require.NotErrorIs(t, err, schema.ErrNoMatch)
@@ -1027,7 +1027,7 @@ func TestIntegration(t *testing.T) {
 
 		var fallbackCalls atomic.Int32
 
-		fallback := schema.ResolverFunc(func(context.Context, *niceyaml.DocumentDecoder) (schema.Ref, error) {
+		fallback := schema.ResolverFunc(func(context.Context, *niceyaml.Document) (schema.Ref, error) {
 			fallbackCalls.Add(1)
 
 			return schema.Ref{}, schema.ErrNoMatch
@@ -1038,7 +1038,7 @@ func TestIntegration(t *testing.T) {
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
 
-		err := reg.ValidateDocument(t.Context(), doc)
+		err := reg.Validate(t.Context(), doc)
 		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
 		assert.Zero(t, fallbackCalls.Load(), "the registry should not try resolvers after the store")
 	})

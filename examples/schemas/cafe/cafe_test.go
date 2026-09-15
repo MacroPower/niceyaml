@@ -13,14 +13,14 @@ import (
 func cafeConfig(ctx context.Context, in string) (*cafe.Config, error) {
 	src := niceyaml.NewSourceFromString(in)
 
-	d, err := src.Decoder()
+	d, err := src.Documents()
 	if err != nil {
 		return nil, err
 	}
 
 	var c cafe.Config
 
-	for _, doc := range d.Documents() {
+	for _, doc := range d.All() {
 		c, err = doc.Decode[cafe.Config](ctx, niceyaml.WithSchema(cafe.Schema))
 		if err != nil {
 			return nil, src.WrapError(err)

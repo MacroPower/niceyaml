@@ -72,7 +72,7 @@ func TestWhen(t *testing.T) {
 		inner := errors.New("inner")
 		r := registry.When(
 			matcher.Content(kindPath, "Deployment"),
-			schema.ResolverFunc(func(_ context.Context, _ *niceyaml.DocumentDecoder) (schema.Ref, error) {
+			schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
 				return schema.Ref{}, inner
 			}),
 		)
@@ -88,7 +88,7 @@ func TestWhen(t *testing.T) {
 		called := false
 		r := registry.When(
 			matcher.Content(kindPath, "Deployment"),
-			schema.ResolverFunc(func(_ context.Context, _ *niceyaml.DocumentDecoder) (schema.Ref, error) {
+			schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
 				called = true
 
 				return schema.Ref{}, nil
