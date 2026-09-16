@@ -24,6 +24,6 @@
 // headers are [line.Annotation] values placed [line.Above] the first line
 // of each hunk.
 //
-// A Differ reuses the buffers of its algorithm, so it is not safe for
-// concurrent use. A Result is.
+// A Differ is safe for concurrent use when its [lcs.Algorithm] is, as
+// [lcs.Hirschberg] is. A Result is safe for concurrent use.
 package diff

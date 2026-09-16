@@ -20,10 +20,11 @@
 //
 // # Usage
 //
-// Create a [Hirschberg] instance once and reuse it for multiple comparisons.
+// Create a [Hirschberg] instance once and reuse it for multiple comparisons,
+// from any number of goroutines.
 //
-// The instance maintains internal buffers that grow as needed but are never
-// shrunk, avoiding repeated allocations. Each call returns a fresh slice:
+// The instance pools its working buffers, so a call borrows one set and
+// returns it for later calls. Each call returns a fresh slice:
 //
 //	h := lcs.NewHirschberg()
 //	ops := h.Diff(before, after)

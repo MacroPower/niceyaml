@@ -1,6 +1,7 @@
 package lcs_test
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -223,4 +224,30 @@ func TestHirschberg_BufferGrowth(t *testing.T) {
 	}
 
 	assert.Equal(t, want, got)
+}
+
+func TestHirschberg_Concurrent(t *testing.T) {
+	t.Parallel()
+
+	h := lcs.NewHirschberg()
+
+	before := []string{"a", "b", "c", "d", "e"}
+	after := []string{"a", "x", "c", "y", "e"}
+	want := h.Diff(before, after)
+
+	var wg sync.WaitGroup
+
+	for range 16 {
+		wg.Go(func() {
+			for range 50 {
+				assert.Equal(t, want, h.Diff(before, after))
+				assert.Equal(t, []lcs.Op{
+					{Kind: lcs.OpEqual, Before: 0, After: 0},
+					{Kind: lcs.OpInsert, Before: -1, After: 1},
+				}, h.Diff([]string{"a"}, []string{"a", "b"}))
+			}
+		})
+	}
+
+	wg.Wait()
 }

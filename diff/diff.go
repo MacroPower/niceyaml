@@ -12,9 +12,9 @@ import (
 
 // Differ computes line differences using a configurable algorithm.
 //
-// Differ is not safe for concurrent use because the underlying algorithm
-// maintains reusable buffers. Create separate instances for concurrent
-// operations. The returned [*Result] is safe for concurrent use.
+// A Differ is safe for concurrent use when its [lcs.Algorithm] is, and the
+// default [lcs.Hirschberg] is. The returned [*Result] is safe for concurrent
+// use.
 //
 // Create instances with [New].
 type Differ struct {
@@ -27,7 +27,8 @@ type Differ struct {
 //   - [WithAlgorithm]
 type Option func(*Differ)
 
-// WithAlgorithm sets the diff algorithm.
+// WithAlgorithm sets the diff algorithm. A [Differ] shared between
+// goroutines needs an algorithm that is safe for concurrent use.
 //
 // Default is [lcs.Hirschberg].
 func WithAlgorithm(algo lcs.Algorithm) Option {

@@ -1,6 +1,9 @@
 package lcs
 
-import "slices"
+import (
+	"slices"
+	"sync"
+)
 
 // Hirschberg implements [Algorithm] using a space-optimized LCS algorithm.
 //
@@ -8,11 +11,43 @@ import "slices"
 // Space complexity: O(n) where n is the length of after, using two-row
 // dynamic programming over the after sequence.
 //
-// A Hirschberg keeps its working buffers between calls, so one instance is
-// not safe for concurrent use. Each call returns a fresh slice.
+// A Hirschberg is safe for concurrent use. Each call borrows a set of
+// working buffers from a pool, so concurrent calls never share one, and the
+// buffers stay in the pool for later calls. Each call returns a fresh slice.
 //
 // Create instances with [NewHirschberg].
 type Hirschberg struct {
+	pool sync.Pool
+}
+
+// NewHirschberg creates a new [*Hirschberg]. Buffers grow on the first call
+// to [Hirschberg.Diff] and stay pooled for later calls.
+func NewHirschberg() *Hirschberg {
+	return &Hirschberg{}
+}
+
+// Diff returns operations transforming before into after. The returned slice
+// is a copy, so it stays valid across later calls.
+func (h *Hirschberg) Diff(before, after []string) []Op {
+	b, ok := h.pool.Get().(*buffers)
+	if !ok {
+		b = &buffers{}
+	}
+
+	defer h.pool.Put(b)
+
+	b.reset(len(before), len(after))
+	b.recurse(before, after, 0, len(before), 0, len(after))
+
+	if len(b.ops) == 0 {
+		return nil
+	}
+
+	return slices.Clone(b.ops)
+}
+
+// buffers is the working memory of one [Hirschberg.Diff] call.
+type buffers struct {
 	// Working rows for 2-row LCS computation.
 	row0, row1 []int
 
@@ -24,49 +59,34 @@ type Hirschberg struct {
 	ops []Op
 }
 
-// NewHirschberg creates a new [*Hirschberg]. Buffers grow on the first call
-// to [Hirschberg.Diff] and stay for later calls.
-func NewHirschberg() *Hirschberg {
-	return &Hirschberg{}
-}
+// reset empties the operations and sizes the rows for sequences of the
+// given lengths.
+func (b *buffers) reset(beforeLen, afterLen int) {
+	b.ops = b.ops[:0]
 
-// Diff returns operations transforming before into after. The returned slice
-// is a copy, so it stays valid across later calls.
-func (h *Hirschberg) Diff(before, after []string) []Op {
-	h.ops = h.ops[:0]
-
-	// Ensure buffers are large enough.
-	needed := len(after) + 1
-	if cap(h.row0) < needed {
-		h.row0 = make([]int, needed)
-		h.row1 = make([]int, needed)
-		h.fwdResult = make([]int, needed)
-		h.bwdResult = make([]int, needed)
+	needed := afterLen + 1
+	if cap(b.row0) < needed {
+		b.row0 = make([]int, needed)
+		b.row1 = make([]int, needed)
+		b.fwdResult = make([]int, needed)
+		b.bwdResult = make([]int, needed)
 	}
 
-	if worst := len(before) + len(after); cap(h.ops) < worst {
-		h.ops = make([]Op, 0, worst)
+	if worst := beforeLen + afterLen; cap(b.ops) < worst {
+		b.ops = make([]Op, 0, worst)
 	}
-
-	h.recurse(before, after, 0, len(before), 0, len(after))
-
-	if len(h.ops) == 0 {
-		return nil
-	}
-
-	return slices.Clone(h.ops)
 }
 
 // recurse recursively finds the LCS using divide-and-conquer.
 // Operates on before[bStart:bEnd] and after[aStart:aEnd].
-func (h *Hirschberg) recurse(before, after []string, bStart, bEnd, aStart, aEnd int) {
+func (b *buffers) recurse(before, after []string, bStart, bEnd, aStart, aEnd int) {
 	m := bEnd - bStart
 	n := aEnd - aStart
 
 	// Base case: no before lines - all after lines are insertions.
 	if m == 0 {
 		for j := aStart; j < aEnd; j++ {
-			h.ops = append(h.ops, Op{Kind: OpInsert, Before: -1, After: j})
+			b.ops = append(b.ops, Op{Kind: OpInsert, Before: -1, After: j})
 		}
 
 		return
@@ -75,7 +95,7 @@ func (h *Hirschberg) recurse(before, after []string, bStart, bEnd, aStart, aEnd 
 	// Base case: no after lines - all before lines are deletions.
 	if n == 0 {
 		for i := bStart; i < bEnd; i++ {
-			h.ops = append(h.ops, Op{Kind: OpDelete, Before: i, After: -1})
+			b.ops = append(b.ops, Op{Kind: OpDelete, Before: i, After: -1})
 		}
 
 		return
@@ -83,7 +103,7 @@ func (h *Hirschberg) recurse(before, after []string, bStart, bEnd, aStart, aEnd 
 
 	// Base case: single before line.
 	if m == 1 {
-		h.singleBeforeLine(before, after, bStart, aStart, aEnd)
+		b.singleBeforeLine(before, after, bStart, aStart, aEnd)
 
 		return
 	}
@@ -92,10 +112,10 @@ func (h *Hirschberg) recurse(before, after []string, bStart, bEnd, aStart, aEnd 
 	bMid := bStart + m/2
 
 	// Forward pass: compute LCS lengths from (bStart, aStart) to (bMid, *).
-	forward := h.forward(before, after, bStart, bMid, aStart, aEnd)
+	forward := b.forward(before, after, bStart, bMid, aStart, aEnd)
 
 	// Backward pass: compute LCS lengths from (bEnd, aEnd) to (bMid, *).
-	backward := h.backward(before, after, bMid, bEnd, aStart, aEnd)
+	backward := b.backward(before, after, bMid, bEnd, aStart, aEnd)
 
 	// Find aMid that maximizes forward[j-aStart] + backward[aEnd-j].
 	aMid := aStart
@@ -110,13 +130,13 @@ func (h *Hirschberg) recurse(before, after []string, bStart, bEnd, aStart, aEnd 
 	}
 
 	// Recurse on both halves.
-	h.recurse(before, after, bStart, bMid, aStart, aMid)
-	h.recurse(before, after, bMid, bEnd, aMid, aEnd)
+	b.recurse(before, after, bStart, bMid, aStart, aMid)
+	b.recurse(before, after, bMid, bEnd, aMid, aEnd)
 }
 
 // singleBeforeLine handles the base case where there's exactly one before line.
 // Maintains "deletions before insertions" convention.
-func (h *Hirschberg) singleBeforeLine(before, after []string, bStart, aStart, aEnd int) {
+func (b *buffers) singleBeforeLine(before, after []string, bStart, aStart, aEnd int) {
 	// Find first match in after sequence.
 	matchIdx := -1
 
@@ -130,21 +150,21 @@ func (h *Hirschberg) singleBeforeLine(before, after []string, bStart, aStart, aE
 
 	if matchIdx < 0 {
 		// No match: delete before line, then insert all after lines.
-		h.ops = append(h.ops, Op{Kind: OpDelete, Before: bStart, After: -1})
+		b.ops = append(b.ops, Op{Kind: OpDelete, Before: bStart, After: -1})
 
 		for j := aStart; j < aEnd; j++ {
-			h.ops = append(h.ops, Op{Kind: OpInsert, Before: -1, After: j})
+			b.ops = append(b.ops, Op{Kind: OpInsert, Before: -1, After: j})
 		}
 	} else {
 		// Match found: insert lines before match, equal at match, insert lines after.
 		for j := aStart; j < matchIdx; j++ {
-			h.ops = append(h.ops, Op{Kind: OpInsert, Before: -1, After: j})
+			b.ops = append(b.ops, Op{Kind: OpInsert, Before: -1, After: j})
 		}
 
-		h.ops = append(h.ops, Op{Kind: OpEqual, Before: bStart, After: matchIdx})
+		b.ops = append(b.ops, Op{Kind: OpEqual, Before: bStart, After: matchIdx})
 
 		for j := matchIdx + 1; j < aEnd; j++ {
-			h.ops = append(h.ops, Op{Kind: OpInsert, Before: -1, After: j})
+			b.ops = append(b.ops, Op{Kind: OpInsert, Before: -1, After: j})
 		}
 	}
 }
@@ -155,39 +175,39 @@ func (h *Hirschberg) singleBeforeLine(before, after []string, bStart, aStart, aE
 // before[bStart:bMid] and after[aStart:aStart+j-aStart].
 //
 // The returned slice uses an internal buffer and is valid until the next call.
-func (h *Hirschberg) forward(before, after []string, bStart, bMid, aStart, aEnd int) []int {
+func (b *buffers) forward(before, after []string, bStart, bMid, aStart, aEnd int) []int {
 	n := aEnd - aStart
 
 	// Initialize both rows to zeros (required since we swap them).
 	for j := 0; j <= n; j++ {
-		h.row0[j] = 0
-		h.row1[j] = 0
+		b.row0[j] = 0
+		b.row1[j] = 0
 	}
 
 	for i := bStart; i < bMid; i++ {
 		// Swap rows: row1 becomes the new row to fill.
-		h.row0, h.row1 = h.row1, h.row0
-		h.row1[0] = 0
+		b.row0, b.row1 = b.row1, b.row0
+		b.row1[0] = 0
 
 		for j := range n {
 			if before[i] == after[aStart+j] {
-				h.row1[j+1] = h.row0[j] + 1
+				b.row1[j+1] = b.row0[j] + 1
 			} else {
-				h.row1[j+1] = max(h.row1[j], h.row0[j+1])
+				b.row1[j+1] = max(b.row1[j], b.row0[j+1])
 			}
 		}
 	}
 
 	// Copy to reusable result buffer.
 	// If no iterations occurred (bStart == bMid), copy row0 (all zeros).
-	src := h.row1
+	src := b.row1
 	if bStart == bMid {
-		src = h.row0
+		src = b.row0
 	}
 
-	copy(h.fwdResult[:n+1], src[:n+1])
+	copy(b.fwdResult[:n+1], src[:n+1])
 
-	return h.fwdResult[:n+1]
+	return b.fwdResult[:n+1]
 }
 
 // backward computes LCS lengths going backward from bEnd to bMid.
@@ -196,37 +216,37 @@ func (h *Hirschberg) forward(before, after []string, bStart, bMid, aStart, aEnd 
 // and after[j:aEnd].
 //
 // The returned slice uses an internal buffer and is valid until the next call.
-func (h *Hirschberg) backward(before, after []string, bMid, bEnd, aStart, aEnd int) []int {
+func (b *buffers) backward(before, after []string, bMid, bEnd, aStart, aEnd int) []int {
 	n := aEnd - aStart
 
 	// Initialize both rows to zeros (required since we swap them).
 	for j := 0; j <= n; j++ {
-		h.row0[j] = 0
-		h.row1[j] = 0
+		b.row0[j] = 0
+		b.row1[j] = 0
 	}
 
 	for i := bEnd - 1; i >= bMid; i-- {
 		// Swap rows: row1 becomes the new row to fill.
-		h.row0, h.row1 = h.row1, h.row0
-		h.row1[0] = 0
+		b.row0, b.row1 = b.row1, b.row0
+		b.row1[0] = 0
 
 		for j := range n {
 			if before[i] == after[aEnd-1-j] {
-				h.row1[j+1] = h.row0[j] + 1
+				b.row1[j+1] = b.row0[j] + 1
 			} else {
-				h.row1[j+1] = max(h.row1[j], h.row0[j+1])
+				b.row1[j+1] = max(b.row1[j], b.row0[j+1])
 			}
 		}
 	}
 
 	// Copy to reusable result buffer.
 	// If no iterations occurred (bMid == bEnd), copy row0 (all zeros).
-	src := h.row1
+	src := b.row1
 	if bMid == bEnd {
-		src = h.row0
+		src = b.row0
 	}
 
-	copy(h.bwdResult[:n+1], src[:n+1])
+	copy(b.bwdResult[:n+1], src[:n+1])
 
-	return h.bwdResult[:n+1]
+	return b.bwdResult[:n+1]
 }
