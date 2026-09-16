@@ -19,7 +19,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/normalizer"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
-	"go.jacobcolvin.com/niceyaml/revision"
 	"go.jacobcolvin.com/niceyaml/style"
 )
 
@@ -150,7 +149,7 @@ type Model struct {
 	printer  *printer.Printer
 	searcher Searcher
 	// Revision history; revIndex below selects the revision on display.
-	revisions revision.History
+	revisions []*niceyaml.Source
 	// Cached diff between base and current revision.
 	diffResult *diff.Result
 	// Left holds the view for the left pane or main content.
@@ -324,7 +323,7 @@ func (m *Model) SetSource(s *niceyaml.Source) {
 // After adding, the viewport moves to the newly added revision.
 func (m *Model) AddRevision(s *niceyaml.Source) {
 	m.revisions = append(m.revisions, s)
-	m.revIndex = m.revisions.Len() - 1
+	m.revIndex = len(m.revisions) - 1
 
 	m.rebuildViews()
 }
@@ -352,9 +351,19 @@ func (m *Model) RevisionName() string {
 	return m.currentRevision().Name()
 }
 
-// RevisionNames returns all revision names in order.
+// RevisionNames returns all revision names in order, or nil without
+// revisions.
 func (m *Model) RevisionNames() []string {
-	return m.revisions.Names()
+	if len(m.revisions) == 0 {
+		return nil
+	}
+
+	names := make([]string, len(m.revisions))
+	for i, s := range m.revisions {
+		names[i] = s.Name()
+	}
+
+	return names
 }
 
 // GoToRevision navigates to the revision at index, clamped to the valid range.
@@ -365,13 +374,13 @@ func (m *Model) GoToRevision(index int) {
 		return
 	}
 
-	m.revIndex = clamp(index, 0, m.revisions.Len()-1)
+	m.revIndex = clamp(index, 0, len(m.revisions)-1)
 	m.showRevision()
 }
 
 // RevisionCount returns the number of revisions in the history.
 func (m *Model) RevisionCount() int {
-	return m.revisions.Len()
+	return len(m.revisions)
 }
 
 // IsAtFirstRevision reports whether the viewport is at revision index 0.
@@ -381,7 +390,7 @@ func (m *Model) IsAtFirstRevision() bool {
 
 // IsAtLatestRevision reports whether the viewport is at the latest revision.
 func (m *Model) IsAtLatestRevision() bool {
-	return m.revIndex >= m.revisions.Len()-1
+	return m.revIndex >= len(m.revisions)-1
 }
 
 // IsShowingDiff reports whether the viewport is displaying a diff between
@@ -531,7 +540,7 @@ func (m *Model) seekRevision(delta int) {
 		return
 	}
 
-	m.revIndex = clamp(m.revIndex+delta, 0, m.revisions.Len()-1)
+	m.revIndex = clamp(m.revIndex+delta, 0, len(m.revisions)-1)
 	m.showRevision()
 }
 
@@ -795,9 +804,9 @@ func (m *Model) getDiffBase() *niceyaml.Source {
 
 	switch m.diffMode {
 	case DiffModeOrigin:
-		return m.revisions.At(0)
+		return m.revision(0)
 	case DiffModeAdjacent:
-		return m.revisions.At(m.revIndex - 1)
+		return m.revision(m.revIndex - 1)
 	default:
 		return nil
 	}
@@ -805,7 +814,17 @@ func (m *Model) getDiffBase() *niceyaml.Source {
 
 // currentRevision returns the revision on display, or nil without revisions.
 func (m *Model) currentRevision() *niceyaml.Source {
-	return m.revisions.At(m.revIndex)
+	return m.revision(m.revIndex)
+}
+
+// revision returns the revision at index, or nil when index is outside the
+// history.
+func (m *Model) revision(index int) *niceyaml.Source {
+	if index < 0 || index >= len(m.revisions) {
+		return nil
+	}
+
+	return m.revisions[index]
 }
 
 // getDisplayLines returns the view to display based on current revision and
@@ -1114,7 +1133,7 @@ func (m *Model) hasContent() bool {
 
 // hasRevision reports whether a revision exists.
 func (m *Model) hasRevision() bool {
-	return m.revisions.Len() > 0
+	return len(m.revisions) > 0
 }
 
 // canRender reports whether the content area has room for any rows.

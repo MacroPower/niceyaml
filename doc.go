@@ -52,8 +52,7 @@
 // [line.Lines] satisfy, with syntax highlighting via lipgloss. It supports
 // customizable gutters (line numbers, diff markers), word wrapping, and
 // annotation rendering. [diff.Differ] compares two views, and
-// [finder.Finder] searches one. [revision.History] keeps the versions of a
-// document in order.
+// [finder.Finder] searches one.
 //
 // Themes from [go.jacobcolvin.com/niceyaml/style/theme] provide color
 // palettes. Without one, [printer.Printer] renders with [style.Default].
@@ -153,12 +152,6 @@
 //	p := printer.New()
 //	fmt.Println(p.Print(result.Unified()))
 //	fmt.Println(p.Print(result.Hunks(3)))
-//
-// [revision.History] keeps the versions of a document in order, from the
-// original to the latest. Any two revisions can be diffed:
-//
-//	revs := revision.History{original, modified}
-//	result := diff.Diff(revs[0], revs[1])
 //
 // Custom algorithms implement [lcs.Algorithm]. For a reusable [diff.Differ]:
 //

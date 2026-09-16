@@ -8,7 +8,6 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
-	"go.jacobcolvin.com/niceyaml/revision"
 )
 
 func BenchmarkFullDiffSource(b *testing.B) {
@@ -184,28 +183,6 @@ func BenchmarkFullDiffSource_InsertAtEnd(b *testing.B) {
 
 			for b.Loop() {
 				_ = diff.Diff(sourceA, sourceB).Unified()
-			}
-		})
-	}
-}
-
-func BenchmarkRevisionsNames(b *testing.B) {
-	yaml := yamltest.GenerateYAML(50)
-
-	counts := []int{10, 50, 100}
-
-	for _, count := range counts {
-		revs := make(revision.History, 0, count)
-		for i := 1; i <= count; i++ {
-			revs = append(revs, niceyaml.NewSourceFromString(yaml, niceyaml.WithName(fmt.Sprintf("v%d", i))))
-		}
-
-		b.Run(fmt.Sprintf("%d_revisions", count), func(b *testing.B) {
-			b.ReportAllocs()
-			b.ResetTimer()
-
-			for b.Loop() {
-				_ = revs.Names()
 			}
 		})
 	}

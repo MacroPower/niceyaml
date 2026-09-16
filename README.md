@@ -17,7 +17,7 @@ It enables **friendly and predictable handling of YAML-compatible documents** in
 - [`Source`][niceyaml.Source] **style overlay** and **annotation** system
 - Pretty [`printer`][niceyaml/printer] with [themes][niceyaml/style/theme]
 - Rich [`Error`][niceyaml.Error] display using the above systems
-- Source [`revision.History`][niceyaml/revision] for file lineage and [**diffs**][niceyaml/diff]
+- Source [**diffs**][niceyaml/diff] between revisions of a file
 - String [`finder`][niceyaml/finder] for load-once, search-many scenarios
 - Extended [`Encoder`][niceyaml.Encoder] and [`Document`][niceyaml.Document] decoding wrappers
 - JSON schema [validation][niceyaml/schema.NewValidator] with YAML path errors
@@ -114,7 +114,6 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [niceyaml/finder]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/finder
 [niceyaml/line]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/line
 [niceyaml/printer]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/printer
-[niceyaml/revision]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/revision
 [niceyaml/style/theme]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/style/theme
 [niceyaml/style.Style]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/style#Style
 [niceyaml/bubbles/yamlviewport]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/bubbles/yamlviewport
