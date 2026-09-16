@@ -163,7 +163,10 @@ func TestRegistry_Validate(t *testing.T) {
 		var validationErr *niceyaml.Error
 
 		require.ErrorAs(t, err, &validationErr)
-		assert.Equal(t, "$.kind", validationErr.Path())
+
+		gotPath, ok := validationErr.Path()
+		require.True(t, ok)
+		assert.Equal(t, "$.kind", gotPath.String())
 	})
 
 	t.Run("no match returns ErrNoMatch", func(t *testing.T) {

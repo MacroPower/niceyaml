@@ -230,7 +230,7 @@ func (s *Source) parse() (*ast.File, error) {
 	if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
 		return nil, NewError(
 			yamlErr.GetMessage(),
-			WithErrorToken(yamlErr.GetToken()),
+			WithToken(yamlErr.GetToken()),
 		)
 	}
 

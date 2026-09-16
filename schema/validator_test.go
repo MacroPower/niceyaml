@@ -810,13 +810,24 @@ func TestValidator_ErrorPaths(t *testing.T) {
 			var validationErr *niceyaml.Error
 
 			require.ErrorAs(t, err, &validationErr)
-			assert.Equal(t, tc.wantPath, validationErr.Path())
+
+			gotPath, ok := validationErr.Path()
+			assert.Equal(t, tc.wantPath != "", ok)
+
+			if ok {
+				assert.Equal(t, tc.wantPath, gotPath.String())
+			}
 
 			var gotNestedPaths []string
 
 			for _, uerr := range validationErr.Unwrap() {
-				if nestedErr, ok := errors.AsType[*niceyaml.Error](uerr); ok {
-					gotNestedPaths = append(gotNestedPaths, nestedErr.Path())
+				nestedErr, ok := errors.AsType[*niceyaml.Error](uerr)
+				if !ok {
+					continue
+				}
+
+				if nestedPath, ok := nestedErr.Path(); ok {
+					gotNestedPaths = append(gotNestedPaths, nestedPath.String())
 				}
 			}
 

@@ -46,7 +46,7 @@ var (
 // Error is an error that points at a location in a YAML document.
 //
 // The location is a [paths.Path], a [*token.Token], or a [position.Range],
-// set with [WithPath], [WithErrorToken], or [WithErrorRange]. A path resolves
+// set with [WithPath], [WithToken], or [WithRange]. A path resolves
 // within one document of a source. [WithDocumentIndex] selects which; without
 // it the first document is used. [Document] sets the index on every
 // error it returns, and nested errors without an index of their own inherit
@@ -120,8 +120,8 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 //
 // Available options:
 //   - [WithPath]
-//   - [WithErrorToken]
-//   - [WithErrorRange]
+//   - [WithToken]
+//   - [WithRange]
 //   - [WithDocumentIndex]
 //   - [WithErrors]
 type ErrorOption func(e *Error)
@@ -148,20 +148,20 @@ func WithDocumentIndex(index int) ErrorOption {
 	}
 }
 
-// WithErrorToken is an [ErrorOption] that sets the token where the error
+// WithToken is an [ErrorOption] that sets the token where the error
 // occurred. Only the token's position is used, so a token from a parsed AST
 // works even though the parser clones tokens.
-func WithErrorToken(tk *token.Token) ErrorOption {
+func WithToken(tk *token.Token) ErrorOption {
 	return func(e *Error) {
 		e.token = tk
 	}
 }
 
-// WithErrorRange is an [ErrorOption] that sets the 0-indexed range the error
+// WithRange is an [ErrorOption] that sets the 0-indexed range the error
 // covers. It is the option for producers that know a location but hold no
 // go-yaml token, such as a check that runs on rendered lines.
 // [SourceError.Detail] highlights the whole range.
-func WithErrorRange(r position.Range) ErrorOption {
+func WithRange(r position.Range) ErrorOption {
 	return func(e *Error) {
 		e.rng = &r
 	}
@@ -299,21 +299,40 @@ func (e *Error) Unwrap() []error {
 	return result
 }
 
-// Path returns the YAML path where the error occurred as a string, or an
-// empty string when it carries none. It looks through wrapping to the
-// [Error] that carries the location.
-func (e *Error) Path() string {
-	return e.anchor().pathString()
-}
-
-// pathString returns e's own path as a string, or an empty string when it
-// carries none.
-func (e *Error) pathString() string {
-	if e.path == nil {
-		return ""
+// Path returns the [paths.Path] set with [WithPath] and whether one was
+// set. It looks through wrapping to the [Error] that carries the location,
+// as [Error.Token] and [Error.Range] do.
+func (e *Error) Path() (paths.Path, bool) {
+	a := e.anchor()
+	if a.path == nil {
+		return paths.Path{}, false
 	}
 
-	return e.path.String()
+	return *a.path, true
+}
+
+// Token returns the token set with [WithToken] and whether one was set. It
+// looks through wrapping to the [Error] that carries the location. The
+// token is the one given, so treat it as read-only.
+func (e *Error) Token() (*token.Token, bool) {
+	a := e.anchor()
+	if a.token == nil {
+		return nil, false
+	}
+
+	return a.token, true
+}
+
+// Range returns the [position.Range] set with [WithRange] and whether one
+// was set. It looks through wrapping to the [Error] that carries the
+// location.
+func (e *Error) Range() (position.Range, bool) {
+	a := e.anchor()
+	if a.rng == nil {
+		return position.Range{}, false
+	}
+
+	return *a.rng, true
 }
 
 // DocumentIndex returns the 0-indexed document the error's path resolves in

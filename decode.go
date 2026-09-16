@@ -562,7 +562,7 @@ func (dd *Document) decodeNode(ctx context.Context, node ast.Node, v any, yamlOp
 		if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
 			return NewError(
 				yamlErr.GetMessage(),
-				WithErrorToken(yamlErr.GetToken()),
+				WithToken(yamlErr.GetToken()),
 				WithDocumentIndex(dd.index),
 			)
 		}
