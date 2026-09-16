@@ -29,7 +29,7 @@ func NewValidator(v *jsonschema.Validator) *Validator {
 // Validator adapts a compiled [*jsonschema.Validator] to
 // [niceyaml.SchemaValidator], reporting constraint violations as
 // [*niceyaml.Error] values that carry the YAML path to each failing location
-// for display by [niceyaml.Printer].
+// for display by [printer.Printer].
 //
 // A Validator is safe for concurrent use. Create instances with
 // [NewValidator].

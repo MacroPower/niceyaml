@@ -1,4 +1,4 @@
-package niceyaml
+package line
 
 import (
 	"errors"
@@ -8,7 +8,7 @@ import (
 
 	"github.com/goccy/go-yaml/token"
 
-	"go.jacobcolvin.com/niceyaml/line"
+	"go.jacobcolvin.com/niceyaml/internal/segment"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style"
 )
@@ -23,7 +23,22 @@ var (
 	ErrColumnNotIncreasing = errors.New("column not greater than previous")
 )
 
-// Lines is an ordered collection of [line.Line] values and the unit that
+// View is read-only, line-by-line access to content that rendering and
+// search utilities consume, such as the printer and finder packages.
+//
+// AllLines yields each [Line] by value, so a change to a yielded line
+// reaches nothing. Overlays and annotations go through the [Lines] methods
+// and through indexing a [Lines] collection directly.
+//
+// [Lines] implements View directly, and a niceyaml Source implements it over
+// its pristine lines.
+type View interface {
+	AllLines(spans ...position.Span) iter.Seq2[int, Line]
+	AllRunes(ranges ...position.Range) iter.Seq2[position.Position, rune]
+	Len() int
+}
+
+// Lines is an ordered collection of [Line] values and the unit that
 // rendering utilities consume.
 //
 // Lines carries only what rendering needs, which is the tokens split per
@@ -37,15 +52,29 @@ var (
 //
 // Create instances with [NewLines].
 // Access individual lines via slice indexing.
-type Lines []line.Line
+type Lines []Line
 
-// NewLines creates new [Lines] from [token.Tokens].
+// NewLines creates new [Lines] from [token.Tokens], one [Line] per source
+// line.
 //
-// NewLines splits multiline tokens, such as block scalars and quoted
-// multiline strings, into one part per line with [line.Split], and
-// [Lines.Tokens] recombines the parts into the original tokens.
+// NewLines cuts multiline tokens, such as block scalars and quoted multiline
+// strings, into one part per line. Each part is a token whose Position
+// describes its own line, following the go-yaml lexer conventions for that
+// token type, and every part keeps a reference to the original token it was
+// cut from. [Lines.Tokens] recombines the parts into the original tokens.
+// Returns nil when tks is empty.
 func NewLines(tks token.Tokens) Lines {
-	return Lines(line.Split(tks))
+	split := segment.Split(tks)
+	if len(split) == 0 {
+		return nil
+	}
+
+	lines := make(Lines, len(split))
+	for i, l := range split {
+		lines[i] = Line{segments: l.Segments, number: l.Number}
+	}
+
+	return lines
 }
 
 // Len returns the number of lines.
@@ -58,7 +87,7 @@ func (ls Lines) IsEmpty() bool {
 	return len(ls) == 0
 }
 
-// Width returns the maximum [line.Line.Width] across all lines.
+// Width returns the maximum [Line.Width] across all lines.
 func (ls Lines) Width() int {
 	var maxWidth int
 
@@ -73,7 +102,7 @@ func (ls Lines) Width() int {
 
 // Clone returns a deep copy of the [Lines].
 //
-// Clone copies each [line.Line] with [line.Line.Clone], so overlays and
+// Clone copies each [Line] with [Line.Clone], so overlays and
 // annotations added to the copy do not affect the original.
 func (ls Lines) Clone() Lines {
 	if len(ls) == 0 {
@@ -91,12 +120,12 @@ func (ls Lines) Clone() Lines {
 // AllLines returns an iterator over lines within the given spans.
 //
 // Without spans, AllLines yields every line. Each iteration yields the
-// 0-indexed line index and the [line.Line] at that index by value, so a
+// 0-indexed line index and the [Line] at that index by value, so a
 // change to the yielded line reaches nothing. To add overlays or
 // annotations, use [Lines.AddOverlay] and the other Lines methods, or index
 // the collection directly. AllLines clamps spans to the available lines.
-func (ls Lines) AllLines(spans ...position.Span) iter.Seq2[int, line.Line] {
-	return func(yield func(int, line.Line) bool) {
+func (ls Lines) AllLines(spans ...position.Span) iter.Seq2[int, Line] {
+	return func(yield func(int, Line) bool) {
 		if len(spans) == 0 {
 			for i := range ls {
 				if !yield(i, ls[i]) {
@@ -124,9 +153,9 @@ func (ls Lines) AllLines(spans ...position.Span) iter.Seq2[int, line.Line] {
 //
 // Without ranges, AllRunes yields every rune. Each iteration yields a
 // [position.Position] and the rune at that position. The iteration includes
-// line endings as a single '\n', as [line.Line.Runes] does, so a newline
+// line endings as a single '\n', as [Line.Runes] does, so a newline
 // occupies the column after the last visible rune whether the source used LF
-// or CRLF, and columns match [line.Line.Width].
+// or CRLF, and columns match [Line.Width].
 func (ls Lines) AllRunes(ranges ...position.Range) iter.Seq2[position.Position, rune] {
 	return func(yield func(position.Position, rune) bool) {
 		if len(ranges) == 0 {
@@ -215,10 +244,10 @@ func (ls Lines) TokenAt(pos position.Position) *token.Token {
 // TokenRanges returns the ranges tk occupies, one per line it appears on.
 //
 // The token may be a lexer token, as returned by [Lines.TokenAt] or
-// [Lines.Tokens], or one of the per-line parts from [line.Line.Tokens].
+// [Lines.Tokens], or one of the per-line parts from [Line.Tokens].
 // Returns nil if tk is nil or not found.
 func (ls Lines) TokenRanges(tk *token.Token) position.Ranges {
-	return ls.ranges(tk, (*line.Line).TokenSpan)
+	return ls.ranges(tk, (*Line).TokenSpan)
 }
 
 // ContentRanges returns the ranges of tk's content, one per line it appears
@@ -228,13 +257,13 @@ func (ls Lines) TokenRanges(tk *token.Token) position.Ranges {
 // The token may be a lexer token or one of the per-line parts, as for
 // [Lines.TokenRanges]. Returns nil if tk is nil or not found.
 func (ls Lines) ContentRanges(tk *token.Token) position.Ranges {
-	return ls.ranges(tk, (*line.Line).ContentSpan)
+	return ls.ranges(tk, (*Line).ContentSpan)
 }
 
 // ranges collects one range per line that holds tk, using span to pick the
 // columns within the line. Lines where span is empty contribute no range.
 func (ls Lines) ranges(
-	tk *token.Token, span func(*line.Line, *token.Token) (position.Span, bool),
+	tk *token.Token, span func(*Line, *token.Token) (position.Span, bool),
 ) position.Ranges {
 	if tk == nil {
 		return nil
@@ -413,11 +442,11 @@ func (ls Lines) addOverlayRange(s style.Style, blend bool, r position.Range) {
 			continue
 		}
 
-		ls[lineIdx].AddOverlay(line.Overlay{Cols: cols, Style: s, Blend: blend})
+		ls[lineIdx].AddOverlay(Overlay{Cols: cols, Style: s, Blend: blend})
 	}
 }
 
-// ClearOverlays removes all [line.Overlay] values from all lines.
+// ClearOverlays removes all [Overlay] values from all lines.
 func (ls Lines) ClearOverlays() {
 	for i := range ls {
 		ls[i].Overlays = nil

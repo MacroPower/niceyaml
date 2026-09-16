@@ -52,7 +52,7 @@
 //
 // # Customization
 //
-// Provide a custom [niceyaml.Printer] via [WithPrinter] to control syntax
+// Provide a custom [printer.Printer] via [WithPrinter] to control syntax
 // highlighting, line numbers, and annotations.
 //
 // Provide a custom [Searcher] via [WithSearcher] for specialized search

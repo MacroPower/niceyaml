@@ -13,9 +13,13 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/differ"
+	"go.jacobcolvin.com/niceyaml/finder"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/normalizer"
 	"go.jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/printer"
+	"go.jacobcolvin.com/niceyaml/revision"
 	"go.jacobcolvin.com/niceyaml/style"
 )
 
@@ -24,9 +28,9 @@ const defaultHorizontalStep = 6
 // Searcher loads a document and finds the [position.Range]s that match a
 // search string in it.
 //
-// See [niceyaml.Finder] for an implementation.
+// See [finder.Finder] for an implementation.
 type Searcher interface {
-	Load(lines niceyaml.View)
+	Load(lines line.View)
 	Find(search string) position.Ranges
 }
 
@@ -73,13 +77,13 @@ const (
 //   - [WithSearcher]
 type Option func(*Model)
 
-// WithPrinter is an [Option] that sets the [*niceyaml.Printer] used for
-// rendering. Without it, the viewport creates a default [niceyaml.Printer].
+// WithPrinter is an [Option] that sets the [*printer.Printer] used for
+// rendering. Without it, the viewport creates a default [printer.Printer].
 //
 // The viewport never modifies the printer. Each render derives a copy with
-// [niceyaml.Printer.With] and the viewport's wrap width, so other renderers
+// [printer.Printer.With] and the viewport's wrap width, so other renderers
 // can share the same printer.
-func WithPrinter(p *niceyaml.Printer) Option {
+func WithPrinter(p *printer.Printer) Option {
 	return func(m *Model) {
 		m.printer = p
 	}
@@ -96,7 +100,7 @@ func WithStyle(s lipgloss.Style) Option {
 }
 
 // WithSearcher is an [Option] that sets the [Searcher] that search terms run
-// through. Without it, the viewport creates a [niceyaml.Finder] with a
+// through. Without it, the viewport creates a [finder.Finder] with a
 // default [normalizer.Normalizer].
 func WithSearcher(s Searcher) Option {
 	return func(m *Model) {
@@ -131,7 +135,7 @@ func New(opts ...Option) Model {
 // wraps to the viewport width or carries an annotation takes several rows,
 // and the vertical offset ([Model.YOffset], [Model.SetYOffset], and the
 // scroll methods) counts those rows, so every row of the view is reachable.
-// The frame of the printer's container style ([niceyaml.WithContainerStyle])
+// The frame of the printer's container style ([printer.WithContainerStyle])
 // adds rows above the first line and below the last. Methods named after rows
 // ([Model.TotalRowCount], [Model.VisibleRowCount]) count rows; methods named
 // after lines ([Model.TotalLineCount], [Model.VisibleLineCount]) count the
@@ -143,12 +147,12 @@ func New(opts ...Option) Model {
 type Model struct {
 	// The container style applied to the viewport frame.
 	style    lipgloss.Style
-	printer  *niceyaml.Printer
+	printer  *printer.Printer
 	searcher Searcher
 	// Revision history; revIndex below selects the revision on display.
-	revisions niceyaml.Revisions
+	revisions revision.History
 	// Cached diff between base and current revision.
-	diffResult *niceyaml.DiffResult
+	diffResult *differ.Result
 	// Left holds the view for the left pane or main content.
 	// In ViewModeFull: Unified diff or plain content.
 	// In ViewModeHunks with diff: the hunks of the diff with their headers.
@@ -158,10 +162,10 @@ type Model struct {
 	// The model always owns the view, either a clone of the revision's lines
 	// or a fresh diff result, so search overlays never touch the caller's
 	// Source.
-	left niceyaml.Lines
+	left line.Lines
 	// Right holds the right pane view for side-by-side diff rendering.
 	// Only populated when viewMode == ViewModeSideBySide and showing a diff.
-	right niceyaml.Lines
+	right line.Lines
 	// Rendered row counts of the view. Copies of the Model share one cache
 	// until a layout change gives a copy its own, so the counts that the
 	// value-receiver View fills in stay filled for the Model it copied.
@@ -215,12 +219,12 @@ func (m *Model) setInitialValues() {
 	m.searchIndex = -1
 
 	if m.printer == nil {
-		m.printer = niceyaml.NewPrinter()
+		m.printer = printer.New()
 	}
 
 	if m.searcher == nil {
-		m.searcher = niceyaml.NewFinder(
-			niceyaml.WithNormalizer(normalizer.New()),
+		m.searcher = finder.New(
+			finder.WithNormalizer(normalizer.New()),
 		)
 	}
 
@@ -285,20 +289,20 @@ func (m *Model) relayout() {
 // renderPrinter returns the printer to render with: the configured printer
 // specialized to the given content width and the viewport's word wrap
 // setting, so wrapped lines fit the content area.
-func (m *Model) renderPrinter(width int) *niceyaml.Printer {
+func (m *Model) renderPrinter(width int) *printer.Printer {
 	if !m.wrapEnabled {
 		width = 0
 	}
 
-	return m.printer.With(niceyaml.WithWidth(width))
+	return m.printer.With(printer.WithWidth(width))
 }
 
-// SetPrinter sets the [*niceyaml.Printer] used for rendering. See
+// SetPrinter sets the [*printer.Printer] used for rendering. See
 // [WithPrinter].
 //
 // The view, its diff, and its search matches stay as they are, so switching
 // themes costs one render and no diff or search index rebuild.
-func (m *Model) SetPrinter(p *niceyaml.Printer) {
+func (m *Model) SetPrinter(p *printer.Printer) {
 	m.printer = p
 	m.relayout()
 }
@@ -601,7 +605,7 @@ func (m *Model) refreshSearch() {
 }
 
 // applySearchOverlays sets overlay highlights for all search matches.
-func (m *Model) applySearchOverlays(lines niceyaml.Lines) {
+func (m *Model) applySearchOverlays(lines line.Lines) {
 	lines.ClearOverlays()
 
 	for i, match := range m.searchMatches {
@@ -723,7 +727,7 @@ func (m *Model) applySideBySideOverlays() {
 // applySideBySidePaneOverlays applies search highlights to a single pane.
 // It uses cached matches and showSelected to determine the selected style.
 func (m *Model) applySideBySidePaneOverlays(
-	view niceyaml.Lines,
+	view line.Lines,
 	matches position.Ranges,
 	selectedPos position.Position,
 	showSelected bool,
@@ -749,7 +753,7 @@ func (m *Model) applySideBySidePaneOverlays(
 //
 // It reloads the searcher only when the lines changed since the last load, so
 // typing a search term does not rebuild the index on every keystroke.
-func (m *Model) updateSearchState(lines niceyaml.Lines) {
+func (m *Model) updateSearchState(lines line.Lines) {
 	if m.searchTerm == "" {
 		m.searchMatches = nil
 		m.leftMatches = nil
@@ -809,7 +813,7 @@ func (m *Model) currentRevision() *niceyaml.Source {
 //
 // The model always owns the result, either a clone of the revision's lines
 // or a fresh unified diff. Returns nil when there is no revision.
-func (m *Model) getDisplayLines() niceyaml.Lines {
+func (m *Model) getDisplayLines() line.Lines {
 	src, needsDiff := m.resolveRevisionSource()
 	if needsDiff {
 		return m.getDiffResult().Unified()
@@ -822,11 +826,11 @@ func (m *Model) getDisplayLines() niceyaml.Lines {
 	return src.Lines()
 }
 
-// getDiffResult returns the cached [niceyaml.DiffResult], computing it if nil.
+// getDiffResult returns the cached [differ.Result], computing it if nil.
 //
 // Without a base for the current [DiffMode], the current revision stands in
 // for it, which yields an empty diff rather than a nil [niceyaml.Source].
-func (m *Model) getDiffResult() *niceyaml.DiffResult {
+func (m *Model) getDiffResult() *differ.Result {
 	if m.diffResult == nil {
 		current := m.currentRevision()
 
@@ -835,7 +839,7 @@ func (m *Model) getDiffResult() *niceyaml.DiffResult {
 			base = current
 		}
 
-		m.diffResult = niceyaml.Diff(base, current)
+		m.diffResult = differ.Diff(base, current)
 	}
 
 	return m.diffResult
@@ -923,18 +927,18 @@ func (m *Model) fillRows() {
 	c.top, c.bottom = 0, 0
 
 	if m.left != nil && m.printer != nil {
-		printer := m.renderPrinter(m.paneWidth())
+		p := m.renderPrinter(m.paneWidth())
 
-		c.left = printer.Rows(m.left)
+		c.left = p.Rows(m.left)
 
 		if m.viewMode == ViewModeSideBySide && m.right != nil {
-			c.right = printer.Rows(m.right)
+			c.right = p.Rows(m.right)
 		}
 
 		// Rows counts the rows before the container style applies. Print adds
 		// the container's frame above and below the lines it renders.
 		if len(c.left) > 0 {
-			frame := printer.ContainerStyle()
+			frame := p.ContainerStyle()
 			c.top = frame.GetMarginTop() + frame.GetBorderTopSize() + frame.GetPaddingTop()
 			c.bottom = frame.GetPaddingBottom() + frame.GetBorderBottomSize() + frame.GetMarginBottom()
 		}
@@ -1130,8 +1134,8 @@ func (m *Model) visibleRows() []string {
 		return nil
 	}
 
-	printer := m.renderPrinter(m.maxWidth())
-	rows := splitLines(printer.Print(m.left, position.NewSpan(first, last)))
+	p := m.renderPrinter(m.maxWidth())
+	rows := splitLines(p.Print(m.left, position.NewSpan(first, last)))
 	rows = m.trimWindow(m.trimFrame(rows, first, last), first)
 
 	// Without wrapping, lines may exceed the viewport width. Cut them to the
@@ -1538,10 +1542,10 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 
 	// Render the lines of the window in both panes.
 	window := position.NewSpan(first, last)
-	printer := m.renderPrinter(paneWidth)
+	p := m.renderPrinter(paneWidth)
 
-	leftRows := m.trimFrame(splitLines(printer.Print(m.left, window)), first, last)
-	rightRows := m.trimFrame(splitLines(printer.Print(right, window)), first, last)
+	leftRows := m.trimFrame(splitLines(p.Print(m.left, window)), first, last)
+	rightRows := m.trimFrame(splitLines(p.Print(right, window)), first, last)
 
 	// Get text style for padding empty areas.
 	textStyle := m.printer.Style(style.Text)

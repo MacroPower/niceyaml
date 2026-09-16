@@ -14,7 +14,7 @@
 // and returns the same value afterwards:
 //
 //	if t, ok := theme.Get("dracula"); ok {
-//		printer := niceyaml.NewPrinter(niceyaml.WithStyles(t.Styles()))
+//		p := printer.New(printer.WithStyles(t.Styles()))
 //	}
 //
 // [All] returns every theme, built-in ones first in alphabetical order, with

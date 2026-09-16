@@ -6,21 +6,8 @@ import (
 	"testing"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
-
-// generateYAML creates YAML content with the specified number of lines.
-// Each line is a simple key-value pair: "key_N: value_N".
-func generateYAML(lines int) string {
-	var sb strings.Builder
-
-	sb.Grow(lines * 25) // Approximate bytes per line.
-
-	for i := range lines {
-		fmt.Fprintf(&sb, "key_%d: value_%d\n", i, i)
-	}
-
-	return sb.String()
-}
 
 // generateNestedYAML creates nested YAML content to test deeper structures.
 func generateNestedYAML(depth, itemsPerLevel int) string {
@@ -58,7 +45,7 @@ func BenchmarkNewSourceFromString(b *testing.B) {
 	}
 
 	for _, sz := range sizes {
-		yaml := generateYAML(sz.lines)
+		yaml := yamltest.GenerateYAML(sz.lines)
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
@@ -105,7 +92,7 @@ func BenchmarkSourceRunes(b *testing.B) {
 	}
 
 	for _, sz := range sizes {
-		yaml := generateYAML(sz.lines)
+		yaml := yamltest.GenerateYAML(sz.lines)
 		source := niceyaml.NewSourceFromString(yaml)
 
 		b.Run(sz.name, func(b *testing.B) {
@@ -136,7 +123,7 @@ func BenchmarkSourceLines(b *testing.B) {
 	}
 
 	for _, sz := range sizes {
-		yaml := generateYAML(sz.lines)
+		yaml := yamltest.GenerateYAML(sz.lines)
 		source := niceyaml.NewSourceFromString(yaml)
 
 		b.Run(sz.name, func(b *testing.B) {
@@ -157,7 +144,7 @@ func BenchmarkSourceLines(b *testing.B) {
 }
 
 func BenchmarkSourceLen(b *testing.B) {
-	yaml := generateYAML(5000)
+	yaml := yamltest.GenerateYAML(5000)
 	source := niceyaml.NewSourceFromString(yaml)
 
 	b.ReportAllocs()
@@ -179,7 +166,7 @@ func BenchmarkSourceContent(b *testing.B) {
 	}
 
 	for _, sz := range sizes {
-		yaml := generateYAML(sz.lines)
+		yaml := yamltest.GenerateYAML(sz.lines)
 		source := niceyaml.NewSourceFromString(yaml)
 
 		b.Run(sz.name, func(b *testing.B) {

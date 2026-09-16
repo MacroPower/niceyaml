@@ -37,7 +37,7 @@
 //   - [OpInsert]: Line only in after, with Before set to -1.
 //
 // The package has no dependencies on the rest of niceyaml, so an [Algorithm]
-// can be developed and tested on plain string slices. The root package maps
+// can be developed and tested on plain string slices. The differ package maps
 // each [OpKind] to a line flag when it builds rendering views from the
 // operations.
 package diff

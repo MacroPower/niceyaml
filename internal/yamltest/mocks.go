@@ -42,7 +42,7 @@ func (m *MockSchemaValidator) ValidateSchema(ctx context.Context, data any) erro
 	return m.fn(ctx, data)
 }
 
-// MockNormalizer implements [niceyaml.Normalizer] for testing.
+// MockNormalizer implements [finder.Normalizer] for testing.
 //
 // It wraps a normalization function that can be configured to return input
 // unchanged, return static output, or implement custom logic.

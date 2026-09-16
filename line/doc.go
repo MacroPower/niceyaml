@@ -6,7 +6,7 @@
 // many operations (e.g. diffing, printing) are much simpler with line-by-line
 // access.
 //
-// [Split] cuts [token.Tokens] into one [Line] per source line while
+// [NewLines] cuts [token.Tokens] into one [Line] per source line while
 // preserving references to the original tokens.
 //
 // Consider this YAML input with a block scalar:
@@ -28,7 +28,7 @@
 //	│                   │
 //	└───────────────────┘
 //
-// [Split] cuts the tokens at line boundaries while every part keeps a
+// [NewLines] cuts the tokens at line boundaries while every part keeps a
 // reference to its source token:
 //
 //	┌──────┬────────────┐
@@ -39,14 +39,36 @@
 //	│String             │
 //	└───────────────────┘
 //
-// # Usage
+// # Lines
 //
-// Most callers receive [Line] values from a niceyaml Lines view or Source
-// rather than calling [Split] directly:
+// [Lines] is the ordered collection of [Line] values that rendering
+// utilities consume, and the view a niceyaml Source exposes. It carries the
+// tokens split per line plus the overlays, annotations, and flags attached
+// to each line, and nothing about YAML documents, parsing, or files. A Lines
+// value may therefore describe content that is not a YAML document, such as
+// a diff that interleaves lines from two revisions:
 //
-//	for _, l := range niceyaml.NewLines(tks) {
-//	    fmt.Printf("%d: %s\n", l.Number(), l.Content())
+//	tks := lexers.Tokenize(input)
+//	lines := line.NewLines(tks)
+//
+//	for _, l := range lines {
+//		fmt.Printf("%d: %s\n", l.Number(), l.Content())
 //	}
+//
+// Position-based token lookup uses [position.Position] values:
+//
+//	tk := lines.TokenAt(position.New(2, 4))  // Line 2, column 4.
+//	ranges := lines.TokenRanges(tk)          // Every line the token occupies.
+//	content := lines.ContentRanges(tk)       // The same without surrounding spaces.
+//
+// [Lines.Tokens] reverses the split. Tokens that were cut across lines
+// collapse back to one, and the result holds the lexer's original tokens in
+// their original order.
+//
+// [View] is the read-only interface over a Lines value that the printer,
+// finder, and differ packages accept. Lines implements it directly, and a
+// niceyaml Source implements it over its pristine lines, so those utilities
+// take either.
 //
 // A [Line] exposes its tokens in two forms. [Line.Tokens] returns the
 // per-line parts, whose positions describe this line. [Line.SourceTokens]
@@ -79,7 +101,12 @@
 // [Overlays] define column ranges with associated styles, primarily for
 // highlighting. An [Overlay] either replaces the style underneath it or, with
 // Blend set, mixes with it so a search highlight keeps the token color it
-// covers.
+// covers. [Lines.AddOverlay] and [Lines.BlendOverlay] add overlays across a
+// range of lines; the first replaces the style underneath and the second
+// mixes with it:
+//
+//	lines.AddOverlay(style.GenericError, errorRange)
+//	lines.BlendOverlay(style.GenericHighlight, matches...)
 //
 // [Flag] values categorize lines for special handling. A diff marks lines with
 // [FlagInserted] and [FlagDeleted], and [FlagAnnotation] marks lines that hold
@@ -89,6 +116,6 @@
 //	l.Flag = line.FlagDeleted  // Show with "-" prefix.
 //
 // Rendering utilities mutate lines by adding overlays and annotations. Use
-// [Line.Clone] to render the same content two different ways without the
-// highlights interfering.
+// [Lines.Clone] or [Line.Clone] to render the same content two different ways
+// without the highlights interfering.
 package line

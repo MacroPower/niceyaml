@@ -13,9 +13,11 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/differ"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
 )
 
@@ -263,7 +265,7 @@ func TestSource_AllRunes_DiffBuiltLines(t *testing.T) {
 	beforeLines := niceyaml.NewSourceFromString(before, niceyaml.WithName("before"))
 	afterLines := niceyaml.NewSourceFromString(after, niceyaml.WithName("after"))
 
-	lines := niceyaml.Diff(beforeLines, afterLines).Unified()
+	lines := differ.Diff(beforeLines, afterLines).Unified()
 
 	// Diff should produce two lines: deleted (old) and inserted (new).
 	// Both have the same source token line (1), but different visual indices (0, 1).
@@ -1094,10 +1096,10 @@ func TestSource_WrapError(t *testing.T) {
 	})
 }
 
-// Both a [niceyaml.Lines] collection and a [*niceyaml.Source] are a [niceyaml.View].
+// Both a [line.Lines] collection and a [*niceyaml.Source] are a [line.View].
 var (
-	_ niceyaml.View = niceyaml.Lines(nil)
-	_ niceyaml.View = (*niceyaml.Source)(nil)
+	_ line.View = line.Lines(nil)
+	_ line.View = (*niceyaml.Source)(nil)
 )
 
 func TestSource_AllLines_YieldsCopies(t *testing.T) {
@@ -1116,10 +1118,10 @@ func TestSource_AllLines_YieldsCopies(t *testing.T) {
 	assert.Empty(t, source.Lines()[0].Overlays)
 
 	// Printing the Source renders the pristine document.
-	plain := niceyaml.NewPrinter(
-		niceyaml.WithStyles(style.Styles{}),
-		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-		niceyaml.WithGutter(niceyaml.NoGutter),
+	plain := printer.New(
+		printer.WithStyles(style.Styles{}),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+		printer.WithGutter(printer.NoGutter),
 	)
 	assert.Equal(t, "key: value", plain.Print(source))
 }

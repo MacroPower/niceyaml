@@ -15,8 +15,8 @@ import (
 // Line holds the tokens on one line of source together with the metadata
 // rendering utilities attach to it.
 //
-// Create instances with [Split], which cuts a token stream into one Line per
-// source line. Every token a Line hands out, from [Line.Tokens],
+// Create instances with [NewLines], which cuts a token stream into one Line
+// per source line. Every token a Line hands out, from [Line.Tokens],
 // [Line.Token], [Line.TokenAt], or [Line.SourceTokens], is shared with the
 // line. Treat them as read-only and call [token.Token.Clone] before modifying
 // one.
@@ -29,27 +29,6 @@ type Line struct {
 	// The 1-indexed line number used for display purposes.
 	// This may differ from the first token's Position.Line for block scalars.
 	number int
-}
-
-// Split creates new [Line] values from [token.Tokens], one per source line.
-//
-// Split cuts multiline tokens, such as block scalars and quoted multiline
-// strings, into one part per line. Each part is a token whose Position
-// describes its own line, following the go-yaml lexer conventions for that
-// token type, and every part keeps a reference to the original token it was
-// cut from. Returns nil when tks is empty.
-func Split(tks token.Tokens) []Line {
-	split := segment.Split(tks)
-	if len(split) == 0 {
-		return nil
-	}
-
-	lines := make([]Line, len(split))
-	for i, l := range split {
-		lines[i] = Line{segments: l.Segments, number: l.Number}
-	}
-
-	return lines
 }
 
 // AddAnnotation adds the given [Annotation] values to this [Line].

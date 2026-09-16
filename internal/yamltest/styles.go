@@ -6,7 +6,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/style"
 )
 
-// XMLStyles implements [niceyaml.StyleGetter] using XML tags instead of ANSI
+// XMLStyles implements [printer.StyleGetter] using XML tags instead of ANSI
 // escape codes.
 //
 // Each [style.Style] category wraps content in descriptive tags, making styled

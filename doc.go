@@ -11,12 +11,12 @@
 //
 // # Usage
 //
-// Parse YAML into a [Source], then use a [Printer] to render it with syntax
-// highlighting:
+// Parse YAML into a [Source], then use a [printer.Printer] to render it with
+// syntax highlighting:
 //
 //	source := niceyaml.NewSourceFromString(yamlContent)
-//	printer := niceyaml.NewPrinter()
-//	fmt.Println(printer.Print(source))
+//	p := printer.New()
+//	fmt.Println(p.Print(source))
 //
 // When errors occur, wrap them with source context to show users exactly where
 // the problem is:
@@ -30,31 +30,33 @@
 //
 // # Architecture
 //
-// The package separates a YAML document from its rendering.
+// The module separates a YAML document from its rendering, and each part
+// lives in a package of its own.
 //
-// [Source] is the document. It owns the tokens from go-yaml, lazily parses
-// them into an AST with [Source.File], iterates documents with
-// [Source.Documents], and attaches source context to errors with
-// [Source.WrapError].
+// [Source], in this package, is the document. It owns the tokens from
+// go-yaml, lazily parses them into an AST with [Source.File], iterates
+// documents with [Source.Documents], and attaches source context to errors
+// with [Source.WrapError].
 //
-// [Lines] is the view. It organizes tokens into lines, and each [line.Line]
-// carries optional metadata for rendering. Annotations hold error messages
-// and diff headers, flags mark inserted and deleted lines, and overlays apply
-// style spans for highlighting. A Source exposes its view through
-// [Source.Lines] and delegates the view methods, so highlighting through
-// either path renders identically.
+// [line.Lines] is the view. It organizes tokens into lines, and each
+// [line.Line] carries optional metadata for rendering. Annotations hold
+// error messages and diff headers, flags mark inserted and deleted lines, and
+// overlays apply style spans for highlighting. A Source exposes its view
+// through [Source.Lines] and delegates the view methods, so highlighting
+// through either path renders identically.
 //
 // A view need not be a YAML document. Diffs, for example, interleave lines
-// from two revisions and are plain [Lines] values.
+// from two revisions and are plain [line.Lines] values.
 //
-// [Printer] renders any [View], which both [*Source] and [Lines] satisfy,
-// with syntax highlighting via lipgloss.
-//
-// It supports customizable gutters (line numbers, diff markers), word wrapping,
-// and annotation rendering.
+// [printer.Printer] renders any [line.View], which both [*Source] and
+// [line.Lines] satisfy, with syntax highlighting via lipgloss. It supports
+// customizable gutters (line numbers, diff markers), word wrapping, and
+// annotation rendering. [differ.Differ] compares two views, and
+// [finder.Finder] searches one. [revision.History] keeps the versions of a
+// document in order.
 //
 // Themes from [go.jacobcolvin.com/niceyaml/style/theme] provide color
-// palettes. Without one, [Printer] renders with [style.Default].
+// palettes. Without one, [printer.Printer] renders with [style.Default].
 //
 // [Error] points at a location in a YAML document: a path, a token, or a
 // range. [Error.Error] returns the message with that location, so a
@@ -75,55 +77,33 @@
 //
 // YAML tokens can span multiple lines, as block scalars and multiline
 // strings do, while diffing, printing, and searching are much simpler with
-// line-by-line access. [NewLines] splits multiline tokens at line boundaries
-// into one part per line and keeps a reference to the original token every
-// part was cut from:
+// line-by-line access. [line.NewLines] splits multiline tokens at line
+// boundaries into one part per line and keeps a reference to the original
+// token every part was cut from, and [line.Lines.Tokens] reverses the split.
+// A [Source] does this on creation and hands out a private copy of the
+// result from [Source.Lines]:
 //
-//	tks := lexers.Tokenize(input)
-//	lines := niceyaml.NewLines(tks)
+//	view := source.Lines()
+//	view.AddOverlay(style.GenericError, errorRange)
+//	view.BlendOverlay(style.GenericHighlight, matches...)
+//	fmt.Println(p.Print(view))
 //
-//	for _, l := range lines {
-//		fmt.Printf("%d: %s\n", l.Number(), l.Content())
-//	}
-//
-// Position-based token lookup uses [position.Position] values:
-//
-//	tk := lines.TokenAt(position.New(2, 4))  // Line 2, column 4.
-//	ranges := lines.TokenRanges(tk)          // Every line the token occupies.
-//	content := lines.ContentRanges(tk)       // The same without surrounding spaces.
-//
-// [Lines.Tokens] reverses the split. Tokens that were cut across lines
-// collapse back to one, and the result holds the lexer's original tokens in
-// their original order. Every token the package hands out, from
-// [Lines.Tokens], [Lines.TokenAt], [line.Line.Tokens], or [line.Line.Token], is
-// shared with the lines. Treat them as read-only and call
-// [token.Token.Clone] before modifying one.
-//
-// Each [line.Line] carries metadata for rendering, defined in the [line]
-// package. [line.Annotations] add extra content above or below a line,
-// [line.Overlays] apply styles to column ranges, and [line.Flag] values mark
-// lines as inserted, deleted, or annotation-only. [Lines.AddOverlay] and
-// [Lines.BlendOverlay] add overlays across a range of lines; the first
-// replaces the style underneath and the second mixes with it:
-//
-//	lines.AddOverlay(style.GenericError, errorRange)
-//	lines.BlendOverlay(style.GenericHighlight, matches...)
-//
-// Rendering utilities mutate a view by adding overlays and annotations. Use
-// [Lines.Clone] to render the same content two different ways without the
-// highlights interfering.
+// Every token the module hands out, from [Source.Tokens], [line.Lines.TokenAt],
+// [line.Line.Tokens], or [line.Line.Token], is shared with the lines. Treat
+// them as read-only and call [token.Token.Clone] before modifying one. The
+// [line] package documents the view and its metadata in full.
 //
 // # Error Presentation
 //
-// The %+v verb renders a [SourceError] with a default [Printer] and two
-// lines of context. The code that prints the error chooses anything else,
+// The %+v verb renders a [SourceError] with a default [printer.Printer] and
+// two lines of context. The code that prints the error chooses anything else,
 // through [DetailOption] values passed to [SourceError.Render] or
 // [SourceError.Detail]:
 //
 //	var bound *niceyaml.SourceError
 //	if errors.As(err, &bound) {
 //		fmt.Println(bound.Render(
-//			niceyaml.WithPrinter(printer),
+//			niceyaml.WithPrinter(p),
 //			niceyaml.WithContextLines(3),
 //		))
 //	}
@@ -159,42 +139,42 @@
 //
 // # Diffs
 //
-// [Differ] computes line differences using the [diff] package.
-// The default [diff.Hirschberg] algorithm is space-efficient for large files:
+// [differ.Differ] computes line differences using the [diff] package. The
+// default [diff.Hirschberg] algorithm is space-efficient for large files:
 //
-//	result := niceyaml.Diff(original, modified)
-//	printer := niceyaml.NewPrinter()
-//	fmt.Println(printer.Print(result.Unified()))
-//	fmt.Println(printer.Print(result.Hunks(3)))
+//	result := differ.Diff(original, modified)
+//	p := printer.New()
+//	fmt.Println(p.Print(result.Unified()))
+//	fmt.Println(p.Print(result.Hunks(3)))
 //
-// [Revisions] keeps the versions of a document in order, from the original
-// to the latest. Any two revisions can be diffed:
+// [revision.History] keeps the versions of a document in order, from the
+// original to the latest. Any two revisions can be diffed:
 //
-//	revs := niceyaml.Revisions{original, modified}
-//	result := niceyaml.Diff(revs[0], revs[1])
+//	revs := revision.History{original, modified}
+//	result := differ.Diff(revs[0], revs[1])
 //
 // Custom algorithms implement [diff.Algorithm]. For reusable differ instances:
 //
-//	differ := niceyaml.NewDiffer(niceyaml.WithAlgorithm(myAlgo))
-//	result := differ.Diff(before, after)
+//	d := differ.New(differ.WithAlgorithm(myAlgo))
+//	result := d.Diff(before, after)
 //
-// Diff output is a [Lines] view rather than a [Source], since the
+// Diff output is a [line.Lines] view rather than a [Source], since the
 // interleaved lines do not form a YAML document. It uses [line.Flag] to mark
 // inserted/deleted lines and [line.Annotation] for unified diff hunk headers.
 //
 // # Text Search
 //
-// [Finder] locates strings within tokens, returning [position.Range] values
-// suitable for [Lines.AddOverlay] and [Lines.BlendOverlay].
+// [finder.Finder] locates strings within tokens, returning [position.Range]
+// values suitable for [line.Lines.AddOverlay] and [line.Lines.BlendOverlay].
 //
-// Use [normalizer.New] with [WithNormalizer] for case-insensitive,
+// Use [normalizer.New] with [finder.WithNormalizer] for case-insensitive,
 // diacritic-insensitive matching:
 //
-//	finder := niceyaml.NewFinder(niceyaml.WithNormalizer(normalizer.New()))
-//	finder.Load(source)
+//	f := finder.New(finder.WithNormalizer(normalizer.New()))
+//	f.Load(source)
 //	view := source.Lines()
-//	view.AddOverlay(style.GenericHighlight, finder.Find("search term")...)
-//	fmt.Println(printer.Print(view))
+//	view.AddOverlay(style.GenericHighlight, f.Find("search term")...)
+//	fmt.Println(p.Print(view))
 //
 // # Dependencies
 //

@@ -12,6 +12,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/fangs"
+	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
 )
 
@@ -36,7 +37,7 @@ func main() {
 
 	// The error printer carries the terminal width so annotated source
 	// excerpts wrap to it.
-	errPrinter := niceyaml.NewPrinter(niceyaml.WithWidth(terminalWidth()))
+	errPrinter := printer.New(printer.WithWidth(terminalWidth()))
 
 	err := fang.Execute(context.Background(), rootCmd,
 		fang.WithErrorHandler(fangs.NewErrorHandler(niceyaml.WithPrinter(errPrinter))),

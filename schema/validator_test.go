@@ -14,6 +14,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
@@ -339,10 +340,10 @@ func TestValidator_PathTarget(t *testing.T) {
 	// highlighting based on the type of validation error, by checking which
 	// part of the YAML gets wrapped with the error overlay style.
 
-	newXMLPrinter := func() *niceyaml.Printer {
-		return niceyaml.NewPrinter(
-			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter),
+	newXMLPrinter := func() *printer.Printer {
+		return printer.New(
+			printer.WithStyles(yamltest.NewXMLStyles()),
+			printer.WithGutter(printer.NoGutter),
 		)
 	}
 

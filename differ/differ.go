@@ -1,4 +1,4 @@
-package niceyaml
+package differ
 
 import (
 	"fmt"
@@ -14,32 +14,32 @@ import (
 //
 // Differ is not safe for concurrent use because the underlying algorithm
 // maintains reusable buffers. Create separate instances for concurrent
-// operations. The returned [*DiffResult] is safe for concurrent use.
+// operations. The returned [*Result] is safe for concurrent use.
 //
-// Create instances with [NewDiffer].
+// Create instances with [New].
 type Differ struct {
 	algo diff.Algorithm
 }
 
-// DifferOption configures a [Differ].
+// Option configures a [Differ].
 //
 // Available options:
 //   - [WithAlgorithm]
-type DifferOption func(*Differ)
+type Option func(*Differ)
 
 // WithAlgorithm sets the diff algorithm.
 //
 // Default is [diff.Hirschberg].
-func WithAlgorithm(algo diff.Algorithm) DifferOption {
+func WithAlgorithm(algo diff.Algorithm) Option {
 	return func(d *Differ) {
 		d.algo = algo
 	}
 }
 
-// NewDiffer creates a new [*Differ] with the given options.
+// New creates a new [*Differ] with the given options.
 //
 // If no algorithm is specified, uses [diff.Hirschberg].
-func NewDiffer(opts ...DifferOption) *Differ {
+func New(opts ...Option) *Differ {
 	d := &Differ{}
 	for _, opt := range opts {
 		opt(d)
@@ -52,14 +52,14 @@ func NewDiffer(opts ...DifferOption) *Differ {
 	return d
 }
 
-// Diff computes the difference between two views, such as two [*Source]
-// values or two [Lines] collections.
+// Diff computes the difference between two views, such as two niceyaml
+// Source values or two [line.Lines] collections.
 //
 // The lines of the result are copies, so the overlays and annotations on
 // the input lines come along, and the flags come from the diff. The result
-// can be rendered multiple times with [DiffResult.Unified] or
-// [DiffResult.Hunks].
-func (d *Differ) Diff(a, b View) *DiffResult {
+// can be rendered multiple times with [Result.Unified] or
+// [Result.Hunks].
+func (d *Differ) Diff(a, b line.View) *Result {
 	ops := d.computeOps(a, b)
 
 	// Precompute prefix sums for O(1) line number and count queries.
@@ -72,7 +72,7 @@ func (d *Differ) Diff(a, b View) *DiffResult {
 		return d
 	})
 
-	return &DiffResult{
+	return &Result{
 		ops:        ops,
 		name:       fmt.Sprintf("%s..%s", viewName(a), viewName(b)),
 		beforeSums: beforeSums,
@@ -80,14 +80,14 @@ func (d *Differ) Diff(a, b View) *DiffResult {
 	}
 }
 
-// namer is a [View] with a name, such as a [*Source].
+// namer is a [line.View] with a name, such as a niceyaml Source.
 type namer interface {
 	Name() string
 }
 
-// viewName returns the name of v, or an empty string for a [View] without
+// viewName returns the name of v, or an empty string for a [line.View] without
 // one.
-func viewName(v View) string {
+func viewName(v line.View) string {
 	if n, ok := v.(namer); ok {
 		return n.Name()
 	}
@@ -98,7 +98,7 @@ func viewName(v View) string {
 // collectLines returns the lines of v in order. The lines share their tokens
 // with v, and both toLines and getAlignedRows clone each line before a
 // caller sees it.
-func collectLines(v View) []line.Line {
+func collectLines(v line.View) []line.Line {
 	lines := make([]line.Line, 0, v.Len())
 	for _, l := range v.AllLines() {
 		lines = append(lines, l)
@@ -108,7 +108,7 @@ func collectLines(v View) []line.Line {
 }
 
 // computeOps computes line operations using the configured algorithm.
-func (d *Differ) computeOps(before, after View) []lineOp {
+func (d *Differ) computeOps(before, after line.View) []lineOp {
 	beforeLines := collectLines(before)
 	afterLines := collectLines(after)
 
@@ -143,18 +143,18 @@ func (d *Differ) computeOps(before, after View) []lineOp {
 	return ops
 }
 
-// DiffResult holds computed diff operations for rendering.
+// Result holds computed diff operations for rendering.
 //
-// Rendering methods each return a fresh [Lines] view that [Printer]
+// Rendering methods each return a fresh [line.Lines] view that a printer
 // accepts directly. A diff is not a YAML document, so the views carry no
 // parsing or decoding behavior:
-//   - [DiffResult.Unified] returns all lines in unified diff format.
-//   - [DiffResult.Hunks] returns only the changed lines with context.
-//   - [DiffResult.Before] and [DiffResult.After] return aligned views
+//   - [Result.Unified] returns all lines in unified diff format.
+//   - [Result.Hunks] returns only the changed lines with context.
+//   - [Result.Before] and [Result.After] return aligned views
 //     for side-by-side rendering.
 //
 // Create instances with [Differ.Diff] or [Diff].
-type DiffResult struct {
+type Result struct {
 	beforeSums  *prefixSums
 	afterSums   *prefixSums
 	name        string
@@ -170,7 +170,7 @@ type alignedRow struct {
 	after  line.Line
 }
 
-// Unified returns a [Lines] view of the complete diff.
+// Unified returns a [line.Lines] view of the complete diff.
 //
 // The view interleaves lines from both revisions. Unchanged lines come from
 // the second source, and changed lines include deleted lines from the first
@@ -179,23 +179,23 @@ type alignedRow struct {
 //
 // Each call returns an independent copy, so overlays added to one result do
 // not affect another.
-func (r *DiffResult) Unified() Lines {
+func (r *Result) Unified() line.Lines {
 	return lineOps(r.ops).toLines()
 }
 
-// Hunks returns a [Lines] view of the summarized diff: the changed
+// Hunks returns a [line.Lines] view of the summarized diff: the changed
 // lines with context lines of unchanged content around each change, and
 // nothing else. A context of 0 shows only the changed lines, and Hunks
 // treats negative values as 0.
 //
 // Each line carries the flag and the line number it has in
-// [DiffResult.Unified], so the view prints with the same numbers, and the
+// [Result.Unified], so the view prints with the same numbers, and the
 // first line of each hunk carries a [line.Above] annotation holding the
 // unified hunk header. Returns nil when the diff has no changes.
 //
 // Each call returns an independent copy, so overlays added to one result do
 // not affect another.
-func (r *DiffResult) Hunks(context int) Lines {
+func (r *Result) Hunks(context int) line.Lines {
 	context = max(0, context)
 
 	if len(r.ops) == 0 {
@@ -208,7 +208,7 @@ func (r *DiffResult) Hunks(context int) Lines {
 		return nil
 	}
 
-	var lines Lines
+	var lines line.Lines
 
 	for _, span := range hunkSpans {
 		start := len(lines)
@@ -225,7 +225,7 @@ func (r *DiffResult) Hunks(context int) Lines {
 }
 
 // Stats returns the number of added and removed lines in the diff.
-func (r *DiffResult) Stats() (int, int) {
+func (r *Result) Stats() (int, int) {
 	var added, removed int
 
 	for _, op := range r.ops {
@@ -248,7 +248,7 @@ func (r *DiffResult) Stats() (int, int) {
 //   - Consecutive delete/insert pairs appear on the same row.
 //   - Unmatched deletions have empty placeholders on the right.
 //   - Unmatched insertions have empty placeholders on the left.
-func (r *DiffResult) getAlignedRows() []alignedRow {
+func (r *Result) getAlignedRows() []alignedRow {
 	r.alignedOnce.Do(func() {
 		rows := make([]alignedRow, 0, len(r.ops))
 
@@ -320,10 +320,10 @@ func (r *DiffResult) getAlignedRows() []alignedRow {
 	return r.alignedRows
 }
 
-// Before returns a [Lines] view for the left (before) pane of a
+// Before returns a [line.Lines] view for the left (before) pane of a
 // side-by-side diff.
 //
-// Before aligns its lines with [DiffResult.After] so both views have equal
+// Before aligns its lines with [Result.After] so both views have equal
 // line counts. Consecutive delete/insert sequences are paired row-by-row. When there
 // are more insertions than deletions, empty placeholder lines (zero value) fill
 // the remaining rows on this side.
@@ -332,11 +332,11 @@ func (r *DiffResult) getAlignedRows() []alignedRow {
 // equal lines and empty placeholders.
 //
 // Each call returns an independent copy, so overlays added to one result do
-// not affect another or the paired [DiffResult.After] view.
-func (r *DiffResult) Before() Lines {
+// not affect another or the paired [Result.After] view.
+func (r *Result) Before() line.Lines {
 	rows := r.getAlignedRows()
 
-	lines := make(Lines, len(rows))
+	lines := make(line.Lines, len(rows))
 	for i := range rows {
 		lines[i] = rows[i].before.Clone()
 	}
@@ -344,10 +344,10 @@ func (r *DiffResult) Before() Lines {
 	return lines
 }
 
-// After returns a [Lines] view for the right (after) pane of a
+// After returns a [line.Lines] view for the right (after) pane of a
 // side-by-side diff.
 //
-// After aligns its lines with [DiffResult.Before] so both views have equal
+// After aligns its lines with [Result.Before] so both views have equal
 // line counts. Consecutive delete/insert sequences are paired row-by-row. When there
 // are more deletions than insertions, empty placeholder lines (zero value) fill
 // the remaining rows on this side.
@@ -356,11 +356,11 @@ func (r *DiffResult) Before() Lines {
 // equal lines and empty placeholders.
 //
 // Each call returns an independent copy, so overlays added to one result do
-// not affect another or the paired [DiffResult.Before] view.
-func (r *DiffResult) After() Lines {
+// not affect another or the paired [Result.Before] view.
+func (r *Result) After() line.Lines {
 	rows := r.getAlignedRows()
 
-	lines := make(Lines, len(rows))
+	lines := make(line.Lines, len(rows))
 	for i := range rows {
 		lines[i] = rows[i].after.Clone()
 	}
@@ -382,23 +382,23 @@ func collectConsecutive(ops []lineOp, i int, kind diff.OpKind) []lineOp {
 }
 
 // IsEmpty reports whether the diff contains no lines.
-func (r *DiffResult) IsEmpty() bool {
+func (r *Result) IsEmpty() bool {
 	return len(r.ops) == 0
 }
 
 // Name returns the diff name in "a..b" format, from the names of the two
-// views. A view without a Name method, such as [Lines], contributes an
+// views. A view without a Name method, such as [line.Lines], contributes an
 // empty string.
-func (r *DiffResult) Name() string {
+func (r *Result) Name() string {
 	return r.name
 }
 
 // Diff computes the difference between two views using the default
 // algorithm. See [Differ.Diff].
 //
-// This is a convenience function equivalent to NewDiffer().Diff(a, b).
-func Diff(a, b View) *DiffResult {
-	return NewDiffer().Diff(a, b)
+// This is a convenience function equivalent to New().Diff(a, b).
+func Diff(a, b line.View) *Result {
+	return New().Diff(a, b)
 }
 
 // lineOp represents a line in the full diff output.
@@ -437,9 +437,9 @@ func opKindFlag(k diff.OpKind) line.Flag {
 // lineOps is a slice of [lineOp] values.
 type lineOps []lineOp
 
-// toLines converts ops to [Lines] with appropriate flags set.
-func (ops lineOps) toLines() Lines {
-	lines := make(Lines, 0, len(ops))
+// toLines converts ops to [line.Lines] with appropriate flags set.
+func (ops lineOps) toLines() line.Lines {
+	lines := make(line.Lines, 0, len(ops))
 	for _, op := range ops {
 		ln := op.line.Clone()
 		ln.Flag = opKindFlag(op.kind)

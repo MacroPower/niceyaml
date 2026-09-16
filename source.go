@@ -17,21 +17,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
-// View is read-only, line-by-line access to content that [Printer] renders
-// and [Finder] searches.
-//
-// AllLines yields each [line.Line] by value, so a change to a yielded line
-// reaches nothing. Overlays and annotations go through the [Lines] methods
-// and through indexing a [Lines] collection directly.
-//
-// [Lines] implements View directly, and [*Source] implements it over its
-// pristine lines.
-type View interface {
-	AllLines(spans ...position.Span) iter.Seq2[int, line.Line]
-	AllRunes(ranges ...position.Range) iter.Seq2[position.Position, rune]
-	Len() int
-}
-
 // Source is a YAML document. It holds the tokens the document was lexed from,
 // the [*ast.File] they parse into, and the settings for parsing, decoding, and
 // reporting errors.
@@ -39,25 +24,27 @@ type View interface {
 // Source separates two concerns. Parsing and decoding live on Source itself,
 // where [Source.File] lazily parses the AST, [Source.Documents] iterates the
 // documents, and [Source.WrapError] attaches source context to errors.
-// Rendering lives in a [Lines] view, available from [Source.Lines], which
-// organizes the tokens into lines and carries the overlays, annotations, and
-// flags that [Printer] renders. Utilities that only render or search, such as
-// [Printer], [Finder], and [Differ], accept either a Source or a view.
+// Rendering lives in a [line.Lines] view, available from [Source.Lines],
+// which organizes the tokens into lines and carries the overlays,
+// annotations, and flags that a [printer.Printer] renders. Utilities that
+// only render or search, such as [printer.Printer], [finder.Finder], and
+// [differ.Differ], accept either a Source or a view.
 //
-// Typical use creates a Source and passes it straight to a [Printer]:
+// Typical use creates a Source and passes it straight to a
+// [printer.Printer]:
 //
-//	source := NewSourceFromString(yamlContent)
-//	printer := NewPrinter()
-//	fmt.Println(printer.Print(source))
+//	source := niceyaml.NewSourceFromString(yamlContent)
+//	p := printer.New()
+//	fmt.Println(p.Print(source))
 //
-// A Source never changes after creation. It implements [View] over its
+// A Source never changes after creation. It implements [line.View] over its
 // pristine lines, so printing a Source always renders the document as
 // parsed. To highlight or annotate, take a view with [Source.Lines], which
 // returns an independent copy each call, and render the view instead:
 //
 //	view := source.Lines()
 //	view.AddOverlay(style.GenericHighlight, ranges...)
-//	fmt.Println(printer.Print(view))
+//	fmt.Println(p.Print(view))
 //
 // Since nothing mutates a Source, it is safe for concurrent use, and every
 // view taken from it is a private copy.
@@ -67,7 +54,7 @@ type View interface {
 type Source struct {
 	name       string
 	filePath   string
-	lines      Lines
+	lines      line.Lines
 	file       *ast.File
 	fileErr    error
 	parserOpts []parser.Option
@@ -161,14 +148,14 @@ func NewSourceFromString(src string, opts ...SourceOption) *Source {
 }
 
 // NewSourceFromTokens creates a new [*Source] from [token.Tokens].
-// See [NewLines] for details on token splitting behavior.
+// See [line.NewLines] for details on token splitting behavior.
 func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 	t := &Source{}
 	for _, opt := range opts {
 		opt(t)
 	}
 
-	t.lines = NewLines(tks)
+	t.lines = line.NewLines(tks)
 
 	return t
 }
@@ -186,7 +173,7 @@ func (s *Source) FilePath() string {
 }
 
 // Tokens reconstructs the full [token.Tokens] stream from all [line.Line]s.
-// See [Lines.Tokens] for details on token recombination behavior.
+// See [line.Lines.Tokens] for details on token recombination behavior.
 func (s *Source) Tokens() token.Tokens {
 	return s.lines.Tokens()
 }
@@ -274,12 +261,12 @@ func (s *Source) WrapError(err error) error {
 	return newSourceError(err, s)
 }
 
-// Lines returns a [Lines] view of the [Source].
+// Lines returns a [line.Lines] view of the [Source].
 //
 // Each call returns an independent copy, so overlays and annotations added to
 // one view never reach the Source or another view. Render the view to see
 // them.
-func (s *Source) Lines() Lines {
+func (s *Source) Lines() line.Lines {
 	return s.lines.Clone()
 }
 
@@ -294,13 +281,13 @@ func (s *Source) IsEmpty() bool {
 }
 
 // AllLines returns an iterator over lines within the given spans.
-// See [Lines.AllLines].
+// See [line.Lines.AllLines].
 func (s *Source) AllLines(spans ...position.Span) iter.Seq2[int, line.Line] {
 	return s.lines.AllLines(spans...)
 }
 
 // AllRunes returns an iterator over runes within the given ranges.
-// See [Lines.AllRunes].
+// See [line.Lines.AllRunes].
 func (s *Source) AllRunes(ranges ...position.Range) iter.Seq2[position.Position, rune] {
 	return s.lines.AllRunes(ranges...)
 }

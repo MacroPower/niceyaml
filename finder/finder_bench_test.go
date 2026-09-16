@@ -1,4 +1,4 @@
-package niceyaml_test
+package finder_test
 
 import (
 	"fmt"
@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/finder"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/normalizer"
 )
 
@@ -20,13 +22,13 @@ func BenchmarkFinderFind(b *testing.B) {
 	}
 
 	for _, sz := range sizes {
-		yaml := generateYAML(sz.lines)
+		yaml := yamltest.GenerateYAML(sz.lines)
 		source := niceyaml.NewSourceFromString(yaml)
 
 		b.Run(sz.name+"/few_matches", func(b *testing.B) {
 			// Create finder once (preprocesses source).
-			finder := niceyaml.NewFinder()
-			finder.Load(source)
+			f := finder.New()
+			f.Load(source)
 
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
@@ -34,14 +36,14 @@ func BenchmarkFinderFind(b *testing.B) {
 
 			for b.Loop() {
 				// Search for something that appears rarely.
-				_ = finder.Find("key_0:")
+				_ = f.Find("key_0:")
 			}
 		})
 
 		b.Run(sz.name+"/many_matches", func(b *testing.B) {
 			// Create finder once (preprocesses source).
-			finder := niceyaml.NewFinder()
-			finder.Load(source)
+			f := finder.New()
+			f.Load(source)
 
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
@@ -49,14 +51,14 @@ func BenchmarkFinderFind(b *testing.B) {
 
 			for b.Loop() {
 				// Search for something that appears on every line.
-				_ = finder.Find("value_")
+				_ = f.Find("value_")
 			}
 		})
 
 		b.Run(sz.name+"/no_matches", func(b *testing.B) {
 			// Create finder once (preprocesses source).
-			finder := niceyaml.NewFinder()
-			finder.Load(source)
+			f := finder.New()
+			f.Load(source)
 
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
@@ -64,7 +66,7 @@ func BenchmarkFinderFind(b *testing.B) {
 
 			for b.Loop() {
 				// Search for something that doesn't exist.
-				_ = finder.Find("ZZZZZ_NOT_FOUND")
+				_ = f.Find("ZZZZZ_NOT_FOUND")
 			}
 		})
 	}
@@ -81,44 +83,44 @@ func BenchmarkFinderFind_WithNormalizer(b *testing.B) {
 	}
 
 	for _, sz := range sizes {
-		yaml := generateYAML(sz.lines)
+		yaml := yamltest.GenerateYAML(sz.lines)
 		source := niceyaml.NewSourceFromString(yaml)
 
 		b.Run(sz.name+"/without_normalizer", func(b *testing.B) {
-			finder := niceyaml.NewFinder()
-			finder.Load(source)
+			f := finder.New()
+			f.Load(source)
 
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
 			b.ResetTimer()
 
 			for b.Loop() {
-				_ = finder.Find("value_")
+				_ = f.Find("value_")
 			}
 		})
 
 		b.Run(sz.name+"/with_normalizer", func(b *testing.B) {
-			finder := niceyaml.NewFinder(
-				niceyaml.WithNormalizer(normalizer.New()),
+			f := finder.New(
+				finder.WithNormalizer(normalizer.New()),
 			)
-			finder.Load(source)
+			f.Load(source)
 
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
 			b.ResetTimer()
 
 			for b.Loop() {
-				_ = finder.Find("value_")
+				_ = f.Find("value_")
 			}
 		})
 	}
 }
 
 func BenchmarkFinderFind_SearchLength(b *testing.B) {
-	yaml := generateYAML(1000)
+	yaml := yamltest.GenerateYAML(1000)
 	source := niceyaml.NewSourceFromString(yaml)
-	finder := niceyaml.NewFinder()
-	finder.Load(source)
+	f := finder.New()
+	f.Load(source)
 
 	lengths := []int{1, 5, 10, 20, 50}
 
@@ -131,7 +133,7 @@ func BenchmarkFinderFind_SearchLength(b *testing.B) {
 			b.ResetTimer()
 
 			for b.Loop() {
-				_ = finder.Find(search)
+				_ = f.Find(search)
 			}
 		})
 	}
@@ -149,31 +151,31 @@ func BenchmarkFinderFind_UnicodeContent(b *testing.B) {
 	source := niceyaml.NewSourceFromString(yaml)
 
 	b.Run("without_normalizer", func(b *testing.B) {
-		finder := niceyaml.NewFinder()
-		finder.Load(source)
+		f := finder.New()
+		f.Load(source)
 
 		b.ReportAllocs()
 		b.SetBytes(int64(len(yaml)))
 		b.ResetTimer()
 
 		for b.Loop() {
-			_ = finder.Find("Héllo")
+			_ = f.Find("Héllo")
 		}
 	})
 
 	b.Run("with_normalizer", func(b *testing.B) {
 		// StandardNormalizer converts "Héllo" -> "hello".
-		finder := niceyaml.NewFinder(
-			niceyaml.WithNormalizer(normalizer.New()),
+		f := finder.New(
+			finder.WithNormalizer(normalizer.New()),
 		)
-		finder.Load(source)
+		f.Load(source)
 
 		b.ReportAllocs()
 		b.SetBytes(int64(len(yaml)))
 		b.ResetTimer()
 
 		for b.Loop() {
-			_ = finder.Find("hello")
+			_ = f.Find("hello")
 		}
 	})
 }
@@ -205,15 +207,15 @@ func BenchmarkNormalizerNormalize(b *testing.B) {
 }
 
 func BenchmarkFinderCreate(b *testing.B) {
-	yaml := generateYAML(500)
+	yaml := yamltest.GenerateYAML(500)
 	source := niceyaml.NewSourceFromString(yaml)
 
 	b.Run("without_normalizer", func(b *testing.B) {
 		b.ReportAllocs()
 
 		for b.Loop() {
-			finder := niceyaml.NewFinder()
-			finder.Load(source)
+			f := finder.New()
+			f.Load(source)
 		}
 	})
 
@@ -221,10 +223,10 @@ func BenchmarkFinderCreate(b *testing.B) {
 		b.ReportAllocs()
 
 		for b.Loop() {
-			finder := niceyaml.NewFinder(
-				niceyaml.WithNormalizer(normalizer.New()),
+			f := finder.New(
+				finder.WithNormalizer(normalizer.New()),
 			)
-			finder.Load(source)
+			f.Load(source)
 		}
 	})
 }
@@ -254,8 +256,8 @@ func BenchmarkFinderFind_MatchDensity(b *testing.B) {
 
 		yaml := sb.String()
 		source := niceyaml.NewSourceFromString(yaml)
-		finder := niceyaml.NewFinder()
-		finder.Load(source)
+		f := finder.New()
+		f.Load(source)
 
 		b.Run(d.name, func(b *testing.B) {
 			b.ReportAllocs()
@@ -263,7 +265,7 @@ func BenchmarkFinderFind_MatchDensity(b *testing.B) {
 			b.ResetTimer()
 
 			for b.Loop() {
-				_ = finder.Find("FINDME")
+				_ = f.Find("FINDME")
 			}
 		})
 	}

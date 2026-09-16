@@ -12,15 +12,15 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
-	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/lexers"
+	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 // describeLines renders each line as its number and content followed by the
 // line, column, and offset of every token on it.
-func describeLines(lines niceyaml.Lines) []string {
+func describeLines(lines line.Lines) []string {
 	out := make([]string, 0, len(lines))
 
 	for i := range lines {
@@ -328,8 +328,8 @@ func TestTokenizeDocuments_WithResetPositions(t *testing.T) {
 				t.Parallel()
 
 				for i, doc := range lexers.TokenizeDocuments(tc.input, lexers.WithResetPositions()) {
-					got := niceyaml.NewLines(doc)
-					want := niceyaml.NewLines(lexers.Tokenize(yamltest.DumpTokenOrigins(doc)))
+					got := line.NewLines(doc)
+					want := line.NewLines(lexers.Tokenize(yamltest.DumpTokenOrigins(doc)))
 
 					require.NoError(t, got.Validate(), "document %d", i)
 					assert.Equal(t, describeLines(want), describeLines(got), "document %d", i)

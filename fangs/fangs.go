@@ -13,7 +13,7 @@ import (
 
 // ErrorHandler is the [fang.ErrorHandler] that [NewErrorHandler] returns
 // with no options, so [niceyaml.SourceError] values render with a default
-// [niceyaml.Printer].
+// [printer.Printer].
 //
 //nolint:gocritic // hugeParam: required by [fang.ErrorHandler] signature.
 func ErrorHandler(w io.Writer, styles fang.Styles, err error) {
@@ -22,10 +22,10 @@ func ErrorHandler(w io.Writer, styles fang.Styles, err error) {
 
 // NewErrorHandler creates a new [fang.ErrorHandler] that renders
 // [niceyaml.SourceError] values with their annotated source, using opts for
-// the [niceyaml.Printer] and the context lines:
+// the [printer.Printer] and the context lines:
 //
 //	fang.WithErrorHandler(fangs.NewErrorHandler(
-//		niceyaml.WithPrinter(niceyaml.NewPrinter(niceyaml.WithWidth(width))),
+//		niceyaml.WithPrinter(printer.New(printer.WithWidth(width))),
 //	))
 //
 // The handler prints a [niceyaml.SourceError] at the top with

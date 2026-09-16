@@ -39,7 +39,7 @@ func TestSplit(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := line.Split(lexer.Tokenize(tc.input))
+			lines := line.NewLines(lexer.Tokenize(tc.input))
 			require.Len(t, lines, len(tc.wantContent))
 
 			for i, l := range lines {
@@ -81,7 +81,7 @@ func TestLine_Runes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := line.Split(lexer.Tokenize(tc.input))
+			lines := line.NewLines(lexer.Tokenize(tc.input))
 			require.Len(t, lines, len(tc.want))
 
 			for i, l := range lines {
@@ -108,7 +108,7 @@ func TestLine_Runes(t *testing.T) {
 	t.Run("stops when yield returns false", func(t *testing.T) {
 		t.Parallel()
 
-		lines := line.Split(lexer.Tokenize("abc: def\n"))
+		lines := line.NewLines(lexer.Tokenize("abc: def\n"))
 		require.Len(t, lines, 1)
 
 		count := 0
@@ -137,7 +137,7 @@ func TestLine_Tokens(t *testing.T) {
 	t.Parallel()
 
 	src := lexer.Tokenize("foo: |-\n  hello\n  world\nbar: baz\n")
-	lines := line.Split(src)
+	lines := line.NewLines(src)
 	require.Len(t, lines, 4)
 
 	// The block scalar content is a single lexer token spanning lines 1 and 2.
@@ -183,7 +183,7 @@ func TestLine_TokenSpan(t *testing.T) {
 	t.Parallel()
 
 	src := lexer.Tokenize("foo: |-\n  hello\n  world\nbar:   baz\n")
-	lines := line.Split(src)
+	lines := line.NewLines(src)
 	require.Len(t, lines, 4)
 
 	content := lines[1].TokenAt(2)

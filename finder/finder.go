@@ -1,4 +1,21 @@
-package niceyaml
+// Package finder locates strings within [line.View] content.
+//
+// A [Finder] maps matches back to [position.Ranges] in the original lines,
+// even when normalization changes the character count, so the ranges can
+// highlight matches in rendered output. Create one with [New], load a view
+// once with [Finder.Load], and search it any number of times with
+// [Finder.Find]:
+//
+//	f := finder.New(finder.WithNormalizer(normalizer.New()))
+//	f.Load(source)
+//
+//	view := source.Lines()
+//	view.BlendOverlay(style.GenericHighlight, f.Find("search term")...)
+//
+// Searches are exact by default. [WithNormalizer] applies a [Normalizer] to
+// both the loaded text and the search string, and the normalizer package
+// provides one that folds case and strips diacritics.
+package finder
 
 import (
 	"sort"
@@ -6,6 +23,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
@@ -38,22 +56,22 @@ type Normalizer interface {
 // Example:
 //
 //	// Create finder with case-insensitive matching.
-//	finder := niceyaml.NewFinder(
-//		niceyaml.WithNormalizer(normalizer.New()),
+//	f := finder.New(
+//		finder.WithNormalizer(normalizer.New()),
 //	)
-//	finder.Load(source)
+//	f.Load(source)
 //
 //	// Find matches and highlight them on a view of the source.
 //	view := source.Lines()
-//	view.AddOverlay(highlightStyle, finder.Find("search term")...)
-//	fmt.Println(printer.Print(view))
+//	view.AddOverlay(highlightStyle, f.Find("search term")...)
+//	fmt.Println(p.Print(view))
 //
 // By default, searches are exact (case-sensitive, no normalization).
 //
 // Use [WithNormalizer] with [normalizer.Normalizer] for case-insensitive
 // matching that also ignores diacritics (e.g., "cafe" matches "Café").
 //
-// Create instances with [NewFinder].
+// Create instances with [New].
 type Finder struct {
 	normalizer Normalizer
 	posMap     *positionMap
@@ -62,12 +80,12 @@ type Finder struct {
 	mu         sync.RWMutex
 }
 
-// NewFinder creates a new [*Finder].
-// Call [Finder.Load] to provide a [View] before searching.
+// New creates a new [*Finder].
+// Call [Finder.Load] to provide a [line.View] before searching.
 //
 // By default, no normalization is applied. Use [WithNormalizer] to enable
 // case-insensitive or diacritic-insensitive matching.
-func NewFinder(opts ...FinderOption) *Finder {
+func New(opts ...Option) *Finder {
 	f := &Finder{}
 	for _, opt := range opts {
 		opt(f)
@@ -76,23 +94,23 @@ func NewFinder(opts ...FinderOption) *Finder {
 	return f
 }
 
-// FinderOption configures a [Finder].
+// Option configures a [Finder].
 //
 // Available options:
 //   - [WithNormalizer]
-type FinderOption func(*Finder)
+type Option func(*Finder)
 
-// WithNormalizer is a [FinderOption] that sets a [Normalizer] applied to both
+// WithNormalizer is a [Option] that sets a [Normalizer] applied to both
 // the search string and the loaded text before matching.
 //
 // See [normalizer.Normalizer] for an implementation.
-func WithNormalizer(normalizer Normalizer) FinderOption {
+func WithNormalizer(normalizer Normalizer) Option {
 	return func(f *Finder) {
 		f.normalizer = normalizer
 	}
 }
 
-// Load preprocesses the given [View], building the search text and
+// Load preprocesses the given [line.View], building the search text and
 // position map.
 //
 // Every call rebuilds the index, so call Load once per distinct content and
@@ -100,7 +118,7 @@ func WithNormalizer(normalizer Normalizer) FinderOption {
 // highlighting matches does not require reloading.
 //
 // This method must be called before using [Finder.Find].
-func (f *Finder) Load(lines View) {
+func (f *Finder) Load(lines line.View) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -193,7 +211,7 @@ func (f *Finder) Find(search string) position.Ranges {
 // When a normalizer is set, it normalizes the returned text, and the position
 // map maps normalized character indices to original positions so lookups in
 // normalized text resolve to the right place.
-func (f *Finder) buildTextAndPositionMap(lines View) (string, *positionMap) {
+func (f *Finder) buildTextAndPositionMap(lines line.View) (string, *positionMap) {
 	var sb strings.Builder
 
 	pm := &positionMap{}

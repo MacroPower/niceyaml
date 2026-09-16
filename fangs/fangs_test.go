@@ -16,6 +16,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/lexers"
 	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/printer"
 )
 
 // silentError wraps another error without adding a message of its own, which
@@ -44,11 +45,11 @@ func TestErrorHandler(t *testing.T) {
 		name: test
 		value: 123
 	`)
-	xmlPrinter := func() *niceyaml.Printer {
-		return niceyaml.NewPrinter(
-			niceyaml.WithStyles(yamltest.NewXMLStyles()),
-			niceyaml.WithGutter(niceyaml.NoGutter),
-			niceyaml.WithContainerStyle(lipgloss.NewStyle()),
+	xmlPrinter := func() *printer.Printer {
+		return printer.New(
+			printer.WithStyles(yamltest.NewXMLStyles()),
+			printer.WithGutter(printer.NoGutter),
+			printer.WithContainerStyle(lipgloss.NewStyle()),
 		)
 	}
 

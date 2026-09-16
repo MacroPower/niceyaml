@@ -1,4 +1,4 @@
-package niceyaml_test
+package revision_test
 
 import (
 	"testing"
@@ -6,10 +6,12 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/differ"
+	"go.jacobcolvin.com/niceyaml/revision"
 )
 
-func newRevisions(names ...string) niceyaml.Revisions {
-	revs := make(niceyaml.Revisions, 0, len(names))
+func newRevisions(names ...string) revision.History {
+	revs := make(revision.History, 0, len(names))
 	for _, name := range names {
 		revs = append(revs, niceyaml.NewSourceFromString(name+": data", niceyaml.WithName(name)))
 	}
@@ -21,7 +23,7 @@ func TestRevisions_At(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		revs  niceyaml.Revisions
+		revs  revision.History
 		index int
 		want  string
 	}{
@@ -34,7 +36,7 @@ func TestRevisions_At(t *testing.T) {
 		"single negative":   {revs: newRevisions("only"), index: -5, want: ""},
 		"single exact":      {revs: newRevisions("only"), index: 0, want: "only"},
 		"empty returns nil": {revs: nil, index: 0, want: ""},
-		"empty past end":    {revs: niceyaml.Revisions{}, index: 3, want: ""},
+		"empty past end":    {revs: revision.History{}, index: 3, want: ""},
 	}
 
 	for name, tc := range tcs {
@@ -56,7 +58,7 @@ func TestRevisions_At(t *testing.T) {
 func TestRevisions_Len(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, 0, niceyaml.Revisions(nil).Len())
+	assert.Equal(t, 0, revision.History(nil).Len())
 	assert.Equal(t, 1, newRevisions("only").Len())
 	assert.Equal(t, 3, newRevisions("v0", "v1", "v2").Len())
 }
@@ -65,14 +67,14 @@ func TestRevisions_Names(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		revs niceyaml.Revisions
+		revs revision.History
 		want []string
 	}{
 		"empty":    {revs: nil, want: nil},
 		"single":   {revs: newRevisions("only"), want: []string{"only"}},
 		"multiple": {revs: newRevisions("v0", "v1", "v2"), want: []string{"v0", "v1", "v2"}},
 		"unnamed": {
-			revs: niceyaml.Revisions{niceyaml.NewSourceFromString("a: 1")},
+			revs: revision.History{niceyaml.NewSourceFromString("a: 1")},
 			want: []string{""},
 		},
 	}
@@ -96,6 +98,6 @@ func TestRevisions_Append(t *testing.T) {
 	assert.Equal(t, "v1", revs.At(revs.Len()-1).Name())
 
 	// The history can be diffed directly.
-	result := niceyaml.Diff(revs[0], revs[1])
+	result := differ.Diff(revs[0], revs[1])
 	assert.Equal(t, "v0..v1", result.Name())
 }

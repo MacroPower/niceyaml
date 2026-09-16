@@ -1,4 +1,37 @@
-package niceyaml
+// Package printer renders [line.View] content as styled terminal output.
+//
+// A [Printer] takes any [line.View], such as a niceyaml Source or a
+// [line.Lines] collection, and renders it with syntax highlighting through
+// [lipgloss.Style] values from a [StyleGetter]. Create one with [New] and
+// render with [Printer.Print] or [Printer.Fprint]:
+//
+//	p := printer.New(printer.WithStyles(theme.Charm()))
+//	fmt.Println(p.Print(source))
+//
+// Every setting is an [Option]. A Printer never changes after construction,
+// so [Printer.With] derives a copy with more options applied while the
+// original stays as it was.
+//
+// # Gutters
+//
+// A [GutterFunc] renders the left edge of each row from a [GutterContext].
+// [DefaultGutter] shows the line number and a diff marker, [DiffGutter] the
+// marker only, [LineNumberGutter] the number only, and [NoGutter] nothing.
+// Pass one to [WithGutter].
+//
+// # Overlays and Annotations
+//
+// The printer renders the [line.Overlays] and [line.Annotations] a view
+// carries. An overlay styles a column span, and an [AnnotationFunc] renders
+// the annotations above or below a line; [DefaultAnnotation] joins them with
+// "; " and prefixes [line.Below] annotations with "^ ".
+//
+// # Word Wrapping
+//
+// [WithWidth] wraps content at a width, with the gutter width subtracted.
+// [Printer.Rows] reports how many rows each line takes, so a viewer that
+// scrolls by rendered row can map rows back to lines.
+package printer
 
 import (
 	"fmt"
@@ -34,18 +67,18 @@ type StyleGetter interface {
 
 // Printer prints YAML with syntax highlighting for terminal output.
 //
-// It accepts a [View], either a [*Source] or a [Lines] collection, and
-// produces styled terminal output using [lipgloss.Style]s. It applies syntax
-// highlighting to YAML tokens, with support for customizable gutters,
-// annotations, styled overlays, and word wrapping.
+// It accepts a [line.View], either a niceyaml Source or a [line.Lines]
+// collection, and produces styled terminal output using [lipgloss.Style]s.
+// It applies syntax highlighting to YAML tokens, with support for
+// customizable gutters, annotations, styled overlays, and word wrapping.
 //
 // A Printer is immutable after construction and safe for concurrent use.
-// Every setting is a [PrinterOption]; to change one on an existing Printer,
+// Every setting is a [Option]; to change one on an existing Printer,
 // derive a copy with [Printer.With]:
 //
-//	narrow := printer.With(niceyaml.WithWidth(40))
+//	narrow := printer.With(printer.WithWidth(40))
 //
-// Create instances with [NewPrinter].
+// Create instances with [New].
 //
 // # Rendering
 //
@@ -53,13 +86,13 @@ type StyleGetter interface {
 // lines. Pass [position.Span] arguments to render specific line spans, which is
 // useful for showing error context or diff hunks:
 //
-//	printer.Print(source)                   // All lines.
-//	printer.Print(source, span1, span2)     // Specific spans.
+//	p.Print(source)                   // All lines.
+//	p.Print(source, span1, span2)     // Specific spans.
 //
 // Use [Printer.Fprint] to write the rendered output to an [io.Writer] instead
 // of returning it as a string:
 //
-//	printer.Fprint(os.Stdout, source)
+//	p.Fprint(os.Stdout, source)
 //
 // # Gutters
 //
@@ -71,8 +104,8 @@ type StyleGetter interface {
 // # Overlays
 //
 // Overlays apply visual highlighting to specific column spans within lines.
-// Add them to a view from [Source.Lines] with [Lines.AddOverlay], which
-// replaces the style underneath, or [Lines.BlendOverlay], which mixes
+// Add them to a [line.Lines] view with [line.Lines.AddOverlay], which
+// replaces the style underneath, or [line.Lines.BlendOverlay], which mixes
 // with it, then print the view. Error positions use the first and search
 // highlights the second, so a match keeps the token or diff color it covers.
 //
@@ -102,9 +135,9 @@ type Printer struct {
 	annotationsEnabled bool
 }
 
-// NewPrinter creates a new [*Printer].
+// New creates a new [*Printer].
 // By default it uses [style.Default], [DefaultGutter], and [DefaultAnnotation].
-func NewPrinter(opts ...PrinterOption) *Printer {
+func New(opts ...Option) *Printer {
 	p := &Printer{
 		styles:             style.Default(),
 		gutterFunc:         DefaultGutter,
@@ -121,11 +154,11 @@ func NewPrinter(opts ...PrinterOption) *Printer {
 // With returns a copy of the [Printer] with the given options applied. The
 // receiver is unchanged, so a shared Printer can be specialized per call:
 //
-//	wrapped := printer.With(niceyaml.WithWidth(80))
+//	wrapped := printer.With(printer.WithWidth(80))
 //
 // The copy shares the receiver's cache of blended styles unless [WithStyles]
 // is among the options; the cache is safe for concurrent use.
-func (p *Printer) With(opts ...PrinterOption) *Printer {
+func (p *Printer) With(opts ...Option) *Printer {
 	c := *p
 	c.apply(opts)
 
@@ -133,7 +166,7 @@ func (p *Printer) With(opts ...PrinterOption) *Printer {
 }
 
 // apply runs opts and recomputes the derived container style.
-func (p *Printer) apply(opts []PrinterOption) {
+func (p *Printer) apply(opts []Option) {
 	for _, opt := range opts {
 		opt(p)
 	}
@@ -144,7 +177,7 @@ func (p *Printer) apply(opts []PrinterOption) {
 	}
 }
 
-// PrinterOption configures a [Printer].
+// Option configures a [Printer].
 //
 // Available options:
 //   - [WithStyles]
@@ -153,7 +186,7 @@ func (p *Printer) apply(opts []PrinterOption) {
 //   - [WithAnnotationFunc]
 //   - [WithWidth]
 //   - [WithAnnotations]
-type PrinterOption func(*Printer)
+type Option func(*Printer)
 
 // GutterContext provides context about the current line for gutter rendering.
 // It is passed to [GutterFunc] to determine the appropriate gutter content.
@@ -187,7 +220,7 @@ type AnnotationContext struct {
 // [AnnotationContext].
 type AnnotationFunc func(AnnotationContext) string
 
-// DefaultAnnotation is the [AnnotationFunc] [NewPrinter] uses. It joins the
+// DefaultAnnotation is the [AnnotationFunc] [New] uses. It joins the
 // annotations with "; ", pads them to their column, and prefixes [line.Below]
 // annotations with "^ ".
 func DefaultAnnotation(ctx AnnotationContext) string {
@@ -248,7 +281,7 @@ func renderDiffMarker(ctx GutterContext) string {
 	}
 }
 
-// DefaultGutter is the [GutterFunc] [NewPrinter] uses. It renders the line
+// DefaultGutter is the [GutterFunc] [New] uses. It renders the line
 // number followed by the diff marker.
 func DefaultGutter(ctx GutterContext) string {
 	return renderLineNumber(ctx) + renderDiffMarker(ctx)
@@ -271,62 +304,62 @@ func NoGutter(GutterContext) string {
 	return ""
 }
 
-// WithContainerStyle is a [PrinterOption] that sets the [lipgloss.Style]
+// WithContainerStyle is a [Option] that sets the [lipgloss.Style]
 // wrapped around the whole rendered output. By default the container is the
 // theme's [style.Text] style with one cell of right padding.
 //
 // To set the theme, which styles the tokens inside, use [WithStyles].
 //
 //nolint:gocritic // hugeParam: Copying.
-func WithContainerStyle(s lipgloss.Style) PrinterOption {
+func WithContainerStyle(s lipgloss.Style) Option {
 	return func(p *Printer) {
 		p.style = s
 		p.hasCustomStyle = true
 	}
 }
 
-// WithStyles is a [PrinterOption] that sets the [StyleGetter], typically a
+// WithStyles is a [Option] that sets the [StyleGetter], typically a
 // theme from [go.jacobcolvin.com/niceyaml/style/theme], that styles tokens,
 // gutters, and annotations.
 //
 // To style the frame around the output, use [WithContainerStyle].
-func WithStyles(s StyleGetter) PrinterOption {
+func WithStyles(s StyleGetter) Option {
 	return func(p *Printer) {
 		p.styles = s
 		p.blends = newBlendCache()
 	}
 }
 
-// WithGutter is a [PrinterOption] that sets the [GutterFunc] for rendering.
+// WithGutter is a [Option] that sets the [GutterFunc] for rendering.
 // By default, [DefaultGutter] renders line numbers and diff markers.
-func WithGutter(fn GutterFunc) PrinterOption {
+func WithGutter(fn GutterFunc) Option {
 	return func(p *Printer) {
 		p.gutterFunc = fn
 	}
 }
 
-// WithAnnotationFunc is a [PrinterOption] that sets the [AnnotationFunc] for
+// WithAnnotationFunc is a [Option] that sets the [AnnotationFunc] for
 // rendering annotations.
 //
 // By default, [DefaultAnnotation] is used which adds "^ " prefix for
 // [line.Below] annotations.
-func WithAnnotationFunc(fn AnnotationFunc) PrinterOption {
+func WithAnnotationFunc(fn AnnotationFunc) Option {
 	return func(p *Printer) {
 		p.annotationFunc = fn
 	}
 }
 
-// WithWidth is a [PrinterOption] that sets the width for word wrapping.
+// WithWidth is a [Option] that sets the width for word wrapping.
 // A width of 0, the default, disables wrapping.
-func WithWidth(width int) PrinterOption {
+func WithWidth(width int) Option {
 	return func(p *Printer) {
 		p.width = width
 	}
 }
 
-// WithAnnotations is a [PrinterOption] that sets whether annotations are
+// WithAnnotations is a [Option] that sets whether annotations are
 // rendered. Defaults to true.
-func WithAnnotations(enabled bool) PrinterOption {
+func WithAnnotations(enabled bool) Option {
 	return func(p *Printer) {
 		p.annotationsEnabled = enabled
 	}
@@ -355,7 +388,7 @@ func (p *Printer) Style(s style.Style) lipgloss.Style {
 // provided, all lines are rendered.
 //
 // It returns the number of bytes written and any write error encountered.
-func (p *Printer) Fprint(w io.Writer, lines View, spans ...position.Span) (int, error) {
+func (p *Printer) Fprint(w io.Writer, lines line.View, spans ...position.Span) (int, error) {
 	n, err := io.WriteString(w, p.Print(lines, spans...))
 	if err != nil {
 		return n, fmt.Errorf("write rendered output: %w", err)
@@ -364,10 +397,10 @@ func (p *Printer) Fprint(w io.Writer, lines View, spans ...position.Span) (int, 
 	return n, nil
 }
 
-// Print prints any [View].
+// Print prints any [line.View].
 // It prints lines within the given [position.Span]s, in the supplied order.
 // If no [position.Span]s are provided, all lines are printed.
-func (p *Printer) Print(lines View, spans ...position.Span) string {
+func (p *Printer) Print(lines line.View, spans ...position.Span) string {
 	if len(spans) == 0 {
 		spans = position.Spans{position.NewSpan(0, lines.Len())}
 	}
@@ -402,7 +435,7 @@ func (p *Printer) Print(lines View, spans ...position.Span) string {
 //
 // Viewers that scroll by rendered row use Rows to map a window of rows back
 // to the lines that fill it.
-func (p *Printer) Rows(lines View, spans ...position.Span) []int {
+func (p *Printer) Rows(lines line.View, spans ...position.Span) []int {
 	if len(spans) == 0 {
 		spans = position.Spans{position.NewSpan(0, lines.Len())}
 	}
@@ -437,7 +470,7 @@ func (p *Printer) gutterWidth(totalLines int) int {
 }
 
 // renderSpan renders the lines of span as rows.
-func (p *Printer) renderSpan(t View, span position.Span) []string {
+func (p *Printer) renderSpan(t line.View, span position.Span) []string {
 	totalLines := t.Len()
 	if totalLines == 0 {
 		return nil
@@ -813,7 +846,7 @@ func (p *Printer) wrapContent(content string, gutterWidth int) []string {
 // It handles separator (leading whitespace) and content styling, plus overlays
 // from the [line.Line].
 //
-// The lineIndex parameter is the 0-indexed position in the [Lines]
+// The lineIndex parameter is the 0-indexed position in the [line.Lines]
 // collection.
 func (p *Printer) renderTokenLine(lineIndex int, ln *line.Line) string {
 	if ln.IsEmpty() {

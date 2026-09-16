@@ -15,6 +15,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
 )
 
@@ -38,8 +39,8 @@ var (
 	// text. [SourceError.Detail] returns it.
 	ErrOutOfRange = errors.New("location outside source")
 
-	// Shared [Printer] used when no [WithPrinter] is configured.
-	defaultPrinter = sync.OnceValue(func() *Printer { return NewPrinter() })
+	// Shared [printer.Printer] used when no [WithPrinter] is configured.
+	defaultPrinter = sync.OnceValue(func() *printer.Printer { return printer.New() })
 )
 
 // Error is an error that points at a location in a YAML document.
@@ -432,7 +433,7 @@ func resolveToken(file *ast.File, p paths.Path, docIndex int) (*token.Token, err
 // error first and add context around the SourceError after.
 //
 // [SourceError.Render] returns what %+v prints, and both it and
-// [SourceError.Detail] accept [DetailOption] values for the [Printer] and the
+// [SourceError.Detail] accept [DetailOption] values for the [printer.Printer] and the
 // number of context lines, so the caller that renders the error decides how
 // it looks. A SourceError implements the error interface and unwraps to the
 // error it was created from, so [errors.Is] and [errors.As] see through it.
@@ -453,12 +454,12 @@ type DetailOption func(*detailConfig)
 
 // detailConfig holds the settings a [DetailOption] configures.
 type detailConfig struct {
-	printer      *Printer
+	printer      *printer.Printer
 	contextLines int
 }
 
 // newDetailConfig applies opts over the defaults: the shared default
-// [Printer] and [defaultContextLines].
+// [printer.Printer] and [defaultContextLines].
 func newDetailConfig(opts []DetailOption) detailConfig {
 	c := detailConfig{contextLines: defaultContextLines}
 	for _, opt := range opts {
@@ -484,11 +485,12 @@ func WithContextLines(lines int) DetailOption {
 	}
 }
 
-// WithPrinter is a [DetailOption] that sets the [*Printer] that renders the
-// source excerpt. The printer's width, set with [WithWidth], controls word
-// wrapping, and its styles color the highlighted locations. The default is a
-// [Printer] from [NewPrinter].
-func WithPrinter(p *Printer) DetailOption {
+// WithPrinter is a [DetailOption] that sets the [*printer.Printer] that
+// renders the source excerpt. The printer's width, set with
+// [printer.WithWidth], controls word wrapping, and its styles color the
+// highlighted locations. The default is a [printer.Printer] from
+// [printer.New].
+func WithPrinter(p *printer.Printer) DetailOption {
 	return func(c *detailConfig) {
 		c.printer = p
 	}
@@ -638,7 +640,7 @@ func (e *SourceError) rangeOf(loc location) position.Range {
 // Detail renders every location that resolves and returns an error only
 // when none does: the errors [SourceError.Location] returns, joined with
 // those of the nested errors, or [ErrOutOfRange] for a location past the
-// last line. The [Printer] and the number of context lines come from opts,
+// last line. The [printer.Printer] and the number of context lines come from opts,
 // and rendering works on a private view of the source.
 func (e *SourceError) Detail(opts ...DetailOption) (string, error) {
 	detail, _, err := e.detail(opts)
@@ -705,7 +707,7 @@ type errorPosition struct {
 //
 // Rendering happens on a private view of the source, so calling
 // [SourceError.Detail] repeatedly renders the same output.
-func (e *SourceError) render(cfg detailConfig, view Lines, positions []errorPosition) string {
+func (e *SourceError) render(cfg detailConfig, view line.Lines, positions []errorPosition) string {
 	// Collect all ranges from positions and apply overlays to the view.
 	var allRanges position.Ranges
 
@@ -740,7 +742,7 @@ func (e *SourceError) render(cfg detailConfig, view Lines, positions []errorPosi
 // whose location does not resolve come back separately, in order. The error
 // joins the resolution failures, so it is nil when every location resolved
 // and, when none did, says why.
-func (e *SourceError) collectPositions(a *Error, doc int, view Lines) ([]errorPosition, []*Error, error) {
+func (e *SourceError) collectPositions(a *Error, doc int, view line.Lines) ([]errorPosition, []*Error, error) {
 	positions := make([]errorPosition, 0, 1+len(a.errors))
 
 	var (
@@ -791,7 +793,7 @@ func (e *SourceError) collectPositions(a *Error, doc int, view Lines) ([]errorPo
 
 // checkInRange reports [ErrOutOfRange] when loc starts past the last line
 // of view.
-func (e *SourceError) checkInRange(loc location, view Lines) error {
+func (e *SourceError) checkInRange(loc location, view line.Lines) error {
 	if loc.pos.Line >= view.Len() {
 		return fmt.Errorf("%w: line %d of %d", ErrOutOfRange, loc.pos.Line+1, view.Len())
 	}
@@ -802,7 +804,7 @@ func (e *SourceError) checkInRange(loc location, view Lines) error {
 // highlightRanges returns the ranges to highlight for loc: the range itself
 // when the error carried one, otherwise the content of the token at its
 // position.
-func highlightRanges(view Lines, loc location) position.Ranges {
+func highlightRanges(view line.Lines, loc location) position.Ranges {
 	if loc.rng != nil {
 		return position.Ranges{*loc.rng}
 	}

@@ -13,6 +13,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/bubbles/yamlviewport"
+	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
@@ -57,11 +58,11 @@ func newModel(opts *modelOptions) model {
 
 	// Create printer with options.
 	printerOpts := buildPrinterOpts(opts.lineNumbers, styles)
-	printer := niceyaml.NewPrinter(printerOpts...)
+	p := printer.New(printerOpts...)
 
 	// Create viewport.
 	vp := yamlviewport.New(
-		yamlviewport.WithPrinter(printer),
+		yamlviewport.WithPrinter(p),
 	)
 
 	// Find default theme index.
@@ -459,11 +460,11 @@ func (m *model) textLine() string {
 	return result + textStyle.Render(strings.Repeat(" ", remaining))
 }
 
-func buildPrinterOpts(lineNumbers bool, styles style.Styles) []niceyaml.PrinterOption {
-	opts := []niceyaml.PrinterOption{niceyaml.WithStyles(styles)}
+func buildPrinterOpts(lineNumbers bool, styles style.Styles) []printer.Option {
+	opts := []printer.Option{printer.WithStyles(styles)}
 
 	if !lineNumbers {
-		opts = append(opts, niceyaml.WithGutter(niceyaml.DiffGutter))
+		opts = append(opts, printer.WithGutter(printer.DiffGutter))
 	}
 
 	return opts
@@ -495,8 +496,8 @@ func themeStyles(name string) style.Styles {
 func (m *model) applyTheme(name string) {
 	m.currentTheme = name
 	m.styles = themeStyles(name)
-	printer := niceyaml.NewPrinter(buildPrinterOpts(m.lineNumbers, m.styles)...)
-	m.viewport.SetPrinter(printer)
+	p := printer.New(buildPrinterOpts(m.lineNumbers, m.styles)...)
+	m.viewport.SetPrinter(p)
 }
 
 func (m *model) renderThemeOverlay() string {

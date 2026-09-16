@@ -18,6 +18,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
 )
 
@@ -44,13 +45,13 @@ func render(err error, opts ...niceyaml.DetailOption) string {
 	return fmt.Sprintf("%+v", err)
 }
 
-// newXMLPrinter creates a [*niceyaml.Printer] that marks styles with XML
+// newXMLPrinter creates a [*printer.Printer] that marks styles with XML
 // tags and renders no gutter or container, so tests can assert on plain text.
-func newXMLPrinter() *niceyaml.Printer {
-	return niceyaml.NewPrinter(
-		niceyaml.WithStyles(yamltest.NewXMLStyles()),
-		niceyaml.WithGutter(niceyaml.NoGutter),
-		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
+func newXMLPrinter() *printer.Printer {
+	return printer.New(
+		printer.WithStyles(yamltest.NewXMLStyles()),
+		printer.WithGutter(printer.NoGutter),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
 	)
 }
 
@@ -491,10 +492,10 @@ func TestWithPrinter(t *testing.T) {
 	`)
 	tokens := lexer.Tokenize(source)
 
-	customPrinter := niceyaml.NewPrinter(
-		niceyaml.WithStyles(yamltest.NewXMLStyles()),
-		niceyaml.WithGutter(niceyaml.NoGutter),
-		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
+	customPrinter := printer.New(
+		printer.WithStyles(yamltest.NewXMLStyles()),
+		printer.WithGutter(printer.NoGutter),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
 	)
 
 	err := niceyaml.NewSourceFromString(source).WrapError(niceyaml.NewError(
@@ -1584,10 +1585,10 @@ func TestError_Width(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			errPrinter := niceyaml.NewPrinter(
-				niceyaml.WithGutter(niceyaml.NoGutter),
-				niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-				niceyaml.WithWidth(tc.width),
+			errPrinter := printer.New(
+				printer.WithGutter(printer.NoGutter),
+				printer.WithContainerStyle(lipgloss.NewStyle()),
+				printer.WithWidth(tc.width),
 			)
 
 			err := niceyaml.NewSourceFromString(source).WrapError(niceyaml.NewError("test error",
@@ -1627,13 +1628,13 @@ func TestError_Width_WithCustomPrinter(t *testing.T) {
 
 	// Width comes from the printer. Word wrap is enabled by default in
 	// NewPrinter.
-	customPrinter := niceyaml.NewPrinter(
-		niceyaml.WithStyles(yamltest.NewXMLStyles()),
-		niceyaml.WithGutter(niceyaml.NoGutter),
-		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
+	customPrinter := printer.New(
+		printer.WithStyles(yamltest.NewXMLStyles()),
+		printer.WithGutter(printer.NoGutter),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
 	)
 
-	errPrinter := customPrinter.With(niceyaml.WithWidth(30))
+	errPrinter := customPrinter.With(printer.WithWidth(30))
 
 	err := niceyaml.NewSourceFromString(source).WrapError(niceyaml.NewError(
 		"test error",
@@ -1667,7 +1668,7 @@ func TestError_Width_DefaultPrinter(t *testing.T) {
 	tokens := lexer.Tokenize(source)
 
 	// A printer with only a width keeps the default styles and gutter.
-	errPrinter := niceyaml.NewPrinter(niceyaml.WithWidth(30))
+	errPrinter := printer.New(printer.WithWidth(30))
 
 	err := niceyaml.NewSourceFromString(source).WrapError(niceyaml.NewError(
 		"test error",
@@ -1743,11 +1744,11 @@ func TestError_Width_AnnotationWrapping(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			errPrinter := niceyaml.NewPrinter(
-				niceyaml.WithStyles(&style.Styles{}),
-				niceyaml.WithGutter(niceyaml.NoGutter),
-				niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-				niceyaml.WithWidth(tc.width),
+			errPrinter := printer.New(
+				printer.WithStyles(&style.Styles{}),
+				printer.WithGutter(printer.NoGutter),
+				printer.WithContainerStyle(lipgloss.NewStyle()),
+				printer.WithWidth(tc.width),
 			)
 
 			err := niceyaml.NewSourceFromString(source).WrapError(niceyaml.NewError(
@@ -1778,11 +1779,11 @@ func TestError_Width_MultipleAnnotationsWrapping(t *testing.T) {
 	`)
 
 	// Test multiple nested errors with long messages.
-	errPrinter := niceyaml.NewPrinter(
-		niceyaml.WithStyles(&style.Styles{}),
-		niceyaml.WithGutter(niceyaml.NoGutter),
-		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-		niceyaml.WithWidth(50),
+	errPrinter := printer.New(
+		printer.WithStyles(&style.Styles{}),
+		printer.WithGutter(printer.NoGutter),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+		printer.WithWidth(50),
 	)
 
 	err := niceyaml.NewSourceFromString(source).WrapError(niceyaml.NewError(
@@ -1822,11 +1823,11 @@ func TestError_Width_CombinedAnnotationsOnSameLine(t *testing.T) {
 	`)
 
 	// Multiple errors on same line get combined with "; ".
-	errPrinter := niceyaml.NewPrinter(
-		niceyaml.WithStyles(&style.Styles{}),
-		niceyaml.WithGutter(niceyaml.NoGutter),
-		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-		niceyaml.WithWidth(40),
+	errPrinter := printer.New(
+		printer.WithStyles(&style.Styles{}),
+		printer.WithGutter(printer.NoGutter),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+		printer.WithWidth(40),
 	)
 
 	err := niceyaml.NewSourceFromString(source).WrapError(niceyaml.NewError(
@@ -2109,10 +2110,10 @@ func TestError_NestedErrorsRenderAsAnnotations(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
-	plain := niceyaml.NewPrinter(
-		niceyaml.WithStyles(style.Styles{}),
-		niceyaml.WithGutter(niceyaml.NoGutter),
-		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
+	plain := printer.New(
+		printer.WithStyles(style.Styles{}),
+		printer.WithGutter(printer.NoGutter),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
 	)
 	badA := niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a").Value()))
 	badB := niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b").Value()))

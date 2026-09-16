@@ -1,4 +1,4 @@
-package niceyaml
+package differ
 
 import "go.jacobcolvin.com/niceyaml/position"
 

@@ -15,10 +15,10 @@ Package `niceyaml` combines the powers of [go-yaml][goccy/go-yaml], [bubbletea][
 It enables **friendly and predictable handling of YAML-compatible documents** in your **CLI** or **TUI** applications, and includes:
 
 - [`Source`][niceyaml.Source] **style overlay** and **annotation** system
-- Pretty [`Printer`][niceyaml.Printer] with [themes][niceyaml/style/theme]
+- Pretty [`printer`][niceyaml/printer] with [themes][niceyaml/style/theme]
 - Rich [`Error`][niceyaml.Error] display using the above systems
-- Source [`Revisions`][niceyaml.Revisions] for file lineage and **diffs**
-- String [`Finder`][niceyaml.Finder] for load-once, search-many scenarios
+- Source [`revision.History`][niceyaml/revision] for file lineage and [**diffs**][niceyaml/differ]
+- String [`finder`][niceyaml/finder] for load-once, search-many scenarios
 - Extended [`Encoder`][niceyaml.Encoder] and [`Document`][niceyaml.Document] decoding wrappers
 - JSON schema [validation][niceyaml/schema.NewValidator] with YAML path errors
 - Bubble [`yamlviewport`][niceyaml/bubbles/yamlviewport] for Bubble Tea, in a module of its own
@@ -59,13 +59,13 @@ go get go.jacobcolvin.com/niceyaml@latest
 
 ### Core Abstractions
 
-Package `niceyaml` adds a few abstractions on top of [go-yaml][goccy/go-yaml]:
+Module `niceyaml` adds a few abstractions on top of [go-yaml][goccy/go-yaml]:
 
-- `Line` - Tokens for a single line of YAML content
-- `Lines` - A collection of `Line`s with overlays, annotations, and flags, which is the view that rendering utilities consume
-- `Source` - A YAML document, which parses, decodes, wraps errors, and exposes its `Lines` view
+- [`line.Line`][niceyaml/line] - Tokens for a single line of YAML content
+- [`line.Lines`][niceyaml/line] - A collection of `Line`s with overlays, annotations, and flags, which is the view that rendering utilities consume
+- [`niceyaml.Source`][niceyaml.Source] - A YAML document, which parses, decodes, wraps errors, and exposes its `Lines` view
 
-Most use cases will only need to interact with `Source`. It delegates to its view, so it satisfies the interfaces that other niceyaml utilities accept. Diffs return plain `Lines`, since interleaved lines from two revisions are not a YAML document.
+Most use cases will only need to interact with `Source`. It implements `line.View`, so the [`printer`][niceyaml/printer], [`finder`][niceyaml/finder], and [`differ`][niceyaml/differ] packages accept it directly. Diffs return plain `Lines`, since interleaved lines from two revisions are not a YAML document.
 
 These abstractions enable straightforward iteration over arbitrary lines of tokens from one or more YAML documents, while maintaining the original token details from the lexer. It cleanly solves common problems introduced by multi-line and/or overlapping tokens in diffs, partial rendering, and/or search.
 
@@ -109,10 +109,12 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [niceyaml.Error]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Error
 [niceyaml.Encoder]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Encoder
 [niceyaml.Document]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Document
-[niceyaml.Finder]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Finder
-[niceyaml.Printer]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Printer
-[niceyaml.Revisions]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Revisions
 [niceyaml.Source]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Source
+[niceyaml/differ]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/differ
+[niceyaml/finder]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/finder
+[niceyaml/line]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/line
+[niceyaml/printer]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/printer
+[niceyaml/revision]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/revision
 [niceyaml/style/theme]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/style/theme
 [niceyaml/style.Style]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/style#Style
 [niceyaml/bubbles/yamlviewport]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/bubbles/yamlviewport

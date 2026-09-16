@@ -19,44 +19,47 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/bubbles/yamlviewport"
+	"go.jacobcolvin.com/niceyaml/finder"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/line"
+	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
 // testPrinter returns a printer without styles or line numbers for predictable golden output.
-func testPrinter() *niceyaml.Printer {
-	return niceyaml.NewPrinter(
-		niceyaml.WithStyles(style.Styles{}),
-		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-		niceyaml.WithGutter(niceyaml.DiffGutter),
+func testPrinter() *printer.Printer {
+	return printer.New(
+		printer.WithStyles(style.Styles{}),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+		printer.WithGutter(printer.DiffGutter),
 	)
 }
 
 // testPrinterWithLineNumbers returns a printer with line numbers (DefaultGutter).
-func testPrinterWithLineNumbers() *niceyaml.Printer {
-	return niceyaml.NewPrinter(
-		niceyaml.WithStyles(style.Styles{}),
-		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
+func testPrinterWithLineNumbers() *printer.Printer {
+	return printer.New(
+		printer.WithStyles(style.Styles{}),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
 	)
 }
 
 // testPrinterWithColors returns a printer with default syntax highlighting.
-func testPrinterWithColors() *niceyaml.Printer {
-	return niceyaml.NewPrinter(
-		niceyaml.WithStyles(theme.Charm()),
-		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
+func testPrinterWithColors() *printer.Printer {
+	return printer.New(
+		printer.WithStyles(theme.Charm()),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
 	)
 }
 
 // testPrinterWithSearch returns a printer with XML-style search highlights for testing.
-func testPrinterWithSearch() *niceyaml.Printer {
-	return niceyaml.NewPrinter(
-		niceyaml.WithStyles(yamltest.NewXMLStyles(
+func testPrinterWithSearch() *printer.Printer {
+	return printer.New(
+		printer.WithStyles(yamltest.NewXMLStyles(
 			yamltest.XMLStyleInclude(style.GenericHighlightDim, style.GenericHighlight),
 		)),
-		niceyaml.WithContainerStyle(lipgloss.NewStyle()),
-		niceyaml.WithGutter(niceyaml.DiffGutter),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+		printer.WithGutter(printer.DiffGutter),
 	)
 }
 
@@ -889,8 +892,8 @@ func TestViewport_ContainerFrame(t *testing.T) {
 				lines  = 10
 			)
 
-			printer := testPrinter().With(niceyaml.WithContainerStyle(tc.container))
-			m := yamlviewport.New(yamlviewport.WithPrinter(printer))
+			p := testPrinter().With(printer.WithContainerStyle(tc.container))
+			m := yamlviewport.New(yamlviewport.WithPrinter(p))
 			m.SetWidth(40)
 			m.SetHeight(height)
 			m.SetViewMode(tc.mode)
@@ -3053,14 +3056,14 @@ func TestViewport_ZeroValue(t *testing.T) {
 	assert.Empty(t, m.View())
 }
 
-// countingSearcher wraps a [niceyaml.Finder] and counts its Load calls.
+// countingSearcher wraps a [finder.Finder] and counts its Load calls.
 type countingSearcher struct {
-	*niceyaml.Finder
+	*finder.Finder
 
 	loads int
 }
 
-func (c *countingSearcher) Load(lines niceyaml.View) {
+func (c *countingSearcher) Load(lines line.View) {
 	c.loads++
 	c.Finder.Load(lines)
 }
@@ -3068,7 +3071,7 @@ func (c *countingSearcher) Load(lines niceyaml.View) {
 func TestViewport_LayoutChangesKeepSearchIndex(t *testing.T) {
 	t.Parallel()
 
-	searcher := &countingSearcher{Finder: niceyaml.NewFinder()}
+	searcher := &countingSearcher{Finder: finder.New()}
 	m := yamlviewport.New(
 		yamlviewport.WithPrinter(testPrinter()),
 		yamlviewport.WithSearcher(searcher),
@@ -3106,10 +3109,10 @@ func TestViewport_WithSearcher(t *testing.T) {
 	t.Run("custom searcher is used for search", func(t *testing.T) {
 		t.Parallel()
 
-		finder := niceyaml.NewFinder()
+		f := finder.New()
 		m := yamlviewport.New(
 			yamlviewport.WithPrinter(testPrinter()),
-			yamlviewport.WithSearcher(finder),
+			yamlviewport.WithSearcher(f),
 		)
 
 		m.SetWidth(80)
