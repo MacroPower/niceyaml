@@ -511,18 +511,18 @@ func (p *Printer) renderLine(idx int, ln *line.Line, totalLines, gutterWidth int
 		Index:      idx,
 		Number:     ln.Number(),
 		TotalLines: totalLines,
-		Flag:       ln.Flag,
+		Flag:       ln.Flag(),
 		Styles:     p.styles,
 	}
 
 	var content string
 
-	switch ln.Flag {
+	switch ln.Flag() {
 	case line.FlagDeleted:
-		content = p.styleLineWithRanges(ln.Content(), position.New(idx, 0), style.GenericDeleted, ln.Overlays)
+		content = p.styleLineWithRanges(ln.Content(), position.New(idx, 0), style.GenericDeleted, ln.Overlays())
 
 	case line.FlagInserted:
-		content = p.styleLineWithRanges(ln.Content(), position.New(idx, 0), style.GenericInserted, ln.Overlays)
+		content = p.styleLineWithRanges(ln.Content(), position.New(idx, 0), style.GenericInserted, ln.Overlays())
 
 	default: // line.FlagDefault (equal line).
 		// Render with syntax highlighting.
@@ -547,7 +547,7 @@ func (p *Printer) renderAnnotation(
 	placement line.Placement,
 	gutterWidth int,
 ) []string {
-	anns := ln.Annotations.Filter(placement)
+	anns := ln.Annotations().Filter(placement)
 	if len(anns) == 0 {
 		return nil
 	}
@@ -581,7 +581,7 @@ func (p *Printer) renderAnnotation(
 			Number:     ln.Number(),
 			TotalLines: totalLines,
 			Soft:       j > 0,
-			Flag:       ln.Flag,
+			Flag:       ln.Flag(),
 			Annotation: true,
 			Styles:     p.styles,
 		}))
@@ -885,7 +885,7 @@ func (p *Printer) renderTokenLine(lineIndex int, ln *line.Line) string {
 		if separatorRunes > 0 && separatorRunes <= len(originRunes) {
 			sepPart := string(originRunes[:separatorRunes])
 			sb.WriteString(
-				p.styleLineWithRanges(sepPart, pos, style.Text, ln.Overlays),
+				p.styleLineWithRanges(sepPart, pos, style.Text, ln.Overlays()),
 			)
 
 			pos.Col += separatorRunes
@@ -895,7 +895,7 @@ func (p *Printer) renderTokenLine(lineIndex int, ln *line.Line) string {
 		// Part 2: Render content portion (token style).
 		if len(originRunes) > 0 {
 			sb.WriteString(
-				p.styleLineWithRanges(string(originRunes), pos, tokenStyle, ln.Overlays),
+				p.styleLineWithRanges(string(originRunes), pos, tokenStyle, ln.Overlays()),
 			)
 
 			pos.Col += len(originRunes)

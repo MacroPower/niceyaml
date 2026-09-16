@@ -660,7 +660,7 @@ func (m *Model) updateSideBySideSearchState() {
 
 		// Track equal-line matches for deduplication.
 		if match.Start.Line < len(leftLines) {
-			if leftLines[match.Start.Line].Flag == line.FlagDefault {
+			if leftLines[match.Start.Line].Flag() == line.FlagDefault {
 				equalLinePositions[match.Start] = true
 			}
 		}
@@ -715,7 +715,7 @@ func (m *Model) applySideBySideOverlays() {
 		// Check if selected match is on an equal line.
 		leftLines := m.left
 		if selectedPos.Line < len(leftLines) {
-			selectedIsEqual = leftLines[selectedPos.Line].Flag == line.FlagDefault
+			selectedIsEqual = leftLines[selectedPos.Line].Flag() == line.FlagDefault
 		}
 	}
 

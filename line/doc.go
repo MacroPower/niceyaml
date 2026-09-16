@@ -111,8 +111,8 @@
 // [Flag] values categorize lines for special handling. A diff marks lines with
 // [FlagInserted] and [FlagDeleted]:
 //
-//	l.Flag = line.FlagInserted // Show with "+" prefix.
-//	l.Flag = line.FlagDeleted  // Show with "-" prefix.
+//	lines[i].SetFlag(line.FlagInserted) // Show with "+" prefix.
+//	lines[i].SetFlag(line.FlagDeleted)  // Show with "-" prefix.
 //
 // Rendering utilities mutate lines by adding overlays and annotations. Use
 // [Lines.Clone] or [Line.Clone] to render the same content two different ways

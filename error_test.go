@@ -1992,8 +1992,8 @@ func TestError_DoesNotMutateSource(t *testing.T) {
 
 	// The caller's Source is untouched.
 	for _, ln := range source.Lines() {
-		assert.Empty(t, ln.Overlays)
-		assert.Empty(t, ln.Annotations)
+		assert.Empty(t, ln.Overlays())
+		assert.Empty(t, ln.Annotations())
 	}
 }
 

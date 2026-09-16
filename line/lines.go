@@ -449,6 +449,6 @@ func (ls Lines) addOverlayRange(s style.Style, blend bool, r position.Range) {
 // ClearOverlays removes all [Overlay] values from all lines.
 func (ls Lines) ClearOverlays() {
 	for i := range ls {
-		ls[i].Overlays = nil
+		ls[i].ClearOverlays()
 	}
 }

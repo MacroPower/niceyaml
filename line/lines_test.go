@@ -646,13 +646,13 @@ func TestLine_Annotation(t *testing.T) {
 		clone := original.Clone()
 
 		// Verify annotations were copied.
-		require.Len(t, clone.Annotations, 1)
-		require.Len(t, original.Annotations, len(clone.Annotations))
-		assert.Equal(t, original.Annotations[0].Content, clone.Annotations[0].Content)
+		require.Len(t, clone.Annotations(), 1)
+		require.Len(t, original.Annotations(), len(clone.Annotations()))
+		assert.Equal(t, original.Annotations()[0].Content, clone.Annotations()[0].Content)
 
 		// Verify position by checking filtered results.
 		belowCount := 0
-		for _, ann := range clone.Annotations {
+		for _, ann := range clone.Annotations() {
 			if ann.Placement == line.Below {
 				belowCount++
 			}
@@ -664,11 +664,11 @@ func TestLine_Annotation(t *testing.T) {
 		clone.AddAnnotation(line.Annotation{Content: "modified", Placement: line.Above})
 
 		// Verify original is unchanged.
-		require.Len(t, original.Annotations, 1)
-		assert.Equal(t, "original note", original.Annotations[0].Content)
+		require.Len(t, original.Annotations(), 1)
+		assert.Equal(t, "original note", original.Annotations()[0].Content)
 
 		origBelowCount := 0
-		for _, ann := range original.Annotations {
+		for _, ann := range original.Annotations() {
 			if ann.Placement == line.Below {
 				origBelowCount++
 			}
@@ -2594,9 +2594,9 @@ func TestLine_Annotate(t *testing.T) {
 		ln := &lines[0]
 		ln.AddAnnotation(line.Annotation{Content: "note", Placement: line.Below})
 
-		require.Len(t, ln.Annotations, 1)
-		assert.Equal(t, "note", ln.Annotations[0].Content)
-		assert.Equal(t, line.Below, ln.Annotations[0].Placement)
+		require.Len(t, ln.Annotations(), 1)
+		assert.Equal(t, "note", ln.Annotations()[0].Content)
+		assert.Equal(t, line.Below, ln.Annotations()[0].Placement)
 	})
 
 	t.Run("add multiple annotations", func(t *testing.T) {
@@ -2612,9 +2612,9 @@ func TestLine_Annotate(t *testing.T) {
 			line.Annotation{Content: "second", Placement: line.Below},
 		)
 
-		require.Len(t, ln.Annotations, 2)
-		assert.Equal(t, "first", ln.Annotations[0].Content)
-		assert.Equal(t, "second", ln.Annotations[1].Content)
+		require.Len(t, ln.Annotations(), 2)
+		assert.Equal(t, "first", ln.Annotations()[0].Content)
+		assert.Equal(t, "second", ln.Annotations()[1].Content)
 	})
 
 	t.Run("accumulates annotations", func(t *testing.T) {
@@ -2628,7 +2628,7 @@ func TestLine_Annotate(t *testing.T) {
 		ln.AddAnnotation(line.Annotation{Content: "first"})
 		ln.AddAnnotation(line.Annotation{Content: "second"})
 
-		require.Len(t, ln.Annotations, 2)
+		require.Len(t, ln.Annotations(), 2)
 	})
 }
 
@@ -2648,9 +2648,9 @@ func TestLine_Overlay(t *testing.T) {
 			Style: "test1",
 		})
 
-		require.Len(t, ln.Overlays, 1)
-		assert.Equal(t, position.NewSpan(0, 5), ln.Overlays[0].Cols)
-		assert.Equal(t, style.Style("test1"), ln.Overlays[0].Style)
+		require.Len(t, ln.Overlays(), 1)
+		assert.Equal(t, position.NewSpan(0, 5), ln.Overlays()[0].Cols)
+		assert.Equal(t, style.Style("test1"), ln.Overlays()[0].Style)
 	})
 
 	t.Run("add multiple overlays", func(t *testing.T) {
@@ -2666,9 +2666,9 @@ func TestLine_Overlay(t *testing.T) {
 			line.Overlay{Cols: position.NewSpan(5, 10), Style: "test2"},
 		)
 
-		require.Len(t, ln.Overlays, 2)
-		assert.Equal(t, position.NewSpan(0, 3), ln.Overlays[0].Cols)
-		assert.Equal(t, position.NewSpan(5, 10), ln.Overlays[1].Cols)
+		require.Len(t, ln.Overlays(), 2)
+		assert.Equal(t, position.NewSpan(0, 3), ln.Overlays()[0].Cols)
+		assert.Equal(t, position.NewSpan(5, 10), ln.Overlays()[1].Cols)
 	})
 
 	t.Run("accumulates overlays", func(t *testing.T) {
@@ -2682,7 +2682,7 @@ func TestLine_Overlay(t *testing.T) {
 		ln.AddOverlay(line.Overlay{Cols: position.NewSpan(0, 3), Style: "test1"})
 		ln.AddOverlay(line.Overlay{Cols: position.NewSpan(5, 10), Style: "test2"})
 
-		require.Len(t, ln.Overlays, 2)
+		require.Len(t, ln.Overlays(), 2)
 	})
 }
 
@@ -2703,8 +2703,8 @@ func TestLines_AddOverlay(t *testing.T) {
 			position.New(5, 3),
 		))
 
-		require.Len(t, lines[0].Overlays, 1)
-		require.Len(t, lines[1].Overlays, 1)
+		require.Len(t, lines[0].Overlays(), 1)
+		require.Len(t, lines[1].Overlays(), 1)
 
 		// A range entirely outside the collection is a no-op.
 		lines.AddOverlay("test2", position.NewRange(
@@ -2712,8 +2712,8 @@ func TestLines_AddOverlay(t *testing.T) {
 			position.New(7, 3),
 		))
 
-		assert.Len(t, lines[0].Overlays, 1)
-		assert.Len(t, lines[1].Overlays, 1)
+		assert.Len(t, lines[0].Overlays(), 1)
+		assert.Len(t, lines[1].Overlays(), 1)
 	})
 
 	t.Run("single line range", func(t *testing.T) {
@@ -2728,9 +2728,9 @@ func TestLines_AddOverlay(t *testing.T) {
 			position.New(0, 5),
 		))
 
-		require.Len(t, lines[0].Overlays, 1)
-		assert.Equal(t, position.NewSpan(0, 5), lines[0].Overlays[0].Cols)
-		assert.Equal(t, style.Style("test1"), lines[0].Overlays[0].Style)
+		require.Len(t, lines[0].Overlays(), 1)
+		assert.Equal(t, position.NewSpan(0, 5), lines[0].Overlays()[0].Cols)
+		assert.Equal(t, style.Style("test1"), lines[0].Overlays()[0].Style)
 	})
 
 	t.Run("multi-line range splits across lines", func(t *testing.T) {
@@ -2752,20 +2752,20 @@ func TestLines_AddOverlay(t *testing.T) {
 		))
 
 		// First line: col 3 to end of line.
-		require.Len(t, lines[0].Overlays, 1)
-		assert.Equal(t, 3, lines[0].Overlays[0].Cols.Start)
-		assert.Equal(t, style.Style("test2"), lines[0].Overlays[0].Style)
+		require.Len(t, lines[0].Overlays(), 1)
+		assert.Equal(t, 3, lines[0].Overlays()[0].Cols.Start)
+		assert.Equal(t, style.Style("test2"), lines[0].Overlays()[0].Style)
 
 		// Middle line: full line.
-		require.Len(t, lines[1].Overlays, 1)
-		assert.Equal(t, 0, lines[1].Overlays[0].Cols.Start)
-		assert.Equal(t, style.Style("test2"), lines[1].Overlays[0].Style)
+		require.Len(t, lines[1].Overlays(), 1)
+		assert.Equal(t, 0, lines[1].Overlays()[0].Cols.Start)
+		assert.Equal(t, style.Style("test2"), lines[1].Overlays()[0].Style)
 
 		// Last line: start to col 5.
-		require.Len(t, lines[2].Overlays, 1)
-		assert.Equal(t, 0, lines[2].Overlays[0].Cols.Start)
-		assert.Equal(t, 5, lines[2].Overlays[0].Cols.End)
-		assert.Equal(t, style.Style("test2"), lines[2].Overlays[0].Style)
+		require.Len(t, lines[2].Overlays(), 1)
+		assert.Equal(t, 0, lines[2].Overlays()[0].Cols.Start)
+		assert.Equal(t, 5, lines[2].Overlays()[0].Cols.End)
+		assert.Equal(t, style.Style("test2"), lines[2].Overlays()[0].Style)
 	})
 
 	t.Run("multiple ranges", func(t *testing.T) {
@@ -2784,8 +2784,8 @@ func TestLines_AddOverlay(t *testing.T) {
 			position.NewRange(position.New(1, 0), position.New(1, 4)),
 		)
 
-		require.Len(t, lines[0].Overlays, 1)
-		require.Len(t, lines[1].Overlays, 1)
+		require.Len(t, lines[0].Overlays(), 1)
+		require.Len(t, lines[1].Overlays(), 1)
 	})
 
 	t.Run("inverted ranges add nothing", func(t *testing.T) {
@@ -2802,7 +2802,7 @@ func TestLines_AddOverlay(t *testing.T) {
 		)
 
 		for i := range lines {
-			assert.Empty(t, lines[i].Overlays, "line %d", i)
+			assert.Empty(t, lines[i].Overlays(), "line %d", i)
 		}
 	})
 
@@ -2838,14 +2838,14 @@ func TestLines_ClearOverlays(t *testing.T) {
 			position.NewRange(position.New(1, 0), position.New(1, 10)),
 		)
 
-		require.Len(t, lines[0].Overlays, 1)
-		require.Len(t, lines[1].Overlays, 1)
+		require.Len(t, lines[0].Overlays(), 1)
+		require.Len(t, lines[1].Overlays(), 1)
 
 		// Clear all overlays.
 		lines.ClearOverlays()
 
-		assert.Nil(t, lines[0].Overlays)
-		assert.Nil(t, lines[1].Overlays)
+		assert.Nil(t, lines[0].Overlays())
+		assert.Nil(t, lines[1].Overlays())
 	})
 
 	t.Run("idempotent on empty", func(t *testing.T) {
@@ -2858,7 +2858,7 @@ func TestLines_ClearOverlays(t *testing.T) {
 		// Clear without any overlays set.
 		lines.ClearOverlays()
 
-		assert.Nil(t, lines[0].Overlays)
+		assert.Nil(t, lines[0].Overlays())
 	})
 }
 
@@ -2875,15 +2875,15 @@ func TestLine_Clone_PreservesOverlays(t *testing.T) {
 	clone := original.Clone()
 
 	// Verify overlays were copied.
-	require.Len(t, clone.Overlays, 1)
-	assert.Equal(t, original.Overlays[0].Cols, clone.Overlays[0].Cols)
-	assert.Equal(t, original.Overlays[0].Style, clone.Overlays[0].Style)
+	require.Len(t, clone.Overlays(), 1)
+	assert.Equal(t, original.Overlays()[0].Cols, clone.Overlays()[0].Cols)
+	assert.Equal(t, original.Overlays()[0].Style, clone.Overlays()[0].Style)
 
 	// Modify clone overlays.
 	clone.AddOverlay(line.Overlay{Cols: position.NewSpan(5, 10), Style: "test2"})
 
 	// Verify original is unchanged.
-	require.Len(t, original.Overlays, 1)
+	require.Len(t, original.Overlays(), 1)
 }
 
 func TestLines_ContentRanges(t *testing.T) {
@@ -3026,14 +3026,14 @@ func TestLines_View(t *testing.T) {
 		}
 
 		for _, ln := range lines {
-			assert.Empty(t, ln.Annotations)
+			assert.Empty(t, ln.Annotations())
 		}
 
 		// Mutation goes through the collection itself.
 		lines[1].AddAnnotation(line.Annotation{Content: "note", Placement: line.Below})
 
-		require.Len(t, lines[1].Annotations, 1)
-		assert.Equal(t, "note", lines[1].Annotations[0].Content)
+		require.Len(t, lines[1].Annotations(), 1)
+		assert.Equal(t, "note", lines[1].Annotations()[0].Content)
 	})
 
 	t.Run("AllRunes round-trips the input", func(t *testing.T) {
@@ -3082,14 +3082,14 @@ func TestLines_View(t *testing.T) {
 		))
 		clone[1].AddAnnotation(line.Annotation{Content: "note", Placement: line.Below})
 
-		clone[2].Flag = line.FlagInserted
+		clone[2].SetFlag(line.FlagInserted)
 
 		require.Len(t, clone, 3)
 		assert.Equal(t, lines.Content(), clone.Content())
 
-		assert.Empty(t, lines[0].Overlays)
-		assert.Empty(t, lines[1].Annotations)
-		assert.Equal(t, line.FlagDefault, lines[2].Flag)
+		assert.Empty(t, lines[0].Overlays())
+		assert.Empty(t, lines[1].Annotations())
+		assert.Equal(t, line.FlagDefault, lines[2].Flag())
 	})
 
 	t.Run("empty", func(t *testing.T) {

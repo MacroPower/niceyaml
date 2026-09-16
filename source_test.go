@@ -843,12 +843,12 @@ func TestSource_Lines_IndependentViews(t *testing.T) {
 
 	// A second view starts from the pristine document.
 	second := source.Lines()
-	assert.Empty(t, second[0].Overlays)
-	assert.Empty(t, second[0].Annotations)
+	assert.Empty(t, second[0].Overlays())
+	assert.Empty(t, second[0].Annotations())
 
 	// The first view keeps what was added to it.
-	require.Len(t, first[0].Overlays, 1)
-	assert.Equal(t, style.Style("test1"), first[0].Overlays[0].Style)
+	require.Len(t, first[0].Overlays(), 1)
+	assert.Equal(t, style.Style("test1"), first[0].Overlays()[0].Style)
 	assert.Equal(t, "key: value", first.Content())
 }
 
@@ -1114,8 +1114,8 @@ func TestSource_AllLines_YieldsCopies(t *testing.T) {
 		ln.AddOverlay(line.Overlay{Cols: position.NewSpan(0, 3), Style: style.GenericError})
 	}
 
-	assert.Empty(t, source.Lines()[0].Annotations)
-	assert.Empty(t, source.Lines()[0].Overlays)
+	assert.Empty(t, source.Lines()[0].Annotations())
+	assert.Empty(t, source.Lines()[0].Overlays())
 
 	// Printing the Source renders the pristine document.
 	plain := printer.New(

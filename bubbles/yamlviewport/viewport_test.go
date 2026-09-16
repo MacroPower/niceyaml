@@ -3340,7 +3340,7 @@ func TestViewport_DoesNotMutateSource(t *testing.T) {
 	_ = m.View()
 
 	// Search highlighting never reaches the caller's Source.
-	assert.Empty(t, source.Lines()[0].Overlays)
+	assert.Empty(t, source.Lines()[0].Overlays())
 }
 
 func TestViewport_RevisionNavigationResetsSearch(t *testing.T) {

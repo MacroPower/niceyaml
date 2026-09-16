@@ -13,32 +13,68 @@ import (
 )
 
 // Line holds the tokens on one line of source together with the metadata
-// rendering utilities attach to it.
+// rendering utilities attach to it: a [Flag], [Overlays], and [Annotations].
 //
 // Create instances with [NewLines], which cuts a token stream into one Line
 // per source line. Every token a Line hands out, from [Line.Tokens],
 // [Line.Token], [Line.TokenAt], or [Line.SourceTokens], is shared with the
 // line. Treat them as read-only and call [token.Token.Clone] before modifying
 // one.
+//
+// The metadata changes through pointer methods, so index a [Lines]
+// collection to reach a line that keeps the change. A Line yielded by value,
+// as [Lines.AllLines] does, is a copy, and a change to it reaches nothing.
 type Line struct {
-	Annotations Annotations
-	Overlays    Overlays
+	annotations Annotations
+	overlays    Overlays
 	segments    segment.Segments
-	Flag        Flag
+	flag        Flag
 
 	// The 1-indexed line number used for display purposes.
 	// This may differ from the first token's Position.Line for block scalars.
 	number int
 }
 
-// AddAnnotation adds the given [Annotation] values to this [Line].
-func (l *Line) AddAnnotation(ann ...Annotation) {
-	l.Annotations = append(l.Annotations, ann...)
+// Flag returns the [Flag] of this [Line]. The zero value is [FlagDefault].
+func (l *Line) Flag() Flag {
+	return l.flag
 }
 
-// AddOverlay adds the given [Overlay] values to this [Line].
+// SetFlag sets the [Flag] of this [Line].
+func (l *Line) SetFlag(f Flag) {
+	l.flag = f
+}
+
+// Annotations returns the [Annotation] values on this [Line], in the order
+// they were added. The slice is shared with the line, so treat it as
+// read-only and add to it with [Line.AddAnnotation].
+func (l *Line) Annotations() Annotations {
+	return l.annotations
+}
+
+// AddAnnotation adds the given [Annotation] values to this [Line].
+func (l *Line) AddAnnotation(ann ...Annotation) {
+	l.annotations = append(l.annotations, ann...)
+}
+
+// Overlays returns the [Overlay] values on this [Line], in the order they
+// were added. The slice is shared with the line, so treat it as read-only
+// and add to it with [Line.AddOverlay] or the [Lines] overlay methods, which
+// clamp a range to the line.
+func (l *Line) Overlays() Overlays {
+	return l.overlays
+}
+
+// AddOverlay adds the given [Overlay] values to this [Line] as given.
+// [Lines.AddOverlay] and [Lines.BlendOverlay] clamp a range to the lines it
+// covers before adding; AddOverlay does not.
 func (l *Line) AddOverlay(o ...Overlay) {
-	l.Overlays = append(l.Overlays, o...)
+	l.overlays = append(l.overlays, o...)
+}
+
+// ClearOverlays removes every [Overlay] from this [Line].
+func (l *Line) ClearOverlays() {
+	l.overlays = nil
 }
 
 // Number returns the 1-indexed line number of this [Line], or 0 for the
@@ -68,22 +104,22 @@ func (l *Line) Content() string {
 func (l *Line) Clone() Line {
 	var ann Annotations
 
-	if len(l.Annotations) > 0 {
-		ann = make(Annotations, len(l.Annotations))
-		copy(ann, l.Annotations)
+	if len(l.annotations) > 0 {
+		ann = make(Annotations, len(l.annotations))
+		copy(ann, l.annotations)
 	}
 
 	var ovl Overlays
 
-	if len(l.Overlays) > 0 {
-		ovl = make(Overlays, len(l.Overlays))
-		copy(ovl, l.Overlays)
+	if len(l.overlays) > 0 {
+		ovl = make(Overlays, len(l.overlays))
+		copy(ovl, l.overlays)
 	}
 
 	return Line{
-		Annotations: ann,
-		Overlays:    ovl,
-		Flag:        l.Flag,
+		annotations: ann,
+		overlays:    ovl,
+		flag:        l.flag,
 		number:      l.number,
 		segments:    l.segments.Clone(),
 	}
@@ -235,7 +271,7 @@ func (l *Line) String() string {
 	prefix := fmt.Sprintf("%4d | ", l.Number())
 
 	// Render annotations above if applicable.
-	above := l.Annotations.Filter(Above)
+	above := l.annotations.Filter(Above)
 	if len(above) > 0 {
 		sb.WriteString(prefix)
 		sb.WriteString(above.String())
@@ -247,7 +283,7 @@ func (l *Line) String() string {
 
 	// Render annotations below if applicable.
 	// Add "^ " prefix for below annotations (error pointers) in debug output.
-	below := l.Annotations.Filter(Below)
+	below := l.annotations.Filter(Below)
 	if len(below) > 0 {
 		sb.WriteByte('\n')
 		sb.WriteString(prefix)

@@ -260,7 +260,8 @@ func (r *Result) getAlignedRows() []alignedRow {
 			case diff.OpEqual:
 				// Equal lines appear on both sides. Before and After clone per call.
 				ln := op.line.Clone()
-				ln.Flag = line.FlagDefault
+				ln.SetFlag(line.FlagDefault)
+
 				rows = append(rows, alignedRow{
 					before: ln,
 					after:  ln,
@@ -287,12 +288,12 @@ func (r *Result) getAlignedRows() []alignedRow {
 
 					if j < len(deletes) {
 						beforeLine = deletes[j].line.Clone()
-						beforeLine.Flag = line.FlagDeleted
+						beforeLine.SetFlag(line.FlagDeleted)
 					}
 
 					if j < len(inserts) {
 						afterLine = inserts[j].line.Clone()
-						afterLine.Flag = line.FlagInserted
+						afterLine.SetFlag(line.FlagInserted)
 					}
 
 					rows = append(rows, alignedRow{
@@ -304,7 +305,7 @@ func (r *Result) getAlignedRows() []alignedRow {
 			case diff.OpInsert:
 				// Standalone insert (not following a delete).
 				ln := op.line.Clone()
-				ln.Flag = line.FlagInserted
+				ln.SetFlag(line.FlagInserted)
 
 				rows = append(rows, alignedRow{
 					before: line.Line{},
@@ -442,7 +443,8 @@ func (ops lineOps) toLines() line.Lines {
 	lines := make(line.Lines, 0, len(ops))
 	for _, op := range ops {
 		ln := op.line.Clone()
-		ln.Flag = opKindFlag(op.kind)
+		ln.SetFlag(opKindFlag(op.kind))
+
 		lines = append(lines, ln)
 	}
 

@@ -31,11 +31,11 @@ func TestDiffer_Views(t *testing.T) {
 
 	got := result.Unified()
 	require.Len(t, got, 3)
-	assert.Equal(t, line.FlagDefault, got[0].Flag)
-	assert.Equal(t, line.FlagDeleted, got[1].Flag)
-	assert.Equal(t, line.FlagInserted, got[2].Flag)
-	assert.Empty(t, got[1].Overlays)
-	assert.Len(t, got[2].Overlays, 1)
+	assert.Equal(t, line.FlagDefault, got[0].Flag())
+	assert.Equal(t, line.FlagDeleted, got[1].Flag())
+	assert.Equal(t, line.FlagInserted, got[2].Flag())
+	assert.Empty(t, got[1].Overlays())
+	assert.Len(t, got[2].Overlays(), 1)
 
 	// The diff of a diff is a view of a view.
 	again := differ.Diff(got, got)
@@ -461,7 +461,7 @@ func TestDiffer_Full_Flags(t *testing.T) {
 
 			flaggedCount := 0
 			for _, ln := range got.AllLines() {
-				if ln.Flag != line.FlagDefault {
+				if ln.Flag() != line.FlagDefault {
 					flaggedCount++
 				}
 			}
@@ -469,7 +469,7 @@ func TestDiffer_Full_Flags(t *testing.T) {
 			assert.Equal(t, tc.wantFlaggedCount, flaggedCount)
 
 			for lineIdx, wantFlag := range tc.wantFlags {
-				assert.Equal(t, wantFlag, got[lineIdx].Flag)
+				assert.Equal(t, wantFlag, got[lineIdx].Flag())
 			}
 		})
 	}
@@ -590,12 +590,12 @@ func TestDiffer_Hunks(t *testing.T) {
 			assert.Len(t, got, tc.wantLen)
 
 			for lineIdx, wantFlag := range tc.flags {
-				assert.Equal(t, wantFlag, got[lineIdx].Flag, "flag mismatch at line %d", lineIdx)
+				assert.Equal(t, wantFlag, got[lineIdx].Flag(), "flag mismatch at line %d", lineIdx)
 			}
 
 			if tc.annotations != nil {
 				for lineIdx, wantAnnotation := range tc.annotations {
-					anns := got[lineIdx].Annotations
+					anns := got[lineIdx].Annotations()
 					require.NotEmpty(t, anns, "expected annotation at line %d", lineIdx)
 					assert.Equal(t, wantAnnotation, anns[0].Content)
 				}
@@ -978,7 +978,7 @@ func verifyLines(t *testing.T, side string, actual []line.Line, want []wantLine)
 			assert.Equal(t, wantLn.content, actualLn.Content(), "%s line %d content", side, i)
 		}
 
-		assert.Equal(t, wantLn.flag, actualLn.Flag, "%s line %d flag", side, i)
+		assert.Equal(t, wantLn.flag, actualLn.Flag(), "%s line %d flag", side, i)
 	}
 }
 
@@ -1042,7 +1042,7 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 		first.AddOverlay(style.GenericHighlight, highlight)
 
 		second := result.Unified()
-		assert.Empty(t, second[0].Overlays)
+		assert.Empty(t, second[0].Overlays())
 	})
 
 	t.Run("Before and After", func(t *testing.T) {
@@ -1053,8 +1053,8 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 
 		left.AddOverlay(style.GenericHighlight, highlight)
 
-		assert.Empty(t, right[0].Overlays)
-		assert.Empty(t, result.Before()[0].Overlays)
+		assert.Empty(t, right[0].Overlays())
+		assert.Empty(t, result.Before()[0].Overlays())
 	})
 
 	t.Run("Hunks without changes", func(t *testing.T) {
@@ -1068,8 +1068,8 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 
 		result.Unified().AddOverlay(style.GenericHighlight, highlight)
 
-		assert.Empty(t, before.Lines()[0].Overlays)
-		assert.Empty(t, after.Lines()[0].Overlays)
+		assert.Empty(t, before.Lines()[0].Overlays())
+		assert.Empty(t, after.Lines()[0].Overlays())
 	})
 }
 
@@ -1079,7 +1079,7 @@ func hunkCount(lines line.Lines) int {
 	count := 0
 
 	for _, l := range lines {
-		if len(l.Annotations.Filter(line.Above)) > 0 {
+		if len(l.Annotations().Filter(line.Above)) > 0 {
 			count++
 		}
 	}
