@@ -17,9 +17,11 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
-// Source is a YAML document. It holds the tokens the document was lexed from,
-// the [*ast.File] they parse into, and the settings for parsing, decoding, and
-// reporting errors.
+// Source is a YAML file: one stream of text that holds one or more YAML
+// documents. It holds the tokens the text was lexed from, the [*ast.File]
+// they parse into, and the settings for parsing, decoding, and reporting
+// errors. [Source.Documents] yields each document in the file as a
+// [*Document].
 //
 // Source separates two concerns. Parsing and decoding live on Source itself,
 // where [Source.File] lazily parses the AST, [Source.Documents] iterates the

@@ -33,10 +33,10 @@
 // The module separates a YAML document from its rendering, and each part
 // lives in a package of its own.
 //
-// [Source], in this package, is the document. It owns the tokens from
-// go-yaml, lazily parses them into an AST with [Source.File], iterates
-// documents with [Source.Documents], and attaches source context to errors
-// with [Source.WrapError].
+// [Source], in this package, is the file. It owns the tokens from go-yaml,
+// lazily parses them into an AST with [Source.File], yields each YAML
+// document in the file as a [Document] with [Source.Documents], and attaches
+// source context to errors with [Source.WrapError].
 //
 // [line.Lines] is the view. It organizes tokens into lines, and each
 // [line.Line] carries optional metadata for rendering. Annotations hold

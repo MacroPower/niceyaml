@@ -63,7 +63,7 @@ Module `niceyaml` adds a few abstractions on top of [go-yaml][goccy/go-yaml]:
 
 - [`line.Line`][niceyaml/line] - Tokens for a single line of YAML content
 - [`line.Lines`][niceyaml/line] - A collection of `Line`s with overlays, annotations, and flags, which is the view that rendering utilities consume
-- [`niceyaml.Source`][niceyaml.Source] - A YAML document, which parses, decodes, wraps errors, and exposes its `Lines` view
+- [`niceyaml.Source`][niceyaml.Source] - A YAML file, which parses into `Document`s, decodes, wraps errors, and exposes its `Lines` view
 
 Most use cases will only need to interact with `Source`. It implements `line.View`, so the [`printer`][niceyaml/printer], [`finder`][niceyaml/finder], and [`differ`][niceyaml/differ] packages accept it directly. Diffs return plain `Lines`, since interleaved lines from two revisions are not a YAML document.
 
