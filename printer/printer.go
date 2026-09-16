@@ -188,8 +188,13 @@ func (p *Printer) apply(opts []Option) {
 //   - [WithAnnotations]
 type Option func(*Printer)
 
-// GutterContext provides context about the current line for gutter rendering.
+// GutterContext provides context about the current row for gutter rendering.
 // It is passed to [GutterFunc] to determine the appropriate gutter content.
+//
+// Index, Number, and Flag describe the line the row belongs to. Soft marks a
+// wrapped continuation row of that line, and Annotation marks a row that
+// holds one of its annotations rather than its content, so the built-in
+// gutters leave the line number and diff marker out of it.
 type GutterContext struct {
 	Styles     StyleGetter
 	Index      int
@@ -197,6 +202,7 @@ type GutterContext struct {
 	TotalLines int
 	Flag       line.Flag
 	Soft       bool
+	Annotation bool
 }
 
 // GutterFunc returns the gutter content for a line based on [GutterContext].
@@ -249,7 +255,7 @@ func renderLineNumber(ctx GutterContext) string {
 	width := max(4, len(strconv.Itoa(ctx.TotalLines)))
 
 	switch {
-	case ctx.Flag == line.FlagAnnotation:
+	case ctx.Annotation:
 		return lineNumStyle.Render(strings.Repeat(" ", width+1))
 	case ctx.Soft:
 		return lineNumStyle.Render(strings.Repeat(" ", width-1) + "- ")
@@ -258,8 +264,13 @@ func renderLineNumber(ctx GutterContext) string {
 	}
 }
 
-// renderDiffMarker renders the diff marker portion of a gutter.
+// renderDiffMarker renders the diff marker portion of a gutter. An
+// annotation row carries no marker.
 func renderDiffMarker(ctx GutterContext) string {
+	if ctx.Annotation {
+		return ctx.Styles.Style(style.Text).Render(" ")
+	}
+
 	if ctx.Soft {
 		switch ctx.Flag {
 		case line.FlagInserted:
@@ -570,7 +581,8 @@ func (p *Printer) renderAnnotation(
 			Number:     ln.Number(),
 			TotalLines: totalLines,
 			Soft:       j > 0,
-			Flag:       line.FlagAnnotation,
+			Flag:       ln.Flag,
+			Annotation: true,
 			Styles:     p.styles,
 		}))
 

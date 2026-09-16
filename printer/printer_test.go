@@ -1320,9 +1320,9 @@ func TestGutterFunctions(t *testing.T) {
 			want:       " ",
 		},
 		// DefaultGutter tests.
-		"default/annotation flag renders empty": {
+		"default/annotation row renders empty": {
 			gutterFunc: printer.DefaultGutter,
-			ctx:        printer.GutterContext{Flag: line.FlagAnnotation, Number: 1, Styles: styles},
+			ctx:        printer.GutterContext{Flag: line.FlagInserted, Annotation: true, Number: 1, Styles: styles},
 			want:       "      ",
 		},
 		"default/soft wrap renders continuation marker": {
@@ -1346,9 +1346,9 @@ func TestGutterFunctions(t *testing.T) {
 			want:       "   1 -",
 		},
 		// LineNumberGutter tests.
-		"lineNumber/annotation flag renders empty": {
+		"lineNumber/annotation row renders empty": {
 			gutterFunc: printer.LineNumberGutter,
-			ctx:        printer.GutterContext{Flag: line.FlagAnnotation, Number: 1, Styles: styles},
+			ctx:        printer.GutterContext{Flag: line.FlagDeleted, Annotation: true, Number: 1, Styles: styles},
 			want:       "     ",
 		},
 		"lineNumber/soft wrap renders continuation marker": {

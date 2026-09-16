@@ -109,8 +109,7 @@
 //	lines.BlendOverlay(style.GenericHighlight, matches...)
 //
 // [Flag] values categorize lines for special handling. A diff marks lines with
-// [FlagInserted] and [FlagDeleted], and [FlagAnnotation] marks lines that hold
-// only an annotation and no line number:
+// [FlagInserted] and [FlagDeleted]:
 //
 //	l.Flag = line.FlagInserted // Show with "+" prefix.
 //	l.Flag = line.FlagDeleted  // Show with "-" prefix.

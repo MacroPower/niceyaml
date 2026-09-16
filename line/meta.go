@@ -27,8 +27,6 @@ const (
 	FlagInserted
 	// FlagDeleted marks lines as deleted in a diff (rendered with "-").
 	FlagDeleted
-	// FlagAnnotation marks annotation-only lines (no line number).
-	FlagAnnotation
 )
 
 // Annotation represents extra content added around a [Line].
