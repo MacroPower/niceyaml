@@ -29,12 +29,15 @@ rules:
       - docs
       - examples
       - fangs
+      - finder
       - internal
       - lexers
       - line
       - normalizer
       - paths
       - position
+      - printer
+      - revision
       - schema
       - style
       - tasks
