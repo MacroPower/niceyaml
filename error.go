@@ -38,10 +38,6 @@ var (
 	// text. [SourceError.Detail] returns it.
 	ErrOutOfRange = errors.New("location outside source")
 
-	// The resolution error for a path location with no source to resolve it
-	// in, which is the case in [Error.Error].
-	errNoSource = errors.New("no source provided")
-
 	// Shared [Printer] used when no [WithPrinter] is configured.
 	defaultPrinter = sync.OnceValue(func() *Printer { return NewPrinter() })
 )
@@ -59,19 +55,18 @@ var (
 // validator that knows a path uses [WithPath] and need not hold the source.
 // To render the error against its document, wrap it with [Source.WrapError],
 // which returns a [*SourceError] that resolves the location and renders the
-// annotated excerpt. Context added with [fmt.Errorf] between the two is
-// preserved.
+// annotated excerpt.
 //
 // An Error is immutable once created. [Error.With] returns a copy with more
 // options applied.
 //
-// [Error.Error] returns the message with its location: the token or range
-// position as "[line:col]", or the path as "at $.path". Once
-// [Source.WrapError] resolves the path, the message reads
-// "[line:col] $.path", so the field name stays alongside the position.
-// Nested errors from [WithErrors] are not part of the message. They surface
-// through [Error.Unwrap], and [SourceError.Detail] renders them as
-// annotations.
+// [Error.Error] returns the message with what the Error knows of its
+// location. A token or range position needs no source and reads
+// "[line:col] msg". A path reads "$.path: msg", and [Source.WrapError] adds
+// the position it resolves to in front, so a bound path error reads
+// "[line:col] $.path: msg". Nested errors from [WithErrors] are not part of
+// the message. They surface through [Error.Unwrap], and [SourceError.Detail]
+// renders them as annotations.
 //
 // Error implements the error interface. Use [Error.Unwrap] with [errors.Is]
 // and [errors.As] to inspect wrapped errors.
@@ -181,115 +176,60 @@ func WithErrors(errs ...*Error) ErrorOption {
 	}
 }
 
-// Error returns the error message prefixed with its location.
-//
-// The location is "[line:col]" when the error carries a token or a range,
-// "at $.path" when it carries a path, and nothing when it has none. Nothing
-// resolves paths here; wrap the error with [Source.WrapError] to see their
-// positions. Nested errors from [WithErrors] are not part of the message.
+// Error returns the error message with the location the Error knows on its
+// own: "[line:col] msg" for a token or a range, "$.path: msg" for a path,
+// and the message alone when it carries none. A path has no position until
+// [Source.WrapError] binds the error to a source, and the [SourceError] then
+// puts the resolved position in front. Nested errors from [WithErrors] are
+// not part of the message.
 func (e *Error) Error() string {
-	return e.headline(nil, 0)
-}
-
-// headline returns e's message prefixed with its location. A path resolves
-// against src when one is given, in document doc. An Error built from a nil
-// error has an empty headline.
-//
-// An Error without a position of its own adds no text, so its headline is
-// the message of the error it wraps, with every Error inside resolved the
-// same way by [resolveMessage]. Foreign wrapping in between keeps its text
-// around the inner headlines.
-func (e *Error) headline(src *Source, doc int) string {
 	if e.err == nil {
 		return ""
 	}
 
-	if !e.hasPosition() {
-		return resolveMessage(e.err, src, doc, true)
-	}
-
-	loc, err := e.locate(src, doc)
-	if err == nil {
-		// Editors count from 1, so the headline uses 1-indexed coordinates.
-		// A path stays in the headline, since it names the field where the
-		// position alone does not.
-		if e.path != nil {
-			return fmt.Sprintf("[%d:%d] %s: %v", loc.pos.Line+1, loc.pos.Col+1, e.path, e.err)
-		}
-
-		return fmt.Sprintf("[%d:%d] %v", loc.pos.Line+1, loc.pos.Col+1, e.err)
-	}
+	msg := e.err.Error()
 
 	if e.path != nil {
-		return fmt.Sprintf("at %s: %v", e.path, e.err)
+		msg = prefixMessage(e.path.String()+":", msg)
 	}
 
-	return resolveMessage(e.err, src, doc, true)
-}
-
-// resolveMessage returns the message of err with the location of every
-// [Error] in its tree resolved against src.
-//
-// It rebuilds the message one level at a time. An Error contributes its
-// headline. Any other error keeps its own text, with the text of each child
-// whose message changed swapped for the child's resolved message, so the
-// context a wrapper such as [fmt.Errorf] adds stays around the resolved
-// location. A level that does not hold a child's text verbatim, as a wrapper
-// that reformats the message it wraps does, keeps its text as it is, and a
-// child with an empty message is left alone since there is nothing to find.
-//
-// Paths resolve in document doc. When docSet is false, no level above chose
-// the document, and the first Error on each branch picks the index its own
-// chain carries.
-func resolveMessage(err error, src *Source, doc int, docSet bool) string {
-	if e, ok := err.(*Error); ok { //nolint:errorlint // Identity of this level, not a chain search.
-		if e == nil {
-			return ""
-		}
-
-		if !docSet {
-			if idx, set := e.DocumentIndex(); set {
-				doc = idx
-			}
-		}
-
-		return e.headline(src, doc)
-	}
-
-	msg := err.Error()
-
-	for _, child := range children(err) {
-		plain := child.Error()
-		if plain == "" {
-			continue
-		}
-
-		resolved := resolveMessage(child, src, doc, docSet)
-		if resolved == plain {
-			continue
-		}
-
-		msg = strings.Replace(msg, plain, resolved, 1)
+	if pos, ok := e.position(); ok {
+		msg = prefixMessage(formatPosition(pos), msg)
 	}
 
 	return msg
 }
 
-// children returns the errors err wraps directly: the one from an Unwrap
-// method returning error, or all from one returning a slice.
-func children(err error) []error {
-	switch x := err.(type) { //nolint:errorlint // Unwrap shape of this level, not a target match.
-	case interface{ Unwrap() error }:
-		child := x.Unwrap()
-		if child != nil {
-			return []error{child}
-		}
-
-	case interface{ Unwrap() []error }:
-		return x.Unwrap()
+// prefixMessage returns prefix and msg separated by a space, or prefix alone
+// when msg is empty.
+func prefixMessage(prefix, msg string) string {
+	if msg == "" {
+		return prefix
 	}
 
-	return nil
+	return prefix + " " + msg
+}
+
+// position returns the position e carries without a source: the start of
+// its range, or the position of its token. The boolean is false when e
+// carries neither, which is the case for a path error.
+func (e *Error) position() (position.Position, bool) {
+	switch {
+	case e.rng != nil:
+		return e.rng.Start, true
+
+	case e.token != nil && e.token.Position != nil:
+		return position.NewFromToken(e.token), true
+
+	default:
+		return position.Position{}, false
+	}
+}
+
+// formatPosition returns pos as "[line:col]". Editors count from 1, so the
+// coordinates are 1-indexed.
+func formatPosition(pos position.Position) string {
+	return fmt.Sprintf("[%d:%d]", pos.Line+1, pos.Col+1)
 }
 
 // find returns the first [Error] in e's chain that satisfies pred, walking
@@ -409,7 +349,7 @@ func (e *Error) defaultDocumentIndex() int {
 	return index
 }
 
-// location is a resolved error location: the position the headline reports,
+// location is a resolved error location: the position the message reports,
 // and the range to highlight when the error carried one.
 type location struct {
 	rng *position.Range
@@ -432,10 +372,6 @@ func (e *Error) locate(src *Source, doc int) (location, error) {
 		return location{pos: position.NewFromToken(e.token)}, nil
 
 	case e.path != nil:
-		if src == nil {
-			return location{}, errNoSource
-		}
-
 		file, err := src.File()
 		if err != nil {
 			return location{}, err
@@ -464,10 +400,6 @@ func (e *Error) locate(src *Source, doc int) (location, error) {
 
 // resolveToken resolves p to a token in document docIndex of file.
 func resolveToken(file *ast.File, p paths.Path, docIndex int) (*token.Token, error) {
-	if file == nil {
-		return nil, errNoSource
-	}
-
 	if docIndex < 0 || docIndex >= len(file.Docs) {
 		return nil, fmt.Errorf("%w: index %d of %d", ErrDocumentNotFound, docIndex, len(file.Docs))
 	}
@@ -484,7 +416,7 @@ func resolveToken(file *ast.File, p paths.Path, docIndex int) (*token.Token, err
 //
 // [Source.WrapError] creates one around any error whose chain holds an
 // [*Error]. It resolves the Error's location against the source, so
-// [SourceError.Error] reports a path as "[line:col] $.path",
+// [SourceError.Error] puts the position of a path in front of the message,
 // [SourceError.Location] returns the resolved range, and
 // [SourceError.Detail] renders the surrounding lines with the location
 // highlighted. The %+v verb prints the message and the detail:
@@ -493,6 +425,11 @@ func resolveToken(file *ast.File, p paths.Path, docIndex int) (*token.Token, err
 //
 // Nested errors appear as annotations below their own lines, and distant
 // locations render as separate hunks.
+//
+// A SourceError never rewrites the message of the error it binds. The text
+// a wrapper such as [fmt.Errorf] produced stays as it was, and the position
+// goes in front of it. To keep the position beside the message, bind an
+// error first and add context around the SourceError after.
 //
 // [SourceError.Render] returns what %+v prints, and both it and
 // [SourceError.Detail] accept [DetailOption] values for the [Printer] and the
@@ -572,19 +509,43 @@ func (e *SourceError) Unwrap() error {
 	return e.err
 }
 
-// Error returns the error message with its location resolved against the
-// source: "[line:col]" for a token or range, "[line:col] $.path" for a path
-// that resolves, and "at $.path" for one that does not. Context added
-// around the [Error] with [fmt.Errorf] or [errors.Join] is kept around the
-// resolved location, and every Error the tree holds resolves, so wrapping
-// before [Source.WrapError] and after it read the same. Nested errors are
-// not part of the message; see [SourceError.Detail].
+// Error returns the message of the bound error with its position in front
+// when the position was unknown before binding: a path error that resolves
+// reads "[line:col] $.path: msg", with any context a wrapper added between
+// the path and the position. A token or range error already carries its
+// position in the message, and a chain that holds a SourceError from an
+// earlier binding already carries the resolved one, so both come back as
+// they are. A path that does not resolve leaves the message as it is too.
+// Nested errors are not part of the message; see [SourceError.Detail].
 //
 // The result is plain text and never includes source lines, so it is safe to
 // log or compare. Use [SourceError.Detail] or the %+v verb for the annotated
 // source excerpt.
 func (e *SourceError) Error() string {
-	return resolveMessage(e.err, e.source, 0, false)
+	msg := e.err.Error()
+
+	// An earlier binding put the position it resolved into the text that
+	// the wrappers above it froze.
+	if _, ok := errors.AsType[*SourceError](e.err); ok { //nolint:errcheck // Presence check, not a value extraction.
+		return msg
+	}
+
+	root, a := e.located()
+	if a == nil {
+		return msg
+	}
+
+	// A token or range position is in the message already.
+	if _, ok := a.position(); ok {
+		return msg
+	}
+
+	loc, err := a.locate(e.source, root.defaultDocumentIndex())
+	if err != nil {
+		return msg
+	}
+
+	return prefixMessage(formatPosition(loc.pos), msg)
 }
 
 // located returns the outermost [*Error] in the chain and the anchor that
@@ -685,7 +646,7 @@ func (e *SourceError) Detail(opts ...DetailOption) (string, error) {
 	return detail, err
 }
 
-// detail is [SourceError.Detail] that also returns the headline of every
+// detail is [SourceError.Detail] that also returns the message of every
 // nested error the excerpt does not annotate, in the order the errors were
 // given.
 func (e *SourceError) detail(opts []DetailOption) (string, []string, error) {
@@ -701,7 +662,7 @@ func (e *SourceError) detail(opts []DetailOption) (string, []string, error) {
 
 	headlines := make([]string, 0, len(unresolved))
 	for _, nested := range unresolved {
-		headlines = append(headlines, nested.headline(e.source, nested.documentIndex(doc)))
+		headlines = append(headlines, nested.Error())
 	}
 
 	if len(positions) == 0 {

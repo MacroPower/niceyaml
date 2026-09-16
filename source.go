@@ -253,8 +253,11 @@ func (s *Source) parse() (*ast.File, error) {
 // The returned [*SourceError] resolves the location of that inner Error
 // against this source, and its [SourceError.Render] and
 // [SourceError.Detail] accept [DetailOption] values for how the excerpt
-// looks. Context added around the Error with [fmt.Errorf] is preserved in
-// the message.
+// looks. The message of err stays as it is, and the resolved position of a
+// path error goes in front of it, so bind a path error before adding
+// context with [fmt.Errorf] to keep the position beside the message:
+//
+//	fmt.Errorf("document %d: %w", i, source.WrapError(err))
 //
 // If err is nil, WrapError returns nil. If err's chain holds no [*Error], or
 // the first one it holds is a nil pointer, WrapError returns err unchanged.

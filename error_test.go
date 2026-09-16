@@ -255,21 +255,21 @@ func TestError_GracefulDegradation(t *testing.T) {
 				"not found",
 				niceyaml.WithPath(paths.Root().Child("nonexistent").Key()),
 			)),
-			want: "at $.nonexistent: not found",
+			want: "$.nonexistent: not found",
 		},
 		"path without source": {
 			err: niceyaml.NewError(
 				"missing source",
 				niceyaml.WithPath(paths.Root().Child("key").Key()),
 			),
-			want: "at $.key: missing source",
+			want: "$.key: missing source",
 		},
 		"empty source": {
 			err: niceyaml.NewSourceFromTokens(emptyTokens).WrapError(niceyaml.NewError(
 				"error in empty source",
 				niceyaml.WithPath(paths.Root().Child("key").Key()),
 			)),
-			want: "at $.key: error in empty source",
+			want: "$.key: error in empty source",
 		},
 		"nonexistent path in source": {
 			err: niceyaml.NewSourceFromString(source).WrapError(niceyaml.NewError(
@@ -278,7 +278,7 @@ func TestError_GracefulDegradation(t *testing.T) {
 					paths.Root().Child("nonexistent").Child("deep").Key(),
 				),
 			)),
-			want: "at $.nonexistent.deep: path not found",
+			want: "$.nonexistent.deep: path not found",
 		},
 		"empty document source": {
 			// Tests graceful handling when source has no documents (Docs slice is empty).
@@ -286,7 +286,7 @@ func TestError_GracefulDegradation(t *testing.T) {
 				"empty doc error",
 				niceyaml.WithPath(paths.Root().Child("key").Key()),
 			)),
-			want: "at $.key: empty doc error",
+			want: "$.key: empty doc error",
 		},
 	}
 
@@ -817,7 +817,7 @@ func TestError_MultiError(t *testing.T) {
 		// The nested error has no line to annotate, so it follows the
 		// excerpt with its unresolved location.
 		assert.NotContains(t, got, "^ nested error")
-		assert.True(t, strings.HasSuffix(got, "\n\nat $.nonexistent: nested error"), got)
+		assert.True(t, strings.HasSuffix(got, "\n\n$.nonexistent: nested error"), got)
 	})
 
 	t.Run("plain error with nested errors renders the headline only", func(t *testing.T) {
@@ -1005,7 +1005,7 @@ func TestError_MultiError(t *testing.T) {
 		assert.Contains(t, got, "^ resolvable error")
 		// The unresolvable error follows the excerpt instead of annotating it.
 		assert.NotContains(t, got, "^ unresolvable error")
-		assert.True(t, strings.HasSuffix(got, "\n\nat $.nonexistent: unresolvable error"), got)
+		assert.True(t, strings.HasSuffix(got, "\n\n$.nonexistent: unresolvable error"), got)
 	})
 
 	t.Run("nested-only error with nested error that has no path or token", func(t *testing.T) {
@@ -1143,7 +1143,7 @@ func TestSourceError_Render_ListsUnresolvedNested(t *testing.T) {
 	// No location resolves, so the message is the headline alone and the
 	// %+v form lists each nested error with its unresolved location.
 	assert.Equal(t, "2 schema violations", err.Error())
-	assert.Equal(t, "2 schema violations\n\nat $.x: bad x\nat $.y: bad y", render(err))
+	assert.Equal(t, "2 schema violations\n\n$.x: bad x\n$.y: bad y", render(err))
 }
 
 func TestError_NilInnerError(t *testing.T) {
@@ -1961,7 +1961,7 @@ func TestError_DocumentIndex(t *testing.T) {
 			niceyaml.WithDocumentIndex(5),
 		))
 
-		assert.Equal(t, "at $.name: bad name", render(err))
+		assert.Equal(t, "$.name: bad name", render(err))
 	})
 }
 
@@ -2026,11 +2026,15 @@ func TestError_WrappedContext(t *testing.T) {
 
 	wrapped := source.WrapError(fmt.Errorf("document 1: %w", inner))
 
-	// The message keeps the outer context around the inner Error's location,
-	// resolved against the source.
-	assert.Equal(t, "document 1: [3:7] $.name: bad name", wrapped.Error())
-	assert.Equal(t, "document 1: [3:7] $.name: bad name", fmt.Sprintf("%v", wrapped))
+	// The outer context stays as the wrapper wrote it, and the position the
+	// path resolves to goes in front of the whole message.
+	assert.Equal(t, "[3:7] document 1: $.name: bad name", wrapped.Error())
+	assert.Equal(t, "[3:7] document 1: $.name: bad name", fmt.Sprintf("%v", wrapped))
 	require.ErrorIs(t, wrapped, inner)
+
+	// Binding first keeps the position beside the message under the context.
+	boundFirst := fmt.Errorf("document 1: %w", source.WrapError(inner))
+	assert.Equal(t, "document 1: [3:7] $.name: bad name", boundFirst.Error())
 
 	var got *niceyaml.Error
 
@@ -2087,8 +2091,8 @@ func TestError_DocumentIndexAboveLocation(t *testing.T) {
 	assert.True(t, set)
 	assert.Equal(t, 1, idx)
 
-	// The headline keeps the producer's context around the resolved location.
-	assert.Equal(t, "validate: [3:7] $.name: bad name", wrapped.Error())
+	// The producer's context stays as written, behind the resolved position.
+	assert.Equal(t, "[3:7] validate: $.name: bad name", wrapped.Error())
 
 	// The highlight lands on the second document's value, not the first's.
 	var bound *niceyaml.SourceError
@@ -2132,7 +2136,7 @@ func TestError_NestedErrorsRenderAsAnnotations(t *testing.T) {
 	got := trimLines(bound.Render(niceyaml.WithPrinter(plain)))
 
 	assert.Equal(t, "document 0: validation failed at 2 locations", strings.SplitN(got, "\n", 2)[0])
-	assert.NotContains(t, got, "at $.a")
+	assert.NotContains(t, got, "$.a")
 	assert.Contains(t, got, "^ bad a")
 	assert.Contains(t, got, "^ bad b")
 }
@@ -2169,22 +2173,22 @@ type reformatError struct{ err error }
 func (r reformatError) Error() string { return "rewritten" }
 func (r reformatError) Unwrap() error { return r.err }
 
-func TestError_ResolvesEveryWrappedError(t *testing.T) {
+func TestSourceError_KeepsWrappedText(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("name: first\n---\nname: second\n")
 	namePath := paths.Root().Child("name").Value()
 
-	t.Run("nested wrappers keep their context", func(t *testing.T) {
+	t.Run("nested wrappers keep their text behind the position", func(t *testing.T) {
 		t.Parallel()
 
 		inner := niceyaml.NewError("bad name", niceyaml.WithPath(namePath))
 		wrapped := source.WrapError(fmt.Errorf("outer: %w", fmt.Errorf("inner: %w", inner)))
 
-		assert.Equal(t, "outer: inner: [1:7] $.name: bad name", wrapped.Error())
+		assert.Equal(t, "[1:7] outer: inner: $.name: bad name", wrapped.Error())
 	})
 
-	t.Run("every joined error resolves", func(t *testing.T) {
+	t.Run("a bound join reports the position of its first branch", func(t *testing.T) {
 		t.Parallel()
 
 		first := niceyaml.NewError("bad first", niceyaml.WithPath(namePath))
@@ -2198,20 +2202,62 @@ func TestError_ResolvesEveryWrappedError(t *testing.T) {
 			fmt.Errorf("b: %w", second),
 		))
 
-		// Each branch resolves in the document its own Error names.
-		assert.Equal(t, "a: [1:7] $.name: bad first\nb: [3:7] $.name: bad second", wrapped.Error())
+		// A SourceError has one location, the first Error's, and the text
+		// of the other branch stays as the join wrote it.
+		assert.Equal(t, "[1:7] a: $.name: bad first\nb: $.name: bad second", wrapped.Error())
+		require.ErrorIs(t, wrapped, second)
 	})
 
-	t.Run("a wrapper that rewrites the message keeps its text", func(t *testing.T) {
+	t.Run("binding each branch reports every position", func(t *testing.T) {
+		t.Parallel()
+
+		first := niceyaml.NewError("bad first", niceyaml.WithPath(namePath))
+		second := niceyaml.NewError(
+			"bad second",
+			niceyaml.WithPath(namePath),
+			niceyaml.WithDocumentIndex(1),
+		)
+		joined := errors.Join(
+			fmt.Errorf("a: %w", source.WrapError(first)),
+			fmt.Errorf("b: %w", source.WrapError(second)),
+		)
+
+		// Each branch resolves in the document its own Error names.
+		assert.Equal(t, "a: [1:7] $.name: bad first\nb: [3:7] $.name: bad second", joined.Error())
+	})
+
+	t.Run("a wrapper that rewrites the message still gets the position", func(t *testing.T) {
 		t.Parallel()
 
 		inner := niceyaml.NewError("bad name", niceyaml.WithPath(namePath))
 		wrapped := source.WrapError(fmt.Errorf("outer: %w", reformatError{inner}))
 
-		// The rewritten text holds no trace of the inner message, so there
-		// is nothing to resolve in place and nothing is inserted.
-		assert.Equal(t, "outer: rewritten", wrapped.Error())
+		// The position comes from the Error in the chain, not from its text,
+		// so a wrapper that hides the text does not hide the position.
+		assert.Equal(t, "[1:7] outer: rewritten", wrapped.Error())
 		require.ErrorIs(t, wrapped, inner)
+	})
+
+	t.Run("a token error keeps its position where the wrapper put it", func(t *testing.T) {
+		t.Parallel()
+
+		tk := source.Lines().TokenAt(position.New(2, 6))
+		inner := niceyaml.NewError("bad token", niceyaml.WithErrorToken(tk))
+		wrapped := source.WrapError(fmt.Errorf("document 1: %w", inner))
+
+		// The Error printed its own position, so binding adds none.
+		assert.Equal(t, "document 1: [3:7] bad token", wrapped.Error())
+	})
+
+	t.Run("a second binding adds no position", func(t *testing.T) {
+		t.Parallel()
+
+		inner := niceyaml.NewError("bad name", niceyaml.WithPath(namePath))
+		once := source.WrapError(inner)
+		twice := source.WrapError(fmt.Errorf("document 0: %w", once))
+
+		// The first binding froze its position into the wrapper's text.
+		assert.Equal(t, "document 0: [1:7] $.name: bad name", twice.Error())
 	})
 }
 
@@ -2382,7 +2428,7 @@ func TestSourceError_Detail_Errors(t *testing.T) {
 		"path that does not resolve": {
 			err:        niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("missing").Value())),
 			is:         paths.ErrNotFound,
-			wantRender: "at $.missing: bad",
+			wantRender: "$.missing: bad",
 		},
 		"range past the last line": {
 			err: niceyaml.NewError("bad",
@@ -2397,7 +2443,7 @@ func TestSourceError_Detail_Errors(t *testing.T) {
 				niceyaml.NewError("second", niceyaml.WithErrorToken(&token.Token{})),
 			)),
 			is:         niceyaml.ErrTokenNotFound,
-			wantRender: "bad\n\nat $.missing: first\nsecond",
+			wantRender: "bad\n\n$.missing: first\nsecond",
 		},
 	}
 

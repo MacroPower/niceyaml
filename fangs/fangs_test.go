@@ -199,7 +199,7 @@ func TestErrorHandler(t *testing.T) {
 			err: fmt.Errorf("document 0: %w", emptyMessageErr),
 			want: stringtest.JoinLF(
 				"Error",
-				"  document 0: ",
+				"  document 0: [1:1]",
 				"  ",
 				"  <genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
 				"  <nameTag>value</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>123</literalNumberInteger>",

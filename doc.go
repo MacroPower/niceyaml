@@ -57,15 +57,19 @@
 // palettes. Without one, [Printer] renders with [style.Default].
 //
 // [Error] points at a location in a YAML document: a path, a token, or a
-// range. [Error.Error] returns the message with that location, and nothing
-// more, so a validator can build one without holding the source.
+// range. [Error.Error] returns the message with that location, so a
+// validator can build one without holding the source. A token or range
+// position is known when the Error is built and reads "[line:col]"; a path
+// reads "$.path" until a source resolves it.
 //
 // [SourceError] binds an Error to its [Source]. [Source.WrapError] creates
-// one, [SourceError.Error] reports the location as a resolved position, and
-// [SourceError.Detail] renders the surrounding lines with the location
-// highlighted. The %+v verb prints both. Nested errors appear as annotations
-// below their respective lines, with distant errors displayed in separate
-// hunks.
+// one, [SourceError.Error] puts the resolved position of a path in front of
+// the message, and [SourceError.Detail] renders the surrounding lines with
+// the location highlighted. The %+v verb prints both. Nested errors appear as
+// annotations below their respective lines, with distant errors displayed in
+// separate hunks. A SourceError never rewrites the message it binds, so bind
+// an error before adding context with [fmt.Errorf] to keep the position
+// beside the message.
 //
 // # Lines
 //
