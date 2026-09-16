@@ -3,6 +3,7 @@ package niceyaml_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -448,6 +449,39 @@ func TestDocument_Decode_Schema(t *testing.T) {
 		assert.True(t, first)
 		assert.False(t, third, "a failing schema stops the pipeline")
 		assert.Equal(t, []string{"first"}, order)
+	})
+
+	t.Run("schemas share one untyped decode", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "name: test\n")
+
+		var seen []any
+
+		record := func() niceyaml.SchemaValidator {
+			return yamltest.NewCustomSchemaValidator(func(_ context.Context, data any) error {
+				seen = append(seen, data)
+
+				return nil
+			})
+		}
+		first, second := record(), record()
+
+		_, err := dd.Decode[plainConfig](t.Context(),
+			niceyaml.WithSchema(first),
+			niceyaml.WithSchema(second),
+		)
+		require.NoError(t, err)
+		require.Len(t, seen, 2)
+
+		firstData, ok := seen[0].(map[string]any)
+		require.True(t, ok)
+
+		secondData, ok := seen[1].(map[string]any)
+		require.True(t, ok)
+
+		assert.Equal(t, reflect.ValueOf(firstData).Pointer(), reflect.ValueOf(secondData).Pointer(),
+			"both schemas receive the same decoded value")
 	})
 
 	t.Run("schema validation fails - no decode", func(t *testing.T) {

@@ -392,17 +392,9 @@ func (dd *Document) node(path paths.Path) (ast.Node, error) {
 // Returns decoding errors or errors from the [SchemaValidator] ValidateSchema
 // method.
 func (dd *Document) ValidateSchema(ctx context.Context, sv SchemaValidator) error {
-	return dd.validateSchema(ctx, dd.doc.Body, sv, nil)
-}
-
-// validateSchema decodes node to [any] with yamlOpts and validates it using
-// sv, attaching the document index to a validation error.
-func (dd *Document) validateSchema(
-	ctx context.Context, node ast.Node, sv SchemaValidator, yamlOpts []yaml.DecodeOption,
-) error {
 	var untypedData any
 
-	err := dd.decodeNode(ctx, node, &untypedData, yamlOpts)
+	err := dd.decodeNode(ctx, dd.doc.Body, &untypedData, nil)
 	if err != nil {
 		return err
 	}
@@ -462,10 +454,10 @@ type decodeConfig struct {
 }
 
 // WithSchema is a [DecodeOption] that validates the document against sv
-// before decoding it. The document is decoded to [any] and handed to
+// before decoding it. The document is decoded to [any] once and handed to
 // ValidateSchema, and a validation error ends the decode before any typed
-// decoding. Several schemas run in the order given, stopping at the first
-// that fails:
+// decoding. Several schemas receive the same value in the order given,
+// stopping at the first that fails:
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithSchema(validator))
 func WithSchema(sv SchemaValidator) DecodeOption {
@@ -552,9 +544,9 @@ func (dd *Document) DecodeInto(ctx context.Context, v any, opts ...DecodeOption)
 }
 
 // decodeInto runs the decode pipeline on node: the schemas from opts check
-// it, the document validators from opts check the document, the decoder
-// fills v with the options from the [Source] and from opts, and v validates
-// itself unless opts switch that off.
+// one untyped decode of it, the document validators from opts check the
+// document, the decoder fills v with the options from the [Source] and from
+// opts, and v validates itself unless opts switch that off.
 func (dd *Document) decodeInto(ctx context.Context, node ast.Node, v any, opts []DecodeOption) error {
 	var cfg decodeConfig
 
@@ -562,10 +554,19 @@ func (dd *Document) decodeInto(ctx context.Context, node ast.Node, v any, opts [
 		opt(&cfg)
 	}
 
-	for _, sv := range cfg.schemas {
-		err := dd.validateSchema(ctx, node, sv, cfg.yamlOpts)
+	if len(cfg.schemas) > 0 {
+		var untypedData any
+
+		err := dd.decodeNode(ctx, node, &untypedData, cfg.yamlOpts)
 		if err != nil {
 			return err
+		}
+
+		for _, sv := range cfg.schemas {
+			err := sv.ValidateSchema(ctx, untypedData)
+			if err != nil {
+				return dd.locate(err)
+			}
 		}
 	}
 
