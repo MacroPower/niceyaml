@@ -643,7 +643,7 @@ func TestDocument_Decode_Validator(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, `name: ""`)
 
-		result, err := dd.Decode[validatorConfig](t.Context(), niceyaml.WithoutValidator())
+		result, err := dd.Decode[validatorConfig](t.Context(), niceyaml.WithSelfValidation(false))
 		require.NoError(t, err)
 		assert.False(t, result.validated, "Validate() should NOT have been called with WithoutValidator")
 	})
@@ -655,9 +655,21 @@ func TestDocument_Decode_Validator(t *testing.T) {
 
 		_, err := dd.Decode[validatorConfig](t.Context(),
 			niceyaml.WithSchema(nameSchema(nil)),
-			niceyaml.WithoutValidator(),
+			niceyaml.WithSelfValidation(false),
 		)
 		require.ErrorIs(t, err, errSchemaValidationFailed)
+	})
+
+	t.Run("a later true turns Validate back on", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, `name: ""`)
+
+		_, err := dd.Decode[validatorConfig](t.Context(),
+			niceyaml.WithSelfValidation(false),
+			niceyaml.WithSelfValidation(true),
+		)
+		require.ErrorIs(t, err, errNameRequired, "Validate() should have been called")
 	})
 
 	t.Run("struct without Validator decodes normally", func(t *testing.T) {
@@ -1211,7 +1223,7 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 		require.NoError(t, err)
 
 		for _, dd := range d.All() {
-			_, err := dd.Decode[strictConfig](t.Context(), niceyaml.WithDisallowUnknownFields())
+			_, err := dd.Decode[strictConfig](t.Context(), niceyaml.WithDisallowUnknownFields(true))
 			require.Error(t, err)
 
 			var yamlErr *niceyaml.Error
@@ -1234,13 +1246,26 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 		// The same document decodes strictly on one call and loosely on the
 		// next, so the option belongs to the call rather than the Source.
 		for _, dd := range d.All() {
-			_, err := dd.Decode[strictConfig](t.Context(), niceyaml.WithDisallowUnknownFields())
+			_, err := dd.Decode[strictConfig](t.Context(), niceyaml.WithDisallowUnknownFields(true))
 			require.Error(t, err)
 
 			result, err := dd.Decode[strictConfig](t.Context())
 			require.NoError(t, err)
 			assert.Equal(t, "test", result.Name)
 		}
+	})
+
+	t.Run("a later false turns the option off", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "name: test\nextra: field\n")
+
+		result, err := dd.Decode[strictConfig](t.Context(),
+			niceyaml.WithDisallowUnknownFields(true),
+			niceyaml.WithDisallowUnknownFields(false),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "test", result.Name)
 	})
 
 	t.Run("option applies to Get", func(t *testing.T) {
@@ -1258,7 +1283,7 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 		innerPath := paths.Root().Child("inner")
 
 		for _, dd := range d.All() {
-			_, err := dd.Get[strictConfig](t.Context(), innerPath, niceyaml.WithDisallowUnknownFields())
+			_, err := dd.Get[strictConfig](t.Context(), innerPath, niceyaml.WithDisallowUnknownFields(true))
 			require.Error(t, err)
 
 			var yamlErr *niceyaml.Error
@@ -1289,7 +1314,7 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 		var errCount int
 
 		for _, dd := range d.All() {
-			_, err := dd.Decode[strictConfig](t.Context(), niceyaml.WithDisallowUnknownFields())
+			_, err := dd.Decode[strictConfig](t.Context(), niceyaml.WithDisallowUnknownFields(true))
 			if err != nil {
 				errCount++
 			}
@@ -1496,7 +1521,7 @@ func TestDocument_DecodeInto(t *testing.T) {
 
 		var result validatorConfig
 
-		err := dd.DecodeInto(t.Context(), &result, niceyaml.WithoutValidator())
+		err := dd.DecodeInto(t.Context(), &result, niceyaml.WithSelfValidation(false))
 		require.NoError(t, err)
 		assert.False(t, result.validated, "Validate() should NOT have been called with WithoutValidator")
 	})
@@ -1573,7 +1598,7 @@ func TestWithAllowDuplicateKeys(t *testing.T) {
 	t.Run("with option the last value wins", func(t *testing.T) {
 		t.Parallel()
 
-		d, err := niceyaml.NewSourceFromString(input, niceyaml.WithAllowDuplicateKeys()).Documents()
+		d, err := niceyaml.NewSourceFromString(input, niceyaml.WithAllowDuplicateKeys(true)).Documents()
 		require.NoError(t, err)
 
 		for _, dd := range d.All() {
@@ -1581,6 +1606,17 @@ func TestWithAllowDuplicateKeys(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, "second", result.Name)
 		}
+	})
+
+	t.Run("a later false turns the option off", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := niceyaml.NewSourceFromString(input,
+			niceyaml.WithAllowDuplicateKeys(true),
+			niceyaml.WithAllowDuplicateKeys(false),
+		).Documents()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `mapping key "name" already defined`)
 	})
 }
 

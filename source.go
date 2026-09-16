@@ -62,6 +62,8 @@ type Source struct {
 	parserOpts []parser.Option
 	decodeOpts []yaml.DecodeOption
 	fileOnce   sync.Once
+	// Accepts a mapping with the same key twice when parsing and decoding.
+	allowDuplicateKeys bool
 }
 
 // SourceOption configures [Source] creation.
@@ -97,14 +99,13 @@ func WithFilePath(path string) SourceOption {
 	}
 }
 
-// WithAllowDuplicateKeys is a [SourceOption] that accepts a mapping with the
-// same key twice, both when [Source.File] parses the document and when
-// [Document] decodes it. The last value wins. Without it a duplicate
-// key is an error.
-func WithAllowDuplicateKeys() SourceOption {
+// WithAllowDuplicateKeys is a [SourceOption] that sets whether a mapping may
+// hold the same key twice, both when [Source.File] parses the document and
+// when [Document] decodes it. When allowed, the last value wins. The default
+// is false, and a duplicate key is then an error.
+func WithAllowDuplicateKeys(allow bool) SourceOption {
 	return func(s *Source) {
-		s.parserOpts = append(s.parserOpts, parser.AllowDuplicateMapKey())
-		s.decodeOpts = append(s.decodeOpts, yaml.AllowDuplicateMapKey())
+		s.allowDuplicateKeys = allow
 	}
 }
 
@@ -155,6 +156,11 @@ func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 	t := &Source{}
 	for _, opt := range opts {
 		opt(t)
+	}
+
+	if t.allowDuplicateKeys {
+		t.parserOpts = append(t.parserOpts, parser.AllowDuplicateMapKey())
+		t.decodeOpts = append(t.decodeOpts, yaml.AllowDuplicateMapKey())
 	}
 
 	t.lines = line.NewLines(tks)

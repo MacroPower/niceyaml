@@ -50,17 +50,18 @@ type splitDocumentsConfig struct {
 	resetPositions bool
 }
 
-// WithResetPositions is a [SplitDocumentsOption] that resets token positions
-// so they match a fresh tokenize of each document's text, which starts from
-// line 1, column 1. A first token whose Origin opens with a line break, such
-// as the one after a "..." marker, starts below line 1, where a fresh
-// tokenize places it.
+// WithResetPositions is a [SplitDocumentsOption] that sets whether token
+// positions are reset to match a fresh tokenize of each document's text,
+// which starts from line 1, column 1. A first token whose Origin opens with
+// a line break, such as the one after a "..." marker, starts below line 1,
+// where a fresh tokenize places it.
 //
-// When enabled, tokens are cloned and their positions adjusted relative to the
-// document's start. By default, positions are preserved from the original source.
-func WithResetPositions() SplitDocumentsOption {
+// When enabled, tokens are cloned and their positions adjusted relative to
+// the document's start. The default is false, and the tokens then keep the
+// positions they have in the original source.
+func WithResetPositions(reset bool) SplitDocumentsOption {
 	return func(cfg *splitDocumentsConfig) {
-		cfg.resetPositions = true
+		cfg.resetPositions = reset
 	}
 }
 

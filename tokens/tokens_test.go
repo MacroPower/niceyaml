@@ -370,7 +370,7 @@ func TestSplitDocuments_WithResetPositions(t *testing.T) {
 				PositionLine(5).PositionColumn(8).PositionOffset(105).Build(),
 		}
 
-		got := collectDocs(tokens.SplitDocuments(input, tokens.WithResetPositions()))
+		got := collectDocs(tokens.SplitDocuments(input, tokens.WithResetPositions(true)))
 
 		require.Len(t, got, 1)
 		require.Len(t, got[0], 3)
@@ -404,7 +404,7 @@ func TestSplitDocuments_WithResetPositions(t *testing.T) {
 
 		input := token.Tokens{doc1Key, header, doc2Key}
 
-		got := collectDocs(tokens.SplitDocuments(input, tokens.WithResetPositions()))
+		got := collectDocs(tokens.SplitDocuments(input, tokens.WithResetPositions(true)))
 
 		require.Len(t, got, 2)
 
@@ -423,6 +423,24 @@ func TestSplitDocuments_WithResetPositions(t *testing.T) {
 		assert.Equal(t, 2, got[1][1].Position.Line) // Key on next line.
 		assert.Equal(t, 1, got[1][1].Position.Column)
 		assert.Equal(t, 6, got[1][1].Position.Offset)
+	})
+
+	t.Run("a later false keeps the original tokens", func(t *testing.T) {
+		t.Parallel()
+
+		input := lexer.Tokenize("key: value\n")
+
+		docs := collectDocs(tokens.SplitDocuments(input,
+			tokens.WithResetPositions(true),
+			tokens.WithResetPositions(false),
+		))
+
+		require.Len(t, docs, 1)
+		require.Len(t, docs[0], len(input))
+
+		for i, tk := range docs[0] {
+			assert.Same(t, input[i], tk)
+		}
 	})
 
 	t.Run("preserves original tokens when option not used", func(t *testing.T) {
@@ -456,7 +474,7 @@ func TestSplitDocuments_WithResetPositions(t *testing.T) {
 			PositionLine(5).PositionColumn(3).PositionOffset(100).Build()
 		input := token.Tokens{original}
 
-		got := collectDocs(tokens.SplitDocuments(input, tokens.WithResetPositions()))
+		got := collectDocs(tokens.SplitDocuments(input, tokens.WithResetPositions(true)))
 
 		require.Len(t, got, 1)
 		require.Len(t, got[0], 1)
@@ -482,7 +500,7 @@ func TestSplitDocuments_WithResetPositions(t *testing.T) {
 
 		input := token.Tokens{blockIndicator, blockContent}
 
-		got := collectDocs(tokens.SplitDocuments(input, tokens.WithResetPositions()))
+		got := collectDocs(tokens.SplitDocuments(input, tokens.WithResetPositions(true)))
 
 		require.Len(t, got, 1)
 		require.Len(t, got[0], 2)
@@ -506,7 +524,7 @@ func TestSplitDocuments_WithResetPositions(t *testing.T) {
 			&token.Token{Type: token.StringType, Value: "test", Position: nil},
 		}
 
-		got := collectDocs(tokens.SplitDocuments(input, tokens.WithResetPositions()))
+		got := collectDocs(tokens.SplitDocuments(input, tokens.WithResetPositions(true)))
 
 		require.Len(t, got, 1)
 		require.Len(t, got[0], 1)
@@ -516,7 +534,7 @@ func TestSplitDocuments_WithResetPositions(t *testing.T) {
 	t.Run("handles empty input", func(t *testing.T) {
 		t.Parallel()
 
-		got := collectDocs(tokens.SplitDocuments(nil, tokens.WithResetPositions()))
+		got := collectDocs(tokens.SplitDocuments(nil, tokens.WithResetPositions(true)))
 
 		assert.Empty(t, got)
 	})
@@ -541,7 +559,7 @@ func TestSplitDocuments_WithResetPositions(t *testing.T) {
 
 		input := token.Tokens{doc1, header2, doc2, header3, doc3}
 
-		got := collectDocs(tokens.SplitDocuments(input, tokens.WithResetPositions()))
+		got := collectDocs(tokens.SplitDocuments(input, tokens.WithResetPositions(true)))
 
 		require.Len(t, got, 3)
 
@@ -560,7 +578,7 @@ func TestSplitDocuments_WithResetPositions(t *testing.T) {
 
 // resetOne splits tks as a single document with reset positions.
 func resetOne(tks token.Tokens) token.Tokens {
-	for _, doc := range tokens.SplitDocuments(tks, tokens.WithResetPositions()) {
+	for _, doc := range tokens.SplitDocuments(tks, tokens.WithResetPositions(true)) {
 		return doc
 	}
 
@@ -591,7 +609,7 @@ func TestSplitDocuments_ResetPositions(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				for i, doc := range tokens.SplitDocuments(lexer.Tokenize(tc.input), tokens.WithResetPositions()) {
+				for i, doc := range tokens.SplitDocuments(lexer.Tokenize(tc.input), tokens.WithResetPositions(true)) {
 					// A document's text is the Origins of its tokens.
 					fresh := lexer.Tokenize(yamltest.DumpTokenOrigins(doc))
 					require.Len(t, doc, len(fresh), "document %d", i)

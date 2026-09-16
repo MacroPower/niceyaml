@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"slices"
 	"sort"
 
 	"github.com/goccy/go-yaml"
@@ -20,7 +21,7 @@ import (
 //
 // [Document.Decode] and [Document.DecodeInto] call Validate
 // after decoding into a value that implements it, unless
-// [WithoutValidator] switches that off.
+// [WithSelfValidation] switches that off.
 type Validator interface {
 	Validate() error
 }
@@ -191,7 +192,7 @@ func (d *Documents) document(index int) *Document {
 // [SchemaValidator] given with [WithSchema] and each [DocumentValidator]
 // given with [WithDocumentValidator] checks the document before decoding,
 // and a value that implements [Validator] validates itself after, unless
-// [WithoutValidator] is given.
+// [WithSelfValidation] switches that off.
 //
 //	for _, doc := range docs.All() {
 //		config, err := doc.Decode[Config](ctx, niceyaml.WithSchema(validator))
@@ -440,17 +441,38 @@ func (dd *Document) locate(err error) error {
 // Available options:
 //   - [WithSchema]
 //   - [WithDocumentValidator]
-//   - [WithoutValidator]
+//   - [WithSelfValidation]
 //   - [WithDisallowUnknownFields]
 //   - [WithYAMLDecodeOptions]
 type DecodeOption func(*decodeConfig)
 
 // decodeConfig holds the settings a [DecodeOption] configures.
 type decodeConfig struct {
-	schemas          []SchemaValidator
-	docValidators    []DocumentValidator
-	yamlOpts         []yaml.DecodeOption
-	withoutValidator bool
+	schemas               []SchemaValidator
+	docValidators         []DocumentValidator
+	yamlOpts              []yaml.DecodeOption
+	selfValidation        bool
+	disallowUnknownFields bool
+}
+
+// newDecodeConfig applies opts over the defaults.
+func newDecodeConfig(opts []DecodeOption) decodeConfig {
+	cfg := decodeConfig{selfValidation: true}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	return cfg
+}
+
+// decodeOptions returns the go-yaml options for one decode: the escape
+// hatch options as given, then the ones the named settings stand for.
+func (c decodeConfig) decodeOptions() []yaml.DecodeOption {
+	if !c.disallowUnknownFields {
+		return c.yamlOpts
+	}
+
+	return append(slices.Clone(c.yamlOpts), yaml.DisallowUnknownField())
 }
 
 // WithSchema is a [DecodeOption] that validates the document against sv
@@ -480,20 +502,23 @@ func WithDocumentValidator(dv DocumentValidator) DecodeOption {
 	}
 }
 
-// WithoutValidator is a [DecodeOption] that skips the Validate method of a
-// decoded value that implements [Validator]. Schemas given with [WithSchema]
-// still run.
-func WithoutValidator() DecodeOption {
+// WithSelfValidation is a [DecodeOption] that sets whether a decoded value
+// that implements [Validator] validates itself after decoding. The default
+// is true. Schemas given with [WithSchema] and document validators given
+// with [WithDocumentValidator] run either way.
+func WithSelfValidation(enabled bool) DecodeOption {
 	return func(c *decodeConfig) {
-		c.withoutValidator = true
+		c.selfValidation = enabled
 	}
 }
 
-// WithDisallowUnknownFields is a [DecodeOption] that rejects a mapping key
-// that has no field in the target struct. Without it unknown keys are
-// ignored.
-func WithDisallowUnknownFields() DecodeOption {
-	return WithYAMLDecodeOptions(yaml.DisallowUnknownField())
+// WithDisallowUnknownFields is a [DecodeOption] that sets whether a mapping
+// key with no field in the target struct is an error. The default is false,
+// and unknown keys are then ignored.
+func WithDisallowUnknownFields(disallow bool) DecodeOption {
+	return func(c *decodeConfig) {
+		c.disallowUnknownFields = disallow
+	}
 }
 
 // WithYAMLDecodeOptions is a [DecodeOption] that passes [yaml.DecodeOption]
@@ -511,7 +536,7 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 // Each [SchemaValidator] from [WithSchema] and each [DocumentValidator]
 // from [WithDocumentValidator] runs before decoding. If *T
 // implements [Validator], Validate is called after successful decoding
-// unless [WithoutValidator] is given. Methods declared on T itself are
+// unless [WithSelfValidation] switches that off. Methods declared on T itself are
 // included in the method set of *T, so both value and pointer receivers
 // participate. YAML decoding errors are converted to [Error] with source
 // annotations. On error, the returned T is the zero value.
@@ -536,7 +561,7 @@ func (dd *Document) Decode[T any](ctx context.Context, opts ...DecodeOption) (T,
 // Each [SchemaValidator] from [WithSchema] and each [DocumentValidator]
 // from [WithDocumentValidator] runs before decoding. If v
 // implements [Validator], Validate is called after successful decoding
-// unless [WithoutValidator] is given. Fields absent from the document keep
+// unless [WithSelfValidation] switches that off. Fields absent from the document keep
 // their existing values, so v may be pre-populated with defaults. YAML
 // decoding errors are converted to [Error] with source annotations.
 func (dd *Document) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
@@ -548,16 +573,13 @@ func (dd *Document) DecodeInto(ctx context.Context, v any, opts ...DecodeOption)
 // document, the decoder fills v with the options from the [Source] and from
 // opts, and v validates itself unless opts switch that off.
 func (dd *Document) decodeInto(ctx context.Context, node ast.Node, v any, opts []DecodeOption) error {
-	var cfg decodeConfig
-
-	for _, opt := range opts {
-		opt(&cfg)
-	}
+	cfg := newDecodeConfig(opts)
+	yamlOpts := cfg.decodeOptions()
 
 	if len(cfg.schemas) > 0 {
 		var untypedData any
 
-		err := dd.decodeNode(ctx, node, &untypedData, cfg.yamlOpts)
+		err := dd.decodeNode(ctx, node, &untypedData, yamlOpts)
 		if err != nil {
 			return err
 		}
@@ -577,12 +599,12 @@ func (dd *Document) decodeInto(ctx context.Context, node ast.Node, v any, opts [
 		}
 	}
 
-	err := dd.decodeNode(ctx, node, v, cfg.yamlOpts)
+	err := dd.decodeNode(ctx, node, v, yamlOpts)
 	if err != nil {
 		return err
 	}
 
-	if cfg.withoutValidator {
+	if !cfg.selfValidation {
 		return nil
 	}
 
