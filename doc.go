@@ -120,17 +120,17 @@
 //	source := niceyaml.NewSourceFromString(yamlContent)
 //	docs, _ := source.Documents()
 //	for _, doc := range docs.All() {
-//		config, err := doc.Decode[Config](ctx, niceyaml.WithSchema(validator))
+//		config, err := doc.Decode[Config](ctx, niceyaml.WithSchemaValidator(validator))
 //		if err != nil {
 //			return source.WrapError(err)
 //		}
 //	}
 //
 // [Document.Decode] supports three validation hooks: a [SchemaValidator]
-// passed with [WithSchema] checks the document against an external schema
-// before decoding, a [DocumentValidator] passed with [WithDocumentValidator]
-// checks the whole document before decoding, and a type implementing
-// [Validator] validates itself after decoding. A
+// passed with [WithSchemaValidator] checks the document against an external
+// schema before decoding, a [DocumentValidator] passed with
+// [WithDocumentValidator] checks the whole document before decoding, and a
+// type implementing [Validator] validates itself after decoding. A
 // [go.jacobcolvin.com/niceyaml/schema/registry.Registry] is a
 // DocumentValidator, so a document decodes against the schema the registry
 // picks for it:

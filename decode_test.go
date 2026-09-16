@@ -412,7 +412,7 @@ func TestDocument_Decode_Schema(t *testing.T) {
 		for _, dd := range d.All() {
 			var called bool
 
-			result, err := dd.Decode[plainConfig](t.Context(), niceyaml.WithSchema(nameSchema(&called)))
+			result, err := dd.Decode[plainConfig](t.Context(), niceyaml.WithSchemaValidator(nameSchema(&called)))
 			require.NoError(t, err)
 			assert.Equal(t, "test", result.Name)
 			assert.Equal(t, 42, result.Value)
@@ -441,9 +441,9 @@ func TestDocument_Decode_Schema(t *testing.T) {
 		}
 
 		_, err := dd.Decode[plainConfig](t.Context(),
-			niceyaml.WithSchema(record("first", &first)),
-			niceyaml.WithSchema(nameSchema(nil)),
-			niceyaml.WithSchema(record("third", &third)),
+			niceyaml.WithSchemaValidator(record("first", &first)),
+			niceyaml.WithSchemaValidator(nameSchema(nil)),
+			niceyaml.WithSchemaValidator(record("third", &third)),
 		)
 		require.ErrorIs(t, err, errSchemaValidationFailed)
 		assert.True(t, first)
@@ -468,8 +468,8 @@ func TestDocument_Decode_Schema(t *testing.T) {
 		first, second := record(), record()
 
 		_, err := dd.Decode[plainConfig](t.Context(),
-			niceyaml.WithSchema(first),
-			niceyaml.WithSchema(second),
+			niceyaml.WithSchemaValidator(first),
+			niceyaml.WithSchemaValidator(second),
 		)
 		require.NoError(t, err)
 		require.Len(t, seen, 2)
@@ -496,7 +496,7 @@ func TestDocument_Decode_Schema(t *testing.T) {
 		require.NoError(t, err)
 
 		for _, dd := range d.All() {
-			_, err := dd.Decode[plainConfig](t.Context(), niceyaml.WithSchema(nameSchema(nil)))
+			_, err := dd.Decode[plainConfig](t.Context(), niceyaml.WithSchemaValidator(nameSchema(nil)))
 			require.ErrorIs(t, err, errSchemaValidationFailed)
 		}
 	})
@@ -583,7 +583,7 @@ func TestDocument_Decode_SchemaThenDecodeError(t *testing.T) {
 	for _, dd := range d.All() {
 		// Schema validation passes, but decode will fail due to type mismatch.
 		_, err := dd.Decode[strictValueConfig](t.Context(),
-			niceyaml.WithSchema(yamltest.NewPassingSchemaValidator()),
+			niceyaml.WithSchemaValidator(yamltest.NewPassingSchemaValidator()),
 		)
 
 		require.Error(t, err)
@@ -654,7 +654,7 @@ func TestDocument_Decode_Validator(t *testing.T) {
 		dd := yamltest.FirstDocument(t, "name: invalid")
 
 		_, err := dd.Decode[validatorConfig](t.Context(),
-			niceyaml.WithSchema(nameSchema(nil)),
+			niceyaml.WithSchemaValidator(nameSchema(nil)),
 			niceyaml.WithSelfValidation(false),
 		)
 		require.ErrorIs(t, err, errSchemaValidationFailed)
@@ -705,7 +705,10 @@ func TestDocument_Decode_Validator(t *testing.T) {
 		for _, dd := range d.All() {
 			var called bool
 
-			result, err := dd.Decode[bothValidatorConfig](t.Context(), niceyaml.WithSchema(nameSchema(&called)))
+			result, err := dd.Decode[bothValidatorConfig](
+				t.Context(),
+				niceyaml.WithSchemaValidator(nameSchema(&called)),
+			)
 			require.NoError(t, err)
 			assert.True(t, called, "ValidateSchema() should have been called")
 			assert.True(t, result.validated, "Validate() should have been called after decode")
@@ -1506,7 +1509,7 @@ func TestDocument_DecodeInto(t *testing.T) {
 
 		var called bool
 
-		err := dd.DecodeInto(t.Context(), &result, niceyaml.WithSchema(nameSchema(&called)))
+		err := dd.DecodeInto(t.Context(), &result, niceyaml.WithSchemaValidator(nameSchema(&called)))
 		require.NoError(t, err)
 		assert.Equal(t, "test", result.Name)
 		assert.Equal(t, 7, result.Value)
@@ -1689,7 +1692,7 @@ func TestDocument_Decode_DocumentValidator(t *testing.T) {
 
 		_, err := dd.Decode[plainConfig](t.Context(),
 			niceyaml.WithDocumentValidator(record("first", nil)),
-			niceyaml.WithSchema(schema),
+			niceyaml.WithSchemaValidator(schema),
 			niceyaml.WithDocumentValidator(record("second", errDocumentRejected)),
 			niceyaml.WithDocumentValidator(record("third", nil)),
 		)

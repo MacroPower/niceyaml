@@ -42,7 +42,7 @@
 //
 // To validate and decode in one step, pass the validator to
 // [go.jacobcolvin.com/niceyaml.Document.Decode] with
-// [go.jacobcolvin.com/niceyaml.WithSchema].
+// [go.jacobcolvin.com/niceyaml.WithSchemaValidator].
 //
 // # Resolution
 //
