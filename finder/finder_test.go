@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/differ"
+	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/finder"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/normalizer"
@@ -435,7 +435,7 @@ func TestFinder_Find_DiffBuiltLines(t *testing.T) {
 	beforeLines := niceyaml.NewSourceFromString(before, niceyaml.WithName("before"))
 	afterLines := niceyaml.NewSourceFromString(after, niceyaml.WithName("after"))
 
-	lines := differ.Diff(beforeLines, afterLines).Unified()
+	lines := diff.Diff(beforeLines, afterLines).Unified()
 
 	tcs := map[string]struct {
 		search string

@@ -66,7 +66,7 @@
 // their original order.
 //
 // [View] is the read-only interface over a Lines value that the printer,
-// finder, and differ packages accept. Lines implements it directly, and a
+// finder, and diff packages accept. Lines implements it directly, and a
 // niceyaml Source implements it over its pristine lines, so those utilities
 // take either.
 //

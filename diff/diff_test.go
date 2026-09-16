@@ -1,4 +1,4 @@
-package differ_test
+package diff_test
 
 import (
 	"testing"
@@ -8,7 +8,7 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/differ"
+	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style"
@@ -24,7 +24,7 @@ func TestDiffer_Views(t *testing.T) {
 	// copies the lines it is given.
 	after.AddOverlay(style.GenericHighlight, position.NewRange(position.New(1, 0), position.New(1, 1)))
 
-	result := differ.Diff(before, after)
+	result := diff.Diff(before, after)
 
 	// Lines has no name, so the name holds only the separator.
 	assert.Equal(t, "..", result.Name())
@@ -38,7 +38,7 @@ func TestDiffer_Views(t *testing.T) {
 	assert.Len(t, got[2].Overlays(), 1)
 
 	// The diff of a diff is a view of a view.
-	again := differ.Diff(got, got)
+	again := diff.Diff(got, got)
 	assert.Equal(t, 3, again.Unified().Len())
 }
 
@@ -383,7 +383,7 @@ func TestDiffer_Full(t *testing.T) {
 			beforeTokens := niceyaml.NewSourceFromString(tc.before, niceyaml.WithName("a"))
 			afterTokens := niceyaml.NewSourceFromString(tc.after, niceyaml.WithName("b"))
 
-			result := differ.Diff(beforeTokens, afterTokens)
+			result := diff.Diff(beforeTokens, afterTokens)
 
 			got := result.Unified()
 
@@ -455,7 +455,7 @@ func TestDiffer_Full_Flags(t *testing.T) {
 			beforeTokens := niceyaml.NewSourceFromString(tc.before, niceyaml.WithName("a"))
 			afterTokens := niceyaml.NewSourceFromString(tc.after, niceyaml.WithName("b"))
 
-			result := differ.Diff(beforeTokens, afterTokens)
+			result := diff.Diff(beforeTokens, afterTokens)
 
 			got := result.Unified()
 
@@ -577,7 +577,7 @@ func TestDiffer_Hunks(t *testing.T) {
 			beforeTokens := niceyaml.NewSourceFromString(tc.before, niceyaml.WithName("a"))
 			afterTokens := niceyaml.NewSourceFromString(tc.after, niceyaml.WithName("b"))
 
-			result := differ.Diff(beforeTokens, afterTokens)
+			result := diff.Diff(beforeTokens, afterTokens)
 			got := result.Hunks(tc.context)
 
 			if tc.wantEmpty {
@@ -646,7 +646,7 @@ func TestDiffer_IsEmpty(t *testing.T) {
 			beforeTokens := niceyaml.NewSourceFromString(tc.before, niceyaml.WithName("a"))
 			afterTokens := niceyaml.NewSourceFromString(tc.after, niceyaml.WithName("b"))
 
-			result := differ.Diff(beforeTokens, afterTokens)
+			result := diff.Diff(beforeTokens, afterTokens)
 
 			assert.Equal(t, tc.want, result.IsEmpty())
 		})
@@ -695,7 +695,7 @@ func TestDiffResult_Stats(t *testing.T) {
 			beforeSrc := niceyaml.NewSourceFromString(tt.before, niceyaml.WithName("a"))
 			afterSrc := niceyaml.NewSourceFromString(tt.after, niceyaml.WithName("b"))
 
-			result := differ.Diff(
+			result := diff.Diff(
 				beforeSrc,
 				afterSrc,
 			)
@@ -918,7 +918,7 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 			beforeSrc := niceyaml.NewSourceFromString(tc.before, niceyaml.WithName("a"))
 			afterSrc := niceyaml.NewSourceFromString(tc.after, niceyaml.WithName("b"))
 
-			result := differ.Diff(
+			result := diff.Diff(
 				beforeSrc,
 				afterSrc,
 			)
@@ -1003,7 +1003,7 @@ func TestDiffer_MultipleRenders(t *testing.T) {
 	beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
 	afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
 
-	result := differ.Diff(beforeTokens, afterTokens)
+	result := diff.Diff(beforeTokens, afterTokens)
 
 	// Call Full multiple times.
 	full1 := result.Unified()
@@ -1031,7 +1031,7 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 
 	before := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("a"))
 	after := niceyaml.NewSourceFromString("a: 1\nb: 3\n", niceyaml.WithName("b"))
-	result := differ.Diff(before, after)
+	result := diff.Diff(before, after)
 
 	highlight := position.NewRange(position.New(0, 0), position.New(0, 1))
 
@@ -1060,7 +1060,7 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 	t.Run("Hunks without changes", func(t *testing.T) {
 		t.Parallel()
 
-		assert.Nil(t, differ.Diff(before, before).Hunks(1))
+		assert.Nil(t, diff.Diff(before, before).Hunks(1))
 	})
 
 	t.Run("inputs are untouched", func(t *testing.T) {
@@ -1073,7 +1073,7 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 	})
 }
 
-// hunkCount returns the number of hunks in a view from [differ.Result.Hunks],
+// hunkCount returns the number of hunks in a view from [diff.Result.Hunks],
 // which is the number of lines carrying a hunk header above them.
 func hunkCount(lines line.Lines) int {
 	count := 0

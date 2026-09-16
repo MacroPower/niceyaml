@@ -13,7 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/differ"
+	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/finder"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/normalizer"
@@ -152,7 +152,7 @@ type Model struct {
 	// Revision history; revIndex below selects the revision on display.
 	revisions revision.History
 	// Cached diff between base and current revision.
-	diffResult *differ.Result
+	diffResult *diff.Result
 	// Left holds the view for the left pane or main content.
 	// In ViewModeFull: Unified diff or plain content.
 	// In ViewModeHunks with diff: the hunks of the diff with their headers.
@@ -563,9 +563,9 @@ func (m *Model) rebuildViews() {
 
 	switch {
 	case m.viewMode == ViewModeSideBySide && needsDiff:
-		diff := m.getDiffResult()
-		m.left = diff.Before()
-		m.right = diff.After()
+		result := m.getDiffResult()
+		m.left = result.Before()
+		m.right = result.After()
 
 	case m.viewMode == ViewModeHunks && needsDiff:
 		// Hunks returns nil when the diff has no changes, which leaves the
@@ -826,11 +826,11 @@ func (m *Model) getDisplayLines() line.Lines {
 	return src.Lines()
 }
 
-// getDiffResult returns the cached [differ.Result], computing it if nil.
+// getDiffResult returns the cached [diff.Result], computing it if nil.
 //
 // Without a base for the current [DiffMode], the current revision stands in
 // for it, which yields an empty diff rather than a nil [niceyaml.Source].
-func (m *Model) getDiffResult() *differ.Result {
+func (m *Model) getDiffResult() *diff.Result {
 	if m.diffResult == nil {
 		current := m.currentRevision()
 
@@ -839,7 +839,7 @@ func (m *Model) getDiffResult() *differ.Result {
 			base = current
 		}
 
-		m.diffResult = differ.Diff(base, current)
+		m.diffResult = diff.Diff(base, current)
 	}
 
 	return m.diffResult

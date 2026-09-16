@@ -51,7 +51,7 @@
 // [printer.Printer] renders any [line.View], which both [*Source] and
 // [line.Lines] satisfy, with syntax highlighting via lipgloss. It supports
 // customizable gutters (line numbers, diff markers), word wrapping, and
-// annotation rendering. [differ.Differ] compares two views, and
+// annotation rendering. [diff.Differ] compares two views, and
 // [finder.Finder] searches one. [revision.History] keeps the versions of a
 // document in order.
 //
@@ -139,10 +139,10 @@
 //
 // # Diffs
 //
-// [differ.Differ] computes line differences using the [diff] package. The
-// default [diff.Hirschberg] algorithm is space-efficient for large files:
+// [diff.Differ] computes line differences using an [lcs.Algorithm]. The
+// default, [lcs.Hirschberg], is space-efficient for large files:
 //
-//	result := differ.Diff(original, modified)
+//	result := diff.Diff(original, modified)
 //	p := printer.New()
 //	fmt.Println(p.Print(result.Unified()))
 //	fmt.Println(p.Print(result.Hunks(3)))
@@ -151,11 +151,11 @@
 // original to the latest. Any two revisions can be diffed:
 //
 //	revs := revision.History{original, modified}
-//	result := differ.Diff(revs[0], revs[1])
+//	result := diff.Diff(revs[0], revs[1])
 //
-// Custom algorithms implement [diff.Algorithm]. For reusable differ instances:
+// Custom algorithms implement [lcs.Algorithm]. For a reusable [diff.Differ]:
 //
-//	d := differ.New(differ.WithAlgorithm(myAlgo))
+//	d := diff.New(diff.WithAlgorithm(myAlgo))
 //	result := d.Diff(before, after)
 //
 // Diff output is a [line.Lines] view rather than a [Source], since the

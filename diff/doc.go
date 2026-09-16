@@ -1,43 +1,29 @@
-// Package diff computes minimal edit sequences between string slices.
+// Package diff computes line differences between two [line.View] values
+// and renders them as [line.Lines].
 //
-// When rendering YAML diffs, the system needs to determine which lines were
-// added, removed, or unchanged between two versions.
+// A [Differ] compares the lines of two views, such as two niceyaml Source
+// values or two [line.Lines] collections, with an [lcs.Algorithm]. The
+// default is [lcs.Hirschberg]. Create one with [New], or call [Diff] for
+// the default algorithm:
 //
-// This package provides the [Algorithm] interface and a default implementation
-// using Hirschberg's algorithm for computing differences while minimizing memory
-// allocations during repeated comparisons.
+//	result := diff.Diff(before, after)
+//	p := printer.New()
+//	fmt.Println(p.Print(result.Unified()))
+//	fmt.Println(p.Print(result.Hunks(3)))
 //
-// # Algorithm Interface
+// The [Result] renders in three shapes. [Result.Unified] interleaves the
+// lines of both views, [Result.Hunks] keeps only the changes with context
+// lines around each and a hunk header above it, and [Result.Before] with
+// [Result.After] return aligned views for side-by-side rendering. Each call
+// returns a fresh [line.Lines] copy, so overlays added to one rendering do
+// not reach another.
 //
-// The [Algorithm] interface allows pluggable diff algorithms. [Hirschberg] is
-// the default implementation, using a space-efficient LCS algorithm.
+// Diff output is a [line.Lines] view rather than a YAML document, since the
+// interleaved lines of two revisions do not parse as one. Each line carries a
+// [line.Flag] that marks it as inserted, deleted, or unchanged, and hunk
+// headers are [line.Annotation] values placed [line.Above] the first line
+// of each hunk.
 //
-// Unlike the standard dynamic programming approach that requires O(m*n) space,
-// Hirschberg's divide-and-conquer strategy reduces space complexity to O(n),
-// where n is the length of the after sequence, while maintaining O(m*n) time.
-//
-// This is particularly important when comparing large YAML documents.
-//
-// # Usage
-//
-// Create a [Hirschberg] instance once and reuse it for multiple comparisons.
-//
-// The instance maintains internal buffers that grow as needed but are never
-// shrunk, avoiding repeated allocations. Each call returns a fresh slice:
-//
-//	h := diff.NewHirschberg()
-//	ops := h.Diff(before, after)
-//
-// Each [Op] in the result describes one edit operation with its index in each
-// input slice, or -1 on the side it does not touch. The [OpKind] indicates the
-// operation type:
-//
-//   - [OpEqual]: Line exists in both, with Before and After set.
-//   - [OpDelete]: Line only in before, with After set to -1.
-//   - [OpInsert]: Line only in after, with Before set to -1.
-//
-// The package has no dependencies on the rest of niceyaml, so an [Algorithm]
-// can be developed and tested on plain string slices. The differ package maps
-// each [OpKind] to a line flag when it builds rendering views from the
-// operations.
+// A Differ reuses the buffers of its algorithm, so it is not safe for
+// concurrent use. A Result is.
 package diff

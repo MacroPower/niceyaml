@@ -30,7 +30,7 @@ import (
 // which organizes the tokens into lines and carries the overlays,
 // annotations, and flags that a [printer.Printer] renders. Utilities that
 // only render or search, such as [printer.Printer], [finder.Finder], and
-// [differ.Differ], accept either a Source or a view.
+// [diff.Differ], accept either a Source or a view.
 //
 // Typical use creates a Source and passes it straight to a
 // [printer.Printer]:

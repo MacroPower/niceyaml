@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/differ"
+	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/revision"
 )
 
@@ -98,6 +98,6 @@ func TestRevisions_Append(t *testing.T) {
 	assert.Equal(t, "v1", revs.At(revs.Len()-1).Name())
 
 	// The history can be diffed directly.
-	result := differ.Diff(revs[0], revs[1])
+	result := diff.Diff(revs[0], revs[1])
 	assert.Equal(t, "v0..v1", result.Name())
 }

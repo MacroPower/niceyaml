@@ -17,7 +17,7 @@ It enables **friendly and predictable handling of YAML-compatible documents** in
 - [`Source`][niceyaml.Source] **style overlay** and **annotation** system
 - Pretty [`printer`][niceyaml/printer] with [themes][niceyaml/style/theme]
 - Rich [`Error`][niceyaml.Error] display using the above systems
-- Source [`revision.History`][niceyaml/revision] for file lineage and [**diffs**][niceyaml/differ]
+- Source [`revision.History`][niceyaml/revision] for file lineage and [**diffs**][niceyaml/diff]
 - String [`finder`][niceyaml/finder] for load-once, search-many scenarios
 - Extended [`Encoder`][niceyaml.Encoder] and [`Document`][niceyaml.Document] decoding wrappers
 - JSON schema [validation][niceyaml/schema.NewValidator] with YAML path errors
@@ -65,7 +65,7 @@ Module `niceyaml` adds a few abstractions on top of [go-yaml][goccy/go-yaml]:
 - [`line.Lines`][niceyaml/line] - A collection of `Line`s with overlays, annotations, and flags, which is the view that rendering utilities consume
 - [`niceyaml.Source`][niceyaml.Source] - A YAML file, which parses into `Document`s, decodes, wraps errors, and exposes its `Lines` view
 
-Most use cases will only need to interact with `Source`. It implements `line.View`, so the [`printer`][niceyaml/printer], [`finder`][niceyaml/finder], and [`differ`][niceyaml/differ] packages accept it directly. Diffs return plain `Lines`, since interleaved lines from two revisions are not a YAML document.
+Most use cases will only need to interact with `Source`. It implements `line.View`, so the [`printer`][niceyaml/printer], [`finder`][niceyaml/finder], and [`diff`][niceyaml/diff] packages accept it directly. Diffs return plain `Lines`, since interleaved lines from two revisions are not a YAML document.
 
 These abstractions enable straightforward iteration over arbitrary lines of tokens from one or more YAML documents, while maintaining the original token details from the lexer. It cleanly solves common problems introduced by multi-line and/or overlapping tokens in diffs, partial rendering, and/or search.
 
@@ -110,7 +110,7 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [niceyaml.Encoder]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Encoder
 [niceyaml.Document]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Document
 [niceyaml.Source]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Source
-[niceyaml/differ]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/differ
+[niceyaml/diff]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/diff
 [niceyaml/finder]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/finder
 [niceyaml/line]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/line
 [niceyaml/printer]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/printer

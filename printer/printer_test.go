@@ -14,7 +14,7 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/differ"
+	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/finder"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
@@ -59,7 +59,7 @@ func printDiff(p *printer.Printer, before, after string) string {
 	beforeTks := niceyaml.NewSourceFromString(before, niceyaml.WithName("before"))
 	afterTks := niceyaml.NewSourceFromString(after, niceyaml.WithName("after"))
 
-	return p.Print(differ.Diff(beforeTks, afterTks).Unified())
+	return p.Print(diff.Diff(beforeTks, afterTks).Unified())
 }
 
 // printDiffSummary generates a summary diff showing only changed lines with context.
@@ -68,7 +68,7 @@ func printDiffSummary(p *printer.Printer, before, after string, context int) str
 	beforeTks := niceyaml.NewSourceFromString(before, niceyaml.WithName("before"))
 	afterTks := niceyaml.NewSourceFromString(after, niceyaml.WithName("after"))
 
-	source := differ.Diff(beforeTks, afterTks).Hunks(context)
+	source := diff.Diff(beforeTks, afterTks).Hunks(context)
 
 	if source.IsEmpty() {
 		return ""
@@ -1043,7 +1043,7 @@ func TestPrinter_PrintTokenDiff_Wrapping(t *testing.T) {
 
 			p := testPrinterWithGutter(printer.DiffGutter).With(printer.WithWidth(tc.width))
 
-			view := differ.Diff(
+			view := diff.Diff(
 				niceyaml.NewSourceFromString(tc.before),
 				niceyaml.NewSourceFromString(tc.after),
 			).Unified()

@@ -13,7 +13,7 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/differ"
+	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -265,7 +265,7 @@ func TestSource_AllRunes_DiffBuiltLines(t *testing.T) {
 	beforeLines := niceyaml.NewSourceFromString(before, niceyaml.WithName("before"))
 	afterLines := niceyaml.NewSourceFromString(after, niceyaml.WithName("after"))
 
-	lines := differ.Diff(beforeLines, afterLines).Unified()
+	lines := diff.Diff(beforeLines, afterLines).Unified()
 
 	// Diff should produce two lines: deleted (old) and inserted (new).
 	// Both have the same source token line (1), but different visual indices (0, 1).

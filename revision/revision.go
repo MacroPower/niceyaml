@@ -2,11 +2,11 @@
 //
 // A [History] holds the [*niceyaml.Source] values of one document from the
 // original to the latest. It is a plain slice, so append adds a revision,
-// indexing reads one, and any two revisions can be handed to the differ
+// indexing reads one, and any two revisions can be handed to the diff
 // package:
 //
 //	revs := revision.History{original, modified}
-//	result := differ.Diff(revs[0], revs[1])
+//	result := diff.Diff(revs[0], revs[1])
 package revision
 
 import "go.jacobcolvin.com/niceyaml"
@@ -17,7 +17,7 @@ import "go.jacobcolvin.com/niceyaml"
 //
 //	revs := revision.History{original}
 //	revs = append(revs, modified)
-//	result := differ.Diff(revs[0], revs[1])
+//	result := diff.Diff(revs[0], revs[1])
 //
 // A single revision is valid; multiple revisions are not required.
 type History []*niceyaml.Source

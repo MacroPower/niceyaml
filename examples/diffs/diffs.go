@@ -6,7 +6,7 @@ import (
 	_ "embed"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/differ"
+	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/printer"
 )
 
@@ -25,7 +25,7 @@ func main() {
 	p := printer.New()
 
 	// Create a diff result between the two sources.
-	result := differ.Diff(before, after)
+	result := diff.Diff(before, after)
 
 	fmt.Println("\nPrint the full diff:")
 	fmt.Println(p.Print(result.Unified()))

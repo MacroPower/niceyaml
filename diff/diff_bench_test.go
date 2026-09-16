@@ -1,4 +1,4 @@
-package differ_test
+package diff_test
 
 import (
 	"fmt"
@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/differ"
+	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/revision"
 )
@@ -33,7 +33,7 @@ func BenchmarkFullDiffSource(b *testing.B) {
 			b.ResetTimer()
 
 			for b.Loop() {
-				_ = differ.Diff(sourceA, sourceB).Unified()
+				_ = diff.Diff(sourceA, sourceB).Unified()
 			}
 		})
 
@@ -52,7 +52,7 @@ func BenchmarkFullDiffSource(b *testing.B) {
 			b.ResetTimer()
 
 			for b.Loop() {
-				_ = differ.Diff(sourceA, sourceB).Unified()
+				_ = diff.Diff(sourceA, sourceB).Unified()
 			}
 		})
 
@@ -75,7 +75,7 @@ func BenchmarkFullDiffSource(b *testing.B) {
 			b.ResetTimer()
 
 			for b.Loop() {
-				_ = differ.Diff(sourceA, sourceB).Unified()
+				_ = diff.Diff(sourceA, sourceB).Unified()
 			}
 		})
 	}
@@ -116,7 +116,7 @@ func BenchmarkHunksDiffSource(b *testing.B) {
 				b.ReportAllocs()
 
 				for b.Loop() {
-					_ = differ.Diff(sourceA, sourceB).Hunks(ctx)
+					_ = diff.Diff(sourceA, sourceB).Hunks(ctx)
 				}
 			})
 		}
@@ -153,7 +153,7 @@ func BenchmarkFullDiffSource_WorstCase(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				_ = differ.Diff(sourceA, sourceB).Unified()
+				_ = diff.Diff(sourceA, sourceB).Unified()
 			}
 		})
 	}
@@ -183,7 +183,7 @@ func BenchmarkFullDiffSource_InsertAtEnd(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				_ = differ.Diff(sourceA, sourceB).Unified()
+				_ = diff.Diff(sourceA, sourceB).Unified()
 			}
 		})
 	}
