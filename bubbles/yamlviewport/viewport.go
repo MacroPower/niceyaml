@@ -24,13 +24,31 @@ import (
 
 const defaultHorizontalStep = 6
 
-// Searcher loads a document and finds the [position.Range]s that match a
-// search string in it.
+// Searcher builds an [Index] over the lines on display. The viewport loads
+// the lines once per change of content and runs every search term through
+// the Index it gets back.
 //
-// See [finder.Finder] for an implementation.
+// [WithFinder] adapts a [finder.Finder] to this interface.
 type Searcher interface {
-	Load(lines line.View)
+	Load(lines line.View) Index
+}
+
+// Index finds the [position.Range]s that match a search string in the lines
+// it was built from.
+//
+// See [finder.Index] for an implementation.
+type Index interface {
 	Find(search string) position.Ranges
+}
+
+// finderSearcher adapts a [finder.Finder] to [Searcher].
+type finderSearcher struct {
+	finder *finder.Finder
+}
+
+// Load implements [Searcher].
+func (s finderSearcher) Load(lines line.View) Index {
+	return s.finder.Load(lines)
 }
 
 // DiffMode specifies how diffs are computed between revisions.
@@ -74,6 +92,7 @@ const (
 //   - [WithPrinter]
 //   - [WithStyle]
 //   - [WithSearcher]
+//   - [WithFinder]
 type Option func(*Model)
 
 // WithPrinter is an [Option] that sets the [*printer.Printer] used for
@@ -99,12 +118,22 @@ func WithStyle(s lipgloss.Style) Option {
 }
 
 // WithSearcher is an [Option] that sets the [Searcher] that search terms run
-// through. Without it, the viewport creates a [finder.Finder] with a
-// default [normalizer.Normalizer].
+// through. Without it, and without [WithFinder], the viewport creates a
+// [finder.Finder] with a default [normalizer.Normalizer].
 func WithSearcher(s Searcher) Option {
 	return func(m *Model) {
 		m.searcher = s
 	}
+}
+
+// WithFinder is an [Option] that sets the [finder.Finder] that builds the
+// search index. It is [WithSearcher] with f adapted to [Searcher]:
+//
+//	yamlviewport.WithFinder(finder.New(finder.WithNormalizer(normalizer.New(
+//		normalizer.WithDiacriticFold(false),
+//	))))
+func WithFinder(f *finder.Finder) Option {
+	return WithSearcher(finderSearcher{finder: f})
 }
 
 // New creates a new [Model] with the given options.
@@ -148,6 +177,8 @@ type Model struct {
 	style    lipgloss.Style
 	printer  *printer.Printer
 	searcher Searcher
+	// Index over the lines on display, built when they change.
+	index Index
 	// Revision history; revIndex below selects the revision on display.
 	revisions []*niceyaml.Source
 	// Cached diff between base and current revision.
@@ -222,9 +253,9 @@ func (m *Model) setInitialValues() {
 	}
 
 	if m.searcher == nil {
-		m.searcher = finder.New(
+		m.searcher = finderSearcher{finder: finder.New(
 			finder.WithNormalizer(normalizer.New()),
-		)
+		)}
 	}
 
 	m.relayout()
@@ -646,13 +677,8 @@ func (m *Model) updateSideBySideSearchState() {
 	}
 
 	// Search on both sources and cache results for overlay application.
-	m.searcher.Load(m.left)
-
-	m.leftMatches = m.searcher.Find(m.searchTerm)
-
-	m.searcher.Load(m.right)
-
-	m.rightMatches = m.searcher.Find(m.searchTerm)
+	m.leftMatches = m.searcher.Load(m.left).Find(m.searchTerm)
+	m.rightMatches = m.searcher.Load(m.right).Find(m.searchTerm)
 
 	// Build combined match list. For equal lines, a match appears in both
 	// sources at the same position, so we deduplicate by (row, startCol).
@@ -771,14 +797,14 @@ func (m *Model) updateSearchState(lines line.Lines) {
 		return
 	}
 
-	if m.searcherStale {
-		m.searcher.Load(lines)
+	if m.searcherStale || m.index == nil {
+		m.index = m.searcher.Load(lines)
 
 		m.searcherStale = false
 	}
 
 	// Convert ranges to searchMatch structs (inLeft is not used in unified mode).
-	ranges := m.searcher.Find(m.searchTerm)
+	ranges := m.index.Find(m.searchTerm)
 	m.searchMatches = make([]searchMatch, 0, len(ranges))
 
 	for _, rng := range ranges {

@@ -2271,12 +2271,11 @@ func TestFinderPrinter_Integration(t *testing.T) {
 			t.Parallel()
 
 			source := niceyaml.NewSourceFromString(tc.input)
-			f := testFinder(tc.normalizer)
-			f.Load(source)
+			idx := testFinder(tc.normalizer).Load(source)
 
 			p := testPrinter()
 
-			ranges := f.Find(tc.search)
+			ranges := idx.Find(tc.search)
 
 			if tc.wantNoRanges {
 				assert.Empty(t, ranges)
@@ -2370,10 +2369,7 @@ func TestPrinter_Golden(t *testing.T) {
 			},
 			setupFunc: func(view line.Lines) {
 				// Search for "日本" (Japan) which appears multiple times in full.yaml.
-				f := finder.New()
-				f.Load(view)
-
-				ranges := f.Find("日本")
+				ranges := finder.New().Load(view).Find("日本")
 				view.AddOverlay(testOverlayHighlight, ranges...)
 			},
 		},

@@ -55,8 +55,9 @@
 // Provide a custom [printer.Printer] via [WithPrinter] to control syntax
 // highlighting, line numbers, and annotations.
 //
-// Provide a custom [Searcher] via [WithSearcher] for specialized search
-// behavior (e.g., case-insensitive matching).
+// Provide a [finder.Finder] via [WithFinder] to change how search terms
+// match, such as the normalization applied, or a custom [Searcher] via
+// [WithSearcher] for another search implementation.
 //
 // Keybindings are fully configurable through the [KeyMap] field on [Model].
 //

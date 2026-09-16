@@ -335,9 +335,9 @@ func TestFinder_Find(t *testing.T) {
 
 			f := finder.New(opts...)
 
-			f.Load(lines)
+			idx := f.Load(lines)
 
-			got := f.Find(tc.search)
+			got := idx.Find(tc.search)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -388,9 +388,9 @@ func TestFinder_Find_EdgeCases(t *testing.T) {
 
 			lines := niceyaml.NewSourceFromString(tc.input)
 			f := finder.New()
-			f.Load(lines)
+			idx := f.Load(lines)
 
-			got := f.Find(tc.search)
+			got := idx.Find(tc.search)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -402,9 +402,9 @@ func TestFinder_Find_NormalizesToEmpty(t *testing.T) {
 	// A search of only combining marks normalizes to an empty string, which
 	// must yield no matches rather than match at every offset.
 	f := finder.New(finder.WithNormalizer(normalizer.New()))
-	f.Load(niceyaml.NewSourceFromString("key: value\n"))
+	idx := f.Load(niceyaml.NewSourceFromString("key: value\n"))
 
-	got := f.Find("́")
+	got := idx.Find("́")
 	assert.Nil(t, got)
 }
 
@@ -412,9 +412,9 @@ func TestFinder_Find_NilLines(t *testing.T) {
 	t.Parallel()
 
 	f := finder.New()
-	f.Load(nil)
+	idx := f.Load(nil)
 
-	got := f.Find("test")
+	got := idx.Find("test")
 	assert.Nil(t, got)
 }
 
@@ -467,9 +467,9 @@ func TestFinder_Find_DiffBuiltLines(t *testing.T) {
 			t.Parallel()
 
 			f := finder.New()
-			f.Load(lines)
+			idx := f.Load(lines)
 
-			got := f.Find(tc.search)
+			got := idx.Find(tc.search)
 
 			assert.Equal(t, tc.want, got)
 		})
@@ -479,30 +479,31 @@ func TestFinder_Find_DiffBuiltLines(t *testing.T) {
 func TestFinder_Reload(t *testing.T) {
 	t.Parallel()
 
-	// Test that a Finder can be reloaded with different sources.
-	t.Run("reload clears previous data", func(t *testing.T) {
+	// Every Load builds its own Index, so one Finder serves any number of
+	// sources and an earlier Index keeps working.
+	t.Run("each load builds an independent index", func(t *testing.T) {
 		t.Parallel()
 
 		f := finder.New()
 
-		// Load first source.
-		lines1 := niceyaml.NewSourceFromString("first: 1")
-		f.Load(lines1)
+		first := f.Load(niceyaml.NewSourceFromString("first: 1"))
+		assert.Len(t, first.Find("first"), 1)
 
-		got1 := f.Find("first")
-		assert.Len(t, got1, 1)
+		second := f.Load(niceyaml.NewSourceFromString("second: 2"))
+		assert.Nil(t, second.Find("first"))
+		assert.Len(t, second.Find("second"), 1)
 
-		// Load second source - should clear previous data.
-		lines2 := niceyaml.NewSourceFromString("second: 2")
-		f.Load(lines2)
+		// The first index is unchanged by the second load.
+		assert.Len(t, first.Find("first"), 1)
+		assert.Nil(t, first.Find("second"))
+	})
 
-		// Old search should not find anything.
-		gotOld := f.Find("first")
-		assert.Nil(t, gotOld)
+	t.Run("nil index finds nothing", func(t *testing.T) {
+		t.Parallel()
 
-		// New search should work.
-		gotNew := f.Find("second")
-		assert.Len(t, gotNew, 1)
+		var idx *finder.Index
+
+		assert.Nil(t, idx.Find("anything"))
 	})
 }
 
@@ -512,7 +513,7 @@ func TestFinder_Find_MultipleSearches(t *testing.T) {
 	// Test multiple Find calls on the same loaded source.
 	lines := niceyaml.NewSourceFromString("key: value\nother: data")
 	f := finder.New()
-	f.Load(lines)
+	idx := f.Load(lines)
 
 	tcs := map[string]struct {
 		search string
@@ -530,7 +531,7 @@ func TestFinder_Find_MultipleSearches(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := f.Find(tc.search)
+			got := idx.Find(tc.search)
 
 			if tc.want == 0 {
 				assert.Nil(t, got)

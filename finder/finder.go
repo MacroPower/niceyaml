@@ -2,15 +2,15 @@
 //
 // A [Finder] maps matches back to [position.Ranges] in the original lines,
 // even when normalization changes the character count, so the ranges can
-// highlight matches in rendered output. Create one with [New], load a view
-// once with [Finder.Load], and search it any number of times with
-// [Finder.Find]:
+// highlight matches in rendered output. Create one with [New], build an
+// [Index] over a view once with [Finder.Load], and search the index any
+// number of times with [Index.Find]:
 //
 //	f := finder.New(finder.WithNormalizer(normalizer.New()))
-//	f.Load(source)
+//	idx := f.Load(source)
 //
 //	view := source.Lines()
-//	view.BlendOverlay(style.GenericHighlight, f.Find("search term")...)
+//	view.BlendOverlay(style.GenericHighlight, idx.Find("search term")...)
 //
 // Searches are exact by default. [WithNormalizer] applies a [Normalizer] to
 // both the loaded text and the search string, and the normalizer package
@@ -20,7 +20,6 @@ package finder
 import (
 	"sort"
 	"strings"
-	"sync"
 	"unicode/utf8"
 
 	"go.jacobcolvin.com/niceyaml/line"
@@ -34,36 +33,30 @@ type Normalizer interface {
 	Normalize(in string) string
 }
 
-// Finder finds strings within YAML tokens, returning [position.Ranges] that can
-// be used to highlight matches in rendered output.
+// Finder builds an [Index] over [line.View] content, so the [position.Ranges]
+// of a search can highlight matches in rendered output.
 //
-// The typical use case is search-as-you-type highlighting: the user views YAML
-// content and types a search term, and matching text is highlighted in place.
+// The typical use case is search-as-you-type highlighting: the user views
+// YAML content and types a search term, and matching text is highlighted in
+// place.
 //
-// [Finder] solves the challenge of mapping string matches back to their
-// original line and column positions, even when normalization (case folding,
-// diacritic removal) changes the character count.
+// Finder uses a load-once, search-many design. [Finder.Load] reads the
+// lines once and returns an [Index] that maps character positions in the
+// search text back to [position.Position] values in the original lines, and
+// [Index.Find] uses that map on every call without re-reading the lines.
 //
-// Finder uses a load-once, search-many design. Call [Finder.Load] once with
-// the lines to search. Load builds an index that maps character positions in
-// the search text back to [position.Position] values in the original lines,
-// and [Finder.Find] uses that index on every call without re-parsing.
-//
-// Finder is safe for concurrent use. Multiple goroutines may call
-// [Finder.Find] simultaneously, and [Finder.Load] uses locking to safely
-// update internal state.
+// A Finder holds only its settings and never changes after [New], so it is
+// safe for concurrent use, as is every Index it builds.
 //
 // Example:
 //
-//	// Create finder with case-insensitive matching.
 //	f := finder.New(
 //		finder.WithNormalizer(normalizer.New()),
 //	)
-//	f.Load(source)
+//	idx := f.Load(source)
 //
-//	// Find matches and highlight them on a view of the source.
 //	view := source.Lines()
-//	view.AddOverlay(highlightStyle, f.Find("search term")...)
+//	view.AddOverlay(highlightStyle, idx.Find("search term")...)
 //	fmt.Println(p.Print(view))
 //
 // By default, searches are exact (case-sensitive, no normalization).
@@ -74,14 +67,10 @@ type Normalizer interface {
 // Create instances with [New].
 type Finder struct {
 	normalizer Normalizer
-	posMap     *positionMap
-	text       string
-	byteToRune []int
-	mu         sync.RWMutex
 }
 
 // New creates a new [*Finder].
-// Call [Finder.Load] to provide a [line.View] before searching.
+// Call [Finder.Load] to build an [Index] over a [line.View] before searching.
 //
 // By default, no normalization is applied. Use [WithNormalizer] to enable
 // case-insensitive or diacritic-insensitive matching.
@@ -110,63 +99,71 @@ func WithNormalizer(normalizer Normalizer) Option {
 	}
 }
 
-// Load preprocesses the given [line.View], building the search text and
-// position map.
+// Load reads the given [line.View] and returns an [Index] over it, built
+// from the search text and a map from its positions back to the lines.
 //
-// Every call rebuilds the index, so call Load once per distinct content and
-// [Finder.Find] as many times as needed. Overlays do not affect the index, so
-// highlighting matches does not require reloading.
-//
-// This method must be called before using [Finder.Find].
-func (f *Finder) Load(lines line.View) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+// Each call builds a new Index and leaves the Finder as it was, so load once
+// per distinct content and call [Index.Find] as many times as needed.
+// Overlays do not affect the index, so highlighting matches does not require
+// reloading.
+func (f *Finder) Load(lines line.View) *Index {
+	idx := &Index{normalizer: f.normalizer}
+	idx.text, idx.posMap = f.buildTextAndPositionMap(lines)
+	idx.buildByteToRuneIndex()
 
-	f.text, f.posMap = f.buildTextAndPositionMap(lines)
-	f.buildByteToRuneIndex()
+	return idx
+}
+
+// Index is the search text of one [line.View] together with the map from
+// its characters back to [position.Position] values in the lines. It never
+// changes after [Finder.Load] builds it, so it is safe for concurrent use.
+//
+// Create instances with [Finder.Load].
+type Index struct {
+	normalizer Normalizer
+	posMap     *positionMap
+	text       string
+	byteToRune []int
 }
 
 // buildByteToRuneIndex builds a lookup table mapping byte offsets to rune counts.
 // This enables O(1) byte-to-rune conversion during Find instead of O(n) scanning.
-func (f *Finder) buildByteToRuneIndex() {
-	if f.text == "" {
-		f.byteToRune = nil
+func (i *Index) buildByteToRuneIndex() {
+	if i.text == "" {
+		i.byteToRune = nil
 		return
 	}
 
-	f.byteToRune = make([]int, len(f.text)+1)
+	i.byteToRune = make([]int, len(i.text)+1)
 	runeCount := 0
 
-	for i := 0; i < len(f.text); {
-		f.byteToRune[i] = runeCount
-		_, size := utf8.DecodeRuneInString(f.text[i:])
-		i += size
+	for b := 0; b < len(i.text); {
+		i.byteToRune[b] = runeCount
+		_, size := utf8.DecodeRuneInString(i.text[b:])
+		b += size
 		runeCount++
 	}
 
-	f.byteToRune[len(f.text)] = runeCount
+	i.byteToRune[len(i.text)] = runeCount
 }
 
-// Find finds all occurrences of the search string in the loaded text.
+// Find finds all occurrences of the search string in the indexed text.
 //
 // It returns the [position.Ranges] of each match, in the order the matches
 // appear in the text.
 //
 // Returns nil if the search string is empty, or normalizes to empty, or the
-// finder has no loaded text.
-func (f *Finder) Find(search string) position.Ranges {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-
-	if search == "" || f.text == "" {
+// Index is nil or holds no text.
+func (i *Index) Find(search string) position.Ranges {
+	if i == nil || search == "" || i.text == "" {
 		return nil
 	}
 
 	// Normalize search string if normalizer is set.
 	// Source is already normalized during construction.
 	searchStr := search
-	if f.normalizer != nil {
-		searchStr = f.normalizer.Normalize(search)
+	if i.normalizer != nil {
+		searchStr = i.normalizer.Normalize(search)
 	}
 
 	// A search of only combining marks normalizes to nothing, and an empty
@@ -181,7 +178,7 @@ func (f *Finder) Find(search string) position.Ranges {
 
 	offset := 0
 	for {
-		idx := strings.Index(f.text[offset:], searchStr)
+		idx := strings.Index(i.text[offset:], searchStr)
 		if idx == -1 {
 			break
 		}
@@ -190,11 +187,11 @@ func (f *Finder) Find(search string) position.Ranges {
 		matchEnd := matchStart + len(searchStr)
 
 		// Convert byte offsets to character offsets for position map lookup.
-		matchStartChar := f.byteToRune[matchStart]
+		matchStartChar := i.byteToRune[matchStart]
 		matchEndChar := matchStartChar + searchRuneCount - 1
 
-		startPos := f.posMap.lookup(matchStartChar)
-		endPos := f.posMap.lookup(matchEndChar)
+		startPos := i.posMap.lookup(matchStartChar)
+		endPos := i.posMap.lookup(matchEndChar)
 		// End column is exclusive, so add 1.
 		endPos.Col++
 

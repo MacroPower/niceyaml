@@ -3058,20 +3058,20 @@ func TestViewport_ZeroValue(t *testing.T) {
 
 // countingSearcher wraps a [finder.Finder] and counts its Load calls.
 type countingSearcher struct {
-	*finder.Finder
-
-	loads int
+	finder *finder.Finder
+	loads  int
 }
 
-func (c *countingSearcher) Load(lines line.View) {
+func (c *countingSearcher) Load(lines line.View) yamlviewport.Index {
 	c.loads++
-	c.Finder.Load(lines)
+
+	return c.finder.Load(lines)
 }
 
 func TestViewport_LayoutChangesKeepSearchIndex(t *testing.T) {
 	t.Parallel()
 
-	searcher := &countingSearcher{Finder: finder.New()}
+	searcher := &countingSearcher{finder: finder.New()}
 	m := yamlviewport.New(
 		yamlviewport.WithPrinter(testPrinter()),
 		yamlviewport.WithSearcher(searcher),
@@ -3109,10 +3109,10 @@ func TestViewport_WithSearcher(t *testing.T) {
 	t.Run("custom searcher is used for search", func(t *testing.T) {
 		t.Parallel()
 
-		f := finder.New()
+		searcher := &countingSearcher{finder: finder.New()}
 		m := yamlviewport.New(
 			yamlviewport.WithPrinter(testPrinter()),
-			yamlviewport.WithSearcher(f),
+			yamlviewport.WithSearcher(searcher),
 		)
 
 		m.SetWidth(80)
@@ -3125,6 +3125,27 @@ func TestViewport_WithSearcher(t *testing.T) {
 
 		assert.Equal(t, "value", m.SearchTerm())
 		assert.Positive(t, m.SearchCount())
+		assert.Equal(t, 1, searcher.loads)
+	})
+
+	t.Run("WithFinder searches through the finder", func(t *testing.T) {
+		t.Parallel()
+
+		m := yamlviewport.New(
+			yamlviewport.WithPrinter(testPrinter()),
+			yamlviewport.WithFinder(finder.New()),
+		)
+
+		m.SetWidth(80)
+		m.SetHeight(10)
+		m.SetSource(niceyaml.NewSourceFromString("key: Value\n"))
+
+		// The finder has no normalizer, so the search is case-sensitive.
+		m.SetSearchTerm("value")
+		assert.Equal(t, 0, m.SearchCount())
+
+		m.SetSearchTerm("Value")
+		assert.Equal(t, 1, m.SearchCount())
 	})
 }
 

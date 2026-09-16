@@ -171,9 +171,9 @@
 // diacritic-insensitive matching:
 //
 //	f := finder.New(finder.WithNormalizer(normalizer.New()))
-//	f.Load(source)
+//	idx := f.Load(source)
 //	view := source.Lines()
-//	view.AddOverlay(style.GenericHighlight, f.Find("search term")...)
+//	view.AddOverlay(style.GenericHighlight, idx.Find("search term")...)
 //	fmt.Println(p.Print(view))
 //
 // # Dependencies
