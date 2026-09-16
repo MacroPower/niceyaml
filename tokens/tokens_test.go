@@ -8,6 +8,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/style"
@@ -22,6 +23,58 @@ func collectDocs(seq iter.Seq2[int, token.Tokens]) []token.Tokens {
 	}
 
 	return result
+}
+
+func TestTokenize(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+	}{
+		"empty string": {
+			input: "",
+		},
+		"simple key value": {
+			input: "key: value\n",
+		},
+		"multi-line": {
+			input: stringtest.JoinLF(
+				"key1: value1",
+				"key2: value2",
+				"key3: value3",
+			),
+		},
+		"nested structure": {
+			input: stringtest.JoinLF(
+				"parent:",
+				"  child1: value1",
+				"  child2: value2",
+			),
+		},
+		"unicode content": {
+			input: "greeting: こんにちは\n",
+		},
+		"list": {
+			input: stringtest.JoinLF(
+				"items:",
+				"  - one",
+				"  - two",
+				"  - three",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			want := lexer.Tokenize(tc.input)
+			got := tokens.Tokenize(tc.input)
+
+			diff := yamltest.CompareTokenSlices(want, got)
+			require.True(t, diff.Equal(), diff.String())
+		})
+	}
 }
 
 func TestSplitDocuments(t *testing.T) {

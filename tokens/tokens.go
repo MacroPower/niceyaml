@@ -4,8 +4,18 @@ import (
 	"iter"
 	"strings"
 
+	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/token"
 )
+
+// Tokenize returns the token stream for the given YAML source.
+//
+// It is the one place niceyaml calls the go-yaml lexer, so every token stream
+// the module works with comes through here. The stream covers the whole
+// file; [SplitDocuments] cuts it into one stream per document.
+func Tokenize(src string) token.Tokens {
+	return lexer.Tokenize(src)
+}
 
 // TrimLineEnding returns s without its trailing line ending: "\n", "\r\n",
 // or a bare "\r". The go-yaml lexer splits CRLF endings across tokens, so a

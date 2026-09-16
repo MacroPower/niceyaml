@@ -14,9 +14,9 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/fangs"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
-	"go.jacobcolvin.com/niceyaml/lexers"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/printer"
+	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 // silentError wraps another error without adding a message of its own, which
@@ -53,7 +53,7 @@ func TestErrorHandler(t *testing.T) {
 		)
 	}
 
-	src := niceyaml.NewSourceFromTokens(lexers.Tokenize(source))
+	src := niceyaml.NewSourceFromTokens(tokens.Tokenize(source))
 
 	niceyamlErr := src.WrapError(niceyaml.NewError(
 		"invalid name",

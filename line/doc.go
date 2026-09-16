@@ -48,7 +48,7 @@
 // value may therefore describe content that is not a YAML document, such as
 // a diff that interleaves lines from two revisions:
 //
-//	tks := lexers.Tokenize(input)
+//	tks := tokens.Tokenize(input)
 //	lines := line.NewLines(tks)
 //
 //	for _, l := range lines {
