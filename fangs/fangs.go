@@ -28,11 +28,13 @@ func ErrorHandler(w io.Writer, styles fang.Styles, err error) {
 //		niceyaml.WithPrinter(niceyaml.NewPrinter(niceyaml.WithWidth(width))),
 //	))
 //
-// The handler prints err with the %+v verb, and a [niceyaml.SourceError] at
-// the top with [niceyaml.SourceError.Render], which is its message followed
-// by [niceyaml.SourceError.Detail]. A SourceError behind other wrapping
-// never reaches its own [fmt.Formatter], so expandYAMLErrors substitutes
-// that form in place. It does so for every SourceError in the tree, so a
+// The handler prints a [niceyaml.SourceError] at the top with
+// [niceyaml.SourceError.Render], which is its message followed by
+// [niceyaml.SourceError.Detail]. Any other error prints with the %+v verb,
+// and the message stays as the error's wrappers wrote it. The message of a
+// SourceError inside that error is part of that text already, so the handler
+// prints the [niceyaml.SourceError.Detail] of each SourceError in the tree
+// below the message, in the order the SourceErrors appear in it, and a
 // joined error annotates each failure it holds. Unlike
 // [fang.DefaultErrorHandler], which wraps errors in a lipgloss style that
 // can break multi-line output, this handler applies styling only to the
@@ -49,14 +51,23 @@ func NewErrorHandler(opts ...niceyaml.DetailOption) fang.ErrorHandler {
 func handleError(w io.Writer, styles fang.Styles, err error, opts []niceyaml.DetailOption) {
 	mustN(fmt.Fprintln(w, styles.ErrorHeader.String()))
 
-	var msg string
+	var parts []string
 
 	//nolint:errorlint // Identity of the top-level error, not a chain search.
 	if top, ok := err.(*niceyaml.SourceError); ok {
-		msg = top.Render(opts...)
+		parts = append(parts, top.Render(opts...))
 	} else {
-		msg = expandYAMLErrors(fmt.Sprintf("%+v", err), yamlErrors(err), opts)
+		parts = append(parts, fmt.Sprintf("%+v", err))
+
+		for _, yamlErr := range yamlErrors(err) {
+			detail, detailErr := yamlErr.Detail(opts...)
+			if detailErr == nil {
+				parts = append(parts, detail)
+			}
+		}
 	}
+
+	msg := strings.Join(parts, "\n\n")
 
 	// Apply margin manually to each line to avoid lipgloss block padding.
 	for line := range strings.SplitSeq(msg, "\n") {
@@ -84,8 +95,8 @@ func mustN(_ int, err error) {
 
 // yamlErrors returns the outermost [niceyaml.SourceError] values in err's
 // tree, in the order their messages appear in the rendered text. It stops at
-// each SourceError it finds, because a SourceError renders the errors it
-// holds.
+// each SourceError it finds, because a SourceError's detail covers the
+// errors it holds.
 func yamlErrors(err error) []*niceyaml.SourceError {
 	var found []*niceyaml.SourceError
 
@@ -119,57 +130,6 @@ func yamlErrors(err error) []*niceyaml.SourceError {
 	walk(err)
 
 	return found
-}
-
-// expandYAMLErrors replaces the plain rendering of each error in errs inside
-// msg with its [niceyaml.SourceError.Render] form under opts, so the
-// annotated source appears where the error does.
-//
-// Each expansion consumes msg up to and including the text it replaced, so two
-// errors that render identically expand one after the other instead of both
-// landing on the first occurrence.
-//
-// Falls back to appending the detail when msg does not hold an error's
-// rendering verbatim, which happens when a wrapper reformats the message it
-// wraps.
-func expandYAMLErrors(msg string, errs []*niceyaml.SourceError, opts []niceyaml.DetailOption) string {
-	var (
-		sb       strings.Builder
-		rest     = msg
-		appended []string
-	)
-
-	for _, yamlErr := range errs {
-		plain := yamlErr.Error()
-
-		at := -1
-		if plain != "" {
-			at = strings.Index(rest, plain)
-		}
-
-		if at < 0 {
-			detail, err := yamlErr.Detail(opts...)
-			if err == nil {
-				appended = append(appended, detail)
-			}
-
-			continue
-		}
-
-		sb.WriteString(rest[:at])
-		sb.WriteString(yamlErr.Render(opts...))
-
-		rest = rest[at+len(plain):]
-	}
-
-	sb.WriteString(rest)
-
-	for _, detail := range appended {
-		sb.WriteString("\n\n")
-		sb.WriteString(detail)
-	}
-
-	return sb.String()
 }
 
 // isUsageError returns true if err appears to be a Cobra usage error.

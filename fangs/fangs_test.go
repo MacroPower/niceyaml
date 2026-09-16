@@ -215,10 +215,10 @@ func TestErrorHandler(t *testing.T) {
 			want: stringtest.JoinLF(
 				"Error",
 				"  a.yaml: [1:1] $.name: bad name",
+				"  b.yaml: [2:8] $.value: bad value",
 				"  ",
 				"  <genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
 				"  <nameTag>value</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>123</literalNumberInteger>",
-				"  b.yaml: [2:8] $.value: bad value",
 				"  ",
 				"  <nameTag>name</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
 				"  <nameTag>value</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>123</genericError>",
