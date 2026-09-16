@@ -790,3 +790,66 @@ func TestRegistry_MultipleDocuments(t *testing.T) {
 	assert.True(t, validated["Deployment"])
 	assert.True(t, validated["Service"])
 }
+
+func TestRegistry_DocumentValidator(t *testing.T) {
+	t.Parallel()
+
+	var _ niceyaml.DocumentValidator = (*registry.Registry)(nil)
+
+	schemaData := []byte(`{
+		"type": "object",
+		"properties": {"kind": {"type": "string"}, "replicas": {"type": "integer"}}
+	}`)
+	reg := registry.New()
+	reg.Register(registry.When(
+		matcher.Content(kindPath, "Deployment"),
+		loader.Embedded("test.json", schemaData),
+	))
+
+	type deployment struct {
+		Kind     string `yaml:"kind"`
+		Replicas int    `yaml:"replicas"`
+	}
+
+	t.Run("decodes a document the registry accepts", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
+			kind: Deployment
+			replicas: 3
+		`))
+
+		got, err := doc.Decode[deployment](t.Context(), niceyaml.WithDocumentValidator(reg))
+		require.NoError(t, err)
+		assert.Equal(t, deployment{Kind: "Deployment", Replicas: 3}, got)
+	})
+
+	t.Run("stops the decode when the schema rejects the document", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
+			kind: Deployment
+			replicas: many
+		`))
+
+		_, err := doc.Decode[deployment](t.Context(), niceyaml.WithDocumentValidator(reg))
+		require.Error(t, err)
+
+		var validationErr *niceyaml.Error
+
+		require.ErrorAs(t, err, &validationErr)
+
+		gotPath, ok := validationErr.Path()
+		require.True(t, ok)
+		assert.Equal(t, "$.replicas", gotPath.String())
+	})
+
+	t.Run("reports ErrNoMatch for a document no resolver applies to", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
+
+		_, err := doc.Decode[deployment](t.Context(), niceyaml.WithDocumentValidator(reg))
+		require.ErrorIs(t, err, schema.ErrNoMatch)
+	})
+}

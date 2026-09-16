@@ -141,7 +141,11 @@ func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.Document) (*schema.
 //
 // This is the primary entry point for schema validation. It combines schema
 // lookup and validation into a single call. Use [Lookup] when you need the
-// validator for custom processing.
+// validator for custom processing. Validate implements
+// [niceyaml.DocumentValidator], so [niceyaml.WithDocumentValidator] runs it
+// before a decode:
+//
+//	config, err := doc.Decode[Config](ctx, niceyaml.WithDocumentValidator(reg))
 //
 // Returns [schema.ErrNoMatch] if no resolver applies to the document.
 // Callers can check for this error to allow unmatched documents:

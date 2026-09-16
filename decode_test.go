@@ -20,6 +20,7 @@ import (
 var (
 	errSchemaValidationFailed = errors.New("schema validation failed: name cannot be 'invalid'")
 	errNameRequired           = errors.New("name is required")
+	errDocumentRejected       = errors.New("document rejected")
 )
 
 func TestSource_Decoder(t *testing.T) {
@@ -1564,4 +1565,124 @@ func TestNewDocument_Context(t *testing.T) {
 	assert.Equal(t, 3, dd.Index())
 	assert.Equal(t, "config.yaml", dd.FilePath())
 	assert.Nil(t, dd.Tokens())
+}
+
+// documentValidatorFunc adapts a function to [niceyaml.DocumentValidator].
+type documentValidatorFunc func(ctx context.Context, doc *niceyaml.Document) error
+
+func (f documentValidatorFunc) Validate(ctx context.Context, doc *niceyaml.Document) error {
+	return f(ctx, doc)
+}
+
+func TestDocument_Decode_DocumentValidator(t *testing.T) {
+	t.Parallel()
+
+	t.Run("receives the document and decodes on success", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "name: test\nvalue: 42\n")
+
+		var got *niceyaml.Document
+
+		result, err := dd.Decode[plainConfig](t.Context(),
+			niceyaml.WithDocumentValidator(documentValidatorFunc(func(_ context.Context, doc *niceyaml.Document) error {
+				got = doc
+
+				return nil
+			})),
+		)
+		require.NoError(t, err)
+		assert.Same(t, dd, got)
+		assert.Equal(t, "test", result.Name)
+		assert.Equal(t, 42, result.Value)
+	})
+
+	t.Run("runs after schemas and stops at the first failure", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "name: test\n")
+
+		var order []string
+
+		record := func(name string, err error) niceyaml.DocumentValidator {
+			return documentValidatorFunc(func(_ context.Context, _ *niceyaml.Document) error {
+				order = append(order, name)
+
+				return err
+			})
+		}
+		schema := yamltest.NewCustomSchemaValidator(func(_ context.Context, _ any) error {
+			order = append(order, "schema")
+
+			return nil
+		})
+
+		_, err := dd.Decode[plainConfig](t.Context(),
+			niceyaml.WithDocumentValidator(record("first", nil)),
+			niceyaml.WithSchema(schema),
+			niceyaml.WithDocumentValidator(record("second", errDocumentRejected)),
+			niceyaml.WithDocumentValidator(record("third", nil)),
+		)
+		require.ErrorIs(t, err, errDocumentRejected)
+		assert.Equal(t, []string{"schema", "first", "second"}, order)
+	})
+
+	t.Run("a failing validator ends the decode", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "name: test\nvalue: 42\n")
+
+		result, err := dd.Decode[plainConfig](t.Context(),
+			niceyaml.WithDocumentValidator(documentValidatorFunc(func(context.Context, *niceyaml.Document) error {
+				return errDocumentRejected
+			})),
+		)
+		require.ErrorIs(t, err, errDocumentRejected)
+		assert.Equal(t, plainConfig{}, result)
+	})
+
+	t.Run("locates a path error in the document", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("name: a\n---\nname: b\n")
+		docs, err := source.Documents()
+		require.NoError(t, err)
+
+		dd := docs.At(1)
+		require.NotNil(t, dd)
+
+		_, err = dd.Decode[plainConfig](t.Context(),
+			niceyaml.WithDocumentValidator(documentValidatorFunc(func(context.Context, *niceyaml.Document) error {
+				return niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name").Value()))
+			})),
+		)
+		require.Error(t, err)
+
+		var located *niceyaml.Error
+
+		require.ErrorAs(t, err, &located)
+
+		index, ok := located.DocumentIndex()
+		require.True(t, ok)
+		assert.Equal(t, 1, index)
+	})
+
+	t.Run("Get passes the whole document", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "name: test\nvalue: 42\n")
+
+		var got *niceyaml.Document
+
+		value, err := dd.Get[int](t.Context(), paths.Root().Child("value"),
+			niceyaml.WithDocumentValidator(documentValidatorFunc(func(_ context.Context, doc *niceyaml.Document) error {
+				got = doc
+
+				return nil
+			})),
+		)
+		require.NoError(t, err)
+		assert.Same(t, dd, got)
+		assert.Equal(t, 42, value)
+	})
 }

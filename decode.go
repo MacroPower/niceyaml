@@ -40,6 +40,21 @@ type SchemaValidator interface {
 	ValidateSchema(ctx context.Context, data any) error
 }
 
+// DocumentValidator is implemented by types that validate a whole
+// [*Document], such as a schema registry that picks the schema from the
+// document's content or file path.
+//
+// Pass one to [Document.Decode] with [WithDocumentValidator], and it runs
+// before decoding, after the schemas from [WithSchema]. The document is the
+// whole document even for [Document.Get], since a validator that routes on
+// the document has no meaning for one value inside it.
+//
+// See [go.jacobcolvin.com/niceyaml/schema/registry.Registry] for an
+// implementation.
+type DocumentValidator interface {
+	Validate(ctx context.Context, doc *Document) error
+}
+
 // Documents is the sequence of YAML documents in a [*Source].
 //
 // A single YAML file can hold several documents separated by "---", often
@@ -173,9 +188,10 @@ func (d *Documents) document(index int) *Document {
 // [Document.Decode] returns a new value and
 // [Document.DecodeInto] fills one the caller already holds, such as
 // one pre-populated with defaults. Both run the same pipeline: each
-// [SchemaValidator] given with [WithSchema] checks the document before
-// decoding, and a value that implements [Validator] validates itself after,
-// unless [WithoutValidator] is given.
+// [SchemaValidator] given with [WithSchema] and each [DocumentValidator]
+// given with [WithDocumentValidator] checks the document before decoding,
+// and a value that implements [Validator] validates itself after, unless
+// [WithoutValidator] is given.
 //
 //	for _, doc := range docs.All() {
 //		config, err := doc.Decode[Config](ctx, niceyaml.WithSchema(validator))
@@ -288,7 +304,8 @@ func (dd *Document) FilePath() string {
 // path rather than on the whole document: each [SchemaValidator] from
 // [WithSchema] checks the value before decoding, a *T that implements
 // [Validator] validates itself after, and [WithDisallowUnknownFields] and
-// [WithYAMLDecodeOptions] configure the decoder.
+// [WithYAMLDecodeOptions] configure the decoder. A [DocumentValidator] from
+// [WithDocumentValidator] still receives the whole document.
 //
 // For a string view of any node, including mappings and sequences, use
 // [Document.GetValue].
@@ -430,6 +447,7 @@ func (dd *Document) locate(err error) error {
 //
 // Available options:
 //   - [WithSchema]
+//   - [WithDocumentValidator]
 //   - [WithoutValidator]
 //   - [WithDisallowUnknownFields]
 //   - [WithYAMLDecodeOptions]
@@ -438,6 +456,7 @@ type DecodeOption func(*decodeConfig)
 // decodeConfig holds the settings a [DecodeOption] configures.
 type decodeConfig struct {
 	schemas          []SchemaValidator
+	docValidators    []DocumentValidator
 	yamlOpts         []yaml.DecodeOption
 	withoutValidator bool
 }
@@ -452,6 +471,20 @@ type decodeConfig struct {
 func WithSchema(sv SchemaValidator) DecodeOption {
 	return func(c *decodeConfig) {
 		c.schemas = append(c.schemas, sv)
+	}
+}
+
+// WithDocumentValidator is a [DecodeOption] that validates the document
+// with dv before decoding it. It runs after every schema from [WithSchema],
+// and several document validators run in the order given, stopping at the
+// first that fails. A [go.jacobcolvin.com/niceyaml/schema/registry.Registry]
+// is one, so a document decodes against the schema the registry picks for
+// it:
+//
+//	config, err := doc.Decode[Config](ctx, niceyaml.WithDocumentValidator(reg))
+func WithDocumentValidator(dv DocumentValidator) DecodeOption {
+	return func(c *decodeConfig) {
+		c.docValidators = append(c.docValidators, dv)
 	}
 }
 
@@ -483,7 +516,8 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 
 // Decode validates and decodes the document into a new T.
 //
-// Each [SchemaValidator] from [WithSchema] runs before decoding. If *T
+// Each [SchemaValidator] from [WithSchema] and each [DocumentValidator]
+// from [WithDocumentValidator] runs before decoding. If *T
 // implements [Validator], Validate is called after successful decoding
 // unless [WithoutValidator] is given. Methods declared on T itself are
 // included in the method set of *T, so both value and pointer receivers
@@ -507,7 +541,8 @@ func (dd *Document) Decode[T any](ctx context.Context, opts ...DecodeOption) (T,
 // DecodeInto validates and decodes the document into v, which must be a
 // pointer.
 //
-// Each [SchemaValidator] from [WithSchema] runs before decoding. If v
+// Each [SchemaValidator] from [WithSchema] and each [DocumentValidator]
+// from [WithDocumentValidator] runs before decoding. If v
 // implements [Validator], Validate is called after successful decoding
 // unless [WithoutValidator] is given. Fields absent from the document keep
 // their existing values, so v may be pre-populated with defaults. YAML
@@ -517,8 +552,9 @@ func (dd *Document) DecodeInto(ctx context.Context, v any, opts ...DecodeOption)
 }
 
 // decodeInto runs the decode pipeline on node: the schemas from opts check
-// it, the decoder fills v with the options from the [Source] and from opts,
-// and v validates itself unless opts switch that off.
+// it, the document validators from opts check the document, the decoder
+// fills v with the options from the [Source] and from opts, and v validates
+// itself unless opts switch that off.
 func (dd *Document) decodeInto(ctx context.Context, node ast.Node, v any, opts []DecodeOption) error {
 	var cfg decodeConfig
 
@@ -530,6 +566,13 @@ func (dd *Document) decodeInto(ctx context.Context, node ast.Node, v any, opts [
 		err := dd.validateSchema(ctx, node, sv, cfg.yamlOpts)
 		if err != nil {
 			return err
+		}
+	}
+
+	for _, dv := range cfg.docValidators {
+		err := dv.Validate(ctx, dd)
+		if err != nil {
+			return dd.locate(err)
 		}
 	}
 
