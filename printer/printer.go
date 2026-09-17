@@ -235,7 +235,9 @@ type AnnotationFunc func(AnnotationContext) string
 // DefaultAnnotation is the [AnnotationFunc] [New] uses. It joins the
 // annotations with "; ", pads them to their column, and prefixes [line.Below]
 // annotations with "^ ". Annotations with empty content are left out, and
-// it returns "" when none remain, as [line.Annotation.String] does.
+// it returns "" when none remain, as [line.Annotation.String] does. Control
+// characters in the content render as their pictures, so an escape sequence
+// in a message shows as text.
 func DefaultAnnotation(ctx AnnotationContext) string {
 	// Filter the annotations rather than their contents, so the column
 	// comes from the ones that are shown. DeleteFunc zeroes the tail in
@@ -245,6 +247,10 @@ func DefaultAnnotation(ctx AnnotationContext) string {
 	})
 	if len(kept) == 0 {
 		return ""
+	}
+
+	for i := range kept {
+		kept[i].Content = escape.Control(kept[i].Content)
 	}
 
 	padding := strings.Repeat(" ", max(0, kept.Col()))
@@ -673,10 +679,9 @@ func (p *Printer) renderAnnotation(
 		return nil
 	}
 
-	// Escape before wrapping, as the content path does, so the wrap
-	// measures the pictures the terminal shows.
-	content = escape.Control(content)
-
+	// The func owns escaping, so styling it applied through ctx.Styles
+	// survives. The wrap is ANSI-aware and measures the shown cells.
+	//
 	// The indent stays out of the wrapped text and comes back on every
 	// row: the first row keeps it as rendered and continuation rows get
 	// the same width in spaces, so the annotation column survives the

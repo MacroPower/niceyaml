@@ -2926,6 +2926,31 @@ func TestPrinter_WithAnnotationFunc(t *testing.T) {
 	}
 }
 
+func TestPrinter_AnnotationFuncKeepsStyling(t *testing.T) {
+	t.Parallel()
+
+	view := niceyaml.NewSourceFromString("key: value").Lines()
+	view[0].AddAnnotation(line.Annotation{Content: "oops", Placement: line.Below})
+
+	styles := style.NewStyles(lipgloss.NewStyle(), style.Set(style.TextError, lipgloss.NewStyle().Bold(true)))
+	styled := func(ctx printer.AnnotationContext) string {
+		return ctx.Styles.Style(style.TextError).Render(strings.Join(ctx.Annotations.Contents(), "; "))
+	}
+
+	p := printer.New(
+		printer.WithStyles(styles),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+		printer.WithGutter(printer.NoGutter),
+		printer.WithAnnotationFunc(styled),
+	)
+
+	// The styling the func applied reaches the output as escape sequences
+	// rather than as control pictures.
+	got := p.Print(view)
+	assert.Contains(t, got, "\x1b[1moops")
+	assert.NotContains(t, got, "\u241b")
+}
+
 func TestPrinter_AnnotationWrap(t *testing.T) {
 	t.Parallel()
 
