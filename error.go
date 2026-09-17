@@ -248,19 +248,15 @@ func (e *Error) position() (position.Position, bool) {
 }
 
 // messagePosition returns the position that is in e's message already: the
-// one e carries, or the one an Error inside e carries when e has no path,
-// token, or range of its own, looking through foreign wrapping as
-// [Error.locate] does. The boolean is false when no such position exists,
-// which is the case for a path error, whose position a [SourceError] adds
-// when it binds the error.
+// one e carries, or the one the first Error inside e that carries a token or
+// a range put there, looking through foreign wrapping as [Error.locate]
+// does. The boolean is false when no such position exists, which is the
+// case for a chain of path errors, whose position a [SourceError] adds when
+// it binds the error.
 func (e *Error) messagePosition() (position.Position, bool) {
 	for cur := e; ; {
 		if pos, ok := cur.position(); ok {
 			return pos, true
-		}
-
-		if cur.path != nil {
-			return position.Position{}, false
 		}
 
 		inner, ok := errors.AsType[*Error](cur.err)
@@ -634,18 +630,28 @@ func (e *SourceError) Error() string {
 		return msg
 	}
 
-	// A token or range position is in the message already, whether the
-	// anchor carries it or an Error it wraps does.
-	if _, ok := a.messagePosition(); ok {
-		return msg
-	}
-
 	loc, err := a.locate(e.source, root.defaultDocumentIndex())
 	if err != nil {
 		return msg
 	}
 
-	return prefixMessage(formatPosition(e.source.textPosition(loc.pos)), msg)
+	text := formatPosition(e.source.textPosition(loc.pos))
+
+	// A position is in the message already when the anchor carries a token
+	// or a range, or wraps an Error that does. A token put the resolved
+	// position there. A range put its start in view coordinates, and an
+	// Error under a path anchor put its own position, so restate the held
+	// position as the resolved one rather than adding a second.
+	if pos, ok := a.messagePosition(); ok {
+		held := formatPosition(pos)
+		if held == text {
+			return msg
+		}
+
+		return strings.Replace(msg, held, text, 1)
+	}
+
+	return prefixMessage(text, msg)
 }
 
 // located returns the outermost [*Error] in the chain and the anchor that

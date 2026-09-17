@@ -2637,6 +2637,38 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 		}
 	})
 
+	t.Run("a path anchor restates the position of the error it wraps", func(t *testing.T) {
+		t.Parallel()
+
+		tk := source.Lines().TokenAt(position.New(2, 6))
+		inner := niceyaml.NewError("bad token", niceyaml.WithToken(tk))
+		outer := niceyaml.NewErrorFrom(inner, niceyaml.WithPath(namePath))
+
+		// The path anchor resolves in the first document, so the position
+		// the inner Error printed becomes the path's, and the message
+		// carries one position that agrees with the highlight.
+		assert.Equal(t, "$.name: [3:7] bad token", outer.Error())
+		assert.Equal(t, "$.name: [1:7] bad token", source.WrapError(outer).Error())
+	})
+
+	t.Run("a range on a later document reports the text line", func(t *testing.T) {
+		t.Parallel()
+
+		docs, err := source.Documents()
+		require.NoError(t, err)
+		require.Len(t, docs, 2)
+
+		// The view starts at text line 3, where the second document does.
+		view := niceyaml.NewSourceFromTokens(docs[1].Tokens())
+		rng := position.NewRange(position.New(1, 6), position.New(1, 12))
+		bound := view.WrapError(niceyaml.NewError("bad range", niceyaml.WithRange(rng)))
+
+		// A bare range reports view coordinates, and binding restates them
+		// as the text counts them, matching a token error on the same line.
+		assert.Equal(t, "[2:7] bad range", niceyaml.NewError("bad range", niceyaml.WithRange(rng)).Error())
+		assert.Equal(t, "[3:7] bad range", bound.Error())
+	})
+
 	t.Run("a second binding adds no position", func(t *testing.T) {
 		t.Parallel()
 
