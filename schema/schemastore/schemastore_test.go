@@ -969,6 +969,60 @@ func TestSchemaStore_Resolve(t *testing.T) {
 	})
 }
 
+func TestSchemaStore_SchemaFetchTimeout(t *testing.T) {
+	t.Parallel()
+
+	// A schema host that accepts the connection and never answers must not
+	// outlast the refresh timeout, whatever deadline the caller has.
+	blocked := make(chan struct{})
+	schemaServer := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		<-blocked
+	}))
+
+	t.Cleanup(func() {
+		close(blocked)
+		schemaServer.Close()
+	})
+
+	catalog := schemastore.Catalog{
+		Schemas: []schemastore.CatalogEntry{
+			{
+				Name:      "Test Schema",
+				URL:       schemaServer.URL + "/schema.json",
+				FileMatch: []string{"*.yaml"},
+			},
+		},
+	}
+
+	catalogServer := newCatalogServer(t, catalog)
+	t.Cleanup(catalogServer.Close)
+
+	store := schemastore.New(
+		schemastore.WithCatalogURL(catalogServer.URL),
+		schemastore.WithRefreshTimeout(100*time.Millisecond),
+	)
+
+	doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
+
+	ref, err := store.Resolve(t.Context(), doc)
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+
+	go func() {
+		_, loadErr := ref.Load(context.Background()) //nolint:usetesting // A context with no deadline is the point.
+		done <- loadErr
+	}()
+
+	select {
+	case loadErr := <-done:
+		require.ErrorIs(t, loadErr, context.DeadlineExceeded)
+
+	case <-time.After(time.Second):
+		t.Fatal("schema fetch outlasted the refresh timeout")
+	}
+}
+
 func TestIntegration(t *testing.T) {
 	t.Parallel()
 

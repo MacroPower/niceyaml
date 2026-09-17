@@ -59,6 +59,10 @@ type CatalogEntry struct {
 
 // SchemaStore matches documents to SchemaStore.org catalog entries.
 //
+// A matched schema is fetched from the entry's URL when the ref the store
+// returns is loaded, under the refresh timeout, so a schema host that
+// accepts a connection and never answers cannot hang the caller.
+//
 // The catalog is fetched on the first lookup and cached for the configured
 // TTL. Once the cache expires, the next lookup refreshes it; a refresh that
 // fails leaves the previous catalog in use, and a fetch that fails before
@@ -147,15 +151,17 @@ func WithCacheTTL(ttl time.Duration) Option {
 	}
 }
 
-// WithRefreshTimeout is an [Option] that sets the timeout for each catalog
-// fetch, the first one included.
+// WithRefreshTimeout is an [Option] that sets the timeout for each HTTP
+// fetch the store makes: every catalog fetch, the first one included, and
+// every fetch of a matched schema.
 //
 // A lookup that finds the cache expired fetches the catalog under this
 // timeout. If the fetch fails or times out, the lookup uses the previous
 // catalog when one exists, so a temporarily unreachable SchemaStore.org
 // degrades to stale matches rather than errors. The fetch does not inherit
 // the cancellation or deadline of the lookup that started it, so this
-// timeout alone bounds how long it runs.
+// timeout alone bounds how long it runs. A schema fetch keeps the
+// cancellation of the caller that loads it and gets this timeout on top.
 //
 // Defaults to 10 seconds. A timeout of zero or less keeps the default,
 // since a fetch under an expired deadline could never succeed.
@@ -229,9 +235,9 @@ func New(opts ...Option) *SchemaStore {
 
 // Resolve names the schema for the catalog entry matching the document's
 // file path. The returned [schema.Ref] fetches the schema from the entry's
-// URL when loaded. A document that matches no entry reports
-// [ErrNoCatalogMatch]; a catalog that has never loaded reports
-// [ErrFetchCatalog].
+// URL when loaded, under the refresh timeout. A document that matches no
+// entry reports [ErrNoCatalogMatch]; a catalog that has never loaded
+// reports [ErrFetchCatalog].
 //
 // Implements [schema.Resolver].
 func (s *SchemaStore) Resolve(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
@@ -240,8 +246,26 @@ func (s *SchemaStore) Resolve(ctx context.Context, doc *niceyaml.Document) (sche
 		return schema.Ref{}, err
 	}
 
-	//nolint:wrapcheck // The URL loader already wraps errors with context.
-	return schema.URL(entry.URL, schema.WithHTTPClient(s.client)).Resolve(ctx, doc)
+	ref, err := schema.URL(entry.URL, schema.WithHTTPClient(s.client)).Resolve(ctx, doc)
+	if err != nil {
+		//nolint:wrapcheck // The URL loader already wraps errors with context.
+		return schema.Ref{}, err
+	}
+
+	// Bound the GET where the registry performs it, so a schema host that
+	// never answers cannot hang a caller whose context has no deadline.
+	// The caller's cancellation still applies, unlike a catalog fetch,
+	// which several lookups share.
+	load := ref.Load
+	ref.Load = func(ctx context.Context) ([]byte, error) {
+		ctx, cancel := context.WithTimeout(ctx, s.refreshTimeout)
+		defer cancel()
+
+		//nolint:wrapcheck // The URL loader already wraps errors with context.
+		return load(ctx)
+	}
+
+	return ref, nil
 }
 
 // FindMatch finds the catalog entry matching a file path.
