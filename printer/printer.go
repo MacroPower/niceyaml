@@ -341,11 +341,15 @@ func WithContainerStyle(s lipgloss.Style) Option {
 
 // WithStyles is a [Option] that sets the [StyleGetter], typically a
 // theme from [go.jacobcolvin.com/niceyaml/style/theme], that styles tokens,
-// gutters, and annotations.
+// gutters, and annotations. A nil s selects [style.Default].
 //
 // To style the frame around the output, use [WithContainerStyle].
 func WithStyles(s StyleGetter) Option {
 	return func(p *Printer) {
+		if s == nil {
+			s = style.Default()
+		}
+
 		p.styles = s
 		p.blends = newBlendCache()
 	}
@@ -368,9 +372,13 @@ func WithGutter(fn GutterFunc) Option {
 // rendering annotations.
 //
 // By default, [DefaultAnnotation] is used which adds "^ " prefix for
-// [line.Below] annotations.
+// [line.Below] annotations. A nil fn selects [DefaultAnnotation].
 func WithAnnotationFunc(fn AnnotationFunc) Option {
 	return func(p *Printer) {
+		if fn == nil {
+			fn = DefaultAnnotation
+		}
+
 		p.annotationFunc = fn
 	}
 }

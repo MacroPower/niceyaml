@@ -3394,3 +3394,26 @@ func TestPrinter_WithGutter_Nil(t *testing.T) {
 	assert.Equal(t, testPrinterWithGutter(printer.NoGutter).Print(view), p.Print(view))
 	assert.Equal(t, "key: value\n     ^ note", p.Print(view))
 }
+
+func TestPrinter_WithStyles_Nil(t *testing.T) {
+	t.Parallel()
+
+	view := niceyaml.NewSourceFromString("key: value").Lines()
+
+	// A nil StyleGetter selects the default styles rather than panicking
+	// in New.
+	assert.Equal(t, printer.New().Print(view), printer.New(printer.WithStyles(nil)).Print(view))
+}
+
+func TestPrinter_WithAnnotationFunc_Nil(t *testing.T) {
+	t.Parallel()
+
+	view := niceyaml.NewSourceFromString("key: value").Lines()
+	view[0].AddAnnotation(line.Annotation{Content: "note", Placement: line.Below, Col: 5})
+
+	// A nil AnnotationFunc selects DefaultAnnotation rather than panicking
+	// on the first annotated line.
+	p := testPrinterWithGutter(nil).With(printer.WithAnnotationFunc(nil))
+
+	assert.Equal(t, "key: value\n     ^ note", p.Print(view))
+}
