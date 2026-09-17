@@ -1531,16 +1531,10 @@ func (m *Model) matchRow(view line.Lines, k, col int) int {
 		}
 	}
 
-	// Every content row starts with the gutter, which is as wide as the
-	// difference between the unwrapped line rendered with and without it.
-	bare := p.With(printer.WithWidth(0), printer.WithAnnotations(false))
-	withGutter := splitLines(bare.Print(view, span))
-	noGutter := splitLines(bare.With(printer.WithGutter(printer.NoGutter)).Print(view, span))
-	gutter := ansi.StringWidth(withGutter[0]) - ansi.StringWidth(noGutter[0])
-
-	// Walk the rows along the line's content. Wrapping drops the spaces it
-	// breaks at, so a space in the content that a row skips still advances
-	// the column.
+	// Walk the rows along the line's content, past the gutter that starts
+	// every row. Wrapping drops the spaces it breaks at, so a space in the
+	// content that a row skips still advances the column.
+	gutter := p.GutterWidth(view)
 	runes := []rune(view[k].Content())
 	next := 0
 
