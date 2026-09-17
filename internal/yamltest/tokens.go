@@ -265,6 +265,10 @@ func DiffTokenFields(want, got *token.Token) []string {
 		diffs = append(diffs, "Indicator")
 	}
 
+	if want.Error != got.Error {
+		diffs = append(diffs, "Error")
+	}
+
 	if want.Position.Column != got.Position.Column {
 		diffs = append(diffs, "Position.Column")
 	}
@@ -439,12 +443,13 @@ func FormatToken(tk *token.Token) string {
 		return "<nil>"
 	}
 
-	return fmt.Sprintf(`Type=%s Value=%q Origin=%q Indicator=%s CharacterType=%s Position=(%s)`,
+	return fmt.Sprintf(`Type=%s Value=%q Origin=%q Indicator=%s CharacterType=%s Error=%q Position=(%s)`,
 		tk.Type,
 		tk.Value,
 		tk.Origin,
 		tk.Indicator,
 		tk.CharacterType,
+		tk.Error,
 		FormatTokenPosition(tk.Position),
 	)
 }

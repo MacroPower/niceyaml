@@ -103,8 +103,16 @@ func TestFormatToken(t *testing.T) {
 		assert.Contains(t, got, "Type=String")
 		assert.Contains(t, got, `Value="hello"`)
 		assert.Contains(t, got, `Origin="hello\n"`)
+		assert.Contains(t, got, `Error=""`)
 		assert.Contains(t, got, "Line=1")
 		assert.Contains(t, got, "Col=1")
+	})
+
+	t.Run("token with error", func(t *testing.T) {
+		t.Parallel()
+
+		got := yamltest.FormatToken(yamltest.NewTokenBuilder().Error("bad").Build())
+		assert.Contains(t, got, `Error="bad"`)
 	})
 }
 
@@ -634,6 +642,7 @@ func TestDiffTokenFields(t *testing.T) {
 			Origin("a\n").
 			CharacterType(token.CharacterTypeMiscellaneous).
 			Indicator(token.NotIndicator).
+			Error("bad").
 			PositionLine(1).
 			PositionColumn(1).
 			PositionOffset(0).
@@ -660,11 +669,22 @@ func TestDiffTokenFields(t *testing.T) {
 		assert.Contains(t, diffs, "Origin")
 		assert.Contains(t, diffs, "CharacterType")
 		assert.Contains(t, diffs, "Indicator")
+		assert.Contains(t, diffs, "Error")
 		assert.Contains(t, diffs, "Position.Line")
 		assert.Contains(t, diffs, "Position.Column")
 		assert.Contains(t, diffs, "Position.Offset")
 		assert.Contains(t, diffs, "Position.IndentNum")
 		assert.Contains(t, diffs, "Position.IndentLevel")
+	})
+
+	t.Run("error is the only difference", func(t *testing.T) {
+		t.Parallel()
+
+		want := yamltest.NewTokenBuilder().Error("bad").Build()
+		got := yamltest.NewTokenBuilder().Build()
+
+		assert.Equal(t, []string{"Error"}, yamltest.DiffTokenFields(want, got))
+		assert.False(t, yamltest.CompareTokens(want, got).Equal())
 	})
 }
 
