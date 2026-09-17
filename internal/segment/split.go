@@ -51,6 +51,7 @@ type Line struct {
 //
 // Additional lexer behaviors:
 //   - CRLF (\r\n) is preserved in Origin but normalized to \n in Value
+//   - A bare CR (\r) ends a line, as it advances the lexer's Position.Line
 //   - Blank lines are absorbed into the previous token's Origin
 //   - Comments include the trailing newline in Origin but not in Value
 func Split(tks token.Tokens) []Line {
@@ -71,14 +72,15 @@ func Split(tks token.Tokens) []Line {
 // Create instances with [newBuilder].
 type builder struct {
 	// Result accumulation.
-	lastPart            *token.Token // Most recent part on the current line, for linking.
+	lastPart *token.Token // Most recent part on the current line, for linking.
+
+	// Token tracking.
+	prevLineEnding string // Line ending that closed the previous token's Origin, or "".
+
 	lines               []Line
 	currentLineSegments Segments
 	currentLine         int // Current line number being built.
 	built               bool
-
-	// Token tracking.
-	prevTokenEndedWithNewline bool // Track if previous token's Origin ended with "\n".
 
 	// Position tracking.
 	currentOffset      int // Cumulative rune offset (1-indexed like lexer).
@@ -103,7 +105,7 @@ func newBuilder(tks token.Tokens) *builder {
 	if tks[0].Position != nil {
 		b.currentLine = tks[0].Position.Line
 		// Count leading newlines in first token's Origin and adjust.
-		leadingNewlines := countLeadingNewlines(tks[0].Origin)
+		leadingNewlines := countLeadingNewlineParts(splitOriginIntoParts(tks[0].Origin))
 		if leadingNewlines > 0 && b.currentLine > leadingNewlines {
 			b.currentLine -= leadingNewlines
 		}
@@ -141,11 +143,11 @@ func (b *builder) AddToken(tk *token.Token) {
 
 	origin := tk.Origin
 
-	// For simple tokens, check for line number gaps and sync forward if needed.
-	b.handleGap(tk, origin)
-
-	// Split token at newline boundaries, filtering empty parts upfront.
+	// Split token at line ending boundaries, filtering empty parts upfront.
 	parts := splitOriginIntoParts(origin)
+
+	// For simple tokens, check for line number gaps and sync forward if needed.
+	b.handleGap(tk, parts)
 
 	// Multi-part means the token's Origin was split into multiple parts.
 	isMultiPart := len(parts) > 1
@@ -173,9 +175,8 @@ func (b *builder) AddToken(tk *token.Token) {
 		b.processPart(ctx)
 	}
 
-	// Track whether this token ended with a newline for duplicate detection.
-	// Only \n counts as ending with newline (not \r alone).
-	b.prevTokenEndedWithNewline = strings.HasSuffix(origin, "\n")
+	// Remember how this token's Origin ended for duplicate detection.
+	b.prevLineEnding = lineEnding(origin)
 }
 
 // Build finalizes and returns the constructed [Line] values.
@@ -231,23 +232,12 @@ type partContext struct {
 func (b *builder) processPart(ctx *partContext) bool {
 	partIsPureNewline := isPureNewline(ctx.part)
 
-	// Handle duplicate leading newline: the go-yaml lexer sometimes includes the
-	// same newline character at both the end of one token and the start of the next.
-	//
-	// Position.Line names the line the token's content starts on, and each
-	// leading pure-newline part advances one line from currentLine. When the
-	// token carries more leading newlines than lines to advance, the first one
-	// repeats the newline that ended the previous token. Comparing counts rather
-	// than checking currentLine == Position.Line also catches a duplicate that
-	// is followed by real blank lines.
-	//
-	// Instead of skipping it entirely (which would make Origin non-invertible), we
-	// append it to the previous line so the newline is preserved in the Origin but
-	// doesn't cause an extra line advance.
-	isDuplicateNewline := ctx.partIndex == 0 && partIsPureNewline && b.prevTokenEndedWithNewline &&
-		ctx.tk.Position != nil && ctx.leadingNewlines > ctx.tk.Position.Line-b.currentLine
-	if isDuplicateNewline && len(b.lines) > 0 {
-		// Create a segment for the duplicate newline and attach to previous line.
+	// A leading newline part can belong to the line the previous token closed.
+	// Instead of skipping it entirely (which would make Origin non-invertible),
+	// we append it to the previous line so the newline is preserved in the
+	// Origin but doesn't cause an extra line advance.
+	if b.continuesPreviousLine(ctx) && len(b.lines) > 0 {
+		// Create a segment for the newline and attach to previous line.
 		lastLine := &b.lines[len(b.lines)-1]
 		newTk := &token.Token{
 			Type:          ctx.tk.Type,
@@ -268,8 +258,11 @@ func (b *builder) processPart(ctx *partContext) bool {
 
 		lastLine.Segments = append(lastLine.Segments, New(ctx.tk, newTk))
 
-		// The previous token's Origin already counted this newline, so
-		// currentOffset stays put.
+		// The previous token's Origin already counted the runes it shares
+		// with this part, so only the rest advances currentOffset. Line
+		// endings are ASCII, so byte and rune counts agree.
+		b.currentOffset += len(ctx.part) - lineEndingOverlap(b.prevLineEnding, ctx.part)
+
 		return false
 	}
 
@@ -374,12 +367,16 @@ func (b *builder) processPart(ctx *partContext) bool {
 	// original Position for the first content part.
 	//
 	// The lexer's Position reflects the content line, not the blank line, so we
-	// should use it to ensure round-trip fidelity.
+	// should use it to ensure round-trip fidelity. The part keeps the line it
+	// sits on, though: the lexer counts a CRLF it cut between a comment and
+	// the next token as two line breaks, and every part on a line reports
+	// that line's number.
 	//
 	// Also update our tracking to match, so subsequent tokens get correct values.
 	hasLeadingBlankLine := ctx.isMultiPart && len(ctx.parts) > 1 && isPureNewline(ctx.parts[0])
 	if hasLeadingBlankLine && wasFirstContentPart && ctx.tk.Position != nil {
 		newTk.Position = clonePosition(ctx.tk.Position)
+		newTk.Position.Line = b.currentLine
 		// Sync our tracking with the original Position to fix subsequent tokens.
 		b.currentIndentLevel = ctx.tk.Position.IndentLevel
 	}
@@ -392,30 +389,56 @@ func (b *builder) processPart(ctx *partContext) bool {
 
 	b.currentOffset += utf8.RuneCountInString(ctx.part)
 
-	// If this part ends with a newline, finish the current line.
+	// If this part ends with a line ending, finish the current line.
 	//
-	// Only \n terminates lines (per YAML spec).
-	//
-	// CRLF (\r\n) may be split by go-yaml across tokens, but we wait for the \n to
-	// create a new line.
-	//
-	// The \r is preserved in Content() and stripped during output.
-	if strings.HasSuffix(ctx.part, "\n") {
+	// The parts are cut after "\n" and after a bare "\r", so every part but
+	// the last ends a line, and the last does when the Origin did.
+	// The lexer advances Position.Line on a bare "\r" as well, and this
+	// mirrors it. The ending stays in the part's Origin so the token can be
+	// rebuilt, and Content() strips it.
+	if lineEnding(ctx.part) != "" {
 		b.finishLine()
 	}
 
 	return true
 }
 
+// continuesPreviousLine reports whether the part, a pure newline that opens
+// its token, belongs to the line the previous token closed rather than
+// starting a line of its own. The go-yaml lexer produces this in two ways:
+//
+//   - It cuts a CRLF between tokens, closing a comment with the "\r" and
+//     opening the next token with the "\n". A "\r" directly followed by "\n"
+//     is one line break in every convention, so the "\n" joins the "\r".
+//   - It repeats a line ending at both the end of one token and the start
+//     of the next. After a tag it repeats "\n" as "\n", and in a CRLF
+//     document it closes the tag with "\r" and opens the next token with
+//     the full "\r\n". Position.Line names the line the token's content
+//     starts on, and each leading pure-newline part advances one line from
+//     currentLine, so more leading newlines than lines to advance means the
+//     first one is the repeat. Comparing counts rather than checking
+//     currentLine == Position.Line also catches a repeat that real blank
+//     lines follow.
+func (b *builder) continuesPreviousLine(ctx *partContext) bool {
+	if ctx.partIndex != 0 || !isPureNewline(ctx.part) || b.prevLineEnding == "" {
+		return false
+	}
+
+	if b.prevLineEnding == "\r" && ctx.part == "\n" {
+		return true
+	}
+
+	return ctx.tk.Position != nil && ctx.leadingNewlines > ctx.tk.Position.Line-b.currentLine
+}
+
 // handleGap detects and handles line number gaps for simple tokens.
-// Simple tokens have no internal newlines (or just a trailing newline).
+// Simple tokens split into a single part: they have no internal line
+// endings, at most a trailing one.
 //
 // When a gap is detected (token is ahead of currentLine), it flushes the
 // current line and syncs forward to the token's line.
-func (b *builder) handleGap(tk *token.Token, origin string) {
-	newlineCount := strings.Count(origin, "\n")
-	isSimple := newlineCount == 0 || (newlineCount == 1 && strings.HasSuffix(origin, "\n"))
-	if !isSimple {
+func (b *builder) handleGap(tk *token.Token, parts []string) {
+	if len(parts) != 1 {
 		return
 	}
 
@@ -488,25 +511,6 @@ func countLeadingWhitespace(s string) int {
 	return count
 }
 
-// countLeadingNewlines returns the number of leading newline characters in s.
-// CR characters are skipped to properly handle CRLF line endings.
-func countLeadingNewlines(s string) int {
-	count := 0
-	for _, r := range s {
-		if r == '\r' {
-			continue // Skip CR in CRLF.
-		}
-
-		if r != '\n' {
-			break
-		}
-
-		count++
-	}
-
-	return count
-}
-
 // newlineColumn returns the 1-indexed Column for a pure-newline part appended
 // to segs: the column just past the existing parts, or 1 when the newline
 // starts an otherwise empty line.
@@ -569,9 +573,38 @@ func isBlockScalarContent(tk *token.Token) bool {
 	return false
 }
 
-// isPureNewline returns true if s is exactly a line ending (LF or CRLF).
+// isPureNewline returns true if s is exactly a line ending (LF, CRLF, or a
+// bare CR).
 func isPureNewline(s string) bool {
-	return s == "\n" || s == "\r\n"
+	return s == "\n" || s == "\r\n" || s == "\r"
+}
+
+// lineEnding returns the line ending that closes s ("\r\n", "\n", or "\r"),
+// or "" when s ends with none.
+func lineEnding(s string) string {
+	switch {
+	case strings.HasSuffix(s, "\r\n"):
+		return "\r\n"
+	case strings.HasSuffix(s, "\n"):
+		return "\n"
+	case strings.HasSuffix(s, "\r"):
+		return "\r"
+	}
+
+	return ""
+}
+
+// lineEndingOverlap returns the length of the longest suffix of prev that
+// part starts with. A repeated "\n" after "\n" overlaps fully, while "\r\n"
+// after a bare "\r" overlaps by one byte.
+func lineEndingOverlap(prev, part string) int {
+	for i := range len(prev) {
+		if strings.HasPrefix(part, prev[i:]) {
+			return len(prev) - i
+		}
+	}
+
+	return 0
 }
 
 // isPureHorizontalWhitespace returns true if s contains only spaces and tabs.
@@ -579,13 +612,13 @@ func isPureHorizontalWhitespace(s string) bool {
 	return s != "" && strings.TrimLeft(s, " \t") == ""
 }
 
-// splitOriginIntoParts splits a token's Origin at newline boundaries.
+// splitOriginIntoParts splits a token's Origin after each line ending: "\n",
+// "\r\n", or a bare "\r", the three the lexer advances Position.Line on.
 //
-// Empty strings from SplitAfter are filtered, but an empty origin is preserved
-// as a single empty part (semantically significant for empty block scalar
-// content).
+// An empty origin is preserved as a single empty part (semantically
+// significant for empty block scalar content).
 //
-// Each part retains its trailing newline if present.
+// Each part retains its trailing line ending if present.
 func splitOriginIntoParts(origin string) []string {
 	// Handle empty origin: preserve as single empty part.
 	// This is semantically significant for empty block scalar content.
@@ -595,10 +628,26 @@ func splitOriginIntoParts(origin string) []string {
 
 	var parts []string
 
-	for _, p := range strings.SplitAfter(origin, "\n") {
-		if p != "" {
-			parts = append(parts, p)
+	start := 0
+
+	for i := range len(origin) {
+		switch origin[i] {
+		case '\n':
+		case '\r':
+			if i+1 < len(origin) && origin[i+1] == '\n' {
+				continue // The "\n" of a CRLF ends the part.
+			}
+
+		default:
+			continue
 		}
+
+		parts = append(parts, origin[start:i+1])
+		start = i + 1
+	}
+
+	if start < len(origin) {
+		parts = append(parts, origin[start:])
 	}
 
 	return parts

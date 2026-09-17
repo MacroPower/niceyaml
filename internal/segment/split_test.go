@@ -109,6 +109,100 @@ func TestSplit_DuplicateNewline(t *testing.T) {
 	}
 }
 
+func TestSplit_LineEndings(t *testing.T) {
+	t.Parallel()
+
+	// The lexer advances Position.Line on "\n", "\r\n", and a bare "\r", and
+	// Split cuts lines at the same three endings. Where the lexer spreads one
+	// CRLF over two tokens, the two halves stay on one line.
+	tcs := map[string]struct {
+		input       string
+		wantContent []string
+		wantNumbers []int
+	}{
+		"bare cr between keys": {
+			input:       "a: 1\rb: 2\r",
+			wantContent: []string{"a: 1", "b: 2"},
+			wantNumbers: []int{1, 2},
+		},
+		"bare cr blank line": {
+			input:       "a: 1\r\rb: 2\r",
+			wantContent: []string{"a: 1", "", "b: 2"},
+			wantNumbers: []int{1, 2, 3},
+		},
+		"bare cr block scalar": {
+			input:       "k: |\r  a\r  b\rz: 1\r",
+			wantContent: []string{"k: |", "  a", "  b", "z: 1"},
+			wantNumbers: []int{1, 2, 3, 4},
+		},
+		"bare cr after comment": {
+			input:       "# c\rk: v\r",
+			wantContent: []string{"# c", "k: v"},
+			wantNumbers: []int{1, 2},
+		},
+		"crlf split after comment": {
+			input:       "a: b # c\r\nd: e\r\n",
+			wantContent: []string{"a: b # c", "d: e"},
+			wantNumbers: []int{1, 2},
+		},
+		"crlf repeated after tag": {
+			input:       "a: !t\r\n  b: 1\r\n",
+			wantContent: []string{"a: !t", "  b: 1"},
+			wantNumbers: []int{1, 2},
+		},
+		"crlf blank line": {
+			input:       "key: value\r\n\r\nnext: data\r\n",
+			wantContent: []string{"key: value", "", "next: data"},
+			wantNumbers: []int{1, 2, 3},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			lines := segment.Split(lexer.Tokenize(tc.input))
+
+			assert.Equal(t, tc.wantContent, lineContents(lines))
+			assert.Equal(t, tc.wantNumbers, lineNumbers(lines))
+
+			// Every part on a line reports that line's number.
+			for _, l := range lines {
+				for _, seg := range l.Segments {
+					assert.Equal(t, l.Number, seg.Part().Position.Line, "part %q", seg.Part().Origin)
+				}
+			}
+		})
+	}
+}
+
+func TestSplit_CRLFSplitOffset(t *testing.T) {
+	t.Parallel()
+
+	// The lexer closes a comment with "\r" and opens the next token with
+	// "\n". That "\n" is a new rune, so it advances the offset by one, while
+	// the "\r" a tag repeats before "\r\n" does not.
+	lines := segment.Split(lexer.Tokenize("# c\r\nk: v\r\n"))
+	require.Len(t, lines, 2)
+
+	nl := part(t, lines, 0, 1)
+	assert.Equal(t, "\n", nl.Origin)
+	assert.Equal(t, 5, nl.Position.Offset)
+
+	lines = segment.Split(lexer.Tokenize("a: !t\r\n  b: 1\r\nc: 'x\r\n  y'\r\n"))
+	require.Len(t, lines, 4)
+
+	dup := part(t, lines, 0, 3)
+	assert.Equal(t, "\r\n", dup.Origin)
+	assert.Equal(t, 7, dup.Position.Offset, "the repeat shares the tag's \\r offset")
+
+	// "a: !t\r\n" (7) + "  b: 1\r\n" (8) + "c: 'x\r\n" (7) puts the
+	// continuation at 1-indexed offset 23.
+	cont := part(t, lines, 3, 0)
+	assert.Equal(t, "  y'", cont.Origin)
+	assert.Equal(t, 23, cont.Position.Offset)
+}
+
 func TestSplit_NewlineColumn(t *testing.T) {
 	t.Parallel()
 
