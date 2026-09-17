@@ -1,4 +1,4 @@
-package niceyaml_test
+package encoder_test
 
 import (
 	"bytes"
@@ -8,10 +8,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/encoder"
 )
 
-func TestNewEncoder(t *testing.T) {
+func TestNew(t *testing.T) {
 	t.Parallel()
 
 	t.Run("creates encoder with no options", func(t *testing.T) {
@@ -19,16 +19,16 @@ func TestNewEncoder(t *testing.T) {
 
 		var buf bytes.Buffer
 
-		enc := niceyaml.NewEncoder(&buf)
+		enc := encoder.New(&buf)
 		require.NotNil(t, enc)
 	})
 
-	t.Run("creates encoder with PrettyEncoderOptions", func(t *testing.T) {
+	t.Run("creates encoder with Pretty", func(t *testing.T) {
 		t.Parallel()
 
 		var buf bytes.Buffer
 
-		enc := niceyaml.NewEncoder(&buf, niceyaml.PrettyEncoderOptions...)
+		enc := encoder.New(&buf, encoder.Pretty()...)
 		require.NotNil(t, enc)
 	})
 }
@@ -73,7 +73,7 @@ func TestEncoder_Encode(t *testing.T) {
 
 			var buf bytes.Buffer
 
-			enc := niceyaml.NewEncoder(&buf)
+			enc := encoder.New(&buf)
 
 			err := enc.Encode(tc.input)
 			require.NoError(t, err)
@@ -89,13 +89,13 @@ func TestEncoder_Close(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	enc := niceyaml.NewEncoder(&buf)
+	enc := encoder.New(&buf)
 
 	err := enc.Close()
 	assert.NoError(t, err)
 }
 
-func TestPrettyEncoderOptions(t *testing.T) {
+func TestPretty(t *testing.T) {
 	t.Parallel()
 
 	type config struct {
@@ -108,7 +108,7 @@ func TestPrettyEncoderOptions(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	enc := niceyaml.NewEncoder(&buf, niceyaml.PrettyEncoderOptions...)
+	enc := encoder.New(&buf, encoder.Pretty()...)
 
 	err := enc.Encode(input)
 	require.NoError(t, err)
@@ -127,7 +127,7 @@ func TestWithYAMLEncodeOptions(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	enc := niceyaml.NewEncoder(&buf, niceyaml.WithYAMLEncodeOptions(yaml.Flow(true)))
+	enc := encoder.New(&buf, encoder.WithYAMLEncodeOptions(yaml.Flow(true)))
 
 	require.NoError(t, enc.Encode(config{Items: []string{"one", "two"}}))
 	assert.Equal(t, "{items: [one, two]}\n", buf.String())
