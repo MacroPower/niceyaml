@@ -156,18 +156,22 @@ func (b *builder) AddToken(tk *token.Token) {
 
 	isFirstContentPart := true
 
+	ctx := &partContext{
+		tk:                   tk,
+		parts:                parts,
+		leadingNewlines:      countLeadingNewlineParts(parts),
+		isBlockScalarContent: isBlockScalarContent,
+		isMultiPart:          isMultiPart,
+		lastContentPartIdx:   lastContentPartIdx,
+		isFirstContentPart:   &isFirstContentPart,
+	}
+
 	for i, part := range parts {
-		b.processPart(&partContext{
-			tk:                   tk,
-			part:                 part,
-			partIndex:            i,
-			isLastPart:           i == len(parts)-1,
-			isBlockScalarContent: isBlockScalarContent,
-			isMultiPart:          isMultiPart,
-			lastContentPartIdx:   lastContentPartIdx,
-			parts:                parts,
-			isFirstContentPart:   &isFirstContentPart,
-		})
+		ctx.part = part
+		ctx.partIndex = i
+		ctx.isLastPart = i == len(parts)-1
+
+		b.processPart(ctx)
 	}
 
 	// Track whether this token ended with a newline for duplicate detection.
@@ -215,6 +219,7 @@ type partContext struct {
 	part                 string
 	parts                []string
 	partIndex            int
+	leadingNewlines      int // Number of pure-newline parts at the start of parts.
 	lastContentPartIdx   int
 	isLastPart           bool
 	isBlockScalarContent bool
@@ -231,15 +236,18 @@ func (b *builder) processPart(ctx *partContext) bool {
 	// Handle duplicate leading newline: the go-yaml lexer sometimes includes the
 	// same newline character at both the end of one token and the start of the next.
 	//
-	// Detect this by checking if we're already at the token's line - if so,
-	// processing the leading "\n" would incorrectly advance us past the token's
-	// position.
+	// Position.Line names the line the token's content starts on, and each
+	// leading pure-newline part advances one line from currentLine. When the
+	// token carries more leading newlines than lines to advance, the first one
+	// repeats the newline that ended the previous token. Comparing counts rather
+	// than checking currentLine == Position.Line also catches a duplicate that
+	// is followed by real blank lines.
 	//
 	// Instead of skipping it entirely (which would make Origin non-invertible), we
 	// append it to the previous line so the newline is preserved in the Origin but
 	// doesn't cause an extra line advance.
 	isDuplicateNewline := ctx.partIndex == 0 && partIsPureNewline && b.prevTokenEndedWithNewline &&
-		ctx.tk.Position != nil && b.currentLine == ctx.tk.Position.Line
+		ctx.tk.Position != nil && ctx.leadingNewlines > ctx.tk.Position.Line-b.currentLine
 	if isDuplicateNewline && len(b.lines) > 0 {
 		// Create a segment for the duplicate newline and attach to previous line.
 		lastLine := &b.lines[len(b.lines)-1]
@@ -262,8 +270,8 @@ func (b *builder) processPart(ctx *partContext) bool {
 
 		lastLine.Segments = append(lastLine.Segments, New(ctx.tk, newTk))
 
-		b.currentOffset += utf8.RuneCountInString(ctx.part)
-
+		// The previous token's Origin already counted this newline, so
+		// currentOffset stays put.
 		return false
 	}
 
@@ -491,6 +499,22 @@ func countLeadingNewlines(s string) int {
 		}
 
 		if r != '\n' {
+			break
+		}
+
+		count++
+	}
+
+	return count
+}
+
+// countLeadingNewlineParts returns the number of pure-newline parts at the
+// start of parts.
+func countLeadingNewlineParts(parts []string) int {
+	count := 0
+
+	for _, p := range parts {
+		if !isPureNewline(p) {
 			break
 		}
 
