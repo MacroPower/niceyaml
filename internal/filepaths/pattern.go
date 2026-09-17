@@ -115,3 +115,90 @@ func anyDepth(pattern string) string {
 
 	return "**/" + pattern
 }
+
+// ExpandBraces returns the patterns the brace alternatives of pattern
+// stand for, so "*.{yml,yaml}" yields "*.yml" and "*.yaml", and nested
+// groups multiply out. A backslash escapes the character after it. A
+// pattern with no brace group, or with an unclosed one, yields itself.
+func ExpandBraces(pattern string) []string {
+	open, closing := braceGroup(pattern)
+	if open < 0 {
+		return []string{pattern}
+	}
+
+	prefix, suffix := pattern[:open], pattern[closing+1:]
+
+	var expanded []string
+
+	for _, alt := range splitAlternatives(pattern[open+1 : closing]) {
+		expanded = append(expanded, ExpandBraces(prefix+alt+suffix)...)
+	}
+
+	return expanded
+}
+
+// braceGroup returns the indexes of the first unescaped "{" in pattern
+// and of the "}" that closes it, or -1 for both when pattern holds no
+// closed brace group.
+func braceGroup(pattern string) (int, int) {
+	open, depth := -1, 0
+
+	for i := 0; i < len(pattern); i++ {
+		switch pattern[i] {
+		case '\\':
+			i++ // Skip the escaped character.
+
+		case '{':
+			if depth == 0 {
+				open = i
+			}
+
+			depth++
+
+		case '}':
+			if depth == 0 {
+				continue
+			}
+
+			depth--
+
+			if depth == 0 {
+				return open, i
+			}
+		}
+	}
+
+	return -1, -1
+}
+
+// splitAlternatives splits the body of a brace group on the commas at its
+// top level, leaving commas inside nested groups and escaped commas in
+// place.
+func splitAlternatives(body string) []string {
+	var (
+		alts  []string
+		start int
+		depth int
+	)
+
+	for i := 0; i < len(body); i++ {
+		switch body[i] {
+		case '\\':
+			i++ // Skip the escaped character.
+
+		case '{':
+			depth++
+
+		case '}':
+			depth--
+
+		case ',':
+			if depth == 0 {
+				alts = append(alts, body[start:i])
+				start = i + 1
+			}
+		}
+	}
+
+	return append(alts, body[start:])
+}

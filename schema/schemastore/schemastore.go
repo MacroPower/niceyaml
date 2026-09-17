@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -439,20 +440,29 @@ func (s *SchemaStore) filterAndNormalizeEntries(schemas []CatalogEntry) []Catalo
 	return entries
 }
 
-// filterSupportedPatterns returns patterns that match YAML-compatible files.
-// This includes .yaml, .yml, and .json extensions since JSON is a valid
-// subset of YAML.
+// filterSupportedPatterns returns the patterns that can match a
+// YAML-compatible file, meaning one with a .yaml, .yml, or .json extension,
+// since JSON is a valid subset of YAML. A pattern with brace alternatives,
+// such as "*.{yml,yaml}", counts when any of its alternatives has a
+// supported extension.
 func filterSupportedPatterns(patterns []string) []string {
 	var result []string
 
 	for _, pattern := range patterns {
-		lower := strings.ToLower(pattern)
-		if strings.HasSuffix(lower, ".yaml") ||
-			strings.HasSuffix(lower, ".yml") ||
-			strings.HasSuffix(lower, ".json") {
+		if slices.ContainsFunc(filepaths.ExpandBraces(pattern), hasSupportedExtension) {
 			result = append(result, pattern)
 		}
 	}
 
 	return result
+}
+
+// hasSupportedExtension reports whether pattern ends in .yaml, .yml, or
+// .json, in any letter case.
+func hasSupportedExtension(pattern string) bool {
+	lower := strings.ToLower(pattern)
+
+	return strings.HasSuffix(lower, ".yaml") ||
+		strings.HasSuffix(lower, ".yml") ||
+		strings.HasSuffix(lower, ".json")
 }

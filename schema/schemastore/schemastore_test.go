@@ -60,6 +60,16 @@ func TestSchemaStore_FindMatch(t *testing.T) {
 				URL:       "https://json.schemastore.org/no-match.json",
 				FileMatch: nil,
 			},
+			{
+				Name:      "CircleCI",
+				URL:       "https://json.schemastore.org/circleciconfig.json",
+				FileMatch: []string{"**/.circleci/config.{yml,yaml}"},
+			},
+			{
+				Name:      "Not YAML",
+				URL:       "https://json.schemastore.org/not-yaml.json",
+				FileMatch: []string{"*.{toml,ini}"},
+			},
 		},
 	}
 
@@ -68,6 +78,18 @@ func TestSchemaStore_FindMatch(t *testing.T) {
 		wantName string
 		err      error
 	}{
+		"matches brace alternative yml": {
+			filePath: ".circleci/config.yml",
+			wantName: "CircleCI",
+		},
+		"matches brace alternative yaml": {
+			filePath: "repo/.circleci/config.yaml",
+			wantName: "CircleCI",
+		},
+		"no match for brace alternatives without a yaml extension": {
+			filePath: "settings.toml",
+			err:      schemastore.ErrNoCatalogMatch,
+		},
 		"matches github workflow yaml": {
 			filePath: ".github/workflows/ci.yaml",
 			wantName: "GitHub Workflow",

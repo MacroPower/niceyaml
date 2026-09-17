@@ -295,3 +295,69 @@ func TestMatchAny(t *testing.T) {
 		})
 	}
 }
+
+func TestExpandBraces(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		pattern string
+		want    []string
+	}{
+		"no braces": {
+			pattern: "*.yaml",
+			want:    []string{"*.yaml"},
+		},
+		"empty pattern": {
+			pattern: "",
+			want:    []string{""},
+		},
+		"two alternatives": {
+			pattern: "*.{yml,yaml}",
+			want:    []string{"*.yml", "*.yaml"},
+		},
+		"directory and alternatives": {
+			pattern: "**/.github/workflows/*.{yml,yaml}",
+			want:    []string{"**/.github/workflows/*.yml", "**/.github/workflows/*.yaml"},
+		},
+		"two groups multiply out": {
+			pattern: "{a,b}.{x,y}",
+			want:    []string{"a.x", "a.y", "b.x", "b.y"},
+		},
+		"nested group": {
+			pattern: "a{b,c{d,e}}f",
+			want:    []string{"abf", "acdf", "acef"},
+		},
+		"empty alternative": {
+			pattern: "a{,b}",
+			want:    []string{"a", "ab"},
+		},
+		"single alternative": {
+			pattern: "a{b}c",
+			want:    []string{"abc"},
+		},
+		"unclosed group is kept": {
+			pattern: "a{b,c",
+			want:    []string{"a{b,c"},
+		},
+		"stray closing brace is kept": {
+			pattern: "a}b{c,d}",
+			want:    []string{"a}bc", "a}bd"},
+		},
+		"escaped braces are kept": {
+			pattern: `a\{b,c\}`,
+			want:    []string{`a\{b,c\}`},
+		},
+		"escaped comma stays in the alternative": {
+			pattern: `{a\,b,c}`,
+			want:    []string{`a\,b`, "c"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, filepaths.ExpandBraces(tc.pattern))
+		})
+	}
+}
