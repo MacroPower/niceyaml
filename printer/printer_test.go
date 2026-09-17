@@ -1376,6 +1376,16 @@ func TestGutterFunctions(t *testing.T) {
 			ctx:        printer.GutterContext{Flag: line.FlagInserted, Number: 15001, MaxNumber: 15001, Styles: styles},
 			want:       "15001 +",
 		},
+		"default/zero number renders a blank column": {
+			gutterFunc: printer.DefaultGutter,
+			ctx:        printer.GutterContext{Flag: line.FlagDefault, Number: 0, MaxNumber: 3, Styles: styles},
+			want:       "      ",
+		},
+		"lineNumber/zero number renders a blank column": {
+			gutterFunc: printer.LineNumberGutter,
+			ctx:        printer.GutterContext{Flag: line.FlagDefault, Number: 0, MaxNumber: 15001, Styles: styles},
+			want:       "      ",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -3118,6 +3128,28 @@ func TestPrinter_LineNumbers_MaxNumber(t *testing.T) {
 		"            ^ note",
 	), got)
 	assert.Equal(t, []int{3}, p.Rows(view))
+}
+
+func TestPrinter_LineNumbers_Placeholder(t *testing.T) {
+	t.Parallel()
+
+	// A side-by-side diff pads the shorter side with zero-value lines, which
+	// have no number. The gutter renders a blank column for them.
+	before := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3").Lines()
+	after := niceyaml.NewSourceFromString("a: 1").Lines()
+
+	p := testPrinterWithGutter(printer.DefaultGutter)
+
+	assert.Equal(t, stringtest.JoinLF(
+		"   1  a: 1",
+		"      ",
+		"      ",
+	), p.Print(diff.Diff(before, after).After()))
+	assert.Equal(t, stringtest.JoinLF(
+		"   1  a: 1",
+		"   2 -b: 2",
+		"   3 -c: 3",
+	), p.Print(diff.Diff(before, after).Before()))
 }
 
 func TestPrinter_WithGutter_Nil(t *testing.T) {

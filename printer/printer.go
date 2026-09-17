@@ -253,7 +253,9 @@ func DefaultAnnotation(ctx AnnotationContext) string {
 
 // renderLineNumber renders the line number portion of a gutter. The number
 // column is at least four wide and grows to fit the largest line number in
-// the view, so every row of the view lines up.
+// the view, so every row of the view lines up. A line with no number, such
+// as the placeholder a side-by-side diff inserts opposite an inserted or
+// deleted line, gets a blank column.
 func renderLineNumber(ctx GutterContext) string {
 	lineNumStyle := ctx.Styles.Style(style.Text).
 		Foreground(ctx.Styles.Style(style.Comment).GetForeground())
@@ -265,6 +267,8 @@ func renderLineNumber(ctx GutterContext) string {
 		return lineNumStyle.Render(strings.Repeat(" ", width+1))
 	case ctx.Soft:
 		return lineNumStyle.Render(strings.Repeat(" ", width-1) + "- ")
+	case ctx.Number <= 0:
+		return lineNumStyle.Render(strings.Repeat(" ", width+1))
 	default:
 		return lineNumStyle.Render(fmt.Sprintf("%*d ", width, ctx.Number))
 	}
