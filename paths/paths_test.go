@@ -683,6 +683,27 @@ func TestPath_DirectiveDocument(t *testing.T) {
 	assert.Equal(t, "v", node.String())
 }
 
+func TestPath_CommentDocument(t *testing.T) {
+	t.Parallel()
+
+	// A parse that keeps comments makes the comment group the body of a
+	// document that holds nothing else, and nothing resolves in it.
+	source := niceyaml.NewSourceFromString("# just a comment\n")
+	file, err := source.File()
+	require.NoError(t, err)
+	require.Len(t, file.Docs, 1)
+
+	_, err = paths.Root().Node(file.Docs[0])
+	require.ErrorIs(t, err, paths.ErrNoDocument)
+	require.ErrorIs(t, err, paths.ErrNotFound)
+
+	_, err = paths.Root().Token(file.Docs[0])
+	require.ErrorIs(t, err, paths.ErrNoDocument)
+
+	_, err = paths.Root().Nodes(file.Docs[0])
+	require.ErrorIs(t, err, paths.ErrNoDocument)
+}
+
 func TestPath_Token_MultipleDocuments(t *testing.T) {
 	t.Parallel()
 

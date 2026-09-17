@@ -14,8 +14,8 @@ import (
 var (
 	// ErrNoDocument indicates a document with no content to resolve in: a
 	// nil document, a document without a body, or a document holding only
-	// directives. Errors that wrap it also wrap [ErrNotFound], since nothing
-	// exists at any path in such a document.
+	// directives or comments. Errors that wrap it also wrap [ErrNotFound],
+	// since nothing exists at any path in such a document.
 	ErrNoDocument = errors.New("document has no content")
 
 	// ErrNotFound indicates that nothing exists at the path in the document.
@@ -262,12 +262,24 @@ func (p Path) wildcard() bool {
 	return false
 }
 
+// hasContent reports whether body holds a value to resolve in. A directive
+// or a comment group is not content.
+func hasContent(body ast.Node) bool {
+	switch body.Type() {
+	case ast.DirectiveType, ast.CommentType:
+		return false
+	default:
+		return true
+	}
+}
+
 // matches resolves the path in doc and returns every match.
 //
 // Returns an error wrapping [ErrNotFound] and [ErrNoDocument] when doc or
-// its body is nil or the body is a directive.
+// its body is nil or the body is a directive or a comment, which is what a
+// parse that keeps comments leaves as the body of a comment-only document.
 func (p Path) matches(doc *ast.DocumentNode) ([]match, error) {
-	if doc == nil || doc.Body == nil || doc.Body.Type() == ast.DirectiveType {
+	if doc == nil || doc.Body == nil || !hasContent(doc.Body) {
 		return nil, fmt.Errorf("resolve %s: %w: %w", p, ErrNotFound, ErrNoDocument)
 	}
 
