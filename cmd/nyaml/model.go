@@ -244,8 +244,8 @@ func (m model) View() tea.View {
 		overlayHeight := lipgloss.Height(overlay)
 
 		// Center the overlay.
-		overlayX := (m.width - overlayWidth) / 2
-		overlayY := (m.height - overlayHeight) / 2
+		overlayX := overlayOffset(m.width, overlayWidth)
+		overlayY := overlayOffset(m.height, overlayHeight)
 
 		baseLayer := lipgloss.NewLayer(base)
 		overlayLayer := lipgloss.NewLayer(overlay).X(overlayX).Y(overlayY).Z(1)
@@ -259,6 +259,13 @@ func (m model) View() tea.View {
 	v.MouseMode = tea.MouseModeCellMotion
 
 	return v
+}
+
+// overlayOffset centers an overlay of size inner in a terminal of size outer.
+// An overlay larger than the terminal sits at the origin, so the terminal
+// shows its top left corner rather than clipping it away.
+func overlayOffset(outer, inner int) int {
+	return max(0, (outer-inner)/2)
 }
 
 func (m *model) statusBar() string {

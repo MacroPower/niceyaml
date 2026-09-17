@@ -165,6 +165,45 @@ func TestUpdateWindowSizeViewportHeight(t *testing.T) {
 	}
 }
 
+func TestOverlayOffset(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		outer int
+		inner int
+		want  int
+	}{
+		"centered": {
+			outer: 80,
+			inner: 30,
+			want:  25,
+		},
+		"exact fit": {
+			outer: 30,
+			inner: 30,
+			want:  0,
+		},
+		"overlay wider than the terminal": {
+			outer: 10,
+			inner: 28,
+			want:  0,
+		},
+		"no terminal": {
+			outer: 0,
+			inner: 10,
+			want:  0,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, overlayOffset(tc.outer, tc.inner))
+		})
+	}
+}
+
 func TestTitleLineWidth(t *testing.T) {
 	t.Parallel()
 
