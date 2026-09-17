@@ -1,5 +1,5 @@
 // Package niceyaml provides utilities for working with YAML documents.
-// It is built using [yaml] and [lipgloss].
+// It is built using [yaml] and [charm.land/lipgloss/v2].
 //
 // By directly styling YAML tokens a single time, niceyaml is much more
 // consistent, flexible, and performant, when compared to using multiple

@@ -14,6 +14,11 @@ import (
 //
 // For example, a comment renders as `<comment># text</comment>`.
 //
+// The tags are ordinary text, so lipgloss counts them toward display width.
+// A printer that combines XMLStyles with [printer.WithWidth] or a padded
+// container style wraps and pads by tag length rather than by the visible
+// text, so assert width and alignment through a color theme instead.
+//
 // Create instances with [NewXMLStyles].
 type XMLStyles struct {
 	only    map[style.Style]bool // If non-nil, only these styles get XML tags.
@@ -27,8 +32,8 @@ type XMLStyles struct {
 //   - [XMLStyleExclude]
 type XMLStylesOption func(*XMLStyles)
 
-// XMLStyleInclude limits XML tags to the given styles.
-// All other styles return an empty (no-op) style.
+// XMLStyleInclude is an [XMLStylesOption] that limits XML tags to the given
+// styles. All other styles return an empty (no-op) style.
 func XMLStyleInclude(styles ...style.Style) XMLStylesOption {
 	return func(x *XMLStyles) {
 		if x.only == nil {
@@ -41,8 +46,8 @@ func XMLStyleInclude(styles ...style.Style) XMLStylesOption {
 	}
 }
 
-// XMLStyleExclude excludes the given styles from XML tagging.
-// Excluded styles return an empty (no-op) style.
+// XMLStyleExclude is an [XMLStylesOption] that excludes the given styles
+// from XML tagging. Excluded styles return an empty (no-op) style.
 func XMLStyleExclude(styles ...style.Style) XMLStylesOption {
 	return func(x *XMLStyles) {
 		if x.exclude == nil {

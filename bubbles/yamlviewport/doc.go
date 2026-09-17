@@ -48,7 +48,8 @@
 // Search highlighting uses [style.GenericHighlightDim] for regular matches and
 // [style.GenericHighlight] for the current match.
 //
-// Configure these styles in your theme (see [theme] package).
+// Configure these styles in your theme (see the
+// [go.jacobcolvin.com/niceyaml/style/theme] package).
 //
 // # Customization
 //

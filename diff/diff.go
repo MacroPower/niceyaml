@@ -27,8 +27,9 @@ type Differ struct {
 //   - [WithAlgorithm]
 type Option func(*Differ)
 
-// WithAlgorithm sets the diff algorithm. A [Differ] shared between
-// goroutines needs an algorithm that is safe for concurrent use.
+// WithAlgorithm is an [Option] that sets the diff algorithm. A [Differ]
+// shared between goroutines needs an algorithm that is safe for concurrent
+// use.
 //
 // Default is [lcs.Hirschberg].
 func WithAlgorithm(algo lcs.Algorithm) Option {
