@@ -1188,6 +1188,12 @@ meta:
 ref: &r
   name: e
 alias: *r
+chain:
+  a:
+    a:
+      a: 1
+merged:
+  <<: *r
 `
 
 	source := niceyaml.NewSourceFromString(input)
@@ -1221,6 +1227,16 @@ alias: *r
 		"recursive then index": {
 			path: paths.Root().Recursive("tags").Index(0),
 			want: []string{"x", "z"},
+		},
+		"chained recursive yields each node once": {
+			// The inner ..a reaches the scalar 1 from two outer matches. The
+			// mapping {a: 1} prints as its ":" token.
+			path: paths.Root().Child("chain").Recursive("a").Recursive("a"),
+			want: []string{":", "1"},
+		},
+		"recursive skips merge sources": {
+			path: paths.Root().Child("merged").Recursive("name"),
+			want: []string{},
 		},
 		"single match": {
 			path: paths.Root().Child("meta", "name"),

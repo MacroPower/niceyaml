@@ -132,6 +132,10 @@ func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.
 }
 
 // resolve applies segs to root and returns every match.
+//
+// A recursive selector walks the whole subtree of each match, so when one
+// match lies inside another, the entries below the inner match appear once
+// for each, and resolve keeps only the first, so every node appears once.
 func (r *resolver) resolve(root ast.Node, segs []segment) ([]match, error) {
 	matches := []match{{node: root}}
 
@@ -147,10 +151,32 @@ func (r *resolver) resolve(root ast.Node, segs []segment) ([]match, error) {
 			next = append(next, found...)
 		}
 
+		if seg.kind == segmentRecursive {
+			next = uniqueMatches(next)
+		}
+
 		matches = next
 	}
 
 	return matches, nil
+}
+
+// uniqueMatches returns matches with every repeat of an earlier node
+// removed, keeping the first occurrence in place.
+func uniqueMatches(matches []match) []match {
+	seen := make(map[ast.Node]bool, len(matches))
+	unique := make([]match, 0, len(matches))
+
+	for _, m := range matches {
+		if seen[m.node] {
+			continue
+		}
+
+		seen[m.node] = true
+		unique = append(unique, m)
+	}
+
+	return unique
 }
 
 // apply applies one selector to node.
