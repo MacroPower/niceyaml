@@ -1336,6 +1336,23 @@ func TestError_NestedErrorsKeepInnerPosition(t *testing.T) {
 	assert.Contains(t, got, "^ bad b")
 }
 
+func TestError_NestedLocationWithoutMessage(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
+	inner := niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a").Value()))
+	nested := niceyaml.NewErrorFrom(nil, niceyaml.WithPath(paths.Root().Child("b").Value()))
+
+	// A nested Error built from a nil error names a location and nothing
+	// else, so that location is highlighted and carries no annotation.
+	wrapped := source.WrapError(niceyaml.NewErrorFrom(inner, niceyaml.WithErrors(nested)))
+
+	got := trimLines(render(wrapped))
+	assert.Contains(t, got, "<genericError>1</genericError>")
+	assert.Contains(t, got, "<genericError>2</genericError>")
+	assert.NotContains(t, got, "^")
+}
+
 func TestError_OutermostDocumentIndexResolves(t *testing.T) {
 	t.Parallel()
 

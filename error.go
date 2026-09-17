@@ -904,7 +904,7 @@ func (e *SourceError) collectPositions(a *Error, doc int, view line.Lines) ([]er
 	}
 
 	for _, nested := range a.errors {
-		if nested == nil || nested.err == nil {
+		if nested == nil {
 			continue
 		}
 
@@ -914,7 +914,13 @@ func (e *SourceError) collectPositions(a *Error, doc int, view line.Lines) ([]er
 		}
 
 		if err != nil {
-			errs = append(errs, fmt.Errorf("%w: %w", nested.err, err))
+			// A nested Error built from a nil error has a location and no
+			// message of its own, so its resolution error stands alone.
+			if nested.err != nil {
+				err = fmt.Errorf("%w: %w", nested.err, err)
+			}
+
+			errs = append(errs, err)
 			unresolved = append(unresolved, nested)
 
 			continue
