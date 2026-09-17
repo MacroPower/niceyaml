@@ -75,6 +75,13 @@ func TestLine_Runes(t *testing.T) {
 		"crlf ending collapses to newline": {input: "a: b\r\nc: d\r\n", want: []string{"a: b\n", "c: d\n"}},
 		"no ending at end of input":        {input: "ab", want: []string{"ab"}},
 		"multibyte runes":                  {input: "k: héllo\nz: 1", want: []string{"k: héllo\n", "z: 1"}},
+		// The lexer repeats the newline after a tag at the start of the next
+		// token; the line still yields it once.
+		"newline repeated after tag": {input: "a: !!map\n  b: 1\n", want: []string{"a: !!map\n", "  b: 1"}},
+		"crlf repeated after tag":    {input: "a: !t\r\n  b: 1\r\n", want: []string{"a: !t\n", "  b: 1\n"}},
+		"crlf cut after comment":     {input: "a: b # c\r\nd: e\r\n", want: []string{"a: b # c\n", "d: e\n"}},
+		"bare cr ending":             {input: "a: 1\rb: 2\r", want: []string{"a: 1\n", "b: 2"}},
+		"blank line after tag":       {input: "a: !t\n\n  b: 1\n", want: []string{"a: !t\n", "\n", "  b: 1"}},
 	}
 
 	for name, tc := range tcs {

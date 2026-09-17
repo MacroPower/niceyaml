@@ -231,35 +231,35 @@ func (l *Line) Width() int {
 // Runes returns an iterator over the runes on this [Line]. Each iteration
 // yields the 0-indexed column and the rune at that column.
 //
-// The iteration includes the line ending as a single '\n', so a newline
-// occupies the column after the last visible rune whether the source used LF
-// or CRLF, and columns match [Line.Width]. The lexer may leave a line's last
-// token ending in a bare '\r', with the '\n' moved into the next token or
-// dropped at the end of input, so a bare '\r' on the last token also yields
-// a newline.
+// The iteration includes the line ending as a single '\n' at the column
+// after the last visible rune, which is [Line.Width], whether the source
+// used LF, CRLF, or a bare CR. A line yields at most one newline: the lexer
+// sometimes repeats a line ending at the start of the next token, and that
+// repeat sits on the same line as the ending it copies.
 func (l *Line) Runes() iter.Seq2[int, rune] {
 	return func(yield func(int, rune) bool) {
 		col := 0
 
-		for i, seg := range l.segments {
-			origin := seg.Part().Origin
-
-			for _, r := range tokens.TrimLineEnding(origin) {
+		for _, seg := range l.segments {
+			for _, r := range tokens.TrimLineEnding(seg.Part().Origin) {
 				if !yield(col, r) {
 					return
 				}
 
 				col++
 			}
+		}
 
-			last := i == len(l.segments)-1
-			endsLine := strings.HasSuffix(origin, "\n") || (last && strings.HasSuffix(origin, "\r"))
-
-			if endsLine && !yield(col, '\n') {
-				return
-			}
+		if n := len(l.segments); n > 0 && hasLineEnding(l.segments[n-1].Part().Origin) {
+			yield(col, '\n')
 		}
 	}
+}
+
+// hasLineEnding reports whether origin ends with "\n", "\r\n", or a bare
+// "\r".
+func hasLineEnding(origin string) bool {
+	return strings.HasSuffix(origin, "\n") || strings.HasSuffix(origin, "\r")
 }
 
 // String reconstructs this [Line] as a string, including any annotations.
