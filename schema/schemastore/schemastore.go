@@ -246,6 +246,9 @@ func (s *SchemaStore) Resolve(ctx context.Context, doc *niceyaml.Document) (sche
 
 // FindMatch finds the catalog entry matching a file path.
 //
+// The returned entry owns its FileMatch patterns, so writing to them
+// leaves the cached catalog alone.
+//
 // Returns [ErrNoCatalogMatch] when no entry matches, which includes an
 // empty file path, and [ErrFetchCatalog] when no catalog has loaded, either
 // because the fetch failed or because ctx ended before it finished.
@@ -261,6 +264,10 @@ func (s *SchemaStore) FindMatch(ctx context.Context, filePath string) (CatalogEn
 
 	for _, entry := range entries {
 		if filepaths.MatchAny(filePath, entry.FileMatch) {
+			// The cached entry shares its pattern slice with s.entries, so
+			// hand the caller a copy it can write to.
+			entry.FileMatch = slices.Clone(entry.FileMatch)
+
 			return entry, nil
 		}
 	}

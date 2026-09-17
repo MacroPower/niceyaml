@@ -149,6 +149,43 @@ func TestSchemaStore_FindMatch(t *testing.T) {
 	}
 }
 
+func TestSchemaStore_FindMatchDoesNotAliasCatalog(t *testing.T) {
+	t.Parallel()
+
+	// The returned entry must not share its pattern slice with the cached
+	// catalog, or a caller writing to it changes which entry matches next.
+	catalog := schemastore.Catalog{
+		Schemas: []schemastore.CatalogEntry{
+			{
+				Name:      "Generic",
+				URL:       "https://example.com/generic.json",
+				FileMatch: []string{"*.yaml"},
+			},
+			{
+				Name:      "Specific",
+				URL:       "https://example.com/specific.json",
+				FileMatch: []string{"myapp.yaml"},
+			},
+		},
+	}
+
+	server := newCatalogServer(t, catalog)
+	t.Cleanup(server.Close)
+
+	store := schemastore.New(schemastore.WithCatalogURL(server.URL))
+
+	entry, err := store.FindMatch(t.Context(), "/x/myapp.yaml")
+	require.NoError(t, err)
+	require.Equal(t, "Generic", entry.Name)
+
+	entry.FileMatch[0] = "*.json"
+
+	entry, err = store.FindMatch(t.Context(), "/x/myapp.yaml")
+	require.NoError(t, err)
+	assert.Equal(t, "Generic", entry.Name)
+	assert.Equal(t, []string{"*.yaml"}, entry.FileMatch)
+}
+
 func TestSchemaStore_LazyLoading(t *testing.T) {
 	t.Parallel()
 
