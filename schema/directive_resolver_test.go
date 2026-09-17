@@ -401,3 +401,94 @@ func firstDocumentFromFile(t *testing.T, path string) *niceyaml.Document {
 
 	return nil
 }
+
+func TestDirective_LeadingCommentDocument(t *testing.T) {
+	t.Parallel()
+
+	// The parser puts comments and %YAML directives written above the first
+	// "---" in a document of their own. The registry must skip that document
+	// and apply its directive to the content document after it. The schema
+	// requires a "b" key, so a document validates only against this schema.
+	const (
+		skip    = "skip"    // ErrNoMatch, the document is not validated.
+		valid   = "valid"   // Validated against the schema and passes.
+		invalid = "invalid" // Validated against the schema and fails.
+	)
+
+	tcs := map[string]struct {
+		input string
+		want  []string
+	}{
+		"directive above the first header": {
+			input: "# yaml-language-server: $schema=./schema.json\n---\nb: 2\n",
+			want:  []string{skip, valid},
+		},
+		"directive above the first header with invalid content": {
+			input: "# yaml-language-server: $schema=./schema.json\n---\nc: 3\n",
+			want:  []string{skip, invalid},
+		},
+		"directive above a YAML directive": {
+			input: "# yaml-language-server: $schema=./schema.json\n%YAML 1.2\n---\nb: 2\n",
+			want:  []string{skip, valid},
+		},
+		"directive does not reach past a content document": {
+			input: "# yaml-language-server: $schema=./schema.json\n---\nb: 2\n---\nc: 3\n",
+			want:  []string{skip, valid, skip},
+		},
+		"directive reaches across a comment-only document": {
+			input: "# yaml-language-server: $schema=./schema.json\n---\n# note\n---\nc: 3\n",
+			want:  []string{skip, skip, invalid},
+		},
+		"own directive wins over a preceding one": {
+			input: "# yaml-language-server: $schema=./missing.json\n---\n# yaml-language-server: $schema=./schema.json\nb: 2\n",
+			want:  []string{skip, valid},
+		},
+		"comment-only document without a directive": {
+			input: "# note\n---\nc: 3\n",
+			want:  []string{skip, skip},
+		},
+		"comment-only file": {
+			input: "# yaml-language-server: $schema=./schema.json\n",
+			want:  []string{skip},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tmpDir := t.TempDir()
+			schemaData := []byte(`{"type": "object", "required": ["b"]}`)
+			err := os.WriteFile(filepath.Join(tmpDir, "schema.json"), schemaData, 0o600)
+			require.NoError(t, err)
+
+			yamlPath := filepath.Join(tmpDir, "config.yaml")
+			err = os.WriteFile(yamlPath, []byte(tc.input), 0o600)
+			require.NoError(t, err)
+
+			source, err := niceyaml.NewSourceFromFile(yamlPath)
+			require.NoError(t, err)
+
+			docs, err := source.Documents()
+			require.NoError(t, err)
+			require.Len(t, docs, len(tc.want))
+
+			reg := schema.NewRegistry()
+			reg.Register(schema.Directive())
+
+			for i, doc := range docs {
+				err := reg.Validate(t.Context(), doc)
+
+				switch tc.want[i] {
+				case skip:
+					require.ErrorIs(t, err, schema.ErrNoMatch, "document %d", i)
+				case valid:
+					require.NoError(t, err, "document %d", i)
+				case invalid:
+					require.Error(t, err, "document %d", i)
+					require.NotErrorIs(t, err, schema.ErrNoMatch, "document %d", i)
+				}
+			}
+		})
+	}
+}
