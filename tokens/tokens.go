@@ -14,7 +14,26 @@ import (
 // the module works with comes through here. The stream covers the whole
 // file; [SplitDocuments] cuts it into one stream per document.
 func Tokenize(src string) token.Tokens {
-	return lexer.Tokenize(src)
+	tks := lexer.Tokenize(src)
+	if len(tks) == 0 {
+		return tks
+	}
+
+	// The lexer drops the source's final line ending, so a file that ends
+	// in a blank line tokenizes like one that does not. Give the dropped
+	// whitespace back to the last token so the stream covers the whole
+	// file and the last line count matches the text.
+	var joined strings.Builder
+
+	for _, tk := range tks {
+		joined.WriteString(tk.Origin)
+	}
+
+	if rest, ok := strings.CutPrefix(src, joined.String()); ok && rest != "" && strings.TrimSpace(rest) == "" {
+		tks[len(tks)-1].Origin += rest
+	}
+
+	return tks
 }
 
 // TrimLineEnding returns s without its trailing line ending: "\n", "\r\n",

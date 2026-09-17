@@ -16,6 +16,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 func TestNewLines_Roundtrip(t *testing.T) {
@@ -1865,6 +1866,34 @@ func TestNewLines_BlankLineAbsorption(t *testing.T) {
 	})
 }
 
+// TestNewLines_TrailingBlankLines verifies that a file ending in blank lines
+// yields one Line per text line, including the blank ones.
+func TestNewLines_TrailingBlankLines(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  int
+	}{
+		"no trailing newline":      {input: "a: 1", want: 1},
+		"trailing newline":         {input: "a: 1\n", want: 1},
+		"one trailing blank line":  {input: "a: 1\n\n", want: 2},
+		"two trailing blank lines": {input: "a: 1\n\n\n", want: 3},
+		"crlf trailing blank line": {input: "a: 1\r\n\r\n", want: 2},
+		"comment then blank line":  {input: "a: 1\n# c\n\n", want: 3},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			lines := line.NewLines(tokens.Tokenize(tc.input))
+
+			assert.Len(t, lines, tc.want)
+		})
+	}
+}
+
 // TestNewLines_PartLinksStopAtLineBoundary verifies that the per-line part
 // chain never crosses a line, including after a gap the builder flushes.
 func TestNewLines_PartLinksStopAtLineBoundary(t *testing.T) {
@@ -2413,10 +2442,10 @@ func TestNewLines_WhitespaceType(t *testing.T) {
 		require.Greater(t, len(lines), 1)
 
 		line2 := lines[1]
-		tokens := line2.Tokens()
+		parts := line2.Tokens()
 
 		// Find any pure whitespace tokens and verify they are SpaceType.
-		for _, tk := range tokens {
+		for _, tk := range parts {
 			if strings.TrimSpace(tk.Origin) == "" && tk.Origin != "" && !strings.Contains(tk.Origin, "\n") {
 				assert.Equal(t, token.SpaceType, tk.Type,
 					"pure horizontal whitespace should be SpaceType, got %s for Origin %q",

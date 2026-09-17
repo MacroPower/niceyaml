@@ -817,6 +817,12 @@ func TestDiffResult_Stats(t *testing.T) {
 			wantAdded:   1,
 			wantRemoved: 1,
 		},
+		"trailing blank line added": {
+			before:      "a: 1\n",
+			after:       "a: 1\n\n",
+			wantAdded:   1,
+			wantRemoved: 0,
+		},
 	}
 
 	for name, tt := range tests {

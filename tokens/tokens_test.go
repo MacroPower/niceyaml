@@ -2,6 +2,7 @@ package tokens_test
 
 import (
 	"iter"
+	"strings"
 	"testing"
 
 	"github.com/goccy/go-yaml/lexer"
@@ -53,6 +54,12 @@ func TestTokenize(t *testing.T) {
 		"unicode content": {
 			input: "greeting: こんにちは\n",
 		},
+		"trailing blank line": {
+			input: "key: value\n\n",
+		},
+		"crlf trailing blank line": {
+			input: "key: value\r\n\r\n",
+		},
 		"list": {
 			input: stringtest.JoinLF(
 				"items:",
@@ -69,6 +76,23 @@ func TestTokenize(t *testing.T) {
 
 			want := lexer.Tokenize(tc.input)
 			got := tokens.Tokenize(tc.input)
+
+			// The stream covers the whole source, including the final
+			// line ending the lexer leaves out of the last Origin.
+			var joined strings.Builder
+
+			for _, tk := range got {
+				joined.WriteString(tk.Origin)
+			}
+
+			assert.Equal(t, tc.input, joined.String())
+
+			if len(want) > 0 {
+				last := len(want) - 1
+				assert.True(t, strings.HasPrefix(got[last].Origin, want[last].Origin))
+
+				want[last].Origin = got[last].Origin
+			}
 
 			diff := yamltest.CompareTokenSlices(want, got)
 			require.True(t, diff.Equal(), diff.String())
