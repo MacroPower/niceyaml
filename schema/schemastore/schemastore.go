@@ -156,10 +156,13 @@ func WithCacheTTL(ttl time.Duration) Option {
 // the cancellation or deadline of the lookup that started it, so this
 // timeout alone bounds how long it runs.
 //
-// Defaults to 10 seconds.
+// Defaults to 10 seconds. A timeout of zero or less keeps the default,
+// since a fetch under an expired deadline could never succeed.
 func WithRefreshTimeout(timeout time.Duration) Option {
 	return func(s *SchemaStore) {
-		s.refreshTimeout = timeout
+		if timeout > 0 {
+			s.refreshTimeout = timeout
+		}
 	}
 }
 

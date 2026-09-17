@@ -471,6 +471,24 @@ func TestSchemaStore_HTTPClient(t *testing.T) {
 	assert.Equal(t, "test-value", headerReceived)
 }
 
+func TestSchemaStore_ZeroRefreshTimeout(t *testing.T) {
+	t.Parallel()
+
+	server := newCatalogServer(t, testCatalog)
+	t.Cleanup(server.Close)
+
+	// A zero timeout keeps the default rather than expiring every fetch
+	// before it starts.
+	store := schemastore.New(
+		schemastore.WithCatalogURL(server.URL),
+		schemastore.WithRefreshTimeout(0),
+	)
+
+	entry, err := store.FindMatch(t.Context(), "config.yaml")
+	require.NoError(t, err)
+	assert.Equal(t, "Test", entry.Name)
+}
+
 func TestSchemaStore_NilHTTPClient(t *testing.T) {
 	t.Parallel()
 
