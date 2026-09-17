@@ -27,6 +27,7 @@ rules:
       - dev
       - diff
       - docs
+      - encoder
       - examples
       - fangs
       - finder
