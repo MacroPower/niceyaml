@@ -3194,6 +3194,44 @@ func TestPrinter_BlendKey_StyleNames(t *testing.T) {
 	), p.Print(view))
 }
 
+func TestPrinter_Overlay_Attributes(t *testing.T) {
+	t.Parallel()
+
+	// An overlay style that sets only text attributes must still change the
+	// rendered output, whether it replaces or blends with the style beneath.
+	const underlined style.Style = "underlined"
+
+	st := lipgloss.NewStyle().Underline(true).Bold(true)
+
+	// Each token renders on its own, so the expected output styles them one
+	// at a time.
+	want := st.Render("k") + st.Render(":") + st.Render(" ") + st.Render("v")
+
+	tcs := map[string]struct {
+		blend bool
+	}{
+		"replace": {blend: false},
+		"blend":   {blend: true},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := niceyaml.NewSourceFromString("k: v").Lines()
+			view[0].AddOverlay(line.Overlay{Style: underlined, Cols: position.NewSpan(0, 4), Blend: tc.blend})
+
+			p := printer.New(
+				printer.WithStyles(style.NewStyles(lipgloss.NewStyle(), style.Set(underlined, st))),
+				printer.WithContainerStyle(lipgloss.NewStyle()),
+				printer.WithGutter(printer.NoGutter),
+			)
+
+			assert.Equal(t, want, p.Print(view))
+		})
+	}
+}
+
 func TestPrinter_WithGutter_Nil(t *testing.T) {
 	t.Parallel()
 

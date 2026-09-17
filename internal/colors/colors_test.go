@@ -293,6 +293,57 @@ func TestBlendStyles(t *testing.T) {
 	}
 }
 
+func TestStyles_Attributes(t *testing.T) {
+	t.Parallel()
+
+	layer := map[string]func(base, overlay lipgloss.Style) lipgloss.Style{
+		"blend":    colors.BlendStyles,
+		"override": colors.OverrideStyles,
+	}
+
+	tcs := map[string]struct {
+		base    lipgloss.Style
+		overlay lipgloss.Style
+		want    lipgloss.Style
+	}{
+		"overlay attributes apply to a plain base": {
+			base:    lipgloss.NewStyle(),
+			overlay: lipgloss.NewStyle().Bold(true).Underline(true),
+			want:    lipgloss.NewStyle().Bold(true).Underline(true),
+		},
+		"base attributes survive an overlay without any": {
+			base:    lipgloss.NewStyle().Italic(true),
+			overlay: lipgloss.NewStyle().Foreground(lipgloss.Color("#0000FF")),
+			want:    lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#0000FF")),
+		},
+		"attributes from both sides combine": {
+			base:    lipgloss.NewStyle().Bold(true),
+			overlay: lipgloss.NewStyle().Strikethrough(true).Faint(true).Blink(true).Reverse(true),
+			want: lipgloss.NewStyle().Bold(true).
+				Strikethrough(true).Faint(true).Blink(true).Reverse(true),
+		},
+	}
+
+	for layerName, fn := range layer {
+		for name, tc := range tcs {
+			t.Run(layerName+"/"+name, func(t *testing.T) {
+				t.Parallel()
+
+				got := fn(tc.base, tc.overlay)
+
+				assert.Equal(t, tc.want.GetBold(), got.GetBold(), "bold")
+				assert.Equal(t, tc.want.GetItalic(), got.GetItalic(), "italic")
+				assert.Equal(t, tc.want.GetUnderline(), got.GetUnderline(), "underline")
+				assert.Equal(t, tc.want.GetStrikethrough(), got.GetStrikethrough(), "strikethrough")
+				assert.Equal(t, tc.want.GetFaint(), got.GetFaint(), "faint")
+				assert.Equal(t, tc.want.GetBlink(), got.GetBlink(), "blink")
+				assert.Equal(t, tc.want.GetReverse(), got.GetReverse(), "reverse")
+				assert.Equal(t, tc.want.Render("x"), got.Render("x"))
+			})
+		}
+	}
+}
+
 func TestOverrideStyles(t *testing.T) {
 	t.Parallel()
 

@@ -60,11 +60,12 @@ func Blend(c1, c2 color.Color) color.Color {
 }
 
 // BlendStyles blends two [lipgloss.Style] values: colors via LAB blending,
-// transforms composed (overlay wraps base).
+// transforms composed (overlay wraps base), and text attributes such as
+// bold or underline kept from either style.
 //
 //nolint:gocritic // hugeParam: value semantics match lipgloss.
 func BlendStyles(base, overlay lipgloss.Style) lipgloss.Style {
-	style := base
+	style := layerAttributes(base, overlay)
 
 	// Blend foreground colors.
 	baseFg := style.GetForeground()
@@ -105,11 +106,13 @@ func BlendStyles(base, overlay lipgloss.Style) lipgloss.Style {
 // OverrideStyles applies overlay on top of base [lipgloss.Style]: overlay
 // properties replace base properties.
 //
-// Colors are overridden (not blended), transforms are overridden (not composed).
+// Colors are overridden (not blended), transforms are overridden (not
+// composed), and text attributes the overlay sets, such as bold or
+// underline, apply on top of the base's.
 //
 //nolint:gocritic // hugeParam: value semantics match lipgloss.
 func OverrideStyles(base, overlay lipgloss.Style) lipgloss.Style {
-	style := base
+	style := layerAttributes(base, overlay)
 
 	// Override foreground if overlay has one.
 	if fg := Override(style.GetForeground(), overlay.GetForeground()); fg != nil {
@@ -127,4 +130,41 @@ func OverrideStyles(base, overlay lipgloss.Style) lipgloss.Style {
 	}
 
 	return style
+}
+
+// layerAttributes returns base with every text attribute that over sets
+// turned on. A lipgloss.Style reports an unset attribute as false, so an
+// overlay cannot turn an attribute of the base off.
+//
+//nolint:gocritic // hugeParam: value semantics match lipgloss.
+func layerAttributes(base, over lipgloss.Style) lipgloss.Style {
+	if over.GetBold() {
+		base = base.Bold(true)
+	}
+
+	if over.GetItalic() {
+		base = base.Italic(true)
+	}
+
+	if over.GetUnderline() {
+		base = base.Underline(true)
+	}
+
+	if over.GetStrikethrough() {
+		base = base.Strikethrough(true)
+	}
+
+	if over.GetFaint() {
+		base = base.Faint(true)
+	}
+
+	if over.GetBlink() {
+		base = base.Blink(true)
+	}
+
+	if over.GetReverse() {
+		base = base.Reverse(true)
+	}
+
+	return base
 }
