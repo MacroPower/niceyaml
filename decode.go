@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"sort"
 
@@ -513,7 +514,8 @@ func (dd *Document) Decode[T any](ctx context.Context, opts ...DecodeOption) (T,
 }
 
 // DecodeInto validates and decodes the document into v, which must be a
-// pointer.
+// non-nil pointer. Any other v returns [ErrDecodeTarget] before anything
+// runs.
 //
 // Each [DocumentValidator] from [WithValidator] runs before decoding. If
 // v implements [Validator], Validate is called after successful decoding
@@ -528,11 +530,17 @@ func (dd *Document) DecodeInto(ctx context.Context, v any, opts ...DecodeOption)
 // decodeInto runs the decode pipeline on node: the validators from opts
 // check the document, the decoder fills v with the options from the
 // [Source] and from opts, and v validates itself unless opts switch that
-// off.
+// off. A v that is not a non-nil pointer returns [ErrDecodeTarget] before
+// the validators run.
 func (dd *Document) decodeInto(ctx context.Context, node ast.Node, v any, opts []DecodeOption) error {
+	err := checkDecodeTarget(v)
+	if err != nil {
+		return err
+	}
+
 	cfg := newDecodeConfig(opts)
 
-	err := dd.Validate(ctx, cfg.validators...)
+	err = dd.Validate(ctx, cfg.validators...)
 	if err != nil {
 		return err
 	}
@@ -548,6 +556,22 @@ func (dd *Document) decodeInto(ctx context.Context, node ast.Node, v any, opts [
 
 	if validator, ok := v.(Validator); ok {
 		return dd.WrapError(validator.Validate())
+	}
+
+	return nil
+}
+
+// checkDecodeTarget returns [ErrDecodeTarget] unless v is a non-nil
+// pointer. The go-yaml decoder panics on a nil interface and decodes
+// nothing into a nil pointer, so the check runs before v reaches it.
+func checkDecodeTarget(v any) error {
+	rv := reflect.ValueOf(v)
+	if !rv.IsValid() {
+		return fmt.Errorf("%w: got nil", ErrDecodeTarget)
+	}
+
+	if rv.Kind() != reflect.Pointer || rv.IsNil() {
+		return fmt.Errorf("%w: got %T", ErrDecodeTarget, v)
 	}
 
 	return nil

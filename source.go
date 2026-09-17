@@ -272,7 +272,7 @@ func (s *Source) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, er
 }
 
 // DecodeInto validates and decodes the single document of the [Source] into
-// v, which must be a pointer, as [Document.DecodeInto] does for that
+// v, which must be a non-nil pointer, as [Document.DecodeInto] does for that
 // document. A file that holds more than one document returns
 // [ErrMultipleDocuments], and one that holds none returns [ErrNoDocuments].
 func (s *Source) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {

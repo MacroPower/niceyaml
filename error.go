@@ -44,6 +44,11 @@ var (
 	// and [Source.DecodeInto] return it.
 	ErrMultipleDocuments = errors.New("multiple documents in source")
 
+	// ErrDecodeTarget indicates the value given to [Document.DecodeInto] or
+	// [Source.DecodeInto] is not a non-nil pointer, so there is nothing to
+	// decode into.
+	ErrDecodeTarget = errors.New("decode target is not a non-nil pointer")
+
 	// ErrOutOfRange indicates the error's location lies outside the lines of
 	// the source, past the last or before the first, which happens when a
 	// token or range came from other text. [SourceError.Detail] returns it.

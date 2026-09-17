@@ -1443,6 +1443,48 @@ func TestDocument_DecodeInto(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects a target that is not a non-nil pointer", func(t *testing.T) {
+		t.Parallel()
+
+		var nilConfig *plainConfig
+
+		tcs := map[string]struct {
+			target any
+			want   string
+		}{
+			"nil": {
+				target: nil,
+				want:   "decode target is not a non-nil pointer: got nil",
+			},
+			"value": {
+				target: 5,
+				want:   "decode target is not a non-nil pointer: got int",
+			},
+			"nil pointer": {
+				target: nilConfig,
+				want:   "decode target is not a non-nil pointer: got *niceyaml_test.plainConfig",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				var called bool
+
+				dd := yamltest.FirstDocument(t, "name: test")
+
+				err := dd.DecodeInto(t.Context(), tc.target, niceyaml.WithValidator(nameSchema(&called)))
+				require.ErrorIs(t, err, niceyaml.ErrDecodeTarget)
+				assert.Equal(t, tc.want, err.Error())
+				assert.False(t, called, "the validator should not run for a bad target")
+
+				err = dd.Source().DecodeInto(t.Context(), tc.target)
+				require.ErrorIs(t, err, niceyaml.ErrDecodeTarget)
+			})
+		}
+	})
+
 	t.Run("runs schema and Validate around the decode", func(t *testing.T) {
 		t.Parallel()
 
