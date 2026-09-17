@@ -51,7 +51,8 @@ var (
 
 	// ErrOutOfRange indicates the error's location lies outside the lines of
 	// the source, past the last or before the first, which happens when a
-	// token or range came from other text. [SourceError.Detail] returns it.
+	// token or range came from other text. [SourceError.Location] and
+	// [SourceError.Detail] return it.
 	ErrOutOfRange = errors.New("location outside source")
 
 	// Shared [printer.Printer] used when no [WithPrinter] is configured.
@@ -718,8 +719,10 @@ func writeString(f fmt.State, s string) {
 //
 // It returns [ErrNoLocation] when the error carries no location,
 // [ErrTokenNotFound] when the token has no position, [ErrDocumentNotFound]
-// when the document index is outside the source, and the resolution error
-// from [go.jacobcolvin.com/niceyaml/paths] when a path does not resolve.
+// when the document index is outside the source, [ErrOutOfRange] when the
+// location starts on a line the source does not hold, and the resolution
+// error from [go.jacobcolvin.com/niceyaml/paths] when a path does not
+// resolve.
 func (e *SourceError) Location() (position.Range, error) {
 	root, a := e.located()
 	if a == nil {
@@ -727,6 +730,11 @@ func (e *SourceError) Location() (position.Range, error) {
 	}
 
 	loc, err := a.locate(e.source, root.defaultDocumentIndex())
+	if err != nil {
+		return position.Range{}, err
+	}
+
+	err = e.checkInRange(loc, e.source.lines)
 	if err != nil {
 		return position.Range{}, err
 	}

@@ -2789,6 +2789,24 @@ func TestSourceError_Location(t *testing.T) {
 			err: niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("missing").Value())),
 			is:  paths.ErrNotFound,
 		},
+		"range past the last line": {
+			err: niceyaml.NewError("bad",
+				niceyaml.WithRange(position.NewRange(position.New(9, 0), position.New(9, 3))),
+			),
+			is: niceyaml.ErrOutOfRange,
+		},
+		"range before the first line": {
+			err: niceyaml.NewError("bad",
+				niceyaml.WithRange(position.NewRange(position.New(-1, 0), position.New(-1, 2))),
+			),
+			is: niceyaml.ErrOutOfRange,
+		},
+		"token from other text": {
+			err: niceyaml.NewError("bad", niceyaml.WithToken(&token.Token{
+				Position: &token.Position{Line: 9, Column: 1},
+			})),
+			is: niceyaml.ErrOutOfRange,
+		},
 	}
 
 	for name, tc := range tcs {
