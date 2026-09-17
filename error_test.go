@@ -1468,6 +1468,71 @@ func TestError_HunkDisplay(t *testing.T) {
 		assert.NotContains(t, got, "line5")
 	})
 
+	t.Run("position with no token under it still picks its excerpt", func(t *testing.T) {
+		t.Parallel()
+
+		source := stringtest.Input(`
+			line1: a
+			line2: b
+			line3: c
+			line4: d
+			line5: e
+			line6: f
+			line7: g
+			line8: h
+			line9: i
+			line10: j
+		`)
+
+		// The token points past the end of line 5, where the view holds no
+		// token, so there is nothing to highlight.
+		err := xmlSource(source).WrapError(niceyaml.NewError(
+			"boom",
+			niceyaml.WithToken(&token.Token{Position: &token.Position{Line: 5, Column: 50}}),
+		))
+
+		got := trimLines(render(err))
+
+		// The excerpt still centers on line 5 with the default two lines of
+		// context on either side.
+		assert.Contains(t, got, "line3")
+		assert.Contains(t, got, "line5")
+		assert.Contains(t, got, "line7")
+		assert.NotContains(t, got, "line2:")
+		assert.NotContains(t, got, "line8")
+		assert.NotContains(t, got, "genericError")
+	})
+
+	t.Run("path to an empty value still picks its excerpt", func(t *testing.T) {
+		t.Parallel()
+
+		source := stringtest.Input(`
+			line1: a
+			line2: b
+			line3: c
+			line4:
+			line5: e
+			line6: f
+			line7: g
+			line8: h
+			line9: i
+			line10: j
+		`)
+
+		err := xmlSource(source).WrapError(niceyaml.NewError(
+			"missing",
+			niceyaml.WithPath(paths.Root().Child("line4").Value()),
+		))
+
+		got := trimLines(render(err))
+
+		assert.Contains(t, got, "line2")
+		assert.Contains(t, got, "line4")
+		assert.Contains(t, got, "line6")
+		assert.NotContains(t, got, "line1:")
+		assert.NotContains(t, got, "line7")
+	})
+
 	t.Run("negative context lines show the error lines alone", func(t *testing.T) {
 		t.Parallel()
 

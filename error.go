@@ -749,12 +749,20 @@ type errorPosition struct {
 // Rendering happens on a private view of the source, so calling
 // [SourceError.Detail] repeatedly renders the same output.
 func (e *SourceError) render(cfg detailConfig, view line.Lines, positions []errorPosition) string {
-	// Collect all ranges from positions and apply overlays to the view.
+	// Collect all ranges from positions and apply overlays to the view. The
+	// line of each position joins the error lines as well, since a position
+	// with no token under it has no range to highlight and still picks the
+	// lines the excerpt shows.
 	var allRanges position.Ranges
+
+	errorLines := make([]int, 0, len(positions))
 
 	for _, pos := range positions {
 		allRanges = append(allRanges, pos.ranges...)
+		errorLines = append(errorLines, pos.pos.Line)
 	}
+
+	errorLines = append(errorLines, allRanges.LineIndices()...)
 
 	view.AddOverlay(style.GenericError, allRanges...)
 
@@ -766,7 +774,7 @@ func (e *SourceError) render(cfg detailConfig, view line.Lines, positions []erro
 	// whose context windows touch share a hunk, so a line gap always
 	// separates two hunks for the "..." separator. ContextSpans clamps the
 	// spans to the view, so each one starts on a line the view holds.
-	hunkSpans := position.ContextSpans(allRanges.LineIndices(), cfg.contextLines, view.Len())
+	hunkSpans := position.ContextSpans(errorLines, cfg.contextLines, view.Len())
 
 	// Add "..." annotations to first line of each non-first hunk.
 	for i, span := range hunkSpans {
