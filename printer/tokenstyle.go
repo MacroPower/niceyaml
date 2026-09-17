@@ -1,6 +1,8 @@
-package tokens
+package printer
 
 import (
+	"strings"
+
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/style"
@@ -43,13 +45,14 @@ var tokenTypeStyles = map[token.Type]style.Style{
 	token.UnknownType:        style.GenericErrorUnknown,
 }
 
-// TypeStyle returns the [style.Style] for the given [*token.Token]'s [token.Type].
+// typeStyle returns the [style.Style] for the given [*token.Token]'s
+// [token.Type].
 //
 // It handles context-sensitive styling: a string followed by a colon is styled
 // as a mapping key, and tokens preceded by anchors or aliases inherit that
 // styling.
-func TypeStyle(tk *token.Token) style.Style {
-	tts, ok := tokenTypeStyles[getVisualType(tk)]
+func typeStyle(tk *token.Token) style.Style {
+	tts, ok := tokenTypeStyles[visualType(tk)]
 	if ok {
 		return tts
 	}
@@ -57,7 +60,9 @@ func TypeStyle(tk *token.Token) style.Style {
 	return style.Text
 }
 
-func getVisualType(tk *token.Token) token.Type {
+// visualType returns the token type the style lookup uses, which differs
+// from tk.Type when a neighbor changes how the token reads.
+func visualType(tk *token.Token) token.Type {
 	prevType := tk.PreviousType()
 	if prevType == token.AnchorType || prevType == token.AliasType {
 		return prevType
@@ -69,4 +74,20 @@ func getVisualType(tk *token.Token) token.Type {
 	}
 
 	return tk.Type
+}
+
+// valueOffset returns the byte offset where Value starts within the first
+// line of the [*token.Token]'s Origin, or 0 when the first line does not
+// contain it.
+func valueOffset(tk *token.Token) int {
+	firstLine, _, _ := strings.Cut(tk.Origin, "\n")
+	if firstLine == "" {
+		return 0
+	}
+
+	if idx := strings.Index(firstLine, tk.Value); idx >= 0 {
+		return idx
+	}
+
+	return 0
 }

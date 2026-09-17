@@ -24,22 +24,6 @@ func TrimLineEnding(s string) string {
 	return strings.TrimSuffix(strings.TrimSuffix(s, "\n"), "\r")
 }
 
-// ValueOffset returns the byte offset where Value starts within the first
-// line of the [*token.Token]'s Origin, or 0 when the first line does not
-// contain it.
-func ValueOffset(tk *token.Token) int {
-	firstLine, _, _ := strings.Cut(tk.Origin, "\n")
-	if firstLine == "" {
-		return 0
-	}
-
-	if idx := strings.Index(firstLine, tk.Value); idx >= 0 {
-		return idx
-	}
-
-	return 0
-}
-
 // SplitDocumentsOption configures [SplitDocuments].
 //
 // Available options:

@@ -870,8 +870,8 @@ func (p *Printer) renderTokenLine(lineIndex int, ln *line.Line) string {
 	var sb strings.Builder
 
 	for _, tk := range ln.Tokens() {
-		tokenStyle := tokens.TypeStyle(tk)
-		valueOffset := tokens.ValueOffset(tk)
+		tokenStyle := typeStyle(tk)
+		valueOffset := valueOffset(tk)
 
 		// Drop the line ending, CR included, as Line.Content does. Print
 		// joins the rows with newlines.
