@@ -606,7 +606,7 @@ func TestFinder_Find_DiffBuiltLines(t *testing.T) {
 			t.Parallel()
 
 			f := finder.New()
-			idx := f.Load(lines)
+			idx := f.Load(lines.Lines())
 
 			got := idx.Find(tc.search)
 

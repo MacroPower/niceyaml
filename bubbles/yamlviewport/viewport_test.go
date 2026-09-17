@@ -3216,7 +3216,7 @@ type countingSearcher struct {
 	loads  int
 }
 
-func (c *countingSearcher) Load(lines line.View) yamlviewport.Index {
+func (c *countingSearcher) Load(lines line.Lines) yamlviewport.Index {
 	c.loads++
 
 	return c.finder.Load(lines)
@@ -3717,8 +3717,8 @@ func TestViewport_DoesNotMutateSource(t *testing.T) {
 
 	_ = m.View()
 
-	// Search highlighting never reaches the caller's Source.
-	assert.Empty(t, source.Lines()[0].Overlays())
+	// Search highlighting never reaches a fresh view of the caller's Source.
+	assert.Empty(t, source.View().Overlays(0))
 }
 
 func TestViewport_RevisionNavigationResetsSearch(t *testing.T) {

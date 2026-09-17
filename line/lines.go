@@ -8,35 +8,21 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/internal/segment"
 	"go.jacobcolvin.com/niceyaml/position"
-	"go.jacobcolvin.com/niceyaml/style"
 )
 
-// View is line-by-line access to content that rendering and search
-// utilities consume, such as the printer and finder packages.
+// Lines is an ordered collection of [*Line] values: the content that a
+// [View] decorates and that the finder and diff packages read.
 //
-// AllLines yields a [*Line] for each line, so a caller adds overlays and
-// annotations to the line it is looking at, and the change reaches the
-// view. See [Lines] for an implementation.
-type View interface {
-	AllLines(spans ...position.Span) iter.Seq2[int, *Line]
-	AllRunes(ranges ...position.Range) iter.Seq2[position.Position, rune]
-	Len() int
-}
-
-// Lines is an ordered collection of [*Line] values and the unit that
-// rendering utilities consume.
+// Lines carries the tokens split per line and nothing else. It has no
+// knowledge of YAML documents, parsing, or files, so a Lines value may
+// describe content that is not a YAML document at all, such as a diff that
+// interleaves lines from two revisions. The lines never change after
+// creation, so a Lines value is safe to share between views and
+// goroutines, and a view over it costs nothing to create.
 //
-// Lines carries only what rendering needs, which is the tokens split per
-// line plus the overlays, annotations, and flags attached to each line. It has
-// no knowledge of YAML documents, parsing, or files. A [Lines] value may
-// therefore describe content that is not a YAML document at all, such as a
-// diff that interleaves lines from two revisions.
-//
-// Lines is not safe for concurrent mutation. Add overlays and annotations from
-// one goroutine at a time, and do not mutate while another goroutine iterates.
-//
-// Create instances with [NewLines]. Reach a line by indexing the collection
-// or by ranging over [Lines.AllLines], and never put a nil pointer in it.
+// Create instances with [NewLines], and reach a line by indexing the
+// collection or by ranging over [Lines.AllLines]. Never put a nil pointer
+// in it.
 type Lines []*Line
 
 // NewLines creates new [Lines] from [token.Tokens], one [Line] per source
@@ -85,29 +71,11 @@ func (ls Lines) Width() int {
 	return maxWidth
 }
 
-// Clone returns a deep copy of the [Lines].
-//
-// Clone copies each [Line] with [Line.Clone], so overlays and
-// annotations added to the copy do not affect the original.
-func (ls Lines) Clone() Lines {
-	if len(ls) == 0 {
-		return nil
-	}
-
-	result := make(Lines, len(ls))
-	for i, l := range ls {
-		result[i] = l.Clone()
-	}
-
-	return result
-}
-
 // AllLines returns an iterator over lines within the given spans.
 //
 // Without spans, AllLines yields every line. Each iteration yields the
-// 0-indexed line index and the [*Line] at that index, the one the
-// collection holds, so an overlay or annotation added to it stays in the
-// collection. AllLines clamps spans to the available lines.
+// 0-indexed line index and the [*Line] at that index. AllLines clamps
+// spans to the available lines.
 func (ls Lines) AllLines(spans ...position.Span) iter.Seq2[int, *Line] {
 	return func(yield func(int, *Line) bool) {
 		if len(spans) == 0 {
@@ -291,8 +259,8 @@ func (ls Lines) Content() string {
 	return sb.String()
 }
 
-// String reconstructs all lines as a string, including any annotations.
-// This should generally only be used for debugging.
+// String returns every line as [Line.String], one per row. This should
+// generally only be used for debugging; [View.String] adds the annotations.
 func (ls Lines) String() string {
 	var sb strings.Builder
 
@@ -305,56 +273,4 @@ func (ls Lines) String() string {
 	}
 
 	return sb.String()
-}
-
-// AddOverlay adds an overlay with the given style to the specified ranges.
-// The overlay replaces the style underneath it; use [Lines.BlendOverlay] to
-// mix with it instead.
-//
-// It splits multi-line ranges into per-line overlays and clamps each
-// overlay's columns to its line's width. It skips lines outside the
-// collection, the same way [Lines.AllLines] clamps its spans, so a range
-// computed against a longer view is safe to apply. A range that
-// covers no columns of a line adds no overlay to it.
-func (ls Lines) AddOverlay(s style.Style, ranges ...position.Range) {
-	for _, r := range ranges {
-		ls.addOverlayRange(s, false, r)
-	}
-}
-
-// BlendOverlay adds an overlay like [Lines.AddOverlay], but one that blends
-// with the style underneath it. A search highlight added this way keeps the
-// token or diff color of the text it covers.
-func (ls Lines) BlendOverlay(s style.Style, ranges ...position.Range) {
-	for _, r := range ranges {
-		ls.addOverlayRange(s, true, r)
-	}
-}
-
-// addOverlayRange adds a single overlay range, splitting across lines as
-// needed and skipping lines outside the collection.
-func (ls Lines) addOverlayRange(s style.Style, blend bool, r position.Range) {
-	for _, lineRange := range r.SliceLines() {
-		lineIdx := lineRange.Start.Line
-		if lineIdx < 0 || lineIdx >= len(ls) {
-			continue
-		}
-
-		cols := position.NewSpan(
-			max(0, lineRange.Start.Col),
-			min(lineRange.End.Col, ls[lineIdx].Width()),
-		)
-		if cols.Len() <= 0 {
-			continue
-		}
-
-		ls[lineIdx].AddOverlay(Overlay{Cols: cols, Style: s, Blend: blend})
-	}
-}
-
-// ClearOverlays removes all [Overlay] values from all lines.
-func (ls Lines) ClearOverlays() {
-	for i := range ls {
-		ls[i].ClearOverlays()
-	}
 }

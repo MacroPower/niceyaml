@@ -38,7 +38,7 @@ func BenchmarkPrinterPrint(b *testing.B) {
 			b.ResetTimer()
 
 			for b.Loop() {
-				_ = p.Print(source.Lines())
+				_ = p.Print(source.View())
 			}
 		})
 	}
@@ -62,7 +62,7 @@ func BenchmarkPrinterPrint_WithOverlays(b *testing.B) {
 
 	for _, rc := range rangeCounts {
 		b.Run(rc.name, func(b *testing.B) {
-			source := niceyaml.NewSourceFromString(yaml).Lines()
+			source := niceyaml.NewSourceFromString(yaml).View()
 			p := printer.New(printer.WithStyles(overlayStyler))
 
 			// Pre-configure overlays before measurement.
@@ -108,7 +108,7 @@ func BenchmarkPrinterPrint_WithOverlays_IncludingSetup(b *testing.B) {
 			b.SetBytes(int64(len(yaml)))
 
 			for b.Loop() {
-				source := niceyaml.NewSourceFromString(yaml).Lines()
+				source := niceyaml.NewSourceFromString(yaml).View()
 				p := printer.New(printer.WithStyles(overlayStyler))
 
 				// Distribute overlays across lines.
@@ -145,7 +145,7 @@ func BenchmarkPrinterPrint_OverlaysDensity(b *testing.B) {
 
 	for _, d := range densities {
 		b.Run(d.name, func(b *testing.B) {
-			source := niceyaml.NewSourceFromString(yaml).Lines()
+			source := niceyaml.NewSourceFromString(yaml).View()
 			p := printer.New(printer.WithStyles(overlayStyler))
 
 			// Pre-configure overlays before measurement.
@@ -196,7 +196,7 @@ func BenchmarkPrinterPrintSlice(b *testing.B) {
 			b.ResetTimer()
 
 			for b.Loop() {
-				_ = p.Print(source.Lines(), sl.span)
+				_ = p.Print(source.View(), sl.span)
 			}
 		})
 	}
@@ -225,7 +225,7 @@ func BenchmarkPrinterWithGutter(b *testing.B) {
 			b.ResetTimer()
 
 			for b.Loop() {
-				_ = p.Print(source.Lines())
+				_ = p.Print(source.View())
 			}
 		})
 	}
@@ -261,7 +261,7 @@ func BenchmarkPrinterWithWrapping(b *testing.B) {
 			b.ResetTimer()
 
 			for b.Loop() {
-				_ = p.Print(source.Lines())
+				_ = p.Print(source.View())
 			}
 		})
 	}
@@ -276,7 +276,7 @@ func BenchmarkSourceClearOverlays(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				source := niceyaml.NewSourceFromString(yaml).Lines()
+				source := niceyaml.NewSourceFromString(yaml).View()
 
 				for i := range count {
 					r := position.Range{
@@ -299,7 +299,7 @@ func BenchmarkLinesAddOverlay(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		source := niceyaml.NewSourceFromString(yaml).Lines()
+		source := niceyaml.NewSourceFromString(yaml).View()
 
 		for i := range 100 {
 			r := position.Range{

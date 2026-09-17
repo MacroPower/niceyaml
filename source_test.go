@@ -97,13 +97,13 @@ func TestTokens_String_Annotation(t *testing.T) {
 			t.Parallel()
 
 			tks := lexer.Tokenize(tc.input)
-			view := niceyaml.NewSourceFromTokens(tks, niceyaml.WithName("test")).Lines()
+			view := niceyaml.NewSourceFromTokens(tks, niceyaml.WithName("test")).View()
 
 			// Apply annotations to specified lines.
 			for idx, ann := range tc.annotations {
 				require.Less(t, idx, view.Len(), "annotation index out of range")
 
-				view[idx].AddAnnotation(ann)
+				view.Annotate(idx, ann)
 			}
 
 			assert.Equal(t, tc.want, view.String())
@@ -277,7 +277,7 @@ func TestSource_AllRunes_DiffBuiltLines(t *testing.T) {
 		col  int
 	}
 
-	for pos, r := range lines.AllRunes() {
+	for pos, r := range lines.Lines().AllRunes() {
 		if r == 'k' { // First char of each line.
 			positions = append(positions, struct {
 				line int
@@ -936,24 +936,24 @@ func TestSource_WithYAMLParserOptions(t *testing.T) {
 	})
 }
 
-func TestSource_Lines_IndependentViews(t *testing.T) {
+func TestSource_View_IndependentViews(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("key: value\n")
 
-	first := source.Lines()
+	first := source.View()
 	first.AddOverlay("test1", position.NewRange(position.New(0, 0), position.New(0, 5)))
-	first[0].AddAnnotation(line.Annotation{Content: "note", Placement: line.Below})
+	first.Annotate(0, line.Annotation{Content: "note", Placement: line.Below})
 
 	// A second view starts from the pristine document.
-	second := source.Lines()
-	assert.Empty(t, second[0].Overlays())
-	assert.Empty(t, second[0].Annotations())
+	second := source.View()
+	assert.Empty(t, second.Overlays(0))
+	assert.Empty(t, second.Annotations(0))
 
 	// The first view keeps what was added to it.
-	require.Len(t, first[0].Overlays(), 1)
-	assert.Equal(t, style.Style("test1"), first[0].Overlays()[0].Style)
-	assert.Equal(t, "key: value", first.Content())
+	require.Len(t, first.Overlays(0), 1)
+	assert.Equal(t, style.Style("test1"), first.Overlays(0)[0].Style)
+	assert.Equal(t, "key: value", first.Lines().Content())
 }
 
 func TestSource_Name(t *testing.T) {
@@ -1289,21 +1289,21 @@ func TestSource_WrapError(t *testing.T) {
 	})
 }
 
-func TestSource_Lines_IsIndependent(t *testing.T) {
+func TestSource_View_IsIndependent(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("key: value\n")
 
 	// A change to one view reaches neither the Source nor another view.
-	view := source.Lines()
-	for _, ln := range view.AllLines() {
-		ln.AddAnnotation(line.Annotation{Content: "note", Placement: line.Below})
-		ln.AddOverlay(line.Overlay{Cols: position.NewSpan(0, 3), Style: style.GenericError})
+	view := source.View()
+	for i := range view.AllLines() {
+		view.Annotate(i, line.Annotation{Content: "note", Placement: line.Below})
+		view.AddLineOverlay(i, line.Overlay{Cols: position.NewSpan(0, 3), Style: style.GenericError})
 	}
 
-	assert.NotEmpty(t, view[0].Annotations())
-	assert.Empty(t, source.Lines()[0].Annotations())
-	assert.Empty(t, source.Lines()[0].Overlays())
+	assert.NotEmpty(t, view.Annotations(0))
+	assert.Empty(t, source.View().Annotations(0))
+	assert.Empty(t, source.View().Overlays(0))
 
 	// A fresh view renders the pristine document.
 	plain := printer.New(
@@ -1311,5 +1311,5 @@ func TestSource_Lines_IsIndependent(t *testing.T) {
 		printer.WithContainerStyle(lipgloss.NewStyle()),
 		printer.WithGutter(printer.NoGutter),
 	)
-	assert.Equal(t, "key: value", plain.Print(source.Lines()))
+	assert.Equal(t, "key: value", plain.Print(source.View()))
 }

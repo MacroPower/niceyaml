@@ -48,7 +48,7 @@ func main() {
 	results := idx.Find("cafe")
 
 	// Highlight the matches on a view of the source.
-	view := source.Lines()
+	view := source.View()
 	view.AddOverlay(highlightKind, results...)
 
 	fmt.Println("\nPrint with matches highlighted:")

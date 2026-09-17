@@ -62,10 +62,11 @@ go get go.jacobcolvin.com/niceyaml@latest
 Module `niceyaml` adds a few abstractions on top of [go-yaml][goccy/go-yaml]:
 
 - [`line.Line`][niceyaml/line] - Tokens for a single line of YAML content
-- [`line.Lines`][niceyaml/line] - A collection of `Line`s with overlays, annotations, and flags, which is the view that rendering utilities consume
+- [`line.Lines`][niceyaml/line] - A collection of `Line`s, which never changes once built
+- [`line.View`][niceyaml/line] - One rendering of a `Lines` value, carrying the overlays, annotations, and flags the printer draws
 - [`niceyaml.Source`][niceyaml.Source] - A YAML file, which parses into `Document`s, decodes, wraps errors, and exposes its `Lines` view
 
-Most use cases will only need to interact with `Source`. Its `Lines` method returns a `line.Lines` view, which the [`printer`][niceyaml/printer], [`finder`][niceyaml/finder], and [`diff`][niceyaml/diff] packages accept. Diffs return plain `Lines`, since interleaved lines from two revisions are not a YAML document.
+Most use cases will only need to interact with `Source`. Its `Lines` method returns the `line.Lines` that the [`finder`][niceyaml/finder] and [`diff`][niceyaml/diff] packages read, and its `View` method returns a fresh `line.View` over them for the [`printer`][niceyaml/printer]. Diffs return plain views, since interleaved lines from two revisions are not a YAML document.
 
 These abstractions enable straightforward iteration over arbitrary lines of tokens from one or more YAML documents, while maintaining the original token details from the lexer. It cleanly solves common problems introduced by multi-line and/or overlapping tokens in diffs, partial rendering, and/or search.
 

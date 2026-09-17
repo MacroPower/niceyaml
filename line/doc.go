@@ -41,12 +41,11 @@
 //
 // # Lines
 //
-// [Lines] is the ordered collection of [Line] values that rendering
-// utilities consume, and the view a niceyaml Source exposes. It carries the
-// tokens split per line plus the overlays, annotations, and flags attached
-// to each line, and nothing about YAML documents, parsing, or files. A Lines
-// value may therefore describe content that is not a YAML document, such as
-// a diff that interleaves lines from two revisions:
+// [Lines] is the ordered collection of [Line] values a niceyaml Source
+// holds. It carries the tokens split per line and nothing about YAML
+// documents, parsing, or files, so a Lines value may describe content
+// that is not a YAML document, such as a diff that interleaves lines from
+// two revisions:
 //
 //	tks := tokens.Tokenize(input)
 //	lines := line.NewLines(tks)
@@ -65,16 +64,9 @@
 // collapse back to one, and the result holds the lexer's original tokens in
 // their original order.
 //
-// [View] is the interface over a Lines value that the printer, finder, and
-// diff packages accept. A Lines collection holds pointers, so a line reached
-// by indexing it or by ranging over [Lines.AllLines] keeps the metadata
-// added to it:
-//
-//	for _, l := range lines.AllLines() {
-//		if l.Flag() == line.FlagInserted {
-//			l.AddAnnotation(line.Annotation{Content: "new", Placement: line.Below})
-//		}
-//	}
+// The lines never change after [NewLines] creates them, so the finder and
+// diff packages read a Lines value as it is, and any number of views share
+// it.
 //
 // A [Line] exposes its tokens in two forms. [Line.Tokens] returns the
 // per-line parts, whose positions describe this line. [Line.SourceTokens]
@@ -90,15 +82,21 @@
 // Every token the package hands out is shared with the line. Treat them as
 // read-only and call [token.Token.Clone] before modifying one.
 //
-// # Rendering Metadata
+// # Views
 //
-// Each [Line] can carry metadata for rendering.
+// A [View] is the unit the printer renders: a Lines value plus the
+// decoration one rendering carries. [NewView] creates one over any Lines,
+// and a niceyaml Source hands one out. The view shares the lines and owns
+// the decoration, so creating a view costs nothing and decorating one
+// reaches no other:
+//
+//	view := line.NewView(lines)
 //
 // [Annotations] add extra content above or below a line, which is useful for
 // error messages, hints, or context. An [Annotation] is positioned with
 // [Above] or [Below]:
 //
-//	l.AddAnnotation(line.Annotation{
+//	view.Annotate(i, line.Annotation{
 //	    Content:   "missing required field",
 //	    Placement: line.Below,
 //	    Col:       4, // Align with the error location.
@@ -107,20 +105,20 @@
 // [Overlays] define column ranges with associated styles, primarily for
 // highlighting. An [Overlay] either replaces the style underneath it or, with
 // Blend set, mixes with it so a search highlight keeps the token color it
-// covers. [Lines.AddOverlay] and [Lines.BlendOverlay] add overlays across a
+// covers. [View.AddOverlay] and [View.BlendOverlay] add overlays across a
 // range of lines; the first replaces the style underneath and the second
 // mixes with it:
 //
-//	lines.AddOverlay(style.GenericError, errorRange)
-//	lines.BlendOverlay(style.GenericHighlight, matches...)
+//	view.AddOverlay(style.GenericError, errorRange)
+//	view.BlendOverlay(style.GenericHighlight, matches...)
 //
 // [Flag] values categorize lines for special handling. A diff marks lines with
 // [FlagInserted] and [FlagDeleted]:
 //
-//	lines[i].SetFlag(line.FlagInserted) // Show with "+" prefix.
-//	lines[i].SetFlag(line.FlagDeleted)  // Show with "-" prefix.
+//	view.SetFlag(i, line.FlagInserted) // Show with "+" prefix.
+//	view.SetFlag(i, line.FlagDeleted)  // Show with "-" prefix.
 //
-// Rendering utilities mutate lines by adding overlays and annotations. Use
-// [Lines.Clone] or [Line.Clone] to render the same content two different ways
-// without the highlights interfering.
+// To render the same content two different ways, take two views of it.
+// [View.Clone] copies the decoration of one, and [View.Slice] picks the
+// lines of a few spans, decoration included, as an error excerpt does.
 package line

@@ -1,4 +1,4 @@
-// Package finder locates strings within [line.View] content.
+// Package finder locates strings within [line.Lines] content.
 //
 // A [Finder] maps matches back to [position.Ranges] in the original lines,
 // even when normalization changes the character count, so the ranges can
@@ -7,8 +7,8 @@
 // number of times with [Index.Find]:
 //
 //	f := finder.New(finder.WithNormalizer(normalizer.New()))
-//	view := source.Lines()
-//	idx := f.Load(view)
+//	idx := f.Load(source.Lines())
+//	view := source.View()
 //	view.BlendOverlay(style.GenericHighlight, idx.Find("search term")...)
 //
 // Searches are exact by default. [WithNormalizer] applies a [Normalizer] to
@@ -32,7 +32,7 @@ type Normalizer interface {
 	Normalize(in string) string
 }
 
-// Finder builds an [Index] over [line.View] content, so the [position.Ranges]
+// Finder builds an [Index] over [line.Lines] content, so the [position.Ranges]
 // of a search can highlight matches in rendered output.
 //
 // The typical use case is search-as-you-type highlighting: the user views
@@ -52,8 +52,8 @@ type Normalizer interface {
 //	f := finder.New(
 //		finder.WithNormalizer(normalizer.New()),
 //	)
-//	view := source.Lines()
-//	idx := f.Load(view)
+//	idx := f.Load(source.Lines())
+//	view := source.View()
 //	view.AddOverlay(highlightStyle, idx.Find("search term")...)
 //	fmt.Println(p.Print(view))
 //
@@ -68,7 +68,7 @@ type Finder struct {
 }
 
 // New creates a new [*Finder].
-// Call [Finder.Load] to build an [Index] over a [line.View] before searching.
+// Call [Finder.Load] to build an [Index] over [line.Lines] before searching.
 //
 // By default, no normalization is applied. Use [WithNormalizer] to enable
 // case-insensitive or diacritic-insensitive matching.
@@ -102,14 +102,14 @@ func WithNormalizer(normalizer Normalizer) Option {
 	}
 }
 
-// Load reads the given [line.View] and returns an [Index] over it, built
+// Load reads the given [line.Lines] and returns an [Index] over it, built
 // from the search text and a map from its positions back to the lines.
 //
 // Each call builds a new Index and leaves the Finder as it was, so load once
-// per distinct content and call [Index.Find] as many times as needed.
-// Overlays do not affect the index, so highlighting matches does not require
-// reloading.
-func (f *Finder) Load(lines line.View) *Index {
+// per distinct content and call [Index.Find] as many times as needed. The
+// lines never change, so the index stays valid however the views over them
+// are decorated.
+func (f *Finder) Load(lines line.Lines) *Index {
 	idx := &Index{normalizer: f.normalizer}
 	idx.text, idx.posMap = f.buildTextAndPositionMap(lines)
 	idx.buildByteToRuneIndex()
@@ -117,7 +117,7 @@ func (f *Finder) Load(lines line.View) *Index {
 	return idx
 }
 
-// Index is the search text of one [line.View] together with the map from
+// Index is the search text of one [line.Lines] together with the map from
 // its characters back to [position.Position] values in the lines. It never
 // changes after [Finder.Load] builds it, so it is safe for concurrent use.
 //
@@ -247,12 +247,12 @@ func normalizeRune(n Normalizer, r rune) string {
 // When a normalizer is set, it normalizes the returned text, and the position
 // map records where each source rune begins in the normalized text so
 // lookups in normalized text resolve to the right place.
-func (f *Finder) buildTextAndPositionMap(lines line.View) (string, *positionMap) {
+func (f *Finder) buildTextAndPositionMap(lines line.Lines) (string, *positionMap) {
 	var sb strings.Builder
 
 	pm := &positionMap{}
 
-	if lines == nil || lines.Len() == 0 {
+	if lines.Len() == 0 {
 		return "", pm
 	}
 

@@ -247,14 +247,13 @@ func (dd *Document) FilePath() string {
 	return dd.source.FilePath()
 }
 
-// Span returns the lines of the view [Source.Lines] returns that the
-// document covers: from the line its first token starts on to the line
-// before the next document starts, or to the end of the source for the last
-// document. A document with no tokens covers no lines. Pass the span to
-// [printer.Printer.Print] to render one document of a file with the file's
-// line numbers:
+// Span returns the lines of [Source.Lines] that the document covers: from
+// the line its first token starts on to the line before the next document
+// starts, or to the end of the source for the last document. A document
+// with no tokens covers no lines. Pass the span to [printer.Printer.Print]
+// to render one document of a file with the file's line numbers:
 //
-//	fmt.Println(p.Print(source.Lines(), doc.Span()))
+//	fmt.Println(p.Print(source.View(), doc.Span()))
 func (dd *Document) Span() position.Span {
 	return dd.span
 }

@@ -34,7 +34,7 @@ const (
 // It can be used to add comments or notes to the rendered output, without being
 // part of the main token stream.
 //
-// Add annotations using [Line.AddAnnotation].
+// Add annotations to a [View] with [View.Annotate].
 type Annotation struct {
 	Content   string
 	Placement Placement
@@ -125,7 +125,8 @@ func (a Annotations) String() string {
 // Overlays apply visual styles (highlighting, coloring) to specific portions of
 // a line.
 //
-// Add overlays using [Line.AddOverlay] or [Lines.AddOverlay].
+// Add overlays to a [View] with [View.AddOverlay], [View.BlendOverlay], or
+// [View.AddLineOverlay].
 type Overlay struct {
 	Style style.Style
 	Cols  position.Span

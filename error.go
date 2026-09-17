@@ -633,7 +633,7 @@ func (e *SourceError) rangeOf(loc location) position.Range {
 // when none does: the errors [SourceError.Location] returns, joined with
 // those of the nested errors, or [ErrOutOfRange] for a location past the
 // last line. The [printer.Printer] and the number of context lines come from opts,
-// and rendering works on a private view of the source.
+// and rendering works on a view of its own over the source.
 func (e *SourceError) Detail(opts ...DetailOption) (string, error) {
 	detail, _, err := e.detail(opts)
 
@@ -649,9 +649,9 @@ func (e *SourceError) detail(opts []DetailOption) (string, []string, error) {
 		return "", nil, ErrNoLocation
 	}
 
-	view := e.source.Lines()
+	view := e.source.View()
 
-	positions, unresolved, err := e.collectPositions(a, view)
+	positions, unresolved, err := e.collectPositions(a, view.Lines())
 
 	headlines := make([]string, 0, len(unresolved))
 	for _, nested := range unresolved {
@@ -696,9 +696,9 @@ type errorPosition struct {
 // annotated with their messages, and the lines around them grouped into
 // hunks.
 //
-// Rendering happens on a private view of the source, so calling
+// Rendering happens on a view of its own over the source, so calling
 // [SourceError.Detail] repeatedly renders the same output.
-func (e *SourceError) render(cfg detailConfig, view line.Lines, positions []errorPosition) string {
+func (e *SourceError) render(cfg detailConfig, view *line.View, positions []errorPosition) string {
 	// Collect all ranges from positions and apply overlays to the view. The
 	// line of each position joins the error lines as well, since a position
 	// with no token under it has no range to highlight and still picks the
@@ -717,7 +717,7 @@ func (e *SourceError) render(cfg detailConfig, view line.Lines, positions []erro
 	view.AddOverlay(style.GenericError, allRanges...)
 
 	for lineIdx, annotation := range prepareLineAnnotations(positions) {
-		view[lineIdx].AddAnnotation(annotation)
+		view.Annotate(lineIdx, annotation)
 	}
 
 	// Group the error lines into hunks with context around each. Errors
@@ -732,7 +732,7 @@ func (e *SourceError) render(cfg detailConfig, view line.Lines, positions []erro
 			continue
 		}
 
-		view[span.Start].AddAnnotation(line.Annotation{
+		view.Annotate(span.Start, line.Annotation{
 			Content:   "...",
 			Placement: line.Above,
 		})

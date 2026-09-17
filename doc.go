@@ -16,7 +16,7 @@
 //
 //	source := niceyaml.NewSourceFromString(yamlContent)
 //	p := printer.New()
-//	fmt.Println(p.Print(source.Lines()))
+//	fmt.Println(p.Print(source.View()))
 //
 // Errors come back bound to the source, so they show users exactly where
 // the problem is:
@@ -39,20 +39,22 @@
 // the errors it and its Documents produce to itself. [Source.WrapError]
 // binds errors built elsewhere.
 //
-// [line.Lines] is the view. It organizes tokens into lines, and each
-// [line.Line] carries optional metadata for rendering. Annotations hold
-// error messages and diff headers, flags mark inserted and deleted lines, and
-// overlays apply style spans for highlighting. A Source hands out an
-// independent view from [Source.Lines], so the metadata added to one view
-// reaches neither the Source nor another view.
+// [line.Lines] is the content, the tokens organized into lines, and it
+// never changes. [line.View] is one rendering of that content: it shares
+// the lines and carries the decoration of the rendering. Annotations hold
+// error messages and diff headers, flags mark inserted and deleted lines,
+// and overlays apply style spans for highlighting. A Source hands out its
+// lines from [Source.Lines] and a fresh view over them from [Source.View],
+// so the decoration added to one view reaches neither the Source nor
+// another view, and taking a view costs nothing.
 //
 // A view need not be a YAML document. Diffs, for example, interleave lines
-// from two revisions and are plain [line.Lines] values.
+// from two revisions and are plain [line.View] values.
 //
-// [printer.Printer] renders any [line.View], which [line.Lines] satisfies,
-// with syntax highlighting via lipgloss. It supports customizable gutters
-// (line numbers, diff markers), word wrapping, and annotation rendering.
-// [diff.Differ] compares two views, and [finder.Finder] searches one.
+// [printer.Printer] renders a [line.View] with syntax highlighting via
+// lipgloss. It supports customizable gutters (line numbers, diff markers),
+// word wrapping, and annotation rendering. [diff.Differ] compares two
+// [line.Lines] values, and [finder.Finder] searches one.
 //
 // Themes from [go.jacobcolvin.com/niceyaml/style/theme] provide color
 // palettes. Without one, [printer.Printer] renders with [style.Default].
@@ -80,10 +82,10 @@
 // line-by-line access. [line.NewLines] splits multiline tokens at line
 // boundaries into one part per line and keeps a reference to the original
 // token every part was cut from, and [line.Lines.Tokens] reverses the split.
-// A [Source] does this on creation and hands out a private copy of the
-// result from [Source.Lines]:
+// A [Source] does this on creation, hands out the result from
+// [Source.Lines], and hands out a view to decorate from [Source.View]:
 //
-//	view := source.Lines()
+//	view := source.View()
 //	view.AddOverlay(style.GenericError, errorRange)
 //	view.BlendOverlay(style.GenericHighlight, matches...)
 //	fmt.Println(p.Print(view))
@@ -163,21 +165,21 @@
 //	d := diff.New(diff.WithAlgorithm(myAlgo))
 //	result := d.Diff(before.Lines(), after.Lines())
 //
-// Diff output is a [line.Lines] view rather than a [Source], since the
+// Diff output is a [line.View] rather than a [Source], since the
 // interleaved lines do not form a YAML document. It uses [line.Flag] to mark
 // inserted/deleted lines and [line.Annotation] for unified diff hunk headers.
 //
 // # Text Search
 //
 // [finder.Finder] locates strings within tokens, returning [position.Range]
-// values suitable for [line.Lines.AddOverlay] and [line.Lines.BlendOverlay].
+// values suitable for [line.View.AddOverlay] and [line.View.BlendOverlay].
 //
 // Use [normalizer.New] with [finder.WithNormalizer] for case-insensitive,
 // diacritic-insensitive matching:
 //
 //	f := finder.New(finder.WithNormalizer(normalizer.New()))
-//	view := source.Lines()
-//	idx := f.Load(view)
+//	idx := f.Load(source.Lines())
+//	view := source.View()
 //	view.AddOverlay(style.GenericHighlight, idx.Find("search term")...)
 //	fmt.Println(p.Print(view))
 //

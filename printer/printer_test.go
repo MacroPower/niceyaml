@@ -70,7 +70,7 @@ func printDiffSummary(p *printer.Printer, before, after string, context int) str
 
 	source := diff.Diff(beforeTks.Lines(), afterTks.Lines()).Hunks(context)
 
-	if source.IsEmpty() {
+	if source.Len() == 0 {
 		return ""
 	}
 
@@ -99,7 +99,7 @@ func TestPrinter_Anchor(t *testing.T) {
 
 	p := testPrinter()
 
-	got := p.Print(niceyaml.NewSourceFromTokens(tks).Lines())
+	got := p.Print(niceyaml.NewSourceFromTokens(tks).View())
 	assert.Equal(t, input, got)
 }
 
@@ -167,7 +167,7 @@ func TestPrinter_AddStyleToRange(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			view := niceyaml.NewSourceFromTokens(lexer.Tokenize(tc.input)).Lines()
+			view := niceyaml.NewSourceFromTokens(lexer.Tokenize(tc.input)).View()
 			view.AddOverlay(testOverlayHighlight, tc.rng)
 
 			p := testPrinter()
@@ -184,7 +184,7 @@ func TestPrinter_ClearOverlays(t *testing.T) {
 	input := "key: value"
 	tks := lexer.Tokenize(input)
 
-	view := niceyaml.NewSourceFromTokens(tks).Lines()
+	view := niceyaml.NewSourceFromTokens(tks).View()
 	view.AddOverlay(
 		testOverlayHighlight,
 		position.NewRange(position.New(0, 0), position.New(0, 3)),
@@ -240,16 +240,16 @@ func TestPrinter_CRLF(t *testing.T) {
 			t.Parallel()
 
 			p := testPrinter()
-			view := niceyaml.NewSourceFromString(tc.input).Lines()
+			view := niceyaml.NewSourceFromString(tc.input).View()
 
 			got := p.Print(view)
 			assert.Equal(t, tc.want, got)
 
 			// Highlight every visible column of every line.
-			for i := range view {
+			for i := range view.Len() {
 				view.AddOverlay(testOverlayHighlight, position.NewRange(
 					position.New(i, 0),
-					position.New(i, view[i].Width()),
+					position.New(i, view.Line(i).Width()),
 				))
 			}
 
@@ -271,7 +271,7 @@ func TestPrinter_PrintTokens_EmptyFile(t *testing.T) {
 	tks := lexer.Tokenize("")
 
 	p := testPrinter()
-	got := p.Print(niceyaml.NewSourceFromTokens(tks).Lines())
+	got := p.Print(niceyaml.NewSourceFromTokens(tks).View())
 
 	// Empty file should produce empty output.
 	assert.Empty(t, got)
@@ -294,10 +294,10 @@ func TestPrinter_Fprint(t *testing.T) {
 
 		var sb strings.Builder
 
-		n, err := p.Fprint(&sb, source.Lines())
+		n, err := p.Fprint(&sb, source.View())
 
 		require.NoError(t, err)
-		assert.Equal(t, p.Print(source.Lines()), sb.String())
+		assert.Equal(t, p.Print(source.View()), sb.String())
 		assert.Equal(t, len(sb.String()), n)
 	})
 
@@ -307,7 +307,7 @@ func TestPrinter_Fprint(t *testing.T) {
 		source := niceyaml.NewSourceFromString("key: value")
 		p := testPrinter()
 
-		_, err := p.Fprint(failingWriter{}, source.Lines())
+		_, err := p.Fprint(failingWriter{}, source.View())
 
 		require.ErrorIs(t, err, errWriteFailed)
 	})
@@ -373,7 +373,7 @@ func TestNewPrinter(t *testing.T) {
 
 			tks := lexer.Tokenize(tc.input)
 			p := printer.New(tc.opts...)
-			got := p.Print(niceyaml.NewSourceFromTokens(tks).Lines())
+			got := p.Print(niceyaml.NewSourceFromTokens(tks).View())
 
 			assert.Equal(t, tc.want, got)
 		})
@@ -423,7 +423,7 @@ func TestPrinter_LineNumbers(t *testing.T) {
 
 			p := testPrinterWithGutter(printer.LineNumberGutter)
 
-			got := p.Print(niceyaml.NewSourceFromTokens(tks).Lines())
+			got := p.Print(niceyaml.NewSourceFromTokens(tks).View())
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -575,7 +575,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 			p := testPrinterWithGutter(tc.gutter)
 			lines := niceyaml.NewSourceFromString(input)
 
-			got := p.Print(lines.Lines(), tc.spans...)
+			got := p.Print(lines.View(), tc.spans...)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -924,7 +924,7 @@ func TestPrinter_WordWrap(t *testing.T) {
 
 			p := testPrinterWithGutter(tc.gutter).With(printer.WithWidth(tc.width))
 
-			got := p.Print(niceyaml.NewSourceFromTokens(tks).Lines())
+			got := p.Print(niceyaml.NewSourceFromTokens(tks).View())
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -936,7 +936,7 @@ func TestPrinter_WordWrap_NarrowWidth(t *testing.T) {
 	// Only a width of 0 turns wrapping off. A positive width at or below the
 	// gutter width still wraps, at one column of content per row.
 	input := "key: this is a long value"
-	view := niceyaml.NewSourceFromString(input).Lines()
+	view := niceyaml.NewSourceFromString(input).View()
 
 	tcs := map[string]struct {
 		width int
@@ -975,7 +975,7 @@ func TestPrinter_WordWrap_WideLineNumbers(t *testing.T) {
 
 	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWidth(30))
 
-	got := p.Print(source.Lines(), position.NewSpan(10000, 10001))
+	got := p.Print(source.View(), position.NewSpan(10000, 10001))
 	for row := range strings.SplitSeq(got, "\n") {
 		assert.LessOrEqual(t, lipgloss.Width(row), 30, row)
 	}
@@ -1458,8 +1458,8 @@ func TestPrinter_WithAnnotations(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			view := niceyaml.NewSourceFromString("key: value\n").Lines()
-			view[0].AddAnnotation(line.Annotation{Content: tc.annotation})
+			view := niceyaml.NewSourceFromString("key: value\n").View()
+			view.Annotate(0, line.Annotation{Content: tc.annotation})
 
 			p := testPrinter().With(printer.WithAnnotations(tc.enabled))
 
@@ -1590,8 +1590,8 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			view := niceyaml.NewSourceFromString(tc.input).Lines()
-			view[tc.lineIndex].AddAnnotation(tc.annotation)
+			view := niceyaml.NewSourceFromString(tc.input).View()
+			view.Annotate(tc.lineIndex, tc.annotation)
 
 			p := testPrinter()
 			got := p.Print(view)
@@ -1653,8 +1653,8 @@ func TestPrinter_AnnotationPosition_WithGutter(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			view := niceyaml.NewSourceFromString(tc.input).Lines()
-			view[tc.lineIndex].AddAnnotation(tc.annotation)
+			view := niceyaml.NewSourceFromString(tc.input).View()
+			view.Annotate(tc.lineIndex, tc.annotation)
 
 			p := testPrinterWithGutter(printer.LineNumberGutter)
 			got := p.Print(view)
@@ -1690,8 +1690,8 @@ func TestPrinter_AnnotationPosition_Disabled(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			view := niceyaml.NewSourceFromString("key: value").Lines()
-			view[0].AddAnnotation(tc.annotation)
+			view := niceyaml.NewSourceFromString("key: value").View()
+			view.Annotate(0, tc.annotation)
 
 			p := testPrinter().With(printer.WithAnnotations(false))
 
@@ -1869,7 +1869,7 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 				printer.WithGutter(printer.NoGutter),
 			)
 
-			got := p.Print(niceyaml.NewSourceFromTokens(tks).Lines())
+			got := p.Print(niceyaml.NewSourceFromTokens(tks).View())
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -1969,7 +1969,7 @@ func TestPrinter_PrintFile_MultiDocument(t *testing.T) {
 			tks := lexer.Tokenize(tc.input)
 			p := testPrinter()
 
-			got := p.Print(niceyaml.NewSourceFromTokens(tks).Lines())
+			got := p.Print(niceyaml.NewSourceFromTokens(tks).View())
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -2386,7 +2386,7 @@ func TestFinderPrinter_Integration(t *testing.T) {
 				assert.Empty(t, ranges)
 			}
 
-			view := source.Lines()
+			view := source.View()
 			view.AddOverlay(testOverlayHighlight, ranges...)
 
 			got := p.Print(view)
@@ -2407,24 +2407,24 @@ func TestPrinter_With(t *testing.T) {
 	assert.Equal(t, 20, narrow.Width())
 
 	// The receiver still renders on one line; the copy wraps.
-	assert.Equal(t, "key: this is a very long value that should wrap", base.Print(source.Lines()))
+	assert.Equal(t, "key: this is a very long value that should wrap", base.Print(source.View()))
 	assert.Equal(t, stringtest.JoinLF(
 		"key: this is a very",
 		"long value that",
 		"should wrap",
-	), narrow.Print(source.Lines()))
+	), narrow.Print(source.View()))
 
 	// A copy can switch styles and gets its own container style.
 	styled := base.With(printer.WithStyles(yamltest.NewXMLStyles()))
-	assert.Contains(t, styled.Print(source.Lines()), "<nameTag>key</nameTag>")
-	assert.NotContains(t, base.Print(source.Lines()), "<nameTag>")
+	assert.Contains(t, styled.Print(source.View()), "<nameTag>key</nameTag>")
+	assert.NotContains(t, base.Print(source.View()), "<nameTag>")
 }
 
 func TestPrinter_Golden(t *testing.T) {
 	t.Parallel()
 
 	type goldenTest struct {
-		setupFunc func(line.Lines)
+		setupFunc func(*line.View)
 		opts      []printer.Option
 	}
 
@@ -2472,9 +2472,9 @@ func TestPrinter_Golden(t *testing.T) {
 				printer.WithContainerStyle(lipgloss.NewStyle()),
 				printer.WithGutter(printer.NoGutter),
 			},
-			setupFunc: func(view line.Lines) {
+			setupFunc: func(view *line.View) {
 				// Search for "日本" (Japan) which appears multiple times in full.yaml.
-				ranges := finder.New().Load(view).Find("日本")
+				ranges := finder.New().Load(view.Lines()).Find("日本")
 				view.AddOverlay(testOverlayHighlight, ranges...)
 			},
 		},
@@ -2487,7 +2487,7 @@ func TestPrinter_Golden(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := niceyaml.NewSourceFromString(string(input)).Lines()
+			lines := niceyaml.NewSourceFromString(string(input)).View()
 			p := printer.New(tc.opts...)
 
 			if tc.setupFunc != nil {
@@ -2670,7 +2670,7 @@ func TestPrinter_BlendStyles(t *testing.T) {
 				printer.WithGutter(printer.NoGutter),
 			)
 
-			view := source.Lines()
+			view := source.View()
 			for _, or := range tc.ranges {
 				view.BlendOverlay(or.kind, position.NewRange(or.start, or.end))
 			}
@@ -2778,7 +2778,7 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			view := niceyaml.NewSourceFromString(tc.input).Lines()
+			view := niceyaml.NewSourceFromString(tc.input).View()
 
 			// Build overlay styler with styles from test case.
 			kinds := []style.Style{colorKind1, colorKind2, colorKind3}
@@ -2946,8 +2946,8 @@ func TestPrinter_WithAnnotationFunc(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			view := niceyaml.NewSourceFromString("key: value").Lines()
-			view[tc.lineIndex].AddAnnotation(tc.annotation)
+			view := niceyaml.NewSourceFromString("key: value").View()
+			view.Annotate(tc.lineIndex, tc.annotation)
 
 			p := printer.New(
 				printer.WithStyles(style.Styles{}),
@@ -2965,8 +2965,8 @@ func TestPrinter_WithAnnotationFunc(t *testing.T) {
 func TestPrinter_AnnotationFuncKeepsStyling(t *testing.T) {
 	t.Parallel()
 
-	view := niceyaml.NewSourceFromString("key: value").Lines()
-	view[0].AddAnnotation(line.Annotation{Content: "oops", Placement: line.Below})
+	view := niceyaml.NewSourceFromString("key: value").View()
+	view.Annotate(0, line.Annotation{Content: "oops", Placement: line.Below})
 
 	styles := style.NewStyles(lipgloss.NewStyle(), style.Set(style.TextError, lipgloss.NewStyle().Bold(true)))
 	styled := func(ctx printer.AnnotationContext) string {
@@ -3145,8 +3145,8 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			view := niceyaml.NewSourceFromString(tc.input).Lines()
-			view[0].AddAnnotation(tc.annotation)
+			view := niceyaml.NewSourceFromString(tc.input).View()
+			view.Annotate(0, tc.annotation)
 
 			p := testPrinterWithGutter(tc.gutter).With(printer.WithWidth(tc.width))
 			if tc.annFunc != nil {
@@ -3198,7 +3198,7 @@ func TestPrinter_Print_EmptySpans(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			view := niceyaml.NewSourceFromString("a: 1\nb: 2").Lines()
+			view := niceyaml.NewSourceFromString("a: 1\nb: 2").View()
 			p := testPrinter()
 
 			got := p.Print(view, tc.spans...)
@@ -3216,8 +3216,9 @@ func TestPrinter_LineNumbers_MaxNumber(t *testing.T) {
 	// 9999, so the gutter must size itself from the number, and every row
 	// of the line, wrapped or annotated, must share that width.
 	input := strings.Repeat("k: v\n", 10000) + "last: this is a long value that wraps"
-	view := niceyaml.NewSourceFromString(input).Lines()[10000:]
-	view[0].AddAnnotation(line.Annotation{Content: "note", Placement: line.Below, Col: 6})
+	source := niceyaml.NewSourceFromString(input)
+	view := source.View().Slice(position.NewSpan(10000, source.Lines().Len()))
+	view.Annotate(0, line.Annotation{Content: "note", Placement: line.Below, Col: 6})
 
 	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWidth(30))
 
@@ -3274,9 +3275,9 @@ func TestPrinter_BlendKey_StyleNames(t *testing.T) {
 		})
 	}
 
-	view := niceyaml.NewSourceFromString("k: 1\nk: 2").Lines()
-	view[0].AddOverlay(line.Overlay{Style: ab, Cols: position.NewSpan(0, 4), Blend: true})
-	view[1].AddOverlay(
+	view := niceyaml.NewSourceFromString("k: 1\nk: 2").View()
+	view.AddLineOverlay(0, line.Overlay{Style: ab, Cols: position.NewSpan(0, 4), Blend: true})
+	view.AddLineOverlay(1,
 		line.Overlay{Style: a, Cols: position.NewSpan(0, 4), Blend: true},
 		line.Overlay{Style: b, Cols: position.NewSpan(0, 4)},
 	)
@@ -3322,8 +3323,8 @@ func TestPrinter_Overlay_Attributes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			view := niceyaml.NewSourceFromString("k: v").Lines()
-			view[0].AddOverlay(line.Overlay{Style: underlined, Cols: position.NewSpan(0, 4), Blend: tc.blend})
+			view := niceyaml.NewSourceFromString("k: v").View()
+			view.AddLineOverlay(0, line.Overlay{Style: underlined, Cols: position.NewSpan(0, 4), Blend: tc.blend})
 
 			p := printer.New(
 				printer.WithStyles(style.NewStyles(lipgloss.NewStyle(), style.Set(underlined, st))),
@@ -3380,7 +3381,7 @@ func TestPrinter_SeparatorStyle(t *testing.T) {
 				printer.WithGutter(printer.NoGutter),
 			)
 
-			assert.Equal(t, tc.want, p.Print(niceyaml.NewSourceFromString(tc.input).Lines()))
+			assert.Equal(t, tc.want, p.Print(niceyaml.NewSourceFromString(tc.input).View()))
 		})
 	}
 }
@@ -3388,11 +3389,11 @@ func TestPrinter_SeparatorStyle(t *testing.T) {
 func TestPrinter_GutterWidth(t *testing.T) {
 	t.Parallel()
 
-	short := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3").Lines()
-	long := niceyaml.NewSourceFromString(strings.Repeat("k: v\n", 10000) + "last: v").Lines()
+	short := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3").View()
+	long := niceyaml.NewSourceFromString(strings.Repeat("k: v\n", 10000) + "last: v").View()
 
 	tcs := map[string]struct {
-		view   line.View
+		view   *line.View
 		gutter printer.GutterFunc
 		want   int
 	}{
@@ -3422,12 +3423,12 @@ func TestPrinter_GutterWidth(t *testing.T) {
 			want:   7,
 		},
 		"slice keeps the width of its largest number": {
-			view:   long[10000:],
+			view:   long.Slice(position.NewSpan(10000, long.Len())),
 			gutter: printer.LineNumberGutter,
 			want:   6,
 		},
 		"empty view": {
-			view:   line.Lines{},
+			view:   line.NewView(nil),
 			gutter: printer.DefaultGutter,
 			want:   6,
 		},
@@ -3455,7 +3456,7 @@ func TestPrinter_GutterWidth(t *testing.T) {
 func TestPrinter_WithMaxNumber(t *testing.T) {
 	t.Parallel()
 
-	short := niceyaml.NewSourceFromString("a: 1\nb: 2").Lines()
+	short := niceyaml.NewSourceFromString("a: 1\nb: 2").View()
 
 	t.Run("sizes the gutter for the given number", func(t *testing.T) {
 		t.Parallel()
@@ -3466,7 +3467,7 @@ func TestPrinter_WithMaxNumber(t *testing.T) {
 		assert.Equal(t, 6, p.GutterWidth(short))
 
 		// Two views of different lengths then share a gutter width.
-		long := niceyaml.NewSourceFromString(strings.Repeat("k: v\n", 10000)).Lines()
+		long := niceyaml.NewSourceFromString(strings.Repeat("k: v\n", 10000)).View()
 		assert.Equal(t, p.GutterWidth(long), p.GutterWidth(short))
 	})
 
@@ -3483,24 +3484,24 @@ func TestPrinter_WithMaxNumber(t *testing.T) {
 func TestPrinter_RowWidth(t *testing.T) {
 	t.Parallel()
 
-	wide := niceyaml.NewSourceFromString("k: " + strings.Repeat("\u65e5", 3) + "\nb: 2").Lines()
+	wide := niceyaml.NewSourceFromString("k: " + strings.Repeat("\u65e5", 3) + "\nb: 2").View()
 
-	annotated := niceyaml.NewSourceFromString("a: 1\nb: 2").Lines()
-	annotated[0].AddAnnotation(line.Annotation{Content: "a note wider than the lines", Placement: line.Above})
+	annotated := niceyaml.NewSourceFromString("a: 1\nb: 2").View()
+	annotated.Annotate(0, line.Annotation{Content: "a note wider than the lines", Placement: line.Above})
 
 	tcs := map[string]struct {
-		view   line.View
+		view   *line.View
 		gutter printer.GutterFunc
 		spans  []position.Span
 		want   int
 	}{
 		"widest line": {
-			view:   niceyaml.NewSourceFromString("a: 1\nbb: 222").Lines(),
+			view:   niceyaml.NewSourceFromString("a: 1\nbb: 222").View(),
 			gutter: printer.NoGutter,
 			want:   7,
 		},
 		"gutter adds to every row": {
-			view:   niceyaml.NewSourceFromString("a: 1\nbb: 222").Lines(),
+			view:   niceyaml.NewSourceFromString("a: 1\nbb: 222").View(),
 			gutter: printer.DefaultGutter,
 			want:   13,
 		},
@@ -3515,13 +3516,13 @@ func TestPrinter_RowWidth(t *testing.T) {
 			want:   27,
 		},
 		"span selects the lines measured": {
-			view:   niceyaml.NewSourceFromString("a: 1\nbb: 222").Lines(),
+			view:   niceyaml.NewSourceFromString("a: 1\nbb: 222").View(),
 			gutter: printer.NoGutter,
 			spans:  []position.Span{position.NewSpan(0, 1)},
 			want:   4,
 		},
 		"empty view": {
-			view:   line.Lines{},
+			view:   line.NewView(nil),
 			gutter: printer.DefaultGutter,
 			want:   0,
 		},
@@ -3552,8 +3553,8 @@ func TestPrinter_RowWidth(t *testing.T) {
 func TestPrinter_WithGutter_Nil(t *testing.T) {
 	t.Parallel()
 
-	view := niceyaml.NewSourceFromString("key: value").Lines()
-	view[0].AddAnnotation(line.Annotation{Content: "note", Placement: line.Below, Col: 5})
+	view := niceyaml.NewSourceFromString("key: value").View()
+	view.Annotate(0, line.Annotation{Content: "note", Placement: line.Below, Col: 5})
 
 	p := testPrinterWithGutter(nil)
 
@@ -3564,7 +3565,7 @@ func TestPrinter_WithGutter_Nil(t *testing.T) {
 func TestPrinter_WithStyles_Nil(t *testing.T) {
 	t.Parallel()
 
-	view := niceyaml.NewSourceFromString("key: value").Lines()
+	view := niceyaml.NewSourceFromString("key: value").View()
 
 	// A nil StyleGetter selects the default styles rather than panicking
 	// in New.
@@ -3574,8 +3575,8 @@ func TestPrinter_WithStyles_Nil(t *testing.T) {
 func TestPrinter_WithAnnotationFunc_Nil(t *testing.T) {
 	t.Parallel()
 
-	view := niceyaml.NewSourceFromString("key: value").Lines()
-	view[0].AddAnnotation(line.Annotation{Content: "note", Placement: line.Below, Col: 5})
+	view := niceyaml.NewSourceFromString("key: value").View()
+	view.Annotate(0, line.Annotation{Content: "note", Placement: line.Below, Col: 5})
 
 	// A nil AnnotationFunc selects DefaultAnnotation rather than panicking
 	// on the first annotated line.

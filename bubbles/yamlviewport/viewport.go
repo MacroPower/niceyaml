@@ -31,7 +31,7 @@ const defaultHorizontalStep = 6
 //
 // [WithFinder] adapts a [finder.Finder] to this interface.
 type Searcher interface {
-	Load(lines line.View) Index
+	Load(lines line.Lines) Index
 }
 
 // Index finds the [position.Range]s that match a search string in the lines
@@ -48,7 +48,7 @@ type finderSearcher struct {
 }
 
 // Load implements [Searcher].
-func (s finderSearcher) Load(lines line.View) Index {
+func (s finderSearcher) Load(lines line.Lines) Index {
 	return s.finder.Load(lines)
 }
 
@@ -195,10 +195,10 @@ type Model struct {
 	// The model always owns the view, either a clone of the revision's lines
 	// or a fresh diff result, so search overlays never touch the caller's
 	// Source.
-	left line.Lines
+	left *line.View
 	// Right holds the right pane view for side-by-side diff rendering.
 	// Only populated when viewMode == ViewModeSideBySide and showing a diff.
-	right line.Lines
+	right *line.View
 	// Rendered row counts of the view. Copies of the Model share one cache
 	// until a layout change gives a copy its own, so the counts that the
 	// value-receiver View fills in stay filled for the Model it copied.
@@ -660,7 +660,7 @@ func (m *Model) refreshSearch() {
 }
 
 // applySearchOverlays sets overlay highlights for all search matches.
-func (m *Model) applySearchOverlays(lines line.Lines) {
+func (m *Model) applySearchOverlays(lines *line.View) {
 	lines.ClearOverlays()
 
 	for i, match := range m.searchMatches {
@@ -692,8 +692,8 @@ func (m *Model) updateSideBySideSearchState() {
 	}
 
 	// Search on both sources and cache results for overlay application.
-	m.leftMatches = m.searcher.Load(m.left).Find(m.searchTerm)
-	m.rightMatches = m.searcher.Load(m.right).Find(m.searchTerm)
+	m.leftMatches = m.searcher.Load(m.left.Lines()).Find(m.searchTerm)
+	m.rightMatches = m.searcher.Load(m.right.Lines()).Find(m.searchTerm)
 
 	// Build combined match list. For equal lines, a match appears in both
 	// sources at the same position, so we deduplicate by (row, startCol).
@@ -701,7 +701,6 @@ func (m *Model) updateSideBySideSearchState() {
 	//
 	// Track equal-line match positions from left source for deduplication.
 	equalLinePositions := make(map[position.Position]bool)
-	leftLines := m.left
 
 	combined := make([]searchMatch, 0, len(m.leftMatches)+len(m.rightMatches))
 
@@ -709,8 +708,8 @@ func (m *Model) updateSideBySideSearchState() {
 		combined = append(combined, searchMatch{rng: match, inLeft: true})
 
 		// Track equal-line matches for deduplication.
-		if match.Start.Line < len(leftLines) {
-			if leftLines[match.Start.Line].Flag() == line.FlagDefault {
+		if match.Start.Line < m.left.Len() {
+			if m.left.Flag(match.Start.Line) == line.FlagDefault {
 				equalLinePositions[match.Start] = true
 			}
 		}
@@ -773,9 +772,8 @@ func (m *Model) applySideBySideOverlays() {
 		selectedInLeft = selected.inLeft
 
 		// Check if selected match is on an equal line.
-		leftLines := m.left
-		if selectedPos.Line < len(leftLines) {
-			selectedIsEqual = leftLines[selectedPos.Line].Flag() == line.FlagDefault
+		if selectedPos.Line < m.left.Len() {
+			selectedIsEqual = m.left.Flag(selectedPos.Line) == line.FlagDefault
 		}
 	}
 
@@ -787,7 +785,7 @@ func (m *Model) applySideBySideOverlays() {
 // applySideBySidePaneOverlays applies search highlights to a single pane.
 // It uses cached matches and showSelected to determine the selected style.
 func (m *Model) applySideBySidePaneOverlays(
-	view line.Lines,
+	view *line.View,
 	matches position.Ranges,
 	selectedPos position.Position,
 	showSelected bool,
@@ -813,7 +811,7 @@ func (m *Model) applySideBySidePaneOverlays(
 //
 // It reloads the searcher only when the lines changed since the last load, so
 // typing a search term does not rebuild the index on every keystroke.
-func (m *Model) updateSearchState(lines line.Lines) {
+func (m *Model) updateSearchState(lines *line.View) {
 	if m.searchTerm == "" {
 		m.searchMatches = nil
 		m.leftMatches = nil
@@ -823,7 +821,7 @@ func (m *Model) updateSearchState(lines line.Lines) {
 	}
 
 	if m.searcherStale || m.index == nil {
-		m.index = m.searcher.Load(lines)
+		m.index = m.searcher.Load(lines.Lines())
 
 		m.searcherStale = false
 	}
@@ -883,7 +881,7 @@ func (m *Model) revision(index int) *niceyaml.Source {
 //
 // The model always owns the result, either a clone of the revision's lines
 // or a fresh unified diff. Returns nil when there is no revision.
-func (m *Model) getDisplayLines() line.Lines {
+func (m *Model) getDisplayLines() *line.View {
 	src, needsDiff := m.resolveRevisionSource()
 	if needsDiff {
 		return m.getDiffResult().Unified()
@@ -893,7 +891,7 @@ func (m *Model) getDisplayLines() line.Lines {
 		return nil
 	}
 
-	return src.Lines()
+	return src.View()
 }
 
 // getDiffResult returns the cached [diff.Result], computing it if nil.
@@ -1539,7 +1537,7 @@ func (m *Model) scrollToCurrentMatch() {
 //
 // It renders the one line as the view does and aligns the rows with the
 // line's content, since the printer keeps the wrap points to itself.
-func (m *Model) matchRow(view line.Lines, k, col int) int {
+func (m *Model) matchRow(view *line.View, k, col int) int {
 	span := position.NewSpan(k, k+1)
 	p := m.renderPrinter(m.paneWidth()).With(printer.WithContainerStyle(lipgloss.NewStyle()))
 
@@ -1569,7 +1567,7 @@ func (m *Model) matchRow(view line.Lines, k, col int) int {
 	// The renderer escapes control characters to pictures, one rune per
 	// rune, so the escaped content is what the rows spell out while the
 	// columns still line up.
-	runes := []rune(escape.Control(view[k].Content()))
+	runes := []rune(escape.Control(view.Line(k).Content()))
 	next := 0
 
 	for j, row := range content {

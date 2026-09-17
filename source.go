@@ -27,27 +27,28 @@ import (
 // where [Source.File] lazily parses the AST and [Source.Documents] builds
 // the documents. Every error they and their Documents produce comes back
 // bound to the Source as a [SourceError], and [Source.WrapError] binds
-// errors built elsewhere. Rendering lives in a [line.Lines] view, which
-// organizes the tokens into lines and carries the overlays, annotations, and
-// flags that a [printer.Printer] renders. [Source.Lines] returns an
-// independent view each call, and utilities that only render or search, such
-// as [printer.Printer], [finder.Finder], and [diff.Differ], take the view.
+// errors built elsewhere. Rendering lives in a [line.View], which carries
+// the overlays, annotations, and flags that a [printer.Printer] renders
+// over the [line.Lines] the Source holds. [Source.Lines] returns those
+// lines, which the [finder.Finder] and [diff.Differ] read, and
+// [Source.View] returns a fresh view over them for the [printer.Printer].
 //
 // Typical use creates a Source and renders a view of it:
 //
 //	source := niceyaml.NewSourceFromString(yamlContent)
 //	p := printer.New()
-//	fmt.Println(p.Print(source.Lines()))
+//	fmt.Println(p.Print(source.View()))
 //
 // A Source never changes after creation. Overlays and annotations go on the
 // view, and a fresh view renders the document as parsed:
 //
-//	view := source.Lines()
+//	view := source.View()
 //	view.AddOverlay(style.GenericHighlight, ranges...)
 //	fmt.Println(p.Print(view))
 //
-// Since nothing mutates a Source, it is safe for concurrent use, and every
-// view taken from it is a private copy.
+// Since nothing mutates a Source, it is safe for concurrent use. Every view
+// taken from it shares its lines and owns its decoration, so creating one
+// costs nothing.
 //
 // Create instances with [NewSourceFromFile], [NewSourceFromBytes],
 // [NewSourceFromString], or [NewSourceFromTokens].
@@ -156,8 +157,8 @@ func NewSourceFromString(src string, opts ...SourceOption) *Source {
 //
 // The Source holds clones of the tokens with their positions reset through
 // [tokens.ResetPositions], so the text it holds counts its lines from 1 as
-// [tokens.Tokenize] does, and line i of the view [Source.Lines] returns is
-// line i+1 of the text. Tokens that count from 1 already, as a whole stream
+// [tokens.Tokenize] does, and line i of [Source.Lines] is line i+1 of the
+// text. Tokens that count from 1 already, as a whole stream
 // does, keep their positions. Tokens cut from a longer stream, as
 // [Document.Tokens] hands out, are renumbered from the first one; to render
 // one document of a file with the file's line numbers, print the file's
@@ -391,13 +392,21 @@ func (s *Source) WrapError(err error) error {
 	return newSourceError(err, s, nil)
 }
 
-// Lines returns a [line.Lines] view of the [Source]. Line i of the view is
-// line i+1 of the text, so [position.NewFromToken] converts any token of the
-// Source to a position in the view.
+// Lines returns the [line.Lines] of the [Source]: its tokens split into
+// one line per line of text. Line i is line i+1 of the text, so
+// [position.NewFromToken] converts any token of the Source to a position
+// in the lines.
 //
-// Each call returns an independent copy, so overlays and annotations added to
-// one view never reach the Source or another view. Render the view to see
-// them.
+// The lines never change, so every call returns the same slice and the
+// [finder.Finder] and [diff.Differ] read it as it is. To render the
+// Source, take a [line.View] from [Source.View].
 func (s *Source) Lines() line.Lines {
-	return s.lines.Clone()
+	return s.lines
+}
+
+// View returns a new [*line.View] over [Source.Lines] with no decoration.
+// Each call returns a view of its own, so overlays and annotations added to
+// one never reach the Source or another view. Render the view to see them.
+func (s *Source) View() *line.View {
+	return line.NewView(s.lines)
 }

@@ -18,25 +18,33 @@ import (
 func TestDiffer_Views(t *testing.T) {
 	t.Parallel()
 
-	before := niceyaml.NewSourceFromString("a: 1\nb: 2\n").Lines()
-	after := niceyaml.NewSourceFromString("a: 1\nb: 3\n").Lines()
+	before := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
+	after := niceyaml.NewSourceFromString("a: 1\nb: 3\n")
 
-	// An overlay on a view comes along into the diff, since the result
-	// copies the lines it is given.
-	after.AddOverlay(style.GenericHighlight, position.NewRange(position.New(1, 0), position.New(1, 1)))
-
-	result := diff.Diff(before, after)
+	result := diff.Diff(before.Lines(), after.Lines())
 
 	got := result.Unified()
-	require.Len(t, got, 3)
-	assert.Equal(t, line.FlagDefault, got[0].Flag())
-	assert.Equal(t, line.FlagDeleted, got[1].Flag())
-	assert.Equal(t, line.FlagInserted, got[2].Flag())
-	assert.Empty(t, got[1].Overlays())
-	assert.Len(t, got[2].Overlays(), 1)
+	require.Equal(t, 3, got.Len())
+	assert.Equal(t, line.FlagDefault, got.Flag(0))
+	assert.Equal(t, line.FlagDeleted, got.Flag(1))
+	assert.Equal(t, line.FlagInserted, got.Flag(2))
 
-	// The diff of a diff is a view of a view.
-	again := diff.Diff(got, got)
+	// Inputs are content only, so the result carries the flags of the diff
+	// and nothing else.
+	for i := range got.Len() {
+		assert.Empty(t, got.Overlays(i))
+	}
+
+	// Each result view owns its decoration, and none of it reaches the
+	// sources the diff was computed from.
+	got.AddOverlay(style.GenericHighlight, position.NewRange(position.New(2, 0), position.New(2, 1)))
+	assert.Len(t, got.Overlays(2), 1)
+	assert.Empty(t, result.Unified().Overlays(2))
+	assert.Empty(t, after.View().Overlays(1))
+	assert.Empty(t, before.View().Overlays(1))
+
+	// The diff of a diff is a diff of the view's content.
+	again := diff.Diff(got.Lines(), got.Lines())
 	assert.Equal(t, 3, again.Unified().Len())
 }
 
@@ -456,8 +464,8 @@ func TestDiffer_Full_Flags(t *testing.T) {
 			got := result.Unified()
 
 			flaggedCount := 0
-			for _, ln := range got.AllLines() {
-				if ln.Flag() != line.FlagDefault {
+			for i := range got.AllLines() {
+				if got.Flag(i) != line.FlagDefault {
 					flaggedCount++
 				}
 			}
@@ -465,7 +473,7 @@ func TestDiffer_Full_Flags(t *testing.T) {
 			assert.Equal(t, tc.wantFlaggedCount, flaggedCount)
 
 			for lineIdx, wantFlag := range tc.wantFlags {
-				assert.Equal(t, wantFlag, got[lineIdx].Flag())
+				assert.Equal(t, wantFlag, got.Flag(lineIdx))
 			}
 		})
 	}
@@ -653,21 +661,22 @@ func TestDiffer_Hunks(t *testing.T) {
 			got := result.Hunks(tc.context)
 
 			if tc.wantEmpty {
-				assert.True(t, got.IsEmpty())
-				assert.Nil(t, got.Tokens())
+				assert.Nil(t, got)
+				assert.Equal(t, 0, got.Len())
+				assert.Nil(t, got.Lines())
 
 				return
 			}
 
-			assert.Len(t, got, tc.wantLen)
+			assert.Equal(t, tc.wantLen, got.Len())
 
 			for lineIdx, wantFlag := range tc.flags {
-				assert.Equal(t, wantFlag, got[lineIdx].Flag(), "flag mismatch at line %d", lineIdx)
+				assert.Equal(t, wantFlag, got.Flag(lineIdx), "flag mismatch at line %d", lineIdx)
 			}
 
 			if tc.annotations != nil {
 				for lineIdx, wantAnnotation := range tc.annotations {
-					anns := got[lineIdx].Annotations()
+					anns := got.Annotations(lineIdx)
 					require.NotEmpty(t, anns, "expected annotation at line %d", lineIdx)
 					assert.Equal(t, wantAnnotation, anns[0].Content)
 				}
@@ -726,10 +735,10 @@ func TestDiffer_WithAlgorithm(t *testing.T) {
 			}
 
 			got := d.Diff(before, after).Unified()
-			require.Len(t, got, len(tc.wantFlags))
+			require.Equal(t, len(tc.wantFlags), got.Len())
 
 			for i, want := range tc.wantFlags {
-				assert.Equal(t, want, got[i].Flag(), "flag mismatch at line %d", i)
+				assert.Equal(t, want, got.Flag(i), "flag mismatch at line %d", i)
 			}
 		})
 	}
@@ -1060,34 +1069,19 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 				afterSrc.Lines(),
 			)
 
-			beforeIter := result.Before()
-			afterIter := result.After()
+			beforeView := result.Before()
+			afterView := result.After()
 
-			// Both iterators should have the same length.
-			assert.Equal(t, tc.wantRowLen, beforeIter.Len(), "Before Len()")
-			assert.Equal(t, tc.wantRowLen, afterIter.Len(), "After Len()")
+			// Both views should have the same length.
+			assert.Equal(t, tc.wantRowLen, beforeView.Len(), "Before Len()")
+			assert.Equal(t, tc.wantRowLen, afterView.Len(), "After Len()")
 
 			// Check IsEmpty.
-			assert.Equal(t, tc.wantRowLen == 0, beforeIter.IsEmpty(), "Before IsEmpty()")
-			assert.Equal(t, tc.wantRowLen == 0, afterIter.IsEmpty(), "After IsEmpty()")
+			assert.Equal(t, tc.wantRowLen == 0, beforeView.Lines().IsEmpty(), "Before IsEmpty()")
+			assert.Equal(t, tc.wantRowLen == 0, afterView.Lines().IsEmpty(), "After IsEmpty()")
 
-			// Verify Before iterator lines.
-			var beforeLines []*line.Line
-
-			for _, ln := range beforeIter.AllLines() {
-				beforeLines = append(beforeLines, ln)
-			}
-
-			verifyLines(t, "Before", beforeLines, tc.wantBefore)
-
-			// Verify After iterator lines.
-			var afterLines []*line.Line
-
-			for _, ln := range afterIter.AllLines() {
-				afterLines = append(afterLines, ln)
-			}
-
-			verifyLines(t, "After", afterLines, tc.wantAfter)
+			verifyLines(t, "Before", beforeView, tc.wantBefore)
+			verifyLines(t, "After", afterView, tc.wantAfter)
 		})
 	}
 }
@@ -1099,14 +1093,14 @@ type wantLine struct {
 	empty   bool // True if this should be an empty placeholder (zero tokens).
 }
 
-// verifyLines checks that actual lines match expected lines.
-func verifyLines(t *testing.T, side string, actual []*line.Line, want []wantLine) {
+// verifyLines checks that the lines of a view match expected lines.
+func verifyLines(t *testing.T, side string, actual *line.View, want []wantLine) {
 	t.Helper()
 
-	require.Len(t, actual, len(want), "%s: line count mismatch", side)
+	require.Equal(t, len(want), actual.Len(), "%s: line count mismatch", side)
 
-	for i, wantLn := range want {
-		actualLn := actual[i]
+	for i, actualLn := range actual.AllLines() {
+		wantLn := want[i]
 
 		if wantLn.empty {
 			// Empty placeholder: should have no tokens.
@@ -1115,7 +1109,7 @@ func verifyLines(t *testing.T, side string, actual []*line.Line, want []wantLine
 			assert.Equal(t, wantLn.content, actualLn.Content(), "%s line %d content", side, i)
 		}
 
-		assert.Equal(t, wantLn.flag, actualLn.Flag(), "%s line %d flag", side, i)
+		assert.Equal(t, wantLn.flag, actual.Flag(i), "%s line %d flag", side, i)
 	}
 }
 
@@ -1179,7 +1173,7 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 		first.AddOverlay(style.GenericHighlight, highlight)
 
 		second := result.Unified()
-		assert.Empty(t, second[0].Overlays())
+		assert.Empty(t, second.Overlays(0))
 	})
 
 	t.Run("Before and After", func(t *testing.T) {
@@ -1190,8 +1184,8 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 
 		left.AddOverlay(style.GenericHighlight, highlight)
 
-		assert.Empty(t, right[0].Overlays())
-		assert.Empty(t, result.Before()[0].Overlays())
+		assert.Empty(t, right.Overlays(0))
+		assert.Empty(t, result.Before().Overlays(0))
 	})
 
 	t.Run("Hunks without changes", func(t *testing.T) {
@@ -1205,18 +1199,18 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 
 		result.Unified().AddOverlay(style.GenericHighlight, highlight)
 
-		assert.Empty(t, before.Lines()[0].Overlays())
-		assert.Empty(t, after.Lines()[0].Overlays())
+		assert.Empty(t, before.View().Overlays(0))
+		assert.Empty(t, after.View().Overlays(0))
 	})
 }
 
 // hunkCount returns the number of hunks in a view from [diff.Result.Hunks],
 // which is the number of lines carrying a hunk header above them.
-func hunkCount(lines line.Lines) int {
+func hunkCount(view *line.View) int {
 	count := 0
 
-	for _, l := range lines {
-		if len(l.Annotations().Filter(line.Above)) > 0 {
+	for i := range view.AllLines() {
+		if len(view.Annotations(i).Filter(line.Above)) > 0 {
 			count++
 		}
 	}

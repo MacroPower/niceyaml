@@ -2231,10 +2231,12 @@ func TestError_DoesNotMutateSource(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(second, "^ nested"))
 	assert.Equal(t, 1, strings.Count(second, "<genericError>2</genericError>"))
 
-	// The caller's Source is untouched.
-	for _, ln := range source.Lines() {
-		assert.Empty(t, ln.Overlays())
-		assert.Empty(t, ln.Annotations())
+	// The caller's Source is untouched: a fresh view still renders
+	// undecorated.
+	view := source.View()
+	for i := range view.AllLines() {
+		assert.Empty(t, view.Overlays(i))
+		assert.Empty(t, view.Annotations(i))
 	}
 }
 
