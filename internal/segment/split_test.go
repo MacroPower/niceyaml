@@ -127,3 +127,28 @@ func TestSplit_DuplicateNewlineOffset(t *testing.T) {
 	assert.Equal(t, "  y\"", cont.Origin)
 	assert.Equal(t, 20, cont.Position.Offset)
 }
+
+func TestSplit_BlockScalarTrailingIndent(t *testing.T) {
+	t.Parallel()
+
+	// The lexer bundles the indentation of the line after a block scalar into
+	// the scalar's Origin ("    x\n\n  "). That fragment is not content, so the
+	// Value and the original Position stay on the last content line.
+	lines := segment.Split(lexer.Tokenize("a:\n  k: |\n    x\n\n  # c\n  z: 1\n"))
+	require.Equal(t, []string{"a:", "  k: |", "    x", "", "  # c", "  z: 1"}, lineContents(lines))
+
+	content := part(t, lines, 2, 0)
+	assert.Equal(t, "    x\n", content.Origin)
+	assert.Equal(t, "x\n", content.Value)
+	assert.Equal(t, 3, content.Position.Line)
+	assert.Equal(t, 5, content.Position.Column)
+
+	indent := part(t, lines, 4, 0)
+	assert.Equal(t, "  ", indent.Origin)
+	assert.Empty(t, indent.Value)
+	assert.Equal(t, 5, indent.Position.Line)
+
+	comment := part(t, lines, 4, 1)
+	assert.Equal(t, token.CommentType, comment.Type)
+	assert.Greater(t, comment.Position.Column, indent.Position.Column)
+}

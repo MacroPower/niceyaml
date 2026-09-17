@@ -601,15 +601,24 @@ func splitOriginIntoParts(origin string) []string {
 // findLastContentPartIndex returns the index of the last part that contains
 // actual content (not a pure newline).
 //
+// The lexer bundles the next line's indentation into a block scalar's
+// Origin when a comment or a key follows the scalar, so a final part that
+// holds only horizontal whitespace and no line ending is that indentation,
+// not content. Falls back to the last part when nothing else qualifies.
+//
 // Used to identify which part should receive the Value for block scalars.
 func findLastContentPartIndex(parts []string) int {
+	last := len(parts) - 1
+
 	for i, v := range slices.Backward(parts) {
-		if !isPureNewline(v) {
-			return i
+		if isPureNewline(v) || (i == last && i > 0 && isPureHorizontalWhitespace(v)) {
+			continue
 		}
+
+		return i
 	}
 
-	return len(parts) - 1
+	return last
 }
 
 // shouldPartReceiveValue determines if a token part should receive the Value
