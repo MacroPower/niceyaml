@@ -930,6 +930,41 @@ func TestPrinter_WordWrap(t *testing.T) {
 	}
 }
 
+func TestPrinter_WordWrap_NarrowWidth(t *testing.T) {
+	t.Parallel()
+
+	// Only a width of 0 turns wrapping off. A positive width at or below the
+	// gutter width still wraps, at one column of content per row.
+	input := "key: this is a long value"
+	view := niceyaml.NewSourceFromString(input).Lines()
+
+	tcs := map[string]struct {
+		width int
+	}{
+		"width below the gutter":    {width: 3},
+		"width equal to the gutter": {width: 5},
+		"width one past the gutter": {width: 6},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWidth(tc.width))
+
+			got := p.Print(view)
+			rows := strings.Split(got, "\n")
+
+			assert.Greater(t, len(rows), 1)
+			assert.Equal(t, []int{len(rows)}, p.Rows(view))
+
+			for _, row := range rows {
+				assert.LessOrEqual(t, lipgloss.Width(row), 6, row)
+			}
+		})
+	}
+}
+
 func TestPrinter_WordWrap_WideLineNumbers(t *testing.T) {
 	t.Parallel()
 

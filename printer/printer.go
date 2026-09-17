@@ -887,7 +887,8 @@ func (c *blendCache) put(key string, st lipgloss.Style) lipgloss.Style {
 }
 
 // contentWidth returns the available width for content after accounting for
-// gutter width.
+// gutter width. A positive printer width always wraps, so the result is at
+// least one column even when the gutter alone fills the width.
 //
 // Returns 0 if wrapping is disabled.
 func (p *Printer) contentWidth(gutterWidth int) int {
@@ -895,7 +896,7 @@ func (p *Printer) contentWidth(gutterWidth int) int {
 		return 0
 	}
 
-	return max(0, p.width-gutterWidth)
+	return max(1, p.width-gutterWidth)
 }
 
 // wrapContent splits content for word wrapping if enabled.
