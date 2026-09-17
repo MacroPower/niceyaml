@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"go.jacobcolvin.com/niceyaml/internal/segment"
+	"go.jacobcolvin.com/niceyaml/position"
 )
 
 func TestSegment_Width(t *testing.T) {
@@ -42,6 +43,7 @@ func TestSegment_Width(t *testing.T) {
 		t.Parallel()
 
 		assert.Equal(t, 0, segment.New(nil, nil).Width())
+		assert.Equal(t, position.Span{}, segment.New(nil, nil).ContentSpan())
 	})
 }
 
