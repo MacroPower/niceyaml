@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"iter"
 	"slices"
 	"sort"
 
@@ -84,29 +83,10 @@ func (f DocumentValidatorFunc) Validate(ctx context.Context, doc *Document) erro
 	return f(ctx, doc)
 }
 
-// Documents is the sequence of YAML documents in a [*Source].
-//
-// A single YAML file can hold several documents separated by "---", often
-// with different schemas and validation requirements. Documents builds a
-// [*Document] for each parsed document once, so [Documents.At] and
-// [Documents.All] return the same pointer for an index however often they
-// run. Two calls to [Source.Documents] build two sets.
-//
-//	docs, err := source.Documents()
-//	for _, doc := range docs.All() {
-//		// Each doc is a Document.
-//	}
-//
-// Create instances with [Source.Documents].
-type Documents struct {
-	source *Source
-	docs   []*Document
-}
-
-// newDocuments creates a new [*Documents] holding one [*Document] per
-// document of file, the AST src parsed, in file order. See
-// alignDocumentTokens for how each Document finds its tokens.
-func newDocuments(src *Source, file *ast.File) *Documents {
+// newDocuments creates one [*Document] per document of file, the AST src
+// parsed, in file order. See alignDocumentTokens for how each Document finds
+// its tokens.
+func newDocuments(src *Source, file *ast.File) []*Document {
 	docTokens := alignDocumentTokens(file, src.Tokens())
 
 	docs := make([]*Document, len(file.Docs))
@@ -114,7 +94,7 @@ func newDocuments(src *Source, file *ast.File) *Documents {
 		docs[i] = &Document{source: src, doc: doc, tokens: docTokens[i], index: i}
 	}
 
-	return &Documents{source: src, docs: docs}
+	return docs
 }
 
 // alignDocumentTokens pairs every document in file with the token group it
@@ -177,40 +157,6 @@ func documentOffset(doc *ast.DocumentNode) (int, bool) {
 	return 0, false
 }
 
-// Source returns the underlying [*Source].
-func (d *Documents) Source() *Source {
-	return d.source
-}
-
-// Len returns the number of YAML documents in the file.
-func (d *Documents) Len() int {
-	return len(d.docs)
-}
-
-// At returns the [*Document] at the given zero-based index, or nil when the
-// index is outside the file. The same index returns the same pointer.
-func (d *Documents) At(index int) *Document {
-	if index < 0 || index >= len(d.docs) {
-		return nil
-	}
-
-	return d.docs[index]
-}
-
-// All returns an iterator over the documents in the file, in order.
-//
-// Each iteration yields the document index and the [*Document] for that
-// document, the one [Documents.At] returns for the index.
-func (d *Documents) All() iter.Seq2[int, *Document] {
-	return func(yield func(int, *Document) bool) {
-		for i, doc := range d.docs {
-			if !yield(i, doc) {
-				return
-			}
-		}
-	}
-}
-
 // Document decodes and validates a single YAML document.
 //
 // [Document.Decode] returns a new value and
@@ -221,12 +167,15 @@ func (d *Documents) All() iter.Seq2[int, *Document] {
 // unless [WithSelfValidation] switches that off. [Document.Validate] runs
 // the first step on its own.
 //
-//	for _, doc := range docs.All() {
+//	for _, doc := range docs {
 //		config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(validator))
 //		if err != nil {
 //			return err
 //		}
 //	}
+//
+// A source that holds one document decodes through [Source.Decode] and
+// [Source.DecodeInto], which run the same pipeline on that document.
 //
 // Use [Document.Get] or [Document.GetValue] to inspect values
 // without decoding the whole document, which is helpful for routing
@@ -236,7 +185,7 @@ func (d *Documents) All() iter.Seq2[int, *Document] {
 // binds the [Error] values it produces to that source, so the errors it
 // returns carry a [SourceError] that renders the offending lines.
 //
-// Create instances with [Documents.At] or iterate with [Documents.All].
+// Receive instances from [Source.Documents].
 type Document struct {
 	source *Source
 	doc    *ast.DocumentNode
@@ -279,7 +228,7 @@ func (dd *Document) FilePath() string {
 // the document, such as a version number or a list of tags:
 //
 //	versionPath := paths.Root().Child("version")
-//	for _, doc := range docs.All() {
+//	for _, doc := range docs {
 //		version, err := doc.Get[int](ctx, versionPath)
 //		if errors.Is(err, paths.ErrNotFound) {
 //			version = 1
@@ -330,7 +279,7 @@ func (dd *Document) Get[T any](ctx context.Context, path paths.Path, opts ...Dec
 // field like "kind" or "version" to determine which schema applies:
 //
 //	kindPath := paths.Root().Child("kind")
-//	for _, doc := range docs.All() {
+//	for _, doc := range docs {
 //		kind, err := doc.GetValue(kindPath)
 //		if err != nil {
 //			return err
@@ -388,7 +337,7 @@ func (dd *Document) node(path paths.Path) (ast.Node, error) {
 // [Document.Decode] on its own, for a caller that checks a document without
 // decoding it:
 //
-//	for _, doc := range docs.All() {
+//	for _, doc := range docs {
 //		if err := doc.Validate(ctx, reg); err != nil {
 //			return err
 //		}

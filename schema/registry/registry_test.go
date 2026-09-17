@@ -666,7 +666,7 @@ func TestRegistry_DynamicResolver(t *testing.T) {
 		docs, err := source.Documents()
 		require.NoError(t, err)
 
-		for _, doc := range docs.All() {
+		for _, doc := range docs {
 			err = reg.Validate(t.Context(), doc)
 			require.NoError(t, err)
 		}
@@ -771,7 +771,7 @@ func TestRegistry_MultipleDocuments(t *testing.T) {
 
 	// Track validation results.
 	validated := make(map[string]bool)
-	for _, doc := range docs.All() {
+	for _, doc := range docs {
 		kind, err := doc.GetValue(kindPath)
 		require.NoError(t, err)
 

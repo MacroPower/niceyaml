@@ -34,6 +34,11 @@ var (
 	// [SourceError.Detail] return it.
 	ErrDocumentNotFound = errors.New("document not found in source")
 
+	// ErrMultipleDocuments indicates a [Source] that holds more than one YAML
+	// document where one was expected. [Source.Document], [Source.Decode],
+	// and [Source.DecodeInto] return it.
+	ErrMultipleDocuments = errors.New("multiple documents in source")
+
 	// ErrOutOfRange indicates the error's location lies past the last line
 	// of the source, which happens when a token or range came from other
 	// text. [SourceError.Detail] returns it.

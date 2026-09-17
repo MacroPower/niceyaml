@@ -69,7 +69,7 @@ func validateFile(ctx context.Context, yamlPath string, reg *registry.Registry) 
 		return err
 	}
 
-	for i, doc := range docs.All() {
+	for i, doc := range docs {
 		err = reg.Validate(ctx, doc)
 		if err != nil {
 			return fmt.Errorf("document %d: %w", i, err)

@@ -13,18 +13,9 @@ import (
 func cafeConfig(ctx context.Context, in string) (*cafe.Config, error) {
 	src := niceyaml.NewSourceFromString(in)
 
-	d, err := src.Documents()
+	c, err := src.Decode[cafe.Config](ctx, niceyaml.WithValidator(cafe.Schema))
 	if err != nil {
 		return nil, err
-	}
-
-	var c cafe.Config
-
-	for _, doc := range d.All() {
-		c, err = doc.Decode[cafe.Config](ctx, niceyaml.WithValidator(cafe.Schema))
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	return &c, nil

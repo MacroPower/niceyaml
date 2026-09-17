@@ -34,8 +34,8 @@
 // lives in a package of its own.
 //
 // [Source], in this package, is the file. It owns the tokens from go-yaml,
-// lazily parses them into an AST with [Source.File], yields each YAML
-// document in the file as a [Document] with [Source.Documents], and binds
+// lazily parses them into an AST with [Source.File], returns each YAML
+// document in the file as a [Document] from [Source.Documents], and binds
 // the errors it and its Documents produce to itself. [Source.WrapError]
 // binds errors built elsewhere.
 //
@@ -116,12 +116,15 @@
 //
 // # Validation Pipeline
 //
-// For structured validation, [Documents] iterates over documents in an
-// [*ast.File] and [Document] provides the validation pipeline:
+// For structured validation, [Source.Decode] decodes a file that holds one
+// document, and [Source.Documents] returns a [Document] for each document
+// of a file that holds several:
 //
 //	source := niceyaml.NewSourceFromString(yamlContent)
+//	config, err := source.Decode[Config](ctx, niceyaml.WithValidator(validator))
+//
 //	docs, _ := source.Documents()
-//	for _, doc := range docs.All() {
+//	for _, doc := range docs {
 //		config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(validator))
 //		if err != nil {
 //			return err

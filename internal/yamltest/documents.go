@@ -34,12 +34,7 @@ func FirstDocumentWithPath(t *testing.T, input, filePath string) *niceyaml.Docum
 	source := niceyaml.NewSourceFromString(input, opts...)
 	docs, err := source.Documents()
 	require.NoError(t, err)
+	require.NotEmpty(t, docs, "no documents found in input")
 
-	for _, doc := range docs.All() {
-		return doc
-	}
-
-	t.Fatal("no documents found in input")
-
-	return nil // Unreachable, but required for compilation.
+	return docs[0]
 }

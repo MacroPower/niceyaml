@@ -1,10 +1,12 @@
 package niceyaml
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"iter"
 	"os"
+	"slices"
 	"sync"
 
 	"github.com/goccy/go-yaml"
@@ -20,11 +22,11 @@ import (
 // Source is a YAML file: one stream of text that holds one or more YAML
 // documents. It holds the tokens the text was lexed from, the [*ast.File]
 // they parse into, and the settings for parsing, decoding, and reporting
-// errors. [Source.Documents] yields each document in the file as a
-// [*Document].
+// errors. [Source.Documents] returns each document in the file as a
+// [*Document], and [Source.Decode] decodes a file that holds one.
 //
 // Source separates two concerns. Parsing and decoding live on Source itself,
-// where [Source.File] lazily parses the AST and [Source.Documents] iterates
+// where [Source.File] lazily parses the AST and [Source.Documents] builds
 // the documents. Every error they and their Documents produce comes back
 // bound to the Source as a [SourceError], and [Source.WrapError] binds
 // errors built elsewhere. Rendering lives in a [line.Lines] view, available
@@ -61,9 +63,11 @@ type Source struct {
 	lines      line.Lines
 	file       *ast.File
 	fileErr    error
+	docs       []*Document
 	parserOpts []parser.Option
 	decodeOpts []yaml.DecodeOption
 	fileOnce   sync.Once
+	docsOnce   sync.Once
 	// Accepts a mapping with the same key twice when parsing and decoding.
 	allowDuplicateKeys bool
 }
@@ -195,21 +199,87 @@ func (s *Source) Tokens() token.Tokens {
 	return s.lines.Tokens()
 }
 
-// Documents returns the [*Documents] of this [Source].
+// Documents returns the [*Document] values of this [Source], one per YAML
+// document in file order.
 //
-// It parses the source and builds a [*Document] for each parsed document
-// once, so [Documents.All] can be iterated any number of times without
-// repeating either step.
+// It parses the source and builds each Document once, so every call returns
+// the same pointers. The slice itself is a copy, so reordering it reaches
+// nothing.
 //
 // A YAML syntax error comes back bound to the Source. It is the same error
 // [Source.File] returns.
-func (s *Source) Documents() (*Documents, error) {
+func (s *Source) Documents() ([]*Document, error) {
 	f, err := s.File()
 	if err != nil {
 		return nil, err
 	}
 
-	return newDocuments(s, f), nil
+	s.docsOnce.Do(func() {
+		s.docs = newDocuments(s, f)
+	})
+
+	return slices.Clone(s.docs), nil
+}
+
+// Document returns the one [*Document] of a [Source] that holds a single
+// YAML document. When the file holds more than one, it returns an error
+// wrapping [ErrMultipleDocuments], bound to the Source and pointing at the
+// header of the second document. A file that does not parse returns the
+// error [Source.File] returns.
+//
+// A file that opens with a %YAML directive parses into two documents, the
+// directive and the content, so such a file needs [Source.Documents].
+func (s *Source) Document() (*Document, error) {
+	docs, err := s.Documents()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(docs) != 1 {
+		err := NewErrorFrom(fmt.Errorf("%w: %d documents", ErrMultipleDocuments, len(docs)))
+		if start := docs[1].doc.Start; start != nil {
+			err = err.With(WithToken(start))
+		}
+
+		return nil, s.WrapError(err)
+	}
+
+	return docs[0], nil
+}
+
+// Decode validates and decodes the single document of the [Source] into a
+// new T, as [Document.Decode] does for that document. It is the direct path
+// for a file that holds one document:
+//
+//	source := niceyaml.NewSourceFromString(yamlContent)
+//	config, err := source.Decode[Config](ctx, niceyaml.WithValidator(validator))
+//
+// A file that holds more than one document returns [ErrMultipleDocuments];
+// use [Source.Documents] for those.
+func (s *Source) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
+	var v T
+
+	err := s.DecodeInto(ctx, &v, opts...)
+	if err != nil {
+		var zero T
+
+		return zero, err
+	}
+
+	return v, nil
+}
+
+// DecodeInto validates and decodes the single document of the [Source] into
+// v, which must be a pointer, as [Document.DecodeInto] does for that
+// document. A file that holds more than one document returns
+// [ErrMultipleDocuments].
+func (s *Source) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
+	doc, err := s.Document()
+	if err != nil {
+		return err
+	}
+
+	return doc.DecodeInto(ctx, v, opts...)
 }
 
 // File returns an [*ast.File] for the [Source] tokens.

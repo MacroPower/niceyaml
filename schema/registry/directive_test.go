@@ -405,7 +405,7 @@ func firstDocumentFromFile(t *testing.T, path string) *niceyaml.Document {
 	docs, err := source.Documents()
 	require.NoError(t, err)
 
-	for _, doc := range docs.All() {
+	for _, doc := range docs {
 		return doc
 	}
 

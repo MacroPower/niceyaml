@@ -316,7 +316,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 			d, err := source.Documents()
 			require.NoError(t, err)
 
-			for _, dd := range d.All() {
+			for _, dd := range d {
 				err = dd.Validate(t.Context(), v)
 
 				if tc.wantErr {
@@ -543,7 +543,7 @@ func TestValidator_PathTarget(t *testing.T) {
 			d, err := source.Documents()
 			require.NoError(t, err)
 
-			for _, dd := range d.All() {
+			for _, dd := range d {
 				err = dd.Validate(t.Context(), v)
 				require.Error(t, err)
 
@@ -692,7 +692,7 @@ func TestValidator_SubErrorAnnotations(t *testing.T) {
 			d, err := source.Documents()
 			require.NoError(t, err)
 
-			for _, dd := range d.All() {
+			for _, dd := range d {
 				err = dd.Validate(t.Context(), v)
 				require.Error(t, err)
 
