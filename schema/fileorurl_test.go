@@ -211,6 +211,18 @@ func TestFileOrURL(t *testing.T) {
 		assert.Equal(t, []byte(schemaData), data)
 	})
 
+	t.Run("windows file URL on any platform", func(t *testing.T) {
+		t.Parallel()
+
+		// A drive-letter path is absolute on Windows and names nothing a
+		// POSIX base directory can resolve, so the reference must survive
+		// intact rather than be rewritten against baseDir.
+		url, _, err := load(t, schema.FileOrURL("/configs", "file:///C:/schemas/config.json"))
+		require.Error(t, err)
+		assert.NotContains(t, url, "/configs")
+		assert.Contains(t, url, "C:/schemas/config.json")
+	})
+
 	t.Run("missing file", func(t *testing.T) {
 		t.Parallel()
 
@@ -218,6 +230,35 @@ func TestFileOrURL(t *testing.T) {
 		require.ErrorIs(t, err, os.ErrNotExist)
 		require.ErrorContains(t, err, "read /some/dir/nonexistent.json")
 	})
+}
+
+func TestHasDriveLetter(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		path string
+		want bool
+	}{
+		"upper-case drive":       {path: "C:/schemas/config.json", want: true},
+		"lower-case drive":       {path: "c:/schemas/config.json", want: true},
+		"drive alone":            {path: "C:", want: true},
+		"backslash separator":    {path: `C:\schemas\config.json`, want: true},
+		"digit before the colon": {path: "1:/schemas/config.json"},
+		"longer first segment":   {path: "ab:/schemas/config.json"},
+		"leading slash":          {path: "/C:/schemas/config.json"},
+		"posix path":             {path: "/srv/schemas/config.json"},
+		"relative path":          {path: "schemas/config.json"},
+		"empty path":             {path: ""},
+		"single letter":          {path: "C"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, schema.HasDriveLetter(tc.path))
+		})
+	}
 }
 
 func TestFileURLPath(t *testing.T) {

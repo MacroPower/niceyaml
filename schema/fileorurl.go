@@ -57,7 +57,10 @@ func FileOrURL(baseDir, ref string, opts ...HTTPOption) Resolver {
 		path = fileURLPath(ref)
 	}
 
-	if filepath.IsAbs(path) {
+	// A drive-letter path is absolute on Windows and names nothing a POSIX
+	// base directory can resolve, so never join it to baseDir. The
+	// reference then stays intact in the URL and the read error.
+	if filepath.IsAbs(path) || hasDriveLetter(path) {
 		return File(path)
 	}
 
@@ -107,16 +110,24 @@ func fileURLPath(ref string) string {
 // is a Windows drive letter, so "/C:/schemas" becomes "C:/schemas". Any
 // other path comes back unchanged.
 func trimDriveSlash(p string) string {
-	const driveLen = 3 // A slash, a letter, and a colon.
-
-	if len(p) < driveLen || p[0] != '/' || p[2] != ':' {
-		return p
-	}
-
-	letter := p[1]
-	if (letter < 'a' || letter > 'z') && (letter < 'A' || letter > 'Z') {
+	if p == "" || p[0] != '/' || !hasDriveLetter(p[1:]) {
 		return p
 	}
 
 	return p[1:]
+}
+
+// hasDriveLetter reports whether p starts with a Windows drive letter, as
+// in "C:/schemas". Such a path is absolute wherever it is read, so the
+// check does not depend on the platform running it.
+func hasDriveLetter(p string) bool {
+	const driveLen = 2 // A letter and a colon.
+
+	if len(p) < driveLen || p[1] != ':' {
+		return false
+	}
+
+	letter := p[0]
+
+	return (letter >= 'a' && letter <= 'z') || (letter >= 'A' && letter <= 'Z')
 }
