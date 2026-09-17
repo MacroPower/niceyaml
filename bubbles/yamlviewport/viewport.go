@@ -1077,11 +1077,6 @@ func (m *Model) AtBottom() bool {
 	return !m.hasContent() || m.YOffset() >= m.maxYOffset()
 }
 
-// PastBottom reports whether the offset lies past the last row.
-func (m *Model) PastBottom() bool {
-	return m.hasContent() && m.YOffset() > m.maxYOffset()
-}
-
 // ScrollPercent returns the vertical scroll position as a float between 0 and 1.
 func (m *Model) ScrollPercent() float64 {
 	if m.left == nil {

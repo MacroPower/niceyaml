@@ -672,7 +672,6 @@ func TestViewport_RowScrolling(t *testing.T) {
 
 		assert.Equal(t, m.TotalRowCount()-5, m.YOffset())
 		assert.True(t, m.AtBottom())
-		assert.False(t, m.PastBottom())
 		assert.InDelta(t, 1.0, m.ScrollPercent(), 0.01)
 		assert.Contains(t, lastRow(m.View()), "line10")
 
@@ -720,7 +719,6 @@ func TestViewport_RowScrolling(t *testing.T) {
 		m.SetWidth(200)
 		assert.Equal(t, 10, m.TotalRowCount())
 		assert.Equal(t, 5, m.YOffset())
-		assert.False(t, m.PastBottom())
 	})
 }
 
@@ -1483,7 +1481,7 @@ func TestViewport_State(t *testing.T) {
 		line5: e
 	`)
 
-	pastBottomYAML := `line1: a
+	threeLineYAML := `line1: a
 line2: b
 line3: c`
 
@@ -1559,29 +1557,9 @@ line3: c`
 				assert.Nil(t, cmd)
 			},
 		},
-		"PastBottom/HeightLargerThanContent": {
+		"AtBottom/GotoBottom": {
 			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
-			yaml:   pastBottomYAML,
-			width:  80,
-			height: 10,
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.False(t, m.PastBottom())
-			},
-		},
-		"PastBottom/AtTop": {
-			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
-			yaml:   pastBottomYAML,
-			width:  80,
-			height: 2,
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.False(t, m.PastBottom())
-			},
-		},
-		"PastBottom/AtBottom": {
-			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
-			yaml:   pastBottomYAML,
+			yaml:   threeLineYAML,
 			width:  80,
 			height: 2,
 			setup: func(m *yamlviewport.Model) {
@@ -1589,11 +1567,10 @@ line3: c`
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
-				assert.False(t, m.PastBottom())
 				assert.True(t, m.AtBottom())
 			},
 		},
-		"PastBottom/SetHeightReclamps": {
+		"AtBottom/SetHeightReclamps": {
 			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
 			yaml:   lineCountYAML,
 			width:  80,
@@ -1609,7 +1586,6 @@ line3: c`
 				// offset follows it instead of overshooting the content.
 				m.SetHeight(4)
 				assert.Equal(t, 1, m.YOffset())
-				assert.False(t, m.PastBottom())
 				assert.True(t, m.AtBottom())
 
 				m.SetHeight(10)
@@ -3023,7 +2999,6 @@ func TestViewport_ZeroValue(t *testing.T) {
 	assert.InDelta(t, 1.0, m.HorizontalScrollPercent(), 0.01)
 	assert.True(t, m.AtTop())
 	assert.True(t, m.AtBottom())
-	assert.False(t, m.PastBottom())
 
 	m.ScrollDown(1)
 	m.PageDown()
