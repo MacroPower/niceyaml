@@ -1079,9 +1079,10 @@ func (m *Model) ScrollPercent() float64 {
 }
 
 // HorizontalScrollPercent returns the horizontal scroll position as a float
-// between 0 and 1.
+// between 0 and 1. It is 1 while word wrap is on, since wrapped lines never
+// overflow the content width.
 func (m *Model) HorizontalScrollPercent() float64 {
-	if m.left == nil {
+	if m.left == nil || m.wrapEnabled {
 		return 1.0
 	}
 
@@ -1111,9 +1112,10 @@ func (m *Model) lineCount() int {
 	return m.left.Len()
 }
 
-// maxXOffset returns the maximum X offset.
+// maxXOffset returns the maximum X offset. Wrapped lines never overflow the
+// content width, so it is 0 while word wrap is on.
 func (m *Model) maxXOffset() int {
-	if m.left == nil {
+	if m.left == nil || m.wrapEnabled {
 		return 0
 	}
 

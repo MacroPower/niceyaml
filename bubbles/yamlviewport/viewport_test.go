@@ -3271,6 +3271,34 @@ func TestViewport_ToggleWordWrapResetsXOffset(t *testing.T) {
 	assert.Equal(t, 0, m.XOffset())
 }
 
+func TestViewport_WordWrapDisablesHorizontalScroll(t *testing.T) {
+	t.Parallel()
+
+	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+	m.SetWidth(20)
+	m.SetHeight(10)
+	m.SetSource(niceyaml.NewSourceFromString("key: very long value that exceeds the viewport width\n"))
+	require.True(t, m.WordWrap())
+
+	before := m.View()
+
+	// Wrapped lines never overflow, so horizontal scrolling has nothing to
+	// move and the offset stays at 0.
+	m.ScrollRight(6)
+	m.ScrollRight(6)
+	assert.Equal(t, 0, m.XOffset())
+	assert.Equal(t, before, m.View())
+	assert.InDelta(t, 1.0, m.HorizontalScrollPercent(), 0.01)
+
+	m.SetXOffset(12)
+	assert.Equal(t, 0, m.XOffset())
+
+	// Turning wrap off shows the lines from their first column.
+	m.SetWordWrap(false)
+	assert.Equal(t, 0, m.XOffset())
+	assert.Contains(t, m.View(), "key: very long")
+}
+
 func TestViewport_SetSearchTermEmpty(t *testing.T) {
 	t.Parallel()
 
