@@ -1,14 +1,20 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
 )
 
-// glob returns the file paths matching pattern.
+// errNoMatch reports a glob pattern that matches no file.
+var errNoMatch = errors.New("no files match pattern")
+
+// glob returns the file paths matching pattern. Directories are excluded
+// from the matches.
 //
 // Unlike [path/filepath.Glob], this supports ** for recursive directory
 // matching. The pattern syntax follows doublestar conventions:
@@ -20,7 +26,7 @@ import (
 //
 // Returns an error if the pattern syntax is invalid.
 func glob(pattern string) ([]string, error) {
-	matches, err := doublestar.FilepathGlob(pattern)
+	matches, err := doublestar.FilepathGlob(pattern, doublestar.WithFilesOnly())
 	if err != nil {
 		return nil, fmt.Errorf("glob %q: %w", pattern, err)
 	}
@@ -35,6 +41,10 @@ func containsGlobChars(s string) bool {
 
 // expandPaths expands arguments containing glob patterns into a sorted list
 // of file paths. Arguments without glob metacharacters are included as-is.
+//
+// A pattern that matches no file falls back to the argument itself when a
+// path with that literal name exists, so a file such as "cfg[1].yaml" is
+// still reachable. Otherwise the pattern is an error wrapping [errNoMatch].
 // Returns an error if a pattern is invalid.
 func expandPaths(args ...string) ([]string, error) {
 	var result []string
@@ -49,6 +59,15 @@ func expandPaths(args ...string) ([]string, error) {
 		matches, err := glob(arg)
 		if err != nil {
 			return nil, err
+		}
+
+		if len(matches) == 0 {
+			_, err = os.Stat(arg)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %q", errNoMatch, arg)
+			}
+
+			matches = []string{arg}
 		}
 
 		result = append(result, matches...)

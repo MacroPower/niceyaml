@@ -74,10 +74,14 @@ func TestExpand(t *testing.T) {
 	require.NoError(t, os.MkdirAll(subdir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(subdir, "003.yaml"), []byte("test"), 0o644))
 
+	// Create a file whose name contains a glob metacharacter.
+	bracketFile := filepath.Join(tmpDir, "cfg[1].txt")
+	require.NoError(t, os.WriteFile(bracketFile, []byte("test"), 0o644))
+
 	tests := map[string]struct {
 		args      []string
 		wantNames []string
-		err       string
+		err       error
 	}{
 		"single file": {
 			args:      []string{filepath.Join(tmpDir, "000.yaml")},
@@ -107,9 +111,25 @@ func TestExpand(t *testing.T) {
 			args:      []string{tmpDir + "/**/*.yaml"},
 			wantNames: []string{"000.yaml", "001.yaml", "002.yaml", "003.yaml"},
 		},
+		"wildcard skips directories": {
+			args:      []string{filepath.Join(tmpDir, "*")},
+			wantNames: []string{"000.yaml", "001.yaml", "002.yaml", "cfg[1].txt"},
+		},
+		"literal name with metacharacter": {
+			args:      []string{bracketFile},
+			wantNames: []string{"cfg[1].txt"},
+		},
 		"no matches": {
-			args:      []string{filepath.Join(tmpDir, "*.json")},
-			wantNames: []string{},
+			args: []string{filepath.Join(tmpDir, "*.json")},
+			err:  errNoMatch,
+		},
+		"no matches among explicit files": {
+			args: []string{filepath.Join(tmpDir, "000.yaml"), filepath.Join(tmpDir, "*.json")},
+			err:  errNoMatch,
+		},
+		"only directories match": {
+			args: []string{filepath.Join(tmpDir, "sub*")},
+			err:  errNoMatch,
 		},
 		"nonexistent file passes": {
 			// ExpandPaths does not check file existence, only glob expansion.
@@ -124,9 +144,8 @@ func TestExpand(t *testing.T) {
 
 			paths, err := expandPaths(tc.args...)
 
-			if tc.err != "" {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tc.err)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
 
 				return
 			}
@@ -213,6 +232,23 @@ func TestGlob(t *testing.T) {
 		"no matches": {
 			pattern:   filepath.Join(tmpDir, "*.json"),
 			wantFiles: []string{},
+		},
+		"directories excluded": {
+			pattern: filepath.Join(tmpDir, "*"),
+			wantFiles: []string{
+				filepath.Join(tmpDir, "a.yaml"),
+				filepath.Join(tmpDir, "b.yml"),
+			},
+		},
+		"recursive wildcard excludes directories": {
+			pattern: tmpDir + "/**",
+			wantFiles: []string{
+				filepath.Join(tmpDir, "a.yaml"),
+				filepath.Join(tmpDir, "b.yml"),
+				filepath.Join(k8sDir, "deploy.yaml"),
+				filepath.Join(subdir, "c.yaml"),
+				filepath.Join(subdirDeep, "d.yaml"),
+			},
 		},
 		"invalid pattern": {
 			pattern: "[",
