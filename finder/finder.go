@@ -12,8 +12,8 @@
 //	view.BlendOverlay(style.GenericHighlight, idx.Find("search term")...)
 //
 // Searches are exact by default. [WithNormalizer] applies a [Normalizer] to
-// both the loaded text and the search string, and the normalizer package
-// provides one that folds case and strips diacritics.
+// both the loaded text and the search string, one character at a time, and
+// the normalizer package provides one that folds case and strips diacritics.
 package finder
 
 import (
@@ -90,6 +90,11 @@ type Option func(*Finder)
 // WithNormalizer is a [Option] that sets a [Normalizer] applied to both
 // the search string and the loaded text before matching.
 //
+// The normalizer receives one character at a time, on both sides, so the
+// same character always normalizes the same way wherever it appears. A
+// transformer whose output depends on surrounding characters, such as title
+// casing, sees none and behaves as it would on a one-character string.
+//
 // See [normalizer.Normalizer] for an implementation.
 func WithNormalizer(normalizer Normalizer) Option {
 	return func(f *Finder) {
@@ -150,6 +155,10 @@ func (i *Index) buildByteToRuneIndex() {
 // It returns the [position.Ranges] of each match, in the order the matches
 // appear in the text.
 //
+// The search string goes through the same per-character normalization as
+// the loaded text, so a string found in the source is found by Find. Bytes
+// that are not valid UTF-8 read as U+FFFD on both sides.
+//
 // Returns nil if the search string is empty, or normalizes to empty, or the
 // Index is nil or holds no text.
 func (i *Index) Find(search string) position.Ranges {
@@ -157,12 +166,7 @@ func (i *Index) Find(search string) position.Ranges {
 		return nil
 	}
 
-	// Normalize search string if normalizer is set.
-	// Source is already normalized during construction.
-	searchStr := search
-	if i.normalizer != nil {
-		searchStr = i.normalizer.Normalize(search)
-	}
+	searchStr := i.normalizeText(search)
 
 	// A search of only combining marks normalizes to nothing, and an empty
 	// needle would match at every offset without advancing.
@@ -200,6 +204,29 @@ func (i *Index) Find(search string) position.Ranges {
 	return results
 }
 
+// normalizeText normalizes s the way [Finder.Load] normalizes the loaded
+// text, one rune at a time, so a search string and the text it is compared
+// against pass through the normalizer identically.
+func (i *Index) normalizeText(s string) string {
+	var sb strings.Builder
+
+	for _, r := range s {
+		sb.WriteString(normalizeRune(i.normalizer, r))
+	}
+
+	return sb.String()
+}
+
+// normalizeRune returns the search text for one rune: the rune itself when
+// n is nil, and its normalized form otherwise.
+func normalizeRune(n Normalizer, r rune) string {
+	if n == nil {
+		return string(r)
+	}
+
+	return n.Normalize(string(r))
+}
+
 // buildTextAndPositionMap concatenates all token Origins into the search text
 // and builds a position map.
 //
@@ -218,25 +245,13 @@ func (f *Finder) buildTextAndPositionMap(lines line.View) (string, *positionMap)
 	normalizedCharIndex := 0
 
 	// Cache normalized forms per unique rune to avoid repeated transform calls.
-	var normalizedCache map[rune]string
-
-	if f.normalizer != nil {
-		normalizedCache = make(map[rune]string)
-	}
+	normalizedCache := make(map[rune]string)
 
 	for pos, r := range lines.AllRunes() {
-		// Get normalized form of this rune (or original if no normalizer).
-		var normalized string
-
-		if f.normalizer != nil {
-			if cached, ok := normalizedCache[r]; ok {
-				normalized = cached
-			} else {
-				normalized = f.normalizer.Normalize(string(r))
-				normalizedCache[r] = normalized
-			}
-		} else {
-			normalized = string(r)
+		normalized, ok := normalizedCache[r]
+		if !ok {
+			normalized = normalizeRune(f.normalizer, r)
+			normalizedCache[r] = normalized
 		}
 
 		// Map each normalized char back to original position.

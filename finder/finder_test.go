@@ -5,6 +5,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
+	"golang.org/x/text/transform"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/diff"
@@ -406,6 +409,83 @@ func TestFinder_Find_NormalizesToEmpty(t *testing.T) {
 
 	got := idx.Find("́")
 	assert.Nil(t, got)
+}
+
+func TestFinder_Find_ContextSensitiveNormalizer(t *testing.T) {
+	t.Parallel()
+
+	// Title casing depends on the preceding character, so it would produce
+	// "Abc" for a whole string but "ABC" rune by rune. Both sides go through
+	// the normalizer the same way, so the search still finds the text.
+	n := normalizer.New(
+		normalizer.WithCaseFold(false),
+		normalizer.WithDiacriticFold(false),
+		normalizer.WithTransformer(func() transform.Transformer {
+			return cases.Title(language.Und)
+		}),
+	)
+	f := finder.New(finder.WithNormalizer(n))
+	idx := f.Load(niceyaml.NewSourceFromString("k: abc\n").Lines())
+
+	want := position.Ranges{
+		position.NewRange(position.New(0, 3), position.New(0, 6)),
+	}
+
+	assert.Equal(t, want, idx.Find("abc"))
+	assert.Equal(t, want, idx.Find("ABC"))
+}
+
+func TestFinder_Find_InvalidUTF8(t *testing.T) {
+	t.Parallel()
+
+	// A stray continuation byte must not match inside a multi-byte rune and
+	// then report the position of an unrelated rune.
+	tcs := map[string]struct {
+		input      string
+		search     string
+		normalizer finder.Normalizer
+		want       position.Ranges
+	}{
+		"continuation byte without normalizer": {
+			input:  "x: a\u00e9",
+			search: "\xa9",
+			want:   nil,
+		},
+		"continuation byte with normalizer": {
+			input:      "x: a\u00e9",
+			search:     "\xa9",
+			normalizer: normalizer.New(),
+			want:       nil,
+		},
+		"truncated rune": {
+			input:  "x: a\u00e9",
+			search: "a\xc3",
+			want:   nil,
+		},
+		"replacement character in the source": {
+			input:  "x: a\xa9b",
+			search: "\xa9",
+			want: position.Ranges{
+				position.NewRange(position.New(0, 4), position.New(0, 5)),
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var opts []finder.Option
+
+			if tc.normalizer != nil {
+				opts = append(opts, finder.WithNormalizer(tc.normalizer))
+			}
+
+			idx := finder.New(opts...).Load(niceyaml.NewSourceFromString(tc.input).Lines())
+
+			assert.Equal(t, tc.want, idx.Find(tc.search))
+		})
+	}
 }
 
 func TestFinder_Find_NilLines(t *testing.T) {
