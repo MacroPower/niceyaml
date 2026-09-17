@@ -205,7 +205,9 @@ func (m *model) updateThemeInput(msg tea.KeyPressMsg) {
 		m.themePicking = false
 		m.applyTheme(m.previousTheme)
 
-		m.themeIndex = slices.Index(m.themeList, m.previousTheme)
+		// A theme outside the picker's list has no index, so the selection
+		// falls back to the first entry.
+		m.themeIndex = max(0, slices.Index(m.themeList, m.previousTheme))
 
 	case key.Matches(msg, key.NewBinding(key.WithKeys("j", "down"))):
 		// Move selection down with live preview.
