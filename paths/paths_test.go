@@ -704,6 +704,24 @@ func TestPath_CommentDocument(t *testing.T) {
 	require.ErrorIs(t, err, paths.ErrNoDocument)
 }
 
+func TestPath_Token_UnresolvableAlias(t *testing.T) {
+	t.Parallel()
+
+	// Node dereferences the alias and reports that it names no anchor, while
+	// Token returns the alias's own token.
+	source := niceyaml.NewSourceFromString("a: *x\nb: &x 1\n")
+	file, err := source.File()
+	require.NoError(t, err)
+	require.Len(t, file.Docs, 1)
+
+	_, err = paths.Root().Child("a").Node(file.Docs[0])
+	require.ErrorIs(t, err, paths.ErrAlias)
+
+	tk, err := paths.Root().Child("a").Token(file.Docs[0])
+	require.NoError(t, err)
+	assert.Equal(t, token.AliasType, tk.Type)
+}
+
 func TestPath_Token_MultipleDocuments(t *testing.T) {
 	t.Parallel()
 

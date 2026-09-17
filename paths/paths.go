@@ -375,7 +375,9 @@ func (p Path) Node(doc *ast.DocumentNode) (ast.Node, error) {
 //
 // The path resolves against the document body only, so the same path
 // resolves to different tokens in different documents of one file. Returns
-// the same errors as [Path.Node].
+// the same errors as [Path.Node], except [ErrAlias]: Token does not
+// dereference the node it resolves to, so an alias that names no anchor
+// still yields the alias's own token.
 //
 // For [PartKey], Token returns the key token of the mapping entry the last
 // selector picked, looking through the `?` indicator of an explicit key and
