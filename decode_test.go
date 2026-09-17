@@ -1450,6 +1450,18 @@ func TestDocument_DecodeInto(t *testing.T) {
 		assert.Equal(t, plainConfig{Name: "test", Value: 7}, result)
 	})
 
+	t.Run("leaves the value as it is for an empty document", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "")
+
+		result := plainConfig{Name: "default", Value: 7}
+
+		err := dd.DecodeInto(t.Context(), &result)
+		require.NoError(t, err)
+		assert.Equal(t, plainConfig{Name: "default", Value: 7}, result)
+	})
+
 	t.Run("runs schema and Validate around the decode", func(t *testing.T) {
 		t.Parallel()
 

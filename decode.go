@@ -603,8 +603,14 @@ func (dd *Document) decodeInto(ctx context.Context, node ast.Node, v any, opts [
 
 // decodeNode decodes node to v with the source's decode options followed by
 // yamlOpts, and binds a YAML error to the source. Any other error from the
-// decoder, such as a canceled context, comes back as it is.
+// decoder, such as a canceled context, comes back as it is. A nil node, the
+// body of an empty document, leaves v as it is, which is what [yaml.Unmarshal]
+// does with empty input.
 func (dd *Document) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []yaml.DecodeOption) error {
+	if node == nil {
+		return nil
+	}
+
 	decodeOpts := make([]yaml.DecodeOption, 0, len(dd.source.decodeOpts)+len(yamlOpts))
 	decodeOpts = append(decodeOpts, dd.source.decodeOpts...)
 	decodeOpts = append(decodeOpts, yamlOpts...)
