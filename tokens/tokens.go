@@ -109,6 +109,10 @@ func cloneWithResetPositions(tks token.Tokens) token.Tokens {
 
 	for _, tk := range tks {
 		clone := tk.Clone()
+		if clone == nil {
+			continue
+		}
+
 		if clone.Position != nil {
 			clone.Position.Line = clone.Position.Line - startLine + 1
 			if clone.Position.Line == 1 {
@@ -125,8 +129,10 @@ func cloneWithResetPositions(tks token.Tokens) token.Tokens {
 	// clones, so the first and last clone still point at the un-cloned
 	// tokens of the neighboring documents. Sever those links so the
 	// document stands alone.
-	result[0].Prev = nil
-	result[len(result)-1].Next = nil
+	if len(result) > 0 {
+		result[0].Prev = nil
+		result[len(result)-1].Next = nil
+	}
 
 	return result
 }
@@ -146,7 +152,8 @@ func cloneWithResetPositions(tks token.Tokens) token.Tokens {
 // original token order and positions. The tokens are the caller's, not
 // copies, and they keep the Next and Prev links of the full stream, so a
 // document's first token still links back to the previous document. Pass
-// [WithResetPositions] to receive clones instead.
+// [WithResetPositions] to receive clones instead. Nil tokens in the stream
+// are skipped.
 func SplitDocuments(tks token.Tokens, opts ...SplitDocumentsOption) iter.Seq2[int, token.Tokens] {
 	cfg := &splitDocumentsConfig{}
 	for _, opt := range opts {
@@ -168,6 +175,10 @@ func SplitDocuments(tks token.Tokens, opts ...SplitDocumentsOption) iter.Seq2[in
 		}
 
 		for _, tk := range tks {
+			if tk == nil {
+				continue
+			}
+
 			if tk.Type == token.DocumentHeaderType && len(current) > 0 {
 				if !yieldDoc(current) {
 					return

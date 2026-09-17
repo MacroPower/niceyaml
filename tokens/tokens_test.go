@@ -138,6 +138,36 @@ func TestSplitDocuments(t *testing.T) {
 		require.True(t, diff.Equal(), diff.String())
 	})
 
+	t.Run("nil tokens are skipped", func(t *testing.T) {
+		t.Parallel()
+
+		// Positions start at 1:1 so a reset leaves them unchanged.
+		tkb := yamltest.NewTokenBuilder().PositionLine(1).PositionColumn(1)
+		want := token.Tokens{
+			tkb.Clone().Type(token.StringType).Value("key").Origin("key").PositionOffset(1).Build(),
+			tkb.Clone().Type(token.MappingValueType).Value(":").Origin(":").PositionOffset(4).Build(),
+			tkb.Clone().Type(token.StringType).Value("value").Origin(" value").PositionOffset(6).Build(),
+		}
+		input := token.Tokens{nil, want[0], want[1], nil, want[2], nil}
+
+		for name, opts := range map[string][]tokens.SplitDocumentsOption{
+			"shared":   nil,
+			"reset":    {tokens.WithResetPositions(true)},
+			"no reset": {tokens.WithResetPositions(false)},
+		} {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				got := collectDocs(tokens.SplitDocuments(input, opts...))
+
+				require.Len(t, got, 1)
+
+				diff := yamltest.CompareTokenSlices(want, got[0])
+				require.True(t, diff.Equal(), diff.String())
+			})
+		}
+	})
+
 	t.Run("single doc with header", func(t *testing.T) {
 		t.Parallel()
 
