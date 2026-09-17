@@ -14,6 +14,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
@@ -89,13 +90,36 @@ func (f DocumentValidatorFunc) Validate(ctx context.Context, doc *Document) erro
 // its tokens.
 func newDocuments(src *Source, file *ast.File) []*Document {
 	docTokens := alignDocumentTokens(file, src.Tokens())
+	spans := documentSpans(docTokens, src.lines.Len())
 
 	docs := make([]*Document, len(file.Docs))
 	for i, doc := range file.Docs {
-		docs[i] = &Document{source: src, doc: doc, tokens: docTokens[i], index: i}
+		docs[i] = &Document{source: src, doc: doc, tokens: docTokens[i], span: spans[i], index: i}
 	}
 
 	return docs
+}
+
+// documentSpans returns the lines of a view of total lines that each token
+// group covers. The groups partition the file in order, so a group runs
+// from the line its first token starts on to the line the next group starts
+// on, and the last group runs to the end of the view. A group with no
+// tokens covers no lines and sits where the next group starts.
+func documentSpans(groups []token.Tokens, total int) []position.Span {
+	spans := make([]position.Span, len(groups))
+
+	end := total
+	for i := len(groups) - 1; i >= 0; i-- {
+		start := end
+		if len(groups[i]) > 0 {
+			start = min(end, max(0, groups[i][0].Position.Line-1))
+		}
+
+		spans[i] = position.NewSpan(start, end)
+		end = start
+	}
+
+	return spans
 }
 
 // alignDocumentTokens pairs every document in file with the token group it
@@ -191,6 +215,7 @@ type Document struct {
 	source *Source
 	doc    *ast.DocumentNode
 	tokens token.Tokens
+	span   position.Span
 	index  int
 }
 
@@ -221,6 +246,18 @@ func (dd *Document) Tokens() token.Tokens {
 // [Source.FilePath]. Returns an empty string when the source has none.
 func (dd *Document) FilePath() string {
 	return dd.source.FilePath()
+}
+
+// Span returns the lines of the view [Source.Lines] returns that the
+// document covers: from the line its first token starts on to the line
+// before the next document starts, or to the end of the source for the last
+// document. A document with no tokens covers no lines. Pass the span to
+// [printer.Printer.Print] to render one document of a file with the file's
+// line numbers:
+//
+//	fmt.Println(p.Print(source.Lines(), doc.Span()))
+func (dd *Document) Span() position.Span {
+	return dd.span
 }
 
 // HasContent reports whether the document holds a YAML value. A document

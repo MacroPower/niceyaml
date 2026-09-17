@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -14,6 +15,8 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/printer"
 )
 
 // Test sentinel errors for mock validators.
@@ -494,6 +497,94 @@ func TestDocument_HasContent(t *testing.T) {
 			assert.Equal(t, tc.want, docs[0].HasContent())
 		})
 	}
+}
+
+func TestDocument_Span(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  []position.Span
+	}{
+		"single document": {
+			input: "a: 1\nb: 2\n",
+			want:  []position.Span{position.NewSpan(0, 2)},
+		},
+		"headers": {
+			input: "a: 1\n---\nb: 2\nc: 3\n---\nd: 4\n",
+			want: []position.Span{
+				position.NewSpan(0, 1),
+				position.NewSpan(1, 4),
+				position.NewSpan(4, 6),
+			},
+		},
+		"end marker": {
+			input: "a: 1\n...\nb: 2\n",
+			want: []position.Span{
+				position.NewSpan(0, 2),
+				position.NewSpan(2, 3),
+			},
+		},
+		"block scalar at the end of a document": {
+			input: "a: |\n  one\n  two\n---\nb: 2\n",
+			want: []position.Span{
+				position.NewSpan(0, 3),
+				position.NewSpan(3, 5),
+			},
+		},
+		"comment preamble": {
+			input: "# license\n---\na: 1\n",
+			want: []position.Span{
+				position.NewSpan(0, 1),
+				position.NewSpan(1, 3),
+			},
+		},
+		"empty file": {
+			input: "",
+			want:  []position.Span{position.NewSpan(0, 0)},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input)
+
+			docs, err := source.Documents()
+			require.NoError(t, err)
+			require.Len(t, docs, len(tc.want))
+
+			got := make([]position.Span, 0, len(docs))
+			for _, doc := range docs {
+				got = append(got, doc.Span())
+			}
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+
+	t.Run("prints one document with the file's line numbers", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\nc: 3\n")
+
+		docs, err := source.Documents()
+		require.NoError(t, err)
+		require.Len(t, docs, 2)
+
+		p := printer.New(
+			printer.WithStyles(yamltest.NewXMLStyles()),
+			printer.WithGutter(printer.LineNumberGutter),
+			printer.WithContainerStyle(lipgloss.NewStyle()),
+		)
+
+		got := p.Print(source.Lines(), docs[1].Span())
+		assert.NotContains(t, got, "a</nameTag>")
+		assert.Contains(t, got, "   2 ")
+		assert.Contains(t, got, "   4 ")
+		assert.NotContains(t, got, "   1 ")
+	})
 }
 
 func TestDocument_GetValue_DirectiveBody(t *testing.T) {
