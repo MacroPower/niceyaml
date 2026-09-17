@@ -18,6 +18,9 @@
 // returns a fresh [line.Lines] copy, so overlays added to one rendering do
 // not reach another.
 //
+// Lines compare by their content with line endings stripped, so a change
+// from LF to CRLF endings or a missing final newline is not a difference.
+//
 // Diff output is a [line.Lines] view rather than a YAML document, since the
 // interleaved lines of two revisions do not parse as one. Each line carries a
 // [line.Flag] that marks it as inserted, deleted, or unchanged, and hunk

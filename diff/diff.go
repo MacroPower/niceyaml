@@ -56,6 +56,10 @@ func New(opts ...Option) *Differ {
 // Diff computes the difference between two views, such as the [line.Lines]
 // views of two niceyaml Source values.
 //
+// Lines compare by [line.Line.Content], which strips the line ending, so
+// two views that differ only in LF versus CRLF endings or in a missing
+// final newline diff as equal.
+//
 // The lines of the result are copies, so the overlays and annotations on
 // the input lines come along, and the flags come from the diff. The result
 // can be rendered multiple times with [Result.Unified] or
