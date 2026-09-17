@@ -801,6 +801,27 @@ func TestDocuments_All(t *testing.T) {
 		}
 	})
 
+	t.Run("returns a copy of the token slice", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
+		d, err := source.Documents()
+		require.NoError(t, err)
+		require.Len(t, d, 1)
+
+		tks := d[0].Tokens()
+		require.NotEmpty(t, tks)
+
+		first := tks[0]
+		tks[0] = nil
+
+		// The document keeps its own slice, so the caller's write does not
+		// reach it.
+		again := d[0].Tokens()
+		require.NotEmpty(t, again)
+		assert.Same(t, first, again[0])
+	})
+
 	t.Run("pairs each document with the token group it starts in", func(t *testing.T) {
 		t.Parallel()
 

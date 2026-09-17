@@ -211,9 +211,10 @@ func (dd *Document) Index() int {
 
 // Tokens returns the tokens of this document, with the positions they have
 // in the source. Returns nil when no token anchors the document, such as one
-// with neither a header nor a body.
+// with neither a header nor a body. The slice is a copy, so reordering it
+// reaches nothing, while the tokens themselves are shared and read-only.
 func (dd *Document) Tokens() token.Tokens {
-	return dd.tokens
+	return slices.Clone(dd.tokens)
 }
 
 // FilePath returns the path of the file the document came from, which is
