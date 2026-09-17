@@ -286,7 +286,7 @@ func TestTypeStyle(t *testing.T) {
 			t.Parallel()
 
 			tk := tc.setup()
-			got := typeStyle(tk)
+			got := typeStyle(tk, nil)
 
 			assert.Equal(t, tc.want, got)
 		})

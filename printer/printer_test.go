@@ -1754,6 +1754,20 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 			input: "key: value",
 			want:  "<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
 		},
+		"key with the colon on the next line": {
+			input: stringtest.JoinLF(
+				"{",
+				"  k",
+				"  : v",
+				"}",
+			),
+			want: stringtest.JoinLF(
+				"<punctuationMappingStart>{</punctuationMappingStart>",
+				"<text>  </text><nameTag>k</nameTag>",
+				"<text>  </text><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>v</literalString>",
+				"<punctuationMappingEnd>}</punctuationMappingEnd>",
+			),
+		},
 		"null types": {
 			input: stringtest.JoinLF(
 				"null: null",

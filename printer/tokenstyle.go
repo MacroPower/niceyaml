@@ -44,13 +44,13 @@ var tokenTypeStyles = map[token.Type]style.Style{
 }
 
 // typeStyle returns the [style.Style] for the given [*token.Token]'s
-// [token.Type].
+// [token.Type]. The src token is the lexer token tk is a part of, or nil.
 //
 // It handles context-sensitive styling: a string followed by a colon is styled
 // as a mapping key, and tokens preceded by anchors or aliases inherit that
 // styling.
-func typeStyle(tk *token.Token) style.Style {
-	tts, ok := tokenTypeStyles[visualType(tk)]
+func typeStyle(tk, src *token.Token) style.Style {
+	tts, ok := tokenTypeStyles[visualType(tk, src)]
 	if ok {
 		return tts
 	}
@@ -60,13 +60,25 @@ func typeStyle(tk *token.Token) style.Style {
 
 // visualType returns the token type the style lookup uses, which differs
 // from tk.Type when a neighbor changes how the token reads.
-func visualType(tk *token.Token) token.Type {
+//
+// The part chain stops at the line boundary, so where tk has no neighbor
+// the lookup reads the neighbor of src, whose chain spans the whole stream.
+// A key whose colon sits on the next line still reads as a key that way.
+func visualType(tk, src *token.Token) token.Type {
 	prevType := tk.PreviousType()
+	if tk.Prev == nil && src != nil {
+		prevType = src.PreviousType()
+	}
+
 	if prevType == token.AnchorType || prevType == token.AliasType {
 		return prevType
 	}
 
 	nextType := tk.NextType()
+	if tk.Next == nil && src != nil {
+		nextType = src.NextType()
+	}
+
 	if nextType == token.MappingValueType {
 		return token.MappingKeyType
 	}
