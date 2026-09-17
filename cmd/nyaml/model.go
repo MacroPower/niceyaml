@@ -171,8 +171,8 @@ func (m *model) updateSearchInput(msg tea.KeyPressMsg) {
 		m.searchInput = ""
 
 	case key.Matches(msg, key.NewBinding(key.WithKeys("backspace"))):
-		if m.searchInput != "" {
-			m.searchInput = m.searchInput[:len(m.searchInput)-1]
+		if runes := []rune(m.searchInput); len(runes) > 0 {
+			m.searchInput = string(runes[:len(runes)-1])
 		}
 
 	default:
