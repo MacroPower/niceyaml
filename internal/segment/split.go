@@ -169,7 +169,6 @@ func (b *builder) AddToken(tk *token.Token) {
 	for i, part := range parts {
 		ctx.part = part
 		ctx.partIndex = i
-		ctx.isLastPart = i == len(parts)-1
 
 		b.processPart(ctx)
 	}
@@ -221,7 +220,6 @@ type partContext struct {
 	partIndex            int
 	leadingNewlines      int // Number of pure-newline parts at the start of parts.
 	lastContentPartIdx   int
-	isLastPart           bool
 	isBlockScalarContent bool
 	isMultiPart          bool
 }
@@ -317,11 +315,12 @@ func (b *builder) processPart(ctx *partContext) bool {
 	// Calculate offset where Value starts within the document.
 	// Use original Offset when:
 	//   - Single-part token (not split), or
-	//   - Last part of block scalar (for recombination Position), or
-	//   - Any part that receives the token's Value.
-	useOriginalOffset := !ctx.isMultiPart ||
-		(ctx.isLastPart && ctx.isBlockScalarContent) ||
-		(shouldHaveValue && val != "")
+	//   - A plain or quoted multiline part that receives the token's Value.
+	//
+	// A block scalar part that keeps the original Position takes its Offset
+	// from that Position below. Every other part counts runes from the
+	// document start, so offsets within one token stay increasing.
+	useOriginalOffset := !ctx.isMultiPart || (shouldHaveValue && val != "" && !ctx.isBlockScalarContent)
 	valueOffset := b.currentOffset
 	if useOriginalOffset && ctx.tk.Position != nil && ctx.tk.Position.Offset > 0 {
 		valueOffset = ctx.tk.Position.Offset

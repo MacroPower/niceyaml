@@ -128,6 +128,46 @@ func TestSplit_DuplicateNewlineOffset(t *testing.T) {
 	assert.Equal(t, 20, cont.Position.Offset)
 }
 
+func TestSplit_BlockScalarOffsets(t *testing.T) {
+	t.Parallel()
+
+	// Offsets of the parts cut from one block scalar must increase down the
+	// scalar, whichever line the lexer pinned the original Position to.
+	tcs := map[string]struct {
+		input string
+		want  []int // Offset of the first part on each block scalar line.
+	}{
+		"blank line inside, content follows": {
+			input: "k: |\n  a\n\n  b\nz: 1\n",
+			want:  []int{9, 10, 11},
+		},
+		"content follows": {
+			input: "k: |\n  a\n  b\nz: 1\n",
+			want:  []int{9, 10},
+		},
+		"at end of input": {
+			input: "k: |\n  a\n  b\n",
+			want:  []int{6, 12},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			lines := segment.Split(lexer.Tokenize(tc.input))
+			require.Greater(t, len(lines), len(tc.want))
+
+			got := make([]int, 0, len(tc.want))
+			for i := range tc.want {
+				got = append(got, part(t, lines, i+1, 0).Position.Offset)
+			}
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestSplit_BlockScalarTrailingIndent(t *testing.T) {
 	t.Parallel()
 
