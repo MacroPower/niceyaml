@@ -196,7 +196,7 @@ func TestPattern_Match(t *testing.T) {
 	}
 }
 
-func TestMatchAnyWithBase(t *testing.T) {
+func TestMatchAny(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -249,13 +249,48 @@ func TestMatchAnyWithBase(t *testing.T) {
 			patterns: []string{".github/dependabot.yml", ".github/dependabot.yaml"},
 			want:     true,
 		},
+		"directory pattern matches an absolute path": {
+			path:     "/repo/.github/workflows/ci.yml",
+			patterns: []string{".github/workflows/*.yml"},
+			want:     true,
+		},
+		"directory pattern matches a nested path": {
+			path:     "repo/.github/workflows/ci.yml",
+			patterns: []string{".github/workflows/*.yml"},
+			want:     true,
+		},
+		"directory pattern does not match another directory": {
+			path:     "repo/.circleci/workflows/ci.yml",
+			patterns: []string{".github/workflows/*.yml"},
+			want:     false,
+		},
+		"directory pattern does not match a partial directory name": {
+			path:     "repo/my.github/workflows/ci.yml",
+			patterns: []string{".github/workflows/*.yml"},
+			want:     false,
+		},
+		"leading slash is dropped": {
+			path:     "repo/.github/workflows/ci.yml",
+			patterns: []string{"/.github/workflows/*.yml"},
+			want:     true,
+		},
+		"double star prefix is kept": {
+			path:     "repo/.github/workflows/ci.yml",
+			patterns: []string{"**/.github/workflows/*.yml"},
+			want:     true,
+		},
+		"base name pattern matches an absolute path": {
+			path:     "/srv/app/docker-compose.yaml",
+			patterns: []string{"docker-compose.yaml"},
+			want:     true,
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := filepaths.MatchAnyWithBase(tc.path, tc.patterns)
+			got := filepaths.MatchAny(tc.path, tc.patterns)
 			assert.Equal(t, tc.want, got)
 		})
 	}

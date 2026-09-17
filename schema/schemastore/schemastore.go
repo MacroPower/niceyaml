@@ -259,9 +259,7 @@ func (s *SchemaStore) FindMatch(ctx context.Context, filePath string) (CatalogEn
 	}
 
 	for _, entry := range entries {
-		// Match against both the full path and the base name, since SchemaStore
-		// patterns may or may not include directory components.
-		if filepaths.MatchAnyWithBase(filePath, entry.FileMatch) {
+		if filepaths.MatchAny(filePath, entry.FileMatch) {
 			return entry, nil
 		}
 	}

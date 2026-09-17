@@ -76,6 +76,10 @@ func TestSchemaStore_FindMatch(t *testing.T) {
 			filePath: ".github/workflows/build.yml",
 			wantName: "GitHub Workflow",
 		},
+		"matches github workflow under an absolute repo path": {
+			filePath: "/home/user/repo/.github/workflows/ci.yaml",
+			wantName: "GitHub Workflow",
+		},
 		"matches dependabot yaml": {
 			filePath: ".github/dependabot.yaml",
 			wantName: "Dependabot",

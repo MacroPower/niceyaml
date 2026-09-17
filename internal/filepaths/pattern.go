@@ -3,6 +3,7 @@ package filepaths
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
 )
@@ -69,10 +70,12 @@ func (p Pattern) String() string {
 	return p.raw
 }
 
-// MatchAnyWithBase checks if a file path matches any of the given glob patterns.
-// It first tries matching against the base name (for simple patterns like
-// "*.yaml"), then tries matching against the full path (for patterns with
-// directory components).
+// MatchAny reports whether path matches any of the glob patterns, with
+// the semantics VS Code and yaml-language-server give a schema fileMatch
+// pattern. A pattern applies at any depth of the tree, so "*.yaml" matches
+// "some/dir/config.yaml" and ".github/workflows/*.yml" matches
+// "/repo/.github/workflows/ci.yml". Every pattern gets an implicit "**/"
+// prefix unless it already has one, and a leading "/" is dropped first.
 //
 // The path is cleaned and its separators normalized to forward slashes
 // before matching, as [Pattern.Match] does.
@@ -83,27 +86,32 @@ func (p Pattern) String() string {
 // use cases like SchemaStore catalog entries where pattern typos should not
 // cause validation failures. For patterns that must be validated upfront, use
 // [NewPattern] or [MustPattern] instead.
-func MatchAnyWithBase(path string, patterns []string) bool {
+func MatchAny(path string, patterns []string) bool {
 	if path == "" {
 		return false
 	}
 
 	path = normalizePath(path)
-	baseName := filepath.Base(path)
 
 	for _, pattern := range patterns {
-		// Try matching against the base name first (for simple patterns like "*.yaml").
-		matched, err := doublestar.Match(pattern, baseName)
-		if err == nil && matched {
-			return true
-		}
-
-		// Try matching against the full path (for patterns with directory components).
-		matched, err = doublestar.Match(pattern, path)
+		matched, err := doublestar.Match(anyDepth(pattern), path)
 		if err == nil && matched {
 			return true
 		}
 	}
 
 	return false
+}
+
+// anyDepth returns pattern with the "**/" prefix that lets it match at any
+// depth of the tree. A leading "/" is dropped first, and a pattern that
+// already starts with "**/" comes back unchanged.
+func anyDepth(pattern string) string {
+	pattern = strings.TrimPrefix(pattern, "/")
+
+	if strings.HasPrefix(pattern, "**/") {
+		return pattern
+	}
+
+	return "**/" + pattern
 }
