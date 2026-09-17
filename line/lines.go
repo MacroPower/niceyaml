@@ -14,19 +14,17 @@ import (
 // View is read-only, line-by-line access to content that rendering and
 // search utilities consume, such as the printer and finder packages.
 //
-// AllLines yields each [Line] by value, so a change to a yielded line
-// reaches nothing. Overlays and annotations go through the [Lines] methods
-// and through indexing a [Lines] collection directly.
-//
-// [Lines] implements View directly, and a niceyaml Source implements it over
-// its pristine lines.
+// AllLines yields a [*Line] for each line, so a caller adds overlays and
+// annotations to the line it is looking at. [Lines] yields its own lines, and
+// a change to one reaches the collection. A niceyaml Source yields a copy of
+// each of its pristine lines, so a change to one reaches nothing.
 type View interface {
-	AllLines(spans ...position.Span) iter.Seq2[int, Line]
+	AllLines(spans ...position.Span) iter.Seq2[int, *Line]
 	AllRunes(ranges ...position.Range) iter.Seq2[position.Position, rune]
 	Len() int
 }
 
-// Lines is an ordered collection of [Line] values and the unit that
+// Lines is an ordered collection of [*Line] values and the unit that
 // rendering utilities consume.
 //
 // Lines carries only what rendering needs, which is the tokens split per
@@ -38,9 +36,9 @@ type View interface {
 // Lines is not safe for concurrent mutation. Add overlays and annotations from
 // one goroutine at a time, and do not mutate while another goroutine iterates.
 //
-// Create instances with [NewLines].
-// Access individual lines via slice indexing.
-type Lines []Line
+// Create instances with [NewLines]. Reach a line by indexing the collection
+// or by ranging over [Lines.AllLines], and never put a nil pointer in it.
+type Lines []*Line
 
 // NewLines creates new [Lines] from [token.Tokens], one [Line] per source
 // line.
@@ -59,7 +57,7 @@ func NewLines(tks token.Tokens) Lines {
 
 	lines := make(Lines, len(split))
 	for i, l := range split {
-		lines[i] = Line{segments: l.Segments, number: l.Number}
+		lines[i] = &Line{segments: l.Segments, number: l.Number}
 	}
 
 	return lines
@@ -108,12 +106,11 @@ func (ls Lines) Clone() Lines {
 // AllLines returns an iterator over lines within the given spans.
 //
 // Without spans, AllLines yields every line. Each iteration yields the
-// 0-indexed line index and the [Line] at that index by value, so a
-// change to the yielded line reaches nothing. To add overlays or
-// annotations, use [Lines.AddOverlay] and the other Lines methods, or index
-// the collection directly. AllLines clamps spans to the available lines.
-func (ls Lines) AllLines(spans ...position.Span) iter.Seq2[int, Line] {
-	return func(yield func(int, Line) bool) {
+// 0-indexed line index and the [*Line] at that index, the one the
+// collection holds, so an overlay or annotation added to it stays in the
+// collection. AllLines clamps spans to the available lines.
+func (ls Lines) AllLines(spans ...position.Span) iter.Seq2[int, *Line] {
+	return func(yield func(int, *Line) bool) {
 		if len(spans) == 0 {
 			for i := range ls {
 				if !yield(i, ls[i]) {
@@ -260,7 +257,7 @@ func (ls Lines) ranges(
 	var result position.Ranges
 
 	for i := range ls {
-		sp, ok := span(&ls[i], tk)
+		sp, ok := span(ls[i], tk)
 		if !ok || sp.Len() <= 0 {
 			continue
 		}

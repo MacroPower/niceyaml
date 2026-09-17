@@ -935,7 +935,7 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 			assert.Equal(t, tc.wantRowLen == 0, afterIter.IsEmpty(), "After IsEmpty()")
 
 			// Verify Before iterator lines.
-			var beforeLines []line.Line
+			var beforeLines []*line.Line
 
 			for _, ln := range beforeIter.AllLines() {
 				beforeLines = append(beforeLines, ln)
@@ -944,7 +944,7 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 			verifyLines(t, "Before", beforeLines, tc.wantBefore)
 
 			// Verify After iterator lines.
-			var afterLines []line.Line
+			var afterLines []*line.Line
 
 			for _, ln := range afterIter.AllLines() {
 				afterLines = append(afterLines, ln)
@@ -963,7 +963,7 @@ type wantLine struct {
 }
 
 // verifyLines checks that actual lines match expected lines.
-func verifyLines(t *testing.T, side string, actual []line.Line, want []wantLine) {
+func verifyLines(t *testing.T, side string, actual []*line.Line, want []wantLine) {
 	t.Helper()
 
 	require.Len(t, actual, len(want), "%s: line count mismatch", side)

@@ -21,9 +21,8 @@ import (
 // line. Treat them as read-only and call [token.Token.Clone] before modifying
 // one.
 //
-// The metadata changes through pointer methods, so index a [Lines]
-// collection to reach a line that keeps the change. A Line yielded by value,
-// as [Lines.AllLines] does, is a copy, and a change to it reaches nothing.
+// A [Lines] collection holds pointers, so a Line reached by indexing it or
+// by ranging over [Lines.AllLines] keeps the metadata added to it.
 type Line struct {
 	annotations Annotations
 	overlays    Overlays
@@ -101,7 +100,7 @@ func (l *Line) Content() string {
 //
 // The copy shares the underlying tokens with the original, since the line
 // never modifies them.
-func (l *Line) Clone() Line {
+func (l *Line) Clone() *Line {
 	var ann Annotations
 
 	if len(l.annotations) > 0 {
@@ -116,7 +115,7 @@ func (l *Line) Clone() Line {
 		copy(ovl, l.overlays)
 	}
 
-	return Line{
+	return &Line{
 		annotations: ann,
 		overlays:    ovl,
 		flag:        l.flag,

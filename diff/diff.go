@@ -96,13 +96,14 @@ func viewName(v line.View) string {
 	return ""
 }
 
-// collectLines returns the lines of v in order. The lines share their tokens
-// with v, and both toLines and getAlignedRows clone each line before a
-// caller sees it.
-func collectLines(v line.View) []line.Line {
-	lines := make([]line.Line, 0, v.Len())
+// collectLines returns a copy of each line of v in order, so a change to v
+// after the diff reaches nothing in the result. The copies share their
+// tokens with v, and both toLines and getAlignedRows clone each line again
+// before a caller sees it.
+func collectLines(v line.View) []*line.Line {
+	lines := make([]*line.Line, 0, v.Len())
 	for _, l := range v.AllLines() {
-		lines = append(lines, l)
+		lines = append(lines, l.Clone())
 	}
 
 	return lines
@@ -165,10 +166,10 @@ type Result struct {
 }
 
 // alignedRow holds a pair of lines for side-by-side diff rendering.
-// Either field may be the zero value to represent an empty placeholder.
+// Either field may be an empty line to represent a placeholder.
 type alignedRow struct {
-	before line.Line
-	after  line.Line
+	before *line.Line
+	after  *line.Line
 }
 
 // Unified returns a [line.Lines] view of the complete diff.
@@ -285,7 +286,7 @@ func (r *Result) getAlignedRows() []alignedRow {
 				// Pair deletes with inserts on the same row.
 				maxPairs := max(len(deletes), len(inserts))
 				for j := range maxPairs {
-					var beforeLine, afterLine line.Line
+					beforeLine, afterLine := &line.Line{}, &line.Line{}
 
 					if j < len(deletes) {
 						beforeLine = deletes[j].line.Clone()
@@ -309,7 +310,7 @@ func (r *Result) getAlignedRows() []alignedRow {
 				ln.SetFlag(line.FlagInserted)
 
 				rows = append(rows, alignedRow{
-					before: line.Line{},
+					before: &line.Line{},
 					after:  ln,
 				})
 				i++
@@ -405,7 +406,7 @@ func Diff(a, b line.View) *Result {
 
 // lineOp represents a line in the full diff output.
 type lineOp struct {
-	line line.Line  // Original [line.Line] from source.
+	line *line.Line // Copy of the [line.Line] from the source.
 	kind lcs.OpKind // One of [lcs.OpEqual], [lcs.OpDelete], [lcs.OpInsert].
 }
 

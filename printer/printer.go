@@ -457,7 +457,7 @@ func (p *Printer) Rows(lines line.View, spans ...position.Span) []int {
 		gutterWidth := p.gutterWidth(lines.Len())
 
 		for idx, ln := range lines.AllLines(span) {
-			rows = append(rows, len(p.renderLine(idx, &ln, lines.Len(), gutterWidth)))
+			rows = append(rows, len(p.renderLine(idx, ln, lines.Len(), gutterWidth)))
 		}
 	}
 
@@ -492,7 +492,7 @@ func (p *Printer) renderSpan(t line.View, span position.Span) []string {
 	var rows []string
 
 	for idx, ln := range t.AllLines(span) {
-		rows = append(rows, p.renderLine(idx, &ln, totalLines, gutterWidth)...)
+		rows = append(rows, p.renderLine(idx, ln, totalLines, gutterWidth)...)
 	}
 
 	return rows

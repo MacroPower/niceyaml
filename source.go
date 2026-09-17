@@ -42,8 +42,9 @@ import (
 //
 // A Source never changes after creation. It implements [line.View] over its
 // pristine lines, so printing a Source always renders the document as
-// parsed. To highlight or annotate, take a view with [Source.Lines], which
-// returns an independent copy each call, and render the view instead:
+// parsed, and [Source.AllLines] yields a copy of each line. To highlight or
+// annotate, take a view with [Source.Lines], which returns an independent
+// copy each call, and render the view instead:
 //
 //	view := source.Lines()
 //	view.AddOverlay(style.GenericHighlight, ranges...)
@@ -308,10 +309,20 @@ func (s *Source) IsEmpty() bool {
 	return s.lines.IsEmpty()
 }
 
-// AllLines returns an iterator over lines within the given spans.
-// See [line.Lines.AllLines].
-func (s *Source) AllLines(spans ...position.Span) iter.Seq2[int, line.Line] {
-	return s.lines.AllLines(spans...)
+// AllLines returns an iterator over lines within the given spans. See
+// [line.Lines.AllLines].
+//
+// Each iteration yields a copy of the line, so a change to it reaches
+// neither the Source nor a later iteration. To keep overlays or
+// annotations, add them to a view from [Source.Lines].
+func (s *Source) AllLines(spans ...position.Span) iter.Seq2[int, *line.Line] {
+	return func(yield func(int, *line.Line) bool) {
+		for i, l := range s.lines.AllLines(spans...) {
+			if !yield(i, l.Clone()) {
+				return
+			}
+		}
+	}
 }
 
 // AllRunes returns an iterator over runes within the given ranges.

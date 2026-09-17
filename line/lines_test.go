@@ -2423,7 +2423,7 @@ func TestLine_Annotate(t *testing.T) {
 		lines := line.NewLines(tks)
 		require.Len(t, lines, 1)
 
-		ln := &lines[0]
+		ln := lines[0]
 		ln.AddAnnotation(line.Annotation{Content: "note", Placement: line.Below})
 
 		require.Len(t, ln.Annotations(), 1)
@@ -2438,7 +2438,7 @@ func TestLine_Annotate(t *testing.T) {
 		lines := line.NewLines(tks)
 		require.Len(t, lines, 1)
 
-		ln := &lines[0]
+		ln := lines[0]
 		ln.AddAnnotation(
 			line.Annotation{Content: "first", Placement: line.Above},
 			line.Annotation{Content: "second", Placement: line.Below},
@@ -2456,7 +2456,7 @@ func TestLine_Annotate(t *testing.T) {
 		lines := line.NewLines(tks)
 		require.Len(t, lines, 1)
 
-		ln := &lines[0]
+		ln := lines[0]
 		ln.AddAnnotation(line.Annotation{Content: "first"})
 		ln.AddAnnotation(line.Annotation{Content: "second"})
 
@@ -2474,7 +2474,7 @@ func TestLine_Overlay(t *testing.T) {
 		lines := line.NewLines(tks)
 		require.Len(t, lines, 1)
 
-		ln := &lines[0]
+		ln := lines[0]
 		ln.AddOverlay(line.Overlay{
 			Cols:  position.NewSpan(0, 5),
 			Style: "test1",
@@ -2492,7 +2492,7 @@ func TestLine_Overlay(t *testing.T) {
 		lines := line.NewLines(tks)
 		require.Len(t, lines, 1)
 
-		ln := &lines[0]
+		ln := lines[0]
 		ln.AddOverlay(
 			line.Overlay{Cols: position.NewSpan(0, 3), Style: "test1"},
 			line.Overlay{Cols: position.NewSpan(5, 10), Style: "test2"},
@@ -2510,7 +2510,7 @@ func TestLine_Overlay(t *testing.T) {
 		lines := line.NewLines(tks)
 		require.Len(t, lines, 1)
 
-		ln := &lines[0]
+		ln := lines[0]
 		ln.AddOverlay(line.Overlay{Cols: position.NewSpan(0, 3), Style: "test1"})
 		ln.AddOverlay(line.Overlay{Cols: position.NewSpan(5, 10), Style: "test2"})
 
@@ -2848,24 +2848,21 @@ func TestLines_View(t *testing.T) {
 		assert.Equal(t, []int{1, 2}, indices)
 	})
 
-	t.Run("AllLines yields copies", func(t *testing.T) {
+	t.Run("AllLines yields the lines of the collection", func(t *testing.T) {
 		t.Parallel()
 
 		lines := line.NewLines(lexer.Tokenize(input))
 
-		for _, ln := range lines.AllLines() {
+		for i, ln := range lines.AllLines() {
+			assert.Same(t, lines[i], ln)
+
 			ln.AddAnnotation(line.Annotation{Content: "note", Placement: line.Below})
 		}
 
 		for _, ln := range lines {
-			assert.Empty(t, ln.Annotations())
+			require.Len(t, ln.Annotations(), 1)
+			assert.Equal(t, "note", ln.Annotations()[0].Content)
 		}
-
-		// Mutation goes through the collection itself.
-		lines[1].AddAnnotation(line.Annotation{Content: "note", Placement: line.Below})
-
-		require.Len(t, lines[1].Annotations(), 1)
-		assert.Equal(t, "note", lines[1].Annotations()[0].Content)
 	})
 
 	t.Run("AllRunes round-trips the input", func(t *testing.T) {
