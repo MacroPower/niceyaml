@@ -1024,17 +1024,25 @@ func (m *Model) lineRows(k int) int {
 // rowWindow returns the rendered lines [first, last) that own the rows of the
 // visible window, which starts at the vertical offset and is one content
 // height tall.
+//
+// The range holds at least one line whenever the view has lines. No line owns
+// a frame row, so a window that lies entirely inside the top or the bottom
+// frame still needs a line to render the frame around.
 func (m *Model) rowWindow() (int, int) {
 	m.ensureRows()
 
 	n := len(m.rows.sums) - 1
+	if n == 0 {
+		return 0, 0
+	}
+
 	top := m.yOffset
 	bottom := top + m.maxHeight()
 
 	// The last line starting at or above the top row, and the first line
 	// starting at or below the bottom row.
-	first := clamp(sort.SearchInts(m.rows.sums, top+1)-1, 0, n)
-	last := clamp(sort.SearchInts(m.rows.sums, bottom), first, n)
+	first := clamp(sort.SearchInts(m.rows.sums, top+1)-1, 0, n-1)
+	last := clamp(sort.SearchInts(m.rows.sums, bottom), first+1, n)
 
 	return first, last
 }

@@ -856,29 +856,41 @@ func TestViewport_ContainerFrame(t *testing.T) {
 		edge      string
 		top       int
 		bottom    int
+		height    int
 		mode      yamlviewport.ViewMode
 	}{
 		"vertical padding": {
 			container: lipgloss.NewStyle().Padding(1, 0),
 			top:       1,
 			bottom:    1,
+			height:    5,
 		},
 		"top padding": {
 			container: lipgloss.NewStyle().PaddingTop(2),
 			top:       2,
+			height:    5,
 		},
 		"border": {
 			container: lipgloss.NewStyle().Border(lipgloss.NormalBorder()),
 			edge:      "─",
 			top:       1,
 			bottom:    1,
+			height:    5,
 		},
 		"border side by side": {
 			container: lipgloss.NewStyle().Border(lipgloss.NormalBorder()),
 			edge:      "─",
 			top:       1,
 			bottom:    1,
+			height:    5,
 			mode:      yamlviewport.ViewModeSideBySide,
+		},
+		"frame taller than height": {
+			container: lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(1, 1),
+			edge:      "─",
+			top:       2,
+			bottom:    2,
+			height:    2,
 		},
 	}
 
@@ -886,15 +898,12 @@ func TestViewport_ContainerFrame(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			const (
-				height = 5
-				lines  = 10
-			)
+			const lines = 10
 
 			p := testPrinter().With(printer.WithContainerStyle(tc.container))
 			m := yamlviewport.New(yamlviewport.WithPrinter(p))
 			m.SetWidth(40)
-			m.SetHeight(height)
+			m.SetHeight(tc.height)
 			m.SetViewMode(tc.mode)
 			m.SetSource(niceyaml.NewSourceFromString(src.String()))
 
@@ -902,19 +911,25 @@ func TestViewport_ContainerFrame(t *testing.T) {
 			require.Equal(t, total, m.TotalRowCount())
 
 			m.GotoBottom()
-			require.Equal(t, total-height, m.YOffset())
+			require.Equal(t, total-tc.height, m.YOffset())
 
-			for offset := range total - height + 1 {
+			for offset := range total - tc.height + 1 {
 				m.SetYOffset(offset)
 
 				rows := strings.Split(m.View(), "\n")
-				require.Len(t, rows, height)
+				require.Len(t, rows, tc.height)
 
 				for i, row := range rows {
 					r := offset + i
 					if r < tc.top || r >= tc.top+lines {
 						assert.NotContains(t, row, "line", "offset %d, row %d", offset, i)
-						assert.Contains(t, row, tc.edge, "offset %d, row %d", offset, i)
+
+						// The border is the outermost row of the frame. The
+						// rest of the frame is padding, which has no edge
+						// glyph to show.
+						if r == 0 || r == total-1 {
+							assert.Contains(t, row, tc.edge, "offset %d, row %d", offset, i)
+						}
 
 						continue
 					}
