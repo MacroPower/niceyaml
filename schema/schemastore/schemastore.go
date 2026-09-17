@@ -180,10 +180,13 @@ func WithRefreshTimeout(timeout time.Duration) Option {
 // exists and report [ErrFetchCatalog] with the last fetch error otherwise,
 // without contacting the catalog URL.
 //
-// Defaults to 1 minute.
+// Defaults to 1 minute. An interval of zero or less keeps the default,
+// since it would retry on every lookup.
 func WithRetryAfter(interval time.Duration) Option {
 	return func(s *SchemaStore) {
-		s.retryAfter = interval
+		if interval > 0 {
+			s.retryAfter = interval
+		}
 	}
 }
 

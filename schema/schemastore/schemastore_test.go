@@ -692,6 +692,44 @@ func TestSchemaStore_RetryAfter(t *testing.T) {
 	assert.Equal(t, int32(2), fetchCount.Load())
 }
 
+func TestSchemaStore_NonPositiveRetryAfter(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]time.Duration{
+		"zero":     0,
+		"negative": -time.Second,
+	}
+
+	for name, interval := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var fetchCount atomic.Int32
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				fetchCount.Add(1)
+				w.WriteHeader(http.StatusInternalServerError)
+			}))
+			t.Cleanup(server.Close)
+
+			// A non-positive interval keeps the default rather than
+			// retrying on every lookup, which costs one refresh timeout
+			// each.
+			store := schemastore.New(
+				schemastore.WithCatalogURL(server.URL),
+				schemastore.WithRetryAfter(interval),
+			)
+
+			for range 5 {
+				_, err := store.FindMatch(t.Context(), "config.yaml")
+				require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+			}
+
+			assert.Equal(t, int32(1), fetchCount.Load())
+		})
+	}
+}
+
 func TestSchemaStore_EmptyCatalog(t *testing.T) {
 	t.Parallel()
 
