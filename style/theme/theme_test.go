@@ -230,6 +230,31 @@ func TestThemeStyles(t *testing.T) {
 	})
 }
 
+func TestPalette_SubtleTextDiffersFromText(t *testing.T) {
+	t.Parallel()
+
+	// Subtle text is de-emphasized text, so every registered theme must
+	// give it a foreground of its own, and the dim variant another.
+	for _, th := range theme.All() {
+		t.Run(th.Name, func(t *testing.T) {
+			t.Parallel()
+
+			styles := th.Styles()
+			text := styles.Style(style.Text).GetForeground()
+			subtle := styles.Style(style.TextSubtle).GetForeground()
+			dim := styles.Style(style.TextSubtleDim).GetForeground()
+
+			// Other tests register dummy themes that set no colors.
+			if _, ok := subtle.(lipgloss.NoColor); ok {
+				t.Skip("theme sets no subtle text color")
+			}
+
+			assert.NotEqual(t, text, subtle, "TextSubtle matches Text")
+			assert.NotEqual(t, subtle, dim, "TextSubtleDim matches TextSubtle")
+		})
+	}
+}
+
 // marker is the foreground that marked gives one category, so a test can tell
 // which dummy theme a lookup returned.
 var marker = lipgloss.Color("#123456")
