@@ -15,7 +15,6 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/finder"
-	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/normalizer"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -940,7 +939,8 @@ func (m *Model) paneWidth() int {
 	return m.maxWidth()
 }
 
-// rowCache holds the rendered row counts of a view.
+// rowCache holds the layout of a view: the row structure the printer
+// reports for each pane and the prefix sums that place every line.
 type rowCache struct {
 	// Row counts of each line the view renders, in span order, for the left
 	// and right panes. The right counts are nil outside side-by-side diffs.
@@ -949,6 +949,10 @@ type rowCache struct {
 	// first row of the k-th rendered line and the last entry is the first row
 	// of the bottom frame. Nil until filled.
 	sums []int
+	// Layouts of the left and right panes, which the row counts come from
+	// and which place a position within its line. The right layout is
+	// empty outside side-by-side diffs.
+	leftLayout, rightLayout printer.Layout
 	// Rows of the printer's container frame above the first line and below
 	// the last. A view without lines has no frame rows.
 	top, bottom int
@@ -997,14 +1001,16 @@ func (m *Model) fillRows() {
 	if m.left != nil && m.printer != nil {
 		p := m.renderPrinter(m.paneWidth())
 
-		c.left = p.Rows(m.left)
+		c.leftLayout = p.Layout(m.left)
+		c.left = lineRows(c.leftLayout)
 
 		if m.viewMode == ViewModeSideBySide && m.right != nil {
-			c.right = p.Rows(m.right)
+			c.rightLayout = p.Layout(m.right)
+			c.right = lineRows(c.rightLayout)
 		}
 
-		// Rows counts the rows before the container style applies. Print adds
-		// the container's frame above and below the lines it renders.
+		// A layout counts the rows before the container style applies. Print
+		// adds the container's frame above and below the lines it renders.
 		if len(c.left) > 0 {
 			frame := p.ContainerStyle()
 			c.top = frame.GetMarginTop() + frame.GetBorderTopSize() + frame.GetPaddingTop()
@@ -1154,17 +1160,30 @@ func (m *Model) maxXOffset() int {
 
 // rowWidth returns the width in cells of the widest row the printer renders
 // for the view before the container frame applies, over both panes in
-// side-by-side mode. It asks the printer, so annotation rows and wide
+// side-by-side mode. It reads the layouts, so annotation rows and wide
 // characters count toward the horizontal scroll bound.
 func (m *Model) rowWidth() int {
-	p := m.renderPrinter(m.paneWidth())
-
-	width := p.RowWidth(m.left)
-	if m.right != nil {
-		width = max(width, p.RowWidth(m.right))
+	// Fill the cache without ensureRows, which clamps the horizontal offset
+	// through this method.
+	if m.rows == nil {
+		m.rows = &rowCache{}
 	}
 
-	return width
+	if m.rows.sums == nil {
+		m.fillRows()
+	}
+
+	return max(m.rows.leftLayout.Width(), m.rows.rightLayout.Width())
+}
+
+// lineRows returns the number of rows each line of layout takes.
+func lineRows(layout printer.Layout) []int {
+	rows := make([]int, layout.Len())
+	for i := range rows {
+		rows[i] = layout.LineRows(i)
+	}
+
+	return rows
 }
 
 // scrollWidth returns the number of row columns a pane shows at once: the
@@ -1515,86 +1534,22 @@ func (m *Model) scrollToCurrentMatch() {
 	match := m.searchMatches[m.searchIndex]
 	k := match.rng.Start.Line
 
-	view := m.left
-	if m.right != nil && !match.inLeft {
-		view = m.right
-	}
-
 	m.ensureRows()
 
-	row := m.rows.sums[k] + m.matchRow(view, k, match.rng.Start.Col)
+	// The row of the match within its line comes from the layout of the
+	// pane it is in, and the line's first row from the sums that place the
+	// taller of the two panes.
+	layout := m.rows.leftLayout
+	if m.right != nil && !match.inLeft {
+		layout = m.rows.rightLayout
+	}
+
+	row := m.rows.sums[k] + layout.RowOf(match.rng.Start) - layout.LineStart(k)
 
 	// Use (maxHeight-1)/2 to ensure the match appears at the visual center.
 	// For height 22: (22-1)/2 = 10, placing the match at position 10 (middle).
 	// For height 21: (21-1)/2 = 10, placing the match at position 10 (middle).
 	m.SetYOffset(row - (m.maxHeight()-1)/2)
-}
-
-// matchRow returns the row of line k in view that holds column col of the
-// line's content, counted from the line's first rendered row. Annotation rows
-// above the content count toward it, and a wrapped line contributes the
-// wrapped row the column lands on.
-//
-// It renders the one line as the view does and aligns the rows with the
-// line's content, since the printer keeps the wrap points to itself.
-func (m *Model) matchRow(view *line.View, k, col int) int {
-	span := position.NewSpan(k, k+1)
-	p := m.renderPrinter(m.paneWidth()).With(printer.WithContainerStyle(lipgloss.NewStyle()))
-
-	all := splitLines(p.Print(view, span))
-	content := splitLines(p.With(printer.WithAnnotations(false)).Print(view, span))
-
-	// The content rows appear in the full render after the annotation rows
-	// above the line; the rest of the annotation rows lie below.
-	annotations := len(all) - len(content)
-	above := annotations
-
-	for a := range annotations {
-		if slices.EqualFunc(all[a:a+len(content)], content, func(x, y string) bool {
-			return plainRow(x) == plainRow(y)
-		}) {
-			above = a
-
-			break
-		}
-	}
-
-	// Walk the rows along the line's content, past the gutter that starts
-	// every row. Wrapping drops the spaces it breaks at, so a space in the
-	// content that a row skips still advances the column.
-	gutter := p.GutterWidth(view)
-
-	// The renderer escapes control characters to pictures, one rune per
-	// rune, so the escaped content is what the rows spell out while the
-	// columns still line up.
-	runes := []rune(escape.Control(view.Line(k).Content()))
-	next := 0
-
-	for j, row := range content {
-		text := plainRow(ansi.Cut(row, gutter, ansi.StringWidth(row)))
-
-		for _, r := range text {
-			for next < len(runes) && runes[next] != r && (runes[next] == ' ' || runes[next] == '\t') {
-				next++
-			}
-
-			if next < len(runes) && runes[next] == r {
-				next++
-			}
-		}
-
-		if next > col || j == len(content)-1 {
-			return above + j
-		}
-	}
-
-	return above
-}
-
-// plainRow returns the text of a rendered row without its styling and
-// trailing padding.
-func plainRow(row string) string {
-	return strings.TrimRight(ansi.Strip(row), " ")
 }
 
 // Update processes Bubble Tea messages and returns the updated model.

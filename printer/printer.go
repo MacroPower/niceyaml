@@ -29,10 +29,11 @@
 // # Word Wrapping
 //
 // [WithWidth] wraps content at a width, with the gutter width subtracted.
-// [Printer.Rows] reports how many rows each line takes, so a viewer that
-// scrolls by rendered row can map rows back to lines, and
-// [Printer.RowWidth] reports the width of the widest row, so a viewer that
-// scrolls horizontally knows how far the content reaches.
+// [Printer.Layout] reports the row structure of a view without rendering
+// it: how many rows each line takes, which row a position lands on, and
+// how wide the rows are, so a viewer that scrolls by rendered row maps rows
+// to lines and back, and one that scrolls horizontally knows how far the
+// content reaches.
 package printer
 
 import (
@@ -463,14 +464,6 @@ func (p *Printer) MaxNumber(view *line.View) int {
 	return maxNumber(view)
 }
 
-// GutterWidth returns the width in cells of the gutter [Printer.Print]
-// renders for every row of view. The gutter grows with the largest line
-// number in the view, so a viewer that scrolls horizontally subtracts it
-// from the row width to find the width of the content.
-func (p *Printer) GutterWidth(view *line.View) int {
-	return p.gutterWidth(p.MaxNumber(view))
-}
-
 // ContainerStyle returns the [lipgloss.Style] wrapped around the whole
 // rendered output. See [WithContainerStyle].
 func (p *Printer) ContainerStyle() lipgloss.Style {
@@ -541,61 +534,6 @@ func (p *Printer) Print(lines *line.View, spans ...position.Span) string {
 	return p.style.Render(sb.String())
 }
 
-// Rows returns the number of rendered rows each line occupies, in the order
-// [Printer.Print] would render the lines of the given spans. A line takes one
-// row for each wrapped piece of its content and each wrapped piece of its
-// annotations, so the sum is the row count of the output before the
-// container style applies. Without spans, Rows covers every line.
-//
-// Viewers that scroll by rendered row use Rows to map a window of rows back
-// to the lines that fill it.
-func (p *Printer) Rows(lines *line.View, spans ...position.Span) []int {
-	if len(spans) == 0 {
-		spans = position.Spans{position.NewSpan(0, lines.Len())}
-	}
-
-	var rows []int
-
-	maxNumber := p.MaxNumber(lines)
-	gutterWidth := p.gutterWidth(maxNumber)
-
-	for _, span := range spans {
-		for idx, ln := range lines.AllLines(span) {
-			rows = append(rows, len(p.renderLine(lines, idx, ln, maxNumber, gutterWidth)))
-		}
-	}
-
-	return rows
-}
-
-// RowWidth returns the width in cells of the widest row [Printer.Print]
-// renders for the given spans, before the container style applies. It
-// measures the rendered rows, so the gutter, the annotations, and wide
-// characters all count. Without spans, RowWidth covers every line.
-//
-// Viewers that scroll horizontally use RowWidth to find the column the last
-// row ends on.
-func (p *Printer) RowWidth(lines *line.View, spans ...position.Span) int {
-	if len(spans) == 0 {
-		spans = position.Spans{position.NewSpan(0, lines.Len())}
-	}
-
-	maxNumber := p.MaxNumber(lines)
-	gutterWidth := p.gutterWidth(maxNumber)
-
-	var width int
-
-	for _, span := range spans {
-		for idx, ln := range lines.AllLines(span) {
-			for _, row := range p.renderLine(lines, idx, ln, maxNumber, gutterWidth) {
-				width = max(width, lipgloss.Width(row))
-			}
-		}
-	}
-
-	return width
-}
-
 // maxNumber returns the largest line number in view, or 0 when the view is
 // empty. A view built from part of a document, such as a diff hunk or a
 // slice of its lines, numbers its lines past its length.
@@ -644,9 +582,6 @@ func (p *Printer) renderSpan(t *line.View, span position.Span, maxNumber int) []
 func (p *Printer) renderLine(view *line.View, idx int, ln *line.Line, maxNumber, gutterWidth int) []string {
 	var rows []string
 
-	flag := view.Flag(idx)
-	overlays := view.Overlays(idx)
-
 	if p.annotationsEnabled {
 		rows = append(rows, p.renderAnnotation(view, ln, idx, maxNumber, line.Above, gutterWidth)...)
 	}
@@ -655,31 +590,35 @@ func (p *Printer) renderLine(view *line.View, idx int, ln *line.Line, maxNumber,
 		Index:     idx,
 		Number:    ln.Number(),
 		MaxNumber: maxNumber,
-		Flag:      flag,
+		Flag:      view.Flag(idx),
 		Styles:    p.styles,
 	}
 
-	var content string
-
-	switch flag {
-	case line.FlagDeleted:
-		content = p.styleLineWithRanges(ln.Content(), position.New(idx, 0), style.GenericDeleted, overlays)
-
-	case line.FlagInserted:
-		content = p.styleLineWithRanges(ln.Content(), position.New(idx, 0), style.GenericInserted, overlays)
-
-	default: // line.FlagDefault (equal line).
-		// Render with syntax highlighting.
-		content = p.renderTokenLine(idx, ln, overlays)
-	}
-
-	rows = append(rows, p.contentRows(content, gutterCtx, gutterWidth)...)
+	rows = append(rows, p.contentRows(p.renderContent(view, idx, ln), gutterCtx, gutterWidth)...)
 
 	if p.annotationsEnabled {
 		rows = append(rows, p.renderAnnotation(view, ln, idx, maxNumber, line.Below, gutterWidth)...)
 	}
 
 	return rows
+}
+
+// renderContent renders the content of line idx of view, which is ln,
+// with its overlays: a deleted or inserted line in the diff style for its
+// flag, and any other line with syntax highlighting.
+func (p *Printer) renderContent(view *line.View, idx int, ln *line.Line) string {
+	overlays := view.Overlays(idx)
+
+	switch view.Flag(idx) {
+	case line.FlagDeleted:
+		return p.styleLineWithRanges(ln.Content(), position.New(idx, 0), style.GenericDeleted, overlays)
+
+	case line.FlagInserted:
+		return p.styleLineWithRanges(ln.Content(), position.New(idx, 0), style.GenericInserted, overlays)
+
+	default: // line.FlagDefault (equal line).
+		return p.renderTokenLine(idx, ln, overlays)
+	}
 }
 
 // renderAnnotation renders the annotations of line idx of view, which is

@@ -52,6 +52,17 @@ func testPrinterWithGutter(gutter printer.GutterFunc) *printer.Printer {
 	)
 }
 
+// layoutRows returns the rows each line of l takes, in layout order.
+func layoutRows(l printer.Layout) []int {
+	var rows []int
+
+	for i := range l.Len() {
+		rows = append(rows, l.LineRows(i))
+	}
+
+	return rows
+}
+
 // printDiff generates a full-file diff between two YAML strings.
 // It outputs the entire file with markers for inserted and deleted lines.
 // Helper to replace the removed Printer.PrintTokenDiff method in tests.
@@ -956,7 +967,7 @@ func TestPrinter_WordWrap_NarrowWidth(t *testing.T) {
 			rows := strings.Split(got, "\n")
 
 			assert.Greater(t, len(rows), 1)
-			assert.Equal(t, []int{len(rows)}, p.Rows(view))
+			assert.Equal(t, []int{len(rows)}, layoutRows(p.Layout(view)))
 
 			for _, row := range rows {
 				assert.LessOrEqual(t, lipgloss.Width(row), 6, row)
@@ -3203,7 +3214,7 @@ func TestPrinter_Print_EmptySpans(t *testing.T) {
 
 			got := p.Print(view, tc.spans...)
 			assert.Equal(t, tc.want, got)
-			assert.Equal(t, tc.wantRows, p.Rows(view, tc.spans...))
+			assert.Equal(t, tc.wantRows, layoutRows(p.Layout(view, tc.spans...)))
 			assert.Len(t, strings.Split(got, "\n"), max(1, len(tc.wantRows)))
 		})
 	}
@@ -3232,7 +3243,7 @@ func TestPrinter_LineNumbers_MaxNumber(t *testing.T) {
 		"    - value that wraps",
 		"            ^ note",
 	), got)
-	assert.Equal(t, []int{3}, p.Rows(view))
+	assert.Equal(t, []int{3}, layoutRows(p.Layout(view)))
 }
 
 func TestPrinter_LineNumbers_Placeholder(t *testing.T) {
@@ -3386,7 +3397,7 @@ func TestPrinter_SeparatorStyle(t *testing.T) {
 	}
 }
 
-func TestPrinter_GutterWidth(t *testing.T) {
+func TestPrinter_Layout_GutterWidth(t *testing.T) {
 	t.Parallel()
 
 	short := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3").View()
@@ -3439,7 +3450,7 @@ func TestPrinter_GutterWidth(t *testing.T) {
 			t.Parallel()
 
 			p := testPrinterWithGutter(tc.gutter)
-			got := p.GutterWidth(tc.view)
+			got := p.Layout(tc.view).GutterWidth()
 
 			assert.Equal(t, tc.want, got)
 
@@ -3464,11 +3475,11 @@ func TestPrinter_WithMaxNumber(t *testing.T) {
 		p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithMaxNumber(10000))
 
 		assert.Equal(t, 10000, p.MaxNumber(short))
-		assert.Equal(t, 6, p.GutterWidth(short))
+		assert.Equal(t, 6, p.Layout(short).GutterWidth())
 
 		// Two views of different lengths then share a gutter width.
 		long := niceyaml.NewSourceFromString(strings.Repeat("k: v\n", 10000)).View()
-		assert.Equal(t, p.GutterWidth(long), p.GutterWidth(short))
+		assert.Equal(t, p.Layout(long).GutterWidth(), p.Layout(short).GutterWidth())
 	})
 
 	t.Run("zero takes the number from the view", func(t *testing.T) {
@@ -3477,11 +3488,11 @@ func TestPrinter_WithMaxNumber(t *testing.T) {
 		p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithMaxNumber(0))
 
 		assert.Equal(t, 2, p.MaxNumber(short))
-		assert.Equal(t, 5, p.GutterWidth(short))
+		assert.Equal(t, 5, p.Layout(short).GutterWidth())
 	})
 }
 
-func TestPrinter_RowWidth(t *testing.T) {
+func TestPrinter_Layout_Width(t *testing.T) {
 	t.Parallel()
 
 	wide := niceyaml.NewSourceFromString("k: " + strings.Repeat("\u65e5", 3) + "\nb: 2").View()
@@ -3533,7 +3544,7 @@ func TestPrinter_RowWidth(t *testing.T) {
 			t.Parallel()
 
 			p := testPrinterWithGutter(tc.gutter)
-			got := p.RowWidth(tc.view, tc.spans...)
+			got := p.Layout(tc.view, tc.spans...).Width()
 
 			assert.Equal(t, tc.want, got)
 
@@ -3583,4 +3594,278 @@ func TestPrinter_WithAnnotationFunc_Nil(t *testing.T) {
 	p := testPrinterWithGutter(nil).With(printer.WithAnnotationFunc(nil))
 
 	assert.Equal(t, "key: value\n     ^ note", p.Print(view))
+}
+
+func TestPrinter_Layout(t *testing.T) {
+	t.Parallel()
+
+	// Width 20 with a five column line number gutter leaves 15 columns of
+	// content, so the first line wraps into three pieces that start at
+	// columns 0, 15, and 31, and its annotation above wraps into two rows.
+	newView := func() *line.View {
+		view := niceyaml.NewSourceFromString(stringtest.JoinLF(
+			"key: this is a long value that wraps",
+			"b: 2",
+			"c: 3",
+		)).View()
+		view.Annotate(0, line.Annotation{Content: "a note above that wraps too", Placement: line.Above})
+		view.Annotate(0, line.Annotation{Content: "below", Placement: line.Below, Col: 5})
+		view.Annotate(2, line.Annotation{Content: "last", Placement: line.Below, Col: 3})
+
+		return view
+	}
+
+	want := stringtest.JoinLF(
+		"     a note above",
+		"     that wraps too",
+		"   1 key: this is a",
+		"   - long value that",
+		"   - wraps",
+		"          ^ below",
+		"   2 b: 2",
+		"   3 c: 3",
+		"        ^ last",
+	)
+
+	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWidth(20))
+
+	t.Run("rows match print", func(t *testing.T) {
+		t.Parallel()
+
+		view := newView()
+		got := p.Print(view)
+		require.Equal(t, want, got)
+
+		l := p.Layout(view)
+
+		assert.Equal(t, len(strings.Split(got, "\n")), l.Rows())
+		assert.Equal(t, 3, l.Len())
+		assert.Equal(t, []int{6, 1, 2}, layoutRows(l))
+	})
+
+	t.Run("line start is the prefix sum of line rows", func(t *testing.T) {
+		t.Parallel()
+
+		l := p.Layout(newView())
+
+		start := 0
+		for i := range l.Len() {
+			assert.Equal(t, start, l.LineStart(i), "line %d", i)
+
+			start += l.LineRows(i)
+		}
+
+		assert.Equal(t, start, l.Rows())
+	})
+
+	t.Run("line at maps every row back to its line", func(t *testing.T) {
+		t.Parallel()
+
+		l := p.Layout(newView())
+
+		for i := range l.Len() {
+			for row := l.LineStart(i); row < l.LineStart(i)+l.LineRows(i); row++ {
+				assert.Equal(t, i, l.LineAt(row), "row %d", row)
+			}
+		}
+	})
+
+	t.Run("line at clamps rows outside the layout", func(t *testing.T) {
+		t.Parallel()
+
+		l := p.Layout(newView())
+
+		assert.Equal(t, 0, l.LineAt(-1))
+		assert.Equal(t, 0, l.LineAt(-100))
+		assert.Equal(t, 2, l.LineAt(l.Rows()))
+		assert.Equal(t, 2, l.LineAt(l.Rows()+100))
+	})
+
+	t.Run("empty view", func(t *testing.T) {
+		t.Parallel()
+
+		l := p.Layout(line.NewView(nil))
+
+		assert.Equal(t, 0, l.Rows())
+		assert.Equal(t, 0, l.Len())
+		assert.Equal(t, -1, l.LineAt(0))
+		assert.Equal(t, -1, l.RowOf(position.New(0, 0)))
+		assert.Equal(t, 0, l.Width())
+	})
+
+	t.Run("row of", func(t *testing.T) {
+		t.Parallel()
+
+		l := p.Layout(newView())
+
+		tcs := map[string]struct {
+			pos  position.Position
+			want int
+		}{
+			"column zero lands below the annotation rows above":   {pos: position.New(0, 0), want: 2},
+			"last column of the first piece":                      {pos: position.New(0, 13), want: 2},
+			"space the wrapper dropped belongs to the row before": {pos: position.New(0, 14), want: 2},
+			"first column of the second piece":                    {pos: position.New(0, 15), want: 3},
+			"space dropped at the second break":                   {pos: position.New(0, 30), want: 3},
+			"first column of the third piece":                     {pos: position.New(0, 31), want: 4},
+			"column past the end lands on the last content row":   {pos: position.New(0, 1000), want: 4},
+			"negative column lands on the first content row":      {pos: position.New(0, -1), want: 2},
+			"line without annotations":                            {pos: position.New(1, 0), want: 6},
+			"line with an annotation below":                       {pos: position.New(2, 3), want: 7},
+			"line past the layout":                                {pos: position.New(3, 0), want: -1},
+			"negative line":                                       {pos: position.New(-1, 0), want: -1},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				assert.Equal(t, tc.want, l.RowOf(tc.pos))
+			})
+		}
+	})
+
+	t.Run("spans in a non-identity order", func(t *testing.T) {
+		t.Parallel()
+
+		view := newView()
+		spans := []position.Span{position.NewSpan(2, 3), position.NewSpan(0, 1)}
+
+		got := p.Print(view, spans...)
+		require.Equal(t, stringtest.JoinLF(
+			"   3 c: 3",
+			"        ^ last",
+			"     a note above",
+			"     that wraps too",
+			"   1 key: this is a",
+			"   - long value that",
+			"   - wraps",
+			"          ^ below",
+		), got)
+
+		l := p.Layout(view, spans...)
+
+		assert.Equal(t, len(strings.Split(got, "\n")), l.Rows())
+		assert.Equal(t, []int{2, 6}, layoutRows(l))
+		assert.Equal(t, 2, l.LineStart(1))
+
+		// LineAt returns view indices, not layout indices.
+		assert.Equal(t, 2, l.LineAt(0))
+		assert.Equal(t, 2, l.LineAt(1))
+		assert.Equal(t, 0, l.LineAt(2))
+		assert.Equal(t, 0, l.LineAt(7))
+		assert.Equal(t, 0, l.LineAt(100))
+		assert.Equal(t, 2, l.LineAt(-1))
+
+		// RowOf finds the line by view index.
+		assert.Equal(t, 0, l.RowOf(position.New(2, 0)))
+		assert.Equal(t, 4, l.RowOf(position.New(0, 0)))
+		assert.Equal(t, 5, l.RowOf(position.New(0, 15)))
+		assert.Equal(t, -1, l.RowOf(position.New(1, 0)))
+	})
+
+	t.Run("tabs and control characters keep columns aligned", func(t *testing.T) {
+		t.Parallel()
+
+		// The printer escapes each control character to a one rune picture,
+		// so the escaped text keeps one rune per source column and the wrap
+		// falls at the same column in both.
+		view := niceyaml.NewSourceFromString("k: \"\tx\x1by zz ww\"").View()
+		p := testPrinter().With(printer.WithWidth(10))
+
+		got := p.Print(view)
+		require.Equal(t, stringtest.JoinLF(
+			"k: \"␉x␛y",
+			"zz ww\"",
+		), got)
+
+		l := p.Layout(view)
+
+		assert.Equal(t, 2, l.Rows())
+		assert.Equal(t, 0, l.RowOf(position.New(0, 4)))
+		assert.Equal(t, 0, l.RowOf(position.New(0, 6)))
+		assert.Equal(t, 0, l.RowOf(position.New(0, 8)))
+		assert.Equal(t, 1, l.RowOf(position.New(0, 9)))
+		assert.Equal(t, 1, l.RowOf(position.New(0, 14)))
+	})
+
+	t.Run("wide characters count two cells", func(t *testing.T) {
+		t.Parallel()
+
+		view := niceyaml.NewSourceFromString("k: 日本語").View()
+		p := testPrinter()
+
+		l := p.Layout(view)
+
+		assert.Equal(t, 9, l.Width())
+		assert.Equal(t, lipgloss.Width(p.Print(view)), l.Width())
+		assert.Equal(t, 0, l.RowOf(position.New(0, 5)))
+	})
+
+	t.Run("width and gutter width match the rendered rows", func(t *testing.T) {
+		t.Parallel()
+
+		view := newView()
+		l := p.Layout(view)
+
+		widest := 0
+		for row := range strings.SplitSeq(p.Print(view), "\n") {
+			widest = max(widest, lipgloss.Width(row))
+			assert.GreaterOrEqual(t, lipgloss.Width(row), l.GutterWidth())
+		}
+
+		assert.Equal(t, widest, l.Width())
+		assert.LessOrEqual(t, l.Width(), 20)
+		assert.Equal(t, 5, l.GutterWidth())
+		assert.Equal(t, lipgloss.Width("   1 "), l.GutterWidth())
+	})
+
+	t.Run("wrapping off gives one content row per line", func(t *testing.T) {
+		t.Parallel()
+
+		view := newView()
+		p := p.With(printer.WithWidth(0))
+
+		got := p.Print(view)
+		require.Equal(t, stringtest.JoinLF(
+			"     a note above that wraps too",
+			"   1 key: this is a long value that wraps",
+			"          ^ below",
+			"   2 b: 2",
+			"   3 c: 3",
+			"        ^ last",
+		), got)
+
+		l := p.Layout(view)
+
+		assert.Equal(t, len(strings.Split(got, "\n")), l.Rows())
+		assert.Equal(t, []int{3, 1, 2}, layoutRows(l))
+		assert.Equal(t, 1, l.RowOf(position.New(0, 0)))
+		assert.Equal(t, 1, l.RowOf(position.New(0, 1000)))
+		assert.Equal(t, lipgloss.Width("   1 key: this is a long value that wraps"), l.Width())
+	})
+
+	t.Run("annotations off counts no annotation rows", func(t *testing.T) {
+		t.Parallel()
+
+		view := newView()
+		p := p.With(printer.WithAnnotations(false))
+
+		got := p.Print(view)
+		require.Equal(t, stringtest.JoinLF(
+			"   1 key: this is a",
+			"   - long value that",
+			"   - wraps",
+			"   2 b: 2",
+			"   3 c: 3",
+		), got)
+
+		l := p.Layout(view)
+
+		assert.Equal(t, len(strings.Split(got, "\n")), l.Rows())
+		assert.Equal(t, []int{3, 1, 1}, layoutRows(l))
+		assert.Equal(t, 0, l.RowOf(position.New(0, 0)))
+		assert.Equal(t, 1, l.RowOf(position.New(0, 15)))
+		assert.Equal(t, 3, l.RowOf(position.New(1, 0)))
+	})
 }
