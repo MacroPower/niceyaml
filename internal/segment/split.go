@@ -455,9 +455,11 @@ func (b *builder) handleGap(tk *token.Token, parts []string, isBlockScalarConten
 
 	// If there's a gap (simple token is ahead), flush and sync forward.
 	// Never sync backwards - currentLine must be monotonically increasing.
+	//
+	// Closing the line through finishLine also clears lastPart, so the next
+	// line's first part does not link back across the boundary.
 	if tkLine > b.currentLine+1 && len(b.currentLineSegments) > 0 {
-		b.lines = append(b.lines, Line{Segments: b.currentLineSegments, Number: b.currentLine})
-		b.currentLineSegments = nil
+		b.finishLine()
 	}
 
 	if len(b.currentLineSegments) == 0 && tkLine > b.currentLine {

@@ -1864,6 +1864,34 @@ func TestNewLines_BlankLineAbsorption(t *testing.T) {
 	})
 }
 
+// TestNewLines_PartLinksStopAtLineBoundary verifies that the per-line part
+// chain never crosses a line, including after a gap the builder flushes.
+func TestNewLines_PartLinksStopAtLineBoundary(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]string{
+		"gap after multi-part token": "''\n\n:",
+		"quoted scalar before a key": "s: 'q\nr'\n\r\n: v\n   \nj: 1\n",
+		"sequence end before a key":  "]\n\n:",
+	}
+
+	for name, input := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			for _, ln := range line.NewLines(lexer.Tokenize(input)) {
+				parts := ln.Tokens()
+				if len(parts) == 0 {
+					continue
+				}
+
+				assert.Nil(t, parts[0].Prev, "line %d first part has a Prev", ln.Number())
+				assert.Nil(t, parts[len(parts)-1].Next, "line %d last part has a Next", ln.Number())
+			}
+		})
+	}
+}
+
 // TestNewLines_FoldedBlockBlankLines verifies handling of blank lines within
 // folded block scalars.
 //
