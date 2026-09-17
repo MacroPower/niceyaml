@@ -2583,6 +2583,25 @@ func TestSourceError_Detail_Errors(t *testing.T) {
 			is:         niceyaml.ErrOutOfRange,
 			wantRender: "[10:1] bad",
 		},
+		"range before the first line": {
+			err: niceyaml.NewError("bad",
+				niceyaml.WithRange(position.NewRange(position.New(-1, 0), position.New(-1, 2))),
+			),
+			is:         niceyaml.ErrOutOfRange,
+			wantRender: "[0:1] bad",
+		},
+		"nested range before the first line": {
+			err: niceyaml.NewError("bad",
+				niceyaml.WithPath(paths.Root().Child("missing").Value()),
+				niceyaml.WithErrors(
+					niceyaml.NewError("first",
+						niceyaml.WithRange(position.NewRange(position.New(-1, 0), position.New(-1, 2))),
+					),
+				),
+			),
+			is:         niceyaml.ErrOutOfRange,
+			wantRender: "$.missing: bad\n\n[0:1] first",
+		},
 		"every nested error unresolved": {
 			err: niceyaml.NewError("bad", niceyaml.WithErrors(
 				niceyaml.NewError("first", niceyaml.WithPath(paths.Root().Child("missing").Value())),

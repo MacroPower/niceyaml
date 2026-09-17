@@ -44,9 +44,9 @@ var (
 	// and [Source.DecodeInto] return it.
 	ErrMultipleDocuments = errors.New("multiple documents in source")
 
-	// ErrOutOfRange indicates the error's location lies past the last line
-	// of the source, which happens when a token or range came from other
-	// text. [SourceError.Detail] returns it.
+	// ErrOutOfRange indicates the error's location lies outside the lines of
+	// the source, past the last or before the first, which happens when a
+	// token or range came from other text. [SourceError.Detail] returns it.
 	ErrOutOfRange = errors.New("location outside source")
 
 	// Shared [printer.Printer] used when no [WithPrinter] is configured.
@@ -837,10 +837,10 @@ func (e *SourceError) collectPositions(a *Error, doc int, view line.Lines) ([]er
 	return positions, unresolved, errors.Join(errs...)
 }
 
-// checkInRange reports [ErrOutOfRange] when loc starts past the last line
-// of view.
+// checkInRange reports [ErrOutOfRange] when loc starts on a line view does
+// not hold: one past its last line, or one before its first.
 func (e *SourceError) checkInRange(loc location, view line.Lines) error {
-	if loc.pos.Line >= view.Len() {
+	if loc.pos.Line < 0 || loc.pos.Line >= view.Len() {
 		return fmt.Errorf("%w: line %d of %d", ErrOutOfRange, loc.pos.Line+1, view.Len())
 	}
 
