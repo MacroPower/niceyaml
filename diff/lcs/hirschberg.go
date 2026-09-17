@@ -7,9 +7,12 @@ import (
 
 // Hirschberg implements [Algorithm] using a space-optimized LCS algorithm.
 //
-// Time complexity: O(m*n) where m and n are the sequence lengths.
-// Space complexity: O(n) where n is the length of after, using two-row
-// dynamic programming over the after sequence.
+// Time complexity is O(m*n), where m and n are the lengths of before and
+// after. The dynamic programming rows take O(n) space, since the algorithm
+// keeps two rows over the after sequence instead of an m by n table. The
+// result holds one [Op] per line of either input, so the accumulated ops
+// take O(m+n) space, and the pool keeps a buffer of that capacity for
+// later calls until the garbage collector clears the pool.
 //
 // A Hirschberg is safe for concurrent use. Each call borrows a set of
 // working buffers from a pool, so concurrent calls never share one, and the

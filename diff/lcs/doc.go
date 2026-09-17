@@ -12,9 +12,11 @@
 // The [Algorithm] interface allows pluggable diff algorithms. [Hirschberg] is
 // the default implementation, using a space-efficient LCS algorithm.
 //
-// Unlike the standard dynamic programming approach that requires O(m*n) space,
-// Hirschberg's divide-and-conquer strategy reduces space complexity to O(n),
-// where n is the length of the after sequence, while maintaining O(m*n) time.
+// Unlike the standard dynamic programming approach that requires O(m*n) space
+// for its table, Hirschberg's divide-and-conquer strategy works in two rows of
+// O(n) space, where n is the length of the after sequence, while maintaining
+// O(m*n) time. The result itself holds one operation per line, so it takes
+// O(m+n) space regardless of the algorithm.
 //
 // This is particularly important when comparing large YAML documents.
 //
