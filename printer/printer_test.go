@@ -3030,6 +3030,56 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 	}
 }
 
+func TestPrinter_Print_EmptySpans(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		want     string
+		spans    []position.Span
+		wantRows []int
+	}{
+		"empty span first": {
+			spans:    []position.Span{position.NewSpan(0, 0), position.NewSpan(0, 2)},
+			want:     "a: 1\nb: 2",
+			wantRows: []int{1, 1},
+		},
+		"out of range span first": {
+			spans:    []position.Span{position.NewSpan(5, 9), position.NewSpan(0, 1)},
+			want:     "a: 1",
+			wantRows: []int{1},
+		},
+		"empty span between": {
+			spans:    []position.Span{position.NewSpan(0, 1), position.NewSpan(1, 1), position.NewSpan(1, 2)},
+			want:     "a: 1\nb: 2",
+			wantRows: []int{1, 1},
+		},
+		"empty span last": {
+			spans:    []position.Span{position.NewSpan(0, 2), position.NewSpan(2, 2)},
+			want:     "a: 1\nb: 2",
+			wantRows: []int{1, 1},
+		},
+		"only empty spans": {
+			spans:    []position.Span{position.NewSpan(0, 0), position.NewSpan(2, 2)},
+			want:     "",
+			wantRows: nil,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := niceyaml.NewSourceFromString("a: 1\nb: 2").Lines()
+			p := testPrinter()
+
+			got := p.Print(view, tc.spans...)
+			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.wantRows, p.Rows(view, tc.spans...))
+			assert.Len(t, strings.Split(got, "\n"), max(1, len(tc.wantRows)))
+		})
+	}
+}
+
 func TestPrinter_WithGutter_Nil(t *testing.T) {
 	t.Parallel()
 

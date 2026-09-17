@@ -436,12 +436,24 @@ func (p *Printer) Print(lines line.View, spans ...position.Span) string {
 
 	sb.Grow(selected * 100)
 
-	for i, span := range spans {
-		if i > 0 {
+	// A span that renders no rows, because it is empty or lies outside the
+	// view, adds no separator either, so the output holds exactly the rows
+	// Rows counts.
+	wrote := false
+
+	for _, span := range spans {
+		rows := p.renderSpan(lines, span)
+		if len(rows) == 0 {
+			continue
+		}
+
+		if wrote {
 			sb.WriteByte('\n')
 		}
 
-		sb.WriteString(strings.Join(p.renderSpan(lines, span), "\n"))
+		sb.WriteString(strings.Join(rows, "\n"))
+
+		wrote = true
 	}
 
 	return p.style.Render(sb.String())
