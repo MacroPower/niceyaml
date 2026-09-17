@@ -21,8 +21,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema"
-	"go.jacobcolvin.com/niceyaml/schema/registry"
-	"go.jacobcolvin.com/niceyaml/schema/registry/schemastore"
+	"go.jacobcolvin.com/niceyaml/schema/schemastore"
 )
 
 // testCatalog is a one-entry catalog whose pattern matches every YAML file.
@@ -904,7 +903,7 @@ func TestIntegration(t *testing.T) {
 		catalogServer := newCatalogServer(t, catalog)
 		t.Cleanup(catalogServer.Close)
 
-		reg := registry.New()
+		reg := schema.NewRegistry()
 		reg.Register(schemastore.New(schemastore.WithCatalogURL(catalogServer.URL)))
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`on: push`), ".github/workflows/ci.yaml")
@@ -938,7 +937,7 @@ func TestIntegration(t *testing.T) {
 
 		catalogServer, catalogFetches := newCountingCatalogServer(t, catalog)
 
-		reg := registry.New()
+		reg := schema.NewRegistry()
 		reg.Register(schemastore.New(schemastore.WithCatalogURL(catalogServer.URL)))
 
 		for _, name := range []string{"ci.yaml", "release.yaml", "lint.yaml"} {
@@ -974,7 +973,7 @@ func TestIntegration(t *testing.T) {
 		catalogServer := newCatalogServer(t, catalog)
 		t.Cleanup(catalogServer.Close)
 
-		reg := registry.New()
+		reg := schema.NewRegistry()
 		reg.Register(schemastore.New(schemastore.WithCatalogURL(catalogServer.URL)))
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`name: test`), ".github/workflows/ci.yaml")
@@ -999,7 +998,7 @@ func TestIntegration(t *testing.T) {
 		catalogServer := newCatalogServer(t, catalog)
 		t.Cleanup(catalogServer.Close)
 
-		reg := registry.New()
+		reg := schema.NewRegistry()
 		reg.Register(schemastore.New(schemastore.WithCatalogURL(catalogServer.URL)))
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "random.yaml")
@@ -1011,14 +1010,14 @@ func TestIntegration(t *testing.T) {
 	t.Run("reports an unreachable catalog through the registry", func(t *testing.T) {
 		t.Parallel()
 
-		reg := registry.New()
+		reg := schema.NewRegistry()
 		reg.Register(schemastore.New(schemastore.WithCatalogURL("http://localhost:1")))
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
 
 		err := reg.Validate(t.Context(), doc)
 		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
-		require.ErrorIs(t, err, registry.ErrResolve)
+		require.ErrorIs(t, err, schema.ErrResolve)
 		require.NotErrorIs(t, err, schema.ErrNoMatch)
 	})
 
@@ -1033,7 +1032,7 @@ func TestIntegration(t *testing.T) {
 			return schema.Ref{}, schema.ErrNoMatch
 		})
 
-		reg := registry.New()
+		reg := schema.NewRegistry()
 		reg.Register(schemastore.New(schemastore.WithCatalogURL("http://localhost:1")), fallback)
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")

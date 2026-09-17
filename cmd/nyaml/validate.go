@@ -9,9 +9,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/schema/loader"
-	"go.jacobcolvin.com/niceyaml/schema/registry"
-	"go.jacobcolvin.com/niceyaml/schema/registry/schemastore"
+	"go.jacobcolvin.com/niceyaml/schema"
+	"go.jacobcolvin.com/niceyaml/schema/schemastore"
 )
 
 func validateCmd() *cobra.Command {
@@ -58,7 +57,7 @@ func validateCmd() *cobra.Command {
 // validateFile validates every document of the file at yamlPath against the
 // registry. Errors come back bound to the source, and the error handler in
 // main renders them with the terminal width.
-func validateFile(ctx context.Context, yamlPath string, reg *registry.Registry) error {
+func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) error {
 	source, err := niceyaml.NewSourceFromFile(yamlPath)
 	if err != nil {
 		return err
@@ -90,8 +89,8 @@ func validateFile(ctx context.Context, yamlPath string, reg *registry.Registry) 
 // followed by SchemaStore automatic discovery. The SchemaStore catalog is
 // fetched on the first document that reaches it, and a file it cannot
 // match, or cannot fetch the catalog for, reports that in the file's error.
-func buildRegistry(schemaRef string) *registry.Registry {
-	reg := registry.New()
+func buildRegistry(schemaRef string) *schema.Registry {
+	reg := schema.NewRegistry()
 
 	// A loader applies to every document, so the CLI schema needs no matcher.
 	// Resolve relative to current working directory. If cwd fails, use ".".
@@ -101,14 +100,14 @@ func buildRegistry(schemaRef string) *registry.Registry {
 			cwd = "."
 		}
 
-		reg.Register(loader.FileOrURL(cwd, schemaRef))
+		reg.Register(schema.FileOrURL(cwd, schemaRef))
 
 		return reg
 	}
 
 	reg.Register(
-		registry.Directive(), // Resolves schemas relative to each YAML file.
-		schemastore.New(),    // Automatic discovery by file path.
+		schema.Directive(), // Resolves schemas relative to each YAML file.
+		schemastore.New(),  // Automatic discovery by file path.
 	)
 
 	return reg

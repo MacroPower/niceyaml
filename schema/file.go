@@ -1,4 +1,4 @@
-package loader
+package schema
 
 import (
 	"context"
@@ -9,10 +9,9 @@ import (
 	"strings"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/schema"
 )
 
-// File creates a [schema.Resolver] that reads schema data from a local file.
+// File creates a [Resolver] that reads schema data from a local file.
 //
 // Resolve makes path absolute against the working directory and names the
 // schema by the file:// URL of that absolute path, such as
@@ -27,15 +26,15 @@ import (
 // paths come from trusted sources or are validated before use to prevent
 // path traversal attacks.
 //
-//	r := loader.File("./schemas/config.json")
-func File(path string) schema.Resolver {
-	return schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
+//	r := schema.File("./schemas/config.json")
+func File(path string) Resolver {
+	return ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (Ref, error) {
 		abs, err := filepath.Abs(path)
 		if err != nil {
-			return schema.Ref{}, fmt.Errorf("resolve %s: %w", path, err)
+			return Ref{}, fmt.Errorf("resolve %s: %w", path, err)
 		}
 
-		return schema.Ref{
+		return Ref{
 			URL: fileURL(abs),
 			Load: func(_ context.Context) ([]byte, error) {
 				data, err := os.ReadFile(abs) //nolint:gosec // User-provided file paths are intentional.

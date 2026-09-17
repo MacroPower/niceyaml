@@ -14,7 +14,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/filepaths"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 	"go.jacobcolvin.com/niceyaml/schema"
-	"go.jacobcolvin.com/niceyaml/schema/loader"
 )
 
 // Default SchemaStore URLs and timeouts.
@@ -33,7 +32,7 @@ var (
 
 	// ErrNoCatalogMatch indicates no catalog entry matches the document's file
 	// path. It wraps [schema.ErrNoMatch], so a
-	// [go.jacobcolvin.com/niceyaml/schema/registry.Registry] moves on to the
+	// [go.jacobcolvin.com/niceyaml/schema.Registry] moves on to the
 	// next resolver.
 	ErrNoCatalogMatch = fmt.Errorf("%w: no catalog entry matches", schema.ErrNoMatch)
 )
@@ -75,7 +74,7 @@ type CatalogEntry struct {
 // later lookups.
 //
 // SchemaStore implements [schema.Resolver] and can be registered directly
-// with a [go.jacobcolvin.com/niceyaml/schema/registry.Registry].
+// with a [go.jacobcolvin.com/niceyaml/schema.Registry].
 // [ErrFetchCatalog] does not wrap [schema.ErrNoMatch], so while no catalog
 // has loaded, the registry stops at the store and does not try the resolvers
 // registered after it. Register the store after any resolver that should
@@ -235,7 +234,7 @@ func (s *SchemaStore) Resolve(ctx context.Context, doc *niceyaml.Document) (sche
 	}
 
 	//nolint:wrapcheck // The URL loader already wraps errors with context.
-	return loader.URL(entry.URL, loader.WithHTTPClient(s.client)).Resolve(ctx, doc)
+	return schema.URL(entry.URL, schema.WithHTTPClient(s.client)).Resolve(ctx, doc)
 }
 
 // FindMatch finds the catalog entry matching a file path.
@@ -380,7 +379,7 @@ func (s *SchemaStore) staleLocked(cause error) ([]CatalogEntry, error) {
 // filtered entries. It holds no lock, so a slow catalog server blocks only
 // the lookups waiting on this fetch.
 //
-// The HTTP GET and its size limit are the ones [loader.URL] uses; only the
+// The HTTP GET and its size limit are the ones [schema.URL] uses; only the
 // catalog JSON parsing is specific to SchemaStore.
 func (s *SchemaStore) fetch(ctx context.Context) ([]CatalogEntry, error) {
 	data, err := httpfetch.Get(ctx, s.client, s.catalogURL)

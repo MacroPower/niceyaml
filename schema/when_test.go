@@ -1,4 +1,4 @@
-package registry_test
+package schema_test
 
 import (
 	"context"
@@ -12,9 +12,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema"
-	"go.jacobcolvin.com/niceyaml/schema/loader"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
-	"go.jacobcolvin.com/niceyaml/schema/registry"
 )
 
 func TestWhen(t *testing.T) {
@@ -43,9 +41,9 @@ func TestWhen(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			r := registry.When(
+			r := schema.When(
 				matcher.Content(kindPath, "Deployment"),
-				loader.Embedded("deployment.json", schemaData),
+				schema.Embedded("deployment.json", schemaData),
 			)
 
 			doc := yamltest.FirstDocument(t, stringtest.Input(tc.input))
@@ -70,7 +68,7 @@ func TestWhen(t *testing.T) {
 		t.Parallel()
 
 		inner := errors.New("inner")
-		r := registry.When(
+		r := schema.When(
 			matcher.Content(kindPath, "Deployment"),
 			schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
 				return schema.Ref{}, inner
@@ -86,7 +84,7 @@ func TestWhen(t *testing.T) {
 		t.Parallel()
 
 		called := false
-		r := registry.When(
+		r := schema.When(
 			matcher.Content(kindPath, "Deployment"),
 			schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
 				called = true
@@ -104,16 +102,16 @@ func TestWhen(t *testing.T) {
 	t.Run("nil matcher panics", func(t *testing.T) {
 		t.Parallel()
 
-		assert.PanicsWithValue(t, "registry.When: matcher is nil", func() {
-			registry.When(nil, loader.Embedded("x.json", schemaData))
+		assert.PanicsWithValue(t, "schema.When: matcher is nil", func() {
+			schema.When(nil, schema.Embedded("x.json", schemaData))
 		})
 	})
 
 	t.Run("nil resolver panics", func(t *testing.T) {
 		t.Parallel()
 
-		assert.PanicsWithValue(t, "registry.When: resolver is nil", func() {
-			registry.When(matcher.Content(kindPath, "x"), nil)
+		assert.PanicsWithValue(t, "schema.When: resolver is nil", func() {
+			schema.When(matcher.Content(kindPath, "x"), nil)
 		})
 	})
 }

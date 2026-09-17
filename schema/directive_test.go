@@ -20,43 +20,43 @@ func TestParseDirective(t *testing.T) {
 
 	tcs := map[string]struct {
 		input string
-		want  *schema.Directive
+		want  *schema.ParsedDirective
 	}{
 		"valid file path": {
 			input: " yaml-language-server: $schema=./schema.json",
-			want:  &schema.Directive{Schema: "./schema.json"},
+			want:  &schema.ParsedDirective{Schema: "./schema.json"},
 		},
 		"valid absolute path": {
 			input: " yaml-language-server: $schema=/path/to/schema.json",
-			want:  &schema.Directive{Schema: "/path/to/schema.json"},
+			want:  &schema.ParsedDirective{Schema: "/path/to/schema.json"},
 		},
 		"valid http URL": {
 			input: " yaml-language-server: $schema=http://example.com/schema.json",
-			want:  &schema.Directive{Schema: "http://example.com/schema.json"},
+			want:  &schema.ParsedDirective{Schema: "http://example.com/schema.json"},
 		},
 		"valid https URL": {
 			input: " yaml-language-server: $schema=https://example.com/schema.json",
-			want:  &schema.Directive{Schema: "https://example.com/schema.json"},
+			want:  &schema.ParsedDirective{Schema: "https://example.com/schema.json"},
 		},
 		"path with spaces": {
 			input: " yaml-language-server: $schema=./path with spaces/schema.json",
-			want:  &schema.Directive{Schema: "./path with spaces/schema.json"},
+			want:  &schema.ParsedDirective{Schema: "./path with spaces/schema.json"},
 		},
 		"no spaces after colon": {
 			input: " yaml-language-server:$schema=schema.json",
-			want:  &schema.Directive{Schema: "schema.json"},
+			want:  &schema.ParsedDirective{Schema: "schema.json"},
 		},
 		"extra spaces": {
 			input: " yaml-language-server:   $schema=schema.json",
-			want:  &schema.Directive{Schema: "schema.json"},
+			want:  &schema.ParsedDirective{Schema: "schema.json"},
 		},
 		"trailing whitespace": {
 			input: " yaml-language-server: $schema=./schema.json   ",
-			want:  &schema.Directive{Schema: "./schema.json"},
+			want:  &schema.ParsedDirective{Schema: "./schema.json"},
 		},
 		"trailing tab": {
 			input: " yaml-language-server: $schema=./schema.json\t",
-			want:  &schema.Directive{Schema: "./schema.json"},
+			want:  &schema.ParsedDirective{Schema: "./schema.json"},
 		},
 		"only whitespace after equals": {
 			input: " yaml-language-server: $schema=   ",

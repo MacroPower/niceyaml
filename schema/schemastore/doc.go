@@ -9,7 +9,7 @@
 // # Usage
 //
 // Create a [*SchemaStore] and register it with a
-// [go.jacobcolvin.com/niceyaml/schema/registry.Registry]:
+// [go.jacobcolvin.com/niceyaml/schema.Registry]:
 //
 //	reg.Register(schemastore.New())
 //

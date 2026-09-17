@@ -1,4 +1,4 @@
-package loader_test
+package schema_test
 
 import (
 	"testing"
@@ -6,14 +6,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.jacobcolvin.com/niceyaml/schema/loader"
+	"go.jacobcolvin.com/niceyaml/schema"
 )
 
 func TestEmbedded(t *testing.T) {
 	t.Parallel()
 
 	schemaData := []byte(`{"type": "object"}`)
-	r := loader.Embedded("test.json", schemaData)
+	r := schema.Embedded("test.json", schemaData)
 
 	url, data, err := load(t, r)
 	require.NoError(t, err)

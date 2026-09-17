@@ -1,4 +1,4 @@
-package registry_test
+package schema_test
 
 import (
 	"context"
@@ -20,9 +20,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema"
-	"go.jacobcolvin.com/niceyaml/schema/loader"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
-	"go.jacobcolvin.com/niceyaml/schema/registry"
 )
 
 // Path helpers for tests.
@@ -55,12 +53,12 @@ func TestRegistry_Lookup(t *testing.T) {
 	t.Run("first match wins", func(t *testing.T) {
 		t.Parallel()
 
-		reg := registry.New()
+		reg := schema.NewRegistry()
 
 		// First registration matches Deployment.
-		reg.Register(registry.When(
+		reg.Register(schema.When(
 			matcher.Content(kindPath, "Deployment"),
-			loader.Embedded("deployment.json", schemaData),
+			schema.Embedded("deployment.json", schemaData),
 		))
 
 		// Second registration matches everything but is never reached.
@@ -77,8 +75,8 @@ func TestRegistry_Lookup(t *testing.T) {
 	t.Run("loader alone applies to every document", func(t *testing.T) {
 		t.Parallel()
 
-		reg := registry.New()
-		reg.Register(loader.Embedded("any.json", schemaData))
+		reg := schema.NewRegistry()
+		reg.Register(schema.Embedded("any.json", schemaData))
 
 		for _, input := range []string{`kind: Deployment`, `kind: Service`, `other: value`} {
 			doc := yamltest.FirstDocument(t, stringtest.Input(input))
@@ -90,10 +88,10 @@ func TestRegistry_Lookup(t *testing.T) {
 	t.Run("no match returns error", func(t *testing.T) {
 		t.Parallel()
 
-		reg := registry.New()
-		reg.Register(registry.When(
+		reg := schema.NewRegistry()
+		reg.Register(schema.When(
 			matcher.Content(kindPath, "Deployment"),
-			loader.Embedded("deployment.json", schemaData),
+			schema.Embedded("deployment.json", schemaData),
 		))
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
@@ -104,7 +102,7 @@ func TestRegistry_Lookup(t *testing.T) {
 	t.Run("empty registry matches nothing", func(t *testing.T) {
 		t.Parallel()
 
-		reg := registry.New()
+		reg := schema.NewRegistry()
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
 		_, err := reg.Lookup(t.Context(), doc)
@@ -117,7 +115,7 @@ func TestRegistry_Lookup(t *testing.T) {
 		first, firstLoads := countingLoader("first.json", schemaData)
 		second, secondLoads := countingLoader("second.json", schemaData)
 
-		reg := registry.New()
+		reg := schema.NewRegistry()
 		reg.Register(first, second)
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
@@ -135,10 +133,10 @@ func TestRegistry_Validate(t *testing.T) {
 		t.Parallel()
 
 		schemaData := []byte(`{"type": "object", "properties": {"kind": {"type": "string"}}}`)
-		reg := registry.New()
-		reg.Register(registry.When(
+		reg := schema.NewRegistry()
+		reg.Register(schema.When(
 			matcher.Content(kindPath, "Deployment"),
-			loader.Embedded("test.json", schemaData),
+			schema.Embedded("test.json", schemaData),
 		))
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
@@ -150,10 +148,10 @@ func TestRegistry_Validate(t *testing.T) {
 		t.Parallel()
 
 		schemaData := []byte(`{"type": "object", "properties": {"kind": {"type": "number"}}}`)
-		reg := registry.New()
-		reg.Register(registry.When(
+		reg := schema.NewRegistry()
+		reg.Register(schema.When(
 			matcher.Content(kindPath, "Deployment"),
-			loader.Embedded("test.json", schemaData),
+			schema.Embedded("test.json", schemaData),
 		))
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
@@ -173,10 +171,10 @@ func TestRegistry_Validate(t *testing.T) {
 		t.Parallel()
 
 		schemaData := []byte(`{"type": "object", "properties": {"kind": {"type": "number"}}}`)
-		reg := registry.New()
-		reg.Register(registry.When(
+		reg := schema.NewRegistry()
+		reg.Register(schema.When(
 			matcher.Content(kindPath, "Deployment"),
-			loader.Embedded("test.json", schemaData),
+			schema.Embedded("test.json", schemaData),
 		))
 
 		// Service doesn't match, returns ErrNoMatch.
@@ -194,10 +192,10 @@ func TestRegistry_Caching(t *testing.T) {
 
 		schemaData := []byte(`{"type": "object"}`)
 
-		reg := registry.New()
-		reg.Register(registry.When(
+		reg := schema.NewRegistry()
+		reg.Register(schema.When(
 			matcher.Content(kindPath, "Deployment"),
-			loader.Embedded("test.json", schemaData),
+			schema.Embedded("test.json", schemaData),
 		))
 
 		// First lookup compiles and caches.
@@ -218,7 +216,7 @@ func TestRegistry_Caching(t *testing.T) {
 
 		r, loads := countingLoader("test.json", []byte(`{"type": "object"}`))
 
-		reg := registry.New()
+		reg := schema.NewRegistry()
 		reg.Register(r)
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
@@ -237,10 +235,10 @@ func TestRegistry_Caching(t *testing.T) {
 		deployment, deploymentLoads := countingLoader("deployment.json", []byte(`{"type": "object"}`))
 		service, serviceLoads := countingLoader("service.json", []byte(`{"type": "object"}`))
 
-		reg := registry.New()
+		reg := schema.NewRegistry()
 		reg.Register(
-			registry.When(matcher.Content(kindPath, "Deployment"), deployment),
-			registry.When(matcher.Content(kindPath, "Service"), service),
+			schema.When(matcher.Content(kindPath, "Deployment"), deployment),
+			schema.When(matcher.Content(kindPath, "Service"), service),
 		)
 
 		for _, input := range []string{`kind: Deployment`, `kind: Service`, `kind: Deployment`, `kind: Service`} {
@@ -258,13 +256,13 @@ func TestRegistry_Caching(t *testing.T) {
 
 		r, loads := countingLoader("", []byte(`{"type": "object"}`))
 
-		reg := registry.New()
+		reg := schema.NewRegistry()
 		reg.Register(r)
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
 		_, err := reg.Lookup(t.Context(), doc)
-		require.ErrorIs(t, err, registry.ErrNoURL)
-		require.ErrorIs(t, err, registry.ErrResolve)
+		require.ErrorIs(t, err, schema.ErrNoURL)
+		require.ErrorIs(t, err, schema.ErrResolve)
 		assert.Equal(t, int32(0), loads.Load(), "a ref without a URL should not be loaded")
 	})
 
@@ -273,7 +271,7 @@ func TestRegistry_Caching(t *testing.T) {
 
 		var loads atomic.Int32
 
-		reg := registry.New()
+		reg := schema.NewRegistry()
 		reg.Register(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
 			return schema.Ref{
 				URL: "flaky.json",
@@ -290,7 +288,7 @@ func TestRegistry_Caching(t *testing.T) {
 		doc := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
 
 		_, err := reg.Lookup(t.Context(), doc)
-		require.ErrorIs(t, err, registry.ErrLoad)
+		require.ErrorIs(t, err, schema.ErrLoad)
 		require.ErrorContains(t, err, "transient")
 
 		_, err = reg.Lookup(t.Context(), doc)
@@ -302,10 +300,10 @@ func TestRegistry_Caching(t *testing.T) {
 		t.Parallel()
 
 		schemaData := []byte(`{"type": "object"}`)
-		reg := registry.New()
-		reg.Register(registry.When(
+		reg := schema.NewRegistry()
+		reg.Register(schema.When(
 			matcher.Content(kindPath, "Deployment"),
-			loader.Embedded("test.json", schemaData),
+			schema.Embedded("test.json", schemaData),
 		))
 
 		// Pre-create documents outside goroutines to avoid assertion issues.
@@ -342,7 +340,7 @@ func TestRegistry_ConcurrentLoad(t *testing.T) {
 
 	var loads atomic.Int32
 
-	reg := registry.New()
+	reg := schema.NewRegistry()
 	reg.Register(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
 		return schema.Ref{
 			URL: "test.json",
@@ -413,7 +411,7 @@ func TestRegistry_SharedLoad(t *testing.T) {
 
 			var loads atomic.Int32
 
-			reg := registry.New()
+			reg := schema.NewRegistry()
 			reg.Register(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
 				return schema.Ref{
 					URL: "slow.json",
@@ -445,7 +443,7 @@ func TestRegistry_SharedLoad(t *testing.T) {
 			assert.Equal(t, int32(1), loads.Load(), "callers should share the failed load")
 
 			for _, err := range errs {
-				require.ErrorIs(t, err, registry.ErrLoad)
+				require.ErrorIs(t, err, schema.ErrLoad)
 				require.ErrorIs(t, err, context.DeadlineExceeded)
 			}
 		})
@@ -457,7 +455,7 @@ func TestRegistry_SharedLoad(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			release := make(chan struct{})
 
-			reg := registry.New()
+			reg := schema.NewRegistry()
 			reg.Register(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
 				return schema.Ref{
 					URL: "slow.json",
@@ -509,7 +507,7 @@ func TestRegistry_SharedLoad(t *testing.T) {
 			<-joinerDone
 
 			require.NoError(t, leaderErr)
-			require.ErrorIs(t, joinerErr, registry.ErrLoad)
+			require.ErrorIs(t, joinerErr, schema.ErrLoad)
 			require.ErrorIs(t, joinerErr, context.DeadlineExceeded)
 		})
 	})
@@ -520,7 +518,7 @@ func TestRegistry_SharedLoad(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			var loads atomic.Int32
 
-			reg := registry.New()
+			reg := schema.NewRegistry()
 			reg.Register(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
 				return schema.Ref{
 					URL: "slow.json",
@@ -576,8 +574,8 @@ func TestRegistry_Register_Concurrent(t *testing.T) {
 
 	// Registering while lookups run must not race.
 	schemaData := []byte(`{"type": "object"}`)
-	reg := registry.New()
-	reg.Register(loader.Embedded("base.json", schemaData))
+	reg := schema.NewRegistry()
+	reg.Register(schema.Embedded("base.json", schemaData))
 
 	doc := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
 
@@ -589,7 +587,7 @@ func TestRegistry_Register_Concurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			reg.Register(loader.Embedded("extra.json", schemaData))
+			reg.Register(schema.Embedded("extra.json", schemaData))
 		}()
 
 		go func() {
@@ -618,14 +616,14 @@ func TestRegistry_DynamicResolver(t *testing.T) {
 			require.NoError(t, err)
 		}
 
-		reg := registry.New()
+		reg := schema.NewRegistry()
 		reg.Register(schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
 			kind, err := doc.GetValue(kindPath)
 			if err != nil || (kind != "Deployment" && kind != "Service") {
 				return schema.Ref{}, schema.ErrNoMatch
 			}
 
-			return loader.File(filepath.Join(tmpDir, kind+".json")).Resolve(ctx, doc)
+			return schema.File(filepath.Join(tmpDir, kind+".json")).Resolve(ctx, doc)
 		}))
 
 		// Deployment should validate.
@@ -657,8 +655,8 @@ func TestRegistry_DynamicResolver(t *testing.T) {
 		err = os.WriteFile(yamlPath, yamlData, 0o600)
 		require.NoError(t, err)
 
-		reg := registry.New()
-		reg.Register(registry.Directive())
+		reg := schema.NewRegistry()
+		reg.Register(schema.Directive())
 
 		source, err := niceyaml.NewSourceFromFile(yamlPath)
 		require.NoError(t, err)
@@ -678,12 +676,12 @@ func TestRegistry_WithValidateOptions(t *testing.T) {
 
 	// Create a registry with custom validate options.
 	schemaData := []byte(`{"type": "object"}`)
-	reg := registry.New(
-		registry.WithValidateOptions(), // Empty options, just testing they pass through.
+	reg := schema.NewRegistry(
+		schema.WithValidateOptions(), // Empty options, just testing they pass through.
 	)
-	reg.Register(registry.When(
+	reg.Register(schema.When(
 		matcher.Content(kindPath, "Deployment"),
-		loader.Embedded("test.json", schemaData),
+		schema.Embedded("test.json", schemaData),
 	))
 
 	doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
@@ -698,21 +696,21 @@ func TestRegistry_ErrorCases(t *testing.T) {
 	t.Run("resolve error propagates", func(t *testing.T) {
 		t.Parallel()
 
-		reg := registry.New()
+		reg := schema.NewRegistry()
 		reg.Register(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
 			return schema.Ref{}, errors.New("cannot decide")
 		}))
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
 		err := reg.Validate(t.Context(), doc)
-		require.ErrorIs(t, err, registry.ErrResolve)
+		require.ErrorIs(t, err, schema.ErrResolve)
 		assert.Contains(t, err.Error(), "cannot decide")
 	})
 
 	t.Run("load error propagates through Validate", func(t *testing.T) {
 		t.Parallel()
 
-		reg := registry.New()
+		reg := schema.NewRegistry()
 		reg.Register(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
 			return schema.Ref{
 				URL: "broken.json",
@@ -724,7 +722,7 @@ func TestRegistry_ErrorCases(t *testing.T) {
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
 		err := reg.Validate(t.Context(), doc)
-		require.ErrorIs(t, err, registry.ErrLoad)
+		require.ErrorIs(t, err, schema.ErrLoad)
 		assert.Contains(t, err.Error(), "disk on fire")
 		assert.Contains(t, err.Error(), "broken.json")
 	})
@@ -733,12 +731,12 @@ func TestRegistry_ErrorCases(t *testing.T) {
 		t.Parallel()
 
 		invalidSchemaData := []byte(`{not valid json`)
-		reg := registry.New()
-		reg.Register(loader.Embedded("bad.json", invalidSchemaData))
+		reg := schema.NewRegistry()
+		reg.Register(schema.Embedded("bad.json", invalidSchemaData))
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
 		_, err := reg.Lookup(t.Context(), doc)
-		require.ErrorIs(t, err, registry.ErrCompile)
+		require.ErrorIs(t, err, schema.ErrCompile)
 		assert.Contains(t, err.Error(), "bad.json")
 	})
 }
@@ -751,10 +749,10 @@ func TestRegistry_MultipleDocuments(t *testing.T) {
 	)
 	serviceSchema := []byte(`{"type": "object", "properties": {"kind": {"const": "Service"}}, "required": ["kind"]}`)
 
-	reg := registry.New()
+	reg := schema.NewRegistry()
 	reg.Register(
-		registry.When(matcher.Content(kindPath, "Deployment"), loader.Embedded("deployment.json", deploymentSchema)),
-		registry.When(matcher.Content(kindPath, "Service"), loader.Embedded("service.json", serviceSchema)),
+		schema.When(matcher.Content(kindPath, "Deployment"), schema.Embedded("deployment.json", deploymentSchema)),
+		schema.When(matcher.Content(kindPath, "Service"), schema.Embedded("service.json", serviceSchema)),
 	)
 
 	input := stringtest.Input(`
@@ -794,16 +792,16 @@ func TestRegistry_MultipleDocuments(t *testing.T) {
 func TestRegistry_DocumentValidator(t *testing.T) {
 	t.Parallel()
 
-	var _ niceyaml.DocumentValidator = (*registry.Registry)(nil)
+	var _ niceyaml.DocumentValidator = (*schema.Registry)(nil)
 
 	schemaData := []byte(`{
 		"type": "object",
 		"properties": {"kind": {"type": "string"}, "replicas": {"type": "integer"}}
 	}`)
-	reg := registry.New()
-	reg.Register(registry.When(
+	reg := schema.NewRegistry()
+	reg.Register(schema.When(
 		matcher.Content(kindPath, "Deployment"),
-		loader.Embedded("test.json", schemaData),
+		schema.Embedded("test.json", schemaData),
 	))
 
 	type deployment struct {

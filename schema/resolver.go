@@ -45,14 +45,14 @@ type Ref struct {
 //
 // A resolver may inspect the document's content, file path, or tokens, or
 // ignore the document and always name the same schema. The document is
-// never nil, so a resolver reads it without checking. The loaders in
-// [go.jacobcolvin.com/niceyaml/schema/loader] are resolvers of the second
-// kind, and [go.jacobcolvin.com/niceyaml/schema/registry.When] guards any
-// resolver with a [go.jacobcolvin.com/niceyaml/schema/matcher.Matcher].
+// never nil, so a resolver reads it without checking. The loaders
+// [Embedded], [File], [URL], and [FileOrURL] are resolvers of the second
+// kind, and [When] guards any resolver with a
+// [go.jacobcolvin.com/niceyaml/schema/matcher.Matcher].
 //
-// See [ResolverFunc], [go.jacobcolvin.com/niceyaml/schema/registry.Directive],
-// and [go.jacobcolvin.com/niceyaml/schema/registry/schemastore.SchemaStore]
-// for implementations.
+// See [ResolverFunc], [Directive], and
+// [go.jacobcolvin.com/niceyaml/schema/schemastore.SchemaStore] for
+// implementations.
 type Resolver interface {
 	Resolve(ctx context.Context, doc *niceyaml.Document) (Ref, error)
 }

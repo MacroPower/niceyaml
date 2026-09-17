@@ -1,4 +1,4 @@
-package loader_test
+package schema_test
 
 import (
 	"os"
@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.jacobcolvin.com/niceyaml/schema/loader"
+	"go.jacobcolvin.com/niceyaml/schema"
 )
 
 func TestFile(t *testing.T) {
@@ -24,7 +24,7 @@ func TestFile(t *testing.T) {
 		err := os.WriteFile(schemaPath, schemaData, 0o600)
 		require.NoError(t, err)
 
-		_, data, err := load(t, loader.File(schemaPath))
+		_, data, err := load(t, schema.File(schemaPath))
 		require.NoError(t, err)
 		assert.Equal(t, schemaData, data)
 	})
@@ -33,7 +33,7 @@ func TestFile(t *testing.T) {
 		t.Parallel()
 
 		// Resolve names the file without touching it; only Load reads it.
-		url, _, err := load(t, loader.File("/nonexistent/path/schema.json"))
+		url, _, err := load(t, schema.File("/nonexistent/path/schema.json"))
 		assert.Equal(t, "file:///nonexistent/path/schema.json", url)
 		require.ErrorIs(t, err, os.ErrNotExist)
 		require.ErrorContains(t, err, "read /nonexistent/path/schema.json")

@@ -1,4 +1,4 @@
-package loader
+package schema
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
-	"go.jacobcolvin.com/niceyaml/schema"
 )
 
 // HTTPOption configures HTTP client settings for loaders that fetch schemas
@@ -33,7 +32,7 @@ func WithHTTPClient(client *http.Client) HTTPOption {
 	}
 }
 
-// URL creates a [schema.Resolver] that fetches schema data from an
+// URL creates a [Resolver] that fetches schema data from an
 // HTTP/HTTPS URL. The registry fetches once per URL and reuses the compiled
 // validator for every document that names it.
 //
@@ -42,15 +41,15 @@ func WithHTTPClient(client *http.Client) HTTPOption {
 // Use [WithHTTPClient] to provide a client with custom timeout settings. The
 // loader rejects a response body over 10 MB.
 //
-//	r := loader.URL("https://example.com/schema.json")
-func URL(schemaURL string, opts ...HTTPOption) schema.Resolver {
+//	r := schema.URL("https://example.com/schema.json")
+func URL(schemaURL string, opts ...HTTPOption) Resolver {
 	cfg := &httpConfig{client: http.DefaultClient}
 	for _, opt := range opts {
 		opt(cfg)
 	}
 
-	return schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
-		return schema.Ref{
+	return ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (Ref, error) {
+		return Ref{
 			URL: schemaURL,
 			Load: func(ctx context.Context) ([]byte, error) {
 				return httpfetch.Get(ctx, cfg.client, schemaURL)

@@ -2,10 +2,10 @@
 // to a YAML document.
 //
 // A [Matcher] guards a [go.jacobcolvin.com/niceyaml/schema.Resolver] through
-// [go.jacobcolvin.com/niceyaml/schema/registry.When]: the guarded resolver
+// [go.jacobcolvin.com/niceyaml/schema.When]: the guarded resolver
 // names its schema only for documents the matcher accepts and reports
 // [go.jacobcolvin.com/niceyaml/schema.ErrNoMatch] for the rest, so a
-// [go.jacobcolvin.com/niceyaml/schema/registry.Registry] moves on to its
+// [go.jacobcolvin.com/niceyaml/schema.Registry] moves on to its
 // next registration.
 //
 // # Matching Strategies

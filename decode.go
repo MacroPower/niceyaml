@@ -54,7 +54,7 @@ type Validator interface {
 // Document leaves a bound error as it is.
 //
 // See [DocumentValidatorFunc], [go.jacobcolvin.com/niceyaml/schema.Validator],
-// and [go.jacobcolvin.com/niceyaml/schema/registry.Registry] for
+// and [go.jacobcolvin.com/niceyaml/schema.Registry] for
 // implementations.
 type DocumentValidator interface {
 	Validate(ctx context.Context, doc *Document) error
@@ -447,7 +447,7 @@ func (c decodeConfig) decodeOptions() []yaml.DecodeOption {
 // typed decoding. Several validators run in the order given, stopping at
 // the first that fails. A [go.jacobcolvin.com/niceyaml/schema.Validator]
 // checks the document against one JSON schema, and a
-// [go.jacobcolvin.com/niceyaml/schema/registry.Registry] against the schema
+// [go.jacobcolvin.com/niceyaml/schema.Registry] against the schema
 // it picks for the document:
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))

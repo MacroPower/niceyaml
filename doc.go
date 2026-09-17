@@ -136,7 +136,7 @@
 // a type implementing [Validator] validates itself after decoding. A
 // [go.jacobcolvin.com/niceyaml/schema.Validator] is a DocumentValidator that
 // checks the document against one JSON schema, and a
-// [go.jacobcolvin.com/niceyaml/schema/registry.Registry] is one that picks
+// [go.jacobcolvin.com/niceyaml/schema.Registry] is one that picks
 // the schema for the document:
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))

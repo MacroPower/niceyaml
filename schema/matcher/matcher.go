@@ -9,7 +9,7 @@ import (
 // Matcher determines whether a schema should be applied to a document.
 //
 // A Matcher guards a [go.jacobcolvin.com/niceyaml/schema.Resolver] through
-// [go.jacobcolvin.com/niceyaml/schema/registry.When].
+// [go.jacobcolvin.com/niceyaml/schema.When].
 //
 // See [Content], [Exists], [FilePath], [Any], [All], and [Func] for
 // implementations.
