@@ -27,6 +27,12 @@ type silentError struct{ err error }
 func (s silentError) Error() string { return "" }
 func (s silentError) Unwrap() error { return s.err }
 
+// unwritableWriter is the writer an error handler gets when the stream it
+// reports on is closed.
+type unwritableWriter struct{}
+
+func (unwritableWriter) Write([]byte) (int, error) { return 0, errors.New("closed") }
+
 func testStyles() fang.Styles {
 	return fang.Styles{
 		ErrorHeader: lipgloss.NewStyle().SetString("Error"),
@@ -239,6 +245,33 @@ func TestErrorHandler(t *testing.T) {
 			fangs.NewErrorHandler(niceyaml.WithPrinter(xmlPrinter()))(&buf, styles, tc.err)
 
 			assert.Equal(t, tc.want, buf.String())
+		})
+	}
+}
+
+func TestErrorHandler_UnwritableWriter(t *testing.T) {
+	t.Parallel()
+
+	// An error handler has nowhere to report a write of its own, so it drops
+	// the write result rather than taking the process down with it.
+	tcs := map[string]struct {
+		err error
+	}{
+		"plain error": {
+			err: errors.New("something went wrong"),
+		},
+		"usage error, which writes the help hint too": {
+			err: errors.New("unknown flag: --foo"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.NotPanics(t, func() {
+				fangs.ErrorHandler(unwritableWriter{}, testStyles(), tc.err)
+			})
 		})
 	}
 }

@@ -49,7 +49,7 @@ func NewErrorHandler(opts ...niceyaml.DetailOption) fang.ErrorHandler {
 //
 //nolint:gocritic // hugeParam: fang.Styles is what the handler receives.
 func handleError(w io.Writer, styles fang.Styles, err error, opts []niceyaml.DetailOption) {
-	mustN(fmt.Fprintln(w, styles.ErrorHeader.String()))
+	ignoreN(fmt.Fprintln(w, styles.ErrorHeader.String()))
 
 	var parts []string
 
@@ -71,27 +71,25 @@ func handleError(w io.Writer, styles fang.Styles, err error, opts []niceyaml.Det
 
 	// Apply margin manually to each line to avoid lipgloss block padding.
 	for line := range strings.SplitSeq(msg, "\n") {
-		mustN(fmt.Fprintln(w, "  "+line))
+		ignoreN(fmt.Fprintln(w, "  "+line))
 	}
 
-	mustN(fmt.Fprintln(w))
+	ignoreN(fmt.Fprintln(w))
 
 	if isUsageError(err) {
-		mustN(fmt.Fprintln(w, lipgloss.JoinHorizontal(
+		ignoreN(fmt.Fprintln(w, lipgloss.JoinHorizontal(
 			lipgloss.Left,
 			styles.ErrorText.UnsetWidth().Render("Try"),
 			styles.Program.Flag.PaddingLeft(1).Render("--help"),
 			styles.ErrorText.UnsetWidth().UnsetMargins().UnsetTransform().PaddingLeft(1).Render("for usage."),
 		)))
-		mustN(fmt.Fprintln(w))
+		ignoreN(fmt.Fprintln(w))
 	}
 }
 
-func mustN(_ int, err error) {
-	if err != nil {
-		panic(err)
-	}
-}
+// ignoreN discards the result of a write to the error writer. A handler that
+// cannot reach the writer has nowhere to report that.
+func ignoreN(_ int, _ error) {}
 
 // yamlErrors returns the outermost [niceyaml.SourceError] values in err's
 // tree, in the order their messages appear in the rendered text. It stops at
