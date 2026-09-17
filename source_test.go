@@ -1212,6 +1212,47 @@ func TestSource_WrapError(t *testing.T) {
 		assert.Equal(t, "document 3: <nil>", fmt.Sprintf("%+v", wrapped))
 	})
 
+	t.Run("looks past a nil SourceError in the chain", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("name: value\n")
+		pathErr := niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name").Value()))
+
+		var nilBound *niceyaml.SourceError
+
+		tcs := map[string]error{
+			"nil binding after the Error":  errors.Join(pathErr, nilBound),
+			"nil binding before the Error": errors.Join(nilBound, pathErr),
+			"nil binding wrapped":          fmt.Errorf("ctx: %w", errors.Join(nilBound, pathErr)),
+		}
+
+		for name, err := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				// The nil pointer binds nothing, so the Error in the chain
+				// binds to this source and its path resolves there.
+				wrapped := source.WrapError(err)
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, wrapped, &bound)
+				assert.Same(t, source, bound.Source())
+				require.ErrorIs(t, wrapped, pathErr)
+
+				rng, locErr := bound.Location()
+				require.NoError(t, locErr)
+				assert.Equal(t, position.NewRange(position.New(0, 6), position.New(0, 11)), rng)
+
+				docs, docsErr := source.Documents()
+				require.NoError(t, docsErr)
+
+				require.ErrorAs(t, docs[0].WrapError(err), &bound)
+				assert.Same(t, source, bound.Source())
+			})
+		}
+	})
+
 	t.Run("returns an error bound to the same source unchanged", func(t *testing.T) {
 		t.Parallel()
 

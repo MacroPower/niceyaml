@@ -392,7 +392,7 @@ func (dd *Document) WrapError(err error) error {
 		return err
 	}
 
-	bound, isBound := errors.AsType[*SourceError](err)
+	bound, isBound := firstSourceError(err)
 	if isBound && bound.source == dd.source {
 		return err
 	}

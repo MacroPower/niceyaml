@@ -350,8 +350,9 @@ func (s *Source) parse() (*ast.File, error) {
 //
 // If err is nil, WrapError returns nil. If err's chain holds no [*Error], or
 // the first one it holds is a nil pointer, or the first [*SourceError] it
-// holds is bound to this Source already, WrapError returns err unchanged.
-// WrapError never modifies err.
+// holds is bound to this Source already, WrapError returns err unchanged. A
+// nil [*SourceError] pointer in the chain binds nothing, so WrapError looks
+// past it. WrapError never modifies err.
 func (s *Source) WrapError(err error) error {
 	if err == nil {
 		return nil
@@ -361,7 +362,7 @@ func (s *Source) WrapError(err error) error {
 		return err
 	}
 
-	bound, ok := errors.AsType[*SourceError](err)
+	bound, ok := firstSourceError(err)
 	if ok && bound.source == s {
 		return err
 	}

@@ -293,7 +293,7 @@ func (e *Error) find(pred func(*Error) bool) *Error {
 		}
 
 		inner, ok := errors.AsType[*Error](cur.err)
-		if !ok {
+		if !ok || inner == nil {
 			return nil
 		}
 
@@ -597,8 +597,13 @@ func (e *SourceError) Source() *Source {
 	return e.source
 }
 
-// Unwrap returns the error the [SourceError] was created from.
+// Unwrap returns the error the [SourceError] was created from. A nil
+// SourceError unwraps to nothing, so a chain that holds one is safe to walk.
 func (e *SourceError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+
 	return e.err
 }
 
@@ -620,7 +625,7 @@ func (e *SourceError) Error() string {
 
 	// A binding to another source put the position it resolved into the
 	// text that the wrappers above it froze.
-	if _, ok := errors.AsType[*SourceError](e.err); ok { //nolint:errcheck // Presence check, not a value extraction.
+	if _, ok := firstSourceError(e.err); ok { //nolint:errcheck // Presence check, not a value extraction.
 		return msg
 	}
 
@@ -662,6 +667,15 @@ func (e *SourceError) located() (*Error, *Error) {
 // message or location to render.
 func firstError(err error) (*Error, bool) {
 	e, ok := errors.AsType[*Error](err)
+
+	return e, ok && e != nil
+}
+
+// firstSourceError returns the first [*SourceError] in err's chain. It
+// reports false when the chain holds none or when that SourceError is a nil
+// pointer, which binds nothing.
+func firstSourceError(err error) (*SourceError, bool) {
+	e, ok := errors.AsType[*SourceError](err)
 
 	return e, ok && e != nil
 }
