@@ -70,6 +70,16 @@ func TestSchemaStore_FindMatch(t *testing.T) {
 				URL:       "https://json.schemastore.org/not-yaml.json",
 				FileMatch: []string{"*.{toml,ini}"},
 			},
+			{
+				Name:      "Issue Template",
+				URL:       "https://json.schemastore.org/github-issue-forms.json",
+				FileMatch: []string{"**/.github/ISSUE_TEMPLATE/!(config).yml"}, // Extglob only.
+			},
+			{
+				Name:      "Mixed Patterns",
+				URL:       "https://json.schemastore.org/mixed.json",
+				FileMatch: []string{"**/mixed/!(config).yml", "**/mixed/*.yaml"},
+			},
 		},
 	}
 
@@ -113,6 +123,21 @@ func TestSchemaStore_FindMatch(t *testing.T) {
 		"matches json file": {
 			filePath: "schema.json",
 			wantName: "JSON Schema Draft 7",
+		},
+		"no match for an extglob pattern": {
+			// The matcher implements no extglob, so the pattern is dropped
+			// rather than kept as something only a literally named file
+			// could match.
+			filePath: ".github/ISSUE_TEMPLATE/bug.yml",
+			err:      schemastore.ErrNoCatalogMatch,
+		},
+		"no match for the literal spelling of an extglob pattern": {
+			filePath: ".github/ISSUE_TEMPLATE/!(config).yml",
+			err:      schemastore.ErrNoCatalogMatch,
+		},
+		"matches the supported pattern beside an extglob one": {
+			filePath: "repo/mixed/config.yaml",
+			wantName: "Mixed Patterns",
 		},
 		"no match for unrelated file": {
 			filePath: "config.yaml",

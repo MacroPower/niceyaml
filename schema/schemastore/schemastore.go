@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -36,6 +37,11 @@ var (
 	// [go.jacobcolvin.com/niceyaml/schema.Registry] moves on to the
 	// next resolver.
 	ErrNoCatalogMatch = fmt.Errorf("%w: no catalog entry matches", schema.ErrNoMatch)
+
+	// An extglob group, such as the "!(config)" in
+	// "**/.github/ISSUE_TEMPLATE/!(config).yml". The matcher implements no
+	// extglob and reads such a group as literal text.
+	extglobRE = regexp.MustCompile(`[?*+@!]\(`)
 )
 
 // Catalog represents the SchemaStore.org catalog structure returned by
@@ -479,10 +485,19 @@ func (s *SchemaStore) filterAndNormalizeEntries(schemas []CatalogEntry) []Catalo
 // since JSON is a valid subset of YAML. A pattern with brace alternatives,
 // such as "*.{yml,yaml}", counts when any of its alternatives has a
 // supported extension.
+//
+// A pattern holding an extglob group is dropped, since the matcher reads
+// the group literally and the pattern could only match a file named after
+// the text of the group. The entry count then reflects the entries that
+// can match a file someone would write.
 func filterSupportedPatterns(patterns []string) []string {
 	var result []string
 
 	for _, pattern := range patterns {
+		if extglobRE.MatchString(pattern) {
+			continue
+		}
+
 		if slices.ContainsFunc(filepaths.ExpandBraces(pattern), hasSupportedExtension) {
 			result = append(result, pattern)
 		}
