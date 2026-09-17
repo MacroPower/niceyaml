@@ -699,7 +699,7 @@ func TestSource_Validate(t *testing.T) {
 			t.Parallel()
 
 			source := niceyaml.NewSourceFromString(tc.input)
-			err := source.Lines().Validate()
+			err := yamltest.ValidateLines(source.Lines())
 
 			assert.NoError(t, err)
 		})

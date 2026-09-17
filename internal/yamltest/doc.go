@@ -40,7 +40,8 @@
 //
 // [ValidateTokenPair] and [ValidateTokens] check for nil tokens or positions,
 // returning [*TokenValidationError] with the underlying [ErrNilToken] or
-// [ErrNilPosition] reason.
+// [ErrNilPosition] reason. [ValidateLines] checks that a [line.Lines]
+// collection keeps its line numbers and token columns in increasing order.
 //
 // [CompareTokens] and [CompareTokenSlices] return [TokenDiff] and [TokensDiff]
 // respectively, providing detailed field-by-field comparison results.
