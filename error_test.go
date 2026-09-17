@@ -2349,6 +2349,89 @@ func TestError_NestedErrorsRenderAsAnnotations(t *testing.T) {
 	assert.Contains(t, got, "^ bad b")
 }
 
+func TestError_NestedErrorChains(t *testing.T) {
+	t.Parallel()
+
+	// A nested error is a chain like the main one: it resolves through the
+	// Error inside it, keeps the document index that Error carries, and
+	// annotates the line with its message alone.
+
+	t.Run("location behind foreign wrapping resolves", func(t *testing.T) {
+		t.Parallel()
+
+		source := xmlSource("a: 1\nb: 2\nc: 3\n")
+		err := source.WrapError(niceyaml.NewError(
+			"outer",
+			niceyaml.WithPath(paths.Root().Child("a").Value()),
+			niceyaml.WithErrors(
+				niceyaml.NewErrorFrom(fmt.Errorf("ctx: %w",
+					niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("b").Value())),
+				)),
+			),
+		))
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+
+		detail, detailErr := bound.Detail(niceyaml.WithPrinter(newXMLPrinter()))
+		require.NoError(t, detailErr)
+
+		got := trimLines(detail)
+		assert.Contains(t, got, "<genericError>2</genericError>")
+		assert.Contains(t, got, "^ ctx: $.b: bad")
+
+		// Nothing is left unresolved, so the excerpt is the whole output.
+		assert.Equal(t, "[1:4] $.a: outer\n\n"+got, trimLines(render(err)))
+	})
+
+	t.Run("document index inside the chain wins over the inherited one", func(t *testing.T) {
+		t.Parallel()
+
+		source := xmlSource("a: 1\n---\na: 2\nb: 3\n")
+
+		docs, err := source.Documents()
+		require.NoError(t, err)
+
+		inner := niceyaml.NewError("bad a",
+			niceyaml.WithPath(paths.Root().Child("a").Value()),
+			niceyaml.WithDocumentIndex(0),
+		)
+		bound := docs[1].WrapError(niceyaml.NewError(
+			"outer",
+			niceyaml.WithPath(paths.Root().Child("b").Value()),
+			niceyaml.WithErrors(niceyaml.NewErrorFrom(fmt.Errorf("ctx: %w", inner))),
+		))
+
+		got := trimLines(render(bound))
+		assert.Contains(t, got, "<genericError>1</genericError>")
+		assert.Contains(t, got, "<genericError>3</genericError>")
+		assert.NotContains(t, got, "<genericError>2</genericError>")
+	})
+
+	t.Run("annotation drops the position the caret marks", func(t *testing.T) {
+		t.Parallel()
+
+		source := xmlSource("a: 1\nb: 2\n")
+		tk := source.Lines().TokenAt(position.New(1, 0))
+		require.NotNil(t, tk)
+
+		err := source.WrapError(niceyaml.NewError(
+			"outer",
+			niceyaml.WithPath(paths.Root().Child("a").Value()),
+			niceyaml.WithErrors(
+				niceyaml.NewErrorFrom(niceyaml.NewError("inner", niceyaml.WithToken(tk))),
+				niceyaml.NewErrorFrom(niceyaml.NewError("also", niceyaml.WithPath(paths.Root().Child("b").Value()))),
+			),
+		))
+
+		got := trimLines(render(err))
+		assert.Contains(t, got, "^ inner; also")
+		assert.NotContains(t, got, "[2:1]")
+		assert.NotContains(t, got, "$.b")
+	})
+}
+
 func TestError_NestedMessageSpansLines(t *testing.T) {
 	t.Parallel()
 

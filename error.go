@@ -394,13 +394,13 @@ func (e *Error) DocumentIndex() (int, bool) {
 	return a.docIndex, true
 }
 
-// documentIndex returns e's own document index, or fallback when
-// [WithDocumentIndex] did not set one. A nested error resolves in its own
-// index when it carries one and otherwise in the one the outer chain
-// selects.
+// documentIndex returns the document index of e's chain, as
+// [Error.DocumentIndex] reports it, or fallback when none in the chain set
+// one. A nested error resolves in the index its own chain carries and
+// otherwise in the one the outer chain selects.
 func (e *Error) documentIndex(fallback int) int {
-	if e.hasDocIndex {
-		return e.docIndex
+	if index, ok := e.DocumentIndex(); ok {
+		return index
 	}
 
 	return fallback
@@ -409,9 +409,26 @@ func (e *Error) documentIndex(fallback int) int {
 // defaultDocumentIndex returns the document index nested errors inherit: the
 // outermost one set in e's chain, or 0.
 func (e *Error) defaultDocumentIndex() int {
-	index, _ := e.DocumentIndex()
+	return e.documentIndex(0)
+}
 
-	return index
+// message returns the text of e without the location e or the Errors it
+// directly wraps put in front: the message of the innermost error that is
+// not an Error, or "" when that error is nil. Text a foreign wrapper such as
+// [fmt.Errorf] added stays as it is, as it does everywhere else.
+func (e *Error) message() string {
+	for cur := e; ; {
+		inner, ok := cur.err.(*Error) //nolint:errorlint // Identity of the direct child, not a chain search.
+		if !ok || inner == nil {
+			if cur.err == nil {
+				return ""
+			}
+
+			return cur.err.Error()
+		}
+
+		cur = inner
+	}
 }
 
 // location is a resolved error location: the position the message reports,
@@ -423,8 +440,9 @@ type location struct {
 
 // locate resolves e's location in the view of src: a range as it is, and a
 // token, or the token a path resolves to in document doc, at the view
-// position of the token. An Error without a position of its own that
-// directly wraps another Error takes that Error's location.
+// position of the token. An Error without a position of its own takes the
+// location of the nearest Error it wraps, looking through foreign wrapping
+// as [Error.anchor] does.
 func (e *Error) locate(src *Source, doc int) (location, error) {
 	switch {
 	case e.rng != nil:
@@ -455,8 +473,8 @@ func (e *Error) locate(src *Source, doc int) (location, error) {
 		return location{pos: src.viewPosition(tk)}, nil
 
 	default:
-		inner, ok := e.err.(*Error) //nolint:errorlint // Identity of the direct child, not a chain search.
-		if ok {
+		inner, ok := errors.AsType[*Error](e.err)
+		if ok && inner != nil {
 			return inner.locate(src, doc)
 		}
 
@@ -827,10 +845,13 @@ func (e *SourceError) render(cfg detailConfig, view line.Lines, positions []erro
 }
 
 // collectPositions resolves the main location of a and the locations of its
-// nested errors within view, with the ranges each highlights. Nested errors
-// whose location does not resolve come back separately, in order. The error
-// joins the resolution failures, so it is nil when every location resolved
-// and, when none did, says why.
+// nested errors within view, with the ranges each highlights. A nested
+// error is a chain like the main one: its location and document index come
+// from the nearest Error in it that carries them, and its annotation is its
+// message without the location that Error puts in front, since the caret
+// marks it. Nested errors whose location does not resolve come back
+// separately, in order. The error joins the resolution failures, so it is
+// nil when every location resolved and, when none did, says why.
 func (e *SourceError) collectPositions(a *Error, doc int, view line.Lines) ([]errorPosition, []*Error, error) {
 	positions := make([]errorPosition, 0, 1+len(a.errors))
 
@@ -871,7 +892,7 @@ func (e *SourceError) collectPositions(a *Error, doc int, view line.Lines) ([]er
 		}
 
 		positions = append(positions, errorPosition{
-			message: nested.err.Error(),
+			message: nested.message(),
 			pos:     loc.pos,
 			ranges:  highlightRanges(view, loc),
 		})
