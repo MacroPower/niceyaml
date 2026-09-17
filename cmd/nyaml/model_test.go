@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -160,6 +161,37 @@ func TestUpdateWindowSizeViewportHeight(t *testing.T) {
 			got, ok := updated.(model)
 			require.True(t, ok)
 			assert.Equal(t, tc.want, got.viewport.Height())
+		})
+	}
+}
+
+func TestTitleLineWidth(t *testing.T) {
+	t.Parallel()
+
+	// The title line fills the terminal exactly. One cell over and it wraps
+	// onto another row, pushing the text line out of the alt screen.
+	tcs := map[string]struct {
+		width int
+	}{
+		"80 columns": {
+			width: 80,
+		},
+		"120 columns": {
+			width: 120,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := newModel(&modelOptions{})
+
+			updated, _ := m.Update(tea.WindowSizeMsg{Width: tc.width, Height: 24})
+
+			got, ok := updated.(model)
+			require.True(t, ok)
+			assert.Equal(t, tc.width, lipgloss.Width(got.titleLine()))
 		})
 	}
 }

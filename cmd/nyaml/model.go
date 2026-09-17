@@ -306,8 +306,9 @@ func (m *model) titleLine() string {
 		titleSegment{titleText, style.GenericHeadingAccent},
 	)
 
-	// Calculate width used by fixed segments (text + 1 separator each).
-	usedWidth := 0
+	// Width used by the fixed segments, each followed by a separator, plus
+	// the trailing separator after the subtitle.
+	usedWidth := 1
 	for _, seg := range segments {
 		usedWidth += lipgloss.Width(seg.text) + 1 // +1 for separator.
 	}
