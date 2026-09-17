@@ -561,15 +561,17 @@ func (p *Printer) renderAnnotation(
 		return nil
 	}
 
-	subLines := p.wrapContent(content, gutterWidth)
+	// Escape before wrapping, as the content path does, so the wrap
+	// measures the pictures the terminal shows.
+	content = escape.Control(content)
 
-	// Calculate continuation padding for wrapped lines.
-	// For Below annotations: col spaces + "^ " = col + 2.
-	// For Above annotations: col spaces.
-	continuationPadding := strings.Repeat(" ", anns.Col())
-	if placement == line.Below {
-		continuationPadding += "  " // Align with text after "^ ".
-	}
+	// The indent stays out of the wrapped text and comes back on every
+	// row: the first row keeps it as rendered and continuation rows get
+	// the same width in spaces, so the annotation column survives the
+	// wrap and no row exceeds the width.
+	indent, body := splitAnnotationIndent(content, placement)
+	indentWidth := lipgloss.Width(indent)
+	subLines := p.wrapContent(body, gutterWidth+indentWidth)
 
 	rows := make([]string, 0, len(subLines))
 
@@ -586,17 +588,30 @@ func (p *Printer) renderAnnotation(
 			Styles:     p.styles,
 		}))
 
-		// Add continuation padding for wrapped lines.
+		prefix := indent
 		if j > 0 {
-			sb.WriteString(p.styles.Style(style.Comment).Render(continuationPadding))
+			prefix = strings.Repeat(" ", indentWidth)
 		}
 
-		sb.WriteString(p.styles.Style(style.Comment).Render(escape.Control(subLine)))
+		sb.WriteString(p.styles.Style(style.Comment).Render(prefix + subLine))
 
 		rows = append(rows, sb.String())
 	}
 
 	return rows
+}
+
+// splitAnnotationIndent splits rendered annotation content into the indent
+// its wrapped rows align under and the body to wrap. The indent is the
+// leading run of spaces and tabs plus, for [line.Below] content, the "^ "
+// marker [DefaultAnnotation] puts after it.
+func splitAnnotationIndent(content string, placement line.Placement) (string, string) {
+	body := strings.TrimLeft(content, " \t")
+	if placement == line.Below {
+		body = strings.TrimPrefix(body, "^ ")
+	}
+
+	return content[:len(content)-len(body)], body
 }
 
 // contentRows wraps a line's rendered content to the printer width and

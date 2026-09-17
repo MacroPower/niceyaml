@@ -2834,3 +2834,175 @@ func TestPrinter_WithAnnotationFunc(t *testing.T) {
 		})
 	}
 }
+
+func TestPrinter_AnnotationWrap(t *testing.T) {
+	t.Parallel()
+
+	// Joins the contents with no padding and no marker, so continuation
+	// rows carry no indent.
+	bare := func(ctx printer.AnnotationContext) string {
+		return strings.Join(ctx.Annotations.Contents(), " ")
+	}
+
+	tcs := map[string]struct {
+		annFunc    printer.AnnotationFunc
+		gutter     printer.GutterFunc
+		input      string
+		want       string
+		annotation line.Annotation
+		width      int
+	}{
+		"below rows align under the marker within the width": {
+			input:  "key: value",
+			gutter: printer.LineNumberGutter,
+			width:  40,
+			annotation: line.Annotation{
+				Content:   "this is a fairly long annotation message that will wrap",
+				Placement: line.Below,
+				Col:       20,
+			},
+			want: stringtest.JoinLF(
+				"   1 key: value",
+				strings.Repeat(" ", 25)+"^ this is a",
+				strings.Repeat(" ", 27)+"fairly long",
+				strings.Repeat(" ", 27)+"annotation",
+				strings.Repeat(" ", 27)+"message that",
+				strings.Repeat(" ", 27)+"will wrap",
+			),
+		},
+		"above rows align under the column": {
+			input:  "key: value",
+			gutter: printer.NoGutter,
+			width:  16,
+			annotation: line.Annotation{
+				Content:   "one two three four five",
+				Placement: line.Above,
+				Col:       4,
+			},
+			want: stringtest.JoinLF(
+				"    one two",
+				"    three four",
+				"    five",
+				"key: value",
+			),
+		},
+		"column past the width keeps the marker at its column": {
+			input:  "key: value",
+			gutter: printer.NoGutter,
+			width:  25,
+			annotation: line.Annotation{
+				Content:   "x",
+				Placement: line.Below,
+				Col:       30,
+			},
+			want: stringtest.JoinLF(
+				"key: value",
+				strings.Repeat(" ", 30)+"^ x",
+			),
+		},
+		"negative column renders at column zero": {
+			input:  "key: value",
+			gutter: printer.NoGutter,
+			width:  0,
+			annotation: line.Annotation{
+				Content:   "x",
+				Placement: line.Below,
+				Col:       -1,
+			},
+			want: stringtest.JoinLF(
+				"key: value",
+				"^ x",
+			),
+		},
+		"negative column renders at column zero when wrapping": {
+			input:  "key: value",
+			gutter: printer.NoGutter,
+			width:  10,
+			annotation: line.Annotation{
+				Content:   "x",
+				Placement: line.Below,
+				Col:       -1,
+			},
+			want: stringtest.JoinLF(
+				"key: value",
+				"^ x",
+			),
+		},
+		"control characters are escaped before wrapping": {
+			input:  "key: value",
+			gutter: printer.NoGutter,
+			width:  20,
+			annotation: line.Annotation{
+				Content:   "\x1b[31mred\x1b[0m w w w w w w w w",
+				Placement: line.Below,
+				Col:       0,
+			},
+			want: stringtest.JoinLF(
+				"key: value",
+				"^ ␛[31mred␛[0m w w w",
+				"  w w w w w",
+			),
+		},
+		"embedded newline renders as a picture without wrapping": {
+			input:  "key: value",
+			gutter: printer.NoGutter,
+			width:  0,
+			annotation: line.Annotation{
+				Content:   "a\nb",
+				Placement: line.Below,
+				Col:       0,
+			},
+			want: stringtest.JoinLF(
+				"key: value",
+				"^ a␊b",
+			),
+		},
+		"embedded newline renders as a picture when wrapping": {
+			input:  "key: value",
+			gutter: printer.NoGutter,
+			width:  20,
+			annotation: line.Annotation{
+				Content:   "a\nb",
+				Placement: line.Below,
+				Col:       0,
+			},
+			want: stringtest.JoinLF(
+				"key: value",
+				"^ a␊b",
+			),
+		},
+		"custom annotation func gets no column indent": {
+			input:   "k: v",
+			gutter:  printer.NoGutter,
+			width:   6,
+			annFunc: bare,
+			annotation: line.Annotation{
+				Content:   "w w w w w w",
+				Placement: line.Below,
+				Col:       10,
+			},
+			want: stringtest.JoinLF(
+				"k: v",
+				"w w w",
+				"w w w",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := niceyaml.NewSourceFromString(tc.input).Lines()
+			view[0].AddAnnotation(tc.annotation)
+
+			p := testPrinterWithGutter(tc.gutter).With(printer.WithWidth(tc.width))
+			if tc.annFunc != nil {
+				p = p.With(printer.WithAnnotationFunc(tc.annFunc))
+			}
+
+			got := p.Print(view)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
