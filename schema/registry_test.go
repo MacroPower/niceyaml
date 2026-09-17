@@ -188,6 +188,78 @@ func TestRegistry_Validate(t *testing.T) {
 	})
 }
 
+func TestRegistry_WithRequireSchema(t *testing.T) {
+	t.Parallel()
+
+	schemaData := []byte(`{"type": "object", "properties": {"kind": {"type": "number"}}}`)
+
+	newRegistry := func() *schema.Registry {
+		reg := schema.NewRegistry(schema.WithRequireSchema(false))
+		reg.Register(schema.When(
+			matcher.Content(kindPath, "Deployment"),
+			schema.Embedded("test.json", schemaData),
+		))
+
+		return reg
+	}
+
+	t.Run("accepts a document no resolver applies to", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
+		require.NoError(t, newRegistry().Validate(t.Context(), doc))
+	})
+
+	t.Run("accepts a document without content", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "# only a comment\n")
+		require.NoError(t, newRegistry().Validate(t.Context(), doc))
+	})
+
+	t.Run("still validates a document a resolver applies to", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
+		err := newRegistry().Validate(t.Context(), doc)
+		require.Error(t, err)
+		require.NotErrorIs(t, err, schema.ErrNoMatch)
+	})
+
+	t.Run("still reports other resolver errors", func(t *testing.T) {
+		t.Parallel()
+
+		cannotDecide := errors.New("cannot decide")
+
+		reg := schema.NewRegistry(schema.WithRequireSchema(false))
+		reg.Register(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
+			return schema.Ref{}, cannotDecide
+		}))
+
+		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
+		err := reg.Validate(t.Context(), doc)
+		require.ErrorIs(t, err, schema.ErrResolve)
+		require.ErrorIs(t, err, cannotDecide)
+	})
+
+	t.Run("Lookup still reports ErrNoMatch", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
+		_, err := newRegistry().Lookup(t.Context(), doc)
+		require.ErrorIs(t, err, schema.ErrNoMatch)
+	})
+
+	t.Run("runs inside a decode", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
+		got, err := doc.Decode[map[string]string](t.Context(), niceyaml.WithValidator(newRegistry()))
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"kind": "Service"}, got)
+	})
+}
+
 func TestRegistry_Caching(t *testing.T) {
 	t.Parallel()
 

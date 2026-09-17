@@ -74,6 +74,15 @@
 //
 // A Registry implements [go.jacobcolvin.com/niceyaml.DocumentValidator],
 // so [go.jacobcolvin.com/niceyaml.WithValidator] runs it before a decode.
+// A document no resolver applies to fails with [ErrNoMatch], which is the
+// answer a validation command wants. A decode that should check the
+// documents it recognizes and accept the rest builds the registry with
+// [WithRequireSchema] set false:
+//
+//	reg := schema.NewRegistry(schema.WithRequireSchema(false))
+//	reg.Register(schema.Directive(), schemastore.New())
+//
+//	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
 //
 // # Loaders
 //

@@ -61,13 +61,36 @@ type Registry struct {
 	resolvers     []Resolver
 	validatorOpts []jsonschema.ValidateOption
 	mu            sync.RWMutex
+	// Makes Validate report ErrNoMatch when no resolver applies.
+	requireSchema bool
 }
 
 // RegistryOption configures [Registry] creation.
 //
 // Available options:
 //   - [WithValidateOptions]
+//   - [WithRequireSchema]
 type RegistryOption func(*Registry)
+
+// WithRequireSchema is a [RegistryOption] that sets whether
+// [Registry.Validate] reports a document no resolver applies to. The
+// default is true, and such a document then fails with [ErrNoMatch]. With
+// false, Validate accepts it, so a registry that validates what it
+// recognizes and passes the rest runs inside a decode through
+// [niceyaml.WithValidator]:
+//
+//	reg := schema.NewRegistry(schema.WithRequireSchema(false))
+//	reg.Register(schema.Directive(), schemastore.New())
+//
+//	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
+//
+// [Registry.Lookup] reports [ErrNoMatch] either way, since a caller that
+// asks for the validator needs to know there is none.
+func WithRequireSchema(require bool) RegistryOption {
+	return func(r *Registry) {
+		r.requireSchema = require
+	}
+}
 
 // WithValidateOptions is a [RegistryOption] that sets the [jsonschema.ValidateOption]
 // values the registry passes to [jsonschema.CompileJSON]. They apply when a
@@ -86,7 +109,8 @@ func WithValidateOptions(opts ...jsonschema.ValidateOption) RegistryOption {
 // NewRegistry creates a new [*Registry].
 func NewRegistry(opts ...RegistryOption) *Registry {
 	r := &Registry{
-		cache: make(map[string]*Validator),
+		cache:         make(map[string]*Validator),
+		requireSchema: true,
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -161,8 +185,10 @@ func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.Document) (*Validat
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
 //
-// Returns [ErrNoMatch] if no resolver applies to the document.
-// Callers can check for this error to allow unmatched documents:
+// Returns [ErrNoMatch] if no resolver applies to the document, unless
+// [WithRequireSchema] set false, in which case such a document passes.
+// Callers of a registry that requires a schema can check for the error to
+// allow unmatched documents at one call site:
 //
 //	err := reg.Validate(ctx, doc)
 //	if err != nil && !errors.Is(err, ErrNoMatch) {
@@ -175,6 +201,10 @@ func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.Document) (*Validat
 func (r *Registry) Validate(ctx context.Context, doc *niceyaml.Document) error {
 	v, err := r.Lookup(ctx, doc)
 	if err != nil {
+		if !r.requireSchema && errors.Is(err, ErrNoMatch) {
+			return nil
+		}
+
 		return err
 	}
 
