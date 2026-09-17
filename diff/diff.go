@@ -505,8 +505,5 @@ func selectHunkSpans(ops []lineOp, context int) position.Spans {
 		return nil
 	}
 
-	// Group indices, expand by context, clamp to valid range.
-	return position.GroupIndices(changeIndices, context).
-		Expand(context).
-		Clamp(0, len(ops))
+	return position.ContextSpans(changeIndices, context, len(ops))
 }

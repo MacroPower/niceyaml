@@ -52,4 +52,8 @@
 //
 // [GroupIndices] is particularly useful for creating context windows around
 // matched lines, merging adjacent matches when their context would overlap.
+// [ContextSpans] runs that chain in one call, grouping the indices, expanding
+// each span by the context, and clamping the result to the document:
+//
+//	hunks := position.ContextSpans(errorLines, 2, lines.Len())
 package position

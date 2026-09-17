@@ -975,3 +975,67 @@ func TestSpans_Chained(t *testing.T) {
 	got := position.GroupIndices(indices, context).Expand(context).Clamp(0, 20)
 	assert.Equal(t, clamped, got)
 }
+
+func TestContextSpans(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		indices []int
+		context int
+		total   int
+		want    position.Spans
+	}{
+		"empty indices": {
+			indices: nil,
+			context: 2,
+			total:   10,
+			want:    nil,
+		},
+		"single index with context": {
+			indices: []int{5},
+			context: 2,
+			total:   10,
+			want:    position.Spans{position.NewSpan(3, 8)},
+		},
+		"context clamped at both ends": {
+			indices: []int{0, 9},
+			context: 2,
+			total:   10,
+			want:    position.Spans{position.NewSpan(0, 3), position.NewSpan(7, 10)},
+		},
+		"windows that touch merge": {
+			indices: []int{2, 7},
+			context: 2,
+			total:   20,
+			want:    position.Spans{position.NewSpan(0, 10)},
+		},
+		"distant indices stay apart": {
+			indices: []int{2, 12},
+			context: 2,
+			total:   20,
+			want:    position.Spans{position.NewSpan(0, 5), position.NewSpan(10, 15)},
+		},
+		"zero context": {
+			indices: []int{4, 5, 9},
+			context: 0,
+			total:   20,
+			want:    position.Spans{position.NewSpan(4, 6), position.NewSpan(9, 10)},
+		},
+		"unsorted indices": {
+			indices: []int{12, 2},
+			context: 1,
+			total:   20,
+			want:    position.Spans{position.NewSpan(1, 4), position.NewSpan(11, 14)},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := position.ContextSpans(tc.indices, tc.context, tc.total)
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}

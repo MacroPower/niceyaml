@@ -321,3 +321,12 @@ func GroupIndices(indices []int, context int) Spans {
 
 	return spans
 }
+
+// ContextSpans returns the spans of lines to show around indices: each index
+// with context lines on either side, merged where the windows would touch or
+// overlap, and clamped to [0, total). It is [GroupIndices] followed by
+// [Spans.Expand] and [Spans.Clamp], which is how error excerpts and diff
+// hunks pick the lines they render. Returns nil when indices is empty.
+func ContextSpans(indices []int, context, total int) Spans {
+	return GroupIndices(indices, context).Expand(context).Clamp(0, total)
+}

@@ -740,8 +740,10 @@ func (e *SourceError) render(cfg detailConfig, view line.Lines, positions []erro
 		view[lineIdx].AddAnnotation(annotation)
 	}
 
-	// Build hunk spans from all line indices covered by error ranges.
-	hunkSpans := hunkSpans(allRanges.LineIndices(), cfg.contextLines, view.Len())
+	// Group the error lines into hunks with context around each. Errors
+	// whose context windows touch share a hunk, so a line gap always
+	// separates two hunks for the "..." separator.
+	hunkSpans := position.ContextSpans(allRanges.LineIndices(), cfg.contextLines, view.Len())
 
 	// Add "..." annotations to first line of each non-first hunk.
 	for i, span := range hunkSpans {
@@ -829,21 +831,6 @@ func highlightRanges(view line.Lines, loc location) position.Ranges {
 	}
 
 	return view.ContentRanges(view.TokenAt(loc.pos))
-}
-
-// hunkSpans groups error line indices into spans based on proximity, with
-// contextLines lines of context applied and clamped to totalLines. Errors
-// merge when their context windows would be adjacent or overlapping, so
-// there is always at least one line gap between hunks for the "..."
-// separator.
-func hunkSpans(errorLines []int, contextLines, totalLines int) position.Spans {
-	if len(errorLines) == 0 {
-		return nil
-	}
-
-	return position.GroupIndices(errorLines, contextLines).
-		Expand(contextLines).
-		Clamp(0, totalLines)
 }
 
 // prepareLineAnnotations prepares annotations grouped by line index. It
