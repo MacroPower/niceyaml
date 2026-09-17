@@ -32,7 +32,7 @@
 // Compile a schema with [go.jacobcolvin.com/x/jsonschema.CompileJSON] (or
 // [go.jacobcolvin.com/x/jsonschema.MustCompileJSON] for embedded schemas) and
 // wrap it with [NewValidator] to obtain a [*Validator], a
-// [go.jacobcolvin.com/niceyaml.DocumentValidator] that reports failures as
+// [go.jacobcolvin.com/niceyaml.Validator] that reports failures as
 // errors carrying YAML path information for integration with niceyaml's error
 // display:
 //
@@ -72,7 +72,7 @@
 //	    }
 //	}
 //
-// A Registry implements [go.jacobcolvin.com/niceyaml.DocumentValidator],
+// A Registry implements [go.jacobcolvin.com/niceyaml.Validator],
 // so [go.jacobcolvin.com/niceyaml.WithValidator] runs it before a decode.
 // A document no resolver applies to fails with [ErrNoMatch], which is the
 // answer a validation command wants. A decode that should check the

@@ -412,8 +412,8 @@ func TestDocument_Decode_Schema(t *testing.T) {
 			order        []string
 		)
 
-		record := func(name string, called *bool) niceyaml.DocumentValidator {
-			return niceyaml.DocumentValidatorFunc(func(_ context.Context, _ *niceyaml.Document) error {
+		record := func(name string, called *bool) niceyaml.Validator {
+			return niceyaml.ValidatorFunc(func(_ context.Context, _ *niceyaml.Document) error {
 				*called = true
 
 				order = append(order, name)
@@ -661,10 +661,10 @@ func TestDocument_Decode_CanceledContext(t *testing.T) {
 	}
 }
 
-func TestDocument_Decode_Validator(t *testing.T) {
+func TestDocument_Decode_SelfValidator(t *testing.T) {
 	t.Parallel()
 
-	t.Run("calls Validate on a Validator struct", func(t *testing.T) {
+	t.Run("calls Validate on a SelfValidator struct", func(t *testing.T) {
 		t.Parallel()
 
 		input := stringtest.Input(`
@@ -718,7 +718,7 @@ func TestDocument_Decode_Validator(t *testing.T) {
 		require.ErrorIs(t, err, errNameRequired, "Validate() should have been called")
 	})
 
-	t.Run("struct without Validator decodes normally", func(t *testing.T) {
+	t.Run("struct without SelfValidator decodes normally", func(t *testing.T) {
 		t.Parallel()
 
 		input := stringtest.Input(`
@@ -761,7 +761,7 @@ func TestDocument_Decode_Validator(t *testing.T) {
 		}
 	})
 
-	t.Run("returns Validator error", func(t *testing.T) {
+	t.Run("returns SelfValidator error", func(t *testing.T) {
 		t.Parallel()
 
 		input := stringtest.Input(`
@@ -779,7 +779,7 @@ func TestDocument_Decode_Validator(t *testing.T) {
 	})
 }
 
-// validatorConfig implements niceyaml.Validator.
+// validatorConfig implements niceyaml.SelfValidator.
 type validatorConfig struct {
 	Name      string `yaml:"name"`
 	Value     int    `yaml:"value"`
@@ -799,17 +799,17 @@ func (c *validatorConfig) Validate() error {
 	return nil
 }
 
-// plainConfig does not implement niceyaml.Validator.
+// plainConfig does not implement niceyaml.SelfValidator.
 type plainConfig struct {
 	Name  string `yaml:"name"`
 	Value int    `yaml:"value"`
 }
 
-// nameSchema returns a [niceyaml.DocumentValidator] that rejects a document
+// nameSchema returns a [niceyaml.Validator] that rejects a document
 // whose name is "invalid" with a path error, and records each call in called
 // when it is not nil.
-func nameSchema(called *bool) niceyaml.DocumentValidator {
-	return niceyaml.DocumentValidatorFunc(func(ctx context.Context, doc *niceyaml.Document) error {
+func nameSchema(called *bool) niceyaml.Validator {
+	return niceyaml.ValidatorFunc(func(ctx context.Context, doc *niceyaml.Document) error {
 		if called != nil {
 			*called = true
 		}
@@ -830,7 +830,7 @@ func nameSchema(called *bool) niceyaml.DocumentValidator {
 	})
 }
 
-// bothValidatorConfig implements niceyaml.Validator and is unmarshaled with
+// bothValidatorConfig implements niceyaml.SelfValidator and is unmarshaled with
 // a schema, so tests of the full pipeline use it.
 type bothValidatorConfig struct {
 	Name      string `yaml:"name"`
@@ -1185,7 +1185,7 @@ func TestDocument_ErrorsResolveInDocument(t *testing.T) {
 		d, err := source.Documents()
 		require.NoError(t, err)
 
-		validator := niceyaml.DocumentValidatorFunc(func(_ context.Context, _ *niceyaml.Document) error {
+		validator := niceyaml.ValidatorFunc(func(_ context.Context, _ *niceyaml.Document) error {
 			return niceyaml.NewError("bad name", niceyaml.WithPath(namePath))
 		})
 
@@ -1710,7 +1710,7 @@ func TestDocument_DecodeInto(t *testing.T) {
 		assert.False(t, result.validated, "Validate() should NOT have been called with WithoutValidator")
 	})
 
-	t.Run("returns Validator error", func(t *testing.T) {
+	t.Run("returns SelfValidator error", func(t *testing.T) {
 		t.Parallel()
 
 		dd := yamltest.FirstDocument(t, `name: ""`)
@@ -1746,7 +1746,7 @@ func TestDocument_Decode_ValueReceivers(t *testing.T) {
 	})
 }
 
-// valueValidatorConfig implements niceyaml.Validator with a value receiver.
+// valueValidatorConfig implements niceyaml.SelfValidator with a value receiver.
 type valueValidatorConfig struct {
 	Name string `yaml:"name"`
 }
@@ -1804,7 +1804,7 @@ func TestWithAllowDuplicateKeys(t *testing.T) {
 	})
 }
 
-// plainValidated is a [niceyaml.Validator] that returns an error with no
+// plainValidated is a [niceyaml.SelfValidator] that returns an error with no
 // location.
 type plainValidated struct {
 	Name string `yaml:"name"`
@@ -1916,7 +1916,7 @@ func TestDocument_ErrorsBindToSource(t *testing.T) {
 
 		var pre error
 
-		validator := niceyaml.DocumentValidatorFunc(func(_ context.Context, doc *niceyaml.Document) error {
+		validator := niceyaml.ValidatorFunc(func(_ context.Context, doc *niceyaml.Document) error {
 			pre = doc.Source().WrapError(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
 
 			return pre
@@ -1982,7 +1982,7 @@ func TestDocument_ValidatorErrorsResolveInDocument(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			validator := niceyaml.DocumentValidatorFunc(func(_ context.Context, doc *niceyaml.Document) error {
+			validator := niceyaml.ValidatorFunc(func(_ context.Context, doc *niceyaml.Document) error {
 				return tc.validate(doc)
 			})
 
@@ -1993,7 +1993,7 @@ func TestDocument_ValidatorErrorsResolveInDocument(t *testing.T) {
 	}
 }
 
-func TestDocument_Decode_DocumentValidator(t *testing.T) {
+func TestDocument_Decode_Validator(t *testing.T) {
 	t.Parallel()
 
 	t.Run("receives the document and decodes on success", func(t *testing.T) {
@@ -2003,7 +2003,7 @@ func TestDocument_Decode_DocumentValidator(t *testing.T) {
 
 		var got *niceyaml.Document
 
-		capture := niceyaml.DocumentValidatorFunc(func(_ context.Context, doc *niceyaml.Document) error {
+		capture := niceyaml.ValidatorFunc(func(_ context.Context, doc *niceyaml.Document) error {
 			got = doc
 
 			return nil
@@ -2023,8 +2023,8 @@ func TestDocument_Decode_DocumentValidator(t *testing.T) {
 
 		var order []string
 
-		record := func(name string, err error) niceyaml.DocumentValidator {
-			return niceyaml.DocumentValidatorFunc(func(_ context.Context, _ *niceyaml.Document) error {
+		record := func(name string, err error) niceyaml.Validator {
+			return niceyaml.ValidatorFunc(func(_ context.Context, _ *niceyaml.Document) error {
 				order = append(order, name)
 
 				return err
@@ -2046,7 +2046,7 @@ func TestDocument_Decode_DocumentValidator(t *testing.T) {
 		dd := yamltest.FirstDocument(t, "name: test\nvalue: 42\n")
 
 		result, err := dd.Decode[plainConfig](t.Context(),
-			niceyaml.WithValidator(niceyaml.DocumentValidatorFunc(func(context.Context, *niceyaml.Document) error {
+			niceyaml.WithValidator(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Document) error {
 				return errDocumentRejected
 			})),
 		)
@@ -2065,7 +2065,7 @@ func TestDocument_Decode_DocumentValidator(t *testing.T) {
 		require.NotNil(t, dd)
 
 		_, err = dd.Decode[plainConfig](t.Context(),
-			niceyaml.WithValidator(niceyaml.DocumentValidatorFunc(func(context.Context, *niceyaml.Document) error {
+			niceyaml.WithValidator(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Document) error {
 				return niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name").Value()))
 			})),
 		)
@@ -2080,7 +2080,7 @@ func TestDocument_Decode_DocumentValidator(t *testing.T) {
 
 		var got *niceyaml.Document
 
-		capture := niceyaml.DocumentValidatorFunc(func(_ context.Context, doc *niceyaml.Document) error {
+		capture := niceyaml.ValidatorFunc(func(_ context.Context, doc *niceyaml.Document) error {
 			got = doc
 
 			return nil
@@ -2093,18 +2093,18 @@ func TestDocument_Decode_DocumentValidator(t *testing.T) {
 	})
 }
 
-// passingValidator returns a [niceyaml.DocumentValidator] that accepts every
+// passingValidator returns a [niceyaml.Validator] that accepts every
 // document.
-func passingValidator() niceyaml.DocumentValidator {
-	return niceyaml.DocumentValidatorFunc(func(context.Context, *niceyaml.Document) error {
+func passingValidator() niceyaml.Validator {
+	return niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Document) error {
 		return nil
 	})
 }
 
-// rejectingValidator returns a [niceyaml.DocumentValidator] that rejects every
+// rejectingValidator returns a [niceyaml.Validator] that rejects every
 // document with err.
-func rejectingValidator(err error) niceyaml.DocumentValidator {
-	return niceyaml.DocumentValidatorFunc(func(context.Context, *niceyaml.Document) error {
+func rejectingValidator(err error) niceyaml.Validator {
+	return niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Document) error {
 		return err
 	})
 }

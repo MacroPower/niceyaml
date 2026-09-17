@@ -2315,7 +2315,7 @@ func TestError_ContextAboveLocation(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, docs, 2)
 
-	// A producer that wraps its own Error with context, the way a Validator
+	// A producer that wraps its own Error with context, the way a SelfValidator
 	// does, leaves the document to the binder above that wrapping.
 	located := niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name").Value()))
 	wrapped := docs[1].WrapError(niceyaml.NewErrorFrom(fmt.Errorf("validate: %w", located)))

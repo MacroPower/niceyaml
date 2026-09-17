@@ -929,10 +929,10 @@ func TestRegistry_MultipleDocuments(t *testing.T) {
 	assert.True(t, validated["Service"])
 }
 
-func TestRegistry_DocumentValidator(t *testing.T) {
+func TestRegistry_Validator(t *testing.T) {
 	t.Parallel()
 
-	var _ niceyaml.DocumentValidator = (*schema.Registry)(nil)
+	var _ niceyaml.Validator = (*schema.Registry)(nil)
 
 	schemaData := []byte(`{
 		"type": "object",

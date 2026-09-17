@@ -29,7 +29,7 @@ func NewValidator(v *jsonschema.Validator) *Validator {
 }
 
 // Validator adapts a compiled [*jsonschema.Validator] to
-// [niceyaml.DocumentValidator], reporting constraint violations as
+// [niceyaml.Validator], reporting constraint violations as
 // [*niceyaml.Error] values that carry the YAML path to each failing location
 // for display by [printer.Printer]. [Validator.Validate] checks a whole
 // document, and [Validator.ValidateSchema] checks decoded data, such as one
@@ -41,7 +41,7 @@ type Validator struct {
 	schema *jsonschema.Validator
 }
 
-// Validate implements [niceyaml.DocumentValidator]. It decodes doc to
+// Validate implements [niceyaml.Validator]. It decodes doc to
 // [any] and checks the result with [Validator.ValidateSchema], so
 // [niceyaml.WithValidator] runs the schema before a decode and
 // [niceyaml.Document.Validate] runs it on its own. A decoding error comes

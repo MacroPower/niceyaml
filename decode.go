@@ -18,18 +18,18 @@ import (
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
-// Validator is implemented by types that validate themselves.
+// SelfValidator is implemented by types that validate themselves.
 //
 // [Document.Decode] and [Document.DecodeInto] call Validate
 // after decoding into a value that implements it, unless
 // [WithSelfValidation] switches that off.
-type Validator interface {
+type SelfValidator interface {
 	Validate() error
 }
 
-// DocumentValidator is implemented by types that validate a whole
-// [*Document] before it decodes, such as a JSON schema or a schema registry
-// that picks the schema from the document's content or file path.
+// Validator is implemented by types that validate a whole [*Document]
+// before it decodes, such as a JSON schema or a schema registry that picks
+// the schema from the document's content or file path.
 //
 // Pass one to [Document.Decode] with [WithValidator], or run one on its own
 // with [Document.Validate]. The document is the whole document even for
@@ -39,13 +39,13 @@ type Validator interface {
 // deadlines to validators doing cancellable work, such as remote schema
 // reference resolution:
 //
-//	func (v *Validator) Validate(ctx context.Context, doc *niceyaml.Document) error {
+//	func (s *Schema) Validate(ctx context.Context, doc *niceyaml.Document) error {
 //		data, err := doc.Decode[any](ctx)
 //		if err != nil {
 //			return err
 //		}
 //
-//		return v.check(ctx, data)
+//		return s.check(ctx, data)
 //	}
 //
 // A validator that knows a location returns an unbound [*Error], and the
@@ -55,18 +55,17 @@ type Validator interface {
 // and [Source.WrapError] resolves paths in the single document the source
 // picks.
 //
-// See [DocumentValidatorFunc], [go.jacobcolvin.com/niceyaml/schema.Validator],
+// See [ValidatorFunc], [go.jacobcolvin.com/niceyaml/schema.Validator],
 // and [go.jacobcolvin.com/niceyaml/schema.Registry] for
 // implementations.
-type DocumentValidator interface {
+type Validator interface {
 	Validate(ctx context.Context, doc *Document) error
 }
 
-// DocumentValidatorFunc adapts a function to the [DocumentValidator]
-// interface.
+// ValidatorFunc adapts a function to the [Validator] interface.
 //
 //	kindPath := paths.Root().Child("kind")
-//	known := niceyaml.DocumentValidatorFunc(func(_ context.Context, doc *niceyaml.Document) error {
+//	known := niceyaml.ValidatorFunc(func(_ context.Context, doc *niceyaml.Document) error {
 //		kind, err := doc.GetValue(kindPath)
 //		if err != nil {
 //			return err
@@ -78,10 +77,10 @@ type DocumentValidator interface {
 //
 //		return nil
 //	})
-type DocumentValidatorFunc func(ctx context.Context, doc *Document) error
+type ValidatorFunc func(ctx context.Context, doc *Document) error
 
-// Validate implements [DocumentValidator].
-func (f DocumentValidatorFunc) Validate(ctx context.Context, doc *Document) error {
+// Validate implements [Validator].
+func (f ValidatorFunc) Validate(ctx context.Context, doc *Document) error {
 	return f(ctx, doc)
 }
 
@@ -187,8 +186,8 @@ func documentOffset(doc *ast.DocumentNode) (int, bool) {
 // [Document.Decode] returns a new value and
 // [Document.DecodeInto] fills one the caller already holds, such as
 // one pre-populated with defaults. Both run the same pipeline: each
-// [DocumentValidator] given with [WithValidator] checks the document before
-// decoding, and a value that implements [Validator] validates itself after,
+// [Validator] given with [WithValidator] checks the document before
+// decoding, and a value that implements [SelfValidator] validates itself after,
 // unless [WithSelfValidation] switches that off. [Document.Validate] runs
 // the first step on its own.
 //
@@ -305,9 +304,9 @@ func (dd *Document) HasContent() bool {
 // whole document.
 //
 // The opts run the pipeline of [Document.DecodeInto] on the value at
-// path rather than on the whole document: a *T that implements [Validator]
+// path rather than on the whole document: a *T that implements [SelfValidator]
 // validates itself after decoding, and [WithDisallowUnknownFields] and
-// [WithYAMLDecodeOptions] configure the decoder. A [DocumentValidator] from
+// [WithYAMLDecodeOptions] configure the decoder. A [Validator] from
 // [WithValidator] still receives the whole document.
 //
 // For a string view of any node, including mappings and sequences, use
@@ -404,7 +403,7 @@ func (dd *Document) node(path paths.Path) (ast.Node, error) {
 // An [*Error] from a validator comes back bound to the source as a
 // [SourceError] through [Document.WrapError]. Any other error comes back as
 // it is.
-func (dd *Document) Validate(ctx context.Context, validators ...DocumentValidator) error {
+func (dd *Document) Validate(ctx context.Context, validators ...Validator) error {
 	for _, dv := range validators {
 		err := dv.Validate(ctx, dd)
 		if err != nil {
@@ -463,7 +462,7 @@ type DecodeOption func(*decodeConfig)
 
 // decodeConfig holds the settings a [DecodeOption] configures.
 type decodeConfig struct {
-	validators            []DocumentValidator
+	validators            []Validator
 	yamlOpts              []yaml.DecodeOption
 	selfValidation        bool
 	disallowUnknownFields bool
@@ -498,14 +497,14 @@ func (c decodeConfig) decodeOptions() []yaml.DecodeOption {
 // it picks for the document:
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
-func WithValidator(dv DocumentValidator) DecodeOption {
+func WithValidator(dv Validator) DecodeOption {
 	return func(c *decodeConfig) {
 		c.validators = append(c.validators, dv)
 	}
 }
 
 // WithSelfValidation is a [DecodeOption] that sets whether a decoded value
-// that implements [Validator] validates itself after decoding. The default
+// that implements [SelfValidator] validates itself after decoding. The default
 // is true. Validators given with [WithValidator] run either way.
 func WithSelfValidation(enabled bool) DecodeOption {
 	return func(c *decodeConfig) {
@@ -534,8 +533,8 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 
 // Decode validates and decodes the document into a new T.
 //
-// Each [DocumentValidator] from [WithValidator] runs before decoding. If
-// *T implements [Validator], Validate is called after successful decoding
+// Each [Validator] from [WithValidator] runs before decoding. If
+// *T implements [SelfValidator], Validate is called after successful decoding
 // unless [WithSelfValidation] switches that off. Methods declared on T
 // itself are included in the method set of *T, so both value and pointer
 // receivers participate. YAML decoding errors, and [Error] values from the
@@ -560,8 +559,8 @@ func (dd *Document) Decode[T any](ctx context.Context, opts ...DecodeOption) (T,
 // non-nil pointer. Any other v returns [ErrDecodeTarget] before anything
 // runs.
 //
-// Each [DocumentValidator] from [WithValidator] runs before decoding. If
-// v implements [Validator], Validate is called after successful decoding
+// Each [Validator] from [WithValidator] runs before decoding. If
+// v implements [SelfValidator], Validate is called after successful decoding
 // unless [WithSelfValidation] switches that off. Fields absent from the
 // document keep their existing values, so v may be pre-populated with
 // defaults. YAML decoding errors, and [Error] values from the validators,
@@ -597,7 +596,7 @@ func (dd *Document) decodeInto(ctx context.Context, node ast.Node, v any, opts [
 		return nil
 	}
 
-	if validator, ok := v.(Validator); ok {
+	if validator, ok := v.(SelfValidator); ok {
 		return dd.WrapError(validator.Validate())
 	}
 

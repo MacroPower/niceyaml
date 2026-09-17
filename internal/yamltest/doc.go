@@ -82,5 +82,5 @@
 //
 //	normalizer := yamltest.NewIdentityNormalizer()
 //
-// A [niceyaml.DocumentValidatorFunc] stands in for a validator.
+// A [niceyaml.ValidatorFunc] stands in for a validator.
 package yamltest
