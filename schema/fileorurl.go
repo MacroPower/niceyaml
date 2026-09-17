@@ -26,8 +26,9 @@ var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 // path, which then fails to resolve or read. A relative file path joins
 // baseDir; an absolute path or an HTTP/HTTPS URL ignores baseDir. When
 // baseDir is empty and the path is relative, Resolve reports
-// [ErrNoBaseDir]. HTTPOptions apply when ref is an HTTP/HTTPS URL and do
-// nothing for file paths.
+// [ErrNoBaseDir], and an empty ref reports [ErrEmptyPath] whatever baseDir
+// is. HTTPOptions apply when ref is an HTTP/HTTPS URL and do nothing for
+// file paths.
 //
 //	// Relative path resolved against baseDir.
 //	r := schema.FileOrURL("/configs", "schema.json")
@@ -42,6 +43,12 @@ func FileOrURL(baseDir, ref string, opts ...HTTPOption) Resolver {
 	// fails to parse does not fall through as a file path.
 	if isHTTPURL(ref) {
 		return URL(ref, opts...)
+	}
+
+	// An empty reference names no file, so it must not join baseDir and
+	// resolve to the base directory itself.
+	if ref == "" {
+		return File(ref)
 	}
 
 	path := ref

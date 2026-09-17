@@ -42,6 +42,17 @@ func TestFileOrURL(t *testing.T) {
 		require.ErrorContains(t, err, `"schema.json"`)
 	})
 
+	t.Run("empty reference", func(t *testing.T) {
+		t.Parallel()
+
+		// An empty reference must not resolve to the base directory itself,
+		// and reports the empty path rather than the missing base directory.
+		for _, baseDir := range []string{"/some/dir", ""} {
+			_, err := schema.FileOrURL(baseDir, "").Resolve(t.Context(), document(t))
+			require.ErrorIs(t, err, schema.ErrEmptyPath, "baseDir %q", baseDir)
+		}
+	})
+
 	t.Run("absolute path", func(t *testing.T) {
 		t.Parallel()
 

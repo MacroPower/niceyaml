@@ -38,6 +38,14 @@ func TestFile(t *testing.T) {
 		require.ErrorIs(t, err, os.ErrNotExist)
 		require.ErrorContains(t, err, "read /nonexistent/path/schema.json")
 	})
+
+	t.Run("empty path", func(t *testing.T) {
+		t.Parallel()
+
+		// An empty path must not resolve to the working directory.
+		_, err := schema.File("").Resolve(t.Context(), document(t))
+		require.ErrorIs(t, err, schema.ErrEmptyPath)
+	})
 }
 
 func TestFile_URL(t *testing.T) {

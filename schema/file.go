@@ -2,6 +2,7 @@ package schema
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -10,6 +11,10 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 )
+
+// ErrEmptyPath reports an empty file path given to [File] or [FileOrURL],
+// which names no file.
+var ErrEmptyPath = errors.New("schema file path is empty")
 
 // File creates a [Resolver] that reads schema data from a local file.
 //
@@ -20,7 +25,8 @@ import (
 // never shares a cache entry with the file. Relative spellings of one path,
 // such as "schemas/config.json" and "./schemas/config.json", resolve to the
 // same URL, so the registry reads the file once and reuses the compiled
-// validator for every document that names it.
+// validator for every document that names it. An empty path reports
+// [ErrEmptyPath] from Resolve.
 //
 // The file path is used directly without validation. Callers should ensure
 // paths come from trusted sources or are validated before use to prevent
@@ -29,6 +35,10 @@ import (
 //	r := schema.File("./schemas/config.json")
 func File(path string) Resolver {
 	return ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (Ref, error) {
+		if path == "" {
+			return Ref{}, ErrEmptyPath
+		}
+
 		abs, err := filepath.Abs(path)
 		if err != nil {
 			return Ref{}, fmt.Errorf("resolve %s: %w", path, err)
