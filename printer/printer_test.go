@@ -3383,6 +3383,75 @@ func TestPrinter_GutterWidth(t *testing.T) {
 	}
 }
 
+func TestPrinter_RowWidth(t *testing.T) {
+	t.Parallel()
+
+	wide := niceyaml.NewSourceFromString("k: " + strings.Repeat("\u65e5", 3) + "\nb: 2").Lines()
+
+	annotated := niceyaml.NewSourceFromString("a: 1\nb: 2").Lines()
+	annotated[0].AddAnnotation(line.Annotation{Content: "a note wider than the lines", Placement: line.Above})
+
+	tcs := map[string]struct {
+		view   line.View
+		gutter printer.GutterFunc
+		spans  []position.Span
+		want   int
+	}{
+		"widest line": {
+			view:   niceyaml.NewSourceFromString("a: 1\nbb: 222").Lines(),
+			gutter: printer.NoGutter,
+			want:   7,
+		},
+		"gutter adds to every row": {
+			view:   niceyaml.NewSourceFromString("a: 1\nbb: 222").Lines(),
+			gutter: printer.DefaultGutter,
+			want:   13,
+		},
+		"wide characters take two cells each": {
+			view:   wide,
+			gutter: printer.NoGutter,
+			want:   9,
+		},
+		"annotation row wider than the lines": {
+			view:   annotated,
+			gutter: printer.NoGutter,
+			want:   27,
+		},
+		"span selects the lines measured": {
+			view:   niceyaml.NewSourceFromString("a: 1\nbb: 222").Lines(),
+			gutter: printer.NoGutter,
+			spans:  []position.Span{position.NewSpan(0, 1)},
+			want:   4,
+		},
+		"empty view": {
+			view:   line.Lines{},
+			gutter: printer.DefaultGutter,
+			want:   0,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := testPrinterWithGutter(tc.gutter)
+			got := p.RowWidth(tc.view, tc.spans...)
+
+			assert.Equal(t, tc.want, got)
+
+			// The width is the widest row Print renders.
+			widest := 0
+			for row := range strings.SplitSeq(p.Print(tc.view, tc.spans...), "\n") {
+				widest = max(widest, lipgloss.Width(row))
+			}
+
+			if tc.view.Len() > 0 {
+				assert.Equal(t, got, widest)
+			}
+		})
+	}
+}
+
 func TestPrinter_WithGutter_Nil(t *testing.T) {
 	t.Parallel()
 

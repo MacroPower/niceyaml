@@ -30,7 +30,9 @@
 //
 // [WithWidth] wraps content at a width, with the gutter width subtracted.
 // [Printer.Rows] reports how many rows each line takes, so a viewer that
-// scrolls by rendered row can map rows back to lines.
+// scrolls by rendered row can map rows back to lines, and
+// [Printer.RowWidth] reports the width of the widest row, so a viewer that
+// scrolls horizontally knows how far the content reaches.
 package printer
 
 import (
@@ -508,6 +510,34 @@ func (p *Printer) Rows(lines line.View, spans ...position.Span) []int {
 	}
 
 	return rows
+}
+
+// RowWidth returns the width in cells of the widest row [Printer.Print]
+// renders for the given spans, before the container style applies. It
+// measures the rendered rows, so the gutter, the annotations, and wide
+// characters all count. Without spans, RowWidth covers every line.
+//
+// Viewers that scroll horizontally use RowWidth to find the column the last
+// row ends on.
+func (p *Printer) RowWidth(lines line.View, spans ...position.Span) int {
+	if len(spans) == 0 {
+		spans = position.Spans{position.NewSpan(0, lines.Len())}
+	}
+
+	maxNumber := maxNumber(lines)
+	gutterWidth := p.gutterWidth(maxNumber)
+
+	var width int
+
+	for _, span := range spans {
+		for idx, ln := range lines.AllLines(span) {
+			for _, row := range p.renderLine(idx, ln, maxNumber, gutterWidth) {
+				width = max(width, lipgloss.Width(row))
+			}
+		}
+	}
+
+	return width
 }
 
 // maxNumber returns the largest line number in view, or 0 when the view is

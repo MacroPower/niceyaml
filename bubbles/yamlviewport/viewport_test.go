@@ -3451,6 +3451,8 @@ func TestViewport_HorizontalScrollReachesEnd(t *testing.T) {
 	tcs := map[string]struct {
 		printer *printer.Printer
 		setup   func(m *yamlviewport.Model)
+		// The text at the end of the widest row, "END" when unset.
+		tail    string
 		width   int
 		wantMax int
 	}{
@@ -3497,6 +3499,31 @@ func TestViewport_HorizontalScrollReachesEnd(t *testing.T) {
 			// Gutter 1 + content 63 - pane (40 - 3) / 2.
 			wantMax: 46,
 		},
+		"wide characters": {
+			printer: testPrinterWithLineNumbers(),
+			width:   21,
+			setup: func(m *yamlviewport.Model) {
+				m.SetSource(niceyaml.NewSourceFromString(
+					"k: " + strings.Repeat("\u65e5", 20) + "END\n",
+				))
+			},
+			// Gutter 6 + content 46 cells - width 21. Each wide glyph takes
+			// two cells, so a rune count leaves END out of reach.
+			wantMax: 31,
+		},
+		"hunk header wider than content": {
+			printer: testPrinter(),
+			width:   14,
+			setup: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n"))
+				m.AddRevision(niceyaml.NewSourceFromString("a: 1\nb: 9\nc: 3\n"))
+				m.SetViewMode(yamlviewport.ViewModeHunks)
+			},
+			// Gutter 1 + hunk header 15 - width 14. The header is an
+			// annotation row wider than any line of the hunk.
+			tail:    "+1,3 @@",
+			wantMax: 2,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -3511,15 +3538,20 @@ func TestViewport_HorizontalScrollReachesEnd(t *testing.T) {
 
 			assert.InDelta(t, 0.0, m.HorizontalScrollPercent(), 0.01)
 
+			tail := tc.tail
+			if tail == "" {
+				tail = "END"
+			}
+
 			m.SetXOffset(1000)
 			assert.Equal(t, tc.wantMax, m.XOffset())
 			assert.InDelta(t, 1.0, m.HorizontalScrollPercent(), 0.01)
-			assert.Contains(t, m.View(), "END")
+			assert.Contains(t, m.View(), tail)
 
 			// One column short of the end cuts the last letter.
 			m.SetXOffset(tc.wantMax - 1)
 			assert.Less(t, m.HorizontalScrollPercent(), 1.0)
-			assert.NotContains(t, m.View(), "END")
+			assert.NotContains(t, m.View(), tail)
 		})
 	}
 }

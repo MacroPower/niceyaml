@@ -1133,13 +1133,16 @@ func (m *Model) maxXOffset() int {
 	return max(0, m.rowWidth()-m.scrollWidth())
 }
 
-// rowWidth returns the width of the widest row the printer renders for the
-// view before the container frame applies: the gutter plus the widest line,
-// over both panes in side-by-side mode.
+// rowWidth returns the width in cells of the widest row the printer renders
+// for the view before the container frame applies, over both panes in
+// side-by-side mode. It asks the printer, so annotation rows and wide
+// characters count toward the horizontal scroll bound.
 func (m *Model) rowWidth() int {
-	width := m.printer.GutterWidth(m.left) + m.left.Width()
+	p := m.renderPrinter(m.paneWidth())
+
+	width := p.RowWidth(m.left)
 	if m.right != nil {
-		width = max(width, m.printer.GutterWidth(m.right)+m.right.Width())
+		width = max(width, p.RowWidth(m.right))
 	}
 
 	return width
