@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml"
@@ -170,7 +169,7 @@ func (r *directiveResolver) Resolve(ctx context.Context, doc *niceyaml.Document)
 // own directive, and otherwise the first directive among the content-free
 // documents directly before it in the same [niceyaml.Source].
 func documentDirective(doc *niceyaml.Document) (*ParsedDirective, error) {
-	if !hasContent(doc) {
+	if !doc.HasContent() {
 		return nil, ErrNoDirective
 	}
 
@@ -186,7 +185,7 @@ func documentDirective(doc *niceyaml.Document) (*ParsedDirective, error) {
 	// Walk back over the run of content-free documents, then scan it
 	// forward so the first directive wins, as it does within one document.
 	start := doc.Index()
-	for start > 0 && !hasContent(docs[start-1]) {
+	for start > 0 && !docs[start-1].HasContent() {
 		start--
 	}
 
@@ -197,21 +196,4 @@ func documentDirective(doc *niceyaml.Document) (*ParsedDirective, error) {
 	}
 
 	return nil, ErrNoDirective
-}
-
-// hasContent reports whether doc holds anything beyond comments and %YAML
-// or %TAG directives. An explicitly empty document, whose body is nil,
-// counts as content, since it is the null document a schema may validate.
-func hasContent(doc *niceyaml.Document) bool {
-	node := doc.Node()
-	if node == nil {
-		return false
-	}
-
-	switch node.Body.(type) {
-	case *ast.CommentGroupNode, *ast.DirectiveNode:
-		return false
-	default:
-		return true
-	}
 }

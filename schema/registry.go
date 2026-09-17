@@ -126,7 +126,7 @@ func (r *Registry) Register(res ...Resolver) {
 func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.Document) (*Validator, error) {
 	// No resolver sees a content-free document, so a resolver registered
 	// after one that declines cannot resurrect it.
-	if !hasContent(doc) {
+	if !doc.HasContent() {
 		return nil, fmt.Errorf("%w: %q: document has no content", ErrNoMatch, doc.FilePath())
 	}
 

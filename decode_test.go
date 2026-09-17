@@ -114,6 +114,79 @@ func TestSource_Document(t *testing.T) {
 		assert.Same(t, source, bound.Source())
 	})
 
+	t.Run("skips a comment block above the first header", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(stringtest.Input(`
+			# Copyright notice.
+			---
+			a: 1
+		`))
+
+		doc, err := source.Document()
+		require.NoError(t, err)
+
+		docs, err := source.Documents()
+		require.NoError(t, err)
+		require.Len(t, docs, 2)
+		assert.Same(t, docs[1], doc)
+
+		got, err := source.Decode[map[string]int](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]int{"a": 1}, got)
+	})
+
+	t.Run("skips a directive above the first header", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(stringtest.Input(`
+			%YAML 1.2
+			---
+			a: 1
+		`))
+
+		got, err := source.Decode[map[string]int](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]int{"a": 1}, got)
+	})
+
+	t.Run("counts only documents with content", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(stringtest.Input(`
+			# Copyright notice.
+			---
+			a: 1
+			---
+			b: 2
+		`))
+
+		_, err := source.Document()
+		require.ErrorIs(t, err, niceyaml.ErrMultipleDocuments)
+		assert.Equal(t, "[4:1] multiple documents in source: 2 documents", err.Error())
+	})
+
+	t.Run("returns the first document when none has content", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(stringtest.Input(`
+			# a
+			---
+			# b
+		`))
+
+		doc, err := source.Document()
+		require.NoError(t, err)
+
+		docs, err := source.Documents()
+		require.NoError(t, err)
+		assert.Same(t, docs[0], doc)
+
+		got, err := source.Decode[map[string]int](t.Context())
+		require.NoError(t, err)
+		assert.Nil(t, got)
+	})
+
 	t.Run("rejects a source with no documents", func(t *testing.T) {
 		t.Parallel()
 
@@ -392,6 +465,35 @@ func TestDocument_Decode_Schema(t *testing.T) {
 			assert.Equal(t, 42, result.Value)
 		}
 	})
+}
+
+func TestDocument_HasContent(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  bool
+	}{
+		"mapping":            {input: "a: 1\n", want: true},
+		"scalar":             {input: "hello\n", want: true},
+		"explicit empty":     {input: "---\n", want: true},
+		"empty file":         {input: "", want: true},
+		"comment only":       {input: "# just a comment\n", want: false},
+		"comment after head": {input: "---\n# just a comment\n", want: false},
+		"directive only":     {input: "%YAML 1.2\n---\n", want: false},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			docs, err := niceyaml.NewSourceFromString(tc.input).Documents()
+			require.NoError(t, err)
+			require.NotEmpty(t, docs)
+
+			assert.Equal(t, tc.want, docs[0].HasContent())
+		})
+	}
 }
 
 func TestDocument_GetValue_DirectiveBody(t *testing.T) {

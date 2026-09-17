@@ -223,6 +223,22 @@ func (dd *Document) FilePath() string {
 	return dd.source.FilePath()
 }
 
+// HasContent reports whether the document holds a YAML value. A document
+// that holds only comments, or only %YAML and %TAG directives, has none.
+// The parser splits such a preamble off from the content below the next
+// "---" as a document of its own, so a file that opens with a license
+// header or a %YAML directive parses into one document without content
+// and one with it. An explicitly empty document, whose body is nil, counts
+// as content, since it is the null document a schema may validate and a
+// decode fills with nothing.
+//
+// [Source.Document] selects the document with content, and a
+// [go.jacobcolvin.com/niceyaml/schema.Registry] validates only documents
+// with content.
+func (dd *Document) HasContent() bool {
+	return dd.doc.Body == nil || hasContent(dd.doc.Body)
+}
+
 // Get decodes the YAML value at path into a T without unmarshaling the whole
 // document.
 //

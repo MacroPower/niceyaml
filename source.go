@@ -222,32 +222,48 @@ func (s *Source) Documents() ([]*Document, error) {
 	return slices.Clone(s.docs), nil
 }
 
-// Document returns the one [*Document] of a [Source] that holds a single
-// YAML document. When the file holds more than one, it returns an error
-// wrapping [ErrMultipleDocuments], bound to the Source and pointing at the
-// header of the second document. When the file holds none, which happens
-// for text that is only a "..." marker, it returns an error wrapping
-// [ErrNoDocuments], bound to the Source. A file that does not parse returns
-// the error [Source.File] returns.
+// Document returns the [*Document] of a [Source] that holds a single YAML
+// document with content: the only one whose [Document.HasContent] reports
+// true. A comment block or a %YAML directive above the first "---" parses
+// into a document of its own that holds no content, so a file that opens
+// with a license header still holds a single document.
 //
-// A file that opens with a %YAML directive parses into two documents, the
-// directive and the content, so such a file needs [Source.Documents].
+// When more than one document holds content, it returns an error wrapping
+// [ErrMultipleDocuments], bound to the Source and pointing at the header of
+// the second such document. When no document holds content, it returns the
+// first document, so a file of comments decodes to the zero value as an
+// empty file does. When the file holds no document at all, which happens
+// for text that is only a "..." marker, it returns an error wrapping
+// [ErrNoDocuments], bound to the Source. A file that does not parse
+// returns the error [Source.File] returns.
 func (s *Source) Document() (*Document, error) {
 	docs, err := s.Documents()
 	if err != nil {
 		return nil, err
 	}
 
-	switch len(docs) {
-	case 0:
+	if len(docs) == 0 {
 		return nil, s.WrapError(NewErrorFrom(ErrNoDocuments))
+	}
 
-	case 1:
+	content := make([]*Document, 0, len(docs))
+
+	for _, doc := range docs {
+		if doc.HasContent() {
+			content = append(content, doc)
+		}
+	}
+
+	switch len(content) {
+	case 0:
 		return docs[0], nil
 
+	case 1:
+		return content[0], nil
+
 	default:
-		err := NewErrorFrom(fmt.Errorf("%w: %d documents", ErrMultipleDocuments, len(docs)))
-		if start := docs[1].doc.Start; start != nil {
+		err := NewErrorFrom(fmt.Errorf("%w: %d documents", ErrMultipleDocuments, len(content)))
+		if start := content[1].doc.Start; start != nil {
 			err = err.With(WithToken(start))
 		}
 
@@ -262,9 +278,9 @@ func (s *Source) Document() (*Document, error) {
 //	source := niceyaml.NewSourceFromString(yamlContent)
 //	config, err := source.Decode[Config](ctx, niceyaml.WithValidator(validator))
 //
-// A file that holds more than one document returns [ErrMultipleDocuments],
-// and one that holds none returns [ErrNoDocuments]; use [Source.Documents]
-// for those.
+// A file that holds more than one document with content returns
+// [ErrMultipleDocuments], and one that holds no document returns
+// [ErrNoDocuments]; use [Source.Documents] for those.
 func (s *Source) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
 	var v T
 
@@ -280,8 +296,9 @@ func (s *Source) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, er
 
 // DecodeInto validates and decodes the single document of the [Source] into
 // v, which must be a non-nil pointer, as [Document.DecodeInto] does for that
-// document. A file that holds more than one document returns
-// [ErrMultipleDocuments], and one that holds none returns [ErrNoDocuments].
+// document. A file that holds more than one document with content returns
+// [ErrMultipleDocuments], and one that holds no document returns
+// [ErrNoDocuments].
 func (s *Source) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
 	doc, err := s.Document()
 	if err != nil {
