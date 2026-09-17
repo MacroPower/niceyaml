@@ -178,9 +178,9 @@ func WithToken(tk *token.Token) ErrorOption {
 
 // WithRange is an [ErrorOption] that sets the 0-indexed range the error
 // covers, in the coordinates of the view [Source.Lines] returns, where line
-// 0 is the first line the Source holds. It is the option for producers that
-// know a location but hold no go-yaml token, such as a check that runs on
-// rendered lines. [SourceError.Detail] highlights the whole range.
+// 0 is line 1 of the text. It is the option for producers that know a
+// location but hold no go-yaml token, such as a check that runs on rendered
+// lines. [SourceError.Detail] highlights the whole range.
 func WithRange(r position.Range) ErrorOption {
 	return func(e *Error) {
 		e.rng = &r
@@ -451,7 +451,7 @@ func (e *Error) locate(src *Source, doc int) (location, error) {
 			return location{}, ErrTokenNotFound
 		}
 
-		return location{pos: src.viewPosition(e.token)}, nil
+		return location{pos: position.NewFromToken(e.token)}, nil
 
 	case e.path != nil:
 		file, err := src.File()
@@ -468,7 +468,7 @@ func (e *Error) locate(src *Source, doc int) (location, error) {
 			return location{}, ErrTokenNotFound
 		}
 
-		return location{pos: src.viewPosition(tk)}, nil
+		return location{pos: position.NewFromToken(tk)}, nil
 
 	default:
 		inner, ok := errors.AsType[*Error](e.err)
@@ -636,7 +636,7 @@ func (e *SourceError) Error() string {
 		return msg
 	}
 
-	text := formatPosition(e.source.textPosition(loc.pos))
+	text := formatPosition(loc.pos)
 
 	// A position is in the message already when the anchor carries a token
 	// or a range, or wraps an Error that does. A token put the resolved
@@ -715,7 +715,7 @@ func writeString(f fmt.State, s string) {
 // range it carries, or the content of the token it carries or its path
 // resolves to. A token that spans several lines yields a range across them.
 // The range is in the coordinates of the view [Source.Lines] returns, where
-// line 0 is the first line the Source holds.
+// line 0 is line 1 of the text.
 //
 // It returns [ErrNoLocation] when the error carries no location,
 // [ErrTokenNotFound] when the token has no position, [ErrDocumentNotFound]
@@ -938,23 +938,19 @@ func (e *SourceError) collectPositions(a *Error, doc int, view line.Lines) ([]er
 
 // checkInRange reports [ErrOutOfRange] when loc starts on a line view does
 // not hold: one past its last line, or one before its first. The message
-// names the line and the lines the view holds as the original text counts
-// them, so both read on one scale for a source built from a later
-// document.
+// names the line and the lines the view holds as the text counts them, from
+// 1.
 func (e *SourceError) checkInRange(loc location, view line.Lines) error {
 	if loc.pos.Line >= 0 && loc.pos.Line < view.Len() {
 		return nil
 	}
 
-	textLine := e.source.textPosition(loc.pos).Line + 1
+	textLine := loc.pos.Line + 1
 	if view.Len() == 0 {
 		return fmt.Errorf("%w: line %d of an empty source", ErrOutOfRange, textLine)
 	}
 
-	first := e.source.textPosition(position.New(0, 0)).Line + 1
-	last := e.source.textPosition(position.New(view.Len()-1, 0)).Line + 1
-
-	return fmt.Errorf("%w: line %d not in lines %d-%d", ErrOutOfRange, textLine, first, last)
+	return fmt.Errorf("%w: line %d not in lines 1-%d", ErrOutOfRange, textLine, view.Len())
 }
 
 // highlightRanges returns the ranges to highlight for loc: the range itself

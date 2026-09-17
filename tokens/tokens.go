@@ -43,44 +43,24 @@ func TrimLineEnding(s string) string {
 	return strings.TrimSuffix(strings.TrimSuffix(s, "\n"), "\r")
 }
 
-// SplitDocumentsOption configures [SplitDocuments].
-//
-// Available options:
-//   - [WithResetPositions]
-type SplitDocumentsOption func(*splitDocumentsConfig)
-
-type splitDocumentsConfig struct {
-	resetPositions bool
-}
-
-// WithResetPositions is a [SplitDocumentsOption] that sets whether token
-// positions are reset to match a fresh tokenize of each document's text,
-// which starts from line 1, column 1. A first token whose Origin opens with
-// a line break, such as the one after a "..." marker, starts below line 1,
-// where a fresh tokenize places it.
-//
-// When enabled, tokens are cloned and their positions adjusted relative to
-// the document's start. The default is false, and the tokens then keep the
-// positions they have in the original source.
-func WithResetPositions(reset bool) SplitDocumentsOption {
-	return func(cfg *splitDocumentsConfig) {
-		cfg.resetPositions = reset
-	}
-}
-
-// cloneWithResetPositions clones tokens and shifts their positions to where a
-// fresh tokenize of their text would put them.
+// ResetPositions clones tks and shifts the positions of the clones to where
+// a fresh tokenize of their text would put them, so a stream cut from a
+// longer one, such as the tokens of one document from [SplitDocuments],
+// counts its lines from 1 as [Tokenize] does. Every token moves by the same
+// number of lines and the same offset distance, and tokens on the first line
+// also move by the same number of columns. Tokens that start at line 1
+// already come back as clones with the same positions.
 //
 // The text starts with the Origin of the first token with a non-nil position.
 // That Origin can open with whitespace and line breaks, such as the line break
 // that ends a preceding "..." line, and a fresh tokenize places the token after
 // them. The token lands at line 1, column 1, offset 1, where the lexer places
 // the first token of a fresh stream, only when its Origin opens with neither.
-// Every token moves by the same number of lines and the same offset distance,
-// and tokens on the first line also move by the same number of columns.
 //
-// Tokens with nil positions are cloned but left with nil positions.
-func cloneWithResetPositions(tks token.Tokens) token.Tokens {
+// The clones link to each other through Next and Prev and to nothing outside
+// the result, so the stream stands alone. Tokens with nil positions are
+// cloned but left with nil positions, and nil tokens are dropped.
+func ResetPositions(tks token.Tokens) token.Tokens {
 	if len(tks) == 0 {
 		return tks
 	}
@@ -151,15 +131,10 @@ func cloneWithResetPositions(tks token.Tokens) token.Tokens {
 // The returned slices each contain tokens for a single document, preserving
 // original token order and positions. The tokens are the caller's, not
 // copies, and they keep the Next and Prev links of the full stream, so a
-// document's first token still links back to the previous document. Pass
-// [WithResetPositions] to receive clones instead. Nil tokens in the stream
-// are skipped.
-func SplitDocuments(tks token.Tokens, opts ...SplitDocumentsOption) iter.Seq2[int, token.Tokens] {
-	cfg := &splitDocumentsConfig{}
-	for _, opt := range opts {
-		opt(cfg)
-	}
-
+// document's first token still links back to the previous document. Pass a
+// document to [ResetPositions] for clones that count lines from 1. Nil
+// tokens in the stream are skipped.
+func SplitDocuments(tks token.Tokens) iter.Seq2[int, token.Tokens] {
 	return func(yield func(int, token.Tokens) bool) {
 		var (
 			docIdx  int
@@ -167,10 +142,6 @@ func SplitDocuments(tks token.Tokens, opts ...SplitDocumentsOption) iter.Seq2[in
 		)
 
 		yieldDoc := func(doc token.Tokens) bool {
-			if cfg.resetPositions {
-				doc = cloneWithResetPositions(doc)
-			}
-
 			return yield(docIdx, doc)
 		}
 

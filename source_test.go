@@ -622,8 +622,8 @@ func TestSource_Lines_TokenLookup(t *testing.T) {
 func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 	t.Parallel()
 
-	// The second document's tokens keep the positions they have in the
-	// stream, so its first line is line 2 of the text.
+	// The second document's tokens start at line 2 of the stream, and the
+	// Source renumbers them so its own text counts from line 1.
 	full := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\nc: 3\nd: 4\n")
 
 	docs, err := full.Documents()
@@ -633,20 +633,35 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 	source := niceyaml.NewSourceFromTokens(docs[1].Tokens())
 	view := source.Lines()
 	require.Equal(t, 4, view.Len())
-	assert.Equal(t, 2, view[0].Number())
+	assert.Equal(t, 1, view[0].Number())
+	assert.Equal(t, "---\nb: 2\nc: 3\nd: 4", view.Content())
 
-	t.Run("path error highlights its own line", func(t *testing.T) {
+	t.Run("the caller's tokens keep their positions", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Equal(t, 2, docs[1].Tokens()[0].Position.Line)
+	})
+
+	t.Run("a token position is a view position", func(t *testing.T) {
+		t.Parallel()
+
+		for _, l := range view {
+			for _, tk := range l.SourceTokens() {
+				assert.Same(t, tk, view.TokenAt(position.NewFromToken(tk)), "token %q", tk.Value)
+			}
+		}
+	})
+
+	t.Run("path error reports the renumbered line", func(t *testing.T) {
 		t.Parallel()
 
 		err := source.WrapError(niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b").Value())))
-		assert.Equal(t, "[3:4] $.b: bad b", err.Error())
+		assert.Equal(t, "[2:4] $.b: bad b", err.Error())
 
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, err, &bound)
 
-		// The view indexes lines from the first one the source holds, so
-		// line 3 of the text is index 1 of the view.
 		rng, err := bound.Location()
 		require.NoError(t, err)
 		assert.Equal(t, position.NewRange(position.New(1, 3), position.New(1, 4)), rng)
@@ -656,48 +671,33 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 		assert.NotContains(t, got, "<genericError>3</genericError>")
 	})
 
-	t.Run("path error on the last line renders", func(t *testing.T) {
-		t.Parallel()
-
-		err := source.WrapError(niceyaml.NewError("bad d", niceyaml.WithPath(paths.Root().Child("d").Value())))
-		assert.Equal(t, "[5:4] $.d: bad d", err.Error())
-
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
-
-		detail, err := bound.Detail(niceyaml.WithPrinter(newXMLPrinter()))
-		require.NoError(t, err)
-		assert.Contains(t, detail, "<genericError>4</genericError>")
-	})
-
-	t.Run("token error keeps the text position in its message", func(t *testing.T) {
+	t.Run("token error reports the renumbered line", func(t *testing.T) {
 		t.Parallel()
 
 		tk := view.TokenAt(position.New(2, 0))
 		require.NotNil(t, tk)
 
 		err := source.WrapError(niceyaml.NewError("bad c", niceyaml.WithToken(tk)))
-		assert.Equal(t, "[4:1] bad c", err.Error())
+		assert.Equal(t, "[3:1] bad c", err.Error())
 
 		got := trimLines(render(err))
 		assert.Contains(t, got, "<genericError>c</genericError>")
 		assert.NotContains(t, got, "<genericError>b</genericError>")
 	})
 
-	t.Run("token before the first line is out of range", func(t *testing.T) {
+	t.Run("token from the whole file is out of range past the last line", func(t *testing.T) {
 		t.Parallel()
 
-		before := full.Lines().TokenAt(position.New(0, 0))
-		require.NotNil(t, before)
+		last := full.Lines().TokenAt(position.New(4, 0))
+		require.NotNil(t, last)
 
 		var bound *niceyaml.SourceError
 
-		require.ErrorAs(t, source.WrapError(niceyaml.NewError("bad a", niceyaml.WithToken(before))), &bound)
+		require.ErrorAs(t, source.WrapError(niceyaml.NewError("bad d", niceyaml.WithToken(last))), &bound)
 
 		_, err := bound.Detail()
 		require.ErrorIs(t, err, niceyaml.ErrOutOfRange)
-		assert.Equal(t, "location outside source: line 1 not in lines 2-5", err.Error())
+		assert.Equal(t, "location outside source: line 5 not in lines 1-4", err.Error())
 	})
 }
 

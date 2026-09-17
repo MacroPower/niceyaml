@@ -20,11 +20,12 @@
 //
 // [SplitDocuments] splits a token stream at document headers ("---") and
 // document end markers ("..."), returning an iterator over separate token
-// streams for each YAML document. Use [WithResetPositions] to receive clones
-// whose positions match a fresh tokenize of each document's text:
+// streams for each YAML document. The tokens keep the positions they have in
+// the whole stream, and [ResetPositions] clones a document's tokens with the
+// positions a fresh tokenize of its text would give them:
 //
 //	for idx, doc := range tokens.SplitDocuments(tokens.Tokenize(src)) {
-//		// Process each document's tokens independently.
+//		standalone := tokens.ResetPositions(doc)
 //	}
 //
 // A document header ("---") starts a new document and belongs to the start
