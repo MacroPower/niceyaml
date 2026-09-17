@@ -115,7 +115,7 @@ func newBuilder(tks token.Tokens) *builder {
 
 	// Initialize position tracking from first token (1-indexed like lexer).
 	if tks[0].Position != nil && tks[0].Position.Offset > 0 {
-		b.currentOffset = tks[0].Position.Offset
+		b.currentOffset = originOffset(tks[0])
 		b.currentIndentNum = tks[0].Position.IndentNum
 		b.currentIndentLevel = tks[0].Position.IndentLevel
 	} else {
@@ -467,13 +467,26 @@ func (b *builder) handleGap(tk *token.Token, parts []string, isBlockScalarConten
 
 		if tk.Position != nil {
 			if tk.Position.Offset > 0 {
-				b.currentOffset = tk.Position.Offset
+				b.currentOffset = originOffset(tk)
 			}
 
 			b.currentIndentNum = tk.Position.IndentNum
 			b.currentIndentLevel = tk.Position.IndentLevel
 		}
 	}
+}
+
+// originOffset returns the 1-indexed document rune offset where tk.Origin
+// starts.
+//
+// Position.Offset points at the value, past the whitespace and line breaks
+// that open the Origin. The builder counts the whole Origin, so it must
+// start counting where the Origin does. Those opening runes are ASCII, so
+// their byte count is their rune count.
+func originOffset(tk *token.Token) int {
+	lead := len(tk.Origin) - len(strings.TrimLeft(tk.Origin, " \t\r\n"))
+
+	return max(1, tk.Position.Offset-lead)
 }
 
 // partColumnAndValue calculates the column position and value for a content part.

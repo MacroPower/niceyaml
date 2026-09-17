@@ -997,8 +997,9 @@ func TestNewLines_SplitTokenOffsets(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]string{
-		"literal block": "script: |\n  line1\n  line2\n",
-		"folded block":  "text: >\n  first\n  second\n",
+		"literal block":                    "script: |\n  line1\n  line2\n",
+		"folded block":                     "text: >\n  first\n  second\n",
+		"leading indent then continuation": "  b\ns:",
 		"multiline string": `key: "line1
   line2"
 `,
