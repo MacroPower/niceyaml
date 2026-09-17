@@ -172,6 +172,8 @@ func New(opts ...Option) Model {
 // A layout change, such as a new width, style, printer, or wrap setting,
 // keeps the same line at the top of the view. The top row stays at the same
 // row of that line, or at its last row if the line no longer has that many.
+// A change of content, such as a new revision, diff mode, or view mode,
+// scrolls to the top, or to the first search match when the term has one.
 type Model struct {
 	// The container style applied to the viewport frame.
 	style    lipgloss.Style
@@ -406,7 +408,7 @@ func (m *Model) GoToRevision(index int) {
 	}
 
 	m.revIndex = clamp(index, 0, len(m.revisions)-1)
-	m.showRevision()
+	m.rebuildViews()
 }
 
 // RevisionCount returns the number of revisions in the history.
@@ -572,26 +574,17 @@ func (m *Model) seekRevision(delta int) {
 	}
 
 	m.revIndex = clamp(m.revIndex+delta, 0, len(m.revisions)-1)
-	m.showRevision()
-}
-
-// showRevision rebuilds the view for the selected revision and scrolls to
-// the top, or to the first search match when the search term has one.
-func (m *Model) showRevision() {
 	m.rebuildViews()
-
-	if m.searchIndex < 0 {
-		m.GotoTop()
-	}
 }
 
 // rebuildViews rebuilds the displayed views from the revision, diff mode, and
 // view mode, then refreshes the search state and drops the cached row counts.
 // Rendering itself waits for View, which renders only the visible window.
 //
-// Every change of content goes through rebuildViews. A match index carried
-// over from the old content points at an arbitrary line, so the first match
-// in the new content becomes the current match and the view scrolls to it.
+// Every change of content goes through rebuildViews. A match index or row
+// offset carried over from the old content points at an arbitrary line, so
+// the view scrolls to the top, or to the first match in the new content when
+// the search term has one.
 func (m *Model) rebuildViews() {
 	m.diffResult = nil // Invalidate cached diff result.
 	m.left = nil
@@ -617,7 +610,13 @@ func (m *Model) rebuildViews() {
 	}
 
 	m.refreshSearch()
-	m.relayout()
+
+	// The old row counts describe other lines, so the cache starts empty
+	// without anchoring to a line of the old content, as relayout would.
+	m.anchored = false
+	m.yOffset = 0
+	m.rows = &rowCache{}
+
 	m.scrollToCurrentMatch()
 }
 

@@ -3533,6 +3533,81 @@ func TestViewport_ContentChangesResetSearch(t *testing.T) {
 	}
 }
 
+func TestViewport_ContentChangesScrollToTop(t *testing.T) {
+	t.Parallel()
+
+	doc := func(changed bool) string {
+		var sb strings.Builder
+
+		for i := range 100 {
+			value := "value"
+			if i == 60 && changed {
+				value = "changed"
+			}
+
+			fmt.Fprintf(&sb, "key%d: %s\n", i, value)
+		}
+
+		return sb.String()
+	}
+
+	tcs := map[string]struct {
+		change  func(m *yamlviewport.Model)
+		wantTop string
+	}{
+		"add revision": {
+			change: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromString(doc(true), niceyaml.WithName("v2")))
+			},
+			wantTop: "key0: value",
+		},
+		"set source": {
+			change: func(m *yamlviewport.Model) {
+				m.SetSource(niceyaml.NewSourceFromString(doc(true)))
+			},
+			wantTop: "key0: value",
+		},
+		"diff mode": {
+			change: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromString(doc(true), niceyaml.WithName("v2")))
+				m.SetYOffset(50)
+				m.SetDiffMode(yamlviewport.DiffModeNone)
+			},
+			wantTop: "key0: value",
+		},
+		"hunks": {
+			change: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromString(doc(true), niceyaml.WithName("v2")))
+				m.SetYOffset(50)
+				m.SetViewMode(yamlviewport.ViewModeHunks)
+			},
+			wantTop: "@@",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+			m.SetWidth(80)
+			m.SetHeight(4)
+			m.AddRevision(niceyaml.NewSourceFromString(doc(false), niceyaml.WithName("v1")))
+			m.SetYOffset(50)
+			require.Equal(t, 50, m.YOffset())
+
+			// The row offset of the old content points at an arbitrary line
+			// of the new, so the new content starts at its first row.
+			tc.change(&m)
+
+			assert.Equal(t, 0, m.YOffset())
+
+			top, _, _ := strings.Cut(m.View(), "\n")
+			assert.Contains(t, top, tc.wantTop)
+		})
+	}
+}
+
 func TestViewport_SearchAcrossRevisions(t *testing.T) {
 	t.Parallel()
 
