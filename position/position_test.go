@@ -840,6 +840,16 @@ func TestGroupIndices(t *testing.T) {
 			context: math.MaxInt,
 			want:    position.Spans{position.NewSpan(0, 101)},
 		},
+		"max int index stays half-open": {
+			indices: []int{math.MaxInt},
+			context: 0,
+			want:    position.Spans{position.NewSpan(math.MaxInt, math.MaxInt)},
+		},
+		"huge context merges a max int index": {
+			indices: []int{0, math.MaxInt},
+			context: math.MaxInt,
+			want:    position.Spans{position.NewSpan(0, math.MaxInt)},
+		},
 		"half of max int context merges everything": {
 			indices: []int{0, 50, 100},
 			context: math.MaxInt / 2,

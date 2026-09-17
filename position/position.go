@@ -352,16 +352,19 @@ func GroupIndices(indices []int, context int) Spans {
 	indices = slices.Clone(indices)
 	slices.Sort(indices)
 
-	spans := Spans{NewSpan(indices[0], indices[0]+1)}
+	spans := Spans{NewSpan(indices[0], addSat(indices[0], 1))}
 
 	for _, idx := range indices[1:] {
 		lastSpan := &spans[len(spans)-1]
-		if idx < addSat(lastSpan.End, threshold) {
+
+		// A limit that saturated reaches every index, so merge on it too.
+		limit := addSat(lastSpan.End, threshold)
+		if idx < limit || limit == math.MaxInt {
 			// Merge into current span.
-			lastSpan.End = idx + 1
+			lastSpan.End = addSat(idx, 1)
 		} else {
 			// Start a new span.
-			spans = append(spans, NewSpan(idx, idx+1))
+			spans = append(spans, NewSpan(idx, addSat(idx, 1)))
 		}
 	}
 
