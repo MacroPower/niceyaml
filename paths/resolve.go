@@ -103,13 +103,18 @@ func (r *resolver) unwrap(node ast.Node) (ast.Node, error) {
 
 // follow looks through anchors and aliases from node and adds each alias it
 // follows to followed. It returns an error wrapping [ErrAlias] when it
-// reaches an alias already in followed or an alias with no anchor.
+// reaches an alias already in followed, an alias with no anchor, or an alias
+// with no name.
 func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.Node, error) {
 	for {
 		switch n := node.(type) {
 		case *ast.AnchorNode:
 			node = n.Value
 		case *ast.AliasNode:
+			if n.Value == nil {
+				return nil, fmt.Errorf("%w: alias has no name", ErrAlias)
+			}
+
 			name := n.Value.GetToken().Value
 
 			if followed[n] {
@@ -374,7 +379,8 @@ func keyName(key ast.MapKeyNode) string {
 
 // firstToken returns the token that starts node's content: the first key of
 // a mapping, the first element of a sequence, or the scalar itself. It looks
-// through anchors and tags; an alias is its own token.
+// through anchors and tags; an alias is its own token. An entry with no key
+// starts at its own token.
 func firstToken(node ast.Node) *token.Token {
 	for {
 		switch n := node.(type) {
@@ -385,6 +391,10 @@ func firstToken(node ast.Node) *token.Token {
 		case *ast.MappingNode:
 			if len(n.Values) == 0 {
 				return n.GetToken()
+			}
+
+			if n.Values[0].Key == nil {
+				return n.Values[0].GetToken()
 			}
 
 			return n.Values[0].Key.GetToken()

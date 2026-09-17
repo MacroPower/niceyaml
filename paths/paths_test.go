@@ -1053,6 +1053,53 @@ func TestPath_AliasCycle(t *testing.T) {
 	}
 }
 
+func TestPath_HandBuiltAST(t *testing.T) {
+	t.Parallel()
+
+	// The parser never produces these shapes, but Node and Token accept any
+	// *ast.DocumentNode, so a mutated tree must error rather than panic.
+	t.Run("alias without a name", func(t *testing.T) {
+		t.Parallel()
+
+		file, err := niceyaml.NewSourceFromString("a: 1\n").File()
+		require.NoError(t, err)
+
+		doc := file.Docs[0]
+		mapping, ok := doc.Body.(*ast.MappingNode)
+		require.True(t, ok, "want *ast.MappingNode, got %T", doc.Body)
+
+		mapping.Values[0].Value = &ast.AliasNode{}
+
+		_, err = paths.Root().Child("a").Node(doc)
+		require.ErrorIs(t, err, paths.ErrAlias)
+		assert.Contains(t, err.Error(), "alias has no name")
+
+		_, err = paths.Root().Child("a", "b").Token(doc)
+		require.ErrorIs(t, err, paths.ErrAlias)
+	})
+
+	t.Run("entry without a key", func(t *testing.T) {
+		t.Parallel()
+
+		file, err := niceyaml.NewSourceFromString("a: 1\n").File()
+		require.NoError(t, err)
+
+		doc := file.Docs[0]
+		mapping, ok := doc.Body.(*ast.MappingNode)
+		require.True(t, ok, "want *ast.MappingNode, got %T", doc.Body)
+
+		mapping.Values[0].Key = nil
+
+		tk, err := paths.Root().Token(doc)
+		require.NoError(t, err)
+		assert.Equal(t, mapping.Values[0].GetToken(), tk)
+
+		tk, err = paths.Root().Child("").Key().Token(doc)
+		require.NoError(t, err)
+		assert.Equal(t, "1", tk.Value)
+	})
+}
+
 func TestPath_RedefinedAnchor(t *testing.T) {
 	t.Parallel()
 
