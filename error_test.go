@@ -1468,6 +1468,42 @@ func TestError_HunkDisplay(t *testing.T) {
 		assert.NotContains(t, got, "line5")
 	})
 
+	t.Run("negative context lines show the error lines alone", func(t *testing.T) {
+		t.Parallel()
+
+		source := stringtest.Input(`
+			line1: a
+			line2: b
+			line3: c
+			line4: d
+			line5: e
+			line6: f
+		`)
+
+		err := xmlSource(source).WrapError(niceyaml.NewError(
+			"validation error",
+			niceyaml.WithPath(paths.Root().Child("line1").Key()),
+			niceyaml.WithErrors(
+				niceyaml.NewError(
+					"error at end",
+					niceyaml.WithPath(paths.Root().Child("line6").Key()),
+				),
+			),
+		))
+
+		// A negative count renders as 0 does, so each error line is a hunk
+		// of its own with no context around it.
+		want := trimLines(render(err, niceyaml.WithContextLines(0)))
+		got := trimLines(render(err, niceyaml.WithContextLines(-1)))
+
+		assert.Equal(t, want, got)
+		assert.Contains(t, got, "line1")
+		assert.Contains(t, got, "line6")
+		assert.Contains(t, got, "...")
+		assert.NotContains(t, got, "line2")
+		assert.NotContains(t, got, "line5")
+	})
+
 	t.Run("close errors merge into single hunk", func(t *testing.T) {
 		t.Parallel()
 

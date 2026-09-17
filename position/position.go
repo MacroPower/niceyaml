@@ -2,6 +2,7 @@ package position
 
 import (
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 
@@ -184,7 +185,9 @@ func (s Span) String() string {
 type Spans []Span
 
 // Expand returns new spans with each span expanded by amount on both sides.
-// The Start is decreased by amount and End is increased by amount.
+// The Start is decreased by amount and End is increased by amount, and each
+// saturates at the int limits rather than wrapping around. A negative amount
+// shrinks the spans, which can invert one.
 // Note: This does not clamp values; use [Spans.Clamp] afterward if needed.
 func (s Spans) Expand(amount int) Spans {
 	if len(s) == 0 {
@@ -193,28 +196,67 @@ func (s Spans) Expand(amount int) Spans {
 
 	result := make(Spans, len(s))
 	for i, span := range s {
-		result[i] = NewSpan(span.Start-amount, span.End+amount)
+		result[i] = NewSpan(subSat(span.Start, amount), addSat(span.End, amount))
 	}
 
 	return result
 }
 
-// Clamp returns new spans with all values clamped to [lower, upper).
-// Start values are clamped to be >= lower, End values are clamped to be <= upper.
+// Clamp returns new spans with all values clamped to [lower, upper), dropping
+// every span that holds nothing there: one that lies outside the bounds, one
+// that is empty, and one whose Start is past its End. Every span it returns
+// has a positive [Span.Len] and lies within the bounds. Returns nil when no
+// span remains.
 func (s Spans) Clamp(lower, upper int) Spans {
-	if len(s) == 0 {
-		return nil
-	}
+	var result Spans
 
-	result := make(Spans, len(s))
-	for i, span := range s {
-		result[i] = NewSpan(
-			max(span.Start, lower),
-			min(span.End, upper),
+	for _, span := range s {
+		clamped := NewSpan(
+			min(max(span.Start, lower), upper),
+			min(max(span.End, lower), upper),
 		)
+		if clamped.Len() <= 0 {
+			continue
+		}
+
+		result = append(result, clamped)
 	}
 
 	return result
+}
+
+// addSat returns a+b, saturating at [math.MinInt] and [math.MaxInt] instead
+// of wrapping around.
+func addSat(a, b int) int {
+	sum := a + b
+
+	switch {
+	case b > 0 && sum < a:
+		return math.MaxInt
+
+	case b < 0 && sum > a:
+		return math.MinInt
+
+	default:
+		return sum
+	}
+}
+
+// subSat returns a-b, saturating at [math.MinInt] and [math.MaxInt] instead
+// of wrapping around.
+func subSat(a, b int) int {
+	diff := a - b
+
+	switch {
+	case b > 0 && diff > a:
+		return math.MinInt
+
+	case b < 0 && diff < a:
+		return math.MaxInt
+
+	default:
+		return diff
+	}
 }
 
 // Ranges represents a slice of [Range] values.
@@ -282,10 +324,12 @@ func (rs Ranges) String() string {
 }
 
 // GroupIndices groups indices into [Span] values. Indices within context
-// distance of each other share a span. The indices need not be sorted.
+// distance of each other share a span. The indices need not be sorted, and
+// a negative context counts as 0.
 //
 // Uses threshold = 2*context + 1 which ensures indices merge when their context
-// windows would overlap or be adjacent.
+// windows would overlap or be adjacent. The threshold saturates at
+// [math.MaxInt], so a huge context merges every index into one span.
 //
 // Returns half-open [Spans] [Start, End).
 //
@@ -297,11 +341,13 @@ func GroupIndices(indices []int, context int) Spans {
 		return nil
 	}
 
+	context = max(0, context)
+
 	// Merge indices when their context windows would be adjacent or overlapping.
 	// Index at I1 has context [I1-C, I1+C], index at I2 has context [I2-C, I2+C].
 	// Merge if I2-C <= I1+C+1, i.e., I2 < I1 + 2C + 2.
 	// Since spans are half-open [Start, End), we use End (which is I1+1) + threshold.
-	threshold := context*2 + 1
+	threshold := addSat(addSat(context, context), 1)
 
 	indices = slices.Clone(indices)
 	slices.Sort(indices)
@@ -310,7 +356,7 @@ func GroupIndices(indices []int, context int) Spans {
 
 	for _, idx := range indices[1:] {
 		lastSpan := &spans[len(spans)-1]
-		if idx < lastSpan.End+threshold {
+		if idx < addSat(lastSpan.End, threshold) {
 			// Merge into current span.
 			lastSpan.End = idx + 1
 		} else {
@@ -326,7 +372,12 @@ func GroupIndices(indices []int, context int) Spans {
 // with context lines on either side, merged where the windows would touch or
 // overlap, and clamped to [0, total). It is [GroupIndices] followed by
 // [Spans.Expand] and [Spans.Clamp], which is how error excerpts and diff
-// hunks pick the lines they render. Returns nil when indices is empty.
+// hunks pick the lines they render. A negative context counts as 0, and a
+// context at or above total covers every line. Every span returned holds at
+// least one index of [0, total), so an index outside that range contributes
+// none. Returns nil when no span remains, such as when indices is empty.
 func ContextSpans(indices []int, context, total int) Spans {
+	context = max(0, context)
+
 	return GroupIndices(indices, context).Expand(context).Clamp(0, total)
 }

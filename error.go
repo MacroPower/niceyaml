@@ -517,7 +517,8 @@ func newDetailConfig(opts []DetailOption) detailConfig {
 const defaultContextLines = 2
 
 // WithContextLines is a [DetailOption] that sets the number of context lines
-// shown around each error location. The default is 2.
+// shown around each error location. The default is 2, and a negative count
+// shows the error lines alone, as 0 does.
 func WithContextLines(lines int) DetailOption {
 	return func(c *detailConfig) {
 		c.contextLines = lines
@@ -763,17 +764,20 @@ func (e *SourceError) render(cfg detailConfig, view line.Lines, positions []erro
 
 	// Group the error lines into hunks with context around each. Errors
 	// whose context windows touch share a hunk, so a line gap always
-	// separates two hunks for the "..." separator.
+	// separates two hunks for the "..." separator. ContextSpans clamps the
+	// spans to the view, so each one starts on a line the view holds.
 	hunkSpans := position.ContextSpans(allRanges.LineIndices(), cfg.contextLines, view.Len())
 
 	// Add "..." annotations to first line of each non-first hunk.
 	for i, span := range hunkSpans {
-		if i > 0 {
-			view[span.Start].AddAnnotation(line.Annotation{
-				Content:   "...",
-				Placement: line.Above,
-			})
+		if i == 0 || span.Start < 0 || span.Start >= view.Len() {
+			continue
 		}
+
+		view[span.Start].AddAnnotation(line.Annotation{
+			Content:   "...",
+			Placement: line.Above,
+		})
 	}
 
 	return cfg.printer.Print(view, hunkSpans...)

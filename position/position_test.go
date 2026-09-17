@@ -1,6 +1,7 @@
 package position_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/goccy/go-yaml/token"
@@ -829,6 +830,21 @@ func TestGroupIndices(t *testing.T) {
 			context: 2,
 			want:    position.Spans{position.NewSpan(0, 3), position.NewSpan(10, 13)},
 		},
+		"negative context counts as zero": {
+			indices: []int{0, 1, 3},
+			context: -1,
+			want:    position.Spans{position.NewSpan(0, 2), position.NewSpan(3, 4)},
+		},
+		"huge context merges everything": {
+			indices: []int{0, 50, 100},
+			context: math.MaxInt,
+			want:    position.Spans{position.NewSpan(0, 101)},
+		},
+		"half of max int context merges everything": {
+			indices: []int{0, 50, 100},
+			context: math.MaxInt / 2,
+			want:    position.Spans{position.NewSpan(0, 101)},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -878,6 +894,16 @@ func TestSpans_Expand(t *testing.T) {
 			input:  position.Spans{position.NewSpan(1, 3)},
 			amount: 5,
 			want:   position.Spans{position.NewSpan(-4, 8)},
+		},
+		"huge amount saturates instead of wrapping": {
+			input:  position.Spans{position.NewSpan(-2, 3)},
+			amount: math.MaxInt,
+			want:   position.Spans{position.NewSpan(math.MinInt, math.MaxInt)},
+		},
+		"negative amount shrinks": {
+			input:  position.Spans{position.NewSpan(2, 8)},
+			amount: -1,
+			want:   position.Spans{position.NewSpan(3, 7)},
 		},
 	}
 
@@ -933,6 +959,31 @@ func TestSpans_Clamp(t *testing.T) {
 			input: position.Spans{position.NewSpan(-5, 10), position.NewSpan(90, 150)},
 			min:   0, max: 100,
 			want: position.Spans{position.NewSpan(0, 10), position.NewSpan(90, 100)},
+		},
+		"span past the upper bound is dropped": {
+			input: position.Spans{position.NewSpan(9, 11)},
+			min:   0, max: 5,
+			want: nil,
+		},
+		"span below the lower bound is dropped": {
+			input: position.Spans{position.NewSpan(-4, -1)},
+			min:   0, max: 5,
+			want: nil,
+		},
+		"inverted span is dropped": {
+			input: position.Spans{position.NewSpan(3, 1)},
+			min:   0, max: 5,
+			want: nil,
+		},
+		"empty span is dropped": {
+			input: position.Spans{position.NewSpan(2, 2)},
+			min:   0, max: 5,
+			want: nil,
+		},
+		"dropped spans leave the rest in order": {
+			input: position.Spans{position.NewSpan(0, 2), position.NewSpan(7, 9), position.NewSpan(3, 5)},
+			min:   0, max: 5,
+			want: position.Spans{position.NewSpan(0, 2), position.NewSpan(3, 5)},
 		},
 	}
 
@@ -1026,6 +1077,54 @@ func TestContextSpans(t *testing.T) {
 			context: 1,
 			total:   20,
 			want:    position.Spans{position.NewSpan(1, 4), position.NewSpan(11, 14)},
+		},
+		"negative context counts as zero": {
+			indices: []int{0, 9},
+			context: -1,
+			total:   10,
+			want:    position.Spans{position.NewSpan(0, 1), position.NewSpan(9, 10)},
+		},
+		"index at total contributes nothing": {
+			indices: []int{10},
+			context: 1,
+			total:   5,
+			want:    nil,
+		},
+		"index past total is dropped and the rest remain": {
+			indices: []int{1, 10},
+			context: 1,
+			total:   5,
+			want:    position.Spans{position.NewSpan(0, 3)},
+		},
+		"negative index contributes nothing": {
+			indices: []int{-3},
+			context: 1,
+			total:   5,
+			want:    nil,
+		},
+		"context at total covers every line": {
+			indices: []int{2},
+			context: 10,
+			total:   10,
+			want:    position.Spans{position.NewSpan(0, 10)},
+		},
+		"huge context covers every line once": {
+			indices: []int{0, 5},
+			context: math.MaxInt,
+			total:   6,
+			want:    position.Spans{position.NewSpan(0, 6)},
+		},
+		"half of max int context covers every line once": {
+			indices: []int{0, 5},
+			context: math.MaxInt / 2,
+			total:   6,
+			want:    position.Spans{position.NewSpan(0, 6)},
+		},
+		"zero total yields nothing": {
+			indices: []int{0},
+			context: 2,
+			total:   0,
+			want:    nil,
 		},
 	}
 
