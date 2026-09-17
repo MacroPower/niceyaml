@@ -218,8 +218,10 @@ func (s *Source) Documents() ([]*Document, error) {
 // Document returns the one [*Document] of a [Source] that holds a single
 // YAML document. When the file holds more than one, it returns an error
 // wrapping [ErrMultipleDocuments], bound to the Source and pointing at the
-// header of the second document. A file that does not parse returns the
-// error [Source.File] returns.
+// header of the second document. When the file holds none, which happens
+// for text that is only a "..." marker, it returns an error wrapping
+// [ErrNoDocuments], bound to the Source. A file that does not parse returns
+// the error [Source.File] returns.
 //
 // A file that opens with a %YAML directive parses into two documents, the
 // directive and the content, so such a file needs [Source.Documents].
@@ -229,7 +231,14 @@ func (s *Source) Document() (*Document, error) {
 		return nil, err
 	}
 
-	if len(docs) != 1 {
+	switch len(docs) {
+	case 0:
+		return nil, s.WrapError(NewErrorFrom(ErrNoDocuments))
+
+	case 1:
+		return docs[0], nil
+
+	default:
 		err := NewErrorFrom(fmt.Errorf("%w: %d documents", ErrMultipleDocuments, len(docs)))
 		if start := docs[1].doc.Start; start != nil {
 			err = err.With(WithToken(start))
@@ -237,8 +246,6 @@ func (s *Source) Document() (*Document, error) {
 
 		return nil, s.WrapError(err)
 	}
-
-	return docs[0], nil
 }
 
 // Decode validates and decodes the single document of the [Source] into a
@@ -248,8 +255,9 @@ func (s *Source) Document() (*Document, error) {
 //	source := niceyaml.NewSourceFromString(yamlContent)
 //	config, err := source.Decode[Config](ctx, niceyaml.WithValidator(validator))
 //
-// A file that holds more than one document returns [ErrMultipleDocuments];
-// use [Source.Documents] for those.
+// A file that holds more than one document returns [ErrMultipleDocuments],
+// and one that holds none returns [ErrNoDocuments]; use [Source.Documents]
+// for those.
 func (s *Source) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
 	var v T
 
@@ -266,7 +274,7 @@ func (s *Source) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, er
 // DecodeInto validates and decodes the single document of the [Source] into
 // v, which must be a pointer, as [Document.DecodeInto] does for that
 // document. A file that holds more than one document returns
-// [ErrMultipleDocuments].
+// [ErrMultipleDocuments], and one that holds none returns [ErrNoDocuments].
 func (s *Source) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
 	doc, err := s.Document()
 	if err != nil {

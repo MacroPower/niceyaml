@@ -34,6 +34,11 @@ var (
 	// [SourceError.Detail] return it.
 	ErrDocumentNotFound = errors.New("document not found in source")
 
+	// ErrNoDocuments indicates a [Source] that holds no YAML document where
+	// one was expected, such as a file holding only a "..." marker.
+	// [Source.Document], [Source.Decode], and [Source.DecodeInto] return it.
+	ErrNoDocuments = errors.New("no documents in source")
+
 	// ErrMultipleDocuments indicates a [Source] that holds more than one YAML
 	// document where one was expected. [Source.Document], [Source.Decode],
 	// and [Source.DecodeInto] return it.

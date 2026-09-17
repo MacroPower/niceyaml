@@ -114,6 +114,30 @@ func TestSource_Document(t *testing.T) {
 		assert.Same(t, source, bound.Source())
 	})
 
+	t.Run("rejects a source with no documents", func(t *testing.T) {
+		t.Parallel()
+
+		// A lone "..." marker parses to zero documents.
+		source := niceyaml.NewSourceFromString("...\n")
+
+		docs, err := source.Documents()
+		require.NoError(t, err)
+		require.Empty(t, docs)
+
+		_, err = source.Document()
+		require.ErrorIs(t, err, niceyaml.ErrNoDocuments)
+		require.NotErrorIs(t, err, niceyaml.ErrMultipleDocuments)
+		assert.Equal(t, "no documents in source", err.Error())
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, source, bound.Source())
+
+		_, err = source.Decode[map[string]int](t.Context())
+		require.ErrorIs(t, err, niceyaml.ErrNoDocuments)
+	})
+
 	t.Run("returns the parse error", func(t *testing.T) {
 		t.Parallel()
 
