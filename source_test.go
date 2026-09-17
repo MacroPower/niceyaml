@@ -16,6 +16,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
+	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
@@ -792,6 +793,27 @@ func TestSource_Parse(t *testing.T) {
 
 		require.ErrorAs(t, err, &yamlErr)
 	})
+
+	t.Run("syntax error comes back bound to the source", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("a: b: c\n")
+
+		_, err := source.File()
+		require.Error(t, err)
+
+		bound, ok := err.(*niceyaml.SourceError) //nolint:errorlint // The top-level value is the bound error.
+		require.True(t, ok, "want *niceyaml.SourceError, got %T", err)
+		assert.Same(t, source, bound.Source())
+
+		detail, err := bound.Detail(niceyaml.WithPrinter(newXMLPrinter()))
+		require.NoError(t, err)
+		assert.Contains(t, detail, "<genericError>b</genericError>", "the offending token is highlighted")
+
+		// Documents forwards the same bound error.
+		_, err = source.Documents()
+		assert.Same(t, bound, err)
+	})
 }
 
 func TestSource_WithYAMLParserOptions(t *testing.T) {
@@ -1106,6 +1128,41 @@ func TestSource_WrapError(t *testing.T) {
 		require.Equal(t, outer, wrapped)
 		assert.Equal(t, "document 3: <nil>", wrapped.Error())
 		assert.Equal(t, "document 3: <nil>", fmt.Sprintf("%+v", wrapped))
+	})
+
+	t.Run("returns an error bound to the same source unchanged", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("name: value\n")
+		namePath := paths.Root().Child("name")
+
+		once := source.WrapError(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
+		assert.Same(t, once, source.WrapError(once))
+
+		outer := fmt.Errorf("document 0: %w", once)
+		assert.Same(t, outer, source.WrapError(outer))
+	})
+
+	t.Run("wraps an error bound to another source", func(t *testing.T) {
+		t.Parallel()
+
+		first := niceyaml.NewSourceFromString("name: value\n")
+		second := niceyaml.NewSourceFromString("# comment\nname: value\n")
+		namePath := paths.Root().Child("name")
+
+		once := first.WrapError(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
+		twice := second.WrapError(once)
+
+		require.NotSame(t, once, twice)
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, twice, &bound)
+		assert.Same(t, second, bound.Source())
+
+		// The first binding put its position in the text, and the second
+		// adds none.
+		assert.Equal(t, "[1:7] $.name: bad name", twice.Error())
 	})
 }
 

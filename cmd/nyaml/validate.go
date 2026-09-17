@@ -66,15 +66,13 @@ func validateFile(ctx context.Context, yamlPath string, reg *registry.Registry) 
 
 	docs, err := source.Documents()
 	if err != nil {
-		return source.WrapError(err)
+		return err
 	}
 
 	for i, doc := range docs.All() {
 		err = reg.Validate(ctx, doc)
 		if err != nil {
-			// Bind before adding context, so the position stays beside the
-			// message under the document prefix.
-			return fmt.Errorf("document %d: %w", i, source.WrapError(err))
+			return fmt.Errorf("document %d: %w", i, err)
 		}
 	}
 

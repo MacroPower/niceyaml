@@ -54,8 +54,9 @@ var (
 //
 // An Error carries what a producer knows and nothing about presentation. A
 // validator that knows a path uses [WithPath] and need not hold the source.
-// To render the error against its document, wrap it with [Source.WrapError],
-// which returns a [*SourceError] that resolves the location and renders the
+// A [Document] binds the Errors its methods and validators produce to its
+// [Source], and [Source.WrapError] binds one built anywhere else. Either way
+// the result is a [*SourceError] that resolves the location and renders the
 // annotated excerpt.
 //
 // An Error is immutable once created. [Error.With] returns a copy with more
@@ -63,11 +64,11 @@ var (
 //
 // [Error.Error] returns the message with what the Error knows of its
 // location. A token or range position needs no source and reads
-// "[line:col] msg". A path reads "$.path: msg", and [Source.WrapError] adds
-// the position it resolves to in front, so a bound path error reads
-// "[line:col] $.path: msg". Nested errors from [WithErrors] are not part of
-// the message. They surface through [Error.Unwrap], and [SourceError.Detail]
-// renders them as annotations.
+// "[line:col] msg". A path reads "$.path: msg", and the SourceError that
+// binds it adds the position it resolves to in front, so a bound path error
+// reads "[line:col] $.path: msg". Nested errors from [WithErrors] are not
+// part of the message. They surface through [Error.Unwrap], and
+// [SourceError.Detail] renders them as annotations.
 //
 // Error implements the error interface. Use [Error.Unwrap] with [errors.Is]
 // and [errors.As] to inspect wrapped errors.
@@ -139,8 +140,10 @@ func WithPath(p paths.Path) ErrorOption {
 // WithDocumentIndex is an [ErrorOption] that sets the 0-indexed document
 // the error's path resolves in. It matters only for multi-document sources.
 //
-// [Document] applies it to the errors it returns, so callers only need
-// it when they build path errors for a specific document by hand.
+// [Document] applies it to the errors it binds, so a validator that returns
+// an unbound [*Error] needs no index of its own. A validator that binds its
+// error through [Source.WrapError] itself sets the index first, since the
+// Document leaves a bound error as it is.
 func WithDocumentIndex(index int) ErrorOption {
 	return func(e *Error) {
 		e.docIndex = index
@@ -180,7 +183,7 @@ func WithErrors(errs ...*Error) ErrorOption {
 // Error returns the error message with the location the Error knows on its
 // own: "[line:col] msg" for a token or a range, "$.path: msg" for a path,
 // and the message alone when it carries none. A path has no position until
-// [Source.WrapError] binds the error to a source, and the [SourceError] then
+// a [Source] or [Document] binds the error, and the [SourceError] then
 // puts the resolved position in front. Nested errors from [WithErrors] are
 // not part of the message.
 func (e *Error) Error() string {
@@ -279,9 +282,10 @@ func (e *Error) hasLocation() bool {
 	return e.hasPosition() || len(e.errors) > 0
 }
 
-// Unwrap returns the underlying errors for [errors.Is] and [errors.As].
+// Unwrap returns the underlying errors for [errors.Is] and [errors.As]. A
+// nil Error unwraps to nothing, so a chain that holds one is safe to walk.
 func (e *Error) Unwrap() []error {
-	if e.err == nil && len(e.errors) == 0 {
+	if e == nil || (e.err == nil && len(e.errors) == 0) {
 		return nil
 	}
 
@@ -434,22 +438,27 @@ func resolveToken(file *ast.File, p paths.Path, docIndex int) (*token.Token, err
 
 // SourceError is an error bound to the [*Source] it occurred in.
 //
-// [Source.WrapError] creates one around any error whose chain holds an
-// [*Error]. It resolves the Error's location against the source, so
-// [SourceError.Error] puts the position of a path in front of the message,
+// [Source.File], [Source.Documents], and the [Document] methods bind every
+// error they return whose chain holds an [*Error], and [Source.WrapError]
+// binds an error built elsewhere. The SourceError resolves the Error's
+// location against the source, so [SourceError.Error]
+// puts the position of a path in front of the message,
 // [SourceError.Location] returns the resolved range, and
 // [SourceError.Detail] renders the surrounding lines with the location
 // highlighted. The %+v verb prints the message and the detail:
 //
-//	fmt.Printf("%+v\n", source.WrapError(err))
+//	if _, err := source.File(); err != nil {
+//		fmt.Printf("%+v\n", err)
+//	}
 //
 // Nested errors appear as annotations below their own lines, and distant
 // locations render as separate hunks.
 //
 // A SourceError never rewrites the message of the error it binds. The text
 // a wrapper such as [fmt.Errorf] produced stays as it was, and the position
-// goes in front of it. To keep the position beside the message, bind an
-// error first and add context around the SourceError after.
+// goes in front of it. An error built by hand therefore goes through
+// [Source.WrapError] first, and context around the SourceError comes after,
+// so the position stays beside the message.
 //
 // [SourceError.Render] returns what %+v prints, and both it and
 // [SourceError.Detail] accept [DetailOption] values for the [printer.Printer] and the
@@ -457,7 +466,8 @@ func resolveToken(file *ast.File, p paths.Path, docIndex int) (*token.Token, err
 // it looks. A SourceError implements the error interface and unwraps to the
 // error it was created from, so [errors.Is] and [errors.As] see through it.
 //
-// Create instances with [Source.WrapError].
+// Create instances with [Source.WrapError], or receive them from the
+// [Source] and [Document] methods.
 type SourceError struct {
 	err    error
 	source *Source
@@ -534,9 +544,10 @@ func (e *SourceError) Unwrap() error {
 // when the position was unknown before binding: a path error that resolves
 // reads "[line:col] $.path: msg", with any context a wrapper added between
 // the path and the position. A token or range error already carries its
-// position in the message, and a chain that holds a SourceError from an
-// earlier binding already carries the resolved one, so both come back as
-// they are. A path that does not resolve leaves the message as it is too.
+// position in the message, and a chain that holds a SourceError from a
+// binding to another source already carries the resolved one, so both come
+// back as they are. A path that does not resolve leaves the message as it
+// is too.
 // Nested errors are not part of the message; see [SourceError.Detail].
 //
 // The result is plain text and never includes source lines, so it is safe to
@@ -545,8 +556,8 @@ func (e *SourceError) Unwrap() error {
 func (e *SourceError) Error() string {
 	msg := e.err.Error()
 
-	// An earlier binding put the position it resolved into the text that
-	// the wrappers above it froze.
+	// A binding to another source put the position it resolved into the
+	// text that the wrappers above it froze.
 	if _, ok := errors.AsType[*SourceError](e.err); ok { //nolint:errcheck // Presence check, not a value extraction.
 		return msg
 	}

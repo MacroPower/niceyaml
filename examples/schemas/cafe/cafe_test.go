@@ -23,7 +23,7 @@ func cafeConfig(ctx context.Context, in string) (*cafe.Config, error) {
 	for _, doc := range d.All() {
 		c, err = doc.Decode[cafe.Config](ctx, niceyaml.WithSchemaValidator(cafe.Schema))
 		if err != nil {
-			return nil, src.WrapError(err)
+			return nil, err
 		}
 	}
 

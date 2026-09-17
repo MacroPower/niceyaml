@@ -24,11 +24,12 @@ import (
 // [*Document].
 //
 // Source separates two concerns. Parsing and decoding live on Source itself,
-// where [Source.File] lazily parses the AST, [Source.Documents] iterates the
-// documents, and [Source.WrapError] attaches source context to errors.
-// Rendering lives in a [line.Lines] view, available from [Source.Lines],
-// which organizes the tokens into lines and carries the overlays,
-// annotations, and flags that a [printer.Printer] renders. Utilities that
+// where [Source.File] lazily parses the AST and [Source.Documents] iterates
+// the documents. Every error they and their Documents produce comes back
+// bound to the Source as a [SourceError], and [Source.WrapError] binds
+// errors built elsewhere. Rendering lives in a [line.Lines] view, available
+// from [Source.Lines], which organizes the tokens into lines and carries the
+// overlays, annotations, and flags that a [printer.Printer] renders. Utilities that
 // only render or search, such as [printer.Printer], [finder.Finder], and
 // [diff.Differ], accept either a Source or a view.
 //
@@ -88,10 +89,8 @@ func WithName(name string) SourceOption {
 }
 
 // WithFilePath is a [SourceOption] that sets the file path for the [Source].
-//
-// This is used by [Documents] to propagate file path context to
-// [Document] instances, enabling schema matchers to route based on
-// file location.
+// Each [Document] of the Source reports it from [Document.FilePath], which
+// schema matchers route on.
 //
 // For file-based sources, use [NewSourceFromFile] which sets this
 // automatically.
@@ -123,9 +122,9 @@ func WithYAMLParserOptions(opts ...parser.Option) SourceOption {
 
 // NewSourceFromFile creates a new [*Source] by reading a file from disk.
 //
-// The file path is automatically set on the [Source], enabling [Documents] to
-// propagate it to [Document] instances for schema routing, and
-// [Source.Name] returns it unless [WithName] sets a name.
+// The file path is set on the [Source], so each [Document] reports it for
+// schema routing, and [Source.Name] returns it unless [WithName] sets a
+// name.
 //
 // Returns an error if the file cannot be read.
 func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
@@ -197,18 +196,19 @@ func (s *Source) Tokens() token.Tokens {
 
 // Documents returns the [*Documents] of this [Source].
 //
-// It parses the source and pairs each parsed document with its tokens once,
-// so [Documents.All] can be iterated any number of times without repeating
-// either step.
+// It parses the source and builds a [*Document] for each parsed document
+// once, so [Documents.All] can be iterated any number of times without
+// repeating either step.
 //
-// Returns an error if the source cannot be parsed.
+// A YAML syntax error comes back bound to the Source. It is the same error
+// [Source.File] returns.
 func (s *Source) Documents() (*Documents, error) {
 	f, err := s.File()
 	if err != nil {
 		return nil, err
 	}
 
-	return &Documents{source: s, file: f, docTokens: alignDocumentTokens(f, s.Tokens())}, nil
+	return newDocuments(s, f), nil
 }
 
 // File returns an [*ast.File] for the [Source] tokens.
@@ -216,8 +216,8 @@ func (s *Source) Documents() (*Documents, error) {
 // The file is lazily parsed on first call using [parser.Parse] with options
 // provided via [WithYAMLParserOptions]. Subsequent calls return the cached result.
 //
-// A YAML syntax error comes back as an [*Error] that carries the offending
-// token. Wrap it with [Source.WrapError] to render it against the source.
+// A YAML syntax error comes back as a [*SourceError] bound to this Source,
+// so the %+v verb renders it with the offending token highlighted.
 func (s *Source) File() (*ast.File, error) {
 	s.fileOnce.Do(func() {
 		s.file, s.fileErr = s.parse()
@@ -243,10 +243,10 @@ func (s *Source) parse() (*ast.File, error) {
 	}
 
 	if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
-		return nil, NewError(
+		return nil, s.WrapError(NewError(
 			yamlErr.GetMessage(),
 			WithToken(yamlErr.GetToken()),
-		)
+		))
 	}
 
 	//nolint:wrapcheck // Return the original error if it's not a [yaml.Error].
@@ -257,14 +257,20 @@ func (s *Source) parse() (*ast.File, error) {
 // The returned [*SourceError] resolves the location of that inner Error
 // against this source, and its [SourceError.Render] and
 // [SourceError.Detail] accept [DetailOption] values for how the excerpt
-// looks. The message of err stays as it is, and the resolved position of a
-// path error goes in front of it, so bind a path error before adding
-// context with [fmt.Errorf] to keep the position beside the message:
+// looks.
+//
+// Errors from [Source.File], [Source.Documents], and the [Document] methods
+// are bound already, so they need no WrapError. WrapError is for errors
+// built elsewhere, such as a validator that returns an [*Error] with a path. The
+// message of err stays as it is, and the resolved position of a path error
+// goes in front of it, so bind such an error before adding context with
+// [fmt.Errorf] to keep the position beside the message:
 //
 //	fmt.Errorf("document %d: %w", i, source.WrapError(err))
 //
 // If err is nil, WrapError returns nil. If err's chain holds no [*Error], or
-// the first one it holds is a nil pointer, WrapError returns err unchanged.
+// the first one it holds is a nil pointer, or the first [*SourceError] it
+// holds is bound to this Source already, WrapError returns err unchanged.
 // WrapError never modifies err.
 func (s *Source) WrapError(err error) error {
 	if err == nil {
@@ -272,6 +278,11 @@ func (s *Source) WrapError(err error) error {
 	}
 
 	if _, ok := firstError(err); !ok { //nolint:errcheck // Presence check, not a value extraction.
+		return err
+	}
+
+	bound, ok := errors.AsType[*SourceError](err)
+	if ok && bound.source == s {
 		return err
 	}
 

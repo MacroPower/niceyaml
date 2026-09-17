@@ -50,6 +50,12 @@ type SchemaValidator interface {
 // document is the whole document even for [Document.Get], since a validator
 // that routes on the document has no meaning for one value inside it.
 //
+// A validator that knows a location returns an unbound [*Error], and the
+// Document binds it to the source with the document's index, so its path
+// resolves in the right document. A validator that binds an error itself
+// through [Source.WrapError] sets [WithDocumentIndex] first, since the
+// Document leaves a bound error as it is.
+//
 // See [go.jacobcolvin.com/niceyaml/schema/registry.Registry] for an
 // implementation.
 type DocumentValidator interface {
@@ -59,9 +65,10 @@ type DocumentValidator interface {
 // Documents is the sequence of YAML documents in a [*Source].
 //
 // A single YAML file can hold several documents separated by "---", often
-// with different schemas and validation requirements. Documents pairs each
-// parsed document with its tokens once, and [Documents.All] yields a
-// [*Document] for each:
+// with different schemas and validation requirements. Documents builds a
+// [*Document] for each parsed document once, so [Documents.At] and
+// [Documents.All] return the same pointer for an index however often they
+// run. Two calls to [Source.Documents] build two sets.
 //
 //	docs, err := source.Documents()
 //	for _, doc := range docs.All() {
@@ -71,10 +78,21 @@ type DocumentValidator interface {
 // Create instances with [Source.Documents].
 type Documents struct {
 	source *Source
-	file   *ast.File
-	// Tokens for each document, aligned with file.Docs by index at
-	// construction. See alignDocumentTokens.
-	docTokens []token.Tokens
+	docs   []*Document
+}
+
+// newDocuments creates a new [*Documents] holding one [*Document] per
+// document of file, the AST src parsed, in file order. See
+// alignDocumentTokens for how each Document finds its tokens.
+func newDocuments(src *Source, file *ast.File) *Documents {
+	docTokens := alignDocumentTokens(file, src.Tokens())
+
+	docs := make([]*Document, len(file.Docs))
+	for i, doc := range file.Docs {
+		docs[i] = &Document{source: src, doc: doc, tokens: docTokens[i], index: i}
+	}
+
+	return &Documents{source: src, docs: docs}
 }
 
 // alignDocumentTokens pairs every document in file with the token group it
@@ -144,44 +162,31 @@ func (d *Documents) Source() *Source {
 
 // Len returns the number of YAML documents in the file.
 func (d *Documents) Len() int {
-	return len(d.file.Docs)
+	return len(d.docs)
 }
 
 // At returns the [*Document] at the given zero-based index, or nil when the
-// index is outside the file.
+// index is outside the file. The same index returns the same pointer.
 func (d *Documents) At(index int) *Document {
-	if index < 0 || index >= len(d.file.Docs) {
+	if index < 0 || index >= len(d.docs) {
 		return nil
 	}
 
-	return d.document(index)
+	return d.docs[index]
 }
 
 // All returns an iterator over the documents in the file, in order.
 //
-// Each iteration yields the document index and a [*Document] for that
-// document, built with the file path, tokens, and decode options of the
-// [*Source]. The tokens were paired at construction, so each call yields
-// the same slices.
+// Each iteration yields the document index and the [*Document] for that
+// document, the one [Documents.At] returns for the index.
 func (d *Documents) All() iter.Seq2[int, *Document] {
 	return func(yield func(int, *Document) bool) {
-		for i := range d.file.Docs {
-			if !yield(i, d.document(i)) {
+		for i, doc := range d.docs {
+			if !yield(i, doc) {
 				return
 			}
 		}
 	}
-}
-
-// document builds the [*Document] at index with the context of the
-// [*Source].
-func (d *Documents) document(index int) *Document {
-	return NewDocument(d.file.Docs[index], DocumentInfo{
-		Index:             index,
-		FilePath:          d.source.FilePath(),
-		Tokens:            d.docTokens[index],
-		YAMLDecodeOptions: d.source.decodeOpts,
-	})
 }
 
 // Document decodes and validates a single YAML document.
@@ -205,52 +210,16 @@ func (d *Documents) document(index int) *Document {
 // without decoding the whole document, which is helpful for routing
 // documents based on a discriminator field.
 //
-// All decoding methods convert YAML errors to [Error] with source
-// annotations.
+// A Document holds the [*Source] it came from, and every decoding method
+// binds the [Error] values it produces to that source, so the errors it
+// returns carry a [SourceError] that renders the offending lines.
 //
-// Create instances with [NewDocument] or iterate with [Documents.All].
+// Create instances with [Documents.At] or iterate with [Documents.All].
 type Document struct {
-	doc        *ast.DocumentNode
-	filePath   string
-	tokens     token.Tokens
-	decodeOpts []yaml.DecodeOption
-	index      int
-}
-
-// DocumentInfo is what a [Document] knows about its document beyond the
-// AST: where it sits in the file, the tokens it came from, and how to decode
-// it. [Documents.All] fills it in from the [Source]; callers that build a
-// [Document] by hand pass what they have and leave the rest zero.
-type DocumentInfo struct {
-	// FilePath is the path of the file the document came from. Schema
-	// matchers route on it.
-	FilePath string
-
-	// Tokens are the tokens the document came from, with positions
-	// relative to the document.
-	Tokens token.Tokens
-
-	// YAMLDecodeOptions reach the go-yaml decoder on every decode of the
-	// document, ahead of the [DecodeOption] values given per call. A
-	// [Source] sends the decoder half of [WithAllowDuplicateKeys] this way.
-	YAMLDecodeOptions []yaml.DecodeOption
-
-	// Index is the 0-indexed position of the document within the file.
-	// Errors from the decoder carry it as their document index.
-	Index int
-}
-
-// NewDocument creates a new [*Document] for doc with the given info.
-// [Documents.All] is the usual way to get one, since it fills the info in
-// from the [Source].
-func NewDocument(doc *ast.DocumentNode, info DocumentInfo) *Document {
-	return &Document{
-		doc:        doc,
-		index:      info.Index,
-		tokens:     info.Tokens,
-		filePath:   info.FilePath,
-		decodeOpts: info.YAMLDecodeOptions,
-	}
+	source *Source
+	doc    *ast.DocumentNode
+	tokens token.Tokens
+	index  int
 }
 
 // Node returns the underlying [*ast.DocumentNode].
@@ -258,22 +227,27 @@ func (dd *Document) Node() *ast.DocumentNode {
 	return dd.doc
 }
 
-// Index returns the 0-indexed position of this document within the file,
-// from [DocumentInfo.Index].
+// Source returns the [*Source] the document came from.
+func (dd *Document) Source() *Source {
+	return dd.source
+}
+
+// Index returns the 0-indexed position of this document within the file.
 func (dd *Document) Index() int {
 	return dd.index
 }
 
-// Tokens returns the tokens for this document, from
-// [DocumentInfo.Tokens]. Returns nil when none were given.
+// Tokens returns the tokens of this document, with the positions they have
+// in the source. Returns nil when no token anchors the document, such as one
+// with neither a header nor a body.
 func (dd *Document) Tokens() token.Tokens {
 	return dd.tokens
 }
 
-// FilePath returns the path of the file the document came from, from
-// [DocumentInfo.FilePath]. Returns an empty string when none was given.
+// FilePath returns the path of the file the document came from, which is
+// [Source.FilePath]. Returns an empty string when the source has none.
 func (dd *Document) FilePath() string {
-	return dd.filePath
+	return dd.source.FilePath()
 }
 
 // Get decodes the YAML value at path into a T without unmarshaling the whole
@@ -297,9 +271,9 @@ func (dd *Document) FilePath() string {
 // [paths.ErrNoDocument] when the document has no content at all, such as an
 // empty document or one holding only directives; [paths.ErrAlias] when an
 // alias on the path does not resolve; and [paths.ErrWildcard] for a path
-// that could match several nodes. YAML decoding errors, including a value
-// that cannot be represented as T, are converted to [Error] with source
-// annotations.
+// that could match several nodes. Those errors come back as they are. A
+// YAML decoding error, including a value that cannot be represented as T,
+// comes back bound to the source as a [SourceError].
 //
 // The opts run the pipeline of [Document.DecodeInto] on the value at
 // path rather than on the whole document: each [SchemaValidator] from
@@ -390,8 +364,8 @@ func (dd *Document) node(path paths.Path) (ast.Node, error) {
 
 // ValidateSchema decodes the document to [any] and validates it using sv.
 //
-// Returns decoding errors or errors from the [SchemaValidator] ValidateSchema
-// method.
+// A decoding error, or an [*Error] from sv, comes back bound to the source
+// as a [SourceError]. Any other error from sv comes back as it is.
 func (dd *Document) ValidateSchema(ctx context.Context, sv SchemaValidator) error {
 	var untypedData any
 
@@ -402,37 +376,43 @@ func (dd *Document) ValidateSchema(ctx context.Context, sv SchemaValidator) erro
 
 	err = sv.ValidateSchema(ctx, untypedData)
 	if err != nil {
-		return dd.locate(err)
+		return dd.bind(err)
 	}
 
 	return nil
 }
 
-// locate attaches this document's index to err when its chain holds an
-// [*Error] without one, so its paths resolve in the right document of a
-// multi-document source. A direct [*Error] is copied with the index; an
-// Error behind other wrapping is wrapped in a new Error that carries it.
-// Other errors pass through unchanged.
-func (dd *Document) locate(err error) error {
+// bind returns err bound to the document's source. An error already bound
+// to that source comes back as it is. When the chain holds an [*Error]
+// without a document index, bind sets this document's index so the paths
+// resolve in the right document of a multi-document source. It copies a
+// direct Error with the index and wraps one behind other wrapping in a new
+// Error that carries it. An error whose chain holds no Error, such as one
+// from [paths], passes through unchanged.
+func (dd *Document) bind(err error) error {
 	if err == nil {
 		return nil
 	}
 
-	yamlErr, ok := errors.AsType[*Error](err)
+	yamlErr, ok := firstError(err)
 	if !ok {
 		return err
 	}
 
-	if _, set := yamlErr.DocumentIndex(); set {
-		//nolint:wrapcheck // The producer already returns Error with path info.
+	bound, isBound := errors.AsType[*SourceError](err)
+	if isBound && bound.source == dd.source {
 		return err
 	}
 
-	if direct, ok := err.(*Error); ok { //nolint:errorlint // A direct Error is copied; a wrapped one is wrapped again.
-		return direct.With(WithDocumentIndex(dd.index))
+	if _, set := yamlErr.DocumentIndex(); !set {
+		if direct, ok := err.(*Error); ok { //nolint:errorlint // A direct Error is copied; a wrapped one is wrapped again.
+			err = direct.With(WithDocumentIndex(dd.index))
+		} else {
+			err = NewErrorFrom(err, WithDocumentIndex(dd.index))
+		}
 	}
 
-	return NewErrorFrom(err, WithDocumentIndex(dd.index))
+	return dd.source.WrapError(err)
 }
 
 // DecodeOption configures [Document.Decode],
@@ -538,8 +518,9 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 // *T implements [Validator], Validate is called after successful decoding
 // unless [WithSelfValidation] switches that off. Methods declared on T
 // itself are included in the method set of *T, so both value and pointer
-// receivers participate. YAML decoding errors are converted to [Error] with
-// source annotations. On error, the returned T is the zero value.
+// receivers participate. YAML decoding errors, and [Error] values from the
+// validators, come back bound to the source as [SourceError] values. On
+// error, the returned T is the zero value.
 //
 // To decode into a value you already hold, use [Document.DecodeInto].
 func (dd *Document) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
@@ -563,8 +544,8 @@ func (dd *Document) Decode[T any](ctx context.Context, opts ...DecodeOption) (T,
 // v implements [Validator], Validate is called after successful decoding
 // unless [WithSelfValidation] switches that off. Fields absent from the
 // document keep their existing values, so v may be pre-populated with
-// defaults. YAML decoding errors are converted to [Error] with source
-// annotations.
+// defaults. YAML decoding errors, and [Error] values from the validators,
+// come back bound to the source as [SourceError] values.
 func (dd *Document) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
 	return dd.decodeInto(ctx, dd.doc.Body, v, opts)
 }
@@ -588,7 +569,7 @@ func (dd *Document) decodeInto(ctx context.Context, node ast.Node, v any, opts [
 		for _, sv := range cfg.schemas {
 			err := sv.ValidateSchema(ctx, untypedData)
 			if err != nil {
-				return dd.locate(err)
+				return dd.bind(err)
 			}
 		}
 	}
@@ -596,7 +577,7 @@ func (dd *Document) decodeInto(ctx context.Context, node ast.Node, v any, opts [
 	for _, dv := range cfg.docValidators {
 		err := dv.Validate(ctx, dd)
 		if err != nil {
-			return dd.locate(err)
+			return dd.bind(err)
 		}
 	}
 
@@ -610,28 +591,25 @@ func (dd *Document) decodeInto(ctx context.Context, node ast.Node, v any, opts [
 	}
 
 	if validator, ok := v.(Validator); ok {
-		return dd.locate(validator.Validate())
+		return dd.bind(validator.Validate())
 	}
 
 	return nil
 }
 
-// decodeNode decodes node to v with the document's decode options followed
-// by yamlOpts, and converts YAML errors.
+// decodeNode decodes node to v with the source's decode options followed by
+// yamlOpts, and binds a YAML error to the source. Any other error from the
+// decoder, such as a canceled context, comes back as it is.
 func (dd *Document) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []yaml.DecodeOption) error {
-	decodeOpts := make([]yaml.DecodeOption, 0, len(dd.decodeOpts)+len(yamlOpts))
-	decodeOpts = append(decodeOpts, dd.decodeOpts...)
+	decodeOpts := make([]yaml.DecodeOption, 0, len(dd.source.decodeOpts)+len(yamlOpts))
+	decodeOpts = append(decodeOpts, dd.source.decodeOpts...)
 	decodeOpts = append(decodeOpts, yamlOpts...)
 
 	dec := yaml.NewDecoder(bytes.NewReader(nil), decodeOpts...)
 	err := dec.DecodeFromNodeContext(ctx, node, v)
 	if err != nil {
 		if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
-			return NewError(
-				yamlErr.GetMessage(),
-				WithToken(yamlErr.GetToken()),
-				WithDocumentIndex(dd.index),
-			)
+			return dd.bind(NewError(yamlErr.GetMessage(), WithToken(yamlErr.GetToken())))
 		}
 
 		//nolint:wrapcheck // Return the original error if it's not a [yaml.Error].

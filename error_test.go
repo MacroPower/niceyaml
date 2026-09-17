@@ -674,6 +674,21 @@ func TestError_NilToken(t *testing.T) {
 func TestError_Unwrap(t *testing.T) {
 	t.Parallel()
 
+	t.Run("a nil Error unwraps to nothing", func(t *testing.T) {
+		t.Parallel()
+
+		var nilErr *niceyaml.Error
+
+		assert.Nil(t, nilErr.Unwrap())
+
+		// A chain that holds a nil Error behind a real one is safe to walk.
+		outer := niceyaml.NewErrorFrom(nilErr)
+
+		var bound *niceyaml.SourceError
+
+		assert.NotErrorAs(t, outer, &bound)
+	})
+
 	t.Run("unwraps underlying error", func(t *testing.T) {
 		t.Parallel()
 
@@ -2346,9 +2361,12 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 
 		inner := niceyaml.NewError("bad name", niceyaml.WithPath(namePath))
 		once := source.WrapError(inner)
-		twice := source.WrapError(fmt.Errorf("document 0: %w", once))
+		wrapper := fmt.Errorf("document 0: %w", once)
+		twice := source.WrapError(wrapper)
 
-		// The first binding froze its position into the wrapper's text.
+		// The chain is bound to this source already, so the second binding
+		// returns the wrapper as it is.
+		assert.Same(t, wrapper, twice)
 		assert.Equal(t, "document 0: [1:7] $.name: bad name", twice.Error())
 	})
 }

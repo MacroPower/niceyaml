@@ -37,7 +37,7 @@
 //
 //	v := schema.NewValidator(jsonschema.MustCompileJSON(schemaBytes))
 //	if err := doc.ValidateSchema(ctx, v); err != nil {
-//	    // err is *niceyaml.Error with path info for highlighting.
+//	    // err is a *niceyaml.SourceError; %+v prints the failing lines.
 //	}
 //
 // To validate and decode in one step, pass the validator to

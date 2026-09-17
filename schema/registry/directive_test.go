@@ -118,15 +118,6 @@ func TestDirective_Resolve_Match(t *testing.T) {
 			},
 			want: false,
 		},
-		"returns false when document has nil tokens": {
-			setup: func(t *testing.T) *niceyaml.Document {
-				t.Helper()
-
-				// NewDocument creates a decoder without tokens.
-				return firstDocumentWithNilTokens(t, stringtest.Input(`kind: Deployment`))
-			},
-			want: false,
-		},
 		"returns false when directive appears after content": {
 			setup: func(t *testing.T) *niceyaml.Document {
 				t.Helper()
@@ -253,16 +244,6 @@ func TestDirective_Resolve(t *testing.T) {
 		_, err = res.Resolve(t.Context(), doc)
 		require.ErrorIs(t, err, registry.ErrNoDirective)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
-	})
-
-	t.Run("returns ErrNoDirective when tokens are nil", func(t *testing.T) {
-		t.Parallel()
-
-		// NewDocument creates a decoder without tokens.
-		doc := firstDocumentWithNilTokens(t, stringtest.Input(`kind: Deployment`))
-		res := registry.Directive()
-		_, err := res.Resolve(t.Context(), doc)
-		require.ErrorIs(t, err, registry.ErrNoDirective)
 	})
 
 	t.Run("returns ErrNoFilePath for a relative path without a file path", func(t *testing.T) {
@@ -431,16 +412,4 @@ func firstDocumentFromFile(t *testing.T, path string) *niceyaml.Document {
 	t.Fatal("no documents found")
 
 	return nil
-}
-
-// firstDocumentWithNilTokens creates a Document with nil tokens for testing.
-func firstDocumentWithNilTokens(t *testing.T, input string) *niceyaml.Document {
-	t.Helper()
-
-	source := niceyaml.NewSourceFromString(input)
-	file, err := source.File()
-	require.NoError(t, err)
-	require.NotEmpty(t, file.Docs)
-
-	return niceyaml.NewDocument(file.Docs[0], niceyaml.DocumentInfo{})
 }

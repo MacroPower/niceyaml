@@ -32,8 +32,8 @@ func main() {
 
 // load parses a cafe configuration and validates it. A single Decode runs
 // the JSON schema from [cafe.Schema] first, then the custom open-before-close
-// check that [cafe.Config] implements. Failures are wrapped against the
-// source so they print with the offending lines highlighted.
+// check that [cafe.Config] implements. Failures come back bound to the
+// source, so they print with the offending lines highlighted.
 func load(in string) (*cafe.Config, error) {
 	source := niceyaml.NewSourceFromString(in)
 
@@ -47,7 +47,7 @@ func load(in string) (*cafe.Config, error) {
 	for _, doc := range docs.All() {
 		cfg, err = doc.Decode[cafe.Config](context.Background(), niceyaml.WithSchemaValidator(cafe.Schema))
 		if err != nil {
-			return nil, source.WrapError(err)
+			return nil, err
 		}
 	}
 

@@ -18,14 +18,14 @@
 //	p := printer.New()
 //	fmt.Println(p.Print(source))
 //
-// When errors occur, wrap them with source context to show users exactly where
+// Errors come back bound to the source, so they show users exactly where
 // the problem is:
 //
 //	file, err := source.File()
 //	if err != nil {
 //		// The %+v verb displays the YAML with the problematic location
 //		// highlighted; plain %v prints the message and position only.
-//		fmt.Printf("%+v\n", source.WrapError(err))
+//		fmt.Printf("%+v\n", err)
 //	}
 //
 // # Architecture
@@ -35,8 +35,9 @@
 //
 // [Source], in this package, is the file. It owns the tokens from go-yaml,
 // lazily parses them into an AST with [Source.File], yields each YAML
-// document in the file as a [Document] with [Source.Documents], and attaches
-// source context to errors with [Source.WrapError].
+// document in the file as a [Document] with [Source.Documents], and binds
+// the errors it and its Documents produce to itself. [Source.WrapError]
+// binds errors built elsewhere.
 //
 // [line.Lines] is the view. It organizes tokens into lines, and each
 // [line.Line] carries optional metadata for rendering. Annotations hold
@@ -63,14 +64,15 @@
 // position is known when the Error is built and reads "[line:col]"; a path
 // reads "$.path" until a source resolves it.
 //
-// [SourceError] binds an Error to its [Source]. [Source.WrapError] creates
-// one, [SourceError.Error] puts the resolved position of a path in front of
-// the message, and [SourceError.Detail] renders the surrounding lines with
-// the location highlighted. The %+v verb prints both. Nested errors appear as
-// annotations below their respective lines, with distant errors displayed in
-// separate hunks. A SourceError never rewrites the message it binds, so bind
-// an error before adding context with [fmt.Errorf] to keep the position
-// beside the message.
+// [SourceError] binds an Error to its [Source]. Every error a Source or one
+// of its Documents produces is one, and [Source.WrapError] binds an Error
+// built elsewhere. [SourceError.Error] puts the resolved position of a path
+// in front of the message, and [SourceError.Detail] renders the surrounding
+// lines with the location highlighted. The %+v verb prints both. Nested
+// errors appear as annotations below their respective lines, with distant
+// errors displayed in separate hunks. A SourceError never rewrites the
+// message it binds, so an error built by hand goes through WrapError before
+// [fmt.Errorf] adds context, which keeps the position beside the message.
 //
 // # Lines
 //
@@ -122,7 +124,7 @@
 //	for _, doc := range docs.All() {
 //		config, err := doc.Decode[Config](ctx, niceyaml.WithSchemaValidator(validator))
 //		if err != nil {
-//			return source.WrapError(err)
+//			return err
 //		}
 //	}
 //
@@ -140,8 +142,8 @@
 // [Document.DecodeInto] runs the same pipeline on a value you already hold,
 // such as one pre-populated with defaults.
 //
-// Both produce [Error] values with path information that [Source.WrapError] can
-// annotate with source context.
+// Both return errors bound to the source, so a decoding failure or a
+// validator's [Error] renders its location with the %+v verb as it is.
 //
 // # Diffs
 //

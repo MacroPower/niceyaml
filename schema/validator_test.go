@@ -547,13 +547,9 @@ func TestValidator_PathTarget(t *testing.T) {
 				err = dd.ValidateSchema(t.Context(), v)
 				require.Error(t, err)
 
-				var validationErr *niceyaml.Error
-
-				require.ErrorAs(t, err, &validationErr)
-
 				var bound *niceyaml.SourceError
 
-				require.ErrorAs(t, source.WrapError(validationErr), &bound)
+				require.ErrorAs(t, err, &bound)
 
 				assert.Contains(t, bound.Render(niceyaml.WithPrinter(newXMLPrinter())), tc.wantContains,
 					"expected error output to contain specific highlighting pattern")
@@ -700,16 +696,20 @@ func TestValidator_SubErrorAnnotations(t *testing.T) {
 				err = dd.ValidateSchema(t.Context(), v)
 				require.Error(t, err)
 
-				var validationErr *niceyaml.Error
+				var bound *niceyaml.SourceError
 
-				require.ErrorAs(t, err, &validationErr)
+				require.ErrorAs(t, err, &bound)
 
-				errOutput := fmt.Sprintf("%+v", source.WrapError(validationErr))
+				errOutput := fmt.Sprintf("%+v", bound)
 
 				for _, annotation := range tc.wantAnnotations {
 					assert.Contains(t, errOutput, annotation,
 						"expected error output to contain annotation text")
 				}
+
+				var validationErr *niceyaml.Error
+
+				require.ErrorAs(t, err, &validationErr)
 
 				// Unwrap includes the main error plus its nested errors.
 				unwrapped := validationErr.Unwrap()
