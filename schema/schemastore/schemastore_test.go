@@ -471,6 +471,24 @@ func TestSchemaStore_HTTPClient(t *testing.T) {
 	assert.Equal(t, "test-value", headerReceived)
 }
 
+func TestSchemaStore_NilHTTPClient(t *testing.T) {
+	t.Parallel()
+
+	server := newCatalogServer(t, testCatalog)
+	t.Cleanup(server.Close)
+
+	// A nil client keeps the default rather than panicking on the first
+	// fetch.
+	store := schemastore.New(
+		schemastore.WithCatalogURL(server.URL),
+		schemastore.WithHTTPClient(nil),
+	)
+
+	entry, err := store.FindMatch(t.Context(), "config.yaml")
+	require.NoError(t, err)
+	assert.Equal(t, "Test", entry.Name)
+}
+
 func TestSchemaStore_FetchError(t *testing.T) {
 	t.Parallel()
 

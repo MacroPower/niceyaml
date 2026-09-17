@@ -127,10 +127,13 @@ func WithCatalogURL(url string) Option {
 }
 
 // WithHTTPClient is an [Option] that sets a custom HTTP client for fetching
-// the catalog and schemas.
+// the catalog and schemas. A nil client keeps the default,
+// [http.DefaultClient].
 func WithHTTPClient(client *http.Client) Option {
 	return func(s *SchemaStore) {
-		s.client = client
+		if client != nil {
+			s.client = client
+		}
 	}
 }
 

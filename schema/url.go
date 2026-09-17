@@ -23,12 +23,15 @@ type httpConfig struct {
 	client *http.Client
 }
 
-// WithHTTPClient is an [HTTPOption] that sets a custom HTTP client.
+// WithHTTPClient is an [HTTPOption] that sets a custom HTTP client. A nil
+// client keeps the default, [http.DefaultClient].
 //
 // Applies to [URL] and [FileOrURL] loaders.
 func WithHTTPClient(client *http.Client) HTTPOption {
 	return func(cfg *httpConfig) {
-		cfg.client = client
+		if client != nil {
+			cfg.client = client
+		}
 	}
 }
 

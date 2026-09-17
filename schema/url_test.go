@@ -99,6 +99,23 @@ func TestURL(t *testing.T) {
 		assert.Equal(t, []byte(schemaData), data)
 	})
 
+	t.Run("with nil client", func(t *testing.T) {
+		t.Parallel()
+
+		schemaData := `{"type": "object"}`
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			//nolint:errcheck // Test helper.
+			w.Write([]byte(schemaData))
+		}))
+		defer server.Close()
+
+		// A nil client keeps the default rather than panicking on Load.
+		_, data, err := load(t, schema.URL(server.URL+"/schema.json", schema.WithHTTPClient(nil)))
+		require.NoError(t, err)
+		assert.Equal(t, []byte(schemaData), data)
+	})
+
 	t.Run("context cancellation", func(t *testing.T) {
 		t.Parallel()
 
