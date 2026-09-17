@@ -2788,6 +2788,14 @@ func TestDefaultAnnotation(t *testing.T) {
 			position:    line.Below,
 			want:        "     ^ error",
 		},
+		"empty content is left out of the column": {
+			annotations: line.Annotations{
+				{Placement: line.Below, Col: 0},
+				{Content: "boom", Placement: line.Below, Col: 5},
+			},
+			position: line.Below,
+			want:     "     ^ boom",
+		},
 		"single above annotation": {
 			annotations: line.Annotations{{Content: "@@ hunk @@", Placement: line.Above, Col: 0}},
 			position:    line.Above,

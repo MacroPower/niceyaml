@@ -237,15 +237,18 @@ type AnnotationFunc func(AnnotationContext) string
 // annotations with "^ ". Annotations with empty content are left out, and
 // it returns "" when none remain, as [line.Annotation.String] does.
 func DefaultAnnotation(ctx AnnotationContext) string {
-	contents := slices.DeleteFunc(ctx.Annotations.Contents(), func(s string) bool {
-		return s == ""
+	// Filter the annotations rather than their contents, so the column
+	// comes from the ones that are shown. DeleteFunc zeroes the tail in
+	// place, so work on a copy of the caller's slice.
+	kept := slices.DeleteFunc(slices.Clone(ctx.Annotations), func(a line.Annotation) bool {
+		return a.Content == ""
 	})
-	if len(contents) == 0 {
+	if len(kept) == 0 {
 		return ""
 	}
 
-	padding := strings.Repeat(" ", max(0, ctx.Annotations.Col()))
-	combined := strings.Join(contents, "; ")
+	padding := strings.Repeat(" ", max(0, kept.Col()))
+	combined := strings.Join(kept.Contents(), "; ")
 
 	// Add "^ " prefix for Below annotations.
 	if ctx.Placement == line.Below {
