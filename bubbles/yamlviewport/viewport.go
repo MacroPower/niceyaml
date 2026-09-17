@@ -1343,12 +1343,19 @@ func (m *Model) VisibleRowCount() int {
 //
 // The term stays set across content changes. A new revision, diff mode, or
 // view mode starts the search over at the first match in the new content and
-// scrolls to it.
+// scrolls to it. A new term likewise starts at its first match, while
+// setting the same term again keeps the current match.
 func (m *Model) SetSearchTerm(term string) {
 	if term == "" {
 		m.ClearSearch()
 
 		return
+	}
+
+	// The match index of another term points at an arbitrary match of this
+	// one.
+	if term != m.searchTerm {
+		m.searchIndex = -1
 	}
 
 	m.searchTerm = term

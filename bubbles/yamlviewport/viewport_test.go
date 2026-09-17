@@ -3533,6 +3533,41 @@ func TestViewport_SearchAcrossRevisions(t *testing.T) {
 	assert.Equal(t, 1, m.SearchCount())
 }
 
+func TestViewport_NewSearchTermStartsAtFirstMatch(t *testing.T) {
+	t.Parallel()
+
+	var sb strings.Builder
+
+	for i := range 40 {
+		fmt.Fprintf(&sb, "k%d: needle\n", i)
+	}
+
+	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+	m.SetWidth(80)
+	m.SetHeight(5)
+	m.SetSource(niceyaml.NewSourceFromString(sb.String()))
+
+	m.SetSearchTerm("needle")
+
+	for range 7 {
+		m.SearchNext()
+	}
+
+	require.Equal(t, 7, m.SearchIndex())
+
+	// Setting the same term again keeps the current match.
+	m.SetSearchTerm("needle")
+	assert.Equal(t, 7, m.SearchIndex())
+
+	// Another term starts over at its first match, k1 on line 1, rather than
+	// carrying the ordinal of the old term into the new match list.
+	m.SetSearchTerm("k1")
+	assert.Equal(t, 11, m.SearchCount())
+	assert.Equal(t, 0, m.SearchIndex())
+	assert.Contains(t, m.View(), "k1: needle")
+	assert.NotContains(t, m.View(), "k16: needle")
+}
+
 func TestViewport_ClearSearchSideBySide(t *testing.T) {
 	t.Parallel()
 
