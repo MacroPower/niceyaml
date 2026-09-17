@@ -109,6 +109,61 @@ func TestSplit_DuplicateNewline(t *testing.T) {
 	}
 }
 
+func TestSplit_NewlineColumn(t *testing.T) {
+	t.Parallel()
+
+	// A pure-newline part starts in the column after the last visible rune
+	// of its line, or in column 1 on a blank line.
+	tcs := map[string]struct {
+		input string
+		line  int // 0-indexed line holding the newline part.
+		idx   int // Segment index of the newline part on that line.
+		want  int
+	}{
+		"repeated newline after a tag": {
+			input: "a: !t\n  b: 1\n",
+			line:  0,
+			idx:   3,
+			want:  7,
+		},
+		"repeated newline after a long tag": {
+			input: "a: !!map\n  b: 1\n",
+			line:  0,
+			idx:   3,
+			want:  10,
+		},
+		"blank line inside a block scalar": {
+			input: "k: |\n  a\n\n  b\nz: 1\n",
+			line:  2,
+			idx:   0,
+			want:  1,
+		},
+		"blank line after a tag": {
+			input: "a: !!seq\n\n  - b\n",
+			line:  1,
+			idx:   0,
+			want:  1,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			lines := segment.Split(lexer.Tokenize(tc.input))
+			nl := part(t, lines, tc.line, tc.idx)
+
+			require.Equal(t, "\n", nl.Origin)
+			assert.Equal(t, tc.want, nl.Position.Column)
+
+			// The newline follows every other part on its line.
+			for _, seg := range lines[tc.line].Segments[:tc.idx] {
+				assert.Less(t, seg.Part().Position.Column, nl.Position.Column, "part %q", seg.Part().Origin)
+			}
+		})
+	}
+}
+
 func TestSplit_DuplicateNewlineOffset(t *testing.T) {
 	t.Parallel()
 

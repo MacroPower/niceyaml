@@ -108,15 +108,18 @@ func (s Segments) PartTokens() token.Tokens {
 	return result
 }
 
-// LastColumn returns the largest 1-indexed Column among the parts, which is
-// where the last part starts. Returns 0 when no part carries a position.
-func (s Segments) LastColumn() int {
+// EndColumn returns the 1-indexed column just past the parts, which is the
+// largest Column plus the width of the part that starts there. Returns 0
+// when no part carries a position.
+func (s Segments) EndColumn() int {
 	col := 0
 
 	for _, seg := range s {
-		if seg.part != nil && seg.part.Position != nil && seg.part.Position.Column > col {
-			col = seg.part.Position.Column
+		if seg.part == nil || seg.part.Position == nil {
+			continue
 		}
+
+		col = max(col, seg.part.Position.Column+seg.width)
 	}
 
 	return col

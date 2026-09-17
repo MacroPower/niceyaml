@@ -256,7 +256,7 @@ func (b *builder) processPart(ctx *partContext) bool {
 			Origin:        ctx.part,
 			Position: &token.Position{
 				Line:        b.currentLine - 1, // Goes on previous line.
-				Column:      lastLine.Segments.LastColumn() + 1,
+				Column:      newlineColumn(lastLine.Segments),
 				Offset:      b.currentOffset,
 				IndentNum:   b.prevLineIndentNum,
 				IndentLevel: b.currentIndentLevel,
@@ -306,7 +306,7 @@ func (b *builder) processPart(ctx *partContext) bool {
 	// Capture before it changes for later use.
 	wasFirstContentPart := *ctx.isFirstContentPart && !partIsPureNewline
 	if partIsPureNewline {
-		col = b.currentLineSegments.LastColumn() + 1
+		col = newlineColumn(b.currentLineSegments)
 	} else {
 		col, val = partColumnAndValue(ctx.tk, *ctx.isFirstContentPart, shouldHaveValue)
 		*ctx.isFirstContentPart = false
@@ -505,6 +505,13 @@ func countLeadingNewlines(s string) int {
 	}
 
 	return count
+}
+
+// newlineColumn returns the 1-indexed Column for a pure-newline part appended
+// to segs: the column just past the existing parts, or 1 when the newline
+// starts an otherwise empty line.
+func newlineColumn(segs Segments) int {
+	return max(segs.EndColumn(), 1)
 }
 
 // countLeadingNewlineParts returns the number of pure-newline parts at the
