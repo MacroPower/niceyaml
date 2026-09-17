@@ -1830,6 +1830,38 @@ func TestNewLines_BlankLineAbsorption(t *testing.T) {
 		assert.Equal(t, 2, lines[1].Number(), "second line (blank) should be 2")
 		assert.Equal(t, 3, lines[2].Number(), "third line should be 3")
 	})
+
+	t.Run("line numbers stay contiguous after block scalar content", func(t *testing.T) {
+		t.Parallel()
+
+		// The lexer reports a block scalar content token at the line of its
+		// last content line, so the builder must not treat that line as a
+		// gap to sync forward to.
+		tcs := map[string]struct {
+			input string
+			want  []int
+		}{
+			"blank content then key":    {input: "b: |\n  \nlast: 1\n# c\n", want: []int{1, 2, 3, 4}},
+			"blank content then marker": {input: "b: |\n  \n---\n", want: []int{1, 2, 3}},
+			"content then marker":       {input: "b: |\n   y\n---\n---\nlast: 1\n", want: []int{1, 2, 3, 4, 5}},
+			"blank content then tagged": {input: "b: |\n\n!!str s: 1\n", want: []int{1, 2, 3}},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				lines := line.NewLines(lexer.Tokenize(tc.input))
+
+				got := make([]int, 0, len(lines))
+				for _, ln := range lines {
+					got = append(got, ln.Number())
+				}
+
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	})
 }
 
 // TestNewLines_FoldedBlockBlankLines verifies handling of blank lines within

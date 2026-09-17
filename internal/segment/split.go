@@ -147,7 +147,7 @@ func (b *builder) AddToken(tk *token.Token) {
 	parts := splitOriginIntoParts(origin)
 
 	// For simple tokens, check for line number gaps and sync forward if needed.
-	b.handleGap(tk, parts)
+	b.handleGap(tk, parts, isBlockScalarContent)
 
 	// Multi-part means the token's Origin was split into multiple parts.
 	isMultiPart := len(parts) > 1
@@ -437,8 +437,14 @@ func (b *builder) continuesPreviousLine(ctx *partContext) bool {
 //
 // When a gap is detected (token is ahead of currentLine), it flushes the
 // current line and syncs forward to the token's line.
-func (b *builder) handleGap(tk *token.Token, parts []string) {
-	if len(parts) != 1 {
+//
+// Block scalar content is never evidence of a gap. The lexer sets its
+// Position.Line to the header's line or to the last content line, not to
+// the line its Origin starts on, so syncing to it would skip a line.
+// The part that owns the original Position carries it forward through
+// processPart.
+func (b *builder) handleGap(tk *token.Token, parts []string, isBlockScalarContent bool) {
+	if len(parts) != 1 || isBlockScalarContent {
 		return
 	}
 
