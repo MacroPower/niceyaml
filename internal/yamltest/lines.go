@@ -79,8 +79,11 @@ func ValidateLines(ls line.Lines) error {
 			// column space.
 			//
 			// The lexer can produce tokens at the same position (e.g., empty block
-			// scalar content).
-			if tk.Origin != "" {
+			// scalar content). It also gives multi-line block scalar content
+			// that other content follows Column 0, a marker rather than a
+			// column, so such a token neither fails the check nor moves the
+			// baseline.
+			if tk.Origin != "" && tk.Position.Column != 0 {
 				if tk.Position.Column <= prevCol {
 					return fmt.Errorf(
 						"line at index %d, token %d: column %d not greater than previous %d: %w",

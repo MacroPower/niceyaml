@@ -1,6 +1,9 @@
 package yamltest_test
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/goccy/go-yaml/lexer"
@@ -31,6 +34,11 @@ func TestLines_Validate(t *testing.T) {
 			},
 			"valid with join flags": {
 				input: "script: |\n  line1\n  line2\n",
+			},
+			// The lexer gives multi-line block scalar content that other
+			// content follows Column 0.
+			"block scalar column zero": {
+				input: "k: >\n  a\n\n  b\nz: 1\n",
 			},
 			"empty": {
 				input: "",
@@ -178,4 +186,23 @@ func TestLines_Validate(t *testing.T) {
 
 		assert.NoError(t, yamltest.ValidateLines(lines))
 	})
+}
+
+func TestLines_Validate_Testdata(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"full.yaml", "full-modified.yaml"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			src, err := os.ReadFile(filepath.Join("..", "..", "testdata", name))
+			require.NoError(t, err)
+
+			lines := line.NewLines(lexer.Tokenize(string(src)))
+			require.NotEmpty(t, lines)
+
+			assert.Len(t, lines, strings.Count(string(src), "\n"), "one line per source line")
+			assert.NoError(t, yamltest.ValidateLines(lines))
+		})
+	}
 }
