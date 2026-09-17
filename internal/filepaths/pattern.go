@@ -51,8 +51,11 @@ func (p Pattern) Match(path string) bool {
 		return false
 	}
 
-	// Error is ignored since we validated the pattern at construction time.
-	matched, _ := doublestar.Match(p.raw, normalizePath(path)) //nolint:errcheck // Pattern was validated.
+	// A pattern error is path dependent: doublestar.ValidatePattern accepts
+	// some patterns that Match rejects for a multi-segment path, such as a
+	// "{" inside a character class. A pattern Match cannot interpret matches
+	// nothing, which is what a false result says already.
+	matched, _ := doublestar.Match(p.raw, normalizePath(path)) //nolint:errcheck // A pattern error means no match.
 
 	return matched
 }
