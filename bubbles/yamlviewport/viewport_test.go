@@ -3,6 +3,7 @@ package yamlviewport_test
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -3646,6 +3647,88 @@ func TestViewport_ContentChangesResetSearch(t *testing.T) {
 			assert.Equal(t, 2, m.SearchCount())
 			assert.Equal(t, 0, m.SearchIndex())
 			assert.Contains(t, m.View(), "key20: needle")
+		})
+	}
+}
+
+func TestViewport_SearchScrollsToWrappedRow(t *testing.T) {
+	t.Parallel()
+
+	// A long line wraps to many rows at width 20, and the match sits on the
+	// last of them.
+	long := func(value string) string {
+		return value + ": " + strings.Repeat("word ", 40) + "needle\n"
+	}
+
+	tcs := map[string]struct {
+		setup   func(m *yamlviewport.Model)
+		printer *printer.Printer
+		// The view row holding the match, or -1 when the offset clamps.
+		wantRow int
+	}{
+		"wrapped line": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetSource(niceyaml.NewSourceFromString("a: 1\n" + long("k") + "y: 2\nz: 3\n"))
+			},
+			wantRow: 1,
+		},
+		"middle row with line numbers": {
+			printer: testPrinterWithLineNumbers(),
+			setup: func(m *yamlviewport.Model) {
+				m.SetWidth(30)
+				m.SetSource(niceyaml.NewSourceFromString(
+					"a: 1\nk: " + strings.Repeat("word ", 20) + "needle " + strings.Repeat("word ", 20) + "\nz: 2\n",
+				))
+			},
+			wantRow: 1,
+		},
+		"hunk header above the line": {
+			setup: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromString("k: old\n", niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromString(long("k"), niceyaml.WithName("v2")))
+				m.SetViewMode(yamlviewport.ViewModeHunks)
+			},
+			wantRow: -1,
+		},
+		"right pane": {
+			setup: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromString("k: old\n", niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromString(long("k"), niceyaml.WithName("v2")))
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+				m.SetWidth(43)
+			},
+			wantRow: -1,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := tc.printer
+			if p == nil {
+				p = testPrinter()
+			}
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(p))
+			m.SetWidth(20)
+			m.SetHeight(4)
+			tc.setup(&m)
+
+			m.SetSearchTerm("needle")
+			require.Equal(t, 1, m.SearchCount())
+
+			// The view centers the row that holds the match, not the first
+			// row of its line.
+			assert.Positive(t, m.YOffset())
+
+			rows := strings.Split(m.View(), "\n")
+			got := slices.IndexFunc(rows, func(row string) bool { return strings.Contains(row, "needle") })
+			require.NotEqual(t, -1, got, "match not on screen:\n%s", m.View())
+
+			if tc.wantRow >= 0 {
+				assert.Equal(t, tc.wantRow, got)
+			}
 		})
 	}
 }

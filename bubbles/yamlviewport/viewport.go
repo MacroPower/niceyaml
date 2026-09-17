@@ -1457,22 +1457,98 @@ func (m *Model) SearchCount() int {
 	return len(m.searchMatches)
 }
 
-// scrollToCurrentMatch scrolls to center the current search match in the
-// viewport.
+// scrollToCurrentMatch scrolls to center the row that holds the start of the
+// current search match in the viewport.
 func (m *Model) scrollToCurrentMatch() {
 	if m.searchIndex < 0 || m.searchIndex >= len(m.searchMatches) {
 		return
 	}
 
-	k := m.searchMatches[m.searchIndex].rng.Start.Line
+	match := m.searchMatches[m.searchIndex]
+	k := match.rng.Start.Line
+
+	view := m.left
+	if m.right != nil && !match.inLeft {
+		view = m.right
+	}
 
 	m.ensureRows()
 
-	// Center the first row of the matched line in the viewport.
+	row := m.rows.sums[k] + m.matchRow(view, k, match.rng.Start.Col)
+
 	// Use (maxHeight-1)/2 to ensure the match appears at the visual center.
 	// For height 22: (22-1)/2 = 10, placing the match at position 10 (middle).
 	// For height 21: (21-1)/2 = 10, placing the match at position 10 (middle).
-	m.SetYOffset(m.rows.sums[k] - (m.maxHeight()-1)/2)
+	m.SetYOffset(row - (m.maxHeight()-1)/2)
+}
+
+// matchRow returns the row of line k in view that holds column col of the
+// line's content, counted from the line's first rendered row. Annotation rows
+// above the content count toward it, and a wrapped line contributes the
+// wrapped row the column lands on.
+//
+// It renders the one line as the view does and aligns the rows with the
+// line's content, since the printer keeps the wrap points to itself.
+func (m *Model) matchRow(view line.Lines, k, col int) int {
+	span := position.NewSpan(k, k+1)
+	p := m.renderPrinter(m.paneWidth()).With(printer.WithContainerStyle(lipgloss.NewStyle()))
+
+	all := splitLines(p.Print(view, span))
+	content := splitLines(p.With(printer.WithAnnotations(false)).Print(view, span))
+
+	// The content rows appear in the full render after the annotation rows
+	// above the line; the rest of the annotation rows lie below.
+	annotations := len(all) - len(content)
+	above := annotations
+
+	for a := range annotations {
+		if slices.EqualFunc(all[a:a+len(content)], content, func(x, y string) bool {
+			return plainRow(x) == plainRow(y)
+		}) {
+			above = a
+
+			break
+		}
+	}
+
+	// Every content row starts with the gutter, which is as wide as the
+	// difference between the unwrapped line rendered with and without it.
+	bare := p.With(printer.WithWidth(0), printer.WithAnnotations(false))
+	withGutter := splitLines(bare.Print(view, span))
+	noGutter := splitLines(bare.With(printer.WithGutter(printer.NoGutter)).Print(view, span))
+	gutter := ansi.StringWidth(withGutter[0]) - ansi.StringWidth(noGutter[0])
+
+	// Walk the rows along the line's content. Wrapping drops the spaces it
+	// breaks at, so a space in the content that a row skips still advances
+	// the column.
+	runes := []rune(view[k].Content())
+	next := 0
+
+	for j, row := range content {
+		text := plainRow(ansi.Cut(row, gutter, ansi.StringWidth(row)))
+
+		for _, r := range text {
+			for next < len(runes) && runes[next] != r && (runes[next] == ' ' || runes[next] == '\t') {
+				next++
+			}
+
+			if next < len(runes) && runes[next] == r {
+				next++
+			}
+		}
+
+		if next > col || j == len(content)-1 {
+			return above + j
+		}
+	}
+
+	return above
+}
+
+// plainRow returns the text of a rendered row without its styling and
+// trailing padding.
+func plainRow(row string) string {
+	return strings.TrimRight(ansi.Strip(row), " ")
 }
 
 // Update processes Bubble Tea messages and returns the updated model.
