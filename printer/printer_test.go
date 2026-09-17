@@ -3316,6 +3316,73 @@ func TestPrinter_SeparatorStyle(t *testing.T) {
 	}
 }
 
+func TestPrinter_GutterWidth(t *testing.T) {
+	t.Parallel()
+
+	short := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3").Lines()
+	long := niceyaml.NewSourceFromString(strings.Repeat("k: v\n", 10000) + "last: v").Lines()
+
+	tcs := map[string]struct {
+		view   line.View
+		gutter printer.GutterFunc
+		want   int
+	}{
+		"no gutter": {
+			view:   short,
+			gutter: printer.NoGutter,
+			want:   0,
+		},
+		"diff gutter": {
+			view:   short,
+			gutter: printer.DiffGutter,
+			want:   1,
+		},
+		"line numbers": {
+			view:   short,
+			gutter: printer.LineNumberGutter,
+			want:   5,
+		},
+		"default gutter": {
+			view:   short,
+			gutter: printer.DefaultGutter,
+			want:   6,
+		},
+		"default gutter with five digit numbers": {
+			view:   long,
+			gutter: printer.DefaultGutter,
+			want:   7,
+		},
+		"slice keeps the width of its largest number": {
+			view:   long[10000:],
+			gutter: printer.LineNumberGutter,
+			want:   6,
+		},
+		"empty view": {
+			view:   line.Lines{},
+			gutter: printer.DefaultGutter,
+			want:   6,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := testPrinterWithGutter(tc.gutter)
+			got := p.GutterWidth(tc.view)
+
+			assert.Equal(t, tc.want, got)
+
+			// Every rendered row starts with a gutter of that width, so the
+			// first row is at least that wide.
+			if tc.view.Len() > 0 {
+				first, _, _ := strings.Cut(p.Print(tc.view), "\n")
+				assert.GreaterOrEqual(t, lipgloss.Width(first), got)
+			}
+		})
+	}
+}
+
 func TestPrinter_WithGutter_Nil(t *testing.T) {
 	t.Parallel()
 

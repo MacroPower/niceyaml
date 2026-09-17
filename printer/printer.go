@@ -397,6 +397,14 @@ func (p *Printer) Width() int {
 	return p.width
 }
 
+// GutterWidth returns the width in cells of the gutter [Printer.Print]
+// renders for every row of view. The gutter grows with the largest line
+// number in the view, so a viewer that scrolls horizontally subtracts it
+// from the row width to find the width of the content.
+func (p *Printer) GutterWidth(view line.View) int {
+	return p.gutterWidth(maxNumber(view))
+}
+
 // ContainerStyle returns the [lipgloss.Style] wrapped around the whole
 // rendered output. See [WithContainerStyle].
 func (p *Printer) ContainerStyle() lipgloss.Style {
