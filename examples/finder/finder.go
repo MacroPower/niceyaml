@@ -42,7 +42,7 @@ func main() {
 	)
 
 	// Load the source to build an internal index.
-	idx := f.Load(source)
+	idx := f.Load(source.Lines())
 
 	// Find all occurrences of "cafe" in the source.
 	results := idx.Find("cafe")

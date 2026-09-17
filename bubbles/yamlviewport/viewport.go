@@ -884,7 +884,7 @@ func (m *Model) getDiffResult() *diff.Result {
 			base = current
 		}
 
-		m.diffResult = diff.Diff(base, current)
+		m.diffResult = diff.Diff(base.Lines(), current.Lines())
 	}
 
 	return m.diffResult

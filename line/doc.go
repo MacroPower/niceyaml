@@ -65,12 +65,10 @@
 // collapse back to one, and the result holds the lexer's original tokens in
 // their original order.
 //
-// [View] is the read-only interface over a Lines value that the printer,
-// finder, and diff packages accept. Lines implements it directly, and a
-// niceyaml Source implements it over its pristine lines, so those utilities
-// take either. A Lines collection holds pointers, so a line reached by
-// indexing it or by ranging over [Lines.AllLines] keeps the metadata added
-// to it:
+// [View] is the interface over a Lines value that the printer, finder, and
+// diff packages accept. A Lines collection holds pointers, so a line reached
+// by indexing it or by ranging over [Lines.AllLines] keeps the metadata
+// added to it:
 //
 //	for _, l := range lines.AllLines() {
 //		if l.Flag() == line.FlagInserted {

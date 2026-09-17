@@ -23,11 +23,11 @@ func main() {
 	)
 
 	fmt.Println("\nPrint with syntax highlighting:")
-	fmt.Println(p.Print(source))
+	fmt.Println(p.Print(source.Lines()))
 
 	fmt.Println("\nOnly render lines 2-4, 12-13:")
 
 	hunk1 := position.NewSpan(1, 4)
 	hunk2 := position.NewSpan(11, 13)
-	fmt.Println(p.Print(source, hunk1, hunk2))
+	fmt.Println(p.Print(source.Lines(), hunk1, hunk2))
 }

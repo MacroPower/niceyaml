@@ -93,7 +93,7 @@ func BenchmarkSourceRunes(b *testing.B) {
 
 	for _, sz := range sizes {
 		yaml := yamltest.GenerateYAML(sz.lines)
-		source := niceyaml.NewSourceFromString(yaml)
+		lines := niceyaml.NewSourceFromString(yaml).Lines()
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
@@ -102,7 +102,7 @@ func BenchmarkSourceRunes(b *testing.B) {
 
 			for b.Loop() {
 				count := 0
-				for range source.AllRunes() {
+				for range lines.AllRunes() {
 					count++
 				}
 
@@ -124,7 +124,7 @@ func BenchmarkSourceLines(b *testing.B) {
 
 	for _, sz := range sizes {
 		yaml := yamltest.GenerateYAML(sz.lines)
-		source := niceyaml.NewSourceFromString(yaml)
+		lines := niceyaml.NewSourceFromString(yaml).Lines()
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
@@ -133,7 +133,7 @@ func BenchmarkSourceLines(b *testing.B) {
 
 			for b.Loop() {
 				count := 0
-				for range source.AllLines() {
+				for range lines.AllLines() {
 					count++
 				}
 
@@ -145,13 +145,13 @@ func BenchmarkSourceLines(b *testing.B) {
 
 func BenchmarkSourceLen(b *testing.B) {
 	yaml := yamltest.GenerateYAML(5000)
-	source := niceyaml.NewSourceFromString(yaml)
+	lines := niceyaml.NewSourceFromString(yaml).Lines()
 
 	b.ReportAllocs()
 	b.ResetTimer()
 
 	for b.Loop() {
-		_ = source.Len()
+		_ = lines.Len()
 	}
 }
 

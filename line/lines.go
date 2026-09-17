@@ -11,13 +11,12 @@ import (
 	"go.jacobcolvin.com/niceyaml/style"
 )
 
-// View is read-only, line-by-line access to content that rendering and
-// search utilities consume, such as the printer and finder packages.
+// View is line-by-line access to content that rendering and search
+// utilities consume, such as the printer and finder packages.
 //
 // AllLines yields a [*Line] for each line, so a caller adds overlays and
-// annotations to the line it is looking at. [Lines] yields its own lines, and
-// a change to one reaches the collection. A niceyaml Source yields a copy of
-// each of its pristine lines, so a change to one reaches nothing.
+// annotations to the line it is looking at, and the change reaches the
+// view. See [Lines] for an implementation.
 type View interface {
 	AllLines(spans ...position.Span) iter.Seq2[int, *Line]
 	AllRunes(ranges ...position.Range) iter.Seq2[position.Position, rune]

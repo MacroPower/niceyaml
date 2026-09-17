@@ -38,7 +38,7 @@ func BenchmarkPrinterPrint(b *testing.B) {
 			b.ResetTimer()
 
 			for b.Loop() {
-				_ = p.Print(source)
+				_ = p.Print(source.Lines())
 			}
 		})
 	}
@@ -196,7 +196,7 @@ func BenchmarkPrinterPrintSlice(b *testing.B) {
 			b.ResetTimer()
 
 			for b.Loop() {
-				_ = p.Print(source, sl.span)
+				_ = p.Print(source.Lines(), sl.span)
 			}
 		})
 	}
@@ -225,7 +225,7 @@ func BenchmarkPrinterWithGutter(b *testing.B) {
 			b.ResetTimer()
 
 			for b.Loop() {
-				_ = p.Print(source)
+				_ = p.Print(source.Lines())
 			}
 		})
 	}
@@ -261,7 +261,7 @@ func BenchmarkPrinterWithWrapping(b *testing.B) {
 			b.ResetTimer()
 
 			for b.Loop() {
-				_ = p.Print(source)
+				_ = p.Print(source.Lines())
 			}
 		})
 	}

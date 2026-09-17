@@ -1,12 +1,12 @@
 // Package printer renders [line.View] content as styled terminal output.
 //
-// A [Printer] takes any [line.View], such as a niceyaml Source or a
-// [line.Lines] collection, and renders it with syntax highlighting through
+// A [Printer] takes any [line.View], such as the [line.Lines] view of a
+// niceyaml Source, and renders it with syntax highlighting through
 // [lipgloss.Style] values from a [StyleGetter]. Create one with [New] and
 // render with [Printer.Print] or [Printer.Fprint]:
 //
 //	p := printer.New(printer.WithStyles(theme.Charm()))
-//	fmt.Println(p.Print(source))
+//	fmt.Println(p.Print(source.Lines()))
 //
 // Every setting is an [Option]. A Printer never changes after construction,
 // so [Printer.With] derives a copy with more options applied while the
@@ -67,8 +67,8 @@ type StyleGetter interface {
 
 // Printer prints YAML with syntax highlighting for terminal output.
 //
-// It accepts a [line.View], either a niceyaml Source or a [line.Lines]
-// collection, and produces styled terminal output using [lipgloss.Style]s.
+// It accepts a [line.View], such as the [line.Lines] view of a niceyaml
+// Source, and produces styled terminal output using [lipgloss.Style]s.
 // It applies syntax highlighting to YAML tokens, with support for
 // customizable gutters, annotations, styled overlays, and word wrapping.
 //
@@ -86,13 +86,13 @@ type StyleGetter interface {
 // lines. Pass [position.Span] arguments to render specific line spans, which is
 // useful for showing error context or diff hunks:
 //
-//	p.Print(source)                   // All lines.
-//	p.Print(source, span1, span2)     // Specific spans.
+//	p.Print(view)                   // All lines.
+//	p.Print(view, span1, span2)     // Specific spans.
 //
 // Use [Printer.Fprint] to write the rendered output to an [io.Writer] instead
 // of returning it as a string:
 //
-//	p.Fprint(os.Stdout, source)
+//	p.Fprint(os.Stdout, view)
 //
 // # Gutters
 //

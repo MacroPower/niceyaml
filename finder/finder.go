@@ -7,9 +7,8 @@
 // number of times with [Index.Find]:
 //
 //	f := finder.New(finder.WithNormalizer(normalizer.New()))
-//	idx := f.Load(source)
-//
 //	view := source.Lines()
+//	idx := f.Load(view)
 //	view.BlendOverlay(style.GenericHighlight, idx.Find("search term")...)
 //
 // Searches are exact by default. [WithNormalizer] applies a [Normalizer] to
@@ -53,9 +52,8 @@ type Normalizer interface {
 //	f := finder.New(
 //		finder.WithNormalizer(normalizer.New()),
 //	)
-//	idx := f.Load(source)
-//
 //	view := source.Lines()
+//	idx := f.Load(view)
 //	view.AddOverlay(highlightStyle, idx.Find("search term")...)
 //	fmt.Println(p.Print(view))
 //

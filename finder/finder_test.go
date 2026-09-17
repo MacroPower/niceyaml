@@ -335,7 +335,7 @@ func TestFinder_Find(t *testing.T) {
 
 			f := finder.New(opts...)
 
-			idx := f.Load(lines)
+			idx := f.Load(lines.Lines())
 
 			got := idx.Find(tc.search)
 			assert.Equal(t, tc.want, got)
@@ -388,7 +388,7 @@ func TestFinder_Find_EdgeCases(t *testing.T) {
 
 			lines := niceyaml.NewSourceFromString(tc.input)
 			f := finder.New()
-			idx := f.Load(lines)
+			idx := f.Load(lines.Lines())
 
 			got := idx.Find(tc.search)
 			assert.Equal(t, tc.want, got)
@@ -402,7 +402,7 @@ func TestFinder_Find_NormalizesToEmpty(t *testing.T) {
 	// A search of only combining marks normalizes to an empty string, which
 	// must yield no matches rather than match at every offset.
 	f := finder.New(finder.WithNormalizer(normalizer.New()))
-	idx := f.Load(niceyaml.NewSourceFromString("key: value\n"))
+	idx := f.Load(niceyaml.NewSourceFromString("key: value\n").Lines())
 
 	got := idx.Find("́")
 	assert.Nil(t, got)
@@ -435,7 +435,7 @@ func TestFinder_Find_DiffBuiltLines(t *testing.T) {
 	beforeLines := niceyaml.NewSourceFromString(before, niceyaml.WithName("before"))
 	afterLines := niceyaml.NewSourceFromString(after, niceyaml.WithName("after"))
 
-	lines := diff.Diff(beforeLines, afterLines).Unified()
+	lines := diff.Diff(beforeLines.Lines(), afterLines.Lines()).Unified()
 
 	tcs := map[string]struct {
 		search string
@@ -486,10 +486,10 @@ func TestFinder_Reload(t *testing.T) {
 
 		f := finder.New()
 
-		first := f.Load(niceyaml.NewSourceFromString("first: 1"))
+		first := f.Load(niceyaml.NewSourceFromString("first: 1").Lines())
 		assert.Len(t, first.Find("first"), 1)
 
-		second := f.Load(niceyaml.NewSourceFromString("second: 2"))
+		second := f.Load(niceyaml.NewSourceFromString("second: 2").Lines())
 		assert.Nil(t, second.Find("first"))
 		assert.Len(t, second.Find("second"), 1)
 
@@ -513,7 +513,7 @@ func TestFinder_Find_MultipleSearches(t *testing.T) {
 	// Test multiple Find calls on the same loaded source.
 	lines := niceyaml.NewSourceFromString("key: value\nother: data")
 	f := finder.New()
-	idx := f.Load(lines)
+	idx := f.Load(lines.Lines())
 
 	tcs := map[string]struct {
 		search string

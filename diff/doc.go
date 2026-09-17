@@ -1,12 +1,12 @@
 // Package diff computes line differences between two [line.View] values
 // and renders them as [line.Lines].
 //
-// A [Differ] compares the lines of two views, such as two niceyaml Source
-// values or two [line.Lines] collections, with an [lcs.Algorithm]. The
-// default is [lcs.Hirschberg]. Create one with [New], or call [Diff] for
-// the default algorithm:
+// A [Differ] compares the lines of two views, such as the [line.Lines]
+// views of two niceyaml Source values, with an [lcs.Algorithm]. The default
+// is [lcs.Hirschberg]. Create one with [New], or call [Diff] for the default
+// algorithm:
 //
-//	result := diff.Diff(before, after)
+//	result := diff.Diff(before.Lines(), after.Lines())
 //	p := printer.New()
 //	fmt.Println(p.Print(result.Unified()))
 //	fmt.Println(p.Print(result.Hunks(3)))

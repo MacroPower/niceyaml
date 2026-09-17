@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"iter"
 	"os"
 	"slices"
 	"sync"
@@ -15,7 +14,6 @@ import (
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/line"
-	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
@@ -29,24 +27,20 @@ import (
 // where [Source.File] lazily parses the AST and [Source.Documents] builds
 // the documents. Every error they and their Documents produce comes back
 // bound to the Source as a [SourceError], and [Source.WrapError] binds
-// errors built elsewhere. Rendering lives in a [line.Lines] view, available
-// from [Source.Lines], which organizes the tokens into lines and carries the
-// overlays, annotations, and flags that a [printer.Printer] renders. Utilities that
-// only render or search, such as [printer.Printer], [finder.Finder], and
-// [diff.Differ], accept either a Source or a view.
+// errors built elsewhere. Rendering lives in a [line.Lines] view, which
+// organizes the tokens into lines and carries the overlays, annotations, and
+// flags that a [printer.Printer] renders. [Source.Lines] returns an
+// independent view each call, and utilities that only render or search, such
+// as [printer.Printer], [finder.Finder], and [diff.Differ], take the view.
 //
-// Typical use creates a Source and passes it straight to a
-// [printer.Printer]:
+// Typical use creates a Source and renders a view of it:
 //
 //	source := niceyaml.NewSourceFromString(yamlContent)
 //	p := printer.New()
-//	fmt.Println(p.Print(source))
+//	fmt.Println(p.Print(source.Lines()))
 //
-// A Source never changes after creation. It implements [line.View] over its
-// pristine lines, so printing a Source always renders the document as
-// parsed, and [Source.AllLines] yields a copy of each line. To highlight or
-// annotate, take a view with [Source.Lines], which returns an independent
-// copy each call, and render the view instead:
+// A Source never changes after creation. Overlays and annotations go on the
+// view, and a fresh view renders the document as parsed:
 //
 //	view := source.Lines()
 //	view.AddOverlay(style.GenericHighlight, ranges...)
@@ -367,36 +361,4 @@ func (s *Source) WrapError(err error) error {
 // them.
 func (s *Source) Lines() line.Lines {
 	return s.lines.Clone()
-}
-
-// Len returns the number of lines.
-func (s *Source) Len() int {
-	return s.lines.Len()
-}
-
-// IsEmpty reports whether there are no lines.
-func (s *Source) IsEmpty() bool {
-	return s.lines.IsEmpty()
-}
-
-// AllLines returns an iterator over lines within the given spans. See
-// [line.Lines.AllLines].
-//
-// Each iteration yields a copy of the line, so a change to it reaches
-// neither the Source nor a later iteration. To keep overlays or
-// annotations, add them to a view from [Source.Lines].
-func (s *Source) AllLines(spans ...position.Span) iter.Seq2[int, *line.Line] {
-	return func(yield func(int, *line.Line) bool) {
-		for i, l := range s.lines.AllLines(spans...) {
-			if !yield(i, l.Clone()) {
-				return
-			}
-		}
-	}
-}
-
-// AllRunes returns an iterator over runes within the given ranges.
-// See [line.Lines.AllRunes].
-func (s *Source) AllRunes(ranges ...position.Range) iter.Seq2[position.Position, rune] {
-	return s.lines.AllRunes(ranges...)
 }

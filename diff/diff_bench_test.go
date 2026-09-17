@@ -31,8 +31,10 @@ func BenchmarkFullDiffSource(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 
+			linesA, linesB := sourceA.Lines(), sourceB.Lines()
+
 			for b.Loop() {
-				_ = diff.Diff(sourceA, sourceB).Unified()
+				_ = diff.Diff(linesA, linesB).Unified()
 			}
 		})
 
@@ -50,8 +52,10 @@ func BenchmarkFullDiffSource(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 
+			linesA, linesB := sourceA.Lines(), sourceB.Lines()
+
 			for b.Loop() {
-				_ = diff.Diff(sourceA, sourceB).Unified()
+				_ = diff.Diff(linesA, linesB).Unified()
 			}
 		})
 
@@ -73,8 +77,10 @@ func BenchmarkFullDiffSource(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 
+			linesA, linesB := sourceA.Lines(), sourceB.Lines()
+
 			for b.Loop() {
-				_ = diff.Diff(sourceA, sourceB).Unified()
+				_ = diff.Diff(linesA, linesB).Unified()
 			}
 		})
 	}
@@ -114,8 +120,10 @@ func BenchmarkHunksDiffSource(b *testing.B) {
 			b.Run(fmt.Sprintf("%s/context_%d", sz.name, ctx), func(b *testing.B) {
 				b.ReportAllocs()
 
+				linesA, linesB := sourceA.Lines(), sourceB.Lines()
+
 				for b.Loop() {
-					_ = diff.Diff(sourceA, sourceB).Hunks(ctx)
+					_ = diff.Diff(linesA, linesB).Hunks(ctx)
 				}
 			})
 		}
@@ -151,8 +159,10 @@ func BenchmarkFullDiffSource_WorstCase(b *testing.B) {
 		b.Run(fmt.Sprintf("interleaved_%d", size), func(b *testing.B) {
 			b.ReportAllocs()
 
+			linesA, linesB := sourceA.Lines(), sourceB.Lines()
+
 			for b.Loop() {
-				_ = diff.Diff(sourceA, sourceB).Unified()
+				_ = diff.Diff(linesA, linesB).Unified()
 			}
 		})
 	}
@@ -181,8 +191,10 @@ func BenchmarkFullDiffSource_InsertAtEnd(b *testing.B) {
 		b.Run(fmt.Sprintf("append_%d", size), func(b *testing.B) {
 			b.ReportAllocs()
 
+			linesA, linesB := sourceA.Lines(), sourceB.Lines()
+
 			for b.Loop() {
-				_ = diff.Diff(sourceA, sourceB).Unified()
+				_ = diff.Diff(linesA, linesB).Unified()
 			}
 		})
 	}

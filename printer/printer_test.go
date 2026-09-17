@@ -59,7 +59,7 @@ func printDiff(p *printer.Printer, before, after string) string {
 	beforeTks := niceyaml.NewSourceFromString(before, niceyaml.WithName("before"))
 	afterTks := niceyaml.NewSourceFromString(after, niceyaml.WithName("after"))
 
-	return p.Print(diff.Diff(beforeTks, afterTks).Unified())
+	return p.Print(diff.Diff(beforeTks.Lines(), afterTks.Lines()).Unified())
 }
 
 // printDiffSummary generates a summary diff showing only changed lines with context.
@@ -68,7 +68,7 @@ func printDiffSummary(p *printer.Printer, before, after string, context int) str
 	beforeTks := niceyaml.NewSourceFromString(before, niceyaml.WithName("before"))
 	afterTks := niceyaml.NewSourceFromString(after, niceyaml.WithName("after"))
 
-	source := diff.Diff(beforeTks, afterTks).Hunks(context)
+	source := diff.Diff(beforeTks.Lines(), afterTks.Lines()).Hunks(context)
 
 	if source.IsEmpty() {
 		return ""
@@ -99,7 +99,7 @@ func TestPrinter_Anchor(t *testing.T) {
 
 	p := testPrinter()
 
-	got := p.Print(niceyaml.NewSourceFromTokens(tks))
+	got := p.Print(niceyaml.NewSourceFromTokens(tks).Lines())
 	assert.Equal(t, input, got)
 }
 
@@ -271,7 +271,7 @@ func TestPrinter_PrintTokens_EmptyFile(t *testing.T) {
 	tks := lexer.Tokenize("")
 
 	p := testPrinter()
-	got := p.Print(niceyaml.NewSourceFromTokens(tks))
+	got := p.Print(niceyaml.NewSourceFromTokens(tks).Lines())
 
 	// Empty file should produce empty output.
 	assert.Empty(t, got)
@@ -294,10 +294,10 @@ func TestPrinter_Fprint(t *testing.T) {
 
 		var sb strings.Builder
 
-		n, err := p.Fprint(&sb, source)
+		n, err := p.Fprint(&sb, source.Lines())
 
 		require.NoError(t, err)
-		assert.Equal(t, p.Print(source), sb.String())
+		assert.Equal(t, p.Print(source.Lines()), sb.String())
 		assert.Equal(t, len(sb.String()), n)
 	})
 
@@ -307,7 +307,7 @@ func TestPrinter_Fprint(t *testing.T) {
 		source := niceyaml.NewSourceFromString("key: value")
 		p := testPrinter()
 
-		_, err := p.Fprint(failingWriter{}, source)
+		_, err := p.Fprint(failingWriter{}, source.Lines())
 
 		require.ErrorIs(t, err, errWriteFailed)
 	})
@@ -373,7 +373,7 @@ func TestNewPrinter(t *testing.T) {
 
 			tks := lexer.Tokenize(tc.input)
 			p := printer.New(tc.opts...)
-			got := p.Print(niceyaml.NewSourceFromTokens(tks))
+			got := p.Print(niceyaml.NewSourceFromTokens(tks).Lines())
 
 			assert.Equal(t, tc.want, got)
 		})
@@ -423,7 +423,7 @@ func TestPrinter_LineNumbers(t *testing.T) {
 
 			p := testPrinterWithGutter(printer.LineNumberGutter)
 
-			got := p.Print(niceyaml.NewSourceFromTokens(tks))
+			got := p.Print(niceyaml.NewSourceFromTokens(tks).Lines())
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -575,7 +575,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 			p := testPrinterWithGutter(tc.gutter)
 			lines := niceyaml.NewSourceFromString(input)
 
-			got := p.Print(lines, tc.spans...)
+			got := p.Print(lines.Lines(), tc.spans...)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -924,7 +924,7 @@ func TestPrinter_WordWrap(t *testing.T) {
 
 			p := testPrinterWithGutter(tc.gutter).With(printer.WithWidth(tc.width))
 
-			got := p.Print(niceyaml.NewSourceFromTokens(tks))
+			got := p.Print(niceyaml.NewSourceFromTokens(tks).Lines())
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -940,7 +940,7 @@ func TestPrinter_WordWrap_WideLineNumbers(t *testing.T) {
 
 	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWidth(30))
 
-	got := p.Print(source, position.NewSpan(10000, 10001))
+	got := p.Print(source.Lines(), position.NewSpan(10000, 10001))
 	for row := range strings.SplitSeq(got, "\n") {
 		assert.LessOrEqual(t, lipgloss.Width(row), 30, row)
 	}
@@ -1044,8 +1044,8 @@ func TestPrinter_PrintTokenDiff_Wrapping(t *testing.T) {
 			p := testPrinterWithGutter(printer.DiffGutter).With(printer.WithWidth(tc.width))
 
 			view := diff.Diff(
-				niceyaml.NewSourceFromString(tc.before),
-				niceyaml.NewSourceFromString(tc.after),
+				niceyaml.NewSourceFromString(tc.before).Lines(),
+				niceyaml.NewSourceFromString(tc.after).Lines(),
 			).Unified()
 			view.AddOverlay(testOverlayHighlight, tc.overlays...)
 
@@ -1764,7 +1764,7 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 				printer.WithGutter(printer.NoGutter),
 			)
 
-			got := p.Print(niceyaml.NewSourceFromTokens(tks))
+			got := p.Print(niceyaml.NewSourceFromTokens(tks).Lines())
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -1864,7 +1864,7 @@ func TestPrinter_PrintFile_MultiDocument(t *testing.T) {
 			tks := lexer.Tokenize(tc.input)
 			p := testPrinter()
 
-			got := p.Print(niceyaml.NewSourceFromTokens(tks))
+			got := p.Print(niceyaml.NewSourceFromTokens(tks).Lines())
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -2271,7 +2271,7 @@ func TestFinderPrinter_Integration(t *testing.T) {
 			t.Parallel()
 
 			source := niceyaml.NewSourceFromString(tc.input)
-			idx := testFinder(tc.normalizer).Load(source)
+			idx := testFinder(tc.normalizer).Load(source.Lines())
 
 			p := testPrinter()
 
@@ -2302,17 +2302,17 @@ func TestPrinter_With(t *testing.T) {
 	assert.Equal(t, 20, narrow.Width())
 
 	// The receiver still renders on one line; the copy wraps.
-	assert.Equal(t, "key: this is a very long value that should wrap", base.Print(source))
+	assert.Equal(t, "key: this is a very long value that should wrap", base.Print(source.Lines()))
 	assert.Equal(t, stringtest.JoinLF(
 		"key: this is a very",
 		"long value that",
 		"should wrap",
-	), narrow.Print(source))
+	), narrow.Print(source.Lines()))
 
 	// A copy can switch styles and gets its own container style.
 	styled := base.With(printer.WithStyles(yamltest.NewXMLStyles()))
-	assert.Contains(t, styled.Print(source), "<nameTag>key</nameTag>")
-	assert.NotContains(t, base.Print(source), "<nameTag>")
+	assert.Contains(t, styled.Print(source.Lines()), "<nameTag>key</nameTag>")
+	assert.NotContains(t, base.Print(source.Lines()), "<nameTag>")
 }
 
 func TestPrinter_Golden(t *testing.T) {

@@ -25,7 +25,7 @@ func main() {
 	p := printer.New()
 
 	// Create a diff result between the two sources.
-	result := diff.Diff(before, after)
+	result := diff.Diff(before.Lines(), after.Lines())
 
 	fmt.Println("\nPrint the full diff:")
 	fmt.Println(p.Print(result.Unified()))

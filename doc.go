@@ -16,7 +16,7 @@
 //
 //	source := niceyaml.NewSourceFromString(yamlContent)
 //	p := printer.New()
-//	fmt.Println(p.Print(source))
+//	fmt.Println(p.Print(source.Lines()))
 //
 // Errors come back bound to the source, so they show users exactly where
 // the problem is:
@@ -42,18 +42,17 @@
 // [line.Lines] is the view. It organizes tokens into lines, and each
 // [line.Line] carries optional metadata for rendering. Annotations hold
 // error messages and diff headers, flags mark inserted and deleted lines, and
-// overlays apply style spans for highlighting. A Source exposes its view
-// through [Source.Lines] and delegates the view methods, so highlighting
-// through either path renders identically.
+// overlays apply style spans for highlighting. A Source hands out an
+// independent view from [Source.Lines], so the metadata added to one view
+// reaches neither the Source nor another view.
 //
 // A view need not be a YAML document. Diffs, for example, interleave lines
 // from two revisions and are plain [line.Lines] values.
 //
-// [printer.Printer] renders any [line.View], which both [*Source] and
-// [line.Lines] satisfy, with syntax highlighting via lipgloss. It supports
-// customizable gutters (line numbers, diff markers), word wrapping, and
-// annotation rendering. [diff.Differ] compares two views, and
-// [finder.Finder] searches one.
+// [printer.Printer] renders any [line.View], which [line.Lines] satisfies,
+// with syntax highlighting via lipgloss. It supports customizable gutters
+// (line numbers, diff markers), word wrapping, and annotation rendering.
+// [diff.Differ] compares two views, and [finder.Finder] searches one.
 //
 // Themes from [go.jacobcolvin.com/niceyaml/style/theme] provide color
 // palettes. Without one, [printer.Printer] renders with [style.Default].
@@ -154,7 +153,7 @@
 // [diff.Differ] computes line differences using an [lcs.Algorithm]. The
 // default, [lcs.Hirschberg], is space-efficient for large files:
 //
-//	result := diff.Diff(original, modified)
+//	result := diff.Diff(original.Lines(), modified.Lines())
 //	p := printer.New()
 //	fmt.Println(p.Print(result.Unified()))
 //	fmt.Println(p.Print(result.Hunks(3)))
@@ -162,7 +161,7 @@
 // Custom algorithms implement [lcs.Algorithm]. For a reusable [diff.Differ]:
 //
 //	d := diff.New(diff.WithAlgorithm(myAlgo))
-//	result := d.Diff(before, after)
+//	result := d.Diff(before.Lines(), after.Lines())
 //
 // Diff output is a [line.Lines] view rather than a [Source], since the
 // interleaved lines do not form a YAML document. It uses [line.Flag] to mark
@@ -177,8 +176,8 @@
 // diacritic-insensitive matching:
 //
 //	f := finder.New(finder.WithNormalizer(normalizer.New()))
-//	idx := f.Load(source)
 //	view := source.Lines()
+//	idx := f.Load(view)
 //	view.AddOverlay(style.GenericHighlight, idx.Find("search term")...)
 //	fmt.Println(p.Print(view))
 //

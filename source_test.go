@@ -196,7 +196,7 @@ func TestSource_AllRunes(t *testing.T) {
 
 			var got []runePosition
 
-			for pos, r := range lines.AllRunes() {
+			for pos, r := range lines.Lines().AllRunes() {
 				got = append(got, runePosition{R: r, Pos: pos})
 			}
 
@@ -219,7 +219,7 @@ func TestSource_AllRunes_LiteralBlock(t *testing.T) {
 		positions []position.Position
 	)
 
-	for pos, r := range lines.AllRunes() {
+	for pos, r := range lines.Lines().AllRunes() {
 		runes = append(runes, r)
 		positions = append(positions, pos)
 	}
@@ -266,7 +266,7 @@ func TestSource_AllRunes_DiffBuiltLines(t *testing.T) {
 	beforeLines := niceyaml.NewSourceFromString(before, niceyaml.WithName("before"))
 	afterLines := niceyaml.NewSourceFromString(after, niceyaml.WithName("after"))
 
-	lines := diff.Diff(beforeLines, afterLines).Unified()
+	lines := diff.Diff(beforeLines.Lines(), afterLines.Lines()).Unified()
 
 	// Diff should produce two lines: deleted (old) and inserted (new).
 	// Both have the same source token line (1), but different visual indices (0, 1).
@@ -307,7 +307,7 @@ func TestSource_AllLines_EarlyBreak(t *testing.T) {
 
 	var collected []int
 
-	for idx := range lines.AllLines() {
+	for idx := range lines.Lines().AllLines() {
 		collected = append(collected, idx)
 		if idx >= 1 {
 			break
@@ -323,14 +323,14 @@ func TestSource_AllLines_WithSpans(t *testing.T) {
 	input := "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n"
 	source := niceyaml.NewSourceFromString(input)
 
-	require.Equal(t, 5, source.Len())
+	require.Equal(t, 5, source.Lines().Len())
 
 	t.Run("no spans returns all lines", func(t *testing.T) {
 		t.Parallel()
 
 		var collected []int
 
-		for idx := range source.AllLines() {
+		for idx := range source.Lines().AllLines() {
 			collected = append(collected, idx)
 		}
 
@@ -342,7 +342,7 @@ func TestSource_AllLines_WithSpans(t *testing.T) {
 
 		var collected []int
 
-		for idx := range source.AllLines(position.NewSpan(1, 3)) {
+		for idx := range source.Lines().AllLines(position.NewSpan(1, 3)) {
 			collected = append(collected, idx)
 		}
 
@@ -354,7 +354,7 @@ func TestSource_AllLines_WithSpans(t *testing.T) {
 
 		var collected []int
 
-		for idx := range source.AllLines(
+		for idx := range source.Lines().AllLines(
 			position.NewSpan(0, 1),
 			position.NewSpan(3, 5),
 		) {
@@ -369,7 +369,7 @@ func TestSource_AllLines_WithSpans(t *testing.T) {
 
 		var collected []int
 
-		for idx := range source.AllLines(position.NewSpan(-5, 100)) {
+		for idx := range source.Lines().AllLines(position.NewSpan(-5, 100)) {
 			collected = append(collected, idx)
 		}
 
@@ -381,7 +381,7 @@ func TestSource_AllLines_WithSpans(t *testing.T) {
 
 		var collected []int
 
-		for idx := range source.AllLines(position.NewSpan(2, 2)) {
+		for idx := range source.Lines().AllLines(position.NewSpan(2, 2)) {
 			collected = append(collected, idx)
 		}
 
@@ -393,7 +393,7 @@ func TestSource_AllLines_WithSpans(t *testing.T) {
 
 		var collected []int
 
-		for idx := range source.AllLines(position.NewSpan(10, 20)) {
+		for idx := range source.Lines().AllLines(position.NewSpan(10, 20)) {
 			collected = append(collected, idx)
 		}
 
@@ -407,7 +407,7 @@ func TestSource_Lines(t *testing.T) {
 	src := niceyaml.NewSourceFromString("key: value\nfoo: bar")
 	lines := src.Lines()
 
-	assert.Len(t, lines, src.Len())
+	assert.Len(t, lines, src.Lines().Len())
 	assert.Equal(t, "key: value", lines[0].Content())
 	assert.Equal(t, "foo: bar", lines[1].Content())
 }
@@ -421,7 +421,7 @@ func TestSource_AllRunes_EarlyBreak(t *testing.T) {
 
 	var collected []rune
 
-	for _, r := range lines.AllRunes() {
+	for _, r := range lines.Lines().AllRunes() {
 		collected = append(collected, r)
 		if r == 'b' {
 			break
@@ -437,14 +437,14 @@ func TestSource_AllRunes_WithRanges(t *testing.T) {
 	input := "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n"
 	source := niceyaml.NewSourceFromString(input)
 
-	require.Equal(t, 5, source.Len())
+	require.Equal(t, 5, source.Lines().Len())
 
 	t.Run("no ranges returns all runes", func(t *testing.T) {
 		t.Parallel()
 
 		var collected []runePosition
 
-		for pos, r := range source.AllRunes() {
+		for pos, r := range source.Lines().AllRunes() {
 			collected = append(collected, runePosition{R: r, Pos: pos})
 		}
 
@@ -463,7 +463,7 @@ func TestSource_AllRunes_WithRanges(t *testing.T) {
 
 		var collected []runePosition
 
-		for pos, r := range source.AllRunes(rng) {
+		for pos, r := range source.Lines().AllRunes(rng) {
 			collected = append(collected, runePosition{R: r, Pos: pos})
 		}
 
@@ -487,7 +487,7 @@ func TestSource_AllRunes_WithRanges(t *testing.T) {
 
 		var collected []runePosition
 
-		for pos, r := range source.AllRunes(rng) {
+		for pos, r := range source.Lines().AllRunes(rng) {
 			collected = append(collected, runePosition{R: r, Pos: pos})
 		}
 
@@ -512,7 +512,7 @@ func TestSource_AllRunes_WithRanges(t *testing.T) {
 
 		var collected []runePosition
 
-		for pos, r := range source.AllRunes(rng) {
+		for pos, r := range source.Lines().AllRunes(rng) {
 			collected = append(collected, runePosition{R: r, Pos: pos})
 		}
 
@@ -530,7 +530,7 @@ func TestSource_AllRunes_WithRanges(t *testing.T) {
 
 		var collected []runePosition
 
-		for pos, r := range emptySource.AllRunes(rng) {
+		for pos, r := range emptySource.Lines().AllRunes(rng) {
 			collected = append(collected, runePosition{R: r, Pos: pos})
 		}
 
@@ -545,7 +545,7 @@ func TestSource_AllRunes_WithRanges(t *testing.T) {
 
 		var collected []runePosition
 
-		for pos, r := range source.AllRunes(rng) {
+		for pos, r := range source.Lines().AllRunes(rng) {
 			collected = append(collected, runePosition{R: r, Pos: pos})
 		}
 
@@ -561,7 +561,7 @@ func TestSource_AllRunes_WithRanges(t *testing.T) {
 
 		var collected []runePosition
 
-		for pos, r := range source.AllRunes(rng1, rng2) {
+		for pos, r := range source.Lines().AllRunes(rng1, rng2) {
 			collected = append(collected, runePosition{R: r, Pos: pos})
 		}
 
@@ -579,7 +579,7 @@ func TestSource_AllRunes_WithRanges(t *testing.T) {
 
 		var collected []rune
 
-		for _, r := range source.AllRunes(rng) {
+		for _, r := range source.Lines().AllRunes(rng) {
 			collected = append(collected, r)
 			if r == ':' {
 				break
@@ -600,7 +600,7 @@ func TestSource_Lines_TokenLookup(t *testing.T) {
 		  line2
 	`)
 	source := niceyaml.NewSourceFromString(input)
-	require.Equal(t, 3, source.Len())
+	require.Equal(t, 3, source.Lines().Len())
 
 	// The view resolves a position inside the block to the lexer's token and
 	// reports one range per line the token occupies.
@@ -954,7 +954,7 @@ func TestSource_Len(t *testing.T) {
 			t.Parallel()
 
 			source := niceyaml.NewSourceFromString(tc.input)
-			got := source.Len()
+			got := source.Lines().Len()
 
 			assert.Equal(t, tc.want, got)
 		})
@@ -987,7 +987,7 @@ func TestSource_IsEmpty(t *testing.T) {
 			t.Parallel()
 
 			source := niceyaml.NewSourceFromString(tc.input)
-			got := source.IsEmpty()
+			got := source.Lines().IsEmpty()
 
 			assert.Equal(t, tc.want, got)
 		})
@@ -1166,32 +1166,27 @@ func TestSource_WrapError(t *testing.T) {
 	})
 }
 
-// Both a [line.Lines] collection and a [*niceyaml.Source] are a [line.View].
-var (
-	_ line.View = line.Lines(nil)
-	_ line.View = (*niceyaml.Source)(nil)
-)
-
-func TestSource_AllLines_YieldsCopies(t *testing.T) {
+func TestSource_Lines_IsIndependent(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("key: value\n")
 
-	// Mutating a line yielded by the Source's own iterator leaves the
-	// document untouched.
-	for _, ln := range source.AllLines() {
+	// A change to one view reaches neither the Source nor another view.
+	view := source.Lines()
+	for _, ln := range view.AllLines() {
 		ln.AddAnnotation(line.Annotation{Content: "note", Placement: line.Below})
 		ln.AddOverlay(line.Overlay{Cols: position.NewSpan(0, 3), Style: style.GenericError})
 	}
 
+	assert.NotEmpty(t, view[0].Annotations())
 	assert.Empty(t, source.Lines()[0].Annotations())
 	assert.Empty(t, source.Lines()[0].Overlays())
 
-	// Printing the Source renders the pristine document.
+	// A fresh view renders the pristine document.
 	plain := printer.New(
 		printer.WithStyles(style.Styles{}),
 		printer.WithContainerStyle(lipgloss.NewStyle()),
 		printer.WithGutter(printer.NoGutter),
 	)
-	assert.Equal(t, "key: value", plain.Print(source))
+	assert.Equal(t, "key: value", plain.Print(source.Lines()))
 }

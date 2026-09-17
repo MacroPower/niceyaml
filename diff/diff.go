@@ -53,8 +53,8 @@ func New(opts ...Option) *Differ {
 	return d
 }
 
-// Diff computes the difference between two views, such as two niceyaml
-// Source values or two [line.Lines] collections.
+// Diff computes the difference between two views, such as the [line.Lines]
+// views of two niceyaml Source values.
 //
 // The lines of the result are copies, so the overlays and annotations on
 // the input lines come along, and the flags come from the diff. The result
@@ -75,25 +75,9 @@ func (d *Differ) Diff(a, b line.View) *Result {
 
 	return &Result{
 		ops:        ops,
-		name:       fmt.Sprintf("%s..%s", viewName(a), viewName(b)),
 		beforeSums: beforeSums,
 		afterSums:  afterSums,
 	}
-}
-
-// namer is a [line.View] with a name, such as a niceyaml Source.
-type namer interface {
-	Name() string
-}
-
-// viewName returns the name of v, or an empty string for a [line.View] without
-// one.
-func viewName(v line.View) string {
-	if n, ok := v.(namer); ok {
-		return n.Name()
-	}
-
-	return ""
 }
 
 // collectLines returns a copy of each line of v in order, so a change to v
@@ -159,7 +143,6 @@ func (d *Differ) computeOps(before, after line.View) []lineOp {
 type Result struct {
 	beforeSums  *prefixSums
 	afterSums   *prefixSums
-	name        string
 	ops         []lineOp
 	alignedRows []alignedRow // Lazily computed for side-by-side rendering.
 	alignedOnce sync.Once    // Ensures thread-safe lazy initialization.
@@ -387,13 +370,6 @@ func collectConsecutive(ops []lineOp, i int, kind lcs.OpKind) []lineOp {
 // IsEmpty reports whether the diff contains no lines.
 func (r *Result) IsEmpty() bool {
 	return len(r.ops) == 0
-}
-
-// Name returns the diff name in "a..b" format, from the names of the two
-// views. A view without a Name method, such as [line.Lines], contributes an
-// empty string.
-func (r *Result) Name() string {
-	return r.name
 }
 
 // Diff computes the difference between two views using the default
