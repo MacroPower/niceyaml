@@ -223,9 +223,30 @@ type GutterFunc func(GutterContext) string
 // It is passed to [AnnotationFunc] to determine the appropriate annotation
 // content.
 type AnnotationContext struct {
-	Styles      StyleGetter
+	Styles StyleGetter
+
+	// Content is the text of the annotated line, without its line ending.
+	// Annotation columns count runes of this text, and the display width
+	// of those runes is what a marker must be padded by to sit under them.
+	Content string
+
 	Annotations line.Annotations
 	Placement   line.Placement
+}
+
+// ColWidth returns the display width of the first col runes of ctx.Content,
+// plus one cell for every column past the end of the content, so a marker
+// padded by it lands under the rune at col whatever the width of the runes
+// before it.
+func (ctx AnnotationContext) ColWidth(col int) int {
+	col = max(0, col)
+	runes := []rune(ctx.Content)
+
+	if col <= len(runes) {
+		return lipgloss.Width(string(runes[:col]))
+	}
+
+	return lipgloss.Width(ctx.Content) + col - len(runes)
 }
 
 // AnnotationFunc returns the rendered annotation content based on
@@ -233,7 +254,8 @@ type AnnotationContext struct {
 type AnnotationFunc func(AnnotationContext) string
 
 // DefaultAnnotation is the [AnnotationFunc] [New] uses. It joins the
-// annotations with "; ", pads them to their column, and prefixes [line.Below]
+// annotations with "; ", pads them to their column as
+// [AnnotationContext.ColWidth] measures it, and prefixes [line.Below]
 // annotations with "^ ". Annotations with empty content are left out, and
 // it returns "" when none remain, as [line.Annotation.String] does. Control
 // characters in the content render as their pictures, so an escape sequence
@@ -253,7 +275,7 @@ func DefaultAnnotation(ctx AnnotationContext) string {
 		kept[i].Content = escape.Control(kept[i].Content)
 	}
 
-	padding := strings.Repeat(" ", max(0, kept.Col()))
+	padding := strings.Repeat(" ", ctx.ColWidth(kept.Col()))
 	combined := strings.Join(kept.Contents(), "; ")
 
 	// Add "^ " prefix for Below annotations.
@@ -674,6 +696,7 @@ func (p *Printer) renderAnnotation(
 		Annotations: anns,
 		Placement:   placement,
 		Styles:      p.styles,
+		Content:     ln.Content(),
 	})
 	if content == "" {
 		return nil

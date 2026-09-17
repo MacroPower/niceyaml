@@ -1519,6 +1519,28 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			},
 			want: "key: value\n     ^ error here",
 		},
+		"below annotation under wide runes": {
+			input:     "日本語: 値",
+			lineIndex: 0,
+			annotation: line.Annotation{
+				Content:   "bad value",
+				Placement: line.Below,
+				Col:       5,
+			},
+			// The three wide runes take six cells, so the marker sits eight
+			// cells in, under the value.
+			want: "日本語: 値\n        ^ bad value",
+		},
+		"below annotation past the end of wide runes": {
+			input:     "日本",
+			lineIndex: 0,
+			annotation: line.Annotation{
+				Content:   "after",
+				Placement: line.Below,
+				Col:       4,
+			},
+			want: "日本\n      ^ after",
+		},
 		"below annotation on second line": {
 			input: stringtest.JoinLF(
 				"first: 1",
