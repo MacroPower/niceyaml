@@ -55,8 +55,9 @@ func validateCmd() *cobra.Command {
 }
 
 // validateFile validates every document of the file at yamlPath against the
-// registry. Errors come back bound to the source, and the error handler in
-// main renders them with the terminal width.
+// registry and joins what every document reports, so one run names each
+// invalid document. Errors come back bound to the source, and the error
+// handler in main renders them with the terminal width.
 func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) error {
 	source, err := niceyaml.NewSourceFromFile(yamlPath)
 	if err != nil {
@@ -68,14 +69,16 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) er
 		return err
 	}
 
+	var errs []error
+
 	for i, doc := range docs {
 		err = reg.Validate(ctx, doc)
 		if err != nil {
-			return fmt.Errorf("document %d: %w", i, err)
+			errs = append(errs, fmt.Errorf("document %d: %w", i, err))
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 // buildRegistry creates a schema registry based on CLI flags.
