@@ -3794,6 +3794,12 @@ func TestViewport_SearchScrollsToWrappedRow(t *testing.T) {
 		return value + ": " + strings.Repeat("word ", 40) + "needle\n"
 	}
 
+	// One long line whose match sits in the middle, after the separator.
+	separated := func(separator string) string {
+		return "key: " + strings.Repeat("a", 40) + separator +
+			strings.Repeat("b", 10) + "needle" + strings.Repeat("c", 200) + "\n"
+	}
+
 	tcs := map[string]struct {
 		setup   func(m *yamlviewport.Model)
 		printer *printer.Printer
@@ -3832,6 +3838,22 @@ func TestViewport_SearchScrollsToWrappedRow(t *testing.T) {
 				m.SetWidth(43)
 			},
 			wantRow: -1,
+		},
+		// The renderer escapes a control character to a picture, so the row
+		// the match lands on is the same as with a printable character in its
+		// place. Walking the raw content instead stops at the control
+		// character and centers the last row of the line.
+		"printable character before the match": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetSource(niceyaml.NewSourceFromString(separated("x")))
+			},
+			wantRow: 1,
+		},
+		"control character before the match": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetSource(niceyaml.NewSourceFromString(separated("\a")))
+			},
+			wantRow: 1,
 		},
 	}
 

@@ -15,6 +15,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/finder"
+	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/normalizer"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -1546,7 +1547,11 @@ func (m *Model) matchRow(view line.Lines, k, col int) int {
 	// every row. Wrapping drops the spaces it breaks at, so a space in the
 	// content that a row skips still advances the column.
 	gutter := p.GutterWidth(view)
-	runes := []rune(view[k].Content())
+
+	// The renderer escapes control characters to pictures, one rune per
+	// rune, so the escaped content is what the rows spell out while the
+	// columns still line up.
+	runes := []rune(escape.Control(view[k].Content()))
 	next := 0
 
 	for j, row := range content {
