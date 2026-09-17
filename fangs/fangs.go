@@ -134,6 +134,10 @@ func yamlErrors(err error) []*niceyaml.SourceError {
 // This is a workaround until Cobra exposes a proper usage error type.
 // See: https://github.com/spf13/cobra/pull/2266
 func isUsageError(err error) bool {
+	if err == nil {
+		return false
+	}
+
 	s := err.Error()
 	for _, prefix := range []string{
 		"flag needs an argument:",
