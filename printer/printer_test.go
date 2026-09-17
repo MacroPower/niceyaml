@@ -226,12 +226,12 @@ func TestPrinter_CRLF(t *testing.T) {
 		"line ending token": {
 			input:       "a: 'x'\r\nb: 'y'\r\n",
 			want:        stringtest.JoinLF("a: 'x'", "b: 'y'"),
-			wantOverlay: stringtest.JoinLF("[a][:][ 'x']", "[b][:][ 'y']"),
+			wantOverlay: stringtest.JoinLF("[a][:][ ]['x']", "[b][:][ ]['y']"),
 		},
 		"block scalar": {
 			input:       "a: |\r\n  x\r\n  y\r\n",
 			want:        stringtest.JoinLF("a: |", "  x", "  y"),
-			wantOverlay: stringtest.JoinLF("[a][:][ ][|]", "[  x]", "[  y]"),
+			wantOverlay: stringtest.JoinLF("[a][:][ ][|]", "[  ][x]", "[  ][y]"),
 		},
 	}
 
@@ -1777,8 +1777,8 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 			),
 			want: stringtest.JoinLF(
 				"<nameTag>text</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><punctuationBlockLiteral>|</punctuationBlockLiteral>",
-				"<literalString>  line1</literalString>",
-				"<literalString>  line2</literalString>",
+				"<text>  </text><literalString>line1</literalString>",
+				"<text>  </text><literalString>line2</literalString>",
 			),
 		},
 		"punctuation": {
@@ -3228,6 +3228,55 @@ func TestPrinter_Overlay_Attributes(t *testing.T) {
 			)
 
 			assert.Equal(t, want, p.Print(view))
+		})
+	}
+}
+
+func TestPrinter_SeparatorStyle(t *testing.T) {
+	t.Parallel()
+
+	// The whitespace a token carries before its text renders in style.Text,
+	// whatever kind of token follows it. Brackets mark the styled tokens.
+	styles := style.NewStyles(
+		lipgloss.NewStyle(),
+		style.Set(style.LiteralString, testHighlightStyle()),
+		style.Set(style.LiteralStringDouble, testHighlightStyle()),
+		style.Set(style.Comment, testHighlightStyle()),
+	)
+
+	tcs := map[string]struct {
+		input string
+		want  string
+	}{
+		"plain scalar": {
+			input: "k:   v",
+			want:  "k:   [v]",
+		},
+		"double quoted scalar": {
+			input: `k:   "v"`,
+			want:  `k:   ["v"]`,
+		},
+		"indented comment": {
+			input: stringtest.JoinLF("a:", "  # note", "  b: 1"),
+			want:  stringtest.JoinLF("a:", "  [# note]", "  b: 1"),
+		},
+		"multiline plain scalar": {
+			input: stringtest.JoinLF("k: plain", "  multi"),
+			want:  stringtest.JoinLF("k: [plain]", "  [multi]"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := printer.New(
+				printer.WithStyles(styles),
+				printer.WithContainerStyle(lipgloss.NewStyle()),
+				printer.WithGutter(printer.NoGutter),
+			)
+
+			assert.Equal(t, tc.want, p.Print(niceyaml.NewSourceFromString(tc.input).Lines()))
 		})
 	}
 }

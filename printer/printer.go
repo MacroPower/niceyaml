@@ -926,18 +926,19 @@ func (p *Printer) renderTokenLine(lineIndex int, ln *line.Line) string {
 
 	for _, tk := range ln.Tokens() {
 		tokenStyle := typeStyle(tk)
-		valueOffset := valueOffset(tk)
 
 		// Drop the line ending, CR included, as Line.Content does. Print
 		// joins the rows with newlines.
 		origin := tokens.TrimLineEnding(tk.Origin)
 		originRunes := []rune(origin)
 
-		// Calculate separator (leading whitespace before value).
-		separatorRunes := leadingWhitespaceRunes(origin, valueOffset)
+		// The separator is the whitespace the token carries before its
+		// text, whether that text is a plain scalar, a quoted string, an
+		// anchor, a comment, or the continuation of a multiline scalar.
+		separatorRunes := leadingWhitespaceRunes(origin)
 
 		// Part 1: Render separator portion (default style).
-		if separatorRunes > 0 && separatorRunes <= len(originRunes) {
+		if separatorRunes > 0 {
 			sepPart := string(originRunes[:separatorRunes])
 			sb.WriteString(
 				p.styleLineWithRanges(sepPart, pos, style.Text, ln.Overlays()),
@@ -960,20 +961,8 @@ func (p *Printer) renderTokenLine(lineIndex int, ln *line.Line) string {
 	return sb.String()
 }
 
-// leadingWhitespaceRunes returns the number of runes in the leading whitespace
-// portion of s, up to maxBytes.
-//
-// Returns 0 if maxBytes is invalid or if the prefix contains non-whitespace
-// characters.
-func leadingWhitespaceRunes(s string, maxBytes int) int {
-	if maxBytes <= 0 || maxBytes > len(s) {
-		return 0
-	}
-
-	prefix := s[:maxBytes]
-	if strings.TrimLeft(prefix, " \t") != "" {
-		return 0
-	}
-
-	return utf8.RuneCountInString(prefix)
+// leadingWhitespaceRunes returns the number of runes in the run of spaces
+// and tabs that starts s.
+func leadingWhitespaceRunes(s string) int {
+	return len(s) - len(strings.TrimLeft(s, " \t"))
 }
