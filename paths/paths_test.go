@@ -1167,6 +1167,8 @@ plain.dotted: 3
 : 5
 empty: {}
 none: []
+!!str tagged: 6
+&k anchored: 7
 `
 
 	source := niceyaml.NewSourceFromString(input)
@@ -1197,6 +1199,26 @@ none: []
 			path:      paths.Root().Child("complex").Value(),
 			wantValue: "5",
 		},
+		"explicit key target is the key itself, not the indicator": {
+			path:      paths.Root().Child("complex").Key(),
+			wantValue: "complex",
+		},
+		"tagged key matches by content": {
+			path:      paths.Root().Child("tagged").Value(),
+			wantValue: "6",
+		},
+		"tagged key target skips the tag": {
+			path:      paths.Root().Child("tagged").Key(),
+			wantValue: "tagged",
+		},
+		"anchored key matches by content": {
+			path:      paths.Root().Child("anchored").Value(),
+			wantValue: "7",
+		},
+		"anchored key target skips the anchor": {
+			path:      paths.Root().Child("anchored").Key(),
+			wantValue: "anchored",
+		},
 		"empty flow mapping value target": {
 			path:      paths.Root().Child("empty").Value(),
 			wantValue: "{",
@@ -1216,4 +1238,13 @@ none: []
 			assert.Equal(t, tc.wantValue, tk.Value)
 		})
 	}
+
+	t.Run("tag and anchor text are not key names", func(t *testing.T) {
+		t.Parallel()
+
+		for _, name := range []string{"!!str", "&k", "k", "&", "?"} {
+			_, err := paths.Root().Child(name).Node(file.Docs[0])
+			require.ErrorIs(t, err, paths.ErrNotFound, "Child(%q)", name)
+		}
+	})
 }

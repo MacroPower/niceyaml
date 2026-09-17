@@ -351,12 +351,13 @@ func (p Path) Node(doc *ast.DocumentNode) (ast.Node, error) {
 // the same errors as [Path.Node].
 //
 // For [PartKey], Token returns the key token of the mapping entry the last
-// selector picked. For [PartValue] and [PartNode], and for PartKey when the
-// path ends at a sequence element or the root, Token returns the token that
-// starts the resolved node: a scalar's own token, the first key of a
-// mapping, or the first element of a sequence. An alias resolves to its own
-// token rather than the anchor's content, since that is where the path
-// points in the source.
+// selector picked, looking through the `?` indicator of an explicit key and
+// any anchor or tag on the key. For [PartValue] and [PartNode], and for
+// PartKey when the path ends at a sequence element or the root, Token
+// returns the token that starts the resolved node: a scalar's own token, the
+// first key of a mapping, or the first element of a sequence. An alias
+// resolves to its own token rather than the anchor's content, since that is
+// where the path points in the source.
 func (p Path) Token(doc *ast.DocumentNode) (*token.Token, error) {
 	m, err := p.single(doc)
 	if err != nil {
@@ -364,7 +365,9 @@ func (p Path) Token(doc *ast.DocumentNode) (*token.Token, error) {
 	}
 
 	if p.part == PartKey && m.entry != nil {
-		return m.entry.Key.GetToken(), nil
+		if key := keyContent(m.entry.Key); key != nil {
+			return firstToken(key), nil
+		}
 	}
 
 	return firstToken(m.node), nil

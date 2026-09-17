@@ -309,24 +309,40 @@ func (r *resolver) descend(node ast.Node, name string, acc []match) []match {
 	return acc
 }
 
+// keyContent looks through the `?` indicator of an explicit key and the
+// anchors and tags on a key to the node that carries the key itself. It
+// returns nil for a nil key.
+func keyContent(key ast.MapKeyNode) ast.Node {
+	var node ast.Node = key
+
+	for {
+		switch n := node.(type) {
+		case *ast.MappingKeyNode:
+			node = n.Value
+		case *ast.AnchorNode:
+			node = n.Value
+		case *ast.TagNode:
+			node = n.Value
+		default:
+			return node
+		}
+	}
+}
+
 // keyName returns the key text a child selector compares against. For a
-// string key that is the unquoted string, and the source text otherwise.
+// string key that is the unquoted string, and the source text of the key
+// otherwise. A key with no content, or with content a selector cannot name,
+// such as a sequence, has the empty name.
 func keyName(key ast.MapKeyNode) string {
-	switch k := key.(type) {
+	switch k := keyContent(key).(type) {
 	case nil:
 		return ""
 	case *ast.StringNode:
 		return k.Value
-	case *ast.MappingKeyNode:
-		inner, ok := k.Value.(ast.MapKeyNode)
-		if !ok {
-			return ""
-		}
-
-		return keyName(inner)
-
+	case ast.MapKeyNode:
+		return k.GetToken().Value
 	default:
-		return key.GetToken().Value
+		return ""
 	}
 }
 
