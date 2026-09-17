@@ -1261,6 +1261,55 @@ func TestError_NilInnerError(t *testing.T) {
 	assert.Empty(t, render(wrapped))
 }
 
+func TestError_NilInnerErrorWithLocation(t *testing.T) {
+	t.Parallel()
+
+	source := xmlSource("a: 1\nb: 2\n")
+	tk := source.Lines().TokenAt(position.New(0, 3))
+	require.NotNil(t, tk)
+
+	// An Error from a nil error has no message, and its text is the
+	// location it carries.
+	tcs := map[string]struct {
+		err       *niceyaml.Error
+		want      string
+		wantBound string
+	}{
+		"token": {
+			err:       niceyaml.NewErrorFrom(nil, niceyaml.WithToken(tk)),
+			want:      "[1:4]",
+			wantBound: "[1:4]",
+		},
+		"range": {
+			err: niceyaml.NewErrorFrom(nil,
+				niceyaml.WithRange(position.NewRange(position.New(1, 3), position.New(1, 4))),
+			),
+			want:      "[2:4]",
+			wantBound: "[2:4]",
+		},
+		"path": {
+			err:       niceyaml.NewErrorFrom(nil, niceyaml.WithPath(paths.Root().Child("b").Value())),
+			want:      "$.b:",
+			wantBound: "[2:4] $.b:",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.err.Error())
+
+			bound := source.WrapError(tc.err)
+			assert.Equal(t, tc.wantBound, bound.Error())
+
+			got := trimLines(render(bound))
+			assert.True(t, strings.HasPrefix(got, tc.wantBound+"\n\n"), got)
+			assert.Contains(t, got, "genericError")
+		})
+	}
+}
+
 func TestError_NestedErrorsKeepInnerPosition(t *testing.T) {
 	t.Parallel()
 

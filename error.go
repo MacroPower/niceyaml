@@ -201,13 +201,14 @@ func WithErrors(errs ...*Error) ErrorOption {
 // and the message alone when it carries none. A path has no position until
 // a [Source] or [Document] binds the error, and the [SourceError] then
 // puts the resolved position in front. Nested errors from [WithErrors] are
-// not part of the message.
+// not part of the message. An Error created from a nil error has an empty
+// message, so its text is the location alone, or "" when it has none.
 func (e *Error) Error() string {
-	if e.err == nil {
-		return ""
-	}
+	var msg string
 
-	msg := e.err.Error()
+	if e.err != nil {
+		msg = e.err.Error()
+	}
 
 	if e.path != nil {
 		msg = prefixMessage(e.path.String()+":", msg)
