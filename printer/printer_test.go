@@ -3029,3 +3029,15 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 		})
 	}
 }
+
+func TestPrinter_WithGutter_Nil(t *testing.T) {
+	t.Parallel()
+
+	view := niceyaml.NewSourceFromString("key: value").Lines()
+	view[0].AddAnnotation(line.Annotation{Content: "note", Placement: line.Below, Col: 5})
+
+	p := testPrinterWithGutter(nil)
+
+	assert.Equal(t, testPrinterWithGutter(printer.NoGutter).Print(view), p.Print(view))
+	assert.Equal(t, "key: value\n     ^ note", p.Print(view))
+}

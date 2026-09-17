@@ -346,9 +346,14 @@ func WithStyles(s StyleGetter) Option {
 }
 
 // WithGutter is a [Option] that sets the [GutterFunc] for rendering.
-// By default, [DefaultGutter] renders line numbers and diff markers.
+// By default, [DefaultGutter] renders line numbers and diff markers. A nil
+// fn selects [NoGutter].
 func WithGutter(fn GutterFunc) Option {
 	return func(p *Printer) {
+		if fn == nil {
+			fn = NoGutter
+		}
+
 		p.gutterFunc = fn
 	}
 }
@@ -472,10 +477,6 @@ func (p *Printer) Rows(lines line.View, spans ...position.Span) []int {
 // lines. The widest gutter carries the largest line number, so it samples
 // with that.
 func (p *Printer) gutterWidth(totalLines int) int {
-	if p.gutterFunc == nil {
-		return 0
-	}
-
 	return lipgloss.Width(p.gutterFunc(GutterContext{
 		Styles:     p.styles,
 		Index:      totalLines - 1,
