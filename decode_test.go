@@ -1353,16 +1353,52 @@ func TestDocument_DecodeInto(t *testing.T) {
 		assert.Equal(t, plainConfig{Name: "test", Value: 7}, result)
 	})
 
-	t.Run("leaves the value as it is for an empty document", func(t *testing.T) {
+	t.Run("leaves the value as it is for a document without content", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, "")
+		// Each input parses to a first document whose body holds no value:
+		// nothing, only comments, or only a directive.
+		tcs := map[string]string{
+			"empty":        "",
+			"comment only": "# just a comment\n",
+			"directive":    "%YAML 1.2\n---\na: 1\n",
+		}
 
-		result := plainConfig{Name: "default", Value: 7}
+		for name, input := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		err := dd.DecodeInto(t.Context(), &result)
+				dd := yamltest.FirstDocument(t, input)
+
+				result := plainConfig{Name: "default", Value: 7}
+
+				err := dd.DecodeInto(t.Context(), &result)
+				require.NoError(t, err)
+				assert.Equal(t, plainConfig{Name: "default", Value: 7}, result)
+
+				got, err := dd.Decode[map[string]any](t.Context())
+				require.NoError(t, err)
+				assert.Nil(t, got)
+			})
+		}
+	})
+
+	t.Run("decodes each document of a stream with a comment-only document", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("a: 1\n---\n# placeholder\n---\nb: 2\n")
+
+		docs, err := source.Documents()
 		require.NoError(t, err)
-		assert.Equal(t, plainConfig{Name: "default", Value: 7}, result)
+		require.Len(t, docs, 3)
+
+		want := []map[string]int{{"a": 1}, nil, {"b": 2}}
+
+		for i, dd := range docs {
+			got, err := dd.Decode[map[string]int](t.Context())
+			require.NoError(t, err, "document %d", i)
+			assert.Equal(t, want[i], got, "document %d", i)
+		}
 	})
 
 	t.Run("runs schema and Validate around the decode", func(t *testing.T) {
