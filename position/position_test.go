@@ -343,6 +343,10 @@ func TestRange_SliceLines(t *testing.T) {
 				position.NewRange(position.New(1, 5), position.New(1, 10)),
 			},
 		},
+		"inverted columns on one line": {
+			input: position.NewRange(position.New(1, 3), position.New(1, 1)),
+			want:  nil,
+		},
 		"empty range": {
 			input: position.NewRange(position.New(2, 3), position.New(2, 3)),
 			want: position.Ranges{
@@ -507,6 +511,7 @@ func TestRanges_LineIndices(t *testing.T) {
 		rs := position.Ranges{
 			position.NewRange(position.New(2, 0), position.New(1, 0)),
 			position.NewRange(position.New(2, 0), position.New(1, 5)),
+			position.NewRange(position.New(1, 3), position.New(1, 1)),
 		}
 		assert.Empty(t, rs.LineIndices())
 	})

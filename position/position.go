@@ -91,9 +91,14 @@ func (r Range) String() string {
 
 // lastLine returns the last line r covers. A multi-line range that ends at
 // column 0 holds nothing on its end line, so it stops at the line before. For
-// a range that ends before its start line, lastLine returns a line before
-// r.Start.Line, so the range covers none.
+// a range that ends before its start, on an earlier line or at an earlier
+// column of the same line, lastLine returns a line before r.Start.Line, so
+// the range covers none.
 func (r Range) lastLine() int {
+	if r.Start.Line == r.End.Line && r.End.Col < r.Start.Col {
+		return r.Start.Line - 1
+	}
+
 	if r.End.Col == 0 && r.End.Line > r.Start.Line {
 		return r.End.Line - 1
 	}
@@ -105,10 +110,15 @@ func (r Range) lastLine() int {
 //
 // Every line but the last extends to the end of the line. A range that ends
 // at column 0 of a later line covers nothing on that line, so SliceLines
-// stops at the line before it. A range that ends on a line before its start
-// line covers no lines, and SliceLines returns nil for it.
+// stops at the line before it. A range that ends before its start, on an
+// earlier line or at an earlier column of the same line, covers no lines,
+// and SliceLines returns nil for it.
 func (r Range) SliceLines() Ranges {
 	if r.Start.Line == r.End.Line {
+		if r.End.Col < r.Start.Col {
+			return nil
+		}
+
 		return Ranges{r}
 	}
 
