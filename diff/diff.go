@@ -429,41 +429,35 @@ func (ops lineOps) toLines() line.Lines {
 	return lines
 }
 
-// formatHunkHeader formats a unified diff hunk header like "@@ -1,3 +1,4 @@".
-// Uses the same edge case handling as go-udiff (unified.go lines 218-235).
+// formatHunkHeader formats a unified diff hunk header like "@@ -1,3 +1,4 @@"
+// with the range syntax of GNU diff -u.
 func formatHunkHeader(span position.Span, beforeSums, afterSums *prefixSums) string {
-	fromLine := beforeSums.At(span.Start) + 1
-	toLine := afterSums.At(span.Start) + 1
-	fromCount := beforeSums.Range(span)
-	toCount := afterSums.Range(span)
-
 	var b strings.Builder
 
-	fmt.Fprint(&b, "@@")
-
-	// Format "before" part.
-	switch {
-	case fromCount > 1:
-		fmt.Fprintf(&b, " -%d,%d", fromLine, fromCount)
-	case fromLine == 1 && fromCount == 0:
-		fmt.Fprint(&b, " -0,0") // GNU diff -u behavior for empty file.
-	default:
-		fmt.Fprintf(&b, " -%d", fromLine)
-	}
-
-	// Format "after" part.
-	switch {
-	case toCount > 1:
-		fmt.Fprintf(&b, " +%d,%d", toLine, toCount)
-	case toLine == 1 && toCount == 0:
-		fmt.Fprint(&b, " +0,0") // GNU diff -u behavior for empty file.
-	default:
-		fmt.Fprintf(&b, " +%d", toLine)
-	}
-
+	fmt.Fprint(&b, "@@ ")
+	writeHunkRange(&b, '-', beforeSums.At(span.Start)+1, beforeSums.Range(span))
+	fmt.Fprint(&b, " ")
+	writeHunkRange(&b, '+', afterSums.At(span.Start)+1, afterSums.Range(span))
 	fmt.Fprint(&b, " @@")
 
 	return b.String()
+}
+
+// writeHunkRange writes one side of a hunk header, where start is the
+// 1-indexed first line of the hunk on that side and count is the number of
+// lines the hunk covers there. GNU diff omits the count when it is 1, and a
+// count of 0 reports the line before the change instead, so a hunk that
+// inserts after line 3 reads "-3,0" and one that inserts into an empty file
+// reads "-0,0".
+func writeHunkRange(b *strings.Builder, sign byte, start, count int) {
+	switch count {
+	case 0:
+		fmt.Fprintf(b, "%c%d,0", sign, start-1)
+	case 1:
+		fmt.Fprintf(b, "%c%d", sign, start)
+	default:
+		fmt.Fprintf(b, "%c%d,%d", sign, start, count)
+	}
 }
 
 // selectHunkSpans collects change indices and groups them into expanded spans.

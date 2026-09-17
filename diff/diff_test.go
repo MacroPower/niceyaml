@@ -563,6 +563,82 @@ func TestDiffer_Hunks(t *testing.T) {
 			},
 			annotations: map[int]string{0: "@@ -2 +2 @@"},
 		},
+		"append reports line before insertion with zero count": {
+			before: stringtest.Input(`
+				a: 1
+				b: 2
+				c: 3
+			`),
+			after: stringtest.Input(`
+				a: 1
+				b: 2
+				c: 3
+				d: 4
+				e: 5
+			`),
+			context: 0,
+			wantLen: 2,
+			flags: map[int]line.Flag{
+				0: line.FlagInserted,
+				1: line.FlagInserted,
+			},
+			annotations: map[int]string{0: "@@ -3,0 +4,2 @@"},
+		},
+		"deletion reports line before removal with zero count": {
+			before: stringtest.Input(`
+				a: 1
+				b: 2
+				c: 3
+			`),
+			after: stringtest.Input(`
+				a: 1
+				c: 3
+			`),
+			context: 0,
+			wantLen: 1,
+			flags: map[int]line.Flag{
+				0: line.FlagDeleted,
+			},
+			annotations: map[int]string{0: "@@ -2 +1,0 @@"},
+		},
+		"insertion at start reports zero line": {
+			before: stringtest.Input(`
+				a: 1
+				b: 2
+			`),
+			after: stringtest.Input(`
+				x: 0
+				a: 1
+				b: 2
+			`),
+			context: 0,
+			wantLen: 1,
+			flags: map[int]line.Flag{
+				0: line.FlagInserted,
+			},
+			annotations: map[int]string{0: "@@ -0,0 +1 @@"},
+		},
+		"insertion into empty file": {
+			before:  "",
+			after:   "a: 1\n",
+			context: 0,
+			wantLen: 1,
+			flags: map[int]line.Flag{
+				0: line.FlagInserted,
+			},
+			annotations: map[int]string{0: "@@ -0,0 +1 @@"},
+		},
+		"deletion to empty file": {
+			before:  "a: 1\nb: 2\n",
+			after:   "",
+			context: 0,
+			wantLen: 2,
+			flags: map[int]line.Flag{
+				0: line.FlagDeleted,
+				1: line.FlagDeleted,
+			},
+			annotations: map[int]string{0: "@@ -1,2 +0,0 @@"},
+		},
 	}
 
 	for name, tc := range tcs {
