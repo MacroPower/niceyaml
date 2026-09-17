@@ -191,15 +191,17 @@ type Option func(*Printer)
 // GutterContext provides context about the current row for gutter rendering.
 // It is passed to [GutterFunc] to determine the appropriate gutter content.
 //
-// Index, Number, and Flag describe the line the row belongs to. Soft marks a
-// wrapped continuation row of that line, and Annotation marks a row that
-// holds one of its annotations rather than its content, so the built-in
-// gutters leave the line number and diff marker out of it.
+// Index, Number, and Flag describe the line the row belongs to. MaxNumber is
+// the largest line number in the view, which sizes the line number column
+// so every row of the view lines up. Soft marks a wrapped continuation row
+// of that line, and Annotation marks a row that holds one of its
+// annotations rather than its content, so the built-in gutters leave the
+// line number and diff marker out of it.
 type GutterContext struct {
 	Styles     StyleGetter
 	Index      int
 	Number     int
-	TotalLines int
+	MaxNumber  int
 	Flag       line.Flag
 	Soft       bool
 	Annotation bool
@@ -250,13 +252,13 @@ func DefaultAnnotation(ctx AnnotationContext) string {
 }
 
 // renderLineNumber renders the line number portion of a gutter. The number
-// column is at least four wide and grows to fit the total line count, so
-// every row of a document lines up.
+// column is at least four wide and grows to fit the largest line number in
+// the view, so every row of the view lines up.
 func renderLineNumber(ctx GutterContext) string {
 	lineNumStyle := ctx.Styles.Style(style.Text).
 		Foreground(ctx.Styles.Style(style.Comment).GetForeground())
 
-	width := max(4, len(strconv.Itoa(ctx.TotalLines)))
+	width := max(4, len(strconv.Itoa(ctx.MaxNumber)))
 
 	switch {
 	case ctx.Annotation:
@@ -436,13 +438,15 @@ func (p *Printer) Print(lines line.View, spans ...position.Span) string {
 
 	sb.Grow(selected * 100)
 
+	maxNumber := maxNumber(lines)
+
 	// A span that renders no rows, because it is empty or lies outside the
 	// view, adds no separator either, so the output holds exactly the rows
 	// Rows counts.
 	wrote := false
 
 	for _, span := range spans {
-		rows := p.renderSpan(lines, span)
+		rows := p.renderSpan(lines, span, maxNumber)
 		if len(rows) == 0 {
 			continue
 		}
@@ -474,42 +478,55 @@ func (p *Printer) Rows(lines line.View, spans ...position.Span) []int {
 
 	var rows []int
 
-	for _, span := range spans {
-		gutterWidth := p.gutterWidth(lines.Len())
+	maxNumber := maxNumber(lines)
+	gutterWidth := p.gutterWidth(maxNumber)
 
+	for _, span := range spans {
 		for idx, ln := range lines.AllLines(span) {
-			rows = append(rows, len(p.renderLine(idx, ln, lines.Len(), gutterWidth)))
+			rows = append(rows, len(p.renderLine(idx, ln, maxNumber, gutterWidth)))
 		}
 	}
 
 	return rows
 }
 
-// gutterWidth returns the width of the gutter for a document of totalLines
-// lines. The widest gutter carries the largest line number, so it samples
-// with that.
-func (p *Printer) gutterWidth(totalLines int) int {
+// maxNumber returns the largest line number in view, or 0 when the view is
+// empty. A view built from part of a document, such as a diff hunk or a
+// slice of its lines, numbers its lines past its length.
+func maxNumber(view line.View) int {
+	n := 0
+
+	for _, ln := range view.AllLines() {
+		n = max(n, ln.Number())
+	}
+
+	return n
+}
+
+// gutterWidth returns the width of the gutter for a view whose largest line
+// number is maxNumber. The widest gutter carries that number, so it
+// samples with it.
+func (p *Printer) gutterWidth(maxNumber int) int {
 	return lipgloss.Width(p.gutterFunc(GutterContext{
-		Styles:     p.styles,
-		Index:      totalLines - 1,
-		Number:     totalLines,
-		TotalLines: totalLines,
+		Styles:    p.styles,
+		Number:    maxNumber,
+		MaxNumber: maxNumber,
 	}))
 }
 
-// renderSpan renders the lines of span as rows.
-func (p *Printer) renderSpan(t line.View, span position.Span) []string {
-	totalLines := t.Len()
-	if totalLines == 0 {
+// renderSpan renders the lines of span as rows, with the gutter sized for
+// maxNumber, the largest line number in t.
+func (p *Printer) renderSpan(t line.View, span position.Span, maxNumber int) []string {
+	if t.Len() == 0 {
 		return nil
 	}
 
-	gutterWidth := p.gutterWidth(totalLines)
+	gutterWidth := p.gutterWidth(maxNumber)
 
 	var rows []string
 
 	for idx, ln := range t.AllLines(span) {
-		rows = append(rows, p.renderLine(idx, ln, totalLines, gutterWidth)...)
+		rows = append(rows, p.renderLine(idx, ln, maxNumber, gutterWidth)...)
 	}
 
 	return rows
@@ -517,19 +534,19 @@ func (p *Printer) renderSpan(t line.View, span position.Span) []string {
 
 // renderLine renders one line as rows: its annotations above, its content
 // wrapped to the printer width, and its annotations below.
-func (p *Printer) renderLine(idx int, ln *line.Line, totalLines, gutterWidth int) []string {
+func (p *Printer) renderLine(idx int, ln *line.Line, maxNumber, gutterWidth int) []string {
 	var rows []string
 
 	if p.annotationsEnabled {
-		rows = append(rows, p.renderAnnotation(ln, idx, totalLines, line.Above, gutterWidth)...)
+		rows = append(rows, p.renderAnnotation(ln, idx, maxNumber, line.Above, gutterWidth)...)
 	}
 
 	gutterCtx := GutterContext{
-		Index:      idx,
-		Number:     ln.Number(),
-		TotalLines: totalLines,
-		Flag:       ln.Flag(),
-		Styles:     p.styles,
+		Index:     idx,
+		Number:    ln.Number(),
+		MaxNumber: maxNumber,
+		Flag:      ln.Flag(),
+		Styles:    p.styles,
 	}
 
 	var content string
@@ -549,7 +566,7 @@ func (p *Printer) renderLine(idx int, ln *line.Line, totalLines, gutterWidth int
 	rows = append(rows, p.contentRows(content, gutterCtx, gutterWidth)...)
 
 	if p.annotationsEnabled {
-		rows = append(rows, p.renderAnnotation(ln, idx, totalLines, line.Below, gutterWidth)...)
+		rows = append(rows, p.renderAnnotation(ln, idx, maxNumber, line.Below, gutterWidth)...)
 	}
 
 	return rows
@@ -560,7 +577,7 @@ func (p *Printer) renderLine(idx int, ln *line.Line, totalLines, gutterWidth int
 // or the [AnnotationFunc] renders them as nothing.
 func (p *Printer) renderAnnotation(
 	ln *line.Line,
-	idx, totalLines int,
+	idx, maxNumber int,
 	placement line.Placement,
 	gutterWidth int,
 ) []string {
@@ -598,7 +615,7 @@ func (p *Printer) renderAnnotation(
 		sb.WriteString(p.gutterFunc(GutterContext{
 			Index:      idx,
 			Number:     ln.Number(),
-			TotalLines: totalLines,
+			MaxNumber:  maxNumber,
 			Soft:       j > 0,
 			Flag:       ln.Flag(),
 			Annotation: true,

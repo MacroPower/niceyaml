@@ -1361,6 +1361,21 @@ func TestGutterFunctions(t *testing.T) {
 			ctx:        printer.GutterContext{Flag: line.FlagDefault, Number: 1, Styles: styles},
 			want:       "   1 ",
 		},
+		"lineNumber/max number widens the column": {
+			gutterFunc: printer.LineNumberGutter,
+			ctx:        printer.GutterContext{Flag: line.FlagDefault, Number: 1, MaxNumber: 15001, Styles: styles},
+			want:       "    1 ",
+		},
+		"lineNumber/max number widens the soft wrap marker": {
+			gutterFunc: printer.LineNumberGutter,
+			ctx:        printer.GutterContext{Flag: line.FlagDefault, Soft: true, MaxNumber: 15001, Styles: styles},
+			want:       "    - ",
+		},
+		"default/max number widens the column": {
+			gutterFunc: printer.DefaultGutter,
+			ctx:        printer.GutterContext{Flag: line.FlagInserted, Number: 15001, MaxNumber: 15001, Styles: styles},
+			want:       "15001 +",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -3078,6 +3093,31 @@ func TestPrinter_Print_EmptySpans(t *testing.T) {
 			assert.Len(t, strings.Split(got, "\n"), max(1, len(tc.wantRows)))
 		})
 	}
+}
+
+func TestPrinter_LineNumbers_MaxNumber(t *testing.T) {
+	t.Parallel()
+
+	// A slice of a long document has a Len of one but a line number past
+	// 9999, so the gutter must size itself from the number, and every row
+	// of the line, wrapped or annotated, must share that width.
+	input := strings.Repeat("k: v\n", 10000) + "last: this is a long value that wraps"
+	view := niceyaml.NewSourceFromString(input).Lines()[10000:]
+	view[0].AddAnnotation(line.Annotation{Content: "note", Placement: line.Below, Col: 6})
+
+	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWidth(30))
+
+	got := p.Print(view)
+	for row := range strings.SplitSeq(got, "\n") {
+		assert.LessOrEqual(t, lipgloss.Width(row), 30, row)
+	}
+
+	assert.Equal(t, stringtest.JoinLF(
+		"10001 last: this is a long",
+		"    - value that wraps",
+		"            ^ note",
+	), got)
+	assert.Equal(t, []int{3}, p.Rows(view))
 }
 
 func TestPrinter_WithGutter_Nil(t *testing.T) {
