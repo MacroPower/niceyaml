@@ -108,6 +108,26 @@ func TestPattern_Match(t *testing.T) {
 			path:    "deep/path/config.yaml",
 			want:    false,
 		},
+		"wildcard in root with dot slash prefix": {
+			pattern: "*.yaml",
+			path:    "./config.yaml",
+			want:    true,
+		},
+		"wildcard in root after parent traversal": {
+			pattern: "*.yaml",
+			path:    "sub/../config.yaml",
+			want:    true,
+		},
+		"repeated separators are collapsed": {
+			pattern: "deep/*.yaml",
+			path:    "deep//config.yaml",
+			want:    true,
+		},
+		"trailing separator is dropped": {
+			pattern: "config.yaml",
+			path:    "config.yaml/",
+			want:    true,
+		},
 		"double star recursive": {
 			pattern: "**/*.yaml",
 			path:    "deep/path/config.yaml",
@@ -191,6 +211,11 @@ func TestMatchAnyWithBase(t *testing.T) {
 		},
 		"matches full path pattern": {
 			path:     ".github/workflows/ci.yaml",
+			patterns: []string{".github/workflows/*.yaml"},
+			want:     true,
+		},
+		"matches full path pattern with dot slash prefix": {
+			path:     "./.github/workflows/ci.yaml",
 			patterns: []string{".github/workflows/*.yaml"},
 			want:     true,
 		},

@@ -41,20 +41,27 @@ func MustPattern(pattern string) Pattern {
 }
 
 // Match reports whether the path matches the pattern.
-// Path separators are normalized to forward slashes for cross-platform
-// consistency.
+//
+// The path is cleaned and its separators normalized to forward slashes
+// before matching, so "./config.yaml" and "config.yaml" both match the
+// root-only pattern "*.yaml".
 func (p Pattern) Match(path string) bool {
 	if p.raw == "" || path == "" {
 		return false
 	}
 
-	// Normalize path separators for cross-platform consistency.
-	path = filepath.ToSlash(path)
-
 	// Error is ignored since we validated the pattern at construction time.
-	matched, _ := doublestar.Match(p.raw, path) //nolint:errcheck // Pattern was validated.
+	matched, _ := doublestar.Match(p.raw, normalizePath(path)) //nolint:errcheck // Pattern was validated.
 
 	return matched
+}
+
+// normalizePath returns path cleaned, with forward slashes as separators,
+// which is the form the patterns match against. Cleaning drops a leading
+// "./", collapses repeated separators, and resolves ".." elements, so the
+// spelling of a path does not decide whether it matches.
+func normalizePath(path string) string {
+	return filepath.ToSlash(filepath.Clean(path))
 }
 
 // String returns the original pattern string.
@@ -67,8 +74,8 @@ func (p Pattern) String() string {
 // "*.yaml"), then tries matching against the full path (for patterns with
 // directory components).
 //
-// Path separators are normalized to forward slashes for cross-platform
-// consistency.
+// The path is cleaned and its separators normalized to forward slashes
+// before matching, as [Pattern.Match] does.
 //
 // # Pattern Validation
 //
@@ -81,8 +88,7 @@ func MatchAnyWithBase(path string, patterns []string) bool {
 		return false
 	}
 
-	// Normalize path separators for cross-platform consistency.
-	path = filepath.ToSlash(path)
+	path = normalizePath(path)
 	baseName := filepath.Base(path)
 
 	for _, pattern := range patterns {

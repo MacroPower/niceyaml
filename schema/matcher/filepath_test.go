@@ -38,6 +38,11 @@ func TestFilePath(t *testing.T) {
 			filePath: "deep/path/config.yaml",
 			want:     false,
 		},
+		"root pattern matches dot slash prefix": {
+			pattern:  "*.yaml",
+			filePath: "./config.yaml",
+			want:     true,
+		},
 		"pattern no match": {
 			pattern:  "**/*.json",
 			filePath: "config.yaml",
