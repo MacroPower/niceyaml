@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 
 	"go.jacobcolvin.com/x/jsonschema"
@@ -73,9 +74,12 @@ type RegistryOption func(*Registry)
 // schema is compiled, which happens once per schema URL, so an option such
 // as a format validator takes effect for every document validated against
 // that schema.
+//
+// The registry keeps its own copy of opts, so writing to the caller's slice
+// afterwards changes nothing.
 func WithValidateOptions(opts ...jsonschema.ValidateOption) RegistryOption {
 	return func(r *Registry) {
-		r.validatorOpts = opts
+		r.validatorOpts = slices.Clone(opts)
 	}
 }
 

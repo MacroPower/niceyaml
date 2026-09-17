@@ -17,6 +17,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
@@ -735,6 +736,26 @@ func TestRegistry_WithValidateOptions(t *testing.T) {
 	v, err := reg.Lookup(t.Context(), doc)
 	require.NoError(t, err)
 	assert.NotNil(t, v)
+}
+
+func TestRegistry_ValidateOptionsNotAliased(t *testing.T) {
+	t.Parallel()
+
+	// The registry compiles each schema on its first lookup, so aliasing
+	// the caller's slice would let a later write change how the next
+	// schema compiles. Asserting formats is what makes the difference
+	// observable here.
+	opts := []jsonschema.ValidateOption{jsonschema.WithFormats(true)}
+
+	reg := schema.NewRegistry(schema.WithValidateOptions(opts...))
+	reg.Register(schema.Embedded("format.json", []byte(`{"type": "string", "format": "ipv4"}`)))
+
+	opts[0] = jsonschema.WithFormats(false)
+
+	doc := yamltest.FirstDocument(t, stringtest.Input(`not-an-ip`))
+	err := reg.Validate(t.Context(), doc)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, schema.ErrNoMatch)
 }
 
 func TestRegistry_ErrorCases(t *testing.T) {
