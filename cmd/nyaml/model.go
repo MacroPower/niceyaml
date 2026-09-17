@@ -18,6 +18,10 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
+// statusBarHeight is the number of terminal rows the status bar occupies
+// below the viewport.
+const statusBarHeight = 2
+
 // fileEntry holds a file path and its contents.
 type fileEntry struct {
 	path    string
@@ -108,7 +112,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.viewport.SetWidth(msg.Width)
-		m.viewport.SetHeight(msg.Height - 2) // Reserve 2 lines for status bar.
+		// Reserve 2 lines for the status bar; a terminal shorter than that
+		// leaves the viewport no rows rather than a negative height.
+		m.viewport.SetHeight(max(0, msg.Height-statusBarHeight))
 
 	case tea.KeyPressMsg:
 		// Quit on ctrl+c from every state, including the theme picker and the

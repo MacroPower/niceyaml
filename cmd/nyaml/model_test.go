@@ -124,6 +124,46 @@ func TestRevisionLabel(t *testing.T) {
 	}
 }
 
+func TestUpdateWindowSizeViewportHeight(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		height int
+		want   int
+	}{
+		"tall terminal": {
+			height: 40,
+			want:   38,
+		},
+		"status bar only": {
+			height: 2,
+			want:   0,
+		},
+		"single row": {
+			height: 1,
+			want:   0,
+		},
+		"zero rows": {
+			height: 0,
+			want:   0,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := newModel(&modelOptions{})
+
+			updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: tc.height})
+
+			got, ok := updated.(model)
+			require.True(t, ok)
+			assert.Equal(t, tc.want, got.viewport.Height())
+		})
+	}
+}
+
 func TestUpdateCtrlCQuits(t *testing.T) {
 	t.Parallel()
 
