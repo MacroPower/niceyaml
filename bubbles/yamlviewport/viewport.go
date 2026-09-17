@@ -319,11 +319,14 @@ func (m *Model) relayout() {
 }
 
 // renderPrinter returns the printer to render with: the configured printer
-// specialized to the given content width and the viewport's word wrap
-// setting, so wrapped lines fit the content area.
+// specialized to the viewport's word wrap setting and the given content
+// width less the horizontal frame of the printer's container style, so a
+// wrapped line and the frame around it together fit the content area.
 func (m *Model) renderPrinter(width int) *printer.Printer {
 	if !m.wrapEnabled {
 		width = 0
+	} else {
+		width = max(0, width-m.printer.ContainerStyle().GetHorizontalFrameSize())
 	}
 
 	return m.printer.With(printer.WithWidth(width))

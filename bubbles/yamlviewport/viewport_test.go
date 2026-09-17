@@ -925,6 +925,71 @@ func TestViewport_ContainerFrame(t *testing.T) {
 	}
 }
 
+func TestViewport_ContainerFrameWidth(t *testing.T) {
+	t.Parallel()
+
+	// Three lines that wrap at the viewport width, the last ending in END.
+	src := "a: " + strings.Repeat("x", 30) + "\n" +
+		"b: " + strings.Repeat("y", 30) + "\n" +
+		"c: " + strings.Repeat("z", 30) + " END\n"
+
+	// The horizontal frame of the printer's container style takes columns
+	// from the content area, so lines wrap to what is left and every rendered
+	// row fits the viewport width. A row wider than the viewport would wrap
+	// again in the final render and push the last line out of reach.
+	tcs := map[string]struct {
+		container lipgloss.Style
+		last      string
+	}{
+		"border": {
+			container: lipgloss.NewStyle().Border(lipgloss.NormalBorder()),
+			last:      "└",
+		},
+		"horizontal padding": {
+			container: lipgloss.NewStyle().Padding(0, 2),
+			last:      "END",
+		},
+		"margin": {
+			container: lipgloss.NewStyle().MarginLeft(3),
+			last:      "END",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			const (
+				width  = 20
+				height = 6
+			)
+
+			p := testPrinter().With(printer.WithContainerStyle(tc.container))
+			m := yamlviewport.New(yamlviewport.WithPrinter(p))
+			m.SetWidth(width)
+			m.SetHeight(height)
+			m.SetSource(niceyaml.NewSourceFromString(src))
+
+			for offset := range m.TotalRowCount() - height + 1 {
+				m.SetYOffset(offset)
+
+				rows := strings.Split(m.View(), "\n")
+				require.Len(t, rows, height, "offset %d", offset)
+
+				for i, row := range rows {
+					assert.Equal(t, width, lipgloss.Width(row), "offset %d, row %d", offset, i)
+				}
+			}
+
+			m.GotoBottom()
+
+			rows := strings.Split(m.View(), "\n")
+			assert.Contains(t, rows[len(rows)-1], tc.last)
+			assert.Contains(t, m.View(), "END")
+		})
+	}
+}
+
 func TestViewport_ViewFitsHeight(t *testing.T) {
 	t.Parallel()
 
