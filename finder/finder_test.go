@@ -399,6 +399,65 @@ func TestFinder_Find_EdgeCases(t *testing.T) {
 	}
 }
 
+func TestFinder_Find_Expansion(t *testing.T) {
+	t.Parallel()
+
+	// Case folding turns one source rune into two normalized chars, so a
+	// one-char needle could match twice inside it and report the same range
+	// twice. Only the match that begins at the source rune counts.
+	tcs := map[string]struct {
+		input  string
+		search string
+		want   position.Ranges
+	}{
+		"needle inside an expansion matches once": {
+			input:  "x: ß",
+			search: "s",
+			want: position.Ranges{
+				position.NewRange(position.New(0, 3), position.New(0, 4)),
+			},
+		},
+		"needle covering the expansion": {
+			input:  "x: ß",
+			search: "ss",
+			want: position.Ranges{
+				position.NewRange(position.New(0, 3), position.New(0, 4)),
+			},
+		},
+		"needle ending inside an expansion covers the rune": {
+			input:  "x: aß",
+			search: "as",
+			want: position.Ranges{
+				position.NewRange(position.New(0, 3), position.New(0, 5)),
+			},
+		},
+		"needle starting inside an expansion does not match": {
+			input:  "x: ßa",
+			search: "sa",
+			want:   nil,
+		},
+		"expansion next to a plain match": {
+			input:  "x: ßs",
+			search: "s",
+			want: position.Ranges{
+				position.NewRange(position.New(0, 3), position.New(0, 4)),
+				position.NewRange(position.New(0, 4), position.New(0, 5)),
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			f := finder.New(finder.WithNormalizer(normalizer.New()))
+			idx := f.Load(niceyaml.NewSourceFromString(tc.input).Lines())
+
+			assert.Equal(t, tc.want, idx.Find(tc.search))
+		})
+	}
+}
+
 func TestFinder_Find_NormalizesToEmpty(t *testing.T) {
 	t.Parallel()
 

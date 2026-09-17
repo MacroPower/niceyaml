@@ -159,6 +159,11 @@ func (i *Index) buildByteToRuneIndex() {
 // the loaded text, so a string found in the source is found by Find. Bytes
 // that are not valid UTF-8 read as U+FFFD on both sides.
 //
+// Every match starts at a source character. When normalization expands one
+// character into several, as case folding turns "ß" into "ss", a needle
+// that matches only the tail of the expansion is not a match, and a match
+// that ends inside an expansion covers the whole character.
+//
 // Returns nil if the search string is empty, or normalizes to empty, or the
 // Index is nil or holds no text.
 func (i *Index) Find(search string) position.Ranges {
@@ -191,6 +196,15 @@ func (i *Index) Find(search string) position.Ranges {
 		// Convert byte offsets to character offsets for position map lookup.
 		matchStartChar := i.byteToRune[matchStart]
 		matchEndChar := matchStartChar + searchRuneCount - 1
+
+		// A match inside the expansion of one source rune has no character
+		// of its own to start at, so skip past that rune.
+		if !i.posMap.starts(matchStartChar) {
+			_, size := utf8.DecodeRuneInString(i.text[matchStart:])
+			offset = matchStart + size
+
+			continue
+		}
 
 		startPos := i.posMap.lookup(matchStartChar)
 		endPos := i.posMap.lookup(matchEndChar)
@@ -231,8 +245,8 @@ func normalizeRune(n Normalizer, r rune) string {
 // and builds a position map.
 //
 // When a normalizer is set, it normalizes the returned text, and the position
-// map maps normalized character indices to original positions so lookups in
-// normalized text resolve to the right place.
+// map records where each source rune begins in the normalized text so
+// lookups in normalized text resolve to the right place.
 func (f *Finder) buildTextAndPositionMap(lines line.View) (string, *positionMap) {
 	var sb strings.Builder
 
@@ -254,9 +268,13 @@ func (f *Finder) buildTextAndPositionMap(lines line.View) (string, *positionMap)
 			normalizedCache[r] = normalized
 		}
 
-		// Map each normalized char back to original position.
-		for _, nr := range normalized {
+		// Record where this source rune begins in the normalized text. Every
+		// following char of the expansion resolves to the same position.
+		if normalized != "" {
 			pm.add(normalizedCharIndex, pos)
+		}
+
+		for _, nr := range normalized {
 			sb.WriteRune(nr)
 
 			normalizedCharIndex++
@@ -267,32 +285,46 @@ func (f *Finder) buildTextAndPositionMap(lines line.View) (string, *positionMap)
 }
 
 // positionMap maps character indices in a concatenated string to original
-// [position.Position] values in the loaded lines.
+// [position.Position] values in the loaded lines. It holds one entry per
+// source rune, at the index where that rune's normalized form begins, in
+// increasing order.
 type positionMap struct {
 	indices   []int
 	positions []position.Position
 }
 
-// add records a character index and its corresponding position.
+// add records the character index at which a source rune begins and its
+// position.
 func (m *positionMap) add(charIndex int, pos position.Position) {
 	m.indices = append(m.indices, charIndex)
 	m.positions = append(m.positions, pos)
 }
 
-// lookup finds the [position.Position] for a given character index using
-// binary search.
-func (m *positionMap) lookup(charIndex int) position.Position {
-	if len(m.indices) == 0 {
-		return position.New(0, 0)
-	}
-
-	// Find the largest index that is <= the target index.
+// floor returns the entry of the source rune that holds charIndex: the last
+// entry whose index is at most charIndex. It returns -1 when the map is
+// empty.
+func (m *positionMap) floor(charIndex int) int {
 	idx := sort.Search(len(m.indices), func(i int) bool {
 		return m.indices[i] > charIndex
 	})
-	if idx > 0 {
-		idx--
+
+	return idx - 1
+}
+
+// lookup finds the [position.Position] of the source rune that holds the
+// given character index.
+func (m *positionMap) lookup(charIndex int) position.Position {
+	idx := m.floor(charIndex)
+	if idx < 0 {
+		return position.New(0, 0)
 	}
 
 	return m.positions[idx]
+}
+
+// starts reports whether a source rune begins at the given character index.
+func (m *positionMap) starts(charIndex int) bool {
+	idx := m.floor(charIndex)
+
+	return idx >= 0 && m.indices[idx] == charIndex
 }
