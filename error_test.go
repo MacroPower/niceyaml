@@ -2457,6 +2457,54 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 		assert.Equal(t, "document 1: [3:7] bad token", wrapped.Error())
 	})
 
+	t.Run("an anchor with nested errors adds no position to a token error", func(t *testing.T) {
+		t.Parallel()
+
+		tk := source.Lines().TokenAt(position.New(2, 6))
+		nested := niceyaml.NewError("bad name", niceyaml.WithPath(namePath))
+
+		tcs := map[string]struct {
+			err  *niceyaml.Error
+			want string
+		}{
+			"direct": {
+				err: niceyaml.NewErrorFrom(
+					niceyaml.NewError("bad token", niceyaml.WithToken(tk)),
+					niceyaml.WithErrors(nested),
+				),
+				want: "[3:7] bad token",
+			},
+			"behind context": {
+				err: niceyaml.NewErrorFrom(
+					fmt.Errorf("document 1: %w", niceyaml.NewError("bad token", niceyaml.WithToken(tk))),
+					niceyaml.WithErrors(nested),
+				),
+				want: "document 1: [3:7] bad token",
+			},
+			"range": {
+				err: niceyaml.NewErrorFrom(
+					niceyaml.NewError("bad range",
+						niceyaml.WithRange(position.NewRange(position.New(2, 6), position.New(2, 12))),
+					),
+					niceyaml.WithErrors(nested),
+				),
+				want: "[3:7] bad range",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				// The nested errors make the outer Error the anchor, and the
+				// Error it wraps printed the position already, so the
+				// message reads the same before and after binding.
+				assert.Equal(t, tc.want, tc.err.Error())
+				assert.Equal(t, tc.want, source.WrapError(tc.err).Error())
+			})
+		}
+	})
+
 	t.Run("a second binding adds no position", func(t *testing.T) {
 		t.Parallel()
 

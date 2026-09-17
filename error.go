@@ -240,6 +240,31 @@ func (e *Error) position() (position.Position, bool) {
 	}
 }
 
+// messagePosition returns the position that is in e's message already: the
+// one e carries, or the one an Error inside e carries when e has no path,
+// token, or range of its own, looking through foreign wrapping as
+// [Error.locate] does. The boolean is false when no such position exists,
+// which is the case for a path error, whose position a [SourceError] adds
+// when it binds the error.
+func (e *Error) messagePosition() (position.Position, bool) {
+	for cur := e; ; {
+		if pos, ok := cur.position(); ok {
+			return pos, true
+		}
+
+		if cur.path != nil {
+			return position.Position{}, false
+		}
+
+		inner, ok := errors.AsType[*Error](cur.err)
+		if !ok || inner == nil {
+			return position.Position{}, false
+		}
+
+		cur = inner
+	}
+}
+
 // formatPosition returns pos as "[line:col]". Editors count from 1, so the
 // coordinates are 1-indexed.
 func formatPosition(pos position.Position) string {
@@ -578,8 +603,9 @@ func (e *SourceError) Error() string {
 		return msg
 	}
 
-	// A token or range position is in the message already.
-	if _, ok := a.position(); ok {
+	// A token or range position is in the message already, whether the
+	// anchor carries it or an Error it wraps does.
+	if _, ok := a.messagePosition(); ok {
 		return msg
 	}
 
