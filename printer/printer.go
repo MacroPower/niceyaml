@@ -228,14 +228,18 @@ type AnnotationFunc func(AnnotationContext) string
 
 // DefaultAnnotation is the [AnnotationFunc] [New] uses. It joins the
 // annotations with "; ", pads them to their column, and prefixes [line.Below]
-// annotations with "^ ".
+// annotations with "^ ". Annotations with empty content are left out, and
+// it returns "" when none remain, as [line.Annotation.String] does.
 func DefaultAnnotation(ctx AnnotationContext) string {
-	if len(ctx.Annotations) == 0 {
+	contents := slices.DeleteFunc(ctx.Annotations.Contents(), func(s string) bool {
+		return s == ""
+	})
+	if len(contents) == 0 {
 		return ""
 	}
 
 	padding := strings.Repeat(" ", max(0, ctx.Annotations.Col()))
-	combined := strings.Join(ctx.Annotations.Contents(), "; ")
+	combined := strings.Join(contents, "; ")
 
 	// Add "^ " prefix for Below annotations.
 	if ctx.Placement == line.Below {

@@ -1493,6 +1493,15 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 				"second: 2",
 			),
 		},
+		"below annotation with empty content renders no row": {
+			input:     "key: value",
+			lineIndex: 0,
+			annotation: line.Annotation{
+				Placement: line.Below,
+				Col:       2,
+			},
+			want: "key: value",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -2752,6 +2761,20 @@ func TestDefaultAnnotation(t *testing.T) {
 			},
 			position: line.Above,
 			want:     "header1; header2",
+		},
+		"empty content renders nothing": {
+			annotations: line.Annotations{{Placement: line.Below, Col: 2}},
+			position:    line.Below,
+			want:        "",
+		},
+		"empty content is left out of the join": {
+			annotations: line.Annotations{
+				{Content: "first", Placement: line.Below, Col: 2},
+				{Placement: line.Below, Col: 2},
+				{Content: "third", Placement: line.Below, Col: 2},
+			},
+			position: line.Below,
+			want:     "  ^ first; third",
 		},
 	}
 
