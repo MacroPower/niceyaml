@@ -60,6 +60,10 @@ func New(opts ...Option) *Differ {
 // the input lines come along, and the flags come from the diff. The result
 // can be rendered multiple times with [Result.Unified] or
 // [Result.Hunks].
+//
+// Diff panics when the [lcs.Algorithm] returns an [lcs.Op] with an
+// [lcs.OpKind] other than [lcs.OpEqual], [lcs.OpDelete], or [lcs.OpInsert],
+// or with an index outside the input it refers to.
 func (d *Differ) Diff(a, b line.View) *Result {
 	ops := d.computeOps(a, b)
 
@@ -115,7 +119,7 @@ func (d *Differ) computeOps(before, after line.View) []lineOp {
 	// Convert to lineOps.
 	ops := make([]lineOp, 0, len(diffOps))
 
-	for _, op := range diffOps {
+	for i, op := range diffOps {
 		switch op.Kind {
 		case lcs.OpEqual:
 			ops = append(ops, lineOp{kind: lcs.OpEqual, line: afterLines[op.After]})
@@ -123,6 +127,11 @@ func (d *Differ) computeOps(before, after line.View) []lineOp {
 			ops = append(ops, lineOp{kind: lcs.OpDelete, line: beforeLines[op.Before]})
 		case lcs.OpInsert:
 			ops = append(ops, lineOp{kind: lcs.OpInsert, line: afterLines[op.After]})
+		default:
+			// Dropping the op would lose a line from every rendering
+			// without a trace, so treat it as a broken Algorithm the same
+			// way an out-of-range index already fails.
+			panic(fmt.Sprintf("diff: op %d has unknown lcs.OpKind %d", i, op.Kind))
 		}
 	}
 

@@ -9,6 +9,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/diff"
+	"go.jacobcolvin.com/niceyaml/diff/lcs"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style"
@@ -670,6 +671,65 @@ func TestDiffer_Hunks(t *testing.T) {
 					require.NotEmpty(t, anns, "expected annotation at line %d", lineIdx)
 					assert.Equal(t, wantAnnotation, anns[0].Content)
 				}
+			}
+		})
+	}
+}
+
+// opsAlgorithm is an [lcs.Algorithm] that returns a fixed op sequence.
+type opsAlgorithm []lcs.Op
+
+func (a opsAlgorithm) Diff(_, _ []string) []lcs.Op {
+	return []lcs.Op(a)
+}
+
+func TestDiffer_WithAlgorithm(t *testing.T) {
+	t.Parallel()
+
+	before := niceyaml.NewSourceFromString("a: 1\nb: 2\n").Lines()
+	after := niceyaml.NewSourceFromString("a: 1\nc: 3\n").Lines()
+
+	tcs := map[string]struct {
+		ops       []lcs.Op
+		wantFlags []line.Flag
+		wantPanic string
+	}{
+		"known kinds render in order": {
+			ops: []lcs.Op{
+				{Kind: lcs.OpEqual, Before: 0, After: 0},
+				{Kind: lcs.OpDelete, Before: 1, After: -1},
+				{Kind: lcs.OpInsert, Before: -1, After: 1},
+			},
+			wantFlags: []line.Flag{line.FlagDefault, line.FlagDeleted, line.FlagInserted},
+		},
+		"unknown kind panics instead of dropping the line": {
+			ops: []lcs.Op{
+				{Kind: lcs.OpEqual, Before: 0, After: 0},
+				{Kind: lcs.OpKind(3), Before: -1, After: 1},
+			},
+			wantPanic: "diff: op 1 has unknown lcs.OpKind 3",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := diff.New(diff.WithAlgorithm(opsAlgorithm(tc.ops)))
+
+			if tc.wantPanic != "" {
+				assert.PanicsWithValue(t, tc.wantPanic, func() {
+					d.Diff(before, after)
+				})
+
+				return
+			}
+
+			got := d.Diff(before, after).Unified()
+			require.Len(t, got, len(tc.wantFlags))
+
+			for i, want := range tc.wantFlags {
+				assert.Equal(t, want, got[i].Flag(), "flag mismatch at line %d", i)
 			}
 		})
 	}

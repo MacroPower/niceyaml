@@ -25,10 +25,11 @@ const (
 
 // Op represents a diff operation with its index in each input sequence.
 //
-// Before is the index into the before sequence and After the index into the
-// after sequence. The side an operation does not touch holds -1: an [OpInsert]
-// has no Before and an [OpDelete] has no After, while an [OpEqual] carries
-// both.
+// Kind is one of [OpEqual], [OpDelete], or [OpInsert], and consumers such
+// as the diff package reject any other value. Before is the index into the
+// before sequence and After the index into the after sequence. The side an
+// operation does not touch holds -1: an [OpInsert] has no Before and an
+// [OpDelete] has no After, while an [OpEqual] carries both.
 type Op struct {
 	Kind   OpKind
 	Before int
