@@ -409,9 +409,14 @@ func TestDirective_LeadingCommentDocument(t *testing.T) {
 	// "---" in a document of their own. The registry must skip that document
 	// and apply its directive to the content document after it. The schema
 	// requires a "b" key, so a document validates only against this schema.
+	//
+	// A second resolver matching every document is registered after the
+	// directive resolver, so a skip means no resolver saw the document
+	// rather than one resolver declining it. A content document with no
+	// directive reaches that resolver and passes.
 	const (
 		skip    = "skip"    // ErrNoMatch, the document is not validated.
-		valid   = "valid"   // Validated against the schema and passes.
+		valid   = "valid"   // Validated and passes.
 		invalid = "invalid" // Validated against the schema and fails.
 	)
 
@@ -433,7 +438,7 @@ func TestDirective_LeadingCommentDocument(t *testing.T) {
 		},
 		"directive does not reach past a content document": {
 			input: "# yaml-language-server: $schema=./schema.json\n---\nb: 2\n---\nc: 3\n",
-			want:  []string{skip, valid, skip},
+			want:  []string{skip, valid, valid},
 		},
 		"directive reaches across a comment-only document": {
 			input: "# yaml-language-server: $schema=./schema.json\n---\n# note\n---\nc: 3\n",
@@ -445,7 +450,7 @@ func TestDirective_LeadingCommentDocument(t *testing.T) {
 		},
 		"comment-only document without a directive": {
 			input: "# note\n---\nc: 3\n",
-			want:  []string{skip, skip},
+			want:  []string{skip, valid},
 		},
 		"comment-only file": {
 			input: "# yaml-language-server: $schema=./schema.json\n",
@@ -474,7 +479,10 @@ func TestDirective_LeadingCommentDocument(t *testing.T) {
 			require.Len(t, docs, len(tc.want))
 
 			reg := schema.NewRegistry()
-			reg.Register(schema.Directive())
+			reg.Register(
+				schema.Directive(),
+				schema.Embedded("example.com/obj.json", []byte(`{"type": "object"}`)),
+			)
 
 			for i, doc := range docs {
 				err := reg.Validate(t.Context(), doc)

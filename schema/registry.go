@@ -112,9 +112,20 @@ func (r *Registry) Register(res ...Resolver) {
 // ctx ends before the schema loads, Lookup returns [ErrLoad] wrapping the
 // context's error without waiting for the load to finish.
 //
+// A document holding nothing but comments and %YAML or %TAG directives,
+// which the parser splits off from the content below the next "---", is
+// [ErrNoMatch] before any resolver runs. An explicitly empty document
+// counts as content, since it is the null document a schema may validate.
+//
 // For most use cases, prefer [Validate] which combines lookup and
 // validation. Use Lookup when you need the validator for custom processing.
 func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.Document) (*Validator, error) {
+	// No resolver sees a content-free document, so a resolver registered
+	// after one that declines cannot resurrect it.
+	if !hasContent(doc) {
+		return nil, fmt.Errorf("%w: %q: document has no content", ErrNoMatch, doc.FilePath())
+	}
+
 	r.mu.RLock()
 
 	resolvers := r.resolvers
