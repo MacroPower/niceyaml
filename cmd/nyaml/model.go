@@ -279,31 +279,7 @@ func (m *model) titleLine() string {
 	// Diff stats for OK/Error segments.
 	added, removed := m.viewport.DiffStats()
 
-	// Build revision info text.
-	revisionInfo := ""
-	if m.viewport.RevisionCount() > 1 {
-		idx := m.viewport.RevisionIndex()
-		count := m.viewport.RevisionCount()
-
-		switch {
-		case m.viewport.IsShowingDiff():
-			modeIndicator := ""
-			if m.viewport.DiffMode() == yamlviewport.DiffModeOrigin {
-				modeIndicator = " origin"
-			}
-
-			revisionInfo = fmt.Sprintf("diff %d/%d%s", idx, count, modeIndicator)
-
-		case m.viewport.DiffMode() == yamlviewport.DiffModeNone && idx > 0 && idx < count:
-			revisionInfo = fmt.Sprintf("rev %d/%d none", idx+1, count)
-
-		case m.viewport.IsAtLatestRevision():
-			revisionInfo = fmt.Sprintf("rev %d/%d", count, count)
-
-		default:
-			revisionInfo = fmt.Sprintf("rev %d/%d", idx+1, count)
-		}
-	}
+	revisionInfo := m.revisionLabel()
 
 	var titleText string
 
@@ -372,6 +348,33 @@ func (m *model) titleLine() string {
 	sb.WriteString(powerlineSep(lastStyle, textStyle))
 
 	return sb.String()
+}
+
+// revisionLabel returns the revision position for the title line, numbered
+// 1-based, or an empty string when the viewport holds at most one revision.
+func (m *model) revisionLabel() string {
+	count := m.viewport.RevisionCount()
+	if count <= 1 {
+		return ""
+	}
+
+	rev := m.viewport.RevisionIndex() + 1
+
+	switch {
+	case m.viewport.IsShowingDiff():
+		modeIndicator := ""
+		if m.viewport.DiffMode() == yamlviewport.DiffModeOrigin {
+			modeIndicator = " origin"
+		}
+
+		return fmt.Sprintf("diff %d/%d%s", rev, count, modeIndicator)
+
+	case m.viewport.DiffMode() == yamlviewport.DiffModeNone && rev > 1:
+		return fmt.Sprintf("rev %d/%d none", rev, count)
+
+	default:
+		return fmt.Sprintf("rev %d/%d", rev, count)
+	}
 }
 
 func (m *model) diffModeLabel() string {
