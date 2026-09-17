@@ -169,6 +169,27 @@ func TestPath_Build(t *testing.T) {
 	}
 }
 
+func TestPath_Index_Negative(t *testing.T) {
+	t.Parallel()
+
+	// A negative index has no meaning of its own, so every rendering of the
+	// path agrees on element 0.
+	negative := paths.Root().Child("items").Index(-1).Value()
+	zero := paths.Root().Child("items").Index(0).Value()
+
+	assert.Equal(t, zero, negative)
+	assert.Equal(t, "$.items[0]", negative.String())
+	assert.Equal(t, "$.items[0]", negative.YAMLPath().String())
+
+	source := niceyaml.NewSourceFromString("items: [a, b]\n")
+	file, err := source.File()
+	require.NoError(t, err)
+
+	tk, err := negative.Token(file.Docs[0])
+	require.NoError(t, err)
+	assert.Equal(t, "a", tk.Value)
+}
+
 func TestPath_Immutable(t *testing.T) {
 	t.Parallel()
 
@@ -1080,7 +1101,6 @@ func TestPath_Token_NotFound(t *testing.T) {
 		"index of mapping":         paths.Root().Index(0).Value(),
 		"index of scalar":          paths.Root().Child("name").Index(0).Value(),
 		"index out of range":       paths.Root().Child("items").Index(2).Value(),
-		"negative index":           paths.Root().Child("items").Index(-1).Value(),
 		"child of sequence":        paths.Root().Child("items", "a").Value(),
 		"missing key then index":   paths.Root().Child("nope").Index(0).Value(),
 		"missing key then child":   paths.Root().Child("nope", "deeper").Key(),

@@ -176,7 +176,7 @@ func (r *resolver) apply(seg segment, node ast.Node) ([]match, error) {
 
 	case segmentIndex:
 		seq, ok := content.(*ast.SequenceNode)
-		if !ok || seg.index < 0 || seg.index >= len(seq.Values) {
+		if !ok || seg.index >= len(seq.Values) {
 			return nil, nil
 		}
 

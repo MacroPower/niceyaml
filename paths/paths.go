@@ -161,11 +161,12 @@ func (p Path) Child(name ...string) Path {
 }
 
 // Index returns a copy of the path with an `[idx]` selector appended for
-// each index.
+// each index. An index below zero selects element 0, so Index(-1) is the
+// same path as Index(0).
 func (p Path) Index(idx ...int) Path {
 	segs := make([]segment, 0, len(idx))
 	for _, i := range idx {
-		segs = append(segs, segment{kind: segmentIndex, index: i})
+		segs = append(segs, segment{kind: segmentIndex, index: max(i, 0)})
 	}
 
 	return p.extend(segs...)
@@ -238,7 +239,7 @@ func (p Path) YAMLPath() *yaml.Path {
 			// match its key.
 			pb = pb.Child(seg.name)
 		case segmentIndex:
-			pb = pb.Index(uint(max(seg.index, 0))) //nolint:gosec // Clamped to non-negative.
+			pb = pb.Index(uint(seg.index)) //nolint:gosec // Index and Parse never store a negative.
 		case segmentIndexAll:
 			pb = pb.IndexAll()
 		case segmentRecursive:
