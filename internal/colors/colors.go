@@ -22,7 +22,9 @@ func Override(base, overlay color.Color) color.Color {
 	return base
 }
 
-// Blend blends two colors using LAB color space (50/50 mix).
+// Blend blends two colors using LAB color space (50/50 mix) and clamps the
+// result to the sRGB gamut, so every channel of the returned color lies in
+// [0, 1] and renders as a valid SGR sequence.
 // If both colors are nil or [lipgloss.NoColor], it returns nil.
 // If one color is nil, [lipgloss.NoColor], or invisible, it returns the other.
 func Blend(c1, c2 color.Color) color.Color {
@@ -54,7 +56,7 @@ func Blend(c1, c2 color.Color) color.Color {
 		return c1
 	}
 
-	return cf1.BlendLab(cf2, 0.5)
+	return cf1.BlendLab(cf2, 0.5).Clamped()
 }
 
 // BlendStyles blends two [lipgloss.Style] values: colors via LAB blending,

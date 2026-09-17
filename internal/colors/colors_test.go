@@ -139,6 +139,47 @@ func TestBlend(t *testing.T) {
 	}
 }
 
+func TestBlend_InGamut(t *testing.T) {
+	t.Parallel()
+
+	// The LAB midpoint of two in-gamut colors can leave the sRGB gamut, and
+	// a negative channel wraps to a huge uint32 in RGBA, which lipgloss then
+	// prints as an invalid SGR sequence. Blend clamps every channel.
+	tcs := map[string]struct {
+		c1 color.Color
+		c2 color.Color
+	}{
+		"red and blue": {
+			c1: color.RGBA{R: 255, G: 0, B: 0, A: 255},
+			c2: color.RGBA{R: 0, G: 0, B: 255, A: 255},
+		},
+		"green and magenta": {
+			c1: color.RGBA{R: 0, G: 255, B: 0, A: 255},
+			c2: color.RGBA{R: 255, G: 0, B: 255, A: 255},
+		},
+		"yellow and blue": {
+			c1: color.RGBA{R: 255, G: 255, B: 0, A: 255},
+			c2: color.RGBA{R: 0, G: 0, B: 255, A: 255},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := colors.Blend(tc.c1, tc.c2)
+
+			r, g, b, a := got.RGBA()
+			for _, ch := range []uint32{r, g, b, a} {
+				assert.LessOrEqual(t, ch, uint32(0xffff))
+			}
+
+			rendered := lipgloss.NewStyle().Foreground(got).Render("x")
+			assert.Regexp(t, `^\x1b\[38;2;\d{1,3};\d{1,3};\d{1,3}mx`, rendered)
+		})
+	}
+}
+
 func TestBlendStyles(t *testing.T) {
 	t.Parallel()
 
