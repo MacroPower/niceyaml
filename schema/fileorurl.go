@@ -76,14 +76,39 @@ func hasScheme(ref, scheme string) bool {
 	return len(ref) >= len(prefix) && strings.EqualFold(ref[:len(prefix)], prefix)
 }
 
-// fileURLPath returns the local path a file:// URL names. A URL that does
-// not parse, names a host other than localhost, or names no path comes back
-// unchanged, so resolving or reading the reference reports it.
+// fileURLPath returns the local path a file:// URL names, in the native
+// separator of the platform. A URL that does not parse, names a host other
+// than localhost, or names no path comes back unchanged, so resolving or
+// reading the reference reports it.
+//
+// A Windows path carries its drive letter behind the leading slash of the
+// URL path, as in file:///C:/schemas/config.json, which is the form
+// [File] names such a path by. The function drops that slash so the
+// result is the absolute path C:\schemas\config.json rather than the
+// relative path \C:\schemas\config.json.
 func fileURLPath(ref string) string {
 	u, err := url.Parse(ref)
 	if err != nil || u.Path == "" || (u.Host != "" && !strings.EqualFold(u.Host, "localhost")) {
 		return ref
 	}
 
-	return u.Path
+	return filepath.FromSlash(trimDriveSlash(u.Path))
+}
+
+// trimDriveSlash drops the leading slash of a URL path whose first segment
+// is a Windows drive letter, so "/C:/schemas" becomes "C:/schemas". Any
+// other path comes back unchanged.
+func trimDriveSlash(p string) string {
+	const driveLen = 3 // A slash, a letter, and a colon.
+
+	if len(p) < driveLen || p[0] != '/' || p[2] != ':' {
+		return p
+	}
+
+	letter := p[1]
+	if (letter < 'a' || letter > 'z') && (letter < 'A' || letter > 'Z') {
+		return p
+	}
+
+	return p[1:]
 }

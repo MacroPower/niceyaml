@@ -206,3 +206,65 @@ func TestFileOrURL(t *testing.T) {
 		require.ErrorContains(t, err, "read /some/dir/nonexistent.json")
 	})
 }
+
+func TestFileURLPath(t *testing.T) {
+	t.Parallel()
+
+	// The result is in the platform's native separator, so a Windows-shaped
+	// URL yields C:/schemas/config.json here and C:\schemas\config.json on
+	// Windows. Either way the drive letter comes first, so filepath.IsAbs
+	// reports the path absolute on Windows.
+	tcs := map[string]struct {
+		ref  string
+		want string
+	}{
+		"unix path": {
+			ref:  "file:///srv/schemas/config.json",
+			want: filepath.FromSlash("/srv/schemas/config.json"),
+		},
+		"windows drive letter": {
+			ref:  "file:///C:/schemas/config.json",
+			want: filepath.FromSlash("C:/schemas/config.json"),
+		},
+		"windows drive letter in lower case": {
+			ref:  "file:///c:/schemas/config.json",
+			want: filepath.FromSlash("c:/schemas/config.json"),
+		},
+		"windows drive letter with localhost": {
+			ref:  "file://localhost/C:/schemas/config.json",
+			want: filepath.FromSlash("C:/schemas/config.json"),
+		},
+		"drive letter alone": {
+			ref:  "file:///C:",
+			want: "C:",
+		},
+		"colon after a digit is not a drive": {
+			ref:  "file:///1:/schemas/config.json",
+			want: filepath.FromSlash("/1:/schemas/config.json"),
+		},
+		"colon in a longer first segment is not a drive": {
+			ref:  "file:///ab:/schemas/config.json",
+			want: filepath.FromSlash("/ab:/schemas/config.json"),
+		},
+		"percent-encoded path": {
+			ref:  "file:///srv/my%20schemas/config.json",
+			want: filepath.FromSlash("/srv/my schemas/config.json"),
+		},
+		"remote host is left as written": {
+			ref:  "file://host/C:/schemas/config.json",
+			want: "file://host/C:/schemas/config.json",
+		},
+		"empty path is left as written": {
+			ref:  "file://",
+			want: "file://",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, schema.FileURLPath(tc.ref))
+		})
+	}
+}
