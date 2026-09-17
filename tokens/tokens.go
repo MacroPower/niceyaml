@@ -102,6 +102,13 @@ func cloneWithResetPositions(tks token.Tokens) token.Tokens {
 		result.Add(clone)
 	}
 
+	// Clone copies Next and Prev, and Add rewires only the links between
+	// clones, so the first and last clone still point at the un-cloned
+	// tokens of the neighboring documents. Sever those links so the
+	// document stands alone.
+	result[0].Prev = nil
+	result[len(result)-1].Next = nil
+
 	return result
 }
 

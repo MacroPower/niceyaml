@@ -624,6 +624,29 @@ func TestSplitDocuments_ResetPositions(t *testing.T) {
 		}
 	})
 
+	t.Run("severs links to neighboring documents", func(t *testing.T) {
+		t.Parallel()
+
+		orig := lexer.Tokenize("a: 1\n...\nb: 2\n")
+		docs := collectDocs(tokens.SplitDocuments(orig, tokens.WithResetPositions(true)))
+		require.Len(t, docs, 2)
+
+		first, second := docs[0], docs[1]
+
+		assert.Nil(t, first[len(first)-1].Next, "the last clone of a document has no Next")
+		assert.Nil(t, second[0].Prev, "the first clone of a document has no Prev")
+		assert.Nil(t, first[0].Prev)
+		assert.Nil(t, second[len(second)-1].Next)
+
+		// The clones still link to each other inside a document.
+		assert.Same(t, first[1], first[0].Next)
+		assert.Same(t, first[0], first[1].Prev)
+
+		// The originals keep their links across the boundary.
+		assert.Same(t, orig[4], orig[3].Next)
+		assert.Same(t, orig[3], orig[4].Prev)
+	})
+
 	t.Run("resets positions to line 1 column 1", func(t *testing.T) {
 		t.Parallel()
 
