@@ -14,6 +14,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/line"
+	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
@@ -153,6 +154,12 @@ func NewSourceFromString(src string, opts ...SourceOption) *Source {
 
 // NewSourceFromTokens creates a new [*Source] from [token.Tokens].
 // See [line.NewLines] for details on token splitting behavior.
+//
+// The tokens may be those of one document of a longer stream, as
+// [Document.Tokens] and [tokens.SplitDocuments] hand out, with the positions
+// they have in that stream. The Source then holds the lines from the first
+// token on, and its view indexes them from 0, while error messages and the
+// gutter report the line numbers of the original text.
 func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 	t := &Source{}
 	for _, opt := range opts {
@@ -360,6 +367,35 @@ func (s *Source) WrapError(err error) error {
 	}
 
 	return newSourceError(err, s)
+}
+
+// lineOffset returns the number of lines of the original text before the
+// first line the [Source] holds: 0 for a Source built from a whole file, and
+// the 0-indexed line of the first token for one built from the tokens of a
+// later document. Token positions count lines in the original text, and the
+// view indexes them from 0, so the offset converts between the two.
+func (s *Source) lineOffset() int {
+	if len(s.lines) == 0 {
+		return 0
+	}
+
+	return max(0, s.lines[0].Number()-1)
+}
+
+// viewPosition returns the position of tk in the view of the [Source],
+// whose lines are indexed from 0 at the first line the Source holds.
+func (s *Source) viewPosition(tk *token.Token) position.Position {
+	pos := position.NewFromToken(tk)
+	pos.Line -= s.lineOffset()
+
+	return pos
+}
+
+// textPosition returns pos, a position in the view of the [Source], as a
+// position in the original text, whose line numbers the gutter shows and
+// messages report.
+func (s *Source) textPosition(pos position.Position) position.Position {
+	return position.New(pos.Line+s.lineOffset(), pos.Col)
 }
 
 // Lines returns a [line.Lines] view of the [Source].
