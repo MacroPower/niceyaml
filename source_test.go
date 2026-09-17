@@ -697,7 +697,7 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 
 		_, err := bound.Detail()
 		require.ErrorIs(t, err, niceyaml.ErrOutOfRange)
-		assert.Equal(t, "location outside source: line 1 of 4", err.Error())
+		assert.Equal(t, "location outside source: line 1 not in lines 2-5", err.Error())
 	})
 }
 

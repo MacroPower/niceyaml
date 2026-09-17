@@ -932,15 +932,23 @@ func (e *SourceError) collectPositions(a *Error, doc int, view line.Lines) ([]er
 
 // checkInRange reports [ErrOutOfRange] when loc starts on a line view does
 // not hold: one past its last line, or one before its first. The message
-// names the line as the original text counts it.
+// names the line and the lines the view holds as the original text counts
+// them, so both read on one scale for a source built from a later
+// document.
 func (e *SourceError) checkInRange(loc location, view line.Lines) error {
-	if loc.pos.Line < 0 || loc.pos.Line >= view.Len() {
-		textLine := e.source.textPosition(loc.pos).Line + 1
-
-		return fmt.Errorf("%w: line %d of %d", ErrOutOfRange, textLine, view.Len())
+	if loc.pos.Line >= 0 && loc.pos.Line < view.Len() {
+		return nil
 	}
 
-	return nil
+	textLine := e.source.textPosition(loc.pos).Line + 1
+	if view.Len() == 0 {
+		return fmt.Errorf("%w: line %d of an empty source", ErrOutOfRange, textLine)
+	}
+
+	first := e.source.textPosition(position.New(0, 0)).Line + 1
+	last := e.source.textPosition(position.New(view.Len()-1, 0)).Line + 1
+
+	return fmt.Errorf("%w: line %d not in lines %d-%d", ErrOutOfRange, textLine, first, last)
 }
 
 // highlightRanges returns the ranges to highlight for loc: the range itself
