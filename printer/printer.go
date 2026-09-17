@@ -708,7 +708,8 @@ func (p *Printer) renderAnnotation(
 	// The indent stays out of the wrapped text and comes back on every
 	// row: the first row keeps it as rendered and continuation rows get
 	// the same width in spaces, so the annotation column survives the
-	// wrap and no row exceeds the width.
+	// wrap. An annotation column past the width wins over the width, and
+	// its rows then run wider, since the body still gets one column.
 	indent, body := splitAnnotationIndent(content, placement)
 	indentWidth := lipgloss.Width(indent)
 	subLines := p.wrapContent(body, gutterWidth+indentWidth)
