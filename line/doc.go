@@ -58,7 +58,7 @@
 // Position-based token lookup uses [position.Position] values:
 //
 //	tk := lines.TokenAt(position.New(2, 4))  // Line 2, column 4.
-//	ranges := lines.TokenRanges(tk)          // Every line the token occupies.
+//	ranges := lines.TokenRanges(tk)          // Every line with runes of the token.
 //	content := lines.ContentRanges(tk)       // The same without surrounding spaces.
 //
 // [Lines.Tokens] reverses the split. Tokens that were cut across lines

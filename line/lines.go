@@ -225,7 +225,9 @@ func (ls Lines) TokenAt(pos position.Position) *token.Token {
 	return ls[pos.Line].TokenAt(pos.Col)
 }
 
-// TokenRanges returns the ranges tk occupies, one per line it appears on.
+// TokenRanges returns the ranges tk occupies, one per line where it holds
+// visible runes. A line where tk holds only a line ending, such as a blank
+// line kept by a block scalar, contributes no range.
 //
 // The token may be a lexer token, as returned by [Lines.TokenAt] or
 // [Lines.Tokens], or one of the per-line parts from [Line.Tokens].
