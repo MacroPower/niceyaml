@@ -108,6 +108,18 @@ func TestPattern_Match(t *testing.T) {
 			path:    "deep/path/config.yaml",
 			want:    false,
 		},
+		"brace in a class matches a single segment": {
+			pattern: "[^a{]b",
+			path:    "xb",
+			want:    true,
+		},
+		"brace in a class matches no multi-segment path": {
+			// The pattern validates, but doublestar cannot interpret it
+			// against a path with a separator, and that reads as no match.
+			pattern: "[^a{]b",
+			path:    "a/b",
+			want:    false,
+		},
 		"wildcard in root with dot slash prefix": {
 			pattern: "*.yaml",
 			path:    "./config.yaml",
