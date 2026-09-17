@@ -1340,14 +1340,20 @@ func (m *Model) PageUp() {
 	m.ScrollUp(m.maxHeight())
 }
 
-// HalfPageDown moves the view down by half a page.
+// HalfPageDown moves the view down by half a page, and by one row when half
+// a page rounds down to none.
 func (m *Model) HalfPageDown() {
-	m.ScrollDown(m.maxHeight() / 2)
+	if h := m.maxHeight(); h > 0 {
+		m.ScrollDown(max(1, h/2))
+	}
 }
 
-// HalfPageUp moves the view up by half a page.
+// HalfPageUp moves the view up by half a page, and by one row when half a
+// page rounds down to none.
 func (m *Model) HalfPageUp() {
-	m.ScrollUp(m.maxHeight() / 2)
+	if h := m.maxHeight(); h > 0 {
+		m.ScrollUp(max(1, h/2))
+	}
 }
 
 // ScrollLeft moves the viewport left by n columns.

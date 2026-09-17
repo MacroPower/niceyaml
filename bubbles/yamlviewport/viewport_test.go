@@ -3359,6 +3359,23 @@ func TestViewport_ScrollEdgeCases(t *testing.T) {
 		m.ScrollUp(1)
 		assert.Equal(t, 0, m.YOffset())
 	})
+
+	t.Run("half page at one row of content scrolls one row", func(t *testing.T) {
+		t.Parallel()
+
+		m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+		m.SetWidth(80)
+		m.SetHeight(1)
+		m.SetSource(niceyaml.NewSourceFromString(
+			"line1: v\nline2: v\nline3: v\nline4: v\nline5: v\n",
+		))
+
+		m.HalfPageDown()
+		assert.Equal(t, 1, m.YOffset())
+
+		m.HalfPageUp()
+		assert.Equal(t, 0, m.YOffset())
+	})
 }
 
 func TestViewport_RevisionStateEdgeCases(t *testing.T) {
