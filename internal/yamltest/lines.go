@@ -16,6 +16,8 @@ var (
 	ErrLineNumberMismatch = errors.New("token line number differs from expected")
 	// ErrColumnNotIncreasing indicates a column is not greater than the previous.
 	ErrColumnNotIncreasing = errors.New("column not greater than previous")
+	// ErrNilLine indicates a nil line in the collection.
+	ErrNilLine = errors.New("line is nil")
 )
 
 // ValidateLines checks the integrity of ls.
@@ -25,16 +27,29 @@ var (
 //   - Every token on a given line has an identical line number in its Position
 //   - Every token on a given line has columns that are strictly increasing
 //
-// Returns an error wrapping [ErrLineNumberNotIncreasing],
+// A line with no tokens is a placeholder and its number is not checked.
+//
+// Returns an error wrapping [ErrNilLine], [ErrLineNumberNotIncreasing],
 // [ErrLineNumberMismatch], or [ErrColumnNotIncreasing] for the first check
 // that fails.
 func ValidateLines(ls line.Lines) error {
 	prevLineNum := 0
 
 	for i, l := range ls {
+		if l == nil {
+			return fmt.Errorf("line at index %d: %w", i, ErrNilLine)
+		}
+
+		// A line with no tokens is a placeholder, such as the blank row a
+		// side-by-side diff inserts, and carries no number to check. Every
+		// other line must number above the one before it.
+		if len(l.Tokens()) == 0 {
+			continue
+		}
+
 		// Check: line numbers strictly increasing.
 		lineNum := l.Number()
-		if lineNum != 0 && lineNum <= prevLineNum {
+		if lineNum <= prevLineNum {
 			return fmt.Errorf(
 				"line at index %d: line number %d not greater than previous %d: %w",
 				i,
@@ -44,9 +59,7 @@ func ValidateLines(ls line.Lines) error {
 			)
 		}
 
-		if lineNum != 0 {
-			prevLineNum = lineNum
-		}
+		prevLineNum = lineNum
 
 		// Check: all tokens have identical line number and columns are strictly increasing.
 		var (

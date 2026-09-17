@@ -98,6 +98,34 @@ func TestLines_Validate(t *testing.T) {
 		assert.Equal(t, 11, lines[1].Number())
 	})
 
+	t.Run("nil line", func(t *testing.T) {
+		t.Parallel()
+
+		err := yamltest.ValidateLines(line.Lines{nil})
+		require.ErrorIs(t, err, yamltest.ErrNilLine)
+	})
+
+	t.Run("placeholder lines carry no number", func(t *testing.T) {
+		t.Parallel()
+
+		// A side-by-side diff inserts zero-value lines opposite inserted
+		// and deleted lines, and they hold no tokens to number.
+		require.NoError(t, yamltest.ValidateLines(line.Lines{&line.Line{}, &line.Line{}}))
+	})
+
+	t.Run("line with tokens and no number", func(t *testing.T) {
+		t.Parallel()
+
+		tks := token.Tokens{}
+		tks.Add(strTkb.Clone().Origin("first\n").Value("first").PositionLine(0).PositionColumn(1).Build())
+
+		lines := line.NewLines(tks)
+		require.Len(t, lines, 1)
+
+		err := yamltest.ValidateLines(lines)
+		require.ErrorIs(t, err, yamltest.ErrLineNumberNotIncreasing)
+	})
+
 	t.Run("columns not increasing - same", func(t *testing.T) {
 		t.Parallel()
 
