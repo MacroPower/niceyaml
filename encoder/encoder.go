@@ -28,7 +28,7 @@ type Encoder struct {
 // Available options:
 //   - [WithIndent]
 //   - [WithIndentSequence]
-//   - [WithYAMLEncodeOptions]
+//   - [WithYAMLOptions]
 type Option func(*config)
 
 // config collects the go-yaml options that build an [Encoder].
@@ -52,10 +52,10 @@ func WithIndentSequence(indent bool) Option {
 	}
 }
 
-// WithYAMLEncodeOptions is an [Option] that passes [yaml.EncodeOption]
+// WithYAMLOptions is an [Option] that passes [yaml.EncodeOption]
 // values straight to the underlying [*yaml.Encoder]. It is the escape hatch
 // for encoder settings that have no option of their own.
-func WithYAMLEncodeOptions(opts ...yaml.EncodeOption) Option {
+func WithYAMLOptions(opts ...yaml.EncodeOption) Option {
 	return func(c *config) {
 		c.opts = append(c.opts, opts...)
 	}

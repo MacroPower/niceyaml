@@ -118,7 +118,7 @@ func TestPretty(t *testing.T) {
 	assert.Equal(t, want, got)
 }
 
-func TestWithYAMLEncodeOptions(t *testing.T) {
+func TestWithYAMLOptions(t *testing.T) {
 	t.Parallel()
 
 	type config struct {
@@ -127,7 +127,7 @@ func TestWithYAMLEncodeOptions(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	enc := encoder.New(&buf, encoder.WithYAMLEncodeOptions(yaml.Flow(true)))
+	enc := encoder.New(&buf, encoder.WithYAMLOptions(yaml.Flow(true)))
 
 	require.NoError(t, enc.Encode(config{Items: []string{"one", "two"}}))
 	assert.Equal(t, "{items: [one, two]}\n", buf.String())

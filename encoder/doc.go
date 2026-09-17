@@ -10,7 +10,7 @@
 //	}
 //
 // [Pretty] returns the options for two-space indentation with indented
-// sequences, which is the layout prettier produces. [WithYAMLEncodeOptions]
+// sequences, which is the layout prettier produces. [WithYAMLOptions]
 // passes go-yaml options through for settings that have no option of their
 // own.
 package encoder

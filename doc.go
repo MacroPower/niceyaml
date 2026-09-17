@@ -194,7 +194,7 @@
 // Every go-yaml setting has a named option, such as [WithAllowDuplicateKeys]
 // or [go.jacobcolvin.com/niceyaml/encoder.WithIndent]. The options that pass
 // go-yaml values through carry a YAML prefix, as in [WithYAMLDecodeOptions]
-// and [go.jacobcolvin.com/niceyaml/encoder.WithYAMLEncodeOptions], so a
+// and [go.jacobcolvin.com/niceyaml/encoder.WithYAMLOptions], so a
 // caller can tell at the call site when the go-yaml dependency shows. A test
 // in this package enforces both rules on every exported declaration.
 //
