@@ -793,7 +793,9 @@ func computeStyleBoundaries(active line.Overlays, cols position.Span) []int {
 // blendKey returns the cache key of the effective style at point: the base
 // category followed by each overlay that covers the point, in order, marked
 // by whether it blends with or replaces the style underneath. Two points
-// with the same key render with the same style.
+// with the same key render with the same style. Each name is quoted, so
+// a name that contains a marker cannot collide with a different overlay
+// sequence.
 func blendKey(base style.Style, overlays line.Overlays, point int) string {
 	var sb strings.Builder
 
@@ -803,7 +805,7 @@ func blendKey(base style.Style, overlays line.Overlays, point int) string {
 		}
 
 		if sb.Len() == 0 {
-			sb.WriteString(string(base))
+			sb.WriteString(strconv.Quote(string(base)))
 		}
 
 		if ov.Blend {
@@ -812,12 +814,12 @@ func blendKey(base style.Style, overlays line.Overlays, point int) string {
 			sb.WriteString("!")
 		}
 
-		sb.WriteString(string(ov.Style))
+		sb.WriteString(strconv.Quote(string(ov.Style)))
 	}
 
 	// A point no overlay covers keeps the base style, with no key to build.
 	if sb.Len() == 0 {
-		return string(base)
+		return strconv.Quote(string(base))
 	}
 
 	return sb.String()

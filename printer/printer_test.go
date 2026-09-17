@@ -3152,6 +3152,48 @@ func TestPrinter_LineNumbers_Placeholder(t *testing.T) {
 	), p.Print(diff.Diff(before, after).Before()))
 }
 
+func TestPrinter_BlendKey_StyleNames(t *testing.T) {
+	t.Parallel()
+
+	// A style named "a!b" must not share a cache entry with the sequence
+	// "blend a, then replace with b", which the key separators once spelled
+	// the same way.
+	const (
+		ab style.Style = "a!b"
+		a  style.Style = "a"
+		b  style.Style = "b"
+	)
+
+	wrap := func(tag string) lipgloss.Style {
+		return lipgloss.NewStyle().Transform(func(s string) string {
+			return "<" + tag + ">" + s + "</" + tag + ">"
+		})
+	}
+
+	view := niceyaml.NewSourceFromString("k: 1\nk: 2").Lines()
+	view[0].AddOverlay(line.Overlay{Style: ab, Cols: position.NewSpan(0, 4), Blend: true})
+	view[1].AddOverlay(
+		line.Overlay{Style: a, Cols: position.NewSpan(0, 4), Blend: true},
+		line.Overlay{Style: b, Cols: position.NewSpan(0, 4)},
+	)
+
+	p := printer.New(
+		printer.WithStyles(style.NewStyles(
+			lipgloss.NewStyle(),
+			style.Set(ab, wrap("AB")),
+			style.Set(a, wrap("A")),
+			style.Set(b, wrap("B")),
+		)),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+		printer.WithGutter(printer.NoGutter),
+	)
+
+	assert.Equal(t, stringtest.JoinLF(
+		"<AB>k</AB><AB>:</AB><AB> </AB><AB>1</AB>",
+		"<B>k</B><B>:</B><B> </B><B>2</B>",
+	), p.Print(view))
+}
+
 func TestPrinter_WithGutter_Nil(t *testing.T) {
 	t.Parallel()
 
