@@ -78,7 +78,9 @@ type Source struct {
 // are [DecodeOption] values passed to [Document.Decode].
 type SourceOption func(*Source)
 
-// WithName is a [SourceOption] that sets the name for the [Source].
+// WithName is a [SourceOption] that sets the name for the [Source], which
+// labels it in output such as diff headers. Without it, [Source.Name]
+// returns the file path.
 func WithName(name string) SourceOption {
 	return func(s *Source) {
 		s.name = name
@@ -122,7 +124,8 @@ func WithYAMLParserOptions(opts ...parser.Option) SourceOption {
 // NewSourceFromFile creates a new [*Source] by reading a file from disk.
 //
 // The file path is automatically set on the [Source], enabling [Documents] to
-// propagate it to [Document] instances for schema routing.
+// propagate it to [Document] instances for schema routing, and
+// [Source.Name] returns it unless [WithName] sets a name.
 //
 // Returns an error if the file cannot be read.
 func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
@@ -132,7 +135,7 @@ func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
 	}
 
 	// Prepend file path option so user options can override if needed.
-	opts = append([]SourceOption{WithFilePath(path), WithName(path)}, opts...)
+	opts = append([]SourceOption{WithFilePath(path)}, opts...)
 
 	return NewSourceFromString(string(data), opts...), nil
 }
@@ -168,8 +171,14 @@ func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 	return t
 }
 
-// Name returns the name of the [Source].
+// Name returns the name of the [Source]: the one [WithName] set, or the
+// file path when none was set. Returns an empty string when the Source has
+// neither.
 func (s *Source) Name() string {
+	if s.name == "" {
+		return s.filePath
+	}
+
 	return s.name
 }
 

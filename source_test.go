@@ -856,8 +856,9 @@ func TestSource_Name(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		name string
-		want string
+		name     string
+		filePath string
+		want     string
 	}{
 		"with name": {
 			name: "test.yaml",
@@ -871,13 +872,25 @@ func TestSource_Name(t *testing.T) {
 			name: "/path/to/file.yaml",
 			want: "/path/to/file.yaml",
 		},
+		"file path without name": {
+			filePath: "/path/to/file.yaml",
+			want:     "/path/to/file.yaml",
+		},
+		"name wins over file path": {
+			name:     "custom",
+			filePath: "/path/to/file.yaml",
+			want:     "custom",
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			source := niceyaml.NewSourceFromString("key: value", niceyaml.WithName(tc.name))
+			source := niceyaml.NewSourceFromString("key: value",
+				niceyaml.WithName(tc.name),
+				niceyaml.WithFilePath(tc.filePath),
+			)
 			got := source.Name()
 
 			assert.Equal(t, tc.want, got)
