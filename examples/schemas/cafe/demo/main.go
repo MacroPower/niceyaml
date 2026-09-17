@@ -45,7 +45,7 @@ func load(in string) (*cafe.Config, error) {
 	var cfg cafe.Config
 
 	for _, doc := range docs.All() {
-		cfg, err = doc.Decode[cafe.Config](context.Background(), niceyaml.WithSchemaValidator(cafe.Schema))
+		cfg, err = doc.Decode[cafe.Config](context.Background(), niceyaml.WithValidator(cafe.Schema))
 		if err != nil {
 			return nil, err
 		}

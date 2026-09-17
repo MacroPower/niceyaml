@@ -819,7 +819,7 @@ func TestRegistry_DocumentValidator(t *testing.T) {
 			replicas: 3
 		`))
 
-		got, err := doc.Decode[deployment](t.Context(), niceyaml.WithDocumentValidator(reg))
+		got, err := doc.Decode[deployment](t.Context(), niceyaml.WithValidator(reg))
 		require.NoError(t, err)
 		assert.Equal(t, deployment{Kind: "Deployment", Replicas: 3}, got)
 	})
@@ -832,7 +832,7 @@ func TestRegistry_DocumentValidator(t *testing.T) {
 			replicas: many
 		`))
 
-		_, err := doc.Decode[deployment](t.Context(), niceyaml.WithDocumentValidator(reg))
+		_, err := doc.Decode[deployment](t.Context(), niceyaml.WithValidator(reg))
 		require.Error(t, err)
 
 		var validationErr *niceyaml.Error
@@ -849,7 +849,7 @@ func TestRegistry_DocumentValidator(t *testing.T) {
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
 
-		_, err := doc.Decode[deployment](t.Context(), niceyaml.WithDocumentValidator(reg))
+		_, err := doc.Decode[deployment](t.Context(), niceyaml.WithValidator(reg))
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 	})
 }

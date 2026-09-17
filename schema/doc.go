@@ -32,17 +32,18 @@
 // Compile a schema with [go.jacobcolvin.com/x/jsonschema.CompileJSON] (or
 // [go.jacobcolvin.com/x/jsonschema.MustCompileJSON] for embedded schemas) and
 // wrap it with [NewValidator] to obtain a [*Validator], a
-// [go.jacobcolvin.com/niceyaml.SchemaValidator] that reports failures as errors
-// carrying YAML path information for integration with niceyaml's error display:
+// [go.jacobcolvin.com/niceyaml.DocumentValidator] that reports failures as
+// errors carrying YAML path information for integration with niceyaml's error
+// display:
 //
 //	v := schema.NewValidator(jsonschema.MustCompileJSON(schemaBytes))
-//	if err := doc.ValidateSchema(ctx, v); err != nil {
+//	if err := doc.Validate(ctx, v); err != nil {
 //	    // err is a *niceyaml.SourceError; %+v prints the failing lines.
 //	}
 //
 // To validate and decode in one step, pass the validator to
 // [go.jacobcolvin.com/niceyaml.Document.Decode] with
-// [go.jacobcolvin.com/niceyaml.WithSchemaValidator].
+// [go.jacobcolvin.com/niceyaml.WithValidator].
 //
 // # Resolution
 //

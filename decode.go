@@ -26,40 +26,62 @@ type Validator interface {
 	Validate() error
 }
 
-// SchemaValidator is implemented by types that validate arbitrary data against
-// a schema.
-//
-// Pass one to [Document.Decode] with [WithSchemaValidator], and it decodes the
-// document to [any] and calls ValidateSchema before decoding to the typed
-// struct. [Document.ValidateSchema] runs one on its own. The
-// context carries cancellation and deadlines to validators doing cancellable
-// work, such as remote schema reference resolution.
-//
-// See [go.jacobcolvin.com/niceyaml/schema.NewValidator] for an
-// implementation.
-type SchemaValidator interface {
-	ValidateSchema(ctx context.Context, data any) error
-}
-
 // DocumentValidator is implemented by types that validate a whole
-// [*Document], such as a schema registry that picks the schema from the
-// document's content or file path.
+// [*Document] before it decodes, such as a JSON schema or a schema registry
+// that picks the schema from the document's content or file path.
 //
-// Pass one to [Document.Decode] with [WithDocumentValidator], and it runs
-// before decoding, after the schemas from [WithSchemaValidator]. The
-// document is the whole document even for [Document.Get], since a validator
-// that routes on the document has no meaning for one value inside it.
+// Pass one to [Document.Decode] with [WithValidator], or run one on its own
+// with [Document.Validate]. The document is the whole document even for
+// [Document.Get], since a validator that routes on the document has no
+// meaning for one value inside it. A validator that checks the decoded data
+// decodes the document itself, and the context carries cancellation and
+// deadlines to validators doing cancellable work, such as remote schema
+// reference resolution:
+//
+//	func (v *Validator) Validate(ctx context.Context, doc *niceyaml.Document) error {
+//		data, err := doc.Decode[any](ctx)
+//		if err != nil {
+//			return err
+//		}
+//
+//		return v.check(ctx, data)
+//	}
 //
 // A validator that knows a location returns an unbound [*Error], and the
 // Document binds it to the source with the document's index, so its path
 // resolves in the right document. A validator that binds an error itself
+// through [Document.WrapError] gets the same index, and one that binds
 // through [Source.WrapError] sets [WithDocumentIndex] first, since the
 // Document leaves a bound error as it is.
 //
-// See [go.jacobcolvin.com/niceyaml/schema/registry.Registry] for an
-// implementation.
+// See [DocumentValidatorFunc], [go.jacobcolvin.com/niceyaml/schema.Validator],
+// and [go.jacobcolvin.com/niceyaml/schema/registry.Registry] for
+// implementations.
 type DocumentValidator interface {
 	Validate(ctx context.Context, doc *Document) error
+}
+
+// DocumentValidatorFunc adapts a function to the [DocumentValidator]
+// interface.
+//
+//	kindPath := paths.Root().Child("kind")
+//	known := niceyaml.DocumentValidatorFunc(func(_ context.Context, doc *niceyaml.Document) error {
+//		kind, err := doc.GetValue(kindPath)
+//		if err != nil {
+//			return err
+//		}
+//
+//		if kind != "Deployment" {
+//			return niceyaml.NewError("unknown kind", niceyaml.WithPath(kindPath.Value()))
+//		}
+//
+//		return nil
+//	})
+type DocumentValidatorFunc func(ctx context.Context, doc *Document) error
+
+// Validate implements [DocumentValidator].
+func (f DocumentValidatorFunc) Validate(ctx context.Context, doc *Document) error {
+	return f(ctx, doc)
 }
 
 // Documents is the sequence of YAML documents in a [*Source].
@@ -194,13 +216,13 @@ func (d *Documents) All() iter.Seq2[int, *Document] {
 // [Document.Decode] returns a new value and
 // [Document.DecodeInto] fills one the caller already holds, such as
 // one pre-populated with defaults. Both run the same pipeline: each
-// [SchemaValidator] given with [WithSchemaValidator] and each
-// [DocumentValidator] given with [WithDocumentValidator] checks the document
-// before decoding, and a value that implements [Validator] validates itself
-// after, unless [WithSelfValidation] switches that off.
+// [DocumentValidator] given with [WithValidator] checks the document before
+// decoding, and a value that implements [Validator] validates itself after,
+// unless [WithSelfValidation] switches that off. [Document.Validate] runs
+// the first step on its own.
 //
 //	for _, doc := range docs.All() {
-//		config, err := doc.Decode[Config](ctx, niceyaml.WithSchemaValidator(validator))
+//		config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(validator))
 //		if err != nil {
 //			return err
 //		}
@@ -276,11 +298,10 @@ func (dd *Document) FilePath() string {
 // comes back bound to the source as a [SourceError].
 //
 // The opts run the pipeline of [Document.DecodeInto] on the value at
-// path rather than on the whole document: each [SchemaValidator] from
-// [WithSchemaValidator] checks the value before decoding, a *T that implements
-// [Validator] validates itself after, and [WithDisallowUnknownFields] and
+// path rather than on the whole document: a *T that implements [Validator]
+// validates itself after decoding, and [WithDisallowUnknownFields] and
 // [WithYAMLDecodeOptions] configure the decoder. A [DocumentValidator] from
-// [WithDocumentValidator] still receives the whole document.
+// [WithValidator] still receives the whole document.
 //
 // For a string view of any node, including mappings and sequences, use
 // [Document.GetValue].
@@ -362,34 +383,53 @@ func (dd *Document) node(path paths.Path) (ast.Node, error) {
 	return path.Node(dd.doc)
 }
 
-// ValidateSchema decodes the document to [any] and validates it using sv.
+// Validate runs each validator on the document in the order given and
+// stops at the first that fails. It is the validation step of
+// [Document.Decode] on its own, for a caller that checks a document without
+// decoding it:
 //
-// A decoding error, or an [*Error] from sv, comes back bound to the source
-// as a [SourceError]. Any other error from sv comes back as it is.
-func (dd *Document) ValidateSchema(ctx context.Context, sv SchemaValidator) error {
-	var untypedData any
-
-	err := dd.decodeNode(ctx, dd.doc.Body, &untypedData, nil)
-	if err != nil {
-		return err
-	}
-
-	err = sv.ValidateSchema(ctx, untypedData)
-	if err != nil {
-		return dd.bind(err)
+//	for _, doc := range docs.All() {
+//		if err := doc.Validate(ctx, reg); err != nil {
+//			return err
+//		}
+//	}
+//
+// An [*Error] from a validator comes back bound to the source as a
+// [SourceError] through [Document.WrapError]. Any other error comes back as
+// it is.
+func (dd *Document) Validate(ctx context.Context, validators ...DocumentValidator) error {
+	for _, dv := range validators {
+		err := dv.Validate(ctx, dd)
+		if err != nil {
+			return dd.WrapError(err)
+		}
 	}
 
 	return nil
 }
 
-// bind returns err bound to the document's source. An error already bound
-// to that source comes back as it is. When the chain holds an [*Error]
-// without a document index, bind sets this document's index so the paths
-// resolve in the right document of a multi-document source. It copies a
-// direct Error with the index and wraps one behind other wrapping in a new
-// Error that carries it. An error whose chain holds no Error, such as one
-// from [paths], passes through unchanged.
-func (dd *Document) bind(err error) error {
+// WrapError binds err to the document's source, as [Source.WrapError] does,
+// and selects this document for the paths in err. When the chain of err
+// holds an [*Error] without a document index, the result carries this
+// document's index, so a path resolves in the right document of a
+// multi-document source. A direct Error is copied with the index, and one
+// behind other wrapping is wrapped in a new Error that carries it.
+//
+// If err is nil, WrapError returns nil. An error already bound to this
+// source, or one whose chain holds no Error, such as one from
+// [go.jacobcolvin.com/niceyaml/paths], comes back as it is.
+//
+// The Document methods bind the errors they return already. WrapError is for
+// an error built elsewhere, such as one from a check the caller runs on a
+// value it took from the document:
+//
+//	value, err := doc.Get[map[string]any](ctx, path)
+//	if err != nil {
+//		return err
+//	}
+//
+//	return doc.WrapError(check(value))
+func (dd *Document) WrapError(err error) error {
 	if err == nil {
 		return nil
 	}
@@ -419,8 +459,7 @@ func (dd *Document) bind(err error) error {
 // [Document.DecodeInto], and [Document.Get].
 //
 // Available options:
-//   - [WithSchemaValidator]
-//   - [WithDocumentValidator]
+//   - [WithValidator]
 //   - [WithSelfValidation]
 //   - [WithDisallowUnknownFields]
 //   - [WithYAMLDecodeOptions]
@@ -428,8 +467,7 @@ type DecodeOption func(*decodeConfig)
 
 // decodeConfig holds the settings a [DecodeOption] configures.
 type decodeConfig struct {
-	schemas               []SchemaValidator
-	docValidators         []DocumentValidator
+	validators            []DocumentValidator
 	yamlOpts              []yaml.DecodeOption
 	selfValidation        bool
 	disallowUnknownFields bool
@@ -455,37 +493,24 @@ func (c decodeConfig) decodeOptions() []yaml.DecodeOption {
 	return append(slices.Clone(c.yamlOpts), yaml.DisallowUnknownField())
 }
 
-// WithSchemaValidator is a [DecodeOption] that validates the document
-// against sv before decoding it. The document is decoded to [any] once and
-// handed to ValidateSchema, and a validation error ends the decode before
-// any typed decoding. Several schemas receive the same value in the order
-// given, stopping at the first that fails:
+// WithValidator is a [DecodeOption] that validates the document with dv
+// before decoding it, and a validation error ends the decode before any
+// typed decoding. Several validators run in the order given, stopping at
+// the first that fails. A [go.jacobcolvin.com/niceyaml/schema.Validator]
+// checks the document against one JSON schema, and a
+// [go.jacobcolvin.com/niceyaml/schema/registry.Registry] against the schema
+// it picks for the document:
 //
-//	config, err := doc.Decode[Config](ctx, niceyaml.WithSchemaValidator(validator))
-func WithSchemaValidator(sv SchemaValidator) DecodeOption {
+//	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
+func WithValidator(dv DocumentValidator) DecodeOption {
 	return func(c *decodeConfig) {
-		c.schemas = append(c.schemas, sv)
-	}
-}
-
-// WithDocumentValidator is a [DecodeOption] that validates the document
-// with dv before decoding it. It runs after every schema from
-// [WithSchemaValidator], and several document validators run in the order
-// given, stopping at the first that fails. A
-// [go.jacobcolvin.com/niceyaml/schema/registry.Registry] is one, so a
-// document decodes against the schema the registry picks for it:
-//
-//	config, err := doc.Decode[Config](ctx, niceyaml.WithDocumentValidator(reg))
-func WithDocumentValidator(dv DocumentValidator) DecodeOption {
-	return func(c *decodeConfig) {
-		c.docValidators = append(c.docValidators, dv)
+		c.validators = append(c.validators, dv)
 	}
 }
 
 // WithSelfValidation is a [DecodeOption] that sets whether a decoded value
 // that implements [Validator] validates itself after decoding. The default
-// is true. Schemas given with [WithSchemaValidator] and document validators
-// given with [WithDocumentValidator] run either way.
+// is true. Validators given with [WithValidator] run either way.
 func WithSelfValidation(enabled bool) DecodeOption {
 	return func(c *decodeConfig) {
 		c.selfValidation = enabled
@@ -513,8 +538,7 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 
 // Decode validates and decodes the document into a new T.
 //
-// Each [SchemaValidator] from [WithSchemaValidator] and each
-// [DocumentValidator] from [WithDocumentValidator] runs before decoding. If
+// Each [DocumentValidator] from [WithValidator] runs before decoding. If
 // *T implements [Validator], Validate is called after successful decoding
 // unless [WithSelfValidation] switches that off. Methods declared on T
 // itself are included in the method set of *T, so both value and pointer
@@ -539,8 +563,7 @@ func (dd *Document) Decode[T any](ctx context.Context, opts ...DecodeOption) (T,
 // DecodeInto validates and decodes the document into v, which must be a
 // pointer.
 //
-// Each [SchemaValidator] from [WithSchemaValidator] and each
-// [DocumentValidator] from [WithDocumentValidator] runs before decoding. If
+// Each [DocumentValidator] from [WithValidator] runs before decoding. If
 // v implements [Validator], Validate is called after successful decoding
 // unless [WithSelfValidation] switches that off. Fields absent from the
 // document keep their existing values, so v may be pre-populated with
@@ -550,38 +573,19 @@ func (dd *Document) DecodeInto(ctx context.Context, v any, opts ...DecodeOption)
 	return dd.decodeInto(ctx, dd.doc.Body, v, opts)
 }
 
-// decodeInto runs the decode pipeline on node: the schemas from opts check
-// one untyped decode of it, the document validators from opts check the
-// document, the decoder fills v with the options from the [Source] and from
-// opts, and v validates itself unless opts switch that off.
+// decodeInto runs the decode pipeline on node: the validators from opts
+// check the document, the decoder fills v with the options from the
+// [Source] and from opts, and v validates itself unless opts switch that
+// off.
 func (dd *Document) decodeInto(ctx context.Context, node ast.Node, v any, opts []DecodeOption) error {
 	cfg := newDecodeConfig(opts)
-	yamlOpts := cfg.decodeOptions()
 
-	if len(cfg.schemas) > 0 {
-		var untypedData any
-
-		err := dd.decodeNode(ctx, node, &untypedData, yamlOpts)
-		if err != nil {
-			return err
-		}
-
-		for _, sv := range cfg.schemas {
-			err := sv.ValidateSchema(ctx, untypedData)
-			if err != nil {
-				return dd.bind(err)
-			}
-		}
+	err := dd.Validate(ctx, cfg.validators...)
+	if err != nil {
+		return err
 	}
 
-	for _, dv := range cfg.docValidators {
-		err := dv.Validate(ctx, dd)
-		if err != nil {
-			return dd.bind(err)
-		}
-	}
-
-	err := dd.decodeNode(ctx, node, v, yamlOpts)
+	err = dd.decodeNode(ctx, node, v, cfg.decodeOptions())
 	if err != nil {
 		return err
 	}
@@ -591,7 +595,7 @@ func (dd *Document) decodeInto(ctx context.Context, node ast.Node, v any, opts [
 	}
 
 	if validator, ok := v.(Validator); ok {
-		return dd.bind(validator.Validate())
+		return dd.WrapError(validator.Validate())
 	}
 
 	return nil
@@ -609,7 +613,7 @@ func (dd *Document) decodeNode(ctx context.Context, node ast.Node, v any, yamlOp
 	err := dec.DecodeFromNodeContext(ctx, node, v)
 	if err != nil {
 		if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
-			return dd.bind(NewError(yamlErr.GetMessage(), WithToken(yamlErr.GetToken())))
+			return dd.WrapError(NewError(yamlErr.GetMessage(), WithToken(yamlErr.GetToken())))
 		}
 
 		//nolint:wrapcheck // Return the original error if it's not a [yaml.Error].

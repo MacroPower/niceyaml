@@ -21,8 +21,8 @@ var (
 	//go:embed cafe.v1.json
 	schemaJSON []byte
 
-	// Schema validates a decoded document against the cafe JSON schema. Pass
-	// it to Decode with [niceyaml.WithSchemaValidator].
+	// Schema validates a document against the cafe JSON schema. Pass it to
+	// Decode with [niceyaml.WithValidator].
 	Schema = schema.NewValidator(jsonschema.MustCompileJSON(schemaJSON))
 
 	// DefaultYAML is a valid cafe configuration, used by the demo and tests.

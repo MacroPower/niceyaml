@@ -1,70 +1,12 @@
 package yamltest_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
-
-func TestMockSchemaValidator(t *testing.T) {
-	t.Parallel()
-
-	t.Run("NewPassingSchemaValidator returns nil for any input", func(t *testing.T) {
-		t.Parallel()
-
-		v := yamltest.NewPassingSchemaValidator()
-
-		assert.NoError(t, v.ValidateSchema(t.Context(), "string"))
-		assert.NoError(t, v.ValidateSchema(t.Context(), 42))
-		assert.NoError(t, v.ValidateSchema(t.Context(), nil))
-		assert.NoError(t, v.ValidateSchema(t.Context(), struct{ Name string }{"test"}))
-	})
-
-	t.Run("NewFailingSchemaValidator returns the specified error", func(t *testing.T) {
-		t.Parallel()
-
-		wantErr := assert.AnError
-		v := yamltest.NewFailingSchemaValidator(wantErr)
-
-		err := v.ValidateSchema(t.Context(), "any input")
-		require.ErrorIs(t, err, wantErr)
-	})
-
-	t.Run("NewCustomSchemaValidator calls custom function with data", func(t *testing.T) {
-		t.Parallel()
-
-		var receivedData any
-
-		customFn := func(_ context.Context, data any) error {
-			receivedData = data
-			return nil
-		}
-
-		v := yamltest.NewCustomSchemaValidator(customFn)
-		err := v.ValidateSchema(t.Context(), "test data")
-
-		require.NoError(t, err)
-		assert.Equal(t, "test data", receivedData)
-	})
-
-	t.Run("NewCustomSchemaValidator passes through error", func(t *testing.T) {
-		t.Parallel()
-
-		wantErr := assert.AnError
-		customFn := func(_ context.Context, _ any) error {
-			return wantErr
-		}
-
-		v := yamltest.NewCustomSchemaValidator(customFn)
-		err := v.ValidateSchema(t.Context(), "any")
-
-		require.ErrorIs(t, err, wantErr)
-	})
-}
 
 func TestMockNormalizer(t *testing.T) {
 	t.Parallel()

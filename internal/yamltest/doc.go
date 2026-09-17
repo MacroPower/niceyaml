@@ -77,10 +77,10 @@
 //
 // # Mocking Dependencies
 //
-// [MockSchemaValidator] and [MockNormalizer] let you test code paths that
-// depend on validation or normalization without wiring up real implementations:
+// [MockNormalizer] lets you test code paths that depend on normalization
+// without wiring up a real implementation:
 //
-//	passing := yamltest.NewPassingSchemaValidator()
-//	failing := yamltest.NewFailingSchemaValidator(errors.New("invalid"))
 //	normalizer := yamltest.NewIdentityNormalizer()
+//
+// A [niceyaml.DocumentValidatorFunc] stands in for a validator.
 package yamltest

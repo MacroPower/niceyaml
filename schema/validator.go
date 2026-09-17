@@ -27,9 +27,11 @@ func NewValidator(v *jsonschema.Validator) *Validator {
 }
 
 // Validator adapts a compiled [*jsonschema.Validator] to
-// [niceyaml.SchemaValidator], reporting constraint violations as
+// [niceyaml.DocumentValidator], reporting constraint violations as
 // [*niceyaml.Error] values that carry the YAML path to each failing location
-// for display by [printer.Printer].
+// for display by [printer.Printer]. [Validator.Validate] checks a whole
+// document, and [Validator.ValidateSchema] checks decoded data, such as one
+// value taken from a document with [niceyaml.Document.Get].
 //
 // A Validator is safe for concurrent use. Create instances with
 // [NewValidator].
@@ -37,7 +39,23 @@ type Validator struct {
 	schema *jsonschema.Validator
 }
 
-// ValidateSchema implements [niceyaml.SchemaValidator].
+// Validate implements [niceyaml.DocumentValidator]. It decodes doc to
+// [any] and checks the result with [Validator.ValidateSchema], so
+// [niceyaml.WithValidator] runs the schema before a decode and
+// [niceyaml.Document.Validate] runs it on its own. A decoding error comes
+// back bound to the source, and a violation as the unbound [*niceyaml.Error]
+// that ValidateSchema returns, which the document binds.
+func (v *Validator) Validate(ctx context.Context, doc *niceyaml.Document) error {
+	data, err := doc.Decode[any](ctx)
+	if err != nil {
+		return err
+	}
+
+	return v.ValidateSchema(ctx, data)
+}
+
+// ValidateSchema checks data, the decoded form of a YAML value, against the
+// schema.
 //
 // Returns nil when data conforms. On a constraint violation, returns a
 // [*niceyaml.Error]: a single violation carries its YAML path on the error
