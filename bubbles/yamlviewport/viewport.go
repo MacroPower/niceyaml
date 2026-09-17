@@ -323,6 +323,9 @@ func (m *Model) relayout() {
 // specialized to the viewport's word wrap setting and the given content
 // width less the horizontal frame of the printer's container style, so a
 // wrapped line and the frame around it together fit the content area.
+//
+// In side-by-side mode both panes get the gutter of the longer revision, so
+// the one horizontal offset lands on the same content column in both.
 func (m *Model) renderPrinter(width int) *printer.Printer {
 	if !m.wrapEnabled {
 		width = 0
@@ -330,7 +333,16 @@ func (m *Model) renderPrinter(width int) *printer.Printer {
 		width = max(0, width-m.printer.ContainerStyle().GetHorizontalFrameSize())
 	}
 
-	return m.printer.With(printer.WithWidth(width))
+	opts := []printer.Option{printer.WithWidth(width)}
+
+	if m.viewMode == ViewModeSideBySide && m.right != nil {
+		opts = append(opts, printer.WithMaxNumber(max(
+			m.printer.MaxNumber(m.left),
+			m.printer.MaxNumber(m.right),
+		)))
+	}
+
+	return m.printer.With(opts...)
 }
 
 // SetPrinter sets the [*printer.Printer] used for rendering. See

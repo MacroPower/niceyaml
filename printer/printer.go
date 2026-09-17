@@ -133,6 +133,7 @@ type Printer struct {
 	// replaces it, since the categories then resolve to other styles.
 	blends             *blendCache
 	width              int
+	maxNumber          int
 	hasCustomStyle     bool
 	annotationsEnabled bool
 }
@@ -187,6 +188,7 @@ func (p *Printer) apply(opts []Option) {
 //   - [WithGutter]
 //   - [WithAnnotationFunc]
 //   - [WithWidth]
+//   - [WithMaxNumber]
 //   - [WithAnnotations]
 type Option func(*Printer)
 
@@ -393,6 +395,18 @@ func WithWidth(width int) Option {
 	}
 }
 
+// WithMaxNumber is a [Option] that sets the line number the gutter sizes
+// itself for, instead of the largest number in the view. A max number of 0,
+// the default, takes the number from the view.
+//
+// Use it to give two views the same gutter width, as a side-by-side diff
+// needs when one revision is longer than the other.
+func WithMaxNumber(n int) Option {
+	return func(p *Printer) {
+		p.maxNumber = max(0, n)
+	}
+}
+
 // WithAnnotations is a [Option] that sets whether annotations are
 // rendered. Defaults to true.
 func WithAnnotations(enabled bool) Option {
@@ -407,12 +421,23 @@ func (p *Printer) Width() int {
 	return p.width
 }
 
+// MaxNumber returns the line number the gutter sizes itself for when
+// rendering view: the number [WithMaxNumber] set, or the largest line number
+// in the view.
+func (p *Printer) MaxNumber(view line.View) int {
+	if p.maxNumber > 0 {
+		return p.maxNumber
+	}
+
+	return maxNumber(view)
+}
+
 // GutterWidth returns the width in cells of the gutter [Printer.Print]
 // renders for every row of view. The gutter grows with the largest line
 // number in the view, so a viewer that scrolls horizontally subtracts it
 // from the row width to find the width of the content.
 func (p *Printer) GutterWidth(view line.View) int {
-	return p.gutterWidth(maxNumber(view))
+	return p.gutterWidth(p.MaxNumber(view))
 }
 
 // ContainerStyle returns the [lipgloss.Style] wrapped around the whole
@@ -460,7 +485,7 @@ func (p *Printer) Print(lines line.View, spans ...position.Span) string {
 
 	sb.Grow(selected * 100)
 
-	maxNumber := maxNumber(lines)
+	maxNumber := p.MaxNumber(lines)
 
 	// A span that renders no rows, because it is empty or lies outside the
 	// view, adds no separator either, so the output holds exactly the rows
@@ -500,7 +525,7 @@ func (p *Printer) Rows(lines line.View, spans ...position.Span) []int {
 
 	var rows []int
 
-	maxNumber := maxNumber(lines)
+	maxNumber := p.MaxNumber(lines)
 	gutterWidth := p.gutterWidth(maxNumber)
 
 	for _, span := range spans {
@@ -524,7 +549,7 @@ func (p *Printer) RowWidth(lines line.View, spans ...position.Span) int {
 		spans = position.Spans{position.NewSpan(0, lines.Len())}
 	}
 
-	maxNumber := maxNumber(lines)
+	maxNumber := p.MaxNumber(lines)
 	gutterWidth := p.gutterWidth(maxNumber)
 
 	var width int

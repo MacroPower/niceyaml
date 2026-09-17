@@ -9,6 +9,7 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
 	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/token"
@@ -3607,6 +3608,45 @@ func TestViewport_SetSearchTermEmpty(t *testing.T) {
 	m.SetSearchTerm("")
 	assert.Empty(t, m.SearchTerm())
 	assert.Equal(t, 0, m.SearchCount())
+}
+
+func TestViewport_SideBySidePanesShareGutterWidth(t *testing.T) {
+	t.Parallel()
+
+	// The before revision numbers its gutter for five digits and the after
+	// revision for two, but the panes cut at one shared horizontal offset, so
+	// they need one gutter width. Sized per pane, the narrower gutter runs
+	// out first and the panes show different columns of the same line.
+	var before strings.Builder
+
+	// A first line long enough to scroll past the widest gutter.
+	first := "k0: " + strings.Repeat("0123456789", 4) + "\n"
+
+	before.WriteString(first)
+
+	for i := 1; i < 10005; i++ {
+		fmt.Fprintf(&before, "k%d: v\n", i)
+	}
+
+	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinterWithLineNumbers()))
+	m.SetWidth(60)
+	m.SetHeight(5)
+	m.SetWordWrap(false)
+	m.AddRevision(niceyaml.NewSourceFromString(before.String(), niceyaml.WithName("v1")))
+	m.AddRevision(niceyaml.NewSourceFromString(first+"last: v\n", niceyaml.WithName("v2")))
+	m.SetViewMode(yamlviewport.ViewModeSideBySide)
+
+	m.SetXOffset(7)
+	require.Equal(t, 7, m.XOffset())
+
+	// The first line is equal in both revisions, so both panes show it from
+	// the same column.
+	row, _, _ := strings.Cut(m.View(), "\n")
+	left, right, ok := strings.Cut(ansi.Strip(row), "\u2502")
+	require.True(t, ok, "no pane separator in %q", row)
+
+	assert.Equal(t, strings.TrimSpace(left), strings.TrimSpace(right))
+	assert.Contains(t, left, "k0: ")
 }
 
 func TestSideBySideSearch_MatchCounting(t *testing.T) {

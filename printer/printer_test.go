@@ -3383,6 +3383,34 @@ func TestPrinter_GutterWidth(t *testing.T) {
 	}
 }
 
+func TestPrinter_WithMaxNumber(t *testing.T) {
+	t.Parallel()
+
+	short := niceyaml.NewSourceFromString("a: 1\nb: 2").Lines()
+
+	t.Run("sizes the gutter for the given number", func(t *testing.T) {
+		t.Parallel()
+
+		p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithMaxNumber(10000))
+
+		assert.Equal(t, 10000, p.MaxNumber(short))
+		assert.Equal(t, 6, p.GutterWidth(short))
+
+		// Two views of different lengths then share a gutter width.
+		long := niceyaml.NewSourceFromString(strings.Repeat("k: v\n", 10000)).Lines()
+		assert.Equal(t, p.GutterWidth(long), p.GutterWidth(short))
+	})
+
+	t.Run("zero takes the number from the view", func(t *testing.T) {
+		t.Parallel()
+
+		p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithMaxNumber(0))
+
+		assert.Equal(t, 2, p.MaxNumber(short))
+		assert.Equal(t, 5, p.GutterWidth(short))
+	})
+}
+
 func TestPrinter_RowWidth(t *testing.T) {
 	t.Parallel()
 
