@@ -1198,11 +1198,43 @@ func (m *Model) visibleRows() []string {
 		maxWidth := m.maxWidth()
 
 		for i := range rows {
-			rows[i] = ansi.Cut(rows[i], m.xOffset, m.xOffset+maxWidth)
+			rows[i] = m.cutRow(rows[i], m.rowOffset(m.yOffset+i), maxWidth)
 		}
 	}
 
 	return rows
+}
+
+// rowOffset returns the horizontal offset of the rendered row r: 0 for a row
+// of the container frame above the first line or below the last, which holds
+// no content, and the horizontal scroll offset for a row of a line.
+func (m *Model) rowOffset(r int) int {
+	if r < m.rows.top || r >= m.rows.total()-m.rows.bottom {
+		return 0
+	}
+
+	return m.xOffset
+}
+
+// cutRow fits a rendered row to width by cutting its content columns to the
+// horizontal window that starts at offset. The columns of the printer's
+// container frame on either side stay in place, so a border keeps its edges
+// while the content between them scrolls.
+func (m *Model) cutRow(row string, offset, width int) string {
+	frame := m.printer.ContainerStyle()
+	left := frame.GetMarginLeft() + frame.GetBorderLeftSize() + frame.GetPaddingLeft()
+	right := frame.GetHorizontalFrameSize() - left
+
+	inner := ansi.StringWidth(row) - left - right
+	if inner < 0 {
+		return ansi.Cut(row, 0, width)
+	}
+
+	visible := max(0, width-left-right)
+
+	return ansi.Cut(row, 0, left) +
+		ansi.Cut(ansi.Cut(row, left, left+inner), offset, offset+visible) +
+		ansi.Cut(row, left+inner, left+inner+right)
 }
 
 // padRows pads rows with empty rows up to the content height when FillHeight
@@ -1622,8 +1654,9 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 	var li, ri int
 
 	// Join the next count rows of the panes, taking at most leftCount rows
-	// from the left pane and rightCount from the right.
-	appendRows := func(count, leftCount, rightCount int) {
+	// from the left pane and rightCount from the right, with their content
+	// columns scrolled to offset.
+	appendRows := func(count, leftCount, rightCount, offset int) {
 		for i := range count {
 			var left, right string
 
@@ -1639,8 +1672,8 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 
 			// Apply horizontal scrolling.
 			if !m.wrapEnabled {
-				left = ansi.Cut(left, m.xOffset, m.xOffset+paneWidth)
-				right = ansi.Cut(right, m.xOffset, m.xOffset+paneWidth)
+				left = m.cutRow(left, offset, paneWidth)
+				right = m.cutRow(right, offset, paneWidth)
 			}
 
 			// Pad left pane to consistent width for alignment.
@@ -1654,7 +1687,7 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 	}
 
 	if first == 0 {
-		appendRows(m.rows.top, m.rows.top, m.rows.top)
+		appendRows(m.rows.top, m.rows.top, m.rows.top, 0)
 	}
 
 	// Zip the panes line by line. A line that wraps taller in one pane gets
@@ -1667,11 +1700,11 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 			rightCount = m.rows.right[k]
 		}
 
-		appendRows(m.lineRows(k), leftCount, rightCount)
+		appendRows(m.lineRows(k), leftCount, rightCount, m.xOffset)
 	}
 
 	if last == len(m.rows.left) {
-		appendRows(m.rows.bottom, m.rows.bottom, m.rows.bottom)
+		appendRows(m.rows.bottom, m.rows.bottom, m.rows.bottom, 0)
 	}
 
 	combined = m.trimWindow(combined, first)

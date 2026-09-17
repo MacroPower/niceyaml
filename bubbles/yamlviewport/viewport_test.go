@@ -990,6 +990,58 @@ func TestViewport_ContainerFrameWidth(t *testing.T) {
 	}
 }
 
+func TestViewport_HorizontalScrollKeepsFrame(t *testing.T) {
+	t.Parallel()
+
+	// With wrap off, horizontal scrolling cuts the content columns of each
+	// row and leaves the border of the printer's container in place, corners
+	// included. The gutter is the first content column, so an offset of 5
+	// starts the row at the fifth column of the line.
+	tcs := map[string]struct {
+		mode    yamlviewport.ViewMode
+		width   int
+		wantTop string
+		wantRow string
+	}{
+		"full": {
+			mode:    yamlviewport.ViewModeFull,
+			width:   24,
+			wantTop: "┌" + strings.Repeat("─", 22) + "┐",
+			wantRow: "│123456789abcdefghijklm│",
+		},
+		"side by side": {
+			mode:    yamlviewport.ViewModeSideBySide,
+			width:   30,
+			wantTop: "┌───────────┐ │  ┌───────────┐",
+			wantRow: "│123456789ab│ │  │123456789ab│",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := testPrinter().With(printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())))
+			m := yamlviewport.New(yamlviewport.WithPrinter(p))
+			m.SetWidth(tc.width)
+			m.SetHeight(3)
+			m.SetViewMode(tc.mode)
+			m.SetWordWrap(false)
+			m.SetSource(niceyaml.NewSourceFromString("k: 0123456789abcdefghijklmnopqrstuvwxyz\n"))
+
+			m.SetXOffset(5)
+			require.Equal(t, 5, m.XOffset())
+
+			rows := strings.Split(m.View(), "\n")
+			require.Len(t, rows, 3)
+
+			assert.Equal(t, tc.wantTop, rows[0])
+			assert.Equal(t, tc.wantRow, rows[1])
+			assert.Equal(t, strings.ReplaceAll(strings.ReplaceAll(tc.wantTop, "┌", "└"), "┐", "┘"), rows[2])
+		})
+	}
+}
+
 func TestViewport_ViewFitsHeight(t *testing.T) {
 	t.Parallel()
 
