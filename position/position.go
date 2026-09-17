@@ -379,5 +379,15 @@ func GroupIndices(indices []int, context int) Spans {
 func ContextSpans(indices []int, context, total int) Spans {
 	context = max(0, context)
 
-	return GroupIndices(indices, context).Expand(context).Clamp(0, total)
+	// Expand runs before Clamp, so an index just outside the bounds would
+	// otherwise pull a window back inside them. Drop it first.
+	inRange := make([]int, 0, len(indices))
+
+	for _, idx := range indices {
+		if idx >= 0 && idx < total {
+			inRange = append(inRange, idx)
+		}
+	}
+
+	return GroupIndices(inRange, context).Expand(context).Clamp(0, total)
 }

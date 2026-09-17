@@ -1102,6 +1102,18 @@ func TestContextSpans(t *testing.T) {
 			total:   5,
 			want:    nil,
 		},
+		"index at total within context reach contributes nothing": {
+			indices: []int{5},
+			context: 2,
+			total:   5,
+			want:    nil,
+		},
+		"negative index within context reach contributes nothing": {
+			indices: []int{-1},
+			context: 2,
+			total:   5,
+			want:    nil,
+		},
 		"context at total covers every line": {
 			indices: []int{2},
 			context: 10,
