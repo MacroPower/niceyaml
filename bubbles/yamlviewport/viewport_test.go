@@ -3568,6 +3568,60 @@ func TestViewport_NewSearchTermStartsAtFirstMatch(t *testing.T) {
 	assert.NotContains(t, m.View(), "k16: needle")
 }
 
+func TestViewport_SideBySideSearchOrder(t *testing.T) {
+	t.Parallel()
+
+	// Every line changes, so each line holds a deleted match in the left pane
+	// and an inserted match at the same position in the right pane.
+	doc := func(value string) string {
+		var sb strings.Builder
+
+		for i := range 20 {
+			fmt.Fprintf(&sb, "k%02d: needle %s\n", i, value)
+		}
+
+		return sb.String()
+	}
+
+	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinterWithSearch()))
+	m.SetWidth(160)
+	m.SetHeight(3)
+	m.AddRevision(niceyaml.NewSourceFromString(doc("a"), niceyaml.WithName("v1")))
+	m.AddRevision(niceyaml.NewSourceFromString(doc("b"), niceyaml.WithName("v2")))
+	m.SetViewMode(yamlviewport.ViewModeSideBySide)
+
+	m.SetSearchTerm("needle")
+	require.Equal(t, 40, m.SearchCount())
+
+	// Matches step through the panes left, right on each line in turn.
+	for i := range m.SearchCount() {
+		require.Equal(t, i, m.SearchIndex())
+
+		var selected string
+
+		for row := range strings.SplitSeq(m.View(), "\n") {
+			if strings.Contains(row, "<genericHighlight>") {
+				selected = row
+			}
+		}
+
+		require.NotEmpty(t, selected, "match %d", i)
+
+		left, right, ok := strings.Cut(selected, "│")
+		require.True(t, ok, "match %d", i)
+
+		assert.Contains(t, selected, fmt.Sprintf("k%02d:", i/2), "match %d", i)
+
+		if i%2 == 0 {
+			assert.Contains(t, left, "<genericHighlight>", "match %d", i)
+		} else {
+			assert.Contains(t, right, "<genericHighlight>", "match %d", i)
+		}
+
+		m.SearchNext()
+	}
+}
+
 func TestViewport_ClearSearchSideBySide(t *testing.T) {
 	t.Parallel()
 

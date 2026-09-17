@@ -710,13 +710,26 @@ func (m *Model) updateSideBySideSearchState() {
 		combined = append(combined, searchMatch{rng: match, inLeft: false})
 	}
 
-	// Sort by position for consistent navigation order.
+	// Sort by position for consistent navigation order. A deleted line and
+	// the inserted line that replaced it share a position, and the left
+	// pane's match comes first there.
 	slices.SortFunc(combined, func(a, b searchMatch) int {
 		if a.rng.Start.Line != b.rng.Start.Line {
 			return cmp.Compare(a.rng.Start.Line, b.rng.Start.Line)
 		}
 
-		return cmp.Compare(a.rng.Start.Col, b.rng.Start.Col)
+		if a.rng.Start.Col != b.rng.Start.Col {
+			return cmp.Compare(a.rng.Start.Col, b.rng.Start.Col)
+		}
+
+		switch {
+		case a.inLeft && !b.inLeft:
+			return -1
+		case !a.inLeft && b.inLeft:
+			return 1
+		default:
+			return 0
+		}
 	})
 
 	m.searchMatches = combined
