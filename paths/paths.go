@@ -302,11 +302,14 @@ func (p Path) single(doc *ast.DocumentNode) (match, error) {
 
 // Nodes resolves every node the path selects in doc, in document order,
 // ignoring the [Part]. A path without `[*]` or `..` selectors yields at most
-// one node; an empty result means nothing exists at the path.
+// one node; an empty result means nothing exists at the path. Each node
+// appears once, even when chained `..` selectors reach it more than once.
 //
 // It looks through anchors and aliases, so each node is the content the
-// path names. Selectors follow aliases to their anchor and see the entries a
-// `<<` merge key brings into a mapping.
+// path names. The `.name`, `[n]`, and `[*]` selectors follow aliases to
+// their anchor and see the entries a `<<` merge key brings into a mapping.
+// The `..name` selector visits each entry once, where the source defines
+// it, so it neither follows aliases nor looks into merge sources.
 //
 // Wraps [ErrNoDocument], together with [ErrNotFound], when the document has
 // no content to resolve in, and [ErrAlias] when an alias on the path does
@@ -335,8 +338,8 @@ func (p Path) Nodes(doc *ast.DocumentNode) ([]ast.Node, error) {
 // Node resolves the node at the path in doc, ignoring the [Part].
 //
 // It looks through anchors and aliases, so the result is the content the
-// path names. Selectors follow aliases to their anchor and see the entries a
-// `<<` merge key brings into a mapping.
+// path names. The `.name` and `[n]` selectors follow aliases to their anchor
+// and see the entries a `<<` merge key brings into a mapping.
 //
 // Returns [ErrWildcard] for a path with a `[*]` or `..` selector (use
 // [Path.Nodes] for those), and wraps [ErrNotFound] when nothing exists at
