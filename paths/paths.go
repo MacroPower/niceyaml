@@ -220,13 +220,23 @@ func (p Path) String() string {
 // YAMLPath returns the equivalent [*yaml.Path] for use with the goccy/go-yaml
 // API, such as [yaml.Path.ReplaceWithNode]. The [Part] has no equivalent
 // there, so the result omits it.
+//
+// The result selects the same names as the Path, but its String is the
+// goccy/go-yaml form, which differs from [Path.String] for names with
+// reserved characters and is not always re-parseable. The builder has no
+// quoting for recursive selectors, so Recursive("a.b") prints as `$..a.b`,
+// which [yaml.PathString] reads as two selectors. Use [Path.String] for a
+// form that [Parse] reads back.
 func (p Path) YAMLPath() *yaml.Path {
 	pb := (&yaml.PathBuilder{}).Root()
 
 	for _, seg := range p.segments {
 		switch seg.kind {
 		case segmentChild:
-			pb = pb.Child(quoteName(seg.name))
+			// The builder quotes names itself, and the goccy filter strips
+			// only the quotes it adds, so a name quoted here would never
+			// match its key.
+			pb = pb.Child(seg.name)
 		case segmentIndex:
 			pb = pb.Index(uint(max(seg.index, 0))) //nolint:gosec // Clamped to non-negative.
 		case segmentIndexAll:

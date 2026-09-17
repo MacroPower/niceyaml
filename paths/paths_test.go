@@ -63,9 +63,10 @@ func TestPath_Build(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		build func() paths.Path
-		want  string
-		part  paths.Part
+		build    func() paths.Path
+		want     string
+		wantYAML string
+		part     paths.Part
 	}{
 		"root path": {
 			build: paths.Root,
@@ -128,14 +129,22 @@ func TestPath_Build(t *testing.T) {
 			want:  "$.'kubernetes.io/name'",
 		},
 		"child name with quote is quoted and escaped": {
-			build: func() paths.Path { return paths.Root().Child("it's") },
-			part:  paths.PartNode,
-			want:  `$.'it\'s'`,
+			build:    func() paths.Path { return paths.Root().Child("it's") },
+			part:     paths.PartNode,
+			want:     `$.'it\'s'`,
+			wantYAML: "$.it's",
 		},
 		"child name with brackets is quoted": {
-			build: func() paths.Path { return paths.Root().Child("a[0]") },
-			part:  paths.PartNode,
-			want:  "$.'a[0]'",
+			build:    func() paths.Path { return paths.Root().Child("a[0]") },
+			part:     paths.PartNode,
+			want:     "$.'a[0]'",
+			wantYAML: "$.a[0]",
+		},
+		"recursive name with a dot is quoted, but goccy cannot quote it": {
+			build:    func() paths.Path { return paths.Root().Recursive("x.y") },
+			part:     paths.PartNode,
+			want:     "$..'x.y'",
+			wantYAML: "$..x.y",
 		},
 	}
 
@@ -148,7 +157,14 @@ func TestPath_Build(t *testing.T) {
 			require.NotNil(t, path)
 			assert.Equal(t, tc.want, path.String())
 			assert.Equal(t, tc.part, path.Part())
-			assert.Equal(t, tc.want, path.YAMLPath().String())
+
+			// The goccy form only differs where goccy quotes differently.
+			wantGoccy := tc.wantYAML
+			if wantGoccy == "" {
+				wantGoccy = tc.want
+			}
+
+			assert.Equal(t, wantGoccy, path.YAMLPath().String())
 		})
 	}
 }
@@ -403,17 +419,46 @@ func TestMustParse(t *testing.T) {
 func TestPath_YAMLPath(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("a:\n  'b.c': [x, y]\n")
+	source := niceyaml.NewSourceFromString("a:\n  'b.c': [x, y]\n  don't: 1\n  a\\.b: 2\n")
 	file, err := source.File()
 	require.NoError(t, err)
 
-	yp := paths.Root().Child("a", "b.c").Index(1).Value().YAMLPath()
-	require.NotNil(t, yp)
-	assert.Equal(t, "$.a.'b.c'[1]", yp.String())
+	tcs := map[string]struct {
+		path       paths.Path
+		wantString string
+		want       string
+	}{
+		"dotted name is quoted": {
+			path:       paths.Root().Child("a", "b.c").Index(1).Value(),
+			wantString: "$.a.'b.c'[1]",
+			want:       "y",
+		},
+		"name with a quote filters by its raw text": {
+			path:       paths.Root().Child("a", "don't"),
+			wantString: "$.a.don't",
+			want:       "1",
+		},
+		"name with a backslash filters by its raw text": {
+			path:       paths.Root().Child("a", `a\.b`),
+			wantString: `$.a.'a\.b'`,
+			want:       "2",
+		},
+	}
 
-	node, err := yp.FilterNode(file.Docs[0].Body)
-	require.NoError(t, err)
-	assert.Equal(t, "y", node.GetToken().Value)
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			yp := tc.path.YAMLPath()
+			require.NotNil(t, yp)
+			assert.Equal(t, tc.wantString, yp.String())
+
+			node, err := yp.FilterNode(file.Docs[0].Body)
+			require.NoError(t, err)
+			require.NotNil(t, node, "node not found")
+			assert.Equal(t, tc.want, node.GetToken().Value)
+		})
+	}
 }
 
 func TestPath_Token(t *testing.T) {
