@@ -584,6 +584,70 @@ func TestValidator_NonFiniteFloats(t *testing.T) {
 	}
 }
 
+func TestValidator_YAMLNativeTypes(t *testing.T) {
+	t.Parallel()
+
+	// YAML decodes !!binary into []byte and !!timestamp into time.Time,
+	// neither of which the JSON Schema validator accepts. The validator
+	// converts them to their JSON spellings, so a tagged scalar does not
+	// suppress every other constraint in the document.
+	tcs := map[string]struct {
+		schema string
+		input  string
+		err    string
+	}{
+		"binary scalar": {
+			schema: `{
+				"type": "object",
+				"properties": {"b": {"type": "string"}}
+			}`,
+			input: stringtest.Input(`
+				b: !!binary aGk=
+			`),
+		},
+		"timestamp scalar": {
+			schema: `{
+				"type": "object",
+				"properties": {"d": {"type": "string"}}
+			}`,
+			input: stringtest.Input(`
+				d: !!timestamp 2024-01-01T00:00:00Z
+			`),
+		},
+		"binary scalar violating a constraint": {
+			schema: `{
+				"type": "object",
+				"properties": {"n": {"type": "integer"}}
+			}`,
+			input: stringtest.Input(`
+				b: !!binary aGk=
+				n: notint
+			`),
+			err: `[2:4] $.n: expected "integer", got "string"`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			v := newValidator(t, []byte(tc.schema))
+			doc := yamltest.FirstDocument(t, tc.input)
+
+			err := doc.Validate(t.Context(), v)
+			if tc.err == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.Error(t, err)
+			require.NotErrorIs(t, err, schema.ErrValidate)
+			assert.Contains(t, err.Error(), tc.err)
+		})
+	}
+}
+
 func TestValidator_BooleanSchema(t *testing.T) {
 	t.Parallel()
 

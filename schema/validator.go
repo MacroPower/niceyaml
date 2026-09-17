@@ -2,8 +2,10 @@ package schema
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"time"
 
 	"go.jacobcolvin.com/x/jsonschema"
 
@@ -57,6 +59,10 @@ func (v *Validator) Validate(ctx context.Context, doc *niceyaml.Document) error 
 // ValidateSchema checks data, the decoded form of a YAML value, against the
 // schema.
 //
+// YAML-native values the JSON Schema validator does not accept are first
+// converted to the JSON spelling of the same data: a !!binary becomes its
+// base64 text and a !!timestamp its RFC 3339 text, anywhere in the value.
+//
 // Returns nil when data conforms. On a constraint violation, returns a
 // [*niceyaml.Error]: a single violation carries its YAML path on the error
 // itself, and several violations become a count summary whose nested errors
@@ -65,7 +71,7 @@ func (v *Validator) Validate(ctx context.Context, doc *niceyaml.Document) error 
 // [jsonschema.Validator], where remote reference resolution honors its
 // cancellation and deadlines.
 func (v *Validator) ValidateSchema(ctx context.Context, data any) error {
-	err := v.schema.Validate(ctx, data)
+	err := v.schema.Validate(ctx, normalizeJSON(data))
 	if err == nil {
 		return nil
 	}
@@ -138,4 +144,37 @@ func buildTargetPath(segments []jsonschema.Segment, targetsKey bool) paths.Path 
 	}
 
 	return path.Value()
+}
+
+// normalizeJSON converts the YAML-native values a decode produces that the
+// JSON Schema validator does not accept into the JSON spellings of the
+// same data: a !!binary becomes its base64 text and a !!timestamp its RFC
+// 3339 text. Maps and slices are walked so a tagged scalar anywhere in a
+// document stays validatable. Every other value comes back unchanged,
+// non-finite floats included, since the validator treats those as numbers.
+func normalizeJSON(data any) any {
+	switch v := data.(type) {
+	case []byte:
+		return base64.StdEncoding.EncodeToString(v)
+	case time.Time:
+		return v.Format(time.RFC3339Nano)
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for key, elem := range v {
+			out[key] = normalizeJSON(elem)
+		}
+
+		return out
+
+	case []any:
+		out := make([]any, len(v))
+		for i, elem := range v {
+			out[i] = normalizeJSON(elem)
+		}
+
+		return out
+
+	default:
+		return data
+	}
 }
