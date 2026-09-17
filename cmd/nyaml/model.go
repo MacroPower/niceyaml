@@ -111,6 +111,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.SetHeight(msg.Height - 2) // Reserve 2 lines for status bar.
 
 	case tea.KeyPressMsg:
+		// Quit on ctrl+c from every state, including the theme picker and the
+		// search prompt, which otherwise consume every key.
+		if key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+c"))) {
+			return m, tea.Quit
+		}
+
 		// Handle theme picker input.
 		if m.themePicking {
 			m.updateThemeInput(msg)
@@ -125,7 +131,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch {
-		case key.Matches(msg, key.NewBinding(key.WithKeys("q", "ctrl+c"))):
+		case key.Matches(msg, key.NewBinding(key.WithKeys("q"))):
 			return m, tea.Quit
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("t"))):
