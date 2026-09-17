@@ -58,8 +58,8 @@ func FileOrURL(baseDir, ref string, opts ...HTTPOption) Resolver {
 	}
 
 	// A drive-letter path is absolute on Windows and names nothing a POSIX
-	// base directory can resolve, so never join it to baseDir. The
-	// reference then stays intact in the URL and the read error.
+	// base directory can resolve, so never join it to baseDir. The drive
+	// then survives into the URL and the read error.
 	if filepath.IsAbs(path) || hasDriveLetter(path) {
 		return File(path)
 	}
