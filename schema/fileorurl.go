@@ -20,15 +20,16 @@ var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 // references and [File] for file paths. Use [URL] or [File] directly when
 // you know the reference type at construction time.
 //
-// Schemes match case-insensitively. A file:// URL resolves to the local
-// path it names. A file:// URL with a host other than localhost names no
-// local path, so FileOrURL treats the whole reference as a relative file
-// path, which then fails to resolve or read. A relative file path joins
-// baseDir; an absolute path or an HTTP/HTTPS URL ignores baseDir. When
-// baseDir is empty and the path is relative, Resolve reports
-// [ErrNoBaseDir], and an empty ref reports [ErrEmptyPath] whatever baseDir
-// is. HTTPOptions apply when ref is an HTTP/HTTPS URL and do nothing for
-// file paths.
+// Schemes match case-insensitively, and an HTTP/HTTPS reference resolves
+// to a [Ref] whose URL carries the scheme in lower case. A file:// URL
+// resolves to the local path it names. A file:// URL with a host other
+// than localhost names no local path, so FileOrURL treats the whole
+// reference as a relative file path, which then fails to resolve or read.
+// A relative file path joins baseDir; an absolute path or an HTTP/HTTPS
+// URL ignores baseDir. When baseDir is empty and the path is relative,
+// Resolve reports [ErrNoBaseDir], and an empty ref reports [ErrEmptyPath]
+// whatever baseDir is. HTTPOptions apply when ref is an HTTP/HTTPS URL and
+// do nothing for file paths.
 //
 //	// Relative path resolved against baseDir.
 //	r := schema.FileOrURL("/configs", "schema.json")

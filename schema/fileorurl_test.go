@@ -137,10 +137,12 @@ func TestFileOrURL(t *testing.T) {
 
 		schemaURL := "HTTP://" + strings.TrimPrefix(server.URL, "http://") + "/schema.json"
 
+		// The resolved URL keys the registry cache, so the scheme comes
+		// back in lower case however the reference spelled it.
 		url, data, err := load(t, schema.FileOrURL("/some/dir", schemaURL))
 		require.NoError(t, err)
 		assert.Equal(t, []byte(schemaData), data)
-		assert.Equal(t, schemaURL, url)
+		assert.Equal(t, server.URL+"/schema.json", url)
 	})
 
 	t.Run("file URL", func(t *testing.T) {

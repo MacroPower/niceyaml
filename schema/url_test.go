@@ -69,6 +69,40 @@ func TestURL(t *testing.T) {
 		assert.Equal(t, 1, requests)
 	})
 
+	t.Run("scheme is lowercased", func(t *testing.T) {
+		t.Parallel()
+
+		// Every entry point shares one cache key, so URL normalizes the
+		// scheme it was given and leaves the rest of the URL alone.
+		tcs := map[string]struct {
+			ref  string
+			want string
+		}{
+			"uppercase http scheme": {
+				ref:  "HTTP://Example.COM/Schema.json",
+				want: "http://Example.COM/Schema.json",
+			},
+			"mixed-case http scheme": {
+				ref:  "HtTp://Example.COM/Schema.json",
+				want: "http://Example.COM/Schema.json",
+			},
+			"uppercase https scheme": {
+				ref:  "HTTPS://Example.COM/Schema.json",
+				want: "https://Example.COM/Schema.json",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				ref, err := schema.URL(tc.ref).Resolve(t.Context(), document(t))
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, ref.URL)
+			})
+		}
+	})
+
 	t.Run("not found", func(t *testing.T) {
 		t.Parallel()
 

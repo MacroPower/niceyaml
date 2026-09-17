@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -227,6 +230,50 @@ func TestRegistry_Caching(t *testing.T) {
 		}
 
 		assert.Equal(t, int32(1), loads.Load(), "the cache should be checked before loading")
+	})
+
+	t.Run("scheme case does not split the cache", func(t *testing.T) {
+		t.Parallel()
+
+		var fetches atomic.Int32
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			fetches.Add(1)
+
+			//nolint:errcheck // Test helper.
+			w.Write([]byte(`{"type": "object"}`))
+		}))
+		t.Cleanup(server.Close)
+
+		host := strings.TrimPrefix(server.URL, "http://")
+
+		reg := schema.NewRegistry()
+		reg.Register(schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
+			// Each document names the same schema with a different scheme
+			// case, as two directives in two files might.
+			scheme := "http"
+			if doc.Index() == 1 {
+				scheme = "HTTP"
+			}
+
+			return schema.URL(scheme+"://"+host+"/schema.json").Resolve(ctx, doc)
+		}))
+
+		source := niceyaml.NewSourceFromString(stringtest.Input(`
+			a: 1
+			---
+			b: 2
+		`))
+
+		docs, err := source.Documents()
+		require.NoError(t, err)
+		require.Len(t, docs, 2)
+
+		for _, doc := range docs {
+			require.NoError(t, reg.Validate(t.Context(), doc))
+		}
+
+		assert.Equal(t, int32(1), fetches.Load(), "one schema should be fetched once")
 	})
 
 	t.Run("distinct URLs load separately", func(t *testing.T) {

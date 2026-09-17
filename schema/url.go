@@ -3,6 +3,7 @@ package schema
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
@@ -39,6 +40,10 @@ func WithHTTPClient(client *http.Client) HTTPOption {
 // HTTP/HTTPS URL. The registry fetches once per URL and reuses the compiled
 // validator for every document that names it.
 //
+// The scheme of schemaURL is lowercased, and the rest of it left as
+// written, so one schema spelled with different scheme case is fetched and
+// compiled once rather than once per spelling.
+//
 // By default, the loader uses [http.DefaultClient] which has no explicit
 // request timeout. Timeouts are controlled via the context passed to Load.
 // Use [WithHTTPClient] to provide a client with custom timeout settings. The
@@ -51,6 +56,8 @@ func URL(schemaURL string, opts ...HTTPOption) Resolver {
 		opt(cfg)
 	}
 
+	schemaURL = normalizeScheme(schemaURL)
+
 	return ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (Ref, error) {
 		return Ref{
 			URL: schemaURL,
@@ -59,4 +66,18 @@ func URL(schemaURL string, opts ...HTTPOption) Resolver {
 			},
 		}, nil
 	})
+}
+
+// normalizeScheme lowercases the scheme of ref and leaves the rest of it
+// as written, since a URL path is case-sensitive. The registry keys its
+// cache on the URL, so one spelling means one fetch and one compile.
+func normalizeScheme(ref string) string {
+	const sep = "://"
+
+	i := strings.Index(ref, sep)
+	if i < 0 {
+		return ref
+	}
+
+	return strings.ToLower(ref[:i]) + ref[i:]
 }
