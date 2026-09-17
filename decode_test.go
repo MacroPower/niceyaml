@@ -1336,6 +1336,48 @@ func TestDocument_Get(t *testing.T) {
 		require.ErrorAs(t, err, &yamlErr)
 		assert.Zero(t, got)
 	})
+
+	t.Run("alias to an anchor outside the value resolves", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, stringtest.Input(`
+			base: &b
+			  x: 1
+			item:
+			  ref: *b
+			list:
+			  - *b
+		`))
+
+		got, err := dd.Get[map[string]any](t.Context(), paths.Root().Child("item"))
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"ref": map[string]any{"x": uint64(1)}}, got)
+
+		list, err := dd.Get[[]map[string]int](t.Context(), paths.Root().Child("list"))
+		require.NoError(t, err)
+		assert.Equal(t, []map[string]int{{"x": 1}}, list)
+	})
+
+	t.Run("alias to a later anchor stays an error", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, stringtest.Input(`
+			item:
+			  ref: *b
+			base: &b
+			  x: 1
+		`))
+
+		// The whole document does not decode either, so the value inside it
+		// reports the same alias error, bound to the source.
+		_, err := dd.Get[map[string]any](t.Context(), paths.Root().Child("item"))
+		require.Error(t, err)
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Contains(t, err.Error(), "could not find alias")
+	})
 }
 
 func TestDocument_DecodeInto(t *testing.T) {

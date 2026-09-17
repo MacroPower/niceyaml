@@ -244,7 +244,10 @@ func (dd *Document) FilePath() string {
 // alias on the path does not resolve; and [paths.ErrWildcard] for a path
 // that could match several nodes. Those errors come back as they are. A
 // YAML decoding error, including a value that cannot be represented as T,
-// comes back bound to the source as a [SourceError].
+// comes back bound to the source as a [SourceError]. An alias inside the
+// value resolves against the anchors of the whole document, so a value
+// that refers to an anchor defined outside it decodes as it does in the
+// whole document.
 //
 // The opts run the pipeline of [Document.DecodeInto] on the value at
 // path rather than on the whole document: a *T that implements [Validator]
@@ -565,17 +568,68 @@ func (dd *Document) decodeNode(ctx context.Context, node ast.Node, v any, yamlOp
 	decodeOpts = append(decodeOpts, yamlOpts...)
 
 	dec := yaml.NewDecoder(bytes.NewReader(nil), decodeOpts...)
-	err := dec.DecodeFromNodeContext(ctx, node, v)
-	if err != nil {
-		if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
-			return dd.WrapError(NewError(yamlErr.GetMessage(), WithToken(yamlErr.GetToken())))
-		}
 
-		//nolint:wrapcheck // Return the original error if it's not a [yaml.Error].
-		return err
+	// The decoder registers the anchors of the node it decodes, so an alias
+	// in a node below the body finds an anchor defined elsewhere in the
+	// document only after the decoder has seen the whole body.
+	if node != dd.doc.Body && hasAlias(node) {
+		var sink any
+
+		err := dec.DecodeFromNodeContext(ctx, dd.doc.Body, &sink)
+		if err != nil {
+			return dd.bindDecodeError(err)
+		}
 	}
 
-	return nil
+	return dd.bindDecodeError(dec.DecodeFromNodeContext(ctx, node, v))
+}
+
+// bindDecodeError binds a [yaml.Error] from the decoder to the source and
+// returns any other error, such as a canceled context, as it is. Returns nil
+// for a nil err.
+func (dd *Document) bindDecodeError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
+		return dd.WrapError(NewError(yamlErr.GetMessage(), WithToken(yamlErr.GetToken())))
+	}
+
+	//nolint:wrapcheck // Return the original error if it's not a [yaml.Error].
+	return err
+}
+
+// hasAlias reports whether node or any node below it is an alias.
+func hasAlias(node ast.Node) bool {
+	if node == nil {
+		return false
+	}
+
+	var found aliasFinder
+
+	ast.Walk(&found, node)
+
+	return bool(found)
+}
+
+// aliasFinder is an [ast.Visitor] that records whether it visited an alias
+// node and stops the walk once it has.
+type aliasFinder bool
+
+// Visit implements [ast.Visitor].
+func (f *aliasFinder) Visit(node ast.Node) ast.Visitor {
+	if *f {
+		return nil
+	}
+
+	if _, ok := node.(*ast.AliasNode); ok {
+		*f = true
+
+		return nil
+	}
+
+	return f
 }
 
 // hasContent reports whether node holds a YAML value. A nil node, a comment
