@@ -925,6 +925,51 @@ func TestViewport_ContainerFrame(t *testing.T) {
 	}
 }
 
+func TestViewport_ViewFitsHeight(t *testing.T) {
+	t.Parallel()
+
+	border := lipgloss.NewStyle().Border(lipgloss.NormalBorder())
+
+	// A view is as tall as the set height, and a height with no room for
+	// content, whether negative or swallowed by the frame of the container
+	// style, renders nothing at all.
+	tcs := map[string]struct {
+		style    lipgloss.Style
+		height   int
+		wantRows int
+	}{
+		"negative height":                   {height: -1},
+		"zero height":                       {height: 0},
+		"one row":                           {height: 1, wantRows: 1},
+		"border with no room":               {style: border, height: 2},
+		"border smaller than its own frame": {style: border, height: 1},
+		"border with one row":               {style: border, height: 3, wantRows: 3},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(
+				yamlviewport.WithPrinter(testPrinter()),
+				yamlviewport.WithStyle(tc.style),
+			)
+			m.SetWidth(20)
+			m.SetHeight(tc.height)
+			m.SetSource(niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n"))
+
+			view := m.View()
+			if tc.wantRows == 0 {
+				assert.Empty(t, view)
+
+				return
+			}
+
+			assert.Len(t, strings.Split(view, "\n"), tc.wantRows)
+		})
+	}
+}
+
 func TestViewport_Search(t *testing.T) {
 	t.Parallel()
 

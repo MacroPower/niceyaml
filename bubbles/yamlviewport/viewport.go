@@ -1520,10 +1520,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// getViewDimensions returns (width, height, ok).
-// If ok is false, the viewport has zero dimensions and should not render.
+// getViewDimensions returns (width, height, ok). If ok is false, the content
+// area has no room for rows, because a dimension is zero or negative or the
+// frame of the container style takes all of it, and View renders "".
 func (m *Model) getViewDimensions() (int, int, bool) {
-	if w, h := m.outerSize(); w == 0 || h == 0 {
+	if !m.canRender() {
 		return 0, 0, false
 	}
 
