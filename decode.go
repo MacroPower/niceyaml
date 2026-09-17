@@ -49,11 +49,11 @@ type Validator interface {
 //	}
 //
 // A validator that knows a location returns an unbound [*Error], and the
-// Document binds it to the source with the document's index, so its path
-// resolves in the right document. A validator that binds an error itself
-// through [Document.WrapError] gets the same index, and one that binds
-// through [Source.WrapError] sets [WithDocumentIndex] first, since the
-// Document leaves a bound error as it is.
+// Document binds it to the source with itself as the document its path
+// resolves in. A validator that binds an error itself does so through
+// [Document.WrapError], since the Document leaves a bound error as it is,
+// and [Source.WrapError] resolves paths in the single document the source
+// picks.
 //
 // See [DocumentValidatorFunc], [go.jacobcolvin.com/niceyaml/schema.Validator],
 // and [go.jacobcolvin.com/niceyaml/schema.Registry] for
@@ -416,11 +416,9 @@ func (dd *Document) Validate(ctx context.Context, validators ...DocumentValidato
 }
 
 // WrapError binds err to the document's source, as [Source.WrapError] does,
-// and selects this document for the paths in err. When the chain of err
-// holds an [*Error] without a document index, the result carries this
-// document's index, so a path resolves in the right document of a
-// multi-document source. A direct Error is copied with the index, and one
-// behind other wrapping is wrapped in a new Error that carries it.
+// with the paths in err resolving in this document rather than in the
+// single document the source picks, so a validator on a multi-document
+// source binds its error through the document it checked.
 //
 // If err is nil, WrapError returns nil. An error already bound to this
 // source, or one whose chain holds no Error, such as one from
@@ -441,8 +439,7 @@ func (dd *Document) WrapError(err error) error {
 		return nil
 	}
 
-	yamlErr, ok := firstError(err)
-	if !ok {
+	if _, ok := firstError(err); !ok { //nolint:errcheck // Presence check, not a value extraction.
 		return err
 	}
 
@@ -451,15 +448,7 @@ func (dd *Document) WrapError(err error) error {
 		return err
 	}
 
-	if _, set := yamlErr.DocumentIndex(); !set {
-		if direct, ok := err.(*Error); ok { //nolint:errorlint // A direct Error is copied; a wrapped one is wrapped again.
-			err = direct.With(WithDocumentIndex(dd.index))
-		} else {
-			err = NewErrorFrom(err, WithDocumentIndex(dd.index))
-		}
-	}
-
-	return dd.source.WrapError(err)
+	return newSourceError(err, dd.source, dd)
 }
 
 // DecodeOption configures [Document.Decode],

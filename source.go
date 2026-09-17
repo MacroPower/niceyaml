@@ -356,14 +356,16 @@ func (s *Source) parse() (*ast.File, error) {
 // The returned [*SourceError] resolves the location of that inner Error
 // against this source, and its [SourceError.Render] and
 // [SourceError.Detail] accept [DetailOption] values for how the excerpt
-// looks.
+// looks. A path resolves in the single document [Source.Document] picks,
+// as [Source.Decode] decodes it, so a file that holds several documents
+// binds through [Document.WrapError] of the document the path belongs to.
 //
 // Errors from [Source.File], [Source.Documents], and the [Document] methods
 // are bound already, so they need no WrapError. WrapError is for errors
 // built elsewhere, such as a validator that returns an [*Error] with a path. The
-// message of err stays as it is, and the resolved position of a path error
-// goes in front of it, so bind such an error before adding context with
-// [fmt.Errorf] to keep the position beside the message:
+// message of err stays as it is, and the resolved position goes in front of
+// it, so bind such an error before adding context with [fmt.Errorf] to keep
+// the position beside the message:
 //
 //	fmt.Errorf("document %d: %w", i, source.WrapError(err))
 //
@@ -386,7 +388,7 @@ func (s *Source) WrapError(err error) error {
 		return err
 	}
 
-	return newSourceError(err, s)
+	return newSourceError(err, s, nil)
 }
 
 // Lines returns a [line.Lines] view of the [Source]. Line i of the view is

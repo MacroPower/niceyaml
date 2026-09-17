@@ -1153,7 +1153,7 @@ func (failingValidator) Validate() error {
 	return niceyaml.NewError("rejected", niceyaml.WithPath(paths.Root().Child("name").Value()))
 }
 
-func TestDocument_DocumentIndex(t *testing.T) {
+func TestDocument_ErrorsResolveInDocument(t *testing.T) {
 	t.Parallel()
 
 	input := stringtest.Input(`
@@ -1163,96 +1163,78 @@ func TestDocument_DocumentIndex(t *testing.T) {
 	`)
 	namePath := paths.Root().Child("name").Value()
 
-	requireIndex := func(t *testing.T, err error, want int) {
+	// The first line of each error's message.
+	headlines := func(t *testing.T, errs []error) []string {
 		t.Helper()
 
-		yamlErr, ok := errors.AsType[*niceyaml.Error](err)
-		require.True(t, ok, "want *niceyaml.Error, got %T", err)
+		got := make([]string, 0, len(errs))
 
-		got, set := yamlErr.DocumentIndex()
-		require.True(t, set)
-		assert.Equal(t, want, got)
-	}
+		for _, err := range errs {
+			require.Error(t, err)
 
-	t.Run("schema validation errors carry the document index", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
-
-		validator := niceyaml.DocumentValidatorFunc(func(_ context.Context, _ *niceyaml.Document) error {
-			return niceyaml.NewError("bad name", niceyaml.WithPath(namePath))
-		})
-
-		for i, dd := range d {
-			requireIndex(t, dd.Validate(t.Context(), validator), i)
-		}
-	})
-
-	t.Run("self validation errors carry the document index", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
-
-		for i, dd := range d {
-			_, err := dd.Decode[failingValidator](t.Context())
-			requireIndex(t, err, i)
-		}
-	})
-
-	t.Run("decode errors carry the document index", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
-
-		for i, dd := range d {
-			_, err := dd.Decode[struct {
-				Name int `yaml:"name"`
-			}](t.Context())
-			requireIndex(t, err, i)
-		}
-	})
-
-	t.Run("an explicit index is kept", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
-
-		validator := niceyaml.DocumentValidatorFunc(func(_ context.Context, _ *niceyaml.Document) error {
-			return niceyaml.NewError("bad name", niceyaml.WithDocumentIndex(7))
-		})
-
-		for _, dd := range d {
-			requireIndex(t, dd.Validate(t.Context(), validator), 7)
-		}
-	})
-
-	t.Run("wrapped errors resolve in their own document", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
-
-		validator := niceyaml.DocumentValidatorFunc(func(_ context.Context, _ *niceyaml.Document) error {
-			return niceyaml.NewError("bad name", niceyaml.WithPath(namePath))
-		})
-
-		var got []string
-
-		for _, dd := range d {
-			err := dd.Validate(t.Context(), validator)
 			got = append(got, strings.SplitN(err.Error(), "\n", 2)[0])
 		}
 
-		assert.Equal(t, []string{"[1:7] $.name: bad name", "[3:7] $.name: bad name"}, got)
+		return got
+	}
+
+	t.Run("validator errors resolve in their own document", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(input)
+		d, err := source.Documents()
+		require.NoError(t, err)
+
+		validator := niceyaml.DocumentValidatorFunc(func(_ context.Context, _ *niceyaml.Document) error {
+			return niceyaml.NewError("bad name", niceyaml.WithPath(namePath))
+		})
+
+		var errs []error
+
+		for _, dd := range d {
+			errs = append(errs, dd.Validate(t.Context(), validator))
+		}
+
+		assert.Equal(t, []string{"[1:7] $.name: bad name", "[3:7] $.name: bad name"}, headlines(t, errs))
+	})
+
+	t.Run("self validation errors resolve in their own document", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(input)
+		d, err := source.Documents()
+		require.NoError(t, err)
+
+		var errs []error
+
+		for _, dd := range d {
+			_, err := dd.Decode[failingValidator](t.Context())
+			errs = append(errs, err)
+		}
+
+		assert.Equal(t, []string{"[1:7] $.name: rejected", "[3:7] $.name: rejected"}, headlines(t, errs))
+	})
+
+	t.Run("decode errors report their own document's line", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(input)
+		d, err := source.Documents()
+		require.NoError(t, err)
+
+		var errs []error
+
+		for _, dd := range d {
+			_, err := dd.Decode[struct {
+				Name int `yaml:"name"`
+			}](t.Context())
+			errs = append(errs, err)
+		}
+
+		got := headlines(t, errs)
+		require.Len(t, got, 2)
+		assert.True(t, strings.HasPrefix(got[0], "[1:7] "), got[0])
+		assert.True(t, strings.HasPrefix(got[1], "[3:7] "), got[1])
 	})
 }
 
@@ -1989,13 +1971,9 @@ func TestDocument_ValidatorErrorsResolveInDocument(t *testing.T) {
 				return niceyaml.NewError("bad name", niceyaml.WithPath(namePath))
 			},
 		},
-		"a validator that binds its own error sets the index first": {
+		"a validator that binds its own error binds through the document": {
 			validate: func(doc *niceyaml.Document) error {
-				return doc.Source().WrapError(niceyaml.NewError(
-					"bad name",
-					niceyaml.WithPath(namePath),
-					niceyaml.WithDocumentIndex(doc.Index()),
-				))
+				return doc.WrapError(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
 			},
 		},
 	}
@@ -2092,14 +2070,7 @@ func TestDocument_Decode_DocumentValidator(t *testing.T) {
 			})),
 		)
 		require.Error(t, err)
-
-		var located *niceyaml.Error
-
-		require.ErrorAs(t, err, &located)
-
-		index, ok := located.DocumentIndex()
-		require.True(t, ok)
-		assert.Equal(t, 1, index)
+		assert.Equal(t, "[3:7] $.name: bad name", err.Error())
 	})
 
 	t.Run("Get passes the whole document", func(t *testing.T) {
@@ -2163,7 +2134,7 @@ func TestDocument_WrapError(t *testing.T) {
 		assert.Same(t, err, second.WrapError(err))
 	})
 
-	t.Run("binds an Error to the source with the document index", func(t *testing.T) {
+	t.Run("binds an Error to the source and this document", func(t *testing.T) {
 		t.Parallel()
 
 		err := second.WrapError(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
@@ -2175,14 +2146,18 @@ func TestDocument_WrapError(t *testing.T) {
 		assert.Equal(t, "[3:7] $.name: bad name", err.Error())
 	})
 
-	t.Run("keeps an index the error already carries", func(t *testing.T) {
+	t.Run("the source alone has no single document to resolve in", func(t *testing.T) {
 		t.Parallel()
 
-		err := second.WrapError(niceyaml.NewError("bad name",
-			niceyaml.WithPath(namePath),
-			niceyaml.WithDocumentIndex(0),
-		))
-		assert.Equal(t, "[1:7] $.name: bad name", err.Error())
+		err := source.WrapError(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
+		assert.Equal(t, "$.name: bad name", err.Error())
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+
+		_, err = bound.Location()
+		require.ErrorIs(t, err, niceyaml.ErrMultipleDocuments)
 	})
 
 	t.Run("an error bound to the source comes back as it is", func(t *testing.T) {
