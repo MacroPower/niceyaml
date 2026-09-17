@@ -15,6 +15,22 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
+func TestNew_NilBuild(t *testing.T) {
+	t.Parallel()
+
+	th := theme.New("test-nil-build", theme.Dark, nil)
+
+	assert.Equal(t, "test-nil-build", th.Name)
+	assert.Equal(t, theme.Dark, th.Mode)
+	assert.Equal(t, style.Styles{}, th.Styles())
+
+	require.NoError(t, theme.Register(th))
+
+	got, ok := theme.Get("test-nil-build")
+	require.True(t, ok)
+	assert.Equal(t, style.Styles{}, got.Styles())
+}
+
 func TestRegister(t *testing.T) {
 	t.Parallel()
 

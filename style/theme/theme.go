@@ -39,9 +39,15 @@ type Theme struct {
 }
 
 // New creates a new [Theme] whose [Theme.Styles] calls build at most once
-// and returns the same value afterwards.
+// and returns the same value afterwards. A nil build gives a Theme whose
+// Styles returns a zero [style.Styles].
 func New(name string, mode Mode, build func() style.Styles) Theme {
-	return Theme{styles: sync.OnceValue(build), Name: name, Mode: mode}
+	t := Theme{Name: name, Mode: mode}
+	if build != nil {
+		t.styles = sync.OnceValue(build)
+	}
+
+	return t
 }
 
 // Styles returns the [style.Styles] for the theme. The first call builds it
