@@ -251,7 +251,7 @@ func TestErrorHandler(t *testing.T) {
 			var buf bytes.Buffer
 
 			styles := testStyles()
-			fangs.NewErrorHandler(niceyaml.WithPrinter(xmlPrinter()))(&buf, styles, tc.err)
+			fangs.NewErrorHandler(fangs.WithPrinter(xmlPrinter()))(&buf, styles, tc.err)
 
 			assert.Equal(t, tc.want, buf.String())
 		})

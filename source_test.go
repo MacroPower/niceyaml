@@ -695,7 +695,7 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 
 		require.ErrorAs(t, source.WrapError(niceyaml.NewError("bad d", niceyaml.WithToken(last))), &bound)
 
-		_, err := bound.Detail()
+		_, err := bound.Excerpt(2)
 		require.ErrorIs(t, err, niceyaml.ErrOutOfRange)
 		assert.Equal(t, "location outside source: line 5 not in lines 1-4", err.Error())
 	})
@@ -888,8 +888,10 @@ func TestSource_Parse(t *testing.T) {
 		require.True(t, ok, "want *niceyaml.SourceError, got %T", err)
 		assert.Same(t, source, bound.Source())
 
-		detail, err := bound.Detail(niceyaml.WithPrinter(newXMLPrinter()))
+		excerpt, err := bound.Excerpt(2)
 		require.NoError(t, err)
+
+		detail := newXMLPrinter().Print(excerpt)
 		assert.Contains(t, detail, "<genericError>b</genericError>", "the offending token is highlighted")
 
 		// Documents forwards the same bound error.

@@ -551,7 +551,7 @@ func TestValidator_PathTarget(t *testing.T) {
 
 				require.ErrorAs(t, err, &bound)
 
-				assert.Contains(t, bound.Render(niceyaml.WithPrinter(newXMLPrinter())), tc.wantContains,
+				assert.Contains(t, bound.Render(newXMLPrinter(), 2), tc.wantContains,
 					"expected error output to contain specific highlighting pattern")
 			}
 		})

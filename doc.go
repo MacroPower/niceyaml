@@ -68,8 +68,8 @@
 // is one, [Document.WrapError] binds an Error built elsewhere to that
 // document, and [Source.WrapError] binds one to the single document
 // [Source.Document] picks. [SourceError.Error] puts the resolved position
-// in front of the message, and [SourceError.Detail] renders the surrounding
-// lines with the location highlighted. The %+v verb prints both. Nested
+// in front of the message, and [SourceError.Excerpt] returns the
+// surrounding lines with the location highlighted. The %+v verb prints both. Nested
 // errors appear as annotations below their respective lines, with distant
 // errors displayed in separate hunks. A SourceError never rewrites the
 // message it binds, so an error built by hand goes through WrapError before
@@ -98,17 +98,25 @@
 // # Error Presentation
 //
 // The %+v verb renders a [SourceError] with a default [printer.Printer] and
-// two lines of context. The code that prints the error chooses anything else,
-// through [DetailOption] values passed to [SourceError.Render] or
-// [SourceError.Detail]:
+// two lines of context. The code that prints the error chooses anything
+// else. [SourceError.Render] takes the printer and the context lines:
 //
 //	var bound *niceyaml.SourceError
 //	if errors.As(err, &bound) {
-//		fmt.Println(bound.Render(
-//			niceyaml.WithPrinter(p),
-//			niceyaml.WithContextLines(3),
-//		))
+//		fmt.Println(bound.Render(p, 3))
 //	}
+//
+// The marks themselves are decoration on a [line.View], so a caller
+// composes them with anything else it renders. [SourceError.Excerpt]
+// returns the hunks around the locations as a view, as [diff.Result.Hunks]
+// does for a diff, and [SourceError.Annotate] marks a whole view of the
+// source, so a viewer shows a document with every error in place:
+//
+//	view := source.View()
+//	for _, bound := range validationErrors {
+//		_ = bound.Annotate(view)
+//	}
+//	fmt.Println(p.Print(view))
 //
 // This separates error production (validators, decoders) from error
 // presentation (source context, formatting), allowing each layer to provide

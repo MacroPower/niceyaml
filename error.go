@@ -20,12 +20,12 @@ import (
 
 var (
 	// ErrNoLocation indicates the error carries neither a path, a token, nor
-	// a range. [SourceError.Location] and [SourceError.Detail] return it.
+	// a range. [SourceError.Location] and [SourceError.Excerpt] return it.
 	ErrNoLocation = errors.New("no location provided")
 
 	// ErrTokenNotFound indicates the error's token, or the token its path
 	// resolves to, carries no position. [SourceError.Location] and
-	// [SourceError.Detail] return it.
+	// [SourceError.Excerpt] return it.
 	ErrTokenNotFound = errors.New("token not found in source")
 
 	// ErrNoDocuments indicates a [Source] that holds no YAML document where
@@ -46,10 +46,11 @@ var (
 	// ErrOutOfRange indicates the error's location lies outside the lines of
 	// the source, past the last or before the first, which happens when a
 	// token or range came from other text. [SourceError.Location] and
-	// [SourceError.Detail] return it.
+	// [SourceError.Excerpt] return it.
 	ErrOutOfRange = errors.New("location outside source")
 
-	// Shared [printer.Printer] used when no [WithPrinter] is configured.
+	// Shared [printer.Printer] for [SourceError.Render] when the caller
+	// passes none.
 	defaultPrinter = sync.OnceValue(func() *printer.Printer { return printer.New() })
 )
 
@@ -75,7 +76,7 @@ var (
 // until a [SourceError] binds the Error and puts the resolved one in front,
 // so a bound error reads "[line:col] $.path: msg" or "[line:col] msg".
 // Nested errors from [WithErrors] are not part of the message. They surface
-// through [Error.Unwrap], and [SourceError.Detail] renders them as
+// through [Error.Unwrap], and [SourceError.Excerpt] renders them as
 // annotations.
 //
 // Error implements the error interface. Use [Error.Unwrap] with [errors.Is]
@@ -155,7 +156,7 @@ func WithToken(tk *token.Token) ErrorOption {
 // covers, in the coordinates of the view [Source.Lines] returns, where line
 // 0 is line 1 of the text. It is the option for producers that know a
 // location but hold no go-yaml token, such as a check that runs on rendered
-// lines. [SourceError.Detail] highlights the whole range.
+// lines. [SourceError.Excerpt] highlights the whole range.
 func WithRange(r position.Range) ErrorOption {
 	return func(e *Error) {
 		e.rng = &r
@@ -372,9 +373,9 @@ func (e *Error) locate(b *SourceError) (location, error) {
 // and [Document.WrapError] bind an error built elsewhere. The SourceError
 // resolves the Error's location against the source, so [SourceError.Error]
 // puts the position in front of the message, [SourceError.Location]
-// returns the resolved range, and [SourceError.Detail] renders the
+// returns the resolved range, and [SourceError.Excerpt] returns the
 // surrounding lines with the location highlighted. The %+v verb prints the
-// message and the detail:
+// message and the excerpt:
 //
 //	if _, err := source.File(); err != nil {
 //		fmt.Printf("%+v\n", err)
@@ -392,11 +393,21 @@ func (e *Error) locate(b *SourceError) (location, error) {
 // [Source.WrapError] first, and context around the SourceError comes after,
 // so the position stays beside the message.
 //
-// [SourceError.Render] returns what %+v prints, and both it and
-// [SourceError.Detail] accept [DetailOption] values for the [printer.Printer] and the
-// number of context lines, so the caller that renders the error decides how
-// it looks. A SourceError implements the error interface and unwraps to the
-// error it was created from, so [errors.Is] and [errors.As] see through it.
+// The marks of an error are decoration on a [line.View], so the caller
+// that renders the error decides how it looks. [SourceError.Excerpt]
+// returns the hunks around the locations as a view for any
+// [printer.Printer], [SourceError.Annotate] marks a whole view of the
+// source, as a viewer that shows errors inline needs, and
+// [SourceError.Render] prints the message and the excerpt with the printer
+// and context lines it is given, which is what %+v does with the defaults:
+//
+//	var bound *niceyaml.SourceError
+//	if errors.As(err, &bound) {
+//		fmt.Println(bound.Render(p, 3))
+//	}
+//
+// A SourceError implements the error interface and unwraps to the error it
+// was created from, so [errors.Is] and [errors.As] see through it.
 //
 // Create instances with [Source.WrapError] or [Document.WrapError], or
 // receive them from the [Source] and [Document] methods.
@@ -408,58 +419,9 @@ type SourceError struct {
 	doc *Document
 }
 
-// DetailOption configures how [SourceError.Detail] and [SourceError.Render]
-// render the source excerpt.
-//
-// Available options:
-//   - [WithPrinter]
-//   - [WithContextLines]
-type DetailOption func(*detailConfig)
-
-// detailConfig holds the settings a [DetailOption] configures.
-type detailConfig struct {
-	printer      *printer.Printer
-	contextLines int
-}
-
-// newDetailConfig applies opts over the defaults: the shared default
-// [printer.Printer] and [defaultContextLines].
-func newDetailConfig(opts []DetailOption) detailConfig {
-	c := detailConfig{contextLines: defaultContextLines}
-	for _, opt := range opts {
-		opt(&c)
-	}
-
-	if c.printer == nil {
-		c.printer = defaultPrinter()
-	}
-
-	return c
-}
-
-// defaultContextLines is the number of context lines shown around an error
-// when [WithContextLines] is not set.
+// defaultContextLines is the number of context lines the %+v verb shows
+// around an error.
 const defaultContextLines = 2
-
-// WithContextLines is a [DetailOption] that sets the number of context lines
-// shown around each error location. The default is 2, and a negative count
-// shows the error lines alone, as 0 does.
-func WithContextLines(lines int) DetailOption {
-	return func(c *detailConfig) {
-		c.contextLines = lines
-	}
-}
-
-// WithPrinter is a [DetailOption] that sets the [*printer.Printer] that
-// renders the source excerpt. The printer's width, set with
-// [printer.WithWidth], controls word wrapping, and its styles color the
-// highlighted locations. The default is a [printer.Printer] from
-// [printer.New].
-func WithPrinter(p *printer.Printer) DetailOption {
-	return func(c *detailConfig) {
-		c.printer = p
-	}
-}
 
 // newSourceError binds err to src, with paths resolving in doc, or in the
 // single document src picks when doc is nil.
@@ -500,11 +462,11 @@ func (e *SourceError) Unwrap() error {
 // another source already carries the position that binding resolved, and a
 // location that does not resolve has none to add, so both come back as
 // they are. Nested errors are not part of the message; see
-// [SourceError.Detail].
+// [SourceError.Excerpt].
 //
 // The result is plain text and never includes source lines, so it is safe to
-// log or compare. Use [SourceError.Detail] or the %+v verb for the annotated
-// source excerpt.
+// log or compare. Use [SourceError.Excerpt] or the %+v verb for the
+// annotated source excerpt.
 func (e *SourceError) Error() string {
 	msg := e.err.Error()
 
@@ -559,12 +521,12 @@ func firstSourceError(err error) (*SourceError, bool) {
 // Format implements [fmt.Formatter].
 //
 // The %v and %s verbs print [SourceError.Error]. The %+v verb prints
-// [SourceError.Render] with the default options. The %q verb quotes
-// [SourceError.Error].
+// [SourceError.Render] with the default [printer.Printer] and two lines of
+// context. The %q verb quotes [SourceError.Error].
 func (e *SourceError) Format(f fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && f.Flag('+'):
-		writeString(f, e.Render())
+		writeString(f, e.Render(nil, defaultContextLines))
 
 	case verb == 'q':
 		writeString(f, strconv.Quote(e.Error()))
@@ -623,58 +585,92 @@ func (e *SourceError) rangeOf(loc location) position.Range {
 	return position.NewRange(ranges[0].Start, ranges[len(ranges)-1].End)
 }
 
-// Detail renders the source around the error's location with the location
-// highlighted. Nested errors appear as annotations below their own lines, and
-// distant locations render as separate hunks. A nested error whose location
-// does not resolve is left out of the excerpt; [SourceError.Render] lists
-// those after it.
+// Annotate marks the error on view, which is a view of the source the
+// error is bound to, such as one from [Source.View]: the location is
+// highlighted with [style.GenericError], and each nested error's message
+// is an annotation below its own line. A viewer that shows a document with
+// its errors in place marks its view this way and renders it as it is.
 //
-// Detail renders every location that resolves and returns an error only
+// Annotate marks every location that resolves and returns an error only
 // when none does: the errors [SourceError.Location] returns, joined with
 // those of the nested errors, or [ErrOutOfRange] for a location past the
-// last line. The [printer.Printer] and the number of context lines come from opts,
-// and rendering works on a view of its own over the source.
-func (e *SourceError) Detail(opts ...DetailOption) (string, error) {
-	detail, _, err := e.detail(opts)
+// last line. A nested error whose location does not resolve is left out.
+func (e *SourceError) Annotate(view *line.View) error {
+	_, _, err := e.annotate(view)
 
-	return detail, err
+	return err
 }
 
-// detail is [SourceError.Detail] that also returns the message of every
+// Excerpt returns a [line.View] of the source around the error's location
+// with the location highlighted, as [SourceError.Annotate] marks it, and
+// context lines of unchanged content on either side of each marked line.
+// Distant locations become separate hunks, and the first line of each hunk
+// after the first carries a "..." annotation above it. The lines keep the
+// numbers they have in the source, so any [printer.Printer] renders the
+// excerpt with the file's line numbers, as it renders the hunks of a diff.
+// A negative context shows the marked lines alone, as 0 does.
+//
+// Excerpt returns an error only when no location resolves, as
+// [SourceError.Annotate] does. A nested error whose location does not
+// resolve is left out of the excerpt; [SourceError.Render] lists those
+// after it.
+func (e *SourceError) Excerpt(context int) (*line.View, error) {
+	excerpt, _, err := e.excerpt(context)
+
+	return excerpt, err
+}
+
+// excerpt is [SourceError.Excerpt] that also returns the message of every
 // nested error the excerpt does not annotate, in the order the errors were
 // given.
-func (e *SourceError) detail(opts []DetailOption) (string, []string, error) {
-	a := e.anchor()
-	if a == nil {
-		return "", nil, ErrNoLocation
-	}
-
+func (e *SourceError) excerpt(context int) (*line.View, []string, error) {
 	view := e.source.View()
 
-	positions, unresolved, err := e.collectPositions(a, view.Lines())
-
-	headlines := make([]string, 0, len(unresolved))
-	for _, nested := range unresolved {
-		headlines = append(headlines, nested.Error())
+	marked, unresolved, err := e.annotate(view)
+	if err != nil {
+		return nil, unresolved, err
 	}
 
-	if len(positions) == 0 {
-		return "", headlines, err
+	// Group the marked lines into hunks with context around each. Errors
+	// whose context windows touch share a hunk, so a line gap always
+	// separates two hunks for the "..." separator. ContextSpans clamps the
+	// spans to the view, so each one starts on a line the view holds.
+	spans := position.ContextSpans(marked, context, view.Len())
+	excerpt := view.Slice(spans...)
+
+	// Add "..." annotations to first line of each non-first hunk.
+	start := 0
+
+	for i, span := range spans {
+		if i > 0 {
+			excerpt.Annotate(start, line.Annotation{
+				Content:   "...",
+				Placement: line.Above,
+			})
+		}
+
+		start += span.Len()
 	}
 
-	return e.render(newDetailConfig(opts), view, positions), headlines, nil
+	return excerpt, unresolved, nil
 }
 
-// Render returns [SourceError.Error], then [SourceError.Detail] rendered
-// with opts when a location resolves, then one line per nested error the
-// detail does not annotate, each with its own unresolved location. Blank
-// lines separate the parts. This is what the %+v verb prints.
-func (e *SourceError) Render(opts ...DetailOption) string {
+// Render returns [SourceError.Error], then [SourceError.Excerpt] with
+// context lines rendered by p when a location resolves, then one line per
+// nested error the excerpt does not annotate, each with its own unresolved
+// location. Blank lines separate the parts. A nil p renders with a
+// [printer.Printer] from [printer.New]. The %+v verb prints Render with
+// that printer and two lines of context.
+func (e *SourceError) Render(p *printer.Printer, context int) string {
+	if p == nil {
+		p = defaultPrinter()
+	}
+
 	parts := []string{e.Error()}
 
-	detail, unresolved, err := e.detail(opts)
+	excerpt, unresolved, err := e.excerpt(context)
 	if err == nil {
-		parts = append(parts, detail)
+		parts = append(parts, p.Print(excerpt))
 	}
 
 	if len(unresolved) > 0 {
@@ -692,27 +688,40 @@ type errorPosition struct {
 	pos     position.Position
 }
 
-// render renders view with every position highlighted, the nested ones
-// annotated with their messages, and the lines around them grouped into
-// hunks.
-//
-// Rendering happens on a view of its own over the source, so calling
-// [SourceError.Detail] repeatedly renders the same output.
-func (e *SourceError) render(cfg detailConfig, view *line.View, positions []errorPosition) string {
+// annotate is [SourceError.Annotate] that also returns the indices of the
+// lines it marked, with repeats, and the message of every nested error
+// whose location did not resolve, in the order the errors were given.
+func (e *SourceError) annotate(view *line.View) ([]int, []string, error) {
+	a := e.anchor()
+	if a == nil {
+		return nil, nil, ErrNoLocation
+	}
+
+	positions, unresolved, err := e.collectPositions(a, view.Lines())
+
+	headlines := make([]string, 0, len(unresolved))
+	for _, nested := range unresolved {
+		headlines = append(headlines, nested.Error())
+	}
+
+	if len(positions) == 0 {
+		return nil, headlines, err
+	}
+
 	// Collect all ranges from positions and apply overlays to the view. The
-	// line of each position joins the error lines as well, since a position
-	// with no token under it has no range to highlight and still picks the
-	// lines the excerpt shows.
+	// line of each position joins the marked lines as well, since a
+	// position with no token under it has no range to highlight and still
+	// picks the lines an excerpt shows.
 	var allRanges position.Ranges
 
-	errorLines := make([]int, 0, len(positions))
+	marked := make([]int, 0, len(positions))
 
 	for _, pos := range positions {
 		allRanges = append(allRanges, pos.ranges...)
-		errorLines = append(errorLines, pos.pos.Line)
+		marked = append(marked, pos.pos.Line)
 	}
 
-	errorLines = append(errorLines, allRanges.LineIndices()...)
+	marked = append(marked, allRanges.LineIndices()...)
 
 	view.AddOverlay(style.GenericError, allRanges...)
 
@@ -720,25 +729,7 @@ func (e *SourceError) render(cfg detailConfig, view *line.View, positions []erro
 		view.Annotate(lineIdx, annotation)
 	}
 
-	// Group the error lines into hunks with context around each. Errors
-	// whose context windows touch share a hunk, so a line gap always
-	// separates two hunks for the "..." separator. ContextSpans clamps the
-	// spans to the view, so each one starts on a line the view holds.
-	hunkSpans := position.ContextSpans(errorLines, cfg.contextLines, view.Len())
-
-	// Add "..." annotations to first line of each non-first hunk.
-	for i, span := range hunkSpans {
-		if i == 0 || span.Start < 0 || span.Start >= view.Len() {
-			continue
-		}
-
-		view.Annotate(span.Start, line.Annotation{
-			Content:   "...",
-			Placement: line.Above,
-		})
-	}
-
-	return cfg.printer.Print(view, hunkSpans...)
+	return marked, headlines, nil
 }
 
 // collectPositions resolves the main location of a and the locations of its

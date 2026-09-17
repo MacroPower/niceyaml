@@ -355,9 +355,9 @@ func (s *Source) parse() (*ast.File, error) {
 
 // WrapError binds err to this [*Source] when err's chain holds an [*Error].
 // The returned [*SourceError] resolves the location of that inner Error
-// against this source, and its [SourceError.Render] and
-// [SourceError.Detail] accept [DetailOption] values for how the excerpt
-// looks. A path resolves in the single document [Source.Document] picks,
+// against this source, and [SourceError.Render] and [SourceError.Excerpt]
+// render the excerpt with the printer of the caller's choice. A path
+// resolves in the single document [Source.Document] picks,
 // as [Source.Decode] decodes it, so a file that holds several documents
 // binds through [Document.WrapError] of the document the path belongs to.
 //

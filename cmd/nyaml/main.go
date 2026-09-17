@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 	"go.jacobcolvin.com/x/cobras/profile"
 
-	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/fangs"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
@@ -40,7 +39,7 @@ func main() {
 	errPrinter := printer.New(printer.WithWidth(terminalWidth()))
 
 	err := fang.Execute(context.Background(), rootCmd,
-		fang.WithErrorHandler(fangs.NewErrorHandler(niceyaml.WithPrinter(errPrinter))),
+		fang.WithErrorHandler(fangs.NewErrorHandler(fangs.WithPrinter(errPrinter))),
 		fang.WithColorSchemeFunc(fangs.ColorSchemeFunc(style.Default())),
 	)
 

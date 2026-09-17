@@ -16,6 +16,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
@@ -33,13 +34,22 @@ func (e *customTestError) Error() string {
 
 // render formats err the way %+v does, which prints the annotated source
 // when the error resolves to a location and the plain message otherwise. A
-// [*niceyaml.SourceError] renders with [newXMLPrinter] and opts, so tests can
-// assert on plain text.
-func render(err error, opts ...niceyaml.DetailOption) string {
-	if bound, ok := err.(*niceyaml.SourceError); ok { //nolint:errorlint // Mirrors %+v, which formats the top-level value.
-		opts = append([]niceyaml.DetailOption{niceyaml.WithPrinter(newXMLPrinter())}, opts...)
+// [*niceyaml.SourceError] renders with [newXMLPrinter] and two lines of
+// context, so tests can assert on plain text.
+func render(err error) string {
+	return renderContext(err, 2)
+}
 
-		return bound.Render(opts...)
+// renderContext is [render] with the given number of context lines.
+func renderContext(err error, context int) string {
+	return renderWith(err, newXMLPrinter(), context)
+}
+
+// renderWith is [render] with the given printer and number of context
+// lines. An error that is not a [*niceyaml.SourceError] formats with %+v.
+func renderWith(err error, p *printer.Printer, context int) string {
+	if bound, ok := err.(*niceyaml.SourceError); ok { //nolint:errorlint // Mirrors %+v, which formats the top-level value.
+		return bound.Render(p, context)
 	}
 
 	return fmt.Sprintf("%+v", err)
@@ -142,28 +152,20 @@ func TestSourceWrapError(t *testing.T) {
 	`)
 
 	tcs := map[string]struct {
-		opts        func() []niceyaml.DetailOption
 		inputErr    func() error
 		wantExact   string
 		wantNil     bool
 		wantSameErr bool
 	}{
 		"wrap nil returns nil": {
-			opts:     func() []niceyaml.DetailOption { return nil },
 			inputErr: func() error { return nil },
 			wantNil:  true,
 		},
 		"wrap non-error type returns unchanged": {
-			opts:        func() []niceyaml.DetailOption { return nil },
 			inputErr:    func() error { return errors.New("plain error") },
 			wantSameErr: true,
 		},
-		"wrap error renders with options and source": {
-			opts: func() []niceyaml.DetailOption {
-				return []niceyaml.DetailOption{
-					niceyaml.WithPrinter(newXMLPrinter()),
-				}
-			},
+		"wrap error renders with source": {
 			inputErr: func() error {
 				return niceyaml.NewError(
 					"test error",
@@ -203,7 +205,7 @@ func TestSourceWrapError(t *testing.T) {
 			require.Error(t, got)
 
 			if tc.wantExact != "" {
-				assert.Equal(t, tc.wantExact, trimLines(render(got, tc.opts()...)))
+				assert.Equal(t, tc.wantExact, trimLines(render(got)))
 			}
 		})
 	}
@@ -490,17 +492,16 @@ func TestErrorAnnotation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			var opts []niceyaml.DetailOption
-
+			context := 2
 			if tc.contextLines > 0 {
-				opts = append(opts, niceyaml.WithContextLines(tc.contextLines))
+				context = tc.contextLines
 			}
 
 			err := xmlSource(tc.source).WrapError(
 				niceyaml.NewError(tc.errMsg, niceyaml.WithPath(tc.path)),
 			)
 
-			assert.Equal(t, tc.want, trimLines(render(err, opts...)))
+			assert.Equal(t, tc.want, trimLines(renderContext(err, context)))
 		})
 	}
 }
@@ -597,7 +598,11 @@ func TestWithPrinter(t *testing.T) {
 		"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
 		"<nameTag>foo</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>bar</literalString>",
 	)
-	assert.Equal(t, want, trimLines(render(err, niceyaml.WithPrinter(customPrinter))))
+
+	var bound *niceyaml.SourceError
+
+	require.ErrorAs(t, err, &bound)
+	assert.Equal(t, want, trimLines(bound.Render(customPrinter, 2)))
 }
 
 func TestError_SpecialParentContext(t *testing.T) {
@@ -1381,7 +1386,7 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 			),
 		))
 
-		got := trimLines(render(err, niceyaml.WithContextLines(1)))
+		got := trimLines(renderContext(err, 1))
 
 		// Should show context around line3.
 		assert.Contains(t, got, "line2")
@@ -1415,7 +1420,7 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 			),
 		))
 
-		got := trimLines(render(err, niceyaml.WithContextLines(0)))
+		got := trimLines(renderContext(err, 0))
 
 		// Should show the full range from line1 to line6.
 		assert.Contains(t, got, "line1")
@@ -1447,7 +1452,7 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 			),
 		))
 
-		got := trimLines(render(err, niceyaml.WithContextLines(0)))
+		got := trimLines(renderContext(err, 0))
 
 		// Should show line2 with combined errors.
 		assert.Contains(t, got, "line2")
@@ -1490,7 +1495,7 @@ func TestError_HunkDisplay(t *testing.T) {
 			),
 		))
 
-		got := trimLines(render(err, niceyaml.WithContextLines(1)))
+		got := trimLines(renderContext(err, 1))
 
 		// Should show both errors.
 		assert.Contains(t, got, "error at start")
@@ -1596,8 +1601,8 @@ func TestError_HunkDisplay(t *testing.T) {
 
 		// A negative count renders as 0 does, so each error line is a hunk
 		// of its own with no context around it.
-		want := trimLines(render(err, niceyaml.WithContextLines(0)))
-		got := trimLines(render(err, niceyaml.WithContextLines(-1)))
+		want := trimLines(renderContext(err, 0))
+		got := trimLines(renderContext(err, -1))
 
 		assert.Equal(t, want, got)
 		assert.Contains(t, got, "line1")
@@ -1634,7 +1639,7 @@ func TestError_HunkDisplay(t *testing.T) {
 			),
 		))
 
-		got := trimLines(render(err, niceyaml.WithContextLines(1)))
+		got := trimLines(renderContext(err, 1))
 
 		// Should show both errors.
 		assert.Contains(t, got, "first error")
@@ -1674,7 +1679,7 @@ func TestError_HunkDisplay(t *testing.T) {
 			),
 		))
 
-		got := trimLines(render(err, niceyaml.WithContextLines(1)))
+		got := trimLines(renderContext(err, 1))
 
 		// Should show both errors.
 		assert.Contains(t, got, "first location error")
@@ -1711,7 +1716,7 @@ func TestError_HunkDisplay(t *testing.T) {
 			),
 		))
 
-		got := trimLines(render(err, niceyaml.WithContextLines(1)))
+		got := trimLines(renderContext(err, 1))
 
 		// Should show both errors with context clipped to valid range.
 		assert.Contains(t, got, "error at first")
@@ -1750,7 +1755,7 @@ func TestError_HunkDisplay(t *testing.T) {
 			),
 		))
 
-		got := trimLines(render(err, niceyaml.WithContextLines(1)))
+		got := trimLines(renderContext(err, 1))
 
 		// Should show both error locations.
 		assert.Contains(t, got, "<genericError>line1</genericError>")
@@ -1786,7 +1791,7 @@ func TestError_HunkDisplay(t *testing.T) {
 			),
 		))
 
-		got := trimLines(render(err, niceyaml.WithContextLines(0)))
+		got := trimLines(renderContext(err, 0))
 
 		// Should show both error annotations.
 		assert.Contains(t, got, "error at line1")
@@ -1837,7 +1842,7 @@ func TestError_Width(t *testing.T) {
 				niceyaml.WithToken(tokens[0]),
 			))
 
-			output := render(err, niceyaml.WithPrinter(errPrinter))
+			output := renderWith(err, errPrinter, 2)
 			lines := strings.Split(output, "\n")
 
 			// Skip the header line "[1:1] $.name: test error:" and the empty line.
@@ -1883,7 +1888,7 @@ func TestError_Width_WithCustomPrinter(t *testing.T) {
 		niceyaml.WithToken(tokens[0]),
 	))
 
-	output := render(err, niceyaml.WithPrinter(errPrinter))
+	output := renderWith(err, errPrinter, 2)
 	lines := strings.Split(output, "\n")
 
 	// Should have multiple content lines due to wrapping.
@@ -1917,7 +1922,7 @@ func TestError_Width_DefaultPrinter(t *testing.T) {
 		niceyaml.WithToken(tokens[0]),
 	))
 
-	output := render(err, niceyaml.WithPrinter(errPrinter))
+	output := renderWith(err, errPrinter, 2)
 	lines := strings.Split(output, "\n")
 
 	// Should have multiple content lines due to wrapping.
@@ -2004,7 +2009,7 @@ func TestError_Width_AnnotationWrapping(t *testing.T) {
 				),
 			))
 
-			got := trimLines(render(err, niceyaml.WithPrinter(errPrinter)))
+			got := trimLines(renderWith(err, errPrinter, 2))
 
 			assert.Equal(t, tc.want, got)
 		})
@@ -2041,7 +2046,7 @@ func TestError_Width_MultipleAnnotationsWrapping(t *testing.T) {
 			),
 		),
 	))
-	got := trimLines(render(err, niceyaml.WithPrinter(errPrinter)))
+	got := trimLines(renderWith(err, errPrinter, 2))
 
 	want := stringtest.JoinLF(
 		"validation failed at 2 locations",
@@ -2086,7 +2091,7 @@ func TestError_Width_CombinedAnnotationsOnSameLine(t *testing.T) {
 			),
 		),
 	))
-	got := trimLines(render(err, niceyaml.WithPrinter(errPrinter)))
+	got := trimLines(renderWith(err, errPrinter, 2))
 
 	want := stringtest.JoinLF(
 		"[1:1] $.key: validation failed",
@@ -2293,8 +2298,10 @@ func TestError_WrappedContext(t *testing.T) {
 
 	require.ErrorAs(t, wrapped, &bound)
 
-	detail, err := bound.Detail(niceyaml.WithPrinter(newXMLPrinter()))
+	excerpt, err := bound.Excerpt(2)
 	require.NoError(t, err)
+
+	detail := newXMLPrinter().Print(excerpt)
 	assert.Contains(t, detail, "second")
 	assert.NotContains(t, detail, "^")
 
@@ -2330,8 +2337,10 @@ func TestError_ContextAboveLocation(t *testing.T) {
 
 	require.ErrorAs(t, wrapped, &bound)
 
-	detail, err := bound.Detail(niceyaml.WithPrinter(newXMLPrinter()))
+	excerpt, err := bound.Excerpt(2)
 	require.NoError(t, err)
+
+	detail := newXMLPrinter().Print(excerpt)
 	assert.Contains(t, detail, "<genericError>second</genericError>")
 	assert.NotContains(t, detail, "<genericError>first</genericError>")
 }
@@ -2364,7 +2373,7 @@ func TestError_NestedErrorsRenderAsAnnotations(t *testing.T) {
 
 	require.ErrorAs(t, wrapped, &bound)
 
-	got := trimLines(bound.Render(niceyaml.WithPrinter(plain)))
+	got := trimLines(bound.Render(plain, 2))
 
 	assert.Equal(t, "document 0: validation failed at 2 locations", strings.SplitN(got, "\n", 2)[0])
 	assert.NotContains(t, got, "$.a")
@@ -2397,10 +2406,10 @@ func TestError_NestedErrorChains(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 
-		detail, detailErr := bound.Detail(niceyaml.WithPrinter(newXMLPrinter()))
-		require.NoError(t, detailErr)
+		excerpt, excerptErr := bound.Excerpt(2)
+		require.NoError(t, excerptErr)
 
-		got := trimLines(detail)
+		got := trimLines(newXMLPrinter().Print(excerpt))
 		assert.Contains(t, got, "<genericError>2</genericError>")
 		assert.Contains(t, got, "^ ctx: $.b: bad")
 
@@ -2636,9 +2645,10 @@ func TestError_ResolvesThroughErrorWrappers(t *testing.T) {
 
 	require.ErrorAs(t, wrapped, &got)
 
-	detail, err := got.Detail()
+	excerpt, err := got.Excerpt(2)
 	require.NoError(t, err)
-	assert.NotEmpty(t, detail)
+	require.NotNil(t, excerpt)
+	assert.Positive(t, excerpt.Len())
 }
 
 func TestError_RangeRendersFromSource(t *testing.T) {
@@ -2783,7 +2793,7 @@ func TestSourceError_Location_MultiLineToken(t *testing.T) {
 	assert.Equal(t, position.NewRange(position.New(0, 6), position.New(1, 8)), got)
 }
 
-func TestSourceError_Detail_Errors(t *testing.T) {
+func TestSourceError_Excerpt_Errors(t *testing.T) {
 	t.Parallel()
 
 	source := xmlSource("name: test\nvalue: 123\n")
@@ -2847,9 +2857,9 @@ func TestSourceError_Detail_Errors(t *testing.T) {
 
 			require.ErrorAs(t, source.WrapError(tc.err), &bound)
 
-			got, err := bound.Detail()
+			got, err := bound.Excerpt(2)
 			require.ErrorIs(t, err, tc.is)
-			assert.Empty(t, got)
+			assert.Nil(t, got)
 
 			// The %+v verb has no excerpt to show, so it prints the message
 			// and any nested errors the excerpt would have annotated.
@@ -2867,9 +2877,273 @@ func TestSourceError_Detail_Errors(t *testing.T) {
 			niceyaml.NewError("second", niceyaml.WithPath(paths.Root().Child("value").Value())),
 		))), &bound)
 
-		got, err := bound.Detail()
+		excerpt, err := bound.Excerpt(2)
 		require.NoError(t, err)
+
+		got := newXMLPrinter().Print(excerpt)
 		assert.Contains(t, got, "^ second")
 		assert.NotContains(t, got, "first")
+	})
+}
+
+// excerptSource is a ten-line source whose second and eighth lines are far
+// enough apart that an excerpt with one line of context shows them as two
+// hunks.
+const excerptSource = "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\nf: 6\ng: 7\nh: 8\ni: 9\nj: 10\n"
+
+// excerptError binds an error on the value of b with a nested error on the
+// value of h to a source of [excerptSource], and returns the bound error.
+func excerptError(t *testing.T) *niceyaml.SourceError {
+	t.Helper()
+
+	err := niceyaml.NewSourceFromString(excerptSource).WrapError(niceyaml.NewError(
+		"bad b",
+		niceyaml.WithPath(paths.Root().Child("b").Value()),
+		niceyaml.WithErrors(
+			niceyaml.NewError("bad h", niceyaml.WithPath(paths.Root().Child("h").Value())),
+		),
+	))
+
+	var bound *niceyaml.SourceError
+
+	require.ErrorAs(t, err, &bound)
+
+	return bound
+}
+
+// lineNumbers returns the source line number of every line in view.
+func lineNumbers(view *line.View) []int {
+	numbers := make([]int, 0, view.Len())
+	for _, l := range view.AllLines() {
+		numbers = append(numbers, l.Number())
+	}
+
+	return numbers
+}
+
+func TestSourceError_Excerpt(t *testing.T) {
+	t.Parallel()
+
+	t.Run("holds only the hunk lines with their source numbers", func(t *testing.T) {
+		t.Parallel()
+
+		excerpt, err := excerptError(t).Excerpt(1)
+		require.NoError(t, err)
+
+		assert.Equal(t, []int{1, 2, 3, 7, 8, 9}, lineNumbers(excerpt))
+		assert.Equal(t, "b: 2", excerpt.Line(1).Content())
+		assert.Equal(t, "h: 8", excerpt.Line(4).Content())
+	})
+
+	t.Run("overlays the error ranges with the error style", func(t *testing.T) {
+		t.Parallel()
+
+		excerpt, err := excerptError(t).Excerpt(1)
+		require.NoError(t, err)
+
+		want := line.Overlays{{Style: style.GenericError, Cols: position.NewSpan(3, 4)}}
+		assert.Equal(t, want, excerpt.Overlays(1), "the main error covers the value of b")
+		assert.Equal(t, want, excerpt.Overlays(4), "the nested error covers the value of h")
+
+		for _, i := range []int{0, 2, 3, 5} {
+			assert.Empty(t, excerpt.Overlays(i), "line %d carries no overlay", i)
+		}
+	})
+
+	t.Run("annotates nested messages below their lines", func(t *testing.T) {
+		t.Parallel()
+
+		excerpt, err := excerptError(t).Excerpt(1)
+		require.NoError(t, err)
+
+		assert.Equal(t, line.Annotations{
+			{Content: "bad h", Placement: line.Below, Col: 3},
+		}, excerpt.Annotations(4).Filter(line.Below))
+		assert.Empty(t, excerpt.Annotations(1), "the main error has no message of its own")
+	})
+
+	t.Run("separates hunks after the first with an ellipsis", func(t *testing.T) {
+		t.Parallel()
+
+		excerpt, err := excerptError(t).Excerpt(1)
+		require.NoError(t, err)
+
+		assert.Equal(t, line.Annotations{
+			{Content: "...", Placement: line.Above},
+		}, excerpt.Annotations(3))
+		assert.Empty(t, excerpt.Annotations(0), "the first hunk has no separator")
+
+		for _, i := range []int{1, 2, 4, 5} {
+			assert.Empty(t, excerpt.Annotations(i).Filter(line.Above), "line %d has no separator", i)
+		}
+	})
+
+	t.Run("prints as the render body", func(t *testing.T) {
+		t.Parallel()
+
+		bound := excerptError(t)
+
+		excerpt, err := bound.Excerpt(1)
+		require.NoError(t, err)
+
+		want := stringtest.JoinLF(
+			"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>1</literalNumberInteger>",
+			"<nameTag>b</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>2</genericError>",
+			"<nameTag>c</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>3</literalNumberInteger>",
+			"<comment>...</comment>",
+			"<nameTag>g</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>7</literalNumberInteger>",
+			"<nameTag>h</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>8</genericError>",
+			"<comment>   ^ bad h</comment>",
+			"<nameTag>i</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>9</literalNumberInteger>",
+		)
+
+		got := trimLines(newXMLPrinter().Print(excerpt))
+		assert.Equal(t, want, got)
+		assert.Equal(t, bound.Error()+"\n\n"+got, trimLines(renderContext(bound, 1)))
+	})
+
+	t.Run("negative context shows the marked lines alone", func(t *testing.T) {
+		t.Parallel()
+
+		bound := excerptError(t)
+
+		zero, err := bound.Excerpt(0)
+		require.NoError(t, err)
+
+		negative, err := bound.Excerpt(-1)
+		require.NoError(t, err)
+
+		assert.Equal(t, []int{2, 8}, lineNumbers(zero))
+		assert.Equal(t, lineNumbers(zero), lineNumbers(negative))
+		assert.Equal(t, newXMLPrinter().Print(zero), newXMLPrinter().Print(negative))
+	})
+
+	t.Run("no location", func(t *testing.T) {
+		t.Parallel()
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, niceyaml.NewSourceFromString(excerptSource).WrapError(niceyaml.NewError("bad")), &bound)
+
+		excerpt, err := bound.Excerpt(2)
+		require.ErrorIs(t, err, niceyaml.ErrNoLocation)
+		assert.Nil(t, excerpt)
+	})
+}
+
+func TestSourceError_Annotate(t *testing.T) {
+	t.Parallel()
+
+	// Assert that no line of view carries an overlay or annotation.
+	unmarked := func(t *testing.T, view *line.View) {
+		t.Helper()
+
+		for i := range view.Len() {
+			assert.Empty(t, view.Overlays(i), "line %d carries no overlay", i)
+			assert.Empty(t, view.Annotations(i), "line %d carries no annotation", i)
+		}
+	}
+
+	t.Run("marks the full view as the excerpt is marked", func(t *testing.T) {
+		t.Parallel()
+
+		bound := excerptError(t)
+		view := bound.Source().View()
+
+		require.NoError(t, bound.Annotate(view))
+
+		assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, lineNumbers(view))
+
+		want := line.Overlays{{Style: style.GenericError, Cols: position.NewSpan(3, 4)}}
+		assert.Equal(t, want, view.Overlays(1))
+		assert.Equal(t, want, view.Overlays(7))
+		assert.Equal(t, line.Annotations{
+			{Content: "bad h", Placement: line.Below, Col: 3},
+		}, view.Annotations(7))
+
+		for i := range view.Len() {
+			if i == 1 || i == 7 {
+				continue
+			}
+
+			assert.Empty(t, view.Overlays(i), "line %d carries no overlay", i)
+			assert.Empty(t, view.Annotations(i), "line %d carries no annotation", i)
+		}
+
+		// The excerpt is the marked view cut down to its hunks.
+		excerpt, err := bound.Excerpt(0)
+		require.NoError(t, err)
+		assert.Equal(t, view.Overlays(1), excerpt.Overlays(0))
+		assert.Equal(t, view.Overlays(7), excerpt.Overlays(1))
+		assert.Equal(t, view.Annotations(7), excerpt.Annotations(1).Filter(line.Below))
+	})
+
+	t.Run("two errors annotate one view", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(excerptSource)
+		view := source.View()
+
+		var first, second *niceyaml.SourceError
+
+		require.ErrorAs(t, source.WrapError(niceyaml.NewError(
+			"bad b", niceyaml.WithPath(paths.Root().Child("b").Value()),
+		)), &first)
+		require.ErrorAs(t, source.WrapError(niceyaml.NewError(
+			"bad d",
+			niceyaml.WithErrors(niceyaml.NewError("too big", niceyaml.WithPath(paths.Root().Child("d").Value()))),
+		)), &second)
+
+		require.NoError(t, first.Annotate(view))
+		require.NoError(t, second.Annotate(view))
+
+		want := line.Overlays{{Style: style.GenericError, Cols: position.NewSpan(3, 4)}}
+		assert.Equal(t, want, view.Overlays(1))
+		assert.Equal(t, want, view.Overlays(3))
+		assert.Empty(t, view.Annotations(1))
+		assert.Equal(t, line.Annotations{
+			{Content: "too big", Placement: line.Below, Col: 3},
+		}, view.Annotations(3))
+	})
+
+	t.Run("leaves the view unmarked when nothing resolves", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(excerptSource)
+
+		tcs := map[string]struct {
+			err *niceyaml.Error
+			is  error
+		}{
+			"no location": {
+				err: niceyaml.NewError("bad"),
+				is:  niceyaml.ErrNoLocation,
+			},
+			"path that does not resolve": {
+				err: niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("missing").Value())),
+				is:  paths.ErrNotFound,
+			},
+			"range past the last line": {
+				err: niceyaml.NewError("bad",
+					niceyaml.WithRange(position.NewRange(position.New(20, 0), position.New(20, 1))),
+				),
+				is: niceyaml.ErrOutOfRange,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, source.WrapError(tc.err), &bound)
+
+				view := source.View()
+
+				require.ErrorIs(t, bound.Annotate(view), tc.is)
+				unmarked(t, view)
+			})
+		}
 	})
 }

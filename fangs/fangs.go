@@ -9,15 +9,67 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/printer"
 )
 
 // ErrorHandler is the [fang.ErrorHandler] that [NewErrorHandler] returns
 // with no options, so [niceyaml.SourceError] values render with a default
-// [printer.Printer].
+// [printer.Printer] and two lines of context.
 //
 //nolint:gocritic // hugeParam: required by [fang.ErrorHandler] signature.
 func ErrorHandler(w io.Writer, styles fang.Styles, err error) {
-	handleError(w, styles, err, nil)
+	handleError(w, styles, err, newConfig(nil))
+}
+
+// Option configures the [fang.ErrorHandler] that [NewErrorHandler] returns.
+//
+// Available options:
+//   - [WithPrinter]
+//   - [WithContextLines]
+type Option func(*config)
+
+// config holds the settings an [Option] configures.
+type config struct {
+	printer *printer.Printer
+	context int
+}
+
+// newConfig applies opts over the defaults: a [printer.Printer] from
+// [printer.New] and two lines of context.
+func newConfig(opts []Option) config {
+	cfg := config{context: defaultContextLines}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	if cfg.printer == nil {
+		cfg.printer = printer.New()
+	}
+
+	return cfg
+}
+
+// defaultContextLines is the number of context lines shown around an error
+// when [WithContextLines] is not given, which matches the %+v verb.
+const defaultContextLines = 2
+
+// WithPrinter is an [Option] that sets the [*printer.Printer] that renders
+// the source excerpt of a [niceyaml.SourceError]. The printer's width, set
+// with [printer.WithWidth], controls word wrapping, and its styles color
+// the highlighted locations.
+func WithPrinter(p *printer.Printer) Option {
+	return func(cfg *config) {
+		cfg.printer = p
+	}
+}
+
+// WithContextLines is an [Option] that sets the number of context lines
+// shown around each error location. The default is 2, and a negative count
+// shows the error lines alone, as 0 does.
+func WithContextLines(lines int) Option {
+	return func(cfg *config) {
+		cfg.context = lines
+	}
 }
 
 // NewErrorHandler creates a new [fang.ErrorHandler] that renders
@@ -25,51 +77,51 @@ func ErrorHandler(w io.Writer, styles fang.Styles, err error) {
 // the [printer.Printer] and the context lines:
 //
 //	fang.WithErrorHandler(fangs.NewErrorHandler(
-//		niceyaml.WithPrinter(printer.New(printer.WithWidth(width))),
+//		fangs.WithPrinter(printer.New(printer.WithWidth(width))),
 //	))
 //
 // The handler prints a [niceyaml.SourceError] at the top with
-// [niceyaml.SourceError.Render], which is its message followed by
-// [niceyaml.SourceError.Detail]. Any other error prints with the %+v verb,
-// and the message stays as the error's wrappers wrote it. The message of a
-// SourceError inside that error is part of that text already, so the handler
-// prints the [niceyaml.SourceError.Detail] of each SourceError in the tree
-// below the message, in the order the SourceErrors appear in it, and a
-// joined error annotates each failure it holds. Unlike
-// [fang.DefaultErrorHandler], which wraps errors in a lipgloss style that
-// can break multi-line output, this handler applies styling only to the
-// error header, keeping the rendered lines intact.
-func NewErrorHandler(opts ...niceyaml.DetailOption) fang.ErrorHandler {
+// [niceyaml.SourceError.Render], which is its message followed by its
+// [niceyaml.SourceError.Excerpt]. Any other error prints with the %+v
+// verb, and the message stays as the error's wrappers wrote it. The message
+// of a SourceError inside that error is part of that text already, so the
+// handler prints the excerpt of each SourceError in the tree below the
+// message, in the order the SourceErrors appear in it, and a joined error
+// annotates each failure it holds. Unlike [fang.DefaultErrorHandler], which
+// wraps errors in a lipgloss style that can break multi-line output, this
+// handler applies styling only to the error header, keeping the rendered
+// lines intact.
+func NewErrorHandler(opts ...Option) fang.ErrorHandler {
+	cfg := newConfig(opts)
+
 	return func(w io.Writer, styles fang.Styles, err error) {
-		handleError(w, styles, err, opts)
+		handleError(w, styles, err, cfg)
 	}
 }
 
 // handleError renders err to w as [NewErrorHandler] describes.
 //
 //nolint:gocritic // hugeParam: fang.Styles is what the handler receives.
-func handleError(w io.Writer, styles fang.Styles, err error, opts []niceyaml.DetailOption) {
+func handleError(w io.Writer, styles fang.Styles, err error, cfg config) {
 	ignoreN(fmt.Fprintln(w, styles.ErrorHeader.String()))
 
 	var parts []string
 
-	//nolint:errorlint // Identity of the top-level error, not a chain search.
-	if top, ok := err.(*niceyaml.SourceError); ok {
-		parts = append(parts, top.Render(opts...))
+	if top, ok := err.(*niceyaml.SourceError); ok { //nolint:errorlint // Mirrors %+v, which formats the top-level value.
+		parts = append(parts, top.Render(cfg.printer, cfg.context))
 	} else {
 		parts = append(parts, fmt.Sprintf("%+v", err))
 
 		for _, yamlErr := range yamlErrors(err) {
-			detail, detailErr := yamlErr.Detail(opts...)
-			if detailErr == nil {
-				parts = append(parts, detail)
+			excerpt, excerptErr := yamlErr.Excerpt(cfg.context)
+			if excerptErr == nil {
+				parts = append(parts, cfg.printer.Print(excerpt))
 			}
 		}
 	}
 
 	msg := strings.Join(parts, "\n\n")
 
-	// Apply margin manually to each line to avoid lipgloss block padding.
 	for line := range strings.SplitSeq(msg, "\n") {
 		ignoreN(fmt.Fprintln(w, "  "+line))
 	}
