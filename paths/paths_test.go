@@ -134,6 +134,18 @@ func TestPath_Build(t *testing.T) {
 			want:     `$.'it\'s'`,
 			wantYAML: "$.it's",
 		},
+		"empty child name is quoted, but goccy leaves it bare": {
+			build:    func() paths.Path { return paths.Root().Child("") },
+			part:     paths.PartNode,
+			want:     "$.''",
+			wantYAML: "$.",
+		},
+		"empty recursive name is quoted, but goccy leaves it bare": {
+			build:    func() paths.Path { return paths.Root().Recursive("") },
+			part:     paths.PartNode,
+			want:     "$..''",
+			wantYAML: "$..",
+		},
 		"child name with brackets is quoted": {
 			build:    func() paths.Path { return paths.Root().Child("a[0]") },
 			part:     paths.PartNode,
@@ -307,6 +319,14 @@ func TestParse(t *testing.T) {
 			expr: "$.'a.b'[1].c",
 			want: "$.'a.b'[1].c",
 		},
+		"empty quoted key": {
+			expr: "$.''",
+			want: "$.''",
+		},
+		"empty quoted recursive key": {
+			expr: "$..''[0]",
+			want: "$..''[0]",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -359,9 +379,6 @@ func TestParse_Invalid(t *testing.T) {
 		"unterminated quote": {
 			expr: "$.'foo",
 		},
-		"empty quoted key": {
-			expr: "$.''",
-		},
 		"bare text after root": {
 			expr: "$foo",
 		},
@@ -413,6 +430,36 @@ func TestParse_RoundTrip(t *testing.T) {
 			// The goccy parser accepts the same expression.
 			_, err = yaml.PathString(want.String())
 			require.NoError(t, err)
+		})
+	}
+}
+
+func TestParse_RoundTrip_EmptyName(t *testing.T) {
+	t.Parallel()
+
+	// The goccy parser rejects $.'' so the empty name stays out of the table
+	// above, but Parse reads back what String writes.
+	source := niceyaml.NewSourceFromString("'': v\n")
+	file, err := source.File()
+	require.NoError(t, err)
+
+	tcs := map[string]paths.Path{
+		"child":     paths.Root().Child(""),
+		"recursive": paths.Root().Recursive(""),
+	}
+
+	for name, want := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := paths.Parse(want.String())
+			require.NoError(t, err)
+			assert.Equal(t, want, got)
+
+			nodes, err := got.Nodes(file.Docs[0])
+			require.NoError(t, err)
+			require.Len(t, nodes, 1)
+			assert.Equal(t, "v", nodes[0].GetToken().Value)
 		})
 	}
 }

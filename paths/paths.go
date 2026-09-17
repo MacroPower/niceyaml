@@ -98,9 +98,10 @@ const reservedNameChars = ".*[]$'"
 
 // quoteName returns name in the form [Parse] accepts as a child or
 // recursive selector, wrapping it in single quotes when it contains reserved
-// characters.
+// characters or is empty, since an unquoted empty name would leave a bare
+// `.` that Parse rejects.
 func quoteName(name string) string {
-	if !strings.ContainsAny(name, reservedNameChars) {
+	if name != "" && !strings.ContainsAny(name, reservedNameChars) {
 		return name
 	}
 

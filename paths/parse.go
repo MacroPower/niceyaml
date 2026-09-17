@@ -17,6 +17,7 @@ var ErrInvalidPath = errors.New("invalid path")
 //
 //	.name     a mapping entry by key
 //	.'name'   a key containing reserved characters, with `\` escaping `'`
+//	.''       the empty key
 //	..name    every mapping entry with that key, at any depth
 //	..'name'  the same for a key containing reserved characters
 //	[n]       a sequence element by 0-based index
@@ -134,7 +135,8 @@ func parseRecursive(rest string) (segment, string, error) {
 }
 
 // parseQuoted reads a single-quoted name after `.'` or `..'` as a selector
-// of the given kind, where `\` escapes the next character.
+// of the given kind, where `\` escapes the next character. The quotes may
+// hold nothing, which names the empty key.
 func parseQuoted(rest string, kind segmentKind) (segment, string, error) {
 	var sb strings.Builder
 
@@ -150,10 +152,6 @@ func parseQuoted(rest string, kind segmentKind) (segment, string, error) {
 			sb.WriteByte(rest[i])
 
 		case '\'':
-			if sb.Len() == 0 {
-				return segment{}, "", errors.New("empty selector")
-			}
-
 			return segment{kind: kind, name: sb.String()}, rest[i+1:], nil
 
 		default:
