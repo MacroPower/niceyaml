@@ -17,8 +17,11 @@ import (
 
 var (
 	// Pattern of a yaml-language-server schema directive, such as
-	// "yaml-language-server: $schema=./schema.json".
-	schemaDirectiveRE = regexp.MustCompile(`yaml-language-server:\s*\$schema=(.+)`)
+	// "yaml-language-server: $schema=./schema.json". The marker must open
+	// the comment, after optional whitespace, so a comment that mentions
+	// the marker mid-sentence is not a directive. The reference runs to
+	// the end of the comment, so a path may contain spaces.
+	schemaDirectiveRE = regexp.MustCompile(`^\s*yaml-language-server:\s*\$schema=(.+)`)
 
 	// ErrNoDirective indicates no schema directive was found in the document.
 	// It wraps [ErrNoMatch], so [Registry] moves on to the next resolver.
@@ -49,6 +52,12 @@ type ParsedDirective struct {
 //
 // The comment text should not include the '#' prefix.
 // Example input: " yaml-language-server: $schema=./schema.json".
+//
+// The "yaml-language-server:" marker must open the comment, after any
+// leading whitespace; a comment that mentions the marker after other text
+// is not a directive. Everything after "$schema=" is the reference, so a
+// path may contain spaces, and a trailing remark on the same line becomes
+// part of the reference.
 //
 // The YAML parser keeps trailing spaces in a comment's value, so
 // ParseDirective trims whitespace around the schema reference. A directive

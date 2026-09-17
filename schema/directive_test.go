@@ -82,6 +82,22 @@ func TestParseDirective(t *testing.T) {
 			input: " YAML-LANGUAGE-SERVER: $schema=schema.json",
 			want:  nil,
 		},
+		"marker after other text": {
+			input: " see yaml-language-server: $schema=./schema.json",
+			want:  nil,
+		},
+		"marker with a prefix": {
+			input: " not-a-yaml-language-server: $schema=./schema.json",
+			want:  nil,
+		},
+		"marker without leading space": {
+			input: "yaml-language-server: $schema=./schema.json",
+			want:  &schema.ParsedDirective{Schema: "./schema.json"},
+		},
+		"marker after a tab": {
+			input: "\tyaml-language-server: $schema=./schema.json",
+			want:  &schema.ParsedDirective{Schema: "./schema.json"},
+		},
 	}
 
 	for name, tc := range tcs {
