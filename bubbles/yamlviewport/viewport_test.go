@@ -3437,6 +3437,93 @@ func TestViewport_WordWrapDisablesHorizontalScroll(t *testing.T) {
 	assert.Contains(t, m.View(), "key: very long")
 }
 
+func TestViewport_HorizontalScrollReachesEnd(t *testing.T) {
+	t.Parallel()
+
+	// A 42-column line and a 63-column one, both ending in END.
+	short := "k: " + strings.Repeat("x", 36) + "END\n"
+	long := "k: " + strings.Repeat("y", 57) + "END\n"
+
+	// The maximum offset brings the last column of the widest rendered row
+	// into view. The row is gutter plus content, the visible width is the
+	// pane less the container frame, and in side-by-side mode both panes
+	// count.
+	tcs := map[string]struct {
+		printer *printer.Printer
+		setup   func(m *yamlviewport.Model)
+		width   int
+		wantMax int
+	}{
+		"line number gutter": {
+			printer: testPrinterWithLineNumbers(),
+			width:   20,
+			setup: func(m *yamlviewport.Model) {
+				m.SetSource(niceyaml.NewSourceFromString(short))
+			},
+			// Gutter 6 + content 42 - width 20.
+			wantMax: 28,
+		},
+		"line number gutter and border": {
+			printer: testPrinterWithLineNumbers().With(
+				printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())),
+			),
+			width: 20,
+			setup: func(m *yamlviewport.Model) {
+				m.SetSource(niceyaml.NewSourceFromString(short))
+			},
+			// Gutter 6 + content 42 - (width 20 - border 2).
+			wantMax: 30,
+		},
+		"side by side": {
+			printer: testPrinter(),
+			width:   60,
+			setup: func(m *yamlviewport.Model) {
+				before := strings.ReplaceAll(short, "x", "z")
+				m.AddRevision(niceyaml.NewSourceFromString(before, niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromString(short, niceyaml.WithName("v2")))
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+			},
+			// Gutter 1 + content 42 - pane (60 - 3) / 2.
+			wantMax: 15,
+		},
+		"side by side with a longer right pane": {
+			printer: testPrinter(),
+			width:   40,
+			setup: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromString("k: short\n", niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromString(long, niceyaml.WithName("v2")))
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+			},
+			// Gutter 1 + content 63 - pane (40 - 3) / 2.
+			wantMax: 46,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(tc.printer))
+			m.SetWidth(tc.width)
+			m.SetHeight(5)
+			m.SetWordWrap(false)
+			tc.setup(&m)
+
+			assert.InDelta(t, 0.0, m.HorizontalScrollPercent(), 0.01)
+
+			m.SetXOffset(1000)
+			assert.Equal(t, tc.wantMax, m.XOffset())
+			assert.InDelta(t, 1.0, m.HorizontalScrollPercent(), 0.01)
+			assert.Contains(t, m.View(), "END")
+
+			// One column short of the end cuts the last letter.
+			m.SetXOffset(tc.wantMax - 1)
+			assert.Less(t, m.HorizontalScrollPercent(), 1.0)
+			assert.NotContains(t, m.View(), "END")
+		})
+	}
+}
+
 func TestViewport_SetSearchTermEmpty(t *testing.T) {
 	t.Parallel()
 

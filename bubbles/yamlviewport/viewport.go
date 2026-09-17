@@ -1092,11 +1092,11 @@ func (m *Model) ScrollPercent() float64 {
 // between 0 and 1. It is 1 while word wrap is on, since wrapped lines never
 // overflow the content width.
 func (m *Model) HorizontalScrollPercent() float64 {
-	if m.left == nil || m.wrapEnabled {
+	if m.left == nil || m.printer == nil || m.wrapEnabled {
 		return 1.0
 	}
 
-	return scrollPercent(m.XOffset(), m.maxWidth(), m.left.Width())
+	return scrollPercent(m.XOffset(), m.scrollWidth(), m.rowWidth())
 }
 
 // scrollPercent calculates scroll position as a value between 0 and 1.
@@ -1122,14 +1122,34 @@ func (m *Model) lineCount() int {
 	return m.left.Len()
 }
 
-// maxXOffset returns the maximum X offset. Wrapped lines never overflow the
-// content width, so it is 0 while word wrap is on.
+// maxXOffset returns the maximum X offset, which brings the last column of
+// the widest rendered row into view. Wrapped lines never overflow the content
+// width, so it is 0 while word wrap is on.
 func (m *Model) maxXOffset() int {
-	if m.left == nil || m.wrapEnabled {
+	if m.left == nil || m.printer == nil || m.wrapEnabled {
 		return 0
 	}
 
-	return max(0, m.left.Width()-m.maxWidth())
+	return max(0, m.rowWidth()-m.scrollWidth())
+}
+
+// rowWidth returns the width of the widest row the printer renders for the
+// view before the container frame applies: the gutter plus the widest line,
+// over both panes in side-by-side mode.
+func (m *Model) rowWidth() int {
+	width := m.printer.GutterWidth(m.left) + m.left.Width()
+	if m.right != nil {
+		width = max(width, m.printer.GutterWidth(m.right)+m.right.Width())
+	}
+
+	return width
+}
+
+// scrollWidth returns the number of row columns a pane shows at once: the
+// pane width less the horizontal frame of the printer's container, which
+// cutRow keeps in place.
+func (m *Model) scrollWidth() int {
+	return max(0, m.paneWidth()-m.printer.ContainerStyle().GetHorizontalFrameSize())
 }
 
 // outerSize returns the width and height of the viewport frame: the set
