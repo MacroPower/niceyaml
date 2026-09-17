@@ -730,12 +730,9 @@ func (m *Model) updateSideBySideSearchState() {
 	}
 }
 
-// applySideBySideOverlays applies search highlights to both panes.
+// applySideBySideOverlays applies search highlights to both panes. Without
+// matches it clears the highlights of both panes.
 func (m *Model) applySideBySideOverlays() {
-	if m.searchTerm == "" {
-		return
-	}
-
 	// Determine the selected match position and whether it's on an equal line.
 	var (
 		selectedPos                     position.Position

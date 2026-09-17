@@ -3504,3 +3504,32 @@ func TestViewport_SearchAcrossRevisions(t *testing.T) {
 	m.SetSearchTerm("other")
 	assert.Equal(t, 1, m.SearchCount())
 }
+
+func TestViewport_ClearSearchSideBySide(t *testing.T) {
+	t.Parallel()
+
+	// The XML tags of the test styles take up columns, so the viewport is
+	// wide enough that highlighted lines still fit on one row.
+	newModel := func() yamlviewport.Model {
+		m := yamlviewport.New(yamlviewport.WithPrinter(testPrinterWithSearch()))
+		m.SetWidth(120)
+		m.SetHeight(5)
+		m.AddRevision(niceyaml.NewSourceFromString("foo: a\nbar: b\n", niceyaml.WithName("v1")))
+		m.AddRevision(niceyaml.NewSourceFromString("foo: c\nbar: b\n", niceyaml.WithName("v2")))
+		m.SetViewMode(yamlviewport.ViewModeSideBySide)
+
+		return m
+	}
+
+	plain := newModel()
+	m := newModel()
+
+	m.SetSearchTerm("foo")
+	require.Equal(t, 2, m.SearchCount())
+	require.NotEqual(t, plain.View(), m.View())
+
+	// Clearing the search removes the highlights from both panes.
+	m.ClearSearch()
+	assert.Equal(t, 0, m.SearchCount())
+	assert.Equal(t, plain.View(), m.View())
+}
