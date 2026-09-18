@@ -320,11 +320,11 @@ type location struct {
 	pos position.Position
 }
 
-// locate resolves e's location in the source b is bound to: a range as it
-// is, and a token, or the token a path resolves to in the document b
-// selects, at the position of the token. An Error without a position of
-// its own returns [ErrNoLocation].
-func (e *Error) locate(b *SourceError) (location, error) {
+// locate resolves e's location: a range as it is, and a token, or the
+// token a path resolves to in the document lookup returns, at the position
+// of the token. An Error without a position of its own returns
+// [ErrNoLocation].
+func (e *Error) locate(lookup func() (*Document, error)) (location, error) {
 	switch {
 	case e.rng != nil:
 		return location{pos: e.rng.Start, rng: e.rng}, nil
@@ -337,7 +337,7 @@ func (e *Error) locate(b *SourceError) (location, error) {
 		return location{pos: position.NewFromToken(e.token)}, nil
 
 	case e.path != nil:
-		doc, err := b.document()
+		doc, err := lookup()
 		if err != nil {
 			return location{}, err
 		}
@@ -363,8 +363,9 @@ func (e *Error) locate(b *SourceError) (location, error) {
 //
 // [Source.File], [Source.Documents], and the [Document] methods bind every
 // error they return whose chain holds an [*Error], and [Source.WrapError]
-// and [Document.WrapError] bind an error built elsewhere. The SourceError
-// resolves the Error's location against the source, so [SourceError.Error]
+// and [Document.WrapError] bind an error built elsewhere. Binding resolves
+// every location in the error against the source, once, so a SourceError
+// never changes and every method of it reads that result: [SourceError.Error]
 // puts the position in front of the message, [SourceError.Location]
 // returns the resolved range, and [SourceError.Excerpt] returns the
 // surrounding lines with the location highlighted. The %+v verb prints the
@@ -392,6 +393,10 @@ func (e *Error) locate(b *SourceError) (location, error) {
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] renders every
 // binding it finds in a tree.
 //
+// A location that does not resolve, such as a path the document does not
+// hold, costs the SourceError its position: [SourceError.Error] returns the
+// message alone, and [SourceError.Location] returns the reason.
+//
 // A SourceError never rewrites the message of the error it binds. The text
 // a wrapper such as [fmt.Errorf] produced stays as it was, and the position
 // goes in front of it. An error built by hand therefore goes through
@@ -417,35 +422,97 @@ func (e *Error) locate(b *SourceError) (location, error) {
 type SourceError struct {
 	err    error
 	source *Source
-	// The document paths resolve in, or nil for the single document the
-	// source picks.
-	doc *Document
+	// The reason the main location did not resolve, which is nil when it
+	// did, and the reason there is no range for it: locErr, or
+	// ErrOutOfRange for a location the source does not hold.
+	locErr error
+	rngErr error
+	// The resolution failures, joined, or nil when every location resolved.
+	resolveErr error
+	// Every position the excerpt marks, the main one first.
+	positions []errorPosition
+	// The message of every nested error the excerpt does not show.
+	unresolved []string
+	// The main location, resolved when the error was bound, and the range
+	// it covers in the source.
+	loc location
+	rng position.Range
 }
 
 // defaultContextLines is the number of context lines the %+v verb shows
 // around an error.
 const defaultContextLines = 2
 
-// newSourceError binds err to src, with paths resolving in doc, or in the
-// single document src picks when doc is nil.
+// newSourceError binds err to src and resolves every location in it, with
+// paths resolving in doc, or in the single document src picks when doc is
+// nil. The main unit gives the SourceError its position, or the reason it
+// has none, and every other unit its annotation. The message of each
+// nested error whose location does not resolve is kept for
+// [SourceError.Detail] to list.
 func newSourceError(err error, src *Source, doc *Document) *SourceError {
-	return &SourceError{err: err, source: src, doc: doc}
+	e := &SourceError{err: err, source: src}
+
+	// The document paths resolve in. Source.Document parses the source on
+	// the first path that asks and serves its cache after that.
+	lookup := func() (*Document, error) {
+		if doc != nil {
+			return doc, nil
+		}
+
+		return src.Document()
+	}
+
+	units := collectUnits(err)
+	e.positions = make([]errorPosition, 0, len(units))
+
+	var errs []error
+
+	for i, u := range units {
+		loc, err := u.locate(lookup)
+		if i == 0 {
+			e.loc, e.locErr = loc, err
+		}
+
+		if err == nil {
+			err = checkInRange(loc, src.lines)
+		}
+
+		if err != nil {
+			if i == 0 {
+				e.rngErr = err
+			} else {
+				err = u.wrapResolution(err)
+			}
+
+			if u.nested {
+				e.unresolved = append(e.unresolved, u.root.Error())
+			}
+
+			errs = append(errs, err)
+
+			continue
+		}
+
+		if i == 0 {
+			e.rng = rangeOf(src.lines, loc)
+		}
+
+		pos := errorPosition{pos: loc.pos, ranges: highlightRanges(src.lines, loc)}
+		if i > 0 {
+			pos.message = u.text()
+		}
+
+		e.positions = append(e.positions, pos)
+	}
+
+	e.resolveErr = errors.Join(errs...)
+
+	return e
 }
 
 // Source returns the [*Source] the error is bound to.
 func (e *SourceError) Source() *Source {
 	return e.source
-}
-
-// document returns the document paths resolve in: the one the error was
-// bound through, or the single document [Source.Document] picks, with its
-// error when the source holds no such document.
-func (e *SourceError) document() (*Document, error) {
-	if e.doc != nil {
-		return e.doc, nil
-	}
-
-	return e.source.Document()
 }
 
 // Unwrap returns the error the [SourceError] was created from. A nil
@@ -472,24 +539,11 @@ func (e *SourceError) Unwrap() error {
 // annotated source excerpt.
 func (e *SourceError) Error() string {
 	msg := e.err.Error()
-
-	a := e.anchor()
-	if a == nil {
+	if e.locErr != nil {
 		return msg
 	}
 
-	loc, err := a.locate(e)
-	if err != nil {
-		return msg
-	}
-
-	return prefixMessage(formatPosition(loc.pos), msg)
-}
-
-// anchor returns the [*Error] that carries the position of the SourceError,
-// the first along the cause chain, or nil when none does.
-func (e *SourceError) anchor() *Error {
-	return e.units()[0].anchor
+	return prefixMessage(formatPosition(e.loc.pos), msg)
 }
 
 // unit is one error of the tree a [SourceError] presents: the error at the
@@ -505,17 +559,17 @@ type unit struct {
 	nested bool
 }
 
-// units returns the units of the error e binds: the main unit first, then
-// every branch in depth-first order.
-func (e *SourceError) units() []unit {
+// collectUnits returns the units of err: the main unit first, then every
+// branch in depth-first order.
+func collectUnits(err error) []unit {
 	var out []unit
 
-	collectUnits(e.err, false, &out)
+	collectBranch(err, false, &out)
 
 	return out
 }
 
-// collectUnits appends the unit rooted at root and, after it, the units of
+// collectBranch appends the unit rooted at root and, after it, the units of
 // the branches along its cause chain. The chain follows a wrapper to the
 // error it wraps, an [*Error] to the error it was created from, and an
 // error that unwraps to several to its first branch. It ends at the first
@@ -523,7 +577,7 @@ func (e *SourceError) units() []unit {
 // [*SourceError], which is a binding of its own. Every nested error of an
 // Error along the chain, and every later branch of an error that unwraps to
 // several, starts a unit.
-func collectUnits(root error, nested bool, out *[]unit) {
+func collectBranch(root error, nested bool, out *[]unit) {
 	u := unit{root: root, nested: nested}
 
 	var branches []unit
@@ -582,8 +636,18 @@ func collectUnits(root error, nested bool, out *[]unit) {
 	*out = append(*out, u)
 
 	for _, b := range branches {
-		collectUnits(b.root, b.nested, out)
+		collectBranch(b.root, b.nested, out)
 	}
+}
+
+// locate resolves the location of u in the document lookup returns. A unit
+// without an anchor returns [ErrNoLocation].
+func (u unit) locate(lookup func() (*Document, error)) (location, error) {
+	if u.anchor == nil {
+		return location{}, ErrNoLocation
+	}
+
+	return u.anchor.locate(lookup)
 }
 
 // isNothing reports whether err is nil or a nil [*Error] or [*SourceError]
@@ -729,36 +793,27 @@ func writeString(f fmt.State, s string) {
 // The range is in the coordinates of the view [Source.Lines] returns, where
 // line 0 is line 1 of the text.
 //
-// It returns [ErrNoLocation] when the error carries no location,
-// [ErrTokenNotFound] when the token has no position, [ErrOutOfRange] when
-// the location starts on a line the source does not hold, the resolution
-// error from [go.jacobcolvin.com/niceyaml/paths] when a path does not
-// resolve, and the error [Source.Document] returns when a path error bound
-// through [Source.WrapError] has no single document to resolve in.
+// The location was resolved when the error was bound, so Location reads
+// the result. It returns [ErrNoLocation] when the error carries no
+// location, [ErrTokenNotFound] when the token has no position,
+// [ErrOutOfRange] when the location starts on a line the source does not
+// hold, the resolution error from [go.jacobcolvin.com/niceyaml/paths] when
+// a path does not resolve, and the error [Source.Document] returns when a
+// path error bound through [Source.WrapError] has no single document to
+// resolve in.
 func (e *SourceError) Location() (position.Range, error) {
-	a := e.anchor()
-	if a == nil {
-		return position.Range{}, ErrNoLocation
+	if e.rngErr != nil {
+		return position.Range{}, e.rngErr
 	}
 
-	loc, err := a.locate(e)
-	if err != nil {
-		return position.Range{}, err
-	}
-
-	err = e.checkInRange(loc, e.source.lines)
-	if err != nil {
-		return position.Range{}, err
-	}
-
-	return e.rangeOf(loc), nil
+	return e.rng, nil
 }
 
-// rangeOf returns the range loc covers in the source: the range it carries,
-// or the content of the token at its position, which spans several lines
-// for a multi-line token. A position with no token yields an empty range.
-func (e *SourceError) rangeOf(loc location) position.Range {
-	ranges := highlightRanges(e.source.lines, loc)
+// rangeOf returns the range loc covers in lines: the range it carries, or
+// the content of the token at its position, which spans several lines for
+// a multi-line token. A position with no token yields an empty range.
+func rangeOf(lines line.Lines, loc location) position.Range {
+	ranges := highlightRanges(lines, loc)
 	if len(ranges) == 0 {
 		return position.NewRange(loc.pos, loc.pos)
 	}
@@ -899,9 +954,9 @@ type errorPosition struct {
 // lines it marked, with repeats, and the message of every nested error
 // whose location did not resolve, in the order the errors were given.
 func (e *SourceError) annotate(view *line.View) ([]int, []string, error) {
-	positions, unresolved, err := e.collectPositions(view.Lines())
+	positions := e.positions
 	if len(positions) == 0 {
-		return nil, unresolved, err
+		return nil, e.unresolved, e.resolveErr
 	}
 
 	// Collect all ranges from positions and apply overlays to the view. The
@@ -925,87 +980,24 @@ func (e *SourceError) annotate(view *line.View) ([]int, []string, error) {
 		view.Annotate(lineIdx, annotation)
 	}
 
-	return marked, unresolved, nil
+	return marked, e.unresolved, nil
 }
 
-// collectPositions resolves the position of every unit of the error within
-// view, with the ranges each highlights: the main unit first, with no
-// message since the headline carries it, then every other branch with its
-// text as its annotation. The message of each nested error whose location
-// does not resolve comes back separately, in order, for [SourceError.Detail]
-// to list. The error joins the resolution failures, so it is nil when every
-// location resolved and, when none did, says why.
-func (e *SourceError) collectPositions(view line.Lines) ([]errorPosition, []string, error) {
-	units := e.units()
-	positions := make([]errorPosition, 0, len(units))
-
-	var (
-		unresolved []string
-		errs       []error
-	)
-
-	for i, u := range units {
-		loc, err := e.resolve(u, view)
-		if err != nil {
-			if i > 0 {
-				err = u.wrapResolution(err)
-			}
-
-			if u.nested {
-				unresolved = append(unresolved, u.root.Error())
-			}
-
-			errs = append(errs, err)
-
-			continue
-		}
-
-		pos := errorPosition{pos: loc.pos, ranges: highlightRanges(view, loc)}
-		if i > 0 {
-			pos.message = u.text()
-		}
-
-		positions = append(positions, pos)
-	}
-
-	return positions, unresolved, errors.Join(errs...)
-}
-
-// resolve resolves the location of u in the source and checks that view
-// holds its line. A unit without an anchor returns [ErrNoLocation].
-func (e *SourceError) resolve(u unit, view line.Lines) (location, error) {
-	if u.anchor == nil {
-		return location{}, ErrNoLocation
-	}
-
-	loc, err := u.anchor.locate(e)
-	if err != nil {
-		return location{}, err
-	}
-
-	err = e.checkInRange(loc, view)
-	if err != nil {
-		return location{}, err
-	}
-
-	return loc, nil
-}
-
-// checkInRange reports [ErrOutOfRange] when loc starts on a line view does
-// not hold: one past its last line, or one before its first. The message
-// names the line and the lines the view holds as the text counts them, from
-// 1.
-func (e *SourceError) checkInRange(loc location, view line.Lines) error {
-	if loc.pos.Line >= 0 && loc.pos.Line < view.Len() {
+// checkInRange reports [ErrOutOfRange] when loc starts on a line lines
+// does not hold: one past its last line, or one before its first. The
+// message names the line and the lines the source holds as the text counts
+// them, from 1.
+func checkInRange(loc location, lines line.Lines) error {
+	if loc.pos.Line >= 0 && loc.pos.Line < lines.Len() {
 		return nil
 	}
 
 	textLine := loc.pos.Line + 1
-	if view.Len() == 0 {
+	if lines.Len() == 0 {
 		return fmt.Errorf("%w: line %d of an empty source", ErrOutOfRange, textLine)
 	}
 
-	return fmt.Errorf("%w: line %d not in lines 1-%d", ErrOutOfRange, textLine, view.Len())
+	return fmt.Errorf("%w: line %d not in lines 1-%d", ErrOutOfRange, textLine, lines.Len())
 }
 
 // highlightRanges returns the ranges to highlight for loc: the range itself
