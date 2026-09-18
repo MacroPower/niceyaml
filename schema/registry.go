@@ -18,12 +18,12 @@ var (
 	ErrResolve = errors.New("resolve schema")
 
 	// ErrNoKey indicates a resolver returned a [Ref] with neither a
-	// Validator nor a Key, which leaves the registry nothing to cache the
+	// Schema nor a Key, which leaves the registry nothing to cache the
 	// schema under.
 	ErrNoKey = errors.New("schema ref has no key")
 
 	// ErrNoLoad indicates a resolver returned a [Ref] with neither a
-	// Validator nor a Load function, which leaves the registry no way to
+	// Schema nor a Load function, which leaves the registry no way to
 	// read the schema.
 	ErrNoLoad = errors.New("schema ref has no Load function")
 
@@ -35,9 +35,9 @@ var (
 //
 // Lookup tries registrations in order; the first [Resolver] that
 // does not report [ErrNoMatch] wins. The registry caches compiled
-// validators by [Ref.Key] and consults that cache before loading, so it
+// schemas by [Ref.Key] and consults that cache before loading, so it
 // loads and compiles each schema once however many documents name it. A
-// Ref that carries a [*Validator] is used as it is.
+// Ref that carries a [*Schema] is used as it is.
 //
 // Example:
 //
@@ -55,8 +55,8 @@ var (
 //
 // Create instances with [NewRegistry].
 type Registry struct {
-	group       singleflight.Group    // one load and compile in flight per Key
-	cache       map[string]*Validator // compiled validators by Ref.Key
+	group       singleflight.Group // one load and compile in flight per Key
+	cache       map[string]*Schema // compiled schemas by Ref.Key
 	resolvers   []Resolver
 	compileOpts []CompileOption
 	mu          sync.RWMutex
@@ -95,7 +95,7 @@ func WithRequireSchema(require bool) RegistryOption {
 // values the registry compiles every schema with, as [Compile] takes them.
 // They apply when a schema is compiled, which happens once per [Ref.Key],
 // so an option such as a format validator takes effect for every document
-// validated against that schema. A [*Validator] a Ref carries was compiled
+// validated against that schema. A [*Schema] a Ref carries was compiled
 // elsewhere, so they do not reach it:
 //
 //	reg := schema.NewRegistry(schema.WithCompileOptions(
@@ -113,7 +113,7 @@ func WithCompileOptions(opts ...CompileOption) RegistryOption {
 // NewRegistry creates a new [*Registry].
 func NewRegistry(opts ...RegistryOption) *Registry {
 	r := &Registry{
-		cache:         make(map[string]*Validator),
+		cache:         make(map[string]*Schema),
 		requireSchema: true,
 	}
 	for _, opt := range opts {
@@ -155,7 +155,7 @@ func (r *Registry) Register(res ...Resolver) {
 //
 // For most use cases, prefer [Validate] which combines lookup and
 // validation. Use Lookup when you need the validator for custom processing.
-func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.Document) (*Validator, error) {
+func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.Document) (*Schema, error) {
 	v, err := r.lookup(ctx, doc)
 	if err != nil {
 		//nolint:wrapcheck // Binding names the document; the error keeps its own context.
@@ -166,7 +166,7 @@ func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.Document) (*Validat
 }
 
 // lookup is [Registry.Lookup] before binding the error to the document.
-func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Document) (*Validator, error) {
+func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Document) (*Schema, error) {
 	// No resolver sees a content-free document, so a resolver registered
 	// after one that declines cannot resurrect it.
 	if !doc.HasContent() {
@@ -188,7 +188,7 @@ func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Document) (*Validat
 			return nil, fmt.Errorf("%w: %w", ErrResolve, err)
 		}
 
-		return r.validator(ctx, ref)
+		return r.schema(ctx, ref)
 	}
 
 	return nil, ErrNoMatch
@@ -231,9 +231,9 @@ func (r *Registry) Validate(ctx context.Context, doc *niceyaml.Document) error {
 	return doc.Validate(ctx, v)
 }
 
-// validator returns the validator for ref: the one it carries, or the
-// compiled schema, loaded and compiled on the first request for its Key and
-// served from the cache after that.
+// schema returns the schema for ref: the one it carries, or the bytes it
+// loads, compiled on the first request for its Key and served from the
+// cache after that.
 //
 // Concurrent requests for one Key share a single load and compile through
 // the singleflight group, and each caller waits for it only while its own
@@ -242,9 +242,9 @@ func (r *Registry) Validate(ctx context.Context, doc *niceyaml.Document) error {
 // failed. A caller that joined with a live context loads again only in that
 // case. Any other failure reaches every caller that shared the load,
 // including a timeout inside the load whose error wraps a context error.
-func (r *Registry) validator(ctx context.Context, ref Ref) (*Validator, error) {
-	if ref.Validator != nil {
-		return ref.Validator, nil
+func (r *Registry) schema(ctx context.Context, ref Ref) (*Schema, error) {
+	if ref.Schema != nil {
+		return ref.Schema, nil
 	}
 
 	if ref.Key == "" {
@@ -298,8 +298,8 @@ func (r *Registry) validator(ctx context.Context, ref Ref) (*Validator, error) {
 	return v, nil
 }
 
-// cached returns the validator cached under key, if any.
-func (r *Registry) cached(key string) (*Validator, bool) {
+// cached returns the schema cached under key, if any.
+func (r *Registry) cached(key string) (*Schema, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -310,7 +310,7 @@ func (r *Registry) cached(key string) (*Validator, bool) {
 
 // compile loads and compiles the schema ref names and caches the result
 // under its Key. A cache entry stored by an earlier call is left in place,
-// so every caller sees one validator per Key.
+// so every caller sees one schema per Key.
 func (r *Registry) compile(ctx context.Context, ref Ref) error {
 	if _, ok := r.cached(ref.Key); ok {
 		return nil

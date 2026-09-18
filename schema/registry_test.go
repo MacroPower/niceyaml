@@ -479,7 +479,7 @@ func TestRegistry_ConcurrentLoad(t *testing.T) {
 		docs[i] = yamltest.FirstDocument(t, stringtest.Input(`key: value`))
 	}
 
-	validators := make([]*schema.Validator, goroutines)
+	validators := make([]*schema.Schema, goroutines)
 
 	var (
 		started sync.WaitGroup

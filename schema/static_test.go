@@ -25,7 +25,7 @@ func TestStatic(t *testing.T) {
 
 		ref, err := schema.Static(compiled).Resolve(t.Context(), document(t))
 		require.NoError(t, err)
-		assert.Same(t, compiled, ref.Validator)
+		assert.Same(t, compiled, ref.Schema)
 		assert.Nil(t, ref.Load)
 		assert.Empty(t, ref.Key)
 	})
@@ -52,10 +52,10 @@ func TestStatic(t *testing.T) {
 		require.NotErrorIs(t, err, schema.ErrNoMatch)
 	})
 
-	t.Run("nil validator panics", func(t *testing.T) {
+	t.Run("nil schema panics", func(t *testing.T) {
 		t.Parallel()
 
-		assert.PanicsWithValue(t, "schema.Static: validator is nil", func() {
+		assert.PanicsWithValue(t, "schema.Static: schema is nil", func() {
 			schema.Static(nil)
 		})
 	})

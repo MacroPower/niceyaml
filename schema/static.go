@@ -6,29 +6,29 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 )
 
-// Static creates a [Resolver] that names v, a schema compiled already, for
-// every document. It is the way into a [Registry] for a validator held at
+// Static creates a [Resolver] that names s, a schema compiled already, for
+// every document. It is the way into a [Registry] for a schema held at
 // package scope, or one built from a Go type and wrapped with
-// [NewValidator]:
+// [FromJSONSchema]:
 //
 //	//go:embed config.schema.json
 //	var schemaJSON []byte
 //
-//	var Schema = schema.MustCompile(schemaJSON)
+//	var Config = schema.MustCompile(schemaJSON)
 //
-//	reg.Register(schema.When(matcher.Content(kindPath, "Config"), schema.Static(Schema)))
+//	reg.Register(schema.When(matcher.Content(kindPath, "Config"), schema.Static(Config)))
 //
-// The registry uses v as it is, so the [CompileOption] values from
+// The registry uses s as it is, so the [CompileOption] values from
 // [WithCompileOptions] do not reach it. Schema bytes that are not compiled
 // yet go in through [Embedded], which compiles them with those options.
 //
-// Panics if v is nil.
-func Static(v *Validator) Resolver {
-	if v == nil {
-		panic("schema.Static: validator is nil")
+// Panics if s is nil.
+func Static(s *Schema) Resolver {
+	if s == nil {
+		panic("schema.Static: schema is nil")
 	}
 
 	return ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (Ref, error) {
-		return Ref{Validator: v}, nil
+		return Ref{Schema: s}, nil
 	})
 }

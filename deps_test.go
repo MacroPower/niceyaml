@@ -67,8 +67,8 @@ var policies = []dependencyPolicy{
 		name:     "x/jsonschema",
 		packages: []string{"go.jacobcolvin.com/x/jsonschema"},
 		types: []string{
-			// A validator compiled elsewhere, which schema.NewValidator
-			// adapts.
+			// A validator compiled elsewhere, which schema.FromJSONSchema
+			// wraps.
 			"jsonschema.Validator",
 			// Escape hatch, only in identifiers with a JSONSchema prefix.
 			"jsonschema.ValidateOption",

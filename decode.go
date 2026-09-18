@@ -55,7 +55,7 @@ type SelfValidator interface {
 // and [Source.Bind] resolves paths in the single document the source
 // picks.
 //
-// See [ValidatorFunc], [go.jacobcolvin.com/niceyaml/schema.Validator],
+// See [ValidatorFunc], [go.jacobcolvin.com/niceyaml/schema.Schema],
 // and [go.jacobcolvin.com/niceyaml/schema.Registry] for
 // implementations.
 type Validator interface {
@@ -490,7 +490,7 @@ func (c decodeConfig) decodeOptions() []yaml.DecodeOption {
 // WithValidator is a [DecodeOption] that validates the document with dv
 // before decoding it, and a validation error ends the decode before any
 // typed decoding. Several validators run in the order given, stopping at
-// the first that fails. A [go.jacobcolvin.com/niceyaml/schema.Validator]
+// the first that fails. A [go.jacobcolvin.com/niceyaml/schema.Schema]
 // checks the document against one JSON schema, and a
 // [go.jacobcolvin.com/niceyaml/schema.Registry] against the schema
 // it picks for the document:

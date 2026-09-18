@@ -156,7 +156,7 @@
 // [Document.Decode] supports two validation hooks: a [Validator]
 // passed with [WithValidator] checks the whole document before decoding, and
 // a type implementing [SelfValidator] validates itself after decoding. A
-// [go.jacobcolvin.com/niceyaml/schema.Validator] is a Validator that
+// [go.jacobcolvin.com/niceyaml/schema.Schema] is a Validator that
 // checks the document against one JSON schema, and a
 // [go.jacobcolvin.com/niceyaml/schema.Registry] is one that picks
 // the schema for the document:

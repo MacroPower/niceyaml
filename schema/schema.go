@@ -61,7 +61,7 @@ func WithJSONSchemaOptions(opts ...jsonschema.ValidateOption) CompileOption {
 	}
 }
 
-// Compile creates a new [*Validator] from a JSON schema document. The
+// Compile creates a new [*Schema] from a JSON schema document. The
 // context reaches the reference resolver for references resolved while
 // compiling. An error wraps [ErrCompile].
 //
@@ -76,7 +76,7 @@ func WithJSONSchemaOptions(opts ...jsonschema.ValidateOption) CompileOption {
 // A schema known valid at build time compiles with [MustCompile] at package
 // scope. A registry compiles the schemas its resolvers name the same way,
 // with the options [WithCompileOptions] gives it.
-func Compile(ctx context.Context, data []byte, opts ...CompileOption) (*Validator, error) {
+func Compile(ctx context.Context, data []byte, opts ...CompileOption) (*Schema, error) {
 	cfg := newCompileConfig(opts)
 
 	compiled, err := jsonschema.CompileJSON(ctx, data, cfg.jsonOpts...)
@@ -84,15 +84,15 @@ func Compile(ctx context.Context, data []byte, opts ...CompileOption) (*Validato
 		return nil, fmt.Errorf("%w: %w", ErrCompile, err)
 	}
 
-	return NewValidator(compiled), nil
+	return FromJSONSchema(compiled), nil
 }
 
 // MustCompile is [Compile] with a background context that panics when the
-// schema does not compile. Use it for a package-scope validator compiled
+// schema does not compile. Use it for a package-scope schema compiled
 // from a schema brought in with go:embed:
 //
-//	var Schema = schema.MustCompile(schemaJSON)
-func MustCompile(data []byte, opts ...CompileOption) *Validator {
+//	var Config = schema.MustCompile(schemaJSON)
+func MustCompile(data []byte, opts ...CompileOption) *Schema {
 	v, err := Compile(context.Background(), data, opts...)
 	if err != nil {
 		panic(err)
@@ -101,43 +101,43 @@ func MustCompile(data []byte, opts ...CompileOption) *Validator {
 	return v
 }
 
-// NewValidator creates a new [*Validator] from a [*jsonschema.Validator]
+// FromJSONSchema creates a new [*Schema] from a [*jsonschema.Validator]
 // compiled elsewhere, such as one built from a Go type with
 // [jsonschema.Compile]. A schema held as JSON compiles with [Compile] or
 // [MustCompile] instead.
-func NewValidator(v *jsonschema.Validator) *Validator {
-	return &Validator{schema: v}
+func FromJSONSchema(v *jsonschema.Validator) *Schema {
+	return &Schema{compiled: v}
 }
 
-// Validator is a [niceyaml.Validator] that checks a document against one
-// JSON schema, reporting constraint violations as [*niceyaml.Error] values
-// that carry the YAML path to each failing location for display by
-// [printer.Printer]. [Validator.Validate] checks a whole document, and
-// [Validator.ValidateSchema] checks decoded data, such as one value taken
-// from a document with [niceyaml.Document.Get].
+// Schema is a compiled JSON schema. It is a [niceyaml.Validator] that
+// checks a document against the schema, reporting constraint violations as
+// [*niceyaml.Error] values that carry the YAML path to each failing
+// location for display by [printer.Printer]. [Schema.Validate] checks a
+// whole document, and [Schema.ValidateValue] checks decoded data, such as
+// one value taken from a document with [niceyaml.Document.Get].
 //
-// A Validator is safe for concurrent use. Create instances with [Compile],
-// [MustCompile], or [NewValidator].
-type Validator struct {
-	schema *jsonschema.Validator
+// A Schema is safe for concurrent use. Create instances with [Compile],
+// [MustCompile], or [FromJSONSchema].
+type Schema struct {
+	compiled *jsonschema.Validator
 }
 
 // Validate implements [niceyaml.Validator]. It decodes doc to
-// [any] and checks the result with [Validator.ValidateSchema], so
+// [any] and checks the result with [Schema.ValidateValue], so
 // [niceyaml.WithValidator] runs the schema before a decode and
 // [niceyaml.Document.Validate] runs it on its own. A decoding error comes
 // back bound to the source, and a violation as the unbound [*niceyaml.Error]
-// that ValidateSchema returns, which the document binds.
-func (v *Validator) Validate(ctx context.Context, doc *niceyaml.Document) error {
+// that ValidateValue returns, which the document binds.
+func (s *Schema) Validate(ctx context.Context, doc *niceyaml.Document) error {
 	data, err := doc.Decode[any](ctx)
 	if err != nil {
 		return err
 	}
 
-	return v.ValidateSchema(ctx, data)
+	return s.ValidateValue(ctx, data)
 }
 
-// ValidateSchema checks data, the decoded form of a YAML value, against the
+// ValidateValue checks data, the decoded form of a YAML value, against the
 // schema.
 //
 // YAML-native values the JSON Schema validator does not accept are first
@@ -151,8 +151,8 @@ func (v *Validator) Validate(ctx context.Context, doc *niceyaml.Document) error 
 // [ErrValidate]. The context is passed to the underlying
 // [jsonschema.Validator], where remote reference resolution honors its
 // cancellation and deadlines.
-func (v *Validator) ValidateSchema(ctx context.Context, data any) error {
-	err := v.schema.Validate(ctx, normalizeJSON(data))
+func (s *Schema) ValidateValue(ctx context.Context, data any) error {
+	err := s.compiled.Validate(ctx, normalizeJSON(data))
 	if err == nil {
 		return nil
 	}

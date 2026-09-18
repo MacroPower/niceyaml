@@ -13,17 +13,17 @@ import (
 // applies.
 var ErrNoMatch = errors.New("no matching schema")
 
-// Ref is the schema a [Resolver] names for a document: a [*Validator]
+// Ref is the schema a [Resolver] names for a document: a [*Schema]
 // compiled already, or a key and a function that loads the bytes to
 // compile.
 //
-// A Ref with a Validator is complete. The registry uses the validator as it
+// A Ref with a Schema is complete. The registry uses the schema as it
 // is, and Key and Load play no part, so a schema compiled at package scope
 // with [MustCompile], or built from a Go type and wrapped with
-// [NewValidator], goes into a registry without a round trip through bytes.
+// [FromJSONSchema], goes into a registry without a round trip through bytes.
 // [Static] returns such a Ref for every document.
 //
-// A Ref without a Validator carries a Key and a Load. The registry checks
+// A Ref without a Schema carries a Key and a Load. The registry checks
 // its cache by Key before any bytes move, and Load runs only on a cache
 // miss, so the two fields carry different obligations. Key must be cheap to
 // produce and must identify the schema uniquely, since two Refs with the
@@ -31,9 +31,9 @@ var ErrNoMatch = errors.New("no matching schema")
 // expensive, may fail, and must return the same bytes each time it is
 // called for the same Key.
 type Ref struct {
-	// Validator is the schema, compiled. When set, the registry uses it as
-	// it is and never calls Load.
-	Validator *Validator
+	// Schema is the schema, compiled. When set, the registry uses it as it
+	// is and never calls Load.
+	Schema *Schema
 
 	// Load returns the schema bytes to compile. The registry calls it on a
 	// cache miss and caches the compiled result, so a load that succeeds
@@ -43,7 +43,7 @@ type Ref struct {
 	// Key identifies the schema and is the cache key. It is a name, not
 	// necessarily a fetchable address: [URL] uses the URL, [File] the file
 	// URL of the absolute path, and [Embedded] a digest of the bytes. The
-	// registry rejects an empty Key on a Ref without a Validator.
+	// registry rejects an empty Key on a Ref without a Schema.
 	Key string
 }
 

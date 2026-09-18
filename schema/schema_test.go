@@ -17,9 +17,9 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
-// newValidator compiles schemaData and wraps it in a [*schema.Validator],
+// compileSchema compiles schemaData into a [*schema.Schema],
 // failing the test if the schema does not compile.
-func newValidator(t *testing.T, schemaData []byte) *schema.Validator {
+func compileSchema(t *testing.T, schemaData []byte) *schema.Schema {
 	t.Helper()
 
 	v, err := schema.Compile(t.Context(), schemaData)
@@ -28,7 +28,7 @@ func newValidator(t *testing.T, schemaData []byte) *schema.Validator {
 	return v
 }
 
-func TestValidator_Validate(t *testing.T) {
+func TestSchema_Validate(t *testing.T) {
 	t.Parallel()
 
 	schemaData := []byte(`{
@@ -85,7 +85,7 @@ func TestValidator_Validate(t *testing.T) {
 		"additionalProperties": false
 	}`)
 
-	v := newValidator(t, schemaData)
+	v := compileSchema(t, schemaData)
 
 	tcs := map[string]struct {
 		input   any
@@ -231,7 +231,7 @@ func TestValidator_Validate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := v.ValidateSchema(t.Context(), tc.input)
+			err := v.ValidateValue(t.Context(), tc.input)
 
 			if tc.wantErr {
 				require.Error(t, err)
@@ -246,7 +246,7 @@ func TestValidator_Validate(t *testing.T) {
 	}
 }
 
-func TestValidator_ValidateWithDecoder(t *testing.T) {
+func TestSchema_ValidateWithDecoder(t *testing.T) {
 	t.Parallel()
 
 	schemaData := []byte(`{
@@ -267,7 +267,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 		"additionalProperties": false
 	}`)
 
-	v := newValidator(t, schemaData)
+	v := compileSchema(t, schemaData)
 
 	tcs := map[string]struct {
 		input   string
@@ -332,7 +332,7 @@ func TestValidator_ValidateWithDecoder(t *testing.T) {
 	}
 }
 
-func TestValidator_PathTarget(t *testing.T) {
+func TestSchema_PathTarget(t *testing.T) {
 	t.Parallel()
 
 	// This test verifies that the validator correctly chooses key vs value
@@ -536,7 +536,7 @@ func TestValidator_PathTarget(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v := newValidator(t, []byte(tc.schema))
+			v := compileSchema(t, []byte(tc.schema))
 
 			source := niceyaml.NewSourceFromString(tc.input)
 			d, err := source.Documents()
@@ -557,13 +557,13 @@ func TestValidator_PathTarget(t *testing.T) {
 	}
 }
 
-func TestValidator_NonFiniteFloats(t *testing.T) {
+func TestSchema_NonFiniteFloats(t *testing.T) {
 	t.Parallel()
 
 	// YAML decodes .nan/.inf into non-finite float64 values. These are not
 	// JSON-encodable, but the validator treats them as numbers rather than
 	// surfacing an opaque marshaling error.
-	v := newValidator(t, []byte(`{
+	v := compileSchema(t, []byte(`{
 		"type": "object",
 		"properties": {"x": {"type": "number"}}
 	}`))
@@ -576,14 +576,14 @@ func TestValidator_NonFiniteFloats(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := v.ValidateSchema(t.Context(), map[string]any{"x": value})
+			err := v.ValidateValue(t.Context(), map[string]any{"x": value})
 			require.NoError(t, err)
 			assert.NotErrorIs(t, err, schema.ErrValidate)
 		})
 	}
 }
 
-func TestValidator_YAMLNativeTypes(t *testing.T) {
+func TestSchema_YAMLNativeTypes(t *testing.T) {
 	t.Parallel()
 
 	// YAML decodes !!binary into []byte and !!timestamp into time.Time,
@@ -630,7 +630,7 @@ func TestValidator_YAMLNativeTypes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v := newValidator(t, []byte(tc.schema))
+			v := compileSchema(t, []byte(tc.schema))
 			doc := yamltest.FirstDocument(t, tc.input)
 
 			err := doc.Validate(t.Context(), v)
@@ -647,7 +647,7 @@ func TestValidator_YAMLNativeTypes(t *testing.T) {
 	}
 }
 
-func TestValidator_BooleanSchema(t *testing.T) {
+func TestSchema_BooleanSchema(t *testing.T) {
 	t.Parallel()
 
 	// Boolean schemas are valid in JSON Schema: true accepts everything, false
@@ -671,10 +671,10 @@ func TestValidator_BooleanSchema(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v := newValidator(t, tc.input)
+			v := compileSchema(t, tc.input)
 
 			for _, data := range testData {
-				err := v.ValidateSchema(t.Context(), data)
+				err := v.ValidateValue(t.Context(), data)
 				if tc.wantAcceptsAll {
 					assert.NoError(t, err)
 				} else {
@@ -685,7 +685,7 @@ func TestValidator_BooleanSchema(t *testing.T) {
 	}
 }
 
-func TestValidator_SubErrorAnnotations(t *testing.T) {
+func TestSchema_SubErrorAnnotations(t *testing.T) {
 	t.Parallel()
 
 	// A single violation is the main error itself; several violations render
@@ -749,7 +749,7 @@ func TestValidator_SubErrorAnnotations(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v := newValidator(t, []byte(tc.schema))
+			v := compileSchema(t, []byte(tc.schema))
 
 			source := niceyaml.NewSourceFromString(tc.input)
 			d, err := source.Documents()
@@ -784,7 +784,7 @@ func TestValidator_SubErrorAnnotations(t *testing.T) {
 	}
 }
 
-func TestValidator_ErrorMessages(t *testing.T) {
+func TestSchema_ErrorMessages(t *testing.T) {
 	t.Parallel()
 
 	// A single failure uses the concrete message once; several use a summary.
@@ -792,14 +792,14 @@ func TestValidator_ErrorMessages(t *testing.T) {
 	t.Run("single validation error uses concrete message once", func(t *testing.T) {
 		t.Parallel()
 
-		v := newValidator(t, []byte(`{
+		v := compileSchema(t, []byte(`{
 			"type": "object",
 			"properties": {
 				"name": {"type": "string"}
 			}
 		}`))
 
-		err := v.ValidateSchema(t.Context(), map[string]any{"name": 123})
+		err := v.ValidateValue(t.Context(), map[string]any{"name": 123})
 		require.Error(t, err)
 
 		const msg = `expected "string", got "integer"`
@@ -811,7 +811,7 @@ func TestValidator_ErrorMessages(t *testing.T) {
 	t.Run("multiple validation errors use summary message", func(t *testing.T) {
 		t.Parallel()
 
-		v := newValidator(t, []byte(`{
+		v := compileSchema(t, []byte(`{
 			"type": "object",
 			"properties": {
 				"name": {"type": "string"},
@@ -819,7 +819,7 @@ func TestValidator_ErrorMessages(t *testing.T) {
 			}
 		}`))
 
-		err := v.ValidateSchema(t.Context(), map[string]any{"name": 123, "age": "thirty"})
+		err := v.ValidateValue(t.Context(), map[string]any{"name": 123, "age": "thirty"})
 		require.Error(t, err)
 
 		assert.Contains(t, err.Error(), "2 schema violations")
@@ -827,7 +827,7 @@ func TestValidator_ErrorMessages(t *testing.T) {
 	})
 }
 
-func TestValidator_ErrorPaths(t *testing.T) {
+func TestSchema_ErrorPaths(t *testing.T) {
 	t.Parallel()
 
 	// A single violation puts its path on the main error. Several violations
@@ -865,9 +865,9 @@ func TestValidator_ErrorPaths(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v := newValidator(t, []byte(tc.schema))
+			v := compileSchema(t, []byte(tc.schema))
 
-			err := v.ValidateSchema(t.Context(), tc.input)
+			err := v.ValidateValue(t.Context(), tc.input)
 			require.Error(t, err)
 
 			var validationErr *niceyaml.Error
