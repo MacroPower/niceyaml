@@ -8,12 +8,12 @@
 //
 // # Usage
 //
-// Create a [*SchemaStore] and register it with a
+// Create a [*SchemaStore] and hand it to a
 // [go.jacobcolvin.com/niceyaml/schema.Registry]:
 //
-//	reg.Register(schemastore.New())
+//	reg := schema.NewRegistry(schema.WithResolvers(schemastore.New()))
 //
-// This single registration handles all SchemaStore schemas, matching file
+// This single resolver handles all SchemaStore schemas, matching file
 // paths against catalog patterns for common tools like GitHub Actions,
 // Docker Compose, and many others. Only YAML file patterns are considered.
 //

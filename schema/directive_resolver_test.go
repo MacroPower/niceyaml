@@ -358,14 +358,13 @@ func TestDirective_EmbeddedNameMatchesPath(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			reg := schema.NewRegistry()
-			reg.Register(
+			reg := schema.NewRegistry(schema.WithResolvers(
 				schema.Directive(),
 				schema.When(
 					matcher.Content(kindPath, "Embedded"),
 					schema.Embedded(embedded),
 				),
-			)
+			))
 
 			docs := map[string]*niceyaml.Document{
 				"embedded": yamltest.FirstDocument(t, "kind: Embedded\nname: 1\n"),
@@ -478,11 +477,10 @@ func TestDirective_LeadingCommentDocument(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, docs, len(tc.want))
 
-			reg := schema.NewRegistry()
-			reg.Register(
+			reg := schema.NewRegistry(schema.WithResolvers(
 				schema.Directive(),
 				schema.Embedded([]byte(`{"type": "object"}`)),
-			)
+			))
 
 			for i, doc := range docs {
 				err := reg.Validate(t.Context(), doc)

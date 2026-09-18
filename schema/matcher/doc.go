@@ -6,7 +6,7 @@
 // names its schema only for documents the matcher accepts and reports
 // [go.jacobcolvin.com/niceyaml/schema.ErrNoMatch] for the rest, so a
 // [go.jacobcolvin.com/niceyaml/schema.Registry] moves on to its
-// next registration.
+// next resolver.
 //
 // # Matching Strategies
 //

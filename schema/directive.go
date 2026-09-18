@@ -137,7 +137,7 @@ type directiveResolver struct {
 //
 // Here the second document resolves to ./schema.json.
 //
-//	reg.Register(schema.Directive())
+//	reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
 func Directive(opts ...HTTPOption) Resolver {
 	return &directiveResolver{opts: opts}
 }

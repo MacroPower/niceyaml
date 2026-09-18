@@ -33,8 +33,9 @@ func TestStatic(t *testing.T) {
 	t.Run("registry uses the validator as it is", func(t *testing.T) {
 		t.Parallel()
 
-		reg := schema.NewRegistry()
-		reg.Register(schema.When(matcher.Content(kindPath, "Deployment"), schema.Static(compiled)))
+		reg := schema.NewRegistry(schema.WithResolvers(
+			schema.When(matcher.Content(kindPath, "Deployment"), schema.Static(compiled)),
+		))
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
 		v, err := reg.Lookup(t.Context(), doc)

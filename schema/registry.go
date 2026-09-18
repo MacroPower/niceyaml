@@ -33,33 +33,33 @@ var (
 
 // Registry maps YAML documents to schemas using pluggable resolvers.
 //
-// Lookup tries registrations in order; the first [Resolver] that
-// does not report [ErrNoMatch] wins. The registry caches compiled
-// schemas by [Ref.Key] and consults that cache before loading, so it
-// loads and compiles each schema once however many documents name it. A
-// Ref that carries a [*Schema] is used as it is.
+// Lookup tries the resolvers [WithResolvers] gave it in order; the first
+// [Resolver] that does not report [ErrNoMatch] wins. The registry caches
+// compiled schemas by [Ref.Key] and consults that cache before loading, so
+// it loads and compiles each schema once however many documents name it.
+// A Ref that carries a [*Schema] is used as it is.
 //
 // Example:
 //
-//	reg := New()
-//
-//	// Directive matching first (i.e. explicit user intent).
-//	reg.Register(schema.Directive())
-//
-//	// Content-based matching.
 //	kindPath := paths.Root().Child("kind")
-//	reg.Register(schema.When(
-//	    matcher.Content(kindPath, "Deployment"),
-//	    schema.Embedded(deploymentSchema),
+//	reg := schema.NewRegistry(schema.WithResolvers(
+//	    // Directive matching first (i.e. explicit user intent).
+//	    schema.Directive(),
+//	    // Content-based matching.
+//	    schema.When(
+//	        matcher.Content(kindPath, "Deployment"),
+//	        schema.Embedded(deploymentSchema),
+//	    ),
 //	))
 //
-// Create instances with [NewRegistry].
+// A Registry never changes after construction except for its cache, so it
+// is safe for concurrent use. Create instances with [NewRegistry].
 type Registry struct {
 	group       singleflight.Group // one load and compile in flight per Key
 	cache       map[string]*Schema // compiled schemas by Ref.Key
 	resolvers   []Resolver
 	compileOpts []CompileOption
-	mu          sync.RWMutex
+	mu          sync.RWMutex // guards cache
 	// Makes Validate report ErrNoMatch when no resolver applies.
 	requireSchema bool
 }
@@ -67,9 +67,30 @@ type Registry struct {
 // RegistryOption configures [Registry] creation.
 //
 // Available options:
+//   - [WithResolvers]
 //   - [WithCompileOptions]
 //   - [WithRequireSchema]
 type RegistryOption func(*Registry)
+
+// WithResolvers is a [RegistryOption] that appends resolvers to the end of
+// the lookup order. Lookup tries them in the order given, and the first
+// that does not report [ErrNoMatch] wins, so explicit user intent goes
+// before content matching and content matching before file path
+// conventions:
+//
+//	reg := schema.NewRegistry(schema.WithResolvers(
+//	    schema.Directive(),
+//	    schema.When(matcher.Content(kindPath, "Deployment"), schema.Embedded(deploymentSchema)),
+//	    schemastore.New(),
+//	))
+//
+// Given more than once, each call appends after the resolvers of the one
+// before it.
+func WithResolvers(res ...Resolver) RegistryOption {
+	return func(r *Registry) {
+		r.resolvers = append(r.resolvers, res...)
+	}
+}
 
 // WithRequireSchema is a [RegistryOption] that sets whether
 // [Registry.Validate] reports a document no resolver applies to. The
@@ -78,8 +99,10 @@ type RegistryOption func(*Registry)
 // recognizes and passes the rest runs inside a decode through
 // [niceyaml.WithValidator]:
 //
-//	reg := schema.NewRegistry(schema.WithRequireSchema(false))
-//	reg.Register(schema.Directive(), schemastore.New())
+//	reg := schema.NewRegistry(
+//	    schema.WithResolvers(schema.Directive(), schemastore.New()),
+//	    schema.WithRequireSchema(false),
+//	)
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
 //
@@ -123,19 +146,6 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 	return r
 }
 
-// Register appends resolvers to the end of the lookup order.
-//
-// Registrations are evaluated in order; the first resolver that does not
-// report [ErrNoMatch] wins. Register is safe to call concurrently
-// with [Lookup] and [Validate]; a lookup already in progress keeps
-// the resolver list it started with.
-func (r *Registry) Register(res ...Resolver) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	r.resolvers = append(r.resolvers, res...)
-}
-
 // Lookup finds the validator for a document.
 //
 // Returns [ErrNoMatch] if no resolver applies to the document,
@@ -167,18 +177,13 @@ func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.Document) (*Schema,
 
 // lookup is [Registry.Lookup] before binding the error to the document.
 func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Document) (*Schema, error) {
-	// No resolver sees a content-free document, so a resolver registered
+	// No resolver sees a content-free document, so a resolver placed
 	// after one that declines cannot resurrect it.
 	if !doc.HasContent() {
 		return nil, fmt.Errorf("%w: document has no content", ErrNoMatch)
 	}
 
-	r.mu.RLock()
-
-	resolvers := r.resolvers
-	r.mu.RUnlock()
-
-	for _, res := range resolvers {
+	for _, res := range r.resolvers {
 		ref, err := res.Resolve(ctx, doc)
 		if errors.Is(err, ErrNoMatch) {
 			continue

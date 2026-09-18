@@ -16,7 +16,9 @@ import (
 //
 //	var Config = schema.MustCompile(schemaJSON)
 //
-//	reg.Register(schema.When(matcher.Content(kindPath, "Config"), schema.Static(Config)))
+//	reg := schema.NewRegistry(schema.WithResolvers(
+//	    schema.When(matcher.Content(kindPath, "Config"), schema.Static(Config)),
+//	))
 //
 // The registry uses s as it is, so the [CompileOption] values from
 // [WithCompileOptions] do not reach it. Schema bytes that are not compiled

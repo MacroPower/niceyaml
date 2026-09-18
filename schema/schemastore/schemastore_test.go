@@ -1119,8 +1119,7 @@ func TestIntegration(t *testing.T) {
 		catalogServer := newCatalogServer(t, catalog)
 		t.Cleanup(catalogServer.Close)
 
-		reg := schema.NewRegistry()
-		reg.Register(schemastore.New(schemastore.WithCatalogURL(catalogServer.URL)))
+		reg := schema.NewRegistry(schema.WithResolvers(schemastore.New(schemastore.WithCatalogURL(catalogServer.URL))))
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`on: push`), ".github/workflows/ci.yaml")
 
@@ -1153,8 +1152,7 @@ func TestIntegration(t *testing.T) {
 
 		catalogServer, catalogFetches := newCountingCatalogServer(t, catalog)
 
-		reg := schema.NewRegistry()
-		reg.Register(schemastore.New(schemastore.WithCatalogURL(catalogServer.URL)))
+		reg := schema.NewRegistry(schema.WithResolvers(schemastore.New(schemastore.WithCatalogURL(catalogServer.URL))))
 
 		for _, name := range []string{"ci.yaml", "release.yaml", "lint.yaml"} {
 			doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`on: push`), ".github/workflows/"+name)
@@ -1189,8 +1187,7 @@ func TestIntegration(t *testing.T) {
 		catalogServer := newCatalogServer(t, catalog)
 		t.Cleanup(catalogServer.Close)
 
-		reg := schema.NewRegistry()
-		reg.Register(schemastore.New(schemastore.WithCatalogURL(catalogServer.URL)))
+		reg := schema.NewRegistry(schema.WithResolvers(schemastore.New(schemastore.WithCatalogURL(catalogServer.URL))))
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`name: test`), ".github/workflows/ci.yaml")
 
@@ -1214,8 +1211,7 @@ func TestIntegration(t *testing.T) {
 		catalogServer := newCatalogServer(t, catalog)
 		t.Cleanup(catalogServer.Close)
 
-		reg := schema.NewRegistry()
-		reg.Register(schemastore.New(schemastore.WithCatalogURL(catalogServer.URL)))
+		reg := schema.NewRegistry(schema.WithResolvers(schemastore.New(schemastore.WithCatalogURL(catalogServer.URL))))
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "random.yaml")
 
@@ -1226,8 +1222,8 @@ func TestIntegration(t *testing.T) {
 	t.Run("reports an unreachable catalog through the registry", func(t *testing.T) {
 		t.Parallel()
 
-		reg := schema.NewRegistry()
-		reg.Register(schemastore.New(schemastore.WithCatalogURL("http://localhost:1")))
+		store := schemastore.New(schemastore.WithCatalogURL("http://localhost:1"))
+		reg := schema.NewRegistry(schema.WithResolvers(store))
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
 
@@ -1248,8 +1244,9 @@ func TestIntegration(t *testing.T) {
 			return schema.Ref{}, schema.ErrNoMatch
 		})
 
-		reg := schema.NewRegistry()
-		reg.Register(schemastore.New(schemastore.WithCatalogURL("http://localhost:1")), fallback)
+		reg := schema.NewRegistry(
+			schema.WithResolvers(schemastore.New(schemastore.WithCatalogURL("http://localhost:1")), fallback),
+		)
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
 

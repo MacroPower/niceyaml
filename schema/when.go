@@ -21,10 +21,10 @@ type guarded struct {
 // decides which documents it should apply to:
 //
 //	kindPath := paths.Root().Child("kind")
-//	reg.Register(schema.When(
+//	reg := schema.NewRegistry(schema.WithResolvers(schema.When(
 //	    matcher.Content(kindPath, "Deployment"),
 //	    schema.Embedded(deploymentSchema),
-//	))
+//	)))
 //
 // A resolver that decides and names the schema from the same parse, such as
 // [Directive], implements [Resolver] directly and needs no guard.

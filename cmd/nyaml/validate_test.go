@@ -48,8 +48,7 @@ func TestValidateFile(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config.yaml")
 			require.NoError(t, os.WriteFile(path, []byte(tc.content), 0o600))
 
-			reg := schema.NewRegistry()
-			reg.Register(schema.Embedded(schemaData))
+			reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded(schemaData)))
 
 			err := validateFile(t.Context(), path, reg)
 			if len(tc.want) == 0 {

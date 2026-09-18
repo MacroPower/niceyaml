@@ -63,16 +63,15 @@
 // [Registry] tries its resolvers in order and validates the document
 // against the first schema named:
 //
-//	reg := schema.NewRegistry()
-//
-//	// Directive matching first (i.e. explicit user intent).
-//	reg.Register(schema.Directive())
-//
-//	// Content-based matching.
 //	kindPath := paths.Root().Child("kind")
-//	reg.Register(schema.When(
-//	    matcher.Content(kindPath, "Deployment"),
-//	    schema.Embedded(deploymentSchema),
+//	reg := schema.NewRegistry(schema.WithResolvers(
+//	    // Directive matching first (i.e. explicit user intent).
+//	    schema.Directive(),
+//	    // Content-based matching.
+//	    schema.When(
+//	        matcher.Content(kindPath, "Deployment"),
+//	        schema.Embedded(deploymentSchema),
+//	    ),
 //	))
 //
 //	// Validate documents.
@@ -89,8 +88,10 @@
 // documents it recognizes and accept the rest builds the registry with
 // [WithRequireSchema] set false:
 //
-//	reg := schema.NewRegistry(schema.WithRequireSchema(false))
-//	reg.Register(schema.Directive(), schemastore.New())
+//	reg := schema.NewRegistry(
+//	    schema.WithResolvers(schema.Directive(), schemastore.New()),
+//	    schema.WithRequireSchema(false),
+//	)
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
 //
@@ -98,11 +99,11 @@
 //
 // [Static], [Embedded], [File], [URL], and [FileOrURL] are resolvers that
 // name the same schema for every document and never report [ErrNoMatch],
-// so registering one on its own validates everything against it. Static
-// returns a [Ref] that carries a validator compiled already, such as the
-// one [MustCompile] built at package scope:
+// so a registry holding one alone validates everything against it. Static
+// returns a [Ref] that carries a schema compiled already, such as the one
+// [MustCompile] built at package scope:
 //
-//	reg.Register(schema.Static(Schema))
+//	reg := schema.NewRegistry(schema.WithResolvers(schema.Static(Config)))
 //
 // The others return a Ref whose Key identifies the schema and whose Load
 // reads the bytes. The registry checks its cache by Key first, so a file is
@@ -113,40 +114,40 @@
 //	//go:embed schema.json
 //	var schemaBytes []byte
 //
-//	reg.Register(schema.Embedded(schemaBytes))
+//	reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded(schemaBytes)))
 //
 // Read a schema from disk or over HTTP:
 //
-//	reg.Register(schema.File("./schemas/config.json"))
-//	reg.Register(schema.URL("https://example.com/schema.json"))
+//	schema.File("./schemas/config.json")
+//	schema.URL("https://example.com/schema.json")
 //
 // [FileOrURL] routes a reference as written in a directive or on a command
 // line, which may be a file path or a URL.
 //
-// # Registration Order
+// # Resolver Order
 //
-// The registry tries registrations in order; the first resolver that does
-// not report [ErrNoMatch] wins. [When] guards any resolver with a
-// [go.jacobcolvin.com/niceyaml/schema/matcher.Matcher], so the schema
-// applies only to documents the matcher accepts, and [Directive] reads the
-// schema a document names for itself in a yaml-language-server comment. A
-// common order puts explicit user intent first, then content-based
-// matching, then file path conventions:
+// The registry tries the resolvers of [WithResolvers] in the order given;
+// the first that does not report [ErrNoMatch] wins. [When] guards any
+// resolver with a [go.jacobcolvin.com/niceyaml/schema/matcher.Matcher], so
+// the schema applies only to documents the matcher accepts, and
+// [Directive] reads the schema a document names for itself in a
+// yaml-language-server comment. A common order puts explicit user intent
+// first, then content-based matching, then file path conventions:
 //
-//	reg.Register(
+//	reg := schema.NewRegistry(schema.WithResolvers(
 //	    schema.Directive(),                                          // Explicit user intent.
 //	    schema.When(matcher.Content(...), schema.Embedded(...)),     // By content.
 //	    schema.When(matcher.MustFilePath(...), schema.File(...)),    // By path.
-//	)
+//	))
 //
 // Implement [Resolver], or wrap a function in [ResolverFunc], for
 // resolution that decides and names the schema from the same inspection of
 // the document.
 //
 // A resolver error that does not wrap [ErrNoMatch] ends the lookup, and the
-// resolvers registered after it do not run. While no catalog has loaded, a
+// resolvers after it do not run. While no catalog has loaded, a
 // [go.jacobcolvin.com/niceyaml/schema/schemastore.SchemaStore] that cannot
-// reach SchemaStore.org ends the lookup this way, so register it after any
+// reach SchemaStore.org ends the lookup this way, so place it after any
 // resolver that should still apply without the catalog.
 //
 // # Schema Caching
@@ -163,5 +164,5 @@
 // [go.jacobcolvin.com/niceyaml/schema/schemastore] package, whose
 // SchemaStore type is a resolver:
 //
-//	reg.Register(schemastore.New())
+//	reg := schema.NewRegistry(schema.WithResolvers(schemastore.New()))
 package schema

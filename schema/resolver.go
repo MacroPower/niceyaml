@@ -51,7 +51,7 @@ type Ref struct {
 //
 // Resolve returns a [Ref] naming the schema for doc, or an error wrapping
 // [ErrNoMatch] when the resolver does not apply to the document. A registry
-// tries its resolvers in registration order and moves past each one that
+// tries its resolvers in the order given and moves past each one that
 // reports ErrNoMatch, so a resolver decides whether it applies and names the
 // schema in the same call. Any other error stops the lookup.
 //

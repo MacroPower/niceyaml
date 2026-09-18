@@ -84,16 +84,17 @@ type CatalogEntry struct {
 // waiting leaves the fetch running, so the fetched catalog still reaches
 // later lookups.
 //
-// SchemaStore implements [schema.Resolver] and can be registered directly
-// with a [go.jacobcolvin.com/niceyaml/schema.Registry].
-// [ErrFetchCatalog] does not wrap [schema.ErrNoMatch], so while no catalog
-// has loaded, the registry stops at the store and does not try the resolvers
-// registered after it. Register the store after any resolver that should
-// still apply without the catalog. Create instances with [New].
+// SchemaStore implements [schema.Resolver] and goes straight into a
+// [go.jacobcolvin.com/niceyaml/schema.Registry] through
+// [schema.WithResolvers]. [ErrFetchCatalog] does not wrap
+// [schema.ErrNoMatch], so while no catalog has loaded, the registry stops
+// at the store and does not try the resolvers after it. Place the store
+// after any resolver that should still apply without the catalog. Create
+// instances with [New].
 //
 // Example:
 //
-//	reg.Register(schemastore.New())
+//	reg := schema.NewRegistry(schema.WithResolvers(schemastore.New()))
 type SchemaStore struct {
 	lastFetch      time.Time // Last successful fetch; zero until the first one succeeds.
 	lastAttempt    time.Time // Last fetch, successful or not.

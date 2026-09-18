@@ -85,7 +85,7 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) er
 
 // buildRegistry creates a schema registry based on CLI flags.
 //
-// When schemaRef is set, it is the only registration, so every document
+// When schemaRef is set, it is the only resolver, so every document
 // validates against it (the CLI flag takes precedence). The schema ref
 // resolves relative to the current working directory.
 //
@@ -95,8 +95,6 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) er
 // fetched on the first document that reaches it, and a file it cannot
 // match, or cannot fetch the catalog for, reports that in the file's error.
 func buildRegistry(schemaRef string) *schema.Registry {
-	reg := schema.NewRegistry()
-
 	// A loader applies to every document, so the CLI schema needs no matcher.
 	// Resolve relative to current working directory. If cwd fails, use ".".
 	if schemaRef != "" {
@@ -105,15 +103,11 @@ func buildRegistry(schemaRef string) *schema.Registry {
 			cwd = "."
 		}
 
-		reg.Register(schema.FileOrURL(cwd, schemaRef))
-
-		return reg
+		return schema.NewRegistry(schema.WithResolvers(schema.FileOrURL(cwd, schemaRef)))
 	}
 
-	reg.Register(
+	return schema.NewRegistry(schema.WithResolvers(
 		schema.Directive(), // Resolves schemas relative to each YAML file.
 		schemastore.New(),  // Automatic discovery by file path.
-	)
-
-	return reg
+	))
 }
