@@ -33,7 +33,8 @@ var (
 // Part selects which token of a resolved node a [Path] refers to.
 //
 // The zero value is [PartNode], so a [Path] from [Parse] or [Root] refers to
-// the node itself.
+// the node itself, which for a mapping entry is its value. [Path.Key] picks
+// the key of the entry instead.
 type Part int
 
 const (
@@ -41,19 +42,15 @@ const (
 	PartNode Part = iota
 	// PartKey targets the key of the mapping entry the path resolves to.
 	PartKey
-	// PartValue targets the value of the mapping entry the path resolves to.
-	PartValue
 )
 
-// String returns the part name: "node", "key", or "value".
+// String returns the part name: "node" or "key".
 func (p Part) String() string {
 	switch p {
 	case PartNode:
 		return "node"
 	case PartKey:
 		return "key"
-	case PartValue:
-		return "value"
 	default:
 		return "Part(" + strconv.Itoa(int(p)) + ")"
 	}
@@ -118,11 +115,12 @@ func quoteName(name string) string {
 // common prefix:
 //
 //	spec := paths.Root().Child("spec")
-//	replicas := spec.Child("replicas").Value() // $.spec.replicas
-//	image := spec.Child("image").Value()       // $.spec.image
+//	replicas := spec.Child("replicas") // $.spec.replicas
+//	image := spec.Child("image")       // $.spec.image
 //
 // The zero value is the document root targeting [PartNode], the same as
-// [Root]. [Path.Key] and [Path.Value] pick one part of a mapping entry.
+// [Root]. A path targets the node it resolves to, which for a mapping entry
+// is its value, and [Path.Key] targets the key of that entry instead.
 //
 // [Path.String] returns the selectors as a path expression, so [Parse] reads
 // it back as an equal Path with [PartNode]. The part travels separately
@@ -193,13 +191,6 @@ func (p Path) Part() Part {
 // Key returns a copy of the path targeting [PartKey].
 func (p Path) Key() Path {
 	p.part = PartKey
-
-	return p
-}
-
-// Value returns a copy of the path targeting [PartValue].
-func (p Path) Value() Path {
-	p.part = PartValue
 
 	return p
 }
@@ -381,7 +372,7 @@ func (p Path) Node(doc *ast.DocumentNode) (ast.Node, error) {
 //
 // For [PartKey], Token returns the key token of the mapping entry the last
 // selector picked, looking through the `?` indicator of an explicit key and
-// any anchor or tag on the key. For [PartValue] and [PartNode], and for
+// any anchor or tag on the key. For [PartNode], and for
 // PartKey when the path ends at a sequence element or the root, Token
 // returns the token that starts the resolved node: a scalar's own token, the
 // first key of a mapping, or the first element of a sequence. An alias

@@ -116,7 +116,7 @@ func NewErrorFrom(err error, opts ...ErrorOption) *Error {
 // receiver is unchanged, so an Error shared between callers can be
 // specialized per use:
 //
-//	located := err.With(niceyaml.WithPath(namePath.Value()))
+//	located := err.With(niceyaml.WithPath(namePath))
 func (e *Error) With(opts ...ErrorOption) *Error {
 	c := *e
 	c.errors = slices.Clone(e.errors)

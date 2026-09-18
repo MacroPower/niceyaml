@@ -177,7 +177,7 @@ func TestSourceError_Error_Name(t *testing.T) {
 			source := niceyaml.NewSourceFromString("name: test\nvalue: 123\n", tc.opts...)
 			err := source.Bind(niceyaml.NewError(
 				"bad value",
-				niceyaml.WithPath(paths.Root().Child("value").Value()),
+				niceyaml.WithPath(paths.Root().Child("value")),
 			))
 
 			assert.Equal(t, tc.want, err.Error())
@@ -207,7 +207,7 @@ func TestSourceError_Error_Name(t *testing.T) {
 			want: "config: bad value",
 		},
 		"name stands alone in front of a path that does not resolve": {
-			err:        niceyaml.NewError("bad value", niceyaml.WithPath(paths.Root().Child("missing").Value())),
+			err:        niceyaml.NewError("bad value", niceyaml.WithPath(paths.Root().Child("missing"))),
 			want:       "config: $.missing: bad value",
 			wantDetail: "no excerpt: resolve $.missing: not found",
 		},
@@ -609,7 +609,7 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 	}{
 		"value selection highlights value token": {
 			source: "key: value",
-			path:   paths.Root().Child("key").Value(),
+			path:   paths.Root().Child("key"),
 			errMsg: "invalid value",
 			want: stringtest.JoinLF(
 				"1:6: $.key: invalid value",
@@ -622,7 +622,7 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 				foo:
 				  bar: nested_value
 			`),
-			path:   paths.Root().Child("foo", "bar").Value(),
+			path:   paths.Root().Child("foo", "bar"),
 			errMsg: "nested value error",
 			want: stringtest.JoinLF(
 				"2:8: $.foo.bar: nested value error",
@@ -638,7 +638,7 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 				  - first
 				  - second
 			`),
-			path:   paths.Root().Child("items").Index(0).Value(),
+			path:   paths.Root().Child("items").Index(0),
 			errMsg: "array error",
 			want: stringtest.JoinLF(
 				"2:5: $.items[0]: array error",
@@ -879,7 +879,7 @@ func TestError_MultiError(t *testing.T) {
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"invalid type",
-					niceyaml.WithPath(paths.Root().Child("value").Value()),
+					niceyaml.WithPath(paths.Root().Child("value")),
 				),
 			),
 		))
@@ -907,7 +907,7 @@ func TestError_MultiError(t *testing.T) {
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"invalid type",
-					niceyaml.WithPath(paths.Root().Child("value").Value()),
+					niceyaml.WithPath(paths.Root().Child("value")),
 				),
 				niceyaml.NewError(
 					"missing field",
@@ -942,7 +942,7 @@ func TestError_MultiError(t *testing.T) {
 				),
 				niceyaml.NewError(
 					"error2",
-					niceyaml.WithPath(paths.Root().Child("key").Value()),
+					niceyaml.WithPath(paths.Root().Child("key")),
 				),
 			),
 		))
@@ -1108,7 +1108,7 @@ func TestError_MultiError(t *testing.T) {
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"got number, want string",
-					niceyaml.WithPath(paths.Root().Child("value").Value()),
+					niceyaml.WithPath(paths.Root().Child("value")),
 				),
 			),
 		))
@@ -1135,7 +1135,7 @@ func TestError_MultiError(t *testing.T) {
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"nested error",
-					niceyaml.WithPath(paths.Root().Child("value").Value()),
+					niceyaml.WithPath(paths.Root().Child("value")),
 				),
 			),
 		)
@@ -1159,7 +1159,7 @@ func TestError_MultiError(t *testing.T) {
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"type error on value",
-					niceyaml.WithPath(paths.Root().Child("value").Value()),
+					niceyaml.WithPath(paths.Root().Child("value")),
 				),
 				niceyaml.NewError(
 					"unexpected property",
@@ -1192,7 +1192,7 @@ func TestError_MultiError(t *testing.T) {
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"resolvable error",
-					niceyaml.WithPath(paths.Root().Child("value").Value()),
+					niceyaml.WithPath(paths.Root().Child("value")),
 				),
 				niceyaml.NewError(
 					"unresolvable error",
@@ -1336,8 +1336,8 @@ func TestSourceError_Detail_ListsUnresolvedNested(t *testing.T) {
 	err := source.Bind(niceyaml.NewError(
 		"2 schema violations",
 		niceyaml.WithErrors(
-			niceyaml.NewError("bad x", niceyaml.WithPath(paths.Root().Child("x").Value())),
-			niceyaml.NewError("bad y", niceyaml.WithPath(paths.Root().Child("y").Value())),
+			niceyaml.NewError("bad x", niceyaml.WithPath(paths.Root().Child("x"))),
+			niceyaml.NewError("bad y", niceyaml.WithPath(paths.Root().Child("y"))),
 		),
 	))
 
@@ -1355,7 +1355,7 @@ func TestSourceError_Format_Plain(t *testing.T) {
 	t.Run("marks the location without escape sequences", func(t *testing.T) {
 		t.Parallel()
 
-		err := source.Bind(niceyaml.NewError("bad value", niceyaml.WithPath(paths.Root().Child("b").Value())))
+		err := source.Bind(niceyaml.NewError("bad value", niceyaml.WithPath(paths.Root().Child("b"))))
 
 		got := fmt.Sprintf("%+v", err)
 
@@ -1375,7 +1375,7 @@ func TestSourceError_Format_Plain(t *testing.T) {
 
 		err := source.Bind(niceyaml.NewError("2 problems", niceyaml.WithErrors(
 			niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a").Key())),
-			niceyaml.NewError("bad c", niceyaml.WithPath(paths.Root().Child("c").Value())),
+			niceyaml.NewError("bad c", niceyaml.WithPath(paths.Root().Child("c"))),
 		)))
 
 		assert.Equal(t, stringtest.JoinLF(
@@ -1414,7 +1414,7 @@ func TestSourceError_Format_Plain(t *testing.T) {
 		t.Parallel()
 
 		multi := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n")
-		err := multi.Bind(niceyaml.NewError("bad value", niceyaml.WithPath(paths.Root().Child("b").Value())))
+		err := multi.Bind(niceyaml.NewError("bad value", niceyaml.WithPath(paths.Root().Child("b"))))
 
 		assert.Equal(t,
 			"$.b: bad value\n\nno excerpt: 2:1: multiple documents in source: 2 documents",
@@ -1477,7 +1477,7 @@ func TestError_NilInnerErrorWithLocation(t *testing.T) {
 			wantBound: "2:4:",
 		},
 		"path": {
-			err:       niceyaml.NewErrorFrom(nil, niceyaml.WithPath(paths.Root().Child("b").Value())),
+			err:       niceyaml.NewErrorFrom(nil, niceyaml.WithPath(paths.Root().Child("b"))),
 			want:      "$.b:",
 			wantBound: "2:4: $.b:",
 		},
@@ -1503,8 +1503,8 @@ func TestError_NestedErrorsKeepInnerPosition(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
-	inner := niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a").Value()))
-	nested := niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b").Value()))
+	inner := niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a")))
+	nested := niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b")))
 
 	// Nested errors on the wrapper add annotations, and the wrapper still
 	// takes its position from the Error it wraps.
@@ -1529,8 +1529,8 @@ func TestError_NestedLocationWithoutMessage(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
-	inner := niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a").Value()))
-	nested := niceyaml.NewErrorFrom(nil, niceyaml.WithPath(paths.Root().Child("b").Value()))
+	inner := niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a")))
+	nested := niceyaml.NewErrorFrom(nil, niceyaml.WithPath(paths.Root().Child("b")))
 
 	// A nested Error built from a nil error names a location and nothing
 	// else, so that location is highlighted and carries no annotation.
@@ -1631,7 +1631,7 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 				),
 				niceyaml.NewError(
 					"error 2",
-					niceyaml.WithPath(paths.Root().Child("line2").Value()),
+					niceyaml.WithPath(paths.Root().Child("line2")),
 				),
 			),
 		))
@@ -1748,7 +1748,7 @@ func TestError_HunkDisplay(t *testing.T) {
 
 		err := xmlSource(source).Bind(niceyaml.NewError(
 			"missing",
-			niceyaml.WithPath(paths.Root().Child("line4").Value()),
+			niceyaml.WithPath(paths.Root().Child("line4")),
 		))
 
 		got := trimLines(render(err))
@@ -2188,7 +2188,7 @@ func TestError_Width_AnnotationWrapping(t *testing.T) {
 				niceyaml.WithErrors(
 					niceyaml.NewError(
 						tc.nestedErrMsg,
-						niceyaml.WithPath(paths.Root().Child("key").Value()),
+						niceyaml.WithPath(paths.Root().Child("key")),
 					),
 				),
 			))
@@ -2222,7 +2222,7 @@ func TestError_Width_MultipleAnnotationsWrapping(t *testing.T) {
 		niceyaml.WithErrors(
 			niceyaml.NewError(
 				"first error with a very long message that should wrap properly",
-				niceyaml.WithPath(paths.Root().Child("value").Value()),
+				niceyaml.WithPath(paths.Root().Child("value")),
 			),
 			niceyaml.NewError(
 				"second error also with a long message for testing wrap behavior",
@@ -2271,7 +2271,7 @@ func TestError_Width_CombinedAnnotationsOnSameLine(t *testing.T) {
 			),
 			niceyaml.NewError(
 				"second error message here",
-				niceyaml.WithPath(paths.Root().Child("key").Value()),
+				niceyaml.WithPath(paths.Root().Child("key")),
 			),
 		),
 	))
@@ -2316,7 +2316,7 @@ func TestError_TokenRendersFromSource(t *testing.T) {
 		"bad block",
 		niceyaml.WithToken(tk),
 		niceyaml.WithErrors(
-			niceyaml.NewError("bad c", niceyaml.WithPath(paths.Root().Child("c").Value())),
+			niceyaml.NewError("bad c", niceyaml.WithPath(paths.Root().Child("c"))),
 		),
 	))))
 
@@ -2333,7 +2333,7 @@ func TestError_BoundDocument(t *testing.T) {
 	t.Parallel()
 
 	source := xmlSource("name: first\n---\nname: second\n")
-	namePath := paths.Root().Child("name").Value()
+	namePath := paths.Root().Child("name")
 
 	docs, err := source.Documents()
 	require.NoError(t, err)
@@ -2414,7 +2414,7 @@ func TestError_DoesNotMutateSource(t *testing.T) {
 	err := source.Bind(niceyaml.NewError(
 		"main",
 		niceyaml.WithErrors(
-			niceyaml.NewError("nested", niceyaml.WithPath(paths.Root().Child("b").Value())),
+			niceyaml.NewError("nested", niceyaml.WithPath(paths.Root().Child("b"))),
 		),
 	))
 
@@ -2462,7 +2462,7 @@ func TestError_WrappedContext(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, docs, 2)
 
-	inner := niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name").Value()))
+	inner := niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name")))
 
 	wrapped := docs[1].Bind(fmt.Errorf("document 1: %w", inner))
 
@@ -2516,7 +2516,7 @@ func TestError_ContextAboveLocation(t *testing.T) {
 
 	// A producer that wraps its own Error with context, the way a SelfValidator
 	// does, leaves the document to the binder above that wrapping.
-	located := niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name").Value()))
+	located := niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name")))
 	wrapped := docs[1].Bind(niceyaml.NewErrorFrom(fmt.Errorf("validate: %w", located)))
 
 	// The producer's context stays as written, behind the resolved position.
@@ -2544,8 +2544,8 @@ func TestError_NestedErrorsRenderAsAnnotations(t *testing.T) {
 		printer.WithGutter(printer.NoGutter),
 		printer.WithContainerStyle(lipgloss.NewStyle()),
 	)
-	badA := niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a").Value()))
-	badB := niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b").Value()))
+	badA := niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a")))
+	badB := niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b")))
 	inner := niceyaml.NewError(
 		"validation failed at 2 locations",
 		niceyaml.WithErrors(badA, badB),
@@ -2584,10 +2584,10 @@ func TestError_NestedErrorChains(t *testing.T) {
 		source := xmlSource("a: 1\nb: 2\nc: 3\n")
 		err := source.Bind(niceyaml.NewError(
 			"outer",
-			niceyaml.WithPath(paths.Root().Child("a").Value()),
+			niceyaml.WithPath(paths.Root().Child("a")),
 			niceyaml.WithErrors(
 				niceyaml.NewErrorFrom(fmt.Errorf("ctx: %w",
-					niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("b").Value())),
+					niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("b"))),
 				)),
 			),
 		))
@@ -2616,10 +2616,10 @@ func TestError_NestedErrorChains(t *testing.T) {
 
 		err := source.Bind(niceyaml.NewError(
 			"outer",
-			niceyaml.WithPath(paths.Root().Child("a").Value()),
+			niceyaml.WithPath(paths.Root().Child("a")),
 			niceyaml.WithErrors(
 				niceyaml.NewErrorFrom(niceyaml.NewError("inner", niceyaml.WithToken(tk))),
-				niceyaml.NewErrorFrom(niceyaml.NewError("also", niceyaml.WithPath(paths.Root().Child("b").Value()))),
+				niceyaml.NewErrorFrom(niceyaml.NewError("also", niceyaml.WithPath(paths.Root().Child("b")))),
 			),
 		))
 
@@ -2639,7 +2639,7 @@ func TestError_NestedMessageSpansLines(t *testing.T) {
 		niceyaml.WithErrors(
 			niceyaml.NewError(
 				"bad a\n  see docs for details",
-				niceyaml.WithPath(paths.Root().Child("a").Value()),
+				niceyaml.WithPath(paths.Root().Child("a")),
 			),
 		),
 	))
@@ -2666,7 +2666,7 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("name: first\n---\nname: second\n")
-	namePath := paths.Root().Child("name").Value()
+	namePath := paths.Root().Child("name")
 
 	docs, err := source.Documents()
 	require.NoError(t, err)
@@ -2823,7 +2823,7 @@ func TestError_ResolvesThroughErrorWrappers(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("name: first\n---\nname: second\n")
-	located := niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name").Value()))
+	located := niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name")))
 
 	docs, err := source.Documents()
 	require.NoError(t, err)
@@ -2889,7 +2889,7 @@ func TestSourceError_Location(t *testing.T) {
 		doc  int
 	}{
 		"path targets the value token": {
-			err:  niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("value").Value())),
+			err:  niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("value"))),
 			want: position.NewRange(position.New(1, 7), position.New(1, 10)),
 		},
 		"path targets the key token": {
@@ -2897,7 +2897,7 @@ func TestSourceError_Location(t *testing.T) {
 			want: position.NewRange(position.New(1, 0), position.New(1, 5)),
 		},
 		"path resolves in the bound document": {
-			err:  niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("name").Value())),
+			err:  niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("name"))),
 			want: position.NewRange(position.New(3, 6), position.New(3, 12)),
 			doc:  1,
 		},
@@ -2922,7 +2922,7 @@ func TestSourceError_Location(t *testing.T) {
 			is:  niceyaml.ErrTokenNotFound,
 		},
 		"path that does not resolve": {
-			err: niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("missing").Value())),
+			err: niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("missing"))),
 			is:  paths.ErrNotFound,
 		},
 		"range past the last line": {
@@ -2977,7 +2977,7 @@ func TestSourceError_Location_MultiLineToken(t *testing.T) {
 	var bound *niceyaml.SourceError
 
 	require.ErrorAs(t, source.Bind(niceyaml.NewError("bad",
-		niceyaml.WithPath(paths.Root().Child("text").Value()),
+		niceyaml.WithPath(paths.Root().Child("text")),
 	)), &bound)
 
 	got, err := bound.Location()
@@ -3003,7 +3003,7 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 			wantRender: "bad",
 		},
 		"path that does not resolve": {
-			err:        niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("missing").Value())),
+			err:        niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("missing"))),
 			is:         paths.ErrNotFound,
 			wantRender: "$.missing: bad\n\nno excerpt: resolve $.missing: not found",
 		},
@@ -3023,7 +3023,7 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 		},
 		"nested range before the first line": {
 			err: niceyaml.NewError("bad",
-				niceyaml.WithPath(paths.Root().Child("missing").Value()),
+				niceyaml.WithPath(paths.Root().Child("missing")),
 				niceyaml.WithErrors(
 					niceyaml.NewError("first",
 						niceyaml.WithRange(position.NewRange(position.New(-1, 0), position.New(-1, 2))),
@@ -3035,7 +3035,7 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 		},
 		"every nested error unresolved": {
 			err: niceyaml.NewError("bad", niceyaml.WithErrors(
-				niceyaml.NewError("first", niceyaml.WithPath(paths.Root().Child("missing").Value())),
+				niceyaml.NewError("first", niceyaml.WithPath(paths.Root().Child("missing"))),
 				niceyaml.NewError("second", niceyaml.WithToken(&token.Token{})),
 			)),
 			is:         niceyaml.ErrTokenNotFound,
@@ -3068,8 +3068,8 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, source.Bind(niceyaml.NewError("bad", niceyaml.WithErrors(
-			niceyaml.NewError("first", niceyaml.WithPath(paths.Root().Child("missing").Value())),
-			niceyaml.NewError("second", niceyaml.WithPath(paths.Root().Child("value").Value())),
+			niceyaml.NewError("first", niceyaml.WithPath(paths.Root().Child("missing"))),
+			niceyaml.NewError("second", niceyaml.WithPath(paths.Root().Child("value"))),
 		))), &bound)
 
 		excerpt, err := bound.Excerpt(2)
@@ -3093,9 +3093,9 @@ func excerptError(t *testing.T) *niceyaml.SourceError {
 
 	err := niceyaml.NewSourceFromString(excerptSource).Bind(niceyaml.NewError(
 		"bad b",
-		niceyaml.WithPath(paths.Root().Child("b").Value()),
+		niceyaml.WithPath(paths.Root().Child("b")),
 		niceyaml.WithErrors(
-			niceyaml.NewError("bad h", niceyaml.WithPath(paths.Root().Child("h").Value())),
+			niceyaml.NewError("bad h", niceyaml.WithPath(paths.Root().Child("h"))),
 		),
 	))
 
@@ -3282,11 +3282,11 @@ func TestSourceError_Annotate(t *testing.T) {
 		var first, second *niceyaml.SourceError
 
 		require.ErrorAs(t, source.Bind(niceyaml.NewError(
-			"bad b", niceyaml.WithPath(paths.Root().Child("b").Value()),
+			"bad b", niceyaml.WithPath(paths.Root().Child("b")),
 		)), &first)
 		require.ErrorAs(t, source.Bind(niceyaml.NewError(
 			"bad d",
-			niceyaml.WithErrors(niceyaml.NewError("too big", niceyaml.WithPath(paths.Root().Child("d").Value()))),
+			niceyaml.WithErrors(niceyaml.NewError("too big", niceyaml.WithPath(paths.Root().Child("d")))),
 		)), &second)
 
 		require.NoError(t, first.Annotate(view))
@@ -3315,7 +3315,7 @@ func TestSourceError_Annotate(t *testing.T) {
 				is:  niceyaml.ErrNoLocation,
 			},
 			"path that does not resolve": {
-				err: niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("missing").Value())),
+				err: niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("missing"))),
 				is:  paths.ErrNotFound,
 			},
 			"range past the last line": {
@@ -3349,9 +3349,9 @@ func TestSourceError_TreeBranches(t *testing.T) {
 	// Every located Error in the tree is marked, however it got there.
 
 	source := xmlSource("a: 1\nb: 2\nc: 3\n")
-	badA := niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a").Value()))
-	badB := niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b").Value()))
-	badC := niceyaml.NewError("bad c", niceyaml.WithPath(paths.Root().Child("c").Value()))
+	badA := niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a")))
+	badB := niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b")))
+	badC := niceyaml.NewError("bad c", niceyaml.WithPath(paths.Root().Child("c")))
 
 	t.Run("join branches are annotated", func(t *testing.T) {
 		t.Parallel()
@@ -3386,7 +3386,7 @@ func TestSourceError_TreeBranches(t *testing.T) {
 	t.Run("a join branch that does not resolve is not listed", func(t *testing.T) {
 		t.Parallel()
 
-		missing := niceyaml.NewError("bad x", niceyaml.WithPath(paths.Root().Child("x").Value()))
+		missing := niceyaml.NewError("bad x", niceyaml.WithPath(paths.Root().Child("x")))
 		err := source.Bind(errors.Join(badA, missing))
 
 		got := trimLines(render(err))
@@ -3398,7 +3398,7 @@ func TestSourceError_TreeBranches(t *testing.T) {
 		t.Parallel()
 
 		other := xmlSource("z: 9\n")
-		inner := other.Bind(niceyaml.NewError("bad z", niceyaml.WithPath(paths.Root().Child("z").Value())))
+		inner := other.Bind(niceyaml.NewError("bad z", niceyaml.WithPath(paths.Root().Child("z"))))
 		err := source.Bind(errors.Join(badA, inner))
 
 		var bound *niceyaml.SourceError
@@ -3427,8 +3427,8 @@ func TestSourceErrors(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, docs, 2)
 
-	first := docs[0].Bind(niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a").Value())))
-	second := docs[1].Bind(niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b").Value())))
+	first := docs[0].Bind(niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a"))))
+	second := docs[1].Bind(niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b"))))
 
 	tcs := map[string]struct {
 		err  error

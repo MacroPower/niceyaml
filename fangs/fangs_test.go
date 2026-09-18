@@ -78,7 +78,7 @@ func TestErrorHandler(t *testing.T) {
 
 	badValue := fileB.Bind(niceyaml.NewError(
 		"bad value",
-		niceyaml.WithPath(paths.Root().Child("value").Value()),
+		niceyaml.WithPath(paths.Root().Child("value")),
 	))
 
 	emptyMessageErr := src.Bind(niceyaml.NewErrorFrom(
@@ -89,7 +89,7 @@ func TestErrorHandler(t *testing.T) {
 		"two problems",
 		niceyaml.WithErrors(
 			niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name").Key())),
-			niceyaml.NewError("bad value", niceyaml.WithPath(paths.Root().Child("value").Value())),
+			niceyaml.NewError("bad value", niceyaml.WithPath(paths.Root().Child("value"))),
 		),
 	))
 

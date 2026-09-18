@@ -655,7 +655,7 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 	t.Run("path error reports the renumbered line", func(t *testing.T) {
 		t.Parallel()
 
-		err := source.Bind(niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b").Value())))
+		err := source.Bind(niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b"))))
 		assert.Equal(t, "2:4: $.b: bad b", err.Error())
 
 		var bound *niceyaml.SourceError
@@ -1252,7 +1252,7 @@ func TestSource_Bind(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString("name: value\n")
-		pathErr := niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name").Value()))
+		pathErr := niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name")))
 
 		var nilBound *niceyaml.SourceError
 

@@ -224,7 +224,7 @@ func buildTargetPath(segments []jsonschema.Segment, targetsKey bool) paths.Path 
 		return path.Key()
 	}
 
-	return path.Value()
+	return path
 }
 
 // normalizeJSON converts the YAML-native values a decode produces that the

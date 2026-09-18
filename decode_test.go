@@ -1150,7 +1150,7 @@ type failingValidator struct {
 }
 
 func (failingValidator) Validate() error {
-	return niceyaml.NewError("rejected", niceyaml.WithPath(paths.Root().Child("name").Value()))
+	return niceyaml.NewError("rejected", niceyaml.WithPath(paths.Root().Child("name")))
 }
 
 func TestDocument_ErrorsResolveInDocument(t *testing.T) {
@@ -1161,7 +1161,7 @@ func TestDocument_ErrorsResolveInDocument(t *testing.T) {
 		---
 		name: second
 	`)
-	namePath := paths.Root().Child("name").Value()
+	namePath := paths.Root().Child("name")
 
 	// The first line of each error's message.
 	headlines := func(t *testing.T, errs []error) []string {
@@ -2064,7 +2064,7 @@ func TestDocument_Decode_Validator(t *testing.T) {
 
 		_, err = dd.Decode[plainConfig](t.Context(),
 			niceyaml.WithValidator(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Document) error {
-				return niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name").Value()))
+				return niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name")))
 			})),
 		)
 		require.Error(t, err)
@@ -2117,7 +2117,7 @@ func TestDocument_Bind(t *testing.T) {
 	second := docs[1]
 	require.NotNil(t, second)
 
-	namePath := paths.Root().Child("name").Value()
+	namePath := paths.Root().Child("name")
 
 	t.Run("nil comes back nil", func(t *testing.T) {
 		t.Parallel()

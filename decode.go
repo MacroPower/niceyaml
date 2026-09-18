@@ -72,7 +72,7 @@ type Validator interface {
 //		}
 //
 //		if kind != "Deployment" {
-//			return niceyaml.NewError("unknown kind", niceyaml.WithPath(kindPath.Value()))
+//			return niceyaml.NewError("unknown kind", niceyaml.WithPath(kindPath))
 //		}
 //
 //		return nil

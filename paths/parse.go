@@ -23,8 +23,8 @@ var ErrInvalidPath = errors.New("invalid path")
 //	[n]       a sequence element by 0-based index
 //	[*]       every sequence element
 //
-// Use [Path.Key] or [Path.Value] on the result to target one part of a
-// mapping entry:
+// Use [Path.Key] on the result to target the key of a mapping entry rather
+// than its value:
 //
 //	p, err := paths.Parse("$.metadata.name")
 //	if err != nil {
