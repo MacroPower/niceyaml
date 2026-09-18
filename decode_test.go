@@ -1917,7 +1917,7 @@ func TestDocument_ErrorsBindToSource(t *testing.T) {
 		var pre error
 
 		validator := niceyaml.ValidatorFunc(func(_ context.Context, doc *niceyaml.Document) error {
-			pre = doc.Source().WrapError(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
+			pre = doc.Source().Bind(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
 
 			return pre
 		})
@@ -1928,26 +1928,24 @@ func TestDocument_ErrorsBindToSource(t *testing.T) {
 		requireBound(t, source, err)
 	})
 
-	t.Run("a plain self validation error comes back as it is", func(t *testing.T) {
+	t.Run("a plain self validation error binds to the source", func(t *testing.T) {
 		t.Parallel()
 
-		_, doc := newDoc(t, "name: a\n")
+		source, doc := newDoc(t, "name: a\n")
 
 		_, err := doc.Decode[plainValidated](t.Context())
-		assert.Same(t, errPlainValidation, err)
+		require.ErrorIs(t, err, errPlainValidation)
+		requireBound(t, source, err)
 	})
 
-	t.Run("a path resolution error comes back as it is", func(t *testing.T) {
+	t.Run("a path resolution error binds to the source", func(t *testing.T) {
 		t.Parallel()
 
-		_, doc := newDoc(t, "name: a\n")
+		source, doc := newDoc(t, "name: a\n")
 
 		_, err := doc.Get[string](t.Context(), paths.Root().Child("missing"))
 		require.ErrorIs(t, err, paths.ErrNotFound)
-
-		var bound *niceyaml.SourceError
-
-		assert.NotErrorAs(t, err, &bound, "no SourceError in the chain")
+		requireBound(t, source, err)
 	})
 }
 
@@ -1973,7 +1971,7 @@ func TestDocument_ValidatorErrorsResolveInDocument(t *testing.T) {
 		},
 		"a validator that binds its own error binds through the document": {
 			validate: func(doc *niceyaml.Document) error {
-				return doc.WrapError(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
+				return doc.Bind(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
 			},
 		},
 	}
@@ -2109,7 +2107,7 @@ func rejectingValidator(err error) niceyaml.Validator {
 	})
 }
 
-func TestDocument_WrapError(t *testing.T) {
+func TestDocument_Bind(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("name: a\n---\nname: b\n")
@@ -2124,20 +2122,30 @@ func TestDocument_WrapError(t *testing.T) {
 	t.Run("nil comes back nil", func(t *testing.T) {
 		t.Parallel()
 
-		require.NoError(t, second.WrapError(nil))
+		require.NoError(t, second.Bind(nil))
 	})
 
-	t.Run("an error without a location passes through", func(t *testing.T) {
+	t.Run("an error without a location names the source", func(t *testing.T) {
 		t.Parallel()
 
-		err := errors.New("plain")
-		assert.Same(t, err, second.WrapError(err))
+		plain := errors.New("plain")
+		err := second.Bind(plain)
+		require.ErrorIs(t, err, plain)
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, source, bound.Source())
+		assert.Equal(t, "plain", err.Error(), "the source has no name to add")
+
+		_, locErr := bound.Location()
+		require.ErrorIs(t, locErr, niceyaml.ErrNoLocation)
 	})
 
 	t.Run("binds an Error to the source and this document", func(t *testing.T) {
 		t.Parallel()
 
-		err := second.WrapError(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
+		err := second.Bind(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
 
 		var bound *niceyaml.SourceError
 
@@ -2149,7 +2157,7 @@ func TestDocument_WrapError(t *testing.T) {
 	t.Run("the source alone has no single document to resolve in", func(t *testing.T) {
 		t.Parallel()
 
-		err := source.WrapError(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
+		err := source.Bind(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
 		assert.Equal(t, "$.name: bad name", err.Error())
 
 		var bound *niceyaml.SourceError
@@ -2163,7 +2171,7 @@ func TestDocument_WrapError(t *testing.T) {
 	t.Run("an error bound to the source comes back as it is", func(t *testing.T) {
 		t.Parallel()
 
-		pre := second.WrapError(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
-		assert.Same(t, pre, second.WrapError(pre))
+		pre := second.Bind(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
+		assert.Same(t, pre, second.Bind(pre))
 	})
 }

@@ -26,7 +26,7 @@ import (
 // Source separates two concerns. Parsing and decoding live on Source itself,
 // where [Source.File] lazily parses the AST and [Source.Documents] builds
 // the documents. Every error they and their Documents produce comes back
-// bound to the Source as a [SourceError], and [Source.WrapError] binds
+// bound to the Source as a [SourceError], and [Source.Bind] binds
 // errors built elsewhere. Rendering lives in a [line.View], which carries
 // the overlays, annotations, and flags that a [printer.Printer] renders
 // over the [line.Lines] the Source holds. [Source.Lines] returns those
@@ -246,7 +246,7 @@ func (s *Source) Document() (*Document, error) {
 	}
 
 	if len(docs) == 0 {
-		return nil, s.WrapError(NewErrorFrom(ErrNoDocuments))
+		return nil, s.Bind(NewErrorFrom(ErrNoDocuments))
 	}
 
 	content := make([]*Document, 0, len(docs))
@@ -270,7 +270,7 @@ func (s *Source) Document() (*Document, error) {
 			err = err.With(WithToken(start))
 		}
 
-		return nil, s.WrapError(err)
+		return nil, s.Bind(err)
 	}
 }
 
@@ -343,7 +343,7 @@ func (s *Source) parse() (*ast.File, error) {
 	}
 
 	if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
-		return nil, s.WrapError(NewError(
+		return nil, s.Bind(NewError(
 			yamlErr.GetMessage(),
 			WithToken(yamlErr.GetToken()),
 		))
@@ -353,37 +353,36 @@ func (s *Source) parse() (*ast.File, error) {
 	return nil, err
 }
 
-// WrapError binds err to this [*Source] when err's chain holds an [*Error].
-// It resolves every location in err against this source as it binds, so
-// the position [SourceError.Error] reports and the range
-// [SourceError.Location] returns are fixed from then on, and
-// [SourceError.Detail] and [SourceError.Excerpt] render the excerpt with
-// the [Renderer] of the caller's choice. A path resolves in the single
+// Bind binds err to this [*Source]. It resolves every location in err
+// against this source as it binds, so the position [SourceError.Error]
+// reports and the range [SourceError.Location] returns are fixed from then
+// on, and [SourceError.Detail] and [SourceError.Excerpt] render the excerpt
+// with the [Renderer] of the caller's choice. A path resolves in the single
 // document [Source.Document] picks, as [Source.Decode] decodes it, which
 // parses the source if nothing has yet, so a file that holds several
-// documents binds through [Document.WrapError] of the document the path
+// documents binds through [Document.Bind] of the document the path
 // belongs to.
 //
 // Errors from [Source.File], [Source.Documents], and the [Document] methods
-// are bound already, so they need no WrapError. WrapError is for errors
-// built elsewhere, such as a validator that returns an [*Error] with a path. The
-// message of err stays as it is, and the resolved position goes in front of
-// it, so bind such an error before adding context with [fmt.Errorf] to keep
-// the position beside the message:
+// are bound already, so they need no Bind. Bind is for errors built
+// elsewhere, such as a validator that returns an [*Error] with a path, or
+// any other error a caller produces while checking the source. An error
+// without a location has no position to put in front of its message, and
+// the bound error then names the source alone, as "name: msg", so an
+// error from one file of many still says which file. The message of err
+// stays as it is, and the position goes in front of it, so bind such an
+// error before adding context with [fmt.Errorf] to keep the position
+// beside the message:
 //
-//	fmt.Errorf("document %d: %w", i, source.WrapError(err))
+//	fmt.Errorf("document %d: %w", i, source.Bind(err))
 //
-// If err is nil, WrapError returns nil. If err's chain holds no [*Error], or
-// the first one it holds is a nil pointer, or the first [*SourceError] it
-// holds is bound to this Source already, WrapError returns err unchanged. A
-// nil [*SourceError] pointer in the chain binds nothing, so WrapError looks
-// past it. WrapError never modifies err.
-func (s *Source) WrapError(err error) error {
-	if err == nil {
-		return nil
-	}
-
-	if !hasError(err) {
+// If err is nil, Bind returns nil. If the first [*SourceError] in err's
+// chain is bound to this Source already, Bind returns err unchanged, so
+// binding is idempotent. A nil [*Error] or [*SourceError] pointer as err
+// carries nothing to bind and comes back as it is, and one inside the
+// chain binds nothing, so Bind looks past it. Bind never modifies err.
+func (s *Source) Bind(err error) error {
+	if isNothing(err) {
 		return err
 	}
 

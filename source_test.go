@@ -655,7 +655,7 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 	t.Run("path error reports the renumbered line", func(t *testing.T) {
 		t.Parallel()
 
-		err := source.WrapError(niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b").Value())))
+		err := source.Bind(niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b").Value())))
 		assert.Equal(t, "2:4: $.b: bad b", err.Error())
 
 		var bound *niceyaml.SourceError
@@ -677,7 +677,7 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 		tk := view.TokenAt(position.New(2, 0))
 		require.NotNil(t, tk)
 
-		err := source.WrapError(niceyaml.NewError("bad c", niceyaml.WithToken(tk)))
+		err := source.Bind(niceyaml.NewError("bad c", niceyaml.WithToken(tk)))
 		assert.Equal(t, "3:1: bad c", err.Error())
 
 		got := trimLines(render(err))
@@ -693,7 +693,7 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 
 		var bound *niceyaml.SourceError
 
-		require.ErrorAs(t, source.WrapError(niceyaml.NewError("bad d", niceyaml.WithToken(last))), &bound)
+		require.ErrorAs(t, source.Bind(niceyaml.NewError("bad d", niceyaml.WithToken(last))), &bound)
 
 		_, err := bound.Excerpt(2)
 		require.ErrorIs(t, err, niceyaml.ErrOutOfRange)
@@ -1135,7 +1135,7 @@ func TestSource_TokenAt(t *testing.T) {
 	}
 }
 
-func TestSource_WrapError(t *testing.T) {
+func TestSource_Bind(t *testing.T) {
 	t.Parallel()
 
 	t.Run("wraps niceyaml.Error", func(t *testing.T) {
@@ -1144,7 +1144,7 @@ func TestSource_WrapError(t *testing.T) {
 		source := niceyaml.NewSourceFromString("key: value\n")
 		yamlErr := niceyaml.NewError("test error")
 
-		wrapped := source.WrapError(yamlErr)
+		wrapped := source.Bind(yamlErr)
 
 		require.Error(t, wrapped)
 
@@ -1157,7 +1157,7 @@ func TestSource_WrapError(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString("key: value\n")
-		wrapped := source.WrapError(nil)
+		wrapped := source.Bind(nil)
 
 		assert.NoError(t, wrapped)
 	})
@@ -1169,21 +1169,55 @@ func TestSource_WrapError(t *testing.T) {
 		yamlErr := niceyaml.NewError("test error")
 		outer := fmt.Errorf("document 3: %w", yamlErr)
 
-		wrapped := source.WrapError(outer)
+		wrapped := source.Bind(outer)
 
 		require.ErrorIs(t, wrapped, outer)
 		assert.Contains(t, wrapped.Error(), "document 3: ")
 	})
 
-	t.Run("returns non-Error unchanged", func(t *testing.T) {
+	t.Run("binds a non-Error and names the source", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString("key: value\n")
 		stdErr := errors.New("standard error")
 
-		wrapped := source.WrapError(stdErr)
+		tcs := map[string]struct {
+			opts []niceyaml.SourceOption
+			want string
+		}{
+			"no name leaves the message as it is": {
+				want: "standard error",
+			},
+			"name goes in front of the message": {
+				opts: []niceyaml.SourceOption{niceyaml.WithName("config")},
+				want: "config: standard error",
+			},
+			"file path names the source": {
+				opts: []niceyaml.SourceOption{niceyaml.WithFilePath("dir/config.yaml")},
+				want: "dir/config.yaml: standard error",
+			},
+		}
 
-		assert.Equal(t, stdErr, wrapped)
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				source := niceyaml.NewSourceFromString("key: value\n", tc.opts...)
+
+				wrapped := source.Bind(stdErr)
+				require.ErrorIs(t, wrapped, stdErr)
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, wrapped, &bound)
+				assert.Same(t, source, bound.Source())
+				assert.Equal(t, tc.want, wrapped.Error())
+				assert.Equal(t, tc.want, fmt.Sprintf("%+v", wrapped), "no location, so no excerpt")
+				assert.Equal(t, "document 0: "+tc.want, fmt.Errorf("document 0: %w", wrapped).Error())
+
+				_, locErr := bound.Location()
+				require.ErrorIs(t, locErr, niceyaml.ErrNoLocation)
+			})
+		}
 	})
 
 	t.Run("returns a nil Error unchanged", func(t *testing.T) {
@@ -1195,23 +1229,23 @@ func TestSource_WrapError(t *testing.T) {
 
 		err := error(nilErr)
 
-		assert.Equal(t, err, source.WrapError(err))
+		assert.Equal(t, err, source.Bind(err))
 	})
 
-	t.Run("returns context around a nil Error unchanged", func(t *testing.T) {
+	t.Run("binds context around a nil Error without a location", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString("key: value\n")
+		source := niceyaml.NewSourceFromString("key: value\n", niceyaml.WithName("config"))
 
 		var nilErr *niceyaml.Error
 
 		outer := fmt.Errorf("document 3: %w", nilErr)
 
-		wrapped := source.WrapError(outer)
+		wrapped := source.Bind(outer)
 
-		require.Equal(t, outer, wrapped)
-		assert.Equal(t, "document 3: <nil>", wrapped.Error())
-		assert.Equal(t, "document 3: <nil>", fmt.Sprintf("%+v", wrapped))
+		require.ErrorIs(t, wrapped, outer)
+		assert.Equal(t, "config: document 3: <nil>", wrapped.Error())
+		assert.Equal(t, "config: document 3: <nil>", fmt.Sprintf("%+v", wrapped))
 	})
 
 	t.Run("looks past a nil SourceError in the chain", func(t *testing.T) {
@@ -1234,7 +1268,7 @@ func TestSource_WrapError(t *testing.T) {
 
 				// The nil pointer binds nothing, so the Error in the chain
 				// binds to this source and its path resolves there.
-				wrapped := source.WrapError(err)
+				wrapped := source.Bind(err)
 
 				var bound *niceyaml.SourceError
 
@@ -1249,7 +1283,7 @@ func TestSource_WrapError(t *testing.T) {
 				docs, docsErr := source.Documents()
 				require.NoError(t, docsErr)
 
-				require.ErrorAs(t, docs[0].WrapError(err), &bound)
+				require.ErrorAs(t, docs[0].Bind(err), &bound)
 				assert.Same(t, source, bound.Source())
 			})
 		}
@@ -1261,22 +1295,22 @@ func TestSource_WrapError(t *testing.T) {
 		source := niceyaml.NewSourceFromString("name: value\n")
 		namePath := paths.Root().Child("name")
 
-		once := source.WrapError(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
-		assert.Same(t, once, source.WrapError(once))
+		once := source.Bind(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
+		assert.Same(t, once, source.Bind(once))
 
 		outer := fmt.Errorf("document 0: %w", once)
-		assert.Same(t, outer, source.WrapError(outer))
+		assert.Same(t, outer, source.Bind(outer))
 	})
 
 	t.Run("wraps an error bound to another source", func(t *testing.T) {
 		t.Parallel()
 
 		first := niceyaml.NewSourceFromString("name: value\n")
-		second := niceyaml.NewSourceFromString("# comment\nname: value\n")
+		second := niceyaml.NewSourceFromString("# comment\nname: value\n", niceyaml.WithName("second"))
 		namePath := paths.Root().Child("name")
 
-		once := first.WrapError(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
-		twice := second.WrapError(once)
+		once := first.Bind(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
+		twice := second.Bind(once)
 
 		require.NotSame(t, once, twice)
 
@@ -1286,7 +1320,7 @@ func TestSource_WrapError(t *testing.T) {
 		assert.Same(t, second, bound.Source())
 
 		// The first binding put its position in the text, and the second
-		// adds none.
+		// adds neither a position nor its name.
 		assert.Equal(t, "1:7: $.name: bad name", twice.Error())
 	})
 }

@@ -145,13 +145,28 @@ func (r *Registry) Register(res ...Resolver) {
 // [ErrNoMatch] before any resolver runs. An explicitly empty document
 // counts as content, since it is the null document a schema may validate.
 //
+// Every error comes back bound to the document through
+// [niceyaml.Document.Bind], so its message names the file the document
+// came from.
+//
 // For most use cases, prefer [Validate] which combines lookup and
 // validation. Use Lookup when you need the validator for custom processing.
 func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.Document) (*Validator, error) {
+	v, err := r.lookup(ctx, doc)
+	if err != nil {
+		//nolint:wrapcheck // Binding names the document; the error keeps its own context.
+		return nil, doc.Bind(err)
+	}
+
+	return v, nil
+}
+
+// lookup is [Registry.Lookup] before binding the error to the document.
+func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Document) (*Validator, error) {
 	// No resolver sees a content-free document, so a resolver registered
 	// after one that declines cannot resurrect it.
 	if !doc.HasContent() {
-		return nil, fmt.Errorf("%w: %q: document has no content", ErrNoMatch, doc.FilePath())
+		return nil, fmt.Errorf("%w: document has no content", ErrNoMatch)
 	}
 
 	r.mu.RLock()
@@ -172,7 +187,7 @@ func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.Document) (*Validat
 		return r.validator(ctx, ref)
 	}
 
-	return nil, fmt.Errorf("%w: %q", ErrNoMatch, doc.FilePath())
+	return nil, ErrNoMatch
 }
 
 // Validate validates a document using the first matching schema.

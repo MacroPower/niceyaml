@@ -51,8 +51,8 @@ type SelfValidator interface {
 // A validator that knows a location returns an unbound [*Error], and the
 // Document binds it to the source with itself as the document its path
 // resolves in. A validator that binds an error itself does so through
-// [Document.WrapError], since the Document leaves a bound error as it is,
-// and [Source.WrapError] resolves paths in the single document the source
+// [Document.Bind], since the Document leaves a bound error as it is,
+// and [Source.Bind] resolves paths in the single document the source
 // picks.
 //
 // See [ValidatorFunc], [go.jacobcolvin.com/niceyaml/schema.Validator],
@@ -295,9 +295,11 @@ func (dd *Document) HasContent() bool {
 // [paths.ErrNoDocument] when the document has no content at all, such as an
 // empty document or one holding only directives; [paths.ErrAlias] when an
 // alias on the path does not resolve; and [paths.ErrWildcard] for a path
-// that could match several nodes. Those errors come back as they are. A
-// YAML decoding error, including a value that cannot be represented as T,
-// comes back bound to the source as a [SourceError]. An alias inside the
+// that could match several nodes. Every error comes back bound to the
+// source as a [SourceError], a path resolution error with the name of the
+// source in front and a YAML decoding error, including a value that cannot
+// be represented as T, with the position of the offending token. An alias
+// inside the
 // value resolves against the anchors of the whole document, so a value
 // that refers to an anchor defined outside it decodes as it does in the
 // whole document.
@@ -381,11 +383,12 @@ func (dd *Document) GetValue(path paths.Path) (string, error) {
 }
 
 // node resolves path against the document body, ignoring the path's
-// [paths.Part]. Errors come from [paths.Path.Node] as they are, since they
-// already name the path.
+// [paths.Part]. An error from [paths.Path.Node] names the path already, so
+// it is bound to the source as it is.
 func (dd *Document) node(path paths.Path) (ast.Node, error) {
-	//nolint:wrapcheck // The paths error already names the path.
-	return path.Node(dd.doc)
+	node, err := path.Node(dd.doc)
+
+	return node, dd.Bind(err)
 }
 
 // Validate runs each validator on the document in the order given and
@@ -399,30 +402,31 @@ func (dd *Document) node(path paths.Path) (ast.Node, error) {
 //		}
 //	}
 //
-// An [*Error] from a validator comes back bound to the source as a
-// [SourceError] through [Document.WrapError]. Any other error comes back as
-// it is.
+// An error from a validator comes back bound to the source as a
+// [SourceError] through [Document.Bind], so an [*Error] renders its
+// location and any other error names the source.
 func (dd *Document) Validate(ctx context.Context, validators ...Validator) error {
 	for _, dv := range validators {
 		err := dv.Validate(ctx, dd)
 		if err != nil {
-			return dd.WrapError(err)
+			return dd.Bind(err)
 		}
 	}
 
 	return nil
 }
 
-// WrapError binds err to the document's source, as [Source.WrapError] does,
-// with the paths in err resolving in this document rather than in the
-// single document the source picks, so a validator on a multi-document
-// source binds its error through the document it checked.
+// Bind binds err to the document's source, as [Source.Bind] does, with
+// the paths in err resolving in this document rather than in the single
+// document the source picks, so a validator on a multi-document source
+// binds its error through the document it checked.
 //
-// If err is nil, WrapError returns nil. An error already bound to this
-// source, or one whose chain holds no Error, such as one from
-// [go.jacobcolvin.com/niceyaml/paths], comes back as it is.
+// If err is nil, Bind returns nil. An error already bound to this source
+// comes back as it is. An error without a location, such as one from
+// [go.jacobcolvin.com/niceyaml/paths], binds all the same, and the bound
+// error names the source in front of the message.
 //
-// The Document methods bind the errors they return already. WrapError is for
+// The Document methods bind the errors they return already. Bind is for
 // an error built elsewhere, such as one from a check the caller runs on a
 // value it took from the document:
 //
@@ -431,13 +435,9 @@ func (dd *Document) Validate(ctx context.Context, validators ...Validator) error
 //		return err
 //	}
 //
-//	return doc.WrapError(check(value))
-func (dd *Document) WrapError(err error) error {
-	if err == nil {
-		return nil
-	}
-
-	if !hasError(err) {
+//	return doc.Bind(check(value))
+func (dd *Document) Bind(err error) error {
+	if isNothing(err) {
 		return err
 	}
 
@@ -596,7 +596,7 @@ func (dd *Document) decodeInto(ctx context.Context, node ast.Node, v any, opts [
 	}
 
 	if validator, ok := v.(SelfValidator); ok {
-		return dd.WrapError(validator.Validate())
+		return dd.Bind(validator.Validate())
 	}
 
 	return nil
@@ -619,8 +619,9 @@ func checkDecodeTarget(v any) error {
 }
 
 // decodeNode decodes node to v with the source's decode options followed by
-// yamlOpts, and binds a YAML error to the source. Any other error from the
-// decoder, such as a canceled context, comes back as it is. A node without
+// yamlOpts, and binds the error to the source: a YAML error as an [*Error]
+// at the offending token, and any other, such as a canceled context, as it
+// is. A node without
 // content, the body of an empty document, leaves v as it is, which is what
 // [yaml.Unmarshal] does with input that holds no value.
 func (dd *Document) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []yaml.DecodeOption) error {
@@ -649,20 +650,20 @@ func (dd *Document) decodeNode(ctx context.Context, node ast.Node, v any, yamlOp
 	return dd.bindDecodeError(dec.DecodeFromNodeContext(ctx, node, v))
 }
 
-// bindDecodeError binds a [yaml.Error] from the decoder to the source and
-// returns any other error, such as a canceled context, as it is. Returns nil
-// for a nil err.
+// bindDecodeError binds an error from the decoder to the source: a
+// [yaml.Error] as an [*Error] at its token, so the excerpt marks it, and any
+// other error, such as a canceled context, as it is. Returns nil for a nil
+// err.
 func (dd *Document) bindDecodeError(err error) error {
 	if err == nil {
 		return nil
 	}
 
 	if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
-		return dd.WrapError(NewError(yamlErr.GetMessage(), WithToken(yamlErr.GetToken())))
+		return dd.Bind(NewError(yamlErr.GetMessage(), WithToken(yamlErr.GetToken())))
 	}
 
-	//nolint:wrapcheck // Return the original error if it's not a [yaml.Error].
-	return err
+	return dd.Bind(err)
 }
 
 // hasAlias reports whether node or any node below it is an alias.

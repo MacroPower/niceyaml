@@ -201,7 +201,7 @@ func TestPrinter_PrintError(t *testing.T) {
 	)
 
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
-	bound := source.WrapError(niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("b").Value())))
+	bound := source.Bind(niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("b").Value())))
 	other := niceyaml.NewSourceFromString("c: 3\n")
 
 	excerpt := stringtest.JoinLF(
@@ -230,17 +230,17 @@ func TestPrinter_PrintError(t *testing.T) {
 			want: "document 0: 2:4: $.b: bad\n\n" + excerpt,
 		},
 		"bound error without a location": {
-			err:  source.WrapError(niceyaml.NewError("bad")),
+			err:  source.Bind(niceyaml.NewError("bad")),
 			want: "bad",
 		},
 		"bound error with an empty message": {
-			err:  source.WrapError(niceyaml.NewErrorFrom(nil, niceyaml.WithPath(paths.Root().Child("b").Value()))),
+			err:  source.Bind(niceyaml.NewErrorFrom(nil, niceyaml.WithPath(paths.Root().Child("b").Value()))),
 			want: "2:4: $.b:\n\n" + excerpt,
 		},
 		"joined bound errors print every excerpt": {
 			err: errors.Join(
 				fmt.Errorf("first: %w", bound),
-				fmt.Errorf("second: %w", other.WrapError(
+				fmt.Errorf("second: %w", other.Bind(
 					niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("c").Value())),
 				)),
 			),

@@ -61,7 +61,7 @@ func TestErrorHandler(t *testing.T) {
 
 	src := niceyaml.NewSourceFromTokens(tokens.Tokenize(source))
 
-	niceyamlErr := src.WrapError(niceyaml.NewError(
+	niceyamlErr := src.Bind(niceyaml.NewError(
 		"invalid name",
 		niceyaml.WithPath(paths.Root().Child("name").Key()),
 	))
@@ -71,21 +71,21 @@ func TestErrorHandler(t *testing.T) {
 	fileA := niceyaml.NewSourceFromTokens(tokens.Tokenize(source), niceyaml.WithName("a.yaml"))
 	fileB := niceyaml.NewSourceFromTokens(tokens.Tokenize(source), niceyaml.WithName("b.yaml"))
 
-	badName := fileA.WrapError(niceyaml.NewError(
+	badName := fileA.Bind(niceyaml.NewError(
 		"bad name",
 		niceyaml.WithPath(paths.Root().Child("name").Key()),
 	))
 
-	badValue := fileB.WrapError(niceyaml.NewError(
+	badValue := fileB.Bind(niceyaml.NewError(
 		"bad value",
 		niceyaml.WithPath(paths.Root().Child("value").Value()),
 	))
 
-	emptyMessageErr := src.WrapError(niceyaml.NewErrorFrom(
+	emptyMessageErr := src.Bind(niceyaml.NewErrorFrom(
 		silentError{niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name").Key()))},
 	))
 
-	nestedErr := src.WrapError(niceyaml.NewError(
+	nestedErr := src.Bind(niceyaml.NewError(
 		"two problems",
 		niceyaml.WithErrors(
 			niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name").Key())),
