@@ -30,7 +30,7 @@ func main() {
 
 	// Create a printer with styles that include the highlight overlay style.
 	p := printer.New(
-		printer.WithStyles(theme.Charm().With(
+		printer.WithStyles(theme.Charm.Styles().With(
 			style.Set(highlightKind, highlight),
 		)),
 	)

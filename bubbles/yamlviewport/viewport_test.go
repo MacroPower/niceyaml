@@ -50,7 +50,7 @@ func testPrinterWithLineNumbers() *printer.Printer {
 // testPrinterWithColors returns a printer with default syntax highlighting.
 func testPrinterWithColors() *printer.Printer {
 	return printer.New(
-		printer.WithStyles(theme.Charm()),
+		printer.WithStyles(theme.Charm.Styles()),
 		printer.WithContainerStyle(lipgloss.NewStyle()),
 	)
 }

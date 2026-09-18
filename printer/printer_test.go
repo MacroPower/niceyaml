@@ -2492,21 +2492,21 @@ func TestPrinter_Golden(t *testing.T) {
 	tcs := map[string]goldenTest{
 		"default colors": {
 			opts: []printer.Option{
-				printer.WithStyles(theme.Charm()),
+				printer.WithStyles(theme.Charm.Styles()),
 				printer.WithContainerStyle(lipgloss.NewStyle()),
 				printer.WithGutter(printer.NoGutter),
 			},
 		},
 		"word wrap with colors": {
 			opts: []printer.Option{
-				printer.WithStyles(theme.Charm()),
+				printer.WithStyles(theme.Charm.Styles()),
 				printer.WithContainerStyle(lipgloss.NewStyle()),
 				printer.WithWidth(40),
 			},
 		},
 		"default colors with line numbers": {
 			opts: []printer.Option{
-				printer.WithStyles(theme.Charm()),
+				printer.WithStyles(theme.Charm.Styles()),
 				printer.WithContainerStyle(lipgloss.NewStyle()),
 			},
 		},
@@ -2525,7 +2525,7 @@ func TestPrinter_Golden(t *testing.T) {
 		},
 		"find and highlight": {
 			opts: []printer.Option{
-				printer.WithStyles(theme.Charm().With(
+				printer.WithStyles(theme.Charm.Styles().With(
 					style.Set(testOverlayHighlight, lipgloss.NewStyle().
 						Background(lipgloss.Color("#FFFF00")).
 						Foreground(lipgloss.Color("#000000"))),

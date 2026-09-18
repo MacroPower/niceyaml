@@ -2,11 +2,11 @@ package theme
 
 import "go.jacobcolvin.com/niceyaml/style"
 
-// catalog holds every built-in theme except charm, keyed by name.
+// palettes holds every built-in theme except charm, keyed by name.
 //
 // Most entries are derived from the Chroma syntax highlighter:
 // https://github.com/alecthomas/chroma
-var catalog = map[string]palette{
+var palettes = map[string]palette{
 	"abap": {
 		Mode:   Light,
 		Fg:     "#000000",

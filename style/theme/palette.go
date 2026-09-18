@@ -15,7 +15,7 @@ const dimShift = 0.15
 const surfaceShift = 0.30
 
 // palette holds the colors a catalog theme is built from. Every built-in
-// theme is one palette in [catalog], and [palette.styles] derives the full
+// theme is one palette in [palettes], and [palette.styles] derives the full
 // [style.Styles] from it, so a theme lists its colors rather than every
 // kind.
 type palette struct {

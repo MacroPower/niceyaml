@@ -24,8 +24,7 @@
 //
 // This provides consistent colors between the YAML viewer and CLI help output:
 //
-//	t, _ := theme.Get("charm")
 //	err := fang.Execute(ctx, rootCmd,
-//	    fang.WithColorSchemeFunc(fangs.ColorSchemeFunc(t.Styles())),
+//	    fang.WithColorSchemeFunc(fangs.ColorSchemeFunc(theme.Charm.Styles())),
 //	)
 package fangs

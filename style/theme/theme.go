@@ -1,8 +1,7 @@
 package theme
 
 import (
-	"errors"
-	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -24,8 +23,9 @@ const (
 // Theme is a named color theme with its mode and a lazily built
 // [style.Styles].
 //
-// Look one up by name with [Get] or enumerate them with [All]. Create custom
-// themes with [New] and add them to the registry with [Register].
+// Look one up by name with [Catalog.Get] or enumerate them with
+// [Catalog.All]. Create custom themes with [New] and add them to a catalog
+// with [Catalog.With].
 type Theme struct {
 	// Memoized builder for the [style.Styles]: the first call builds them
 	// and copies of the Theme share the result. Nil for the zero value.
@@ -62,93 +62,115 @@ func (t Theme) Styles() style.Styles {
 }
 
 var (
-	// ErrRegistered is returned by [Register] when a theme with the same name
-	// already exists.
-	ErrRegistered = errors.New("theme already registered")
+	// Charm is the theme of CharmTone colors that [style.Default] returns,
+	// listed here so a picker can offer it by name.
+	Charm = New("charm", Dark, style.Default)
 
-	customMu     sync.RWMutex
-	customThemes = map[string]Theme{}
-	// Names in registration order, so All is deterministic.
-	customOrder []string
-
-	// Indexes the built-in themes by name.
-	builtinIndex = func() map[string]Theme {
-		m := make(map[string]Theme, len(themes))
-		for _, t := range themes {
-			m[t.Name] = t
+	// The catalog of every palette plus charm, built once.
+	builtin = func() Catalog {
+		themes := make([]Theme, 0, len(palettes)+1)
+		for name, p := range palettes {
+			themes = append(themes, New(name, p.Mode, p.styles))
 		}
 
-		return m
-	}()
+		themes = append(themes, Charm)
 
-	// The built-in themes in name order: every catalog palette plus charm.
-	themes = func() []Theme {
-		result := make([]Theme, 0, len(catalog)+1)
-		for name, p := range catalog {
-			result = append(result, New(name, p.Mode, p.styles))
-		}
-
-		result = append(result, New("charm", Dark, Charm))
-
-		slices.SortFunc(result, func(a, b Theme) int {
+		slices.SortFunc(themes, func(a, b Theme) int {
 			return strings.Compare(a.Name, b.Name)
 		})
 
-		return result
+		return Catalog{}.With(themes...)
 	}()
 )
 
-// Register adds a custom theme to the registry, where [Get] and [All] find
-// it. It returns [ErrRegistered] when a built-in or an earlier custom theme
-// already has the same name and leaves the registry unchanged in that case.
+// Catalog is an ordered set of [Theme] values, one per name.
 //
-// Register is safe for concurrent use.
-func Register(t Theme) error {
-	if _, builtin := builtinIndex[t.Name]; builtin {
-		return fmt.Errorf("%w: %q", ErrRegistered, t.Name)
-	}
-
-	customMu.Lock()
-	defer customMu.Unlock()
-
-	if _, exists := customThemes[t.Name]; exists {
-		return fmt.Errorf("%w: %q", ErrRegistered, t.Name)
-	}
-
-	customThemes[t.Name] = t
-	customOrder = append(customOrder, t.Name)
-
-	return nil
+// A Catalog never changes after it is built. [Catalog.With] returns a new
+// Catalog holding more themes, and the receiver stays as it was, so a
+// program builds one at startup and shares it with every picker and
+// printer that needs it. The zero Catalog holds no themes.
+//
+// Create instances with [Builtin], or from the zero value with
+// [Catalog.With].
+type Catalog struct {
+	index  map[string]int
+	themes []Theme
 }
 
-// Get returns the [Theme] registered under name. The boolean reports whether
-// one was found.
-func Get(name string) (Theme, bool) {
-	if t, ok := builtinIndex[name]; ok {
-		return t, true
-	}
-
-	customMu.RLock()
-	defer customMu.RUnlock()
-
-	t, ok := customThemes[name]
-
-	return t, ok
+// Builtin returns the [Catalog] of every theme this package ships, in name
+// order. Add to it with [Catalog.With]:
+//
+//	catalog := theme.Builtin().With(theme.New("corp", theme.Dark, buildCorp))
+func Builtin() Catalog {
+	return builtin
 }
 
-// All returns every registered [Theme], built-in ones first in alphabetical
-// order followed by custom ones in registration order. Filter by
-// [Theme.Mode] to list the themes for one background.
-func All() []Theme {
-	customMu.RLock()
-	defer customMu.RUnlock()
-
-	result := make([]Theme, 0, len(themes)+len(customOrder))
-	result = append(result, themes...)
-
-	for _, name := range customOrder {
-		result = append(result, customThemes[name])
+// With returns a [Catalog] holding the themes of the receiver and then the
+// given ones. A theme whose name the receiver already holds replaces that
+// entry in place, and one with a new name goes on the end, so a program
+// shadows a built-in theme by adding one of the same name. When several
+// given themes share a name, the last one wins. The receiver is unchanged.
+func (c Catalog) With(themes ...Theme) Catalog {
+	out := Catalog{
+		index:  make(map[string]int, len(c.themes)+len(themes)),
+		themes: make([]Theme, 0, len(c.themes)+len(themes)),
 	}
 
-	return result
+	maps.Copy(out.index, c.index)
+
+	out.themes = append(out.themes, c.themes...)
+
+	for _, t := range themes {
+		if i, ok := out.index[t.Name]; ok {
+			out.themes[i] = t
+
+			continue
+		}
+
+		out.index[t.Name] = len(out.themes)
+		out.themes = append(out.themes, t)
+	}
+
+	return out
+}
+
+// Get returns the [Theme] held under name. The boolean reports whether one
+// was found.
+func (c Catalog) Get(name string) (Theme, bool) {
+	i, ok := c.index[name]
+	if !ok {
+		return Theme{}, false
+	}
+
+	return c.themes[i], true
+}
+
+// All returns every [Theme] in the [Catalog], in order. The slice is a
+// copy, so reordering it reaches nothing.
+func (c Catalog) All() []Theme {
+	return slices.Clone(c.themes)
+}
+
+// Mode returns the [Catalog] of the themes designed for mode, in the order
+// they hold in the receiver, so a picker lists the themes for one
+// background:
+//
+//	for _, t := range theme.Builtin().Mode(theme.Dark).All() {
+//		fmt.Println(t.Name)
+//	}
+func (c Catalog) Mode(mode Mode) Catalog {
+	var out Catalog
+
+	for _, t := range c.themes {
+		if t.Mode == mode {
+			out = out.With(t)
+		}
+	}
+
+	return out
+}
+
+// Len returns the number of themes in the [Catalog].
+func (c Catalog) Len() int {
+	return len(c.themes)
 }

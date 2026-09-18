@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml/fangs"
 	"go.jacobcolvin.com/niceyaml/style/theme"
@@ -13,10 +12,7 @@ import (
 func TestColorScheme(t *testing.T) {
 	t.Parallel()
 
-	th, ok := theme.Get("charm")
-	require.True(t, ok, "charm theme should exist")
-
-	styles := th.Styles()
+	styles := theme.Charm.Styles()
 
 	cs := fangs.ColorScheme(styles)
 
@@ -41,10 +37,7 @@ func TestColorScheme(t *testing.T) {
 func TestColorSchemeFunc(t *testing.T) {
 	t.Parallel()
 
-	th, ok := theme.Get("charm")
-	require.True(t, ok, "charm theme should exist")
-
-	styles := th.Styles()
+	styles := theme.Charm.Styles()
 
 	csFunc := fangs.ColorSchemeFunc(styles)
 

@@ -5,7 +5,7 @@
 // from a [StyleGetter]. Create one with [New] and render with
 // [Printer.Print] or [Printer.Fprint]:
 //
-//	p := printer.New(printer.WithStyles(theme.Charm()))
+//	p := printer.New(printer.WithStyles(theme.Charm.Styles()))
 //	fmt.Println(p.Print(source.View()))
 //
 // Every setting is an [Option]. A Printer never changes after construction,

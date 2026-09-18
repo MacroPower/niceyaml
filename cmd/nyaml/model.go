@@ -495,23 +495,22 @@ func buildPrinterOpts(lineNumbers bool, styles style.Styles) []printer.Option {
 	return opts
 }
 
-// darkThemeNames returns the names of every registered dark theme.
+// darkThemeNames returns the names of every built-in dark theme.
 func darkThemeNames() []string {
-	var names []string
+	dark := theme.Builtin().Mode(theme.Dark).All()
 
-	for _, t := range theme.All() {
-		if t.Mode == theme.Dark {
-			names = append(names, t.Name)
-		}
+	names := make([]string, 0, len(dark))
+	for _, t := range dark {
+		names = append(names, t.Name)
 	}
 
 	return names
 }
 
-// themeStyles returns the styles of the named theme, or the default styles
-// when no theme has that name.
+// themeStyles returns the styles of the named built-in theme, or the
+// default styles when no theme has that name.
 func themeStyles(name string) style.Styles {
-	if t, ok := theme.Get(name); ok {
+	if t, ok := theme.Builtin().Get(name); ok {
 		return t.Styles()
 	}
 

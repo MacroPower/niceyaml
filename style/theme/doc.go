@@ -9,39 +9,42 @@
 //
 // # Using Themes
 //
-// [Get] looks a [Theme] up by its kebab-case name, and [Theme.Styles] returns
-// a ready-to-use [style.Styles]. A theme builds its styles on the first call
-// and returns the same value afterwards:
+// [Builtin] returns the [Catalog] of every theme this package ships.
+// [Catalog.Get] looks a [Theme] up by its kebab-case name, and
+// [Theme.Styles] returns a ready-to-use [style.Styles]. A theme builds its
+// styles on the first call and returns the same value afterwards:
 //
-//	if t, ok := theme.Get("dracula"); ok {
+//	if t, ok := theme.Builtin().Get("dracula"); ok {
 //		p := printer.New(printer.WithStyles(t.Styles()))
 //	}
 //
-// [All] returns every theme, built-in ones first in alphabetical order, with
-// the name and [Mode] alongside the styles for building a picker. Filter by
-// [Theme.Mode] to list the themes for one background:
+// [Charm] is the theme [style.Default] renders with, held as a Theme so a
+// program can name it without a lookup:
 //
-//	for _, t := range theme.All() {
-//		if t.Mode == theme.Dark {
-//			fmt.Println(t.Name)
-//		}
+//	p := printer.New(printer.WithStyles(theme.Charm.Styles()))
+//
+// [Catalog.All] returns every theme in the catalog, with the name and
+// [Mode] alongside the styles for building a picker, and [Catalog.Mode]
+// keeps the themes for one background:
+//
+//	for _, t := range theme.Builtin().Mode(theme.Dark).All() {
+//		fmt.Println(t.Name)
 //	}
 //
 // # Custom Themes
 //
-// Applications create custom themes with [New] and add them to the registry
-// with [Register]. Register returns [ErrRegistered] when a theme with the
-// same name already exists, so a custom theme cannot replace a built-in one:
+// Applications create custom themes with [New] and add them to a catalog
+// with [Catalog.With], which returns a new Catalog and leaves the receiver
+// as it was. A theme with the name of one the catalog holds replaces it,
+// so a program can shadow a built-in theme:
 //
 //	custom := theme.New("my-theme", theme.Dark, func() style.Styles {
 //		return style.NewStyles(lipgloss.NewStyle() /* , style.Set(...) */)
 //	})
-//	if err := theme.Register(custom); err != nil {
-//		// The name is taken.
-//	}
+//	catalog := theme.Builtin().With(custom)
 //
-// Registered themes become available through [Get] and [All] alongside
-// built-in themes.
+// A Catalog never changes after it is built, so a program builds one at
+// startup and shares it with every picker that needs it.
 //
 // # Theme Structure
 //
