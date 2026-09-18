@@ -2696,7 +2696,7 @@ func TestSourceError_NestedPositionsBehindWrappers(t *testing.T) {
 			want: "f.yaml: outer\nf.yaml:2:4: $.b: middle\nf.yaml:1:4: $.a: leaf",
 		},
 		"a wrapper that rewrites the message keeps its text": {
-			err:  reformatError{err: inner},
+			err:  yamltest.RewriteError{Err: inner},
 			want: "f.yaml: rewritten",
 		},
 	}
@@ -2709,13 +2709,6 @@ func TestSourceError_NestedPositionsBehindWrappers(t *testing.T) {
 		})
 	}
 }
-
-// reformatError wraps another error without embedding its text, the way a
-// wrapper that rewrites the message it wraps does.
-type reformatError struct{ err error }
-
-func (r reformatError) Error() string { return "rewritten" }
-func (r reformatError) Unwrap() error { return r.err }
 
 func TestSourceError_KeepsWrappedText(t *testing.T) {
 	t.Parallel()
@@ -2774,7 +2767,7 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 		t.Parallel()
 
 		inner := niceyaml.NewError("bad name", niceyaml.WithPath(namePath))
-		wrapped := docs[0].Bind(fmt.Errorf("outer: %w", reformatError{inner}))
+		wrapped := docs[0].Bind(fmt.Errorf("outer: %w", yamltest.RewriteError{Err: inner}))
 
 		// The position comes from the Error in the chain, not from its text,
 		// so a wrapper that hides the text does not hide the position.
