@@ -54,7 +54,7 @@ func TestWhen(t *testing.T) {
 			}
 
 			require.NoError(t, err)
-			assert.NotEmpty(t, ref.Key)
+			assert.NotEmpty(t, ref.Key())
 
 			data, err := ref.Load(t.Context())
 			require.NoError(t, err)

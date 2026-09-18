@@ -30,7 +30,7 @@ func resolveAndLoad(t *testing.T, res schema.Resolver, doc *niceyaml.Document) (
 	data, err := ref.Load(t.Context())
 	require.NoError(t, err)
 
-	return ref.Key, data
+	return ref.Key(), data
 }
 
 func TestDirective(t *testing.T) {
@@ -324,7 +324,7 @@ func TestDirective_Resolve(t *testing.T) {
 		res := schema.Directive()
 		ref, err := res.Resolve(t.Context(), doc)
 		require.NoError(t, err)
-		assert.Equal(t, fileURL(t, filepath.Join(tmpDir, "nonexistent.json")), ref.Key)
+		assert.Equal(t, fileURL(t, filepath.Join(tmpDir, "nonexistent.json")), ref.Key())
 
 		_, err = ref.Load(t.Context())
 		require.ErrorIs(t, err, os.ErrNotExist)

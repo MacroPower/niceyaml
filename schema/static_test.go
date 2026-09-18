@@ -25,9 +25,11 @@ func TestStatic(t *testing.T) {
 
 		ref, err := schema.Static(compiled).Resolve(t.Context(), document(t))
 		require.NoError(t, err)
-		assert.Same(t, compiled, ref.Schema)
-		assert.Nil(t, ref.Load)
-		assert.Empty(t, ref.Key)
+		assert.Same(t, compiled, ref.Schema())
+		assert.Empty(t, ref.Key())
+
+		_, err = ref.Load(t.Context())
+		require.ErrorIs(t, err, schema.ErrLoad)
 	})
 
 	t.Run("registry uses the validator as it is", func(t *testing.T) {

@@ -58,8 +58,9 @@
 //
 // When a document's schema is unknown ahead of time, a [Resolver] finds
 // it. Resolve inspects the document and returns a [Ref], which carries a
-// compiled validator or names the schema by key and loads its bytes on
-// demand, or reports [ErrNoMatch] when the resolver does not apply. A
+// compiled schema through [Compiled] or names one by key and loads its
+// bytes on demand through [Loadable], or reports [ErrNoMatch] when the
+// resolver does not apply. A
 // [Registry] tries its resolvers in order and validates the document
 // against the first schema named:
 //
@@ -100,14 +101,15 @@
 // [Static], [Embedded], [File], [URL], and [FileOrURL] are resolvers that
 // name the same schema for every document and never report [ErrNoMatch],
 // so a registry holding one alone validates everything against it. Static
-// returns a [Ref] that carries a schema compiled already, such as the one
+// returns a [Compiled] ref for a schema compiled already, such as the one
 // [MustCompile] built at package scope:
 //
 //	reg := schema.NewRegistry(schema.WithResolvers(schema.Static(Config)))
 //
-// The others return a Ref whose Key identifies the schema and whose Load
-// reads the bytes. The registry checks its cache by Key first, so a file is
-// read or a URL fetched once per registry, however many documents name it.
+// The others return a [Loadable] ref whose key identifies the schema and
+// whose load reads the bytes. The registry checks its cache by key first,
+// so a file is read or a URL fetched once per registry, however many
+// documents name it.
 //
 // Embed a schema in the binary with go:embed:
 //
@@ -153,10 +155,10 @@
 // # Schema Caching
 //
 // A resolver returns a [Ref] that names the schema by key and loads its
-// bytes on demand. The registry checks its cache of compiled validators by
-// key before calling Load, so each schema is loaded and compiled once per
-// registry however many documents name it. A Ref that carries a validator
-// skips the cache, since there is nothing to load.
+// bytes on demand. The registry checks its cache of compiled schemas by
+// key before loading, so each schema is loaded and compiled once per
+// registry however many documents name it. A [Compiled] ref skips the
+// cache, since there is nothing to load.
 //
 // # SchemaStore Integration
 //

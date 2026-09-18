@@ -30,12 +30,9 @@ func TestResolverFunc(t *testing.T) {
 			return schema.Ref{}, schema.ErrNoMatch
 		}
 
-		return schema.Ref{
-			Key: kind + ".json",
-			Load: func(_ context.Context) ([]byte, error) {
-				return []byte(`{"title": "` + kind + `"}`), nil
-			},
-		}, nil
+		return schema.Loadable(kind+".json", func(_ context.Context) ([]byte, error) {
+			return []byte(`{"title": "` + kind + `"}`), nil
+		}), nil
 	})
 
 	tcs := map[string]struct {
@@ -69,11 +66,83 @@ func TestResolverFunc(t *testing.T) {
 			}
 
 			require.NoError(t, err)
-			assert.Equal(t, tc.wantKey, ref.Key)
+			assert.Equal(t, tc.wantKey, ref.Key())
 
 			data, err := ref.Load(t.Context())
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantData, string(data))
 		})
 	}
+}
+
+func TestCompiled(t *testing.T) {
+	t.Parallel()
+
+	t.Run("carries the schema", func(t *testing.T) {
+		t.Parallel()
+
+		compiled := schema.MustCompile([]byte(`{"type": "object"}`))
+		ref := schema.Compiled(compiled)
+
+		assert.Same(t, compiled, ref.Schema())
+		assert.Empty(t, ref.Key())
+
+		_, err := ref.Load(t.Context())
+		require.ErrorIs(t, err, schema.ErrLoad)
+	})
+
+	t.Run("nil schema panics", func(t *testing.T) {
+		t.Parallel()
+
+		assert.PanicsWithValue(t, "schema.Compiled: schema is nil", func() {
+			schema.Compiled(nil)
+		})
+	})
+}
+
+func TestLoadable(t *testing.T) {
+	t.Parallel()
+
+	t.Run("names the key and loads the bytes", func(t *testing.T) {
+		t.Parallel()
+
+		ref := schema.Loadable("config.json", func(_ context.Context) ([]byte, error) {
+			return []byte(`{"type": "object"}`), nil
+		})
+
+		assert.Nil(t, ref.Schema())
+		assert.Equal(t, "config.json", ref.Key())
+
+		data, err := ref.Load(t.Context())
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"type": "object"}`, string(data))
+	})
+
+	t.Run("empty key panics", func(t *testing.T) {
+		t.Parallel()
+
+		assert.PanicsWithValue(t, "schema.Loadable: key is empty", func() {
+			schema.Loadable("", func(_ context.Context) ([]byte, error) { return nil, nil })
+		})
+	})
+
+	t.Run("nil load panics", func(t *testing.T) {
+		t.Parallel()
+
+		assert.PanicsWithValue(t, "schema.Loadable: load is nil", func() {
+			schema.Loadable("config.json", nil)
+		})
+	})
+
+	t.Run("zero ref loads nothing", func(t *testing.T) {
+		t.Parallel()
+
+		var ref schema.Ref
+
+		assert.Nil(t, ref.Schema())
+		assert.Empty(t, ref.Key())
+
+		_, err := ref.Load(t.Context())
+		require.ErrorIs(t, err, schema.ErrLoad)
+	})
 }

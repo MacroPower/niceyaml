@@ -266,16 +266,13 @@ func (s *SchemaStore) Resolve(ctx context.Context, doc *niceyaml.Document) (sche
 	// never answers cannot hang a caller whose context has no deadline.
 	// The caller's cancellation still applies, unlike a catalog fetch,
 	// which several lookups share.
-	load := ref.Load
-	ref.Load = func(ctx context.Context) ([]byte, error) {
+	return schema.Loadable(ref.Key(), func(ctx context.Context) ([]byte, error) {
 		ctx, cancel := context.WithTimeout(ctx, s.refreshTimeout)
 		defer cancel()
 
 		//nolint:wrapcheck // The URL loader already wraps errors with context.
-		return load(ctx)
-	}
-
-	return ref, nil
+		return ref.Load(ctx)
+	}), nil
 }
 
 // FindMatch finds the catalog entry matching a file path.

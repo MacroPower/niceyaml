@@ -22,14 +22,12 @@ import (
 // through [Static] instead.
 func Embedded(data []byte) Resolver {
 	sum := sha256.Sum256(data)
-	key := "embedded:" + hex.EncodeToString(sum[:])
+
+	ref := Loadable("embedded:"+hex.EncodeToString(sum[:]), func(_ context.Context) ([]byte, error) {
+		return data, nil
+	})
 
 	return ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (Ref, error) {
-		return Ref{
-			Key: key,
-			Load: func(_ context.Context) ([]byte, error) {
-				return data, nil
-			},
-		}, nil
+		return ref, nil
 	})
 }

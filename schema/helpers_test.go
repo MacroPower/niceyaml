@@ -25,11 +25,10 @@ func load(t *testing.T, r schema.Resolver) (string, []byte, error) {
 
 	ref, err := r.Resolve(t.Context(), document(t))
 	require.NoError(t, err)
-	require.NotNil(t, ref.Load)
 
 	data, err := ref.Load(t.Context())
 
-	return ref.Key, data, err //nolint:wrapcheck // Tests inspect the loader's own error.
+	return ref.Key(), data, err //nolint:wrapcheck // Tests inspect the loader's own error.
 }
 
 // fileURL returns the key that [schema.File] names for path, which is its
@@ -40,5 +39,5 @@ func fileURL(t *testing.T, path string) string {
 	ref, err := schema.File(path).Resolve(t.Context(), document(t))
 	require.NoError(t, err)
 
-	return ref.Key
+	return ref.Key()
 }

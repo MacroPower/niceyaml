@@ -7,9 +7,9 @@ import (
 )
 
 // Static creates a [Resolver] that names s, a schema compiled already, for
-// every document. It is the way into a [Registry] for a schema held at
-// package scope, or one built from a Go type and wrapped with
-// [FromJSONSchema]:
+// every document, as [Compiled] refs it. It is the way into a [Registry]
+// for a schema held at package scope, or one built from a Go type and
+// wrapped with [FromJSONSchema]:
 //
 //	//go:embed config.schema.json
 //	var schemaJSON []byte
@@ -30,7 +30,9 @@ func Static(s *Schema) Resolver {
 		panic("schema.Static: schema is nil")
 	}
 
+	ref := Compiled(s)
+
 	return ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (Ref, error) {
-		return Ref{Schema: s}, nil
+		return ref, nil
 	})
 }

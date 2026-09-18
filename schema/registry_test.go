@@ -36,14 +36,11 @@ func countingLoader(key string, data []byte) (schema.Resolver, *atomic.Int32) {
 	var loads atomic.Int32
 
 	r := schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
-		return schema.Ref{
-			Key: key,
-			Load: func(_ context.Context) ([]byte, error) {
-				loads.Add(1)
+		return schema.Loadable(key, func(_ context.Context) ([]byte, error) {
+			loads.Add(1)
 
-				return data, nil
-			},
-		}, nil
+			return data, nil
+		}), nil
 	})
 
 	return r, &loads
@@ -364,18 +361,19 @@ func TestRegistry_Caching(t *testing.T) {
 		assert.Equal(t, int32(1), serviceLoads.Load())
 	})
 
-	t.Run("empty key is rejected", func(t *testing.T) {
+	t.Run("zero ref is rejected", func(t *testing.T) {
 		t.Parallel()
 
-		r, loads := countingLoader("", []byte(`{"type": "object"}`))
-
-		reg := schema.NewRegistry(schema.WithResolvers(r))
+		reg := schema.NewRegistry(schema.WithResolvers(
+			schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
+				return schema.Ref{}, nil
+			}),
+		))
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
 		_, err := reg.Lookup(t.Context(), doc)
-		require.ErrorIs(t, err, schema.ErrNoKey)
 		require.ErrorIs(t, err, schema.ErrResolve)
-		assert.Equal(t, int32(0), loads.Load(), "a ref without a key should not be loaded")
+		require.ErrorContains(t, err, "empty ref")
 	})
 
 	t.Run("load failure is not cached", func(t *testing.T) {
@@ -385,16 +383,13 @@ func TestRegistry_Caching(t *testing.T) {
 
 		reg := schema.NewRegistry(
 			schema.WithResolvers(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
-				return schema.Ref{
-					Key: "flaky.json",
-					Load: func(_ context.Context) ([]byte, error) {
-						if loads.Add(1) == 1 {
-							return nil, errors.New("transient")
-						}
+				return schema.Loadable("flaky.json", func(_ context.Context) ([]byte, error) {
+					if loads.Add(1) == 1 {
+						return nil, errors.New("transient")
+					}
 
-						return []byte(`{"type": "object"}`), nil
-					},
-				}, nil
+					return []byte(`{"type": "object"}`), nil
+				}), nil
 			})),
 		)
 
@@ -454,15 +449,12 @@ func TestRegistry_ConcurrentLoad(t *testing.T) {
 
 	reg := schema.NewRegistry(
 		schema.WithResolvers(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
-			return schema.Ref{
-				Key: "test.json",
-				Load: func(_ context.Context) ([]byte, error) {
-					loads.Add(1)
-					<-release // Hold the load open until every goroutine has looked up.
+			return schema.Loadable("test.json", func(_ context.Context) ([]byte, error) {
+				loads.Add(1)
+				<-release // Hold the load open until every goroutine has looked up.
 
-					return []byte(`{"type": "object"}`), nil
-				},
-			}, nil
+				return []byte(`{"type": "object"}`), nil
+			}), nil
 		})),
 	)
 
@@ -527,15 +519,12 @@ func TestRegistry_SharedLoad(t *testing.T) {
 			reg := schema.NewRegistry(
 				schema.WithResolvers(
 					schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
-						return schema.Ref{
-							Key: "slow.json",
-							Load: func(_ context.Context) ([]byte, error) {
-								loads.Add(1)
-								<-release
+						return schema.Loadable("slow.json", func(_ context.Context) ([]byte, error) {
+							loads.Add(1)
+							<-release
 
-								return nil, fmt.Errorf("fetch slow.json: %w", context.DeadlineExceeded)
-							},
-						}, nil
+							return nil, fmt.Errorf("fetch slow.json: %w", context.DeadlineExceeded)
+						}), nil
 					}),
 				),
 			)
@@ -574,14 +563,11 @@ func TestRegistry_SharedLoad(t *testing.T) {
 			reg := schema.NewRegistry(
 				schema.WithResolvers(
 					schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
-						return schema.Ref{
-							Key: "slow.json",
-							Load: func(_ context.Context) ([]byte, error) {
-								<-release
+						return schema.Loadable("slow.json", func(_ context.Context) ([]byte, error) {
+							<-release
 
-								return schemaData, nil
-							},
-						}, nil
+							return schemaData, nil
+						}), nil
 					}),
 				),
 			)
@@ -640,20 +626,17 @@ func TestRegistry_SharedLoad(t *testing.T) {
 			reg := schema.NewRegistry(
 				schema.WithResolvers(
 					schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
-						return schema.Ref{
-							Key: "slow.json",
-							Load: func(ctx context.Context) ([]byte, error) {
-								if loads.Add(1) == 1 {
-									// The first load runs under the starting caller's context
-									// and ends with its cancellation.
-									<-ctx.Done()
+						return schema.Loadable("slow.json", func(ctx context.Context) ([]byte, error) {
+							if loads.Add(1) == 1 {
+								// The first load runs under the starting caller's context
+								// and ends with its cancellation.
+								<-ctx.Done()
 
-									return nil, fmt.Errorf("fetch slow.json: %w", ctx.Err())
-								}
+								return nil, fmt.Errorf("fetch slow.json: %w", ctx.Err())
+							}
 
-								return schemaData, nil
-							},
-						}, nil
+							return schemaData, nil
+						}), nil
 					}),
 				),
 			)
@@ -827,12 +810,9 @@ func TestRegistry_ErrorCases(t *testing.T) {
 
 		reg := schema.NewRegistry(
 			schema.WithResolvers(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
-				return schema.Ref{
-					Key: "broken.json",
-					Load: func(_ context.Context) ([]byte, error) {
-						return nil, errors.New("disk on fire")
-					},
-				}, nil
+				return schema.Loadable("broken.json", func(_ context.Context) ([]byte, error) {
+					return nil, errors.New("disk on fire")
+				}), nil
 			})),
 		)
 

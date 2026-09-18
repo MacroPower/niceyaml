@@ -2,12 +2,16 @@ package schema
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 )
+
+// ErrEmptyURL reports an empty URL given to [URL], which names no schema.
+var ErrEmptyURL = errors.New("schema URL is empty")
 
 // HTTPOption configures HTTP client settings for loaders that fetch schemas
 // over HTTP.
@@ -42,7 +46,8 @@ func WithHTTPClient(client *http.Client) HTTPOption {
 //
 // The scheme of schemaURL is lowercased, and the rest of it left as
 // written, so one schema spelled with different scheme case is fetched and
-// compiled once rather than once per spelling.
+// compiled once rather than once per spelling. An empty schemaURL reports
+// [ErrEmptyURL] from Resolve.
 //
 // By default, the loader uses [http.DefaultClient] which has no explicit
 // request timeout. Timeouts are controlled via the context passed to Load.
@@ -59,12 +64,13 @@ func URL(schemaURL string, opts ...HTTPOption) Resolver {
 	schemaURL = normalizeScheme(schemaURL)
 
 	return ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (Ref, error) {
-		return Ref{
-			Key: schemaURL,
-			Load: func(ctx context.Context) ([]byte, error) {
-				return httpfetch.Get(ctx, cfg.client, schemaURL)
-			},
-		}, nil
+		if schemaURL == "" {
+			return Ref{}, ErrEmptyURL
+		}
+
+		return Loadable(schemaURL, func(ctx context.Context) ([]byte, error) {
+			return httpfetch.Get(ctx, cfg.client, schemaURL)
+		}), nil
 	})
 }
 

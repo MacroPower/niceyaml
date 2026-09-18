@@ -14,18 +14,9 @@ import (
 
 var (
 	// ErrResolve indicates a resolver applied to the document but could not
-	// name its schema.
+	// name its schema, either by returning an error of its own or by
+	// returning the zero [Ref] with no error.
 	ErrResolve = errors.New("resolve schema")
-
-	// ErrNoKey indicates a resolver returned a [Ref] with neither a
-	// Schema nor a Key, which leaves the registry nothing to cache the
-	// schema under.
-	ErrNoKey = errors.New("schema ref has no key")
-
-	// ErrNoLoad indicates a resolver returned a [Ref] with neither a
-	// Schema nor a Load function, which leaves the registry no way to
-	// read the schema.
-	ErrNoLoad = errors.New("schema ref has no Load function")
 
 	// ErrLoad indicates the schema could not be loaded.
 	ErrLoad = errors.New("load schema")
@@ -37,7 +28,7 @@ var (
 // [Resolver] that does not report [ErrNoMatch] wins. The registry caches
 // compiled schemas by [Ref.Key] and consults that cache before loading, so
 // it loads and compiles each schema once however many documents name it.
-// A Ref that carries a [*Schema] is used as it is.
+// A Ref from [Compiled] is used as it is.
 //
 // Example:
 //
@@ -118,7 +109,7 @@ func WithRequireSchema(require bool) RegistryOption {
 // values the registry compiles every schema with, as [Compile] takes them.
 // They apply when a schema is compiled, which happens once per [Ref.Key],
 // so an option such as a format validator takes effect for every document
-// validated against that schema. A [*Schema] a Ref carries was compiled
+// validated against that schema. A Ref from [Compiled] was compiled
 // elsewhere, so they do not reach it:
 //
 //	reg := schema.NewRegistry(schema.WithCompileOptions(
@@ -238,7 +229,7 @@ func (r *Registry) Validate(ctx context.Context, doc *niceyaml.Document) error {
 
 // schema returns the schema for ref: the one it carries, or the bytes it
 // loads, compiled on the first request for its Key and served from the
-// cache after that.
+// cache after that. The zero Ref names no schema, so it is [ErrResolve].
 //
 // Concurrent requests for one Key share a single load and compile through
 // the singleflight group, and each caller waits for it only while its own
@@ -248,24 +239,20 @@ func (r *Registry) Validate(ctx context.Context, doc *niceyaml.Document) error {
 // case. Any other failure reaches every caller that shared the load,
 // including a timeout inside the load whose error wraps a context error.
 func (r *Registry) schema(ctx context.Context, ref Ref) (*Schema, error) {
-	if ref.Schema != nil {
-		return ref.Schema, nil
+	if s := ref.Schema(); s != nil {
+		return s, nil
 	}
 
-	if ref.Key == "" {
-		return nil, fmt.Errorf("%w: %w", ErrResolve, ErrNoKey)
+	if ref.Key() == "" {
+		return nil, fmt.Errorf("%w: resolver returned an empty ref", ErrResolve)
 	}
 
-	if ref.Load == nil {
-		return nil, fmt.Errorf("%w: %q: %w", ErrResolve, ref.Key, ErrNoLoad)
-	}
-
-	if v, ok := r.cached(ref.Key); ok {
+	if v, ok := r.cached(ref.Key()); ok {
 		return v, nil
 	}
 
 	for {
-		ch := r.group.DoChan(ref.Key, func() (any, error) {
+		ch := r.group.DoChan(ref.Key(), func() (any, error) {
 			err := r.compile(ctx, ref)
 
 			// Report whether this caller's context had ended when the load
@@ -278,7 +265,7 @@ func (r *Registry) schema(ctx context.Context, ref Ref) (*Schema, error) {
 
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("%w: %q: %w", ErrLoad, ref.Key, ctx.Err())
+			return nil, fmt.Errorf("%w: %q: %w", ErrLoad, ref.Key(), ctx.Err())
 
 		case res = <-ch:
 		}
@@ -295,9 +282,9 @@ func (r *Registry) schema(ctx context.Context, ref Ref) (*Schema, error) {
 		return nil, res.Err
 	}
 
-	v, ok := r.cached(ref.Key)
+	v, ok := r.cached(ref.Key())
 	if !ok {
-		return nil, fmt.Errorf("%w: %q: validator missing after compile", ErrCompile, ref.Key)
+		return nil, fmt.Errorf("%w: %q: validator missing after compile", ErrCompile, ref.Key())
 	}
 
 	return v, nil
@@ -317,25 +304,27 @@ func (r *Registry) cached(key string) (*Schema, bool) {
 // under its Key. A cache entry stored by an earlier call is left in place,
 // so every caller sees one schema per Key.
 func (r *Registry) compile(ctx context.Context, ref Ref) error {
-	if _, ok := r.cached(ref.Key); ok {
+	key := ref.Key()
+
+	if _, ok := r.cached(key); ok {
 		return nil
 	}
 
 	data, err := ref.Load(ctx)
 	if err != nil {
-		return fmt.Errorf("%w: %q: %w", ErrLoad, ref.Key, err)
+		return fmt.Errorf("%w: %q: %w", ErrLoad, key, err)
 	}
 
 	compiled, err := Compile(ctx, data, r.compileOpts...)
 	if err != nil {
-		return fmt.Errorf("%q: %w", ref.Key, err)
+		return fmt.Errorf("%q: %w", key, err)
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, ok := r.cache[ref.Key]; !ok {
-		r.cache[ref.Key] = compiled
+	if _, ok := r.cache[key]; !ok {
+		r.cache[key] = compiled
 	}
 
 	return nil

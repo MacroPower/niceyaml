@@ -937,7 +937,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`on: push`), ".github/workflows/ci.yaml")
 		ref, err := store.Resolve(t.Context(), doc)
 		require.NoError(t, err)
-		assert.Equal(t, "https://json.schemastore.org/github-workflow.json", ref.Key)
+		assert.Equal(t, "https://json.schemastore.org/github-workflow.json", ref.Key())
 	})
 
 	t.Run("no match for unknown file", func(t *testing.T) {
@@ -993,7 +993,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 
 		ref, err := store.Resolve(t.Context(), doc)
 		require.NoError(t, err)
-		assert.Equal(t, schemaServer.URL+"/schema.json", ref.Key)
+		assert.Equal(t, schemaServer.URL+"/schema.json", ref.Key())
 
 		data, err := ref.Load(t.Context())
 		require.NoError(t, err)
@@ -1024,7 +1024,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 		// which is not a no-match.
 		ref, err := store.Resolve(t.Context(), doc)
 		require.NoError(t, err)
-		assert.Equal(t, "https://example.com/schema.json", ref.Key)
+		assert.Equal(t, "https://example.com/schema.json", ref.Key())
 
 		_, err = ref.Load(t.Context())
 		require.ErrorContains(t, err, "fetch https://example.com/schema.json: status 404")
