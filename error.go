@@ -10,6 +10,7 @@ import (
 
 	"github.com/goccy/go-yaml/token"
 
+	"go.jacobcolvin.com/niceyaml/internal/errchain"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -20,6 +21,18 @@ var (
 	// ErrNoLocation indicates the error carries neither a path, a token, nor
 	// a range. [SourceError.Location] and [SourceError.Excerpt] return it.
 	ErrNoLocation = errors.New("no location provided")
+
+	// ChainFuncs describes [*Error] and [*SourceError] to the
+	// [errchain.Funcs] walk. The error tree in
+	// [go.jacobcolvin.com/niceyaml/internal/errortree] builds the same
+	// Funcs from the exported accessors, so the message and the tree split
+	// the nested lines the same way.
+	chainFuncs = errchain.Funcs{
+		Nothing:  isNothing,
+		Node:     chainNode,
+		Binding:  chainBinding,
+		Position: chainPosition,
+	}
 
 	// ErrTokenNotFound indicates the error's token, or the token its path
 	// resolves to, carries no position. [SourceError.Location] and
@@ -203,7 +216,7 @@ func (e *Error) Error() string {
 	}
 
 	if e.path != nil {
-		msg = prefixMessage(e.path.String()+":", msg)
+		msg = errchain.Prefix(e.path.String()+":", msg)
 	}
 
 	lines := make([]string, 0, 1+len(e.errors))
@@ -232,27 +245,6 @@ func (e *Error) nested() []*Error {
 	}
 
 	return out
-}
-
-// prefixMessage returns prefix and msg separated by a space, or prefix alone
-// when msg is empty.
-func prefixMessage(prefix, msg string) string {
-	if msg == "" {
-		return prefix
-	}
-
-	return prefix + " " + msg
-}
-
-// formatPosition returns pos as "name:line:col:", the shape editors and
-// build tools read, or "line:col:" when name is empty. Editors count from 1,
-// so the coordinates are 1-indexed.
-func formatPosition(name string, pos position.Position) string {
-	if name == "" {
-		return fmt.Sprintf("%d:%d:", pos.Line+1, pos.Col+1)
-	}
-
-	return fmt.Sprintf("%s:%d:%d:", name, pos.Line+1, pos.Col+1)
 }
 
 // anchor returns the [Error] that carries the position: e itself when it has
@@ -535,7 +527,7 @@ func newSourceError(err error, src *Source, doc *Document) *SourceError {
 
 	units := collectUnits(err)
 	e.positions = make([]errorPosition, 0, len(units))
-	e.rebound = units[0].rebound
+	e.rebound = chainFuncs.Rebound(e)
 
 	var errs []error
 
@@ -636,86 +628,54 @@ func (e *SourceError) Error() string {
 		return msg
 	}
 
-	msg = e.positionNested(e.err, msg)
+	msg = chainFuncs.Positioned(e, e.err, msg)
 	name := e.source.Name()
 
 	switch {
 	case e.locErr == nil:
-		return prefixMessage(formatPosition(name, e.loc.pos), msg)
+		return errchain.Prefix(errchain.FormatPosition(name, e.loc.pos), msg)
 
 	case name != "":
-		return prefixMessage(name+":", msg)
+		return errchain.Prefix(name+":", msg)
 
 	default:
 		return msg
 	}
 }
 
-// positionNested returns msg, the message of err, with the resolved
-// position of each nested error along err's cause chain in front of its
-// lines. The chain follows a wrapper to the error it wraps and an [*Error]
-// to the error it was created from, and ends at an error that unwraps to
-// several or at a [*SourceError]. The nested lines of those Errors end the
-// message, the innermost Error's first, as [Error.Error] composes it;
-// when msg does not end with them, as it does not behind a wrapper that
-// rewrote the message, msg comes back as it is.
-func (e *SourceError) positionNested(err error, msg string) string {
-	var nested []*Error
-
-	for cur := err; cur != nil; {
-		//nolint:errorlint // Walks the chain one node at a time; errors.As would skip ahead.
-		switch x := cur.(type) {
-		case *SourceError:
-			cur = nil
-
-		case *Error:
-			if x == nil {
-				cur = nil
-
-				break
-			}
-
-			// The inner Error's nested lines come first in the message.
-			nested = append(x.nested(), nested...)
-			cur = x.err
-
-		case interface{ Unwrap() error }:
-			cur = x.Unwrap()
-
-		default:
-			cur = nil
-		}
+// chainNode is the [errchain.Funcs.Node] of [chainFuncs].
+func chainNode(err error) (errchain.Node, bool) {
+	x, ok := err.(*Error) //nolint:errorlint // The node itself, not a chain search.
+	if !ok || x == nil {
+		return errchain.Node{}, false
 	}
 
-	if len(nested) == 0 {
-		return msg
+	return errchain.Node{Cause: x.err, Nested: errchain.Errors(x.nested()), Located: x.hasPosition()}, true
+}
+
+// chainBinding is the [errchain.Funcs.Binding] of [chainFuncs].
+func chainBinding(err error) (errchain.Binding, bool) {
+	x, ok := err.(*SourceError) //nolint:errorlint // The node itself, not a chain search.
+	if !ok || x == nil {
+		return errchain.Binding{}, false
 	}
 
-	plain := make([]string, 0, len(nested))
-	positioned := make([]string, 0, len(nested))
+	return errchain.Binding{Inner: x.err, Name: x.source.Name()}, true
+}
 
-	for _, n := range nested {
-		text := n.Error()
-		if text == "" {
-			continue
-		}
-
-		plain = append(plain, text)
-
-		text = e.positionNested(n, text)
-		if pos, ok := e.nestedPos[n]; ok {
-			text = prefixMessage(formatPosition(e.source.Name(), pos), text)
-		}
-
-		positioned = append(positioned, text)
+// chainPosition is the [errchain.Funcs.Position] of [chainFuncs].
+func chainPosition(binding, nested error) (position.Position, bool) {
+	x, ok := binding.(*SourceError) //nolint:errorlint // The node itself, not a chain search.
+	if !ok || x == nil {
+		return position.Position{}, false
 	}
 
-	suffix := "\n" + strings.Join(plain, "\n")
-	if !strings.HasSuffix(msg, suffix) {
-		return msg
+	n, ok := nested.(*Error) //nolint:errorlint // The node itself, not a chain search.
+	if !ok || n == nil {
+		return position.Position{}, false
 	}
 
-	return strings.TrimSuffix(msg, suffix) + "\n" + strings.Join(positioned, "\n")
+	return x.PositionOf(n)
 }
 
 // unit is one error of the tree a [SourceError] presents: the error at the
@@ -726,8 +686,6 @@ func (e *SourceError) positionNested(err error, msg string) string {
 type unit struct {
 	root   error
 	anchor *Error
-	// The cause chain ended at a [*SourceError], a binding of its own.
-	rebound bool
 }
 
 // collectUnits returns the units of err: the main unit first, then every
@@ -757,7 +715,6 @@ func collectBranch(root error, out *[]unit) {
 		//nolint:errorlint // Walks the tree one node at a time; errors.As would skip ahead.
 		switch x := cur.(type) {
 		case *SourceError:
-			u.rebound = x != nil
 			cur = nil
 
 		case *Error:
