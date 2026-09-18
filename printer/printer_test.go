@@ -3031,9 +3031,9 @@ func TestPrinter_AnnotationKind(t *testing.T) {
 	view := niceyaml.NewSourceFromString("key: value").View()
 	view.Annotate(0,
 		line.Annotation{Content: "hunk", Placement: line.Above},
-		line.Annotation{Content: "bad key", Kind: style.GenericError, Placement: line.Below, Col: 0},
+		line.Annotation{Content: "bad key", Kind: style.TextError, Placement: line.Below, Col: 0},
 		line.Annotation{Content: "note", Placement: line.Below, Col: 5},
-		line.Annotation{Content: "bad value", Kind: style.GenericError, Placement: line.Below, Col: 5},
+		line.Annotation{Content: "bad value", Kind: style.TextError, Placement: line.Below, Col: 5},
 	)
 
 	p := printer.New(
@@ -3045,7 +3045,7 @@ func TestPrinter_AnnotationKind(t *testing.T) {
 	want := stringtest.JoinLF(
 		"<comment>hunk</comment>",
 		"<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
-		"<genericError>^ bad key; bad value</genericError>",
+		"<textError>^ bad key; bad value</textError>",
 		"<comment>     ^ note</comment>",
 	)
 

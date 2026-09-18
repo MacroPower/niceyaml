@@ -99,7 +99,7 @@
 //
 //	view.Annotate(i, line.Annotation{
 //	    Content:   "missing required field",
-//	    Kind:      style.GenericError,
+//	    Kind:      style.TextError,
 //	    Placement: line.Below,
 //	    Col:       4, // Align with the error location.
 //	})

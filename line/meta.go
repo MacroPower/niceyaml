@@ -34,7 +34,7 @@ const (
 // It can be used to add comments or notes to the rendered output, without being
 // part of the main token stream. Kind names the style the printer renders
 // the annotation with, as [Overlay.Kind] does for an overlay, so an error
-// message below a line renders in [style.GenericError] and a hunk header
+// message below a line renders in [style.TextError] and a hunk header
 // above one in [style.Comment]. The zero Kind renders as [style.Comment].
 //
 // Add annotations to a [View] with [View.Annotate].
