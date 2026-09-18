@@ -23,7 +23,7 @@ type guarded struct {
 //	kindPath := paths.Root().Child("kind")
 //	reg.Register(schema.When(
 //	    matcher.Content(kindPath, "Deployment"),
-//	    schema.Embedded("example.com/k8s/deployment.json", deploymentSchema),
+//	    schema.Embedded(deploymentSchema),
 //	))
 //
 // A resolver that decides and names the schema from the same parse, such as

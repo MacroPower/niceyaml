@@ -30,7 +30,7 @@ func resolveAndLoad(t *testing.T, res schema.Resolver, doc *niceyaml.Document) (
 	data, err := ref.Load(t.Context())
 	require.NoError(t, err)
 
-	return ref.URL, data
+	return ref.Key, data
 }
 
 func TestDirective(t *testing.T) {
@@ -324,7 +324,7 @@ func TestDirective_Resolve(t *testing.T) {
 		res := schema.Directive()
 		ref, err := res.Resolve(t.Context(), doc)
 		require.NoError(t, err)
-		assert.Equal(t, fileURL(t, filepath.Join(tmpDir, "nonexistent.json")), ref.URL)
+		assert.Equal(t, fileURL(t, filepath.Join(tmpDir, "nonexistent.json")), ref.Key)
 
 		_, err = ref.Load(t.Context())
 		require.ErrorIs(t, err, os.ErrNotExist)
@@ -363,7 +363,7 @@ func TestDirective_EmbeddedNameMatchesPath(t *testing.T) {
 				schema.Directive(),
 				schema.When(
 					matcher.Content(kindPath, "Embedded"),
-					schema.Embedded(filepath.Join("testdata", "schemas", "name.json"), embedded),
+					schema.Embedded(embedded),
 				),
 			)
 
@@ -481,7 +481,7 @@ func TestDirective_LeadingCommentDocument(t *testing.T) {
 			reg := schema.NewRegistry()
 			reg.Register(
 				schema.Directive(),
-				schema.Embedded("example.com/obj.json", []byte(`{"type": "object"}`)),
+				schema.Embedded([]byte(`{"type": "object"}`)),
 			)
 
 			for i, doc := range docs {

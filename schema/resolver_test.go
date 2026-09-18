@@ -31,7 +31,7 @@ func TestResolverFunc(t *testing.T) {
 		}
 
 		return schema.Ref{
-			URL: kind + ".json",
+			Key: kind + ".json",
 			Load: func(_ context.Context) ([]byte, error) {
 				return []byte(`{"title": "` + kind + `"}`), nil
 			},
@@ -40,13 +40,13 @@ func TestResolverFunc(t *testing.T) {
 
 	tcs := map[string]struct {
 		input    string
-		wantURL  string
+		wantKey  string
 		wantData string
 		err      error
 	}{
 		"names the schema for a kind": {
 			input:    `kind: Deployment`,
-			wantURL:  "Deployment.json",
+			wantKey:  "Deployment.json",
 			wantData: `{"title": "Deployment"}`,
 		},
 		"reports no match without a kind": {
@@ -69,7 +69,7 @@ func TestResolverFunc(t *testing.T) {
 			}
 
 			require.NoError(t, err)
-			assert.Equal(t, tc.wantURL, ref.URL)
+			assert.Equal(t, tc.wantKey, ref.Key)
 
 			data, err := ref.Load(t.Context())
 			require.NoError(t, err)

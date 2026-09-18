@@ -22,13 +22,11 @@ func TestWhen(t *testing.T) {
 
 	tcs := map[string]struct {
 		input    string
-		wantURL  string
 		wantErr  error
 		wantLoad bool
 	}{
 		"matcher accepts": {
 			input:    `kind: Deployment`,
-			wantURL:  "deployment.json",
 			wantLoad: true,
 		},
 		"matcher rejects": {
@@ -43,7 +41,7 @@ func TestWhen(t *testing.T) {
 
 			r := schema.When(
 				matcher.Content(kindPath, "Deployment"),
-				schema.Embedded("deployment.json", schemaData),
+				schema.Embedded(schemaData),
 			)
 
 			doc := yamltest.FirstDocument(t, stringtest.Input(tc.input))
@@ -56,7 +54,7 @@ func TestWhen(t *testing.T) {
 			}
 
 			require.NoError(t, err)
-			assert.Equal(t, tc.wantURL, ref.URL)
+			assert.NotEmpty(t, ref.Key)
 
 			data, err := ref.Load(t.Context())
 			require.NoError(t, err)
@@ -103,7 +101,7 @@ func TestWhen(t *testing.T) {
 		t.Parallel()
 
 		assert.PanicsWithValue(t, "schema.When: matcher is nil", func() {
-			schema.When(nil, schema.Embedded("x.json", schemaData))
+			schema.When(nil, schema.Embedded(schemaData))
 		})
 	})
 

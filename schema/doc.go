@@ -57,10 +57,11 @@
 // # Resolution
 //
 // When a document's schema is unknown ahead of time, a [Resolver] finds
-// it. Resolve inspects the document and returns a [Ref], which names the
-// schema by URL and loads its bytes on demand, or reports [ErrNoMatch] when
-// the resolver does not apply. A [Registry] tries its resolvers in order and
-// validates the document against the first schema named:
+// it. Resolve inspects the document and returns a [Ref], which carries a
+// compiled validator or names the schema by key and loads its bytes on
+// demand, or reports [ErrNoMatch] when the resolver does not apply. A
+// [Registry] tries its resolvers in order and validates the document
+// against the first schema named:
 //
 //	reg := schema.NewRegistry()
 //
@@ -71,7 +72,7 @@
 //	kindPath := paths.Root().Child("kind")
 //	reg.Register(schema.When(
 //	    matcher.Content(kindPath, "Deployment"),
-//	    schema.Embedded("example.com/k8s/deployment.json", deploymentSchema),
+//	    schema.Embedded(deploymentSchema),
 //	))
 //
 //	// Validate documents.
@@ -95,19 +96,24 @@
 //
 // # Loaders
 //
-// [Embedded], [File], [URL], and [FileOrURL] are resolvers that name the
-// same schema for every document and never report [ErrNoMatch], so
-// registering one on its own validates everything against it. Each returns
-// a [Ref] whose URL identifies the schema and whose Load reads the bytes.
-// The registry checks its cache by URL first, so a file is read or a URL
-// fetched once per registry, however many documents name it.
+// [Static], [Embedded], [File], [URL], and [FileOrURL] are resolvers that
+// name the same schema for every document and never report [ErrNoMatch],
+// so registering one on its own validates everything against it. Static
+// returns a [Ref] that carries a validator compiled already, such as the
+// one [MustCompile] built at package scope:
+//
+//	reg.Register(schema.Static(Schema))
+//
+// The others return a Ref whose Key identifies the schema and whose Load
+// reads the bytes. The registry checks its cache by Key first, so a file is
+// read or a URL fetched once per registry, however many documents name it.
 //
 // Embed a schema in the binary with go:embed:
 //
 //	//go:embed schema.json
 //	var schemaBytes []byte
 //
-//	reg.Register(schema.Embedded("example.com/config/schema.json", schemaBytes))
+//	reg.Register(schema.Embedded(schemaBytes))
 //
 // Read a schema from disk or over HTTP:
 //
@@ -145,10 +151,11 @@
 //
 // # Schema Caching
 //
-// A resolver returns a [Ref] that names the schema by URL and loads its
+// A resolver returns a [Ref] that names the schema by key and loads its
 // bytes on demand. The registry checks its cache of compiled validators by
-// URL before calling Load, so each schema is loaded and compiled once per
-// registry however many documents name it.
+// key before calling Load, so each schema is loaded and compiled once per
+// registry however many documents name it. A Ref that carries a validator
+// skips the cache, since there is nothing to load.
 //
 // # SchemaStore Integration
 //

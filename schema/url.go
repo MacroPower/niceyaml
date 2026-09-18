@@ -60,7 +60,7 @@ func URL(schemaURL string, opts ...HTTPOption) Resolver {
 
 	return ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (Ref, error) {
 		return Ref{
-			URL: schemaURL,
+			Key: schemaURL,
 			Load: func(ctx context.Context) ([]byte, error) {
 				return httpfetch.Get(ctx, cfg.client, schemaURL)
 			},

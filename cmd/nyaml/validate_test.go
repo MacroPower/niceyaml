@@ -49,7 +49,7 @@ func TestValidateFile(t *testing.T) {
 			require.NoError(t, os.WriteFile(path, []byte(tc.content), 0o600))
 
 			reg := schema.NewRegistry()
-			reg.Register(schema.Embedded("go.jacobcolvin.com/niceyaml/cmd/nyaml/test.json", schemaData))
+			reg.Register(schema.Embedded(schemaData))
 
 			err := validateFile(t.Context(), path, reg)
 			if len(tc.want) == 0 {

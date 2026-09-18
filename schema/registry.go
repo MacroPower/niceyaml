@@ -17,12 +17,14 @@ var (
 	// name its schema.
 	ErrResolve = errors.New("resolve schema")
 
-	// ErrNoURL indicates a resolver returned a [Ref] with an empty URL,
-	// which leaves the registry no key to cache the schema under.
-	ErrNoURL = errors.New("schema ref has no URL")
+	// ErrNoKey indicates a resolver returned a [Ref] with neither a
+	// Validator nor a Key, which leaves the registry nothing to cache the
+	// schema under.
+	ErrNoKey = errors.New("schema ref has no key")
 
-	// ErrNoLoad indicates a resolver returned a [Ref] without a Load
-	// function, which leaves the registry no way to read the schema.
+	// ErrNoLoad indicates a resolver returned a [Ref] with neither a
+	// Validator nor a Load function, which leaves the registry no way to
+	// read the schema.
 	ErrNoLoad = errors.New("schema ref has no Load function")
 
 	// ErrLoad indicates the schema could not be loaded.
@@ -33,8 +35,9 @@ var (
 //
 // Lookup tries registrations in order; the first [Resolver] that
 // does not report [ErrNoMatch] wins. The registry caches compiled
-// validators by schema URL and consults that cache before loading, so it
-// loads and compiles each schema once however many documents name it.
+// validators by [Ref.Key] and consults that cache before loading, so it
+// loads and compiles each schema once however many documents name it. A
+// Ref that carries a [*Validator] is used as it is.
 //
 // Example:
 //
@@ -47,13 +50,13 @@ var (
 //	kindPath := paths.Root().Child("kind")
 //	reg.Register(schema.When(
 //	    matcher.Content(kindPath, "Deployment"),
-//	    schema.Embedded("example.com/k8s/deployment.json", deploymentSchema),
+//	    schema.Embedded(deploymentSchema),
 //	))
 //
 // Create instances with [NewRegistry].
 type Registry struct {
-	group       singleflight.Group    // one load and compile in flight per URL
-	cache       map[string]*Validator // compiled validators by schema URL
+	group       singleflight.Group    // one load and compile in flight per Key
+	cache       map[string]*Validator // compiled validators by Ref.Key
 	resolvers   []Resolver
 	compileOpts []CompileOption
 	mu          sync.RWMutex
@@ -90,9 +93,10 @@ func WithRequireSchema(require bool) RegistryOption {
 
 // WithCompileOptions is a [RegistryOption] that sets the [CompileOption]
 // values the registry compiles every schema with, as [Compile] takes them.
-// They apply when a schema is compiled, which happens once per schema URL,
+// They apply when a schema is compiled, which happens once per [Ref.Key],
 // so an option such as a format validator takes effect for every document
-// validated against that schema:
+// validated against that schema. A [*Validator] a Ref carries was compiled
+// elsewhere, so they do not reach it:
 //
 //	reg := schema.NewRegistry(schema.WithCompileOptions(
 //	    schema.WithJSONSchemaOptions(jsonschema.WithFormats(true)),
@@ -227,11 +231,11 @@ func (r *Registry) Validate(ctx context.Context, doc *niceyaml.Document) error {
 	return doc.Validate(ctx, v)
 }
 
-// validator returns the compiled validator for ref, loading and compiling
-// the schema on the first request for its URL and serving the cached
-// validator after that.
+// validator returns the validator for ref: the one it carries, or the
+// compiled schema, loaded and compiled on the first request for its Key and
+// served from the cache after that.
 //
-// Concurrent requests for one URL share a single load and compile through
+// Concurrent requests for one Key share a single load and compile through
 // the singleflight group, and each caller waits for it only while its own
 // context is live. The shared load runs under the context of the caller
 // that started it and reports whether that context had ended when the load
@@ -239,20 +243,24 @@ func (r *Registry) Validate(ctx context.Context, doc *niceyaml.Document) error {
 // case. Any other failure reaches every caller that shared the load,
 // including a timeout inside the load whose error wraps a context error.
 func (r *Registry) validator(ctx context.Context, ref Ref) (*Validator, error) {
-	if ref.URL == "" {
-		return nil, fmt.Errorf("%w: %w", ErrResolve, ErrNoURL)
+	if ref.Validator != nil {
+		return ref.Validator, nil
+	}
+
+	if ref.Key == "" {
+		return nil, fmt.Errorf("%w: %w", ErrResolve, ErrNoKey)
 	}
 
 	if ref.Load == nil {
-		return nil, fmt.Errorf("%w: %q: %w", ErrResolve, ref.URL, ErrNoLoad)
+		return nil, fmt.Errorf("%w: %q: %w", ErrResolve, ref.Key, ErrNoLoad)
 	}
 
-	if v, ok := r.cached(ref.URL); ok {
+	if v, ok := r.cached(ref.Key); ok {
 		return v, nil
 	}
 
 	for {
-		ch := r.group.DoChan(ref.URL, func() (any, error) {
+		ch := r.group.DoChan(ref.Key, func() (any, error) {
 			err := r.compile(ctx, ref)
 
 			// Report whether this caller's context had ended when the load
@@ -265,7 +273,7 @@ func (r *Registry) validator(ctx context.Context, ref Ref) (*Validator, error) {
 
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("%w: %q: %w", ErrLoad, ref.URL, ctx.Err())
+			return nil, fmt.Errorf("%w: %q: %w", ErrLoad, ref.Key, ctx.Err())
 
 		case res = <-ch:
 		}
@@ -278,51 +286,51 @@ func (r *Registry) validator(ctx context.Context, ref Ref) (*Validator, error) {
 			continue
 		}
 
-		//nolint:wrapcheck // compile already wraps its errors with the sentinel and URL.
+		//nolint:wrapcheck // compile already wraps its errors with the sentinel and Key.
 		return nil, res.Err
 	}
 
-	v, ok := r.cached(ref.URL)
+	v, ok := r.cached(ref.Key)
 	if !ok {
-		return nil, fmt.Errorf("%w: %q: validator missing after compile", ErrCompile, ref.URL)
+		return nil, fmt.Errorf("%w: %q: validator missing after compile", ErrCompile, ref.Key)
 	}
 
 	return v, nil
 }
 
-// cached returns the validator cached under url, if any.
-func (r *Registry) cached(url string) (*Validator, bool) {
+// cached returns the validator cached under key, if any.
+func (r *Registry) cached(key string) (*Validator, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	v, ok := r.cache[url]
+	v, ok := r.cache[key]
 
 	return v, ok
 }
 
 // compile loads and compiles the schema ref names and caches the result
-// under its URL. A cache entry stored by an earlier call is left in place,
-// so every caller sees one validator per URL.
+// under its Key. A cache entry stored by an earlier call is left in place,
+// so every caller sees one validator per Key.
 func (r *Registry) compile(ctx context.Context, ref Ref) error {
-	if _, ok := r.cached(ref.URL); ok {
+	if _, ok := r.cached(ref.Key); ok {
 		return nil
 	}
 
 	data, err := ref.Load(ctx)
 	if err != nil {
-		return fmt.Errorf("%w: %q: %w", ErrLoad, ref.URL, err)
+		return fmt.Errorf("%w: %q: %w", ErrLoad, ref.Key, err)
 	}
 
 	compiled, err := Compile(ctx, data, r.compileOpts...)
 	if err != nil {
-		return fmt.Errorf("%q: %w", ref.URL, err)
+		return fmt.Errorf("%q: %w", ref.Key, err)
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, ok := r.cache[ref.URL]; !ok {
-		r.cache[ref.URL] = compiled
+	if _, ok := r.cache[ref.Key]; !ok {
+		r.cache[ref.Key] = compiled
 	}
 
 	return nil

@@ -45,7 +45,7 @@ func File(path string) Resolver {
 		}
 
 		return Ref{
-			URL: fileURL(abs),
+			Key: fileURL(abs),
 			Load: func(_ context.Context) ([]byte, error) {
 				data, err := os.ReadFile(abs) //nolint:gosec // User-provided file paths are intentional.
 				if err != nil {

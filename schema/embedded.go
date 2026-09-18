@@ -2,6 +2,8 @@ package schema
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 
 	"go.jacobcolvin.com/niceyaml"
 )
@@ -12,16 +14,19 @@ import (
 //	//go:embed schema.json
 //	var schemaBytes []byte
 //
-//	r := schema.Embedded("example.com/config/schema.json", schemaBytes)
+//	r := schema.Embedded(schemaBytes)
 //
-// The schemaURL is the registry's cache key and need not be fetchable, but
-// it must be unique among the schemas one registry sees. A bare file name
-// collides when two packages each embed their own "schema.json", so prefix
-// it with something package-specific, such as the module path.
-func Embedded(schemaURL string, data []byte) Resolver {
+// The [Ref.Key] is a digest of the bytes, so two Embedded resolvers over
+// the same bytes name one schema to the registry, which compiles it once.
+// A schema compiled already, with [MustCompile] or [NewValidator], goes in
+// through [Static] instead.
+func Embedded(data []byte) Resolver {
+	sum := sha256.Sum256(data)
+	key := "embedded:" + hex.EncodeToString(sum[:])
+
 	return ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (Ref, error) {
 		return Ref{
-			URL: schemaURL,
+			Key: key,
 			Load: func(_ context.Context) ([]byte, error) {
 				return data, nil
 			},
