@@ -188,12 +188,6 @@ func (v *View) addOverlayRange(s style.Style, blend bool, r position.Range) {
 	}
 }
 
-// ClearOverlays removes every [Overlay] from every line. Flags and
-// annotations stay.
-func (v *View) ClearOverlays() {
-	v.overlays = nil
-}
-
 // Clone returns a copy of the [View] with its own decoration. The copy
 // shares the lines with the original, so it costs one copy of the flags,
 // overlays, and annotations, and decorating either reaches nothing in the

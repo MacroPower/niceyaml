@@ -8,10 +8,24 @@
 //	m := yamlviewport.New()
 //	m.SetWidth(80)
 //	m.SetHeight(24)
-//	m.SetSource(niceyaml.NewSourceFromString(yamlContent))
+//	m.SetRevision(niceyaml.NewSourceFromString(yamlContent))
 //
 // The viewport implements [tea.Model], so embed it in your Bubble Tea
 // application and forward messages to [Model.Update].
+//
+// A [Revision] is a name and a view of the content. A [niceyaml.Source] is
+// one, and [NewRevision] makes one from a decorated view, so a viewer shows
+// a document with its error marks in place:
+//
+//	view := source.View()
+//	for _, bound := range validationErrors {
+//		_ = bound.Annotate(view)
+//	}
+//
+//	m.SetRevision(yamlviewport.NewRevision(source.Name(), view))
+//
+// Search highlights go on a clone of the view, so the marks stay and the
+// view itself is never changed.
 //
 // # Revision History
 //

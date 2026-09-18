@@ -74,7 +74,6 @@ func TestNewView(t *testing.T) {
 
 		// Range-taking methods are safe on an empty view.
 		view.AddOverlay("test1", position.NewRange(position.New(0, 0), position.New(0, 5)))
-		view.ClearOverlays()
 
 		assert.Equal(t, 0, view.Slice(position.NewSpan(0, 5)).Len())
 	})
@@ -512,77 +511,6 @@ func TestView_BlendOverlay(t *testing.T) {
 	})
 }
 
-func TestView_ClearOverlays(t *testing.T) {
-	t.Parallel()
-
-	t.Run("clears all overlays", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			key1: value1
-			key2: value2
-		`)
-		view := newTestView(t, input, 2)
-
-		// Add overlays to both lines.
-		view.AddOverlay("test1",
-			position.NewRange(position.New(0, 0), position.New(0, 10)),
-			position.NewRange(position.New(1, 0), position.New(1, 10)),
-		)
-		view.AddLineOverlay(1, line.Overlay{Cols: position.NewSpan(0, 2), Style: "test2"})
-
-		require.Len(t, view.Overlays(0), 1)
-		require.Len(t, view.Overlays(1), 2)
-
-		// Clear all overlays.
-		view.ClearOverlays()
-
-		assert.Nil(t, view.Overlays(0))
-		assert.Nil(t, view.Overlays(1))
-	})
-
-	t.Run("keeps flags and annotations", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "a: 1\nb: 2\n", 2)
-		view.AddOverlay("test1", position.NewRange(position.New(0, 0), position.New(1, 4)))
-		view.SetFlag(0, line.FlagInserted)
-		view.Annotate(1, line.Annotation{Content: "note", Placement: line.Below})
-
-		view.ClearOverlays()
-
-		assert.Nil(t, view.Overlays(0))
-		assert.Nil(t, view.Overlays(1))
-		assert.Equal(t, line.FlagInserted, view.Flag(0))
-		require.Len(t, view.Annotations(1), 1)
-		assert.Equal(t, "note", view.Annotations(1)[0].Content)
-	})
-
-	t.Run("idempotent on empty", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "key: value\n", 1)
-
-		// Clear without any overlays set.
-		view.ClearOverlays()
-		view.ClearOverlays()
-
-		assert.Nil(t, view.Overlays(0))
-	})
-
-	t.Run("overlays can be added again", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "key: value\n", 1)
-		view.AddOverlay("test1", position.NewRange(position.New(0, 0), position.New(0, 3)))
-		view.ClearOverlays()
-		view.AddOverlay("test2", position.NewRange(position.New(0, 0), position.New(0, 3)))
-
-		require.Len(t, view.Overlays(0), 1)
-		assert.Equal(t, style.Style("test2"), view.Overlays(0)[0].Style)
-	})
-}
-
 func TestView_Clone(t *testing.T) {
 	t.Parallel()
 
@@ -695,9 +623,7 @@ func TestView_Clone(t *testing.T) {
 		assert.Empty(t, clone.Annotations(0))
 		assert.Equal(t, line.FlagDefault, clone.Flag(0))
 
-		// Clearing one leaves the other intact.
-		view.ClearOverlays()
-
+		// Decorating one leaves the other intact.
 		require.Len(t, clone.Overlays(0), 1)
 	})
 
@@ -872,9 +798,6 @@ func TestView_Slice(t *testing.T) {
 		assert.Equal(t, line.Flag(1), view.Flag(1))
 		assert.Len(t, view.Overlays(1), 1)
 		assert.Len(t, view.Annotations(1), 1)
-
-		view.ClearOverlays()
-
 		assert.Len(t, got.Overlays(0), 2)
 	})
 

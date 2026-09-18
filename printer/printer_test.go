@@ -247,25 +247,6 @@ func TestPrinter_PrintError(t *testing.T) {
 	}
 }
 
-func TestPrinter_ClearOverlays(t *testing.T) {
-	t.Parallel()
-
-	input := "key: value"
-	tks := lexer.Tokenize(input)
-
-	view := niceyaml.NewSourceFromTokens(tks).View()
-	view.AddOverlay(
-		testOverlayHighlight,
-		position.NewRange(position.New(0, 0), position.New(0, 3)),
-	)
-	view.ClearOverlays()
-
-	p := testPrinter()
-
-	// After clearing, no styles should be applied.
-	assert.Equal(t, "key: value", p.Print(view))
-}
-
 func TestPrinter_CRLF(t *testing.T) {
 	t.Parallel()
 

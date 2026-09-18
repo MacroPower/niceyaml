@@ -24,6 +24,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/finder"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
+	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/theme"
@@ -394,7 +395,7 @@ func TestViewport_Golden(t *testing.T) {
 			m := yamlviewport.New(tc.opts...)
 			m.SetWidth(tc.width)
 			m.SetHeight(tc.height)
-			m.SetSource(niceyaml.NewSourceFromTokens(tks))
+			m.SetRevision(niceyaml.NewSourceFromTokens(tks))
 
 			if tc.setupFunc != nil {
 				tc.setupFunc(&m, tks)
@@ -601,7 +602,7 @@ func TestViewport_Scrolling(t *testing.T) {
 			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
 			m.SetWidth(tc.width)
 			m.SetHeight(tc.height)
-			m.SetSource(niceyaml.NewSourceFromTokens(tks))
+			m.SetRevision(niceyaml.NewSourceFromTokens(tks))
 
 			if tc.setup != nil {
 				tc.setup(&m)
@@ -634,7 +635,7 @@ func TestViewport_RowScrolling(t *testing.T) {
 		m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
 		m.SetWidth(30)
 		m.SetHeight(5)
-		m.SetSource(niceyaml.NewSourceFromString(wrapYAML))
+		m.SetRevision(niceyaml.NewSourceFromString(wrapYAML))
 
 		return &m
 	}
@@ -801,7 +802,7 @@ func TestViewport_LayoutChangesKeepTopLine(t *testing.T) {
 			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
 			m.SetWidth(30)
 			m.SetHeight(5)
-			m.SetSource(niceyaml.NewSourceFromString(src.String()))
+			m.SetRevision(niceyaml.NewSourceFromString(src.String()))
 			require.Equal(t, 250, m.TotalRowCount())
 
 			m.SetYOffset(tc.offset)
@@ -831,7 +832,7 @@ func TestViewport_SearchBeforeSize(t *testing.T) {
 	src.WriteString("needle: here\n")
 
 	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-	m.SetSource(niceyaml.NewSourceFromString(src.String()))
+	m.SetRevision(niceyaml.NewSourceFromString(src.String()))
 	m.SetSearchTerm("needle")
 
 	m.SetWidth(30)
@@ -906,7 +907,7 @@ func TestViewport_ContainerFrame(t *testing.T) {
 			m.SetWidth(40)
 			m.SetHeight(tc.height)
 			m.SetViewMode(tc.mode)
-			m.SetSource(niceyaml.NewSourceFromString(src.String()))
+			m.SetRevision(niceyaml.NewSourceFromString(src.String()))
 
 			total := tc.top + lines + tc.bottom
 			require.Equal(t, total, m.TotalRowCount())
@@ -985,7 +986,7 @@ func TestViewport_ContainerFrameWidth(t *testing.T) {
 			m := yamlviewport.New(yamlviewport.WithPrinter(p))
 			m.SetWidth(width)
 			m.SetHeight(height)
-			m.SetSource(niceyaml.NewSourceFromString(src))
+			m.SetRevision(niceyaml.NewSourceFromString(src))
 
 			for offset := range m.TotalRowCount() - height + 1 {
 				m.SetYOffset(offset)
@@ -1044,7 +1045,7 @@ func TestViewport_HorizontalScrollKeepsFrame(t *testing.T) {
 			m.SetHeight(3)
 			m.SetViewMode(tc.mode)
 			m.SetWordWrap(false)
-			m.SetSource(niceyaml.NewSourceFromString("k: 0123456789abcdefghijklmnopqrstuvwxyz\n"))
+			m.SetRevision(niceyaml.NewSourceFromString("k: 0123456789abcdefghijklmnopqrstuvwxyz\n"))
 
 			m.SetXOffset(5)
 			require.Equal(t, 5, m.XOffset())
@@ -1090,7 +1091,7 @@ func TestViewport_ViewFitsHeight(t *testing.T) {
 			)
 			m.SetWidth(20)
 			m.SetHeight(tc.height)
-			m.SetSource(niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n"))
+			m.SetRevision(niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n"))
 
 			view := m.View()
 			if tc.wantRows == 0 {
@@ -1188,7 +1189,7 @@ func TestViewport_Search(t *testing.T) {
 			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
 			m.SetWidth(80)
 			m.SetHeight(24)
-			m.SetSource(lines)
+			m.SetRevision(lines)
 			m.SetSearchTerm(tc.searchTerm)
 
 			tc.test(t, &m)
@@ -1417,7 +1418,7 @@ func TestViewport_Revisions(t *testing.T) {
 			setup: func(m *yamlviewport.Model) {
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
-				m.SetSource(niceyaml.NewSourceFromTokens(rev3Tokens)) // SetSource uses the Source's name.
+				m.SetRevision(niceyaml.NewSourceFromTokens(rev3Tokens)) // SetSource uses the Source's name.
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -1790,7 +1791,7 @@ line3: c`
 				assert.Equal(t, "line", m.SearchTerm())
 
 				// The term survives, so the search runs again on new content.
-				m.SetSource(niceyaml.NewSourceFromString("line: a\n"))
+				m.SetRevision(niceyaml.NewSourceFromString("line: a\n"))
 				assert.Equal(t, 1, m.SearchCount())
 				assert.Equal(t, 0, m.SearchIndex())
 			},
@@ -1811,7 +1812,7 @@ line3: c`
 			}
 
 			if tc.yaml != "" {
-				m.SetSource(niceyaml.NewSourceFromTokens(lexer.Tokenize(tc.yaml)))
+				m.SetRevision(niceyaml.NewSourceFromTokens(lexer.Tokenize(tc.yaml)))
 			}
 
 			if tc.setup != nil {
@@ -1905,7 +1906,7 @@ func TestViewport_SetFile(t *testing.T) {
 			}
 
 			if tc.yaml != "" {
-				m.SetSource(niceyaml.NewSourceFromString(tc.yaml))
+				m.SetRevision(niceyaml.NewSourceFromString(tc.yaml))
 			}
 
 			tc.test(t, &m)
@@ -2179,7 +2180,7 @@ func TestViewport_Update(t *testing.T) {
 			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
 			m.SetWidth(tc.width)
 			m.SetHeight(tc.height)
-			m.SetSource(niceyaml.NewSourceFromTokens(tks))
+			m.SetRevision(niceyaml.NewSourceFromTokens(tks))
 
 			if tc.setup != nil {
 				tc.setup(&m)
@@ -2263,7 +2264,7 @@ func TestViewport_KeyMap(t *testing.T) {
 			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
 			m.SetWidth(80)
 			m.SetHeight(2)
-			m.SetSource(lines)
+			m.SetRevision(lines)
 
 			if tc.setup != nil {
 				tc.setup(&m)
@@ -3164,7 +3165,7 @@ func TestViewport_ZeroValue(t *testing.T) {
 
 	m.SetHeight(3)
 	m.SetWidth(20)
-	m.SetSource(niceyaml.NewSourceFromString("key: value\n"))
+	m.SetRevision(niceyaml.NewSourceFromString("key: value\n"))
 
 	assert.Empty(t, m.View())
 
@@ -3273,7 +3274,7 @@ func TestViewport_WithSearcher(t *testing.T) {
 		m.SetHeight(10)
 
 		tokens := lexer.Tokenize("key: value\n")
-		m.SetSource(niceyaml.NewSourceFromTokens(tokens))
+		m.SetRevision(niceyaml.NewSourceFromTokens(tokens))
 
 		m.SetSearchTerm("value")
 
@@ -3292,7 +3293,7 @@ func TestViewport_WithSearcher(t *testing.T) {
 
 		m.SetWidth(80)
 		m.SetHeight(10)
-		m.SetSource(niceyaml.NewSourceFromString("key: Value\n"))
+		m.SetRevision(niceyaml.NewSourceFromString("key: Value\n"))
 
 		// The finder has no normalizer, so the search is case-sensitive.
 		m.SetSearchTerm("value")
@@ -3314,7 +3315,7 @@ func TestViewport_ScrollEdgeCases(t *testing.T) {
 		m.SetHeight(10)
 
 		tokens := lexer.Tokenize("line1: value1\nline2: value2\nline3: value3\n")
-		m.SetSource(niceyaml.NewSourceFromTokens(tokens))
+		m.SetRevision(niceyaml.NewSourceFromTokens(tokens))
 
 		initialOffset := m.YOffset()
 		m.ScrollDown(0)
@@ -3342,7 +3343,7 @@ func TestViewport_ScrollEdgeCases(t *testing.T) {
 
 		// Need more lines than viewport height to enable scrolling.
 		tokens := lexer.Tokenize("line1: value1\nline2: value2\nline3: value3\nline4: value4\nline5: value5\n")
-		m.SetSource(niceyaml.NewSourceFromTokens(tokens))
+		m.SetRevision(niceyaml.NewSourceFromTokens(tokens))
 
 		m.SetYOffset(2)
 		m.ScrollUp(0)
@@ -3367,7 +3368,7 @@ func TestViewport_ScrollEdgeCases(t *testing.T) {
 		m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
 		m.SetWidth(80)
 		m.SetHeight(1)
-		m.SetSource(niceyaml.NewSourceFromString(
+		m.SetRevision(niceyaml.NewSourceFromString(
 			"line1: v\nline2: v\nline3: v\nline4: v\nline5: v\n",
 		))
 
@@ -3426,7 +3427,7 @@ func TestViewport_ToggleWordWrapResetsXOffset(t *testing.T) {
 	m.SetHeight(10)
 
 	tokens := lexer.Tokenize("key: very long value that exceeds width\n")
-	m.SetSource(niceyaml.NewSourceFromTokens(tokens))
+	m.SetRevision(niceyaml.NewSourceFromTokens(tokens))
 
 	// Disable wrapping first.
 	m.ToggleWordWrap()
@@ -3448,7 +3449,7 @@ func TestViewport_WordWrapDisablesHorizontalScroll(t *testing.T) {
 	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
 	m.SetWidth(20)
 	m.SetHeight(10)
-	m.SetSource(niceyaml.NewSourceFromString("key: very long value that exceeds the viewport width\n"))
+	m.SetRevision(niceyaml.NewSourceFromString("key: very long value that exceeds the viewport width\n"))
 	require.True(t, m.WordWrap())
 
 	before := m.View()
@@ -3493,7 +3494,7 @@ func TestViewport_HorizontalScrollReachesEnd(t *testing.T) {
 			printer: testPrinterWithLineNumbers(),
 			width:   20,
 			setup: func(m *yamlviewport.Model) {
-				m.SetSource(niceyaml.NewSourceFromString(short))
+				m.SetRevision(niceyaml.NewSourceFromString(short))
 			},
 			// Gutter 6 + content 42 - width 20.
 			wantMax: 28,
@@ -3504,7 +3505,7 @@ func TestViewport_HorizontalScrollReachesEnd(t *testing.T) {
 			),
 			width: 20,
 			setup: func(m *yamlviewport.Model) {
-				m.SetSource(niceyaml.NewSourceFromString(short))
+				m.SetRevision(niceyaml.NewSourceFromString(short))
 			},
 			// Gutter 6 + content 42 - (width 20 - border 2).
 			wantMax: 30,
@@ -3536,7 +3537,7 @@ func TestViewport_HorizontalScrollReachesEnd(t *testing.T) {
 			printer: testPrinterWithLineNumbers(),
 			width:   21,
 			setup: func(m *yamlviewport.Model) {
-				m.SetSource(niceyaml.NewSourceFromString(
+				m.SetRevision(niceyaml.NewSourceFromString(
 					"k: " + strings.Repeat("\u65e5", 20) + "END\n",
 				))
 			},
@@ -3597,7 +3598,7 @@ func TestViewport_SetSearchTermEmpty(t *testing.T) {
 	m.SetHeight(10)
 
 	tokens := lexer.Tokenize("key: value\n")
-	m.SetSource(niceyaml.NewSourceFromTokens(tokens))
+	m.SetRevision(niceyaml.NewSourceFromTokens(tokens))
 
 	// Set a search term first.
 	m.SetSearchTerm("value")
@@ -3707,7 +3708,7 @@ func TestViewport_DoesNotMutateSource(t *testing.T) {
 
 	source := niceyaml.NewSourceFromString("key: value\n")
 
-	m.SetSource(source)
+	m.SetRevision(source)
 	m.SetSearchTerm("value")
 	require.Positive(t, m.SearchCount())
 
@@ -3719,6 +3720,58 @@ func TestViewport_DoesNotMutateSource(t *testing.T) {
 
 	// Search highlighting never reaches a fresh view of the caller's Source.
 	assert.Empty(t, source.View().Overlays(0))
+}
+
+func TestViewport_RevisionKeepsDecoration(t *testing.T) {
+	t.Parallel()
+
+	p := printer.New(
+		printer.WithStyles(yamltest.NewXMLStyles(
+			yamltest.XMLStyleInclude(style.GenericHighlight, style.GenericError),
+		)),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+		printer.WithGutter(printer.NoGutter),
+	)
+
+	m := yamlviewport.New(yamlviewport.WithPrinter(p))
+	m.SetWidth(80)
+	m.SetHeight(10)
+
+	source := niceyaml.NewSourceFromString("key: value\nother: thing\n", niceyaml.WithName("marked"))
+	view := source.View()
+	view.Annotate(0, line.Annotation{Content: "note", Placement: line.Below})
+	view.AddOverlay(style.GenericError, position.NewRange(position.New(1, 0), position.New(1, 5)))
+
+	m.SetRevision(yamlviewport.NewRevision(source.Name(), view))
+	assert.Equal(t, "marked", m.RevisionName())
+
+	// The marks the caller added show as they are.
+	out := m.View()
+
+	assert.Contains(t, out, "^ note")
+	assert.Contains(t, out, "<genericError>other</genericError>")
+
+	// Search highlights sit beside the marks rather than replacing them.
+	m.SetSearchTerm("value")
+
+	out = m.View()
+
+	assert.Contains(t, out, "<genericHighlight>value</genericHighlight>")
+	assert.Contains(t, out, "^ note")
+	assert.Contains(t, out, "<genericError>other</genericError>")
+
+	// Clearing the search leaves the marks alone.
+	m.ClearSearch()
+
+	out = m.View()
+
+	assert.NotContains(t, out, "genericHighlight")
+	assert.Contains(t, out, "^ note")
+	assert.Contains(t, out, "<genericError>other</genericError>")
+
+	// The caller's view never changes.
+	assert.Empty(t, view.Overlays(0))
+	assert.Len(t, view.Overlays(1), 1)
 }
 
 func TestViewport_RevisionNavigationResetsSearch(t *testing.T) {
@@ -3806,7 +3859,7 @@ func TestViewport_ContentChangesResetSearch(t *testing.T) {
 		},
 		"set source": {
 			change: func(m *yamlviewport.Model) {
-				m.SetSource(niceyaml.NewSourceFromString(doc(true)))
+				m.SetRevision(niceyaml.NewSourceFromString(doc(true)))
 			},
 		},
 		"diff mode": {
@@ -3865,7 +3918,7 @@ func TestViewport_SearchScrollsToWrappedRow(t *testing.T) {
 	}{
 		"wrapped line": {
 			setup: func(m *yamlviewport.Model) {
-				m.SetSource(niceyaml.NewSourceFromString("a: 1\n" + long("k") + "y: 2\nz: 3\n"))
+				m.SetRevision(niceyaml.NewSourceFromString("a: 1\n" + long("k") + "y: 2\nz: 3\n"))
 			},
 			wantRow: 1,
 		},
@@ -3873,7 +3926,7 @@ func TestViewport_SearchScrollsToWrappedRow(t *testing.T) {
 			printer: testPrinterWithLineNumbers(),
 			setup: func(m *yamlviewport.Model) {
 				m.SetWidth(30)
-				m.SetSource(niceyaml.NewSourceFromString(
+				m.SetRevision(niceyaml.NewSourceFromString(
 					"a: 1\nk: " + strings.Repeat("word ", 20) + "needle " + strings.Repeat("word ", 20) + "\nz: 2\n",
 				))
 			},
@@ -3902,13 +3955,13 @@ func TestViewport_SearchScrollsToWrappedRow(t *testing.T) {
 		// character and centers the last row of the line.
 		"printable character before the match": {
 			setup: func(m *yamlviewport.Model) {
-				m.SetSource(niceyaml.NewSourceFromString(separated("x")))
+				m.SetRevision(niceyaml.NewSourceFromString(separated("x")))
 			},
 			wantRow: 1,
 		},
 		"control character before the match": {
 			setup: func(m *yamlviewport.Model) {
-				m.SetSource(niceyaml.NewSourceFromString(separated("\a")))
+				m.SetRevision(niceyaml.NewSourceFromString(separated("\a")))
 			},
 			wantRow: 1,
 		},
@@ -3976,7 +4029,7 @@ func TestViewport_ContentChangesScrollToTop(t *testing.T) {
 		},
 		"set source": {
 			change: func(m *yamlviewport.Model) {
-				m.SetSource(niceyaml.NewSourceFromString(doc(true)))
+				m.SetRevision(niceyaml.NewSourceFromString(doc(true)))
 			},
 			wantTop: "key0: value",
 		},
@@ -4053,7 +4106,7 @@ func TestViewport_NewSearchTermStartsAtFirstMatch(t *testing.T) {
 	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
 	m.SetWidth(80)
 	m.SetHeight(5)
-	m.SetSource(niceyaml.NewSourceFromString(sb.String()))
+	m.SetRevision(niceyaml.NewSourceFromString(sb.String()))
 
 	m.SetSearchTerm("needle")
 

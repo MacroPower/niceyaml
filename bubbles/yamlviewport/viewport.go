@@ -51,6 +51,55 @@ func (s finderSearcher) Load(lines line.Lines) Index {
 	return s.finder.Load(lines)
 }
 
+// Revision is one version of a document in the viewport's history: a name
+// for the revision picker and a view of its content. A [*niceyaml.Source]
+// is a Revision, so a source goes straight to [Model.AddRevision] or
+// [Model.SetRevision]. A view that carries decoration, such as the marks
+// [niceyaml.SourceError.Annotate] adds, goes in through [NewRevision]:
+//
+//	view := source.View()
+//	for _, bound := range validationErrors {
+//		_ = bound.Annotate(view)
+//	}
+//
+//	m.SetRevision(yamlviewport.NewRevision(source.Name(), view))
+//
+// The viewport reads the view every time it rebuilds its display and never
+// decorates it. Search highlights go on a clone, so the marks a caller adds
+// stay, and the caller's view stays as the caller left it. A diff between
+// two revisions interleaves their lines in a view of its own, so decoration
+// shows only while the viewport displays a revision without a diff.
+//
+// See [NewRevision] and [niceyaml.Source] for implementations.
+type Revision interface {
+	Name() string
+	View() *line.View
+}
+
+var _ Revision = (*niceyaml.Source)(nil)
+
+// NewRevision creates a new [Revision] from a name and a view of its
+// content.
+func NewRevision(name string, view *line.View) Revision {
+	return revision{name: name, view: view}
+}
+
+// revision is the [Revision] that [NewRevision] returns.
+type revision struct {
+	view *line.View
+	name string
+}
+
+// Name implements [Revision].
+func (r revision) Name() string {
+	return r.name
+}
+
+// View implements [Revision].
+func (r revision) View() *line.View {
+	return r.view
+}
+
 // DiffMode specifies how diffs are computed between revisions.
 //
 // Use [Model.SetDiffMode] to change the mode, or [Model.ToggleDiffMode] to
@@ -182,22 +231,24 @@ type Model struct {
 	// Index over the lines on display, built when they change.
 	index Index
 	// Revision history; revIndex below selects the revision on display.
-	revisions []*niceyaml.Source
+	revisions []Revision
 	// Cached diff between base and current revision.
 	diffResult *diff.Result
-	// Left holds the view for the left pane or main content.
-	// In ViewModeFull: Unified diff or plain content.
+	// The content on display before search highlights, for the left pane or
+	// main content and for the right pane of a side-by-side diff.
+	// In ViewModeFull: the unified diff, or the view of the revision.
 	// In ViewModeHunks with diff: the hunks of the diff with their headers.
-	// In ViewModeSideBySide with diff: Before view.
-	// In ViewModeSideBySide without diff: plain content (same on both sides).
+	// In ViewModeSideBySide with diff: the Before and After views.
+	// In ViewModeSideBySide without diff: the view of the revision on the
+	// left and nil on the right.
 	//
-	// The model always owns the view, either a clone of the revision's lines
-	// or a fresh diff result, so search overlays never touch the caller's
-	// Source.
-	left *line.View
-	// Right holds the right pane view for side-by-side diff rendering.
-	// Only populated when viewMode == ViewModeSideBySide and showing a diff.
-	right *line.View
+	// A view a Revision hands out is the caller's, so the model never
+	// decorates a base. It decorates a clone.
+	baseLeft, baseRight *line.View
+	// The base views with the search highlights added: fresh clones of
+	// baseLeft and baseRight that decorate takes on every change of the term
+	// or the selected match. Right is nil when baseRight is.
+	left, right *line.View
 	// Rendered row counts of the view. Copies of the Model share one cache
 	// until a layout change gives a copy its own, so the counts that the
 	// value-receiver View fills in stay filled for the Model it copied.
@@ -354,23 +405,23 @@ func (m *Model) SetPrinter(p *printer.Printer) {
 	m.relayout()
 }
 
-// SetSource replaces the revision history with a single revision.
+// SetRevision replaces the revision history with a single revision.
 //
 // This is a convenience method equivalent to [Model.ClearRevisions] followed by
 // [Model.AddRevision].
-//
-// The viewport renders a private copy of the source's lines. It does not
-// display overlays the caller adds to s afterward, and its search highlights
-// never modify s.
-func (m *Model) SetSource(s *niceyaml.Source) {
+func (m *Model) SetRevision(r Revision) {
 	m.ClearRevisions()
-	m.AddRevision(s)
+	m.AddRevision(r)
 }
 
 // AddRevision adds a new revision to the history.
 // After adding, the viewport moves to the newly added revision.
-func (m *Model) AddRevision(s *niceyaml.Source) {
-	m.revisions = append(m.revisions, s)
+//
+// The viewport displays the view r hands out, decoration included, and
+// adds its search highlights to a clone of it, so the view itself stays as
+// the caller left it. See [Revision].
+func (m *Model) AddRevision(r Revision) {
+	m.revisions = append(m.revisions, r)
 	m.revIndex = len(m.revisions) - 1
 
 	m.rebuildViews()
@@ -602,8 +653,8 @@ func (m *Model) seekRevision(delta int) {
 // the search term has one.
 func (m *Model) rebuildViews() {
 	m.diffResult = nil // Invalidate cached diff result.
-	m.left = nil
-	m.right = nil
+	m.baseLeft = nil
+	m.baseRight = nil
 	m.searcherStale = true
 	m.searchIndex = -1
 
@@ -612,16 +663,16 @@ func (m *Model) rebuildViews() {
 	switch {
 	case m.viewMode == ViewModeSideBySide && needsDiff:
 		result := m.getDiffResult()
-		m.left = result.Before()
-		m.right = result.After()
+		m.baseLeft = result.Before()
+		m.baseRight = result.After()
 
 	case m.viewMode == ViewModeHunks && needsDiff:
 		// Hunks returns nil when the diff has no changes, which leaves the
 		// view empty.
-		m.left = m.getDiffResult().Hunks(m.hunkContext)
+		m.baseLeft = m.getDiffResult().Hunks(m.hunkContext)
 
 	default:
-		m.left = m.getDisplayLines()
+		m.baseLeft = m.getDisplayLines()
 	}
 
 	m.refreshSearch()
@@ -635,10 +686,12 @@ func (m *Model) rebuildViews() {
 	m.scrollToCurrentMatch()
 }
 
-// refreshSearch recomputes search matches and overlays for the current views
-// without rebuilding them.
+// refreshSearch recomputes search matches and overlays for the current base
+// views without rebuilding them.
 func (m *Model) refreshSearch() {
-	if m.left == nil {
+	if m.baseLeft == nil {
+		m.left = nil
+		m.right = nil
 		m.searchMatches = nil
 		m.leftMatches = nil
 		m.rightMatches = nil
@@ -647,21 +700,37 @@ func (m *Model) refreshSearch() {
 		return
 	}
 
-	if m.viewMode == ViewModeSideBySide && m.right != nil {
+	if m.viewMode == ViewModeSideBySide && m.baseRight != nil {
 		m.updateSideBySideSearchState()
-		m.applySideBySideOverlays()
+	} else {
+		m.updateSearchState(m.baseLeft)
+	}
 
+	m.decorate()
+}
+
+// decorate takes a fresh clone of each base view and adds the search
+// highlights of the current matches and selection to it. A fresh clone
+// carries no highlight of the last term or the last selection, and the
+// base, which may be the caller's view, stays as it is.
+func (m *Model) decorate() {
+	m.left = m.baseLeft.Clone()
+	m.right = m.baseRight.Clone()
+
+	if m.left == nil {
 		return
 	}
 
-	m.updateSearchState(m.left)
-	m.applySearchOverlays(m.left)
+	if m.viewMode == ViewModeSideBySide && m.right != nil {
+		m.applySideBySideOverlays()
+	} else {
+		m.applySearchOverlays(m.left)
+	}
 }
 
-// applySearchOverlays sets overlay highlights for all search matches.
+// applySearchOverlays adds overlay highlights for all search matches to
+// lines, which holds none yet.
 func (m *Model) applySearchOverlays(lines *line.View) {
-	lines.ClearOverlays()
-
 	for i, match := range m.searchMatches {
 		if i == m.searchIndex {
 			lines.BlendOverlay(style.GenericHighlight, match.rng)
@@ -691,8 +760,8 @@ func (m *Model) updateSideBySideSearchState() {
 	}
 
 	// Search on both sources and cache results for overlay application.
-	m.leftMatches = m.searcher.Load(m.left.Lines()).Find(m.searchTerm)
-	m.rightMatches = m.searcher.Load(m.right.Lines()).Find(m.searchTerm)
+	m.leftMatches = m.searcher.Load(m.baseLeft.Lines()).Find(m.searchTerm)
+	m.rightMatches = m.searcher.Load(m.baseRight.Lines()).Find(m.searchTerm)
 
 	// Build combined match list. For equal lines, a match appears in both
 	// sources at the same position, so we deduplicate by (row, startCol).
@@ -707,8 +776,8 @@ func (m *Model) updateSideBySideSearchState() {
 		combined = append(combined, searchMatch{rng: match, inLeft: true})
 
 		// Track equal-line matches for deduplication.
-		if match.Start.Line < m.left.Len() {
-			if m.left.Flag(match.Start.Line) == line.FlagDefault {
+		if match.Start.Line < m.baseLeft.Len() {
+			if m.baseLeft.Flag(match.Start.Line) == line.FlagDefault {
 				equalLinePositions[match.Start] = true
 			}
 		}
@@ -756,8 +825,8 @@ func (m *Model) updateSideBySideSearchState() {
 	}
 }
 
-// applySideBySideOverlays applies search highlights to both panes. Without
-// matches it clears the highlights of both panes.
+// applySideBySideOverlays adds search highlights to both panes, which hold
+// none yet.
 func (m *Model) applySideBySideOverlays() {
 	// Determine the selected match position and whether it's on an equal line.
 	var (
@@ -781,8 +850,9 @@ func (m *Model) applySideBySideOverlays() {
 	m.applySideBySidePaneOverlays(m.right, m.rightMatches, selectedPos, !selectedInLeft || selectedIsEqual)
 }
 
-// applySideBySidePaneOverlays applies search highlights to a single pane.
-// It uses cached matches and showSelected to determine the selected style.
+// applySideBySidePaneOverlays adds search highlights to a single pane,
+// which holds none yet. It uses cached matches and showSelected to
+// determine the selected style.
 func (m *Model) applySideBySidePaneOverlays(
 	view *line.View,
 	matches position.Ranges,
@@ -792,8 +862,6 @@ func (m *Model) applySideBySidePaneOverlays(
 	if view == nil {
 		return
 	}
-
-	view.ClearOverlays()
 
 	for _, match := range matches {
 		isSelected := match.Start == selectedPos && showSelected
@@ -845,7 +913,7 @@ func (m *Model) updateSearchState(lines *line.View) {
 // getDiffBase returns the revision the current one is compared against
 // based on the current [DiffMode].
 // Returns nil if diff mode is [DiffModeNone] or there are no revisions.
-func (m *Model) getDiffBase() *niceyaml.Source {
+func (m *Model) getDiffBase() Revision {
 	if !m.hasRevision() {
 		return nil
 	}
@@ -861,13 +929,13 @@ func (m *Model) getDiffBase() *niceyaml.Source {
 }
 
 // currentRevision returns the revision on display, or nil without revisions.
-func (m *Model) currentRevision() *niceyaml.Source {
+func (m *Model) currentRevision() Revision {
 	return m.revision(m.revIndex)
 }
 
 // revision returns the revision at index, or nil when index is outside the
 // history.
-func (m *Model) revision(index int) *niceyaml.Source {
+func (m *Model) revision(index int) Revision {
 	if index < 0 || index >= len(m.revisions) {
 		return nil
 	}
@@ -875,28 +943,27 @@ func (m *Model) revision(index int) *niceyaml.Source {
 	return m.revisions[index]
 }
 
-// getDisplayLines returns the view to display based on current revision and
-// [DiffMode].
-//
-// The model always owns the result, either a clone of the revision's lines
-// or a fresh unified diff. Returns nil when there is no revision.
+// getDisplayLines returns the base view to display for the current
+// revision and [DiffMode]: a fresh unified diff, or the view the revision
+// hands out, which is the caller's and is never decorated. Returns nil
+// when there is no revision.
 func (m *Model) getDisplayLines() *line.View {
-	src, needsDiff := m.resolveRevisionSource()
+	rev, needsDiff := m.resolveRevisionSource()
 	if needsDiff {
 		return m.getDiffResult().Unified()
 	}
 
-	if src == nil {
+	if rev == nil {
 		return nil
 	}
 
-	return src.View()
+	return rev.View()
 }
 
 // getDiffResult returns the cached [diff.Result], computing it if nil.
 //
 // Without a base for the current [DiffMode], the current revision stands in
-// for it, which yields an empty diff rather than a nil [niceyaml.Source].
+// for it, which yields an empty diff rather than a nil [Revision].
 func (m *Model) getDiffResult() *diff.Result {
 	if m.diffResult == nil {
 		current := m.currentRevision()
@@ -906,18 +973,18 @@ func (m *Model) getDiffResult() *diff.Result {
 			base = current
 		}
 
-		m.diffResult = diff.Diff(base.Lines(), current.Lines())
+		m.diffResult = diff.Diff(base.View().Lines(), current.View().Lines())
 	}
 
 	return m.diffResult
 }
 
-// resolveRevisionSource determines which source to display for the current
-// revision state.
+// resolveRevisionSource determines which revision to display for the
+// current revision state.
 //
-// Returns (source, false) for non-diff cases (origin, no diff mode, or no
+// Returns (revision, false) for non-diff cases (origin, no diff mode, or no
 // revision), or (nil, true) when a diff should be computed.
-func (m *Model) resolveRevisionSource() (*niceyaml.Source, bool) {
+func (m *Model) resolveRevisionSource() (Revision, bool) {
 	if !m.hasRevision() {
 		return nil, false
 	}
@@ -1504,11 +1571,7 @@ func (m *Model) navigateSearch(delta int) {
 	m.searchIndex = (m.searchIndex + delta + len(m.searchMatches)) % len(m.searchMatches)
 
 	// Update overlays; rendering happens lazily in View.
-	if m.viewMode == ViewModeSideBySide && m.right != nil {
-		m.applySideBySideOverlays()
-	} else if m.left != nil {
-		m.applySearchOverlays(m.left)
-	}
+	m.decorate()
 
 	m.scrollToCurrentMatch()
 }

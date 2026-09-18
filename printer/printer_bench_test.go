@@ -267,31 +267,6 @@ func BenchmarkPrinterWithWrapping(b *testing.B) {
 	}
 }
 
-func BenchmarkSourceClearOverlays(b *testing.B) {
-	yaml := yamltest.GenerateYAML(1000)
-	rangeCounts := []int{10, 100, 1000}
-
-	for _, count := range rangeCounts {
-		b.Run(fmt.Sprintf("%d_overlays", count), func(b *testing.B) {
-			b.ReportAllocs()
-
-			for b.Loop() {
-				source := niceyaml.NewSourceFromString(yaml).View()
-
-				for i := range count {
-					r := position.Range{
-						Start: position.New(i, 0),
-						End:   position.New(i, 10),
-					}
-					source.AddOverlay(benchmarkOverlayKind, r)
-				}
-
-				source.ClearOverlays()
-			}
-		})
-	}
-}
-
 func BenchmarkLinesAddOverlay(b *testing.B) {
 	yaml := yamltest.GenerateYAML(100)
 
