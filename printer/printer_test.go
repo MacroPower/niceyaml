@@ -253,7 +253,7 @@ func TestPrinter_PrintError(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, p.PrintError(tc.err, 2))
+			assert.Equal(t, tc.want, p.PrintError(tc.err))
 		})
 	}
 }

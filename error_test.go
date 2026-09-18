@@ -49,7 +49,7 @@ func renderContext(err error, context int) string {
 // lines. An error that is not a [*niceyaml.SourceError] formats with %+v.
 func renderWith(err error, p *printer.Printer, context int) string {
 	if bound, ok := err.(*niceyaml.SourceError); ok { //nolint:errorlint // Mirrors %+v, which formats the top-level value.
-		return p.PrintError(bound, context)
+		return p.With(printer.WithContextLines(context)).PrintError(bound)
 	}
 
 	return fmt.Sprintf("%+v", err)
@@ -694,7 +694,7 @@ func TestWithPrinter(t *testing.T) {
 	var bound *niceyaml.SourceError
 
 	require.ErrorAs(t, err, &bound)
-	assert.Equal(t, want, trimLines(customPrinter.PrintError(bound, 2)))
+	assert.Equal(t, want, trimLines(customPrinter.PrintError(bound)))
 }
 
 func TestError_SpecialParentContext(t *testing.T) {
@@ -2563,7 +2563,7 @@ func TestError_NestedErrorsRenderAsAnnotations(t *testing.T) {
 
 	require.ErrorAs(t, wrapped, &bound)
 
-	got := trimLines(plain.PrintError(bound, 2))
+	got := trimLines(plain.PrintError(bound))
 
 	assert.Equal(t, "document 0: validation failed at 2 locations", strings.SplitN(got, "\n", 2)[0])
 	assert.NotContains(t, got, "$.a")

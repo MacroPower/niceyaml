@@ -418,9 +418,10 @@ func (e *Error) locate(lookup func() (*Document, error)) (location, error) {
 // that shows errors inline needs, and [SourceError.Detail] renders the
 // excerpt with the Renderer and context lines it is given. A
 // [go.jacobcolvin.com/niceyaml/printer.Printer] is a Renderer, and its
-// PrintError method prints the message and the Detail with color:
+// PrintError method prints the message and the Detail with color and the
+// context lines the printer is configured with:
 //
-//	fmt.Println(p.PrintError(err, 3))
+//	fmt.Println(p.PrintError(err))
 //
 // A SourceError implements the error interface and unwraps to the error it
 // was created from, so [errors.Is] and [errors.As] see through it.

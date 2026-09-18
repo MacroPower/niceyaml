@@ -109,12 +109,13 @@
 // excerpt around the location with two lines of context and carets under
 // the offending columns. The output holds no escape sequences, so it goes
 // into a log as it is. A terminal gets color from [printer.Printer.PrintError],
-// which prints the same parts with the printer's styles and width and the
-// context lines it is given, and accepts any error, so a caller need not
-// look for the [SourceError] in the chain. It renders the excerpt of every
-// SourceError in the error's tree:
+// which prints the same parts with the printer's styles, width, and
+// context lines, and accepts any error, so a caller need not look for the
+// [SourceError] in the chain. It renders the excerpt of every SourceError
+// in the error's tree:
 //
-//	fmt.Println(p.PrintError(err, 3))
+//	p := printer.New(printer.WithWidth(width), printer.WithContextLines(3))
+//	fmt.Println(p.PrintError(err))
 //
 // This package knows nothing of the printer. [SourceError.Detail] renders
 // the excerpt with any [Renderer], which a [printer.Printer] is, and the

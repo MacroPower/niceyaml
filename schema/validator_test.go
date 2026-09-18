@@ -551,7 +551,7 @@ func TestValidator_PathTarget(t *testing.T) {
 
 				require.ErrorAs(t, err, &bound)
 
-				assert.Contains(t, newXMLPrinter().PrintError(bound, 2), tc.wantContains,
+				assert.Contains(t, newXMLPrinter().PrintError(bound), tc.wantContains,
 					"expected error output to contain specific highlighting pattern")
 			}
 		})

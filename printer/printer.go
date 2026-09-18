@@ -125,6 +125,13 @@ type StyleGetter interface {
 // accounts for gutter width when calculating available content width. Wrapped
 // continuation lines show a "-" marker in the gutter. A width of 0 turns
 // wrapping off.
+//
+// # Errors
+//
+// [Printer.PrintError] renders any error, and the source excerpt of every
+// [niceyaml.SourceError] in it, with the printer's styles, width, and the
+// context lines [WithContextLines] sets. A program configures one printer
+// with its terminal width and theme and prints its errors through it.
 type Printer struct {
 	styles         StyleGetter
 	style          lipgloss.Style
@@ -135,9 +142,15 @@ type Printer struct {
 	blends             *blendCache
 	width              int
 	maxNumber          int
+	contextLines       int
 	hasCustomStyle     bool
 	annotationsEnabled bool
 }
+
+// DefaultContextLines is the number of context lines [Printer.PrintError]
+// shows around each error location when [WithContextLines] is not given.
+// It matches the %+v verb.
+const DefaultContextLines = 2
 
 // New creates a new [*Printer].
 // By default it uses [style.Default], [DefaultGutter], and [DefaultAnnotation].
@@ -147,6 +160,7 @@ func New(opts ...Option) *Printer {
 		gutterFunc:         DefaultGutter,
 		annotationFunc:     DefaultAnnotation,
 		blends:             newBlendCache(),
+		contextLines:       DefaultContextLines,
 		annotationsEnabled: true,
 	}
 
@@ -191,6 +205,7 @@ func (p *Printer) apply(opts []Option) {
 //   - [WithWidth]
 //   - [WithMaxNumber]
 //   - [WithAnnotations]
+//   - [WithContextLines]
 type Option func(*Printer)
 
 // GutterContext provides context about the current row for gutter rendering.
@@ -447,10 +462,26 @@ func WithAnnotations(enabled bool) Option {
 	}
 }
 
+// WithContextLines is a [Option] that sets the number of context lines
+// [Printer.PrintError] shows around each error location. The default is
+// [DefaultContextLines], and a negative count shows the error lines alone,
+// as 0 does.
+func WithContextLines(n int) Option {
+	return func(p *Printer) {
+		p.contextLines = n
+	}
+}
+
 // Width returns the width used for word wrapping, or 0 when wrapping is
 // disabled.
 func (p *Printer) Width() int {
 	return p.width
+}
+
+// ContextLines returns the number of context lines [Printer.PrintError]
+// shows around each error location.
+func (p *Printer) ContextLines() int {
+	return p.contextLines
 }
 
 // MaxNumber returns the line number the gutter sizes itself for when

@@ -101,7 +101,7 @@ func TestErrorHandler(t *testing.T) {
 			err: nil,
 			want: stringtest.JoinLF(
 				"Error",
-				"  <nil>",
+				"  ",
 				"",
 				"",
 			),
