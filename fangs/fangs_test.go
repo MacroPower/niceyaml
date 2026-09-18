@@ -66,12 +66,17 @@ func TestErrorHandler(t *testing.T) {
 		niceyaml.WithPath(paths.Root().Child("name").Key()),
 	))
 
-	badName := src.WrapError(niceyaml.NewError(
+	// Two named sources with the same content, so a joined error names the
+	// file each branch came from and renders one excerpt per file.
+	fileA := niceyaml.NewSourceFromTokens(tokens.Tokenize(source), niceyaml.WithName("a.yaml"))
+	fileB := niceyaml.NewSourceFromTokens(tokens.Tokenize(source), niceyaml.WithName("b.yaml"))
+
+	badName := fileA.WrapError(niceyaml.NewError(
 		"bad name",
 		niceyaml.WithPath(paths.Root().Child("name").Key()),
 	))
 
-	badValue := src.WrapError(niceyaml.NewError(
+	badValue := fileB.WrapError(niceyaml.NewError(
 		"bad value",
 		niceyaml.WithPath(paths.Root().Child("value").Value()),
 	))
@@ -224,14 +229,11 @@ func TestErrorHandler(t *testing.T) {
 			),
 		},
 		"every joined niceyaml error annotates": {
-			err: errors.Join(
-				fmt.Errorf("a.yaml: %w", badName),
-				fmt.Errorf("b.yaml: %w", badValue),
-			),
+			err: errors.Join(badName, badValue),
 			want: stringtest.JoinLF(
 				"Error",
-				"  a.yaml: 1:1: $.name: bad name",
-				"  b.yaml: 2:8: $.value: bad value",
+				"  a.yaml:1:1: $.name: bad name",
+				"  b.yaml:2:8: $.value: bad value",
 				"  ",
 				"  <genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
 				"  <nameTag>value</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>123</literalNumberInteger>",
