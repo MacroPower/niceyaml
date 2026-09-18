@@ -20,6 +20,8 @@ var (
 	apiVersionPath = paths.Root().Child("apiVersion")
 	metadataName   = paths.Root().Child("metadata").Child("name")
 	missingPath    = paths.Root().Child("missing")
+	versionPath    = paths.Root().Child("version")
+	enabledPath    = paths.Root().Child("enabled")
 )
 
 func TestFunc(t *testing.T) {

@@ -7,28 +7,21 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-// existsMatcher matches documents where a YAML path exists with a non-empty
-// value.
+// existsMatcher matches documents that hold a node at a YAML path.
 type existsMatcher struct {
 	path paths.Path
 }
 
-// Exists creates a new [Matcher] that matches documents where the specified
-// path exists and has a non-empty value.
+// Exists creates a new [Matcher] that matches documents that hold a node
+// at path, whatever its value. A key with a null or empty value is present,
+// so `kind:` and `kind: ""` both match. A document without the path, or
+// one where the path does not resolve, does not match. To match a
+// particular value, use [Content].
 //
-// A value is considered empty if:
-//   - The path does not exist in the document
-//   - The value is an empty string
-//   - The value is null
-//
-// This is useful for matching documents that have a particular field present,
-// regardless of its specific value. For matching specific values, use [Content]
-// instead.
-//
-//	// Matches documents that have a kind field with any non-empty value.
+//	// Matches documents that have a kind field.
 //	matcher.Exists(paths.Root().Child("kind"))
 //
-// For requiring multiple fields, combine with [All]:
+// To require several fields, combine with [All]:
 //
 //	// Matches Kubernetes manifests (documents with both apiVersion and kind).
 //	matcher.All(
@@ -41,7 +34,7 @@ func Exists(path paths.Path) Matcher {
 
 // Match implements [Matcher].
 func (m *existsMatcher) Match(_ context.Context, doc *niceyaml.Document) bool {
-	v, err := doc.GetValue(m.path)
+	_, err := m.path.Node(doc.Node())
 
-	return err == nil && v != ""
+	return err == nil
 }

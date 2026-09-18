@@ -8,42 +8,40 @@ import (
 )
 
 // contentMatcher matches documents by a single YAML content value.
-type contentMatcher struct {
-	value string
-	path  paths.Path
+type contentMatcher[T comparable] struct {
+	want T
+	path paths.Path
 }
 
-// Content creates a new [Matcher] that matches documents based on a YAML
-// content value at the specified path.
+// Content creates a new [Matcher] that matches documents whose value at
+// path decodes to want.
 //
-// Content uses exact string comparison against the YAML scalar value's string
-// representation. This means:
+// Match decodes the value with [niceyaml.Document.Get] as a T and compares
+// the result to want, so the type of want decides how the YAML is read:
+// a string matches the text of a scalar, and a number matches its numeric
+// value however the document spells it. A document without the path, or
+// whose value does not decode into T, does not match:
 //
-//   - String values match directly: `kind: Deployment` matches `"Deployment"`
-//   - Unquoted values are compared as strings: `version: 2` matches `"2"`
-//   - Boolean keywords match their string form: `enabled: true` matches `"true"`
-//   - Null values match "null": `value: null` matches `"null"`
-//
-// Note that quoted and unquoted values are equivalent: both version: "2" and
-// version: 2 will match "2". The comparison is case-sensitive.
-//
-//	// Matches documents with kind: Deployment.
+//	// Matches kind: Deployment.
 //	matcher.Content(paths.Root().Child("kind"), "Deployment")
 //
-// For multiple conditions, use [All] (AND) or [Any] (OR):
+//	// Matches version: 1.0 and version: 1.
+//	matcher.Content(paths.Root().Child("version"), 1.0)
 //
-//	// Matches documents with kind: Deployment AND apiVersion: apps/v1.
+// For several conditions, use [All] (AND) or [Any] (OR):
+//
+//	// Matches kind: Deployment AND apiVersion: apps/v1.
 //	matcher.All(
 //	    matcher.Content(paths.Root().Child("kind"), "Deployment"),
 //	    matcher.Content(paths.Root().Child("apiVersion"), "apps/v1"),
 //	)
-func Content(path paths.Path, value string) Matcher {
-	return &contentMatcher{path: path, value: value}
+func Content[T comparable](path paths.Path, want T) Matcher {
+	return &contentMatcher[T]{path: path, want: want}
 }
 
 // Match implements [Matcher].
-func (m *contentMatcher) Match(_ context.Context, doc *niceyaml.Document) bool {
-	v, err := doc.GetValue(m.path)
+func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Document) bool {
+	got, err := doc.Get[T](ctx, m.path)
 
-	return err == nil && v == m.value
+	return err == nil && got == m.want
 }

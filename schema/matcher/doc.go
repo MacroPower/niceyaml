@@ -10,14 +10,13 @@
 //
 // # Matching Strategies
 //
-// Match documents based on their content using [Content], which extracts a
-// value at a YAML path and compares it to an expected string. This is useful
-// for schema discrimination based on type fields, version numbers, or other
-// identifying markers within the document itself.
+// Match documents based on their content using [Content], which decodes
+// the value at a YAML path as the type of the value it is given and
+// compares the two, so a string matches the text of a field such as kind
+// and a number matches a version number however the document spells it.
 //
-// Use [Exists] to match documents where a path exists with any non-empty value.
-// This is useful when the presence of a field matters more than its specific
-// value.
+// Use [Exists] to match documents that hold a node at a path, whatever its
+// value, when the presence of a field matters more than its content.
 //
 // Match documents based on their source file using [FilePath], which tests
 // the document's file path against a glob pattern. This works well for

@@ -27,14 +27,29 @@ func TestExists(t *testing.T) {
 		},
 		"field empty unquoted": {
 			input: stringtest.Input(`kind:`),
-			want:  false,
+			want:  true,
+		},
+		"field null": {
+			input: stringtest.Input(`kind: null`),
+			want:  true,
 		},
 		"field empty double quoted": {
 			input: stringtest.Input(`kind: ""`),
-			want:  false,
+			want:  true,
 		},
 		"field empty single quoted": {
 			input: stringtest.Input(`kind: ''`),
+			want:  true,
+		},
+		"field with mapping value": {
+			input: stringtest.Input(`
+				kind:
+				  name: x
+			`),
+			want: true,
+		},
+		"document without content": {
+			input: stringtest.Input(`# only a comment`),
 			want:  false,
 		},
 		"field with whitespace value": {
@@ -137,6 +152,6 @@ func TestExists_WithAll(t *testing.T) {
 		`))
 
 		got := m.Match(t.Context(), doc)
-		assert.False(t, got)
+		assert.True(t, got)
 	})
 }

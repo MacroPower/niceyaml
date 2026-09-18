@@ -14,24 +14,67 @@ func TestContent(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		value string
-		input string
-		want  bool
+		matcher matcher.Matcher
+		input   string
+		want    bool
 	}{
-		"single condition match": {
-			value: "Deployment",
-			input: stringtest.Input(`kind: Deployment`),
-			want:  true,
+		"string match": {
+			matcher: matcher.Content(kindPath, "Deployment"),
+			input:   stringtest.Input(`kind: Deployment`),
+			want:    true,
 		},
-		"single condition no match": {
-			value: "Deployment",
-			input: stringtest.Input(`kind: Service`),
-			want:  false,
+		"string no match": {
+			matcher: matcher.Content(kindPath, "Deployment"),
+			input:   stringtest.Input(`kind: Service`),
+			want:    false,
 		},
 		"missing field": {
-			value: "value",
-			input: stringtest.Input(`kind: Deployment`),
-			want:  false,
+			matcher: matcher.Content(missingPath, "value"),
+			input:   stringtest.Input(`kind: Deployment`),
+			want:    false,
+		},
+		"string matches number text": {
+			matcher: matcher.Content(versionPath, "2"),
+			input:   stringtest.Input(`version: 2`),
+			want:    true,
+		},
+		"float matches unquoted float": {
+			matcher: matcher.Content(versionPath, 1.0),
+			input:   stringtest.Input(`version: 1.0`),
+			want:    true,
+		},
+		"float matches integer spelling": {
+			matcher: matcher.Content(versionPath, 1.0),
+			input:   stringtest.Input(`version: 1`),
+			want:    true,
+		},
+		"int no match": {
+			matcher: matcher.Content(versionPath, 2),
+			input:   stringtest.Input(`version: 3`),
+			want:    false,
+		},
+		"bool match": {
+			matcher: matcher.Content(enabledPath, true),
+			input:   stringtest.Input(`enabled: true`),
+			want:    true,
+		},
+		"bool does not match string": {
+			matcher: matcher.Content(enabledPath, true),
+			input:   stringtest.Input(`enabled: "true"`),
+			want:    false,
+		},
+		"value that does not decode": {
+			matcher: matcher.Content(versionPath, 1),
+			input:   stringtest.Input(`version: abc`),
+			want:    false,
+		},
+		"mapping does not decode into scalar": {
+			matcher: matcher.Content(kindPath, "Deployment"),
+			input: stringtest.Input(`
+				kind:
+				  name: Deployment
+			`),
+			want: false,
 		},
 	}
 
@@ -39,15 +82,9 @@ func TestContent(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			path := kindPath
-			if !tc.want && tc.value == "value" {
-				path = missingPath
-			}
-
-			m := matcher.Content(path, tc.value)
 			doc := yamltest.FirstDocument(t, tc.input)
 
-			got := m.Match(t.Context(), doc)
+			got := tc.matcher.Match(t.Context(), doc)
 			assert.Equal(t, tc.want, got)
 		})
 	}
