@@ -72,8 +72,8 @@ type Resolver interface {
 // ResolverFunc adapts a function to the [Resolver] interface.
 //
 //	kindPath := paths.Root().Child("kind")
-//	r := schema.ResolverFunc(func(_ context.Context, doc *niceyaml.Document) (schema.Ref, error) {
-//	    kind, err := doc.GetValue(kindPath)
+//	r := schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
+//	    kind, err := doc.Get[string](ctx, kindPath)
 //	    if err != nil {
 //	        return schema.Ref{}, schema.ErrNoMatch
 //	    }

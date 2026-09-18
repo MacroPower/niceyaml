@@ -587,7 +587,7 @@ func TestDocument_Span(t *testing.T) {
 	})
 }
 
-func TestDocument_GetValue_DirectiveBody(t *testing.T) {
+func TestDocument_Get_DirectiveBody(t *testing.T) {
 	t.Parallel()
 
 	// A %YAML directive parses as a document of its own whose body is the
@@ -603,7 +603,7 @@ key: value`
 	got := make(map[int]string)
 
 	for i, dd := range d {
-		v, err := dd.GetValue(path)
+		v, err := dd.Get[string](t.Context(), path)
 		if err != nil {
 			require.ErrorIs(t, err, paths.ErrNotFound)
 			require.ErrorIs(t, err, paths.ErrNoDocument)
@@ -969,7 +969,7 @@ func TestDocuments_All(t *testing.T) {
 		kindPath := paths.Root().Child("kind")
 
 		for i, dd := range d {
-			kind, err := dd.GetValue(kindPath)
+			kind, err := dd.Get[string](t.Context(), kindPath)
 			require.NoError(t, err)
 
 			tks := dd.Tokens()

@@ -709,7 +709,7 @@ func TestRegistry_DynamicResolver(t *testing.T) {
 		reg := schema.NewRegistry(
 			schema.WithResolvers(
 				schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
-					kind, err := doc.GetValue(kindPath)
+					kind, err := doc.Get[string](ctx, kindPath)
 					if err != nil || (kind != "Deployment" && kind != "Service") {
 						return schema.Ref{}, schema.ErrNoMatch
 					}
@@ -884,7 +884,7 @@ func TestRegistry_MultipleDocuments(t *testing.T) {
 	// Track validation results.
 	validated := make(map[string]bool)
 	for _, doc := range docs {
-		kind, err := doc.GetValue(kindPath)
+		kind, err := doc.Get[string](t.Context(), kindPath)
 		require.NoError(t, err)
 
 		err = reg.Validate(t.Context(), doc)

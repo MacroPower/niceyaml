@@ -1183,7 +1183,7 @@ func TestPath_RedefinedAnchor(t *testing.T) {
 		assert.Equal(t, map[string]any{"a": "v1", "b": "v1", "c": "v2", "d": "v2"}, decoded)
 
 		for _, key := range []string{"b", "d"} {
-			got, err := dd.GetValue(paths.Root().Child(key))
+			got, err := dd.Get[string](t.Context(), paths.Root().Child(key))
 			require.NoError(t, err)
 			assert.Equal(t, decoded[key], got)
 		}

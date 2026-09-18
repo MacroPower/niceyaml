@@ -65,8 +65,8 @@ type Validator interface {
 // ValidatorFunc adapts a function to the [Validator] interface.
 //
 //	kindPath := paths.Root().Child("kind")
-//	known := niceyaml.ValidatorFunc(func(_ context.Context, doc *niceyaml.Document) error {
-//		kind, err := doc.GetValue(kindPath)
+//	known := niceyaml.ValidatorFunc(func(ctx context.Context, doc *niceyaml.Document) error {
+//		kind, err := doc.Get[string](ctx, kindPath)
 //		if err != nil {
 //			return err
 //		}
@@ -201,9 +201,9 @@ func documentOffset(doc *ast.DocumentNode) (int, bool) {
 // A source that holds one document decodes through [Source.Decode] and
 // [Source.DecodeInto], which run the same pipeline on that document.
 //
-// Use [Document.Get] or [Document.GetValue] to inspect values
-// without decoding the whole document, which is helpful for routing
-// documents based on a discriminator field.
+// Use [Document.Get] to read one value without decoding the whole
+// document, which is helpful for routing documents based on a
+// discriminator field.
 //
 // A Document holds the [*Source] it came from, and every decoding method
 // binds the [Error] values it produces to that source, so the errors it
@@ -272,58 +272,6 @@ func (dd *Document) Span() position.Span {
 // with content.
 func (dd *Document) HasContent() bool {
 	return dd.doc.Body == nil || hasContent(dd.doc.Body)
-}
-
-// GetValue extracts a YAML value as a string without unmarshaling.
-//
-// This is useful when you need to inspect document content before deciding how
-// to process it. For example, multi-document files often use a discriminator
-// field like "kind" or "version" to determine which schema applies:
-//
-//	kindPath := paths.Root().Child("kind")
-//	for _, doc := range docs {
-//		kind, err := doc.GetValue(kindPath)
-//		if err != nil {
-//			return err
-//		}
-//
-//		switch kind {
-//		case "Pod":
-//			// Decode to Pod struct.
-//		case "Service":
-//			// Decode to Service struct.
-//		}
-//	}
-//
-// For scalar values (strings, numbers, booleans), returns the semantic value
-// rather than YAML syntax. For example, `kind: ""` returns an empty string,
-// not the literal `""`. Null values return an empty string with a nil error.
-//
-// For non-scalar values (mappings, sequences), returns the YAML representation.
-//
-// Returns the same resolution errors as [Document.Get], so
-// [paths.ErrNotFound] means nothing exists at the path and any other error
-// means the path could not be resolved.
-//
-// For a typed value, use [Document.Get].
-func (dd *Document) GetValue(path paths.Path) (string, error) {
-	node, err := dd.node(path)
-	if err != nil {
-		return "", err
-	}
-
-	// Use GetValue() for scalar nodes to get the actual semantic value.
-	if scalar, ok := node.(ast.ScalarNode); ok {
-		v := scalar.GetValue()
-		if v == nil {
-			return "", nil // NullNode.
-		}
-
-		return fmt.Sprintf("%v", v), nil
-	}
-
-	// For non-scalar nodes (mappings, sequences), return YAML representation.
-	return node.String(), nil
 }
 
 // node resolves path against the document body, ignoring the path's
@@ -673,8 +621,27 @@ func hasContent(node ast.Node) bool {
 // [WithYAMLDecodeOptions] configure the decoder. A [Validator] from
 // [WithValidator] still receives the whole document.
 //
-// For a string view of any node, including mappings and sequences, use
-// [Document.GetValue].
+// A scalar decodes into a string as its text, so Get[string] reads a
+// discriminator field such as kind whatever its type:
+//
+//	kindPath := paths.Root().Child("kind")
+//	for _, doc := range docs {
+//		kind, err := doc.Get[string](ctx, kindPath)
+//		if err != nil {
+//			return err
+//		}
+//
+//		switch kind {
+//		case "Pod":
+//			// Decode to Pod struct.
+//		case "Service":
+//			// Decode to Service struct.
+//		}
+//	}
+//
+// For the YAML text of any node, including a mapping or a sequence, resolve
+// it with [paths.Path.Node] against [Document.Node] and call its String
+// method.
 func (dd *Document) Get[T any](ctx context.Context, path paths.Path, opts ...DecodeOption) (T, error) {
 	var zero T
 
