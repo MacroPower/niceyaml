@@ -3044,7 +3044,7 @@ func TestSourceError_Excerpt(t *testing.T) {
 		excerpt, err := excerptError(t).Excerpt(1)
 		require.NoError(t, err)
 
-		want := line.Overlays{{Style: style.GenericError, Cols: position.NewSpan(3, 4)}}
+		want := line.Overlays{{Kind: style.GenericError, Cols: position.NewSpan(3, 4)}}
 		assert.Equal(t, want, excerpt.Overlays(1), "the main error covers the value of b")
 		assert.Equal(t, want, excerpt.Overlays(4), "the nested error covers the value of h")
 
@@ -3157,7 +3157,7 @@ func TestSourceError_Annotate(t *testing.T) {
 
 		assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, lineNumbers(view))
 
-		want := line.Overlays{{Style: style.GenericError, Cols: position.NewSpan(3, 4)}}
+		want := line.Overlays{{Kind: style.GenericError, Cols: position.NewSpan(3, 4)}}
 		assert.Equal(t, want, view.Overlays(1))
 		assert.Equal(t, want, view.Overlays(7))
 		assert.Equal(t, line.Annotations{
@@ -3200,7 +3200,7 @@ func TestSourceError_Annotate(t *testing.T) {
 		require.NoError(t, first.Annotate(view))
 		require.NoError(t, second.Annotate(view))
 
-		want := line.Overlays{{Style: style.GenericError, Cols: position.NewSpan(3, 4)}}
+		want := line.Overlays{{Kind: style.GenericError, Cols: position.NewSpan(3, 4)}}
 		assert.Equal(t, want, view.Overlays(1))
 		assert.Equal(t, want, view.Overlays(3))
 		assert.Empty(t, view.Annotations(1))

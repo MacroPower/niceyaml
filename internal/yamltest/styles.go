@@ -9,7 +9,7 @@ import (
 // XMLStyles implements [printer.StyleGetter] using XML tags instead of ANSI
 // escape codes.
 //
-// Each [style.Style] category wraps content in descriptive tags, making styled
+// Each [style.Kind] category wraps content in descriptive tags, making styled
 // output easy to compare in tests.
 //
 // For example, a comment renders as `<comment># text</comment>`.
@@ -21,8 +21,8 @@ import (
 //
 // Create instances with [NewXMLStyles].
 type XMLStyles struct {
-	only    map[style.Style]bool // If non-nil, only these styles get XML tags.
-	exclude map[style.Style]bool // Styles to exclude from XML tagging.
+	only    map[style.Kind]bool // If non-nil, only these styles get XML tags.
+	exclude map[style.Kind]bool // Styles to exclude from XML tagging.
 }
 
 // XMLStylesOption configures [XMLStyles].
@@ -34,10 +34,10 @@ type XMLStylesOption func(*XMLStyles)
 
 // XMLStyleInclude is an [XMLStylesOption] that limits XML tags to the given
 // styles. All other styles return an empty (no-op) style.
-func XMLStyleInclude(styles ...style.Style) XMLStylesOption {
+func XMLStyleInclude(styles ...style.Kind) XMLStylesOption {
 	return func(x *XMLStyles) {
 		if x.only == nil {
-			x.only = make(map[style.Style]bool)
+			x.only = make(map[style.Kind]bool)
 		}
 
 		for _, s := range styles {
@@ -48,10 +48,10 @@ func XMLStyleInclude(styles ...style.Style) XMLStylesOption {
 
 // XMLStyleExclude is an [XMLStylesOption] that excludes the given styles
 // from XML tagging. Excluded styles return an empty (no-op) style.
-func XMLStyleExclude(styles ...style.Style) XMLStylesOption {
+func XMLStyleExclude(styles ...style.Kind) XMLStylesOption {
 	return func(x *XMLStyles) {
 		if x.exclude == nil {
-			x.exclude = make(map[style.Style]bool)
+			x.exclude = make(map[style.Kind]bool)
 		}
 
 		for _, s := range styles {
@@ -72,11 +72,11 @@ func NewXMLStyles(opts ...XMLStylesOption) *XMLStyles {
 }
 
 // Style returns a [lipgloss.Style] that wraps content in XML tags based on
-// the [style.Style] category.
+// the [style.Kind] category.
 //
 // If the style is excluded or not in the "only" list (when configured),
 // returns an empty style.
-func (x *XMLStyles) Style(s style.Style) lipgloss.Style {
+func (x *XMLStyles) Style(s style.Kind) lipgloss.Style {
 	// Check if style should be excluded.
 	if x.exclude != nil && x.exclude[s] {
 		return lipgloss.NewStyle()

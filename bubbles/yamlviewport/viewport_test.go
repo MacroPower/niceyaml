@@ -241,7 +241,7 @@ func TestViewport_Golden(t *testing.T) {
 		"StyledContainer": {
 			opts: []yamlviewport.Option{
 				yamlviewport.WithPrinter(testPrinter()),
-				yamlviewport.WithStyle(lipgloss.NewStyle().
+				yamlviewport.WithContainerStyle(lipgloss.NewStyle().
 					Border(lipgloss.NormalBorder()).
 					Padding(1)),
 			},
@@ -1087,7 +1087,7 @@ func TestViewport_ViewFitsHeight(t *testing.T) {
 
 			m := yamlviewport.New(
 				yamlviewport.WithPrinter(testPrinter()),
-				yamlviewport.WithStyle(tc.style),
+				yamlviewport.WithContainerStyle(tc.style),
 			)
 			m.SetWidth(20)
 			m.SetHeight(tc.height)
@@ -3243,7 +3243,7 @@ func TestViewport_LayoutChangesKeepSearchIndex(t *testing.T) {
 	// Printer, style, wrap, and dimension changes leave the view alone, so
 	// the searcher keeps its index and the matches survive.
 	m.SetPrinter(testPrinterWithColors())
-	m.SetStyle(lipgloss.NewStyle().Padding(1))
+	m.SetContainerStyle(lipgloss.NewStyle().Padding(1))
 	m.SetWordWrap(false)
 	m.SetWidth(60)
 	m.SetHeight(5)

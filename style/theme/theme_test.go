@@ -265,13 +265,13 @@ func empty() style.Styles {
 }
 
 // marked returns a builder for a theme whose only set category is s.
-func marked(s style.Style) func() style.Styles {
+func marked(s style.Kind) func() style.Styles {
 	return func() style.Styles {
 		return style.NewStyles(lipgloss.NewStyle(), style.Set(s, lipgloss.NewStyle().Foreground(marker)))
 	}
 }
 
 // isMarked reports whether s carries the marker in styles.
-func isMarked(styles style.Styles, s style.Style) bool {
+func isMarked(styles style.Styles, s style.Kind) bool {
 	return styles.Style(s).GetForeground() == marker
 }

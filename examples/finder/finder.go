@@ -15,8 +15,8 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
-// highlightKind is a custom style.Style constant for search highlights.
-const highlightKind style.Style = "highlightCustom"
+// highlightKind is a custom style.Kind constant for search highlights.
+const highlightKind style.Kind = "highlightCustom"
 
 var (
 	//go:embed demo.yaml

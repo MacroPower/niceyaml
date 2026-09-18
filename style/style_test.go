@@ -68,7 +68,7 @@ func TestNewStyles(t *testing.T) {
 		t.Parallel()
 
 		// Check a sampling of styles exist directly in the map.
-		stylesToCheck := []style.Style{
+		stylesToCheck := []style.Kind{
 			style.Text,
 			style.Comment,
 			style.LiteralNumber,
@@ -105,7 +105,7 @@ func TestNewStyles_TextStyles(t *testing.T) {
 
 		styles := style.NewStyles(base)
 
-		for _, s := range []style.Style{style.TextAccentDim, style.TextSubtleDim, style.GenericHeading} {
+		for _, s := range []style.Kind{style.TextAccentDim, style.TextSubtleDim, style.GenericHeading} {
 			got := styles.Style(s)
 			assert.NotNil(t, got)
 			assert.Equal(t, lipgloss.Color("white"), got.GetForeground(),
@@ -176,7 +176,7 @@ func TestStyles_With(t *testing.T) {
 	original := style.NewStyles(base, style.Set(style.Comment, green))
 
 	// Custom style key for testing.
-	const customKey style.Style = "customKey"
+	const customKey style.Kind = "customKey"
 
 	t.Run("adds new custom style", func(t *testing.T) {
 		t.Parallel()

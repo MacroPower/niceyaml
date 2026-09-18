@@ -139,7 +139,7 @@ const (
 //
 // Available options:
 //   - [WithPrinter]
-//   - [WithStyle]
+//   - [WithContainerStyle]
 //   - [WithSearcher]
 //   - [WithFinder]
 type Option func(*Model)
@@ -156,11 +156,12 @@ func WithPrinter(p *printer.Printer) Option {
 	}
 }
 
-// WithStyle is an [Option] that sets the container style for the viewport.
-// See [Model.SetStyle].
+// WithContainerStyle is an [Option] that sets the [lipgloss.Style] wrapped
+// around the viewport, as [printer.WithContainerStyle] does for a printer.
+// See [Model.SetContainerStyle].
 //
 //nolint:gocritic // hugeParam: Copying.
-func WithStyle(s lipgloss.Style) Option {
+func WithContainerStyle(s lipgloss.Style) Option {
 	return func(m *Model) {
 		m.style = s
 	}
@@ -603,16 +604,17 @@ func (m *Model) ToggleWordWrap() {
 	m.SetWordWrap(!m.wrapEnabled)
 }
 
-// Style returns the container style applied to the viewport frame.
-func (m *Model) Style() lipgloss.Style {
+// ContainerStyle returns the container style applied to the viewport frame.
+func (m *Model) ContainerStyle() lipgloss.Style {
 	return m.style
 }
 
-// SetStyle sets the container style applied to the viewport frame. The frame
-// size changes the content area, so the scroll offsets clamp to it.
+// SetContainerStyle sets the container style applied to the viewport frame.
+// The frame size changes the content area, so the scroll offsets clamp to
+// it.
 //
 //nolint:gocritic // hugeParam: Copying.
-func (m *Model) SetStyle(s lipgloss.Style) {
+func (m *Model) SetContainerStyle(s lipgloss.Style) {
 	m.style = s
 	m.relayout()
 }

@@ -6,15 +6,16 @@
 //
 // Rather than requiring themes to define every possible token type, this
 // package uses inheritance: unspecified styles automatically fall back to their
-// parent category.
+// parent kind.
 //
 // For example, [LiteralNumberFloat] inherits from [LiteralNumber], which
 // inherits from [Literal], which inherits from [Text].
 //
-// # Style Categories
+// # Kinds
 //
-// [Style] constants identify token categories following Pygments naming
-// conventions.
+// A [Kind] names one kind of text to style. The constants identify token
+// kinds following Pygments naming conventions, and a rendering names its
+// own, such as one for search matches, as conversions of a string.
 //
 // The hierarchy is organized into major groups:
 //
@@ -38,7 +39,7 @@
 // [NewStyles] creates a [Styles] value that resolves inherited styles.
 //
 // Provide a base [lipgloss.Style] and use [Set] to override specific
-// categories:
+// kinds:
 //
 //	styles := style.NewStyles(
 //	    lipgloss.NewStyle().Foreground(lipgloss.Color("white")),

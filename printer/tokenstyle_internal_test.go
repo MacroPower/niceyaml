@@ -19,7 +19,7 @@ func TestTypeStyle(t *testing.T) {
 
 	tcs := map[string]struct {
 		setup func() *token.Token
-		want  style.Style
+		want  style.Kind
 	}{
 		"basic string type": {
 			setup: func() *token.Token {

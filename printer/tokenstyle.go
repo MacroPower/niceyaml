@@ -6,7 +6,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/style"
 )
 
-var tokenTypeStyles = map[token.Type]style.Style{
+var tokenTypeStyles = map[token.Type]style.Kind{
 	token.AliasType:          style.NameAlias,
 	token.AnchorType:         style.NameAnchor,
 	token.BinaryIntegerType:  style.LiteralNumberBin,
@@ -43,13 +43,13 @@ var tokenTypeStyles = map[token.Type]style.Style{
 	token.UnknownType:        style.GenericErrorUnknown,
 }
 
-// typeStyle returns the [style.Style] for the given [*token.Token]'s
+// typeStyle returns the [style.Kind] for the given [*token.Token]'s
 // [token.Type]. The src token is the lexer token tk is a part of, or nil.
 //
 // It handles context-sensitive styling: a string followed by a colon is styled
 // as a mapping key, and tokens preceded by anchors or aliases inherit that
 // styling.
-func typeStyle(tk, src *token.Token) style.Style {
+func typeStyle(tk, src *token.Token) style.Kind {
 	tts, ok := tokenTypeStyles[visualType(tk, src)]
 	if ok {
 		return tts

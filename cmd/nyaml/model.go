@@ -287,7 +287,7 @@ func powerlineSep(from, to lipgloss.Style) string {
 
 type titleSegment struct {
 	text     string
-	styleKey style.Style
+	styleKey style.Kind
 }
 
 func (m *model) titleLine() string {
@@ -451,7 +451,7 @@ func (m *model) textLine() string {
 
 	type swatch struct {
 		label    string
-		styleKey style.Style
+		styleKey style.Kind
 	}
 
 	swatches := []swatch{

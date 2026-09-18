@@ -260,13 +260,13 @@ func TestView_AddLineOverlay(t *testing.T) {
 
 		view := newTestView(t, "key: value\n", 1)
 		view.AddLineOverlay(0, line.Overlay{
-			Cols:  position.NewSpan(0, 5),
-			Style: "test1",
+			Cols: position.NewSpan(0, 5),
+			Kind: "test1",
 		})
 
 		require.Len(t, view.Overlays(0), 1)
 		assert.Equal(t, position.NewSpan(0, 5), view.Overlays(0)[0].Cols)
-		assert.Equal(t, style.Style("test1"), view.Overlays(0)[0].Style)
+		assert.Equal(t, style.Kind("test1"), view.Overlays(0)[0].Kind)
 	})
 
 	t.Run("add multiple overlays", func(t *testing.T) {
@@ -274,8 +274,8 @@ func TestView_AddLineOverlay(t *testing.T) {
 
 		view := newTestView(t, "key: value\n", 1)
 		view.AddLineOverlay(0,
-			line.Overlay{Cols: position.NewSpan(0, 3), Style: "test1"},
-			line.Overlay{Cols: position.NewSpan(5, 10), Style: "test2"},
+			line.Overlay{Cols: position.NewSpan(0, 3), Kind: "test1"},
+			line.Overlay{Cols: position.NewSpan(5, 10), Kind: "test2"},
 		)
 
 		require.Len(t, view.Overlays(0), 2)
@@ -287,8 +287,8 @@ func TestView_AddLineOverlay(t *testing.T) {
 		t.Parallel()
 
 		view := newTestView(t, "key: value\n", 1)
-		view.AddLineOverlay(0, line.Overlay{Cols: position.NewSpan(0, 3), Style: "test1"})
-		view.AddLineOverlay(0, line.Overlay{Cols: position.NewSpan(5, 10), Style: "test2"})
+		view.AddLineOverlay(0, line.Overlay{Cols: position.NewSpan(0, 3), Kind: "test1"})
+		view.AddLineOverlay(0, line.Overlay{Cols: position.NewSpan(5, 10), Kind: "test2"})
 
 		require.Len(t, view.Overlays(0), 2)
 	})
@@ -300,7 +300,7 @@ func TestView_AddLineOverlay(t *testing.T) {
 
 		// The clamped AddOverlay would cut this to the line width; the raw
 		// method keeps the columns as given.
-		view.AddLineOverlay(0, line.Overlay{Cols: position.NewSpan(-2, 99), Style: "test1"})
+		view.AddLineOverlay(0, line.Overlay{Cols: position.NewSpan(-2, 99), Kind: "test1"})
 
 		require.Len(t, view.Overlays(0), 1)
 		assert.Equal(t, position.NewSpan(-2, 99), view.Overlays(0)[0].Cols)
@@ -310,7 +310,7 @@ func TestView_AddLineOverlay(t *testing.T) {
 		t.Parallel()
 
 		view := newTestView(t, "a: 1\nb: 2\n", 2)
-		view.AddLineOverlay(1, line.Overlay{Cols: position.NewSpan(0, 1), Style: "test1"})
+		view.AddLineOverlay(1, line.Overlay{Cols: position.NewSpan(0, 1), Kind: "test1"})
 
 		assert.Empty(t, view.Overlays(0))
 		require.Len(t, view.Overlays(1), 1)
@@ -356,7 +356,7 @@ func TestView_AddOverlay(t *testing.T) {
 
 		require.Len(t, view.Overlays(0), 1)
 		assert.Equal(t, position.NewSpan(0, 5), view.Overlays(0)[0].Cols)
-		assert.Equal(t, style.Style("test1"), view.Overlays(0)[0].Style)
+		assert.Equal(t, style.Kind("test1"), view.Overlays(0)[0].Kind)
 		assert.False(t, view.Overlays(0)[0].Blend)
 	})
 
@@ -406,17 +406,17 @@ func TestView_AddOverlay(t *testing.T) {
 		// First line: col 3 to end of line.
 		require.Len(t, view.Overlays(0), 1)
 		assert.Equal(t, position.NewSpan(3, len("key1: value1")), view.Overlays(0)[0].Cols)
-		assert.Equal(t, style.Style("test2"), view.Overlays(0)[0].Style)
+		assert.Equal(t, style.Kind("test2"), view.Overlays(0)[0].Kind)
 
 		// Middle line: full line.
 		require.Len(t, view.Overlays(1), 1)
 		assert.Equal(t, position.NewSpan(0, len("key2: value2")), view.Overlays(1)[0].Cols)
-		assert.Equal(t, style.Style("test2"), view.Overlays(1)[0].Style)
+		assert.Equal(t, style.Kind("test2"), view.Overlays(1)[0].Kind)
 
 		// Last line: start to col 5.
 		require.Len(t, view.Overlays(2), 1)
 		assert.Equal(t, position.NewSpan(0, 5), view.Overlays(2)[0].Cols)
-		assert.Equal(t, style.Style("test2"), view.Overlays(2)[0].Style)
+		assert.Equal(t, style.Kind("test2"), view.Overlays(2)[0].Kind)
 	})
 
 	t.Run("multiple ranges", func(t *testing.T) {
@@ -482,7 +482,7 @@ func TestView_BlendOverlay(t *testing.T) {
 		require.Len(t, view.Overlays(1), 1)
 		assert.True(t, view.Overlays(0)[0].Blend)
 		assert.True(t, view.Overlays(1)[0].Blend)
-		assert.Equal(t, style.Style("test1"), view.Overlays(0)[0].Style)
+		assert.Equal(t, style.Kind("test1"), view.Overlays(0)[0].Kind)
 	})
 
 	t.Run("clamps like AddOverlay", func(t *testing.T) {
@@ -562,17 +562,17 @@ func TestView_Clone(t *testing.T) {
 		t.Parallel()
 
 		view := newTestView(t, "key: value\n", 1)
-		view.AddLineOverlay(0, line.Overlay{Cols: position.NewSpan(0, 5), Style: "test1"})
+		view.AddLineOverlay(0, line.Overlay{Cols: position.NewSpan(0, 5), Kind: "test1"})
 
 		clone := view.Clone()
 
 		// Verify overlays were copied.
 		require.Len(t, clone.Overlays(0), 1)
 		assert.Equal(t, view.Overlays(0)[0].Cols, clone.Overlays(0)[0].Cols)
-		assert.Equal(t, view.Overlays(0)[0].Style, clone.Overlays(0)[0].Style)
+		assert.Equal(t, view.Overlays(0)[0].Kind, clone.Overlays(0)[0].Kind)
 
 		// Modify clone overlays.
-		clone.AddLineOverlay(0, line.Overlay{Cols: position.NewSpan(5, 10), Style: "test2"})
+		clone.AddLineOverlay(0, line.Overlay{Cols: position.NewSpan(5, 10), Kind: "test2"})
 
 		// Verify original is unchanged.
 		require.Len(t, view.Overlays(0), 1)
@@ -669,7 +669,7 @@ func TestView_Slice(t *testing.T) {
 
 		for i := range view.Len() {
 			view.SetFlag(i, line.Flag(i))
-			view.AddLineOverlay(i, line.Overlay{Cols: position.NewSpan(0, i+1), Style: "test"})
+			view.AddLineOverlay(i, line.Overlay{Cols: position.NewSpan(0, i+1), Kind: "test"})
 			view.Annotate(i, line.Annotation{Content: view.Line(i).Content(), Placement: line.Below})
 		}
 
@@ -792,7 +792,7 @@ func TestView_Slice(t *testing.T) {
 		got := view.Slice(position.NewSpan(1, 2))
 
 		got.SetFlag(0, line.FlagDefault)
-		got.AddLineOverlay(0, line.Overlay{Cols: position.NewSpan(2, 3), Style: "extra"})
+		got.AddLineOverlay(0, line.Overlay{Cols: position.NewSpan(2, 3), Kind: "extra"})
 		got.Annotate(0, line.Annotation{Content: "extra"})
 
 		assert.Equal(t, line.Flag(1), view.Flag(1))

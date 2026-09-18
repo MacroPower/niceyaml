@@ -6,140 +6,141 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// Style identifies a style category for YAML highlighting.
-//
-// Style constants are used as keys in [Styles] maps to associate token
-// categories with [lipgloss.Style] formatting. Custom keys, such as overlay
-// kinds, are conversions of a string: style.Style("mine").
-type Style string
+// Kind names one kind of text a rendering styles: a kind of YAML token,
+// such as a mapping key or a number, a diff or error mark, or a heading in
+// a status bar. A [Styles] value maps each Kind to the [lipgloss.Style] it
+// renders with, and a [line.Overlay] names the Kind of its highlight. Custom
+// kinds, such as one for search matches, are conversions of a string:
+// style.Kind("mine").
+type Kind string
 
-// Style constants for YAML highlighting.
-// Names follow Pygments token naming conventions where applicable.
+// Kinds of YAML tokens and rendered text. Names follow Pygments token
+// naming conventions where applicable.
 const (
 	// Text is a default/fallback style.
-	Text Style = "text"
+	Text Kind = "text"
 	// TextAccent styles accented text.
-	TextAccent Style = "textAccent"
+	TextAccent Kind = "textAccent"
 	// TextAccentDim styles dimmed accented text.
-	TextAccentDim Style = "textAccentDim"
+	TextAccentDim Kind = "textAccentDim"
 	// TextSubtle styles de-emphasized text.
-	TextSubtle Style = "textSubtle"
+	TextSubtle Kind = "textSubtle"
 	// TextSubtleDim styles dimmed de-emphasized text.
-	TextSubtleDim Style = "textSubtleDim"
+	TextSubtleDim Kind = "textSubtleDim"
 	// TextOK styles success/OK text.
-	TextOK Style = "textOK"
+	TextOK Kind = "textOK"
 	// TextWarn styles warning text.
-	TextWarn Style = "textWarn"
+	TextWarn Kind = "textWarn"
 	// TextError styles error text.
-	TextError Style = "textError"
+	TextError Kind = "textError"
 	// Comment styles comments (#).
-	Comment Style = "comment"
+	Comment Kind = "comment"
 	// CommentPreproc styles preprocessor comment, e.g.: %YAML, %TAG.
-	CommentPreproc Style = "commentPreproc"
+	CommentPreproc Kind = "commentPreproc"
 	// Generic is a parent style for generic tokens.
-	Generic Style = "generic"
+	Generic Kind = "generic"
 	// GenericDeleted styles lines deleted in diff (-).
-	GenericDeleted Style = "genericDeleted"
+	GenericDeleted Kind = "genericDeleted"
 	// GenericError styles error tokens.
-	GenericError Style = "genericError"
+	GenericError Kind = "genericError"
 	// GenericErrorInvalid styles invalid tokens.
-	GenericErrorInvalid Style = "genericErrorInvalid"
+	GenericErrorInvalid Kind = "genericErrorInvalid"
 	// GenericErrorUnknown styles unknown tokens.
-	GenericErrorUnknown Style = "genericErrorUnknown"
+	GenericErrorUnknown Kind = "genericErrorUnknown"
 	// GenericInserted styles lines inserted in diff (+).
-	GenericInserted Style = "genericInserted"
+	GenericInserted Kind = "genericInserted"
 	// GenericHighlight styles highlights.
-	GenericHighlight Style = "genericHighlight"
+	GenericHighlight Kind = "genericHighlight"
 	// GenericHighlightDim styles dimmed highlights.
-	GenericHighlightDim Style = "genericHighlightDim"
+	GenericHighlightDim Kind = "genericHighlightDim"
 	// GenericHeading styles titles.
-	GenericHeading Style = "genericHeading"
+	GenericHeading Kind = "genericHeading"
 	// GenericHeadingAccent styles accented titles.
-	GenericHeadingAccent Style = "genericHeadingAccent"
+	GenericHeadingAccent Kind = "genericHeadingAccent"
 	// GenericHeadingSubtle styles de-emphasized titles.
-	GenericHeadingSubtle Style = "genericHeadingSubtle"
+	GenericHeadingSubtle Kind = "genericHeadingSubtle"
 	// GenericHeadingOK styles success/OK titles.
-	GenericHeadingOK Style = "genericHeadingOK"
+	GenericHeadingOK Kind = "genericHeadingOK"
 	// GenericHeadingWarn styles warning titles.
-	GenericHeadingWarn Style = "genericHeadingWarn"
+	GenericHeadingWarn Kind = "genericHeadingWarn"
 	// GenericHeadingError styles error titles.
-	GenericHeadingError Style = "genericHeadingError"
+	GenericHeadingError Kind = "genericHeadingError"
 	// Literal is a parent style for literal values.
-	Literal Style = "literal"
+	Literal Kind = "literal"
 	// LiteralBoolean styles boolean values (true, false).
-	LiteralBoolean Style = "literalBoolean"
+	LiteralBoolean Kind = "literalBoolean"
 	// LiteralNull styles null values (~, null).
-	LiteralNull Style = "literalNull"
+	LiteralNull Kind = "literalNull"
 	// LiteralNullImplicit styles implicit null (empty value).
-	LiteralNullImplicit Style = "literalNullImplicit"
+	LiteralNullImplicit Kind = "literalNullImplicit"
 	// LiteralNumber is a parent style for number values.
-	LiteralNumber Style = "literalNumber"
+	LiteralNumber Kind = "literalNumber"
 	// LiteralNumberBin styles binary integers (0b...).
-	LiteralNumberBin Style = "literalNumberBin"
+	LiteralNumberBin Kind = "literalNumberBin"
 	// LiteralNumberFloat styles float values (1.5, 2.0).
-	LiteralNumberFloat Style = "literalNumberFloat"
+	LiteralNumberFloat Kind = "literalNumberFloat"
 	// LiteralNumberHex styles hex integers (0x...).
-	LiteralNumberHex Style = "literalNumberHex"
+	LiteralNumberHex Kind = "literalNumberHex"
 	// LiteralNumberInfinity styles infinity (.inf).
-	LiteralNumberInfinity Style = "literalNumberInfinity"
+	LiteralNumberInfinity Kind = "literalNumberInfinity"
 	// LiteralNumberInteger styles integer values (1, 42).
-	LiteralNumberInteger Style = "literalNumberInteger"
+	LiteralNumberInteger Kind = "literalNumberInteger"
 	// LiteralNumberNaN styles NaN (.nan).
-	LiteralNumberNaN Style = "literalNumberNaN"
+	LiteralNumberNaN Kind = "literalNumberNaN"
 	// LiteralNumberOct styles octal integers (0o...).
-	LiteralNumberOct Style = "literalNumberOct"
+	LiteralNumberOct Kind = "literalNumberOct"
 	// LiteralString styles unquoted string values.
-	LiteralString Style = "literalString"
+	LiteralString Kind = "literalString"
 	// LiteralStringDouble styles double-quoted strings ("...").
-	LiteralStringDouble Style = "literalStringDouble"
+	LiteralStringDouble Kind = "literalStringDouble"
 	// LiteralStringSingle styles single-quoted strings ('...').
-	LiteralStringSingle Style = "literalStringSingle"
+	LiteralStringSingle Kind = "literalStringSingle"
 	// Name is a parent style for names and references.
-	Name Style = "name"
+	Name Kind = "name"
 	// NameAlias styles aliases (*).
-	NameAlias Style = "nameAlias"
+	NameAlias Kind = "nameAlias"
 	// NameAliasMerge styles merge key (<<).
-	NameAliasMerge Style = "nameAliasMerge"
+	NameAliasMerge Kind = "nameAliasMerge"
 	// NameAnchor styles anchors (&).
-	NameAnchor Style = "nameAnchor"
+	NameAnchor Kind = "nameAnchor"
 	// NameDecorator styles tags (!tag).
-	NameDecorator Style = "nameDecorator"
+	NameDecorator Kind = "nameDecorator"
 	// NameTag styles mapping keys (key:).
-	NameTag Style = "nameTag"
+	NameTag Kind = "nameTag"
 	// Punctuation is a parent style for punctuation.
-	Punctuation Style = "punctuation"
+	Punctuation Kind = "punctuation"
 	// PunctuationBlock is a parent style for block scalar punctuation.
-	PunctuationBlock Style = "punctuationBlock"
+	PunctuationBlock Kind = "punctuationBlock"
 	// PunctuationBlockFolded styles folded block scalar (>).
-	PunctuationBlockFolded Style = "punctuationBlockFolded"
+	PunctuationBlockFolded Kind = "punctuationBlockFolded"
 	// PunctuationBlockLiteral styles literal block scalar (|).
-	PunctuationBlockLiteral Style = "punctuationBlockLiteral"
+	PunctuationBlockLiteral Kind = "punctuationBlockLiteral"
 	// PunctuationCollectEntry styles comma (,).
-	PunctuationCollectEntry Style = "punctuationCollectEntry"
+	PunctuationCollectEntry Kind = "punctuationCollectEntry"
 	// PunctuationHeading styles document markers (---, ...).
-	PunctuationHeading Style = "punctuationHeading"
+	PunctuationHeading Kind = "punctuationHeading"
 	// PunctuationMapping is a parent style for mapping punctuation.
-	PunctuationMapping Style = "punctuationMapping"
+	PunctuationMapping Kind = "punctuationMapping"
 	// PunctuationMappingEnd styles closing brace (}).
-	PunctuationMappingEnd Style = "punctuationMappingEnd"
+	PunctuationMappingEnd Kind = "punctuationMappingEnd"
 	// PunctuationMappingStart styles opening brace ({).
-	PunctuationMappingStart Style = "punctuationMappingStart"
+	PunctuationMappingStart Kind = "punctuationMappingStart"
 	// PunctuationMappingValue styles colon (:).
-	PunctuationMappingValue Style = "punctuationMappingValue"
+	PunctuationMappingValue Kind = "punctuationMappingValue"
 	// PunctuationSequence is a parent style for sequence punctuation.
-	PunctuationSequence Style = "punctuationSequence"
+	PunctuationSequence Kind = "punctuationSequence"
 	// PunctuationSequenceEnd styles closing bracket (]).
-	PunctuationSequenceEnd Style = "punctuationSequenceEnd"
+	PunctuationSequenceEnd Kind = "punctuationSequenceEnd"
 	// PunctuationSequenceEntry styles sequence entry (-).
-	PunctuationSequenceEntry Style = "punctuationSequenceEntry"
+	PunctuationSequenceEntry Kind = "punctuationSequenceEntry"
 	// PunctuationSequenceStart styles opening bracket ([).
-	PunctuationSequenceStart Style = "punctuationSequenceStart"
+	PunctuationSequenceStart Kind = "punctuationSequenceStart"
 )
 
 var (
 	// The inheritance hierarchy for styles. Each style maps to its parent,
 	// and [Text] is the root with no parent.
-	styleParent = map[Style]Style{
+	styleParent = map[Kind]Kind{
 		Comment:                  Text,
 		CommentPreproc:           Comment,
 		Generic:                  Text,
@@ -200,14 +201,14 @@ var (
 		TextWarn:                 Text,
 	}
 
-	// A shared empty style, returned for lookups of categories that are
+	// A shared empty style, returned for lookups of kinds that are
 	// neither predefined nor set.
 	emptyStyle = lipgloss.NewStyle()
 )
 
-// getParent returns the parent [Style] for inheritance lookup.
+// getParent returns the parent [Kind] for inheritance lookup.
 // Returns [Text] if no explicit parent is defined.
-func getParent(s Style) Style {
+func getParent(s Kind) Kind {
 	if p, ok := styleParent[s]; ok {
 		return p
 	}
@@ -215,18 +216,18 @@ func getParent(s Style) Style {
 	return Text
 }
 
-// Styles resolves [Style] categories to [lipgloss.Style] formatting.
+// Styles resolves each [Kind] to the [lipgloss.Style] it renders with.
 //
 // A Styles value holds a base style plus explicit overrides, and resolves every
-// predefined category through the inheritance hierarchy when it is built, so
-// [Styles.Style] is a map lookup. Custom keys, such as overlay styles, are
-// stored as given.
+// predefined kind through the inheritance hierarchy when it is built, so
+// [Styles.Style] is a map lookup. Custom kinds, such as one for an overlay,
+// are stored as given.
 //
-// The zero value resolves every category to an empty style. Create instances
+// The zero value resolves every kind to an empty style. Create instances
 // with [NewStyles].
 type Styles struct {
-	overrides map[Style]*lipgloss.Style
-	resolved  map[Style]*lipgloss.Style
+	overrides map[Kind]*lipgloss.Style
+	resolved  map[Kind]*lipgloss.Style
 }
 
 // StylesOption configures a [Styles] value during construction.
@@ -235,12 +236,11 @@ type Styles struct {
 //   - [Set]
 type StylesOption func(*Styles)
 
-// Set returns a [StylesOption] that sets the [lipgloss.Style] for a [Style]
-// category. Categories below it in the hierarchy inherit it unless they are
-// set themselves.
+// Set returns a [StylesOption] that sets the [lipgloss.Style] for a [Kind].
+// Kinds below it in the hierarchy inherit it unless they are set themselves.
 //
 //nolint:gocritic // Value semantics preferred for API ergonomics.
-func Set(s Style, ls lipgloss.Style) StylesOption {
+func Set(s Kind, ls lipgloss.Style) StylesOption {
 	return func(st *Styles) {
 		st.overrides[s] = &ls
 	}
@@ -248,13 +248,13 @@ func Set(s Style, ls lipgloss.Style) StylesOption {
 
 // NewStyles creates a new [Styles] value with inheritance resolved.
 //
-// The base style is used for [Text] and inherited by every other category.
-// Use [Set] options to override specific categories; child categories inherit
-// from their closest set ancestor.
+// The base style is used for [Text] and inherited by every other kind.
+// Use [Set] options to override specific kinds; child kinds inherit from
+// their closest set ancestor.
 //
 //nolint:gocritic // Value semantics preferred for API ergonomics.
 func NewStyles(base lipgloss.Style, opts ...StylesOption) Styles {
-	st := Styles{overrides: map[Style]*lipgloss.Style{Text: &base}}
+	st := Styles{overrides: map[Kind]*lipgloss.Style{Text: &base}}
 
 	for _, opt := range opts {
 		opt(&st)
@@ -265,11 +265,11 @@ func NewStyles(base lipgloss.Style, opts ...StylesOption) Styles {
 	return st
 }
 
-// resolveStyles walks the hierarchy for every predefined category and returns
-// the map of category to its closest set ancestor. Custom keys outside the
+// resolveStyles walks the hierarchy for every predefined kind and returns
+// the map of kind to its closest set ancestor. Custom kinds outside the
 // hierarchy resolve to themselves. The overrides must hold [Text].
-func resolveStyles(overrides map[Style]*lipgloss.Style) map[Style]*lipgloss.Style {
-	lookup := func(st Style) *lipgloss.Style {
+func resolveStyles(overrides map[Kind]*lipgloss.Style) map[Kind]*lipgloss.Style {
+	lookup := func(st Kind) *lipgloss.Style {
 		for current := st; ; current = getParent(current) {
 			if ls, ok := overrides[current]; ok {
 				return ls
@@ -281,7 +281,7 @@ func resolveStyles(overrides map[Style]*lipgloss.Style) map[Style]*lipgloss.Styl
 		}
 	}
 
-	resolved := make(map[Style]*lipgloss.Style, len(styleParent)+1+len(overrides))
+	resolved := make(map[Kind]*lipgloss.Style, len(styleParent)+1+len(overrides))
 	resolved[Text] = lookup(Text)
 
 	for st := range styleParent {
@@ -297,10 +297,10 @@ func resolveStyles(overrides map[Style]*lipgloss.Style) map[Style]*lipgloss.Styl
 	return resolved
 }
 
-// Style returns the [lipgloss.Style] for the given [Style] category.
+// Style returns the [lipgloss.Style] for the given [Kind].
 //
-// A category that is neither predefined nor set returns an empty style.
-func (s Styles) Style(st Style) lipgloss.Style {
+// A kind that is neither predefined nor set returns an empty style.
+func (s Styles) Style(st Kind) lipgloss.Style {
 	if ls, ok := s.resolved[st]; ok && ls != nil {
 		return *ls
 	}
@@ -309,10 +309,10 @@ func (s Styles) Style(st Style) lipgloss.Style {
 }
 
 // With returns a copy of the [Styles] with the given options applied and
-// inheritance resolved again, so overriding a parent category also changes
+// inheritance resolved again, so overriding a parent kind also changes
 // the children that inherit from it. The receiver is unchanged.
 func (s Styles) With(opts ...StylesOption) Styles {
-	c := Styles{overrides: make(map[Style]*lipgloss.Style, len(s.overrides)+len(opts))}
+	c := Styles{overrides: make(map[Kind]*lipgloss.Style, len(s.overrides)+len(opts))}
 	maps.Copy(c.overrides, s.overrides)
 
 	if _, ok := c.overrides[Text]; !ok {

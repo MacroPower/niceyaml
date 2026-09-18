@@ -14,7 +14,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/style"
 )
 
-const benchmarkOverlayKind style.Style = "benchmarkOverlayKind"
+const benchmarkOverlayKind style.Kind = "benchmarkOverlayKind"
 
 func BenchmarkPrinterPrint(b *testing.B) {
 	sizes := []struct {

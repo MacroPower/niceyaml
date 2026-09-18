@@ -21,7 +21,7 @@ func TestXMLStyles_Style(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		input style.Style
+		input style.Kind
 		want  string
 	}{
 		"Text": {
@@ -113,7 +113,7 @@ func TestXMLStyles_Style_UnknownStyle(t *testing.T) {
 	t.Parallel()
 
 	getter := yamltest.NewXMLStyles()
-	st := getter.Style(style.Style("unknownStyle"))
+	st := getter.Style(style.Kind("unknownStyle"))
 
 	require.NotNil(t, st)
 

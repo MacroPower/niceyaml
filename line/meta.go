@@ -123,13 +123,14 @@ func (a Annotations) String() string {
 // Overlay represents a styled column range within a single [Line].
 //
 // Overlays apply visual styles (highlighting, coloring) to specific portions of
-// a line.
+// a line. Kind names the style the printer renders the columns with, as its
+// [style.Styles] resolves it.
 //
 // Add overlays to a [View] with [View.AddOverlay], [View.BlendOverlay], or
 // [View.AddLineOverlay].
 type Overlay struct {
-	Style style.Style
-	Cols  position.Span
+	Kind style.Kind
+	Cols position.Span
 	// Blend mixes the overlay style with the style underneath it instead of
 	// replacing it, so a highlight keeps the token or diff color it covers.
 	Blend bool

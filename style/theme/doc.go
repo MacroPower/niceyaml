@@ -45,16 +45,16 @@
 //
 // # Theme Structure
 //
-// Themes define colors for YAML token categories: keys ([style.NameTag]),
+// Themes define colors for YAML token kinds: keys ([style.NameTag]),
 // strings ([style.LiteralString]), numbers ([style.LiteralNumber]), comments
 // ([style.Comment]), and so on.
 //
 // The [style] package's inheritance system means themes only need to specify
-// the categories they want to customize; undefined categories fall back to
+// the kinds they want to customize; undefined kinds fall back to
 // their parent style.
 //
 // Each built-in theme is a small palette: a base foreground and background,
-// an accent color, OK, warning, and error colors, and the token categories it
+// an accent color, OK, warning, and error colors, and the token kinds it
 // colors. The package derives the remaining categories, such as headings,
 // highlights, and dimmed text, from those colors, so every theme presents the
 // same set of categories.

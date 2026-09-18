@@ -27,8 +27,8 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
-// testOverlayHighlight is a custom style.Style constant for test highlights.
-const testOverlayHighlight style.Style = "testOverlayHighlight"
+// testOverlayHighlight is a custom style.Kind constant for test highlights.
+const testOverlayHighlight style.Kind = "testOverlayHighlight"
 
 // testHighlightStyle returns a style that wraps content in brackets for easy verification.
 func testHighlightStyle() lipgloss.Style {
@@ -1771,7 +1771,7 @@ func TestPrinter_Style(t *testing.T) {
 
 	tcs := map[string]struct {
 		styles     style.Styles
-		query      style.Style
+		query      style.Kind
 		wantBold   bool
 		wantItalic bool
 	}{
@@ -2573,23 +2573,23 @@ func TestPrinter_BlendStyles(t *testing.T) {
 
 	// OverlayRange defines an overlay kind and its range.
 	type overlayRange struct {
-		kind  style.Style
+		kind  style.Kind
 		start position.Position
 		end   position.Position
 	}
 
 	// Overlay kinds for the various test tags.
 	const (
-		kindHL   style.Style = "kindHL"
-		kindAll  style.Style = "kindAll"
-		kindA    style.Style = "kindA"
-		kindB    style.Style = "kindB"
-		kindC    style.Style = "kindC"
-		kindX    style.Style = "kindX"
-		kindY    style.Style = "kindY"
-		kindK    style.Style = "kindK"
-		kindVal  style.Style = "kindVal"
-		kindSpan style.Style = "kindSpan"
+		kindHL   style.Kind = "kindHL"
+		kindAll  style.Kind = "kindAll"
+		kindA    style.Kind = "kindA"
+		kindB    style.Kind = "kindB"
+		kindC    style.Kind = "kindC"
+		kindX    style.Kind = "kindX"
+		kindY    style.Kind = "kindY"
+		kindK    style.Kind = "kindK"
+		kindVal  style.Kind = "kindVal"
+		kindSpan style.Kind = "kindSpan"
 	)
 
 	// Overlay styler mapping kinds to tag-wrapped styles.
@@ -2756,9 +2756,9 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 
 	// Overlay kinds for color blending tests.
 	const (
-		colorKind1 style.Style = "colorKind1"
-		colorKind2 style.Style = "colorKind2"
-		colorKind3 style.Style = "colorKind3"
+		colorKind1 style.Kind = "colorKind1"
+		colorKind2 style.Kind = "colorKind2"
+		colorKind3 style.Kind = "colorKind3"
 	)
 
 	tcs := map[string]struct {
@@ -2842,7 +2842,7 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 			view := niceyaml.NewSourceFromString(tc.input).View()
 
 			// Build overlay styler with styles from test case.
-			kinds := []style.Style{colorKind1, colorKind2, colorKind3}
+			kinds := []style.Kind{colorKind1, colorKind2, colorKind3}
 
 			overlayOpts := make([]style.StylesOption, 0, len(tc.overlays))
 			for i, od := range tc.overlays {
@@ -3325,9 +3325,9 @@ func TestPrinter_BlendKey_StyleNames(t *testing.T) {
 	// "blend a, then replace with b", which the key separators once spelled
 	// the same way.
 	const (
-		ab style.Style = "a!b"
-		a  style.Style = "a"
-		b  style.Style = "b"
+		ab style.Kind = "a!b"
+		a  style.Kind = "a"
+		b  style.Kind = "b"
 	)
 
 	wrap := func(tag string) lipgloss.Style {
@@ -3337,10 +3337,10 @@ func TestPrinter_BlendKey_StyleNames(t *testing.T) {
 	}
 
 	view := niceyaml.NewSourceFromString("k: 1\nk: 2").View()
-	view.AddLineOverlay(0, line.Overlay{Style: ab, Cols: position.NewSpan(0, 4), Blend: true})
+	view.AddLineOverlay(0, line.Overlay{Kind: ab, Cols: position.NewSpan(0, 4), Blend: true})
 	view.AddLineOverlay(1,
-		line.Overlay{Style: a, Cols: position.NewSpan(0, 4), Blend: true},
-		line.Overlay{Style: b, Cols: position.NewSpan(0, 4)},
+		line.Overlay{Kind: a, Cols: position.NewSpan(0, 4), Blend: true},
+		line.Overlay{Kind: b, Cols: position.NewSpan(0, 4)},
 	)
 
 	p := printer.New(
@@ -3365,7 +3365,7 @@ func TestPrinter_Overlay_Attributes(t *testing.T) {
 
 	// An overlay style that sets only text attributes must still change the
 	// rendered output, whether it replaces or blends with the style beneath.
-	const underlined style.Style = "underlined"
+	const underlined style.Kind = "underlined"
 
 	st := lipgloss.NewStyle().Underline(true).Bold(true)
 
@@ -3385,7 +3385,7 @@ func TestPrinter_Overlay_Attributes(t *testing.T) {
 			t.Parallel()
 
 			view := niceyaml.NewSourceFromString("k: v").View()
-			view.AddLineOverlay(0, line.Overlay{Style: underlined, Cols: position.NewSpan(0, 4), Blend: tc.blend})
+			view.AddLineOverlay(0, line.Overlay{Kind: underlined, Cols: position.NewSpan(0, 4), Blend: tc.blend})
 
 			p := printer.New(
 				printer.WithStyles(style.NewStyles(lipgloss.NewStyle(), style.Set(underlined, st))),

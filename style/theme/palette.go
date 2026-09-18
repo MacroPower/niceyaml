@@ -17,22 +17,22 @@ const surfaceShift = 0.30
 // palette holds the colors a catalog theme is built from. Every built-in
 // theme is one palette in [catalog], and [palette.styles] derives the full
 // [style.Styles] from it, so a theme lists its colors rather than every
-// category.
+// kind.
 type palette struct {
-	// Tokens sets token categories in the style-string form [style.Parse]
-	// reads, layered over the base style. Categories left out inherit from
+	// Tokens sets token kinds in the style-string form [style.Parse]
+	// reads, layered over the base style. Kinds left out inherit from
 	// their parent.
-	Tokens map[style.Style]string
+	Tokens map[style.Kind]string
 	// Fg and Bg are the base text colors as hex strings. An empty value
-	// leaves the terminal default in place; the derived categories then
+	// leaves the terminal default in place; the derived kinds then
 	// assume black on white for a [Light] theme and white on black for a
 	// [Dark] one.
 	Fg, Bg string
 	// Accent colors headings and accented text. OK, Warn, and Error color
-	// the status categories.
+	// the status kinds.
 	Accent, OK, Warn, Error string
-	// Overrides is applied after every derived category, for the few
-	// categories a theme sets outside the template.
+	// Overrides is applied after every derived kind, for the few
+	// kinds a theme sets outside the template.
 	Overrides []style.StylesOption
 	// Mode is the background the theme is designed for. It also picks the
 	// direction of the derived shifts, so dimmed text moves toward the
@@ -97,7 +97,7 @@ func (p palette) styles() style.Styles {
 	return style.NewStyles(base, opts...)
 }
 
-// surface returns the foreground and background the derived categories are
+// surface returns the foreground and background the derived kinds are
 // computed from: the palette's own colors, or black and white arranged for
 // the mode when the palette leaves one unset.
 func (p palette) surface() (color.Color, color.Color) {

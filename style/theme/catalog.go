@@ -15,7 +15,7 @@ var catalog = map[string]palette{
 		OK:     "#22863a",
 		Warn:   "#b07d2b",
 		Error:  "#cb2431",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:       "italic #888888",
 			style.GenericError:  "#ff0000",
 			style.LiteralNumber: "#33aaff",
@@ -33,7 +33,7 @@ var catalog = map[string]palette{
 		OK:     "#22863a",
 		Warn:   "#b07d2b",
 		Error:  "#cb2431",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic #888888",
 			style.LiteralString:      "italic #666666",
 			style.Name:               "bold italic",
@@ -51,7 +51,7 @@ var catalog = map[string]palette{
 		OK:     "#22863a",
 		Warn:   "#b07d2b",
 		Error:  "#cb2431",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic #888888",
 			style.LiteralString:      "italic #666666",
 			style.Name:               "bold italic",
@@ -69,7 +69,7 @@ var catalog = map[string]palette{
 		OK:     "#22863a",
 		Warn:   "#d08700",
 		Error:  "#cb2431",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:        "#95a5a6",
 			style.GenericError:   "#a61717",
 			style.LiteralBoolean: "#00979d",
@@ -89,7 +89,7 @@ var catalog = map[string]palette{
 		OK:     "#b4b4b4",
 		Warn:   "#e8b57e",
 		Error:  "#c53030",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic #737373",
 			style.Generic:            "#b4b4b4",
 			style.GenericDeleted:     "#c53030",
@@ -113,7 +113,7 @@ var catalog = map[string]palette{
 		OK:     "#61ffca",
 		Warn:   "#ffca85",
 		Error:  "#ff6767",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic #6d6d6d",
 			style.CommentPreproc:     "italic #6d6d6d",
 			style.Generic:            "#edecee",
@@ -138,7 +138,7 @@ var catalog = map[string]palette{
 		OK:     "#54c59f",
 		Warn:   "#ffca85",
 		Error:  "#c55858",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic #6d6d6d",
 			style.CommentPreproc:     "italic #6d6d6d",
 			style.Generic:            "#bdbdbd",
@@ -163,7 +163,7 @@ var catalog = map[string]palette{
 		OK:     "#00aa00",
 		Warn:   "#aa5500",
 		Error:  "#aa0000",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic #aaaaaa",
 			style.Generic:            "italic",
 			style.GenericDeleted:     "#aa0000",
@@ -186,7 +186,7 @@ var catalog = map[string]palette{
 		OK:     "#5faf5f",
 		Warn:   "#e5c07b",
 		Error:  "#ec0000",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "#757575",
 			style.Generic:            "#757575",
 			style.GenericDeleted:     "#ec0000",
@@ -210,7 +210,7 @@ var catalog = map[string]palette{
 		OK:     "#5af78e",
 		Warn:   "#f3f99d",
 		Error:  "#ff5c57",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "#78787e",
 			style.Generic:            "#e2e4e5",
 			style.GenericDeleted:     "#ff5c57",
@@ -234,7 +234,7 @@ var catalog = map[string]palette{
 		OK:     "#22863a",
 		Warn:   "#d08700",
 		Error:  "#cb2431",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:         "italic #008800",
 			style.Generic:         "italic",
 			style.GenericDeleted:  "#000000 bg:#ffdddd",
@@ -255,7 +255,7 @@ var catalog = map[string]palette{
 		OK:     "#22863a",
 		Warn:   "#b07d2b",
 		Error:  "#cb2431",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic",
 			style.Generic:            "italic",
 			style.LiteralString:      "italic",
@@ -273,7 +273,7 @@ var catalog = map[string]palette{
 		OK:     "#a6d189",
 		Warn:   "#e5c890",
 		Error:  "#e78284",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic #737994",
 			style.CommentPreproc:     "bold #737994",
 			style.Generic:            "#c6d0f5",
@@ -298,7 +298,7 @@ var catalog = map[string]palette{
 		OK:     "#40a02b",
 		Warn:   "#df8e1d",
 		Error:  "#d20f39",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic #9ca0b0",
 			style.CommentPreproc:     "bold #9ca0b0",
 			style.Generic:            "#4c4f69",
@@ -323,7 +323,7 @@ var catalog = map[string]palette{
 		OK:     "#a6da95",
 		Warn:   "#eed49f",
 		Error:  "#ed8796",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic #6e738d",
 			style.CommentPreproc:     "bold #6e738d",
 			style.Generic:            "#cad3f5",
@@ -348,7 +348,7 @@ var catalog = map[string]palette{
 		OK:     "#a6e3a1",
 		Warn:   "#f9e2af",
 		Error:  "#f38ba8",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic #6c7086",
 			style.CommentPreproc:     "bold #6c7086",
 			style.Generic:            "#cdd6f4",
@@ -373,7 +373,7 @@ var catalog = map[string]palette{
 		OK:     "#00a000",
 		Warn:   "#b07d2b",
 		Error:  "#a00000",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:              "#888888",
 			style.Generic:              "italic",
 			style.GenericDeleted:       "#a00000",
@@ -399,7 +399,7 @@ var catalog = map[string]palette{
 		OK:     "#a6e22e",
 		Warn:   "#ecbe7b",
 		Error:  "#ff5555",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:             "italic #8a93a5",
 			style.Generic:             "#b0c4de",
 			style.GenericError:        "#b0c4de",
@@ -423,7 +423,7 @@ var catalog = map[string]palette{
 		OK:     "#a6e22e",
 		Warn:   "#ecbe7b",
 		Error:  "#ff6c6b",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:             "italic #8a93a5",
 			style.Generic:             "#b0c4de",
 			style.GenericDeleted:      "#b0c4de",
@@ -448,7 +448,7 @@ var catalog = map[string]palette{
 		OK:     "#50fa7b",
 		Warn:   "#f1fa8c",
 		Error:  "#ff5555",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "#6272a4",
 			style.Generic:            "#f8f8f2",
 			style.GenericDeleted:     "#ff5555",
@@ -472,7 +472,7 @@ var catalog = map[string]palette{
 		OK:     "#00a000",
 		Warn:   "#b07d2b",
 		Error:  "#a00000",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic #008800",
 			style.Generic:            "italic",
 			style.GenericDeleted:     "#a00000",
@@ -495,7 +495,7 @@ var catalog = map[string]palette{
 		OK:     "#b2c98f",
 		Warn:   "#e6b99d",
 		Error:  "#e67e80",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:         "italic #859289",
 			style.Generic:         "#d6cbb4",
 			style.GenericDeleted:  "#252b2e bg:#e67e80",
@@ -517,7 +517,7 @@ var catalog = map[string]palette{
 		OK:     "#00a000",
 		Warn:   "#b07d2b",
 		Error:  "#a00000",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic #60a0b0",
 			style.Generic:            "italic",
 			style.GenericDeleted:     "#a00000",
@@ -540,7 +540,7 @@ var catalog = map[string]palette{
 		OK:     "#00ff00",
 		Warn:   "#ffb86c",
 		Error:  "#ff0000",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:       "italic #008800 bg:#0f140f",
 			style.Generic:       "bold #ffffff",
 			style.LiteralNumber: "bold #0086f7",
@@ -558,7 +558,7 @@ var catalog = map[string]palette{
 		OK:     "#116329",
 		Warn:   "#d08700",
 		Error:  "#82071e",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:         "#57606a",
 			style.CommentPreproc:  "#57606a",
 			style.GenericDeleted:  "#82071e bg:#ffebe9",
@@ -578,7 +578,7 @@ var catalog = map[string]palette{
 		OK:     "#56d364",
 		Warn:   "#d29922",
 		Error:  "#ffa198",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic #8b949e",
 			style.Generic:            "#e6edf3",
 			style.GenericDeleted:     "#ffa198 bg:#490202",
@@ -601,7 +601,7 @@ var catalog = map[string]palette{
 		OK:     "#b8bb26",
 		Warn:   "#fabd2f",
 		Error:  "#fb4934",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:         "italic #928374",
 			style.Generic:         "#ebdbb2",
 			style.GenericDeleted:  "#282828 bg:#fb4934",
@@ -623,7 +623,7 @@ var catalog = map[string]palette{
 		OK:     "#79740e",
 		Warn:   "#b57614",
 		Error:  "#9d0006",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:         "italic #928374",
 			style.Generic:         "#3c3836",
 			style.GenericDeleted:  "#282828 bg:#9d0006",
@@ -645,7 +645,7 @@ var catalog = map[string]palette{
 		OK:     "#00ff00",
 		Warn:   "#e5c07b",
 		Error:  "#ff0000",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:        "#5a8349",
 			style.LiteralBoolean: "#467faf",
 			style.LiteralNumber:  "#ffffff",
@@ -663,7 +663,7 @@ var catalog = map[string]palette{
 		OK:     "#00ff00",
 		Warn:   "#e5c07b",
 		Error:  "#ff0000",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:       "italic #828b96",
 			style.LiteralString: "#a6be9d",
 			style.Name:          "#58a1dd",
@@ -679,7 +679,7 @@ var catalog = map[string]palette{
 		OK:     "#22863a",
 		Warn:   "#d08700",
 		Error:  "#cb2431",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:       "italic #ff0000",
 			style.LiteralString: "#009c00",
 			style.Name:          "#007575",
@@ -695,7 +695,7 @@ var catalog = map[string]palette{
 		OK:     "#76946a",
 		Warn:   "#e6c384",
 		Error:  "#c34043",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:         "italic #737c73",
 			style.CommentPreproc:  "italic #c4746e",
 			style.GenericDeleted:  "#c34043 bg:#43242b",
@@ -716,7 +716,7 @@ var catalog = map[string]palette{
 		OK:     "#6e915f",
 		Warn:   "#cc6d00",
 		Error:  "#d7474b",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:         "italic #8a8980",
 			style.CommentPreproc:  "italic #c84053",
 			style.GenericDeleted:  "#d7474b bg:#d9a594",
@@ -737,7 +737,7 @@ var catalog = map[string]palette{
 		OK:     "#76946a",
 		Warn:   "#e6c384",
 		Error:  "#c34043",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:         "italic #727169",
 			style.CommentPreproc:  "italic #e46876",
 			style.GenericDeleted:  "#c34043 bg:#43242b",
@@ -758,7 +758,7 @@ var catalog = map[string]palette{
 		OK:     "#388038",
 		Warn:   "#b07d2b",
 		Error:  "#c02828",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic #888888",
 			style.Generic:            "italic",
 			style.GenericDeleted:     "#c02828",
@@ -782,7 +782,7 @@ var catalog = map[string]palette{
 		OK:     "#22863a",
 		Warn:   "#b07d2b",
 		Error:  "#cb2431",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic #0099ff",
 			style.Generic:            "italic",
 			style.GenericDeleted:     "bg:#ffcccc",
@@ -805,7 +805,7 @@ var catalog = map[string]palette{
 		OK:     "#006800",
 		Warn:   "#c65614",
 		Error:  "#a60000",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:        "#505050",
 			style.LiteralBoolean: "#0000c0",
 			style.LiteralString:  "#2544bb",
@@ -822,7 +822,7 @@ var catalog = map[string]palette{
 		OK:     "#44bc44",
 		Warn:   "#d0bc00",
 		Error:  "#ff5f59",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:        "#a8a8a8",
 			style.LiteralBoolean: "#00bcff",
 			style.LiteralString:  "#79a8ff",
@@ -839,7 +839,7 @@ var catalog = map[string]palette{
 		OK:     "#a6e22e",
 		Warn:   "#e6db74",
 		Error:  "#f92672",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:         "#75715e",
 			style.Generic:         "italic",
 			style.GenericDeleted:  "#f92672",
@@ -861,7 +861,7 @@ var catalog = map[string]palette{
 		OK:     "#22863a",
 		Warn:   "#b07d2b",
 		Error:  "#cb2431",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:       "#75715e",
 			style.Generic:       "italic",
 			style.GenericError:  "#960050 bg:#1e0010",
@@ -881,7 +881,7 @@ var catalog = map[string]palette{
 		OK:     "#00a000",
 		Warn:   "#d08700",
 		Error:  "#a00000",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:              "italic #666666",
 			style.Generic:              "italic",
 			style.GenericDeleted:       "#a00000",
@@ -907,7 +907,7 @@ var catalog = map[string]palette{
 		OK:     "#589819",
 		Warn:   "#ffb86c",
 		Error:  "#d22323",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic #999999",
 			style.Generic:            "italic",
 			style.GenericDeleted:     "#d22323",
@@ -930,7 +930,7 @@ var catalog = map[string]palette{
 		OK:     "#a3be8c",
 		Warn:   "#ebcb8b",
 		Error:  "#bf616a",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic #616e87",
 			style.Generic:            "italic",
 			style.GenericDeleted:     "#bf616a",
@@ -953,7 +953,7 @@ var catalog = map[string]palette{
 		OK:     "#a3be8c",
 		Warn:   "#ebcb8b",
 		Error:  "#c5727a",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic #4c566a",
 			style.Generic:            "italic",
 			style.GenericDeleted:     "#c5727a",
@@ -976,7 +976,7 @@ var catalog = map[string]palette{
 		OK:     "#98c379",
 		Warn:   "#e5c07b",
 		Error:  "#e06c75",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:         "#7f848e",
 			style.GenericDeleted:  "#e06c75",
 			style.GenericInserted: "bold #98c379",
@@ -996,7 +996,7 @@ var catalog = map[string]palette{
 		OK:     "#22863a",
 		Warn:   "#986801",
 		Error:  "#cb2431",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:       "#008000",
 			style.LiteralString: "#000000",
 			style.Name:          "#0000ff",
@@ -1016,7 +1016,7 @@ var catalog = map[string]palette{
 		OK:     "#48b685",
 		Warn:   "#f99b15",
 		Error:  "#ef6155",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "#776e71",
 			style.Generic:            "italic",
 			style.GenericDeleted:     "#ef6155",
@@ -1039,7 +1039,7 @@ var catalog = map[string]palette{
 		OK:     "#48b685",
 		Warn:   "#f99b15",
 		Error:  "#ef6155",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "#8d8687",
 			style.Generic:            "italic",
 			style.GenericDeleted:     "#ef6155",
@@ -1062,7 +1062,7 @@ var catalog = map[string]palette{
 		OK:     "#22863a",
 		Warn:   "#d08700",
 		Error:  "#cb2431",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "#888888",
 			style.Generic:            "italic",
 			style.GenericDeleted:     "#000000 bg:#ffdddd",
@@ -1085,7 +1085,7 @@ var catalog = map[string]palette{
 		OK:     "#00aa00",
 		Warn:   "#b07d2b",
 		Error:  "#aa0000",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "#228b22",
 			style.Generic:            "italic",
 			style.GenericDeleted:     "#aa0000",
@@ -1106,7 +1106,7 @@ var catalog = map[string]palette{
 		OK:     "#00a000",
 		Warn:   "#b07d2b",
 		Error:  "#a00000",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic #408080",
 			style.Generic:            "italic",
 			style.GenericDeleted:     "#a00000",
@@ -1132,7 +1132,7 @@ var catalog = map[string]palette{
 		OK:     "#22863a",
 		Warn:   "#d08700",
 		Error:  "#cb2431",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:         "italic #0080ff",
 			style.Generic:         "italic",
 			style.GenericDeleted:  "bg:#ffcccc",
@@ -1154,7 +1154,7 @@ var catalog = map[string]palette{
 		OK:     "#9ccfd8",
 		Warn:   "#f6c177",
 		Error:  "#eb6f92",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:         "#6e6a86",
 			style.Generic:         "italic",
 			style.GenericDeleted:  "#eb6f92",
@@ -1176,7 +1176,7 @@ var catalog = map[string]palette{
 		OK:     "#56949f",
 		Warn:   "#ea9d34",
 		Error:  "#b4637a",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:         "#9893a5",
 			style.Generic:         "italic",
 			style.GenericDeleted:  "#b4637a",
@@ -1198,7 +1198,7 @@ var catalog = map[string]palette{
 		OK:     "#9ccfd8",
 		Warn:   "#f6c177",
 		Error:  "#eb6f92",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:         "#6e6a86",
 			style.Generic:         "italic",
 			style.GenericDeleted:  "#eb6f92",
@@ -1220,7 +1220,7 @@ var catalog = map[string]palette{
 		OK:     "#22863a",
 		Warn:   "#d08700",
 		Error:  "#cb2431",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:       "#75715e",
 			style.Generic:       "italic",
 			style.GenericError:  "#960050 bg:#1e0010",
@@ -1240,7 +1240,7 @@ var catalog = map[string]palette{
 		OK:     "#00ff00",
 		Warn:   "#ffb86c",
 		Error:  "#ff0000",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:         "#00ff00",
 			style.Generic:         "italic",
 			style.GenericDeleted:  "#f00",
@@ -1260,7 +1260,7 @@ var catalog = map[string]palette{
 		OK:     "#719e07",
 		Warn:   "#b58900",
 		Error:  "#dc322f",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:         "#586e75",
 			style.Generic:         "italic",
 			style.GenericDeleted:  "#dc322f",
@@ -1283,7 +1283,7 @@ var catalog = map[string]palette{
 		OK:     "#5f8700",
 		Warn:   "#af8700",
 		Error:  "#af0000",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:         "#4e4e4e",
 			style.Generic:         "italic",
 			style.GenericDeleted:  "#af0000",
@@ -1306,7 +1306,7 @@ var catalog = map[string]palette{
 		OK:     "#719e07",
 		Warn:   "#b58900",
 		Error:  "#dc322f",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:        "italic #93a1a1",
 			style.Generic:        "#d33682",
 			style.LiteralBoolean: "bold",
@@ -1325,7 +1325,7 @@ var catalog = map[string]palette{
 		OK:     "#00ff00",
 		Warn:   "#ffb86c",
 		Error:  "#ff0000",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:       "#007f7f",
 			style.Generic:       "bold",
 			style.GenericError:  "#ff0000",
@@ -1344,7 +1344,7 @@ var catalog = map[string]palette{
 		OK:     "#00a000",
 		Warn:   "#c4a000",
 		Error:  "#a40000",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic #8f5902",
 			style.Generic:            "#000000",
 			style.GenericDeleted:     "#a40000",
@@ -1368,7 +1368,7 @@ var catalog = map[string]palette{
 		OK:     "#587539",
 		Warn:   "#965027",
 		Error:  "#c64343",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic #a1a6c5",
 			style.CommentPreproc:     "bold #a1a6c5",
 			style.Generic:            "#3760bf",
@@ -1393,7 +1393,7 @@ var catalog = map[string]palette{
 		OK:     "#c3e88d",
 		Warn:   "#ff9e64",
 		Error:  "#c53b53",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic #444a73",
 			style.CommentPreproc:     "bold #444a73",
 			style.Generic:            "#c8d3f5",
@@ -1418,7 +1418,7 @@ var catalog = map[string]palette{
 		OK:     "#9ece6a",
 		Warn:   "#e0af68",
 		Error:  "#db4b4b",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic #414868",
 			style.CommentPreproc:     "bold #414868",
 			style.Generic:            "#c0caf5",
@@ -1443,7 +1443,7 @@ var catalog = map[string]palette{
 		OK:     "#9ece6a",
 		Warn:   "#e0af68",
 		Error:  "#db4b4b",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic #414868",
 			style.CommentPreproc:     "bold #414868",
 			style.Generic:            "#c0caf5",
@@ -1473,7 +1473,7 @@ var catalog = map[string]palette{
 		OK:     "#22863a",
 		Warn:   "#b07d2b",
 		Error:  "#cb2431",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "italic #999988",
 			style.Generic:            "italic",
 			style.GenericDeleted:     "#000000 bg:#ffdddd",
@@ -1496,7 +1496,7 @@ var catalog = map[string]palette{
 		OK:     "#00cd00",
 		Warn:   "#cdcd00",
 		Error:  "#cd0000",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:         "#000080",
 			style.Generic:         "italic",
 			style.GenericDeleted:  "#cd0000",
@@ -1517,7 +1517,7 @@ var catalog = map[string]palette{
 		OK:     "#22863a",
 		Warn:   "#d08700",
 		Error:  "#cb2431",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:       "#008000",
 			style.Generic:       "italic",
 			style.LiteralString: "#a31515",
@@ -1535,7 +1535,7 @@ var catalog = map[string]palette{
 		OK:     "#ecbe7b",
 		Warn:   "#ffb86c",
 		Error:  "#cf5967",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:            "#3e4460",
 			style.Generic:            "#c9c9c9",
 			style.GenericDeleted:     "#cf5967",
@@ -1562,7 +1562,7 @@ var catalog = map[string]palette{
 		OK:     "#a6e22e",
 		Warn:   "#fff352",
 		Error:  "#f92672",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:         "#b0bec5",
 			style.Generic:         "italic",
 			style.GenericDeleted:  "#f92672",
@@ -1584,7 +1584,7 @@ var catalog = map[string]palette{
 		OK:     "#22863a",
 		Warn:   "#d08700",
 		Error:  "#cb2431",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:       "#177500",
 			style.GenericError:  "#000000",
 			style.LiteralNumber: "#1c01ce",
@@ -1603,7 +1603,7 @@ var catalog = map[string]palette{
 		OK:     "#4eb400",
 		Warn:   "#d0a946",
 		Error:  "#ff0000",
-		Tokens: map[style.Style]string{
+		Tokens: map[style.Kind]string{
 			style.Comment:        "#6c7986",
 			style.GenericError:   "#960050",
 			style.LiteralBoolean: "#fc5fa3",

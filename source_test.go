@@ -954,7 +954,7 @@ func TestSource_View_IndependentViews(t *testing.T) {
 
 	// The first view keeps what was added to it.
 	require.Len(t, first.Overlays(0), 1)
-	assert.Equal(t, style.Style("test1"), first.Overlays(0)[0].Style)
+	assert.Equal(t, style.Kind("test1"), first.Overlays(0)[0].Kind)
 	assert.Equal(t, "key: value", first.Lines().Content())
 }
 
@@ -1300,7 +1300,7 @@ func TestSource_View_IsIndependent(t *testing.T) {
 	view := source.View()
 	for i := range view.AllLines() {
 		view.Annotate(i, line.Annotation{Content: "note", Placement: line.Below})
-		view.AddLineOverlay(i, line.Overlay{Cols: position.NewSpan(0, 3), Style: style.GenericError})
+		view.AddLineOverlay(i, line.Overlay{Cols: position.NewSpan(0, 3), Kind: style.GenericError})
 	}
 
 	assert.NotEmpty(t, view.Annotations(0))
