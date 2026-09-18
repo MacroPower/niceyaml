@@ -13,8 +13,8 @@ import (
 )
 
 // ErrorHandler is the [fang.ErrorHandler] that [NewErrorHandler] returns
-// with no options, so [niceyaml.SourceError] values render with a default
-// [printer.Printer] and two lines of context.
+// with no options, so [niceyaml.SourceError] values render with a
+// [printer.Printer] from [printer.New] and two lines of context.
 //
 //nolint:gocritic // hugeParam: required by [fang.ErrorHandler] signature.
 func ErrorHandler(w io.Writer, styles fang.Styles, err error) {
@@ -80,17 +80,14 @@ func WithContextLines(lines int) Option {
 //		fangs.WithPrinter(printer.New(printer.WithWidth(width))),
 //	))
 //
-// The handler prints a [niceyaml.SourceError] at the top with
-// [niceyaml.SourceError.Render], which is its message followed by its
-// [niceyaml.SourceError.Excerpt]. Any other error prints with the %+v
-// verb, and the message stays as the error's wrappers wrote it. The message
-// of a SourceError inside that error is part of that text already, so the
-// handler prints the excerpt of each SourceError in the tree below the
-// message, in the order the SourceErrors appear in it, and a joined error
-// annotates each failure it holds. Unlike [fang.DefaultErrorHandler], which
-// wraps errors in a lipgloss style that can break multi-line output, this
-// handler applies styling only to the error header, keeping the rendered
-// lines intact.
+// The handler prints the message of err as its wrappers wrote it, then the
+// [niceyaml.SourceError.Detail] of each [niceyaml.SourceError] in the
+// error's tree, in the order the SourceErrors appear in it, so a joined
+// error annotates each failure it holds. The message of a SourceError
+// inside the error is part of the message already. Unlike
+// [fang.DefaultErrorHandler], which wraps errors in a lipgloss style that
+// can break multi-line output, this handler applies styling only to the
+// error header, keeping the rendered lines intact.
 func NewErrorHandler(opts ...Option) fang.ErrorHandler {
 	cfg := newConfig(opts)
 
@@ -105,18 +102,11 @@ func NewErrorHandler(opts ...Option) fang.ErrorHandler {
 func handleError(w io.Writer, styles fang.Styles, err error, cfg config) {
 	ignoreN(fmt.Fprintln(w, styles.ErrorHeader.String()))
 
-	var parts []string
+	parts := []string{fmt.Sprintf("%v", err)}
 
-	if top, ok := err.(*niceyaml.SourceError); ok { //nolint:errorlint // Mirrors %+v, which formats the top-level value.
-		parts = append(parts, top.Render(cfg.printer, cfg.context))
-	} else {
-		parts = append(parts, fmt.Sprintf("%+v", err))
-
-		for _, yamlErr := range yamlErrors(err) {
-			excerpt, excerptErr := yamlErr.Excerpt(cfg.context)
-			if excerptErr == nil {
-				parts = append(parts, cfg.printer.Print(excerpt))
-			}
+	for _, yamlErr := range yamlErrors(err) {
+		if detail := yamlErr.Detail(cfg.printer, cfg.context); detail != "" {
+			parts = append(parts, detail)
 		}
 	}
 

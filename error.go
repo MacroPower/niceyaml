@@ -7,14 +7,12 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
-	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
 )
 
@@ -48,11 +46,16 @@ var (
 	// token or range came from other text. [SourceError.Location] and
 	// [SourceError.Excerpt] return it.
 	ErrOutOfRange = errors.New("location outside source")
-
-	// Shared [printer.Printer] for [SourceError.Render] when the caller
-	// passes none.
-	defaultPrinter = sync.OnceValue(func() *printer.Printer { return printer.New() })
 )
+
+// Renderer renders a [line.View] as text. [SourceError.Detail] renders the
+// excerpt around an error's location with one, and the %+v verb renders it
+// as plain text.
+//
+// See [go.jacobcolvin.com/niceyaml/printer.Printer] for an implementation.
+type Renderer interface {
+	Print(view *line.View) string
+}
 
 // Error is an error that points at a location in a YAML document.
 //
@@ -347,7 +350,8 @@ func (e *Error) locate(b *SourceError) (location, error) {
 
 		tk, err := e.path.Token(doc.doc)
 		if err != nil {
-			return location{}, fmt.Errorf("path token: %w", err)
+			//nolint:wrapcheck // The paths error already names the path.
+			return location{}, err
 		}
 
 		if tk == nil || tk.Position == nil {
@@ -375,7 +379,8 @@ func (e *Error) locate(b *SourceError) (location, error) {
 // puts the position in front of the message, [SourceError.Location]
 // returns the resolved range, and [SourceError.Excerpt] returns the
 // surrounding lines with the location highlighted. The %+v verb prints the
-// message and the excerpt:
+// message and the excerpt as plain text, with carets under the location,
+// so it is safe for a log:
 //
 //	if _, err := source.File(); err != nil {
 //		fmt.Printf("%+v\n", err)
@@ -395,16 +400,14 @@ func (e *Error) locate(b *SourceError) (location, error) {
 //
 // The marks of an error are decoration on a [line.View], so the caller
 // that renders the error decides how it looks. [SourceError.Excerpt]
-// returns the hunks around the locations as a view for any
-// [printer.Printer], [SourceError.Annotate] marks a whole view of the
-// source, as a viewer that shows errors inline needs, and
-// [SourceError.Render] prints the message and the excerpt with the printer
-// and context lines it is given, which is what %+v does with the defaults:
+// returns the hunks around the locations as a view for any [Renderer],
+// [SourceError.Annotate] marks a whole view of the source, as a viewer
+// that shows errors inline needs, and [SourceError.Detail] renders the
+// excerpt with the Renderer and context lines it is given. A
+// [go.jacobcolvin.com/niceyaml/printer.Printer] is a Renderer, and its
+// PrintError method prints the message and the Detail with color:
 //
-//	var bound *niceyaml.SourceError
-//	if errors.As(err, &bound) {
-//		fmt.Println(bound.Render(p, 3))
-//	}
+//	fmt.Println(p.PrintError(err, 3))
 //
 // A SourceError implements the error interface and unwraps to the error it
 // was created from, so [errors.Is] and [errors.As] see through it.
@@ -521,12 +524,16 @@ func firstSourceError(err error) (*SourceError, bool) {
 // Format implements [fmt.Formatter].
 //
 // The %v and %s verbs print [SourceError.Error]. The %+v verb prints
-// [SourceError.Render] with the default [printer.Printer] and two lines of
-// context. The %q verb quotes [SourceError.Error].
+// [SourceError.Error], then [SourceError.Detail] rendered as plain text
+// with two lines of context: each line of the excerpt behind its number,
+// carets under the columns of the location on the row below, and nested
+// errors beside their carets. The output holds no escape sequences, so it
+// reads in a log as it does in a terminal. The %q verb quotes
+// [SourceError.Error].
 func (e *SourceError) Format(f fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && f.Flag('+'):
-		writeString(f, e.Render(nil, defaultContextLines))
+		writeString(f, joinParts(e.Error(), e.Detail(plainRenderer{}, defaultContextLines)))
 
 	case verb == 'q':
 		writeString(f, strconv.Quote(e.Error()))
@@ -612,7 +619,7 @@ func (e *SourceError) Annotate(view *line.View) error {
 //
 // Excerpt returns an error only when no location resolves, as
 // [SourceError.Annotate] does. A nested error whose location does not
-// resolve is left out of the excerpt; [SourceError.Render] lists those
+// resolve is left out of the excerpt; [SourceError.Detail] lists those
 // after it.
 func (e *SourceError) Excerpt(context int) (*line.View, error) {
 	excerpt, _, err := e.excerpt(context)
@@ -655,29 +662,52 @@ func (e *SourceError) excerpt(context int) (*line.View, []string, error) {
 	return excerpt, unresolved, nil
 }
 
-// Render returns [SourceError.Error], then [SourceError.Excerpt] with
-// context lines rendered by p when a location resolves, then one line per
-// nested error the excerpt does not annotate, each with its own unresolved
-// location. Blank lines separate the parts. A nil p renders with a
-// [printer.Printer] from [printer.New]. The %+v verb prints Render with
-// that printer and two lines of context.
-func (e *SourceError) Render(p *printer.Printer, context int) string {
-	if p == nil {
-		p = defaultPrinter()
-	}
-
-	parts := []string{e.Error()}
+// Detail returns what [SourceError.Error] leaves out: [SourceError.Excerpt]
+// with context lines, rendered by r, then one line per nested error the
+// excerpt does not annotate, each with its own unresolved location. Blank
+// lines separate the parts. When no location resolves, a line starting
+// "no excerpt:" names the error [SourceError.Location] returns in place of
+// the excerpt, unless that error is [ErrNoLocation], since an error that
+// carries no location has nothing to explain. Returns "" when there is
+// nothing to show.
+//
+// The %+v verb prints [SourceError.Error] and the Detail rendered as plain
+// text with two lines of context. A
+// [go.jacobcolvin.com/niceyaml/printer.Printer] is a Renderer, and its
+// PrintError method prints the message and the Detail the same way with
+// the printer's styles.
+func (e *SourceError) Detail(r Renderer, context int) string {
+	var parts []string
 
 	excerpt, unresolved, err := e.excerpt(context)
 	if err == nil {
-		parts = append(parts, p.Print(excerpt))
+		parts = append(parts, r.Print(excerpt))
+	} else {
+		_, locErr := e.Location()
+		if locErr != nil && !errors.Is(locErr, ErrNoLocation) {
+			parts = append(parts, "no excerpt: "+locErr.Error())
+		}
 	}
 
 	if len(unresolved) > 0 {
 		parts = append(parts, strings.Join(unresolved, "\n"))
 	}
 
-	return strings.Join(parts, "\n\n")
+	return joinParts(parts...)
+}
+
+// joinParts joins the parts that are not empty with a blank line between
+// each pair.
+func joinParts(parts ...string) string {
+	kept := make([]string, 0, len(parts))
+
+	for _, part := range parts {
+		if part != "" {
+			kept = append(kept, part)
+		}
+	}
+
+	return strings.Join(kept, "\n\n")
 }
 
 // errorPosition holds a resolved error position: the main error position

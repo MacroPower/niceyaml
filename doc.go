@@ -23,8 +23,9 @@
 //
 //	file, err := source.File()
 //	if err != nil {
-//		// The %+v verb displays the YAML with the problematic location
-//		// highlighted; plain %v prints the message and position only.
+//		// The %+v verb prints the message and a plain-text excerpt of
+//		// the YAML with the problematic location marked; plain %v prints
+//		// the message and position only.
 //		fmt.Printf("%+v\n", err)
 //	}
 //
@@ -97,17 +98,20 @@
 //
 // # Error Presentation
 //
-// The %+v verb renders a [SourceError] with a default [printer.Printer] and
-// two lines of context. The code that prints the error chooses anything
-// else. [SourceError.Render] takes the printer and the context lines:
+// The %+v verb prints a [SourceError] as plain text: the message, then the
+// excerpt around the location with two lines of context and carets under
+// the offending columns. The output holds no escape sequences, so it goes
+// into a log as it is. A terminal gets color from [printer.Printer.PrintError],
+// which prints the same parts with the printer's styles and width and the
+// context lines it is given, and accepts any error, so a caller need not
+// look for the [SourceError] in the chain:
 //
-//	var bound *niceyaml.SourceError
-//	if errors.As(err, &bound) {
-//		fmt.Println(bound.Render(p, 3))
-//	}
+//	fmt.Println(p.PrintError(err, 3))
 //
-// The marks themselves are decoration on a [line.View], so a caller
-// composes them with anything else it renders. [SourceError.Excerpt]
+// This package knows nothing of the printer. [SourceError.Detail] renders
+// the excerpt with any [Renderer], which a [printer.Printer] is, and the
+// marks themselves are decoration on a [line.View], so a caller composes
+// them with anything else it renders. [SourceError.Excerpt]
 // returns the hunks around the locations as a view, as [diff.Result.Hunks]
 // does for a diff, and [SourceError.Annotate] marks a whole view of the
 // source, so a viewer shows a document with every error in place:

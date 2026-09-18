@@ -2,6 +2,7 @@ package printer_test
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -19,6 +20,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/normalizer"
+	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
@@ -185,6 +187,62 @@ func TestPrinter_AddStyleToRange(t *testing.T) {
 
 			got := p.Print(view)
 			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestPrinter_PrintError(t *testing.T) {
+	t.Parallel()
+
+	p := printer.New(
+		printer.WithStyles(yamltest.NewXMLStyles()),
+		printer.WithGutter(printer.NoGutter),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+	)
+
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
+	bound := source.WrapError(niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("b").Value())))
+
+	excerpt := stringtest.JoinLF(
+		"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>1</literalNumberInteger>",
+		"<nameTag>b</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>2</genericError>",
+	)
+
+	tcs := map[string]struct {
+		err  error
+		want string
+	}{
+		"nil": {
+			err:  nil,
+			want: "",
+		},
+		"error without a source": {
+			err:  errors.New("boom"),
+			want: "boom",
+		},
+		"bound error": {
+			err:  bound,
+			want: "[2:4] $.b: bad\n\n" + excerpt,
+		},
+		"wrapped bound error keeps the wrapper's context": {
+			err:  fmt.Errorf("document 0: %w", bound),
+			want: "document 0: [2:4] $.b: bad\n\n" + excerpt,
+		},
+		"bound error without a location": {
+			err:  source.WrapError(niceyaml.NewError("bad")),
+			want: "bad",
+		},
+		"bound error with an empty message": {
+			err:  source.WrapError(niceyaml.NewErrorFrom(nil, niceyaml.WithPath(paths.Root().Child("b").Value()))),
+			want: "[2:4] $.b:\n\n" + excerpt,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, p.PrintError(tc.err, 2))
 		})
 	}
 }

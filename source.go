@@ -317,7 +317,7 @@ func (s *Source) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) er
 // provided via [WithYAMLParserOptions]. Subsequent calls return the cached result.
 //
 // A YAML syntax error comes back as a [*SourceError] bound to this Source,
-// so the %+v verb renders it with the offending token highlighted.
+// so the %+v verb renders it with the offending token marked.
 func (s *Source) File() (*ast.File, error) {
 	s.fileOnce.Do(func() {
 		s.file, s.fileErr = s.parse()
@@ -355,8 +355,8 @@ func (s *Source) parse() (*ast.File, error) {
 
 // WrapError binds err to this [*Source] when err's chain holds an [*Error].
 // The returned [*SourceError] resolves the location of that inner Error
-// against this source, and [SourceError.Render] and [SourceError.Excerpt]
-// render the excerpt with the printer of the caller's choice. A path
+// against this source, and [SourceError.Detail] and [SourceError.Excerpt]
+// render the excerpt with the [Renderer] of the caller's choice. A path
 // resolves in the single document [Source.Document] picks,
 // as [Source.Decode] decodes it, so a file that holds several documents
 // binds through [Document.WrapError] of the document the path belongs to.

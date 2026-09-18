@@ -35,7 +35,7 @@ func (e *customTestError) Error() string {
 // render formats err the way %+v does, which prints the annotated source
 // when the error resolves to a location and the plain message otherwise. A
 // [*niceyaml.SourceError] renders with [newXMLPrinter] and two lines of
-// context, so tests can assert on plain text.
+// context, so tests can assert on styled text without escape sequences.
 func render(err error) string {
 	return renderContext(err, 2)
 }
@@ -49,7 +49,7 @@ func renderContext(err error, context int) string {
 // lines. An error that is not a [*niceyaml.SourceError] formats with %+v.
 func renderWith(err error, p *printer.Printer, context int) string {
 	if bound, ok := err.(*niceyaml.SourceError); ok { //nolint:errorlint // Mirrors %+v, which formats the top-level value.
-		return bound.Render(p, context)
+		return p.PrintError(bound, context)
 	}
 
 	return fmt.Sprintf("%+v", err)
@@ -346,7 +346,7 @@ func TestError_GracefulDegradation(t *testing.T) {
 				"not found",
 				niceyaml.WithPath(paths.Root().Child("nonexistent").Key()),
 			)),
-			want: "$.nonexistent: not found",
+			want: "$.nonexistent: not found\n\nno excerpt: resolve $.nonexistent: not found",
 		},
 		"path without source": {
 			err: niceyaml.NewError(
@@ -360,7 +360,7 @@ func TestError_GracefulDegradation(t *testing.T) {
 				"error in empty source",
 				niceyaml.WithPath(paths.Root().Child("key").Key()),
 			)),
-			want: "$.key: error in empty source",
+			want: "$.key: error in empty source\n\nno excerpt: resolve $.key: not found: document has no content",
 		},
 		"nonexistent path in source": {
 			err: niceyaml.NewSourceFromString(source).WrapError(niceyaml.NewError(
@@ -369,7 +369,7 @@ func TestError_GracefulDegradation(t *testing.T) {
 					paths.Root().Child("nonexistent").Child("deep").Key(),
 				),
 			)),
-			want: "$.nonexistent.deep: path not found",
+			want: "$.nonexistent.deep: path not found\n\nno excerpt: resolve $.nonexistent.deep: not found",
 		},
 		"empty document source": {
 			// Tests graceful handling when source has no documents (Docs slice is empty).
@@ -377,7 +377,7 @@ func TestError_GracefulDegradation(t *testing.T) {
 				"empty doc error",
 				niceyaml.WithPath(paths.Root().Child("key").Key()),
 			)),
-			want: "$.key: empty doc error",
+			want: "$.key: empty doc error\n\nno excerpt: resolve $.key: not found: document has no content",
 		},
 	}
 
@@ -602,7 +602,7 @@ func TestWithPrinter(t *testing.T) {
 	var bound *niceyaml.SourceError
 
 	require.ErrorAs(t, err, &bound)
-	assert.Equal(t, want, trimLines(bound.Render(customPrinter, 2)))
+	assert.Equal(t, want, trimLines(customPrinter.PrintError(bound, 2)))
 }
 
 func TestError_SpecialParentContext(t *testing.T) {
@@ -1138,7 +1138,7 @@ func TestError_MultiError(t *testing.T) {
 	})
 }
 
-func TestSourceError_Render_NestedLocations(t *testing.T) {
+func TestSourceError_Detail_NestedLocations(t *testing.T) {
 	t.Parallel()
 
 	// A nested error with a location annotates the source excerpt. A nested
@@ -1237,7 +1237,7 @@ func TestSourceError_Render_NestedLocations(t *testing.T) {
 	}
 }
 
-func TestSourceError_Render_ListsUnresolvedNested(t *testing.T) {
+func TestSourceError_Detail_ListsUnresolvedNested(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("a: 1\n")
@@ -1253,6 +1253,98 @@ func TestSourceError_Render_ListsUnresolvedNested(t *testing.T) {
 	// %+v form lists each nested error with its unresolved location.
 	assert.Equal(t, "2 schema violations", err.Error())
 	assert.Equal(t, "2 schema violations\n\n$.x: bad x\n$.y: bad y", render(err))
+}
+
+func TestSourceError_Format_Plain(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n")
+
+	t.Run("marks the location without escape sequences", func(t *testing.T) {
+		t.Parallel()
+
+		err := source.WrapError(niceyaml.NewError("bad value", niceyaml.WithPath(paths.Root().Child("b").Value())))
+
+		got := fmt.Sprintf("%+v", err)
+
+		assert.Equal(t, stringtest.JoinLF(
+			"[2:4] $.b: bad value",
+			"",
+			"   1 | a: 1",
+			"   2 | b: 2",
+			"     |    ^",
+			"   3 | c: 3",
+		), got)
+		assert.NotContains(t, got, "\x1b")
+	})
+
+	t.Run("nested errors annotate their lines", func(t *testing.T) {
+		t.Parallel()
+
+		err := source.WrapError(niceyaml.NewError("2 problems", niceyaml.WithErrors(
+			niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a").Key())),
+			niceyaml.NewError("bad c", niceyaml.WithPath(paths.Root().Child("c").Value())),
+		)))
+
+		assert.Equal(t, stringtest.JoinLF(
+			"2 problems",
+			"",
+			"   1 | a: 1",
+			"     | ^ bad a",
+			"   2 | b: 2",
+			"   3 | c: 3",
+			"     |    ^ bad c",
+		), fmt.Sprintf("%+v", err))
+	})
+
+	t.Run("distant locations render as hunks", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Equal(t, stringtest.JoinLF(
+			"[2:4] $.b: bad b",
+			"",
+			"   1 | a: 1",
+			"   2 | b: 2",
+			"     |    ^",
+			"   3 | c: 3",
+			"   4 | d: 4",
+			"     | ...",
+			"   6 | f: 6",
+			"   7 | g: 7",
+			"   8 | h: 8",
+			"     |    ^ bad h",
+			"   9 | i: 9",
+			"  10 | j: 10",
+		), fmt.Sprintf("%+v", excerptError(t)))
+	})
+
+	t.Run("names why no excerpt resolves", func(t *testing.T) {
+		t.Parallel()
+
+		multi := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n")
+		err := multi.WrapError(niceyaml.NewError("bad value", niceyaml.WithPath(paths.Root().Child("b").Value())))
+
+		assert.Equal(t,
+			"$.b: bad value\n\nno excerpt: [2:1] multiple documents in source: 2 documents",
+			fmt.Sprintf("%+v", err),
+		)
+	})
+
+	t.Run("control characters render as pictures", func(t *testing.T) {
+		t.Parallel()
+
+		src := niceyaml.NewSourceFromString("a: \"x\\ty\"\n")
+		err := src.WrapError(niceyaml.NewError("bad", niceyaml.WithRange(
+			position.NewRange(position.New(0, 3), position.New(0, 9)),
+		)))
+
+		assert.Equal(t, stringtest.JoinLF(
+			"[1:4] bad",
+			"",
+			"   1 | a: \"x\\ty\"",
+			"     |    ^^^^^^",
+		), fmt.Sprintf("%+v", err))
+	})
 }
 
 func TestError_NilInnerError(t *testing.T) {
@@ -2196,12 +2288,18 @@ func TestError_BoundDocument(t *testing.T) {
 		assert.Contains(t, got, "<genericError>only</genericError>")
 	})
 
-	t.Run("a path bound through a multi-document source degrades to a plain message", func(t *testing.T) {
+	t.Run("a path bound through a multi-document source names the reason", func(t *testing.T) {
 		t.Parallel()
 
 		err := source.WrapError(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
 
-		assert.Equal(t, "$.name: bad name", render(err))
+		// The message carries no position, and the detail says why the
+		// excerpt is missing rather than dropping it without a trace.
+		assert.Equal(t, "$.name: bad name", err.Error())
+		assert.Equal(t,
+			"$.name: bad name\n\nno excerpt: [2:1] multiple documents in source: 2 documents",
+			render(err),
+		)
 
 		var bound *niceyaml.SourceError
 
@@ -2373,7 +2471,7 @@ func TestError_NestedErrorsRenderAsAnnotations(t *testing.T) {
 
 	require.ErrorAs(t, wrapped, &bound)
 
-	got := trimLines(bound.Render(plain, 2))
+	got := trimLines(plain.PrintError(bound, 2))
 
 	assert.Equal(t, "document 0: validation failed at 2 locations", strings.SplitN(got, "\n", 2)[0])
 	assert.NotContains(t, got, "$.a")
@@ -2811,21 +2909,21 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 		"path that does not resolve": {
 			err:        niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("missing").Value())),
 			is:         paths.ErrNotFound,
-			wantRender: "$.missing: bad",
+			wantRender: "$.missing: bad\n\nno excerpt: resolve $.missing: not found",
 		},
 		"range past the last line": {
 			err: niceyaml.NewError("bad",
 				niceyaml.WithRange(position.NewRange(position.New(9, 0), position.New(9, 3))),
 			),
 			is:         niceyaml.ErrOutOfRange,
-			wantRender: "[10:1] bad",
+			wantRender: "[10:1] bad\n\nno excerpt: location outside source: line 10 not in lines 1-2",
 		},
 		"range before the first line": {
 			err: niceyaml.NewError("bad",
 				niceyaml.WithRange(position.NewRange(position.New(-1, 0), position.New(-1, 2))),
 			),
 			is:         niceyaml.ErrOutOfRange,
-			wantRender: "[0:1] bad",
+			wantRender: "[0:1] bad\n\nno excerpt: location outside source: line 0 not in lines 1-2",
 		},
 		"nested range before the first line": {
 			err: niceyaml.NewError("bad",
@@ -2837,7 +2935,7 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 				),
 			),
 			is:         niceyaml.ErrOutOfRange,
-			wantRender: "$.missing: bad\n\nfirst",
+			wantRender: "$.missing: bad\n\nno excerpt: resolve $.missing: not found\n\nfirst",
 		},
 		"every nested error unresolved": {
 			err: niceyaml.NewError("bad", niceyaml.WithErrors(
@@ -2861,8 +2959,9 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 			require.ErrorIs(t, err, tc.is)
 			assert.Nil(t, got)
 
-			// The %+v verb has no excerpt to show, so it prints the message
-			// and any nested errors the excerpt would have annotated.
+			// With no excerpt to show, the detail names why the location did
+			// not resolve, unless the error carries none, and lists any nested
+			// errors the excerpt would have annotated.
 			assert.Equal(t, tc.wantRender, render(bound))
 		})
 	}
