@@ -274,29 +274,6 @@ func (s *Source) Document() (*Document, error) {
 	}
 }
 
-// Decode validates and decodes the single document of the [Source] into a
-// new T, as [Document.Decode] does for that document. It is the direct path
-// for a file that holds one document:
-//
-//	source := niceyaml.NewSourceFromString(yamlContent)
-//	config, err := source.Decode[Config](ctx, niceyaml.WithValidator(validator))
-//
-// A file that holds more than one document with content returns
-// [ErrMultipleDocuments], and one that holds no document returns
-// [ErrNoDocuments]; use [Source.Documents] for those.
-func (s *Source) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
-	var v T
-
-	err := s.DecodeInto(ctx, &v, opts...)
-	if err != nil {
-		var zero T
-
-		return zero, err
-	}
-
-	return v, nil
-}
-
 // DecodeInto validates and decodes the single document of the [Source] into
 // v, which must be a non-nil pointer, as [Document.DecodeInto] does for that
 // document. A file that holds more than one document with content returns
@@ -411,4 +388,27 @@ func (s *Source) Lines() line.Lines {
 // one never reach the Source or another view. Render the view to see them.
 func (s *Source) View() *line.View {
 	return line.NewView(s.lines)
+}
+
+// Decode validates and decodes the single document of the [Source] into a
+// new T, as [Document.Decode] does for that document. It is the direct path
+// for a file that holds one document:
+//
+//	source := niceyaml.NewSourceFromString(yamlContent)
+//	config, err := source.Decode[Config](ctx, niceyaml.WithValidator(validator))
+//
+// A file that holds more than one document with content returns
+// [ErrMultipleDocuments], and one that holds no document returns
+// [ErrNoDocuments]; use [Source.Documents] for those.
+func (s *Source) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
+	var v T
+
+	err := s.DecodeInto(ctx, &v, opts...)
+	if err != nil {
+		var zero T
+
+		return zero, err
+	}
+
+	return v, nil
 }

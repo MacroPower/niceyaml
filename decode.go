@@ -274,62 +274,6 @@ func (dd *Document) HasContent() bool {
 	return dd.doc.Body == nil || hasContent(dd.doc.Body)
 }
 
-// Get decodes the YAML value at path into a T without unmarshaling the whole
-// document.
-//
-// This is useful when you need a typed field before deciding how to process
-// the document, such as a version number or a list of tags:
-//
-//	versionPath := paths.Root().Child("version")
-//	for _, doc := range docs {
-//		version, err := doc.Get[int](ctx, versionPath)
-//		if errors.Is(err, paths.ErrNotFound) {
-//			version = 1
-//		} else if err != nil {
-//			return err
-//		}
-//	}
-//
-// Path resolution errors come from [paths.Path.Node]: an error wrapping
-// [paths.ErrNotFound] when nothing exists at the path, which also wraps
-// [paths.ErrNoDocument] when the document has no content at all, such as an
-// empty document or one holding only directives; [paths.ErrAlias] when an
-// alias on the path does not resolve; and [paths.ErrWildcard] for a path
-// that could match several nodes. Every error comes back bound to the
-// source as a [SourceError], a path resolution error with the name of the
-// source in front and a YAML decoding error, including a value that cannot
-// be represented as T, with the position of the offending token. An alias
-// inside the
-// value resolves against the anchors of the whole document, so a value
-// that refers to an anchor defined outside it decodes as it does in the
-// whole document.
-//
-// The opts run the pipeline of [Document.DecodeInto] on the value at
-// path rather than on the whole document: a *T that implements [SelfValidator]
-// validates itself after decoding, and [WithDisallowUnknownFields] and
-// [WithYAMLDecodeOptions] configure the decoder. A [Validator] from
-// [WithValidator] still receives the whole document.
-//
-// For a string view of any node, including mappings and sequences, use
-// [Document.GetValue].
-func (dd *Document) Get[T any](ctx context.Context, path paths.Path, opts ...DecodeOption) (T, error) {
-	var zero T
-
-	node, err := dd.node(path)
-	if err != nil {
-		return zero, err
-	}
-
-	var v T
-
-	err = dd.decodeInto(ctx, node, &v, opts)
-	if err != nil {
-		return zero, err
-	}
-
-	return v, nil
-}
-
 // GetValue extracts a YAML value as a string without unmarshaling.
 //
 // This is useful when you need to inspect document content before deciding how
@@ -530,30 +474,6 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 	}
 }
 
-// Decode validates and decodes the document into a new T.
-//
-// Each [Validator] from [WithValidator] runs before decoding. If
-// *T implements [SelfValidator], Validate is called after successful decoding
-// unless [WithSelfValidation] switches that off. Methods declared on T
-// itself are included in the method set of *T, so both value and pointer
-// receivers participate. YAML decoding errors, and [Error] values from the
-// validators, come back bound to the source as [SourceError] values. On
-// error, the returned T is the zero value.
-//
-// To decode into a value you already hold, use [Document.DecodeInto].
-func (dd *Document) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
-	var v T
-
-	err := dd.DecodeInto(ctx, &v, opts...)
-	if err != nil {
-		var zero T
-
-		return zero, err
-	}
-
-	return v, nil
-}
-
 // DecodeInto validates and decodes the document into v, which must be a
 // non-nil pointer. Any other v returns [ErrDecodeTarget] before anything
 // runs.
@@ -715,4 +635,84 @@ func hasContent(node ast.Node) bool {
 	default:
 		return true
 	}
+}
+
+// Get decodes the YAML value at path into a T without unmarshaling the whole
+// document.
+//
+// This is useful when you need a typed field before deciding how to process
+// the document, such as a version number or a list of tags:
+//
+//	versionPath := paths.Root().Child("version")
+//	for _, doc := range docs {
+//		version, err := doc.Get[int](ctx, versionPath)
+//		if errors.Is(err, paths.ErrNotFound) {
+//			version = 1
+//		} else if err != nil {
+//			return err
+//		}
+//	}
+//
+// Path resolution errors come from [paths.Path.Node]: an error wrapping
+// [paths.ErrNotFound] when nothing exists at the path, which also wraps
+// [paths.ErrNoDocument] when the document has no content at all, such as an
+// empty document or one holding only directives; [paths.ErrAlias] when an
+// alias on the path does not resolve; and [paths.ErrWildcard] for a path
+// that could match several nodes. Every error comes back bound to the
+// source as a [SourceError], a path resolution error with the name of the
+// source in front and a YAML decoding error, including a value that cannot
+// be represented as T, with the position of the offending token. An alias
+// inside the
+// value resolves against the anchors of the whole document, so a value
+// that refers to an anchor defined outside it decodes as it does in the
+// whole document.
+//
+// The opts run the pipeline of [Document.DecodeInto] on the value at
+// path rather than on the whole document: a *T that implements [SelfValidator]
+// validates itself after decoding, and [WithDisallowUnknownFields] and
+// [WithYAMLDecodeOptions] configure the decoder. A [Validator] from
+// [WithValidator] still receives the whole document.
+//
+// For a string view of any node, including mappings and sequences, use
+// [Document.GetValue].
+func (dd *Document) Get[T any](ctx context.Context, path paths.Path, opts ...DecodeOption) (T, error) {
+	var zero T
+
+	node, err := dd.node(path)
+	if err != nil {
+		return zero, err
+	}
+
+	var v T
+
+	err = dd.decodeInto(ctx, node, &v, opts)
+	if err != nil {
+		return zero, err
+	}
+
+	return v, nil
+}
+
+// Decode validates and decodes the document into a new T.
+//
+// Each [Validator] from [WithValidator] runs before decoding. If
+// *T implements [SelfValidator], Validate is called after successful decoding
+// unless [WithSelfValidation] switches that off. Methods declared on T
+// itself are included in the method set of *T, so both value and pointer
+// receivers participate. YAML decoding errors, and [Error] values from the
+// validators, come back bound to the source as [SourceError] values. On
+// error, the returned T is the zero value.
+//
+// To decode into a value you already hold, use [Document.DecodeInto].
+func (dd *Document) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
+	var v T
+
+	err := dd.DecodeInto(ctx, &v, opts...)
+	if err != nil {
+		var zero T
+
+		return zero, err
+	}
+
+	return v, nil
 }
