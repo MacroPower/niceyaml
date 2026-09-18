@@ -207,6 +207,8 @@ func TestErrorHandler(t *testing.T) {
 			want: stringtest.JoinLF(
 				"Error",
 				"  document 0: two problems",
+				"  1:1: $.name: bad name",
+				"  2:8: $.value: bad value",
 				"  ",
 				"  <genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
 				"  <genericError>^ bad name</genericError>",
