@@ -3554,6 +3554,60 @@ func TestError_Accessors(t *testing.T) {
 	assert.Empty(t, nilErr.Errors())
 }
 
+func TestError_Located(t *testing.T) {
+	t.Parallel()
+
+	located := niceyaml.NewError("inner", niceyaml.WithPath(paths.Root().Child("a")))
+
+	tcs := map[string]struct {
+		err  *niceyaml.Error
+		want bool
+	}{
+		"own path": {
+			err:  located,
+			want: true,
+		},
+		"own token": {
+			err:  niceyaml.NewError("tok", niceyaml.WithToken(&token.Token{})),
+			want: true,
+		},
+		"own range": {
+			err: niceyaml.NewError(
+				"rng",
+				niceyaml.WithRange(position.NewRange(position.New(0, 0), position.New(0, 1))),
+			),
+			want: true,
+		},
+		"no location": {
+			err:  niceyaml.NewError("plain"),
+			want: false,
+		},
+		"location of a wrapped Error does not count": {
+			err:  niceyaml.NewErrorFrom(located),
+			want: false,
+		},
+		"nil": {
+			err:  nil,
+			want: false,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.err.Located())
+
+			// Path still reports the wrapped location, so the two differ
+			// for an Error that wraps a located one.
+			if tc.err != nil && !tc.want {
+				_, ok := tc.err.Path()
+				assert.Equal(t, errors.Is(tc.err.Cause(), located), ok)
+			}
+		})
+	}
+}
+
 func TestSourceError_PositionOf(t *testing.T) {
 	t.Parallel()
 

@@ -315,6 +315,14 @@ func (e *Error) Errors() []*Error {
 	return e.nested()
 }
 
+// Located reports whether the [Error] carries a token, a range, or a path
+// of its own. [Error.Path], [Error.Token], and [Error.Range] look through
+// wrapping to the nearest Error that does, so they report a location for
+// an Error that is not itself located. A nil Error is not located.
+func (e *Error) Located() bool {
+	return e != nil && e.hasPosition()
+}
+
 // Path returns the [paths.Path] set with [WithPath] and whether one was
 // set. It looks through wrapping to the [Error] that carries the location,
 // as [Error.Token] and [Error.Range] do; [Error.Located] reports whether
