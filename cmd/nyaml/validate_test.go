@@ -23,7 +23,9 @@ func TestValidateFile(t *testing.T) {
 
 	tcs := map[string]struct {
 		content string
-		// Substrings the joined error names, or none when the file is valid.
+		// Positions of the invalid documents, each as the "line:col:" that
+		// follows the file path in the joined error, or none when the file
+		// is valid.
 		want []string
 	}{
 		"every document valid": {
@@ -31,11 +33,11 @@ func TestValidateFile(t *testing.T) {
 		},
 		"first and last document invalid": {
 			content: "value: 1\n---\nname: b\n---\nvalue: 3\n",
-			want:    []string{"document 0", "document 2"},
+			want:    []string{"1:1:", "5:1:"},
 		},
 		"middle document invalid": {
 			content: "name: a\n---\nvalue: 2\n---\nname: c\n",
-			want:    []string{"document 1"},
+			want:    []string{"3:1:"},
 		},
 	}
 
@@ -59,7 +61,7 @@ func TestValidateFile(t *testing.T) {
 			require.Error(t, err)
 
 			for _, want := range tc.want {
-				assert.Contains(t, err.Error(), want)
+				assert.Contains(t, err.Error(), path+":"+want+" ")
 			}
 		})
 	}

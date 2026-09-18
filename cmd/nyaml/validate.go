@@ -39,7 +39,7 @@ func validateCmd() *cobra.Command {
 			for _, yamlPath := range yamlPaths {
 				err := validateFile(cmd.Context(), yamlPath, reg)
 				if err != nil {
-					errs = append(errs, fmt.Errorf("%s: %w", yamlPath, err))
+					errs = append(errs, err)
 				} else {
 					fmt.Printf("%s: valid\n", yamlPath)
 				}
@@ -56,12 +56,14 @@ func validateCmd() *cobra.Command {
 
 // validateFile validates every document of the file at yamlPath against the
 // registry and joins what every document reports, so one run names each
-// invalid document. Errors come back bound to the source, and the error
-// handler in main renders them with the terminal width.
+// invalid document. Errors come back bound to the source, whose name is the
+// file path, so each message opens with "path:line:col:" and the error
+// handler in main renders the excerpt with the terminal width. A file that
+// cannot be read has no source to name it, so the path goes in front here.
 func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) error {
 	source, err := niceyaml.NewSourceFromFile(yamlPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("%s: %w", yamlPath, err)
 	}
 
 	docs, err := source.Documents()
@@ -71,10 +73,10 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) er
 
 	var errs []error
 
-	for i, doc := range docs {
+	for _, doc := range docs {
 		err = reg.Validate(ctx, doc)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("document %d: %w", i, err))
+			errs = append(errs, err)
 		}
 	}
 
