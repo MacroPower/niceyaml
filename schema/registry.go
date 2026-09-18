@@ -7,7 +7,6 @@ import (
 	"slices"
 	"sync"
 
-	"go.jacobcolvin.com/x/jsonschema"
 	"golang.org/x/sync/singleflight"
 
 	"go.jacobcolvin.com/niceyaml"
@@ -28,9 +27,6 @@ var (
 
 	// ErrLoad indicates the schema could not be loaded.
 	ErrLoad = errors.New("load schema")
-
-	// ErrCompile indicates schema compilation failed.
-	ErrCompile = errors.New("compile schema")
 )
 
 // Registry maps YAML documents to schemas using pluggable resolvers.
@@ -56,11 +52,11 @@ var (
 //
 // Create instances with [NewRegistry].
 type Registry struct {
-	group         singleflight.Group    // one load and compile in flight per URL
-	cache         map[string]*Validator // compiled validators by schema URL
-	resolvers     []Resolver
-	validatorOpts []jsonschema.ValidateOption
-	mu            sync.RWMutex
+	group       singleflight.Group    // one load and compile in flight per URL
+	cache       map[string]*Validator // compiled validators by schema URL
+	resolvers   []Resolver
+	compileOpts []CompileOption
+	mu          sync.RWMutex
 	// Makes Validate report ErrNoMatch when no resolver applies.
 	requireSchema bool
 }
@@ -68,7 +64,7 @@ type Registry struct {
 // RegistryOption configures [Registry] creation.
 //
 // Available options:
-//   - [WithValidateOptions]
+//   - [WithCompileOptions]
 //   - [WithRequireSchema]
 type RegistryOption func(*Registry)
 
@@ -92,17 +88,21 @@ func WithRequireSchema(require bool) RegistryOption {
 	}
 }
 
-// WithValidateOptions is a [RegistryOption] that sets the [jsonschema.ValidateOption]
-// values the registry passes to [jsonschema.CompileJSON]. They apply when a
-// schema is compiled, which happens once per schema URL, so an option such
-// as a format validator takes effect for every document validated against
-// that schema.
+// WithCompileOptions is a [RegistryOption] that sets the [CompileOption]
+// values the registry compiles every schema with, as [Compile] takes them.
+// They apply when a schema is compiled, which happens once per schema URL,
+// so an option such as a format validator takes effect for every document
+// validated against that schema:
+//
+//	reg := schema.NewRegistry(schema.WithCompileOptions(
+//	    schema.WithJSONSchemaOptions(jsonschema.WithFormats(true)),
+//	))
 //
 // The registry keeps its own copy of opts, so writing to the caller's slice
 // afterwards changes nothing.
-func WithValidateOptions(opts ...jsonschema.ValidateOption) RegistryOption {
+func WithCompileOptions(opts ...CompileOption) RegistryOption {
 	return func(r *Registry) {
-		r.validatorOpts = slices.Clone(opts)
+		r.compileOpts = slices.Clone(opts)
 	}
 }
 
@@ -313,16 +313,16 @@ func (r *Registry) compile(ctx context.Context, ref Ref) error {
 		return fmt.Errorf("%w: %q: %w", ErrLoad, ref.URL, err)
 	}
 
-	compiled, err := jsonschema.CompileJSON(ctx, data, r.validatorOpts...)
+	compiled, err := Compile(ctx, data, r.compileOpts...)
 	if err != nil {
-		return fmt.Errorf("%w: %q: %w", ErrCompile, ref.URL, err)
+		return fmt.Errorf("%q: %w", ref.URL, err)
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if _, ok := r.cache[ref.URL]; !ok {
-		r.cache[ref.URL] = NewValidator(compiled)
+		r.cache[ref.URL] = compiled
 	}
 
 	return nil

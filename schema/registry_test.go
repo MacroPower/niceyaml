@@ -791,13 +791,13 @@ func TestRegistry_DynamicResolver(t *testing.T) {
 	})
 }
 
-func TestRegistry_WithValidateOptions(t *testing.T) {
+func TestRegistry_WithCompileOptions(t *testing.T) {
 	t.Parallel()
 
-	// Create a registry with custom validate options.
+	// Create a registry with custom compile options.
 	schemaData := []byte(`{"type": "object"}`)
 	reg := schema.NewRegistry(
-		schema.WithValidateOptions(), // Empty options, just testing they pass through.
+		schema.WithCompileOptions(), // Empty options, just testing they pass through.
 	)
 	reg.Register(schema.When(
 		matcher.Content(kindPath, "Deployment"),
@@ -810,19 +810,19 @@ func TestRegistry_WithValidateOptions(t *testing.T) {
 	assert.NotNil(t, v)
 }
 
-func TestRegistry_ValidateOptionsNotAliased(t *testing.T) {
+func TestRegistry_CompileOptionsNotAliased(t *testing.T) {
 	t.Parallel()
 
 	// The registry compiles each schema on its first lookup, so aliasing
 	// the caller's slice would let a later write change how the next
 	// schema compiles. Asserting formats is what makes the difference
 	// observable here.
-	opts := []jsonschema.ValidateOption{jsonschema.WithFormats(true)}
+	opts := []schema.CompileOption{schema.WithJSONSchemaOptions(jsonschema.WithFormats(true))}
 
-	reg := schema.NewRegistry(schema.WithValidateOptions(opts...))
+	reg := schema.NewRegistry(schema.WithCompileOptions(opts...))
 	reg.Register(schema.Embedded("format.json", []byte(`{"type": "string", "format": "ipv4"}`)))
 
-	opts[0] = jsonschema.WithFormats(false)
+	opts[0] = schema.WithJSONSchemaOptions(jsonschema.WithFormats(false))
 
 	doc := yamltest.FirstDocument(t, stringtest.Input(`not-an-ip`))
 	err := reg.Validate(t.Context(), doc)

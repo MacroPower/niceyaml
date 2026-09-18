@@ -9,7 +9,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
@@ -23,10 +22,10 @@ import (
 func newValidator(t *testing.T, schemaData []byte) *schema.Validator {
 	t.Helper()
 
-	v, err := jsonschema.CompileJSON(t.Context(), schemaData)
+	v, err := schema.Compile(t.Context(), schemaData)
 	require.NoError(t, err)
 
-	return schema.NewValidator(v)
+	return v
 }
 
 func TestValidator_Validate(t *testing.T) {

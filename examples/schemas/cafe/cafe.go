@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"go.jacobcolvin.com/x/jsonschema"
-
 	_ "embed"
 
 	"go.jacobcolvin.com/niceyaml"
@@ -23,7 +21,7 @@ var (
 
 	// Schema validates a document against the cafe JSON schema. Pass it to
 	// Decode with [niceyaml.WithValidator].
-	Schema = schema.NewValidator(jsonschema.MustCompileJSON(schemaJSON))
+	Schema = schema.MustCompile(schemaJSON)
 
 	// DefaultYAML is a valid cafe configuration, used by the demo and tests.
 	//go:embed defaults.yaml

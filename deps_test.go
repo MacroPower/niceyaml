@@ -14,42 +14,74 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var (
-	// The go-yaml identifiers the exported API may name. The
-	// list is the dependency policy in the package documentation. Add to it
-	// only with a matching change there.
-	goYAMLTypes = []string{
-		// The document model niceyaml wraps rather than hides.
-		"ast.File",
-		"ast.DocumentNode",
-		"ast.Node",
-		"token.Token",
-		"token.Tokens",
-		"token.Type",
-		"token.Position",
-		// Interop with go-yaml's own path API.
-		"yaml.Path",
-		// Escape hatches, only in identifiers with a YAML prefix.
-		"yaml.DecodeOption",
-		"yaml.EncodeOption",
-		"parser.Option",
-	}
+// dependencyPolicy is the rule for one third-party library the exported API
+// names. The package documentation states the rule for go-yaml, and this
+// test applies the same rule to every library it lists.
+type dependencyPolicy struct {
+	// The library, for the report.
+	name string
+	// The import paths whose identifiers the policy covers.
+	packages []string
+	// The local name of an import path whose base is not its package
+	// name.
+	localNames map[string]string
+	// The identifiers the exported API may name, as "pkg.Name".
+	types []string
+	// The prefix an identifier must carry to pass one of the library's
+	// option types through.
+	prefix string
+}
 
-	// The import paths whose identifiers the policy
-	// covers.
-	goYAMLPackages = []string{
-		"github.com/goccy/go-yaml",
-		"github.com/goccy/go-yaml/ast",
-		"github.com/goccy/go-yaml/token",
-		"github.com/goccy/go-yaml/parser",
-		"github.com/goccy/go-yaml/lexer",
-	}
-)
+var policies = []dependencyPolicy{
+	{
+		name: "go-yaml",
+		packages: []string{
+			"github.com/goccy/go-yaml",
+			"github.com/goccy/go-yaml/ast",
+			"github.com/goccy/go-yaml/token",
+			"github.com/goccy/go-yaml/parser",
+			"github.com/goccy/go-yaml/lexer",
+		},
+		localNames: map[string]string{"github.com/goccy/go-yaml": "yaml"},
+		// Add to the list only with a matching change to the dependency
+		// policy in the package documentation.
+		types: []string{
+			// The document model niceyaml wraps rather than hides.
+			"ast.File",
+			"ast.DocumentNode",
+			"ast.Node",
+			"token.Token",
+			"token.Tokens",
+			"token.Type",
+			"token.Position",
+			// Interop with go-yaml's own path API.
+			"yaml.Path",
+			// Escape hatches, only in identifiers with a YAML prefix.
+			"yaml.DecodeOption",
+			"yaml.EncodeOption",
+			"parser.Option",
+		},
+		prefix: "YAML",
+	},
+	{
+		name:     "x/jsonschema",
+		packages: []string{"go.jacobcolvin.com/x/jsonschema"},
+		types: []string{
+			// A validator compiled elsewhere, which schema.NewValidator
+			// adapts.
+			"jsonschema.Validator",
+			// Escape hatch, only in identifiers with a JSONSchema prefix.
+			"jsonschema.ValidateOption",
+		},
+		prefix: "JSONSchema",
+	},
+}
 
-// TestExportedAPI_GoYAMLPolicy walks every exported declaration in the module
-// and checks that any go-yaml type it names is on the allowlist, and that the
-// pass-through options only appear in identifiers with a YAML prefix.
-func TestExportedAPI_GoYAMLPolicy(t *testing.T) {
+// TestExportedAPI_DependencyPolicy walks every exported declaration in the
+// module and checks that any third-party type it names is on the allowlist
+// of its library's policy, and that the pass-through options only appear in
+// identifiers with the library's prefix.
+func TestExportedAPI_DependencyPolicy(t *testing.T) {
 	t.Parallel()
 
 	var violations []string
@@ -79,7 +111,7 @@ func TestExportedAPI_GoYAMLPolicy(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	require.Empty(t, violations, "exported API names go-yaml types outside the policy")
+	require.Empty(t, violations, "exported API names third-party types outside the policy")
 }
 
 // checkFile returns the policy violations in the exported declarations of
@@ -95,28 +127,32 @@ func checkFile(t *testing.T, path string) []string {
 	file, err := parser.ParseFile(fset, path, src, parser.SkipObjectResolution)
 	require.NoError(t, err)
 
-	// Map local import names to whether they are go-yaml packages.
-	yamlNames := map[string]bool{}
+	// Map local import names to the policy that covers them.
+	covered := map[string]*dependencyPolicy{}
 
 	for _, imp := range file.Imports {
 		importPath := strings.Trim(imp.Path.Value, `"`)
-		if !slices.Contains(goYAMLPackages, importPath) {
-			continue
-		}
 
-		name := filepath.Base(importPath)
-		if importPath == "github.com/goccy/go-yaml" {
-			name = "yaml"
-		}
+		for i := range policies {
+			policy := &policies[i]
+			if !slices.Contains(policy.packages, importPath) {
+				continue
+			}
 
-		if imp.Name != nil {
-			name = imp.Name.Name
-		}
+			name := filepath.Base(importPath)
+			if local, ok := policy.localNames[importPath]; ok {
+				name = local
+			}
 
-		yamlNames[name] = true
+			if imp.Name != nil {
+				name = imp.Name.Name
+			}
+
+			covered[name] = policy
+		}
 	}
 
-	if len(yamlNames) == 0 {
+	if len(covered) == 0 {
 		return nil
 	}
 
@@ -130,7 +166,12 @@ func checkFile(t *testing.T, path string) []string {
 			}
 
 			pkg, ok := sel.X.(*ast.Ident)
-			if !ok || !yamlNames[pkg.Name] {
+			if !ok {
+				return true
+			}
+
+			policy, ok := covered[pkg.Name]
+			if !ok {
 				return true
 			}
 
@@ -138,10 +179,13 @@ func checkFile(t *testing.T, path string) []string {
 			pos := fset.Position(sel.Pos())
 
 			switch {
-			case !slices.Contains(goYAMLTypes, ref):
-				violations = append(violations, pos.String()+": "+owner+" names "+ref)
-			case strings.HasSuffix(ref, "Option") && !strings.Contains(owner, "YAML"):
-				violations = append(violations, pos.String()+": "+owner+" passes "+ref+" through without a YAML prefix")
+			case !slices.Contains(policy.types, ref):
+				violations = append(violations, pos.String()+": "+owner+" names "+policy.name+" type "+ref)
+			case strings.HasSuffix(ref, "Option") && !strings.Contains(owner, policy.prefix):
+				violations = append(
+					violations,
+					pos.String()+": "+owner+" passes "+ref+" through without a "+policy.prefix+" prefix",
+				)
 			}
 
 			return true
@@ -179,7 +223,7 @@ func checkFile(t *testing.T, path string) []string {
 	return violations
 }
 
-// reportType reports the go-yaml references in an exported type. A struct
+// reportType reports the third-party references in an exported type. A struct
 // contributes only its exported fields, each under its own name, so the
 // prefix rule reads the field's name.
 func reportType(report func(string, ast.Node), spec *ast.TypeSpec) {

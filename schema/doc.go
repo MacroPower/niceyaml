@@ -29,21 +29,30 @@
 //	    return nil
 //	}
 //
-// Compile a schema with [go.jacobcolvin.com/x/jsonschema.CompileJSON] (or
-// [go.jacobcolvin.com/x/jsonschema.MustCompileJSON] for embedded schemas) and
-// wrap it with [NewValidator] to obtain a [*Validator], a
-// [go.jacobcolvin.com/niceyaml.Validator] that reports failures as
-// errors carrying YAML path information for integration with niceyaml's error
-// display:
+// [Compile] turns a JSON schema document into a [*Validator], a
+// [go.jacobcolvin.com/niceyaml.Validator] that reports failures as errors
+// carrying the YAML path to each failing location, and [MustCompile] does
+// the same at package scope for an embedded schema:
 //
-//	v := schema.NewValidator(jsonschema.MustCompileJSON(schemaBytes))
-//	if err := doc.Validate(ctx, v); err != nil {
+//	//go:embed config.schema.json
+//	var schemaBytes []byte
+//
+//	var Schema = schema.MustCompile(schemaBytes)
+//
+//	if err := doc.Validate(ctx, Schema); err != nil {
 //	    // err is a *niceyaml.SourceError; %+v prints the failing lines.
 //	}
 //
 // To validate and decode in one step, pass the validator to
 // [go.jacobcolvin.com/niceyaml.Document.Decode] with
-// [go.jacobcolvin.com/niceyaml.WithValidator].
+// [go.jacobcolvin.com/niceyaml.WithValidator]. A validator compiled by
+// [go.jacobcolvin.com/x/jsonschema] itself, such as one built from a Go
+// type, goes through [NewValidator].
+//
+// Settings of the JSON Schema library pass through [WithJSONSchemaOptions],
+// which carries the JSONSchema prefix so the dependency shows at the call
+// site, as the options of the root package that pass go-yaml values through
+// carry a YAML prefix.
 //
 // # Resolution
 //

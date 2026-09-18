@@ -221,6 +221,14 @@
 // caller can tell at the call site when the go-yaml dependency shows. A test
 // in this package enforces both rules on every exported declaration.
 //
+// The [go.jacobcolvin.com/niceyaml/schema] package follows the same rule
+// for the JSON Schema library it builds on:
+// [go.jacobcolvin.com/niceyaml/schema.Compile] takes a schema document as
+// bytes, and the options that pass that library's values through carry a
+// JSONSchema prefix, as in
+// [go.jacobcolvin.com/niceyaml/schema.WithJSONSchemaOptions]. The same
+// test enforces it.
+//
 // Rendering builds on lipgloss, and the [style] package exposes its Style
 // type directly since a theme is a set of lipgloss styles. The
 // [go.jacobcolvin.com/niceyaml/fangs] and
