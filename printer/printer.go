@@ -22,9 +22,11 @@
 // # Overlays and Annotations
 //
 // The printer renders the [line.Overlays] and [line.Annotations] a view
-// carries. An overlay styles a column span, and an [AnnotationFunc] renders
-// the annotations above or below a line; [DefaultAnnotation] joins them with
-// "; " and prefixes [line.Below] annotations with "^ ".
+// carries. An overlay styles a column span. The annotations above or below
+// a line render as rows in the style of their [line.Annotation.Kind], or
+// [style.Comment] for those with none, and an [AnnotationFunc] renders the
+// text of each group of one Kind; [DefaultAnnotation] joins them with "; "
+// and prefixes [line.Below] annotations with "^ ".
 //
 // # Word Wrapping
 //
@@ -116,8 +118,11 @@ type StyleGetter interface {
 //
 // Annotations are extra text lines rendered above or below a line, outside the
 // token stream. They display error messages, diff hunk headers, or other
-// contextual notes. The printer renders them via [AnnotationFunc], defaulting
-// to [DefaultAnnotation] which prefixes below-line annotations with "^ ".
+// contextual notes. Each annotation renders in the style of its
+// [line.Annotation.Kind], or [style.Comment] when it has none, and the
+// annotations of one Kind on a line share their rows. The printer renders
+// the text of each such group via [AnnotationFunc], defaulting to
+// [DefaultAnnotation] which prefixes below-line annotations with "^ ".
 //
 // # Word Wrapping
 //
@@ -237,7 +242,9 @@ type GutterFunc func(GutterContext) string
 // AnnotationContext provides context for annotation rendering.
 //
 // It is passed to [AnnotationFunc] to determine the appropriate annotation
-// content.
+// content. Annotations holds the annotations of one line, placement, and
+// [line.Annotation.Kind], so the func renders them as one piece of text and
+// the printer styles it with that Kind.
 type AnnotationContext struct {
 	Styles StyleGetter
 
@@ -627,59 +634,107 @@ func (p *Printer) renderAnnotation(
 	placement line.Placement,
 	gutterWidth int,
 ) []string {
+	var rows []string
+
+	for _, group := range p.annotationGroups(view, ln, idx, gutterWidth, placement) {
+		for j, subLine := range group.rows {
+			var sb strings.Builder
+
+			sb.WriteString(p.gutterFunc(GutterContext{
+				Index:      idx,
+				Number:     ln.Number(),
+				MaxNumber:  maxNumber,
+				Soft:       j > 0,
+				Flag:       view.Flag(idx),
+				Annotation: true,
+				Styles:     p.styles,
+			}))
+
+			prefix := group.indent
+			if j > 0 {
+				prefix = strings.Repeat(" ", group.indentWidth)
+			}
+
+			sb.WriteString(p.styles.Style(group.kind).Render(prefix + subLine))
+
+			rows = append(rows, sb.String())
+		}
+	}
+
+	return rows
+}
+
+// annotationGroup is the rendered text of the annotations of one Kind on a
+// line: the style to render it in, the indent every row aligns under, and
+// the rows the body wraps to.
+type annotationGroup struct {
+	indent      string
+	kind        style.Kind
+	rows        []string
+	indentWidth int
+}
+
+// annotationGroups renders the annotations of line idx of view, which is
+// ln, at the given placement: one group per [line.Annotation.Kind], as
+// [line.Annotations.ByKind] orders them, each rendered by the
+// [AnnotationFunc] and wrapped to the printer width. A group the func
+// renders as nothing is left out.
+func (p *Printer) annotationGroups(
+	view *line.View,
+	ln *line.Line,
+	idx, gutterWidth int,
+	placement line.Placement,
+) []annotationGroup {
 	anns := view.Annotations(idx).Filter(placement)
 	if len(anns) == 0 {
 		return nil
 	}
 
-	content := p.annotationFunc(AnnotationContext{
-		Annotations: anns,
-		Placement:   placement,
-		Styles:      p.styles,
-		Content:     ln.Content(),
-	})
-	if content == "" {
-		return nil
-	}
+	var groups []annotationGroup
 
-	// The func owns escaping, so styling it applied through ctx.Styles
-	// survives. The wrap is ANSI-aware and measures the shown cells.
-	//
-	// The indent stays out of the wrapped text and comes back on every
-	// row: the first row keeps it as rendered and continuation rows get
-	// the same width in spaces, so the annotation column survives the
-	// wrap. An annotation column past the width wins over the width, and
-	// its rows then run wider, since the body still gets one column.
-	indent, body := splitAnnotationIndent(content, placement)
-	indentWidth := lipgloss.Width(indent)
-	subLines := p.wrapContent(body, gutterWidth+indentWidth)
-
-	rows := make([]string, 0, len(subLines))
-
-	for j, subLine := range subLines {
-		var sb strings.Builder
-
-		sb.WriteString(p.gutterFunc(GutterContext{
-			Index:      idx,
-			Number:     ln.Number(),
-			MaxNumber:  maxNumber,
-			Soft:       j > 0,
-			Flag:       view.Flag(idx),
-			Annotation: true,
-			Styles:     p.styles,
-		}))
-
-		prefix := indent
-		if j > 0 {
-			prefix = strings.Repeat(" ", indentWidth)
+	for _, group := range anns.ByKind() {
+		content := p.annotationFunc(AnnotationContext{
+			Annotations: group,
+			Placement:   placement,
+			Styles:      p.styles,
+			Content:     ln.Content(),
+		})
+		if content == "" {
+			continue
 		}
 
-		sb.WriteString(p.styles.Style(style.Comment).Render(prefix + subLine))
+		// The func owns escaping, so styling it applied through
+		// ctx.Styles survives. The wrap is ANSI-aware and measures the
+		// shown cells.
+		//
+		// The indent stays out of the wrapped text and comes back on
+		// every row: the first row keeps it as rendered and continuation
+		// rows get the same width in spaces, so the annotation column
+		// survives the wrap. An annotation column past the width wins
+		// over the width, and its rows then run wider, since the body
+		// still gets one column.
+		indent, body := splitAnnotationIndent(content, placement)
+		indentWidth := lipgloss.Width(indent)
 
-		rows = append(rows, sb.String())
+		groups = append(groups, annotationGroup{
+			kind:        annotationKind(group[0].Kind),
+			indent:      indent,
+			indentWidth: indentWidth,
+			rows:        p.wrapContent(body, gutterWidth+indentWidth),
+		})
 	}
 
-	return rows
+	return groups
+}
+
+// annotationKind returns the style an annotation of kind renders in:
+// [style.Comment] for the zero Kind, and kind itself otherwise.
+func annotationKind(kind style.Kind) style.Kind {
+	if kind == "" {
+		return style.Comment
+	}
+
+	return kind
 }
 
 // splitAnnotationIndent splits rendered annotation content into the indent

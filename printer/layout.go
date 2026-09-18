@@ -105,30 +105,17 @@ func (p *Printer) layoutAnnotation(
 	placement line.Placement,
 	width *int,
 ) int {
-	anns := view.Annotations(idx).Filter(placement)
-	if len(anns) == 0 {
-		return 0
+	var rows int
+
+	for _, group := range p.annotationGroups(view, ln, idx, gutterWidth, placement) {
+		for _, row := range group.rows {
+			*width = max(*width, gutterWidth+group.indentWidth+lipgloss.Width(row))
+		}
+
+		rows += len(group.rows)
 	}
 
-	content := p.annotationFunc(AnnotationContext{
-		Annotations: anns,
-		Placement:   placement,
-		Styles:      p.styles,
-		Content:     ln.Content(),
-	})
-	if content == "" {
-		return 0
-	}
-
-	indent, body := splitAnnotationIndent(content, placement)
-	indentWidth := lipgloss.Width(indent)
-	subLines := p.wrapContent(body, gutterWidth+indentWidth)
-
-	for _, subLine := range subLines {
-		*width = max(*width, gutterWidth+indentWidth+lipgloss.Width(subLine))
-	}
-
-	return len(subLines)
+	return rows
 }
 
 // rowStarts returns the column of content at which each piece of its

@@ -3152,7 +3152,7 @@ func TestSourceError_Excerpt(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, line.Annotations{
-			{Content: "bad h", Placement: line.Below, Col: 3},
+			{Content: "bad h", Kind: style.GenericError, Placement: line.Below, Col: 3},
 		}, excerpt.Annotations(4).Filter(line.Below))
 		assert.Empty(t, excerpt.Annotations(1), "the main error has no message of its own")
 	})
@@ -3188,7 +3188,7 @@ func TestSourceError_Excerpt(t *testing.T) {
 			"<comment>...</comment>",
 			"<nameTag>g</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>7</literalNumberInteger>",
 			"<nameTag>h</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>8</genericError>",
-			"<comment>   ^ bad h</comment>",
+			"<genericError>   ^ bad h</genericError>",
 			"<nameTag>i</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>9</literalNumberInteger>",
 		)
 
@@ -3253,7 +3253,7 @@ func TestSourceError_Annotate(t *testing.T) {
 		assert.Equal(t, want, view.Overlays(1))
 		assert.Equal(t, want, view.Overlays(7))
 		assert.Equal(t, line.Annotations{
-			{Content: "bad h", Placement: line.Below, Col: 3},
+			{Content: "bad h", Kind: style.GenericError, Placement: line.Below, Col: 3},
 		}, view.Annotations(7))
 
 		for i := range view.Len() {
@@ -3297,7 +3297,7 @@ func TestSourceError_Annotate(t *testing.T) {
 		assert.Equal(t, want, view.Overlays(3))
 		assert.Empty(t, view.Annotations(1))
 		assert.Equal(t, line.Annotations{
-			{Content: "too big", Placement: line.Below, Col: 3},
+			{Content: "too big", Kind: style.GenericError, Placement: line.Below, Col: 3},
 		}, view.Annotations(3))
 	})
 

@@ -32,11 +32,15 @@ const (
 // Annotation represents extra content added around a [Line].
 //
 // It can be used to add comments or notes to the rendered output, without being
-// part of the main token stream.
+// part of the main token stream. Kind names the style the printer renders
+// the annotation with, as [Overlay.Kind] does for an overlay, so an error
+// message below a line renders in [style.GenericError] and a hunk header
+// above one in [style.Comment]. The zero Kind renders as [style.Comment].
 //
 // Add annotations to a [View] with [View.Annotate].
 type Annotation struct {
 	Content   string
+	Kind      style.Kind
 	Placement Placement
 	Col       int // Optional, 0-indexed column position for the annotation.
 }
@@ -66,6 +70,31 @@ func (a Annotations) Filter(p Placement) Annotations {
 	}
 
 	return result
+}
+
+// ByKind groups the annotations by [Annotation.Kind], one group per Kind
+// in the order each Kind first appears, with the annotations of a group in
+// their original order. The printer renders each group as rows of its own
+// in the style of its Kind.
+func (a Annotations) ByKind() []Annotations {
+	var (
+		groups []Annotations
+		index  = make(map[style.Kind]int)
+	)
+
+	for _, ann := range a {
+		i, ok := index[ann.Kind]
+		if !ok {
+			i = len(groups)
+			index[ann.Kind] = i
+
+			groups = append(groups, nil)
+		}
+
+		groups[i] = append(groups[i], ann)
+	}
+
+	return groups
 }
 
 // Col returns the minimum column position among all annotations.

@@ -850,8 +850,8 @@ func rangeOf(lines line.Lines, loc location) position.Range {
 // error is bound to, such as one from [Source.View]: every location in
 // the tree is highlighted with [style.GenericError], and the message of
 // each branch other than the main one is an annotation below its own
-// line. A viewer that shows a document with its errors in place marks its
-// view this way and renders it as it is.
+// line, in the same style. A viewer that shows a document with its errors
+// in place marks its view this way and renders it as it is.
 //
 // Annotate marks every location that resolves and returns an error only
 // when none does: the errors [SourceError.Location] returns, joined with
@@ -1060,6 +1060,7 @@ func prepareLineAnnotations(positions []errorPosition) map[int]line.Annotation {
 
 		result[lineIdx] = line.Annotation{
 			Content:   strings.Join(messages, "; "),
+			Kind:      style.GenericError,
 			Placement: line.Below,
 			Col:       minCol,
 		}

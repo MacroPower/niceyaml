@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"go.jacobcolvin.com/niceyaml/line"
+	"go.jacobcolvin.com/niceyaml/style"
 )
 
 func TestAnnotation_String(t *testing.T) {
@@ -132,6 +133,50 @@ func TestAnnotations_Contents(t *testing.T) {
 
 			got := tc.anns.Contents()
 			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestAnnotations_ByKind(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		anns line.Annotations
+		want []line.Annotations
+	}{
+		"empty annotations": {
+			anns: nil,
+			want: nil,
+		},
+		"one kind stays one group": {
+			anns: line.Annotations{
+				{Content: "a"},
+				{Content: "b"},
+			},
+			want: []line.Annotations{
+				{{Content: "a"}, {Content: "b"}},
+			},
+		},
+		"groups in order of first appearance": {
+			anns: line.Annotations{
+				{Content: "a", Kind: style.GenericError},
+				{Content: "b"},
+				{Content: "c", Kind: style.GenericError},
+				{Content: "d", Kind: style.Comment},
+			},
+			want: []line.Annotations{
+				{{Content: "a", Kind: style.GenericError}, {Content: "c", Kind: style.GenericError}},
+				{{Content: "b"}},
+				{{Content: "d", Kind: style.Comment}},
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.anns.ByKind())
 		})
 	}
 }
