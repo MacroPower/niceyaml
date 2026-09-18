@@ -173,8 +173,9 @@ func WithRange(r position.Range) ErrorOption {
 // such as one per violation a validator found.
 //
 // Each nested error has its own location. Its message follows the message
-// of the Error on a line of its own, and a [SourceError] renders it as an
-// annotation below its resolved line. A nil nested error is skipped.
+// of the Error on a line of its own, [Error.Errors] returns it, and a
+// [SourceError] renders it as an annotation below its resolved line. A nil
+// nested error is skipped.
 func WithErrors(errs ...*Error) ErrorOption {
 	return func(e *Error) {
 		e.errors = append(e.errors, errs...)
@@ -300,9 +301,32 @@ func (e *Error) Unwrap() []error {
 	return result
 }
 
+// Cause returns the error the [Error] was created from: the error given
+// to [NewErrorFrom], or one holding the message given to [NewError]. It is
+// nil for an Error created from a nil error, and a nil Error has no cause.
+func (e *Error) Cause() error {
+	if e == nil {
+		return nil
+	}
+
+	return e.err
+}
+
+// Errors returns the errors nested in the [Error] with [WithErrors], in the
+// order they were given and without the nil ones. A nil Error nests
+// nothing. The slice is a copy, so a caller may keep or sort it.
+func (e *Error) Errors() []*Error {
+	if e == nil {
+		return nil
+	}
+
+	return e.nested()
+}
+
 // Path returns the [paths.Path] set with [WithPath] and whether one was
 // set. It looks through wrapping to the [Error] that carries the location,
-// as [Error.Token] and [Error.Range] do.
+// as [Error.Token] and [Error.Range] do; [Error.Located] reports whether
+// the Error itself carries one.
 func (e *Error) Path() (paths.Path, bool) {
 	a := e.anchor()
 	if a.path == nil {
@@ -947,6 +971,18 @@ func (e *SourceError) Location() (position.Range, error) {
 	}
 
 	return e.rng, nil
+}
+
+// PositionOf returns the position the nested error n resolved to when the
+// source was bound, and whether it resolved. The nested error is one given
+// with [WithErrors] anywhere in the tree of the bound error; the position
+// of the bound error itself is [SourceError.Location]. A nested error the
+// binding never resolved, such as one behind a binding to another source,
+// reports false.
+func (e *SourceError) PositionOf(n *Error) (position.Position, bool) {
+	pos, ok := e.nestedPos[n]
+
+	return pos, ok
 }
 
 // rangeOf returns the range loc covers in lines: the range it carries, or

@@ -3528,3 +3528,62 @@ func TestSourceErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestError_Accessors(t *testing.T) {
+	t.Parallel()
+
+	cause := errors.New("boom")
+	nested := niceyaml.NewError("nested", niceyaml.WithPath(paths.Root().Child("a")))
+
+	err := niceyaml.NewErrorFrom(cause, niceyaml.WithErrors(nil, nested))
+
+	assert.Equal(t, cause, err.Cause())
+	assert.Equal(t, []*niceyaml.Error{nested}, err.Errors())
+
+	// The nested slice is a copy.
+	err.Errors()[0] = nil
+	assert.Equal(t, []*niceyaml.Error{nested}, err.Errors())
+
+	require.EqualError(t, niceyaml.NewError("plain").Cause(), "plain")
+	assert.Empty(t, niceyaml.NewError("plain").Errors())
+	assert.NoError(t, niceyaml.NewErrorFrom(nil).Cause())
+
+	var nilErr *niceyaml.Error
+
+	assert.NoError(t, nilErr.Cause())
+	assert.Empty(t, nilErr.Errors())
+}
+
+func TestSourceError_PositionOf(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
+	badA := niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a")))
+	badX := niceyaml.NewError("bad x", niceyaml.WithPath(paths.Root().Child("x")))
+	deep := niceyaml.NewError("deep", niceyaml.WithPath(paths.Root().Child("b")))
+	mid := niceyaml.NewError("mid", niceyaml.WithErrors(deep))
+
+	var bound *niceyaml.SourceError
+
+	require.ErrorAs(t, source.Bind(niceyaml.NewError("main", niceyaml.WithErrors(badA, badX, mid))), &bound)
+
+	pos, ok := bound.PositionOf(badA)
+	assert.True(t, ok)
+	assert.Equal(t, position.New(0, 3), pos)
+
+	// A nested error further in resolves as well.
+	pos, ok = bound.PositionOf(deep)
+	assert.True(t, ok)
+	assert.Equal(t, position.New(1, 3), pos)
+
+	// One that did not resolve, one that carries no location, and one the
+	// binding never saw all report false.
+	for name, n := range map[string]*niceyaml.Error{
+		"unresolved":  badX,
+		"no location": mid,
+		"stranger":    niceyaml.NewError("stranger"),
+	} {
+		_, ok = bound.PositionOf(n)
+		assert.False(t, ok, name)
+	}
+}
