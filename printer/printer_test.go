@@ -202,6 +202,7 @@ func TestPrinter_PrintError(t *testing.T) {
 
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
 	bound := source.WrapError(niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("b").Value())))
+	other := niceyaml.NewSourceFromString("c: 3\n")
 
 	excerpt := stringtest.JoinLF(
 		"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>1</literalNumberInteger>",
@@ -235,6 +236,16 @@ func TestPrinter_PrintError(t *testing.T) {
 		"bound error with an empty message": {
 			err:  source.WrapError(niceyaml.NewErrorFrom(nil, niceyaml.WithPath(paths.Root().Child("b").Value()))),
 			want: "[2:4] $.b:\n\n" + excerpt,
+		},
+		"joined bound errors print every excerpt": {
+			err: errors.Join(
+				fmt.Errorf("first: %w", bound),
+				fmt.Errorf("second: %w", other.WrapError(
+					niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("c").Value())),
+				)),
+			),
+			want: "first: [2:4] $.b: bad\nsecond: [1:4] $.c: bad\n\n" + excerpt + "\n\n" +
+				"<nameTag>c</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>3</genericError>",
 		},
 	}
 

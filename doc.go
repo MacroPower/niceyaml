@@ -70,9 +70,15 @@
 // document, and [Source.WrapError] binds one to the single document
 // [Source.Document] picks. [SourceError.Error] puts the resolved position
 // in front of the message, and [SourceError.Excerpt] returns the
-// surrounding lines with the location highlighted. The %+v verb prints both. Nested
-// errors appear as annotations below their respective lines, with distant
-// errors displayed in separate hunks. A SourceError never rewrites the
+// surrounding lines with the location highlighted. The %+v verb prints both.
+// The bound error is a tree, and every located Error in it is marked: the
+// first one along the cause chain puts its position in front of the
+// message, and every other branch, whether a nested error from [WithErrors]
+// or a later branch of [errors.Join], appears as an annotation below its
+// own line, with distant errors displayed in separate hunks. An error
+// joined from several bound errors, such as one per document of a file,
+// holds several SourceErrors, and [SourceErrors] finds every one of them
+// for a caller that renders them all. A SourceError never rewrites the
 // message it binds, so an error built by hand goes through WrapError before
 // [fmt.Errorf] adds context, which keeps the position beside the message.
 //
@@ -104,7 +110,8 @@
 // into a log as it is. A terminal gets color from [printer.Printer.PrintError],
 // which prints the same parts with the printer's styles and width and the
 // context lines it is given, and accepts any error, so a caller need not
-// look for the [SourceError] in the chain:
+// look for the [SourceError] in the chain. It renders the excerpt of every
+// SourceError in the error's tree:
 //
 //	fmt.Println(p.PrintError(err, 3))
 //

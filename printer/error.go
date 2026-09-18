@@ -1,22 +1,23 @@
 package printer
 
 import (
-	"errors"
 	"strings"
 
 	"go.jacobcolvin.com/niceyaml"
 )
 
-// PrintError renders err for a reader: its message, then, when its chain
-// holds a [*niceyaml.SourceError], the [niceyaml.SourceError.Detail] of the
-// first one, rendered by p with context lines of unchanged content on
-// either side of each marked line. A blank line separates the two. The
-// message is [error.Error] as it is, so the context a wrapper added stays
-// in front of the position:
+// PrintError renders err for a reader: its message, then the
+// [niceyaml.SourceError.Detail] of every [*niceyaml.SourceError] in its
+// tree, as [niceyaml.SourceErrors] finds them, each rendered by p with
+// context lines of unchanged content on either side of each marked line.
+// An error joined from one bound error per document therefore prints an
+// excerpt for each document. Blank lines separate the parts. The message
+// is [error.Error] as it is, so the context a wrapper added stays in front
+// of the position:
 //
 //	fmt.Println(p.PrintError(err, 3))
 //
-// An error whose chain holds no SourceError, or whose Detail is empty,
+// An error whose tree holds no SourceError, or whose Details are empty,
 // prints as its message alone, and a nil err prints as "". The %+v verb
 // prints the same parts as plain text with two lines of context.
 func (p *Printer) PrintError(err error, context int) string {
@@ -30,8 +31,7 @@ func (p *Printer) PrintError(err error, context int) string {
 		parts = append(parts, msg)
 	}
 
-	bound, ok := errors.AsType[*niceyaml.SourceError](err)
-	if ok && bound != nil {
+	for _, bound := range niceyaml.SourceErrors(err) {
 		if detail := bound.Detail(p, context); detail != "" {
 			parts = append(parts, detail)
 		}

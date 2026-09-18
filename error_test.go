@@ -2599,10 +2599,14 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 			fmt.Errorf("b: %w", second),
 		))
 
-		// A SourceError has one location, the first Error's, and the text
-		// of the other branch stays as the join wrote it.
+		// The position in front is the first Error's, and the text of the
+		// other branch stays as the join wrote it. The excerpt marks both.
 		assert.Equal(t, "[1:7] a: $.name: bad first\nb: $.name: bad second", wrapped.Error())
 		require.ErrorIs(t, wrapped, second)
+
+		got := trimLines(render(wrapped))
+		assert.Contains(t, got, "<genericError>first</genericError>")
+		assert.Contains(t, got, "^ b: $.name: bad second")
 	})
 
 	t.Run("binding each branch reports every position", func(t *testing.T) {
@@ -3245,4 +3249,141 @@ func TestSourceError_Annotate(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestSourceError_TreeBranches(t *testing.T) {
+	t.Parallel()
+
+	// Every located Error in the tree is marked, however it got there.
+
+	source := xmlSource("a: 1\nb: 2\nc: 3\n")
+	badA := niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a").Value()))
+	badB := niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b").Value()))
+	badC := niceyaml.NewError("bad c", niceyaml.WithPath(paths.Root().Child("c").Value()))
+
+	t.Run("join branches are annotated", func(t *testing.T) {
+		t.Parallel()
+
+		err := source.WrapError(errors.Join(badA, badB))
+
+		assert.Equal(t, "[1:4] $.a: bad a\n$.b: bad b", err.Error())
+
+		got := trimLines(render(err))
+		assert.Contains(t, got, "<genericError>1</genericError>")
+		assert.Contains(t, got, "<genericError>2</genericError>")
+		assert.Contains(t, got, "^ bad b")
+		assert.NotContains(t, got, "^ bad a")
+	})
+
+	t.Run("branches below a wrapper are annotated", func(t *testing.T) {
+		t.Parallel()
+
+		err := source.WrapError(fmt.Errorf("document 0: %w", errors.Join(
+			fmt.Errorf("first: %w", badA),
+			niceyaml.NewError("summary", niceyaml.WithErrors(badB, badC)),
+		)))
+
+		assert.Equal(t, "[1:4] document 0: first: $.a: bad a\nsummary", err.Error())
+
+		got := trimLines(render(err))
+		assert.Contains(t, got, "<genericError>1</genericError>")
+		assert.Contains(t, got, "^ bad b")
+		assert.Contains(t, got, "^ bad c")
+	})
+
+	t.Run("a join branch that does not resolve is not listed", func(t *testing.T) {
+		t.Parallel()
+
+		missing := niceyaml.NewError("bad x", niceyaml.WithPath(paths.Root().Child("x").Value()))
+		err := source.WrapError(errors.Join(badA, missing))
+
+		got := trimLines(render(err))
+		assert.Equal(t, "[1:4] $.a: bad a\n$.x: bad x", strings.SplitN(got, "\n\n", 2)[0])
+		assert.Equal(t, 1, strings.Count(got, "$.x: bad x"))
+	})
+
+	t.Run("a bound error inside the tree keeps its own binding", func(t *testing.T) {
+		t.Parallel()
+
+		other := xmlSource("z: 9\n")
+		inner := other.WrapError(niceyaml.NewError("bad z", niceyaml.WithPath(paths.Root().Child("z").Value())))
+		err := source.WrapError(errors.Join(badA, inner))
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, source, bound.Source())
+
+		// The outer binding marks its own branch, and the inner keeps its
+		// excerpt from the other source.
+		excerpt, excerptErr := bound.Excerpt(0)
+		require.NoError(t, excerptErr)
+		assert.Equal(t, 1, excerpt.Len())
+
+		got := trimLines(render(err))
+		assert.Contains(t, got, "<genericError>1</genericError>")
+		assert.Contains(t, got, "<genericError>9</genericError>")
+	})
+}
+
+func TestSourceErrors(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n")
+
+	docs, err := source.Documents()
+	require.NoError(t, err)
+	require.Len(t, docs, 2)
+
+	first := docs[0].WrapError(niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a").Value())))
+	second := docs[1].WrapError(niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b").Value())))
+
+	tcs := map[string]struct {
+		err  error
+		want []error
+	}{
+		"nil": {
+			err: nil,
+		},
+		"no binding": {
+			err: errors.New("plain"),
+		},
+		"one binding": {
+			err:  fmt.Errorf("document 0: %w", first),
+			want: []error{first},
+		},
+		"joined bindings in order": {
+			err: errors.Join(
+				fmt.Errorf("document 0: %w", first),
+				fmt.Errorf("document 1: %w", second),
+			),
+			want: []error{first, second},
+		},
+		"binding inside a binding": {
+			err:  niceyaml.NewSourceFromString("c: 3\n").WrapError(first),
+			want: nil, // Filled in below, since the outer is built here.
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := niceyaml.SourceErrors(tc.err)
+
+			if name == "binding inside a binding" {
+				require.Len(t, got, 2)
+				assert.Same(t, tc.err, got[0])
+				assert.Same(t, first, got[1])
+
+				return
+			}
+
+			require.Len(t, got, len(tc.want))
+
+			for i, want := range tc.want {
+				assert.Same(t, want, got[i])
+			}
+		})
+	}
 }

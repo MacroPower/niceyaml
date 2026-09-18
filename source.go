@@ -380,7 +380,7 @@ func (s *Source) WrapError(err error) error {
 		return nil
 	}
 
-	if _, ok := firstError(err); !ok { //nolint:errcheck // Presence check, not a value extraction.
+	if !hasError(err) {
 		return err
 	}
 
