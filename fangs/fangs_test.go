@@ -207,8 +207,8 @@ func TestErrorHandler(t *testing.T) {
 			want: stringtest.JoinLF(
 				"Error",
 				"  document 0: two problems",
-				"  1:1: $.name: bad name",
-				"  2:8: $.value: bad value",
+				"  ├── 1:1: $.name: bad name",
+				"  └── 2:8: $.value: bad value",
 				"  ",
 				"  <genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
 				"  <textError>^ bad name</textError>",
@@ -234,8 +234,8 @@ func TestErrorHandler(t *testing.T) {
 			err: errors.Join(badName, badValue),
 			want: stringtest.JoinLF(
 				"Error",
-				"  a.yaml:1:1: $.name: bad name",
-				"  b.yaml:2:8: $.value: bad value",
+				"  ├── a.yaml:1:1: $.name: bad name",
+				"  └── b.yaml:2:8: $.value: bad value",
 				"  ",
 				"  <genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
 				"  <nameTag>value</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>123</literalNumberInteger>",

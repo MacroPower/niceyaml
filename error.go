@@ -478,8 +478,8 @@ func (e *Error) locate(lookup func() (*Document, error)) (location, error) {
 // that shows errors inline needs, and [SourceError.Detail] renders the
 // excerpt with the Renderer and context lines it is given. A
 // [go.jacobcolvin.com/niceyaml/printer.Printer] is a Renderer, and its
-// PrintError method prints the message and the Detail with color and the
-// context lines the printer is configured with:
+// PrintError method prints the message as a tree and the Detail with
+// color and the context lines the printer is configured with:
 //
 //	fmt.Println(p.PrintError(err))
 //
@@ -1036,8 +1036,8 @@ func (e *SourceError) Excerpt(context int) (*line.View, error) {
 // The %+v verb prints [SourceError.Error] and the Detail rendered as plain
 // text with two lines of context. A
 // [go.jacobcolvin.com/niceyaml/printer.Printer] is a Renderer, and its
-// PrintError method prints the message and the Detail the same way with
-// the printer's styles.
+// PrintError method prints the message as a tree and the Detail the same
+// way with the printer's styles.
 func (e *SourceError) Detail(r Renderer, context int) string {
 	excerpt, err := e.Excerpt(context)
 	if err == nil {

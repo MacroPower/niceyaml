@@ -69,8 +69,9 @@ func WithPrinter(p *printer.Printer) Option {
 //	)
 //
 // The handler writes the error header, then what
-// [printer.Printer.PrintError] renders for err: the message as its
-// wrappers wrote it, then the excerpt of each [niceyaml.SourceError] in
+// [printer.Printer.PrintError] renders for err: the message as a tree,
+// with the context its wrappers added in front and a connector before
+// each nested error, then the excerpt of each [niceyaml.SourceError] in
 // the error's tree, so a joined error annotates each failure it holds.
 // Unlike [fang.DefaultErrorHandler], which wraps errors in a lipgloss style
 // that can break multi-line output, this handler applies styling only to

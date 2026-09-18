@@ -115,8 +115,9 @@
 // into a log as it is. A terminal gets color from [printer.Printer.PrintError],
 // which prints the same parts with the printer's styles, width, and
 // context lines, and accepts any error, so a caller need not look for the
-// [SourceError] in the chain. It renders the excerpt of every SourceError
-// in the error's tree:
+// [SourceError] in the chain. It draws the message as a tree, with a
+// connector in front of each nested error, and renders the excerpt of
+// every SourceError in the error's tree:
 //
 //	p := printer.New(printer.WithWidth(width), printer.WithContextLines(3))
 //	fmt.Println(p.PrintError(err))

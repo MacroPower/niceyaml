@@ -209,6 +209,14 @@ func TestPrinter_PrintError(t *testing.T) {
 		"<nameTag>b</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>2</genericError>",
 	)
 
+	// Both values marked, each with its message below it.
+	annotated := stringtest.JoinLF(
+		"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>1</genericError>",
+		"<textError>   ^ bad a</textError>",
+		"<nameTag>b</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>2</genericError>",
+		"<textError>   ^ bad b</textError>",
+	)
+
 	tcs := map[string]struct {
 		err  error
 		want string
@@ -244,7 +252,26 @@ func TestPrinter_PrintError(t *testing.T) {
 					niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("c"))),
 				)),
 			),
-			want: "first: 2:4: $.b: bad\nsecond: 1:4: $.c: bad\n\n" + excerpt + "\n\n" +
+			want: "├── first: 2:4: $.b: bad\n└── second: 1:4: $.c: bad\n\n" + excerpt + "\n\n" +
+				"<nameTag>c</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>3</genericError>",
+		},
+		"nested errors draw as branches in position order": {
+			err: source.Bind(niceyaml.NewError("2 problems", niceyaml.WithErrors(
+				niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b"))),
+				niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a"))),
+			))),
+			want: "2 problems\n├── 1:4: $.a: bad a\n└── 2:4: $.b: bad b\n\n" + annotated,
+		},
+		"joined nested errors draw as a forest of subtrees": {
+			err: errors.Join(
+				source.Bind(niceyaml.NewError("2 problems", niceyaml.WithErrors(
+					niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a"))),
+					niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b"))),
+				))),
+				other.Bind(niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("c")))),
+			),
+			want: "├── 2 problems\n│   ├── 1:4: $.a: bad a\n│   └── 2:4: $.b: bad b\n└── 1:4: $.c: bad\n\n" +
+				annotated + "\n\n" +
 				"<nameTag>c</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>3</genericError>",
 		},
 	}
