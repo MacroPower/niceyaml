@@ -18,8 +18,8 @@ import (
 //
 // The [Ref.Key] is a digest of the bytes, so two Embedded resolvers over
 // the same bytes name one schema to the registry, which compiles it once.
-// A schema compiled already, with [MustCompile] or [FromJSONSchema], goes in
-// through [Static] instead.
+// A schema compiled already, with [MustCompile] or [FromJSONSchema], is a
+// [Resolver] itself and goes in as it is.
 func Embedded(data []byte) Resolver {
 	sum := sha256.Sum256(data)
 

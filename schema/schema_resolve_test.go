@@ -12,7 +12,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
 
-func TestStatic(t *testing.T) {
+func TestSchema_Resolve(t *testing.T) {
 	t.Parallel()
 
 	compiled := schema.MustCompile([]byte(`{
@@ -20,10 +20,10 @@ func TestStatic(t *testing.T) {
 		"properties": {"kind": {"type": "string"}, "replicas": {"type": "integer"}}
 	}`))
 
-	t.Run("names the validator", func(t *testing.T) {
+	t.Run("names itself", func(t *testing.T) {
 		t.Parallel()
 
-		ref, err := schema.Static(compiled).Resolve(t.Context(), document(t))
+		ref, err := compiled.Resolve(t.Context(), document(t))
 		require.NoError(t, err)
 		assert.Same(t, compiled, ref.Schema())
 		assert.Empty(t, ref.Key())
@@ -32,11 +32,11 @@ func TestStatic(t *testing.T) {
 		require.ErrorIs(t, err, schema.ErrLoad)
 	})
 
-	t.Run("registry uses the validator as it is", func(t *testing.T) {
+	t.Run("registry uses the schema as it is", func(t *testing.T) {
 		t.Parallel()
 
 		reg := schema.NewRegistry(schema.WithResolvers(
-			schema.When(matcher.Content(kindPath, "Deployment"), schema.Static(compiled)),
+			schema.When(matcher.Content(kindPath, "Deployment"), compiled),
 		))
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
@@ -53,13 +53,5 @@ func TestStatic(t *testing.T) {
 		err = reg.Validate(t.Context(), bad)
 		require.Error(t, err)
 		require.NotErrorIs(t, err, schema.ErrNoMatch)
-	})
-
-	t.Run("nil schema panics", func(t *testing.T) {
-		t.Parallel()
-
-		assert.PanicsWithValue(t, "schema.Static: schema is nil", func() {
-			schema.Static(nil)
-		})
 	})
 }

@@ -101,12 +101,12 @@ func (r Ref) Load(ctx context.Context) ([]byte, error) {
 //
 // A resolver may inspect the document's content, file path, or tokens, or
 // ignore the document and always name the same schema. The document is
-// never nil, so a resolver reads it without checking. [Static] and the
+// never nil, so a resolver reads it without checking. A [*Schema] and the
 // loaders [Embedded], [File], [URL], and [FileOrURL] are resolvers of the
 // second kind, and [When] guards any resolver with a
 // [go.jacobcolvin.com/niceyaml/schema/matcher.Matcher].
 //
-// See [ResolverFunc], [Directive], and
+// See [ResolverFunc], [Schema], [Directive], and
 // [go.jacobcolvin.com/niceyaml/schema/schemastore.SchemaStore] for
 // implementations.
 type Resolver interface {

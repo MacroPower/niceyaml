@@ -98,15 +98,15 @@
 //
 // # Loaders
 //
-// [Static], [Embedded], [File], [URL], and [FileOrURL] are resolvers that
+// A [*Schema], [Embedded], [File], [URL], and [FileOrURL] are resolvers that
 // name the same schema for every document and never report [ErrNoMatch],
-// so a registry holding one alone validates everything against it. Static
-// returns a [Compiled] ref for a schema compiled already, such as the one
-// [MustCompile] built at package scope:
+// so a registry holding one alone validates everything against it. A
+// Schema compiled already, such as the one [MustCompile] built at package
+// scope, returns a [Compiled] ref naming itself:
 //
-//	reg := schema.NewRegistry(schema.WithResolvers(schema.Static(Config)))
+//	reg := schema.NewRegistry(schema.WithResolvers(Config))
 //
-// The others return a [Loadable] ref whose key identifies the schema and
+// The loaders return a [Loadable] ref whose key identifies the schema and
 // whose load reads the bytes. The registry checks its cache by key first,
 // so a file is read or a URL fetched once per registry, however many
 // documents name it.
