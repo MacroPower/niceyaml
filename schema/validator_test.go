@@ -623,7 +623,7 @@ func TestValidator_YAMLNativeTypes(t *testing.T) {
 				b: !!binary aGk=
 				n: notint
 			`),
-			err: `[2:4] $.n: expected "integer", got "string"`,
+			err: `2:4: $.n: expected "integer", got "string"`,
 		},
 	}
 

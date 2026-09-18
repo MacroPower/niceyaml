@@ -656,7 +656,7 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 		t.Parallel()
 
 		err := source.WrapError(niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b").Value())))
-		assert.Equal(t, "[2:4] $.b: bad b", err.Error())
+		assert.Equal(t, "2:4: $.b: bad b", err.Error())
 
 		var bound *niceyaml.SourceError
 
@@ -678,7 +678,7 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 		require.NotNil(t, tk)
 
 		err := source.WrapError(niceyaml.NewError("bad c", niceyaml.WithToken(tk)))
-		assert.Equal(t, "[3:1] bad c", err.Error())
+		assert.Equal(t, "3:1: bad c", err.Error())
 
 		got := trimLines(render(err))
 		assert.Contains(t, got, "<genericError>c</genericError>")
@@ -1287,7 +1287,7 @@ func TestSource_WrapError(t *testing.T) {
 
 		// The first binding put its position in the text, and the second
 		// adds none.
-		assert.Equal(t, "[1:7] $.name: bad name", twice.Error())
+		assert.Equal(t, "1:7: $.name: bad name", twice.Error())
 	})
 }
 

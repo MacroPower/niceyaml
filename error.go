@@ -77,7 +77,8 @@ type Renderer interface {
 // [Error.Error] returns the message, with the path in front when the Error
 // carries one: "$.path: msg". A position is never part of the message
 // until a [SourceError] binds the Error and puts the resolved one in front,
-// so a bound error reads "[line:col] $.path: msg" or "[line:col] msg".
+// so a bound error reads "name:line:col: $.path: msg" or
+// "name:line:col: msg".
 // Nested errors from [WithErrors] are not part of the message. They surface
 // through [Error.Unwrap], and [SourceError.Excerpt] renders them as
 // annotations.
@@ -206,10 +207,15 @@ func prefixMessage(prefix, msg string) string {
 	return prefix + " " + msg
 }
 
-// formatPosition returns pos as "[line:col]". Editors count from 1, so the
-// coordinates are 1-indexed.
-func formatPosition(pos position.Position) string {
-	return fmt.Sprintf("[%d:%d]", pos.Line+1, pos.Col+1)
+// formatPosition returns pos as "name:line:col:", the shape editors and
+// build tools read, or "line:col:" when name is empty. Editors count from 1,
+// so the coordinates are 1-indexed.
+func formatPosition(name string, pos position.Position) string {
+	if name == "" {
+		return fmt.Sprintf("%d:%d:", pos.Line+1, pos.Col+1)
+	}
+
+	return fmt.Sprintf("%s:%d:%d:", name, pos.Line+1, pos.Col+1)
 }
 
 // anchor returns the [Error] that carries the position: e itself when it has
@@ -526,13 +532,16 @@ func (e *SourceError) Unwrap() error {
 }
 
 // Error returns the message of the bound error with its resolved position
-// in front: "[line:col] $.path: msg" for a path error and "[line:col] msg"
-// for a token or range error, with any context a wrapper added between the
-// position and the rest. A chain that holds a SourceError from a binding to
-// another source already carries the position that binding resolved, and a
-// location that does not resolve has none to add, so both come back as
-// they are. Nested errors are not part of the message; see
-// [SourceError.Excerpt].
+// in front: "name:line:col: $.path: msg" for a path error and
+// "name:line:col: msg" for a token or range error, with any context a
+// wrapper added between the position and the rest. The name is
+// [Source.Name], and the position stands alone as "line:col:" when the
+// source has none, so an error from a named file reads as a compiler
+// diagnostic that editors and build tools link to the line. A chain that
+// holds a SourceError from a binding to another source already carries the
+// position that binding resolved, and a location that does not resolve has
+// none to add, so both come back as they are. Nested errors are not part of
+// the message; see [SourceError.Excerpt].
 //
 // The result is plain text and never includes source lines, so it is safe to
 // log or compare. Use [SourceError.Excerpt] or the %+v verb for the
@@ -543,7 +552,7 @@ func (e *SourceError) Error() string {
 		return msg
 	}
 
-	return prefixMessage(formatPosition(e.loc.pos), msg)
+	return prefixMessage(formatPosition(e.source.Name(), e.loc.pos), msg)
 }
 
 // unit is one error of the tree a [SourceError] presents: the error at the

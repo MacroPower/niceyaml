@@ -223,11 +223,11 @@ func TestPrinter_PrintError(t *testing.T) {
 		},
 		"bound error": {
 			err:  bound,
-			want: "[2:4] $.b: bad\n\n" + excerpt,
+			want: "2:4: $.b: bad\n\n" + excerpt,
 		},
 		"wrapped bound error keeps the wrapper's context": {
 			err:  fmt.Errorf("document 0: %w", bound),
-			want: "document 0: [2:4] $.b: bad\n\n" + excerpt,
+			want: "document 0: 2:4: $.b: bad\n\n" + excerpt,
 		},
 		"bound error without a location": {
 			err:  source.WrapError(niceyaml.NewError("bad")),
@@ -235,7 +235,7 @@ func TestPrinter_PrintError(t *testing.T) {
 		},
 		"bound error with an empty message": {
 			err:  source.WrapError(niceyaml.NewErrorFrom(nil, niceyaml.WithPath(paths.Root().Child("b").Value()))),
-			want: "[2:4] $.b:\n\n" + excerpt,
+			want: "2:4: $.b:\n\n" + excerpt,
 		},
 		"joined bound errors print every excerpt": {
 			err: errors.Join(
@@ -244,7 +244,7 @@ func TestPrinter_PrintError(t *testing.T) {
 					niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("c").Value())),
 				)),
 			),
-			want: "first: [2:4] $.b: bad\nsecond: [1:4] $.c: bad\n\n" + excerpt + "\n\n" +
+			want: "first: 2:4: $.b: bad\nsecond: 1:4: $.c: bad\n\n" + excerpt + "\n\n" +
 				"<nameTag>c</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>3</genericError>",
 		},
 	}

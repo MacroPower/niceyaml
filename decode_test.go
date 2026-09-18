@@ -109,7 +109,7 @@ func TestSource_Document(t *testing.T) {
 
 		_, err := source.Document()
 		require.ErrorIs(t, err, niceyaml.ErrMultipleDocuments)
-		assert.Equal(t, "[2:1] multiple documents in source: 2 documents", err.Error())
+		assert.Equal(t, "2:1: multiple documents in source: 2 documents", err.Error())
 
 		var bound *niceyaml.SourceError
 
@@ -166,7 +166,7 @@ func TestSource_Document(t *testing.T) {
 
 		_, err := source.Document()
 		require.ErrorIs(t, err, niceyaml.ErrMultipleDocuments)
-		assert.Equal(t, "[4:1] multiple documents in source: 2 documents", err.Error())
+		assert.Equal(t, "4:1: multiple documents in source: 2 documents", err.Error())
 	})
 
 	t.Run("returns the first document when none has content", func(t *testing.T) {
@@ -1195,7 +1195,7 @@ func TestDocument_ErrorsResolveInDocument(t *testing.T) {
 			errs = append(errs, dd.Validate(t.Context(), validator))
 		}
 
-		assert.Equal(t, []string{"[1:7] $.name: bad name", "[3:7] $.name: bad name"}, headlines(t, errs))
+		assert.Equal(t, []string{"1:7: $.name: bad name", "3:7: $.name: bad name"}, headlines(t, errs))
 	})
 
 	t.Run("self validation errors resolve in their own document", func(t *testing.T) {
@@ -1212,7 +1212,7 @@ func TestDocument_ErrorsResolveInDocument(t *testing.T) {
 			errs = append(errs, err)
 		}
 
-		assert.Equal(t, []string{"[1:7] $.name: rejected", "[3:7] $.name: rejected"}, headlines(t, errs))
+		assert.Equal(t, []string{"1:7: $.name: rejected", "3:7: $.name: rejected"}, headlines(t, errs))
 	})
 
 	t.Run("decode errors report their own document's line", func(t *testing.T) {
@@ -1233,8 +1233,8 @@ func TestDocument_ErrorsResolveInDocument(t *testing.T) {
 
 		got := headlines(t, errs)
 		require.Len(t, got, 2)
-		assert.True(t, strings.HasPrefix(got[0], "[1:7] "), got[0])
-		assert.True(t, strings.HasPrefix(got[1], "[3:7] "), got[1])
+		assert.True(t, strings.HasPrefix(got[0], "1:7: "), got[0])
+		assert.True(t, strings.HasPrefix(got[1], "3:7: "), got[1])
 	})
 }
 
@@ -1988,7 +1988,7 @@ func TestDocument_ValidatorErrorsResolveInDocument(t *testing.T) {
 
 			_, err := second.Decode[map[string]string](t.Context(), niceyaml.WithValidator(validator))
 			require.Error(t, err)
-			assert.Equal(t, "[3:7] $.name: bad name", err.Error())
+			assert.Equal(t, "3:7: $.name: bad name", err.Error())
 		})
 	}
 }
@@ -2070,7 +2070,7 @@ func TestDocument_Decode_Validator(t *testing.T) {
 			})),
 		)
 		require.Error(t, err)
-		assert.Equal(t, "[3:7] $.name: bad name", err.Error())
+		assert.Equal(t, "3:7: $.name: bad name", err.Error())
 	})
 
 	t.Run("Get passes the whole document", func(t *testing.T) {
@@ -2143,7 +2143,7 @@ func TestDocument_WrapError(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 		assert.Same(t, source, bound.Source())
-		assert.Equal(t, "[3:7] $.name: bad name", err.Error())
+		assert.Equal(t, "3:7: $.name: bad name", err.Error())
 	})
 
 	t.Run("the source alone has no single document to resolve in", func(t *testing.T) {
