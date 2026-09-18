@@ -10,18 +10,25 @@
 // # Using Themes
 //
 // [Builtin] returns the [Catalog] of every theme this package ships.
-// [Catalog.Get] looks a [Theme] up by its kebab-case name, and
-// [Theme.Styles] returns a ready-to-use [style.Styles]. A theme builds its
-// styles on the first call and returns the same value afterwards:
+// [Catalog.Get] looks a [Theme] up by its kebab-case name. A Theme resolves
+// each [style.Kind] through [Theme.Style], so it goes to
+// [go.jacobcolvin.com/niceyaml/printer.WithStyles] as it is. A theme builds
+// its styles on the first call and returns the same value afterwards:
 //
 //	if t, ok := theme.Builtin().Get("dracula"); ok {
-//		p := printer.New(printer.WithStyles(t.Styles()))
+//		p := printer.New(printer.WithStyles(t))
 //	}
 //
 // [Charm] is the theme [style.Default] renders with, held as a Theme so a
 // program can name it without a lookup:
 //
-//	p := printer.New(printer.WithStyles(theme.Charm.Styles()))
+//	p := printer.New(printer.WithStyles(theme.Charm))
+//
+// [Theme.Styles] returns the [style.Styles] behind a theme, for a program
+// that overrides some of its kinds with [style.Styles.With]:
+//
+//	styles := theme.Charm.Styles().With(style.Set(style.Comment, dim))
+//	p := printer.New(printer.WithStyles(styles))
 //
 // [Catalog.All] returns every theme in the catalog, with the name and
 // [Mode] alongside the styles for building a picker, and [Catalog.Mode]

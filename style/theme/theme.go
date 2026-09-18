@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 
+	"charm.land/lipgloss/v2"
+
 	"go.jacobcolvin.com/niceyaml/style"
 )
 
@@ -21,7 +23,10 @@ const (
 )
 
 // Theme is a named color theme with its mode and a lazily built
-// [style.Styles].
+// [style.Styles]. [Theme.Style] resolves one kind from those styles, so a
+// Theme goes wherever a
+// [go.jacobcolvin.com/niceyaml/printer.StyleGetter] does, such as
+// [go.jacobcolvin.com/niceyaml/printer.WithStyles].
 //
 // Look one up by name with [Catalog.Get] or enumerate them with
 // [Catalog.All]. Create custom themes with [New] and add them to a catalog
@@ -59,6 +64,14 @@ func (t Theme) Styles() style.Styles {
 	}
 
 	return t.styles()
+}
+
+// Style returns the [lipgloss.Style] for st from [Theme.Styles], so a Theme
+// is a [go.jacobcolvin.com/niceyaml/printer.StyleGetter] and goes to
+// [go.jacobcolvin.com/niceyaml/printer.WithStyles] as it is. The zero
+// Theme returns an empty style for every kind.
+func (t Theme) Style(st style.Kind) lipgloss.Style {
+	return t.Styles().Style(st)
 }
 
 var (

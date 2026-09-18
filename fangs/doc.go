@@ -18,13 +18,13 @@
 //
 // # Color Schemes
 //
-// [ColorScheme] and [ColorSchemeFunc] translate [style.Styles] to
-// [fang.ColorScheme], allowing CLI styling to be derived from the existing
-// theme system.
+// [ColorScheme] and [ColorSchemeFunc] translate the styles of a
+// [printer.StyleGetter], such as a theme, to [fang.ColorScheme], allowing
+// CLI styling to be derived from the existing theme system.
 //
 // This provides consistent colors between the YAML viewer and CLI help output:
 //
 //	err := fang.Execute(ctx, rootCmd,
-//	    fang.WithColorSchemeFunc(fangs.ColorSchemeFunc(theme.Charm.Styles())),
+//	    fang.WithColorSchemeFunc(fangs.ColorSchemeFunc(theme.Charm)),
 //	)
 package fangs

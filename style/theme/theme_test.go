@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
@@ -306,4 +307,16 @@ func marked(s style.Kind) func() style.Styles {
 // isMarked reports whether s carries the marker in styles.
 func isMarked(styles style.Styles, s style.Kind) bool {
 	return styles.Style(s).GetForeground() == marker
+}
+
+func TestTheme_Style(t *testing.T) {
+	t.Parallel()
+
+	var _ printer.StyleGetter = theme.Theme{}
+
+	assert.Equal(t, theme.Charm.Styles().Style(style.Comment), theme.Charm.Style(style.Comment))
+	assert.Equal(t, lipgloss.NewStyle(), theme.Theme{}.Style(style.Comment))
+
+	p := printer.New(printer.WithStyles(theme.Charm))
+	assert.Equal(t, theme.Charm.Styles().Style(style.NameTag), p.Style(style.NameTag))
 }

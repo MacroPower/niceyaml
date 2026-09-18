@@ -6,14 +6,17 @@ import (
 	"charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
 
+	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
 )
 
-// ColorScheme creates a [fang.ColorScheme] from [style.Styles].
+// ColorScheme creates a [fang.ColorScheme] from the styles of a
+// [printer.StyleGetter], such as a theme from
+// [go.jacobcolvin.com/niceyaml/style/theme] or a [style.Styles] value.
 //
 // This allows CLI styling to be derived from the existing theme system,
 // providing consistent colors between the YAML viewer and CLI help output.
-func ColorScheme(styles style.Styles) fang.ColorScheme {
+func ColorScheme(styles printer.StyleGetter) fang.ColorScheme {
 	text := styles.Style(style.Text)
 	comment := styles.Style(style.Comment)
 	genericError := styles.Style(style.GenericError)
@@ -40,12 +43,12 @@ func ColorScheme(styles style.Styles) fang.ColorScheme {
 }
 
 // ColorSchemeFunc returns a [fang.ColorSchemeFunc] that creates a
-// [fang.ColorScheme] from [style.Styles].
+// [fang.ColorScheme] from the styles of a [printer.StyleGetter].
 //
 // This wraps [ColorScheme] for use with [fang.WithColorSchemeFunc].
 // Since themes are designed for a specific light/dark mode, the
 // [lipgloss.LightDarkFunc] parameter is ignored.
-func ColorSchemeFunc(styles style.Styles) fang.ColorSchemeFunc {
+func ColorSchemeFunc(styles printer.StyleGetter) fang.ColorSchemeFunc {
 	return func(_ lipgloss.LightDarkFunc) fang.ColorScheme {
 		return ColorScheme(styles)
 	}

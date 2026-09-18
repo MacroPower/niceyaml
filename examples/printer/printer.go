@@ -18,7 +18,7 @@ func main() {
 	source := niceyaml.NewSourceFromString(example)
 
 	p := printer.New(
-		printer.WithStyles(theme.Charm.Styles()),
+		printer.WithStyles(theme.Charm),
 		printer.WithGutter(printer.DefaultGutter),
 	)
 
