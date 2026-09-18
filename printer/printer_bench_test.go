@@ -196,7 +196,7 @@ func BenchmarkPrinterPrintSlice(b *testing.B) {
 			b.ResetTimer()
 
 			for b.Loop() {
-				_ = p.Print(source.View(), sl.span)
+				_ = p.Print(source.View().Slice(sl.span))
 			}
 		})
 	}

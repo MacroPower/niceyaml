@@ -29,5 +29,5 @@ func main() {
 
 	hunk1 := position.NewSpan(1, 4)
 	hunk2 := position.NewSpan(11, 13)
-	fmt.Println(p.Print(source.View(), hunk1, hunk2))
+	fmt.Println(p.Print(source.View().Slice(hunk1, hunk2)))
 }

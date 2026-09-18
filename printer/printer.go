@@ -85,12 +85,12 @@ type StyleGetter interface {
 //
 // # Rendering
 //
-// Use [Printer.Print] to render lines. When called without spans, it renders all
-// lines. Pass [position.Span] arguments to render specific line spans, which is
-// useful for showing error context or diff hunks:
+// Use [Printer.Print] to render every line of a view. To render part of a
+// document, such as the lines around an error or the hunks of a diff, print
+// the view [line.View.Slice] returns, whose lines keep their numbers:
 //
-//	p.Print(view)                   // All lines.
-//	p.Print(view, span1, span2)     // Specific spans.
+//	p.Print(view)                       // All lines.
+//	p.Print(view.Slice(span1, span2))   // The lines of two spans.
 //
 // Use [Printer.Fprint] to write the rendered output to an [io.Writer] instead
 // of returning it as a string:
@@ -476,13 +476,11 @@ func (p *Printer) Style(s style.Style) lipgloss.Style {
 	return p.styles.Style(s)
 }
 
-// Fprint renders lines to w. It renders lines within the given
-// [position.Span]s, in the supplied order. If no [position.Span]s are
-// provided, all lines are rendered.
+// Fprint renders view to w as [Printer.Print] does.
 //
 // It returns the number of bytes written and any write error encountered.
-func (p *Printer) Fprint(w io.Writer, lines *line.View, spans ...position.Span) (int, error) {
-	n, err := io.WriteString(w, p.Print(lines, spans...))
+func (p *Printer) Fprint(w io.Writer, view *line.View) (int, error) {
+	n, err := io.WriteString(w, p.Print(view))
 	if err != nil {
 		return n, fmt.Errorf("write rendered output: %w", err)
 	}
@@ -490,48 +488,12 @@ func (p *Printer) Fprint(w io.Writer, lines *line.View, spans ...position.Span) 
 	return n, nil
 }
 
-// Print prints any [line.View].
-// It prints lines within the given [position.Span]s, in the supplied order.
-// If no [position.Span]s are provided, all lines are printed.
-func (p *Printer) Print(lines *line.View, spans ...position.Span) string {
-	if len(spans) == 0 {
-		spans = position.Spans{position.NewSpan(0, lines.Len())}
-	}
-
-	// Size the buffer by the lines the spans select. A viewer prints one
-	// window of a long document at a time.
-	selected := 0
-	for _, span := range spans {
-		selected += max(0, min(span.End, lines.Len())-max(span.Start, 0))
-	}
-
-	var sb strings.Builder
-
-	sb.Grow(selected * 100)
-
-	maxNumber := p.MaxNumber(lines)
-
-	// A span that renders no rows, because it is empty or lies outside the
-	// view, adds no separator either, so the output holds exactly the rows
-	// Rows counts.
-	wrote := false
-
-	for _, span := range spans {
-		rows := p.renderSpan(lines, span, maxNumber)
-		if len(rows) == 0 {
-			continue
-		}
-
-		if wrote {
-			sb.WriteByte('\n')
-		}
-
-		sb.WriteString(strings.Join(rows, "\n"))
-
-		wrote = true
-	}
-
-	return p.style.Render(sb.String())
+// Print renders every line of view, one row per line plus a row for each
+// wrapped piece and each annotation, and wraps the result in the container
+// style. To print part of a document, pass the view [line.View.Slice]
+// returns. An empty view renders as the container alone.
+func (p *Printer) Print(view *line.View) string {
+	return p.style.Render(strings.Join(p.renderRows(view), "\n"))
 }
 
 // maxNumber returns the largest line number in view, or 0 when the view is
@@ -558,19 +520,21 @@ func (p *Printer) gutterWidth(maxNumber int) int {
 	}))
 }
 
-// renderSpan renders the lines of span as rows, with the gutter sized for
-// maxNumber, the largest line number in t.
-func (p *Printer) renderSpan(t *line.View, span position.Span, maxNumber int) []string {
-	if t.Len() == 0 {
+// renderRows renders the lines of view as rows, with the gutter sized for
+// [Printer.MaxNumber].
+func (p *Printer) renderRows(view *line.View) []string {
+	if view.Len() == 0 {
 		return nil
 	}
 
+	maxNumber := p.MaxNumber(view)
 	gutterWidth := p.gutterWidth(maxNumber)
 
-	var rows []string
+	// A viewer prints one window of a long document at a time.
+	rows := make([]string, 0, view.Len())
 
-	for idx, ln := range t.AllLines(span) {
-		rows = append(rows, p.renderLine(t, idx, ln, maxNumber, gutterWidth)...)
+	for idx, ln := range view.AllLines() {
+		rows = append(rows, p.renderLine(view, idx, ln, maxNumber, gutterWidth)...)
 	}
 
 	return rows

@@ -323,8 +323,11 @@ func (m *Model) relayout() {
 // width less the horizontal frame of the printer's container style, so a
 // wrapped line and the frame around it together fit the content area.
 //
-// In side-by-side mode both panes get the gutter of the longer revision, so
-// the one horizontal offset lands on the same content column in both.
+// A render prints a slice of the view, so the gutter is sized for the
+// largest line number of the whole view rather than of the window, and
+// every window lines up with the layout. In side-by-side mode both panes
+// get the gutter of the longer revision, so the one horizontal offset lands
+// on the same content column in both.
 func (m *Model) renderPrinter(width int) *printer.Printer {
 	if !m.wrapEnabled {
 		width = 0
@@ -332,16 +335,13 @@ func (m *Model) renderPrinter(width int) *printer.Printer {
 		width = max(0, width-m.printer.ContainerStyle().GetHorizontalFrameSize())
 	}
 
-	opts := []printer.Option{printer.WithWidth(width)}
+	maxNumber := m.printer.MaxNumber(m.left)
 
 	if m.viewMode == ViewModeSideBySide && m.right != nil {
-		opts = append(opts, printer.WithMaxNumber(max(
-			m.printer.MaxNumber(m.left),
-			m.printer.MaxNumber(m.right),
-		)))
+		maxNumber = max(maxNumber, m.printer.MaxNumber(m.right))
 	}
 
-	return m.printer.With(opts...)
+	return m.printer.With(printer.WithWidth(width), printer.WithMaxNumber(maxNumber))
 }
 
 // SetPrinter sets the [*printer.Printer] used for rendering. See
@@ -1250,7 +1250,7 @@ func (m *Model) visibleRows() []string {
 	}
 
 	p := m.renderPrinter(m.maxWidth())
-	rows := splitLines(p.Print(m.left, position.NewSpan(first, last)))
+	rows := splitLines(p.Print(m.left.Slice(position.NewSpan(first, last))))
 	rows = m.trimWindow(m.trimFrame(rows, first, last), first)
 
 	// Without wrapping, lines may exceed the viewport width. Cut them to the
@@ -1715,8 +1715,8 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 	window := position.NewSpan(first, last)
 	p := m.renderPrinter(paneWidth)
 
-	leftRows := m.trimFrame(splitLines(p.Print(m.left, window)), first, last)
-	rightRows := m.trimFrame(splitLines(p.Print(right, window)), first, last)
+	leftRows := m.trimFrame(splitLines(p.Print(m.left.Slice(window))), first, last)
+	rightRows := m.trimFrame(splitLines(p.Print(right.Slice(window))), first, last)
 
 	// Get text style for padding empty areas.
 	textStyle := m.printer.Style(style.Text)

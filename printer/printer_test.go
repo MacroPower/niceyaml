@@ -586,7 +586,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 			p := testPrinterWithGutter(tc.gutter)
 			lines := niceyaml.NewSourceFromString(input)
 
-			got := p.Print(lines.View(), tc.spans...)
+			got := p.Print(lines.View().Slice(tc.spans...))
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -986,7 +986,7 @@ func TestPrinter_WordWrap_WideLineNumbers(t *testing.T) {
 
 	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWidth(30))
 
-	got := p.Print(source.View(), position.NewSpan(10000, 10001))
+	got := p.Print(source.View().Slice(position.NewSpan(10000, 10001)))
 	for row := range strings.SplitSeq(got, "\n") {
 		assert.LessOrEqual(t, lipgloss.Width(row), 30, row)
 	}
@@ -3209,12 +3209,12 @@ func TestPrinter_Print_EmptySpans(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			view := niceyaml.NewSourceFromString("a: 1\nb: 2").View()
+			view := niceyaml.NewSourceFromString("a: 1\nb: 2").View().Slice(tc.spans...)
 			p := testPrinter()
 
-			got := p.Print(view, tc.spans...)
+			got := p.Print(view)
 			assert.Equal(t, tc.want, got)
-			assert.Equal(t, tc.wantRows, layoutRows(p.Layout(view, tc.spans...)))
+			assert.Equal(t, tc.wantRows, layoutRows(p.Layout(view)))
 			assert.Len(t, strings.Split(got, "\n"), max(1, len(tc.wantRows)))
 		})
 	}
@@ -3544,17 +3544,18 @@ func TestPrinter_Layout_Width(t *testing.T) {
 			t.Parallel()
 
 			p := testPrinterWithGutter(tc.gutter)
-			got := p.Layout(tc.view, tc.spans...).Width()
+			view := tc.view.Slice(tc.spans...)
+			got := p.Layout(view).Width()
 
 			assert.Equal(t, tc.want, got)
 
 			// The width is the widest row Print renders.
 			widest := 0
-			for row := range strings.SplitSeq(p.Print(tc.view, tc.spans...), "\n") {
+			for row := range strings.SplitSeq(p.Print(view), "\n") {
 				widest = max(widest, lipgloss.Width(row))
 			}
 
-			if tc.view.Len() > 0 {
+			if view.Len() > 0 {
 				assert.Equal(t, got, widest)
 			}
 		})
@@ -3725,13 +3726,12 @@ func TestPrinter_Layout(t *testing.T) {
 		}
 	})
 
-	t.Run("spans in a non-identity order", func(t *testing.T) {
+	t.Run("slice in a non-identity order", func(t *testing.T) {
 		t.Parallel()
 
-		view := newView()
-		spans := []position.Span{position.NewSpan(2, 3), position.NewSpan(0, 1)}
+		view := newView().Slice(position.NewSpan(2, 3), position.NewSpan(0, 1))
 
-		got := p.Print(view, spans...)
+		got := p.Print(view)
 		require.Equal(t, stringtest.JoinLF(
 			"   3 c: 3",
 			"        ^ last",
@@ -3743,25 +3743,24 @@ func TestPrinter_Layout(t *testing.T) {
 			"          ^ below",
 		), got)
 
-		l := p.Layout(view, spans...)
+		l := p.Layout(view)
 
 		assert.Equal(t, len(strings.Split(got, "\n")), l.Rows())
 		assert.Equal(t, []int{2, 6}, layoutRows(l))
 		assert.Equal(t, 2, l.LineStart(1))
 
-		// LineAt returns view indices, not layout indices.
-		assert.Equal(t, 2, l.LineAt(0))
-		assert.Equal(t, 2, l.LineAt(1))
-		assert.Equal(t, 0, l.LineAt(2))
-		assert.Equal(t, 0, l.LineAt(7))
-		assert.Equal(t, 0, l.LineAt(100))
-		assert.Equal(t, 2, l.LineAt(-1))
+		// Lines are numbered as the slice orders them, not as the source does.
+		assert.Equal(t, 0, l.LineAt(0))
+		assert.Equal(t, 0, l.LineAt(1))
+		assert.Equal(t, 1, l.LineAt(2))
+		assert.Equal(t, 1, l.LineAt(7))
+		assert.Equal(t, 1, l.LineAt(100))
+		assert.Equal(t, 0, l.LineAt(-1))
 
-		// RowOf finds the line by view index.
-		assert.Equal(t, 0, l.RowOf(position.New(2, 0)))
-		assert.Equal(t, 4, l.RowOf(position.New(0, 0)))
-		assert.Equal(t, 5, l.RowOf(position.New(0, 15)))
-		assert.Equal(t, -1, l.RowOf(position.New(1, 0)))
+		assert.Equal(t, 0, l.RowOf(position.New(0, 0)))
+		assert.Equal(t, 4, l.RowOf(position.New(1, 0)))
+		assert.Equal(t, 5, l.RowOf(position.New(1, 15)))
+		assert.Equal(t, -1, l.RowOf(position.New(2, 0)))
 	})
 
 	t.Run("tabs and control characters keep columns aligned", func(t *testing.T) {

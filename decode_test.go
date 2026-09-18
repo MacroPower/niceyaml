@@ -579,7 +579,7 @@ func TestDocument_Span(t *testing.T) {
 			printer.WithContainerStyle(lipgloss.NewStyle()),
 		)
 
-		got := p.Print(source.View(), docs[1].Span())
+		got := p.Print(source.View().Slice(docs[1].Span()))
 		assert.NotContains(t, got, "a</nameTag>")
 		assert.Contains(t, got, "   2 ")
 		assert.Contains(t, got, "   4 ")

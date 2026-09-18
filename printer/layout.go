@@ -1,7 +1,6 @@
 package printer
 
 import (
-	"slices"
 	"sort"
 
 	"charm.land/lipgloss/v2"
@@ -24,16 +23,13 @@ import (
 // assembles no output, so one Layout replaces a render for every question
 // about rows. It stays valid until the view or the printer changes.
 //
-// Lines are numbered as [Printer.Print] renders them: without spans, line i
-// of the layout is line i of the view, and with spans, the lines of the
-// spans in the supplied order. Rows count from 0 at the first row of the
-// first line and leave the container style out.
+// Line i of the layout is line i of the view. Rows count from 0 at the
+// first row of the first line and leave the container style out.
 //
 // Create instances with [Printer.Layout].
 type Layout struct {
 	lines       []lineLayout
 	starts      []int // starts[i] is the first row of line i; starts[len(lines)] is the row count.
-	indices     []int // indices[i] is the view index of line i, or nil when they are equal.
 	width       int
 	gutterWidth int
 }
@@ -47,38 +43,21 @@ type lineLayout struct {
 	below int
 }
 
-// Layout computes the [Layout] of view as [Printer.Print] would render it
-// with the same spans.
-func (p *Printer) Layout(view *line.View, spans ...position.Span) Layout {
-	if len(spans) == 0 {
-		spans = position.Spans{position.NewSpan(0, view.Len())}
-	}
-
+// Layout computes the [Layout] of view as [Printer.Print] would render it.
+func (p *Printer) Layout(view *line.View) Layout {
 	maxNumber := p.MaxNumber(view)
 	gutterWidth := p.gutterWidth(maxNumber)
-	l := Layout{gutterWidth: gutterWidth}
-
-	identity := true
-	starts := []int{0}
-
-	for _, span := range spans {
-		for idx, ln := range view.AllLines(span) {
-			ll := p.layoutLine(view, idx, ln, gutterWidth, &l.width)
-
-			if idx != len(l.lines) {
-				identity = false
-			}
-
-			l.lines = append(l.lines, ll)
-			l.indices = append(l.indices, idx)
-			starts = append(starts, starts[len(starts)-1]+ll.above+len(ll.rows)+ll.below)
-		}
+	l := Layout{
+		lines:       make([]lineLayout, 0, view.Len()),
+		starts:      make([]int, 1, view.Len()+1),
+		gutterWidth: gutterWidth,
 	}
 
-	l.starts = starts
+	for idx, ln := range view.AllLines() {
+		ll := p.layoutLine(view, idx, ln, gutterWidth, &l.width)
 
-	if identity {
-		l.indices = nil
+		l.lines = append(l.lines, ll)
+		l.starts = append(l.starts, l.starts[len(l.starts)-1]+ll.above+len(ll.rows)+ll.below)
 	}
 
 	return l
@@ -215,10 +194,10 @@ func (l Layout) LineStart(i int) int {
 	return l.starts[i]
 }
 
-// LineAt returns the view index of the line that holds row. A row before
-// the first belongs to the first line and a row past the last to the last,
-// so a scroll offset always names a line. Returns -1 when the layout holds
-// no lines.
+// LineAt returns the index of the line that holds row. A row before the
+// first belongs to the first line and a row past the last to the last, so
+// a scroll offset always names a line. Returns -1 when the layout holds no
+// lines.
 func (l Layout) LineAt(row int) int {
 	n := len(l.lines)
 	if n == 0 {
@@ -229,26 +208,25 @@ func (l Layout) LineAt(row int) int {
 	// it; SearchInts finds the first start past row.
 	i := sort.SearchInts(l.starts[:n], row+1) - 1
 
-	return l.viewIndex(min(max(i, 0), n-1))
+	return min(max(i, 0), n-1)
 }
 
-// RowOf returns the row that holds column pos.Col of view line pos.Line:
-// the content row the column wraps onto, below any annotation rows above
-// the line. A column in the spaces the wrapper dropped at a break belongs
-// to the row before the break, and one past the end of the content to the
+// RowOf returns the row that holds column pos.Col of line pos.Line: the
+// content row the column wraps onto, below any annotation rows above the
+// line. A column in the spaces the wrapper dropped at a break belongs to
+// the row before the break, and one past the end of the content to the
 // last row. Returns -1 when the layout does not hold the line.
 func (l Layout) RowOf(pos position.Position) int {
-	i := l.layoutIndex(pos.Line)
-	if i < 0 {
+	if pos.Line < 0 || pos.Line >= len(l.lines) {
 		return -1
 	}
 
-	ll := l.lines[i]
+	ll := l.lines[pos.Line]
 
 	// The last content row that starts at or before the column.
 	row := sort.SearchInts(ll.rows, pos.Col+1) - 1
 
-	return l.starts[i] + ll.above + max(row, 0)
+	return l.starts[pos.Line] + ll.above + max(row, 0)
 }
 
 // Width returns the width in cells of the widest row, gutter included,
@@ -263,28 +241,4 @@ func (l Layout) Width() int {
 // find the width of the content.
 func (l Layout) GutterWidth() int {
 	return l.gutterWidth
-}
-
-// viewIndex returns the view index of layout line i.
-func (l Layout) viewIndex(i int) int {
-	if l.indices == nil {
-		return i
-	}
-
-	return l.indices[i]
-}
-
-// layoutIndex returns the layout line that holds view line idx, or -1 when
-// none does. With spans, a view line the spans name twice is the first of
-// them.
-func (l Layout) layoutIndex(idx int) int {
-	if l.indices == nil {
-		if idx < 0 || idx >= len(l.lines) {
-			return -1
-		}
-
-		return idx
-	}
-
-	return slices.Index(l.indices, idx)
 }
