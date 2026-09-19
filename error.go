@@ -764,9 +764,11 @@ func (e *SourceError) Errors() []*SourceError {
 // so an error from one file of many still says which file; without a name
 // the message comes back as it is.
 //
-// The message is one line, as the message of any error is, so it wraps
-// and logs as one. The nested errors are not part of it: [SourceError.Errors]
-// returns them, the %+v verb lists each one behind its own position, and
+// The message is the text of the bound error, which runs over several
+// lines when that text does, as the text of an [errors.Join] and a
+// message written with continuation lines both do. The nested errors
+// are not part of it: [SourceError.Errors] returns them, the %+v verb
+// lists each one behind its own position, and
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] draws them as a
 // tree. The result never includes source lines, so it is safe to log or
 // compare; use [SourceError.Excerpt] or the %+v verb for the annotated
@@ -871,6 +873,31 @@ func (e *SourceError) resolution() error {
 	return errors.Join(errs...)
 }
 
+// echoesChildren reports whether the text of e says no more than the text
+// of its children already does. The message of an [errors.Join] is the
+// text of its branches joined by line breaks and nothing else, and each
+// branch is a child, so the %+v verb that lists every child behind its own
+// position would otherwise print each branch twice. A wrapper that adds
+// context of its own, and a node with a headline above its children, both
+// say something the children do not.
+func (e *SourceError) echoesChildren() bool {
+	if e == nil || e.locErr == nil || len(e.errors) == 0 {
+		return false
+	}
+
+	texts := make([]string, 0, len(e.errors))
+
+	for _, c := range e.errors {
+		if c == nil {
+			return false
+		}
+
+		texts = append(texts, c.err.Error())
+	}
+
+	return e.err.Error() == strings.Join(texts, "\n")
+}
+
 // walk calls visit for every node below e in depth-first order. A nil e
 // has no nodes below it.
 func (e *SourceError) walk(visit func(*SourceError)) {
@@ -948,13 +975,19 @@ func SourceErrors(err error) []*SourceError {
 // then [SourceError.Excerpt] rendered as plain text with two lines of
 // context: each line of the excerpt behind its number, carets under the
 // columns of every location on the row below, and the message of each
-// child beside its caret. The output holds no escape sequences, so it
-// reads in a log as it does in a terminal. The %q verb quotes
-// [SourceError.Error].
+// child beside its caret. The binding of an [errors.Join] leads with its
+// children instead, since its own message is their text joined and each
+// child follows behind a position of its own. The output holds no escape
+// sequences, so it reads in a log as it does in a terminal. The %q verb
+// quotes [SourceError.Error].
 func (e *SourceError) Format(f fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && f.Flag('+'):
-		lines := []string{e.Error()}
+		var lines []string
+
+		if !e.echoesChildren() {
+			lines = append(lines, e.Error())
+		}
 
 		e.walk(func(n *SourceError) {
 			lines = append(lines, n.Error())

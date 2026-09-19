@@ -3487,9 +3487,11 @@ func TestSourceError_TreeBranches(t *testing.T) {
 		err := yamltest.Bind(t, source, errors.Join(badA, badB))
 
 		// The join has no location of its own, each branch is a child
-		// with one, and the excerpt marks both with their messages.
+		// with one, and the excerpt marks both with their messages. The
+		// %+v verb leads with the branches, since the join's own message
+		// is their text joined and says nothing they do not.
 		assert.Equal(t, "$.a: bad a\n$.b: bad b", err.Error())
-		assert.Equal(t, "$.a: bad a\n$.b: bad b\n1:4: $.a: bad a\n2:4: $.b: bad b", report(err))
+		assert.Equal(t, "1:4: $.a: bad a\n2:4: $.b: bad b", report(err))
 		require.Len(t, niceyaml.SourceErrors(err), 1)
 
 		got := trimLines(newXMLPrinter().PrintError(err))
