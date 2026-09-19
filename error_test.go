@@ -1419,6 +1419,37 @@ func TestError_NilReceiver(t *testing.T) {
 	assert.Equal(t, "$.a:", wrapped.Error())
 }
 
+func TestSourceError_NilReceiver(t *testing.T) {
+	t.Parallel()
+
+	// Document.Bind passes a nil *SourceError through, so every reader of
+	// one accepts nil the way Unwrap does.
+	src := niceyaml.NewSourceFromString("a: 1\n")
+
+	doc, err := src.Document()
+	require.NoError(t, err)
+
+	var missing *niceyaml.SourceError
+
+	bound := doc.Bind(missing)
+	require.ErrorAs(t, bound, &missing)
+
+	assert.Empty(t, missing.Error())
+	assert.Empty(t, fmt.Sprintf("%+v", missing))
+	assert.Nil(t, missing.Source())
+	assert.Nil(t, missing.Document())
+	assert.Nil(t, missing.Errors())
+	assert.NoError(t, missing.Unwrap()) //nolint:testifylint // Asserts the nil, not a test failure.
+
+	_, rngErr := missing.Range()
+	require.ErrorIs(t, rngErr, niceyaml.ErrNoLocation)
+
+	_, excerptErr := missing.Excerpt(2)
+	require.ErrorIs(t, excerptErr, niceyaml.ErrNoLocation)
+
+	require.ErrorIs(t, missing.Annotate(src.View()), niceyaml.ErrNoLocation)
+}
+
 func TestError_NilInnerError(t *testing.T) {
 	t.Parallel()
 

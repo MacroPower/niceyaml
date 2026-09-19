@@ -696,8 +696,13 @@ func (e *SourceError) addChild(n error, src *Source, doc *Document) {
 	e.errors = append(e.errors, newSourceError(n, src, doc))
 }
 
-// Source returns the [*Source] the error is bound to.
+// Source returns the [*Source] the error is bound to. A nil SourceError is
+// bound to none.
 func (e *SourceError) Source() *Source {
+	if e == nil {
+		return nil
+	}
+
 	return e.source
 }
 
@@ -706,8 +711,12 @@ func (e *SourceError) Source() *Source {
 // and in which a path in the error resolved. It is nil for an error bound
 // through [Source.Bind] or produced by the [Source] itself, since those
 // resolve no path. A caller that sorts the errors of a file by document
-// reads it beside [Document.Index].
+// reads it beside [Document.Index]. A nil SourceError is bound to none.
 func (e *SourceError) Document() *Document {
+	if e == nil {
+		return nil
+	}
+
 	return e.doc
 }
 
@@ -733,8 +742,13 @@ func (e *SourceError) Unwrap() error {
 //		...
 //	}
 //
-// The slice is a copy, so a caller may keep or sort it.
+// The slice is a copy, so a caller may keep or sort it. A nil SourceError
+// has no children.
 func (e *SourceError) Errors() []*SourceError {
+	if e == nil {
+		return nil
+	}
+
 	return slices.Clone(e.errors)
 }
 
@@ -756,8 +770,13 @@ func (e *SourceError) Errors() []*SourceError {
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] draws them as a
 // tree. The result never includes source lines, so it is safe to log or
 // compare; use [SourceError.Excerpt] or the %+v verb for the annotated
-// source excerpt.
+// source excerpt. A nil SourceError, which [Document.Bind] passes through
+// as it does any nil pointer, has an empty message, as a nil [*Error] does.
 func (e *SourceError) Error() string {
+	if e == nil {
+		return ""
+	}
+
 	msg := e.err.Error()
 	name := e.source.Name()
 
@@ -816,6 +835,10 @@ func isNothing(err error) bool {
 // message of an [*Error] without the location it puts in front, since the
 // caret marks it, or the message of any other error as it is.
 func (e *SourceError) text() string {
+	if e == nil {
+		return ""
+	}
+
 	if x, ok := e.err.(*Error); ok { //nolint:errorlint // The node itself, not a chain search.
 		return x.message()
 	}
@@ -848,8 +871,13 @@ func (e *SourceError) resolution() error {
 	return errors.Join(errs...)
 }
 
-// walk calls visit for every node below e in depth-first order.
+// walk calls visit for every node below e in depth-first order. A nil e
+// has no nodes below it.
 func (e *SourceError) walk(visit func(*SourceError)) {
+	if e == nil {
+		return
+	}
+
 	for _, c := range e.errors {
 		visit(c)
 		c.walk(visit)
@@ -961,8 +989,13 @@ func writeString(f fmt.State, s string) {
 // location starts on a line the source does not hold, and the resolution
 // error from [go.jacobcolvin.com/niceyaml/paths] when a path does not
 // resolve. An error whose Range fails has no position in
-// [SourceError.Error] and no excerpt.
+// [SourceError.Error] and no excerpt. A nil SourceError carries no
+// location, so it returns [ErrNoLocation].
 func (e *SourceError) Range() (position.Range, error) {
+	if e == nil {
+		return position.Range{}, ErrNoLocation
+	}
+
 	if e.locErr != nil {
 		return position.Range{}, e.locErr
 	}
@@ -1020,8 +1053,13 @@ func (e *SourceError) Annotate(view *line.View) error {
 //
 // Excerpt returns an error only when no location resolves, as
 // [SourceError.Annotate] does. A node whose location does not resolve is
-// left out of the excerpt; its message is still part of the %+v output.
+// left out of the excerpt; its message is still part of the %+v output. A
+// nil SourceError carries no location, so it returns [ErrNoLocation].
 func (e *SourceError) Excerpt(context int) (*line.View, error) {
+	if e == nil {
+		return nil, ErrNoLocation
+	}
+
 	view := e.source.View()
 
 	marked, err := e.annotate(view)
@@ -1099,6 +1137,10 @@ type errorPosition struct {
 // annotate is [SourceError.Annotate] that also returns the indices of the
 // lines of view it marked, with repeats.
 func (e *SourceError) annotate(view *line.View) ([]int, error) {
+	if e == nil {
+		return nil, ErrNoLocation
+	}
+
 	var positions []errorPosition
 
 	if e.locErr == nil {
