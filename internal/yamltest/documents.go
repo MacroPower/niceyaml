@@ -18,6 +18,18 @@ func FirstDocument(t *testing.T, input string) *niceyaml.Document {
 	return FirstDocumentWithPath(t, input, "")
 }
 
+// Bind binds err to the single document of source through
+// [niceyaml.Document.Bind]. The test fails when the source does not hold
+// exactly one document.
+func Bind(t *testing.T, source *niceyaml.Source, err error) error {
+	t.Helper()
+
+	doc, docErr := source.Document()
+	require.NoError(t, docErr)
+
+	return doc.Bind(err)
+}
+
 // FirstDocumentWithPath creates a [*niceyaml.Document] with file path
 // context for testing. It returns the first document in the input.
 //

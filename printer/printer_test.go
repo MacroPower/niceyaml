@@ -201,7 +201,7 @@ func TestPrinter_PrintError(t *testing.T) {
 	)
 
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
-	bound := source.Bind(niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("b"))))
+	bound := yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("b"))))
 	other := niceyaml.NewSourceFromString("c: 3\n")
 
 	excerpt := stringtest.JoinLF(
@@ -238,17 +238,17 @@ func TestPrinter_PrintError(t *testing.T) {
 			want: "document 0: 2:4: $.b: bad\n\n" + excerpt,
 		},
 		"bound error without a location": {
-			err:  source.Bind(niceyaml.NewError("bad")),
+			err:  yamltest.Bind(t, source, niceyaml.NewError("bad")),
 			want: "bad",
 		},
 		"bound error with an empty message": {
-			err:  source.Bind(niceyaml.NewErrorFrom(nil, niceyaml.WithPath(paths.Root().Child("b")))),
+			err:  yamltest.Bind(t, source, niceyaml.NewErrorFrom(nil, niceyaml.WithPath(paths.Root().Child("b")))),
 			want: "2:4: $.b:\n\n" + excerpt,
 		},
 		"joined bound errors print every excerpt": {
 			err: errors.Join(
 				fmt.Errorf("first: %w", bound),
-				fmt.Errorf("second: %w", other.Bind(
+				fmt.Errorf("second: %w", yamltest.Bind(t, other,
 					niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("c"))),
 				)),
 			),
@@ -256,7 +256,7 @@ func TestPrinter_PrintError(t *testing.T) {
 				"<nameTag>c</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>3</genericError>",
 		},
 		"nested errors draw as branches in position order": {
-			err: source.Bind(niceyaml.NewError("2 problems", niceyaml.WithErrors(
+			err: yamltest.Bind(t, source, niceyaml.NewError("2 problems", niceyaml.WithErrors(
 				niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b"))),
 				niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a"))),
 			))),
@@ -264,11 +264,11 @@ func TestPrinter_PrintError(t *testing.T) {
 		},
 		"joined nested errors draw as a forest of subtrees": {
 			err: errors.Join(
-				source.Bind(niceyaml.NewError("2 problems", niceyaml.WithErrors(
+				yamltest.Bind(t, source, niceyaml.NewError("2 problems", niceyaml.WithErrors(
 					niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a"))),
 					niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b"))),
 				))),
-				other.Bind(niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("c")))),
+				yamltest.Bind(t, other, niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("c")))),
 			),
 			want: "├── 2 problems\n│   ├── 1:4: $.a: bad a\n│   └── 2:4: $.b: bad b\n└── 1:4: $.c: bad\n\n" +
 				annotated + "\n\n" +

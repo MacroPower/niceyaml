@@ -70,10 +70,9 @@ type Renderer interface {
 //
 // The location is a [paths.Path], a [position.Position], or a
 // [position.Range], set with [WithPath], [WithPosition], or [WithRange]. A
-// path resolves within one document of a source, and the binder picks
-// which: a [Document] binds the Errors its methods and validators produce,
-// and [Document.Bind] binds one built elsewhere, to itself; [Source.Bind]
-// binds to the single document [Source.Document] picks.
+// path resolves within one document of a source: the [Document] that
+// binds the Error, whether its own methods and validators produced the
+// Error or [Document.Bind] bound one built elsewhere.
 //
 // An Error carries what a producer knows and nothing about presentation. A
 // validator that knows a path uses [WithPath] and need not hold the source.
@@ -434,8 +433,8 @@ func (e *Error) locate(lookup func() (*Document, error)) (location, error) {
 // SourceError is an error bound to the [*Source] it occurred in.
 //
 // [Source.File], [Source.Documents], and the [Document] methods bind every
-// error they return, and [Source.Bind] and [Document.Bind] bind an error
-// built elsewhere. Binding resolves
+// error they return, and [Document.Bind] binds an error built elsewhere.
+// Binding resolves
 // every location in the error against the source, once, so a SourceError
 // never changes and every method of it reads that result: [SourceError.Error]
 // puts the position in front of the message, [SourceError.Location]
@@ -448,9 +447,7 @@ func (e *Error) locate(lookup func() (*Document, error)) (location, error) {
 //		fmt.Printf("%+v\n", err)
 //	}
 //
-// A path resolves in the document the binder picked: the [Document] that
-// bound the error, or the single document [Source.Document] picks for an
-// error bound through [Source.Bind].
+// A path resolves in the [Document] that bound the error.
 //
 // The bound error is a tree, and the SourceError presents all of it. Its
 // own position is that of the first [Error] along the cause chain, the
@@ -474,7 +471,7 @@ func (e *Error) locate(lookup func() (*Document, error)) (location, error) {
 // A SourceError never rewrites the message of the error it binds. The text
 // a wrapper such as [fmt.Errorf] produced stays as it was, and the position
 // goes in front of it. An error built by hand therefore goes through
-// [Source.Bind] first, and context around the SourceError comes after,
+// [Document.Bind] first, and context around the SourceError comes after,
 // so the position stays beside the message.
 //
 // The marks of an error are decoration on a [line.View], so the caller
@@ -492,8 +489,8 @@ func (e *Error) locate(lookup func() (*Document, error)) (location, error) {
 // A SourceError implements the error interface and unwraps to the error it
 // was created from, so [errors.Is] and [errors.As] see through it.
 //
-// Create instances with [Source.Bind] or [Document.Bind], or
-// receive them from the [Source] and [Document] methods.
+// Create instances with [Document.Bind], or receive them from the [Source]
+// and [Document] methods.
 type SourceError struct {
 	err error
 	// The reason the main location did not resolve, which is nil when it
@@ -523,20 +520,22 @@ type SourceError struct {
 const defaultContextLines = 2
 
 // newSourceError binds err to src and resolves every location in it, with
-// paths resolving in doc, or in the single document src picks when doc is
-// nil. The main unit gives the SourceError its position, or the reason it
-// has none, and every other unit its annotation.
+// paths resolving in doc. A nil doc, which src passes for the errors it
+// produces itself, resolves no path. The main unit gives the SourceError
+// its position, or the reason it has none, and every other unit its
+// annotation.
 func newSourceError(err error, src *Source, doc *Document) *SourceError {
 	e := &SourceError{err: err, source: src, nestedPos: make(map[*Error]position.Position)}
 
-	// The document paths resolve in. Source.Document parses the source on
-	// the first path that asks and serves its cache after that.
+	// The document paths resolve in. The Source binds only the errors it
+	// produces itself, which carry no path, so a path with no document
+	// reports that rather than pick one.
 	lookup := func() (*Document, error) {
-		if doc != nil {
-			return doc, nil
+		if doc == nil {
+			return nil, fmt.Errorf("%w: no document to resolve the path in", ErrNoLocation)
 		}
 
-		return src.Document()
+		return doc, nil
 	}
 
 	units := collectUnits(err)
@@ -933,10 +932,8 @@ func writeString(f fmt.State, s string) {
 // the result. It returns [ErrNoLocation] when the error carries no
 // location or its path resolves to a token without one,
 // [ErrOutOfRange] when the location starts on a line the source does not
-// hold, the resolution error from [go.jacobcolvin.com/niceyaml/paths] when
-// a path does not resolve, and the error [Source.Document] returns when a
-// path error bound through [Source.Bind] has no single document to
-// resolve in.
+// hold, and the resolution error from [go.jacobcolvin.com/niceyaml/paths]
+// when a path does not resolve.
 func (e *SourceError) Location() (position.Range, error) {
 	if e.rngErr != nil {
 		return position.Range{}, e.rngErr

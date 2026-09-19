@@ -37,7 +37,7 @@
 // [Source], in this package, is the file. It owns the tokens from go-yaml,
 // lazily parses them into an AST with [Source.File], returns each YAML
 // document in the file as a [Document] from [Source.Documents], and binds
-// the errors it and its Documents produce to itself. [Source.Bind]
+// the errors it and its Documents produce to itself. [Document.Bind]
 // binds errors built elsewhere.
 //
 // [line.Lines] is the content, the tokens organized into lines, and it
@@ -66,9 +66,8 @@
 //
 // [SourceError] binds an error to its [Source] and to the document its
 // path resolves in. Every error a Source or one of its Documents produces
-// is one, [Document.Bind] binds an error built elsewhere to that
-// document, and [Source.Bind] binds one to the single document
-// [Source.Document] picks. [SourceError.Error] puts the resolved position
+// is one, and [Document.Bind] binds an error built elsewhere to that
+// document. [SourceError.Error] puts the resolved position
 // in front of the message, or the name of the source alone when the error
 // carries no location, and [SourceError.Excerpt] returns the surrounding
 // lines with the location highlighted. The %+v verb prints both.

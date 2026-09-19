@@ -51,9 +51,7 @@ type SelfValidator interface {
 // A validator that knows a location returns an unbound [*Error], and the
 // Document binds it to the source with itself as the document its path
 // resolves in. A validator that binds an error itself does so through
-// [Document.Bind], since the Document leaves a bound error as it is,
-// and [Source.Bind] resolves paths in the single document the source
-// picks.
+// [Document.Bind], since the Document leaves a bound error as it is.
 //
 // See [ValidatorFunc], [go.jacobcolvin.com/niceyaml/schema.Schema],
 // and [go.jacobcolvin.com/niceyaml/schema.Registry] for
@@ -308,19 +306,16 @@ func (dd *Document) Validate(ctx context.Context, validators ...Validator) error
 	return nil
 }
 
-// Bind binds err to the document's source, as [Source.Bind] does, with
-// the paths in err resolving in this document rather than in the single
-// document the source picks, so a validator on a multi-document source
-// binds its error through the document it checked.
-//
-// If err is nil, Bind returns nil. An error already bound to this source
-// comes back as it is. An error without a location, such as one from
-// [go.jacobcolvin.com/niceyaml/paths], binds all the same, and the bound
-// error names the source in front of the message.
+// Bind binds err to the document's source, with the paths in err
+// resolving in this document. It resolves every location in err as it
+// binds, so the position [SourceError.Error] reports and the range
+// [SourceError.Location] returns are fixed from then on, and
+// [SourceError.Detail] and [SourceError.Excerpt] render the excerpt with
+// the [Renderer] of the caller's choice.
 //
 // The Document methods bind the errors they return already. Bind is for
-// an error built elsewhere, such as one from a check the caller runs on a
-// value it took from the document:
+// an error built elsewhere, such as a validator's [*Error] with a path, or
+// one from a check the caller runs on a value it took from the document:
 //
 //	value, err := doc.Get[map[string]any](ctx, path)
 //	if err != nil {
@@ -328,6 +323,22 @@ func (dd *Document) Validate(ctx context.Context, validators ...Validator) error
 //	}
 //
 //	return doc.Bind(check(value))
+//
+// An error without a location, such as one from
+// [go.jacobcolvin.com/niceyaml/paths], binds all the same, and the bound
+// error names the source in front of the message, as "name: msg", so an
+// error from one file of many still says which file. The message of err
+// stays as it is, and the position goes in front of it, so bind such an
+// error before adding context with [fmt.Errorf] to keep the position
+// beside the message:
+//
+//	fmt.Errorf("document %d: %w", i, doc.Bind(err))
+//
+// If err is nil, Bind returns nil. If the first [*SourceError] in err's
+// chain is bound to this source already, Bind returns err unchanged, so
+// binding is idempotent. A nil [*Error] or [*SourceError] pointer as err
+// carries nothing to bind and comes back as it is, and one inside the
+// chain binds nothing, so Bind looks past it. Bind never modifies err.
 func (dd *Document) Bind(err error) error {
 	if isNothing(err) {
 		return err

@@ -1917,7 +1917,7 @@ func TestDocument_ErrorsBindToSource(t *testing.T) {
 		var pre error
 
 		validator := niceyaml.ValidatorFunc(func(_ context.Context, doc *niceyaml.Document) error {
-			pre = doc.Source().Bind(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
+			pre = yamltest.Bind(t, doc.Source(), niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
 
 			return pre
 		})
@@ -2152,20 +2152,6 @@ func TestDocument_Bind(t *testing.T) {
 		require.ErrorAs(t, err, &bound)
 		assert.Same(t, source, bound.Source())
 		assert.Equal(t, "3:7: $.name: bad name", err.Error())
-	})
-
-	t.Run("the source alone has no single document to resolve in", func(t *testing.T) {
-		t.Parallel()
-
-		err := source.Bind(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
-		assert.Equal(t, "$.name: bad name", err.Error())
-
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
-
-		_, err = bound.Location()
-		require.ErrorIs(t, err, niceyaml.ErrMultipleDocuments)
 	})
 
 	t.Run("an error bound to the source comes back as it is", func(t *testing.T) {

@@ -105,7 +105,7 @@ func TestError(t *testing.T) {
 			want: "something went wrong",
 		},
 		"with path and source shows annotated source": {
-			err: xmlSource(source).Bind(niceyaml.NewError(
+			err: yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 				"invalid value",
 				niceyaml.WithPath(paths.Root().Child("key").Key()),
 			)),
@@ -118,7 +118,7 @@ func TestError(t *testing.T) {
 			),
 		},
 		"with direct token bypasses path resolution": {
-			err: xmlSource(source).Bind(niceyaml.NewError(
+			err: yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 				"bad token",
 				niceyaml.WithPosition(position.NewFromToken(tokens[0])),
 			)),
@@ -175,7 +175,7 @@ func TestSourceError_Error_Name(t *testing.T) {
 			t.Parallel()
 
 			source := niceyaml.NewSourceFromString("name: test\nvalue: 123\n", tc.opts...)
-			err := source.Bind(niceyaml.NewError(
+			err := yamltest.Bind(t, source, niceyaml.NewError(
 				"bad value",
 				niceyaml.WithPath(paths.Root().Child("value")),
 			))
@@ -228,7 +228,7 @@ func TestSourceError_Error_Name(t *testing.T) {
 			}
 
 			source := niceyaml.NewSourceFromString("name: test\nvalue: 123\n", opts...)
-			err := source.Bind(tc.err)
+			err := yamltest.Bind(t, source, tc.err)
 
 			assert.Equal(t, tc.want, err.Error())
 
@@ -242,7 +242,7 @@ func TestSourceError_Error_Name(t *testing.T) {
 	}
 }
 
-func TestSourceBind(t *testing.T) {
+func TestDocument_BindRender(t *testing.T) {
 	t.Parallel()
 
 	sourceInput := stringtest.Input(`
@@ -286,7 +286,7 @@ func TestSourceBind(t *testing.T) {
 			source := niceyaml.NewSourceFromString(sourceInput)
 			inputErr := tc.inputErr()
 
-			got := source.Bind(inputErr)
+			got := yamltest.Bind(t, source, inputErr)
 
 			if tc.wantNil {
 				assert.NoError(t, got)
@@ -434,7 +434,7 @@ func TestError_GracefulDegradation(t *testing.T) {
 		want string
 	}{
 		"invalid path": {
-			err: niceyaml.NewSourceFromString(source).Bind(niceyaml.NewError(
+			err: yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
 				"not found",
 				niceyaml.WithPath(paths.Root().Child("nonexistent").Key()),
 			)),
@@ -448,14 +448,14 @@ func TestError_GracefulDegradation(t *testing.T) {
 			want: "$.key: missing source",
 		},
 		"empty source": {
-			err: niceyaml.NewSourceFromTokens(emptyTokens).Bind(niceyaml.NewError(
+			err: yamltest.Bind(t, niceyaml.NewSourceFromTokens(emptyTokens), niceyaml.NewError(
 				"error in empty source",
 				niceyaml.WithPath(paths.Root().Child("key").Key()),
 			)),
 			want: "$.key: error in empty source\n\nno excerpt: resolve $.key: not found: document has no content",
 		},
 		"nonexistent path in source": {
-			err: niceyaml.NewSourceFromString(source).Bind(niceyaml.NewError(
+			err: yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
 				"path not found",
 				niceyaml.WithPath(
 					paths.Root().Child("nonexistent").Child("deep").Key(),
@@ -465,7 +465,7 @@ func TestError_GracefulDegradation(t *testing.T) {
 		},
 		"empty document source": {
 			// Tests graceful handling when source has no documents (Docs slice is empty).
-			err: niceyaml.NewSourceFromTokens(emptyTokens).Bind(niceyaml.NewError(
+			err: yamltest.Bind(t, niceyaml.NewSourceFromTokens(emptyTokens), niceyaml.NewError(
 				"empty doc error",
 				niceyaml.WithPath(paths.Root().Child("key").Key()),
 			)),
@@ -589,7 +589,7 @@ func TestErrorAnnotation(t *testing.T) {
 				context = tc.contextLines
 			}
 
-			err := xmlSource(tc.source).Bind(
+			err := yamltest.Bind(t, xmlSource(tc.source),
 				niceyaml.NewError(tc.errMsg, niceyaml.WithPath(tc.path)),
 			)
 
@@ -654,7 +654,7 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := xmlSource(tc.source).Bind(niceyaml.NewError(
+			err := yamltest.Bind(t, xmlSource(tc.source), niceyaml.NewError(
 				tc.errMsg,
 				niceyaml.WithPath(tc.path),
 			))
@@ -679,7 +679,7 @@ func TestWithPrinter(t *testing.T) {
 		printer.WithContainerStyle(lipgloss.NewStyle()),
 	)
 
-	err := niceyaml.NewSourceFromString(source).Bind(niceyaml.NewError(
+	err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
 		"test error",
 		niceyaml.WithPosition(position.NewFromToken(tokens[0])),
 	))
@@ -744,7 +744,7 @@ func TestError_SpecialParentContext(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := xmlSource(tc.source).Bind(niceyaml.NewError(
+			err := yamltest.Bind(t, xmlSource(tc.source), niceyaml.NewError(
 				tc.errMsg,
 				niceyaml.WithPath(tc.path),
 			))
@@ -859,7 +859,7 @@ func TestError_MultiError(t *testing.T) {
 			other: data
 		`)
 
-		err := xmlSource(source).Bind(niceyaml.NewError(
+		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"validation failed",
 			niceyaml.WithPath(paths.Root().Child("name").Key()),
 			niceyaml.WithErrors(
@@ -887,7 +887,7 @@ func TestError_MultiError(t *testing.T) {
 			other: data
 		`)
 
-		err := xmlSource(source).Bind(niceyaml.NewError(
+		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"validation failed",
 			niceyaml.WithPath(paths.Root().Child("name").Key()),
 			niceyaml.WithErrors(
@@ -918,7 +918,7 @@ func TestError_MultiError(t *testing.T) {
 		tokens := lexer.Tokenize(source)
 
 		// Both errors point to the same line.
-		err := xmlSource(source).Bind(niceyaml.NewError(
+		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"validation failed",
 			niceyaml.WithPosition(position.NewFromToken(tokens[0])),
 			niceyaml.WithErrors(
@@ -960,7 +960,7 @@ func TestError_MultiError(t *testing.T) {
 
 		require.NotNil(t, fooToken, "failed to find foo token")
 
-		err := xmlSource(source).Bind(niceyaml.NewError(
+		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"main error",
 			niceyaml.WithPosition(position.NewFromToken(tokens[0])),
 			niceyaml.WithErrors(
@@ -986,7 +986,7 @@ func TestError_MultiError(t *testing.T) {
 			key: value
 		`)
 
-		err := xmlSource(source).Bind(niceyaml.NewError(
+		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"main error",
 			niceyaml.WithPath(paths.Root().Child("key").Key()),
 			niceyaml.WithErrors(
@@ -1028,7 +1028,7 @@ func TestError_MultiError(t *testing.T) {
 			key: value
 		`)
 
-		err := xmlSource(source).Bind(niceyaml.NewError(
+		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"main error",
 			niceyaml.WithPath(paths.Root().Child("key").Key()),
 			niceyaml.WithErrors(
@@ -1089,7 +1089,7 @@ func TestError_MultiError(t *testing.T) {
 		`)
 
 		// Create error with NO main path, but nested error with path.
-		err := xmlSource(source).Bind(niceyaml.NewError(
+		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"validation failed at 1 location",
 			niceyaml.WithErrors(
 				niceyaml.NewError(
@@ -1140,7 +1140,7 @@ func TestError_MultiError(t *testing.T) {
 		`)
 
 		// Create error with nested errors on different lines.
-		err := xmlSource(source).Bind(niceyaml.NewError(
+		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"validation failed at 2 locations",
 			niceyaml.WithErrors(
 				niceyaml.NewError(
@@ -1173,7 +1173,7 @@ func TestError_MultiError(t *testing.T) {
 		`)
 
 		// Create error with some nested errors that resolve and some that don't.
-		err := xmlSource(source).Bind(niceyaml.NewError(
+		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"validation failed",
 			niceyaml.WithErrors(
 				niceyaml.NewError(
@@ -1208,7 +1208,7 @@ func TestError_MultiError(t *testing.T) {
 
 		// No nested error has a location, so nothing annotates the source
 		// and the message is the whole output.
-		err := niceyaml.NewSourceFromString(source).Bind(niceyaml.NewError(
+		err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
 			"validation failed",
 			niceyaml.WithErrors(
 				niceyaml.NewError("nested without location"),
@@ -1236,13 +1236,13 @@ func TestSourceError_Detail_NestedLocations(t *testing.T) {
 		wantDetail bool
 	}{
 		"no nested errors": {
-			err: niceyaml.NewSourceFromString(source).Bind(niceyaml.NewError(
+			err: yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
 				"main error",
 			)),
 			want: "main error",
 		},
 		"nested errors without locations": {
-			err: niceyaml.NewSourceFromString(source).Bind(niceyaml.NewError(
+			err: yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
 				"main error",
 				niceyaml.WithErrors(
 					niceyaml.NewError("nested 1"),
@@ -1252,7 +1252,7 @@ func TestSourceError_Detail_NestedLocations(t *testing.T) {
 			want: "main error\n├── nested 1\n└── nested 2",
 		},
 		"nested error with path": {
-			err: xmlSource(source).Bind(niceyaml.NewError(
+			err: yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 				"main error",
 				niceyaml.WithErrors(
 					niceyaml.NewError(
@@ -1267,7 +1267,7 @@ func TestSourceError_Detail_NestedLocations(t *testing.T) {
 			err: func() error {
 				tokens := lexer.Tokenize(source)
 
-				return xmlSource(source).Bind(niceyaml.NewError(
+				return yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 					"main error",
 					niceyaml.WithErrors(
 						niceyaml.NewError(
@@ -1280,7 +1280,7 @@ func TestSourceError_Detail_NestedLocations(t *testing.T) {
 			wantDetail: true,
 		},
 		"mix of located and unlocated nested errors": {
-			err: xmlSource(source).Bind(niceyaml.NewError(
+			err: yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 				"main error",
 				niceyaml.WithErrors(
 					niceyaml.NewError("no path"),
@@ -1294,7 +1294,7 @@ func TestSourceError_Detail_NestedLocations(t *testing.T) {
 			wantDetail: true,
 		},
 		"nil nested errors only": {
-			err: niceyaml.NewSourceFromString(source).Bind(niceyaml.NewError(
+			err: yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
 				"main error",
 				niceyaml.WithErrors(nil, nil),
 			)),
@@ -1322,7 +1322,7 @@ func TestSourceError_UnresolvedNestedStayInMessage(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("a: 1\n")
-	err := source.Bind(niceyaml.NewError(
+	err := yamltest.Bind(t, source, niceyaml.NewError(
 		"2 schema violations",
 		niceyaml.WithErrors(
 			niceyaml.NewError("bad x", niceyaml.WithPath(paths.Root().Child("x"))),
@@ -1345,7 +1345,7 @@ func TestSourceError_Format_Plain(t *testing.T) {
 	t.Run("marks the location without escape sequences", func(t *testing.T) {
 		t.Parallel()
 
-		err := source.Bind(niceyaml.NewError("bad value", niceyaml.WithPath(paths.Root().Child("b"))))
+		err := yamltest.Bind(t, source, niceyaml.NewError("bad value", niceyaml.WithPath(paths.Root().Child("b"))))
 
 		got := fmt.Sprintf("%+v", err)
 
@@ -1363,7 +1363,7 @@ func TestSourceError_Format_Plain(t *testing.T) {
 	t.Run("nested errors annotate their lines", func(t *testing.T) {
 		t.Parallel()
 
-		err := source.Bind(niceyaml.NewError("2 problems", niceyaml.WithErrors(
+		err := yamltest.Bind(t, source, niceyaml.NewError("2 problems", niceyaml.WithErrors(
 			niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a").Key())),
 			niceyaml.NewError("bad c", niceyaml.WithPath(paths.Root().Child("c"))),
 		)))
@@ -1406,11 +1406,11 @@ func TestSourceError_Format_Plain(t *testing.T) {
 	t.Run("names why no excerpt resolves", func(t *testing.T) {
 		t.Parallel()
 
-		multi := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n")
-		err := multi.Bind(niceyaml.NewError("bad value", niceyaml.WithPath(paths.Root().Child("b"))))
+		src := niceyaml.NewSourceFromString("a: 1\n")
+		err := yamltest.Bind(t, src, niceyaml.NewError("bad value", niceyaml.WithPath(paths.Root().Child("b"))))
 
 		assert.Equal(t,
-			"$.b: bad value\n\nno excerpt: 2:1: multiple documents in source: 2 documents",
+			"$.b: bad value\n\nno excerpt: resolve $.b: not found",
 			fmt.Sprintf("%+v", err),
 		)
 	})
@@ -1419,7 +1419,7 @@ func TestSourceError_Format_Plain(t *testing.T) {
 		t.Parallel()
 
 		src := niceyaml.NewSourceFromString("a: \"x\\ty\"\n")
-		err := src.Bind(niceyaml.NewError("bad", niceyaml.WithRange(
+		err := yamltest.Bind(t, src, niceyaml.NewError("bad", niceyaml.WithRange(
 			position.NewRange(position.New(0, 3), position.New(0, 9)),
 		)))
 
@@ -1438,7 +1438,7 @@ func TestError_NilInnerError(t *testing.T) {
 	err := niceyaml.NewErrorFrom(niceyaml.NewErrorFrom(nil))
 	assert.Empty(t, err.Error())
 
-	wrapped := niceyaml.NewSourceFromString("a: 1\n").Bind(err)
+	wrapped := yamltest.Bind(t, niceyaml.NewSourceFromString("a: 1\n"), err)
 	assert.Empty(t, wrapped.Error())
 	assert.Empty(t, render(wrapped))
 }
@@ -1482,7 +1482,7 @@ func TestError_NilInnerErrorWithLocation(t *testing.T) {
 
 			assert.Equal(t, tc.want, tc.err.Error())
 
-			bound := source.Bind(tc.err)
+			bound := yamltest.Bind(t, source, tc.err)
 			assert.Equal(t, tc.wantBound, bound.Error())
 
 			got := trimLines(render(bound))
@@ -1501,7 +1501,7 @@ func TestError_NestedErrorsKeepInnerPosition(t *testing.T) {
 
 	// Nested errors on the wrapper follow its message and add annotations,
 	// and the wrapper still takes its position from the Error it wraps.
-	wrapped := source.Bind(niceyaml.NewErrorFrom(inner, niceyaml.WithErrors(nested)))
+	wrapped := yamltest.Bind(t, source, niceyaml.NewErrorFrom(inner, niceyaml.WithErrors(nested)))
 	assert.Equal(t, "1:4: $.a: bad a\n2:4: $.b: bad b", wrapped.Error())
 
 	var bound *niceyaml.SourceError
@@ -1527,7 +1527,7 @@ func TestError_NestedLocationWithoutMessage(t *testing.T) {
 
 	// A nested Error built from a nil error names a location and nothing
 	// else, so that location is highlighted and carries no annotation.
-	wrapped := source.Bind(niceyaml.NewErrorFrom(inner, niceyaml.WithErrors(nested)))
+	wrapped := yamltest.Bind(t, source, niceyaml.NewErrorFrom(inner, niceyaml.WithErrors(nested)))
 
 	got := trimLines(render(wrapped))
 	assert.Contains(t, got, "<genericError>1</genericError>")
@@ -1553,7 +1553,7 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 			line6: f
 		`)
 
-		err := xmlSource(source).Bind(niceyaml.NewError(
+		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"validation error",
 			niceyaml.WithErrors(
 				niceyaml.NewError(
@@ -1583,7 +1583,7 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 			line6: f
 		`)
 
-		err := xmlSource(source).Bind(niceyaml.NewError(
+		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"validation error", // No extra context.
 			niceyaml.WithErrors(
 				niceyaml.NewError(
@@ -1615,7 +1615,7 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 			line3: c
 		`)
 
-		err := xmlSource(source).Bind(niceyaml.NewError(
+		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"validation error",
 			niceyaml.WithErrors(
 				niceyaml.NewError(
@@ -1658,7 +1658,7 @@ func TestError_HunkDisplay(t *testing.T) {
 		`)
 
 		// Errors at line1 and line10 with contextLines=1 should create separate hunks.
-		err := xmlSource(source).Bind(niceyaml.NewError(
+		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"validation error",
 			niceyaml.WithErrors(
 				niceyaml.NewError(
@@ -1706,7 +1706,7 @@ func TestError_HunkDisplay(t *testing.T) {
 
 		// The position points past the end of line 5, where the view holds
 		// no token, so there is nothing to highlight.
-		err := xmlSource(source).Bind(niceyaml.NewError(
+		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"boom",
 			niceyaml.WithPosition(position.New(4, 49)),
 		))
@@ -1739,7 +1739,7 @@ func TestError_HunkDisplay(t *testing.T) {
 			line10: j
 		`)
 
-		err := xmlSource(source).Bind(niceyaml.NewError(
+		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"missing",
 			niceyaml.WithPath(paths.Root().Child("line4")),
 		))
@@ -1765,7 +1765,7 @@ func TestError_HunkDisplay(t *testing.T) {
 			line6: f
 		`)
 
-		err := xmlSource(source).Bind(niceyaml.NewError(
+		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"validation error",
 			niceyaml.WithPath(paths.Root().Child("line1").Key()),
 			niceyaml.WithErrors(
@@ -1802,7 +1802,7 @@ func TestError_HunkDisplay(t *testing.T) {
 
 		// Errors at line1 and line3 with contextLines=1 should merge into one hunk
 		// since they're within 2*contextLines of each other.
-		err := xmlSource(source).Bind(niceyaml.NewError(
+		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"validation error",
 			niceyaml.WithErrors(
 				niceyaml.NewError(
@@ -1842,7 +1842,7 @@ func TestError_HunkDisplay(t *testing.T) {
 		`)
 
 		// No main path, but nested errors at distant locations.
-		err := xmlSource(source).Bind(niceyaml.NewError(
+		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"validation failed at 2 locations",
 			niceyaml.WithErrors(
 				niceyaml.NewError(
@@ -1879,7 +1879,7 @@ func TestError_HunkDisplay(t *testing.T) {
 		`)
 
 		// Errors at first and last lines.
-		err := xmlSource(source).Bind(niceyaml.NewError(
+		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"validation error",
 			niceyaml.WithErrors(
 				niceyaml.NewError(
@@ -1921,7 +1921,7 @@ func TestError_HunkDisplay(t *testing.T) {
 		`)
 
 		// Main error at line1, nested error at line10.
-		err := xmlSource(source).Bind(niceyaml.NewError(
+		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"main error",
 			niceyaml.WithPath(paths.Root().Child("line1").Key()),
 			niceyaml.WithErrors(
@@ -1954,7 +1954,7 @@ func TestError_HunkDisplay(t *testing.T) {
 
 		// With contextLines=0, errors at line1 and line2 should merge because
 		// they're within threshold (2*0+1=1) of each other.
-		err := xmlSource(source).Bind(niceyaml.NewError(
+		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"validation error",
 			niceyaml.WithErrors(
 				niceyaml.NewError(
@@ -2015,7 +2015,7 @@ func TestError_Width(t *testing.T) {
 				printer.WithWidth(tc.width),
 			)
 
-			err := niceyaml.NewSourceFromString(source).Bind(niceyaml.NewError("test error",
+			err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError("test error",
 				niceyaml.WithPosition(position.NewFromToken(tokens[0])),
 			))
 
@@ -2060,7 +2060,7 @@ func TestError_Width_WithCustomPrinter(t *testing.T) {
 
 	errPrinter := customPrinter.With(printer.WithWidth(30))
 
-	err := niceyaml.NewSourceFromString(source).Bind(niceyaml.NewError(
+	err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
 		"test error",
 		niceyaml.WithPosition(position.NewFromToken(tokens[0])),
 	))
@@ -2094,7 +2094,7 @@ func TestError_Width_DefaultPrinter(t *testing.T) {
 	// A printer with only a width keeps the default styles and gutter.
 	errPrinter := printer.New(printer.WithWidth(30))
 
-	err := niceyaml.NewSourceFromString(source).Bind(niceyaml.NewError(
+	err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
 		"test error",
 		niceyaml.WithPosition(position.NewFromToken(tokens[0])),
 	))
@@ -2169,7 +2169,7 @@ func TestError_Width_AnnotationWrapping(t *testing.T) {
 				printer.WithWidth(tc.width),
 			)
 
-			err := niceyaml.NewSourceFromString(source).Bind(niceyaml.NewError(
+			err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
 				"validation failed",
 				niceyaml.WithPath(paths.Root().Child("key").Key()),
 				niceyaml.WithErrors(
@@ -2207,7 +2207,7 @@ func TestError_Width_MultipleAnnotationsWrapping(t *testing.T) {
 		printer.WithWidth(50),
 	)
 
-	err := niceyaml.NewSourceFromString(source).Bind(niceyaml.NewError(
+	err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
 		"validation failed at 2 locations",
 		niceyaml.WithErrors(
 			niceyaml.NewError(
@@ -2253,7 +2253,7 @@ func TestError_Width_CombinedAnnotationsOnSameLine(t *testing.T) {
 		printer.WithWidth(40),
 	)
 
-	err := niceyaml.NewSourceFromString(source).Bind(niceyaml.NewError(
+	err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
 		"validation failed",
 		niceyaml.WithPath(paths.Root().Child("key").Key()),
 		niceyaml.WithErrors(
@@ -2306,7 +2306,7 @@ func TestError_TokenRendersFromSource(t *testing.T) {
 
 	tk := literal.Value.GetToken()
 
-	got := trimLines(render(source.Bind(niceyaml.NewError(
+	got := trimLines(render(yamltest.Bind(t, source, niceyaml.NewError(
 		"bad block",
 		niceyaml.WithPosition(position.NewFromToken(tk)),
 		niceyaml.WithErrors(
@@ -2361,39 +2361,6 @@ func TestError_BoundDocument(t *testing.T) {
 		assert.Contains(t, got, "^ bad name")
 		assert.NotContains(t, got, "<genericError>first</genericError>")
 	})
-
-	t.Run("the source binds to its single document", func(t *testing.T) {
-		t.Parallel()
-
-		single := xmlSource("name: only\n")
-		err := single.Bind(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
-
-		got := trimLines(render(err))
-
-		assert.True(t, strings.HasPrefix(got, "1:7: $.name: bad name"), got)
-		assert.Contains(t, got, "<genericError>only</genericError>")
-	})
-
-	t.Run("a path bound through a multi-document source names the reason", func(t *testing.T) {
-		t.Parallel()
-
-		err := source.Bind(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
-
-		// The message carries no position, and the detail says why the
-		// excerpt is missing rather than dropping it without a trace.
-		assert.Equal(t, "$.name: bad name", err.Error())
-		assert.Equal(t,
-			"$.name: bad name\n\nno excerpt: 2:1: multiple documents in source: 2 documents",
-			render(err),
-		)
-
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
-
-		_, err = bound.Location()
-		require.ErrorIs(t, err, niceyaml.ErrMultipleDocuments)
-	})
 }
 
 func TestError_DoesNotMutateSource(t *testing.T) {
@@ -2405,7 +2372,7 @@ func TestError_DoesNotMutateSource(t *testing.T) {
 		c: 3
 	`))
 
-	err := source.Bind(niceyaml.NewError(
+	err := yamltest.Bind(t, source, niceyaml.NewError(
 		"main",
 		niceyaml.WithErrors(
 			niceyaml.NewError("nested", niceyaml.WithPath(paths.Root().Child("b"))),
@@ -2545,7 +2512,7 @@ func TestError_NestedErrorsRenderAsAnnotations(t *testing.T) {
 		niceyaml.WithErrors(badA, badB),
 	)
 
-	wrapped := source.Bind(fmt.Errorf("document 0: %w", inner))
+	wrapped := yamltest.Bind(t, source, fmt.Errorf("document 0: %w", inner))
 
 	// The message lists the nested errors behind their positions, which
 	// stay in place behind the context the wrapper added. They are
@@ -2580,7 +2547,7 @@ func TestError_NestedErrorChains(t *testing.T) {
 		t.Parallel()
 
 		source := xmlSource("a: 1\nb: 2\nc: 3\n")
-		err := source.Bind(niceyaml.NewError(
+		err := yamltest.Bind(t, source, niceyaml.NewError(
 			"outer",
 			niceyaml.WithPath(paths.Root().Child("a")),
 			niceyaml.WithErrors(
@@ -2613,7 +2580,7 @@ func TestError_NestedErrorChains(t *testing.T) {
 		tk := source.Lines().TokenAt(position.New(1, 0))
 		require.NotNil(t, tk)
 
-		err := source.Bind(niceyaml.NewError(
+		err := yamltest.Bind(t, source, niceyaml.NewError(
 			"outer",
 			niceyaml.WithPath(paths.Root().Child("a")),
 			niceyaml.WithErrors(
@@ -2633,7 +2600,7 @@ func TestError_NestedMessageSpansLines(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
-	err := source.Bind(niceyaml.NewError(
+	err := yamltest.Bind(t, source, niceyaml.NewError(
 		"validation failed",
 		niceyaml.WithErrors(
 			niceyaml.NewError(
@@ -2694,7 +2661,7 @@ func TestSourceError_NestedPositionsBehindWrappers(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, source.Bind(tc.err).Error())
+			assert.Equal(t, tc.want, yamltest.Bind(t, source, tc.err).Error())
 		})
 	}
 }
@@ -2892,7 +2859,7 @@ func TestError_RangeRendersFromSource(t *testing.T) {
 	source := xmlSource("key: some value\n")
 	rng := position.NewRange(position.New(0, 5), position.New(0, 9))
 
-	err := source.Bind(niceyaml.NewError("bad word", niceyaml.WithRange(rng)))
+	err := yamltest.Bind(t, source, niceyaml.NewError("bad word", niceyaml.WithRange(rng)))
 
 	// The headline is 1-indexed, and the highlight covers the range rather
 	// than the token under it.
@@ -3009,7 +2976,7 @@ func TestSourceError_Location_MultiLineToken(t *testing.T) {
 
 	var bound *niceyaml.SourceError
 
-	require.ErrorAs(t, source.Bind(niceyaml.NewError("bad",
+	require.ErrorAs(t, yamltest.Bind(t, source, niceyaml.NewError("bad",
 		niceyaml.WithPath(paths.Root().Child("text")),
 	)), &bound)
 
@@ -3082,7 +3049,7 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 
 			var bound *niceyaml.SourceError
 
-			require.ErrorAs(t, source.Bind(tc.err), &bound)
+			require.ErrorAs(t, yamltest.Bind(t, source, tc.err), &bound)
 
 			got, err := bound.Excerpt(2)
 			require.ErrorIs(t, err, tc.is)
@@ -3100,7 +3067,7 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 
 		var bound *niceyaml.SourceError
 
-		require.ErrorAs(t, source.Bind(niceyaml.NewError("bad", niceyaml.WithErrors(
+		require.ErrorAs(t, yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.WithErrors(
 			niceyaml.NewError("first", niceyaml.WithPath(paths.Root().Child("missing"))),
 			niceyaml.NewError("second", niceyaml.WithPath(paths.Root().Child("value"))),
 		))), &bound)
@@ -3124,7 +3091,7 @@ const excerptSource = "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\nf: 6\ng: 7\nh: 8\ni: 9\nj: 
 func excerptError(t *testing.T) *niceyaml.SourceError {
 	t.Helper()
 
-	err := niceyaml.NewSourceFromString(excerptSource).Bind(niceyaml.NewError(
+	err := yamltest.Bind(t, niceyaml.NewSourceFromString(excerptSource), niceyaml.NewError(
 		"bad b",
 		niceyaml.WithPath(paths.Root().Child("b")),
 		niceyaml.WithErrors(
@@ -3251,7 +3218,11 @@ func TestSourceError_Excerpt(t *testing.T) {
 
 		var bound *niceyaml.SourceError
 
-		require.ErrorAs(t, niceyaml.NewSourceFromString(excerptSource).Bind(niceyaml.NewError("bad")), &bound)
+		require.ErrorAs(
+			t,
+			yamltest.Bind(t, niceyaml.NewSourceFromString(excerptSource), niceyaml.NewError("bad")),
+			&bound,
+		)
 
 		excerpt, err := bound.Excerpt(2)
 		require.ErrorIs(t, err, niceyaml.ErrNoLocation)
@@ -3314,10 +3285,10 @@ func TestSourceError_Annotate(t *testing.T) {
 
 		var first, second *niceyaml.SourceError
 
-		require.ErrorAs(t, source.Bind(niceyaml.NewError(
+		require.ErrorAs(t, yamltest.Bind(t, source, niceyaml.NewError(
 			"bad b", niceyaml.WithPath(paths.Root().Child("b")),
 		)), &first)
-		require.ErrorAs(t, source.Bind(niceyaml.NewError(
+		require.ErrorAs(t, yamltest.Bind(t, source, niceyaml.NewError(
 			"bad d",
 			niceyaml.WithErrors(niceyaml.NewError("too big", niceyaml.WithPath(paths.Root().Child("d")))),
 		)), &second)
@@ -3365,7 +3336,7 @@ func TestSourceError_Annotate(t *testing.T) {
 
 				var bound *niceyaml.SourceError
 
-				require.ErrorAs(t, source.Bind(tc.err), &bound)
+				require.ErrorAs(t, yamltest.Bind(t, source, tc.err), &bound)
 
 				view := source.View()
 
@@ -3389,7 +3360,7 @@ func TestSourceError_TreeBranches(t *testing.T) {
 	t.Run("join branches are annotated", func(t *testing.T) {
 		t.Parallel()
 
-		err := source.Bind(errors.Join(badA, badB))
+		err := yamltest.Bind(t, source, errors.Join(badA, badB))
 
 		assert.Equal(t, "1:4: $.a: bad a\n$.b: bad b", err.Error())
 
@@ -3403,7 +3374,7 @@ func TestSourceError_TreeBranches(t *testing.T) {
 	t.Run("branches below a wrapper are annotated", func(t *testing.T) {
 		t.Parallel()
 
-		err := source.Bind(fmt.Errorf("document 0: %w", errors.Join(
+		err := yamltest.Bind(t, source, fmt.Errorf("document 0: %w", errors.Join(
 			fmt.Errorf("first: %w", badA),
 			niceyaml.NewError("summary", niceyaml.WithErrors(badB, badC)),
 		)))
@@ -3420,7 +3391,7 @@ func TestSourceError_TreeBranches(t *testing.T) {
 		t.Parallel()
 
 		missing := niceyaml.NewError("bad x", niceyaml.WithPath(paths.Root().Child("x")))
-		err := source.Bind(errors.Join(badA, missing))
+		err := yamltest.Bind(t, source, errors.Join(badA, missing))
 
 		got := trimLines(render(err))
 		assert.Equal(t, "1:4: $.a: bad a\n$.x: bad x", strings.SplitN(got, "\n\n", 2)[0])
@@ -3431,8 +3402,8 @@ func TestSourceError_TreeBranches(t *testing.T) {
 		t.Parallel()
 
 		other := xmlSource("z: 9\n")
-		inner := other.Bind(niceyaml.NewError("bad z", niceyaml.WithPath(paths.Root().Child("z"))))
-		err := source.Bind(errors.Join(badA, inner))
+		inner := yamltest.Bind(t, other, niceyaml.NewError("bad z", niceyaml.WithPath(paths.Root().Child("z"))))
+		err := yamltest.Bind(t, source, errors.Join(badA, inner))
 
 		var bound *niceyaml.SourceError
 
@@ -3485,7 +3456,7 @@ func TestSourceErrors(t *testing.T) {
 			want: []error{first, second},
 		},
 		"binding inside a binding": {
-			err:  niceyaml.NewSourceFromString("c: 3\n").Bind(first),
+			err:  yamltest.Bind(t, niceyaml.NewSourceFromString("c: 3\n"), first),
 			want: nil, // Filled in below, since the outer is built here.
 		},
 	}
@@ -3603,7 +3574,11 @@ func TestSourceError_PositionOf(t *testing.T) {
 
 	var bound *niceyaml.SourceError
 
-	require.ErrorAs(t, source.Bind(niceyaml.NewError("main", niceyaml.WithErrors(badA, badX, mid))), &bound)
+	require.ErrorAs(
+		t,
+		yamltest.Bind(t, source, niceyaml.NewError("main", niceyaml.WithErrors(badA, badX, mid))),
+		&bound,
+	)
 
 	pos, ok := bound.PositionOf(badA)
 	assert.True(t, ok)

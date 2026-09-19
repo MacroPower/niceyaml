@@ -655,7 +655,7 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 	t.Run("path error reports the renumbered line", func(t *testing.T) {
 		t.Parallel()
 
-		err := source.Bind(niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b"))))
+		err := yamltest.Bind(t, source, niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b"))))
 		assert.Equal(t, "2:4: $.b: bad b", err.Error())
 
 		var bound *niceyaml.SourceError
@@ -677,7 +677,7 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 		tk := view.TokenAt(position.New(2, 0))
 		require.NotNil(t, tk)
 
-		err := source.Bind(niceyaml.NewError("bad c", niceyaml.WithPosition(position.NewFromToken(tk))))
+		err := yamltest.Bind(t, source, niceyaml.NewError("bad c", niceyaml.WithPosition(position.NewFromToken(tk))))
 		assert.Equal(t, "3:1: bad c", err.Error())
 
 		got := trimLines(render(err))
@@ -695,7 +695,7 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 
 		require.ErrorAs(
 			t,
-			source.Bind(niceyaml.NewError("bad d", niceyaml.WithPosition(position.NewFromToken(last)))),
+			yamltest.Bind(t, source, niceyaml.NewError("bad d", niceyaml.WithPosition(position.NewFromToken(last)))),
 			&bound,
 		)
 
@@ -1139,7 +1139,7 @@ func TestSource_TokenAt(t *testing.T) {
 	}
 }
 
-func TestSource_Bind(t *testing.T) {
+func TestDocument_BindChain(t *testing.T) {
 	t.Parallel()
 
 	t.Run("wraps niceyaml.Error", func(t *testing.T) {
@@ -1148,7 +1148,7 @@ func TestSource_Bind(t *testing.T) {
 		source := niceyaml.NewSourceFromString("key: value\n")
 		yamlErr := niceyaml.NewError("test error")
 
-		wrapped := source.Bind(yamlErr)
+		wrapped := yamltest.Bind(t, source, yamlErr)
 
 		require.Error(t, wrapped)
 
@@ -1161,7 +1161,7 @@ func TestSource_Bind(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString("key: value\n")
-		wrapped := source.Bind(nil)
+		wrapped := yamltest.Bind(t, source, nil)
 
 		assert.NoError(t, wrapped)
 	})
@@ -1173,7 +1173,7 @@ func TestSource_Bind(t *testing.T) {
 		yamlErr := niceyaml.NewError("test error")
 		outer := fmt.Errorf("document 3: %w", yamlErr)
 
-		wrapped := source.Bind(outer)
+		wrapped := yamltest.Bind(t, source, outer)
 
 		require.ErrorIs(t, wrapped, outer)
 		assert.Contains(t, wrapped.Error(), "document 3: ")
@@ -1207,7 +1207,7 @@ func TestSource_Bind(t *testing.T) {
 
 				source := niceyaml.NewSourceFromString("key: value\n", tc.opts...)
 
-				wrapped := source.Bind(stdErr)
+				wrapped := yamltest.Bind(t, source, stdErr)
 				require.ErrorIs(t, wrapped, stdErr)
 
 				var bound *niceyaml.SourceError
@@ -1233,7 +1233,7 @@ func TestSource_Bind(t *testing.T) {
 
 		err := error(nilErr)
 
-		assert.Equal(t, err, source.Bind(err))
+		assert.Equal(t, err, yamltest.Bind(t, source, err))
 	})
 
 	t.Run("binds context around a nil Error without a location", func(t *testing.T) {
@@ -1245,7 +1245,7 @@ func TestSource_Bind(t *testing.T) {
 
 		outer := fmt.Errorf("document 3: %w", nilErr)
 
-		wrapped := source.Bind(outer)
+		wrapped := yamltest.Bind(t, source, outer)
 
 		require.ErrorIs(t, wrapped, outer)
 		assert.Equal(t, "config: document 3: <nil>", wrapped.Error())
@@ -1272,7 +1272,7 @@ func TestSource_Bind(t *testing.T) {
 
 				// The nil pointer binds nothing, so the Error in the chain
 				// binds to this source and its path resolves there.
-				wrapped := source.Bind(err)
+				wrapped := yamltest.Bind(t, source, err)
 
 				var bound *niceyaml.SourceError
 
@@ -1299,11 +1299,11 @@ func TestSource_Bind(t *testing.T) {
 		source := niceyaml.NewSourceFromString("name: value\n")
 		namePath := paths.Root().Child("name")
 
-		once := source.Bind(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
-		assert.Same(t, once, source.Bind(once))
+		once := yamltest.Bind(t, source, niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
+		assert.Same(t, once, yamltest.Bind(t, source, once))
 
 		outer := fmt.Errorf("document 0: %w", once)
-		assert.Same(t, outer, source.Bind(outer))
+		assert.Same(t, outer, yamltest.Bind(t, source, outer))
 	})
 
 	t.Run("wraps an error bound to another source", func(t *testing.T) {
@@ -1313,8 +1313,8 @@ func TestSource_Bind(t *testing.T) {
 		second := niceyaml.NewSourceFromString("# comment\nname: value\n", niceyaml.WithName("second"))
 		namePath := paths.Root().Child("name")
 
-		once := first.Bind(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
-		twice := second.Bind(once)
+		once := yamltest.Bind(t, first, niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
+		twice := yamltest.Bind(t, second, once)
 
 		require.NotSame(t, once, twice)
 
