@@ -310,7 +310,7 @@ func TestRegistry_Caching(t *testing.T) {
 
 		host := strings.TrimPrefix(server.URL, "http://")
 
-		resolve := schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
+		resolve := schema.ResolverFunc(func(_ context.Context, doc *niceyaml.Document) (schema.Ref, error) {
 			// Each document names the same schema with a different scheme
 			// case, as two directives in two files might.
 			scheme := "http"
@@ -318,7 +318,7 @@ func TestRegistry_Caching(t *testing.T) {
 				scheme = "HTTP"
 			}
 
-			return schema.URL(scheme+"://"+host+"/schema.json").Resolve(ctx, doc)
+			return schema.URL(scheme + "://" + host + "/schema.json"), nil
 		})
 
 		reg := schema.NewRegistry(schema.WithResolvers(resolve))
@@ -374,6 +374,23 @@ func TestRegistry_Caching(t *testing.T) {
 		_, err := reg.Lookup(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrResolve)
 		require.ErrorContains(t, err, "empty ref")
+	})
+
+	t.Run("failed ref is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		// A resolver that returns a Ref carrying an error, as one that
+		// builds a File from an empty path does, reports that error.
+		reg := schema.NewRegistry(schema.WithResolvers(
+			schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
+				return schema.File(""), nil
+			}),
+		))
+
+		doc := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
+		_, err := reg.Lookup(t.Context(), doc)
+		require.ErrorIs(t, err, schema.ErrResolve)
+		require.ErrorIs(t, err, schema.ErrEmptyPath)
 	})
 
 	t.Run("load failure is not cached", func(t *testing.T) {
@@ -697,7 +714,7 @@ func TestRegistry_DynamicResolver(t *testing.T) {
 						return schema.Ref{}, schema.ErrNoMatch
 					}
 
-					return schema.File(filepath.Join(tmpDir, kind+".json")).Resolve(ctx, doc)
+					return schema.File(filepath.Join(tmpDir, kind+".json")), nil
 				}),
 			),
 		)

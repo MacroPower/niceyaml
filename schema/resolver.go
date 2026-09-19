@@ -16,19 +16,42 @@ var ErrNoMatch = errors.New("no matching schema")
 
 // Ref is the schema a [Resolver] names for a document: a [*Schema]
 // compiled already, from [Compiled], or a key and a function that loads
-// the bytes to compile, from [Loadable].
+// the bytes to compile, from [Loadable]. [Embedded], [File], [URL], and
+// [FileOrURL] build Refs of the second kind.
+//
+// A Ref is itself a [Resolver] that names its schema for every document,
+// so one goes into [WithResolvers] or [When] as it is, and a resolver that
+// picks a schema from the document returns one:
+//
+//	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
+//	    kind, err := doc.Get[string](ctx, kindPath)
+//	    if err != nil {
+//	        return schema.Ref{}, schema.ErrNoMatch
+//	    }
+//
+//	    return schema.File("schemas/" + kind + ".json"), nil
+//	})
 //
 // The registry uses a compiled schema as it is. For a loadable Ref it
 // checks its cache by [Ref.Key] before any bytes move, and calls
 // [Ref.Load] only on a cache miss, so a load that succeeds runs once per
 // key however many documents name it.
 //
-// The zero Ref names no schema. Return it beside an error, as a resolver
-// does with [ErrNoMatch].
+// A Ref built from input that names no schema, such as [File] given an
+// empty path, carries that error instead of a schema: [Ref.Resolve] and
+// [Ref.Load] return it, and the registry reports it as [ErrResolve]. The
+// zero Ref names no schema and carries no error. Return it beside an
+// error, as a resolver does with [ErrNoMatch].
 type Ref struct {
 	schema *Schema
 	load   func(ctx context.Context) ([]byte, error)
+	err    error
 	key    string
+}
+
+// failedRef returns a [Ref] that carries err in place of a schema.
+func failedRef(err error) Ref {
+	return Ref{err: err}
 }
 
 // Compiled creates a new [Ref] that carries s, a schema compiled already,
@@ -79,15 +102,30 @@ func (r Ref) Key() string {
 	return r.key
 }
 
-// Load returns the schema bytes of a [Ref] from [Loadable]. A Ref from
-// [Compiled], or the zero Ref, carries no loader, and Load then returns an
-// error wrapping [ErrLoad].
+// Load returns the schema bytes of a [Ref] from [Loadable]. A Ref that
+// carries an error returns it. A Ref from [Compiled], or the zero Ref,
+// carries no loader, and Load then returns an error wrapping [ErrLoad].
 func (r Ref) Load(ctx context.Context) ([]byte, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+
 	if r.load == nil {
 		return nil, fmt.Errorf("%w: ref carries no loader", ErrLoad)
 	}
 
 	return r.load(ctx)
+}
+
+// Resolve implements [Resolver]. It names the Ref's schema for every
+// document and never reports [ErrNoMatch]. A Ref that carries an error
+// returns it.
+func (r Ref) Resolve(_ context.Context, _ *niceyaml.Document) (Ref, error) {
+	if r.err != nil {
+		return Ref{}, r.err
+	}
+
+	return r, nil
 }
 
 // Resolver finds the schema for a document.
@@ -101,12 +139,11 @@ func (r Ref) Load(ctx context.Context) ([]byte, error) {
 //
 // A resolver may inspect the document's content, file path, or tokens, or
 // ignore the document and always name the same schema. The document is
-// never nil, so a resolver reads it without checking. A [*Schema] and the
-// loaders [Embedded], [File], [URL], and [FileOrURL] are resolvers of the
-// second kind, and [When] guards any resolver with a
-// [go.jacobcolvin.com/niceyaml/schema/matcher.Matcher].
+// never nil, so a resolver reads it without checking. A [Ref] and a
+// [*Schema] are resolvers of the second kind, and [When] guards any
+// resolver with a [go.jacobcolvin.com/niceyaml/schema/matcher.Matcher].
 //
-// See [ResolverFunc], [Schema], [Directive], and
+// See [ResolverFunc], [Ref], [Schema], [Directive], and
 // [go.jacobcolvin.com/niceyaml/schema/schemastore.SchemaStore] for
 // implementations.
 type Resolver interface {
@@ -122,11 +159,7 @@ type Resolver interface {
 //	        return schema.Ref{}, schema.ErrNoMatch
 //	    }
 //
-//	    name := "schemas/" + strings.ToLower(kind) + ".json"
-//
-//	    return schema.Loadable(name, func(context.Context) ([]byte, error) {
-//	        return schemaFS.ReadFile(name)
-//	    }), nil
+//	    return schema.File("schemas/" + strings.ToLower(kind) + ".json"), nil
 //	})
 type ResolverFunc func(ctx context.Context, doc *niceyaml.Document) (Ref, error)
 

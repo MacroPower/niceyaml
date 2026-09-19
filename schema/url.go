@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strings"
 
-	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 )
 
@@ -40,14 +39,15 @@ func WithHTTPClient(client *http.Client) HTTPOption {
 	}
 }
 
-// URL creates a [Resolver] that fetches schema data from an
-// HTTP/HTTPS URL. The registry fetches once per URL and reuses the compiled
-// validator for every document that names it.
+// URL creates a [Ref] that fetches schema data from an HTTP/HTTPS URL.
+// The Ref is a [Resolver] that names the URL for every document, and the
+// registry fetches once per URL and reuses the compiled validator for
+// every document that names it.
 //
 // The scheme of schemaURL is lowercased, and the rest of it left as
 // written, so one schema spelled with different scheme case is fetched and
-// compiled once rather than once per spelling. An empty schemaURL reports
-// [ErrEmptyURL] from Resolve.
+// compiled once rather than once per spelling. An empty schemaURL yields a
+// Ref that carries [ErrEmptyURL].
 //
 // By default, the loader uses [http.DefaultClient] which has no explicit
 // request timeout. Timeouts are controlled via the context passed to Load.
@@ -55,22 +55,19 @@ func WithHTTPClient(client *http.Client) HTTPOption {
 // loader rejects a response body over 10 MB.
 //
 //	r := schema.URL("https://example.com/schema.json")
-func URL(schemaURL string, opts ...HTTPOption) Resolver {
+func URL(schemaURL string, opts ...HTTPOption) Ref {
 	cfg := &httpConfig{client: http.DefaultClient}
 	for _, opt := range opts {
 		opt(cfg)
 	}
 
 	schemaURL = normalizeScheme(schemaURL)
+	if schemaURL == "" {
+		return failedRef(ErrEmptyURL)
+	}
 
-	return ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (Ref, error) {
-		if schemaURL == "" {
-			return Ref{}, ErrEmptyURL
-		}
-
-		return Loadable(schemaURL, func(ctx context.Context) ([]byte, error) {
-			return httpfetch.Get(ctx, cfg.client, schemaURL)
-		}), nil
+	return Loadable(schemaURL, func(ctx context.Context) ([]byte, error) {
+		return httpfetch.Get(ctx, cfg.client, schemaURL)
 	})
 }
 

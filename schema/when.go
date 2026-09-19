@@ -17,7 +17,7 @@ type guarded struct {
 // When creates a [Resolver] that delegates to r for documents m
 // accepts and reports [ErrNoMatch] for the rest.
 //
-// This pairs a loader, which applies to every document, with a matcher that
+// This pairs a [Ref], which applies to every document, with a matcher that
 // decides which documents it should apply to:
 //
 //	kindPath := paths.Root().Child("kind")

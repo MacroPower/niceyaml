@@ -256,11 +256,8 @@ func (s *SchemaStore) Resolve(ctx context.Context, doc *niceyaml.Document) (sche
 		return schema.Ref{}, err
 	}
 
-	ref, err := schema.URL(entry.URL, schema.WithHTTPClient(s.client)).Resolve(ctx, doc)
-	if err != nil {
-		//nolint:wrapcheck // The URL loader already wraps errors with context.
-		return schema.Ref{}, err
-	}
+	// The catalog keeps only entries with a URL, so the Ref names one.
+	ref := schema.URL(entry.URL, schema.WithHTTPClient(s.client))
 
 	// Bound the GET where the registry performs it, so a schema host that
 	// never answers cannot hang a caller whose context has no deadline.

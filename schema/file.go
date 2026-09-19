@@ -8,50 +8,48 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"go.jacobcolvin.com/niceyaml"
 )
 
 // ErrEmptyPath reports an empty file path given to [File] or [FileOrURL],
 // which names no file.
 var ErrEmptyPath = errors.New("schema file path is empty")
 
-// File creates a [Resolver] that reads schema data from a local file.
+// File creates a [Ref] that reads schema data from a local file. The Ref
+// is a [Resolver] that names the file for every document.
 //
-// Resolve makes path absolute against the working directory and names the
+// File makes path absolute against the working directory and names the
 // schema by the file:// URL of that absolute path, such as
 // file:///srv/schemas/config.json. A schema that [Embedded] or another
 // resolver names by a bare path such as "schemas/config.json" therefore
 // never shares a cache entry with the file. Relative spellings of one path,
 // such as "schemas/config.json" and "./schemas/config.json", resolve to the
 // same URL, so the registry reads the file once and reuses the compiled
-// validator for every document that names it. An empty path reports
-// [ErrEmptyPath] from Resolve.
+// validator for every document that names it. The file is read when the
+// Ref loads, not when File runs. An empty path yields a Ref that carries
+// [ErrEmptyPath].
 //
 // The file path is used directly without validation. Callers should ensure
 // paths come from trusted sources or are validated before use to prevent
 // path traversal attacks.
 //
 //	r := schema.File("./schemas/config.json")
-func File(path string) Resolver {
-	return ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (Ref, error) {
-		if path == "" {
-			return Ref{}, ErrEmptyPath
-		}
+func File(path string) Ref {
+	if path == "" {
+		return failedRef(ErrEmptyPath)
+	}
 
-		abs, err := filepath.Abs(path)
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return failedRef(fmt.Errorf("resolve %s: %w", path, err))
+	}
+
+	return Loadable(fileURL(abs), func(_ context.Context) ([]byte, error) {
+		data, err := os.ReadFile(abs) //nolint:gosec // User-provided file paths are intentional.
 		if err != nil {
-			return Ref{}, fmt.Errorf("resolve %s: %w", path, err)
+			return nil, fmt.Errorf("read %s: %w", abs, err)
 		}
 
-		return Loadable(fileURL(abs), func(_ context.Context) ([]byte, error) {
-			data, err := os.ReadFile(abs) //nolint:gosec // User-provided file paths are intentional.
-			if err != nil {
-				return nil, fmt.Errorf("read %s: %w", abs, err)
-			}
-
-			return data, nil
-		}), nil
+		return data, nil
 	})
 }
 

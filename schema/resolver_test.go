@@ -14,8 +14,55 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
-// Compile-time interface satisfaction check.
-var _ schema.Resolver = schema.ResolverFunc(nil)
+// Compile-time interface satisfaction checks.
+var (
+	_ schema.Resolver = schema.ResolverFunc(nil)
+	_ schema.Resolver = schema.Ref{}
+)
+
+func TestRef_Resolve(t *testing.T) {
+	t.Parallel()
+
+	t.Run("names itself for every document", func(t *testing.T) {
+		t.Parallel()
+
+		ref := schema.Loadable("config.json", func(_ context.Context) ([]byte, error) {
+			return []byte(`{"type": "object"}`), nil
+		})
+
+		got, err := ref.Resolve(t.Context(), document(t))
+		require.NoError(t, err)
+		assert.Equal(t, ref.Key(), got.Key())
+
+		data, err := got.Load(t.Context())
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"type": "object"}`, string(data))
+	})
+
+	t.Run("carries a construction error", func(t *testing.T) {
+		t.Parallel()
+
+		ref := schema.File("")
+
+		assert.Empty(t, ref.Key())
+		assert.Nil(t, ref.Schema())
+
+		_, err := ref.Resolve(t.Context(), document(t))
+		require.ErrorIs(t, err, schema.ErrEmptyPath)
+
+		_, err = ref.Load(t.Context())
+		require.ErrorIs(t, err, schema.ErrEmptyPath)
+	})
+
+	t.Run("zero ref names no schema", func(t *testing.T) {
+		t.Parallel()
+
+		got, err := schema.Ref{}.Resolve(t.Context(), document(t))
+		require.NoError(t, err)
+		assert.Empty(t, got.Key())
+		assert.Nil(t, got.Schema())
+	})
+}
 
 func TestResolverFunc(t *testing.T) {
 	t.Parallel()

@@ -1,22 +1,19 @@
 package schema
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/url"
 	"path/filepath"
 	"strings"
-
-	"go.jacobcolvin.com/niceyaml"
 )
 
 // ErrNoBaseDir reports a relative file path given to [FileOrURL] with an
 // empty baseDir, which leaves nothing to resolve the path against.
 var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 
-// FileOrURL creates a [Resolver] for a schema reference as written in
-// a directive or on a command line, routing to [URL] for HTTP/HTTPS
+// FileOrURL creates a [Ref] for a schema reference as written in a
+// directive or on a command line, routing to [URL] for HTTP/HTTPS
 // references and [File] for file paths. Use [URL] or [File] directly when
 // you know the reference type at construction time.
 //
@@ -27,7 +24,7 @@ var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 // reference as a relative file path, which then fails to resolve or read.
 // A relative file path joins baseDir; an absolute path or an HTTP/HTTPS
 // URL ignores baseDir. When baseDir is empty and the path is relative,
-// Resolve reports [ErrNoBaseDir], and an empty ref reports [ErrEmptyPath]
+// the Ref carries [ErrNoBaseDir], and an empty ref carries [ErrEmptyPath]
 // whatever baseDir is. HTTPOptions apply when ref is an HTTP/HTTPS URL and
 // do nothing for file paths.
 //
@@ -39,7 +36,7 @@ var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 //
 //	// URL fetched directly.
 //	r := schema.FileOrURL("/configs", "https://example.com/schema.json")
-func FileOrURL(baseDir, ref string, opts ...HTTPOption) Resolver {
+func FileOrURL(baseDir, ref string, opts ...HTTPOption) Ref {
 	// Check for an HTTP/HTTPS URL by string prefix, so a malformed URL that
 	// fails to parse does not fall through as a file path.
 	if isHTTPURL(ref) {
@@ -65,9 +62,7 @@ func FileOrURL(baseDir, ref string, opts ...HTTPOption) Resolver {
 	}
 
 	if baseDir == "" {
-		return ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (Ref, error) {
-			return Ref{}, fmt.Errorf("%w: %q", ErrNoBaseDir, ref)
-		})
+		return failedRef(fmt.Errorf("%w: %q", ErrNoBaseDir, ref))
 	}
 
 	return File(filepath.Join(baseDir, path))

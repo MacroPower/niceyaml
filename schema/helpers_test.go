@@ -36,8 +36,5 @@ func load(t *testing.T, r schema.Resolver) (string, []byte, error) {
 func fileURL(t *testing.T, path string) string {
 	t.Helper()
 
-	ref, err := schema.File(path).Resolve(t.Context(), document(t))
-	require.NoError(t, err)
-
-	return ref.Key()
+	return schema.File(path).Key()
 }

@@ -155,13 +155,13 @@ func (r *directiveResolver) Resolve(ctx context.Context, doc *niceyaml.Document)
 		baseDir = filepath.Dir(filePath)
 	}
 
-	ref, err := FileOrURL(baseDir, directive.Schema, r.opts...).Resolve(ctx, doc)
-	if errors.Is(err, ErrNoBaseDir) {
-		return Ref{}, fmt.Errorf("%w: %w", ErrNoFilePath, err)
+	ref := FileOrURL(baseDir, directive.Schema, r.opts...)
+	if errors.Is(ref.err, ErrNoBaseDir) {
+		return Ref{}, fmt.Errorf("%w: %w", ErrNoFilePath, ref.err)
 	}
 
 	//nolint:wrapcheck // Loader errors already carry the reference.
-	return ref, err
+	return ref.Resolve(ctx, doc)
 }
 
 // documentDirective returns the directive that applies to doc. A document

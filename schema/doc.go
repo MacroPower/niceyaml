@@ -62,7 +62,8 @@
 // bytes on demand through [Loadable], or reports [ErrNoMatch] when the
 // resolver does not apply. A
 // [Registry] tries its resolvers in order and validates the document
-// against the first schema named:
+// against the first schema named. A Ref is a Resolver itself, so the
+// loaders below go in directly or behind a [When] guard:
 //
 //	kindPath := paths.Root().Child("kind")
 //	reg := schema.NewRegistry(schema.WithResolvers(
@@ -98,18 +99,28 @@
 //
 // # Loaders
 //
-// A [*Schema], [Embedded], [File], [URL], and [FileOrURL] are resolvers that
-// name the same schema for every document and never report [ErrNoMatch],
-// so a registry holding one alone validates everything against it. A
-// Schema compiled already, such as the one [MustCompile] built at package
-// scope, returns a [Compiled] ref naming itself:
+// [Embedded], [File], [URL], and [FileOrURL] return a [Ref] that names one
+// schema, and a Ref is a resolver that names its schema for every document
+// and never reports [ErrNoMatch], so a registry holding one alone validates
+// everything against it. A [*Schema] compiled already, such as the one
+// [MustCompile] built at package scope, is a resolver too and names itself:
 //
 //	reg := schema.NewRegistry(schema.WithResolvers(Config))
 //
 // The loaders return a [Loadable] ref whose key identifies the schema and
 // whose load reads the bytes. The registry checks its cache by key first,
 // so a file is read or a URL fetched once per registry, however many
-// documents name it.
+// documents name it. A resolver that picks the schema from the document
+// returns the same Refs:
+//
+//	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
+//	    kind, err := doc.Get[string](ctx, kindPath)
+//	    if err != nil {
+//	        return schema.Ref{}, schema.ErrNoMatch
+//	    }
+//
+//	    return schema.File("schemas/" + kind + ".json"), nil
+//	})
 //
 // Embed a schema in the binary with go:embed:
 //
