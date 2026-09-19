@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
@@ -245,6 +247,34 @@ func TestSchema_Validate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSchema_UnresolvableRef(t *testing.T) {
+	t.Parallel()
+
+	unreachable := errors.New("host unreachable")
+	resolver := jsonschema.RefResolverFunc(func(_ context.Context, _ string) (*jsonschema.Schema, error) {
+		return nil, unreachable
+	})
+
+	// The ref resolves when the validator walks to it, so the failure
+	// arrives at the location of the value that referenced it.
+	v, err := schema.Compile(t.Context(),
+		[]byte(`{"properties": {"a": {"$ref": "https://example.invalid/nope.json"}}}`),
+		schema.WithJSONSchemaOptions(jsonschema.WithRefResolver(resolver)),
+	)
+	require.NoError(t, err)
+
+	err = v.ValidateValue(t.Context(), map[string]any{"a": 1})
+	require.ErrorIs(t, err, schema.ErrValidate)
+	require.ErrorIs(t, err, jsonschema.ErrRefResolve)
+	require.ErrorIs(t, err, unreachable)
+
+	// The schema is at fault, so the failure names no location in the
+	// document to highlight.
+	var nerr *niceyaml.Error
+
+	require.NotErrorAs(t, err, &nerr)
 }
 
 func TestSchema_ValidateWithDecoder(t *testing.T) {

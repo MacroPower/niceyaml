@@ -166,13 +166,23 @@ func (s *Schema) Validate(ctx context.Context, doc *niceyaml.Document) error {
 // [*niceyaml.Error]: a single violation carries its YAML path on the error
 // itself, and several violations become a count summary whose nested errors
 // each carry the path to one failing location. Any other failure wraps
-// [ErrValidate]. The context is passed to the underlying
-// [jsonschema.Validator], where remote reference resolution honors its
-// cancellation and deadlines.
+// [ErrValidate], including a $ref a [jsonschema.RefResolver] reports it
+// cannot resolve, since no location in the document is at fault for that.
+//
+// The context is passed to the underlying [jsonschema.Validator], where
+// remote reference resolution honors its cancellation and deadlines.
 func (s *Schema) ValidateValue(ctx context.Context, data any) error {
 	err := s.compiled.Validate(ctx, normalizeJSON(data))
 	if err == nil {
 		return nil
+	}
+
+	// A resolver that reports a $ref it cannot fetch arrives as a validation
+	// failure at the referencing location, but the data there broke no
+	// constraint, so report the schema problem rather than point at the
+	// document.
+	if errors.Is(err, jsonschema.ErrRefResolve) {
+		return fmt.Errorf("%w: %w", ErrValidate, err)
 	}
 
 	// A structured validation failure carries per-location paths; convert it to
