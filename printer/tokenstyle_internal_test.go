@@ -243,6 +243,17 @@ func TestTypeStyle(t *testing.T) {
 			},
 			want: kind.NameAliasMerge,
 		},
+		"merge key followed by colon stays a merge key": {
+			setup: func() *token.Token {
+				merge := newToken(token.MergeKeyType, "<<")
+				colon := newToken(token.MappingValueType, ":")
+				merge.Next = colon
+				colon.Prev = merge
+
+				return merge
+			},
+			want: kind.NameAliasMerge,
+		},
 		"collect entry type": {
 			setup: func() *token.Token {
 				return newToken(token.CollectEntryType, ",")

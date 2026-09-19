@@ -64,6 +64,9 @@ func typeStyle(tk, src *token.Token) kind.Kind {
 // The part chain stops at the line boundary, so where tk has no neighbor
 // the lookup reads the neighbor of src, whose chain spans the whole stream.
 // A key whose colon sits on the next line still reads as a key that way.
+//
+// A merge key keeps its own type, since the lexer only reports "<<" as a
+// merge key when a colon already follows it.
 func visualType(tk, src *token.Token) token.Type {
 	prevType := tk.PreviousType()
 	if tk.Prev == nil && src != nil {
@@ -79,7 +82,7 @@ func visualType(tk, src *token.Token) token.Type {
 		nextType = src.NextType()
 	}
 
-	if nextType == token.MappingValueType {
+	if nextType == token.MappingValueType && tk.Type != token.MergeKeyType {
 		return token.MappingKeyType
 	}
 
