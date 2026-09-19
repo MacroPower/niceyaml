@@ -225,10 +225,20 @@ func hasContent(body ast.Node) bool {
 
 // matches resolves the path in doc and returns every match.
 //
-// Returns an error wrapping [ErrNotFound] and [ErrNoDocument] when doc or
-// its body is nil or the body is a directive or a comment, which is what a
-// parse that keeps comments leaves as the body of a comment-only document.
+// A document with a nil body below a "---" header is the null document, and
+// the root path matches that null at the header, so an error about the
+// document as a whole points at the line it was written on. Every deeper
+// path has no node to reach.
+//
+// Returns an error wrapping [ErrNotFound] and [ErrNoDocument] when doc is
+// nil, when a path with segments meets a nil body, or when the body is a
+// directive or a comment, which is what a parse that keeps comments leaves
+// as the body of a comment-only document.
 func (p Path) matches(doc *ast.DocumentNode) ([]match, error) {
+	if doc != nil && doc.Body == nil && doc.Start != nil && len(p.segments) == 0 {
+		return []match{{node: ast.Null(doc.Start)}}, nil
+	}
+
 	if doc == nil || doc.Body == nil || !hasContent(doc.Body) {
 		return nil, fmt.Errorf("resolve %s: %w: %w", p, ErrNotFound, ErrNoDocument)
 	}

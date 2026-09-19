@@ -1477,6 +1477,37 @@ func TestSourceError_NilReceiver(t *testing.T) {
 	require.ErrorIs(t, missing.Annotate(src.View()), niceyaml.ErrNoLocation)
 }
 
+func TestSourceError_EmptyDocument(t *testing.T) {
+	t.Parallel()
+
+	// An explicitly empty document is the null document a schema validates,
+	// so an error at the root of one resolves to its header.
+	source := niceyaml.NewSourceFromString("a: 1\n---\n")
+
+	docs, err := source.Documents()
+	require.NoError(t, err)
+	require.Len(t, docs, 2)
+
+	bound := docs[1].Bind(niceyaml.NewError("required property 'a' missing", niceyaml.WithPath(paths.Root())))
+
+	var se *niceyaml.SourceError
+
+	require.ErrorAs(t, bound, &se)
+
+	rng, rngErr := se.Range()
+	require.NoError(t, rngErr)
+	assert.Equal(t, 1, rng.Start.Line)
+
+	assert.Equal(t, "2:1: $: required property 'a' missing", se.Error())
+	assert.Equal(t, stringtest.JoinLF(
+		"2:1: $: required property 'a' missing",
+		"",
+		"   1 | a: 1",
+		"   2 | ---",
+		"     | ^^^",
+	), fmt.Sprintf("%+v", bound))
+}
+
 func TestError_NilInnerError(t *testing.T) {
 	t.Parallel()
 
