@@ -10,7 +10,7 @@ import (
 // ErrInvalidPath indicates a path expression that [Parse] cannot read.
 var ErrInvalidPath = errors.New("invalid path")
 
-// Parse parses a path expression into a [Path] targeting [PartNode].
+// Parse parses a path expression into a [Path].
 //
 // An expression starts with `$` for the document root, followed by any number
 // of selectors:
@@ -23,15 +23,6 @@ var ErrInvalidPath = errors.New("invalid path")
 //	[n]       a sequence element by 0-based index, written in decimal
 //	          with no sign and no leading zero
 //	[*]       every sequence element
-//
-// Use [Path.Key] on the result to target the key of a mapping entry rather
-// than its value:
-//
-//	p, err := paths.Parse("$.metadata.name")
-//	if err != nil {
-//		return err
-//	}
-//	keyPath := p.Key()
 //
 // Returns an error wrapping [ErrInvalidPath] for a malformed expression.
 func Parse(expr string) (Path, error) {

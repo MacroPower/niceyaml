@@ -2,20 +2,18 @@
 //
 // A [Path] is a sequence of selectors from the document root, written in the
 // YAMLPath syntax that goccy/go-yaml uses (`$.metadata.name`,
-// `$.items[0]`), plus a [Part]. Standard path expressions point at nodes, but
-// error highlighting and precise editing often need one token of a mapping
-// entry rather than the whole node, so the Part says whether a path refers to
-// the node itself, which for a mapping entry is its value, or to the entry's
-// key:
+// `$.items[0]`). A path selects a node, which for a mapping entry is its
+// value. Error highlighting and precise editing often need one token of an
+// entry rather than the whole node, so a Path resolves to either token of
+// the entry it selects:
 //
-//	valPath := paths.Root().Child("metadata", "name")
-//	keyPath := paths.Root().Child("metadata", "name").Key()
+//	p := paths.Root().Child("metadata", "name")
+//	node, err := p.Node(doc)      // the value node
+//	value, err := p.Token(doc)    // the token that starts the value
+//	key, err := p.KeyToken(doc)   // the key token "name"
 //
-// Both paths print as `$.metadata.name` and resolve to the same node, but
-// [Path.Token] returns different tokens: the value token for the first and
-// the key token "name" for the second. [Path.Node] ignores the Part and
-// returns the node. Both resolve within a single document, so callers
-// working with multi-document files pick the document first.
+// Every method resolves within a single document, so callers working with
+// multi-document files pick the document first.
 //
 // # Resolution
 //
@@ -41,9 +39,10 @@
 //
 // # Integration with niceyaml.Error
 //
-// [Path] is directly usable with [niceyaml.WithPath] to highlight either keys
-// or values in error messages. The error carries the path, and
-// [niceyaml.Document.Bind] resolves it against the document:
+// [Path] is directly usable with [niceyaml.WithPath], which highlights the
+// value at the path, and [niceyaml.WithKey], which highlights the key of the
+// entry. The error carries the path, and [niceyaml.Document.Bind] resolves
+// it against the document:
 //
 //	err := niceyaml.NewError(
 //		"invalid value",
@@ -53,28 +52,24 @@
 //
 // # Parsing Path Expressions
 //
-// Use [Parse] to read a path expression. The result targets [PartNode], the
-// value of a mapping entry, and [Path.Key] derives the path to its key:
+// Use [Parse] to read a path expression:
 //
-//	p, err := paths.Parse("$.metadata.name") // targets the value
-//	keyPath := p.Key()                       // targets the key
+//	p, err := paths.Parse("$.metadata.name")
 //
 // [MustParse] panics on invalid input, useful for package-level variables:
 //
 //	var namePath = paths.MustParse("$.items[0].name")
 //
-// [Path.String] returns the expression without the part, so
-// Parse(p.String()) yields a path with the same selectors.
+// [Path.String] returns the expression, so Parse(p.String()) yields an
+// equal path.
 //
 // # Building Paths
 //
-// Use [Root] to start at the document root and chain selectors. The result
-// targets [PartNode] until [Path.Key] picks the key:
+// Use [Root] to start at the document root and chain selectors:
 //
-//	paths.Root().Child("items").Index(0).Child("name")        // $.items[0].name
-//	paths.Root().Child("items").Index(0).Child("name").Key()  // the same, key token
-//	paths.Root().Child("spec").IndexAll()                     // $.spec[*]
-//	paths.Root().Recursive("name")                            // $..name
+//	paths.Root().Child("items").Index(0).Child("name")  // $.items[0].name
+//	paths.Root().Child("spec").IndexAll()               // $.spec[*]
+//	paths.Root().Recursive("name")                      // $..name
 //
 // A Path is a value that never changes, so a common prefix can be shared
 // safely:

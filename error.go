@@ -48,12 +48,14 @@ var (
 )
 
 // Location is where an [Error] points in a YAML document: a [paths.Path],
-// a [position.Position], or a [position.Range]. [WithPath], [WithPosition],
-// and [WithRange] each set one, and [Error.Location] returns the one set,
-// as one of those three types, so a caller reads it with a type switch:
+// a [KeyPath], a [position.Position], or a [position.Range]. [WithPath],
+// [WithKey], [WithPosition], and [WithRange] each set one, and
+// [Error.Location] returns the one set, as one of those four types, so a
+// caller reads it with a type switch:
 //
 //	switch loc := err.Location().(type) {
 //	case paths.Path:
+//	case niceyaml.KeyPath:
 //	case position.Position:
 //	case position.Range:
 //	case nil: // No location.
@@ -64,14 +66,28 @@ type Location interface {
 	String() string
 }
 
+// KeyPath is the [Location] that [WithKey] sets: the key of the mapping
+// entry that Path selects, where a [paths.Path] on its own is the value of
+// that entry. A path that selects a sequence element or the root picks no
+// entry, and a KeyPath there points where the Path does.
+type KeyPath struct {
+	Path paths.Path
+}
+
+// String returns the path expression, as [paths.Path.String] does.
+func (k KeyPath) String() string {
+	return k.Path.String()
+}
+
 // Error is an error that points at a location in a YAML document.
 //
-// The location is a [Location]: a [paths.Path], a [position.Position], or
-// a [position.Range], set with [WithPath], [WithPosition], or [WithRange].
-// An Error holds one, and the last of those options given wins. A path
-// resolves within one document of a source: the [Document] that binds the
-// Error, whether its own methods and validators produced the Error or
-// [Document.Bind] bound one built elsewhere.
+// The location is a [Location]: a [paths.Path], a [KeyPath], a
+// [position.Position], or a [position.Range], set with [WithPath],
+// [WithKey], [WithPosition], or [WithRange]. An Error holds one, and the
+// last of those options given wins. A path resolves within one document of
+// a source: the [Document] that binds the Error, whether its own methods
+// and validators produced the Error or [Document.Bind] bound one built
+// elsewhere.
 //
 // An Error carries what a producer knows and nothing about presentation. A
 // validator that knows a path uses [WithPath] and need not hold the source.
@@ -141,6 +157,7 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 //
 // Available options:
 //   - [WithPath]
+//   - [WithKey]
 //   - [WithPosition]
 //   - [WithRange]
 //   - [WithErrors]
@@ -148,13 +165,25 @@ type ErrorOption func(e *Error)
 
 // WithPath is an [ErrorOption] that sets the YAML path where the error
 // occurred as the [Location] of the [Error], replacing any location set
-// before it.
-//
-// The [paths.Path] provides both the path and whether to highlight the key
-// or value.
+// before it. The error points at the node the path selects, which for a
+// mapping entry is its value, so [SourceError.Excerpt] highlights the
+// value. [WithKey] points at the key of the entry instead.
 func WithPath(p paths.Path) ErrorOption {
 	return func(e *Error) {
 		e.loc = p
+	}
+}
+
+// WithKey is an [ErrorOption] that sets the key of the mapping entry at
+// the YAML path p as the [Location] of the [Error], replacing any location
+// set before it. The location is a [KeyPath], and [SourceError.Excerpt]
+// highlights the key rather than the value, which suits an error about the
+// key itself, such as an unknown field:
+//
+//	niceyaml.NewError("unknown field", niceyaml.WithKey(paths.Root().Child("spec", "foo")))
+func WithKey(p paths.Path) ErrorOption {
+	return func(e *Error) {
+		e.loc = KeyPath{Path: p}
 	}
 }
 
@@ -212,12 +241,13 @@ func WithErrors(errs ...error) ErrorOption {
 }
 
 // Error returns the error message: "$.path: msg" when the Error carries a
-// path, and the message alone otherwise. A position or a range puts nothing
-// in the message, since the [SourceError] that binds the Error puts the
-// resolved position in front, and the nested errors from [WithErrors] put
-// nothing in it either, since that SourceError lists them behind their own
-// positions. An Error created from a nil error has an empty message, so
-// its text is the path alone, or "" when it has none.
+// path, from [WithPath] or [WithKey], and the message alone otherwise. A
+// position or a range puts nothing in the message, since the [SourceError]
+// that binds the Error puts the resolved position in front, and the nested
+// errors from [WithErrors] put nothing in it either, since that SourceError
+// lists them behind their own positions. An Error created from a nil error
+// has an empty message, so its text is the path alone, or "" when it has
+// none.
 func (e *Error) Error() string {
 	if e == nil {
 		return ""
@@ -229,8 +259,9 @@ func (e *Error) Error() string {
 		msg = e.err.Error()
 	}
 
-	if p, ok := e.loc.(paths.Path); ok {
-		msg = prefix(p.String()+":", msg)
+	switch e.loc.(type) {
+	case paths.Path, KeyPath:
+		msg = prefix(e.loc.String()+":", msg)
 	}
 
 	return msg
@@ -388,21 +419,30 @@ func (e *Error) locate(lookup func() (*Document, error)) (location, error) {
 		return location{pos: loc}, nil
 
 	case paths.Path:
-		doc, err := lookup()
-		if err != nil {
-			return location{}, err
-		}
+		return locatePath(lookup, loc, false)
 
-		pos, err := doc.position(loc)
-		if err != nil {
-			return location{}, err
-		}
-
-		return location{pos: pos}, nil
+	case KeyPath:
+		return locatePath(lookup, loc.Path, true)
 
 	default:
 		return location{}, ErrNoLocation
 	}
+}
+
+// locatePath resolves path in the document lookup returns, to the key of
+// the entry it selects when key is set and to its value otherwise.
+func locatePath(lookup func() (*Document, error), path paths.Path, key bool) (location, error) {
+	doc, err := lookup()
+	if err != nil {
+		return location{}, err
+	}
+
+	pos, err := doc.position(path, key)
+	if err != nil {
+		return location{}, err
+	}
+
+	return location{pos: pos}, nil
 }
 
 // SourceError is an error bound to the [*Source] it occurred in.

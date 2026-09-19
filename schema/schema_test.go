@@ -839,16 +839,18 @@ func TestSchema_ErrorPaths(t *testing.T) {
 		input           any
 		wantPath        string   // Expected path on the main error.
 		wantNestedPaths []string // Expected paths from nested errors.
+		wantKey         bool     // The main error points at the key of the entry.
 	}{
 		"type error has path on main error": {
 			schema:   `{"type": "object", "properties": {"name": {"type": "string"}}}`,
 			input:    map[string]any{"name": 123},
 			wantPath: "$.name",
 		},
-		"additional property has path on main error": {
+		"additional property has key path on main error": {
 			schema:   `{"type": "object", "properties": {"name": {"type": "string"}}, "additionalProperties": false}`,
 			input:    map[string]any{"name": "valid", "extra": "invalid"},
 			wantPath: "$.extra",
+			wantKey:  true,
 		},
 		"nested validation error has path on main error": {
 			schema:   `{"type": "object", "properties": {"user": {"type": "object", "properties": {"age": {"type": "integer"}}}}}`,
@@ -875,11 +877,12 @@ func TestSchema_ErrorPaths(t *testing.T) {
 
 			require.ErrorAs(t, err, &validationErr)
 
-			gotPath, ok := validationErr.Location().(paths.Path)
+			gotPath, gotKey, ok := locationPath(validationErr.Location())
 			assert.Equal(t, tc.wantPath != "", ok)
 
 			if ok {
 				assert.Equal(t, tc.wantPath, gotPath.String())
+				assert.Equal(t, tc.wantKey, gotKey)
 			}
 
 			var gotNestedPaths []string
@@ -890,12 +893,26 @@ func TestSchema_ErrorPaths(t *testing.T) {
 					continue
 				}
 
-				if nestedPath, ok := nestedErr.Location().(paths.Path); ok {
+				if nestedPath, _, ok := locationPath(nestedErr.Location()); ok {
 					gotNestedPaths = append(gotNestedPaths, nestedPath.String())
 				}
 			}
 
 			assert.ElementsMatch(t, tc.wantNestedPaths, gotNestedPaths)
 		})
+	}
+}
+
+// locationPath returns the path a location carries and whether it names
+// the key of the entry. The last result is false for a location without a
+// path.
+func locationPath(loc niceyaml.Location) (paths.Path, bool, bool) {
+	switch l := loc.(type) {
+	case paths.Path:
+		return l, false, true
+	case niceyaml.KeyPath:
+		return l.Path, true, true
+	default:
+		return paths.Path{}, false, false
 	}
 }

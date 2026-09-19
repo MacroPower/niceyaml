@@ -215,19 +215,24 @@ func newValidationError(ve *jsonschema.ValidationError) *niceyaml.Error {
 }
 
 // leafError converts one concrete failure into a [*niceyaml.Error] carrying
-// the YAML path to the failing location.
+// the YAML path to the failing location. A failure that constrains the key
+// of a member, such as an additional property, points at the key with
+// [niceyaml.WithKey], and any other at the value with [niceyaml.WithPath].
 func leafError(leaf *jsonschema.ValidationError) *niceyaml.Error {
-	return niceyaml.NewError(
-		leaf.Message,
-		niceyaml.WithPath(buildTargetPath(leaf.InstanceSegments(), leaf.TargetsKey())),
-	)
+	path := buildTargetPath(leaf.InstanceSegments())
+
+	locate := niceyaml.WithPath(path)
+	if leaf.TargetsKey() {
+		locate = niceyaml.WithKey(path)
+	}
+
+	return niceyaml.NewError(leaf.Message, locate)
 }
 
-// buildTargetPath converts instance-location segments to a [paths.Path],
-// pointing at the key when targetsKey is set and the value otherwise. Each
-// [jsonschema.Segment] already distinguishes an array index from a property
-// name, so no numeric guessing is needed.
-func buildTargetPath(segments []jsonschema.Segment, targetsKey bool) paths.Path {
+// buildTargetPath converts instance-location segments to a [paths.Path].
+// Each [jsonschema.Segment] already distinguishes an array index from a
+// property name, so no numeric guessing is needed.
+func buildTargetPath(segments []jsonschema.Segment) paths.Path {
 	path := paths.Root()
 
 	for _, seg := range segments {
@@ -236,10 +241,6 @@ func buildTargetPath(segments []jsonschema.Segment, targetsKey bool) paths.Path 
 		} else {
 			path = path.Child(seg.Key)
 		}
-	}
-
-	if targetsKey {
-		return path.Key()
 	}
 
 	return path

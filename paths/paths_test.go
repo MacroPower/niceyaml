@@ -18,24 +18,22 @@ import (
 func TestRoot(t *testing.T) {
 	t.Parallel()
 
-	t.Run("empty path targets the node", func(t *testing.T) {
+	t.Run("empty path is the root", func(t *testing.T) {
 		t.Parallel()
 
 		path := paths.Root()
 
 		require.NotNil(t, path)
 		assert.Equal(t, "$", path.String())
-		assert.Equal(t, paths.PartNode, path.Part())
 	})
 
-	t.Run("single child with key target", func(t *testing.T) {
+	t.Run("single child", func(t *testing.T) {
 		t.Parallel()
 
-		path := paths.Root().Child("kind").Key()
+		path := paths.Root().Child("kind")
 
 		require.NotNil(t, path)
 		assert.Equal(t, "$.kind", path.String())
-		assert.Equal(t, paths.PartKey, path.Part())
 	})
 
 	t.Run("multiple children", func(t *testing.T) {
@@ -45,7 +43,6 @@ func TestRoot(t *testing.T) {
 
 		require.NotNil(t, path)
 		assert.Equal(t, "$.metadata.name", path.String())
-		assert.Equal(t, paths.PartNode, path.Part())
 	})
 }
 
@@ -56,95 +53,77 @@ func TestPath_Build(t *testing.T) {
 		build    func() paths.Path
 		want     string
 		wantYAML string
-		part     paths.Part
 	}{
 		"root path": {
 			build: paths.Root,
-			part:  paths.PartNode,
 			want:  "$",
 		},
 		"chained children": {
-			build: func() paths.Path { return paths.Root().Child("metadata", "labels").Key() },
-			part:  paths.PartKey,
+			build: func() paths.Path { return paths.Root().Child("metadata", "labels") },
 			want:  "$.metadata.labels",
 		},
 		"child then index": {
 			build: func() paths.Path { return paths.Root().Child("items").Index(0) },
-			part:  paths.PartNode,
 			want:  "$.items[0]",
 		},
 		"variadic index": {
 			build: func() paths.Path { return paths.Root().Child("matrix").Index(0, 1) },
-			part:  paths.PartNode,
 			want:  "$.matrix[0][1]",
 		},
 		"index all": {
-			build: func() paths.Path { return paths.Root().Child("items").IndexAll().Key() },
-			part:  paths.PartKey,
+			build: func() paths.Path { return paths.Root().Child("items").IndexAll() },
 			want:  "$.items[*]",
 		},
 		"recursive descent": {
 			build: func() paths.Path { return paths.Root().Recursive("name") },
-			part:  paths.PartNode,
 			want:  "$..name",
 		},
 		"large index": {
 			build: func() paths.Path { return paths.Root().Child("items").Index(999) },
-			part:  paths.PartNode,
 			want:  "$.items[999]",
 		},
 		"recursive with index": {
-			build: func() paths.Path { return paths.Root().Recursive("items").Index(0).Key() },
-			part:  paths.PartKey,
+			build: func() paths.Path { return paths.Root().Recursive("items").Index(0) },
 			want:  "$..items[0]",
 		},
 		"multiple recursive": {
 			build: func() paths.Path { return paths.Root().Recursive("containers").Recursive("name") },
-			part:  paths.PartNode,
 			want:  "$..containers..name",
 		},
 		"child after index": {
 			build: func() paths.Path { return paths.Root().Child("items").Index(0).Child("name") },
-			part:  paths.PartNode,
 			want:  "$.items[0].name",
 		},
 		"index all then index": {
 			build: func() paths.Path { return paths.Root().Child("matrix").IndexAll().Index(0) },
-			part:  paths.PartNode,
 			want:  "$.matrix[*][0]",
 		},
 		"dotted child name is quoted": {
 			build: func() paths.Path { return paths.Root().Child("kubernetes.io/name") },
-			part:  paths.PartNode,
 			want:  "$.'kubernetes.io/name'",
 		},
 		"child name with quote is quoted and escaped": {
 			build:    func() paths.Path { return paths.Root().Child("it's") },
-			part:     paths.PartNode,
 			want:     `$.'it\'s'`,
 			wantYAML: "$.it's",
 		},
 		"empty child name is quoted, but goccy leaves it bare": {
 			build:    func() paths.Path { return paths.Root().Child("") },
-			part:     paths.PartNode,
 			want:     "$.''",
 			wantYAML: "$.",
 		},
 		"empty recursive name is quoted, but goccy leaves it bare": {
 			build:    func() paths.Path { return paths.Root().Recursive("") },
-			part:     paths.PartNode,
 			want:     "$..''",
 			wantYAML: "$..",
 		},
 		"child name with brackets is quoted": {
 			build:    func() paths.Path { return paths.Root().Child("a[0]") },
-			part:     paths.PartNode,
 			want:     "$.'a[0]'",
 			wantYAML: "$.a[0]",
 		},
 		"recursive name with a dot is quoted, but goccy cannot quote it": {
 			build:    func() paths.Path { return paths.Root().Recursive("x.y") },
-			part:     paths.PartNode,
 			want:     "$..'x.y'",
 			wantYAML: "$..x.y",
 		},
@@ -158,7 +137,6 @@ func TestPath_Build(t *testing.T) {
 
 			require.NotNil(t, path)
 			assert.Equal(t, tc.want, path.String())
-			assert.Equal(t, tc.part, path.Part())
 
 			// The goccy form only differs where goccy quotes differently.
 			wantGoccy := tc.wantYAML
@@ -207,14 +185,13 @@ func TestPath_Immutable(t *testing.T) {
 		assert.Equal(t, "$.spec", spec.String())
 	})
 
-	t.Run("picking a part does not change the receiver", func(t *testing.T) {
+	t.Run("extending does not change the receiver", func(t *testing.T) {
 		t.Parallel()
 
 		p := paths.Root().Child("metadata", "name")
 
-		assert.Equal(t, paths.PartKey, p.Key().Part())
-		assert.Equal(t, paths.PartNode, p.Part())
 		assert.Equal(t, "$.metadata.name.labels", p.Child("labels").String())
+		assert.Equal(t, "$.metadata.name", p.String())
 	})
 
 	t.Run("zero value is the root", func(t *testing.T) {
@@ -224,33 +201,8 @@ func TestPath_Immutable(t *testing.T) {
 
 		assert.Equal(t, paths.Root(), p)
 		assert.Equal(t, "$", p.String())
-		assert.Equal(t, paths.PartNode, p.Part())
 		assert.Equal(t, "$.a", p.Child("a").String())
 	})
-}
-
-func TestPath_Key(t *testing.T) {
-	t.Parallel()
-
-	t.Run("derives copies with a different part", func(t *testing.T) {
-		t.Parallel()
-
-		node := paths.MustParse("$.a.b")
-		key := node.Key()
-
-		assert.Equal(t, paths.PartNode, node.Part())
-		assert.Equal(t, paths.PartKey, key.Part())
-		assert.Equal(t, "$.a.b", key.String())
-		assert.Equal(t, "$.a.b", node.String())
-	})
-}
-
-func TestPart_String(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, "node", paths.PartNode.String())
-	assert.Equal(t, "key", paths.PartKey.String())
-	assert.Equal(t, "Part(7)", paths.Part(7).String())
 }
 
 func TestParse(t *testing.T) {
@@ -323,7 +275,6 @@ func TestParse(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, p)
 			assert.Equal(t, tc.want, p.String())
-			assert.Equal(t, paths.PartNode, p.Part())
 		})
 	}
 }
@@ -396,7 +347,7 @@ func TestParse_RoundTrip(t *testing.T) {
 
 	tcs := map[string]paths.Path{
 		"root":             paths.Root(),
-		"children":         paths.Root().Child("a", "b").Key(),
+		"children":         paths.Root().Child("a", "b"),
 		"index":            paths.Root().Child("items").Index(3),
 		"wildcards":        paths.Root().Child("items").IndexAll().Recursive("name"),
 		"dotted name":      paths.Root().Child("kubernetes.io/name"),
@@ -418,8 +369,7 @@ func TestParse_RoundTrip(t *testing.T) {
 			got, err := paths.Parse(want.String())
 			require.NoError(t, err)
 
-			assert.Equal(t, want.String(), got.String())
-			assert.Equal(t, paths.PartNode, got.Part())
+			assert.Equal(t, want, got)
 
 			// The goccy parser accepts the same expression.
 			_, err = yaml.PathString(want.String())
@@ -544,6 +494,7 @@ items:
 	tcs := map[string]struct {
 		path      paths.Path
 		wantValue string
+		key       bool
 		wantType  token.Type
 	}{
 		"root value returns the first key": {
@@ -552,7 +503,8 @@ items:
 			wantType:  token.StringType,
 		},
 		"root key returns the first key": {
-			path:      paths.Root().Key(),
+			path:      paths.Root(),
+			key:       true,
 			wantValue: "name",
 			wantType:  token.StringType,
 		},
@@ -562,7 +514,8 @@ items:
 			wantType:  token.StringType,
 		},
 		"mapping key target returns the entry key": {
-			path:      paths.Root().Child("metadata").Key(),
+			path:      paths.Root().Child("metadata"),
+			key:       true,
 			wantValue: "metadata",
 			wantType:  token.StringType,
 		},
@@ -572,12 +525,14 @@ items:
 			wantType:  token.StringType,
 		},
 		"sequence key target returns the entry key": {
-			path:      paths.Root().Child("items").Key(),
+			path:      paths.Root().Child("items"),
+			key:       true,
 			wantValue: "items",
 			wantType:  token.StringType,
 		},
 		"simple key target returns key token": {
-			path:      paths.Root().Child("name").Key(),
+			path:      paths.Root().Child("name"),
+			key:       true,
 			wantValue: "name",
 			wantType:  token.StringType,
 		},
@@ -592,7 +547,8 @@ items:
 			wantType:  token.StringType,
 		},
 		"nested key target": {
-			path:      paths.Root().Child("metadata", "labels", "app").Key(),
+			path:      paths.Root().Child("metadata", "labels", "app"),
+			key:       true,
 			wantValue: "app",
 			wantType:  token.StringType,
 		},
@@ -607,7 +563,8 @@ items:
 			wantType:  token.StringType,
 		},
 		"array element key target returns value (no parent mapping)": {
-			path:      paths.Root().Child("items").Index(1).Key(),
+			path:      paths.Root().Child("items").Index(1),
+			key:       true,
 			wantValue: "second",
 			wantType:  token.StringType,
 		},
@@ -617,9 +574,7 @@ items:
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tk, err := tc.path.Token(file.Docs[0])
-			require.NoError(t, err)
-			require.NotNil(t, tk)
+			tk := resolveToken(t, tc.path, tc.key, file.Docs[0])
 			assert.Equal(t, tc.wantValue, tk.Value)
 			assert.Equal(t, tc.wantType, tk.Type)
 		})
@@ -641,16 +596,25 @@ func TestPath_Token_InvalidPath(t *testing.T) {
 func TestPath_Token_NoDocument(t *testing.T) {
 	t.Parallel()
 
-	path := paths.Root().Child("name").Key()
+	path := paths.Root().Child("name")
 
-	_, err := path.Token(nil)
-	require.ErrorIs(t, err, paths.ErrNoDocument)
-	require.ErrorIs(t, err, paths.ErrNotFound)
+	for name, resolve := range map[string]func(*ast.DocumentNode) (*token.Token, error){
+		"Token":    path.Token,
+		"KeyToken": path.KeyToken,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	_, err = path.Token(&ast.DocumentNode{})
-	require.ErrorIs(t, err, paths.ErrNoDocument)
-	require.ErrorIs(t, err, paths.ErrNotFound)
-	assert.Contains(t, err.Error(), "$.name")
+			_, err := resolve(nil)
+			require.ErrorIs(t, err, paths.ErrNoDocument)
+			require.ErrorIs(t, err, paths.ErrNotFound)
+
+			_, err = resolve(&ast.DocumentNode{})
+			require.ErrorIs(t, err, paths.ErrNoDocument)
+			require.ErrorIs(t, err, paths.ErrNotFound)
+			assert.Contains(t, err.Error(), "$.name")
+		})
+	}
 }
 
 func TestPath_DirectiveDocument(t *testing.T) {
@@ -761,6 +725,7 @@ nested:
 	tcs := map[string]struct {
 		path      paths.Path
 		wantValue string
+		key       bool
 		wantType  token.Type
 	}{
 		"nested array first element name": {
@@ -779,7 +744,8 @@ nested:
 			wantType:  token.StringType,
 		},
 		"deeply nested key": {
-			path:      paths.Root().Child("nested", "deep", "deeper", "value").Key(),
+			path:      paths.Root().Child("nested", "deep", "deeper", "value"),
+			key:       true,
 			wantValue: "value",
 			wantType:  token.StringType,
 		},
@@ -789,9 +755,7 @@ nested:
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tk, err := tc.path.Token(file.Docs[0])
-			require.NoError(t, err)
-			require.NotNil(t, tk)
+			tk := resolveToken(t, tc.path, tc.key, file.Docs[0])
 			assert.Equal(t, tc.wantValue, tk.Value)
 			assert.Equal(t, tc.wantType, tk.Type)
 		})
@@ -805,19 +769,12 @@ func TestPath_Node(t *testing.T) {
 	file, err := source.File()
 	require.NoError(t, err)
 
-	// The part does not affect the resolved node.
-	for _, path := range []paths.Path{
-		paths.Root().Child("a", "b"),
-		paths.Root().Child("a", "b").Key(),
-		paths.Root().Child("a", "b"),
-	} {
-		node, err := path.Node(file.Docs[0])
-		require.NoError(t, err)
+	node, err := paths.Root().Child("a", "b").Node(file.Docs[0])
+	require.NoError(t, err)
 
-		seq, ok := node.(*ast.SequenceNode)
-		require.True(t, ok, "want *ast.SequenceNode, got %T", node)
-		assert.Len(t, seq.Values, 2)
-	}
+	seq, ok := node.(*ast.SequenceNode)
+	require.True(t, ok, "want *ast.SequenceNode, got %T", node)
+	assert.Len(t, seq.Values, 2)
 }
 
 func TestPath_Token_Anchors(t *testing.T) {
@@ -854,6 +811,7 @@ chain:
 	tcs := map[string]struct {
 		path      paths.Path
 		wantValue string
+		key       bool
 		wantLine  int
 	}{
 		"child of anchored mapping": {
@@ -862,7 +820,8 @@ chain:
 			wantLine:  3,
 		},
 		"key of anchored mapping entry": {
-			path:      paths.Root().Child("base", "a").Key(),
+			path:      paths.Root().Child("base", "a"),
+			key:       true,
 			wantValue: "a",
 			wantLine:  3,
 		},
@@ -882,7 +841,8 @@ chain:
 			wantLine:  6,
 		},
 		"alias key target is its key": {
-			path:      paths.Root().Child("other").Key(),
+			path:      paths.Root().Child("other"),
+			key:       true,
 			wantValue: "other",
 			wantLine:  6,
 		},
@@ -907,7 +867,8 @@ chain:
 			wantLine:  3,
 		},
 		"merged key target resolves to the anchor key": {
-			path:      paths.Root().Child("merged", "a").Key(),
+			path:      paths.Root().Child("merged", "a"),
+			key:       true,
 			wantValue: "a",
 			wantLine:  3,
 		},
@@ -947,9 +908,7 @@ chain:
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tk, err := tc.path.Token(file.Docs[0])
-			require.NoError(t, err)
-			require.NotNil(t, tk)
+			tk := resolveToken(t, tc.path, tc.key, file.Docs[0])
 			assert.Equal(t, tc.wantValue, tk.Value)
 			assert.Equal(t, tc.wantLine, tk.Position.Line)
 		})
@@ -965,7 +924,7 @@ chain:
 	t.Run("merge key entry itself is addressable", func(t *testing.T) {
 		t.Parallel()
 
-		tk, err := paths.Root().Child("merged", "<<").Key().Token(file.Docs[0])
+		tk, err := paths.Root().Child("merged", "<<").KeyToken(file.Docs[0])
 		require.NoError(t, err)
 		assert.Equal(t, "<<", tk.Value)
 	})
@@ -1127,7 +1086,7 @@ func TestPath_HandBuiltAST(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, mapping.Values[0].GetToken(), tk)
 
-		tk, err = paths.Root().Child("").Key().Token(doc)
+		tk, err = paths.Root().Child("").KeyToken(doc)
 		require.NoError(t, err)
 		assert.Equal(t, "1", tk.Value)
 	})
@@ -1230,8 +1189,8 @@ func TestPath_Token_NotFound(t *testing.T) {
 		"index out of range":       paths.Root().Child("items").Index(2),
 		"child of sequence":        paths.Root().Child("items", "a"),
 		"missing key then index":   paths.Root().Child("nope").Index(0),
-		"missing key then child":   paths.Root().Child("nope", "deeper").Key(),
-		"index then missing child": paths.Root().Child("items").Index(0).Child("x").Key(),
+		"missing key then child":   paths.Root().Child("nope", "deeper"),
+		"index then missing child": paths.Root().Child("items").Index(0).Child("x"),
 	}
 
 	for name, path := range tcs {
@@ -1241,6 +1200,9 @@ func TestPath_Token_NotFound(t *testing.T) {
 			_, err := path.Token(file.Docs[0])
 			require.ErrorIs(t, err, paths.ErrNotFound)
 			assert.Contains(t, err.Error(), path.String())
+
+			_, err = path.KeyToken(file.Docs[0])
+			require.ErrorIs(t, err, paths.ErrNotFound)
 
 			_, err = path.Node(file.Docs[0])
 			require.ErrorIs(t, err, paths.ErrNotFound)
@@ -1351,7 +1313,7 @@ merged:
 		_, err = path.Node(file.Docs[0])
 		require.ErrorIs(t, err, paths.ErrWildcard)
 
-		_, err = paths.Root().Recursive("name").Key().Token(file.Docs[0])
+		_, err = paths.Root().Recursive("name").KeyToken(file.Docs[0])
 		require.ErrorIs(t, err, paths.ErrWildcard)
 	})
 
@@ -1386,6 +1348,7 @@ none: []
 	tcs := map[string]struct {
 		path      paths.Path
 		wantValue string
+		key       bool
 	}{
 		"double quoted key": {
 			path:      paths.Root().Child("quoted key"),
@@ -1408,7 +1371,8 @@ none: []
 			wantValue: "5",
 		},
 		"explicit key target is the key itself, not the indicator": {
-			path:      paths.Root().Child("complex").Key(),
+			path:      paths.Root().Child("complex"),
+			key:       true,
 			wantValue: "complex",
 		},
 		"tagged key matches by content": {
@@ -1416,7 +1380,8 @@ none: []
 			wantValue: "6",
 		},
 		"tagged key target skips the tag": {
-			path:      paths.Root().Child("tagged").Key(),
+			path:      paths.Root().Child("tagged"),
+			key:       true,
 			wantValue: "tagged",
 		},
 		"anchored key matches by content": {
@@ -1424,7 +1389,8 @@ none: []
 			wantValue: "7",
 		},
 		"anchored key target skips the anchor": {
-			path:      paths.Root().Child("anchored").Key(),
+			path:      paths.Root().Child("anchored"),
+			key:       true,
 			wantValue: "anchored",
 		},
 		"empty flow mapping value target": {
@@ -1441,8 +1407,7 @@ none: []
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tk, err := tc.path.Token(file.Docs[0])
-			require.NoError(t, err)
+			tk := resolveToken(t, tc.path, tc.key, file.Docs[0])
 			assert.Equal(t, tc.wantValue, tk.Value)
 		})
 	}
@@ -1455,4 +1420,22 @@ none: []
 			require.ErrorIs(t, err, paths.ErrNotFound, "Child(%q)", name)
 		}
 	})
+}
+
+// resolveToken returns the token path selects in doc, the key of the entry
+// when key is set and the value otherwise, and fails the test when the path
+// does not resolve.
+func resolveToken(t *testing.T, path paths.Path, key bool, doc *ast.DocumentNode) *token.Token {
+	t.Helper()
+
+	resolve := path.Token
+	if key {
+		resolve = path.KeyToken
+	}
+
+	tk, err := resolve(doc)
+	require.NoError(t, err)
+	require.NotNil(t, tk)
+
+	return tk
 }

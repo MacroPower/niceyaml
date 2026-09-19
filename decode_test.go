@@ -838,7 +838,7 @@ func (c *validatorConfig) Validate() error {
 	if c.Name == "" {
 		return niceyaml.NewErrorFrom(
 			errNameRequired,
-			niceyaml.WithPath(paths.Root().Child("name").Key()),
+			niceyaml.WithKey(paths.Root().Child("name")),
 		)
 	}
 
@@ -868,7 +868,7 @@ func nameSchema(called *bool) niceyaml.Validator {
 		if name, ok := m["name"].(string); ok && name == "invalid" {
 			return niceyaml.NewErrorFrom(
 				errSchemaValidationFailed,
-				niceyaml.WithPath(paths.Root().Child("name").Key()),
+				niceyaml.WithKey(paths.Root().Child("name")),
 			)
 		}
 
@@ -890,7 +890,7 @@ func (c *bothValidatorConfig) Validate() error {
 	if c.Name == "" {
 		return niceyaml.NewErrorFrom(
 			errNameRequired,
-			niceyaml.WithPath(paths.Root().Child("name").Key()),
+			niceyaml.WithKey(paths.Root().Child("name")),
 		)
 	}
 
@@ -1451,20 +1451,29 @@ func TestDocument_Ranges(t *testing.T) {
 		  line1
 		  line2
 		empty:
+		list:
+		  - a
 	`)
 
 	tcs := map[string]struct {
 		path paths.Path
 		want position.Ranges
 		is   error
+		key  bool
 	}{
 		"value": {
 			path: paths.Root().Child("kind"),
 			want: position.Ranges{position.NewRange(position.New(0, 6), position.New(0, 16))},
 		},
 		"key": {
-			path: paths.Root().Child("kind").Key(),
+			path: paths.Root().Child("kind"),
+			key:  true,
 			want: position.Ranges{position.NewRange(position.New(0, 0), position.New(0, 4))},
+		},
+		"key of a sequence element is the element": {
+			path: paths.Root().Child("list").Index(0),
+			key:  true,
+			want: position.Ranges{position.NewRange(position.New(8, 4), position.New(8, 5))},
 		},
 		"value across lines": {
 			path: paths.Root().Child("text"),
@@ -1489,7 +1498,12 @@ func TestDocument_Ranges(t *testing.T) {
 
 			dd := yamltest.FirstDocument(t, input)
 
-			got, err := dd.Ranges(tc.path)
+			ranges := dd.Ranges
+			if tc.key {
+				ranges = dd.KeyRanges
+			}
+
+			got, err := ranges(tc.path)
 			if tc.is != nil {
 				require.ErrorIs(t, err, tc.is)
 

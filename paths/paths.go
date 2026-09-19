@@ -30,32 +30,6 @@ var (
 	ErrWildcard = errors.New("wildcard path matches any number of nodes")
 )
 
-// Part selects which token of a resolved node a [Path] refers to.
-//
-// The zero value is [PartNode], so a [Path] from [Parse] or [Root] refers to
-// the node itself, which for a mapping entry is its value. [Path.Key] picks
-// the key of the entry instead.
-type Part int
-
-const (
-	// PartNode targets the node the path resolves to.
-	PartNode Part = iota
-	// PartKey targets the key of the mapping entry the path resolves to.
-	PartKey
-)
-
-// String returns the part name: "node" or "key".
-func (p Part) String() string {
-	switch p {
-	case PartNode:
-		return "node"
-	case PartKey:
-		return "key"
-	default:
-		return "Part(" + strconv.Itoa(int(p)) + ")"
-	}
-}
-
 // segmentKind identifies the selector a [segment] applies.
 type segmentKind int
 
@@ -108,7 +82,7 @@ func quoteName(name string) string {
 }
 
 // Path is a location in a YAML document, given as a sequence of selectors
-// from the document root plus the [Part] of the resolved node it refers to.
+// from the document root.
 //
 // A Path is a value and never changes: each selector method returns a new
 // Path and leaves the receiver as it was, so a Path is safe to share as a
@@ -118,21 +92,20 @@ func quoteName(name string) string {
 //	replicas := spec.Child("replicas") // $.spec.replicas
 //	image := spec.Child("image")       // $.spec.image
 //
-// The zero value is the document root targeting [PartNode], the same as
-// [Root]. A path targets the node it resolves to, which for a mapping entry
-// is its value, and [Path.Key] targets the key of that entry instead.
+// The zero value is the document root, the same as [Root]. A path selects a
+// node, which for a mapping entry is its value. [Path.Token] returns the
+// token that starts that node and [Path.KeyToken] the key of the entry, so
+// the same Path names either token of an entry.
 //
-// [Path.String] returns the selectors as a path expression, so [Parse] reads
-// it back as an equal Path with [PartNode]. The part travels separately
-// through [Path.Part].
+// [Path.String] returns the selectors as a path expression, and [Parse]
+// reads it back as an equal Path.
 //
 // Create instances with [Root], [Parse], or [MustParse].
 type Path struct {
 	segments []segment
-	part     Part
 }
 
-// Root creates a new [Path] at the document root ($), targeting [PartNode].
+// Root creates a new [Path] at the document root ($).
 func Root() Path {
 	return Path{}
 }
@@ -145,7 +118,7 @@ func (p Path) extend(segs ...segment) Path {
 	merged = append(merged, p.segments...)
 	merged = append(merged, segs...)
 
-	return Path{segments: merged, part: p.part}
+	return Path{segments: merged}
 }
 
 // Child returns a copy of the path with a `.name` selector appended for
@@ -183,21 +156,8 @@ func (p Path) Recursive(selector string) Path {
 	return p.extend(segment{kind: segmentRecursive, name: selector})
 }
 
-// Part returns the [Part] the path targets.
-func (p Path) Part() Part {
-	return p.part
-}
-
-// Key returns a copy of the path targeting [PartKey].
-func (p Path) Key() Path {
-	p.part = PartKey
-
-	return p
-}
-
-// String returns the path expression, such as "$.metadata.name".
-//
-// The [Part] is not part of the expression, so [Parse] accepts the result.
+// String returns the path expression, such as "$.metadata.name", which
+// [Parse] reads back.
 func (p Path) String() string {
 	var sb strings.Builder
 
@@ -211,8 +171,7 @@ func (p Path) String() string {
 }
 
 // YAMLPath returns the equivalent [*yaml.Path] for use with the goccy/go-yaml
-// API, such as [yaml.Path.ReplaceWithNode]. The [Part] has no equivalent
-// there, so the result omits it.
+// API, such as [yaml.Path.ReplaceWithNode].
 //
 // The result selects the same names as the Path, but its String is the
 // goccy/go-yaml form, which differs from [Path.String] for names with
@@ -303,10 +262,10 @@ func (p Path) single(doc *ast.DocumentNode) (match, error) {
 	return found[0], nil
 }
 
-// Nodes resolves every node the path selects in doc, in document order,
-// ignoring the [Part]. A path without `[*]` or `..` selectors yields at most
-// one node; an empty result means nothing exists at the path. Each node
-// appears once, even when chained `..` selectors reach it more than once.
+// Nodes resolves every node the path selects in doc, in document order. A
+// path without `[*]` or `..` selectors yields at most one node; an empty
+// result means nothing exists at the path. Each node appears once, even
+// when chained `..` selectors reach it more than once.
 //
 // It looks through anchors and aliases, so each node is the content the
 // path names. The `.name`, `[n]`, and `[*]` selectors follow aliases to
@@ -338,7 +297,7 @@ func (p Path) Nodes(doc *ast.DocumentNode) ([]ast.Node, error) {
 	return nodes, nil
 }
 
-// Node resolves the node at the path in doc, ignoring the [Part].
+// Node resolves the node at the path in doc.
 //
 // It looks through anchors and aliases, so the result is the content the
 // path names. The `.name` and `[n]` selectors follow aliases to their anchor
@@ -362,37 +321,53 @@ func (p Path) Node(doc *ast.DocumentNode) (ast.Node, error) {
 	return node, nil
 }
 
-// Token resolves the [*token.Token] the path refers to in doc.
+// Token resolves the [*token.Token] that starts the node the path selects
+// in doc: a scalar's own token, the first key of a mapping, or the first
+// element of a sequence. For a mapping entry that is the token of its
+// value; [Path.KeyToken] returns the key. An alias resolves to its own
+// token rather than the anchor's content, since that is where the path
+// points in the source.
 //
 // The path resolves against the document body only, so the same path
 // resolves to different tokens in different documents of one file. Returns
 // the same errors as [Path.Node], except [ErrAlias]: Token does not
 // dereference the node it resolves to, so an alias that names no anchor
 // still yields the alias's own token.
-//
-// For [PartKey], Token returns the key token of the mapping entry the last
-// selector picked, looking through the `?` indicator of an explicit key and
-// any anchor or tag on the key. For [PartNode], and for
-// PartKey when the path ends at a sequence element or the root, Token
-// returns the token that starts the resolved node: a scalar's own token, the
-// first key of a mapping, or the first element of a sequence. An alias
-// resolves to its own token rather than the anchor's content, since that is
-// where the path points in the source.
 func (p Path) Token(doc *ast.DocumentNode) (*token.Token, error) {
 	m, err := p.single(doc)
 	if err != nil {
 		return nil, err
 	}
 
+	return p.tokenOf(m.node)
+}
+
+// KeyToken resolves the [*token.Token] of the key of the mapping entry the
+// last selector of the path picked, looking through the `?` indicator of an
+// explicit key and any anchor or tag on the key. A path that ends at a
+// sequence element or at the root picks no entry, and KeyToken then returns
+// the token [Path.Token] returns. It resolves as Token does and returns the
+// same errors.
+func (p Path) KeyToken(doc *ast.DocumentNode) (*token.Token, error) {
+	m, err := p.single(doc)
+	if err != nil {
+		return nil, err
+	}
+
 	node := m.node
-	if p.part == PartKey && m.entry != nil {
+	if m.entry != nil {
 		if key := keyContent(m.entry.Key); key != nil {
 			node = key
 		}
 	}
 
-	// A tree built by hand may hold a typed nil where the parser always
-	// puts a node, and such a node has no token to point at.
+	return p.tokenOf(node)
+}
+
+// tokenOf returns the token that starts node. A tree built by hand may hold
+// a typed nil where the parser always puts a node, and such a node has no
+// token to point at, which is [ErrNotFound].
+func (p Path) tokenOf(node ast.Node) (*token.Token, error) {
 	tk := firstToken(node)
 	if tk == nil {
 		return nil, fmt.Errorf("%w: %s has no token", ErrNotFound, p)
