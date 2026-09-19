@@ -28,6 +28,8 @@ func Override(base, overlay color.Color) color.Color {
 // If both colors are nil or [lipgloss.NoColor], it returns nil.
 // If one color is nil, [lipgloss.NoColor], or invisible, it returns the
 // other, clamped the same way when it lies outside the gamut.
+// A color outside the gamut is clamped before the blend as well, since
+// the conversion the blend reads wraps a negative channel to a bright one.
 func Blend(c1, c2 color.Color) color.Color {
 	_, isNoColor1 := c1.(lipgloss.NoColor)
 	_, isNoColor2 := c2.(lipgloss.NoColor)
@@ -46,8 +48,8 @@ func Blend(c1, c2 color.Color) color.Color {
 		return clamped(c1)
 	}
 
-	cf1, visible1 := colorful.MakeColor(c1)
-	cf2, visible2 := colorful.MakeColor(c2)
+	cf1, visible1 := colorful.MakeColor(clamped(c1))
+	cf2, visible2 := colorful.MakeColor(clamped(c2))
 
 	if !visible1 {
 		return clamped(c2)

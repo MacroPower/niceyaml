@@ -190,6 +190,33 @@ func TestBlend_InGamut(t *testing.T) {
 	}
 }
 
+func TestBlend_ClampsInputs(t *testing.T) {
+	t.Parallel()
+
+	// The blend reads each color through an RGBA roundtrip, which wraps a
+	// negative channel to a bright one and keeps a channel above 1 as it
+	// is, so an out-of-gamut color pulls the midpoint somewhere the clamped
+	// color never reaches. Blend clamps each color before mixing, the way
+	// the paths that hand one color back do.
+	black := color.RGBA{A: 255}
+
+	tcs := map[string]struct {
+		bad colorful.Color
+	}{
+		"negative channel":  {bad: colorful.Color{R: 0.5, G: -0.2, B: 0.5}},
+		"channel above one": {bad: colorful.Color{R: 1.8, G: 0.2, B: 0.5}},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, colors.Blend(tc.bad.Clamped(), black), colors.Blend(tc.bad, black))
+			assert.Equal(t, colors.Blend(black, tc.bad.Clamped()), colors.Blend(black, tc.bad))
+		})
+	}
+}
+
 func TestBlendStyles(t *testing.T) {
 	t.Parallel()
 
