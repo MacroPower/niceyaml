@@ -38,6 +38,10 @@ type StylesOption func(*Styles)
 //nolint:gocritic // Value semantics preferred for API ergonomics.
 func Set(s kind.Kind, ls lipgloss.Style) StylesOption {
 	return func(st *Styles) {
+		if st.overrides == nil {
+			st.overrides = make(map[kind.Kind]*lipgloss.Style, 1)
+		}
+
 		st.overrides[s] = &ls
 	}
 }

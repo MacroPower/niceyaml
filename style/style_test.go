@@ -254,6 +254,19 @@ func TestStyles_With(t *testing.T) {
 		assert.Equal(t, lipgloss.Color("#ffff00"), result.Style(kind.Comment).GetForeground())
 		assert.Equal(t, lipgloss.Style{}, result.Style(kind.Text))
 	})
+
+	t.Run("option applies to a zero value", func(t *testing.T) {
+		t.Parallel()
+
+		var zero style.Styles
+
+		assert.NotPanics(t, func() { style.Set(kind.Comment, yellow)(&zero) })
+
+		// The option records the style, and resolving it makes the style
+		// reachable.
+		assert.Equal(t, lipgloss.NewStyle(), zero.Style(kind.Comment))
+		assert.Equal(t, lipgloss.Color("#ffff00"), zero.With().Style(kind.Comment).GetForeground())
+	})
 }
 
 func TestStyles_UnsetCategories(t *testing.T) {
