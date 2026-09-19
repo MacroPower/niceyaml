@@ -1097,6 +1097,91 @@ func TestPath_HandBuiltAST(t *testing.T) {
 	})
 }
 
+// mapNode builds a mapping node from entries, for a tree the parser would
+// never produce.
+func mapNode(entries ...*ast.MappingValueNode) *ast.MappingNode {
+	return &ast.MappingNode{Values: entries}
+}
+
+// mapEntry builds a mapping entry from key and value.
+func mapEntry(key ast.MapKeyNode, value ast.Node) *ast.MappingValueNode {
+	return &ast.MappingValueNode{Key: key, Value: value}
+}
+
+func TestPath_Node_HandBuiltTree(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		body ast.Node
+		path paths.Path
+		err  error
+	}{
+		"nil mapping entry": {
+			body: mapNode(nil),
+			path: paths.Root().Child("a"),
+			err:  paths.ErrNotFound,
+		},
+		"nil entry beside a real one": {
+			body: mapNode(nil, mapEntry(&ast.StringNode{Value: "a"}, &ast.StringNode{Value: "1"})),
+			path: paths.Root().Child("b"),
+			err:  paths.ErrNotFound,
+		},
+		"key without a token": {
+			body: mapNode(mapEntry(&ast.IntegerNode{}, &ast.StringNode{Value: "1"})),
+			path: paths.Root().Child("a"),
+			err:  paths.ErrNotFound,
+		},
+		"alias name holding a typed nil": {
+			body: mapNode(mapEntry(
+				&ast.StringNode{Value: "a"},
+				&ast.AliasNode{Value: (*ast.StringNode)(nil)},
+			)),
+			path: paths.Root().Child("a"),
+			err:  paths.ErrAlias,
+		},
+		"anchor name without a token": {
+			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, &ast.AnchorNode{
+				Name:  &ast.StringNode{},
+				Value: &ast.StringNode{Value: "1"},
+			})),
+			path: paths.Root().Child("a", "b"),
+			err:  paths.ErrNotFound,
+		},
+		"entry without a value": {
+			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, nil)),
+			path: paths.Root().Child("a", "b"),
+			err:  paths.ErrNotFound,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := &ast.DocumentNode{Body: tc.body}
+
+			_, err := tc.path.Node(doc)
+			require.ErrorIs(t, err, tc.err)
+		})
+	}
+}
+
+func TestPath_Nodes_HandBuiltTreeRecursive(t *testing.T) {
+	t.Parallel()
+
+	doc := &ast.DocumentNode{Body: mapNode(
+		nil,
+		mapEntry(&ast.IntegerNode{}, mapNode(
+			nil,
+			mapEntry(&ast.IntegerNode{}, &ast.StringNode{Value: "1"}),
+		)),
+	)}
+
+	nodes, err := paths.Root().Recursive("b").Nodes(doc)
+	require.NoError(t, err)
+	assert.Empty(t, nodes)
+}
+
 func TestPath_RedefinedAnchor(t *testing.T) {
 	t.Parallel()
 

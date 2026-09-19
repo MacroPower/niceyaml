@@ -51,19 +51,27 @@ type aliasBinder struct {
 
 // Visit records an anchor or binds an alias, then returns b so [ast.Walk]
 // continues into the children of node.
+//
+// It returns nil for a nil node, including a typed nil a hand-built tree may
+// hold, so Walk stops rather than reading the fields behind it.
 func (b *aliasBinder) Visit(node ast.Node) ast.Visitor {
+	if node == nil || reflect.ValueOf(node).IsNil() {
+		return nil
+	}
+
 	switch n := node.(type) {
 	case *ast.AnchorNode:
-		if n.Name != nil {
-			b.anchors[n.Name.GetToken().Value] = n.Value
+		if name := nodeToken(n.Name); name != nil {
+			b.anchors[name.Value] = n.Value
 		}
 
 	case *ast.AliasNode:
-		if n.Value == nil {
+		name := nodeToken(n.Value)
+		if name == nil {
 			return b
 		}
 
-		if target, ok := b.anchors[n.Value.GetToken().Value]; ok {
+		if target, ok := b.anchors[name.Value]; ok {
 			b.targets[n] = target
 		}
 	}
@@ -113,11 +121,12 @@ func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.
 		case *ast.AnchorNode:
 			node = n.Value
 		case *ast.AliasNode:
-			if n.Value == nil {
+			tk := nodeToken(n.Value)
+			if tk == nil {
 				return nil, fmt.Errorf("%w: alias has no name", ErrAlias)
 			}
 
-			name := n.Value.GetToken().Value
+			name := tk.Value
 
 			if followed[n] {
 				return nil, fmt.Errorf("%w: *%s forms a cycle", ErrAlias, name)
@@ -247,7 +256,7 @@ func (r *resolver) lookup(
 	mapping *ast.MappingNode, name string, seen map[*ast.MappingNode]bool,
 ) (*ast.MappingValueNode, bool, error) {
 	for _, entry := range mapping.Values {
-		if keyName(entry.Key) == name {
+		if entry != nil && keyName(entry.Key) == name {
 			return entry, true, nil
 		}
 	}
@@ -259,7 +268,7 @@ func (r *resolver) lookup(
 	seen[mapping] = true
 
 	for _, entry := range mapping.Values {
-		if entry.Key == nil || !entry.Key.IsMergeKey() {
+		if entry == nil || entry.Key == nil || !entry.Key.IsMergeKey() {
 			continue
 		}
 
@@ -322,6 +331,10 @@ func (r *resolver) descend(node ast.Node, name string, acc []match) []match {
 	switch n := node.(type) {
 	case *ast.MappingNode:
 		for _, entry := range n.Values {
+			if entry == nil {
+				continue
+			}
+
 			if keyName(entry.Key) == name {
 				acc = append(acc, match{node: entry.Value, entry: entry})
 			}
@@ -374,10 +387,26 @@ func keyName(key ast.MapKeyNode) string {
 	case *ast.StringNode:
 		return k.Value
 	case ast.MapKeyNode:
-		return k.GetToken().Value
+		tk := nodeToken(k)
+		if tk == nil {
+			return ""
+		}
+
+		return tk.Value
+
 	default:
 		return ""
 	}
+}
+
+// nodeToken returns the token of node, or nil when node has none. A nil
+// node, including a typed nil a hand-built tree may hold, has no token.
+func nodeToken(node ast.Node) *token.Token {
+	if node == nil || reflect.ValueOf(node).IsNil() {
+		return nil
+	}
+
+	return node.GetToken()
 }
 
 // firstToken returns the token that starts node's content: the first key of
