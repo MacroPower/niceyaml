@@ -78,6 +78,10 @@ func TestExpand(t *testing.T) {
 	bracketFile := filepath.Join(tmpDir, "cfg[1].txt")
 	require.NoError(t, os.WriteFile(bracketFile, []byte("test"), 0o644))
 
+	// Create a directory whose name contains a glob metacharacter.
+	bracketDir := filepath.Join(tmpDir, "data[1]")
+	require.NoError(t, os.MkdirAll(bracketDir, 0o755))
+
 	tests := map[string]struct {
 		args      []string
 		wantNames []string
@@ -141,6 +145,10 @@ func TestExpand(t *testing.T) {
 		},
 		"only directories match": {
 			args: []string{filepath.Join(tmpDir, "sub*")},
+			err:  errNoMatch,
+		},
+		"literal directory with metacharacter": {
+			args: []string{bracketDir},
 			err:  errNoMatch,
 		},
 		"nonexistent file passes": {

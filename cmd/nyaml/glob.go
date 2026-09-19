@@ -77,8 +77,9 @@ func expandPaths(args ...string) ([]string, error) {
 		}
 
 		if len(matches) == 0 {
-			_, err = os.Stat(arg)
-			if err != nil {
+			// The fallback admits files only, as the glob itself does.
+			info, err := os.Stat(arg)
+			if err != nil || info.IsDir() {
 				return nil, fmt.Errorf("%w: %q", errNoMatch, arg)
 			}
 
