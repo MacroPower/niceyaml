@@ -1792,6 +1792,7 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 
 	leftRows := m.trimFrame(splitLines(p.Print(m.left.Slice(window))), first, last)
 	rightRows := m.trimFrame(splitLines(p.Print(right.Slice(window))), first, last)
+	blank := m.blankPaneRow(p)
 
 	// Get text style for padding empty areas.
 	textStyle := m.printer.Style(kind.Text)
@@ -1810,22 +1811,28 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 	// columns scrolled to offset.
 	appendRows := func(count, leftCount, rightCount, offset int) {
 		for i := range count {
-			var left, right string
+			// A pane out of rows shows the blank row, which carries the
+			// container's frame. Horizontal scrolling cuts the content
+			// columns of a rendered row; the blank row has none, and its
+			// frame already sits where it belongs.
+			left, right := blank, blank
 
 			if i < leftCount && li < len(leftRows) {
 				left = leftRows[li]
 				li++
+
+				if !m.wrapEnabled {
+					left = m.cutRow(left, offset, paneWidth)
+				}
 			}
 
 			if i < rightCount && ri < len(rightRows) {
 				right = rightRows[ri]
 				ri++
-			}
 
-			// Apply horizontal scrolling.
-			if !m.wrapEnabled {
-				left = m.cutRow(left, offset, paneWidth)
-				right = m.cutRow(right, offset, paneWidth)
+				if !m.wrapEnabled {
+					right = m.cutRow(right, offset, paneWidth)
+				}
 			}
 
 			// Pad left pane to consistent width for alignment.
@@ -1862,6 +1869,20 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 	combined = m.trimWindow(combined, first)
 
 	return m.renderContent(combined, contentW, contentH)
+}
+
+// blankPaneRow renders the row a side-by-side pane shows where it has run
+// out of rows, because the line wraps taller in the other pane. It is one
+// empty content row with the frame of p's container style around it, so the
+// pane keeps its border down the whole window. A container without a
+// horizontal frame gives "", as a pane of spaces would render anyway.
+func (m *Model) blankPaneRow(p *printer.Printer) string {
+	rows := splitLines(p.Print(m.left.Slice(position.NewSpan(0, 0))))
+	if m.rows.top >= len(rows) {
+		return ""
+	}
+
+	return rows[m.rows.top]
 }
 
 func clamp[T cmp.Ordered](v, low, high T) T {

@@ -1090,6 +1090,52 @@ func TestViewport_ContainerBoxKeepsItsColumns(t *testing.T) {
 	}
 }
 
+func TestViewport_SideBySideFillerRowsKeepTheFrame(t *testing.T) {
+	t.Parallel()
+
+	// A line that wraps taller in one pane leaves the other pane short of
+	// rows, and the filler rows once rendered as spaces, so the short pane
+	// lost its border partway down the window. Every row of both panes
+	// carries the border of the printer's container.
+	const (
+		width  = 31 // Two panes of 14 columns either side of a 3-column separator.
+		height = 4
+		pane   = 14
+	)
+
+	before := niceyaml.NewSourceFromString("a: 1\nb: short\nc: 3\n")
+	after := niceyaml.NewSourceFromString("a: 1\nb: " + strings.Repeat("y", 60) + "\nc: 3\n")
+
+	p := testPrinter().With(printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())))
+	m := yamlviewport.New(yamlviewport.WithPrinter(p))
+	m.SetWidth(width)
+	m.SetHeight(height)
+	m.SetViewMode(yamlviewport.ViewModeSideBySide)
+	m.AddRevision(before)
+	m.AddRevision(after)
+
+	// The wrapped line takes more rows in the right pane than in the left,
+	// so the left pane runs out of rows partway down the window.
+	require.Greater(t, m.TotalRowCount(), before.View().Len()+2)
+
+	for offset := range m.TotalRowCount() - height + 1 {
+		m.SetYOffset(offset)
+
+		for i, row := range strings.Split(m.View(), "\n") {
+			plain := []rune(ansi.Strip(row))
+			require.Len(t, plain, width, "offset %d, row %d", offset, i)
+
+			for _, col := range []int{0, width - pane} {
+				assert.Contains(t, "┌│└", string(plain[col]), "offset %d, row %d, col %d", offset, i, col)
+			}
+
+			for _, col := range []int{pane - 1, width - 1} {
+				assert.Contains(t, "┐│┘", string(plain[col]), "offset %d, row %d, col %d", offset, i, col)
+			}
+		}
+	}
+}
+
 func TestViewport_HorizontalScrollKeepsFrame(t *testing.T) {
 	t.Parallel()
 
