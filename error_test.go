@@ -303,110 +303,63 @@ func TestDocument_BindRender(t *testing.T) {
 	}
 }
 
-func TestError_Path(t *testing.T) {
+func TestError_Location(t *testing.T) {
 	t.Parallel()
 
+	path := paths.Root().Child("foo").Key()
+	pos := position.New(1, 4)
+	rng := position.NewRange(position.New(1, 2), position.New(1, 5))
+
 	tcs := map[string]struct {
-		err    *niceyaml.Error
-		want   paths.Path
-		wantOK bool
+		err  *niceyaml.Error
+		want niceyaml.Location
 	}{
-		"no path": {
+		"nil": {
+			err: nil,
+		},
+		"no location": {
 			err: niceyaml.NewError("test"),
 		},
-		"path set": {
-			err: niceyaml.NewError(
-				"test",
-				niceyaml.WithPath(paths.Root().Child("foo").Key()),
-			),
-			want:   paths.Root().Child("foo").Key(),
-			wantOK: true,
+		"path": {
+			err:  niceyaml.NewError("test", niceyaml.WithPath(path)),
+			want: path,
+		},
+		"position": {
+			err:  niceyaml.NewError("test", niceyaml.WithPosition(pos)),
+			want: pos,
+		},
+		"range": {
+			err:  niceyaml.NewError("test", niceyaml.WithRange(rng)),
+			want: rng,
+		},
+		"last option wins": {
+			err:  niceyaml.NewError("test", niceyaml.WithPath(path), niceyaml.WithPosition(pos)),
+			want: pos,
 		},
 		"path on a wrapped error": {
 			err: niceyaml.NewErrorFrom(
-				fmt.Errorf("context: %w", niceyaml.NewError(
-					"test",
-					niceyaml.WithPath(paths.Root().Child("foo")),
-				)),
+				fmt.Errorf("context: %w", niceyaml.NewError("test", niceyaml.WithPath(path))),
 			),
-			want:   paths.Root().Child("foo"),
-			wantOK: true,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got, ok := tc.err.Path()
-			assert.Equal(t, tc.wantOK, ok)
-			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
-func TestError_Position(t *testing.T) {
-	t.Parallel()
-
-	pos := position.New(1, 4)
-
-	tcs := map[string]struct {
-		err    *niceyaml.Error
-		want   position.Position
-		wantOK bool
-	}{
-		"no position": {
-			err: niceyaml.NewError("test"),
-		},
-		"position set": {
-			err:    niceyaml.NewError("test", niceyaml.WithPosition(pos)),
-			want:   pos,
-			wantOK: true,
+			want: path,
 		},
 		"position on a wrapped error": {
 			err: niceyaml.NewErrorFrom(
 				fmt.Errorf("context: %w", niceyaml.NewError("test", niceyaml.WithPosition(pos))),
 			),
-			want:   pos,
-			wantOK: true,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got, ok := tc.err.Position()
-			assert.Equal(t, tc.wantOK, ok)
-			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
-func TestError_Range(t *testing.T) {
-	t.Parallel()
-
-	rng := position.NewRange(position.New(1, 2), position.New(1, 5))
-
-	tcs := map[string]struct {
-		err    *niceyaml.Error
-		want   position.Range
-		wantOK bool
-	}{
-		"no range": {
-			err: niceyaml.NewError("test"),
-		},
-		"range set": {
-			err:    niceyaml.NewError("test", niceyaml.WithRange(rng)),
-			want:   rng,
-			wantOK: true,
+			want: pos,
 		},
 		"range on a wrapped error": {
 			err: niceyaml.NewErrorFrom(
 				fmt.Errorf("context: %w", niceyaml.NewError("test", niceyaml.WithRange(rng))),
 			),
-			want:   rng,
-			wantOK: true,
+			want: rng,
+		},
+		"own location wins over a wrapped one": {
+			err: niceyaml.NewErrorFrom(
+				niceyaml.NewError("test", niceyaml.WithPath(path)),
+				niceyaml.WithPosition(pos),
+			),
+			want: pos,
 		},
 	}
 
@@ -414,9 +367,7 @@ func TestError_Range(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got, ok := tc.err.Range()
-			assert.Equal(t, tc.wantOK, ok)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, tc.err.Location())
 		})
 	}
 }
@@ -2405,12 +2356,8 @@ func TestError_With(t *testing.T) {
 	located := base.With(niceyaml.WithPath(paths.Root().Child("key").Key()))
 
 	// The copy carries the new option and the receiver keeps its own.
-	_, set := base.Path()
-	assert.False(t, set)
-
-	got, set := located.Path()
-	assert.True(t, set)
-	assert.Equal(t, "$.key", got.String())
+	assert.Nil(t, base.Location())
+	assert.Equal(t, paths.Root().Child("key").Key(), located.Location())
 
 	assert.Equal(t, "bad key", base.Error())
 	assert.Equal(t, "$.key: bad key", located.Error())
@@ -2443,7 +2390,7 @@ func TestError_WrappedContext(t *testing.T) {
 
 	require.ErrorAs(t, wrapped, &got)
 
-	gotPath, ok := got.Path()
+	gotPath, ok := got.Location().(paths.Path)
 	require.True(t, ok)
 	assert.Equal(t, "$.name", gotPath.String())
 
@@ -3509,60 +3456,6 @@ func TestError_Accessors(t *testing.T) {
 
 	assert.NoError(t, nilErr.Cause())
 	assert.Empty(t, nilErr.Errors())
-}
-
-func TestError_Located(t *testing.T) {
-	t.Parallel()
-
-	located := niceyaml.NewError("inner", niceyaml.WithPath(paths.Root().Child("a")))
-
-	tcs := map[string]struct {
-		err  *niceyaml.Error
-		want bool
-	}{
-		"own path": {
-			err:  located,
-			want: true,
-		},
-		"own position": {
-			err:  niceyaml.NewError("pos", niceyaml.WithPosition(position.New(0, 0))),
-			want: true,
-		},
-		"own range": {
-			err: niceyaml.NewError(
-				"rng",
-				niceyaml.WithRange(position.NewRange(position.New(0, 0), position.New(0, 1))),
-			),
-			want: true,
-		},
-		"no location": {
-			err:  niceyaml.NewError("plain"),
-			want: false,
-		},
-		"location of a wrapped Error does not count": {
-			err:  niceyaml.NewErrorFrom(located),
-			want: false,
-		},
-		"nil": {
-			err:  nil,
-			want: false,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, tc.err.Located())
-
-			// Path still reports the wrapped location, so the two differ
-			// for an Error that wraps a located one.
-			if tc.err != nil && !tc.want {
-				_, ok := tc.err.Path()
-				assert.Equal(t, errors.Is(tc.err.Cause(), located), ok)
-			}
-		})
-	}
 }
 
 func TestSourceError_PositionOf(t *testing.T) {

@@ -53,13 +53,31 @@ type Renderer interface {
 	Print(view *line.View) string
 }
 
+// Location is where an [Error] points in a YAML document: a [paths.Path],
+// a [position.Position], or a [position.Range]. [WithPath], [WithPosition],
+// and [WithRange] each set one, and [Error.Location] returns the one set,
+// as one of those three types, so a caller reads it with a type switch:
+//
+//	switch loc := err.Location().(type) {
+//	case paths.Path:
+//	case position.Position:
+//	case position.Range:
+//	case nil: // No location.
+//	}
+type Location interface {
+	// String returns the location as people read it: the path expression
+	// for a path, and 1-indexed coordinates for a position or a range.
+	String() string
+}
+
 // Error is an error that points at a location in a YAML document.
 //
-// The location is a [paths.Path], a [position.Position], or a
-// [position.Range], set with [WithPath], [WithPosition], or [WithRange]. A
-// path resolves within one document of a source: the [Document] that
-// binds the Error, whether its own methods and validators produced the
-// Error or [Document.Bind] bound one built elsewhere.
+// The location is a [Location]: a [paths.Path], a [position.Position], or
+// a [position.Range], set with [WithPath], [WithPosition], or [WithRange].
+// An Error holds one, and the last of those options given wins. A path
+// resolves within one document of a source: the [Document] that binds the
+// Error, whether its own methods and validators produced the Error or
+// [Document.Bind] bound one built elsewhere.
 //
 // An Error carries what a producer knows and nothing about presentation. A
 // validator that knows a path uses [WithPath] and need not hold the source.
@@ -85,9 +103,7 @@ type Renderer interface {
 // Create instances with [NewError] or [NewErrorFrom].
 type Error struct {
 	err    error
-	path   *paths.Path
-	pos    *position.Position
-	rng    *position.Range
+	loc    Location
 	errors []*Error
 }
 
@@ -133,25 +149,29 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 //   - [WithErrors]
 type ErrorOption func(e *Error)
 
-// WithPath is an [ErrorOption] that sets the YAML path where the error occurred.
+// WithPath is an [ErrorOption] that sets the YAML path where the error
+// occurred as the [Location] of the [Error], replacing any location set
+// before it.
 //
 // The [paths.Path] provides both the path and whether to highlight the key
 // or value.
 func WithPath(p paths.Path) ErrorOption {
 	return func(e *Error) {
-		e.path = &p
+		e.loc = p
 	}
 }
 
 // WithPosition is an [ErrorOption] that sets the 0-indexed position where
-// the error occurred, in the coordinates of the lines [Source.Lines]
-// returns, where line 0 is line 1 of the text. [SourceError.Excerpt]
-// highlights the content of the token at that position. A producer that
-// holds a go-yaml token converts it with [position.NewFromToken], and one
-// that holds none names the position on its own.
+// the error occurred as the [Location] of the [Error], replacing any
+// location set before it. The position is in the coordinates of the lines
+// [Source.Lines] returns, where line 0 is line 1 of the text.
+// [SourceError.Excerpt] highlights the content of the token at that
+// position. A producer that holds a go-yaml token converts it with
+// [position.NewFromToken], and one that holds none names the position on
+// its own.
 func WithPosition(p position.Position) ErrorOption {
 	return func(e *Error) {
-		e.pos = &p
+		e.loc = p
 	}
 }
 
@@ -167,13 +187,15 @@ func atToken(tk *token.Token) ErrorOption {
 }
 
 // WithRange is an [ErrorOption] that sets the 0-indexed range the error
-// covers, in the coordinates of the view [Source.Lines] returns, where line
-// 0 is line 1 of the text. [SourceError.Excerpt] highlights the whole range
-// rather than one token, so it is the option for a check that knows the
-// columns an error covers, such as one that runs on rendered lines.
+// covers as the [Location] of the [Error], replacing any location set
+// before it. The range is in the coordinates of the view [Source.Lines]
+// returns, where line 0 is line 1 of the text. [SourceError.Excerpt]
+// highlights the whole range rather than one token, so it is the option
+// for a check that knows the columns an error covers, such as one that
+// runs on rendered lines.
 func WithRange(r position.Range) ErrorOption {
 	return func(e *Error) {
-		e.rng = &r
+		e.loc = r
 	}
 }
 
@@ -204,8 +226,8 @@ func (e *Error) Error() string {
 		msg = e.err.Error()
 	}
 
-	if e.path != nil {
-		msg = prefix(e.path.String()+":", msg)
+	if p, ok := e.loc.(paths.Path); ok {
+		msg = prefix(p.String()+":", msg)
 	}
 
 	return msg
@@ -225,10 +247,9 @@ func (e *Error) nested() []*Error {
 	return out
 }
 
-// anchor returns the [Error] that carries the position: e itself when it has
-// a token, path, or range, otherwise the nearest such Error wrapped inside
-// e, looking through foreign wrapping. Falls back to e when none carries a
-// position.
+// anchor returns the [Error] that carries the location: e itself when it
+// has one, otherwise the nearest such Error wrapped inside e, looking
+// through foreign wrapping. Falls back to e when none carries a location.
 func (e *Error) anchor() *Error {
 	for cur := e; ; {
 		if cur.hasPosition() {
@@ -244,10 +265,9 @@ func (e *Error) anchor() *Error {
 	}
 }
 
-// hasPosition reports whether e carries a position, a range, or a path of
-// its own.
+// hasPosition reports whether e carries a location of its own.
 func (e *Error) hasPosition() bool {
-	return e.pos != nil || e.rng != nil || e.path != nil
+	return e.loc != nil
 }
 
 // Unwrap returns the underlying errors for [errors.Is] and [errors.As]. A
@@ -293,49 +313,17 @@ func (e *Error) Errors() []*Error {
 	return e.nested()
 }
 
-// Located reports whether the [Error] carries a token, a range, or a path
-// of its own. [Error.Path], [Error.Token], and [Error.Range] look through
-// wrapping to the nearest Error that does, so they report a location for
-// an Error that is not itself located. A nil Error is not located.
-func (e *Error) Located() bool {
-	return e != nil && e.hasPosition()
-}
-
-// Path returns the [paths.Path] set with [WithPath] and whether one was
-// set. It looks through wrapping to the [Error] that carries the location,
-// as [Error.Position] and [Error.Range] do; [Error.Located] reports whether
-// the Error itself carries one.
-func (e *Error) Path() (paths.Path, bool) {
-	a := e.anchor()
-	if a.path == nil {
-		return paths.Path{}, false
+// Location returns the [Location] of the [Error]: the [paths.Path],
+// [position.Position], or [position.Range] that [WithPath], [WithPosition],
+// or [WithRange] set, or nil when none did. It looks through wrapping to
+// the nearest Error that carries one, so an Error built with [NewErrorFrom]
+// around a located Error reports that location. A nil Error has none.
+func (e *Error) Location() Location {
+	if e == nil {
+		return nil
 	}
 
-	return *a.path, true
-}
-
-// Position returns the [position.Position] set with [WithPosition] and
-// whether one was set. It looks through wrapping to the [Error] that
-// carries the location.
-func (e *Error) Position() (position.Position, bool) {
-	a := e.anchor()
-	if a.pos == nil {
-		return position.Position{}, false
-	}
-
-	return *a.pos, true
-}
-
-// Range returns the [position.Range] set with [WithRange] and whether one
-// was set. It looks through wrapping to the [Error] that carries the
-// location.
-func (e *Error) Range() (position.Range, bool) {
-	a := e.anchor()
-	if a.rng == nil {
-		return position.Range{}, false
-	}
-
-	return *a.rng, true
+	return e.anchor().loc
 }
 
 // message returns the text of e without the location e or the Errors it
@@ -369,20 +357,20 @@ type location struct {
 // of the token. An Error without a location of its own returns
 // [ErrNoLocation].
 func (e *Error) locate(lookup func() (*Document, error)) (location, error) {
-	switch {
-	case e.rng != nil:
-		return location{pos: e.rng.Start, rng: e.rng}, nil
+	switch loc := e.loc.(type) {
+	case position.Range:
+		return location{pos: loc.Start, rng: &loc}, nil
 
-	case e.pos != nil:
-		return location{pos: *e.pos}, nil
+	case position.Position:
+		return location{pos: loc}, nil
 
-	case e.path != nil:
+	case paths.Path:
 		doc, err := lookup()
 		if err != nil {
 			return location{}, err
 		}
 
-		tk, err := e.path.Token(doc.doc)
+		tk, err := loc.Token(doc.doc)
 		if err != nil {
 			//nolint:wrapcheck // The paths error already names the path.
 			return location{}, err

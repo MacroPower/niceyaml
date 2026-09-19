@@ -13,6 +13,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
@@ -874,7 +875,7 @@ func TestSchema_ErrorPaths(t *testing.T) {
 
 			require.ErrorAs(t, err, &validationErr)
 
-			gotPath, ok := validationErr.Path()
+			gotPath, ok := validationErr.Location().(paths.Path)
 			assert.Equal(t, tc.wantPath != "", ok)
 
 			if ok {
@@ -889,7 +890,7 @@ func TestSchema_ErrorPaths(t *testing.T) {
 					continue
 				}
 
-				if nestedPath, ok := nestedErr.Path(); ok {
+				if nestedPath, ok := nestedErr.Location().(paths.Path); ok {
 					gotNestedPaths = append(gotNestedPaths, nestedPath.String())
 				}
 			}

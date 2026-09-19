@@ -157,7 +157,7 @@ func TestRegistry_Validate(t *testing.T) {
 
 		require.ErrorAs(t, err, &validationErr)
 
-		gotPath, ok := validationErr.Path()
+		gotPath, ok := validationErr.Location().(paths.Path)
 		require.True(t, ok)
 		assert.Equal(t, "$.kind", gotPath.String())
 	})
@@ -947,7 +947,7 @@ func TestRegistry_Validator(t *testing.T) {
 
 		require.ErrorAs(t, err, &validationErr)
 
-		gotPath, ok := validationErr.Path()
+		gotPath, ok := validationErr.Location().(paths.Path)
 		require.True(t, ok)
 		assert.Equal(t, "$.replicas", gotPath.String())
 	})
