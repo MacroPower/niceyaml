@@ -182,24 +182,29 @@ func (ls Lines) yieldRunes(lineIdx int, rng *position.Range, yield func(position
 
 // Tokens reconstructs the full [token.Tokens] stream from all lines.
 //
-// For multiline tokens that were split across lines, Tokens recombines them by
-// returning the original token once. The slice is new, but the tokens are the
-// originals. Treat them as read-only.
+// Each original token appears once, where it first occurs, so a multiline
+// token split across lines returns as the single token the lexer produced,
+// and so does a token a line repeats. The slice is new, but the tokens are
+// the originals. Treat them as read-only.
 func (ls Lines) Tokens() token.Tokens {
 	if len(ls.lines) == 0 {
 		return nil
 	}
 
-	result := token.Tokens{}
-
-	var last *token.Token
+	var (
+		result = token.Tokens{}
+		seen   = map[*token.Token]struct{}{}
+	)
 
 	for _, l := range ls.lines {
 		for _, src := range l.SourceTokens() {
-			if src != last {
-				result = append(result, src)
-				last = src
+			if _, ok := seen[src]; ok {
+				continue
 			}
+
+			seen[src] = struct{}{}
+
+			result = append(result, src)
 		}
 	}
 

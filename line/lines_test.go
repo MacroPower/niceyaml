@@ -2665,6 +2665,18 @@ func TestCollect(t *testing.T) {
 			line.Collect(before.Line(0), nil)
 		})
 	})
+
+	t.Run("Tokens returns a repeated line's tokens once", func(t *testing.T) {
+		t.Parallel()
+
+		got := line.Collect(before.Line(0), before.Line(1), before.Line(0)).Tokens()
+
+		want := append(
+			token.Tokens{},
+			append(before.Line(0).SourceTokens(), before.Line(1).SourceTokens()...)...,
+		)
+		assert.Equal(t, want, got)
+	})
 }
 
 func TestLines_Line(t *testing.T) {
