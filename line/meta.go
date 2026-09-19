@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"go.jacobcolvin.com/niceyaml/position"
-	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
 // Placement says where an [Annotation] sits relative to its [Line].
@@ -34,13 +34,13 @@ const (
 // It can be used to add comments or notes to the rendered output, without being
 // part of the main token stream. Kind names the style the printer renders
 // the annotation with, as [Overlay.Kind] does for an overlay, so an error
-// message below a line renders in [style.TextError] and a hunk header
-// above one in [style.Comment]. The zero Kind renders as [style.Comment].
+// message below a line renders in [kind.TextError] and a hunk header
+// above one in [kind.Comment]. The zero Kind renders as [kind.Comment].
 //
 // Add annotations to a [View] with [View.Annotate].
 type Annotation struct {
 	Content   string
-	Kind      style.Kind
+	Kind      kind.Kind
 	Placement Placement
 	Col       int // Optional, 0-indexed column position for the annotation.
 }
@@ -79,7 +79,7 @@ func (a Annotations) Filter(p Placement) Annotations {
 func (a Annotations) ByKind() []Annotations {
 	var (
 		groups []Annotations
-		index  = make(map[style.Kind]int)
+		index  = make(map[kind.Kind]int)
 	)
 
 	for _, ann := range a {
@@ -153,12 +153,12 @@ func (a Annotations) String() string {
 //
 // Overlays apply visual styles (highlighting, coloring) to specific portions of
 // a line. Kind names the style the printer renders the columns with, as its
-// [style.Styles] resolves it.
+// [go.jacobcolvin.com/niceyaml/style.Styles] resolves it.
 //
 // Add overlays to a [View] with [View.AddOverlay], [View.BlendOverlay], or
 // [View.AddLineOverlay].
 type Overlay struct {
-	Kind style.Kind
+	Kind kind.Kind
 	Cols position.Span
 	// Blend mixes the overlay style with the style underneath it instead of
 	// replacing it, so a highlight keeps the token or diff color it covers.

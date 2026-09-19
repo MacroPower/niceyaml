@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
 // Mode is the color scheme a theme targets.
@@ -70,7 +71,7 @@ func (t Theme) Styles() style.Styles {
 // is a [go.jacobcolvin.com/niceyaml/printer.StyleGetter] and goes to
 // [go.jacobcolvin.com/niceyaml/printer.WithStyles] as it is. The zero
 // Theme returns an empty style for every kind.
-func (t Theme) Style(st style.Kind) lipgloss.Style {
+func (t Theme) Style(st kind.Kind) lipgloss.Style {
 	return t.Styles().Style(st)
 }
 

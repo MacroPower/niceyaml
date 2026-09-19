@@ -12,11 +12,12 @@ import (
 	"go.jacobcolvin.com/niceyaml/normalizer"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
-// highlightKind is a custom style.Kind constant for search highlights.
-const highlightKind style.Kind = "highlightCustom"
+// highlightKind is a custom kind.Kind constant for search highlights.
+const highlightKind kind.Kind = "highlightCustom"
 
 var (
 	//go:embed demo.yaml

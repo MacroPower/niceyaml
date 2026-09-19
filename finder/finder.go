@@ -9,7 +9,7 @@
 //	f := finder.New(finder.WithNormalizer(normalizer.New()))
 //	idx := f.Load(source.Lines())
 //	view := source.View()
-//	view.BlendOverlay(style.GenericHighlight, idx.Find("search term")...)
+//	view.BlendOverlay(kind.GenericHighlight, idx.Find("search term")...)
 //
 // Searches are exact by default. [WithNormalizer] applies a [Normalizer] to
 // both the loaded text and the search string, one character at a time, and

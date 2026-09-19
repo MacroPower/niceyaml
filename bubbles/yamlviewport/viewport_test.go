@@ -27,6 +27,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
@@ -59,7 +60,7 @@ func testPrinterWithColors() *printer.Printer {
 func testPrinterWithSearch() *printer.Printer {
 	return printer.New(
 		printer.WithStyles(yamltest.NewXMLStyles(
-			yamltest.XMLStyleInclude(style.GenericHighlightDim, style.GenericHighlight),
+			yamltest.XMLStyleInclude(kind.GenericHighlightDim, kind.GenericHighlight),
 		)),
 		printer.WithContainerStyle(lipgloss.NewStyle()),
 		printer.WithGutter(printer.DiffGutter),
@@ -3727,7 +3728,7 @@ func TestViewport_RevisionKeepsDecoration(t *testing.T) {
 
 	p := printer.New(
 		printer.WithStyles(yamltest.NewXMLStyles(
-			yamltest.XMLStyleInclude(style.GenericHighlight, style.GenericError),
+			yamltest.XMLStyleInclude(kind.GenericHighlight, kind.GenericError),
 		)),
 		printer.WithContainerStyle(lipgloss.NewStyle()),
 		printer.WithGutter(printer.NoGutter),
@@ -3740,7 +3741,7 @@ func TestViewport_RevisionKeepsDecoration(t *testing.T) {
 	source := niceyaml.NewSourceFromString("key: value\nother: thing\n", niceyaml.WithName("marked"))
 	view := source.View()
 	view.Annotate(0, line.Annotation{Content: "note", Placement: line.Below})
-	view.AddOverlay(style.GenericError, position.NewRange(position.New(1, 0), position.New(1, 5)))
+	view.AddOverlay(kind.GenericError, position.NewRange(position.New(1, 0), position.New(1, 5)))
 
 	m.SetRevision(yamlviewport.NewRevision(source.Name(), view))
 	assert.Equal(t, "marked", m.RevisionName())

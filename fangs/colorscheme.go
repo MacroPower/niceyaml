@@ -7,34 +7,35 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"go.jacobcolvin.com/niceyaml/printer"
-	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
 // ColorScheme creates a [fang.ColorScheme] from the styles of a
 // [printer.StyleGetter], such as a theme from
-// [go.jacobcolvin.com/niceyaml/style/theme] or a [style.Styles] value.
+// [go.jacobcolvin.com/niceyaml/style/theme] or a
+// [go.jacobcolvin.com/niceyaml/style.Styles] value.
 //
 // This allows CLI styling to be derived from the existing theme system,
 // providing consistent colors between the YAML viewer and CLI help output.
 func ColorScheme(styles printer.StyleGetter) fang.ColorScheme {
-	text := styles.Style(style.Text)
-	comment := styles.Style(style.Comment)
-	genericError := styles.Style(style.GenericError)
+	text := styles.Style(kind.Text)
+	comment := styles.Style(kind.Comment)
+	genericError := styles.Style(kind.GenericError)
 
 	return fang.ColorScheme{
 		Base:           text.GetForeground(),
-		Title:          styles.Style(style.NameTag).GetForeground(),
+		Title:          styles.Style(kind.NameTag).GetForeground(),
 		Description:    text.GetForeground(),
 		Codeblock:      text.GetBackground(),
-		Program:        styles.Style(style.NameTag).GetForeground(),
-		Command:        styles.Style(style.NameAnchor).GetForeground(),
+		Program:        styles.Style(kind.NameTag).GetForeground(),
+		Command:        styles.Style(kind.NameAnchor).GetForeground(),
 		DimmedArgument: comment.GetForeground(),
 		Comment:        comment.GetForeground(),
-		Flag:           styles.Style(style.LiteralNumber).GetForeground(),
+		Flag:           styles.Style(kind.LiteralNumber).GetForeground(),
 		FlagDefault:    comment.GetForeground(),
-		QuotedString:   styles.Style(style.LiteralString).GetForeground(),
+		QuotedString:   styles.Style(kind.LiteralString).GetForeground(),
 		Argument:       text.GetForeground(),
-		Dash:           styles.Style(style.Punctuation).GetForeground(),
+		Dash:           styles.Style(kind.Punctuation).GetForeground(),
 		ErrorHeader: [2]color.Color{
 			genericError.GetForeground(),
 			genericError.GetBackground(),

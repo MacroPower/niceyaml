@@ -269,7 +269,7 @@ func (dd *Document) Span() position.Span {
 //	}
 //
 //	view := doc.Source().View()
-//	view.AddOverlay(style.GenericHighlight, ranges...)
+//	view.AddOverlay(kind.GenericHighlight, ranges...)
 //
 // A path that does not resolve returns the error [Document.Get] describes,
 // bound to the source, and a path whose token carries no position returns

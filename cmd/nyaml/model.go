@@ -15,6 +15,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/bubbles/yamlviewport"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
@@ -287,7 +288,7 @@ func powerlineSep(from, to lipgloss.Style) string {
 
 type titleSegment struct {
 	text     string
-	styleKey style.Kind
+	styleKey kind.Kind
 }
 
 func (m *model) titleLine() string {
@@ -308,11 +309,11 @@ func (m *model) titleLine() string {
 
 	segments := make([]titleSegment, 0, 6)
 	segments = append(segments,
-		titleSegment{" nyaml ", style.GenericHeading},
-		titleSegment{fmt.Sprintf(" +%d ", added), style.GenericHeadingOK},
-		titleSegment{fmt.Sprintf(" -%d ", removed), style.GenericHeadingError},
-		titleSegment{linesText, style.GenericHeadingWarn},
-		titleSegment{titleText, style.GenericHeadingAccent},
+		titleSegment{" nyaml ", kind.GenericHeading},
+		titleSegment{fmt.Sprintf(" +%d ", added), kind.GenericHeadingOK},
+		titleSegment{fmt.Sprintf(" -%d ", removed), kind.GenericHeadingError},
+		titleSegment{linesText, kind.GenericHeadingWarn},
+		titleSegment{titleText, kind.GenericHeadingAccent},
 	)
 
 	// Width used by the fixed segments, each followed by a separator, plus
@@ -343,7 +344,7 @@ func (m *model) titleLine() string {
 		subtitleRight,
 	)
 
-	segments = append(segments, titleSegment{subtitleContent, style.GenericHeadingSubtle})
+	segments = append(segments, titleSegment{subtitleContent, kind.GenericHeadingSubtle})
 
 	// Render all segments with powerline separators.
 	var sb strings.Builder
@@ -360,7 +361,7 @@ func (m *model) titleLine() string {
 
 	// Trailing separator: transition from last Title bg to Text bg.
 	lastStyle := m.styles.Style(segments[len(segments)-1].styleKey)
-	textStyle := m.styles.Style(style.Text)
+	textStyle := m.styles.Style(kind.Text)
 	sb.WriteString(powerlineSep(lastStyle, textStyle))
 
 	return sb.String()
@@ -416,10 +417,10 @@ func (m *model) viewModeLabel() string {
 }
 
 func (m *model) textLine() string {
-	textStyle := m.styles.Style(style.Text).Inline(true)
+	textStyle := m.styles.Style(kind.Text).Inline(true)
 
 	if m.searching {
-		searchContent := m.styles.Style(style.TextAccentDim).Inline(true).
+		searchContent := m.styles.Style(kind.TextAccentDim).Inline(true).
 			Render("/" + m.searchInput)
 
 		remaining := max(0, m.width-lipgloss.Width(searchContent))
@@ -451,20 +452,20 @@ func (m *model) textLine() string {
 
 	type swatch struct {
 		label    string
-		styleKey style.Kind
+		styleKey kind.Kind
 	}
 
 	swatches := []swatch{
-		{m.viewport.RevisionName(), style.TextAccentDim},
-		{searchLabel, style.TextAccent},
-		{m.diffModeLabel(), style.TextOK},
-		{m.viewModeLabel(), style.TextWarn},
-		{wrapLabel, style.TextError},
-		{fmt.Sprintf("%d/%d", m.viewport.VisibleLineCount(), m.viewport.TotalLineCount()), style.TextSubtleDim},
-		{fmt.Sprintf("col %d", m.viewport.XOffset()), style.TextSubtle},
+		{m.viewport.RevisionName(), kind.TextAccentDim},
+		{searchLabel, kind.TextAccent},
+		{m.diffModeLabel(), kind.TextOK},
+		{m.viewModeLabel(), kind.TextWarn},
+		{wrapLabel, kind.TextError},
+		{fmt.Sprintf("%d/%d", m.viewport.VisibleLineCount(), m.viewport.TotalLineCount()), kind.TextSubtleDim},
+		{fmt.Sprintf("col %d", m.viewport.XOffset()), kind.TextSubtle},
 	}
 
-	sep := m.styles.Style(style.TextSubtleDim).Inline(true).Render(" · ")
+	sep := m.styles.Style(kind.TextSubtleDim).Inline(true).Render(" · ")
 
 	var sb strings.Builder
 
@@ -542,9 +543,9 @@ func (m *model) renderThemeOverlay() string {
 	scrollOffset := min(maxScroll, max(0, m.themeIndex-visibleItems/2))
 
 	// Use the current theme styles for the overlay appearance.
-	baseStyle := m.styles.Style(style.Text)
-	titleStyle := m.styles.Style(style.GenericHeading)
-	dimStyle := m.styles.Style(style.TextSubtleDim)
+	baseStyle := m.styles.Style(kind.Text)
+	titleStyle := m.styles.Style(kind.GenericHeading)
+	dimStyle := m.styles.Style(kind.TextSubtleDim)
 
 	// Build theme list content.
 	var items []string

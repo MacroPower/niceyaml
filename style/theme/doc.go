@@ -11,7 +11,7 @@
 //
 // [Builtin] returns the [Catalog] of every theme this package ships.
 // [Catalog.Get] looks a [Theme] up by its kebab-case name. A Theme resolves
-// each [style.Kind] through [Theme.Style], so it goes to
+// each [kind.Kind] through [Theme.Style], so it goes to
 // [go.jacobcolvin.com/niceyaml/printer.WithStyles] as it is. A theme builds
 // its styles on the first call and returns the same value afterwards:
 //
@@ -27,7 +27,7 @@
 // [Theme.Styles] returns the [style.Styles] behind a theme, for a program
 // that overrides some of its kinds with [style.Styles.With]:
 //
-//	styles := theme.Charm.Styles().With(style.Set(style.Comment, dim))
+//	styles := theme.Charm.Styles().With(style.Set(kind.Comment, dim))
 //	p := printer.New(printer.WithStyles(styles))
 //
 // [Catalog.All] returns every theme in the catalog, with the name and
@@ -55,9 +55,9 @@
 //
 // # Theme Structure
 //
-// Themes define colors for YAML token kinds: keys ([style.NameTag]),
-// strings ([style.LiteralString]), numbers ([style.LiteralNumber]), comments
-// ([style.Comment]), and so on.
+// Themes define colors for YAML token kinds: keys ([kind.NameTag]), strings
+// ([kind.LiteralString]), numbers ([kind.LiteralNumber]), comments
+// ([kind.Comment]), and so on.
 //
 // The [style] package's inheritance system means themes only need to specify
 // the kinds they want to customize; undefined kinds fall back to

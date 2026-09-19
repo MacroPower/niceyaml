@@ -116,7 +116,7 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [niceyaml/line]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/line
 [niceyaml/printer]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/printer
 [niceyaml/style/theme]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/style/theme
-[niceyaml/style.Kind]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/style#Kind
+[niceyaml/style/kind.Kind]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/style/kind#Kind
 [niceyaml/bubbles/yamlviewport]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/bubbles/yamlviewport
 [niceyaml/fangs]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/fangs
 [niceyaml/schema.Schema]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/schema#Schema

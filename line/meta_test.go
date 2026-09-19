@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"go.jacobcolvin.com/niceyaml/line"
-	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
 func TestAnnotation_String(t *testing.T) {
@@ -159,15 +159,15 @@ func TestAnnotations_ByKind(t *testing.T) {
 		},
 		"groups in order of first appearance": {
 			anns: line.Annotations{
-				{Content: "a", Kind: style.GenericError},
+				{Content: "a", Kind: kind.GenericError},
 				{Content: "b"},
-				{Content: "c", Kind: style.GenericError},
-				{Content: "d", Kind: style.Comment},
+				{Content: "c", Kind: kind.GenericError},
+				{Content: "d", Kind: kind.Comment},
 			},
 			want: []line.Annotations{
-				{{Content: "a", Kind: style.GenericError}, {Content: "c", Kind: style.GenericError}},
+				{{Content: "a", Kind: kind.GenericError}, {Content: "c", Kind: kind.GenericError}},
 				{{Content: "b"}},
-				{{Content: "d", Kind: style.Comment}},
+				{{Content: "d", Kind: kind.Comment}},
 			},
 		},
 	}

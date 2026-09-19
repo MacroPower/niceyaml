@@ -19,7 +19,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/normalizer"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
-	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
 const defaultHorizontalStep = 6
@@ -735,9 +735,9 @@ func (m *Model) decorate() {
 func (m *Model) applySearchOverlays(lines *line.View) {
 	for i, match := range m.searchMatches {
 		if i == m.searchIndex {
-			lines.BlendOverlay(style.GenericHighlight, match.rng)
+			lines.BlendOverlay(kind.GenericHighlight, match.rng)
 		} else {
-			lines.BlendOverlay(style.GenericHighlightDim, match.rng)
+			lines.BlendOverlay(kind.GenericHighlightDim, match.rng)
 		}
 	}
 }
@@ -868,9 +868,9 @@ func (m *Model) applySideBySidePaneOverlays(
 	for _, match := range matches {
 		isSelected := match.Start == selectedPos && showSelected
 		if isSelected {
-			view.BlendOverlay(style.GenericHighlight, match)
+			view.BlendOverlay(kind.GenericHighlight, match)
 		} else {
-			view.BlendOverlay(style.GenericHighlightDim, match)
+			view.BlendOverlay(kind.GenericHighlightDim, match)
 		}
 	}
 }
@@ -1709,7 +1709,7 @@ func (m *Model) getViewDimensions() (int, int, bool) {
 
 // renderContent applies styling and renders lines into final output.
 func (m *Model) renderContent(lines []string, contentW, contentH int) string {
-	textStyle := m.printer.Style(style.Text)
+	textStyle := m.printer.Style(kind.Text)
 
 	contents := textStyle.
 		Width(contentW).
@@ -1784,7 +1784,7 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 	rightRows := m.trimFrame(splitLines(p.Print(right.Slice(window))), first, last)
 
 	// Get text style for padding empty areas.
-	textStyle := m.printer.Style(style.Text)
+	textStyle := m.printer.Style(kind.Text)
 
 	// Build separator with any extra padding from odd width.
 	separatorWidth := ansi.StringWidth(sideBySideSeparator)

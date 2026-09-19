@@ -12,9 +12,10 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
-const benchmarkOverlayKind style.Kind = "benchmarkOverlayKind"
+const benchmarkOverlayKind kind.Kind = "benchmarkOverlayKind"
 
 func BenchmarkPrinterPrint(b *testing.B) {
 	sizes := []struct {

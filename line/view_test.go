@@ -11,7 +11,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
-	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
 // newTestView creates a view over the lines of input.
@@ -266,7 +266,7 @@ func TestView_AddLineOverlay(t *testing.T) {
 
 		require.Len(t, view.Overlays(0), 1)
 		assert.Equal(t, position.NewSpan(0, 5), view.Overlays(0)[0].Cols)
-		assert.Equal(t, style.Kind("test1"), view.Overlays(0)[0].Kind)
+		assert.Equal(t, kind.Kind("test1"), view.Overlays(0)[0].Kind)
 	})
 
 	t.Run("add multiple overlays", func(t *testing.T) {
@@ -356,7 +356,7 @@ func TestView_AddOverlay(t *testing.T) {
 
 		require.Len(t, view.Overlays(0), 1)
 		assert.Equal(t, position.NewSpan(0, 5), view.Overlays(0)[0].Cols)
-		assert.Equal(t, style.Kind("test1"), view.Overlays(0)[0].Kind)
+		assert.Equal(t, kind.Kind("test1"), view.Overlays(0)[0].Kind)
 		assert.False(t, view.Overlays(0)[0].Blend)
 	})
 
@@ -406,17 +406,17 @@ func TestView_AddOverlay(t *testing.T) {
 		// First line: col 3 to end of line.
 		require.Len(t, view.Overlays(0), 1)
 		assert.Equal(t, position.NewSpan(3, len("key1: value1")), view.Overlays(0)[0].Cols)
-		assert.Equal(t, style.Kind("test2"), view.Overlays(0)[0].Kind)
+		assert.Equal(t, kind.Kind("test2"), view.Overlays(0)[0].Kind)
 
 		// Middle line: full line.
 		require.Len(t, view.Overlays(1), 1)
 		assert.Equal(t, position.NewSpan(0, len("key2: value2")), view.Overlays(1)[0].Cols)
-		assert.Equal(t, style.Kind("test2"), view.Overlays(1)[0].Kind)
+		assert.Equal(t, kind.Kind("test2"), view.Overlays(1)[0].Kind)
 
 		// Last line: start to col 5.
 		require.Len(t, view.Overlays(2), 1)
 		assert.Equal(t, position.NewSpan(0, 5), view.Overlays(2)[0].Cols)
-		assert.Equal(t, style.Kind("test2"), view.Overlays(2)[0].Kind)
+		assert.Equal(t, kind.Kind("test2"), view.Overlays(2)[0].Kind)
 	})
 
 	t.Run("multiple ranges", func(t *testing.T) {
@@ -482,7 +482,7 @@ func TestView_BlendOverlay(t *testing.T) {
 		require.Len(t, view.Overlays(1), 1)
 		assert.True(t, view.Overlays(0)[0].Blend)
 		assert.True(t, view.Overlays(1)[0].Blend)
-		assert.Equal(t, style.Kind("test1"), view.Overlays(0)[0].Kind)
+		assert.Equal(t, kind.Kind("test1"), view.Overlays(0)[0].Kind)
 	})
 
 	t.Run("clamps like AddOverlay", func(t *testing.T) {
@@ -601,7 +601,7 @@ func TestView_Clone(t *testing.T) {
 		view := newTestView(t, input, 3)
 		clone := view.Clone()
 
-		clone.AddOverlay(style.GenericHighlight, position.NewRange(
+		clone.AddOverlay(kind.GenericHighlight, position.NewRange(
 			position.New(0, 0),
 			position.New(0, 3),
 		))
@@ -612,7 +612,7 @@ func TestView_Clone(t *testing.T) {
 		assert.Empty(t, view.Annotations(1))
 		assert.Equal(t, line.FlagDefault, view.Flag(2))
 
-		view.AddOverlay(style.GenericError, position.NewRange(
+		view.AddOverlay(kind.GenericError, position.NewRange(
 			position.New(1, 0),
 			position.New(1, 3),
 		))

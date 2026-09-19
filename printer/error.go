@@ -9,7 +9,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/errortree"
-	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
 // PrintError renders err for a reader: its message as a tree, then the
@@ -87,7 +87,7 @@ func (p *Printer) detail(bound *niceyaml.SourceError) string {
 // as the gutter's line numbers are.
 func (p *Printer) renderErrorTree(t errortree.Tree) string {
 	branch := lipgloss.NewStyle().
-		Foreground(p.styles.Style(style.Comment).GetForeground()).
+		Foreground(p.styles.Style(kind.Comment).GetForeground()).
 		PaddingRight(1)
 
 	return errorTreeNode(t, &branch).String()

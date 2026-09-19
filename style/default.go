@@ -3,6 +3,8 @@ package style
 import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/charmtone"
+
+	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
 // Default returns the [Styles] niceyaml renders with when no theme is chosen.
@@ -15,43 +17,43 @@ func Default() Styles {
 
 	return NewStyles(
 		base,
-		Set(Comment, base.Foreground(charmtone.Oyster)),
-		Set(CommentPreproc, base.Foreground(charmtone.Smoke)),
-		Set(GenericDeleted, base.Foreground(charmtone.Cherry).Background(charmtone.Toast)),
-		Set(GenericInserted, base.Foreground(charmtone.Julep).Background(charmtone.Spinach)),
-		Set(GenericError, base.Foreground(charmtone.Butter).Background(charmtone.Sriracha)),
-		Set(LiteralBoolean, base.Foreground(charmtone.Malibu)),
-		Set(LiteralNull, base.Foreground(charmtone.Malibu)),
-		Set(LiteralNumber, base.Foreground(charmtone.Julep)),
-		Set(LiteralString, base.Foreground(charmtone.Cumin)),
-		Set(NameAlias, base.Foreground(charmtone.Bengal)),
-		Set(NameAnchor, base.Foreground(charmtone.Bengal)),
-		Set(NameTag, base.Foreground(charmtone.Mauve)),
-		Set(Punctuation, base.Foreground(charmtone.Zest)),
-		Set(PunctuationHeading, base.Foreground(charmtone.Smoke)),
-		Set(GenericHeading, base.Foreground(charmtone.Pepper).Background(charmtone.Mauve).Bold(true)),
-		Set(GenericHeadingAccent, base.Background(charmtone.Iron).Foreground(charmtone.Salt)),
-		Set(GenericHeadingSubtle, base.Background(charmtone.Charcoal)),
-		Set(TextAccentDim, base.Foreground(lipgloss.Lighten(charmtone.Mauve, 0.15))),
-		Set(TextAccent, base.Foreground(charmtone.Mauve)),
-		Set(TextSubtleDim, base.Foreground(charmtone.Iron)),
-		Set(TextSubtle, base.Foreground(charmtone.Oyster)),
-		Set(GenericHighlightDim, lipgloss.NewStyle().Background(charmtone.Iron)),
-		Set(GenericHighlight, lipgloss.NewStyle().Background(charmtone.Smoke)),
+		Set(kind.Comment, base.Foreground(charmtone.Oyster)),
+		Set(kind.CommentPreproc, base.Foreground(charmtone.Smoke)),
+		Set(kind.GenericDeleted, base.Foreground(charmtone.Cherry).Background(charmtone.Toast)),
+		Set(kind.GenericInserted, base.Foreground(charmtone.Julep).Background(charmtone.Spinach)),
+		Set(kind.GenericError, base.Foreground(charmtone.Butter).Background(charmtone.Sriracha)),
+		Set(kind.LiteralBoolean, base.Foreground(charmtone.Malibu)),
+		Set(kind.LiteralNull, base.Foreground(charmtone.Malibu)),
+		Set(kind.LiteralNumber, base.Foreground(charmtone.Julep)),
+		Set(kind.LiteralString, base.Foreground(charmtone.Cumin)),
+		Set(kind.NameAlias, base.Foreground(charmtone.Bengal)),
+		Set(kind.NameAnchor, base.Foreground(charmtone.Bengal)),
+		Set(kind.NameTag, base.Foreground(charmtone.Mauve)),
+		Set(kind.Punctuation, base.Foreground(charmtone.Zest)),
+		Set(kind.PunctuationHeading, base.Foreground(charmtone.Smoke)),
+		Set(kind.GenericHeading, base.Foreground(charmtone.Pepper).Background(charmtone.Mauve).Bold(true)),
+		Set(kind.GenericHeadingAccent, base.Background(charmtone.Iron).Foreground(charmtone.Salt)),
+		Set(kind.GenericHeadingSubtle, base.Background(charmtone.Charcoal)),
+		Set(kind.TextAccentDim, base.Foreground(lipgloss.Lighten(charmtone.Mauve, 0.15))),
+		Set(kind.TextAccent, base.Foreground(charmtone.Mauve)),
+		Set(kind.TextSubtleDim, base.Foreground(charmtone.Iron)),
+		Set(kind.TextSubtle, base.Foreground(charmtone.Oyster)),
+		Set(kind.GenericHighlightDim, lipgloss.NewStyle().Background(charmtone.Iron)),
+		Set(kind.GenericHighlight, lipgloss.NewStyle().Background(charmtone.Smoke)),
 		Set(
-			GenericHeadingOK,
+			kind.GenericHeadingOK,
 			lipgloss.NewStyle().Foreground(charmtone.Pepper).Background(charmtone.Julep).Bold(true),
 		),
 		Set(
-			GenericHeadingWarn,
+			kind.GenericHeadingWarn,
 			lipgloss.NewStyle().Foreground(charmtone.Pepper).Background(charmtone.Cumin).Bold(true),
 		),
 		Set(
-			GenericHeadingError,
+			kind.GenericHeadingError,
 			lipgloss.NewStyle().Foreground(charmtone.Pepper).Background(charmtone.Cherry).Bold(true),
 		),
-		Set(TextOK, base.Foreground(charmtone.Julep)),
-		Set(TextWarn, base.Foreground(charmtone.Cumin)),
-		Set(TextError, base.Foreground(charmtone.Cherry)),
+		Set(kind.TextOK, base.Foreground(charmtone.Julep)),
+		Set(kind.TextWarn, base.Foreground(charmtone.Cumin)),
+		Set(kind.TextError, base.Foreground(charmtone.Cherry)),
 	)
 }

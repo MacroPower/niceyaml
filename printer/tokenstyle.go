@@ -3,59 +3,59 @@ package printer
 import (
 	"github.com/goccy/go-yaml/token"
 
-	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
-var tokenTypeStyles = map[token.Type]style.Kind{
-	token.AliasType:          style.NameAlias,
-	token.AnchorType:         style.NameAnchor,
-	token.BinaryIntegerType:  style.LiteralNumberBin,
-	token.BoolType:           style.LiteralBoolean,
-	token.CollectEntryType:   style.PunctuationCollectEntry,
-	token.CommentType:        style.Comment,
-	token.DirectiveType:      style.CommentPreproc,
-	token.DocumentEndType:    style.PunctuationHeading,
-	token.DocumentHeaderType: style.PunctuationHeading,
-	token.DoubleQuoteType:    style.LiteralStringDouble,
-	token.FloatType:          style.LiteralNumberFloat,
-	token.FoldedType:         style.PunctuationBlockFolded,
-	token.HexIntegerType:     style.LiteralNumberHex,
-	token.ImplicitNullType:   style.LiteralNullImplicit,
-	token.InfinityType:       style.LiteralNumberInfinity,
-	token.IntegerType:        style.LiteralNumberInteger,
-	token.InvalidType:        style.GenericErrorInvalid,
-	token.LiteralType:        style.PunctuationBlockLiteral,
-	token.MappingEndType:     style.PunctuationMappingEnd,
-	token.MappingKeyType:     style.NameTag,
-	token.MappingStartType:   style.PunctuationMappingStart,
-	token.MappingValueType:   style.PunctuationMappingValue,
-	token.MergeKeyType:       style.NameAliasMerge,
-	token.NanType:            style.LiteralNumberNaN,
-	token.NullType:           style.LiteralNull,
-	token.OctetIntegerType:   style.LiteralNumberOct,
-	token.SequenceEndType:    style.PunctuationSequenceEnd,
-	token.SequenceEntryType:  style.PunctuationSequenceEntry,
-	token.SequenceStartType:  style.PunctuationSequenceStart,
-	token.SingleQuoteType:    style.LiteralStringSingle,
-	token.SpaceType:          style.Text,
-	token.StringType:         style.LiteralString,
-	token.TagType:            style.NameDecorator,
-	token.UnknownType:        style.GenericErrorUnknown,
+var tokenTypeStyles = map[token.Type]kind.Kind{
+	token.AliasType:          kind.NameAlias,
+	token.AnchorType:         kind.NameAnchor,
+	token.BinaryIntegerType:  kind.LiteralNumberBin,
+	token.BoolType:           kind.LiteralBoolean,
+	token.CollectEntryType:   kind.PunctuationCollectEntry,
+	token.CommentType:        kind.Comment,
+	token.DirectiveType:      kind.CommentPreproc,
+	token.DocumentEndType:    kind.PunctuationHeading,
+	token.DocumentHeaderType: kind.PunctuationHeading,
+	token.DoubleQuoteType:    kind.LiteralStringDouble,
+	token.FloatType:          kind.LiteralNumberFloat,
+	token.FoldedType:         kind.PunctuationBlockFolded,
+	token.HexIntegerType:     kind.LiteralNumberHex,
+	token.ImplicitNullType:   kind.LiteralNullImplicit,
+	token.InfinityType:       kind.LiteralNumberInfinity,
+	token.IntegerType:        kind.LiteralNumberInteger,
+	token.InvalidType:        kind.GenericErrorInvalid,
+	token.LiteralType:        kind.PunctuationBlockLiteral,
+	token.MappingEndType:     kind.PunctuationMappingEnd,
+	token.MappingKeyType:     kind.NameTag,
+	token.MappingStartType:   kind.PunctuationMappingStart,
+	token.MappingValueType:   kind.PunctuationMappingValue,
+	token.MergeKeyType:       kind.NameAliasMerge,
+	token.NanType:            kind.LiteralNumberNaN,
+	token.NullType:           kind.LiteralNull,
+	token.OctetIntegerType:   kind.LiteralNumberOct,
+	token.SequenceEndType:    kind.PunctuationSequenceEnd,
+	token.SequenceEntryType:  kind.PunctuationSequenceEntry,
+	token.SequenceStartType:  kind.PunctuationSequenceStart,
+	token.SingleQuoteType:    kind.LiteralStringSingle,
+	token.SpaceType:          kind.Text,
+	token.StringType:         kind.LiteralString,
+	token.TagType:            kind.NameDecorator,
+	token.UnknownType:        kind.GenericErrorUnknown,
 }
 
-// typeStyle returns the [style.Kind] for the given [*token.Token]'s
+// typeStyle returns the [kind.Kind] for the given [*token.Token]'s
 // [token.Type]. The src token is the lexer token tk is a part of, or nil.
 //
 // It handles context-sensitive styling: a string followed by a colon is styled
 // as a mapping key, and tokens preceded by anchors or aliases inherit that
 // styling.
-func typeStyle(tk, src *token.Token) style.Kind {
+func typeStyle(tk, src *token.Token) kind.Kind {
 	tts, ok := tokenTypeStyles[visualType(tk, src)]
 	if ok {
 		return tts
 	}
 
-	return style.Text
+	return kind.Text
 }
 
 // visualType returns the token type the style lookup uses, which differs

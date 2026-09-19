@@ -1,38 +1,18 @@
-// Package style provides a hierarchical styling system for YAML syntax
-// highlighting.
+// Package style maps the kinds of text in a rendering to lipgloss styles.
 //
 // When rendering YAML, each token (keys, strings, numbers, punctuation, etc.)
-// needs distinct visual styling.
+// needs distinct visual styling. A [Styles] value maps each
+// [kind.Kind] to the [lipgloss.Style] it
+// renders with. The kind package declares the kinds and their hierarchy and
+// depends on no terminal library, so the packages that mark content, such
+// as line and diff, name kinds without depending on lipgloss; this package
+// puts the styles behind them.
 //
-// Rather than requiring themes to define every possible token type, this
-// package uses inheritance: unspecified styles automatically fall back to their
-// parent kind.
-//
-// For example, [LiteralNumberFloat] inherits from [LiteralNumber], which
-// inherits from [Literal], which inherits from [Text].
-//
-// # Kinds
-//
-// A [Kind] names one kind of text to style. The constants identify token
-// kinds following Pygments naming conventions, and a rendering names its
-// own, such as one for search matches, as conversions of a string.
-//
-// The hierarchy is organized into major groups:
-//
-//   - [Text] -> [TextOK], [TextWarn], [TextError]: Base text styles
-//   - [Comment], [CommentPreproc]: Comments and directives
-//   - [Literal] -> [LiteralString], [LiteralNumber], [LiteralBoolean],
-//     [LiteralNull]: Values
-//   - [Name] -> [NameTag], [NameAnchor], [NameAlias]: Identifiers
-//   - [Punctuation] -> [PunctuationMapping], [PunctuationSequence],
-//     [PunctuationBlock]: Syntax
-//   - [Generic] -> [GenericDeleted], [GenericInserted], [GenericError]: Diff
-//     and error markers
-//   - [GenericHighlight] -> [GenericHighlightDim]: Search and selection highlights
-//   - [TextAccent] -> [TextAccentDim]: Emphasized text
-//   - [TextSubtle] -> [TextSubtleDim]: De-emphasized text
-//   - [GenericHeading] -> [GenericHeadingAccent], [GenericHeadingSubtle],
-//     [GenericHeadingOK], [GenericHeadingWarn], [GenericHeadingError]: Headings
+// Rather than requiring themes to define every possible kind, a Styles value
+// resolves inheritance: a kind that is not set falls back to its parent in
+// the hierarchy. For example, [kind.LiteralNumberFloat] inherits from
+// [kind.LiteralNumber], which inherits from [kind.Literal], which inherits
+// from [kind.Text].
 //
 // # Creating Styles
 //
@@ -43,15 +23,15 @@
 //
 //	styles := style.NewStyles(
 //	    lipgloss.NewStyle().Foreground(lipgloss.Color("white")),
-//	    style.Set(style.Comment, lipgloss.NewStyle().Foreground(lipgloss.Color("8"))),
-//	    style.Set(style.LiteralNumber, lipgloss.NewStyle().Foreground(lipgloss.Color("cyan"))),
+//	    style.Set(kind.Comment, lipgloss.NewStyle().Foreground(lipgloss.Color("8"))),
+//	    style.Set(kind.LiteralNumber, lipgloss.NewStyle().Foreground(lipgloss.Color("cyan"))),
 //	)
 //
-// With this configuration, [LiteralNumberFloat] and [LiteralNumberInteger]
-// inherit the cyan foreground from [LiteralNumber], while [LiteralString] falls
-// back to white. [Styles.With] derives a new value with more overrides and
-// resolves inheritance again, so overriding a parent later reaches its
-// children too.
+// With this configuration, [kind.LiteralNumberFloat] and
+// [kind.LiteralNumberInteger] inherit the cyan foreground from
+// [kind.LiteralNumber], while [kind.LiteralString] falls back to white.
+// [Styles.With] derives a new value with more overrides and resolves
+// inheritance again, so overriding a parent later reaches its children too.
 //
 // # Themes
 //

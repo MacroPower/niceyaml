@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
-	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
 func TestNewXMLStyles(t *testing.T) {
@@ -21,75 +21,75 @@ func TestXMLStyles_Style(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		input style.Kind
+		input kind.Kind
 		want  string
 	}{
 		"Text": {
-			input: style.Text,
+			input: kind.Text,
 			want:  "<text>test</text>",
 		},
 		"NameTag": {
-			input: style.NameTag,
+			input: kind.NameTag,
 			want:  "<nameTag>test</nameTag>",
 		},
 		"LiteralString": {
-			input: style.LiteralString,
+			input: kind.LiteralString,
 			want:  "<literalString>test</literalString>",
 		},
 		"LiteralNumberInteger": {
-			input: style.LiteralNumberInteger,
+			input: kind.LiteralNumberInteger,
 			want:  "<literalNumberInteger>test</literalNumberInteger>",
 		},
 		"LiteralBoolean": {
-			input: style.LiteralBoolean,
+			input: kind.LiteralBoolean,
 			want:  "<literalBoolean>test</literalBoolean>",
 		},
 		"LiteralNull": {
-			input: style.LiteralNull,
+			input: kind.LiteralNull,
 			want:  "<literalNull>test</literalNull>",
 		},
 		"NameAnchor": {
-			input: style.NameAnchor,
+			input: kind.NameAnchor,
 			want:  "<nameAnchor>test</nameAnchor>",
 		},
 		"NameAlias": {
-			input: style.NameAlias,
+			input: kind.NameAlias,
 			want:  "<nameAlias>test</nameAlias>",
 		},
 		"Comment": {
-			input: style.Comment,
+			input: kind.Comment,
 			want:  "<comment>test</comment>",
 		},
 		"GenericError": {
-			input: style.GenericError,
+			input: kind.GenericError,
 			want:  "<genericError>test</genericError>",
 		},
 		"NameDecorator": {
-			input: style.NameDecorator,
+			input: kind.NameDecorator,
 			want:  "<nameDecorator>test</nameDecorator>",
 		},
 		"PunctuationHeading": {
-			input: style.PunctuationHeading,
+			input: kind.PunctuationHeading,
 			want:  "<punctuationHeading>test</punctuationHeading>",
 		},
 		"CommentPreproc": {
-			input: style.CommentPreproc,
+			input: kind.CommentPreproc,
 			want:  "<commentPreproc>test</commentPreproc>",
 		},
 		"PunctuationSequenceEntry": {
-			input: style.PunctuationSequenceEntry,
+			input: kind.PunctuationSequenceEntry,
 			want:  "<punctuationSequenceEntry>test</punctuationSequenceEntry>",
 		},
 		"PunctuationBlockLiteral": {
-			input: style.PunctuationBlockLiteral,
+			input: kind.PunctuationBlockLiteral,
 			want:  "<punctuationBlockLiteral>test</punctuationBlockLiteral>",
 		},
 		"GenericInserted": {
-			input: style.GenericInserted,
+			input: kind.GenericInserted,
 			want:  "<genericInserted>test</genericInserted>",
 		},
 		"GenericDeleted": {
-			input: style.GenericDeleted,
+			input: kind.GenericDeleted,
 			want:  "<genericDeleted>test</genericDeleted>",
 		},
 	}
@@ -113,7 +113,7 @@ func TestXMLStyles_Style_UnknownStyle(t *testing.T) {
 	t.Parallel()
 
 	getter := yamltest.NewXMLStyles()
-	st := getter.Style(style.Kind("unknownStyle"))
+	st := getter.Style(kind.Kind("unknownStyle"))
 
 	require.NotNil(t, st)
 
@@ -125,7 +125,7 @@ func TestXMLStyles_Style_EmptyContent(t *testing.T) {
 	t.Parallel()
 
 	getter := yamltest.NewXMLStyles()
-	st := getter.Style(style.NameTag)
+	st := getter.Style(kind.NameTag)
 
 	require.NotNil(t, st)
 
@@ -137,20 +137,20 @@ func TestXMLStyles_XMLStyleInclude(t *testing.T) {
 	t.Parallel()
 
 	getter := yamltest.NewXMLStyles(
-		yamltest.XMLStyleInclude(style.GenericHighlightDim, style.GenericHighlight),
+		yamltest.XMLStyleInclude(kind.GenericHighlightDim, kind.GenericHighlight),
 	)
 
 	// Included styles get XML tags.
-	searchStyle := getter.Style(style.GenericHighlightDim)
+	searchStyle := getter.Style(kind.GenericHighlightDim)
 	require.NotNil(t, searchStyle)
 	assert.Equal(t, "<genericHighlightDim>test</genericHighlightDim>", searchStyle.Render("test"))
 
-	selectedStyle := getter.Style(style.GenericHighlight)
+	selectedStyle := getter.Style(kind.GenericHighlight)
 	require.NotNil(t, selectedStyle)
 	assert.Equal(t, "<genericHighlight>test</genericHighlight>", selectedStyle.Render("test"))
 
 	// Non-included styles return empty (no transformation).
-	commentStyle := getter.Style(style.Comment)
+	commentStyle := getter.Style(kind.Comment)
 	require.NotNil(t, commentStyle)
 	assert.Equal(t, "test", commentStyle.Render("test"))
 }
@@ -159,20 +159,20 @@ func TestXMLStyles_XMLStyleExclude(t *testing.T) {
 	t.Parallel()
 
 	getter := yamltest.NewXMLStyles(
-		yamltest.XMLStyleExclude(style.Text, style.Comment),
+		yamltest.XMLStyleExclude(kind.Text, kind.Comment),
 	)
 
 	// Excluded styles return empty (no transformation).
-	textStyle := getter.Style(style.Text)
+	textStyle := getter.Style(kind.Text)
 	require.NotNil(t, textStyle)
 	assert.Equal(t, "test", textStyle.Render("test"))
 
-	commentStyle := getter.Style(style.Comment)
+	commentStyle := getter.Style(kind.Comment)
 	require.NotNil(t, commentStyle)
 	assert.Equal(t, "test", commentStyle.Render("test"))
 
 	// Non-excluded styles get XML tags.
-	searchStyle := getter.Style(style.GenericHighlightDim)
+	searchStyle := getter.Style(kind.GenericHighlightDim)
 	require.NotNil(t, searchStyle)
 	assert.Equal(t, "<genericHighlightDim>test</genericHighlightDim>", searchStyle.Render("test"))
 }

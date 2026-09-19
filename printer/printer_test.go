@@ -24,11 +24,12 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
-// testOverlayHighlight is a custom style.Kind constant for test highlights.
-const testOverlayHighlight style.Kind = "testOverlayHighlight"
+// testOverlayHighlight is a custom kind.Kind constant for test highlights.
+const testOverlayHighlight kind.Kind = "testOverlayHighlight"
 
 // testHighlightStyle returns a style that wraps content in brackets for easy verification.
 func testHighlightStyle() lipgloss.Style {
@@ -1798,21 +1799,21 @@ func TestPrinter_Style(t *testing.T) {
 
 	tcs := map[string]struct {
 		styles     style.Styles
-		query      style.Kind
+		query      kind.Kind
 		wantBold   bool
 		wantItalic bool
 	}{
 		"returns style from styles map": {
 			styles: style.NewStyles(
 				base,
-				style.Set(style.NameTag, base.Bold(true)),
+				style.Set(kind.NameTag, base.Bold(true)),
 			),
-			query:    style.NameTag,
+			query:    kind.NameTag,
 			wantBold: true,
 		},
 		"child inherits from parent": {
 			styles:     style.NewStyles(base.Italic(true)),
-			query:      style.NameTag,
+			query:      kind.NameTag,
 			wantItalic: true,
 		},
 	}
@@ -2600,23 +2601,23 @@ func TestPrinter_BlendStyles(t *testing.T) {
 
 	// OverlayRange defines an overlay kind and its range.
 	type overlayRange struct {
-		kind  style.Kind
+		kind  kind.Kind
 		start position.Position
 		end   position.Position
 	}
 
 	// Overlay kinds for the various test tags.
 	const (
-		kindHL   style.Kind = "kindHL"
-		kindAll  style.Kind = "kindAll"
-		kindA    style.Kind = "kindA"
-		kindB    style.Kind = "kindB"
-		kindC    style.Kind = "kindC"
-		kindX    style.Kind = "kindX"
-		kindY    style.Kind = "kindY"
-		kindK    style.Kind = "kindK"
-		kindVal  style.Kind = "kindVal"
-		kindSpan style.Kind = "kindSpan"
+		kindHL   kind.Kind = "kindHL"
+		kindAll  kind.Kind = "kindAll"
+		kindA    kind.Kind = "kindA"
+		kindB    kind.Kind = "kindB"
+		kindC    kind.Kind = "kindC"
+		kindX    kind.Kind = "kindX"
+		kindY    kind.Kind = "kindY"
+		kindK    kind.Kind = "kindK"
+		kindVal  kind.Kind = "kindVal"
+		kindSpan kind.Kind = "kindSpan"
 	)
 
 	// Overlay styler mapping kinds to tag-wrapped styles.
@@ -2783,9 +2784,9 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 
 	// Overlay kinds for color blending tests.
 	const (
-		colorKind1 style.Kind = "colorKind1"
-		colorKind2 style.Kind = "colorKind2"
-		colorKind3 style.Kind = "colorKind3"
+		colorKind1 kind.Kind = "colorKind1"
+		colorKind2 kind.Kind = "colorKind2"
+		colorKind3 kind.Kind = "colorKind3"
 	)
 
 	tcs := map[string]struct {
@@ -2869,7 +2870,7 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 			view := niceyaml.NewSourceFromString(tc.input).View()
 
 			// Build overlay styler with styles from test case.
-			kinds := []style.Kind{colorKind1, colorKind2, colorKind3}
+			kinds := []kind.Kind{colorKind1, colorKind2, colorKind3}
 
 			overlayOpts := make([]style.StylesOption, 0, len(tc.overlays))
 			for i, od := range tc.overlays {
@@ -3058,9 +3059,9 @@ func TestPrinter_AnnotationKind(t *testing.T) {
 	view := niceyaml.NewSourceFromString("key: value").View()
 	view.Annotate(0,
 		line.Annotation{Content: "hunk", Placement: line.Above},
-		line.Annotation{Content: "bad key", Kind: style.TextError, Placement: line.Below, Col: 0},
+		line.Annotation{Content: "bad key", Kind: kind.TextError, Placement: line.Below, Col: 0},
 		line.Annotation{Content: "note", Placement: line.Below, Col: 5},
-		line.Annotation{Content: "bad value", Kind: style.TextError, Placement: line.Below, Col: 5},
+		line.Annotation{Content: "bad value", Kind: kind.TextError, Placement: line.Below, Col: 5},
 	)
 
 	p := printer.New(
@@ -3086,9 +3087,9 @@ func TestPrinter_AnnotationFuncKeepsStyling(t *testing.T) {
 	view := niceyaml.NewSourceFromString("key: value").View()
 	view.Annotate(0, line.Annotation{Content: "oops", Placement: line.Below})
 
-	styles := style.NewStyles(lipgloss.NewStyle(), style.Set(style.TextError, lipgloss.NewStyle().Bold(true)))
+	styles := style.NewStyles(lipgloss.NewStyle(), style.Set(kind.TextError, lipgloss.NewStyle().Bold(true)))
 	styled := func(ctx printer.AnnotationContext) string {
-		return ctx.Styles.Style(style.TextError).Render(strings.Join(ctx.Annotations.Contents(), "; "))
+		return ctx.Styles.Style(kind.TextError).Render(strings.Join(ctx.Annotations.Contents(), "; "))
 	}
 
 	p := printer.New(
@@ -3382,9 +3383,9 @@ func TestPrinter_BlendKey_StyleNames(t *testing.T) {
 	// "blend a, then replace with b", which the key separators once spelled
 	// the same way.
 	const (
-		ab style.Kind = "a!b"
-		a  style.Kind = "a"
-		b  style.Kind = "b"
+		ab kind.Kind = "a!b"
+		a  kind.Kind = "a"
+		b  kind.Kind = "b"
 	)
 
 	wrap := func(tag string) lipgloss.Style {
@@ -3422,7 +3423,7 @@ func TestPrinter_Overlay_Attributes(t *testing.T) {
 
 	// An overlay style that sets only text attributes must still change the
 	// rendered output, whether it replaces or blends with the style beneath.
-	const underlined style.Kind = "underlined"
+	const underlined kind.Kind = "underlined"
 
 	st := lipgloss.NewStyle().Underline(true).Bold(true)
 
@@ -3458,13 +3459,13 @@ func TestPrinter_Overlay_Attributes(t *testing.T) {
 func TestPrinter_SeparatorStyle(t *testing.T) {
 	t.Parallel()
 
-	// The whitespace a token carries before its text renders in style.Text,
+	// The whitespace a token carries before its text renders in kind.Text,
 	// whatever kind of token follows it. Brackets mark the styled tokens.
 	styles := style.NewStyles(
 		lipgloss.NewStyle(),
-		style.Set(style.LiteralString, testHighlightStyle()),
-		style.Set(style.LiteralStringDouble, testHighlightStyle()),
-		style.Set(style.Comment, testHighlightStyle()),
+		style.Set(kind.LiteralString, testHighlightStyle()),
+		style.Set(kind.LiteralStringDouble, testHighlightStyle()),
+		style.Set(kind.Comment, testHighlightStyle()),
 	)
 
 	tcs := map[string]struct {

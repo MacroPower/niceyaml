@@ -6,6 +6,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
 // dimShift separates a dimmed variant from its source color.
@@ -22,7 +23,7 @@ type palette struct {
 	// Tokens sets token kinds in the style-string form [style.Parse]
 	// reads, layered over the base style. Kinds left out inherit from
 	// their parent.
-	Tokens map[style.Kind]string
+	Tokens map[kind.Kind]string
 	// Fg and Bg are the base text colors as hex strings. An empty value
 	// leaves the terminal default in place; the derived kinds then
 	// assume black on white for a [Light] theme and white on black for a
@@ -73,23 +74,23 @@ func (p palette) styles() style.Styles {
 	}
 
 	opts = append(opts,
-		style.Set(style.GenericHeading, heading(accent)),
-		style.Set(style.GenericHeadingAccent,
+		style.Set(kind.GenericHeading, heading(accent)),
+		style.Set(kind.GenericHeadingAccent,
 			base.Background(towardFg(bg, surfaceShift)).Foreground(towardFg(fg, dimShift)),
 		),
-		style.Set(style.GenericHeadingSubtle, base.Background(towardFg(bg, dimShift))),
-		style.Set(style.GenericHeadingOK, heading(ok)),
-		style.Set(style.GenericHeadingWarn, heading(warn)),
-		style.Set(style.GenericHeadingError, heading(errColor)),
-		style.Set(style.GenericHighlight, lipgloss.NewStyle().Background(towardFg(bg, surfaceShift))),
-		style.Set(style.GenericHighlightDim, lipgloss.NewStyle().Background(towardFg(bg, dimShift))),
-		style.Set(style.TextAccent, base.Foreground(accent)),
-		style.Set(style.TextAccentDim, base.Foreground(towardFg(accent, dimShift))),
-		style.Set(style.TextSubtle, base.Foreground(towardBg(fg, dimShift))),
-		style.Set(style.TextSubtleDim, base.Foreground(towardBg(fg, surfaceShift))),
-		style.Set(style.TextOK, base.Foreground(ok)),
-		style.Set(style.TextWarn, base.Foreground(warn)),
-		style.Set(style.TextError, base.Foreground(errColor)),
+		style.Set(kind.GenericHeadingSubtle, base.Background(towardFg(bg, dimShift))),
+		style.Set(kind.GenericHeadingOK, heading(ok)),
+		style.Set(kind.GenericHeadingWarn, heading(warn)),
+		style.Set(kind.GenericHeadingError, heading(errColor)),
+		style.Set(kind.GenericHighlight, lipgloss.NewStyle().Background(towardFg(bg, surfaceShift))),
+		style.Set(kind.GenericHighlightDim, lipgloss.NewStyle().Background(towardFg(bg, dimShift))),
+		style.Set(kind.TextAccent, base.Foreground(accent)),
+		style.Set(kind.TextAccentDim, base.Foreground(towardFg(accent, dimShift))),
+		style.Set(kind.TextSubtle, base.Foreground(towardBg(fg, dimShift))),
+		style.Set(kind.TextSubtleDim, base.Foreground(towardBg(fg, surfaceShift))),
+		style.Set(kind.TextOK, base.Foreground(ok)),
+		style.Set(kind.TextWarn, base.Foreground(warn)),
+		style.Set(kind.TextError, base.Foreground(errColor)),
 	)
 
 	opts = append(opts, p.Overrides...)

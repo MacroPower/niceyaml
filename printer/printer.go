@@ -24,7 +24,7 @@
 // The printer renders the [line.Overlays] and [line.Annotations] a view
 // carries. An overlay styles a column span. The annotations above or below
 // a line render as rows in the style of their [line.Annotation.Kind], or
-// [style.Comment] for those with none, and an [AnnotationFunc] renders the
+// [kind.Comment] for those with none, and an [AnnotationFunc] renders the
 // text of each group of one Kind; [DefaultAnnotation] joins them with "; "
 // and prefixes [line.Below] annotations with "^ ".
 //
@@ -54,12 +54,13 @@ import (
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 const wrapOnCharacters = " /-"
 
-// StyleGetter retrieves the style for each [style.Kind].
+// StyleGetter retrieves the style for each [kind.Kind].
 //
 // A [Printer] asks for each kind as it renders and caches the styles it
 // blends for overlays by the kinds involved, so Style should return the
@@ -67,7 +68,7 @@ const wrapOnCharacters = " /-"
 //
 // See [style.Styles] for an implementation.
 type StyleGetter interface {
-	Style(s style.Kind) lipgloss.Style
+	Style(s kind.Kind) lipgloss.Style
 }
 
 // Printer prints YAML with syntax highlighting for terminal output.
@@ -119,7 +120,7 @@ type StyleGetter interface {
 // Annotations are extra text lines rendered above or below a line, outside the
 // token stream. They display error messages, diff hunk headers, or other
 // contextual notes. Each annotation renders in the style of its
-// [line.Annotation.Kind], or [style.Comment] when it has none, and the
+// [line.Annotation.Kind], or [kind.Comment] when it has none, and the
 // annotations of one Kind on a line share their rows. The printer renders
 // the text of each such group via [AnnotationFunc], defaulting to
 // [DefaultAnnotation] which prefixes below-line annotations with "^ ".
@@ -196,7 +197,7 @@ func (p *Printer) apply(opts []Option) {
 	}
 
 	if !p.hasCustomStyle {
-		p.style = p.styles.Style(style.Text).
+		p.style = p.styles.Style(kind.Text).
 			PaddingRight(1)
 	}
 }
@@ -316,8 +317,8 @@ func DefaultAnnotation(ctx AnnotationContext) string {
 // as the placeholder a side-by-side diff inserts opposite an inserted or
 // deleted line, gets a blank column.
 func renderLineNumber(ctx GutterContext) string {
-	lineNumStyle := ctx.Styles.Style(style.Text).
-		Foreground(ctx.Styles.Style(style.Comment).GetForeground())
+	lineNumStyle := ctx.Styles.Style(kind.Text).
+		Foreground(ctx.Styles.Style(kind.Comment).GetForeground())
 
 	width := max(4, len(strconv.Itoa(ctx.MaxNumber)))
 
@@ -337,27 +338,27 @@ func renderLineNumber(ctx GutterContext) string {
 // annotation row carries no marker.
 func renderDiffMarker(ctx GutterContext) string {
 	if ctx.Annotation {
-		return ctx.Styles.Style(style.Text).Render(" ")
+		return ctx.Styles.Style(kind.Text).Render(" ")
 	}
 
 	if ctx.Soft {
 		switch ctx.Flag {
 		case line.FlagInserted:
-			return ctx.Styles.Style(style.GenericInserted).Render(" ")
+			return ctx.Styles.Style(kind.GenericInserted).Render(" ")
 		case line.FlagDeleted:
-			return ctx.Styles.Style(style.GenericDeleted).Render(" ")
+			return ctx.Styles.Style(kind.GenericDeleted).Render(" ")
 		default:
-			return ctx.Styles.Style(style.Text).Render(" ")
+			return ctx.Styles.Style(kind.Text).Render(" ")
 		}
 	}
 
 	switch ctx.Flag {
 	case line.FlagInserted:
-		return ctx.Styles.Style(style.GenericInserted).Render("+")
+		return ctx.Styles.Style(kind.GenericInserted).Render("+")
 	case line.FlagDeleted:
-		return ctx.Styles.Style(style.GenericDeleted).Render("-")
+		return ctx.Styles.Style(kind.GenericDeleted).Render("-")
 	default:
-		return ctx.Styles.Style(style.Text).Render(" ")
+		return ctx.Styles.Style(kind.Text).Render(" ")
 	}
 }
 
@@ -368,13 +369,13 @@ func DefaultGutter(ctx GutterContext) string {
 }
 
 // DiffGutter is a [GutterFunc] that renders diff markers only (" ", "+",
-// "-"), styled with [style.GenericInserted] and [style.GenericDeleted].
+// "-"), styled with [kind.GenericInserted] and [kind.GenericDeleted].
 func DiffGutter(ctx GutterContext) string {
 	return renderDiffMarker(ctx)
 }
 
 // LineNumberGutter is a [GutterFunc] that renders line numbers only, in the
-// [style.Comment] foreground. Soft-wrapped continuation lines show " - ".
+// [kind.Comment] foreground. Soft-wrapped continuation lines show " - ".
 func LineNumberGutter(ctx GutterContext) string {
 	return renderLineNumber(ctx)
 }
@@ -386,7 +387,7 @@ func NoGutter(GutterContext) string {
 
 // WithContainerStyle is a [Option] that sets the [lipgloss.Style]
 // wrapped around the whole rendered output. By default the container is the
-// theme's [style.Text] style with one cell of right padding.
+// theme's [kind.Text] style with one cell of right padding.
 //
 // To set the theme, which styles the tokens inside, use [WithStyles].
 //
@@ -509,9 +510,9 @@ func (p *Printer) ContainerStyle() lipgloss.Style {
 	return p.style
 }
 
-// Style retrieves the [lipgloss.Style] for the given [style.Kind] from the
+// Style retrieves the [lipgloss.Style] for the given [kind.Kind] from the
 // printer's [StyleGetter].
-func (p *Printer) Style(s style.Kind) lipgloss.Style {
+func (p *Printer) Style(s kind.Kind) lipgloss.Style {
 	return p.styles.Style(s)
 }
 
@@ -614,10 +615,10 @@ func (p *Printer) renderContent(view *line.View, idx int, ln *line.Line) string 
 
 	switch view.Flag(idx) {
 	case line.FlagDeleted:
-		return p.styleLineWithRanges(ln.Content(), position.New(idx, 0), style.GenericDeleted, overlays)
+		return p.styleLineWithRanges(ln.Content(), position.New(idx, 0), kind.GenericDeleted, overlays)
 
 	case line.FlagInserted:
-		return p.styleLineWithRanges(ln.Content(), position.New(idx, 0), style.GenericInserted, overlays)
+		return p.styleLineWithRanges(ln.Content(), position.New(idx, 0), kind.GenericInserted, overlays)
 
 	default: // line.FlagDefault (equal line).
 		return p.renderTokenLine(idx, ln, overlays)
@@ -670,7 +671,7 @@ func (p *Printer) renderAnnotation(
 // the rows the body wraps to.
 type annotationGroup struct {
 	indent      string
-	kind        style.Kind
+	kind        kind.Kind
 	rows        []string
 	indentWidth int
 }
@@ -728,14 +729,14 @@ func (p *Printer) annotationGroups(
 	return groups
 }
 
-// annotationKind returns the style an annotation of kind renders in:
-// [style.Comment] for the zero Kind, and kind itself otherwise.
-func annotationKind(kind style.Kind) style.Kind {
-	if kind == "" {
-		return style.Comment
+// annotationKind returns the style an annotation of k renders in:
+// [kind.Comment] for the zero Kind, and k itself otherwise.
+func annotationKind(k kind.Kind) kind.Kind {
+	if k == "" {
+		return kind.Comment
 	}
 
-	return kind
+	return k
 }
 
 // splitAnnotationIndent splits rendered annotation content into the indent
@@ -784,7 +785,7 @@ func (p *Printer) contentRows(content string, gutterCtx GutterContext, gutterWid
 func (p *Printer) styleLineWithRanges(
 	src string,
 	pos position.Position,
-	base style.Kind,
+	base kind.Kind,
 	overlays line.Overlays,
 ) string {
 	if src == "" {
@@ -895,7 +896,7 @@ func computeStyleBoundaries(active line.Overlays, cols position.Span) []int {
 // with the same key render with the same style. Each name is quoted, so
 // a name that contains a marker cannot collide with a different overlay
 // sequence.
-func blendKey(base style.Kind, overlays line.Overlays, point int) string {
+func blendKey(base kind.Kind, overlays line.Overlays, point int) string {
 	var sb strings.Builder
 
 	for _, ov := range overlays {
@@ -928,7 +929,7 @@ func blendKey(base style.Kind, overlays line.Overlays, point int) string {
 // the overlays that cover point. It computes the style on the first request
 // and serves the cache after that. The overlays apply in order: a blending
 // overlay mixes with the result so far, and any other replaces it.
-func (p *Printer) blended(key string, base style.Kind, overlays line.Overlays, point int) lipgloss.Style {
+func (p *Printer) blended(key string, base kind.Kind, overlays line.Overlays, point int) lipgloss.Style {
 	if st, ok := p.blends.get(key); ok {
 		return st
 	}
@@ -1040,7 +1041,7 @@ func (p *Printer) renderTokenLine(lineIndex int, ln *line.Line, overlays line.Ov
 		if separatorRunes > 0 {
 			sepPart := string(originRunes[:separatorRunes])
 			sb.WriteString(
-				p.styleLineWithRanges(sepPart, pos, style.Text, overlays),
+				p.styleLineWithRanges(sepPart, pos, kind.Text, overlays),
 			)
 
 			pos.Col += separatorRunes

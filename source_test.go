@@ -24,6 +24,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
 func TestTokens_String_Annotation(t *testing.T) {
@@ -1038,7 +1039,7 @@ func TestSource_View_IndependentViews(t *testing.T) {
 
 	// The first view keeps what was added to it.
 	require.Len(t, first.Overlays(0), 1)
-	assert.Equal(t, style.Kind("test1"), first.Overlays(0)[0].Kind)
+	assert.Equal(t, kind.Kind("test1"), first.Overlays(0)[0].Kind)
 	assert.Equal(t, "key: value", first.Lines().Content())
 }
 
@@ -1419,7 +1420,7 @@ func TestSource_View_IsIndependent(t *testing.T) {
 	view := source.View()
 	for i := range view.AllLines() {
 		view.Annotate(i, line.Annotation{Content: "note", Placement: line.Below})
-		view.AddLineOverlay(i, line.Overlay{Cols: position.NewSpan(0, 3), Kind: style.GenericError})
+		view.AddLineOverlay(i, line.Overlay{Cols: position.NewSpan(0, 3), Kind: kind.GenericError})
 	}
 
 	assert.NotEmpty(t, view.Annotations(0))

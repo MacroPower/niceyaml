@@ -7,13 +7,14 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
 func TestStyles_Style_EmptyStyles(t *testing.T) {
 	t.Parallel()
 
 	styles := style.Styles{}
-	got := styles.Style(style.LiteralNumberInteger)
+	got := styles.Style(kind.LiteralNumberInteger)
 
 	// Should return an empty style when nothing is defined.
 	assert.Equal(t, lipgloss.Style{}, got)
@@ -28,14 +29,14 @@ func TestNewStyles(t *testing.T) {
 
 	styles := style.NewStyles(
 		base,
-		style.Set(style.LiteralNumber, red),
-		style.Set(style.Comment, green),
+		style.Set(kind.LiteralNumber, red),
+		style.Set(kind.Comment, green),
 	)
 
 	t.Run("base style used for Text", func(t *testing.T) {
 		t.Parallel()
 
-		got := styles.Style(style.Text)
+		got := styles.Style(kind.Text)
 		assert.NotNil(t, got)
 		assert.Equal(t, lipgloss.Color("white"), got.GetForeground())
 	})
@@ -43,7 +44,7 @@ func TestNewStyles(t *testing.T) {
 	t.Run("direct override is used", func(t *testing.T) {
 		t.Parallel()
 
-		got := styles.Style(style.LiteralNumber)
+		got := styles.Style(kind.LiteralNumber)
 		assert.NotNil(t, got)
 		assert.Equal(t, lipgloss.Color("red"), got.GetForeground())
 	})
@@ -51,7 +52,7 @@ func TestNewStyles(t *testing.T) {
 	t.Run("child inherits from parent override", func(t *testing.T) {
 		t.Parallel()
 
-		got := styles.Style(style.LiteralNumberFloat)
+		got := styles.Style(kind.LiteralNumberFloat)
 		assert.NotNil(t, got)
 		assert.Equal(t, lipgloss.Color("red"), got.GetForeground())
 	})
@@ -59,7 +60,7 @@ func TestNewStyles(t *testing.T) {
 	t.Run("unrelated style inherits from base", func(t *testing.T) {
 		t.Parallel()
 
-		got := styles.Style(style.NameTag)
+		got := styles.Style(kind.NameTag)
 		assert.NotNil(t, got)
 		assert.Equal(t, lipgloss.Color("white"), got.GetForeground())
 	})
@@ -68,25 +69,25 @@ func TestNewStyles(t *testing.T) {
 		t.Parallel()
 
 		// Check a sampling of styles exist directly in the map.
-		stylesToCheck := []style.Kind{
-			style.Text,
-			style.Comment,
-			style.LiteralNumber,
-			style.LiteralNumberFloat,
-			style.LiteralString,
-			style.NameTag,
-			style.Punctuation,
-			style.PunctuationMappingValue,
-			style.TextAccentDim,
-			style.TextSubtleDim,
-			style.GenericHeading,
+		stylesToCheck := []kind.Kind{
+			kind.Text,
+			kind.Comment,
+			kind.LiteralNumber,
+			kind.LiteralNumberFloat,
+			kind.LiteralString,
+			kind.NameTag,
+			kind.Punctuation,
+			kind.PunctuationMappingValue,
+			kind.TextAccentDim,
+			kind.TextSubtleDim,
+			kind.GenericHeading,
 		}
 
 		// Every category resolves to the style of its closest set ancestor.
 		set := []lipgloss.Style{
-			styles.Style(style.Text),
-			styles.Style(style.LiteralNumber),
-			styles.Style(style.Comment),
+			styles.Style(kind.Text),
+			styles.Style(kind.LiteralNumber),
+			styles.Style(kind.Comment),
 		}
 
 		for _, s := range stylesToCheck {
@@ -105,7 +106,7 @@ func TestNewStyles_TextStyles(t *testing.T) {
 
 		styles := style.NewStyles(base)
 
-		for _, s := range []style.Kind{style.TextAccentDim, style.TextSubtleDim, style.GenericHeading} {
+		for _, s := range []kind.Kind{kind.TextAccentDim, kind.TextSubtleDim, kind.GenericHeading} {
 			got := styles.Style(s)
 			assert.NotNil(t, got)
 			assert.Equal(t, lipgloss.Color("white"), got.GetForeground(),
@@ -123,15 +124,15 @@ func TestNewStyles_TextStyles(t *testing.T) {
 			Background(lipgloss.Color("red"))
 
 		styles := style.NewStyles(base,
-			style.Set(style.TextAccentDim, accent),
-			style.Set(style.TextSubtleDim, subtle),
-			style.Set(style.GenericHeading, title),
+			style.Set(kind.TextAccentDim, accent),
+			style.Set(kind.TextSubtleDim, subtle),
+			style.Set(kind.GenericHeading, title),
 		)
 
-		assert.Equal(t, lipgloss.Color("red"), styles.Style(style.TextAccentDim).GetForeground())
-		assert.Equal(t, lipgloss.Color("gray"), styles.Style(style.TextSubtleDim).GetForeground())
-		assert.Equal(t, lipgloss.Color("black"), styles.Style(style.GenericHeading).GetForeground())
-		assert.Equal(t, lipgloss.Color("red"), styles.Style(style.GenericHeading).GetBackground())
+		assert.Equal(t, lipgloss.Color("red"), styles.Style(kind.TextAccentDim).GetForeground())
+		assert.Equal(t, lipgloss.Color("gray"), styles.Style(kind.TextSubtleDim).GetForeground())
+		assert.Equal(t, lipgloss.Color("black"), styles.Style(kind.GenericHeading).GetForeground())
+		assert.Equal(t, lipgloss.Color("red"), styles.Style(kind.GenericHeading).GetBackground())
 	})
 }
 
@@ -144,14 +145,14 @@ func TestNewStyles_Override(t *testing.T) {
 
 	styles := style.NewStyles(
 		base,
-		style.Set(style.Text, red),
-		style.Set(style.LiteralNumber, blue),
+		style.Set(kind.Text, red),
+		style.Set(kind.LiteralNumber, blue),
 	)
 
 	t.Run("Text override takes precedence over base", func(t *testing.T) {
 		t.Parallel()
 
-		got := styles.Style(style.Text)
+		got := styles.Style(kind.Text)
 		assert.NotNil(t, got)
 		assert.Equal(t, lipgloss.Color("red"), got.GetForeground())
 	})
@@ -159,7 +160,7 @@ func TestNewStyles_Override(t *testing.T) {
 	t.Run("other overrides still work", func(t *testing.T) {
 		t.Parallel()
 
-		got := styles.Style(style.LiteralNumber)
+		got := styles.Style(kind.LiteralNumber)
 		assert.NotNil(t, got)
 		assert.Equal(t, lipgloss.Color("blue"), got.GetForeground())
 	})
@@ -173,10 +174,10 @@ func TestStyles_With(t *testing.T) {
 	green := lipgloss.NewStyle().Foreground(lipgloss.Color("green"))
 	yellow := lipgloss.NewStyle().Foreground(lipgloss.Color("yellow"))
 
-	original := style.NewStyles(base, style.Set(style.Comment, green))
+	original := style.NewStyles(base, style.Set(kind.Comment, green))
 
 	// Custom style key for testing.
-	const customKey style.Kind = "customKey"
+	const customKey kind.Kind = "customKey"
 
 	t.Run("adds new custom style", func(t *testing.T) {
 		t.Parallel()
@@ -191,9 +192,9 @@ func TestStyles_With(t *testing.T) {
 	t.Run("overrides existing style", func(t *testing.T) {
 		t.Parallel()
 
-		result := original.With(style.Set(style.Comment, yellow))
+		result := original.With(style.Set(kind.Comment, yellow))
 
-		got := result.Style(style.Comment)
+		got := result.Style(kind.Comment)
 		assert.NotNil(t, got)
 		assert.Equal(t, lipgloss.Color("yellow"), got.GetForeground())
 	})
@@ -203,7 +204,7 @@ func TestStyles_With(t *testing.T) {
 
 		_ = original.With(
 			style.Set(customKey, red),
-			style.Set(style.Comment, yellow),
+			style.Set(kind.Comment, yellow),
 		)
 
 		// Custom key should return empty style (not found) in original.
@@ -212,7 +213,7 @@ func TestStyles_With(t *testing.T) {
 		assert.Equal(t, lipgloss.Style{}, got)
 
 		// Comment should still be green in original.
-		got = original.Style(style.Comment)
+		got = original.Style(kind.Comment)
 		assert.NotNil(t, got)
 		assert.Equal(t, lipgloss.Color("green"), got.GetForeground())
 	})
@@ -221,10 +222,10 @@ func TestStyles_With(t *testing.T) {
 		t.Parallel()
 
 		// Overriding a parent category reaches the children that inherit it.
-		result := original.With(style.Set(style.LiteralNumber, red))
+		result := original.With(style.Set(kind.LiteralNumber, red))
 
-		assert.Equal(t, lipgloss.Color("red"), result.Style(style.LiteralNumberFloat).GetForeground())
-		assert.Equal(t, lipgloss.Color("white"), original.Style(style.LiteralNumberFloat).GetForeground())
+		assert.Equal(t, lipgloss.Color("red"), result.Style(kind.LiteralNumberFloat).GetForeground())
+		assert.Equal(t, lipgloss.Color("white"), original.Style(kind.LiteralNumberFloat).GetForeground())
 	})
 
 	t.Run("keeps untouched categories", func(t *testing.T) {
@@ -232,8 +233,8 @@ func TestStyles_With(t *testing.T) {
 
 		result := original.With(style.Set(customKey, red))
 
-		assert.Equal(t, original.Style(style.Comment), result.Style(style.Comment))
-		assert.Equal(t, original.Style(style.Text), result.Style(style.Text))
+		assert.Equal(t, original.Style(kind.Comment), result.Style(kind.Comment))
+		assert.Equal(t, original.Style(kind.Text), result.Style(kind.Text))
 	})
 
 	t.Run("empty options returns an equal copy", func(t *testing.T) {
@@ -241,17 +242,17 @@ func TestStyles_With(t *testing.T) {
 
 		result := original.With()
 
-		assert.Equal(t, lipgloss.Color("green"), result.Style(style.Comment).GetForeground())
-		assert.Equal(t, lipgloss.Color("white"), result.Style(style.Text).GetForeground())
+		assert.Equal(t, lipgloss.Color("green"), result.Style(kind.Comment).GetForeground())
+		assert.Equal(t, lipgloss.Color("white"), result.Style(kind.Text).GetForeground())
 	})
 
 	t.Run("zero value can be extended", func(t *testing.T) {
 		t.Parallel()
 
-		result := style.Styles{}.With(style.Set(style.Comment, yellow))
+		result := style.Styles{}.With(style.Set(kind.Comment, yellow))
 
-		assert.Equal(t, lipgloss.Color("yellow"), result.Style(style.Comment).GetForeground())
-		assert.Equal(t, lipgloss.Style{}, result.Style(style.Text))
+		assert.Equal(t, lipgloss.Color("yellow"), result.Style(kind.Comment).GetForeground())
+		assert.Equal(t, lipgloss.Style{}, result.Style(kind.Text))
 	})
 }
 
@@ -262,6 +263,6 @@ func TestStyles_UnsetCategories(t *testing.T) {
 
 	// An unset predefined category inherits the base, and an unknown key is
 	// an empty style.
-	assert.Equal(t, styles.Style(style.Text), styles.Style(style.NameTag))
+	assert.Equal(t, styles.Style(kind.Text), styles.Style(kind.NameTag))
 	assert.Equal(t, lipgloss.NewStyle(), styles.Style("never-set"))
 }

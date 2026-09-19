@@ -44,7 +44,7 @@ import (
 // view, and a fresh view renders the document as parsed:
 //
 //	view := source.View()
-//	view.AddOverlay(style.GenericHighlight, ranges...)
+//	view.AddOverlay(kind.GenericHighlight, ranges...)
 //	fmt.Println(p.Print(view))
 //
 // Since nothing mutates a Source, it is safe for concurrent use. Every view

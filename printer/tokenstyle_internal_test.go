@@ -6,7 +6,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 
-	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
 // newToken returns a token of the given type and value with no neighbors.
@@ -19,31 +19,31 @@ func TestTypeStyle(t *testing.T) {
 
 	tcs := map[string]struct {
 		setup func() *token.Token
-		want  style.Kind
+		want  kind.Kind
 	}{
 		"basic string type": {
 			setup: func() *token.Token {
 				return newToken(token.StringType, "")
 			},
-			want: style.LiteralString,
+			want: kind.LiteralString,
 		},
 		"bool type": {
 			setup: func() *token.Token {
 				return newToken(token.BoolType, "")
 			},
-			want: style.LiteralBoolean,
+			want: kind.LiteralBoolean,
 		},
 		"comment type": {
 			setup: func() *token.Token {
 				return newToken(token.CommentType, "")
 			},
-			want: style.Comment,
+			want: kind.Comment,
 		},
 		"mapping value type": {
 			setup: func() *token.Token {
 				return newToken(token.MappingValueType, "")
 			},
-			want: style.PunctuationMappingValue,
+			want: kind.PunctuationMappingValue,
 		},
 		"string followed by colon becomes mapping key": {
 			setup: func() *token.Token {
@@ -54,7 +54,7 @@ func TestTypeStyle(t *testing.T) {
 
 				return key
 			},
-			want: style.NameTag, // Mapping key style.
+			want: kind.NameTag, // Mapping key style.
 		},
 		"string not followed by colon stays string": {
 			setup: func() *token.Token {
@@ -65,7 +65,7 @@ func TestTypeStyle(t *testing.T) {
 
 				return str
 			},
-			want: style.LiteralString,
+			want: kind.LiteralString,
 		},
 		"token preceded by anchor inherits anchor style": {
 			setup: func() *token.Token {
@@ -76,7 +76,7 @@ func TestTypeStyle(t *testing.T) {
 
 				return name
 			},
-			want: style.NameAnchor,
+			want: kind.NameAnchor,
 		},
 		"token preceded by alias inherits alias style": {
 			setup: func() *token.Token {
@@ -87,7 +87,7 @@ func TestTypeStyle(t *testing.T) {
 
 				return name
 			},
-			want: style.NameAlias,
+			want: kind.NameAlias,
 		},
 		"unknown type returns text style": {
 			setup: func() *token.Token {
@@ -97,187 +97,187 @@ func TestTypeStyle(t *testing.T) {
 
 				return tk
 			},
-			want: style.Text,
+			want: kind.Text,
 		},
 		"anchor type itself": {
 			setup: func() *token.Token {
 				return newToken(token.AnchorType, "&")
 			},
-			want: style.NameAnchor,
+			want: kind.NameAnchor,
 		},
 		"alias type itself": {
 			setup: func() *token.Token {
 				return newToken(token.AliasType, "*")
 			},
-			want: style.NameAlias,
+			want: kind.NameAlias,
 		},
 		"integer type": {
 			setup: func() *token.Token {
 				return newToken(token.IntegerType, "42")
 			},
-			want: style.LiteralNumberInteger,
+			want: kind.LiteralNumberInteger,
 		},
 		"null type": {
 			setup: func() *token.Token {
 				return newToken(token.NullType, "null")
 			},
-			want: style.LiteralNull,
+			want: kind.LiteralNull,
 		},
 		"float type": {
 			setup: func() *token.Token {
 				return newToken(token.FloatType, "3.14")
 			},
-			want: style.LiteralNumberFloat,
+			want: kind.LiteralNumberFloat,
 		},
 		"double quote type": {
 			setup: func() *token.Token {
 				return newToken(token.DoubleQuoteType, "quoted")
 			},
-			want: style.LiteralStringDouble,
+			want: kind.LiteralStringDouble,
 		},
 		"single quote type": {
 			setup: func() *token.Token {
 				return newToken(token.SingleQuoteType, "quoted")
 			},
-			want: style.LiteralStringSingle,
+			want: kind.LiteralStringSingle,
 		},
 		"sequence entry type": {
 			setup: func() *token.Token {
 				return newToken(token.SequenceEntryType, "-")
 			},
-			want: style.PunctuationSequenceEntry,
+			want: kind.PunctuationSequenceEntry,
 		},
 		"sequence start type": {
 			setup: func() *token.Token {
 				return newToken(token.SequenceStartType, "[")
 			},
-			want: style.PunctuationSequenceStart,
+			want: kind.PunctuationSequenceStart,
 		},
 		"sequence end type": {
 			setup: func() *token.Token {
 				return newToken(token.SequenceEndType, "]")
 			},
-			want: style.PunctuationSequenceEnd,
+			want: kind.PunctuationSequenceEnd,
 		},
 		"mapping start type": {
 			setup: func() *token.Token {
 				return newToken(token.MappingStartType, "{")
 			},
-			want: style.PunctuationMappingStart,
+			want: kind.PunctuationMappingStart,
 		},
 		"mapping end type": {
 			setup: func() *token.Token {
 				return newToken(token.MappingEndType, "}")
 			},
-			want: style.PunctuationMappingEnd,
+			want: kind.PunctuationMappingEnd,
 		},
 		"tag type": {
 			setup: func() *token.Token {
 				return newToken(token.TagType, "!mytag")
 			},
-			want: style.NameDecorator,
+			want: kind.NameDecorator,
 		},
 		"directive type": {
 			setup: func() *token.Token {
 				return newToken(token.DirectiveType, "%YAML")
 			},
-			want: style.CommentPreproc,
+			want: kind.CommentPreproc,
 		},
 		"document header type": {
 			setup: func() *token.Token {
 				return newToken(token.DocumentHeaderType, "---")
 			},
-			want: style.PunctuationHeading,
+			want: kind.PunctuationHeading,
 		},
 		"document end type": {
 			setup: func() *token.Token {
 				return newToken(token.DocumentEndType, "...")
 			},
-			want: style.PunctuationHeading,
+			want: kind.PunctuationHeading,
 		},
 		"literal block type": {
 			setup: func() *token.Token {
 				return newToken(token.LiteralType, "|")
 			},
-			want: style.PunctuationBlockLiteral,
+			want: kind.PunctuationBlockLiteral,
 		},
 		"folded block type": {
 			setup: func() *token.Token {
 				return newToken(token.FoldedType, ">")
 			},
-			want: style.PunctuationBlockFolded,
+			want: kind.PunctuationBlockFolded,
 		},
 		"hex integer type": {
 			setup: func() *token.Token {
 				return newToken(token.HexIntegerType, "0xFF")
 			},
-			want: style.LiteralNumberHex,
+			want: kind.LiteralNumberHex,
 		},
 		"octet integer type": {
 			setup: func() *token.Token {
 				return newToken(token.OctetIntegerType, "0o777")
 			},
-			want: style.LiteralNumberOct,
+			want: kind.LiteralNumberOct,
 		},
 		"binary integer type": {
 			setup: func() *token.Token {
 				return newToken(token.BinaryIntegerType, "0b1010")
 			},
-			want: style.LiteralNumberBin,
+			want: kind.LiteralNumberBin,
 		},
 		"infinity type": {
 			setup: func() *token.Token {
 				return newToken(token.InfinityType, ".inf")
 			},
-			want: style.LiteralNumberInfinity,
+			want: kind.LiteralNumberInfinity,
 		},
 		"nan type": {
 			setup: func() *token.Token {
 				return newToken(token.NanType, ".nan")
 			},
-			want: style.LiteralNumberNaN,
+			want: kind.LiteralNumberNaN,
 		},
 		"merge key type": {
 			setup: func() *token.Token {
 				return newToken(token.MergeKeyType, "<<")
 			},
-			want: style.NameAliasMerge,
+			want: kind.NameAliasMerge,
 		},
 		"collect entry type": {
 			setup: func() *token.Token {
 				return newToken(token.CollectEntryType, ",")
 			},
-			want: style.PunctuationCollectEntry,
+			want: kind.PunctuationCollectEntry,
 		},
 		"implicit null type": {
 			setup: func() *token.Token {
 				return newToken(token.ImplicitNullType, "")
 			},
-			want: style.LiteralNullImplicit,
+			want: kind.LiteralNullImplicit,
 		},
 		"space type": {
 			setup: func() *token.Token {
 				return newToken(token.SpaceType, " ")
 			},
-			want: style.Text,
+			want: kind.Text,
 		},
 		"invalid type": {
 			setup: func() *token.Token {
 				return newToken(token.InvalidType, "???")
 			},
-			want: style.GenericErrorInvalid,
+			want: kind.GenericErrorInvalid,
 		},
 		"unknown type": {
 			setup: func() *token.Token {
 				return newToken(token.UnknownType, "???")
 			},
-			want: style.GenericErrorUnknown,
+			want: kind.GenericErrorUnknown,
 		},
 		"mapping key type": {
 			setup: func() *token.Token {
 				return newToken(token.MappingKeyType, "?")
 			},
-			want: style.NameTag,
+			want: kind.NameTag,
 		},
 	}
 

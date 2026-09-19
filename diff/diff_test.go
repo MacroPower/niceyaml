@@ -12,7 +12,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/diff/lcs"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
-	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
 func TestDiffer_Views(t *testing.T) {
@@ -37,7 +37,7 @@ func TestDiffer_Views(t *testing.T) {
 
 	// Each result view owns its decoration, and none of it reaches the
 	// sources the diff was computed from.
-	got.AddOverlay(style.GenericHighlight, position.NewRange(position.New(2, 0), position.New(2, 1)))
+	got.AddOverlay(kind.GenericHighlight, position.NewRange(position.New(2, 0), position.New(2, 1)))
 	assert.Len(t, got.Overlays(2), 1)
 	assert.Empty(t, result.Unified().Overlays(2))
 	assert.Empty(t, after.View().Overlays(1))
@@ -1170,7 +1170,7 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 		t.Parallel()
 
 		first := result.Unified()
-		first.AddOverlay(style.GenericHighlight, highlight)
+		first.AddOverlay(kind.GenericHighlight, highlight)
 
 		second := result.Unified()
 		assert.Empty(t, second.Overlays(0))
@@ -1182,7 +1182,7 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 		left := result.Before()
 		right := result.After()
 
-		left.AddOverlay(style.GenericHighlight, highlight)
+		left.AddOverlay(kind.GenericHighlight, highlight)
 
 		assert.Empty(t, right.Overlays(0))
 		assert.Empty(t, result.Before().Overlays(0))
@@ -1197,7 +1197,7 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 	t.Run("inputs are untouched", func(t *testing.T) {
 		t.Parallel()
 
-		result.Unified().AddOverlay(style.GenericHighlight, highlight)
+		result.Unified().AddOverlay(kind.GenericHighlight, highlight)
 
 		assert.Empty(t, before.View().Overlays(0))
 		assert.Empty(t, after.View().Overlays(0))

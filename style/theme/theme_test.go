@@ -11,6 +11,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
@@ -50,13 +51,13 @@ func TestCatalog_With(t *testing.T) {
 			check: func(t *testing.T) {
 				t.Helper()
 
-				c := theme.Builtin().With(theme.New("test-custom", theme.Dark, marked(style.Comment)))
+				c := theme.Builtin().With(theme.New("test-custom", theme.Dark, marked(kind.Comment)))
 
 				got, ok := c.Get("test-custom")
 				require.True(t, ok)
 				assert.Equal(t, "test-custom", got.Name)
 				assert.Equal(t, theme.Dark, got.Mode)
-				assert.True(t, isMarked(got.Styles(), style.Comment))
+				assert.True(t, isMarked(got.Styles(), kind.Comment))
 			},
 		},
 		"added theme goes on the end": {
@@ -76,14 +77,14 @@ func TestCatalog_With(t *testing.T) {
 				t.Helper()
 
 				c := theme.Catalog{}.With(
-					theme.New("test-replace", theme.Dark, marked(style.Comment)),
-					theme.New("test-replace", theme.Light, marked(style.NameTag)),
+					theme.New("test-replace", theme.Dark, marked(kind.Comment)),
+					theme.New("test-replace", theme.Light, marked(kind.NameTag)),
 				)
 
 				got, ok := c.Get("test-replace")
 				require.True(t, ok)
 				assert.Equal(t, theme.Light, got.Mode)
-				assert.True(t, isMarked(got.Styles(), style.NameTag))
+				assert.True(t, isMarked(got.Styles(), kind.NameTag))
 				assert.Equal(t, 1, c.Len())
 			},
 		},
@@ -91,11 +92,11 @@ func TestCatalog_With(t *testing.T) {
 			check: func(t *testing.T) {
 				t.Helper()
 
-				c := theme.Builtin().With(theme.New("vulcan", theme.Dark, marked(style.NameTag)))
+				c := theme.Builtin().With(theme.New("vulcan", theme.Dark, marked(kind.NameTag)))
 
 				got, ok := c.Get("vulcan")
 				require.True(t, ok)
-				assert.True(t, isMarked(got.Styles(), style.NameTag))
+				assert.True(t, isMarked(got.Styles(), kind.NameTag))
 				assert.Equal(t, theme.Builtin().Len(), c.Len())
 
 				names := make([]string, 0, c.Len())
@@ -147,7 +148,7 @@ func TestCatalog_Get(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, "dracula", got.Name)
 		assert.Equal(t, theme.Dark, got.Mode)
-		assert.NotNil(t, got.Styles().Style(style.Text))
+		assert.NotNil(t, got.Styles().Style(kind.Text))
 	})
 
 	t.Run("unknown theme", func(t *testing.T) {
@@ -213,7 +214,7 @@ func TestBuiltin(t *testing.T) {
 	// Every entry is complete and builds.
 	for _, th := range all {
 		assert.NotEmpty(t, th.Name)
-		assert.NotNil(t, th.Styles().Style(style.Text), th.Name)
+		assert.NotNil(t, th.Styles().Style(kind.Text), th.Name)
 	}
 
 	// The slice is a copy.
@@ -233,7 +234,7 @@ func TestThemeStyles(t *testing.T) {
 		th := theme.New("test-memo", theme.Dark, func() style.Styles {
 			calls.Add(1)
 
-			return marked(style.Comment)()
+			return marked(kind.Comment)()
 		})
 
 		first := th.Styles()
@@ -242,8 +243,8 @@ func TestThemeStyles(t *testing.T) {
 		second := duplicate.Styles()
 
 		assert.Equal(t, int32(1), calls.Load())
-		assert.True(t, isMarked(first, style.Comment))
-		assert.True(t, isMarked(second, style.Comment))
+		assert.True(t, isMarked(first, kind.Comment))
+		assert.True(t, isMarked(second, kind.Comment))
 	})
 
 	t.Run("zero value", func(t *testing.T) {
@@ -251,7 +252,7 @@ func TestThemeStyles(t *testing.T) {
 
 		var th theme.Theme
 
-		assert.NotNil(t, th.Styles().Style(style.Text))
+		assert.NotNil(t, th.Styles().Style(kind.Text))
 	})
 }
 
@@ -265,9 +266,9 @@ func TestPalette_SubtleTextDiffersFromText(t *testing.T) {
 			t.Parallel()
 
 			styles := th.Styles()
-			text := styles.Style(style.Text).GetForeground()
-			subtle := styles.Style(style.TextSubtle).GetForeground()
-			dim := styles.Style(style.TextSubtleDim).GetForeground()
+			text := styles.Style(kind.Text).GetForeground()
+			subtle := styles.Style(kind.TextSubtle).GetForeground()
+			dim := styles.Style(kind.TextSubtleDim).GetForeground()
 
 			assert.NotEqual(t, text, subtle, "TextSubtle matches Text")
 			assert.NotEqual(t, subtle, dim, "TextSubtleDim matches TextSubtle")
@@ -298,14 +299,14 @@ func empty() style.Styles {
 }
 
 // marked returns a builder for a theme whose only set category is s.
-func marked(s style.Kind) func() style.Styles {
+func marked(s kind.Kind) func() style.Styles {
 	return func() style.Styles {
 		return style.NewStyles(lipgloss.NewStyle(), style.Set(s, lipgloss.NewStyle().Foreground(marker)))
 	}
 }
 
 // isMarked reports whether s carries the marker in styles.
-func isMarked(styles style.Styles, s style.Kind) bool {
+func isMarked(styles style.Styles, s kind.Kind) bool {
 	return styles.Style(s).GetForeground() == marker
 }
 
@@ -314,9 +315,9 @@ func TestTheme_Style(t *testing.T) {
 
 	var _ printer.StyleGetter = theme.Theme{}
 
-	assert.Equal(t, theme.Charm.Styles().Style(style.Comment), theme.Charm.Style(style.Comment))
-	assert.Equal(t, lipgloss.NewStyle(), theme.Theme{}.Style(style.Comment))
+	assert.Equal(t, theme.Charm.Styles().Style(kind.Comment), theme.Charm.Style(kind.Comment))
+	assert.Equal(t, lipgloss.NewStyle(), theme.Theme{}.Style(kind.Comment))
 
 	p := printer.New(printer.WithStyles(theme.Charm))
-	assert.Equal(t, theme.Charm.Styles().Style(style.NameTag), p.Style(style.NameTag))
+	assert.Equal(t, theme.Charm.Styles().Style(kind.NameTag), p.Style(kind.NameTag))
 }

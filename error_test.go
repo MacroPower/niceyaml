@@ -21,6 +21,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
 // customTestError is a test error type for errors.As testing.
@@ -3112,7 +3113,7 @@ func TestSourceError_Excerpt(t *testing.T) {
 		excerpt, err := excerptError(t).Excerpt(1)
 		require.NoError(t, err)
 
-		want := line.Overlays{{Kind: style.GenericError, Cols: position.NewSpan(3, 4)}}
+		want := line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}
 		assert.Equal(t, want, excerpt.Overlays(1), "the main error covers the value of b")
 		assert.Equal(t, want, excerpt.Overlays(4), "the nested error covers the value of h")
 
@@ -3128,7 +3129,7 @@ func TestSourceError_Excerpt(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, line.Annotations{
-			{Content: "bad h", Kind: style.TextError, Placement: line.Below, Col: 3},
+			{Content: "bad h", Kind: kind.TextError, Placement: line.Below, Col: 3},
 		}, excerpt.Annotations(4).Filter(line.Below))
 		assert.Empty(t, excerpt.Annotations(1), "the main error has no message of its own")
 	})
@@ -3229,11 +3230,11 @@ func TestSourceError_Annotate(t *testing.T) {
 
 		assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, lineNumbers(view))
 
-		want := line.Overlays{{Kind: style.GenericError, Cols: position.NewSpan(3, 4)}}
+		want := line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}
 		assert.Equal(t, want, view.Overlays(1))
 		assert.Equal(t, want, view.Overlays(7))
 		assert.Equal(t, line.Annotations{
-			{Content: "bad h", Kind: style.TextError, Placement: line.Below, Col: 3},
+			{Content: "bad h", Kind: kind.TextError, Placement: line.Below, Col: 3},
 		}, view.Annotations(7))
 
 		for i := range view.Len() {
@@ -3272,12 +3273,12 @@ func TestSourceError_Annotate(t *testing.T) {
 		require.NoError(t, first.Annotate(view))
 		require.NoError(t, second.Annotate(view))
 
-		want := line.Overlays{{Kind: style.GenericError, Cols: position.NewSpan(3, 4)}}
+		want := line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}
 		assert.Equal(t, want, view.Overlays(1))
 		assert.Equal(t, want, view.Overlays(3))
 		assert.Empty(t, view.Annotations(1))
 		assert.Equal(t, line.Annotations{
-			{Content: "too big", Kind: style.TextError, Placement: line.Below, Col: 3},
+			{Content: "too big", Kind: kind.TextError, Placement: line.Below, Col: 3},
 		}, view.Annotations(3))
 	})
 

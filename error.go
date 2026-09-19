@@ -14,7 +14,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
-	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
 var (
@@ -917,9 +917,9 @@ func rangeOf(lines line.Lines, loc location) position.Range {
 
 // Annotate marks the error on view, which is a view of the source the
 // error is bound to, such as one from [Source.View]: the location of every
-// node in the tree is highlighted with [style.GenericError], and the
+// node in the tree is highlighted with [kind.GenericError], and the
 // message of each node below the root is an annotation below its own
-// line in [style.TextError], so the message reads as error text without
+// line in [kind.TextError], so the message reads as error text without
 // the highlight of the token it describes. A viewer that shows a document
 // with its errors in place marks its view this way and renders it as it
 // is.
@@ -1057,7 +1057,7 @@ func (e *SourceError) annotate(view *line.View) ([]int, error) {
 
 	marked = append(marked, allRanges.LineIndices()...)
 
-	view.AddOverlay(style.GenericError, allRanges...)
+	view.AddOverlay(kind.GenericError, allRanges...)
 
 	for lineIdx, annotation := range prepareLineAnnotations(positions) {
 		view.Annotate(lineIdx, annotation)
@@ -1118,7 +1118,7 @@ func prepareLineAnnotations(positions []errorPosition) map[int]line.Annotation {
 
 		result[lineIdx] = line.Annotation{
 			Content:   strings.Join(messages, "; "),
-			Kind:      style.TextError,
+			Kind:      kind.TextError,
 			Placement: line.Below,
 			Col:       minCol,
 		}

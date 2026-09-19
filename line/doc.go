@@ -99,7 +99,7 @@
 //
 //	view.Annotate(i, line.Annotation{
 //	    Content:   "missing required field",
-//	    Kind:      style.TextError,
+//	    Kind:      kind.TextError,
 //	    Placement: line.Below,
 //	    Col:       4, // Align with the error location.
 //	})
@@ -111,8 +111,8 @@
 // range of lines; the first replaces the style underneath and the second
 // mixes with it:
 //
-//	view.AddOverlay(style.GenericError, errorRange)
-//	view.BlendOverlay(style.GenericHighlight, matches...)
+//	view.AddOverlay(kind.GenericError, errorRange)
+//	view.BlendOverlay(kind.GenericHighlight, matches...)
 //
 // [Flag] values categorize lines for special handling. A diff marks lines with
 // [FlagInserted] and [FlagDeleted]:

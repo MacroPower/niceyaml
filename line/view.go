@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"go.jacobcolvin.com/niceyaml/position"
-	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
 // View is [Lines] content together with the decoration one rendering of it
@@ -152,7 +152,7 @@ func (v *View) AddLineOverlay(i int, o ...Overlay) {
 // the same way [Lines.AllLines] clamps its spans, so a range computed
 // against a longer view is safe to apply. A range that covers no columns
 // of a line adds no overlay to it.
-func (v *View) AddOverlay(s style.Kind, ranges ...position.Range) {
+func (v *View) AddOverlay(s kind.Kind, ranges ...position.Range) {
 	for _, r := range ranges {
 		v.addOverlayRange(s, false, r)
 	}
@@ -161,7 +161,7 @@ func (v *View) AddOverlay(s style.Kind, ranges ...position.Range) {
 // BlendOverlay adds an overlay like [View.AddOverlay], but one that blends
 // with the style underneath it. A search highlight added this way keeps the
 // token or diff color of the text it covers.
-func (v *View) BlendOverlay(s style.Kind, ranges ...position.Range) {
+func (v *View) BlendOverlay(s kind.Kind, ranges ...position.Range) {
 	for _, r := range ranges {
 		v.addOverlayRange(s, true, r)
 	}
@@ -169,7 +169,7 @@ func (v *View) BlendOverlay(s style.Kind, ranges ...position.Range) {
 
 // addOverlayRange adds a single overlay range, splitting across lines as
 // needed and skipping lines outside the view.
-func (v *View) addOverlayRange(s style.Kind, blend bool, r position.Range) {
+func (v *View) addOverlayRange(s kind.Kind, blend bool, r position.Range) {
 	for _, lineRange := range r.SliceLines() {
 		lineIdx := lineRange.Start.Line
 		if lineIdx < 0 || lineIdx >= len(v.lines) {

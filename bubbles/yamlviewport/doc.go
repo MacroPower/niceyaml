@@ -59,8 +59,8 @@
 // Navigate between matches with [Model.SearchNext] and [Model.SearchPrevious].
 // The viewport automatically scrolls to center the current match.
 //
-// Search highlighting uses [style.GenericHighlightDim] for regular matches and
-// [style.GenericHighlight] for the current match.
+// Search highlighting uses [kind.GenericHighlightDim] for regular matches and
+// [kind.GenericHighlight] for the current match.
 //
 // Configure these styles in your theme (see the
 // [go.jacobcolvin.com/niceyaml/style/theme] package).

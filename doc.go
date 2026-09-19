@@ -98,8 +98,8 @@
 // [Source.Lines], and hands out a view to decorate from [Source.View]:
 //
 //	view := source.View()
-//	view.AddOverlay(style.GenericError, errorRange)
-//	view.BlendOverlay(style.GenericHighlight, matches...)
+//	view.AddOverlay(kind.GenericError, errorRange)
+//	view.BlendOverlay(kind.GenericHighlight, matches...)
 //	fmt.Println(p.Print(view))
 //
 // Every token the module hands out, from [Source.Tokens], [line.Lines.TokenAt],
@@ -213,7 +213,7 @@
 //	f := finder.New(finder.WithNormalizer(normalizer.New()))
 //	idx := f.Load(source.Lines())
 //	view := source.View()
-//	view.AddOverlay(style.GenericHighlight, idx.Find("search term")...)
+//	view.AddOverlay(kind.GenericHighlight, idx.Find("search term")...)
 //	fmt.Println(p.Print(view))
 //
 // # Dependencies
@@ -242,7 +242,11 @@
 // test enforces it.
 //
 // Rendering builds on lipgloss, and the [style] package exposes its Style
-// type directly since a theme is a set of lipgloss styles. The
+// type directly since a theme is a set of lipgloss styles. The kinds of text
+// a rendering names, such as [kind.GenericError], live in
+// [go.jacobcolvin.com/niceyaml/style/kind], which imports nothing, so the
+// [line], [diff], and [finder] packages mark content without depending on
+// lipgloss. The
 // [go.jacobcolvin.com/niceyaml/fangs] and
 // [go.jacobcolvin.com/niceyaml/bubbles/yamlviewport] packages are adapters
 // for the charm libraries they build on and expose those libraries' types by
