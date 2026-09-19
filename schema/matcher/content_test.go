@@ -38,6 +38,13 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`version: 2`),
 			want:    true,
 		},
+		"uncomparable dynamic type does not match": {
+			// T is any, so the compared values may hold a map, which ==
+			// cannot compare; the matcher declines rather than panics.
+			matcher: matcher.Content[any](kindPath, map[string]any{"a": uint64(1)}),
+			input:   stringtest.Input("kind:\n  a: 1"),
+			want:    false,
+		},
 		"float matches unquoted float": {
 			matcher: matcher.Content(versionPath, 1.0),
 			input:   stringtest.Input(`version: 1.0`),

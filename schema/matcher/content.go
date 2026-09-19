@@ -2,6 +2,7 @@ package matcher
 
 import (
 	"context"
+	"reflect"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -42,6 +43,16 @@ func Content[T comparable](path paths.Path, want T) Matcher {
 // Match implements [Matcher].
 func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Document) bool {
 	got, err := doc.Get[T](ctx, m.path)
+	if err != nil {
+		return false
+	}
 
-	return err == nil && got == m.want
+	// T may be an interface such as any, whose dynamic type decides whether
+	// == is defined. A value == cannot compare, such as a map, matches
+	// nothing rather than panicking.
+	if !reflect.ValueOf(&got).Elem().Comparable() {
+		return false
+	}
+
+	return got == m.want
 }
