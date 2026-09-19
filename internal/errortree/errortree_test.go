@@ -199,6 +199,17 @@ func TestNew(t *testing.T) {
 				},
 			},
 		},
+		"child wrapping a binding of the same source keeps one position": {
+			err: yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithErrors(
+				fmt.Errorf("ctx: %w", yamltest.Bind(t, source, badA())),
+			))),
+			want: errortree.Tree{
+				Text: "f.yaml: outer",
+				Children: []errortree.Tree{
+					{Text: "ctx: f.yaml:1:4: $.a: bad a"},
+				},
+			},
+		},
 		"root with a position keeps it": {
 			err: yamltest.Bind(t, source, niceyaml.NewError("outer",
 				niceyaml.WithPath(paths.Root().Child("a")),

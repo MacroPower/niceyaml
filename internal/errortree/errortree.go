@@ -214,7 +214,9 @@ func trees(kids []positioned) []Tree {
 // does a child bound to the same source when named is set, for a parent
 // with no text of its own. Otherwise a child bound to the same source
 // carries the "line:col:" its location resolved to in front of its
-// message, without the name the parent gives already.
+// message, without the name the parent gives already. A child that wraps
+// a binding took that binding over, so its message names the position
+// already and comes through as it is.
 func boundChildren(bound *niceyaml.SourceError, named bool) []positioned {
 	var kids []positioned
 
@@ -229,11 +231,18 @@ func boundChildren(bound *niceyaml.SourceError, named bool) []positioned {
 			kid.pos = rng.Start
 		}
 
+		// The binding put the position in front of the message it wraps,
+		// so stripping it back to that message leaves the position to
+		// put back without the name. A child that took a binding over
+		// carries its position inside the message instead, and adds no
+		// prefix of its own, so there is nothing to strip or put back.
 		text := child.Error()
 		if !named && child.Source() == bound.Source() {
-			text = child.Unwrap().Error()
-			if kid.located {
-				text = prefix(kid.pos.String()+":", text)
+			if inner := child.Unwrap().Error(); inner != text {
+				text = inner
+				if kid.located {
+					text = prefix(kid.pos.String()+":", text)
+				}
 			}
 		}
 
