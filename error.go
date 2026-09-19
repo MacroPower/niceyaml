@@ -448,7 +448,9 @@ func locatePath(lookup func() (*Document, error), path paths.Path, key bool) (lo
 // SourceError is an error bound to the [*Source] it occurred in.
 //
 // [Source.File], [Source.Documents], and the [Document] methods bind every
-// error they return, and [Document.Bind] binds an error built elsewhere.
+// error they return. [Document.Bind] binds an error built elsewhere, and
+// [Source.Bind] binds one that carries a position or a range rather than a
+// path.
 // Binding resolves the location of the error against the source, once, so
 // a SourceError never changes and every method of it reads that result:
 // [SourceError.Error] puts the position in front of the message,
@@ -492,8 +494,8 @@ func locatePath(lookup func() (*Document, error), path paths.Path, key bool) (lo
 // A SourceError never rewrites the message of the error it binds. The text
 // a wrapper such as [fmt.Errorf] produced stays as it was, and the position
 // goes in front of it. An error built by hand therefore goes through
-// [Document.Bind] first, and context around the SourceError comes after,
-// so the position stays beside the message.
+// [Document.Bind] or [Source.Bind] first, and context around the
+// SourceError comes after, so the position stays beside the message.
 //
 // The marks of an error are decoration on a [line.View], so the caller
 // that renders the error decides how it looks. [SourceError.Excerpt]
@@ -510,11 +512,14 @@ func locatePath(lookup func() (*Document, error), path paths.Path, key bool) (lo
 // A SourceError implements the error interface and unwraps to the error it
 // was created from, so [errors.Is] and [errors.As] see through it.
 //
-// Create instances with [Document.Bind], or receive them from the [Source]
-// and [Document] methods.
+// Create instances with [Document.Bind] or [Source.Bind], or receive them
+// from the [Source] and [Document] methods.
 type SourceError struct {
 	err    error
 	source *Source
+	// The document paths resolved in, which is nil for an error the Source
+	// bound.
+	doc *Document
 	// The reason the location did not resolve, which is nil when it did:
 	// ErrNoLocation, the error of a path that does not resolve, or
 	// ErrOutOfRange for a location the source does not hold.
@@ -592,7 +597,7 @@ func anchorOf(err error) error {
 // resolving in doc. A nil doc, which src passes for the errors it produces
 // itself, resolves no path. The children of err bind the same way.
 func newSourceError(err error, src *Source, doc *Document) *SourceError {
-	e := &SourceError{err: err, source: src, locErr: ErrNoLocation}
+	e := &SourceError{err: err, source: src, doc: doc, locErr: ErrNoLocation}
 
 	// The document paths resolve in. The Source binds only the errors it
 	// produces itself, which carry no path, so a path with no document
@@ -616,6 +621,7 @@ func newSourceError(err error, src *Source, doc *Document) *SourceError {
 		// there already.
 		e.adopted = true
 		e.source = a.source
+		e.doc = a.doc
 		e.loc, e.locErr = a.loc, a.locErr
 		e.rng, e.ranges = a.rng, a.ranges
 	}
@@ -693,6 +699,16 @@ func (e *SourceError) addChild(n error, src *Source, doc *Document) {
 // Source returns the [*Source] the error is bound to.
 func (e *SourceError) Source() *Source {
 	return e.source
+}
+
+// Document returns the [*Document] the error is bound to: the one whose
+// methods and validators produced it or whose [Document.Bind] bound it,
+// and in which a path in the error resolved. It is nil for an error bound
+// through [Source.Bind] or produced by the [Source] itself, since those
+// resolve no path. A caller that sorts the errors of a file by document
+// reads it beside [Document.Index].
+func (e *SourceError) Document() *Document {
+	return e.doc
 }
 
 // Unwrap returns the error the [SourceError] was created from. A nil

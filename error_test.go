@@ -3715,3 +3715,59 @@ func TestSourceError_Errors(t *testing.T) {
 
 	assert.NotNil(t, bound.Errors()[0])
 }
+
+func TestSourceError_Document(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n")
+	docs, err := source.Documents()
+	require.NoError(t, err)
+
+	tcs := map[string]struct {
+		err  error
+		want *niceyaml.Document
+	}{
+		"bound by a document": {
+			err:  docs[1].Bind(niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("b")))),
+			want: docs[1],
+		},
+		"produced by a document": {
+			err: func() error {
+				_, err := docs[0].Get[int](t.Context(), paths.Root().Child("missing"))
+
+				return err
+			}(),
+			want: docs[0],
+		},
+		"bound by the source": {
+			err: source.Bind(niceyaml.NewError("bad", niceyaml.WithPosition(position.New(0, 0)))),
+		},
+		"produced by the source": {
+			err: func() error {
+				_, err := niceyaml.NewSourceFromString("a: [\n").File()
+
+				return err
+			}(),
+		},
+		"wrapping a binding keeps its document": {
+			err:  docs[1].Bind(fmt.Errorf("context: %w", docs[0].Bind(niceyaml.NewError("bad")))),
+			want: docs[0],
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, tc.err, &bound)
+
+			if tc.want == nil {
+				assert.Nil(t, bound.Document())
+			} else {
+				assert.Same(t, tc.want, bound.Document())
+			}
+		})
+	}
+}

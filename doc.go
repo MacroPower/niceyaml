@@ -38,7 +38,8 @@
 // lazily parses them into an AST with [Source.File], returns each YAML
 // document in the file as a [Document] from [Source.Documents], and binds
 // the errors it and its Documents produce to itself. [Document.Bind]
-// binds errors built elsewhere.
+// binds errors built elsewhere, and [Source.Bind] binds one that carries a
+// position or a range and so needs no document.
 //
 // [line.Lines] is the content, the tokens organized into lines, and it
 // never changes. [line.View] is one rendering of that content: it shares
@@ -66,8 +67,9 @@
 //
 // [SourceError] binds an error to its [Source] and to the document its
 // path resolves in. Every error a Source or one of its Documents produces
-// is one, and [Document.Bind] binds an error built elsewhere to that
-// document. [SourceError.Error] is one line: the resolved position in
+// is one, [Document.Bind] binds an error built elsewhere to that
+// document, and [Source.Bind] binds one that carries a position or a range
+// to the source alone. [SourceError.Error] is one line: the resolved position in
 // front of the message, or the name of the source alone when the error
 // carries no location. [SourceError.Excerpt] returns the surrounding
 // lines with the location highlighted.

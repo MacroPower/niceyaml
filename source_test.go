@@ -1437,3 +1437,89 @@ func TestSource_View_IsIndependent(t *testing.T) {
 	)
 	assert.Equal(t, "key: value", plain.Print(source.View()))
 }
+
+func TestSource_Bind(t *testing.T) {
+	t.Parallel()
+
+	// Two documents, so Source.Document would refuse to pick one.
+	source := niceyaml.NewSourceFromString("a: 1\n---\nb: 22\n", niceyaml.WithName("two.yaml"))
+
+	t.Run("range error resolves without a document", func(t *testing.T) {
+		t.Parallel()
+
+		rng := position.NewRange(position.New(2, 3), position.New(2, 5))
+		err := source.Bind(niceyaml.NewError("too wide", niceyaml.WithRange(rng)))
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, source, bound.Source())
+		assert.Nil(t, bound.Document())
+		assert.Equal(t, "two.yaml:3:4: too wide", err.Error())
+
+		got, rangeErr := bound.Range()
+		require.NoError(t, rangeErr)
+		assert.Equal(t, rng, got)
+
+		assert.Equal(t, stringtest.JoinLF(
+			"two.yaml:3:4: too wide",
+			"",
+			"   1 | a: 1",
+			"   2 | ---",
+			"   3 | b: 22",
+			"     |    ^^",
+		), fmt.Sprintf("%+v", err))
+	})
+
+	t.Run("position error resolves to its token", func(t *testing.T) {
+		t.Parallel()
+
+		err := source.Bind(niceyaml.NewError("bad value", niceyaml.WithPosition(position.New(2, 3))))
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+
+		got, err := bound.Range()
+		require.NoError(t, err)
+		assert.Equal(t, position.NewRange(position.New(2, 3), position.New(2, 5)), got)
+	})
+
+	t.Run("path error has no document to resolve in", func(t *testing.T) {
+		t.Parallel()
+
+		err := source.Bind(niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("b"))))
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Equal(t, "two.yaml: $.b: bad", err.Error())
+
+		_, err = bound.Range()
+		require.ErrorIs(t, err, niceyaml.ErrNoLocation)
+		assert.Contains(t, err.Error(), "no document")
+	})
+
+	t.Run("error without a location names the source", func(t *testing.T) {
+		t.Parallel()
+
+		err := source.Bind(errors.New("plain"))
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Equal(t, "two.yaml: plain", err.Error())
+	})
+
+	t.Run("nil and bound errors come back as they are", func(t *testing.T) {
+		t.Parallel()
+
+		require.NoError(t, source.Bind(nil))
+
+		docs, err := source.Documents()
+		require.NoError(t, err)
+
+		bound := docs[1].Bind(niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("b"))))
+		assert.Same(t, bound, source.Bind(bound))
+	})
+}

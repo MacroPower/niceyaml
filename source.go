@@ -26,8 +26,10 @@ import (
 // Source separates two concerns. Parsing and decoding live on Source itself,
 // where [Source.File] lazily parses the AST and [Source.Documents] builds
 // the documents. Every error they and their Documents produce comes back
-// bound to the Source as a [SourceError], and [Document.Bind] binds errors
-// built elsewhere to the document they were checked against. Rendering
+// bound to the Source as a [SourceError]. [Document.Bind] binds errors
+// built elsewhere to the document they were checked against, and
+// [Source.Bind] binds one that carries a position or a range and so needs
+// no document. Rendering
 // lives in a [line.View], which carries the overlays, annotations, and
 // flags that a [printer.Printer] renders over the [line.Lines] the Source
 // holds. [Source.Lines] returns those lines, which the [finder.Finder] and
@@ -248,7 +250,7 @@ func (s *Source) Document() (*Document, error) {
 	}
 
 	if len(docs) == 0 {
-		return nil, s.bind(NewErrorFrom(ErrNoDocuments))
+		return nil, s.Bind(NewErrorFrom(ErrNoDocuments))
 	}
 
 	content := make([]*Document, 0, len(docs))
@@ -272,7 +274,7 @@ func (s *Source) Document() (*Document, error) {
 			atToken(content[1].anchorToken()),
 		)
 
-		return nil, s.bind(err)
+		return nil, s.Bind(err)
 	}
 }
 
@@ -343,18 +345,35 @@ func (s *Source) parse() (*ast.File, error) {
 	}
 
 	if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
-		return nil, s.bind(NewErrorFrom(yamlMessageError{yamlErr}, atToken(yamlErr.GetToken())))
+		return nil, s.Bind(NewErrorFrom(yamlMessageError{yamlErr}, atToken(yamlErr.GetToken())))
 	}
 
 	//nolint:wrapcheck // Return the original error if it's not a [yaml.Error].
 	return nil, err
 }
 
-// bind binds err to this [*Source] with no document to resolve paths in.
-// It is for the errors the Source produces itself, which carry a position
-// or no location at all. Errors built elsewhere bind through
-// [Document.Bind], which describes what comes back as it is.
-func (s *Source) bind(err error) error {
+// Bind binds err to the [Source] with no document to resolve a path in.
+// It is the binding for an error that carries a [position.Position] or a
+// [position.Range], as a check that runs on [Source.Lines] produces, and
+// for one that carries no location, which then names the source alone. A
+// file that holds several documents binds such an error here without
+// picking one of them:
+//
+//	for i, ln := range source.Lines().AllLines() {
+//		if ln.Width() > 120 {
+//			rng := position.NewRange(position.New(i, 120), position.New(i, ln.Width()))
+//
+//			return source.Bind(niceyaml.NewError("line exceeds 120 columns", niceyaml.WithRange(rng)))
+//		}
+//	}
+//
+// An error that carries a path needs the document the path resolves in,
+// so it goes through [Document.Bind]. Bound through the Source, its
+// location does not resolve, and [SourceError.Range] returns
+// [ErrNoLocation] naming the missing document. In every other way Bind is
+// [Document.Bind], which describes what comes back, and the
+// [SourceError.Document] of the result is nil.
+func (s *Source) Bind(err error) error {
 	return bindTree(err, s, nil)
 }
 
