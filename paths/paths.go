@@ -384,11 +384,19 @@ func (p Path) Token(doc *ast.DocumentNode) (*token.Token, error) {
 		return nil, err
 	}
 
+	node := m.node
 	if p.part == PartKey && m.entry != nil {
 		if key := keyContent(m.entry.Key); key != nil {
-			return firstToken(key), nil
+			node = key
 		}
 	}
 
-	return firstToken(m.node), nil
+	// A tree built by hand may hold a typed nil where the parser always
+	// puts a node, and such a node has no token to point at.
+	tk := firstToken(node)
+	if tk == nil {
+		return nil, fmt.Errorf("%w: %s has no token", ErrNotFound, p)
+	}
+
+	return tk, nil
 }

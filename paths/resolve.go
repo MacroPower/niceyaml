@@ -2,6 +2,7 @@ package paths
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
@@ -380,9 +381,14 @@ func keyName(key ast.MapKeyNode) string {
 // firstToken returns the token that starts node's content: the first key of
 // a mapping, the first element of a sequence, or the scalar itself. It looks
 // through anchors and tags; an alias is its own token. An entry with no key
-// starts at its own token.
+// starts at its own token. A nil node, including a typed nil a hand-built
+// tree may hold, has no token.
 func firstToken(node ast.Node) *token.Token {
 	for {
+		if node == nil || reflect.ValueOf(node).IsNil() {
+			return nil
+		}
+
 		switch n := node.(type) {
 		case *ast.AnchorNode:
 			node = n.Value
