@@ -65,6 +65,12 @@ func TestTokenize(t *testing.T) {
 		"unicode content": {
 			input: "greeting: こんにちは\n",
 		},
+		"whitespace only": {
+			input: "\n\n",
+		},
+		"spaces and tabs only": {
+			input: " \t \n",
+		},
 		"trailing blank line": {
 			input: "key: value\n\n",
 		},
@@ -98,12 +104,22 @@ func TestTokenize(t *testing.T) {
 
 			assert.Equal(t, tc.input, joined.String())
 
-			if len(want) > 0 {
-				last := len(want) - 1
-				assert.True(t, strings.HasPrefix(got[last].Origin, want[last].Origin))
+			if len(want) == 0 {
+				// The lexer emits nothing for whitespace alone, and
+				// Tokenize covers such a source with one token.
+				if tc.input == "" {
+					assert.Empty(t, got)
+				} else {
+					assert.Len(t, got, 1)
+				}
 
-				want[last].Origin = got[last].Origin
+				return
 			}
+
+			last := len(want) - 1
+			assert.True(t, strings.HasPrefix(got[last].Origin, want[last].Origin))
+
+			want[last].Origin = got[last].Origin
 
 			diff := yamltest.CompareTokenSlices(want, got)
 			require.True(t, diff.Equal(), diff.String())

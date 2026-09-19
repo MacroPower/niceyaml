@@ -16,7 +16,21 @@ import (
 func Tokenize(src string) token.Tokens {
 	tks := lexer.Tokenize(src)
 	if len(tks) == 0 {
-		return tks
+		if src == "" {
+			return tks
+		}
+
+		// The lexer emits nothing for a source of whitespace alone, so
+		// give the stream one token holding the whole text, positioned
+		// where the lexer places the first token of a file.
+		return token.Tokens{{
+			Type:          token.StringType,
+			CharacterType: token.CharacterTypeMiscellaneous,
+			Indicator:     token.NotIndicator,
+			Value:         src,
+			Origin:        src,
+			Position:      &token.Position{Line: 1, Column: 1, Offset: 1},
+		}}
 	}
 
 	// The lexer drops the source's final line ending, so a file that ends
