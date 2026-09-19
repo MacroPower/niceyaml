@@ -176,10 +176,10 @@ func boundChildren(bound *niceyaml.SourceError, named bool) []positioned {
 
 		// A location the source does not hold resolved to nothing the
 		// excerpt can mark, so the node reads as an unlocated one.
-		_, err := child.Location()
+		rng, err := child.Range()
 		if err == nil {
 			kid.located = true
-			kid.pos, _ = child.Position() //nolint:errcheck // A resolved range has a position.
+			kid.pos = rng.Start
 		}
 
 		text := child.Error()

@@ -20,7 +20,7 @@ import (
 var (
 	// ErrNoLocation indicates the error carries neither a path, a position,
 	// nor a range, or its path resolves to a token that carries no position.
-	// [SourceError.Location] and [SourceError.Excerpt] return it.
+	// [SourceError.Range] and [SourceError.Excerpt] return it.
 	ErrNoLocation = errors.New("no location provided")
 
 	// ErrNoDocuments indicates a [Source] that holds no YAML document where
@@ -40,7 +40,7 @@ var (
 
 	// ErrOutOfRange indicates the error's location lies outside the lines of
 	// the source, past the last or before the first, which happens when a
-	// position or range came from other text. [SourceError.Location] and
+	// position or range came from other text. [SourceError.Range] and
 	// [SourceError.Excerpt] return it.
 	ErrOutOfRange = errors.New("location outside source")
 )
@@ -411,7 +411,7 @@ func (e *Error) locate(lookup func() (*Document, error)) (location, error) {
 // Binding resolves the location of the error against the source, once, so
 // a SourceError never changes and every method of it reads that result:
 // [SourceError.Error] puts the position in front of the message,
-// [SourceError.Location] returns the resolved range, and
+// [SourceError.Range] returns the resolved range, and
 // [SourceError.Excerpt] returns the surrounding lines with the location
 // highlighted. The %+v verb prints the message, one line per nested
 // error, and the excerpt as plain text, with carets under the locations,
@@ -443,10 +443,10 @@ func (e *Error) locate(lookup func() (*Document, error)) (location, error) {
 // separate hunks.
 //
 // A location that does not resolve, such as a path the document does not
-// hold, costs the SourceError its position, and an error that carries no
-// location never had one: [SourceError.Error] then puts the name of the
-// source alone in front of the message, and [SourceError.Location] returns
-// the reason.
+// hold or a position on a line the source does not have, costs the
+// SourceError its position, and an error that carries no location never
+// had one: [SourceError.Error] then puts the name of the source alone in
+// front of the message, and [SourceError.Range] returns the reason.
 //
 // A SourceError never rewrites the message of the error it binds. The text
 // a wrapper such as [fmt.Errorf] produced stays as it was, and the position
@@ -474,11 +474,10 @@ func (e *Error) locate(lookup func() (*Document, error)) (location, error) {
 type SourceError struct {
 	err    error
 	source *Source
-	// The reason the location did not resolve, which is nil when it did,
-	// and the reason there is no range for it: locErr, or ErrOutOfRange
-	// for a location the source does not hold.
+	// The reason the location did not resolve, which is nil when it did:
+	// ErrNoLocation, the error of a path that does not resolve, or
+	// ErrOutOfRange for a location the source does not hold.
 	locErr error
-	rngErr error
 	// The bound children: the errors nested along the cause chain and the
 	// branches of it that lead to a location of their own.
 	errors []*SourceError
@@ -577,16 +576,15 @@ func newSourceError(err error, src *Source, doc *Document) *SourceError {
 		e.adopted = true
 		e.source = a.source
 		e.loc, e.locErr = a.loc, a.locErr
-		e.rng, e.rngErr, e.ranges = a.rng, a.rngErr, a.ranges
+		e.rng, e.ranges = a.rng, a.ranges
 	}
 
 	if !e.adopted {
-		e.rngErr = e.locErr
-		if e.rngErr == nil {
-			e.rngErr = checkInRange(e.loc, src.lines)
+		if e.locErr == nil {
+			e.locErr = checkInRange(e.loc, src.lines)
 		}
 
-		if e.rngErr == nil {
+		if e.locErr == nil {
 			e.ranges = highlightRanges(src.lines, e.loc)
 			e.rng = rangeOf(src.lines, e.loc)
 		}
@@ -674,7 +672,7 @@ func (e *SourceError) Unwrap() error {
 // child per violation:
 //
 //	for _, violation := range bound.Errors() {
-//		loc, err := violation.Location()
+//		rng, err := violation.Range()
 //		...
 //	}
 //
@@ -773,21 +771,21 @@ func (e *SourceError) text() string {
 // error, joined. A node built from a nil error has a location and no
 // message of its own, so its reason stands alone.
 func (e *SourceError) resolution() error {
-	errs := []error{e.rngErr}
+	errs := []error{e.locErr}
 
 	e.walk(func(n *SourceError) {
-		if n.rngErr == nil || n.source != e.source {
+		if n.locErr == nil || n.source != e.source {
 			return
 		}
 
 		x, ok := n.err.(*Error) //nolint:errorlint // The node itself, not a chain search.
 		if ok && x.err == nil {
-			errs = append(errs, n.rngErr)
+			errs = append(errs, n.locErr)
 
 			return
 		}
 
-		errs = append(errs, fmt.Errorf("%w: %w", n.err, n.rngErr))
+		errs = append(errs, fmt.Errorf("%w: %w", n.err, n.locErr))
 	})
 
 	return errors.Join(errs...)
@@ -893,40 +891,23 @@ func writeString(f fmt.State, s string) {
 	_, _ = io.WriteString(f, s) //nolint:errcheck // Formatter has no error channel.
 }
 
-// Position returns the position [SourceError.Error] reports: the start of
-// the range the error carries, the position it carries, or the position of
-// the token its path resolves to, in the coordinates of the view
-// [Source.Lines] returns, where line 0 is line 1 of the text.
-//
-// It returns [ErrNoLocation] when the error carries no location or its
-// path resolves to a token without one, and the resolution error from
-// [go.jacobcolvin.com/niceyaml/paths] when a path does not resolve. A
-// position the source does not hold still comes back, and
-// [SourceError.Location] reports [ErrOutOfRange] for it.
-func (e *SourceError) Position() (position.Position, error) {
-	if e.locErr != nil {
-		return position.Position{}, e.locErr
-	}
-
-	return e.loc.pos, nil
-}
-
-// Location returns the range in the source that the error points at: the
+// Range returns the range in the source that the error points at: the
 // range it carries, or the content of the token at the position it carries
 // or its path resolves to. A token that spans several lines yields a range
-// across them.
+// across them, and its start is the position [SourceError.Error] reports.
 // The range is in the coordinates of the view [Source.Lines] returns, where
 // line 0 is line 1 of the text.
 //
-// The location was resolved when the error was bound, so Location reads
-// the result. It returns [ErrNoLocation] when the error carries no
-// location or its path resolves to a token without one,
-// [ErrOutOfRange] when the location starts on a line the source does not
-// hold, and the resolution error from [go.jacobcolvin.com/niceyaml/paths]
-// when a path does not resolve.
-func (e *SourceError) Location() (position.Range, error) {
-	if e.rngErr != nil {
-		return position.Range{}, e.rngErr
+// The location was resolved when the error was bound, so Range reads the
+// result. It returns [ErrNoLocation] when the error carries no location or
+// its path resolves to a token without one, [ErrOutOfRange] when the
+// location starts on a line the source does not hold, and the resolution
+// error from [go.jacobcolvin.com/niceyaml/paths] when a path does not
+// resolve. An error whose Range fails has no position in
+// [SourceError.Error] and no excerpt.
+func (e *SourceError) Range() (position.Range, error) {
+	if e.locErr != nil {
+		return position.Range{}, e.locErr
 	}
 
 	return e.rng, nil
@@ -954,7 +935,7 @@ func rangeOf(lines line.Lines, loc location) position.Range {
 // is.
 //
 // Annotate marks every location that resolves and returns an error only
-// when none does: the error [SourceError.Location] returns, joined with
+// when none does: the error [SourceError.Range] returns, joined with
 // those of the nodes below it, or [ErrOutOfRange] for a location past the
 // last line. A node whose location does not resolve is left out.
 func (e *SourceError) Annotate(view *line.View) error {
@@ -1009,7 +990,7 @@ func (e *SourceError) Excerpt(context int) (*line.View, error) {
 
 // Detail returns what [SourceError.Error] leaves out: [SourceError.Excerpt]
 // with context lines, rendered by r. When no location resolves, a line
-// starting "no excerpt:" names the error [SourceError.Location] returns in
+// starting "no excerpt:" names the error [SourceError.Range] returns in
 // place of the excerpt, unless that error is [ErrNoLocation], since an
 // error that carries no location has nothing to explain. Returns "" when
 // there is nothing to show.
@@ -1025,7 +1006,7 @@ func (e *SourceError) Detail(r Renderer, context int) string {
 		return r.Print(excerpt)
 	}
 
-	_, locErr := e.Location()
+	_, locErr := e.Range()
 	if locErr != nil && !errors.Is(locErr, ErrNoLocation) {
 		return "no excerpt: " + locErr.Error()
 	}
@@ -1060,14 +1041,14 @@ type errorPosition struct {
 func (e *SourceError) annotate(view *line.View) ([]int, error) {
 	var positions []errorPosition
 
-	if e.rngErr == nil {
+	if e.locErr == nil {
 		positions = append(positions, errorPosition{pos: e.loc.pos, ranges: e.ranges})
 	}
 
 	// A node bound to another source marks that source, and its excerpt
 	// renders on its own; its children may still be bound to this one.
 	e.walk(func(n *SourceError) {
-		if n.rngErr == nil && n.source == e.source {
+		if n.locErr == nil && n.source == e.source {
 			positions = append(positions, errorPosition{pos: n.loc.pos, ranges: n.ranges, message: n.text()})
 		}
 	})

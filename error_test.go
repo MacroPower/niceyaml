@@ -1471,7 +1471,7 @@ func TestError_NestedErrorsKeepInnerPosition(t *testing.T) {
 
 	require.ErrorAs(t, wrapped, &bound)
 
-	rng, err := bound.Location()
+	rng, err := bound.Range()
 	require.NoError(t, err)
 	assert.Equal(t, 0, rng.Start.Line)
 	assert.Equal(t, 3, rng.Start.Col)
@@ -2850,7 +2850,7 @@ func TestError_RangeRendersFromSource(t *testing.T) {
 	assert.Equal(t, "bad word", bare.Error())
 }
 
-func TestSourceError_Location(t *testing.T) {
+func TestSourceError_Range(t *testing.T) {
 	t.Parallel()
 
 	source := xmlSource(stringtest.Input(`
@@ -2927,7 +2927,7 @@ func TestSourceError_Location(t *testing.T) {
 
 			require.ErrorAs(t, docs[tc.doc].Bind(tc.err), &bound)
 
-			got, err := bound.Location()
+			got, err := bound.Range()
 			if tc.is != nil {
 				require.ErrorIs(t, err, tc.is)
 
@@ -2940,7 +2940,7 @@ func TestSourceError_Location(t *testing.T) {
 	}
 }
 
-func TestSourceError_Location_MultiLineToken(t *testing.T) {
+func TestSourceError_Range_MultiLineToken(t *testing.T) {
 	t.Parallel()
 
 	source := xmlSource(stringtest.Input(`
@@ -2954,7 +2954,7 @@ func TestSourceError_Location_MultiLineToken(t *testing.T) {
 		niceyaml.WithPath(paths.Root().Child("text")),
 	)), &bound)
 
-	got, err := bound.Location()
+	got, err := bound.Range()
 	require.NoError(t, err)
 
 	// The plain scalar continues on the second line, so the range ends there.
@@ -2986,14 +2986,14 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 				niceyaml.WithRange(position.NewRange(position.New(9, 0), position.New(9, 3))),
 			),
 			is:         niceyaml.ErrOutOfRange,
-			wantRender: "10:1: bad\n\nno excerpt: location outside source: line 10 not in lines 1-2",
+			wantRender: "bad\n\nno excerpt: location outside source: line 10 not in lines 1-2",
 		},
 		"range before the first line": {
 			err: niceyaml.NewError("bad",
 				niceyaml.WithRange(position.NewRange(position.New(-1, 0), position.New(-1, 2))),
 			),
 			is:         niceyaml.ErrOutOfRange,
-			wantRender: "0:1: bad\n\nno excerpt: location outside source: line 0 not in lines 1-2",
+			wantRender: "bad\n\nno excerpt: location outside source: line 0 not in lines 1-2",
 		},
 		"nested range before the first line": {
 			err: niceyaml.NewError("bad",
@@ -3030,8 +3030,10 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 			assert.Nil(t, got)
 
 			// With no excerpt to show, the detail names why the location did
-			// not resolve, unless the error carries none. The nested errors
-			// are part of the message whether they resolve or not.
+			// not resolve, unless the error carries none, and the message
+			// carries no position, since the source holds none for it. The
+			// nested errors are part of the message whether they resolve or
+			// not.
 			assert.Equal(t, tc.wantRender, render(bound))
 		})
 	}
@@ -3373,7 +3375,7 @@ func TestSourceError_TreeBranches(t *testing.T) {
 				require.ErrorAs(t, err, &bound)
 				assert.Equal(t, tc.Error(), bound.Error())
 
-				_, locErr := bound.Location()
+				_, locErr := bound.Range()
 				require.ErrorIs(t, locErr, niceyaml.ErrNoLocation)
 
 				require.Len(t, bound.Errors(), 2)
@@ -3570,26 +3572,26 @@ func TestSourceError_Errors(t *testing.T) {
 		require.ErrorIs(t, children[i], want)
 	}
 
-	pos, err := children[0].Position()
+	rng, err := children[0].Range()
 	require.NoError(t, err)
-	assert.Equal(t, position.New(0, 3), pos)
+	assert.Equal(t, position.New(0, 3), rng.Start)
 	assert.Equal(t, "1:4: $.a: bad a", children[0].Error())
 
 	// One that did not resolve reports why, and one that carries no
 	// location reports that.
-	_, err = children[1].Position()
+	_, err = children[1].Range()
 	require.ErrorIs(t, err, paths.ErrNotFound)
 
-	_, err = children[2].Position()
+	_, err = children[2].Range()
 	require.ErrorIs(t, err, niceyaml.ErrNoLocation)
 
 	// A nested error further in is a child of its own parent.
 	grandchildren := children[2].Errors()
 	require.Len(t, grandchildren, 1)
 
-	pos, err = grandchildren[0].Position()
+	rng, err = grandchildren[0].Range()
 	require.NoError(t, err)
-	assert.Equal(t, position.New(1, 3), pos)
+	assert.Equal(t, position.New(1, 3), rng.Start)
 
 	// The slice is a copy.
 	children[0] = nil

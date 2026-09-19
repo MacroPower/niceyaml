@@ -356,7 +356,7 @@ func (dd *Document) Validate(ctx context.Context, validators ...Validator) error
 // Bind binds err to the document's source, with the paths in err
 // resolving in this document. It resolves every location in err as it
 // binds, so the position [SourceError.Error] reports and the range
-// [SourceError.Location] returns are fixed from then on, and
+// [SourceError.Range] returns are fixed from then on, and
 // [SourceError.Detail] and [SourceError.Excerpt] render the excerpt with
 // the [Renderer] of the caller's choice.
 //

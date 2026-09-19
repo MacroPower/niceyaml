@@ -742,7 +742,7 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 
-		rng, err := bound.Location()
+		rng, err := bound.Range()
 		require.NoError(t, err)
 		assert.Equal(t, position.NewRange(position.New(1, 3), position.New(1, 4)), rng)
 
@@ -1298,7 +1298,7 @@ func TestDocument_BindChain(t *testing.T) {
 				assert.Equal(t, tc.want, fmt.Sprintf("%+v", wrapped), "no location, so no excerpt")
 				assert.Equal(t, "document 0: "+tc.want, fmt.Errorf("document 0: %w", wrapped).Error())
 
-				_, locErr := bound.Location()
+				_, locErr := bound.Range()
 				require.ErrorIs(t, locErr, niceyaml.ErrNoLocation)
 			})
 		}
@@ -1362,7 +1362,7 @@ func TestDocument_BindChain(t *testing.T) {
 				require.ErrorIs(t, wrapped, pathErr)
 				require.Len(t, bound.Errors(), 1)
 
-				rng, locErr := bound.Errors()[0].Location()
+				rng, locErr := bound.Errors()[0].Range()
 				require.NoError(t, locErr)
 				assert.Equal(t, position.NewRange(position.New(0, 6), position.New(0, 11)), rng)
 

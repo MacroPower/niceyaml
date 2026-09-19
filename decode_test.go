@@ -2238,7 +2238,7 @@ func TestDocument_Bind(t *testing.T) {
 		assert.Same(t, source, bound.Source())
 		assert.Equal(t, "plain", err.Error(), "the source has no name to add")
 
-		_, locErr := bound.Location()
+		_, locErr := bound.Range()
 		require.ErrorIs(t, locErr, niceyaml.ErrNoLocation)
 	})
 
