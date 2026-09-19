@@ -48,6 +48,45 @@ func TestTokenize_TabIndentation(t *testing.T) {
 	assert.True(t, strings.HasSuffix(tks[len(tks)-1].Origin, "\n"), "last origin %q", tks[len(tks)-1].Origin)
 }
 
+func TestTokenize_NumericEscape(t *testing.T) {
+	t.Parallel()
+
+	// The lexer truncates a double-quoted scalar's Origin at a "\x", "\u",
+	// or "\U" escape, so the stream loses the rest of the scalar and the
+	// source's final line ending. Pin that shape, so an upstream fix shows
+	// up here.
+	tcs := map[string]struct {
+		input string
+		want  string
+	}{
+		"hex escape": {
+			input: `a: "x\x41"` + "\n",
+			want:  `a: "x\"`,
+		},
+		"short unicode escape": {
+			input: `a: "x\u0041"` + "\n",
+			want:  `a: "x\"`,
+		},
+		"long unicode escape": {
+			input: `a: "x\U00000041"` + "\n",
+			want:  `a: "x\"`,
+		},
+		"escape the lexer keeps": {
+			input: `a: "x\ty"` + "\n",
+			want:  `a: "x\ty"` + "\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := yamltest.DumpTokenOrigins(tokens.Tokenize(tc.input))
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestTokenize(t *testing.T) {
 	t.Parallel()
 

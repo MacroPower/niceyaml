@@ -13,9 +13,11 @@ import (
 // It is the one place niceyaml calls the go-yaml lexer, so every token stream
 // the module works with comes through here. The stream covers the whole
 // file, except where the lexer itself drops text: a tab used as indentation
-// swallows the characters after it into an invalid token, and a "\u"
-// escape in a double-quoted scalar comes back decoded rather than as
-// written. [SplitDocuments] cuts the stream into one stream per document.
+// swallows the characters after it into an invalid token, and a "\x", "\u",
+// or "\U" escape in a double-quoted scalar truncates the token's Origin at
+// the escape, leaving the text before the escape and a closing quote, so the
+// rest of the scalar never reaches the stream. [SplitDocuments] cuts the
+// stream into one stream per document.
 func Tokenize(src string) token.Tokens {
 	tks := lexer.Tokenize(src)
 	if len(tks) == 0 {
