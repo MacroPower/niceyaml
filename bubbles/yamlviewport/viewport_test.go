@@ -3490,6 +3490,45 @@ func TestViewport_WithSearcher(t *testing.T) {
 	})
 }
 
+func TestViewport_SideBySideSelectedMatchOnInsertedLine(t *testing.T) {
+	t.Parallel()
+
+	// The diff pads the left pane opposite an inserted line with an empty
+	// line that carries the default flag, the same flag an equal line
+	// carries. A match selected on the inserted line belongs to the right
+	// pane alone, so only the right pane draws the selected highlight.
+	before := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("v1"))
+	after := niceyaml.NewSourceFromString("a: 1\nfind: me\nb: 2\n", niceyaml.WithName("v2"))
+
+	const highlight = "<genericHighlight>"
+
+	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinterWithSearch()))
+	m.SetWidth(100)
+	m.SetHeight(8)
+	m.AddRevision(before)
+	m.AddRevision(after)
+	m.SetViewMode(yamlviewport.ViewModeSideBySide)
+
+	m.SetSearchTerm("find")
+	require.Equal(t, 1, m.SearchCount())
+
+	view := m.View()
+	require.Equal(t, 1, strings.Count(view, highlight))
+	assert.NotContains(t, view, "<genericHighlightDim>")
+
+	// The panes sit either side of a vertical bar, and the highlight is in
+	// the right one.
+	rows := strings.Split(view, "\n")
+
+	i := slices.IndexFunc(rows, func(row string) bool { return strings.Contains(row, highlight) })
+	require.NotEqual(t, -1, i)
+
+	left, right, ok := strings.Cut(rows[i], "│")
+	require.True(t, ok)
+	assert.NotContains(t, left, highlight)
+	assert.Contains(t, right, highlight)
+}
+
 func TestViewport_OffsetWithNoContentHeight(t *testing.T) {
 	t.Parallel()
 

@@ -874,9 +874,13 @@ func (m *Model) applySideBySideOverlays() {
 		selectedPos = selected.rng.Start
 		selectedInLeft = selected.inLeft
 
-		// Check if selected match is on an equal line.
-		if selectedPos.Line < m.left.Len() {
-			selectedIsEqual = m.left.Flag(selectedPos.Line) == line.FlagDefault
+		// A line is equal when both panes hold it unchanged. The padding
+		// a diff puts opposite an inserted or deleted line is empty and
+		// carries the default flag too, so one pane alone cannot tell the
+		// two apart.
+		if l := selectedPos.Line; l < m.left.Len() && l < m.right.Len() {
+			selectedIsEqual = m.left.Flag(l) == line.FlagDefault &&
+				m.right.Flag(l) == line.FlagDefault
 		}
 	}
 
