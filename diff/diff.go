@@ -276,7 +276,9 @@ func (r *Result) getAlignedRows() []alignedRow {
 				// Pair deletes with inserts on the same row.
 				maxPairs := max(len(deletes), len(inserts))
 				for j := range maxPairs {
-					row := alignedRow{before: placeholder, after: placeholder}
+					// Each filler row gets a line of its own, so a
+					// line pointer names one row of one view.
+					row := alignedRow{before: &line.Line{}, after: &line.Line{}}
 
 					if j < len(deletes) {
 						row.before = deletes[j].line
@@ -294,7 +296,7 @@ func (r *Result) getAlignedRows() []alignedRow {
 			case lcs.OpInsert:
 				// Standalone insert (not following a delete).
 				rows = append(rows, alignedRow{
-					before:    placeholder,
+					before:    &line.Line{},
 					after:     op.line,
 					afterFlag: line.FlagInserted,
 				})
@@ -367,11 +369,6 @@ func (r *Result) After() *line.View {
 
 	return view
 }
-
-// placeholder is the empty line a side-by-side pane shows opposite a line
-// the other pane inserted or deleted. Lines never change, so one serves
-// every row.
-var placeholder = &line.Line{}
 
 // collectConsecutive collects consecutive ops of the same kind starting at
 // index i.

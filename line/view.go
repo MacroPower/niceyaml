@@ -66,8 +66,7 @@ func (v *View) Line(i int) *Line {
 // so a decorator that knows a line of a [Lines] value finds where that line
 // sits in a slice of it, or in a diff that interleaves it with another
 // revision, without knowing how the view was built. A line the view does
-// not hold, such as one from other content or the zero placeholder of a
-// side-by-side diff, yields nil.
+// not hold, such as one from other content, yields nil.
 func (v *View) Indices(l *Line) []int {
 	if v == nil || l == nil {
 		return nil

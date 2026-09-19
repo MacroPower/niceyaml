@@ -1138,6 +1138,46 @@ func verifyLines(t *testing.T, side string, actual *line.View, want []wantLine) 
 	}
 }
 
+func TestDiffResult_PlaceholdersAreDistinct(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		before string
+		after  string
+	}{
+		"opposite standalone inserts": {
+			before: "a: 1\n",
+			after:  "a: 1\nb: 2\nc: 3\n",
+		},
+		"opposite inserts paired with a delete": {
+			before: "a: 1\n",
+			after:  "x: 1\nb: 2\nc: 3\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			beforeSrc := niceyaml.NewSourceFromString(tc.before)
+			afterSrc := niceyaml.NewSourceFromString(tc.after)
+
+			left := diff.Diff(beforeSrc.Lines(), afterSrc.Lines()).Before()
+			require.Equal(t, 3, left.Len())
+
+			// Rows 1 and 2 are the placeholders opposite the two lines the
+			// other pane added. Each names the one row it fills, so a
+			// decorator that holds one marks that row alone.
+			assert.Equal(t, []int{1}, left.Indices(left.Line(1)))
+			assert.Equal(t, []int{2}, left.Indices(left.Line(2)))
+
+			// A placeholder of one diff belongs to no view of another.
+			other := diff.Diff(beforeSrc.Lines(), afterSrc.Lines()).Before()
+			assert.Nil(t, other.Indices(left.Line(1)))
+		})
+	}
+}
+
 func TestDiffer_MultipleRenders(t *testing.T) {
 	t.Parallel()
 
