@@ -225,7 +225,11 @@ func (i *Index) normalizeText(s string) string {
 	var sb strings.Builder
 
 	for _, r := range s {
-		sb.WriteString(normalizeRune(i.normalizer, r))
+		// Write rune by rune, as the index does, so bytes that are not
+		// valid UTF-8 become U+FFFD on both sides.
+		for _, nr := range normalizeRune(i.normalizer, r) {
+			sb.WriteRune(nr)
+		}
 	}
 
 	return sb.String()

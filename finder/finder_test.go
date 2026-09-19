@@ -529,6 +529,16 @@ func TestFinder_Find_InvalidUTF8(t *testing.T) {
 				position.NewRange(position.New(0, 4), position.New(0, 5)),
 			},
 		},
+		"normalizer emitting an invalid byte": {
+			// The needle and the index both pass through the normalizer,
+			// so an invalid byte it emits must read the same on both sides.
+			input:      "a: x",
+			search:     "x",
+			normalizer: invalidByteNormalizer{},
+			want: position.Ranges{
+				position.NewRange(position.New(0, 3), position.New(0, 4)),
+			},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -546,6 +556,18 @@ func TestFinder_Find_InvalidUTF8(t *testing.T) {
 			assert.Equal(t, tc.want, idx.Find(tc.search))
 		})
 	}
+}
+
+// invalidByteNormalizer maps "x" to a byte that is not valid UTF-8 and
+// leaves every other string alone.
+type invalidByteNormalizer struct{}
+
+func (invalidByteNormalizer) Normalize(in string) string {
+	if in == "x" {
+		return "\xff"
+	}
+
+	return in
 }
 
 func TestFinder_Find_NilLines(t *testing.T) {
