@@ -416,11 +416,16 @@ func (b *TokenBuilder) Build() *token.Token {
 }
 
 // DumpTokenOrigins concatenates all token Origin fields into a single string,
-// reconstructing the original source text.
+// reconstructing the original source text. A nil token contributes nothing,
+// since a placeholder such as "<nil>" would corrupt the reconstruction.
 func DumpTokenOrigins(tks token.Tokens) string {
 	var sb strings.Builder
 
 	for _, tk := range tks {
+		if tk == nil {
+			continue
+		}
+
 		sb.WriteString(tk.Origin)
 	}
 

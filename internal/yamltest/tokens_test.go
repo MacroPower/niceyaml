@@ -35,6 +35,18 @@ func TestDumpTokenOrigins(t *testing.T) {
 			},
 			want: "key: value\n",
 		},
+		"nil token": {
+			input: token.Tokens{
+				{Origin: "key"},
+				nil,
+				{Origin: ": value\n"},
+			},
+			want: "key: value\n",
+		},
+		"only nil tokens": {
+			input: token.Tokens{nil, nil},
+			want:  "",
+		},
 	}
 
 	for name, tc := range tcs {
