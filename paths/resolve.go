@@ -3,6 +3,7 @@ package paths
 import (
 	"fmt"
 	"reflect"
+	"slices"
 
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
@@ -237,7 +238,8 @@ func (r *resolver) apply(seg segment, node ast.Node) ([]match, error) {
 
 // lookup finds the entry for name in mapping, looking through `<<` merge keys
 // when no entry of the mapping itself has that key. A key the mapping defines
-// wins over a merged one, and earlier merge sources win over later ones.
+// wins over a merged one, and a later merge source wins over an earlier one,
+// which is the source the goccy/go-yaml decoder takes.
 //
 // The seen set guards against merge cycles through aliases. The bool result
 // reports whether an entry was found.
@@ -266,7 +268,7 @@ func (r *resolver) lookup(
 			return nil, false, err
 		}
 
-		for _, src := range sources {
+		for _, src := range slices.Backward(sources) {
 			if seen[src] {
 				continue
 			}

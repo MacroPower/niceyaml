@@ -784,7 +784,7 @@ func TestPath_Token_Anchors(t *testing.T) {
 base: &b
   a: 1
   b: 2
-flow: &f {x: 10}
+flow: &f {x: 10, b: 200}
 other: *b
 list: &l
   - one
@@ -890,6 +890,11 @@ chain:
 		"merge sequence second source": {
 			path:      paths.Root().Child("multi", "x"),
 			wantValue: "10",
+			wantLine:  5,
+		},
+		"merge sequence later source wins": {
+			path:      paths.Root().Child("multi", "b"),
+			wantValue: "200",
 			wantLine:  5,
 		},
 		"merge of a merged mapping": {

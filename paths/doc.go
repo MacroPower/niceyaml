@@ -20,10 +20,16 @@
 // Selectors apply to the content of a node, so an anchor (`&name`) or tag
 // (`!!map`) on a value is transparent, an alias (`*name`) resolves to the
 // anchor it names, and a mapping key lookup sees the entries a `<<` merge
-// key brings in. A key the mapping defines itself wins over a merged one,
-// and when `<<` lists several sources the earlier source wins. A token
-// found through an alias or merge key sits where the anchor defines it,
-// which is where the offending text is.
+// key brings in. A key the mapping defines itself wins over a merged one.
+// When `<<` lists several sources the later source wins, which is the source
+// the goccy/go-yaml decoder takes; YAML 1.1 gives the earlier source
+// precedence instead. A token found through an alias or merge key sits where
+// the anchor defines it, which is where the offending text is.
+//
+// The decoder parts ways over an own key in one shape. A `<<` written after
+// a key of the same name overwrites that key when the decoder fills a map,
+// and it reports a duplicate key when the decoder fills a struct. A path
+// keeps the mapping's own key either way.
 //
 // When several anchors share a name, an alias refers to the last one before
 // it, which is the anchor the goccy/go-yaml decoder uses. An alias with no
