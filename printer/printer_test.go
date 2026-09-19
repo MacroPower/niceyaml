@@ -4054,3 +4054,82 @@ func TestPrinter_Layout(t *testing.T) {
 		assert.Equal(t, 3, l.RowOf(position.New(1, 0)))
 	})
 }
+
+func TestPrinter_ContainerWidth(t *testing.T) {
+	t.Parallel()
+
+	// Without a container width the border box shrinks to the widest row, so
+	// a window of short lines draws a narrower box than a window of long
+	// ones. A container width pins the box to the same columns for both.
+	src := niceyaml.NewSourceFromString("a: 1\nb: this value is much longer\nc: 3\n")
+
+	border := printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder()))
+
+	tcs := map[string]struct {
+		opts []printer.Option
+		span position.Span
+		want []string
+	}{
+		"unpinned box shrinks to the widest row": {
+			opts: []printer.Option{border},
+			span: position.NewSpan(0, 1),
+			want: []string{
+				"┌────┐",
+				"│a: 1│",
+				"└────┘",
+			},
+		},
+		"pinned box keeps its columns": {
+			opts: []printer.Option{border, printer.WithContainerWidth(12)},
+			span: position.NewSpan(0, 1),
+			want: []string{
+				"┌──────────┐",
+				"│a: 1      │",
+				"└──────────┘",
+			},
+		},
+		"a row past the width is padded by nothing": {
+			opts: []printer.Option{border, printer.WithContainerWidth(12)},
+			span: position.NewSpan(1, 2),
+			want: []string{
+				"┌────────────────────────────┐",
+				"│b: this value is much longer│",
+				"└────────────────────────────┘",
+			},
+		},
+		"an empty view renders one padded row": {
+			opts: []printer.Option{border, printer.WithContainerWidth(12)},
+			span: position.NewSpan(0, 0),
+			want: []string{
+				"┌──────────┐",
+				"│          │",
+				"└──────────┘",
+			},
+		},
+		"no container frame takes the whole width": {
+			opts: []printer.Option{printer.WithContainerWidth(12)},
+			span: position.NewSpan(0, 1),
+			want: []string{"a: 1        "},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := testPrinter().With(tc.opts...)
+
+			assert.Equal(t, stringtest.JoinLF(tc.want...), p.Print(src.View().Slice(tc.span)))
+		})
+	}
+}
+
+func TestPrinter_ContainerWidth_Accessor(t *testing.T) {
+	t.Parallel()
+
+	// A negative width is no width at all, so the box keeps shrinking to the
+	// widest row.
+	assert.Equal(t, 0, testPrinter().ContainerWidth())
+	assert.Equal(t, 40, testPrinter().With(printer.WithContainerWidth(40)).ContainerWidth())
+	assert.Equal(t, 0, testPrinter().With(printer.WithContainerWidth(-1)).ContainerWidth())
+}

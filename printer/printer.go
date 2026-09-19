@@ -148,6 +148,7 @@ type Printer struct {
 	// it, since the kinds then resolve to other styles.
 	blends             *blendCache
 	width              int
+	containerWidth     int
 	maxNumber          int
 	contextLines       int
 	hasCustomStyle     bool
@@ -207,6 +208,7 @@ func (p *Printer) apply(opts []Option) {
 // Available options:
 //   - [WithStyles]
 //   - [WithContainerStyle]
+//   - [WithContainerWidth]
 //   - [WithGutter]
 //   - [WithAnnotationFunc]
 //   - [WithWidth]
@@ -398,6 +400,26 @@ func WithContainerStyle(s lipgloss.Style) Option {
 	}
 }
 
+// WithContainerWidth is a [Option] that pins the width of the container
+// style's box to n columns. [Printer.Print] pads every row it renders with
+// [kind.Text] spaces out to n less the container's horizontal frame, so the
+// frame sits in the same columns whatever the widest row of the view is. A
+// width of 0, the default, lets the container shrink to the widest row.
+//
+// Pad a row, never cut one: a row can still run past n, since an
+// annotation column may push the layout wider than [WithWidth] and a style
+// transform may widen a row after it wraps. A viewer that scrolls
+// horizontally cuts the rows itself.
+//
+// Use it for a viewer that renders one window of a document at a time, where
+// a window of short lines would otherwise draw a narrower box than the one
+// beside it.
+func WithContainerWidth(n int) Option {
+	return func(p *Printer) {
+		p.containerWidth = max(0, n)
+	}
+}
+
 // WithStyles is a [Option] that sets the [StyleGetter], typically a
 // theme from [go.jacobcolvin.com/niceyaml/style/theme], that styles tokens,
 // gutters, and annotations. A nil s selects [style.Default].
@@ -487,6 +509,12 @@ func (p *Printer) Width() int {
 	return p.width
 }
 
+// ContainerWidth returns the width the container style's box is pinned to,
+// or 0 when it shrinks to the widest row. See [WithContainerWidth].
+func (p *Printer) ContainerWidth() int {
+	return p.containerWidth
+}
+
 // ContextLines returns the number of context lines [Printer.PrintError]
 // shows around each error location.
 func (p *Printer) ContextLines() int {
@@ -527,9 +555,39 @@ func (p *Printer) Fprint(w io.Writer, view *line.View) (int, error) {
 // Print renders every line of view, one row per line plus a row for each
 // wrapped piece and each annotation, and wraps the result in the container
 // style. To print part of a document, pass the view [line.View.Slice]
-// returns. An empty view renders as the container alone.
+// returns. An empty view renders as the container around one empty row.
+//
+// The container shrinks to the widest row unless [WithContainerWidth] pins
+// its width.
 func (p *Printer) Print(view *line.View) string {
-	return p.style.Render(strings.Join(p.renderRows(view), "\n"))
+	return p.style.Render(strings.Join(p.padRows(p.renderRows(view)), "\n"))
+}
+
+// padRows pads rows out to the container width, which pins the width of the
+// box the container style draws around them. It returns rows unchanged when
+// no container width is set, and pads a row that already reaches the width
+// by nothing at all.
+func (p *Printer) padRows(rows []string) []string {
+	if p.containerWidth == 0 {
+		return rows
+	}
+
+	// An empty view renders as one empty row, which carries the width for
+	// the frame around it.
+	if len(rows) == 0 {
+		rows = []string{""}
+	}
+
+	width := max(0, p.containerWidth-p.style.GetHorizontalFrameSize())
+	textStyle := p.Style(kind.Text)
+
+	for i, row := range rows {
+		if pad := width - lipgloss.Width(row); pad > 0 {
+			rows[i] = row + textStyle.Render(strings.Repeat(" ", pad))
+		}
+	}
+
+	return rows
 }
 
 // maxNumber returns the largest line number in view, or 0 when the view is
