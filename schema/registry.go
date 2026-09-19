@@ -265,6 +265,12 @@ func (r *Registry) schema(ctx context.Context, ref Ref) (*Schema, error) {
 
 		select {
 		case <-ctx.Done():
+			// The load may have finished in the same instant the context
+			// ended, so hand back the cached schema when there is one.
+			if v, ok := r.cached(ref.Key()); ok {
+				return v, nil
+			}
+
 			return nil, fmt.Errorf("%w: %q: %w", ErrLoad, ref.Key(), ctx.Err())
 
 		case res = <-ch:
