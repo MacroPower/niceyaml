@@ -22,6 +22,7 @@ var (
 //
 // It ensures that:
 //   - Line numbers are strictly increasing
+//   - Every token on a given line is non-nil and carries a Position
 //   - Every token on a given line has an identical line number in its Position
 //   - Every token on a given line has columns that are strictly increasing
 //
@@ -29,7 +30,9 @@ var (
 //
 // Returns an error wrapping [ErrLineNumberNotIncreasing],
 // [ErrLineNumberMismatch], or [ErrColumnNotIncreasing] for the first check
-// that fails.
+// that fails. A nil token or a token without a Position yields an error
+// wrapping a [*TokenValidationError], whose Reason is [ErrNilToken] or
+// [ErrNilPosition].
 func ValidateLines(ls line.Lines) error {
 	prevLineNum := 0
 
@@ -62,8 +65,20 @@ func ValidateLines(ls line.Lines) error {
 		)
 
 		for j, tk := range l.Tokens() {
-			if tk == nil || tk.Position == nil {
-				continue
+			if tk == nil {
+				return fmt.Errorf(
+					"line at index %d: %w",
+					i,
+					&TokenValidationError{Index: j, Which: whichGot, Reason: ErrNilToken},
+				)
+			}
+
+			if tk.Position == nil {
+				return fmt.Errorf(
+					"line at index %d: %w",
+					i,
+					&TokenValidationError{Index: j, Which: whichGot, Reason: ErrNilPosition},
+				)
 			}
 
 			// Check token line number consistency.

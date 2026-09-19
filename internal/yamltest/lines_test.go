@@ -175,7 +175,7 @@ func TestLines_Validate(t *testing.T) {
 		assert.Equal(t, 1, ln.Token(1).Position.Line)
 	})
 
-	t.Run("nil position tokens - valid", func(t *testing.T) {
+	t.Run("nil position tokens - normalized", func(t *testing.T) {
 		t.Parallel()
 
 		tks := token.Tokens{}
@@ -189,8 +189,10 @@ func TestLines_Validate(t *testing.T) {
 
 		lines := line.NewLines(tks)
 
-		// Nil positions are skipped in validation.
-		assert.NoError(t, yamltest.ValidateLines(lines))
+		// NewLines gives every token a position, so validation sees none of
+		// the nil positions it rejects.
+		require.NoError(t, yamltest.ValidateLines(lines))
+		assert.NotNil(t, lines.Line(0).Token(0).Position)
 	})
 
 	t.Run("valid with gaps in line numbers", func(t *testing.T) {
