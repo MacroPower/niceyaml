@@ -81,10 +81,28 @@ func ParseDirective(comment string) *ParsedDirective {
 // returns.
 //
 // The directive must appear before any non-comment content in the document;
-// a document header (---) may precede it. The first directive wins. Returns
-// nil if no directive is found before content.
+// a document header (---) and a %YAML or %TAG directive line may precede
+// it. The first directive wins. Returns nil if no directive is found before
+// content.
 func ParseDocumentDirective(tks token.Tokens) *ParsedDirective {
+	// The parser splits a %YAML or %TAG line into a directive token and the
+	// tokens holding its value, so the value reads as content unless the
+	// rest of the directive line is skipped with it.
+	inDirective, directiveLine := false, 0
+
 	for _, tk := range tks {
+		line, hasLine := tokenLine(tk)
+
+		if tk.Type == token.DirectiveType {
+			inDirective, directiveLine = hasLine, line
+
+			continue
+		}
+
+		if inDirective && hasLine && line == directiveLine {
+			continue
+		}
+
 		switch tk.Type {
 		case token.DocumentHeaderType:
 			// Skip document header, continue looking for directive.
@@ -105,6 +123,16 @@ func ParseDocumentDirective(tks token.Tokens) *ParsedDirective {
 	}
 
 	return nil
+}
+
+// tokenLine returns the line tk sits on, and whether it carries a position
+// to read the line from.
+func tokenLine(tk *token.Token) (int, bool) {
+	if tk == nil || tk.Position == nil {
+		return 0, false
+	}
+
+	return tk.Position.Line, true
 }
 
 // directiveResolver resolves schemas from yaml-language-server directives.

@@ -323,6 +323,49 @@ func TestParseDocumentDirective_TokenBuilder(t *testing.T) {
 		assert.Equal(t, "./doc.json", got.Schema)
 	})
 
+	t.Run("directive line precedes the directive", func(t *testing.T) {
+		t.Parallel()
+
+		// The parser splits "%YAML 1.2" into a directive token and the
+		// tokens of its value, and neither is content.
+		tkb := yamltest.NewTokenBuilder()
+		tks := token.Tokens{
+			tkb.Clone().Type(token.DirectiveType).Value("%").PositionLine(1).Build(),
+			tkb.Clone().Type(token.FloatType).Value("1.2").PositionLine(1).Build(),
+			tkb.Clone().Type(token.CommentType).
+				Value(" yaml-language-server: $schema=./doc.json").
+				PositionLine(2).
+				Build(),
+			tkb.Clone().Type(token.StringType).Value("key").PositionLine(3).Build(),
+			tkb.Clone().Type(token.MappingValueType).Value(":").PositionLine(3).Build(),
+			tkb.Clone().Type(token.StringType).Value("value").PositionLine(3).Build(),
+		}
+
+		got := schema.ParseDocumentDirective(tks)
+
+		require.NotNil(t, got)
+		assert.Equal(t, "./doc.json", got.Schema)
+	})
+
+	t.Run("content on the line after a directive yields nil", func(t *testing.T) {
+		t.Parallel()
+
+		// Only the directive's own line is skipped.
+		tkb := yamltest.NewTokenBuilder()
+		tks := token.Tokens{
+			tkb.Clone().Type(token.DirectiveType).Value("%").PositionLine(1).Build(),
+			tkb.Clone().Type(token.StringType).Value("YAML").PositionLine(1).Build(),
+			tkb.Clone().Type(token.StringType).Value("key").PositionLine(2).Build(),
+			tkb.Clone().Type(token.MappingValueType).Value(":").PositionLine(2).Build(),
+			tkb.Clone().Type(token.CommentType).
+				Value(" yaml-language-server: $schema=./doc.json").
+				PositionLine(3).
+				Build(),
+		}
+
+		assert.Nil(t, schema.ParseDocumentDirective(tks))
+	})
+
 	t.Run("content before the directive yields nil", func(t *testing.T) {
 		t.Parallel()
 
