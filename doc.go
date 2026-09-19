@@ -71,10 +71,11 @@
 // in front of the message, or the name of the source alone when the error
 // carries no location, and [SourceError.Excerpt] returns the surrounding
 // lines with the location highlighted. The %+v verb prints both.
-// Nested errors from [WithErrors] follow the message, one per line, as
-// [errors.Join] lists its errors, and once bound each line carries its own
-// resolved position, so a log that prints the error alone still names
-// every violation and where it is.
+// Nested errors from [WithErrors] are structure on the Error, and the
+// SourceError that binds it records them: [SourceError.Error] lists each
+// one on a line of its own behind its resolved position, so a log that
+// prints the error alone still names every violation and where it is,
+// and [SourceError.Message] is the first line alone.
 // The bound error is a tree, and every located Error in it is marked: the
 // first one along the cause chain puts its position in front of the
 // message, and every other branch, whether a nested error from [WithErrors]

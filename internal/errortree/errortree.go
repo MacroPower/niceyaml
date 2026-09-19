@@ -1,18 +1,19 @@
 // Package errortree lays the message of an error out as a tree, with one
 // node per error, for a printer that draws nested errors as branches.
 //
-// The tree splits the nested lines off a message the way the niceyaml
-// package wrote them, through the [errchain] walk both share, so the tree
-// and the plain message never disagree about where one ends and the other
-// begins. The package reads the niceyaml types through their exported
-// accessors only.
+// The tree reads the errors themselves rather than their messages: a node
+// is an error, and its children are the errors nested in it with
+// [niceyaml.WithErrors] along its cause chain. The package reads the
+// niceyaml types through their exported accessors only, so it never
+// disagrees with [niceyaml.SourceError.Error] about which error a line
+// belongs to.
 package errortree
 
 import (
 	"slices"
+	"strings"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/internal/errchain"
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
@@ -21,10 +22,10 @@ import (
 //
 // Create instances with [New].
 type Tree struct {
-	// Text is the message of the node: the message of the error less the
-	// lines of the errors nested in it. It is empty for a node that stands
-	// for several errors and adds no message of its own, such as one built
-	// from [errors.Join].
+	// Text is the message of the node: the message of the error without
+	// the lines of the errors nested in it. It is empty for a node that
+	// stands for several errors and adds no message of its own, such as
+	// one built from [errors.Join].
 	Text string
 	// Children are the nodes of the nested errors, in the order the tree
 	// shows them.
@@ -33,14 +34,14 @@ type Tree struct {
 
 // New creates a new [Tree] from err.
 //
-// The root text is the message of err less the lines of its nested errors,
-// so context a wrapper added stays in front. For an error bound to a
-// source, the root keeps the "name:line:col:" position
-// [niceyaml.SourceError.Error] gives it, and each child carries the
-// "line:col:" position its location resolved to without the name, since
-// the root names the source already. The children of a node sort by
-// position; those whose location did not resolve follow in the order they
-// were given. A nested error with nested errors of its own is a subtree.
+// The root text is the message of err without its nested errors, so
+// context a wrapper added stays in front. For an error bound to a source,
+// the root keeps the "name:line:col:" position [niceyaml.SourceError.Error]
+// gives it, and each child carries the "line:col:" position its location
+// resolved to without the name, since the root names the source already.
+// The children of a node sort by position; those whose location did not
+// resolve follow in the order they were given. A nested error with nested
+// errors of its own is a subtree.
 //
 // An error that unwraps to several, such as one from [errors.Join], is a
 // node with no text and one child per error, so a run over several files
@@ -48,12 +49,11 @@ type Tree struct {
 // nothing: its children take its place in the tree above it, and one with
 // a single child is that child.
 //
-// A wrapper that rewrites the message it wraps leaves nothing for the
-// tree to find, so the node holds the message as it is and has no
-// children, as [niceyaml.SourceError.Error] keeps such a message. A nil err
-// yields the zero Tree.
+// The children come from the errors rather than from the text of the
+// message, so a wrapper that rewrites the message it wraps keeps its
+// children. A nil err yields the zero Tree.
 func New(err error) Tree {
-	if funcs.Nothing(err) {
+	if nothing(err) {
 		return Tree{}
 	}
 
@@ -61,7 +61,7 @@ func New(err error) Tree {
 		children := make([]Tree, 0, len(branches))
 
 		for _, branch := range branches {
-			if !funcs.Nothing(branch) {
+			if !nothing(branch) {
 				children = append(children, New(branch))
 			}
 		}
@@ -69,61 +69,34 @@ func New(err error) Tree {
 		return newTree("", children)
 	}
 
-	return treeOf(err, err.Error(), nil)
+	if bound, ok := err.(*niceyaml.SourceError); ok { //nolint:errorlint // The node itself, not a chain search.
+		return newTree(bound.Message(), children(bound.Unwrap(), bound))
+	}
+
+	return newTree(head(err), children(err, nil))
 }
 
-// funcs describes the niceyaml types to the [errchain.Funcs] walk through
-// their exported accessors.
-var funcs = errchain.Funcs{
-	Nothing: func(err error) bool {
-		switch x := err.(type) { //nolint:errorlint // The node itself, not a chain search.
-		case nil:
-			return true
-		case *niceyaml.Error:
-			return x == nil
-		case *niceyaml.SourceError:
-			return x == nil
-		default:
-			return false
-		}
-	},
-	Node: func(err error) (errchain.Node, bool) {
-		x, ok := err.(*niceyaml.Error) //nolint:errorlint // The node itself, not a chain search.
-		if !ok || x == nil {
-			return errchain.Node{}, false
-		}
-
-		return errchain.Node{Cause: x.Cause(), Nested: errchain.Errors(x.Errors()), Located: x.Located()}, true
-	},
-	Binding: func(err error) (errchain.Binding, bool) {
-		x, ok := err.(*niceyaml.SourceError) //nolint:errorlint // The node itself, not a chain search.
-		if !ok || x == nil {
-			return errchain.Binding{}, false
-		}
-
-		return errchain.Binding{Inner: x.Unwrap(), Name: x.Source().Name()}, true
-	},
-	Position: func(binding, nested error) (position.Position, bool) {
-		x, ok := binding.(*niceyaml.SourceError) //nolint:errorlint // The node itself, not a chain search.
-		if !ok || x == nil {
-			return position.Position{}, false
-		}
-
-		n, ok := nested.(*niceyaml.Error) //nolint:errorlint // The node itself, not a chain search.
-		if !ok || n == nil {
-			return position.Position{}, false
-		}
-
-		return x.PositionOf(n)
-	},
+// nothing reports whether err is nil or a nil pointer to an Error or a
+// SourceError, which carries no message and no nested errors.
+func nothing(err error) bool {
+	switch x := err.(type) { //nolint:errorlint // The node itself, not a chain search.
+	case nil:
+		return true
+	case *niceyaml.Error:
+		return x == nil
+	case *niceyaml.SourceError:
+		return x == nil
+	default:
+		return false
+	}
 }
 
 // joinBranches returns the errors err unwraps to when err is joined from
-// several, as [errors.Join] builds one, and false for any other error. A
-// node unwraps to several too, but it is one node of the tree with its
+// several, as [errors.Join] builds one, and false for any other error. An
+// Error unwraps to several too, but it is one node of the tree with its
 // nested errors as children, so it is not a join.
 func joinBranches(err error) ([]error, bool) {
-	if _, ok := funcs.Node(err); ok {
+	if _, ok := err.(*niceyaml.Error); ok { //nolint:errorlint // The node itself, not a chain search.
 		return nil, false
 	}
 
@@ -134,41 +107,111 @@ func joinBranches(err error) ([]error, bool) {
 	return nil, false
 }
 
-// treeOf returns the tree of err, whose message is msg, with binding the
-// binding that resolved the positions of the nested errors err holds, or
-// nil. The outermost error passes nil, since its own chain holds any
-// binding; a nested error inherits the binding of the error above it while
-// its message is its own, as [niceyaml.Error.Error] writes it.
-func treeOf(err error, msg string, binding error) Tree {
-	head, nested, ok := funcs.Split(err, msg, binding)
-	if !ok || len(nested) == 0 {
-		return Tree{Text: msg}
+// head returns the message of err without the nested lines a binding along
+// its cause chain wrote: the message of that binding is replaced by its
+// [niceyaml.SourceError.Message], and the text around it stays as the
+// wrappers wrote it.
+func head(err error) string {
+	msg := err.Error()
+
+	inner := binding(err)
+	if inner != nil {
+		msg = strings.Replace(msg, inner.Error(), inner.Message(), 1)
 	}
 
-	children := make([]positioned, 0, len(nested))
+	return msg
+}
 
-	for _, n := range nested {
-		child := positioned{tree: treeOf(n.Err, n.Text, n.Binding)}
-
-		if n.Binding != nil {
-			if pos, ok := funcs.Position(n.Binding, n.Err); ok {
-				child.located = true
-				child.pos = pos
-				child.tree.Text = errchain.Prefix(errchain.FormatPosition("", pos), child.tree.Text)
-			}
+// binding returns the first [*niceyaml.SourceError] along the cause chain
+// of err, or nil when the chain holds none. The chain follows a wrapper to
+// the error it wraps and an Error to its cause, and does not follow a
+// joined error.
+func binding(err error) *niceyaml.SourceError {
+	for cur := err; !nothing(cur); {
+		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
+		case *niceyaml.SourceError:
+			return x
+		case *niceyaml.Error:
+			cur = x.Cause()
+		case interface{ Unwrap() error }:
+			cur = x.Unwrap()
+		default:
+			return nil
 		}
-
-		children = append(children, child)
 	}
 
-	slices.SortStableFunc(children, comparePositioned)
+	return nil
+}
 
-	trees := make([]Tree, 0, len(children))
-	for _, child := range children {
-		trees = append(trees, child.tree)
+// children returns the nodes of the errors nested along the cause chain of
+// err, sorted by position. The binding given resolved their positions, or
+// is nil when none did; a binding met along the chain takes over for the
+// errors below it, since it resolved those.
+func children(err error, bound *niceyaml.SourceError) []Tree {
+	var kids []positioned
+
+	for cur := err; !nothing(cur); {
+		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
+		case *niceyaml.SourceError:
+			bound = x
+			cur = x.Unwrap()
+
+		case *niceyaml.Error:
+			for _, n := range x.Errors() {
+				kids = append(kids, child(n, bound))
+			}
+
+			cur = x.Cause()
+
+		case interface{ Unwrap() error }:
+			cur = x.Unwrap()
+
+		default:
+			cur = nil
+		}
 	}
 
-	return newTree(head, trees)
+	if len(kids) == 0 {
+		return nil
+	}
+
+	slices.SortStableFunc(kids, comparePositioned)
+
+	trees := make([]Tree, 0, len(kids))
+	for _, kid := range kids {
+		trees = append(trees, kid.tree)
+	}
+
+	return trees
+}
+
+// child returns the node of the nested error n, with the "line:col:" its
+// location resolved to in front when bound resolved it, and the errors
+// nested in n as its children.
+func child(n *niceyaml.Error, bound *niceyaml.SourceError) positioned {
+	kid := positioned{tree: newTree(head(n), children(n, bound))}
+
+	if bound == nil {
+		return kid
+	}
+
+	if pos, ok := bound.PositionOf(n); ok {
+		kid.located = true
+		kid.pos = pos
+		kid.tree.Text = prefix(pos.String()+":", kid.tree.Text)
+	}
+
+	return kid
+}
+
+// prefix returns p and msg separated by a space, or p alone when msg is
+// empty.
+func prefix(p, msg string) string {
+	if msg == "" {
+		return p
+	}
+
+	return p + " " + msg
 }
 
 // positioned is a child of a node and the position it resolved to, when
@@ -201,6 +244,10 @@ func comparePositioned(a, b positioned) int {
 // nothing: a child with no text gives its place to its own children, and a
 // node with no text and a single child is that child.
 func newTree(text string, children []Tree) Tree {
+	if len(children) == 0 {
+		return Tree{Text: text}
+	}
+
 	flat := make([]Tree, 0, len(children))
 
 	for _, child := range children {

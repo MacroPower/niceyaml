@@ -277,10 +277,20 @@ func TestNew(t *testing.T) {
 			err:  niceyaml.NewError("main", niceyaml.WithErrors(nil, niceyaml.NewError("one"), nil)),
 			want: errortree.Tree{Text: "main", Children: []errortree.Tree{{Text: "one"}}},
 		},
-		"rewritten message has no children": {
-			err:       yamltest.RewriteError{Err: niceyaml.NewError("main", niceyaml.WithErrors(badA()))},
-			want:      errortree.Tree{Text: "rewritten"},
-			multiLine: true,
+		"rewritten message keeps its children": {
+			err:  yamltest.RewriteError{Err: niceyaml.NewError("main", niceyaml.WithErrors(badA()))},
+			want: errortree.Tree{Text: "rewritten", Children: []errortree.Tree{{Text: "$.a: bad a"}}},
+		},
+		"rewritten bound message keeps its children with positions": {
+			err: yamltest.Bind(
+				t,
+				source,
+				yamltest.RewriteError{Err: niceyaml.NewError("main", niceyaml.WithErrors(badA()))},
+			),
+			want: errortree.Tree{
+				Text:     "f.yaml: rewritten",
+				Children: []errortree.Tree{{Text: "1:4: $.a: bad a"}},
+			},
 		},
 		"multi-line nested message stays whole": {
 			err: yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithErrors(
@@ -303,10 +313,13 @@ func TestNew(t *testing.T) {
 			got := errortree.New(tc.err)
 			assert.Equal(t, tc.want, got)
 
-			// Every line of the message is a node of its own, so the split
-			// found every nested line the niceyaml package wrote. A split
-			// that misses them leaves one node holding the whole message.
-			if !tc.multiLine && countNodes(got) > 0 {
+			// A bound error lists every nested error on a line of its own,
+			// so its message has one line per node of the tree. An unbound
+			// Error's message is one line, so the check applies to bound
+			// errors alone.
+			var bound *niceyaml.SourceError
+
+			if !tc.multiLine && errors.As(tc.err, &bound) {
 				assert.Len(t, strings.Split(tc.err.Error(), "\n"), countNodes(got))
 			}
 		})

@@ -1007,16 +1007,17 @@ func TestError_MultiError(t *testing.T) {
 		assert.NotContains(t, got, "\n\n$.nonexistent")
 	})
 
-	t.Run("plain error with nested errors lists them", func(t *testing.T) {
+	t.Run("plain error with nested errors keeps its own message", func(t *testing.T) {
 		t.Parallel()
 
 		nested1 := niceyaml.NewError("nested 1")
 		nested2 := niceyaml.NewError("nested 2")
 		err := niceyaml.NewError("main error", niceyaml.WithErrors(nested1, nested2))
 
-		assert.Equal(t, "main error\nnested 1\nnested 2", render(err))
-
-		// The nested errors surface through Unwrap as well.
+		// The nested errors are structure, not text: Errors returns them
+		// and they surface through Unwrap, while the message stays one line.
+		assert.Equal(t, "main error", render(err))
+		assert.Equal(t, []*niceyaml.Error{nested1, nested2}, err.Errors())
 		require.ErrorIs(t, err, nested1)
 		require.ErrorIs(t, err, nested2)
 	})
@@ -1126,8 +1127,9 @@ func TestError_MultiError(t *testing.T) {
 			),
 		)
 
-		// Without a source, the message alone renders, nested error included.
-		assert.Equal(t, "validation failed\n$.value: nested error", render(err))
+		// Without a source, the message alone renders, and the nested error
+		// waits for a binding to list it behind its position.
+		assert.Equal(t, "validation failed", render(err))
 	})
 
 	t.Run("nested-only error with multiple lines", func(t *testing.T) {
@@ -2651,9 +2653,9 @@ func TestSourceError_NestedPositionsBehindWrappers(t *testing.T) {
 			)),
 			want: "f.yaml: outer\nf.yaml:2:4: $.b: middle\nf.yaml:1:4: $.a: leaf",
 		},
-		"a wrapper that rewrites the message keeps its text": {
+		"a wrapper that rewrites the message keeps the nested lines": {
 			err:  yamltest.RewriteError{Err: inner},
-			want: "f.yaml: rewritten",
+			want: "f.yaml: rewritten\nf.yaml:1:4: $.a: bad a\n$.missing: bad b",
 		},
 	}
 
@@ -2792,8 +2794,8 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 
 				// The nested errors make the outer Error the anchor, and it
 				// takes the location of the Error it wraps. The nested error
-				// follows the message either way, with its position once bound.
-				assert.Equal(t, tc.unbound+"\n"+nested.Error(), tc.err.Error())
+				// follows the message once bound, with its position.
+				assert.Equal(t, tc.unbound, tc.err.Error())
 				assert.Equal(t, tc.bound+"\n1:7: "+nested.Error(), docs[0].Bind(tc.err).Error())
 			})
 		}
@@ -3379,7 +3381,7 @@ func TestSourceError_TreeBranches(t *testing.T) {
 			niceyaml.NewError("summary", niceyaml.WithErrors(badB, badC)),
 		)))
 
-		assert.Equal(t, "1:4: document 0: first: $.a: bad a\nsummary\n$.b: bad b\n$.c: bad c", err.Error())
+		assert.Equal(t, "1:4: document 0: first: $.a: bad a\nsummary\n2:4: $.b: bad b\n3:4: $.c: bad c", err.Error())
 
 		got := trimLines(render(err))
 		assert.Contains(t, got, "<genericError>1</genericError>")
