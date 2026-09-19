@@ -1,7 +1,6 @@
 package theme
 
 import (
-	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
@@ -1435,7 +1434,7 @@ var palettes = map[string]palette{
 	"tokyonight-storm": {
 		Mode:   Dark,
 		Fg:     "#c0caf5",
-		Bg:     "#1a1b26",
+		Bg:     "#24283b",
 		Accent: "#bb9af7",
 		OK:     "#9ece6a",
 		Warn:   "#e0af68",
@@ -1444,9 +1443,9 @@ var palettes = map[string]palette{
 			kind.Comment:            "italic #414868",
 			kind.CommentPreproc:     "bold #414868",
 			kind.Generic:            "#c0caf5",
-			kind.GenericDeleted:     "#db4b4b bg:#15161e",
+			kind.GenericDeleted:     "#db4b4b bg:#1f2335",
 			kind.GenericError:       "#db4b4b",
-			kind.GenericInserted:    "#9ece6a bg:#15161e",
+			kind.GenericInserted:    "#9ece6a bg:#1f2335",
 			kind.LiteralBoolean:     "#e0af68",
 			kind.LiteralNumber:      "#e0af68",
 			kind.LiteralString:      "#9ece6a",
@@ -1455,11 +1454,6 @@ var palettes = map[string]palette{
 			kind.NameTag:            "#bb9af7",
 			kind.Punctuation:        "bold #9ece6a",
 			kind.PunctuationHeading: "#e0af68",
-		},
-		Overrides: []style.StylesOption{
-			style.Set(kind.GenericHeadingOK, style.MustParse("bold #24283b bg:#9ece6a")),
-			style.Set(kind.GenericHeadingWarn, style.MustParse("bold #24283b bg:#e0af68")),
-			style.Set(kind.GenericHeadingError, style.MustParse("bold #24283b bg:#db4b4b")),
 		},
 	},
 	"trac": {

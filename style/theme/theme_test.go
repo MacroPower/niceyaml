@@ -1,6 +1,7 @@
 package theme_test
 
 import (
+	"image/color"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -272,6 +273,55 @@ func TestPalette_SubtleTextDiffersFromText(t *testing.T) {
 
 			assert.NotEqual(t, text, subtle, "TextSubtle matches Text")
 			assert.NotEqual(t, subtle, dim, "TextSubtleDim matches TextSubtle")
+		})
+	}
+}
+
+func TestPalette_TokyonightStormSurface(t *testing.T) {
+	t.Parallel()
+
+	// Storm and Night share every syntax color and part ways on their
+	// surfaces, so Storm renders on #24283b with #1f2335 behind the diff
+	// marks.
+	night, ok := theme.Builtin().Get("tokyonight-night")
+	require.True(t, ok)
+
+	storm, ok := theme.Builtin().Get("tokyonight-storm")
+	require.True(t, ok)
+
+	assert.NotEqual(t,
+		night.Style(kind.Text).GetBackground(),
+		storm.Style(kind.Text).GetBackground(),
+		"Storm renders on Night's background",
+	)
+
+	tests := map[string]struct {
+		got  color.Color
+		want color.Color
+	}{
+		"text background": {
+			got:  storm.Style(kind.Text).GetBackground(),
+			want: lipgloss.Color("#24283b"),
+		},
+		"deleted background": {
+			got:  storm.Style(kind.GenericDeleted).GetBackground(),
+			want: lipgloss.Color("#1f2335"),
+		},
+		"inserted background": {
+			got:  storm.Style(kind.GenericInserted).GetBackground(),
+			want: lipgloss.Color("#1f2335"),
+		},
+		"OK heading foreground": {
+			got:  storm.Style(kind.GenericHeadingOK).GetForeground(),
+			want: lipgloss.Color("#24283b"),
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.got)
 		})
 	}
 }
