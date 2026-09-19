@@ -126,6 +126,44 @@ func TestRevisionLabel(t *testing.T) {
 	}
 }
 
+func TestRevisionLabels(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		paths []string
+		want  []string
+	}{
+		"distinct base names": {
+			paths: []string{"a/one.yaml", "b/two.yaml"},
+			want:  []string{"one.yaml", "two.yaml"},
+		},
+		"shared base name": {
+			paths: []string{"a/config.yaml", "b/config.yaml"},
+			want:  []string{"a/config.yaml", "b/config.yaml"},
+		},
+		"only the colliding names grow": {
+			paths: []string{"a/config.yaml", "b/config.yaml", "c/other.yaml"},
+			want:  []string{"a/config.yaml", "b/config.yaml", "other.yaml"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			files := make([]fileEntry, len(tc.paths))
+			for i, path := range tc.paths {
+				files[i] = fileEntry{path: path, content: []byte("a: 1\n")}
+			}
+
+			assert.Equal(t, tc.want, revisionLabels(files))
+
+			m := newModel(&modelOptions{files: files})
+			assert.Equal(t, tc.want, m.viewport.RevisionNames())
+		})
+	}
+}
+
 func TestUpdateWindowSizeViewportHeight(t *testing.T) {
 	t.Parallel()
 

@@ -82,10 +82,11 @@ func newModel(opts *modelOptions) model {
 		lineNumbers:  opts.lineNumbers,
 	}
 
-	for _, f := range opts.files {
+	labels := revisionLabels(opts.files)
+	for i, f := range opts.files {
 		m.viewport.AddRevision(niceyaml.NewSourceFromString(
 			string(f.content),
-			niceyaml.WithName(filepath.Base(f.path)),
+			niceyaml.WithName(labels[i]),
 		))
 	}
 
@@ -95,6 +96,28 @@ func newModel(opts *modelOptions) model {
 	}
 
 	return m
+}
+
+// revisionLabels names each file for the status bar. A file's base name
+// labels it, so a full path stays out of the bar. Two files sharing a base
+// name, such as a/config.yaml and b/config.yaml, each fall back to the path
+// as the user typed it, so the bar tells the revisions apart.
+func revisionLabels(files []fileEntry) []string {
+	labels := make([]string, len(files))
+	counts := make(map[string]int, len(files))
+
+	for i, f := range files {
+		labels[i] = filepath.Base(f.path)
+		counts[labels[i]]++
+	}
+
+	for i, f := range files {
+		if counts[labels[i]] > 1 {
+			labels[i] = f.path
+		}
+	}
+
+	return labels
 }
 
 // Init implements [tea.Model].
