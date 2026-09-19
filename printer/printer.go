@@ -262,16 +262,17 @@ type AnnotationContext struct {
 // ColWidth returns the display width of the first col runes of ctx.Content,
 // plus one cell for every column past the end of the content, so a marker
 // padded by it lands under the rune at col whatever the width of the runes
-// before it.
+// before it. The width is that of the rendered row, in which a control
+// character shows as a one-cell picture.
 func (ctx AnnotationContext) ColWidth(col int) int {
 	col = max(0, col)
 	runes := []rune(ctx.Content)
 
 	if col <= len(runes) {
-		return lipgloss.Width(string(runes[:col]))
+		return lipgloss.Width(escape.Control(string(runes[:col])))
 	}
 
-	return lipgloss.Width(ctx.Content) + col - len(runes)
+	return lipgloss.Width(escape.Control(ctx.Content)) + col - len(runes)
 }
 
 // AnnotationFunc returns the rendered annotation content based on

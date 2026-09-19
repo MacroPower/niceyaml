@@ -3572,6 +3572,34 @@ func TestPrinter_Layout_GutterWidth(t *testing.T) {
 	}
 }
 
+func TestAnnotationContext_ColWidth(t *testing.T) {
+	t.Parallel()
+
+	// The rendered row shows a control character as a one-cell picture, so
+	// the width counts it as one cell rather than the zero lipgloss gives
+	// the raw character.
+	ctx := printer.AnnotationContext{Content: "a: \"tab\there\""}
+
+	tcs := map[string]struct {
+		col  int
+		want int
+	}{
+		"before the control":       {col: 3, want: 3},
+		"just past the control":    {col: 8, want: 8},
+		"end of the content":       {col: 13, want: 13},
+		"past the end":             {col: 20, want: 20},
+		"negative clamps to start": {col: -1, want: 0},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, ctx.ColWidth(tc.col))
+		})
+	}
+}
+
 func TestPrinter_WithMaxNumber(t *testing.T) {
 	t.Parallel()
 
