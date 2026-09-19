@@ -179,6 +179,8 @@ func TestSegments_EndColumn(t *testing.T) {
 	assert.Equal(t, 7, segment.Segments{at(1, "a"), at(2, ":"), at(4, " !t\n")}.EndColumn(),
 		"a multi-rune part ends past its start column")
 	assert.Equal(t, 1, segment.Segments{at(1, "\n")}.EndColumn(), "a newline has no width")
+	assert.Equal(t, 8, segment.Segments{at(0, "  hello")}.EndColumn(),
+		"a part below column 1, as a block scalar line reports, starts at column 1")
 	assert.Equal(t, 0, segment.Segments{segment.New(nil, &token.Token{Origin: "x"})}.EndColumn())
 }
 
