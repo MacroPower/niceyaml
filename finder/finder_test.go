@@ -570,6 +570,21 @@ func (invalidByteNormalizer) Normalize(in string) string {
 	return in
 }
 
+func TestFinder_Find_CRLF(t *testing.T) {
+	t.Parallel()
+
+	// The loaded text reads every line ending as "\n", so a search string
+	// copied out of a CRLF file, line ending included, still matches.
+	idx := finder.New().Load(niceyaml.NewSourceFromString("a: 1\r\nb: 2\r\n").Lines())
+
+	want := position.Ranges{
+		position.NewRange(position.New(0, 3), position.New(1, 1)),
+	}
+
+	assert.Equal(t, want, idx.Find("1\r\nb"))
+	assert.Equal(t, want, idx.Find("1\nb"))
+}
+
 func TestFinder_Find_NilLines(t *testing.T) {
 	t.Parallel()
 

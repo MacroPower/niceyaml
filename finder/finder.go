@@ -157,7 +157,8 @@ func (i *Index) buildByteToRuneIndex() {
 //
 // The search string goes through the same per-character normalization as
 // the loaded text, so a string found in the source is found by Find. Bytes
-// that are not valid UTF-8 read as U+FFFD on both sides.
+// that are not valid UTF-8 read as U+FFFD on both sides, and a CRLF or bare
+// CR line ending reads as "\n" on both sides.
 //
 // Every match starts at a source character. When normalization expands one
 // character into several, as case folding turns "ß" into "ss", a needle
@@ -220,8 +221,12 @@ func (i *Index) Find(search string) position.Ranges {
 
 // normalizeText normalizes s the way [Finder.Load] normalizes the loaded
 // text, one rune at a time, so a search string and the text it is compared
-// against pass through the normalizer identically.
+// against pass through the normalizer identically. Line endings collapse to
+// "\n" first, since the loaded text reads every line ending that way.
 func (i *Index) normalizeText(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+
 	var sb strings.Builder
 
 	for _, r := range s {
