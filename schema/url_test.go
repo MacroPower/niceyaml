@@ -181,7 +181,7 @@ func TestURL(t *testing.T) {
 		t.Parallel()
 
 		_, _, err := load(t, schema.URL("\x00")) // Control char makes URL invalid.
-		require.ErrorContains(t, err, "create request for")
+		require.ErrorContains(t, err, "parse URL")
 	})
 
 	t.Run("client error", func(t *testing.T) {
