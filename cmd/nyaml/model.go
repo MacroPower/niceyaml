@@ -257,11 +257,7 @@ func (m *model) applySearch(term string) {
 //
 //nolint:gocritic // hugeParam: required for tea.Model interface.
 func (m model) View() tea.View {
-	base := lipgloss.JoinVertical(
-		lipgloss.Top,
-		m.viewport.View(),
-		m.statusBar(),
-	)
+	base := m.baseView()
 
 	// Overlay theme picker if active.
 	if m.themePicking {
@@ -285,6 +281,28 @@ func (m model) View() tea.View {
 	v.MouseMode = tea.MouseModeCellMotion
 
 	return v
+}
+
+// baseView renders the viewport above the status bar, in the rows the
+// terminal has. A terminal of two rows leaves the viewport none, and a
+// viewport with no rows renders an empty string that the vertical join
+// still counts as a row, so the viewport drops out of the render instead.
+// A terminal of one row shows the title line alone.
+func (m *model) baseView() string {
+	switch m.height {
+	case 1:
+		return m.titleLine()
+
+	case statusBarHeight:
+		return m.statusBar()
+
+	default:
+		return lipgloss.JoinVertical(
+			lipgloss.Top,
+			m.viewport.View(),
+			m.statusBar(),
+		)
+	}
 }
 
 // overlayOffset centers an overlay of size inner in a terminal of size outer.

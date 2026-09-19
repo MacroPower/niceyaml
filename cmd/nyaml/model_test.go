@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -200,6 +201,28 @@ func TestUpdateWindowSizeViewportHeight(t *testing.T) {
 			got, ok := updated.(model)
 			require.True(t, ok)
 			assert.Equal(t, tc.want, got.viewport.Height())
+		})
+	}
+}
+
+func TestBaseViewHeight(t *testing.T) {
+	t.Parallel()
+
+	// A render taller than the terminal scrolls the alt screen, so every
+	// height must fit. Heights of 1 and 2 leave the viewport no rows.
+	for height := 1; height <= 10; height++ {
+		t.Run(fmt.Sprintf("height %d", height), func(t *testing.T) {
+			t.Parallel()
+
+			m := newModel(&modelOptions{
+				files: []fileEntry{{path: "a.yaml", content: []byte("a: 1\nb: 2\nc: 3\n")}},
+			})
+
+			updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: height})
+
+			got, ok := updated.(model)
+			require.True(t, ok)
+			assert.LessOrEqual(t, lipgloss.Height(got.baseView()), height)
 		})
 	}
 }
