@@ -53,9 +53,19 @@ func file(path string) (Ref, error) {
 		return Ref{}, ErrEmptyPath
 	}
 
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return Ref{}, fmt.Errorf("resolve %s: %w", path, err)
+	abs := path
+
+	// A drive-letter path is absolute wherever it is read, but filepath.Abs
+	// on a POSIX platform treats it as relative and puts the working
+	// directory in front of it. Keep it as written, so the drive survives
+	// into the URL and the read error.
+	if !hasDriveLetter(path) {
+		var err error
+
+		abs, err = filepath.Abs(path)
+		if err != nil {
+			return Ref{}, fmt.Errorf("resolve %s: %w", path, err)
+		}
 	}
 
 	return Loadable(fileURL(abs), func(_ context.Context) ([]byte, error) {

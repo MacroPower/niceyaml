@@ -245,8 +245,13 @@ func TestFileOrURL(t *testing.T) {
 		// intact rather than be rewritten against baseDir.
 		url, _, err := load(t, fileOrURL(t, "/configs", "file:///C:/schemas/config.json"))
 		require.Error(t, err)
-		assert.NotContains(t, url, "/configs")
-		assert.Contains(t, url, "C:/schemas/config.json")
+		assert.Equal(t, "file:///C:/schemas/config.json", url)
+
+		// The bare drive-letter path names the same schema, and neither
+		// form picks up the working directory.
+		url, _, err = load(t, fileOrURL(t, "/configs", "C:/schemas/config.json"))
+		require.Error(t, err)
+		assert.Equal(t, "file:///C:/schemas/config.json", url)
 	})
 
 	t.Run("missing file", func(t *testing.T) {
