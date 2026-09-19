@@ -133,11 +133,13 @@ func documentSpans(groups []token.Tokens, total int) []position.Span {
 //
 // The groups come from [tokens.SplitDocuments]. Each document is anchored by
 // the offset of its header token, or of its body's first token when it has
-// no header, and takes the last group that starts at or before that offset.
-// Matching by offset rather than by index keeps a document paired with its
-// own tokens when the parser and the splitter disagree on boundaries, which
-// happens for streams such as consecutive empty headers. A document with no
-// anchor gets nil tokens.
+// no header, and takes the groups from the last one that starts at or before
+// that offset up to the one the next document anchors in. Matching by offset
+// rather than by index keeps a document paired with its own tokens when the
+// parser and the splitter disagree on boundaries: the splitter cuts a group
+// at every header, while the parser collapses consecutive headers into one
+// document, so such a document spans several groups and takes them all. A
+// document with no anchor gets nil tokens.
 func alignDocumentTokens(file *ast.File, tks token.Tokens) []token.Tokens {
 	var (
 		groups []token.Tokens
@@ -153,19 +155,39 @@ func alignDocumentTokens(file *ast.File, tks token.Tokens) []token.Tokens {
 		starts = append(starts, group[0].Position.Offset)
 	}
 
-	result := make([]token.Tokens, len(file.Docs))
+	anchors := make([]int, len(file.Docs))
+	anchored := make([]bool, len(file.Docs))
 
 	for i, doc := range file.Docs {
-		offset, ok := documentOffset(doc)
-		if !ok {
+		anchors[i], anchored[i] = documentOffset(doc)
+	}
+
+	result := make([]token.Tokens, len(file.Docs))
+
+	for i := range file.Docs {
+		if !anchored[i] {
 			continue
 		}
 
-		// Index of the last group that starts at or before offset.
-		idx := sort.Search(len(starts), func(j int) bool { return starts[j] > offset }) - 1
-		if idx >= 0 {
-			result[i] = groups[idx]
+		// Index of the last group that starts at or before the anchor.
+		idx := sort.Search(len(starts), func(j int) bool { return starts[j] > anchors[i] }) - 1
+		if idx < 0 {
+			continue
 		}
+
+		// The groups before the one the next anchored document starts in
+		// belong to this one, and the last document takes the rest.
+		end := len(starts)
+
+		for j := i + 1; j < len(file.Docs); j++ {
+			if anchored[j] {
+				end = sort.Search(len(starts), func(k int) bool { return starts[k] > anchors[j] }) - 1
+
+				break
+			}
+		}
+
+		result[i] = slices.Concat(groups[idx:max(end, idx+1)]...)
 	}
 
 	return result

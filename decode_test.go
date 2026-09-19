@@ -1114,8 +1114,10 @@ func TestDocuments_All(t *testing.T) {
 		t.Parallel()
 
 		// The go-yaml parser folds everything after consecutive headers into
-		// one empty document anchored at the first header, so that document
-		// takes only the first header's token group.
+		// one empty document anchored at the first header, while the
+		// splitter cuts a group at each header. The document takes every
+		// group from its anchor on, so its tokens cover the same lines its
+		// span does.
 		input := stringtest.Input(`
 			---
 			---
@@ -1128,9 +1130,11 @@ func TestDocuments_All(t *testing.T) {
 
 		for _, dd := range d {
 			tks := dd.Tokens()
-			require.Len(t, tks, 1)
+			require.Len(t, tks, 5)
 			assert.Equal(t, token.DocumentHeaderType, tks[0].Type)
+			assert.Equal(t, token.DocumentHeaderType, tks[1].Type)
 			assert.Same(t, source.Tokens()[0], tks[0])
+			assert.Equal(t, input, yamltest.DumpTokenOrigins(tks))
 		}
 	})
 
