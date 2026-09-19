@@ -19,8 +19,9 @@ var (
 	// "yaml-language-server: $schema=./schema.json". The marker must open
 	// the comment, after optional whitespace, so a comment that mentions
 	// the marker mid-sentence is not a directive. The reference runs to
-	// the end of the comment, so a path may contain spaces.
-	schemaDirectiveRE = regexp.MustCompile(`^\s*yaml-language-server:\s*\$schema=(.+)`)
+	// the first whitespace, as yaml-language-server reads it, so a remark
+	// after the reference is not part of it.
+	schemaDirectiveRE = regexp.MustCompile(`^\s*yaml-language-server:\s*\$schema=(\S+)`)
 
 	// ErrNoDirective indicates no schema directive was found in the document.
 	// It wraps [ErrNoMatch], so [Registry] moves on to the next resolver.
@@ -54,13 +55,11 @@ type ParsedDirective struct {
 //
 // The "yaml-language-server:" marker must open the comment, after any
 // leading whitespace; a comment that mentions the marker after other text
-// is not a directive. Everything after "$schema=" is the reference, so a
-// path may contain spaces, and a trailing remark on the same line becomes
-// part of the reference.
-//
-// The YAML parser keeps trailing spaces in a comment's value, so
-// ParseDirective trims whitespace around the schema reference. A directive
-// with nothing after the equals sign yields nil.
+// is not a directive. The reference is the text after "$schema=" up to the
+// first whitespace, as yaml-language-server reads it, so a remark after
+// the reference on the same line is not part of it, and a path cannot
+// contain spaces. A directive with nothing after the equals sign yields
+// nil.
 func ParseDirective(comment string) *ParsedDirective {
 	matches := schemaDirectiveRE.FindStringSubmatch(comment)
 	if len(matches) < 2 {

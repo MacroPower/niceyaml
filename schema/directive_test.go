@@ -38,9 +38,13 @@ func TestParseDirective(t *testing.T) {
 			input: " yaml-language-server: $schema=https://example.com/schema.json",
 			want:  &schema.ParsedDirective{Schema: "https://example.com/schema.json"},
 		},
-		"path with spaces": {
+		"remark after the reference": {
+			input: " yaml-language-server: $schema=./schema.json # managed by tooling",
+			want:  &schema.ParsedDirective{Schema: "./schema.json"},
+		},
+		"path with spaces ends at the first space": {
 			input: " yaml-language-server: $schema=./path with spaces/schema.json",
-			want:  &schema.ParsedDirective{Schema: "./path with spaces/schema.json"},
+			want:  &schema.ParsedDirective{Schema: "./path"},
 		},
 		"no spaces after colon": {
 			input: " yaml-language-server:$schema=schema.json",
