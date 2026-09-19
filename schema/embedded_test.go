@@ -23,6 +23,21 @@ func TestEmbedded(t *testing.T) {
 		assert.NotEmpty(t, key)
 	})
 
+	t.Run("copies the caller's bytes", func(t *testing.T) {
+		t.Parallel()
+
+		// The key is a digest taken at construction time, so a write to the
+		// caller's slice must not reach the bytes that key names.
+		original := `{"type": "object"}`
+		mutable := []byte(original)
+		ref := schema.Embedded(mutable)
+		copy(mutable, `{"type": "string"}`)
+
+		_, data, err := load(t, ref)
+		require.NoError(t, err)
+		assert.Equal(t, original, string(data))
+	})
+
 	t.Run("keys by content", func(t *testing.T) {
 		t.Parallel()
 

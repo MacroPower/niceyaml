@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -16,13 +17,16 @@ import (
 //	r := schema.Embedded(schemaBytes)
 //
 // The [Ref.Key] is a digest of the bytes, so two Embedded Refs over the
-// same bytes name one schema to the registry, which compiles it once. A
-// schema compiled already, with [MustCompile] or [FromJSONSchema], is a
-// [Resolver] itself and goes in as it is.
+// same bytes name one schema to the registry, which compiles it once.
+// Embedded copies data, so a caller that writes to its slice afterward
+// cannot make the key name different bytes. A schema compiled already,
+// with [MustCompile] or [FromJSONSchema], is a [Resolver] itself and goes
+// in as it is.
 func Embedded(data []byte) Ref {
 	sum := sha256.Sum256(data)
+	schemaData := bytes.Clone(data)
 
 	return Loadable("embedded:"+hex.EncodeToString(sum[:]), func(_ context.Context) ([]byte, error) {
-		return data, nil
+		return schemaData, nil
 	})
 }
