@@ -112,7 +112,10 @@ func (r Range) lastLine() int {
 // at column 0 of a later line covers nothing on that line, so SliceLines
 // stops at the line before it. A range that ends before its start, on an
 // earlier line or at an earlier column of the same line, covers no lines,
-// and SliceLines returns nil for it.
+// and SliceLines returns nil for it. An empty range, whose end is its
+// start, still yields its own line as one empty range, so a position with
+// nothing under it names the line it sits on although [Range.Contains]
+// reports nothing inside it.
 func (r Range) SliceLines() Ranges {
 	if r.Start.Line == r.End.Line {
 		if r.End.Col < r.Start.Col {
@@ -295,7 +298,8 @@ func (rs Ranges) UniqueValues() Ranges {
 // LineIndices returns all line indices covered by the [Ranges].
 // A multi-line range contributes each line within it, except an end line it
 // touches only at column 0, which holds none of it. A range that ends on a
-// line before its start line contributes none.
+// line before its start line contributes none, while an empty range
+// contributes the line it sits on, as [Range.SliceLines] does.
 // Duplicate line indices are returned if covered by multiple ranges.
 func (rs Ranges) LineIndices() []int {
 	if len(rs) == 0 {
