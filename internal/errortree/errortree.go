@@ -296,5 +296,9 @@ func newTree(text string, children []Tree) Tree {
 		return flat[0]
 	}
 
+	if len(flat) == 0 {
+		return Tree{Text: text}
+	}
+
 	return Tree{Text: text, Children: flat}
 }

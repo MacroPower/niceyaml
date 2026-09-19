@@ -58,6 +58,10 @@ func TestNew_MultiWrap(t *testing.T) {
 				},
 			},
 		},
+		"children that add nothing leave no children": {
+			err:  niceyaml.NewError("outer", niceyaml.WithErrors(niceyaml.NewError(""))),
+			want: errortree.Tree{Text: "outer"},
+		},
 		"join at the root is textless": {
 			err: errors.Join(errA, errB),
 			want: errortree.Tree{
