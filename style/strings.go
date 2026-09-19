@@ -115,15 +115,18 @@ func applyToken(style lipgloss.Style, token string) (lipgloss.Style, error) {
 	case "bold":
 		return style.Bold(true), nil
 	case "nobold":
-		return style.Bold(false), nil
+		// Encode writes no token for an attribute that is off, so the
+		// keyword clears the attribute rather than setting it to false,
+		// and Parse and Encode round-trip.
+		return style.UnsetBold(), nil
 	case "italic":
 		return style.Italic(true), nil
 	case "noitalic":
-		return style.Italic(false), nil
+		return style.UnsetItalic(), nil
 	case "underline":
 		return style.Underline(true), nil
 	case "nounderline":
-		return style.Underline(false), nil
+		return style.UnsetUnderline(), nil
 	case "noinherit":
 		// Pygments compatibility, ignored.
 		return style, nil

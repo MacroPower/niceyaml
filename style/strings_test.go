@@ -298,6 +298,7 @@ func TestRoundTrip(t *testing.T) {
 		"modifiers only":   {input: "bold italic underline"},
 		"colors only":      {input: "#aabbcc bg:#112233"},
 		"case insensitive": {input: "Bold #FF0000"},
+		"cleared modifier": {input: "bold nobold #ff0000"},
 	}
 
 	for name, tt := range tests {
