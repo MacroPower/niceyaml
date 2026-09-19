@@ -547,6 +547,33 @@ func TestSchema_PathTarget(t *testing.T) {
 			`),
 			wantContains: "<genericError>BadKey</genericError>",
 		},
+		"hexadecimal key highlights value": {
+			// The key decodes to the member name 16, which the source spells
+			// 0x10, so the path names nothing and the walk locates the value.
+			schema: `{
+				"type": "object",
+				"properties": {
+					"16": {"type": "integer"}
+				}
+			}`,
+			input: stringtest.Input(`
+				0x10: hello
+			`),
+			wantContains: "<genericError>hello</genericError>",
+		},
+		"boolean key highlights the key": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"name": {"type": "string"}
+				},
+				"additionalProperties": false
+			}`,
+			input: stringtest.Input(`
+				True: nope
+			`),
+			wantContains: "<genericError>True</genericError>",
+		},
 		"false subschema on a keyword-named property highlights value": {
 			// A property named like a key-targeting keyword ("contains") must
 			// still highlight the value, not the key.
