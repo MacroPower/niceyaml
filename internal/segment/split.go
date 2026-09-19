@@ -360,6 +360,10 @@ func (b *builder) processPart(ctx *partContext) bool {
 		isFirstLinePosition := ctx.tk.Position.Column == 0
 		if (wasFirstContentPart && isFirstLinePosition) || (isLastContentPart && !isFirstLinePosition) {
 			newTk.Position = clonePosition(ctx.tk.Position)
+			// The lexer's line is a guess about which content line it
+			// pointed at, and a folded scalar with content after it lands
+			// one line off. Every part on a line reports that line.
+			newTk.Position.Line = b.currentLine
 		}
 	}
 

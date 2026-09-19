@@ -87,6 +87,16 @@ func TestSplit_DuplicateNewline(t *testing.T) {
 			wantContent: []string{"a: !t", "", "", "  b: 1"},
 			wantNumbers: []int{1, 2, 3, 4},
 		},
+		"folded scalar with content after it": {
+			input:       "a: >-\n  long\n  folded\nb: 2\n",
+			wantContent: []string{"a: >-", "  long", "  folded", "b: 2"},
+			wantNumbers: []int{1, 2, 3, 4},
+		},
+		"literal scalar at the end": {
+			input:       "a: |-\n  x\n  y\n",
+			wantContent: []string{"a: |-", "  x", "  y"},
+			wantNumbers: []int{1, 2, 3},
+		},
 	}
 
 	for name, tc := range tcs {
