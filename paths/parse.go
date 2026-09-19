@@ -20,7 +20,8 @@ var ErrInvalidPath = errors.New("invalid path")
 //	.''       the empty key
 //	..name    every mapping entry with that key, at any depth
 //	..'name'  the same for a key containing reserved characters
-//	[n]       a sequence element by 0-based index
+//	[n]       a sequence element by 0-based index, written in decimal
+//	          with no sign and no leading zero
 //	[*]       every sequence element
 //
 // Use [Path.Key] on the result to target the key of a mapping entry rather
@@ -173,10 +174,34 @@ func parseIndex(rest string) (segment, string, error) {
 		return segment{kind: segmentIndexAll}, remaining, nil
 	}
 
+	// An index is a canonical decimal: digits only, with no sign and no
+	// leading zero, so every index has one spelling and a parsed path prints
+	// as it was written.
+	if !isCanonicalIndex(body) {
+		return segment{}, "", fmt.Errorf("index %q is not a non-negative integer", body)
+	}
+
 	idx, err := strconv.Atoi(body)
-	if err != nil || idx < 0 || strings.HasPrefix(body, "+") {
+	if err != nil {
 		return segment{}, "", fmt.Errorf("index %q is not a non-negative integer", body)
 	}
 
 	return segment{kind: segmentIndex, index: idx}, remaining, nil
+}
+
+// isCanonicalIndex reports whether s is a non-negative decimal integer as
+// [Path.String] writes one: at least one digit, and no leading zero unless
+// the number is zero itself.
+func isCanonicalIndex(s string) bool {
+	if s == "" || (len(s) > 1 && s[0] == '0') {
+		return false
+	}
+
+	for i := range len(s) {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+
+	return true
 }

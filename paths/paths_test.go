@@ -355,6 +355,15 @@ func TestParse_Invalid(t *testing.T) {
 		"negative index": {
 			expr: "$[-1]",
 		},
+		"negative zero index": {
+			expr: "$[-0]",
+		},
+		"index with a leading zero": {
+			expr: "$[01]",
+		},
+		"index with a plus sign": {
+			expr: "$[+1]",
+		},
 		"non-numeric index": {
 			expr: "$[a]",
 		},
