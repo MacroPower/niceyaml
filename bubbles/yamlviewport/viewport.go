@@ -282,8 +282,6 @@ type Model struct {
 	// frame above the first line.
 	anchorLine int
 	anchorRow  int
-	// FillHeight pads output with empty lines to fill the viewport height when true.
-	FillHeight bool
 	// Reports that left changed since the searcher last loaded it.
 	searcherStale bool
 	// MouseWheelEnabled enables mouse wheel scrolling.
@@ -1325,7 +1323,7 @@ func (m *Model) canRender() bool {
 }
 
 // visibleRows renders the rows of the visible window, trimmed to the content
-// height and without FillHeight padding.
+// height and without the padding renderContent adds.
 func (m *Model) visibleRows() []string {
 	if !m.canRender() || !m.hasContent() {
 		return nil
@@ -1383,23 +1381,6 @@ func (m *Model) cutRow(row string, offset, width int) string {
 	return ansi.Cut(row, 0, left) +
 		ansi.Cut(ansi.Cut(row, left, left+inner), offset, offset+visible) +
 		ansi.Cut(row, left+inner, left+inner+right)
-}
-
-// padRows pads rows with empty rows up to the content height when FillHeight
-// is set.
-func (m *Model) padRows(rows []string) []string {
-	if !m.canRender() {
-		return nil
-	}
-
-	if maxHeight := m.maxHeight(); m.FillHeight && len(rows) < maxHeight {
-		padded := make([]string, maxHeight)
-		copy(padded, rows)
-
-		return padded
-	}
-
-	return rows
 }
 
 // SetYOffset sets the vertical offset, in rows, clamped to the scrollable
@@ -1524,8 +1505,8 @@ func (m *Model) TotalRowCount() int {
 	return m.rows.total()
 }
 
-// VisibleRowCount returns the number of rendered rows on screen, without any
-// FillHeight padding.
+// VisibleRowCount returns the number of rendered rows on screen, without the
+// padding that fills the rest of the viewport height.
 func (m *Model) VisibleRowCount() int {
 	if !m.canRender() {
 		return 0
@@ -1764,7 +1745,7 @@ func (m Model) View() string {
 		return m.renderSideBySide(w, h)
 	}
 
-	return m.renderContent(m.padRows(m.visibleRows()), w, h)
+	return m.renderContent(m.visibleRows(), w, h)
 }
 
 // sideBySideSeparator is the column divider between panes.
@@ -1774,7 +1755,7 @@ const sideBySideSeparator = " │ "
 func (m *Model) renderSideBySide(contentW, contentH int) string {
 	// Get views for both panes. The model owns both, with overlays applied.
 	if !m.hasContent() {
-		return m.renderContent(m.padRows(nil), contentW, contentH)
+		return m.renderContent(nil, contentW, contentH)
 	}
 
 	right := m.right
@@ -1791,7 +1772,7 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 
 	first, last := m.rowWindow()
 	if first >= last {
-		return m.renderContent(m.padRows(nil), contentW, contentH)
+		return m.renderContent(nil, contentW, contentH)
 	}
 
 	// Render the lines of the window in both panes.
@@ -1869,7 +1850,7 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 
 	combined = m.trimWindow(combined, first)
 
-	return m.renderContent(m.padRows(combined), contentW, contentH)
+	return m.renderContent(combined, contentW, contentH)
 }
 
 func clamp[T cmp.Ordered](v, low, high T) T {

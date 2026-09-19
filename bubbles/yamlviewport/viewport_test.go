@@ -263,15 +263,6 @@ func TestViewport_Golden(t *testing.T) {
 				// XOffset stays at 0 - verifies lines are truncated, not wrapped.
 			},
 		},
-		"FillHeight": {
-			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
-			yaml:   "key: value",
-			width:  80,
-			height: 10,
-			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
-				m.FillHeight = true
-			},
-		},
 		"EmptyContent": {
 			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
 			yaml:   "",
