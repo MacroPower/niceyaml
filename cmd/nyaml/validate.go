@@ -114,8 +114,13 @@ func buildRegistry(schemaRef string) (*schema.Registry, error) {
 		return schema.NewRegistry(schema.WithResolvers(ref)), nil
 	}
 
-	return schema.NewRegistry(schema.WithResolvers(
-		schema.Directive(), // Resolves schemas relative to each YAML file.
-		schemastore.New(),  // Automatic discovery by file path.
-	)), nil
+	// Schema validation is optional here, so a document that no resolver
+	// claims passes rather than failing the file.
+	return schema.NewRegistry(
+		schema.WithResolvers(
+			schema.Directive(), // Resolves schemas relative to each YAML file.
+			schemastore.New(),  // Automatic discovery by file path.
+		),
+		schema.WithRequireSchema(false),
+	), nil
 }
