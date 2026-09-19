@@ -8,6 +8,10 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/filepaths"
 )
 
+// ErrInvalidPattern reports a glob pattern [FilePath] cannot use, which is
+// an empty pattern or one whose syntax does not parse.
+var ErrInvalidPattern = filepaths.ErrInvalidPattern
+
 // filePathMatcher matches documents by file path glob pattern.
 type filePathMatcher struct {
 	pattern filepaths.Pattern
@@ -17,8 +21,9 @@ type filePathMatcher struct {
 // glob pattern.
 //
 // The pattern is matched against the full file path using doublestar glob
-// syntax. Returns an error if the pattern syntax is invalid. Use
-// [MustFilePath] for patterns known to be valid at compile time.
+// syntax. A pattern whose syntax does not parse comes back as
+// [ErrInvalidPattern]. Use [MustFilePath] for patterns known to be valid at
+// compile time.
 //
 //	// Matches any YAML file recursively.
 //	m, err := matcher.FilePath("**/*.yaml")
@@ -29,11 +34,11 @@ type filePathMatcher struct {
 //	// Matches YAML files only in the root directory.
 //	m, err := matcher.FilePath("*.yaml")
 //
-// An empty pattern is rejected, since it would match nothing and silently
-// disable the [Matcher].
+// An empty pattern is [ErrInvalidPattern] too, since it would match nothing
+// and silently disable the [Matcher].
 func FilePath(pattern string) (Matcher, error) {
 	if pattern == "" {
-		return nil, fmt.Errorf("%w: %q", filepaths.ErrInvalidPattern, pattern)
+		return nil, fmt.Errorf("%w: %q", ErrInvalidPattern, pattern)
 	}
 
 	p, err := filepaths.NewPattern(pattern)
@@ -44,7 +49,8 @@ func FilePath(pattern string) (Matcher, error) {
 	return &filePathMatcher{pattern: p}, nil
 }
 
-// MustFilePath is like [FilePath] but panics if the pattern is invalid.
+// MustFilePath is like [FilePath] but panics on a pattern [FilePath]
+// reports as [ErrInvalidPattern].
 //
 // Use it for patterns known to be valid at compile time:
 //

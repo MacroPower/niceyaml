@@ -97,7 +97,7 @@ func TestFilePath_InvalidPattern(t *testing.T) {
 	t.Parallel()
 
 	_, err := matcher.FilePath("[")
-	require.Error(t, err)
+	require.ErrorIs(t, err, matcher.ErrInvalidPattern)
 
 	assert.Panics(t, func() {
 		matcher.MustFilePath("[")
@@ -110,7 +110,7 @@ func TestFilePath_EmptyPattern(t *testing.T) {
 	// An empty pattern matches nothing, so it is rejected rather than
 	// silently disabling the matcher.
 	_, err := matcher.FilePath("")
-	require.Error(t, err)
+	require.ErrorIs(t, err, matcher.ErrInvalidPattern)
 
 	assert.Panics(t, func() {
 		matcher.MustFilePath("")
