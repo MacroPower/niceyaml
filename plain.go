@@ -32,8 +32,10 @@ func (plainRenderer) Print(view *line.View) string {
 	for i, ln := range view.AllLines() {
 		anns := view.Annotations(i)
 
-		if above := anns.Filter(line.Above); len(above) > 0 {
-			rows = append(rows, blank+escape.Control(above.String()))
+		// An annotation without content adds no row, as it adds none to a
+		// marker row or to [line.View.String].
+		if above := anns.Filter(line.Above).String(); above != "" {
+			rows = append(rows, blank+escape.Control(above))
 		}
 
 		rows = append(rows, fmt.Sprintf("%*d | %s", width, ln.Number(), escape.Control(ln.Content())))
