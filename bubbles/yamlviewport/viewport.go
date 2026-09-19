@@ -171,7 +171,8 @@ func WithContainerStyle(s lipgloss.Style) Option {
 
 // WithSearcher is an [Option] that sets the [Searcher] that search terms run
 // through. Without it, and without [WithFinder], the viewport creates a
-// [finder.Finder] with a default [normalizer.Normalizer].
+// [finder.Finder] with a default [normalizer.Normalizer]. A nil s selects
+// that same default.
 func WithSearcher(s Searcher) Option {
 	return func(m *Model) {
 		m.searcher = s
@@ -184,7 +185,13 @@ func WithSearcher(s Searcher) Option {
 //	yamlviewport.WithFinder(finder.New(finder.WithNormalizer(normalizer.New(
 //		normalizer.WithDiacriticFold(false),
 //	))))
+//
+// A nil f selects the default searcher, as a nil [WithSearcher] does.
 func WithFinder(f *finder.Finder) Option {
+	if f == nil {
+		return WithSearcher(nil)
+	}
+
 	return WithSearcher(finderSearcher{finder: f})
 }
 

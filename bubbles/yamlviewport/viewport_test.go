@@ -3460,6 +3460,34 @@ func TestViewport_WithSearcher(t *testing.T) {
 		m.SetSearchTerm("Value")
 		assert.Equal(t, 1, m.SearchCount())
 	})
+
+	t.Run("a nil searcher or finder selects the default", func(t *testing.T) {
+		t.Parallel()
+
+		// WithFinder wrapped a nil finder in an adapter, which is a non-nil
+		// Searcher, so the constructor kept it and the first search
+		// dereferenced the finder.
+		tcs := map[string]yamlviewport.Option{
+			"nil searcher": yamlviewport.WithSearcher(nil),
+			"nil finder":   yamlviewport.WithFinder(nil),
+		}
+
+		for name, opt := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()), opt)
+
+				m.SetWidth(80)
+				m.SetHeight(10)
+				m.SetRevision(niceyaml.NewSourceFromString("key: Value\n"))
+
+				// The default finder folds case.
+				m.SetSearchTerm("value")
+				assert.Equal(t, 1, m.SearchCount())
+			})
+		}
+	})
 }
 
 func TestViewport_OffsetWithNoContentHeight(t *testing.T) {
