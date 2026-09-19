@@ -27,8 +27,8 @@ var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 // A relative file path joins baseDir; an absolute path or an HTTP/HTTPS
 // URL ignores baseDir. When baseDir is empty and the path is relative,
 // the error wraps [ErrNoBaseDir], and an empty ref is [ErrEmptyPath]
-// whatever baseDir is. HTTPOptions apply when ref is an HTTP/HTTPS URL and
-// do nothing for file paths.
+// whatever baseDir is. The registry fetches an HTTP/HTTPS reference with
+// the client [WithHTTPClient] gave it.
 //
 // The result is the shape a [Resolver] returns, so a resolver that builds
 // the reference from the document hands it back as it is:
@@ -46,11 +46,11 @@ var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 //	}
 //
 //	reg := schema.NewRegistry(schema.WithResolvers(ref))
-func FileOrURL(baseDir, ref string, opts ...HTTPOption) (Ref, error) {
+func FileOrURL(baseDir, ref string) (Ref, error) {
 	// Check for an HTTP/HTTPS URL by string prefix, so a malformed URL that
 	// fails to parse does not fall through as a file path.
 	if isHTTPURL(ref) {
-		return URL(ref, opts...), nil
+		return URL(ref), nil
 	}
 
 	// An empty reference names no file, so it must not join baseDir and

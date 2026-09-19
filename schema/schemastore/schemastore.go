@@ -65,9 +65,10 @@ type CatalogEntry struct {
 
 // SchemaStore matches documents to SchemaStore.org catalog entries.
 //
-// A matched schema is fetched from the entry's URL when the ref the store
-// returns is loaded, under the refresh timeout, so a schema host that
-// accepts a connection and never answers cannot hang the caller.
+// The store names a matched schema by the entry's URL, and the registry
+// fetches it with the client
+// [go.jacobcolvin.com/niceyaml/schema.WithHTTPClient] gave the registry.
+// The store's own client and refresh timeout apply to the catalog alone.
 //
 // The catalog is fetched on the first lookup and cached for the configured
 // TTL. Once the cache expires, the next lookup refreshes it; a refresh that
@@ -139,8 +140,9 @@ func WithCatalogURL(url string) Option {
 }
 
 // WithHTTPClient is an [Option] that sets a custom HTTP client for fetching
-// the catalog and schemas. A nil client keeps the default,
-// [http.DefaultClient].
+// the catalog. A nil client keeps the default, [http.DefaultClient]. The
+// registry fetches the schemas the catalog names with its own client, from
+// [go.jacobcolvin.com/niceyaml/schema.WithHTTPClient].
 func WithHTTPClient(client *http.Client) Option {
 	return func(s *SchemaStore) {
 		if client != nil {
@@ -158,17 +160,16 @@ func WithCacheTTL(ttl time.Duration) Option {
 	}
 }
 
-// WithRefreshTimeout is an [Option] that sets the timeout for each HTTP
-// fetch the store makes: every catalog fetch, the first one included, and
-// every fetch of a matched schema.
+// WithRefreshTimeout is an [Option] that sets the timeout for each catalog
+// fetch, the first one included.
 //
 // A lookup that finds the cache expired fetches the catalog under this
 // timeout. If the fetch fails or times out, the lookup uses the previous
 // catalog when one exists, so a temporarily unreachable SchemaStore.org
 // degrades to stale matches rather than errors. The fetch does not inherit
 // the cancellation or deadline of the lookup that started it, so this
-// timeout alone bounds how long it runs. A schema fetch keeps the
-// cancellation of the caller that loads it and gets this timeout on top.
+// timeout alone bounds how long it runs. A fetch of a matched schema is
+// the registry's, bounded by its client and the context of the lookup.
 //
 // Defaults to 10 seconds. A timeout of zero or less keeps the default,
 // since a fetch under an expired deadline could never succeed.
@@ -244,10 +245,10 @@ func New(opts ...Option) *SchemaStore {
 }
 
 // Resolve names the schema for the catalog entry matching the document's
-// file path. The returned [schema.Ref] fetches the schema from the entry's
-// URL when loaded, under the refresh timeout. A document that matches no
-// entry reports [ErrNoCatalogMatch]; a catalog that has never loaded
-// reports [ErrFetchCatalog].
+// file path. The returned [schema.Ref] names the entry's URL, which the
+// registry fetches with its own client. A document that matches no entry
+// reports [ErrNoCatalogMatch]; a catalog that has never loaded reports
+// [ErrFetchCatalog].
 //
 // Implements [schema.Resolver].
 func (s *SchemaStore) Resolve(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
@@ -257,19 +258,7 @@ func (s *SchemaStore) Resolve(ctx context.Context, doc *niceyaml.Document) (sche
 	}
 
 	// The catalog keeps only entries with a URL, so the Ref names one.
-	ref := schema.URL(entry.URL, schema.WithHTTPClient(s.client))
-
-	// Bound the GET where the registry performs it, so a schema host that
-	// never answers cannot hang a caller whose context has no deadline.
-	// The caller's cancellation still applies, unlike a catalog fetch,
-	// which several lookups share.
-	return schema.Loadable(ref.Key(), func(ctx context.Context) ([]byte, error) {
-		ctx, cancel := context.WithTimeout(ctx, s.refreshTimeout)
-		defer cancel()
-
-		//nolint:wrapcheck // The URL loader already wraps errors with context.
-		return ref.Load(ctx)
-	}), nil
+	return schema.URL(entry.URL), nil
 }
 
 // FindMatch finds the catalog entry matching a file path.

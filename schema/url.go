@@ -1,44 +1,13 @@
 package schema
 
 import (
-	"context"
-	"net/http"
 	"strings"
-
-	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 )
 
-// HTTPOption configures HTTP client settings for loaders that fetch schemas
-// over HTTP.
-//
-// Used by [URL] and [FileOrURL].
-//
-// Available options:
-//   - [WithHTTPClient]
-type HTTPOption func(*httpConfig)
-
-// httpConfig holds HTTP configuration shared by the URL and FileOrURL
-// loaders.
-type httpConfig struct {
-	client *http.Client
-}
-
-// WithHTTPClient is an [HTTPOption] that sets a custom HTTP client. A nil
-// client keeps the default, [http.DefaultClient].
-//
-// Applies to [URL] and [FileOrURL] loaders.
-func WithHTTPClient(client *http.Client) HTTPOption {
-	return func(cfg *httpConfig) {
-		if client != nil {
-			cfg.client = client
-		}
-	}
-}
-
-// URL creates a [Ref] that fetches schema data from an HTTP/HTTPS URL.
-// The Ref is a [Resolver] that names the URL for every document, and the
-// registry fetches once per URL and reuses the compiled validator for
-// every document that names it.
+// URL creates a [Ref] that names a schema by its HTTP or HTTPS URL. The Ref
+// is a [Resolver] that names the URL for every document, and a [Registry]
+// fetches it once with the client [WithHTTPClient] gave it and reuses the
+// compiled schema for every document that names it.
 //
 // The scheme of schemaURL is lowercased, and the rest of it left as
 // written, so one schema spelled with different scheme case is fetched and
@@ -47,27 +16,18 @@ func WithHTTPClient(client *http.Client) HTTPOption {
 // schemaURL is empty. A reference read from a directive or a command line
 // goes through [FileOrURL].
 //
-// By default, the loader uses [http.DefaultClient] which has no explicit
-// request timeout. Timeouts are controlled via the context passed to Load.
-// Use [WithHTTPClient] to provide a client with custom timeout settings. The
-// loader rejects a response body over 10 MB.
+// A registry rejects a response body over 10 MB. The client's Timeout and
+// the context of the lookup bound each fetch. [Ref.Load] fetches the URL
+// with [http.DefaultClient] for a caller that loads schemas without a
+// registry.
 //
 //	r := schema.URL("https://example.com/schema.json")
-func URL(schemaURL string, opts ...HTTPOption) Ref {
-	cfg := &httpConfig{client: http.DefaultClient}
-	for _, opt := range opts {
-		opt(cfg)
-	}
-
+func URL(schemaURL string) Ref {
 	if schemaURL == "" {
 		panic("schema.URL: url is empty")
 	}
 
-	schemaURL = normalizeScheme(schemaURL)
-
-	return Loadable(schemaURL, func(ctx context.Context) ([]byte, error) {
-		return httpfetch.Get(ctx, cfg.client, schemaURL)
-	})
+	return Ref{key: normalizeScheme(schemaURL), url: true}
 }
 
 // normalizeScheme lowercases the scheme of ref and leaves the rest of it

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"sync"
 
@@ -48,6 +49,7 @@ var (
 type Registry struct {
 	group       singleflight.Group // one load and compile in flight per Key
 	cache       map[string]*Schema // compiled schemas by Ref.Key
+	client      *http.Client       // fetches the schemas URL refs name
 	resolvers   []Resolver
 	compileOpts []CompileOption
 	mu          sync.RWMutex // guards cache
@@ -61,7 +63,32 @@ type Registry struct {
 //   - [WithResolvers]
 //   - [WithCompileOptions]
 //   - [WithRequireSchema]
+//   - [WithHTTPClient]
 type RegistryOption func(*Registry)
+
+// WithHTTPClient is a [RegistryOption] that sets the client the registry
+// fetches schemas with: every [Ref] from [URL], whether a resolver holds
+// it or [Directive] and [FileOrURL] build it from a reference in the
+// input. The client's Timeout bounds each fetch, beside the context of the
+// lookup, so a schema host that accepts a connection and never answers
+// cannot hang a caller whose context has no deadline:
+//
+//	reg := schema.NewRegistry(
+//	    schema.WithHTTPClient(&http.Client{Timeout: 10 * time.Second}),
+//	    schema.WithResolvers(schema.Directive(), schemastore.New()),
+//	)
+//
+// The default is [http.DefaultClient], and a nil client keeps it. A
+// [go.jacobcolvin.com/niceyaml/schema/schemastore.SchemaStore] fetches
+// its catalog with a client of its own, since the catalog is not a schema
+// the registry loads.
+func WithHTTPClient(client *http.Client) RegistryOption {
+	return func(r *Registry) {
+		if client != nil {
+			r.client = client
+		}
+	}
+}
 
 // WithResolvers is a [RegistryOption] that appends resolvers to the end of
 // the lookup order. Lookup tries them in the order given, and the first
@@ -128,6 +155,7 @@ func WithCompileOptions(opts ...CompileOption) RegistryOption {
 func NewRegistry(opts ...RegistryOption) *Registry {
 	r := &Registry{
 		cache:         make(map[string]*Schema),
+		client:        http.DefaultClient,
 		requireSchema: true,
 	}
 	for _, opt := range opts {
@@ -322,7 +350,7 @@ func (r *Registry) compile(ctx context.Context, ref Ref) error {
 		return nil
 	}
 
-	data, err := ref.Load(ctx)
+	data, err := ref.fetch(ctx, r.client)
 	if err != nil {
 		return fmt.Errorf("%w: %q: %w", ErrLoad, key, err)
 	}

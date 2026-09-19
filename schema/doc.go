@@ -137,7 +137,14 @@
 //	schema.URL("https://example.com/schema.json")
 //
 // [FileOrURL] routes a reference as written in a directive or on a command
-// line, which may be a file path or a URL.
+// line, which may be a file path or a URL. The registry fetches every URL
+// with one client, which [WithHTTPClient] sets, so a timeout or a proxy is
+// configured once for every resolver that names a URL:
+//
+//	reg := schema.NewRegistry(
+//	    schema.WithHTTPClient(&http.Client{Timeout: 10 * time.Second}),
+//	    schema.WithResolvers(schema.Directive(), schemastore.New()),
+//	)
 //
 // # Resolver Order
 //

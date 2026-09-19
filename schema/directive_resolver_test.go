@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -43,7 +44,7 @@ func TestDirective(t *testing.T) {
 		assert.NotNil(t, res)
 	})
 
-	t.Run("options are passed through", func(t *testing.T) {
+	t.Run("registry fetches a directive URL with its client", func(t *testing.T) {
 		t.Parallel()
 
 		schemaData := `{"type": "object"}`
@@ -60,12 +61,16 @@ func TestDirective(t *testing.T) {
 		err := os.WriteFile(yamlPath, yamlData, 0o600)
 		require.NoError(t, err)
 
-		customClient := &http.Client{}
-		res := schema.Directive(schema.WithHTTPClient(customClient))
+		var requests atomic.Int32
 
-		doc := firstDocumentFromFile(t, yamlPath)
-		_, data := resolveAndLoad(t, res, doc)
-		assert.Equal(t, []byte(schemaData), data)
+		reg := schema.NewRegistry(
+			schema.WithHTTPClient(countingClient(&requests)),
+			schema.WithResolvers(schema.Directive()),
+		)
+
+		err = reg.Validate(t.Context(), firstDocumentFromFile(t, yamlPath))
+		require.NoError(t, err)
+		assert.Equal(t, int32(1), requests.Load())
 	})
 }
 

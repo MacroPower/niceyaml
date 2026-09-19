@@ -136,9 +136,7 @@ func tokenLine(tk *token.Token) (int, bool) {
 }
 
 // directiveResolver resolves schemas from yaml-language-server directives.
-type directiveResolver struct {
-	opts []HTTPOption
-}
+type directiveResolver struct{}
 
 // Directive creates a new [Resolver] for yaml-language-server schema
 // directives.
@@ -159,15 +157,16 @@ type directiveResolver struct {
 //	---
 //	key: value
 //
-// The first directive in the preamble wins.
+// The first directive in the preamble wins. The registry fetches a
+// directive that names a URL with the client [WithHTTPClient] gave it.
 //
 //	reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
-func Directive(opts ...HTTPOption) Resolver {
-	return &directiveResolver{opts: opts}
+func Directive() Resolver {
+	return directiveResolver{}
 }
 
 // Resolve implements [Resolver].
-func (r *directiveResolver) Resolve(_ context.Context, doc *niceyaml.Document) (Ref, error) {
+func (directiveResolver) Resolve(_ context.Context, doc *niceyaml.Document) (Ref, error) {
 	directive := ParseDocumentDirective(doc.Preamble())
 	if directive == nil {
 		return Ref{}, ErrNoDirective
@@ -179,7 +178,7 @@ func (r *directiveResolver) Resolve(_ context.Context, doc *niceyaml.Document) (
 		baseDir = filepath.Dir(filePath)
 	}
 
-	ref, err := FileOrURL(baseDir, directive.Schema, r.opts...)
+	ref, err := FileOrURL(baseDir, directive.Schema)
 	if errors.Is(err, ErrNoBaseDir) {
 		return Ref{}, fmt.Errorf("%w: %w", ErrNoFilePath, err)
 	}

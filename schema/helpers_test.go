@@ -1,6 +1,8 @@
 package schema_test
 
 import (
+	"net/http"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -29,6 +31,35 @@ func load(t *testing.T, r schema.Resolver) (string, []byte, error) {
 	data, err := ref.Load(t.Context())
 
 	return ref.Key(), data, err //nolint:wrapcheck // Tests inspect the loader's own error.
+}
+
+// lookup builds a registry that fetches with client and holds r as its
+// one resolver, and looks up the schema for a document r never reads. It
+// returns the Lookup error, so a test checks which client fetched and what
+// the fetch reported.
+func lookup(t *testing.T, client *http.Client, r schema.Resolver) error {
+	t.Helper()
+
+	reg := schema.NewRegistry(
+		schema.WithHTTPClient(client),
+		schema.WithResolvers(r),
+	)
+
+	_, err := reg.Lookup(t.Context(), document(t))
+
+	return err //nolint:wrapcheck // Tests inspect the registry's own error.
+}
+
+// countingClient returns a client that counts the requests it sends and
+// sends them through the default transport.
+func countingClient(requests *atomic.Int32) *http.Client {
+	return &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			requests.Add(1)
+
+			return http.DefaultTransport.RoundTrip(r) //nolint:wrapcheck // Test helper.
+		}),
+	}
 }
 
 // fileURL returns the key that [schema.File] names for path, which is its

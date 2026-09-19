@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -123,7 +124,7 @@ func TestURL(t *testing.T) {
 		require.ErrorContains(t, err, "fetch "+server.URL+"/schema.json: status 404")
 	})
 
-	t.Run("with custom client", func(t *testing.T) {
+	t.Run("registry fetches with its client", func(t *testing.T) {
 		t.Parallel()
 
 		schemaData := `{"type": "object"}`
@@ -134,14 +135,14 @@ func TestURL(t *testing.T) {
 		}))
 		defer server.Close()
 
-		customClient := &http.Client{}
+		var requests atomic.Int32
 
-		_, data, err := load(t, schema.URL(server.URL+"/schema.json", schema.WithHTTPClient(customClient)))
+		err := lookup(t, countingClient(&requests), schema.URL(server.URL+"/schema.json"))
 		require.NoError(t, err)
-		assert.Equal(t, []byte(schemaData), data)
+		assert.Equal(t, int32(1), requests.Load())
 	})
 
-	t.Run("with nil client", func(t *testing.T) {
+	t.Run("registry with nil client", func(t *testing.T) {
 		t.Parallel()
 
 		schemaData := `{"type": "object"}`
@@ -152,10 +153,9 @@ func TestURL(t *testing.T) {
 		}))
 		defer server.Close()
 
-		// A nil client keeps the default rather than panicking on Load.
-		_, data, err := load(t, schema.URL(server.URL+"/schema.json", schema.WithHTTPClient(nil)))
+		// A nil client keeps the default rather than panicking on the fetch.
+		err := lookup(t, nil, schema.URL(server.URL+"/schema.json"))
 		require.NoError(t, err)
-		assert.Equal(t, []byte(schemaData), data)
 	})
 
 	t.Run("context cancellation", func(t *testing.T) {
@@ -203,7 +203,8 @@ func TestURL(t *testing.T) {
 			}),
 		}
 
-		_, _, err := load(t, schema.URL("http://example.com/schema.json", schema.WithHTTPClient(client)))
+		err := lookup(t, client, schema.URL("http://example.com/schema.json"))
+		require.ErrorIs(t, err, schema.ErrLoad)
 		require.ErrorContains(t, err, "read response from http://example.com/schema.json")
 	})
 
@@ -223,7 +224,8 @@ func TestURL(t *testing.T) {
 			}),
 		}
 
-		_, _, err := load(t, schema.URL("http://example.com/schema.json", schema.WithHTTPClient(client)))
+		err := lookup(t, client, schema.URL("http://example.com/schema.json"))
+		require.ErrorIs(t, err, schema.ErrLoad)
 		require.ErrorContains(t, err, "response exceeds")
 	})
 }

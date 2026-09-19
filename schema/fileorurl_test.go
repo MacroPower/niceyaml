@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,10 +17,10 @@ import (
 
 // fileOrURL is [schema.FileOrURL] for a reference the test knows names a
 // schema.
-func fileOrURL(t *testing.T, baseDir, ref string, opts ...schema.HTTPOption) schema.Ref {
+func fileOrURL(t *testing.T, baseDir, ref string) schema.Ref {
 	t.Helper()
 
-	r, err := schema.FileOrURL(baseDir, ref, opts...)
+	r, err := schema.FileOrURL(baseDir, ref)
 	require.NoError(t, err)
 
 	return r
@@ -229,12 +230,14 @@ func TestFileOrURL(t *testing.T) {
 		}))
 		defer server.Close()
 
-		customClient := &http.Client{}
-		r := fileOrURL(t, "/dir", server.URL+"/schema.json", schema.WithHTTPClient(customClient))
+		var requests atomic.Int32
 
-		_, data, err := load(t, r)
+		r := fileOrURL(t, "/dir", server.URL+"/schema.json")
+
+		// The registry fetches the URL with its own client.
+		err := lookup(t, countingClient(&requests), r)
 		require.NoError(t, err)
-		assert.Equal(t, []byte(schemaData), data)
+		assert.Equal(t, int32(1), requests.Load())
 	})
 
 	t.Run("windows file URL on any platform", func(t *testing.T) {

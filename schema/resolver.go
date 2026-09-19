@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 )
 
 // ErrNoMatch reports that a [Resolver] does not apply to a document. A
@@ -15,9 +17,10 @@ import (
 var ErrNoMatch = errors.New("no matching schema")
 
 // Ref is the schema a [Resolver] names for a document: a [*Schema]
-// compiled already, from [Compiled], or a key and a function that loads
-// the bytes to compile, from [Loadable]. [Embedded], [File], [URL], and
-// [FileOrURL] build Refs of the second kind.
+// compiled already, from [Compiled]; a key and a function that loads the
+// bytes to compile, from [Loadable], which [Embedded] and [File] build; or
+// an HTTP URL the registry fetches, from [URL]. [FileOrURL] builds one of
+// the last two.
 //
 // A Ref is itself a [Resolver] that names its schema for every document,
 // so one goes into [WithResolvers] or [When] as it is, and a resolver that
@@ -32,10 +35,12 @@ var ErrNoMatch = errors.New("no matching schema")
 //	    return schema.File("schemas/" + kind + ".json"), nil
 //	})
 //
-// The registry uses a compiled schema as it is. For a loadable Ref it
-// checks its cache by [Ref.Key] before any bytes move, and calls
-// [Ref.Load] only on a cache miss, so a load that succeeds runs once per
-// key however many documents name it.
+// The registry uses a compiled schema as it is. For any other Ref it
+// checks its cache by [Ref.Key] before any bytes move, and loads the
+// schema only on a cache miss, so a load that succeeds runs once per key
+// however many documents name it. The registry fetches a URL with the
+// client [WithHTTPClient] gave it, so one client serves every URL its
+// resolvers name.
 //
 // The zero Ref names no schema. Return it beside an error, as a resolver
 // does with [ErrNoMatch].
@@ -43,6 +48,8 @@ type Ref struct {
 	schema *Schema
 	load   func(ctx context.Context) ([]byte, error)
 	key    string
+	// The key is an HTTP URL the registry fetches with its client.
+	url bool
 }
 
 // Compiled creates a new [Ref] that carries s, a schema compiled already,
@@ -88,20 +95,35 @@ func (r Ref) Schema() *Schema {
 	return r.schema
 }
 
-// Key returns the key of a [Ref] from [Loadable], or "" for any other Ref.
+// Key returns the key of a [Ref] from [Loadable] or [URL], or "" for any
+// other Ref.
 func (r Ref) Key() string {
 	return r.key
 }
 
-// Load returns the schema bytes of a [Ref] from [Loadable]. A Ref from
-// [Compiled], or the zero Ref, carries no loader, and Load then returns an
-// error wrapping [ErrLoad].
+// Load returns the schema bytes of a [Ref] from [Loadable], or fetches
+// those of a Ref from [URL] with [http.DefaultClient]. A [Registry] loads
+// the same bytes itself and fetches a URL with the client [WithHTTPClient]
+// gave it, so Load is for a caller that loads schemas without one. A Ref
+// from [Compiled], or the zero Ref, carries no loader, and Load then
+// returns an error wrapping [ErrLoad].
 func (r Ref) Load(ctx context.Context) ([]byte, error) {
-	if r.load == nil {
+	return r.fetch(ctx, http.DefaultClient)
+}
+
+// fetch is [Ref.Load] with the client that fetches a Ref from [URL].
+func (r Ref) fetch(ctx context.Context, client *http.Client) ([]byte, error) {
+	switch {
+	case r.url:
+		//nolint:wrapcheck // The fetch error names the URL already.
+		return httpfetch.Get(ctx, client, r.key)
+
+	case r.load != nil:
+		return r.load(ctx)
+
+	default:
 		return nil, fmt.Errorf("%w: ref carries no loader", ErrLoad)
 	}
-
-	return r.load(ctx)
 }
 
 // Resolve implements [Resolver]. It names the Ref's schema for every
