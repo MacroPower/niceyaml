@@ -39,6 +39,13 @@ func TestValidateFile(t *testing.T) {
 			content: "name: a\n---\nvalue: 2\n---\nname: c\n",
 			want:    []string{"3:1:"},
 		},
+		"comment above the first header": {
+			content: "# yaml-language-server: $schema=./s.json\n---\nname: a\n",
+		},
+		"comment above an invalid document": {
+			content: "# a preamble\n---\nvalue: 1\n",
+			want:    []string{"3:1:"},
+		},
 	}
 
 	for name, tc := range tcs {

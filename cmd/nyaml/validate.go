@@ -77,6 +77,12 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) er
 	var errs []error
 
 	for _, doc := range docs {
+		// A comment block above the first "---", such as a schema directive,
+		// parses as a document of its own with nothing to validate.
+		if !doc.HasContent() {
+			continue
+		}
+
 		err = reg.Validate(ctx, doc)
 		if err != nil {
 			errs = append(errs, err)
