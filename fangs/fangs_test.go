@@ -181,6 +181,61 @@ func TestErrorHandler(t *testing.T) {
 				"",
 			),
 		},
+		"usage error requires at least": {
+			err: errors.New("requires at least 1 arg(s), only received 0"),
+			want: stringtest.JoinLF(
+				"Error",
+				"  requires at least 1 arg(s), only received 0",
+				"",
+				"Try --help for usage.",
+				"",
+				"",
+			),
+		},
+		"usage error accepts at most": {
+			err: errors.New("accepts at most 2 arg(s), received 3"),
+			want: stringtest.JoinLF(
+				"Error",
+				"  accepts at most 2 arg(s), received 3",
+				"",
+				"Try --help for usage.",
+				"",
+				"",
+			),
+		},
+		"usage error accepts exactly": {
+			err: errors.New("accepts 1 arg(s), received 2"),
+			want: stringtest.JoinLF(
+				"Error",
+				"  accepts 1 arg(s), received 2",
+				"",
+				"Try --help for usage.",
+				"",
+				"",
+			),
+		},
+		"usage error accepts between": {
+			err: errors.New("accepts between 1 and 2 arg(s), received 3"),
+			want: stringtest.JoinLF(
+				"Error",
+				"  accepts between 1 and 2 arg(s), received 3",
+				"",
+				"Try --help for usage.",
+				"",
+				"",
+			),
+		},
+		"usage error required flag not set": {
+			err: errors.New(`required flag(s) "schema" not set`),
+			want: stringtest.JoinLF(
+				"Error",
+				`  required flag(s) "schema" not set`,
+				"",
+				"Try --help for usage.",
+				"",
+				"",
+			),
+		},
 		"non-usage error with flag word": {
 			err: errors.New("flagged as incorrect"),
 			want: stringtest.JoinLF(

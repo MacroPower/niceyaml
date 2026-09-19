@@ -111,7 +111,9 @@ func handleError(w io.Writer, styles fang.Styles, err error, cfg config) {
 // cannot reach the writer has nowhere to report that.
 func ignoreN(_ int, _ error) {}
 
-// isUsageError returns true if err appears to be a Cobra usage error.
+// isUsageError returns true if err appears to be a Cobra usage error. The
+// prefixes cover Cobra's flag parser, its argument-count validators, and its
+// required-flag check.
 // This is a workaround until Cobra exposes a proper usage error type.
 // See: https://github.com/spf13/cobra/pull/2266
 func isUsageError(err error) bool {
@@ -126,6 +128,9 @@ func isUsageError(err error) bool {
 		"unknown shorthand flag:",
 		"unknown command",
 		"invalid argument",
+		"requires at least",
+		"accepts ",
+		"required flag(s)",
 	} {
 		if strings.HasPrefix(s, prefix) {
 			return true
