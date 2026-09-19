@@ -48,7 +48,10 @@
 // text styling. They are commonly used in syntax highlighting configurations
 // and theme files.
 //
-// Styles are specified as space-separated tokens. Order is not significant.
+// Styles are specified as space-separated tokens, applied left to right. A
+// later color replaces an earlier one of the same kind, and a no* keyword
+// clears the attribute only when it follows the keyword that set it, so
+// "bold nobold" leaves bold off and "nobold bold" turns it on.
 //
 // Colors use hex format:
 //
