@@ -64,13 +64,16 @@ func TrimLineEnding(s string) string {
 	return strings.TrimSuffix(strings.TrimSuffix(s, "\n"), "\r")
 }
 
-// ResetPositions clones tks and shifts the positions of the clones to where
-// a fresh tokenize of their text would put them, so a stream cut from a
-// longer one, such as the tokens of one document from [SplitDocuments],
-// counts its lines from 1 as [Tokenize] does. Every token moves by the same
-// number of lines and the same offset distance, and tokens on the first line
-// also move by the same number of columns. Tokens that start at line 1
-// already come back as clones with the same positions.
+// ResetPositions clones tks and shifts the positions of the clones so that
+// a stream cut from a longer one, such as the tokens of one document from
+// [SplitDocuments], counts its lines from 1 as [Tokenize] does. Every token
+// moves by the same number of lines and the same offset distance, and
+// tokens on the first line also move by the same number of columns. Tokens
+// that start at line 1 already come back as clones with the same positions.
+// The shift is uniform, so a position the lexer placed oddly, such as block
+// scalar content followed by a document header, which it places on the
+// header's line, stays odd rather than moving to where a fresh tokenize of
+// the cut text alone would put it.
 //
 // The text starts with the Origin of the first token with a non-nil position.
 // That Origin can open with whitespace and line breaks, such as the line break
