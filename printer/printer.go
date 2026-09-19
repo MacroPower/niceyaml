@@ -1001,7 +1001,9 @@ func (p *Printer) contentWidth(gutterWidth int) int {
 func (p *Printer) wrapContent(content string, gutterWidth int) []string {
 	cw := p.contentWidth(gutterWidth)
 	if cw <= 0 {
-		return []string{content}
+		// A newline in the content is a row of its own with or without
+		// wrapping, so the row count matches what Print writes.
+		return strings.Split(content, "\n")
 	}
 
 	return strings.Split(lipgloss.Wrap(content, cw, wrapOnCharacters), "\n")

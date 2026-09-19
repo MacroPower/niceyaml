@@ -3600,6 +3600,38 @@ func TestAnnotationContext_ColWidth(t *testing.T) {
 	}
 }
 
+func TestPrinter_Layout_MultiLineAnnotation(t *testing.T) {
+	t.Parallel()
+
+	// A custom annotation may span several lines. The layout counts each
+	// of them as a row, wrapping or not, so the rows it reports match the
+	// rows Print writes.
+	joined := func(ctx printer.AnnotationContext) string {
+		return strings.Join(ctx.Annotations.Contents(), "\n")
+	}
+
+	tcs := map[string]struct {
+		width int
+	}{
+		"without wrapping": {width: 0},
+		"with wrapping":    {width: 30},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := niceyaml.NewSourceFromString("a: 1\nb: 2\n").View()
+			view.Annotate(0, line.Annotation{Content: "one\ntwo"})
+
+			p := testPrinter().With(printer.WithAnnotationFunc(joined), printer.WithWidth(tc.width))
+
+			printed := strings.Split(strings.TrimSuffix(p.Print(view), "\n"), "\n")
+			assert.Len(t, printed, p.Layout(view).Rows())
+		})
+	}
+}
+
 func TestPrinter_WithMaxNumber(t *testing.T) {
 	t.Parallel()
 
