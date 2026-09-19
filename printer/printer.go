@@ -452,9 +452,10 @@ func WithWidth(width int) Option {
 	}
 }
 
-// WithMaxNumber is a [Option] that sets the line number the gutter sizes
-// itself for, instead of the largest number in the view. A max number of 0,
-// the default, takes the number from the view.
+// WithMaxNumber is a [Option] that sets the smallest line number the gutter
+// sizes itself for. The gutter fits the larger of n and the largest number
+// in the view, so a number the view holds never overflows it. A max number
+// of 0, the default, takes the number from the view alone.
 //
 // Use it to give two views the same gutter width, as a side-by-side diff
 // needs when one revision is longer than the other.
@@ -495,14 +496,10 @@ func (p *Printer) ContextLines() int {
 }
 
 // MaxNumber returns the line number the gutter sizes itself for when
-// rendering view: the number [WithMaxNumber] set, or the largest line number
-// in the view.
+// rendering view: the larger of the number [WithMaxNumber] set and the
+// largest line number in the view.
 func (p *Printer) MaxNumber(view *line.View) int {
-	if p.maxNumber > 0 {
-		return p.maxNumber
-	}
-
-	return maxNumber(view)
+	return max(p.maxNumber, maxNumber(view))
 }
 
 // ContainerStyle returns the [lipgloss.Style] wrapped around the whole

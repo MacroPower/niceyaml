@@ -3626,6 +3626,18 @@ func TestPrinter_WithMaxNumber(t *testing.T) {
 		assert.Equal(t, 2, p.MaxNumber(short))
 		assert.Equal(t, 5, p.Layout(short).GutterWidth())
 	})
+
+	t.Run("a longer view widens the gutter past the given number", func(t *testing.T) {
+		t.Parallel()
+
+		// A number below the view's own largest would let the last rows
+		// overflow the gutter the layout reports, so the view wins.
+		long := niceyaml.NewSourceFromString(strings.Repeat("k: v\n", 10000)).View()
+		p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithMaxNumber(3))
+
+		assert.Equal(t, 10000, p.MaxNumber(long))
+		assert.Equal(t, 6, p.Layout(long).GutterWidth())
+	})
 }
 
 func TestPrinter_Layout_Width(t *testing.T) {
