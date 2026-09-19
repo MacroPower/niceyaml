@@ -198,8 +198,8 @@ func TestSourceError_Error_Name(t *testing.T) {
 	noLocation := map[string]struct {
 		err  error
 		want string
-		// The reason the location did not resolve, which Detail names below
-		// the message, or "" for an error that carries no location.
+		// The reason the location did not resolve, which the detail names
+		// below the message, or "" for an error that carries no location.
 		wantDetail string
 	}{
 		"no name leaves the message alone": {
@@ -1180,7 +1180,7 @@ func TestError_MultiError(t *testing.T) {
 	})
 }
 
-func TestSourceError_Detail_NestedLocations(t *testing.T) {
+func TestSourceError_Excerpt_NestedLocations(t *testing.T) {
 	t.Parallel()
 
 	// A nested error with a location annotates the source excerpt. A nested

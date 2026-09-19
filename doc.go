@@ -126,10 +126,9 @@
 //	p := printer.New(printer.WithWidth(width), printer.WithContextLines(3))
 //	fmt.Println(p.PrintError(err))
 //
-// This package knows nothing of the printer. [SourceError.Detail] renders
-// the excerpt with any [Renderer], which a [printer.Printer] is, and the
-// marks themselves are decoration on a [line.View], so a caller composes
-// them with anything else it renders. [SourceError.Excerpt]
+// This package knows nothing of the printer. The marks of an error are
+// decoration on a [line.View], so a caller renders them with any renderer
+// and composes them with anything else it renders. [SourceError.Excerpt]
 // returns the hunks around the locations as a view, as [diff.Result.Hunks]
 // does for a diff, and [SourceError.Annotate] marks a whole view of the
 // source, so a viewer shows a document with every error in place:

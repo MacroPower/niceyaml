@@ -9,14 +9,14 @@ import (
 	"go.jacobcolvin.com/niceyaml/line"
 )
 
-// plainRenderer is the [Renderer] the %+v verb uses. It renders a view as
-// text without styles: each line behind its number, carets on the row below
+// plainRenderer renders the excerpt the %+v verb prints. It renders a view
+// as text without styles: each line behind its number, carets on the row below
 // under the columns its overlays cover, and its annotations beside the
 // carets, so an excerpt reads in a log as it does in a terminal. Control
 // characters render as their pictures, as the printer renders them.
 type plainRenderer struct{}
 
-// Print implements [Renderer].
+// Print renders view as plain text.
 func (plainRenderer) Print(view *line.View) string {
 	width := 4
 	for _, ln := range view.AllLines() {
