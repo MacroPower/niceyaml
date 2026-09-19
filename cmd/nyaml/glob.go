@@ -23,6 +23,7 @@ var errNoMatch = errors.New("no files match pattern")
 //   - `?` matches any single non-separator character.
 //   - `[abc]` matches any character in the set.
 //   - `[a-z]` matches any character in the range.
+//   - `{a,b}` matches any of the comma-separated alternatives.
 //
 // Returns an error if the pattern syntax is invalid.
 func glob(pattern string) ([]string, error) {
@@ -36,7 +37,7 @@ func glob(pattern string) ([]string, error) {
 
 // containsGlobChars reports whether s contains glob metacharacters.
 func containsGlobChars(s string) bool {
-	return strings.ContainsAny(s, "*?[")
+	return strings.ContainsAny(s, "*?[{")
 }
 
 // expandPaths expands arguments containing glob patterns into a list of

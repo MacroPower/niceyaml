@@ -32,6 +32,10 @@ func TestContainsGlobChars(t *testing.T) {
 			input: "**/[a-z]*.yaml",
 			want:  true,
 		},
+		"brace alternation": {
+			input: "{a,b}.yaml",
+			want:  true,
+		},
 		"no glob chars": {
 			input: "file.yaml",
 			want:  false,
@@ -134,6 +138,10 @@ func TestExpand(t *testing.T) {
 		"literal name with metacharacter": {
 			args:      []string{bracketFile},
 			wantNames: []string{"cfg[1].txt"},
+		},
+		"glob with brace alternation": {
+			args:      []string{filepath.Join(tmpDir, "{000,002}.yaml")},
+			wantNames: []string{"000.yaml", "002.yaml"},
 		},
 		"no matches": {
 			args: []string{filepath.Join(tmpDir, "*.json")},
