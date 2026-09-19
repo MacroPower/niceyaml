@@ -37,21 +37,12 @@ var ErrNoMatch = errors.New("no matching schema")
 // [Ref.Load] only on a cache miss, so a load that succeeds runs once per
 // key however many documents name it.
 //
-// A Ref built from input that names no schema, such as [File] given an
-// empty path, carries that error instead of a schema: [Ref.Resolve] and
-// [Ref.Load] return it, and the registry reports it as [ErrResolve]. The
-// zero Ref names no schema and carries no error. Return it beside an
-// error, as a resolver does with [ErrNoMatch].
+// The zero Ref names no schema. Return it beside an error, as a resolver
+// does with [ErrNoMatch].
 type Ref struct {
 	schema *Schema
 	load   func(ctx context.Context) ([]byte, error)
-	err    error
 	key    string
-}
-
-// failedRef returns a [Ref] that carries err in place of a schema.
-func failedRef(err error) Ref {
-	return Ref{err: err}
 }
 
 // Compiled creates a new [Ref] that carries s, a schema compiled already,
@@ -102,14 +93,10 @@ func (r Ref) Key() string {
 	return r.key
 }
 
-// Load returns the schema bytes of a [Ref] from [Loadable]. A Ref that
-// carries an error returns it. A Ref from [Compiled], or the zero Ref,
-// carries no loader, and Load then returns an error wrapping [ErrLoad].
+// Load returns the schema bytes of a [Ref] from [Loadable]. A Ref from
+// [Compiled], or the zero Ref, carries no loader, and Load then returns an
+// error wrapping [ErrLoad].
 func (r Ref) Load(ctx context.Context) ([]byte, error) {
-	if r.err != nil {
-		return nil, r.err
-	}
-
 	if r.load == nil {
 		return nil, fmt.Errorf("%w: ref carries no loader", ErrLoad)
 	}
@@ -118,13 +105,8 @@ func (r Ref) Load(ctx context.Context) ([]byte, error) {
 }
 
 // Resolve implements [Resolver]. It names the Ref's schema for every
-// document and never reports [ErrNoMatch]. A Ref that carries an error
-// returns it.
+// document and never reports [ErrNoMatch].
 func (r Ref) Resolve(_ context.Context, _ *niceyaml.Document) (Ref, error) {
-	if r.err != nil {
-		return Ref{}, r.err
-	}
-
 	return r, nil
 }
 

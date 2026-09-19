@@ -376,14 +376,14 @@ func TestRegistry_Caching(t *testing.T) {
 		require.ErrorContains(t, err, "empty ref")
 	})
 
-	t.Run("failed ref is rejected", func(t *testing.T) {
+	t.Run("reference error is rejected", func(t *testing.T) {
 		t.Parallel()
 
-		// A resolver that returns a Ref carrying an error, as one that
-		// builds a File from an empty path does, reports that error.
+		// A resolver that hands back what FileOrURL returns for a reference
+		// that names nothing reports that error.
 		reg := schema.NewRegistry(schema.WithResolvers(
-			schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
-				return schema.File(""), nil
+			schema.ResolverFunc(func(_ context.Context, doc *niceyaml.Document) (schema.Ref, error) {
+				return schema.FileOrURL(doc.FilePath(), "")
 			}),
 		))
 

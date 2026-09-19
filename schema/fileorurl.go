@@ -14,8 +14,10 @@ var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 
 // FileOrURL creates a [Ref] for a schema reference as written in a
 // directive or on a command line, routing to [URL] for HTTP/HTTPS
-// references and [File] for file paths. Use [URL] or [File] directly when
-// you know the reference type at construction time.
+// references and [File] for file paths. Input the program did not write
+// can name no schema, so FileOrURL returns that as an error where [File]
+// and [URL] panic. Use those directly when you know the reference at
+// construction time.
 //
 // Schemes match case-insensitively, and an HTTP/HTTPS reference resolves
 // to a [Ref] whose URL carries the scheme in lower case. A file:// URL
@@ -24,29 +26,37 @@ var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 // reference as a relative file path, which then fails to resolve or read.
 // A relative file path joins baseDir; an absolute path or an HTTP/HTTPS
 // URL ignores baseDir. When baseDir is empty and the path is relative,
-// the Ref carries [ErrNoBaseDir], and an empty ref carries [ErrEmptyPath]
+// the error wraps [ErrNoBaseDir], and an empty ref is [ErrEmptyPath]
 // whatever baseDir is. HTTPOptions apply when ref is an HTTP/HTTPS URL and
 // do nothing for file paths.
 //
-//	// Relative path resolved against baseDir.
-//	r := schema.FileOrURL("/configs", "schema.json")
+// The result is the shape a [Resolver] returns, so a resolver that builds
+// the reference from the document hands it back as it is:
 //
-//	// Absolute path used directly.
-//	r := schema.FileOrURL("/configs", "/schemas/config.json")
+//	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
+//	    return schema.FileOrURL(filepath.Dir(doc.FilePath()), pickSchema(doc))
+//	})
 //
-//	// URL fetched directly.
-//	r := schema.FileOrURL("/configs", "https://example.com/schema.json")
-func FileOrURL(baseDir, ref string, opts ...HTTPOption) Ref {
+// A reference from a command line reports its error where the flag is
+// read:
+//
+//	ref, err := schema.FileOrURL(cwd, flag)
+//	if err != nil {
+//	    return fmt.Errorf("--schema: %w", err)
+//	}
+//
+//	reg := schema.NewRegistry(schema.WithResolvers(ref))
+func FileOrURL(baseDir, ref string, opts ...HTTPOption) (Ref, error) {
 	// Check for an HTTP/HTTPS URL by string prefix, so a malformed URL that
 	// fails to parse does not fall through as a file path.
 	if isHTTPURL(ref) {
-		return URL(ref, opts...)
+		return URL(ref, opts...), nil
 	}
 
 	// An empty reference names no file, so it must not join baseDir and
 	// resolve to the base directory itself.
 	if ref == "" {
-		return File(ref)
+		return Ref{}, ErrEmptyPath
 	}
 
 	path := ref
@@ -58,14 +68,14 @@ func FileOrURL(baseDir, ref string, opts ...HTTPOption) Ref {
 	// base directory can resolve, so never join it to baseDir. The drive
 	// then survives into the URL and the read error.
 	if filepath.IsAbs(path) || hasDriveLetter(path) {
-		return File(path)
+		return file(path)
 	}
 
 	if baseDir == "" {
-		return failedRef(fmt.Errorf("%w: %q", ErrNoBaseDir, ref))
+		return Ref{}, fmt.Errorf("%w: %q", ErrNoBaseDir, ref)
 	}
 
-	return File(filepath.Join(baseDir, path))
+	return file(filepath.Join(baseDir, path))
 }
 
 // isHTTPURL reports whether ref starts with http:// or https://, in any

@@ -14,8 +14,8 @@ import (
 
 var (
 	// ErrResolve indicates a resolver applied to the document but could not
-	// name its schema, either by returning an error of its own, a [Ref]
-	// that carries one, or the zero Ref with no error.
+	// name its schema, either by returning an error of its own or the zero
+	// Ref with no error.
 	ErrResolve = errors.New("resolve schema")
 
 	// ErrLoad indicates the schema could not be loaded.
@@ -229,8 +229,7 @@ func (r *Registry) Validate(ctx context.Context, doc *niceyaml.Document) error {
 
 // schema returns the schema for ref: the one it carries, or the bytes it
 // loads, compiled on the first request for its Key and served from the
-// cache after that. The zero Ref names no schema, so it is [ErrResolve],
-// as is a Ref that carries an error.
+// cache after that. The zero Ref names no schema, so it is [ErrResolve].
 //
 // Concurrent requests for one Key share a single load and compile through
 // the singleflight group, and each caller waits for it only while its own
@@ -240,10 +239,6 @@ func (r *Registry) Validate(ctx context.Context, doc *niceyaml.Document) error {
 // case. Any other failure reaches every caller that shared the load,
 // including a timeout inside the load whose error wraps a context error.
 func (r *Registry) schema(ctx context.Context, ref Ref) (*Schema, error) {
-	if ref.err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrResolve, ref.err)
-	}
-
 	if s := ref.Schema(); s != nil {
 		return s, nil
 	}

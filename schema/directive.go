@@ -143,7 +143,7 @@ func Directive(opts ...HTTPOption) Resolver {
 }
 
 // Resolve implements [Resolver].
-func (r *directiveResolver) Resolve(ctx context.Context, doc *niceyaml.Document) (Ref, error) {
+func (r *directiveResolver) Resolve(_ context.Context, doc *niceyaml.Document) (Ref, error) {
 	directive, err := documentDirective(doc)
 	if err != nil {
 		return Ref{}, err
@@ -155,13 +155,17 @@ func (r *directiveResolver) Resolve(ctx context.Context, doc *niceyaml.Document)
 		baseDir = filepath.Dir(filePath)
 	}
 
-	ref := FileOrURL(baseDir, directive.Schema, r.opts...)
-	if errors.Is(ref.err, ErrNoBaseDir) {
-		return Ref{}, fmt.Errorf("%w: %w", ErrNoFilePath, ref.err)
+	ref, err := FileOrURL(baseDir, directive.Schema, r.opts...)
+	if errors.Is(err, ErrNoBaseDir) {
+		return Ref{}, fmt.Errorf("%w: %w", ErrNoFilePath, err)
 	}
 
-	//nolint:wrapcheck // Loader errors already carry the reference.
-	return ref.Resolve(ctx, doc)
+	if err != nil {
+		//nolint:wrapcheck // The reference error already names the reference.
+		return Ref{}, err
+	}
+
+	return ref, nil
 }
 
 // documentDirective returns the directive that applies to doc. A document

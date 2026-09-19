@@ -39,21 +39,6 @@ func TestRef_Resolve(t *testing.T) {
 		assert.JSONEq(t, `{"type": "object"}`, string(data))
 	})
 
-	t.Run("carries a construction error", func(t *testing.T) {
-		t.Parallel()
-
-		ref := schema.File("")
-
-		assert.Empty(t, ref.Key())
-		assert.Nil(t, ref.Schema())
-
-		_, err := ref.Resolve(t.Context(), document(t))
-		require.ErrorIs(t, err, schema.ErrEmptyPath)
-
-		_, err = ref.Load(t.Context())
-		require.ErrorIs(t, err, schema.ErrEmptyPath)
-	})
-
 	t.Run("zero ref names no schema", func(t *testing.T) {
 		t.Parallel()
 

@@ -32,7 +32,10 @@ func validateCmd() *cobra.Command {
 			}
 
 			// Build registry once for all files to enable cross-file schema caching.
-			reg := buildRegistry(schemaRef)
+			reg, err := buildRegistry(schemaRef)
+			if err != nil {
+				return err
+			}
 
 			var errs []error
 
@@ -94,7 +97,7 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) er
 // followed by SchemaStore automatic discovery. The SchemaStore catalog is
 // fetched on the first document that reaches it, and a file it cannot
 // match, or cannot fetch the catalog for, reports that in the file's error.
-func buildRegistry(schemaRef string) *schema.Registry {
+func buildRegistry(schemaRef string) (*schema.Registry, error) {
 	// A loader applies to every document, so the CLI schema needs no matcher.
 	// Resolve relative to current working directory. If cwd fails, use ".".
 	if schemaRef != "" {
@@ -103,11 +106,16 @@ func buildRegistry(schemaRef string) *schema.Registry {
 			cwd = "."
 		}
 
-		return schema.NewRegistry(schema.WithResolvers(schema.FileOrURL(cwd, schemaRef)))
+		ref, err := schema.FileOrURL(cwd, schemaRef)
+		if err != nil {
+			return nil, fmt.Errorf("--schema: %w", err)
+		}
+
+		return schema.NewRegistry(schema.WithResolvers(ref)), nil
 	}
 
 	return schema.NewRegistry(schema.WithResolvers(
 		schema.Directive(), // Resolves schemas relative to each YAML file.
 		schemastore.New(),  // Automatic discovery by file path.
-	))
+	)), nil
 }

@@ -29,11 +29,12 @@ func (errReader) Read(_ []byte) (int, error) {
 func TestURL(t *testing.T) {
 	t.Parallel()
 
-	t.Run("empty URL", func(t *testing.T) {
+	t.Run("empty URL panics", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := schema.URL("").Resolve(t.Context(), document(t))
-		require.ErrorIs(t, err, schema.ErrEmptyURL)
+		assert.PanicsWithValue(t, "schema.URL: url is empty", func() {
+			schema.URL("")
+		})
 	})
 
 	t.Run("successful fetch", func(t *testing.T) {

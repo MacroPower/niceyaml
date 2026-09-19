@@ -99,11 +99,13 @@
 //
 // # Loaders
 //
-// [Embedded], [File], [URL], and [FileOrURL] return a [Ref] that names one
-// schema, and a Ref is a resolver that names its schema for every document
-// and never reports [ErrNoMatch], so a registry holding one alone validates
-// everything against it. A [*Schema] compiled already, such as the one
-// [MustCompile] built at package scope, is a resolver too and names itself:
+// [Embedded], [File], and [URL] return a [Ref] that names one schema, and
+// [FileOrURL] returns one for a reference read from input, beside the
+// error for a reference that names nothing. A Ref is a resolver that names
+// its schema for every document and never reports [ErrNoMatch], so a
+// registry holding one alone validates everything against it. A [*Schema]
+// compiled already, such as the one [MustCompile] built at package scope,
+// is a resolver too and names itself:
 //
 //	reg := schema.NewRegistry(schema.WithResolvers(Config))
 //

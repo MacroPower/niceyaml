@@ -10,8 +10,8 @@ import (
 	"strings"
 )
 
-// ErrEmptyPath reports an empty file path given to [File] or [FileOrURL],
-// which names no file.
+// ErrEmptyPath reports an empty reference given to [FileOrURL], which names
+// no file.
 var ErrEmptyPath = errors.New("schema file path is empty")
 
 // File creates a [Ref] that reads schema data from a local file. The Ref
@@ -25,8 +25,12 @@ var ErrEmptyPath = errors.New("schema file path is empty")
 // such as "schemas/config.json" and "./schemas/config.json", resolve to the
 // same URL, so the registry reads the file once and reuses the compiled
 // validator for every document that names it. The file is read when the
-// Ref loads, not when File runs. An empty path yields a Ref that carries
-// [ErrEmptyPath].
+// Ref loads, not when File runs.
+//
+// File is for a path the program knows, as [Loadable] is for a key it
+// knows, so it panics when path is empty or the working directory cannot
+// be read to make it absolute. A path read from a directive or a command
+// line goes through [FileOrURL], which returns those as errors.
 //
 // The file path is used directly without validation. Callers should ensure
 // paths come from trusted sources or are validated before use to prevent
@@ -34,13 +38,24 @@ var ErrEmptyPath = errors.New("schema file path is empty")
 //
 //	r := schema.File("./schemas/config.json")
 func File(path string) Ref {
+	ref, err := file(path)
+	if err != nil {
+		panic("schema.File: " + err.Error())
+	}
+
+	return ref
+}
+
+// file is [File] that reports an empty path as [ErrEmptyPath] and a
+// working directory it cannot read as an error, for a path from input.
+func file(path string) (Ref, error) {
 	if path == "" {
-		return failedRef(ErrEmptyPath)
+		return Ref{}, ErrEmptyPath
 	}
 
 	abs, err := filepath.Abs(path)
 	if err != nil {
-		return failedRef(fmt.Errorf("resolve %s: %w", path, err))
+		return Ref{}, fmt.Errorf("resolve %s: %w", path, err)
 	}
 
 	return Loadable(fileURL(abs), func(_ context.Context) ([]byte, error) {
@@ -50,7 +65,7 @@ func File(path string) Ref {
 		}
 
 		return data, nil
-	})
+	}), nil
 }
 
 // fileURL returns the file:// URL that names the absolute path abs.
