@@ -50,8 +50,18 @@ func TestSegment_Width(t *testing.T) {
 func TestSegment_Contains(t *testing.T) {
 	t.Parallel()
 
-	source := &token.Token{Origin: "a\nb\n"}
-	part := &token.Token{Origin: "a\n"}
+	source := &token.Token{
+		Type:     token.StringType,
+		Value:    "a\nb",
+		Origin:   "a\nb\n",
+		Position: &token.Position{Line: 1, Column: 1, Offset: 0},
+	}
+	part := &token.Token{
+		Type:     token.StringType,
+		Value:    "a",
+		Origin:   "a\n",
+		Position: &token.Position{Line: 1, Column: 1, Offset: 0},
+	}
 	other := &token.Token{Origin: "c"}
 
 	seg := segment.New(source, part)
@@ -60,6 +70,51 @@ func TestSegment_Contains(t *testing.T) {
 	assert.True(t, seg.Contains(part))
 	assert.False(t, seg.Contains(other))
 	assert.False(t, seg.Contains(nil))
+
+	t.Run("a copy matches by its fields", func(t *testing.T) {
+		t.Parallel()
+
+		assert.True(t, seg.Contains(source.Clone()))
+		assert.True(t, seg.Contains(part.Clone()))
+	})
+
+	t.Run("a copy that differs in one field does not match", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]func(*token.Token){
+			"type":     func(tk *token.Token) { tk.Type = token.IntegerType },
+			"value":    func(tk *token.Token) { tk.Value = "x" },
+			"origin":   func(tk *token.Token) { tk.Origin = "x" },
+			"line":     func(tk *token.Token) { tk.Position.Line++ },
+			"column":   func(tk *token.Token) { tk.Position.Column++ },
+			"offset":   func(tk *token.Token) { tk.Position.Offset++ },
+			"position": func(tk *token.Token) { tk.Position = nil },
+		}
+
+		for name, change := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				copied := source.Clone()
+				change(copied)
+
+				assert.False(t, seg.Contains(copied))
+			})
+		}
+	})
+
+	t.Run("tokens without positions match by the rest", func(t *testing.T) {
+		t.Parallel()
+
+		bare := &token.Token{Type: token.StringType, Value: "a", Origin: "a"}
+		seg := segment.New(bare, bare)
+
+		assert.True(t, seg.Contains(bare.Clone()))
+		assert.False(
+			t,
+			seg.Contains(&token.Token{Type: token.StringType, Value: "a", Origin: "a", Position: &token.Position{}}),
+		)
+	})
 }
 
 func TestSegment_ContentSpan(t *testing.T) {

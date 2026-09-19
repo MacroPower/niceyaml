@@ -104,8 +104,11 @@
 //
 // Every token the module hands out, from [Source.Tokens], [line.Lines.TokenAt],
 // [line.Line.Tokens], or [line.Line.Token], is shared with the lines. Treat
-// them as read-only and call [token.Token.Clone] before modifying one. The
-// [line] package documents the view and its metadata in full.
+// them as read-only and call [token.Token.Clone] before modifying one. A
+// copy of a token, such as one from the [*ast.File] that [Source.File]
+// parses, matches the original by its type, value, origin, and position,
+// so a token taken from a node finds its lines the same way. The [line]
+// package documents the view and its metadata in full.
 //
 // # Error Presentation
 //

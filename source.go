@@ -294,6 +294,12 @@ func (s *Source) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) er
 // The file is lazily parsed on first call using [parser.Parse] with options
 // provided via [WithYAMLParserOptions]. Subsequent calls return the cached result.
 //
+// The tokens of the file are copies of the Source's own, since the parser
+// relinks the tokens it is given. A copy matches the original by its type,
+// value, origin, and position, so a token taken from a node finds its
+// lines through [line.Lines.TokenRanges] and [line.Lines.ContentRanges] as
+// the original does.
+//
 // A YAML syntax error comes back as a [*SourceError] bound to this Source,
 // so the %+v verb renders it with the offending token marked.
 func (s *Source) File() (*ast.File, error) {

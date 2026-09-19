@@ -198,8 +198,10 @@ func (ls Lines) TokenAt(pos position.Position) *token.Token {
 // line kept by a block scalar, contributes no range.
 //
 // The token may be a lexer token, as returned by [Lines.TokenAt] or
-// [Lines.Tokens], or one of the per-line parts from [Line.Tokens].
-// Returns nil if tk is nil or not found.
+// [Lines.Tokens], one of the per-line parts from [Line.Tokens], or a copy
+// of either, such as a token taken from the AST a parser built from the
+// same stream. A token matches by its type, value, origin, and position
+// rather than by pointer. Returns nil if tk is nil or not found.
 func (ls Lines) TokenRanges(tk *token.Token) position.Ranges {
 	return ls.ranges(tk, (*Line).TokenSpan)
 }
@@ -208,8 +210,9 @@ func (ls Lines) TokenRanges(tk *token.Token) position.Ranges {
 // on, excluding leading and trailing spaces. A line where tk holds only
 // spaces contributes no range.
 //
-// The token may be a lexer token or one of the per-line parts, as for
-// [Lines.TokenRanges]. Returns nil if tk is nil or not found.
+// The token may be a lexer token, one of the per-line parts, or a copy of
+// either, as for [Lines.TokenRanges]. Returns nil if tk is nil or not
+// found.
 func (ls Lines) ContentRanges(tk *token.Token) position.Ranges {
 	return ls.ranges(tk, (*Line).ContentSpan)
 }

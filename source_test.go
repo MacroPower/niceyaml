@@ -3,9 +3,13 @@ package niceyaml_test
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
@@ -617,6 +621,82 @@ func TestSource_Lines_TokenLookup(t *testing.T) {
 		position.NewRange(position.New(1, 2), position.New(1, 7)),
 		position.NewRange(position.New(2, 2), position.New(2, 7)),
 	}, content)
+}
+
+func TestSource_File_TokensFindLines(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a token from a node finds its ranges", func(t *testing.T) {
+		t.Parallel()
+
+		input := stringtest.Input(`
+			key: |
+			  line1
+			  line2
+			other: value
+		`)
+		source := niceyaml.NewSourceFromString(input)
+		doc := yamltest.FirstDocument(t, input)
+
+		// The parser holds copies of the Source's tokens, and a copy finds
+		// the ranges the original does.
+		tk, err := paths.Root().Child("other").Token(doc.Node())
+		require.NoError(t, err)
+		require.NotNil(t, tk)
+
+		original := source.Lines().TokenAt(position.NewFromToken(tk))
+		require.NotNil(t, original)
+		assert.NotSame(t, original, tk)
+
+		assert.Equal(t, position.Ranges{
+			position.NewRange(position.New(3, 7), position.New(3, 12)),
+		}, source.Lines().ContentRanges(tk))
+		assert.Equal(t, source.Lines().TokenRanges(original), source.Lines().TokenRanges(tk))
+
+		// A path to a key resolves to the key token, and a block scalar to
+		// its indicator, each of which finds its own columns.
+		keyTk, err := paths.Root().Child("other").Key().Token(doc.Node())
+		require.NoError(t, err)
+		assert.Equal(t, position.Ranges{
+			position.NewRange(position.New(3, 0), position.New(3, 5)),
+		}, source.Lines().ContentRanges(keyTk))
+
+		blockTk, err := paths.Root().Child("key").Token(doc.Node())
+		require.NoError(t, err)
+		assert.Equal(t, position.Ranges{
+			position.NewRange(position.New(0, 5), position.New(0, 6)),
+		}, source.Lines().ContentRanges(blockTk))
+	})
+
+	t.Run("every token of the file finds its ranges", func(t *testing.T) {
+		t.Parallel()
+
+		data, err := os.ReadFile(filepath.Join("testdata", "full.yaml"))
+		require.NoError(t, err)
+
+		source := niceyaml.NewSourceFromString(string(data))
+
+		file, err := source.File()
+		require.NoError(t, err)
+
+		lines := source.Lines()
+		checked := 0
+
+		for _, doc := range file.Docs {
+			for _, node := range ast.Filter(ast.StringType, doc) {
+				tk := node.GetToken()
+				if tk == nil || strings.TrimSpace(tk.Origin) == "" {
+					continue
+				}
+
+				assert.NotEmpty(t, lines.TokenRanges(tk), "token %q at %s", tk.Value, tk.Position)
+
+				checked++
+			}
+		}
+
+		assert.Positive(t, checked)
+	})
 }
 
 func TestNewSourceFromTokens_LaterDocument(t *testing.T) {

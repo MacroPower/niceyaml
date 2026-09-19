@@ -104,8 +104,10 @@ func (l *Line) TokenAt(col int) *token.Token {
 }
 
 // TokenSpan returns the columns tk occupies on this [Line]. The token may be
-// a lexer token or one of the per-line parts from [Line.Tokens]. The second
-// result is false when tk is nil or has no part on this line.
+// a lexer token, one of the per-line parts from [Line.Tokens], or a copy of
+// either, which matches by its type, value, origin, and position, as
+// [Lines.TokenRanges] describes. The second result is false when tk is nil
+// or has no part on this line.
 func (l *Line) TokenSpan(tk *token.Token) (position.Span, bool) {
 	return l.span(tk, func(seg segment.Segment) position.Span {
 		return position.NewSpan(0, seg.Width())

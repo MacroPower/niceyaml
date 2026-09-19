@@ -56,9 +56,43 @@ func (s Segment) Part() *token.Token {
 	return s.part
 }
 
-// Contains reports whether tk is this segment's source or part token.
+// Contains reports whether tk is this segment's source or part token, or
+// a copy of either as [token.Token.Clone] makes one: a token of the same
+// type with the same value, origin, and position. The AST a parser builds
+// holds such copies, so a token taken from a node finds its segment.
 func (s Segment) Contains(tk *token.Token) bool {
-	return s.source == tk || s.part == tk
+	if tk == nil {
+		return false
+	}
+
+	return sameToken(tk, s.source) || sameToken(tk, s.part)
+}
+
+// sameToken reports whether a and b are one token or copies of one: the
+// same pointer, or the same type, value, origin, and position.
+func sameToken(a, b *token.Token) bool {
+	if a == b {
+		return true
+	}
+
+	if a == nil || b == nil {
+		return false
+	}
+
+	return a.Type == b.Type &&
+		a.Value == b.Value &&
+		a.Origin == b.Origin &&
+		samePosition(a.Position, b.Position)
+}
+
+// samePosition reports whether a and b name the same place: both nil, or
+// the same line, column, and offset.
+func samePosition(a, b *token.Position) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+
+	return a.Line == b.Line && a.Column == b.Column && a.Offset == b.Offset
 }
 
 // ContentSpan returns the columns of the part's content relative to the

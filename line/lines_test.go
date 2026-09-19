@@ -2129,6 +2129,38 @@ func TestLines_TokenRanges(t *testing.T) {
 
 		assert.Nil(t, lines.TokenRanges(other[0]))
 	})
+
+	t.Run("a copy of a token matches by its fields", func(t *testing.T) {
+		t.Parallel()
+
+		input := stringtest.Input(`
+			key: |
+			  line1
+			  line2
+		`)
+		tks := lexer.Tokenize(input)
+		lines := line.NewLines(tks)
+
+		// A parser hands out copies of the tokens it was given, and a copy
+		// finds the same ranges as the original.
+		var tk *token.Token
+
+		for _, lexTk := range tks {
+			if lexTk.Type == token.StringType && strings.Contains(lexTk.Origin, "line1") {
+				tk = lexTk
+			}
+		}
+
+		require.NotNil(t, tk)
+		assert.Equal(t, lines.TokenRanges(tk), lines.TokenRanges(tk.Clone()))
+		assert.Equal(t, lines.ContentRanges(tk), lines.ContentRanges(tk.Clone()))
+		assert.Equal(t, lines.TokenRanges(lines[1].Token(0)), lines.TokenRanges(lines[1].Token(0).Clone()))
+
+		// A token from another stream at the same position differs in its
+		// text, so it matches nothing.
+		other := lexer.Tokenize("key: |\n  other\n  lines\n")
+		assert.Nil(t, lines.TokenRanges(other[len(other)-1]))
+	})
 }
 
 func TestLines_String(t *testing.T) {
