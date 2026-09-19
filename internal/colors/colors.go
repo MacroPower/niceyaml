@@ -26,7 +26,8 @@ func Override(base, overlay color.Color) color.Color {
 // result to the sRGB gamut, so every channel of the returned color lies in
 // [0, 1] and renders as a valid SGR sequence.
 // If both colors are nil or [lipgloss.NoColor], it returns nil.
-// If one color is nil, [lipgloss.NoColor], or invisible, it returns the other.
+// If one color is nil, [lipgloss.NoColor], or invisible, it returns the
+// other, clamped the same way when it lies outside the gamut.
 func Blend(c1, c2 color.Color) color.Color {
 	_, isNoColor1 := c1.(lipgloss.NoColor)
 	_, isNoColor2 := c2.(lipgloss.NoColor)
@@ -38,25 +39,37 @@ func Blend(c1, c2 color.Color) color.Color {
 	}
 
 	if noColor1 {
-		return c2
+		return clamped(c2)
 	}
 
 	if noColor2 {
-		return c1
+		return clamped(c1)
 	}
 
 	cf1, visible1 := colorful.MakeColor(c1)
 	cf2, visible2 := colorful.MakeColor(c2)
 
 	if !visible1 {
-		return c2
+		return clamped(c2)
 	}
 
 	if !visible2 {
-		return c1
+		return clamped(c1)
 	}
 
 	return cf1.BlendLab(cf2, 0.5).Clamped()
+}
+
+// clamped returns c as it is when every channel lies in [0, 1], and c
+// clamped to the sRGB gamut otherwise. Only a [colorful.Color] can hold a
+// channel outside that range; every other color type is bounded by its
+// integer channels.
+func clamped(c color.Color) color.Color {
+	if cf, ok := c.(colorful.Color); ok && !cf.IsValid() {
+		return cf.Clamped()
+	}
+
+	return c
 }
 
 // BlendStyles blends two [lipgloss.Style] values: colors via LAB blending,

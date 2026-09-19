@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/lucasb-eyer/go-colorful"
 	"github.com/stretchr/testify/assert"
 
 	"go.jacobcolvin.com/niceyaml/internal/colors"
@@ -160,6 +161,15 @@ func TestBlend_InGamut(t *testing.T) {
 		"yellow and blue": {
 			c1: color.RGBA{R: 255, G: 255, B: 0, A: 255},
 			c2: color.RGBA{R: 0, G: 0, B: 255, A: 255},
+		},
+		"out of gamut against NoColor": {
+			// A color handed back as it is must still be clamped.
+			c1: colorful.Color{R: 1.8, G: -0.4, B: 0.5},
+			c2: lipgloss.NoColor{},
+		},
+		"out of gamut against nil": {
+			c1: nil,
+			c2: colorful.Color{R: 1.8, G: -0.4, B: 0.5},
 		},
 	}
 
