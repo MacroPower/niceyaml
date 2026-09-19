@@ -3298,6 +3298,36 @@ func TestViewport_LayoutChangesKeepSearchIndex(t *testing.T) {
 	assert.Equal(t, 1, m.SearchCount())
 }
 
+func TestViewport_SideBySideLoadsSearcherOncePerContent(t *testing.T) {
+	t.Parallel()
+
+	// Side-by-side search indexes both panes, and like the unified view it
+	// loads them once per change of content rather than on every keystroke.
+	searcher := &countingSearcher{finder: finder.New()}
+	m := yamlviewport.New(
+		yamlviewport.WithPrinter(testPrinter()),
+		yamlviewport.WithSearcher(searcher),
+	)
+	m.SetWidth(80)
+	m.SetHeight(10)
+	m.AddRevision(niceyaml.NewSourceFromString("key: alpha\n", niceyaml.WithName("v1")))
+	m.AddRevision(niceyaml.NewSourceFromString("key: alpha\nother: alpha\n", niceyaml.WithName("v2")))
+	m.SetViewMode(yamlviewport.ViewModeSideBySide)
+
+	for _, term := range []string{"a", "al", "alp", "alpha"} {
+		m.SetSearchTerm(term)
+	}
+
+	assert.Equal(t, 2, searcher.loads, "one load per pane")
+	assert.Equal(t, 2, m.SearchCount())
+
+	// A revision change rebuilds the view and reloads the searcher: once
+	// for the single first revision, then once per pane on the way back.
+	m.PrevRevision()
+	m.NextRevision()
+	assert.Equal(t, 5, searcher.loads)
+}
+
 func TestViewport_WithSearcher(t *testing.T) {
 	t.Parallel()
 

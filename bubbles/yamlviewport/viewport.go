@@ -229,8 +229,11 @@ type Model struct {
 	style    lipgloss.Style
 	printer  *printer.Printer
 	searcher Searcher
-	// Index over the lines on display, built when they change.
-	index Index
+	// Index over the lines on display, built when they change. In
+	// side-by-side mode index covers the left pane and indexRight the
+	// right one.
+	index      Index
+	indexRight Index
 	// Revision history; revIndex below selects the revision on display.
 	revisions []Revision
 	// Cached diff between base and current revision.
@@ -765,9 +768,19 @@ func (m *Model) updateSideBySideSearchState() {
 		return
 	}
 
+	// Load both panes once per change of content, as the unified path
+	// does, so typing a term does not rebuild the indexes on every
+	// keystroke.
+	if m.searcherStale || m.index == nil || m.indexRight == nil {
+		m.index = m.searcher.Load(m.baseLeft.Lines())
+		m.indexRight = m.searcher.Load(m.baseRight.Lines())
+
+		m.searcherStale = false
+	}
+
 	// Search on both sources and cache results for overlay application.
-	m.leftMatches = m.searcher.Load(m.baseLeft.Lines()).Find(m.searchTerm)
-	m.rightMatches = m.searcher.Load(m.baseRight.Lines()).Find(m.searchTerm)
+	m.leftMatches = m.index.Find(m.searchTerm)
+	m.rightMatches = m.indexRight.Find(m.searchTerm)
 
 	// Build combined match list. For equal lines, a match appears in both
 	// sources at the same position, so we deduplicate by (row, startCol).
