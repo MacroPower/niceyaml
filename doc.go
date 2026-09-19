@@ -67,22 +67,21 @@
 // [SourceError] binds an error to its [Source] and to the document its
 // path resolves in. Every error a Source or one of its Documents produces
 // is one, and [Document.Bind] binds an error built elsewhere to that
-// document. [SourceError.Error] puts the resolved position
-// in front of the message, or the name of the source alone when the error
-// carries no location, and [SourceError.Excerpt] returns the surrounding
-// lines with the location highlighted. The %+v verb prints both.
-// Nested errors from [WithErrors] are structure on the Error, and the
-// SourceError that binds it records them: [SourceError.Error] lists each
-// one on a line of its own behind its resolved position, so a log that
-// prints the error alone still names every violation and where it is,
-// and [SourceError.Message] is the first line alone.
-// The bound error is a tree, and every located Error in it is marked: the
-// first one along the cause chain puts its position in front of the
-// message, and every other branch, whether a nested error from [WithErrors]
-// or a later branch of [errors.Join], appears as an annotation below its
-// own line, with distant errors displayed in separate hunks. An error
-// joined from several bound errors, such as one per document of a file,
-// holds several SourceErrors, and [SourceErrors] finds every one of them
+// document. [SourceError.Error] is one line: the resolved position in
+// front of the message, or the name of the source alone when the error
+// carries no location. [SourceError.Excerpt] returns the surrounding
+// lines with the location highlighted.
+// Nested errors from [WithErrors] are structure on the Error, and binding
+// binds each of them too: [SourceError.Errors] returns one SourceError per
+// nested error, with its own resolved location and its own children, so a
+// validator's report of several violations is a tree of bound errors. The
+// %+v verb prints the message, one line per nested error behind its
+// position, and the excerpt, so a log that prints the error that way still
+// names every violation and where it is. The excerpt marks every location
+// in the tree, with each nested error as an annotation below its own line
+// and distant errors in separate hunks. An error joined from several with
+// [errors.Join], such as one per document of a file, binds to the join of
+// its bound branches, and [SourceErrors] finds every binding in an error
 // for a caller that renders them all. A SourceError never rewrites the
 // message it binds, so an error built by hand goes through Bind before
 // [fmt.Errorf] adds context, which keeps the position beside the message.
@@ -109,10 +108,11 @@
 //
 // # Error Presentation
 //
-// The %+v verb prints a [SourceError] as plain text: the message, then the
-// excerpt around the location with two lines of context and carets under
-// the offending columns. The output holds no escape sequences, so it goes
-// into a log as it is. A terminal gets color from [printer.Printer.PrintError],
+// The %+v verb prints a [SourceError] as plain text: the message, one line
+// per nested error, then the excerpt around the locations with two lines
+// of context and carets under the offending columns. The output holds no
+// escape sequences, so it goes into a log as it is. A terminal gets color
+// from [printer.Printer.PrintError],
 // which prints the same parts with the printer's styles, width, and
 // context lines, and accepts any error, so a caller need not look for the
 // [SourceError] in the chain. It draws the message as a tree, with a

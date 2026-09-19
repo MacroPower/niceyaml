@@ -1306,7 +1306,7 @@ func TestDocument_BindChain(t *testing.T) {
 		assert.Same(t, outer, yamltest.Bind(t, source, outer))
 	})
 
-	t.Run("wraps an error bound to another source", func(t *testing.T) {
+	t.Run("leaves an error bound to another source as it is", func(t *testing.T) {
 		t.Parallel()
 
 		first := niceyaml.NewSourceFromString("name: value\n")
@@ -1316,15 +1316,14 @@ func TestDocument_BindChain(t *testing.T) {
 		once := yamltest.Bind(t, first, niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
 		twice := yamltest.Bind(t, second, once)
 
-		require.NotSame(t, once, twice)
+		// The error is bound already, so the second binding neither moves
+		// it nor adds its name.
+		require.Same(t, once, twice)
 
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, twice, &bound)
-		assert.Same(t, second, bound.Source())
-
-		// The first binding put its position in the text, and the second
-		// adds neither a position nor its name.
+		assert.Same(t, first, bound.Source())
 		assert.Equal(t, "1:7: $.name: bad name", twice.Error())
 	})
 }

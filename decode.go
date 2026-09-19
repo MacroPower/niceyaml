@@ -334,22 +334,23 @@ func (dd *Document) Validate(ctx context.Context, validators ...Validator) error
 //
 //	fmt.Errorf("document %d: %w", i, doc.Bind(err))
 //
-// If err is nil, Bind returns nil. If the first [*SourceError] in err's
-// chain is bound to this source already, Bind returns err unchanged, so
-// binding is idempotent. A nil [*Error] or [*SourceError] pointer as err
-// carries nothing to bind and comes back as it is, and one inside the
-// chain binds nothing, so Bind looks past it. Bind never modifies err.
+// Binding binds the whole tree of err: the [Error] that anchors it gives
+// the [SourceError] its location, and every error nested with
+// [WithErrors] along the way becomes a child with a location of its own,
+// which [SourceError.Errors] returns. An error joined from several with
+// [errors.Join] comes back as the join of its bound branches, so one
+// error per document of a file binds in one call.
+//
+// If err is nil, Bind returns nil. An error that is or wraps a
+// [*SourceError] along its cause chain is bound already, to this source or
+// another, and comes back as it is, so binding is idempotent. A nil
+// [*Error] or [*SourceError] pointer as err carries nothing to bind and
+// comes back as it is, and one inside the chain binds nothing, so Bind
+// looks past it. Bind never modifies err.
 func (dd *Document) Bind(err error) error {
-	if isNothing(err) {
-		return err
-	}
+	bound, _ := bindTree(err, dd.source, dd)
 
-	bound, isBound := firstSourceError(err)
-	if isBound && bound.source == dd.source {
-		return err
-	}
-
-	return newSourceError(err, dd.source, dd)
+	return bound
 }
 
 // DecodeOption configures [Document.Decode],

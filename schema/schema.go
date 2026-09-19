@@ -203,7 +203,7 @@ func newValidationError(ve *jsonschema.ValidationError) *niceyaml.Error {
 		return leafError(leaves[0])
 	}
 
-	causes := make([]*niceyaml.Error, 0, len(leaves))
+	causes := make([]error, 0, len(leaves))
 	for _, leaf := range leaves {
 		causes = append(causes, leafError(leaf))
 	}

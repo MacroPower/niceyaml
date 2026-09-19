@@ -334,19 +334,11 @@ func (s *Source) parse() (*ast.File, error) {
 // bind binds err to this [*Source] with no document to resolve paths in.
 // It is for the errors the Source produces itself, which carry a position
 // or no location at all. Errors built elsewhere bind through
-// [Document.Bind]. If err is nil, or the first [*SourceError] in its chain
-// is bound to this Source already, bind returns err unchanged.
+// [Document.Bind], which describes what comes back as it is.
 func (s *Source) bind(err error) error {
-	if isNothing(err) {
-		return err
-	}
+	bound, _ := bindTree(err, s, nil)
 
-	bound, ok := firstSourceError(err)
-	if ok && bound.source == s {
-		return err
-	}
-
-	return newSourceError(err, s, nil)
+	return bound
 }
 
 // Lines returns the [line.Lines] of the [Source]: its tokens split into

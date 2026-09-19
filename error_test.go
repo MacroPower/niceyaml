@@ -40,6 +40,14 @@ func render(err error) string {
 	return renderContext(err, 2)
 }
 
+// report returns the message part of the %+v output of err: the headline
+// and one line per nested error, before the blank line and the excerpt.
+func report(err error) string {
+	msg, _, _ := strings.Cut(fmt.Sprintf("%+v", err), "\n\n")
+
+	return msg
+}
+
 // renderContext is [render] with the given number of context lines.
 func renderContext(err error, context int) string {
 	return renderWith(err, newXMLPrinter(), context)
@@ -968,7 +976,7 @@ func TestError_MultiError(t *testing.T) {
 		// The nested errors are structure, not text: Errors returns them
 		// and they surface through Unwrap, while the message stays one line.
 		assert.Equal(t, "main error", render(err))
-		assert.Equal(t, []*niceyaml.Error{nested1, nested2}, err.Errors())
+		assert.Equal(t, []error{nested1, nested2}, err.Errors())
 		require.ErrorIs(t, err, nested1)
 		require.ErrorIs(t, err, nested2)
 	})
@@ -1271,7 +1279,7 @@ func TestSourceError_Detail_NestedLocations(t *testing.T) {
 	}
 }
 
-func TestSourceError_UnresolvedNestedStayInMessage(t *testing.T) {
+func TestSourceError_UnresolvedNestedInTree(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("a: 1\n")
@@ -1283,10 +1291,11 @@ func TestSourceError_UnresolvedNestedStayInMessage(t *testing.T) {
 		),
 	))
 
-	// The message lists each nested error behind its path, and since no
+	// The %+v verb lists each nested error behind its path, and since no
 	// location resolves, the printer adds nothing beyond the connectors of
 	// the tree.
-	assert.Equal(t, "2 schema violations\n$.x: bad x\n$.y: bad y", err.Error())
+	assert.Equal(t, "2 schema violations", err.Error())
+	assert.Equal(t, "2 schema violations\n$.x: bad x\n$.y: bad y", report(err))
 	assert.Equal(t, "2 schema violations\n├── $.x: bad x\n└── $.y: bad y", render(err))
 }
 
@@ -1452,10 +1461,11 @@ func TestError_NestedErrorsKeepInnerPosition(t *testing.T) {
 	inner := niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a")))
 	nested := niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b")))
 
-	// Nested errors on the wrapper follow its message and add annotations,
+	// Nested errors on the wrapper become its children and add annotations,
 	// and the wrapper still takes its position from the Error it wraps.
 	wrapped := yamltest.Bind(t, source, niceyaml.NewErrorFrom(inner, niceyaml.WithErrors(nested)))
-	assert.Equal(t, "1:4: $.a: bad a\n2:4: $.b: bad b", wrapped.Error())
+	assert.Equal(t, "1:4: $.a: bad a", wrapped.Error())
+	assert.Equal(t, "1:4: $.a: bad a\n2:4: $.b: bad b", report(wrapped))
 
 	var bound *niceyaml.SourceError
 
@@ -2463,11 +2473,12 @@ func TestError_NestedErrorsRenderAsAnnotations(t *testing.T) {
 
 	wrapped := yamltest.Bind(t, source, fmt.Errorf("document 0: %w", inner))
 
-	// The message lists the nested errors behind their positions, which
-	// stay in place behind the context the wrapper added. They are
-	// reachable through Unwrap, the printer draws them as branches of the
-	// tree, and they appear in the excerpt as annotations.
-	assert.Equal(t, "document 0: validation failed at 2 locations\n1:4: $.a: bad a\n2:4: $.b: bad b", wrapped.Error())
+	// The message is the headline behind the context the wrapper added.
+	// The %+v verb lists the nested errors behind their positions after
+	// it, they are reachable through Unwrap, the printer draws them as
+	// branches of the tree, and they appear in the excerpt as annotations.
+	assert.Equal(t, "document 0: validation failed at 2 locations", wrapped.Error())
+	assert.Equal(t, "document 0: validation failed at 2 locations\n1:4: $.a: bad a\n2:4: $.b: bad b", report(wrapped))
 	require.ErrorIs(t, wrapped, badA)
 	require.ErrorIs(t, wrapped, badB)
 
@@ -2559,10 +2570,12 @@ func TestError_NestedMessageSpansLines(t *testing.T) {
 		),
 	))
 
-	// The nested message follows the headline whole, continuation line
-	// included. The tree indents the continuation line under the branch,
-	// and the annotation carries it as well.
-	assert.Equal(t, "validation failed\n1:4: $.a: bad a\n  see docs for details", err.Error())
+	// The message is the headline alone. The %+v verb lists the nested
+	// message after it whole, continuation line included, the tree indents
+	// the continuation line under the branch, and the annotation carries
+	// it as well.
+	assert.Equal(t, "validation failed", err.Error())
+	assert.Equal(t, "validation failed\n1:4: $.a: bad a\n  see docs for details", report(err))
 
 	got := trimLines(render(err))
 	message, detail, _ := strings.Cut(got, "\n\n")
@@ -2586,11 +2599,11 @@ func TestSourceError_NestedPositionsBehindWrappers(t *testing.T) {
 	}{
 		"bare": {
 			err:  inner,
-			want: "f.yaml: 2 problems\nf.yaml:1:4: $.a: bad a\n$.missing: bad b",
+			want: "f.yaml: 2 problems\nf.yaml:1:4: $.a: bad a\nf.yaml: $.missing: bad b",
 		},
 		"context in front keeps the nested lines at the end": {
 			err:  fmt.Errorf("document 0: %w", inner),
-			want: "f.yaml: document 0: 2 problems\nf.yaml:1:4: $.a: bad a\n$.missing: bad b",
+			want: "f.yaml: document 0: 2 problems\nf.yaml:1:4: $.a: bad a\nf.yaml: $.missing: bad b",
 		},
 		"nested inside nested": {
 			err: niceyaml.NewError("outer", niceyaml.WithErrors(
@@ -2602,7 +2615,7 @@ func TestSourceError_NestedPositionsBehindWrappers(t *testing.T) {
 		},
 		"a wrapper that rewrites the message keeps the nested lines": {
 			err:  yamltest.RewriteError{Err: inner},
-			want: "f.yaml: rewritten\nf.yaml:1:4: $.a: bad a\n$.missing: bad b",
+			want: "f.yaml: rewritten\nf.yaml:1:4: $.a: bad a\nf.yaml: $.missing: bad b",
 		},
 	}
 
@@ -2610,7 +2623,12 @@ func TestSourceError_NestedPositionsBehindWrappers(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, yamltest.Bind(t, source, tc.err).Error())
+			bound := yamltest.Bind(t, source, tc.err)
+
+			// The message is the first line, and the %+v verb lists the
+			// nested errors after it, each as its own bound error.
+			assert.Equal(t, tc.want, report(bound))
+			assert.Equal(t, strings.SplitN(tc.want, "\n", 2)[0], bound.Error())
 		})
 	}
 }
@@ -2634,7 +2652,7 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 		assert.Equal(t, "1:7: outer: inner: $.name: bad name", wrapped.Error())
 	})
 
-	t.Run("a bound join reports the position of its first branch", func(t *testing.T) {
+	t.Run("a bound join binds each branch", func(t *testing.T) {
 		t.Parallel()
 
 		first := niceyaml.NewError("bad first", niceyaml.WithPath(namePath))
@@ -2644,14 +2662,12 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 			fmt.Errorf("b: %w", second),
 		))
 
-		// The position in front is the first Error's, and the text of the
-		// other branch stays as the join wrote it. The excerpt marks both.
-		assert.Equal(t, "1:7: a: $.name: bad first\nb: $.name: bad second", wrapped.Error())
+		// Each branch is a binding with its position in front of the text
+		// its wrapper wrote, and the join keeps them apart.
+		assert.Equal(t, "1:7: a: $.name: bad first\n1:7: b: $.name: bad second", wrapped.Error())
+		require.ErrorIs(t, wrapped, first)
 		require.ErrorIs(t, wrapped, second)
-
-		got := trimLines(render(wrapped))
-		assert.Contains(t, got, "<genericError>first</genericError>")
-		assert.Contains(t, got, "^ b: $.name: bad second")
+		assert.Len(t, niceyaml.SourceErrors(wrapped), 2)
 	})
 
 	t.Run("binding each branch reports every position", func(t *testing.T) {
@@ -2739,11 +2755,12 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				// The nested errors make the outer Error the anchor, and it
-				// takes the location of the Error it wraps. The nested error
-				// follows the message once bound, with its position.
+				// The outer Error takes the location of the Error it wraps,
+				// and the nested error becomes a child with its own position,
+				// which the %+v verb lists after the message.
 				assert.Equal(t, tc.unbound, tc.err.Error())
-				assert.Equal(t, tc.bound+"\n1:7: "+nested.Error(), docs[0].Bind(tc.err).Error())
+				assert.Equal(t, tc.bound, docs[0].Bind(tc.err).Error())
+				assert.Equal(t, tc.bound+"\n1:7: "+nested.Error(), report(docs[0].Bind(tc.err)))
 			})
 		}
 	})
@@ -3306,18 +3323,20 @@ func TestSourceError_TreeBranches(t *testing.T) {
 	badB := niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b")))
 	badC := niceyaml.NewError("bad c", niceyaml.WithPath(paths.Root().Child("c")))
 
-	t.Run("join branches are annotated", func(t *testing.T) {
+	t.Run("join branches bind on their own", func(t *testing.T) {
 		t.Parallel()
 
 		err := yamltest.Bind(t, source, errors.Join(badA, badB))
 
-		assert.Equal(t, "1:4: $.a: bad a\n$.b: bad b", err.Error())
+		// The join comes back as the join of two bindings, each with its
+		// own position, and the printer renders an excerpt for each.
+		assert.Equal(t, "1:4: $.a: bad a\n2:4: $.b: bad b", err.Error())
+		require.Len(t, niceyaml.SourceErrors(err), 2)
 
-		got := trimLines(render(err))
+		got := trimLines(newXMLPrinter().PrintError(err))
 		assert.Contains(t, got, "<genericError>1</genericError>")
 		assert.Contains(t, got, "<genericError>2</genericError>")
-		assert.Contains(t, got, "^ bad b")
-		assert.NotContains(t, got, "^ bad a")
+		assert.NotContains(t, got, "^ bad")
 	})
 
 	t.Run("branches below a wrapper are annotated", func(t *testing.T) {
@@ -3328,7 +3347,8 @@ func TestSourceError_TreeBranches(t *testing.T) {
 			niceyaml.NewError("summary", niceyaml.WithErrors(badB, badC)),
 		)))
 
-		assert.Equal(t, "1:4: document 0: first: $.a: bad a\nsummary\n2:4: $.b: bad b\n3:4: $.c: bad c", err.Error())
+		assert.Equal(t, "1:4: document 0: first: $.a: bad a\nsummary", err.Error())
+		assert.Equal(t, "1:4: document 0: first: $.a: bad a\nsummary\n2:4: $.b: bad b\n3:4: $.c: bad c", report(err))
 
 		got := trimLines(render(err))
 		assert.Contains(t, got, "<genericError>1</genericError>")
@@ -3365,7 +3385,7 @@ func TestSourceError_TreeBranches(t *testing.T) {
 		require.NoError(t, excerptErr)
 		assert.Equal(t, 1, excerpt.Len())
 
-		got := trimLines(render(err))
+		got := trimLines(newXMLPrinter().PrintError(err))
 		assert.Contains(t, got, "<genericError>1</genericError>")
 		assert.Contains(t, got, "<genericError>9</genericError>")
 	})
@@ -3382,6 +3402,11 @@ func TestSourceErrors(t *testing.T) {
 
 	first := docs[0].Bind(niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a"))))
 	second := docs[1].Bind(niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b"))))
+	outer := yamltest.Bind(
+		t,
+		niceyaml.NewSourceFromString("c: 3\n"),
+		niceyaml.NewError("outer", niceyaml.WithErrors(first)),
+	)
 
 	tcs := map[string]struct {
 		err  error
@@ -3404,9 +3429,17 @@ func TestSourceErrors(t *testing.T) {
 			),
 			want: []error{first, second},
 		},
-		"binding inside a binding": {
-			err:  yamltest.Bind(t, niceyaml.NewSourceFromString("c: 3\n"), first),
-			want: nil, // Filled in below, since the outer is built here.
+		"binding of a binding is that binding": {
+			err:  yamltest.Bind(t, niceyaml.NewSourceFromString("c: 3\n"), fmt.Errorf("ctx: %w", first)),
+			want: []error{first},
+		},
+		"child bound to another source stands on its own": {
+			err:  outer,
+			want: []error{outer, first},
+		},
+		"child bound to the same source is part of its parent": {
+			err:  docs[0].Bind(niceyaml.NewError("outer", niceyaml.WithErrors(first))),
+			want: []error{docs[0].Bind(niceyaml.NewError("outer", niceyaml.WithErrors(first)))},
 		},
 	}
 
@@ -3416,10 +3449,10 @@ func TestSourceErrors(t *testing.T) {
 
 			got := niceyaml.SourceErrors(tc.err)
 
-			if name == "binding inside a binding" {
-				require.Len(t, got, 2)
+			if name == "child bound to the same source is part of its parent" {
+				require.Len(t, got, 1)
 				assert.Same(t, tc.err, got[0])
-				assert.Same(t, first, got[1])
+				assert.Same(t, first, got[0].Errors()[0])
 
 				return
 			}
@@ -3442,11 +3475,11 @@ func TestError_Accessors(t *testing.T) {
 	err := niceyaml.NewErrorFrom(cause, niceyaml.WithErrors(nil, nested))
 
 	assert.Equal(t, cause, err.Cause())
-	assert.Equal(t, []*niceyaml.Error{nested}, err.Errors())
+	assert.Equal(t, []error{nested}, err.Errors())
 
 	// The nested slice is a copy.
 	err.Errors()[0] = nil
-	assert.Equal(t, []*niceyaml.Error{nested}, err.Errors())
+	assert.Equal(t, []error{nested}, err.Errors())
 
 	require.EqualError(t, niceyaml.NewError("plain").Cause(), "plain")
 	assert.Empty(t, niceyaml.NewError("plain").Errors())
@@ -3458,7 +3491,7 @@ func TestError_Accessors(t *testing.T) {
 	assert.Empty(t, nilErr.Errors())
 }
 
-func TestSourceError_PositionOf(t *testing.T) {
+func TestSourceError_Errors(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
@@ -3471,27 +3504,43 @@ func TestSourceError_PositionOf(t *testing.T) {
 
 	require.ErrorAs(
 		t,
-		yamltest.Bind(t, source, niceyaml.NewError("main", niceyaml.WithErrors(badA, badX, mid))),
+		yamltest.Bind(t, source, niceyaml.NewError("main", niceyaml.WithErrors(badA, badX, nil, mid))),
 		&bound,
 	)
 
-	pos, ok := bound.PositionOf(badA)
-	assert.True(t, ok)
-	assert.Equal(t, position.New(0, 3), pos)
+	// One child per nested error, in the order given, each bound to the
+	// same source and unwrapping to the error it binds.
+	children := bound.Errors()
+	require.Len(t, children, 3)
 
-	// A nested error further in resolves as well.
-	pos, ok = bound.PositionOf(deep)
-	assert.True(t, ok)
+	for i, want := range []error{badA, badX, mid} {
+		assert.Same(t, source, children[i].Source())
+		require.ErrorIs(t, children[i], want)
+	}
+
+	pos, err := children[0].Position()
+	require.NoError(t, err)
+	assert.Equal(t, position.New(0, 3), pos)
+	assert.Equal(t, "1:4: $.a: bad a", children[0].Error())
+
+	// One that did not resolve reports why, and one that carries no
+	// location reports that.
+	_, err = children[1].Position()
+	require.ErrorIs(t, err, paths.ErrNotFound)
+
+	_, err = children[2].Position()
+	require.ErrorIs(t, err, niceyaml.ErrNoLocation)
+
+	// A nested error further in is a child of its own parent.
+	grandchildren := children[2].Errors()
+	require.Len(t, grandchildren, 1)
+
+	pos, err = grandchildren[0].Position()
+	require.NoError(t, err)
 	assert.Equal(t, position.New(1, 3), pos)
 
-	// One that did not resolve, one that carries no location, and one the
-	// binding never saw all report false.
-	for name, n := range map[string]*niceyaml.Error{
-		"unresolved":  badX,
-		"no location": mid,
-		"stranger":    niceyaml.NewError("stranger"),
-	} {
-		_, ok = bound.PositionOf(n)
-		assert.False(t, ok, name)
-	}
+	// The slice is a copy.
+	children[0] = nil
+
+	assert.NotNil(t, bound.Errors()[0])
 }

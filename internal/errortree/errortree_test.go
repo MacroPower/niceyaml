@@ -208,7 +208,7 @@ func TestNew(t *testing.T) {
 			want: errortree.Tree{
 				Text: "f.yaml:1:4: $.a: g.yaml: inner",
 				Children: []errortree.Tree{
-					{Text: "1:4: $.c: bad c"},
+					{Text: "g.yaml:1:4: $.c: bad c"},
 					{Text: "2:4: $.b: bad b"},
 				},
 			},
@@ -313,14 +313,15 @@ func TestNew(t *testing.T) {
 			got := errortree.New(tc.err)
 			assert.Equal(t, tc.want, got)
 
-			// A bound error lists every nested error on a line of its own,
-			// so its message has one line per node of the tree. An unbound
-			// Error's message is one line, so the check applies to bound
-			// errors alone.
-			var bound *niceyaml.SourceError
-
-			if !tc.multiLine && errors.As(tc.err, &bound) {
-				assert.Len(t, strings.Split(tc.err.Error(), "\n"), countNodes(got))
+			// The %+v verb of a bound error lists every nested error on a
+			// line of its own before the excerpt, so that part has one line
+			// per node of the tree. A wrapper around a binding has no
+			// formatter of its own, so the check applies to a bound error
+			// at the top.
+			bound, ok := tc.err.(*niceyaml.SourceError) //nolint:errorlint // The value itself formats.
+			if ok && !tc.multiLine {
+				msg, _, _ := strings.Cut(fmt.Sprintf("%+v", bound), "\n\n")
+				assert.Len(t, strings.Split(msg, "\n"), countNodes(got))
 			}
 		})
 	}

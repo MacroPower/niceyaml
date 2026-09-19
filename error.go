@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -42,6 +44,10 @@ var (
 	// position or range came from other text. [SourceError.Location] and
 	// [SourceError.Excerpt] return it.
 	ErrOutOfRange = errors.New("location outside source")
+
+	// The type of the error [errors.Join] returns, which binding rebuilds
+	// from its bound branches.
+	joinType = reflect.TypeOf(errors.Join(errors.New("")))
 )
 
 // Renderer renders a [line.View] as text. [SourceError.Detail] renders the
@@ -94,8 +100,7 @@ type Location interface {
 // "name:line:col: msg". Nested errors from [WithErrors] are structure
 // rather than text: [Error.Errors] returns them, [Error.Unwrap] exposes
 // them to [errors.Is] and [errors.As], and the [SourceError] that binds
-// the Error lists each one behind its resolved position and renders it as
-// an annotation.
+// the Error binds each one as a child with a resolved location of its own.
 //
 // Error implements the error interface. Use [Error.Unwrap] with [errors.Is]
 // and [errors.As] to inspect wrapped errors.
@@ -104,7 +109,7 @@ type Location interface {
 type Error struct {
 	err    error
 	loc    Location
-	errors []*Error
+	errors []error
 }
 
 // NewError creates a new [*Error] with the given message.
@@ -202,11 +207,13 @@ func WithRange(r position.Range) ErrorOption {
 // WithErrors is an [ErrorOption] that adds nested errors to the [Error],
 // such as one per violation a validator found.
 //
-// Each nested error has its own location. [Error.Errors] returns it, and
-// the [SourceError] that binds the Error lists it behind its resolved
-// position on a line of its own and renders it as an annotation below
-// that line. A nil nested error is skipped.
-func WithErrors(errs ...*Error) ErrorOption {
+// A nested error is any error, and one that is an [*Error] carries a
+// location of its own. [Error.Errors] returns them, and the [SourceError]
+// that binds the Error binds each one as a child with its own resolved
+// location, listed on a line of its own by the %+v verb and rendered as
+// an annotation below that line. A nested error that is a [*SourceError]
+// already, or wraps one, is bound as it is. A nil nested error is skipped.
+func WithErrors(errs ...error) ErrorOption {
 	return func(e *Error) {
 		e.errors = append(e.errors, errs...)
 	}
@@ -233,13 +240,13 @@ func (e *Error) Error() string {
 	return msg
 }
 
-// nested returns the nested errors of e that are not nil, in the order
-// they were given.
-func (e *Error) nested() []*Error {
-	out := make([]*Error, 0, len(e.errors))
+// nested returns the nested errors of e that are not nothing, in the
+// order they were given.
+func (e *Error) nested() []error {
+	out := make([]error, 0, len(e.errors))
 
 	for _, n := range e.errors {
-		if n != nil {
+		if !isNothing(n) {
 			out = append(out, n)
 		}
 	}
@@ -282,13 +289,7 @@ func (e *Error) Unwrap() []error {
 		result = append(result, e.err)
 	}
 
-	for _, nested := range e.errors {
-		if nested != nil {
-			result = append(result, nested)
-		}
-	}
-
-	return result
+	return append(result, e.nested()...)
 }
 
 // Cause returns the error the [Error] was created from: the error given
@@ -305,7 +306,7 @@ func (e *Error) Cause() error {
 // Errors returns the errors nested in the [Error] with [WithErrors], in the
 // order they were given and without the nil ones. A nil Error nests
 // nothing. The slice is a copy, so a caller may keep or sort it.
-func (e *Error) Errors() []*Error {
+func (e *Error) Errors() []error {
 	if e == nil {
 		return nil
 	}
@@ -391,13 +392,13 @@ func (e *Error) locate(lookup func() (*Document, error)) (location, error) {
 //
 // [Source.File], [Source.Documents], and the [Document] methods bind every
 // error they return, and [Document.Bind] binds an error built elsewhere.
-// Binding resolves
-// every location in the error against the source, once, so a SourceError
-// never changes and every method of it reads that result: [SourceError.Error]
-// puts the position in front of the message, [SourceError.Location]
-// returns the resolved range, and [SourceError.Excerpt] returns the
-// surrounding lines with the location highlighted. The %+v verb prints the
-// message and the excerpt as plain text, with carets under the location,
+// Binding resolves the location of the error against the source, once, so
+// a SourceError never changes and every method of it reads that result:
+// [SourceError.Error] puts the position in front of the message,
+// [SourceError.Location] returns the resolved range, and
+// [SourceError.Excerpt] returns the surrounding lines with the location
+// highlighted. The %+v verb prints the message, one line per nested
+// error, and the excerpt as plain text, with carets under the locations,
 // so it is safe for a log:
 //
 //	if _, err := source.File(); err != nil {
@@ -406,21 +407,23 @@ func (e *Error) locate(lookup func() (*Document, error)) (location, error) {
 //
 // A path resolves in the [Document] that bound the error.
 //
-// The bound error is a tree, and the SourceError presents all of it. Its
-// own position is that of the first [Error] along the cause chain, the
-// chain that follows each wrapper to the error it wraps and, where an
-// error unwraps to several as one from [errors.Join] does, to its first
-// branch. Every other branch of the tree, whether a later branch of a join
-// or a nested error given with [WithErrors], resolves the same way in the
-// same document, and [SourceError.Excerpt] marks its location and
-// annotates it with its message. Distant locations render as separate
-// hunks. The nested errors are recorded when the error is bound, so
-// [SourceError.Error] lists each one behind the position it resolved to
-// whatever a wrapper around the bound error does to the text of the
-// message. An error bound to another source inside the tree is a binding
-// of its own, so the SourceError leaves it alone, and
-// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] renders every
-// binding it finds in a tree.
+// The bound error is a tree, and binding binds every node of it. The
+// location of the SourceError is that of the first located [Error] along
+// the cause chain of the error it binds: the chain follows each wrapper to
+// the error it wraps and, where an error unwraps to several, the first
+// branch that leads to a location. Every error nested with [WithErrors]
+// in an Error along that chain, and every other branch that leads to a
+// location of its own, is bound the same way to the same document and
+// becomes a child. [SourceError.Errors] returns the children, each a
+// SourceError with its own location and children, so a validator's report
+// of several violations binds to one SourceError per violation. An error
+// that is or wraps a SourceError is a binding already: as a nested error
+// it contributes that binding as the child, and as the error given to Bind
+// it comes back as it is.
+//
+// [SourceError.Excerpt] marks the location of every node in the tree and
+// annotates each child with its message, with distant locations in
+// separate hunks.
 //
 // A location that does not resolve, such as a path the document does not
 // hold, costs the SourceError its position, and an error that carries no
@@ -452,45 +455,139 @@ func (e *Error) locate(lookup func() (*Document, error)) (location, error) {
 // Create instances with [Document.Bind], or receive them from the [Source]
 // and [Document] methods.
 type SourceError struct {
-	err error
-	// The reason the main location did not resolve, which is nil when it
-	// did, and the reason there is no range for it: locErr, or
-	// ErrOutOfRange for a location the source does not hold.
+	err    error
+	source *Source
+	// The reason the location did not resolve, which is nil when it did,
+	// and the reason there is no range for it: locErr, or ErrOutOfRange
+	// for a location the source does not hold.
 	locErr error
 	rngErr error
-	// The resolution failures, joined, or nil when every location resolved.
-	resolveErr error
-	source     *Source
-	// The first binding along the cause chain, or nil when there is none.
-	// Its message sits inside the message of err, nested lines included.
-	inner *SourceError
-	// Every position the excerpt marks, the main one first.
-	positions []errorPosition
-	// The nested errors from WithErrors along the cause chain, in the order
-	// the message lists them, and the resolved position of each one that
-	// resolved.
-	nested    []*Error
-	nestedPos map[*Error]position.Position
-	// The main location, resolved when the error was bound, and the range
-	// it covers in the source.
-	loc location
-	rng position.Range
-	// The cause chain reaches inner before any located Error, so that
-	// binding put its own position or name in the message already.
-	rebound bool
+	// The bound children: the errors nested along the cause chain and the
+	// branches of it that lead to a location of their own.
+	errors []*SourceError
+	// The ranges the excerpt highlights, the location, resolved when the
+	// error was bound, and the range it covers in the source.
+	ranges position.Ranges
+	loc    location
+	rng    position.Range
+	// The error wraps a binding, whose location, source, and children this
+	// one took over, and whose position its message carries already.
+	adopted bool
 }
 
 // defaultContextLines is the number of context lines the %+v verb shows
 // around an error.
 const defaultContextLines = 2
 
-// newSourceError binds err to src and resolves every location in it, with
-// paths resolving in doc. A nil doc, which src passes for the errors it
-// produces itself, resolves no path. The main unit gives the SourceError
-// its position, or the reason it has none, and every other unit its
-// annotation.
+// bindTree binds err to src, with paths resolving in doc, which is nil for
+// the errors a Source produces itself. It reports whether the result is a
+// new error: a nil err or a nil [*Error] or [*SourceError] pointer comes
+// back as it is, as does an error that is or wraps a [*SourceError] along
+// its cause chain, since that is a binding already. An error from
+// [errors.Join] comes back as the join of its bound branches, or as it is
+// when every branch was bound already. Any other error is bound as a new
+// SourceError.
+func bindTree(err error, src *Source, doc *Document) (error, bool) {
+	if isNothing(err) {
+		return err, false
+	}
+
+	if branches, ok := joinBranches(err); ok {
+		bound := make([]error, 0, len(branches))
+		changed := false
+
+		for _, branch := range branches {
+			// A nil pointer binds nothing, and a rebuilt join leaves it
+			// out so the first binding in the join is a live one.
+			if isNothing(branch) {
+				continue
+			}
+
+			b, c := bindTree(branch, src, doc)
+			bound = append(bound, b)
+			changed = changed || c
+		}
+
+		if !changed {
+			return err, false
+		}
+
+		return errors.Join(bound...), true
+	}
+
+	if _, ok := anchorOf(err).(*SourceError); ok { //nolint:errorlint // The anchor itself, found by the walk.
+		return err, false
+	}
+
+	return newSourceError(err, src, doc), true
+}
+
+// joinBranches returns the errors err unwraps to when err is the error
+// [errors.Join] returns, and false for any other error. Any other type
+// that unwraps to several, such as one from [fmt.Errorf] with two %w
+// verbs, has a message of its own that a rebuilt join would lose, so it
+// is bound as a wrapper.
+func joinBranches(err error) ([]error, bool) {
+	if reflect.TypeOf(err) != joinType {
+		return nil, false
+	}
+
+	joined, ok := err.(interface{ Unwrap() []error })
+	if !ok {
+		return nil, false
+	}
+
+	return joined.Unwrap(), true
+}
+
+// anchorOf returns the error along the cause chain of err that carries the
+// location: the first located [*Error], or the first [*SourceError], which
+// resolved one already. The chain follows a wrapper to the error it wraps,
+// an Error to its cause, and an error that unwraps to several to the first
+// branch that leads to an anchor. Returns nil when none does.
+func anchorOf(err error) error {
+	switch x := err.(type) { //nolint:errorlint // Walks the chain one node at a time.
+	case *SourceError:
+		if x == nil {
+			return nil
+		}
+
+		return x
+
+	case *Error:
+		if x == nil {
+			return nil
+		}
+
+		if x.loc != nil {
+			return x
+		}
+
+		return anchorOf(x.err)
+
+	case interface{ Unwrap() error }:
+		return anchorOf(x.Unwrap())
+
+	case interface{ Unwrap() []error }:
+		for _, branch := range x.Unwrap() {
+			a := anchorOf(branch)
+			if a != nil {
+				return a
+			}
+		}
+
+		return nil
+
+	default:
+		return nil
+	}
+}
+
+// newSourceError binds err to src and resolves its location, with a path
+// resolving in doc. A nil doc, which src passes for the errors it produces
+// itself, resolves no path. The children of err bind the same way.
 func newSourceError(err error, src *Source, doc *Document) *SourceError {
-	e := &SourceError{err: err, source: src, nestedPos: make(map[*Error]position.Position)}
+	e := &SourceError{err: err, source: src, locErr: ErrNoLocation}
 
 	// The document paths resolve in. The Source binds only the errors it
 	// produces itself, which carry no path, so a path with no document
@@ -503,59 +600,109 @@ func newSourceError(err error, src *Source, doc *Document) *SourceError {
 		return doc, nil
 	}
 
-	units := collectUnits(err)
-	e.positions = make([]errorPosition, 0, len(units))
-	e.inner, e.rebound = innerBinding(err)
+	switch a := anchorOf(err).(type) { //nolint:errorlint // The anchor itself, found by the walk.
+	case *Error:
+		e.loc, e.locErr = a.locate(lookup)
 
-	var errs []error
-
-	for i, u := range units {
-		x := u.nestedRoot()
-		if x != nil {
-			e.nested = append(e.nested, x)
-		}
-
-		loc, err := u.locate(lookup)
-		if i == 0 {
-			e.loc, e.locErr = loc, err
-		}
-
-		if err == nil {
-			err = checkInRange(loc, src.lines)
-		}
-
-		if err != nil {
-			if i == 0 {
-				e.rngErr = err
-			} else {
-				err = u.wrapResolution(err)
-			}
-
-			errs = append(errs, err)
-
-			continue
-		}
-
-		if i == 0 {
-			e.rng = rangeOf(src.lines, loc)
-		}
-
-		pos := errorPosition{pos: loc.pos, ranges: highlightRanges(src.lines, loc)}
-		if i > 0 {
-			pos.message = u.text()
-
-			x := u.nestedRoot()
-			if x != nil {
-				e.nestedPos[x] = loc.pos
-			}
-		}
-
-		e.positions = append(e.positions, pos)
+	case *SourceError:
+		// The error wraps a binding, so it is that binding with more
+		// around it: it takes over the location and source the binding
+		// resolved, and its message carries the position the binding put
+		// there already.
+		e.adopted = true
+		e.source = a.source
+		e.loc, e.locErr = a.loc, a.locErr
+		e.rng, e.rngErr, e.ranges = a.rng, a.rngErr, a.ranges
 	}
 
-	e.resolveErr = errors.Join(errs...)
+	if !e.adopted {
+		e.rngErr = e.locErr
+		if e.rngErr == nil {
+			e.rngErr = checkInRange(e.loc, src.lines)
+		}
+
+		if e.rngErr == nil {
+			e.ranges = highlightRanges(src.lines, e.loc)
+			e.rng = rangeOf(src.lines, e.loc)
+		}
+	}
+
+	e.collect(err, src, doc)
 
 	return e
+}
+
+// collect binds the children of the error e binds: every error nested with
+// [WithErrors] in an [*Error] along its cause chain, and every branch of
+// an error along the chain that unwraps to several and leads to a location
+// of its own, other than the branch that continues the chain. A branch
+// that leads to no location contributes the errors nested along it
+// instead. The chain ends at a [*SourceError], which is the cause of the
+// error above it rather than a violation of its own, so its children join
+// the children of e.
+func (e *SourceError) collect(err error, src *Source, doc *Document) {
+	for cur := err; !isNothing(cur); {
+		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
+		case *SourceError:
+			e.errors = append(e.errors, x.errors...)
+
+			return
+
+		case *Error:
+			for _, n := range x.errors {
+				e.addChild(n, src, doc)
+			}
+
+			cur = x.err
+
+		case interface{ Unwrap() error }:
+			cur = x.Unwrap()
+
+		case interface{ Unwrap() []error }:
+			var chain error
+
+			for _, branch := range x.Unwrap() {
+				switch {
+				case anchorOf(branch) == nil:
+					e.collect(branch, src, doc)
+				case chain == nil:
+					chain = branch
+				default:
+					e.addChild(branch, src, doc)
+				}
+			}
+
+			cur = chain
+
+		default:
+			return
+		}
+	}
+}
+
+// addChild binds n as a child of e. A join contributes each of its
+// branches, a binding is the child as it is, and any other error binds to
+// the same source and document as e, or takes over the binding it wraps.
+func (e *SourceError) addChild(n error, src *Source, doc *Document) {
+	if isNothing(n) {
+		return
+	}
+
+	if branches, ok := joinBranches(n); ok {
+		for _, branch := range branches {
+			e.addChild(branch, src, doc)
+		}
+
+		return
+	}
+
+	if bound, ok := n.(*SourceError); ok { //nolint:errorlint // The node itself, not a chain search.
+		e.errors = append(e.errors, bound)
+
+		return
+	}
+
+	e.errors = append(e.errors, newSourceError(n, src, doc))
 }
 
 // Source returns the [*Source] the error is bound to.
@@ -573,90 +720,50 @@ func (e *SourceError) Unwrap() error {
 	return e.err
 }
 
+// Errors returns the bound children of the [SourceError]: one SourceError
+// per error nested with [WithErrors] along the cause chain of the bound
+// error, and per branch of it that leads to a location of its own, in the
+// order they were given, each with its own location and children. A
+// validator's report of several violations therefore unwraps to one
+// child per violation:
+//
+//	for _, violation := range bound.Errors() {
+//		loc, err := violation.Location()
+//		...
+//	}
+//
+// The slice is a copy, so a caller may keep or sort it.
+func (e *SourceError) Errors() []*SourceError {
+	return slices.Clone(e.errors)
+}
+
 // Error returns the message of the bound error with its resolved position
-// in front, then one line per nested error from [WithErrors] along its
-// cause chain, each behind the position it resolved to:
+// in front: "name:line:col: $.path: msg" for a path error and
+// "name:line:col: msg" for a position or range error, with any context a
+// wrapper added between the position and the rest. The name is
+// [Source.Name], and the position stands alone as "line:col:" when the
+// source has none, so an error from a named file reads as a compiler
+// diagnostic that editors and build tools link to the line. An error
+// without a location, or one whose location does not resolve, has no
+// position to add, and the name then stands alone in front as "name: msg",
+// so an error from one file of many still says which file; without a name
+// the message comes back as it is.
 //
-//	cafe.yaml: 2 schema violations
-//	cafe.yaml:6:8: $.spec.sla: string does not match pattern
-//	cafe.yaml:22:11: $.spec.hours.days: expected "array", got "string"
-//
-// The first line is [SourceError.Message], which reads
-// "name:line:col: $.path: msg" for a path error and "name:line:col: msg"
-// for a position or range error, with any context a wrapper added between
-// the position and the rest. The name is [Source.Name], and the position
-// stands alone as "line:col:" when the source has none, so an error from a
-// named file reads as a compiler diagnostic that editors and build tools
-// link to the line. An error without a location, or one whose location
-// does not resolve, has no position to add, and the name then stands alone
-// in front as "name: msg", so an error from one file of many still says
-// which file; without a name the message comes back as it is.
-//
-// The nested lines come from the errors themselves rather than from the
-// text of the message, so a wrapper around the bound error that rewrites
-// the message still leaves every nested error listed. A nested error whose
-// location does not resolve keeps the line [Error.Error] gives it. The
-// nested errors of a nested error follow it, so the list is the tree in
-// depth-first order.
-//
-// A chain that holds a SourceError from a binding to another source
-// already carries the position or name that binding resolved, so the
-// message of that binding comes back as its wrappers wrote it, with the
-// nested lines of this binding after it.
-//
-// The result is plain text and never includes source lines, so it is safe to
-// log or compare. Use [SourceError.Excerpt] or the %+v verb for the
-// annotated source excerpt.
+// The message is one line, as the message of any error is, so it wraps
+// and logs as one. The nested errors are not part of it: [SourceError.Errors]
+// returns them, the %+v verb lists each one behind its own position, and
+// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] draws them as a
+// tree. The result never includes source lines, so it is safe to log or
+// compare; use [SourceError.Excerpt] or the %+v verb for the annotated
+// source excerpt.
 func (e *SourceError) Error() string {
-	lines := make([]string, 0, 1+len(e.nested))
-	lines = append(lines, e.headline(e.err.Error()))
-
-	for _, n := range e.nested {
-		text := n.Error()
-
-		if pos, ok := e.nestedPos[n]; ok {
-			text = prefix(formatPosition(e.source.Name(), pos), text)
-		}
-
-		if text != "" {
-			lines = append(lines, text)
-		}
-	}
-
-	return strings.Join(lines, "\n")
-}
-
-// Message returns the first line of [SourceError.Error]: the message of
-// the bound error with its resolved position or the name of the source in
-// front, without the lines of the nested errors that follow it. A wrapper
-// around a binding to another source keeps its text around the message of
-// that binding, so the line still reads as the wrapper wrote it.
-//
-// A message that spans several lines on its own, such as one from
-// [errors.Join], comes back whole.
-func (e *SourceError) Message() string {
 	msg := e.err.Error()
-
-	// The inner binding wrote its nested lines into the message that the
-	// wrappers around it carry. Its own Message is that text without them.
-	if e.inner != nil {
-		msg = strings.Replace(msg, e.inner.Error(), e.inner.Message(), 1)
-	}
-
-	return e.headline(msg)
-}
-
-// headline returns msg, the message of the bound error, with the resolved
-// position or the name of the source in front, or as it is for a rebound
-// binding, whose inner binding put its own in front already.
-func (e *SourceError) headline(msg string) string {
-	if e.rebound {
-		return msg
-	}
-
 	name := e.source.Name()
 
 	switch {
+	case e.adopted:
+		return msg
+
 	case e.locErr == nil:
 		return prefix(formatPosition(name, e.loc.pos), msg)
 
@@ -666,49 +773,6 @@ func (e *SourceError) headline(msg string) string {
 	default:
 		return msg
 	}
-}
-
-// innerBinding returns the first [*SourceError] along the cause chain of
-// err, or nil when the chain holds none, and whether the chain reaches it
-// before any [*Error] that carries a location. The chain follows a wrapper
-// to the error it wraps, an Error to its cause, and an error that unwraps
-// to several to its first branch that is not nothing.
-func innerBinding(err error) (*SourceError, bool) {
-	located := false
-
-	for cur := err; !isNothing(cur); {
-		//nolint:errorlint // Walks the chain one node at a time; errors.As would skip ahead.
-		switch x := cur.(type) {
-		case *SourceError:
-			return x, !located
-
-		case *Error:
-			if x.hasPosition() {
-				located = true
-			}
-
-			cur = x.err
-
-		case interface{ Unwrap() error }:
-			cur = x.Unwrap()
-
-		case interface{ Unwrap() []error }:
-			cur = nil
-
-			for _, branch := range x.Unwrap() {
-				if !isNothing(branch) {
-					cur = branch
-
-					break
-				}
-			}
-
-		default:
-			return nil, false
-		}
-	}
-
-	return nil, false
 }
 
 // formatPosition returns pos as "name:line:col:", the shape editors and
@@ -732,125 +796,6 @@ func prefix(p, msg string) string {
 	return p + " " + msg
 }
 
-// unit is one error of the tree a [SourceError] presents: the error at the
-// root of a branch and the [*Error] along its cause chain that carries the
-// position, or nil when none does. The main unit is the whole tree, and its
-// position goes in front of the message. Every other unit marks its
-// position in the excerpt and annotates it with its text, and one that is
-// a nested error from [WithErrors] gets a line of the message as well.
-type unit struct {
-	root   error
-	anchor *Error
-	nested bool
-}
-
-// collectUnits returns the units of err: the main unit first, then every
-// branch in depth-first order.
-func collectUnits(err error) []unit {
-	var out []unit
-
-	collectBranch(err, false, &out)
-
-	return out
-}
-
-// collectBranch appends the unit rooted at root, which is a nested error
-// from [WithErrors] when nested is set, and, after it, the units of the
-// branches along its cause chain. The chain follows a wrapper to the
-// error it wraps, an [*Error] to the error it was created from, and an
-// error that unwraps to several to its first branch. It ends at the first
-// Error that carries a position, which anchors the unit, or at a
-// [*SourceError], which is a binding of its own. Every nested error of an
-// Error along the chain, and every later branch of an error that unwraps to
-// several, starts a unit.
-func collectBranch(root error, nested bool, out *[]unit) {
-	u := unit{root: root, nested: nested}
-
-	var branches []unit
-
-	for cur := root; cur != nil; {
-		//nolint:errorlint // Walks the tree one node at a time; errors.As would skip ahead.
-		switch x := cur.(type) {
-		case *SourceError:
-			cur = nil
-
-		case *Error:
-			if x == nil {
-				cur = nil
-
-				break
-			}
-
-			for _, n := range x.errors {
-				if n != nil {
-					branches = append(branches, unit{root: n, nested: true})
-				}
-			}
-
-			if x.hasPosition() {
-				u.anchor = x
-				cur = nil
-
-				break
-			}
-
-			cur = x.err
-
-		case interface{ Unwrap() error }:
-			cur = x.Unwrap()
-
-		case interface{ Unwrap() []error }:
-			// A nil pointer binds nothing and locates nothing, so the
-			// chain continues at the first branch that holds something.
-			cur = nil
-
-			for _, err := range x.Unwrap() {
-				switch {
-				case isNothing(err):
-				case cur == nil:
-					cur = err
-				default:
-					branches = append(branches, unit{root: err})
-				}
-			}
-
-		default:
-			cur = nil
-		}
-	}
-
-	*out = append(*out, u)
-
-	for _, b := range branches {
-		collectBranch(b.root, b.nested, out)
-	}
-}
-
-// nestedRoot returns the [*Error] a nested unit is rooted at, and nil for
-// a unit that is not a nested error from [WithErrors].
-func (u unit) nestedRoot() *Error {
-	if !u.nested {
-		return nil
-	}
-
-	x, ok := u.root.(*Error) //nolint:errorlint // The root itself, not a chain search.
-	if !ok {
-		return nil
-	}
-
-	return x
-}
-
-// locate resolves the location of u in the document lookup returns. A unit
-// without an anchor returns [ErrNoLocation].
-func (u unit) locate(lookup func() (*Document, error)) (location, error) {
-	if u.anchor == nil {
-		return location{}, ErrNoLocation
-	}
-
-	return u.anchor.locate(lookup)
-}
-
 // isNothing reports whether err is nil or a nil [*Error] or [*SourceError]
 // pointer, which carries no message and no location.
 func isNothing(err error) bool {
@@ -866,37 +811,59 @@ func isNothing(err error) bool {
 	}
 }
 
-// text returns the text a unit annotates its position with: the message of
-// an [*Error] without the location it puts in front, since the caret marks
-// it, or the message of any other error as it is.
-func (u unit) text() string {
-	if x, ok := u.root.(*Error); ok { //nolint:errorlint // The root itself, not a chain search.
+// text returns the text the excerpt annotates the location of e with: the
+// message of an [*Error] without the location it puts in front, since the
+// caret marks it, or the message of any other error as it is.
+func (e *SourceError) text() string {
+	if x, ok := e.err.(*Error); ok { //nolint:errorlint // The node itself, not a chain search.
 		return x.message()
 	}
 
-	return u.root.Error()
+	return e.err.Error()
 }
 
-// wrapResolution returns err, the failure to resolve the unit, behind the
-// error the unit was created from. A unit built from a nil error has a
-// location and no message of its own, so its failure stands alone.
-func (u unit) wrapResolution(err error) error {
-	if x, ok := u.root.(*Error); ok { //nolint:errorlint // The root itself, not a chain search.
-		if x.err == nil {
-			return err
+// resolution returns why no location in the tree of e resolved: the reason
+// of e itself, then that of every node below it behind the message of its
+// error, joined. A node built from a nil error has a location and no
+// message of its own, so its reason stands alone.
+func (e *SourceError) resolution() error {
+	errs := []error{e.rngErr}
+
+	e.walk(func(n *SourceError) {
+		if n.rngErr == nil || n.source != e.source {
+			return
 		}
 
-		return fmt.Errorf("%w: %w", x.err, err)
-	}
+		x, ok := n.err.(*Error) //nolint:errorlint // The node itself, not a chain search.
+		if ok && x.err == nil {
+			errs = append(errs, n.rngErr)
 
-	return fmt.Errorf("%w: %w", u.root, err)
+			return
+		}
+
+		errs = append(errs, fmt.Errorf("%w: %w", n.err, n.rngErr))
+	})
+
+	return errors.Join(errs...)
 }
 
-// SourceErrors returns every [*SourceError] in the tree of err, in
-// depth-first order, so the outermost comes first and each branch of an
-// [errors.Join] follows the one before it. A caller that renders an error
-// built from several bindings, such as one per document of a file, marks
-// every one of them this way:
+// walk calls visit for every node below e in depth-first order.
+func (e *SourceError) walk(visit func(*SourceError)) {
+	for _, c := range e.errors {
+		visit(c)
+		c.walk(visit)
+	}
+}
+
+// SourceErrors returns every binding in the tree of err whose excerpt
+// stands on its own: each [*SourceError] reached through the wrappers and
+// joins around it, in depth-first order, so the outermost comes first and
+// each branch of an [errors.Join] follows the one before it, and, below
+// each one, every child bound to a source none of its ancestors in the
+// result is bound to. The excerpt of a binding marks the children bound to
+// the same source, so those are part of it. A caller that renders an
+// error built from several bindings, such as one per document of a file,
+// marks every one of them this way:
 //
 //	view := source.View()
 //	for _, bound := range niceyaml.SourceErrors(err) {
@@ -907,64 +874,64 @@ func (u unit) wrapResolution(err error) error {
 func SourceErrors(err error) []*SourceError {
 	var out []*SourceError
 
-	walkErrors(err, func(err error) {
-		bound, ok := err.(*SourceError) //nolint:errorlint // Visits every node itself.
-		if ok && bound != nil {
-			out = append(out, bound)
+	var walk func(error, map[*Source]bool)
+
+	walk = func(err error, seen map[*Source]bool) {
+		switch x := err.(type) { //nolint:errorlint // Walks the tree one node at a time.
+		case *SourceError:
+			if x == nil {
+				return
+			}
+
+			if !seen[x.source] {
+				out = append(out, x)
+			}
+
+			// The children of a binding to a source seen already render
+			// with the ancestor bound to it, and the rest on their own.
+			below := maps.Clone(seen)
+			below[x.source] = true
+
+			for _, c := range x.errors {
+				walk(c, below)
+			}
+
+		case interface{ Unwrap() error }:
+			walk(x.Unwrap(), seen)
+
+		case interface{ Unwrap() []error }:
+			for _, inner := range x.Unwrap() {
+				walk(inner, seen)
+			}
 		}
-	})
+	}
+
+	walk(err, map[*Source]bool{})
 
 	return out
-}
-
-// walkErrors calls visit for err and every error below it, in depth-first
-// order.
-func walkErrors(err error, visit func(error)) {
-	if err == nil {
-		return
-	}
-
-	visit(err)
-
-	switch x := err.(type) { //nolint:errorlint // Walks the tree one node at a time.
-	case interface{ Unwrap() error }:
-		walkErrors(x.Unwrap(), visit)
-
-	case interface{ Unwrap() []error }:
-		for _, inner := range x.Unwrap() {
-			walkErrors(inner, visit)
-		}
-	}
-}
-
-// firstSourceError returns the first [*SourceError] in err's chain. It
-// reports false when the chain holds none or when that SourceError is a nil
-// pointer, which binds nothing.
-func firstSourceError(err error) (*SourceError, bool) {
-	e, ok := errors.AsType[*SourceError](err)
-
-	return e, ok && e != nil
 }
 
 // Format implements [fmt.Formatter].
 //
 // The %v and %s verbs print [SourceError.Error]. The %+v verb prints
-// [SourceError.Error], then [SourceError.Detail] rendered as plain text
-// with two lines of context: each line of the excerpt behind its number,
-// carets under the columns of every location on the row below, and the
-// message of each branch beside its caret. The Detail of every other
-// SourceError in the tree follows, as [SourceErrors] finds them. The output
-// holds no escape sequences, so it reads in a log as it does in a terminal.
-// The %q verb quotes [SourceError.Error].
+// [SourceError.Error], then the Error of every node below it in the tree
+// on a line of its own, so a log names every violation and where it is,
+// then [SourceError.Detail] rendered as plain text with two lines of
+// context: each line of the excerpt behind its number, carets under the
+// columns of every location on the row below, and the message of each
+// child beside its caret. The output holds no escape sequences, so it
+// reads in a log as it does in a terminal. The %q verb quotes
+// [SourceError.Error].
 func (e *SourceError) Format(f fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && f.Flag('+'):
-		parts := []string{e.Error()}
-		for _, bound := range SourceErrors(e) {
-			parts = append(parts, bound.Detail(plainRenderer{}, defaultContextLines))
-		}
+		lines := []string{e.Error()}
 
-		writeString(f, joinParts(parts...))
+		e.walk(func(n *SourceError) {
+			lines = append(lines, n.Error())
+		})
+
+		writeString(f, joinParts(strings.Join(lines, "\n"), e.Detail(plainRenderer{}, defaultContextLines)))
 
 	case verb == 'q':
 		writeString(f, strconv.Quote(e.Error()))
@@ -978,6 +945,24 @@ func (e *SourceError) Format(f fmt.State, verb rune) {
 // for a [fmt.Formatter].
 func writeString(f fmt.State, s string) {
 	_, _ = io.WriteString(f, s) //nolint:errcheck // Formatter has no error channel.
+}
+
+// Position returns the position [SourceError.Error] reports: the start of
+// the range the error carries, the position it carries, or the position of
+// the token its path resolves to, in the coordinates of the view
+// [Source.Lines] returns, where line 0 is line 1 of the text.
+//
+// It returns [ErrNoLocation] when the error carries no location or its
+// path resolves to a token without one, and the resolution error from
+// [go.jacobcolvin.com/niceyaml/paths] when a path does not resolve. A
+// position the source does not hold still comes back, and
+// [SourceError.Location] reports [ErrOutOfRange] for it.
+func (e *SourceError) Position() (position.Position, error) {
+	if e.locErr != nil {
+		return position.Position{}, e.locErr
+	}
+
+	return e.loc.pos, nil
 }
 
 // Location returns the range in the source that the error points at: the
@@ -1001,18 +986,6 @@ func (e *SourceError) Location() (position.Range, error) {
 	return e.rng, nil
 }
 
-// PositionOf returns the position the nested error n resolved to when the
-// source was bound, and whether it resolved. The nested error is one given
-// with [WithErrors] anywhere in the tree of the bound error; the position
-// of the bound error itself is [SourceError.Location]. A nested error the
-// binding never resolved, such as one behind a binding to another source,
-// reports false.
-func (e *SourceError) PositionOf(n *Error) (position.Position, bool) {
-	pos, ok := e.nestedPos[n]
-
-	return pos, ok
-}
-
 // rangeOf returns the range loc covers in lines: the range it carries, or
 // the content of the token at its position, which spans several lines for
 // a multi-line token. A position with no token yields an empty range.
@@ -1026,18 +999,18 @@ func rangeOf(lines line.Lines, loc location) position.Range {
 }
 
 // Annotate marks the error on view, which is a view of the source the
-// error is bound to, such as one from [Source.View]: every location in
-// the tree is highlighted with [style.GenericError], and the message of
-// each branch other than the main one is an annotation below its own
+// error is bound to, such as one from [Source.View]: the location of every
+// node in the tree is highlighted with [style.GenericError], and the
+// message of each node below the root is an annotation below its own
 // line in [style.TextError], so the message reads as error text without
 // the highlight of the token it describes. A viewer that shows a document
 // with its errors in place marks its view this way and renders it as it
 // is.
 //
 // Annotate marks every location that resolves and returns an error only
-// when none does: the errors [SourceError.Location] returns, joined with
-// those of the other branches, or [ErrOutOfRange] for a location past the
-// last line. A branch whose location does not resolve is left out.
+// when none does: the error [SourceError.Location] returns, joined with
+// those of the nodes below it, or [ErrOutOfRange] for a location past the
+// last line. A node whose location does not resolve is left out.
 func (e *SourceError) Annotate(view *line.View) error {
 	_, err := e.annotate(view)
 
@@ -1054,9 +1027,8 @@ func (e *SourceError) Annotate(view *line.View) error {
 // A negative context shows the marked lines alone, as 0 does.
 //
 // Excerpt returns an error only when no location resolves, as
-// [SourceError.Annotate] does. A branch whose location does not resolve is
-// left out of the excerpt; its message is still part of
-// [SourceError.Error].
+// [SourceError.Annotate] does. A node whose location does not resolve is
+// left out of the excerpt; its message is still part of the %+v output.
 func (e *SourceError) Excerpt(context int) (*line.View, error) {
 	view := e.source.View()
 
@@ -1096,8 +1068,8 @@ func (e *SourceError) Excerpt(context int) (*line.View, error) {
 // error that carries no location has nothing to explain. Returns "" when
 // there is nothing to show.
 //
-// The %+v verb prints [SourceError.Error] and the Detail rendered as plain
-// text with two lines of context. A
+// The %+v verb prints [SourceError.Error], the nested errors, and the
+// Detail rendered as plain text with two lines of context. A
 // [go.jacobcolvin.com/niceyaml/printer.Printer] is a Renderer, and its
 // PrintError method prints the message as a tree and the Detail the same
 // way with the printer's styles.
@@ -1140,9 +1112,22 @@ type errorPosition struct {
 // annotate is [SourceError.Annotate] that also returns the indices of the
 // lines it marked, with repeats.
 func (e *SourceError) annotate(view *line.View) ([]int, error) {
-	positions := e.positions
+	var positions []errorPosition
+
+	if e.rngErr == nil {
+		positions = append(positions, errorPosition{pos: e.loc.pos, ranges: e.ranges})
+	}
+
+	// A node bound to another source marks that source, and its excerpt
+	// renders on its own; its children may still be bound to this one.
+	e.walk(func(n *SourceError) {
+		if n.rngErr == nil && n.source == e.source {
+			positions = append(positions, errorPosition{pos: n.loc.pos, ranges: n.ranges, message: n.text()})
+		}
+	})
+
 	if len(positions) == 0 {
-		return nil, e.resolveErr
+		return nil, e.resolution()
 	}
 
 	// Collect all ranges from positions and apply overlays to the view. The
