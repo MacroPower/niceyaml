@@ -41,8 +41,11 @@ type palette struct {
 	// replaces a kind's style rather than layering over it.
 	Overrides []style.StylesOption
 	// Mode is the background the theme is designed for. It also picks the
-	// direction of the derived shifts, so dimmed text moves toward the
-	// background and highlights move away from it.
+	// direction of the derived shifts. [kind.TextSubtle] and
+	// [kind.TextSubtleDim] move toward the background, while highlights,
+	// accent headings, and [kind.TextAccentDim] move away from it, so the
+	// dimmed accent reads brighter than the accent on a [Dark] theme and
+	// darker on a [Light] one.
 	Mode Mode
 }
 
