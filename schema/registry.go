@@ -175,6 +175,14 @@ func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Document) (*Schema,
 	}
 
 	for _, res := range r.resolvers {
+		// A matcher reports only whether it matched, so a resolver run
+		// under an ended context declines rather than reporting the
+		// cancellation. Check the context here, so a canceled lookup
+		// reports that instead of no match.
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("%w: %w", ErrResolve, ctx.Err())
+		}
+
 		ref, err := res.Resolve(ctx, doc)
 		if errors.Is(err, ErrNoMatch) {
 			continue

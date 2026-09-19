@@ -123,6 +123,25 @@ func TestRegistry_Lookup(t *testing.T) {
 	})
 }
 
+func TestRegistry_Lookup_CancelledContext(t *testing.T) {
+	t.Parallel()
+
+	// A matcher reports only whether it matched, so a canceled lookup
+	// reports the cancellation itself rather than no match.
+	reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded([]byte(`{"type":"object"}`))))
+
+	doc, err := niceyaml.NewSourceFromString("kind: Deployment\n").Document()
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err = reg.Lookup(ctx, doc)
+	require.ErrorIs(t, err, context.Canceled)
+	require.ErrorIs(t, err, schema.ErrResolve)
+	require.NotErrorIs(t, err, schema.ErrNoMatch)
+}
+
 func TestRegistry_Validate(t *testing.T) {
 	t.Parallel()
 
