@@ -677,7 +677,7 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 		tk := view.TokenAt(position.New(2, 0))
 		require.NotNil(t, tk)
 
-		err := source.Bind(niceyaml.NewError("bad c", niceyaml.WithToken(tk)))
+		err := source.Bind(niceyaml.NewError("bad c", niceyaml.WithPosition(position.NewFromToken(tk))))
 		assert.Equal(t, "3:1: bad c", err.Error())
 
 		got := trimLines(render(err))
@@ -693,7 +693,11 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 
 		var bound *niceyaml.SourceError
 
-		require.ErrorAs(t, source.Bind(niceyaml.NewError("bad d", niceyaml.WithToken(last))), &bound)
+		require.ErrorAs(
+			t,
+			source.Bind(niceyaml.NewError("bad d", niceyaml.WithPosition(position.NewFromToken(last)))),
+			&bound,
+		)
 
 		_, err := bound.Excerpt(2)
 		require.ErrorIs(t, err, niceyaml.ErrOutOfRange)

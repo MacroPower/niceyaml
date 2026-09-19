@@ -265,10 +265,10 @@ func (s *Source) Document() (*Document, error) {
 		return content[0], nil
 
 	default:
-		err := NewErrorFrom(fmt.Errorf("%w: %d documents", ErrMultipleDocuments, len(content)))
-		if start := content[1].doc.Start; start != nil {
-			err = err.With(WithToken(start))
-		}
+		err := NewErrorFrom(
+			fmt.Errorf("%w: %d documents", ErrMultipleDocuments, len(content)),
+			atToken(content[1].doc.Start),
+		)
 
 		return nil, s.Bind(err)
 	}
@@ -322,7 +322,7 @@ func (s *Source) parse() (*ast.File, error) {
 	if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
 		return nil, s.Bind(NewError(
 			yamlErr.GetMessage(),
-			WithToken(yamlErr.GetToken()),
+			atToken(yamlErr.GetToken()),
 		))
 	}
 

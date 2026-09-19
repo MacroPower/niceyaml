@@ -120,7 +120,7 @@ func TestError(t *testing.T) {
 		"with direct token bypasses path resolution": {
 			err: xmlSource(source).Bind(niceyaml.NewError(
 				"bad token",
-				niceyaml.WithToken(tokens[0]),
+				niceyaml.WithPosition(position.NewFromToken(tokens[0])),
 			)),
 			want: stringtest.JoinLF(
 				"1:1: bad token",
@@ -345,29 +345,29 @@ func TestError_Path(t *testing.T) {
 	}
 }
 
-func TestError_Token(t *testing.T) {
+func TestError_Position(t *testing.T) {
 	t.Parallel()
 
-	tk := lexer.Tokenize("key: value")[0]
+	pos := position.New(1, 4)
 
 	tcs := map[string]struct {
 		err    *niceyaml.Error
-		want   *token.Token
+		want   position.Position
 		wantOK bool
 	}{
-		"no token": {
+		"no position": {
 			err: niceyaml.NewError("test"),
 		},
-		"token set": {
-			err:    niceyaml.NewError("test", niceyaml.WithToken(tk)),
-			want:   tk,
+		"position set": {
+			err:    niceyaml.NewError("test", niceyaml.WithPosition(pos)),
+			want:   pos,
 			wantOK: true,
 		},
-		"token on a wrapped error": {
+		"position on a wrapped error": {
 			err: niceyaml.NewErrorFrom(
-				fmt.Errorf("context: %w", niceyaml.NewError("test", niceyaml.WithToken(tk))),
+				fmt.Errorf("context: %w", niceyaml.NewError("test", niceyaml.WithPosition(pos))),
 			),
-			want:   tk,
+			want:   pos,
 			wantOK: true,
 		},
 	}
@@ -376,9 +376,9 @@ func TestError_Token(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got, ok := tc.err.Token()
+			got, ok := tc.err.Position()
 			assert.Equal(t, tc.wantOK, ok)
-			assert.Same(t, tc.want, got)
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
@@ -681,7 +681,7 @@ func TestWithPrinter(t *testing.T) {
 
 	err := niceyaml.NewSourceFromString(source).Bind(niceyaml.NewError(
 		"test error",
-		niceyaml.WithToken(tokens[0]),
+		niceyaml.WithPosition(position.NewFromToken(tokens[0])),
 	))
 
 	want := stringtest.JoinLF(
@@ -752,20 +752,6 @@ func TestError_SpecialParentContext(t *testing.T) {
 			assert.Equal(t, tc.want, trimLines(render(err)))
 		})
 	}
-}
-
-func TestError_NilToken(t *testing.T) {
-	t.Parallel()
-
-	// Test getTokenPosition with nil token - should return empty position.
-	err := niceyaml.NewError(
-		"nil token error",
-		niceyaml.WithToken(nil),
-	)
-
-	got := render(err)
-	// Should still work and show the error message.
-	assert.Equal(t, "nil token error", got)
 }
 
 func TestError_Unwrap(t *testing.T) {
@@ -934,7 +920,7 @@ func TestError_MultiError(t *testing.T) {
 		// Both errors point to the same line.
 		err := xmlSource(source).Bind(niceyaml.NewError(
 			"validation failed",
-			niceyaml.WithToken(tokens[0]),
+			niceyaml.WithPosition(position.NewFromToken(tokens[0])),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"error1",
@@ -976,11 +962,11 @@ func TestError_MultiError(t *testing.T) {
 
 		err := xmlSource(source).Bind(niceyaml.NewError(
 			"main error",
-			niceyaml.WithToken(tokens[0]),
+			niceyaml.WithPosition(position.NewFromToken(tokens[0])),
 			niceyaml.WithErrors(
 				niceyaml.NewError(
 					"nested with token",
-					niceyaml.WithToken(fooToken),
+					niceyaml.WithPosition(position.NewFromToken(fooToken)),
 				),
 			),
 		))
@@ -1286,7 +1272,7 @@ func TestSourceError_Detail_NestedLocations(t *testing.T) {
 					niceyaml.WithErrors(
 						niceyaml.NewError(
 							"nested with token",
-							niceyaml.WithToken(tokens[0]),
+							niceyaml.WithPosition(position.NewFromToken(tokens[0])),
 						),
 					),
 				))
@@ -1472,7 +1458,7 @@ func TestError_NilInnerErrorWithLocation(t *testing.T) {
 		wantBound string
 	}{
 		"token": {
-			err:       niceyaml.NewErrorFrom(nil, niceyaml.WithToken(tk)),
+			err:       niceyaml.NewErrorFrom(nil, niceyaml.WithPosition(position.NewFromToken(tk))),
 			want:      "",
 			wantBound: "1:4:",
 		},
@@ -1718,11 +1704,11 @@ func TestError_HunkDisplay(t *testing.T) {
 			line10: j
 		`)
 
-		// The token points past the end of line 5, where the view holds no
-		// token, so there is nothing to highlight.
+		// The position points past the end of line 5, where the view holds
+		// no token, so there is nothing to highlight.
 		err := xmlSource(source).Bind(niceyaml.NewError(
 			"boom",
-			niceyaml.WithToken(&token.Token{Position: &token.Position{Line: 5, Column: 50}}),
+			niceyaml.WithPosition(position.New(4, 49)),
 		))
 
 		got := trimLines(render(err))
@@ -2030,7 +2016,7 @@ func TestError_Width(t *testing.T) {
 			)
 
 			err := niceyaml.NewSourceFromString(source).Bind(niceyaml.NewError("test error",
-				niceyaml.WithToken(tokens[0]),
+				niceyaml.WithPosition(position.NewFromToken(tokens[0])),
 			))
 
 			output := renderWith(err, errPrinter, 2)
@@ -2076,7 +2062,7 @@ func TestError_Width_WithCustomPrinter(t *testing.T) {
 
 	err := niceyaml.NewSourceFromString(source).Bind(niceyaml.NewError(
 		"test error",
-		niceyaml.WithToken(tokens[0]),
+		niceyaml.WithPosition(position.NewFromToken(tokens[0])),
 	))
 
 	output := renderWith(err, errPrinter, 2)
@@ -2110,7 +2096,7 @@ func TestError_Width_DefaultPrinter(t *testing.T) {
 
 	err := niceyaml.NewSourceFromString(source).Bind(niceyaml.NewError(
 		"test error",
-		niceyaml.WithToken(tokens[0]),
+		niceyaml.WithPosition(position.NewFromToken(tokens[0])),
 	))
 
 	output := renderWith(err, errPrinter, 2)
@@ -2322,7 +2308,7 @@ func TestError_TokenRendersFromSource(t *testing.T) {
 
 	got := trimLines(render(source.Bind(niceyaml.NewError(
 		"bad block",
-		niceyaml.WithToken(tk),
+		niceyaml.WithPosition(position.NewFromToken(tk)),
 		niceyaml.WithErrors(
 			niceyaml.NewError("bad c", niceyaml.WithPath(paths.Root().Child("c"))),
 		),
@@ -2631,7 +2617,7 @@ func TestError_NestedErrorChains(t *testing.T) {
 			"outer",
 			niceyaml.WithPath(paths.Root().Child("a")),
 			niceyaml.WithErrors(
-				niceyaml.NewErrorFrom(niceyaml.NewError("inner", niceyaml.WithToken(tk))),
+				niceyaml.NewErrorFrom(niceyaml.NewError("inner", niceyaml.WithPosition(position.NewFromToken(tk)))),
 				niceyaml.NewErrorFrom(niceyaml.NewError("also", niceyaml.WithPath(paths.Root().Child("b")))),
 			),
 		))
@@ -2782,7 +2768,7 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 		t.Parallel()
 
 		tk := source.Lines().TokenAt(position.New(2, 6))
-		inner := niceyaml.NewError("bad token", niceyaml.WithToken(tk))
+		inner := niceyaml.NewError("bad token", niceyaml.WithPosition(position.NewFromToken(tk)))
 		wrapped := docs[0].Bind(fmt.Errorf("document 1: %w", inner))
 
 		// The Error carries no position in its text, and binding puts the
@@ -2804,7 +2790,7 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 		}{
 			"direct": {
 				err: niceyaml.NewErrorFrom(
-					niceyaml.NewError("bad token", niceyaml.WithToken(tk)),
+					niceyaml.NewError("bad token", niceyaml.WithPosition(position.NewFromToken(tk))),
 					niceyaml.WithErrors(nested),
 				),
 				unbound: "bad token",
@@ -2812,7 +2798,10 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 			},
 			"behind context": {
 				err: niceyaml.NewErrorFrom(
-					fmt.Errorf("document 1: %w", niceyaml.NewError("bad token", niceyaml.WithToken(tk))),
+					fmt.Errorf(
+						"document 1: %w",
+						niceyaml.NewError("bad token", niceyaml.WithPosition(position.NewFromToken(tk))),
+					),
 					niceyaml.WithErrors(nested),
 				),
 				unbound: "document 1: bad token",
@@ -2847,7 +2836,7 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 		t.Parallel()
 
 		tk := source.Lines().TokenAt(position.New(2, 6))
-		inner := niceyaml.NewError("bad token", niceyaml.WithToken(tk))
+		inner := niceyaml.NewError("bad token", niceyaml.WithPosition(position.NewFromToken(tk)))
 		outer := niceyaml.NewErrorFrom(inner, niceyaml.WithPath(namePath))
 
 		// The path anchor resolves in the first document, and the message
@@ -2959,19 +2948,13 @@ func TestSourceError_Location(t *testing.T) {
 			),
 			want: position.NewRange(position.New(0, 1), position.New(0, 3)),
 		},
-		"token covers its content": {
-			err: niceyaml.NewError("bad", niceyaml.WithToken(&token.Token{
-				Position: &token.Position{Line: 1, Column: 7},
-			})),
+		"position covers the content of its token": {
+			err:  niceyaml.NewError("bad", niceyaml.WithPosition(position.New(0, 6))),
 			want: position.NewRange(position.New(0, 6), position.New(0, 10)),
 		},
 		"no location": {
 			err: niceyaml.NewError("bad"),
 			is:  niceyaml.ErrNoLocation,
-		},
-		"token without position": {
-			err: niceyaml.NewError("bad", niceyaml.WithToken(&token.Token{})),
-			is:  niceyaml.ErrTokenNotFound,
 		},
 		"path that does not resolve": {
 			err: niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("missing"))),
@@ -2989,11 +2972,9 @@ func TestSourceError_Location(t *testing.T) {
 			),
 			is: niceyaml.ErrOutOfRange,
 		},
-		"token from other text": {
-			err: niceyaml.NewError("bad", niceyaml.WithToken(&token.Token{
-				Position: &token.Position{Line: 9, Column: 1},
-			})),
-			is: niceyaml.ErrOutOfRange,
+		"position from other text": {
+			err: niceyaml.NewError("bad", niceyaml.WithPosition(position.New(8, 0))),
+			is:  niceyaml.ErrOutOfRange,
 		},
 	}
 
@@ -3088,9 +3069,9 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 		"every nested error unresolved": {
 			err: niceyaml.NewError("bad", niceyaml.WithErrors(
 				niceyaml.NewError("first", niceyaml.WithPath(paths.Root().Child("missing"))),
-				niceyaml.NewError("second", niceyaml.WithToken(&token.Token{})),
+				niceyaml.NewError("second", niceyaml.WithPosition(position.New(9, 0))),
 			)),
-			is:         niceyaml.ErrTokenNotFound,
+			is:         niceyaml.ErrOutOfRange,
 			wantRender: "bad\n├── $.missing: first\n└── second",
 		},
 	}
@@ -3570,8 +3551,8 @@ func TestError_Located(t *testing.T) {
 			err:  located,
 			want: true,
 		},
-		"own token": {
-			err:  niceyaml.NewError("tok", niceyaml.WithToken(&token.Token{})),
+		"own position": {
+			err:  niceyaml.NewError("pos", niceyaml.WithPosition(position.New(0, 0))),
 			want: true,
 		},
 		"own range": {

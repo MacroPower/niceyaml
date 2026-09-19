@@ -18,8 +18,9 @@ import (
 )
 
 var (
-	// ErrNoLocation indicates the error carries neither a path, a token, nor
-	// a range. [SourceError.Location] and [SourceError.Excerpt] return it.
+	// ErrNoLocation indicates the error carries neither a path, a position,
+	// nor a range, or its path resolves to a token that carries no position.
+	// [SourceError.Location] and [SourceError.Excerpt] return it.
 	ErrNoLocation = errors.New("no location provided")
 
 	// ChainFuncs describes [*Error] and [*SourceError] to the
@@ -33,11 +34,6 @@ var (
 		Binding:  chainBinding,
 		Position: chainPosition,
 	}
-
-	// ErrTokenNotFound indicates the error's token, or the token its path
-	// resolves to, carries no position. [SourceError.Location] and
-	// [SourceError.Excerpt] return it.
-	ErrTokenNotFound = errors.New("token not found in source")
 
 	// ErrNoDocuments indicates a [Source] that holds no YAML document where
 	// one was expected, such as a file holding only a "..." marker.
@@ -56,7 +52,7 @@ var (
 
 	// ErrOutOfRange indicates the error's location lies outside the lines of
 	// the source, past the last or before the first, which happens when a
-	// token or range came from other text. [SourceError.Location] and
+	// position or range came from other text. [SourceError.Location] and
 	// [SourceError.Excerpt] return it.
 	ErrOutOfRange = errors.New("location outside source")
 )
@@ -72,12 +68,12 @@ type Renderer interface {
 
 // Error is an error that points at a location in a YAML document.
 //
-// The location is a [paths.Path], a [*token.Token], or a [position.Range],
-// set with [WithPath], [WithToken], or [WithRange]. A path resolves within
-// one document of a source, and the binder picks which: a [Document] binds
-// the Errors its methods and validators produce, and [Document.Bind]
-// binds one built elsewhere, to itself; [Source.Bind] binds to the
-// single document [Source.Document] picks.
+// The location is a [paths.Path], a [position.Position], or a
+// [position.Range], set with [WithPath], [WithPosition], or [WithRange]. A
+// path resolves within one document of a source, and the binder picks
+// which: a [Document] binds the Errors its methods and validators produce,
+// and [Document.Bind] binds one built elsewhere, to itself; [Source.Bind]
+// binds to the single document [Source.Document] picks.
 //
 // An Error carries what a producer knows and nothing about presentation. A
 // validator that knows a path uses [WithPath] and need not hold the source.
@@ -105,7 +101,7 @@ type Renderer interface {
 type Error struct {
 	err    error
 	path   *paths.Path
-	token  *token.Token
+	pos    *position.Position
 	rng    *position.Range
 	errors []*Error
 }
@@ -147,7 +143,7 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 //
 // Available options:
 //   - [WithPath]
-//   - [WithToken]
+//   - [WithPosition]
 //   - [WithRange]
 //   - [WithErrors]
 type ErrorOption func(e *Error)
@@ -162,20 +158,34 @@ func WithPath(p paths.Path) ErrorOption {
 	}
 }
 
-// WithToken is an [ErrorOption] that sets the token where the error
-// occurred. Only the token's position is used, so a token from a parsed AST
-// works even though the parser clones tokens.
-func WithToken(tk *token.Token) ErrorOption {
+// WithPosition is an [ErrorOption] that sets the 0-indexed position where
+// the error occurred, in the coordinates of the lines [Source.Lines]
+// returns, where line 0 is line 1 of the text. [SourceError.Excerpt]
+// highlights the content of the token at that position. A producer that
+// holds a go-yaml token converts it with [position.NewFromToken], and one
+// that holds none names the position on its own.
+func WithPosition(p position.Position) ErrorOption {
 	return func(e *Error) {
-		e.token = tk
+		e.pos = &p
 	}
+}
+
+// atToken returns an [ErrorOption] that sets the position of tk, or one
+// that sets nothing when tk or its position is nil, as the token of a
+// go-yaml error can be.
+func atToken(tk *token.Token) ErrorOption {
+	if tk == nil || tk.Position == nil {
+		return func(*Error) {}
+	}
+
+	return WithPosition(position.NewFromToken(tk))
 }
 
 // WithRange is an [ErrorOption] that sets the 0-indexed range the error
 // covers, in the coordinates of the view [Source.Lines] returns, where line
-// 0 is line 1 of the text. It is the option for producers that know a
-// location but hold no go-yaml token, such as a check that runs on rendered
-// lines. [SourceError.Excerpt] highlights the whole range.
+// 0 is line 1 of the text. [SourceError.Excerpt] highlights the whole range
+// rather than one token, so it is the option for a check that knows the
+// columns an error covers, such as one that runs on rendered lines.
 func WithRange(r position.Range) ErrorOption {
 	return func(e *Error) {
 		e.rng = &r
@@ -196,7 +206,7 @@ func WithErrors(errs ...*Error) ErrorOption {
 }
 
 // Error returns the error message: "$.path: msg" when the Error carries a
-// path, and the message alone otherwise. A token or a range puts nothing in
+// path, and the message alone otherwise. A position or a range puts nothing in
 // the message, since the [SourceError] that binds the Error puts the
 // resolved position in front. Each nested error from [WithErrors] follows
 // on a line of its own, as its own Error method returns it, so an Error
@@ -266,10 +276,10 @@ func (e *Error) anchor() *Error {
 	}
 }
 
-// hasPosition reports whether e carries a token, a range, or a path of its
-// own.
+// hasPosition reports whether e carries a position, a range, or a path of
+// its own.
 func (e *Error) hasPosition() bool {
-	return e.token != nil || e.rng != nil || e.path != nil
+	return e.pos != nil || e.rng != nil || e.path != nil
 }
 
 // Unwrap returns the underlying errors for [errors.Is] and [errors.As]. A
@@ -325,7 +335,7 @@ func (e *Error) Located() bool {
 
 // Path returns the [paths.Path] set with [WithPath] and whether one was
 // set. It looks through wrapping to the [Error] that carries the location,
-// as [Error.Token] and [Error.Range] do; [Error.Located] reports whether
+// as [Error.Position] and [Error.Range] do; [Error.Located] reports whether
 // the Error itself carries one.
 func (e *Error) Path() (paths.Path, bool) {
 	a := e.anchor()
@@ -336,16 +346,16 @@ func (e *Error) Path() (paths.Path, bool) {
 	return *a.path, true
 }
 
-// Token returns the token set with [WithToken] and whether one was set. It
-// looks through wrapping to the [Error] that carries the location. The
-// token is the one given, so treat it as read-only.
-func (e *Error) Token() (*token.Token, bool) {
+// Position returns the [position.Position] set with [WithPosition] and
+// whether one was set. It looks through wrapping to the [Error] that
+// carries the location.
+func (e *Error) Position() (position.Position, bool) {
 	a := e.anchor()
-	if a.token == nil {
-		return nil, false
+	if a.pos == nil {
+		return position.Position{}, false
 	}
 
-	return a.token, true
+	return *a.pos, true
 }
 
 // Range returns the [position.Range] set with [WithRange] and whether one
@@ -386,21 +396,17 @@ type location struct {
 	pos position.Position
 }
 
-// locate resolves e's location: a range as it is, and a token, or the
+// locate resolves e's location: a range or a position as it is, and the
 // token a path resolves to in the document lookup returns, at the position
-// of the token. An Error without a position of its own returns
+// of the token. An Error without a location of its own returns
 // [ErrNoLocation].
 func (e *Error) locate(lookup func() (*Document, error)) (location, error) {
 	switch {
 	case e.rng != nil:
 		return location{pos: e.rng.Start, rng: e.rng}, nil
 
-	case e.token != nil:
-		if e.token.Position == nil {
-			return location{}, ErrTokenNotFound
-		}
-
-		return location{pos: position.NewFromToken(e.token)}, nil
+	case e.pos != nil:
+		return location{pos: *e.pos}, nil
 
 	case e.path != nil:
 		doc, err := lookup()
@@ -415,7 +421,7 @@ func (e *Error) locate(lookup func() (*Document, error)) (location, error) {
 		}
 
 		if tk == nil || tk.Position == nil {
-			return location{}, ErrTokenNotFound
+			return location{}, fmt.Errorf("%w: token at path has no position", ErrNoLocation)
 		}
 
 		return location{pos: position.NewFromToken(tk)}, nil
@@ -600,7 +606,7 @@ func (e *SourceError) Unwrap() error {
 
 // Error returns the message of the bound error with its resolved position
 // in front: "name:line:col: $.path: msg" for a path error and
-// "name:line:col: msg" for a token or range error, with any context a
+// "name:line:col: msg" for a position or range error, with any context a
 // wrapper added between the position and the rest. The name is
 // [Source.Name], and the position stands alone as "line:col:" when the
 // source has none, so an error from a named file reads as a compiler
@@ -917,14 +923,15 @@ func writeString(f fmt.State, s string) {
 }
 
 // Location returns the range in the source that the error points at: the
-// range it carries, or the content of the token it carries or its path
-// resolves to. A token that spans several lines yields a range across them.
+// range it carries, or the content of the token at the position it carries
+// or its path resolves to. A token that spans several lines yields a range
+// across them.
 // The range is in the coordinates of the view [Source.Lines] returns, where
 // line 0 is line 1 of the text.
 //
 // The location was resolved when the error was bound, so Location reads
 // the result. It returns [ErrNoLocation] when the error carries no
-// location, [ErrTokenNotFound] when the token has no position,
+// location or its path resolves to a token without one,
 // [ErrOutOfRange] when the location starts on a line the source does not
 // hold, the resolution error from [go.jacobcolvin.com/niceyaml/paths] when
 // a path does not resolve, and the error [Source.Document] returns when a

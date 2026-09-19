@@ -60,8 +60,8 @@
 // Themes from [go.jacobcolvin.com/niceyaml/style/theme] provide color
 // palettes. Without one, [printer.Printer] renders with [style.Default].
 //
-// [Error] points at a location in a YAML document: a path, a token, or a
-// range. [Error.Error] returns the message, with a path in front as
+// [Error] points at a location in a YAML document: a path, a position, or
+// a range. [Error.Error] returns the message, with a path in front as
 // "$.path", so a validator can build one without holding the source.
 //
 // [SourceError] binds an error to its [Source] and to the document its
