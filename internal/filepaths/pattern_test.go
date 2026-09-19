@@ -286,6 +286,11 @@ func TestMatchAny(t *testing.T) {
 			patterns: []string{"/.github/workflows/*.yml"},
 			want:     true,
 		},
+		"leading dot slash is dropped": {
+			path:     "repo/.github/workflows/ci.yml",
+			patterns: []string{"./.github/workflows/*.yml"},
+			want:     true,
+		},
 		"double star prefix is kept": {
 			path:     "repo/.github/workflows/ci.yml",
 			patterns: []string{"**/.github/workflows/*.yml"},

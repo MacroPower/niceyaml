@@ -107,9 +107,11 @@ func MatchAny(path string, patterns []string) bool {
 }
 
 // anyDepth returns pattern with the "**/" prefix that lets it match at any
-// depth of the tree. A leading "/" is dropped first, and a pattern that
+// depth of the tree. A leading "./" or "/" is dropped first, since the path
+// it matches against is cleaned and carries neither, and a pattern that
 // already starts with "**/" comes back unchanged.
 func anyDepth(pattern string) string {
+	pattern = strings.TrimPrefix(pattern, "./")
 	pattern = strings.TrimPrefix(pattern, "/")
 
 	if strings.HasPrefix(pattern, "**/") {
