@@ -48,6 +48,31 @@ func TestDiffer_Views(t *testing.T) {
 	assert.Equal(t, 3, again.Unified().Len())
 }
 
+func TestDiffer_Views_LineNumbers(t *testing.T) {
+	t.Parallel()
+
+	// An unchanged line keeps the number it has in each revision, so an
+	// insertion at the top of the after revision leaves the before view's
+	// numbers alone.
+	before := niceyaml.NewSourceFromString("a: 1\nb: 2\n").Lines()
+	after := niceyaml.NewSourceFromString("x: 0\na: 1\nb: 2\n").Lines()
+
+	result := diff.New().Diff(before, after)
+
+	var beforeNumbers, afterNumbers []int
+
+	for _, l := range result.Before().Lines().AllLines() {
+		beforeNumbers = append(beforeNumbers, l.Number())
+	}
+
+	for _, l := range result.After().Lines().AllLines() {
+		afterNumbers = append(afterNumbers, l.Number())
+	}
+
+	assert.Equal(t, []int{0, 1, 2}, beforeNumbers)
+	assert.Equal(t, []int{1, 2, 3}, afterNumbers)
+}
+
 func TestDiffer_Full(t *testing.T) {
 	t.Parallel()
 

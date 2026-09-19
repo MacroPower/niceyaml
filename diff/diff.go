@@ -113,7 +113,7 @@ func (d *Differ) computeOps(before, after line.Lines) []lineOp {
 	for i, op := range diffOps {
 		switch op.Kind {
 		case lcs.OpEqual:
-			ops = append(ops, lineOp{kind: lcs.OpEqual, line: after.Line(op.After)})
+			ops = append(ops, lineOp{kind: lcs.OpEqual, line: after.Line(op.After), before: before.Line(op.Before)})
 		case lcs.OpDelete:
 			ops = append(ops, lineOp{kind: lcs.OpDelete, line: before.Line(op.Before)})
 		case lcs.OpInsert:
@@ -252,9 +252,10 @@ func (r *Result) getAlignedRows() []alignedRow {
 
 			switch op.kind {
 			case lcs.OpEqual:
-				// Equal lines appear on both sides.
+				// Equal lines appear on both sides, each with the number it
+				// has in its own revision.
 				rows = append(rows, alignedRow{
-					before: op.line,
+					before: op.before,
 					after:  op.line,
 				})
 				i++
@@ -401,6 +402,12 @@ func Diff(a, b line.Lines) *Result {
 // lineOp represents a line in the full diff output.
 type lineOp struct {
 	line *line.Line // The [line.Line] from the revision it came from.
+
+	// The [line.Line] of the before revision for an [lcs.OpEqual] op, whose
+	// line field holds the after revision's line, so each side of an
+	// aligned view numbers the line as its own revision does.
+	before *line.Line
+
 	kind lcs.OpKind // One of [lcs.OpEqual], [lcs.OpDelete], [lcs.OpInsert].
 }
 
