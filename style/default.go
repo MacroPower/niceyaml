@@ -28,6 +28,7 @@ func Default() Styles {
 		Set(kind.LiteralString, base.Foreground(charmtone.Cumin)),
 		Set(kind.NameAlias, base.Foreground(charmtone.Bengal)),
 		Set(kind.NameAnchor, base.Foreground(charmtone.Bengal)),
+		Set(kind.NameDecorator, base.Foreground(charmtone.Bengal)),
 		Set(kind.NameTag, base.Foreground(charmtone.Mauve)),
 		Set(kind.Punctuation, base.Foreground(charmtone.Zest)),
 		Set(kind.PunctuationHeading, base.Foreground(charmtone.Smoke)),

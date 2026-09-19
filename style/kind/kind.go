@@ -207,7 +207,7 @@ var parent = map[Kind]Kind{
 	NameAlias:                Name,
 	NameAliasMerge:           NameAlias,
 	NameAnchor:               Name,
-	NameDecorator:            NameAnchor,
+	NameDecorator:            Name,
 	NameTag:                  Name,
 	Punctuation:              Text,
 	PunctuationBlock:         Punctuation,
