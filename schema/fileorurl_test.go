@@ -254,6 +254,23 @@ func TestFileOrURL(t *testing.T) {
 		assert.Equal(t, "file:///C:/schemas/config.json", url)
 	})
 
+	t.Run("colon in a relative path", func(t *testing.T) {
+		t.Parallel()
+
+		// A colon is a legal character in a POSIX file name, and only a
+		// separator behind it makes a drive letter, so this path joins
+		// baseDir like any other relative one.
+		tmpDir := t.TempDir()
+		schemaPath := filepath.Join(tmpDir, "a:b.json")
+		schemaData := []byte(`{"type": "object"}`)
+		require.NoError(t, os.WriteFile(schemaPath, schemaData, 0o600))
+
+		url, data, err := load(t, fileOrURL(t, tmpDir, "a:b.json"))
+		require.NoError(t, err)
+		assert.Equal(t, schemaData, data)
+		assert.Equal(t, fileURL(t, schemaPath), url)
+	})
+
 	t.Run("missing file", func(t *testing.T) {
 		t.Parallel()
 
@@ -270,17 +287,18 @@ func TestHasDriveLetter(t *testing.T) {
 		path string
 		want bool
 	}{
-		"upper-case drive":       {path: "C:/schemas/config.json", want: true},
-		"lower-case drive":       {path: "c:/schemas/config.json", want: true},
-		"drive alone":            {path: "C:", want: true},
-		"backslash separator":    {path: `C:\schemas\config.json`, want: true},
-		"digit before the colon": {path: "1:/schemas/config.json"},
-		"longer first segment":   {path: "ab:/schemas/config.json"},
-		"leading slash":          {path: "/C:/schemas/config.json"},
-		"posix path":             {path: "/srv/schemas/config.json"},
-		"relative path":          {path: "schemas/config.json"},
-		"empty path":             {path: ""},
-		"single letter":          {path: "C"},
+		"upper-case drive":        {path: "C:/schemas/config.json", want: true},
+		"lower-case drive":        {path: "c:/schemas/config.json", want: true},
+		"drive alone":             {path: "C:", want: true},
+		"backslash separator":     {path: `C:\schemas\config.json`, want: true},
+		"colon without separator": {path: "a:b.json"},
+		"digit before the colon":  {path: "1:/schemas/config.json"},
+		"longer first segment":    {path: "ab:/schemas/config.json"},
+		"leading slash":           {path: "/C:/schemas/config.json"},
+		"posix path":              {path: "/srv/schemas/config.json"},
+		"relative path":           {path: "schemas/config.json"},
+		"empty path":              {path: ""},
+		"single letter":           {path: "C"},
 	}
 
 	for name, tc := range tcs {

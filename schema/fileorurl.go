@@ -134,13 +134,22 @@ func trimDriveSlash(p string) string {
 	return p[1:]
 }
 
-// hasDriveLetter reports whether p starts with a Windows drive letter, as
-// in "C:/schemas". Such a path is absolute wherever it is read, so the
-// check does not depend on the platform running it.
+// hasDriveLetter reports whether p starts with a Windows drive letter and
+// nothing else or a separator behind it, as in "C:" or "C:/schemas". Such
+// a path is absolute wherever it is read, so the check does not depend on
+// the platform running it.
+//
+// A colon is a legal character in a POSIX file name, so "a:b.json" is a
+// relative path. Windows reads it as a path relative to the current
+// directory of drive A, which is no more absolute.
 func hasDriveLetter(p string) bool {
 	const driveLen = 2 // A letter and a colon.
 
 	if len(p) < driveLen || p[1] != ':' {
+		return false
+	}
+
+	if len(p) > driveLen && p[driveLen] != '/' && p[driveLen] != '\\' {
 		return false
 	}
 
