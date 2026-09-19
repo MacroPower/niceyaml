@@ -1394,6 +1394,106 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 	})
 }
 
+func TestDocument_Ranges(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.Input(`
+		kind: Deployment
+		text: first
+		  second
+		block: |
+		  line1
+		  line2
+		empty:
+	`)
+
+	tcs := map[string]struct {
+		path paths.Path
+		want position.Ranges
+		is   error
+	}{
+		"value": {
+			path: paths.Root().Child("kind"),
+			want: position.Ranges{position.NewRange(position.New(0, 6), position.New(0, 16))},
+		},
+		"key": {
+			path: paths.Root().Child("kind").Key(),
+			want: position.Ranges{position.NewRange(position.New(0, 0), position.New(0, 4))},
+		},
+		"value across lines": {
+			path: paths.Root().Child("text"),
+			want: position.Ranges{
+				position.NewRange(position.New(1, 6), position.New(1, 11)),
+				position.NewRange(position.New(2, 2), position.New(2, 8)),
+			},
+		},
+		"block scalar covers its indicator": {
+			path: paths.Root().Child("block"),
+			want: position.Ranges{position.NewRange(position.New(3, 7), position.New(3, 8))},
+		},
+		"missing path": {
+			path: paths.Root().Child("missing"),
+			is:   paths.ErrNotFound,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dd := yamltest.FirstDocument(t, input)
+
+			got, err := dd.Ranges(tc.path)
+			if tc.is != nil {
+				require.ErrorIs(t, err, tc.is)
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &bound)
+				assert.Same(t, dd.Source(), bound.Source())
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+
+	t.Run("matches the ranges a bound error highlights", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		for _, path := range []paths.Path{
+			paths.Root().Child("kind"),
+			paths.Root().Child("text"),
+			paths.Root().Child("block"),
+			paths.Root().Child("empty"),
+		} {
+			want, err := dd.Ranges(path)
+			require.NoError(t, err)
+
+			view := dd.Source().View()
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, dd.Bind(niceyaml.NewError("bad", niceyaml.WithPath(path))), &bound)
+			require.NoError(t, bound.Annotate(view))
+
+			var got position.Ranges
+
+			for i := range view.Len() {
+				for _, o := range view.Overlays(i) {
+					got = append(got, position.NewRange(position.New(i, o.Cols.Start), position.New(i, o.Cols.End)))
+				}
+			}
+
+			assert.Equal(t, want, got, "path %s", path)
+		}
+	})
+}
+
 func TestDocument_Get(t *testing.T) {
 	t.Parallel()
 

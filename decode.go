@@ -256,6 +256,53 @@ func (dd *Document) Span() position.Span {
 	return dd.span
 }
 
+// Ranges returns the ranges the value at path covers, one per line, without
+// the spaces around its content: the ranges [SourceError.Excerpt] highlights
+// for an [Error] built with [WithPath] at that path. A path from
+// [paths.Path.Key] covers the key rather than the value, and a block scalar
+// covers its indicator. The ranges highlight the value on a view of the
+// source:
+//
+//	ranges, err := doc.Ranges(paths.Root().Child("spec", "replicas"))
+//	if err != nil {
+//		return err
+//	}
+//
+//	view := doc.Source().View()
+//	view.AddOverlay(style.GenericHighlight, ranges...)
+//
+// A path that does not resolve returns the error [Document.Get] describes,
+// bound to the source, and a path whose token carries no position returns
+// an error wrapping [ErrNoLocation]. Returns nil when the value holds no
+// content on any line.
+func (dd *Document) Ranges(path paths.Path) (position.Ranges, error) {
+	pos, err := dd.position(path)
+	if err != nil {
+		return nil, dd.Bind(err)
+	}
+
+	lines := dd.source.lines
+
+	return lines.ContentRanges(lines.TokenAt(pos)), nil
+}
+
+// position returns the position of the token path resolves to in the
+// document. An error from [paths.Path.Token] names the path already and
+// comes back as it is, and a token without a position is [ErrNoLocation].
+func (dd *Document) position(path paths.Path) (position.Position, error) {
+	tk, err := path.Token(dd.doc)
+	if err != nil {
+		//nolint:wrapcheck // The paths error already names the path.
+		return position.Position{}, err
+	}
+
+	if tk == nil || tk.Position == nil {
+		return position.Position{}, fmt.Errorf("%w: token at path has no position", ErrNoLocation)
+	}
+
+	return position.NewFromToken(tk), nil
+}
+
 // HasContent reports whether the document holds a YAML value. A document
 // that holds only comments, or only %YAML and %TAG directives, has none.
 // The parser splits such a preamble off from the content below the next

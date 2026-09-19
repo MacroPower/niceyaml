@@ -140,6 +140,10 @@
 //	}
 //	fmt.Println(p.Print(view))
 //
+// [Document.Ranges] returns the ranges a path covers, the same ones an
+// error at that path highlights, for a caller that marks a value on a view
+// without an error to bind.
+//
 // This separates error production (validators, decoders) from error
 // presentation (source context, formatting), allowing each layer to provide
 // what it knows: a validator the path, a source the document, and the

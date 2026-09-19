@@ -392,17 +392,12 @@ func (e *Error) locate(lookup func() (*Document, error)) (location, error) {
 			return location{}, err
 		}
 
-		tk, err := loc.Token(doc.doc)
+		pos, err := doc.position(loc)
 		if err != nil {
-			//nolint:wrapcheck // The paths error already names the path.
 			return location{}, err
 		}
 
-		if tk == nil || tk.Position == nil {
-			return location{}, fmt.Errorf("%w: token at path has no position", ErrNoLocation)
-		}
-
-		return location{pos: position.NewFromToken(tk)}, nil
+		return location{pos: pos}, nil
 
 	default:
 		return location{}, ErrNoLocation
