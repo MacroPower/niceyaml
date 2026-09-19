@@ -663,7 +663,7 @@ func TestDiffer_Hunks(t *testing.T) {
 			if tc.wantEmpty {
 				assert.Nil(t, got)
 				assert.Equal(t, 0, got.Len())
-				assert.Nil(t, got.Lines())
+				assert.True(t, got.Lines().IsEmpty())
 
 				return
 			}

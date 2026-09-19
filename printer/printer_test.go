@@ -3547,7 +3547,7 @@ func TestPrinter_Layout_GutterWidth(t *testing.T) {
 			want:   6,
 		},
 		"empty view": {
-			view:   line.NewView(nil),
+			view:   line.NewView(line.Lines{}),
 			gutter: printer.DefaultGutter,
 			want:   6,
 		},
@@ -3641,7 +3641,7 @@ func TestPrinter_Layout_Width(t *testing.T) {
 			want:   4,
 		},
 		"empty view": {
-			view:   line.NewView(nil),
+			view:   line.NewView(line.Lines{}),
 			gutter: printer.DefaultGutter,
 			want:   0,
 		},
@@ -3793,7 +3793,7 @@ func TestPrinter_Layout(t *testing.T) {
 	t.Run("empty view", func(t *testing.T) {
 		t.Parallel()
 
-		l := p.Layout(line.NewView(nil))
+		l := p.Layout(line.NewView(line.Lines{}))
 
 		assert.Equal(t, 0, l.Rows())
 		assert.Equal(t, 0, l.Len())

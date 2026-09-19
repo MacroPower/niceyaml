@@ -1097,7 +1097,7 @@ func (e *SourceError) lineIndices(view *line.View) func(int) []int {
 	cache := make(map[int][]int)
 
 	return func(srcIdx int) []int {
-		if srcIdx < 0 || srcIdx >= len(lines) {
+		if srcIdx < 0 || srcIdx >= lines.Len() {
 			return nil
 		}
 
@@ -1105,7 +1105,7 @@ func (e *SourceError) lineIndices(view *line.View) func(int) []int {
 			return out
 		}
 
-		out := view.Indices(lines[srcIdx])
+		out := view.Indices(lines.Line(srcIdx))
 		cache[srcIdx] = out
 
 		return out

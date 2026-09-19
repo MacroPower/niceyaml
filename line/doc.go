@@ -50,7 +50,7 @@
 //	tks := tokens.Tokenize(input)
 //	lines := line.NewLines(tks)
 //
-//	for _, l := range lines {
+//	for _, l := range lines.AllLines() {
 //		fmt.Printf("%d: %s\n", l.Number(), l.Content())
 //	}
 //
@@ -64,9 +64,12 @@
 // collapse back to one, and the result holds the lexer's original tokens in
 // their original order.
 //
-// The lines never change after [NewLines] creates them, so the finder and
-// diff packages read a Lines value as it is, and any number of views share
-// it.
+// The lines never change after [NewLines] creates them, and nothing outside
+// this package can add to, remove from, or reorder a Lines value, so the
+// finder and diff packages read one as it is, and any number of views share
+// it. [Collect] builds a Lines value from lines taken from others, as a
+// diff does to interleave two revisions, and the result shares the lines
+// with the values they came from.
 //
 // A [Line] exposes its tokens in two forms. [Line.Tokens] returns the
 // per-line parts, whose positions describe this line. [Line.SourceTokens]

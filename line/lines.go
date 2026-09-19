@@ -1,7 +1,9 @@
 package line
 
 import (
+	"fmt"
 	"iter"
+	"slices"
 	"strings"
 
 	"github.com/goccy/go-yaml/token"
@@ -17,13 +19,19 @@ import (
 // knowledge of YAML documents, parsing, or files, so a Lines value may
 // describe content that is not a YAML document at all, such as a diff that
 // interleaves lines from two revisions. The lines never change after
-// creation, so a Lines value is safe to share between views and
+// creation, and nothing outside this package can add to, remove from, or
+// reorder a Lines value, so it is safe to share between views and
 // goroutines, and a view over it costs nothing to create.
 //
-// Create instances with [NewLines], and reach a line by indexing the
-// collection or by ranging over [Lines.AllLines]. Never put a nil pointer
-// in it.
-type Lines []*Line
+// Reach a line with [Lines.Line] or by ranging over [Lines.AllLines], as
+// with a [View]. The zero value holds no lines.
+//
+// Create instances with [NewLines], which cuts a token stream into one
+// [Line] per source line, or [Collect], which gathers lines taken from
+// other Lines values.
+type Lines struct {
+	lines []*Line
+}
 
 // NewLines creates new [Lines] from [token.Tokens], one [Line] per source
 // line.
@@ -33,36 +41,56 @@ type Lines []*Line
 // describes its own line, following the go-yaml lexer conventions for that
 // token type, and every part keeps a reference to the original token it was
 // cut from. [Lines.Tokens] recombines the parts into the original tokens.
-// Returns nil when tks is empty.
+// Returns the zero Lines when tks is empty.
 func NewLines(tks token.Tokens) Lines {
 	split := segment.Split(tks)
 	if len(split) == 0 {
-		return nil
+		return Lines{}
 	}
 
-	lines := make(Lines, len(split))
+	lines := make([]*Line, len(split))
 	for i, l := range split {
 		lines[i] = &Line{segments: l.Segments, number: l.Number}
 	}
 
-	return lines
+	return Lines{lines: lines}
+}
+
+// Collect creates new [Lines] holding ls in the order given, such as the
+// lines of two revisions a diff interleaves. The lines are shared with the
+// Lines values they came from, so a [View] over the result finds them by
+// identity as it finds them in the originals. Panics when a line is nil.
+func Collect(ls ...*Line) Lines {
+	for i, l := range ls {
+		if l == nil {
+			panic(fmt.Sprintf("line: Collect: line %d is nil", i))
+		}
+	}
+
+	return Lines{lines: slices.Clone(ls)}
+}
+
+// Line returns the [*Line] at index i. Panics when i is outside the
+// collection, as indexing a slice does.
+func (ls Lines) Line(i int) *Line {
+	return ls.lines[i]
 }
 
 // Len returns the number of lines.
 func (ls Lines) Len() int {
-	return len(ls)
+	return len(ls.lines)
 }
 
 // IsEmpty reports whether there are no lines.
 func (ls Lines) IsEmpty() bool {
-	return len(ls) == 0
+	return len(ls.lines) == 0
 }
 
 // Width returns the maximum [Line.Width] across all lines.
 func (ls Lines) Width() int {
 	var maxWidth int
 
-	for _, l := range ls {
+	for _, l := range ls.lines {
 		if w := l.Width(); w > maxWidth {
 			maxWidth = w
 		}
@@ -79,8 +107,8 @@ func (ls Lines) Width() int {
 func (ls Lines) AllLines(spans ...position.Span) iter.Seq2[int, *Line] {
 	return func(yield func(int, *Line) bool) {
 		if len(spans) == 0 {
-			for i := range ls {
-				if !yield(i, ls[i]) {
+			for i := range ls.lines {
+				if !yield(i, ls.lines[i]) {
 					return
 				}
 			}
@@ -90,10 +118,10 @@ func (ls Lines) AllLines(spans ...position.Span) iter.Seq2[int, *Line] {
 
 		for _, span := range spans {
 			start := max(0, span.Start)
-			end := min(len(ls), span.End)
+			end := min(len(ls.lines), span.End)
 
 			for i := start; i < end; i++ {
-				if !yield(i, ls[i]) {
+				if !yield(i, ls.lines[i]) {
 					return
 				}
 			}
@@ -111,7 +139,7 @@ func (ls Lines) AllLines(spans ...position.Span) iter.Seq2[int, *Line] {
 func (ls Lines) AllRunes(ranges ...position.Range) iter.Seq2[position.Position, rune] {
 	return func(yield func(position.Position, rune) bool) {
 		if len(ranges) == 0 {
-			for i := range ls {
+			for i := range ls.lines {
 				if !ls.yieldRunes(i, nil, yield) {
 					return
 				}
@@ -122,7 +150,7 @@ func (ls Lines) AllRunes(ranges ...position.Range) iter.Seq2[position.Position, 
 
 		for _, rng := range ranges {
 			startLine := max(0, rng.Start.Line)
-			endLine := min(len(ls)-1, rng.End.Line)
+			endLine := min(len(ls.lines)-1, rng.End.Line)
 
 			for i := startLine; i <= endLine; i++ {
 				if !ls.yieldRunes(i, &rng, yield) {
@@ -137,7 +165,7 @@ func (ls Lines) AllRunes(ranges ...position.Range) iter.Seq2[position.Position, 
 // When rng is non-nil, it yields only the runes inside it. Returns false when
 // yield stops the iteration.
 func (ls Lines) yieldRunes(lineIdx int, rng *position.Range, yield func(position.Position, rune) bool) bool {
-	for col, r := range ls[lineIdx].Runes() {
+	for col, r := range ls.lines[lineIdx].Runes() {
 		pos := position.New(lineIdx, col)
 
 		if rng != nil && !rng.Contains(pos) {
@@ -158,7 +186,7 @@ func (ls Lines) yieldRunes(lineIdx int, rng *position.Range, yield func(position
 // returning the original token once. The slice is new, but the tokens are the
 // originals. Treat them as read-only.
 func (ls Lines) Tokens() token.Tokens {
-	if len(ls) == 0 {
+	if len(ls.lines) == 0 {
 		return nil
 	}
 
@@ -166,7 +194,7 @@ func (ls Lines) Tokens() token.Tokens {
 
 	var last *token.Token
 
-	for _, l := range ls {
+	for _, l := range ls.lines {
 		for _, src := range l.SourceTokens() {
 			if src != last {
 				result = append(result, src)
@@ -186,11 +214,11 @@ func (ls Lines) Tokens() token.Tokens {
 //
 // Returns nil if the position is out of bounds or no token exists there.
 func (ls Lines) TokenAt(pos position.Position) *token.Token {
-	if pos.Line < 0 || pos.Line >= len(ls) {
+	if pos.Line < 0 || pos.Line >= len(ls.lines) {
 		return nil
 	}
 
-	return ls[pos.Line].TokenAt(pos.Col)
+	return ls.lines[pos.Line].TokenAt(pos.Col)
 }
 
 // TokenRanges returns the ranges tk occupies, one per line where it holds
@@ -228,8 +256,8 @@ func (ls Lines) ranges(
 
 	var result position.Ranges
 
-	for i := range ls {
-		sp, ok := span(ls[i], tk)
+	for i := range ls.lines {
+		sp, ok := span(ls.lines[i], tk)
 		if !ok || sp.Len() <= 0 {
 			continue
 		}
@@ -246,12 +274,12 @@ func (ls Lines) ranges(
 // Content returns the combined content of all lines as a string.
 // Lines are joined with newlines.
 func (ls Lines) Content() string {
-	if len(ls) == 0 {
+	if len(ls.lines) == 0 {
 		return ""
 	}
 
 	sb := strings.Builder{}
-	for i, l := range ls {
+	for i, l := range ls.lines {
 		if i > 0 {
 			sb.WriteByte('\n')
 		}
@@ -267,7 +295,7 @@ func (ls Lines) Content() string {
 func (ls Lines) String() string {
 	var sb strings.Builder
 
-	for i, l := range ls {
+	for i, l := range ls.lines {
 		if i > 0 {
 			sb.WriteByte('\n')
 		}

@@ -2,7 +2,6 @@ package diff
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 	"sync"
 
@@ -91,22 +90,18 @@ func (d *Differ) Diff(a, b line.Lines) *Result {
 }
 
 // computeOps computes line operations using the configured algorithm. The
-// ops hold the caller's lines, since a line never changes; the slices
-// themselves are copied so a caller that reorders its input afterwards
-// reaches nothing in the result.
+// ops hold the caller's lines, which never change and which nothing can
+// reorder inside a [line.Lines] value.
 func (d *Differ) computeOps(before, after line.Lines) []lineOp {
-	beforeLines := slices.Clone(before)
-	afterLines := slices.Clone(after)
-
 	// Pre-compute content strings once to avoid repeated string building.
-	beforeContent := make([]string, len(beforeLines))
-	for i := range beforeLines {
-		beforeContent[i] = beforeLines[i].Content()
+	beforeContent := make([]string, before.Len())
+	for i, l := range before.AllLines() {
+		beforeContent[i] = l.Content()
 	}
 
-	afterContent := make([]string, len(afterLines))
-	for i := range afterLines {
-		afterContent[i] = afterLines[i].Content()
+	afterContent := make([]string, after.Len())
+	for i, l := range after.AllLines() {
+		afterContent[i] = l.Content()
 	}
 
 	// Compute diff using the configured algorithm.
@@ -118,11 +113,11 @@ func (d *Differ) computeOps(before, after line.Lines) []lineOp {
 	for i, op := range diffOps {
 		switch op.Kind {
 		case lcs.OpEqual:
-			ops = append(ops, lineOp{kind: lcs.OpEqual, line: afterLines[op.After]})
+			ops = append(ops, lineOp{kind: lcs.OpEqual, line: after.Line(op.After)})
 		case lcs.OpDelete:
-			ops = append(ops, lineOp{kind: lcs.OpDelete, line: beforeLines[op.Before]})
+			ops = append(ops, lineOp{kind: lcs.OpDelete, line: before.Line(op.Before)})
 		case lcs.OpInsert:
-			ops = append(ops, lineOp{kind: lcs.OpInsert, line: afterLines[op.After]})
+			ops = append(ops, lineOp{kind: lcs.OpInsert, line: after.Line(op.After)})
 		default:
 			// Dropping the op would lose a line from every rendering
 			// without a trace, so treat it as a broken Algorithm the same
@@ -328,12 +323,12 @@ func (r *Result) getAlignedRows() []alignedRow {
 func (r *Result) Before() *line.View {
 	rows := r.getAlignedRows()
 
-	lines := make(line.Lines, len(rows))
+	lines := make([]*line.Line, len(rows))
 	for i := range rows {
 		lines[i] = rows[i].before
 	}
 
-	view := line.NewView(lines)
+	view := line.NewView(line.Collect(lines...))
 
 	for i := range rows {
 		view.SetFlag(i, rows[i].beforeFlag)
@@ -358,12 +353,12 @@ func (r *Result) Before() *line.View {
 func (r *Result) After() *line.View {
 	rows := r.getAlignedRows()
 
-	lines := make(line.Lines, len(rows))
+	lines := make([]*line.Line, len(rows))
 	for i := range rows {
 		lines[i] = rows[i].after
 	}
 
-	view := line.NewView(lines)
+	view := line.NewView(line.Collect(lines...))
 
 	for i := range rows {
 		view.SetFlag(i, rows[i].afterFlag)
@@ -442,12 +437,12 @@ type lineOps []lineOp
 // toView converts ops to a [line.View] with the flag of each op set on its
 // line.
 func (ops lineOps) toView() *line.View {
-	lines := make(line.Lines, len(ops))
+	lines := make([]*line.Line, len(ops))
 	for i, op := range ops {
 		lines[i] = op.line
 	}
 
-	view := line.NewView(lines)
+	view := line.NewView(line.Collect(lines...))
 
 	for i, op := range ops {
 		view.SetFlag(i, opKindFlag(op.kind))

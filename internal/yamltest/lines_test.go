@@ -73,9 +73,9 @@ func TestLines_Validate(t *testing.T) {
 
 		// After normalization, line numbers are sequential.
 		require.NoError(t, yamltest.ValidateLines(lines))
-		require.Len(t, lines, 2)
-		assert.Equal(t, 5, lines[0].Number())
-		assert.Equal(t, 6, lines[1].Number())
+		require.Equal(t, 2, lines.Len())
+		assert.Equal(t, 5, lines.Line(0).Number())
+		assert.Equal(t, 6, lines.Line(1).Number())
 	})
 
 	t.Run("line numbers normalized - decreasing input", func(t *testing.T) {
@@ -93,16 +93,9 @@ func TestLines_Validate(t *testing.T) {
 
 		// After normalization, line numbers are sequential.
 		require.NoError(t, yamltest.ValidateLines(lines))
-		require.Len(t, lines, 2)
-		assert.Equal(t, 10, lines[0].Number())
-		assert.Equal(t, 11, lines[1].Number())
-	})
-
-	t.Run("nil line", func(t *testing.T) {
-		t.Parallel()
-
-		err := yamltest.ValidateLines(line.Lines{nil})
-		require.ErrorIs(t, err, yamltest.ErrNilLine)
+		require.Equal(t, 2, lines.Len())
+		assert.Equal(t, 10, lines.Line(0).Number())
+		assert.Equal(t, 11, lines.Line(1).Number())
 	})
 
 	t.Run("placeholder lines carry no number", func(t *testing.T) {
@@ -110,7 +103,7 @@ func TestLines_Validate(t *testing.T) {
 
 		// A side-by-side diff inserts zero-value lines opposite inserted
 		// and deleted lines, and they hold no tokens to number.
-		require.NoError(t, yamltest.ValidateLines(line.Lines{&line.Line{}, &line.Line{}}))
+		require.NoError(t, yamltest.ValidateLines(line.Collect(&line.Line{}, &line.Line{})))
 	})
 
 	t.Run("line with tokens and no number", func(t *testing.T) {
@@ -120,7 +113,7 @@ func TestLines_Validate(t *testing.T) {
 		tks.Add(strTkb.Clone().Origin("first\n").Value("first").PositionLine(0).PositionColumn(1).Build())
 
 		lines := line.NewLines(tks)
-		require.Len(t, lines, 1)
+		require.Equal(t, 1, lines.Len())
 
 		err := yamltest.ValidateLines(lines)
 		require.ErrorIs(t, err, yamltest.ErrLineNumberNotIncreasing)
@@ -174,9 +167,9 @@ func TestLines_Validate(t *testing.T) {
 
 		// Both tokens end up on line 1 with normalized positions.
 		require.NoError(t, yamltest.ValidateLines(lines))
-		require.Len(t, lines, 1)
+		require.Equal(t, 1, lines.Len())
 
-		ln := lines[0]
+		ln := lines.Line(0)
 		require.Len(t, ln.Tokens(), 2)
 		assert.Equal(t, 1, ln.Token(0).Position.Line)
 		assert.Equal(t, 1, ln.Token(1).Position.Line)
@@ -229,7 +222,7 @@ func TestLines_Validate_Testdata(t *testing.T) {
 			lines := line.NewLines(lexer.Tokenize(string(src)))
 			require.NotEmpty(t, lines)
 
-			assert.Len(t, lines, strings.Count(string(src), "\n"), "one line per source line")
+			assert.Equal(t, strings.Count(string(src), "\n"), lines.Len(), "one line per source line")
 			assert.NoError(t, yamltest.ValidateLines(lines))
 		})
 	}

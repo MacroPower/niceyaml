@@ -350,7 +350,7 @@ func (s *Source) bind(err error) error {
 // [position.NewFromToken] converts any token of the Source to a position
 // in the lines.
 //
-// The lines never change, so every call returns the same slice and the
+// The lines never change, so every call returns the same value and the
 // [finder.Finder] and [diff.Differ] read it as it is. To render the
 // Source, take a [line.View] from [Source.View].
 func (s *Source) Lines() line.Lines {

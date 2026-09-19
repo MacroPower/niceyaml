@@ -3361,7 +3361,7 @@ func TestSourceError_Annotate(t *testing.T) {
 				view: niceyaml.NewSourceFromString(excerptSource).View(),
 			},
 			"empty view": {
-				view: line.NewView(nil),
+				view: line.NewView(line.Lines{}),
 			},
 		}
 

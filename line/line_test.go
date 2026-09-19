@@ -40,9 +40,9 @@ func TestSplit(t *testing.T) {
 			t.Parallel()
 
 			lines := line.NewLines(lexer.Tokenize(tc.input))
-			require.Len(t, lines, len(tc.wantContent))
+			require.Equal(t, len(tc.wantContent), lines.Len())
 
-			for i, l := range lines {
+			for i, l := range lines.AllLines() {
 				assert.Equal(t, tc.wantContent[i], l.Content(), "line %d content", i)
 				assert.Equal(t, tc.wantNumbers[i], l.Number(), "line %d number", i)
 			}
@@ -89,9 +89,9 @@ func TestLine_Runes(t *testing.T) {
 			t.Parallel()
 
 			lines := line.NewLines(lexer.Tokenize(tc.input))
-			require.Len(t, lines, len(tc.want))
+			require.Equal(t, len(tc.want), lines.Len())
 
-			for i, l := range lines {
+			for i, l := range lines.AllLines() {
 				var got []rune
 
 				for col, r := range l.Runes() {
@@ -116,10 +116,10 @@ func TestLine_Runes(t *testing.T) {
 		t.Parallel()
 
 		lines := line.NewLines(lexer.Tokenize("abc: def\n"))
-		require.Len(t, lines, 1)
+		require.Equal(t, 1, lines.Len())
 
 		count := 0
-		for range lines[0].Runes() {
+		for range lines.Line(0).Runes() {
 			count++
 			if count == 2 {
 				break
@@ -145,21 +145,21 @@ func TestLine_Tokens(t *testing.T) {
 
 	src := lexer.Tokenize("foo: |-\n  hello\n  world\nbar: baz\n")
 	lines := line.NewLines(src)
-	require.Len(t, lines, 4)
+	require.Equal(t, 4, lines.Len())
 
 	// The block scalar content is a single lexer token spanning lines 1 and 2.
-	content := lines[1].TokenAt(2)
+	content := lines.Line(1).TokenAt(2)
 	require.NotNil(t, content)
 	assert.Equal(t, "hello\nworld", content.Value)
-	assert.Same(t, content, lines[2].TokenAt(0), "both lines resolve to the same source token")
+	assert.Same(t, content, lines.Line(2).TokenAt(0), "both lines resolve to the same source token")
 
 	t.Run("SourceTokens returns each original once per line", func(t *testing.T) {
 		t.Parallel()
 
-		assert.Equal(t, token.Tokens{content}, lines[1].SourceTokens())
-		assert.Equal(t, token.Tokens{content}, lines[2].SourceTokens())
+		assert.Equal(t, token.Tokens{content}, lines.Line(1).SourceTokens())
+		assert.Equal(t, token.Tokens{content}, lines.Line(2).SourceTokens())
 
-		first := lines[0].SourceTokens()
+		first := lines.Line(0).SourceTokens()
 		require.Len(t, first, 3, "key, colon, and block header")
 
 		for _, tk := range first {
@@ -170,19 +170,19 @@ func TestLine_Tokens(t *testing.T) {
 	t.Run("Tokens returns per-line parts", func(t *testing.T) {
 		t.Parallel()
 
-		parts := lines[1].Tokens()
+		parts := lines.Line(1).Tokens()
 		require.Len(t, parts, 1)
 		assert.NotSame(t, content, parts[0], "the part is distinct from its source")
 		assert.Equal(t, "  hello\n", parts[0].Origin)
 		assert.Equal(t, 2, parts[0].Position.Line)
-		assert.Same(t, parts[0], lines[1].Token(0))
+		assert.Same(t, parts[0], lines.Line(1).Token(0))
 	})
 
 	t.Run("TokenAt out of range", func(t *testing.T) {
 		t.Parallel()
 
-		assert.Nil(t, lines[3].TokenAt(-1))
-		assert.Nil(t, lines[3].TokenAt(lines[3].Width()))
+		assert.Nil(t, lines.Line(3).TokenAt(-1))
+		assert.Nil(t, lines.Line(3).TokenAt(lines.Line(3).Width()))
 	})
 }
 
@@ -191,9 +191,9 @@ func TestLine_TokenSpan(t *testing.T) {
 
 	src := lexer.Tokenize("foo: |-\n  hello\n  world\nbar:   baz\n")
 	lines := line.NewLines(src)
-	require.Len(t, lines, 4)
+	require.Equal(t, 4, lines.Len())
 
-	content := lines[1].TokenAt(2)
+	content := lines.Line(1).TokenAt(2)
 	require.NotNil(t, content)
 
 	tcs := map[string]struct {
@@ -219,14 +219,14 @@ func TestLine_TokenSpan(t *testing.T) {
 		},
 		"per-line part": {
 			line:        2,
-			tk:          lines[2].Token(0),
+			tk:          lines.Line(2).Token(0),
 			wantSpan:    position.NewSpan(0, 7),
 			wantContent: position.NewSpan(2, 7),
 			wantFound:   true,
 		},
 		"value after padding": {
 			line:        3,
-			tk:          lines[3].TokenAt(7),
+			tk:          lines.Line(3).TokenAt(7),
 			wantSpan:    position.NewSpan(4, 10),
 			wantContent: position.NewSpan(7, 10),
 			wantFound:   true,
@@ -247,7 +247,7 @@ func TestLine_TokenSpan(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			l := lines[tc.line]
+			l := lines.Line(tc.line)
 
 			span, ok := l.TokenSpan(tc.tk)
 			assert.Equal(t, tc.wantFound, ok)

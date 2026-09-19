@@ -412,9 +412,9 @@ func TestSource_Lines(t *testing.T) {
 	src := niceyaml.NewSourceFromString("key: value\nfoo: bar")
 	lines := src.Lines()
 
-	assert.Len(t, lines, src.Lines().Len())
-	assert.Equal(t, "key: value", lines[0].Content())
-	assert.Equal(t, "foo: bar", lines[1].Content())
+	assert.Equal(t, src.Lines().Len(), lines.Len())
+	assert.Equal(t, "key: value", lines.Line(0).Content())
+	assert.Equal(t, "foo: bar", lines.Line(1).Content())
 }
 
 func TestSource_AllRunes_EarlyBreak(t *testing.T) {
@@ -714,7 +714,7 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 	source := niceyaml.NewSourceFromTokens(docs[1].Tokens())
 	view := source.Lines()
 	require.Equal(t, 4, view.Len())
-	assert.Equal(t, 1, view[0].Number())
+	assert.Equal(t, 1, view.Line(0).Number())
 	assert.Equal(t, "---\nb: 2\nc: 3\nd: 4", view.Content())
 
 	t.Run("the caller's tokens keep their positions", func(t *testing.T) {
@@ -726,7 +726,7 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 	t.Run("a token position is a view position", func(t *testing.T) {
 		t.Parallel()
 
-		for _, l := range view {
+		for _, l := range view.AllLines() {
 			for _, tk := range l.SourceTokens() {
 				assert.Same(t, tk, view.TokenAt(position.NewFromToken(tk)), "token %q", tk.Value)
 			}

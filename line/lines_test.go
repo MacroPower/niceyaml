@@ -322,10 +322,10 @@ func TestNewLines_PerLine(t *testing.T) {
 			input := lexer.Tokenize(tc.input)
 			lines := line.NewLines(input)
 
-			require.Len(t, lines, len(tc.want), "wrong number of lines")
+			require.Equal(t, len(tc.want), lines.Len(), "wrong number of lines")
 
 			for i, want := range tc.want {
-				assert.Equal(t, want, lines[i].String(), "line %d", i)
+				assert.Equal(t, want, lines.Line(i).String(), "line %d", i)
 			}
 		})
 	}
@@ -422,10 +422,10 @@ func TestNewLines_NonStandardLineNumbers(t *testing.T) {
 
 			lines := line.NewLines(tks)
 
-			require.Len(t, lines, tc.wantLineCount, "wrong number of lines")
+			require.Equal(t, tc.wantLineCount, lines.Len(), "wrong number of lines")
 
 			for i, wantNum := range tc.wantLineNums {
-				assert.Equal(t, wantNum, lines[i].Number(), "line %d has wrong number", i)
+				assert.Equal(t, wantNum, lines.Line(i).Number(), "line %d has wrong number", i)
 			}
 
 			// Verify round-trip: dumping tokens should preserve content.
@@ -553,10 +553,10 @@ func TestNewLines_GappedLineNumbers(t *testing.T) {
 			tks := tc.buildTokens()
 			lines := line.NewLines(tks)
 
-			require.Len(t, lines, tc.wantLineCount, "wrong number of lines")
+			require.Equal(t, tc.wantLineCount, lines.Len(), "wrong number of lines")
 
 			for i, wantNum := range tc.wantLineNums {
-				assert.Equal(t, wantNum, lines[i].Number(), "line %d has wrong number", i)
+				assert.Equal(t, wantNum, lines.Line(i).Number(), "line %d has wrong number", i)
 			}
 
 			// Verify Prev/Next linking works correctly across gaps.
@@ -828,10 +828,10 @@ func TestNewLines_LeadingNewlineTokens(t *testing.T) {
 			require.NoError(t, yamltest.ValidateLines(lines), "tokens should be valid")
 
 			// Verify expected line numbers.
-			require.Len(t, lines, len(tc.want), "wrong number of lines")
+			require.Equal(t, len(tc.want), lines.Len(), "wrong number of lines")
 
 			for i, wantNum := range tc.want {
-				assert.Equal(t, wantNum, lines[i].Number(), "line %d has wrong number", i)
+				assert.Equal(t, wantNum, lines.Line(i).Number(), "line %d has wrong number", i)
 			}
 		})
 	}
@@ -921,8 +921,8 @@ func TestNewLines_SplitTokenOffsets(t *testing.T) {
 
 			var prevOffset int
 
-			for i := range lines {
-				ln := lines[i]
+			for i := range lines.AllLines() {
+				ln := lines.Line(i)
 				for _, tk := range ln.Tokens() {
 					if tk.Position != nil {
 						// Offset must be strictly increasing.
@@ -997,13 +997,13 @@ func TestNewLines_OffsetRuneCount_Continuation(t *testing.T) {
 	// "key: héllo\n" is 11 runes, so the continuation starts at offset 12.
 	input := "key: h\u00e9llo\n  w\u00f6rld\nnext: v\n"
 	lines := line.NewLines(lexer.Tokenize(input))
-	require.Len(t, lines, 3)
+	require.Equal(t, 3, lines.Len())
 
-	continuation := lines[1].Token(0)
+	continuation := lines.Line(1).Token(0)
 	assert.Equal(t, "  w\u00f6rld\n", continuation.Origin)
 	assert.Equal(t, 12, continuation.Position.Offset)
 
-	next := lines[2].Token(0)
+	next := lines.Line(2).Token(0)
 	assert.Equal(t, "next", next.Value)
 	assert.Equal(t, 20, next.Position.Offset)
 }
@@ -1032,10 +1032,10 @@ func TestNewLines_IndentLevelProgression(t *testing.T) {
 	// Line 7: end: val -> level 0.
 	wantLevels := []int{0, 1, 2, 3, 2, 1, 0}
 
-	require.Len(t, lines, len(wantLevels))
+	require.Equal(t, len(wantLevels), lines.Len())
 
-	for i := range lines {
-		ln := lines[i]
+	for i := range lines.AllLines() {
+		ln := lines.Line(i)
 		if len(ln.Tokens()) > 0 {
 			firstTk := ln.Token(0)
 			if firstTk.Position != nil {
@@ -1424,7 +1424,7 @@ func TestNewLines_ColumnPositionAfterSplit(t *testing.T) {
 		lines := line.NewLines(originalTks)
 
 		// Verify we have the expected number of lines.
-		require.Len(t, lines, 3)
+		require.Equal(t, 3, lines.Len())
 
 		// Verify round-trip produces identical tokens.
 		resultTks := lines.Tokens()
@@ -1445,7 +1445,7 @@ func TestNewLines_ColumnPositionAfterSplit(t *testing.T) {
 		lines := line.NewLines(originalTks)
 
 		// Verify we have the expected number of lines.
-		require.Len(t, lines, 2)
+		require.Equal(t, 2, lines.Len())
 
 		// Verify round-trip produces identical tokens.
 		resultTks := lines.Tokens()
@@ -1477,8 +1477,8 @@ func TestEmptyAndZeroValues(t *testing.T) {
 		tks := lexer.Tokenize("key: value\n")
 		lines := line.NewLines(tks)
 
-		require.Len(t, lines, 1)
-		assert.False(t, lines[0].IsEmpty())
+		require.Equal(t, 1, lines.Len())
+		assert.False(t, lines.Line(0).IsEmpty())
 	})
 
 	t.Run("Lines/nil", func(t *testing.T) {
@@ -1502,14 +1502,16 @@ func TestEmptyAndZeroValues(t *testing.T) {
 		t.Parallel()
 
 		lines := line.NewLines(nil)
-		assert.Nil(t, lines)
+		assert.True(t, lines.IsEmpty())
+		assert.Equal(t, 0, lines.Len())
 	})
 
 	t.Run("Lines/NewLines with empty tokens", func(t *testing.T) {
 		t.Parallel()
 
 		lines := line.NewLines(lexer.Tokenize(""))
-		assert.Nil(t, lines)
+		assert.True(t, lines.IsEmpty())
+		assert.Equal(t, 0, lines.Len())
 	})
 }
 
@@ -1732,12 +1734,12 @@ func TestNewLines_BlankLineAbsorption(t *testing.T) {
 		lines := line.NewLines(original)
 
 		// Should have lines at positions 1, 2 (blank absorbed), and 3.
-		require.Len(t, lines, 3, "expected 3 lines including blank")
+		require.Equal(t, 3, lines.Len(), "expected 3 lines including blank")
 
 		// Line numbers should be 1, 2, 3.
-		assert.Equal(t, 1, lines[0].Number(), "first line should be 1")
-		assert.Equal(t, 2, lines[1].Number(), "second line (blank) should be 2")
-		assert.Equal(t, 3, lines[2].Number(), "third line should be 3")
+		assert.Equal(t, 1, lines.Line(0).Number(), "first line should be 1")
+		assert.Equal(t, 2, lines.Line(1).Number(), "second line (blank) should be 2")
+		assert.Equal(t, 3, lines.Line(2).Number(), "third line should be 3")
 	})
 
 	t.Run("line numbers stay contiguous after block scalar content", func(t *testing.T) {
@@ -1762,8 +1764,8 @@ func TestNewLines_BlankLineAbsorption(t *testing.T) {
 
 				lines := line.NewLines(lexer.Tokenize(tc.input))
 
-				got := make([]int, 0, len(lines))
-				for _, ln := range lines {
+				got := make([]int, 0, lines.Len())
+				for _, ln := range lines.AllLines() {
 					got = append(got, ln.Number())
 				}
 
@@ -1796,7 +1798,7 @@ func TestNewLines_TrailingBlankLines(t *testing.T) {
 
 			lines := line.NewLines(tokens.Tokenize(tc.input))
 
-			assert.Len(t, lines, tc.want)
+			assert.Equal(t, tc.want, lines.Len())
 		})
 	}
 }
@@ -1816,7 +1818,7 @@ func TestNewLines_PartLinksStopAtLineBoundary(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			for _, ln := range line.NewLines(lexer.Tokenize(input)) {
+			for _, ln := range line.NewLines(lexer.Tokenize(input)).AllLines() {
 				parts := ln.Tokens()
 				if len(parts) == 0 {
 					continue
@@ -2094,7 +2096,7 @@ func TestLines_TokenRanges(t *testing.T) {
 		`)
 		lines := line.NewLines(lexer.Tokenize(input))
 
-		part := lines[2].Token(0)
+		part := lines.Line(2).Token(0)
 
 		ranges := lines.TokenRanges(part)
 		assert.Equal(t, position.Ranges{
@@ -2154,7 +2156,7 @@ func TestLines_TokenRanges(t *testing.T) {
 		require.NotNil(t, tk)
 		assert.Equal(t, lines.TokenRanges(tk), lines.TokenRanges(tk.Clone()))
 		assert.Equal(t, lines.ContentRanges(tk), lines.ContentRanges(tk.Clone()))
-		assert.Equal(t, lines.TokenRanges(lines[1].Token(0)), lines.TokenRanges(lines[1].Token(0).Clone()))
+		assert.Equal(t, lines.TokenRanges(lines.Line(1).Token(0)), lines.TokenRanges(lines.Line(1).Token(0).Clone()))
 
 		// A token from another stream at the same position differs in its
 		// text, so it matches nothing.
@@ -2235,9 +2237,9 @@ func TestLine_Number_Fallbacks(t *testing.T) {
 		tks := lexer.Tokenize(input)
 		lines := line.NewLines(tks)
 
-		require.Len(t, lines, 1)
+		require.Equal(t, 1, lines.Len())
 		// Line number should be 1 (1-indexed from lexer).
-		assert.Equal(t, 1, lines[0].Number())
+		assert.Equal(t, 1, lines.Line(0).Number())
 	})
 
 	t.Run("empty line returns zero", func(t *testing.T) {
@@ -2260,10 +2262,10 @@ func TestLine_Number_Fallbacks(t *testing.T) {
 		tks := lexer.Tokenize(input)
 		lines := line.NewLines(tks)
 
-		require.Len(t, lines, 3)
-		assert.Equal(t, 1, lines[0].Number())
-		assert.Equal(t, 2, lines[1].Number())
-		assert.Equal(t, 3, lines[2].Number())
+		require.Equal(t, 3, lines.Len())
+		assert.Equal(t, 1, lines.Line(0).Number())
+		assert.Equal(t, 2, lines.Line(1).Number())
+		assert.Equal(t, 3, lines.Line(2).Number())
 	})
 
 	t.Run("segment with nil position returns zero", func(t *testing.T) {
@@ -2283,12 +2285,12 @@ func TestLine_Number_Fallbacks(t *testing.T) {
 
 		// NewLines creates a line from the token, but Number() should
 		// handle the nil position gracefully.
-		require.Len(t, lines, 1)
+		require.Equal(t, 1, lines.Len())
 
 		// The line number should be 0 since Position is nil.
 		// Note: NewLines may assign a number based on its own tracking.
 		// This tests that the fallback path handles nil Position.
-		assert.GreaterOrEqual(t, lines[0].Number(), 0)
+		assert.GreaterOrEqual(t, lines.Line(0).Number(), 0)
 	})
 
 	t.Run("fallback to segment position line", func(t *testing.T) {
@@ -2307,10 +2309,10 @@ func TestLine_Number_Fallbacks(t *testing.T) {
 			Build())
 
 		lines := line.NewLines(tks)
-		require.Len(t, lines, 1)
+		require.Equal(t, 1, lines.Len())
 
 		// The line should use the position from the token.
-		assert.Equal(t, 42, lines[0].Number())
+		assert.Equal(t, 42, lines.Line(0).Number())
 	})
 
 	t.Run("number field takes precedence over segment position", func(t *testing.T) {
@@ -2337,11 +2339,11 @@ func TestLine_Number_Fallbacks(t *testing.T) {
 			Build())
 
 		lines := line.NewLines(tks)
-		require.Len(t, lines, 2)
+		require.Equal(t, 2, lines.Len())
 
 		// Both lines should preserve their original line numbers.
-		assert.Equal(t, 100, lines[0].Number())
-		assert.Equal(t, 200, lines[1].Number())
+		assert.Equal(t, 100, lines.Line(0).Number())
+		assert.Equal(t, 200, lines.Line(1).Number())
 	})
 }
 
@@ -2363,9 +2365,9 @@ func TestNewLines_WhitespaceType(t *testing.T) {
 		lines := line.NewLines(tks)
 
 		// Line 2 (index 1) should have the indented "child: true".
-		require.Greater(t, len(lines), 1)
+		require.Greater(t, lines.Len(), 1)
 
-		line2 := lines[1]
+		line2 := lines.Line(1)
 		parts := line2.Tokens()
 
 		// Find any pure whitespace tokens and verify they are SpaceType.
@@ -2388,8 +2390,8 @@ func TestNewLines_WhitespaceType(t *testing.T) {
 
 		// Lines 2 and 3 contain block scalar content.
 		// Their whitespace should NOT be converted to SpaceType.
-		for i := 1; i < len(lines); i++ {
-			for _, tk := range lines[i].Tokens() {
+		for i := 1; i < lines.Len(); i++ {
+			for _, tk := range lines.Line(i).Tokens() {
 				// Check if this is a whitespace-only token from block scalar.
 				if strings.TrimSpace(tk.Origin) == "" && tk.Origin != "" {
 					// Whitespace in block scalar should remain StringType.
@@ -2415,7 +2417,7 @@ func TestNewLines_WhitespaceType(t *testing.T) {
 		lines := line.NewLines(tks)
 
 		// Verify all pure horizontal whitespace parts are SpaceType.
-		for i, ln := range lines {
+		for i, ln := range lines.AllLines() {
 			for _, tk := range ln.Tokens() {
 				if strings.TrimSpace(tk.Origin) == "" && tk.Origin != "" && !strings.Contains(tk.Origin, "\n") {
 					assert.Equal(t, token.SpaceType, tk.Type,
@@ -2563,7 +2565,7 @@ func TestLines_View(t *testing.T) {
 		lines := line.NewLines(lexer.Tokenize(input))
 
 		for i, ln := range lines.AllLines() {
-			assert.Same(t, lines[i], ln)
+			assert.Same(t, lines.Line(i), ln)
 		}
 	})
 
@@ -2592,7 +2594,7 @@ func TestLines_View(t *testing.T) {
 
 		for pos, r := range lines.AllRunes() {
 			if r == '\n' {
-				assert.Equal(t, lines[pos.Line].Width(), pos.Col)
+				assert.Equal(t, lines.Line(pos.Line).Width(), pos.Col)
 			}
 
 			sb.WriteRune(r)
@@ -2618,4 +2620,60 @@ func TestLines_View(t *testing.T) {
 			t.Fatal("expected no runes")
 		}
 	})
+}
+
+func TestCollect(t *testing.T) {
+	t.Parallel()
+
+	before := line.NewLines(lexer.Tokenize("a: 1\nb: 2\n"))
+	after := line.NewLines(lexer.Tokenize("a: 1\nc: 3\n"))
+
+	t.Run("holds the lines in the order given", func(t *testing.T) {
+		t.Parallel()
+
+		got := line.Collect(after.Line(0), before.Line(1), after.Line(1))
+
+		require.Equal(t, 3, got.Len())
+		assert.Same(t, after.Line(0), got.Line(0))
+		assert.Same(t, before.Line(1), got.Line(1))
+		assert.Same(t, after.Line(1), got.Line(2))
+	})
+
+	t.Run("copies the slice it is given", func(t *testing.T) {
+		t.Parallel()
+
+		ls := []*line.Line{before.Line(0), before.Line(1)}
+		got := line.Collect(ls...)
+		ls[0] = after.Line(0)
+
+		assert.Same(t, before.Line(0), got.Line(0))
+	})
+
+	t.Run("no lines yields the zero value", func(t *testing.T) {
+		t.Parallel()
+
+		got := line.Collect()
+
+		assert.True(t, got.IsEmpty())
+		assert.Equal(t, 0, got.Len())
+	})
+
+	t.Run("panics on a nil line", func(t *testing.T) {
+		t.Parallel()
+
+		assert.PanicsWithValue(t, "line: Collect: line 1 is nil", func() {
+			line.Collect(before.Line(0), nil)
+		})
+	})
+}
+
+func TestLines_Line(t *testing.T) {
+	t.Parallel()
+
+	lines := line.NewLines(lexer.Tokenize("a: 1\nb: 2\n"))
+
+	assert.Equal(t, "a: 1", lines.Line(0).Content())
+	assert.Equal(t, "b: 2", lines.Line(1).Content())
+	assert.Panics(t, func() { lines.Line(2) })
+	assert.Panics(t, func() { line.Lines{}.Line(0) })
 }

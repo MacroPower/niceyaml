@@ -13,6 +13,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/finder"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/normalizer"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -551,7 +552,7 @@ func TestFinder_Find_NilLines(t *testing.T) {
 	t.Parallel()
 
 	f := finder.New()
-	idx := f.Load(nil)
+	idx := f.Load(line.Lines{})
 
 	got := idx.Find("test")
 	assert.Nil(t, got)

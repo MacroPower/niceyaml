@@ -27,7 +27,7 @@ import (
 //
 // Create instances with [NewView]. The zero value is an empty view.
 type View struct {
-	lines       Lines
+	lines       []*Line
 	flags       []Flag
 	overlays    []Overlays
 	annotations []Annotations
@@ -35,17 +35,16 @@ type View struct {
 
 // NewView creates a new [*View] over lines with no decoration.
 func NewView(lines Lines) *View {
-	return &View{lines: lines}
+	return &View{lines: lines.lines}
 }
 
-// Lines returns the content of the [View]. The slice is the view's own, so
-// treat it as read-only.
+// Lines returns the content of the [View].
 func (v *View) Lines() Lines {
 	if v == nil {
-		return nil
+		return Lines{}
 	}
 
-	return v.lines
+	return Lines{lines: v.lines}
 }
 
 // Len returns the number of lines.

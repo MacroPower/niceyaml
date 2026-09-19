@@ -19,7 +19,7 @@ func newTestView(t *testing.T, input string, wantLen int) *line.View {
 	t.Helper()
 
 	lines := line.NewLines(lexer.Tokenize(input))
-	require.Len(t, lines, wantLen)
+	require.Equal(t, wantLen, lines.Len())
 
 	return line.NewView(lines)
 }
@@ -35,17 +35,17 @@ func TestNewView(t *testing.T) {
 
 		assert.Equal(t, 2, view.Len())
 		assert.Equal(t, lines, view.Lines())
-		assert.Same(t, lines[0], view.Line(0))
-		assert.Same(t, lines[1], view.Line(1))
+		assert.Same(t, lines.Line(0), view.Line(0))
+		assert.Same(t, lines.Line(1), view.Line(1))
 	})
 
 	t.Run("over nil lines", func(t *testing.T) {
 		t.Parallel()
 
-		view := line.NewView(nil)
+		view := line.NewView(line.Lines{})
 
 		assert.Equal(t, 0, view.Len())
-		assert.Nil(t, view.Lines())
+		assert.True(t, view.Lines().IsEmpty())
 		assert.Empty(t, view.String())
 
 		for range view.AllLines() {
@@ -69,7 +69,7 @@ func TestNewView(t *testing.T) {
 		var view line.View
 
 		assert.Equal(t, 0, view.Len())
-		assert.Nil(t, view.Lines())
+		assert.True(t, view.Lines().IsEmpty())
 		assert.Empty(t, view.String())
 
 		// Range-taking methods are safe on an empty view.
@@ -84,7 +84,7 @@ func TestNewView(t *testing.T) {
 		var view *line.View
 
 		assert.Equal(t, 0, view.Len())
-		assert.Nil(t, view.Lines())
+		assert.True(t, view.Lines().IsEmpty())
 		assert.Nil(t, view.Clone())
 
 		for range view.AllLines() {
@@ -457,7 +457,7 @@ func TestView_AddOverlay(t *testing.T) {
 	t.Run("empty view no-op", func(t *testing.T) {
 		t.Parallel()
 
-		view := line.NewView(nil)
+		view := line.NewView(line.Lines{})
 
 		// Should not panic on an empty view.
 		view.AddOverlay("test1", position.NewRange(position.New(0, 0), position.New(0, 5)))
@@ -643,7 +643,7 @@ func TestView_Clone(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		t.Parallel()
 
-		clone := line.NewView(nil).Clone()
+		clone := line.NewView(line.Lines{}).Clone()
 
 		require.NotNil(t, clone)
 		assert.Equal(t, 0, clone.Len())
@@ -994,7 +994,7 @@ func TestView_String(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		t.Parallel()
 
-		assert.Empty(t, line.NewView(nil).String())
+		assert.Empty(t, line.NewView(line.Lines{}).String())
 	})
 }
 
@@ -1029,7 +1029,7 @@ func TestView_OutOfRange(t *testing.T) {
 				assert.Panics(t, func() { call(view, i) }, "index %d on decorated view", i)
 			}
 
-			assert.Panics(t, func() { call(line.NewView(nil), 0) }, "index 0 on empty view")
+			assert.Panics(t, func() { call(line.NewView(line.Lines{}), 0) }, "index 0 on empty view")
 		})
 	}
 }
