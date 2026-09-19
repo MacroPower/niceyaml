@@ -64,11 +64,13 @@ func (s finderSearcher) Load(lines line.Lines) Index {
 //
 //	m.SetRevision(yamlviewport.NewRevision(source.Name(), view))
 //
-// The viewport reads the view every time it rebuilds its display and never
-// decorates it. Search highlights go on a clone, so the marks a caller adds
-// stay, and the caller's view stays as the caller left it. A diff between
-// two revisions interleaves their lines in a view of its own, so decoration
-// shows only while the viewport displays a revision without a diff.
+// The viewport reads the view when the revision, the diff mode, or the view
+// mode changes, and never decorates it. Search highlights go on a clone, so
+// the marks a caller adds stay, and the caller's view stays as the caller
+// left it. Marks added after the viewport read the view show once the
+// revision is set again. A diff between two revisions interleaves their
+// lines in a view of its own, so decoration shows only while the viewport
+// displays a revision without a diff.
 //
 // See [NewRevision] and [niceyaml.Source] for implementations.
 type Revision interface {
@@ -1485,7 +1487,8 @@ func (m *Model) TotalLineCount() int {
 }
 
 // VisibleLineCount returns the number of lines with at least one row on
-// screen.
+// screen. It reports at least 1 whenever the view has lines, since a window
+// that lies wholly inside the container frame still renders around a line.
 func (m *Model) VisibleLineCount() int {
 	if !m.canRender() || !m.hasContent() {
 		return 0
