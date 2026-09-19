@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 
+	"charm.land/lipgloss/v2"
+
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/line"
 )
@@ -47,7 +49,10 @@ func (plainRenderer) Print(view *line.View) string {
 // plainMarker returns the row below ln that marks its overlays and carries
 // its annotations: a caret under every column an overlay covers within the
 // line, a caret at the column of the annotations, and their contents after
-// the last caret. Returns "" when the line has neither.
+// the last caret. A column is as many carets wide as the rune on it renders,
+// so the carets stay under the runes they mark on a line holding wide or
+// control characters, as [printer.AnnotationContext.ColWidth] keeps a
+// styled marker under them. Returns "" when the line has neither.
 func plainMarker(ln *line.Line, overlays line.Overlays, below line.Annotations) string {
 	var marks []bool
 
@@ -84,12 +89,22 @@ func plainMarker(ln *line.Line, overlays line.Overlays, below line.Annotations) 
 
 	var sb strings.Builder
 
-	for _, marked := range marks {
+	// The content row renders each rune at its display width, and a column
+	// past the end of the content takes one cell, as ColWidth counts it.
+	runes := []rune(ln.Content())
+
+	for col, marked := range marks {
+		cell := " "
 		if marked {
-			sb.WriteByte('^')
-		} else {
-			sb.WriteByte(' ')
+			cell = "^"
 		}
+
+		cells := 1
+		if col < len(runes) {
+			cells = lipgloss.Width(escape.Control(string(runes[col])))
+		}
+
+		sb.WriteString(strings.Repeat(cell, cells))
 	}
 
 	if len(contents) > 0 {

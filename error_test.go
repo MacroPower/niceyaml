@@ -1332,6 +1332,33 @@ func TestSourceError_Format_Plain(t *testing.T) {
 		assert.NotContains(t, got, "\x1b")
 	})
 
+	t.Run("carets sit under wide runes", func(t *testing.T) {
+		t.Parallel()
+
+		// Each CJK rune renders two cells wide, so the columns before the
+		// marked ones are worth two carets each.
+		wide := niceyaml.NewSourceFromString("名前: value\n")
+		namePath := paths.Root().Child("名前")
+
+		value := yamltest.Bind(t, wide, niceyaml.NewError("bad value", niceyaml.WithPath(namePath)))
+
+		assert.Equal(t, stringtest.JoinLF(
+			"1:5: $.名前: bad value",
+			"",
+			"   1 | 名前: value",
+			"     |       ^^^^^",
+		), fmt.Sprintf("%+v", value))
+
+		key := yamltest.Bind(t, wide, niceyaml.NewError("bad key", niceyaml.WithKey(namePath)))
+
+		assert.Equal(t, stringtest.JoinLF(
+			"1:1: $.名前: bad key",
+			"",
+			"   1 | 名前: value",
+			"     | ^^^^",
+		), fmt.Sprintf("%+v", key))
+	})
+
 	t.Run("nested errors annotate their lines", func(t *testing.T) {
 		t.Parallel()
 
