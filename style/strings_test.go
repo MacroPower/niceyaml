@@ -168,11 +168,11 @@ func TestParse(t *testing.T) {
 		},
 		"invalid color - wrong length": {
 			input: "#ff00",
-			err:   style.ErrUnknownKeyword,
+			err:   style.ErrInvalidColor,
 		},
 		"invalid color - invalid hex": {
 			input: "#gggggg",
-			err:   style.ErrUnknownKeyword,
+			err:   style.ErrInvalidColor,
 		},
 		"invalid bg color": {
 			input: "bg:#invalid",

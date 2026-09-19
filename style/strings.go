@@ -11,8 +11,11 @@ import (
 
 var (
 	// ErrInvalidColor is returned when a color value is not a valid hex color.
+	// A token carrying a bg: prefix or a leading # names a color, so a
+	// malformed one returns this rather than [ErrUnknownKeyword].
 	ErrInvalidColor = errors.New("invalid color")
-	// ErrUnknownKeyword is returned when a token is not a recognized keyword or color.
+	// ErrUnknownKeyword is returned when a token is not a recognized keyword
+	// and names no color.
 	ErrUnknownKeyword = errors.New("unknown keyword")
 )
 
@@ -134,6 +137,12 @@ func applyToken(style lipgloss.Style, token string) (lipgloss.Style, error) {
 
 	// Must be a foreground color.
 	if !isValidColor(token) {
+		// A leading # says the token was meant as a color, so report the
+		// color rather than a missing keyword.
+		if strings.HasPrefix(token, "#") {
+			return style, fmt.Errorf("%w: %s", ErrInvalidColor, token)
+		}
+
 		return style, fmt.Errorf("%w: %s", ErrUnknownKeyword, token)
 	}
 
