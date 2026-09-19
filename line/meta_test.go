@@ -270,6 +270,20 @@ func TestAnnotations_String(t *testing.T) {
 			},
 			want: "     first; second",
 		},
+		"annotations without content add nothing": {
+			anns: line.Annotations{
+				{Content: "", Col: 5},
+				{Content: "second", Col: 10},
+			},
+			want: "     second",
+		},
+		"no content at all is empty": {
+			anns: line.Annotations{
+				{Content: "", Col: 5},
+				{Content: "", Col: 10},
+			},
+			want: "",
+		},
 		"uses minimum column": {
 			anns: line.Annotations{
 				{Content: "a", Col: 8},

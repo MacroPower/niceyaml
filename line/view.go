@@ -282,28 +282,30 @@ func (v *View) String() string {
 		prefix := fmt.Sprintf("%4d | ", l.Number())
 		anns := v.Annotations(i)
 
-		// Render annotations above if applicable.
-		above := anns.Filter(Above)
-		if len(above) > 0 {
+		// Render annotations above if they have content, so an annotation
+		// without any adds no row.
+		if above := anns.Filter(Above).String(); above != "" {
 			sb.WriteString(prefix)
-			sb.WriteString(above.String())
+			sb.WriteString(above)
 			sb.WriteByte('\n')
 		}
 
 		sb.WriteString(prefix)
 		sb.WriteString(l.Content())
 
-		// Render annotations below if applicable, with the "^ " prefix
-		// that marks an error pointer in debug output.
+		// Render annotations below if they have content, with the "^ "
+		// prefix that marks an error pointer in debug output.
 		below := anns.Filter(Below)
-		if len(below) > 0 {
+		texts := slices.DeleteFunc(below.Contents(), func(s string) bool { return s == "" })
+
+		if len(texts) > 0 {
 			sb.WriteByte('\n')
 			sb.WriteString(prefix)
 
 			padding := strings.Repeat(" ", max(0, below.Col()))
 			sb.WriteString(padding)
 			sb.WriteString("^ ")
-			sb.WriteString(strings.Join(below.Contents(), "; "))
+			sb.WriteString(strings.Join(texts, "; "))
 		}
 	}
 

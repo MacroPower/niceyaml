@@ -123,7 +123,9 @@ func (a Annotations) Contents() []string {
 }
 
 // String returns the combined annotation content for debugging.
-// Same-position annotations are joined by "; " at the minimum column position.
+// Same-position annotations are joined by "; " at the minimum column
+// position. Annotations without content add nothing, so a set with no
+// content at all is the empty string, as a single such annotation is.
 func (a Annotations) String() string {
 	if len(a) == 0 {
 		return ""
@@ -135,13 +137,20 @@ func (a Annotations) String() string {
 
 	// Find minimum column and collect content.
 	minCol := a[0].Col
-	contents := make([]string, len(a))
+	contents := make([]string, 0, len(a))
 
-	for i, ann := range a {
-		contents[i] = ann.Content
+	for _, ann := range a {
+		if ann.Content != "" {
+			contents = append(contents, ann.Content)
+		}
+
 		if ann.Col < minCol {
 			minCol = ann.Col
 		}
+	}
+
+	if len(contents) == 0 {
+		return ""
 	}
 
 	padding := strings.Repeat(" ", max(0, minCol))

@@ -914,6 +914,13 @@ func TestView_String(t *testing.T) {
 				want: `   1 | @@ hunk header @@
    1 | key: value`,
 			},
+			"annotations without content add no row": {
+				annotations: []line.Annotation{
+					{Content: "", Placement: line.Above},
+					{Content: "", Placement: line.Below, Col: 2},
+				},
+				want: "   1 | key: value",
+			},
 			"annotations above and below": {
 				annotations: []line.Annotation{
 					{Content: "@@ hunk header @@", Placement: line.Above},
