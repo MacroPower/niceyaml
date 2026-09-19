@@ -123,6 +123,10 @@ func NewErrorFrom(err error, opts ...ErrorOption) *Error {
 //
 //	located := err.With(niceyaml.WithPath(namePath))
 func (e *Error) With(opts ...ErrorOption) *Error {
+	if e == nil {
+		return nil
+	}
+
 	c := *e
 	c.errors = slices.Clone(e.errors)
 
@@ -215,6 +219,10 @@ func WithErrors(errs ...error) ErrorOption {
 // positions. An Error created from a nil error has an empty message, so
 // its text is the path alone, or "" when it has none.
 func (e *Error) Error() string {
+	if e == nil {
+		return ""
+	}
+
 	var msg string
 
 	if e.err != nil {

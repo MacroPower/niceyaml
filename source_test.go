@@ -1328,9 +1328,11 @@ func TestDocument_BindChain(t *testing.T) {
 
 		wrapped := yamltest.Bind(t, source, outer)
 
+		// A nil Error has an empty message, so the wrapper's text ends at
+		// its own prefix.
 		require.ErrorIs(t, wrapped, outer)
-		assert.Equal(t, "config: document 3: <nil>", wrapped.Error())
-		assert.Equal(t, "config: document 3: <nil>", fmt.Sprintf("%+v", wrapped))
+		assert.Equal(t, "config: document 3: ", wrapped.Error())
+		assert.Equal(t, "config: document 3: ", fmt.Sprintf("%+v", wrapped))
 	})
 
 	t.Run("looks past a nil SourceError in the chain", func(t *testing.T) {

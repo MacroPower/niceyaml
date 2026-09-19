@@ -1396,6 +1396,21 @@ func TestSourceError_Format_Plain(t *testing.T) {
 	})
 }
 
+func TestError_NilReceiver(t *testing.T) {
+	t.Parallel()
+
+	// A nil *Error carries no message and specializes to nothing, and one
+	// wrapped by another Error contributes nothing to the message, in line
+	// with Cause, Errors, Unwrap, and Location, which all accept nil.
+	var missing *niceyaml.Error
+
+	assert.Empty(t, missing.Error())
+	assert.Nil(t, missing.With(niceyaml.WithPath(paths.Root().Child("a"))))
+
+	wrapped := niceyaml.NewErrorFrom(missing, niceyaml.WithPath(paths.Root().Child("a")))
+	assert.Equal(t, "$.a:", wrapped.Error())
+}
+
 func TestError_NilInnerError(t *testing.T) {
 	t.Parallel()
 
