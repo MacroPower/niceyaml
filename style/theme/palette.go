@@ -69,10 +69,8 @@ func (p palette) styles() style.Styles {
 
 	opts := make([]style.StylesOption, 0, len(p.Tokens)+len(p.Overrides)+15)
 
-	for st, spec := range p.Tokens {
-		opts = append(opts, style.Set(st, layer(base, style.MustParse(spec))))
-	}
-
+	// The derived kinds come first, so a Tokens entry naming one of them
+	// replaces the derived value rather than being replaced by it.
 	opts = append(opts,
 		style.Set(kind.GenericHeading, heading(accent)),
 		style.Set(kind.GenericHeadingAccent,
@@ -92,6 +90,10 @@ func (p palette) styles() style.Styles {
 		style.Set(kind.TextWarn, base.Foreground(warn)),
 		style.Set(kind.TextError, base.Foreground(errColor)),
 	)
+
+	for st, spec := range p.Tokens {
+		opts = append(opts, style.Set(st, layer(base, style.MustParse(spec))))
+	}
 
 	opts = append(opts, p.Overrides...)
 
