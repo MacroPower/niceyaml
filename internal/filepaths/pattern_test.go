@@ -1,6 +1,7 @@
 package filepaths_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -311,6 +312,20 @@ func TestMatchAny(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
+}
+
+func TestExpandBraces_Budget(t *testing.T) {
+	t.Parallel()
+
+	// Ten binary groups stand for 1024 patterns, the most ExpandBraces
+	// produces; one more group would double that, so the pattern comes
+	// back as it is.
+	group := "{a,b}"
+	within := strings.Repeat(group, 10)
+	over := strings.Repeat(group, 11)
+
+	assert.Len(t, filepaths.ExpandBraces(within), filepaths.MaxBraceExpansions)
+	assert.Equal(t, []string{over}, filepaths.ExpandBraces(over))
 }
 
 func TestExpandBraces(t *testing.T) {

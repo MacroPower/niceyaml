@@ -121,14 +121,32 @@ func anyDepth(pattern string) string {
 	return "**/" + pattern
 }
 
+// MaxBraceExpansions is the most patterns [ExpandBraces] produces for one
+// pattern. Brace groups multiply out, so a pattern from an untrusted source
+// could otherwise stand for millions of patterns.
+const MaxBraceExpansions = 1024
+
 // ExpandBraces returns the patterns the brace alternatives of pattern
 // stand for, so "*.{yml,yaml}" yields "*.yml" and "*.yaml", and nested
 // groups multiply out. A backslash escapes the character after it. A
-// pattern with no brace group, or with an unclosed one, yields itself.
+// pattern with no brace group, or with an unclosed one, yields itself, and
+// so does a pattern that would expand to more than [MaxBraceExpansions]
+// patterns.
 func ExpandBraces(pattern string) []string {
+	expanded, ok := expandBraces(pattern, MaxBraceExpansions)
+	if !ok {
+		return []string{pattern}
+	}
+
+	return expanded
+}
+
+// expandBraces is [ExpandBraces] with a budget of patterns left to
+// produce. It reports false once the expansion outgrows the budget.
+func expandBraces(pattern string, budget int) ([]string, bool) {
 	open, closing := braceGroup(pattern)
 	if open < 0 {
-		return []string{pattern}
+		return []string{pattern}, budget >= 1
 	}
 
 	prefix, suffix := pattern[:open], pattern[closing+1:]
@@ -136,10 +154,15 @@ func ExpandBraces(pattern string) []string {
 	var expanded []string
 
 	for _, alt := range splitAlternatives(pattern[open+1 : closing]) {
-		expanded = append(expanded, ExpandBraces(prefix+alt+suffix)...)
+		more, ok := expandBraces(prefix+alt+suffix, budget-len(expanded))
+		if !ok {
+			return nil, false
+		}
+
+		expanded = append(expanded, more...)
 	}
 
-	return expanded
+	return expanded, true
 }
 
 // braceGroup returns the indexes of the first unescaped "{" in pattern
