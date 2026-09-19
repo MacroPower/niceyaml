@@ -417,6 +417,41 @@ func TestSource_Lines(t *testing.T) {
 	assert.Equal(t, "foo: bar", lines.Line(1).Content())
 }
 
+func TestSource_Lines_Whitespace(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input   string
+		numbers []int
+		want    position.Span
+	}{
+		"line break":          {input: "\n", numbers: []int{1}, want: position.NewSpan(0, 1)},
+		"two line breaks":     {input: "\n\n", numbers: []int{1, 2}, want: position.NewSpan(0, 2)},
+		"spaces":              {input: "  ", numbers: []int{1}, want: position.NewSpan(0, 1)},
+		"spaces then a break": {input: "   \n", numbers: []int{1}, want: position.NewSpan(0, 1)},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			src := niceyaml.NewSourceFromString(tc.input)
+			lines := src.Lines()
+
+			require.Equal(t, len(tc.numbers), lines.Len())
+
+			for i, want := range tc.numbers {
+				assert.Equal(t, want, lines.Line(i).Number(), "line %d", i)
+			}
+
+			docs, err := src.Documents()
+			require.NoError(t, err)
+			require.Len(t, docs, 1)
+			assert.Equal(t, tc.want, docs[0].Span())
+		})
+	}
+}
+
 func TestSource_AllRunes_EarlyBreak(t *testing.T) {
 	t.Parallel()
 

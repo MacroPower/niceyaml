@@ -77,11 +77,14 @@ func TrimLineEnding(s string) string {
 // header's line, stays odd rather than moving to where a fresh tokenize of
 // the cut text alone would put it.
 //
-// The text starts with the Origin of the first token with a non-nil position.
-// That Origin can open with whitespace and line breaks, such as the line break
-// that ends a preceding "..." line, and a fresh tokenize places the token after
-// them. The token lands at line 1, column 1, offset 1, where the lexer places
-// the first token of a fresh stream, only when its Origin opens with neither.
+// The text starts with the Origin of the first token that has a non-nil
+// position and holds something other than whitespace. That Origin can open
+// with whitespace and line breaks, such as the line break that ends a
+// preceding "..." line, and a fresh tokenize places the token after them. The
+// token lands at line 1, column 1, offset 1, where the lexer places the first
+// token of a fresh stream, only when its Origin opens with neither. A stream
+// carrying whitespace alone, whose token [Tokenize] positions ahead of the
+// whitespace rather than inside it, keeps the positions it has.
 //
 // The clones link to each other through Next and Prev and to nothing outside
 // the result, so the stream stands alone. Tokens with nil positions are
@@ -91,8 +94,9 @@ func ResetPositions(tks token.Tokens) token.Tokens {
 		return tks
 	}
 
-	// Find where the text starts from the first token with a position.
-	var startLine, startCol, startOffset int
+	// Find where the text starts from the first token that holds content.
+	// A stream without one starts where the lexer starts a fresh stream.
+	startLine, startCol, startOffset := 1, 1, 1
 
 	for _, tk := range tks {
 		if tk == nil || tk.Position == nil {
@@ -100,8 +104,14 @@ func ResetPositions(tks token.Tokens) token.Tokens {
 		}
 
 		// The position points past the whitespace and line breaks that open
-		// the Origin, and the text still holds them.
-		lead := tk.Origin[:len(tk.Origin)-len(strings.TrimLeft(tk.Origin, " \t\r\n"))]
+		// the Origin, and the text still holds them. An Origin holding
+		// whitespace alone has no such split, so it anchors nothing.
+		trimmed := strings.TrimLeft(tk.Origin, " \t\r\n")
+		if trimmed == "" && tk.Origin != "" {
+			continue
+		}
+
+		lead := tk.Origin[:len(tk.Origin)-len(trimmed)]
 		lastLine := lead[strings.LastIndexByte(lead, '\n')+1:]
 
 		startLine = tk.Position.Line - strings.Count(lead, "\n")

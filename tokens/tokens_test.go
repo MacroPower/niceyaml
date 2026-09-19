@@ -790,6 +790,32 @@ func TestResetPositions_Text(t *testing.T) {
 		assert.Equal(t, 6, got[2].Position.Offset) // Offset 105 relative to start 100, plus the 1-based origin.
 	})
 
+	t.Run("keeps the positions of a stream holding whitespace alone", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+		}{
+			"line break":          {input: "\n"},
+			"two line breaks":     {input: "\n\n"},
+			"spaces":              {input: "  "},
+			"spaces then a break": {input: "   \n"},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				got := resetOne(tokens.Tokenize(tc.input))
+
+				require.Len(t, got, 1)
+				assert.Equal(t, 1, got[0].Position.Line)
+				assert.Equal(t, 1, got[0].Position.Column)
+				assert.Equal(t, 1, got[0].Position.Offset)
+			})
+		}
+	})
+
 	t.Run("handles multiline tokens", func(t *testing.T) {
 		t.Parallel()
 
