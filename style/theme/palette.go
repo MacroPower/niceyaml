@@ -78,7 +78,7 @@ func (p palette) styles() style.Styles {
 		style.Set(kind.GenericHeadingAccent,
 			base.Background(towardFg(bg, surfaceShift)).Foreground(towardFg(fg, dimShift)),
 		),
-		style.Set(kind.GenericHeadingSubtle, base.Background(towardFg(bg, dimShift))),
+		style.Set(kind.GenericHeadingSubtle, base.Background(towardFg(bg, dimShift)).Foreground(fg)),
 		style.Set(kind.GenericHeadingOK, heading(ok)),
 		style.Set(kind.GenericHeadingWarn, heading(warn)),
 		style.Set(kind.GenericHeadingError, heading(errColor)),

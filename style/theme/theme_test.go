@@ -276,6 +276,35 @@ func TestPalette_SubtleTextDiffersFromText(t *testing.T) {
 	}
 }
 
+func TestPalette_HeadingsCarryForeground(t *testing.T) {
+	t.Parallel()
+
+	// A heading paints a background, so every built-in theme must pair it
+	// with a foreground of its own rather than leaving the terminal default
+	// to land on the painted surface.
+	headings := []kind.Kind{
+		kind.GenericHeading,
+		kind.GenericHeadingAccent,
+		kind.GenericHeadingSubtle,
+		kind.GenericHeadingOK,
+		kind.GenericHeadingWarn,
+		kind.GenericHeadingError,
+	}
+
+	for _, th := range theme.Builtin().All() {
+		t.Run(th.Name, func(t *testing.T) {
+			t.Parallel()
+
+			styles := th.Styles()
+			for _, k := range headings {
+				st := styles.Style(k)
+				assert.NotEqual(t, lipgloss.NoColor{}, st.GetBackground(), "%s has no background", k)
+				assert.NotEqual(t, lipgloss.NoColor{}, st.GetForeground(), "%s has no foreground", k)
+			}
+		})
+	}
+}
+
 // countOf returns how many times name appears in names.
 func countOf(names []string, name string) int {
 	n := 0

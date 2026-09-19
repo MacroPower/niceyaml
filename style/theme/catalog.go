@@ -1007,9 +1007,6 @@ var palettes = map[string]palette{
 			kind.NameTag:       "#ff0000",
 			kind.Punctuation:   "#ff0000",
 		},
-		Overrides: []style.StylesOption{
-			style.Set(kind.GenericHeading, style.MustParse("bold bg:#ff0000")),
-		},
 	},
 	"paraiso-dark": {
 		Mode:   Dark,
@@ -1122,9 +1119,6 @@ var palettes = map[string]palette{
 			kind.NameTag:            "bold #008000",
 			kind.Punctuation:        "#666666",
 			kind.PunctuationHeading: "bold #0000ff",
-		},
-		Overrides: []style.StylesOption{
-			style.Set(kind.GenericHeading, style.MustParse("bold bg:#008000")),
 		},
 	},
 	"rainbow-dash": {
