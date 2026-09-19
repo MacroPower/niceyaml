@@ -295,10 +295,16 @@ func (dd *Document) anchorToken() *token.Token {
 
 // DecodeInto validates and decodes the single document of the [Source] into
 // v, which must be a non-nil pointer, as [Document.DecodeInto] does for that
-// document. A file that holds more than one document with content returns
+// document. Any other v returns [ErrDecodeTarget] before anything runs. A
+// file that holds more than one document with content returns
 // [ErrMultipleDocuments], and one that holds no document returns
 // [ErrNoDocuments].
 func (s *Source) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
+	err := checkDecodeTarget(v)
+	if err != nil {
+		return err
+	}
+
 	doc, err := s.Document()
 	if err != nil {
 		return err

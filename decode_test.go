@@ -1873,6 +1873,28 @@ func TestDocument_DecodeInto(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects a bad target before picking the document", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+		}{
+			"multiple documents": {input: "a: 1\n---\nb: 2\n"},
+			"no documents":       {input: "...\n"},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				src := niceyaml.NewSourceFromString(tc.input)
+
+				err := src.DecodeInto(t.Context(), nil)
+				require.ErrorIs(t, err, niceyaml.ErrDecodeTarget)
+			})
+		}
+	})
+
 	t.Run("runs schema and Validate around the decode", func(t *testing.T) {
 		t.Parallel()
 
