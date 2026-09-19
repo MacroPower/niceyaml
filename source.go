@@ -234,8 +234,8 @@ func (s *Source) Documents() ([]*Document, error) {
 //
 // When more than one document holds content, it returns an error wrapping
 // [ErrMultipleDocuments], bound to the Source and pointing at the header of
-// the second such document, or at its body when a "..." marker rather than
-// a header opens it. When no document holds content, it returns the
+// the second such document, or at its first token when a "..." marker
+// rather than a header opens it. When no document holds content, it returns the
 // first document, so a file of comments decodes to the zero value as an
 // empty file does. When the file holds no document at all, which happens
 // for text that is only a "..." marker, it returns an error wrapping
@@ -269,23 +269,23 @@ func (s *Source) Document() (*Document, error) {
 	default:
 		err := NewErrorFrom(
 			fmt.Errorf("%w: %d documents", ErrMultipleDocuments, len(content)),
-			atToken(anchorToken(content[1].doc)),
+			atToken(content[1].anchorToken()),
 		)
 
 		return nil, s.bind(err)
 	}
 }
 
-// anchorToken returns the token that locates doc: its header, or the token
-// of its body when it has no header, as a document after a "..." marker has
-// none. It is nil when doc has neither.
-func anchorToken(doc *ast.DocumentNode) *token.Token {
-	if doc.Start != nil {
-		return doc.Start
+// anchorToken returns the token that locates the document: its header, or
+// the first token of its text when it has no header, as a document after a
+// "..." marker has none. It is nil when the document has neither.
+func (dd *Document) anchorToken() *token.Token {
+	if dd.doc.Start != nil {
+		return dd.doc.Start
 	}
 
-	if doc.Body != nil {
-		return doc.Body.GetToken()
+	if len(dd.tokens) > 0 {
+		return dd.tokens[0]
 	}
 
 	return nil
