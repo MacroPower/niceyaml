@@ -171,6 +171,22 @@ func TestFileOrURL(t *testing.T) {
 		assert.Equal(t, fileURL(t, schemaPath), url)
 	})
 
+	t.Run("file URL without authority", func(t *testing.T) {
+		t.Parallel()
+
+		// RFC 8089 allows file:/path alongside file:///path, and both name
+		// the same absolute path rather than a path relative to baseDir.
+		tmpDir := t.TempDir()
+		schemaPath := filepath.Join(tmpDir, "schema.json")
+		schemaData := []byte(`{"type": "object"}`)
+		require.NoError(t, os.WriteFile(schemaPath, schemaData, 0o600))
+
+		url, data, err := load(t, fileOrURL(t, "/some/other/dir", "file:"+filepath.ToSlash(schemaPath)))
+		require.NoError(t, err)
+		assert.Equal(t, schemaData, data)
+		assert.Equal(t, fileURL(t, schemaPath), url)
+	})
+
 	t.Run("file URL scheme in upper case", func(t *testing.T) {
 		t.Parallel()
 

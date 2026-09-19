@@ -60,7 +60,7 @@ func FileOrURL(baseDir, ref string, opts ...HTTPOption) (Ref, error) {
 	}
 
 	path := ref
-	if hasScheme(ref, "file") {
+	if isFileURL(ref) {
 		path = fileURLPath(ref)
 	}
 
@@ -84,18 +84,30 @@ func isHTTPURL(ref string) bool {
 	return hasScheme(ref, "http") || hasScheme(ref, "https")
 }
 
+// isFileURL reports whether ref is a file URL, in any letter case. RFC 8089
+// allows the form without an authority, file:/path, alongside file:///path,
+// so the check is for "file:/" rather than "file://".
+func isFileURL(ref string) bool {
+	return hasPrefixFold(ref, "file:/")
+}
+
 // hasScheme reports whether ref starts with scheme followed by "://",
 // compared case-insensitively.
 func hasScheme(ref, scheme string) bool {
-	prefix := scheme + "://"
-
-	return len(ref) >= len(prefix) && strings.EqualFold(ref[:len(prefix)], prefix)
+	return hasPrefixFold(ref, scheme+"://")
 }
 
-// fileURLPath returns the local path a file:// URL names, in the native
-// separator of the platform. A URL that does not parse, names a host other
-// than localhost, or names no path comes back unchanged, so resolving or
-// reading the reference reports it.
+// hasPrefixFold reports whether s starts with prefix, compared
+// case-insensitively.
+func hasPrefixFold(s, prefix string) bool {
+	return len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix)
+}
+
+// fileURLPath returns the local path a file URL names, in the native
+// separator of the platform, whether the URL carries an empty authority
+// (file:///path) or none (file:/path). A URL that does not parse, names a
+// host other than localhost, or names no path comes back unchanged, so
+// resolving or reading the reference reports it.
 //
 // A Windows path carries its drive letter behind the leading slash of the
 // URL path, as in file:///C:/schemas/config.json, which is the form
