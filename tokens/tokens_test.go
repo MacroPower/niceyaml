@@ -36,6 +36,18 @@ func collectReset(seq iter.Seq2[int, token.Tokens]) []token.Tokens {
 	return result
 }
 
+func TestTokenize_TabIndentation(t *testing.T) {
+	t.Parallel()
+
+	// The lexer swallows characters after a tab used as indentation, so the
+	// joined origins are not a prefix of the source. The final line ending
+	// must still come back, so the stream ends where the file does.
+	tks := tokens.Tokenize("\ta: 1\n")
+	require.NotEmpty(t, tks)
+
+	assert.True(t, strings.HasSuffix(tks[len(tks)-1].Origin, "\n"), "last origin %q", tks[len(tks)-1].Origin)
+}
+
 func TestTokenize(t *testing.T) {
 	t.Parallel()
 

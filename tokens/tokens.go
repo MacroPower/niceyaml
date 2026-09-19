@@ -12,7 +12,10 @@ import (
 //
 // It is the one place niceyaml calls the go-yaml lexer, so every token stream
 // the module works with comes through here. The stream covers the whole
-// file; [SplitDocuments] cuts it into one stream per document.
+// file, except where the lexer itself drops text: a tab used as indentation
+// swallows the characters after it into an invalid token, and a "\u"
+// escape in a double-quoted scalar comes back decoded rather than as
+// written. [SplitDocuments] cuts the stream into one stream per document.
 func Tokenize(src string) token.Tokens {
 	tks := lexer.Tokenize(src)
 	if len(tks) == 0 {
@@ -35,16 +38,20 @@ func Tokenize(src string) token.Tokens {
 
 	// The lexer drops the source's final line ending, so a file that ends
 	// in a blank line tokenizes like one that does not. Give the dropped
-	// whitespace back to the last token so the stream covers the whole
-	// file and the last line count matches the text.
-	var joined strings.Builder
+	// whitespace back to the last token so the stream ends where the file
+	// does and the last line count matches the text. The rest is found
+	// behind the last token's text rather than behind the joined origins,
+	// which need not be a prefix of the source when the lexer dropped text
+	// earlier in the file.
+	last := tks[len(tks)-1]
 
-	for _, tk := range tks {
-		joined.WriteString(tk.Origin)
+	i := strings.LastIndex(src, last.Origin)
+	if i < 0 {
+		return tks
 	}
 
-	if rest, ok := strings.CutPrefix(src, joined.String()); ok && rest != "" && strings.TrimSpace(rest) == "" {
-		tks[len(tks)-1].Origin += rest
+	if rest := src[i+len(last.Origin):]; rest != "" && strings.TrimSpace(rest) == "" {
+		last.Origin += rest
 	}
 
 	return tks
