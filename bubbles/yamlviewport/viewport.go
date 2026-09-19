@@ -318,10 +318,11 @@ func (m *Model) setInitialValues() {
 	m.relayout()
 }
 
-// Init implements the [tea.Model] interface.
-// It returns nil because the viewport requires no initialization commands.
+// Init returns the command that starts the viewport, which is nil because
+// the viewport requires no initialization commands. It follows the shape of
+// [tea.Model.Init], so a parent model can call it from its own Init.
 //
-//nolint:gocritic // hugeParam: required by tea.Model interface.
+//nolint:gocritic // hugeParam: value receivers match the Bubble Tea update loop.
 func (m Model) Init() tea.Cmd {
 	return nil
 }
@@ -1636,7 +1637,7 @@ func (m *Model) scrollToCurrentMatch() {
 
 // Update processes Bubble Tea messages and returns the updated model.
 //
-//nolint:gocritic // hugeParam: required for tea.Model interface compatibility.
+//nolint:gocritic // hugeParam: value receivers match the Bubble Tea update loop.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
@@ -1748,7 +1749,7 @@ func (m *Model) renderContent(lines []string, contentW, contentH int) string {
 //     lines of context around each change.
 //   - [ViewModeSideBySide]: Renders before and after content in separate panes.
 //
-//nolint:gocritic // hugeParam: required for tea.Model interface compatibility.
+//nolint:gocritic // hugeParam: value receivers match the Bubble Tea update loop.
 func (m Model) View() string {
 	if m.printer == nil {
 		return ""

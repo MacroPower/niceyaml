@@ -10,8 +10,10 @@
 //	m.SetHeight(24)
 //	m.SetRevision(niceyaml.NewSourceFromString(yamlContent))
 //
-// The viewport implements [tea.Model], so embed it in your Bubble Tea
-// application and forward messages to [Model.Update].
+// The viewport is a component in the Bubbles convention rather than a
+// [tea.Model]: [Model.Update] returns the updated Model, so hold it as a
+// field of your own model, forward messages to Update, and store the Model
+// it returns.
 //
 // A [Revision] is a name and a view of the content. A [niceyaml.Source] is
 // one, and [NewRevision] makes one from a decorated view, so a viewer shows
