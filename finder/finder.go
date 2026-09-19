@@ -54,7 +54,7 @@ type Normalizer interface {
 //	)
 //	idx := f.Load(source.Lines())
 //	view := source.View()
-//	view.AddOverlay(highlightStyle, idx.Find("search term")...)
+//	view.BlendOverlay(kind.GenericHighlight, idx.Find("search term")...)
 //	fmt.Println(p.Print(view))
 //
 // By default, searches are exact (case-sensitive, no normalization).
