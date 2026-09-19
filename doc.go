@@ -79,10 +79,11 @@
 // position, and the excerpt, so a log that prints the error that way still
 // names every violation and where it is. The excerpt marks every location
 // in the tree, with each nested error as an annotation below its own line
-// and distant errors in separate hunks. An error joined from several with
-// [errors.Join], such as one per document of a file, binds to the join of
-// its bound branches, and [SourceErrors] finds every binding in an error
-// for a caller that renders them all. A SourceError never rewrites the
+// and distant errors in separate hunks. An error that unwraps to several,
+// such as one from [errors.Join], binds as one SourceError with a child
+// per branch, and [SourceErrors] finds every binding in an error joined
+// from bound errors, such as one per document of a file, for a caller
+// that renders them all. A SourceError never rewrites the
 // message it binds, so an error built by hand goes through Bind before
 // [fmt.Errorf] adds context, which keeps the position beside the message.
 //

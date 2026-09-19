@@ -336,9 +336,7 @@ func (s *Source) parse() (*ast.File, error) {
 // or no location at all. Errors built elsewhere bind through
 // [Document.Bind], which describes what comes back as it is.
 func (s *Source) bind(err error) error {
-	bound, _ := bindTree(err, s, nil)
-
-	return bound
+	return bindTree(err, s, nil)
 }
 
 // Lines returns the [line.Lines] of the [Source]: its tokens split into

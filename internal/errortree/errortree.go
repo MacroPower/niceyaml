@@ -45,9 +45,11 @@ type Tree struct {
 //
 // An error that unwraps to several, such as one from [errors.Join], is a
 // node with no text and one child per error, so a run over several files
-// reads as one tree with a branch per file. A node with no text adds
-// nothing: its children take its place in the tree above it, and one with
-// a single child is that child.
+// reads as one tree with a branch per file. A binding of such an error is
+// the same node, with each child carrying its whole
+// [niceyaml.SourceError.Error], since no root names the source for it. A
+// node with no text adds nothing: its children take its place in the tree
+// above it, and one with a single child is that child.
 //
 // The children come from the errors rather than from the text of the
 // message, so a wrapper that rewrites the message it wraps keeps its
@@ -67,6 +69,12 @@ func New(err error) Tree {
 		}
 
 		return newTree("", children)
+	}
+
+	if bound, ok := err.(*niceyaml.SourceError); ok { //nolint:errorlint // The node itself, not a chain search.
+		if _, joined := joinBranches(bound.Unwrap()); joined {
+			return newTree("", trees(boundChildren(bound, true)))
+		}
 	}
 
 	return newTree(err.Error(), children(err))
@@ -114,7 +122,7 @@ func children(err error) []Tree {
 	for cur := err; !nothing(cur); {
 		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
 		case *niceyaml.SourceError:
-			kids = append(kids, boundChildren(x)...)
+			kids = append(kids, boundChildren(x, false)...)
 			cur = nil
 
 		case *niceyaml.Error:
@@ -132,26 +140,35 @@ func children(err error) []Tree {
 		}
 	}
 
+	return trees(kids)
+}
+
+// trees returns the nodes of kids in position order, with those whose
+// location did not resolve after the rest in the order they were given.
+// Returns nil when kids is empty.
+func trees(kids []positioned) []Tree {
 	if len(kids) == 0 {
 		return nil
 	}
 
 	slices.SortStableFunc(kids, comparePositioned)
 
-	trees := make([]Tree, 0, len(kids))
+	out := make([]Tree, 0, len(kids))
 	for _, kid := range kids {
-		trees = append(trees, kid.tree)
+		out = append(out, kid.tree)
 	}
 
-	return trees
+	return out
 }
 
 // boundChildren returns the nodes of the children of bound, each with its
-// own children as a subtree. A child bound to the same source carries the
-// "line:col:" its location resolved to in front of its message, without
-// the name the parent gives already, and one bound to another source
-// carries its whole [niceyaml.SourceError.Error], which names that source.
-func boundChildren(bound *niceyaml.SourceError) []positioned {
+// own children as a subtree. A child bound to another source carries its
+// whole [niceyaml.SourceError.Error], which names that source, and so
+// does a child bound to the same source when named is set, for a parent
+// with no text of its own. Otherwise a child bound to the same source
+// carries the "line:col:" its location resolved to in front of its
+// message, without the name the parent gives already.
+func boundChildren(bound *niceyaml.SourceError, named bool) []positioned {
 	var kids []positioned
 
 	for _, child := range bound.Errors() {
@@ -166,7 +183,7 @@ func boundChildren(bound *niceyaml.SourceError) []positioned {
 		}
 
 		text := child.Error()
-		if child.Source() == bound.Source() {
+		if !named && child.Source() == bound.Source() {
 			text = child.Unwrap().Error()
 			if kid.located {
 				text = prefix(kid.pos.String()+":", text)

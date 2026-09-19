@@ -337,9 +337,12 @@ func (dd *Document) Validate(ctx context.Context, validators ...Validator) error
 // Binding binds the whole tree of err: the [Error] that anchors it gives
 // the [SourceError] its location, and every error nested with
 // [WithErrors] along the way becomes a child with a location of its own,
-// which [SourceError.Errors] returns. An error joined from several with
-// [errors.Join] comes back as the join of its bound branches, so one
-// error per document of a file binds in one call.
+// which [SourceError.Errors] returns. An error that unwraps to several,
+// such as one from [errors.Join], binds the same way whatever wraps it:
+// the SourceError carries no location of its own, and each branch is a
+// child with its own, so a validator that joins its violations reports
+// each one with its position. To keep several errors as separate
+// bindings, bind each one before joining them.
 //
 // If err is nil, Bind returns nil. An error that is or wraps a
 // [*SourceError] along its cause chain is bound already, to this source or
@@ -348,9 +351,7 @@ func (dd *Document) Validate(ctx context.Context, validators ...Validator) error
 // comes back as it is, and one inside the chain binds nothing, so Bind
 // looks past it. Bind never modifies err.
 func (dd *Document) Bind(err error) error {
-	bound, _ := bindTree(err, dd.source, dd)
-
-	return bound
+	return bindTree(err, dd.source, dd)
 }
 
 // DecodeOption configures [Document.Decode],

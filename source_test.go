@@ -1270,8 +1270,9 @@ func TestDocument_BindChain(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				// The nil pointer binds nothing, so the Error in the chain
-				// binds to this source and its path resolves there.
+				// The nil pointer binds nothing, so the join binds to this
+				// source with the Error as its only child, and the path
+				// resolves there.
 				wrapped := yamltest.Bind(t, source, err)
 
 				var bound *niceyaml.SourceError
@@ -1279,8 +1280,9 @@ func TestDocument_BindChain(t *testing.T) {
 				require.ErrorAs(t, wrapped, &bound)
 				assert.Same(t, source, bound.Source())
 				require.ErrorIs(t, wrapped, pathErr)
+				require.Len(t, bound.Errors(), 1)
 
-				rng, locErr := bound.Location()
+				rng, locErr := bound.Errors()[0].Location()
 				require.NoError(t, locErr)
 				assert.Equal(t, position.NewRange(position.New(0, 6), position.New(0, 11)), rng)
 

@@ -2652,7 +2652,7 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 		assert.Equal(t, "1:7: outer: inner: $.name: bad name", wrapped.Error())
 	})
 
-	t.Run("a bound join binds each branch", func(t *testing.T) {
+	t.Run("a bound join binds each branch as a child", func(t *testing.T) {
 		t.Parallel()
 
 		first := niceyaml.NewError("bad first", niceyaml.WithPath(namePath))
@@ -2662,12 +2662,20 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 			fmt.Errorf("b: %w", second),
 		))
 
-		// Each branch is a binding with its position in front of the text
-		// its wrapper wrote, and the join keeps them apart.
-		assert.Equal(t, "1:7: a: $.name: bad first\n1:7: b: $.name: bad second", wrapped.Error())
+		// The join carries no location of its own, so the message stays
+		// as the join wrote it, and each branch is a child with its
+		// position in front of the text its wrapper wrote.
+		assert.Equal(t, "a: $.name: bad first\nb: $.name: bad second", wrapped.Error())
 		require.ErrorIs(t, wrapped, first)
 		require.ErrorIs(t, wrapped, second)
-		assert.Len(t, niceyaml.SourceErrors(wrapped), 2)
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, wrapped, &bound)
+		require.Len(t, bound.Errors(), 2)
+		assert.Equal(t, "1:7: a: $.name: bad first", bound.Errors()[0].Error())
+		assert.Equal(t, "1:7: b: $.name: bad second", bound.Errors()[1].Error())
+		assert.Len(t, niceyaml.SourceErrors(wrapped), 1)
 	})
 
 	t.Run("binding each branch reports every position", func(t *testing.T) {
@@ -3323,20 +3331,56 @@ func TestSourceError_TreeBranches(t *testing.T) {
 	badB := niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b")))
 	badC := niceyaml.NewError("bad c", niceyaml.WithPath(paths.Root().Child("c")))
 
-	t.Run("join branches bind on their own", func(t *testing.T) {
+	t.Run("join branches bind as children", func(t *testing.T) {
 		t.Parallel()
 
 		err := yamltest.Bind(t, source, errors.Join(badA, badB))
 
-		// The join comes back as the join of two bindings, each with its
-		// own position, and the printer renders an excerpt for each.
-		assert.Equal(t, "1:4: $.a: bad a\n2:4: $.b: bad b", err.Error())
-		require.Len(t, niceyaml.SourceErrors(err), 2)
+		// The join has no location of its own, each branch is a child
+		// with one, and the excerpt marks both with their messages.
+		assert.Equal(t, "$.a: bad a\n$.b: bad b", err.Error())
+		assert.Equal(t, "$.a: bad a\n$.b: bad b\n1:4: $.a: bad a\n2:4: $.b: bad b", report(err))
+		require.Len(t, niceyaml.SourceErrors(err), 1)
 
 		got := trimLines(newXMLPrinter().PrintError(err))
+		assert.Equal(t, "├── 1:4: $.a: bad a\n└── 2:4: $.b: bad b", strings.SplitN(got, "\n\n", 2)[0])
 		assert.Contains(t, got, "<genericError>1</genericError>")
 		assert.Contains(t, got, "<genericError>2</genericError>")
-		assert.NotContains(t, got, "^ bad")
+		assert.Contains(t, got, "^ bad a")
+		assert.Contains(t, got, "^ bad b")
+	})
+
+	t.Run("every multi-error binds the same way", func(t *testing.T) {
+		t.Parallel()
+
+		// A join, a wrapper with two %w verbs, and a join inside a
+		// wrapper all bind as a root without a location and one child
+		// per branch.
+		tcs := map[string]error{
+			"join":         errors.Join(badA, badB),
+			"two %w verbs": fmt.Errorf("%w; %w", badA, badB),
+			"wrapped join": fmt.Errorf("ctx: %w", errors.Join(badA, badB)),
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := yamltest.Bind(t, source, tc)
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &bound)
+				assert.Equal(t, tc.Error(), bound.Error())
+
+				_, locErr := bound.Location()
+				require.ErrorIs(t, locErr, niceyaml.ErrNoLocation)
+
+				require.Len(t, bound.Errors(), 2)
+				assert.Equal(t, "1:4: $.a: bad a", bound.Errors()[0].Error())
+				assert.Equal(t, "2:4: $.b: bad b", bound.Errors()[1].Error())
+			})
+		}
 	})
 
 	t.Run("branches below a wrapper are annotated", func(t *testing.T) {
@@ -3347,23 +3391,31 @@ func TestSourceError_TreeBranches(t *testing.T) {
 			niceyaml.NewError("summary", niceyaml.WithErrors(badB, badC)),
 		)))
 
-		assert.Equal(t, "1:4: document 0: first: $.a: bad a\nsummary", err.Error())
-		assert.Equal(t, "1:4: document 0: first: $.a: bad a\nsummary\n2:4: $.b: bad b\n3:4: $.c: bad c", report(err))
+		assert.Equal(t, "document 0: first: $.a: bad a\nsummary", err.Error())
+		assert.Equal(t, stringtest.JoinLF(
+			"document 0: first: $.a: bad a",
+			"summary",
+			"1:4: first: $.a: bad a",
+			"summary",
+			"2:4: $.b: bad b",
+			"3:4: $.c: bad c",
+		), report(err))
 
 		got := trimLines(render(err))
 		assert.Contains(t, got, "<genericError>1</genericError>")
+		assert.Contains(t, got, "^ first: $.a: bad a")
 		assert.Contains(t, got, "^ bad b")
 		assert.Contains(t, got, "^ bad c")
 	})
 
-	t.Run("a join branch that does not resolve is not listed", func(t *testing.T) {
+	t.Run("a join branch that does not resolve is listed without a position", func(t *testing.T) {
 		t.Parallel()
 
 		missing := niceyaml.NewError("bad x", niceyaml.WithPath(paths.Root().Child("x")))
 		err := yamltest.Bind(t, source, errors.Join(badA, missing))
 
 		got := trimLines(render(err))
-		assert.Equal(t, "1:4: $.a: bad a\n$.x: bad x", strings.SplitN(got, "\n\n", 2)[0])
+		assert.Equal(t, "├── 1:4: $.a: bad a\n└── $.x: bad x", strings.SplitN(got, "\n\n", 2)[0])
 		assert.Equal(t, 1, strings.Count(got, "$.x: bad x"))
 	})
 

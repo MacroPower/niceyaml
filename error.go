@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -44,10 +43,6 @@ var (
 	// position or range came from other text. [SourceError.Location] and
 	// [SourceError.Excerpt] return it.
 	ErrOutOfRange = errors.New("location outside source")
-
-	// The type of the error [errors.Join] returns, which binding rebuilds
-	// from its bound branches.
-	joinType = reflect.TypeOf(errors.Join(errors.New("")))
 )
 
 // Renderer renders a [line.View] as text. [SourceError.Detail] renders the
@@ -255,7 +250,7 @@ func (e *Error) nested() []error {
 }
 
 // anchor returns the [Error] that carries the location: e itself when it
-// has one, otherwise the nearest such Error wrapped inside e, looking
+// has one, otherwise the nearest such Error along its cause chain, looking
 // through foreign wrapping. Falls back to e when none carries a location.
 func (e *Error) anchor() *Error {
 	for cur := e; ; {
@@ -263,13 +258,39 @@ func (e *Error) anchor() *Error {
 			return cur
 		}
 
-		inner, ok := errors.AsType[*Error](cur.err)
-		if !ok || inner == nil {
+		inner := nextError(cur.err)
+		if inner == nil {
 			return e
 		}
 
 		cur = inner
 	}
+}
+
+// nextError returns the nearest [*Error] along the cause chain of err: err
+// itself, or the one a wrapper wraps, following each wrapper to the one
+// error it wraps. An error that unwraps to several ends the chain, as it
+// does for binding, so an Error and its binding agree on the location.
+// Returns nil when the chain holds none.
+func nextError(err error) *Error {
+	for cur := err; cur != nil; {
+		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
+		case *Error:
+			if x == nil {
+				return nil
+			}
+
+			return x
+
+		case interface{ Unwrap() error }:
+			cur = x.Unwrap()
+
+		default:
+			return nil
+		}
+	}
+
+	return nil
 }
 
 // hasPosition reports whether e carries a location of its own.
@@ -410,13 +431,14 @@ func (e *Error) locate(lookup func() (*Document, error)) (location, error) {
 // The bound error is a tree, and binding binds every node of it. The
 // location of the SourceError is that of the first located [Error] along
 // the cause chain of the error it binds: the chain follows each wrapper to
-// the error it wraps and, where an error unwraps to several, the first
-// branch that leads to a location. Every error nested with [WithErrors]
-// in an Error along that chain, and every other branch that leads to a
-// location of its own, is bound the same way to the same document and
-// becomes a child. [SourceError.Errors] returns the children, each a
-// SourceError with its own location and children, so a validator's report
-// of several violations binds to one SourceError per violation. An error
+// the one error it wraps and ends at an error that unwraps to several,
+// such as one from [errors.Join], which carries no location of its own.
+// Every error nested with [WithErrors] in an Error along that chain, and
+// every branch of the error that ends it, is bound the same way to the
+// same document and becomes a child. [SourceError.Errors] returns the
+// children, each a SourceError with its own location and children, so a
+// validator's report of several violations binds to one SourceError per
+// violation whether it nests them with WithErrors or joins them. An error
 // that is or wraps a SourceError is a binding already: as a nested error
 // it contributes that binding as the child, and as the error given to Bind
 // it comes back as it is.
@@ -480,71 +502,29 @@ type SourceError struct {
 const defaultContextLines = 2
 
 // bindTree binds err to src, with paths resolving in doc, which is nil for
-// the errors a Source produces itself. It reports whether the result is a
-// new error: a nil err or a nil [*Error] or [*SourceError] pointer comes
-// back as it is, as does an error that is or wraps a [*SourceError] along
-// its cause chain, since that is a binding already. An error from
-// [errors.Join] comes back as the join of its bound branches, or as it is
-// when every branch was bound already. Any other error is bound as a new
-// SourceError.
-func bindTree(err error, src *Source, doc *Document) (error, bool) {
+// the errors a Source produces itself. A nil err or a nil [*Error] or
+// [*SourceError] pointer comes back as it is, as does an error that is or
+// wraps a [*SourceError] along its cause chain, since that is a binding
+// already. Any other error is bound as a new SourceError.
+func bindTree(err error, src *Source, doc *Document) error {
 	if isNothing(err) {
-		return err, false
-	}
-
-	if branches, ok := joinBranches(err); ok {
-		bound := make([]error, 0, len(branches))
-		changed := false
-
-		for _, branch := range branches {
-			// A nil pointer binds nothing, and a rebuilt join leaves it
-			// out so the first binding in the join is a live one.
-			if isNothing(branch) {
-				continue
-			}
-
-			b, c := bindTree(branch, src, doc)
-			bound = append(bound, b)
-			changed = changed || c
-		}
-
-		if !changed {
-			return err, false
-		}
-
-		return errors.Join(bound...), true
+		return err
 	}
 
 	if _, ok := anchorOf(err).(*SourceError); ok { //nolint:errorlint // The anchor itself, found by the walk.
-		return err, false
+		return err
 	}
 
-	return newSourceError(err, src, doc), true
-}
-
-// joinBranches returns the errors err unwraps to when err is the error
-// [errors.Join] returns, and false for any other error. Any other type
-// that unwraps to several, such as one from [fmt.Errorf] with two %w
-// verbs, has a message of its own that a rebuilt join would lose, so it
-// is bound as a wrapper.
-func joinBranches(err error) ([]error, bool) {
-	if reflect.TypeOf(err) != joinType {
-		return nil, false
-	}
-
-	joined, ok := err.(interface{ Unwrap() []error })
-	if !ok {
-		return nil, false
-	}
-
-	return joined.Unwrap(), true
+	return newSourceError(err, src, doc)
 }
 
 // anchorOf returns the error along the cause chain of err that carries the
 // location: the first located [*Error], or the first [*SourceError], which
-// resolved one already. The chain follows a wrapper to the error it wraps,
-// an Error to its cause, and an error that unwraps to several to the first
-// branch that leads to an anchor. Returns nil when none does.
+// resolved one already. The chain follows a wrapper to the one error it
+// wraps and an Error to its cause. An error that unwraps to several, such
+// as one from [errors.Join], ends the chain: it carries no location of its
+// own, and each of its branches binds as a child. Returns nil when the
+// chain holds no anchor.
 func anchorOf(err error) error {
 	switch x := err.(type) { //nolint:errorlint // Walks the chain one node at a time.
 	case *SourceError:
@@ -567,16 +547,6 @@ func anchorOf(err error) error {
 
 	case interface{ Unwrap() error }:
 		return anchorOf(x.Unwrap())
-
-	case interface{ Unwrap() []error }:
-		for _, branch := range x.Unwrap() {
-			a := anchorOf(branch)
-			if a != nil {
-				return a
-			}
-		}
-
-		return nil
 
 	default:
 		return nil
@@ -634,12 +604,10 @@ func newSourceError(err error, src *Source, doc *Document) *SourceError {
 
 // collect binds the children of the error e binds: every error nested with
 // [WithErrors] in an [*Error] along its cause chain, and every branch of
-// an error along the chain that unwraps to several and leads to a location
-// of its own, other than the branch that continues the chain. A branch
-// that leads to no location contributes the errors nested along it
-// instead. The chain ends at a [*SourceError], which is the cause of the
-// error above it rather than a violation of its own, so its children join
-// the children of e.
+// the error that ends the chain by unwrapping to several. The chain also
+// ends at a [*SourceError], which is the cause of the error above it
+// rather than a violation of its own, so its children join the children
+// of e.
 func (e *SourceError) collect(err error, src *Source, doc *Document) {
 	for cur := err; !isNothing(cur); {
 		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
@@ -659,20 +627,11 @@ func (e *SourceError) collect(err error, src *Source, doc *Document) {
 			cur = x.Unwrap()
 
 		case interface{ Unwrap() []error }:
-			var chain error
-
 			for _, branch := range x.Unwrap() {
-				switch {
-				case anchorOf(branch) == nil:
-					e.collect(branch, src, doc)
-				case chain == nil:
-					chain = branch
-				default:
-					e.addChild(branch, src, doc)
-				}
+				e.addChild(branch, src, doc)
 			}
 
-			cur = chain
+			return
 
 		default:
 			return
@@ -680,19 +639,11 @@ func (e *SourceError) collect(err error, src *Source, doc *Document) {
 	}
 }
 
-// addChild binds n as a child of e. A join contributes each of its
-// branches, a binding is the child as it is, and any other error binds to
-// the same source and document as e, or takes over the binding it wraps.
+// addChild binds n as a child of e. A binding is the child as it is, and
+// any other error binds to the same source and document as e, or takes
+// over the binding it wraps. A nil n, or a nil pointer, adds nothing.
 func (e *SourceError) addChild(n error, src *Source, doc *Document) {
 	if isNothing(n) {
-		return
-	}
-
-	if branches, ok := joinBranches(n); ok {
-		for _, branch := range branches {
-			e.addChild(branch, src, doc)
-		}
-
 		return
 	}
 

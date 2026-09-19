@@ -243,6 +243,27 @@ func TestNew(t *testing.T) {
 				},
 			},
 		},
+		"bound join is a forest of named bindings": {
+			err: yamltest.Bind(t, source, errors.Join(badB(), badA())),
+			want: errortree.Tree{
+				Children: []errortree.Tree{
+					{Text: "f.yaml:1:4: $.a: bad a"},
+					{Text: "f.yaml:2:4: $.b: bad b"},
+				},
+			},
+			multiLine: true,
+		},
+		"bound join below a wrapper keeps the wrapper as the root": {
+			err: yamltest.Bind(t, source, fmt.Errorf("ctx: %w", errors.Join(badA(), badB()))),
+			want: errortree.Tree{
+				Text: "f.yaml: ctx: $.a: bad a\n$.b: bad b",
+				Children: []errortree.Tree{
+					{Text: "1:4: $.a: bad a"},
+					{Text: "2:4: $.b: bad b"},
+				},
+			},
+			multiLine: true,
+		},
 		"join of one error is that error": {
 			err:  errors.Join(errors.Join(errors.New("boom"))),
 			want: errortree.Tree{Text: "boom"},
