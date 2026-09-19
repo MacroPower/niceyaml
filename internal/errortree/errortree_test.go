@@ -309,8 +309,8 @@ func TestNew(t *testing.T) {
 			want: errortree.Tree{
 				Text: "f.yaml:1:4: $.a: g.yaml: inner",
 				Children: []errortree.Tree{
-					{Text: "g.yaml:1:4: $.c: bad c"},
 					{Text: "2:4: $.b: bad b"},
+					{Text: "g.yaml:1:4: $.c: bad c"},
 				},
 			},
 		},
@@ -343,6 +343,19 @@ func TestNew(t *testing.T) {
 					{Text: "g.yaml:1:4: $.c: bad c"},
 				},
 			},
+		},
+		"bound join of two sources keeps the order it was given": {
+			err: yamltest.Bind(t, source, errors.Join(
+				yamltest.Bind(t, source, badB()),
+				yamltest.Bind(t, other, niceyaml.NewError("bad c", niceyaml.WithPath(paths.Root().Child("c")))),
+			)),
+			want: errortree.Tree{
+				Children: []errortree.Tree{
+					{Text: "f.yaml:2:4: $.b: bad b"},
+					{Text: "g.yaml:1:4: $.c: bad c"},
+				},
+			},
+			multiLine: true,
 		},
 		"bound join is a forest of named bindings": {
 			err: yamltest.Bind(t, source, errors.Join(badB(), badA())),

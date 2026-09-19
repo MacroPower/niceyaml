@@ -40,9 +40,11 @@ type Tree struct {
 // each child, a binding of its own from [niceyaml.SourceError.Errors],
 // carries the "line:col:" position its location resolved to without the
 // name, since the root names the source already. The children of a node
-// sort by position; those whose location did not resolve follow in the
-// order they were given. A nested error with nested errors of its own is
-// a subtree.
+// sort by position within the source they are bound to, with the sources
+// in the order they first appear, since a line number counts only in the
+// source that holds it; those whose location did not resolve follow in
+// the order they were given. A nested error with nested errors of its own
+// is a subtree.
 //
 // An error that unwraps to several, such as one from [errors.Join], is a
 // node with no text and one child per error, so a run over several files
@@ -190,14 +192,15 @@ func children(err error) []Tree {
 	return trees(kids)
 }
 
-// trees returns the nodes of kids in position order, with those whose
-// location did not resolve after the rest in the order they were given.
-// Returns nil when kids is empty.
+// trees returns the nodes of kids in position order within the source
+// each is bound to, with those whose location did not resolve after the
+// rest in the order they were given. Returns nil when kids is empty.
 func trees(kids []positioned) []Tree {
 	if len(kids) == 0 {
 		return nil
 	}
 
+	groupSources(kids)
 	slices.SortStableFunc(kids, comparePositioned)
 
 	out := make([]Tree, 0, len(kids))
@@ -221,7 +224,7 @@ func boundChildren(bound *niceyaml.SourceError, named bool) []positioned {
 	var kids []positioned
 
 	for _, child := range bound.Errors() {
-		kid := positioned{}
+		kid := positioned{src: child.Source()}
 
 		// A location the source does not hold resolved to nothing the
 		// excerpt can mark, so the node reads as an unlocated one.
@@ -263,17 +266,38 @@ func prefix(p, msg string) string {
 	return p + " " + msg
 }
 
-// positioned is a child of a node and the position it resolved to, when
-// located, for the order the children take.
+// positioned is a child of a node, the source it is bound to, and the
+// position it resolved to, when located, for the order the children take.
+// [groupSources] fills group in.
 type positioned struct {
+	src     *niceyaml.Source
 	tree    Tree
 	pos     position.Position
+	group   int
 	located bool
 }
 
-// comparePositioned orders children by position, with those that have none
-// after those that do, and equal among themselves so a stable sort keeps
-// their order.
+// groupSources numbers the source of each of kids in the order the sources
+// first appear, so children of one source stay together in the order they
+// were given rather than interleaving with another source by position: a
+// line number counts only in the source that holds it.
+func groupSources(kids []positioned) {
+	seen := make([]*niceyaml.Source, 0, 1)
+
+	for i := range kids {
+		group := slices.Index(seen, kids[i].src)
+		if group < 0 {
+			group = len(seen)
+			seen = append(seen, kids[i].src)
+		}
+
+		kids[i].group = group
+	}
+}
+
+// comparePositioned orders children by source group and then by position,
+// with those that have no position after those that do, and equal among
+// themselves so a stable sort keeps their order.
 func comparePositioned(a, b positioned) int {
 	switch {
 	case !a.located && !b.located:
@@ -282,6 +306,8 @@ func comparePositioned(a, b positioned) int {
 		return 1
 	case !b.located:
 		return -1
+	case a.group != b.group:
+		return a.group - b.group
 	case a.pos.Line != b.pos.Line:
 		return a.pos.Line - b.pos.Line
 	default:
