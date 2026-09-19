@@ -309,7 +309,7 @@ func TestPrinter_CRLF(t *testing.T) {
 		"comment ending in CR": {
 			input:       "a: b # c\r\nd: e\r\n",
 			want:        stringtest.JoinLF("a: b # c", "d: e"),
-			wantOverlay: stringtest.JoinLF("[a][:][ ][b ][# c]", "[d][:][ ][e]"),
+			wantOverlay: stringtest.JoinLF("[a][:][ ][b][ ][# c]", "[d][:][ ][e]"),
 		},
 		// The lexer gives the CRLF after a quoted value a token of its own.
 		"line ending token": {
@@ -1899,11 +1899,11 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 		},
 		"comment": {
 			input: "key: value # comment",
-			want:  "<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value </literalString><comment># comment</comment>",
+			want:  "<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString><text> </text><comment># comment</comment>",
 		},
 		"tag": {
 			input: "tagged: !custom value",
-			want:  "<nameTag>tagged</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><nameDecorator>!custom </nameDecorator><literalString>value</literalString>",
+			want:  "<nameTag>tagged</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><nameDecorator>!custom</nameDecorator><text> </text><literalString>value</literalString>",
 		},
 		"document markers": {
 			input: stringtest.JoinLF(
@@ -1944,6 +1944,12 @@ func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
 		"punctuation": {
 			input: "key: value",
 			want:  "<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
+		},
+		// The lexer hands the whole gap before a comment to the value
+		// token, and every cell of it renders unstyled.
+		"gap before a comment": {
+			input: "key: value   # comment",
+			want:  "<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString><text>   </text><comment># comment</comment>",
 		},
 	}
 

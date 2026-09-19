@@ -1033,7 +1033,16 @@ func (p *Printer) renderTokenLine(lineIndex int, ln *line.Line, overlays line.Ov
 		// The separator is the whitespace the token carries before its
 		// text, whether that text is a plain scalar, a quoted string, an
 		// anchor, a comment, or the continuation of a multiline scalar.
+		// The trailer is the whitespace it carries after that text, which
+		// the lexer hands to the token preceding a comment. Neither is
+		// part of the text, so both render in [kind.Text]. A token of
+		// nothing but whitespace is all separator.
 		separatorRunes := leadingWhitespaceRunes(origin)
+
+		trailerRunes := trailingWhitespaceRunes(origin)
+		if separatorRunes+trailerRunes > len(originRunes) {
+			trailerRunes = 0
+		}
 
 		// Part 1: Render separator portion (default style).
 		if separatorRunes > 0 {
@@ -1047,9 +1056,19 @@ func (p *Printer) renderTokenLine(lineIndex int, ln *line.Line, overlays line.Ov
 		}
 
 		// Part 2: Render content portion (token style).
+		if contentRunes := len(originRunes) - trailerRunes; contentRunes > 0 {
+			sb.WriteString(
+				p.styleLineWithRanges(string(originRunes[:contentRunes]), pos, tokenStyle, overlays),
+			)
+
+			pos.Col += contentRunes
+			originRunes = originRunes[contentRunes:]
+		}
+
+		// Part 3: Render trailer portion (default style).
 		if len(originRunes) > 0 {
 			sb.WriteString(
-				p.styleLineWithRanges(string(originRunes), pos, tokenStyle, overlays),
+				p.styleLineWithRanges(string(originRunes), pos, kind.Text, overlays),
 			)
 
 			pos.Col += len(originRunes)
@@ -1063,4 +1082,10 @@ func (p *Printer) renderTokenLine(lineIndex int, ln *line.Line, overlays line.Ov
 // and tabs that starts s.
 func leadingWhitespaceRunes(s string) int {
 	return len(s) - len(strings.TrimLeft(s, " \t"))
+}
+
+// trailingWhitespaceRunes returns the number of runes in the run of spaces
+// and tabs that ends s.
+func trailingWhitespaceRunes(s string) int {
+	return len(s) - len(strings.TrimRight(s, " \t"))
 }
