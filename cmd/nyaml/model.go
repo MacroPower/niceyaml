@@ -364,7 +364,14 @@ func (m *model) titleLine() string {
 	textStyle := m.styles.Style(kind.Text)
 	sb.WriteString(powerlineSep(lastStyle, textStyle))
 
-	return sb.String()
+	return m.clampWidth(sb.String())
+}
+
+// clampWidth truncates a status bar row to the terminal width, so a row
+// whose fixed segments outgrow a narrow terminal is cut rather than wrapped
+// onto a second row that pushes the rows below it off the screen.
+func (m *model) clampWidth(row string) string {
+	return lipgloss.NewStyle().MaxWidth(m.width).Render(row)
 }
 
 // revisionLabel returns the revision position for the title line, numbered
@@ -425,7 +432,7 @@ func (m *model) textLine() string {
 
 		remaining := max(0, m.width-lipgloss.Width(searchContent))
 
-		return searchContent + textStyle.Render(strings.Repeat(" ", remaining))
+		return m.clampWidth(searchContent + textStyle.Render(strings.Repeat(" ", remaining)))
 	}
 
 	// Build search info label.
@@ -483,7 +490,7 @@ func (m *model) textLine() string {
 	contentWidth := lipgloss.Width(result)
 	remaining := max(0, m.width-contentWidth)
 
-	return result + textStyle.Render(strings.Repeat(" ", remaining))
+	return m.clampWidth(result + textStyle.Render(strings.Repeat(" ", remaining)))
 }
 
 func buildPrinterOpts(lineNumbers bool, styles style.Styles) []printer.Option {

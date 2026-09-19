@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
@@ -204,14 +205,21 @@ func TestOverlayOffset(t *testing.T) {
 	}
 }
 
-func TestTitleLineWidth(t *testing.T) {
+func TestStatusBarWidth(t *testing.T) {
 	t.Parallel()
 
-	// The title line fills the terminal exactly. One cell over and it wraps
-	// onto another row, pushing the text line out of the alt screen.
+	// Both status bar rows fill the terminal exactly. One cell over and a
+	// row wraps onto another row, pushing the rows below it out of the alt
+	// screen, so a terminal narrower than the fixed segments cuts them.
 	tcs := map[string]struct {
 		width int
 	}{
+		"20 columns": {
+			width: 20,
+		},
+		"50 columns": {
+			width: 50,
+		},
 		"80 columns": {
 			width: 80,
 		},
@@ -230,7 +238,12 @@ func TestTitleLineWidth(t *testing.T) {
 
 			got, ok := updated.(model)
 			require.True(t, ok)
-			assert.Equal(t, tc.width, lipgloss.Width(got.titleLine()))
+			assert.Equal(t, tc.width, lipgloss.Width(got.titleLine()), "title line")
+			assert.Equal(t, tc.width, lipgloss.Width(got.textLine()), "text line")
+
+			got.searching = true
+			got.searchInput = strings.Repeat("x", tc.width)
+			assert.Equal(t, tc.width, lipgloss.Width(got.textLine()), "search line")
 		})
 	}
 }
