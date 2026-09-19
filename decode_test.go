@@ -118,6 +118,23 @@ func TestSource_Document(t *testing.T) {
 		assert.Same(t, source, bound.Source())
 	})
 
+	t.Run("rejects several documents at a second document without a header", func(t *testing.T) {
+		t.Parallel()
+
+		// A "..." marker ends the first document, so the second has no
+		// header, and the error points at its body instead: the token of
+		// the mapping, which go-yaml places at its first ":".
+		source := niceyaml.NewSourceFromString(stringtest.Input(`
+			a: 1
+			...
+			b: 2
+		`))
+
+		_, err := source.Document()
+		require.ErrorIs(t, err, niceyaml.ErrMultipleDocuments)
+		assert.Equal(t, "3:2: multiple documents in source: 2 documents", err.Error())
+	})
+
 	t.Run("skips a comment block above the first header", func(t *testing.T) {
 		t.Parallel()
 
