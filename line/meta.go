@@ -111,6 +111,22 @@ func (a Annotations) Col() int {
 	return col
 }
 
+// WithContent returns a new [Annotations] holding the annotations that have
+// content, in their original order. An annotation without content renders
+// nothing, so its column must not pull [Annotations.Col] left; callers that
+// pad to a column filter with WithContent first.
+func (a Annotations) WithContent() Annotations {
+	var result Annotations
+
+	for _, ann := range a {
+		if ann.Content != "" {
+			result = append(result, ann)
+		}
+	}
+
+	return result
+}
+
 // Contents returns the content of each annotation.
 func (a Annotations) Contents() []string {
 	contents := make([]string, len(a))
@@ -124,38 +140,18 @@ func (a Annotations) Contents() []string {
 
 // String returns the combined annotation content for debugging.
 // Same-position annotations are joined by "; " at the minimum column
-// position. Annotations without content add nothing, so a set with no
-// content at all is the empty string, as a single such annotation is.
+// position among the annotations that have content. Annotations without
+// content add nothing, so a set with no content at all is the empty string,
+// as a single such annotation is.
 func (a Annotations) String() string {
-	if len(a) == 0 {
+	kept := a.WithContent()
+	if len(kept) == 0 {
 		return ""
 	}
 
-	if len(a) == 1 {
-		return a[0].String()
-	}
+	padding := strings.Repeat(" ", max(0, kept.Col()))
 
-	// Find minimum column and collect content.
-	minCol := a[0].Col
-	contents := make([]string, 0, len(a))
-
-	for _, ann := range a {
-		if ann.Content != "" {
-			contents = append(contents, ann.Content)
-		}
-
-		if ann.Col < minCol {
-			minCol = ann.Col
-		}
-	}
-
-	if len(contents) == 0 {
-		return ""
-	}
-
-	padding := strings.Repeat(" ", max(0, minCol))
-
-	return padding + strings.Join(contents, "; ")
+	return padding + strings.Join(kept.Contents(), "; ")
 }
 
 // Overlay represents a styled column range within a single [Line].

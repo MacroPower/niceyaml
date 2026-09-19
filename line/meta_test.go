@@ -1,6 +1,7 @@
 package line_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -133,6 +134,51 @@ func TestAnnotations_Contents(t *testing.T) {
 
 			got := tc.anns.Contents()
 			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestAnnotations_WithContent(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		anns line.Annotations
+		want line.Annotations
+	}{
+		"empty annotations": {
+			anns: nil,
+			want: nil,
+		},
+		"all have content": {
+			anns: line.Annotations{{Content: "a", Col: 1}, {Content: "b", Col: 2}},
+			want: line.Annotations{{Content: "a", Col: 1}, {Content: "b", Col: 2}},
+		},
+		"drops the empty content": {
+			anns: line.Annotations{{Content: "", Col: 0}, {Content: "b", Col: 2}},
+			want: line.Annotations{{Content: "b", Col: 2}},
+		},
+		"no content at all": {
+			anns: line.Annotations{{Content: "", Col: 0}, {Content: "", Col: 2}},
+			want: nil,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := tc.anns.WithContent()
+			assert.Equal(t, tc.want, got)
+
+			// The result is a new slice, so editing it in place leaves
+			// the receiver alone.
+			before := slices.Clone(tc.anns)
+
+			for i := range got {
+				got[i].Content = "edited"
+			}
+
+			assert.Equal(t, before, tc.anns)
 		})
 	}
 }
@@ -275,7 +321,14 @@ func TestAnnotations_String(t *testing.T) {
 				{Content: "", Col: 5},
 				{Content: "second", Col: 10},
 			},
-			want: "     second",
+			want: "          second",
+		},
+		"empty content at column zero does not pull the column left": {
+			anns: line.Annotations{
+				{Content: "", Col: 0},
+				{Content: "boom", Col: 5},
+			},
+			want: "     boom",
 		},
 		"no content at all is empty": {
 			anns: line.Annotations{

@@ -938,6 +938,14 @@ func TestView_String(t *testing.T) {
 				want: `   1 | key: value
    1 |   ^ first; second`,
 			},
+			"an annotation without content does not set the column": {
+				annotations: []line.Annotation{
+					{Content: "", Placement: line.Below, Col: 0},
+					{Content: "boom", Placement: line.Below, Col: 5},
+				},
+				want: `   1 | key: value
+   1 |      ^ boom`,
+			},
 			"negative column is not padded": {
 				annotations: []line.Annotation{{Content: "note", Placement: line.Below, Col: -3}},
 				want: `   1 | key: value

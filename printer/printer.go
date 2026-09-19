@@ -288,11 +288,9 @@ type AnnotationFunc func(AnnotationContext) string
 // in a message shows as text.
 func DefaultAnnotation(ctx AnnotationContext) string {
 	// Filter the annotations rather than their contents, so the column
-	// comes from the ones that are shown. DeleteFunc zeroes the tail in
-	// place, so work on a copy of the caller's slice.
-	kept := slices.DeleteFunc(slices.Clone(ctx.Annotations), func(a line.Annotation) bool {
-		return a.Content == ""
-	})
+	// comes from the ones that are shown. WithContent returns a new slice,
+	// so the escaping below leaves the caller's annotations alone.
+	kept := ctx.Annotations.WithContent()
 	if len(kept) == 0 {
 		return ""
 	}

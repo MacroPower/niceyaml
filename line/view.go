@@ -295,17 +295,16 @@ func (v *View) String() string {
 
 		// Render annotations below if they have content, with the "^ "
 		// prefix that marks an error pointer in debug output.
-		below := anns.Filter(Below)
-		texts := slices.DeleteFunc(below.Contents(), func(s string) bool { return s == "" })
+		below := anns.Filter(Below).WithContent()
 
-		if len(texts) > 0 {
+		if len(below) > 0 {
 			sb.WriteByte('\n')
 			sb.WriteString(prefix)
 
 			padding := strings.Repeat(" ", max(0, below.Col()))
 			sb.WriteString(padding)
 			sb.WriteString("^ ")
-			sb.WriteString(strings.Join(texts, "; "))
+			sb.WriteString(strings.Join(below.Contents(), "; "))
 		}
 	}
 
