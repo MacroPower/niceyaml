@@ -3,6 +3,7 @@ package schema_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -47,6 +48,24 @@ func TestFile(t *testing.T) {
 			schema.File("")
 		})
 	})
+}
+
+func TestFile_DriveLetter(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("a drive letter names a drive on Windows")
+	}
+
+	// Here a drive letter is an ordinary directory name, so a read would
+	// resolve "C:" against the working directory while the key names the
+	// drive. The loader refuses rather than read a file per directory, so
+	// the failure is not a missing file.
+	key, data, err := load(t, schema.File("C:/schemas/config.json"))
+	assert.Equal(t, "file:///C:/schemas/config.json", key)
+	assert.Nil(t, data)
+	require.ErrorContains(t, err, "read C:/schemas/config.json")
+	require.NotErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestFile_URL(t *testing.T) {

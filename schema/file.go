@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -69,6 +70,14 @@ func file(path string) (Ref, error) {
 	}
 
 	return Loadable(fileURL(abs), func(_ context.Context) ([]byte, error) {
+		// Off Windows, a drive letter is an ordinary directory name, so
+		// os.ReadFile would read the path against the working directory
+		// while the key stays the cwd-independent drive URL. One key would
+		// then name different bytes per directory, so refuse the read.
+		if hasDriveLetter(abs) && runtime.GOOS != "windows" {
+			return nil, fmt.Errorf("read %s: a drive letter names no file on %s", abs, runtime.GOOS)
+		}
+
 		data, err := os.ReadFile(abs) //nolint:gosec // User-provided file paths are intentional.
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", abs, err)
