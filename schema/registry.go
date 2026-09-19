@@ -195,6 +195,12 @@ func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Document) (*Schema,
 		return r.schema(ctx, ref)
 	}
 
+	// The loop-top check does not see a context the last resolver ended, so
+	// a resolver that cancels and then declines would report no match.
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("%w: %w", ErrResolve, ctx.Err())
+	}
+
 	return nil, ErrNoMatch
 }
 

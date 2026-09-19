@@ -126,20 +126,51 @@ func TestRegistry_Lookup(t *testing.T) {
 func TestRegistry_Lookup_CancelledContext(t *testing.T) {
 	t.Parallel()
 
-	// A matcher reports only whether it matched, so a canceled lookup
-	// reports the cancellation itself rather than no match.
-	reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded([]byte(`{"type":"object"}`))))
+	t.Run("canceled before the lookup", func(t *testing.T) {
+		t.Parallel()
 
-	doc, err := niceyaml.NewSourceFromString("kind: Deployment\n").Document()
-	require.NoError(t, err)
+		// A matcher reports only whether it matched, so a canceled lookup
+		// reports the cancellation itself rather than no match.
+		reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded([]byte(`{"type":"object"}`))))
 
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
+		doc, err := niceyaml.NewSourceFromString("kind: Deployment\n").Document()
+		require.NoError(t, err)
 
-	_, err = reg.Lookup(ctx, doc)
-	require.ErrorIs(t, err, context.Canceled)
-	require.ErrorIs(t, err, schema.ErrResolve)
-	require.NotErrorIs(t, err, schema.ErrNoMatch)
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		_, err = reg.Lookup(ctx, doc)
+		require.ErrorIs(t, err, context.Canceled)
+		require.ErrorIs(t, err, schema.ErrResolve)
+		require.NotErrorIs(t, err, schema.ErrNoMatch)
+	})
+
+	t.Run("last resolver cancels and declines", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		reg := schema.NewRegistry(
+			schema.WithResolvers(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
+				cancel()
+
+				return schema.Ref{}, schema.ErrNoMatch
+			})),
+			schema.WithRequireSchema(false),
+		)
+
+		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
+
+		_, err := reg.Lookup(ctx, doc)
+		require.ErrorIs(t, err, context.Canceled)
+		require.ErrorIs(t, err, schema.ErrResolve)
+		require.NotErrorIs(t, err, schema.ErrNoMatch)
+
+		// A registry that does not require a schema passes an unmatched
+		// document, but never a canceled lookup.
+		require.ErrorIs(t, reg.Validate(ctx, doc), context.Canceled)
+	})
 }
 
 func TestRegistry_Validate(t *testing.T) {
