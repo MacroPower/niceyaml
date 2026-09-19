@@ -565,14 +565,14 @@ func (dd *Document) decodeNode(ctx context.Context, node ast.Node, v any, yamlOp
 
 	// The decoder registers the anchors of the node it decodes, so an alias
 	// in a node below the body finds an anchor defined elsewhere in the
-	// document only after the decoder has seen the whole body.
+	// document only after the decoder has seen the whole body. That pass
+	// only primes the anchors, so a failure in it, which concerns a value
+	// the caller did not ask for, is not the caller's error; an alias the
+	// pass could not resolve fails again in the decode of node itself.
 	if node != dd.doc.Body && hasAlias(node) {
 		var sink any
 
-		err := dec.DecodeFromNodeContext(ctx, dd.doc.Body, &sink)
-		if err != nil {
-			return dd.bindDecodeError(err)
-		}
+		_ = dec.DecodeFromNodeContext(ctx, dd.doc.Body, &sink) //nolint:errcheck // The pass only primes anchors.
 	}
 
 	return dd.bindDecodeError(dec.DecodeFromNodeContext(ctx, node, v))

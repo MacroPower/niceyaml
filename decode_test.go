@@ -1701,6 +1701,23 @@ func TestDocument_Get(t *testing.T) {
 		assert.Equal(t, []map[string]int{{"x": 1}}, list)
 	})
 
+	t.Run("a failure elsewhere in the document does not break Get", func(t *testing.T) {
+		t.Parallel()
+
+		// Resolving the alias under $.sub decodes the whole body once to
+		// register its anchors. The undefined alias under $.bad fails that
+		// pass, and the value the caller asked for still comes back.
+		dd := yamltest.FirstDocument(t, stringtest.Input(`
+			a: &x 1
+			sub: {k: *x}
+			bad: *nope
+		`))
+
+		got, err := dd.Get[map[string]any](t.Context(), paths.Root().Child("sub"))
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"k": uint64(1)}, got)
+	})
+
 	t.Run("alias to a later anchor stays an error", func(t *testing.T) {
 		t.Parallel()
 
@@ -1711,8 +1728,8 @@ func TestDocument_Get(t *testing.T) {
 			  x: 1
 		`))
 
-		// The whole document does not decode either, so the value inside it
-		// reports the same alias error, bound to the source.
+		// The anchor is defined after the alias, so the value's own decode
+		// reports the alias error, bound to the source.
 		_, err := dd.Get[map[string]any](t.Context(), paths.Root().Child("item"))
 		require.Error(t, err)
 
