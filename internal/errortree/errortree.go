@@ -11,6 +11,7 @@ package errortree
 
 import (
 	"slices"
+	"strings"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -98,17 +99,46 @@ func nothing(err error) bool {
 // joinBranches returns the errors err unwraps to when err is joined from
 // several, as [errors.Join] builds one, and false for any other error. An
 // Error unwraps to several too, but it is one node of the tree with its
-// nested errors as children, so it is not a join.
+// nested errors as children, so it is not a join. Nor is an error built
+// with several %w verbs, whose message is its own rather than its
+// branches' messages one per line, so its text stays in front of them.
 func joinBranches(err error) ([]error, bool) {
 	if _, ok := err.(*niceyaml.Error); ok { //nolint:errorlint // The node itself, not a chain search.
 		return nil, false
 	}
 
-	if joined, ok := err.(interface{ Unwrap() []error }); ok { //nolint:errorlint // The node itself, not a chain search.
-		return joined.Unwrap(), true
+	joined, ok := err.(interface{ Unwrap() []error }) //nolint:errorlint // The node itself, not a chain search.
+	if !ok {
+		return nil, false
 	}
 
-	return nil, false
+	branches := joined.Unwrap()
+	if !isJoinMessage(err.Error(), branches) {
+		return nil, false
+	}
+
+	return branches, true
+}
+
+// isJoinMessage reports whether msg is the messages of branches one per
+// line, which is how [errors.Join] writes the message of the error it
+// builds.
+func isJoinMessage(msg string, branches []error) bool {
+	var sb strings.Builder
+
+	for i, branch := range branches {
+		if branch == nil {
+			continue
+		}
+
+		if i > 0 {
+			sb.WriteByte('\n')
+		}
+
+		sb.WriteString(branch.Error())
+	}
+
+	return msg == sb.String()
 }
 
 // children returns the nodes of the errors nested along the cause chain of
@@ -134,6 +164,17 @@ func children(err error) []Tree {
 
 		case interface{ Unwrap() error }:
 			cur = x.Unwrap()
+
+		case interface{ Unwrap() []error }:
+			// A wrapper with several %w verbs, or a join met along the
+			// chain: every branch is a child, and the chain ends there.
+			for _, branch := range x.Unwrap() {
+				if !nothing(branch) {
+					kids = append(kids, positioned{tree: New(branch)})
+				}
+			}
+
+			cur = nil
 
 		default:
 			cur = nil

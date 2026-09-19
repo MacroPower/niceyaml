@@ -28,6 +28,56 @@ func countNodes(t errortree.Tree) int {
 	return n
 }
 
+func TestNew_MultiWrap(t *testing.T) {
+	t.Parallel()
+
+	errA := errors.New("first")
+	errB := errors.New("second")
+
+	tcs := map[string]struct {
+		err  error
+		want errortree.Tree
+	}{
+		"wrapper with two verbs keeps its own text": {
+			err: fmt.Errorf("parse path: %w: %w", errA, errB),
+			want: errortree.Tree{
+				Text: "parse path: first: second",
+				Children: []errortree.Tree{
+					{Text: "first"},
+					{Text: "second"},
+				},
+			},
+		},
+		"join below a wrapper yields one child per branch": {
+			err: fmt.Errorf("while checking: %w", errors.Join(errA, errB)),
+			want: errortree.Tree{
+				Text: "while checking: first\nsecond",
+				Children: []errortree.Tree{
+					{Text: "first"},
+					{Text: "second"},
+				},
+			},
+		},
+		"join at the root is textless": {
+			err: errors.Join(errA, errB),
+			want: errortree.Tree{
+				Children: []errortree.Tree{
+					{Text: "first"},
+					{Text: "second"},
+				},
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, errortree.New(tc.err))
+		})
+	}
+}
+
 func TestNew(t *testing.T) {
 	t.Parallel()
 
