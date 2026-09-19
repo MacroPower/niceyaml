@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sort"
+	"path/filepath"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -39,8 +39,11 @@ func containsGlobChars(s string) bool {
 	return strings.ContainsAny(s, "*?[")
 }
 
-// expandPaths expands arguments containing glob patterns into a sorted list
-// of file paths. Arguments without glob metacharacters are included as-is.
+// expandPaths expands arguments containing glob patterns into a list of
+// file paths. The list keeps the order of the arguments, with each pattern's
+// matches sorted in its place, and names each file once, so the order of
+// two explicit files decides which revision a diff treats as older.
+// Arguments without glob metacharacters are included as-is.
 //
 // A pattern that matches no file falls back to the argument itself when a
 // path with that literal name exists, so a file such as "cfg[1].yaml" is
@@ -49,9 +52,21 @@ func containsGlobChars(s string) bool {
 func expandPaths(args ...string) ([]string, error) {
 	var result []string
 
+	seen := make(map[string]bool)
+	add := func(path string) {
+		key := filepath.Clean(path)
+		if seen[key] {
+			return
+		}
+
+		seen[key] = true
+
+		result = append(result, path)
+	}
+
 	for _, arg := range args {
 		if !containsGlobChars(arg) {
-			result = append(result, arg)
+			add(arg)
 
 			continue
 		}
@@ -70,10 +85,10 @@ func expandPaths(args ...string) ([]string, error) {
 			matches = []string{arg}
 		}
 
-		result = append(result, matches...)
+		for _, match := range matches {
+			add(match)
+		}
 	}
-
-	sort.Strings(result)
 
 	return result, nil
 }

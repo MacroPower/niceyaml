@@ -87,9 +87,21 @@ func TestExpand(t *testing.T) {
 			args:      []string{filepath.Join(tmpDir, "000.yaml")},
 			wantNames: []string{"000.yaml"},
 		},
-		"multiple explicit files": {
+		"multiple explicit files keep their order": {
 			args:      []string{filepath.Join(tmpDir, "002.yaml"), filepath.Join(tmpDir, "000.yaml")},
-			wantNames: []string{"000.yaml", "002.yaml"},
+			wantNames: []string{"002.yaml", "000.yaml"},
+		},
+		"repeated file appears once": {
+			args:      []string{filepath.Join(tmpDir, "000.yaml"), filepath.Join(tmpDir, "000.yaml")},
+			wantNames: []string{"000.yaml"},
+		},
+		"overlapping globs name each file once": {
+			args:      []string{filepath.Join(tmpDir, "00[01].yaml"), filepath.Join(tmpDir, "*.yaml")},
+			wantNames: []string{"000.yaml", "001.yaml", "002.yaml"},
+		},
+		"explicit file before a glob keeps its place": {
+			args:      []string{filepath.Join(tmpDir, "002.yaml"), filepath.Join(tmpDir, "00[01].yaml")},
+			wantNames: []string{"002.yaml", "000.yaml", "001.yaml"},
 		},
 		"glob pattern": {
 			args:      []string{filepath.Join(tmpDir, "*.yaml")},
