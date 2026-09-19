@@ -3462,6 +3462,50 @@ func TestViewport_WithSearcher(t *testing.T) {
 	})
 }
 
+func TestViewport_OffsetWithNoContentHeight(t *testing.T) {
+	t.Parallel()
+
+	// The offset is the index of the row at the top of the view, and a
+	// content area with no height once let it reach the row count itself,
+	// one row past the last row of the view.
+	var src strings.Builder
+
+	for i := 1; i <= 20; i++ {
+		fmt.Fprintf(&src, "line%d: v\n", i)
+	}
+
+	tcs := map[string]struct {
+		container lipgloss.Style
+		height    int
+	}{
+		"no height":               {container: lipgloss.NewStyle(), height: 0},
+		"frame as tall as height": {container: lipgloss.NewStyle().Border(lipgloss.NormalBorder()), height: 2},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(
+				yamlviewport.WithPrinter(testPrinter()),
+				yamlviewport.WithContainerStyle(tc.container),
+			)
+			m.SetWidth(40)
+			m.SetHeight(tc.height)
+			m.SetRevision(niceyaml.NewSourceFromString(src.String()))
+
+			require.Equal(t, 20, m.TotalRowCount())
+
+			m.GotoBottom()
+			assert.Equal(t, m.TotalRowCount()-1, m.YOffset())
+			assert.True(t, m.AtBottom())
+
+			m.SetYOffset(1000)
+			assert.Equal(t, m.TotalRowCount()-1, m.YOffset())
+		})
+	}
+}
+
 func TestViewport_ScrollEdgeCases(t *testing.T) {
 	t.Parallel()
 

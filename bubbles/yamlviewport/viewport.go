@@ -1082,7 +1082,7 @@ func (m *Model) ensureRows() {
 		}
 	}
 
-	m.yOffset = clamp(m.yOffset, 0, max(0, m.rows.total()-m.maxHeight()))
+	m.yOffset = clamp(m.yOffset, 0, m.rowOffsetLimit())
 	m.xOffset = clamp(m.xOffset, 0, m.maxXOffset())
 }
 
@@ -1234,7 +1234,19 @@ func scrollPercent(offset, visible, total int) float64 {
 func (m *Model) maxYOffset() int {
 	m.ensureRows()
 
-	return max(0, m.rows.total()-m.maxHeight())
+	return m.rowOffsetLimit()
+}
+
+// rowOffsetLimit returns the last row the view can start at, from a filled
+// cache: the row that brings the last row of the view to the bottom of the
+// content area, or the last row of the view when the content area is shorter
+// than the view is. A content area with no height, which a height of 0 or a
+// container frame as tall as the height gives, would otherwise put the
+// offset one row past the end of the view.
+func (m *Model) rowOffsetLimit() int {
+	total := m.rows.total()
+
+	return max(0, min(total-m.maxHeight(), total-1))
 }
 
 // lineCount returns the number of lines the view renders.
