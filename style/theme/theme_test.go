@@ -277,6 +277,49 @@ func TestPalette_SubtleTextDiffersFromText(t *testing.T) {
 	}
 }
 
+func TestPalette_TokensLayerOverAncestors(t *testing.T) {
+	t.Parallel()
+
+	// A token spec sets what it names and takes the rest from the kind
+	// above it, so "bold" alone keeps the parent's foreground.
+	tests := map[string]struct {
+		theme string
+		kind  kind.Kind
+		want  string
+	}{
+		"attributes alone keep the parent color": {
+			theme: "solarized-light",
+			kind:  kind.NameTag,
+			want:  "bold #268bd2 bg:#eee8d5",
+		},
+		"a color of its own replaces the parent's": {
+			theme: "solarized-dark",
+			kind:  kind.NameTag,
+			want:  "#268bd2 bg:#002b36",
+		},
+		"a child keeps the parent's attributes": {
+			theme: "solarized-dark",
+			kind:  kind.GenericDeleted,
+			want:  "italic #dc322f bg:#002b36",
+		},
+		"a child keeps the parent's bold": {
+			theme: "tokyonight-night",
+			kind:  kind.PunctuationHeading,
+			want:  "bold #e0af68 bg:#1a1b26",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			th, ok := theme.Builtin().Get(tc.theme)
+			require.True(t, ok)
+			assert.Equal(t, tc.want, style.Encode(th.Style(tc.kind)))
+		})
+	}
+}
+
 func TestPalette_TokyonightStormSurface(t *testing.T) {
 	t.Parallel()
 

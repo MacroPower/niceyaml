@@ -1,7 +1,10 @@
 package theme
 
 import (
+	"cmp"
 	"image/color"
+	"maps"
+	"slices"
 
 	"charm.land/lipgloss/v2"
 
@@ -21,8 +24,9 @@ const surfaceShift = 0.30
 // kind.
 type palette struct {
 	// Tokens sets token kinds in the style-string form [style.Parse]
-	// reads, layered over the base style. Kinds left out inherit from
-	// their parent.
+	// reads. Each spec layers over the style its kind inherits, so a spec
+	// naming only attributes keeps the colors of the closest kind above
+	// it. Kinds left out inherit from their parent.
 	Tokens map[kind.Kind]string
 	// Fg and Bg are the base text colors as hex strings. An empty value
 	// leaves the terminal default in place; the derived kinds then
@@ -32,8 +36,9 @@ type palette struct {
 	// Accent colors headings and accented text. OK, Warn, and Error color
 	// the status kinds.
 	Accent, OK, Warn, Error string
-	// Overrides is applied after every derived kind, for the few
-	// kinds a theme sets outside the template.
+	// Overrides is applied last, after the derived kinds and Tokens, for
+	// the few kinds a theme sets outside the template. An override
+	// replaces a kind's style rather than layering over it.
 	Overrides []style.StylesOption
 	// Mode is the background the theme is designed for. It also picks the
 	// direction of the derived shifts, so dimmed text moves toward the
@@ -67,11 +72,9 @@ func (p palette) styles() style.Styles {
 		return lipgloss.NewStyle().Foreground(bg).Background(c).Bold(true)
 	}
 
-	opts := make([]style.StylesOption, 0, len(p.Tokens)+len(p.Overrides)+15)
-
-	// The derived kinds come first, so a Tokens entry naming one of them
-	// replaces the derived value rather than being replaced by it.
-	opts = append(opts,
+	// The derived kinds resolve first, so a Tokens entry naming one of them
+	// layers over the derived value rather than the other way around.
+	derived := []style.StylesOption{
 		style.Set(kind.GenericHeading, heading(accent)),
 		style.Set(kind.GenericHeadingAccent,
 			base.Background(towardFg(bg, surfaceShift)).Foreground(towardFg(fg, dimShift)),
@@ -89,15 +92,43 @@ func (p palette) styles() style.Styles {
 		style.Set(kind.TextOK, base.Foreground(ok)),
 		style.Set(kind.TextWarn, base.Foreground(warn)),
 		style.Set(kind.TextError, base.Foreground(errColor)),
-	)
-
-	for st, spec := range p.Tokens {
-		opts = append(opts, style.Set(st, layer(base, style.MustParse(spec))))
 	}
 
-	opts = append(opts, p.Overrides...)
+	s := style.NewStyles(base, derived...)
 
-	return style.NewStyles(base, opts...)
+	// A Tokens spec layers over the style its kind already resolves to, so
+	// a spec of "bold" alone keeps the ancestor's colors. Parents come
+	// first, so a child layers over the parent's finished style.
+	for _, st := range byDepth(p.Tokens) {
+		s = s.With(style.Set(st, layer(s.Style(st), style.MustParse(p.Tokens[st]))))
+	}
+
+	return s.With(p.Overrides...)
+}
+
+// byDepth returns the kinds of tokens ordered by their distance from
+// [kind.Text], parents ahead of their children. Kinds an equal distance
+// out never inherit from one another, so name orders those.
+func byDepth(tokens map[kind.Kind]string) []kind.Kind {
+	return slices.SortedFunc(maps.Keys(tokens), func(a, b kind.Kind) int {
+		if d := cmp.Compare(depth(a), depth(b)); d != 0 {
+			return d
+		}
+
+		return cmp.Compare(a, b)
+	})
+}
+
+// depth returns how many steps separate st from [kind.Text], the root of
+// the hierarchy. A custom kind counts as one step, since [kind.Parent]
+// reports [kind.Text] for it.
+func depth(st kind.Kind) int {
+	n := 0
+	for current := st; current != kind.Text; current = kind.Parent(current) {
+		n++
+	}
+
+	return n
 }
 
 // surface returns the foreground and background the derived kinds are
