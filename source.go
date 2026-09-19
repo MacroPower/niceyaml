@@ -327,10 +327,7 @@ func (s *Source) parse() (*ast.File, error) {
 	}
 
 	if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
-		return nil, s.bind(NewError(
-			yamlErr.GetMessage(),
-			atToken(yamlErr.GetToken()),
-		))
+		return nil, s.bind(NewErrorFrom(yamlMessageError{yamlErr}, atToken(yamlErr.GetToken())))
 	}
 
 	//nolint:wrapcheck // Return the original error if it's not a [yaml.Error].

@@ -588,10 +588,26 @@ func (dd *Document) bindDecodeError(err error) error {
 	}
 
 	if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
-		return dd.Bind(NewError(yamlErr.GetMessage(), atToken(yamlErr.GetToken())))
+		return dd.Bind(NewErrorFrom(yamlMessageError{yamlErr}, atToken(yamlErr.GetToken())))
 	}
 
 	return dd.Bind(err)
+}
+
+// yamlMessageError is a [yaml.Error] reduced to its message. The go-yaml text
+// carries its own position and excerpt, which the [SourceError] binding
+// the error renders itself, so the message alone goes in the chain, and
+// the original error stays reachable through [errors.As].
+type yamlMessageError struct {
+	err yaml.Error
+}
+
+func (e yamlMessageError) Error() string {
+	return e.err.GetMessage()
+}
+
+func (e yamlMessageError) Unwrap() error {
+	return e.err
 }
 
 // hasAlias reports whether node or any node below it is an alias.

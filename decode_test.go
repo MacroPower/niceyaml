@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -263,6 +264,35 @@ func TestSource_Decode(t *testing.T) {
 		err := source.DecodeInto(t.Context(), &result)
 		require.NoError(t, err)
 		assert.Equal(t, plainConfig{Name: "test", Value: 7}, result)
+	})
+}
+
+func TestDecode_GoYAMLErrorReachable(t *testing.T) {
+	t.Parallel()
+
+	// The binding renders the position itself, so the chain carries the
+	// go-yaml message alone, but the original error stays reachable.
+	t.Run("decode error", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("b: notanint\n")
+
+		_, err := source.Decode[struct{ B int }](t.Context())
+		require.Error(t, err)
+
+		_, ok := errors.AsType[yaml.Error](err)
+		assert.True(t, ok, "yaml.Error is not in the chain: %v", err)
+		assert.NotContains(t, err.Error(), "\n", "the go-yaml excerpt leaked into the message")
+	})
+
+	t.Run("parse error", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := niceyaml.NewSourceFromString("a: [\n").Documents()
+		require.Error(t, err)
+
+		_, ok := errors.AsType[yaml.Error](err)
+		assert.True(t, ok, "yaml.Error is not in the chain: %v", err)
 	})
 }
 
