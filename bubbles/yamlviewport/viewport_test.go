@@ -32,6 +32,45 @@ import (
 )
 
 // testPrinter returns a printer without styles or line numbers for predictable golden output.
+func TestViewport_SearchDecorationRefreshesRowCounts(t *testing.T) {
+	t.Parallel()
+
+	// A highlight style may transform the text it styles and change its
+	// width, so the row counts must follow the decoration of the current
+	// term and selection rather than the one before it.
+	widen := lipgloss.NewStyle().Transform(func(s string) string {
+		return "<<" + s + ">>"
+	})
+	styles := style.NewStyles(lipgloss.NewStyle(),
+		style.Set(kind.GenericHighlight, widen),
+		style.Set(kind.GenericHighlightDim, widen),
+	)
+	p := printer.New(
+		printer.WithStyles(styles),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+		printer.WithGutter(printer.NoGutter),
+	)
+
+	m := yamlviewport.New(yamlviewport.WithPrinter(p))
+	m.SetWidth(24)
+	m.SetHeight(2)
+	m.SetWordWrap(true)
+	m.SetRevision(niceyaml.NewSourceFromString("k: aaaa aaaa aaaa aaaa\nv: aaaa aaaa aaaa aaaa\n"))
+
+	_ = m.View()
+
+	before := m.TotalRowCount()
+
+	m.SetSearchTerm("aaaa")
+
+	cached := m.TotalRowCount()
+
+	// A width change drops every cached count, so this is the true total.
+	m.SetWidth(24)
+	assert.Equal(t, m.TotalRowCount(), cached)
+	assert.Greater(t, cached, before, "the widened highlights should wrap more rows")
+}
+
 func testPrinter() *printer.Printer {
 	return printer.New(
 		printer.WithStyles(style.Styles{}),

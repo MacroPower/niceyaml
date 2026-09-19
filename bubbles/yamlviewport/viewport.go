@@ -728,6 +728,10 @@ func (m *Model) decorate() {
 	} else {
 		m.applySearchOverlays(m.left)
 	}
+
+	// A highlight style may change the width of the text it styles, so the
+	// row counts of the old decoration no longer hold.
+	m.relayout()
 }
 
 // applySearchOverlays adds overlay highlights for all search matches to
