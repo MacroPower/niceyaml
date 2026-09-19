@@ -585,6 +585,21 @@ func TestDocument_Span(t *testing.T) {
 				position.NewSpan(1, 3),
 			},
 		},
+		"leading blank lines": {
+			input: "\n\na: 1\n",
+			want:  []position.Span{position.NewSpan(0, 3)},
+		},
+		"leading comment": {
+			input: "# note\na: 1\n",
+			want:  []position.Span{position.NewSpan(0, 2)},
+		},
+		"leading blank lines before a header": {
+			input: "\n---\na: 1\n---\nb: 2\n",
+			want: []position.Span{
+				position.NewSpan(0, 3),
+				position.NewSpan(3, 5),
+			},
+		},
 		"empty file": {
 			input: "",
 			want:  []position.Span{position.NewSpan(0, 0)},
