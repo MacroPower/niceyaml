@@ -28,6 +28,33 @@ func countNodes(t errortree.Tree) int {
 	return n
 }
 
+// sparseJoinError is an error joined from several, the way [errors.Join]
+// builds one, except that it keeps a nil branch instead of dropping it.
+// Its message is the messages of the branches that are not nil, one per
+// line.
+type sparseJoinError struct {
+	errs []error
+}
+
+// Error returns the messages of the branches that are not nil, one per
+// line.
+func (e sparseJoinError) Error() string {
+	msgs := make([]string, 0, len(e.errs))
+
+	for _, err := range e.errs {
+		if err != nil {
+			msgs = append(msgs, err.Error())
+		}
+	}
+
+	return strings.Join(msgs, "\n")
+}
+
+// Unwrap returns the branches, nil ones included.
+func (e sparseJoinError) Unwrap() []error {
+	return e.errs
+}
+
 func TestNew_MultiWrap(t *testing.T) {
 	t.Parallel()
 
@@ -64,6 +91,15 @@ func TestNew_MultiWrap(t *testing.T) {
 		},
 		"join at the root is textless": {
 			err: errors.Join(errA, errB),
+			want: errortree.Tree{
+				Children: []errortree.Tree{
+					{Text: "first"},
+					{Text: "second"},
+				},
+			},
+		},
+		"join with a leading nil branch is textless": {
+			err: sparseJoinError{errs: []error{nil, errA, errB}},
 			want: errortree.Tree{
 				Children: []errortree.Tree{
 					{Text: "first"},

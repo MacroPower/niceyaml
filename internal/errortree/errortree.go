@@ -122,18 +122,24 @@ func joinBranches(err error) ([]error, bool) {
 
 // isJoinMessage reports whether msg is the messages of branches one per
 // line, which is how [errors.Join] writes the message of the error it
-// builds.
+// builds. A nil branch carries no message and no line of its own, so it
+// takes no separator either.
 func isJoinMessage(msg string, branches []error) bool {
-	var sb strings.Builder
+	var (
+		sb    strings.Builder
+		first = true
+	)
 
-	for i, branch := range branches {
+	for _, branch := range branches {
 		if branch == nil {
 			continue
 		}
 
-		if i > 0 {
+		if !first {
 			sb.WriteByte('\n')
 		}
+
+		first = false
 
 		sb.WriteString(branch.Error())
 	}
