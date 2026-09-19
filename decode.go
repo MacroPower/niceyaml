@@ -82,19 +82,110 @@ func (f ValidatorFunc) Validate(ctx context.Context, doc *Document) error {
 	return f(ctx, doc)
 }
 
-// newDocuments creates one [*Document] per document of file, the AST src
-// parsed, in file order. See alignDocumentTokens for how each Document finds
-// its tokens.
+// newDocuments creates one [*Document] per YAML document of file, the AST
+// src parsed, in file order. See alignDocumentTokens for how each document
+// node finds its tokens and foldPreambles for which nodes become documents.
 func newDocuments(src *Source, file *ast.File) []*Document {
-	docTokens := alignDocumentTokens(file, src.Tokens())
-	spans := documentSpans(docTokens, src.lines.Len())
+	docs := foldPreambles(file.Docs, alignDocumentTokens(file, src.Tokens()))
 
-	docs := make([]*Document, len(file.Docs))
-	for i, doc := range file.Docs {
-		docs[i] = &Document{source: src, doc: doc, tokens: docTokens[i], span: spans[i], index: i}
+	groups := make([]token.Tokens, len(docs))
+	for i, doc := range docs {
+		groups[i] = doc.tokens
+	}
+
+	spans := documentSpans(groups, src.lines.Len())
+
+	for i, doc := range docs {
+		doc.source = src
+		doc.span = spans[i]
+		doc.index = i
+		doc.preamble = preambleLen(doc.tokens)
 	}
 
 	return docs
+}
+
+// foldPreambles pairs each document node with its token group and folds
+// the nodes that are not YAML documents into the ones that are. The parser
+// makes a node with no header and no content from the comments and %YAML
+// or %TAG directives above a "---" header, and from the comments after a
+// "..." marker. The YAML spec attaches the first to the document below
+// them and the second to the document above, so such a node joins the next
+// document as its preamble, or the last document when nothing follows. A
+// file that holds such nodes and nothing else, such as a file of comments,
+// keeps the first as its one document, which decodes to nothing as an
+// empty file does.
+func foldPreambles(nodes []*ast.DocumentNode, groups []token.Tokens) []*Document {
+	var (
+		docs    []*Document
+		pending token.Tokens
+	)
+
+	for i, node := range nodes {
+		if isPreambleNode(node) {
+			pending = append(pending, groups[i]...)
+
+			continue
+		}
+
+		docs = append(docs, &Document{doc: node, tokens: slices.Concat(pending, groups[i])})
+		pending = nil
+	}
+
+	switch {
+	case len(docs) > 0 && len(pending) > 0:
+		last := docs[len(docs)-1]
+		last.tokens = append(last.tokens, pending...)
+
+	case len(docs) == 0 && len(nodes) > 0:
+		docs = append(docs, &Document{doc: nodes[0], tokens: pending})
+	}
+
+	return docs
+}
+
+// isPreambleNode reports whether node is one the parser cut off from the
+// document it belongs to: a node with no "---" header whose body holds no
+// value. A node with a header and a body of comments is an explicit empty
+// document and stays one.
+func isPreambleNode(node *ast.DocumentNode) bool {
+	return node.Start == nil && !hasContent(node.Body)
+}
+
+// preambleLen returns the number of tokens at the start of tks before the
+// document's content: comments, the tokens of each %YAML or %TAG directive
+// line, and the "---" and "..." markers. A stream without content is all
+// preamble.
+func preambleLen(tks token.Tokens) int {
+	inDirective, directiveLine := false, 0
+
+	for i, tk := range tks {
+		if tk.Type == token.DirectiveType {
+			// The lexer splits a directive line into a directive token and
+			// the tokens holding its value, which read as content unless
+			// the rest of the line goes with the directive.
+			inDirective = tk.Position != nil
+			if inDirective {
+				directiveLine = tk.Position.Line
+			}
+
+			continue
+		}
+
+		if inDirective && tk.Position != nil && tk.Position.Line == directiveLine {
+			continue
+		}
+
+		switch tk.Type {
+		case token.CommentType, token.DocumentHeaderType, token.DocumentEndType:
+			continue
+
+		default:
+			return i
+		}
+	}
+
+	return len(tks)
 }
 
 // documentSpans returns the lines of a view of total lines that each token
@@ -245,6 +336,8 @@ type Document struct {
 	tokens token.Tokens
 	span   position.Span
 	index  int
+	// The number of tokens at the start of tokens before the content.
+	preamble int
 }
 
 // Node returns the underlying [*ast.DocumentNode].
@@ -263,11 +356,27 @@ func (dd *Document) Index() int {
 }
 
 // Tokens returns the tokens of this document, with the positions they have
-// in the source. Returns nil when no token anchors the document, such as one
-// with neither a header nor a body. The slice is a copy, so reordering it
-// reaches nothing, while the tokens themselves are shared and read-only.
+// in the source: its preamble, its content, and the comments after a "..."
+// marker that ends it. Returns nil when no token anchors the document, such
+// as one with neither a header nor a body. The slice is a copy, so
+// reordering it reaches nothing, while the tokens themselves are shared and
+// read-only.
 func (dd *Document) Tokens() token.Tokens {
 	return slices.Clone(dd.tokens)
+}
+
+// Preamble returns the tokens of this document before its content: the
+// comments and %YAML or %TAG directives above its "---" header, the header
+// itself, and the comments between the header and the first token of the
+// content. The parser cuts the tokens above the header off as a node of
+// their own, and [Source.Documents] folds them back into the document the
+// YAML spec attaches them to, so a schema directive written above the
+// header is in the preamble of the document it describes. A document
+// without content, such as one holding comments alone, is all preamble.
+// The slice is a copy, and the tokens are shared and read-only, as for
+// [Document.Tokens].
+func (dd *Document) Preamble() token.Tokens {
+	return slices.Clone(dd.tokens[:dd.preamble])
 }
 
 // FilePath returns the path of the file the document came from, which is
@@ -356,22 +465,6 @@ func (dd *Document) position(path paths.Path, key bool) (position.Position, erro
 	}
 
 	return position.NewFromToken(tk), nil
-}
-
-// HasContent reports whether the document holds a YAML value. A document
-// that holds only comments, or only %YAML and %TAG directives, has none.
-// The parser splits such a preamble off from the content below the next
-// "---" as a document of its own, so a file that opens with a license
-// header or a %YAML directive parses into one document without content
-// and one with it. An explicitly empty document, whose body is nil, counts
-// as content, since it is the null document a schema may validate and a
-// decode fills with nothing.
-//
-// [Source.Document] selects the document with content, and a
-// [go.jacobcolvin.com/niceyaml/schema.Registry] validates only documents
-// with content.
-func (dd *Document) HasContent() bool {
-	return dd.doc.Body == nil || hasContent(dd.doc.Body)
 }
 
 // node resolves path against the document body. An error from

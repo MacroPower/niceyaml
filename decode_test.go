@@ -134,7 +134,7 @@ func TestSource_Document(t *testing.T) {
 		assert.Equal(t, "3:1: multiple documents in source: 2 documents", err.Error())
 	})
 
-	t.Run("skips a comment block above the first header", func(t *testing.T) {
+	t.Run("folds a comment block above the first header", func(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString(stringtest.Input(`
@@ -148,8 +148,8 @@ func TestSource_Document(t *testing.T) {
 
 		docs, err := source.Documents()
 		require.NoError(t, err)
-		require.Len(t, docs, 2)
-		assert.Same(t, docs[1], doc)
+		require.Len(t, docs, 1)
+		assert.Same(t, docs[0], doc)
 
 		got, err := source.Decode[map[string]int](t.Context())
 		require.NoError(t, err)
@@ -170,7 +170,7 @@ func TestSource_Document(t *testing.T) {
 		assert.Equal(t, map[string]int{"a": 1}, got)
 	})
 
-	t.Run("counts only documents with content", func(t *testing.T) {
+	t.Run("counts the documents below a comment block", func(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString(stringtest.Input(`
@@ -516,20 +516,79 @@ func TestDocument_Decode_Schema(t *testing.T) {
 	})
 }
 
-func TestDocument_HasContent(t *testing.T) {
+func TestDocument_Preamble(t *testing.T) {
 	t.Parallel()
+
+	// The parser cuts the comments and directives above a header into a
+	// node of their own, and Documents folds it into the document below.
+	// Each case lists the preamble and the content of every document, as
+	// the origin text of their tokens.
+	type doc struct {
+		preamble string
+		content  string
+	}
 
 	tcs := map[string]struct {
 		input string
-		want  bool
+		want  []doc
 	}{
-		"mapping":            {input: "a: 1\n", want: true},
-		"scalar":             {input: "hello\n", want: true},
-		"explicit empty":     {input: "---\n", want: true},
-		"empty file":         {input: "", want: true},
-		"comment only":       {input: "# just a comment\n", want: false},
-		"comment after head": {input: "---\n# just a comment\n", want: false},
-		"directive only":     {input: "%YAML 1.2\n---\n", want: false},
+		"mapping": {
+			input: "a: 1\n",
+			want:  []doc{{content: "a: 1\n"}},
+		},
+		"leading comment": {
+			input: "# note\na: 1\n",
+			want:  []doc{{preamble: "# note\n", content: "a: 1\n"}},
+		},
+		"comment above the header": {
+			input: "# license\n---\na: 1\n",
+			want:  []doc{{preamble: "# license\n---\n", content: "a: 1\n"}},
+		},
+		"comment below the header": {
+			input: "--- # note\na: 1\n",
+			want:  []doc{{preamble: "--- # note\n", content: "a: 1\n"}},
+		},
+		"directive above the header": {
+			input: "%YAML 1.2\n---\na: 1\n",
+			want:  []doc{{preamble: "%YAML 1.2\n---\n", content: "a: 1\n"}},
+		},
+		"explicit empty": {
+			input: "---\n",
+			want:  []doc{{preamble: "---\n"}},
+		},
+		"explicit empty with a comment": {
+			input: "---\n# note\n---\nb: 2\n",
+			want: []doc{
+				{preamble: "---\n# note\n"},
+				{preamble: "---\n", content: "b: 2\n"},
+			},
+		},
+		"empty file": {
+			input: "",
+			want:  []doc{{}},
+		},
+		"comment only": {
+			input: "# note\n",
+			want:  []doc{{preamble: "# note\n"}},
+		},
+		"trailing comment after an end marker": {
+			input: "a: 1\n...\n# trailing\n",
+			want:  []doc{{content: "a: 1\n...\n# trailing\n"}},
+		},
+		"comment between documents": {
+			input: "a: 1\n...\n# note\n---\nb: 2\n",
+			want: []doc{
+				{content: "a: 1\n...\n"},
+				{preamble: "# note\n---\n", content: "b: 2\n"},
+			},
+		},
+		"headers": {
+			input: "a: 1\n---\nb: 2\n",
+			want: []doc{
+				{content: "a: 1\n"},
+				{preamble: "---\n", content: "b: 2\n"},
+			},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -538,9 +597,27 @@ func TestDocument_HasContent(t *testing.T) {
 
 			docs, err := niceyaml.NewSourceFromString(tc.input).Documents()
 			require.NoError(t, err)
-			require.NotEmpty(t, docs)
+			require.Len(t, docs, len(tc.want))
 
-			assert.Equal(t, tc.want, docs[0].HasContent())
+			for i, d := range docs {
+				preamble := d.Preamble()
+				all := d.Tokens()
+
+				// The lexer gives the line ending after a "---" to the token
+				// that follows it, so compare the text without the whitespace
+				// around it.
+				got := doc{
+					preamble: strings.TrimSpace(yamltest.DumpTokenOrigins(preamble)),
+					content:  strings.TrimSpace(yamltest.DumpTokenOrigins(all[len(preamble):])),
+				}
+				want := doc{
+					preamble: strings.TrimSpace(tc.want[i].preamble),
+					content:  strings.TrimSpace(tc.want[i].content),
+				}
+
+				assert.Equal(t, want, got, "document %d", i)
+				assert.Equal(t, i, d.Index())
+			}
 		})
 	}
 }
@@ -580,10 +657,18 @@ func TestDocument_Span(t *testing.T) {
 		},
 		"comment preamble": {
 			input: "# license\n---\na: 1\n",
+			want:  []position.Span{position.NewSpan(0, 3)},
+		},
+		"comment between documents": {
+			input: "a: 1\n...\n# note\n---\nb: 2\n",
 			want: []position.Span{
-				position.NewSpan(0, 1),
-				position.NewSpan(1, 3),
+				position.NewSpan(0, 2),
+				position.NewSpan(2, 5),
 			},
+		},
+		"trailing comment": {
+			input: "a: 1\n...\n# note\n",
+			want:  []position.Span{position.NewSpan(0, 3)},
 		},
 		"leading blank lines": {
 			input: "\n\na: 1\n",
@@ -651,31 +736,25 @@ func TestDocument_Span(t *testing.T) {
 func TestDocument_Get_DirectiveBody(t *testing.T) {
 	t.Parallel()
 
-	// A %YAML directive parses as a document of its own whose body is the
-	// directive node, followed by the document with the content.
-	input := `%YAML 1.2
----
-key: value`
-	source := niceyaml.NewSourceFromString(input)
+	// A %YAML directive above the header is the preamble of the document
+	// below it, so the path resolves in that document. A document that
+	// holds only the directive has no content to resolve in.
+	source := niceyaml.NewSourceFromString("%YAML 1.2\n---\nkey: value")
 	d, err := source.Documents()
 	require.NoError(t, err)
+	require.Len(t, d, 1)
 
 	path := paths.Root().Child("key")
-	got := make(map[int]string)
 
-	for i, dd := range d {
-		v, err := dd.Get[string](t.Context(), path)
-		if err != nil {
-			require.ErrorIs(t, err, paths.ErrNotFound)
-			require.ErrorIs(t, err, paths.ErrNoDocument)
+	v, err := d[0].Get[string](t.Context(), path)
+	require.NoError(t, err)
+	assert.Equal(t, "value", v)
 
-			continue
-		}
+	empty := yamltest.FirstDocument(t, "%YAML 1.2\n---\n")
 
-		got[i] = v
-	}
-
-	assert.Equal(t, map[int]string{1: "value"}, got)
+	_, err = empty.Get[string](t.Context(), path)
+	require.ErrorIs(t, err, paths.ErrNotFound)
+	require.ErrorIs(t, err, paths.ErrNoDocument)
 }
 
 func TestDocument_Decode_SchemaThenDecodeError(t *testing.T) {
@@ -1076,11 +1155,12 @@ func TestDocuments_All(t *testing.T) {
 		assert.Same(t, first, again[0])
 	})
 
-	t.Run("pairs each document with the token group it starts in", func(t *testing.T) {
+	t.Run("folds a leading comment into the document below it", func(t *testing.T) {
 		t.Parallel()
 
-		// A leading comment forms its own document, and the header that follows
-		// starts the second. Each document's tokens begin at its own anchor.
+		// The parser cuts a leading comment into a node of its own, and the
+		// header that follows starts the document. The comment is the
+		// preamble of that document, so its tokens open the document's.
 		input := stringtest.Input(`
 			# top
 
@@ -1090,7 +1170,7 @@ func TestDocuments_All(t *testing.T) {
 		source := niceyaml.NewSourceFromString(input)
 		d, err := source.Documents()
 		require.NoError(t, err)
-		require.Len(t, d, 2)
+		require.Len(t, d, 1)
 
 		var types [][]token.Type
 
@@ -1105,8 +1185,7 @@ func TestDocuments_All(t *testing.T) {
 		}
 
 		assert.Equal(t, [][]token.Type{
-			{token.CommentType},
-			{token.DocumentHeaderType, token.StringType, token.MappingValueType, token.IntegerType},
+			{token.CommentType, token.DocumentHeaderType, token.StringType, token.MappingValueType, token.IntegerType},
 		}, types)
 	})
 
@@ -1790,12 +1869,13 @@ func TestDocument_DecodeInto(t *testing.T) {
 	t.Run("leaves the value as it is for a document without content", func(t *testing.T) {
 		t.Parallel()
 
-		// Each input parses to a first document whose body holds no value:
-		// nothing, only comments, or only a directive.
+		// Each input parses to a document whose body holds no value:
+		// nothing, only comments, or only a directive above an empty
+		// document.
 		tcs := map[string]string{
 			"empty":        "",
 			"comment only": "# just a comment\n",
-			"directive":    "%YAML 1.2\n---\na: 1\n",
+			"directive":    "%YAML 1.2\n---\n",
 		}
 
 		for name, input := range tcs {

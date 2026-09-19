@@ -143,26 +143,23 @@ type directiveResolver struct {
 // Directive creates a new [Resolver] for yaml-language-server schema
 // directives.
 //
-// Resolve parses the document's tokens for a directive comment and names
-// the schema it references through [FileOrURL]. A relative path is
-// resolved against the directory of the document's file, so a document
-// without a file path reports [ErrNoFilePath] for a relative path; a URL or
-// an absolute path needs no file and resolves either way. A document
-// without a directive reports [ErrNoDirective].
+// Resolve reads the directive comment from the document's
+// [niceyaml.Document.Preamble] and names the schema it references through
+// [FileOrURL]. A relative path is resolved against the directory of the
+// document's file, so a document without a file path reports
+// [ErrNoFilePath] for a relative path; a URL or an absolute path needs no
+// file and resolves either way. A document without a directive reports
+// [ErrNoDirective].
 //
-// The parser splits comments and %YAML or %TAG directives written above
-// the first "---" into a document of their own. Such a document holds no
-// content, so Resolve reports [ErrNoDirective] for it rather than have the
-// registry validate it, and a directive comment it holds applies to the
-// next document with content. A document with content and no directive of
-// its own therefore takes the first directive from the content-free
-// documents directly before it:
+// The preamble holds the comments above the document's "---" header as
+// well as those below it, so a directive written either way names the
+// schema of the document it opens:
 //
 //	# yaml-language-server: $schema=./schema.json
 //	---
 //	key: value
 //
-// Here the second document resolves to ./schema.json.
+// The first directive in the preamble wins.
 //
 //	reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
 func Directive(opts ...HTTPOption) Resolver {
@@ -171,9 +168,9 @@ func Directive(opts ...HTTPOption) Resolver {
 
 // Resolve implements [Resolver].
 func (r *directiveResolver) Resolve(_ context.Context, doc *niceyaml.Document) (Ref, error) {
-	directive, err := documentDirective(doc)
-	if err != nil {
-		return Ref{}, err
+	directive := ParseDocumentDirective(doc.Preamble())
+	if directive == nil {
+		return Ref{}, ErrNoDirective
 	}
 
 	var baseDir string
@@ -193,38 +190,4 @@ func (r *directiveResolver) Resolve(_ context.Context, doc *niceyaml.Document) (
 	}
 
 	return ref, nil
-}
-
-// documentDirective returns the directive that applies to doc. A document
-// without content reports ErrNoDirective. A document with content uses its
-// own directive, and otherwise the first directive among the content-free
-// documents directly before it in the same [niceyaml.Source].
-func documentDirective(doc *niceyaml.Document) (*ParsedDirective, error) {
-	if !doc.HasContent() {
-		return nil, ErrNoDirective
-	}
-
-	if directive := ParseDocumentDirective(doc.Tokens()); directive != nil {
-		return directive, nil
-	}
-
-	docs, err := doc.Source().Documents()
-	if err != nil {
-		return nil, fmt.Errorf("preceding documents: %w", err)
-	}
-
-	// Walk back over the run of content-free documents, then scan it
-	// forward so the first directive wins, as it does within one document.
-	start := doc.Index()
-	for start > 0 && !docs[start-1].HasContent() {
-		start--
-	}
-
-	for _, prev := range docs[start:doc.Index()] {
-		if directive := ParseDocumentDirective(prev.Tokens()); directive != nil {
-			return directive, nil
-		}
-	}
-
-	return nil, ErrNoDirective
 }

@@ -404,17 +404,15 @@ func firstDocumentFromFile(t *testing.T, path string) *niceyaml.Document {
 func TestDirective_LeadingCommentDocument(t *testing.T) {
 	t.Parallel()
 
-	// The parser puts comments and %YAML directives written above the first
-	// "---" in a document of their own. The registry must skip that document
-	// and apply its directive to the content document after it. The schema
-	// requires a "b" key, so a document validates only against this schema.
+	// The comments and %YAML directives written above the first "---" are
+	// the preamble of the document below them, so a directive there names
+	// the schema of that document. The schema requires a "b" key, so a
+	// document validates only against this schema.
 	//
 	// A second resolver matching every document is registered after the
-	// directive resolver, so a skip means no resolver saw the document
-	// rather than one resolver declining it. A content document with no
-	// directive reaches that resolver and passes.
+	// directive resolver, so a document with no directive reaches that
+	// resolver and passes.
 	const (
-		skip    = "skip"    // ErrNoMatch, the document is not validated.
 		valid   = "valid"   // Validated and passes.
 		invalid = "invalid" // Validated against the schema and fails.
 	)
@@ -425,35 +423,35 @@ func TestDirective_LeadingCommentDocument(t *testing.T) {
 	}{
 		"directive above the first header": {
 			input: "# yaml-language-server: $schema=./schema.json\n---\nb: 2\n",
-			want:  []string{skip, valid},
+			want:  []string{valid},
 		},
 		"directive above the first header with invalid content": {
 			input: "# yaml-language-server: $schema=./schema.json\n---\nc: 3\n",
-			want:  []string{skip, invalid},
+			want:  []string{invalid},
 		},
 		"directive above a YAML directive": {
 			input: "# yaml-language-server: $schema=./schema.json\n%YAML 1.2\n---\nb: 2\n",
-			want:  []string{skip, valid},
+			want:  []string{valid},
 		},
-		"directive does not reach past a content document": {
+		"directive does not reach past its document": {
 			input: "# yaml-language-server: $schema=./schema.json\n---\nb: 2\n---\nc: 3\n",
-			want:  []string{skip, valid, valid},
+			want:  []string{valid, valid},
 		},
-		"directive reaches across a comment-only document": {
+		"directive applies to an explicit empty document": {
 			input: "# yaml-language-server: $schema=./schema.json\n---\n# note\n---\nc: 3\n",
-			want:  []string{skip, skip, invalid},
+			want:  []string{invalid, valid},
 		},
-		"own directive wins over a preceding one": {
-			input: "# yaml-language-server: $schema=./missing.json\n---\n# yaml-language-server: $schema=./schema.json\nb: 2\n",
-			want:  []string{skip, valid},
+		"first directive in the preamble wins": {
+			input: "# yaml-language-server: $schema=./schema.json\n---\n# yaml-language-server: $schema=./missing.json\nb: 2\n",
+			want:  []string{valid},
 		},
-		"comment-only document without a directive": {
+		"comment above the header without a directive": {
 			input: "# note\n---\nc: 3\n",
-			want:  []string{skip, valid},
+			want:  []string{valid},
 		},
-		"comment-only file": {
+		"comment-only file is the null document": {
 			input: "# yaml-language-server: $schema=./schema.json\n",
-			want:  []string{skip},
+			want:  []string{invalid},
 		},
 	}
 
@@ -486,8 +484,6 @@ func TestDirective_LeadingCommentDocument(t *testing.T) {
 				err := reg.Validate(t.Context(), doc)
 
 				switch tc.want[i] {
-				case skip:
-					require.ErrorIs(t, err, schema.ErrNoMatch, "document %d", i)
 				case valid:
 					require.NoError(t, err, "document %d", i)
 				case invalid:

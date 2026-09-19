@@ -145,10 +145,8 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 // ctx ends before the schema loads, Lookup returns [ErrLoad] wrapping the
 // context's error without waiting for the load to finish.
 //
-// A document holding nothing but comments and %YAML or %TAG directives,
-// which the parser splits off from the content below the next "---", is
-// [ErrNoMatch] before any resolver runs. An explicitly empty document
-// counts as content, since it is the null document a schema may validate.
+// An empty document, such as one that holds only comments, is the null
+// document, and a resolver sees it as it sees any other.
 //
 // Every error comes back bound to the document through
 // [niceyaml.Document.Bind], so its message names the file the document
@@ -168,12 +166,6 @@ func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.Document) (*Schema,
 
 // lookup is [Registry.Lookup] before binding the error to the document.
 func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Document) (*Schema, error) {
-	// No resolver sees a content-free document, so a resolver placed
-	// after one that declines cannot resurrect it.
-	if !doc.HasContent() {
-		return nil, fmt.Errorf("%w: document has no content", ErrNoMatch)
-	}
-
 	for _, res := range r.resolvers {
 		// A matcher reports only whether it matched, so a resolver run
 		// under an ended context declines rather than reporting the

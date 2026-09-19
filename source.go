@@ -209,6 +209,14 @@ func (s *Source) Tokens() token.Tokens {
 // Documents returns the [*Document] values of this [Source], one per YAML
 // document in file order.
 //
+// The parser cuts the comments and %YAML or %TAG directives above a "---"
+// header, and the comments after a "..." marker, into a node of their own
+// with no header and no content. The YAML spec attaches those to the
+// document below or above them, so Documents folds each such node into
+// that document, where [Document.Preamble] returns the tokens above the
+// content. A document that opens with a "---" header and holds only
+// comments is an explicit empty document and stays one.
+//
 // It parses the source and builds each Document once, so every call returns
 // the same pointers. The slice itself is a copy, so reordering it reaches
 // nothing.
@@ -229,49 +237,36 @@ func (s *Source) Documents() ([]*Document, error) {
 }
 
 // Document returns the [*Document] of a [Source] that holds a single YAML
-// document with content: the only one whose [Document.HasContent] reports
-// true. A comment block or a %YAML directive above the first "---" parses
-// into a document of its own that holds no content, so a file that opens
-// with a license header still holds a single document.
+// document. The comments above the first "---" are the preamble of the
+// document below them rather than a document of their own, so a file that
+// opens with a license header holds a single document, and a file of
+// comments alone holds one that decodes to the zero value as an empty file
+// does.
 //
-// When more than one document holds content, it returns an error wrapping
+// When the file holds more than one document, it returns an error wrapping
 // [ErrMultipleDocuments], bound to the Source and pointing at the header of
-// the second such document, or at its first token when a "..." marker
-// rather than a header opens it. When no document holds content, it returns the
-// first document, so a file of comments decodes to the zero value as an
-// empty file does. When the file holds no document at all, which happens
-// for text that is only a "..." marker, it returns an error wrapping
-// [ErrNoDocuments], bound to the Source. A file that does not parse
-// returns the error [Source.File] returns.
+// the second document, or at its first token when a "..." marker rather
+// than a header opens it. When the file holds no document at all, which
+// happens for text that is only a "..." marker, it returns an error
+// wrapping [ErrNoDocuments], bound to the Source. A file that does not
+// parse returns the error [Source.File] returns.
 func (s *Source) Document() (*Document, error) {
 	docs, err := s.Documents()
 	if err != nil {
 		return nil, err
 	}
 
-	if len(docs) == 0 {
-		return nil, s.Bind(NewErrorFrom(ErrNoDocuments))
-	}
-
-	content := make([]*Document, 0, len(docs))
-
-	for _, doc := range docs {
-		if doc.HasContent() {
-			content = append(content, doc)
-		}
-	}
-
-	switch len(content) {
+	switch len(docs) {
 	case 0:
-		return docs[0], nil
+		return nil, s.Bind(NewErrorFrom(ErrNoDocuments))
 
 	case 1:
-		return content[0], nil
+		return docs[0], nil
 
 	default:
 		err := NewErrorFrom(
-			fmt.Errorf("%w: %d documents", ErrMultipleDocuments, len(content)),
-			atToken(content[1].anchorToken()),
+			fmt.Errorf("%w: %d documents", ErrMultipleDocuments, len(docs)),
+			atToken(docs[1].anchorToken()),
 		)
 
 		return nil, s.Bind(err)
@@ -296,7 +291,7 @@ func (dd *Document) anchorToken() *token.Token {
 // DecodeInto validates and decodes the single document of the [Source] into
 // v, which must be a non-nil pointer, as [Document.DecodeInto] does for that
 // document. Any other v returns [ErrDecodeTarget] before anything runs. A
-// file that holds more than one document with content returns
+// file that holds more than one document returns
 // [ErrMultipleDocuments], and one that holds no document returns
 // [ErrNoDocuments].
 func (s *Source) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
@@ -409,7 +404,7 @@ func (s *Source) View() *line.View {
 //	source := niceyaml.NewSourceFromString(yamlContent)
 //	config, err := source.Decode[Config](ctx, niceyaml.WithValidator(validator))
 //
-// A file that holds more than one document with content returns
+// A file that holds more than one document returns
 // [ErrMultipleDocuments], and one that holds no document returns
 // [ErrNoDocuments]; use [Source.Documents] for those.
 func (s *Source) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
