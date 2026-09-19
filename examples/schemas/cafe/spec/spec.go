@@ -10,7 +10,7 @@ import (
 type Spec struct {
 	// SLA is the service level agreement duration for order fulfillment.
 	// Defaults to 15 minutes.
-	SLA *Duration `json:"sla,omitempty" jsonschema:"title=SLA,type=string,pattern=^(\\d+d)?(\\d+h)?(\\d+m)?(\\d+s)?$,default=15m,examples=15m|1h|90s"`
+	SLA *Duration `json:"sla,omitempty" jsonschema:"title=SLA,type=string,pattern=^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$,default=15m,examples=15m|1h|90s"`
 	// Settings contains optional cafe settings.
 	Settings *Settings `json:"settings,omitempty" jsonschema:"title=Settings"`
 	// Hours defines operating hours.

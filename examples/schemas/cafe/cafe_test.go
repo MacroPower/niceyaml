@@ -2,6 +2,7 @@ package cafe_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -41,4 +42,45 @@ func TestCafeBrokenConfig(t *testing.T) {
 
 	_, err := cafeConfig(t.Context(), cafe.BrokenYAML)
 	require.Error(t, err, "broken config should fail schema validation")
+}
+
+func TestCafeSLA(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		sla string
+		err bool
+	}{
+		"minutes":      {sla: "15m"},
+		"hours":        {sla: "1h"},
+		"seconds":      {sla: "90s"},
+		"compound":     {sla: "1h30m"},
+		"fractional":   {sla: "1.5h"},
+		"days":         {sla: "1d", err: true},
+		"empty":        {sla: `""`, err: true},
+		"uppercase":    {sla: "15M", err: true},
+		"no unit":      {sla: "15", err: true},
+		"unknown unit": {sla: "15w", err: true},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			in := strings.Replace(cafe.DefaultYAML, "sla: 15m", "sla: "+tc.sla, 1)
+			require.Contains(t, in, "sla: "+tc.sla)
+
+			_, err := cafeConfig(t.Context(), in)
+			if !tc.err {
+				require.NoError(t, err)
+
+				return
+			}
+
+			// A schema violation carries the location of the value, which a
+			// decode failure inside UnmarshalText would not.
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "$.spec.sla")
+		})
+	}
 }
