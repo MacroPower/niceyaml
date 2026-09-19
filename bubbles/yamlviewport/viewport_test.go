@@ -1039,6 +1039,57 @@ func TestViewport_ContainerFrameWidth(t *testing.T) {
 	}
 }
 
+func TestViewport_ContainerBoxKeepsItsColumns(t *testing.T) {
+	t.Parallel()
+
+	// The printer sizes the container's box to the widest row it renders, so
+	// a window holding only short lines once drew a box that stopped well
+	// short of the viewport width. The viewport pins the box to the content
+	// width, so its border sits in the first and last column of every row at
+	// every offset.
+	src := "a: 1\nb: 2\nc: 3\nlong: " + strings.Repeat("x", 40) + "\nd: 4\ne: 5\n"
+
+	tcs := map[string]struct {
+		mode yamlviewport.ViewMode
+		wrap bool
+	}{
+		"wrap on":              {wrap: true},
+		"wrap off":             {wrap: false},
+		"side by side wrap on": {wrap: true, mode: yamlviewport.ViewModeSideBySide},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			const (
+				width  = 24
+				height = 3
+			)
+
+			p := testPrinter().With(printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())))
+			m := yamlviewport.New(yamlviewport.WithPrinter(p))
+			m.SetWidth(width)
+			m.SetHeight(height)
+			m.SetViewMode(tc.mode)
+			m.SetWordWrap(tc.wrap)
+			m.SetRevision(niceyaml.NewSourceFromString(src))
+
+			for offset := range m.TotalRowCount() - height + 1 {
+				m.SetYOffset(offset)
+
+				for i, row := range strings.Split(m.View(), "\n") {
+					plain := []rune(ansi.Strip(row))
+					require.Len(t, plain, width, "offset %d, row %d", offset, i)
+
+					assert.Contains(t, "┌│└", string(plain[0]), "offset %d, row %d", offset, i)
+					assert.Contains(t, "┐│┘", string(plain[width-1]), "offset %d, row %d", offset, i)
+				}
+			}
+		})
+	}
+}
+
 func TestViewport_HorizontalScrollKeepsFrame(t *testing.T) {
 	t.Parallel()
 

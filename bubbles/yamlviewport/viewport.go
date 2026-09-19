@@ -379,16 +379,20 @@ func (m *Model) relayout() {
 // width less the horizontal frame of the printer's container style, so a
 // wrapped line and the frame around it together fit the content area.
 //
+// The printer's container is pinned to the given width, so the box it draws
+// covers the same columns for every window. Without the pin it would shrink
+// to the widest row of the window, and a window of short lines would carry
+// its border in from the edge of the content area.
+//
 // A render prints a slice of the view, so the gutter is sized for the
 // largest line number of the whole view rather than of the window, and
 // every window lines up with the layout. In side-by-side mode both panes
 // get the gutter of the longer revision, so the one horizontal offset lands
 // on the same content column in both.
 func (m *Model) renderPrinter(width int) *printer.Printer {
-	if !m.wrapEnabled {
-		width = 0
-	} else {
-		width = max(0, width-m.printer.ContainerStyle().GetHorizontalFrameSize())
+	wrapWidth := 0
+	if m.wrapEnabled {
+		wrapWidth = max(0, width-m.printer.ContainerStyle().GetHorizontalFrameSize())
 	}
 
 	maxNumber := m.printer.MaxNumber(m.left)
@@ -397,7 +401,11 @@ func (m *Model) renderPrinter(width int) *printer.Printer {
 		maxNumber = max(maxNumber, m.printer.MaxNumber(m.right))
 	}
 
-	return m.printer.With(printer.WithWidth(width), printer.WithMaxNumber(maxNumber))
+	return m.printer.With(
+		printer.WithWidth(wrapWidth),
+		printer.WithMaxNumber(maxNumber),
+		printer.WithContainerWidth(width),
+	)
 }
 
 // SetPrinter sets the [*printer.Printer] used for rendering. See
