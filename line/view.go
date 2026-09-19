@@ -62,6 +62,29 @@ func (v *View) Line(i int) *Line {
 	return v.lines[i]
 }
 
+// Indices returns every index of the [View] that holds l, in view order.
+// Lines are shared by pointer between every view over the same content,
+// so a decorator that knows a line of a [Lines] value finds where that line
+// sits in a slice of it, or in a diff that interleaves it with another
+// revision, without knowing how the view was built. A line the view does
+// not hold, such as one from other content or the zero placeholder of a
+// side-by-side diff, yields nil.
+func (v *View) Indices(l *Line) []int {
+	if v == nil || l == nil {
+		return nil
+	}
+
+	var out []int
+
+	for i, vl := range v.lines {
+		if vl == l {
+			out = append(out, i)
+		}
+	}
+
+	return out
+}
+
 // AllLines returns an iterator over the lines within the given spans, as
 // [Lines.AllLines] does. Each iteration yields the 0-indexed line index and
 // the [*Line] at that index, and the index reaches the line's decoration

@@ -15,6 +15,7 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -3280,6 +3281,98 @@ func TestSourceError_Annotate(t *testing.T) {
 		assert.Equal(t, line.Annotations{
 			{Content: "too big", Kind: kind.TextError, Placement: line.Below, Col: 3},
 		}, view.Annotations(3))
+	})
+
+	t.Run("marks a slice of the source by line identity", func(t *testing.T) {
+		t.Parallel()
+
+		bound := excerptError(t)
+
+		// Lines 7-10 of the source, which hold h at index 1 and not b.
+		view := bound.Source().View().Slice(position.NewSpan(6, 10))
+
+		require.NoError(t, bound.Annotate(view))
+
+		assert.Equal(t, []int{7, 8, 9, 10}, lineNumbers(view))
+		assert.Equal(t, line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}, view.Overlays(1))
+		assert.Equal(t, line.Annotations{
+			{Content: "bad h", Kind: kind.TextError, Placement: line.Below, Col: 3},
+		}, view.Annotations(1))
+
+		for i := range view.Len() {
+			if i == 1 {
+				continue
+			}
+
+			assert.Empty(t, view.Overlays(i), "line %d carries no overlay", i)
+			assert.Empty(t, view.Annotations(i), "line %d carries no annotation", i)
+		}
+	})
+
+	t.Run("marks a line the view holds twice at each index", func(t *testing.T) {
+		t.Parallel()
+
+		bound := excerptError(t)
+		view := bound.Source().View().Slice(position.NewSpan(1, 2), position.NewSpan(1, 2))
+
+		require.NoError(t, bound.Annotate(view))
+
+		want := line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}
+		assert.Equal(t, want, view.Overlays(0))
+		assert.Equal(t, want, view.Overlays(1))
+	})
+
+	t.Run("marks a diff on the lines of this revision", func(t *testing.T) {
+		t.Parallel()
+
+		before := niceyaml.NewSourceFromString("a: 1\nb: 3\n")
+		after := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, yamltest.Bind(t, after, niceyaml.NewError(
+			"bad b", niceyaml.WithPath(paths.Root().Child("b")),
+		)), &bound)
+
+		// The unified view holds a from after, then b from before as a
+		// deleted line, then b from after as an inserted one.
+		view := diff.Diff(before.Lines(), after.Lines()).Unified()
+		require.Equal(t, 3, view.Len())
+
+		require.NoError(t, bound.Annotate(view))
+
+		assert.Empty(t, view.Overlays(0))
+		assert.Empty(t, view.Overlays(1), "the deleted line of the other revision stays unmarked")
+		assert.Equal(t, line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}, view.Overlays(2))
+	})
+
+	t.Run("returns ErrOutOfRange for a view without the marked lines", func(t *testing.T) {
+		t.Parallel()
+
+		bound := excerptError(t)
+
+		tcs := map[string]struct {
+			view *line.View
+		}{
+			"slice that holds neither line": {
+				view: bound.Source().View().Slice(position.NewSpan(3, 6)),
+			},
+			"view of another source with the same text": {
+				view: niceyaml.NewSourceFromString(excerptSource).View(),
+			},
+			"empty view": {
+				view: line.NewView(nil),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				require.ErrorIs(t, bound.Annotate(tc.view), niceyaml.ErrOutOfRange)
+				unmarked(t, tc.view)
+			})
+		}
 	})
 
 	t.Run("leaves the view unmarked when nothing resolves", func(t *testing.T) {

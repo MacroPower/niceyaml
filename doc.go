@@ -130,14 +130,20 @@
 // decoration on a [line.View], so a caller renders them with any renderer
 // and composes them with anything else it renders. [SourceError.Excerpt]
 // returns the hunks around the locations as a view, as [diff.Result.Hunks]
-// does for a diff, and [SourceError.Annotate] marks a whole view of the
-// source, so a viewer shows a document with every error in place:
+// does for a diff, and [SourceError.Annotate] marks a view that holds
+// lines of the source, so a viewer shows a document with every error in
+// place:
 //
 //	view := source.View()
 //	for _, bound := range validationErrors {
 //		_ = bound.Annotate(view)
 //	}
 //	fmt.Println(p.Print(view))
+//
+// Annotate finds each line by identity, since every view over a source
+// shares its lines, so the view may be a slice of the source, such as one
+// document of a file from [Document.Span], or a diff against another
+// revision, where the marks land on the lines of this source alone.
 //
 // [Document.Ranges] returns the ranges a path covers, the same ones an
 // error at that path highlights, for a caller that marks a value on a view

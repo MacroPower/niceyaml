@@ -40,8 +40,10 @@ var (
 
 	// ErrOutOfRange indicates the error's location lies outside the lines of
 	// the source, past the last or before the first, which happens when a
-	// position or range came from other text. [SourceError.Range] and
-	// [SourceError.Excerpt] return it.
+	// position or range came from other text, or outside the view given to
+	// [SourceError.Annotate], which holds none of the lines the locations
+	// fall on. [SourceError.Range], [SourceError.Excerpt], and
+	// [SourceError.Annotate] return it.
 	ErrOutOfRange = errors.New("location outside source")
 )
 
@@ -448,8 +450,9 @@ func (e *Error) locate(lookup func() (*Document, error)) (location, error) {
 // The marks of an error are decoration on a [line.View], so the caller
 // that renders the error decides how it looks. [SourceError.Excerpt]
 // returns the hunks around the locations as a view for any renderer, and
-// [SourceError.Annotate] marks a whole view of the source, as a viewer
-// that shows errors inline needs. The %+v verb renders the excerpt as
+// [SourceError.Annotate] marks any view that holds lines of the source, as
+// a viewer that shows errors inline needs: the whole source, a slice of
+// it, or a diff against another revision. The %+v verb renders the excerpt as
 // plain text, and [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError]
 // prints the message as a tree and the excerpt with color and the context
 // lines the printer is configured with:
@@ -915,19 +918,27 @@ func rangeOf(lines line.Lines, loc location) position.Range {
 	return position.NewRange(ranges[0].Start, ranges[len(ranges)-1].End)
 }
 
-// Annotate marks the error on view, which is a view of the source the
-// error is bound to, such as one from [Source.View]: the location of every
-// node in the tree is highlighted with [kind.GenericError], and the
-// message of each node below the root is an annotation below its own
-// line in [kind.TextError], so the message reads as error text without
-// the highlight of the token it describes. A viewer that shows a document
-// with its errors in place marks its view this way and renders it as it
-// is.
+// Annotate marks the error on view, which holds lines of the source the
+// error is bound to: the location of every node in the tree is highlighted
+// with [kind.GenericError], and the message of each node below the root is
+// an annotation below its own line in [kind.TextError], so the message
+// reads as error text without the highlight of the token it describes. A
+// viewer that shows a document with its errors in place marks its view this
+// way and renders it as it is.
+//
+// Annotate finds each line by identity rather than by index, since every
+// view over the source shares its [*line.Line] values, so the view may be
+// the whole source from [Source.View], a slice of it from [line.View.Slice]
+// such as one document of a file, or a diff that interleaves the source
+// with another revision, where the marks land on the lines of this source
+// alone. A line the view holds more than once is marked each time, and a
+// line it does not hold is left out.
 //
 // Annotate marks every location that resolves and returns an error only
 // when none does: the error [SourceError.Range] returns, joined with
 // those of the nodes below it, or [ErrOutOfRange] for a location past the
-// last line. A node whose location does not resolve is left out.
+// last line or on lines the view does not hold. A node whose location does
+// not resolve is left out.
 func (e *SourceError) Annotate(view *line.View) error {
 	_, err := e.annotate(view)
 
@@ -1022,7 +1033,7 @@ type errorPosition struct {
 }
 
 // annotate is [SourceError.Annotate] that also returns the indices of the
-// lines it marked, with repeats.
+// lines of view it marked, with repeats.
 func (e *SourceError) annotate(view *line.View) ([]int, error) {
 	var positions []errorPosition
 
@@ -1042,28 +1053,68 @@ func (e *SourceError) annotate(view *line.View) ([]int, error) {
 		return nil, e.resolution()
 	}
 
-	// Collect all ranges from positions and apply overlays to the view. The
-	// line of each position joins the marked lines as well, since a
-	// position with no token under it has no range to highlight and still
-	// picks the lines an excerpt shows.
-	var allRanges position.Ranges
+	// The view may hold the lines of the source in any order and any
+	// number of times, so every mark goes to each index that holds its
+	// line. The line of each position joins the marked lines as well,
+	// since a position with no token under it has no range to highlight
+	// and still picks the lines an excerpt shows.
+	indices := e.lineIndices(view)
 
-	marked := make([]int, 0, len(positions))
+	var marked []int
 
 	for _, pos := range positions {
-		allRanges = append(allRanges, pos.ranges...)
-		marked = append(marked, pos.pos.Line)
+		marked = append(marked, indices(pos.pos.Line)...)
+
+		for _, r := range pos.ranges {
+			for _, lr := range r.SliceLines() {
+				for _, i := range indices(lr.Start.Line) {
+					view.AddOverlay(kind.GenericError, viewRange(lr, i))
+
+					marked = append(marked, i)
+				}
+			}
+		}
 	}
 
-	marked = append(marked, allRanges.LineIndices()...)
-
-	view.AddOverlay(kind.GenericError, allRanges...)
+	if len(marked) == 0 {
+		return nil, fmt.Errorf("%w: the view holds none of the lines the error marks", ErrOutOfRange)
+	}
 
 	for lineIdx, annotation := range prepareLineAnnotations(positions) {
-		view.Annotate(lineIdx, annotation)
+		for _, i := range indices(lineIdx) {
+			view.Annotate(i, annotation)
+		}
 	}
 
 	return marked, nil
+}
+
+// lineIndices returns a lookup from a line index of the source to the
+// indices of view that hold that line, found by identity. A line index the
+// source does not hold, or a line the view does not hold, yields nil.
+func (e *SourceError) lineIndices(view *line.View) func(int) []int {
+	lines := e.source.lines
+	cache := make(map[int][]int)
+
+	return func(srcIdx int) []int {
+		if srcIdx < 0 || srcIdx >= len(lines) {
+			return nil
+		}
+
+		if out, ok := cache[srcIdx]; ok {
+			return out
+		}
+
+		out := view.Indices(lines[srcIdx])
+		cache[srcIdx] = out
+
+		return out
+	}
+}
+
+// viewRange moves the single-line range r to line i of a view.
+func viewRange(r position.Range, i int) position.Range {
+	return position.NewRange(position.New(i, r.Start.Col), position.New(i, r.End.Col))
 }
 
 // checkInRange reports [ErrOutOfRange] when loc starts on a line lines

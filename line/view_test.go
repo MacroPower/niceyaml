@@ -650,6 +650,65 @@ func TestView_Clone(t *testing.T) {
 	})
 }
 
+func TestView_Indices(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.Input(`
+		a: 1
+		b: 2
+		c: 3
+		d: 4
+	`)
+
+	view := newTestView(t, input, 4)
+	other := newTestView(t, input, 4)
+
+	tcs := map[string]struct {
+		view *line.View
+		line *line.Line
+		want []int
+	}{
+		"line of the view": {
+			view: view,
+			line: view.Line(2),
+			want: []int{2},
+		},
+		"line held twice by a slice": {
+			view: view.Slice(position.NewSpan(2, 4), position.NewSpan(2, 3)),
+			line: view.Line(2),
+			want: []int{0, 2},
+		},
+		"line of a slice that dropped it": {
+			view: view.Slice(position.NewSpan(0, 2)),
+			line: view.Line(2),
+			want: nil,
+		},
+		"line of other content with the same text": {
+			view: view,
+			line: other.Line(2),
+			want: nil,
+		},
+		"nil line": {
+			view: view,
+			line: nil,
+			want: nil,
+		},
+		"nil view": {
+			view: nil,
+			line: view.Line(0),
+			want: nil,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.view.Indices(tc.line))
+		})
+	}
+}
+
 func TestView_Slice(t *testing.T) {
 	t.Parallel()
 
