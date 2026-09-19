@@ -1299,7 +1299,7 @@ var palettes = map[string]palette{
 		Mode:   Light,
 		Fg:     "#586e75",
 		Bg:     "#eee8d5",
-		Accent: "#586e75",
+		Accent: "#268bd2",
 		OK:     "#719e07",
 		Warn:   "#b58900",
 		Error:  "#dc322f",
