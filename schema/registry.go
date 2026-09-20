@@ -79,7 +79,7 @@ type RegistryOption func(*Registry)
 //	)
 //
 // The default is [http.DefaultClient], and a nil client keeps it. A
-// [go.jacobcolvin.com/niceyaml/schema/schemastore.SchemaStore] fetches
+// [go.jacobcolvin.com/niceyaml/schema/schemastore.Store] fetches
 // its catalog with a client of its own, since the catalog is not a schema
 // the registry loads.
 func WithHTTPClient(client *http.Client) RegistryOption {

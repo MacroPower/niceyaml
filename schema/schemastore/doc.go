@@ -8,7 +8,7 @@
 //
 // # Usage
 //
-// Create a [*SchemaStore] and hand it to a
+// Create a [*Store] and hand it to a
 // [go.jacobcolvin.com/niceyaml/schema.Registry]:
 //
 //	reg := schema.NewRegistry(schema.WithResolvers(schemastore.New()))

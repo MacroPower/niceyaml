@@ -1295,7 +1295,7 @@ type findMatchResult struct {
 
 // findMatchAsync looks up config.yaml with FindMatch in a new goroutine and
 // sends the result on the returned channel.
-func findMatchAsync(ctx context.Context, store *schemastore.SchemaStore) <-chan findMatchResult {
+func findMatchAsync(ctx context.Context, store *schemastore.Store) <-chan findMatchResult {
 	results := make(chan findMatchResult, 1)
 
 	go func() {

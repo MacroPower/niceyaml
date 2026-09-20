@@ -148,7 +148,7 @@ func (r Ref) Resolve(_ context.Context, _ *niceyaml.Document) (Ref, error) {
 // resolver with a [go.jacobcolvin.com/niceyaml/schema/matcher.Matcher].
 //
 // See [ResolverFunc], [Ref], [Schema], [Directive], and
-// [go.jacobcolvin.com/niceyaml/schema/schemastore.SchemaStore] for
+// [go.jacobcolvin.com/niceyaml/schema/schemastore.Store] for
 // implementations.
 type Resolver interface {
 	Resolve(ctx context.Context, doc *niceyaml.Document) (Ref, error)

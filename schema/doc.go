@@ -168,7 +168,7 @@
 //
 // A resolver error that does not wrap [ErrNoMatch] ends the lookup, and the
 // resolvers after it do not run. While no catalog has loaded, a
-// [go.jacobcolvin.com/niceyaml/schema/schemastore.SchemaStore] that cannot
+// [go.jacobcolvin.com/niceyaml/schema/schemastore.Store] that cannot
 // reach SchemaStore.org ends the lookup this way, so place it after any
 // resolver that should still apply without the catalog.
 //
@@ -184,7 +184,7 @@
 //
 // For automatic schema discovery based on file paths, use the
 // [go.jacobcolvin.com/niceyaml/schema/schemastore] package, whose
-// SchemaStore type is a resolver:
+// Store type is a resolver:
 //
 //	reg := schema.NewRegistry(schema.WithResolvers(schemastore.New()))
 package schema

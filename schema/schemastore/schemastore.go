@@ -63,7 +63,7 @@ type CatalogEntry struct {
 	FileMatch []string `json:"fileMatch"`
 }
 
-// SchemaStore matches documents to SchemaStore.org catalog entries.
+// Store matches documents to SchemaStore.org catalog entries.
 //
 // The store names a matched schema by the entry's URL, and the registry
 // fetches it with the client
@@ -85,7 +85,7 @@ type CatalogEntry struct {
 // waiting leaves the fetch running, so the fetched catalog still reaches
 // later lookups.
 //
-// SchemaStore implements [schema.Resolver] and goes straight into a
+// Store implements [schema.Resolver] and goes straight into a
 // [go.jacobcolvin.com/niceyaml/schema.Registry] through
 // [schema.WithResolvers]. [ErrFetchCatalog] does not wrap
 // [schema.ErrNoMatch], so while no catalog has loaded, the registry stops
@@ -96,7 +96,7 @@ type CatalogEntry struct {
 // Example:
 //
 //	reg := schema.NewRegistry(schema.WithResolvers(schemastore.New()))
-type SchemaStore struct {
+type Store struct {
 	lastFetch      time.Time // Last successful fetch; zero until the first one succeeds.
 	lastAttempt    time.Time // Last fetch, successful or not.
 	client         *http.Client
@@ -119,7 +119,7 @@ type fetchCall struct {
 	entries []CatalogEntry
 }
 
-// Option configures [SchemaStore] creation.
+// Option configures [Store] creation.
 //
 // Available options:
 //   - [WithCatalogURL]
@@ -128,13 +128,13 @@ type fetchCall struct {
 //   - [WithRefreshTimeout]
 //   - [WithRetryAfter]
 //   - [WithFilter]
-type Option func(*SchemaStore)
+type Option func(*Store)
 
 // WithCatalogURL is an [Option] that sets a custom catalog URL.
 //
 // Defaults to "https://www.schemastore.org/api/json/catalog.json".
 func WithCatalogURL(url string) Option {
-	return func(s *SchemaStore) {
+	return func(s *Store) {
 		s.catalogURL = url
 	}
 }
@@ -144,7 +144,7 @@ func WithCatalogURL(url string) Option {
 // registry fetches the schemas the catalog names with its own client, from
 // [go.jacobcolvin.com/niceyaml/schema.WithHTTPClient].
 func WithHTTPClient(client *http.Client) Option {
-	return func(s *SchemaStore) {
+	return func(s *Store) {
 		if client != nil {
 			s.client = client
 		}
@@ -155,7 +155,7 @@ func WithHTTPClient(client *http.Client) Option {
 //
 // Defaults to 1 hour. Set to 0 to disable caching (fetch on every lookup).
 func WithCacheTTL(ttl time.Duration) Option {
-	return func(s *SchemaStore) {
+	return func(s *Store) {
 		s.cacheTTL = ttl
 	}
 }
@@ -174,7 +174,7 @@ func WithCacheTTL(ttl time.Duration) Option {
 // Defaults to 10 seconds. A timeout of zero or less keeps the default,
 // since a fetch under an expired deadline could never succeed.
 func WithRefreshTimeout(timeout time.Duration) Option {
-	return func(s *SchemaStore) {
+	return func(s *Store) {
 		if timeout > 0 {
 			s.refreshTimeout = timeout
 		}
@@ -191,7 +191,7 @@ func WithRefreshTimeout(timeout time.Duration) Option {
 // Defaults to 1 minute. An interval of zero or less keeps the default,
 // since it would retry on every lookup.
 func WithRetryAfter(interval time.Duration) Option {
-	return func(s *SchemaStore) {
+	return func(s *Store) {
 		if interval > 0 {
 			s.retryAfter = interval
 		}
@@ -212,12 +212,12 @@ func WithRetryAfter(interval time.Duration) Option {
 //	    return strings.Contains(strings.ToLower(e.Name), "github")
 //	}))
 func WithFilter(fn func(CatalogEntry) bool) Option {
-	return func(s *SchemaStore) {
+	return func(s *Store) {
 		s.filter = fn
 	}
 }
 
-// New creates a new [*SchemaStore].
+// New creates a new [*Store].
 //
 // New performs no I/O; the catalog is fetched on the first lookup and
 // cached for the configured TTL. Configure with options to customize
@@ -229,8 +229,8 @@ func WithFilter(fn func(CatalogEntry) bool) Option {
 //	        return strings.Contains(e.Name, "GitHub")
 //	    }),
 //	)
-func New(opts ...Option) *SchemaStore {
-	store := &SchemaStore{
+func New(opts ...Option) *Store {
+	store := &Store{
 		catalogURL:     defaultCatalogURL,
 		client:         http.DefaultClient,
 		cacheTTL:       defaultCacheTTL,
@@ -251,7 +251,7 @@ func New(opts ...Option) *SchemaStore {
 // [ErrFetchCatalog].
 //
 // Implements [schema.Resolver].
-func (s *SchemaStore) Resolve(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
+func (s *Store) Resolve(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
 	entry, err := s.FindMatch(ctx, doc.FilePath())
 	if err != nil {
 		return schema.Ref{}, err
@@ -269,7 +269,7 @@ func (s *SchemaStore) Resolve(ctx context.Context, doc *niceyaml.Document) (sche
 // Returns [ErrNoCatalogMatch] when no entry matches, which includes an
 // empty file path, and [ErrFetchCatalog] when no catalog has loaded, either
 // because the fetch failed or because ctx ended before it finished.
-func (s *SchemaStore) FindMatch(ctx context.Context, filePath string) (CatalogEntry, error) {
+func (s *Store) FindMatch(ctx context.Context, filePath string) (CatalogEntry, error) {
 	if filePath == "" {
 		return CatalogEntry{}, fmt.Errorf("%w: document has no file path", ErrNoCatalogMatch)
 	}
@@ -298,7 +298,7 @@ func (s *SchemaStore) FindMatch(ctx context.Context, filePath string) (CatalogEn
 // A lookup that waits for a fetch stops waiting when ctx ends. When the
 // fetch fails or the wait ends early, the lookup falls back to the previous
 // entries, or reports ErrFetchCatalog when none exist.
-func (s *SchemaStore) catalog(ctx context.Context) ([]CatalogEntry, error) {
+func (s *Store) catalog(ctx context.Context) ([]CatalogEntry, error) {
 	call, entries, err := s.join(ctx)
 	if call == nil {
 		return entries, err
@@ -321,7 +321,7 @@ func (s *SchemaStore) catalog(ctx context.Context) ([]CatalogEntry, error) {
 // for a fetch. It returns the entries or error to report when the lookup
 // can, and otherwise the fetch to wait on, starting one when none is
 // running.
-func (s *SchemaStore) join(ctx context.Context) (*fetchCall, []CatalogEntry, error) {
+func (s *Store) join(ctx context.Context) (*fetchCall, []CatalogEntry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -364,7 +364,7 @@ func (s *SchemaStore) join(ctx context.Context) (*fetchCall, []CatalogEntry, err
 // belongs to the lookup that started it, so a lookup that stops waiting
 // does not cancel a fetch that other lookups share; the refresh timeout
 // bounds it instead.
-func (s *SchemaStore) refresh(ctx context.Context, call *fetchCall) {
+func (s *Store) refresh(ctx context.Context, call *fetchCall) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.refreshTimeout)
 	defer cancel()
 
@@ -388,7 +388,7 @@ func (s *SchemaStore) refresh(ctx context.Context, call *fetchCall) {
 
 // stale returns the previous entries when a fetch has ever succeeded and
 // otherwise wraps cause in ErrFetchCatalog.
-func (s *SchemaStore) stale(cause error) ([]CatalogEntry, error) {
+func (s *Store) stale(cause error) ([]CatalogEntry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -396,7 +396,7 @@ func (s *SchemaStore) stale(cause error) ([]CatalogEntry, error) {
 }
 
 // staleLocked is stale for a caller that already holds mu.
-func (s *SchemaStore) staleLocked(cause error) ([]CatalogEntry, error) {
+func (s *Store) staleLocked(cause error) ([]CatalogEntry, error) {
 	if s.lastFetch.IsZero() {
 		return nil, fmt.Errorf("%w: %w", ErrFetchCatalog, cause)
 	}
@@ -410,7 +410,7 @@ func (s *SchemaStore) staleLocked(cause error) ([]CatalogEntry, error) {
 //
 // The HTTP GET and its size limit are the ones [schema.URL] uses; only the
 // catalog JSON parsing is specific to SchemaStore.
-func (s *SchemaStore) fetch(ctx context.Context) ([]CatalogEntry, error) {
+func (s *Store) fetch(ctx context.Context) ([]CatalogEntry, error) {
 	data, err := httpfetch.Get(ctx, s.client, s.catalogURL)
 	if err != nil {
 		//nolint:wrapcheck // The error already names the catalog URL.
@@ -431,7 +431,7 @@ func (s *SchemaStore) fetch(ctx context.Context) ([]CatalogEntry, error) {
 // filterAndNormalizeEntries filters catalog entries to only those with
 // supported patterns that pass the configured filter. It also normalizes each
 // entry's FileMatch to contain only supported patterns (YAML and JSON files).
-func (s *SchemaStore) filterAndNormalizeEntries(schemas []CatalogEntry) []CatalogEntry {
+func (s *Store) filterAndNormalizeEntries(schemas []CatalogEntry) []CatalogEntry {
 	entries := make([]CatalogEntry, 0, len(schemas))
 
 	for _, entry := range schemas {
