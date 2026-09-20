@@ -2,9 +2,11 @@ package matcher_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -24,19 +26,46 @@ var (
 	enabledPath    = paths.Root().Child("enabled")
 )
 
+// match runs m on doc and fails the test when the matcher cannot decide.
+func match(t *testing.T, m matcher.Matcher, doc *niceyaml.Document) bool {
+	t.Helper()
+
+	got, err := m.Match(t.Context(), doc)
+	require.NoError(t, err)
+
+	return got
+}
+
 func TestFunc(t *testing.T) {
 	t.Parallel()
 
-	called := false
-	m := matcher.Func(func(_ context.Context, _ *niceyaml.Document) bool {
-		called = true
+	t.Run("reports the result of the function", func(t *testing.T) {
+		t.Parallel()
 
-		return true
+		called := false
+		m := matcher.Func(func(_ context.Context, _ *niceyaml.Document) (bool, error) {
+			called = true
+
+			return true, nil
+		})
+
+		doc := yamltest.FirstDocument(t, "kind: Test")
+		got := match(t, m, doc)
+
+		assert.True(t, called)
+		assert.True(t, got)
 	})
 
-	doc := yamltest.FirstDocument(t, "kind: Test")
-	got := m.Match(t.Context(), doc)
+	t.Run("passes the error of the function through", func(t *testing.T) {
+		t.Parallel()
 
-	assert.True(t, called)
-	assert.True(t, got)
+		undecided := errors.New("undecided")
+		m := matcher.Func(func(_ context.Context, _ *niceyaml.Document) (bool, error) {
+			return false, undecided
+		})
+
+		doc := yamltest.FirstDocument(t, "kind: Test")
+		_, err := m.Match(t.Context(), doc)
+		require.ErrorIs(t, err, undecided)
+	})
 }

@@ -4,9 +4,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
 
@@ -73,7 +75,7 @@ func TestExists(t *testing.T) {
 			m := matcher.Exists(kindPath)
 			doc := yamltest.FirstDocument(t, tc.input)
 
-			got := m.Match(t.Context(), doc)
+			got := match(t, m, doc)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -88,7 +90,7 @@ func TestExists(t *testing.T) {
 			  name: my-app
 		`))
 
-		got := m.Match(t.Context(), doc)
+		got := match(t, m, doc)
 		assert.True(t, got)
 	})
 
@@ -102,8 +104,18 @@ func TestExists(t *testing.T) {
 			  namespace: default
 		`))
 
-		got := m.Match(t.Context(), doc)
+		got := match(t, m, doc)
 		assert.False(t, got)
+	})
+
+	t.Run("alias without an anchor is an error", func(t *testing.T) {
+		t.Parallel()
+
+		m := matcher.Exists(metadataName)
+		doc := yamltest.FirstDocument(t, stringtest.Input(`metadata: *missing`))
+
+		_, err := m.Match(t.Context(), doc)
+		require.ErrorIs(t, err, paths.ErrAlias)
 	})
 }
 
@@ -122,7 +134,7 @@ func TestExists_WithAll(t *testing.T) {
 			apiVersion: apps/v1
 		`))
 
-		got := m.Match(t.Context(), doc)
+		got := match(t, m, doc)
 		assert.True(t, got)
 	})
 
@@ -135,7 +147,7 @@ func TestExists_WithAll(t *testing.T) {
 		)
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
 
-		got := m.Match(t.Context(), doc)
+		got := match(t, m, doc)
 		assert.False(t, got)
 	})
 
@@ -151,7 +163,7 @@ func TestExists_WithAll(t *testing.T) {
 			apiVersion: ""
 		`))
 
-		got := m.Match(t.Context(), doc)
+		got := match(t, m, doc)
 		assert.True(t, got)
 	})
 }

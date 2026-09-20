@@ -6,7 +6,10 @@
 // names its schema only for documents the matcher accepts and reports
 // [go.jacobcolvin.com/niceyaml/schema.ErrNoMatch] for the rest, so a
 // [go.jacobcolvin.com/niceyaml/schema.Registry] moves on to its
-// next resolver.
+// next resolver. A matcher that cannot decide, because its context ended
+// or the document holds an alias its path cannot follow, returns an
+// error, and the registry stops at that document rather than route it to
+// a resolver further down.
 //
 // # Matching Strategies
 //
@@ -40,8 +43,8 @@
 // Implement the [Matcher] interface for reusable custom matchers, or use
 // [Func] for one-off matching logic that doesn't warrant a separate type:
 //
-//	m := matcher.Func(func(ctx context.Context, doc *niceyaml.Document) bool {
+//	m := matcher.Func(func(ctx context.Context, doc *niceyaml.Document) (bool, error) {
 //	    // Custom logic here.
-//	    return true
+//	    return true, nil
 //	})
 package matcher

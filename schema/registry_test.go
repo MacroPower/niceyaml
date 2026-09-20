@@ -129,8 +129,8 @@ func TestRegistry_Lookup_CancelledContext(t *testing.T) {
 	t.Run("canceled before the lookup", func(t *testing.T) {
 		t.Parallel()
 
-		// A matcher reports only whether it matched, so a canceled lookup
-		// reports the cancellation itself rather than no match.
+		// A Ref ignores its context, so the lookup reports the
+		// cancellation itself rather than name the schema.
 		reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded([]byte(`{"type":"object"}`))))
 
 		doc, err := niceyaml.NewSourceFromString("kind: Deployment\n").Document()
@@ -1010,4 +1010,36 @@ func TestRegistry_Validator(t *testing.T) {
 		_, err := doc.Decode[deployment](t.Context(), niceyaml.WithValidator(reg))
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 	})
+}
+
+func TestRegistry_Lookup_MatcherError(t *testing.T) {
+	t.Parallel()
+
+	// A document whose routing key holds an alias with no anchor cannot be
+	// matched, so the lookup stops there rather than routing the document
+	// to the next resolver.
+	fallbackCalled := false
+	reg := schema.NewRegistry(
+		schema.WithResolvers(
+			schema.When(matcher.Content(kindPath, "Deployment"), schema.Embedded([]byte(`{"type":"object"}`))),
+			schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
+				fallbackCalled = true
+
+				return schema.Embedded([]byte(`{}`)), nil
+			}),
+		),
+		schema.WithRequireSchema(false),
+	)
+
+	doc := yamltest.FirstDocument(t, stringtest.Input(`kind: *missing`))
+
+	_, err := reg.Lookup(t.Context(), doc)
+	require.ErrorIs(t, err, schema.ErrResolve)
+	require.ErrorIs(t, err, paths.ErrAlias)
+	require.NotErrorIs(t, err, schema.ErrNoMatch)
+	assert.False(t, fallbackCalled)
+
+	// A registry that does not require a schema passes an unmatched
+	// document, but never one its matcher could not decide on.
+	require.ErrorIs(t, reg.Validate(t.Context(), doc), paths.ErrAlias)
 }

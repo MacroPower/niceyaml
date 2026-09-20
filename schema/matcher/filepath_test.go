@@ -87,7 +87,7 @@ func TestFilePath(t *testing.T) {
 			m := matcher.MustFilePath(tc.pattern)
 			doc := yamltest.FirstDocumentWithPath(t, "kind: Test", tc.filePath)
 
-			got := m.Match(t.Context(), doc)
+			got := match(t, m, doc)
 			assert.Equal(t, tc.want, got)
 		})
 	}

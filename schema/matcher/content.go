@@ -2,7 +2,10 @@ package matcher
 
 import (
 	"context"
+	"errors"
 	"reflect"
+
+	"github.com/goccy/go-yaml"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -21,7 +24,11 @@ type contentMatcher[T comparable] struct {
 // the result to want, so the type of want decides how the YAML is read:
 // a string matches the text of a scalar, and a number matches its numeric
 // value however the document spells it. A document without the path, or
-// whose value does not decode into T, does not match:
+// whose value does not decode into T, does not match. Any other error
+// from the read, such as an alias on the path that names no anchor, a
+// path with a wildcard selector, or a context that ended, comes back as
+// the error, so a registry stops at the document rather than routing it
+// elsewhere:
 //
 //	// Matches kind: Deployment.
 //	matcher.Content(paths.Root().Child("kind"), "Deployment")
@@ -41,18 +48,30 @@ func Content[T comparable](path paths.Path, want T) Matcher {
 }
 
 // Match implements [Matcher].
-func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Document) bool {
+func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Document) (bool, error) {
 	got, err := doc.Get[T](ctx, m.path)
+	if errors.Is(err, paths.ErrNotFound) || isDecodeError(err) {
+		return false, nil
+	}
+
 	if err != nil {
-		return false
+		return false, err
 	}
 
 	// T may be an interface such as any, whose dynamic type decides whether
 	// == is defined. A value == cannot compare, such as a map, matches
 	// nothing rather than panicking.
 	if !reflect.ValueOf(&got).Elem().Comparable() {
-		return false
+		return false, nil
 	}
 
-	return got == m.want
+	return got == m.want, nil
+}
+
+// isDecodeError reports whether err is the decoder saying the value does
+// not read as the requested type, which is a no rather than a failure.
+func isDecodeError(err error) bool {
+	_, ok := errors.AsType[yaml.Error](err)
+
+	return ok
 }

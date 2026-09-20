@@ -4,9 +4,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
 
@@ -91,7 +93,7 @@ func TestContent(t *testing.T) {
 
 			doc := yamltest.FirstDocument(t, tc.input)
 
-			got := tc.matcher.Match(t.Context(), doc)
+			got := match(t, tc.matcher, doc)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -106,8 +108,28 @@ func TestContent(t *testing.T) {
 			  name: my-app
 		`))
 
-		got := m.Match(t.Context(), doc)
+		got := match(t, m, doc)
 		assert.True(t, got)
+	})
+
+	t.Run("alias without an anchor is an error", func(t *testing.T) {
+		t.Parallel()
+
+		m := matcher.Content(kindPath, "Deployment")
+		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: *missing`))
+
+		_, err := m.Match(t.Context(), doc)
+		require.ErrorIs(t, err, paths.ErrAlias)
+	})
+
+	t.Run("wildcard path is an error", func(t *testing.T) {
+		t.Parallel()
+
+		m := matcher.Content(paths.Root().Child("items").IndexAll(), "x")
+		doc := yamltest.FirstDocument(t, stringtest.Input(`items: [x]`))
+
+		_, err := m.Match(t.Context(), doc)
+		require.ErrorIs(t, err, paths.ErrWildcard)
 	})
 }
 
@@ -126,7 +148,7 @@ func TestContent_WithAll(t *testing.T) {
 			apiVersion: apps/v1
 		`))
 
-		got := m.Match(t.Context(), doc)
+		got := match(t, m, doc)
 		assert.True(t, got)
 	})
 
@@ -142,7 +164,7 @@ func TestContent_WithAll(t *testing.T) {
 			apiVersion: v1
 		`))
 
-		got := m.Match(t.Context(), doc)
+		got := match(t, m, doc)
 		assert.False(t, got)
 	})
 }

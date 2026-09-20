@@ -195,10 +195,9 @@ func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.Document) (*Schema,
 // lookup is [Registry.Lookup] before binding the error to the document.
 func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Document) (*Schema, error) {
 	for _, res := range r.resolvers {
-		// A matcher reports only whether it matched, so a resolver run
-		// under an ended context declines rather than reporting the
-		// cancellation. Check the context here, so a canceled lookup
-		// reports that instead of no match.
+		// A resolver that ignores its context, as a Ref does, would name
+		// a schema for a canceled lookup. Check the context here, so a
+		// canceled lookup reports that whatever the resolver does.
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("%w: %w", ErrResolve, ctx.Err())
 		}

@@ -13,7 +13,8 @@ type allMatcher struct {
 }
 
 // All creates a new [Matcher] that matches if ALL sub-matchers match (AND
-// logic). Evaluation short-circuits on the first non-matching matcher.
+// logic). Evaluation short-circuits on the first non-matching matcher, and
+// the first matcher that returns an error ends it with that error.
 //
 // Returns true if no matchers are provided.
 //
@@ -35,12 +36,14 @@ func All(matchers ...Matcher) Matcher {
 }
 
 // Match implements [Matcher].
-func (m *allMatcher) Match(ctx context.Context, doc *niceyaml.Document) bool {
+func (m *allMatcher) Match(ctx context.Context, doc *niceyaml.Document) (bool, error) {
 	for _, matcher := range m.matchers {
-		if !matcher.Match(ctx, doc) {
-			return false
+		ok, err := matcher.Match(ctx, doc)
+		if err != nil || !ok {
+			//nolint:wrapcheck // The sub-matcher's error is this matcher's own.
+			return false, err
 		}
 	}
 
-	return true
+	return true, nil
 }

@@ -78,6 +78,29 @@ func TestWhen(t *testing.T) {
 		require.ErrorIs(t, err, inner)
 	})
 
+	t.Run("matcher errors pass through", func(t *testing.T) {
+		t.Parallel()
+
+		undecided := errors.New("undecided")
+		called := false
+		r := schema.When(
+			matcher.Func(func(_ context.Context, _ *niceyaml.Document) (bool, error) {
+				return false, undecided
+			}),
+			schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
+				called = true
+
+				return schema.Ref{}, nil
+			}),
+		)
+
+		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
+		_, err := r.Resolve(t.Context(), doc)
+		require.ErrorIs(t, err, undecided)
+		require.NotErrorIs(t, err, schema.ErrNoMatch)
+		assert.False(t, called)
+	})
+
 	t.Run("guarded resolver is not consulted on reject", func(t *testing.T) {
 		t.Parallel()
 

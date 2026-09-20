@@ -15,7 +15,8 @@ type guarded struct {
 }
 
 // When creates a [Resolver] that delegates to r for documents m
-// accepts and reports [ErrNoMatch] for the rest.
+// accepts, reports [ErrNoMatch] for the rest, and returns the error of a
+// matcher that cannot decide, which ends a registry's lookup.
 //
 // This pairs a [Ref], which applies to every document, with a matcher that
 // decides which documents it should apply to:
@@ -44,7 +45,13 @@ func When(m matcher.Matcher, r Resolver) Resolver {
 
 // Resolve implements [Resolver].
 func (g *guarded) Resolve(ctx context.Context, doc *niceyaml.Document) (Ref, error) {
-	if !g.matcher.Match(ctx, doc) {
+	ok, err := g.matcher.Match(ctx, doc)
+	if err != nil {
+		//nolint:wrapcheck // The matcher's error passes through as the resolver's.
+		return Ref{}, err
+	}
+
+	if !ok {
 		return Ref{}, ErrNoMatch
 	}
 
