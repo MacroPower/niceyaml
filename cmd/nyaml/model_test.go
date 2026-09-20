@@ -120,7 +120,7 @@ func TestRevisionLabel(t *testing.T) {
 
 			m := newModel(&modelOptions{files: tc.files})
 			m.viewport.SetDiffMode(tc.diffMode)
-			m.viewport.GoToRevision(tc.index)
+			m.viewport.GotoRevision(tc.index)
 
 			assert.Equal(t, tc.want, m.revisionLabel())
 		})

@@ -426,7 +426,7 @@ func (m *model) revisionLabel() string {
 	rev := m.viewport.RevisionIndex() + 1
 
 	switch {
-	case m.viewport.IsShowingDiff():
+	case m.viewport.ShowingDiff():
 		modeIndicator := ""
 		if m.viewport.DiffMode() == yamlviewport.DiffModeOrigin {
 			modeIndicator = " origin"

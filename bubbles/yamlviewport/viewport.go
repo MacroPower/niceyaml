@@ -485,10 +485,10 @@ func (m *Model) RevisionNames() []string {
 	return names
 }
 
-// GoToRevision navigates to the revision at index, clamped to the valid range.
+// GotoRevision navigates to the revision at index, clamped to the valid range.
 // Index 0 always shows the first revision without diff markers.
 // Index 1 to N-1 shows a diff based on the current [DiffMode].
-func (m *Model) GoToRevision(index int) {
+func (m *Model) GotoRevision(index int) {
 	if !m.hasRevision() {
 		return
 	}
@@ -502,22 +502,22 @@ func (m *Model) RevisionCount() int {
 	return len(m.revisions)
 }
 
-// IsAtFirstRevision reports whether the viewport is at revision index 0.
-func (m *Model) IsAtFirstRevision() bool {
+// AtFirstRevision reports whether the viewport is at revision index 0.
+func (m *Model) AtFirstRevision() bool {
 	return m.revIndex == 0
 }
 
-// IsAtLatestRevision reports whether the viewport is at the latest revision.
-func (m *Model) IsAtLatestRevision() bool {
+// AtLatestRevision reports whether the viewport is at the latest revision.
+func (m *Model) AtLatestRevision() bool {
 	return m.revIndex >= len(m.revisions)-1
 }
 
-// IsShowingDiff reports whether the viewport is displaying a diff between
+// ShowingDiff reports whether the viewport is displaying a diff between
 // revisions.
 //
 // This is true when not at the first revision and [DiffMode] is not
 // [DiffModeNone].
-func (m *Model) IsShowingDiff() bool {
+func (m *Model) ShowingDiff() bool {
 	return m.hasRevision() && m.revIndex > 0 && m.diffMode != DiffModeNone
 }
 
@@ -526,7 +526,7 @@ func (m *Model) IsShowingDiff() bool {
 // Returns (0, 0) if no diff is being shown (at first revision, diff mode is none,
 // or no revisions exist).
 func (m *Model) DiffStats() (int, int) {
-	if !m.IsShowingDiff() {
+	if !m.ShowingDiff() {
 		return 0, 0
 	}
 
@@ -642,9 +642,9 @@ func (m *Model) SetContainerStyle(s lipgloss.Style) {
 // If already at the latest, does nothing.
 func (m *Model) NextRevision() { m.seekRevision(1) }
 
-// PrevRevision moves to the previous revision in history.
+// PreviousRevision moves to the previous revision in history.
 // If already at the first (index 0), does nothing.
-func (m *Model) PrevRevision() { m.seekRevision(-1) }
+func (m *Model) PreviousRevision() { m.seekRevision(-1) }
 
 // seekRevision moves the revision index by delta, with boundary checks.
 func (m *Model) seekRevision(delta int) {
@@ -652,11 +652,11 @@ func (m *Model) seekRevision(delta int) {
 		return
 	}
 
-	if delta > 0 && m.IsAtLatestRevision() {
+	if delta > 0 && m.AtLatestRevision() {
 		return
 	}
 
-	if delta < 0 && m.IsAtFirstRevision() {
+	if delta < 0 && m.AtFirstRevision() {
 		return
 	}
 
@@ -1028,7 +1028,7 @@ func (m *Model) resolveRevisionSource() (Revision, bool) {
 		return nil, false
 	}
 
-	if !m.IsShowingDiff() {
+	if !m.ShowingDiff() {
 		return m.currentRevision(), false
 	}
 
@@ -1684,8 +1684,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, m.KeyMap.NextRevision):
 			m.NextRevision()
 
-		case key.Matches(msg, m.KeyMap.PrevRevision):
-			m.PrevRevision()
+		case key.Matches(msg, m.KeyMap.PreviousRevision):
+			m.PreviousRevision()
 
 		case key.Matches(msg, m.KeyMap.ToggleDiffMode):
 			m.ToggleDiffMode()

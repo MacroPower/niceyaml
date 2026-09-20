@@ -28,8 +28,8 @@ type KeyMap struct {
 	Right key.Binding
 	// NextRevision navigates to the next revision.
 	NextRevision key.Binding
-	// PrevRevision navigates to the previous revision.
-	PrevRevision key.Binding
+	// PreviousRevision navigates to the previous revision.
+	PreviousRevision key.Binding
 	// ToggleDiffMode cycles through diff computation modes.
 	ToggleDiffMode key.Binding
 	// ToggleViewMode cycles through view rendering modes.
@@ -77,7 +77,7 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "next revision"),
 		),
-		PrevRevision: key.NewBinding(
+		PreviousRevision: key.NewBinding(
 			key.WithKeys("shift+tab"),
 			key.WithHelp("shift+tab", "prev revision"),
 		),
