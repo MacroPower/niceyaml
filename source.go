@@ -28,8 +28,9 @@ import (
 // the documents. Every error they and their Documents produce comes back
 // bound to the Source as a [SourceError]. [Document.Bind] binds errors
 // built elsewhere to the document they were checked against, and
-// [Source.Bind] binds one that carries a position or a range and so needs
-// no document. Rendering
+// [Source.Bind] binds one to the sole document of the file, as
+// [Source.Decode] decodes it, or to the Source alone when the error
+// carries a position or a range and so needs no document. Rendering
 // lives in a [line.View], which carries the overlays, annotations, and
 // flags that a [printer.Printer] renders over the [line.Lines] the Source
 // holds. [Source.Lines] returns those lines, which the [finder.Finder] and
@@ -353,12 +354,27 @@ func (s *Source) parse() (*ast.File, error) {
 	return nil, err
 }
 
-// Bind binds err to the [Source] with no document to resolve a path in.
-// It is the binding for an error that carries a [position.Position] or a
-// [position.Range], as a check that runs on [Source.Lines] produces, and
-// for one that carries no location, which then names the source alone. A
-// file that holds several documents binds such an error here without
-// picking one of them:
+// Bind binds err to the [Source]. A path in err resolves in the sole
+// document of the Source, the one [Source.Decode] decodes, so a check on
+// the value that Decode returned binds its error here:
+//
+//	cfg, err := source.Decode[Config](ctx)
+//	if err != nil {
+//		return err
+//	}
+//
+//	return source.Bind(checkHours(cfg))
+//
+// When the Source holds several documents or none, the path does not
+// resolve, and [SourceError.Range] returns the error [Source.Document]
+// reports, which wraps [ErrMultipleDocuments] or [ErrNoDocuments]; the
+// %+v verb prints it on a "no excerpt:" line. An error that carries a
+// path and names its document goes through [Document.Bind].
+//
+// An error that carries a [position.Position] or a [position.Range], as a
+// check that runs on [Source.Lines] produces, needs no document, and one
+// that carries no location names the source alone. A file that holds
+// several documents binds such an error here without picking one of them:
 //
 //	for i, ln := range source.Lines().AllLines() {
 //		if ln.Width() > 120 {
@@ -368,12 +384,9 @@ func (s *Source) parse() (*ast.File, error) {
 //		}
 //	}
 //
-// An error that carries a path needs the document the path resolves in,
-// so it goes through [Document.Bind]. Bound through the Source, its
-// location does not resolve, and [SourceError.Range] returns
-// [ErrNoLocation] naming the missing document. In every other way Bind is
-// [Document.Bind], which describes what comes back, and the
-// [SourceError.Document] of the result is nil.
+// In every other way Bind is [Document.Bind], which describes what comes
+// back. The [SourceError.Document] of the result is the sole document when
+// a path resolved in it, and nil otherwise.
 func (s *Source) Bind(err error) error {
 	return bindTree(err, s, nil)
 }

@@ -508,8 +508,9 @@ func (dd *Document) Validate(ctx context.Context, validators ...Validator) error
 //
 //	fmt.Errorf("document %d: %w", i, doc.Bind(err))
 //
-// An error that carries a position or a range rather than a path needs no
-// document, and [Source.Bind] binds it to the source alone.
+// [Source.Bind] binds an error to the sole document of a source that
+// holds one, and an error that carries a position or a range rather than a
+// path needs no document, so Source.Bind binds it to the source alone.
 //
 // Binding binds the whole tree of err: the [Error] that anchors it gives
 // the [SourceError] its location, and every error nested with

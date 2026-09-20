@@ -1520,7 +1520,7 @@ func TestSource_Bind(t *testing.T) {
 		assert.Equal(t, position.NewRange(position.New(2, 3), position.New(2, 5)), got)
 	})
 
-	t.Run("path error has no document to resolve in", func(t *testing.T) {
+	t.Run("path error has no single document to resolve in", func(t *testing.T) {
 		t.Parallel()
 
 		err := source.Bind(niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("b"))))
@@ -1529,10 +1529,98 @@ func TestSource_Bind(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 		assert.Equal(t, "two.yaml: $.b: bad", err.Error())
+		assert.Nil(t, bound.Document())
 
-		_, err = bound.Range()
-		require.ErrorIs(t, err, niceyaml.ErrNoLocation)
-		assert.Contains(t, err.Error(), "no document")
+		_, rangeErr := bound.Range()
+		require.ErrorIs(t, rangeErr, niceyaml.ErrMultipleDocuments)
+		require.NotErrorIs(t, rangeErr, niceyaml.ErrNoLocation)
+
+		// The %+v verb names the reason in place of the excerpt.
+		assert.Equal(t, stringtest.JoinLF(
+			"two.yaml: $.b: bad",
+			"",
+			"no excerpt: no single document to resolve the path in: two.yaml:2:1: multiple documents in source: 2 documents",
+		), fmt.Sprintf("%+v", err))
+	})
+
+	t.Run("path error resolves in the sole document", func(t *testing.T) {
+		t.Parallel()
+
+		single := niceyaml.NewSourceFromString("a: 1\nb: 22\n", niceyaml.WithName("one.yaml"))
+		err := single.Bind(niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("b"))))
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Equal(t, "one.yaml:2:4: $.b: bad", err.Error())
+
+		doc, docErr := single.Document()
+		require.NoError(t, docErr)
+		assert.Same(t, doc, bound.Document())
+
+		got, rangeErr := bound.Range()
+		require.NoError(t, rangeErr)
+		assert.Equal(t, position.NewRange(position.New(1, 3), position.New(1, 5)), got)
+
+		assert.Equal(t, stringtest.JoinLF(
+			"one.yaml:2:4: $.b: bad",
+			"",
+			"   1 | a: 1",
+			"   2 | b: 22",
+			"     |    ^^",
+		), fmt.Sprintf("%+v", err))
+	})
+
+	t.Run("nested path errors resolve in the sole document", func(t *testing.T) {
+		t.Parallel()
+
+		single := niceyaml.NewSourceFromString("a: 1\nb: 22\n", niceyaml.WithName("one.yaml"))
+		err := single.Bind(niceyaml.NewError("2 problems", niceyaml.WithErrors(
+			niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a"))),
+			niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b").Key())),
+		)))
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Nil(t, bound.Document())
+
+		doc, docErr := single.Document()
+		require.NoError(t, docErr)
+
+		children := bound.Errors()
+		require.Len(t, children, 2)
+		assert.Same(t, doc, children[0].Document())
+		assert.Same(t, doc, children[1].Document())
+
+		assert.Equal(t, stringtest.JoinLF(
+			"one.yaml: 2 problems",
+			"one.yaml:1:4: $.a: bad a",
+			"one.yaml:2:1: $.b~: bad b",
+			"",
+			"   1 | a: 1",
+			"     |    ^ bad a",
+			"   2 | b: 22",
+			"     | ^ bad b",
+		), fmt.Sprintf("%+v", err))
+	})
+
+	t.Run("path error on a source that does not parse", func(t *testing.T) {
+		t.Parallel()
+
+		broken := niceyaml.NewSourceFromString("a: [\n", niceyaml.WithName("broken.yaml"))
+		err := broken.Bind(niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("a"))))
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Equal(t, "broken.yaml: $.a: bad", err.Error())
+
+		_, parseErr := broken.File()
+		require.Error(t, parseErr)
+
+		_, rangeErr := bound.Range()
+		require.ErrorIs(t, rangeErr, parseErr)
 	})
 
 	t.Run("error without a location names the source", func(t *testing.T) {
