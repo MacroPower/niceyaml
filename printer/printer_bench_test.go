@@ -59,7 +59,7 @@ func BenchmarkPrinterPrint_WithOverlays(b *testing.B) {
 
 	yaml := yamltest.GenerateYAML(500)
 	highlightStyle := lipgloss.NewStyle().Background(lipgloss.Color("3"))
-	overlayStyler := style.NewStyles(lipgloss.NewStyle(), style.Set(benchmarkOverlayKind, highlightStyle))
+	overlayStyler := style.New(lipgloss.NewStyle(), style.Set(benchmarkOverlayKind, highlightStyle))
 
 	for _, rc := range rangeCounts {
 		b.Run(rc.name, func(b *testing.B) {
@@ -101,7 +101,7 @@ func BenchmarkPrinterPrint_WithOverlays_IncludingSetup(b *testing.B) {
 
 	yaml := yamltest.GenerateYAML(500)
 	highlightStyle := lipgloss.NewStyle().Background(lipgloss.Color("3"))
-	overlayStyler := style.NewStyles(lipgloss.NewStyle(), style.Set(benchmarkOverlayKind, highlightStyle))
+	overlayStyler := style.New(lipgloss.NewStyle(), style.Set(benchmarkOverlayKind, highlightStyle))
 
 	for _, rc := range rangeCounts {
 		b.Run(rc.name, func(b *testing.B) {
@@ -142,7 +142,7 @@ func BenchmarkPrinterPrint_OverlaysDensity(b *testing.B) {
 
 	yaml := yamltest.GenerateYAML(200)
 	highlightStyle := lipgloss.NewStyle().Background(lipgloss.Color("3"))
-	overlayStyler := style.NewStyles(lipgloss.NewStyle(), style.Set(benchmarkOverlayKind, highlightStyle))
+	overlayStyler := style.New(lipgloss.NewStyle(), style.Set(benchmarkOverlayKind, highlightStyle))
 
 	for _, d := range densities {
 		b.Run(d.name, func(b *testing.B) {

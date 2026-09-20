@@ -20,14 +20,14 @@ func TestStyles_Style_EmptyStyles(t *testing.T) {
 	assert.Equal(t, lipgloss.Style{}, got)
 }
 
-func TestNewStyles(t *testing.T) {
+func TestNew(t *testing.T) {
 	t.Parallel()
 
 	base := lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff"))
 	red := base.Foreground(lipgloss.Color("#ff0000"))
 	green := base.Foreground(lipgloss.Color("#00ff00"))
 
-	styles := style.NewStyles(
+	styles := style.New(
 		base,
 		style.Set(kind.LiteralNumber, red),
 		style.Set(kind.Comment, green),
@@ -96,7 +96,7 @@ func TestNewStyles(t *testing.T) {
 	})
 }
 
-func TestNewStyles_TextStyles(t *testing.T) {
+func TestNew_TextStyles(t *testing.T) {
 	t.Parallel()
 
 	base := lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff"))
@@ -104,7 +104,7 @@ func TestNewStyles_TextStyles(t *testing.T) {
 	t.Run("inherit from Text when not explicitly set", func(t *testing.T) {
 		t.Parallel()
 
-		styles := style.NewStyles(base)
+		styles := style.New(base)
 
 		for _, s := range []kind.Kind{kind.TextAccentDim, kind.TextSubtleDim, kind.GenericHeading} {
 			got := styles.Style(s)
@@ -123,7 +123,7 @@ func TestNewStyles_TextStyles(t *testing.T) {
 			Foreground(lipgloss.Color("#000000")).
 			Background(lipgloss.Color("#ff0000"))
 
-		styles := style.NewStyles(base,
+		styles := style.New(base,
 			style.Set(kind.TextAccentDim, accent),
 			style.Set(kind.TextSubtleDim, subtle),
 			style.Set(kind.GenericHeading, title),
@@ -136,14 +136,14 @@ func TestNewStyles_TextStyles(t *testing.T) {
 	})
 }
 
-func TestNewStyles_Override(t *testing.T) {
+func TestNew_Override(t *testing.T) {
 	t.Parallel()
 
 	base := lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff"))
 	red := base.Foreground(lipgloss.Color("#ff0000"))
 	blue := base.Foreground(lipgloss.Color("#0000ff"))
 
-	styles := style.NewStyles(
+	styles := style.New(
 		base,
 		style.Set(kind.Text, red),
 		style.Set(kind.LiteralNumber, blue),
@@ -174,7 +174,7 @@ func TestStyles_With(t *testing.T) {
 	green := lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff00"))
 	yellow := lipgloss.NewStyle().Foreground(lipgloss.Color("#ffff00"))
 
-	original := style.NewStyles(base, style.Set(kind.Comment, green))
+	original := style.New(base, style.Set(kind.Comment, green))
 
 	// Custom style key for testing.
 	const customKey kind.Kind = "customKey"
@@ -272,7 +272,7 @@ func TestStyles_With(t *testing.T) {
 func TestStyles_UnsetCategories(t *testing.T) {
 	t.Parallel()
 
-	styles := style.NewStyles(lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff")))
+	styles := style.New(lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff")))
 
 	// An unset predefined category inherits the base, and an unknown key is
 	// an empty style.

@@ -20,23 +20,23 @@ var emptyStyle = lipgloss.NewStyle()
 // are stored as given.
 //
 // The zero value resolves every kind to an empty style. Create instances
-// with [NewStyles].
+// with [New].
 type Styles struct {
 	overrides map[kind.Kind]*lipgloss.Style
 	resolved  map[kind.Kind]*lipgloss.Style
 }
 
-// StylesOption configures a [Styles] value during construction.
+// Option configures a [Styles] value during construction.
 //
 // Available options:
 //   - [Set]
-type StylesOption func(*Styles)
+type Option func(*Styles)
 
-// Set returns a [StylesOption] that sets the [lipgloss.Style] for a [kind.Kind].
+// Set returns an [Option] that sets the [lipgloss.Style] for a [kind.Kind].
 // Kinds below it in the hierarchy inherit it unless they are set themselves.
 //
 //nolint:gocritic // Value semantics preferred for API ergonomics.
-func Set(s kind.Kind, ls lipgloss.Style) StylesOption {
+func Set(s kind.Kind, ls lipgloss.Style) Option {
 	return func(st *Styles) {
 		if st.overrides == nil {
 			st.overrides = make(map[kind.Kind]*lipgloss.Style, 1)
@@ -46,14 +46,14 @@ func Set(s kind.Kind, ls lipgloss.Style) StylesOption {
 	}
 }
 
-// NewStyles creates a new [Styles] value with inheritance resolved.
+// New creates a new [Styles] value with inheritance resolved.
 //
 // The base style is used for [kind.Text] and inherited by every other kind.
 // Use [Set] options to override specific kinds; child kinds inherit from
 // their closest set ancestor.
 //
 //nolint:gocritic // Value semantics preferred for API ergonomics.
-func NewStyles(base lipgloss.Style, opts ...StylesOption) Styles {
+func New(base lipgloss.Style, opts ...Option) Styles {
 	st := Styles{overrides: map[kind.Kind]*lipgloss.Style{kind.Text: &base}}
 
 	for _, opt := range opts {
@@ -111,7 +111,7 @@ func (s Styles) Style(st kind.Kind) lipgloss.Style {
 // With returns a copy of the [Styles] with the given options applied and
 // inheritance resolved again, so overriding a parent kind also changes
 // the children that inherit from it. The receiver is unchanged.
-func (s Styles) With(opts ...StylesOption) Styles {
+func (s Styles) With(opts ...Option) Styles {
 	c := Styles{overrides: make(map[kind.Kind]*lipgloss.Style, len(s.overrides)+len(opts))}
 	maps.Copy(c.overrides, s.overrides)
 

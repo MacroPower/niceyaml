@@ -16,12 +16,12 @@
 //
 // # Creating Styles
 //
-// [NewStyles] creates a [Styles] value that resolves inherited styles.
+// [New] creates a [Styles] value that resolves inherited styles.
 //
 // Provide a base [lipgloss.Style] and use [Set] to override specific
 // kinds:
 //
-//	styles := style.NewStyles(
+//	styles := style.New(
 //	    lipgloss.NewStyle().Foreground(lipgloss.Color("white")),
 //	    style.Set(kind.Comment, lipgloss.NewStyle().Foreground(lipgloss.Color("8"))),
 //	    style.Set(kind.LiteralNumber, lipgloss.NewStyle().Foreground(lipgloss.Color("cyan"))),

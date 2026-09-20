@@ -15,7 +15,7 @@ func Default() Styles {
 		Foreground(charmtone.Smoke).
 		Background(charmtone.Pepper)
 
-	return NewStyles(
+	return New(
 		base,
 		Set(kind.Comment, base.Foreground(charmtone.Oyster)),
 		Set(kind.CommentPreproc, base.Foreground(charmtone.Smoke)),

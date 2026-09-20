@@ -417,13 +417,13 @@ var marker = lipgloss.Color("#123456")
 
 // empty builds a theme with no categories set.
 func empty() style.Styles {
-	return style.NewStyles(lipgloss.NewStyle())
+	return style.New(lipgloss.NewStyle())
 }
 
 // marked returns a builder for a theme whose only set category is s.
 func marked(s kind.Kind) func() style.Styles {
 	return func() style.Styles {
-		return style.NewStyles(lipgloss.NewStyle(), style.Set(s, lipgloss.NewStyle().Foreground(marker)))
+		return style.New(lipgloss.NewStyle(), style.Set(s, lipgloss.NewStyle().Foreground(marker)))
 	}
 }
 

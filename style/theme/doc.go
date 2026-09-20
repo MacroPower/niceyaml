@@ -46,7 +46,7 @@
 // so a program can shadow a built-in theme:
 //
 //	custom := theme.New("my-theme", theme.Dark, func() style.Styles {
-//		return style.NewStyles(lipgloss.NewStyle() /* , style.Set(...) */)
+//		return style.New(lipgloss.NewStyle() /* , style.Set(...) */)
 //	})
 //	catalog := theme.Builtin().With(custom)
 //

@@ -39,7 +39,7 @@ type palette struct {
 	// Overrides is applied last, after the derived kinds and Tokens, for
 	// the few kinds a theme sets outside the template. An override
 	// replaces a kind's style rather than layering over it.
-	Overrides []style.StylesOption
+	Overrides []style.Option
 	// Mode is the background the theme is designed for. It also picks the
 	// direction of the derived shifts. [kind.TextSubtle] and
 	// [kind.TextSubtleDim] move toward the background, while highlights,
@@ -77,7 +77,7 @@ func (p palette) styles() style.Styles {
 
 	// The derived kinds resolve first, so a Tokens entry naming one of them
 	// layers over the derived value rather than the other way around.
-	derived := []style.StylesOption{
+	derived := []style.Option{
 		style.Set(kind.GenericHeading, heading(accent)),
 		style.Set(kind.GenericHeadingAccent,
 			base.Background(towardFg(bg, surfaceShift)).Foreground(towardFg(fg, dimShift)),
@@ -97,7 +97,7 @@ func (p palette) styles() style.Styles {
 		style.Set(kind.TextError, base.Foreground(errColor)),
 	}
 
-	s := style.NewStyles(base, derived...)
+	s := style.New(base, derived...)
 
 	// A Tokens spec layers over the style its kind already resolves to, so
 	// a spec of "bold" alone keeps the ancestor's colors. Parents come

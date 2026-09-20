@@ -46,7 +46,7 @@ func testPrinter() *printer.Printer {
 // testPrinterWithGutter returns a printer without styles but with a custom gutter.
 func testPrinterWithGutter(gutter printer.GutterFunc) *printer.Printer {
 	return printer.New(
-		printer.WithStyles(style.NewStyles(
+		printer.WithStyles(style.New(
 			lipgloss.NewStyle(),
 			style.Set(testOverlayHighlight, testHighlightStyle()),
 		)),
@@ -1804,7 +1804,7 @@ func TestPrinter_Style(t *testing.T) {
 		wantItalic bool
 	}{
 		"returns style from styles map": {
-			styles: style.NewStyles(
+			styles: style.New(
 				base,
 				style.Set(kind.NameTag, base.Bold(true)),
 			),
@@ -1812,7 +1812,7 @@ func TestPrinter_Style(t *testing.T) {
 			wantBold: true,
 		},
 		"child inherits from parent": {
-			styles:     style.NewStyles(base.Italic(true)),
+			styles:     style.New(base.Italic(true)),
 			query:      kind.NameTag,
 			wantItalic: true,
 		},
@@ -2627,7 +2627,7 @@ func TestPrinter_BlendStyles(t *testing.T) {
 	)
 
 	// Overlay styler mapping kinds to tag-wrapped styles.
-	testOverlayStyler := style.NewStyles(
+	testOverlayStyler := style.New(
 		lipgloss.NewStyle(),
 		style.Set(kindHL, styleWithTag("hl")),
 		style.Set(kindAll, styleWithTag("all")),
@@ -2878,14 +2878,14 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 			// Build overlay styler with styles from test case.
 			kinds := []kind.Kind{colorKind1, colorKind2, colorKind3}
 
-			overlayOpts := make([]style.StylesOption, 0, len(tc.overlays))
+			overlayOpts := make([]style.Option, 0, len(tc.overlays))
 			for i, od := range tc.overlays {
 				overlayOpts = append(overlayOpts, style.Set(kinds[i], od.style))
 				view.BlendOverlay(kinds[i], position.NewRange(od.start, od.end))
 			}
 
 			p := printer.New(
-				printer.WithStyles(style.NewStyles(lipgloss.NewStyle(), overlayOpts...)),
+				printer.WithStyles(style.New(lipgloss.NewStyle(), overlayOpts...)),
 				printer.WithContainerStyle(lipgloss.NewStyle()),
 				printer.WithGutter(printer.NoGutter),
 			)
@@ -3093,7 +3093,7 @@ func TestPrinter_AnnotationFuncKeepsStyling(t *testing.T) {
 	view := niceyaml.NewSourceFromString("key: value").View()
 	view.Annotate(0, line.Annotation{Content: "oops", Placement: line.Below})
 
-	styles := style.NewStyles(lipgloss.NewStyle(), style.Set(kind.TextError, lipgloss.NewStyle().Bold(true)))
+	styles := style.New(lipgloss.NewStyle(), style.Set(kind.TextError, lipgloss.NewStyle().Bold(true)))
 	styled := func(ctx printer.AnnotationContext) string {
 		return ctx.Styles.Style(kind.TextError).Render(strings.Join(ctx.Annotations.Contents(), "; "))
 	}
@@ -3408,7 +3408,7 @@ func TestPrinter_BlendKey_StyleNames(t *testing.T) {
 	)
 
 	p := printer.New(
-		printer.WithStyles(style.NewStyles(
+		printer.WithStyles(style.New(
 			lipgloss.NewStyle(),
 			style.Set(ab, wrap("AB")),
 			style.Set(a, wrap("A")),
@@ -3452,7 +3452,7 @@ func TestPrinter_Overlay_Attributes(t *testing.T) {
 			view.AddLineOverlay(0, line.Overlay{Kind: underlined, Cols: position.NewSpan(0, 4), Blend: tc.blend})
 
 			p := printer.New(
-				printer.WithStyles(style.NewStyles(lipgloss.NewStyle(), style.Set(underlined, st))),
+				printer.WithStyles(style.New(lipgloss.NewStyle(), style.Set(underlined, st))),
 				printer.WithContainerStyle(lipgloss.NewStyle()),
 				printer.WithGutter(printer.NoGutter),
 			)
@@ -3467,7 +3467,7 @@ func TestPrinter_SeparatorStyle(t *testing.T) {
 
 	// The whitespace a token carries before its text renders in kind.Text,
 	// whatever kind of token follows it. Brackets mark the styled tokens.
-	styles := style.NewStyles(
+	styles := style.New(
 		lipgloss.NewStyle(),
 		style.Set(kind.LiteralString, testHighlightStyle()),
 		style.Set(kind.LiteralStringDouble, testHighlightStyle()),

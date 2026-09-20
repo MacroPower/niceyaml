@@ -41,7 +41,7 @@ func TestViewport_SearchDecorationRefreshesRowCounts(t *testing.T) {
 	widen := lipgloss.NewStyle().Transform(func(s string) string {
 		return "<<" + s + ">>"
 	})
-	styles := style.NewStyles(lipgloss.NewStyle(),
+	styles := style.New(lipgloss.NewStyle(),
 		style.Set(kind.GenericHighlight, widen),
 		style.Set(kind.GenericHighlightDim, widen),
 	)
