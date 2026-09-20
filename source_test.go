@@ -691,7 +691,7 @@ func TestSource_File_TokensFindLines(t *testing.T) {
 
 		// A path to a key resolves to the key token, and a block scalar to
 		// its indicator, each of which finds its own columns.
-		keyTk, err := paths.Root().Child("other").KeyToken(doc.Node())
+		keyTk, err := paths.Root().Child("other").Key().Token(doc.Node())
 		require.NoError(t, err)
 		assert.Equal(t, position.Ranges{
 			position.NewRange(position.New(3, 0), position.New(3, 5)),

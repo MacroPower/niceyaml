@@ -38,6 +38,7 @@ const (
 	segmentIndex                        // [n]
 	segmentIndexAll                     // [*]
 	segmentRecursive                    // ..name
+	segmentKey                          // ~
 )
 
 // segment is one selector of a [Path].
@@ -58,6 +59,8 @@ func (s segment) String() string {
 		return "[*]"
 	case segmentRecursive:
 		return ".." + quoteName(s.name)
+	case segmentKey:
+		return "~"
 	default:
 		return ""
 	}
@@ -65,7 +68,7 @@ func (s segment) String() string {
 
 // reservedNameChars are the characters that force a selector name into
 // single quotes so that [Parse] reads it back as one selector.
-const reservedNameChars = ".*[]$'"
+const reservedNameChars = ".*[]$'~"
 
 // quoteName returns name in the form [Parse] accepts as a child or
 // recursive selector, wrapping it in single quotes when it contains reserved
@@ -93,9 +96,11 @@ func quoteName(name string) string {
 //	image := spec.Child("image")       // $.spec.image
 //
 // The zero value is the document root, the same as [Root]. A path selects a
-// node, which for a mapping entry is its value. [Path.Token] returns the
-// token that starts that node and [Path.KeyToken] the key of the entry, so
-// the same Path names either token of an entry.
+// node, which for a mapping entry is its value. [Path.Key] appends the `~`
+// selector, which picks the key of that entry instead, so one Path names
+// either node of an entry and every method that takes a Path, such as
+// [Path.Token] or [niceyaml.WithPath], reads the key or the value from the
+// Path alone.
 //
 // [Path.String] returns the selectors as a path expression, and [Parse]
 // reads it back as an equal Path.
@@ -150,6 +155,21 @@ func (p Path) IndexAll() Path {
 	return p.extend(segment{kind: segmentIndexAll})
 }
 
+// Key returns a copy of the path with a `~` selector appended, which picks
+// the key of the mapping entry the selector before it picked rather than
+// its value. The selector looks through the `?` indicator of an explicit
+// key and any anchor or tag on the key. Where the path selects no entry,
+// such as a sequence element or the root, the `~` selects the node the
+// path already does, so an error at such a path highlights the same text
+// with or without it.
+//
+//	name := paths.Root().Child("metadata", "name")
+//	value, err := name.Token(doc)       // the token that starts the value
+//	key, err := name.Key().Token(doc)   // the key token "name"
+func (p Path) Key() Path {
+	return p.extend(segment{kind: segmentKey})
+}
+
 // Recursive returns a copy of the path with a `..selector` recursive descent
 // selector appended.
 func (p Path) Recursive(selector string) Path {
@@ -179,6 +199,9 @@ func (p Path) String() string {
 // quoting for recursive selectors, so Recursive("a.b") prints as `$..a.b`,
 // which [yaml.PathString] reads as two selectors. Use [Path.String] for a
 // form that [Parse] reads back.
+//
+// The `~` selector from [Path.Key] is left out, since goccy/go-yaml has
+// no selector for the key of an entry, so the result selects the value.
 func (p Path) YAMLPath() *yaml.Path {
 	pb := (&yaml.PathBuilder{}).Root()
 
@@ -195,6 +218,8 @@ func (p Path) YAMLPath() *yaml.Path {
 			pb = pb.IndexAll()
 		case segmentRecursive:
 			pb = pb.Recursive(seg.name)
+		case segmentKey:
+			// No goccy selector names a key.
 		}
 	}
 
@@ -334,9 +359,9 @@ func (p Path) Node(doc *ast.DocumentNode) (ast.Node, error) {
 // Token resolves the [*token.Token] that starts the node the path selects
 // in doc: a scalar's own token, the first key of a mapping, or the first
 // element of a sequence. For a mapping entry that is the token of its
-// value; [Path.KeyToken] returns the key. An alias resolves to its own
-// token rather than the anchor's content, since that is where the path
-// points in the source.
+// value, and for a path ending in the `~` selector from [Path.Key] it is
+// the token of the key. An alias resolves to its own token rather than the
+// anchor's content, since that is where the path points in the source.
 //
 // The path resolves against the document body only, so the same path
 // resolves to different tokens in different documents of one file. Returns
@@ -350,28 +375,6 @@ func (p Path) Token(doc *ast.DocumentNode) (*token.Token, error) {
 	}
 
 	return p.tokenOf(m.node)
-}
-
-// KeyToken resolves the [*token.Token] of the key of the mapping entry the
-// last selector of the path picked, looking through the `?` indicator of an
-// explicit key and any anchor or tag on the key. A path that ends at a
-// sequence element or at the root picks no entry, and KeyToken then returns
-// the token [Path.Token] returns. It resolves as Token does and returns the
-// same errors.
-func (p Path) KeyToken(doc *ast.DocumentNode) (*token.Token, error) {
-	m, err := p.single(doc)
-	if err != nil {
-		return nil, err
-	}
-
-	node := m.node
-	if m.entry != nil {
-		if key := keyContent(m.entry.Key); key != nil {
-			node = key
-		}
-	}
-
-	return p.tokenOf(node)
 }
 
 // tokenOf returns the token that starts node. A tree built by hand may hold

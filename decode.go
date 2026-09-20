@@ -398,11 +398,12 @@ func (dd *Document) Span() position.Span {
 	return dd.span
 }
 
-// Ranges returns the ranges the value at path covers, one per line, without
+// Ranges returns the ranges the node at path covers, one per line, without
 // the spaces around its content: the ranges [SourceError.Excerpt] highlights
 // for an [Error] built with [WithPath] at that path. A block scalar covers
-// its indicator. [Document.KeyRanges] covers the key of the entry instead.
-// The ranges highlight the value on a view of the source:
+// its indicator, and a path from [paths.Path.Key] covers the key of the
+// entry rather than its value. The ranges highlight the value on a view of
+// the source:
 //
 //	ranges, err := doc.Ranges(paths.Root().Child("spec", "replicas"))
 //	if err != nil {
@@ -417,23 +418,7 @@ func (dd *Document) Span() position.Span {
 // an error wrapping [ErrNoLocation]. Returns nil when the value holds no
 // content on any line.
 func (dd *Document) Ranges(path paths.Path) (position.Ranges, error) {
-	return dd.ranges(path, false)
-}
-
-// KeyRanges returns the ranges the key of the mapping entry at path covers,
-// as [Document.Ranges] returns them for its value: the ranges
-// [SourceError.Excerpt] highlights for an [Error] built with [WithKey] at
-// that path. A path that selects a sequence element or the root picks no
-// entry, and KeyRanges then returns what Ranges returns. It returns the
-// same errors as Ranges.
-func (dd *Document) KeyRanges(path paths.Path) (position.Ranges, error) {
-	return dd.ranges(path, true)
-}
-
-// ranges returns the content ranges of the token path resolves to: the key
-// of the entry it selects when key is set and its value otherwise.
-func (dd *Document) ranges(path paths.Path, key bool) (position.Ranges, error) {
-	pos, err := dd.position(path, key)
+	pos, err := dd.position(path)
 	if err != nil {
 		return nil, dd.Bind(err)
 	}
@@ -444,17 +429,11 @@ func (dd *Document) ranges(path paths.Path, key bool) (position.Ranges, error) {
 }
 
 // position returns the position of the token path resolves to in the
-// document: the key of the entry it selects when key is set, from
-// [paths.Path.KeyToken], and its value otherwise, from [paths.Path.Token].
-// An error from either names the path already and comes back as it is, and
-// a token without a position is [ErrNoLocation].
-func (dd *Document) position(path paths.Path, key bool) (position.Position, error) {
-	resolve := path.Token
-	if key {
-		resolve = path.KeyToken
-	}
-
-	tk, err := resolve(dd.doc)
+// document, from [paths.Path.Token]. An error from it names the path
+// already and comes back as it is, and a token without a position is
+// [ErrNoLocation].
+func (dd *Document) position(path paths.Path) (position.Position, error) {
+	tk, err := path.Token(dd.doc)
 	if err != nil {
 		//nolint:wrapcheck // The paths error already names the path.
 		return position.Position{}, err

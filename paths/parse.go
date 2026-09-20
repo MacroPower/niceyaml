@@ -23,6 +23,8 @@ var ErrInvalidPath = errors.New("invalid path")
 //	[n]       a sequence element by 0-based index, written in decimal
 //	          with no sign and no leading zero
 //	[*]       every sequence element
+//	~         the key of the mapping entry the selector before it picked,
+//	          as [Path.Key] appends it
 //
 // Returns an error wrapping [ErrInvalidPath] for a malformed expression.
 func Parse(expr string) (Path, error) {
@@ -73,6 +75,8 @@ func parseSegments(expr string) ([]segment, error) {
 			seg, rest, err = parseChild(rest[1:])
 		case strings.HasPrefix(rest, "["):
 			seg, rest, err = parseIndex(rest[1:])
+		case strings.HasPrefix(rest, "~"):
+			seg, rest = segment{kind: segmentKey}, rest[1:]
 		default:
 			return nil, fmt.Errorf("unexpected %q at %d", rest[0], len(expr)-len(rest))
 		}
@@ -87,9 +91,10 @@ func parseSegments(expr string) ([]segment, error) {
 	return segs, nil
 }
 
-// parseName reads an unquoted selector name up to the next `.` or `[`.
+// parseName reads an unquoted selector name up to the next `.`, `[`, or
+// `~`.
 func parseName(rest string) (string, string, error) {
-	end := strings.IndexAny(rest, ".[")
+	end := strings.IndexAny(rest, ".[~")
 	if end < 0 {
 		end = len(rest)
 	}

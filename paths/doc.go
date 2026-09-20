@@ -3,14 +3,14 @@
 // A [Path] is a sequence of selectors from the document root, written in the
 // YAMLPath syntax that goccy/go-yaml uses (`$.metadata.name`,
 // `$.items[0]`). A path selects a node, which for a mapping entry is its
-// value. Error highlighting and precise editing often need one token of an
-// entry rather than the whole node, so a Path resolves to either token of
-// the entry it selects:
+// value. Error highlighting and precise editing often need the key of an
+// entry rather than its value, so [Path.Key] appends a `~` selector that
+// picks the key instead, and every method reads which one from the Path:
 //
 //	p := paths.Root().Child("metadata", "name")
-//	node, err := p.Node(doc)      // the value node
-//	value, err := p.Token(doc)    // the token that starts the value
-//	key, err := p.KeyToken(doc)   // the key token "name"
+//	node, err := p.Node(doc)          // the value node
+//	value, err := p.Token(doc)        // the token that starts the value
+//	key, err := p.Key().Token(doc)    // the key token "name"
 //
 // Every method resolves within a single document, so callers working with
 // multi-document files pick the document first.
@@ -46,9 +46,9 @@
 // # Integration with niceyaml.Error
 //
 // [Path] is directly usable with [niceyaml.WithPath], which highlights the
-// value at the path, and [niceyaml.WithKey], which highlights the key of the
-// entry. The error carries the path, and [niceyaml.Document.Bind] resolves
-// it against the document:
+// value at the path, or the key of the entry for a path from [Path.Key].
+// The error carries the path, and [niceyaml.Document.Bind] resolves it
+// against the document:
 //
 //	err := niceyaml.NewError(
 //		"invalid value",
@@ -76,6 +76,7 @@
 //	paths.Root().Child("items").Index(0).Child("name")  // $.items[0].name
 //	paths.Root().Child("spec").IndexAll()               // $.spec[*]
 //	paths.Root().Recursive("name")                      // $..name
+//	paths.Root().Child("spec").Key()                    // $.spec~
 //
 // A Path is a value that never changes, so a common prefix can be shared
 // safely:

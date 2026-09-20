@@ -127,6 +127,16 @@ func TestPath_Build(t *testing.T) {
 			want:     "$..'x.y'",
 			wantYAML: "$..x.y",
 		},
+		"key selector, which goccy has no form for": {
+			build:    func() paths.Path { return paths.Root().Child("spec", "name").Key() },
+			want:     "$.spec.name~",
+			wantYAML: "$.spec.name",
+		},
+		"tilde in a name is quoted": {
+			build:    func() paths.Path { return paths.Root().Child("a~b") },
+			want:     "$.'a~b'",
+			wantYAML: "$.a~b",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -264,6 +274,18 @@ func TestParse(t *testing.T) {
 			expr: "$..''[0]",
 			want: "$..''[0]",
 		},
+		"key selector": {
+			expr: "$.spec.name~",
+			want: "$.spec.name~",
+		},
+		"key selector on the root": {
+			expr: "$~",
+			want: "$~",
+		},
+		"key selector after an index": {
+			expr: "$.items[0]~",
+			want: "$.items[0]~",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -327,6 +349,9 @@ func TestParse_Invalid(t *testing.T) {
 		"bare text after root": {
 			expr: "$foo",
 		},
+		"bare text after key selector": {
+			expr: "$.a~b",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -359,6 +384,7 @@ func TestParse_RoundTrip(t *testing.T) {
 		"numeric name":     paths.Root().Child("1"),
 		"space in name":    paths.Root().Child("has space"),
 		"only reserved":    paths.Root().Child("."),
+		"tilde in name":    paths.Root().Child("a~b"),
 		"goccy compatible": paths.Root().Child("a.b").Index(1).Child("c"),
 	}
 
@@ -374,6 +400,33 @@ func TestParse_RoundTrip(t *testing.T) {
 			// The goccy parser accepts the same expression.
 			_, err = yaml.PathString(want.String())
 			require.NoError(t, err)
+		})
+	}
+}
+
+func TestParse_RoundTrip_Key(t *testing.T) {
+	t.Parallel()
+
+	// The goccy parser has no key selector, so a key path stays out of the
+	// table above, but Parse reads back what String writes.
+	tcs := map[string]paths.Path{
+		"key":               paths.Root().Child("a").Key(),
+		"key of root":       paths.Root().Key(),
+		"key of element":    paths.Root().Child("items").Index(0).Key(),
+		"key then child":    paths.Root().Child("a").Key().Child("b"),
+		"quoted name key":   paths.Root().Child("a.b").Key(),
+		"recursive key":     paths.Root().Recursive("name").Key(),
+		"empty name key":    paths.Root().Child("").Key(),
+		"tilde in name key": paths.Root().Child("a~b").Key(),
+	}
+
+	for name, want := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := paths.Parse(want.String())
+			require.NoError(t, err)
+			assert.Equal(t, want, got)
 		})
 	}
 }
@@ -599,8 +652,8 @@ func TestPath_Token_NoDocument(t *testing.T) {
 	path := paths.Root().Child("name")
 
 	for name, resolve := range map[string]func(*ast.DocumentNode) (*token.Token, error){
-		"Token":    path.Token,
-		"KeyToken": path.KeyToken,
+		"Token": path.Token,
+		"Key":   path.Key().Token,
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -929,7 +982,7 @@ chain:
 	t.Run("merge key entry itself is addressable", func(t *testing.T) {
 		t.Parallel()
 
-		tk, err := paths.Root().Child("merged", "<<").KeyToken(file.Docs[0])
+		tk, err := paths.Root().Child("merged", "<<").Key().Token(file.Docs[0])
 		require.NoError(t, err)
 		assert.Equal(t, "<<", tk.Value)
 	})
@@ -1091,7 +1144,7 @@ func TestPath_HandBuiltAST(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, mapping.Values[0].GetToken(), tk)
 
-		tk, err = paths.Root().Child("").KeyToken(doc)
+		tk, err = paths.Root().Child("").Key().Token(doc)
 		require.NoError(t, err)
 		assert.Equal(t, "1", tk.Value)
 	})
@@ -1291,7 +1344,7 @@ func TestPath_Token_NotFound(t *testing.T) {
 			require.ErrorIs(t, err, paths.ErrNotFound)
 			assert.Contains(t, err.Error(), path.String())
 
-			_, err = path.KeyToken(file.Docs[0])
+			_, err = path.Key().Token(file.Docs[0])
 			require.ErrorIs(t, err, paths.ErrNotFound)
 
 			_, err = path.Node(file.Docs[0])
@@ -1403,7 +1456,7 @@ merged:
 		_, err = path.Node(file.Docs[0])
 		require.ErrorIs(t, err, paths.ErrWildcard)
 
-		_, err = paths.Root().Recursive("name").KeyToken(file.Docs[0])
+		_, err = paths.Root().Recursive("name").Key().Token(file.Docs[0])
 		require.ErrorIs(t, err, paths.ErrWildcard)
 	})
 
@@ -1518,12 +1571,11 @@ none: []
 func resolveToken(t *testing.T, path paths.Path, key bool, doc *ast.DocumentNode) *token.Token {
 	t.Helper()
 
-	resolve := path.Token
 	if key {
-		resolve = path.KeyToken
+		path = path.Key()
 	}
 
-	tk, err := resolve(doc)
+	tk, err := path.Token(doc)
 	require.NoError(t, err)
 	require.NotNil(t, tk)
 

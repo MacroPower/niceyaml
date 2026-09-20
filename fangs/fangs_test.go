@@ -63,7 +63,7 @@ func TestErrorHandler(t *testing.T) {
 
 	niceyamlErr := yamltest.Bind(t, src, niceyaml.NewError(
 		"invalid name",
-		niceyaml.WithKey(paths.Root().Child("name")),
+		niceyaml.WithPath(paths.Root().Child("name").Key()),
 	))
 
 	// Two named sources with the same content, so a joined error names the
@@ -73,7 +73,7 @@ func TestErrorHandler(t *testing.T) {
 
 	badName := yamltest.Bind(t, fileA, niceyaml.NewError(
 		"bad name",
-		niceyaml.WithKey(paths.Root().Child("name")),
+		niceyaml.WithPath(paths.Root().Child("name").Key()),
 	))
 
 	badValue := yamltest.Bind(t, fileB, niceyaml.NewError(
@@ -82,13 +82,13 @@ func TestErrorHandler(t *testing.T) {
 	))
 
 	emptyMessageErr := yamltest.Bind(t, src, niceyaml.NewErrorFrom(
-		silentError{niceyaml.NewError("bad name", niceyaml.WithKey(paths.Root().Child("name")))},
+		silentError{niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name").Key()))},
 	))
 
 	nestedErr := yamltest.Bind(t, src, niceyaml.NewError(
 		"two problems",
 		niceyaml.WithErrors(
-			niceyaml.NewError("bad name", niceyaml.WithKey(paths.Root().Child("name"))),
+			niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name").Key())),
 			niceyaml.NewError("bad value", niceyaml.WithPath(paths.Root().Child("value"))),
 		),
 	))
@@ -249,7 +249,7 @@ func TestErrorHandler(t *testing.T) {
 			err: niceyamlErr,
 			want: stringtest.JoinLF(
 				"Error",
-				"  1:1: $.name: invalid name",
+				"  1:1: $.name~: invalid name",
 				"  ",
 				"  <genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
 				"  <nameTag>value</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>123</literalNumberInteger>",
@@ -262,7 +262,7 @@ func TestErrorHandler(t *testing.T) {
 			want: stringtest.JoinLF(
 				"Error",
 				"  document 0: two problems",
-				"  ├── 1:1: $.name: bad name",
+				"  ├── 1:1: $.name~: bad name",
 				"  └── 2:8: $.value: bad value",
 				"  ",
 				"  <genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
@@ -289,7 +289,7 @@ func TestErrorHandler(t *testing.T) {
 			err: errors.Join(badName, badValue),
 			want: stringtest.JoinLF(
 				"Error",
-				"  ├── a.yaml:1:1: $.name: bad name",
+				"  ├── a.yaml:1:1: $.name~: bad name",
 				"  └── b.yaml:2:8: $.value: bad value",
 				"  ",
 				"  <genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",

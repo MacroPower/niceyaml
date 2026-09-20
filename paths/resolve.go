@@ -16,6 +16,22 @@ type match struct {
 	entry *ast.MappingValueNode
 }
 
+// key returns the match for the `~` selector applied to m: the key of the
+// entry m holds, or m itself when m holds no entry or its entry has no key,
+// so a `~` on a sequence element or the root selects what the path before
+// it does.
+func (m match) key() match {
+	if m.entry == nil {
+		return m
+	}
+
+	if key := keyContent(m.entry.Key); key != nil {
+		return match{node: key}
+	}
+
+	return m
+}
+
 // resolver walks a document for the selectors of a [Path]. Its targets map
 // holds the content of the anchor each alias refers to.
 //
@@ -159,6 +175,12 @@ func (r *resolver) resolve(root ast.Node, segs []segment) ([]match, error) {
 		var next []match
 
 		for _, m := range matches {
+			if seg.kind == segmentKey {
+				next = append(next, m.key())
+
+				continue
+			}
+
 			found, err := r.apply(seg, m.node)
 			if err != nil {
 				return nil, err

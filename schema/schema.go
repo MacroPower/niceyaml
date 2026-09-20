@@ -241,8 +241,8 @@ func newValidationError(ve *jsonschema.ValidationError, doc *niceyaml.Document) 
 
 // leafError converts one concrete failure into a [*niceyaml.Error] carrying
 // the YAML path to the failing location. A failure that constrains the key
-// of a member, such as an additional property, points at the key with
-// [niceyaml.WithKey], and any other at the value with [niceyaml.WithPath].
+// of a member, such as an additional property, points at the key through
+// [paths.Path.Key], and any other at the value.
 //
 // A path built from a key the decoder spells differently from the source,
 // such as 0x10 decoding to the member name 16, names nothing the document
@@ -254,10 +254,11 @@ func leafError(leaf *jsonschema.ValidationError, doc *niceyaml.Document) *niceya
 	segments := leaf.InstanceSegments()
 	path := buildTargetPath(segments)
 
-	locate := niceyaml.WithPath(path)
 	if leaf.TargetsKey() {
-		locate = niceyaml.WithKey(path)
+		path = path.Key()
 	}
+
+	locate := niceyaml.WithPath(path)
 
 	if pos, ok := decodedPosition(doc, path, segments, leaf.TargetsKey()); ok {
 		locate = niceyaml.WithPosition(pos)
@@ -288,8 +289,8 @@ func buildTargetPath(segments []jsonschema.Segment) paths.Path {
 // decodedPosition returns the position of the node segments name in doc,
 // for a path that resolves to nothing because a key decodes to a name the
 // source does not spell. The walk matches each mapping key by its decoded
-// name instead, and reports the key of the member when key is set and its
-// value otherwise.
+// name instead, and reports the key of the member when key is set, as it
+// is for a path from [paths.Path.Key], and its value otherwise.
 //
 // Reports false without a document, for a path that resolves as it is, and
 // for segments the walk cannot follow, such as a member a merge key brought
@@ -301,12 +302,7 @@ func decodedPosition(
 		return position.Position{}, false
 	}
 
-	resolve := path.Token
-	if key {
-		resolve = path.KeyToken
-	}
-
-	_, err := resolve(doc.Node())
+	_, err := path.Token(doc.Node())
 	if err == nil {
 		return position.Position{}, false
 	}

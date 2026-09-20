@@ -932,7 +932,7 @@ func (c *validatorConfig) Validate() error {
 	if c.Name == "" {
 		return niceyaml.NewErrorFrom(
 			errNameRequired,
-			niceyaml.WithKey(paths.Root().Child("name")),
+			niceyaml.WithPath(paths.Root().Child("name").Key()),
 		)
 	}
 
@@ -962,7 +962,7 @@ func nameSchema(called *bool) niceyaml.Validator {
 		if name, ok := m["name"].(string); ok && name == "invalid" {
 			return niceyaml.NewErrorFrom(
 				errSchemaValidationFailed,
-				niceyaml.WithKey(paths.Root().Child("name")),
+				niceyaml.WithPath(paths.Root().Child("name").Key()),
 			)
 		}
 
@@ -984,7 +984,7 @@ func (c *bothValidatorConfig) Validate() error {
 	if c.Name == "" {
 		return niceyaml.NewErrorFrom(
 			errNameRequired,
-			niceyaml.WithKey(paths.Root().Child("name")),
+			niceyaml.WithPath(paths.Root().Child("name").Key()),
 		)
 	}
 
@@ -1596,12 +1596,12 @@ func TestDocument_Ranges(t *testing.T) {
 
 			dd := yamltest.FirstDocument(t, input)
 
-			ranges := dd.Ranges
+			path := tc.path
 			if tc.key {
-				ranges = dd.KeyRanges
+				path = path.Key()
 			}
 
-			got, err := ranges(tc.path)
+			got, err := dd.Ranges(path)
 			if tc.is != nil {
 				require.ErrorIs(t, err, tc.is)
 
