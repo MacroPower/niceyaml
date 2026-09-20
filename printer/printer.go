@@ -146,13 +146,12 @@ type Printer struct {
 	annotationFunc AnnotationFunc
 	// Blended styles by the kinds that produce them. WithStyles replaces
 	// it, since the kinds then resolve to other styles.
-	blends             *blendCache
-	width              int
-	containerWidth     int
-	maxNumber          int
-	contextLines       int
-	hasCustomStyle     bool
-	annotationsEnabled bool
+	blends         *blendCache
+	width          int
+	containerWidth int
+	maxNumber      int
+	contextLines   int
+	hasCustomStyle bool
 }
 
 // DefaultContextLines is the number of context lines [Printer.PrintError]
@@ -164,12 +163,11 @@ const DefaultContextLines = 2
 // By default it uses [style.Default], [DefaultGutter], and [DefaultAnnotation].
 func New(opts ...Option) *Printer {
 	p := &Printer{
-		styles:             style.Default(),
-		gutterFunc:         DefaultGutter,
-		annotationFunc:     DefaultAnnotation,
-		blends:             newBlendCache(),
-		contextLines:       DefaultContextLines,
-		annotationsEnabled: true,
+		styles:         style.Default(),
+		gutterFunc:     DefaultGutter,
+		annotationFunc: DefaultAnnotation,
+		blends:         newBlendCache(),
+		contextLines:   DefaultContextLines,
 	}
 
 	p.apply(opts)
@@ -210,10 +208,9 @@ func (p *Printer) apply(opts []Option) {
 //   - [WithContainerStyle]
 //   - [WithContainerWidth]
 //   - [WithGutter]
-//   - [WithAnnotationFunc]
+//   - [WithAnnotation]
 //   - [WithWidth]
 //   - [WithMaxNumber]
-//   - [WithAnnotations]
 //   - [WithContextLines]
 type Option func(*Printer)
 
@@ -280,6 +277,12 @@ func (ctx AnnotationContext) ColWidth(col int) int {
 // AnnotationFunc returns the rendered annotation content based on
 // [AnnotationContext].
 type AnnotationFunc func(AnnotationContext) string
+
+// NoAnnotation is an [AnnotationFunc] that renders nothing, so the rows
+// annotations would take are left out.
+func NoAnnotation(AnnotationContext) string {
+	return ""
+}
 
 // DefaultAnnotation is the [AnnotationFunc] [New] uses. It joins the
 // annotations with "; ", pads them to their column as
@@ -449,12 +452,11 @@ func WithGutter(fn GutterFunc) Option {
 	}
 }
 
-// WithAnnotationFunc is a [Option] that sets the [AnnotationFunc] for
-// rendering annotations.
-//
-// By default, [DefaultAnnotation] is used which adds "^ " prefix for
-// [line.Below] annotations. A nil fn selects [DefaultAnnotation].
-func WithAnnotationFunc(fn AnnotationFunc) Option {
+// WithAnnotation is an [Option] that sets the [AnnotationFunc] that
+// renders annotations. By default, [DefaultAnnotation] joins them and
+// prefixes [line.Below] annotations with "^ ". [NoAnnotation] leaves
+// annotations out. A nil fn selects [DefaultAnnotation].
+func WithAnnotation(fn AnnotationFunc) Option {
 	return func(p *Printer) {
 		if fn == nil {
 			fn = DefaultAnnotation
@@ -482,14 +484,6 @@ func WithWidth(width int) Option {
 func WithMaxNumber(n int) Option {
 	return func(p *Printer) {
 		p.maxNumber = max(0, n)
-	}
-}
-
-// WithAnnotations is a [Option] that sets whether annotations are
-// rendered. Defaults to true.
-func WithAnnotations(enabled bool) Option {
-	return func(p *Printer) {
-		p.annotationsEnabled = enabled
 	}
 }
 
@@ -640,9 +634,7 @@ func (p *Printer) renderRows(view *line.View) []string {
 func (p *Printer) renderLine(view *line.View, idx int, ln *line.Line, maxNumber, gutterWidth int) []string {
 	var rows []string
 
-	if p.annotationsEnabled {
-		rows = append(rows, p.renderAnnotation(view, ln, idx, maxNumber, line.Above, gutterWidth)...)
-	}
+	rows = append(rows, p.renderAnnotation(view, ln, idx, maxNumber, line.Above, gutterWidth)...)
 
 	gutterCtx := GutterContext{
 		Index:     idx,
@@ -654,9 +646,7 @@ func (p *Printer) renderLine(view *line.View, idx int, ln *line.Line, maxNumber,
 
 	rows = append(rows, p.contentRows(p.renderContent(view, idx, ln), gutterCtx, gutterWidth)...)
 
-	if p.annotationsEnabled {
-		rows = append(rows, p.renderAnnotation(view, ln, idx, maxNumber, line.Below, gutterWidth)...)
-	}
+	rows = append(rows, p.renderAnnotation(view, ln, idx, maxNumber, line.Below, gutterWidth)...)
 
 	return rows
 }

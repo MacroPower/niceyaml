@@ -68,9 +68,7 @@ func (p *Printer) Layout(view *line.View) Layout {
 func (p *Printer) layoutLine(view *line.View, idx int, ln *line.Line, gutterWidth int, width *int) lineLayout {
 	var ll lineLayout
 
-	if p.annotationsEnabled {
-		ll.above = p.layoutAnnotation(view, ln, idx, gutterWidth, line.Above, width)
-	}
+	ll.above = p.layoutAnnotation(view, ln, idx, gutterWidth, line.Above, width)
 
 	// The content wraps as the rendered line does, styles included, since
 	// a style's transform may change the shown text. The wrap is
@@ -88,9 +86,7 @@ func (p *Printer) layoutLine(view *line.View, idx int, ln *line.Line, gutterWidt
 
 	ll.rows = rowStarts(escape.Control(ln.Content()), plain)
 
-	if p.annotationsEnabled {
-		ll.below = p.layoutAnnotation(view, ln, idx, gutterWidth, line.Below, width)
-	}
+	ll.below = p.layoutAnnotation(view, ln, idx, gutterWidth, line.Below, width)
 
 	return ll
 }

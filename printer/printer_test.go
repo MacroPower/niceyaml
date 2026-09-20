@@ -1523,21 +1523,21 @@ func TestGutterFunctions(t *testing.T) {
 	}
 }
 
-func TestPrinter_WithAnnotations(t *testing.T) {
+func TestPrinter_NoAnnotation(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
 		annotation string
 		want       string
-		enabled    bool
+		fn         printer.AnnotationFunc
 	}{
-		"disabled annotations hides them": {
-			enabled:    false,
+		"NoAnnotation hides them": {
+			fn:         printer.NoAnnotation,
 			annotation: "test annotation",
 			want:       "key: value",
 		},
-		"enabled annotations shows them": {
-			enabled:    true,
+		"DefaultAnnotation shows them": {
+			fn:         printer.DefaultAnnotation,
 			annotation: "@@ -1 +1 @@",
 			want:       "@@ -1 +1 @@\nkey: value",
 		},
@@ -1550,7 +1550,7 @@ func TestPrinter_WithAnnotations(t *testing.T) {
 			view := niceyaml.NewSourceFromString("key: value\n").View()
 			view.Annotate(0, line.Annotation{Content: tc.annotation})
 
-			p := testPrinter().With(printer.WithAnnotations(tc.enabled))
+			p := testPrinter().With(printer.WithAnnotation(tc.fn))
 
 			got := p.Print(view)
 
@@ -1782,7 +1782,7 @@ func TestPrinter_AnnotationPosition_Disabled(t *testing.T) {
 			view := niceyaml.NewSourceFromString("key: value").View()
 			view.Annotate(0, tc.annotation)
 
-			p := testPrinter().With(printer.WithAnnotations(false))
+			p := testPrinter().With(printer.WithAnnotation(printer.NoAnnotation))
 
 			got := p.Print(view)
 
@@ -2994,7 +2994,7 @@ func TestDefaultAnnotation(t *testing.T) {
 	}
 }
 
-func TestPrinter_WithAnnotationFunc(t *testing.T) {
+func TestPrinter_WithAnnotation(t *testing.T) {
 	t.Parallel()
 
 	// Custom annotation function that uses different prefixes.
@@ -3048,7 +3048,7 @@ func TestPrinter_WithAnnotationFunc(t *testing.T) {
 				printer.WithStyles(style.Styles{}),
 				printer.WithContainerStyle(lipgloss.NewStyle()),
 				printer.WithGutter(printer.NoGutter),
-				printer.WithAnnotationFunc(customAnnotation),
+				printer.WithAnnotation(customAnnotation),
 			)
 
 			got := p.Print(view)
@@ -3102,7 +3102,7 @@ func TestPrinter_AnnotationFuncKeepsStyling(t *testing.T) {
 		printer.WithStyles(styles),
 		printer.WithContainerStyle(lipgloss.NewStyle()),
 		printer.WithGutter(printer.NoGutter),
-		printer.WithAnnotationFunc(styled),
+		printer.WithAnnotation(styled),
 	)
 
 	// The styling the func applied reaches the output as escape sequences
@@ -3275,7 +3275,7 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 
 			p := testPrinterWithGutter(tc.gutter).With(printer.WithWidth(tc.width))
 			if tc.annFunc != nil {
-				p = p.With(printer.WithAnnotationFunc(tc.annFunc))
+				p = p.With(printer.WithAnnotation(tc.annFunc))
 			}
 
 			got := p.Print(view)
@@ -3630,7 +3630,7 @@ func TestPrinter_Layout_MultiLineAnnotation(t *testing.T) {
 			view := niceyaml.NewSourceFromString("a: 1\nb: 2\n").View()
 			view.Annotate(0, line.Annotation{Content: "one\ntwo"})
 
-			p := testPrinter().With(printer.WithAnnotationFunc(joined), printer.WithWidth(tc.width))
+			p := testPrinter().With(printer.WithAnnotation(joined), printer.WithWidth(tc.width))
 
 			printed := strings.Split(strings.TrimSuffix(p.Print(view), "\n"), "\n")
 			assert.Len(t, printed, p.Layout(view).Rows())
@@ -3770,7 +3770,7 @@ func TestPrinter_WithStyles_Nil(t *testing.T) {
 	assert.Equal(t, printer.New().Print(view), printer.New(printer.WithStyles(nil)).Print(view))
 }
 
-func TestPrinter_WithAnnotationFunc_Nil(t *testing.T) {
+func TestPrinter_WithAnnotation_Nil(t *testing.T) {
 	t.Parallel()
 
 	view := niceyaml.NewSourceFromString("key: value").View()
@@ -3778,7 +3778,7 @@ func TestPrinter_WithAnnotationFunc_Nil(t *testing.T) {
 
 	// A nil AnnotationFunc selects DefaultAnnotation rather than panicking
 	// on the first annotated line.
-	p := testPrinterWithGutter(nil).With(printer.WithAnnotationFunc(nil))
+	p := testPrinterWithGutter(nil).With(printer.WithAnnotation(nil))
 
 	assert.Equal(t, "key: value\n     ^ note", p.Print(view))
 }
@@ -4034,7 +4034,7 @@ func TestPrinter_Layout(t *testing.T) {
 		t.Parallel()
 
 		view := newView()
-		p := p.With(printer.WithAnnotations(false))
+		p := p.With(printer.WithAnnotation(printer.NoAnnotation))
 
 		got := p.Print(view)
 		require.Equal(t, stringtest.JoinLF(
