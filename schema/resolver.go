@@ -102,19 +102,18 @@ func (r Ref) Key() string {
 }
 
 // Load returns the schema bytes of a [Ref] from [Loadable], or fetches
-// those of a Ref from [URL] with [http.DefaultClient]. A [Registry] loads
-// the same bytes itself and fetches a URL with the client [WithHTTPClient]
-// gave it, so Load is for a caller that loads schemas without one. A Ref
-// from [Compiled], or the zero Ref, carries no loader, and Load then
-// returns an error wrapping [ErrLoad].
-func (r Ref) Load(ctx context.Context) ([]byte, error) {
-	return r.fetch(ctx, http.DefaultClient)
-}
-
-// fetch is [Ref.Load] with the client that fetches a Ref from [URL].
-func (r Ref) fetch(ctx context.Context, client *http.Client) ([]byte, error) {
+// those of a Ref from [URL] with client. A [Registry] loads the same bytes
+// this way with the client [WithHTTPClient] gave it, so a caller that
+// loads schemas without one passes its own client, and a nil client is
+// [http.DefaultClient]. A Ref from [Compiled], or the zero Ref, carries no
+// loader, and Load then returns an error wrapping [ErrLoad].
+func (r Ref) Load(ctx context.Context, client *http.Client) ([]byte, error) {
 	switch {
 	case r.url:
+		if client == nil {
+			client = http.DefaultClient
+		}
+
 		//nolint:wrapcheck // The fetch error names the URL already.
 		return httpfetch.Get(ctx, client, r.key)
 

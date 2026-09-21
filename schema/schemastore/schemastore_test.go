@@ -995,7 +995,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, schemaServer.URL+"/schema.json", ref.Key())
 
-		data, err := ref.Load(t.Context())
+		data, err := ref.Load(t.Context(), nil)
 		require.NoError(t, err)
 		assert.Equal(t, []byte(schemaData), data)
 	})
@@ -1026,7 +1026,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "https://example.com/schema.json", ref.Key())
 
-		_, err = ref.Load(t.Context())
+		_, err = ref.Load(t.Context(), nil)
 		require.ErrorContains(t, err, "fetch https://example.com/schema.json: status 404")
 		require.NotErrorIs(t, err, schema.ErrNoMatch)
 	})

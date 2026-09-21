@@ -76,7 +76,7 @@ func TestURL(t *testing.T) {
 		assert.Equal(t, server.URL+"/schema.json", ref.Key())
 		assert.Equal(t, 0, requests, "Resolve should name the schema without fetching it")
 
-		_, err = ref.Load(t.Context())
+		_, err = ref.Load(t.Context(), nil)
 		require.NoError(t, err)
 		assert.Equal(t, 1, requests)
 	})
@@ -176,7 +176,7 @@ func TestURL(t *testing.T) {
 		ref, err := schema.MustURL(server.URL+"/schema.json").Resolve(ctx, document(t))
 		require.NoError(t, err)
 
-		_, err = ref.Load(ctx)
+		_, err = ref.Load(ctx, nil)
 		require.Error(t, err)
 	})
 

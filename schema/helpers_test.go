@@ -28,7 +28,7 @@ func load(t *testing.T, r schema.Resolver) (string, []byte, error) {
 	ref, err := r.Resolve(t.Context(), document(t))
 	require.NoError(t, err)
 
-	data, err := ref.Load(t.Context())
+	data, err := ref.Load(t.Context(), nil)
 
 	return ref.Key(), data, err //nolint:wrapcheck // Tests inspect the loader's own error.
 }

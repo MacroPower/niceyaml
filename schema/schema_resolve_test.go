@@ -28,7 +28,7 @@ func TestSchema_Resolve(t *testing.T) {
 		assert.Same(t, compiled, ref.Schema())
 		assert.Empty(t, ref.Key())
 
-		_, err = ref.Load(t.Context())
+		_, err = ref.Load(t.Context(), nil)
 		require.ErrorIs(t, err, schema.ErrLoad)
 	})
 

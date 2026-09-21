@@ -349,7 +349,7 @@ func (r *Registry) compile(ctx context.Context, ref Ref) error {
 		return nil
 	}
 
-	data, err := ref.fetch(ctx, r.client)
+	data, err := ref.Load(ctx, r.client)
 	if err != nil {
 		return fmt.Errorf("%w: %q: %w", ErrLoad, key, err)
 	}
