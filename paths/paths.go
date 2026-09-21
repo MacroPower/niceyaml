@@ -278,7 +278,7 @@ func hasContent(body ast.Node) bool {
 // directive or a comment, which is what a parse that keeps comments leaves
 // as the body of a comment-only document.
 func (p Path) matches(doc *ast.DocumentNode) ([]match, error) {
-	if doc != nil && doc.Body == nil && doc.Start != nil && len(p.segments) == 0 {
+	if doc != nil && doc.Body == nil && doc.Start != nil && p.selectsRoot() {
 		return []match{{node: ast.Null(doc.Start)}}, nil
 	}
 
@@ -292,6 +292,19 @@ func (p Path) matches(doc *ast.DocumentNode) ([]match, error) {
 	}
 
 	return found, nil
+}
+
+// selectsRoot reports whether the path names the root node: it has no
+// segments, or only the `~` segments of [Path.Key], which on the root
+// select the node the path already does.
+func (p Path) selectsRoot() bool {
+	for _, s := range p.segments {
+		if s.kind != segmentKey {
+			return false
+		}
+	}
+
+	return true
 }
 
 // single resolves the path in doc to exactly one match.

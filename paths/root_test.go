@@ -45,6 +45,16 @@ func TestPath_EmptyDocument(t *testing.T) {
 		assert.Equal(t, 2, tk.Position.Line)
 	})
 
+	t.Run("the key of the root is the same null", func(t *testing.T) {
+		t.Parallel()
+
+		doc := emptyDocument(t, "a: 1\n---\n")
+
+		tk, err := paths.Root().Key().Token(doc)
+		require.NoError(t, err)
+		assert.Equal(t, token.DocumentHeaderType, tk.Type)
+	})
+
 	t.Run("a path with segments reaches nothing", func(t *testing.T) {
 		t.Parallel()
 
