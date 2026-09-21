@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/goccy/go-yaml/ast"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/jsonschema"
@@ -635,6 +636,41 @@ func TestSchema_PathTarget(t *testing.T) {
 				assert.Contains(t, newXMLPrinter().PrintError(bound), tc.wantContains,
 					"expected error output to contain specific highlighting pattern")
 			}
+		})
+	}
+}
+
+func TestWalkSegments_TypedNilNode(t *testing.T) {
+	t.Parallel()
+
+	// The parser always puts a node where these trees hold a typed nil,
+	// but a tree built or rewritten by hand may not, and the walk reports
+	// no match for it rather than panicking.
+	tcs := map[string]struct {
+		root     ast.Node
+		segments []jsonschema.Segment
+	}{
+		"mapping behind an anchor": {
+			root:     &ast.AnchorNode{Value: (*ast.MappingNode)(nil)},
+			segments: []jsonschema.Segment{{Key: "name"}},
+		},
+		"mapping value behind an anchor": {
+			root:     &ast.AnchorNode{Value: (*ast.MappingValueNode)(nil)},
+			segments: []jsonschema.Segment{{Key: "name"}},
+		},
+		"sequence behind an anchor": {
+			root:     &ast.AnchorNode{Value: (*ast.SequenceNode)(nil)},
+			segments: []jsonschema.Segment{{Index: 0, IsIndex: true}},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			keyNode, valueNode := schema.WalkSegments(tc.root, tc.segments)
+			assert.Nil(t, keyNode)
+			assert.Nil(t, valueNode)
 		})
 	}
 }

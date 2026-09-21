@@ -349,10 +349,12 @@ func walkSegments(root ast.Node, segments []jsonschema.Segment) (ast.Node, ast.N
 }
 
 // elementNode returns the element at index of the sequence node holds, or
-// nil for any other node and for an index the sequence does not hold.
+// nil for any other node and for an index the sequence does not hold. A
+// tree built by hand may hold a typed nil where the parser always puts a
+// node, which holds no element either.
 func elementNode(node ast.Node, index int) ast.Node {
 	seq, ok := contentNode(node).(*ast.SequenceNode)
-	if !ok || index < 0 || index >= len(seq.Values) {
+	if !ok || seq == nil || index < 0 || index >= len(seq.Values) {
 		return nil
 	}
 
@@ -361,15 +363,22 @@ func elementNode(node ast.Node, index int) ast.Node {
 
 // memberNodes returns the key and value nodes of the member whose key
 // decodes to name, or nil nodes when the node is no mapping or holds no
-// such member.
+// such member. A tree built by hand may hold a typed nil where the parser
+// always puts a node, which holds no member either.
 func memberNodes(node ast.Node, name string) (ast.Node, ast.Node) {
 	var members []*ast.MappingValueNode
 
 	switch n := contentNode(node).(type) {
 	case *ast.MappingNode:
-		members = n.Values
+		if n != nil {
+			members = n.Values
+		}
+
 	case *ast.MappingValueNode:
-		members = []*ast.MappingValueNode{n}
+		if n != nil {
+			members = []*ast.MappingValueNode{n}
+		}
+
 	default:
 		return nil, nil
 	}
