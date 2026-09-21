@@ -609,12 +609,13 @@ func (dd *Document) Validate(ctx context.Context, validators ...Validator) error
 // each one with its position. To keep several errors as separate
 // bindings, bind each one before joining them.
 //
-// If err is nil, Bind returns nil. An error that is or wraps a
-// [*SourceError] along its cause chain is bound already, to this source or
-// another, and comes back as it is, so binding is idempotent. A nil
-// [*Error] or [*SourceError] pointer as err carries nothing to bind and
-// comes back as it is, and one inside the chain binds nothing, so Bind
-// looks past it. Bind never modifies err.
+// If err is nil, Bind returns nil. A nil [*Error] or [*SourceError]
+// pointer as err carries nothing to bind and also returns a nil error, so
+// a validator that accumulates into a typed pointer and returns it on
+// success reports no error, and one inside the chain binds nothing, so
+// Bind looks past it. An error that is or wraps a [*SourceError] along its
+// cause chain is bound already, to this source or another, and comes back
+// as it is, so binding is idempotent. Bind never modifies err.
 func (dd *Document) Bind(err error) error {
 	return bindTree(err, binder{src: dd.source, doc: dd})
 }

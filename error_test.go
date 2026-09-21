@@ -1476,17 +1476,11 @@ func TestError_NilReceiver(t *testing.T) {
 func TestSourceError_NilReceiver(t *testing.T) {
 	t.Parallel()
 
-	// Document.Bind passes a nil *SourceError through, so every reader of
-	// one accepts nil the way Unwrap does.
+	// A nil *SourceError reaches a reader through errors.As on a chain that
+	// holds one, so every reader of one accepts nil the way Unwrap does.
 	src := niceyaml.NewSourceFromString("a: 1\n")
 
-	doc, err := src.Document()
-	require.NoError(t, err)
-
 	var missing *niceyaml.SourceError
-
-	bound := doc.Bind(missing)
-	require.ErrorAs(t, bound, &missing)
 
 	assert.Empty(t, missing.Error())
 	assert.Empty(t, fmt.Sprintf("%+v", missing))

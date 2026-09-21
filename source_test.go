@@ -1340,16 +1340,14 @@ func TestDocument_BindChain(t *testing.T) {
 		}
 	})
 
-	t.Run("returns a nil Error unchanged", func(t *testing.T) {
+	t.Run("returns a nil Error as a nil error", func(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString("key: value\n")
 
 		var nilErr *niceyaml.Error
 
-		err := error(nilErr)
-
-		assert.Equal(t, err, yamltest.Bind(t, source, err))
+		require.NoError(t, yamltest.Bind(t, source, nilErr))
 	})
 
 	t.Run("binds context around a nil Error without a location", func(t *testing.T) {

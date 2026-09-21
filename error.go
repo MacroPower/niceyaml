@@ -597,13 +597,15 @@ func (b binder) documentAt(idx int) *Document {
 	return nil
 }
 
-// bindTree binds err to b. A nil err or a nil [*Error] or [*SourceError]
-// pointer comes back as it is, as does an error that is or wraps a
-// [*SourceError] along its cause chain, since that is a binding already.
-// Any other error is bound as a new SourceError.
+// bindTree binds err to b. A nil err, or a nil [*Error] or [*SourceError]
+// pointer, carries nothing to bind and comes back as a nil error, so a
+// caller compares the result against nil whatever the shape of the nil it
+// passed. An error that is or wraps a [*SourceError] along its cause chain
+// is a binding already and comes back as it is. Any other error is bound
+// as a new SourceError.
 func bindTree(err error, b binder) error {
 	if isNothing(err) {
-		return err
+		return nil
 	}
 
 	if _, ok := anchorOf(err).(*SourceError); ok { //nolint:errorlint // The anchor itself, found by the walk.

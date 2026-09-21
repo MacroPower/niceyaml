@@ -823,6 +823,25 @@ func TestDocument_Node(t *testing.T) {
 	})
 }
 
+// accumulatingConfig is a [niceyaml.SelfValidator] whose Validate builds
+// its result in a typed pointer, as an accumulator does, so a valid value
+// returns a nil [*niceyaml.Error] rather than a nil error.
+type accumulatingConfig struct {
+	Name  string `yaml:"name"`
+	Value int    `yaml:"value"`
+}
+
+// Validate implements [niceyaml.SelfValidator].
+func (c accumulatingConfig) Validate() error {
+	var err *niceyaml.Error
+
+	if c.Value == 0 {
+		err = niceyaml.NewError("value is required", niceyaml.WithPath(paths.Root().Child("value")))
+	}
+
+	return err
+}
+
 func TestDocument_Decode_SchemaThenDecodeError(t *testing.T) {
 	t.Parallel()
 
@@ -922,6 +941,33 @@ func TestDocument_Decode_SelfValidator(t *testing.T) {
 			niceyaml.WithSelfValidation(true),
 		)
 		require.ErrorIs(t, err, errNameRequired, "Validate() should have been called")
+	})
+
+	t.Run("a typed nil from Validate decodes without error", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("name: test\nvalue: 42\n")
+		doc, err := source.Document()
+		require.NoError(t, err)
+
+		result, err := doc.Decode[accumulatingConfig](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, accumulatingConfig{Name: "test", Value: 42}, result)
+	})
+
+	t.Run("a typed non-nil from Validate binds to the document", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("name: test\nvalue: 0\n")
+		doc, err := source.Document()
+		require.NoError(t, err)
+
+		_, err = doc.Decode[accumulatingConfig](t.Context())
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Equal(t, "2:8: $.value: value is required", bound.Error())
 	})
 
 	t.Run("struct without SelfValidator decodes normally", func(t *testing.T) {
@@ -2465,6 +2511,22 @@ func TestDocument_Bind(t *testing.T) {
 		t.Parallel()
 
 		require.NoError(t, second.Bind(nil))
+	})
+
+	t.Run("a nil Error pointer comes back as a nil error", func(t *testing.T) {
+		t.Parallel()
+
+		var typed *niceyaml.Error
+
+		require.NoError(t, second.Bind(typed))
+	})
+
+	t.Run("a nil SourceError pointer comes back as a nil error", func(t *testing.T) {
+		t.Parallel()
+
+		var typed *niceyaml.SourceError
+
+		require.NoError(t, second.Bind(typed))
 	})
 
 	t.Run("an error without a location names the source", func(t *testing.T) {
