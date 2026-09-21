@@ -122,6 +122,16 @@ func TestBlend(t *testing.T) {
 			c2:   color.RGBA{R: 0, G: 0, B: 255, A: 0},
 			want: red,
 		},
+		"NoColor against invisible returns nil": {
+			c1:   lipgloss.NoColor{},
+			c2:   color.RGBA{R: 0, G: 0, B: 0, A: 0},
+			want: nil,
+		},
+		"both invisible returns nil": {
+			c1:   color.RGBA{R: 255, G: 0, B: 0, A: 0},
+			c2:   color.RGBA{R: 0, G: 0, B: 255, A: 0},
+			want: nil,
+		},
 	}
 
 	for name, tc := range tcs {

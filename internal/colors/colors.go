@@ -25,41 +25,39 @@ func Override(base, overlay color.Color) color.Color {
 // Blend blends two colors using LAB color space (50/50 mix) and clamps the
 // result to the sRGB gamut, so every channel of the returned color lies in
 // [0, 1] and renders as a valid SGR sequence.
-// If both colors are nil or [lipgloss.NoColor], it returns nil.
-// If one color is nil, [lipgloss.NoColor], or invisible, it returns the
-// other, clamped the same way when it lies outside the gamut.
+// A color is absent when it is nil, [lipgloss.NoColor], or invisible. When
+// both colors are absent, Blend returns nil, and when one is, it returns
+// the other, clamped the same way when it lies outside the gamut.
 // A color outside the gamut is clamped before the blend as well, since
 // the conversion the blend reads wraps a negative channel to a bright one.
 func Blend(c1, c2 color.Color) color.Color {
-	_, isNoColor1 := c1.(lipgloss.NoColor)
-	_, isNoColor2 := c2.(lipgloss.NoColor)
-	noColor1 := c1 == nil || isNoColor1
-	noColor2 := c2 == nil || isNoColor2
+	cf1, visible1 := visible(c1)
+	cf2, visible2 := visible(c2)
 
-	if noColor1 && noColor2 {
+	switch {
+	case !visible1 && !visible2:
 		return nil
-	}
-
-	if noColor1 {
+	case !visible1:
 		return clamped(c2)
-	}
-
-	if noColor2 {
-		return clamped(c1)
-	}
-
-	cf1, visible1 := colorful.MakeColor(clamped(c1))
-	cf2, visible2 := colorful.MakeColor(clamped(c2))
-
-	if !visible1 {
-		return clamped(c2)
-	}
-
-	if !visible2 {
+	case !visible2:
 		return clamped(c1)
 	}
 
 	return cf1.BlendLab(cf2, 0.5).Clamped()
+}
+
+// visible converts c for blending and reports whether c is visible: not
+// nil, not [lipgloss.NoColor], and with an alpha above zero.
+func visible(c color.Color) (colorful.Color, bool) {
+	if c == nil {
+		return colorful.Color{}, false
+	}
+
+	if _, ok := c.(lipgloss.NoColor); ok {
+		return colorful.Color{}, false
+	}
+
+	return colorful.MakeColor(clamped(c))
 }
 
 // clamped returns c as it is when every channel lies in [0, 1], and c
