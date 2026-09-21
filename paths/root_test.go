@@ -21,7 +21,7 @@ func emptyDocument(t *testing.T, input string) *ast.DocumentNode {
 	require.NoError(t, err)
 	require.NotEmpty(t, docs)
 
-	node := docs[len(docs)-1].Node()
+	node := docs[len(docs)-1].Root()
 	require.Nil(t, node.Body, "the document should have no body")
 
 	return node

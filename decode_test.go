@@ -8,6 +8,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/goccy/go-yaml"
+	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -716,6 +717,95 @@ func TestDocument_At_DirectiveBody(t *testing.T) {
 	_, err = empty.At(path).Decode[string](t.Context())
 	require.ErrorIs(t, err, paths.ErrNotFound)
 	require.ErrorIs(t, err, paths.ErrNoDocument)
+}
+
+func TestDocument_Node(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.Input(`
+		kind: Deployment
+		meta:
+		  name: app
+	`)
+
+	t.Run("root scope is the body", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		node, err := dd.Node()
+		require.NoError(t, err)
+		assert.Same(t, dd.Root().Body, node)
+	})
+
+	t.Run("scope is the node the path selects", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		node, err := dd.At(paths.Root().Child("meta")).Node()
+		require.NoError(t, err)
+		assert.Equal(t, "  name: app", node.String())
+
+		want, err := paths.Root().Child("meta").Node(dd.Root())
+		require.NoError(t, err)
+		assert.Same(t, want, node)
+	})
+
+	t.Run("nested scopes join", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		node, err := dd.At(paths.Root().Child("meta")).At(paths.Root().Child("name")).Node()
+		require.NoError(t, err)
+		assert.Equal(t, "app", node.String())
+	})
+
+	t.Run("scope that selects nothing binds the error", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		node, err := dd.At(paths.Root().Child("missing")).Node()
+		require.ErrorIs(t, err, paths.ErrNotFound)
+		assert.Nil(t, node)
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, dd.Source(), bound.Source())
+	})
+
+	t.Run("empty document has no body", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "---\n")
+
+		node, err := dd.Node()
+		require.NoError(t, err)
+		assert.Nil(t, node)
+	})
+
+	t.Run("document of comments has its comment group", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "# only a comment\n")
+
+		node, err := dd.Node()
+		require.NoError(t, err)
+		assert.IsType(t, &ast.CommentGroupNode{}, node)
+	})
+
+	t.Run("root is the whole document from any scope", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+		meta := dd.At(paths.Root().Child("meta"))
+
+		assert.Same(t, dd.Root(), meta.Root())
+		assert.Equal(t, paths.Root().Child("meta"), meta.Path())
+	})
 }
 
 func TestDocument_Decode_SchemaThenDecodeError(t *testing.T) {
@@ -2562,7 +2652,7 @@ func TestDocument_At_Scope(t *testing.T) {
 		hours := dd.At(hoursPath)
 
 		assert.Same(t, dd.Source(), hours.Source())
-		assert.Same(t, dd.Node(), hours.Node())
+		assert.Same(t, dd.Root(), hours.Root())
 		assert.Equal(t, dd.Index(), hours.Index())
 		assert.Equal(t, dd.Span(), hours.Span())
 		assert.Equal(t, dd.Tokens(), hours.Tokens())

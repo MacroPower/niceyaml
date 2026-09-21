@@ -36,15 +36,15 @@ func Exists(path paths.Path) Matcher {
 
 // Match implements [Matcher].
 func (m *existsMatcher) Match(_ context.Context, doc *niceyaml.Document) (bool, error) {
-	_, err := doc.Path().Join(m.path).Node(doc.Node())
+	node, err := doc.At(m.path).Node()
 	if errors.Is(err, paths.ErrNotFound) {
 		return false, nil
 	}
 
 	if err != nil {
-		//nolint:wrapcheck // The paths error names the path already.
-		return false, doc.Bind(err)
+		//nolint:wrapcheck // The Document binds the error already.
+		return false, err
 	}
 
-	return true, nil
+	return node != nil, nil
 }

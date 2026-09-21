@@ -346,13 +346,39 @@ type Document struct {
 	preamble int
 }
 
-// Node returns the underlying [*ast.DocumentNode] of the whole document,
-// whatever node the Document is scoped to. Resolve a path against it with
-// [Document.Path] in front to reach the node of a scoped Document:
-//
-//	node, err := doc.Path().Join(path).Node(doc.Node())
-func (dd *Document) Node() *ast.DocumentNode {
+// Root returns the [*ast.DocumentNode] of the whole document, whatever
+// node the Document is scoped to. [Document.Node] returns the node the
+// scope selects, and [Document.Path] is the path from this root to it.
+func (dd *Document) Root() *ast.DocumentNode {
 	return dd.doc
+}
+
+// Node returns the node the Document is scoped to, resolved in the
+// document as [Document.Decode] and the other scoped methods resolve it:
+// the body of the whole document for a Document from [Source.Documents],
+// and the node its path selects for one from [Document.At]. The text of
+// any node, including a mapping or a sequence, is its String method:
+//
+//	node, err := doc.At(path).Node()
+//	if err != nil {
+//		return err
+//	}
+//
+//	fmt.Println(node.String())
+//
+// The body is what the parser built: nil for an empty document, and a
+// comment group for one holding only comments, and Node returns either
+// without an error, as such a document decodes to nothing. A scope that
+// selects nothing returns the error [paths.Path.Node] describes, bound to
+// the source.
+func (dd *Document) Node() (ast.Node, error) {
+	if dd.base.IsRoot() {
+		return dd.doc.Body, nil
+	}
+
+	node, err := dd.base.Node(dd.doc)
+
+	return node, dd.Bind(err)
 }
 
 // At returns a [*Document] scoped to the node path selects, with path
@@ -494,21 +520,6 @@ func (dd *Document) position(path paths.Path) (position.Position, error) {
 	}
 
 	return position.NewFromToken(tk), nil
-}
-
-// scopeNode returns the node the Document is scoped to: the body of the
-// document for the root scope, which is nil for a document without one,
-// and the node the scope path resolves to otherwise. An error from
-// [paths.Path.Node] names the path already, so it is bound to the source
-// as it is.
-func (dd *Document) scopeNode() (ast.Node, error) {
-	if dd.base.IsRoot() {
-		return dd.doc.Body, nil
-	}
-
-	node, err := dd.base.Node(dd.doc)
-
-	return node, dd.Bind(err)
 }
 
 // Validate runs each validator on the document in the order given and
@@ -705,7 +716,7 @@ func (dd *Document) DecodeInto(ctx context.Context, v any, opts ...DecodeOption)
 		return err
 	}
 
-	node, err := dd.scopeNode()
+	node, err := dd.Node()
 	if err != nil {
 		return err
 	}
@@ -907,9 +918,8 @@ func hasContent(node ast.Node) bool {
 //		}
 //	}
 //
-// For the YAML text of any node, including a mapping or a sequence, resolve
-// it with [paths.Path.Node] against [Document.Node] and call its String
-// method.
+// For the YAML text of any node, including a mapping or a sequence, take
+// the node from [Document.Node] and call its String method.
 //
 // To decode into a value you already hold, use [Document.DecodeInto].
 func (dd *Document) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
