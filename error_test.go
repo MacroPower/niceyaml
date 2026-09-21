@@ -3861,8 +3861,12 @@ func TestSourceError_Document(t *testing.T) {
 			}(),
 			want: docs[0],
 		},
-		"bound by the source": {
-			err: source.Bind(niceyaml.NewError("bad", niceyaml.WithPosition(position.New(0, 0)))),
+		"bound by the source at a position": {
+			err:  source.Bind(niceyaml.NewError("bad", niceyaml.WithPosition(position.New(0, 0)))),
+			want: docs[0],
+		},
+		"bound by the source at no location": {
+			err: source.Bind(niceyaml.NewError("bad")),
 		},
 		"produced by the source": {
 			err: func() error {

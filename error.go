@@ -45,10 +45,12 @@ var (
 	ErrOutOfRange = errors.New("location outside source")
 
 	// ErrPathNeedsDocument indicates an error that carries a path was bound
-	// through [Source.Bind], which has no document to resolve the path in.
-	// [SourceError.Range] and [SourceError.Excerpt] return it. Bind such an
-	// error through [Document.Bind] with the document it was checked
-	// against.
+	// through [Source.Bind] in a source that holds no single document to
+	// resolve the path in. It wraps the reason [Source.Document] gives:
+	// [ErrMultipleDocuments], [ErrNoDocuments], or the error the file
+	// fails to parse with. [SourceError.Range] and [SourceError.Excerpt]
+	// return it. Bind such an error through [Document.Bind] with the
+	// document it was checked against.
 	ErrPathNeedsDocument = errors.New("path needs a document to resolve in")
 )
 
@@ -410,50 +412,64 @@ type location struct {
 	pos position.Position
 }
 
-// locate resolves e's location: a range or a position as it is, and the
-// token a path resolves to in the document of b, at the position of the
-// token. An Error without a location of its own returns [ErrNoLocation],
-// and one with a path bound where b has no document returns
-// [ErrPathNeedsDocument].
-func (e *Error) locate(b binder) (location, error) {
+// locate resolves e's location and returns the document it is bound to:
+// a range or a position as it is, and the token a path resolves to in
+// the document, at the position of the token. The document is the one
+// b binds with, or, when b routes, the one [binder.route] picks for the
+// location. An Error without a location of its own returns
+// [ErrNoLocation], and one with a path bound where no document resolves
+// it returns [ErrPathNeedsDocument].
+func (e *Error) locate(b binder) (location, *Document, error) {
 	switch loc := e.loc.(type) {
 	case position.Range:
-		return location{pos: loc.Start, rng: &loc}, nil
+		return location{pos: loc.Start, rng: &loc}, b.documentAt(loc.Start.Line), nil
 
 	case position.Position:
-		return location{pos: loc}, nil
+		return location{pos: loc}, b.documentAt(loc.Line), nil
 
 	case paths.Path:
-		return locatePath(b.doc, loc)
+		return locatePath(b, loc)
 
 	default:
-		return location{}, ErrNoLocation
+		return location{}, b.doc, ErrNoLocation
 	}
 }
 
-// locatePath resolves path in doc. A nil doc, which is what [Source.Bind]
-// binds with, has nothing to resolve a path in, so the location is
-// [ErrPathNeedsDocument].
-func locatePath(doc *Document, path paths.Path) (location, error) {
+// locatePath resolves path in the document b binds with, or in the one
+// document of the source when b routes. A source that holds none, holds
+// several, or does not parse has no document to resolve the path in, so
+// the location is [ErrPathNeedsDocument] wrapping that reason.
+func locatePath(b binder, path paths.Path) (location, *Document, error) {
+	doc := b.doc
+
+	if doc == nil && b.route {
+		var err error
+
+		doc, err = b.src.single()
+		if err != nil {
+			return location{}, nil, fmt.Errorf("%w: %s: %w", ErrPathNeedsDocument, path, err)
+		}
+	}
+
 	if doc == nil {
-		return location{}, fmt.Errorf("%w: %s", ErrPathNeedsDocument, path)
+		return location{}, nil, fmt.Errorf("%w: %s", ErrPathNeedsDocument, path)
 	}
 
 	pos, err := doc.position(path)
 	if err != nil {
-		return location{}, err
+		return location{}, doc, err
 	}
 
-	return location{pos: pos}, nil
+	return location{pos: pos}, doc, nil
 }
 
 // SourceError is an error bound to the [*Source] it occurred in.
 //
 // [Source.File], [Source.Documents], and the [Document] methods bind every
 // error they return. [Document.Bind] binds an error built elsewhere to the
-// document it was checked against, and [Source.Bind] binds one that
-// carries a position or a range, or no location, to the source alone.
-// Binding resolves the location of the error against the source, once, so
+// document it was checked against, and [Source.Bind] binds one to the
+// document its location falls in, or to the source alone when it carries
+// no location. Binding resolves the location of the error against the source, once, so
 // a SourceError never changes and every method of it reads that result:
 // [SourceError.Error] puts the position in front of the message,
 // [SourceError.Range] returns the resolved range, and
@@ -466,9 +482,10 @@ func locatePath(doc *Document, path paths.Path) (location, error) {
 //		fmt.Printf("%+v\n", err)
 //	}
 //
-// A path resolves in the [Document] that bound the error. [Source.Bind]
-// has no document, so a path bound through it resolves nowhere, and the
-// reason is [ErrPathNeedsDocument].
+// A path resolves in the [Document] that bound the error, which for
+// [Source.Bind] is the one document of the source. A path bound through
+// Source.Bind in a source that holds none or several resolves nowhere,
+// and the reason is [ErrPathNeedsDocument].
 //
 // The bound error is a tree, and binding binds every node of it. The
 // location of the SourceError is that of the first located [Error] along
@@ -547,10 +564,37 @@ const defaultContextLines = 2
 
 // binder is where an error binds: the source, and the document that binds
 // it, which is nil for [Source.Bind] and for the errors a Source produces
-// itself.
+// itself. A binder that routes picks the document for each location it
+// resolves, as [Source.Bind] does; one that does not, as the parser's
+// binder must not, since the documents are not built until the parse
+// ends, binds to the source alone.
 type binder struct {
-	src *Source
-	doc *Document
+	src   *Source
+	doc   *Document
+	route bool
+}
+
+// documentAt returns the document an error on line idx binds to: the one
+// b binds with, or, when b routes, the document of the source whose span
+// holds the line, which is nil when the source does not parse or the line
+// lies outside it.
+func (b binder) documentAt(idx int) *Document {
+	if b.doc != nil || !b.route {
+		return b.doc
+	}
+
+	docs, err := b.src.Documents()
+	if err != nil {
+		return nil
+	}
+
+	for _, doc := range docs {
+		if doc.span.Contains(idx) {
+			return doc
+		}
+	}
+
+	return nil
 }
 
 // bindTree binds err to b. A nil err or a nil [*Error] or [*SourceError]
@@ -611,7 +655,7 @@ func newSourceError(err error, b binder) *SourceError {
 
 	switch a := anchorOf(err).(type) { //nolint:errorlint // The anchor itself, found by the walk.
 	case *Error:
-		e.loc, e.locErr = a.locate(b)
+		e.loc, e.doc, e.locErr = a.locate(b)
 
 	case *SourceError:
 		// The error wraps a binding, so it is that binding with more
@@ -707,8 +751,10 @@ func (e *SourceError) Source() *Source {
 
 // Document returns the [*Document] the error is bound to: the one whose
 // methods and validators produced it or whose [Document.Bind] bound it,
-// and in which a path in the error resolves. An error bound through
-// [Source.Bind], and one the [Source] produced itself, is bound to none. A
+// and in which a path in the error resolves, or, for an error bound
+// through [Source.Bind], the document its location falls in. An error
+// without a location, one whose location resolves in no document, and
+// one a [Source] that does not parse produced itself are bound to none. A
 // caller that sorts the errors of a file by document reads it beside
 // [Document.Index]. A nil SourceError is bound to none.
 func (e *SourceError) Document() *Document {

@@ -28,9 +28,8 @@ import (
 // documents. Every error they and their Documents produce comes back
 // bound to the Source as a [SourceError]. [Document.Bind] binds errors
 // built elsewhere to the document they were checked against, and
-// [Source.Bind] binds one that carries a position or a range to the
-// source alone. Rendering
-// lives in a [line.View], which carries the overlays, annotations, and
+// [Source.Bind] binds one to the document its location falls in.
+// Rendering lives in a [line.View], which carries the overlays, annotations, and
 // flags that a [printer.Printer] renders over the [line.Lines] the Source
 // holds. [Source.Lines] returns those lines, which the [finder.Finder] and
 // [diff.Differ] read, and [Source.View] returns a fresh view over them for
@@ -260,6 +259,18 @@ func (s *Source) Documents() ([]*Document, error) {
 // parse returns the error [Source.File] returns. Use [Source.Documents]
 // for a file that may hold several.
 func (s *Source) Document() (*Document, error) {
+	doc, err := s.single()
+	if err != nil {
+		return nil, s.Bind(err)
+	}
+
+	return doc, nil
+}
+
+// single returns the one document of the Source, or the reason it has
+// none, unbound: the error [Source.File] returns, [ErrNoDocuments], or
+// [ErrMultipleDocuments] at the anchor of the second document.
+func (s *Source) single() (*Document, error) {
 	docs, err := s.Documents()
 	if err != nil {
 		return nil, err
@@ -267,18 +278,16 @@ func (s *Source) Document() (*Document, error) {
 
 	switch len(docs) {
 	case 0:
-		return nil, s.Bind(WrapError(ErrNoDocuments))
+		return nil, WrapError(ErrNoDocuments)
 
 	case 1:
 		return docs[0], nil
 
 	default:
-		err := WrapError(
+		return nil, WrapError(
 			fmt.Errorf("%w: %d documents", ErrMultipleDocuments, len(docs)),
 			atToken(docs[1].anchorToken()),
 		)
-
-		return nil, s.Bind(err)
 	}
 }
 
@@ -334,19 +343,22 @@ func (s *Source) parse() (*ast.File, error) {
 		return file, nil
 	}
 
+	// The documents are built from the file this parse returns, so the
+	// error binds to the source alone rather than routing to one of them.
 	if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
-		return nil, s.Bind(WrapError(yamlMessageError{yamlErr}, atToken(yamlErr.GetToken())))
+		return nil, bindTree(WrapError(yamlMessageError{yamlErr}, atToken(yamlErr.GetToken())), binder{src: s})
 	}
 
 	//nolint:wrapcheck // Return the original error if it's not a [yaml.Error].
 	return nil, err
 }
 
-// Bind binds err to the [Source]. An error that carries a
-// [position.Position] or a [position.Range], as a check that runs on
-// [Source.Lines] produces, needs no document, and one that carries no
-// location names the source alone. A file that holds several documents
-// binds such an error here without picking one of them:
+// Bind binds err to the [Source] and to the document each location in
+// it falls in, so a caller that holds the source binds without picking a
+// document. An error that carries a [position.Position] or a
+// [position.Range], as a check that runs on [Source.Lines] produces, binds
+// to the document whose [Document.Span] holds the line, whatever the
+// file holds:
 //
 //	for i, ln := range source.Lines().All() {
 //		if ln.Width() > 120 {
@@ -356,18 +368,25 @@ func (s *Source) parse() (*ast.File, error) {
 //		}
 //	}
 //
-// A path resolves in a document, and Bind has none, so an error that
-// carries a path resolves nowhere here: the bound error keeps its message
-// and the name of the source, [SourceError.Range] returns
-// [ErrPathNeedsDocument], and the %+v verb names it in place of the
+// A path resolves in the one document of the source, the one
+// [Source.Document] returns, so a check on a configuration file binds its
+// findings here as it would through [Document.Bind]:
+//
+//	return source.Bind(check(cfg))
+//
+// A path in a source that holds several documents, or none, resolves
+// nowhere: the bound error keeps its message and the name of the source,
+// [SourceError.Range] returns [ErrPathNeedsDocument] wrapping the reason
+// Source.Document gives, and the %+v verb names it in place of the
 // excerpt. Bind such an error through [Document.Bind] with the document
-// it was checked against, which [Source.Document] returns for a file
-// that holds one.
+// it was checked against, which also resolves a path from the scope of a
+// Document from [Document.At].
 //
 // In every other way Bind is [Document.Bind], which describes what comes
-// back.
+// back. [SourceError.Document] returns the document each location fell
+// in, and nil for an error whose location resolves in none.
 func (s *Source) Bind(err error) error {
-	return bindTree(err, binder{src: s})
+	return bindTree(err, binder{src: s, route: true})
 }
 
 // Lines returns the [line.Lines] of the [Source]: its tokens split into
