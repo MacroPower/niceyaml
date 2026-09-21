@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"sync"
 
 	"golang.org/x/sync/singleflight"
@@ -150,10 +149,11 @@ func WithRequireSchema(require bool) RegistryOption {
 //	))
 //
 // The registry keeps its own copy of opts, so writing to the caller's slice
-// afterwards changes nothing.
+// afterwards changes nothing. Given more than once, each call appends after
+// the options of the one before it.
 func WithCompileOptions(opts ...CompileOption) RegistryOption {
 	return func(r *Registry) {
-		r.compileOpts = slices.Clone(opts)
+		r.compileOpts = append(r.compileOpts, opts...)
 	}
 }
 

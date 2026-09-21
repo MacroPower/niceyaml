@@ -895,6 +895,23 @@ func TestRegistry_CompileOptionsNotAliased(t *testing.T) {
 	require.NotErrorIs(t, err, schema.ErrNoMatch)
 }
 
+func TestRegistry_CompileOptionsAppend(t *testing.T) {
+	t.Parallel()
+
+	// Each call appends, so the format assertions the first call asks for
+	// still reach the compiler after the second call adds to them.
+	reg := schema.NewRegistry(
+		schema.WithCompileOptions(schema.WithJSONSchemaOptions(jsonschema.WithFormats(true))),
+		schema.WithCompileOptions(schema.WithJSONSchemaOptions()),
+		schema.WithResolvers(schema.Embedded([]byte(`{"type": "string", "format": "ipv4"}`))),
+	)
+
+	doc := yamltest.FirstDocument(t, stringtest.Input(`not-an-ip`))
+	err := reg.Validate(t.Context(), doc)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, schema.ErrNoMatch)
+}
+
 func TestRegistry_ErrorCases(t *testing.T) {
 	t.Parallel()
 
