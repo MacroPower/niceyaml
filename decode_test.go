@@ -16,6 +16,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
@@ -707,6 +708,84 @@ func TestDocument_Span(t *testing.T) {
 		assert.Contains(t, got, "   2 ")
 		assert.Contains(t, got, "   4 ")
 		assert.NotContains(t, got, "   1 ")
+	})
+}
+
+func TestDocument_View(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.Input(`
+		a: 1
+		---
+		spec:
+		  hours:
+		    open: "09:00"
+		    close: "17:00"
+		b: 2
+	`)
+
+	t.Run("covers the document with the file's line numbers", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(input)
+
+		docs, err := source.Documents()
+		require.NoError(t, err)
+		require.Len(t, docs, 2)
+
+		view := docs[1].View()
+
+		assert.Equal(t, source.View().Slice(docs[1].Span()).String(), view.String())
+		assert.Equal(t, docs[1].Span().Len(), view.Len())
+		assert.Equal(t, 2, view.Line(0).Number())
+	})
+
+	t.Run("covers the node of a scoped Document", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(input)
+
+		docs, err := source.Documents()
+		require.NoError(t, err)
+		require.Len(t, docs, 2)
+
+		hours := docs[1].At(paths.Root().Child("spec", "hours"))
+
+		assert.Equal(t, stringtest.JoinLF(
+			`   5 |     open: "09:00"`,
+			`   6 |     close: "17:00"`,
+		), hours.View().String())
+	})
+
+	t.Run("each call returns a view of its own", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, input)
+
+		first := doc.View()
+		first.Annotate(0, line.Annotation{Content: "here", Placement: line.Below})
+
+		assert.NotEqual(t, first.String(), doc.View().String())
+		assert.Equal(t, doc.Source().View().Slice(doc.Span()).String(), doc.View().String())
+	})
+
+	t.Run("a bound error marks the view", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(input)
+
+		docs, err := source.Documents()
+		require.NoError(t, err)
+		require.Len(t, docs, 2)
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, docs[1].Bind(niceyaml.NewError("closed", niceyaml.AtPath(paths.Root().Child("b")))), &bound)
+
+		view := docs[1].View()
+		require.NoError(t, bound.Annotate(view))
+
+		assert.Contains(t, view.String(), "   7 | b: 2\n     |    ^")
 	})
 }
 

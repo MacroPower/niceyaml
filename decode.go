@@ -13,6 +13,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
+	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/tokens"
@@ -593,12 +594,30 @@ func (dd *Document) FilePath() string {
 // [paths.Path.Key] covers the key. A scope that selects nothing covers no
 // lines.
 //
-// Slice a view of the source with the span to render the document, or the
-// node, with the file's line numbers:
+// [Document.View] returns a view of the source sliced to the span, so a
+// caller that renders the document need not slice one itself. The span
+// slices any other view over the source, such as one that carries
+// decoration already:
 //
-//	fmt.Println(p.Print(source.View().Slice(doc.Span())))
+//	fmt.Println(p.Print(view.Slice(doc.Span())))
 func (dd *Document) Span() position.Span {
 	return dd.span
+}
+
+// View returns a new [*line.View] over the lines of [Source.Lines] that
+// the Document covers, [Document.Span], with the line numbers they have in
+// the file. A document of a file that holds several, or the node a
+// Document from [Document.At] is scoped to, renders on its own:
+//
+//	fmt.Println(p.Print(doc.View()))
+//
+// Each call returns a view of its own with no decoration, as [Source.View]
+// does, so overlays and annotations added to one reach neither the Source
+// nor another view. The view shares its lines with every view over the
+// source, so a bound error from the document marks it through
+// [SourceError.Annotate] as it marks a view of the whole source.
+func (dd *Document) View() *line.View {
+	return dd.source.View().Slice(dd.span)
 }
 
 // Ranges returns the ranges the node at path covers, one per line, without

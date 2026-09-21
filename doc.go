@@ -48,7 +48,9 @@
 // and overlays apply style spans for highlighting. A Source hands out its
 // lines from [Source.Lines] and a fresh view over them from [Source.View],
 // so the decoration added to one view reaches neither the Source nor
-// another view, and taking a view costs nothing.
+// another view, and taking a view costs nothing. [Document.View] is the
+// same view sliced to the lines of one document, with the line numbers
+// they have in the file.
 //
 // A view need not be a YAML document. Diffs, for example, interleave lines
 // from two revisions and are plain [line.View] values.
