@@ -31,10 +31,11 @@ var (
 //
 // Lookup tries the resolvers [WithResolvers] gave it in order; the first
 // [Resolver] that does not report [ErrNoMatch] wins. The registry caches
-// compiled schemas by [Ref.Key] and consults that cache before loading, so
-// it loads and compiles each schema once however many documents name it,
-// and every schema it validates with is compiled with the options
-// [WithCompileOptions] gave it.
+// the schemas it compiles by [Ref.Key] and consults that cache before
+// loading, so it loads and compiles each schema once however many
+// documents name it, and every schema it compiles is compiled with the
+// options [WithCompileOptions] gave it. A [*Schema] compiled elsewhere is
+// a resolver too, and the registry validates with it as it is.
 //
 // Example:
 //
@@ -141,8 +142,8 @@ func WithRequireSchema(require bool) RegistryOption {
 // values the registry compiles every schema with, as [Compile] takes them.
 // They apply when a schema is compiled, which happens once per [Ref.Key],
 // so an option such as a format validator takes effect for every document
-// validated against that schema. A [*Schema] compiled elsewhere never
-// enters a registry, so the options reach every schema it validates with:
+// validated against that schema. A [*Schema] compiled elsewhere goes into
+// the registry as it is, with the options it was compiled with:
 //
 //	reg := schema.NewRegistry(schema.WithCompileOptions(
 //	    schema.WithJSONSchemaOptions(jsonschema.WithFormats(true)),
@@ -276,9 +277,10 @@ func (r *Registry) Validate(ctx context.Context, doc *niceyaml.Document) error {
 	return doc.Validate(ctx, v)
 }
 
-// schema returns the schema for ref: the bytes it loads, compiled on the
-// first request for its Key and served from the cache after that. The
-// zero Ref names no schema, so it is [ErrResolve].
+// schema returns the schema for ref: the one it carries, as it is, or
+// the bytes it loads, compiled on the first request for its Key and
+// served from the cache after that. The zero Ref names no schema, so it
+// is [ErrResolve].
 //
 // Concurrent requests for one Key share a single load and compile through
 // the singleflight group, and each caller waits for it only while its own
@@ -288,6 +290,10 @@ func (r *Registry) Validate(ctx context.Context, doc *niceyaml.Document) error {
 // case. Any other failure reaches every caller that shared the load,
 // including a timeout inside the load whose error wraps a context error.
 func (r *Registry) schema(ctx context.Context, ref Ref) (*Schema, error) {
+	if ref.Schema() != nil {
+		return ref.Schema(), nil
+	}
+
 	if ref.Key() == "" {
 		return nil, fmt.Errorf("%w: resolver returned an empty ref", ErrResolve)
 	}

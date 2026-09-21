@@ -76,8 +76,9 @@ func WithJSONSchemaOptions(opts ...jsonschema.ValidateOption) CompileOption {
 //	v, err := schema.Compile(ctx, schemaJSON)
 //
 // A schema known valid at build time compiles with [MustCompile] at package
-// scope. A registry compiles the schemas its resolvers name the same way,
-// with the options [WithCompileOptions] gives it.
+// scope. A registry compiles the schemas its resolvers name as bytes the
+// same way, with the options [WithCompileOptions] gives it, and takes a
+// compiled Schema as it is.
 func Compile(ctx context.Context, data []byte, opts ...CompileOption) (*Schema, error) {
 	cfg := newCompileConfig(opts)
 
@@ -120,19 +121,46 @@ func FromJSONSchema(v *jsonschema.Validator) *Schema {
 // taken from a document with a scoped [niceyaml.Document.Decode].
 //
 // A Schema is the validator for a program that holds one schema and
-// compiles it itself. A [Registry] compiles every schema it validates
-// with, so the same bytes go into one through [Embedded]:
+// compiles it itself. It is also a [Resolver] that names itself for every
+// document, so one goes into a [Registry] as it is, on its own or behind
+// a [When] guard, and the registry validates with it without loading or
+// compiling anything:
 //
 //	var Config = schema.MustCompile(schemaJSON)
 //
 //	reg := schema.NewRegistry(schema.WithResolvers(
-//	    schema.When(matcher.Content(kindPath, "Config"), schema.Embedded(schemaJSON)),
+//	    schema.When(matcher.Content(kindPath, "Config"), Config),
+//	    schema.When(matcher.Content(kindPath, "Pod"), schema.FromJSONSchema(podValidator)),
 //	))
 //
 // A Schema is safe for concurrent use. Create instances with [Compile],
 // [MustCompile], or [FromJSONSchema].
 type Schema struct {
 	compiled *jsonschema.Validator
+}
+
+// Ref returns the [Ref] that carries the compiled schema, which
+// [Ref.Schema] returns and a [Registry] validates with as it is. A
+// resolver that picks among compiled schemas returns one:
+//
+//	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
+//	    if strings.HasSuffix(doc.FilePath(), ".pod.yaml") {
+//	        return Pod.Ref(), nil
+//	    }
+//
+//	    return schema.Ref{}, schema.ErrNoMatch
+//	})
+//
+// The Ref has no [Ref.Key], since the registry has nothing to load or
+// cache for it, and [Ref.Load] returns an error wrapping [ErrLoad].
+func (s *Schema) Ref() Ref {
+	return Ref{schema: s}
+}
+
+// Resolve implements [Resolver]. It names the schema for every document
+// and never reports [ErrNoMatch].
+func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Document) (Ref, error) {
+	return s.Ref(), nil
 }
 
 // Validate implements [niceyaml.Validator]. It decodes doc to

@@ -106,10 +106,21 @@
 //
 //	reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded(schemaBytes)))
 //
-// A [*Schema] from [MustCompile] never enters a registry. The registry
-// compiles every schema it validates with, so every one of them is
-// compiled with the options [WithCompileOptions] gave it, and the bytes
-// behind a package-scope Schema go in through [Embedded] as above.
+// A [*Schema] is a resolver of the same kind, so one compiled at package
+// scope with [MustCompile], or built from a Go type with
+// [FromJSONSchema], goes into a registry as it is, and the registry
+// validates with it without loading or compiling anything:
+//
+//	var Config = schema.MustCompile(configJSON)
+//
+//	reg := schema.NewRegistry(schema.WithResolvers(
+//	    schema.Directive(),
+//	    schema.When(matcher.Content(kindPath, "Config"), Config),
+//	))
+//
+// [WithCompileOptions] reaches the schemas the registry compiles from
+// bytes, and a Schema compiled elsewhere keeps the options it was
+// compiled with.
 //
 // The loaders return a [Loadable] ref whose key identifies the schema and
 // whose load reads the bytes. The registry checks its cache by key first,

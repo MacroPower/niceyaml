@@ -1106,3 +1106,92 @@ func TestRegistry_Lookup_MatcherError(t *testing.T) {
 	// document, but never one its matcher could not decide on.
 	require.ErrorIs(t, reg.Validate(t.Context(), doc), paths.ErrAlias)
 }
+
+func TestRegistry_CompiledSchema(t *testing.T) {
+	t.Parallel()
+
+	deployment := schema.MustCompile([]byte(`{"type": "object", "required": ["replicas"]}`))
+	service := schema.MustCompile([]byte(`{"type": "object", "required": ["port"]}`))
+
+	t.Run("a schema is a resolver the registry validates with as it is", func(t *testing.T) {
+		t.Parallel()
+
+		reg := schema.NewRegistry(schema.WithResolvers(
+			schema.When(matcher.Content(kindPath, "Deployment"), deployment),
+			schema.When(matcher.Content(kindPath, "Service"), service),
+		))
+
+		doc := yamltest.FirstDocument(t, "kind: Service\nport: 80\n")
+
+		got, err := reg.Lookup(t.Context(), doc)
+		require.NoError(t, err)
+		assert.Same(t, service, got)
+		require.NoError(t, reg.Validate(t.Context(), doc))
+
+		bad := yamltest.FirstDocument(t, "kind: Deployment\nport: 80\n")
+		err = reg.Validate(t.Context(), bad)
+		require.Error(t, err)
+		require.NotErrorIs(t, err, schema.ErrNoMatch)
+		assert.Contains(t, err.Error(), "replicas")
+	})
+
+	t.Run("a schema built from a Go type routes the same way", func(t *testing.T) {
+		t.Parallel()
+
+		type pod struct {
+			Kind  string `json:"kind"`
+			Image string `json:"image"`
+		}
+
+		generated, err := jsonschema.NewGenerator().GenerateFor[pod](t.Context())
+		require.NoError(t, err)
+
+		podSchema := schema.FromJSONSchema(jsonschema.MustCompile(generated))
+
+		reg := schema.NewRegistry(schema.WithResolvers(
+			schema.When(matcher.Content(kindPath, "Pod"), podSchema),
+		))
+
+		got, err := reg.Lookup(t.Context(), yamltest.FirstDocument(t, "kind: Pod\nimage: nginx\n"))
+		require.NoError(t, err)
+		assert.Same(t, podSchema, got)
+
+		_, err = reg.Lookup(t.Context(), yamltest.FirstDocument(t, "kind: Job\n"))
+		require.ErrorIs(t, err, schema.ErrNoMatch)
+	})
+
+	t.Run("a resolver returns the ref of a schema", func(t *testing.T) {
+		t.Parallel()
+
+		reg := schema.NewRegistry(schema.WithResolvers(
+			schema.ResolverFunc(func(_ context.Context, doc *niceyaml.Document) (schema.Ref, error) {
+				if strings.HasSuffix(doc.FilePath(), ".svc.yaml") {
+					return service.Ref(), nil
+				}
+
+				return schema.Ref{}, schema.ErrNoMatch
+			}),
+		))
+
+		doc := yamltest.FirstDocumentWithPath(t, "port: 80\n", "web.svc.yaml")
+
+		got, err := reg.Lookup(t.Context(), doc)
+		require.NoError(t, err)
+		assert.Same(t, service, got)
+	})
+
+	t.Run("a compiled schema keeps the options it was compiled with", func(t *testing.T) {
+		t.Parallel()
+
+		// The registry asserts formats, and the schema compiled without
+		// them, so the value passes: the registry compiles nothing here.
+		lax := schema.MustCompile([]byte(`{"type": "string", "format": "ipv4"}`))
+
+		reg := schema.NewRegistry(
+			schema.WithCompileOptions(schema.WithJSONSchemaOptions(jsonschema.WithFormats(true))),
+			schema.WithResolvers(lax),
+		)
+
+		require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, "not-an-ip")))
+	})
+}

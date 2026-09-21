@@ -1101,3 +1101,21 @@ func TestSchema_Validate_Scope(t *testing.T) {
 		assert.Equal(t, position.New(2, 2), rng.Start)
 	})
 }
+
+func TestSchema_Ref(t *testing.T) {
+	t.Parallel()
+
+	s := schema.MustCompile([]byte(`{"type": "object"}`))
+
+	ref, err := s.Resolve(t.Context(), yamltest.FirstDocument(t, "key: value\n"))
+	require.NoError(t, err)
+	assert.Same(t, s, ref.Schema())
+	assert.Equal(t, s.Ref(), ref)
+	assert.Empty(t, ref.Key())
+
+	_, err = ref.Load(t.Context(), nil)
+	require.ErrorIs(t, err, schema.ErrLoad)
+
+	assert.Nil(t, schema.Embedded([]byte(`{}`)).Schema())
+	assert.Nil(t, schema.Ref{}.Schema())
+}
