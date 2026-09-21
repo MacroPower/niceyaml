@@ -80,7 +80,11 @@ type builder struct {
 	lines               []Line
 	currentLineSegments Segments
 	currentLine         int // Current line number being built.
-	built               bool
+	// Lines the lexer counted that the source does not have: it counts a
+	// CRLF it cut between two tokens as two line breaks, so its
+	// Position.Line runs this far ahead of currentLine.
+	lineDrift int
+	built     bool
 
 	// Position tracking.
 	currentOffset      int // Cumulative rune offset (1-indexed like lexer).
@@ -263,6 +267,13 @@ func (b *builder) processPart(ctx *partContext) bool {
 		// endings are ASCII, so byte and rune counts agree.
 		b.currentOffset += len(ctx.part) - lineEndingOverlap(b.prevLineEnding, ctx.part)
 
+		// The lexer advanced its line on both halves of the CRLF it cut
+		// between the two tokens, while this line absorbed the second
+		// half, so from here on its Position.Line reads one line too far.
+		if b.prevLineEnding == "\r" && ctx.part == "\n" {
+			b.lineDrift++
+		}
+
 		return false
 	}
 
@@ -414,6 +425,8 @@ func (b *builder) processPart(ctx *partContext) bool {
 //   - It cuts a CRLF between tokens, closing a comment with the "\r" and
 //     opening the next token with the "\n". A "\r" directly followed by "\n"
 //     is one line break in every convention, so the "\n" joins the "\r".
+//     The lexer counted two breaks there, so absorbing the "\n" adds one to
+//     lineDrift, which every later reading of a Position.Line subtracts.
 //   - It repeats a line ending at both the end of one token and the start
 //     of the next. After a tag it repeats "\n" as "\n", and in a CRLF
 //     document it closes the tag with "\r" and opens the next token with
@@ -441,7 +454,7 @@ func (b *builder) continuesPreviousLine(ctx *partContext) bool {
 		return false
 	}
 
-	return ctx.tk.Position != nil && ctx.leadingNewlines > ctx.tk.Position.Line-b.currentLine
+	return ctx.tk.Position != nil && ctx.leadingNewlines > ctx.tk.Position.Line-b.lineDrift-b.currentLine
 }
 
 // handleGap detects and handles line number gaps for simple tokens.
@@ -449,7 +462,10 @@ func (b *builder) continuesPreviousLine(ctx *partContext) bool {
 // endings, at most a trailing one.
 //
 // When a gap is detected (token is ahead of currentLine), it flushes the
-// current line and syncs forward to the token's line.
+// current line and syncs forward to the token's line. That line is
+// Position.Line less the drift the lexer picked up from the CRLFs it cut
+// between tokens, so a CRLF document reports the same gaps as the same
+// text with LF endings.
 //
 // Block scalar content is never evidence of a gap. The lexer sets its
 // Position.Line to the header's line or to the last content line, not to
@@ -463,7 +479,7 @@ func (b *builder) handleGap(tk *token.Token, parts []string, isBlockScalarConten
 
 	tkLine := b.currentLine
 	if tk.Position != nil {
-		tkLine = tk.Position.Line
+		tkLine = tk.Position.Line - b.lineDrift
 	}
 
 	// If there's a gap (simple token is ahead), flush and sync forward.

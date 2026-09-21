@@ -141,7 +141,9 @@ func TestSplit_LineEndings(t *testing.T) {
 
 	// The lexer advances Position.Line on "\n", "\r\n", and a bare "\r", and
 	// Split cuts lines at the same three endings. Where the lexer spreads one
-	// CRLF over two tokens, the two halves stay on one line.
+	// CRLF over two tokens, the two halves stay on one line, and the line
+	// the lexer skipped there stays out of every later line number, however
+	// many such splits a file holds.
 	tcs := map[string]struct {
 		input       string
 		wantContent []string
@@ -171,6 +173,21 @@ func TestSplit_LineEndings(t *testing.T) {
 			input:       "a: b # c\r\nd: e\r\n",
 			wantContent: []string{"a: b # c", "d: e"},
 			wantNumbers: []int{1, 2},
+		},
+		"crlf between two comments": {
+			input:       "# a\r\n# b\r\nc: 1\r\n",
+			wantContent: []string{"# a", "# b", "c: 1"},
+			wantNumbers: []int{1, 2, 3},
+		},
+		"crlf between three comments": {
+			input:       "# a\r\n# b\r\n# c\r\nd: 1\r\n",
+			wantContent: []string{"# a", "# b", "# c", "d: 1"},
+			wantNumbers: []int{1, 2, 3, 4},
+		},
+		"crlf blank line between comments": {
+			input:       "# a\r\n\r\n# b\r\nc: 1\r\n",
+			wantContent: []string{"# a", "", "# b", "c: 1"},
+			wantNumbers: []int{1, 2, 3, 4},
 		},
 		"crlf repeated after tag": {
 			input:       "a: !t\r\n  b: 1\r\n",
