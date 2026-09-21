@@ -36,7 +36,7 @@ import (
 // An error with no nested errors prints as [error.Error] as it is, so the
 // context a wrapper added stays in front of the position:
 //
-//	p := printer.New(printer.WithWidth(width), printer.WithContextLines(3))
+//	p := printer.New(printer.WithWrap(width), printer.WithContextLines(3))
 //	fmt.Println(p.PrintError(err))
 //
 // An error whose tree holds no SourceError, or whose excerpts are empty,

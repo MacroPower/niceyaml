@@ -1011,7 +1011,7 @@ func TestPrinter_WordWrap(t *testing.T) {
 
 			tks := lexer.Tokenize(tc.input)
 
-			p := testPrinterWithGutter(tc.gutter).With(printer.WithWidth(tc.width))
+			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrap(tc.width))
 
 			got := p.Print(niceyaml.NewSourceFromTokens(tks).View())
 			assert.Equal(t, tc.want, got)
@@ -1039,7 +1039,7 @@ func TestPrinter_WordWrap_NarrowWidth(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWidth(tc.width))
+			p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrap(tc.width))
 
 			got := p.Print(view)
 			rows := strings.Split(got, "\n")
@@ -1062,7 +1062,7 @@ func TestPrinter_WordWrap_WideLineNumbers(t *testing.T) {
 	input := strings.Repeat("k: v\n", 10000) + "last: this is a long value that wraps"
 	source := niceyaml.NewSourceFromString(input)
 
-	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWidth(30))
+	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrap(30))
 
 	got := p.Print(source.View().Slice(position.NewSpan(10000, 10001)))
 	for row := range strings.SplitSeq(got, "\n") {
@@ -1165,7 +1165,7 @@ func TestPrinter_PrintTokenDiff_Wrapping(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := testPrinterWithGutter(printer.DiffGutter).With(printer.WithWidth(tc.width))
+			p := testPrinterWithGutter(printer.DiffGutter).With(printer.WithWrap(tc.width))
 
 			view := diff.Diff(
 				niceyaml.NewSourceFromString(tc.before).Lines(),
@@ -2496,10 +2496,10 @@ func TestPrinter_With(t *testing.T) {
 	source := niceyaml.NewSourceFromString("key: this is a very long value that should wrap")
 
 	base := testPrinterWithGutter(printer.NoGutter)
-	narrow := base.With(printer.WithWidth(20))
+	narrow := base.With(printer.WithWrap(20))
 
-	assert.Equal(t, 0, base.Width())
-	assert.Equal(t, 20, narrow.Width())
+	assert.Equal(t, 0, base.Wrap())
+	assert.Equal(t, 20, narrow.Wrap())
 
 	// The receiver still renders on one line; the copy wraps.
 	assert.Equal(t, "key: this is a very long value that should wrap", base.Print(source.View()))
@@ -2535,7 +2535,7 @@ func TestPrinter_Golden(t *testing.T) {
 			opts: []printer.Option{
 				printer.WithStyles(theme.Charm.Styles()),
 				printer.WithContainerStyle(lipgloss.NewStyle()),
-				printer.WithWidth(40),
+				printer.WithWrap(40),
 			},
 		},
 		"default colors with line numbers": {
@@ -3273,7 +3273,7 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			view := niceyaml.NewSourceFromString(tc.input).View()
 			view.Annotate(0, tc.annotation)
 
-			p := testPrinterWithGutter(tc.gutter).With(printer.WithWidth(tc.width))
+			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrap(tc.width))
 			if tc.annFunc != nil {
 				p = p.With(printer.WithAnnotation(tc.annFunc))
 			}
@@ -3345,7 +3345,7 @@ func TestPrinter_LineNumbers_MaxNumber(t *testing.T) {
 	view := source.View().Slice(position.NewSpan(10000, source.Lines().Len()))
 	view.Annotate(0, line.Annotation{Content: "note", Placement: line.Below, Col: 6})
 
-	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWidth(30))
+	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrap(30))
 
 	got := p.Print(view)
 	for row := range strings.SplitSeq(got, "\n") {
@@ -3630,7 +3630,7 @@ func TestPrinter_Layout_MultiLineAnnotation(t *testing.T) {
 			view := niceyaml.NewSourceFromString("a: 1\nb: 2\n").View()
 			view.Annotate(0, line.Annotation{Content: "one\ntwo"})
 
-			p := testPrinter().With(printer.WithAnnotation(joined), printer.WithWidth(tc.width))
+			p := testPrinter().With(printer.WithAnnotation(joined), printer.WithWrap(tc.width))
 
 			printed := strings.Split(strings.TrimSuffix(p.Print(view), "\n"), "\n")
 			assert.Len(t, printed, p.Layout(view).Rows())
@@ -3814,7 +3814,7 @@ func TestPrinter_Layout(t *testing.T) {
 		"        ^ last",
 	)
 
-	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWidth(20))
+	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrap(20))
 
 	t.Run("rows match print", func(t *testing.T) {
 		t.Parallel()
@@ -3956,7 +3956,7 @@ func TestPrinter_Layout(t *testing.T) {
 		// so the escaped text keeps one rune per source column and the wrap
 		// falls at the same column in both.
 		view := niceyaml.NewSourceFromString("k: \"\tx\x1by zz ww\"").View()
-		p := testPrinter().With(printer.WithWidth(10))
+		p := testPrinter().With(printer.WithWrap(10))
 
 		got := p.Print(view)
 		require.Equal(t, stringtest.JoinLF(
@@ -4009,7 +4009,7 @@ func TestPrinter_Layout(t *testing.T) {
 		t.Parallel()
 
 		view := newView()
-		p := p.With(printer.WithWidth(0))
+		p := p.With(printer.WithWrap(0))
 
 		got := p.Print(view)
 		require.Equal(t, stringtest.JoinLF(

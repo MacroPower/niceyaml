@@ -21,7 +21,7 @@ func main() {
 
 	// The error printer carries the terminal width so annotated source
 	// excerpts wrap to it.
-	errPrinter := printer.New(printer.WithWidth(terminalWidth()))
+	errPrinter := printer.New(printer.WithWrap(terminalWidth()))
 
 	err := fang.Execute(context.Background(), rootCmd,
 		fang.WithErrorHandler(fangs.NewErrorHandler(fangs.WithPrinter(errPrinter))),

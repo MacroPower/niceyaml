@@ -127,7 +127,7 @@
 // connector in front of each nested error, and renders the excerpt of
 // every SourceError in the error's tree:
 //
-//	p := printer.New(printer.WithWidth(width), printer.WithContextLines(3))
+//	p := printer.New(printer.WithWrap(width), printer.WithContextLines(3))
 //	fmt.Println(p.PrintError(err))
 //
 // This package knows nothing of the printer. The marks of an error are

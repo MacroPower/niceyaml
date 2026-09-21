@@ -409,7 +409,7 @@ func (m *Model) renderPrinter(width int) *printer.Printer {
 	}
 
 	return m.printer.With(
-		printer.WithWidth(wrapWidth),
+		printer.WithWrap(wrapWidth),
 		printer.WithMaxNumber(maxNumber),
 		printer.WithContainerWidth(width),
 	)

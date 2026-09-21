@@ -255,7 +255,7 @@ func BenchmarkPrinterWithWrapping(b *testing.B) {
 
 	for _, w := range widths {
 		b.Run(w.name, func(b *testing.B) {
-			p := printer.New(printer.WithWidth(w.width))
+			p := printer.New(printer.WithWrap(w.width))
 
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))

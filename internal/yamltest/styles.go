@@ -15,7 +15,7 @@ import (
 // For example, a comment renders as `<comment># text</comment>`.
 //
 // The tags are ordinary text, so lipgloss counts them toward display width.
-// A printer that combines XMLStyles with [printer.WithWidth] or a padded
+// A printer that combines XMLStyles with [printer.WithWrap] or a padded
 // container style wraps and pads by tag length rather than by the visible
 // text, so assert width and alignment through a color theme instead.
 //

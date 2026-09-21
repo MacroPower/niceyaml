@@ -30,7 +30,7 @@
 //
 // # Word Wrapping
 //
-// [WithWidth] wraps content at a width, with the gutter width subtracted.
+// [WithWrap] wraps content at a width, with the gutter width subtracted.
 // [Printer.Layout] reports the row structure of a view without rendering
 // it: how many rows each line takes, which row a position lands on, and
 // how wide the rows are, so a viewer that scrolls by rendered row maps rows
@@ -82,7 +82,7 @@ type StyleGetter interface {
 // Every setting is a [Option]; to change one on an existing Printer,
 // derive a copy with [Printer.With]:
 //
-//	narrow := printer.With(printer.WithWidth(40))
+//	narrow := printer.With(printer.WithWrap(40))
 //
 // Create instances with [New].
 //
@@ -127,7 +127,7 @@ type StyleGetter interface {
 //
 // # Word Wrapping
 //
-// Pass [WithWidth] to enable word wrapping at a given width. The printer
+// Pass [WithWrap] to enable word wrapping at a given width. The printer
 // accounts for gutter width when calculating available content width. Wrapped
 // continuation lines show a "-" marker in the gutter. A width of 0 turns
 // wrapping off.
@@ -147,7 +147,7 @@ type Printer struct {
 	// Blended styles by the kinds that produce them. WithStyles replaces
 	// it, since the kinds then resolve to other styles.
 	blends         *blendCache
-	width          int
+	wrap           int
 	containerWidth int
 	maxNumber      int
 	contextLines   int
@@ -178,7 +178,7 @@ func New(opts ...Option) *Printer {
 // With returns a copy of the [Printer] with the given options applied. The
 // receiver is unchanged, so a shared Printer can be specialized per call:
 //
-//	wrapped := printer.With(printer.WithWidth(80))
+//	wrapped := printer.With(printer.WithWrap(80))
 //
 // The copy shares the receiver's cache of blended styles unless [WithStyles]
 // is among the options; the cache is safe for concurrent use.
@@ -209,7 +209,7 @@ func (p *Printer) apply(opts []Option) {
 //   - [WithContainerWidth]
 //   - [WithGutter]
 //   - [WithAnnotation]
-//   - [WithWidth]
+//   - [WithWrap]
 //   - [WithMaxNumber]
 //   - [WithContextLines]
 type Option func(*Printer)
@@ -410,7 +410,7 @@ func WithContainerStyle(s lipgloss.Style) Option {
 // width of 0, the default, lets the container shrink to the widest row.
 //
 // Pad a row, never cut one: a row can still run past n, since an
-// annotation column may push the layout wider than [WithWidth] and a style
+// annotation column may push the layout wider than [WithWrap] and a style
 // transform may widen a row after it wraps. A viewer that scrolls
 // horizontally cuts the rows itself.
 //
@@ -466,11 +466,12 @@ func WithAnnotation(fn AnnotationFunc) Option {
 	}
 }
 
-// WithWidth is a [Option] that sets the width for word wrapping.
-// A width of 0, the default, disables wrapping.
-func WithWidth(width int) Option {
+// WithWrap is an [Option] that sets the width for word wrapping.
+// A width of 0, the default, disables wrapping. The width of the box
+// around the output is [WithContainerWidth].
+func WithWrap(width int) Option {
 	return func(p *Printer) {
-		p.width = width
+		p.wrap = width
 	}
 }
 
@@ -497,10 +498,10 @@ func WithContextLines(n int) Option {
 	}
 }
 
-// Width returns the width used for word wrapping, or 0 when wrapping is
+// Wrap returns the width used for word wrapping, or 0 when wrapping is
 // disabled.
-func (p *Printer) Width() int {
-	return p.width
+func (p *Printer) Wrap() int {
+	return p.wrap
 }
 
 // ContainerWidth returns the width the container style's box is pinned to,
@@ -1036,11 +1037,11 @@ func (c *blendCache) put(key string, st lipgloss.Style) lipgloss.Style {
 //
 // Returns 0 if wrapping is disabled.
 func (p *Printer) contentWidth(gutterWidth int) int {
-	if p.width <= 0 {
+	if p.wrap <= 0 {
 		return 0
 	}
 
-	return max(1, p.width-gutterWidth)
+	return max(1, p.wrap-gutterWidth)
 }
 
 // wrapContent splits content for word wrapping if enabled.

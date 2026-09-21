@@ -49,7 +49,7 @@ func newConfig(opts []Option) config {
 
 // WithPrinter is an [Option] that sets the [*printer.Printer] that renders
 // errors through [printer.Printer.PrintError]. The printer's width, set
-// with [printer.WithWidth], controls word wrapping, its styles color the
+// with [printer.WithWrap], controls word wrapping, its styles color the
 // highlighted locations, and [printer.WithContextLines] sets the context
 // lines around each one.
 func WithPrinter(p *printer.Printer) Option {
@@ -64,7 +64,7 @@ func WithPrinter(p *printer.Printer) Option {
 //
 //	err := fang.Execute(ctx, rootCmd,
 //	    fang.WithErrorHandler(fangs.NewErrorHandler(
-//	        fangs.WithPrinter(printer.New(printer.WithWidth(width))),
+//	        fangs.WithPrinter(printer.New(printer.WithWrap(width))),
 //	    )),
 //	)
 //
