@@ -1861,13 +1861,16 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 				}
 			}
 
-			// Pad left pane to consistent width for alignment.
+			// Pad left pane to consistent width for alignment. Both panes
+			// are cut to the pane width, which the gutter of a pane row
+			// can exceed on its own, so the joined row fits the content
+			// width.
 			leftPadded := ansi.Truncate(left, paneWidth, "")
 			if padding := paneWidth - ansi.StringWidth(leftPadded); padding > 0 {
 				leftPadded += textStyle.Render(strings.Repeat(" ", padding))
 			}
 
-			combined = append(combined, leftPadded+separator+right)
+			combined = append(combined, leftPadded+separator+ansi.Truncate(right, paneWidth, ""))
 		}
 	}
 
