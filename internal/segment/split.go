@@ -21,7 +21,8 @@ type Line struct {
 }
 
 // Split cuts tks into one [Line] per source line, splitting multiline
-// tokens into per-line parts. Returns nil when tks is empty.
+// tokens into per-line parts. Nil tokens in the stream are skipped.
+// Returns nil when tks holds no other token.
 //
 // The parts closely match go-yaml lexer behavior:
 //
@@ -61,6 +62,10 @@ func Split(tks token.Tokens) []Line {
 	}
 
 	for _, tk := range tks {
+		if tk == nil {
+			continue
+		}
+
 		b.AddToken(tk)
 	}
 
@@ -94,9 +99,10 @@ type builder struct {
 }
 
 // newBuilder creates a new [*builder] initialized from the first token.
-// Returns nil if tks is empty.
+// Nil tokens are skipped, and nil comes back when tks holds no other token.
 func newBuilder(tks token.Tokens) *builder {
-	if len(tks) == 0 {
+	first := firstToken(tks)
+	if first == nil {
 		return nil
 	}
 
@@ -106,10 +112,10 @@ func newBuilder(tks token.Tokens) *builder {
 	//
 	// If the first token's Origin has leading newlines, we need to start earlier
 	// because Position.Line points to the content, not the Origin start.
-	if tks[0].Position != nil {
-		b.currentLine = tks[0].Position.Line
+	if first.Position != nil {
+		b.currentLine = first.Position.Line
 		// Count leading newlines in first token's Origin and adjust.
-		leadingNewlines := countLeadingNewlineParts(splitOriginIntoParts(tks[0].Origin))
+		leadingNewlines := countLeadingNewlineParts(splitOriginIntoParts(first.Origin))
 		if leadingNewlines > 0 && b.currentLine > leadingNewlines {
 			b.currentLine -= leadingNewlines
 		}
@@ -118,21 +124,45 @@ func newBuilder(tks token.Tokens) *builder {
 	}
 
 	// Initialize position tracking from first token (1-indexed like lexer).
-	if tks[0].Position != nil && tks[0].Position.Offset > 0 {
-		b.currentOffset = originOffset(tks[0])
-		b.currentIndentNum = tks[0].Position.IndentNum
-		b.currentIndentLevel = tks[0].Position.IndentLevel
+	if first.Position != nil && first.Position.Offset > 0 {
+		b.currentOffset = originOffset(first)
+		b.currentIndentNum = first.Position.IndentNum
+		b.currentIndentLevel = first.Position.IndentLevel
 	} else {
 		b.currentOffset = 1
 	}
 
 	// Pre-allocate lines slice based on last token's line number.
 	// This provides a reasonable upper bound for expected line count.
-	if last := tks[len(tks)-1]; last.Position != nil {
+	if last := lastToken(tks); last.Position != nil {
 		b.lines = make([]Line, 0, last.Position.Line)
 	}
 
 	return b
+}
+
+// firstToken returns the first non-nil token in tks, or nil when tks holds
+// none.
+func firstToken(tks token.Tokens) *token.Token {
+	for _, tk := range tks {
+		if tk != nil {
+			return tk
+		}
+	}
+
+	return nil
+}
+
+// lastToken returns the last non-nil token in tks, or nil when tks holds
+// none.
+func lastToken(tks token.Tokens) *token.Token {
+	for _, tk := range slices.Backward(tks) {
+		if tk != nil {
+			return tk
+		}
+	}
+
+	return nil
 }
 
 // AddToken adds a single token, splitting it into per-line parts.

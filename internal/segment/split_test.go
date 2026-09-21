@@ -1,6 +1,7 @@
 package segment_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -384,4 +385,56 @@ func TestSplit_BlockScalarTrailingIndent(t *testing.T) {
 	comment := part(t, lines, 4, 1)
 	assert.Equal(t, token.CommentType, comment.Type)
 	assert.Greater(t, comment.Position.Column, indent.Position.Column)
+}
+
+func TestSplit_HandBuiltStream(t *testing.T) {
+	t.Parallel()
+
+	// A caller can compose a stream itself rather than take one from the
+	// lexer, so Split tolerates what the lexer never emits.
+	pair := lexer.Tokenize("a: 1\nb: 2\n")
+	require.NotEmpty(t, pair)
+
+	tcs := map[string]struct {
+		input       token.Tokens
+		wantContent []string
+		wantNumbers []int
+	}{
+		"nil alone": {
+			input:       token.Tokens{nil},
+			wantContent: []string{},
+			wantNumbers: []int{},
+		},
+		"nil tokens only": {
+			input:       token.Tokens{nil, nil},
+			wantContent: []string{},
+			wantNumbers: []int{},
+		},
+		"nil before the stream": {
+			input:       append(token.Tokens{nil}, pair...),
+			wantContent: []string{"a: 1", "b: 2"},
+			wantNumbers: []int{1, 2},
+		},
+		"nil after the stream": {
+			input:       append(slices.Clone(pair), nil),
+			wantContent: []string{"a: 1", "b: 2"},
+			wantNumbers: []int{1, 2},
+		},
+		"nil inside the stream": {
+			input:       slices.Insert(slices.Clone(pair), 2, nil),
+			wantContent: []string{"a: 1", "b: 2"},
+			wantNumbers: []int{1, 2},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			lines := segment.Split(tc.input)
+
+			assert.Equal(t, tc.wantContent, lineContents(lines))
+			assert.Equal(t, tc.wantNumbers, lineNumbers(lines))
+		})
+	}
 }
