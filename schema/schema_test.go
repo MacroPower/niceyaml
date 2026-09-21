@@ -1040,7 +1040,7 @@ func TestSchema_Validate_Scope(t *testing.T) {
 			  replicas: many
 		`))
 
-		err := dd.At(spec).Validate(t.Context(), v)
+		err := yamltest.At(t, dd, spec).Validate(t.Context(), v)
 
 		var bound *niceyaml.SourceError
 
@@ -1070,7 +1070,7 @@ func TestSchema_Validate_Scope(t *testing.T) {
 			  0x10: hello
 		`))
 
-		err := dd.At(spec).Validate(t.Context(), v)
+		err := yamltest.At(t, dd, spec).Validate(t.Context(), v)
 
 		var bound *niceyaml.SourceError
 
@@ -1090,7 +1090,7 @@ func TestSchema_Validate_Scope(t *testing.T) {
 			  extra: 1
 		`))
 
-		err := dd.At(spec).Validate(t.Context(), v)
+		err := yamltest.At(t, dd, spec).Validate(t.Context(), v)
 
 		var bound *niceyaml.SourceError
 

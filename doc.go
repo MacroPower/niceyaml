@@ -209,7 +209,10 @@
 // so a check written for a type reports the same lines whether the type is
 // the whole document or a value inside one:
 //
-//	hours := doc.At(paths.Root().Child("spec", "hours"))
+//	hours, err := doc.At(paths.Root().Child("spec", "hours"))
+//	if err != nil {
+//		return err
+//	}
 //
 //	h, err := hours.Decode[Hours](ctx, niceyaml.WithValidator(hoursSchema))
 //	if err != nil {
@@ -218,8 +221,9 @@
 //
 //	return hours.Bind(check(h))
 //
-// Both return errors bound to the source, so a decoding failure or a
-// validator's [Error] renders its location with the %+v verb as it is.
+// All three return errors bound to the source, so a path that selects
+// nothing, a decoding failure, or a validator's [Error] renders its
+// location with the %+v verb as it is.
 //
 // # Diffs
 //

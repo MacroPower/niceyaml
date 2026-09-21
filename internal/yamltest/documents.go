@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/paths"
 )
 
 // FirstDocument creates a [*niceyaml.Document] from YAML input for
@@ -16,6 +17,17 @@ func FirstDocument(t *testing.T, input string) *niceyaml.Document {
 	t.Helper()
 
 	return FirstDocumentWithPath(t, input, "")
+}
+
+// At scopes doc to the node path selects through [niceyaml.Document.At].
+// The test fails when the path selects nothing.
+func At(t *testing.T, doc *niceyaml.Document, path paths.Path) *niceyaml.Document {
+	t.Helper()
+
+	scoped, err := doc.At(path)
+	require.NoError(t, err)
+
+	return scoped
 }
 
 // Bind binds err to the single document of source through

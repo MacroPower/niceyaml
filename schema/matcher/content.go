@@ -50,8 +50,18 @@ func Content[T comparable](path paths.Path, want T) Matcher {
 
 // Match implements [Matcher].
 func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Document) (bool, error) {
-	got, err := doc.At(m.path).Decode[T](ctx)
-	if errors.Is(err, paths.ErrNotFound) || isDecodeError(err) {
+	node, err := doc.At(m.path)
+	if errors.Is(err, paths.ErrNotFound) {
+		return false, nil
+	}
+
+	if err != nil {
+		//nolint:wrapcheck // The Document binds the error already.
+		return false, err
+	}
+
+	got, err := node.Decode[T](ctx)
+	if isDecodeError(err) {
 		return false, nil
 	}
 

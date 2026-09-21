@@ -28,11 +28,16 @@ type Matcher interface {
 //
 //	kindPath := paths.Root().Child("kind")
 //	m := matcher.Func(func(ctx context.Context, doc *niceyaml.Document) (bool, error) {
-//	    kind, err := doc.At(kindPath).Decode[string](ctx)
+//	    node, err := doc.At(kindPath)
 //	    if errors.Is(err, paths.ErrNotFound) {
 //	        return false, nil
 //	    }
 //
+//	    if err != nil {
+//	        return false, err
+//	    }
+//
+//	    kind, err := node.Decode[string](ctx)
 //	    if err != nil {
 //	        return false, err
 //	    }

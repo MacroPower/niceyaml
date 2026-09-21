@@ -137,7 +137,7 @@ func TestRegistry_Lookup_ScopedDocument(t *testing.T) {
 		spec:
 		  replicas: 1
 	`))
-	spec := doc.At(paths.Root().Child("spec"))
+	spec := yamltest.At(t, doc, paths.Root().Child("spec"))
 
 	_, err := reg.Lookup(t.Context(), spec)
 	require.ErrorIs(t, err, schema.ErrScopedDocument)
@@ -800,7 +800,12 @@ func TestRegistry_DynamicResolver(t *testing.T) {
 		reg := schema.NewRegistry(
 			schema.WithResolvers(
 				schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
-					kind, err := doc.At(kindPath).Decode[string](ctx)
+					node, err := doc.At(kindPath)
+					if err != nil {
+						return schema.Ref{}, schema.ErrNoMatch
+					}
+
+					kind, err := node.Decode[string](ctx)
 					if err != nil || (kind != "Deployment" && kind != "Service") {
 						return schema.Ref{}, schema.ErrNoMatch
 					}
@@ -989,7 +994,7 @@ func TestRegistry_MultipleDocuments(t *testing.T) {
 	// Track validation results.
 	validated := make(map[string]bool)
 	for _, doc := range docs {
-		kind, err := doc.At(kindPath).Decode[string](t.Context())
+		kind, err := yamltest.At(t, doc, kindPath).Decode[string](t.Context())
 		require.NoError(t, err)
 
 		err = reg.Validate(t.Context(), doc)

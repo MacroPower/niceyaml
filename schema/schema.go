@@ -299,7 +299,7 @@ func decodedPosition(
 
 	// The path and the segments are written from the node the document is
 	// scoped to, as the data the schema checked was decoded from it.
-	_, err := doc.At(path).Node()
+	_, err := doc.At(path)
 	if err == nil {
 		return position.Position{}, false
 	}

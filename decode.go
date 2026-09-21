@@ -66,7 +66,12 @@ type Validator interface {
 //
 //	kindPath := paths.Root().Child("kind")
 //	known := niceyaml.ValidatorFunc(func(ctx context.Context, doc *niceyaml.Document) error {
-//		kind, err := doc.At(kindPath).Decode[string](ctx)
+//		node, err := doc.At(kindPath)
+//		if err != nil {
+//			return err
+//		}
+//
+//		kind, err := node.Decode[string](ctx)
 //		if err != nil {
 //			return err
 //		}
@@ -375,7 +380,12 @@ func (dd *Document) Root() *ast.DocumentNode {
 // and the node its path selects for one from [Document.At]. The text of
 // any node, including a mapping or a sequence, is its String method:
 //
-//	node, err := doc.At(path).Node()
+//	scoped, err := doc.At(path)
+//	if err != nil {
+//		return err
+//	}
+//
+//	node, err := scoped.Node()
 //	if err != nil {
 //		return err
 //	}
@@ -384,9 +394,7 @@ func (dd *Document) Root() *ast.DocumentNode {
 //
 // The body is what the parser built: nil for an empty document, and a
 // comment group for one holding only comments, and Node returns either
-// without an error, as such a document decodes to nothing. A scope that
-// selects nothing returns the error [paths.Path.Node] describes, bound to
-// the source.
+// without an error, as such a document decodes to nothing.
 func (dd *Document) Node() (ast.Node, error) {
 	if dd.base.IsRoot() {
 		return dd.doc.Body, nil
@@ -410,7 +418,10 @@ func (dd *Document) Node() (ast.Node, error) {
 // check written for a type reports the same lines whether the type is
 // the whole document or a value inside one:
 //
-//	hours := doc.At(paths.Root().Child("spec", "hours"))
+//	hours, err := doc.At(paths.Root().Child("spec", "hours"))
+//	if err != nil {
+//		return err
+//	}
 //
 //	h, err := hours.Decode[Hours](ctx, niceyaml.WithValidator(hoursSchema))
 //	if err != nil {
@@ -419,31 +430,49 @@ func (dd *Document) Node() (ast.Node, error) {
 //
 //	return hours.Bind(check(h))
 //
-// At resolves the node to find the lines and tokens it covers. A path
-// that selects nothing covers no lines and holds no tokens, and the first
-// method that reads the node, such as [Document.Node] or
-// [Document.Decode], reports the error [paths.Path.Node] describes,
-// bound to the source.
-func (dd *Document) At(path paths.Path) *Document {
+// At resolves the node to find the lines and tokens it covers, and a path
+// that selects nothing returns the error [paths.Path.Node] describes,
+// bound to the source: an error wrapping [paths.ErrNotFound] when nothing
+// exists at the path, which also wraps [paths.ErrNoDocument] when the
+// document has no content at all, such as an empty document or one
+// holding only directives; [paths.ErrAlias] when an alias on the path
+// does not resolve; and [paths.ErrWildcard] for a path that could match
+// several nodes. A caller that falls back when a value is absent checks
+// for [paths.ErrNotFound]:
+//
+//	version := 1
+//
+//	node, err := doc.At(versionPath)
+//	if err == nil {
+//		version, err = node.Decode[int](ctx)
+//	}
+//
+//	if err != nil && !errors.Is(err, paths.ErrNotFound) {
+//		return err
+//	}
+//
+// A node whose tokens carry no position covers no lines and holds no
+// tokens.
+func (dd *Document) At(path paths.Path) (*Document, error) {
 	c := *dd
 	c.base = dd.base.Join(path)
-	c.span, c.content = dd.extent(c.base)
 
-	return &c
-}
-
-// extent returns the lines and the tokens of the node base selects in the
-// document: the tokens of the document from the first token under the
-// node through the last, in source order, and the lines from the one the
-// first starts on through the one the last ends on. A base that selects
-// nothing, or a node whose tokens carry no position, covers no lines and
-// holds no tokens.
-func (dd *Document) extent(base paths.Path) (position.Span, token.Tokens) {
-	node, err := base.Node(dd.doc)
+	node, err := c.base.Node(dd.doc)
 	if err != nil {
-		return position.Span{}, nil
+		return nil, c.Bind(err)
 	}
 
+	c.span, c.content = dd.extent(node)
+
+	return &c, nil
+}
+
+// extent returns the lines and the tokens of node in the document: the
+// tokens of the document from the first token under the node through the
+// last, in source order, and the lines from the one the first starts on
+// through the one the last ends on. A node whose tokens carry no position
+// covers no lines and holds no tokens.
+func (dd *Document) extent(node ast.Node) (position.Span, token.Tokens) {
 	first, last := tokenBounds(node)
 	if first == nil || last == nil {
 		return position.Span{}, nil
@@ -707,7 +736,10 @@ func (dd *Document) Validate(ctx context.Context, validators ...Validator) error
 // A path in such an error is written from the value, so the Document
 // scoped to that value with [Document.At] binds it:
 //
-//	item := doc.At(path)
+//	item, err := doc.At(path)
+//	if err != nil {
+//		return err
+//	}
 //
 //	value, err := item.Decode[map[string]any](ctx)
 //	if err != nil {
@@ -850,16 +882,9 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 // come back bound to the source as [SourceError] values, with a path in
 // them resolving from the scope.
 //
-// The scope of a Document from [Document.At] resolves before the
-// validators run, so a path that selects nothing returns the error
-// [paths.Path.Node] describes: an error wrapping [paths.ErrNotFound] when
-// nothing exists at the path, which also wraps [paths.ErrNoDocument] when
-// the document has no content at all, such as an empty document or one
-// holding only directives; [paths.ErrAlias] when an alias on the path does
-// not resolve; and [paths.ErrWildcard] for a path that could match several
-// nodes. An alias inside the node resolves against the anchors of the
-// whole document, so a value that refers to an anchor defined outside it
-// decodes as it does in the whole document.
+// An alias inside the node resolves against the anchors of the whole
+// document, so a value that refers to an anchor defined outside it decodes
+// as it does in the whole document.
 func (dd *Document) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
 	err := checkDecodeTarget(v)
 	if err != nil {
@@ -1033,29 +1058,22 @@ func hasContent(node ast.Node) bool {
 // unless [WithSelfValidation] switches that off. Methods declared on T
 // itself are included in the method set of *T, so both value and pointer
 // receivers participate. YAML decoding errors, and [Error] values from the
-// validators, come back bound to the source as [SourceError] values, and
-// [Document.DecodeInto] describes the errors a scope that selects nothing
-// returns. On error, the returned T is the zero value.
+// validators, come back bound to the source as [SourceError] values. On
+// error, the returned T is the zero value.
 //
 // A scoped Decode reads one typed value without decoding the whole
-// document, such as a version number or a list of tags:
-//
-//	versionPath := paths.Root().Child("version")
-//	for _, doc := range docs {
-//		version, err := doc.At(versionPath).Decode[int](ctx)
-//		if errors.Is(err, paths.ErrNotFound) {
-//			version = 1
-//		} else if err != nil {
-//			return err
-//		}
-//	}
-//
-// A scalar decodes into a string as its text, so a Decode[string] reads a
+// document, such as a version number or a list of tags, and a scalar
+// decodes into a string as its text, so a Decode[string] reads a
 // discriminator field such as kind whatever its type:
 //
 //	kindPath := paths.Root().Child("kind")
 //	for _, doc := range docs {
-//		kind, err := doc.At(kindPath).Decode[string](ctx)
+//		node, err := doc.At(kindPath)
+//		if err != nil {
+//			return err
+//		}
+//
+//		kind, err := node.Decode[string](ctx)
 //		if err != nil {
 //			return err
 //		}

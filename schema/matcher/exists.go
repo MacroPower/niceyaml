@@ -36,7 +36,7 @@ func Exists(path paths.Path) Matcher {
 
 // Match implements [Matcher].
 func (m *existsMatcher) Match(_ context.Context, doc *niceyaml.Document) (bool, error) {
-	node, err := doc.At(m.path).Node()
+	_, err := doc.At(m.path)
 	if errors.Is(err, paths.ErrNotFound) {
 		return false, nil
 	}
@@ -46,5 +46,5 @@ func (m *existsMatcher) Match(_ context.Context, doc *niceyaml.Document) (bool, 
 		return false, err
 	}
 
-	return node != nil, nil
+	return true, nil
 }

@@ -1375,7 +1375,7 @@ func TestPath_RedefinedAnchor(t *testing.T) {
 		assert.Equal(t, map[string]any{"a": "v1", "b": "v1", "c": "v2", "d": "v2"}, decoded)
 
 		for _, key := range []string{"b", "d"} {
-			got, err := dd.At(paths.Root().Child(key)).Decode[string](t.Context())
+			got, err := yamltest.At(t, dd, paths.Root().Child(key)).Decode[string](t.Context())
 			require.NoError(t, err)
 			assert.Equal(t, decoded[key], got)
 		}
