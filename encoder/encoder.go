@@ -1,6 +1,7 @@
 package encoder
 
 import (
+	"fmt"
 	"io"
 
 	"github.com/goccy/go-yaml"
@@ -21,6 +22,30 @@ func Pretty() []Option {
 // Create instances with [New].
 type Encoder struct {
 	e *yaml.Encoder
+	w *errWriter
+}
+
+// errWriter keeps the first error the writer it wraps returns, since the
+// go-yaml encoder discards the result of every write it makes. Once a write
+// has failed, every later write returns that error without reaching the
+// writer, so a document never lands partly written after a failure.
+type errWriter struct {
+	w   io.Writer
+	err error
+}
+
+// Write implements [io.Writer].
+func (w *errWriter) Write(p []byte) (int, error) {
+	if w.err != nil {
+		return 0, w.err
+	}
+
+	n, err := w.w.Write(p)
+	if err != nil {
+		w.err = err
+	}
+
+	return n, err //nolint:wrapcheck // Return the original error.
 }
 
 // Option configures an [Encoder].
@@ -69,17 +94,44 @@ func New(w io.Writer, opts ...Option) *Encoder {
 		opt(&c)
 	}
 
+	ew := &errWriter{w: w}
+
 	return &Encoder{
-		e: yaml.NewEncoder(w, c.opts...),
+		e: yaml.NewEncoder(ew, c.opts...),
+		w: ew,
 	}
 }
 
-// Encode encodes v as YAML and writes it to the underlying writer.
+// Encode encodes v as YAML and writes it to the underlying writer. A write
+// the writer refuses is an error, and every later call returns that same
+// error without writing.
 func (e *Encoder) Encode(v any) error {
-	return e.e.Encode(v) //nolint:wrapcheck // Return the original error.
+	err := e.e.Encode(v)
+	if err != nil {
+		return err //nolint:wrapcheck // Return the original error.
+	}
+
+	return e.writeErr()
 }
 
-// Close flushes the encoder and releases its resources.
+// Close releases the encoder's resources and reports the write error, if
+// any, that an earlier [Encoder.Encode] did. It does not flush the writer,
+// so a caller holding a buffered writer flushes it after Close.
 func (e *Encoder) Close() error {
-	return e.e.Close() //nolint:wrapcheck // Return the original error.
+	err := e.e.Close()
+	if err != nil {
+		return err //nolint:wrapcheck // Return the original error.
+	}
+
+	return e.writeErr()
+}
+
+// writeErr returns the first error the writer returned, wrapped with what
+// the encoder was doing, or nil when every write succeeded.
+func (e *Encoder) writeErr() error {
+	if e.w.err != nil {
+		return fmt.Errorf("write YAML: %w", e.w.err)
+	}
+
+	return nil
 }

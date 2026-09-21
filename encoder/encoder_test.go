@@ -2,6 +2,7 @@ package encoder_test
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
 	"github.com/goccy/go-yaml"
@@ -93,6 +94,30 @@ func TestEncoder_Close(t *testing.T) {
 
 	err := enc.Close()
 	assert.NoError(t, err)
+}
+
+// failWriter refuses every write with errWrite.
+type failWriter struct{}
+
+var errWrite = errors.New("disk full")
+
+func (failWriter) Write([]byte) (int, error) {
+	return 0, errWrite
+}
+
+func TestEncoder_Encode_writeError(t *testing.T) {
+	t.Parallel()
+
+	enc := encoder.New(failWriter{})
+
+	err := enc.Encode(map[string]int{"a": 1})
+	require.ErrorIs(t, err, errWrite)
+
+	err = enc.Encode(map[string]int{"b": 2})
+	require.ErrorIs(t, err, errWrite, "a later Encode reports the same error")
+
+	err = enc.Close()
+	require.ErrorIs(t, err, errWrite, "Close reports the write error")
 }
 
 func TestPretty(t *testing.T) {
