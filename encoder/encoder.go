@@ -62,8 +62,14 @@ type config struct {
 }
 
 // WithIndent is an [Option] that sets the number of spaces per indentation
-// level.
+// level. It panics when spaces is below 1, since the encoder would then
+// write nested values at the indent of their parent, which reads back as a
+// different value.
 func WithIndent(spaces int) Option {
+	if spaces < 1 {
+		panic(fmt.Sprintf("encoder.WithIndent: %d spaces is below 1", spaces))
+	}
+
 	return func(c *config) {
 		c.opts = append(c.opts, yaml.Indent(spaces))
 	}

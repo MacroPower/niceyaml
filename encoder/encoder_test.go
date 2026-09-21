@@ -120,6 +120,14 @@ func TestEncoder_Encode_writeError(t *testing.T) {
 	require.ErrorIs(t, err, errWrite, "Close reports the write error")
 }
 
+func TestWithIndent_panicsBelowOne(t *testing.T) {
+	t.Parallel()
+
+	for _, spaces := range []int{0, -1} {
+		assert.Panics(t, func() { encoder.WithIndent(spaces) }, "spaces=%d", spaces)
+	}
+}
+
 func TestPretty(t *testing.T) {
 	t.Parallel()
 
