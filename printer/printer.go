@@ -24,7 +24,7 @@
 // The printer renders the [line.Overlays] and [line.Annotations] a view
 // carries. An overlay styles a column span. The annotations above or below
 // a line render as rows in the style of their [line.Annotation.Kind], or
-// [kind.Comment] for those with none, and an [AnnotationFunc] renders the
+// [kind.UIAnnotation] for those with none, and an [AnnotationFunc] renders the
 // text of each group of one Kind; [DefaultAnnotation] joins them with "; "
 // and prefixes [line.Below] annotations with "^ ".
 //
@@ -120,7 +120,7 @@ type StyleGetter interface {
 // Annotations are extra text lines rendered above or below a line, outside the
 // token stream. They display error messages, diff hunk headers, or other
 // contextual notes. Each annotation renders in the style of its
-// [line.Annotation.Kind], or [kind.Comment] when it has none, and the
+// [line.Annotation.Kind], or [kind.UIAnnotation] when it has none, and the
 // annotations of one Kind on a line share their rows. The printer renders
 // the text of each such group via [AnnotationFunc], defaulting to
 // [DefaultAnnotation] which prefixes below-line annotations with "^ ".
@@ -321,8 +321,7 @@ func DefaultAnnotation(ctx AnnotationContext) string {
 // as the placeholder a side-by-side diff inserts opposite an inserted or
 // deleted line, gets a blank column.
 func renderLineNumber(ctx GutterContext) string {
-	lineNumStyle := ctx.Styles.Style(kind.Text).
-		Foreground(ctx.Styles.Style(kind.Comment).GetForeground())
+	lineNumStyle := ctx.Styles.Style(kind.UILineNumber)
 
 	width := max(4, len(strconv.Itoa(ctx.MaxNumber)))
 
@@ -378,8 +377,8 @@ func DiffGutter(ctx GutterContext) string {
 	return renderDiffMarker(ctx)
 }
 
-// LineNumberGutter is a [GutterFunc] that renders line numbers only, in the
-// [kind.Comment] foreground. Soft-wrapped continuation lines show " - ".
+// LineNumberGutter is a [GutterFunc] that renders line numbers only, in
+// [kind.UILineNumber]. Soft-wrapped continuation lines show " - ".
 func LineNumberGutter(ctx GutterContext) string {
 	return renderLineNumber(ctx)
 }
@@ -775,10 +774,10 @@ func (p *Printer) annotationGroups(
 }
 
 // annotationKind returns the style an annotation of k renders in:
-// [kind.Comment] for the zero Kind, and k itself otherwise.
+// [kind.UIAnnotation] for the zero Kind, and k itself otherwise.
 func annotationKind(k kind.Kind) kind.Kind {
 	if k == "" {
-		return kind.Comment
+		return kind.UIAnnotation
 	}
 
 	return k

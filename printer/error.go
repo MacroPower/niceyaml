@@ -83,11 +83,13 @@ func (p *Printer) detail(bound *niceyaml.SourceError) string {
 	return ""
 }
 
-// renderErrorTree draws t with a connector in front of each child, styled
-// as the gutter's line numbers are.
+// renderErrorTree draws t with a connector in front of each child, in the
+// foreground of [kind.UILineNumber], so the connectors take the color of
+// the gutter's line numbers without the background of the gutter, which
+// the message text beside them does not have.
 func (p *Printer) renderErrorTree(t errortree.Tree) string {
 	branch := lipgloss.NewStyle().
-		Foreground(p.styles.Style(kind.Comment).GetForeground()).
+		Foreground(p.styles.Style(kind.UILineNumber).GetForeground()).
 		PaddingRight(1)
 
 	return errorTreeNode(t, &branch).String()

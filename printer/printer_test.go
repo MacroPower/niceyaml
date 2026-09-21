@@ -3061,7 +3061,7 @@ func TestPrinter_AnnotationKind(t *testing.T) {
 	t.Parallel()
 
 	// Annotations of one kind share a row, and every kind renders as rows
-	// of its own in its style. The zero kind renders as a comment.
+	// of its own in its style. The zero kind renders as kind.UIAnnotation.
 	view := niceyaml.NewSourceFromString("key: value").View()
 	view.Annotate(0,
 		line.Annotation{Content: "hunk", Placement: line.Above},
@@ -3077,10 +3077,10 @@ func TestPrinter_AnnotationKind(t *testing.T) {
 	)
 
 	want := stringtest.JoinLF(
-		"<comment>hunk</comment>",
+		"<uiAnnotation>hunk</uiAnnotation>",
 		"<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
 		"<textError>^ bad key; bad value</textError>",
-		"<comment>     ^ note</comment>",
+		"<uiAnnotation>     ^ note</uiAnnotation>",
 	)
 
 	assert.Equal(t, want, p.Print(view))

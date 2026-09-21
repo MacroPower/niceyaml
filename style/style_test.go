@@ -57,6 +57,13 @@ func TestNew(t *testing.T) {
 		assert.Equal(t, lipgloss.Color("#ff0000"), got.GetForeground())
 	})
 
+	t.Run("chrome inherits from Comment", func(t *testing.T) {
+		t.Parallel()
+
+		got := styles.Style(kind.UILineNumber)
+		assert.Equal(t, lipgloss.Color("#00ff00"), got.GetForeground())
+	})
+
 	t.Run("unrelated style inherits from base", func(t *testing.T) {
 		t.Parallel()
 

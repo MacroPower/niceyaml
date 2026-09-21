@@ -106,6 +106,11 @@ func (p palette) styles() style.Styles {
 		s = s.With(style.Set(st, layer(s.Style(st), style.MustParse(p.Tokens[st]))))
 	}
 
+	// The chrome takes the comment color alone. A Tokens spec that sets
+	// comments in italics or bold styles the comments, and a line number
+	// drawn the same way would read as one.
+	s = s.With(style.Set(kind.UI, base.Foreground(s.Style(kind.Comment).GetForeground())))
+
 	return s.With(p.Overrides...)
 }
 

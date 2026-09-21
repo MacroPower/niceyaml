@@ -8,6 +8,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/diff/lcs"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
 // Differ computes line differences using a configurable algorithm.
@@ -211,6 +212,7 @@ func (r *Result) Hunks(context int) *line.View {
 	for i, span := range hunkSpans {
 		view.Annotate(headers[i], line.Annotation{
 			Content:   formatHunkHeader(span, r.beforeSums, r.afterSums),
+			Kind:      kind.UIHunkHeader,
 			Placement: line.Above,
 		})
 	}
@@ -372,10 +374,10 @@ func (r *Result) After() *line.View {
 
 // collectConsecutive collects consecutive ops of the same kind starting at
 // index i.
-func collectConsecutive(ops []lineOp, i int, kind lcs.OpKind) []lineOp {
+func collectConsecutive(ops []lineOp, i int, op lcs.OpKind) []lineOp {
 	var result []lineOp
 
-	for i < len(ops) && ops[i].kind == kind {
+	for i < len(ops) && ops[i].kind == op {
 		result = append(result, ops[i])
 		i++
 	}

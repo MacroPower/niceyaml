@@ -3254,7 +3254,7 @@ func TestSourceError_Excerpt(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, line.Annotations{
-			{Content: "...", Placement: line.Above},
+			{Content: "...", Kind: kind.UISeparator, Placement: line.Above},
 		}, excerpt.Annotations(3))
 		assert.Empty(t, excerpt.Annotations(0), "the first hunk has no separator")
 
@@ -3275,7 +3275,7 @@ func TestSourceError_Excerpt(t *testing.T) {
 			"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>1</literalNumberInteger>",
 			"<nameTag>b</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>2</genericError>",
 			"<nameTag>c</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>3</literalNumberInteger>",
-			"<comment>...</comment>",
+			"<uiSeparator>...</uiSeparator>",
 			"<nameTag>g</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>7</literalNumberInteger>",
 			"<nameTag>h</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>8</genericError>",
 			"<textError>   ^ bad h</textError>",

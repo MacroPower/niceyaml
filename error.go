@@ -1098,6 +1098,7 @@ func (e *SourceError) Excerpt(context int) (*line.View, error) {
 		if i > 0 {
 			excerpt.Annotate(start, line.Annotation{
 				Content:   "...",
+				Kind:      kind.UISeparator,
 				Placement: line.Above,
 			})
 		}

@@ -1,8 +1,9 @@
 // Package kind names the kinds of text a rendering styles.
 //
 // A [Kind] is the name of one kind of text: a kind of YAML token, such as a
-// mapping key or a number, a diff or error mark, or a heading in a status
-// bar. The constants follow Pygments token naming conventions where they
+// mapping key or a number, a diff or error mark, a heading in a status
+// bar, or a piece of the chrome a renderer draws around content, such as a
+// line number. The constants follow Pygments token naming conventions where they
 // apply. A [go.jacobcolvin.com/niceyaml/style.Styles] value maps each Kind
 // to the style it renders with, and a [go.jacobcolvin.com/niceyaml/line.Overlay]
 // names the Kind of its highlight.
@@ -31,6 +32,13 @@
 //   - TextSubtle -> TextSubtleDim: De-emphasized text
 //   - GenericHeading -> GenericHeadingAccent, GenericHeadingSubtle,
 //     GenericHeadingOK, GenericHeadingWarn, GenericHeadingError: Headings
+//   - Comment -> UI -> UILineNumber, UIAnnotation -> UIHunkHeader,
+//     UISeparator: The chrome a renderer draws around content
+//
+// The UI kinds inherit from [Comment] rather than from [Text], so a theme
+// that sets none of them draws gutters, annotations, and hunk headers in
+// its comment color, and one that sets [UI] restyles all of the chrome at
+// once without touching the comments.
 //
 // A rendering names its own kinds, such as one for search matches, as
 // conversions of a string: kind.Kind("mine"). A custom Kind has no parent
@@ -167,6 +175,21 @@ const (
 	PunctuationSequenceEntry Kind = "punctuationSequenceEntry"
 	// PunctuationSequenceStart styles opening bracket ([).
 	PunctuationSequenceStart Kind = "punctuationSequenceStart"
+	// UI is a parent style for the chrome a renderer draws around content:
+	// gutters, annotations, and the headers and separators between hunks.
+	// It inherits from [Comment], so a theme that sets nothing for it draws
+	// the chrome in the comment color.
+	UI Kind = "ui"
+	// UILineNumber styles the line numbers of a gutter and the marker of a
+	// soft-wrapped continuation row.
+	UILineNumber Kind = "uiLineNumber"
+	// UIAnnotation styles an annotation that names no kind of its own.
+	UIAnnotation Kind = "uiAnnotation"
+	// UIHunkHeader styles the header above each hunk of a diff, such as
+	// "@@ -1,3 +1,4 @@".
+	UIHunkHeader Kind = "uiHunkHeader"
+	// UISeparator styles the "..." between the hunks of an excerpt.
+	UISeparator Kind = "uiSeparator"
 )
 
 // The inheritance hierarchy for kinds. Each kind maps to its parent, and
@@ -230,6 +253,11 @@ var parent = map[Kind]Kind{
 	TextSubtle:               Text,
 	TextSubtleDim:            TextSubtle,
 	TextWarn:                 Text,
+	UI:                       Comment,
+	UIAnnotation:             UI,
+	UIHunkHeader:             UIAnnotation,
+	UILineNumber:             UI,
+	UISeparator:              UIAnnotation,
 }
 
 // Parent returns the parent of k in the hierarchy. [Text] is the root, and a

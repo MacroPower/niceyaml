@@ -35,7 +35,8 @@ const (
 // part of the main token stream. Kind names the style the printer renders
 // the annotation with, as [Overlay.Kind] does for an overlay, so an error
 // message below a line renders in [kind.TextError] and a hunk header
-// above one in [kind.Comment]. The zero Kind renders as [kind.Comment].
+// above one in [kind.UIHunkHeader]. The zero Kind renders as
+// [kind.UIAnnotation].
 //
 // Add annotations to a [View] with [View.Annotate].
 type Annotation struct {
