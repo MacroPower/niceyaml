@@ -869,7 +869,7 @@ func (p *Printer) styleLineWithRanges(
 
 	boundaries := computeStyleBoundaries(active, cols)
 	if len(boundaries) < 2 {
-		return ""
+		return p.styles.Style(base).Render(escape.Control(src))
 	}
 
 	// Render spans between boundaries, merging adjacent same-styled spans.
