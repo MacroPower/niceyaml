@@ -35,7 +35,7 @@ func Get(ctx context.Context, client *http.Client, rawURL string) ([]byte, error
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("fetch %s: %w", name, err)
+		return nil, fmt.Errorf("fetch %s: %w", name, reason(err))
 	}
 	defer resp.Body.Close() //nolint:errcheck // Best-effort close.
 
