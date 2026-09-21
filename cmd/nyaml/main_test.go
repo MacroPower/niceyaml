@@ -56,3 +56,22 @@ func TestRootCmdStopWithoutStart(t *testing.T) {
 
 	require.NoError(t, stopProfiler())
 }
+
+func TestViewCmdLineNumbersFlag(t *testing.T) {
+	t.Parallel()
+
+	// A boolean shorthand takes no value, so a shorthand on a flag that
+	// defaults to true could only repeat the default. The long flag carries
+	// the value that turns the line numbers off.
+	flag := viewCmd().Flags().Lookup("line-numbers")
+	require.NotNil(t, flag)
+	assert.Empty(t, flag.Shorthand)
+	assert.Equal(t, "true", flag.DefValue)
+
+	cmd := viewCmd()
+	require.NoError(t, cmd.Flags().Parse([]string{"--line-numbers=false"}))
+
+	lineNumbers, err := cmd.Flags().GetBool("line-numbers")
+	require.NoError(t, err)
+	assert.False(t, lineNumbers)
+}

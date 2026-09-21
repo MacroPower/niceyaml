@@ -54,7 +54,10 @@ func viewCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVarP(&lineNumbers, "line-numbers", "n", true, "show line numbers")
+	// A shorthand on a flag that defaults to true can only repeat the
+	// default, because a bool shorthand takes no value, so the long flag
+	// stands alone and --line-numbers=false turns the gutter off.
+	cmd.Flags().BoolVar(&lineNumbers, "line-numbers", true, "show line numbers")
 	cmd.Flags().StringVarP(&search, "search", "s", "", "initial search term")
 
 	return cmd
