@@ -24,6 +24,14 @@ import (
 // [Document.Decode] and [Document.DecodeInto] call Validate
 // after decoding into a value that implements it, unless
 // [WithSelfValidation] switches that off.
+//
+// An [*Error] the value returns writes its path from the value's own
+// root, so a type that delegates to a field's Validate puts the result
+// under the field with [Rebase]:
+//
+//	func (c Config) Validate() error {
+//		return niceyaml.Rebase(c.Hours.Validate(), paths.Root().Child("hours"))
+//	}
 type SelfValidator interface {
 	Validate() error
 }

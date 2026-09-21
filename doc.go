@@ -199,6 +199,15 @@
 //
 // [Document.Validate] runs the same validators without decoding.
 //
+// A [SelfValidator] writes its paths from its own root, and [Rebase] puts
+// the error a nested value returns under the path of that value, so a
+// type that delegates validation to its fields reports the lines of the
+// field:
+//
+//	func (c Config) Validate() error {
+//		return niceyaml.Rebase(c.Hours.Validate(), paths.Root().Child("hours"))
+//	}
+//
 // [Document.DecodeInto] runs the same pipeline on a value you already hold,
 // such as one pre-populated with defaults.
 //

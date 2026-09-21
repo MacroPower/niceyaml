@@ -3936,3 +3936,189 @@ func TestSourceError_Document(t *testing.T) {
 		})
 	}
 }
+
+// rebasedHours is a [niceyaml.SelfValidator] that writes its path from its
+// own root, as a type validated on its own does.
+type rebasedHours struct {
+	Open  string `yaml:"open"`
+	Close string `yaml:"close"`
+}
+
+func (h rebasedHours) Validate() error {
+	if h.Close < h.Open {
+		return niceyaml.NewError("closes before it opens", niceyaml.AtPath(paths.Root().Child("close")))
+	}
+
+	return nil
+}
+
+// rebasedConfig delegates to the Validate of its field and puts the
+// result under the field.
+type rebasedConfig struct {
+	Name  string       `yaml:"name"`
+	Hours rebasedHours `yaml:"hours"`
+}
+
+func (c rebasedConfig) Validate() error {
+	//nolint:wrapcheck // Rebase keeps the error as it is.
+	return niceyaml.Rebase(c.Hours.Validate(), paths.Root().Child("hours"))
+}
+
+func TestRebase(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.Input(`
+		name: cafe
+		hours:
+		  open: "09:00"
+		  close: "08:00"
+	`)
+	hours := paths.Root().Child("hours")
+	closePath := paths.Root().Child("close")
+
+	t.Run("nil returns nil", func(t *testing.T) {
+		t.Parallel()
+
+		var nilErr *niceyaml.Error
+
+		assert.NoError(t, niceyaml.Rebase(nil, hours))
+		assert.NoError(t, niceyaml.Rebase(nilErr, hours))
+	})
+
+	t.Run("path composes with the base", func(t *testing.T) {
+		t.Parallel()
+
+		err := niceyaml.Rebase(niceyaml.NewError("closes before it opens", niceyaml.AtPath(closePath)), hours)
+
+		var e *niceyaml.Error
+
+		require.ErrorAs(t, err, &e)
+
+		p, ok := e.Path()
+		require.True(t, ok)
+		assert.Equal(t, "$.hours.close", p.String())
+		assert.Equal(t, "$.hours.close: closes before it opens", err.Error())
+	})
+
+	t.Run("a self validator delegates through it", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(input, niceyaml.WithName("cafe.yaml"))
+		doc, err := source.Document()
+		require.NoError(t, err)
+
+		_, err = doc.Decode[rebasedConfig](t.Context())
+		require.EqualError(t, err, "cafe.yaml:4:10: $.hours.close: closes before it opens")
+		assert.Equal(t, stringtest.JoinLF(
+			"cafe.yaml:4:10: $.hours.close: closes before it opens",
+			"",
+			"   2 | hours:",
+			`   3 |   open: "09:00"`,
+			`   4 |   close: "08:00"`,
+			"     |          ^^^^^^^",
+		), fmt.Sprintf("%+v", err))
+	})
+
+	t.Run("an error without a location points at the base", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		err := dd.Bind(niceyaml.Rebase(errors.New("bad hours"), hours))
+		require.EqualError(t, err, "3:3: $.hours: bad hours")
+
+		var e *niceyaml.Error
+
+		require.ErrorAs(t, err, &e)
+
+		p, ok := e.Path()
+		require.True(t, ok)
+		assert.Equal(t, "$.hours", p.String())
+	})
+
+	t.Run("nested errors compose too", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		report := niceyaml.NewError("invalid hours", niceyaml.WithErrors(
+			niceyaml.NewError("bad open", niceyaml.AtPath(paths.Root().Child("open"))),
+			niceyaml.NewError("bad close", niceyaml.AtPath(closePath)),
+		))
+
+		err := dd.Bind(niceyaml.Rebase(report, hours))
+		require.EqualError(t, err, "3:3: $.hours: invalid hours")
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		require.Len(t, bound.Errors(), 2)
+
+		assert.Equal(t, "3:9: $.open: bad open", bound.Errors()[0].Error())
+		assert.Equal(t, "4:10: $.close: bad close", bound.Errors()[1].Error())
+	})
+
+	t.Run("rebases compose", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "spec:\n  hours:\n    open: 1\n    close: 0\n")
+
+		inner := niceyaml.NewError("closes before it opens", niceyaml.AtPath(closePath))
+		err := niceyaml.Rebase(niceyaml.Rebase(inner, hours), paths.Root().Child("spec"))
+
+		assert.Equal(t, "$.spec.hours.close: closes before it opens", err.Error())
+		require.EqualError(t, dd.Bind(err), "4:12: $.spec.hours.close: closes before it opens")
+	})
+
+	t.Run("a position stays as it is", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		err := dd.Bind(niceyaml.Rebase(niceyaml.NewError("bad", niceyaml.AtPosition(position.New(0, 6))), hours))
+		require.EqualError(t, err, "1:7: bad")
+	})
+
+	t.Run("a bound error comes back as it is", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		bound := dd.Bind(niceyaml.NewError("bad", niceyaml.AtPath(closePath)))
+		require.Error(t, bound)
+
+		assert.Same(t, bound, niceyaml.Rebase(bound, hours))
+
+		wrapped := fmt.Errorf("context: %w", bound)
+		assert.Same(t, wrapped, niceyaml.Rebase(wrapped, hours))
+	})
+
+	t.Run("text a wrapper added stays as it is", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		inner := niceyaml.NewError("closes before it opens", niceyaml.AtPath(closePath))
+		err := niceyaml.Rebase(fmt.Errorf("checking hours: %w", inner), hours)
+
+		require.ErrorIs(t, err, inner)
+		assert.Equal(t, "$.hours.close: checking hours: $.close: closes before it opens", err.Error())
+		require.EqualError(t, dd.Bind(err), "4:10: $.hours.close: checking hours: $.close: closes before it opens")
+	})
+
+	t.Run("a check runs under the scope it is written for", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		checkHours := func(h *rebasedHours) error {
+			return h.Validate()
+		}
+
+		c, err := dd.Decode[rebasedConfig](t.Context(), niceyaml.WithSelfValidation(false))
+		require.NoError(t, err)
+
+		err = dd.Bind(niceyaml.Rebase(checkHours(&c.Hours), hours))
+		require.EqualError(t, err, "4:10: $.hours.close: closes before it opens")
+	})
+}

@@ -98,6 +98,11 @@ type Error struct {
 	// or nil when none is set.
 	loc    any
 	errors []error
+	// The path the paths under the Error are written from, set by Rebase,
+	// and whether it is set at all, since the root is a base like any
+	// other.
+	base    paths.Path
+	rebased bool
 }
 
 // NewError creates a new [*Error] with the given message.
@@ -135,6 +140,44 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 	}
 
 	return &c
+}
+
+// Rebase returns an error whose paths are written from base: every path
+// in the tree of err, whether on the [*Error] that anchors it or on an
+// error nested with [WithErrors], resolves as base joined with that path,
+// and the message of the result carries the joined path. A type that
+// validates itself writes paths from its own root, so a parent that
+// delegates to it rebases the result under the field the value came
+// from:
+//
+//	func (c Config) Validate() error {
+//		return niceyaml.Rebase(c.Hours.Validate(), paths.Root().Child("hours"))
+//	}
+//
+// The same call puts each element of a slice under its index, and puts a
+// check written for one type under the path of a value of that type
+// inside another. Rebases compose, so a chain of delegations composes the
+// chain of paths. An error under the base that carries no location points
+// at base itself, and a position or a range stays as it is, since the
+// base moves paths alone.
+//
+// The result wraps err, so [errors.Is] and [errors.As] see through it, and
+// the text a wrapper such as [fmt.Errorf] added around a located error
+// stays as it is, with the path the wrapper wrote in it, so rebase an
+// error before adding context to it. A nil err, or a nil [*Error] or
+// [*SourceError] pointer, returns nil, so a validator returns the result as
+// it is. An error that is or wraps a [*SourceError] is bound already, with
+// its location resolved, and comes back as it is.
+func Rebase(err error, base paths.Path) error {
+	if isNothing(err) {
+		return nil
+	}
+
+	if _, ok := anchorOf(err).err.(*SourceError); ok { //nolint:errorlint // The anchor itself, found by the walk.
+		return err
+	}
+
+	return &Error{err: err, base: base, rebased: true}
 }
 
 // ErrorOption configures an [Error]. An At option sets the location of
@@ -222,7 +265,8 @@ func WithErrors(errs ...error) ErrorOption {
 // errors from [WithErrors] put nothing in it either, since that SourceError
 // lists them behind their own positions. An Error created from a nil error
 // has an empty message, so its text is the path alone, or "" when it has
-// none.
+// none. An Error from [Rebase] carries the joined path in front of the
+// message of the error it rebased, in place of the path that error wrote.
 func (e *Error) Error() string {
 	if e == nil {
 		return ""
@@ -230,7 +274,17 @@ func (e *Error) Error() string {
 
 	var msg string
 
-	if e.err != nil {
+	switch {
+	case e.rebased:
+		msg = e.message()
+
+		if p, ok := e.location().(paths.Path); ok {
+			msg = prefix(p.String()+":", msg)
+		}
+
+		return msg
+
+	case e.err != nil:
 		msg = e.err.Error()
 	}
 
@@ -255,22 +309,34 @@ func (e *Error) nested() []error {
 	return out
 }
 
-// anchor returns the [Error] that carries the location: e itself when it
-// has one, otherwise the nearest such Error along its cause chain, looking
-// through foreign wrapping. Falls back to e when none carries a location.
-func (e *Error) anchor() *Error {
-	for cur := e; ; {
-		if cur.hasPosition() {
-			return cur
-		}
-
-		inner := nextError(cur.err)
-		if inner == nil {
-			return e
-		}
-
-		cur = inner
+// located returns the location of e: its own when it has one, otherwise
+// that of the nearest located Error along its cause chain, looking
+// through foreign wrapping, with the base of every Error from [Rebase] on
+// the way joined in front of a path. An Error from Rebase with no located
+// Error below it is located at its base. Reports false when the chain
+// holds none.
+func (e *Error) located() (any, bool) {
+	if e.hasPosition() {
+		return e.loc, true
 	}
+
+	inner := nextError(e.err)
+	if inner != nil {
+		loc, ok := inner.located()
+		if ok {
+			if p, isPath := loc.(paths.Path); isPath && e.rebased {
+				loc = e.base.Join(p)
+			}
+
+			return loc, true
+		}
+	}
+
+	if e.rebased {
+		return e.base, true
+	}
+
+	return nil, false
 }
 
 // nextError returns the nearest [*Error] along the cause chain of err: err
@@ -345,21 +411,29 @@ func (e *Error) Errors() []error {
 // [position.Position], or [position.Range] that [AtPath], [AtPosition],
 // or [AtRange] set, or nil when none did. It looks through wrapping to
 // the nearest Error that carries one, so an Error built with [WrapError]
-// around a located Error reports that location. A nil Error has none.
+// around a located Error reports that location, and a path comes back
+// with the base of every [Rebase] on the way joined in front. A nil Error
+// has none.
 func (e *Error) location() any {
 	if e == nil {
 		return nil
 	}
 
-	return e.anchor().loc
+	loc, ok := e.located()
+	if !ok {
+		return nil
+	}
+
+	return loc
 }
 
 // Path returns the [paths.Path] the [Error] points at and true, or the
 // zero Path and false when the Error carries a position, a range, or no
 // location. The location is the one [AtPath] set on the Error itself or
 // on the nearest located Error along its cause chain, so an Error built
-// with [WrapError] around a located Error reports that location. A nil
-// Error has none.
+// with [WrapError] around a located Error reports that location, with
+// the base of every [Rebase] on the way joined in front. A nil Error has
+// none.
 func (e *Error) Path() (paths.Path, bool) {
 	p, ok := e.location().(paths.Path)
 
@@ -413,15 +487,15 @@ type location struct {
 	pos position.Position
 }
 
-// locate resolves e's location and returns the document it is bound to:
-// a range or a position as it is, and the token a path resolves to in
-// the document, at the position of the token. The document is the one
-// b binds with, or, when b routes, the one [binder.route] picks for the
-// location. An Error without a location of its own returns
-// [ErrNoLocation], and one with a path bound where no document resolves
-// it returns [ErrPathNeedsDocument].
-func (e *Error) locate(b binder) (location, *Document, error) {
-	switch loc := e.loc.(type) {
+// locate resolves loc, the location of an [Error], and returns the
+// document it is bound to: a range or a position as it is, and the token
+// a path resolves to in the document, at the position of the token, with
+// the base of b in front of the path. The document is the one b binds
+// with, or, when b routes, the one [binder.route] picks for the
+// location. A nil loc returns [ErrNoLocation], and a path bound where no
+// document resolves it returns [ErrPathNeedsDocument].
+func locate(b binder, loc any) (location, *Document, error) {
+	switch loc := loc.(type) {
 	case position.Range:
 		return location{pos: loc.Start, rng: &loc}, b.documentAt(loc.Start.Line), nil
 
@@ -429,7 +503,7 @@ func (e *Error) locate(b binder) (location, *Document, error) {
 		return location{pos: loc}, b.documentAt(loc.Line), nil
 
 	case paths.Path:
-		return locatePath(b, loc)
+		return locatePath(b, b.base.Join(loc))
 
 	default:
 		return location{}, b.doc, ErrNoLocation
@@ -570,8 +644,11 @@ const defaultContextLines = 2
 // binder must not, since the documents are not built until the parse
 // ends, binds to the source alone.
 type binder struct {
-	src   *Source
-	doc   *Document
+	src *Source
+	doc *Document
+	// The path the paths of the errors bound here are written from: the
+	// root, joined with the base of every Error from Rebase above them.
+	base  paths.Path
 	route bool
 }
 
@@ -609,45 +686,68 @@ func bindTree(err error, b binder) error {
 		return nil
 	}
 
-	if _, ok := anchorOf(err).(*SourceError); ok { //nolint:errorlint // The anchor itself, found by the walk.
+	if _, ok := anchorOf(err).err.(*SourceError); ok { //nolint:errorlint // The anchor itself, found by the walk.
 		return err
 	}
 
 	return newSourceError(err, b)
 }
 
-// anchorOf returns the error along the cause chain of err that carries the
-// location: the first located [*Error], or the first [*SourceError], which
-// resolved one already. The chain follows a wrapper to the one error it
-// wraps and an Error to its cause. An error that unwraps to several, such
-// as one from [errors.Join], ends the chain: it carries no location of its
-// own, and each of its branches binds as a child. Returns nil when the
-// chain holds no anchor.
-func anchorOf(err error) error {
+// anchor is the error along a cause chain that carries the location, and
+// the location it carries: a [paths.Path], with the base of every Error
+// from [Rebase] above it joined in front, a [position.Position], or a
+// [position.Range], or nil for a [*SourceError], which resolved its
+// location already. The zero anchor is a chain that holds none.
+type anchor struct {
+	err error
+	loc any
+}
+
+// anchorOf returns the anchor of err: the first located [*Error] along
+// its cause chain, or the first [*SourceError]. An Error from [Rebase]
+// with no anchor below it is the anchor, located at its base. The chain
+// follows a wrapper to the one error it wraps and an Error to its cause.
+// An error that unwraps to several, such as one from [errors.Join], ends
+// the chain: it carries no location of its own, and each of its branches
+// binds as a child.
+func anchorOf(err error) anchor {
 	switch x := err.(type) { //nolint:errorlint // Walks the chain one node at a time.
 	case *SourceError:
 		if x == nil {
-			return nil
+			return anchor{}
 		}
 
-		return x
+		return anchor{err: x}
 
 	case *Error:
 		if x == nil {
-			return nil
+			return anchor{}
 		}
 
 		if x.loc != nil {
-			return x
+			return anchor{err: x, loc: x.loc}
 		}
 
-		return anchorOf(x.err)
+		a := anchorOf(x.err)
+		if a.err != nil {
+			if p, ok := a.loc.(paths.Path); ok && x.rebased {
+				a.loc = x.base.Join(p)
+			}
+
+			return a
+		}
+
+		if x.rebased {
+			return anchor{err: x, loc: x.base}
+		}
+
+		return anchor{}
 
 	case interface{ Unwrap() error }:
 		return anchorOf(x.Unwrap())
 
 	default:
-		return nil
+		return anchor{}
 	}
 }
 
@@ -656,9 +756,11 @@ func anchorOf(err error) error {
 func newSourceError(err error, b binder) *SourceError {
 	e := &SourceError{err: err, source: b.src, doc: b.doc, locErr: ErrNoLocation}
 
-	switch a := anchorOf(err).(type) { //nolint:errorlint // The anchor itself, found by the walk.
+	found := anchorOf(err)
+
+	switch a := found.err.(type) { //nolint:errorlint // The anchor itself, found by the walk.
 	case *Error:
-		e.loc, e.doc, e.locErr = a.locate(b)
+		e.loc, e.doc, e.locErr = locate(b, found.loc)
 
 	case *SourceError:
 		// The error wraps a binding, so it is that binding with more
@@ -690,8 +792,9 @@ func newSourceError(err error, b binder) *SourceError {
 
 // collect binds the children of the error e binds: every error nested with
 // [WithErrors] in an [*Error] along its cause chain, and every branch of
-// the error that ends the chain by unwrapping to several. The chain also
-// ends at a [*SourceError], which is the cause of the error above it
+// the error that ends the chain by unwrapping to several, with the base of
+// every Error from [Rebase] on the way in front of their paths. The chain
+// also ends at a [*SourceError], which is the cause of the error above it
 // rather than a violation of its own, so its children join the children
 // of e.
 func (e *SourceError) collect(err error, b binder) {
@@ -703,6 +806,10 @@ func (e *SourceError) collect(err error, b binder) {
 			return
 
 		case *Error:
+			if x.rebased {
+				b.base = b.base.Join(x.base)
+			}
+
 			for _, n := range x.errors {
 				e.addChild(n, b)
 			}
