@@ -36,7 +36,10 @@ type modelOptions struct {
 }
 
 type model struct {
-	searchInput   string
+	searchInput string
+	// The term of the --search flag, held until the first
+	// [tea.WindowSizeMsg] gives the viewport its size.
+	pendingSearch string
 	currentTheme  string
 	previousTheme string
 	themeList     []string
@@ -90,10 +93,10 @@ func newModel(opts *modelOptions) model {
 		))
 	}
 
-	// Apply initial search if provided.
-	if opts.search != "" {
-		m.applySearch(opts.search)
-	}
+	// The viewport scrolls a match to the center of the rows it has, and it
+	// has none until the first tea.WindowSizeMsg sizes it, so the initial
+	// term waits for that message.
+	m.pendingSearch = opts.search
 
 	return m
 }
@@ -139,6 +142,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Reserve 2 lines for the status bar; a terminal shorter than that
 		// leaves the viewport no rows rather than a negative height.
 		m.viewport.SetHeight(max(0, msg.Height-statusBarHeight))
+
+		if m.pendingSearch != "" {
+			m.applySearch(m.pendingSearch)
+
+			m.pendingSearch = ""
+		}
 
 	case tea.KeyPressMsg:
 		// Quit on ctrl+c from every state, including the theme picker and the

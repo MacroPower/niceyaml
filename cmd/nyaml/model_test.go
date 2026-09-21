@@ -205,6 +205,36 @@ func TestUpdateWindowSizeViewportHeight(t *testing.T) {
 	}
 }
 
+func TestInitialSearchScrollsLikeALaterOne(t *testing.T) {
+	t.Parallel()
+
+	// The viewport centers a match in the rows it has, and it has none
+	// before the first window size message, so a term applied at
+	// construction landed near the top of the view instead of its center.
+	lines := &strings.Builder{}
+	for i := 1; i <= 40; i++ {
+		fmt.Fprintf(lines, "k%d: v\n", i)
+	}
+
+	files := []fileEntry{{path: "a.yaml", content: []byte(lines.String())}}
+	size := tea.WindowSizeMsg{Width: 40, Height: 14}
+
+	sized, _ := newModel(&modelOptions{files: files, search: "k30"}).Update(size)
+	got, ok := sized.(model)
+	require.True(t, ok)
+
+	sized, _ = newModel(&modelOptions{files: files}).Update(size)
+	want, ok := sized.(model)
+	require.True(t, ok)
+
+	want.applySearch("k30")
+
+	assert.Equal(t, "k30", got.viewport.SearchTerm())
+	assert.Equal(t, 1, got.viewport.SearchCount())
+	assert.Positive(t, want.viewport.YOffset())
+	assert.Equal(t, want.viewport.YOffset(), got.viewport.YOffset())
+}
+
 func TestBaseViewHeight(t *testing.T) {
 	t.Parallel()
 
