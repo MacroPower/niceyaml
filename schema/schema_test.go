@@ -15,6 +15,8 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
@@ -954,4 +956,89 @@ func TestSchema_ErrorPaths(t *testing.T) {
 			assert.ElementsMatch(t, tc.wantNestedPaths, gotNestedPaths)
 		})
 	}
+}
+
+func TestSchema_Validate_Scope(t *testing.T) {
+	t.Parallel()
+
+	v := compileSchema(t, []byte(`{
+		"type": "object",
+		"properties": {
+			"replicas": {"type": "integer"},
+			"16": {"type": "integer"}
+		},
+		"additionalProperties": false
+	}`))
+
+	spec := paths.Root().Child("spec")
+
+	t.Run("violation resolves from the node", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, stringtest.Input(`
+			replicas: 1
+			spec:
+			  replicas: many
+		`))
+
+		err := dd.At(spec).Validate(t.Context(), v)
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+
+		rng, err := bound.Range()
+		require.NoError(t, err)
+		assert.Equal(t, position.New(2, 12), rng.Start)
+		assert.Equal(t, "3:13: $.replicas: expected \"integer\", got \"string\"", bound.Error())
+
+		// The whole document conforms where the node does not.
+		require.NoError(t, dd.Validate(t.Context(), compileSchema(t, []byte(`{
+			"type": "object",
+			"properties": {"replicas": {"type": "integer"}}
+		}`))))
+	})
+
+	t.Run("decoded key resolves from the node", func(t *testing.T) {
+		t.Parallel()
+
+		// The key decodes to the member name 16, which the source spells
+		// 0x10, so the path names nothing and the walk from the node
+		// locates the value.
+		dd := yamltest.FirstDocument(t, stringtest.Input(`
+			0x10: 1
+			spec:
+			  0x10: hello
+		`))
+
+		err := dd.At(spec).Validate(t.Context(), v)
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+
+		rng, err := bound.Range()
+		require.NoError(t, err)
+		assert.Equal(t, position.New(2, 8), rng.Start)
+	})
+
+	t.Run("additional property resolves from the node", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, stringtest.Input(`
+			extra: 1
+			spec:
+			  extra: 1
+		`))
+
+		err := dd.At(spec).Validate(t.Context(), v)
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+
+		rng, err := bound.Range()
+		require.NoError(t, err)
+		assert.Equal(t, position.New(2, 2), rng.Start)
+	})
 }

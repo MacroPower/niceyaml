@@ -115,8 +115,9 @@ func FromJSONSchema(v *jsonschema.Validator) *Schema {
 // checks a document against the schema, reporting constraint violations as
 // [*niceyaml.Error] values that carry the YAML path to each failing
 // location for display by [printer.Printer]. [Schema.Validate] checks a
-// whole document, and [Schema.ValidateValue] checks decoded data, such as
-// one value taken from a document with [niceyaml.Document.Get].
+// document, or the node a document from [niceyaml.Document.At] is scoped
+// to, and [Schema.ValidateValue] checks decoded data, such as one value
+// taken from a document with a scoped [niceyaml.Document.Decode].
 //
 // A Schema is also a [Resolver] that names itself for every document, so
 // one held at package scope goes into a [Registry] as it is:
@@ -145,9 +146,11 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Document) (Ref, error) {
 // Validate implements [niceyaml.Validator]. It decodes doc to
 // [any] and checks the result as [Schema.ValidateValue] does, so
 // [niceyaml.WithValidator] runs the schema before a decode and
-// [niceyaml.Document.Validate] runs it on its own. A decoding error comes
-// back bound to the source, and a violation as an unbound
-// [*niceyaml.Error], which the document binds.
+// [niceyaml.Document.Validate] runs it on its own. A document from
+// [niceyaml.Document.At] decodes to the node it is scoped to, so the
+// schema checks that node and a violation's path resolves from it. A
+// decoding error comes back bound to the source, and a violation as an
+// unbound [*niceyaml.Error], which the document binds.
 //
 // Holding the document lets Validate locate a violation at a key the
 // decoder spells differently from the source, such as the hexadecimal
@@ -302,12 +305,19 @@ func decodedPosition(
 		return position.Position{}, false
 	}
 
-	_, err := path.Token(doc.Node())
+	// The path and the segments are written from the node the document is
+	// scoped to, as the data the schema checked was decoded from it.
+	_, err := doc.Path().Join(path).Token(doc.Node())
 	if err == nil {
 		return position.Position{}, false
 	}
 
-	keyNode, valueNode := walkSegments(doc.Node(), segments)
+	root, err := doc.Path().Node(doc.Node())
+	if err != nil {
+		return position.Position{}, false
+	}
+
+	keyNode, valueNode := walkSegments(root, segments)
 
 	node := valueNode
 	if key && keyNode != nil {

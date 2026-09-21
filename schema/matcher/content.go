@@ -20,7 +20,8 @@ type contentMatcher[T comparable] struct {
 // Content creates a new [Matcher] that matches documents whose value at
 // path decodes to want.
 //
-// Match decodes the value with [niceyaml.Document.Get] as a T and compares
+// Match decodes the value at path, from the scope of the document, with
+// [niceyaml.Document.Decode] as a T and compares
 // the result to want, so the type of want decides how the YAML is read:
 // a string matches the text of a scalar, and a number matches its numeric
 // value however the document spells it. A document without the path, or
@@ -49,7 +50,7 @@ func Content[T comparable](path paths.Path, want T) Matcher {
 
 // Match implements [Matcher].
 func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Document) (bool, error) {
-	got, err := doc.Get[T](ctx, m.path)
+	got, err := doc.At(m.path).Decode[T](ctx)
 	if errors.Is(err, paths.ErrNotFound) || isDecodeError(err) {
 		return false, nil
 	}

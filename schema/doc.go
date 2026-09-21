@@ -116,7 +116,7 @@
 // returns the same Refs:
 //
 //	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
-//	    kind, err := doc.Get[string](ctx, kindPath)
+//	    kind, err := doc.At(kindPath).Decode[string](ctx)
 //	    if err != nil {
 //	        return schema.Ref{}, schema.ErrNoMatch
 //	    }

@@ -3855,9 +3855,9 @@ func TestSourceError_Document(t *testing.T) {
 		},
 		"produced by a document": {
 			err: func() error {
-				_, err := docs[0].Get[int](t.Context(), paths.Root().Child("missing"))
+				_, err := docs[0].Ranges(paths.Root().Child("missing"))
 
-				return err
+				return err //nolint:wrapcheck // The error is bound already.
 			}(),
 			want: docs[0],
 		},

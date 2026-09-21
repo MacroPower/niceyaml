@@ -196,6 +196,22 @@
 // [Document.DecodeInto] runs the same pipeline on a value you already hold,
 // such as one pre-populated with defaults.
 //
+// [Document.At] returns a Document scoped to the node a path selects, and
+// the same pipeline then runs on that node: Decode reads one value without
+// decoding the whole document, a validator given to it checks the node,
+// and the paths in every error it returns or binds resolve from the node,
+// so a check written for a type reports the same lines whether the type is
+// the whole document or a value inside one:
+//
+//	hours := doc.At(paths.Root().Child("spec", "hours"))
+//
+//	h, err := hours.Decode[Hours](ctx, niceyaml.WithValidator(hoursSchema))
+//	if err != nil {
+//		return err
+//	}
+//
+//	return hours.Bind(check(h))
+//
 // Both return errors bound to the source, so a decoding failure or a
 // validator's [Error] renders its location with the %+v verb as it is.
 //

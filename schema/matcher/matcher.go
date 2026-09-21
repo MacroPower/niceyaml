@@ -28,7 +28,7 @@ type Matcher interface {
 //
 //	kindPath := paths.Root().Child("kind")
 //	m := matcher.Func(func(ctx context.Context, doc *niceyaml.Document) (bool, error) {
-//	    kind, err := doc.Get[string](ctx, kindPath)
+//	    kind, err := doc.At(kindPath).Decode[string](ctx)
 //	    if errors.Is(err, paths.ErrNotFound) {
 //	        return false, nil
 //	    }
