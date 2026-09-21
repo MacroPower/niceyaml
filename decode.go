@@ -508,7 +508,8 @@ func (dd *Document) Validate(ctx context.Context, validators ...Validator) error
 //	fmt.Errorf("document %d: %w", i, doc.Bind(err))
 //
 // An error that carries a position or a range rather than a path needs
-// no document, and [Source.Bind] binds it to the source alone.
+// no document, and [Source.Bind] binds it to the source alone. Source.Bind
+// resolves a path too, in the one document of a source that holds one.
 //
 // Binding binds the whole tree of err: the [Error] that anchors it gives
 // the [SourceError] its location, and every error nested with
@@ -527,7 +528,7 @@ func (dd *Document) Validate(ctx context.Context, validators ...Validator) error
 // comes back as it is, and one inside the chain binds nothing, so Bind
 // looks past it. Bind never modifies err.
 func (dd *Document) Bind(err error) error {
-	return bindTree(err, dd.source, dd)
+	return bindTree(err, binder{src: dd.source, doc: dd})
 }
 
 // DecodeOption configures [Document.Decode],

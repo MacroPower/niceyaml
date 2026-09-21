@@ -28,8 +28,8 @@ import (
 // documents. Every error they and their Documents produce comes back
 // bound to the Source as a [SourceError]. [Document.Bind] binds errors
 // built elsewhere to the document they were checked against, and
-// [Source.Bind] binds one that carries a position or a range, or no
-// location at all, and so needs no document. Rendering
+// [Source.Bind] binds one to the source, with a path resolving in the one
+// document of a source that holds one. Rendering
 // lives in a [line.View], which carries the overlays, annotations, and
 // flags that a [printer.Printer] renders over the [line.Lines] the Source
 // holds. [Source.Lines] returns those lines, which the [finder.Finder] and
@@ -356,16 +356,21 @@ func (s *Source) parse() (*ast.File, error) {
 //		}
 //	}
 //
-// A path resolves in a document, so an error that carries one goes
-// through [Document.Bind], with the document of [Source.Document] for a
-// file that holds one. Bound here, it keeps its message and the name of
-// the source but resolves no position: [SourceError.Range] returns an
-// error wrapping [ErrNoLocation], and [SourceError.Document] is nil.
+// A path resolves in a document, and Bind resolves it in the one
+// [Source.Document] returns, so a configuration file binds an error at a
+// path here as it would through [Document.Bind], and [SourceError.Document]
+// is that document. When the source holds several documents, or none, or
+// does not parse, the path resolves nowhere: the bound error keeps its
+// message and the name of the source, [SourceError.Range] returns the
+// error of [Source.Document], which wraps [ErrMultipleDocuments] or
+// [ErrNoDocuments] or is the parse error, and the %+v verb names it in
+// place of the excerpt. Bind such an error through [Document.Bind] with
+// the document it was checked against.
 //
 // In every other way Bind is [Document.Bind], which describes what comes
 // back.
 func (s *Source) Bind(err error) error {
-	return bindTree(err, s, nil)
+	return bindTree(err, binder{src: s})
 }
 
 // Lines returns the [line.Lines] of the [Source]: its tokens split into
