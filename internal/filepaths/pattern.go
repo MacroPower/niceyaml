@@ -167,7 +167,8 @@ func expandBraces(pattern string, budget int) ([]string, bool) {
 
 // braceGroup returns the indexes of the first unescaped "{" in pattern
 // and of the "}" that closes it, or -1 for both when pattern holds no
-// closed brace group.
+// closed brace group. A brace inside a character class is part of the
+// class, as [Pattern.Match] reads it.
 func braceGroup(pattern string) (int, int) {
 	open, depth := -1, 0
 
@@ -175,6 +176,11 @@ func braceGroup(pattern string) (int, int) {
 		switch pattern[i] {
 		case '\\':
 			i++ // Skip the escaped character.
+
+		case '[':
+			if end := classEnd(pattern, i); end >= 0 {
+				i = end
+			}
 
 		case '{':
 			if depth == 0 {
@@ -200,8 +206,8 @@ func braceGroup(pattern string) (int, int) {
 }
 
 // splitAlternatives splits the body of a brace group on the commas at its
-// top level, leaving commas inside nested groups and escaped commas in
-// place.
+// top level, leaving commas inside nested groups, character classes, and
+// escaped commas in place.
 func splitAlternatives(body string) []string {
 	var (
 		alts  []string
@@ -213,6 +219,11 @@ func splitAlternatives(body string) []string {
 		switch body[i] {
 		case '\\':
 			i++ // Skip the escaped character.
+
+		case '[':
+			if end := classEnd(body, i); end >= 0 {
+				i = end
+			}
 
 		case '{':
 			depth++
@@ -229,4 +240,31 @@ func splitAlternatives(body string) []string {
 	}
 
 	return append(alts, body[start:])
+}
+
+// classEnd returns the index of the "]" that closes the character class
+// opening at pattern[i], or -1 when nothing closes it, so the "[" reads
+// as a literal. A "]" right after the "[", or after a leading "!" or "^",
+// is a member of the class rather than its end.
+func classEnd(pattern string, i int) int {
+	j := i + 1
+
+	if j < len(pattern) && (pattern[j] == '!' || pattern[j] == '^') {
+		j++
+	}
+
+	if j < len(pattern) && pattern[j] == ']' {
+		j++
+	}
+
+	for ; j < len(pattern); j++ {
+		switch pattern[j] {
+		case '\\':
+			j++ // Skip the escaped character.
+		case ']':
+			return j
+		}
+	}
+
+	return -1
 }

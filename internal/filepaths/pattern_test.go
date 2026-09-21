@@ -383,6 +383,22 @@ func TestExpandBraces(t *testing.T) {
 			pattern: `{a\,b,c}`,
 			want:    []string{`a\,b`, "c"},
 		},
+		"braces inside a character class are kept": {
+			pattern: "x.[{a,b}]c",
+			want:    []string{"x.[{a,b}]c"},
+		},
+		"class inside a group keeps its comma": {
+			pattern: "{a,[,]b}",
+			want:    []string{"a", "[,]b"},
+		},
+		"closing bracket first in a negated class": {
+			pattern: "[!]{]{a,b}",
+			want:    []string{"[!]{]a", "[!]{]b"},
+		},
+		"unclosed class reads as a literal": {
+			pattern: "a[{b,c}",
+			want:    []string{"a[b", "a[c"},
+		},
 	}
 
 	for name, tc := range tcs {
