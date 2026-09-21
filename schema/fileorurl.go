@@ -23,11 +23,11 @@ var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 // resolves to the local path it names. A file:// URL with a host other
 // than localhost names no local path, so FileOrURL treats the whole
 // reference as a relative file path, which then fails to resolve or read.
-// A relative file path joins baseDir; an absolute path or an HTTP/HTTPS
-// URL ignores baseDir. When baseDir is empty and the path is relative,
-// the error wraps [ErrNoBaseDir], and an empty ref is [ErrEmptyPath]
-// whatever baseDir is. The registry fetches an HTTP/HTTPS reference with
-// the client [WithHTTPClient] gave it.
+// A relative file path joins baseDir; the path a file:// URL names, an
+// absolute path, and an HTTP/HTTPS URL ignore baseDir. When baseDir is
+// empty and the path is relative, the error wraps [ErrNoBaseDir], and an
+// empty ref is [ErrEmptyPath] whatever baseDir is. The registry fetches
+// an HTTP/HTTPS reference with the client [WithHTTPClient] gave it.
 //
 // The result is the shape a [Resolver] returns, so a resolver that builds
 // the reference from the document hands it back as it is:
@@ -58,15 +58,17 @@ func FileOrURL(baseDir, ref string) (Ref, error) {
 		return Ref{}, ErrEmptyPath
 	}
 
-	path := ref
+	path, fromFileURL := ref, false
 	if isFileURL(ref) {
-		path = fileURLPath(ref)
+		path, fromFileURL = fileURLPath(ref)
 	}
 
-	// A drive-letter path is absolute on Windows and names nothing a POSIX
-	// base directory can resolve, so never join it to baseDir. The drive
-	// then survives into the URL and the read error.
-	if filepath.IsAbs(path) || hasDriveLetter(path) {
+	// A file URL names a local path, which never joins baseDir, whether or
+	// not the platform reads that path as absolute. A drive-letter path is
+	// absolute on Windows and names nothing a POSIX base directory can
+	// resolve, so it never joins baseDir either. The drive then survives
+	// into the URL and the read error.
+	if fromFileURL || filepath.IsAbs(path) || hasDriveLetter(path) {
 		return file(path)
 	}
 
@@ -104,22 +106,23 @@ func hasPrefixFold(s, prefix string) bool {
 
 // fileURLPath returns the local path a file URL names, in the native
 // separator of the platform, whether the URL carries an empty authority
-// (file:///path) or none (file:/path). A URL that does not parse, names a
-// host other than localhost, or names no path comes back unchanged, so
-// resolving or reading the reference reports it.
+// (file:///path) or none (file:/path), and whether the URL names a path
+// at all. A URL that does not parse, names a host other than localhost,
+// or names no path comes back unchanged and false, so resolving or
+// reading the reference reports it.
 //
 // A Windows path carries its drive letter behind the leading slash of the
 // URL path, as in file:///C:/schemas/config.json, which is the form
 // [File] names such a path by. The function drops that slash so the
 // result is the absolute path C:\schemas\config.json rather than the
 // relative path \C:\schemas\config.json.
-func fileURLPath(ref string) string {
+func fileURLPath(ref string) (string, bool) {
 	u, err := url.Parse(ref)
 	if err != nil || u.Path == "" || (u.Host != "" && !strings.EqualFold(u.Host, "localhost")) {
-		return ref
+		return ref, false
 	}
 
-	return filepath.FromSlash(trimDriveSlash(u.Path))
+	return filepath.FromSlash(trimDriveSlash(u.Path)), true
 }
 
 // trimDriveSlash drops the leading slash of a URL path whose first segment
