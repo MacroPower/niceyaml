@@ -423,6 +423,11 @@ func (b *builder) processPart(ctx *partContext) bool {
 //     first one is the repeat. Comparing counts rather than checking
 //     currentLine == Position.Line also catches a repeat that real blank
 //     lines follow.
+//
+// Block scalar content never reaches the count, because handleGap leaves
+// currentLine on the content line for it. No line is left to advance, so the
+// count would read the lone newline of an empty scalar as a repeat and drop
+// the blank line it stands for.
 func (b *builder) continuesPreviousLine(ctx *partContext) bool {
 	if ctx.partIndex != 0 || !isPureNewline(ctx.part) || b.prevLineEnding == "" {
 		return false
@@ -430,6 +435,10 @@ func (b *builder) continuesPreviousLine(ctx *partContext) bool {
 
 	if b.prevLineEnding == "\r" && ctx.part == "\n" {
 		return true
+	}
+
+	if ctx.isBlockScalarContent {
+		return false
 	}
 
 	return ctx.tk.Position != nil && ctx.leadingNewlines > ctx.tk.Position.Line-b.currentLine

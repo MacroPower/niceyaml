@@ -57,6 +57,8 @@ func TestSplit_DuplicateNewline(t *testing.T) {
 	// The lexer repeats the newline that ends a tag at the start of the next
 	// token. Split must attach the repeat to the finished line and still keep
 	// one line per source line, including real blank lines that follow it.
+	// The lone newline an empty block scalar holds is no such repeat, so it
+	// opens a line of its own.
 	tcs := map[string]struct {
 		input       string
 		wantContent []string
@@ -96,6 +98,21 @@ func TestSplit_DuplicateNewline(t *testing.T) {
 			input:       "a: |-\n  x\n  y\n",
 			wantContent: []string{"a: |-", "  x", "  y"},
 			wantNumbers: []int{1, 2, 3},
+		},
+		"empty literal scalar": {
+			input:       "a: |\n\n",
+			wantContent: []string{"a: |", ""},
+			wantNumbers: []int{1, 2},
+		},
+		"empty strip literal scalar": {
+			input:       "a: |-\n\n\n",
+			wantContent: []string{"a: |-", "", ""},
+			wantNumbers: []int{1, 2, 3},
+		},
+		"empty folded scalar": {
+			input:       "a: >\n\n",
+			wantContent: []string{"a: >", ""},
+			wantNumbers: []int{1, 2},
 		},
 	}
 
