@@ -25,8 +25,7 @@ const (
 
 // Theme is a named color theme with its mode and a lazily built
 // [style.Styles]. [Theme.Style] resolves one kind from those styles, so a
-// Theme goes wherever a
-// [go.jacobcolvin.com/niceyaml/printer.Styler] does, such as
+// Theme goes wherever a [style.Styler] does, such as
 // [go.jacobcolvin.com/niceyaml/printer.WithStyles].
 //
 // Look one up by name with [Catalog.Get] or enumerate them with
@@ -68,7 +67,7 @@ func (t Theme) Styles() style.Styles {
 }
 
 // Style returns the [lipgloss.Style] for st from [Theme.Styles], so a Theme
-// is a [go.jacobcolvin.com/niceyaml/printer.Styler] and goes to
+// is a [style.Styler] and goes to
 // [go.jacobcolvin.com/niceyaml/printer.WithStyles] as it is. The zero
 // Theme returns an empty style for every kind.
 func (t Theme) Style(st kind.Kind) lipgloss.Style {

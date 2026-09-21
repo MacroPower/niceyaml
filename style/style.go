@@ -12,6 +12,18 @@ import (
 // neither predefined nor set.
 var emptyStyle = lipgloss.NewStyle()
 
+// Styler retrieves the style for each [kind.Kind].
+//
+// A renderer asks for each kind as it renders, and one such as
+// [go.jacobcolvin.com/niceyaml/printer.Printer] caches the styles it
+// blends for overlays by the kinds involved, so Style should return the
+// same style for a kind for the life of the value.
+//
+// See [Styles] for an implementation.
+type Styler interface {
+	Style(s kind.Kind) lipgloss.Style
+}
+
 // Styles resolves each [kind.Kind] to the [lipgloss.Style] it renders with.
 //
 // A Styles value holds a base style plus explicit overrides, and resolves every

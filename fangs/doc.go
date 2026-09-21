@@ -19,7 +19,7 @@
 // # Color Schemes
 //
 // [ColorScheme] and [ColorSchemeFunc] translate the styles of a
-// [printer.Styler], such as a theme, to [fang.ColorScheme], allowing
+// [style.Styler], such as a theme, to [fang.ColorScheme], allowing
 // CLI styling to be derived from the existing theme system.
 //
 // This provides consistent colors between the YAML viewer and CLI help output:

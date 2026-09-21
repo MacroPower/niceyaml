@@ -2,7 +2,7 @@
 //
 // A [Printer] takes a [line.View], such as the view of a niceyaml Source,
 // and renders it with syntax highlighting through [lipgloss.Style] values
-// from a [Styler]. Create one with [New] and render with
+// from a [style.Styler]. Create one with [New] and render with
 // [Printer.Print] or [Printer.Fprint]:
 //
 //	p := printer.New(printer.WithStyles(theme.Charm))
@@ -59,17 +59,6 @@ import (
 )
 
 const wrapOnCharacters = " /-"
-
-// Styler retrieves the style for each [kind.Kind].
-//
-// A [Printer] asks for each kind as it renders and caches the styles it
-// blends for overlays by the kinds involved, so Style should return the
-// same style for a kind for the life of the value.
-//
-// See [style.Styles] for an implementation.
-type Styler interface {
-	Style(s kind.Kind) lipgloss.Style
-}
 
 // Printer prints YAML with syntax highlighting for terminal output.
 //
@@ -140,7 +129,7 @@ type Styler interface {
 // context lines [WithContextLines] sets. A program configures one printer
 // with its terminal width and theme and prints its errors through it.
 type Printer struct {
-	styles         Styler
+	styles         style.Styler
 	style          lipgloss.Style
 	gutterFunc     GutterFunc
 	annotationFunc AnnotationFunc
@@ -224,7 +213,7 @@ type Option func(*Printer)
 // annotations rather than its content, so the built-in gutters leave the
 // line number and diff marker out of it.
 type GutterContext struct {
-	Styles     Styler
+	Styles     style.Styler
 	Index      int
 	Number     int
 	MaxNumber  int
@@ -236,7 +225,7 @@ type GutterContext struct {
 // styler returns the styles a gutter renders with: the ones the context
 // carries, or the default styles when it carries none, so a gutter called
 // with a zero context renders rather than panics.
-func (c GutterContext) styler() Styler {
+func (c GutterContext) styler() style.Styler {
 	if c.Styles == nil {
 		return style.Default()
 	}
@@ -258,7 +247,7 @@ type GutterFunc func(GutterContext) string
 // [line.Annotation.Kind], so the func renders them as one piece of text and
 // the printer styles it with that Kind.
 type AnnotationContext struct {
-	Styles Styler
+	Styles style.Styler
 
 	// Content is the text of the annotated line, without its line ending.
 	// Annotation columns count runes of this text, and the display width
@@ -433,12 +422,12 @@ func WithContainerWidth(n int) Option {
 	}
 }
 
-// WithStyles is a [Option] that sets the [Styler], typically a
+// WithStyles is a [Option] that sets the [style.Styler], typically a
 // theme from [go.jacobcolvin.com/niceyaml/style/theme], that styles tokens,
 // gutters, and annotations. A nil s selects [style.Default].
 //
 // To style the frame around the output, use [WithContainerStyle].
-func WithStyles(s Styler) Option {
+func WithStyles(s style.Styler) Option {
 	return func(p *Printer) {
 		if s == nil {
 			s = style.Default()
@@ -540,7 +529,7 @@ func (p *Printer) ContainerStyle() lipgloss.Style {
 }
 
 // Style retrieves the [lipgloss.Style] for the given [kind.Kind] from the
-// printer's [Styler].
+// printer's [style.Styler].
 func (p *Printer) Style(s kind.Kind) lipgloss.Style {
 	return p.styles.Style(s)
 }

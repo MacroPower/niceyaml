@@ -6,7 +6,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
-// XMLStyles implements [printer.Styler] using XML tags instead of ANSI
+// XMLStyles implements [style.Styler] using XML tags instead of ANSI
 // escape codes.
 //
 // Each [kind.Kind] category wraps content in descriptive tags, making styled

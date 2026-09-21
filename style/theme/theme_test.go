@@ -435,7 +435,7 @@ func isMarked(styles style.Styles, s kind.Kind) bool {
 func TestTheme_Style(t *testing.T) {
 	t.Parallel()
 
-	var _ printer.Styler = theme.Theme{}
+	var _ style.Styler = theme.Theme{}
 
 	assert.Equal(t, theme.Charm.Styles().Style(kind.Comment), theme.Charm.Style(kind.Comment))
 	assert.Equal(t, lipgloss.NewStyle(), theme.Theme{}.Style(kind.Comment))
