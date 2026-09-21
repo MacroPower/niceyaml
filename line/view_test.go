@@ -33,10 +33,9 @@ func TestNewView(t *testing.T) {
 		lines := line.NewLines(lexer.Tokenize("key: value\nother: data\n"))
 		view := line.NewView(lines)
 
-		assert.Equal(t, 2, view.Len())
+		assert.Equal(t, 2, view.Count())
 		assert.Equal(t, lines, view.Lines())
-		assert.Same(t, lines.Line(0), view.Line(0))
-		assert.Same(t, lines.Line(1), view.Line(1))
+		assert.Equal(t, 2, view.Lines().Len())
 	})
 
 	t.Run("over nil lines", func(t *testing.T) {
@@ -44,7 +43,7 @@ func TestNewView(t *testing.T) {
 
 		view := line.NewView(line.Lines{})
 
-		assert.Equal(t, 0, view.Len())
+		assert.Equal(t, 0, view.Count())
 		assert.True(t, view.Lines().IsEmpty())
 		assert.Empty(t, view.String())
 
@@ -58,7 +57,7 @@ func TestNewView(t *testing.T) {
 
 		view := line.NewView(line.Lines{})
 
-		assert.Equal(t, 0, view.Len())
+		assert.Equal(t, 0, view.Count())
 		assert.Empty(t, view.Lines())
 		assert.Empty(t, view.String())
 	})
@@ -68,14 +67,14 @@ func TestNewView(t *testing.T) {
 
 		var view line.View
 
-		assert.Equal(t, 0, view.Len())
+		assert.Equal(t, 0, view.Count())
 		assert.True(t, view.Lines().IsEmpty())
 		assert.Empty(t, view.String())
 
 		// Range-taking methods are safe on an empty view.
 		view.AddOverlay("test1", position.NewRange(position.New(0, 0), position.New(0, 5)))
 
-		assert.Equal(t, 0, view.Slice(position.NewSpan(0, 5)).Len())
+		assert.Equal(t, 0, view.Slice(position.NewSpan(0, 5)).Count())
 	})
 
 	t.Run("nil view", func(t *testing.T) {
@@ -83,7 +82,7 @@ func TestNewView(t *testing.T) {
 
 		var view *line.View
 
-		assert.Equal(t, 0, view.Len())
+		assert.Equal(t, 0, view.Count())
 		assert.True(t, view.Lines().IsEmpty())
 		assert.Nil(t, view.Clone())
 
@@ -148,7 +147,7 @@ func TestView_All(t *testing.T) {
 			indices = append(indices, i)
 			contents = append(contents, ln.Content())
 
-			assert.Same(t, view.Line(i), ln)
+			assert.Same(t, view.Lines().Line(i), ln)
 		}
 
 		assert.Equal(t, []int{0, 1, 2}, indices)
@@ -481,7 +480,7 @@ func TestView_AddOverlay(t *testing.T) {
 			position.NewRange(position.New(2, 0), position.New(1, 3)),
 		)
 
-		for i := range view.Len() {
+		for i := range view.All() {
 			assert.Empty(t, view.Overlays(i), "line %d", i)
 		}
 	})
@@ -494,7 +493,7 @@ func TestView_AddOverlay(t *testing.T) {
 		// Should not panic on an empty view.
 		view.AddOverlay("test1", position.NewRange(position.New(0, 0), position.New(0, 5)))
 
-		assert.Equal(t, 0, view.Len())
+		assert.Equal(t, 0, view.Count())
 	})
 }
 
@@ -559,11 +558,13 @@ func TestView_Clone(t *testing.T) {
 		clone := view.Clone()
 
 		require.NotSame(t, view, clone)
-		require.Equal(t, 3, clone.Len())
+		require.Equal(t, 3, clone.Count())
 		assert.Equal(t, view.Lines().Content(), clone.Lines().Content())
 
-		for i := range view.Len() {
-			assert.Same(t, view.Line(i), clone.Line(i), "line %d", i)
+		for i, ln := range view.All() {
+			j, ok := clone.Index(ln)
+			require.True(t, ok, "line %d", i)
+			assert.Equal(t, i, j)
 		}
 	})
 
@@ -665,7 +666,7 @@ func TestView_Clone(t *testing.T) {
 		view := newTestView(t, input, 3)
 		clone := view.Clone()
 
-		for i := range clone.Len() {
+		for i := range clone.All() {
 			assert.Equal(t, line.FlagDefault, clone.Flag(i))
 			assert.Nil(t, clone.Overlays(i))
 			assert.Nil(t, clone.Annotations(i))
@@ -678,11 +679,11 @@ func TestView_Clone(t *testing.T) {
 		clone := line.NewView(line.Lines{}).Clone()
 
 		require.NotNil(t, clone)
-		assert.Equal(t, 0, clone.Len())
+		assert.Equal(t, 0, clone.Count())
 	})
 }
 
-func TestView_Indices(t *testing.T) {
+func TestView_Index(t *testing.T) {
 	t.Parallel()
 
 	input := stringtest.Input(`
@@ -698,37 +699,36 @@ func TestView_Indices(t *testing.T) {
 	tcs := map[string]struct {
 		view *line.View
 		line *line.Line
-		want []int
+		want int
+		ok   bool
 	}{
 		"line of the view": {
 			view: view,
-			line: view.Line(2),
-			want: []int{2},
+			line: view.Lines().Line(2),
+			want: 2,
+			ok:   true,
 		},
-		"line held twice by a slice": {
+		"line a slice holds through overlapping spans": {
 			view: view.Slice(position.NewSpan(2, 4), position.NewSpan(2, 3)),
-			line: view.Line(2),
-			want: []int{2},
+			line: view.Lines().Line(2),
+			want: 2,
+			ok:   true,
 		},
 		"line of a slice that dropped it": {
 			view: view.Slice(position.NewSpan(0, 2)),
-			line: view.Line(2),
-			want: nil,
+			line: view.Lines().Line(2),
 		},
 		"line of other content with the same text": {
 			view: view,
-			line: other.Line(2),
-			want: nil,
+			line: other.Lines().Line(2),
 		},
 		"nil line": {
 			view: view,
 			line: nil,
-			want: nil,
 		},
 		"nil view": {
 			view: nil,
-			line: view.Line(0),
-			want: nil,
+			line: view.Lines().Line(0),
 		},
 	}
 
@@ -736,7 +736,9 @@ func TestView_Indices(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, tc.view.Indices(tc.line))
+			got, ok := tc.view.Index(tc.line)
+			assert.Equal(t, tc.ok, ok)
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
@@ -758,10 +760,10 @@ func TestView_Slice(t *testing.T) {
 
 		view := newTestView(t, input, 4)
 
-		for i := range view.Len() {
+		for i, ln := range view.All() {
 			view.SetFlag(i, line.Flag(i))
 			view.AddLineOverlay(i, line.Overlay{Cols: position.NewSpan(0, i+1), Kind: "test"})
-			view.Annotate(i, line.Annotation{Content: view.Line(i).Content(), Placement: line.Below})
+			view.Annotate(i, line.Annotation{Content: ln.Content(), Placement: line.Below})
 		}
 
 		return view
@@ -796,22 +798,23 @@ func TestView_Slice(t *testing.T) {
 		assert.Equal(t, []string{"b: 2", "c: 3"}, contents(got))
 	})
 
-	t.Run("spans in supplied order", func(t *testing.T) {
+	t.Run("spans in any order yield content order", func(t *testing.T) {
 		t.Parallel()
 
 		view := decorated(t)
 		got := view.Slice(position.NewSpan(3, 4), position.NewSpan(0, 2))
 
-		assert.Equal(t, []string{"d: 4", "a: 1", "b: 2"}, contents(got))
+		assert.Equal(t, []string{"a: 1", "b: 2", "d: 4"}, contents(got))
 	})
 
-	t.Run("overlapping spans repeat lines", func(t *testing.T) {
+	t.Run("overlapping spans hold each line once", func(t *testing.T) {
 		t.Parallel()
 
 		view := decorated(t)
 		got := view.Slice(position.NewSpan(0, 2), position.NewSpan(1, 3))
 
-		assert.Equal(t, []string{"a: 1", "b: 2", "b: 2", "c: 3"}, contents(got))
+		assert.Equal(t, []string{"a: 1", "b: 2", "c: 3"}, contents(got))
+		assert.Equal(t, 3, got.Count())
 	})
 
 	t.Run("spans are clamped", func(t *testing.T) {
@@ -836,7 +839,7 @@ func TestView_Slice(t *testing.T) {
 		} {
 			got := view.Slice(span)
 
-			assert.Equal(t, 0, got.Len(), name)
+			assert.Equal(t, 0, got.Count(), name)
 			assert.Equal(t, view.Lines(), got.Lines(), name)
 			assert.Empty(t, got.String(), name)
 		}
@@ -848,10 +851,12 @@ func TestView_Slice(t *testing.T) {
 		view := decorated(t)
 		got := view.Slice(position.NewSpan(2, 4))
 
-		require.Equal(t, 2, got.Len())
-		assert.Same(t, view.Line(2), got.Line(2))
-		assert.Same(t, view.Line(3), got.Line(3))
+		require.Equal(t, 2, got.Count())
 		assert.Equal(t, view.Lines(), got.Lines())
+
+		for i, ln := range got.All() {
+			assert.Same(t, view.Lines().Line(i), ln)
+		}
 	})
 
 	t.Run("carries decoration", func(t *testing.T) {
@@ -860,7 +865,7 @@ func TestView_Slice(t *testing.T) {
 		view := decorated(t)
 		got := view.Slice(position.NewSpan(3, 4), position.NewSpan(1, 2))
 
-		require.Equal(t, 2, got.Len())
+		require.Equal(t, 2, got.Count())
 
 		// The slice keeps the indices of the source.
 		assert.Equal(t, line.Flag(3), got.Flag(3))
@@ -953,7 +958,7 @@ func TestView_Slice(t *testing.T) {
 		view := newTestView(t, input, 4)
 		got := view.Slice(position.NewSpan(1, 3))
 
-		require.Equal(t, 2, got.Len())
+		require.Equal(t, 2, got.Count())
 
 		for i := range got.All() {
 			assert.Equal(t, line.FlagDefault, got.Flag(i))
@@ -1150,7 +1155,6 @@ func TestView_OutOfRange(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]func(v *line.View, i int){
-		"Line":           func(v *line.View, i int) { v.Line(i) },
 		"Flag":           func(v *line.View, i int) { v.Flag(i) },
 		"SetFlag":        func(v *line.View, i int) { v.SetFlag(i, line.FlagInserted) },
 		"Annotations":    func(v *line.View, i int) { v.Annotations(i) },

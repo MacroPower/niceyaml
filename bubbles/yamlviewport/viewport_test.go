@@ -1116,7 +1116,7 @@ func TestViewport_SideBySideFillerRowsKeepTheFrame(t *testing.T) {
 
 	// The wrapped line takes more rows in the right pane than in the left,
 	// so the left pane runs out of rows partway down the window.
-	require.Greater(t, m.TotalRowCount(), before.View().Len()+2)
+	require.Greater(t, m.TotalRowCount(), before.View().Count()+2)
 
 	for offset := range m.TotalRowCount() - height + 1 {
 		m.SetYOffset(offset)

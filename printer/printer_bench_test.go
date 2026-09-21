@@ -68,7 +68,7 @@ func BenchmarkPrinterPrint_WithOverlays(b *testing.B) {
 
 			// Pre-configure overlays before measurement.
 			for i := range rc.ranges {
-				lineNum := (i * 5) % source.Len()
+				lineNum := (i * 5) % source.Lines().Len()
 				r := position.Range{
 					Start: position.New(lineNum, 0),
 					End:   position.New(lineNum, 10),
@@ -114,7 +114,7 @@ func BenchmarkPrinterPrint_WithOverlays_IncludingSetup(b *testing.B) {
 
 				// Distribute overlays across lines.
 				for i := range rc.ranges {
-					lineNum := (i * 5) % source.Len()
+					lineNum := (i * 5) % source.Lines().Len()
 					r := position.Range{
 						Start: position.New(lineNum, 0),
 						End:   position.New(lineNum, 10),

@@ -109,7 +109,7 @@ func TestTokens_String_Annotation(t *testing.T) {
 
 			// Apply annotations to specified lines.
 			for idx, ann := range tc.annotations {
-				require.Less(t, idx, view.Len(), "annotation index out of range")
+				require.Less(t, idx, view.Count(), "annotation index out of range")
 
 				view.Annotate(idx, ann)
 			}
@@ -278,7 +278,7 @@ func TestSource_Runes_DiffBuiltLines(t *testing.T) {
 
 	// Diff should produce two lines: deleted (old) and inserted (new).
 	// Both have the same source token line (1), but different visual indices (0, 1).
-	require.Equal(t, 2, lines.Len(), "diff should produce 2 lines")
+	require.Equal(t, 2, lines.Count(), "diff should produce 2 lines")
 
 	var positions []struct {
 		line int

@@ -26,12 +26,14 @@ import (
 //
 // Every index and every [position.Range] a View takes or yields is in the
 // coordinates of its content, the [Lines] that [View.Lines] returns, where
-// line i is [Lines.Line] i. A View from [View.Slice] holds some of those
+// line i is [Lines.Line] i. A View holds each line of its content at most
+// once, in content order. A View from [View.Slice] holds some of those
 // lines and keeps their indices, so a range from a search of the content
 // or from the path of a document applies to a slice of the content as it
 // applies to the whole, and slicing before or after decorating renders the
-// same. [View.All] yields the lines the View holds with their indices, and
-// [View.Contains] reports whether it holds a line.
+// same. [View.All] yields the lines the View holds with their indices,
+// [View.Contains] reports whether it holds a line, [View.Index] finds the
+// index of a line it holds, and [View.Count] is the number it holds.
 //
 // Index-taking methods panic when the index is outside the content, as
 // indexing a slice does. Decoration on a line the View does not hold is
@@ -42,7 +44,7 @@ import (
 // Create instances with [NewView]. The zero value is an empty view.
 type View struct {
 	lines Lines
-	// The index in lines of each line the View holds, in view order.
+	// The index in lines of each line the View holds, ascending.
 	held []int
 	// Whether the View holds each line of lines, by index.
 	mask        []bool
@@ -79,18 +81,15 @@ func (v *View) Lines() Lines {
 	return v.lines
 }
 
-// Len returns the number of lines the [View] holds.
-func (v *View) Len() int {
+// Count returns the number of lines the [View] holds, which is the number
+// [View.All] yields. The lines of the content, held or not, are
+// [View.Lines], and [Lines.Len] counts those.
+func (v *View) Count() int {
 	if v == nil {
 		return 0
 	}
 
 	return len(v.held)
-}
-
-// Line returns line i of the content, whether or not the [View] holds it.
-func (v *View) Line(i int) *Line {
-	return v.lines.lines[i]
 }
 
 // Contains reports whether the [View] holds line i of its content. A nil
@@ -103,56 +102,46 @@ func (v *View) Contains(i int) bool {
 	return v.mask[i]
 }
 
-// Indices returns the index of every line the [View] holds that is l, in
-// view order and each once. Lines are shared by pointer between every view
-// over the same content, so a decorator that knows a line of a [Lines]
-// value finds it in a slice of that content, or in a diff that interleaves
-// it with another revision, without knowing how the view was built. A
-// line the view does not hold, such as one from other content, yields nil.
-func (v *View) Indices(l *Line) []int {
+// Index returns the index of the line the [View] holds that is l and
+// true. Lines are shared by pointer between every view over the same
+// content, so a decorator that knows a line of a [Lines] value finds it in
+// a slice of that content, or in a diff that interleaves it with another
+// revision, without knowing how the view was built. A line the view does
+// not hold, such as one from other content, reports false.
+func (v *View) Index(l *Line) (int, bool) {
 	if v == nil || l == nil {
-		return nil
+		return 0, false
 	}
 
-	var out []int
-
 	for _, i := range v.held {
-		if v.lines.lines[i] == l && !slices.Contains(out, i) {
-			out = append(out, i)
+		if v.lines.lines[i] == l {
+			return i, true
 		}
 	}
 
-	return out
+	return 0, false
 }
 
-// All returns an iterator over the lines the [View] holds within the given
-// spans, in view order within each span and in the order the spans are
-// given, or over every line it holds when no span is given. Each iteration
-// yields the index of the line in the content and the [*Line], and the
-// index reaches the line's decoration through [View.Flag],
-// [View.Overlays], and [View.Annotations]. A span reaching outside the
-// content selects the lines it does hold.
+// All returns an iterator over the lines the [View] holds within any of
+// the given spans, or over every line it holds when no span is given, in
+// content order and each once whatever order the spans come in and however
+// they overlap. Each iteration yields the index of the line in the content
+// and the [*Line], and the index reaches the line's decoration through
+// [View.Flag], [View.Overlays], and [View.Annotations]. A span reaching
+// outside the content selects the lines it does hold.
 func (v *View) All(spans ...position.Span) iter.Seq2[int, *Line] {
 	return func(yield func(int, *Line) bool) {
 		if v == nil {
 			return
 		}
 
-		if len(spans) == 0 {
-			for _, i := range v.held {
-				if !yield(i, v.lines.lines[i]) {
-					return
-				}
+		for _, i := range v.held {
+			if len(spans) > 0 && !slices.ContainsFunc(spans, func(s position.Span) bool { return s.Contains(i) }) {
+				continue
 			}
 
-			return
-		}
-
-		for _, span := range spans {
-			for _, i := range v.held {
-				if span.Contains(i) && !yield(i, v.lines.lines[i]) {
-					return
-				}
+			if !yield(i, v.lines.lines[i]) {
+				return
 			}
 		}
 	}
@@ -300,12 +289,13 @@ func (v *View) Clone() *View {
 }
 
 // Slice returns a new [*View] over the same content that holds the lines
-// the receiver holds within the given spans, in the order [View.All]
-// yields them, each with its index and its decoration. The result owns
-// its decoration and carries that of the lines it holds, so it is the view
-// a caller renders to show part of a document, such as the hunks around
-// an error, and a range or an index that applies to the receiver applies
-// to it. Slicing an already sliced view narrows it further.
+// the receiver holds within any of the given spans, in content order and
+// each once, as [View.All] yields them, each with its index and its
+// decoration. The result owns its decoration and carries that of the
+// lines it holds, so it is the view a caller renders to show part of a
+// document, such as the hunks around an error, and a range or an index
+// that applies to the receiver applies to it. Slicing an already sliced
+// view narrows it further.
 func (v *View) Slice(spans ...position.Span) *View {
 	out := &View{lines: v.Lines()}
 	if v == nil {

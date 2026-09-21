@@ -60,8 +60,15 @@ func testPrinterWithGutter(gutter printer.GutterFunc) *printer.Printer {
 func layoutRows(l printer.Layout) []int {
 	var rows []int
 
-	for i := range l.Len() {
-		rows = append(rows, l.LineRows(i))
+	prev := -1
+
+	for row := range l.Rows() {
+		if i := l.LineAt(row); i != prev {
+			rows = append(rows, 0)
+			prev = i
+		}
+
+		rows[len(rows)-1]++
 	}
 
 	return rows
@@ -85,7 +92,7 @@ func printDiffSummary(p *printer.Printer, before, after string, context int) str
 
 	source := diff.Diff(beforeTks.Lines(), afterTks.Lines()).Hunks(context)
 
-	if source.Len() == 0 {
+	if source.Count() == 0 {
 		return ""
 	}
 
@@ -384,10 +391,10 @@ func TestPrinter_CRLF(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 
 			// Highlight every visible column of every line.
-			for i := range view.Len() {
+			for i, ln := range view.All() {
 				view.AddOverlay(testOverlayHighlight, position.NewRange(
 					position.New(i, 0),
-					position.New(i, view.Line(i).Width()),
+					position.New(i, ln.Width()),
 				))
 			}
 
@@ -3616,7 +3623,7 @@ func TestPrinter_Layout_GutterWidth(t *testing.T) {
 			want:   7,
 		},
 		"slice keeps the width of its largest number": {
-			view:   long.Slice(position.NewSpan(10000, long.Len())),
+			view:   long.Slice(position.NewSpan(10000, long.Lines().Len())),
 			gutter: printer.LineNumberGutter,
 			want:   6,
 		},
@@ -3638,7 +3645,7 @@ func TestPrinter_Layout_GutterWidth(t *testing.T) {
 
 			// Every rendered row starts with a gutter of that width, so the
 			// first row is at least that wide.
-			if tc.view.Len() > 0 {
+			if tc.view.Count() > 0 {
 				first, _, _ := strings.Cut(p.Print(tc.view), "\n")
 				assert.GreaterOrEqual(t, lipgloss.Width(first), got)
 			}
@@ -3809,7 +3816,7 @@ func TestPrinter_Layout_Width(t *testing.T) {
 				widest = max(widest, lipgloss.Width(row))
 			}
 
-			if view.Len() > 0 {
+			if view.Count() > 0 {
 				assert.Equal(t, got, widest)
 			}
 		})
@@ -3894,7 +3901,7 @@ func TestPrinter_Layout(t *testing.T) {
 		l := p.Layout(view)
 
 		assert.Equal(t, len(strings.Split(got, "\n")), l.Rows())
-		assert.Equal(t, 3, l.Len())
+		assert.Equal(t, 3, l.Count())
 		assert.Equal(t, []int{6, 1, 2}, layoutRows(l))
 	})
 
@@ -3904,7 +3911,7 @@ func TestPrinter_Layout(t *testing.T) {
 		l := p.Layout(newView())
 
 		start := 0
-		for i := range l.Len() {
+		for i := range l.Count() {
 			assert.Equal(t, start, l.LineStart(i), "line %d", i)
 
 			start += l.LineRows(i)
@@ -3918,7 +3925,7 @@ func TestPrinter_Layout(t *testing.T) {
 
 		l := p.Layout(newView())
 
-		for i := range l.Len() {
+		for i := range l.Count() {
 			for row := l.LineStart(i); row < l.LineStart(i)+l.LineRows(i); row++ {
 				assert.Equal(t, i, l.LineAt(row), "row %d", row)
 			}
@@ -3942,7 +3949,7 @@ func TestPrinter_Layout(t *testing.T) {
 		l := p.Layout(line.NewView(line.Lines{}))
 
 		assert.Equal(t, 0, l.Rows())
-		assert.Equal(t, 0, l.Len())
+		assert.Equal(t, 0, l.Count())
 		assert.Equal(t, -1, l.LineAt(0))
 		assert.Equal(t, -1, l.RowOf(position.New(0, 0)))
 		assert.Equal(t, 0, l.Width())
@@ -3980,45 +3987,51 @@ func TestPrinter_Layout(t *testing.T) {
 		}
 	})
 
-	t.Run("slice in a non-identity order", func(t *testing.T) {
+	t.Run("slice keeps the indices of the content", func(t *testing.T) {
 		t.Parallel()
 
 		view := newView().Slice(position.NewSpan(2, 3), position.NewSpan(0, 1))
 
 		got := p.Print(view)
 		require.Equal(t, stringtest.JoinLF(
-			"   3 c: 3",
-			"        ^ last",
 			"     a note above",
 			"     that wraps too",
 			"   1 key: this is a",
 			"   - long value that",
 			"   - wraps",
 			"          ^ below",
+			"   3 c: 3",
+			"        ^ last",
 		), got)
 
 		l := p.Layout(view)
 
 		assert.Equal(t, len(strings.Split(got, "\n")), l.Rows())
-		assert.Equal(t, []int{2, 6}, layoutRows(l))
-		assert.Equal(t, 2, l.LineStart(1))
+		assert.Equal(t, 2, l.Count())
+		assert.Equal(t, []int{6, 2}, layoutRows(l))
 
-		// The layout numbers lines by position, as the slice orders them,
-		// and Index maps a position back to the index in the content.
+		// The layout speaks in the indices of the content, as the view
+		// does, so line 2 of the content starts after the six rows of
+		// line 0 and line 1, which the slice dropped, takes no rows.
+		assert.Equal(t, 0, l.LineStart(0))
+		assert.Equal(t, 6, l.LineStart(2))
+		assert.Equal(t, 6, l.LineRows(0))
+		assert.Equal(t, 2, l.LineRows(2))
+		assert.Equal(t, -1, l.LineStart(1))
+		assert.Equal(t, 0, l.LineRows(1))
+
 		assert.Equal(t, 0, l.LineAt(0))
-		assert.Equal(t, 0, l.LineAt(1))
-		assert.Equal(t, 1, l.LineAt(2))
-		assert.Equal(t, 1, l.LineAt(7))
-		assert.Equal(t, 1, l.LineAt(100))
+		assert.Equal(t, 0, l.LineAt(5))
+		assert.Equal(t, 2, l.LineAt(6))
+		assert.Equal(t, 2, l.LineAt(7))
+		assert.Equal(t, 2, l.LineAt(100))
 		assert.Equal(t, 0, l.LineAt(-1))
-		assert.Equal(t, 2, l.Index(0))
-		assert.Equal(t, 0, l.Index(1))
 
-		// RowOf takes a position in the content, so line 0 of the content
-		// is the second line of the layout and line 1 is not in it.
-		assert.Equal(t, 0, l.RowOf(position.New(2, 0)))
-		assert.Equal(t, 4, l.RowOf(position.New(0, 0)))
-		assert.Equal(t, 5, l.RowOf(position.New(0, 15)))
+		// RowOf takes a position in the content too, and line 1 is not in
+		// the layout.
+		assert.Equal(t, 2, l.RowOf(position.New(0, 0)))
+		assert.Equal(t, 3, l.RowOf(position.New(0, 15)))
+		assert.Equal(t, 6, l.RowOf(position.New(2, 0)))
 		assert.Equal(t, -1, l.RowOf(position.New(1, 0)))
 	})
 

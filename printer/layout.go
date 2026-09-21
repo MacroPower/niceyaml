@@ -24,21 +24,21 @@ import (
 // assembles no output, so one Layout replaces a render for every question
 // about rows. It stays valid until the view or the printer changes.
 //
-// The layout numbers the lines the view holds by position, from 0 in the
-// order [line.View.All] yields them, and [Layout.Len], [Layout.LineRows],
-// [Layout.LineStart], and [Layout.LineAt] speak in those positions. The
-// view itself indexes lines by their place in its content, and
-// [Layout.Index] maps a position to that index, so a viewer that finds the
-// line at a row reaches its decoration through the view. [Layout.RowOf]
-// takes a position in the content, as a search yields one. Rows count
-// from 0 at the first row of the first line and leave the container style
-// out. An empty view has no rows, though [Printer.Print] draws one empty
-// row for it to carry the container.
+// The layout speaks in the coordinates of the view: [Layout.LineRows],
+// [Layout.LineStart], and [Layout.LineAt] take and return the index of a
+// line in the content of the view, the one every [line.View] method
+// takes, so a viewer that finds the line at a row reaches its decoration
+// through the view with the same index, and [Layout.RowOf] takes a
+// position in the content, as a search yields one. A line the view does
+// not hold takes no rows and starts nowhere. Rows count from 0 at the
+// first row of the first line and leave the container style out. An empty
+// view has no rows, though [Printer.Print] draws one empty row for it to
+// carry the container.
 //
 // Create instances with [Printer.Layout].
 type Layout struct {
 	lines       []lineLayout
-	indices     []int // indices[k] is the index in the view's content of the k-th line.
+	indices     []int // indices[k] is the index in the view's content of the k-th line, ascending.
 	starts      []int // starts[k] is the first row of the k-th line; starts[len(lines)] is the row count.
 	width       int
 	gutterWidth int
@@ -58,9 +58,9 @@ func (p *Printer) Layout(view *line.View) Layout {
 	maxNumber := p.MaxNumber(view)
 	gutterWidth := p.gutterWidth(maxNumber)
 	l := Layout{
-		lines:       make([]lineLayout, 0, view.Len()),
-		indices:     make([]int, 0, view.Len()),
-		starts:      make([]int, 1, view.Len()+1),
+		lines:       make([]lineLayout, 0, view.Count()),
+		indices:     make([]int, 0, view.Count()),
+		starts:      make([]int, 1, view.Count()+1),
 		gutterWidth: gutterWidth,
 	}
 
@@ -169,37 +169,47 @@ func (l Layout) Rows() int {
 	return l.starts[len(l.starts)-1]
 }
 
-// Len returns the number of lines the layout holds.
-func (l Layout) Len() int {
+// Count returns the number of lines the layout holds, which is
+// [line.View.Count] of the view it was computed from.
+func (l Layout) Count() int {
 	return len(l.lines)
 }
 
-// Index returns the index in the content of the view of the line at
-// position k, which is the index the [line.View] methods take.
-func (l Layout) Index(k int) int {
-	return l.indices[k]
+// position returns the position among the lines the layout holds of line
+// i of the content, and whether the layout holds it.
+func (l Layout) position(i int) (int, bool) {
+	return slices.BinarySearch(l.indices, i)
 }
 
-// LineRows returns the number of rows the line at position k takes: one
+// LineRows returns the number of rows line i of the content takes: one
 // for each wrapped piece of its content and one for each wrapped piece of
-// its annotations.
-func (l Layout) LineRows(k int) int {
+// its annotations. A line the layout does not hold takes none.
+func (l Layout) LineRows(i int) int {
+	k, ok := l.position(i)
+	if !ok {
+		return 0
+	}
+
 	ll := l.lines[k]
 
 	return ll.above + len(ll.rows) + ll.below
 }
 
-// LineStart returns the first row of the line at position k.
-func (l Layout) LineStart(k int) int {
-	_ = l.lines[k]
+// LineStart returns the first row of line i of the content, or -1 when
+// the layout does not hold the line.
+func (l Layout) LineStart(i int) int {
+	k, ok := l.position(i)
+	if !ok {
+		return -1
+	}
 
 	return l.starts[k]
 }
 
-// LineAt returns the position of the line that holds row. A row before the
-// first belongs to the first line and a row past the last to the last, so
-// a scroll offset always names a line. Returns -1 when the layout holds no
-// lines.
+// LineAt returns the index in the content of the line that holds row. A
+// row before the first belongs to the first line and a row past the last
+// to the last, so a scroll offset always names a line. Returns -1 when the
+// layout holds no lines.
 func (l Layout) LineAt(row int) int {
 	n := len(l.lines)
 	if n == 0 {
@@ -208,21 +218,20 @@ func (l Layout) LineAt(row int) int {
 
 	// The last start at or before row, which is the line whose rows hold
 	// it; SearchInts finds the first start past row.
-	i := sort.SearchInts(l.starts[:n], row+1) - 1
+	k := sort.SearchInts(l.starts[:n], row+1) - 1
 
-	return min(max(i, 0), n-1)
+	return l.indices[min(max(k, 0), n-1)]
 }
 
 // RowOf returns the row that holds column pos.Col of line pos.Line of the
 // content: the content row the column wraps onto, below any annotation
 // rows above the line. A column in the spaces the wrapper dropped at a
 // break belongs to the row before the break, and one past the end of the
-// content to the last row. A line the view holds more than once is
-// placed where it first appears. Returns -1 when the layout does not hold
-// the line.
+// content to the last row. Returns -1 when the layout does not hold the
+// line.
 func (l Layout) RowOf(pos position.Position) int {
-	k := slices.Index(l.indices, pos.Line)
-	if k < 0 {
+	k, ok := l.position(pos.Line)
+	if !ok {
 		return -1
 	}
 

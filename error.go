@@ -1224,8 +1224,7 @@ func rangeOf(lines line.Lines, loc location) position.Range {
 // the whole source from [Source.View], a slice of it from [line.View.Slice]
 // such as one document of a file, or a diff that interleaves the source
 // with another revision, where the marks land on the lines of this source
-// alone. A line the view holds more than once is marked each time, and a
-// line it does not hold is left out.
+// alone. A line the view does not hold is left out.
 //
 // Annotate marks every location that resolves and returns an error only
 // when none does: the error [SourceError.Range] returns, joined with
@@ -1267,7 +1266,7 @@ func (e *SourceError) Excerpt(context int) (*line.View, error) {
 	// whose context windows touch share a hunk, so a line gap always
 	// separates two hunks for the "..." separator. ContextSpans clamps the
 	// spans to the view, so each one starts on a line the view holds.
-	spans := position.ContextSpans(marked, context, view.Len())
+	spans := position.ContextSpans(marked, context, view.Lines().Len())
 	excerpt := view.Slice(spans...)
 
 	// Add "..." annotations to the first line of each hunk after the
@@ -1353,21 +1352,23 @@ func (e *SourceError) annotate(view *line.View) ([]int, error) {
 		return nil, e.resolution()
 	}
 
-	// The view may hold the lines of the source in any order and any
-	// number of times, so every mark goes to each index that holds its
-	// line. The line of each position joins the marked lines as well,
-	// since a position with no token under it has no range to highlight
-	// and still picks the lines an excerpt shows.
-	indices := e.lineIndices(view)
+	// The view may hold the lines of the source at other indices, as a
+	// diff does, so every mark goes to the index that holds its line. The
+	// line of each position joins the marked lines as well, since a
+	// position with no token under it has no range to highlight and still
+	// picks the lines an excerpt shows.
+	index := e.lineIndex(view)
 
 	var marked []int
 
 	for _, pos := range positions {
-		marked = append(marked, indices(pos.pos.Line)...)
+		if i, ok := index(pos.pos.Line); ok {
+			marked = append(marked, i)
+		}
 
 		for _, r := range pos.ranges {
 			for _, lr := range e.source.lines.SliceLines(r) {
-				for _, i := range indices(lr.Start.Line) {
+				if i, ok := index(lr.Start.Line); ok {
 					view.AddOverlay(kind.GenericError, viewRange(lr, i))
 
 					marked = append(marked, i)
@@ -1381,7 +1382,7 @@ func (e *SourceError) annotate(view *line.View) ([]int, error) {
 	}
 
 	for lineIdx, annotation := range prepareLineAnnotations(positions) {
-		for _, i := range indices(lineIdx) {
+		if i, ok := index(lineIdx); ok {
 			view.Annotate(i, annotation)
 		}
 	}
@@ -1389,26 +1390,18 @@ func (e *SourceError) annotate(view *line.View) ([]int, error) {
 	return marked, nil
 }
 
-// lineIndices returns a lookup from a line index of the source to the
-// indices of view that hold that line, found by identity. A line index the
-// source does not hold, or a line the view does not hold, yields nil.
-func (e *SourceError) lineIndices(view *line.View) func(int) []int {
+// lineIndex returns a lookup from a line index of the source to the index
+// of view that holds that line, found by identity. A line index the
+// source does not hold, or a line the view does not hold, reports false.
+func (e *SourceError) lineIndex(view *line.View) func(int) (int, bool) {
 	lines := e.source.lines
-	cache := make(map[int][]int)
 
-	return func(srcIdx int) []int {
+	return func(srcIdx int) (int, bool) {
 		if srcIdx < 0 || srcIdx >= lines.Len() {
-			return nil
+			return 0, false
 		}
 
-		if out, ok := cache[srcIdx]; ok {
-			return out
-		}
-
-		out := view.Indices(lines.Line(srcIdx))
-		cache[srcIdx] = out
-
-		return out
+		return view.Index(lines.Line(srcIdx))
 	}
 }
 

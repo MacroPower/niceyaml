@@ -73,11 +73,9 @@ func (s finderSearcher) Load(lines line.Lines) Index {
 // displays a revision without a diff.
 //
 // The viewport renders the lines the view holds in the order
-// [line.View.All] yields them and windows them by index, so it expects the
-// indices to ascend, as they do in every view [niceyaml.Source.View],
-// [niceyaml.Document.View], [niceyaml.SourceError.Excerpt], and the diff
-// package return. A search covers the content of the view, and the
-// viewport keeps the matches on lines the view holds.
+// [line.View.All] yields them, which is content order, and windows them
+// by index. A search covers the content of the view, and the viewport
+// keeps the matches on lines the view holds.
 //
 // See [NewRevision] and [niceyaml.Source] for implementations.
 type Revision interface {
@@ -1076,9 +1074,12 @@ func (m *Model) paneWidth() int {
 // rowCache holds the layout of a view: the row structure the printer
 // reports for each pane and the prefix sums that place every line.
 type rowCache struct {
-	// Row counts of each line the view renders, in span order, for the left
-	// and right panes. The right counts are nil outside side-by-side diffs.
+	// Row counts of each line the view renders, in content order, for the
+	// left and right panes. The right counts are nil outside side-by-side
+	// diffs.
 	left, right []int
+	// The index in the content of the k-th rendered line, ascending.
+	indices []int
 	// Prefix sums of the taller pane after the top frame, so sums[k] is the
 	// first row of the k-th rendered line and the last entry is the first row
 	// of the bottom frame. Nil until filled.
@@ -1136,11 +1137,11 @@ func (m *Model) fillRows() {
 		p := m.renderPrinter(m.paneWidth())
 
 		c.leftLayout = p.Layout(m.left)
-		c.left = lineRows(c.leftLayout)
+		c.indices, c.left = lineRows(c.leftLayout, m.left)
 
 		if m.viewMode == ViewModeSideBySide && m.right != nil {
 			c.rightLayout = p.Layout(m.right)
-			c.right = lineRows(c.rightLayout)
+			_, c.right = lineRows(c.rightLayout, m.right)
 		}
 
 		// A layout counts the rows before the container style applies. Print
@@ -1206,9 +1207,9 @@ func (m *Model) window(first, last int) position.Span {
 		return position.Span{}
 	}
 
-	layout := m.rows.leftLayout
+	indices := m.rows.indices
 
-	return position.NewSpan(layout.Index(first), layout.Index(last-1)+1)
+	return position.NewSpan(indices[first], indices[last-1]+1)
 }
 
 // trimWindow drops the rows above and below the visible window from rows,
@@ -1303,7 +1304,7 @@ func (m *Model) rowOffsetLimit() int {
 
 // lineCount returns the number of lines the view renders.
 func (m *Model) lineCount() int {
-	return m.left.Len()
+	return m.left.Count()
 }
 
 // maxXOffset returns the maximum X offset, which brings the last column of
@@ -1335,14 +1336,18 @@ func (m *Model) rowWidth() int {
 	return max(m.rows.leftLayout.Width(), m.rows.rightLayout.Width())
 }
 
-// lineRows returns the number of rows each line of layout takes.
-func lineRows(layout printer.Layout) []int {
-	rows := make([]int, layout.Len())
-	for i := range rows {
-		rows[i] = layout.LineRows(i)
+// lineRows returns the index in the content of each line view holds and
+// the number of rows each takes in layout, in content order.
+func lineRows(layout printer.Layout, view *line.View) ([]int, []int) {
+	indices := make([]int, 0, view.Count())
+	rows := make([]int, 0, view.Count())
+
+	for i := range view.All() {
+		indices = append(indices, i)
+		rows = append(rows, layout.LineRows(i))
 	}
 
-	return rows
+	return indices, rows
 }
 
 // scrollWidth returns the number of row columns a pane shows at once: the
@@ -1686,8 +1691,9 @@ func (m *Model) scrollToCurrentMatch() {
 		return
 	}
 
-	k := layout.LineAt(matchRow)
-	row := m.rows.sums[k] + matchRow - layout.LineStart(k)
+	i := layout.LineAt(matchRow)
+	k, _ := slices.BinarySearch(m.rows.indices, i)
+	row := m.rows.sums[k] + matchRow - layout.LineStart(i)
 
 	// Use (maxHeight-1)/2 to ensure the match appears at the visual center.
 	// For height 22: (22-1)/2 = 10, placing the match at position 10 (middle).

@@ -611,7 +611,7 @@ func (p *Printer) gutterWidth(maxNumber int) int {
 // renderRows renders the lines of view as rows, with the gutter sized for
 // [Printer.MaxNumber].
 func (p *Printer) renderRows(view *line.View) []string {
-	if view.Len() == 0 {
+	if view.Count() == 0 {
 		return nil
 	}
 
@@ -619,7 +619,7 @@ func (p *Printer) renderRows(view *line.View) []string {
 	gutterWidth := p.gutterWidth(maxNumber)
 
 	// A viewer prints one window of a long document at a time.
-	rows := make([]string, 0, view.Len())
+	rows := make([]string, 0, view.Count())
 
 	for idx, ln := range view.All() {
 		rows = append(rows, p.renderLine(view, idx, ln, maxNumber, gutterWidth)...)

@@ -736,8 +736,8 @@ func TestDocument_View(t *testing.T) {
 		view := docs[1].View()
 
 		assert.Equal(t, source.View().Slice(docs[1].Span()).String(), view.String())
-		assert.Equal(t, docs[1].Span().Len(), view.Len())
-		assert.Equal(t, 2, view.Line(docs[1].Span().Start).Number())
+		assert.Equal(t, docs[1].Span().Len(), view.Count())
+		assert.Equal(t, 2, view.Lines().Line(docs[1].Span().Start).Number())
 		assert.False(t, view.Contains(0), "the view keeps the indices of the source")
 	})
 
@@ -1836,7 +1836,7 @@ func TestDocument_Ranges(t *testing.T) {
 
 			var got position.Ranges
 
-			for i := range view.Len() {
+			for i := range view.All() {
 				for _, o := range view.Overlays(i) {
 					got = append(got, position.NewRange(position.New(i, o.Cols.Start), position.New(i, o.Cols.End)))
 				}

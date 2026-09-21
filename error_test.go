@@ -2981,7 +2981,7 @@ func TestError_ResolvesThroughErrorWrappers(t *testing.T) {
 	excerpt, err := got.Excerpt(2)
 	require.NoError(t, err)
 	require.NotNil(t, excerpt)
-	assert.Positive(t, excerpt.Len())
+	assert.Positive(t, excerpt.Count())
 }
 
 func TestError_RangeRendersFromSource(t *testing.T) {
@@ -3241,7 +3241,7 @@ func excerptError(t *testing.T) *niceyaml.SourceError {
 
 // lineNumbers returns the source line number of every line in view.
 func lineNumbers(view *line.View) []int {
-	numbers := make([]int, 0, view.Len())
+	numbers := make([]int, 0, view.Count())
 	for _, l := range view.All() {
 		numbers = append(numbers, l.Number())
 	}
@@ -3259,8 +3259,8 @@ func TestSourceError_Excerpt(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, []int{1, 2, 3, 7, 8, 9}, lineNumbers(excerpt))
-		assert.Equal(t, "b: 2", excerpt.Line(1).Content())
-		assert.Equal(t, "h: 8", excerpt.Line(7).Content())
+		assert.Equal(t, "b: 2", excerpt.Lines().Line(1).Content())
+		assert.Equal(t, "h: 8", excerpt.Lines().Line(7).Content())
 		assert.True(t, excerpt.Contains(7))
 		assert.False(t, excerpt.Contains(4), "the excerpt keeps the indices of the source")
 	})
@@ -3372,7 +3372,7 @@ func TestSourceError_Annotate(t *testing.T) {
 	unmarked := func(t *testing.T, view *line.View) {
 		t.Helper()
 
-		for i := range view.Len() {
+		for i := range view.All() {
 			assert.Empty(t, view.Overlays(i), "line %d carries no overlay", i)
 			assert.Empty(t, view.Annotations(i), "line %d carries no annotation", i)
 		}
@@ -3395,7 +3395,7 @@ func TestSourceError_Annotate(t *testing.T) {
 			{Content: "bad h", Kind: kind.TextError, Placement: line.Below, Col: 3},
 		}, view.Annotations(7))
 
-		for i := range view.Len() {
+		for i := range view.All() {
 			if i == 1 || i == 7 {
 				continue
 			}
@@ -3471,7 +3471,7 @@ func TestSourceError_Annotate(t *testing.T) {
 		assert.NotContains(t, view.String(), "b: 2")
 	})
 
-	t.Run("marks a line the view holds twice once", func(t *testing.T) {
+	t.Run("marks a line once however many spans select it", func(t *testing.T) {
 		t.Parallel()
 
 		bound := excerptError(t)
@@ -3479,11 +3479,9 @@ func TestSourceError_Annotate(t *testing.T) {
 
 		require.NoError(t, bound.Annotate(view))
 
-		require.Equal(t, 2, view.Len())
+		require.Equal(t, 1, view.Count())
 		assert.Equal(t, line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}, view.Overlays(1))
 		assert.Equal(t, stringtest.JoinLF(
-			"   2 | b: 2",
-			"     |    ^",
 			"   2 | b: 2",
 			"     |    ^",
 		), view.String())
@@ -3504,7 +3502,7 @@ func TestSourceError_Annotate(t *testing.T) {
 		// The unified view holds a from after, then b from before as a
 		// deleted line, then b from after as an inserted one.
 		view := diff.Diff(before.Lines(), after.Lines()).Unified()
-		require.Equal(t, 3, view.Len())
+		require.Equal(t, 3, view.Count())
 
 		require.NoError(t, bound.Annotate(view))
 
@@ -3715,7 +3713,7 @@ func TestSourceError_TreeBranches(t *testing.T) {
 		// excerpt from the other source.
 		excerpt, excerptErr := bound.Excerpt(0)
 		require.NoError(t, excerptErr)
-		assert.Equal(t, 1, excerpt.Len())
+		assert.Equal(t, 1, excerpt.Count())
 
 		got := trimLines(newXMLPrinter().PrintError(err))
 		assert.Contains(t, got, "<genericError>1</genericError>")

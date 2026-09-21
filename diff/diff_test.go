@@ -24,14 +24,14 @@ func TestDiffer_Views(t *testing.T) {
 	result := diff.Diff(before.Lines(), after.Lines())
 
 	got := result.Unified()
-	require.Equal(t, 3, got.Len())
+	require.Equal(t, 3, got.Count())
 	assert.Equal(t, line.FlagDefault, got.Flag(0))
 	assert.Equal(t, line.FlagDeleted, got.Flag(1))
 	assert.Equal(t, line.FlagInserted, got.Flag(2))
 
 	// Inputs are content only, so the result carries the flags of the diff
 	// and nothing else.
-	for i := range got.Len() {
+	for i := range got.All() {
 		assert.Empty(t, got.Overlays(i))
 	}
 
@@ -45,7 +45,7 @@ func TestDiffer_Views(t *testing.T) {
 
 	// The diff of a diff is a diff of the view's content.
 	again := diff.Diff(got.Lines(), got.Lines())
-	assert.Equal(t, 3, again.Unified().Len())
+	assert.Equal(t, 3, again.Unified().Count())
 }
 
 func TestDiffer_Views_LineNumbers(t *testing.T) {
@@ -687,13 +687,13 @@ func TestDiffer_Hunks(t *testing.T) {
 
 			if tc.wantEmpty {
 				assert.Nil(t, got)
-				assert.Equal(t, 0, got.Len())
+				assert.Equal(t, 0, got.Count())
 				assert.True(t, got.Lines().IsEmpty())
 
 				return
 			}
 
-			assert.Equal(t, tc.wantLen, got.Len())
+			assert.Equal(t, tc.wantLen, got.Count())
 
 			for lineIdx, wantFlag := range tc.flags {
 				assert.Equal(t, wantFlag, got.Flag(lineIdx), "flag mismatch at line %d", lineIdx)
@@ -760,7 +760,7 @@ func TestDiffer_WithAlgorithm(t *testing.T) {
 			}
 
 			got := d.Diff(before, after).Unified()
-			require.Equal(t, len(tc.wantFlags), got.Len())
+			require.Equal(t, len(tc.wantFlags), got.Count())
 
 			for i, want := range tc.wantFlags {
 				assert.Equal(t, want, got.Flag(i), "flag mismatch at line %d", i)
@@ -1098,8 +1098,8 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 			afterView := result.After()
 
 			// Both views should have the same length.
-			assert.Equal(t, tc.wantRowLen, beforeView.Len(), "Before Len()")
-			assert.Equal(t, tc.wantRowLen, afterView.Len(), "After Len()")
+			assert.Equal(t, tc.wantRowLen, beforeView.Count(), "Before Count()")
+			assert.Equal(t, tc.wantRowLen, afterView.Count(), "After Count()")
 
 			// Check IsEmpty.
 			assert.Equal(t, tc.wantRowLen == 0, beforeView.Lines().IsEmpty(), "Before IsEmpty()")
@@ -1122,7 +1122,7 @@ type wantLine struct {
 func verifyLines(t *testing.T, side string, actual *line.View, want []wantLine) {
 	t.Helper()
 
-	require.Equal(t, len(want), actual.Len(), "%s: line count mismatch", side)
+	require.Equal(t, len(want), actual.Count(), "%s: line count mismatch", side)
 
 	for i, actualLn := range actual.All() {
 		wantLn := want[i]
@@ -1163,17 +1163,23 @@ func TestDiffResult_PlaceholdersAreDistinct(t *testing.T) {
 			afterSrc := niceyaml.NewSourceFromString(tc.after)
 
 			left := diff.Diff(beforeSrc.Lines(), afterSrc.Lines()).Before()
-			require.Equal(t, 3, left.Len())
+			require.Equal(t, 3, left.Count())
 
 			// Rows 1 and 2 are the placeholders opposite the two lines the
 			// other pane added. Each names the one row it fills, so a
 			// decorator that holds one marks that row alone.
-			assert.Equal(t, []int{1}, left.Indices(left.Line(1)))
-			assert.Equal(t, []int{2}, left.Indices(left.Line(2)))
+			i, ok := left.Index(left.Lines().Line(1))
+			require.True(t, ok)
+			assert.Equal(t, 1, i)
+
+			i, ok = left.Index(left.Lines().Line(2))
+			require.True(t, ok)
+			assert.Equal(t, 2, i)
 
 			// A placeholder of one diff belongs to no view of another.
 			other := diff.Diff(beforeSrc.Lines(), afterSrc.Lines()).Before()
-			assert.Nil(t, other.Indices(left.Line(1)))
+			_, ok = other.Index(left.Lines().Line(1))
+			assert.False(t, ok)
 		})
 	}
 }
@@ -1218,8 +1224,8 @@ func TestDiffer_MultipleRenders(t *testing.T) {
 	assert.Equal(t, 1, hunkCount(summary2))
 
 	// Different contexts should produce different hunk sizes.
-	assert.Less(t, summary0.Len(), summary1.Len())
-	assert.Less(t, summary1.Len(), summary2.Len())
+	assert.Less(t, summary0.Count(), summary1.Count())
+	assert.Less(t, summary1.Count(), summary2.Count())
 }
 
 func TestDiffResult_ViewsAreIndependent(t *testing.T) {
