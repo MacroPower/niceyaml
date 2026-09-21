@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
 	"github.com/goccy/go-yaml/lexer"
 	"github.com/stretchr/testify/assert"
@@ -1460,6 +1461,22 @@ func TestGutterFunctions(t *testing.T) {
 		want       string
 		ctx        printer.GutterContext
 	}{
+		// A zero context renders with the default styles.
+		"zero context/default": {
+			gutterFunc: printer.DefaultGutter,
+			ctx:        printer.GutterContext{},
+			want:       "     " + " ",
+		},
+		"zero context/diff": {
+			gutterFunc: printer.DiffGutter,
+			ctx:        printer.GutterContext{},
+			want:       " ",
+		},
+		"zero context/line number": {
+			gutterFunc: printer.LineNumberGutter,
+			ctx:        printer.GutterContext{},
+			want:       "     ",
+		},
 		// DiffGutter tests.
 		"diff/default flag": {
 			gutterFunc: printer.DiffGutter,
@@ -1566,7 +1583,10 @@ func TestGutterFunctions(t *testing.T) {
 
 			gutter := tc.gutterFunc
 			got := gutter(tc.ctx)
-			assert.Equal(t, tc.want, got)
+
+			// The default styles of a zero context carry colors, which the
+			// text under test does not.
+			assert.Equal(t, tc.want, ansi.Strip(got))
 		})
 	}
 }

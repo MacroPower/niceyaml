@@ -233,6 +233,17 @@ type GutterContext struct {
 	Annotation bool
 }
 
+// styler returns the styles a gutter renders with: the ones the context
+// carries, or the default styles when it carries none, so a gutter called
+// with a zero context renders rather than panics.
+func (c GutterContext) styler() Styler {
+	if c.Styles == nil {
+		return style.Default()
+	}
+
+	return c.Styles
+}
+
 // GutterFunc returns the gutter content for a line based on [GutterContext].
 // The returned string is rendered as the leftmost content before the line content.
 //
@@ -321,7 +332,7 @@ func DefaultAnnotation(ctx AnnotationContext) string {
 // as the placeholder a side-by-side diff inserts opposite an inserted or
 // deleted line, gets a blank column.
 func renderLineNumber(ctx GutterContext) string {
-	lineNumStyle := ctx.Styles.Style(kind.UILineNumber)
+	lineNumStyle := ctx.styler().Style(kind.UILineNumber)
 
 	width := max(4, len(strconv.Itoa(ctx.MaxNumber)))
 
@@ -341,27 +352,27 @@ func renderLineNumber(ctx GutterContext) string {
 // annotation row carries no marker.
 func renderDiffMarker(ctx GutterContext) string {
 	if ctx.Annotation {
-		return ctx.Styles.Style(kind.Text).Render(" ")
+		return ctx.styler().Style(kind.Text).Render(" ")
 	}
 
 	if ctx.Soft {
 		switch ctx.Flag {
 		case line.FlagInserted:
-			return ctx.Styles.Style(kind.GenericInserted).Render(" ")
+			return ctx.styler().Style(kind.GenericInserted).Render(" ")
 		case line.FlagDeleted:
-			return ctx.Styles.Style(kind.GenericDeleted).Render(" ")
+			return ctx.styler().Style(kind.GenericDeleted).Render(" ")
 		default:
-			return ctx.Styles.Style(kind.Text).Render(" ")
+			return ctx.styler().Style(kind.Text).Render(" ")
 		}
 	}
 
 	switch ctx.Flag {
 	case line.FlagInserted:
-		return ctx.Styles.Style(kind.GenericInserted).Render("+")
+		return ctx.styler().Style(kind.GenericInserted).Render("+")
 	case line.FlagDeleted:
-		return ctx.Styles.Style(kind.GenericDeleted).Render("-")
+		return ctx.styler().Style(kind.GenericDeleted).Render("-")
 	default:
-		return ctx.Styles.Style(kind.Text).Render(" ")
+		return ctx.styler().Style(kind.Text).Render(" ")
 	}
 }
 
