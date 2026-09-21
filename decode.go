@@ -98,6 +98,7 @@ func newDocuments(src *Source, file *ast.File) []*Document {
 
 	for i, doc := range docs {
 		doc.source = src
+		doc.content = doc.tokens
 		doc.span = spans[i]
 		doc.index = i
 		doc.preamble = preambleLen(doc.tokens)
@@ -345,10 +346,15 @@ func documentOffset(doc *ast.DocumentNode) (int, bool) {
 type Document struct {
 	source *Source
 	doc    *ast.DocumentNode
+	// The tokens of the whole document, whatever the scope.
 	tokens token.Tokens
+	// The tokens of the node the scope selects: tokens for a whole
+	// document, and a sub-slice of them for a Document from At.
+	content token.Tokens
 	// The scope: the path from the document root to the node the Document
 	// resolves from, which is the root for a whole document.
-	base  paths.Path
+	base paths.Path
+	// The lines of the source that the node the scope selects covers.
 	span  position.Span
 	index int
 	// The number of tokens at the start of tokens before the content.
@@ -392,15 +398,16 @@ func (dd *Document) Node() (ast.Node, error) {
 
 // At returns a [*Document] scoped to the node path selects, with path
 // resolving from the scope of the receiver. The scoped Document shares
-// the source and the document with the receiver, so [Document.Index],
-// [Document.Span], and the other methods that describe the document in
-// the file answer as the receiver does, while [Document.Decode],
-// [Document.DecodeInto], [Document.Validate], [Document.Bind], and
-// [Document.Ranges] read and resolve from the node. A validator given to
-// a scoped decode checks the node, and a path in an error it or the
-// decoded value reports resolves from the node, so a check written for a
-// type reports the same lines whether the type is the whole document or
-// a value inside one:
+// the source and the document with the receiver: [Document.Root],
+// [Document.Index], [Document.Preamble], [Document.FilePath], and
+// [Document.Source] describe the enclosing document as the receiver does,
+// while [Document.Node], [Document.Span], [Document.Tokens],
+// [Document.Decode], [Document.DecodeInto], [Document.Validate],
+// [Document.Bind], and [Document.Ranges] read and resolve from the node.
+// A validator given to a scoped decode checks the node, and a path in an
+// error it or the decoded value reports resolves from the node, so a
+// check written for a type reports the same lines whether the type is
+// the whole document or a value inside one:
 //
 //	hours := doc.At(paths.Root().Child("spec", "hours"))
 //
@@ -411,14 +418,111 @@ func (dd *Document) Node() (ast.Node, error) {
 //
 //	return hours.Bind(check(h))
 //
-// At resolves nothing itself, so a path that selects nothing reports the
-// error [paths.Path.Node] describes from the first method that resolves
-// it, bound to the source.
+// At resolves the node to find the lines and tokens it covers. A path
+// that selects nothing covers no lines and holds no tokens, and the first
+// method that reads the node, such as [Document.Node] or
+// [Document.Decode], reports the error [paths.Path.Node] describes,
+// bound to the source.
 func (dd *Document) At(path paths.Path) *Document {
 	c := *dd
 	c.base = dd.base.Join(path)
+	c.span, c.content = dd.extent(c.base)
 
 	return &c
+}
+
+// extent returns the lines and the tokens of the node base selects in the
+// document: the tokens of the document from the first token under the
+// node through the last, in source order, and the lines from the one the
+// first starts on through the one the last ends on. A base that selects
+// nothing, or a node whose tokens carry no position, covers no lines and
+// holds no tokens.
+func (dd *Document) extent(base paths.Path) (position.Span, token.Tokens) {
+	node, err := base.Node(dd.doc)
+	if err != nil {
+		return position.Span{}, nil
+	}
+
+	first, last := tokenBounds(node)
+	if first == nil || last == nil {
+		return position.Span{}, nil
+	}
+
+	var tks token.Tokens
+
+	for _, tk := range dd.tokens {
+		if tk == nil || tk.Position == nil {
+			continue
+		}
+
+		if tk.Position.Offset >= first.Position.Offset && tk.Position.Offset <= last.Position.Offset {
+			tks = append(tks, tk)
+		}
+	}
+
+	if len(tks) == 0 {
+		return position.Span{}, nil
+	}
+
+	start := tks[0].Position.Line - 1
+	end := start
+
+	for _, r := range dd.source.lines.TokenRanges(tks[len(tks)-1]) {
+		end = max(end, r.LastLine())
+	}
+
+	total := dd.source.lines.Len()
+
+	return position.NewSpan(min(max(start, 0), total), min(end+1, total)), tks
+}
+
+// isNilNode reports whether node is nil, including a typed nil a
+// hand-built tree may hold behind a non-nil interface.
+func isNilNode(node ast.Node) bool {
+	return node == nil || reflect.ValueOf(node).IsNil()
+}
+
+// tokenBounds returns the tokens under node with the lowest and the
+// highest offset, comments included, or nil when no token under node
+// carries a position.
+func tokenBounds(node ast.Node) (*token.Token, *token.Token) {
+	if isNilNode(node) {
+		return nil, nil
+	}
+
+	var b boundsFinder
+
+	ast.Walk(&b, node)
+
+	return b.first, b.last
+}
+
+// boundsFinder is an [ast.Visitor] that records the tokens with the lowest
+// and the highest offset among the nodes it visits.
+type boundsFinder struct {
+	first, last *token.Token
+}
+
+// Visit implements [ast.Visitor].
+func (b *boundsFinder) Visit(node ast.Node) ast.Visitor {
+	if isNilNode(node) {
+		return nil
+	}
+
+	tk := node.GetToken()
+	if tk == nil || tk.Position == nil {
+		return b
+	}
+
+	if b.first == nil || tk.Position.Offset < b.first.Position.Offset {
+		b.first = tk
+	}
+
+	if b.last == nil || tk.Position.Offset > b.last.Position.Offset {
+		b.last = tk
+	}
+
+	return b
 }
 
 // Path returns the scope of the [Document]: the path from the document
@@ -434,22 +538,27 @@ func (dd *Document) Source() *Source {
 	return dd.source
 }
 
-// Index returns the 0-indexed position of this document within the file.
+// Index returns the 0-indexed position of the enclosing document within
+// the file, whatever node the Document is scoped to.
 func (dd *Document) Index() int {
 	return dd.index
 }
 
-// Tokens returns the tokens of this document, with the positions they have
-// in the source: its preamble, its content, and the comments after a "..."
-// marker that ends it. Returns nil when no token anchors the document, such
-// as one with neither a header nor a body. The slice is a copy, so
-// reordering it reaches nothing, while the tokens themselves are shared and
-// read-only.
+// Tokens returns the tokens of the node the Document is scoped to, with
+// the positions they have in the source. For a whole document they are
+// its preamble, its content, and the comments after a "..." marker that
+// ends it, and nil when no token anchors the document, such as one with
+// neither a header nor a body. For a Document from [Document.At] they run
+// from the first token under the node through the last, comments between
+// them included, and are nil when the scope selects nothing. The slice is
+// a copy, so reordering it reaches nothing, while the tokens themselves
+// are shared and read-only.
 func (dd *Document) Tokens() token.Tokens {
-	return slices.Clone(dd.tokens)
+	return slices.Clone(dd.content)
 }
 
-// Preamble returns the tokens of this document before its content: the
+// Preamble returns the tokens of the enclosing document before its
+// content, whatever node the Document is scoped to: the
 // comments and %YAML or %TAG directives above its "---" header, the header
 // itself, and the comments between the header and the first token of the
 // content. The parser cuts the tokens above the header off as a node of
@@ -469,13 +578,23 @@ func (dd *Document) FilePath() string {
 	return dd.source.FilePath()
 }
 
-// Span returns the lines of [Source.Lines] that the document covers: from
-// the line its first token starts on to the line before the next document
-// starts, or to the end of the source for the last document. The first
-// document also covers the lines above its first token, so the spans of a
-// source cover every one of its lines. A document after the first with no
-// tokens covers no lines. Slice a view of the source with the span to
-// render one document of a file with the file's line numbers:
+// Span returns the lines of [Source.Lines] that the node the Document is
+// scoped to covers. A whole document covers the lines from the one its
+// first token starts on to the one before the next document starts, or
+// to the end of the source for the last document. The first document also
+// covers the lines above its first token, so the spans of a source cover
+// every one of its lines. A document after the first with no tokens covers
+// no lines.
+//
+// A Document from [Document.At] covers the lines from the one the first
+// token under its node starts on through the one the last token ends on.
+// The node of a mapping entry is its value, so the line of the key is in
+// the span only when the value starts on it, and a scope from
+// [paths.Path.Key] covers the key. A scope that selects nothing covers no
+// lines.
+//
+// Slice a view of the source with the span to render the document, or the
+// node, with the file's line numbers:
 //
 //	fmt.Println(p.Print(source.View().Slice(doc.Span())))
 func (dd *Document) Span() position.Span {

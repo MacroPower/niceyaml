@@ -2722,7 +2722,7 @@ func TestDocument_At_Scope(t *testing.T) {
 		assert.True(t, dd.Path().IsRoot())
 	})
 
-	t.Run("scope shares the document", func(t *testing.T) {
+	t.Run("scope shares the enclosing document", func(t *testing.T) {
 		t.Parallel()
 
 		dd := yamltest.FirstDocument(t, input)
@@ -2731,10 +2731,93 @@ func TestDocument_At_Scope(t *testing.T) {
 		assert.Same(t, dd.Source(), hours.Source())
 		assert.Same(t, dd.Root(), hours.Root())
 		assert.Equal(t, dd.Index(), hours.Index())
-		assert.Equal(t, dd.Span(), hours.Span())
-		assert.Equal(t, dd.Tokens(), hours.Tokens())
 		assert.Equal(t, dd.Preamble(), hours.Preamble())
 		assert.Equal(t, dd.FilePath(), hours.FilePath())
+	})
+
+	t.Run("scope covers the lines and tokens of the node", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		tcs := map[string]struct {
+			path   paths.Path
+			span   position.Span
+			tokens []string
+		}{
+			"block mapping value": {
+				path:   hoursPath,
+				span:   position.NewSpan(3, 5),
+				tokens: []string{"open", ":", "17:00", "close", ":", "09:00"},
+			},
+			"scalar on the key line": {
+				path:   paths.Root().Child("open"),
+				span:   position.NewSpan(0, 1),
+				tokens: []string{"1"},
+			},
+			"key selector": {
+				path:   hoursPath.Key(),
+				span:   position.NewSpan(2, 3),
+				tokens: []string{"hours"},
+			},
+			"nested scalar": {
+				path:   hoursPath.Child("close"),
+				span:   position.NewSpan(4, 5),
+				tokens: []string{"09:00"},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				scoped := dd.At(tc.path)
+
+				assert.Equal(t, tc.span, scoped.Span())
+
+				var got []string
+
+				for _, tk := range scoped.Tokens() {
+					got = append(got, tk.Value)
+				}
+
+				assert.Equal(t, tc.tokens, got)
+			})
+		}
+	})
+
+	t.Run("scope on a block scalar covers every line of it", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "text: |\n  a\n  b\nnext: 1\n")
+		text := dd.At(paths.Root().Child("text"))
+
+		assert.Equal(t, position.NewSpan(0, 3), text.Span())
+		require.Len(t, text.Tokens(), 2)
+		assert.Equal(t, "|", text.Tokens()[0].Value)
+		assert.Equal(t, "a\nb\n", text.Tokens()[1].Value)
+	})
+
+	t.Run("scopes chain to the same extent", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+		direct := dd.At(hoursPath)
+		chained := dd.At(paths.Root().Child("spec")).At(paths.Root().Child("hours"))
+
+		assert.Equal(t, direct.Span(), chained.Span())
+		assert.Equal(t, direct.Tokens(), chained.Tokens())
+	})
+
+	t.Run("a scope that selects nothing covers no lines", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+		missing := dd.At(paths.Root().Child("missing"))
+
+		assert.Equal(t, position.Span{}, missing.Span())
+		assert.Nil(t, missing.Tokens())
+		assert.Equal(t, dd.Preamble(), missing.Preamble())
 	})
 
 	t.Run("a scope that selects nothing fails at the decode", func(t *testing.T) {
