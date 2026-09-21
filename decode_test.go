@@ -655,6 +655,13 @@ func TestDocument_Span(t *testing.T) {
 				position.NewSpan(3, 5),
 			},
 		},
+		"leading end marker": {
+			input: "...\na: 1\n---\nb: 2\n",
+			want: []position.Span{
+				position.NewSpan(0, 2),
+				position.NewSpan(2, 4),
+			},
+		},
 		"empty file": {
 			input: "",
 			want:  []position.Span{position.NewSpan(0, 0)},

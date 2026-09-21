@@ -193,8 +193,8 @@ func preambleLen(tks token.Tokens) int {
 // group covers. The groups partition the file in order, so a group runs
 // from the line its first token starts on to the line the next group starts
 // on, the first group runs from the top of the view, and the last group runs
-// to the end of it. A group with no tokens covers no lines and sits where the
-// next group starts.
+// to the end of it. A group after the first with no tokens covers no lines
+// and sits where the next group starts.
 func documentSpans(groups []token.Tokens, total int) []position.Span {
 	spans := make([]position.Span, len(groups))
 
@@ -212,8 +212,9 @@ func documentSpans(groups []token.Tokens, total int) []position.Span {
 	// The lines above the first group's first token, such as blank lines or
 	// a comment the lexer hangs off a later token, belong to no later group,
 	// so the first group takes them the way the last group takes the lines
-	// below its last token.
-	if len(groups) > 0 && len(groups[0]) > 0 {
+	// below its last token. A first group with no tokens takes them too,
+	// which keeps the spans covering every line of the view.
+	if len(groups) > 0 {
 		spans[0] = position.NewSpan(0, spans[0].End)
 	}
 
@@ -473,9 +474,9 @@ func (dd *Document) FilePath() string {
 // the line its first token starts on to the line before the next document
 // starts, or to the end of the source for the last document. The first
 // document also covers the lines above its first token, so the spans of a
-// source cover every one of its lines. A document with no tokens covers no
-// lines. Slice a view of the source with the span to render one document of
-// a file with the file's line numbers:
+// source cover every one of its lines. A document after the first with no
+// tokens covers no lines. Slice a view of the source with the span to
+// render one document of a file with the file's line numbers:
 //
 //	fmt.Println(p.Print(source.View().Slice(doc.Span())))
 func (dd *Document) Span() position.Span {
