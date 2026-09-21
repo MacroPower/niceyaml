@@ -303,6 +303,12 @@ func (r *Result) getAlignedRows() []alignedRow {
 					afterFlag: line.FlagInserted,
 				})
 				i++
+
+			default:
+				// Only the cases above advance i, so an op of any other
+				// kind would spin this loop forever. Fail the way
+				// computeOps does for the same op instead.
+				panic(fmt.Sprintf("diff: op %d has unknown lcs.OpKind %d", i, op.kind))
 			}
 		}
 
