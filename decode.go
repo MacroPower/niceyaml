@@ -225,8 +225,10 @@ func documentSpans(groups []token.Tokens, total int) []position.Span {
 //
 // The groups come from [tokens.SplitDocuments]. Each document is anchored by
 // the offset of its header token, or of its body's first token when it has
-// no header, and takes the groups from the last one that starts at or before
-// that offset up to the one the next document anchors in. Matching by offset
+// no header, and takes the groups from the first one no earlier document
+// claimed up to the one the next document anchors in, so a group that starts
+// ahead of the first anchor, such as a leading "..." marker, joins the
+// document below it. Matching by offset
 // rather than by index keeps a document paired with its own tokens when the
 // parser and the splitter disagree on boundaries: the splitter cuts a group
 // at every header, while the parser collapses consecutive headers into one
@@ -256,6 +258,10 @@ func alignDocumentTokens(file *ast.File, tks token.Tokens) []token.Tokens {
 
 	result := make([]token.Tokens, len(file.Docs))
 
+	// The first group no document has claimed, so a group that no anchor
+	// reaches back to still joins a document instead of being dropped.
+	next := 0
+
 	for i := range file.Docs {
 		if !anchored[i] {
 			continue
@@ -266,6 +272,8 @@ func alignDocumentTokens(file *ast.File, tks token.Tokens) []token.Tokens {
 		if idx < 0 {
 			continue
 		}
+
+		idx = min(idx, next)
 
 		// The groups before the one the next anchored document starts in
 		// belong to this one, and the last document takes the rest.
@@ -279,7 +287,8 @@ func alignDocumentTokens(file *ast.File, tks token.Tokens) []token.Tokens {
 			}
 		}
 
-		result[i] = slices.Concat(groups[idx:max(end, idx+1)]...)
+		next = max(end, idx+1)
+		result[i] = slices.Concat(groups[idx:next]...)
 	}
 
 	return result

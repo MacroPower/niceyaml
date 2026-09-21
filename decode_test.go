@@ -537,6 +537,14 @@ func TestDocument_Preamble(t *testing.T) {
 			input: "a: 1\n...\n# trailing\n",
 			want:  []doc{{content: "a: 1\n...\n# trailing\n"}},
 		},
+		"leading end marker": {
+			input: "...\na: 1\n",
+			want:  []doc{{preamble: "...\n", content: "a: 1\n"}},
+		},
+		"leading end marker above a header": {
+			input: "...\n---\na: 1\n",
+			want:  []doc{{preamble: "...\n---\n", content: "a: 1\n"}},
+		},
 		"comment between documents": {
 			input: "a: 1\n...\n# note\n---\nb: 2\n",
 			want: []doc{
