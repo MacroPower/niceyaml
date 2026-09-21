@@ -2229,11 +2229,18 @@ func TestError_Width_AnnotationWrapping(t *testing.T) {
 	tcs := map[string]struct {
 		width        int
 		nestedErrMsg string
+		tree         string
 		want         string
 	}{
 		"long annotation wraps at narrow width": {
 			width:        40,
 			nestedErrMsg: "this is a very long error message that should definitely wrap when the width is limited",
+			tree: stringtest.JoinLF(
+				"1:1: $.key~: validation failed",
+				"└── 1:6: $.key: this is a very long",
+				"    error message that should definitely",
+				"    wrap when the width is limited",
+			),
 			want: stringtest.JoinLF(
 				"key: value",
 				"     ^ this is a very long error message",
@@ -2245,6 +2252,10 @@ func TestError_Width_AnnotationWrapping(t *testing.T) {
 		"annotation does not wrap when width is 0": {
 			width:        0,
 			nestedErrMsg: "this is a very long error message that should not wrap",
+			tree: stringtest.JoinLF(
+				"1:1: $.key~: validation failed",
+				"└── 1:6: $.key: this is a very long error message that should not wrap",
+			),
 			want: stringtest.JoinLF(
 				"key: value",
 				"     ^ this is a very long error message that should not wrap",
@@ -2254,6 +2265,10 @@ func TestError_Width_AnnotationWrapping(t *testing.T) {
 		"short annotation fits on single line": {
 			width:        80,
 			nestedErrMsg: "short error",
+			tree: stringtest.JoinLF(
+				"1:1: $.key~: validation failed",
+				"└── 1:6: $.key: short error",
+			),
 			want: stringtest.JoinLF(
 				"key: value",
 				"     ^ short error",
@@ -2286,10 +2301,9 @@ func TestError_Width_AnnotationWrapping(t *testing.T) {
 
 			got := trimLines(renderWith(err, errPrinter, 2))
 
-			// The message lists the nested error whole, and the printer
-			// wraps only the annotation in the excerpt.
-			want := "1:1: $.key~: validation failed\n└── 1:6: $.key: " + tc.nestedErrMsg + "\n\n" + tc.want
-			assert.Equal(t, want, got)
+			// The message tree and the annotation in the excerpt both
+			// wrap to the width, the tree less its connectors.
+			assert.Equal(t, tc.tree+"\n\n"+tc.want, got)
 		})
 	}
 }
@@ -2328,8 +2342,10 @@ func TestError_Width_MultipleAnnotationsWrapping(t *testing.T) {
 
 	want := stringtest.JoinLF(
 		"validation failed at 2 locations",
-		"├── 2:8: $.value: first error with a very long message that should wrap properly",
-		"└── 3:1: $.other~: second error also with a long message for testing wrap behavior",
+		"├── 2:8: $.value: first error with a very long",
+		"│   message that should wrap properly",
+		"└── 3:1: $.other~: second error also with a long",
+		"    message for testing wrap behavior",
 		"",
 		"name: test",
 		"value: 123",
@@ -2375,8 +2391,10 @@ func TestError_Width_CombinedAnnotationsOnSameLine(t *testing.T) {
 
 	want := stringtest.JoinLF(
 		"1:1: $.key~: validation failed",
-		"├── 1:1: $.key~: first error message here",
-		"└── 1:6: $.key: second error message here",
+		"├── 1:1: $.key~: first error message",
+		"│   here",
+		"└── 1:6: $.key: second error message",
+		"    here",
 		"",
 		"key: value",
 		"^ first error message here; second error",

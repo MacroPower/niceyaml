@@ -13,6 +13,12 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
+// errorConnectorWidth is the width of the connector in front of each
+// nested error in the tree [Printer.PrintError] draws: the three cells of
+// the enumerator, "├──" or "└──", and the one cell of padding after it.
+// The indent below a connector, "│  " and its padding, is as wide.
+const errorConnectorWidth = 4
+
 // PrintError renders err for a reader: its message as a tree, then the
 // [niceyaml.SourceError.Excerpt] of every [*niceyaml.SourceError] in its
 // tree, as [niceyaml.SourceErrors] finds them, each rendered by p with the
@@ -88,42 +94,56 @@ func (p *Printer) detail(bound *niceyaml.SourceError) string {
 // foreground of [kind.UILineNumber], so the connectors take the color of
 // the gutter's line numbers without the background of the gutter, which
 // the message text beside them does not have. Control characters in a
-// message render as their pictures, as they do in an excerpt.
+// message render as their pictures, as they do in an excerpt, and each
+// message wraps to the printer's width less the connectors in front of it.
 func (p *Printer) renderErrorTree(t errortree.Tree) string {
 	branch := lipgloss.NewStyle().
 		Foreground(p.styles.Style(kind.UILineNumber).GetForeground()).
 		PaddingRight(1)
 
-	return errorTreeNode(t, &branch).String()
+	rows := strings.Split(p.errorTreeNode(t, &branch, 0).String(), "\n")
+
+	// The tree pads every row of a message to the widest one, which a
+	// message that wraps would otherwise carry to the end of each row.
+	for i, row := range rows {
+		rows[i] = strings.TrimRight(row, " ")
+	}
+
+	return strings.Join(rows, "\n")
 }
 
-// errorTreeNode builds the [*tree.Tree] of t, with branch styling the
-// connector and indent of every child. A child without children is a leaf.
-func errorTreeNode(t errortree.Tree, branch *lipgloss.Style) *tree.Tree {
-	node := tree.Root(errorText(t.Text)).
+// errorTreeNode builds the [*tree.Tree] of t at depth connectors from the
+// left edge, with branch styling the connector and indent of every child.
+// A child without children is a leaf.
+func (p *Printer) errorTreeNode(t errortree.Tree, branch *lipgloss.Style, depth int) *tree.Tree {
+	node := tree.Root(p.errorText(t.Text, depth)).
 		EnumeratorStyle(*branch).
 		IndenterStyle(*branch)
 
 	for _, child := range t.Children {
 		if len(child.Children) == 0 {
-			node.Child(errorText(child.Text))
+			node.Child(p.errorText(child.Text, depth+1))
 		} else {
-			node.Child(errorTreeNode(child, branch))
+			node.Child(p.errorTreeNode(child, branch, depth+1))
 		}
 	}
 
 	return node
 }
 
-// errorText renders one message of the tree with its control characters
-// as their pictures. A line break in the message stays a line break,
+// errorText renders one message of the tree at depth connectors from the
+// left edge: control characters as their pictures, wrapped to the width
+// left of the connectors. A line break in the message stays a line break,
 // since a wrapper around a joined error keeps the breaks between its
-// branches in its own text.
-func errorText(text string) string {
+// branches in its own text. The tree indents every row of a message after
+// the first under the connector.
+func (p *Printer) errorText(text string, depth int) string {
 	lines := strings.Split(text, "\n")
 	for i, ln := range lines {
 		lines[i] = escape.Control(ln)
 	}
 
-	return strings.Join(lines, "\n")
+	rows := p.wrapContent(strings.Join(lines, "\n"), depth*errorConnectorWidth)
+
+	return strings.Join(rows, "\n")
 }

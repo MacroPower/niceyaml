@@ -302,6 +302,38 @@ func TestPrinter_PrintError_ControlCharacters(t *testing.T) {
 	assert.Contains(t, got, "bad \u241b[31mred\u2407 thing")
 }
 
+func TestPrinter_PrintError_Wrap(t *testing.T) {
+	t.Parallel()
+
+	const width = 24
+
+	p := printer.New(
+		printer.WithStyles(yamltest.NewXMLStyles()),
+		printer.WithWrap(width),
+	)
+
+	long := "a very long error message that certainly exceeds the width of the terminal"
+
+	err := fmt.Errorf("%s: %w", long, errors.Join(
+		errors.New(long),
+		fmt.Errorf("%s: %w", long, errors.New(long)),
+	))
+
+	got := p.PrintError(err)
+	rows := strings.Split(got, "\n")
+	require.Greater(t, len(rows), 3, "every message wraps")
+
+	for i, row := range rows {
+		assert.LessOrEqual(t, lipgloss.Width(row), width, "row %d: %q", i, row)
+	}
+
+	// A wrapped row of a nested message stays under its connector, so the
+	// second row of the first branch starts with the indent of the tree,
+	// and no row carries padding after its text.
+	assert.Contains(t, got, "\n\u2502   message that\n")
+	assert.NotContains(t, got, " \n")
+}
+
 func TestPrinter_CRLF(t *testing.T) {
 	t.Parallel()
 
