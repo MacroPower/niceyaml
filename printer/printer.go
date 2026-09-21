@@ -1140,11 +1140,11 @@ func (p *Printer) renderTokenLine(lineIndex int, ln *line.Line, overlays line.Ov
 // leadingWhitespaceRunes returns the number of runes in the run of spaces
 // and tabs that starts s.
 func leadingWhitespaceRunes(s string) int {
-	return len(s) - len(strings.TrimLeft(s, " \t"))
+	return utf8.RuneCountInString(s) - utf8.RuneCountInString(strings.TrimLeft(s, " \t"))
 }
 
 // trailingWhitespaceRunes returns the number of runes in the run of spaces
 // and tabs that ends s.
 func trailingWhitespaceRunes(s string) int {
-	return len(s) - len(strings.TrimRight(s, " \t"))
+	return utf8.RuneCountInString(s) - utf8.RuneCountInString(strings.TrimRight(s, " \t"))
 }
