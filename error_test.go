@@ -3609,6 +3609,21 @@ func TestSourceError_TreeBranches(t *testing.T) {
 		assert.Contains(t, got, "^ bad b")
 	})
 
+	t.Run("a join of bound branches lists each branch once", func(t *testing.T) {
+		t.Parallel()
+
+		// Each branch printed the position its own binding resolved, so
+		// the join's message is the text of its children as they read,
+		// and the %+v verb leads with them instead of repeating both.
+		err := yamltest.Bind(t, source, errors.Join(
+			yamltest.Bind(t, source, badA),
+			yamltest.Bind(t, source, badB),
+		))
+
+		assert.Equal(t, "1:4: $.a: bad a\n2:4: $.b: bad b", err.Error())
+		assert.Equal(t, "1:4: $.a: bad a\n2:4: $.b: bad b", report(err))
+	})
+
 	t.Run("every multi-error binds the same way", func(t *testing.T) {
 		t.Parallel()
 

@@ -930,14 +930,22 @@ func (e *SourceError) echoesChildren() bool {
 		return false
 	}
 
-	texts := make([]string, 0, len(e.errors))
+	// The branches of e.err wrote its message, so they say what the
+	// message repeats, while the children they became may not: a branch
+	// bound before the join contributed its position to the text too.
+	multi, ok := e.err.(interface{ Unwrap() []error }) //nolint:errorlint // The node itself, not a chain search.
+	if !ok {
+		return false
+	}
 
-	for _, c := range e.errors {
-		if c == nil {
-			return false
-		}
+	branches := multi.Unwrap()
+	if len(branches) != len(e.errors) {
+		return false
+	}
 
-		texts = append(texts, c.err.Error())
+	texts := make([]string, 0, len(branches))
+	for _, branch := range branches {
+		texts = append(texts, branch.Error())
 	}
 
 	return e.err.Error() == strings.Join(texts, "\n")
