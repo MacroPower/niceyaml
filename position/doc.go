@@ -30,11 +30,10 @@
 //	end := position.New(0, 10)      // Line 0, column 10.
 //	r := position.NewRange(start, end)
 //
-// Multi-line ranges can be split into per-line ranges using [Range.SliceLines],
-// which is useful when applying line-by-line styling:
-//
-//	multiLine := position.NewRange(position.New(0, 5), position.New(2, 10))
-//	perLine := multiLine.SliceLines() // Returns 3 single-line ranges.
+// A range is a pair of coordinates and knows nothing of the text it lies
+// on, so splitting a multi-line range into one range per line, each ending
+// where its line does, is a method of the lines that hold the text:
+// [go.jacobcolvin.com/niceyaml/line.Lines.SliceLines].
 //
 // [Ranges] collects multiple ranges and provides methods like
 // [Ranges.LineIndices] for querying which lines are covered and

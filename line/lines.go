@@ -211,6 +211,44 @@ func (ls Lines) Tokens() token.Tokens {
 	return result
 }
 
+// SliceLines splits r into one [position.Range] per line of the [Lines]
+// it covers, each holding the columns of r on that line: from the start
+// column on the first line and from column 0 on every later one, to the
+// end column on the last line and to [Line.Width] on every earlier one.
+// The result is what [View.AddOverlay] marks for r, so a caller that
+// inspects or compares the per-line ranges sees the columns the lines
+// hold.
+//
+// A range that ends at column 0 of a later line covers nothing on that
+// line, as [position.Range.LastLine] counts it, and a range that ends
+// before its start covers no lines. Lines outside the collection, columns
+// before 0, and columns past the width of a line are left out, and a line
+// on which r covers no column contributes no range. Returns nil when no
+// range remains.
+func (ls Lines) SliceLines(r position.Range) position.Ranges {
+	var result position.Ranges
+
+	for i := max(0, r.Start.Line); i <= min(r.LastLine(), len(ls.lines)-1); i++ {
+		start, end := 0, ls.lines[i].Width()
+
+		if i == r.Start.Line {
+			start = max(0, r.Start.Col)
+		}
+
+		if i == r.End.Line {
+			end = min(end, r.End.Col)
+		}
+
+		if end <= start {
+			continue
+		}
+
+		result = append(result, position.NewRange(position.New(i, start), position.New(i, end)))
+	}
+
+	return result
+}
+
 // TokenAt returns the original [*token.Token] covering the given position.
 //
 // The token is the one the lexer produced, so it can be passed back to

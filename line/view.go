@@ -168,11 +168,10 @@ func (v *View) AddLineOverlay(i int, o ...Overlay) {
 // The overlay replaces the style underneath it; use [View.BlendOverlay] to
 // mix with it instead.
 //
-// It splits multi-line ranges into per-line overlays and clamps each
-// overlay's columns to its line's width. It skips lines outside the view,
-// the same way [Lines.All] clamps its spans, so a range computed
-// against a longer view is safe to apply. A range that covers no columns
-// of a line adds no overlay to it.
+// It splits each range into one overlay per line with [Lines.SliceLines],
+// which clamps the columns to the width of the line and skips lines
+// outside the view, so a range computed against a longer view is safe to
+// apply. A range that covers no columns of a line adds no overlay to it.
 func (v *View) AddOverlay(s kind.Kind, ranges ...position.Range) {
 	for _, r := range ranges {
 		v.addOverlayRange(s, false, r)
@@ -188,24 +187,15 @@ func (v *View) BlendOverlay(s kind.Kind, ranges ...position.Range) {
 	}
 }
 
-// addOverlayRange adds a single overlay range, splitting across lines as
-// needed and skipping lines outside the view.
+// addOverlayRange adds a single overlay range, one overlay per line r
+// covers within the view.
 func (v *View) addOverlayRange(s kind.Kind, blend bool, r position.Range) {
-	for _, lineRange := range r.SliceLines() {
-		lineIdx := lineRange.Start.Line
-		if lineIdx < 0 || lineIdx >= len(v.lines) {
-			continue
-		}
-
-		cols := position.NewSpan(
-			max(0, lineRange.Start.Col),
-			min(lineRange.End.Col, v.lines[lineIdx].Width()),
-		)
-		if cols.Len() <= 0 {
-			continue
-		}
-
-		v.AddLineOverlay(lineIdx, Overlay{Cols: cols, Kind: s, Blend: blend})
+	for _, lr := range v.Lines().SliceLines(r) {
+		v.AddLineOverlay(lr.Start.Line, Overlay{
+			Cols:  position.NewSpan(lr.Start.Col, lr.End.Col),
+			Kind:  s,
+			Blend: blend,
+		})
 	}
 }
 

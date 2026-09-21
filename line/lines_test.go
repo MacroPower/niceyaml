@@ -2689,3 +2689,85 @@ func TestLines_Line(t *testing.T) {
 	assert.Panics(t, func() { lines.Line(2) })
 	assert.Panics(t, func() { line.Lines{}.Line(0) })
 }
+
+func TestLines_SliceLines(t *testing.T) {
+	t.Parallel()
+
+	// Widths 4, 6, and 8.
+	lines := line.NewLines(tokens.Tokenize("a: 1\nbb: 22\nccc: 333\n"))
+
+	tcs := map[string]struct {
+		input position.Range
+		want  position.Ranges
+	}{
+		"single line range": {
+			input: position.NewRange(position.New(1, 1), position.New(1, 3)),
+			want: position.Ranges{
+				position.NewRange(position.New(1, 1), position.New(1, 3)),
+			},
+		},
+		"every line but the last ends at its width": {
+			input: position.NewRange(position.New(0, 3), position.New(2, 3)),
+			want: position.Ranges{
+				position.NewRange(position.New(0, 3), position.New(0, 4)),
+				position.NewRange(position.New(1, 0), position.New(1, 6)),
+				position.NewRange(position.New(2, 0), position.New(2, 3)),
+			},
+		},
+		"end at column 0 stops on the line before": {
+			input: position.NewRange(position.New(0, 1), position.New(2, 0)),
+			want: position.Ranges{
+				position.NewRange(position.New(0, 1), position.New(0, 4)),
+				position.NewRange(position.New(1, 0), position.New(1, 6)),
+			},
+		},
+		"columns clamp to the line": {
+			input: position.NewRange(position.New(1, -2), position.New(1, 100)),
+			want: position.Ranges{
+				position.NewRange(position.New(1, 0), position.New(1, 6)),
+			},
+		},
+		"lines outside the collection are left out": {
+			input: position.NewRange(position.New(-1, 0), position.New(5, 2)),
+			want: position.Ranges{
+				position.NewRange(position.New(0, 0), position.New(0, 4)),
+				position.NewRange(position.New(1, 0), position.New(1, 6)),
+				position.NewRange(position.New(2, 0), position.New(2, 8)),
+			},
+		},
+		"start past the width covers nothing on that line": {
+			input: position.NewRange(position.New(0, 9), position.New(1, 2)),
+			want: position.Ranges{
+				position.NewRange(position.New(1, 0), position.New(1, 2)),
+			},
+		},
+		"empty range": {
+			input: position.NewRange(position.New(1, 3), position.New(1, 3)),
+			want:  nil,
+		},
+		"inverted columns on one line": {
+			input: position.NewRange(position.New(1, 3), position.New(1, 1)),
+			want:  nil,
+		},
+		"inverted lines": {
+			input: position.NewRange(position.New(2, 0), position.New(1, 5)),
+			want:  nil,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, lines.SliceLines(tc.input))
+		})
+	}
+
+	t.Run("no lines", func(t *testing.T) {
+		t.Parallel()
+
+		r := position.NewRange(position.New(0, 0), position.New(0, 3))
+
+		assert.Nil(t, line.Lines{}.SliceLines(r))
+	})
+}

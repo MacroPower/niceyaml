@@ -10,11 +10,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
-const (
-	// MaxCol matches the internal constant in position.go.
-	maxCol = 1_000_000
-)
-
 func TestNew(t *testing.T) {
 	t.Parallel()
 
@@ -325,89 +320,6 @@ func TestRange_Contains(t *testing.T) {
 			t.Parallel()
 
 			got := tc.r.Contains(tc.pos)
-			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
-func TestRange_SliceLines(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input position.Range
-		want  position.Ranges
-	}{
-		"single line range": {
-			input: position.NewRange(position.New(1, 5), position.New(1, 10)),
-			want: position.Ranges{
-				position.NewRange(position.New(1, 5), position.New(1, 10)),
-			},
-		},
-		"inverted columns on one line": {
-			input: position.NewRange(position.New(1, 3), position.New(1, 1)),
-			want:  nil,
-		},
-		"empty range": {
-			input: position.NewRange(position.New(2, 3), position.New(2, 3)),
-			want: position.Ranges{
-				position.NewRange(position.New(2, 3), position.New(2, 3)),
-			},
-		},
-		"two line range": {
-			input: position.NewRange(position.New(1, 5), position.New(2, 10)),
-			want: position.Ranges{
-				position.NewRange(position.New(1, 5), position.New(1, maxCol)),
-				position.NewRange(position.New(2, 0), position.New(2, 10)),
-			},
-		},
-		"three line range": {
-			input: position.NewRange(position.New(1, 5), position.New(3, 10)),
-			want: position.Ranges{
-				position.NewRange(position.New(1, 5), position.New(1, maxCol)),
-				position.NewRange(position.New(2, 0), position.New(2, maxCol)),
-				position.NewRange(position.New(3, 0), position.New(3, 10)),
-			},
-		},
-		"multi-line range with zero end col stops before end line": {
-			input: position.NewRange(position.New(0, 10), position.New(2, 0)),
-			want: position.Ranges{
-				position.NewRange(position.New(0, 10), position.New(0, maxCol)),
-				position.NewRange(position.New(1, 0), position.New(1, maxCol)),
-			},
-		},
-		"two line range with zero end col": {
-			input: position.NewRange(position.New(0, 10), position.New(1, 0)),
-			want: position.Ranges{
-				position.NewRange(position.New(0, 10), position.New(0, maxCol)),
-			},
-		},
-		"range starting at col 0": {
-			input: position.NewRange(position.New(5, 0), position.New(7, 15)),
-			want: position.Ranges{
-				position.NewRange(position.New(5, 0), position.New(5, maxCol)),
-				position.NewRange(position.New(6, 0), position.New(6, maxCol)),
-				position.NewRange(position.New(7, 0), position.New(7, 15)),
-			},
-		},
-		"inverted range with zero end col": {
-			input: position.NewRange(position.New(2, 0), position.New(1, 0)),
-			want:  nil,
-		},
-		"inverted range with nonzero end col": {
-			input: position.NewRange(position.New(2, 0), position.New(1, 5)),
-			want:  nil,
-		},
-		"inverted range across several lines": {
-			input: position.NewRange(position.New(5, 3), position.New(1, 4)),
-			want:  nil,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got := tc.input.SliceLines()
 			assert.Equal(t, tc.want, got)
 		})
 	}

@@ -9,14 +9,6 @@ import (
 	"github.com/goccy/go-yaml/token"
 )
 
-const (
-	// Maximum column value used to indicate "end of line" when slicing ranges.
-	//
-	// Chosen to be larger than any realistic line length while remaining easy to
-	// read in debug output.
-	maxCol = 1_000_000
-)
-
 // Position represents a 0-indexed line and column location.
 //
 // Note that it is not simply an offset of [token.Position]s, rather it
@@ -89,12 +81,14 @@ func (r Range) String() string {
 	return fmt.Sprintf("%s-%s", r.Start.String(), r.End.String())
 }
 
-// lastLine returns the last line r covers. A multi-line range that ends at
-// column 0 holds nothing on its end line, so it stops at the line before. For
-// a range that ends before its start, on an earlier line or at an earlier
-// column of the same line, lastLine returns a line before r.Start.Line, so
-// the range covers none.
-func (r Range) lastLine() int {
+// LastLine returns the last line the [Range] covers. A multi-line range
+// that ends at column 0 holds nothing on its end line, so it stops at the
+// line before. For a range that ends before its start, on an earlier line
+// or at an earlier column of the same line, LastLine returns a line before
+// Start.Line, so the range covers none. An empty range, whose end is its
+// start, covers the line it sits on although [Range.Contains] reports
+// nothing inside it.
+func (r Range) LastLine() int {
 	if r.Start.Line == r.End.Line && r.End.Col < r.Start.Col {
 		return r.Start.Line - 1
 	}
@@ -104,57 +98,6 @@ func (r Range) lastLine() int {
 	}
 
 	return r.End.Line
-}
-
-// SliceLines splits a multi-line range into per-line ranges.
-//
-// Every line but the last extends to the end of the line. A range that ends
-// at column 0 of a later line covers nothing on that line, so SliceLines
-// stops at the line before it. A range that ends before its start, on an
-// earlier line or at an earlier column of the same line, covers no lines,
-// and SliceLines returns nil for it. An empty range, whose end is its
-// start, still yields its own line as one empty range, so a position with
-// nothing under it names the line it sits on although [Range.Contains]
-// reports nothing inside it.
-func (r Range) SliceLines() Ranges {
-	if r.Start.Line == r.End.Line {
-		if r.End.Col < r.Start.Col {
-			return nil
-		}
-
-		return Ranges{r}
-	}
-
-	lineCount := r.lastLine() - r.Start.Line + 1
-	if lineCount <= 0 {
-		return nil
-	}
-
-	result := make(Ranges, lineCount)
-
-	for i := range lineCount {
-		line := r.Start.Line + i
-
-		var start, end Position
-
-		switch {
-		case i == 0:
-			start = Position{Line: line, Col: r.Start.Col}
-			end = Position{Line: line, Col: maxCol}
-
-		case line == r.End.Line:
-			start = Position{Line: line, Col: 0}
-			end = Position{Line: line, Col: r.End.Col}
-
-		default:
-			start = Position{Line: line, Col: 0}
-			end = Position{Line: line, Col: maxCol}
-		}
-
-		result[i] = Range{Start: start, End: end}
-	}
-
-	return result
 }
 
 // Span represents a half-open range [Start, End) of integers.
@@ -299,7 +242,7 @@ func (rs Ranges) UniqueValues() Ranges {
 // A multi-line range contributes each line within it, except an end line it
 // touches only at column 0, which holds none of it. A range that ends on a
 // line before its start line contributes none, while an empty range
-// contributes the line it sits on, as [Range.SliceLines] does.
+// contributes the line it sits on, as [Range.LastLine] counts them.
 // Duplicate line indices are returned if covered by multiple ranges.
 func (rs Ranges) LineIndices() []int {
 	if len(rs) == 0 {
@@ -309,7 +252,7 @@ func (rs Ranges) LineIndices() []int {
 	var result []int
 
 	for _, r := range rs {
-		last := r.lastLine()
+		last := r.LastLine()
 		for line := r.Start.Line; line <= last; line++ {
 			result = append(result, line)
 		}

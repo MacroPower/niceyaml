@@ -1174,7 +1174,7 @@ func (e *SourceError) annotate(view *line.View) ([]int, error) {
 		marked = append(marked, indices(pos.pos.Line)...)
 
 		for _, r := range pos.ranges {
-			for _, lr := range r.SliceLines() {
+			for _, lr := range e.source.lines.SliceLines(r) {
 				for _, i := range indices(lr.Start.Line) {
 					view.AddOverlay(kind.GenericError, viewRange(lr, i))
 
