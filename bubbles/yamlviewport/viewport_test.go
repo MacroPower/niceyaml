@@ -3377,6 +3377,21 @@ func TestViewport_ZeroValue(t *testing.T) {
 	assert.Equal(t, 0, m.TotalRowCount())
 	assert.Empty(t, m.View())
 
+	// Searching needs the searcher New creates, so a zero Model finds no
+	// match instead of panicking on the nil one.
+	for _, mode := range []yamlviewport.ViewMode{yamlviewport.ViewModeFull, yamlviewport.ViewModeSideBySide} {
+		m.SetViewMode(mode)
+		m.SetSearchTerm("key")
+		m.SearchNext()
+		m.SearchPrevious()
+
+		assert.Equal(t, "key", m.SearchTerm())
+		assert.Equal(t, 0, m.SearchCount())
+		assert.Equal(t, -1, m.SearchIndex())
+		assert.Equal(t, 0, m.YOffset())
+		assert.Empty(t, m.View())
+	}
+
 	m, cmd := m.Update(tea.KeyPressMsg{Code: 'j'})
 	assert.Nil(t, cmd)
 	assert.Empty(t, m.View())

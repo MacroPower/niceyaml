@@ -213,8 +213,8 @@ func New(opts ...Option) Model {
 //
 // A zero Model has no printer, keymap, or searcher. It counts no rows, so
 // [Model.View] returns "" and both scroll offsets stay at 0. Searching needs
-// the searcher that [New] creates, so construct every Model with [New] and
-// its [Option]s.
+// the searcher that [New] creates, so a zero Model finds no match for any
+// term. Construct every Model with [New] and its [Option]s.
 //
 // # Rows and Lines
 //
@@ -708,7 +708,8 @@ func (m *Model) rebuildViews() {
 }
 
 // refreshSearch recomputes search matches and overlays for the current base
-// views without rebuilding them.
+// views without rebuilding them. A zero Model, one not created with [New],
+// has no searcher, so it finds no match for any term.
 func (m *Model) refreshSearch() {
 	if m.baseLeft == nil {
 		m.left = nil
@@ -721,9 +722,16 @@ func (m *Model) refreshSearch() {
 		return
 	}
 
-	if m.viewMode == ViewModeSideBySide && m.baseRight != nil {
+	switch {
+	case m.searcher == nil:
+		m.searchMatches = nil
+		m.leftMatches = nil
+		m.rightMatches = nil
+
+	case m.viewMode == ViewModeSideBySide && m.baseRight != nil:
 		m.updateSideBySideSearchState()
-	} else {
+
+	default:
 		m.updateSearchState(m.baseLeft)
 	}
 
