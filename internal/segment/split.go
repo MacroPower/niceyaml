@@ -134,8 +134,10 @@ func newBuilder(tks token.Tokens) *builder {
 
 	// Pre-allocate lines slice based on last token's line number.
 	// This provides a reasonable upper bound for expected line count.
+	// A hand-built stream can number a line below 1, which make refuses as
+	// a capacity, so the bound stops at zero.
 	if last := lastToken(tks); last.Position != nil {
-		b.lines = make([]Line, 0, last.Position.Line)
+		b.lines = make([]Line, 0, max(0, last.Position.Line))
 	}
 
 	return b

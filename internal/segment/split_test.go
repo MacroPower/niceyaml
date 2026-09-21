@@ -425,6 +425,16 @@ func TestSplit_HandBuiltStream(t *testing.T) {
 			wantContent: []string{"a: 1", "b: 2"},
 			wantNumbers: []int{1, 2},
 		},
+		"line number below one": {
+			input: token.Tokens{{
+				Type:     token.StringType,
+				Value:    "a",
+				Origin:   "a",
+				Position: &token.Position{Line: -5, Column: 1, Offset: 1},
+			}},
+			wantContent: []string{"a"},
+			wantNumbers: []int{-5},
+		},
 	}
 
 	for name, tc := range tcs {
