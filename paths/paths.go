@@ -344,6 +344,12 @@ func (p Path) Nodes(doc *ast.DocumentNode) ([]ast.Node, error) {
 			return nil, fmt.Errorf("resolve %s: %w", p, err)
 		}
 
+		// A tree built by hand may hold a nil where the parser always
+		// puts a node, and a nil is nothing to list.
+		if isNilNode(node) {
+			continue
+		}
+
 		nodes = append(nodes, node)
 	}
 
@@ -369,6 +375,12 @@ func (p Path) Node(doc *ast.DocumentNode) (ast.Node, error) {
 	node, err := newResolver(doc).deref(m.node)
 	if err != nil {
 		return nil, fmt.Errorf("resolve %s: %w", p, err)
+	}
+
+	// A tree built by hand may hold a nil where the parser always puts a
+	// node, and a path that reaches one selects nothing.
+	if isNilNode(node) {
+		return nil, fmt.Errorf("resolve %s: %w", p, ErrNotFound)
 	}
 
 	return node, nil

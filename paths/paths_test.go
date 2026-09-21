@@ -1276,11 +1276,16 @@ func TestPath_Node_HandBuiltTree(t *testing.T) {
 			path: paths.Root().Child("a", "b"),
 			err:  paths.ErrNotFound,
 		},
+		"path ending at an entry without a value": {
+			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, nil)),
 			path: paths.Root().Child("a"),
 			err:  paths.ErrNotFound,
 		},
 		"key holding a typed nil": {
 			body: mapNode(mapEntry((*ast.StringNode)(nil), &ast.StringNode{Value: "1"})),
+			path: paths.Root().Child("a"),
+			err:  paths.ErrNotFound,
+		},
 	}
 
 	for name, tc := range tcs {
