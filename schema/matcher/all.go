@@ -3,6 +3,7 @@ package matcher
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"go.jacobcolvin.com/niceyaml"
 )
@@ -18,7 +19,8 @@ type allMatcher struct {
 //
 // Returns true if no matchers are provided.
 //
-// Panics if any matcher is nil.
+// Panics if any matcher is nil. The matcher keeps its own copy of
+// matchers, so writing to the caller's slice afterwards changes nothing.
 //
 //	// Matches YAML files in k8s directories with kind: Deployment.
 //	matcher.All(
@@ -32,7 +34,7 @@ func All(matchers ...Matcher) Matcher {
 		}
 	}
 
-	return &allMatcher{matchers: matchers}
+	return &allMatcher{matchers: slices.Clone(matchers)}
 }
 
 // Match implements [Matcher].

@@ -3,6 +3,7 @@ package matcher
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"go.jacobcolvin.com/niceyaml"
 )
@@ -18,7 +19,8 @@ type anyMatcher struct {
 //
 // Returns false if no matchers are provided.
 //
-// Panics if any matcher is nil.
+// Panics if any matcher is nil. The matcher keeps its own copy of
+// matchers, so writing to the caller's slice afterwards changes nothing.
 //
 // This is useful for matching multiple document types with the same schema:
 //
@@ -35,7 +37,7 @@ func Any(matchers ...Matcher) Matcher {
 		}
 	}
 
-	return &anyMatcher{matchers: matchers}
+	return &anyMatcher{matchers: slices.Clone(matchers)}
 }
 
 // Match implements [Matcher].

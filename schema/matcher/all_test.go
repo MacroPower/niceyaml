@@ -110,4 +110,16 @@ func TestAll(t *testing.T) {
 			matcher.All(matcher.Content(kindPath, "Test"), nil)
 		})
 	})
+
+	t.Run("writing to the caller's slice changes nothing", func(t *testing.T) {
+		t.Parallel()
+
+		ms := []matcher.Matcher{matcher.Content(kindPath, "Deployment")}
+		m := matcher.All(ms...)
+		ms[0] = matcher.Content(kindPath, "Service")
+		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
+
+		got := match(t, m, doc)
+		assert.False(t, got)
+	})
 }
