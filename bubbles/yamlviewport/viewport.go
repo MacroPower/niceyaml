@@ -1740,13 +1740,16 @@ func (m *Model) getViewDimensions() (int, int, bool) {
 	return m.maxWidth(), m.maxHeight(), true
 }
 
-// renderContent applies styling and renders lines into final output.
+// renderContent applies styling and renders lines into final output. It clips
+// a row wider than contentW, a width the printer's gutter can force on a
+// viewport of only a few columns.
 func (m *Model) renderContent(lines []string, contentW, contentH int) string {
 	textStyle := m.printer.Style(kind.Text)
 
 	contents := textStyle.
 		Width(contentW).
 		Height(contentH).
+		MaxWidth(contentW).
 		MaxHeight(contentH).
 		Render(strings.Join(lines, "\n"))
 

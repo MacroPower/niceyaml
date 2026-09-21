@@ -1233,6 +1233,49 @@ func TestViewport_ViewFitsHeight(t *testing.T) {
 	}
 }
 
+func TestViewport_ViewFitsWidth(t *testing.T) {
+	t.Parallel()
+
+	// A gutter keeps a rendered row at its own width plus a content column,
+	// however narrow the wrap width is, so a viewport of a few columns gets
+	// rows wider than it asked for. The view clips them to its width.
+	tcs := map[string]struct {
+		printer *printer.Printer
+		mode    yamlviewport.ViewMode
+	}{
+		"diff gutter":  {printer: testPrinter()},
+		"line numbers": {printer: testPrinterWithLineNumbers()},
+		"side by side": {printer: testPrinter(), mode: yamlviewport.ViewModeSideBySide},
+		"hunks":        {printer: testPrinter(), mode: yamlviewport.ViewModeHunks},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			const height = 3
+
+			for width := 1; width <= 12; width++ {
+				m := yamlviewport.New(yamlviewport.WithPrinter(tc.printer))
+				m.SetWidth(width)
+				m.SetHeight(height)
+				m.SetViewMode(tc.mode)
+				m.AddRevision(niceyaml.NewSourceFromString("name: original\ncount: 10\n"))
+				m.AddRevision(niceyaml.NewSourceFromString("name: modified\ncount: 20\n"))
+
+				view := m.View()
+				if view == "" {
+					continue
+				}
+
+				for i, row := range strings.Split(view, "\n") {
+					assert.LessOrEqual(t, lipgloss.Width(row), width, "width %d, row %d", width, i)
+				}
+			}
+		})
+	}
+}
+
 func TestViewport_Search(t *testing.T) {
 	t.Parallel()
 
