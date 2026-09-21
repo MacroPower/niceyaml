@@ -286,6 +286,22 @@ func TestPrinter_PrintError(t *testing.T) {
 	}
 }
 
+func TestPrinter_PrintError_ControlCharacters(t *testing.T) {
+	t.Parallel()
+
+	p := printer.New(printer.WithStyles(yamltest.NewXMLStyles()))
+
+	err := fmt.Errorf("outer: %w", errors.Join(
+		errors.New("bad \x1b[31mred\x07 thing"),
+		errors.New("second"),
+	))
+
+	got := p.PrintError(err)
+	assert.NotContains(t, got, "\x1b")
+	assert.NotContains(t, got, "\x07")
+	assert.Contains(t, got, "bad \u241b[31mred\u2407 thing")
+}
+
 func TestPrinter_CRLF(t *testing.T) {
 	t.Parallel()
 

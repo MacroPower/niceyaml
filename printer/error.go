@@ -9,6 +9,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/errortree"
+	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
@@ -86,7 +87,8 @@ func (p *Printer) detail(bound *niceyaml.SourceError) string {
 // renderErrorTree draws t with a connector in front of each child, in the
 // foreground of [kind.UILineNumber], so the connectors take the color of
 // the gutter's line numbers without the background of the gutter, which
-// the message text beside them does not have.
+// the message text beside them does not have. Control characters in a
+// message render as their pictures, as they do in an excerpt.
 func (p *Printer) renderErrorTree(t errortree.Tree) string {
 	branch := lipgloss.NewStyle().
 		Foreground(p.styles.Style(kind.UILineNumber).GetForeground()).
@@ -98,17 +100,30 @@ func (p *Printer) renderErrorTree(t errortree.Tree) string {
 // errorTreeNode builds the [*tree.Tree] of t, with branch styling the
 // connector and indent of every child. A child without children is a leaf.
 func errorTreeNode(t errortree.Tree, branch *lipgloss.Style) *tree.Tree {
-	node := tree.Root(t.Text).
+	node := tree.Root(errorText(t.Text)).
 		EnumeratorStyle(*branch).
 		IndenterStyle(*branch)
 
 	for _, child := range t.Children {
 		if len(child.Children) == 0 {
-			node.Child(child.Text)
+			node.Child(errorText(child.Text))
 		} else {
 			node.Child(errorTreeNode(child, branch))
 		}
 	}
 
 	return node
+}
+
+// errorText renders one message of the tree with its control characters
+// as their pictures. A line break in the message stays a line break,
+// since a wrapper around a joined error keeps the breaks between its
+// branches in its own text.
+func errorText(text string) string {
+	lines := strings.Split(text, "\n")
+	for i, ln := range lines {
+		lines[i] = escape.Control(ln)
+	}
+
+	return strings.Join(lines, "\n")
 }
