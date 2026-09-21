@@ -82,7 +82,8 @@ func ParseDirective(comment string) *ParsedDirective {
 //
 // The directive must appear before any non-comment content in the document;
 // a document header (---) and a %YAML or %TAG directive line may precede
-// it. The first directive wins. Returns nil if no directive is found before
+// it, and such a line may carry the directive as its trailing comment. The
+// first directive wins. Returns nil if no directive is found before
 // content.
 func ParseDocumentDirective(tks token.Tokens) *ParsedDirective {
 	// The parser splits a %YAML or %TAG line into a directive token and the
@@ -99,7 +100,16 @@ func ParseDocumentDirective(tks token.Tokens) *ParsedDirective {
 			continue
 		}
 
-		if inDirective && hasLine && line == directiveLine {
+		// A token the scan can place on a later line ends the directive
+		// line. One without a position neither ends it nor is skipped
+		// with it.
+		if hasLine && line != directiveLine {
+			inDirective = false
+		}
+
+		// A comment on the directive line is no part of the directive's
+		// value, so it is read as a comment rather than skipped.
+		if inDirective && hasLine && tk.Type != token.CommentType {
 			continue
 		}
 

@@ -245,6 +245,10 @@ func TestParseDocumentDirective(t *testing.T) {
 			`),
 			want: map[int]string{0: "./schema.json"},
 		},
+		"directive as a trailing comment on a %YAML line": {
+			input: "%YAML 1.2 # yaml-language-server: $schema=./schema.json\n---\nkey: value\n",
+			want:  map[int]string{0: "./schema.json"},
+		},
 		"comment between header and content": {
 			input: stringtest.Input(`
 				key1: value1
