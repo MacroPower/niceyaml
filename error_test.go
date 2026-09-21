@@ -320,9 +320,36 @@ func TestError_Location(t *testing.T) {
 	pos := position.New(1, 4)
 	rng := position.NewRange(position.New(1, 2), position.New(1, 5))
 
+	// The location an Error reports through its accessors. Fails the test
+	// when more than one of them reports.
+	location := func(t *testing.T, e *niceyaml.Error) any {
+		t.Helper()
+
+		var (
+			got   any
+			found int
+		)
+
+		if p, ok := e.Path(); ok {
+			got, found = p, found+1
+		}
+
+		if p, ok := e.Position(); ok {
+			got, found = p, found+1
+		}
+
+		if r, ok := e.Range(); ok {
+			got, found = r, found+1
+		}
+
+		require.LessOrEqual(t, found, 1, "an Error reports at most one location")
+
+		return got
+	}
+
 	tcs := map[string]struct {
 		err  *niceyaml.Error
-		want niceyaml.Location
+		want any
 	}{
 		"nil": {
 			err: nil,
@@ -385,7 +412,7 @@ func TestError_Location(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, tc.err.Location())
+			assert.Equal(t, tc.want, location(t, tc.err))
 		})
 	}
 }
@@ -1436,7 +1463,7 @@ func TestError_NilReceiver(t *testing.T) {
 
 	// A nil *Error carries no message and specializes to nothing, and one
 	// wrapped by another Error contributes nothing to the message, in line
-	// with Cause, Errors, Unwrap, and Location, which all accept nil.
+	// with Cause, Errors, Unwrap, and Path, which all accept nil.
 	var missing *niceyaml.Error
 
 	assert.Empty(t, missing.Error())
@@ -2480,8 +2507,12 @@ func TestError_With(t *testing.T) {
 	located := base.With(niceyaml.WithPath(paths.Root().Child("key").Key()))
 
 	// The copy carries the new option and the receiver keeps its own.
-	assert.Nil(t, base.Location())
-	assert.Equal(t, paths.Root().Child("key").Key(), located.Location())
+	_, ok := base.Path()
+	assert.False(t, ok)
+
+	locatedPath, ok := located.Path()
+	require.True(t, ok)
+	assert.Equal(t, paths.Root().Child("key").Key(), locatedPath)
 
 	assert.Equal(t, "bad key", base.Error())
 	assert.Equal(t, "$.key~: bad key", located.Error())
@@ -2514,7 +2545,7 @@ func TestError_WrappedContext(t *testing.T) {
 
 	require.ErrorAs(t, wrapped, &got)
 
-	gotPath, ok := got.Location().(paths.Path)
+	gotPath, ok := got.Path()
 	require.True(t, ok)
 	assert.Equal(t, "$.name", gotPath.String())
 

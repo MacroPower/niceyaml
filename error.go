@@ -52,31 +52,22 @@ var (
 	ErrPathNeedsDocument = errors.New("path needs a document to resolve in")
 )
 
-// Location is where an [Error] points in a YAML document: a [paths.Path],
-// a [position.Position], or a [position.Range]. [WithPath], [WithPosition],
-// and [WithRange] each set one, and [Error.Location] returns the one set,
-// as one of those three types, so a caller reads it with a type switch:
-//
-//	switch loc := err.Location().(type) {
-//	case paths.Path:
-//	case position.Position:
-//	case position.Range:
-//	case nil: // No location.
-//	}
-type Location interface {
-	// String returns the location as people read it: the path expression
-	// for a path, and 1-indexed coordinates for a position or a range.
-	String() string
-}
-
 // Error is an error that points at a location in a YAML document.
 //
-// The location is a [Location]: a [paths.Path], a [position.Position], or
-// a [position.Range], set with [WithPath], [WithPosition], or [WithRange].
-// An Error holds one, and the last of those options given wins. A path
-// resolves within one document of a source: the [Document] that binds the
-// Error, whether its own methods and validators produced the Error or
-// [Document.Bind] bound one built elsewhere.
+// The location is a [paths.Path], a [position.Position], or a
+// [position.Range], set with [WithPath], [WithPosition], or [WithRange].
+// An Error holds one, and the last of those options given wins.
+// [Error.Path], [Error.Position], and [Error.Range] each return the
+// location when it is of that type, so a caller that wants the path
+// reads it without a type switch:
+//
+//	if path, ok := err.Path(); ok {
+//		// The error points at path.
+//	}
+//
+// A path resolves within one document of a source: the [Document] that
+// binds the Error, whether its own methods and validators produced the
+// Error or [Document.Bind] bound one built elsewhere.
 //
 // An Error carries what a producer knows and nothing about presentation. A
 // validator that knows a path uses [WithPath] and need not hold the source.
@@ -100,8 +91,10 @@ type Location interface {
 //
 // Create instances with [NewError] or [WrapError].
 type Error struct {
-	err    error
-	loc    Location
+	err error
+	// The location: a paths.Path, a position.Position, or a position.Range,
+	// or nil when none is set.
+	loc    any
 	errors []error
 }
 
@@ -152,7 +145,7 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 type ErrorOption func(e *Error)
 
 // WithPath is an [ErrorOption] that sets the YAML path where the error
-// occurred as the [Location] of the [Error], replacing any location set
+// occurred as the location of the [Error], replacing any location set
 // before it. The error points at the node the path selects, which for a
 // mapping entry is its value, so [SourceError.Excerpt] highlights the
 // value. A path from [paths.Path.Key] points at the key of the entry
@@ -167,7 +160,7 @@ func WithPath(p paths.Path) ErrorOption {
 }
 
 // WithPosition is an [ErrorOption] that sets the 0-indexed position where
-// the error occurred as the [Location] of the [Error], replacing any
+// the error occurred as the location of the [Error], replacing any
 // location set before it. The position is in the coordinates of the lines
 // [Source.Lines] returns, where line 0 is line 1 of the text.
 // [SourceError.Excerpt] highlights the content of the token at that
@@ -192,7 +185,7 @@ func atToken(tk *token.Token) ErrorOption {
 }
 
 // WithRange is an [ErrorOption] that sets the 0-indexed range the error
-// covers as the [Location] of the [Error], replacing any location set
+// covers as the location of the [Error], replacing any location set
 // before it. The range is in the coordinates of the view [Source.Lines]
 // returns, where line 0 is line 1 of the text. [SourceError.Excerpt]
 // highlights the whole range rather than one token, so it is the option
@@ -238,8 +231,8 @@ func (e *Error) Error() string {
 		msg = e.err.Error()
 	}
 
-	if _, ok := e.loc.(paths.Path); ok {
-		msg = prefix(e.loc.String()+":", msg)
+	if p, ok := e.loc.(paths.Path); ok {
+		msg = prefix(p.String()+":", msg)
 	}
 
 	return msg
@@ -345,17 +338,50 @@ func (e *Error) Errors() []error {
 	return e.nested()
 }
 
-// Location returns the [Location] of the [Error]: the [paths.Path],
+// location returns the location of the [Error]: the [paths.Path],
 // [position.Position], or [position.Range] that [WithPath], [WithPosition],
 // or [WithRange] set, or nil when none did. It looks through wrapping to
 // the nearest Error that carries one, so an Error built with [WrapError]
 // around a located Error reports that location. A nil Error has none.
-func (e *Error) Location() Location {
+func (e *Error) location() any {
 	if e == nil {
 		return nil
 	}
 
 	return e.anchor().loc
+}
+
+// Path returns the [paths.Path] the [Error] points at and true, or the
+// zero Path and false when the Error carries a position, a range, or no
+// location. The location is the one [WithPath] set on the Error itself or
+// on the nearest located Error along its cause chain, so an Error built
+// with [WrapError] around a located Error reports that location. A nil
+// Error has none.
+func (e *Error) Path() (paths.Path, bool) {
+	p, ok := e.location().(paths.Path)
+
+	return p, ok
+}
+
+// Position returns the [position.Position] the [Error] points at and
+// true, or the zero Position and false when the Error carries a path, a
+// range, or no location. It looks through wrapping as [Error.Path] does.
+func (e *Error) Position() (position.Position, bool) {
+	p, ok := e.location().(position.Position)
+
+	return p, ok
+}
+
+// Range returns the [position.Range] the [Error] covers and true, or the
+// zero Range and false when the Error carries a path, a position, or no
+// location. It looks through wrapping as [Error.Path] does. The range is
+// the one [WithRange] set, in the coordinates of [Source.Lines];
+// [SourceError.Range] returns the range a location of any kind resolved
+// to once the Error is bound.
+func (e *Error) Range() (position.Range, bool) {
+	r, ok := e.location().(position.Range)
+
+	return r, ok
 }
 
 // message returns the text of e without the location e or the Errors it

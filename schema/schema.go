@@ -215,7 +215,7 @@ func (s *Schema) validate(ctx context.Context, data any, doc *niceyaml.Document)
 // The error tree is flattened to its concrete failures with
 // [jsonschema.ValidationError.Leaves]. A single failure becomes the main
 // error, carrying its own path so the printer highlights that location and
-// [niceyaml.Error.Location] reports it. Several failures become a count summary
+// [niceyaml.Error.Path] reports it. Several failures become a count summary
 // with no path of its own; each nested error carries the path to one
 // failing location.
 func newValidationError(ve *jsonschema.ValidationError, doc *niceyaml.Document) *niceyaml.Error {
