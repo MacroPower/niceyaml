@@ -28,8 +28,8 @@ import (
 // documents. Every error they and their Documents produce comes back
 // bound to the Source as a [SourceError]. [Document.Bind] binds errors
 // built elsewhere to the document they were checked against, and
-// [Source.Bind] binds one to the source, with a path resolving in the one
-// document of a source that holds one. Rendering
+// [Source.Bind] binds one that carries a position or a range to the
+// source alone. Rendering
 // lives in a [line.View], which carries the overlays, annotations, and
 // flags that a [printer.Printer] renders over the [line.Lines] the Source
 // holds. [Source.Lines] returns those lines, which the [finder.Finder] and
@@ -356,16 +356,13 @@ func (s *Source) parse() (*ast.File, error) {
 //		}
 //	}
 //
-// A path resolves in a document, and Bind resolves it in the one
-// [Source.Document] returns, so a configuration file binds an error at a
-// path here as it would through [Document.Bind], and [SourceError.Document]
-// is that document. When the source holds several documents, or none, or
-// does not parse, the path resolves nowhere: the bound error keeps its
-// message and the name of the source, [SourceError.Range] returns the
-// error of [Source.Document], which wraps [ErrMultipleDocuments] or
-// [ErrNoDocuments] or is the parse error, and the %+v verb names it in
-// place of the excerpt. Bind such an error through [Document.Bind] with
-// the document it was checked against.
+// A path resolves in a document, and Bind has none, so an error that
+// carries a path resolves nowhere here: the bound error keeps its message
+// and the name of the source, [SourceError.Range] returns
+// [ErrPathNeedsDocument], and the %+v verb names it in place of the
+// excerpt. Bind such an error through [Document.Bind] with the document
+// it was checked against, which [Source.Document] returns for a file
+// that holds one.
 //
 // In every other way Bind is [Document.Bind], which describes what comes
 // back.
