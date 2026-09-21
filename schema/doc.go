@@ -100,8 +100,8 @@
 // # Loaders
 //
 // [Embedded], [File], and [URL] return a [Ref] that names one schema, and
-// [FileOrURL] returns one for a reference read from input, beside the
-// error for a reference that names nothing. A Ref is a resolver that names
+// [FileOrURL] returns one for a reference that may be either, as written
+// in a directive or on a command line. A Ref is a resolver that names
 // its schema for every document and never reports [ErrNoMatch], so a
 // registry holding one alone validates everything against it. A [*Schema]
 // compiled already, such as the one [MustCompile] built at package scope,
@@ -121,7 +121,7 @@
 //	        return schema.Ref{}, schema.ErrNoMatch
 //	    }
 //
-//	    return schema.File("schemas/" + kind + ".json"), nil
+//	    return schema.File("schemas/" + kind + ".json")
 //	})
 //
 // Embed a schema in the binary with go:embed:
@@ -131,10 +131,13 @@
 //
 //	reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded(schemaBytes)))
 //
-// Read a schema from disk or over HTTP:
+// Read a schema from disk or over HTTP. [File] and [URL] return an error
+// for a reference that names nothing, and [MustFile] and [MustURL] panic
+// instead, for a reference written in the program, as [MustCompile] does
+// for a schema:
 //
-//	schema.File("./schemas/config.json")
-//	schema.URL("https://example.com/schema.json")
+//	schema.MustFile("./schemas/config.json")
+//	schema.MustURL("https://example.com/schema.json")
 //
 // [FileOrURL] routes a reference as written in a directive or on a command
 // line, which may be a file path or a URL. The registry fetches every URL
@@ -159,7 +162,7 @@
 //	reg := schema.NewRegistry(schema.WithResolvers(
 //	    schema.Directive(),                                          // Explicit user intent.
 //	    schema.When(matcher.Content(...), schema.Embedded(...)),     // By content.
-//	    schema.When(matcher.MustFilePath(...), schema.File(...)),    // By path.
+//	    schema.When(matcher.MustFilePath(...), schema.MustFile(...)), // By path.
 //	))
 //
 // Implement [Resolver], or wrap a function in [ResolverFunc], for

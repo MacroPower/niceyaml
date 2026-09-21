@@ -11,8 +11,8 @@ import (
 	"strings"
 )
 
-// ErrEmptyPath reports an empty reference given to [FileOrURL], which names
-// no file.
+// ErrEmptyPath reports an empty path given to [File] or [FileOrURL], which
+// names no file.
 var ErrEmptyPath = errors.New("schema file path is empty")
 
 // File creates a [Ref] that reads schema data from a local file. The Ref
@@ -28,28 +28,28 @@ var ErrEmptyPath = errors.New("schema file path is empty")
 // validator for every document that names it. The file is read when the
 // Ref loads, not when File runs.
 //
-// File is for a path the program knows, as [Loadable] is for a key it
-// knows, so it panics when path is empty or the working directory cannot
-// be read to make it absolute. A path read from a directive or a command
-// line goes through [FileOrURL], which returns those as errors.
+// An empty path returns [ErrEmptyPath], and a working directory that
+// cannot be read to make the path absolute returns that error. The result
+// is the shape a [Resolver] returns, so a resolver that builds the path
+// from the document hands it back as it is:
+//
+//	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
+//	    kind, err := doc.Get[string](ctx, kindPath)
+//	    if err != nil {
+//	        return schema.Ref{}, schema.ErrNoMatch
+//	    }
+//
+//	    return schema.File("schemas/" + kind + ".json")
+//	})
+//
+// [MustFile] panics instead, for a path written in the program. A
+// reference that may be a URL, such as one read from a directive or a
+// command line, goes through [FileOrURL].
 //
 // The file path is used directly without validation. Callers should ensure
 // paths come from trusted sources or are validated before use to prevent
 // path traversal attacks.
-//
-//	r := schema.File("./schemas/config.json")
-func File(path string) Ref {
-	ref, err := file(path)
-	if err != nil {
-		panic("schema.File: " + err.Error())
-	}
-
-	return ref
-}
-
-// file is [File] that reports an empty path as [ErrEmptyPath] and a
-// working directory it cannot read as an error, for a path from input.
-func file(path string) (Ref, error) {
+func File(path string) (Ref, error) {
 	if path == "" {
 		return Ref{}, ErrEmptyPath
 	}
@@ -85,6 +85,22 @@ func file(path string) (Ref, error) {
 
 		return data, nil
 	}), nil
+}
+
+// MustFile is [File] that panics when path is empty or the working
+// directory cannot be read, for a path written in the program, as
+// [MustCompile] is for a schema known valid at build time:
+//
+//	reg := schema.NewRegistry(schema.WithResolvers(
+//	    schema.When(matcher.MustFilePath("*.deploy.yaml"), schema.MustFile("schemas/deploy.json")),
+//	))
+func MustFile(path string) Ref {
+	ref, err := File(path)
+	if err != nil {
+		panic("schema.MustFile: " + err.Error())
+	}
+
+	return ref
 }
 
 // fileURL returns the file:// URL that names the absolute path abs.

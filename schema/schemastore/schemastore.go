@@ -258,7 +258,12 @@ func (s *Store) Resolve(ctx context.Context, doc *niceyaml.Document) (schema.Ref
 	}
 
 	// The catalog keeps only entries with a URL, so the Ref names one.
-	return schema.URL(entry.URL), nil
+	ref, err := schema.URL(entry.URL)
+	if err != nil {
+		return schema.Ref{}, fmt.Errorf("catalog entry %q: %w", entry.Name, err)
+	}
+
+	return ref, nil
 }
 
 // FindMatch finds the catalog entry matching a file path.

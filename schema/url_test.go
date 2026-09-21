@@ -30,11 +30,14 @@ func (errReader) Read(_ []byte) (int, error) {
 func TestURL(t *testing.T) {
 	t.Parallel()
 
-	t.Run("empty URL panics", func(t *testing.T) {
+	t.Run("empty URL", func(t *testing.T) {
 		t.Parallel()
 
-		assert.PanicsWithValue(t, "schema.URL: url is empty", func() {
-			schema.URL("")
+		_, err := schema.URL("")
+		require.ErrorIs(t, err, schema.ErrEmptyURL)
+
+		assert.PanicsWithValue(t, "schema.MustURL: "+schema.ErrEmptyURL.Error(), func() {
+			schema.MustURL("")
 		})
 	})
 
@@ -49,7 +52,7 @@ func TestURL(t *testing.T) {
 		}))
 		defer server.Close()
 
-		url, data, err := load(t, schema.URL(server.URL+"/schema.json"))
+		url, data, err := load(t, schema.MustURL(server.URL+"/schema.json"))
 		require.NoError(t, err)
 		assert.Equal(t, []byte(schemaData), data)
 		assert.Equal(t, server.URL+"/schema.json", url)
@@ -68,7 +71,7 @@ func TestURL(t *testing.T) {
 		}))
 		defer server.Close()
 
-		ref, err := schema.URL(server.URL+"/schema.json").Resolve(t.Context(), document(t))
+		ref, err := schema.MustURL(server.URL+"/schema.json").Resolve(t.Context(), document(t))
 		require.NoError(t, err)
 		assert.Equal(t, server.URL+"/schema.json", ref.Key())
 		assert.Equal(t, 0, requests, "Resolve should name the schema without fetching it")
@@ -105,7 +108,7 @@ func TestURL(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				ref, err := schema.URL(tc.ref).Resolve(t.Context(), document(t))
+				ref, err := schema.MustURL(tc.ref).Resolve(t.Context(), document(t))
 				require.NoError(t, err)
 				assert.Equal(t, tc.want, ref.Key())
 			})
@@ -120,7 +123,7 @@ func TestURL(t *testing.T) {
 		}))
 		defer server.Close()
 
-		_, _, err := load(t, schema.URL(server.URL+"/schema.json"))
+		_, _, err := load(t, schema.MustURL(server.URL+"/schema.json"))
 		require.ErrorContains(t, err, "fetch "+server.URL+"/schema.json: status 404")
 	})
 
@@ -137,7 +140,7 @@ func TestURL(t *testing.T) {
 
 		var requests atomic.Int32
 
-		err := lookup(t, countingClient(&requests), schema.URL(server.URL+"/schema.json"))
+		err := lookup(t, countingClient(&requests), schema.MustURL(server.URL+"/schema.json"))
 		require.NoError(t, err)
 		assert.Equal(t, int32(1), requests.Load())
 	})
@@ -154,7 +157,7 @@ func TestURL(t *testing.T) {
 		defer server.Close()
 
 		// A nil client keeps the default rather than panicking on the fetch.
-		err := lookup(t, nil, schema.URL(server.URL+"/schema.json"))
+		err := lookup(t, nil, schema.MustURL(server.URL+"/schema.json"))
 		require.NoError(t, err)
 	})
 
@@ -170,7 +173,7 @@ func TestURL(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel() // Cancel immediately.
 
-		ref, err := schema.URL(server.URL+"/schema.json").Resolve(ctx, document(t))
+		ref, err := schema.MustURL(server.URL+"/schema.json").Resolve(ctx, document(t))
 		require.NoError(t, err)
 
 		_, err = ref.Load(ctx)
@@ -180,14 +183,14 @@ func TestURL(t *testing.T) {
 	t.Run("invalid url", func(t *testing.T) {
 		t.Parallel()
 
-		_, _, err := load(t, schema.URL("\x00")) // Control char makes URL invalid.
+		_, _, err := load(t, schema.MustURL("\x00")) // Control char makes URL invalid.
 		require.ErrorContains(t, err, "parse URL")
 	})
 
 	t.Run("client error", func(t *testing.T) {
 		t.Parallel()
 
-		_, _, err := load(t, schema.URL("http://localhost:0/schema.json")) // Port 0 = connection refused.
+		_, _, err := load(t, schema.MustURL("http://localhost:0/schema.json")) // Port 0 = connection refused.
 		require.ErrorContains(t, err, "fetch http://localhost:0/schema.json")
 	})
 
@@ -203,7 +206,7 @@ func TestURL(t *testing.T) {
 			}),
 		}
 
-		err := lookup(t, client, schema.URL("http://example.com/schema.json"))
+		err := lookup(t, client, schema.MustURL("http://example.com/schema.json"))
 		require.ErrorIs(t, err, schema.ErrLoad)
 		require.ErrorContains(t, err, "read response from http://example.com/schema.json")
 	})
@@ -224,7 +227,7 @@ func TestURL(t *testing.T) {
 			}),
 		}
 
-		err := lookup(t, client, schema.URL("http://example.com/schema.json"))
+		err := lookup(t, client, schema.MustURL("http://example.com/schema.json"))
 		require.ErrorIs(t, err, schema.ErrLoad)
 		require.ErrorContains(t, err, "response exceeds")
 	})

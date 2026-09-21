@@ -32,7 +32,7 @@ var ErrNoMatch = errors.New("no matching schema")
 //	        return schema.Ref{}, schema.ErrNoMatch
 //	    }
 //
-//	    return schema.File("schemas/" + kind + ".json"), nil
+//	    return schema.File("schemas/" + kind + ".json")
 //	})
 //
 // The registry uses a compiled schema as it is. For any other Ref it
@@ -163,7 +163,7 @@ type Resolver interface {
 //	        return schema.Ref{}, schema.ErrNoMatch
 //	    }
 //
-//	    return schema.File("schemas/" + strings.ToLower(kind) + ".json"), nil
+//	    return schema.File("schemas/" + strings.ToLower(kind) + ".json")
 //	})
 type ResolverFunc func(ctx context.Context, doc *niceyaml.Document) (Ref, error)
 

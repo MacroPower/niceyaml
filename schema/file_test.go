@@ -25,7 +25,7 @@ func TestFile(t *testing.T) {
 		err := os.WriteFile(schemaPath, schemaData, 0o600)
 		require.NoError(t, err)
 
-		_, data, err := load(t, schema.File(schemaPath))
+		_, data, err := load(t, schema.MustFile(schemaPath))
 		require.NoError(t, err)
 		assert.Equal(t, schemaData, data)
 	})
@@ -34,18 +34,21 @@ func TestFile(t *testing.T) {
 		t.Parallel()
 
 		// Resolve names the file without touching it; only Load reads it.
-		url, _, err := load(t, schema.File("/nonexistent/path/schema.json"))
+		url, _, err := load(t, schema.MustFile("/nonexistent/path/schema.json"))
 		assert.Equal(t, "file:///nonexistent/path/schema.json", url)
 		require.ErrorIs(t, err, os.ErrNotExist)
 		require.ErrorContains(t, err, "read /nonexistent/path/schema.json")
 	})
 
-	t.Run("empty path panics", func(t *testing.T) {
+	t.Run("empty path", func(t *testing.T) {
 		t.Parallel()
 
 		// An empty path must not resolve to the working directory.
-		assert.PanicsWithValue(t, "schema.File: "+schema.ErrEmptyPath.Error(), func() {
-			schema.File("")
+		_, err := schema.File("")
+		require.ErrorIs(t, err, schema.ErrEmptyPath)
+
+		assert.PanicsWithValue(t, "schema.MustFile: "+schema.ErrEmptyPath.Error(), func() {
+			schema.MustFile("")
 		})
 	})
 }
@@ -61,7 +64,7 @@ func TestFile_DriveLetter(t *testing.T) {
 	// resolve "C:" against the working directory while the key names the
 	// drive. The loader refuses rather than read a file per directory, so
 	// the failure is not a missing file.
-	key, data, err := load(t, schema.File("C:/schemas/config.json"))
+	key, data, err := load(t, schema.MustFile("C:/schemas/config.json"))
 	assert.Equal(t, "file:///C:/schemas/config.json", key)
 	assert.Nil(t, data)
 	require.ErrorContains(t, err, "read C:/schemas/config.json")
