@@ -24,7 +24,9 @@ import (
 // about rows. It stays valid until the view or the printer changes.
 //
 // Line i of the layout is line i of the view. Rows count from 0 at the
-// first row of the first line and leave the container style out.
+// first row of the first line and leave the container style out. An empty
+// view has no rows, though [Printer.Print] draws one empty row for it to
+// carry the container.
 //
 // Create instances with [Printer.Layout].
 type Layout struct {
