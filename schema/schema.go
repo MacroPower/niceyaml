@@ -385,12 +385,17 @@ func memberNodes(node ast.Node, name string) (ast.Node, ast.Node) {
 
 // decodedKey returns the member name a decode gives the key node: the
 // unquoted text of a string key, and the Go value of any other scalar as
-// the decoder spells it, so the hexadecimal key 0x10 reads as 16. A key
-// that is no scalar, such as a sequence, has no name.
+// the decoder spells it, so the hexadecimal key 0x10 reads as 16, and a
+// null key, however it is written, reads as null. A key that is no
+// scalar, such as a sequence, has no name.
 func decodedKey(key ast.MapKeyNode) string {
 	switch k := contentNode(key).(type) {
 	case *ast.StringNode:
 		return k.Value
+	case *ast.NullNode:
+		// A null node carries a nil value, which prints as "<nil>" rather
+		// than the "null" the decoder names the member by.
+		return "null"
 	case ast.ScalarNode:
 		return fmt.Sprint(k.GetValue())
 	default:

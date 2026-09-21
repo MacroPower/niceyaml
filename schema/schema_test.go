@@ -562,6 +562,29 @@ func TestSchema_PathTarget(t *testing.T) {
 			`),
 			wantContains: "<genericError>hello</genericError>",
 		},
+		"tilde null key highlights value": {
+			// The key decodes to the member name null, which the source
+			// spells ~, so the path names nothing and the walk locates the
+			// value.
+			schema: `{
+				"type": "object",
+				"additionalProperties": {"type": "string"}
+			}`,
+			input: stringtest.Input(`
+				~: 5
+			`),
+			wantContains: "<genericError>5</genericError>",
+		},
+		"spelled-out null key highlights value": {
+			schema: `{
+				"type": "object",
+				"additionalProperties": {"type": "string"}
+			}`,
+			input: stringtest.Input(`
+				NULL: 5
+			`),
+			wantContains: "<genericError>5</genericError>",
+		},
 		"boolean key highlights the key": {
 			schema: `{
 				"type": "object",
