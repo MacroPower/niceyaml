@@ -43,8 +43,13 @@ func validateCmd() *cobra.Command {
 				err := validateFile(cmd.Context(), yamlPath, reg)
 				if err != nil {
 					errs = append(errs, err)
-				} else {
-					fmt.Printf("%s: valid\n", yamlPath)
+
+					continue
+				}
+
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s: valid\n", yamlPath)
+				if err != nil {
+					errs = append(errs, fmt.Errorf("write the result of %s: %w", yamlPath, err))
 				}
 			}
 

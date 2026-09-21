@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -71,4 +72,33 @@ func TestValidateFile(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateCmdOutput(t *testing.T) {
+	t.Parallel()
+
+	// The per-file line goes to the writer the caller set on the command,
+	// so embedding the command and redirecting its output captures it.
+	dir := t.TempDir()
+
+	schemaPath := filepath.Join(dir, "schema.json")
+	require.NoError(t, os.WriteFile(schemaPath, []byte(`{"type": "object"}`), 0o600))
+
+	paths := []string{
+		filepath.Join(dir, "a.yaml"),
+		filepath.Join(dir, "b.yaml"),
+	}
+	for _, path := range paths {
+		require.NoError(t, os.WriteFile(path, []byte("name: a\n"), 0o600))
+	}
+
+	out := &bytes.Buffer{}
+
+	cmd := validateCmd()
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetArgs(append([]string{"--schema", schemaPath}, paths...))
+
+	require.NoError(t, cmd.Execute())
+	assert.Equal(t, paths[0]+": valid\n"+paths[1]+": valid\n", out.String())
 }
