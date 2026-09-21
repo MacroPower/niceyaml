@@ -110,12 +110,11 @@ func newDocuments(src *Source, file *ast.File) []*Document {
 // the nodes that are not YAML documents into the ones that are. The parser
 // makes a node with no header and no content from the comments and %YAML
 // or %TAG directives above a "---" header, and from the comments after a
-// "..." marker. The YAML spec attaches the first to the document below
-// them and the second to the document above, so such a node joins the next
-// document as its preamble, or the last document when nothing follows. A
-// file that holds such nodes and nothing else, such as a file of comments,
-// keeps the first as its one document, which decodes to nothing as an
-// empty file does.
+// "..." marker. Such a node joins the next document as its preamble,
+// whichever of the two it holds, or the last document when no document
+// follows it. A file that holds such nodes and nothing else, such as a
+// file of comments, keeps the first as its one document, which decodes to
+// nothing as an empty file does.
 func foldPreambles(nodes []*ast.DocumentNode, groups []token.Tokens) []*Document {
 	var (
 		docs    []*Document

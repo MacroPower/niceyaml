@@ -210,11 +210,11 @@ func (s *Source) Tokens() token.Tokens {
 //
 // The parser cuts the comments and %YAML or %TAG directives above a "---"
 // header, and the comments after a "..." marker, into a node of their own
-// with no header and no content. The YAML spec attaches those to the
-// document below or above them, so Documents folds each such node into
-// that document, where [Document.Preamble] returns the tokens above the
-// content. A document that opens with a "---" header and holds only
-// comments is an explicit empty document and stays one.
+// with no header and no content. Documents folds each such node into the
+// document below it, or into the last document when no document follows,
+// and [Document.Preamble] returns the tokens it put above the content. A
+// document that opens with a "---" header and holds only comments is an
+// explicit empty document and stays one.
 //
 // It parses the source and builds each Document once, so every call returns
 // the same pointers. The slice itself is a copy, so reordering it reaches
