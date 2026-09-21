@@ -380,11 +380,16 @@ func (r *resolver) descend(node ast.Node, name string, acc []match) []match {
 
 // keyContent looks through the `?` indicator of an explicit key and the
 // anchors and tags on a key to the node that carries the key itself. It
-// returns nil for a nil key.
+// returns nil for a nil key, including a typed nil a hand-built tree may
+// hold at any step.
 func keyContent(key ast.MapKeyNode) ast.Node {
 	var node ast.Node = key
 
 	for {
+		if isNilNode(node) {
+			return nil
+		}
+
 		switch n := node.(type) {
 		case *ast.MappingKeyNode:
 			node = n.Value
@@ -421,10 +426,16 @@ func keyName(key ast.MapKeyNode) string {
 	}
 }
 
+// isNilNode reports whether node is nil, including a typed nil a
+// hand-built tree may hold behind a non-nil interface.
+func isNilNode(node ast.Node) bool {
+	return node == nil || reflect.ValueOf(node).IsNil()
+}
+
 // nodeToken returns the token of node, or nil when node has none. A nil
 // node, including a typed nil a hand-built tree may hold, has no token.
 func nodeToken(node ast.Node) *token.Token {
-	if node == nil || reflect.ValueOf(node).IsNil() {
+	if isNilNode(node) {
 		return nil
 	}
 
@@ -438,7 +449,7 @@ func nodeToken(node ast.Node) *token.Token {
 // tree may hold, has no token.
 func firstToken(node ast.Node) *token.Token {
 	for {
-		if node == nil || reflect.ValueOf(node).IsNil() {
+		if isNilNode(node) {
 			return nil
 		}
 
