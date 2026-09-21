@@ -81,7 +81,7 @@ func TestErrorHandler(t *testing.T) {
 		niceyaml.WithPath(paths.Root().Child("value")),
 	))
 
-	emptyMessageErr := yamltest.Bind(t, src, niceyaml.NewErrorFrom(
+	emptyMessageErr := yamltest.Bind(t, src, niceyaml.WrapError(
 		silentError{niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name").Key()))},
 	))
 

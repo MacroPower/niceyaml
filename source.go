@@ -267,13 +267,13 @@ func (s *Source) Document() (*Document, error) {
 
 	switch len(docs) {
 	case 0:
-		return nil, s.Bind(NewErrorFrom(ErrNoDocuments))
+		return nil, s.Bind(WrapError(ErrNoDocuments))
 
 	case 1:
 		return docs[0], nil
 
 	default:
-		err := NewErrorFrom(
+		err := WrapError(
 			fmt.Errorf("%w: %d documents", ErrMultipleDocuments, len(docs)),
 			atToken(docs[1].anchorToken()),
 		)
@@ -335,7 +335,7 @@ func (s *Source) parse() (*ast.File, error) {
 	}
 
 	if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
-		return nil, s.Bind(NewErrorFrom(yamlMessageError{yamlErr}, atToken(yamlErr.GetToken())))
+		return nil, s.Bind(WrapError(yamlMessageError{yamlErr}, atToken(yamlErr.GetToken())))
 	}
 
 	//nolint:wrapcheck // Return the original error if it's not a [yaml.Error].

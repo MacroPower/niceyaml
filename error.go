@@ -91,7 +91,7 @@ type Location interface {
 // Error implements the error interface. Use [Error.Unwrap] with [errors.Is]
 // and [errors.As] to inspect wrapped errors.
 //
-// Create instances with [NewError] or [NewErrorFrom].
+// Create instances with [NewError] or [WrapError].
 type Error struct {
 	err    error
 	loc    Location
@@ -99,14 +99,14 @@ type Error struct {
 }
 
 // NewError creates a new [*Error] with the given message.
-// Use [NewErrorFrom] instead if wrapping an existing error.
+// Use [WrapError] instead if wrapping an existing error.
 func NewError(msg string, opts ...ErrorOption) *Error {
-	return NewErrorFrom(errors.New(msg), opts...)
+	return WrapError(errors.New(msg), opts...)
 }
 
-// NewErrorFrom creates a new [*Error] wrapping an existing error.
+// WrapError creates a new [*Error] wrapping an existing error.
 // Use [NewError] instead if creating an error from a message string.
-func NewErrorFrom(err error, opts ...ErrorOption) *Error {
+func WrapError(err error, opts ...ErrorOption) *Error {
 	e := &Error{err: err}
 	for _, opt := range opts {
 		opt(e)
@@ -317,7 +317,7 @@ func (e *Error) Unwrap() []error {
 }
 
 // Cause returns the error the [Error] was created from: the error given
-// to [NewErrorFrom], or one holding the message given to [NewError]. It is
+// to [WrapError], or one holding the message given to [NewError]. It is
 // nil for an Error created from a nil error, and a nil Error has no cause.
 func (e *Error) Cause() error {
 	if e == nil {
@@ -341,7 +341,7 @@ func (e *Error) Errors() []error {
 // Location returns the [Location] of the [Error]: the [paths.Path],
 // [position.Position], or [position.Range] that [WithPath], [WithPosition],
 // or [WithRange] set, or nil when none did. It looks through wrapping to
-// the nearest Error that carries one, so an Error built with [NewErrorFrom]
+// the nearest Error that carries one, so an Error built with [WrapError]
 // around a located Error reports that location. A nil Error has none.
 func (e *Error) Location() Location {
 	if e == nil {

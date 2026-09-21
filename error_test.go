@@ -107,7 +107,7 @@ func TestError(t *testing.T) {
 		want string
 	}{
 		"nil error returns empty string": {
-			err:  niceyaml.NewErrorFrom(nil),
+			err:  niceyaml.WrapError(nil),
 			want: "",
 		},
 		"no path or token returns plain error": {
@@ -222,7 +222,7 @@ func TestSourceError_Error_Name(t *testing.T) {
 			wantDetail: "no excerpt: resolve $.missing: not found",
 		},
 		"name stands alone in front of an empty message": {
-			err:  niceyaml.NewErrorFrom(nil),
+			err:  niceyaml.WrapError(nil),
 			want: "config:",
 		},
 	}
@@ -355,25 +355,25 @@ func TestError_Location(t *testing.T) {
 			want: pos,
 		},
 		"path on a wrapped error": {
-			err: niceyaml.NewErrorFrom(
+			err: niceyaml.WrapError(
 				fmt.Errorf("context: %w", niceyaml.NewError("test", niceyaml.WithPath(path))),
 			),
 			want: path,
 		},
 		"position on a wrapped error": {
-			err: niceyaml.NewErrorFrom(
+			err: niceyaml.WrapError(
 				fmt.Errorf("context: %w", niceyaml.NewError("test", niceyaml.WithPosition(pos))),
 			),
 			want: pos,
 		},
 		"range on a wrapped error": {
-			err: niceyaml.NewErrorFrom(
+			err: niceyaml.WrapError(
 				fmt.Errorf("context: %w", niceyaml.NewError("test", niceyaml.WithRange(rng))),
 			),
 			want: rng,
 		},
 		"own location wins over a wrapped one": {
-			err: niceyaml.NewErrorFrom(
+			err: niceyaml.WrapError(
 				niceyaml.NewError("test", niceyaml.WithPath(path)),
 				niceyaml.WithPosition(pos),
 			),
@@ -734,7 +734,7 @@ func TestError_Unwrap(t *testing.T) {
 		assert.Nil(t, nilErr.Unwrap())
 
 		// A chain that holds a nil Error behind a real one is safe to walk.
-		outer := niceyaml.NewErrorFrom(nilErr)
+		outer := niceyaml.WrapError(nilErr)
 
 		var bound *niceyaml.SourceError
 
@@ -745,7 +745,7 @@ func TestError_Unwrap(t *testing.T) {
 		t.Parallel()
 
 		underlying := errors.New("underlying error")
-		err := niceyaml.NewErrorFrom(underlying)
+		err := niceyaml.WrapError(underlying)
 
 		got := err.Unwrap()
 
@@ -756,7 +756,7 @@ func TestError_Unwrap(t *testing.T) {
 	t.Run("nil error unwraps to nil", func(t *testing.T) {
 		t.Parallel()
 
-		err := niceyaml.NewErrorFrom(nil)
+		err := niceyaml.WrapError(nil)
 
 		got := err.Unwrap()
 
@@ -767,7 +767,7 @@ func TestError_Unwrap(t *testing.T) {
 		t.Parallel()
 
 		sentinel := errors.New("sentinel error")
-		err := niceyaml.NewErrorFrom(sentinel)
+		err := niceyaml.WrapError(sentinel)
 
 		require.ErrorIs(t, err, sentinel)
 	})
@@ -779,10 +779,10 @@ func TestError_Unwrap(t *testing.T) {
 		nested1 := errors.New("nested error 1")
 		nested2 := errors.New("nested error 2")
 
-		err := niceyaml.NewErrorFrom(underlying,
+		err := niceyaml.WrapError(underlying,
 			niceyaml.WithErrors(
-				niceyaml.NewErrorFrom(nested1),
-				niceyaml.NewErrorFrom(nested2),
+				niceyaml.WrapError(nested1),
+				niceyaml.WrapError(nested2),
 			),
 		)
 
@@ -801,10 +801,10 @@ func TestError_Unwrap(t *testing.T) {
 		underlying := errors.New("main error")
 		nested := errors.New("nested error")
 
-		err := niceyaml.NewErrorFrom(underlying,
+		err := niceyaml.WrapError(underlying,
 			niceyaml.WithErrors(
 				nil,
-				niceyaml.NewErrorFrom(nested),
+				niceyaml.WrapError(nested),
 				nil,
 			),
 		)
@@ -1022,8 +1022,8 @@ func TestError_MultiError(t *testing.T) {
 		err := niceyaml.NewError(
 			"main error",
 			niceyaml.WithErrors(
-				niceyaml.NewErrorFrom(sentinel1),
-				niceyaml.NewErrorFrom(sentinel2),
+				niceyaml.WrapError(sentinel1),
+				niceyaml.WrapError(sentinel2),
 			),
 		)
 
@@ -1039,7 +1039,7 @@ func TestError_MultiError(t *testing.T) {
 		err := niceyaml.NewError(
 			"main",
 			niceyaml.WithErrors(
-				niceyaml.NewErrorFrom(customErr),
+				niceyaml.WrapError(customErr),
 			),
 		)
 
@@ -1442,7 +1442,7 @@ func TestError_NilReceiver(t *testing.T) {
 	assert.Empty(t, missing.Error())
 	assert.Nil(t, missing.With(niceyaml.WithPath(paths.Root().Child("a"))))
 
-	wrapped := niceyaml.NewErrorFrom(missing, niceyaml.WithPath(paths.Root().Child("a")))
+	wrapped := niceyaml.WrapError(missing, niceyaml.WithPath(paths.Root().Child("a")))
 	assert.Equal(t, "$.a:", wrapped.Error())
 }
 
@@ -1511,7 +1511,7 @@ func TestSourceError_EmptyDocument(t *testing.T) {
 func TestError_NilInnerError(t *testing.T) {
 	t.Parallel()
 
-	err := niceyaml.NewErrorFrom(niceyaml.NewErrorFrom(nil))
+	err := niceyaml.WrapError(niceyaml.WrapError(nil))
 	assert.Empty(t, err.Error())
 
 	wrapped := yamltest.Bind(t, niceyaml.NewSourceFromString("a: 1\n"), err)
@@ -1534,19 +1534,19 @@ func TestError_NilInnerErrorWithLocation(t *testing.T) {
 		wantBound string
 	}{
 		"token": {
-			err:       niceyaml.NewErrorFrom(nil, niceyaml.WithPosition(position.NewFromToken(tk))),
+			err:       niceyaml.WrapError(nil, niceyaml.WithPosition(position.NewFromToken(tk))),
 			want:      "",
 			wantBound: "1:4:",
 		},
 		"range": {
-			err: niceyaml.NewErrorFrom(nil,
+			err: niceyaml.WrapError(nil,
 				niceyaml.WithRange(position.NewRange(position.New(1, 3), position.New(1, 4))),
 			),
 			want:      "",
 			wantBound: "2:4:",
 		},
 		"path": {
-			err:       niceyaml.NewErrorFrom(nil, niceyaml.WithPath(paths.Root().Child("b"))),
+			err:       niceyaml.WrapError(nil, niceyaml.WithPath(paths.Root().Child("b"))),
 			want:      "$.b:",
 			wantBound: "2:4: $.b:",
 		},
@@ -1577,7 +1577,7 @@ func TestError_NestedErrorsKeepInnerPosition(t *testing.T) {
 
 	// Nested errors on the wrapper become its children and add annotations,
 	// and the wrapper still takes its position from the Error it wraps.
-	wrapped := yamltest.Bind(t, source, niceyaml.NewErrorFrom(inner, niceyaml.WithErrors(nested)))
+	wrapped := yamltest.Bind(t, source, niceyaml.WrapError(inner, niceyaml.WithErrors(nested)))
 	assert.Equal(t, "1:4: $.a: bad a", wrapped.Error())
 	assert.Equal(t, "1:4: $.a: bad a\n2:4: $.b: bad b", report(wrapped))
 
@@ -1600,11 +1600,11 @@ func TestError_NestedLocationWithoutMessage(t *testing.T) {
 
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
 	inner := niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a")))
-	nested := niceyaml.NewErrorFrom(nil, niceyaml.WithPath(paths.Root().Child("b")))
+	nested := niceyaml.WrapError(nil, niceyaml.WithPath(paths.Root().Child("b")))
 
 	// A nested Error built from a nil error names a location and nothing
 	// else, so that location is highlighted and carries no annotation.
-	wrapped := yamltest.Bind(t, source, niceyaml.NewErrorFrom(inner, niceyaml.WithErrors(nested)))
+	wrapped := yamltest.Bind(t, source, niceyaml.WrapError(inner, niceyaml.WithErrors(nested)))
 
 	got := trimLines(render(wrapped))
 	assert.Contains(t, got, "<genericError>1</genericError>")
@@ -2551,7 +2551,7 @@ func TestError_ContextAboveLocation(t *testing.T) {
 	// A producer that wraps its own Error with context, the way a SelfValidator
 	// does, leaves the document to the binder above that wrapping.
 	located := niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name")))
-	wrapped := docs[1].Bind(niceyaml.NewErrorFrom(fmt.Errorf("validate: %w", located)))
+	wrapped := docs[1].Bind(niceyaml.WrapError(fmt.Errorf("validate: %w", located)))
 
 	// The producer's context stays as written, behind the resolved position.
 	assert.Equal(t, "3:7: validate: $.name: bad name", wrapped.Error())
@@ -2625,7 +2625,7 @@ func TestError_NestedErrorChains(t *testing.T) {
 			"outer",
 			niceyaml.WithPath(paths.Root().Child("a")),
 			niceyaml.WithErrors(
-				niceyaml.NewErrorFrom(fmt.Errorf("ctx: %w",
+				niceyaml.WrapError(fmt.Errorf("ctx: %w",
 					niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("b"))),
 				)),
 			),
@@ -2658,8 +2658,8 @@ func TestError_NestedErrorChains(t *testing.T) {
 			"outer",
 			niceyaml.WithPath(paths.Root().Child("a")),
 			niceyaml.WithErrors(
-				niceyaml.NewErrorFrom(niceyaml.NewError("inner", niceyaml.WithPosition(position.NewFromToken(tk)))),
-				niceyaml.NewErrorFrom(niceyaml.NewError("also", niceyaml.WithPath(paths.Root().Child("b")))),
+				niceyaml.WrapError(niceyaml.NewError("inner", niceyaml.WithPosition(position.NewFromToken(tk)))),
+				niceyaml.WrapError(niceyaml.NewError("also", niceyaml.WithPath(paths.Root().Child("b")))),
 			),
 		))
 
@@ -2843,7 +2843,7 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 			bound   string
 		}{
 			"direct": {
-				err: niceyaml.NewErrorFrom(
+				err: niceyaml.WrapError(
 					niceyaml.NewError("bad token", niceyaml.WithPosition(position.NewFromToken(tk))),
 					niceyaml.WithErrors(nested),
 				),
@@ -2851,7 +2851,7 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 				bound:   "3:7: bad token",
 			},
 			"behind context": {
-				err: niceyaml.NewErrorFrom(
+				err: niceyaml.WrapError(
 					fmt.Errorf(
 						"document 1: %w",
 						niceyaml.NewError("bad token", niceyaml.WithPosition(position.NewFromToken(tk))),
@@ -2862,7 +2862,7 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 				bound:   "3:7: document 1: bad token",
 			},
 			"range": {
-				err: niceyaml.NewErrorFrom(
+				err: niceyaml.WrapError(
 					niceyaml.NewError("bad range",
 						niceyaml.WithRange(position.NewRange(position.New(2, 6), position.New(2, 12))),
 					),
@@ -2892,7 +2892,7 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 
 		tk := source.Lines().TokenAt(position.New(2, 6))
 		inner := niceyaml.NewError("bad token", niceyaml.WithPosition(position.NewFromToken(tk)))
-		outer := niceyaml.NewErrorFrom(inner, niceyaml.WithPath(namePath))
+		outer := niceyaml.WrapError(inner, niceyaml.WithPath(namePath))
 
 		// The path anchor resolves in the first document, and the message
 		// carries that one position, which agrees with the highlight.
@@ -2927,7 +2927,7 @@ func TestError_ResolvesThroughErrorWrappers(t *testing.T) {
 
 	// Error wrappers add no message text of their own, so the document
 	// attached above them still resolves the location in the message.
-	wrapped := docs[0].Bind(niceyaml.NewErrorFrom(located))
+	wrapped := docs[0].Bind(niceyaml.WrapError(located))
 
 	assert.Equal(t, "1:7: $.name: bad name", wrapped.Error())
 
@@ -3734,7 +3734,7 @@ func TestError_Accessors(t *testing.T) {
 	cause := errors.New("boom")
 	nested := niceyaml.NewError("nested", niceyaml.WithPath(paths.Root().Child("a")))
 
-	err := niceyaml.NewErrorFrom(cause, niceyaml.WithErrors(nil, nested))
+	err := niceyaml.WrapError(cause, niceyaml.WithErrors(nil, nested))
 
 	assert.Equal(t, cause, err.Cause())
 	assert.Equal(t, []error{nested}, err.Errors())
@@ -3745,7 +3745,7 @@ func TestError_Accessors(t *testing.T) {
 
 	require.EqualError(t, niceyaml.NewError("plain").Cause(), "plain")
 	assert.Empty(t, niceyaml.NewError("plain").Errors())
-	assert.NoError(t, niceyaml.NewErrorFrom(nil).Cause())
+	assert.NoError(t, niceyaml.WrapError(nil).Cause())
 
 	var nilErr *niceyaml.Error
 

@@ -267,7 +267,7 @@ func TestNew(t *testing.T) {
 		},
 		"nested error bound to another source keeps its own positions": {
 			err: yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithErrors(
-				niceyaml.NewErrorFrom(yamltest.Bind(t, other,
+				niceyaml.WrapError(yamltest.Bind(t, other,
 					niceyaml.NewError("inner", niceyaml.WithErrors(
 						niceyaml.NewError("bad c", niceyaml.WithPath(paths.Root().Child("c"))),
 					)),
@@ -299,7 +299,7 @@ func TestNew(t *testing.T) {
 			},
 		},
 		"located error above an inner binding positions its own nested errors": {
-			err: yamltest.Bind(t, source, niceyaml.NewErrorFrom(
+			err: yamltest.Bind(t, source, niceyaml.WrapError(
 				yamltest.Bind(t, other, niceyaml.NewError("inner", niceyaml.WithErrors(
 					niceyaml.NewError("bad c", niceyaml.WithPath(paths.Root().Child("c"))),
 				))),
@@ -397,7 +397,7 @@ func TestNew(t *testing.T) {
 			},
 		},
 		"error without a message and nested errors is a forest": {
-			err: niceyaml.NewErrorFrom(nil, niceyaml.WithErrors(
+			err: niceyaml.WrapError(nil, niceyaml.WithErrors(
 				niceyaml.NewError("one"),
 				niceyaml.NewError("two"),
 			)),

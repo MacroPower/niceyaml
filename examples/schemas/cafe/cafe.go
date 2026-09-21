@@ -53,7 +53,7 @@ func NewConfig() Config {
 func (c Config) Validate() error {
 	openTime, err := time.Parse("15:04", c.Spec.Hours.Open)
 	if err != nil {
-		return niceyaml.NewErrorFrom(
+		return niceyaml.WrapError(
 			fmt.Errorf("invalid open time: %w", err),
 			niceyaml.WithPath(paths.Root().Child("spec", "hours", "open")),
 		)
@@ -61,7 +61,7 @@ func (c Config) Validate() error {
 
 	closeTime, err := time.Parse("15:04", c.Spec.Hours.Close)
 	if err != nil {
-		return niceyaml.NewErrorFrom(
+		return niceyaml.WrapError(
 			fmt.Errorf("invalid close time: %w", err),
 			niceyaml.WithPath(paths.Root().Child("spec", "hours", "close")),
 		)

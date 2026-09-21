@@ -718,7 +718,7 @@ func (dd *Document) bindDecodeError(err error) error {
 	}
 
 	if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
-		return dd.Bind(NewErrorFrom(yamlMessageError{yamlErr}, atToken(yamlErr.GetToken())))
+		return dd.Bind(WrapError(yamlMessageError{yamlErr}, atToken(yamlErr.GetToken())))
 	}
 
 	return dd.Bind(err)

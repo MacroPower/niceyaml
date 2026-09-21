@@ -243,7 +243,7 @@ func TestPrinter_PrintError(t *testing.T) {
 			want: "bad",
 		},
 		"bound error with an empty message": {
-			err:  yamltest.Bind(t, source, niceyaml.NewErrorFrom(nil, niceyaml.WithPath(paths.Root().Child("b")))),
+			err:  yamltest.Bind(t, source, niceyaml.WrapError(nil, niceyaml.WithPath(paths.Root().Child("b")))),
 			want: "2:4: $.b:\n\n" + excerpt,
 		},
 		"joined bound errors print every excerpt": {
