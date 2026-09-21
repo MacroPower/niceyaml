@@ -2,7 +2,7 @@
 //
 // A [Printer] takes a [line.View], such as the view of a niceyaml Source,
 // and renders it with syntax highlighting through [lipgloss.Style] values
-// from a [StyleGetter]. Create one with [New] and render with
+// from a [Styler]. Create one with [New] and render with
 // [Printer.Print] or [Printer.Fprint]:
 //
 //	p := printer.New(printer.WithStyles(theme.Charm))
@@ -60,14 +60,14 @@ import (
 
 const wrapOnCharacters = " /-"
 
-// StyleGetter retrieves the style for each [kind.Kind].
+// Styler retrieves the style for each [kind.Kind].
 //
 // A [Printer] asks for each kind as it renders and caches the styles it
 // blends for overlays by the kinds involved, so Style should return the
 // same style for a kind for the life of the value.
 //
 // See [style.Styles] for an implementation.
-type StyleGetter interface {
+type Styler interface {
 	Style(s kind.Kind) lipgloss.Style
 }
 
@@ -140,7 +140,7 @@ type StyleGetter interface {
 // context lines [WithContextLines] sets. A program configures one printer
 // with its terminal width and theme and prints its errors through it.
 type Printer struct {
-	styles         StyleGetter
+	styles         Styler
 	style          lipgloss.Style
 	gutterFunc     GutterFunc
 	annotationFunc AnnotationFunc
@@ -224,7 +224,7 @@ type Option func(*Printer)
 // annotations rather than its content, so the built-in gutters leave the
 // line number and diff marker out of it.
 type GutterContext struct {
-	Styles     StyleGetter
+	Styles     Styler
 	Index      int
 	Number     int
 	MaxNumber  int
@@ -247,7 +247,7 @@ type GutterFunc func(GutterContext) string
 // [line.Annotation.Kind], so the func renders them as one piece of text and
 // the printer styles it with that Kind.
 type AnnotationContext struct {
-	Styles StyleGetter
+	Styles Styler
 
 	// Content is the text of the annotated line, without its line ending.
 	// Annotation columns count runes of this text, and the display width
@@ -422,12 +422,12 @@ func WithContainerWidth(n int) Option {
 	}
 }
 
-// WithStyles is a [Option] that sets the [StyleGetter], typically a
+// WithStyles is a [Option] that sets the [Styler], typically a
 // theme from [go.jacobcolvin.com/niceyaml/style/theme], that styles tokens,
 // gutters, and annotations. A nil s selects [style.Default].
 //
 // To style the frame around the output, use [WithContainerStyle].
-func WithStyles(s StyleGetter) Option {
+func WithStyles(s Styler) Option {
 	return func(p *Printer) {
 		if s == nil {
 			s = style.Default()
@@ -529,7 +529,7 @@ func (p *Printer) ContainerStyle() lipgloss.Style {
 }
 
 // Style retrieves the [lipgloss.Style] for the given [kind.Kind] from the
-// printer's [StyleGetter].
+// printer's [Styler].
 func (p *Printer) Style(s kind.Kind) lipgloss.Style {
 	return p.styles.Style(s)
 }

@@ -1832,7 +1832,7 @@ func TestPrinter_Style(t *testing.T) {
 	}
 }
 
-func TestPrinter_TokenTypes_XMLStyleGetter(t *testing.T) {
+func TestPrinter_TokenTypes_XMLStyler(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -3765,7 +3765,7 @@ func TestPrinter_WithStyles_Nil(t *testing.T) {
 
 	view := niceyaml.NewSourceFromString("key: value").View()
 
-	// A nil StyleGetter selects the default styles rather than panicking
+	// A nil Styler selects the default styles rather than panicking
 	// in New.
 	assert.Equal(t, printer.New().Print(view), printer.New(printer.WithStyles(nil)).Print(view))
 }
