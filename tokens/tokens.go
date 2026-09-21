@@ -59,6 +59,13 @@ func Tokenize(src string) token.Tokens {
 	return tks
 }
 
+// countLineBreaks returns the number of line breaks in s, counting "\r\n",
+// "\n", and a bare "\r" as one each. The go-yaml lexer advances
+// Position.Line on all three.
+func countLineBreaks(s string) int {
+	return strings.Count(s, "\n") + strings.Count(s, "\r") - strings.Count(s, "\r\n")
+}
+
 // TrimLineEnding returns s without its trailing line ending: "\n", "\r\n",
 // or a bare "\r". The go-yaml lexer splits CRLF endings across tokens, so a
 // token may end with the "\r" alone while the "\n" opens the next one.
@@ -112,9 +119,9 @@ func ResetPositions(tks token.Tokens) token.Tokens {
 		}
 
 		lead := tk.Origin[:len(tk.Origin)-len(trimmed)]
-		lastLine := lead[strings.LastIndexByte(lead, '\n')+1:]
+		lastLine := lead[strings.LastIndexAny(lead, "\r\n")+1:]
 
-		startLine = tk.Position.Line - strings.Count(lead, "\n")
+		startLine = tk.Position.Line - countLineBreaks(lead)
 		startCol = tk.Position.Column - len(lastLine)
 		startOffset = tk.Position.Offset - len(lead)
 

@@ -711,6 +711,8 @@ func TestResetPositions_Text(t *testing.T) {
 			"header after directive":       {input: "%YAML 1.2\n---\na: 1\n"},
 			"leading blank lines":          {input: "\n\na: 1\n"},
 			"crlf after document end":      {input: "a: 1\r\n...\r\nb: 2\r\n"},
+			"bare cr after document end":   {input: "a: 1\r...\rb: 2\r"},
+			"bare cr blank line":           {input: "a: 1\r...\r\rb: 2\r"},
 		}
 
 		for name, tc := range tcs {
