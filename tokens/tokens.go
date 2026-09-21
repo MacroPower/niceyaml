@@ -44,16 +44,22 @@ func Tokenize(src string) token.Tokens {
 	// does and the last line count matches the text. The rest is found
 	// behind the last token's text rather than behind the joined origins,
 	// which need not be a prefix of the source when the lexer dropped text
-	// earlier in the file.
+	// earlier in the file. The search leaves the token's own trailing
+	// whitespace out as well, because the lexer rewrites it: it collapses a
+	// blank line of spaces to a bare line ending, which leaves an Origin the
+	// source does not hold. A token whose text the source does not hold
+	// either keeps the Origin it came with.
 	last := tks[len(tks)-1]
 
-	i := strings.LastIndex(src, last.Origin)
+	text := strings.TrimRight(last.Origin, " \t\r\n")
+
+	i := strings.LastIndex(src, text)
 	if i < 0 {
 		return tks
 	}
 
-	if rest := src[i+len(last.Origin):]; rest != "" && strings.TrimSpace(rest) == "" {
-		last.Origin += rest
+	if rest := src[i+len(text):]; rest != "" && strings.TrimSpace(rest) == "" {
+		last.Origin = text + rest
 	}
 
 	return tks
