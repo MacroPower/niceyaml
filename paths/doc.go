@@ -85,6 +85,12 @@
 //	replicas := spec.Child("replicas") // $.spec.replicas
 //	image := spec.Child("image")       // $.spec.image
 //
+// [Path.Join] appends one path to another, so a path written from a node
+// of the document, such as one a check on a decoded value reports,
+// resolves from the root:
+//
+//	spec.Join(paths.Root().Child("replicas")) // $.spec.replicas
+//
 // For the goccy/go-yaml API, [Path.YAMLPath] converts the selectors to a
 // [*yaml.Path].
 package paths

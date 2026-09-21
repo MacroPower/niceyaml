@@ -176,6 +176,24 @@ func (p Path) Recursive(selector string) Path {
 	return p.extend(segment{kind: segmentRecursive, name: selector})
 }
 
+// Join returns a copy of the path with the selectors of q appended, so a
+// path written from one node of a document resolves from the root:
+//
+//	hours := paths.Root().Child("spec", "hours")
+//	open := paths.Root().Child("open")
+//	hours.Join(open) // $.spec.hours.open
+//
+// Joining the root changes nothing, and joining to the root yields q.
+func (p Path) Join(q Path) Path {
+	return p.extend(q.segments...)
+}
+
+// IsRoot reports whether the path holds no selectors, so it names the
+// document root as [Root] does.
+func (p Path) IsRoot() bool {
+	return len(p.segments) == 0
+}
+
 // String returns the path expression, such as "$.metadata.name", which
 // [Parse] reads back.
 func (p Path) String() string {

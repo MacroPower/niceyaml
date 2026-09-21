@@ -215,6 +215,77 @@ func TestPath_Immutable(t *testing.T) {
 	})
 }
 
+func TestPath_Join(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		p    paths.Path
+		q    paths.Path
+		want string
+	}{
+		"root to root": {
+			p:    paths.Root(),
+			q:    paths.Root(),
+			want: "$",
+		},
+		"root to path": {
+			p:    paths.Root(),
+			q:    paths.Root().Child("open"),
+			want: "$.open",
+		},
+		"path to root": {
+			p:    paths.Root().Child("spec", "hours"),
+			q:    paths.Root(),
+			want: "$.spec.hours",
+		},
+		"path to path": {
+			p:    paths.Root().Child("spec", "hours"),
+			q:    paths.Root().Child("open"),
+			want: "$.spec.hours.open",
+		},
+		"keeps every selector kind": {
+			p:    paths.Root().Child("items").Index(0),
+			q:    paths.Root().Recursive("name").IndexAll().Key(),
+			want: "$.items[0]..name[*]~",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.p.Join(tc.q).String())
+		})
+	}
+
+	t.Run("leaves both paths as they were", func(t *testing.T) {
+		t.Parallel()
+
+		p := paths.Root().Child("spec")
+		q := paths.Root().Child("open")
+		joined := p.Join(q)
+
+		assert.Equal(t, "$.spec.open", joined.String())
+		assert.Equal(t, "$.spec", p.String())
+		assert.Equal(t, "$.open", q.String())
+		assert.Equal(t, "$.spec.open.x", joined.Child("x").String())
+		assert.Equal(t, "$.spec", p.String())
+	})
+}
+
+func TestPath_IsRoot(t *testing.T) {
+	t.Parallel()
+
+	var zero paths.Path
+
+	assert.True(t, paths.Root().IsRoot())
+	assert.True(t, zero.IsRoot())
+	assert.True(t, paths.MustParse("$").IsRoot())
+	assert.False(t, paths.Root().Child("a").IsRoot())
+	assert.False(t, paths.Root().Key().IsRoot())
+	assert.False(t, paths.Root().Index(0).IsRoot())
+}
+
 func TestParse(t *testing.T) {
 	t.Parallel()
 
