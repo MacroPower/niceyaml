@@ -1163,19 +1163,15 @@ func (e *SourceError) Excerpt(context int) (*line.View, error) {
 	spans := position.ContextSpans(marked, context, view.Len())
 	excerpt := view.Slice(spans...)
 
-	// Add "..." annotations to first line of each non-first hunk.
-	start := 0
-
-	for i, span := range spans {
-		if i > 0 {
-			excerpt.Annotate(start, line.Annotation{
-				Content:   "...",
-				Kind:      kind.UISeparator,
-				Placement: line.Above,
-			})
-		}
-
-		start += span.Len()
+	// Add "..." annotations to the first line of each hunk after the
+	// first. ContextSpans clamps the spans to the view, so each one starts
+	// on a line the excerpt holds.
+	for _, span := range spans[1:] {
+		excerpt.Annotate(span.Start, line.Annotation{
+			Content:   "...",
+			Kind:      kind.UISeparator,
+			Placement: line.Above,
+		})
 	}
 
 	return excerpt, nil

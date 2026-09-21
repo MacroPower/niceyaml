@@ -50,7 +50,10 @@
 // so the decoration added to one view reaches neither the Source nor
 // another view, and taking a view costs nothing. [Document.View] is the
 // same view sliced to the lines of one document, with the line numbers
-// they have in the file.
+// they have in the file. Every index and range a view takes is in the
+// coordinates of its lines, and a slice keeps them, so the ranges a
+// [finder.Finder] or [Document.Ranges] returns apply to a view of the
+// whole source and to a slice of it alike.
 //
 // A view need not be a YAML document. Diffs, for example, interleave lines
 // from two revisions and are plain [line.View] values.

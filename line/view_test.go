@@ -93,6 +93,38 @@ func TestNewView(t *testing.T) {
 	})
 }
 
+func TestView_Contains(t *testing.T) {
+	t.Parallel()
+
+	view := newTestView(t, "a: 1\nb: 2\nc: 3\n", 3)
+	sliced := view.Slice(position.NewSpan(1, 3))
+
+	var nilView *line.View
+
+	tcs := map[string]struct {
+		view *line.View
+		i    int
+		want bool
+	}{
+		"held by the whole view":  {view: view, i: 0, want: true},
+		"held by a slice":         {view: sliced, i: 1, want: true},
+		"dropped by a slice":      {view: sliced, i: 0, want: false},
+		"before the content":      {view: view, i: -1, want: false},
+		"past the content":        {view: view, i: 3, want: false},
+		"nil view":                {view: nilView, i: 0, want: false},
+		"zero view":               {view: &line.View{}, i: 0, want: false},
+		"empty slice of the view": {view: view.Slice(position.NewSpan(0, 0)), i: 0, want: false},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.view.Contains(tc.i))
+		})
+	}
+}
+
 func TestView_All(t *testing.T) {
 	t.Parallel()
 
@@ -676,7 +708,7 @@ func TestView_Indices(t *testing.T) {
 		"line held twice by a slice": {
 			view: view.Slice(position.NewSpan(2, 4), position.NewSpan(2, 3)),
 			line: view.Line(2),
-			want: []int{0, 2},
+			want: []int{2},
 		},
 		"line of a slice that dropped it": {
 			view: view.Slice(position.NewSpan(0, 2)),
@@ -805,7 +837,7 @@ func TestView_Slice(t *testing.T) {
 			got := view.Slice(span)
 
 			assert.Equal(t, 0, got.Len(), name)
-			assert.Empty(t, got.Lines(), name)
+			assert.Equal(t, view.Lines(), got.Lines(), name)
 			assert.Empty(t, got.String(), name)
 		}
 	})
@@ -817,8 +849,9 @@ func TestView_Slice(t *testing.T) {
 		got := view.Slice(position.NewSpan(2, 4))
 
 		require.Equal(t, 2, got.Len())
-		assert.Same(t, view.Line(2), got.Line(0))
-		assert.Same(t, view.Line(3), got.Line(1))
+		assert.Same(t, view.Line(2), got.Line(2))
+		assert.Same(t, view.Line(3), got.Line(3))
+		assert.Equal(t, view.Lines(), got.Lines())
 	})
 
 	t.Run("carries decoration", func(t *testing.T) {
@@ -829,19 +862,23 @@ func TestView_Slice(t *testing.T) {
 
 		require.Equal(t, 2, got.Len())
 
-		// Line 3 of the source is line 0 of the slice.
-		assert.Equal(t, line.Flag(3), got.Flag(0))
-		require.Len(t, got.Overlays(0), 1)
-		assert.Equal(t, position.NewSpan(0, 4), got.Overlays(0)[0].Cols)
-		require.Len(t, got.Annotations(0), 1)
-		assert.Equal(t, "d: 4", got.Annotations(0)[0].Content)
+		// The slice keeps the indices of the source.
+		assert.Equal(t, line.Flag(3), got.Flag(3))
+		require.Len(t, got.Overlays(3), 1)
+		assert.Equal(t, position.NewSpan(0, 4), got.Overlays(3)[0].Cols)
+		require.Len(t, got.Annotations(3), 1)
+		assert.Equal(t, "d: 4", got.Annotations(3)[0].Content)
 
-		// Line 1 of the source is line 1 of the slice.
 		assert.Equal(t, line.Flag(1), got.Flag(1))
 		require.Len(t, got.Overlays(1), 1)
 		assert.Equal(t, position.NewSpan(0, 2), got.Overlays(1)[0].Cols)
 		require.Len(t, got.Annotations(1), 1)
 		assert.Equal(t, "b: 2", got.Annotations(1)[0].Content)
+
+		// The decoration of a line the slice does not hold is left behind.
+		assert.Equal(t, line.FlagDefault, got.Flag(2))
+		assert.Empty(t, got.Overlays(2))
+		assert.Empty(t, got.Annotations(2))
 	})
 
 	t.Run("decoration is independent", func(t *testing.T) {
@@ -850,14 +887,64 @@ func TestView_Slice(t *testing.T) {
 		view := decorated(t)
 		got := view.Slice(position.NewSpan(1, 2))
 
-		got.SetFlag(0, line.FlagDefault)
-		got.AddLineOverlay(0, line.Overlay{Cols: position.NewSpan(2, 3), Kind: "extra"})
-		got.Annotate(0, line.Annotation{Content: "extra"})
+		got.SetFlag(1, line.FlagDefault)
+		got.AddLineOverlay(1, line.Overlay{Cols: position.NewSpan(2, 3), Kind: "extra"})
+		got.Annotate(1, line.Annotation{Content: "extra"})
 
 		assert.Equal(t, line.Flag(1), view.Flag(1))
 		assert.Len(t, view.Overlays(1), 1)
 		assert.Len(t, view.Annotations(1), 1)
-		assert.Len(t, got.Overlays(0), 2)
+		assert.Len(t, got.Overlays(1), 2)
+	})
+
+	t.Run("keeps the coordinates of the content", func(t *testing.T) {
+		t.Parallel()
+
+		// Decorating before or after slicing renders the same, since a
+		// slice takes ranges and indices in the coordinates of its content.
+		rng := position.NewRange(position.New(2, 3), position.New(2, 4))
+		ann := line.Annotation{Content: "here", Placement: line.Below, Col: 3}
+
+		before := newTestView(t, input, 4)
+		before.AddOverlay("test", rng)
+		before.Annotate(2, ann)
+
+		before = before.Slice(position.NewSpan(2, 4))
+
+		after := newTestView(t, input, 4).Slice(position.NewSpan(2, 4))
+		after.AddOverlay("test", rng)
+		after.Annotate(2, ann)
+
+		want := stringtest.JoinLF(
+			"   3 | c: 3",
+			"     |    ^ here",
+			"   4 | d: 4",
+		)
+		assert.Equal(t, want, before.String())
+		assert.Equal(t, want, after.String())
+	})
+
+	t.Run("a slice of a slice narrows it", func(t *testing.T) {
+		t.Parallel()
+
+		view := newTestView(t, input, 4)
+		got := view.Slice(position.NewSpan(1, 4)).Slice(position.NewSpan(0, 3))
+
+		assert.Equal(t, []string{"b: 2", "c: 3"}, contents(got))
+		assert.True(t, got.Contains(1))
+		assert.False(t, got.Contains(0))
+		assert.False(t, got.Contains(3))
+	})
+
+	t.Run("decoration on a line the slice does not hold never renders", func(t *testing.T) {
+		t.Parallel()
+
+		view := newTestView(t, input, 4).Slice(position.NewSpan(0, 2))
+		view.AddOverlay("test", position.NewRange(position.New(3, 0), position.New(3, 4)))
+		view.Annotate(3, line.Annotation{Content: "hidden", Placement: line.Below})
+
+		assert.Len(t, view.Overlays(3), 1)
+		assert.Equal(t, "   1 | a: 1\n   2 | b: 2", view.String())
 	})
 
 	t.Run("undecorated source", func(t *testing.T) {
@@ -868,7 +955,7 @@ func TestView_Slice(t *testing.T) {
 
 		require.Equal(t, 2, got.Len())
 
-		for i := range got.Len() {
+		for i := range got.All() {
 			assert.Equal(t, line.FlagDefault, got.Flag(i))
 			assert.Nil(t, got.Overlays(i))
 			assert.Nil(t, got.Annotations(i))

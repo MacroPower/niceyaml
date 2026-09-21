@@ -633,7 +633,7 @@ func (dd *Document) View() *line.View {
 //		return err
 //	}
 //
-//	view := doc.Source().View()
+//	view := doc.View()
 //	view.AddOverlay(kind.GenericHighlight, ranges...)
 //
 // A path that does not resolve returns the error [paths.Path.Token]

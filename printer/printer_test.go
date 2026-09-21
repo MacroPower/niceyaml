@@ -3411,7 +3411,7 @@ func TestPrinter_LineNumbers_MaxNumber(t *testing.T) {
 	input := strings.Repeat("k: v\n", 10000) + "last: this is a long value that wraps"
 	source := niceyaml.NewSourceFromString(input)
 	view := source.View().Slice(position.NewSpan(10000, source.Lines().Len()))
-	view.Annotate(0, line.Annotation{Content: "note", Placement: line.Below, Col: 6})
+	view.Annotate(10000, line.Annotation{Content: "note", Placement: line.Below, Col: 6})
 
 	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrap(30))
 
@@ -4003,18 +4003,23 @@ func TestPrinter_Layout(t *testing.T) {
 		assert.Equal(t, []int{2, 6}, layoutRows(l))
 		assert.Equal(t, 2, l.LineStart(1))
 
-		// Lines are numbered as the slice orders them, not as the source does.
+		// The layout numbers lines by position, as the slice orders them,
+		// and Index maps a position back to the index in the content.
 		assert.Equal(t, 0, l.LineAt(0))
 		assert.Equal(t, 0, l.LineAt(1))
 		assert.Equal(t, 1, l.LineAt(2))
 		assert.Equal(t, 1, l.LineAt(7))
 		assert.Equal(t, 1, l.LineAt(100))
 		assert.Equal(t, 0, l.LineAt(-1))
+		assert.Equal(t, 2, l.Index(0))
+		assert.Equal(t, 0, l.Index(1))
 
-		assert.Equal(t, 0, l.RowOf(position.New(0, 0)))
-		assert.Equal(t, 4, l.RowOf(position.New(1, 0)))
-		assert.Equal(t, 5, l.RowOf(position.New(1, 15)))
-		assert.Equal(t, -1, l.RowOf(position.New(2, 0)))
+		// RowOf takes a position in the content, so line 0 of the content
+		// is the second line of the layout and line 1 is not in it.
+		assert.Equal(t, 0, l.RowOf(position.New(2, 0)))
+		assert.Equal(t, 4, l.RowOf(position.New(0, 0)))
+		assert.Equal(t, 5, l.RowOf(position.New(0, 15)))
+		assert.Equal(t, -1, l.RowOf(position.New(1, 0)))
 	})
 
 	t.Run("tabs and control characters keep columns aligned", func(t *testing.T) {

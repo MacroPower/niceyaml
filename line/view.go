@@ -24,53 +24,91 @@ import (
 // one reaches no other. Two renderings of one document, such as search
 // highlights and error marks, are two Views over the same [Lines].
 //
-// Index-taking methods panic when the index is outside the view, as
-// indexing a slice does. A View is not safe for concurrent mutation.
+// Every index and every [position.Range] a View takes or yields is in the
+// coordinates of its content, the [Lines] that [View.Lines] returns, where
+// line i is [Lines.Line] i. A View from [View.Slice] holds some of those
+// lines and keeps their indices, so a range from a search of the content
+// or from the path of a document applies to a slice of the content as it
+// applies to the whole, and slicing before or after decorating renders the
+// same. [View.All] yields the lines the View holds with their indices, and
+// [View.Contains] reports whether it holds a line.
+//
+// Index-taking methods panic when the index is outside the content, as
+// indexing a slice does. Decoration on a line the View does not hold is
+// kept and never renders. A View is not safe for concurrent mutation.
 // Decorate from one goroutine at a time, and do not decorate while another
 // goroutine renders.
 //
 // Create instances with [NewView]. The zero value is an empty view.
 type View struct {
-	lines       []*Line
+	lines Lines
+	// The index in lines of each line the View holds, in view order.
+	held []int
+	// Whether the View holds each line of lines, by index.
+	mask        []bool
 	flags       []Flag
 	overlays    []Overlays
 	annotations []Annotations
 }
 
-// NewView creates a new [*View] over lines with no decoration.
+// NewView creates a new [*View] over lines with no decoration, holding
+// every line in order.
 func NewView(lines Lines) *View {
-	return &View{lines: lines.lines}
+	held := make([]int, lines.Len())
+	mask := make([]bool, lines.Len())
+
+	for i := range held {
+		held[i] = i
+		mask[i] = true
+	}
+
+	return &View{lines: lines, held: held, mask: mask}
 }
 
-// Lines returns the content of the [View].
+// Lines returns the content of the [View]: every line of the [Lines] it is
+// over, whether or not the View holds it. A search of the content, such as
+// one a [finder.Finder] loads, yields ranges in the coordinates every View
+// method takes.
+//
+// [finder.Finder]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/finder#Finder
 func (v *View) Lines() Lines {
 	if v == nil {
 		return Lines{}
 	}
 
-	return Lines{lines: v.lines}
+	return v.lines
 }
 
-// Len returns the number of lines.
+// Len returns the number of lines the [View] holds.
 func (v *View) Len() int {
 	if v == nil {
 		return 0
 	}
 
-	return len(v.lines)
+	return len(v.held)
 }
 
-// Line returns the [*Line] at index i.
+// Line returns line i of the content, whether or not the [View] holds it.
 func (v *View) Line(i int) *Line {
-	return v.lines[i]
+	return v.lines.lines[i]
 }
 
-// Indices returns every index of the [View] that holds l, in view order.
-// Lines are shared by pointer between every view over the same content,
-// so a decorator that knows a line of a [Lines] value finds where that line
-// sits in a slice of it, or in a diff that interleaves it with another
-// revision, without knowing how the view was built. A line the view does
-// not hold, such as one from other content, yields nil.
+// Contains reports whether the [View] holds line i of its content. A nil
+// View holds no line, and an index outside the content is held by none.
+func (v *View) Contains(i int) bool {
+	if v == nil || i < 0 || i >= len(v.mask) {
+		return false
+	}
+
+	return v.mask[i]
+}
+
+// Indices returns the index of every line the [View] holds that is l, in
+// view order and each once. Lines are shared by pointer between every view
+// over the same content, so a decorator that knows a line of a [Lines]
+// value finds it in a slice of that content, or in a diff that interleaves
+// it with another revision, without knowing how the view was built. A
+// line the view does not hold, such as one from other content, yields nil.
 func (v *View) Indices(l *Line) []int {
 	if v == nil || l == nil {
 		return nil
@@ -78,8 +116,8 @@ func (v *View) Indices(l *Line) []int {
 
 	var out []int
 
-	for i, vl := range v.lines {
-		if vl == l {
+	for _, i := range v.held {
+		if v.lines.lines[i] == l && !slices.Contains(out, i) {
 			out = append(out, i)
 		}
 	}
@@ -87,17 +125,42 @@ func (v *View) Indices(l *Line) []int {
 	return out
 }
 
-// All returns an iterator over the lines within the given spans, as
-// [Lines.All] does. Each iteration yields the 0-indexed line index and
-// the [*Line] at that index, and the index reaches the line's decoration
-// through [View.Flag], [View.Overlays], and [View.Annotations].
+// All returns an iterator over the lines the [View] holds within the given
+// spans, in view order within each span and in the order the spans are
+// given, or over every line it holds when no span is given. Each iteration
+// yields the index of the line in the content and the [*Line], and the
+// index reaches the line's decoration through [View.Flag],
+// [View.Overlays], and [View.Annotations]. A span reaching outside the
+// content selects the lines it does hold.
 func (v *View) All(spans ...position.Span) iter.Seq2[int, *Line] {
-	return v.Lines().All(spans...)
+	return func(yield func(int, *Line) bool) {
+		if v == nil {
+			return
+		}
+
+		if len(spans) == 0 {
+			for _, i := range v.held {
+				if !yield(i, v.lines.lines[i]) {
+					return
+				}
+			}
+
+			return
+		}
+
+		for _, span := range spans {
+			for _, i := range v.held {
+				if span.Contains(i) && !yield(i, v.lines.lines[i]) {
+					return
+				}
+			}
+		}
+	}
 }
 
 // Flag returns the [Flag] of line i. The zero value is [FlagDefault].
 func (v *View) Flag(i int) Flag {
-	_ = v.lines[i]
+	_ = v.lines.lines[i]
 
 	if v.flags == nil {
 		return FlagDefault
@@ -108,10 +171,10 @@ func (v *View) Flag(i int) Flag {
 
 // SetFlag sets the [Flag] of line i.
 func (v *View) SetFlag(i int, f Flag) {
-	_ = v.lines[i]
+	_ = v.lines.lines[i]
 
 	if v.flags == nil {
-		v.flags = make([]Flag, len(v.lines))
+		v.flags = make([]Flag, v.lines.Len())
 	}
 
 	v.flags[i] = f
@@ -121,7 +184,7 @@ func (v *View) SetFlag(i int, f Flag) {
 // were added. The slice is shared with the view, so treat it as read-only
 // and add to it with [View.Annotate].
 func (v *View) Annotations(i int) Annotations {
-	_ = v.lines[i]
+	_ = v.lines.lines[i]
 
 	if v.annotations == nil {
 		return nil
@@ -132,10 +195,10 @@ func (v *View) Annotations(i int) Annotations {
 
 // Annotate adds the given [Annotation] values to line i.
 func (v *View) Annotate(i int, ann ...Annotation) {
-	_ = v.lines[i]
+	_ = v.lines.lines[i]
 
 	if v.annotations == nil {
-		v.annotations = make([]Annotations, len(v.lines))
+		v.annotations = make([]Annotations, v.lines.Len())
 	}
 
 	v.annotations[i] = append(v.annotations[i], ann...)
@@ -146,7 +209,7 @@ func (v *View) Annotate(i int, ann ...Annotation) {
 // add to it with [View.AddOverlay], [View.BlendOverlay], or
 // [View.AddLineOverlay].
 func (v *View) Overlays(i int) Overlays {
-	_ = v.lines[i]
+	_ = v.lines.lines[i]
 
 	if v.overlays == nil {
 		return nil
@@ -159,23 +222,24 @@ func (v *View) Overlays(i int) Overlays {
 // [View.AddOverlay] and [View.BlendOverlay] clamp a range to the lines it
 // covers before adding; AddLineOverlay does not.
 func (v *View) AddLineOverlay(i int, o ...Overlay) {
-	_ = v.lines[i]
+	_ = v.lines.lines[i]
 
 	if v.overlays == nil {
-		v.overlays = make([]Overlays, len(v.lines))
+		v.overlays = make([]Overlays, v.lines.Len())
 	}
 
 	v.overlays[i] = append(v.overlays[i], o...)
 }
 
-// AddOverlay adds an overlay with the given style to the specified ranges.
-// The overlay replaces the style underneath it; use [View.BlendOverlay] to
-// mix with it instead.
+// AddOverlay adds an overlay with the given style to the specified ranges,
+// in the coordinates of the content. The overlay replaces the style
+// underneath it; use [View.BlendOverlay] to mix with it instead.
 //
 // It splits each range into one overlay per line with [Lines.SliceLines],
 // which clamps the columns to the width of the line and skips lines
-// outside the view, so a range computed against a longer view is safe to
-// apply. A range that covers no columns of a line adds no overlay to it.
+// outside the content, so a range computed against longer content is safe
+// to apply. A range that covers no columns of a line adds no overlay to
+// it, and an overlay on a line the View does not hold never renders.
 func (v *View) AddOverlay(s kind.Kind, ranges ...position.Range) {
 	for _, r := range ranges {
 		v.addOverlayRange(s, false, r)
@@ -192,9 +256,9 @@ func (v *View) BlendOverlay(s kind.Kind, ranges ...position.Range) {
 }
 
 // addOverlayRange adds a single overlay range, one overlay per line r
-// covers within the view.
+// covers within the content.
 func (v *View) addOverlayRange(s kind.Kind, blend bool, r position.Range) {
-	for _, lr := range v.Lines().SliceLines(r) {
+	for _, lr := range v.lines.SliceLines(r) {
 		v.AddLineOverlay(lr.Start.Line, Overlay{
 			Cols:  position.NewSpan(lr.Start.Col, lr.End.Col),
 			Kind:  s,
@@ -204,15 +268,15 @@ func (v *View) addOverlayRange(s kind.Kind, blend bool, r position.Range) {
 }
 
 // Clone returns a copy of the [View] with its own decoration. The copy
-// shares the lines with the original, so it costs one copy of the flags,
-// overlays, and annotations, and decorating either reaches nothing in the
-// other.
+// shares the lines with the original and holds the same ones, so it costs
+// one copy of the flags, overlays, and annotations, and decorating either
+// reaches nothing in the other.
 func (v *View) Clone() *View {
 	if v == nil {
 		return nil
 	}
 
-	c := &View{lines: v.lines}
+	c := &View{lines: v.lines, held: slices.Clone(v.held), mask: slices.Clone(v.mask)}
 
 	if v.flags != nil {
 		c.flags = slices.Clone(v.flags)
@@ -235,27 +299,45 @@ func (v *View) Clone() *View {
 	return c
 }
 
-// Slice returns a new [*View] holding the lines within the given spans, in
-// the supplied order, each with its decoration. Spans are clamped to the
-// view as [Lines.All] clamps them. The result shares the lines with
-// the receiver and owns its decoration, so it is the view a caller renders
-// to show part of a document, such as the hunks around an error.
+// Slice returns a new [*View] over the same content that holds the lines
+// the receiver holds within the given spans, in the order [View.All]
+// yields them, each with its index and its decoration. The result owns
+// its decoration and carries that of the lines it holds, so it is the view
+// a caller renders to show part of a document, such as the hunks around
+// an error, and a range or an index that applies to the receiver applies
+// to it. Slicing an already sliced view narrows it further.
 func (v *View) Slice(spans ...position.Span) *View {
-	out := &View{}
+	out := &View{lines: v.Lines()}
+	if v == nil {
+		return out
+	}
+
+	n := v.lines.Len()
+	out.mask = make([]bool, n)
 
 	for i := range v.All(spans...) {
-		out.lines = append(out.lines, v.lines[i])
+		out.held = append(out.held, i)
+		out.mask[i] = true
+	}
 
-		if v.flags != nil {
-			out.flags = append(out.flags, v.flags[i])
+	if v.flags != nil {
+		out.flags = make([]Flag, n)
+		for _, i := range out.held {
+			out.flags[i] = v.flags[i]
 		}
+	}
 
-		if v.overlays != nil {
-			out.overlays = append(out.overlays, slices.Clone(v.overlays[i]))
+	if v.overlays != nil {
+		out.overlays = make([]Overlays, n)
+		for _, i := range out.held {
+			out.overlays[i] = slices.Clone(v.overlays[i])
 		}
+	}
 
-		if v.annotations != nil {
-			out.annotations = append(out.annotations, slices.Clone(v.annotations[i]))
+	if v.annotations != nil {
+		out.annotations = make([]Annotations, n)
+		for _, i := range out.held {
+			out.annotations[i] = slices.Clone(v.annotations[i])
 		}
 	}
 

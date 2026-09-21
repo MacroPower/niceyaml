@@ -72,6 +72,13 @@ func (s finderSearcher) Load(lines line.Lines) Index {
 // lines in a view of its own, so decoration shows only while the viewport
 // displays a revision without a diff.
 //
+// The viewport renders the lines the view holds in the order
+// [line.View.All] yields them and windows them by index, so it expects the
+// indices to ascend, as they do in every view [niceyaml.Source.View],
+// [niceyaml.Document.View], [niceyaml.SourceError.Excerpt], and the diff
+// package return. A search covers the content of the view, and the
+// viewport keeps the matches on lines the view holds.
+//
 // See [NewRevision] and [niceyaml.Source] for implementations.
 type Revision interface {
 	Name() string
@@ -803,8 +810,8 @@ func (m *Model) updateSideBySideSearchState() {
 	}
 
 	// Search on both sources and cache results for overlay application.
-	m.leftMatches = m.index.Find(m.searchTerm)
-	m.rightMatches = m.indexRight.Find(m.searchTerm)
+	m.leftMatches = heldMatches(m.baseLeft, m.index.Find(m.searchTerm))
+	m.rightMatches = heldMatches(m.baseRight, m.indexRight.Find(m.searchTerm))
 
 	// Build combined match list. For equal lines, a match appears in both
 	// sources at the same position, so we deduplicate by (row, startCol).
@@ -819,10 +826,8 @@ func (m *Model) updateSideBySideSearchState() {
 		combined = append(combined, searchMatch{rng: match, inLeft: true})
 
 		// Track equal-line matches for deduplication.
-		if match.Start.Line < m.baseLeft.Len() {
-			if m.baseLeft.Flag(match.Start.Line) == line.FlagDefault {
-				equalLinePositions[match.Start] = true
-			}
+		if m.baseLeft.Contains(match.Start.Line) && m.baseLeft.Flag(match.Start.Line) == line.FlagDefault {
+			equalLinePositions[match.Start] = true
 		}
 	}
 
@@ -886,7 +891,7 @@ func (m *Model) applySideBySideOverlays() {
 		// a diff puts opposite an inserted or deleted line is empty and
 		// carries the default flag too, so one pane alone cannot tell the
 		// two apart.
-		if l := selectedPos.Line; l < m.left.Len() && l < m.right.Len() {
+		if l := selectedPos.Line; m.left.Contains(l) && m.right.Contains(l) {
 			selectedIsEqual = m.left.Flag(l) == line.FlagDefault &&
 				m.right.Flag(l) == line.FlagDefault
 		}
@@ -941,7 +946,7 @@ func (m *Model) updateSearchState(lines *line.View) {
 	}
 
 	// Convert ranges to searchMatch structs (inLeft is not used in unified mode).
-	ranges := m.index.Find(m.searchTerm)
+	ranges := heldMatches(lines, m.index.Find(m.searchTerm))
 	m.searchMatches = make([]searchMatch, 0, len(ranges))
 
 	for _, rng := range ranges {
@@ -955,6 +960,21 @@ func (m *Model) updateSearchState(lines *line.View) {
 	case m.searchIndex >= len(m.searchMatches), m.searchIndex < 0:
 		m.searchIndex = 0
 	}
+}
+
+// heldMatches returns the matches that start on a line view holds. A
+// search covers the whole content of the view, and a view over part of a
+// document, such as one from [niceyaml.Document.View], holds some of it.
+func heldMatches(view *line.View, matches position.Ranges) position.Ranges {
+	held := make(position.Ranges, 0, len(matches))
+
+	for _, match := range matches {
+		if view.Contains(match.Start.Line) {
+			held = append(held, match)
+		}
+	}
+
+	return held
 }
 
 // getDiffBase returns the revision the current one is compared against
@@ -1178,6 +1198,19 @@ func (m *Model) rowWindow() (int, int) {
 	return first, last
 }
 
+// window returns the span of content indices that selects the rendered
+// lines [first, last) from the view, which holds its lines in ascending
+// order, so a slice of the view by the span renders those lines alone.
+func (m *Model) window(first, last int) position.Span {
+	if first >= last {
+		return position.Span{}
+	}
+
+	layout := m.rows.leftLayout
+
+	return position.NewSpan(layout.Index(first), layout.Index(last-1)+1)
+}
+
 // trimWindow drops the rows above and below the visible window from rows,
 // which hold the rendered lines starting at the first line of the window. For
 // the first line of the view, rows start with the top frame.
@@ -1376,7 +1409,7 @@ func (m *Model) visibleRows() []string {
 	}
 
 	p := m.renderPrinter(m.maxWidth())
-	rows := splitLines(p.Print(m.left.Slice(position.NewSpan(first, last))))
+	rows := splitLines(p.Print(m.left.Slice(m.window(first, last))))
 	rows = m.trimWindow(m.trimFrame(rows, first, last), first)
 
 	// Without wrapping, lines may exceed the viewport width. Cut them to the
@@ -1638,8 +1671,6 @@ func (m *Model) scrollToCurrentMatch() {
 	}
 
 	match := m.searchMatches[m.searchIndex]
-	k := match.rng.Start.Line
-
 	m.ensureRows()
 
 	// The row of the match within its line comes from the layout of the
@@ -1650,7 +1681,13 @@ func (m *Model) scrollToCurrentMatch() {
 		layout = m.rows.rightLayout
 	}
 
-	row := m.rows.sums[k] + layout.RowOf(match.rng.Start) - layout.LineStart(k)
+	matchRow := layout.RowOf(match.rng.Start)
+	if matchRow < 0 {
+		return
+	}
+
+	k := layout.LineAt(matchRow)
+	row := m.rows.sums[k] + matchRow - layout.LineStart(k)
 
 	// Use (maxHeight-1)/2 to ensure the match appears at the visual center.
 	// For height 22: (22-1)/2 = 10, placing the match at position 10 (middle).
@@ -1821,7 +1858,7 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 	}
 
 	// Render the lines of the window in both panes.
-	window := position.NewSpan(first, last)
+	window := m.window(first, last)
 	p := m.renderPrinter(paneWidth)
 
 	leftRows := m.trimFrame(splitLines(p.Print(m.left.Slice(window))), first, last)

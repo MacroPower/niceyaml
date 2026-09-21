@@ -737,7 +737,8 @@ func TestDocument_View(t *testing.T) {
 
 		assert.Equal(t, source.View().Slice(docs[1].Span()).String(), view.String())
 		assert.Equal(t, docs[1].Span().Len(), view.Len())
-		assert.Equal(t, 2, view.Line(0).Number())
+		assert.Equal(t, 2, view.Line(docs[1].Span().Start).Number())
+		assert.False(t, view.Contains(0), "the view keeps the indices of the source")
 	})
 
 	t.Run("covers the node of a scoped Document", func(t *testing.T) {

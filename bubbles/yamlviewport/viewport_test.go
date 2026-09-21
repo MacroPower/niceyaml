@@ -4049,6 +4049,70 @@ func TestViewport_DoesNotMutateSource(t *testing.T) {
 	assert.Empty(t, source.View().Overlays(0))
 }
 
+func TestViewport_RevisionOverPartOfTheSource(t *testing.T) {
+	t.Parallel()
+
+	// A view over part of a source keeps the indices of the source, so the
+	// viewport windows it by those indices, and a search covers the whole
+	// source but keeps the matches on the lines the view holds.
+	p := printer.New(
+		printer.WithStyles(yamltest.NewXMLStyles(
+			yamltest.XMLStyleInclude(kind.GenericHighlight, kind.GenericHighlightDim),
+		)),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+		printer.WithGutter(printer.LineNumberGutter),
+	)
+
+	m := yamlviewport.New(yamlviewport.WithPrinter(p))
+	m.SetWidth(80)
+	m.SetHeight(2)
+
+	source := niceyaml.NewSourceFromString(stringtest.Input(`
+		a: item
+		b: two
+		c: item
+		d: four
+		e: item
+		f: six
+	`), niceyaml.WithName("part"))
+
+	m.SetRevision(yamlviewport.NewRevision(source.Name(), source.View().Slice(position.NewSpan(2, 5))))
+
+	out := m.View()
+
+	assert.Contains(t, out, "3 c: item")
+	assert.Contains(t, out, "4 d: four")
+	assert.NotContains(t, out, "a: item")
+	assert.NotContains(t, out, "e: item")
+
+	m.ScrollDown(1)
+
+	out = m.View()
+
+	assert.Contains(t, out, "4 d: four")
+	assert.Contains(t, out, "5 e: item")
+	assert.NotContains(t, out, "f: six")
+
+	// The source holds three matches, and the view two of them.
+	m.SetSearchTerm("item")
+
+	assert.Equal(t, 2, m.SearchCount())
+	assert.Equal(t, 0, m.SearchIndex())
+
+	m.GotoTop()
+
+	out = m.View()
+
+	assert.Contains(t, out, "3 c: <genericHighlight>item</genericHighlight>")
+
+	m.SearchNext()
+
+	out = m.View()
+
+	assert.Contains(t, out, "5 e: <genericHighlight>item</genericHighlight>")
+	assert.Equal(t, 1, m.SearchIndex())
+}
+
 func TestViewport_RevisionKeepsDecoration(t *testing.T) {
 	t.Parallel()
 
