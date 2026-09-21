@@ -21,6 +21,11 @@ var (
 
 	// ErrLoad indicates the schema could not be loaded.
 	ErrLoad = errors.New("load schema")
+
+	// ErrScopedDocument indicates a [*niceyaml.Document] from
+	// [niceyaml.Document.At] was given to [Registry.Lookup] or
+	// [Registry.Validate], which pick a schema for a whole document.
+	ErrScopedDocument = errors.New("registry needs a whole document")
 )
 
 // Registry maps YAML documents to schemas using pluggable resolvers.
@@ -177,6 +182,12 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 // An empty document, such as one that holds only comments, is the null
 // document, and a resolver sees it as it sees any other.
 //
+// The resolvers pick a schema for a whole document, from its file path,
+// its preamble, or its content, so a Document scoped to a node with
+// [niceyaml.Document.At] returns [ErrScopedDocument] rather than a schema
+// for the file applied to the node. Validate one node against a schema
+// of its own with a [Schema].
+//
 // Every error comes back bound to the document through
 // [niceyaml.Document.Bind], so its message names the file the document
 // came from.
@@ -195,6 +206,10 @@ func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.Document) (*Schema,
 
 // lookup is [Registry.Lookup] before binding the error to the document.
 func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Document) (*Schema, error) {
+	if !doc.Path().IsRoot() {
+		return nil, fmt.Errorf("%w: document is scoped to %s", ErrScopedDocument, doc.Path())
+	}
+
 	for _, res := range r.resolvers {
 		// A resolver that ignores its context, as a Ref does, would name
 		// a schema for a canceled lookup. Check the context here, so a

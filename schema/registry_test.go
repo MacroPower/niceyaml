@@ -123,6 +123,47 @@ func TestRegistry_Lookup(t *testing.T) {
 	})
 }
 
+func TestRegistry_Lookup_ScopedDocument(t *testing.T) {
+	t.Parallel()
+
+	// The resolvers read the file path, the preamble, and the content of a
+	// whole document, so a scope would get the file's schema applied to one
+	// node of it.
+	schemaData := []byte(`{"type": "object", "properties": {"kind": {"type": "string"}}}`)
+	reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded(schemaData)))
+
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
+		kind: Deployment
+		spec:
+		  replicas: 1
+	`))
+	spec := doc.At(paths.Root().Child("spec"))
+
+	_, err := reg.Lookup(t.Context(), spec)
+	require.ErrorIs(t, err, schema.ErrScopedDocument)
+	assert.Contains(t, err.Error(), "$.spec")
+
+	var bound *niceyaml.SourceError
+
+	require.ErrorAs(t, err, &bound)
+	assert.Same(t, doc.Source(), bound.Source())
+
+	// Validate refuses the scope too, whether or not a schema is required.
+	err = spec.Validate(t.Context(), reg)
+	require.ErrorIs(t, err, schema.ErrScopedDocument)
+
+	lax := schema.NewRegistry(
+		schema.WithResolvers(schema.Embedded(schemaData)),
+		schema.WithRequireSchema(false),
+	)
+	err = lax.Validate(t.Context(), spec)
+	require.ErrorIs(t, err, schema.ErrScopedDocument)
+
+	// The whole document resolves as before.
+	_, err = reg.Lookup(t.Context(), doc)
+	require.NoError(t, err)
+}
+
 func TestRegistry_Lookup_CancelledContext(t *testing.T) {
 	t.Parallel()
 
