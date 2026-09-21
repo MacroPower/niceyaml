@@ -151,7 +151,7 @@ func TestSource_Document(t *testing.T) {
 		require.Len(t, docs, 1)
 		assert.Same(t, docs[0], doc)
 
-		got, err := source.Decode[map[string]int](t.Context())
+		got, err := doc.Decode[map[string]int](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, map[string]int{"a": 1}, got)
 	})
@@ -165,7 +165,10 @@ func TestSource_Document(t *testing.T) {
 			a: 1
 		`))
 
-		got, err := source.Decode[map[string]int](t.Context())
+		doc, err := source.Document()
+		require.NoError(t, err)
+
+		got, err := doc.Decode[map[string]int](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, map[string]int{"a": 1}, got)
 	})
@@ -202,7 +205,7 @@ func TestSource_Document(t *testing.T) {
 		require.NoError(t, err)
 		assert.Same(t, docs[0], doc)
 
-		got, err := source.Decode[map[string]int](t.Context())
+		got, err := doc.Decode[map[string]int](t.Context())
 		require.NoError(t, err)
 		assert.Nil(t, got)
 	})
@@ -226,9 +229,6 @@ func TestSource_Document(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 		assert.Same(t, source, bound.Source())
-
-		_, err = source.Decode[map[string]int](t.Context())
-		require.ErrorIs(t, err, niceyaml.ErrNoDocuments)
 	})
 
 	t.Run("returns the parse error", func(t *testing.T) {
@@ -244,45 +244,6 @@ func TestSource_Document(t *testing.T) {
 	})
 }
 
-func TestSource_Decode(t *testing.T) {
-	t.Parallel()
-
-	t.Run("decodes the single document", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString("name: test")
-
-		var called bool
-
-		got, err := source.Decode[plainConfig](t.Context(), niceyaml.WithValidator(nameSchema(&called)))
-		require.NoError(t, err)
-		assert.Equal(t, plainConfig{Name: "test"}, got)
-		assert.True(t, called, "the validator should have been called")
-	})
-
-	t.Run("returns the zero value for several documents", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString("a: 1\n---\nb: 2")
-
-		got, err := source.Decode[map[string]int](t.Context())
-		require.ErrorIs(t, err, niceyaml.ErrMultipleDocuments)
-		assert.Nil(t, got)
-	})
-
-	t.Run("DecodeInto keeps fields absent from the document", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString("name: test")
-
-		result := plainConfig{Name: "default", Value: 7}
-
-		err := source.DecodeInto(t.Context(), &result)
-		require.NoError(t, err)
-		assert.Equal(t, plainConfig{Name: "test", Value: 7}, result)
-	})
-}
-
 func TestDecode_GoYAMLErrorReachable(t *testing.T) {
 	t.Parallel()
 
@@ -291,9 +252,9 @@ func TestDecode_GoYAMLErrorReachable(t *testing.T) {
 	t.Run("decode error", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString("b: notanint\n")
+		dd := yamltest.FirstDocument(t, "b: notanint\n")
 
-		_, err := source.Decode[struct{ B int }](t.Context())
+		_, err := dd.Decode[struct{ B int }](t.Context())
 		require.Error(t, err)
 
 		_, ok := errors.AsType[yaml.Error](err)
@@ -1950,31 +1911,6 @@ func TestDocument_DecodeInto(t *testing.T) {
 				require.ErrorIs(t, err, niceyaml.ErrDecodeTarget)
 				assert.Equal(t, tc.want, err.Error())
 				assert.False(t, called, "the validator should not run for a bad target")
-
-				err = dd.Source().DecodeInto(t.Context(), tc.target)
-				require.ErrorIs(t, err, niceyaml.ErrDecodeTarget)
-			})
-		}
-	})
-
-	t.Run("rejects a bad target before picking the document", func(t *testing.T) {
-		t.Parallel()
-
-		tcs := map[string]struct {
-			input string
-		}{
-			"multiple documents": {input: "a: 1\n---\nb: 2\n"},
-			"no documents":       {input: "...\n"},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				src := niceyaml.NewSourceFromString(tc.input)
-
-				err := src.DecodeInto(t.Context(), nil)
-				require.ErrorIs(t, err, niceyaml.ErrDecodeTarget)
 			})
 		}
 	})

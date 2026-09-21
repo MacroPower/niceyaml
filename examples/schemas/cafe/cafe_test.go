@@ -12,9 +12,12 @@ import (
 )
 
 func cafeConfig(ctx context.Context, in string) (*cafe.Config, error) {
-	src := niceyaml.NewSourceFromString(in)
+	doc, err := niceyaml.NewSourceFromString(in).Document()
+	if err != nil {
+		return nil, err
+	}
 
-	c, err := src.Decode[cafe.Config](ctx, niceyaml.WithValidator(cafe.Schema))
+	c, err := doc.Decode[cafe.Config](ctx, niceyaml.WithValidator(cafe.Schema))
 	if err != nil {
 		return nil, err
 	}

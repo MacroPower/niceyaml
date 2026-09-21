@@ -1,7 +1,6 @@
 package niceyaml
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -21,16 +20,16 @@ import (
 // documents. It holds the tokens the text was lexed from, the [*ast.File]
 // they parse into, and the settings for parsing, decoding, and reporting
 // errors. [Source.Documents] returns each document in the file as a
-// [*Document], and [Source.Decode] decodes a file that holds one.
+// [*Document], and [Source.Document] returns the one document of a file
+// that holds one, which is where decoding and validation live.
 //
-// Source separates two concerns. Parsing and decoding live on Source itself,
-// where [Source.File] lazily parses the AST and [Source.Documents] builds
-// the documents. Every error they and their Documents produce comes back
+// Source separates two concerns. Parsing lives on Source itself, where
+// [Source.File] lazily parses the AST and [Source.Documents] builds the
+// documents. Every error they and their Documents produce comes back
 // bound to the Source as a [SourceError]. [Document.Bind] binds errors
 // built elsewhere to the document they were checked against, and
-// [Source.Bind] binds one to the sole document of the file, as
-// [Source.Decode] decodes it, or to the Source alone when the error
-// carries a position or a range and so needs no document. Rendering
+// [Source.Bind] binds one that carries a position or a range, or no
+// location at all, and so needs no document. Rendering
 // lives in a [line.View], which carries the overlays, annotations, and
 // flags that a [printer.Printer] renders over the [line.Lines] the Source
 // holds. [Source.Lines] returns those lines, which the [finder.Finder] and
@@ -238,11 +237,19 @@ func (s *Source) Documents() ([]*Document, error) {
 }
 
 // Document returns the [*Document] of a [Source] that holds a single YAML
-// document. The comments above the first "---" are the preamble of the
-// document below them rather than a document of their own, so a file that
-// opens with a license header holds a single document, and a file of
-// comments alone holds one that decodes to the zero value as an empty file
-// does.
+// document, which is the direct path for a configuration file:
+//
+//	doc, err := niceyaml.NewSourceFromString(yamlContent).Document()
+//	if err != nil {
+//		return err
+//	}
+//
+//	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(validator))
+//
+// The comments above the first "---" are the preamble of the document
+// below them rather than a document of their own, so a file that opens
+// with a license header holds a single document, and a file of comments
+// alone holds one that decodes to the zero value as an empty file does.
 //
 // When the file holds more than one document, it returns an error wrapping
 // [ErrMultipleDocuments], bound to the Source and pointing at the header of
@@ -250,7 +257,8 @@ func (s *Source) Documents() ([]*Document, error) {
 // than a header opens it. When the file holds no document at all, which
 // happens for text that is only a "..." marker, it returns an error
 // wrapping [ErrNoDocuments], bound to the Source. A file that does not
-// parse returns the error [Source.File] returns.
+// parse returns the error [Source.File] returns. Use [Source.Documents]
+// for a file that may hold several.
 func (s *Source) Document() (*Document, error) {
 	docs, err := s.Documents()
 	if err != nil {
@@ -287,26 +295,6 @@ func (dd *Document) anchorToken() *token.Token {
 	}
 
 	return nil
-}
-
-// DecodeInto validates and decodes the single document of the [Source] into
-// v, which must be a non-nil pointer, as [Document.DecodeInto] does for that
-// document. Any other v returns [ErrDecodeTarget] before anything runs. A
-// file that holds more than one document returns
-// [ErrMultipleDocuments], and one that holds no document returns
-// [ErrNoDocuments].
-func (s *Source) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
-	err := checkDecodeTarget(v)
-	if err != nil {
-		return err
-	}
-
-	doc, err := s.Document()
-	if err != nil {
-		return err
-	}
-
-	return doc.DecodeInto(ctx, v, opts...)
 }
 
 // File returns an [*ast.File] for the [Source] tokens.
@@ -354,27 +342,11 @@ func (s *Source) parse() (*ast.File, error) {
 	return nil, err
 }
 
-// Bind binds err to the [Source]. A path in err resolves in the sole
-// document of the Source, the one [Source.Decode] decodes, so a check on
-// the value that Decode returned binds its error here:
-//
-//	cfg, err := source.Decode[Config](ctx)
-//	if err != nil {
-//		return err
-//	}
-//
-//	return source.Bind(checkHours(cfg))
-//
-// When the Source holds several documents or none, the path does not
-// resolve, and [SourceError.Range] returns the error [Source.Document]
-// reports, which wraps [ErrMultipleDocuments] or [ErrNoDocuments]; the
-// %+v verb prints it on a "no excerpt:" line. An error that carries a
-// path and names its document goes through [Document.Bind].
-//
-// An error that carries a [position.Position] or a [position.Range], as a
-// check that runs on [Source.Lines] produces, needs no document, and one
-// that carries no location names the source alone. A file that holds
-// several documents binds such an error here without picking one of them:
+// Bind binds err to the [Source]. An error that carries a
+// [position.Position] or a [position.Range], as a check that runs on
+// [Source.Lines] produces, needs no document, and one that carries no
+// location names the source alone. A file that holds several documents
+// binds such an error here without picking one of them:
 //
 //	for i, ln := range source.Lines().AllLines() {
 //		if ln.Width() > 120 {
@@ -384,9 +356,14 @@ func (s *Source) parse() (*ast.File, error) {
 //		}
 //	}
 //
+// A path resolves in a document, so an error that carries one goes
+// through [Document.Bind], with the document of [Source.Document] for a
+// file that holds one. Bound here, it keeps its message and the name of
+// the source but resolves no position: [SourceError.Range] returns an
+// error wrapping [ErrNoLocation], and [SourceError.Document] is nil.
+//
 // In every other way Bind is [Document.Bind], which describes what comes
-// back. The [SourceError.Document] of the result is the sole document when
-// a path resolved in it, and nil otherwise.
+// back.
 func (s *Source) Bind(err error) error {
 	return bindTree(err, s, nil)
 }
@@ -408,27 +385,4 @@ func (s *Source) Lines() line.Lines {
 // one never reach the Source or another view. Render the view to see them.
 func (s *Source) View() *line.View {
 	return line.NewView(s.lines)
-}
-
-// Decode validates and decodes the single document of the [Source] into a
-// new T, as [Document.Decode] does for that document. It is the direct path
-// for a file that holds one document:
-//
-//	source := niceyaml.NewSourceFromString(yamlContent)
-//	config, err := source.Decode[Config](ctx, niceyaml.WithValidator(validator))
-//
-// A file that holds more than one document returns
-// [ErrMultipleDocuments], and one that holds no document returns
-// [ErrNoDocuments]; use [Source.Documents] for those.
-func (s *Source) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
-	var v T
-
-	err := s.DecodeInto(ctx, &v, opts...)
-	if err != nil {
-		var zero T
-
-		return zero, err
-	}
-
-	return v, nil
 }

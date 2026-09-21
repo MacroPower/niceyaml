@@ -38,9 +38,12 @@ func main() {
 // check that [cafe.Config] implements. Failures come back bound to the
 // source, so they print with the offending lines highlighted.
 func load(in string) (*cafe.Config, error) {
-	source := niceyaml.NewSourceFromString(in)
+	doc, err := niceyaml.NewSourceFromString(in).Document()
+	if err != nil {
+		return nil, err
+	}
 
-	cfg, err := source.Decode[cafe.Config](context.Background(), niceyaml.WithValidator(cafe.Schema))
+	cfg, err := doc.Decode[cafe.Config](context.Background(), niceyaml.WithValidator(cafe.Schema))
 	if err != nil {
 		return nil, err
 	}
