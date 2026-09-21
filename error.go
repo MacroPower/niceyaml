@@ -1114,8 +1114,9 @@ func (e *SourceError) Excerpt(context int) (*line.View, error) {
 	return excerpt, nil
 }
 
-// detail returns what [SourceError.Error] leaves out: [SourceError.Excerpt]
-// with context lines, rendered as plain text. When no location resolves, a
+// detail returns what [SourceError.Error] leaves out: the excerpt from
+// [SourceError.Excerpt] with context lines, rendered as plain text by
+// [line.View.String]. When no location resolves, a
 // line starting "no excerpt:" names the error [SourceError.Range] returns
 // in place of the excerpt, unless that error is [ErrNoLocation], since an
 // error that carries no location has nothing to explain. Returns "" when
@@ -1124,7 +1125,7 @@ func (e *SourceError) Excerpt(context int) (*line.View, error) {
 func (e *SourceError) detail(context int) string {
 	excerpt, err := e.Excerpt(context)
 	if err == nil {
-		return plainRenderer{}.Print(excerpt)
+		return excerpt.String()
 	}
 
 	_, locErr := e.Range()

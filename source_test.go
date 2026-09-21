@@ -42,7 +42,7 @@ func TestTokens_String_Annotation(t *testing.T) {
 			},
 			want: stringtest.JoinLF(
 				"   1 | key: value",
-				"   1 | ^ error",
+				"     | ^ error",
 			),
 		},
 		"multiple lines one annotation": {
@@ -56,7 +56,7 @@ func TestTokens_String_Annotation(t *testing.T) {
 			want: stringtest.JoinLF(
 				"   1 | first: 1",
 				"   2 | second: 2",
-				"   2 | ^ here",
+				"     | ^ here",
 			),
 		},
 		"multiple lines multiple annotations": {
@@ -71,10 +71,10 @@ func TestTokens_String_Annotation(t *testing.T) {
 			},
 			want: stringtest.JoinLF(
 				"   1 | first: 1",
-				"   1 | ^ start",
+				"     | ^ start",
 				"   2 | second: 2",
 				"   3 | third: 3",
-				"   3 | ^ end",
+				"     | ^ end",
 			),
 		},
 		"mixed annotated and non-annotated": {
@@ -90,7 +90,7 @@ func TestTokens_String_Annotation(t *testing.T) {
 			want: stringtest.JoinLF(
 				"   1 | a: 1",
 				"   2 | b: 2",
-				"   2 |   ^ middle",
+				"     |   ^ middle",
 				"   3 | c: 3",
 				"   4 | d: 4",
 			),

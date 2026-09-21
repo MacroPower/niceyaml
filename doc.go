@@ -117,8 +117,10 @@
 //
 // The %+v verb prints a [SourceError] as plain text: the message, one line
 // per nested error, then the excerpt around the locations with two lines
-// of context and carets under the offending columns. The output holds no
-// escape sequences, so it goes into a log as it is. A terminal gets color
+// of context and carets under the offending columns. The excerpt is
+// [line.View.String], so a view a caller decorates, such as one with
+// search matches, renders the same way. The output holds no escape
+// sequences, so it goes into a log as it is. A terminal gets color
 // from [printer.Printer.PrintError],
 // which prints the same parts with the printer's styles, width, and
 // context lines, and accepts any error, so a caller need not look for the

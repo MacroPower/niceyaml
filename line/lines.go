@@ -333,18 +333,8 @@ func (ls Lines) Content() string {
 	return sb.String()
 }
 
-// String returns every line as [Line.String], one per row. This should
-// generally only be used for debugging; [View.String] adds the annotations.
+// String renders the lines as [View.String] renders a view over them
+// with no decoration: each line behind its number, one per row.
 func (ls Lines) String() string {
-	var sb strings.Builder
-
-	for i, l := range ls.lines {
-		if i > 0 {
-			sb.WriteByte('\n')
-		}
-
-		sb.WriteString(l.String())
-	}
-
-	return sb.String()
+	return NewView(ls).String()
 }

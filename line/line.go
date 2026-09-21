@@ -195,9 +195,9 @@ func hasLineEnding(origin string) bool {
 	return strings.HasSuffix(origin, "\n") || strings.HasSuffix(origin, "\r")
 }
 
-// String returns the line number and content, as "   1 | key: value".
-// This should generally only be used for debugging; [View.String] adds the
-// annotations.
+// String returns the line number and content, as "   1 | key: value",
+// which is the row [View.String] renders for a line with no decoration in
+// a view of fewer than ten thousand lines.
 func (l *Line) String() string {
 	return fmt.Sprintf("%4d | %s", l.Number(), l.Content())
 }

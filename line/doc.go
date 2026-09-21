@@ -126,4 +126,10 @@
 // To render the same content two different ways, take two views of it.
 // [View.Clone] copies the decoration of one, and [View.Slice] picks the
 // lines of a few spans, decoration included, as an error excerpt does.
+//
+// [View.String] renders a view as plain text: each line behind its number,
+// carets under the columns its overlays cover, and its annotations beside
+// the carets, with no escape sequences. It is the rendering the %+v verb
+// of a bound error prints, and it suits a log or a golden file. A printer
+// renders the same view with styles.
 package line

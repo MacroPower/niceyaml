@@ -4,8 +4,12 @@ import (
 	"fmt"
 	"iter"
 	"slices"
+	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
+
+	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
@@ -258,43 +262,105 @@ func (v *View) Slice(spans ...position.Span) *View {
 	return out
 }
 
-// String reconstructs every line as a string, including its annotations.
-// This should generally only be used for debugging.
+// String renders the [View] as plain text: each line behind its number,
+// the annotations above it on rows of their own, and a row below it that
+// marks its decoration, with a caret under every column an overlay covers,
+// a caret at the column of the annotations below the line, and their
+// contents after the last caret. Flags are not rendered. The number
+// column is at least four wide and grows to fit the largest number in the
+// view, so every row lines up.
+//
+// Control characters render as their pictures, and a rune that takes two
+// cells in a terminal gets two carets, so the carets stay under the runes
+// they mark in a fixed-width font. The output holds no escape sequences,
+// so it goes into a log or a golden file as it is, and the %+v verb of a
+// bound error prints its excerpt this way. A printer renders the same
+// view with styles. An empty view renders as "".
 func (v *View) String() string {
-	var sb strings.Builder
+	width := 4
+	for _, ln := range v.All() {
+		width = max(width, len(strconv.Itoa(ln.Number())))
+	}
 
-	for i, l := range v.All() {
-		if i > 0 {
-			sb.WriteByte('\n')
-		}
+	blank := strings.Repeat(" ", width) + " | "
 
-		prefix := fmt.Sprintf("%4d | ", l.Number())
+	var rows []string
+
+	for i, ln := range v.All() {
 		anns := v.Annotations(i)
 
-		// Render annotations above if they have content, so an annotation
-		// without any adds no row.
+		// An annotation without content adds no row, as it adds none to
+		// the marker row.
 		if above := anns.Filter(Above).String(); above != "" {
-			sb.WriteString(prefix)
-			sb.WriteString(above)
-			sb.WriteByte('\n')
+			rows = append(rows, blank+escape.Control(above))
 		}
 
-		sb.WriteString(prefix)
-		sb.WriteString(l.Content())
+		rows = append(rows, fmt.Sprintf("%*d | %s", width, ln.Number(), escape.Control(ln.Content())))
 
-		// Render annotations below if they have content, with the "^ "
-		// prefix that marks an error pointer in debug output.
-		below := anns.Filter(Below).WithContent()
-
-		if len(below) > 0 {
-			sb.WriteByte('\n')
-			sb.WriteString(prefix)
-
-			padding := strings.Repeat(" ", max(0, below.Col()))
-			sb.WriteString(padding)
-			sb.WriteString("^ ")
-			sb.WriteString(strings.Join(below.Contents(), "; "))
+		if marker := markerRow(ln, v.Overlays(i), anns.Filter(Below)); marker != "" {
+			rows = append(rows, blank+marker)
 		}
+	}
+
+	return strings.Join(rows, "\n")
+}
+
+// markerRow returns the row below ln that marks its overlays and carries
+// its annotations: a caret under every column an overlay covers within the
+// line, a caret at the column of the annotations, and their contents after
+// the last caret. A column is as many carets wide as the rune on it
+// renders, so the carets stay under the runes they mark on a line holding
+// wide or control characters. Returns "" when the line has neither.
+func markerRow(ln *Line, overlays Overlays, below Annotations) string {
+	var marks []bool
+
+	mark := func(col int) {
+		col = max(0, col)
+		if col >= len(marks) {
+			marks = append(marks, make([]bool, col+1-len(marks))...)
+		}
+
+		marks[col] = true
+	}
+
+	for _, o := range overlays {
+		for col := max(0, o.Cols.Start); col < min(o.Cols.End, ln.Width()); col++ {
+			mark(col)
+		}
+	}
+
+	contents := below.WithContent().Contents()
+	if len(contents) > 0 {
+		mark(below.WithContent().Col())
+	}
+
+	if len(marks) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+
+	// The content row renders each rune at its display width, and a column
+	// past the end of the content takes one cell.
+	runes := []rune(ln.Content())
+
+	for col, marked := range marks {
+		cell := " "
+		if marked {
+			cell = "^"
+		}
+
+		cells := 1
+		if col < len(runes) {
+			cells = ansi.StringWidth(escape.Control(string(runes[col])))
+		}
+
+		sb.WriteString(strings.Repeat(cell, cells))
+	}
+
+	if len(contents) > 0 {
+		sb.WriteByte(' ')
+		sb.WriteString(escape.Control(strings.Join(contents, "; ")))
 	}
 
 	return sb.String()

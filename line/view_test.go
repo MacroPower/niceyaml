@@ -881,7 +881,7 @@ func TestView_Slice(t *testing.T) {
 		view := decorated(t)
 		got := view.Slice(position.NewSpan(2, 3))
 
-		assert.Equal(t, "   3 | c: 3\n   3 | ^ c: 3", got.String())
+		assert.Equal(t, "   3 | c: 3\n     | ^^^ c: 3", got.String())
 	})
 }
 
@@ -902,16 +902,16 @@ func TestView_String(t *testing.T) {
 			"annotation below at start": {
 				annotations: []line.Annotation{{Content: "error here", Placement: line.Below}},
 				want: `   1 | key: value
-   1 | ^ error here`,
+     | ^ error here`,
 			},
 			"annotation below with padding": {
 				annotations: []line.Annotation{{Content: "note", Placement: line.Below, Col: 4}},
 				want: `   1 | key: value
-   1 |     ^ note`,
+     |     ^ note`,
 			},
 			"annotation above": {
 				annotations: []line.Annotation{{Content: "@@ hunk header @@", Placement: line.Above}},
-				want: `   1 | @@ hunk header @@
+				want: `     | @@ hunk header @@
    1 | key: value`,
 			},
 			"annotations without content add no row": {
@@ -926,9 +926,9 @@ func TestView_String(t *testing.T) {
 					{Content: "@@ hunk header @@", Placement: line.Above},
 					{Content: "note", Placement: line.Below, Col: 2},
 				},
-				want: `   1 | @@ hunk header @@
+				want: `     | @@ hunk header @@
    1 | key: value
-   1 |   ^ note`,
+     |   ^ note`,
 			},
 			"multiple annotations below join at the minimum column": {
 				annotations: []line.Annotation{
@@ -936,7 +936,7 @@ func TestView_String(t *testing.T) {
 					{Content: "second", Placement: line.Below, Col: 2},
 				},
 				want: `   1 | key: value
-   1 |   ^ first; second`,
+     |   ^ first; second`,
 			},
 			"an annotation without content does not set the column": {
 				annotations: []line.Annotation{
@@ -944,12 +944,12 @@ func TestView_String(t *testing.T) {
 					{Content: "boom", Placement: line.Below, Col: 5},
 				},
 				want: `   1 | key: value
-   1 |      ^ boom`,
+     |      ^ boom`,
 			},
 			"negative column is not padded": {
 				annotations: []line.Annotation{{Content: "note", Placement: line.Below, Col: -3}},
 				want: `   1 | key: value
-   1 | ^ note`,
+     | ^ note`,
 			},
 		}
 
@@ -986,24 +986,70 @@ func TestView_String(t *testing.T) {
 		view.Annotate(2, line.Annotation{Content: "bottom", Placement: line.Below, Col: 3})
 
 		want := strings.Join([]string{
-			"   1 | top",
+			"     | top",
 			"   1 | a: 1",
 			"   2 | b: 2",
 			"   3 | c: 3",
-			"   3 |    ^ bottom",
+			"     |    ^ bottom",
 		}, "\n")
 
 		assert.Equal(t, want, view.String())
 	})
 
-	t.Run("flags and overlays do not render", func(t *testing.T) {
+	t.Run("overlays mark their columns and flags do not render", func(t *testing.T) {
 		t.Parallel()
 
 		view := newTestView(t, "key: value\n", 1)
 		view.SetFlag(0, line.FlagDeleted)
 		view.AddOverlay("test1", position.NewRange(position.New(0, 0), position.New(0, 3)))
+		view.BlendOverlay("test2", position.NewRange(position.New(0, 5), position.New(0, 7)))
 
-		assert.Equal(t, "   1 | key: value", view.String())
+		assert.Equal(t, "   1 | key: value\n     | ^^^  ^^", view.String())
+	})
+
+	t.Run("overlay and annotation share the marker row", func(t *testing.T) {
+		t.Parallel()
+
+		view := newTestView(t, "key: value\n", 1)
+		view.AddOverlay("test1", position.NewRange(position.New(0, 5), position.New(0, 10)))
+		view.Annotate(0, line.Annotation{Content: "bad value", Placement: line.Below, Col: 5})
+
+		assert.Equal(t, "   1 | key: value\n     |      ^^^^^ bad value", view.String())
+	})
+
+	t.Run("overlay past the width stops at the content", func(t *testing.T) {
+		t.Parallel()
+
+		view := newTestView(t, "key: value\n", 1)
+		view.AddLineOverlay(0, line.Overlay{Kind: "test1", Cols: position.NewSpan(8, 20)})
+
+		assert.Equal(t, "   1 | key: value\n     |         ^^", view.String())
+	})
+
+	t.Run("carets sit under wide runes", func(t *testing.T) {
+		t.Parallel()
+
+		// Each CJK rune renders two cells wide, so the columns before the
+		// marked ones are worth two carets each.
+		view := newTestView(t, "名前: value\n", 1)
+		view.AddOverlay("test1", position.NewRange(position.New(0, 4), position.New(0, 9)))
+		view.Annotate(0, line.Annotation{Content: "bad", Placement: line.Below, Col: 4})
+
+		assert.Equal(t, "   1 | 名前: value\n     |       ^^^^^ bad", view.String())
+	})
+
+	t.Run("control characters render as pictures", func(t *testing.T) {
+		t.Parallel()
+
+		view := newTestView(t, "a: \"x\\ty\"\n", 1)
+		view.AddOverlay("test1", position.NewRange(position.New(0, 3), position.New(0, 9)))
+		view.Annotate(0, line.Annotation{Content: "tab\x1bhere", Placement: line.Above})
+
+		assert.Equal(t, stringtest.JoinLF(
+			"     | tab\u241bhere",
+			"   1 | a: \"x\\ty\"",
+			"     |    ^^^^^^",
+		), view.String())
 	})
 
 	t.Run("empty", func(t *testing.T) {
