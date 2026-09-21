@@ -13,9 +13,10 @@ import (
 var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 
 // FileOrURL creates a [Ref] for a schema reference as written in a
-// directive or on a command line, routing to [URL] for HTTP/HTTPS
-// references and [File] for file paths. Use those directly when you know
-// which of the two the reference is.
+// directive or on a command line, naming a URL as [URL] does for HTTP/HTTPS
+// references and a file as [File] does for file paths. Use those directly
+// for a reference written in the program, where an empty one is a mistake
+// rather than input to report.
 //
 // Schemes match case-insensitively, and an HTTP/HTTPS reference resolves
 // to a [Ref] whose URL carries the scheme in lower case. A file:// URL
@@ -48,7 +49,7 @@ func FileOrURL(baseDir, ref string) (Ref, error) {
 	// Check for an HTTP/HTTPS URL by string prefix, so a malformed URL that
 	// fails to parse does not fall through as a file path.
 	if isHTTPURL(ref) {
-		return URL(ref)
+		return URL(ref), nil
 	}
 
 	// An empty reference names no file, so it must not join baseDir and
@@ -66,14 +67,14 @@ func FileOrURL(baseDir, ref string) (Ref, error) {
 	// base directory can resolve, so never join it to baseDir. The drive
 	// then survives into the URL and the read error.
 	if filepath.IsAbs(path) || hasDriveLetter(path) {
-		return File(path)
+		return file(path)
 	}
 
 	if baseDir == "" {
 		return Ref{}, fmt.Errorf("%w: %q", ErrNoBaseDir, ref)
 	}
 
-	return File(filepath.Join(baseDir, path))
+	return file(filepath.Join(baseDir, path))
 }
 
 // isHTTPURL reports whether ref starts with http:// or https://, in any

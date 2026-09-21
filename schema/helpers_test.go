@@ -67,5 +67,5 @@ func countingClient(requests *atomic.Int32) *http.Client {
 func fileURL(t *testing.T, path string) string {
 	t.Helper()
 
-	return schema.MustFile(path).Key()
+	return schema.File(path).Key()
 }

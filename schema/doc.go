@@ -121,7 +121,7 @@
 //	        return schema.Ref{}, schema.ErrNoMatch
 //	    }
 //
-//	    return schema.File("schemas/" + kind + ".json")
+//	    return schema.File("schemas/" + kind + ".json"), nil
 //	})
 //
 // Embed a schema in the binary with go:embed:
@@ -131,16 +131,16 @@
 //
 //	reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded(schemaBytes)))
 //
-// Read a schema from disk or over HTTP. [File] and [URL] return an error
-// for a reference that names nothing, and [MustFile] and [MustURL] panic
-// instead, for a reference written in the program, as [MustCompile] does
-// for a schema:
+// Read a schema from disk or over HTTP. [File] and [URL] take a reference
+// written in the program and panic on an empty one, as [Loadable] panics
+// on an empty key:
 //
-//	schema.MustFile("./schemas/config.json")
-//	schema.MustURL("https://example.com/schema.json")
+//	schema.File("./schemas/config.json")
+//	schema.URL("https://example.com/schema.json")
 //
 // [FileOrURL] routes a reference as written in a directive or on a command
-// line, which may be a file path or a URL. The registry fetches every URL
+// line, which may be a file path or a URL, and returns an error for one
+// that names nothing. The registry fetches every URL
 // with one client, which [WithHTTPClient] sets, so a timeout or a proxy is
 // configured once for every resolver that names a URL:
 //
@@ -162,7 +162,7 @@
 //	reg := schema.NewRegistry(schema.WithResolvers(
 //	    schema.Directive(),                                          // Explicit user intent.
 //	    schema.When(matcher.Content(...), schema.Embedded(...)),     // By content.
-//	    schema.When(matcher.MustFilePath(...), schema.MustFile(...)), // By path.
+//	    schema.When(matcher.MustFilePath(...), schema.File(...)),     // By path.
 //	))
 //
 // Implement [Resolver], or wrap a function in [ResolverFunc], for

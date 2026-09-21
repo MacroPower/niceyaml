@@ -368,7 +368,7 @@ func TestRegistry_Caching(t *testing.T) {
 				scheme = "HTTP"
 			}
 
-			return schema.URL(scheme + "://" + host + "/schema.json")
+			return schema.URL(scheme + "://" + host + "/schema.json"), nil
 		})
 
 		reg := schema.NewRegistry(schema.WithResolvers(resolve))
@@ -764,7 +764,7 @@ func TestRegistry_DynamicResolver(t *testing.T) {
 						return schema.Ref{}, schema.ErrNoMatch
 					}
 
-					return schema.File(filepath.Join(tmpDir, kind+".json"))
+					return schema.File(filepath.Join(tmpDir, kind+".json")), nil
 				}),
 			),
 		)
