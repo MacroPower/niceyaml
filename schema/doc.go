@@ -57,10 +57,9 @@
 // # Resolution
 //
 // When a document's schema is unknown ahead of time, a [Resolver] finds
-// it. Resolve inspects the document and returns a [Ref], which carries a
-// compiled schema through [Compiled] or names one by key and loads its
-// bytes on demand through [Loadable], or reports [ErrNoMatch] when the
-// resolver does not apply. A
+// it. Resolve inspects the document and returns a [Ref], which names a
+// schema by key and loads its bytes on demand through [Loadable], or
+// reports [ErrNoMatch] when the resolver does not apply. A
 // [Registry] tries its resolvers in order and validates the document
 // against the first schema named. A Ref is a Resolver itself, so the
 // loaders below go in directly or behind a [When] guard:
@@ -103,11 +102,14 @@
 // [FileOrURL] returns one for a reference that may be either, as written
 // in a directive or on a command line. A Ref is a resolver that names
 // its schema for every document and never reports [ErrNoMatch], so a
-// registry holding one alone validates everything against it. A [*Schema]
-// compiled already, such as the one [MustCompile] built at package scope,
-// is a resolver too and names itself:
+// registry holding one alone validates everything against it:
 //
-//	reg := schema.NewRegistry(schema.WithResolvers(Config))
+//	reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded(schemaBytes)))
+//
+// A [*Schema] from [MustCompile] never enters a registry. The registry
+// compiles every schema it validates with, so every one of them is
+// compiled with the options [WithCompileOptions] gave it, and the bytes
+// behind a package-scope Schema go in through [Embedded] as above.
 //
 // The loaders return a [Loadable] ref whose key identifies the schema and
 // whose load reads the bytes. The registry checks its cache by key first,
@@ -180,8 +182,7 @@
 // A resolver returns a [Ref] that names the schema by key and loads its
 // bytes on demand. The registry checks its cache of compiled schemas by
 // key before loading, so each schema is loaded and compiled once per
-// registry however many documents name it. A [Compiled] ref skips the
-// cache, since there is nothing to load.
+// registry however many documents name it.
 //
 // # SchemaStore Integration
 //

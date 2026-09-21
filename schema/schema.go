@@ -119,28 +119,20 @@ func FromJSONSchema(v *jsonschema.Validator) *Schema {
 // to, and [Schema.ValidateValue] checks decoded data, such as one value
 // taken from a document with a scoped [niceyaml.Document.Decode].
 //
-// A Schema is also a [Resolver] that names itself for every document, so
-// one held at package scope goes into a [Registry] as it is:
+// A Schema is the validator for a program that holds one schema and
+// compiles it itself. A [Registry] compiles every schema it validates
+// with, so the same bytes go into one through [Embedded]:
 //
 //	var Config = schema.MustCompile(schemaJSON)
 //
 //	reg := schema.NewRegistry(schema.WithResolvers(
-//	    schema.When(matcher.Content(kindPath, "Config"), Config),
+//	    schema.When(matcher.Content(kindPath, "Config"), schema.Embedded(schemaJSON)),
 //	))
 //
 // A Schema is safe for concurrent use. Create instances with [Compile],
 // [MustCompile], or [FromJSONSchema].
 type Schema struct {
 	compiled *jsonschema.Validator
-}
-
-// Resolve implements [Resolver]. It names the Schema for every document,
-// as [Compiled] refs it, and never reports [ErrNoMatch]. The registry uses
-// the Schema as it is, so the [CompileOption] values from
-// [WithCompileOptions] do not reach it. Schema bytes that are not compiled
-// yet go in through [Embedded], which compiles them with those options.
-func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Document) (Ref, error) {
-	return Compiled(s), nil
 }
 
 // Validate implements [niceyaml.Validator]. It decodes doc to

@@ -45,7 +45,6 @@ func TestRef_Resolve(t *testing.T) {
 		got, err := schema.Ref{}.Resolve(t.Context(), document(t))
 		require.NoError(t, err)
 		assert.Empty(t, got.Key())
-		assert.Nil(t, got.Schema())
 	})
 }
 
@@ -107,31 +106,6 @@ func TestResolverFunc(t *testing.T) {
 	}
 }
 
-func TestCompiled(t *testing.T) {
-	t.Parallel()
-
-	t.Run("carries the schema", func(t *testing.T) {
-		t.Parallel()
-
-		compiled := schema.MustCompile([]byte(`{"type": "object"}`))
-		ref := schema.Compiled(compiled)
-
-		assert.Same(t, compiled, ref.Schema())
-		assert.Empty(t, ref.Key())
-
-		_, err := ref.Load(t.Context(), nil)
-		require.ErrorIs(t, err, schema.ErrLoad)
-	})
-
-	t.Run("nil schema panics", func(t *testing.T) {
-		t.Parallel()
-
-		assert.PanicsWithValue(t, "schema.Compiled: schema is nil", func() {
-			schema.Compiled(nil)
-		})
-	})
-}
-
 func TestLoadable(t *testing.T) {
 	t.Parallel()
 
@@ -142,7 +116,6 @@ func TestLoadable(t *testing.T) {
 			return []byte(`{"type": "object"}`), nil
 		})
 
-		assert.Nil(t, ref.Schema())
 		assert.Equal(t, "config.json", ref.Key())
 
 		data, err := ref.Load(t.Context(), nil)
@@ -171,7 +144,6 @@ func TestLoadable(t *testing.T) {
 
 		var ref schema.Ref
 
-		assert.Nil(t, ref.Schema())
 		assert.Empty(t, ref.Key())
 
 		_, err := ref.Load(t.Context(), nil)
