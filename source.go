@@ -3,6 +3,8 @@ package niceyaml
 import (
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"slices"
 	"sync"
@@ -52,8 +54,9 @@ import (
 // taken from it shares its lines and owns its decoration, so creating one
 // costs nothing.
 //
-// Create instances with [NewSourceFromFile], [NewSourceFromBytes],
-// [NewSourceFromString], or [NewSourceFromTokens].
+// Create instances with [NewSourceFromFile], [NewSourceFromFS],
+// [NewSourceFromReader], [NewSourceFromBytes], [NewSourceFromString], or
+// [NewSourceFromTokens].
 type Source struct {
 	name       string
 	filePath   string
@@ -126,7 +129,7 @@ func WithYAMLParserOptions(opts ...parser.Option) SourceOption {
 //
 // The file path is set on the [Source], so each [Document] reports it for
 // schema routing, and [Source.Name] returns it unless [WithName] sets a
-// name.
+// name. [NewSourceFromFS] reads a file from an [fs.FS] the same way.
 //
 // Returns an error if the file cannot be read.
 func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
@@ -139,6 +142,43 @@ func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
 	opts = append([]SourceOption{WithFilePath(path)}, opts...)
 
 	return NewSourceFromString(string(data), opts...), nil
+}
+
+// NewSourceFromFS creates a new [*Source] by reading the file at path
+// from fsys, such as an [embed.FS] that ships configuration with the
+// binary or an [fs.FS] a test builds. The path is set on the [Source] as
+// [NewSourceFromFile] sets it, so each [Document] reports it for schema
+// routing and a schema directive resolves relative to it in the same
+// file system, through the registry option
+// [go.jacobcolvin.com/niceyaml/schema.WithFS]:
+//
+//	source, err := niceyaml.NewSourceFromFS(bundle, "configs/app.yaml")
+//
+// Returns an error if the file cannot be read.
+func NewSourceFromFS(fsys fs.FS, path string, opts ...SourceOption) (*Source, error) {
+	data, err := fs.ReadFile(fsys, path)
+	if err != nil {
+		return nil, fmt.Errorf("read file: %w", err)
+	}
+
+	return NewSourceFromBytes(data, append([]SourceOption{WithFilePath(path)}, opts...)...), nil
+}
+
+// NewSourceFromReader creates a new [*Source] by reading r to its end,
+// such as standard input or the body of an HTTP request. The Source has
+// no file path unless [WithFilePath] sets one, and [WithName] names it in
+// output:
+//
+//	source, err := niceyaml.NewSourceFromReader(os.Stdin, niceyaml.WithName("<stdin>"))
+//
+// Returns an error if r cannot be read.
+func NewSourceFromReader(r io.Reader, opts ...SourceOption) (*Source, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("read: %w", err)
+	}
+
+	return NewSourceFromBytes(data, opts...), nil
 }
 
 // NewSourceFromBytes creates a new [*Source] from raw YAML bytes.

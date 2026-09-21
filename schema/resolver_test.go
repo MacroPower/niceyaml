@@ -34,7 +34,7 @@ func TestRef_Resolve(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, ref.Key(), got.Key())
 
-		data, err := got.Load(t.Context(), nil)
+		data, err := schema.NewRegistry().Load(t.Context(), got)
 		require.NoError(t, err)
 		assert.JSONEq(t, `{"type": "object"}`, string(data))
 	})
@@ -104,7 +104,7 @@ func TestResolverFunc(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantKey, ref.Key())
 
-			data, err := ref.Load(t.Context(), nil)
+			data, err := schema.NewRegistry().Load(t.Context(), ref)
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantData, string(data))
 		})
@@ -123,7 +123,7 @@ func TestLoadable(t *testing.T) {
 
 		assert.Equal(t, "config.json", ref.Key())
 
-		data, err := ref.Load(t.Context(), nil)
+		data, err := schema.NewRegistry().Load(t.Context(), ref)
 		require.NoError(t, err)
 		assert.JSONEq(t, `{"type": "object"}`, string(data))
 	})
@@ -151,7 +151,7 @@ func TestLoadable(t *testing.T) {
 
 		assert.Empty(t, ref.Key())
 
-		_, err := ref.Load(t.Context(), nil)
+		_, err := schema.NewRegistry().Load(t.Context(), ref)
 		require.ErrorIs(t, err, schema.ErrLoad)
 	})
 }

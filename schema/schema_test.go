@@ -1113,7 +1113,7 @@ func TestSchema_Ref(t *testing.T) {
 	assert.Equal(t, s.Ref(), ref)
 	assert.Empty(t, ref.Key())
 
-	_, err = ref.Load(t.Context(), nil)
+	_, err = schema.NewRegistry().Load(t.Context(), ref)
 	require.ErrorIs(t, err, schema.ErrLoad)
 
 	assert.Nil(t, schema.Embedded([]byte(`{}`)).Schema())

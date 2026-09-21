@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"sync"
 
 	"golang.org/x/sync/singleflight"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 )
 
 var (
@@ -56,6 +58,7 @@ type Registry struct {
 	group       singleflight.Group // one load and compile in flight per Key
 	cache       map[string]*Schema // compiled schemas by Ref.Key
 	client      *http.Client       // fetches the schemas URL refs name
+	fsys        fs.FS              // reads the schemas File refs name; nil reads the working directory
 	resolvers   []Resolver
 	compileOpts []CompileOption
 	mu          sync.RWMutex // guards cache
@@ -70,7 +73,34 @@ type Registry struct {
 //   - [WithCompileOptions]
 //   - [WithRequireSchema]
 //   - [WithHTTPClient]
+//   - [WithFS]
 type RegistryOption func(*Registry)
+
+// WithFS is a [RegistryOption] that sets the file system the registry
+// reads schema files from: every [Ref] from [File], whether a resolver
+// holds it or [Directive] and [FileOrURL] build it from a reference in
+// the input. A path then names a file relative to the root of fsys, in
+// slash form, so schemas shipped in an [embed.FS] beside the documents
+// that name them resolve without touching the disk:
+//
+//	source, err := niceyaml.NewSourceFromFS(bundle, "configs/app.yaml")
+//
+//	reg := schema.NewRegistry(
+//	    schema.WithFS(bundle),
+//	    schema.WithResolvers(schema.Directive()),
+//	)
+//
+// A directive in that document that names ./schema.json resolves to
+// configs/schema.json in bundle. Without the option, the registry reads
+// the working directory, with each path made absolute against it, and a
+// nil fsys keeps that.
+func WithFS(fsys fs.FS) RegistryOption {
+	return func(r *Registry) {
+		if fsys != nil {
+			r.fsys = fsys
+		}
+	}
+}
 
 // WithHTTPClient is a [RegistryOption] that sets the client the registry
 // fetches schemas with: every [Ref] from [URL], whether a resolver holds
@@ -347,6 +377,48 @@ func (r *Registry) schema(ctx context.Context, ref Ref) (*Schema, error) {
 	return v, nil
 }
 
+// Load returns the bytes of the schema ref names: the file a Ref from
+// [File] names, read from the file system [WithFS] gave the registry or
+// from the working directory; the URL a Ref from [URL] names, fetched
+// with the client [WithHTTPClient] gave it; or the bytes the load of a Ref
+// from [Loadable] returns. [Registry.Lookup] loads the same bytes and
+// compiles them, so Load is for a caller that wants the bytes
+// themselves, such as one that prints a schema. An error wraps [ErrLoad].
+//
+// The zero Ref names no bytes, and a Ref from [Schema.Ref] carries a
+// compiled schema rather than bytes, which [Ref.Schema] returns, so Load
+// returns an error for either.
+func (r *Registry) Load(ctx context.Context, ref Ref) ([]byte, error) {
+	data, err := r.load(ctx, ref)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %q: %w", ErrLoad, ref.Key(), err)
+	}
+
+	return data, nil
+}
+
+// load is [Registry.Load] before wrapping the error with the sentinel and
+// the key.
+func (r *Registry) load(ctx context.Context, ref Ref) ([]byte, error) {
+	switch {
+	case ref.url:
+		//nolint:wrapcheck // The fetch error names the URL already.
+		return httpfetch.Get(ctx, r.client, ref.key)
+
+	case ref.file != "":
+		return readFile(r.fsys, ref.file)
+
+	case ref.load != nil:
+		return ref.load(ctx)
+
+	case ref.schema != nil:
+		return nil, errors.New("ref carries a compiled schema rather than bytes")
+
+	default:
+		return nil, errors.New("ref carries no loader")
+	}
+}
+
 // cached returns the schema cached under key, if any.
 func (r *Registry) cached(key string) (*Schema, bool) {
 	r.mu.RLock()
@@ -367,9 +439,9 @@ func (r *Registry) compile(ctx context.Context, ref Ref) error {
 		return nil
 	}
 
-	data, err := ref.Load(ctx, r.client)
+	data, err := r.Load(ctx, ref)
 	if err != nil {
-		return fmt.Errorf("%w: %q: %w", ErrLoad, key, err)
+		return err
 	}
 
 	compiled, err := Compile(ctx, data, r.compileOpts...)

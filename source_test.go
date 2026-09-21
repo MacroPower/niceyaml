@@ -3,10 +3,13 @@ package niceyaml_test
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
+	"testing/iotest"
 
 	"charm.land/lipgloss/v2"
 	"github.com/goccy/go-yaml/ast"
@@ -1727,5 +1730,72 @@ func TestSource_Bind(t *testing.T) {
 
 		bound := docs[1].Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("b"))))
 		assert.Same(t, bound, source.Bind(bound))
+	})
+}
+
+// errReadFailed is the error a failing reader reports.
+var errReadFailed = errors.New("read failed")
+
+func TestNewSourceFromReader(t *testing.T) {
+	t.Parallel()
+
+	t.Run("reads to the end", func(t *testing.T) {
+		t.Parallel()
+
+		source, err := niceyaml.NewSourceFromReader(strings.NewReader("key: value\n"), niceyaml.WithName("<stdin>"))
+		require.NoError(t, err)
+		assert.Equal(t, "<stdin>", source.Name())
+		assert.Empty(t, source.FilePath())
+
+		doc, err := source.Document()
+		require.NoError(t, err)
+
+		got, err := doc.Decode[map[string]string](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"key": "value"}, got)
+	})
+
+	t.Run("reports a read error", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := niceyaml.NewSourceFromReader(iotest.ErrReader(errReadFailed))
+		require.ErrorIs(t, err, errReadFailed)
+	})
+}
+
+func TestNewSourceFromFS(t *testing.T) {
+	t.Parallel()
+
+	fsys := fstest.MapFS{
+		"configs/app.yaml": &fstest.MapFile{Data: []byte("key: value\n")},
+	}
+
+	t.Run("reads the file and sets its path", func(t *testing.T) {
+		t.Parallel()
+
+		source, err := niceyaml.NewSourceFromFS(fsys, "configs/app.yaml")
+		require.NoError(t, err)
+		assert.Equal(t, "configs/app.yaml", source.FilePath())
+		assert.Equal(t, "configs/app.yaml", source.Name())
+
+		doc, err := source.Document()
+		require.NoError(t, err)
+		assert.Equal(t, "configs/app.yaml", doc.FilePath())
+	})
+
+	t.Run("options apply after the path", func(t *testing.T) {
+		t.Parallel()
+
+		source, err := niceyaml.NewSourceFromFS(fsys, "configs/app.yaml", niceyaml.WithName("app"))
+		require.NoError(t, err)
+		assert.Equal(t, "app", source.Name())
+		assert.Equal(t, "configs/app.yaml", source.FilePath())
+	})
+
+	t.Run("reports a missing file", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := niceyaml.NewSourceFromFS(fsys, "configs/missing.yaml")
+		require.ErrorIs(t, err, fs.ErrNotExist)
 	})
 }

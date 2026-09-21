@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/fstest"
 	"testing/synctest"
 	"time"
 
@@ -1193,5 +1195,144 @@ func TestRegistry_CompiledSchema(t *testing.T) {
 		)
 
 		require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, "not-an-ip")))
+	})
+}
+
+func TestRegistry_WithFS(t *testing.T) {
+	t.Parallel()
+
+	schemaData := []byte(`{"type": "object", "required": ["kind"]}`)
+
+	bundle := fstest.MapFS{
+		"configs/app.yaml": &fstest.MapFile{
+			Data: []byte("# yaml-language-server: $schema=./app.schema.json\nkind: App\n"),
+		},
+		"configs/app.schema.json": &fstest.MapFile{Data: schemaData},
+		"schemas/pod.json":        &fstest.MapFile{Data: schemaData},
+	}
+
+	t.Run("a file ref reads from the file system", func(t *testing.T) {
+		t.Parallel()
+
+		reg := schema.NewRegistry(
+			schema.WithFS(bundle),
+			schema.WithResolvers(schema.File("schemas/pod.json")),
+		)
+
+		data, err := reg.Load(t.Context(), schema.File("./schemas/pod.json"))
+		require.NoError(t, err)
+		assert.Equal(t, schemaData, data)
+
+		require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, "kind: Pod\n")))
+
+		err = reg.Validate(t.Context(), yamltest.FirstDocument(t, "name: x\n"))
+		require.Error(t, err)
+		require.NotErrorIs(t, err, schema.ErrNoMatch)
+	})
+
+	t.Run("a directive resolves beside its document", func(t *testing.T) {
+		t.Parallel()
+
+		source, err := niceyaml.NewSourceFromFS(bundle, "configs/app.yaml")
+		require.NoError(t, err)
+
+		doc, err := source.Document()
+		require.NoError(t, err)
+
+		reg := schema.NewRegistry(
+			schema.WithFS(bundle),
+			schema.WithResolvers(schema.Directive()),
+		)
+
+		require.NoError(t, reg.Validate(t.Context(), doc))
+
+		// The same registry without the file system looks for the file on
+		// disk, where it does not exist.
+		disk := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+		err = disk.Validate(t.Context(), doc)
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorIs(t, err, os.ErrNotExist)
+	})
+
+	t.Run("a missing file reports the path", func(t *testing.T) {
+		t.Parallel()
+
+		reg := schema.NewRegistry(schema.WithFS(bundle))
+
+		_, err := reg.Load(t.Context(), schema.File("schemas/missing.json"))
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorIs(t, err, fs.ErrNotExist)
+		assert.Contains(t, err.Error(), "schemas/missing.json")
+	})
+
+	t.Run("an absolute path names no file in the file system", func(t *testing.T) {
+		t.Parallel()
+
+		reg := schema.NewRegistry(schema.WithFS(bundle))
+
+		_, err := reg.Load(t.Context(), schema.File("/schemas/pod.json"))
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorIs(t, err, fs.ErrInvalid)
+	})
+
+	t.Run("a nil file system keeps the disk", func(t *testing.T) {
+		t.Parallel()
+
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "schema.json")
+		require.NoError(t, os.WriteFile(path, schemaData, 0o600))
+
+		reg := schema.NewRegistry(schema.WithFS(nil))
+
+		data, err := reg.Load(t.Context(), schema.File(path))
+		require.NoError(t, err)
+		assert.Equal(t, schemaData, data)
+	})
+}
+
+func TestRegistry_Load(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a loadable ref returns its bytes", func(t *testing.T) {
+		t.Parallel()
+
+		ref := schema.Loadable("k", func(_ context.Context) ([]byte, error) {
+			return []byte(`{}`), nil
+		})
+
+		data, err := schema.NewRegistry().Load(t.Context(), ref)
+		require.NoError(t, err)
+		assert.Equal(t, []byte(`{}`), data)
+	})
+
+	t.Run("a URL ref fetches with the client", func(t *testing.T) {
+		t.Parallel()
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			//nolint:errcheck // Test helper.
+			w.Write([]byte(`{"type": "object"}`))
+		}))
+		defer server.Close()
+
+		var requests atomic.Int32
+
+		reg := schema.NewRegistry(schema.WithHTTPClient(countingClient(&requests)))
+
+		data, err := reg.Load(t.Context(), schema.URL(server.URL+"/schema.json"))
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"type": "object"}`, string(data))
+		assert.Equal(t, int32(1), requests.Load())
+	})
+
+	t.Run("a compiled schema and the zero ref have no bytes", func(t *testing.T) {
+		t.Parallel()
+
+		reg := schema.NewRegistry()
+
+		_, err := reg.Load(t.Context(), schema.MustCompile([]byte(`{}`)).Ref())
+		require.ErrorIs(t, err, schema.ErrLoad)
+
+		_, err = reg.Load(t.Context(), schema.Ref{})
+		require.ErrorIs(t, err, schema.ErrLoad)
 	})
 }

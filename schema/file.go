@@ -1,26 +1,32 @@
 package schema
 
 import (
-	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	slashpath "path"
 )
 
 // ErrEmptyPath reports an empty path given to [FileOrURL], which names no
 // file.
 var ErrEmptyPath = errors.New("schema file path is empty")
 
-// File creates a [Ref] that reads schema data from a local file. The Ref
-// is a [Resolver] that names the file for every document.
+// File creates a [Ref] that names a schema file. The Ref is a [Resolver]
+// that names the file for every document, and the registry reads the
+// file with [Registry.Load]: from the working directory, with path made
+// absolute against it, or from the file system [WithFS] gave the
+// registry, with path as a slash-separated path relative to its root, so
+// a schema shipped in an [embed.FS] loads without touching the disk.
 //
-// File makes path absolute against the working directory and names the
-// schema by the file:// URL of that absolute path, such as
-// file:///srv/schemas/config.json. A schema that [Embedded] or another
+// File names the schema by the file:// URL of the path made absolute
+// against the working directory, such as file:///srv/schemas/config.json,
+// however the registry reads it. A schema that [Embedded] or another
 // resolver names by a bare path such as "schemas/config.json" therefore
 // never shares a cache entry with the file. Relative spellings of one path,
 // such as "schemas/config.json" and "./schemas/config.json", resolve to the
@@ -85,22 +91,53 @@ func file(path string) (Ref, error) {
 		}
 	}
 
-	return Loadable(fileURL(abs), func(_ context.Context) ([]byte, error) {
-		// Off Windows, a drive letter is an ordinary directory name, so
-		// os.ReadFile would read the path against the working directory
-		// while the key stays the cwd-independent drive URL. One key would
-		// then name different bytes per directory, so refuse the read.
-		if hasDriveLetter(abs) && runtime.GOOS != "windows" {
-			return nil, fmt.Errorf("read %s: a drive letter names no file on %s", abs, runtime.GOOS)
+	return Ref{key: fileURL(abs), file: path}, nil
+}
+
+// readFile returns the bytes of the file a [Ref] from [File] names: from
+// fsys, with the path in slash form relative to its root, or from the
+// working directory when fsys is nil, with the path made absolute against
+// it as [File] made it to build the key.
+func readFile(fsys fs.FS, name string) ([]byte, error) {
+	if fsys != nil {
+		fsPath := slashpath.Clean(filepath.ToSlash(name))
+		if !fs.ValidPath(fsPath) {
+			return nil, fmt.Errorf("read %s: %w: not a path in the registry's file system", name, fs.ErrInvalid)
 		}
 
-		data, err := os.ReadFile(abs) //nolint:gosec // User-provided file paths are intentional.
+		data, err := fs.ReadFile(fsys, fsPath)
 		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", abs, err)
+			return nil, fmt.Errorf("read %s: %w", name, err)
 		}
 
 		return data, nil
-	}), nil
+	}
+
+	abs := name
+
+	if !hasDriveLetter(name) {
+		var err error
+
+		abs, err = filepath.Abs(name)
+		if err != nil {
+			return nil, fmt.Errorf("resolve %s: %w", name, err)
+		}
+	}
+
+	// Off Windows, a drive letter is an ordinary directory name, so
+	// os.ReadFile would read the path against the working directory
+	// while the key stays the cwd-independent drive URL. One key would
+	// then name different bytes per directory, so refuse the read.
+	if hasDriveLetter(abs) && runtime.GOOS != "windows" {
+		return nil, fmt.Errorf("read %s: a drive letter names no file on %s", abs, runtime.GOOS)
+	}
+
+	data, err := os.ReadFile(abs) //nolint:gosec // User-provided file paths are intentional.
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", abs, err)
+	}
+
+	return data, nil
 }
 
 // fileURL returns the file:// URL that names the absolute path abs.

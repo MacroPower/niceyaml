@@ -20,9 +20,9 @@ import (
 // nil error.
 //
 // A registry rejects a response body over 10 MB. The client's Timeout and
-// the context of the lookup bound each fetch. [Ref.Load] fetches the URL
-// with the client given to it, for a caller that loads schemas without a
-// registry.
+// the context of the lookup bound each fetch. [Registry.Load] fetches the
+// URL and returns the bytes, for a caller that wants them rather than the
+// compiled schema.
 func URL(schemaURL string) Ref {
 	if schemaURL == "" {
 		panic("schema.URL: schema URL is empty")

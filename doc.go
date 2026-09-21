@@ -18,6 +18,10 @@
 //	p := printer.New()
 //	fmt.Println(p.Print(source.View()))
 //
+// [NewSourceFromFile] reads a file from disk, [NewSourceFromFS] one from
+// an [fs.FS] such as an [embed.FS], and [NewSourceFromReader] any
+// [io.Reader], such as standard input.
+//
 // Errors come back bound to the source, so they show users exactly where
 // the problem is:
 //

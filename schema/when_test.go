@@ -56,7 +56,7 @@ func TestWhen(t *testing.T) {
 			require.NoError(t, err)
 			assert.NotEmpty(t, ref.Key())
 
-			data, err := ref.Load(t.Context(), nil)
+			data, err := schema.NewRegistry().Load(t.Context(), ref)
 			require.NoError(t, err)
 			assert.Equal(t, schemaData, data)
 		})
