@@ -55,7 +55,7 @@ func (c Config) Validate() error {
 	if err != nil {
 		return niceyaml.WrapError(
 			fmt.Errorf("invalid open time: %w", err),
-			niceyaml.WithPath(paths.Root().Child("spec", "hours", "open")),
+			niceyaml.AtPath(paths.Root().Child("spec", "hours", "open")),
 		)
 	}
 
@@ -63,14 +63,14 @@ func (c Config) Validate() error {
 	if err != nil {
 		return niceyaml.WrapError(
 			fmt.Errorf("invalid close time: %w", err),
-			niceyaml.WithPath(paths.Root().Child("spec", "hours", "close")),
+			niceyaml.AtPath(paths.Root().Child("spec", "hours", "close")),
 		)
 	}
 
 	if !openTime.Before(closeTime) {
 		return niceyaml.NewError(
 			"open must be before close",
-			niceyaml.WithPath(paths.Root().Child("spec", "hours", "open")),
+			niceyaml.AtPath(paths.Root().Child("spec", "hours", "open")),
 		)
 	}
 

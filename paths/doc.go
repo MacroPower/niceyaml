@@ -45,14 +45,14 @@
 //
 // # Integration with niceyaml.Error
 //
-// [Path] is directly usable with [niceyaml.WithPath], which highlights the
+// [Path] is directly usable with [niceyaml.AtPath], which highlights the
 // value at the path, or the key of the entry for a path from [Path.Key].
 // The error carries the path, and [niceyaml.Document.Bind] resolves it
 // against the document:
 //
 //	err := niceyaml.NewError(
 //		"invalid value",
-//		niceyaml.WithPath(paths.Root().Child("spec", "replicas")),
+//		niceyaml.AtPath(paths.Root().Child("spec", "replicas")),
 //	)
 //	fmt.Printf("%+v\n", doc.Bind(err))
 //

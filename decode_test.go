@@ -836,7 +836,7 @@ func (c accumulatingConfig) Validate() error {
 	var err *niceyaml.Error
 
 	if c.Value == 0 {
-		err = niceyaml.NewError("value is required", niceyaml.WithPath(paths.Root().Child("value")))
+		err = niceyaml.NewError("value is required", niceyaml.AtPath(paths.Root().Child("value")))
 	}
 
 	return err
@@ -1044,7 +1044,7 @@ func (c *validatorConfig) Validate() error {
 	if c.Name == "" {
 		return niceyaml.WrapError(
 			errNameRequired,
-			niceyaml.WithPath(paths.Root().Child("name").Key()),
+			niceyaml.AtPath(paths.Root().Child("name").Key()),
 		)
 	}
 
@@ -1074,7 +1074,7 @@ func nameSchema(called *bool) niceyaml.Validator {
 		if name, ok := m["name"].(string); ok && name == "invalid" {
 			return niceyaml.WrapError(
 				errSchemaValidationFailed,
-				niceyaml.WithPath(paths.Root().Child("name").Key()),
+				niceyaml.AtPath(paths.Root().Child("name").Key()),
 			)
 		}
 
@@ -1096,7 +1096,7 @@ func (c *bothValidatorConfig) Validate() error {
 	if c.Name == "" {
 		return niceyaml.WrapError(
 			errNameRequired,
-			niceyaml.WithPath(paths.Root().Child("name").Key()),
+			niceyaml.AtPath(paths.Root().Child("name").Key()),
 		)
 	}
 
@@ -1406,7 +1406,7 @@ type failingValidator struct {
 }
 
 func (failingValidator) Validate() error {
-	return niceyaml.NewError("rejected", niceyaml.WithPath(paths.Root().Child("name")))
+	return niceyaml.NewError("rejected", niceyaml.AtPath(paths.Root().Child("name")))
 }
 
 func TestDocument_ErrorsResolveInDocument(t *testing.T) {
@@ -1442,7 +1442,7 @@ func TestDocument_ErrorsResolveInDocument(t *testing.T) {
 		require.NoError(t, err)
 
 		validator := niceyaml.ValidatorFunc(func(_ context.Context, _ *niceyaml.Document) error {
-			return niceyaml.NewError("bad name", niceyaml.WithPath(namePath))
+			return niceyaml.NewError("bad name", niceyaml.AtPath(namePath))
 		})
 
 		var errs []error
@@ -1748,7 +1748,7 @@ func TestDocument_Ranges(t *testing.T) {
 
 			var bound *niceyaml.SourceError
 
-			require.ErrorAs(t, dd.Bind(niceyaml.NewError("bad", niceyaml.WithPath(path))), &bound)
+			require.ErrorAs(t, dd.Bind(niceyaml.NewError("bad", niceyaml.AtPath(path))), &bound)
 			require.NoError(t, bound.Annotate(view))
 
 			var got position.Ranges
@@ -2229,7 +2229,7 @@ func TestDocument_ErrorsBindToSource(t *testing.T) {
 		Name string `yaml:"name"`
 	}
 
-	failing := rejectingValidator(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
+	failing := rejectingValidator(niceyaml.NewError("bad name", niceyaml.AtPath(namePath)))
 
 	tcs := map[string]struct {
 		input string
@@ -2302,7 +2302,7 @@ func TestDocument_ErrorsBindToSource(t *testing.T) {
 		var pre error
 
 		validator := niceyaml.ValidatorFunc(func(_ context.Context, doc *niceyaml.Document) error {
-			pre = yamltest.Bind(t, doc.Source(), niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
+			pre = yamltest.Bind(t, doc.Source(), niceyaml.NewError("bad name", niceyaml.AtPath(namePath)))
 
 			return pre
 		})
@@ -2351,12 +2351,12 @@ func TestDocument_ValidatorErrorsResolveInDocument(t *testing.T) {
 	}{
 		"an unbound path error takes the document's index": {
 			validate: func(*niceyaml.Document) error {
-				return niceyaml.NewError("bad name", niceyaml.WithPath(namePath))
+				return niceyaml.NewError("bad name", niceyaml.AtPath(namePath))
 			},
 		},
 		"a validator that binds its own error binds through the document": {
 			validate: func(doc *niceyaml.Document) error {
-				return doc.Bind(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
+				return doc.Bind(niceyaml.NewError("bad name", niceyaml.AtPath(namePath)))
 			},
 		},
 	}
@@ -2449,7 +2449,7 @@ func TestDocument_Decode_Validator(t *testing.T) {
 
 		_, err = dd.Decode[plainConfig](t.Context(),
 			niceyaml.WithValidator(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Document) error {
-				return niceyaml.NewError("bad name", niceyaml.WithPath(paths.Root().Child("name")))
+				return niceyaml.NewError("bad name", niceyaml.AtPath(paths.Root().Child("name")))
 			})),
 		)
 		require.Error(t, err)
@@ -2549,7 +2549,7 @@ func TestDocument_Bind(t *testing.T) {
 	t.Run("binds an Error to the source and this document", func(t *testing.T) {
 		t.Parallel()
 
-		err := second.Bind(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
+		err := second.Bind(niceyaml.NewError("bad name", niceyaml.AtPath(namePath)))
 
 		var bound *niceyaml.SourceError
 
@@ -2561,7 +2561,7 @@ func TestDocument_Bind(t *testing.T) {
 	t.Run("an error bound to the source comes back as it is", func(t *testing.T) {
 		t.Parallel()
 
-		pre := second.Bind(niceyaml.NewError("bad name", niceyaml.WithPath(namePath)))
+		pre := second.Bind(niceyaml.NewError("bad name", niceyaml.AtPath(namePath)))
 		assert.Same(t, pre, second.Bind(pre))
 	})
 }
@@ -2575,11 +2575,11 @@ type hoursConfig struct {
 
 func (h hoursConfig) Validate() error {
 	if h.Open == "" {
-		return niceyaml.NewError("open is required", niceyaml.WithPath(paths.Root().Child("open").Key()))
+		return niceyaml.NewError("open is required", niceyaml.AtPath(paths.Root().Child("open").Key()))
 	}
 
 	if h.Open >= h.Close {
-		return niceyaml.NewError("open must be before close", niceyaml.WithPath(paths.Root().Child("open")))
+		return niceyaml.NewError("open must be before close", niceyaml.AtPath(paths.Root().Child("open")))
 	}
 
 	return nil
@@ -2625,7 +2625,7 @@ func TestDocument_At_Scope(t *testing.T) {
 		dd := yamltest.FirstDocument(t, input)
 		hours := dd.At(hoursPath)
 
-		err := hours.Bind(niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("open"))))
+		err := hours.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("open"))))
 
 		var bound *niceyaml.SourceError
 
@@ -2637,7 +2637,7 @@ func TestDocument_At_Scope(t *testing.T) {
 		assert.Same(t, hours, bound.Document())
 
 		// The whole document resolves the same path at its root.
-		err = dd.Bind(niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("open"))))
+		err = dd.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("open"))))
 		require.ErrorAs(t, err, &bound)
 
 		rng, err = bound.Range()
@@ -2691,7 +2691,7 @@ func TestDocument_At_Scope(t *testing.T) {
 		dd := yamltest.FirstDocument(t, input)
 
 		reject := niceyaml.ValidatorFunc(func(_ context.Context, _ *niceyaml.Document) error {
-			return niceyaml.NewError("bad", niceyaml.WithPath(paths.Root().Child("open")))
+			return niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("open")))
 		})
 
 		err := dd.At(hoursPath).Validate(t.Context(), reject)

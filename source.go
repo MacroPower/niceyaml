@@ -364,7 +364,7 @@ func (s *Source) parse() (*ast.File, error) {
 //		if ln.Width() > 120 {
 //			rng := position.NewRange(position.New(i, 120), position.New(i, ln.Width()))
 //
-//			return source.Bind(niceyaml.NewError("line exceeds 120 columns", niceyaml.WithRange(rng)))
+//			return source.Bind(niceyaml.NewError("line exceeds 120 columns", niceyaml.AtRange(rng)))
 //		}
 //	}
 //

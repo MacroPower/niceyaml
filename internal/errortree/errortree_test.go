@@ -125,10 +125,10 @@ func TestNew(t *testing.T) {
 	other := niceyaml.NewSourceFromString("c: 3\n", niceyaml.WithName("g.yaml"))
 
 	badA := func() *niceyaml.Error {
-		return niceyaml.NewError("bad a", niceyaml.WithPath(paths.Root().Child("a")))
+		return niceyaml.NewError("bad a", niceyaml.AtPath(paths.Root().Child("a")))
 	}
 	badB := func() *niceyaml.Error {
-		return niceyaml.NewError("bad b", niceyaml.WithPath(paths.Root().Child("b")))
+		return niceyaml.NewError("bad b", niceyaml.AtPath(paths.Root().Child("b")))
 	}
 
 	tcs := map[string]struct {
@@ -186,7 +186,7 @@ func TestNew(t *testing.T) {
 		},
 		"children without a position follow the positioned ones": {
 			err: yamltest.Bind(t, source, niceyaml.NewError("3 problems", niceyaml.WithErrors(
-				niceyaml.NewError("bad x", niceyaml.WithPath(paths.Root().Child("x"))),
+				niceyaml.NewError("bad x", niceyaml.AtPath(paths.Root().Child("x"))),
 				niceyaml.NewError("no path"),
 				badA(),
 			))),
@@ -212,7 +212,7 @@ func TestNew(t *testing.T) {
 		},
 		"root with a position keeps it": {
 			err: yamltest.Bind(t, source, niceyaml.NewError("outer",
-				niceyaml.WithPath(paths.Root().Child("a")),
+				niceyaml.AtPath(paths.Root().Child("a")),
 				niceyaml.WithErrors(badB()),
 			)),
 			want: errortree.Tree{
@@ -249,7 +249,7 @@ func TestNew(t *testing.T) {
 		"nested error with nested errors is a subtree": {
 			err: yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithErrors(
 				niceyaml.NewError("mid",
-					niceyaml.WithPath(paths.Root().Child("a")),
+					niceyaml.AtPath(paths.Root().Child("a")),
 					niceyaml.WithErrors(badB()),
 				),
 			))),
@@ -269,7 +269,7 @@ func TestNew(t *testing.T) {
 			err: yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithErrors(
 				niceyaml.WrapError(yamltest.Bind(t, other,
 					niceyaml.NewError("inner", niceyaml.WithErrors(
-						niceyaml.NewError("bad c", niceyaml.WithPath(paths.Root().Child("c"))),
+						niceyaml.NewError("bad c", niceyaml.AtPath(paths.Root().Child("c"))),
 					)),
 				)),
 			))),
@@ -288,7 +288,7 @@ func TestNew(t *testing.T) {
 		"binding rebound to another binding keeps the inner positions": {
 			err: yamltest.Bind(t, source, fmt.Errorf("outer: %w", yamltest.Bind(t, other,
 				niceyaml.NewError("inner", niceyaml.WithErrors(
-					niceyaml.NewError("bad c", niceyaml.WithPath(paths.Root().Child("c"))),
+					niceyaml.NewError("bad c", niceyaml.AtPath(paths.Root().Child("c"))),
 				)),
 			))),
 			want: errortree.Tree{
@@ -301,9 +301,9 @@ func TestNew(t *testing.T) {
 		"located error above an inner binding positions its own nested errors": {
 			err: yamltest.Bind(t, source, niceyaml.WrapError(
 				yamltest.Bind(t, other, niceyaml.NewError("inner", niceyaml.WithErrors(
-					niceyaml.NewError("bad c", niceyaml.WithPath(paths.Root().Child("c"))),
+					niceyaml.NewError("bad c", niceyaml.AtPath(paths.Root().Child("c"))),
 				))),
-				niceyaml.WithPath(paths.Root().Child("a")),
+				niceyaml.AtPath(paths.Root().Child("a")),
 				niceyaml.WithErrors(badB()),
 			)),
 			want: errortree.Tree{
@@ -317,7 +317,7 @@ func TestNew(t *testing.T) {
 		"joined errors form a forest": {
 			err: errors.Join(
 				yamltest.Bind(t, source, badA()),
-				yamltest.Bind(t, other, niceyaml.NewError("bad c", niceyaml.WithPath(paths.Root().Child("c")))),
+				yamltest.Bind(t, other, niceyaml.NewError("bad c", niceyaml.AtPath(paths.Root().Child("c")))),
 			),
 			want: errortree.Tree{
 				Children: []errortree.Tree{
@@ -329,7 +329,7 @@ func TestNew(t *testing.T) {
 		"joined errors with nested errors are subtrees": {
 			err: errors.Join(
 				yamltest.Bind(t, source, niceyaml.NewError("2 problems", niceyaml.WithErrors(badA(), badB()))),
-				yamltest.Bind(t, other, niceyaml.NewError("bad c", niceyaml.WithPath(paths.Root().Child("c")))),
+				yamltest.Bind(t, other, niceyaml.NewError("bad c", niceyaml.AtPath(paths.Root().Child("c")))),
 			),
 			want: errortree.Tree{
 				Children: []errortree.Tree{
@@ -347,7 +347,7 @@ func TestNew(t *testing.T) {
 		"bound join of two sources keeps the order it was given": {
 			err: yamltest.Bind(t, source, errors.Join(
 				yamltest.Bind(t, source, badB()),
-				yamltest.Bind(t, other, niceyaml.NewError("bad c", niceyaml.WithPath(paths.Root().Child("c")))),
+				yamltest.Bind(t, other, niceyaml.NewError("bad c", niceyaml.AtPath(paths.Root().Child("c")))),
 			)),
 			want: errortree.Tree{
 				Children: []errortree.Tree{
@@ -429,7 +429,7 @@ func TestNew(t *testing.T) {
 		},
 		"multi-line nested message stays whole": {
 			err: yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithErrors(
-				niceyaml.NewError("bad a\n  see docs", niceyaml.WithPath(paths.Root().Child("a"))),
+				niceyaml.NewError("bad a\n  see docs", niceyaml.AtPath(paths.Root().Child("a"))),
 			))),
 			want: errortree.Tree{
 				Text: "f.yaml: outer",

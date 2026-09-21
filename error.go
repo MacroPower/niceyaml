@@ -57,7 +57,7 @@ var (
 // Error is an error that points at a location in a YAML document.
 //
 // The location is a [paths.Path], a [position.Position], or a
-// [position.Range], set with [WithPath], [WithPosition], or [WithRange].
+// [position.Range], set with [AtPath], [AtPosition], or [AtRange].
 // An Error holds one, and the last of those options given wins.
 // [Error.Path], [Error.Position], and [Error.Range] each return the
 // location when it is of that type, so a caller that wants the path
@@ -72,7 +72,7 @@ var (
 // Error or [Document.Bind] bound one built elsewhere.
 //
 // An Error carries what a producer knows and nothing about presentation. A
-// validator that knows a path uses [WithPath] and need not hold the source.
+// validator that knows a path uses [AtPath] and need not hold the source.
 // Binding produces a [*SourceError] that resolves the location and renders
 // the annotated excerpt.
 //
@@ -121,7 +121,7 @@ func WrapError(err error, opts ...ErrorOption) *Error {
 // receiver is unchanged, so an Error shared between callers can be
 // specialized per use:
 //
-//	located := err.With(niceyaml.WithPath(namePath))
+//	located := err.With(niceyaml.AtPath(namePath))
 func (e *Error) With(opts ...ErrorOption) *Error {
 	if e == nil {
 		return nil
@@ -137,16 +137,17 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 	return &c
 }
 
-// ErrorOption configures an [Error].
+// ErrorOption configures an [Error]. An At option sets the location of
+// the Error, and the last one given wins. [WithErrors] adds nested errors.
 //
 // Available options:
-//   - [WithPath]
-//   - [WithPosition]
-//   - [WithRange]
+//   - [AtPath]
+//   - [AtPosition]
+//   - [AtRange]
 //   - [WithErrors]
 type ErrorOption func(e *Error)
 
-// WithPath is an [ErrorOption] that sets the YAML path where the error
+// AtPath is an [ErrorOption] that sets the YAML path where the error
 // occurred as the location of the [Error], replacing any location set
 // before it. The error points at the node the path selects, which for a
 // mapping entry is its value, so [SourceError.Excerpt] highlights the
@@ -154,14 +155,14 @@ type ErrorOption func(e *Error)
 // instead, which suits an error about the key itself, such as an unknown
 // field:
 //
-//	niceyaml.NewError("unknown field", niceyaml.WithPath(paths.Root().Child("spec", "foo").Key()))
-func WithPath(p paths.Path) ErrorOption {
+//	niceyaml.NewError("unknown field", niceyaml.AtPath(paths.Root().Child("spec", "foo").Key()))
+func AtPath(p paths.Path) ErrorOption {
 	return func(e *Error) {
 		e.loc = p
 	}
 }
 
-// WithPosition is an [ErrorOption] that sets the 0-indexed position where
+// AtPosition is an [ErrorOption] that sets the 0-indexed position where
 // the error occurred as the location of the [Error], replacing any
 // location set before it. The position is in the coordinates of the lines
 // [Source.Lines] returns, where line 0 is line 1 of the text.
@@ -169,7 +170,7 @@ func WithPath(p paths.Path) ErrorOption {
 // position. A producer that holds a go-yaml token converts it with
 // [position.NewFromToken], and one that holds none names the position on
 // its own.
-func WithPosition(p position.Position) ErrorOption {
+func AtPosition(p position.Position) ErrorOption {
 	return func(e *Error) {
 		e.loc = p
 	}
@@ -183,17 +184,17 @@ func atToken(tk *token.Token) ErrorOption {
 		return func(*Error) {}
 	}
 
-	return WithPosition(position.NewFromToken(tk))
+	return AtPosition(position.NewFromToken(tk))
 }
 
-// WithRange is an [ErrorOption] that sets the 0-indexed range the error
+// AtRange is an [ErrorOption] that sets the 0-indexed range the error
 // covers as the location of the [Error], replacing any location set
 // before it. The range is in the coordinates of the view [Source.Lines]
 // returns, where line 0 is line 1 of the text. [SourceError.Excerpt]
 // highlights the whole range rather than one token, so it is the option
 // for a check that knows the columns an error covers, such as one that
 // runs on rendered lines.
-func WithRange(r position.Range) ErrorOption {
+func AtRange(r position.Range) ErrorOption {
 	return func(e *Error) {
 		e.loc = r
 	}
@@ -215,7 +216,7 @@ func WithErrors(errs ...error) ErrorOption {
 }
 
 // Error returns the error message: "$.path: msg" when the Error carries a
-// path, from [WithPath], and the message alone otherwise. A
+// path, from [AtPath], and the message alone otherwise. A
 // position or a range puts nothing in the message, since the [SourceError]
 // that binds the Error puts the resolved position in front, and the nested
 // errors from [WithErrors] put nothing in it either, since that SourceError
@@ -341,8 +342,8 @@ func (e *Error) Errors() []error {
 }
 
 // location returns the location of the [Error]: the [paths.Path],
-// [position.Position], or [position.Range] that [WithPath], [WithPosition],
-// or [WithRange] set, or nil when none did. It looks through wrapping to
+// [position.Position], or [position.Range] that [AtPath], [AtPosition],
+// or [AtRange] set, or nil when none did. It looks through wrapping to
 // the nearest Error that carries one, so an Error built with [WrapError]
 // around a located Error reports that location. A nil Error has none.
 func (e *Error) location() any {
@@ -355,7 +356,7 @@ func (e *Error) location() any {
 
 // Path returns the [paths.Path] the [Error] points at and true, or the
 // zero Path and false when the Error carries a position, a range, or no
-// location. The location is the one [WithPath] set on the Error itself or
+// location. The location is the one [AtPath] set on the Error itself or
 // on the nearest located Error along its cause chain, so an Error built
 // with [WrapError] around a located Error reports that location. A nil
 // Error has none.
@@ -377,7 +378,7 @@ func (e *Error) Position() (position.Position, bool) {
 // Range returns the [position.Range] the [Error] covers and true, or the
 // zero Range and false when the Error carries a path, a position, or no
 // location. It looks through wrapping as [Error.Path] does. The range is
-// the one [WithRange] set, in the coordinates of [Source.Lines];
+// the one [AtRange] set, in the coordinates of [Source.Lines];
 // [SourceError.Range] returns the range a location of any kind resolved
 // to once the Error is bound.
 func (e *Error) Range() (position.Range, bool) {

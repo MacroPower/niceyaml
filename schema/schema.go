@@ -253,10 +253,10 @@ func leafError(leaf *jsonschema.ValidationError, doc *niceyaml.Document) *niceya
 		path = path.Key()
 	}
 
-	locate := niceyaml.WithPath(path)
+	locate := niceyaml.AtPath(path)
 
 	if pos, ok := decodedPosition(doc, path, segments, leaf.TargetsKey()); ok {
-		locate = niceyaml.WithPosition(pos)
+		locate = niceyaml.AtPosition(pos)
 	}
 
 	return niceyaml.NewError(leaf.Message, locate)

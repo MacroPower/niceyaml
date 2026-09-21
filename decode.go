@@ -71,7 +71,7 @@ type Validator interface {
 //		}
 //
 //		if kind != "Deployment" {
-//			return niceyaml.NewError("unknown kind", niceyaml.WithPath(kindPath))
+//			return niceyaml.NewError("unknown kind", niceyaml.AtPath(kindPath))
 //		}
 //
 //		return nil
@@ -484,7 +484,7 @@ func (dd *Document) Span() position.Span {
 
 // Ranges returns the ranges the node at path covers, one per line, without
 // the spaces around its content: the ranges [SourceError.Excerpt] highlights
-// for an [Error] built with [WithPath] at that path. The path resolves
+// for an [Error] built with [AtPath] at that path. The path resolves
 // from the scope of the Document, as it does in such an Error. A block
 // scalar covers its indicator, and a path from [paths.Path.Key] covers
 // the key of the entry rather than its value. The ranges highlight the
