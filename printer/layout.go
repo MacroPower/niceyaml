@@ -53,7 +53,7 @@ func (p *Printer) Layout(view *line.View) Layout {
 		gutterWidth: gutterWidth,
 	}
 
-	for idx, ln := range view.AllLines() {
+	for idx, ln := range view.All() {
 		ll := p.layoutLine(view, idx, ln, gutterWidth, &l.width)
 
 		l.lines = append(l.lines, ll)

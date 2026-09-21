@@ -61,11 +61,11 @@ func TestDiffer_Views_LineNumbers(t *testing.T) {
 
 	var beforeNumbers, afterNumbers []int
 
-	for _, l := range result.Before().Lines().AllLines() {
+	for _, l := range result.Before().Lines().All() {
 		beforeNumbers = append(beforeNumbers, l.Number())
 	}
 
-	for _, l := range result.After().Lines().AllLines() {
+	for _, l := range result.After().Lines().All() {
 		afterNumbers = append(afterNumbers, l.Number())
 	}
 
@@ -489,7 +489,7 @@ func TestDiffer_Full_Flags(t *testing.T) {
 			got := result.Unified()
 
 			flaggedCount := 0
-			for i := range got.AllLines() {
+			for i := range got.All() {
 				if got.Flag(i) != line.FlagDefault {
 					flaggedCount++
 				}
@@ -1124,7 +1124,7 @@ func verifyLines(t *testing.T, side string, actual *line.View, want []wantLine) 
 
 	require.Equal(t, len(want), actual.Len(), "%s: line count mismatch", side)
 
-	for i, actualLn := range actual.AllLines() {
+	for i, actualLn := range actual.All() {
 		wantLn := want[i]
 
 		if wantLn.empty {
@@ -1274,7 +1274,7 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 func hunkCount(view *line.View) int {
 	count := 0
 
-	for i := range view.AllLines() {
+	for i := range view.All() {
 		if len(view.Annotations(i).Filter(line.Above)) > 0 {
 			count++
 		}

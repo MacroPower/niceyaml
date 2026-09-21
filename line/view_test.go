@@ -48,7 +48,7 @@ func TestNewView(t *testing.T) {
 		assert.True(t, view.Lines().IsEmpty())
 		assert.Empty(t, view.String())
 
-		for range view.AllLines() {
+		for range view.All() {
 			t.Fatal("expected no lines")
 		}
 	})
@@ -87,13 +87,13 @@ func TestNewView(t *testing.T) {
 		assert.True(t, view.Lines().IsEmpty())
 		assert.Nil(t, view.Clone())
 
-		for range view.AllLines() {
+		for range view.All() {
 			t.Fatal("expected no lines")
 		}
 	})
 }
 
-func TestView_AllLines(t *testing.T) {
+func TestView_All(t *testing.T) {
 	t.Parallel()
 
 	input := stringtest.Input(`
@@ -112,7 +112,7 @@ func TestView_AllLines(t *testing.T) {
 			contents []string
 		)
 
-		for i, ln := range view.AllLines() {
+		for i, ln := range view.All() {
 			indices = append(indices, i)
 			contents = append(contents, ln.Content())
 
@@ -130,7 +130,7 @@ func TestView_AllLines(t *testing.T) {
 
 		var indices []int
 
-		for i := range view.AllLines(position.NewSpan(1, 99)) {
+		for i := range view.All(position.NewSpan(1, 99)) {
 			indices = append(indices, i)
 		}
 
@@ -145,7 +145,7 @@ func TestView_AllLines(t *testing.T) {
 
 		var flags []line.Flag
 
-		for i := range view.AllLines() {
+		for i := range view.All() {
 			flags = append(flags, view.Flag(i))
 		}
 
@@ -738,7 +738,7 @@ func TestView_Slice(t *testing.T) {
 	contents := func(v *line.View) []string {
 		var out []string
 
-		for _, ln := range v.AllLines() {
+		for _, ln := range v.All() {
 			out = append(out, ln.Content())
 		}
 

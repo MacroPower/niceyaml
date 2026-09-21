@@ -42,7 +42,7 @@ func TestSplit(t *testing.T) {
 			lines := line.NewLines(lexer.Tokenize(tc.input))
 			require.Equal(t, len(tc.wantContent), lines.Len())
 
-			for i, l := range lines.AllLines() {
+			for i, l := range lines.All() {
 				assert.Equal(t, tc.wantContent[i], l.Content(), "line %d content", i)
 				assert.Equal(t, tc.wantNumbers[i], l.Number(), "line %d number", i)
 			}
@@ -91,7 +91,7 @@ func TestLine_Runes(t *testing.T) {
 			lines := line.NewLines(lexer.Tokenize(tc.input))
 			require.Equal(t, len(tc.want), lines.Len())
 
-			for i, l := range lines.AllLines() {
+			for i, l := range lines.All() {
 				var got []rune
 
 				for col, r := range l.Runes() {

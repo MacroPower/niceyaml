@@ -96,12 +96,12 @@ func (d *Differ) Diff(a, b line.Lines) *Result {
 func (d *Differ) computeOps(before, after line.Lines) []lineOp {
 	// Pre-compute content strings once to avoid repeated string building.
 	beforeContent := make([]string, before.Len())
-	for i, l := range before.AllLines() {
+	for i, l := range before.All() {
 		beforeContent[i] = l.Content()
 	}
 
 	afterContent := make([]string, after.Len())
-	for i, l := range after.AllLines() {
+	for i, l := range after.All() {
 		afterContent[i] = l.Content()
 	}
 

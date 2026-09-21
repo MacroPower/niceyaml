@@ -2467,7 +2467,7 @@ func TestError_DoesNotMutateSource(t *testing.T) {
 	// The caller's Source is untouched: a fresh view still renders
 	// undecorated.
 	view := source.View()
-	for i := range view.AllLines() {
+	for i := range view.All() {
 		assert.Empty(t, view.Overlays(i))
 		assert.Empty(t, view.Annotations(i))
 	}
@@ -3199,7 +3199,7 @@ func excerptError(t *testing.T) *niceyaml.SourceError {
 // lineNumbers returns the source line number of every line in view.
 func lineNumbers(view *line.View) []int {
 	numbers := make([]int, 0, view.Len())
-	for _, l := range view.AllLines() {
+	for _, l := range view.All() {
 		numbers = append(numbers, l.Number())
 	}
 

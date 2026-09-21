@@ -102,7 +102,7 @@ func BenchmarkSourceRunes(b *testing.B) {
 
 			for b.Loop() {
 				count := 0
-				for range lines.AllRunes() {
+				for range lines.Runes() {
 					count++
 				}
 
@@ -133,7 +133,7 @@ func BenchmarkSourceLines(b *testing.B) {
 
 			for b.Loop() {
 				count := 0
-				for range lines.AllLines() {
+				for range lines.All() {
 					count++
 				}
 

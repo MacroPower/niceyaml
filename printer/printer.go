@@ -590,7 +590,7 @@ func (p *Printer) padRows(rows []string) []string {
 func maxNumber(view *line.View) int {
 	n := 0
 
-	for _, ln := range view.AllLines() {
+	for _, ln := range view.All() {
 		n = max(n, ln.Number())
 	}
 
@@ -621,7 +621,7 @@ func (p *Printer) renderRows(view *line.View) []string {
 	// A viewer prints one window of a long document at a time.
 	rows := make([]string, 0, view.Len())
 
-	for idx, ln := range view.AllLines() {
+	for idx, ln := range view.All() {
 		rows = append(rows, p.renderLine(view, idx, ln, maxNumber, gutterWidth)...)
 	}
 

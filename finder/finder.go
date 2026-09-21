@@ -270,7 +270,7 @@ func (f *Finder) buildTextAndPositionMap(lines line.Lines) (string, *positionMap
 	// Cache normalized forms per unique rune to avoid repeated transform calls.
 	normalizedCache := make(map[rune]string)
 
-	for pos, r := range lines.AllRunes() {
+	for pos, r := range lines.Runes() {
 		normalized, ok := normalizedCache[r]
 		if !ok {
 			normalized = normalizeRune(f.normalizer, r)

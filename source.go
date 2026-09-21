@@ -348,7 +348,7 @@ func (s *Source) parse() (*ast.File, error) {
 // location names the source alone. A file that holds several documents
 // binds such an error here without picking one of them:
 //
-//	for i, ln := range source.Lines().AllLines() {
+//	for i, ln := range source.Lines().All() {
 //		if ln.Width() > 120 {
 //			rng := position.NewRange(position.New(i, 120), position.New(i, ln.Width()))
 //

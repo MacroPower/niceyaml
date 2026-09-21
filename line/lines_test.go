@@ -921,7 +921,7 @@ func TestNewLines_SplitTokenOffsets(t *testing.T) {
 
 			var prevOffset int
 
-			for i := range lines.AllLines() {
+			for i := range lines.All() {
 				ln := lines.Line(i)
 				for _, tk := range ln.Tokens() {
 					if tk.Position != nil {
@@ -1034,7 +1034,7 @@ func TestNewLines_IndentLevelProgression(t *testing.T) {
 
 	require.Equal(t, len(wantLevels), lines.Len())
 
-	for i := range lines.AllLines() {
+	for i := range lines.All() {
 		ln := lines.Line(i)
 		if len(ln.Tokens()) > 0 {
 			firstTk := ln.Token(0)
@@ -1765,7 +1765,7 @@ func TestNewLines_BlankLineAbsorption(t *testing.T) {
 				lines := line.NewLines(lexer.Tokenize(tc.input))
 
 				got := make([]int, 0, lines.Len())
-				for _, ln := range lines.AllLines() {
+				for _, ln := range lines.All() {
 					got = append(got, ln.Number())
 				}
 
@@ -1818,7 +1818,7 @@ func TestNewLines_PartLinksStopAtLineBoundary(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			for _, ln := range line.NewLines(lexer.Tokenize(input)).AllLines() {
+			for _, ln := range line.NewLines(lexer.Tokenize(input)).All() {
 				parts := ln.Tokens()
 				if len(parts) == 0 {
 					continue
@@ -2417,7 +2417,7 @@ func TestNewLines_WhitespaceType(t *testing.T) {
 		lines := line.NewLines(tks)
 
 		// Verify all pure horizontal whitespace parts are SpaceType.
-		for i, ln := range lines.AllLines() {
+		for i, ln := range lines.All() {
 			for _, tk := range ln.Tokens() {
 				if strings.TrimSpace(tk.Origin) == "" && tk.Origin != "" && !strings.Contains(tk.Origin, "\n") {
 					assert.Equal(t, token.SpaceType, tk.Type,
@@ -2526,7 +2526,7 @@ func TestLines_View(t *testing.T) {
 		assert.Equal(t, len("key: value"), lines.Width())
 	})
 
-	t.Run("AllLines yields every index and line", func(t *testing.T) {
+	t.Run("All yields every index and line", func(t *testing.T) {
 		t.Parallel()
 
 		lines := line.NewLines(lexer.Tokenize(input))
@@ -2536,7 +2536,7 @@ func TestLines_View(t *testing.T) {
 			contents []string
 		)
 
-		for i, ln := range lines.AllLines() {
+		for i, ln := range lines.All() {
 			indices = append(indices, i)
 			contents = append(contents, ln.Content())
 		}
@@ -2545,38 +2545,38 @@ func TestLines_View(t *testing.T) {
 		assert.Equal(t, []string{"key: value", "list:", "  - one"}, contents)
 	})
 
-	t.Run("AllLines clamps spans", func(t *testing.T) {
+	t.Run("All clamps spans", func(t *testing.T) {
 		t.Parallel()
 
 		lines := line.NewLines(lexer.Tokenize(input))
 
 		var indices []int
 
-		for i := range lines.AllLines(position.NewSpan(1, 99)) {
+		for i := range lines.All(position.NewSpan(1, 99)) {
 			indices = append(indices, i)
 		}
 
 		assert.Equal(t, []int{1, 2}, indices)
 	})
 
-	t.Run("AllLines yields the lines of the collection", func(t *testing.T) {
+	t.Run("All yields the lines of the collection", func(t *testing.T) {
 		t.Parallel()
 
 		lines := line.NewLines(lexer.Tokenize(input))
 
-		for i, ln := range lines.AllLines() {
+		for i, ln := range lines.All() {
 			assert.Same(t, lines.Line(i), ln)
 		}
 	})
 
-	t.Run("AllRunes round-trips the input", func(t *testing.T) {
+	t.Run("Runes round-trips the input", func(t *testing.T) {
 		t.Parallel()
 
 		lines := line.NewLines(lexer.Tokenize(input))
 
 		var sb strings.Builder
 
-		for _, r := range lines.AllRunes() {
+		for _, r := range lines.Runes() {
 			sb.WriteRune(r)
 		}
 
@@ -2592,7 +2592,7 @@ func TestLines_View(t *testing.T) {
 
 		var sb strings.Builder
 
-		for pos, r := range lines.AllRunes() {
+		for pos, r := range lines.Runes() {
 			if r == '\n' {
 				assert.Equal(t, lines.Line(pos.Line).Width(), pos.Col)
 			}
@@ -2612,11 +2612,11 @@ func TestLines_View(t *testing.T) {
 		assert.True(t, lines.IsEmpty())
 		assert.Equal(t, 0, lines.Width())
 
-		for range lines.AllLines() {
+		for range lines.All() {
 			t.Fatal("expected no lines")
 		}
 
-		for range lines.AllRunes() {
+		for range lines.Runes() {
 			t.Fatal("expected no runes")
 		}
 	})

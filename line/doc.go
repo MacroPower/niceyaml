@@ -50,7 +50,7 @@
 //	tks := tokens.Tokenize(input)
 //	lines := line.NewLines(tks)
 //
-//	for _, l := range lines.AllLines() {
+//	for _, l := range lines.All() {
 //		fmt.Printf("%d: %s\n", l.Number(), l.Content())
 //	}
 //

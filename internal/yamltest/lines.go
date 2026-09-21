@@ -36,7 +36,7 @@ var (
 func ValidateLines(ls line.Lines) error {
 	prevLineNum := 0
 
-	for i, l := range ls.AllLines() {
+	for i, l := range ls.All() {
 		// A line with no tokens is a placeholder, such as the blank row a
 		// side-by-side diff inserts, and carries no number to check. Every
 		// other line must number above the one before it.

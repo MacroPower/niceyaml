@@ -21,7 +21,7 @@ type plainRenderer struct{}
 // Print renders view as plain text.
 func (plainRenderer) Print(view *line.View) string {
 	width := 4
-	for _, ln := range view.AllLines() {
+	for _, ln := range view.All() {
 		width = max(width, len(strconv.Itoa(ln.Number())))
 	}
 
@@ -29,7 +29,7 @@ func (plainRenderer) Print(view *line.View) string {
 
 	var rows []string
 
-	for i, ln := range view.AllLines() {
+	for i, ln := range view.All() {
 		anns := view.Annotations(i)
 
 		// An annotation without content adds no row, as it adds none to a

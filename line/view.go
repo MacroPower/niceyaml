@@ -83,12 +83,12 @@ func (v *View) Indices(l *Line) []int {
 	return out
 }
 
-// AllLines returns an iterator over the lines within the given spans, as
-// [Lines.AllLines] does. Each iteration yields the 0-indexed line index and
+// All returns an iterator over the lines within the given spans, as
+// [Lines.All] does. Each iteration yields the 0-indexed line index and
 // the [*Line] at that index, and the index reaches the line's decoration
 // through [View.Flag], [View.Overlays], and [View.Annotations].
-func (v *View) AllLines(spans ...position.Span) iter.Seq2[int, *Line] {
-	return v.Lines().AllLines(spans...)
+func (v *View) All(spans ...position.Span) iter.Seq2[int, *Line] {
+	return v.Lines().All(spans...)
 }
 
 // Flag returns the [Flag] of line i. The zero value is [FlagDefault].
@@ -170,7 +170,7 @@ func (v *View) AddLineOverlay(i int, o ...Overlay) {
 //
 // It splits multi-line ranges into per-line overlays and clamps each
 // overlay's columns to its line's width. It skips lines outside the view,
-// the same way [Lines.AllLines] clamps its spans, so a range computed
+// the same way [Lines.All] clamps its spans, so a range computed
 // against a longer view is safe to apply. A range that covers no columns
 // of a line adds no overlay to it.
 func (v *View) AddOverlay(s kind.Kind, ranges ...position.Range) {
@@ -243,13 +243,13 @@ func (v *View) Clone() *View {
 
 // Slice returns a new [*View] holding the lines within the given spans, in
 // the supplied order, each with its decoration. Spans are clamped to the
-// view as [Lines.AllLines] clamps them. The result shares the lines with
+// view as [Lines.All] clamps them. The result shares the lines with
 // the receiver and owns its decoration, so it is the view a caller renders
 // to show part of a document, such as the hunks around an error.
 func (v *View) Slice(spans ...position.Span) *View {
 	out := &View{}
 
-	for i := range v.AllLines(spans...) {
+	for i := range v.All(spans...) {
 		out.lines = append(out.lines, v.lines[i])
 
 		if v.flags != nil {
@@ -273,7 +273,7 @@ func (v *View) Slice(spans ...position.Span) *View {
 func (v *View) String() string {
 	var sb strings.Builder
 
-	for i, l := range v.AllLines() {
+	for i, l := range v.All() {
 		if i > 0 {
 			sb.WriteByte('\n')
 		}

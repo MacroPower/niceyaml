@@ -121,7 +121,7 @@ type runePosition struct {
 	Pos position.Position
 }
 
-func TestSource_AllRunes(t *testing.T) {
+func TestSource_Runes(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -201,7 +201,7 @@ func TestSource_AllRunes(t *testing.T) {
 
 			var got []runePosition
 
-			for pos, r := range lines.Lines().AllRunes() {
+			for pos, r := range lines.Lines().Runes() {
 				got = append(got, runePosition{R: r, Pos: pos})
 			}
 
@@ -210,7 +210,7 @@ func TestSource_AllRunes(t *testing.T) {
 	}
 }
 
-func TestSource_AllRunes_LiteralBlock(t *testing.T) {
+func TestSource_Runes_LiteralBlock(t *testing.T) {
 	t.Parallel()
 
 	// Literal blocks have multi-line content.
@@ -224,7 +224,7 @@ func TestSource_AllRunes_LiteralBlock(t *testing.T) {
 		positions []position.Position
 	)
 
-	for pos, r := range lines.Lines().AllRunes() {
+	for pos, r := range lines.Lines().Runes() {
 		runes = append(runes, r)
 		positions = append(positions, pos)
 	}
@@ -258,7 +258,7 @@ func TestSource_AllRunes_LiteralBlock(t *testing.T) {
 	assert.Positive(t, positions[len(positions)-1].Line, "should have content on multiple lines")
 }
 
-func TestSource_AllRunes_DiffBuiltLines(t *testing.T) {
+func TestSource_Runes_DiffBuiltLines(t *testing.T) {
 	t.Parallel()
 
 	// When Lines are built from a diff, Position.Line should be based on the
@@ -282,7 +282,7 @@ func TestSource_AllRunes_DiffBuiltLines(t *testing.T) {
 		col  int
 	}
 
-	for pos, r := range lines.Lines().AllRunes() {
+	for pos, r := range lines.Lines().Runes() {
 		if r == 'k' { // First char of each line.
 			positions = append(positions, struct {
 				line int
@@ -303,7 +303,7 @@ func TestSource_AllRunes_DiffBuiltLines(t *testing.T) {
 	assert.Equal(t, 0, positions[1].col, "second 'k' should be at column 0")
 }
 
-func TestSource_AllLines_EarlyBreak(t *testing.T) {
+func TestSource_All_EarlyBreak(t *testing.T) {
 	t.Parallel()
 
 	input := "a: 1\nb: 2\nc: 3\n"
@@ -312,7 +312,7 @@ func TestSource_AllLines_EarlyBreak(t *testing.T) {
 
 	var collected []int
 
-	for idx := range lines.Lines().AllLines() {
+	for idx := range lines.Lines().All() {
 		collected = append(collected, idx)
 		if idx >= 1 {
 			break
@@ -322,7 +322,7 @@ func TestSource_AllLines_EarlyBreak(t *testing.T) {
 	assert.Equal(t, []int{0, 1}, collected)
 }
 
-func TestSource_AllLines_WithSpans(t *testing.T) {
+func TestSource_All_WithSpans(t *testing.T) {
 	t.Parallel()
 
 	input := "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n"
@@ -335,7 +335,7 @@ func TestSource_AllLines_WithSpans(t *testing.T) {
 
 		var collected []int
 
-		for idx := range source.Lines().AllLines() {
+		for idx := range source.Lines().All() {
 			collected = append(collected, idx)
 		}
 
@@ -347,7 +347,7 @@ func TestSource_AllLines_WithSpans(t *testing.T) {
 
 		var collected []int
 
-		for idx := range source.Lines().AllLines(position.NewSpan(1, 3)) {
+		for idx := range source.Lines().All(position.NewSpan(1, 3)) {
 			collected = append(collected, idx)
 		}
 
@@ -359,7 +359,7 @@ func TestSource_AllLines_WithSpans(t *testing.T) {
 
 		var collected []int
 
-		for idx := range source.Lines().AllLines(
+		for idx := range source.Lines().All(
 			position.NewSpan(0, 1),
 			position.NewSpan(3, 5),
 		) {
@@ -374,7 +374,7 @@ func TestSource_AllLines_WithSpans(t *testing.T) {
 
 		var collected []int
 
-		for idx := range source.Lines().AllLines(position.NewSpan(-5, 100)) {
+		for idx := range source.Lines().All(position.NewSpan(-5, 100)) {
 			collected = append(collected, idx)
 		}
 
@@ -386,7 +386,7 @@ func TestSource_AllLines_WithSpans(t *testing.T) {
 
 		var collected []int
 
-		for idx := range source.Lines().AllLines(position.NewSpan(2, 2)) {
+		for idx := range source.Lines().All(position.NewSpan(2, 2)) {
 			collected = append(collected, idx)
 		}
 
@@ -398,7 +398,7 @@ func TestSource_AllLines_WithSpans(t *testing.T) {
 
 		var collected []int
 
-		for idx := range source.Lines().AllLines(position.NewSpan(10, 20)) {
+		for idx := range source.Lines().All(position.NewSpan(10, 20)) {
 			collected = append(collected, idx)
 		}
 
@@ -452,7 +452,7 @@ func TestSource_Lines_Whitespace(t *testing.T) {
 	}
 }
 
-func TestSource_AllRunes_EarlyBreak(t *testing.T) {
+func TestSource_Runes_EarlyBreak(t *testing.T) {
 	t.Parallel()
 
 	input := "abc\n"
@@ -461,7 +461,7 @@ func TestSource_AllRunes_EarlyBreak(t *testing.T) {
 
 	var collected []rune
 
-	for _, r := range lines.Lines().AllRunes() {
+	for _, r := range lines.Lines().Runes() {
 		collected = append(collected, r)
 		if r == 'b' {
 			break
@@ -471,7 +471,7 @@ func TestSource_AllRunes_EarlyBreak(t *testing.T) {
 	assert.Equal(t, []rune{'a', 'b'}, collected)
 }
 
-func TestSource_AllRunes_WithRanges(t *testing.T) {
+func TestSource_Runes_WithRanges(t *testing.T) {
 	t.Parallel()
 
 	input := "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n"
@@ -484,7 +484,7 @@ func TestSource_AllRunes_WithRanges(t *testing.T) {
 
 		var collected []runePosition
 
-		for pos, r := range source.Lines().AllRunes() {
+		for pos, r := range source.Lines().Runes() {
 			collected = append(collected, runePosition{R: r, Pos: pos})
 		}
 
@@ -503,7 +503,7 @@ func TestSource_AllRunes_WithRanges(t *testing.T) {
 
 		var collected []runePosition
 
-		for pos, r := range source.Lines().AllRunes(rng) {
+		for pos, r := range source.Lines().Runes(rng) {
 			collected = append(collected, runePosition{R: r, Pos: pos})
 		}
 
@@ -527,7 +527,7 @@ func TestSource_AllRunes_WithRanges(t *testing.T) {
 
 		var collected []runePosition
 
-		for pos, r := range source.Lines().AllRunes(rng) {
+		for pos, r := range source.Lines().Runes(rng) {
 			collected = append(collected, runePosition{R: r, Pos: pos})
 		}
 
@@ -552,7 +552,7 @@ func TestSource_AllRunes_WithRanges(t *testing.T) {
 
 		var collected []runePosition
 
-		for pos, r := range source.Lines().AllRunes(rng) {
+		for pos, r := range source.Lines().Runes(rng) {
 			collected = append(collected, runePosition{R: r, Pos: pos})
 		}
 
@@ -570,7 +570,7 @@ func TestSource_AllRunes_WithRanges(t *testing.T) {
 
 		var collected []runePosition
 
-		for pos, r := range emptySource.Lines().AllRunes(rng) {
+		for pos, r := range emptySource.Lines().Runes(rng) {
 			collected = append(collected, runePosition{R: r, Pos: pos})
 		}
 
@@ -585,7 +585,7 @@ func TestSource_AllRunes_WithRanges(t *testing.T) {
 
 		var collected []runePosition
 
-		for pos, r := range source.Lines().AllRunes(rng) {
+		for pos, r := range source.Lines().Runes(rng) {
 			collected = append(collected, runePosition{R: r, Pos: pos})
 		}
 
@@ -601,7 +601,7 @@ func TestSource_AllRunes_WithRanges(t *testing.T) {
 
 		var collected []runePosition
 
-		for pos, r := range source.Lines().AllRunes(rng1, rng2) {
+		for pos, r := range source.Lines().Runes(rng1, rng2) {
 			collected = append(collected, runePosition{R: r, Pos: pos})
 		}
 
@@ -619,7 +619,7 @@ func TestSource_AllRunes_WithRanges(t *testing.T) {
 
 		var collected []rune
 
-		for _, r := range source.Lines().AllRunes(rng) {
+		for _, r := range source.Lines().Runes(rng) {
 			collected = append(collected, r)
 			if r == ':' {
 				break
@@ -761,7 +761,7 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 	t.Run("a token position is a view position", func(t *testing.T) {
 		t.Parallel()
 
-		for _, l := range view.AllLines() {
+		for _, l := range view.All() {
 			for _, tk := range l.SourceTokens() {
 				assert.Same(t, tk, view.TokenAt(position.NewFromToken(tk)), "token %q", tk.Value)
 			}
@@ -1455,7 +1455,7 @@ func TestSource_View_IsIndependent(t *testing.T) {
 
 	// A change to one view reaches neither the Source nor another view.
 	view := source.View()
-	for i := range view.AllLines() {
+	for i := range view.All() {
 		view.Annotate(i, line.Annotation{Content: "note", Placement: line.Below})
 		view.AddLineOverlay(i, line.Overlay{Cols: position.NewSpan(0, 3), Kind: kind.GenericError})
 	}
