@@ -2576,6 +2576,9 @@ func TestPrinter_With(t *testing.T) {
 	assert.Equal(t, 0, base.Wrap())
 	assert.Equal(t, 20, narrow.Wrap())
 
+	// A negative width disables wrapping, and Wrap reports that as 0.
+	assert.Equal(t, 0, base.With(printer.WithWrap(-5)).Wrap())
+
 	// The receiver still renders on one line; the copy wraps.
 	assert.Equal(t, "key: this is a very long value that should wrap", base.Print(source.View()))
 	assert.Equal(t, stringtest.JoinLF(

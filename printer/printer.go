@@ -466,11 +466,12 @@ func WithAnnotation(fn AnnotationFunc) Option {
 }
 
 // WithWrap is an [Option] that sets the width for word wrapping.
-// A width of 0, the default, disables wrapping. The width of the box
-// around the output is [WithContainerWidth].
+// A width of 0, the default, disables wrapping, and a negative width
+// counts as 0. The width of the box around the output is
+// [WithContainerWidth].
 func WithWrap(width int) Option {
 	return func(p *Printer) {
-		p.wrap = width
+		p.wrap = max(0, width)
 	}
 }
 
