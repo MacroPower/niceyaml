@@ -296,13 +296,17 @@ func (m model) View() tea.View {
 // terminal has. A terminal of two rows leaves the viewport none, and a
 // viewport with no rows renders an empty string that the vertical join
 // still counts as a row, so the viewport drops out of the render instead.
-// A terminal of one row shows the title line alone.
+// A terminal of one row shows the title line alone, and one with no rows,
+// as before the first window size arrives, renders nothing.
 func (m *model) baseView() string {
-	switch m.height {
-	case 1:
+	switch {
+	case m.height <= 0:
+		return ""
+
+	case m.height == 1:
 		return m.titleLine()
 
-	case statusBarHeight:
+	case m.height == statusBarHeight:
 		return m.statusBar()
 
 	default:

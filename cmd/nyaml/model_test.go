@@ -257,6 +257,24 @@ func TestBaseViewHeight(t *testing.T) {
 	}
 }
 
+func TestBaseViewNoRows(t *testing.T) {
+	t.Parallel()
+
+	// A terminal with no rows, as before the first window size arrives,
+	// renders nothing rather than a status bar the join counts as rows.
+	m := newModel(&modelOptions{
+		files: []fileEntry{{path: "a.yaml", content: []byte("a: 1\n")}},
+	})
+
+	assert.Empty(t, m.baseView())
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 0})
+
+	got, ok := updated.(model)
+	require.True(t, ok)
+	assert.Empty(t, got.baseView())
+}
+
 func TestOverlayOffset(t *testing.T) {
 	t.Parallel()
 
