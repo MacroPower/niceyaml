@@ -236,6 +236,12 @@ func (c GutterContext) styler() style.Styler {
 // GutterFunc returns the gutter content for a line based on [GutterContext].
 // The returned string is rendered as the leftmost content before the line content.
 //
+// The printer measures the gutter once per view, with the largest line
+// number and every other field of the context unset, and budgets word
+// wrapping and [Layout.Width] from that width, so return the same width
+// for every context of a view: vary the text on Soft, Flag, or
+// Annotation, but not its width.
+//
 // [DefaultGutter], [DiffGutter], [LineNumberGutter], and [NoGutter] are
 // ready-made gutters; pass one to [WithGutter].
 type GutterFunc func(GutterContext) string
