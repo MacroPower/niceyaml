@@ -787,19 +787,19 @@ func TestResetPositions_Text(t *testing.T) {
 
 		require.Len(t, got, 3)
 
-		// First token should be at line 1, column 1, offset 0.
+		// First token should be at line 1, column 1, offset 1.
 		assert.Equal(t, 1, got[0].Position.Line)
 		assert.Equal(t, 1, got[0].Position.Column)
 		assert.Equal(t, 1, got[0].Position.Offset)
 
 		// Second token: same line, column adjusted relatively.
 		assert.Equal(t, 1, got[1].Position.Line)
-		assert.Equal(t, 4, got[1].Position.Column) // Offset 6 relative to start 3, plus the 1-based origin.
+		assert.Equal(t, 4, got[1].Position.Column) // Column 6 relative to start 3, plus the 1-based origin.
 		assert.Equal(t, 4, got[1].Position.Offset) // Offset 103 relative to start 100, plus the 1-based origin.
 
 		// Third token: same line, column adjusted relatively.
 		assert.Equal(t, 1, got[2].Position.Line)
-		assert.Equal(t, 6, got[2].Position.Column) // Offset 8 relative to start 3, plus the 1-based origin.
+		assert.Equal(t, 6, got[2].Position.Column) // Column 8 relative to start 3, plus the 1-based origin.
 		assert.Equal(t, 6, got[2].Position.Offset) // Offset 105 relative to start 100, plus the 1-based origin.
 	})
 

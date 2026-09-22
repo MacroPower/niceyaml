@@ -21,15 +21,13 @@
 // [SplitDocuments] splits a token stream at document headers ("---") and
 // document end markers ("..."), returning an iterator over separate token
 // streams for each YAML document. The tokens keep the positions they have in
-// the whole stream, and [ResetPositions] clones a document's tokens with the
-// positions a fresh tokenize of its text would give them:
+// the whole stream, and [ResetPositions] clones a document's tokens with
+// positions that count from line 1, as a fresh tokenize of its text would:
 //
 //	for idx, doc := range tokens.SplitDocuments(tokens.Tokenize(src)) {
 //		standalone := tokens.ResetPositions(doc)
 //	}
 //
-// A document header ("---") starts a new document and belongs to the start
-// of it. A document end marker ("...") closes the current document and
-// belongs to the end of it, so content that follows without a header forms
-// a new document. The first document may or may not have a header.
+// The first document may or may not have a header. See [SplitDocuments] for
+// the rest of the boundary rules.
 package tokens

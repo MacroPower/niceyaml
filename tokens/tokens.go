@@ -43,14 +43,14 @@ func Tokenize(src string) token.Tokens {
 	// The lexer drops the source's final line ending, so a file that ends
 	// in a blank line tokenizes like one that does not. Give the dropped
 	// whitespace back to the last token so the stream ends where the file
-	// does and the last line count matches the text. The rest is found
-	// behind the last token's text rather than behind the joined origins,
-	// which need not be a prefix of the source when the lexer dropped text
+	// does and the last line count matches the text. Find the rest behind
+	// the last token's text rather than behind the joined origins, which
+	// need not be a prefix of the source when the lexer dropped text
 	// earlier in the file. The search leaves the token's own trailing
-	// whitespace out as well, because the lexer rewrites it: it collapses a
-	// blank line of spaces to a bare line ending, which leaves an Origin the
-	// source does not hold. A token whose text the source does not hold
-	// either keeps the Origin it came with.
+	// whitespace out as well, because the lexer rewrites it. The lexer
+	// collapses a blank line of spaces to a bare line ending, which leaves
+	// an Origin the source does not hold. A token whose text the source
+	// does not hold either keeps the Origin it came with.
 	last := tks[len(tks)-1]
 
 	text := strings.TrimRight(last.Origin, " \t\r\n")
@@ -102,8 +102,8 @@ func TrimLineEnding(s string) string {
 // whitespace rather than inside it, keeps the positions it has.
 //
 // The clones link to each other through Next and Prev and to nothing outside
-// the result, so the stream stands alone. Tokens with nil positions are
-// cloned but left with nil positions, and nil tokens are dropped.
+// the result, so the stream stands alone. Tokens with nil positions come
+// back as clones with nil positions, and ResetPositions drops nil tokens.
 func ResetPositions(tks token.Tokens) token.Tokens {
 	if len(tks) == 0 {
 		return tks
@@ -171,20 +171,20 @@ func ResetPositions(tks token.Tokens) token.Tokens {
 // SplitDocuments splits a token stream into multiple token streams, one for
 // each YAML document.
 //
-// A document header token ('---') starts a new document and is included at
-// the start of it. A document end token ('...') closes the current document
-// and is included at the end of it, so content that follows without a header
-// forms a new document. These are the boundaries the go-yaml parser uses for
+// A document header token ('---') starts a new document and belongs to the
+// start of it. A document end token ('...') closes the current document and
+// belongs to the end of it, so content that follows without a header forms
+// a new document. These are the boundaries the go-yaml parser uses for
 // well-formed streams. The parser may produce fewer documents than this
 // function yields, for example when consecutive headers collapse, so pair
 // the two by token offset rather than by index.
 //
-// The returned slices each contain tokens for a single document, preserving
-// original token order and positions. The tokens are the caller's, not
-// copies, and they keep the Next and Prev links of the full stream, so a
+// Each returned slice holds the tokens of one document in their original
+// order and with their original positions. The tokens are the caller's, not
+// copies, and they keep the Next and Prev links of the whole stream, so a
 // document's first token still links back to the previous document. Pass a
-// document to [ResetPositions] for clones that count lines from 1. Nil
-// tokens in the stream are skipped.
+// document to [ResetPositions] for clones that count lines from 1.
+// SplitDocuments skips nil tokens in the stream.
 func SplitDocuments(tks token.Tokens) iter.Seq2[int, token.Tokens] {
 	return func(yield func(int, token.Tokens) bool) {
 		var (
