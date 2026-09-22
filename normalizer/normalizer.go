@@ -13,8 +13,8 @@ import (
 )
 
 // Normalizer transforms strings by applying a configurable pipeline of Unicode
-// transformations. The pipeline is defined once at construction time from the
-// provided [Option] values.
+// transformations. [New] defines the pipeline once at construction time from
+// the provided [Option] values.
 //
 // Normalizer is safe for concurrent use. Each call borrows a pipeline
 // instance from a pool, so concurrent calls never wait on each other.
@@ -42,8 +42,8 @@ type config struct {
 
 // New creates a new [*Normalizer].
 //
-// By default, diacritics are removed and text is case-folded. Use [Option]
-// values to customize the pipeline.
+// By default, the pipeline removes diacritics and case-folds text. Use
+// [Option] values to customize the pipeline.
 func New(opts ...Option) *Normalizer {
 	cfg := config{
 		caseFold:   true,
@@ -98,7 +98,7 @@ func (c *config) build() transform.Transformer {
 }
 
 // WithCaseFold is an [Option] that toggles Unicode case folding.
-// When true (the default), text is case-folded for case-insensitive
+// When true (the default), the pipeline case-folds text for case-insensitive
 // comparison.
 func WithCaseFold(enabled bool) Option {
 	return func(c *config) {
@@ -107,7 +107,7 @@ func WithCaseFold(enabled bool) Option {
 }
 
 // WithDiacriticFold is an [Option] that toggles diacritics removal.
-// When true (the default), diacritics are folded away. For example, "Ö"
+// When true (the default), the pipeline removes diacritics. For example, "Ö"
 // becomes "O" (before any case folding).
 func WithDiacriticFold(enabled bool) Option {
 	return func(c *config) {
@@ -116,8 +116,7 @@ func WithDiacriticFold(enabled bool) Option {
 }
 
 // WithTransformer is an [Option] that appends custom transformers to the end
-// of the pipeline. Can be called multiple times to add additional
-// transformers.
+// of the pipeline. Call it multiple times to append more transformers.
 //
 // Each argument is a constructor rather than an instance, because a
 // [transform.Transformer] carries state between calls and the Normalizer
@@ -133,8 +132,8 @@ func WithTransformer(newTransformer ...func() transform.Transformer) Option {
 }
 
 // WithWidthFold is an [Option] that toggles Unicode width folding.
-// When true, fullwidth and halfwidth characters are normalized to their
-// canonical forms. For example, "ａｂｃ" becomes "abc".
+// When true, the pipeline normalizes fullwidth and halfwidth characters to
+// their canonical forms. For example, "ａｂｃ" becomes "abc".
 func WithWidthFold(enabled bool) Option {
 	return func(c *config) {
 		c.widthFold = enabled
@@ -142,7 +141,7 @@ func WithWidthFold(enabled bool) Option {
 }
 
 // Normalize applies the configured transformations to the input string.
-// If the transformation fails, the original string is returned unchanged.
+// If the transformation fails, Normalize returns the input string unchanged.
 func (n *Normalizer) Normalize(in string) string {
 	t, ok := n.pool.Get().(transform.Transformer)
 	if !ok {
