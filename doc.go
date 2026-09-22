@@ -203,7 +203,12 @@
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
 //
-// [Node.Validate] runs the same validators without decoding.
+// [Node.Validate] runs the same validators without decoding, and
+// [WithValidators] sets the validators every document of a [Source]
+// decodes with, so a file of many documents states its schema once. A
+// validator reads the node it checks with [Node.Value], which decodes
+// without validating, so a validator of the source does not run itself
+// again.
 //
 // A [SelfValidator] writes its paths from its own root, and [Rebase] puts
 // the error a nested value returns under the path of that value, so a

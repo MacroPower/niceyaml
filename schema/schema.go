@@ -166,9 +166,10 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 	return s.Ref(), nil
 }
 
-// Validate implements [niceyaml.Validator]. It decodes n to any and
-// checks the result as [Schema.ValidateValue] does, so
-// [niceyaml.WithValidator] runs the schema before a decode and
+// Validate implements [niceyaml.Validator]. It reads n as any through
+// [niceyaml.Node.Value] and checks the result as [Schema.ValidateValue]
+// does, so [niceyaml.WithValidator] runs the schema before a decode,
+// [niceyaml.WithValidators] runs it on every document of a source, and
 // [niceyaml.Node.Validate] runs it on its own. A Node from
 // [niceyaml.Node.At] decodes to the node it selects, so the schema checks
 // that node and a violation's path resolves from it. A decoding error
@@ -180,7 +181,7 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // which no path names. Such a violation carries the position of the key
 // or value it found rather than a path.
 func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
-	data, err := n.Decode[any](ctx)
+	data, err := n.Value[any](ctx)
 	if err != nil {
 		return err
 	}

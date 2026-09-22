@@ -66,10 +66,11 @@ type Source struct {
 	docs       []*Node
 	parserOpts []parser.Option
 	decodeOpts []yaml.DecodeOption
-	// The DecodeOption values every decode of the Source starts from.
-	decodeDefaults []DecodeOption
-	fileOnce       sync.Once
-	docsOnce       sync.Once
+	// The settings every decode of the Source starts from, and the
+	// validators that check each of its documents.
+	decodeCfg decodeConfig
+	fileOnce  sync.Once
+	docsOnce  sync.Once
 	// Accepts a mapping with the same key twice when parsing and decoding.
 	allowDuplicateKeys bool
 }
@@ -82,11 +83,13 @@ type Source struct {
 //   - [WithAllowDuplicateKeys]
 //   - [WithYAMLParserOptions]
 //   - [WithDecodeOptions]
+//   - [WithValidators]
 //
 // Settings that only affect decoding, such as [WithDisallowUnknownFields],
 // are [DecodeOption] values passed to [Node.Decode], and
 // [WithDecodeOptions] sets the ones every decode of the Source starts
-// from.
+// from. [WithValidators] sets the validators that check each document
+// of the Source.
 type SourceOption func(*Source)
 
 // WithName is a [SourceOption] that sets the name for the [Source], which
@@ -132,15 +135,15 @@ func WithYAMLParserOptions(opts ...parser.Option) SourceOption {
 }
 
 // WithDecodeOptions is a [SourceOption] that sets the [DecodeOption]
-// values every [Node.Decode] and [Node.DecodeInto] of the Source
-// starts from, ahead of the options of the call itself, so a file that
-// holds many documents, or a Source a library hands to its own callers,
-// decodes with a setting stated once:
+// values every [Node.Decode], [Node.DecodeInto], and [Node.Value] of the
+// Source starts from, ahead of the options of the call itself, so a file
+// that holds many documents, or a Source a library hands to its own
+// callers, decodes with a setting stated once:
 //
-//	source, err := niceyaml.NewSourceFromFile(path, niceyaml.WithDecodeOptions(
-//		niceyaml.WithValidator(reg),
-//		niceyaml.WithDisallowUnknownFields(true),
-//	))
+//	source, err := niceyaml.NewSourceFromFile(path,
+//		niceyaml.WithValidators(reg),
+//		niceyaml.WithDecodeOptions(niceyaml.WithDisallowUnknownFields(true)),
+//	)
 //	if err != nil {
 //		return err
 //	}
@@ -155,20 +158,37 @@ func WithYAMLParserOptions(opts ...parser.Option) SourceOption {
 //		...
 //	}
 //
-// A validator among the defaults runs before the validators of the call,
-// and a setting the call gives replaces the same setting among the
-// defaults. Given more than once, each call appends after the options of
-// the one before it.
-//
-// The defaults belong to the decode the caller asks for. A validator that
-// decodes the document itself, as a schema does, runs that decode under
-// the context it was given, and a decode under that context applies none
-// of the defaults, so a default validator does not run itself again.
-// [Node.Validate] runs the validators it is given and none of the
-// defaults.
+// A setting the call gives replaces the same setting among the defaults,
+// and given more than once, each call applies after the one before it.
+// A [WithValidator] among the options is a validator of the Source, as
+// [WithValidators] sets one, since a validator checks a document rather
+// than configures a decode.
 func WithDecodeOptions(opts ...DecodeOption) SourceOption {
 	return func(s *Source) {
-		s.decodeDefaults = append(s.decodeDefaults, opts...)
+		for _, opt := range opts {
+			opt(&s.decodeCfg)
+		}
+	}
+}
+
+// WithValidators is a [SourceOption] that sets the [Validator] values
+// that check each document of the Source, so a file that holds many
+// documents, or a Source a library hands to its own callers, validates
+// against a schema stated once:
+//
+//	source, err := niceyaml.NewSourceFromFile(path, niceyaml.WithValidators(reg))
+//
+// The validators check a whole document. They run in the order given,
+// before the validators of the call, when a root Node decodes, and
+// [Node.Validate] with no validators of its own runs them on the
+// document without decoding it. A scoped decode from [Node.At], such as
+// one that reads a discriminator field to route the document, runs none
+// of them, and neither does [Node.Value], which is how a validator reads
+// the document it checks without running itself again. Given more than
+// once, each call appends after the validators of the one before it.
+func WithValidators(validators ...Validator) SourceOption {
+	return func(s *Source) {
+		s.decodeCfg.validators = append(s.decodeCfg.validators, validators...)
 	}
 }
 
@@ -253,7 +273,7 @@ func NewSourceFromString(src string, opts ...SourceOption) *Source {
 // one document of a file with the file's line numbers, print the file's
 // view with [Node.Span] instead.
 func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
-	t := &Source{}
+	t := &Source{decodeCfg: decodeConfig{selfValidation: true}}
 	for _, opt := range opts {
 		opt(t)
 	}
