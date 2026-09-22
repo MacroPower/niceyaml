@@ -29,7 +29,10 @@ func New(line, col int) Position {
 // the 1-indexed coordinates used by [token.Position] to the 0-indexed
 // coordinates used by this package.
 //
-// Returns the zero position if tk or its position is nil.
+// The token comes from [go.jacobcolvin.com/niceyaml/tokens.Tokenize] or
+// from a parse over such tokens, whose Line and Column name the rune where
+// the token's text starts, so the result names the same rune in the lines
+// of the source. Returns the zero position if tk or its position is nil.
 func NewFromToken(tk *token.Token) Position {
 	var line, col int
 

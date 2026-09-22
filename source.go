@@ -240,7 +240,9 @@ func (s *Source) FilePath() string {
 }
 
 // Tokens reconstructs the full [token.Tokens] stream from all [line.Line]s.
-// See [line.Lines.Tokens] for details on token recombination behavior.
+// See [line.Lines.Tokens] for details on token recombination behavior. The
+// tokens are the ones [tokens.Tokenize] returned for the text, so the Line
+// and Column of each name the rune where its text starts.
 func (s *Source) Tokens() token.Tokens {
 	return s.lines.Tokens()
 }
