@@ -8,7 +8,7 @@ import (
 )
 
 // Pretty returns the [Option] values that make [New] produce
-// prettier-friendly YAML: two-space indentation with indented sequences.
+// prettier-friendly YAML with two-space indentation and indented sequences.
 // Each call returns a new slice.
 func Pretty() []Option {
 	return []Option{
@@ -75,8 +75,9 @@ func WithIndent(spaces int) Option {
 	}
 }
 
-// WithIndentSequence is an [Option] that indents sequence entries one level
-// below their parent key.
+// WithIndentSequence is an [Option] that sets whether the encoder indents
+// sequence entries one level below their parent key. The default is false,
+// and entries then sit at the indent of their parent key.
 func WithIndentSequence(indent bool) Option {
 	return func(c *config) {
 		c.opts = append(c.opts, yaml.IndentSequence(indent))
@@ -121,7 +122,7 @@ func (e *Encoder) Encode(v any) error {
 }
 
 // Close releases the encoder's resources and reports the write error, if
-// any, that an earlier [Encoder.Encode] did. It does not flush the writer,
+// any, from an earlier [Encoder.Encode]. It does not flush the writer,
 // so a caller holding a buffered writer flushes it after Close.
 func (e *Encoder) Close() error {
 	err := e.e.Close()
@@ -132,8 +133,8 @@ func (e *Encoder) Close() error {
 	return e.writeErr()
 }
 
-// writeErr returns the first error the writer returned, wrapped with what
-// the encoder was doing, or nil when every write succeeded.
+// writeErr returns the first error the writer returned, wrapped with the
+// "write YAML" prefix, or nil when every write succeeded.
 func (e *Encoder) writeErr() error {
 	if e.w.err != nil {
 		return fmt.Errorf("write YAML: %w", e.w.err)

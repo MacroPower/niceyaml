@@ -1,7 +1,7 @@
 // Package encoder writes Go values as YAML.
 //
 // An [Encoder] wraps the go-yaml encoder so its settings are named options
-// of this module. Create one with [New] and call [Encoder.Encode] for each
+// of this package. Create one with [New] and call [Encoder.Encode] for each
 // value:
 //
 //	enc := encoder.New(os.Stdout, encoder.Pretty()...)
