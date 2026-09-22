@@ -1614,11 +1614,16 @@ func (m *Model) SetSearchTerm(term string) {
 	}
 
 	// The match index of another term points at an arbitrary match of this
-	// one.
-	if term != m.searchTerm {
-		m.searchIndex = -1
+	// one. The same term keeps the current match and the scroll position,
+	// so a parent that pushes the term on every update does not snap the
+	// view back to the match.
+	if term == m.searchTerm {
+		m.refreshSearch()
+
+		return
 	}
 
+	m.searchIndex = -1
 	m.searchTerm = term
 	m.refreshSearch()
 	m.scrollToCurrentMatch()

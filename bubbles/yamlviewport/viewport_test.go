@@ -4519,9 +4519,20 @@ func TestViewport_NewSearchTermStartsAtFirstMatch(t *testing.T) {
 
 	require.Equal(t, 7, m.SearchIndex())
 
-	// Setting the same term again keeps the current match.
+	// Setting the same term again keeps the current match and the scroll
+	// position, so a parent that pushes the term on every update does not
+	// snap the view back to the match.
 	m.SetSearchTerm("needle")
 	assert.Equal(t, 7, m.SearchIndex())
+
+	m.GotoBottom()
+
+	bottom := m.YOffset()
+	require.NotEqual(t, 0, bottom)
+
+	m.SetSearchTerm("needle")
+	assert.Equal(t, 7, m.SearchIndex())
+	assert.Equal(t, bottom, m.YOffset())
 
 	// Another term starts over at its first match, k1 on line 1, rather than
 	// carrying the ordinal of the old term into the new match list.
