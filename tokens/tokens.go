@@ -25,9 +25,11 @@ func Tokenize(src string) token.Tokens {
 			return tks
 		}
 
-		// The lexer emits nothing for a source of whitespace alone, so
-		// give the stream one token holding the whole text, positioned
-		// where the lexer places the first token of a file.
+		// The lexer emits nothing for a source of whitespace alone, and
+		// nothing for some text it rejects outright, such as a lone "!",
+		// so give the stream one token holding the whole text, positioned
+		// where the lexer places the first token of a file, and the file
+		// stays visible whatever the lexer made of it.
 		return token.Tokens{{
 			Type:          token.StringType,
 			CharacterType: token.CharacterTypeMiscellaneous,
