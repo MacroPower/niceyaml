@@ -46,10 +46,11 @@ func containsGlobChars(s string) bool {
 // two explicit files decides which revision a diff treats as older.
 // Arguments without glob metacharacters are included as-is.
 //
-// A pattern that matches no file falls back to the argument itself when a
-// path with that literal name exists, so a file such as "cfg[1].yaml" is
-// still reachable. Otherwise the pattern is an error wrapping [errNoMatch].
-// Returns an error if a pattern is invalid.
+// A pattern that matches no file, or that is no valid pattern, falls back
+// to the argument itself when a path with that literal name exists, so a
+// file such as "cfg[1].yaml" or "report[2024.txt" is still reachable.
+// Otherwise a pattern that matches nothing is an error wrapping
+// [errNoMatch], and an invalid pattern is its own error.
 func expandPaths(args ...string) ([]string, error) {
 	var result []string
 
@@ -73,14 +74,16 @@ func expandPaths(args ...string) ([]string, error) {
 		}
 
 		matches, err := glob(arg)
-		if err != nil {
-			return nil, err
-		}
+		if err != nil || len(matches) == 0 {
+			// The fallback admits files only, as the glob itself does. A
+			// name that is no valid pattern, such as one with a stray
+			// bracket, still names a file that exists.
+			info, statErr := os.Stat(arg)
+			if statErr != nil || info.IsDir() {
+				if err != nil {
+					return nil, err
+				}
 
-		if len(matches) == 0 {
-			// The fallback admits files only, as the glob itself does.
-			info, err := os.Stat(arg)
-			if err != nil || info.IsDir() {
 				return nil, fmt.Errorf("%w: %q", errNoMatch, arg)
 			}
 

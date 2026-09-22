@@ -86,6 +86,12 @@ func TestExpand(t *testing.T) {
 	bracketDir := filepath.Join(tmpDir, "data[1]")
 	require.NoError(t, os.MkdirAll(bracketDir, 0o755))
 
+	// Create a file whose name is no valid pattern, out of the way of the
+	// wildcard cases.
+	strayFile := filepath.Join(tmpDir, "stray", "report[2024.txt")
+	require.NoError(t, os.MkdirAll(filepath.Dir(strayFile), 0o755))
+	require.NoError(t, os.WriteFile(strayFile, []byte("test"), 0o644))
+
 	tests := map[string]struct {
 		args      []string
 		wantNames []string
@@ -102,6 +108,10 @@ func TestExpand(t *testing.T) {
 		"repeated file appears once": {
 			args:      []string{filepath.Join(tmpDir, "000.yaml"), filepath.Join(tmpDir, "000.yaml")},
 			wantNames: []string{"000.yaml"},
+		},
+		"invalid pattern names an existing file": {
+			args:      []string{strayFile},
+			wantNames: []string{"report[2024.txt"},
 		},
 		"overlapping globs name each file once": {
 			args:      []string{filepath.Join(tmpDir, "00[01].yaml"), filepath.Join(tmpDir, "*.yaml")},
