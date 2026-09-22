@@ -268,7 +268,10 @@ func WithErrors(errs ...error) ErrorOption {
 // lists them behind their own positions. An Error created from a nil error
 // has an empty message, so its text is the path alone, or "" when it has
 // none. An Error from [Rebase] carries the joined path in front of the
-// message of the error it rebased, in place of the path that error wrote.
+// message of the error it rebased, in place of the path that error wrote,
+// and an Error with a location of its own likewise replaces the path an
+// Error it wraps wrote, so the message names one location, the one
+// [Error.Path] reports.
 func (e *Error) Error() string {
 	if e == nil {
 		return ""
@@ -285,6 +288,9 @@ func (e *Error) Error() string {
 		}
 
 		return msg
+
+	case e.hasPosition():
+		msg = e.message()
 
 	case e.err != nil:
 		msg = e.err.Error()

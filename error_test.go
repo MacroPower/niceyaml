@@ -2943,6 +2943,20 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 		assert.Equal(t, "1:7: $.name: bad token", docs[0].Bind(outer).Error())
 	})
 
+	t.Run("a path anchor replaces the path of the error it wraps", func(t *testing.T) {
+		t.Parallel()
+
+		inner := niceyaml.NewError("bad token", niceyaml.AtPath(paths.Root().Child("other")))
+		outer := niceyaml.WrapError(inner, niceyaml.AtPath(namePath))
+
+		// The message names the one location Path reports, not both.
+		p, ok := outer.Path()
+		require.True(t, ok)
+		assert.Equal(t, namePath, p)
+		assert.Equal(t, "$.name: bad token", outer.Error())
+		assert.Equal(t, "1:7: $.name: bad token", docs[0].Bind(outer).Error())
+	})
+
 	t.Run("a second binding adds no position", func(t *testing.T) {
 		t.Parallel()
 
