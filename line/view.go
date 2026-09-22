@@ -370,7 +370,15 @@ func (v *View) String() string {
 			rows = append(rows, blank+padding+escape.Control(strings.Join(kept.Contents(), "; ")))
 		}
 
-		rows = append(rows, fmt.Sprintf("%*d | %s", width, ln.Number(), escape.Control(ln.Content())))
+		// A line with no number, such as the placeholder a diff puts
+		// opposite an inserted or deleted line, gets a blank gutter, as
+		// the printer gives it one.
+		number := ""
+		if ln.Number() > 0 {
+			number = strconv.Itoa(ln.Number())
+		}
+
+		rows = append(rows, fmt.Sprintf("%*s | %s", width, number, escape.Control(ln.Content())))
 
 		if marker := markerRow(ln, v.Overlays(i), anns.Filter(Below)); marker != "" {
 			rows = append(rows, blank+marker)

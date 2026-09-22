@@ -1204,3 +1204,13 @@ func TestView_String_AboveAnnotationOnWideContent(t *testing.T) {
 		"     |     ^ below",
 	), view.String())
 }
+
+func TestView_String_PlaceholderLine(t *testing.T) {
+	t.Parallel()
+
+	// A zero Line, which a diff puts opposite an inserted or deleted line,
+	// has no number, and its gutter is blank rather than 0.
+	view := line.NewView(line.Collect(&line.Line{}))
+
+	assert.Equal(t, "     | ", view.String())
+}
