@@ -1,7 +1,7 @@
 // Package errortree lays the message of an error out as a tree, with one
 // node per error, for a printer that draws nested errors as branches.
 //
-// The tree reads the errors themselves rather than their messages: a node
+// The tree reads the errors themselves rather than their messages. A node
 // is an error, and its children are the errors nested in it with
 // [niceyaml.WithErrors], which a [niceyaml.SourceError] binds as children
 // of its own. The package reads the niceyaml types through their exported
@@ -22,7 +22,7 @@ import (
 //
 // Create instances with [New].
 type Tree struct {
-	// Text is the message of the node: the message of the error without
+	// Text is the message of the node, the message of the error without
 	// the errors nested in it. It is empty for a node that stands for
 	// several errors and adds no message of its own, such as one built
 	// from [errors.Join].
@@ -51,7 +51,7 @@ type Tree struct {
 // reads as one tree with a branch per file. A binding of such an error is
 // the same node, with each child carrying its whole
 // [niceyaml.SourceError.Error], since no root names the source for it. A
-// node with no text adds nothing: its children take its place in the tree
+// node with no text adds nothing. Its children take its place in the tree
 // above it, and one with a single child is that child.
 //
 // The children come from the errors rather than from the text of the
@@ -175,7 +175,8 @@ func children(err error) []Tree {
 
 		case interface{ Unwrap() []error }:
 			// A wrapper with several %w verbs, or a join met along the
-			// chain: every branch is a child, and the chain ends there.
+			// chain, contributes its branches as children and ends the
+			// chain.
 			for _, branch := range x.Unwrap() {
 				if !nothing(branch) {
 					kids = append(kids, positioned{tree: New(branch)})
@@ -279,7 +280,7 @@ type positioned struct {
 
 // groupSources numbers the source of each of kids in the order the sources
 // first appear, so children of one source stay together in the order they
-// were given rather than interleaving with another source by position: a
+// were given rather than interleaving with another source by position. A
 // line number counts only in the source that holds it.
 func groupSources(kids []positioned) {
 	seen := make([]*niceyaml.Source, 0, 1)
@@ -316,7 +317,7 @@ func comparePositioned(a, b positioned) int {
 }
 
 // newTree returns the node with text and children, less the nodes that add
-// nothing: a child with no text gives its place to its own children, and a
+// nothing. A child with no text gives its place to its own children, and a
 // node with no text and a single child is that child.
 func newTree(text string, children []Tree) Tree {
 	if len(children) == 0 {
