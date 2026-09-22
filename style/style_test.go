@@ -214,10 +214,10 @@ func TestStyles_With(t *testing.T) {
 			style.Set(kind.Comment, yellow),
 		)
 
-		// Custom key should return empty style (not found) in original.
+		// The custom key is unset in the original, so it inherits the base.
 		got := original.Style(customKey)
 		assert.NotNil(t, got)
-		assert.Equal(t, lipgloss.Style{}, got)
+		assert.Equal(t, original.Style(kind.Text), got)
 
 		// Comment should still be green in original.
 		got = original.Style(kind.Comment)
@@ -281,8 +281,9 @@ func TestStyles_UnsetCategories(t *testing.T) {
 
 	styles := style.New(lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff")))
 
-	// An unset predefined kind inherits the base, and an unknown kind
-	// resolves to an empty style.
+	// An unset predefined kind inherits the base, and so does an unknown
+	// kind, whose parent is Text.
 	assert.Equal(t, styles.Style(kind.Text), styles.Style(kind.NameTag))
-	assert.Equal(t, lipgloss.NewStyle(), styles.Style("never-set"))
+	assert.Equal(t, styles.Style(kind.Text), styles.Style("never-set"))
+	assert.Equal(t, lipgloss.NewStyle(), style.Styles{}.Style("never-set"))
 }

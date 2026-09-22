@@ -8,8 +8,8 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
-// emptyStyle is a shared empty style, returned for lookups of kinds that
-// are neither predefined nor set.
+// emptyStyle is a shared empty style, which the zero [Styles] value
+// returns for every kind.
 var emptyStyle = lipgloss.NewStyle()
 
 // Styler retrieves the style for each [kind.Kind].
@@ -29,7 +29,8 @@ type Styler interface {
 // A Styles value holds a base style plus explicit overrides, and resolves every
 // predefined kind through the inheritance hierarchy when it is built, so
 // [Styles.Style] is a map lookup. A Styles value stores custom kinds, such
-// as one for an overlay, as given.
+// as one for an overlay, as given, and one that is not set resolves to
+// the base style, as [kind.Parent] places it under [kind.Text].
 //
 // The zero value resolves every kind to an empty style. Create instances
 // with [New].
@@ -113,9 +114,18 @@ func resolveStyles(overrides map[kind.Kind]*lipgloss.Style) map[kind.Kind]*lipgl
 
 // Style returns the [lipgloss.Style] for the given [kind.Kind].
 //
-// A kind that is neither predefined nor set returns an empty style.
+// A kind that is neither predefined nor set inherits from its parent as a
+// predefined kind does, and [kind.Parent] puts such a kind under
+// [kind.Text], so it returns the base style. An overlay of a custom kind
+// no [Set] names therefore renders as the text it covers rather than
+// with no style at all. The zero Styles value returns an empty style for
+// every kind.
 func (s Styles) Style(st kind.Kind) lipgloss.Style {
 	if ls, ok := s.resolved[st]; ok && ls != nil {
+		return *ls
+	}
+
+	if ls, ok := s.resolved[kind.Parent(st)]; ok && ls != nil {
 		return *ls
 	}
 
