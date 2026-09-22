@@ -344,11 +344,12 @@ func decodedPosition(
 		node = keyNode
 	}
 
-	if node == nil || node.GetToken() == nil {
+	tk := node.GetToken()
+	if node == nil || tk == nil || tk.Position == nil {
 		return position.Position{}, false
 	}
 
-	return position.NewFromToken(node.GetToken()), true
+	return position.NewFromToken(tk), true
 }
 
 // walkSegments walks root along segments, matching each mapping key by the
