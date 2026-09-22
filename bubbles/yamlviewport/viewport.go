@@ -696,8 +696,8 @@ func (m *Model) rebuildViews() {
 		m.baseRight = result.After()
 
 	case m.viewMode == ViewModeHunks && needsDiff:
-		// Hunks returns nil when the diff has no changes, which leaves the
-		// view empty.
+		// Hunks holds no lines when the diff has no changes, which leaves
+		// the view empty.
 		m.baseLeft = m.getDiffResult().Hunks(m.hunkContext)
 
 	default:

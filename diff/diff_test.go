@@ -686,9 +686,13 @@ func TestDiffer_Hunks(t *testing.T) {
 			got := result.Hunks(tc.context)
 
 			if tc.wantEmpty {
-				assert.Nil(t, got)
+				require.NotNil(t, got)
 				assert.Equal(t, 0, got.Count())
-				assert.True(t, got.Lines().IsEmpty())
+				assert.Equal(t, result.Unified().Lines().Len(), got.Lines().Len())
+
+				// The empty view takes decoration as any other.
+				got.AddOverlay(kind.GenericHighlight, position.NewRange(position.New(0, 0), position.New(0, 1)))
+				assert.Empty(t, got.String())
 
 				return
 			}
@@ -1262,7 +1266,9 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 	t.Run("Hunks without changes", func(t *testing.T) {
 		t.Parallel()
 
-		assert.Nil(t, diff.Diff(before.Lines(), before.Lines()).Hunks(1))
+		hunks := diff.Diff(before.Lines(), before.Lines()).Hunks(1)
+		require.NotNil(t, hunks)
+		assert.Equal(t, 0, hunks.Count())
 	})
 
 	t.Run("inputs are untouched", func(t *testing.T) {

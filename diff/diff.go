@@ -181,21 +181,20 @@ func (r *Result) Unified() *line.View {
 // Each line carries the flag and the line number it has in
 // [Result.Unified], so the view prints with the same numbers, and the
 // first line of each hunk carries a [line.Above] annotation holding the
-// unified hunk header. Returns nil when the diff has no changes.
+// unified hunk header. A diff with no changes has no hunks, and the view
+// then holds no lines, so it prints as an empty view and takes decoration
+// as any other does.
 //
 // Each call returns a new view with its own decoration, so overlays added
 // to one do not affect another.
 func (r *Result) Hunks(context int) *line.View {
 	context = max(0, context)
 
-	if len(r.ops) == 0 {
-		return nil
-	}
-
 	hunkSpans := selectHunkSpans(r.ops, context)
-
 	if len(hunkSpans) == 0 {
-		return nil
+		// A view over the unified lines that holds none of them, so a
+		// caller decorates or prints it as it would the hunks.
+		return lineOps(r.ops).toView().Slice(position.Span{})
 	}
 
 	var (
