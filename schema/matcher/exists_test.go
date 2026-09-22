@@ -1,6 +1,7 @@
 package matcher_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -166,4 +167,19 @@ func TestExists_WithAll(t *testing.T) {
 		got := match(t, m, doc)
 		assert.True(t, got)
 	})
+}
+
+func TestExists_ContextEnded(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
+
+	// A matcher whose context ended cannot decide, so it returns the error
+	// rather than a match, and the registry stops at the document.
+	ok, err := matcher.Exists(paths.Root().Child("kind")).Match(ctx, doc)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.False(t, ok)
 }
