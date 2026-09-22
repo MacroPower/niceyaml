@@ -60,7 +60,7 @@ func MustParse(s string) lipgloss.Style {
 // Encode encodes a [lipgloss.Style] to a Pygments-style string.
 //
 // The output contains space-separated tokens representing the style's
-// properties. Colors are encoded as lowercase hex values.
+// properties. Encode writes colors as lowercase hex values.
 //
 //nolint:gocritic // Value semantics preferred for API ergonomics.
 func Encode(style lipgloss.Style) string {
@@ -137,8 +137,8 @@ func applyToken(style lipgloss.Style, token string) (lipgloss.Style, error) {
 
 	// Must be a foreground color.
 	if !isValidColor(token) {
-		// A leading # says the token was meant as a color, so report the
-		// color rather than a missing keyword.
+		// A leading # says the token was meant as a color, so report an
+		// invalid color rather than an unknown keyword.
 		if strings.HasPrefix(token, "#") {
 			return style, fmt.Errorf("%w: %s", ErrInvalidColor, token)
 		}
@@ -185,8 +185,8 @@ func isColorSet(c color.Color) bool {
 	return !isNoColor
 }
 
-// colorToHex converts a [color.Color] to a hex string.
-// Returns empty string if the color is not set.
+// colorToHex converts a [color.Color] to a hex string. It returns an empty
+// string for a color that is not set or fully transparent.
 func colorToHex(c color.Color) string {
 	if !isColorSet(c) {
 		return ""

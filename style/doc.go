@@ -9,12 +9,12 @@
 // puts the styles behind them.
 //
 // Rather than requiring themes to define every possible kind, a Styles value
-// resolves inheritance: a kind that is not set falls back to its parent in
+// resolves inheritance. A kind that is not set falls back to its parent in
 // the hierarchy. For example, [kind.LiteralNumberFloat] inherits from
 // [kind.LiteralNumber], which inherits from [kind.Literal], which inherits
 // from [kind.Text].
 //
-// # Creating Styles
+// # Construction
 //
 // [New] creates a [Styles] value that resolves inherited styles.
 //
@@ -36,22 +36,21 @@
 // # Themes
 //
 // The [go.jacobcolvin.com/niceyaml/style/theme] subpackage provides
-// predefined themes (Monokai, Dracula, Catppuccin, etc.), looked up by name,
-// each returning [Styles] with colors appropriate for that palette.
+// predefined themes (Monokai, Dracula, Catppuccin, etc.). A program looks a
+// theme up by name and gets [Styles] with the colors of that palette.
 //
 // # Style Strings
 //
 // This package provides encoding and decoding of Pygments-style strings to and
 // from [lipgloss.Style] objects via [Parse], [MustParse], and [Encode].
 //
-// Pygments-style strings are a compact, human-readable format for specifying
-// text styling. They are commonly used in syntax highlighting configurations
-// and theme files.
+// Pygments-style strings are a format for specifying text styling. They are
+// commonly used in syntax highlighting configurations and theme files.
 //
-// Styles are specified as space-separated tokens, applied left to right. A
-// later color replaces an earlier one of the same kind, and a no* keyword
-// clears the attribute only when it follows the keyword that set it, so
-// "bold nobold" leaves bold off and "nobold bold" turns it on.
+// A Pygments-style string holds space-separated tokens, and [Parse] applies
+// them left to right. A later color replaces an earlier one of the same kind,
+// and a no* keyword clears the attribute only when it follows the keyword that
+// set it, so "bold nobold" leaves bold off and "nobold bold" turns it on.
 //
 // Colors use hex format:
 //

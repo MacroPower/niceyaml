@@ -90,7 +90,7 @@ func TestNew(t *testing.T) {
 			kind.GenericHeading,
 		}
 
-		// Every category resolves to the style of its closest set ancestor.
+		// Every kind resolves to the style of its closest set ancestor.
 		set := []lipgloss.Style{
 			styles.Style(kind.Text),
 			styles.Style(kind.LiteralNumber),
@@ -228,7 +228,7 @@ func TestStyles_With(t *testing.T) {
 	t.Run("re-resolves inheritance", func(t *testing.T) {
 		t.Parallel()
 
-		// Overriding a parent category reaches the children that inherit it.
+		// Overriding a parent kind reaches the children that inherit it.
 		result := original.With(style.Set(kind.LiteralNumber, red))
 
 		assert.Equal(t, lipgloss.Color("#ff0000"), result.Style(kind.LiteralNumberFloat).GetForeground())
@@ -281,8 +281,8 @@ func TestStyles_UnsetCategories(t *testing.T) {
 
 	styles := style.New(lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff")))
 
-	// An unset predefined category inherits the base, and an unknown key is
-	// an empty style.
+	// An unset predefined kind inherits the base, and an unknown kind
+	// resolves to an empty style.
 	assert.Equal(t, styles.Style(kind.Text), styles.Style(kind.NameTag))
 	assert.Equal(t, lipgloss.NewStyle(), styles.Style("never-set"))
 }

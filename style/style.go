@@ -8,8 +8,8 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
-// A shared empty style, returned for lookups of kinds that are
-// neither predefined nor set.
+// emptyStyle is a shared empty style, returned for lookups of kinds that
+// are neither predefined nor set.
 var emptyStyle = lipgloss.NewStyle()
 
 // Styler retrieves the style for each [kind.Kind].
@@ -28,8 +28,8 @@ type Styler interface {
 //
 // A Styles value holds a base style plus explicit overrides, and resolves every
 // predefined kind through the inheritance hierarchy when it is built, so
-// [Styles.Style] is a map lookup. Custom kinds, such as one for an overlay,
-// are stored as given.
+// [Styles.Style] is a map lookup. A Styles value stores custom kinds, such
+// as one for an overlay, as given.
 //
 // The zero value resolves every kind to an empty style. Create instances
 // with [New].
@@ -45,7 +45,8 @@ type Styles struct {
 type Option func(*Styles)
 
 // Set returns an [Option] that sets the [lipgloss.Style] for a [kind.Kind].
-// Kinds below it in the hierarchy inherit it unless they are set themselves.
+// Kinds below it in the hierarchy inherit it unless a [Set] on the kind
+// itself or on a nearer ancestor overrides it.
 //
 //nolint:gocritic // Value semantics preferred for API ergonomics.
 func Set(s kind.Kind, ls lipgloss.Style) Option {
@@ -60,7 +61,7 @@ func Set(s kind.Kind, ls lipgloss.Style) Option {
 
 // New creates a new [Styles] value with inheritance resolved.
 //
-// The base style is used for [kind.Text] and inherited by every other kind.
+// [kind.Text] uses the base style, and every other kind inherits it.
 // Use [Set] options to override specific kinds; child kinds inherit from
 // their closest set ancestor.
 //
@@ -78,8 +79,9 @@ func New(base lipgloss.Style, opts ...Option) Styles {
 }
 
 // resolveStyles walks the hierarchy for every predefined kind and returns
-// the map of kind to its closest set ancestor. Custom kinds outside the
-// hierarchy resolve to themselves. The overrides must hold [kind.Text].
+// the map of kind to the style of its closest set ancestor. Custom kinds
+// outside the hierarchy resolve to their own style. The overrides must
+// hold [kind.Text].
 func resolveStyles(overrides map[kind.Kind]*lipgloss.Style) map[kind.Kind]*lipgloss.Style {
 	lookup := func(st kind.Kind) *lipgloss.Style {
 		for current := st; ; current = kind.Parent(current) {
