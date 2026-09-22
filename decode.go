@@ -467,7 +467,10 @@ func (dd *Document) At(path paths.Path) (*Document, error) {
 
 	node, err := c.base.Node(dd.doc)
 	if err != nil {
-		return nil, c.Bind(err)
+		// The error is bound to the receiver, a Document that exists,
+		// rather than to the copy, whose scope moved to a path that
+		// resolves to no node.
+		return nil, dd.Bind(err)
 	}
 
 	c.span, c.content = dd.extent(node)

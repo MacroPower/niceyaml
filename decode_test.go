@@ -2993,3 +2993,20 @@ func TestDocument_Decode_ValidatorDecodesWithoutHooks(t *testing.T) {
 		require.NoError(t, err)
 	})
 }
+
+func TestDocument_At_ErrorBoundToReceiver(t *testing.T) {
+	t.Parallel()
+
+	dd := yamltest.FirstDocument(t, "a:\n  b: 1\nc: 2\n")
+	scoped := yamltest.At(t, dd, paths.Root().Child("a"))
+
+	_, err := scoped.At(paths.Root().Child("missing"))
+	require.ErrorIs(t, err, paths.ErrNotFound)
+
+	// The error is bound to the Document At was called on, not to a copy
+	// scoped to the path that did not resolve.
+	var bound *niceyaml.SourceError
+
+	require.ErrorAs(t, err, &bound)
+	assert.Same(t, scoped, bound.Document())
+}
