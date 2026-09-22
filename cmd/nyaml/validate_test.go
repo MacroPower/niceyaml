@@ -15,7 +15,7 @@ import (
 func TestValidateFile(t *testing.T) {
 	t.Parallel()
 
-	// A schema every document of the fixture validates against.
+	// The schema the registry applies to every document of the fixture.
 	schemaData := []byte(`{
 		"type": "object",
 		"properties": {"name": {"type": "string"}},

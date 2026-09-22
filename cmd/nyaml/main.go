@@ -32,8 +32,8 @@ func main() {
 		code = 1
 	}
 
-	// Errors returned by fang.Execute are rendered by its handler, so a
-	// profile that fails to write this late prints itself.
+	// The error handler of fang.Execute renders only the errors it returns,
+	// so a profile that fails to write this late prints itself.
 	stopErr := stopProfiler()
 	if stopErr != nil {
 		fmt.Fprintln(os.Stderr, "stop profiler:", stopErr)
@@ -52,10 +52,10 @@ func main() {
 func newRootCmd() (*cobra.Command, func() error) {
 	cfg := profile.NewConfig()
 
-	// NewProfiler copies the config, so the profiler is built inside
-	// PersistentPreRunE, after Cobra has parsed the flags bound to cfg. A
-	// profiler built here would carry the empty paths cfg starts with and
-	// write nothing.
+	// NewProfiler copies the config, so PersistentPreRunE builds the
+	// profiler after Cobra has parsed the flags bound to cfg. A profiler
+	// built here would carry the empty paths cfg starts with and write
+	// nothing.
 	var p *profile.Profiler
 
 	rootCmd := &cobra.Command{
@@ -86,9 +86,9 @@ func newRootCmd() (*cobra.Command, func() error) {
 	}
 }
 
-// terminalWidth returns the width error output wraps to: the width of the
-// terminal on stderr less the handler's margin, or 88 when stderr is not a
-// terminal.
+// terminalWidth returns the width of the terminal on stderr less the
+// handler's margin, or 88 when stderr is not a terminal. Error output
+// wraps to that width.
 func terminalWidth() int {
 	width := 90
 

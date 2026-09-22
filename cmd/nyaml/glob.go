@@ -18,7 +18,7 @@ var (
 	errIsDirectory = errors.New("is a directory")
 )
 
-// glob returns the file paths matching pattern. Directories are excluded
+// glob returns the file paths matching pattern. It excludes directories
 // from the matches.
 //
 // Unlike [path/filepath.Glob], this supports ** for recursive directory
@@ -48,11 +48,12 @@ func containsGlobChars(s string) bool {
 // expandPaths expands arguments containing glob patterns into a list of
 // file paths. The list keeps the order of the arguments, with each pattern's
 // matches sorted in its place, and names each file once, so the order of
-// two explicit files decides which revision a diff treats as older.
-// Arguments without glob metacharacters are included as-is.
+// two explicit files decides which revision a diff treats as older. An
+// argument without glob metacharacters joins the list as-is, and one that
+// names a directory is an error wrapping [errIsDirectory].
 //
 // A pattern that matches no file, or that is no valid pattern, falls back
-// to the argument itself when a path with that literal name exists, so a
+// to the argument itself when a file with that literal name exists, so a
 // file such as "cfg[1].yaml" or "report[2024.txt" is still reachable.
 // Otherwise a pattern that matches nothing is an error wrapping
 // [errNoMatch], and an invalid pattern is its own error.

@@ -174,7 +174,8 @@ func TestExpand(t *testing.T) {
 			err:  errNoMatch,
 		},
 		"nonexistent file passes": {
-			// ExpandPaths does not check file existence, only glob expansion.
+			// Glob expansion does not check file existence, so expandPaths
+			// accepts a path with no file behind it.
 			args:      []string{filepath.Join(tmpDir, "nonexistent.yaml")},
 			wantNames: []string{"nonexistent.yaml"},
 		},

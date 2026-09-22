@@ -210,7 +210,8 @@ func TestInitialSearchScrollsLikeALaterOne(t *testing.T) {
 
 	// The viewport centers a match in the rows it has, and it has none
 	// before the first window size message, so a term applied at
-	// construction landed near the top of the view instead of its center.
+	// construction would land near the top of the view instead of its
+	// center.
 	lines := &strings.Builder{}
 	for i := 1; i <= 40; i++ {
 		fmt.Fprintf(lines, "k%d: v\n", i)
@@ -319,7 +320,7 @@ func TestStatusBarWidth(t *testing.T) {
 
 	// Both status bar rows fill the terminal exactly. One cell over and a
 	// row wraps onto another row, pushing the rows below it out of the alt
-	// screen, so a terminal narrower than the fixed segments cuts them.
+	// screen, so a terminal narrower than the fixed segments truncates them.
 	tcs := map[string]struct {
 		width int
 	}{

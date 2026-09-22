@@ -93,9 +93,9 @@ func newModel(opts *modelOptions) model {
 		))
 	}
 
-	// The viewport scrolls a match to the center of the rows it has, and it
-	// has none until the first tea.WindowSizeMsg sizes it, so the initial
-	// term waits for that message.
+	// The viewport centers a match in the rows it has, and it has none
+	// until the first tea.WindowSizeMsg sizes it, so the initial term waits
+	// for that message.
 	m.pendingSearch = opts.search
 
 	return m
@@ -413,7 +413,8 @@ func (m *model) titleLine() string {
 		}
 	}
 
-	// Trailing separator: transition from last Title bg to Text bg.
+	// The trailing separator transitions from the last Title bg to the
+	// Text bg.
 	lastStyle := m.styles.Style(segments[len(segments)-1].styleKey)
 	textStyle := m.styles.Style(kind.Text)
 	sb.WriteString(powerlineSep(lastStyle, textStyle))
@@ -422,8 +423,9 @@ func (m *model) titleLine() string {
 }
 
 // clampWidth truncates a status bar row to the terminal width, so a row
-// whose fixed segments outgrow a narrow terminal is cut rather than wrapped
-// onto a second row that pushes the rows below it off the screen.
+// whose fixed segments outgrow a narrow terminal ends at that width rather
+// than wrapping onto a second row that pushes the rows below it off the
+// screen.
 func (m *model) clampWidth(row string) string {
 	return lipgloss.NewStyle().MaxWidth(m.width).Render(row)
 }

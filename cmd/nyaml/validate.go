@@ -94,14 +94,16 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) er
 // buildRegistry creates a schema registry based on CLI flags.
 //
 // When schemaRef is set, it is the only resolver, so every document
-// validates against it (the CLI flag takes precedence). The schema ref
-// resolves relative to the current working directory.
+// validates against it. The schema ref resolves relative to the current
+// working directory.
 //
-// Otherwise, directive-based matching is enabled with per-file resolution
-// (schemas referenced in directives are resolved relative to each YAML file),
-// followed by SchemaStore automatic discovery. The SchemaStore catalog is
-// fetched on the first document that reaches it, and a file it cannot
-// match, or cannot fetch the catalog for, reports that in the file's error.
+// Otherwise the registry matches on schema directives first, and a
+// directive's reference resolves relative to its own YAML file. A document
+// that no directive claims falls through to SchemaStore's automatic
+// discovery by file path. SchemaStore fetches its catalog on the first
+// document that reaches it, and a file it cannot fetch the catalog for
+// reports that in the file's error. Schema validation is optional here, so
+// a document that no resolver claims passes rather than failing the file.
 func buildRegistry(schemaRef string) (*schema.Registry, error) {
 	// A loader applies to every document, so the CLI schema needs no matcher.
 	// Resolve relative to current working directory. If cwd fails, use ".".
@@ -119,8 +121,6 @@ func buildRegistry(schemaRef string) (*schema.Registry, error) {
 		return schema.NewRegistry(schema.WithResolvers(ref)), nil
 	}
 
-	// Schema validation is optional here, so a document that no resolver
-	// claims passes rather than failing the file.
 	return schema.NewRegistry(
 		schema.WithResolvers(
 			schema.Directive(), // Resolves schemas relative to each YAML file.
