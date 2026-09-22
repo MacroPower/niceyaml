@@ -119,7 +119,8 @@ func (d TokensDiff) String() string {
 }
 
 // ContentDiff represents the difference between two content strings after
-// normalization (line endings converted and leading/trailing newlines trimmed).
+// normalization, which converts CRLF to LF and trims leading/trailing
+// newlines.
 //
 // Use [CompareContent] to create a ContentDiff.
 type ContentDiff struct {
@@ -165,8 +166,8 @@ func ValidateTokenPair(want, got *token.Token) error {
 
 // ValidateTokens checks that all tokens and their positions are non-nil.
 // Returns nil if all tokens are valid, or the first [*TokenValidationError]
-// found. If the slice lengths differ, returns a descriptive error (not a
-// [*TokenValidationError]).
+// found. If the slice lengths differ, returns an error reporting both counts
+// (not a [*TokenValidationError]).
 func ValidateTokens(want, got token.Tokens) error {
 	if len(want) != len(got) {
 		return fmt.Errorf("token count mismatch: want %d, got %d\nwant tokens:\n%s\ngot tokens:\n%s",
@@ -230,8 +231,8 @@ func CompareTokenSlices(want, got token.Tokens) TokensDiff {
 }
 
 // CompareContent compares two strings for equality and returns a [ContentDiff].
-// Both strings are normalized by converting CRLF to LF and trimming
-// leading/trailing newlines before comparison.
+// It converts CRLF to LF and trims leading/trailing newlines in both strings
+// before comparing.
 func CompareContent(want, got string) ContentDiff {
 	return ContentDiff{
 		Want: normalizeContent(want),
@@ -295,7 +296,7 @@ func DiffTokenFields(want, got *token.Token) []string {
 // TokenBuilder is a helper for constructing test tokens.
 //
 // Chain methods to set fields, then call [TokenBuilder.Build] to get the final
-// token. The builder is mutable: each setter modifies the internal state and
+// token. The builder is mutable. Each setter modifies the internal state and
 // returns the same builder for chaining.
 //
 // [TokenBuilder.Build] returns a clone, so you can call it multiple times at
@@ -308,7 +309,7 @@ type TokenBuilder struct {
 }
 
 // NewTokenBuilder creates a new [TokenBuilder] with default values.
-// All position fields are initialized to zero values.
+// All position fields start at zero.
 func NewTokenBuilder() *TokenBuilder {
 	return &TokenBuilder{
 		token: &token.Token{

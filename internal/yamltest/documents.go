@@ -19,8 +19,8 @@ func FirstDocument(t *testing.T, input string) *niceyaml.Document {
 	return FirstDocumentWithPath(t, input, "")
 }
 
-// At scopes doc to the node path selects through [niceyaml.Document.At].
-// The test fails when the path selects nothing.
+// At scopes doc to the node that path selects, through
+// [niceyaml.Document.At]. The test fails when the path selects nothing.
 func At(t *testing.T, doc *niceyaml.Document, path paths.Path) *niceyaml.Document {
 	t.Helper()
 

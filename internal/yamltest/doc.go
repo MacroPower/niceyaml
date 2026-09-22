@@ -1,13 +1,13 @@
 // Package yamltest provides test utilities for code that works with go-yaml
 // tokens and niceyaml styled output.
 //
-// Testing YAML tooling presents two main challenges: constructing token
-// fixtures is verbose, and comparing styled output cluttered with ANSI escape
-// codes is difficult to read. This package addresses both.
+// Testing YAML tooling presents two challenges: constructing token fixtures
+// is verbose, and styled output cluttered with ANSI escape codes is difficult
+// to read. This package addresses both.
 //
-// # Building Token Fixtures
+// # Token Fixtures
 //
-// [token.Token] has many fields that must be populated for tests.
+// [token.Token] has many fields that tests must populate.
 // [TokenBuilder] provides a fluent API to construct tokens without boilerplate:
 //
 //	tok := yamltest.NewTokenBuilder().
@@ -18,11 +18,11 @@
 //		Build()
 //
 // The builder is mutable, but [TokenBuilder.Build] returns a clone, so you can
-// call it multiple times to get independent tokens.
+// call it multiple times to produce independent tokens.
 //
 // Use [TokenBuilder.Clone] to branch from a common base configuration.
 //
-// # Comparing Tokens
+// # Token Comparison
 //
 // When tokens differ, standard equality checks produce unhelpful output.
 //
@@ -43,8 +43,8 @@
 // [ErrNilPosition] reason. [ValidateLines] checks that a [line.Lines]
 // collection keeps its line numbers and token columns in increasing order.
 //
-// [CompareTokens] and [CompareTokenSlices] return [TokenDiff] and [TokensDiff]
-// respectively, providing detailed field-by-field comparison results.
+// [CompareTokens] and [CompareTokenSlices] compare token fields and return
+// [TokenDiff] and [TokensDiff] respectively.
 //
 // For content comparison with normalized line endings, use [CompareContent]:
 //
@@ -56,10 +56,9 @@
 // representations, and [DumpTokenOrigins] reconstructs the original source by
 // concatenating [token.Token.Origin] fields.
 //
-// # Testing Styled Output
+// # Styled Output
 //
 // niceyaml applies terminal styles to YAML syntax elements.
-// Testing styled output with raw ANSI codes is often unreadable.
 // [XMLStyles] replaces escape codes with XML-like tags:
 //
 //	styles := yamltest.NewXMLStyles()
@@ -67,7 +66,7 @@
 //	// <nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue>\
 //	// <text> </text><literalString>value</literalString>
 //
-// # Creating Test Documents
+// # Test Documents
 //
 // [FirstDocument] and [FirstDocumentWithPath] create [*niceyaml.Document]
 // instances for testing schema matchers and validators:
@@ -75,7 +74,7 @@
 //	doc := yamltest.FirstDocument(t, "kind: Deployment")
 //	docWithPath := yamltest.FirstDocumentWithPath(t, "on: push", ".github/workflows/ci.yaml")
 //
-// # Mocking Dependencies
+// # Mocks
 //
 // [MockNormalizer] lets you test code paths that depend on normalization
 // without wiring up a real implementation:

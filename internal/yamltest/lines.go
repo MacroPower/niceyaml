@@ -20,13 +20,14 @@ var (
 
 // ValidateLines checks the integrity of ls.
 //
-// It ensures that:
+// It checks that:
 //   - Line numbers are strictly increasing
 //   - Every token on a given line is non-nil and carries a Position
 //   - Every token on a given line has an identical line number in its Position
-//   - Every token on a given line has columns that are strictly increasing
+//   - Every token on a given line has columns that are strictly increasing,
+//     ignoring tokens with an empty Origin or Column 0
 //
-// A line with no tokens is a placeholder and its number is not checked.
+// A line with no tokens is a placeholder, and ValidateLines skips its number.
 //
 // Returns an error wrapping [ErrLineNumberNotIncreasing],
 // [ErrLineNumberMismatch], or [ErrColumnNotIncreasing] for the first check
@@ -101,10 +102,10 @@ func ValidateLines(ls line.Lines) error {
 			// column space.
 			//
 			// The lexer can produce tokens at the same position (e.g., empty block
-			// scalar content). It also gives multi-line block scalar content
-			// that other content follows Column 0, a marker rather than a
-			// column, so such a token neither fails the check nor moves the
-			// baseline.
+			// scalar content). It also gives Column 0 to multi-line block scalar
+			// content when other content follows. That zero is a marker rather
+			// than a column, so such a token neither fails the check nor moves
+			// the baseline.
 			if tk.Origin != "" && tk.Position.Column != 0 {
 				if tk.Position.Column <= prevCol {
 					return fmt.Errorf(

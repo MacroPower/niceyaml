@@ -9,8 +9,7 @@ import (
 // XMLStyles implements [style.Styler] using XML tags instead of ANSI
 // escape codes.
 //
-// Each [kind.Kind] category wraps content in descriptive tags, making styled
-// output easy to compare in tests.
+// Each [kind.Kind] category wraps content in descriptive tags.
 //
 // For example, a comment renders as `<comment># text</comment>`.
 //
@@ -74,8 +73,8 @@ func NewXMLStyles(opts ...XMLStylesOption) *XMLStyles {
 // Style returns a [lipgloss.Style] that wraps content in XML tags based on
 // the [kind.Kind] category.
 //
-// If the style is excluded or not in the "only" list (when configured),
-// returns an empty style.
+// Returns an empty style when [XMLStyleExclude] excludes s, or when
+// [XMLStyleInclude] limits tags to other styles.
 func (x *XMLStyles) Style(s kind.Kind) lipgloss.Style {
 	// Check if style should be excluded.
 	if x.exclude != nil && x.exclude[s] {

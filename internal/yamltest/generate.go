@@ -6,8 +6,8 @@ import (
 )
 
 // GenerateYAML creates YAML content with the given number of lines. Each
-// line is a simple key-value pair: "key_N: value_N". A count of zero or
-// less yields the empty string.
+// line is a key-value pair: "key_N: value_N". A count of zero or less
+// yields the empty string.
 func GenerateYAML(lines int) string {
 	if lines <= 0 {
 		return ""

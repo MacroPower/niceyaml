@@ -35,8 +35,8 @@ func TestLines_Validate(t *testing.T) {
 			"valid with join flags": {
 				input: "script: |\n  line1\n  line2\n",
 			},
-			// The lexer gives multi-line block scalar content that other
-			// content follows Column 0.
+			// The lexer gives Column 0 to multi-line block scalar content
+			// when other content follows.
 			"block scalar column zero": {
 				input: "k: >\n  a\n\n  b\nz: 1\n",
 			},
