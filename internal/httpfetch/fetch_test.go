@@ -16,8 +16,8 @@ import (
 func TestGet_RedactsPassword(t *testing.T) {
 	t.Parallel()
 
-	// A URL that does not parse reaches no redaction of its own, so Get has
-	// to reject it before its text can reach a message.
+	// Get cannot redact a URL that does not parse, so it keeps the URL out
+	// of the error.
 	tcs := map[string]struct {
 		url string
 	}{

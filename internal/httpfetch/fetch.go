@@ -12,14 +12,12 @@ import (
 // MaxSize is the largest response body [Get] accepts, in bytes.
 const MaxSize = 10 * 1024 * 1024 // 10 MB.
 
-// Get performs an HTTP GET for url with client and returns the body. It
-// rejects a response with a status other than 200 OK and a body over
-// [MaxSize] bytes.
+// Get performs an HTTP GET for rawURL with client and returns the body. It
+// rejects any status other than 200 OK and any body over [MaxSize] bytes.
 //
 // Errors name the URL with any password in its userinfo redacted, so a
-// credential embedded in a schema URL does not reach logs. A URL that does
-// not parse names no URL at all, since there is no userinfo to redact in a
-// string that has no shape.
+// credential embedded in a schema URL does not reach logs. Errors omit a
+// URL that does not parse, since Get cannot redact its userinfo.
 func Get(ctx context.Context, client *http.Client, rawURL string) ([]byte, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
