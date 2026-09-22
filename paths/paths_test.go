@@ -6,6 +6,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1682,4 +1683,19 @@ func TestPath_Token_HandBuiltMapping(t *testing.T) {
 			require.ErrorIs(t, err, paths.ErrNotFound)
 		})
 	}
+}
+
+func TestPath_Node_LaterMergeKeyWins(t *testing.T) {
+	t.Parallel()
+
+	// A mapping may hold two merge keys when duplicate keys are allowed.
+	// The decoder takes the value of the later one, so the path does too.
+	src := "p: &p {k: P}\nq: &q {k: Q}\nt:\n  <<: *p\n  <<: *q\n"
+
+	f, err := parser.ParseBytes([]byte(src), 0, parser.AllowDuplicateMapKey())
+	require.NoError(t, err)
+
+	node, err := paths.MustParse("$.t.k").Node(f.Docs[0])
+	require.NoError(t, err)
+	assert.Equal(t, "Q", node.String())
 }

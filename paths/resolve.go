@@ -289,7 +289,9 @@ func (r *resolver) lookup(
 
 	seen[mapping] = true
 
-	for _, entry := range mapping.Values {
+	// A later merge key overrides an earlier one, as a later source in one
+	// merge key does, so the entries are read from the last one back.
+	for _, entry := range slices.Backward(mapping.Values) {
 		if entry == nil || entry.Key == nil || !entry.Key.IsMergeKey() {
 			continue
 		}
