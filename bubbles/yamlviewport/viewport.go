@@ -708,8 +708,11 @@ func (m *Model) rebuildViews() {
 
 	// The old row counts describe other lines, so the cache starts empty
 	// without anchoring to a line of the old content, as relayout would.
+	// The horizontal offset describes them too, and a search match in the
+	// new content sets it again below.
 	m.anchored = false
 	m.yOffset = 0
+	m.xOffset = 0
 	m.rows = &rowCache{}
 
 	m.scrollToCurrentMatch()
@@ -1730,6 +1733,29 @@ func (m *Model) scrollToCurrentMatch() {
 	// For height 22: (22-1)/2 = 10, placing the match at position 10 (middle).
 	// For height 21: (21-1)/2 = 10, placing the match at position 10 (middle).
 	m.SetYOffset(row - (m.maxHeight()-1)/2)
+
+	if m.wrapEnabled {
+		return
+	}
+
+	// With wrap off every line is one row that starts at the gutter, so
+	// the cell of the match is the gutter plus the width of the content
+	// before its column, and the offset centers that cell the way the Y
+	// offset centers its row. SetXOffset clamps, so a match inside the
+	// first screen keeps the offset at 0.
+	view := m.left
+	if m.right != nil && !match.inLeft {
+		view = m.right
+	}
+
+	if view == nil || match.rng.Start.Line < 0 || match.rng.Start.Line >= view.Lines().Len() {
+		return
+	}
+
+	content := view.Lines().Line(match.rng.Start.Line).Content()
+	x := layout.GutterWidth() + printer.ColWidth(content, match.rng.Start.Col)
+
+	m.SetXOffset(x - (m.scrollWidth()-1)/2)
 }
 
 // Update processes Bubble Tea messages and returns the updated model.

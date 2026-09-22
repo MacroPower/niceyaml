@@ -4696,3 +4696,100 @@ func TestViewport_ClearSearchSideBySide(t *testing.T) {
 	assert.Equal(t, 0, m.SearchCount())
 	assert.Equal(t, plain.View(), m.View())
 }
+
+func TestViewport_SearchScrollsToHorizontalMatch(t *testing.T) {
+	t.Parallel()
+
+	// With wrap off, a match past the right edge of the frame scrolls the
+	// view horizontally so the match is on screen, centered as the Y
+	// offset centers its row. A match inside the first screen leaves the
+	// offset at 0, and so does wrap, which has no horizontal scroll.
+	tcs := map[string]struct {
+		revisions  []string
+		mode       yamlviewport.ViewMode
+		width      int
+		wrap       bool
+		wantScroll bool
+	}{
+		"match past the right edge": {
+			revisions:  []string{"k: " + strings.Repeat("-", 60) + "NEEDLE\nz: 1\n"},
+			width:      30,
+			wantScroll: true,
+		},
+		"wide runes before the match": {
+			// Each rune before the needle takes two cells, so the cell of
+			// the match is twice its column, and an offset counted in
+			// runes would leave the needle off screen.
+			revisions:  []string{"k: " + strings.Repeat("日本", 15) + "NEEDLE\nz: 1\n"},
+			width:      30,
+			wantScroll: true,
+		},
+		"match inside the first screen": {
+			revisions:  []string{"k: NEEDLE " + strings.Repeat("-", 60) + "\nz: 1\n"},
+			width:      30,
+			wantScroll: false,
+		},
+		"match in the right pane": {
+			revisions: []string{
+				"k: short\n",
+				"k: " + strings.Repeat("-", 60) + "NEEDLE\n",
+			},
+			mode:       yamlviewport.ViewModeSideBySide,
+			width:      60,
+			wantScroll: true,
+		},
+		"wrap on": {
+			revisions:  []string{"k: " + strings.Repeat("-", 60) + "NEEDLE\nz: 1\n"},
+			width:      30,
+			wrap:       true,
+			wantScroll: false,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+			m.SetWidth(tc.width)
+			m.SetHeight(5)
+			m.SetViewMode(tc.mode)
+			m.SetWordWrap(tc.wrap)
+
+			for _, rev := range tc.revisions {
+				m.AddRevision(niceyaml.NewSourceFromString(rev))
+			}
+
+			m.SetSearchTerm("NEEDLE")
+			require.Equal(t, 1, m.SearchCount())
+
+			if tc.wantScroll {
+				assert.Positive(t, m.XOffset())
+			} else {
+				assert.Equal(t, 0, m.XOffset())
+			}
+
+			assert.Contains(t, m.View(), "NEEDLE")
+		})
+	}
+}
+
+func TestViewport_ContentChangeResetsHorizontalScroll(t *testing.T) {
+	t.Parallel()
+
+	// A search match scrolls the view to the right, and content that holds
+	// no match starts from the first column again rather than keeping an
+	// offset that described other lines.
+	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+	m.SetWidth(30)
+	m.SetHeight(5)
+	m.SetWordWrap(false)
+	m.SetRevision(niceyaml.NewSourceFromString("k: " + strings.Repeat("-", 60) + "NEEDLE\n"))
+
+	m.SetSearchTerm("NEEDLE")
+	require.Positive(t, m.XOffset())
+
+	m.SetRevision(niceyaml.NewSourceFromString("k: " + strings.Repeat("-", 60) + "\n"))
+	assert.Equal(t, 0, m.XOffset())
+	assert.Contains(t, m.View(), "k: ---")
+}

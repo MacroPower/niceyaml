@@ -230,11 +230,22 @@ type AnnotationContext struct {
 // ColWidth returns the display width of the first col runes of ctx.Content,
 // plus one cell for every column past the end of the content, so a marker
 // padded by it lands under the rune at col whatever the width of the runes
-// before it. The width is that of the rendered row, in which a control
-// character shows as a one-cell picture.
+// before it. See [ColWidth] for the rules it measures by.
 func (ctx AnnotationContext) ColWidth(col int) int {
+	return ColWidth(ctx.Content, col)
+}
+
+// ColWidth returns the display width of the first col runes of content, the
+// text of a line without its line ending, plus one cell for every column
+// past the end of the content. The width is that of the row the printer
+// renders, in which a control character shows as a one-cell picture, and a
+// combining mark has no cell of its own, so a column on one measures up to
+// the rune it renders on. A viewer that scrolls horizontally adds the
+// result to [Layout.GutterWidth] to find the cell a column of the line
+// occupies.
+func ColWidth(content string, col int) int {
 	col = max(0, col)
-	runes := []rune(ctx.Content)
+	runes := []rune(content)
 
 	// A combining mark has no cell of its own. It renders on the rune
 	// before it, so a marker at its column lands under that rune.
@@ -246,7 +257,7 @@ func (ctx AnnotationContext) ColWidth(col int) int {
 		return lipgloss.Width(escape.Control(string(runes[:col])))
 	}
 
-	return lipgloss.Width(escape.Control(ctx.Content)) + col - len(runes)
+	return lipgloss.Width(escape.Control(content)) + col - len(runes)
 }
 
 // AnnotationFunc returns the rendered annotation content based on

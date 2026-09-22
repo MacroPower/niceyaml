@@ -4303,3 +4303,34 @@ func TestPrinter_AnnotationGutterSoftAcrossKinds(t *testing.T) {
 	assert.True(t, strings.HasPrefix(rows[1], "F "), rows[1])
 	assert.True(t, strings.HasPrefix(rows[2], "S "), rows[2])
 }
+
+func TestColWidth(t *testing.T) {
+	t.Parallel()
+
+	// The width is that of the rendered row: a control character shows as
+	// a one-cell picture, a wide rune takes two cells, and a combining mark
+	// renders on the rune before it.
+	tcs := map[string]struct {
+		content string
+		col     int
+		want    int
+	}{
+		"start":                      {content: "a: b", col: 0, want: 0},
+		"negative clamps to start":   {content: "a: b", col: -1, want: 0},
+		"before a control character": {content: "a: \"tab\there\"", col: 3, want: 3},
+		"past a control character":   {content: "a: \"tab\there\"", col: 8, want: 8},
+		"past the end":               {content: "a: b", col: 10, want: 10},
+		"after wide runes":           {content: "k: 日本 x", col: 5, want: 7},
+		"at a wide rune":             {content: "k: 日本 x", col: 4, want: 5},
+		"at a combining mark":        {content: "k: éx", col: 4, want: 3},
+		"after a combining mark":     {content: "k: éx", col: 5, want: 4},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, printer.ColWidth(tc.content, tc.col))
+		})
+	}
+}
