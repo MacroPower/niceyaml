@@ -1450,3 +1450,82 @@ func TestRegistry_Schema(t *testing.T) {
 		require.ErrorIs(t, err, schema.ErrCompile)
 	})
 }
+
+func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
+	t.Parallel()
+
+	errNoKind := fmt.Errorf("%w: no kind", schema.ErrNoMatch)
+
+	byKind := schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
+		return schema.Ref{}, errNoKind
+	})
+
+	t.Run("nests the reason of each resolver that gave one", func(t *testing.T) {
+		t.Parallel()
+
+		reg := schema.NewRegistry(schema.WithResolvers(
+			schema.Directive(),
+			schema.When(matcher.Content(kindPath, "Deployment"), schema.Embedded([]byte(`{}`))),
+			byKind,
+		))
+
+		doc := yamltest.FirstDocumentWithPath(t, "kind: Service\n", "app.yaml")
+
+		_, err := reg.Lookup(t.Context(), doc)
+		require.ErrorIs(t, err, schema.ErrNoMatch)
+		require.ErrorIs(t, err, schema.ErrNoDirective)
+		require.ErrorIs(t, err, errNoKind)
+		assert.Equal(t, "app.yaml: no matching schema", err.Error())
+
+		// A resolver that returned ErrNoMatch alone adds no reason, and the
+		// reasons read without the sentinel the message states already.
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+
+		reasons := make([]string, 0, 2)
+		for _, child := range bound.Errors() {
+			reasons = append(reasons, child.Unwrap().Error())
+		}
+
+		assert.Equal(t, []string{"no schema directive", "no kind"}, reasons)
+		assert.Equal(t,
+			"app.yaml: no matching schema\napp.yaml: no schema directive\napp.yaml: no kind",
+			fmt.Sprintf("%+v", err),
+		)
+	})
+
+	t.Run("reports ErrNoMatch alone when no resolver says more", func(t *testing.T) {
+		t.Parallel()
+
+		reg := schema.NewRegistry(schema.WithResolvers(
+			schema.When(matcher.Content(kindPath, "Deployment"), schema.Embedded([]byte(`{}`))),
+		))
+
+		doc := yamltest.FirstDocumentWithPath(t, "kind: Service\n", "app.yaml")
+
+		_, err := reg.Lookup(t.Context(), doc)
+		require.ErrorIs(t, err, schema.ErrNoMatch)
+		assert.Equal(t, "app.yaml: no matching schema", err.Error())
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Empty(t, bound.Errors())
+	})
+
+	t.Run("Validate passes the reasons through when it requires a schema", func(t *testing.T) {
+		t.Parallel()
+
+		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+
+		doc := yamltest.FirstDocument(t, "kind: Service\n")
+
+		err := reg.Validate(t.Context(), doc)
+		require.ErrorIs(t, err, schema.ErrNoMatch)
+		require.ErrorIs(t, err, schema.ErrNoDirective)
+
+		lenient := schema.NewRegistry(schema.WithResolvers(schema.Directive()), schema.WithRequireSchema(false))
+		require.NoError(t, lenient.Validate(t.Context(), doc))
+	})
+}

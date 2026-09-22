@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"strings"
 	"sync"
 
 	"golang.org/x/sync/singleflight"
@@ -208,8 +209,17 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 
 // Lookup finds the validator for a document.
 //
-// Returns [ErrNoMatch] if no resolver applies to the document,
-// [ErrResolve] if a resolver applied but could not name the schema, and
+// Returns [ErrNoMatch] if no resolver applies to the document, with the
+// reason each resolver gave nested in it, so [errors.Is] finds a reason
+// such as [ErrNoDirective] and a rendering of the error, such as the %+v
+// verb or [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError],
+// lists the reasons below the message:
+//
+//	app.yaml: no matching schema
+//	├── no schema directive
+//	└── no catalog entry matches
+//
+// Returns [ErrResolve] if a resolver applied but could not name the schema, and
 // [ErrLoad] or [ErrCompile] if loading or compiling the schema fails. When
 // ctx ends before the schema loads, Lookup returns [ErrLoad] wrapping the
 // context's error without waiting for the load to finish.
@@ -246,6 +256,8 @@ func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Document) (*Schema,
 		return nil, fmt.Errorf("%w: document is scoped to %s", ErrScopedDocument, doc.Path())
 	}
 
+	var reasons []error
+
 	for _, res := range r.resolvers {
 		// A resolver that ignores its context, as a Ref does, would name
 		// a schema for a canceled lookup. Check the context here, so a
@@ -256,6 +268,8 @@ func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Document) (*Schema,
 
 		ref, err := res.Resolve(ctx, doc)
 		if errors.Is(err, ErrNoMatch) {
+			reasons = append(reasons, err)
+
 			continue
 		}
 
@@ -272,7 +286,44 @@ func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Document) (*Schema,
 		return nil, fmt.Errorf("%w: %w", ErrResolve, ctx.Err())
 	}
 
-	return nil, ErrNoMatch
+	return nil, noMatch(reasons)
+}
+
+// noMatch returns the error a lookup reports when every resolver declined:
+// [ErrNoMatch] alone when no resolver said more than that, and otherwise
+// ErrNoMatch with the reason of each resolver that did nested in it, in
+// lookup order, so [errors.Is] finds a reason such as [ErrNoDirective]
+// and a rendering of the error lists the reasons below the message.
+func noMatch(reasons []error) error {
+	var nested []error
+
+	for _, reason := range reasons {
+		if reason.Error() != ErrNoMatch.Error() {
+			nested = append(nested, reasonError{err: reason})
+		}
+	}
+
+	if len(nested) == 0 {
+		return ErrNoMatch
+	}
+
+	return niceyaml.WrapError(ErrNoMatch, niceyaml.WithErrors(nested...))
+}
+
+// reasonError is the reason one resolver declined a document, nested
+// under the [ErrNoMatch] the lookup reports. A resolver wraps ErrNoMatch,
+// so its message repeats the sentinel the lookup's message states
+// already, and the reason reads without it.
+type reasonError struct {
+	err error
+}
+
+func (e reasonError) Error() string {
+	return strings.TrimPrefix(e.err.Error(), ErrNoMatch.Error()+": ")
+}
+
+func (e reasonError) Unwrap() error {
+	return e.err
 }
 
 // Validate validates a document using the first matching schema.
