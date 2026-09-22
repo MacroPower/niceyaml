@@ -31,7 +31,7 @@ const (
 
 // Annotation represents extra content added around a [Line].
 //
-// It can be used to add comments or notes to the rendered output, without being
+// An annotation adds comments or notes to the rendered output and is not
 // part of the main token stream. Kind names the style the printer renders
 // the annotation with, as [Overlay.Kind] does for an overlay, so an error
 // message below a line renders in [kind.TextError] and a hunk header
@@ -46,7 +46,9 @@ type Annotation struct {
 	Col       int // Optional, 0-indexed column position for the annotation.
 }
 
-// String returns the annotation content padded to the specified column.
+// String returns the annotation content padded to [Annotation.Col]. An
+// annotation without content renders nothing, so the result is the empty
+// string.
 func (a Annotation) String() string {
 	if a.Content == "" {
 		return ""
@@ -140,7 +142,7 @@ func (a Annotations) Contents() []string {
 }
 
 // String returns the combined annotation content for debugging.
-// Same-position annotations are joined by "; " at the minimum column
+// It joins same-position annotations with "; " at the minimum column
 // position among the annotations that have content. Annotations without
 // content add nothing, so a set with no content at all is the empty string,
 // as a single such annotation is.

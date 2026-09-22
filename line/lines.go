@@ -12,16 +12,16 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
-// Lines is an ordered collection of [*Line] values: the content that a
+// Lines is an ordered collection of [*Line] values, the content that a
 // [View] decorates and that the finder and diff packages read.
 //
-// Lines carries the tokens split per line and nothing else. It has no
-// knowledge of YAML documents, parsing, or files, so a Lines value may
-// describe content that is not a YAML document at all, such as a diff that
-// interleaves lines from two revisions. The lines never change after
-// creation, and nothing outside this package can add to, remove from, or
-// reorder a Lines value, so it is safe to share between views and
-// goroutines, and a view over it costs nothing to create.
+// Lines carries the tokens split per line. It has no knowledge of YAML
+// documents, parsing, or files, so a Lines value may describe content that
+// is not a YAML document at all, such as a diff that interleaves lines from
+// two revisions. The lines never change after creation, and nothing outside
+// this package can add to, remove from, or reorder a Lines value, so it is
+// safe to share between views and goroutines, and a view over it costs
+// nothing to create.
 //
 // Reach a line with [Lines.Line] or by ranging over [Lines.All], as
 // with a [View]. The zero value holds no lines.
@@ -221,10 +221,10 @@ func (ls Lines) Tokens() token.Tokens {
 //
 // A range that ends at column 0 of a later line covers nothing on that
 // line, as [position.Range.LastLine] counts it, and a range that ends
-// before its start covers no lines. Lines outside the collection, columns
-// before 0, and columns past the width of a line are left out, and a line
-// on which r covers no column contributes no range. Returns nil when no
-// range remains.
+// before its start covers no lines. SliceLines leaves out lines outside
+// the collection, columns before 0, and columns past the width of a line,
+// and a line on which r covers no column contributes no range. Returns nil
+// when no range remains.
 func (ls Lines) SliceLines(r position.Range) position.Ranges {
 	var result position.Ranges
 
@@ -251,8 +251,8 @@ func (ls Lines) SliceLines(r position.Range) position.Ranges {
 
 // TokenAt returns the original [*token.Token] covering the given position.
 //
-// The token is the one the lexer produced, so it can be passed back to
-// [Lines.TokenRanges] or [Lines.ContentRanges] to find every range it
+// The token is the one the lexer produced, so a caller can pass it back
+// to [Lines.TokenRanges] or [Lines.ContentRanges] to find every range it
 // occupies. Treat it as read-only.
 //
 // Returns nil if the position is out of bounds or no token exists there.
@@ -315,7 +315,7 @@ func (ls Lines) ranges(
 }
 
 // Content returns the combined content of all lines as a string.
-// Lines are joined with newlines.
+// It joins the lines with newlines.
 func (ls Lines) Content() string {
 	if len(ls.lines) == 0 {
 		return ""

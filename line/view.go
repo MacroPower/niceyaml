@@ -36,10 +36,10 @@ import (
 // index of a line it holds, and [View.Count] is the number it holds.
 //
 // Index-taking methods panic when the index is outside the content, as
-// indexing a slice does. Decoration on a line the View does not hold is
-// kept and never renders. A View is not safe for concurrent mutation.
-// Decorate from one goroutine at a time, and do not decorate while another
-// goroutine renders.
+// indexing a slice does. A View keeps decoration on a line it does not
+// hold, and that decoration never renders. A View is not safe for
+// concurrent mutation. Decorate from one goroutine at a time, and do not
+// decorate while another goroutine renders.
 //
 // Create instances with [NewView]. The zero value is an empty view.
 type View struct {
@@ -67,7 +67,7 @@ func NewView(lines Lines) *View {
 	return &View{lines: lines, held: held, mask: mask}
 }
 
-// Lines returns the content of the [View]: every line of the [Lines] it is
+// Lines returns the content of the [View], every line of the [Lines] it is
 // over, whether or not the View holds it. A search of the content, such as
 // one a [finder.Finder] loads, yields ranges in the coordinates every View
 // method takes.
@@ -93,7 +93,7 @@ func (v *View) Count() int {
 }
 
 // Contains reports whether the [View] holds line i of its content. A nil
-// View holds no line, and an index outside the content is held by none.
+// View holds no line, and no View holds an index outside its content.
 func (v *View) Contains(i int) bool {
 	if v == nil || i < 0 || i >= len(v.mask) {
 		return false
@@ -103,11 +103,11 @@ func (v *View) Contains(i int) bool {
 }
 
 // Index returns the index of the line the [View] holds that is l and
-// true. Lines are shared by pointer between every view over the same
-// content, so a decorator that knows a line of a [Lines] value finds it in
-// a slice of that content, or in a diff that interleaves it with another
-// revision, without knowing how the view was built. A line the view does
-// not hold, such as one from other content, reports false.
+// true. Every View over the same content shares its lines by pointer, so
+// a decorator that knows a line of a [Lines] value finds it in a slice of
+// that content, or in a diff that interleaves it with another revision,
+// without knowing how the view was built. A line the view does not hold,
+// such as one from other content, reports false.
 func (v *View) Index(l *Line) (int, bool) {
 	if v == nil || l == nil {
 		return 0, false
@@ -338,7 +338,7 @@ func (v *View) Slice(spans ...position.Span) *View {
 // the annotations above it on rows of their own, and a row below it that
 // marks its decoration, with a caret under every column an overlay covers,
 // a caret at the column of the annotations below the line, and their
-// contents after the last caret. Flags are not rendered. The number
+// contents after the last caret. String does not render flags. The number
 // column is at least four wide and grows to fit the largest number in the
 // view, so every row lines up.
 //

@@ -754,7 +754,7 @@ func TestView_Slice(t *testing.T) {
 	`)
 
 	// Decorated returns a view with a distinct flag, overlay, and annotation
-	// on every line so a slice can be checked against its source.
+	// on every line so a test can check a slice against its source.
 	decorated := func(t *testing.T) *line.View {
 		t.Helper()
 
@@ -880,7 +880,7 @@ func TestView_Slice(t *testing.T) {
 		require.Len(t, got.Annotations(1), 1)
 		assert.Equal(t, "b: 2", got.Annotations(1)[0].Content)
 
-		// The decoration of a line the slice does not hold is left behind.
+		// The slice leaves behind the decoration of a line it does not hold.
 		assert.Equal(t, line.FlagDefault, got.Flag(2))
 		assert.Empty(t, got.Overlays(2))
 		assert.Empty(t, got.Annotations(2))

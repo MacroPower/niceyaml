@@ -87,18 +87,18 @@
 //
 // # Views
 //
-// A [View] is the unit the printer renders: a Lines value plus the
-// decoration one rendering carries. [NewView] creates one over any Lines,
-// and a niceyaml Source hands one out. The view shares the lines and owns
-// the decoration, so creating a view costs nothing and decorating one
-// reaches no other:
+// A [View] is the unit the printer renders. It is a Lines value together
+// with the decoration one rendering carries. [NewView] creates one over
+// any Lines, and a niceyaml Source hands one out. The view shares the
+// lines and owns the decoration, so creating a view costs nothing and
+// decorating one reaches no other:
 //
 //	view := line.NewView(lines)
 //
 // [Annotations] add extra content above or below a line, which is useful for
-// error messages, hints, or context. An [Annotation] is positioned with
-// [Above] or [Below], and its Kind names the style it renders in, as the
-// Kind of an [Overlay] does; without one it renders as a comment:
+// error messages, hints, or context. An [Annotation] takes a [Placement] of
+// [Above] or [Below], and its Kind names the style it renders in, as the Kind
+// of an [Overlay] does; without one it renders as a comment:
 //
 //	view.Annotate(i, line.Annotation{
 //	    Content:   "missing required field",
@@ -111,8 +111,7 @@
 // highlighting. An [Overlay] either replaces the style underneath it or, with
 // Blend set, mixes with it so a search highlight keeps the token color it
 // covers. [View.AddOverlay] and [View.BlendOverlay] add overlays across a
-// range of lines; the first replaces the style underneath and the second
-// mixes with it:
+// range of lines, the second with Blend set:
 //
 //	view.AddOverlay(kind.GenericError, errorRange)
 //	view.BlendOverlay(kind.GenericHighlight, matches...)
@@ -128,8 +127,9 @@
 // lines of a few spans, decoration included, as an error excerpt does.
 //
 // [View.String] renders a view as plain text: each line behind its number,
-// carets under the columns its overlays cover, and its annotations beside
-// the carets, with no escape sequences. It is the rendering the %+v verb
-// of a bound error prints, and it suits a log or a golden file. A printer
-// renders the same view with styles.
+// the annotations above it on rows of their own, carets under the columns
+// its overlays cover, and the annotations below it beside the carets, with
+// no escape sequences. It is the rendering the %+v verb of a bound error
+// prints, and it suits a log or a golden file. A printer renders the same
+// view with styles.
 package line

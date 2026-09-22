@@ -131,8 +131,8 @@ func TestNewLines_Roundtrip(t *testing.T) {
 		// TODO: go-yaml's scanner does not preserve \u, \U, or \x escape sequences in
 		// the Origin field.
 		//
-		// See scanner/scanner.go:455-516 - these cases skip ctx.addOriginBuf() calls,
-		// causing Origin to be truncated (e.g., "\u65E5" becomes "\\").
+		// See scanner/scanner.go:455-516, where these cases skip ctx.addOriginBuf()
+		// calls, so the scanner truncates Origin (e.g., "\u65E5" becomes "\\").
 		// This makes Content() roundtrip impossible for these escapes.
 		//
 		//	"unicode escape": "text: \"\\u65E5\\u672C\"\n"
@@ -428,7 +428,7 @@ func TestNewLines_NonStandardLineNumbers(t *testing.T) {
 				assert.Equal(t, wantNum, lines.Line(i).Number(), "line %d has wrong number", i)
 			}
 
-			// Verify round-trip: dumping tokens should preserve content.
+			// Verify the round-trip. Dumping tokens should preserve content.
 			gotTokens := lines.Tokens()
 			assert.Equal(
 				t,
@@ -767,8 +767,8 @@ func TestNewLines_Value_PrevNextLinking(t *testing.T) {
 func TestNewLines_LeadingNewlineTokens(t *testing.T) {
 	t.Parallel()
 
-	// Test cases for tokens with leading newlines, which should be handled
-	// correctly without creating invalid column ordering.
+	// Test cases for tokens with leading newlines, which NewLines must handle
+	// without creating invalid column ordering.
 	tcs := map[string]struct {
 		input string
 		want  []int
@@ -1056,7 +1056,6 @@ func TestNewLines_BlockScalars(t *testing.T) {
 
 		// The go-yaml lexer places the Position of block scalar content (StringType)
 		// on the LAST line of the content, not the first.
-		// This is critical for round-trip fidelity.
 
 		tcs := map[string]struct {
 			input string
@@ -1268,7 +1267,6 @@ func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 	// The go-yaml lexer places the Position of plain multiline strings
 	// (StringType) on the FIRST line, not the last.
 	// This is different from block scalars.
-	// This is critical for round-trip fidelity.
 
 	tcs := map[string]struct {
 		input string
@@ -1406,11 +1404,11 @@ func TestNewLines_QuotedMultilineActualNewlines(t *testing.T) {
 func TestNewLines_ColumnPositionAfterSplit(t *testing.T) {
 	t.Parallel()
 
-	// Test that Column positions are correctly calculated when multiline tokens
-	// are split across lines.
+	// Test that NewLines calculates Column positions correctly when it splits
+	// multiline tokens across lines.
 	//
-	// For block scalars, each split part should have Column calculated based on
-	// the leading whitespace of that line.
+	// For block scalars, the split part that carries the token's Value keeps
+	// the lexer's Column; every other content part starts at column 1.
 
 	t.Run("block scalar column positions", func(t *testing.T) {
 		t.Parallel()
@@ -1662,10 +1660,10 @@ func TestNewLines_BlockScalarPositionBehavior(t *testing.T) {
 	})
 }
 
-// TestNewLines_BlankLineAbsorption documents how blank lines are handled by the
-// go-yaml lexer: blank lines are absorbed into the previous token's Origin
-// rather than being separate tokens.
-// This test verifies that NewLines correctly handles this behavior.
+// TestNewLines_BlankLineAbsorption documents how the go-yaml lexer handles
+// blank lines. The lexer absorbs a blank line into the previous token's
+// Origin rather than emitting a separate token.
+// NewLines still yields one Line per source line and round-trips the tokens.
 func TestNewLines_BlankLineAbsorption(t *testing.T) {
 	t.Parallel()
 
@@ -1885,8 +1883,8 @@ func TestNewLines_PartLinksStopAtLineBoundary(t *testing.T) {
 // TestNewLines_FoldedBlockBlankLines verifies handling of blank lines within
 // folded block scalars.
 //
-// In folded scalars, blank lines have special semantics - they preserve line
-// breaks instead of folding to spaces.
+// In folded scalars, a blank line preserves a line break instead of folding
+// to a space.
 func TestNewLines_FoldedBlockBlankLines(t *testing.T) {
 	t.Parallel()
 
@@ -1894,8 +1892,8 @@ func TestNewLines_FoldedBlockBlankLines(t *testing.T) {
 		t.Parallel()
 
 		// In folded blocks, blank lines cause a line break in the Value.
-		// "first" and "second" are separated by a blank line, which becomes
-		// a newline in the Value instead of a space.
+		// A blank line separates "first" and "second", and it becomes a
+		// newline in the Value instead of a space.
 		input := "text: >\n  first\n\n  second\n"
 
 		original := lexer.Tokenize(input)
@@ -1948,7 +1946,7 @@ func TestNewLines_FoldedBlockBlankLines(t *testing.T) {
 		}
 
 		require.NotNil(t, contentToken, "expected to find folded content token")
-		// Adjacent lines fold to space, resulting in "first second\n".
+		// Adjacent lines fold to a space, so the Value is "first second\n".
 		assert.Equal(t, "first second\n", contentToken.Value,
 			"folded block without blank line should have space-joined Value")
 	})
@@ -2334,13 +2332,11 @@ func TestLine_Number_Fallbacks(t *testing.T) {
 
 		lines := line.NewLines(tks)
 
-		// NewLines creates a line from the token, but Number() should
-		// handle the nil position gracefully.
+		// NewLines creates a line from the token even with a nil Position.
 		require.Equal(t, 1, lines.Len())
 
-		// The line number should be 0 since Position is nil.
-		// Note: NewLines may assign a number based on its own tracking.
-		// This tests that the fallback path handles nil Position.
+		// With no Position to read, NewLines numbers the line from its own
+		// line tracking, so Number() stays non-negative.
 		assert.GreaterOrEqual(t, lines.Line(0).Number(), 0)
 	})
 
@@ -2349,8 +2345,8 @@ func TestLine_Number_Fallbacks(t *testing.T) {
 
 		strTkb := yamltest.NewTokenBuilder().Type(token.StringType)
 
-		// When number field is 0 and segments exist with valid position,
-		// Number() should return the first segment's Position.Line.
+		// NewLines numbers each line from its tokens, so a lone token at
+		// line 42 yields a line numbered 42.
 		tks := token.Tokens{}
 		tks.Add(strTkb.Clone().
 			Origin("value\n").
@@ -2371,8 +2367,8 @@ func TestLine_Number_Fallbacks(t *testing.T) {
 
 		strTkb := yamltest.NewTokenBuilder().Type(token.StringType)
 
-		// When the internal number field is set, it takes precedence
-		// over the segment's Position.Line.
+		// Each line takes the number from the token that starts it, so a
+		// gap in Position.Line leaves a gap in the line numbers.
 		tks := token.Tokens{}
 		// First token at line 100.
 		tks.Add(strTkb.Clone().
@@ -2398,8 +2394,8 @@ func TestLine_Number_Fallbacks(t *testing.T) {
 	})
 }
 
-// TestNewLines_WhitespaceType verifies that pure horizontal whitespace parts
-// are assigned SpaceType for correct styling.
+// TestNewLines_WhitespaceType verifies that NewLines assigns SpaceType to
+// pure horizontal whitespace parts for correct styling.
 //
 // This handles cases where the go-yaml lexer bundles trailing whitespace (like
 // next line's indentation) with the previous token.
@@ -2440,7 +2436,7 @@ func TestNewLines_WhitespaceType(t *testing.T) {
 		lines := line.NewLines(tks)
 
 		// Lines 2 and 3 contain block scalar content.
-		// Their whitespace should NOT be converted to SpaceType.
+		// NewLines must NOT convert their whitespace to SpaceType.
 		for i := 1; i < lines.Len(); i++ {
 			for _, tk := range lines.Line(i).Tokens() {
 				// Check if this is a whitespace-only token from block scalar.

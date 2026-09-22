@@ -12,7 +12,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
-// Line holds the tokens on one line of source. It is content alone: the
+// Line holds the tokens on one line of source. It is content alone. The
 // flag, overlays, and annotations that rendering attaches to a line live
 // on a [View], so one Line renders many ways without being copied.
 //
@@ -30,7 +30,7 @@ import (
 type Line struct {
 	segments segment.Segments
 
-	// The 1-indexed line number used for display purposes.
+	// The 1-indexed line number used for display.
 	// This may differ from the first token's Position.Line for block scalars.
 	number int
 }
@@ -43,8 +43,8 @@ func (l *Line) Number() int {
 
 // Content returns this [Line]'s content as a string.
 //
-// Line endings (LF or CRLF) are stripped from each segment for a clean
-// single-line representation.
+// Content strips the line ending (LF, CRLF, or a bare CR) from each
+// segment, so the result is a single line.
 func (l *Line) Content() string {
 	var sb strings.Builder
 
@@ -166,7 +166,7 @@ func (l *Line) Width() int {
 //
 // The iteration includes the line ending as a single '\n' at the column
 // after the last visible rune, which is [Line.Width], whether the source
-// used LF, CRLF, or a bare CR. A line yields at most one newline: the lexer
+// used LF, CRLF, or a bare CR. A line yields at most one newline. The lexer
 // sometimes repeats a line ending at the start of the next token, and that
 // repeat sits on the same line as the ending it copies.
 func (l *Line) Runes() iter.Seq2[int, rune] {
@@ -197,7 +197,7 @@ func hasLineEnding(origin string) bool {
 
 // String returns the line number and content, as "   1 | key: value",
 // which is the row [View.String] renders for a line with no decoration in
-// a view of fewer than ten thousand lines.
+// a view whose largest line number is under ten thousand.
 func (l *Line) String() string {
 	return fmt.Sprintf("%4d | %s", l.Number(), l.Content())
 }
