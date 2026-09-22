@@ -75,7 +75,7 @@ func WithPrinter(p *printer.Printer) Option {
 // the error's tree, so a joined error annotates each failure it holds.
 // Unlike [fang.DefaultErrorHandler], which wraps errors in a lipgloss style
 // that can break multi-line output, this handler applies styling only to
-// the error header, keeping the rendered lines intact.
+// the error header and leaves the rendered lines intact.
 func NewErrorHandler(opts ...Option) fang.ErrorHandler {
 	cfg := newConfig(opts)
 
@@ -112,8 +112,8 @@ func handleError(w io.Writer, styles fang.Styles, err error, cfg config) {
 func ignoreN(_ int, _ error) {}
 
 // isUsageError returns true if err appears to be a Cobra usage error. The
-// prefixes cover Cobra's flag parser, its argument-count validators, and its
-// required-flag check.
+// prefixes cover Cobra's flag parser, its command lookup, its argument-count
+// validators, and its required-flag check.
 // This is a workaround until Cobra exposes a proper usage error type.
 // See: https://github.com/spf13/cobra/pull/2266
 func isUsageError(err error) bool {

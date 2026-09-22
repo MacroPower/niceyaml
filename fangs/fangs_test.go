@@ -19,9 +19,9 @@ import (
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
-// silentError wraps another error without adding a message of its own, which
-// is what makes the [niceyaml.SourceError] holding it render an empty message
-// while still resolving a detail.
+// silentError wraps another error without adding a message of its own, so
+// the [niceyaml.SourceError] holding it renders an empty message while still
+// resolving a detail.
 type silentError struct{ err error }
 
 func (s silentError) Error() string { return "" }

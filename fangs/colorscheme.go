@@ -15,8 +15,8 @@ import (
 // [go.jacobcolvin.com/niceyaml/style/theme] or a
 // [go.jacobcolvin.com/niceyaml/style.Styles] value.
 //
-// This allows CLI styling to be derived from the existing theme system,
-// providing consistent colors between the YAML viewer and CLI help output.
+// This derives CLI styling from the existing theme system, so the YAML
+// viewer and CLI help output use the same colors.
 func ColorScheme(styles style.Styler) fang.ColorScheme {
 	text := styles.Style(kind.Text)
 	comment := styles.Style(kind.Comment)
@@ -47,8 +47,8 @@ func ColorScheme(styles style.Styler) fang.ColorScheme {
 // [fang.ColorScheme] from the styles of a [style.Styler].
 //
 // This wraps [ColorScheme] for use with [fang.WithColorSchemeFunc].
-// Since themes are designed for a specific light/dark mode, the
-// [lipgloss.LightDarkFunc] parameter is ignored.
+// Each theme targets a specific light/dark mode, so the returned function
+// ignores its [lipgloss.LightDarkFunc] parameter.
 func ColorSchemeFunc(styles style.Styler) fang.ColorSchemeFunc {
 	return func(_ lipgloss.LightDarkFunc) fang.ColorScheme {
 		return ColorScheme(styles)

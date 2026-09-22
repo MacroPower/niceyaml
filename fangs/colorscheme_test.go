@@ -16,7 +16,8 @@ func TestColorScheme(t *testing.T) {
 
 	cs := fangs.ColorScheme(styles)
 
-	// Verify all fields are populated.
+	// Verify ColorScheme populates every field it maps; Help and
+	// ErrorDetails stay unset.
 	assert.NotNil(t, cs.Base)
 	assert.NotNil(t, cs.Title)
 	assert.NotNil(t, cs.Description)
@@ -41,7 +42,7 @@ func TestColorSchemeFunc(t *testing.T) {
 
 	csFunc := fangs.ColorSchemeFunc(styles)
 
-	// The LightDarkFunc parameter should be ignored.
+	// The returned function ignores the LightDarkFunc parameter.
 	cs := csFunc(nil)
 
 	assert.NotNil(t, cs.Base)
