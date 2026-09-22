@@ -55,7 +55,7 @@ func TestResolverFunc(t *testing.T) {
 
 	// A resolver that names a schema per kind and reports ErrNoMatch for
 	// documents without one.
-	r := schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
+	r := schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
 		node, err := doc.At(kindPath)
 		if err != nil {
 			return schema.Ref{}, schema.ErrNoMatch

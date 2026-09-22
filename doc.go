@@ -38,11 +38,11 @@
 // lives in a package of its own.
 //
 // [Source], in this package, is the file. It owns the tokens from go-yaml,
-// lazily parses them into an AST with [Source.File], returns each YAML
-// document in the file as a [Document] from [Source.Documents], and binds
-// the errors it and its Documents produce to itself. [Node.Bind]
-// binds errors built elsewhere to that document, and [Source.Bind] binds
-// one to the document its location falls in.
+// lazily parses them into an AST with [Source.File], returns the root
+// [Node] of each YAML document in the file from [Source.Documents], and
+// binds the errors it and its Nodes produce to itself. [Node.Bind] binds
+// errors built elsewhere to that document, and [Source.Bind] binds one to
+// the document its location falls in.
 //
 // [line.Lines] is the content, the tokens organized into lines, and it never changes.
 // [line.View] is one rendering of that content. It shares the lines and carries the
@@ -75,8 +75,8 @@
 // "$.path", so a validator can build one without holding the source.
 //
 // [SourceError] binds an error to its [Source] and to the document its
-// path resolves in. Every error a Source or one of its Documents produces
-// is one, [Node.Bind] binds an error built elsewhere to that
+// path resolves in. Every error a Source or one of its Nodes produces is
+// one, [Node.Bind] binds an error built elsewhere to that
 // document, and [Source.Bind] binds one to the document its location
 // falls in: a position or a range to the document whose span holds it,
 // and a path to the one document of a source that holds one.
@@ -171,9 +171,9 @@
 //
 // # Validation Pipeline
 //
-// For structured validation, [Source.Document] returns the [Document] of
-// a file that holds one, and [Source.Documents] returns one for each
-// document of a file that holds several:
+// For structured validation, [Source.Document] returns the root [Node]
+// of a file that holds one document, and [Source.Documents] returns the
+// root of each document of a file that holds several:
 //
 //	source := niceyaml.NewSourceFromString(yamlContent)
 //	doc, err := source.Document()
@@ -191,16 +191,15 @@
 //		}
 //	}
 //
-// A [Document] is its root [Node], embedded, so it decodes, validates,
-// and binds as a Node does, and a function that takes a Node takes
-// doc.Node. [Node.Decode] runs validation on both sides of the decode. A
-// [Validator] passed with [WithValidator] checks the node before
-// decoding, and after decoding a type implementing [SelfValidator]
-// validates itself. A [go.jacobcolvin.com/niceyaml/schema.Schema] is a
-// Validator that
-// checks the document against one JSON schema, and a
-// [go.jacobcolvin.com/niceyaml/schema.Registry] is one that picks
-// the schema for the document:
+// The root Node decodes, validates, and binds the whole document, and
+// every function that takes a Node takes it as it is. [Node.Decode] runs
+// validation on both sides of the decode. A [Validator] passed with
+// [WithValidator] checks the node before decoding, and after decoding a
+// type implementing [SelfValidator] validates itself. A
+// [go.jacobcolvin.com/niceyaml/schema.Schema] is a Validator that checks
+// the document against one JSON schema, and a
+// [go.jacobcolvin.com/niceyaml/schema.Registry] is one that picks the
+// schema for the document:
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
 //

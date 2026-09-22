@@ -44,7 +44,7 @@ func When(m matcher.Matcher, r Resolver) Resolver {
 }
 
 // Resolve implements [Resolver].
-func (g *guarded) Resolve(ctx context.Context, doc *niceyaml.Document) (Ref, error) {
+func (g *guarded) Resolve(ctx context.Context, doc *niceyaml.Node) (Ref, error) {
 	ok, err := g.matcher.Match(ctx, doc)
 	if err != nil {
 		//nolint:wrapcheck // The matcher's error passes through as the resolver's.

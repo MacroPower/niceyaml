@@ -77,7 +77,7 @@ func ParseDirective(comment string) *ParsedDirective {
 }
 
 // ParseDocumentDirective extracts a schema directive from a single document's
-// tokens, such as those [go.jacobcolvin.com/niceyaml.Document.Tokens]
+// tokens, such as those [go.jacobcolvin.com/niceyaml.Node.Tokens]
 // returns.
 //
 // The directive must appear before any non-comment content in the document;
@@ -158,7 +158,7 @@ type directiveResolver struct{}
 // directives.
 //
 // Resolve reads the directive comment from the document's
-// [niceyaml.Document.Preamble] and names the schema it references through
+// [niceyaml.Node.Preamble] and names the schema it references through
 // [FileOrURL]. It resolves a relative path against the directory of the
 // document's file, so a document without a file path reports
 // [ErrNoFilePath] for a relative path; a URL or an absolute path needs no
@@ -182,7 +182,7 @@ func Directive() Resolver {
 }
 
 // Resolve implements [Resolver].
-func (directiveResolver) Resolve(_ context.Context, doc *niceyaml.Document) (Ref, error) {
+func (directiveResolver) Resolve(_ context.Context, doc *niceyaml.Node) (Ref, error) {
 	directive := ParseDocumentDirective(doc.Preamble())
 	if directive == nil {
 		return Ref{}, ErrNoDirective

@@ -102,10 +102,11 @@ func (f ValidatorFunc) Validate(ctx context.Context, n *Node) error {
 	return f(ctx, n)
 }
 
-// newDocuments creates one [*Document] per YAML document of file, the AST
-// src parsed, in file order. See alignDocumentTokens for how each document
-// node finds its tokens and foldPreambles for which nodes become documents.
-func newDocuments(src *Source, file *ast.File) []*Document {
+// newDocuments creates the root [*Node] of each YAML document of file, the
+// AST src parsed, in file order. See alignDocumentTokens for how each
+// document node finds its tokens and foldPreambles for which nodes become
+// documents.
+func newDocuments(src *Source, file *ast.File) []*Node {
 	docs := foldPreambles(file.Docs, alignDocumentTokens(file, src.Tokens()))
 
 	groups := make([]token.Tokens, len(docs))
@@ -115,13 +116,16 @@ func newDocuments(src *Source, file *ast.File) []*Document {
 
 	spans := documentSpans(groups, src.lines.Len())
 
+	nodes := make([]*Node, len(docs))
+
 	for i, doc := range docs {
-		doc.Node = &Node{source: src, doc: doc, content: doc.tokens, span: spans[i]}
 		doc.index = i
 		doc.preamble = preambleLen(doc.tokens)
+		doc.node = &Node{source: src, doc: doc, content: doc.tokens, span: spans[i]}
+		nodes[i] = doc.node
 	}
 
-	return docs
+	return nodes
 }
 
 // foldPreambles pairs each document node with its token group and folds
@@ -133,9 +137,9 @@ func newDocuments(src *Source, file *ast.File) []*Document {
 // follows it. A file that holds such nodes and nothing else, such as a
 // file of comments, keeps the first as its one document, which decodes to
 // nothing as an empty file does.
-func foldPreambles(nodes []*ast.DocumentNode, groups []token.Tokens) []*Document {
+func foldPreambles(nodes []*ast.DocumentNode, groups []token.Tokens) []*document {
 	var (
-		docs    []*Document
+		docs    []*document
 		pending token.Tokens
 	)
 
@@ -146,7 +150,7 @@ func foldPreambles(nodes []*ast.DocumentNode, groups []token.Tokens) []*Document
 			continue
 		}
 
-		docs = append(docs, &Document{root: node, tokens: slices.Concat(pending, groups[i])})
+		docs = append(docs, &document{root: node, tokens: slices.Concat(pending, groups[i])})
 		pending = nil
 	}
 
@@ -156,7 +160,7 @@ func foldPreambles(nodes []*ast.DocumentNode, groups []token.Tokens) []*Document
 		last.tokens = append(last.tokens, pending...)
 
 	case len(docs) == 0 && len(nodes) > 0:
-		docs = append(docs, &Document{root: nodes[0], tokens: pending})
+		docs = append(docs, &document{root: nodes[0], tokens: pending})
 	}
 
 	return docs
@@ -329,48 +333,12 @@ func documentOffset(doc *ast.DocumentNode) (int, bool) {
 	return 0, false
 }
 
-// Document is a single YAML document of a [Source]: the [*Node] at its
-// root, which decodes and validates it, together with what describes the
-// document as a whole, such as its index in the file and its preamble.
-//
-// The root Node is embedded, so a Document decodes, validates, and binds
-// as a Node does. [Node.Decode] returns a new value and [Node.DecodeInto]
-// fills one the caller already holds, such as one pre-populated with
-// defaults. Both run the same pipeline. Each [Validator] given with
-// [WithValidator] checks the document before decoding, and a value that
-// implements [SelfValidator] validates itself after, unless
-// [WithSelfValidation] switches that off. [Node.Validate] runs the first
-// step on its own.
-//
-//	for _, doc := range docs {
-//		config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(validator))
-//		if err != nil {
-//			return err
-//		}
-//	}
-//
-// A source that holds one document hands it out from [Source.Document].
-//
-// [Node.At] returns a Node scoped to the node a path selects, and every
-// method of that Node reads and resolves from it. Decode decodes the node
-// alone, which reads one value without decoding the whole document, such
-// as a discriminator field that routes the document, and Bind resolves
-// the paths in an error from the node, so a check written for the type
-// of that value reports the right lines. A Node reaches its Document
-// through [Node.Document], and a Document is its root Node as the Node
-// field, so a function that takes a Node takes doc.Node.
-//
-// [Document.Root], [Document.Index], [Document.Preamble], and
-// [Document.FilePath] describe the document as a whole, whatever Node a
-// caller holds.
-//
-// Receive instances from [Source.Documents], [Source.Document], or
-// [Node.Document].
-type Document struct {
-	// Node is the root of the document, which decodes, validates, and
-	// binds it.
-	*Node
-
+// document is what describes one YAML document of a [Source] as a whole:
+// its root, the tokens of the whole document, its index in the file, and
+// the length of its preamble. Every [Node] of the document shares it.
+type document struct {
+	// The root Node of the document.
+	node *Node
 	root *ast.DocumentNode
 	// The tokens of the whole document.
 	tokens token.Tokens
@@ -379,24 +347,53 @@ type Document struct {
 	preamble int
 }
 
-// Node is a scope in a YAML document: the node a path selects, or the
-// root of the document, together with the [*Source] and the [*Document]
-// it belongs to. Every method reads and resolves from the node, so
-// [Node.Decode] decodes it alone, [Node.Validate] runs a [Validator] on
-// it, and [Node.Bind] resolves the paths of an error from it, so a check
-// written for the type of a value reports the same lines whether the
-// value is the whole document or one inside it.
+// Node is a scope in a YAML document: the root of the document, which
+// [Source.Documents] and [Source.Document] return, or the node a path
+// selects, which [Node.At] returns. Every method reads and resolves from
+// the node, so [Node.Decode] decodes it alone, [Node.Validate] runs a
+// [Validator] on it, and [Node.Bind] resolves the paths of an error from
+// it, so a check written for the type of a value reports the same lines
+// whether the value is the whole document or one inside it.
+//
+// [Node.Decode] returns a new value and [Node.DecodeInto] fills one the
+// caller already holds, such as one pre-populated with defaults. Both run
+// the same pipeline. Each [Validator] given with [WithValidator] checks
+// the node before decoding, and a value that implements [SelfValidator]
+// validates itself after, unless [WithSelfValidation] switches that off.
+// [Node.Validate] runs the first step on its own.
+//
+//	for _, doc := range docs {
+//		config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(validator))
+//		if err != nil {
+//			return err
+//		}
+//	}
+//
+// A source that holds one document hands its root out from
+// [Source.Document].
+//
+// A Node from [Node.At] is scoped to the node a path selects. Decode
+// decodes that node alone, which reads one value without decoding the
+// whole document, such as a discriminator field that routes the
+// document, and Bind resolves the paths in an error from the node, so a
+// check written for the type of that value reports the right lines. Any
+// Node reaches the root of its document through [Node.Document], and
+// [Node.Path] is [paths.Root] for the root and the path from it for a
+// scoped Node.
+//
+// [Node.Root], [Node.Index], [Node.Preamble], and [Node.FilePath]
+// describe the document as a whole, whatever Node of it a caller holds.
 //
 // A Node holds the Source it came from, and every decoding method binds
 // the [Error] values it produces to that source, so the errors it returns
 // carry a [SourceError] that renders the offending lines.
 //
-// Receive instances from [Node.At], or from a [Document], whose Node
-// field is the root Node of the document.
+// Receive instances from [Source.Documents], [Source.Document],
+// [Node.At], or [Node.Document].
 type Node struct {
 	source *Source
 	// The enclosing document.
-	doc *Document
+	doc *document
 	// The tokens of the node: the tokens of the whole document for its
 	// root, and a sub-slice of them for a Node from At.
 	content token.Tokens
@@ -407,22 +404,24 @@ type Node struct {
 	span position.Span
 }
 
-// Root returns the [*ast.DocumentNode] of the whole document. [Node.AST]
-// returns the node a Node selects, and [Node.Path] is the path from this
-// root to it.
-func (dd *Document) Root() *ast.DocumentNode {
-	return dd.root
+// Root returns the [*ast.DocumentNode] of the whole document the Node
+// belongs to. [Node.AST] returns the node the Node selects, and
+// [Node.Path] is the path from this root to it.
+func (n *Node) Root() *ast.DocumentNode {
+	return n.doc.root
 }
 
-// Document returns the [*Document] the Node belongs to, so a Node from
-// [Node.At] reaches what describes the whole document, such as its file
-// path. A nil Node belongs to none.
-func (n *Node) Document() *Document {
+// Document returns the root [*Node] of the document the Node belongs to,
+// so a Node from [Node.At] reaches the whole document, as a validator
+// that picks a schema from the file path or the content of the document
+// does. The root Node of a document returns itself. A nil Node belongs
+// to none.
+func (n *Node) Document() *Node {
 	if n == nil {
 		return nil
 	}
 
-	return n.doc
+	return n.doc.node
 }
 
 // AST returns the [ast.Node] the Node selects, resolved in the document
@@ -622,8 +621,8 @@ func (b *boundsFinder) consider(tk *token.Token) {
 }
 
 // Path returns the scope of the [Node]: the path from the document root
-// to the node, which is [paths.Root] for the root Node of a [Document]
-// and the joined paths for one from [Node.At].
+// to the node, which is [paths.Root] for the root Node of a document and
+// the joined paths for one from [Node.At].
 func (n *Node) Path() paths.Path {
 	return n.base
 }
@@ -633,9 +632,10 @@ func (n *Node) Source() *Source {
 	return n.source
 }
 
-// Index returns the 0-indexed position of the document within the file.
-func (dd *Document) Index() int {
-	return dd.index
+// Index returns the 0-indexed position within the file of the document
+// the Node belongs to.
+func (n *Node) Index() int {
+	return n.doc.index
 }
 
 // Tokens returns the tokens of the node, with the positions they have in
@@ -652,24 +652,24 @@ func (n *Node) Tokens() token.Tokens {
 	return slices.Clone(n.content)
 }
 
-// Preamble returns the tokens of the document before its content: the
-// comments and %YAML or %TAG directives above its "---" header, the header
-// itself, and the comments between the header and the first token of the
-// content. The parser cuts the tokens above the header off as a node of
+// Preamble returns the tokens of the document the Node belongs to before
+// its content: the comments and %YAML or %TAG directives above its "---"
+// header, the header itself, and the comments between the header and the
+// first token of the content. The parser cuts the tokens above the header off as a node of
 // their own, and [Source.Documents] folds them back into the document the
 // YAML spec attaches them to, so a schema directive written above the
 // header is in the preamble of the document it describes. A document
 // without content, such as one holding comments alone, is all preamble.
 // The slice is a copy, and the tokens are shared and read-only, as for
 // [Node.Tokens].
-func (dd *Document) Preamble() token.Tokens {
-	return slices.Clone(dd.tokens[:dd.preamble])
+func (n *Node) Preamble() token.Tokens {
+	return slices.Clone(n.doc.tokens[:n.doc.preamble])
 }
 
 // FilePath returns the path of the file the document came from, which is
 // [Source.FilePath]. Returns an empty string when the source has none.
-func (dd *Document) FilePath() string {
-	return dd.source.FilePath()
+func (n *Node) FilePath() string {
+	return n.source.FilePath()
 }
 
 // Span returns the lines of [Source.Lines] that the node covers. A whole
@@ -962,7 +962,7 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 }
 
 // DecodeInto validates and decodes the node, which is the whole document
-// for the root Node of a [Document], into v, which must be a non-nil
+// for the root Node of a document, into v, which must be a non-nil
 // pointer. Any other v returns [ErrDecodeTarget] before anything runs.
 //
 // The options [WithDecodeOptions] set on the source apply first, then
@@ -1142,7 +1142,7 @@ func hasContent(node ast.Node) bool {
 }
 
 // Decode validates and decodes the node, which is the whole document for
-// the root Node of a [Document], into a new T.
+// the root Node of a document, into a new T.
 //
 // The options [WithDecodeOptions] set on the source apply first, then
 // opts. Each [Validator] from [WithValidator] runs before decoding. If *T

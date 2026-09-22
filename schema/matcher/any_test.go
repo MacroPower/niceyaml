@@ -72,10 +72,10 @@ func TestAny(t *testing.T) {
 		undecided := errors.New("undecided")
 		called := false
 		m := matcher.Any(
-			matcher.Func(func(_ context.Context, _ *niceyaml.Document) (bool, error) {
+			matcher.Func(func(_ context.Context, _ *niceyaml.Node) (bool, error) {
 				return false, undecided
 			}),
-			matcher.Func(func(_ context.Context, _ *niceyaml.Document) (bool, error) {
+			matcher.Func(func(_ context.Context, _ *niceyaml.Node) (bool, error) {
 				called = true
 
 				return true, nil

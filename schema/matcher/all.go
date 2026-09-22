@@ -38,7 +38,7 @@ func All(matchers ...Matcher) Matcher {
 }
 
 // Match implements [Matcher].
-func (m *allMatcher) Match(ctx context.Context, doc *niceyaml.Document) (bool, error) {
+func (m *allMatcher) Match(ctx context.Context, doc *niceyaml.Node) (bool, error) {
 	for _, matcher := range m.matchers {
 		ok, err := matcher.Match(ctx, doc)
 		if err != nil || !ok {

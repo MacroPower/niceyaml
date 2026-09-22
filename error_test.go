@@ -3919,7 +3919,7 @@ func TestSourceError_Document(t *testing.T) {
 
 	tcs := map[string]struct {
 		err  error
-		want *niceyaml.Document
+		want *niceyaml.Node
 	}{
 		"bound by a document": {
 			err:  docs[1].Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("b")))),

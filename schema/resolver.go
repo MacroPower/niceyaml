@@ -24,7 +24,7 @@ var ErrNoMatch = errors.New("no matching schema")
 // so one goes into [WithResolvers] or [When] as it is, and a resolver that
 // picks a schema from the document returns one:
 //
-//	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
+//	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
 //	    node, err := doc.At(kindPath)
 //	    if err != nil {
 //	        return schema.Ref{}, schema.ErrNoMatch
@@ -107,7 +107,7 @@ func (r Ref) Schema() *Schema {
 
 // Resolve implements [Resolver]. It names the Ref's schema for every
 // document and never reports [ErrNoMatch].
-func (r Ref) Resolve(_ context.Context, _ *niceyaml.Document) (Ref, error) {
+func (r Ref) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 	return r, nil
 }
 
@@ -130,13 +130,13 @@ func (r Ref) Resolve(_ context.Context, _ *niceyaml.Document) (Ref, error) {
 // [go.jacobcolvin.com/niceyaml/schema/schemastore.Store] for
 // implementations.
 type Resolver interface {
-	Resolve(ctx context.Context, doc *niceyaml.Document) (Ref, error)
+	Resolve(ctx context.Context, doc *niceyaml.Node) (Ref, error)
 }
 
 // ResolverFunc adapts a function to the [Resolver] interface.
 //
 //	kindPath := paths.Root().Child("kind")
-//	r := schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
+//	r := schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
 //	    node, err := doc.At(kindPath)
 //	    if err != nil {
 //	        return schema.Ref{}, schema.ErrNoMatch
@@ -149,9 +149,9 @@ type Resolver interface {
 //
 //	    return schema.File("schemas/" + strings.ToLower(kind) + ".json"), nil
 //	})
-type ResolverFunc func(ctx context.Context, doc *niceyaml.Document) (Ref, error)
+type ResolverFunc func(ctx context.Context, doc *niceyaml.Node) (Ref, error)
 
 // Resolve implements [Resolver].
-func (f ResolverFunc) Resolve(ctx context.Context, doc *niceyaml.Document) (Ref, error) {
+func (f ResolverFunc) Resolve(ctx context.Context, doc *niceyaml.Node) (Ref, error) {
 	return f(ctx, doc)
 }

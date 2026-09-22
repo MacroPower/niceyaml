@@ -21,13 +21,13 @@ type Matcher interface {
 	// is for a matcher that cannot decide, such as one whose context ended
 	// or whose path an alias in the document leaves unresolved; a document
 	// that reads as a plain no is false with no error.
-	Match(ctx context.Context, doc *niceyaml.Document) (bool, error)
+	Match(ctx context.Context, doc *niceyaml.Node) (bool, error)
 }
 
 // Func adapts a function to the [Matcher] interface.
 //
 //	kindPath := paths.Root().Child("kind")
-//	m := matcher.Func(func(ctx context.Context, doc *niceyaml.Document) (bool, error) {
+//	m := matcher.Func(func(ctx context.Context, doc *niceyaml.Node) (bool, error) {
 //	    node, err := doc.At(kindPath)
 //	    if errors.Is(err, paths.ErrNotFound) {
 //	        return false, nil
@@ -44,10 +44,10 @@ type Matcher interface {
 //
 //	    return strings.HasPrefix(kind, "Custom"), nil
 //	})
-type Func func(ctx context.Context, doc *niceyaml.Document) (bool, error)
+type Func func(ctx context.Context, doc *niceyaml.Node) (bool, error)
 
 // Match implements [Matcher].
-func (f Func) Match(ctx context.Context, doc *niceyaml.Document) (bool, error) {
+func (f Func) Match(ctx context.Context, doc *niceyaml.Node) (bool, error) {
 	return f(ctx, doc)
 }
 

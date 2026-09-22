@@ -22,7 +22,7 @@ import (
 // resolveAndLoad resolves doc through res and loads the schema it names,
 // returning the ref's Key alongside the loaded bytes. Both steps must
 // succeed.
-func resolveAndLoad(t *testing.T, res schema.Resolver, doc *niceyaml.Document) (string, []byte) {
+func resolveAndLoad(t *testing.T, res schema.Resolver, doc *niceyaml.Node) (string, []byte) {
 	t.Helper()
 
 	ref, err := res.Resolve(t.Context(), doc)
@@ -68,7 +68,7 @@ func TestDirective(t *testing.T) {
 			schema.WithResolvers(schema.Directive()),
 		)
 
-		err = reg.Validate(t.Context(), firstDocumentFromFile(t, yamlPath).Node)
+		err = reg.Validate(t.Context(), firstDocumentFromFile(t, yamlPath))
 		require.NoError(t, err)
 		assert.Equal(t, int32(1), requests.Load())
 	})
@@ -80,11 +80,11 @@ func TestDirective_Resolve_Match(t *testing.T) {
 	// A resolver "matches" when it reports anything other than ErrNoMatch.
 	// Loading the named schema may still fail, which is a match.
 	tests := map[string]struct {
-		setup func(t *testing.T) *niceyaml.Document
+		setup func(t *testing.T) *niceyaml.Node
 		want  bool
 	}{
 		"returns true when document has valid schema directive": {
-			setup: func(t *testing.T) *niceyaml.Document {
+			setup: func(t *testing.T) *niceyaml.Node {
 				t.Helper()
 
 				tmpDir := t.TempDir()
@@ -98,7 +98,7 @@ func TestDirective_Resolve_Match(t *testing.T) {
 			want: true,
 		},
 		"returns false when document has no directive": {
-			setup: func(t *testing.T) *niceyaml.Document {
+			setup: func(t *testing.T) *niceyaml.Node {
 				t.Helper()
 
 				tmpDir := t.TempDir()
@@ -112,7 +112,7 @@ func TestDirective_Resolve_Match(t *testing.T) {
 			want: false,
 		},
 		"returns false when directive appears after content": {
-			setup: func(t *testing.T) *niceyaml.Document {
+			setup: func(t *testing.T) *niceyaml.Node {
 				t.Helper()
 
 				tmpDir := t.TempDir()
@@ -126,7 +126,7 @@ func TestDirective_Resolve_Match(t *testing.T) {
 			want: false,
 		},
 		"returns true when directive follows document header": {
-			setup: func(t *testing.T) *niceyaml.Document {
+			setup: func(t *testing.T) *niceyaml.Node {
 				t.Helper()
 
 				tmpDir := t.TempDir()
@@ -372,7 +372,7 @@ func TestDirective_EmbeddedNameMatchesPath(t *testing.T) {
 				),
 			))
 
-			docs := map[string]*niceyaml.Document{
+			docs := map[string]*niceyaml.Node{
 				"embedded": yamltest.FirstDocument(t, "kind: Embedded\nname: 1\n"),
 				"directive": yamltest.FirstDocumentWithPath(t,
 					"# yaml-language-server: $schema=schemas/name.json\nname: text\n",
@@ -381,7 +381,7 @@ func TestDirective_EmbeddedNameMatchesPath(t *testing.T) {
 			}
 
 			for _, key := range tt.order {
-				err := reg.Validate(t.Context(), docs[key].Node)
+				err := reg.Validate(t.Context(), docs[key])
 				require.NoError(t, err, "%s document", key)
 			}
 		})
@@ -389,7 +389,7 @@ func TestDirective_EmbeddedNameMatchesPath(t *testing.T) {
 }
 
 // firstDocumentFromFile creates a Document from a YAML file path.
-func firstDocumentFromFile(t *testing.T, path string) *niceyaml.Document {
+func firstDocumentFromFile(t *testing.T, path string) *niceyaml.Node {
 	t.Helper()
 
 	source, err := niceyaml.NewSourceFromFile(path)
@@ -487,7 +487,7 @@ func TestDirective_LeadingCommentDocument(t *testing.T) {
 			))
 
 			for i, doc := range docs {
-				err := reg.Validate(t.Context(), doc.Node)
+				err := reg.Validate(t.Context(), doc)
 
 				switch tc.want[i] {
 				case valid:

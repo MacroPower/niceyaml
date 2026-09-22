@@ -228,9 +228,10 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 // document, and a resolver sees it as it sees any other.
 //
 // The resolvers pick a schema for a whole document, from its file path,
-// its preamble, or its content, which is why Lookup takes a Document
-// rather than a [niceyaml.Node]. Validate one node against a schema of
-// its own with a [Schema].
+// its preamble, or its content, so n must be the root [niceyaml.Node] of
+// a document, and a Node from [niceyaml.Node.At] fails with
+// [ErrScopedDocument]. Validate one node against a schema of its own
+// with a [Schema].
 //
 // Every error comes back bound to the document through
 // [niceyaml.Node.Bind], so its message names the file the document
@@ -239,18 +240,22 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 // For most use cases, prefer [Registry.Validate] which combines lookup
 // and validation. Use Lookup when you need the validator for custom
 // processing.
-func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.Document) (*Schema, error) {
-	v, err := r.lookup(ctx, doc)
+func (r *Registry) Lookup(ctx context.Context, n *niceyaml.Node) (*Schema, error) {
+	v, err := r.lookup(ctx, n)
 	if err != nil {
 		//nolint:wrapcheck // Binding names the document; the error keeps its own context.
-		return nil, doc.Bind(err)
+		return nil, n.Bind(err)
 	}
 
 	return v, nil
 }
 
 // lookup is [Registry.Lookup] before binding the error to the document.
-func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Document) (*Schema, error) {
+func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Node) (*Schema, error) {
+	if !doc.Path().IsRoot() {
+		return nil, fmt.Errorf("%w: node is scoped to %s", ErrScopedDocument, doc.Path())
+	}
+
 	var reasons []error
 
 	for _, res := range r.resolvers {
@@ -332,10 +337,11 @@ func (e reasonError) Unwrap() error {
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
 //
 // The resolvers pick a schema for a whole document, so n must be the root
-// [niceyaml.Node] of a [niceyaml.Document], which is the Node field of
-// the Document, and a Node from [niceyaml.Node.At] fails with
-// [ErrScopedDocument] rather than a schema for the file applied to the
-// node. Validate one node against a schema of its own with a [Schema].
+// [niceyaml.Node] of a document, the one [niceyaml.Source.Documents]
+// returns or [niceyaml.Node.Document] reaches, and a Node from
+// [niceyaml.Node.At] fails with [ErrScopedDocument] rather than a schema
+// for the file applied to the node. Validate one node against a schema of
+// its own with a [Schema].
 //
 // Returns [ErrNoMatch] if no resolver applies to the document, unless
 // [WithRequireSchema] set false, in which case such a document passes.
@@ -351,12 +357,7 @@ func (e reasonError) Unwrap() error {
 // Returns resolution, loading, or compilation errors if schema preparation
 // fails.
 func (r *Registry) Validate(ctx context.Context, n *niceyaml.Node) error {
-	if !n.Path().IsRoot() {
-		//nolint:wrapcheck // Binding names the document; the error keeps its own context.
-		return n.Bind(fmt.Errorf("%w: node is scoped to %s", ErrScopedDocument, n.Path()))
-	}
-
-	v, err := r.Lookup(ctx, n.Document())
+	v, err := r.Lookup(ctx, n)
 	if err != nil {
 		if !r.requireSchema && errors.Is(err, ErrNoMatch) {
 			return nil

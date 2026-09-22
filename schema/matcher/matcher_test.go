@@ -27,7 +27,7 @@ var (
 )
 
 // match runs m on doc and fails the test when the matcher cannot decide.
-func match(t *testing.T, m matcher.Matcher, doc *niceyaml.Document) bool {
+func match(t *testing.T, m matcher.Matcher, doc *niceyaml.Node) bool {
 	t.Helper()
 
 	got, err := m.Match(t.Context(), doc)
@@ -43,7 +43,7 @@ func TestFunc(t *testing.T) {
 		t.Parallel()
 
 		called := false
-		m := matcher.Func(func(_ context.Context, _ *niceyaml.Document) (bool, error) {
+		m := matcher.Func(func(_ context.Context, _ *niceyaml.Node) (bool, error) {
 			called = true
 
 			return true, nil
@@ -60,7 +60,7 @@ func TestFunc(t *testing.T) {
 		t.Parallel()
 
 		undecided := errors.New("undecided")
-		m := matcher.Func(func(_ context.Context, _ *niceyaml.Document) (bool, error) {
+		m := matcher.Func(func(_ context.Context, _ *niceyaml.Node) (bool, error) {
 			return false, undecided
 		})
 

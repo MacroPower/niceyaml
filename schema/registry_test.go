@@ -37,7 +37,7 @@ var kindPath = paths.Root().Child("kind")
 func countingLoader(key string, data []byte) (schema.Resolver, *atomic.Int32) {
 	var loads atomic.Int32
 
-	r := schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
+	r := schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Node) (schema.Ref, error) {
 		return schema.Loadable(key, func(_ context.Context) ([]byte, error) {
 			loads.Add(1)
 
@@ -130,9 +130,8 @@ func TestRegistry_Validate_ScopedNode(t *testing.T) {
 	t.Parallel()
 
 	// The resolvers read the file path, the preamble, and the content of a
-	// whole document, so Lookup takes a Document, and Validate, which
-	// takes any Node to be a Validator, refuses a scope rather than apply
-	// the file's schema to a single node of that document.
+	// whole document, so Lookup and Validate refuse a scoped Node rather
+	// than apply the file's schema to a single node of that document.
 	schemaData := []byte(`{"type": "object", "properties": {"kind": {"type": "string"}}}`)
 	reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded(schemaData)))
 
@@ -164,8 +163,15 @@ func TestRegistry_Validate_ScopedNode(t *testing.T) {
 	err = lax.Validate(t.Context(), spec)
 	require.ErrorIs(t, err, schema.ErrScopedDocument)
 
-	// The whole document resolves as before.
+	_, err = reg.Lookup(t.Context(), spec)
+	require.ErrorIs(t, err, schema.ErrScopedDocument)
+
+	// The whole document resolves as before, whichever Node of it reaches
+	// the root.
 	_, err = reg.Lookup(t.Context(), doc)
+	require.NoError(t, err)
+
+	_, err = reg.Lookup(t.Context(), spec.Document())
 	require.NoError(t, err)
 }
 
@@ -198,7 +204,7 @@ func TestRegistry_Lookup_CancelledContext(t *testing.T) {
 		defer cancel()
 
 		reg := schema.NewRegistry(
-			schema.WithResolvers(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
+			schema.WithResolvers(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Node) (schema.Ref, error) {
 				cancel()
 
 				return schema.Ref{}, schema.ErrNoMatch
@@ -215,7 +221,7 @@ func TestRegistry_Lookup_CancelledContext(t *testing.T) {
 
 		// A registry that does not require a schema passes an unmatched
 		// document, but never a canceled lookup.
-		require.ErrorIs(t, reg.Validate(ctx, doc.Node), context.Canceled)
+		require.ErrorIs(t, reg.Validate(ctx, doc), context.Canceled)
 	})
 }
 
@@ -232,7 +238,7 @@ func TestRegistry_Validate(t *testing.T) {
 		)))
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
-		err := reg.Validate(t.Context(), doc.Node)
+		err := reg.Validate(t.Context(), doc)
 		require.NoError(t, err)
 	})
 
@@ -246,7 +252,7 @@ func TestRegistry_Validate(t *testing.T) {
 		)))
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
-		err := reg.Validate(t.Context(), doc.Node)
+		err := reg.Validate(t.Context(), doc)
 		require.Error(t, err)
 
 		var validationErr *niceyaml.Error
@@ -269,7 +275,7 @@ func TestRegistry_Validate(t *testing.T) {
 
 		// Service doesn't match, returns ErrNoMatch.
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
-		err := reg.Validate(t.Context(), doc.Node)
+		err := reg.Validate(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 	})
 }
@@ -293,21 +299,21 @@ func TestRegistry_WithRequireSchema(t *testing.T) {
 		t.Parallel()
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
-		require.NoError(t, newRegistry().Validate(t.Context(), doc.Node))
+		require.NoError(t, newRegistry().Validate(t.Context(), doc))
 	})
 
 	t.Run("accepts a document without content", func(t *testing.T) {
 		t.Parallel()
 
 		doc := yamltest.FirstDocument(t, "# only a comment\n")
-		require.NoError(t, newRegistry().Validate(t.Context(), doc.Node))
+		require.NoError(t, newRegistry().Validate(t.Context(), doc))
 	})
 
 	t.Run("still validates a document a resolver applies to", func(t *testing.T) {
 		t.Parallel()
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
-		err := newRegistry().Validate(t.Context(), doc.Node)
+		err := newRegistry().Validate(t.Context(), doc)
 		require.Error(t, err)
 		require.NotErrorIs(t, err, schema.ErrNoMatch)
 	})
@@ -318,14 +324,14 @@ func TestRegistry_WithRequireSchema(t *testing.T) {
 		cannotDecide := errors.New("cannot decide")
 
 		reg := schema.NewRegistry(
-			schema.WithResolvers(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
+			schema.WithResolvers(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Node) (schema.Ref, error) {
 				return schema.Ref{}, cannotDecide
 			})),
 			schema.WithRequireSchema(false),
 		)
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
-		err := reg.Validate(t.Context(), doc.Node)
+		err := reg.Validate(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrResolve)
 		require.ErrorIs(t, err, cannotDecide)
 	})
@@ -384,7 +390,7 @@ func TestRegistry_Caching(t *testing.T) {
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
 
 		for range 5 {
-			err := reg.Validate(t.Context(), doc.Node)
+			err := reg.Validate(t.Context(), doc)
 			require.NoError(t, err)
 		}
 
@@ -406,7 +412,7 @@ func TestRegistry_Caching(t *testing.T) {
 
 		host := strings.TrimPrefix(server.URL, "http://")
 
-		resolve := schema.ResolverFunc(func(_ context.Context, doc *niceyaml.Document) (schema.Ref, error) {
+		resolve := schema.ResolverFunc(func(_ context.Context, doc *niceyaml.Node) (schema.Ref, error) {
 			// Each document names the same schema with a different scheme
 			// case, as two directives in two files might.
 			scheme := "http"
@@ -430,7 +436,7 @@ func TestRegistry_Caching(t *testing.T) {
 		require.Len(t, docs, 2)
 
 		for _, doc := range docs {
-			require.NoError(t, reg.Validate(t.Context(), doc.Node))
+			require.NoError(t, reg.Validate(t.Context(), doc))
 		}
 
 		assert.Equal(t, int32(1), fetches.Load(), "one schema should be fetched once")
@@ -449,7 +455,7 @@ func TestRegistry_Caching(t *testing.T) {
 
 		for _, input := range []string{`kind: Deployment`, `kind: Service`, `kind: Deployment`, `kind: Service`} {
 			doc := yamltest.FirstDocument(t, stringtest.Input(input))
-			err := reg.Validate(t.Context(), doc.Node)
+			err := reg.Validate(t.Context(), doc)
 			require.NoError(t, err)
 		}
 
@@ -461,7 +467,7 @@ func TestRegistry_Caching(t *testing.T) {
 		t.Parallel()
 
 		reg := schema.NewRegistry(schema.WithResolvers(
-			schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
+			schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Node) (schema.Ref, error) {
 				return schema.Ref{}, nil
 			}),
 		))
@@ -478,7 +484,7 @@ func TestRegistry_Caching(t *testing.T) {
 		// A resolver that hands back what FileOrURL returns for a reference
 		// that names nothing reports that error.
 		reg := schema.NewRegistry(schema.WithResolvers(
-			schema.ResolverFunc(func(_ context.Context, doc *niceyaml.Document) (schema.Ref, error) {
+			schema.ResolverFunc(func(_ context.Context, doc *niceyaml.Node) (schema.Ref, error) {
 				return schema.FileOrURL(doc.FilePath(), "")
 			}),
 		))
@@ -495,7 +501,7 @@ func TestRegistry_Caching(t *testing.T) {
 		var loads atomic.Int32
 
 		reg := schema.NewRegistry(
-			schema.WithResolvers(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
+			schema.WithResolvers(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Node) (schema.Ref, error) {
 				return schema.Loadable("flaky.json", func(_ context.Context) ([]byte, error) {
 					if loads.Add(1) == 1 {
 						return nil, errors.New("transient")
@@ -528,7 +534,7 @@ func TestRegistry_Caching(t *testing.T) {
 
 		// Pre-create documents outside goroutines, since only the test
 		// goroutine may run the helper's require calls.
-		docs := make([]*niceyaml.Document, 100)
+		docs := make([]*niceyaml.Node, 100)
 		for i := range docs {
 			docs[i] = yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
 		}
@@ -562,7 +568,7 @@ func TestRegistry_ConcurrentLoad(t *testing.T) {
 	var loads atomic.Int32
 
 	reg := schema.NewRegistry(
-		schema.WithResolvers(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
+		schema.WithResolvers(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Node) (schema.Ref, error) {
 			return schema.Loadable("test.json", func(_ context.Context) ([]byte, error) {
 				loads.Add(1)
 				<-release // Hold the load open until every goroutine has looked up.
@@ -573,7 +579,7 @@ func TestRegistry_ConcurrentLoad(t *testing.T) {
 	)
 
 	// Pre-create documents outside goroutines.
-	docs := make([]*niceyaml.Document, goroutines)
+	docs := make([]*niceyaml.Node, goroutines)
 	for i := range docs {
 		docs[i] = yamltest.FirstDocument(t, stringtest.Input(`key: value`))
 	}
@@ -632,7 +638,7 @@ func TestRegistry_SharedLoad(t *testing.T) {
 
 			reg := schema.NewRegistry(
 				schema.WithResolvers(
-					schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
+					schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Node) (schema.Ref, error) {
 						return schema.Loadable("slow.json", func(_ context.Context) ([]byte, error) {
 							loads.Add(1)
 							<-release
@@ -676,7 +682,7 @@ func TestRegistry_SharedLoad(t *testing.T) {
 
 			reg := schema.NewRegistry(
 				schema.WithResolvers(
-					schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
+					schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Node) (schema.Ref, error) {
 						return schema.Loadable("slow.json", func(_ context.Context) ([]byte, error) {
 							<-release
 
@@ -739,7 +745,7 @@ func TestRegistry_SharedLoad(t *testing.T) {
 
 			reg := schema.NewRegistry(
 				schema.WithResolvers(
-					schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
+					schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Node) (schema.Ref, error) {
 						return schema.Loadable("slow.json", func(ctx context.Context) ([]byte, error) {
 							if loads.Add(1) == 1 {
 								// The first load runs under the starting caller's context
@@ -805,7 +811,7 @@ func TestRegistry_DynamicResolver(t *testing.T) {
 
 		reg := schema.NewRegistry(
 			schema.WithResolvers(
-				schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
+				schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
 					node, err := doc.At(kindPath)
 					if err != nil {
 						return schema.Ref{}, schema.ErrNoMatch
@@ -823,17 +829,17 @@ func TestRegistry_DynamicResolver(t *testing.T) {
 
 		// Deployment should validate.
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
-		err := reg.Validate(t.Context(), doc.Node)
+		err := reg.Validate(t.Context(), doc)
 		require.NoError(t, err)
 
 		// Service should validate.
 		doc = yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
-		err = reg.Validate(t.Context(), doc.Node)
+		err = reg.Validate(t.Context(), doc)
 		require.NoError(t, err)
 
 		// ConfigMap has no schema.
 		doc = yamltest.FirstDocument(t, stringtest.Input(`kind: ConfigMap`))
-		err = reg.Validate(t.Context(), doc.Node)
+		err = reg.Validate(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 	})
 
@@ -859,7 +865,7 @@ func TestRegistry_DynamicResolver(t *testing.T) {
 		require.NoError(t, err)
 
 		for _, doc := range docs {
-			err = reg.Validate(t.Context(), doc.Node)
+			err = reg.Validate(t.Context(), doc)
 			require.NoError(t, err)
 		}
 	})
@@ -901,7 +907,7 @@ func TestRegistry_CompileOptionsNotAliased(t *testing.T) {
 	opts[0] = schema.WithJSONSchemaOptions(jsonschema.WithFormats(false))
 
 	doc := yamltest.FirstDocument(t, stringtest.Input(`not-an-ip`))
-	err := reg.Validate(t.Context(), doc.Node)
+	err := reg.Validate(t.Context(), doc)
 	require.Error(t, err)
 	require.NotErrorIs(t, err, schema.ErrNoMatch)
 }
@@ -918,7 +924,7 @@ func TestRegistry_CompileOptionsAppend(t *testing.T) {
 	)
 
 	doc := yamltest.FirstDocument(t, stringtest.Input(`not-an-ip`))
-	err := reg.Validate(t.Context(), doc.Node)
+	err := reg.Validate(t.Context(), doc)
 	require.Error(t, err)
 	require.NotErrorIs(t, err, schema.ErrNoMatch)
 }
@@ -930,13 +936,13 @@ func TestRegistry_ErrorCases(t *testing.T) {
 		t.Parallel()
 
 		reg := schema.NewRegistry(
-			schema.WithResolvers(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
+			schema.WithResolvers(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Node) (schema.Ref, error) {
 				return schema.Ref{}, errors.New("cannot decide")
 			})),
 		)
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
-		err := reg.Validate(t.Context(), doc.Node)
+		err := reg.Validate(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrResolve)
 		assert.Contains(t, err.Error(), "cannot decide")
 	})
@@ -945,7 +951,7 @@ func TestRegistry_ErrorCases(t *testing.T) {
 		t.Parallel()
 
 		reg := schema.NewRegistry(
-			schema.WithResolvers(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
+			schema.WithResolvers(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Node) (schema.Ref, error) {
 				return schema.Loadable("broken.json", func(_ context.Context) ([]byte, error) {
 					return nil, errors.New("disk on fire")
 				}), nil
@@ -953,7 +959,7 @@ func TestRegistry_ErrorCases(t *testing.T) {
 		)
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
-		err := reg.Validate(t.Context(), doc.Node)
+		err := reg.Validate(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrLoad)
 		assert.Contains(t, err.Error(), "disk on fire")
 		assert.Contains(t, err.Error(), "broken.json")
@@ -1003,7 +1009,7 @@ func TestRegistry_MultipleDocuments(t *testing.T) {
 		kind, err := yamltest.At(t, doc, kindPath).Decode[string](t.Context())
 		require.NoError(t, err)
 
-		err = reg.Validate(t.Context(), doc.Node)
+		err = reg.Validate(t.Context(), doc)
 
 		if kind == "Deployment" || kind == "Service" {
 			require.NoError(t, err, "expected %s to validate", kind)
@@ -1091,7 +1097,7 @@ func TestRegistry_Lookup_MatcherError(t *testing.T) {
 	reg := schema.NewRegistry(
 		schema.WithResolvers(
 			schema.When(matcher.Content(kindPath, "Deployment"), schema.Embedded([]byte(`{"type":"object"}`))),
-			schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
+			schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Node) (schema.Ref, error) {
 				fallbackCalled = true
 
 				return schema.Embedded([]byte(`{}`)), nil
@@ -1110,7 +1116,7 @@ func TestRegistry_Lookup_MatcherError(t *testing.T) {
 
 	// A registry that does not require a schema passes an unmatched
 	// document, but never one its matcher could not decide on.
-	require.ErrorIs(t, reg.Validate(t.Context(), doc.Node), paths.ErrAlias)
+	require.ErrorIs(t, reg.Validate(t.Context(), doc), paths.ErrAlias)
 }
 
 func TestRegistry_CompiledSchema(t *testing.T) {
@@ -1132,10 +1138,10 @@ func TestRegistry_CompiledSchema(t *testing.T) {
 		got, err := reg.Lookup(t.Context(), doc)
 		require.NoError(t, err)
 		assert.Same(t, service, got)
-		require.NoError(t, reg.Validate(t.Context(), doc.Node))
+		require.NoError(t, reg.Validate(t.Context(), doc))
 
 		bad := yamltest.FirstDocument(t, "kind: Deployment\nport: 80\n")
-		err = reg.Validate(t.Context(), bad.Node)
+		err = reg.Validate(t.Context(), bad)
 		require.Error(t, err)
 		require.NotErrorIs(t, err, schema.ErrNoMatch)
 		assert.Contains(t, err.Error(), "replicas")
@@ -1170,7 +1176,7 @@ func TestRegistry_CompiledSchema(t *testing.T) {
 		t.Parallel()
 
 		reg := schema.NewRegistry(schema.WithResolvers(
-			schema.ResolverFunc(func(_ context.Context, doc *niceyaml.Document) (schema.Ref, error) {
+			schema.ResolverFunc(func(_ context.Context, doc *niceyaml.Node) (schema.Ref, error) {
 				if strings.HasSuffix(doc.FilePath(), ".svc.yaml") {
 					return service.Ref(), nil
 				}
@@ -1198,7 +1204,7 @@ func TestRegistry_CompiledSchema(t *testing.T) {
 			schema.WithResolvers(lax),
 		)
 
-		require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, "not-an-ip").Node))
+		require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, "not-an-ip")))
 	})
 }
 
@@ -1227,9 +1233,9 @@ func TestRegistry_WithFS(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, schemaData, data)
 
-		require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, "kind: Pod\n").Node))
+		require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, "kind: Pod\n")))
 
-		err = reg.Validate(t.Context(), yamltest.FirstDocument(t, "name: x\n").Node)
+		err = reg.Validate(t.Context(), yamltest.FirstDocument(t, "name: x\n"))
 		require.Error(t, err)
 		require.NotErrorIs(t, err, schema.ErrNoMatch)
 	})
@@ -1248,12 +1254,12 @@ func TestRegistry_WithFS(t *testing.T) {
 			schema.WithResolvers(schema.Directive()),
 		)
 
-		require.NoError(t, reg.Validate(t.Context(), doc.Node))
+		require.NoError(t, reg.Validate(t.Context(), doc))
 
 		// The same registry without the file system looks for the file on
 		// disk, where it does not exist.
 		disk := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
-		err = disk.Validate(t.Context(), doc.Node)
+		err = disk.Validate(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrLoad)
 		require.ErrorIs(t, err, os.ErrNotExist)
 	})
@@ -1457,7 +1463,7 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 
 	errNoKind := fmt.Errorf("%w: no kind", schema.ErrNoMatch)
 
-	byKind := schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
+	byKind := schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Node) (schema.Ref, error) {
 		return schema.Ref{}, errNoKind
 	})
 
@@ -1522,11 +1528,11 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 
 		doc := yamltest.FirstDocument(t, "kind: Service\n")
 
-		err := reg.Validate(t.Context(), doc.Node)
+		err := reg.Validate(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 		require.ErrorIs(t, err, schema.ErrNoDirective)
 
 		lenient := schema.NewRegistry(schema.WithResolvers(schema.Directive()), schema.WithRequireSchema(false))
-		require.NoError(t, lenient.Validate(t.Context(), doc.Node))
+		require.NoError(t, lenient.Validate(t.Context(), doc))
 	})
 }

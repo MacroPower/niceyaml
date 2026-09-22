@@ -117,7 +117,7 @@ func FromJSONSchema(v *jsonschema.Validator) *Schema {
 // as [*niceyaml.Error] values that carry the YAML path to each failing
 // location for [go.jacobcolvin.com/niceyaml/printer.Printer] to display.
 // [Schema.Validate] checks a node, which is the whole document for the
-// root [niceyaml.Node] of a [niceyaml.Document] and one value inside it
+// root [niceyaml.Node] of a document and one value inside it
 // for a Node from [niceyaml.Node.At], and [Schema.ValidateValue] checks
 // decoded data, such as one value taken from a document with a scoped
 // [niceyaml.Node.Decode] into any.
@@ -145,7 +145,7 @@ type Schema struct {
 // [Ref.Schema] returns and a [Registry] validates with as it is. A
 // resolver that picks among compiled schemas returns one:
 //
-//	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
+//	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
 //	    if strings.HasSuffix(doc.FilePath(), ".pod.yaml") {
 //	        return Pod.Ref(), nil
 //	    }
@@ -162,7 +162,7 @@ func (s *Schema) Ref() Ref {
 
 // Resolve implements [Resolver]. It names the schema for every document
 // and never reports [ErrNoMatch].
-func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Document) (Ref, error) {
+func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 	return s.Ref(), nil
 }
 

@@ -45,7 +45,7 @@
 //	}
 //
 // To validate and decode in one step, pass the schema to
-// [go.jacobcolvin.com/niceyaml.Document.Decode] with
+// [go.jacobcolvin.com/niceyaml.Node.Decode] with
 // [go.jacobcolvin.com/niceyaml.WithValidator]. A schema compiled by
 // [go.jacobcolvin.com/x/jsonschema] itself, such as one built from a Go
 // type, goes through [FromJSONSchema].
@@ -133,7 +133,7 @@
 // same cache. A resolver that picks the schema from the document returns
 // the same Refs:
 //
-//	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
+//	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
 //	    node, err := doc.At(kindPath)
 //	    if err != nil {
 //	        return schema.Ref{}, schema.ErrNoMatch

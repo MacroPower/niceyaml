@@ -68,7 +68,7 @@ func TestWhen(t *testing.T) {
 		inner := errors.New("inner")
 		r := schema.When(
 			matcher.Content(kindPath, "Deployment"),
-			schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
+			schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Node) (schema.Ref, error) {
 				return schema.Ref{}, inner
 			}),
 		)
@@ -84,10 +84,10 @@ func TestWhen(t *testing.T) {
 		undecided := errors.New("undecided")
 		called := false
 		r := schema.When(
-			matcher.Func(func(_ context.Context, _ *niceyaml.Document) (bool, error) {
+			matcher.Func(func(_ context.Context, _ *niceyaml.Node) (bool, error) {
 				return false, undecided
 			}),
-			schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
+			schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Node) (schema.Ref, error) {
 				called = true
 
 				return schema.Ref{}, nil
@@ -107,7 +107,7 @@ func TestWhen(t *testing.T) {
 		called := false
 		r := schema.When(
 			matcher.Content(kindPath, "Deployment"),
-			schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Document) (schema.Ref, error) {
+			schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Node) (schema.Ref, error) {
 				called = true
 
 				return schema.Ref{}, nil

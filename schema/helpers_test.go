@@ -13,7 +13,7 @@ import (
 )
 
 // document returns a document for resolvers that never read it.
-func document(t *testing.T) *niceyaml.Document {
+func document(t *testing.T) *niceyaml.Node {
 	t.Helper()
 
 	return yamltest.FirstDocument(t, "key: value\n")

@@ -9,28 +9,22 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-// FirstDocument creates a [*niceyaml.Document] from YAML input for
-// testing. It returns the first document in the input.
+// FirstDocument creates the root [*niceyaml.Node] of the first document
+// of a YAML input for testing.
 //
 // If the input contains no documents, the test fails.
-func FirstDocument(t *testing.T, input string) *niceyaml.Document {
+func FirstDocument(t *testing.T, input string) *niceyaml.Node {
 	t.Helper()
 
 	return FirstDocumentWithPath(t, input, "")
 }
 
-// Scope is a [*niceyaml.Node] or a [*niceyaml.Document], whose root Node
-// resolves paths, for [At] to scope.
-type Scope interface {
-	At(path paths.Path) (*niceyaml.Node, error)
-}
-
-// At scopes s to the node that path selects, through [niceyaml.Node.At].
+// At scopes n to the node that path selects, through [niceyaml.Node.At].
 // The test fails when the path selects nothing.
-func At(t *testing.T, s Scope, path paths.Path) *niceyaml.Node {
+func At(t *testing.T, n *niceyaml.Node, path paths.Path) *niceyaml.Node {
 	t.Helper()
 
-	scoped, err := s.At(path)
+	scoped, err := n.At(path)
 	require.NoError(t, err)
 
 	return scoped
@@ -48,11 +42,11 @@ func Bind(t *testing.T, source *niceyaml.Source, err error) error {
 	return doc.Bind(err)
 }
 
-// FirstDocumentWithPath creates a [*niceyaml.Document] with file path
-// context for testing. It returns the first document in the input.
+// FirstDocumentWithPath creates the root [*niceyaml.Node] of the first
+// document of a YAML input, with file path context, for testing.
 //
 // If the input contains no documents, the test fails.
-func FirstDocumentWithPath(t *testing.T, input, filePath string) *niceyaml.Document {
+func FirstDocumentWithPath(t *testing.T, input, filePath string) *niceyaml.Node {
 	t.Helper()
 
 	var opts []niceyaml.SourceOption

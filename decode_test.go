@@ -2313,7 +2313,7 @@ func TestDocument_ErrorsBindToSource(t *testing.T) {
 
 	namePath := paths.Root().Child("name")
 
-	newDoc := func(t *testing.T, input string) (*niceyaml.Source, *niceyaml.Document) {
+	newDoc := func(t *testing.T, input string) (*niceyaml.Source, *niceyaml.Node) {
 		t.Helper()
 
 		source := niceyaml.NewSourceFromString(input)
@@ -2399,7 +2399,7 @@ func TestDocument_ErrorsBindToSource(t *testing.T) {
 			t.Parallel()
 
 			source, doc := newDoc(t, tc.input)
-			requireBound(t, source, tc.call(t, doc.Node))
+			requireBound(t, source, tc.call(t, doc))
 		})
 	}
 
@@ -2503,7 +2503,7 @@ func TestDocument_Decode_Validator(t *testing.T) {
 
 		result, err := dd.Decode[plainConfig](t.Context(), niceyaml.WithValidator(capture))
 		require.NoError(t, err)
-		assert.Same(t, dd.Node, got)
+		assert.Same(t, dd, got)
 		assert.Same(t, dd, got.Document())
 		assert.Equal(t, "test", result.Name)
 		assert.Equal(t, 42, result.Value)

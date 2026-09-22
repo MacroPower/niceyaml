@@ -21,13 +21,13 @@ import (
 // Source is a YAML file, one stream of text that holds one or more YAML
 // documents. It holds the tokens lexed from the text, the [*ast.File]
 // they parse into, and the settings for parsing, decoding, and reporting
-// errors. [Source.Documents] returns each document in the file as a
-// [*Document], and [Source.Document] returns the one document of a file
-// that holds one, which is where decoding and validation live.
+// errors. [Source.Documents] returns the root [*Node] of each document in
+// the file, and [Source.Document] returns the root of the one document of
+// a file that holds one, which is where decoding and validation live.
 //
 // Source separates two concerns. Parsing lives on Source itself, where [Source.File]
 // lazily parses the AST and [Source.Documents] builds the documents. Every error they
-// and their Documents produce comes back bound to the Source as a [SourceError].
+// and their Nodes produce comes back bound to the Source as a [SourceError].
 // [Node.Bind] binds errors built elsewhere to the document they were checked
 // against, and [Source.Bind] binds one to the document its location falls in. Rendering
 // lives in a [line.View], which carries the overlays, annotations, and flags that a
@@ -63,7 +63,7 @@ type Source struct {
 	lines      line.Lines
 	file       *ast.File
 	fileErr    error
-	docs       []*Document
+	docs       []*Node
 	parserOpts []parser.Option
 	decodeOpts []yaml.DecodeOption
 	// The DecodeOption values every decode of the Source starts from.
@@ -100,7 +100,7 @@ func WithName(name string) SourceOption {
 }
 
 // WithFilePath is a [SourceOption] that sets the file path for the [Source].
-// Each [Document] of the Source reports it from [Document.FilePath], which
+// Each document of the Source reports it from [Node.FilePath], which
 // schema matchers route on.
 //
 // For file-based sources, use [NewSourceFromFile] which sets this
@@ -113,7 +113,7 @@ func WithFilePath(path string) SourceOption {
 
 // WithAllowDuplicateKeys is a [SourceOption] that sets whether a mapping may
 // hold the same key twice, both when [Source.File] parses the document and
-// when [Document] decodes it. When allowed, the last value wins. The default
+// when a [Node] decodes it. When allowed, the last value wins. The default
 // is false, and a duplicate key is then an error.
 func WithAllowDuplicateKeys(allow bool) SourceOption {
 	return func(s *Source) {
@@ -174,7 +174,7 @@ func WithDecodeOptions(opts ...DecodeOption) SourceOption {
 
 // NewSourceFromFile creates a new [*Source] by reading a file from disk.
 //
-// It sets the file path on the [Source], so each [Document] reports it for
+// It sets the file path on the [Source], so each document reports it for
 // schema routing, and [Source.Name] returns it unless [WithName] sets a
 // name. [NewSourceFromFS] reads a file from an [fs.FS] the same way.
 //
@@ -194,7 +194,7 @@ func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
 // NewSourceFromFS creates a new [*Source] by reading the file at path
 // from fsys, such as an [embed.FS] that ships configuration with the
 // binary or an [fs.FS] a test builds. It sets the path on the [Source] as
-// [NewSourceFromFile] does, so each [Document] reports it for schema
+// [NewSourceFromFile] does, so each document reports it for schema
 // routing and a schema directive resolves relative to it in the same
 // file system, through the registry option
 // [go.jacobcolvin.com/niceyaml/schema.WithFS]:
@@ -294,24 +294,24 @@ func (s *Source) Tokens() token.Tokens {
 	return s.lines.Tokens()
 }
 
-// Documents returns the [*Document] values of this [Source], one per YAML
-// document in file order.
+// Documents returns the root [*Node] of each YAML document of this
+// [Source], in file order.
 //
 // The parser cuts the comments and %YAML or %TAG directives above a "---"
 // header, and the comments after a "..." marker, into a node of their own
 // with no header and no content. Documents folds each such node into the
 // document below it, or into the last document when no document follows,
-// and [Document.Preamble] returns the tokens it put above the content. A
+// and [Node.Preamble] returns the tokens it put above the content. A
 // document that opens with a "---" header and holds only comments is an
 // explicit empty document and stays one.
 //
-// It parses the source and builds each Document once, so every call returns
+// It parses the source and builds each Node once, so every call returns
 // the same pointers. The slice itself is a copy, so reordering it reaches
 // nothing.
 //
 // A YAML syntax error comes back bound to the Source. It is the same error
 // [Source.File] returns.
-func (s *Source) Documents() ([]*Document, error) {
+func (s *Source) Documents() ([]*Node, error) {
 	f, err := s.File()
 	if err != nil {
 		return nil, err
@@ -324,8 +324,8 @@ func (s *Source) Documents() ([]*Document, error) {
 	return slices.Clone(s.docs), nil
 }
 
-// Document returns the [*Document] of a [Source] that holds a single YAML
-// document, which is the direct path for a configuration file:
+// Document returns the root [*Node] of a [Source] that holds a single
+// YAML document, which is the direct path for a configuration file:
 //
 //	doc, err := niceyaml.NewSourceFromString(yamlContent).Document()
 //	if err != nil {
@@ -347,7 +347,7 @@ func (s *Source) Documents() ([]*Document, error) {
 // error wrapping [ErrNoDocuments], bound to the Source. A file that does
 // not parse returns the error [Source.File] returns. Use [Source.Documents]
 // for a file that may hold several.
-func (s *Source) Document() (*Document, error) {
+func (s *Source) Document() (*Node, error) {
 	doc, err := s.single()
 	if err != nil {
 		return nil, s.Bind(err)
@@ -359,7 +359,7 @@ func (s *Source) Document() (*Document, error) {
 // single returns the one document of the Source, or the reason it has
 // none, unbound: the error [Source.File] returns, [ErrNoDocuments], or
 // [ErrMultipleDocuments] at the anchor of the second document.
-func (s *Source) single() (*Document, error) {
+func (s *Source) single() (*Node, error) {
 	docs, err := s.Documents()
 	if err != nil {
 		return nil, err
@@ -375,7 +375,7 @@ func (s *Source) single() (*Document, error) {
 	default:
 		return nil, WrapError(
 			fmt.Errorf("%w: %d documents", ErrMultipleDocuments, len(docs)),
-			atToken(docs[1].anchorToken()),
+			atToken(docs[1].doc.anchorToken()),
 		)
 	}
 }
@@ -384,17 +384,17 @@ func (s *Source) single() (*Document, error) {
 // the first token of its content when it has no header, as a document after
 // a "..." marker has none, past the comments folded above it. It is nil
 // when the document has neither.
-func (dd *Document) anchorToken() *token.Token {
-	if dd.root.Start != nil {
-		return dd.root.Start
+func (d *document) anchorToken() *token.Token {
+	if d.root.Start != nil {
+		return d.root.Start
 	}
 
-	if dd.preamble < len(dd.tokens) {
-		return dd.tokens[dd.preamble]
+	if d.preamble < len(d.tokens) {
+		return d.tokens[d.preamble]
 	}
 
-	if len(dd.tokens) > 0 {
-		return dd.tokens[0]
+	if len(d.tokens) > 0 {
+		return d.tokens[0]
 	}
 
 	return nil

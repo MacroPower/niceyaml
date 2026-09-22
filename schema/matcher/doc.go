@@ -43,7 +43,7 @@
 // Implement the [Matcher] interface for reusable custom matchers, or use
 // [Func] for one-off matching logic that doesn't warrant a separate type:
 //
-//	m := matcher.Func(func(ctx context.Context, doc *niceyaml.Document) (bool, error) {
+//	m := matcher.Func(func(ctx context.Context, doc *niceyaml.Node) (bool, error) {
 //	    // Custom logic here.
 //	    return true, nil
 //	})

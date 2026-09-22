@@ -43,7 +43,7 @@ var ErrEmptyPath = errors.New("schema file path is empty")
 // [Resolver] returns, so a resolver that builds the path from the document
 // hands it back beside a nil error:
 //
-//	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
+//	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
 //	    node, err := doc.At(kindPath)
 //	    if err != nil {
 //	        return schema.Ref{}, schema.ErrNoMatch

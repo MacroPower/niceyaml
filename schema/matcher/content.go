@@ -48,7 +48,7 @@ func Content[T comparable](path paths.Path, want T) Matcher {
 }
 
 // Match implements [Matcher].
-func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Document) (bool, error) {
+func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool, error) {
 	err := ctx.Err()
 	if err != nil {
 		//nolint:wrapcheck // The error of the context is the reason the matcher cannot decide.

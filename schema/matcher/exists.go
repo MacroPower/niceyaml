@@ -35,7 +35,7 @@ func Exists(path paths.Path) Matcher {
 }
 
 // Match implements [Matcher].
-func (m *existsMatcher) Match(ctx context.Context, doc *niceyaml.Document) (bool, error) {
+func (m *existsMatcher) Match(ctx context.Context, doc *niceyaml.Node) (bool, error) {
 	err := ctx.Err()
 	if err != nil {
 		//nolint:wrapcheck // The error of the context is the reason the matcher cannot decide.

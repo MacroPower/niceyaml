@@ -68,8 +68,8 @@
 //
 // # Test Documents
 //
-// [FirstDocument] and [FirstDocumentWithPath] create [*niceyaml.Document]
-// instances for testing schema matchers and validators:
+// [FirstDocument] and [FirstDocumentWithPath] create root [*niceyaml.Node]
+// values for testing schema matchers and validators:
 //
 //	doc := yamltest.FirstDocument(t, "kind: Deployment")
 //	docWithPath := yamltest.FirstDocumentWithPath(t, "on: push", ".github/workflows/ci.yaml")

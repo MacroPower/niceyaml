@@ -19,7 +19,7 @@ It enables **friendly and predictable handling of YAML-compatible documents** in
 - Rich [`Error`][niceyaml.Error] display using the above systems
 - Source [**diffs**][niceyaml/diff] between revisions of a file
 - String [`finder`][niceyaml/finder] for load-once, search-many scenarios
-- [`Document`][niceyaml.Document] decoding with validation hooks, and a matching [`encoder`][niceyaml/encoder]
+- [`Node`][niceyaml.Node] decoding with validation hooks, and a matching [`encoder`][niceyaml/encoder]
 - JSON schema [validation][niceyaml/schema.Schema] with YAML path errors
 - Bubble [`yamlviewport`][niceyaml/bubbles/yamlviewport] for Bubble Tea, in a module of its own
 - [`fangs`][niceyaml/fangs] adapters for CLIs built with fang, in a module of their own
@@ -64,7 +64,7 @@ Module `niceyaml` adds a few abstractions on top of [go-yaml][goccy/go-yaml]:
 - [`line.Line`][niceyaml/line] - Tokens for a single line of YAML content
 - [`line.Lines`][niceyaml/line] - A collection of `Line`s, which never changes once built
 - [`line.View`][niceyaml/line] - One rendering of a `Lines` value, carrying the overlays, annotations, and flags the printer draws
-- [`niceyaml.Source`][niceyaml.Source] - A YAML file, which parses into `Document`s, decodes, wraps errors, and exposes its `Lines` view
+- [`niceyaml.Source`][niceyaml.Source] - A YAML file, which parses into one `Node` per document, decodes, wraps errors, and exposes its `Lines` view
 
 Most use cases will only need to interact with `Source`. Its `Lines` method returns the `line.Lines` that the [`finder`][niceyaml/finder] and [`diff`][niceyaml/diff] packages read, and its `View` method returns a fresh `line.View` over them for the [`printer`][niceyaml/printer]. Diffs return plain views, since interleaved lines from two revisions are not a YAML document.
 
@@ -108,7 +108,7 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [bubbletea]: https://github.com/charmbracelet/bubbletea
 [go.jacobcolvin.com/x/jsonschema]: https://github.com/MacroPower/x/tree/main/jsonschema
 [niceyaml.Error]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Error
-[niceyaml.Document]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Document
+[niceyaml.Node]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Node
 [niceyaml.Source]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Source
 [niceyaml/diff]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/diff
 [niceyaml/encoder]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/encoder
