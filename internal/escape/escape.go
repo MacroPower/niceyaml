@@ -23,7 +23,8 @@ const (
 	// DELPicture is the Unicode Control Picture for [DEL].
 	DELPicture = 0x2421
 	// ReplacementCharacter is the Unicode replacement character.
-	// Used for C1 control characters which have no control pictures.
+	// [Control] uses it for C1 control characters, which have no
+	// control pictures.
 	ReplacementCharacter = 0xFFFD
 )
 
@@ -33,7 +34,6 @@ const (
 //   - C1 controls ([PAD]-[APC]) -> [ReplacementCharacter]
 //   - [DEL] -> [DELPicture]
 //
-// This makes invisible control characters visible in terminal output.
 // For example, an ANSI escape sequence like "\x1b[31m" becomes "␛[31m".
 func Control(s string) string {
 	var sb strings.Builder
