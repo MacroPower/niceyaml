@@ -294,11 +294,11 @@ func (s *Source) Documents() ([]*Document, error) {
 //
 // When the file holds more than one document, it returns an error wrapping
 // [ErrMultipleDocuments], bound to the Source and pointing at the header of
-// the second document, or at its first token when a "..." marker rather
-// than a header opens it. When the file holds no document at all, which
-// happens for text that is only a "..." marker, it returns an error
-// wrapping [ErrNoDocuments], bound to the Source. A file that does not
-// parse returns the error [Source.File] returns. Use [Source.Documents]
+// the second document, or at the first token of its content when a "..."
+// marker rather than a header opens it. When the file holds no document at
+// all, which happens for text that is only a "..." marker, it returns an
+// error wrapping [ErrNoDocuments], bound to the Source. A file that does
+// not parse returns the error [Source.File] returns. Use [Source.Documents]
 // for a file that may hold several.
 func (s *Source) Document() (*Document, error) {
 	doc, err := s.single()
@@ -334,11 +334,16 @@ func (s *Source) single() (*Document, error) {
 }
 
 // anchorToken returns the token that locates the document: its header, or
-// the first token of its text when it has no header, as a document after a
-// "..." marker has none. It is nil when the document has neither.
+// the first token of its content when it has no header, as a document after
+// a "..." marker has none, past the comments folded above it. It is nil
+// when the document has neither.
 func (dd *Document) anchorToken() *token.Token {
 	if dd.doc.Start != nil {
 		return dd.doc.Start
+	}
+
+	if dd.preamble < len(dd.tokens) {
+		return dd.tokens[dd.preamble]
 	}
 
 	if len(dd.tokens) > 0 {

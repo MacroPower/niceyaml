@@ -136,6 +136,24 @@ func TestSource_Document(t *testing.T) {
 		assert.Equal(t, "3:1: multiple documents in source: 2 documents", err.Error())
 	})
 
+	t.Run("rejects several documents past the comments above the second", func(t *testing.T) {
+		t.Parallel()
+
+		// The comments after a "..." marker fold into the document below
+		// them as its preamble, and the error points past them at the
+		// first token of its content.
+		source := niceyaml.NewSourceFromString(stringtest.Input(`
+			a: 1
+			...
+			# tail
+			b: 2
+		`))
+
+		_, err := source.Document()
+		require.ErrorIs(t, err, niceyaml.ErrMultipleDocuments)
+		assert.Equal(t, "4:1: multiple documents in source: 2 documents", err.Error())
+	})
+
 	t.Run("folds a comment block above the first header", func(t *testing.T) {
 		t.Parallel()
 
