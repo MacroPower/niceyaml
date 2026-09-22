@@ -92,6 +92,10 @@ func ParseDocumentDirective(tks token.Tokens) *ParsedDirective {
 	inDirective, directiveLine := false, 0
 
 	for _, tk := range tks {
+		if tk == nil {
+			continue
+		}
+
 		line, hasLine := tokenLine(tk)
 
 		if tk.Type == token.DirectiveType {

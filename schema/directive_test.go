@@ -392,3 +392,16 @@ func TestParseDocumentDirective_TokenBuilder(t *testing.T) {
 		assert.Nil(t, schema.ParseDocumentDirective(nil))
 	})
 }
+
+func TestParseDocumentDirective_NilToken(t *testing.T) {
+	t.Parallel()
+
+	// A nil token in the stream is skipped, as every other token consumer
+	// skips it, rather than dereferenced.
+	directive := schema.ParseDocumentDirective(token.Tokens{
+		nil,
+		tokens.Tokenize("# yaml-language-server: $schema=./schema.json\n")[0],
+	})
+	require.NotNil(t, directive)
+	assert.Equal(t, "./schema.json", directive.Schema)
+}
