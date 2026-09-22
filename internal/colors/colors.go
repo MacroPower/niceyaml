@@ -8,7 +8,9 @@ import (
 )
 
 // Override returns the overlay color if valid, otherwise the base color.
-// Unlike [Blend], this does not blend - overlay takes precedence.
+// Unlike [Blend], this does not blend - overlay takes precedence. An overlay
+// outside the sRGB gamut is clamped into it, as [Blend] clamps, so it
+// renders as a valid SGR sequence.
 func Override(base, overlay color.Color) color.Color {
 	_, isNoColor := overlay.(lipgloss.NoColor)
 	if overlay == nil || isNoColor {
@@ -16,7 +18,7 @@ func Override(base, overlay color.Color) color.Color {
 	}
 
 	if _, visible := colorful.MakeColor(overlay); visible {
-		return overlay
+		return clamped(overlay)
 	}
 
 	return base

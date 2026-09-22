@@ -53,6 +53,11 @@ func TestOverride(t *testing.T) {
 			overlay: blue,
 			want:    blue,
 		},
+		"overlay outside the gamut is clamped": {
+			base:    red,
+			overlay: colorful.Color{R: -0.2, G: 1.4, B: 0.5},
+			want:    colorful.Color{R: 0, G: 1, B: 0.5},
+		},
 	}
 
 	for name, tc := range tcs {
