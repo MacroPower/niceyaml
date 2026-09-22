@@ -1,5 +1,5 @@
 // Command demo loads cafe configurations and validates them against the
-// embedded JSON schema, rendering any schema or custom validation failures
+// embedded JSON schema. It prints any schema or custom validation failures
 // with niceyaml's source-annotated error printer.
 package main
 
@@ -36,7 +36,7 @@ func main() {
 // load parses a cafe configuration and validates it. A single Decode runs
 // the JSON schema from [cafe.Schema] first, then the custom open-before-close
 // check that [cafe.Config] implements. Failures come back bound to the
-// source, so they print with the offending lines highlighted.
+// source, so they print with the offending lines annotated.
 func load(in string) (*cafe.Config, error) {
 	doc, err := niceyaml.NewSourceFromString(in).Document()
 	if err != nil {
