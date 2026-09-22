@@ -4274,3 +4274,35 @@ func TestPrinter_PrintError_JoinOfNothing(t *testing.T) {
 
 	assert.Equal(t, err.Error(), testPrinterWithGutter(printer.NoGutter).PrintError(err))
 }
+
+func TestPrinter_AnnotationGutterSoftAcrossKinds(t *testing.T) {
+	t.Parallel()
+
+	// Every row after the first of a line's annotation block is a
+	// continuation, whichever kind group it belongs to.
+	view := niceyaml.NewSourceFromString("key: value\n").View()
+	view.Annotate(0,
+		line.Annotation{Content: "one", Placement: line.Below, Kind: kind.UIAnnotation},
+		line.Annotation{Content: "two", Placement: line.Below, Kind: kind.TextError},
+	)
+
+	p := printer.New(
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+		printer.WithGutter(func(ctx printer.GutterContext) string {
+			switch {
+			case !ctx.Annotation:
+				return "L "
+			case ctx.Soft:
+				return "S "
+			default:
+				return "F "
+			}
+		}),
+	)
+
+	rows := strings.Split(p.Print(view), "\n")
+	require.Len(t, rows, 3)
+	assert.True(t, strings.HasPrefix(rows[0], "L "), rows[0])
+	assert.True(t, strings.HasPrefix(rows[1], "F "), rows[1])
+	assert.True(t, strings.HasPrefix(rows[2], "S "), rows[2])
+}

@@ -662,11 +662,13 @@ func (p *Printer) renderAnnotation(
 		for j, subLine := range group.rows {
 			var sb strings.Builder
 
+			// Every row after the first of the line's annotation block is
+			// a continuation, whichever kind group it belongs to.
 			sb.WriteString(p.gutterFunc(GutterContext{
 				Index:      idx,
 				Number:     ln.Number(),
 				MaxNumber:  maxNumber,
-				Soft:       j > 0,
+				Soft:       len(rows) > 0,
 				Flag:       view.Flag(idx),
 				Annotation: true,
 				Styles:     p.styles,
