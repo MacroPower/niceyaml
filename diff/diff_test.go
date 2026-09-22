@@ -30,7 +30,7 @@ func TestDiffer_Views(t *testing.T) {
 	assert.Equal(t, line.FlagInserted, got.Flag(2))
 
 	// Inputs are content only, so the result carries the flags of the diff
-	// and nothing else.
+	// and no overlays.
 	for i := range got.All() {
 		assert.Empty(t, got.Overlays(i))
 	}
@@ -1014,7 +1014,7 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 			wantRowLen: 4,
 		},
 		"unbalanced delete insert": {
-			// More deletes than inserts: extra rows for placeholders.
+			// More deletes than inserts, so the extra rows are placeholders.
 			before: stringtest.Input(`
 				keep: 1
 				del1: a
@@ -1128,7 +1128,7 @@ func verifyLines(t *testing.T, side string, actual *line.View, want []wantLine) 
 		wantLn := want[i]
 
 		if wantLn.empty {
-			// Empty placeholder: should have no tokens.
+			// An empty placeholder has no tokens.
 			assert.Empty(t, actualLn.Tokens(), "%s line %d: expected empty placeholder", side, i)
 		} else {
 			assert.Equal(t, wantLn.content, actualLn.Content(), "%s line %d content", side, i)
@@ -1207,13 +1207,13 @@ func TestDiffer_MultipleRenders(t *testing.T) {
 
 	result := diff.Diff(beforeTokens.Lines(), afterTokens.Lines())
 
-	// Call Full multiple times.
+	// Call Unified multiple times.
 	full1 := result.Unified()
 	full2 := result.Unified()
 
 	assert.Equal(t, full1.String(), full2.String())
 
-	// Call Summary with different contexts.
+	// Call Hunks with different contexts.
 	summary0 := result.Hunks(0)
 	summary1 := result.Hunks(1)
 	summary2 := result.Hunks(2)

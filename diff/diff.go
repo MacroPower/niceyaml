@@ -41,7 +41,7 @@ func WithAlgorithm(algo lcs.Algorithm) Option {
 
 // New creates a new [*Differ] with the given options.
 //
-// If no algorithm is specified, uses [lcs.Hirschberg].
+// By default it uses [lcs.Hirschberg].
 func New(opts ...Option) *Differ {
 	d := &Differ{}
 	for _, opt := range opts {
@@ -94,7 +94,7 @@ func (d *Differ) Diff(a, b line.Lines) *Result {
 // ops hold the caller's lines, which never change and which nothing can
 // reorder inside a [line.Lines] value.
 func (d *Differ) computeOps(before, after line.Lines) []lineOp {
-	// Pre-compute content strings once to avoid repeated string building.
+	// Precompute content strings once to avoid repeated string building.
 	beforeContent := make([]string, before.Len())
 	for i, l := range before.All() {
 		beforeContent[i] = l.Content()
@@ -133,12 +133,14 @@ func (d *Differ) computeOps(before, after line.Lines) []lineOp {
 // Result holds computed diff operations for rendering.
 //
 // Rendering methods each return a fresh [line.View] that a printer accepts
-// directly. A diff is not a YAML document, so the views carry no parsing or
-// decoding behavior:
+// directly:
 //   - [Result.Unified] returns all lines in unified diff format.
 //   - [Result.Hunks] returns only the changed lines with context.
 //   - [Result.Before] and [Result.After] return aligned views
 //     for side-by-side rendering.
+//
+// A diff is not a YAML document, so the views carry no parsing or decoding
+// behavior.
 //
 // Create instances with [Differ.Diff] or [Diff].
 type Result struct {
@@ -161,9 +163,9 @@ type alignedRow struct {
 // Unified returns a [line.View] of the complete diff.
 //
 // The view interleaves lines from both revisions. Unchanged lines come from
-// the second source, and changed lines include deleted lines from the first
-// source followed by inserted lines from the second. Each line carries a
-// [line.Flag] marking it as deleted, inserted, or unchanged.
+// the after revision, and changed lines include deleted lines from the
+// before revision followed by inserted lines from the after revision. Each
+// line carries a [line.Flag] marking it as deleted, inserted, or unchanged.
 //
 // Each call returns a new view with its own decoration, so overlays added
 // to one do not affect another.
@@ -171,9 +173,9 @@ func (r *Result) Unified() *line.View {
 	return lineOps(r.ops).toView()
 }
 
-// Hunks returns a [line.View] of the summarized diff: the changed lines
-// with context lines of unchanged content around each change, and nothing
-// else. A context of 0 shows only the changed lines, and Hunks treats
+// Hunks returns a [line.View] of the summarized diff. The view holds the
+// changed lines with context lines of unchanged content around each
+// change. A context of 0 shows only the changed lines, and Hunks treats
 // negative values as 0.
 //
 // Each line carries the flag and the line number it has in
@@ -239,7 +241,7 @@ func (r *Result) Stats() (int, int) {
 }
 
 // getAlignedRows returns the lazily computed aligned rows for side-by-side
-// rendering. Lines are aligned so both sides have equal counts:
+// rendering. It aligns lines so both sides have equal counts:
 //   - Equal lines appear on both sides at the same position.
 //   - Consecutive delete/insert pairs appear on the same row.
 //   - Unmatched deletions have empty placeholders on the right.
@@ -322,9 +324,9 @@ func (r *Result) getAlignedRows() []alignedRow {
 // diff.
 //
 // Before aligns its lines with [Result.After] so both views have equal
-// line counts. Consecutive delete/insert sequences are paired row-by-row. When there
-// are more insertions than deletions, empty placeholder lines (zero value) fill
-// the remaining rows on this side.
+// line counts. It pairs consecutive delete/insert sequences row-by-row.
+// When there are more insertions than deletions, empty placeholder lines
+// (zero value) fill the remaining rows on this side.
 //
 // Line flags: [line.FlagDeleted] for deleted lines, [line.FlagDefault] for
 // equal lines and empty placeholders.
@@ -352,9 +354,9 @@ func (r *Result) Before() *line.View {
 // diff.
 //
 // After aligns its lines with [Result.Before] so both views have equal
-// line counts. Consecutive delete/insert sequences are paired row-by-row. When there
-// are more deletions than insertions, empty placeholder lines (zero value) fill
-// the remaining rows on this side.
+// line counts. It pairs consecutive delete/insert sequences row-by-row.
+// When there are more deletions than insertions, empty placeholder lines
+// (zero value) fill the remaining rows on this side.
 //
 // Line flags: [line.FlagInserted] for inserted lines, [line.FlagDefault] for
 // equal lines and empty placeholders.
@@ -404,7 +406,7 @@ func Diff(a, b line.Lines) *Result {
 	return New().Diff(a, b)
 }
 
-// lineOp represents a line in the full diff output.
+// lineOp represents a line in the unified diff output.
 type lineOp struct {
 	line *line.Line // The [line.Line] from the revision it came from.
 
@@ -416,8 +418,8 @@ type lineOp struct {
 	kind lcs.OpKind // One of [lcs.OpEqual], [lcs.OpDelete], [lcs.OpInsert].
 }
 
-// opKindDeltas returns the line count deltas this kind affects in before/after
-// files.
+// opKindDeltas returns the line count deltas that k contributes to the
+// before and after revisions.
 func opKindDeltas(k lcs.OpKind) (int, int) {
 	switch k {
 	case lcs.OpEqual:

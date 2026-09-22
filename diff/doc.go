@@ -16,7 +16,7 @@
 // lines around each and a hunk header above it, and [Result.Before] with
 // [Result.After] return aligned views for side-by-side rendering. Each call
 // returns a fresh [line.View], so overlays added to one rendering do not
-// reach another.
+// affect another.
 //
 // Lines compare by their content with line endings stripped, so a change
 // from LF to CRLF endings or a missing final newline is not a difference.
