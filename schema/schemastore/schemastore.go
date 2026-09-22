@@ -490,12 +490,21 @@ func filterSupportedPatterns(patterns []string) []string {
 	return result
 }
 
-// hasSupportedExtension reports whether pattern ends in .yaml, .yml, or
-// .json, in any letter case.
+// hasSupportedExtension reports whether pattern can match a file whose
+// name ends in .yaml, .yml, or .json, in any letter case: it ends in one
+// of them, or the extension of its last segment holds a wildcard, as
+// "azure-pipelines*.y*ml" does.
 func hasSupportedExtension(pattern string) bool {
 	lower := strings.ToLower(pattern)
 
-	return strings.HasSuffix(lower, ".yaml") ||
+	if strings.HasSuffix(lower, ".yaml") ||
 		strings.HasSuffix(lower, ".yml") ||
-		strings.HasSuffix(lower, ".json")
+		strings.HasSuffix(lower, ".json") {
+		return true
+	}
+
+	base := lower[strings.LastIndex(lower, "/")+1:]
+	ext := base[strings.LastIndex(base, ".")+1:]
+
+	return strings.ContainsAny(ext, "*?[")
 }

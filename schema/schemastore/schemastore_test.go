@@ -1358,3 +1358,29 @@ func TestStore_ParseErrorRedactsCredentials(t *testing.T) {
 	assert.Contains(t, err.Error(), "svc:xxxxx@")
 	assert.NotContains(t, err.Error(), "hunter2")
 }
+
+func TestStore_FindMatch_WildcardExtension(t *testing.T) {
+	t.Parallel()
+
+	// A pattern whose extension holds a wildcard can match a YAML file, so
+	// the store keeps it, while one with another literal extension is
+	// dropped.
+	catalog := schemastore.Catalog{Schemas: []schemastore.CatalogEntry{{
+		Name:      "Azure Pipelines",
+		URL:       "https://example.com/azure.json",
+		FileMatch: []string{"**/azure-pipelines*.y*ml", "*.toml"},
+	}}}
+
+	server := newCatalogServer(t, catalog)
+	t.Cleanup(server.Close)
+
+	store := schemastore.New(schemastore.WithCatalogURL(server.URL))
+
+	entry, err := store.FindMatch(t.Context(), "ci/azure-pipelines.yaml")
+	require.NoError(t, err)
+	assert.Equal(t, "Azure Pipelines", entry.Name)
+	assert.Equal(t, []string{"**/azure-pipelines*.y*ml"}, entry.FileMatch)
+
+	_, err = store.FindMatch(t.Context(), "ci/azure.toml")
+	require.ErrorIs(t, err, schemastore.ErrNoCatalogMatch)
+}
