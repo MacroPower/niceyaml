@@ -1662,3 +1662,24 @@ func resolveToken(t *testing.T, path paths.Path, key bool, doc *ast.DocumentNode
 
 	return tk
 }
+
+func TestPath_Token_HandBuiltMapping(t *testing.T) {
+	t.Parallel()
+
+	// A tree built by hand may hold a typed nil or a nil entry where the
+	// parser always puts a node; the first token of such a mapping is not
+	// found rather than a panic.
+	tcs := map[string]ast.Node{
+		"key holding a typed nil": mapNode(mapEntry((*ast.StringNode)(nil), &ast.StringNode{Value: "1"})),
+		"nil entry":               &ast.MappingNode{Values: []*ast.MappingValueNode{nil}},
+	}
+
+	for name, body := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := paths.Root().Token(&ast.DocumentNode{Body: body})
+			require.ErrorIs(t, err, paths.ErrNotFound)
+		})
+	}
+}

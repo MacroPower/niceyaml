@@ -459,11 +459,11 @@ func firstToken(node ast.Node) *token.Token {
 		case *ast.TagNode:
 			node = n.Value
 		case *ast.MappingNode:
-			if len(n.Values) == 0 {
+			if len(n.Values) == 0 || n.Values[0] == nil {
 				return n.GetToken()
 			}
 
-			if n.Values[0].Key == nil {
+			if isNilNode(n.Values[0].Key) {
 				return n.Values[0].GetToken()
 			}
 
