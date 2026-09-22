@@ -18,8 +18,6 @@
 // O(m*n) time. The result itself holds one operation per line, so it takes
 // O(m+n) space regardless of the algorithm.
 //
-// This is particularly important when comparing large YAML documents.
-//
 // # Usage
 //
 // Create a [Hirschberg] instance once and reuse it for multiple comparisons,
@@ -31,7 +29,7 @@
 //	h := lcs.NewHirschberg()
 //	ops := h.Diff(before, after)
 //
-// Each [Op] in the result describes one edit operation with its index in each
+// Each [Op] in the result describes one diff operation with its index in each
 // input slice, or -1 on the side it does not touch. The [OpKind] indicates the
 // operation type:
 //
@@ -39,8 +37,8 @@
 //   - [OpDelete]: Line only in before, with After set to -1.
 //   - [OpInsert]: Line only in after, with Before set to -1.
 //
-// The package has no dependencies on the rest of niceyaml, so an [Algorithm]
-// can be developed and tested on plain string slices. The diff package maps
+// The package has no dependencies on the rest of niceyaml, so you can develop
+// and test an [Algorithm] on plain string slices. The diff package maps
 // each [OpKind] to a line flag when it builds rendering views from the
 // operations.
 package lcs

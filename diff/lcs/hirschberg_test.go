@@ -186,7 +186,7 @@ func TestHirschberg_Reuse(t *testing.T) {
 		{Kind: lcs.OpInsert, Before: -1, After: 1},
 	}, ops1)
 
-	// Second computation should work correctly with reused instance.
+	// Second computation, with the instance reused.
 	ops2 := h.Diff([]string{"x", "y", "z"}, []string{"x", "z"})
 	assert.Equal(t, []lcs.Op{
 		{Kind: lcs.OpEqual, Before: 0, After: 0},

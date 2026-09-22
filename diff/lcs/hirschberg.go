@@ -5,7 +5,7 @@ import (
 	"sync"
 )
 
-// Hirschberg implements [Algorithm] using a space-optimized LCS algorithm.
+// Hirschberg implements [Algorithm] using a space-efficient LCS algorithm.
 //
 // Time complexity is O(m*n), where m and n are the lengths of before and
 // after. The dynamic programming rows take O(n) space, since the algorithm
@@ -55,7 +55,8 @@ type buffers struct {
 	row0, row1 []int
 
 	// Reusable result buffers for forward/backward passes.
-	// These are safe to reuse since results are consumed before recursion.
+	// These are safe to reuse since recurse consumes each result
+	// before recursion.
 	fwdResult, bwdResult []int
 
 	// Accumulated diff operations.
@@ -80,13 +81,13 @@ func (b *buffers) reset(beforeLen, afterLen int) {
 	}
 }
 
-// recurse recursively finds the LCS using divide-and-conquer.
+// recurse finds the LCS using divide-and-conquer.
 // Operates on before[bStart:bEnd] and after[aStart:aEnd].
 func (b *buffers) recurse(before, after []string, bStart, bEnd, aStart, aEnd int) {
 	m := bEnd - bStart
 	n := aEnd - aStart
 
-	// Base case: no before lines - all after lines are insertions.
+	// Base case: no before lines, so all after lines are insertions.
 	if m == 0 {
 		for j := aStart; j < aEnd; j++ {
 			b.ops = append(b.ops, Op{Kind: OpInsert, Before: -1, After: j})
@@ -95,7 +96,7 @@ func (b *buffers) recurse(before, after []string, bStart, bEnd, aStart, aEnd int
 		return
 	}
 
-	// Base case: no after lines - all before lines are deletions.
+	// Base case: no after lines, so all before lines are deletions.
 	if n == 0 {
 		for i := bStart; i < bEnd; i++ {
 			b.ops = append(b.ops, Op{Kind: OpDelete, Before: i, After: -1})
@@ -188,7 +189,7 @@ func (b *buffers) forward(before, after []string, bStart, bMid, aStart, aEnd int
 	}
 
 	for i := bStart; i < bMid; i++ {
-		// Swap rows: row1 becomes the new row to fill.
+		// Swap rows so row1 becomes the new row to fill.
 		b.row0, b.row1 = b.row1, b.row0
 		b.row1[0] = 0
 
@@ -229,7 +230,7 @@ func (b *buffers) backward(before, after []string, bMid, bEnd, aStart, aEnd int)
 	}
 
 	for i := bEnd - 1; i >= bMid; i-- {
-		// Swap rows: row1 becomes the new row to fill.
+		// Swap rows so row1 becomes the new row to fill.
 		b.row0, b.row1 = b.row1, b.row0
 		b.row1[0] = 0
 
