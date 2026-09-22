@@ -662,6 +662,22 @@ func TestWalkSegments_TypedNilNode(t *testing.T) {
 			root:     &ast.AnchorNode{Value: (*ast.SequenceNode)(nil)},
 			segments: []jsonschema.Segment{{Index: 0, IsIndex: true}},
 		},
+		"tag behind an anchor": {
+			root:     &ast.AnchorNode{Value: (*ast.TagNode)(nil)},
+			segments: []jsonschema.Segment{{Key: "name"}},
+		},
+		"anchor behind an anchor": {
+			root:     &ast.AnchorNode{Value: (*ast.AnchorNode)(nil)},
+			segments: []jsonschema.Segment{{Key: "name"}},
+		},
+		"document behind an anchor": {
+			root:     &ast.AnchorNode{Value: (*ast.DocumentNode)(nil)},
+			segments: []jsonschema.Segment{{Key: "name"}},
+		},
+		"mapping key behind an anchor": {
+			root:     &ast.AnchorNode{Value: (*ast.MappingKeyNode)(nil)},
+			segments: []jsonschema.Segment{{Key: "name"}},
+		},
 	}
 
 	for name, tc := range tcs {

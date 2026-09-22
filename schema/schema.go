@@ -443,16 +443,38 @@ func decodedKey(key ast.MapKeyNode) string {
 // contentNode looks through the nodes that wrap a value, so the walk sees
 // the mapping or sequence behind a document, an anchor, or a tag.
 func contentNode(node ast.Node) ast.Node {
+	// A tree built by hand may hold a typed nil where the parser always
+	// puts a node; such a wrapper holds no content and comes back as it is.
 	for {
 		switch n := node.(type) {
 		case *ast.DocumentNode:
+			if n == nil {
+				return nil
+			}
+
 			node = n.Body
+
 		case *ast.AnchorNode:
+			if n == nil {
+				return nil
+			}
+
 			node = n.Value
+
 		case *ast.TagNode:
+			if n == nil {
+				return nil
+			}
+
 			node = n.Value
+
 		case *ast.MappingKeyNode:
+			if n == nil {
+				return nil
+			}
+
 			node = n.Value
+
 		default:
 			return node
 		}
