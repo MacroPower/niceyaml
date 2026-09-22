@@ -2972,6 +2972,26 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 	})
 }
 
+func TestSourceError_Range_ClampsToTheLines(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n", niceyaml.WithName("f.yaml"))
+
+	// A range that starts on a line of the source binds, and its end past
+	// the last line is cut to the end of that line, so the range reported
+	// names lines the source has.
+	err := niceyaml.NewError("wide", niceyaml.AtRange(position.NewRange(position.New(1, 0), position.New(99, 3))))
+
+	var bound *niceyaml.SourceError
+
+	require.ErrorAs(t, yamltest.Bind(t, source, err), &bound)
+
+	rng, rngErr := bound.Range()
+	require.NoError(t, rngErr)
+	assert.Equal(t, position.NewRange(position.New(1, 0), position.New(2, 4)), rng)
+	assert.Equal(t, "f.yaml:2:1: wide", bound.Error())
+}
+
 func TestError_ResolvesThroughErrorWrappers(t *testing.T) {
 	t.Parallel()
 

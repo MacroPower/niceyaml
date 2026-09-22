@@ -1452,10 +1452,23 @@ func checkInRange(loc location, lines line.Lines) error {
 // position.
 func highlightRanges(view line.Lines, loc location) position.Ranges {
 	if loc.rng != nil {
-		return position.Ranges{*loc.rng}
+		return position.Ranges{clampRange(view, *loc.rng)}
 	}
 
 	return view.ContentRanges(view.TokenAt(loc.pos))
+}
+
+// clampRange returns r cut to lines: a range that runs past the last line
+// ends at the end of that line, so a range an error carried marks lines
+// the source has and [SourceError.Range] reports one of them. A range
+// within the lines comes back as it is.
+func clampRange(lines line.Lines, r position.Range) position.Range {
+	last := lines.Len() - 1
+	if last < 0 || r.End.Line <= last {
+		return r
+	}
+
+	return position.NewRange(r.Start, position.New(last, lines.Line(last).Width()))
 }
 
 // prepareLineAnnotations prepares annotations grouped by line index. It
