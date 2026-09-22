@@ -20,7 +20,7 @@
 // which inherits from [Literal], which inherits from [Text], the root:
 //
 //   - Text -> TextOK, TextWarn, TextError: Base text styles
-//   - Comment, CommentPreproc: Comments and directives
+//   - Comment -> CommentPreproc: Comments and directives
 //   - Literal -> LiteralString, LiteralNumber, LiteralBoolean, LiteralNull: Values
 //   - Name -> NameTag, NameAnchor, NameAlias: Identifiers
 //   - Punctuation -> PunctuationMapping, PunctuationSequence, PunctuationBlock:
@@ -55,7 +55,7 @@ import (
 type Kind string
 
 // Kinds of YAML tokens and rendered text. Names follow Pygments token
-// naming conventions where applicable.
+// naming conventions where they apply.
 const (
 	// Text is a default/fallback style.
 	Text Kind = "text"
@@ -75,7 +75,7 @@ const (
 	TextError Kind = "textError"
 	// Comment styles comments (#).
 	Comment Kind = "comment"
-	// CommentPreproc styles preprocessor comment, e.g.: %YAML, %TAG.
+	// CommentPreproc styles preprocessor comments (%YAML, %TAG).
 	CommentPreproc Kind = "commentPreproc"
 	// Generic is a parent style for generic tokens.
 	Generic Kind = "generic"
