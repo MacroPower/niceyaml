@@ -19,9 +19,9 @@ const dimShift = 0.15
 const surfaceShift = 0.30
 
 // palette holds the colors a catalog theme is built from. Every built-in
-// theme is one palette in [palettes], and [palette.styles] derives the full
-// [style.Styles] from it, so a theme lists its colors rather than every
-// kind.
+// theme except charm is one palette in [palettes], and [palette.styles]
+// derives the full [style.Styles] from it, so a theme lists its colors
+// rather than every kind.
 type palette struct {
 	// Tokens sets token kinds in the style-string form [style.Parse]
 	// reads. Each spec layers over the style its kind inherits, so a spec
@@ -36,9 +36,9 @@ type palette struct {
 	// Accent colors headings and accented text. OK, Warn, and Error color
 	// the status kinds.
 	Accent, OK, Warn, Error string
-	// Overrides is applied last, after the derived kinds and Tokens, for
-	// the few kinds a theme sets outside the template. An override
-	// replaces a kind's style rather than layering over it.
+	// Overrides takes effect last, after the derived kinds and Tokens, for
+	// the few kinds a theme sets outside those two. An override replaces
+	// a kind's style rather than layering over it.
 	Overrides []style.Option
 	// Mode is the background the theme is designed for. It also picks the
 	// direction of the derived shifts. [kind.TextSubtle] and

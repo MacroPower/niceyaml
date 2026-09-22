@@ -411,16 +411,16 @@ func countOf(names []string, name string) int {
 	return n
 }
 
-// marker is the foreground that marked gives one category, so a test can tell
+// marker is the foreground that marked gives one kind, so a test can tell
 // which dummy theme a lookup returned.
 var marker = lipgloss.Color("#123456")
 
-// empty builds a theme with no categories set.
+// empty builds a theme with no kinds set.
 func empty() style.Styles {
 	return style.New(lipgloss.NewStyle())
 }
 
-// marked returns a builder for a theme whose only set category is s.
+// marked returns a builder for a theme whose only set kind is s.
 func marked(s kind.Kind) func() style.Styles {
 	return func() style.Styles {
 		return style.New(lipgloss.NewStyle(), style.Set(s, lipgloss.NewStyle().Foreground(marker)))

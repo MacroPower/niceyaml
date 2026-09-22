@@ -12,10 +12,10 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
-// Mode is the color scheme a theme targets.
+// Mode is the background a theme is designed for.
 type Mode int
 
-// Color scheme modes.
+// Background modes.
 const (
 	// Light marks themes designed for light backgrounds.
 	Light Mode = iota
@@ -32,7 +32,7 @@ const (
 // [Catalog.All]. Create custom themes with [New] and add them to a catalog
 // with [Catalog.With].
 type Theme struct {
-	// Memoized builder for the [style.Styles]: the first call builds them
+	// Memoized builder for the [style.Styles]. The first call builds them
 	// and copies of the Theme share the result. Nil for the zero value.
 	styles func() style.Styles
 	// Name is the kebab-case identifier for the theme (e.g., "monokai",
@@ -147,8 +147,8 @@ func (c Catalog) With(themes ...Theme) Catalog {
 	return out
 }
 
-// Get returns the [Theme] held under name. The boolean reports whether one
-// was found.
+// Get returns the [Theme] held under name. The boolean reports whether the
+// catalog holds one.
 func (c Catalog) Get(name string) (Theme, bool) {
 	i, ok := c.index[name]
 	if !ok {
@@ -165,7 +165,7 @@ func (c Catalog) All() []Theme {
 }
 
 // Mode returns the [Catalog] of the themes designed for mode, in the order
-// they hold in the receiver, so a picker lists the themes for one
+// the receiver holds them, so a picker lists the themes for one
 // background:
 //
 //	for _, t := range theme.Builtin().Mode(theme.Dark).All() {

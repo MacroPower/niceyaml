@@ -6,7 +6,7 @@ import (
 
 // palettes holds every built-in theme except charm, keyed by name.
 //
-// Most entries are derived from the Chroma syntax highlighter:
+// Most entries derive from the Chroma syntax highlighter:
 // https://github.com/alecthomas/chroma
 var palettes = map[string]palette{
 	"abap": {

@@ -4,10 +4,10 @@
 // Themes translate popular editor and terminal color schemes (Monokai, Dracula,
 // Catppuccin, etc.) into [style.Styles] configurations.
 //
-// This allows applications to offer familiar, well-designed color palettes
-// without manually defining token colors.
+// This allows applications to offer familiar color palettes without
+// manually defining token colors.
 //
-// # Using Themes
+// # Usage
 //
 // [Builtin] returns the [Catalog] of every theme this package ships.
 // [Catalog.Get] looks a [Theme] up by its kebab-case name. A Theme resolves
@@ -63,12 +63,12 @@
 // the kinds they want to customize; undefined kinds fall back to
 // their parent style.
 //
-// Each built-in theme is a small palette: a base foreground and background,
-// an accent color, OK, warning, and error colors, and the token kinds it
-// colors. The package derives the remaining categories, such as headings,
+// Most built-in themes come from a small palette: a base foreground and
+// background, an accent color, OK, warning, and error colors, and the token
+// kinds it colors. The package derives the remaining kinds, such as headings,
 // highlights, and dimmed text, from those colors, so every theme presents the
-// same set of categories.
+// same set of kinds.
 //
-// Most themes in this package are derived from the Chroma syntax highlighter:
+// Most themes in this package derive from the Chroma syntax highlighter:
 // https://github.com/alecthomas/chroma
 package theme
