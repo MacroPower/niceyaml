@@ -4294,3 +4294,132 @@ func TestFormat(t *testing.T) {
 		assert.Empty(t, niceyaml.Format(nil))
 	})
 }
+
+func TestSourceError_MessageAndPath(t *testing.T) {
+	t.Parallel()
+
+	src := niceyaml.NewSourceFromString("a:\n  b: 1\n", niceyaml.WithName("x.yaml"))
+	bPath := paths.Root().Child("a", "b")
+
+	bind := func(t *testing.T, err error) *niceyaml.SourceError {
+		t.Helper()
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, yamltest.Bind(t, src, err), &bound)
+
+		return bound
+	}
+
+	t.Run("a path error", func(t *testing.T) {
+		t.Parallel()
+
+		bound := bind(t, niceyaml.NewError("bad", niceyaml.AtPath(bPath)))
+
+		assert.Equal(t, "x.yaml:2:6: $.a.b: bad", bound.Error())
+		assert.Equal(t, "bad", bound.Message())
+
+		p, ok := bound.Path()
+		require.True(t, ok)
+		assert.Equal(t, bPath, p)
+	})
+
+	t.Run("a position error has no path", func(t *testing.T) {
+		t.Parallel()
+
+		bound := bind(t, niceyaml.NewError("bad", niceyaml.AtPosition(position.New(1, 5))))
+
+		assert.Equal(t, "bad", bound.Message())
+
+		_, ok := bound.Path()
+		assert.False(t, ok)
+	})
+
+	t.Run("a rebased path joins the base", func(t *testing.T) {
+		t.Parallel()
+
+		inner := niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("b")))
+		bound := bind(t, niceyaml.Rebase(inner, paths.Root().Child("a")))
+
+		assert.Equal(t, "bad", bound.Message())
+
+		p, ok := bound.Path()
+		require.True(t, ok)
+		assert.Equal(t, bPath, p)
+	})
+
+	t.Run("a path from a scoped document is the one the error wrote", func(t *testing.T) {
+		t.Parallel()
+
+		doc, err := src.Document()
+		require.NoError(t, err)
+
+		scoped, err := doc.At(paths.Root().Child("a"))
+		require.NoError(t, err)
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, scoped.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("b")))), &bound)
+
+		p, ok := bound.Path()
+		require.True(t, ok)
+		assert.Equal(t, paths.Root().Child("b"), p)
+
+		rng, err := bound.Range()
+		require.NoError(t, err)
+		assert.Equal(t, 1, rng.Start.Line)
+	})
+
+	t.Run("text a wrapper added stays", func(t *testing.T) {
+		t.Parallel()
+
+		bound := bind(t, fmt.Errorf("ctx: %w", niceyaml.NewError("bad", niceyaml.AtPath(bPath))))
+
+		assert.Equal(t, "ctx: $.a.b: bad", bound.Message())
+
+		p, ok := bound.Path()
+		require.True(t, ok)
+		assert.Equal(t, bPath, p)
+	})
+
+	t.Run("a binding that wraps a binding reports the path of the inner one", func(t *testing.T) {
+		t.Parallel()
+
+		inner := bind(t, niceyaml.NewError("bad", niceyaml.AtPath(bPath)))
+
+		// A nested error that wraps a binding binds as a child that takes
+		// over the inner binding, rather than as the inner binding itself.
+		outer := bind(t, niceyaml.NewError("outer", niceyaml.WithErrors(fmt.Errorf("ctx: %w", inner))))
+		require.Len(t, outer.Errors(), 1)
+
+		child := outer.Errors()[0]
+		require.NotSame(t, inner, child)
+		assert.Equal(t, "ctx: x.yaml:2:6: $.a.b: bad", child.Message())
+
+		p, ok := child.Path()
+		require.True(t, ok)
+		assert.Equal(t, bPath, p)
+	})
+
+	t.Run("an error without a location has neither", func(t *testing.T) {
+		t.Parallel()
+
+		bound := bind(t, errors.New("plain"))
+
+		assert.Equal(t, "plain", bound.Message())
+
+		_, ok := bound.Path()
+		assert.False(t, ok)
+	})
+
+	t.Run("nil has neither", func(t *testing.T) {
+		t.Parallel()
+
+		var bound *niceyaml.SourceError
+
+		assert.Empty(t, bound.Message())
+
+		_, ok := bound.Path()
+		assert.False(t, ok)
+	})
+}

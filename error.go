@@ -559,9 +559,10 @@ func locatePath(b binder, path paths.Path) (location, *Document, error) {
 // no location. Binding resolves the location of the error against the source, once, so
 // a SourceError never changes and every method of it reads that result.
 // [SourceError.Error] puts the position in front of the message,
-// [SourceError.Range] returns the resolved range, and
-// [SourceError.Excerpt] returns the surrounding lines with the location
-// highlighted. The %+v verb prints the message, one line per nested
+// [SourceError.Message] returns the message alone, [SourceError.Range]
+// returns the resolved range, [SourceError.Path] the path the error was
+// written with, and [SourceError.Excerpt] returns the surrounding lines
+// with the location highlighted. The %+v verb prints the message, one line per nested
 // error, and the excerpt as plain text, with carets under the locations,
 // so it is safe for a log, and [Format] prints the same for an error
 // that wraps or joins bound errors:
@@ -894,6 +895,51 @@ func (e *SourceError) Document() *Document {
 	}
 
 	return e.doc
+}
+
+// Message returns the text of the bound error with no position or path
+// in front: the message an [*Error] was created with, without the path
+// [Error.Error] puts before it, or the text of any other error as it is.
+// It is the text [SourceError.Excerpt] annotates a location with, and
+// the field a structured report such as a JSON line or a CI annotation
+// carries beside the position from [SourceError.Range] and the path from
+// [SourceError.Path]:
+//
+//	for _, bound := range niceyaml.SourceErrors(err) {
+//		rng, _ := bound.Range()
+//		path, _ := bound.Path()
+//		emit(bound.Source().FilePath(), rng.Start, bound.Message(), path)
+//	}
+//
+// Text a wrapper such as [fmt.Errorf] added around the Error stays, with
+// the path the wrapper wrote in it, as it does everywhere else. A nil
+// SourceError has an empty message.
+func (e *SourceError) Message() string {
+	return e.text()
+}
+
+// Path returns the [paths.Path] the bound error points at and true, or
+// the zero Path and false when it carries a position, a range, or no
+// location. It is the path [Error.Path] reports for the [*Error] that
+// gave the binding its location, with the base of every [Rebase] on the
+// way joined in front, so an error bound through a scoped [Document]
+// reports the path as the error wrote it, from the scope. A binding that
+// wraps another reports the path of the one it wraps. A nil SourceError
+// has none.
+func (e *SourceError) Path() (paths.Path, bool) {
+	if e == nil {
+		return paths.Path{}, false
+	}
+
+	found := anchorOf(e.err)
+
+	if inner, ok := found.err.(*SourceError); ok { //nolint:errorlint // The anchor itself, found by the walk.
+		return inner.Path()
+	}
+
+	p, ok := found.loc.(paths.Path)
+
+	return p, ok
 }
 
 // Unwrap returns the error the [SourceError] was created from. A nil
