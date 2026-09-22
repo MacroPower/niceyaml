@@ -4203,3 +4203,94 @@ func TestError_TokenAfterTrailingSpaces(t *testing.T) {
 	assert.True(t, strings.HasPrefix(got, "1:4: bad value\n"), got)
 	assert.Contains(t, got, "<genericError>1</genericError>")
 }
+
+func TestFormat(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a bare binding renders as the %+v verb does", func(t *testing.T) {
+		t.Parallel()
+
+		err := excerptError(t)
+		assert.Equal(t, fmt.Sprintf("%+v", err), niceyaml.Format(err))
+	})
+
+	t.Run("looks through a wrapper for the excerpt", func(t *testing.T) {
+		t.Parallel()
+
+		src := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("x.yaml"))
+		bound := yamltest.Bind(t, src, niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("b"))))
+		err := fmt.Errorf("load config: %w", bound)
+
+		// The wrapper does not format as the binding does, so the %+v verb
+		// prints the message alone.
+		assert.Equal(t, "load config: x.yaml:2:4: $.b: bad", fmt.Sprintf("%+v", err))
+
+		assert.Equal(t, stringtest.JoinLF(
+			"load config: x.yaml:2:4: $.b: bad",
+			"",
+			"   1 | a: 1",
+			"   2 | b: 2",
+			"     |    ^",
+		), niceyaml.Format(err))
+	})
+
+	t.Run("lists the nodes below a wrapped binding", func(t *testing.T) {
+		t.Parallel()
+
+		err := fmt.Errorf("checking: %w", excerptError(t))
+
+		assert.Equal(t, stringtest.JoinLF(
+			"checking: 2:4: $.b: bad b",
+			"8:4: $.h: bad h",
+			"",
+			"   1 | a: 1",
+			"   2 | b: 2",
+			"     |    ^",
+			"   3 | c: 3",
+			"   4 | d: 4",
+			"     | ...",
+			"   6 | f: 6",
+			"   7 | g: 7",
+			"   8 | h: 8",
+			"     |    ^ bad h",
+			"   9 | i: 9",
+			"  10 | j: 10",
+		), niceyaml.Format(err))
+	})
+
+	t.Run("renders one excerpt per binding of a join", func(t *testing.T) {
+		t.Parallel()
+
+		first := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("a.yaml"))
+		second := niceyaml.NewSourceFromString("b: 2\n", niceyaml.WithName("b.yaml"))
+
+		err := errors.Join(
+			yamltest.Bind(t, first, niceyaml.NewError("bad a", niceyaml.AtPath(paths.Root().Child("a")))),
+			yamltest.Bind(t, second, niceyaml.NewError("bad b", niceyaml.AtPath(paths.Root().Child("b")))),
+		)
+
+		assert.Equal(t, stringtest.JoinLF(
+			"a.yaml:1:4: $.a: bad a",
+			"b.yaml:1:4: $.b: bad b",
+			"",
+			"   1 | a: 1",
+			"     |    ^",
+			"",
+			"   1 | b: 2",
+			"     |    ^",
+		), niceyaml.Format(err))
+	})
+
+	t.Run("an error bound to no source renders as its message", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Equal(t, "plain", niceyaml.Format(errors.New("plain")))
+		assert.Equal(t, "$.a: bad", niceyaml.Format(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("a")))))
+	})
+
+	t.Run("nil renders as nothing", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Empty(t, niceyaml.Format(nil))
+	})
+}

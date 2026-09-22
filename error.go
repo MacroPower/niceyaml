@@ -563,7 +563,8 @@ func locatePath(b binder, path paths.Path) (location, *Document, error) {
 // [SourceError.Excerpt] returns the surrounding lines with the location
 // highlighted. The %+v verb prints the message, one line per nested
 // error, and the excerpt as plain text, with carets under the locations,
-// so it is safe for a log:
+// so it is safe for a log, and [Format] prints the same for an error
+// that wraps or joins bound errors:
 //
 //	if _, err := source.File(); err != nil {
 //		fmt.Printf("%+v\n", err)
@@ -1152,37 +1153,109 @@ func SourceErrors(err error) []*SourceError {
 
 // Format implements [fmt.Formatter].
 //
-// The %v and %s verbs print [SourceError.Error]. The %+v verb prints
-// [SourceError.Error], then the Error of every node below it in the tree
-// on a line of its own, so a log names every violation and where it is,
-// then [SourceError.Excerpt] rendered as plain text with two lines of
-// context: each line of the excerpt behind its number, carets under the
-// columns of every location on the row below, and the message of each
-// child beside its caret. The binding of an [errors.Join] leads with its
-// children instead, since its own message is their text joined and each
-// child follows behind a position of its own. The output holds no escape
-// sequences, so it reads in a log as it does in a terminal. The %q verb
-// quotes [SourceError.Error].
+// The %v and %s verbs print [SourceError.Error]. The %+v verb prints what
+// [Format] renders for the error: [SourceError.Error], then the Error of
+// every node below it in the tree on a line of its own, so a log names
+// every violation and where it is, then [SourceError.Excerpt] rendered as
+// plain text with two lines of context. The %q verb quotes
+// [SourceError.Error].
 func (e *SourceError) Format(f fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && f.Flag('+'):
-		var lines []string
-
-		if !e.echoesChildren() {
-			lines = append(lines, e.Error())
-		}
-
-		e.walk(func(n *SourceError) {
-			lines = append(lines, n.Error())
-		})
-
-		writeString(f, joinParts(strings.Join(lines, "\n"), e.detail(defaultContextLines)))
+		writeString(f, Format(e))
 
 	case verb == 'q':
 		writeString(f, strconv.Quote(e.Error()))
 
 	default:
 		writeString(f, e.Error())
+	}
+}
+
+// Format renders err as plain text, with the excerpt of every error bound
+// to a source in it: the message of err, then the Error of every node
+// below each binding in the tree on a line of its own, so a log names
+// every violation and where it is, then the excerpt of each binding
+// [SourceErrors] finds, in that order, each rendered as
+// [SourceError.Excerpt] with two lines of context: each line of the
+// excerpt behind its number, carets under the columns of every location
+// on the row below, and the message of each child beside its caret. The
+// output holds no escape sequences, so it reads in a log as it does in a
+// terminal.
+//
+// The %+v verb of a [*SourceError] prints the same text, but only for the
+// SourceError itself. The docs of [Document.Bind] say to bind an error
+// before adding context to it, and a wrapper such as [fmt.Errorf] does
+// not format its way, so the %+v verb of the wrapped error prints the
+// message alone. Format looks through wrappers and joins, so it renders
+// the excerpt however the error was wrapped, and it is what a program
+// logs when it holds any error:
+//
+//	err := fmt.Errorf("load %s: %w", name, doc.Bind(check(cfg)))
+//	log.Print(niceyaml.Format(err))
+//
+// An error that binds to no source renders as its message. The binding of
+// an [errors.Join] leads with its children instead of its own message,
+// since that message is their text joined and each child follows behind a
+// position of its own.
+// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] renders the
+// same parts with styles, the message as a tree and the excerpts with
+// the printer's context lines. A nil err renders as "".
+func Format(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	var lines []string
+
+	// The value itself, rather than one below it, decides whether its
+	// message repeats its children.
+	bound, isBound := err.(*SourceError) //nolint:errorlint // The node itself, not a chain search.
+	if !isBound || !bound.echoesChildren() {
+		lines = append(lines, err.Error())
+	}
+
+	for _, root := range boundRoots(err) {
+		root.walk(func(n *SourceError) {
+			lines = append(lines, n.Error())
+		})
+	}
+
+	parts := []string{strings.Join(lines, "\n")}
+
+	for _, bound := range SourceErrors(err) {
+		parts = append(parts, bound.detail(defaultContextLines))
+	}
+
+	return joinParts(parts...)
+}
+
+// boundRoots returns the bindings in the tree of err reached through the
+// wrappers and joins around them, without looking below a binding, in the
+// order they appear. The nodes below each are its own tree.
+func boundRoots(err error) []*SourceError {
+	switch x := err.(type) { //nolint:errorlint // Walks the tree one node at a time.
+	case *SourceError:
+		if x == nil {
+			return nil
+		}
+
+		return []*SourceError{x}
+
+	case interface{ Unwrap() error }:
+		return boundRoots(x.Unwrap())
+
+	case interface{ Unwrap() []error }:
+		var out []*SourceError
+
+		for _, inner := range x.Unwrap() {
+			out = append(out, boundRoots(inner)...)
+		}
+
+		return out
+
+	default:
+		return nil
 	}
 }
 
