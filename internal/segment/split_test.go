@@ -251,8 +251,9 @@ func TestSplit_CRLFSplitOffset(t *testing.T) {
 func TestSplit_NewlineColumn(t *testing.T) {
 	t.Parallel()
 
-	// A pure-newline part starts in the column after the last visible rune
-	// of its line, or in column 1 on a blank line.
+	// A pure-newline part starts just past the parts on its line, at the
+	// largest part Column plus that part's width, or in column 1 on a
+	// blank line.
 	tcs := map[string]struct {
 		input string
 		line  int // 0-indexed line holding the newline part.
