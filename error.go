@@ -1257,14 +1257,14 @@ func (e *SourceError) Annotate(view *line.View) error {
 	return err
 }
 
-// Excerpt returns a [line.View] of the source around the error's locations
-// with each one highlighted, as [SourceError.Annotate] marks them, and
-// context lines of unchanged content on either side of each marked line.
-// Distant locations become separate hunks, and the first line of each hunk
-// after the first carries a "..." annotation above it. The lines keep the
-// numbers they have in the source, so any [printer.Printer] renders the
-// excerpt with the file's line numbers, as it renders the hunks of a diff.
-// A negative context shows the marked lines alone, as 0 does.
+// Excerpt returns a [line.View] of the source around the error's locations with each
+// one highlighted, as [SourceError.Annotate] marks them, and context lines of unchanged
+// content on either side of each marked line. Distant locations become separate hunks,
+// and the first line of each hunk after the first carries a "..." annotation above it.
+// The lines keep the numbers they have in the source, so any
+// [go.jacobcolvin.com/niceyaml/printer.Printer] renders the excerpt with the file's
+// line numbers, as it renders the hunks of a diff. A negative context shows the marked
+// lines alone, as 0 does.
 //
 // Excerpt returns an error only when no location resolves, as
 // [SourceError.Annotate] does. A node whose location does not resolve is

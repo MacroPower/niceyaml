@@ -25,17 +25,17 @@ import (
 // [*Document], and [Source.Document] returns the one document of a file
 // that holds one, which is where decoding and validation live.
 //
-// Source separates two concerns. Parsing lives on Source itself, where
-// [Source.File] lazily parses the AST and [Source.Documents] builds the
-// documents. Every error they and their Documents produce comes back
-// bound to the Source as a [SourceError]. [Document.Bind] binds errors
-// built elsewhere to the document they were checked against, and
-// [Source.Bind] binds one to the document its location falls in.
-// Rendering lives in a [line.View], which carries the overlays, annotations, and
-// flags that a [printer.Printer] renders over the [line.Lines] the Source
-// holds. [Source.Lines] returns those lines, which the [finder.Finder] and
-// [diff.Differ] read, and [Source.View] returns a fresh view over them for
-// the [printer.Printer].
+// Source separates two concerns. Parsing lives on Source itself, where [Source.File]
+// lazily parses the AST and [Source.Documents] builds the documents. Every error they
+// and their Documents produce comes back bound to the Source as a [SourceError].
+// [Document.Bind] binds errors built elsewhere to the document they were checked
+// against, and [Source.Bind] binds one to the document its location falls in. Rendering
+// lives in a [line.View], which carries the overlays, annotations, and flags that a
+// [go.jacobcolvin.com/niceyaml/printer.Printer] renders over the [line.Lines] the
+// Source holds. [Source.Lines] returns those lines, which the
+// [go.jacobcolvin.com/niceyaml/finder.Finder] and
+// [go.jacobcolvin.com/niceyaml/diff.Differ] read, and [Source.View] returns a fresh
+// view over them for the [go.jacobcolvin.com/niceyaml/printer.Printer].
 //
 // Typical use creates a Source and renders a view of it:
 //
@@ -435,8 +435,9 @@ func (s *Source) Bind(err error) error {
 // in the lines.
 //
 // The lines never change, so every call returns the same value and the
-// [finder.Finder] and [diff.Differ] read it as it is. To render the
-// Source, take a [line.View] from [Source.View].
+// [go.jacobcolvin.com/niceyaml/finder.Finder] and
+// [go.jacobcolvin.com/niceyaml/diff.Differ] read it as it is. To render the Source,
+// take a [line.View] from [Source.View].
 func (s *Source) Lines() line.Lines {
 	return s.lines
 }

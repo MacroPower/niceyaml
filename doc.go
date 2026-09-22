@@ -11,8 +11,8 @@
 //
 // # Usage
 //
-// Parse YAML into a [Source], then use a [printer.Printer] to render it with
-// syntax highlighting:
+// Parse YAML into a [Source], then use a [go.jacobcolvin.com/niceyaml/printer.Printer]
+// to render it with syntax highlighting:
 //
 //	source := niceyaml.NewSourceFromString(yamlContent)
 //	p := printer.New()
@@ -45,30 +45,31 @@
 // binds errors built elsewhere to that document, and [Source.Bind] binds
 // one to the document its location falls in.
 //
-// [line.Lines] is the content, the tokens organized into lines, and it
-// never changes. [line.View] is one rendering of that content: it shares
-// the lines and carries the decoration of the rendering. Annotations hold
-// error messages and diff headers, flags mark inserted and deleted lines,
-// and overlays apply style spans for highlighting. A Source hands out its
-// lines from [Source.Lines] and a fresh view over them from [Source.View],
-// so the decoration added to one view reaches neither the Source nor
-// another view, and taking a view costs nothing. [Document.View] is the
-// same view sliced to the lines of one document, with the line numbers
-// they have in the file. Every index and range a view takes is in the
-// coordinates of its lines, and a slice keeps them, so the ranges a
-// [finder.Finder] or [Document.Ranges] returns apply to a view of the
-// whole source and to a slice of it alike.
+// [line.Lines] is the content, the tokens organized into lines, and it never changes.
+// [line.View] is one rendering of that content: it shares the lines and carries the
+// decoration of the rendering. Annotations hold error messages and diff headers, flags
+// mark inserted and deleted lines, and overlays apply style spans for highlighting. A
+// Source hands out its lines from [Source.Lines] and a fresh view over them from
+// [Source.View], so the decoration added to one view reaches neither the Source nor
+// another view, and taking a view costs nothing. [Document.View] is the same view
+// sliced to the lines of one document, with the line numbers they have in the file.
+// Every index and range a view takes is in the coordinates of its lines, and a slice
+// keeps them, so the ranges a [go.jacobcolvin.com/niceyaml/finder.Finder] or
+// [Document.Ranges] returns apply to a view of the whole source and to a slice of it
+// alike.
 //
 // A view need not be a YAML document. Diffs, for example, interleave lines
 // from two revisions and are plain [line.View] values.
 //
-// [printer.Printer] renders a [line.View] with syntax highlighting via
-// lipgloss. It supports customizable gutters (line numbers, diff markers),
-// word wrapping, and annotation rendering. [diff.Differ] compares two
-// [line.Lines] values, and [finder.Finder] searches one.
+// [go.jacobcolvin.com/niceyaml/printer.Printer] renders a [line.View] with syntax
+// highlighting via lipgloss. It supports customizable gutters (line numbers, diff
+// markers), word wrapping, and annotation rendering.
+// [go.jacobcolvin.com/niceyaml/diff.Differ] compares two [line.Lines] values, and
+// [go.jacobcolvin.com/niceyaml/finder.Finder] searches one.
 //
-// Themes from [go.jacobcolvin.com/niceyaml/style/theme] provide color
-// palettes. Without one, [printer.Printer] renders with [style.Default].
+// Themes from [go.jacobcolvin.com/niceyaml/style/theme] provide color palettes. Without
+// one, [go.jacobcolvin.com/niceyaml/printer.Printer] renders with
+// [go.jacobcolvin.com/niceyaml/style.Default].
 //
 // [Error] points at a location in a YAML document: a path, a position, or
 // a range. [Error.Error] returns the message, with a path in front as
@@ -132,7 +133,7 @@
 // [line.View.String], so a view a caller decorates, such as one with
 // search matches, renders the same way. The output holds no escape
 // sequences, so it goes into a log as it is. A terminal gets color
-// from [printer.Printer.PrintError],
+// from [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError],
 // which prints the same parts with the printer's styles, width, and
 // context lines, and accepts any error, so a caller need not look for the
 // [SourceError] in the chain. It draws the message as a tree, with a
@@ -142,13 +143,12 @@
 //	p := printer.New(printer.WithWrap(width), printer.WithContextLines(3))
 //	fmt.Println(p.PrintError(err))
 //
-// This package knows nothing of the printer. The marks of an error are
-// decoration on a [line.View], so a caller renders them with any renderer
-// and composes them with anything else it renders. [SourceError.Excerpt]
-// returns the hunks around the locations as a view, as [diff.Result.Hunks]
-// does for a diff, and [SourceError.Annotate] marks a view that holds
-// lines of the source, so a viewer shows a document with every error in
-// place:
+// This package knows nothing of the printer. The marks of an error are decoration on a
+// [line.View], so a caller renders them with any renderer and composes them with
+// anything else it renders. [SourceError.Excerpt] returns the hunks around the
+// locations as a view, as [go.jacobcolvin.com/niceyaml/diff.Result.Hunks] does for a
+// diff, and [SourceError.Annotate] marks a view that holds lines of the source, so a
+// viewer shows a document with every error in place:
 //
 //	view := source.View()
 //	for _, bound := range validationErrors {
@@ -241,15 +241,18 @@
 //
 // # Diffs
 //
-// [diff.Differ] computes line differences using an [lcs.Algorithm]. The
-// default, [lcs.Hirschberg], is space-efficient for large files:
+// [go.jacobcolvin.com/niceyaml/diff.Differ] computes line differences using an
+// [go.jacobcolvin.com/niceyaml/diff/lcs.Algorithm]. The default,
+// [go.jacobcolvin.com/niceyaml/diff/lcs.Hirschberg], is space-efficient for large
+// files:
 //
 //	result := diff.Diff(original.Lines(), modified.Lines())
 //	p := printer.New()
 //	fmt.Println(p.Print(result.Unified()))
 //	fmt.Println(p.Print(result.Hunks(3)))
 //
-// Custom algorithms implement [lcs.Algorithm]. For a reusable [diff.Differ]:
+// Custom algorithms implement [go.jacobcolvin.com/niceyaml/diff/lcs.Algorithm]. For a
+// reusable [go.jacobcolvin.com/niceyaml/diff.Differ]:
 //
 //	d := diff.New(diff.WithAlgorithm(myAlgo))
 //	result := d.Diff(before.Lines(), after.Lines())
@@ -260,10 +263,12 @@
 //
 // # Text Search
 //
-// [finder.Finder] locates strings within tokens, returning [position.Range]
-// values suitable for [line.View.AddOverlay] and [line.View.BlendOverlay].
+// [go.jacobcolvin.com/niceyaml/finder.Finder] locates strings within tokens, returning
+// [position.Range] values suitable for [line.View.AddOverlay] and
+// [line.View.BlendOverlay].
 //
-// Use [normalizer.New] with [finder.WithNormalizer] for case-insensitive,
+// Use [go.jacobcolvin.com/niceyaml/normalizer.New] with
+// [go.jacobcolvin.com/niceyaml/finder.WithNormalizer] for case-insensitive,
 // diacritic-insensitive matching:
 //
 //	f := finder.New(finder.WithNormalizer(normalizer.New()))
@@ -297,15 +302,14 @@
 // [go.jacobcolvin.com/niceyaml/schema.WithJSONSchemaOptions]. The same
 // test enforces it.
 //
-// Rendering builds on lipgloss, and the [style] package exposes its Style
-// type directly since a theme is a set of lipgloss styles. The kinds of text
-// a rendering names, such as [kind.GenericError], live in
-// [go.jacobcolvin.com/niceyaml/style/kind], which imports nothing, so the
-// [line], [diff], and [finder] packages mark content without depending on
-// lipgloss. The
-// [go.jacobcolvin.com/niceyaml/fangs] and
-// [go.jacobcolvin.com/niceyaml/bubbles/yamlviewport] packages are adapters
-// for the charm libraries they build on and expose those libraries' types by
-// design. Each is a module of its own, so bubbletea, fang, and cobra stay
-// out of this module's dependencies.
+// Rendering builds on lipgloss, and the [go.jacobcolvin.com/niceyaml/style] package
+// exposes its Style type directly since a theme is a set of lipgloss styles. The kinds
+// of text a rendering names, such as [kind.GenericError], live in
+// [go.jacobcolvin.com/niceyaml/style/kind], which imports nothing, so the [line],
+// [go.jacobcolvin.com/niceyaml/diff], and [go.jacobcolvin.com/niceyaml/finder] packages
+// mark content without depending on lipgloss. The [go.jacobcolvin.com/niceyaml/fangs]
+// and [go.jacobcolvin.com/niceyaml/bubbles/yamlviewport] packages are adapters for the
+// charm libraries they build on and expose those libraries' types by design. Each is a
+// module of its own, so bubbletea, fang, and cobra stay out of this module's
+// dependencies.
 package niceyaml
