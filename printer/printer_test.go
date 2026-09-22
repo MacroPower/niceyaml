@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -45,7 +46,7 @@ func testPrinter() *printer.Printer {
 }
 
 // testPrinterWithGutter returns a printer without styles but with a custom gutter.
-func testPrinterWithGutter(gutter printer.GutterFunc) *printer.Printer {
+func testPrinterWithGutter(gutter printer.Gutter) *printer.Printer {
 	return printer.New(
 		printer.WithStyles(style.New(
 			lipgloss.NewStyle(),
@@ -584,7 +585,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 	`)
 
 	tcs := map[string]struct {
-		gutter printer.GutterFunc
+		gutter printer.Gutter
 		want   string
 		spans  position.Spans
 	}{
@@ -950,7 +951,7 @@ func TestPrinter_WordWrap(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		gutter printer.GutterFunc
+		gutter printer.Gutter
 		input  string
 		want   string
 		width  int
@@ -1350,26 +1351,14 @@ func TestPrinter_PrintTokenDiff_WithLineNumbers(t *testing.T) {
 func TestPrinter_PrintTokenDiff_CustomGutter(t *testing.T) {
 	t.Parallel()
 
-	// Helper to create a gutter function with custom prefixes.
-	makeGutter := func(inserted, deleted, equal string) printer.GutterFunc {
-		return func(ctx printer.GutterContext) string {
-			if ctx.Soft {
-				return strings.Repeat(" ", len(equal))
-			}
-
-			switch ctx.Flag {
-			case line.FlagInserted:
-				return inserted
-			case line.FlagDeleted:
-				return deleted
-			default:
-				return equal
-			}
-		}
+	// Helper to create a gutter with custom prefixes, declared as wide as
+	// the widest of them, so the printer pads the narrower ones.
+	makeGutter := func(inserted, deleted, equal string) printer.Gutter {
+		return prefixGutter{inserted: inserted, deleted: deleted, equal: equal}
 	}
 
 	tcs := map[string]struct {
-		gutterFunc printer.GutterFunc
+		gutterFunc printer.Gutter
 		before     string
 		after      string
 		want       string
@@ -1383,7 +1372,7 @@ func TestPrinter_PrintTokenDiff_CustomGutter(t *testing.T) {
 				"",
 			),
 			want: stringtest.JoinLF(
-				" key: old",
+				"  key: old",
 				">>new: line",
 			),
 		},
@@ -1396,7 +1385,7 @@ func TestPrinter_PrintTokenDiff_CustomGutter(t *testing.T) {
 			),
 			after: "key: old\n",
 			want: stringtest.JoinLF(
-				" key: old",
+				"  key: old",
 				"<<old: line",
 			),
 		},
@@ -1454,13 +1443,134 @@ func TestPrinter_PrintTokenDiff_CustomGutter(t *testing.T) {
 	}
 }
 
+// prefixGutter is a [printer.Gutter] that renders one prefix per flag and
+// declares the width of the widest.
+type prefixGutter struct {
+	inserted, deleted, equal string
+}
+
+func (g prefixGutter) Width(printer.GutterContext) int {
+	return max(len(g.inserted), len(g.deleted), len(g.equal))
+}
+
+func (g prefixGutter) Render(ctx printer.GutterContext) string {
+	if ctx.Soft {
+		return ""
+	}
+
+	switch ctx.Flag {
+	case line.FlagInserted:
+		return g.inserted
+	case line.FlagDeleted:
+		return g.deleted
+	default:
+		return g.equal
+	}
+}
+
+func TestGutter(t *testing.T) {
+	t.Parallel()
+
+	view := niceyaml.NewSourceFromString("a: 1\nb: 2\n").View()
+	view.SetFlag(1, line.FlagInserted)
+
+	t.Run("pads a row that renders less than the width", func(t *testing.T) {
+		t.Parallel()
+
+		p := testPrinterWithGutter(prefixGutter{inserted: "+ "})
+
+		assert.Equal(t, "  a: 1\n+ b: 2", p.Print(view))
+		assert.Equal(t, 2, p.Layout(view).GutterWidth())
+	})
+
+	t.Run("cuts a row that renders more than the width", func(t *testing.T) {
+		t.Parallel()
+
+		p := testPrinterWithGutter(fixedGutter{width: 1, text: "abc"})
+
+		assert.Equal(t, "aa: 1\nab: 2", p.Print(view))
+	})
+
+	t.Run("a negative width counts as none", func(t *testing.T) {
+		t.Parallel()
+
+		p := testPrinterWithGutter(fixedGutter{width: -3, text: "abc"})
+
+		assert.Equal(t, "a: 1\nb: 2", p.Print(view))
+		assert.Equal(t, 0, p.Layout(view).GutterWidth())
+	})
+
+	t.Run("a func measures what it renders for the largest number", func(t *testing.T) {
+		t.Parallel()
+
+		g := printer.GutterFunc(func(ctx printer.GutterContext) string {
+			if ctx.Flag == line.FlagInserted {
+				return "++"
+			}
+
+			return strings.Repeat("#", len(strconv.Itoa(ctx.MaxNumber)))
+		})
+
+		assert.Equal(t, 1, g.Width(printer.GutterContext{MaxNumber: 2}))
+		assert.Equal(t, 3, g.Width(printer.GutterContext{MaxNumber: 100}))
+
+		// The func renders two cells for the inserted line and the printer
+		// cuts it to the one cell it measured.
+		p := testPrinterWithGutter(g)
+		assert.Equal(t, "#a: 1\n+b: 2", p.Print(view))
+	})
+
+	t.Run("the built-in gutters render every row at the width they declare", func(t *testing.T) {
+		t.Parallel()
+
+		for name, g := range map[string]printer.Gutter{
+			"default": printer.DefaultGutter,
+			"diff":    printer.DiffGutter,
+			"number":  printer.LineNumberGutter,
+			"none":    printer.NoGutter,
+		} {
+			for _, maxNumber := range []int{0, 1, 9999, 10000, 123456} {
+				sample := printer.GutterContext{Number: maxNumber, MaxNumber: maxNumber, Styles: style.Styles{}}
+				width := g.Width(sample)
+
+				for _, flag := range []line.Flag{line.FlagDefault, line.FlagInserted, line.FlagDeleted} {
+					for _, soft := range []bool{false, true} {
+						for _, annotation := range []bool{false, true} {
+							ctx := sample
+							ctx.Number, ctx.Flag, ctx.Soft, ctx.Annotation = 1, flag, soft, annotation
+
+							got := lipgloss.Width(g.Render(ctx))
+							assert.Equal(t, width, got, "%s gutter at %d: %+v", name, maxNumber, ctx)
+						}
+					}
+				}
+			}
+		}
+	})
+}
+
+// fixedGutter is a [printer.Gutter] that declares one width and renders
+// one text, whatever the row.
+type fixedGutter struct {
+	text  string
+	width int
+}
+
+func (g fixedGutter) Width(printer.GutterContext) int {
+	return g.width
+}
+
+func (g fixedGutter) Render(printer.GutterContext) string {
+	return g.text
+}
+
 func TestGutterFunctions(t *testing.T) {
 	t.Parallel()
 
 	styles := style.Styles{}
 
 	tcs := map[string]struct {
-		gutterFunc printer.GutterFunc
+		gutterFunc printer.Gutter
 		want       string
 		ctx        printer.GutterContext
 	}{
@@ -1584,8 +1694,7 @@ func TestGutterFunctions(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			gutter := tc.gutterFunc
-			got := gutter(tc.ctx)
+			got := tc.gutterFunc.Render(tc.ctx)
 
 			// The default styles of a zero context carry colors, which the
 			// text under test does not.
@@ -3198,7 +3307,7 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 
 	tcs := map[string]struct {
 		annFunc    printer.AnnotationFunc
-		gutter     printer.GutterFunc
+		gutter     printer.Gutter
 		input      string
 		want       string
 		annotation line.Annotation
@@ -3594,7 +3703,7 @@ func TestPrinter_Layout_GutterWidth(t *testing.T) {
 
 	tcs := map[string]struct {
 		view   *line.View
-		gutter printer.GutterFunc
+		gutter printer.Gutter
 		want   int
 	}{
 		"no gutter": {
@@ -3775,7 +3884,7 @@ func TestPrinter_Layout_Width(t *testing.T) {
 
 	tcs := map[string]struct {
 		view   *line.View
-		gutter printer.GutterFunc
+		gutter printer.Gutter
 		spans  []position.Span
 		want   int
 	}{
@@ -4285,7 +4394,7 @@ func TestPrinter_AnnotationGutterSoftAcrossKinds(t *testing.T) {
 
 	p := printer.New(
 		printer.WithContainerStyle(lipgloss.NewStyle()),
-		printer.WithGutter(func(ctx printer.GutterContext) string {
+		printer.WithGutter(printer.GutterFunc(func(ctx printer.GutterContext) string {
 			switch {
 			case !ctx.Annotation:
 				return "L "
@@ -4294,7 +4403,7 @@ func TestPrinter_AnnotationGutterSoftAcrossKinds(t *testing.T) {
 			default:
 				return "F "
 			}
-		}),
+		})),
 	)
 
 	rows := strings.Split(p.Print(view), "\n")

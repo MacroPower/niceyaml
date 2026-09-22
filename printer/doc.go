@@ -13,10 +13,11 @@
 //
 // # Gutters
 //
-// A [GutterFunc] renders the left edge of each row from a [GutterContext].
+// A [Gutter] renders the left edge of each row from a [GutterContext] and
+// declares its width, which the printer pads or cuts every row to.
 // [DefaultGutter] shows the line number and a diff marker, [DiffGutter] the
-// marker only, [LineNumberGutter] the number only, and [NoGutter] nothing.
-// Pass one to [WithGutter].
+// marker only, [LineNumberGutter] the number only, and [NoGutter] nothing,
+// and a [GutterFunc] adapts a function. Pass one to [WithGutter].
 //
 // # Overlays
 //

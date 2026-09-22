@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"go.jacobcolvin.com/niceyaml/internal/colors"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
@@ -58,6 +59,8 @@ const wrapOnCharacters = " /-"
 // or diff markers. The printer uses [DefaultGutter] by default, which combines
 // line numbers with diff markers (+/-). Other built-in options include
 // [DiffGutter] (markers only), [LineNumberGutter] (numbers only), and [NoGutter].
+// A [Gutter] of your own declares its width and renders each row, and a
+// [GutterFunc] adapts a function.
 //
 // # Overlays
 //
@@ -93,7 +96,7 @@ const wrapOnCharacters = " /-"
 type Printer struct {
 	styles         style.Styler
 	style          lipgloss.Style
-	gutterFunc     GutterFunc
+	gutter         Gutter
 	annotationFunc AnnotationFunc
 	// Blended styles by the kinds that produce them. WithStyles replaces
 	// it, since the kinds then resolve to other styles.
@@ -115,7 +118,7 @@ const DefaultContextLines = 2
 func New(opts ...Option) *Printer {
 	p := &Printer{
 		styles:         style.Default(),
-		gutterFunc:     DefaultGutter,
+		gutter:         DefaultGutter,
 		annotationFunc: DefaultAnnotation,
 		blends:         newBlendCache(),
 		contextLines:   DefaultContextLines,
@@ -166,7 +169,7 @@ func (p *Printer) apply(opts []Option) {
 type Option func(*Printer)
 
 // GutterContext provides context about the current row for gutter rendering.
-// The printer passes it to [GutterFunc] to determine the gutter content.
+// The printer passes it to [Gutter.Render] to determine the gutter content.
 //
 // Index, Number, and Flag describe the line the row belongs to. MaxNumber
 // is the number the gutter sizes its line number column for, the larger
@@ -196,18 +199,65 @@ func (c GutterContext) styler() style.Styler {
 	return c.Styles
 }
 
-// GutterFunc returns the gutter content for a row based on [GutterContext].
-// The printer renders the returned string before the line content.
+// Gutter renders the left edge of each row. The printer asks it once per
+// view for the width of the gutter, budgets word wrapping and
+// [Layout.GutterWidth] from that, and renders every row's gutter at that
+// width: text that falls short is padded with spaces in [kind.Text], and
+// text that runs over is cut, so the content of every row starts in the
+// same column whatever the gutter renders for the row.
 //
-// The printer measures the gutter once per view, with the largest line
-// number and every other field of the context unset, and budgets word
-// wrapping and [Layout.Width] from that width, so return the same width
-// for every context of a view. Vary the text on Soft, Flag, or
-// Annotation, but not its width.
+// A gutter that shows a marker on some rows and nothing on others
+// therefore declares the width of the marker and renders what it likes:
+//
+//	type markerGutter struct{}
+//
+//	func (markerGutter) Width(printer.GutterContext) int { return 2 }
+//
+//	func (markerGutter) Render(ctx printer.GutterContext) string {
+//		if ctx.Flag == line.FlagInserted {
+//			return "+ "
+//		}
+//
+//		return ""
+//	}
+//
+//	p := printer.New(printer.WithGutter(markerGutter{}))
 //
 // [DefaultGutter], [DiffGutter], [LineNumberGutter], and [NoGutter] are
-// ready-made gutters; pass one to [WithGutter].
+// ready-made gutters, and [GutterFunc] adapts a function; pass one to
+// [WithGutter].
+type Gutter interface {
+	// Width returns the width in cells of the gutter on every row of a
+	// view. The context holds the styles the gutter renders with and, in
+	// both Number and MaxNumber, the largest line number of the view, and
+	// nothing else, since the width may not depend on the row.
+	Width(ctx GutterContext) int
+	// Render returns the gutter text for a row. The printer pads or cuts
+	// it to Width.
+	Render(ctx GutterContext) string
+}
+
+// GutterFunc adapts a function to the [Gutter] interface. Its width is
+// the width of what the function renders for the context [Gutter.Width]
+// receives, so a function whose width depends on the line number alone,
+// as the built-in gutters do, measures as it renders, and one that varies
+// its width on the flag or the row is padded or cut to what it renders
+// for that context:
+//
+//	p := printer.New(printer.WithGutter(printer.GutterFunc(func(ctx printer.GutterContext) string {
+//		return fmt.Sprintf("%3d ", ctx.Number)
+//	})))
 type GutterFunc func(GutterContext) string
+
+// Width implements [Gutter] by measuring what f renders for ctx.
+func (f GutterFunc) Width(ctx GutterContext) int {
+	return lipgloss.Width(f(ctx))
+}
+
+// Render implements [Gutter].
+func (f GutterFunc) Render(ctx GutterContext) string {
+	return f(ctx)
+}
 
 // AnnotationContext provides context for annotation rendering.
 //
@@ -309,7 +359,7 @@ func DefaultAnnotation(ctx AnnotationContext) string {
 func renderLineNumber(ctx GutterContext) string {
 	lineNumStyle := ctx.styler().Style(kind.UILineNumber)
 
-	width := max(4, len(strconv.Itoa(ctx.MaxNumber)))
+	width := numberWidth(ctx.MaxNumber)
 
 	switch {
 	case ctx.Annotation:
@@ -351,26 +401,75 @@ func renderDiffMarker(ctx GutterContext) string {
 	}
 }
 
-// DefaultGutter is the [GutterFunc] [New] uses. It renders the line
-// number followed by the diff marker.
-func DefaultGutter(ctx GutterContext) string {
-	return renderLineNumber(ctx) + renderDiffMarker(ctx)
+// numberWidth returns the width of the line number column for a view
+// whose largest line number is maxNumber: at least four, and as many
+// digits as the number has.
+func numberWidth(maxNumber int) int {
+	return max(4, len(strconv.Itoa(maxNumber)))
 }
 
-// DiffGutter is a [GutterFunc] that renders diff markers only (" ", "+",
-// "-"), styled with [kind.GenericInserted] and [kind.GenericDeleted].
-func DiffGutter(ctx GutterContext) string {
-	return renderDiffMarker(ctx)
+var (
+	// DefaultGutter is the [Gutter] [New] uses. It renders the line number
+	// followed by the diff marker.
+	DefaultGutter Gutter = numberGutter{marker: true}
+
+	// DiffGutter is a [Gutter] that renders diff markers only (" ", "+",
+	// "-"), styled with [kind.GenericInserted] and [kind.GenericDeleted].
+	DiffGutter Gutter = diffGutter{}
+
+	// LineNumberGutter is a [Gutter] that renders line numbers only, in
+	// [kind.UILineNumber]. Soft-wrapped continuation rows show " - ".
+	LineNumberGutter Gutter = numberGutter{}
+
+	// NoGutter is a [Gutter] that renders nothing.
+	NoGutter Gutter = noGutter{}
+)
+
+// numberGutter is the [Gutter] behind [DefaultGutter] and
+// [LineNumberGutter]: the line number column, followed by the diff marker
+// when marker is set.
+type numberGutter struct {
+	marker bool
 }
 
-// LineNumberGutter is a [GutterFunc] that renders line numbers only, in
-// [kind.UILineNumber]. Soft-wrapped continuation rows show " - ".
-func LineNumberGutter(ctx GutterContext) string {
+// Width implements [Gutter] by measuring what the gutter renders for ctx,
+// as [GutterFunc] does, so it measures with the styles it renders with.
+func (g numberGutter) Width(ctx GutterContext) int {
+	return lipgloss.Width(g.Render(ctx))
+}
+
+// Render implements [Gutter].
+func (g numberGutter) Render(ctx GutterContext) string {
+	if g.marker {
+		return renderLineNumber(ctx) + renderDiffMarker(ctx)
+	}
+
 	return renderLineNumber(ctx)
 }
 
-// NoGutter is a [GutterFunc] that renders nothing.
-func NoGutter(GutterContext) string {
+// diffGutter is the [Gutter] behind [DiffGutter].
+type diffGutter struct{}
+
+// Width implements [Gutter] by measuring what the gutter renders for ctx.
+func (g diffGutter) Width(ctx GutterContext) int {
+	return lipgloss.Width(g.Render(ctx))
+}
+
+// Render implements [Gutter].
+func (diffGutter) Render(ctx GutterContext) string {
+	return renderDiffMarker(ctx)
+}
+
+// noGutter is the [Gutter] behind [NoGutter].
+type noGutter struct{}
+
+// Width implements [Gutter].
+func (noGutter) Width(GutterContext) int {
+	return 0
+}
+
+// Render implements [Gutter].
+func (noGutter) Render(GutterContext) string {
 	return ""
 }
 
@@ -424,16 +523,16 @@ func WithStyles(s style.Styler) Option {
 	}
 }
 
-// WithGutter is an [Option] that sets the [GutterFunc] for rendering.
+// WithGutter is an [Option] that sets the [Gutter] for rendering.
 // By default, [DefaultGutter] renders line numbers and diff markers. A nil
-// fn selects [NoGutter].
-func WithGutter(fn GutterFunc) Option {
+// g selects [NoGutter].
+func WithGutter(g Gutter) Option {
 	return func(p *Printer) {
-		if fn == nil {
-			fn = NoGutter
+		if g == nil {
+			g = NoGutter
 		}
 
-		p.gutterFunc = fn
+		p.gutter = g
 	}
 }
 
@@ -585,14 +684,33 @@ func maxNumber(view *line.View) int {
 }
 
 // gutterWidth returns the width of the gutter for a view whose largest line
-// number is maxNumber. The widest gutter carries that number, so it
-// samples with it.
+// number is maxNumber, which the [Gutter] declares for a context holding
+// that number and the printer's styles.
 func (p *Printer) gutterWidth(maxNumber int) int {
-	return lipgloss.Width(p.gutterFunc(GutterContext{
+	return max(0, p.gutter.Width(GutterContext{
 		Styles:    p.styles,
 		Number:    maxNumber,
 		MaxNumber: maxNumber,
 	}))
+}
+
+// renderGutter renders the gutter for ctx at width cells: the text the
+// [Gutter] renders, padded with spaces in [kind.Text] to width or cut to
+// it, so every row of a view starts its content in the same column
+// whatever the gutter renders for the row.
+func (p *Printer) renderGutter(ctx GutterContext, width int) string {
+	text := p.gutter.Render(ctx)
+
+	switch w := lipgloss.Width(text); {
+	case w < width:
+		return text + p.styles.Style(kind.Text).Render(strings.Repeat(" ", width-w))
+
+	case w > width:
+		return ansi.Truncate(text, width, "")
+
+	default:
+		return text
+	}
 }
 
 // renderRows renders the lines of view as rows, with the gutter sized for
@@ -675,7 +793,7 @@ func (p *Printer) renderAnnotation(
 
 			// Every row after the first of the line's annotation block is
 			// a continuation, whichever kind group it belongs to.
-			sb.WriteString(p.gutterFunc(GutterContext{
+			sb.WriteString(p.renderGutter(GutterContext{
 				Index:      idx,
 				Number:     ln.Number(),
 				MaxNumber:  maxNumber,
@@ -683,7 +801,7 @@ func (p *Printer) renderAnnotation(
 				Flag:       view.Flag(idx),
 				Annotation: true,
 				Styles:     p.styles,
-			}))
+			}, gutterWidth))
 
 			prefix := group.indent
 			if j > 0 {
@@ -800,7 +918,7 @@ func (p *Printer) contentRows(content string, gutterCtx GutterContext, gutterWid
 		ctx := gutterCtx
 		ctx.Soft = j > 0
 
-		rows = append(rows, p.gutterFunc(ctx)+subLine)
+		rows = append(rows, p.renderGutter(ctx, gutterWidth)+subLine)
 	}
 
 	return rows

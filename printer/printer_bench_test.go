@@ -205,7 +205,7 @@ func BenchmarkPrinterPrintSlice(b *testing.B) {
 
 func BenchmarkPrinterWithGutter(b *testing.B) {
 	gutters := []struct {
-		gutter printer.GutterFunc
+		gutter printer.Gutter
 		name   string
 	}{
 		{printer.NoGutter, "no_gutter"},
