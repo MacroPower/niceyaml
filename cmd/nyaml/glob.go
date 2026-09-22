@@ -56,7 +56,13 @@ func expandPaths(args ...string) ([]string, error) {
 
 	seen := make(map[string]bool)
 	add := func(path string) {
-		key := filepath.Clean(path)
+		// One file named two ways, such as by a relative and an absolute
+		// path, is one file.
+		key, err := filepath.Abs(path)
+		if err != nil {
+			key = filepath.Clean(path)
+		}
+
 		if seen[key] {
 			return
 		}
