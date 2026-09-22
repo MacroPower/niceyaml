@@ -1,4 +1,4 @@
-package printer
+package line_test
 
 import (
 	"testing"
@@ -6,6 +6,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 
+	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
@@ -14,7 +15,7 @@ func newToken(typ token.Type, value string) *token.Token {
 	return &token.Token{Type: typ, Value: value, Origin: value}
 }
 
-func TestTypeStyle(t *testing.T) {
+func TestTokenKind(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -297,7 +298,7 @@ func TestTypeStyle(t *testing.T) {
 			t.Parallel()
 
 			tk := tc.setup()
-			got := typeStyle(tk, nil)
+			got := line.TokenKind(tk)
 
 			assert.Equal(t, tc.want, got)
 		})

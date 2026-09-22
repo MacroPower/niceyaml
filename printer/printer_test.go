@@ -2073,8 +2073,8 @@ func TestPrinter_TokenTypes_XMLStyler(t *testing.T) {
 				"alias: *x",
 			),
 			want: stringtest.JoinLF(
-				"<nameTag>anchor</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><nameAnchor>&</nameAnchor><nameAnchor>x</nameAnchor><text> </text><literalNumberInteger>1</literalNumberInteger>",
-				"<nameTag>alias</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><nameAlias>*</nameAlias><nameAlias>x</nameAlias>",
+				"<nameTag>anchor</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><nameAnchor>&x</nameAnchor><text> </text><literalNumberInteger>1</literalNumberInteger>",
+				"<nameTag>alias</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><nameAlias>*x</nameAlias>",
 			),
 		},
 		"comment": {

@@ -86,7 +86,7 @@ func (p *Printer) layoutLine(view *line.View, idx int, ln *line.Line, gutterWidt
 	// The content wraps as the rendered line does, styles included, since
 	// a style's transform may change the shown text. The wrap is
 	// ANSI-aware and measures the shown cells.
-	pieces := p.wrapContent(p.renderContent(view, idx, ln), gutterWidth)
+	pieces := p.wrapContent(p.renderContent(view, idx), gutterWidth)
 
 	// The columns come from the shown text of each piece matched against
 	// the escaped content, which is what the rows spell out when no style

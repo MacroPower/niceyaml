@@ -82,6 +82,11 @@
 // as a single '\n' whether the source used LF or CRLF, so the columns it
 // reports match [Line.Width].
 //
+// [Line.Kind] returns the [kind.Kind] the text of each token renders with,
+// read from its type and its neighbors, so a string before a colon is a
+// mapping key and the name after an anchor takes the kind of the anchor.
+// [TokenKind] reads the same from a token of a whole stream.
+//
 // Every token the package hands out is shared with the line. Treat them as
 // read-only and call [token.Token.Clone] before modifying one.
 //
@@ -115,6 +120,15 @@
 //
 //	view.AddOverlay(kind.GenericError, errorRange)
 //	view.BlendOverlay(kind.GenericHighlight, matches...)
+//
+// [View.Segments] cuts a line into the runs that one kind and one set of
+// overlays style, each with its text, so a renderer of any kind, such as
+// one that writes HTML, styles the line as the printer does without
+// reading the tokens or the overlays itself:
+//
+//	for seg := range view.Segments(i) {
+//		fmt.Fprintf(w, `<span class=%q>%s</span>`, seg.Kind, html.EscapeString(seg.Text))
+//	}
 //
 // [Flag] values categorize lines for special handling. A diff marks lines with
 // [FlagInserted] and [FlagDeleted]:

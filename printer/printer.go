@@ -3,12 +3,10 @@ package printer
 import (
 	"fmt"
 	"io"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"unicode"
-	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -16,10 +14,8 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/colors"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/line"
-	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
-	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 const wrapOnCharacters = " /-"
@@ -749,29 +745,65 @@ func (p *Printer) renderLine(view *line.View, idx int, ln *line.Line, maxNumber,
 		Styles:    p.styles,
 	}
 
-	rows = append(rows, p.contentRows(p.renderContent(view, idx, ln), gutterCtx, gutterWidth)...)
+	rows = append(rows, p.contentRows(p.renderContent(view, idx), gutterCtx, gutterWidth)...)
 
 	rows = append(rows, p.renderAnnotation(view, ln, idx, maxNumber, line.Below, gutterWidth)...)
 
 	return rows
 }
 
-// renderContent renders the content of line idx of view, which is ln,
-// with its overlays: a deleted or inserted line in the diff style for its
-// flag, and any other line with syntax highlighting.
-func (p *Printer) renderContent(view *line.View, idx int, ln *line.Line) string {
-	overlays := view.Overlays(idx)
+// renderContent renders the content of line idx of view with its
+// overlays, one styled run per run of segments from [line.View.Segments]
+// that style the same: a deleted or inserted line in the diff style for
+// its flag, and any other line in the kind of each segment, with the
+// overlays that cover the segment applied over that.
+func (p *Printer) renderContent(view *line.View, idx int) string {
+	var base kind.Kind
 
 	switch view.Flag(idx) {
 	case line.FlagDeleted:
-		return p.styleLineWithRanges(ln.Content(), position.New(idx, 0), kind.GenericDeleted, overlays)
+		base = kind.GenericDeleted
 
 	case line.FlagInserted:
-		return p.styleLineWithRanges(ln.Content(), position.New(idx, 0), kind.GenericInserted, overlays)
+		base = kind.GenericInserted
 
-	default: // line.FlagDefault (equal line).
-		return p.renderTokenLine(idx, ln, overlays)
+	case line.FlagDefault:
+		// Each segment renders in its own kind.
 	}
+
+	var (
+		sb      strings.Builder
+		run     strings.Builder
+		runKey  string
+		runSeg  line.Segment
+		started bool
+	)
+
+	flush := func() {
+		if started {
+			sb.WriteString(p.blended(runKey, runSeg).Render(escape.Control(run.String())))
+			run.Reset()
+		}
+	}
+
+	for seg := range view.Segments(idx) {
+		if base != "" {
+			seg.Kind = base
+		}
+
+		key := blendKey(seg)
+		if !started || key != runKey {
+			flush()
+
+			runKey, runSeg, started = key, seg, true
+		}
+
+		run.WriteString(seg.Text)
+	}
+
+	flush()
+
+	return sb.String()
 }
 
 // renderAnnotation renders the annotations of line idx of view, which is
@@ -924,142 +956,18 @@ func (p *Printer) contentRows(content string, gutterCtx GutterContext, gutterWid
 	return rows
 }
 
-// styleLineWithRanges renders src in the style for base. It splits the
-// line into spans based on effective styles (base plus the overlays that
-// cover each span).
-//
-// The pos parameter specifies the visual line and column position. Each
-// overlay either replaces or blends with the style underneath it, as its
-// [line.Overlay.Blend] field says.
-//
-// The overlays parameter provides the style overlays of the line; pass nil
-// if none.
-func (p *Printer) styleLineWithRanges(
-	src string,
-	pos position.Position,
-	base kind.Kind,
-	overlays line.Overlays,
-) string {
-	if src == "" {
-		return src
-	}
-
-	if len(overlays) == 0 {
-		return p.styles.Style(base).Render(escape.Control(src))
-	}
-
-	// Create span for this line segment's column range.
-	cols := position.NewSpan(pos.Col, pos.Col+utf8.RuneCountInString(src))
-
-	// Keep the overlays that overlap this column span.
-	var active line.Overlays
-
-	for _, o := range overlays {
-		if o.Cols.Overlaps(cols) {
-			active = append(active, o)
-		}
-	}
-
-	if len(active) == 0 {
-		return p.styles.Style(base).Render(escape.Control(src))
-	}
-
-	boundaries := computeStyleBoundaries(active, cols)
-	if len(boundaries) < 2 {
-		return p.styles.Style(base).Render(escape.Control(src))
-	}
-
-	// Render spans between boundaries, merging adjacent same-styled spans.
-	var sb strings.Builder
-
-	sb.Grow(len(src) * 2)
-
-	runes := []rune(src)
-
-	var (
-		currentKey   string
-		currentPoint int
-	)
-
-	spanStart := 0
-
-	for i := range len(boundaries) - 1 {
-		boundaryStart := boundaries[i] - cols.Start // Convert to rune index.
-		boundaryEnd := boundaries[i+1] - cols.Start // Convert to rune index.
-		spanPoint := boundaries[i]                  // Point for style lookup.
-
-		if boundaryStart < 0 || boundaryEnd > len(runes) || boundaryStart >= boundaryEnd {
-			continue
-		}
-
-		spanKey := blendKey(base, active, spanPoint)
-
-		// Merge adjacent spans with the same style.
-		if currentKey == "" {
-			currentKey, currentPoint = spanKey, spanPoint
-			spanStart = boundaryStart
-		} else if currentKey != spanKey {
-			// Style changed - flush current span.
-			st := p.blended(currentKey, base, active, currentPoint)
-			sb.WriteString(st.Render(escape.Control(string(runes[spanStart:boundaryStart]))))
-
-			currentKey, currentPoint = spanKey, spanPoint
-			spanStart = boundaryStart
-		}
-
-		// If styles are equal, continue accumulating the span.
-	}
-
-	// Flush remaining content.
-	if currentKey != "" && spanStart < len(runes) {
-		st := p.blended(currentKey, base, active, currentPoint)
-		sb.WriteString(st.Render(escape.Control(string(runes[spanStart:]))))
-	}
-
-	return sb.String()
-}
-
-// computeStyleBoundaries returns sorted, deduplicated boundary points where
-// styles change.
-//
-// The cols span defines the line segment boundaries.
-func computeStyleBoundaries(active line.Overlays, cols position.Span) []int {
-	boundaries := make([]int, 0, len(active)*2+2)
-	boundaries = append(boundaries, cols.Start, cols.End)
-
-	for _, ov := range active {
-		if ov.Cols.Start > cols.Start && ov.Cols.Start < cols.End {
-			boundaries = append(boundaries, ov.Cols.Start)
-		}
-
-		if ov.Cols.End > cols.Start && ov.Cols.End < cols.End {
-			boundaries = append(boundaries, ov.Cols.End)
-		}
-	}
-
-	slices.Sort(boundaries)
-
-	return slices.Compact(boundaries)
-}
-
-// blendKey returns the cache key of the effective style at point: the base
-// category followed by each overlay that covers the point, in order, marked
-// by whether it blends with or replaces the style underneath. Two points
-// with the same key render with the same style. It quotes each name, so
-// a name that contains a marker cannot collide with a different overlay
+// blendKey returns the cache key of the effective style of seg: its kind
+// followed by each overlay that covers it, in order, marked by whether it
+// blends with or replaces the style underneath. Two segments with the
+// same key render with the same style. It quotes each name, so a name
+// that contains a marker cannot collide with a different overlay
 // sequence.
-func blendKey(base kind.Kind, overlays line.Overlays, point int) string {
+func blendKey(seg line.Segment) string {
 	var sb strings.Builder
 
-	for _, ov := range overlays {
-		if !ov.Cols.Contains(point) {
-			continue
-		}
+	sb.WriteString(strconv.Quote(string(seg.Kind)))
 
-		if sb.Len() == 0 {
-			sb.WriteString(strconv.Quote(string(base)))
-		}
-
+	for _, ov := range seg.Overlays {
 		if ov.Blend {
 			sb.WriteString("+")
 		} else {
@@ -1069,30 +977,21 @@ func blendKey(base kind.Kind, overlays line.Overlays, point int) string {
 		sb.WriteString(strconv.Quote(string(ov.Kind)))
 	}
 
-	// A point no overlay covers keeps the base style, with no key to build.
-	if sb.Len() == 0 {
-		return strconv.Quote(string(base))
-	}
-
 	return sb.String()
 }
 
-// blended returns the style for key, which [blendKey] built from base and
-// the overlays that cover point. It computes the style on the first request
-// and serves the cache after that. The overlays apply in order. A blending
-// overlay mixes with the result so far, and any other replaces it.
-func (p *Printer) blended(key string, base kind.Kind, overlays line.Overlays, point int) lipgloss.Style {
+// blended returns the style for key, which [blendKey] built from seg. It
+// computes the style on the first request and serves the cache after
+// that. The overlays apply in order. A blending overlay mixes with the
+// result so far, and any other replaces it.
+func (p *Printer) blended(key string, seg line.Segment) lipgloss.Style {
 	if st, ok := p.blends.get(key); ok {
 		return st
 	}
 
-	result := p.styles.Style(base)
+	result := p.styles.Style(seg.Kind)
 
-	for _, ov := range overlays {
-		if !ov.Cols.Contains(point) {
-			continue
-		}
-
+	for _, ov := range seg.Overlays {
 		if ov.Blend {
 			result = colors.BlendStyles(result, p.styles.Style(ov.Kind))
 		} else {
@@ -1161,87 +1060,4 @@ func (p *Printer) wrapContent(content string, gutterWidth int) []string {
 	}
 
 	return strings.Split(lipgloss.Wrap(content, cw, wrapOnCharacters), "\n")
-}
-
-// renderTokenLine renders a single line's tokens with syntax highlighting.
-//
-// It handles separator (leading whitespace) and content styling, plus the
-// overlays the view carries for the line.
-//
-// The lineIndex parameter is the 0-indexed position in the [line.View].
-func (p *Printer) renderTokenLine(lineIndex int, ln *line.Line, overlays line.Overlays) string {
-	if ln.IsEmpty() {
-		return ""
-	}
-
-	pos := position.New(lineIndex, 0)
-
-	var sb strings.Builder
-
-	for _, tk := range ln.Tokens() {
-		tokenStyle := typeStyle(tk, ln.TokenAt(pos.Col))
-
-		// Drop the line ending, CR included, as Line.Content does. Print
-		// joins the rows with newlines.
-		origin := tokens.TrimLineEnding(tk.Origin)
-		originRunes := []rune(origin)
-
-		// The separator is the whitespace the token carries before its
-		// text, whether that text is a plain scalar, a quoted string, an
-		// anchor, a comment, or the continuation of a multiline scalar.
-		// The trailer is the whitespace it carries after that text, which
-		// the lexer hands to the token preceding a comment. Neither is
-		// part of the text, so both render in [kind.Text]. A token of
-		// nothing but whitespace is all separator.
-		separatorRunes := leadingWhitespaceRunes(origin)
-
-		trailerRunes := trailingWhitespaceRunes(origin)
-		if separatorRunes+trailerRunes > len(originRunes) {
-			trailerRunes = 0
-		}
-
-		// Part 1: Render separator portion (default style).
-		if separatorRunes > 0 {
-			sepPart := string(originRunes[:separatorRunes])
-			sb.WriteString(
-				p.styleLineWithRanges(sepPart, pos, kind.Text, overlays),
-			)
-
-			pos.Col += separatorRunes
-			originRunes = originRunes[separatorRunes:]
-		}
-
-		// Part 2: Render content portion (token style).
-		if contentRunes := len(originRunes) - trailerRunes; contentRunes > 0 {
-			sb.WriteString(
-				p.styleLineWithRanges(string(originRunes[:contentRunes]), pos, tokenStyle, overlays),
-			)
-
-			pos.Col += contentRunes
-			originRunes = originRunes[contentRunes:]
-		}
-
-		// Part 3: Render trailer portion (default style).
-		if len(originRunes) > 0 {
-			sb.WriteString(
-				p.styleLineWithRanges(string(originRunes), pos, kind.Text, overlays),
-			)
-
-			pos.Col += len(originRunes)
-		}
-	}
-
-	return sb.String()
-}
-
-// leadingWhitespaceRunes returns the number of runes in the run of spaces
-// and tabs that starts s.
-func leadingWhitespaceRunes(s string) int {
-	return utf8.RuneCountInString(s) - utf8.RuneCountInString(strings.TrimLeft(s, " \t"))
-}
-
-// trailingWhitespaceRunes returns the number of runes in the run of spaces
-// and tabs that ends s.
-func trailingWhitespaceRunes(s string) int {
-	return utf8.RuneCountInString(s) - utf8.RuneCountInString(strings.TrimRight(s, " \t"))
 }

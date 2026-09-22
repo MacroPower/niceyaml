@@ -1,4 +1,4 @@
-package printer
+package line
 
 import (
 	"github.com/goccy/go-yaml/token"
@@ -6,7 +6,9 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
-var tokenTypeStyles = map[token.Type]kind.Kind{
+// tokenKinds maps each [token.Type] to the [kind.Kind] its text renders
+// with. A type with no entry, such as a space, renders as [kind.Text].
+var tokenKinds = map[token.Type]kind.Kind{
 	token.AliasType:          kind.NameAlias,
 	token.AnchorType:         kind.NameAnchor,
 	token.BinaryIntegerType:  kind.LiteralNumberBin,
@@ -43,21 +45,49 @@ var tokenTypeStyles = map[token.Type]kind.Kind{
 	token.UnknownType:        kind.GenericErrorUnknown,
 }
 
-// typeStyle returns the [kind.Kind] for the given [*token.Token]'s
-// [token.Type]. The src token is the lexer token tk is a part of, or nil.
+// TokenKind returns the [kind.Kind] the text of tk renders with: the kind
+// of its [token.Type], read with its neighbors in the chain it links
+// into. A string followed by a colon reads as a mapping key, [kind.NameTag],
+// and a token after an anchor or an alias takes the kind of that anchor
+// or alias, so the name of "&base" renders as the "&" does. A merge key
+// keeps its own kind, since the lexer reports "<<" as one only when a
+// colon follows it. A type with no kind of its own, such as a space, and
+// a nil token render as [kind.Text].
 //
-// A string followed by a colon takes the mapping key style, and a token
-// after an anchor or alias inherits the style of that anchor or alias.
-func typeStyle(tk, src *token.Token) kind.Kind {
-	tts, ok := tokenTypeStyles[visualType(tk, src)]
-	if ok {
-		return tts
+// TokenKind reads a token of a whole stream, such as one from
+// [Lines.Tokens]. [Line.Kind] reads a token on a line, whose chain stops
+// at the line boundary, through the lexer token it is a part of, so a
+// key whose colon sits on the next line still reads as a key there.
+func TokenKind(tk *token.Token) kind.Kind {
+	return tokenKind(tk, nil)
+}
+
+// Kind returns the [kind.Kind] the text of the token at idx renders with,
+// as [TokenKind] reads it, with the neighbors of the lexer token it is a
+// part of standing in where the chain of the line stops. It is the kind
+// [View.Segments] gives the content of the token, and the kind a renderer
+// styles it with. Panics if idx is out of range.
+func (l *Line) Kind(idx int) kind.Kind {
+	seg := l.segments[idx]
+
+	return tokenKind(seg.Part(), seg.Source())
+}
+
+// tokenKind returns the [kind.Kind] for tk, with src the lexer token tk
+// is a part of, or nil for a token of a whole stream.
+func tokenKind(tk, src *token.Token) kind.Kind {
+	if tk == nil {
+		return kind.Text
+	}
+
+	if k, ok := tokenKinds[visualType(tk, src)]; ok {
+		return k
 	}
 
 	return kind.Text
 }
 
-// visualType returns the token type the style lookup uses, which differs
+// visualType returns the token type the kind lookup uses, which differs
 // from tk.Type when a neighbor changes how the token reads.
 //
 // The part chain stops at the line boundary, so where tk has no neighbor
