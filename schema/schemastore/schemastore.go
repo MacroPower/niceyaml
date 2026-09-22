@@ -421,7 +421,7 @@ func (s *Store) fetch(ctx context.Context) ([]CatalogEntry, error) {
 
 	err = json.Unmarshal(data, &catalog)
 	if err != nil {
-		return nil, fmt.Errorf("parse catalog from %s: %w", s.catalogURL, err)
+		return nil, fmt.Errorf("parse catalog from %s: %w", httpfetch.Redacted(s.catalogURL), err)
 	}
 
 	// Prefilter entries: only keep entries with YAML patterns that pass the filter.

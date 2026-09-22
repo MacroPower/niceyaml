@@ -1337,3 +1337,24 @@ type errorReader struct{}
 func (e *errorReader) Read(_ []byte) (int, error) {
 	return 0, errors.New("read error")
 }
+
+func TestStore_ParseErrorRedactsCredentials(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		//nolint:errcheck // Test helper.
+		w.Write([]byte("<html>not json</html>"))
+	}))
+	t.Cleanup(srv.Close)
+
+	catalogURL := strings.Replace(srv.URL, "http://", "http://svc:hunter2@", 1) + "/catalog.json"
+	store := schemastore.New(schemastore.WithCatalogURL(catalogURL), schemastore.WithHTTPClient(srv.Client()))
+
+	_, err := store.FindMatch(t.Context(), "a.yaml")
+	require.Error(t, err)
+
+	// The catalog URL in the message carries no password, as it does not
+	// when the fetch itself fails.
+	assert.Contains(t, err.Error(), "svc:xxxxx@")
+	assert.NotContains(t, err.Error(), "hunter2")
+}
