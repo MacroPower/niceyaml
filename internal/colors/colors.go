@@ -8,9 +8,8 @@ import (
 )
 
 // Override returns the overlay color if valid, otherwise the base color.
-// Unlike [Blend], this does not blend - overlay takes precedence. An overlay
-// outside the sRGB gamut is clamped into it, as [Blend] clamps, so it
-// renders as a valid SGR sequence.
+// Override clamps an overlay outside the sRGB gamut into it, as [Blend]
+// clamps, so the result renders as a valid SGR sequence.
 func Override(base, overlay color.Color) color.Color {
 	_, isNoColor := overlay.(lipgloss.NoColor)
 	if overlay == nil || isNoColor {
@@ -30,8 +29,8 @@ func Override(base, overlay color.Color) color.Color {
 // A color is absent when it is nil, [lipgloss.NoColor], or invisible. When
 // both colors are absent, Blend returns nil, and when one is, it returns
 // the other, clamped the same way when it lies outside the gamut.
-// A color outside the gamut is clamped before the blend as well, since
-// the conversion the blend reads wraps a negative channel to a bright one.
+// Blend also clamps a color outside the gamut before mixing, since the
+// RGBA conversion it reads wraps a negative channel to a bright one.
 func Blend(c1, c2 color.Color) color.Color {
 	cf1, visible1 := visible(c1)
 	cf2, visible2 := visible(c2)
@@ -64,8 +63,7 @@ func visible(c color.Color) (colorful.Color, bool) {
 
 // clamped returns c as it is when every channel lies in [0, 1], and c
 // clamped to the sRGB gamut otherwise. Only a [colorful.Color] can hold a
-// channel outside that range; every other color type is bounded by its
-// integer channels.
+// channel outside that range; integer channels bound every other color type.
 func clamped(c color.Color) color.Color {
 	if cf, ok := c.(colorful.Color); ok && !cf.IsValid() {
 		return cf.Clamped()
@@ -74,9 +72,10 @@ func clamped(c color.Color) color.Color {
 	return c
 }
 
-// BlendStyles blends two [lipgloss.Style] values: colors via LAB blending,
-// transforms composed (overlay wraps base), and text attributes such as
-// bold or underline kept from either style.
+// BlendStyles blends two [lipgloss.Style] values. It blends colors in LAB
+// color space and composes transforms so overlay wraps base. Text
+// attributes the overlay sets, such as bold or underline, apply on top of
+// the base's.
 //
 //nolint:gocritic // hugeParam: value semantics match lipgloss.
 func BlendStyles(base, overlay lipgloss.Style) lipgloss.Style {
@@ -100,7 +99,7 @@ func BlendStyles(base, overlay lipgloss.Style) lipgloss.Style {
 		style = style.Background(blendedBg)
 	}
 
-	// Compose transforms: overlay wraps base.
+	// Compose transforms so overlay wraps base.
 	baseTransform := style.GetTransform()
 	overlayTransform := overlay.GetTransform()
 
@@ -112,18 +111,19 @@ func BlendStyles(base, overlay lipgloss.Style) lipgloss.Style {
 
 	case overlayTransform != nil:
 		style = style.Transform(overlayTransform)
-		// Base transform is nil: keep base's transform (already in result).
+		// Base transform is nil here. When the overlay has no transform,
+		// the result keeps base's, already in style.
 	}
 
 	return style
 }
 
-// OverrideStyles applies overlay on top of base [lipgloss.Style]: overlay
-// properties replace base properties.
+// OverrideStyles applies overlay on top of base [lipgloss.Style], so
+// overlay properties replace base properties.
 //
-// Colors are overridden (not blended), transforms are overridden (not
-// composed), and text attributes the overlay sets, such as bold or
-// underline, apply on top of the base's.
+// OverrideStyles replaces colors rather than blending them, and transforms
+// rather than composing them. Text attributes the overlay sets, such as
+// bold or underline, apply on top of the base's.
 //
 //nolint:gocritic // hugeParam: value semantics match lipgloss.
 func OverrideStyles(base, overlay lipgloss.Style) lipgloss.Style {
@@ -148,7 +148,7 @@ func OverrideStyles(base, overlay lipgloss.Style) lipgloss.Style {
 }
 
 // layerAttributes returns base with every text attribute that over sets
-// turned on. A lipgloss.Style reports an unset attribute as false, so an
+// turned on. A [lipgloss.Style] reports an unset attribute as false, so an
 // overlay cannot turn an attribute of the base off.
 //
 //nolint:gocritic // hugeParam: value semantics match lipgloss.

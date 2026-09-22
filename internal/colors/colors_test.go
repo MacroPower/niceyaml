@@ -178,7 +178,7 @@ func TestBlend_InGamut(t *testing.T) {
 			c2: color.RGBA{R: 0, G: 0, B: 255, A: 255},
 		},
 		"out of gamut against NoColor": {
-			// A color handed back as it is must still be clamped.
+			// Blend still clamps a color it hands back as it is.
 			c1: colorful.Color{R: 1.8, G: -0.4, B: 0.5},
 			c2: lipgloss.NoColor{},
 		},
