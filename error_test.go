@@ -4174,3 +4174,32 @@ func TestRebase(t *testing.T) {
 		require.EqualError(t, err, "4:10: $.hours.close: closes before it opens")
 	})
 }
+
+func TestError_TokenAfterTrailingSpaces(t *testing.T) {
+	t.Parallel()
+
+	// The lexer counts the spaces after a value into its column, and the
+	// Source places the token where its text starts, so an error at the
+	// token marks the value rather than the spaces after it.
+	src := xmlSource("a: 1   \nb: 2\n")
+
+	var value *token.Token
+
+	for _, tk := range src.Tokens() {
+		if tk.Value == "1" {
+			value = tk
+		}
+	}
+
+	require.NotNil(t, value)
+	assert.Equal(t, position.New(0, 3), position.NewFromToken(value))
+
+	err := yamltest.Bind(t, src, niceyaml.NewError(
+		"bad value",
+		niceyaml.AtPosition(position.NewFromToken(value)),
+	))
+
+	got := trimLines(render(err))
+	assert.True(t, strings.HasPrefix(got, "1:4: bad value\n"), got)
+	assert.Contains(t, got, "<genericError>1</genericError>")
+}
