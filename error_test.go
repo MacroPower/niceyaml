@@ -4105,6 +4105,25 @@ func TestRebase(t *testing.T) {
 		assert.Same(t, wrapped, niceyaml.Rebase(wrapped, hours))
 	})
 
+	t.Run("a location set on the rebased error is under the base", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		var e *niceyaml.Error
+
+		inner := niceyaml.NewError("closes before it opens", niceyaml.AtPath(closePath))
+		require.ErrorAs(t, niceyaml.Rebase(inner, hours), &e)
+
+		moved := e.With(niceyaml.AtPath(paths.Root().Child("open")))
+
+		p, ok := moved.Path()
+		require.True(t, ok)
+		assert.Equal(t, hours.Child("open"), p)
+		assert.Equal(t, "$.hours.open: closes before it opens", moved.Error())
+		require.EqualError(t, dd.Bind(moved), `3:9: $.hours.open: closes before it opens`)
+	})
+
 	t.Run("text a wrapper added stays as it is", func(t *testing.T) {
 		t.Parallel()
 

@@ -325,6 +325,10 @@ func (e *Error) nested() []error {
 // holds none.
 func (e *Error) located() (any, bool) {
 	if e.hasPosition() {
+		if p, isPath := e.loc.(paths.Path); isPath && e.rebased {
+			return e.base.Join(p), true
+		}
+
 		return e.loc, true
 	}
 
@@ -736,6 +740,10 @@ func anchorOf(err error) anchor {
 		}
 
 		if x.loc != nil {
+			if p, ok := x.loc.(paths.Path); ok && x.rebased {
+				return anchor{err: x, loc: x.base.Join(p)}
+			}
+
 			return anchor{err: x, loc: x.loc}
 		}
 
