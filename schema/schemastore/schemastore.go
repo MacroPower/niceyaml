@@ -59,7 +59,10 @@ type CatalogEntry struct {
 	Description string `json:"description"`
 	// URL is the HTTP URL to fetch the schema from.
 	URL string `json:"url"`
-	// FileMatch contains glob patterns for files this schema applies to.
+	// FileMatch contains the glob patterns for files this schema applies
+	// to that can match a YAML or JSON file. The store drops the other
+	// patterns of the entry when it loads the catalog, so the slice may be
+	// shorter than the catalog's.
 	FileMatch []string `json:"fileMatch"`
 }
 
