@@ -17,12 +17,12 @@ type anyMatcher struct {
 // logic). Evaluation short-circuits on the first matching matcher, and the
 // first matcher that returns an error ends it with that error.
 //
-// Returns false if no matchers are provided.
+// Returns false when the caller passes no matchers.
 //
 // Panics if any matcher is nil. The matcher keeps its own copy of
 // matchers, so writing to the caller's slice afterwards changes nothing.
 //
-// This is useful for matching multiple document types with the same schema:
+// Use Any to match several document types with the same schema:
 //
 //	kindPath := paths.Root().Child("kind")
 //	matcher.Any(

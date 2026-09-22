@@ -2,14 +2,14 @@
 // to a YAML document.
 //
 // A [Matcher] guards a [go.jacobcolvin.com/niceyaml/schema.Resolver] through
-// [go.jacobcolvin.com/niceyaml/schema.When]: the guarded resolver
+// [go.jacobcolvin.com/niceyaml/schema.When]. The guarded resolver
 // names its schema only for documents the matcher accepts and reports
 // [go.jacobcolvin.com/niceyaml/schema.ErrNoMatch] for the rest, so a
 // [go.jacobcolvin.com/niceyaml/schema.Registry] moves on to its
 // next resolver. A matcher that cannot decide, because its context ended
 // or the document holds an alias its path cannot follow, returns an
-// error, and the registry stops at that document rather than route it to
-// a resolver further down.
+// error, and the registry stops at that document rather than routing it
+// to a resolver further down.
 //
 // # Matching Strategies
 //

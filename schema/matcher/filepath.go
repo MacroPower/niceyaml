@@ -20,8 +20,8 @@ type filePathMatcher struct {
 // FilePath creates a new [Matcher] that matches documents based on a file path
 // glob pattern.
 //
-// The pattern is matched against the full file path using doublestar glob
-// syntax. A pattern whose syntax does not parse comes back as
+// Match tests the full file path against the pattern using doublestar
+// glob syntax. A pattern whose syntax does not parse comes back as
 // [ErrInvalidPattern]. Use [MustFilePath] for patterns known to be valid at
 // compile time.
 //

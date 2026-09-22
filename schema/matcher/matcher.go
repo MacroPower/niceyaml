@@ -6,7 +6,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 )
 
-// Matcher determines whether a schema should be applied to a document.
+// Matcher determines whether a schema applies to a document.
 //
 // A Matcher guards a [go.jacobcolvin.com/niceyaml/schema.Resolver] through
 // [go.jacobcolvin.com/niceyaml/schema.When], which reports

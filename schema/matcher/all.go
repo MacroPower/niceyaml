@@ -17,7 +17,7 @@ type allMatcher struct {
 // logic). Evaluation short-circuits on the first non-matching matcher, and
 // the first matcher that returns an error ends it with that error.
 //
-// Returns true if no matchers are provided.
+// Returns true when the caller passes no matchers.
 //
 // Panics if any matcher is nil. The matcher keeps its own copy of
 // matchers, so writing to the caller's slice afterwards changes nothing.

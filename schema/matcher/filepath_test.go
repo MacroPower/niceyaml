@@ -107,8 +107,8 @@ func TestFilePath_InvalidPattern(t *testing.T) {
 func TestFilePath_EmptyPattern(t *testing.T) {
 	t.Parallel()
 
-	// An empty pattern matches nothing, so it is rejected rather than
-	// silently disabling the matcher.
+	// An empty pattern matches nothing, so FilePath rejects it rather
+	// than silently disabling the matcher.
 	_, err := matcher.FilePath("")
 	require.ErrorIs(t, err, matcher.ErrInvalidPattern)
 
