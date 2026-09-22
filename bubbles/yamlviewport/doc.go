@@ -11,11 +11,11 @@
 //	m.SetRevision(niceyaml.NewSourceFromString(yamlContent))
 //
 // The viewport is a component in the Bubbles convention rather than a
-// [tea.Model]: [Model.Update] returns the updated Model, so hold it as a
+// [tea.Model]. [Model.Update] returns the updated Model, so hold it as a
 // field of your own model, forward messages to Update, and store the Model
 // it returns.
 //
-// A [Revision] is a name and a view of the content. A [niceyaml.Source] is
+// A [Revision] is a name and a view of the content. A [*niceyaml.Source] is
 // one, and [NewRevision] makes one from a decorated view, so a viewer shows
 // a document with its error marks in place:
 //
@@ -27,7 +27,7 @@
 //	m.SetRevision(yamlviewport.NewRevision(source.Name(), view))
 //
 // Search highlights go on a clone of the view, so the marks stay and the
-// view itself is never changed.
+// viewport never changes the view itself.
 //
 // # Revision History
 //
@@ -44,7 +44,7 @@
 //	m.AddRevision(niceyaml.NewSourceFromString(v2, niceyaml.WithName("v2")))
 //	// Now showing diff between v1 and v2.
 //
-// Three diff modes control how comparisons are made:
+// Three diff modes control how the viewport compares revisions:
 //
 //   - [DiffModeAdjacent]: Compare with the previous revision (default).
 //   - [DiffModeOrigin]: Compare with the first revision.
@@ -76,7 +76,7 @@
 // match, such as the normalization applied, or a custom [Searcher] via
 // [WithSearcher] for another search implementation.
 //
-// Keybindings are fully configurable through the [KeyMap] field on [Model].
+// Configure keybindings through the [KeyMap] field on [Model].
 //
 // The viewport supports both keyboard navigation (vim-style by default) and
 // mouse wheel scrolling.

@@ -31,7 +31,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
-// testPrinter returns a printer without styles or line numbers for predictable golden output.
 func TestViewport_SearchDecorationRefreshesRowCounts(t *testing.T) {
 	t.Parallel()
 
@@ -71,6 +70,7 @@ func TestViewport_SearchDecorationRefreshesRowCounts(t *testing.T) {
 	assert.Greater(t, cached, before, "the widened highlights should wrap more rows")
 }
 
+// testPrinter returns a printer without styles or line numbers for predictable golden output.
 func testPrinter() *printer.Printer {
 	return printer.New(
 		printer.WithStyles(style.Styles{}),
@@ -260,7 +260,8 @@ func TestViewport_Golden(t *testing.T) {
 			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
 				m.ToggleWordWrap() // Disable wrap (default is true).
 
-				// XOffset stays at 0 - verifies lines are truncated, not wrapped.
+				// XOffset stays at 0 to verify the viewport truncates the
+				// lines instead of wrapping them.
 			},
 		},
 		"EmptyContent": {
@@ -370,7 +371,7 @@ func TestViewport_Golden(t *testing.T) {
 			height: 24,
 			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
 				m.SetSearchTerm("item")
-				m.ClearSearch() // Clear search - no highlights.
+				m.ClearSearch() // Clearing the search removes the highlights.
 			},
 		},
 		"SearchScrollsToFirstMatch": {
@@ -1671,7 +1672,7 @@ func TestViewport_Revisions(t *testing.T) {
 			setup: func(m *yamlviewport.Model) {
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
-				m.SetRevision(niceyaml.NewSourceFromTokens(rev3Tokens)) // SetSource uses the Source's name.
+				m.SetRevision(niceyaml.NewSourceFromTokens(rev3Tokens)) // SetRevision uses the Source's name.
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -2133,11 +2134,11 @@ func TestViewport_SetFile(t *testing.T) {
 			yaml:       simpleYAML,
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
-				// After SetSource, revisions should be replaced with single file.
+				// SetRevision replaces the history with a single revision.
 				assert.Equal(t, 1, m.RevisionCount())
 				assert.False(t, m.ShowingDiff())
 				assert.Equal(t, 2, m.TotalLineCount())
-				assert.Empty(t, m.RevisionName()) // SetSource uses Source's name.
+				assert.Empty(t, m.RevisionName()) // SetRevision uses the Source's name.
 			},
 		},
 	}
@@ -2402,10 +2403,10 @@ func TestViewport_Update(t *testing.T) {
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
-				// After PreviousRevision, we're at index 0 (the original SetSource revision).
+				// After PreviousRevision, we're at index 0 (the revision SetRevision set).
 				assert.Equal(t, 0, m.RevisionIndex())
 				assert.False(t, m.ShowingDiff())  // First revision, no diff.
-				assert.Empty(t, m.RevisionName()) // SetSource uses empty name.
+				assert.Empty(t, m.RevisionName()) // SetRevision uses the Source's name, which is empty.
 			},
 		},
 		"Behavior/MToggleDiffMode": {
@@ -2915,7 +2916,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			height: 24,
 		},
 		"SideBySideNoChanges": {
-			// Same content on both sides - verifies identical panes.
+			// Same content on both sides renders identical panes.
 			setupFunc: func(m *yamlviewport.Model) {
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("v1")))
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("v2")))
@@ -2926,7 +2927,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			height: 24,
 		},
 		"SideBySideAtOrigin": {
-			// At revision 0 - shows same content on both panes.
+			// At revision 0, both panes show the same content.
 			setupFunc: func(m *yamlviewport.Model) {
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("v1")))
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("v2")))
@@ -2962,7 +2963,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			height: 24,
 		},
 		"SideBySideDiffModeNone": {
-			// Side-by-side with no diff mode - shows same content on both panes.
+			// Side-by-side with no diff mode shows the same content on both panes.
 			setupFunc: func(m *yamlviewport.Model) {
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("v1")))
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("v2")))
@@ -3007,7 +3008,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			height: 10,
 		},
 		"SideBySideMoreDeletions": {
-			// More deletions than insertions - placeholders on the right pane.
+			// With more deletions than insertions, the right pane gets placeholders.
 			setupFunc: func(m *yamlviewport.Model) {
 				moreDeletionsBefore := stringtest.Input(`
 					keep: start
@@ -3033,7 +3034,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			height: 16,
 		},
 		"SideBySideMoreInsertions": {
-			// More insertions than deletions - placeholders on the left pane.
+			// With more insertions than deletions, the left pane gets placeholders.
 			setupFunc: func(m *yamlviewport.Model) {
 				moreInsertionsBefore := stringtest.Input(`
 					keep: start
@@ -3737,7 +3738,7 @@ func TestViewport_ScrollEdgeCases(t *testing.T) {
 		m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
 		m.SetWidth(80)
 		m.SetHeight(10)
-		// No tokens set - empty lines.
+		// No tokens set, so the lines are empty.
 
 		m.ScrollDown(1)
 		assert.Equal(t, 0, m.YOffset())
@@ -3765,7 +3766,7 @@ func TestViewport_ScrollEdgeCases(t *testing.T) {
 		m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
 		m.SetWidth(80)
 		m.SetHeight(10)
-		// No tokens set - empty lines.
+		// No tokens set, so the lines are empty.
 
 		m.ScrollUp(1)
 		assert.Equal(t, 0, m.YOffset())
@@ -3822,7 +3823,7 @@ func TestViewport_RevisionStateEdgeCases(t *testing.T) {
 		m.SetWidth(80)
 		m.SetHeight(10)
 
-		// No revisions - should return true.
+		// With no revisions, both checks return true.
 		assert.True(t, m.AtFirstRevision())
 		assert.True(t, m.AtLatestRevision())
 	})
@@ -3846,7 +3847,7 @@ func TestViewport_ToggleWordWrapResetsXOffset(t *testing.T) {
 	m.ScrollRight(5)
 	assert.Equal(t, 5, m.XOffset())
 
-	// Toggle back to enable wrapping - should reset xOffset.
+	// Toggle back to enable wrapping, which resets xOffset.
 	m.ToggleWordWrap()
 	assert.True(t, m.WordWrap())
 	assert.Equal(t, 0, m.XOffset())
@@ -4558,8 +4559,8 @@ func TestViewport_SearchAcrossRevisions(t *testing.T) {
 	m.SetSearchTerm("alpha")
 	assert.Equal(t, 1, m.SearchCount())
 
-	// A new revision changes the displayed content, so matches are recomputed
-	// against the diff rather than the stale index.
+	// A new revision changes the displayed content, so the viewport
+	// recomputes the matches against the diff rather than the stale index.
 	m.AddRevision(niceyaml.NewSourceFromString("key: alpha\nother: alpha\n", niceyaml.WithName("v2")))
 	assert.Equal(t, 2, m.SearchCount())
 

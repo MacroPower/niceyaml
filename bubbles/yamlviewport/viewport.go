@@ -107,7 +107,7 @@ func (r revision) View() *line.View {
 	return r.view
 }
 
-// DiffMode specifies how diffs are computed between revisions.
+// DiffMode specifies how the viewport computes diffs between revisions.
 //
 // Use [Model.SetDiffMode] to change the mode, or [Model.ToggleDiffMode] to
 // cycle through modes.
@@ -119,10 +119,9 @@ const (
 	// This is the default mode.
 	DiffModeAdjacent DiffMode = iota
 	// DiffModeOrigin compares the current revision with the first (origin)
-	// revision, showing cumulative changes.
+	// revision, so the diff shows cumulative changes.
 	DiffModeOrigin
-	// DiffModeNone displays the current revision without any diff markers, showing
-	// the plain document content.
+	// DiffModeNone displays the current revision without any diff markers.
 	DiffModeNone
 )
 
@@ -221,7 +220,7 @@ func New(opts ...Option) Model {
 // the searcher that [New] creates, so a zero Model finds no match for any
 // term. Construct every Model with [New] and its [Option]s.
 //
-// # Rows and Lines
+// # Rows
 //
 // The viewport scrolls by rendered row, not by source line. A line that
 // wraps to the viewport width or carries an annotation takes several rows,
@@ -296,7 +295,8 @@ type Model struct {
 	// frame above the first line.
 	anchorLine int
 	anchorRow  int
-	// Reports that left changed since the searcher last loaded it.
+	// Reports that the base views changed since the searcher last loaded
+	// them.
 	searcherStale bool
 	// MouseWheelEnabled enables mouse wheel scrolling.
 	// Default: true.
@@ -364,11 +364,10 @@ func (m *Model) SetWidth(w int) {
 	m.relayout()
 }
 
-// relayout responds to a change in how the view is laid out, such as a new
-// printer, style, wrap setting, or width, without rebuilding the view. It
-// gives the Model an empty row count cache and leaves any copy that shares
-// the old cache untouched. The next read of the scroll bounds fills the new
-// cache.
+// relayout responds to a layout change, such as a new printer, style, wrap
+// setting, or width, without rebuilding the view. It gives the Model an empty
+// row count cache and leaves any copy that shares the old cache untouched.
+// The next read of the scroll bounds fills the new cache.
 //
 // Row offsets from the old cache point at other lines once the rows reflow,
 // so relayout records the line at the top of the view and the row within it,
@@ -391,13 +390,13 @@ func (m *Model) relayout() {
 // width less the horizontal frame of the printer's container style, so a
 // wrapped line and the frame around it together fit the content area.
 //
-// The printer's container is pinned to the given width, so the box it draws
-// covers the same columns for every window. Without the pin it would shrink
+// Pinning the printer's container to the given width makes the box it draws
+// cover the same columns for every window. Without the pin it would shrink
 // to the widest row of the window, and a window of short lines would carry
 // its border in from the edge of the content area.
 //
-// A render prints a slice of the view, so the gutter is sized for the
-// largest line number of the whole view rather than of the window, and
+// A render prints a slice of the view, so renderPrinter sizes the gutter for
+// the largest line number of the whole view rather than of the window, and
 // every window lines up with the layout. In side-by-side mode both panes
 // get the gutter of the longer revision, so the one horizontal offset lands
 // on the same content column in both.
@@ -464,13 +463,13 @@ func (m *Model) ClearRevisions() {
 }
 
 // RevisionIndex returns the current revision index.
-// Returns 0 if revisions are empty.
+// Returns 0 without revisions.
 func (m *Model) RevisionIndex() int {
 	return m.revIndex
 }
 
 // RevisionName returns the name of the current revision.
-// Returns empty string if revisions are empty.
+// Returns an empty string without revisions.
 func (m *Model) RevisionName() string {
 	if !m.hasRevision() {
 		return ""
@@ -532,8 +531,8 @@ func (m *Model) ShowingDiff() bool {
 
 // DiffStats returns the number of added and removed lines in the current diff.
 //
-// Returns (0, 0) if no diff is being shown (at first revision, diff mode is none,
-// or no revisions exist).
+// Returns (0, 0) when the viewport shows no diff (at first revision, diff
+// mode is none, or no revisions exist).
 func (m *Model) DiffStats() (int, int) {
 	if !m.ShowingDiff() {
 		return 0, 0
@@ -790,8 +789,9 @@ type searchMatch struct {
 
 // updateSideBySideSearchState updates search matches for side-by-side mode.
 //
-// Matches are combined from both sources with deduplication: equal lines count
-// as a single match, while deleted/inserted lines are separate matches.
+// It combines the matches from both panes and deduplicates them. Equal lines
+// count as a single match, while deleted and inserted lines count as separate
+// matches.
 func (m *Model) updateSideBySideSearchState() {
 	if m.searchTerm == "" {
 		m.searchMatches = nil
@@ -811,15 +811,15 @@ func (m *Model) updateSideBySideSearchState() {
 		m.searcherStale = false
 	}
 
-	// Search on both sources and cache results for overlay application.
+	// Search both panes and cache the results for overlay application.
 	m.leftMatches = heldMatches(m.baseLeft, m.index.Find(m.searchTerm))
 	m.rightMatches = heldMatches(m.baseRight, m.indexRight.Find(m.searchTerm))
 
 	// Build combined match list. For equal lines, a match appears in both
-	// sources at the same position, so we deduplicate by (row, startCol).
-	// For deleted/inserted lines, the match only appears in one source.
+	// panes at the same position, so we deduplicate by (row, startCol).
+	// For deleted/inserted lines, the match only appears in one pane.
 	//
-	// Track equal-line match positions from left source for deduplication.
+	// Track equal-line match positions from the left pane for deduplication.
 	equalLinePositions := make(map[position.Position]bool)
 
 	combined := make([]searchMatch, 0, len(m.leftMatches)+len(m.rightMatches))
@@ -833,7 +833,7 @@ func (m *Model) updateSideBySideSearchState() {
 		}
 	}
 
-	// Add matches from right source, skipping duplicates on equal lines.
+	// Add matches from the right pane, skipping duplicates on equal lines.
 	for _, match := range m.rightMatches {
 		if equalLinePositions[match.Start] {
 			continue
@@ -899,7 +899,7 @@ func (m *Model) applySideBySideOverlays() {
 		}
 	}
 
-	// Apply overlays to both sources using cached matches.
+	// Apply overlays to both panes using cached matches.
 	m.applySideBySidePaneOverlays(m.left, m.leftMatches, selectedPos, selectedInLeft || selectedIsEqual)
 	m.applySideBySidePaneOverlays(m.right, m.rightMatches, selectedPos, !selectedInLeft || selectedIsEqual)
 }
@@ -947,7 +947,8 @@ func (m *Model) updateSearchState(lines *line.View) {
 		m.searcherStale = false
 	}
 
-	// Convert ranges to searchMatch structs (inLeft is not used in unified mode).
+	// Convert ranges to searchMatch structs (the unified path does not
+	// use inLeft).
 	ranges := heldMatches(lines, m.index.Find(m.searchTerm))
 	m.searchMatches = make([]searchMatch, 0, len(ranges))
 
@@ -1014,8 +1015,8 @@ func (m *Model) revision(index int) Revision {
 
 // getDisplayLines returns the base view to display for the current
 // revision and [DiffMode]: a fresh unified diff, or the view the revision
-// hands out, which is the caller's and is never decorated. Returns nil
-// when there is no revision.
+// hands out, which is the caller's and which the model never decorates.
+// Returns nil when there is no revision.
 func (m *Model) getDisplayLines() *line.View {
 	rev, needsDiff := m.resolveRevisionSource()
 	if needsDiff {
@@ -1064,8 +1065,9 @@ func heldLines(v *line.View) line.Lines {
 // resolveRevisionSource determines which revision to display for the
 // current revision state.
 //
-// Returns (revision, false) for non-diff cases (origin, no diff mode, or no
-// revision), or (nil, true) when a diff should be computed.
+// Returns (revision, false) when the viewport shows a revision without a
+// diff (at the origin, or with diff mode none), (nil, false) without a
+// revision, or (nil, true) when the caller must compute a diff.
 func (m *Model) resolveRevisionSource() (Revision, bool) {
 	if !m.hasRevision() {
 		return nil, false
@@ -1877,7 +1879,7 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 
 	right := m.right
 	if right == nil {
-		// Not showing a diff: show same content on both sides.
+		// Without a diff, show the same content on both sides.
 		right = m.left
 	}
 
@@ -1998,9 +2000,8 @@ func clamp[T cmp.Ordered](v, low, high T) T {
 	return min(high, max(low, v))
 }
 
-// splitLines splits content by newlines, correctly handling trailing newlines.
-// Unlike [strings.Split], this does not produce an empty trailing element when
-// the content ends with a newline.
+// splitLines splits content by newlines. Unlike [strings.Split], it does not
+// produce an empty trailing element when the content ends with a newline.
 func splitLines(content string) []string {
 	if content == "" {
 		return nil
