@@ -1,9 +1,9 @@
 // Package filepaths matches file paths against glob patterns.
 //
-// This package wraps [github.com/bmatcuk/doublestar] so the schema matchers
-// and the SchemaStore catalog agree on pattern syntax. It supports extended
-// glob patterns including `**` for recursive directory matching, unlike
-// [path/filepath.Match].
+// This package wraps [github.com/bmatcuk/doublestar/v4] so the schema
+// matchers and the SchemaStore catalog agree on pattern syntax. It supports
+// extended glob patterns including `**` for recursive directory matching,
+// unlike [path/filepath.Match].
 //
 // # Pattern Matching
 //

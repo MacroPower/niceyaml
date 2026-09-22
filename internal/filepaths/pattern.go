@@ -28,8 +28,8 @@ func NewPattern(pattern string) (Pattern, error) {
 }
 
 // MustPattern creates a [Pattern] from the given glob pattern string.
-// Panics if the pattern syntax is invalid. Use this for compile-time
-// validated patterns.
+// Panics if the pattern syntax is invalid. Use this for patterns fixed
+// at compile time.
 //
 //	var configPattern = filepaths.MustPattern("**/*.yaml")
 func MustPattern(pattern string) Pattern {
@@ -43,7 +43,7 @@ func MustPattern(pattern string) Pattern {
 
 // Match reports whether the path matches the pattern.
 //
-// The path is cleaned and its separators normalized to forward slashes
+// Match cleans the path and normalizes its separators to forward slashes
 // before matching, so "./config.yaml" and "config.yaml" both match the
 // root-only pattern "*.yaml".
 func (p Pattern) Match(path string) bool {
@@ -51,10 +51,10 @@ func (p Pattern) Match(path string) bool {
 		return false
 	}
 
-	// A pattern error is path dependent: doublestar.ValidatePattern accepts
-	// some patterns that Match rejects for a multi-segment path, such as a
-	// "{" inside a character class. A pattern Match cannot interpret matches
-	// nothing, which is what a false result says already.
+	// A pattern error is path dependent, since doublestar.ValidatePattern
+	// accepts some patterns that Match rejects for a multi-segment path,
+	// such as a "{" inside a character class. A pattern Match cannot
+	// interpret matches nothing, which is what a false result says already.
 	matched, _ := doublestar.Match(p.raw, normalizePath(path)) //nolint:errcheck // A pattern error means no match.
 
 	return matched
@@ -78,17 +78,16 @@ func (p Pattern) String() string {
 // pattern. A pattern applies at any depth of the tree, so "*.yaml" matches
 // "some/dir/config.yaml" and ".github/workflows/*.yml" matches
 // "/repo/.github/workflows/ci.yml". Every pattern gets an implicit "**/"
-// prefix unless it already has one, and a leading "/" is dropped first.
+// prefix unless it already has one, and drops a leading "/" first.
 //
-// The path is cleaned and its separators normalized to forward slashes
-// before matching, as [Pattern.Match] does.
+// MatchAny cleans the path and normalizes its separators to forward
+// slashes before matching, as [Pattern.Match] does.
 //
 // # Pattern Validation
 //
-// Invalid patterns are silently skipped without error. This is intentional for
-// use cases like SchemaStore catalog entries where pattern typos should not
-// cause validation failures. For patterns that must be validated upfront, use
-// [NewPattern] or [MustPattern] instead.
+// MatchAny skips an invalid pattern without error, so a typo in a
+// SchemaStore catalog entry does not break validation. To validate a
+// pattern upfront, use [NewPattern] or [MustPattern] instead.
 func MatchAny(path string, patterns []string) bool {
 	if path == "" {
 		return false
@@ -107,9 +106,9 @@ func MatchAny(path string, patterns []string) bool {
 }
 
 // anyDepth returns pattern with the "**/" prefix that lets it match at any
-// depth of the tree. A leading "./" or "/" is dropped first, since the path
-// it matches against is cleaned and carries neither, and a pattern that
-// already starts with "**/" comes back unchanged.
+// depth of the tree. Any leading "./" or "/" comes off first, since the
+// path it matches against is cleaned and carries neither, and a pattern
+// that already starts with "**/" comes back unchanged.
 func anyDepth(pattern string) string {
 	pattern = strings.TrimPrefix(pattern, "./")
 	pattern = strings.TrimPrefix(pattern, "/")
