@@ -1,11 +1,15 @@
 package tokens_test
 
 import (
+	"fmt"
 	"iter"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
+	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/lexer"
+	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -945,4 +949,306 @@ func TestResetPositions_Text(t *testing.T) {
 		assert.Equal(t, "mykey", got[0].Value)
 		assert.Equal(t, "mykey", got[0].Origin)
 	})
+}
+
+// positionsOf returns the position of each token as "line:column:offset".
+func positionsOf(tks token.Tokens) []string {
+	got := make([]string, 0, len(tks))
+	for _, tk := range tks {
+		got = append(got, fmt.Sprintf("%d:%d:%d", tk.Position.Line, tk.Position.Column, tk.Position.Offset))
+	}
+
+	return got
+}
+
+func TestTokenize_Positions(t *testing.T) {
+	t.Parallel()
+
+	// Every token sits on the rune where its text starts, where the lexer
+	// alone counts trailing spaces it drops from a value, runs one rune
+	// short after a comment or a tag, places a multi-line block scalar on
+	// its last line, and counts a CRLF it cuts between two tokens twice.
+	tcs := map[string]struct {
+		input string
+		want  []string
+	}{
+		"trailing spaces after a value": {
+			input: "a: 1   \nb: 2\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:9", "2:2:10", "2:4:12"},
+		},
+		"header after a comment": {
+			input: "# comment\n---\nb: two\n",
+			want:  []string{"1:1:1", "2:1:11", "3:1:15", "3:2:16", "3:4:18"},
+		},
+		"value after a tag": {
+			input: "t: !!str s\n...",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "1:10:10", "2:1:12"},
+		},
+		"block scalar at the end": {
+			input: "k: |\n    hello\n    world\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:5:10"},
+		},
+		"block scalar with repeated lines": {
+			input: "k: |\n  a\n  a\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:8"},
+		},
+		"block scalar followed by content": {
+			input: "k: |\n  a\n  b\nz: 1\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:8", "4:1:14", "4:2:15", "4:4:17"},
+		},
+		"block scalar followed by a header": {
+			input: "k: |\n  a\n---\nz: 1\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:8", "3:1:10", "4:1:14", "4:2:15", "4:4:17"},
+		},
+		"block scalar holding a comment and a key": {
+			input: "k: |\n  a\n\n  # c\n  z: 1\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:8"},
+		},
+		"empty block scalar": {
+			input: "a: |\nb: 1\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:6", "2:1:6", "2:2:7", "2:4:9"},
+		},
+		"comment in a CRLF file": {
+			input: "key: value\r\n# c\r\nnext: 1\r\n",
+			want:  []string{"1:1:1", "1:4:4", "1:6:6", "2:1:13", "3:1:18", "3:5:22", "3:7:24"},
+		},
+		"block scalar in a CRLF file": {
+			input: "a: 1\r\nb: |\r\n  x\r\n  y\r\nc: 3\r\n",
+			want: []string{
+				"1:1:1",
+				"1:2:2",
+				"1:4:4",
+				"2:1:7",
+				"2:2:8",
+				"2:4:10",
+				"3:3:15",
+				"5:1:23",
+				"5:2:24",
+				"5:4:26",
+			},
+		},
+		"sequence after a tag and a blank line": {
+			input: "a: !!seq\n\n  - b\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "3:3:13", "3:5:15"},
+		},
+		"tab between key and value": {
+			input: "a:\t1\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4"},
+		},
+		"wide runes": {
+			input: "a: 日本 x\nb: é\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:9", "2:2:10", "2:4:12"},
+		},
+		"key after a truncated escape": {
+			// The lexer cuts "x41" out of the Origin, so the scalar's text
+			// is not in the source and the key after it must not be found
+			// inside the scalar, where "c" also appears.
+			input: "a: \"x\\x41 b c\"\nc: 2\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:16", "2:2:17", "2:4:19"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, positionsOf(tokens.Tokenize(tc.input)))
+		})
+	}
+}
+
+// positionCorpus holds sources whose tokens exercise the positions the lexer
+// places oddly, and none whose Origin the lexer truncates.
+var positionCorpus = map[string]string{
+	"mapping":                             "a: 1\nb: two\n",
+	"trailing spaces":                     "a: 1   \nb: 2  \n",
+	"trailing spaces before a comment":    "a: 1   # c\nb: 2\n",
+	"comments":                            "# head\na: 1 # line\n# foot\nb: 2\n",
+	"header after a comment":              "# comment\n---\nb: two\n",
+	"tag on a value":                      "t: !!str s\nu: !!int 1\n",
+	"tag before a nested map":             "a: !t\n  b: 1\nc: 2\n",
+	"tag before a blank line":             "a: !!seq\n\n  - b\n",
+	"anchor and alias":                    "a: &x 1\nb: *x\n",
+	"literal at the end":                  "k: |\n    hello\n    world\n",
+	"literal with content after":          "k: |\n  a\n  b\nz: 1\n",
+	"literal with blank lines":            "k: |\n  a\n\n  b\n\nz: 1\n",
+	"literal with a blank line of spaces": "k: |\n  a\n   \n  b\nz: 1\n",
+	"literal with a leading blank line":   "k: |\n\n  b\nz: 1\n",
+	"literal with keep":                   "k: |+\n  a\n\n\nz: 1\n",
+	"literal with an indent indicator":    "k: |2\n   a\n  b\n",
+	"literal with a comment after":        "k: |\n  a\n# c\nz: 1\n",
+	"literal followed by a header":        "k: |\n  a\n---\nz: 1\n",
+	"nested literal with a comment after": "a:\n  k: |\n    x\n\n  # c\n  z: 1\n",
+	"folded":                              "k: >\n  a\n\n  b\n\nz: 1\n",
+	"empty literal":                       "a: |\nb: 1\n",
+	"empty literal with keep":             "a: |+\n\nb: 1\n",
+	"quoted multi-line":                   "a: 'x\n\n  y'\nb: 1\n",
+	"double-quoted multi-line":            "c: \"x\n  y\"\nd: 1\n",
+	"plain multi-line":                    "a: plain\n  multi\nb: 2\n",
+	"flow collections":                    "{a: 1, b: [1, 2]}\n",
+	"flow sequence over lines":            "a: [\n  1,\n  2\n]\n",
+	"sequences":                           "- a\n- b # c\n- - c\n  - d\n",
+	"complex key":                         "? k\n: v\n",
+	"directive":                           "%YAML 1.2\n---\na: 1\n",
+	"several documents":                   "a: 1\n---\nb: 2\n...\n# tail\nc: 3\n",
+	"blank lines":                         "a: 1\n\n\nb: 2\n",
+	"key with trailing spaces":            "a  : 1\n",
+	"tab after a colon":                   "a:\t1\n",
+	"wide runes":                          "a: 日本 x\nb: é\n日: 1\n",
+	"crlf":                                "key: value\r\n# c\r\nnext: 1\r\n",
+	"crlf literal":                        "a: 1\r\nb: |\r\n  x\r\n  y\r\nc: 3\r\n",
+	"crlf tag and quoted":                 "a: !t\r\n  b: 1\r\nc: 'x\r\n  y'\r\n",
+	"bare cr":                             "a: 1\rb: 2\r",
+	"no final line ending":                "a: 1\nb: 2",
+}
+
+func TestTokenize_PositionsLocateText(t *testing.T) {
+	t.Parallel()
+
+	for name, input := range positionCorpus {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			runes := []rune(input)
+
+			for i, tk := range tokens.Tokenize(input) {
+				require.NotNil(t, tk.Position, "token %d", i)
+
+				at := tk.Position.Offset - 1
+				require.GreaterOrEqual(t, at, 0, "token %d %q", i, tk.Origin)
+				require.LessOrEqual(t, at, len(runes), "token %d %q", i, tk.Origin)
+
+				// Line and Column follow from Offset: one more line per
+				// line break before the rune, and the runes since the
+				// last break.
+				before := string(runes[:at])
+				lastBreak := strings.LastIndexAny(before, "\r\n")
+
+				assert.Equal(t, 1+countLineBreaks(before), tk.Position.Line, "token %d %q line", i, tk.Origin)
+
+				wantCol := utf8.RuneCountInString(before[lastBreak+1:]) + 1
+				assert.Equal(t, wantCol, tk.Position.Column, "token %d %q column", i, tk.Origin)
+
+				// The first line of text in the Origin is in the source at
+				// Offset.
+				text := firstTextLine(tk.Origin)
+				if text == "" {
+					continue
+				}
+
+				assert.True(
+					t,
+					strings.HasPrefix(string(runes[at:]), text),
+					"token %d %q at %d: %q",
+					i,
+					tk.Origin,
+					at,
+					string(runes[at:]),
+				)
+			}
+		})
+	}
+}
+
+// countLineBreaks counts "\r\n", "\n", and a bare "\r" as one break each.
+func countLineBreaks(s string) int {
+	return strings.Count(s, "\n") + strings.Count(s, "\r") - strings.Count(s, "\r\n")
+}
+
+// firstTextLine returns the first line of origin that holds text, without
+// the whitespace around it, or "" when none does.
+func firstTextLine(origin string) string {
+	for _, ln := range strings.SplitAfter(strings.ReplaceAll(origin, "\r", "\n"), "\n") {
+		if text := strings.Trim(ln, " \t\n"); text != "" {
+			return text
+		}
+	}
+
+	return ""
+}
+
+func TestTokenize_ParsesAsTheLexerDoes(t *testing.T) {
+	t.Parallel()
+
+	// The go-yaml parser reads Column and Line to decide which map or
+	// sequence a token belongs to and where a comment attaches, so moving
+	// tokens must not change the tree it builds.
+	for name, input := range positionCorpus {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			want, wantErr := parser.Parse(lexer.Tokenize(input), parser.ParseComments)
+			got, gotErr := parser.Parse(tokens.Tokenize(input), parser.ParseComments)
+
+			if wantErr != nil {
+				require.Error(t, gotErr)
+
+				return
+			}
+
+			require.NoError(t, gotErr)
+			assert.Equal(t, nodeShape(want), nodeShape(got))
+
+			// The rendering of a file spaces its nodes by their Lines, so
+			// the blank lines the lexer's drift adds or drops are the
+			// one difference the repair may make to it.
+			assert.Equal(t, withoutBlankLines(want.String()), withoutBlankLines(got.String()))
+		})
+	}
+}
+
+// nodeShape lists every node of file in walk order: its type, its path,
+// and the comments attached to it.
+func nodeShape(file *ast.File) []string {
+	var shape []string
+
+	for _, doc := range file.Docs {
+		ast.Walk(shapeVisitor(func(n ast.Node) {
+			entry := n.Type().String() + " " + n.GetPath()
+			if c := n.GetComment(); c != nil {
+				entry += " comment=" + c.String()
+			}
+
+			var foot *ast.CommentGroupNode
+
+			switch n := n.(type) {
+			case *ast.MappingNode:
+				foot = n.FootComment
+			case *ast.MappingValueNode:
+				foot = n.FootComment
+			case *ast.SequenceNode:
+				foot = n.FootComment
+			}
+
+			if foot != nil {
+				entry += " foot=" + foot.String()
+			}
+
+			shape = append(shape, entry)
+		}), doc)
+	}
+
+	return shape
+}
+
+// withoutBlankLines returns s with its blank lines removed.
+func withoutBlankLines(s string) string {
+	var kept []string
+
+	for ln := range strings.SplitSeq(s, "\n") {
+		if strings.TrimSpace(ln) != "" {
+			kept = append(kept, ln)
+		}
+	}
+
+	return strings.Join(kept, "\n")
+}
+
+// shapeVisitor is an [ast.Visitor] that calls itself on every node.
+type shapeVisitor func(ast.Node)
+
+func (v shapeVisitor) Visit(n ast.Node) ast.Visitor {
+	v(n)
+
+	return v
 }
