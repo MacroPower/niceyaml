@@ -10,8 +10,13 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 )
 
-// errNoMatch reports a glob pattern that matches no file.
-var errNoMatch = errors.New("no files match pattern")
+var (
+	// The error for a glob pattern that matches no file.
+	errNoMatch = errors.New("no files match pattern")
+
+	// The error for an argument that names a directory.
+	errIsDirectory = errors.New("is a directory")
+)
 
 // glob returns the file paths matching pattern. Directories are excluded
 // from the matches.
@@ -74,6 +79,14 @@ func expandPaths(args ...string) ([]string, error) {
 
 	for _, arg := range args {
 		if !containsGlobChars(arg) {
+			// A directory is no file to read, as the glob path excludes
+			// one; a name that does not exist passes through to the read,
+			// which reports it.
+			info, err := os.Stat(arg)
+			if err == nil && info.IsDir() {
+				return nil, fmt.Errorf("%w: %q", errIsDirectory, arg)
+			}
+
 			add(arg)
 
 			continue

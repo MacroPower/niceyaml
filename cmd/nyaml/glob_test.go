@@ -113,6 +113,10 @@ func TestExpand(t *testing.T) {
 			args:      []string{strayFile},
 			wantNames: []string{"report[2024.txt"},
 		},
+		"literal directory is an error": {
+			args: []string{subdir},
+			err:  errIsDirectory,
+		},
 		"overlapping globs name each file once": {
 			args:      []string{filepath.Join(tmpDir, "00[01].yaml"), filepath.Join(tmpDir, "*.yaml")},
 			wantNames: []string{"000.yaml", "001.yaml", "002.yaml"},
