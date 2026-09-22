@@ -2,14 +2,14 @@
 // Taskfile targets that call local tools (go, golangci-lint, prettier) provided
 // by devbox. These functions run those same tasks inside the project's devbox
 // environment via the devbox toolchain, so CI reproduces exactly what
-// developers run locally: local skips the container for speed, CI keeps it for
-// reproducibility.
+// developers run locally. Local skips the container for speed, and CI keeps it
+// for reproducibility.
 //
 // Two gates instead compose a sibling toolchain directly because their tools are
-// not on the devbox PATH: LintActions runs the zizmor toolchain and Security
+// not on the devbox PATH. LintActions runs the zizmor toolchain, and Security
 // runs the security toolchain (Trivy). Renovate-config validation stays
 // self-contained here (a pinned renovate-config-validator in a Node container)
-// because it is the one check neither devbox nor a shared toolchain provides.
+// because it is the one gate neither devbox nor a shared toolchain provides.
 package main
 
 import (
@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	// renovateConfig is the Renovate configuration file validated by
-	// [Ci.LintRenovate], relative to the source root.
+	// renovateConfig is the Renovate configuration file that [Ci.LintRenovate]
+	// validates, relative to the source root.
 	renovateConfig = ".github/renovate.json5"
 
 	// Docker Official Image, pulled from Docker's verified publisher
@@ -28,7 +28,7 @@ const (
 	renovateImage   = "public.ecr.aws/docker/library/node:24-slim" // renovate: datasource=docker depName=public.ecr.aws/docker/library/node
 	renovateVersion = "44.83.0"                                    // renovate: datasource=npm depName=renovate
 
-	// zizmorConfig is the zizmor configuration file used by [Ci.LintActions],
+	// zizmorConfig is the zizmor configuration file that [Ci.LintActions] uses,
 	// relative to the source root.
 	zizmorConfig = ".github/zizmor.yaml"
 
@@ -36,7 +36,7 @@ const (
 	cacheNamespace = "go.jacobcolvin.com/niceyaml/ci"
 
 	// devboxHome is the home directory of the devbox image's non-root user,
-	// under which the Go and golangci-lint caches are mounted.
+	// under which env mounts the Go and golangci-lint caches.
 	devboxHome = "/home/devbox"
 	// devboxUser owns the mounted caches so the containerized tasks can
 	// write to them.
@@ -57,7 +57,7 @@ type Ci struct {
 	Zizmor *dagger.Zizmor // +private
 }
 
-// New creates an [Ci] module with the given project source directory.
+// New creates a new [Ci] module with the given project source directory.
 func New(
 	// Project source directory. Ignore patterns (e.g. .git, dist) belong in the
 	// root dagger.json customizations, not here.
@@ -138,9 +138,9 @@ func (m *Ci) TestCoverage() *dagger.File {
 }
 
 // Security scans source dependencies for known vulnerabilities by composing the
-// security toolchain (Trivy) directly. The scanned source is the `ci`
-// toolchain's source, whose root dagger.json customization already excludes the
-// build and cache directories.
+// security toolchain (Trivy) directly. It scans the `ci` toolchain's source,
+// whose root dagger.json customization already excludes the build and cache
+// directories.
 //
 // +check
 func (m *Ci) Security(ctx context.Context) error {
@@ -149,7 +149,7 @@ func (m *Ci) Security(ctx context.Context) error {
 
 // SecuritySourceSarif scans source dependencies for known vulnerabilities and
 // returns the results as a SARIF file for upload to GitHub Code Scanning. Unlike
-// [Ci.Security], it does not gate on findings: SARIF capture must produce the
+// [Ci.Security], it does not gate on findings. SARIF capture must produce the
 // file even when vulnerabilities are present, so they can be published to the
 // Security tab. It scans the same source as the gate.
 func (m *Ci) SecuritySourceSarif() *dagger.File {
@@ -167,10 +167,10 @@ func (m *Ci) LintActions(ctx context.Context) error {
 }
 
 // LintRenovate validates the Renovate configuration with
-// renovate-config-validator, installed at a pinned version in a Node container
-// so the check is self-contained and Renovate can bump its own validator
-// version. It is the one check that composes neither devbox nor a shared
-// toolchain.
+// renovate-config-validator, which it installs at a pinned version in a Node
+// container so the gate is self-contained and Renovate can bump its own
+// validator version. It is the one gate that composes neither devbox nor a
+// shared toolchain.
 //
 // +check
 func (m *Ci) LintRenovate(ctx context.Context) error {
