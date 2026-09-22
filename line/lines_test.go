@@ -1742,6 +1742,32 @@ func TestNewLines_BlankLineAbsorption(t *testing.T) {
 		assert.Equal(t, 3, lines.Line(2).Number(), "third line should be 3")
 	})
 
+	t.Run("a first token whose text opens on an earlier line starts there", func(t *testing.T) {
+		t.Parallel()
+
+		// The lexer folds the lines before a merge key into its token and
+		// positions the token on the line of the key, so the lines start
+		// that many lines earlier.
+		for _, input := range []string{
+			"x\nx\n<<: *an\n",
+			"  text\n<<: *an\n",
+			"x\n*a\n\n<<: *an\n",
+			"\n\nfoo: 1\n",
+			"\"a\n b\"\n",
+			"|\n  a\n  b\n",
+			"# c\nk: v\n",
+		} {
+			lines := line.NewLines(lexer.Tokenize(input))
+			want := strings.Count(input, "\n")
+
+			require.Equal(t, want, lines.Len(), "input %q", input)
+
+			for i := range want {
+				assert.Equal(t, i+1, lines.Line(i).Number(), "input %q line %d", input, i)
+			}
+		}
+	})
+
 	t.Run("a blank line after a bare block scalar header stays a line", func(t *testing.T) {
 		t.Parallel()
 

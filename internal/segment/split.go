@@ -110,14 +110,15 @@ func newBuilder(tks token.Tokens) *builder {
 
 	// Initialize currentLine from the first token's position.
 	//
-	// If the first token's Origin has leading newlines, we need to start earlier
-	// because Position.Line points to the content, not the Origin start.
+	// The lexer positions a token on the line its content sits on, so an
+	// Origin that opens with earlier lines, blank ones or text the lexer
+	// folded into the token, starts that many lines before Position.Line.
 	if first.Position != nil {
 		b.currentLine = first.Position.Line
-		// Count leading newlines in first token's Origin and adjust.
-		leadingNewlines := countLeadingNewlineParts(splitOriginIntoParts(first.Origin))
-		if leadingNewlines > 0 && b.currentLine > leadingNewlines {
-			b.currentLine -= leadingNewlines
+
+		before := countLineEndingsBeforeLast(splitOriginIntoParts(first.Origin))
+		if before > 0 && b.currentLine > before {
+			b.currentLine -= before
 		}
 	} else {
 		b.currentLine = 1
@@ -613,6 +614,21 @@ func countLeadingNewlineParts(parts []string) int {
 		}
 
 		count++
+	}
+
+	return count
+}
+
+// countLineEndingsBeforeLast returns the number of parts before the last
+// one that end in a line ending, which is the number of lines the text of
+// a token opens with before the line its last part sits on.
+func countLineEndingsBeforeLast(parts []string) int {
+	count := 0
+
+	for _, p := range parts[:max(len(parts)-1, 0)] {
+		if lineEnding(p) != "" {
+			count++
+		}
 	}
 
 	return count
