@@ -66,8 +66,10 @@ type Source struct {
 	docs       []*Document
 	parserOpts []parser.Option
 	decodeOpts []yaml.DecodeOption
-	fileOnce   sync.Once
-	docsOnce   sync.Once
+	// The DecodeOption values every decode of the Source starts from.
+	decodeDefaults []DecodeOption
+	fileOnce       sync.Once
+	docsOnce       sync.Once
 	// Accepts a mapping with the same key twice when parsing and decoding.
 	allowDuplicateKeys bool
 }
@@ -79,9 +81,12 @@ type Source struct {
 //   - [WithFilePath]
 //   - [WithAllowDuplicateKeys]
 //   - [WithYAMLParserOptions]
+//   - [WithDecodeOptions]
 //
 // Settings that only affect decoding, such as [WithDisallowUnknownFields],
-// are [DecodeOption] values passed to [Document.Decode].
+// are [DecodeOption] values passed to [Document.Decode], and
+// [WithDecodeOptions] sets the ones every decode of the Source starts
+// from.
 type SourceOption func(*Source)
 
 // WithName is a [SourceOption] that sets the name for the [Source], which
@@ -123,6 +128,47 @@ func WithAllowDuplicateKeys(allow bool) SourceOption {
 func WithYAMLParserOptions(opts ...parser.Option) SourceOption {
 	return func(s *Source) {
 		s.parserOpts = append(s.parserOpts, opts...)
+	}
+}
+
+// WithDecodeOptions is a [SourceOption] that sets the [DecodeOption]
+// values every [Document.Decode] and [Document.DecodeInto] of the Source
+// starts from, ahead of the options of the call itself, so a file that
+// holds many documents, or a Source a library hands to its own callers,
+// decodes with a setting stated once:
+//
+//	source, err := niceyaml.NewSourceFromFile(path, niceyaml.WithDecodeOptions(
+//		niceyaml.WithValidator(reg),
+//		niceyaml.WithDisallowUnknownFields(true),
+//	))
+//	if err != nil {
+//		return err
+//	}
+//
+//	docs, err := source.Documents()
+//	if err != nil {
+//		return err
+//	}
+//
+//	for _, doc := range docs {
+//		manifest, err := doc.Decode[Manifest](ctx)
+//		...
+//	}
+//
+// A validator among the defaults runs before the validators of the call,
+// and a setting the call gives replaces the same setting among the
+// defaults. Given more than once, each call appends after the options of
+// the one before it.
+//
+// The defaults belong to the decode the caller asks for. A validator that
+// decodes the document itself, as a schema does, runs that decode under
+// the context it was given, and a decode under that context applies none
+// of the defaults, so a default validator does not run itself again.
+// [Document.Validate] runs the validators it is given and none of the
+// defaults.
+func WithDecodeOptions(opts ...DecodeOption) SourceOption {
+	return func(s *Source) {
+		s.decodeDefaults = append(s.decodeDefaults, opts...)
 	}
 }
 

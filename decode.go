@@ -739,6 +739,9 @@ func (dd *Document) position(path paths.Path) (position.Position, error) {
 //		}
 //	}
 //
+// Validate runs the validators it is given and none of the defaults
+// [WithDecodeOptions] set on the source, which belong to a decode.
+//
 // An error from a validator comes back bound to the source as a
 // [SourceError] through [Document.Bind], so an [*Error] renders its
 // location and any other error names the source.
@@ -824,6 +827,8 @@ func (dd *Document) Bind(err error) error {
 }
 
 // DecodeOption configures [Document.Decode] and [Document.DecodeInto].
+// [WithDecodeOptions] sets the ones every decode of a [Source] starts
+// from.
 //
 // Available options:
 //   - [WithValidator]
@@ -840,14 +845,34 @@ type decodeConfig struct {
 	disallowUnknownFields bool
 }
 
-// newDecodeConfig applies opts over the defaults.
-func newDecodeConfig(opts []DecodeOption) decodeConfig {
+// newDecodeConfig applies defaults, then opts, over the zero settings.
+func newDecodeConfig(defaults, opts []DecodeOption) decodeConfig {
 	cfg := decodeConfig{selfValidation: true}
+
+	for _, opt := range defaults {
+		opt(&cfg)
+	}
+
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 
 	return cfg
+}
+
+// decodingKey is the context key under which [Document.DecodeInto] marks
+// the context it hands to validators with the [*Source] being decoded.
+type decodingKey struct{}
+
+// defaults returns the [DecodeOption] values [WithDecodeOptions] set on the
+// source of the document, or none when ctx marks a decode of that source
+// already, which is a validator of one decoding the document for itself.
+func (dd *Document) defaults(ctx context.Context) []DecodeOption {
+	if src, ok := ctx.Value(decodingKey{}).(*Source); ok && src == dd.source {
+		return nil
+	}
+
+	return dd.source.decodeDefaults
 }
 
 // decodeOptions returns the go-yaml options for one decode: the escape
@@ -907,7 +932,8 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 // from [Document.At] is scoped to, into v, which must be a non-nil
 // pointer. Any other v returns [ErrDecodeTarget] before anything runs.
 //
-// Each [Validator] from [WithValidator] runs before decoding. If v
+// The options [WithDecodeOptions] set on the source apply first, then
+// opts. Each [Validator] from [WithValidator] runs before decoding. If v
 // implements [SelfValidator], DecodeInto calls Validate after decoding
 // succeeds, unless [WithSelfValidation] switches that off. Fields absent
 // from the document keep their existing values, so v may be pre-populated
@@ -929,9 +955,12 @@ func (dd *Document) DecodeInto(ctx context.Context, v any, opts ...DecodeOption)
 		return err
 	}
 
-	cfg := newDecodeConfig(opts)
+	cfg := newDecodeConfig(dd.defaults(ctx), opts)
 
-	err = dd.Validate(ctx, cfg.validators...)
+	// A validator that decodes the document for itself decodes under this
+	// context, which tells that decode to leave the defaults of the source
+	// out, so a default validator does not run itself again.
+	err = dd.Validate(context.WithValue(ctx, decodingKey{}, dd.source), cfg.validators...)
 	if err != nil {
 		return err
 	}
@@ -1086,7 +1115,8 @@ func hasContent(node ast.Node) bool {
 // Decode validates and decodes the document, or the node a Document from
 // [Document.At] is scoped to, into a new T.
 //
-// Each [Validator] from [WithValidator] runs before decoding. If *T
+// The options [WithDecodeOptions] set on the source apply first, then
+// opts. Each [Validator] from [WithValidator] runs before decoding. If *T
 // implements [SelfValidator], Decode calls Validate after decoding
 // succeeds, unless [WithSelfValidation] switches that off. The method set
 // of *T includes methods declared on T itself, so both value and pointer

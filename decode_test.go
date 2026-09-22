@@ -3078,3 +3078,179 @@ func TestDocument_At_FlowCollectionSpan(t *testing.T) {
 		})
 	}
 }
+
+func TestWithDecodeOptions(t *testing.T) {
+	t.Parallel()
+
+	type strictConfig struct {
+		Name string `yaml:"name"`
+	}
+
+	input := stringtest.Input(`
+		name: test
+		extra: field
+		---
+		name: other
+		extra: field
+	`)
+
+	t.Run("every decode of the source starts from the defaults", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(input, niceyaml.WithDecodeOptions(
+			niceyaml.WithDisallowUnknownFields(true),
+		))
+
+		docs, err := source.Documents()
+		require.NoError(t, err)
+		require.Len(t, docs, 2)
+
+		for _, dd := range docs {
+			_, err := dd.Decode[strictConfig](t.Context())
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "extra")
+		}
+	})
+
+	t.Run("an option of the call replaces the same default", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(input, niceyaml.WithDecodeOptions(
+			niceyaml.WithDisallowUnknownFields(true),
+		))
+
+		dd, err := source.Documents()
+		require.NoError(t, err)
+
+		got, err := dd[0].Decode[strictConfig](t.Context(), niceyaml.WithDisallowUnknownFields(false))
+		require.NoError(t, err)
+		assert.Equal(t, "test", got.Name)
+	})
+
+	t.Run("a default validator runs before the validators of the call", func(t *testing.T) {
+		t.Parallel()
+
+		var order []string
+
+		record := func(name string) niceyaml.Validator {
+			return niceyaml.ValidatorFunc(func(_ context.Context, _ *niceyaml.Document) error {
+				order = append(order, name)
+
+				return nil
+			})
+		}
+
+		source := niceyaml.NewSourceFromString(input, niceyaml.WithDecodeOptions(
+			niceyaml.WithValidator(record("default")),
+		))
+
+		dd, err := source.Documents()
+		require.NoError(t, err)
+
+		_, err = dd[0].Decode[strictConfig](t.Context(), niceyaml.WithValidator(record("call")))
+		require.NoError(t, err)
+		assert.Equal(t, []string{"default", "call"}, order)
+	})
+
+	t.Run("a default validator that decodes the document does not run again", func(t *testing.T) {
+		t.Parallel()
+
+		runs := 0
+
+		decoding := niceyaml.ValidatorFunc(func(ctx context.Context, doc *niceyaml.Document) error {
+			runs++
+
+			// The decode under the validator's context leaves the defaults
+			// out, the strictness among them.
+			_, err := doc.Decode[strictConfig](ctx)
+
+			return err
+		})
+
+		source := niceyaml.NewSourceFromString(input, niceyaml.WithDecodeOptions(
+			niceyaml.WithValidator(decoding),
+			niceyaml.WithDisallowUnknownFields(true),
+		))
+
+		dd, err := source.Documents()
+		require.NoError(t, err)
+
+		_, err = dd[0].Decode[strictConfig](t.Context())
+		require.Error(t, err, "the strictness applies to the decode the caller asked for")
+		assert.Equal(t, 1, runs)
+	})
+
+	t.Run("a decode of another source under that context keeps its defaults", func(t *testing.T) {
+		t.Parallel()
+
+		other := niceyaml.NewSourceFromString("name: x\nextra: y\n", niceyaml.WithDecodeOptions(
+			niceyaml.WithDisallowUnknownFields(true),
+		))
+
+		crossing := niceyaml.ValidatorFunc(func(ctx context.Context, _ *niceyaml.Document) error {
+			doc, err := other.Document()
+			if err != nil {
+				return err
+			}
+
+			_, err = doc.Decode[strictConfig](ctx)
+
+			return err
+		})
+
+		source := niceyaml.NewSourceFromString(input, niceyaml.WithDecodeOptions(niceyaml.WithValidator(crossing)))
+
+		dd, err := source.Documents()
+		require.NoError(t, err)
+
+		_, err = dd[0].Decode[strictConfig](t.Context())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "extra")
+	})
+
+	t.Run("Validate runs the validators it is given alone", func(t *testing.T) {
+		t.Parallel()
+
+		called := false
+
+		source := niceyaml.NewSourceFromString(input, niceyaml.WithDecodeOptions(
+			niceyaml.WithValidator(niceyaml.ValidatorFunc(func(_ context.Context, _ *niceyaml.Document) error {
+				called = true
+
+				return nil
+			})),
+		))
+
+		dd, err := source.Documents()
+		require.NoError(t, err)
+
+		require.NoError(t, dd[0].Validate(t.Context()))
+		assert.False(t, called)
+	})
+
+	t.Run("given more than once, each call appends", func(t *testing.T) {
+		t.Parallel()
+
+		var order []string
+
+		record := func(name string) niceyaml.Validator {
+			return niceyaml.ValidatorFunc(func(_ context.Context, _ *niceyaml.Document) error {
+				order = append(order, name)
+
+				return nil
+			})
+		}
+
+		source := niceyaml.NewSourceFromString(input,
+			niceyaml.WithDecodeOptions(niceyaml.WithValidator(record("first"))),
+			niceyaml.WithDecodeOptions(niceyaml.WithValidator(record("second"))),
+		)
+
+		dd, err := source.Documents()
+		require.NoError(t, err)
+
+		_, err = dd[0].Decode[strictConfig](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, []string{"first", "second"}, order)
+	})
+}
