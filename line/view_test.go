@@ -1185,3 +1185,22 @@ func TestView_OutOfRange(t *testing.T) {
 		})
 	}
 }
+
+func TestView_String_AboveAnnotationOnWideContent(t *testing.T) {
+	t.Parallel()
+
+	// The row above starts at the column of the annotation as the content
+	// row renders it, so on wide characters it takes their cells, as the
+	// marker row below does.
+	view := newTestView(t, "名前: v\n", 1)
+	view.Annotate(0,
+		line.Annotation{Content: "above", Placement: line.Above, Col: 2},
+		line.Annotation{Content: "below", Placement: line.Below, Col: 2},
+	)
+
+	assert.Equal(t, stringtest.JoinLF(
+		"     |     above",
+		"   1 | 名前: v",
+		"     |     ^ below",
+	), view.String())
+}

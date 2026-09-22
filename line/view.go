@@ -362,9 +362,12 @@ func (v *View) String() string {
 		anns := v.Annotations(i)
 
 		// An annotation without content adds no row, as it adds none to
-		// the marker row.
-		if above := anns.Filter(Above).String(); above != "" {
-			rows = append(rows, blank+escape.Control(above))
+		// the marker row. The row starts at the column of the annotations
+		// as the content row renders it, so it lines up on a line holding
+		// wide or control characters.
+		if kept := anns.Filter(Above).WithContent(); len(kept) > 0 {
+			padding := strings.Repeat(" ", colWidth(ln, kept.Col()))
+			rows = append(rows, blank+padding+escape.Control(strings.Join(kept.Contents(), "; ")))
 		}
 
 		rows = append(rows, fmt.Sprintf("%*d | %s", width, ln.Number(), escape.Control(ln.Content())))
@@ -375,6 +378,20 @@ func (v *View) String() string {
 	}
 
 	return strings.Join(rows, "\n")
+}
+
+// colWidth returns the width in cells of the content of ln before col, as
+// the content row renders it, with a column past the end of the content
+// taking one cell.
+func colWidth(ln *Line, col int) int {
+	runes := []rune(ln.Content())
+	col = max(0, col)
+
+	if col <= len(runes) {
+		return ansi.StringWidth(escape.Control(string(runes[:col])))
+	}
+
+	return ansi.StringWidth(escape.Control(ln.Content())) + col - len(runes)
 }
 
 // markerRow returns the row below ln that marks its overlays and carries
