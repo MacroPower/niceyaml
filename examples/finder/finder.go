@@ -42,7 +42,7 @@ func main() {
 		finder.WithNormalizer(normalizer.New()),
 	)
 
-	// Load the source to build an internal index.
+	// Load the source lines to build a search index.
 	idx := f.Load(source.Lines())
 
 	// Find all occurrences of "cafe" in the source.
