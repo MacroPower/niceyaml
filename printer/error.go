@@ -67,6 +67,12 @@ func (p *Printer) PrintError(err error) string {
 		}
 	}
 
+	// A bound join whose branches all carry nothing renders as an empty
+	// tree, so the message stands in for it rather than nothing.
+	if len(parts) == 0 {
+		return err.Error()
+	}
+
 	return strings.Join(parts, "\n\n")
 }
 

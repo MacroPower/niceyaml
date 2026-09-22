@@ -4260,3 +4260,17 @@ func TestPrinter_ContainerWidth_Accessor(t *testing.T) {
 	assert.Equal(t, 40, testPrinter().With(printer.WithContainerWidth(40)).ContainerWidth())
 	assert.Equal(t, 0, testPrinter().With(printer.WithContainerWidth(-1)).ContainerWidth())
 }
+
+func TestPrinter_PrintError_JoinOfNothing(t *testing.T) {
+	t.Parallel()
+
+	// A bound join whose branches all carry nothing renders as an empty
+	// tree and no excerpt, so the message stands in rather than nothing.
+	var nilErr *niceyaml.Error
+
+	source := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("f.yaml"))
+	err := source.Bind(errors.Join(nilErr, nilErr))
+	require.Error(t, err)
+
+	assert.Equal(t, err.Error(), testPrinterWithGutter(printer.NoGutter).PrintError(err))
+}
