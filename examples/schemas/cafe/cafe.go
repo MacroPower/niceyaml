@@ -1,4 +1,5 @@
-// Package cafe is an example.
+// Package cafe is an example configuration schema with valid and invalid
+// sample documents.
 package cafe
 
 import (
@@ -23,12 +24,12 @@ var (
 	// Decode with [niceyaml.WithValidator].
 	Schema = schema.MustCompile(schemaJSON)
 
-	// DefaultYAML is a valid cafe configuration, used by the demo and tests.
+	// DefaultYAML is a valid cafe configuration for the demo and tests.
 	//go:embed defaults.yaml
 	DefaultYAML string
 
 	// BrokenYAML is an invalid cafe configuration that trips several schema
-	// constraints, used by the demo and tests to show validation errors.
+	// constraints. The demo and tests use it to show validation errors.
 	//go:embed broken.yaml
 	BrokenYAML string
 )
@@ -49,7 +50,8 @@ func NewConfig() Config {
 	return Config{}
 }
 
-// Validate performs custom validation after decoding.
+// Validate runs after decoding. It checks that the operating hours parse
+// and that open is before close.
 func (c Config) Validate() error {
 	openTime, err := time.Parse("15:04", c.Spec.Hours.Open)
 	if err != nil {
