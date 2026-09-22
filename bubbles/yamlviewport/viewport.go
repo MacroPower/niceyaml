@@ -444,8 +444,12 @@ func (m *Model) SetRevision(r Revision) {
 //
 // The viewport displays the view r hands out, decoration included, and
 // adds its search highlights to a clone of it, so the view itself stays as
-// the caller left it. See [Revision].
+// the caller left it. See [Revision]. A nil r adds nothing.
 func (m *Model) AddRevision(r Revision) {
+	if r == nil {
+		return
+	}
+
 	m.revisions = append(m.revisions, r)
 	m.revIndex = len(m.revisions) - 1
 

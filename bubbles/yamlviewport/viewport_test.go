@@ -1407,6 +1407,18 @@ func TestViewport_Revisions(t *testing.T) {
 				assert.Empty(t, m.RevisionName())
 			},
 		},
+		"AddRevision/Nil": {
+			setup: func(m *yamlviewport.Model) {
+				m.AddRevision(nil)
+				m.SetRevision(nil)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, 0, m.RevisionCount())
+				assert.Empty(t, m.RevisionName())
+				assert.Empty(t, m.RevisionNames())
+			},
+		},
 		"AddRevision/Single": {
 			setup: func(m *yamlviewport.Model) {
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
