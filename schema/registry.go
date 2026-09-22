@@ -406,7 +406,7 @@ func (r *Registry) load(ctx context.Context, ref Ref) ([]byte, error) {
 		return httpfetch.Get(ctx, r.client, ref.key)
 
 	case ref.file != "":
-		return readFile(r.fsys, ref.file)
+		return readFile(r.fsys, ref.file, ref.abs)
 
 	case ref.load != nil:
 		return ref.load(ctx)

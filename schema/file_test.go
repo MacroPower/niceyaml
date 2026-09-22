@@ -112,3 +112,19 @@ func TestFile_RelativePath(t *testing.T) {
 		assert.Equal(t, want, fileURL(t, path), path)
 	}
 }
+
+func TestReadFile_ReadsTheAbsolutePath(t *testing.T) {
+	t.Parallel()
+
+	// A read from the working directory uses the path File made absolute
+	// to build the key, not the relative path made absolute again at read
+	// time, so the bytes under a key do not depend on the working
+	// directory at the time of the read.
+	dir := t.TempDir()
+	abs := filepath.Join(dir, "s.json")
+	require.NoError(t, os.WriteFile(abs, []byte(`{"type": "object"}`), 0o600))
+
+	data, err := schema.ReadFile(nil, "elsewhere/s.json", abs)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"type": "object"}`, string(data))
+}

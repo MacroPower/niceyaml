@@ -60,6 +60,10 @@ type Ref struct {
 	// The file the registry reads, as given to File, which is relative to
 	// the working directory or to the file system of the registry.
 	file string
+	// The file made absolute against the working directory as File made
+	// it to build the key, which a read from the working directory uses,
+	// so the bytes under the key stay the same wherever the read happens.
+	abs string
 	// The key is an HTTP URL the registry fetches with its client.
 	url bool
 }

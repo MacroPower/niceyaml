@@ -91,14 +91,16 @@ func file(path string) (Ref, error) {
 		}
 	}
 
-	return Ref{key: fileURL(abs), file: path}, nil
+	return Ref{key: fileURL(abs), file: path, abs: abs}, nil
 }
 
 // readFile returns the bytes of the file a [Ref] from [File] names: from
-// fsys, with the path in slash form relative to its root, or from the
-// working directory when fsys is nil, with the path made absolute against
-// it as [File] made it to build the key.
-func readFile(fsys fs.FS, name string) ([]byte, error) {
+// fsys, with name in slash form relative to its root, or from the working
+// directory when fsys is nil, at abs, the path [File] made absolute to
+// build the key, so a change of working directory between the two does
+// not put another file's bytes under the key. An empty abs is made
+// absolute against the working directory of the read.
+func readFile(fsys fs.FS, name, abs string) ([]byte, error) {
 	if fsys != nil {
 		fsPath := slashpath.Clean(filepath.ToSlash(name))
 		if !fs.ValidPath(fsPath) {
@@ -113,14 +115,16 @@ func readFile(fsys fs.FS, name string) ([]byte, error) {
 		return data, nil
 	}
 
-	abs := name
+	if abs == "" {
+		abs = name
 
-	if !hasDriveLetter(name) {
-		var err error
+		if !hasDriveLetter(name) {
+			var err error
 
-		abs, err = filepath.Abs(name)
-		if err != nil {
-			return nil, fmt.Errorf("resolve %s: %w", name, err)
+			abs, err = filepath.Abs(name)
+			if err != nil {
+				return nil, fmt.Errorf("resolve %s: %w", name, err)
+			}
 		}
 	}
 

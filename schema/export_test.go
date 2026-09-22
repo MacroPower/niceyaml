@@ -12,4 +12,7 @@ var (
 
 	// WalkSegments exposes walkSegments to the external test package.
 	WalkSegments = walkSegments
+
+	// ReadFile exposes readFile to the external test package.
+	ReadFile = readFile
 )
