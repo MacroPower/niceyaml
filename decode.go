@@ -505,7 +505,11 @@ func (dd *Document) extent(node ast.Node) (position.Span, token.Tokens) {
 	start := tks[0].Position.Line - 1
 	end := start
 
-	for _, r := range dd.source.lines.TokenRanges(tks[len(tks)-1]) {
+	// The content of the last token ends the span. Its text runs on
+	// through the line breaks and the indentation of the next line, which
+	// the lexer folds into a scalar, so the ranges of the text would put a
+	// sibling's line into the span.
+	for _, r := range dd.source.lines.ContentRanges(tks[len(tks)-1]) {
 		end = max(end, r.LastLine())
 	}
 

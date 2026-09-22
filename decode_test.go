@@ -2852,6 +2852,13 @@ func TestDocument_At_Scope(t *testing.T) {
 				span:   position.NewSpan(4, 5),
 				tokens: []string{"09:00"},
 			},
+			"nested scalar before a sibling": {
+				// The lexer folds the indentation of the next line into the
+				// scalar, which does not put that line into the span.
+				path:   hoursPath.Child("open"),
+				span:   position.NewSpan(3, 4),
+				tokens: []string{"17:00"},
+			},
 		}
 
 		for name, tc := range tcs {
