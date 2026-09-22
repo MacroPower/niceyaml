@@ -118,7 +118,7 @@ func FromJSONSchema(v *jsonschema.Validator) *Schema {
 // location for display by [printer.Printer]. [Schema.Validate] checks a
 // document, or the node a document from [niceyaml.Document.At] is scoped
 // to, and [Schema.ValidateValue] checks decoded data, such as one value
-// taken from a document with a scoped [niceyaml.Document.Decode].
+// taken from a document with a scoped [niceyaml.Document.Decode] into any.
 //
 // A Schema is the validator for a program that holds one schema and
 // compiles it itself. It is also a [Resolver] that names itself for every
@@ -186,7 +186,10 @@ func (s *Schema) Validate(ctx context.Context, doc *niceyaml.Document) error {
 }
 
 // ValidateValue checks data, the decoded form of a YAML value, against the
-// schema.
+// schema. The value is the shape a decode into any yields: maps with
+// string keys, slices, strings, bools, nil, and numbers, nested as the
+// document nests them. A Go struct is not accepted, since the validator
+// reads the data as JSON does.
 //
 // YAML-native values the JSON Schema validator does not accept are first
 // converted to the JSON spelling of the same data: a !!binary becomes its
