@@ -9,7 +9,8 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
-// generateNestedYAML creates nested YAML content to test deeper structures.
+// generateNestedYAML creates YAML nested to the given depth, where each
+// level branches into itemsPerLevel keys.
 func generateNestedYAML(depth, itemsPerLevel int) string {
 	var sb strings.Builder
 

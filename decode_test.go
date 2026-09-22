@@ -932,7 +932,7 @@ func TestDocument_Decode_SchemaThenDecodeError(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, dd := range d {
-		// Schema validation passes, but decode will fail due to type mismatch.
+		// Schema validation passes, but the decode fails on a type mismatch.
 		_, err := dd.Decode[strictValueConfig](t.Context(),
 			niceyaml.WithValidator(passingValidator()),
 		)
@@ -960,7 +960,7 @@ func TestDocument_Decode_CanceledContext(t *testing.T) {
 	for _, dd := range d {
 		_, err := dd.Decode[map[string]string](ctx)
 		// Context cancellation may or may not cause an error depending on timing.
-		// The decode might complete before the context cancellation is checked.
+		// The decode might complete before it checks the context.
 		// This test mainly ensures the code path doesn't panic.
 		_ = err
 	}
@@ -1162,8 +1162,8 @@ func nameSchema(called *bool) niceyaml.Validator {
 	})
 }
 
-// bothValidatorConfig implements niceyaml.SelfValidator and is unmarshaled with
-// a schema, so tests of the full pipeline use it.
+// bothValidatorConfig implements niceyaml.SelfValidator, and tests of the full
+// pipeline decode it with a schema.
 type bothValidatorConfig struct {
 	Name      string `yaml:"name"`
 	Value     int    `yaml:"value"`
@@ -2649,8 +2649,8 @@ func TestDocument_Bind(t *testing.T) {
 	})
 }
 
-// hoursConfig is a value decoded from one node of a document whose check
-// names a path from that node.
+// hoursConfig is a value decoded from one node of a document, and its
+// Validate names a path from that node.
 type hoursConfig struct {
 	Open  string `yaml:"open"`
 	Close string `yaml:"close"`
@@ -2951,7 +2951,7 @@ func TestDocument_Decode_ValidatorDecodesWithoutHooks(t *testing.T) {
 
 		var runs int
 
-		// A validator shaped like schema.Schema.Validate: it decodes the
+		// A validator shaped like schema.Schema.Validate decodes the
 		// document to inspect it. Its own decode must carry no hooks, or
 		// the validator would run itself again on every decode it performs.
 		inspect := niceyaml.ValidatorFunc(func(ctx context.Context, doc *niceyaml.Document) error {
@@ -3003,7 +3003,7 @@ func TestDocument_At_ErrorBoundToReceiver(t *testing.T) {
 	_, err := scoped.At(paths.Root().Child("missing"))
 	require.ErrorIs(t, err, paths.ErrNotFound)
 
-	// The error is bound to the Document At was called on, not to a copy
+	// At binds the error to the Document it was called on, not to a copy
 	// scoped to the path that did not resolve.
 	var bound *niceyaml.SourceError
 

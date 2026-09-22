@@ -238,17 +238,17 @@ func documentSpans(groups []token.Tokens, total int) []position.Span {
 // alignDocumentTokens pairs every document in file with the token group it
 // starts in, returning one entry per document in file order.
 //
-// The groups come from [tokens.SplitDocuments]. Each document is anchored by
+// The groups come from [tokens.SplitDocuments]. Each document anchors at
 // the offset of its header token, or of its body's first token when it has
 // no header, and takes the groups from the first one no earlier document
 // claimed up to the one the next document anchors in, so a group that starts
 // ahead of the first anchor, such as a leading "..." marker, joins the
-// document below it. Matching by offset
-// rather than by index keeps a document paired with its own tokens when the
-// parser and the splitter disagree on boundaries: the splitter cuts a group
-// at every header, while the parser collapses consecutive headers into one
-// document, so such a document spans several groups and takes them all. A
-// document with no anchor gets nil tokens.
+// document below it. Matching by offset rather than by index keeps a
+// document paired with its own tokens when the parser and the splitter
+// disagree on boundaries. The splitter cuts a group at every header, while
+// the parser collapses consecutive headers into one document, so such a
+// document spans several groups and takes them all. A document with no
+// anchor gets nil tokens.
 func alignDocumentTokens(file *ast.File, tks token.Tokens) []token.Tokens {
 	var (
 		groups []token.Tokens
@@ -330,7 +330,7 @@ func documentOffset(doc *ast.DocumentNode) (int, bool) {
 //
 // [Document.Decode] returns a new value and
 // [Document.DecodeInto] fills one the caller already holds, such as
-// one pre-populated with defaults. Both run the same pipeline: each
+// one pre-populated with defaults. Both run the same pipeline. Each
 // [Validator] given with [WithValidator] checks the document before
 // decoding, and a value that implements [SelfValidator] validates itself after,
 // unless [WithSelfValidation] switches that off. [Document.Validate] runs
@@ -347,7 +347,7 @@ func documentOffset(doc *ast.DocumentNode) (int, bool) {
 //
 // A Document is a scope. [Document.At] returns one scoped to the node a
 // path selects, and every method of that Document reads and resolves from
-// the node: Decode decodes the node alone, which reads one value without
+// the node. Decode decodes the node alone, which reads one value without
 // decoding the whole document, such as a discriminator field that routes
 // the document, and Bind resolves the paths in an error from the node, so
 // a check written for the type of that value reports the right lines.
@@ -401,7 +401,7 @@ func (dd *Document) Root() *ast.DocumentNode {
 //	fmt.Println(node.String())
 //
 // The body is what the parser built: nil for an empty document, and a
-// comment group for one holding only comments, and Node returns either
+// comment group for one holding only comments. Node returns either
 // without an error, as such a document decodes to nothing.
 func (dd *Document) Node() (ast.Node, error) {
 	if dd.base.IsRoot() {
@@ -415,7 +415,7 @@ func (dd *Document) Node() (ast.Node, error) {
 
 // At returns a [*Document] scoped to the node path selects, with path
 // resolving from the scope of the receiver. The scoped Document shares
-// the source and the document with the receiver: [Document.Root],
+// the source and the document with the receiver. [Document.Root],
 // [Document.Index], [Document.Preamble], [Document.FilePath], and
 // [Document.Source] describe the enclosing document as the receiver does,
 // while [Document.Node], [Document.Span], [Document.Tokens],
@@ -467,9 +467,9 @@ func (dd *Document) At(path paths.Path) (*Document, error) {
 
 	node, err := c.base.Node(dd.doc)
 	if err != nil {
-		// The error is bound to the receiver, a Document that exists,
-		// rather than to the copy, whose scope moved to a path that
-		// resolves to no node.
+		// Bind to the receiver, a Document that exists, rather than to
+		// the copy, whose scope moved to a path that resolves to no
+		// node.
 		return nil, dd.Bind(err)
 	}
 
@@ -605,13 +605,14 @@ func (dd *Document) Index() int {
 
 // Tokens returns the tokens of the node the Document is scoped to, with
 // the positions they have in the source. For a whole document they are
-// its preamble, its content, and the comments after a "..." marker that
-// ends it, and nil when no token anchors the document, such as one with
-// neither a header nor a body. For a Document from [Document.At] they run
-// from the first token under the node through the last, comments between
-// them included, and are nil when the scope selects nothing. The slice is
-// a copy, so reordering it reaches nothing, while the tokens themselves
-// are shared and read-only.
+// its preamble, its content, and, when no document follows, the comments
+// after a "..." marker that ends it, which otherwise become the preamble
+// of the next document. They are nil when no token anchors the document,
+// such as one with neither a header nor a body. For a Document from
+// [Document.At] they run from the first token under the node through the
+// last, comments between them included, and are nil when the scope
+// selects nothing. The slice is a copy, so reordering it reaches nothing,
+// while the tokens themselves are shared and read-only.
 func (dd *Document) Tokens() token.Tokens {
 	return slices.Clone(dd.content)
 }
@@ -709,10 +710,10 @@ func (dd *Document) Ranges(path paths.Path) (position.Ranges, error) {
 	return lines.ContentRanges(lines.TokenAt(pos)), nil
 }
 
-// position returns the position of the token path, which resolves from
-// the scope, resolves to in the document, from [paths.Path.Token]. An
-// error from it names the path already and comes back as it is, and a
-// token without a position is [ErrNoLocation].
+// position returns the position of the token that path resolves to in the
+// document, through [paths.Path.Token], with path resolving from the
+// scope. An error from it names the path already and comes back as it is,
+// and a token without a position is [ErrNoLocation].
 func (dd *Document) position(path paths.Path) (position.Position, error) {
 	tk, err := dd.base.Join(path).Token(dd.doc)
 	if err != nil {
@@ -762,8 +763,8 @@ func (dd *Document) Validate(ctx context.Context, validators ...Validator) error
 // The Document methods bind the errors they return already. Bind is for
 // an error built elsewhere, such as a validator's [*Error] with a path, or
 // one from a check the caller runs on a value it took from the document.
-// A path in such an error is written from the value, so the Document
-// scoped to that value with [Document.At] binds it:
+// Such an error writes its path from the value, so the Document scoped
+// to that value with [Document.At] binds it:
 //
 //	item, err := doc.At(path)
 //	if err != nil {
@@ -792,18 +793,18 @@ func (dd *Document) Validate(ctx context.Context, validators ...Validator) error
 //	fmt.Errorf("document %d: %w", i, doc.Bind(err))
 //
 // [Source.Bind] binds an error to the document its location falls in,
-// so a caller that holds the source rather than a document binds there:
-// a position or a range finds the document whose span holds it, and a
+// so a caller that holds the source rather than a document binds there.
+// A position or a range finds the document whose span holds it, and a
 // path resolves in the one document of a source that holds one. A path
 // in a source that holds several resolves nowhere there, with
 // [ErrPathNeedsDocument] as the reason, and binds here instead.
 //
-// Binding binds the whole tree of err: the [Error] that anchors it gives
+// Binding binds the whole tree of err. The [Error] that anchors it gives
 // the [SourceError] its location, and every error nested with
 // [WithErrors] along the way becomes a child with a location of its own,
 // which [SourceError.Errors] returns. An error that unwraps to several,
-// such as one from [errors.Join], binds the same way whatever wraps it:
-// the SourceError carries no location of its own, and each branch is a
+// such as one from [errors.Join], binds the same way whatever wraps it.
+// The SourceError carries no location of its own, and each branch is a
 // child with its own, so a validator that joins its violations reports
 // each one with its position. To keep several errors as separate
 // bindings, bind each one before joining them.
@@ -906,13 +907,13 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 // from [Document.At] is scoped to, into v, which must be a non-nil
 // pointer. Any other v returns [ErrDecodeTarget] before anything runs.
 //
-// Each [Validator] from [WithValidator] runs before decoding. If
-// v implements [SelfValidator], Validate is called after successful decoding
-// unless [WithSelfValidation] switches that off. Fields absent from the
-// document keep their existing values, so v may be pre-populated with
-// defaults. YAML decoding errors, and [Error] values from the validators,
-// come back bound to the source as [SourceError] values, with a path in
-// them resolving from the scope.
+// Each [Validator] from [WithValidator] runs before decoding. If v
+// implements [SelfValidator], DecodeInto calls Validate after decoding
+// succeeds, unless [WithSelfValidation] switches that off. Fields absent
+// from the document keep their existing values, so v may be pre-populated
+// with defaults. YAML decoding errors, and [Error] values from the
+// validators, come back bound to the source as [SourceError] values, with
+// a path in them resolving from the scope.
 //
 // An alias inside the node resolves against the anchors of the whole
 // document, so a value that refers to an anchor defined outside it decodes
@@ -1085,10 +1086,10 @@ func hasContent(node ast.Node) bool {
 // Decode validates and decodes the document, or the node a Document from
 // [Document.At] is scoped to, into a new T.
 //
-// Each [Validator] from [WithValidator] runs before decoding. If
-// *T implements [SelfValidator], Validate is called after successful decoding
-// unless [WithSelfValidation] switches that off. Methods declared on T
-// itself are included in the method set of *T, so both value and pointer
+// Each [Validator] from [WithValidator] runs before decoding. If *T
+// implements [SelfValidator], Decode calls Validate after decoding
+// succeeds, unless [WithSelfValidation] switches that off. The method set
+// of *T includes methods declared on T itself, so both value and pointer
 // receivers participate. YAML decoding errors, and [Error] values from the
 // validators, come back bound to the source as [SourceError] values. On
 // error, the returned T is the zero value.

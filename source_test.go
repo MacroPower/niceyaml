@@ -264,9 +264,9 @@ func TestSource_Runes_LiteralBlock(t *testing.T) {
 func TestSource_Runes_DiffBuiltLines(t *testing.T) {
 	t.Parallel()
 
-	// When Lines are built from a diff, Position.Line should be based on the
-	// visual line index (Line.idx), not the source token position.
-	// This is critical for Finder to work correctly with diffs.
+	// When a diff builds Lines, Position.Line follows the visual line index
+	// within Lines, not the source token position.
+	// Finder maps its matches back onto those visual lines.
 
 	before := "key: old\n"
 	after := "key: new\n"
@@ -1075,7 +1075,7 @@ func TestSource_View_IndependentViews(t *testing.T) {
 	assert.Empty(t, second.Overlays(0))
 	assert.Empty(t, second.Annotations(0))
 
-	// The first view keeps what was added to it.
+	// The first view keeps its overlay and annotation.
 	require.Len(t, first.Overlays(0), 1)
 	assert.Equal(t, kind.Kind("test1"), first.Overlays(0)[0].Kind)
 	assert.Equal(t, "key: value", first.Lines().Content())

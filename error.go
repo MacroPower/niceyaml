@@ -84,7 +84,7 @@ var (
 // until a [SourceError] binds the Error and puts the resolved one in front,
 // so a bound error reads "name:line:col: $.path: msg" or
 // "name:line:col: msg". Nested errors from [WithErrors] are structure
-// rather than text: [Error.Errors] returns them, [Error.Unwrap] exposes
+// rather than text. [Error.Errors] returns them, [Error.Unwrap] exposes
 // them to [errors.Is] and [errors.As], and the [SourceError] that binds
 // the Error binds each one as a child with a resolved location of its own.
 //
@@ -98,9 +98,9 @@ type Error struct {
 	// or nil when none is set.
 	loc    any
 	errors []error
-	// The path the paths under the Error are written from, set by Rebase,
-	// and whether it is set at all, since the root is a base like any
-	// other.
+	// The path the paths under the Error are written from, which Rebase
+	// sets, and whether it is set at all, since the root is a base like
+	// any other.
 	base    paths.Path
 	rebased bool
 }
@@ -142,7 +142,7 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 	return &c
 }
 
-// Rebase returns an error whose paths are written from base: every path
+// Rebase returns an error whose paths are written from base. Every path
 // in the tree of err, whether on the [*Error] that anchors it or on an
 // error nested with [WithErrors], resolves as base joined with that path,
 // and the message of the result carries the joined path. A type that
@@ -557,7 +557,7 @@ func locatePath(b binder, path paths.Path) (location, *Document, error) {
 // document it was checked against, and [Source.Bind] binds one to the
 // document its location falls in, or to the source alone when it carries
 // no location. Binding resolves the location of the error against the source, once, so
-// a SourceError never changes and every method of it reads that result:
+// a SourceError never changes and every method of it reads that result.
 // [SourceError.Error] puts the position in front of the message,
 // [SourceError.Range] returns the resolved range, and
 // [SourceError.Excerpt] returns the surrounding lines with the location
@@ -576,7 +576,7 @@ func locatePath(b binder, path paths.Path) (location, *Document, error) {
 //
 // The bound error is a tree, and binding binds every node of it. The
 // location of the SourceError is that of the first located [Error] along
-// the cause chain of the error it binds: the chain follows each wrapper to
+// the cause chain of the error it binds. The chain follows each wrapper to
 // the one error it wraps and ends at an error that unwraps to several,
 // such as one from [errors.Join], which carries no location of its own.
 // Every error nested with [WithErrors] in an Error along that chain, and
@@ -586,7 +586,7 @@ func locatePath(b binder, path paths.Path) (location, *Document, error) {
 // validator's report of several violations binds to one SourceError per
 // violation whether it nests them with WithErrors or joins them. An error
 // that is or wraps a SourceError, with no located Error above it, is a
-// binding already: as a nested error it contributes that binding as the
+// binding already. As a nested error it contributes that binding as the
 // child, and as the error given to Bind it comes back as it is. A located
 // Error above a binding binds anew at its own location, and its message
 // carries the position the inner binding resolved as well as its own.
@@ -598,7 +598,7 @@ func locatePath(b binder, path paths.Path) (location, *Document, error) {
 // A location that does not resolve, such as a path the document does not
 // hold or a position on a line the source does not have, costs the
 // SourceError its position, and an error that carries no location never
-// had one: [SourceError.Error] then puts the name of the source alone in
+// had one. [SourceError.Error] then puts the name of the source alone in
 // front of the message, and [SourceError.Range] returns the reason.
 //
 // A SourceError never rewrites the message of the error it binds. The text
@@ -723,8 +723,8 @@ type anchor struct {
 // with no anchor below it is the anchor, located at its base. The chain
 // follows a wrapper to the one error it wraps and an Error to its cause.
 // An error that unwraps to several, such as one from [errors.Join], ends
-// the chain: it carries no location of its own, and each of its branches
-// binds as a child.
+// the chain. Such an error carries no location of its own, and each of
+// its branches binds as a child.
 func anchorOf(err error) anchor {
 	switch x := err.(type) { //nolint:errorlint // Walks the chain one node at a time.
 	case *SourceError:
@@ -783,7 +783,7 @@ func newSourceError(err error, b binder) *SourceError {
 
 	case *SourceError:
 		// The error wraps a binding, so it is that binding with more
-		// around it: it takes over the location and source the binding
+		// around it. It takes over the location and source the binding
 		// resolved, and its message carries the position the binding put
 		// there already.
 		e.adopted = true
@@ -942,7 +942,7 @@ func (e *SourceError) Errors() []*SourceError {
 // The message is the text of the bound error, which runs over several
 // lines when that text does, as the text of an [errors.Join] and a
 // message written with continuation lines both do. The nested errors
-// are not part of it: [SourceError.Errors] returns them, the %+v verb
+// are not part of it. [SourceError.Errors] returns them, the %+v verb
 // lists each one behind its own position, and
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] draws them as a
 // tree. The result never includes source lines, so it is safe to log or
@@ -1061,7 +1061,7 @@ func (e *SourceError) echoesChildren() bool {
 	}
 
 	// The branches of e.err wrote its message, so they say what the
-	// message repeats, while the children they became may not: a branch
+	// message repeats, while the children they became may not. A branch
 	// bound before the join contributed its position to the text too.
 	multi, ok := e.err.(interface{ Unwrap() []error }) //nolint:errorlint // The node itself, not a chain search.
 	if !ok {
@@ -1199,14 +1199,14 @@ func writeString(f fmt.State, s string) {
 // The range is in the coordinates of the view [Source.Lines] returns, where
 // line 0 is line 1 of the text.
 //
-// The location was resolved when the error was bound, so Range reads the
-// result. It returns [ErrNoLocation] when the error carries no location or
-// its path resolves to a token without one, [ErrOutOfRange] when the
-// location starts on a line the source does not hold, and the resolution
-// error from [go.jacobcolvin.com/niceyaml/paths] when a path does not
-// resolve. An error whose Range fails has no position in
-// [SourceError.Error] and no excerpt. A nil SourceError carries no
-// location, so it returns [ErrNoLocation].
+// Binding resolved the location, so Range reads the result. It returns
+// [ErrNoLocation] when the error carries no location or its path resolves
+// to a token without one, [ErrOutOfRange] when the location starts on a
+// line the source does not hold, and the resolution error from
+// [go.jacobcolvin.com/niceyaml/paths] when a path does not resolve. An
+// error whose Range fails has no position in [SourceError.Error] and no
+// excerpt. A nil SourceError carries no location, so it returns
+// [ErrNoLocation].
 func (e *SourceError) Range() (position.Range, error) {
 	if e == nil {
 		return position.Range{}, ErrNoLocation
@@ -1232,12 +1232,12 @@ func rangeOf(lines line.Lines, loc location) position.Range {
 }
 
 // Annotate marks the error on view, which holds lines of the source the
-// error is bound to: the location of every node in the tree is highlighted
-// with [kind.GenericError], and the message of each node below the root is
-// an annotation below its own line in [kind.TextError], so the message
-// reads as error text without the highlight of the token it describes. A
-// viewer that shows a document with its errors in place marks its view this
-// way and renders it as it is.
+// error is bound to. Annotate highlights the location of every node in
+// the tree with [kind.GenericError] and adds the message of each node
+// below the root as an annotation below its own line in [kind.TextError],
+// so the message reads as error text without the highlight of the token
+// it describes. A viewer that shows a document with its errors in place
+// marks its view this way and renders it as it is.
 //
 // Annotate finds each line by identity rather than by index, since every
 // view over the source shares its [*line.Line] values, so the view may be
@@ -1304,13 +1304,12 @@ func (e *SourceError) Excerpt(context int) (*line.View, error) {
 }
 
 // detail returns what [SourceError.Error] leaves out: the excerpt from
-// [SourceError.Excerpt] with context lines, rendered as plain text by
-// [line.View.String]. When no location resolves, a
-// line starting "no excerpt:" names the error [SourceError.Range] returns
-// in place of the excerpt, unless that error is [ErrNoLocation], since an
-// error that carries no location has nothing to explain. Returns "" when
-// there is nothing to show. The printer renders the same parts with its
-// styles.
+// [SourceError.Excerpt] with context lines, which [line.View.String]
+// renders as plain text. When no location resolves, a line starting
+// "no excerpt:" names the error [SourceError.Range] returns in place of
+// the excerpt, unless that error is [ErrNoLocation], since an error that
+// carries no location has nothing to explain. Returns "" when there is
+// nothing to show. The printer renders the same parts with its styles.
 func (e *SourceError) detail(context int) string {
 	excerpt, err := e.Excerpt(context)
 	if err == nil {
@@ -1458,7 +1457,7 @@ func highlightRanges(view line.Lines, loc location) position.Ranges {
 	return view.ContentRanges(view.TokenAt(loc.pos))
 }
 
-// clampRange returns r cut to lines: a range that runs past the last line
+// clampRange returns r cut to lines. A range that runs past the last line
 // ends at the end of that line, so a range an error carried marks lines
 // the source has and [SourceError.Range] reports one of them. A range
 // within the lines comes back as it is.

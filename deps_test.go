@@ -78,9 +78,9 @@ var policies = []dependencyPolicy{
 }
 
 // TestExportedAPI_DependencyPolicy walks every exported declaration in the
-// module and checks that any third-party type it names is on the allowlist
-// of its library's policy, and that the pass-through options only appear in
-// identifiers with the library's prefix.
+// repository's public packages and checks that any third-party type it names
+// is on the allowlist of its library's policy, and that the pass-through
+// options only appear in identifiers with the library's prefix.
 func TestExportedAPI_DependencyPolicy(t *testing.T) {
 	t.Parallel()
 
@@ -224,8 +224,8 @@ func checkFile(t *testing.T, path string) []string {
 }
 
 // reportType reports the third-party references in an exported type. A struct
-// contributes only its exported fields, each under its own name, so the
-// prefix rule reads the field's name.
+// contributes only its exported fields, each under a "Type.Field" name, so
+// the prefix rule reads the field's name along with the type's.
 func reportType(report func(string, ast.Node), spec *ast.TypeSpec) {
 	st, ok := spec.Type.(*ast.StructType)
 	if !ok {

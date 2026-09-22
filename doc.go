@@ -1,9 +1,8 @@
 // Package niceyaml provides utilities for working with YAML documents.
-// It is built using [yaml] and [charm.land/lipgloss/v2].
+// It builds on [yaml] and [charm.land/lipgloss/v2].
 //
-// By directly styling YAML tokens a single time, niceyaml is much more
-// consistent, flexible, and performant, when compared to using multiple
-// distinct styling systems.
+// Rather than using multiple distinct styling systems, niceyaml styles the
+// YAML tokens directly, a single time.
 //
 // It also provides an alternative implementation of go-yaml's source
 // annotations for errors, as well as adapters for use with JSON schema
@@ -46,7 +45,7 @@
 // one to the document its location falls in.
 //
 // [line.Lines] is the content, the tokens organized into lines, and it never changes.
-// [line.View] is one rendering of that content: it shares the lines and carries the
+// [line.View] is one rendering of that content. It shares the lines and carries the
 // decoration of the rendering. Annotations hold error messages and diff headers, flags
 // mark inserted and deleted lines, and overlays apply style spans for highlighting. A
 // Source hands out its lines from [Source.Lines] and a fresh view over them from
@@ -87,7 +86,7 @@
 // [SourceError.Excerpt] returns the surrounding lines with the location
 // highlighted.
 // Nested errors from [WithErrors] are structure on the Error, and binding
-// binds each of them too: [SourceError.Errors] returns one SourceError per
+// binds each of them too. [SourceError.Errors] returns one SourceError per
 // nested error, with its own resolved location and its own children, so a
 // validator's report of several violations is a tree of bound errors. The
 // %+v verb prints the message, one line per nested error behind its
@@ -108,7 +107,7 @@
 // strings do, while diffing, printing, and searching are much simpler with
 // line-by-line access. [line.NewLines] splits multiline tokens at line
 // boundaries into one part per line and keeps a reference to the original
-// token every part was cut from, and [line.Lines.Tokens] reverses the split.
+// token each part came from, and [line.Lines.Tokens] reverses the split.
 // A [Source] does this on creation, hands out the result from
 // [Source.Lines], and hands out a view to decorate from [Source.View]:
 //
@@ -166,9 +165,9 @@
 // without an error to bind.
 //
 // This separates error production (validators, decoders) from error
-// presentation (source context, formatting), allowing each layer to provide
-// what it knows: a validator the path, a source the document, and the
-// caller that prints the terminal width and theme.
+// presentation (source context, formatting). Each layer provides what it
+// knows: a validator the path, a source the document, and the caller that
+// prints the terminal width and theme.
 //
 // # Validation Pipeline
 //
@@ -192,10 +191,11 @@
 //		}
 //	}
 //
-// [Document.Decode] supports two validation hooks: a [Validator]
-// passed with [WithValidator] checks the whole document before decoding, and
-// a type implementing [SelfValidator] validates itself after decoding. A
-// [go.jacobcolvin.com/niceyaml/schema.Schema] is a Validator that
+// [Document.Decode] runs validation on both sides of the decode. A
+// [Validator] passed with [WithValidator] checks the document before
+// decoding, and after decoding a type implementing [SelfValidator]
+// validates itself. A [go.jacobcolvin.com/niceyaml/schema.Schema] is a
+// Validator that
 // checks the document against one JSON schema, and a
 // [go.jacobcolvin.com/niceyaml/schema.Registry] is one that picks
 // the schema for the document:
@@ -217,7 +217,7 @@
 // such as one pre-populated with defaults.
 //
 // [Document.At] returns a Document scoped to the node a path selects, and
-// the same pipeline then runs on that node: Decode reads one value without
+// the same pipeline then runs on that node. Decode reads one value without
 // decoding the whole document, a validator given to it checks the node,
 // and the paths in every error it returns or binds resolve from the node,
 // so a check written for a type reports the same lines whether the type is
@@ -263,8 +263,8 @@
 //
 // # Text Search
 //
-// [go.jacobcolvin.com/niceyaml/finder.Finder] locates strings within tokens, returning
-// [position.Range] values suitable for [line.View.AddOverlay] and
+// [go.jacobcolvin.com/niceyaml/finder.Finder] locates strings within tokens and
+// returns [position.Range] values suitable for [line.View.AddOverlay] and
 // [line.View.BlendOverlay].
 //
 // Use [go.jacobcolvin.com/niceyaml/normalizer.New] with
@@ -305,11 +305,10 @@
 // Rendering builds on lipgloss, and the [go.jacobcolvin.com/niceyaml/style] package
 // exposes its Style type directly since a theme is a set of lipgloss styles. The kinds
 // of text a rendering names, such as [kind.GenericError], live in
-// [go.jacobcolvin.com/niceyaml/style/kind], which imports nothing, so the [line],
+// [go.jacobcolvin.com/niceyaml/style/kind], which holds names alone, so the [line],
 // [go.jacobcolvin.com/niceyaml/diff], and [go.jacobcolvin.com/niceyaml/finder] packages
 // mark content without depending on lipgloss. The [go.jacobcolvin.com/niceyaml/fangs]
 // and [go.jacobcolvin.com/niceyaml/bubbles/yamlviewport] packages are adapters for the
-// charm libraries they build on and expose those libraries' types by design. Each is a
-// module of its own, so bubbletea, fang, and cobra stay out of this module's
-// dependencies.
+// charm libraries they build on and expose those libraries' types. Each is a module of
+// its own, so bubbletea, fang, and cobra stay out of this module's dependencies.
 package niceyaml

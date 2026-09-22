@@ -18,8 +18,8 @@ import (
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
-// Source is a YAML file: one stream of text that holds one or more YAML
-// documents. It holds the tokens the text was lexed from, the [*ast.File]
+// Source is a YAML file, one stream of text that holds one or more YAML
+// documents. It holds the tokens lexed from the text, the [*ast.File]
 // they parse into, and the settings for parsing, decoding, and reporting
 // errors. [Source.Documents] returns each document in the file as a
 // [*Document], and [Source.Document] returns the one document of a file
@@ -118,7 +118,7 @@ func WithAllowDuplicateKeys(allow bool) SourceOption {
 // WithYAMLParserOptions is a [SourceOption] that passes [parser.Option]
 // values to the go-yaml parser when [Source.File] parses the document. It is
 // the escape hatch for parser settings that have no option of their own;
-// comments are always parsed.
+// the parser always parses comments.
 func WithYAMLParserOptions(opts ...parser.Option) SourceOption {
 	return func(s *Source) {
 		s.parserOpts = append(s.parserOpts, opts...)
@@ -127,7 +127,7 @@ func WithYAMLParserOptions(opts ...parser.Option) SourceOption {
 
 // NewSourceFromFile creates a new [*Source] by reading a file from disk.
 //
-// The file path is set on the [Source], so each [Document] reports it for
+// It sets the file path on the [Source], so each [Document] reports it for
 // schema routing, and [Source.Name] returns it unless [WithName] sets a
 // name. [NewSourceFromFS] reads a file from an [fs.FS] the same way.
 //
@@ -146,8 +146,8 @@ func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
 
 // NewSourceFromFS creates a new [*Source] by reading the file at path
 // from fsys, such as an [embed.FS] that ships configuration with the
-// binary or an [fs.FS] a test builds. The path is set on the [Source] as
-// [NewSourceFromFile] sets it, so each [Document] reports it for schema
+// binary or an [fs.FS] a test builds. It sets the path on the [Source] as
+// [NewSourceFromFile] does, so each [Document] reports it for schema
 // routing and a schema directive resolves relative to it in the same
 // file system, through the registry option
 // [go.jacobcolvin.com/niceyaml/schema.WithFS]:
@@ -234,7 +234,7 @@ func (s *Source) Name() string {
 
 // FilePath returns the file path of the [Source].
 //
-// Returns an empty string if not set via [WithFilePath] or [NewSourceFromFile].
+// Returns an empty string unless [WithFilePath] or [NewSourceFromFile] sets it.
 func (s *Source) FilePath() string {
 	return s.filePath
 }
@@ -348,8 +348,9 @@ func (dd *Document) anchorToken() *token.Token {
 
 // File returns an [*ast.File] for the [Source] tokens.
 //
-// The file is lazily parsed on first call using [parser.Parse] with options
-// provided via [WithYAMLParserOptions]. Subsequent calls return the cached result.
+// The first call parses the file with [parser.Parse] and the options
+// [WithYAMLParserOptions] provides. Subsequent calls return the cached
+// result.
 //
 // The tokens of the file are copies of the Source's own, since the parser
 // relinks the tokens it is given. A copy matches the original by its type,
@@ -383,8 +384,8 @@ func (s *Source) parse() (*ast.File, error) {
 		return file, nil
 	}
 
-	// The documents are built from the file this parse returns, so the
-	// error binds to the source alone rather than routing to one of them.
+	// The documents come from the file this parse returns, so the error
+	// binds to the source alone rather than routing to one of them.
 	if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
 		return nil, bindTree(WrapError(yamlMessageError{yamlErr}, atToken(yamlErr.GetToken())), binder{src: s})
 	}
@@ -415,9 +416,9 @@ func (s *Source) parse() (*ast.File, error) {
 //	return source.Bind(check(cfg))
 //
 // A path in a source that holds several documents, or none, resolves
-// nowhere: the bound error keeps its message and the name of the source,
+// nowhere. The bound error keeps its message and the name of the source,
 // [SourceError.Range] returns [ErrPathNeedsDocument] wrapping the reason
-// Source.Document gives, and the %+v verb names it in place of the
+// [Source.Document] gives, and the %+v verb names it in place of the
 // excerpt. Bind such an error through [Document.Bind] with the document
 // it was checked against, which also resolves a path from the scope of a
 // Document from [Document.At].
@@ -429,7 +430,7 @@ func (s *Source) Bind(err error) error {
 	return bindTree(err, binder{src: s, route: true})
 }
 
-// Lines returns the [line.Lines] of the [Source]: its tokens split into
+// Lines returns the [line.Lines] of the [Source], its tokens split into
 // one line per line of text. Line i is line i+1 of the text, so
 // [position.NewFromToken] converts any token of the Source to a position
 // in the lines.

@@ -82,7 +82,7 @@ func xmlSource(input string) *niceyaml.Source {
 }
 
 // trimLines trims trailing whitespace from each line of a string.
-// This is useful for comparing styled output where lipgloss adds padding.
+// Tests use it to compare styled output, which lipgloss pads.
 func trimLines(s string) string {
 	lines := strings.Split(s, "\n")
 	for i, line := range lines {
@@ -460,7 +460,7 @@ func TestError_GracefulDegradation(t *testing.T) {
 			want: "$.nonexistent.deep~: path not found\n\nno excerpt: resolve $.nonexistent.deep~: not found",
 		},
 		"empty document source": {
-			// Tests graceful handling when source has no documents (Docs slice is empty).
+			// Tests a source with no documents (the Docs slice is empty).
 			err: yamltest.Bind(t, niceyaml.NewSourceFromTokens(emptyTokens), niceyaml.NewError(
 				"empty doc error",
 				niceyaml.AtPath(paths.Root().Child("key").Key()),
@@ -817,7 +817,7 @@ func TestError_Unwrap(t *testing.T) {
 
 		require.Len(t, got, 3)
 		assert.Equal(t, underlying, got[0])
-		// Check that nested errors are included.
+		// A call to errors.Is finds each nested error.
 		require.ErrorIs(t, err, nested1)
 		require.ErrorIs(t, err, nested2)
 	})
@@ -931,7 +931,7 @@ func TestError_MultiError(t *testing.T) {
 
 		got := trimLines(render(err))
 
-		// Errors on same line should be combined with "; ".
+		// Errors on the same line combine with "; ".
 		assert.Contains(t, got, "error1; error2")
 	})
 
@@ -1010,7 +1010,7 @@ func TestError_MultiError(t *testing.T) {
 		nested2 := niceyaml.NewError("nested 2")
 		err := niceyaml.NewError("main error", niceyaml.WithErrors(nested1, nested2))
 
-		// The nested errors are structure, not text: Errors returns them
+		// The nested errors are structure, not text. Errors returns them
 		// and they surface through Unwrap, while the message stays one line.
 		assert.Equal(t, "main error", render(err))
 		assert.Equal(t, []error{nested1, nested2}, err.Errors())
@@ -1624,7 +1624,7 @@ func TestError_NestedLocationWithoutMessage(t *testing.T) {
 	nested := niceyaml.WrapError(nil, niceyaml.AtPath(paths.Root().Child("b")))
 
 	// A nested Error built from a nil error names a location and nothing
-	// else, so that location is highlighted and carries no annotation.
+	// else, so the printer highlights that location and adds no annotation.
 	wrapped := yamltest.Bind(t, source, niceyaml.WrapError(inner, niceyaml.WithErrors(nested)))
 
 	got := trimLines(render(wrapped))
@@ -1636,8 +1636,9 @@ func TestError_NestedLocationWithoutMessage(t *testing.T) {
 func TestError_calculateNestedLineRange(t *testing.T) {
 	t.Parallel()
 
-	// These tests verify calculateNestedLineRange indirectly through rendered output.
-	// The line range determines which lines are visible in the output.
+	// These tests exercise the nested line range indirectly through
+	// rendered output. The line range determines which lines are
+	// visible in the output.
 
 	t.Run("single nested error shows correct context lines", func(t *testing.T) {
 		t.Parallel()
@@ -2120,7 +2121,7 @@ func TestError_Width(t *testing.T) {
 			output := renderWith(err, errPrinter, 2)
 			lines := strings.Split(output, "\n")
 
-			// Skip the header line "1:1: $.name: test error:" and the empty line.
+			// Skip the header line and the empty line.
 			contentLines := 0
 			for _, line := range lines {
 				if strings.Contains(line, "key:") || strings.Contains(line, "this is") ||
@@ -2148,8 +2149,8 @@ func TestError_Width_WithCustomPrinter(t *testing.T) {
 	`)
 	tokens := lexer.Tokenize(source)
 
-	// Width comes from the printer. Word wrap is enabled by default in
-	// NewPrinter.
+	// Width comes from the printer, which wraps only at the width
+	// [printer.WithWrap] sets.
 	customPrinter := printer.New(
 		printer.WithStyles(yamltest.NewXMLStyles()),
 		printer.WithGutter(printer.NoGutter),
@@ -2359,7 +2360,7 @@ func TestError_Width_CombinedAnnotationsOnSameLine(t *testing.T) {
 		key: value
 	`)
 
-	// Multiple errors on same line get combined with "; ".
+	// Multiple errors on the same line combine with "; ".
 	errPrinter := printer.New(
 		printer.WithStyles(&style.Styles{}),
 		printer.WithGutter(printer.NoGutter),
@@ -2410,7 +2411,7 @@ func TestError_TokenRendersFromSource(t *testing.T) {
 	`))
 
 	// A parsed token is a clone of the lexer's token, so it shares position
-	// but not identity with the tokens the source's view was built from.
+	// but not identity with the tokens the source built its view from.
 	file, err := source.File()
 	require.NoError(t, err)
 
@@ -2430,8 +2431,8 @@ func TestError_TokenRendersFromSource(t *testing.T) {
 		),
 	))))
 
-	// Both lines of the block scalar are highlighted, comments keep their
-	// place, and the nested path resolves in the same source.
+	// The printer highlights both lines of the block scalar, comments keep
+	// their place, and the nested path resolves in the same source.
 	assert.Contains(t, got, "<genericError>two</genericError>")
 	assert.Contains(t, got, "<genericError>lines</genericError>")
 	assert.Contains(t, got, "<comment># note</comment>")
@@ -2503,7 +2504,7 @@ func TestError_DoesNotMutateSource(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(second, "^ nested"))
 	assert.Equal(t, 1, strings.Count(second, "<genericError>2</genericError>"))
 
-	// The caller's Source is untouched: a fresh view still renders
+	// The caller's Source is untouched, so a fresh view still renders
 	// undecorated.
 	view := source.View()
 	for i := range view.All() {
@@ -2656,7 +2657,7 @@ func TestError_NestedErrorsRenderAsAnnotations(t *testing.T) {
 func TestError_NestedErrorChains(t *testing.T) {
 	t.Parallel()
 
-	// A nested error is a chain like the main one: it resolves through the
+	// A nested error is a chain like the main one. It resolves through the
 	// Error inside it, in the document the binder picked, and annotates the
 	// line with its message alone.
 
@@ -2978,7 +2979,7 @@ func TestSourceError_Range_ClampsToTheLines(t *testing.T) {
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n", niceyaml.WithName("f.yaml"))
 
 	// A range that starts on a line of the source binds, and its end past
-	// the last line is cut to the end of that line, so the range reported
+	// the last line clamps to the end of that line, so the range reported
 	// names lines the source has.
 	err := niceyaml.NewError("wide", niceyaml.AtRange(position.NewRange(position.New(1, 0), position.New(99, 3))))
 
