@@ -145,21 +145,27 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 // Rebase returns an error whose paths are written from base. Every path
 // in the tree of err, whether on the [*Error] that anchors it or on an
 // error nested with [WithErrors], resolves as base joined with that path,
-// and the message of the result carries the joined path. A type that
-// validates itself writes paths from its own root, so a parent that
-// delegates to it rebases the result under the field the value came
-// from:
+// and the message of the result carries the joined path. A check
+// written for a type writes paths from the value's own root, so a
+// caller that runs it on a value inside a decoded document rebases the
+// result under the path of that value before binding it:
 //
-//	func (c Config) Validate() error {
-//		return niceyaml.Rebase(c.Hours.Validate(), paths.Root().Child("hours"))
+//	func checkHours(h *Hours) error {
+//		if h.Close.Before(h.Open) {
+//			return niceyaml.NewError("closes before it opens", niceyaml.AtPath(paths.Root().Child("close")))
+//		}
+//
+//		return nil
 //	}
 //
-// The same call puts each element of a slice under its index, and puts a
-// check written for one type under the path of a value of that type
-// inside another. Rebases compose, so a chain of delegations composes the
-// chain of paths. An error under the base that carries no location points
-// at base itself, and a position or a range stays as it is, since the
-// base moves paths alone.
+//	return doc.Bind(niceyaml.Rebase(checkHours(&cfg.Hours), paths.Root().Child("hours")))
+//
+// The same call puts each element of a slice under its index. Rebases
+// compose, so a chain of them composes the chain of paths. An error
+// under the base that carries no location points at base itself, and a
+// position or a range stays as it is, since the base moves paths alone.
+// A decode rebases the errors of every nested [SelfValidator] itself,
+// so a Validate need not rebase the Validate of a field.
 //
 // The result wraps err, so [errors.Is] and [errors.As] see through it, and
 // the text a wrapper such as [fmt.Errorf] added around a located error

@@ -4,6 +4,9 @@ package spec
 import (
 	"fmt"
 	"time"
+
+	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/paths"
 )
 
 // Spec is the cafe specification.
@@ -59,6 +62,37 @@ type Hours struct {
 	Close string `json:"close" jsonschema:"title=Close,pattern=^([01]?[0-9]|2[0-3]):[0-5][0-9]$,default=19:00"`
 	// Days lists the days of operation.
 	Days []string `json:"days" jsonschema:"title=Days,enum=monday|tuesday|wednesday|thursday|friday|saturday|sunday"`
+}
+
+// Validate runs after decoding, wherever a document holds the hours. It
+// checks that both times parse and that open is before close, and
+// writes each path from the hours themselves, so a decode reports it
+// under the field that holds them, such as $.spec.hours.open.
+func (h Hours) Validate() error {
+	openTime, err := time.Parse("15:04", h.Open)
+	if err != nil {
+		return niceyaml.WrapError(
+			fmt.Errorf("invalid open time: %w", err),
+			niceyaml.AtPath(paths.Root().Child("open")),
+		)
+	}
+
+	closeTime, err := time.Parse("15:04", h.Close)
+	if err != nil {
+		return niceyaml.WrapError(
+			fmt.Errorf("invalid close time: %w", err),
+			niceyaml.AtPath(paths.Root().Child("close")),
+		)
+	}
+
+	if !openTime.Before(closeTime) {
+		return niceyaml.NewError(
+			"open must be before close",
+			niceyaml.AtPath(paths.Root().Child("open")),
+		)
+	}
+
+	return nil
 }
 
 // Settings contains optional cafe settings.

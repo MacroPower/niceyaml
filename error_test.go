@@ -3985,16 +3985,10 @@ func (h rebasedHours) Validate() error {
 	return nil
 }
 
-// rebasedConfig delegates to the Validate of its field and puts the
-// result under the field.
+// rebasedConfig holds a value that validates itself under a field.
 type rebasedConfig struct {
 	Name  string       `yaml:"name"`
 	Hours rebasedHours `yaml:"hours"`
-}
-
-func (c rebasedConfig) Validate() error {
-	//nolint:wrapcheck // Rebase keeps the error as it is.
-	return niceyaml.Rebase(c.Hours.Validate(), paths.Root().Child("hours"))
 }
 
 func TestRebase(t *testing.T) {
@@ -4033,7 +4027,7 @@ func TestRebase(t *testing.T) {
 		assert.Equal(t, "$.hours.close: closes before it opens", err.Error())
 	})
 
-	t.Run("a self validator delegates through it", func(t *testing.T) {
+	t.Run("a decode rebases a nested self validator the same way", func(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString(input, niceyaml.WithName("cafe.yaml"))

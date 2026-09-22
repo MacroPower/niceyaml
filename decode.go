@@ -21,20 +21,43 @@ import (
 
 // SelfValidator is implemented by types that validate themselves.
 //
-// [Node.Decode] and [Node.DecodeInto] call Validate
-// after decoding into a value that implements it, unless
-// [WithSelfValidation] switches that off. A check that belongs to the
-// caller rather than the type, such as one that needs a registry of
-// known names, runs on the decoded value after Decode returns, and
+// [Node.Decode] and [Node.DecodeInto] call Validate after decoding on
+// every value in the decoded value that implements it: the value
+// itself, and each field, element, or map entry below it, however deep,
+// unless [WithSelfValidation] switches that off. A check that belongs
+// to the caller rather than the type, such as one that needs a registry
+// of known names, runs on the decoded value after Decode returns, and
 // [Node.Bind] binds its result to the document the value came from.
 //
 // An [*Error] the value returns writes its path from the value's own
-// root, so a type that delegates to a field's Validate puts the result
-// under the field with [Rebase]:
+// root, and the decode puts it under the path of the value in the
+// document: the name go-yaml decoded the field under, from its yaml
+// tag, its json tag, or its lowercased name, the index of an element,
+// or the key of a map entry, so a type checks its own invariants once
+// and reports the right lines wherever a document holds it:
 //
-//	func (c Config) Validate() error {
-//		return niceyaml.Rebase(c.Hours.Validate(), paths.Root().Child("hours"))
+//	type Config struct {
+//		Hours Hours  `yaml:"hours"`
+//		Items []Item `yaml:"items"`
 //	}
+//
+//	func (h Hours) Validate() error {
+//		if h.Close.Before(h.Open) {
+//			return niceyaml.NewError("closes before it opens", niceyaml.AtPath(paths.Root().Child("close")))
+//		}
+//
+//		return nil
+//	}
+//
+// A decode of Config reports $.hours.close from Hours and $.items[2].price
+// from an Item, with Config declaring no Validate of its own. The values
+// below a value validate first, and the value validates only when every
+// one of them passed, so a parent that checks a relation between its
+// fields sees fields that hold together, and a decode reports every
+// value that failed. A field an inline tag flattens keeps the path of
+// the struct that holds it. A parent need not call the Validate of its
+// fields, and [Rebase] is for a check run on a value after Decode
+// returns.
 type SelfValidator interface {
 	Validate() error
 }
@@ -934,9 +957,10 @@ func WithValidator(dv Validator) DecodeOption {
 	}
 }
 
-// WithSelfValidation is a [DecodeOption] that sets whether a decoded value
-// that implements [SelfValidator] validates itself after decoding. The default
-// is true. Validators given with [WithValidator] run either way.
+// WithSelfValidation is a [DecodeOption] that sets whether the values
+// in a decoded value that implement [SelfValidator] validate themselves
+// after decoding. The default is true. Validators given with
+// [WithValidator] run either way.
 func WithSelfValidation(enabled bool) DecodeOption {
 	return func(c *decodeConfig) {
 		c.selfValidation = enabled
@@ -970,13 +994,15 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 // opts. The validators [WithValidators] set on the source run before
 // decoding when the Node is the root of a document, since they check a
 // whole document, and a scoped decode from [Node.At] runs none of them.
-// Each [Validator] from [WithValidator] runs after them, on any Node. If
-// v implements [SelfValidator], DecodeInto calls Validate after decoding
-// succeeds, unless [WithSelfValidation] switches that off. Fields absent
-// from the document keep their existing values, so v may be pre-populated
-// with defaults. YAML decoding errors, and [Error] values from the
-// validators, come back bound to the source as [SourceError] values, with
-// a path in them resolving from the scope.
+// Each [Validator] from [WithValidator] runs after them, on any Node.
+// After decoding succeeds, every value in v that implements
+// [SelfValidator] validates itself, with the paths it reports put under
+// the path of the value, unless [WithSelfValidation] switches that off.
+// Fields absent from the document keep their existing values, so v may
+// be pre-populated with defaults.
+// YAML decoding errors, and [Error] values from the validators, come back
+// bound to the source as [SourceError] values, with a path in them
+// resolving from the scope.
 //
 // An alias inside the node resolves against the anchors of the whole
 // document, so a value that refers to an anchor defined outside it decodes
@@ -1012,8 +1038,8 @@ func (n *Node) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) erro
 		return err
 	}
 
-	if validator, ok := v.(SelfValidator); ok && cfg.selfValidation {
-		return n.Bind(validator.Validate())
+	if cfg.selfValidation {
+		return n.Bind(selfValidate(v))
 	}
 
 	return nil
@@ -1180,13 +1206,14 @@ func hasContent(node ast.Node) bool {
 // The settings [WithDecodeOptions] set on the source apply first, then
 // opts. The validators [WithValidators] set on the source run before
 // decoding a root Node, and each [Validator] from [WithValidator] runs
-// after them, as [Node.DecodeInto] describes. If *T implements
-// [SelfValidator], Decode calls Validate after decoding succeeds, unless
-// [WithSelfValidation] switches that off. The method set of *T includes
-// methods declared on T itself, so both value and pointer receivers
-// participate. YAML decoding errors, and [Error] values from the
-// validators, come back bound to the source as [SourceError] values. On
-// error, the returned T is the zero value.
+// after them, as [Node.DecodeInto] describes. After decoding succeeds,
+// every value in the result that implements [SelfValidator] validates
+// itself, T first among them, unless [WithSelfValidation] switches that
+// off. The method set of a pointer includes the methods declared on the
+// value, so both value and pointer receivers participate. YAML decoding
+// errors, and [Error] values from the validators, come back bound to the
+// source as [SourceError] values. On error, the returned T is the zero
+// value.
 //
 // A scoped Decode reads one typed value without decoding the whole
 // document, such as a version number or a list of tags, and a scalar

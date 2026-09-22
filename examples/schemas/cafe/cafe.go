@@ -3,14 +3,9 @@
 package cafe
 
 import (
-	"fmt"
-	"time"
-
 	_ "embed"
 
-	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/examples/schemas/cafe/spec"
-	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
@@ -48,35 +43,6 @@ type Config struct {
 // NewConfig creates a new [Config].
 func NewConfig() Config {
 	return Config{}
-}
-
-// Validate runs after decoding. It checks that the operating hours parse
-// and that open is before close.
-func (c Config) Validate() error {
-	openTime, err := time.Parse("15:04", c.Spec.Hours.Open)
-	if err != nil {
-		return niceyaml.WrapError(
-			fmt.Errorf("invalid open time: %w", err),
-			niceyaml.AtPath(paths.Root().Child("spec", "hours", "open")),
-		)
-	}
-
-	closeTime, err := time.Parse("15:04", c.Spec.Hours.Close)
-	if err != nil {
-		return niceyaml.WrapError(
-			fmt.Errorf("invalid close time: %w", err),
-			niceyaml.AtPath(paths.Root().Child("spec", "hours", "close")),
-		)
-	}
-
-	if !openTime.Before(closeTime) {
-		return niceyaml.NewError(
-			"open must be before close",
-			niceyaml.AtPath(paths.Root().Child("spec", "hours", "open")),
-		)
-	}
-
-	return nil
 }
 
 // Metadata contains identifying information about the cafe.

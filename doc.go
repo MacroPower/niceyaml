@@ -210,14 +210,23 @@
 // without validating, so a validator of the source does not run itself
 // again.
 //
-// A [SelfValidator] writes its paths from its own root, and [Rebase] puts
-// the error a nested value returns under the path of that value, so a
-// type that delegates validation to its fields reports the lines of the
-// field:
+// A [SelfValidator] writes its paths from its own root, and the decode
+// calls Validate on every value in the result that implements it, with
+// the paths each one reports put under the path of that value in the
+// document, so a type checks its own invariants once and a document
+// reports the lines of the field, element, or entry that holds it:
 //
-//	func (c Config) Validate() error {
-//		return niceyaml.Rebase(c.Hours.Validate(), paths.Root().Child("hours"))
+//	func (h Hours) Validate() error {
+//		if h.Close.Before(h.Open) {
+//			return niceyaml.NewError("closes before it opens", niceyaml.AtPath(paths.Root().Child("close")))
+//		}
+//
+//		return nil
 //	}
+//
+// A decode of a Config that holds Hours under spec reports
+// $.spec.hours.close. [Rebase] puts the result of a check run on a value
+// after Decode returns under the path of that value the same way.
 //
 // [Node.DecodeInto] runs the same pipeline on a value you already hold,
 // such as one pre-populated with defaults.
