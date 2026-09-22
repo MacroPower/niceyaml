@@ -85,8 +85,9 @@ type Source struct {
 type SourceOption func(*Source)
 
 // WithName is a [SourceOption] that sets the name for the [Source], which
-// labels it in output such as diff headers. Without it, [Source.Name]
-// returns the file path.
+// [SourceError.Error] puts in front of the position of every error bound
+// to it, as "name:line:col: msg". Without it, [Source.Name] returns the
+// file path.
 func WithName(name string) SourceOption {
 	return func(s *Source) {
 		s.name = name
