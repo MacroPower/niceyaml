@@ -11,7 +11,7 @@ import (
 
 // Position represents a 0-indexed line and column location.
 //
-// Note that it is not simply an offset of [token.Position]s, rather it
+// Note that it is not simply an offset of [token.Position]s. Rather, it
 // represents the absolute line and column in a document, including in cases
 // where multiple instances of the same token exist (e.g. in diffs).
 //
@@ -42,8 +42,7 @@ func NewFromToken(tk *token.Token) Position {
 }
 
 // String returns the position in "line:col" format with 1-indexed values,
-// which is how editors count, so the output suits people. The fields
-// themselves stay 0-indexed.
+// which is how editors count. The fields themselves stay 0-indexed.
 func (p Position) String() string {
 	return fmt.Sprintf("%d:%d", p.Line+1, p.Col+1)
 }
@@ -60,7 +59,8 @@ func NewRange(start, end Position) Range {
 }
 
 // Contains reports whether the given [Position] is within this [Range].
-// The range is half-open [Start, End): Start is inclusive, End is exclusive.
+// The range is half-open [Start, End), where Start is inclusive and End is
+// exclusive.
 func (r Range) Contains(pos Position) bool {
 	// Before start?
 	if pos.Line < r.Start.Line || (pos.Line == r.Start.Line && pos.Col < r.Start.Col) {
@@ -141,7 +141,7 @@ func (s Span) String() string {
 type Spans []Span
 
 // Expand returns new spans with each span expanded by amount on both sides.
-// The Start is decreased by amount and End is increased by amount, and each
+// It decreases Start by amount and increases End by amount, and each value
 // saturates at the int limits rather than wrapping around. A negative amount
 // shrinks the spans, which can invert one.
 // Note: This does not clamp values; use [Spans.Clamp] afterward if needed.
@@ -238,12 +238,12 @@ func (rs Ranges) UniqueValues() Ranges {
 	return result
 }
 
-// LineIndices returns all line indices covered by the [Ranges].
+// LineIndices returns all line indices the [Ranges] cover.
 // A multi-line range contributes each line within it, except an end line it
 // touches only at column 0, which holds none of it. A range that ends on a
 // line before its start line contributes none, while an empty range
 // contributes the line it sits on, as [Range.LastLine] counts them.
-// Duplicate line indices are returned if covered by multiple ranges.
+// A line covered by multiple ranges appears once per range.
 func (rs Ranges) LineIndices() []int {
 	if len(rs) == 0 {
 		return nil
@@ -328,14 +328,15 @@ func GroupIndices(indices []int, context int) Spans {
 	return spans
 }
 
-// ContextSpans returns the spans of lines to show around indices: each index
-// with context lines on either side, merged where the windows would touch or
-// overlap, and clamped to [0, total). It is [GroupIndices] followed by
-// [Spans.Expand] and [Spans.Clamp], which is how error excerpts and diff
-// hunks pick the lines they render. A negative context counts as 0, and a
-// context at or above total covers every line. Every span returned holds at
-// least one index of [0, total), so an index outside that range contributes
-// none. Returns nil when no span remains, such as when indices is empty.
+// ContextSpans returns the spans of lines to show around indices. It gives
+// each index context lines on either side, merges windows that would overlap
+// or be adjacent, and clamps the result to [0, total). It is [GroupIndices]
+// followed by [Spans.Expand] and [Spans.Clamp], which is how error excerpts
+// and diff hunks pick the lines they render. A negative context counts as 0,
+// and a context at or above total covers every line. Every span returned
+// holds at least one index of [0, total), so an index outside that range
+// contributes none. Returns nil when no span remains, such as when indices is
+// empty.
 func ContextSpans(indices []int, context, total int) Spans {
 	context = max(0, context)
 

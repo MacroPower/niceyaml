@@ -4,22 +4,20 @@
 // YAML processing often requires tracking where tokens appear in source text,
 // highlighting search matches, or marking regions for visual styling.
 //
-// This package provides the coordinate types needed for these operations, using
-// consistent 0-indexed conventions that simplify arithmetic and integrate
-// cleanly with slice operations.
+// This package provides the coordinate types for these operations.
 //
 // # Coordinate System
 //
 // All types use 0-indexed coordinates and half-open intervals [Start, End)
 // where Start is inclusive and End is exclusive.
 //
-// This matches Go slice semantics: a span from 5 to 10 contains 5 elements
-// (indices 5, 6, 7, 8, 9). Length is simply End - Start.
+// This matches Go slice semantics. A span from 5 to 10 contains 5 elements
+// (indices 5, 6, 7, 8, 9). Length is End - Start.
 //
 // When converting from external sources like go-yaml tokens (which use
 // 1-indexed positions), use [NewFromToken] to handle the offset automatically.
 //
-// # 2D Positions and Ranges
+// # 2D Coordinates
 //
 // [Position] represents a line and column location.
 //
@@ -36,12 +34,12 @@
 // [go.jacobcolvin.com/niceyaml/line.Lines.SliceLines].
 //
 // [Ranges] collects multiple ranges and provides methods like
-// [Ranges.LineIndices] for querying which lines are covered and
+// [Ranges.LineIndices] for querying which lines the ranges cover and
 // [Ranges.UniqueValues] for deduplication.
 //
 // # 1D Spans
 //
-// [Span] represents a simple half-open range of integers, useful for column
+// [Span] represents a half-open range of integers, useful for column
 // spans within a line or line ranges within a document.
 //
 // [Spans] is a slice type with chainable transformations:
@@ -49,8 +47,8 @@
 //	spans := position.GroupIndices([]int{0, 2, 10, 12}, 2) // Group with context.
 //	spans = spans.Expand(3).Clamp(0, 100)                  // Expand then clamp.
 //
-// [GroupIndices] is particularly useful for creating context windows around
-// matched lines, merging adjacent matches when their context would overlap.
+// [GroupIndices] is useful for creating context windows around matched
+// lines, merging adjacent matches when their context would overlap.
 // [ContextSpans] runs that chain in one call, grouping the indices, expanding
 // each span by the context, and clamping the result to the document:
 //
