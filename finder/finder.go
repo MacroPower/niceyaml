@@ -3,7 +3,7 @@
 // A [Finder] maps matches back to [position.Ranges] in the original lines,
 // even when normalization changes the character count, so the ranges can
 // highlight matches in rendered output. Create one with [New], build an
-// [Index] over a view once with [Finder.Load], and search the index any
+// [Index] over the lines once with [Finder.Load], and search the index any
 // number of times with [Index.Find]:
 //
 //	f := finder.New(finder.WithNormalizer(normalizer.New()))
@@ -35,13 +35,13 @@ type Normalizer interface {
 // Finder builds an [Index] over [line.Lines] content, so the [position.Ranges]
 // of a search can highlight matches in rendered output.
 //
-// The typical use case is search-as-you-type highlighting: the user views
-// YAML content and types a search term, and matching text is highlighted in
-// place.
+// The typical use case is search-as-you-type highlighting. The user views
+// YAML content, types a search term, and sees matching text highlighted
+// in place.
 //
 // Finder uses a load-once, search-many design. [Finder.Load] reads the
 // lines once and returns an [Index] that maps character positions in the
-// search text back to [position.Position] values in the original lines, and
+// loaded text back to [position.Position] values in the original lines, and
 // [Index.Find] uses that map on every call without re-reading the lines.
 //
 // A Finder holds only its settings and never changes after [New], so it is
@@ -70,8 +70,8 @@ type Finder struct {
 // New creates a new [*Finder].
 // Call [Finder.Load] to build an [Index] over [line.Lines] before searching.
 //
-// By default, no normalization is applied. Use [WithNormalizer] to enable
-// case-insensitive or diacritic-insensitive matching.
+// By default, the Finder applies no normalization. Use [WithNormalizer] to
+// enable case-insensitive or diacritic-insensitive matching.
 func New(opts ...Option) *Finder {
 	f := &Finder{}
 	for _, opt := range opts {
@@ -87,7 +87,7 @@ func New(opts ...Option) *Finder {
 //   - [WithNormalizer]
 type Option func(*Finder)
 
-// WithNormalizer is a [Option] that sets a [Normalizer] applied to both
+// WithNormalizer is an [Option] that sets a [Normalizer] applied to both
 // the search string and the loaded text before matching.
 //
 // The normalizer receives one character at a time, on both sides, so the
@@ -103,12 +103,12 @@ func WithNormalizer(normalizer Normalizer) Option {
 }
 
 // Load reads the given [line.Lines] and returns an [Index] over it, built
-// from the search text and a map from its positions back to the lines.
+// from the loaded text and a map from its positions back to the lines.
 //
 // Each call builds a new Index and leaves the Finder as it was, so load once
 // per distinct content and call [Index.Find] as many times as needed. The
-// lines never change, so the index stays valid however the views over them
-// are decorated.
+// lines never change, so the index stays valid however callers decorate the
+// views over them.
 func (f *Finder) Load(lines line.Lines) *Index {
 	idx := &Index{normalizer: f.normalizer}
 	idx.text, idx.posMap = f.buildTextAndPositionMap(lines)
@@ -117,7 +117,7 @@ func (f *Finder) Load(lines line.Lines) *Index {
 	return idx
 }
 
-// Index is the search text of one [line.Lines] together with the map from
+// Index is the loaded text of one [line.Lines] together with the map from
 // its characters back to [position.Position] values in the lines. It never
 // changes after [Finder.Load] builds it, so it is safe for concurrent use.
 //
@@ -150,15 +150,15 @@ func (i *Index) buildByteToRuneIndex() {
 	i.byteToRune[len(i.text)] = runeCount
 }
 
-// Find finds all occurrences of the search string in the indexed text.
+// Find finds all occurrences of the search string in the loaded text.
 //
 // It returns the [position.Ranges] of each match, in the order the matches
 // appear in the text.
 //
 // The search string goes through the same per-character normalization as
-// the loaded text, so a string found in the source is found by Find. Bytes
-// that are not valid UTF-8 read as U+FFFD on both sides, and a CRLF or bare
-// CR line ending reads as "\n" on both sides.
+// the loaded text, so Find finds any string that appears in the source.
+// Bytes that are not valid UTF-8 read as U+FFFD on both sides, and a CRLF
+// or bare CR line ending reads as "\n" on both sides.
 //
 // Every match starts at a source character. When normalization expands one
 // character into several, as case folding turns "ß" into "ss", a needle
@@ -221,9 +221,9 @@ func (i *Index) Find(search string) position.Ranges {
 }
 
 // normalizeText normalizes s the way [Finder.Load] normalizes the loaded
-// text, one rune at a time, so a search string and the text it is compared
-// against pass through the normalizer identically. Line endings collapse to
-// "\n" first, since the loaded text reads every line ending that way.
+// text, one rune at a time, so a search string and the text Find compares
+// it against pass through the normalizer identically. Line endings collapse
+// to "\n" first, since the loaded text reads every line ending that way.
 func (i *Index) normalizeText(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	s = strings.ReplaceAll(s, "\r", "\n")
@@ -241,8 +241,8 @@ func (i *Index) normalizeText(s string) string {
 	return sb.String()
 }
 
-// normalizeRune returns the search text for one rune: the rune itself when
-// n is nil, and its normalized form otherwise.
+// normalizeRune returns the text for one rune: the rune itself when n is
+// nil, and its normalized form otherwise.
 func normalizeRune(n Normalizer, r rune) string {
 	if n == nil {
 		return string(r)
@@ -251,8 +251,9 @@ func normalizeRune(n Normalizer, r rune) string {
 	return n.Normalize(string(r))
 }
 
-// buildTextAndPositionMap concatenates all token Origins into the search text
-// and builds a position map.
+// buildTextAndPositionMap concatenates the runes of every line into the
+// loaded text and builds a position map. [line.Lines.Runes] yields every
+// line ending as a single "\n".
 //
 // When a normalizer is set, it normalizes the returned text, and the position
 // map records where each source rune begins in the normalized text so
@@ -268,7 +269,7 @@ func (f *Finder) buildTextAndPositionMap(lines line.Lines) (string, *positionMap
 
 	normalizedCharIndex := 0
 
-	// Cache normalized forms per unique rune to avoid repeated transform calls.
+	// Cache normalized forms per unique rune to avoid repeated normalizer calls.
 	normalizedCache := make(map[rune]string)
 
 	for pos, r := range lines.Runes() {
@@ -301,8 +302,9 @@ func (f *Finder) buildTextAndPositionMap(lines line.Lines) (string, *positionMap
 
 // positionMap maps character indices in a concatenated string to original
 // [position.Position] values in the loaded lines. It holds one entry per
-// source rune, at the index where that rune's normalized form begins, in
-// increasing order.
+// source rune whose normalized form is non-empty, at the index where that
+// form begins, in increasing order. A rune that normalizes to nothing has
+// no entry of its own and extends the entry before it on its line.
 type positionMap struct {
 	indices   []int
 	positions []position.Position
@@ -319,7 +321,7 @@ func (m *positionMap) add(charIndex int, pos position.Position) {
 	m.ends = append(m.ends, pos.Col+1)
 }
 
-// extend records a source rune at pos that normalizes to nothing: the
+// extend records a source rune at pos that normalizes to nothing, so the
 // entry before it on the same line runs past it. A rune with no entry
 // before it on its line extends nothing, since no match starts at it.
 func (m *positionMap) extend(pos position.Position) {
@@ -341,7 +343,7 @@ func (m *positionMap) end(charIndex int) position.Position {
 	return position.New(m.positions[idx].Line, m.ends[idx])
 }
 
-// floor returns the entry of the source rune that holds charIndex: the last
+// floor returns the entry of the source rune that holds charIndex, the last
 // entry whose index is at most charIndex. It returns -1 when the map is
 // empty.
 func (m *positionMap) floor(charIndex int) int {

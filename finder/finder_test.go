@@ -598,13 +598,13 @@ func TestFinder_Find_NilLines(t *testing.T) {
 func TestFinder_Find_DiffBuiltLines(t *testing.T) {
 	t.Parallel()
 
-	// When searching Lines built from a diff, matches should be at the correct
-	// visual line positions, not based on original source Position.Line.
+	// When searching Lines built from a diff, matches land at the visual line
+	// positions rather than the original source Position.Line.
 	//
 	// Diff produces:
 	// Line 0 (idx=0): "key: old" (deleted, Position.Line=1)
 	// Line 1 (idx=1): "key: new" (inserted, Position.Line=1)
-	// Both have same source Position.Line, but different visual indices.
+	// Both lines share a source Position.Line but have different visual indices.
 
 	before := "key: old\n"
 	after := "key: new\n"
@@ -670,7 +670,7 @@ func TestFinder_Reload(t *testing.T) {
 		assert.Nil(t, second.Find("first"))
 		assert.Len(t, second.Find("second"), 1)
 
-		// The first index is unchanged by the second load.
+		// The second load leaves the first index unchanged.
 		assert.Len(t, first.Find("first"), 1)
 		assert.Nil(t, first.Find("second"))
 	})
@@ -723,7 +723,7 @@ func TestIndex_Find_CoversDroppedTrailingRune(t *testing.T) {
 	t.Parallel()
 
 	// The accent is a combining mark the normalizer drops, so it has no
-	// character of its own in the search text. A match ending right before
+	// character of its own in the loaded text. A match ending right before
 	// it covers it, as a match ending inside an expansion covers the whole
 	// character, so the highlight ends where the next character begins.
 	source := niceyaml.NewSourceFromString("k: caféx\n")
