@@ -1461,9 +1461,16 @@ func (m *Model) cutRow(row string, offset, width int) string {
 
 	visible := max(0, width-left-right)
 
-	return ansi.Cut(row, 0, left) +
-		ansi.Cut(ansi.Cut(row, left, left+inner), offset, offset+visible) +
-		ansi.Cut(row, left+inner, left+inner+right)
+	// A pane of the side-by-side view is padded to its own widest row,
+	// while the offset runs to the widest row of either pane, so the
+	// window can reach past the content of this row. Filling the window
+	// keeps the right frame in its column.
+	content := ansi.Cut(ansi.Cut(row, left, left+inner), offset, offset+visible)
+	if padding := visible - ansi.StringWidth(content); padding > 0 {
+		content += m.printer.Style(kind.Text).Render(strings.Repeat(" ", padding))
+	}
+
+	return ansi.Cut(row, 0, left) + content + ansi.Cut(row, left+inner, left+inner+right)
 }
 
 // SetYOffset sets the vertical offset, in rows, clamped to the scrollable

@@ -1188,6 +1188,40 @@ func TestViewport_HorizontalScrollKeepsFrame(t *testing.T) {
 	}
 }
 
+func TestViewport_HorizontalScrollKeepsFrameOfNarrowerPane(t *testing.T) {
+	t.Parallel()
+
+	// The offset runs to the widest row of either pane, so the window can
+	// reach past the content of the narrower pane. Its right border stays
+	// in its column, as the top and bottom borders do.
+	p := testPrinter().With(printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())))
+	m := yamlviewport.New(yamlviewport.WithPrinter(p))
+	m.SetWidth(31)
+	m.SetHeight(3)
+	m.SetViewMode(yamlviewport.ViewModeSideBySide)
+	m.SetWordWrap(false)
+	m.SetRevision(niceyaml.NewSourceFromString("a: 1\nb: s\nc: 3\n"))
+	m.AddRevision(niceyaml.NewSourceFromString("a: 1\nb: " + strings.Repeat("y", 50) + "\nc: 3\n"))
+
+	for _, offset := range []int{1, 10, 40} {
+		m.SetXOffset(offset)
+		require.Equal(t, offset, m.XOffset())
+
+		rows := strings.Split(m.View(), "\n")
+		require.Len(t, rows, 3)
+
+		top := []rune(rows[0])
+		row := []rune(rows[1])
+		require.Len(t, row, len(top), "offset %d: %q", offset, rows[1])
+
+		for i, r := range top {
+			if r == '┌' || r == '┐' {
+				assert.Equal(t, '│', row[i], "offset %d column %d: %q", offset, i, rows[1])
+			}
+		}
+	}
+}
+
 func TestViewport_ViewFitsHeight(t *testing.T) {
 	t.Parallel()
 
