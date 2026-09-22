@@ -118,8 +118,9 @@ func ParseDocumentDirective(tks token.Tokens) *ParsedDirective {
 		}
 
 		switch tk.Type {
-		case token.DocumentHeaderType:
-			// Skip document header, continue looking for directive.
+		case token.DocumentHeaderType, token.DocumentEndType:
+			// A document marker is part of the preamble rather than
+			// content, so the scan continues past it.
 			continue
 
 		case token.CommentType:
