@@ -2933,3 +2933,56 @@ func TestDocument_At_Scope(t *testing.T) {
 		assert.Equal(t, "   4 |     open: \"17:00\"\n     |           ^^^^^^^", excerpt.String())
 	})
 }
+
+func TestDocument_Decode_ValidatorDecodesWithoutHooks(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a validator that decodes the document runs once", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "name: test\nvalue: 42\n")
+
+		var runs int
+
+		// A validator shaped like schema.Schema.Validate: it decodes the
+		// document to inspect it. Its own decode must carry no hooks, or
+		// the validator would run itself again on every decode it performs.
+		inspect := niceyaml.ValidatorFunc(func(ctx context.Context, doc *niceyaml.Document) error {
+			runs++
+
+			_, err := doc.Decode[any](ctx)
+
+			return err
+		})
+
+		result, err := dd.Decode[plainConfig](t.Context(), niceyaml.WithValidator(inspect))
+		require.NoError(t, err)
+		assert.Equal(t, 1, runs)
+		assert.Equal(t, "test", result.Name)
+		assert.Equal(t, 42, result.Value)
+	})
+
+	t.Run("a validator that reads one field resolves the path once", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "name: test\nvalue: 42\n")
+
+		readName := niceyaml.ValidatorFunc(func(ctx context.Context, doc *niceyaml.Document) error {
+			scoped := yamltest.At(t, doc, paths.Root().Child("name"))
+
+			name, err := scoped.Decode[string](ctx)
+			if err != nil {
+				return err
+			}
+
+			if name != "test" {
+				return errNameRequired
+			}
+
+			return nil
+		})
+
+		_, err := dd.Decode[plainConfig](t.Context(), niceyaml.WithValidator(readName))
+		require.NoError(t, err)
+	})
+}
