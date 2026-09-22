@@ -1432,6 +1432,13 @@ func TestNewLines_ColumnPositionAfterSplit(t *testing.T) {
 
 		diff := yamltest.CompareTokenSlices(originalTks, resultTks)
 		require.True(t, diff.Equal(), diff.String())
+
+		// The lexer positions a standalone block scalar on its last content
+		// line, so the Column of the token belongs to that line. The first
+		// content part starts at column 1 rather than carrying it.
+		first := lines.Line(1).Tokens()
+		require.NotEmpty(t, first)
+		assert.Equal(t, 1, first[0].Position.Column)
 	})
 
 	t.Run("plain multiline column positions", func(t *testing.T) {

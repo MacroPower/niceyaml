@@ -345,7 +345,12 @@ func (b *builder) processPart(ctx *partContext) bool {
 	if partIsPureNewline {
 		col = newlineColumn(b.currentLineSegments)
 	} else {
-		col, val = partColumnAndValue(ctx.tk, *ctx.isFirstContentPart, shouldHaveValue)
+		// The first part of a multi-part block scalar starts at column 1:
+		// the Column of the token belongs to the content line the lexer
+		// positioned it on, which the part that keeps the original
+		// Position carries.
+		isFirst := *ctx.isFirstContentPart && (!ctx.isBlockScalarContent || !ctx.isMultiPart)
+		col, val = partColumnAndValue(ctx.tk, isFirst, shouldHaveValue)
 		*ctx.isFirstContentPart = false
 	}
 
