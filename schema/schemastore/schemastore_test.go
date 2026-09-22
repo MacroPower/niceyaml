@@ -125,9 +125,9 @@ func TestSchemaStore_FindMatch(t *testing.T) {
 			wantName: "JSON Schema Draft 7",
 		},
 		"no match for an extglob pattern": {
-			// The matcher implements no extglob, so the pattern is dropped
-			// rather than kept as something only a literally named file
-			// could match.
+			// The matcher implements no extglob, so the store drops the
+			// pattern rather than keeping it as something only a literally
+			// named file could match.
 			filePath: ".github/ISSUE_TEMPLATE/bug.yml",
 			err:      schemastore.ErrNoCatalogMatch,
 		},
@@ -868,10 +868,10 @@ func TestSchemaStore_RefetchFails(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Test", entry.Name)
 
-	// Verify refetch was attempted.
+	// Verify the store attempted the refetch.
 	assert.Equal(t, int32(2), requestCount.Load())
 
-	// Inside the retry interval the stale data serves without a request.
+	// Inside the retry interval the store serves stale data without a request.
 	entry, err = store.FindMatch(t.Context(), "config.yaml")
 	require.NoError(t, err)
 	assert.Equal(t, "Test", entry.Name)
@@ -901,7 +901,7 @@ func TestSchemaStore_SkipsEntriesWithoutURL(t *testing.T) {
 
 	store := schemastore.New(schemastore.WithCatalogURL(server.URL))
 
-	// Entry without URL should be skipped, so random.yaml won't match.
+	// The store skips the entry without a URL, so random.yaml won't match.
 	_, err := store.FindMatch(t.Context(), "random.yaml")
 	require.ErrorIs(t, err, schemastore.ErrNoCatalogMatch)
 
@@ -1242,10 +1242,10 @@ func newCountingCatalogServer(t *testing.T, catalog schemastore.Catalog) (*httpt
 }
 
 // newHeldCatalogServer serves a one-entry catalog whose pattern matches every
-// YAML file and whose entry is named for the request count, starting with
+// YAML file and names its entry for the request count, starting with
 // "Catalog 1". It answers the first immediate requests at once and holds each
-// later one until release is called, sending on held as the request arrives.
-// Cleanup releases held requests before the server closes.
+// later one until the caller calls release, sending on held as the request
+// arrives. Cleanup releases held requests before the server closes.
 func newHeldCatalogServer(t *testing.T, immediate int32) (*httptest.Server, <-chan struct{}, func()) {
 	t.Helper()
 
@@ -1363,8 +1363,8 @@ func TestStore_FindMatch_WildcardExtension(t *testing.T) {
 	t.Parallel()
 
 	// A pattern whose extension holds a wildcard can match a YAML file, so
-	// the store keeps it, while one with another literal extension is
-	// dropped.
+	// the store keeps it. The store drops a pattern whose literal extension
+	// it does not support.
 	catalog := schemastore.Catalog{Schemas: []schemastore.CatalogEntry{{
 		Name:      "Azure Pipelines",
 		URL:       "https://example.com/azure.json",

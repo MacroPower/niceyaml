@@ -18,7 +18,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
-// Default SchemaStore URLs and timeouts.
+// Default catalog URL and timings for the store.
 const (
 	defaultCatalogURL     = "https://www.schemastore.org/api/json/catalog.json"
 	defaultCacheTTL       = 1 * time.Hour
@@ -27,9 +27,9 @@ const (
 )
 
 var (
-	// ErrFetchCatalog indicates the SchemaStore catalog could not be fetched
-	// and no earlier fetch succeeded, so there is no catalog to match
-	// against.
+	// ErrFetchCatalog indicates the store could not fetch the SchemaStore
+	// catalog and no earlier fetch succeeded, so there is no catalog to
+	// match against.
 	ErrFetchCatalog = errors.New("fetch schema catalog")
 
 	// ErrNoCatalogMatch indicates no catalog entry matches the document's file
@@ -50,8 +50,7 @@ type Catalog struct {
 	Schemas []CatalogEntry `json:"schemas"`
 }
 
-// CatalogEntry represents a single schema entry in the catalog, containing
-// metadata and file matching patterns.
+// CatalogEntry represents a single schema entry in the catalog.
 type CatalogEntry struct {
 	// Name is the display name of the schema.
 	Name string `json:"name"`
@@ -59,10 +58,10 @@ type CatalogEntry struct {
 	Description string `json:"description"`
 	// URL is the HTTP URL to fetch the schema from.
 	URL string `json:"url"`
-	// FileMatch contains the glob patterns for files this schema applies
-	// to that can match a YAML or JSON file. The store drops the other
-	// patterns of the entry when it loads the catalog, so the slice may be
-	// shorter than the catalog's.
+	// FileMatch contains the glob patterns for the files this schema
+	// applies to. When the store loads the catalog, it drops the patterns
+	// that cannot match a YAML or JSON file, so the slice may be shorter
+	// than the catalog's.
 	FileMatch []string `json:"fileMatch"`
 }
 
@@ -73,13 +72,13 @@ type CatalogEntry struct {
 // [go.jacobcolvin.com/niceyaml/schema.WithHTTPClient] gave the registry.
 // The store's own client and refresh timeout apply to the catalog alone.
 //
-// The catalog is fetched on the first lookup and cached for the configured
-// TTL. Once the cache expires, the next lookup refreshes it; a refresh that
-// fails leaves the previous catalog in use, and a fetch that fails before
-// any catalog has loaded reports [ErrFetchCatalog]. After a failed fetch the
-// store waits the retry interval before contacting the catalog URL again,
-// so an unreachable catalog costs one timeout per interval rather than one
-// per lookup.
+// The store fetches the catalog on the first lookup and caches it for the
+// configured TTL. Once the cache expires, the next lookup refreshes it; a
+// refresh that fails leaves the previous catalog in use, and a fetch that
+// fails before any catalog has loaded reports [ErrFetchCatalog]. After a
+// failed fetch the store waits the retry interval before contacting the
+// catalog URL again, so an unreachable catalog costs one timeout per
+// interval rather than one per lookup.
 //
 // Concurrent lookups share a single fetch. A lookup that arrives while a
 // refresh is running uses the previous catalog without waiting. The lookup
@@ -203,9 +202,8 @@ func WithRetryAfter(interval time.Duration) Option {
 
 // WithFilter is an [Option] that sets a filter function for catalog entries.
 //
-// Only entries for which the filter returns true will be considered for
-// matching. This can be used to limit the schemas to a specific subset.
-// The filter is called during catalog refresh; avoid expensive or stateful
+// The store matches only the entries for which the filter returns true.
+// It calls the filter during catalog refresh; avoid expensive or stateful
 // operations.
 //
 // Example:
@@ -222,9 +220,9 @@ func WithFilter(fn func(CatalogEntry) bool) Option {
 
 // New creates a new [*Store].
 //
-// New performs no I/O; the catalog is fetched on the first lookup and
-// cached for the configured TTL. Configure with options to customize
-// behavior:
+// New performs no I/O; the store fetches the catalog on the first lookup
+// and caches it for the configured TTL. Configure with options to
+// customize behavior:
 //
 //	store := schemastore.New(
 //	    schemastore.WithCacheTTL(1 * time.Hour),
@@ -427,7 +425,7 @@ func (s *Store) fetch(ctx context.Context) ([]CatalogEntry, error) {
 		return nil, fmt.Errorf("parse catalog from %s: %w", httpfetch.Redacted(s.catalogURL), err)
 	}
 
-	// Prefilter entries: only keep entries with YAML patterns that pass the filter.
+	// Prefilter entries to those with supported patterns that pass the filter.
 	return s.filterAndNormalizeEntries(catalog.Schemas), nil
 }
 
@@ -473,10 +471,10 @@ func (s *Store) filterAndNormalizeEntries(schemas []CatalogEntry) []CatalogEntry
 // such as "*.{yml,yaml}", counts when any of its alternatives has a
 // supported extension.
 //
-// A pattern holding an extglob group is dropped, since the matcher reads
-// the group literally and the pattern could only match a file named after
-// the text of the group. The entry count then reflects the entries that
-// can match a file someone would write.
+// An extglob group makes filterSupportedPatterns drop the pattern, since
+// the matcher reads the group literally and the pattern could only match a
+// file named after the text of the group. The entry count then reflects
+// the entries that can match a file someone would write.
 func filterSupportedPatterns(patterns []string) []string {
 	var result []string
 
@@ -494,9 +492,9 @@ func filterSupportedPatterns(patterns []string) []string {
 }
 
 // hasSupportedExtension reports whether pattern can match a file whose
-// name ends in .yaml, .yml, or .json, in any letter case: it ends in one
-// of them, or the extension of its last segment holds a wildcard, as
-// "azure-pipelines*.y*ml" does.
+// name ends in .yaml, .yml, or .json, in any letter case. A pattern
+// qualifies when it ends in one of them, or when the extension of its
+// last segment holds a wildcard, as "azure-pipelines*.y*ml" does.
 func hasSupportedExtension(pattern string) bool {
 	lower := strings.ToLower(pattern)
 

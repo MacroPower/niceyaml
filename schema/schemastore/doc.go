@@ -13,13 +13,14 @@
 //
 //	reg := schema.NewRegistry(schema.WithResolvers(schemastore.New()))
 //
-// This single resolver handles all SchemaStore schemas, matching file
-// paths against catalog patterns for common tools like GitHub Actions,
-// Docker Compose, and many others. Only YAML file patterns are considered.
+// This one resolver handles all SchemaStore schemas. It matches file
+// paths against the catalog patterns for tools like GitHub Actions and
+// Docker Compose. The store keeps only the patterns that can match a
+// YAML or JSON file.
 //
 // New performs no I/O. The first lookup fetches the catalog; later lookups
 // reuse it until the cache TTL expires, and a refresh that fails keeps the
-// previous catalog in use. When the catalog cannot be fetched at all, a
-// lookup reports [ErrFetchCatalog], and the store waits the retry interval
+// previous catalog in use. When a fetch fails and no earlier one succeeded,
+// a lookup reports [ErrFetchCatalog], and the store waits the retry interval
 // before contacting SchemaStore.org again.
 package schemastore
