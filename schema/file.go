@@ -26,13 +26,14 @@ var ErrEmptyPath = errors.New("schema file path is empty")
 //
 // File names the schema by the file:// URL of the path made absolute
 // against the working directory, such as file:///srv/schemas/config.json,
-// however the registry reads it. A schema that [Embedded] or another
-// resolver names by a bare path such as "schemas/config.json" therefore
-// never shares a cache entry with the file. Relative spellings of one path,
-// such as "schemas/config.json" and "./schemas/config.json", resolve to the
-// same URL, so the registry reads the file once and reuses the compiled
-// validator for every document that names it. The file is read when the
-// Ref loads, not when File runs.
+// however the registry reads it. A schema that [Embedded] names by a
+// digest of its bytes, or that another resolver names by a bare path such
+// as "schemas/config.json", therefore never shares a cache entry with the
+// file. Relative spellings of one path, such as "schemas/config.json" and
+// "./schemas/config.json", resolve to the same URL, so the registry reads
+// the file once and reuses the compiled schema for every document that
+// names it. The registry reads the file when the Ref loads, not when File
+// runs.
 //
 // File is for a path written in the program, so it panics on an empty
 // path, as [Loadable] panics on an empty key, and on a working directory
@@ -56,9 +57,9 @@ var ErrEmptyPath = errors.New("schema file path is empty")
 //	    return schema.File("schemas/" + kind + ".json"), nil
 //	})
 //
-// The file path is used directly without validation. Callers should ensure
-// paths come from trusted sources or are validated before use to prevent
-// path traversal attacks.
+// File uses the path as written, without validating it. Validate a path
+// from an untrusted source before passing it to File, to prevent path
+// traversal attacks.
 func File(path string) Ref {
 	ref, err := file(path)
 	if err != nil {
@@ -98,8 +99,8 @@ func file(path string) (Ref, error) {
 // fsys, with name in slash form relative to its root, or from the working
 // directory when fsys is nil, at abs, the path [File] made absolute to
 // build the key, so a change of working directory between the two does
-// not put another file's bytes under the key. An empty abs is made
-// absolute against the working directory of the read.
+// not put another file's bytes under the key. When abs is empty, readFile
+// makes name absolute against the working directory of the read.
 func readFile(fsys fs.FS, name, abs string) ([]byte, error) {
 	if fsys != nil {
 		fsPath := slashpath.Clean(filepath.ToSlash(name))

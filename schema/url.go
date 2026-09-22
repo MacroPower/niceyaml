@@ -9,15 +9,15 @@ import (
 // fetches it once with the client [WithHTTPClient] gave it and reuses the
 // compiled schema for every document that names it.
 //
-// The scheme of schemaURL is lowercased, and the rest of it left as
-// written, so one schema spelled with different scheme case is fetched and
-// compiled once rather than once per spelling. URL is for a URL written in
-// the program, so it panics on an empty schemaURL, as [Loadable] panics on
-// an empty key. A reference read from a directive or a command line, which
-// may be empty or a file path, goes through [FileOrURL], which returns an
-// error instead. The result is the shape a [Resolver] returns, so a
-// resolver that builds the URL from the document hands it back beside a
-// nil error.
+// URL lowercases the scheme of schemaURL and leaves the rest of it as
+// written, so a registry fetches and compiles a schema spelled with
+// different scheme case once rather than once per spelling. URL is for a
+// URL written in the program, so it panics on an empty schemaURL, as
+// [Loadable] panics on an empty key. A reference read from a directive
+// or a command line, which may be empty or a file path, goes through
+// [FileOrURL], which returns an error instead. The result is the shape a
+// [Resolver] returns, so a resolver that builds the URL from the document
+// hands it back beside a nil error.
 //
 // A registry rejects a response body over 10 MB. The client's Timeout and
 // the context of the lookup bound each fetch. [Registry.Load] fetches the

@@ -20,7 +20,7 @@ import (
 )
 
 // resolveAndLoad resolves doc through res and loads the schema it names,
-// returning the ref's URL alongside the loaded bytes. Both steps must
+// returning the ref's Key alongside the loaded bytes. Both steps must
 // succeed.
 func resolveAndLoad(t *testing.T, res schema.Resolver, doc *niceyaml.Document) (string, []byte) {
 	t.Helper()
@@ -342,10 +342,11 @@ func TestDirective_EmbeddedNameMatchesPath(t *testing.T) {
 	t.Parallel()
 
 	// A document in testdata names schemas/name.json in its directive, which
-	// joins to testdata/schemas/name.json. An embedded schema uses that joined
-	// path as its name. The file requires a string name and the embedded schema
-	// requires an integer, so each document passes only when the registry
-	// validates it against its own schema.
+	// joins to testdata/schemas/name.json. An embedded schema names its bytes
+	// by their digest rather than by that path, so the two never share a cache
+	// entry. The file requires a string name and the embedded schema requires
+	// an integer, so each document passes only when the registry validates it
+	// against its own schema.
 	embedded := []byte(`{"type": "object", "properties": {"name": {"type": "integer"}}}`)
 
 	tests := map[string]struct {
@@ -412,11 +413,11 @@ func TestDirective_LeadingCommentDocument(t *testing.T) {
 	// The comments and %YAML directives written above the first "---" are
 	// the preamble of the document below them, so a directive there names
 	// the schema of that document. The schema requires a "b" key, so a
-	// document validates only against this schema.
+	// document fails only when the registry checks it against this schema.
 	//
-	// A second resolver matching every document is registered after the
-	// directive resolver, so a document with no directive reaches that
-	// resolver and passes.
+	// A second resolver matching every document follows the directive
+	// resolver, so a document with no directive reaches that resolver and
+	// passes.
 	const (
 		valid   = "valid"   // Validated and passes.
 		invalid = "invalid" // Validated against the schema and fails.

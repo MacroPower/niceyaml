@@ -3,10 +3,9 @@
 //
 // # Schema Directives
 //
-// Schema directives let YAML files declare their own schema, providing IDE
-// integration and explicit validation control. The directive format follows the
-// yaml-language-server convention, making schemas work seamlessly in editors
-// like VS Code:
+// Schema directives let YAML files declare their own schema. The directive
+// format follows the yaml-language-server convention, so editors like VS Code
+// read it:
 //
 //	# yaml-language-server: $schema=./config.schema.json
 //	name: example
@@ -14,7 +13,7 @@
 // Use [ParseDirective] to extract the schema path from a single comment, and
 // [ParseDocumentDirective] to find the directive in one document's tokens.
 //
-// # Generation and Validation
+// # Generation
 //
 // Generate JSON schemas from Go types with
 // [go.jacobcolvin.com/x/jsonschema] directly, or at build time with its
@@ -28,6 +27,8 @@
 //
 //	    return nil
 //	}
+//
+// # Validation
 //
 // [Compile] turns a JSON schema document into a [*Schema], a
 // [go.jacobcolvin.com/niceyaml.Validator] that reports failures as errors
@@ -126,9 +127,9 @@
 // bytes the registry loads through [Registry.Load]: a file from the
 // working directory, or from the file system [WithFS] gave the registry,
 // and a URL with the client [WithHTTPClient] gave it. The registry checks
-// its cache by key first, so a file is read or a URL fetched once per
-// registry, however many documents name it. A resolver that picks the
-// schema from the document returns the same Refs:
+// its cache by key first, so it reads a file or fetches a URL once,
+// however many documents name it. A resolver that picks the schema from
+// the document returns the same Refs:
 //
 //	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
 //	    node, err := doc.At(kindPath)
@@ -160,9 +161,9 @@
 //
 // [FileOrURL] routes a reference as written in a directive or on a command
 // line, which may be a file path or a URL, and returns an error for one
-// that names nothing. The registry fetches every URL
-// with one client, which [WithHTTPClient] sets, so a timeout or a proxy is
-// configured once for every resolver that names a URL:
+// that names nothing. The registry fetches every URL with one client, which
+// [WithHTTPClient] sets, so that client's timeout or proxy applies to every
+// resolver that names a URL:
 //
 //	reg := schema.NewRegistry(
 //	    schema.WithHTTPClient(&http.Client{Timeout: 10 * time.Second}),
@@ -199,8 +200,8 @@
 //
 // A resolver returns a [Ref] that names the schema by key and loads its
 // bytes on demand. The registry checks its cache of compiled schemas by
-// key before loading, so each schema is loaded and compiled once per
-// registry however many documents name it.
+// key before loading, so it loads and compiles each schema once, however
+// many documents name it.
 //
 // # SchemaStore Integration
 //

@@ -81,8 +81,8 @@ func TestURL(t *testing.T) {
 	t.Run("scheme is lowercased", func(t *testing.T) {
 		t.Parallel()
 
-		// Every entry point shares one cache key, so URL normalizes the
-		// scheme it was given and leaves the rest of the URL alone.
+		// Every entry point shares one cache key, so URL lowercases the
+		// scheme and leaves the rest of the URL alone.
 		tcs := map[string]struct {
 			ref  string
 			want string

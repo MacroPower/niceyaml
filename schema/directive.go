@@ -23,12 +23,12 @@ var (
 	// after the reference is not part of it.
 	schemaDirectiveRE = regexp.MustCompile(`^\s*yaml-language-server:\s*\$schema=(\S+)`)
 
-	// ErrNoDirective indicates no schema directive was found in the document.
+	// ErrNoDirective indicates a document has no schema directive.
 	// It wraps [ErrNoMatch], so [Registry] moves on to the next resolver.
 	ErrNoDirective = fmt.Errorf("%w: no schema directive", ErrNoMatch)
 
-	// ErrNoFilePath indicates a document has no file path, which is required
-	// for resolving relative schema paths in directives.
+	// ErrNoFilePath indicates a document has no file path, which [Directive]
+	// needs to resolve a relative schema path.
 	ErrNoFilePath = errors.New("document has no file path")
 )
 
@@ -83,12 +83,12 @@ func ParseDirective(comment string) *ParsedDirective {
 // The directive must appear before any non-comment content in the document;
 // a document header (---) and a %YAML or %TAG directive line may precede
 // it, and such a line may carry the directive as its trailing comment. The
-// first directive wins. Returns nil if no directive is found before
+// first directive wins. Returns nil when no directive appears before
 // content.
 func ParseDocumentDirective(tks token.Tokens) *ParsedDirective {
 	// The parser splits a %YAML or %TAG line into a directive token and the
 	// tokens holding its value, so the value reads as content unless the
-	// rest of the directive line is skipped with it.
+	// scan skips the rest of the directive line with it.
 	inDirective, directiveLine := false, 0
 
 	for _, tk := range tks {
@@ -105,14 +105,14 @@ func ParseDocumentDirective(tks token.Tokens) *ParsedDirective {
 		}
 
 		// A token the scan can place on a later line ends the directive
-		// line. One without a position neither ends it nor is skipped
-		// with it.
+		// line. A token without a position leaves the line open, and the
+		// scan reads it rather than skipping it.
 		if hasLine && line != directiveLine {
 			inDirective = false
 		}
 
 		// A comment on the directive line is no part of the directive's
-		// value, so it is read as a comment rather than skipped.
+		// value, so the scan reads it as a comment rather than skipping it.
 		if inDirective && hasLine && tk.Type != token.CommentType {
 			continue
 		}
@@ -132,7 +132,8 @@ func ParseDocumentDirective(tks token.Tokens) *ParsedDirective {
 			}
 
 		default:
-			// Content found before directive, no directive for this document.
+			// The scan found content before any directive, so this
+			// document has none.
 			return nil
 		}
 	}
@@ -158,7 +159,7 @@ type directiveResolver struct{}
 //
 // Resolve reads the directive comment from the document's
 // [niceyaml.Document.Preamble] and names the schema it references through
-// [FileOrURL]. A relative path is resolved against the directory of the
+// [FileOrURL]. It resolves a relative path against the directory of the
 // document's file, so a document without a file path reports
 // [ErrNoFilePath] for a relative path; a URL or an absolute path needs no
 // file and resolves either way. A document without a directive reports

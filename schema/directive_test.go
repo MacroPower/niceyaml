@@ -354,7 +354,7 @@ func TestParseDocumentDirective_TokenBuilder(t *testing.T) {
 	t.Run("content on the line after a directive yields nil", func(t *testing.T) {
 		t.Parallel()
 
-		// Only the directive's own line is skipped.
+		// ParseDocumentDirective skips only the directive's own line.
 		tkb := yamltest.NewTokenBuilder()
 		tks := token.Tokens{
 			tkb.Clone().Type(token.DirectiveType).Value("%").PositionLine(1).Build(),
@@ -396,8 +396,8 @@ func TestParseDocumentDirective_TokenBuilder(t *testing.T) {
 func TestParseDocumentDirective_NilToken(t *testing.T) {
 	t.Parallel()
 
-	// A nil token in the stream is skipped, as every other token consumer
-	// skips it, rather than dereferenced.
+	// ParseDocumentDirective skips a nil token in the stream, as every
+	// other token consumer skips it, rather than dereferencing it.
 	directive := schema.ParseDocumentDirective(token.Tokens{
 		nil,
 		tokens.Tokenize("# yaml-language-server: $schema=./schema.json\n")[0],

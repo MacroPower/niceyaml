@@ -1,7 +1,7 @@
 package schema
 
 // Hooks into the package internals, so the Windows drive-letter handling
-// can run on every platform and the error position walk can be handed a
+// can run on every platform and a test can hand the error position walk a
 // tree the parser never builds.
 var (
 	// FileURLPath exposes fileURLPath to the external test package.

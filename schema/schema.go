@@ -18,7 +18,7 @@ import (
 var (
 	// ErrValidate indicates an unexpected, non-validation failure while
 	// validating against a schema, such as a reference resolution problem.
-	// Schema constraint violations are reported as [*niceyaml.Error] values
+	// Schema constraint violations come back as [*niceyaml.Error] values
 	// with path information instead of wrapping this sentinel.
 	ErrValidate = errors.New("validate schema")
 
@@ -64,8 +64,8 @@ func WithJSONSchemaOptions(opts ...jsonschema.ValidateOption) CompileOption {
 }
 
 // Compile creates a new [*Schema] from a JSON schema document. The
-// context reaches the reference resolver for references resolved while
-// compiling. An error wraps [ErrCompile].
+// context reaches the reference resolver for references it resolves
+// while compiling. An error wraps [ErrCompile].
 //
 // It is the path for a program that holds one schema, such as one embedded
 // in the binary:
@@ -92,7 +92,7 @@ func Compile(ctx context.Context, data []byte, opts ...CompileOption) (*Schema, 
 
 // MustCompile is [Compile] with a background context that panics when the
 // schema does not compile. Use it for a package-scope schema compiled
-// from a schema brought in with go:embed:
+// from a document go:embed brings in:
 //
 //	var Config = schema.MustCompile(schemaJSON)
 func MustCompile(data []byte, opts ...CompileOption) *Schema {
@@ -113,12 +113,13 @@ func FromJSONSchema(v *jsonschema.Validator) *Schema {
 }
 
 // Schema is a compiled JSON schema. It is a [niceyaml.Validator] that
-// checks a document against the schema, reporting constraint violations as
-// [*niceyaml.Error] values that carry the YAML path to each failing
-// location for display by [printer.Printer]. [Schema.Validate] checks a
-// document, or the node a document from [niceyaml.Document.At] is scoped
-// to, and [Schema.ValidateValue] checks decoded data, such as one value
-// taken from a document with a scoped [niceyaml.Document.Decode] into any.
+// checks a document against the schema and reports constraint violations
+// as [*niceyaml.Error] values that carry the YAML path to each failing
+// location for [go.jacobcolvin.com/niceyaml/printer.Printer] to display.
+// [Schema.Validate] checks a document, or the node a document from
+// [niceyaml.Document.At] is scoped to, and [Schema.ValidateValue] checks
+// decoded data, such as one value taken from a document with a scoped
+// [niceyaml.Document.Decode] into any.
 //
 // A Schema is the validator for a program that holds one schema and
 // compiles it itself. It is also a [Resolver] that names itself for every
@@ -163,8 +164,8 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Document) (Ref, error) {
 	return s.Ref(), nil
 }
 
-// Validate implements [niceyaml.Validator]. It decodes doc to
-// [any] and checks the result as [Schema.ValidateValue] does, so
+// Validate implements [niceyaml.Validator]. It decodes doc to any and
+// checks the result as [Schema.ValidateValue] does, so
 // [niceyaml.WithValidator] runs the schema before a decode and
 // [niceyaml.Document.Validate] runs it on its own. A document from
 // [niceyaml.Document.At] decodes to the node it is scoped to, so the
@@ -188,22 +189,23 @@ func (s *Schema) Validate(ctx context.Context, doc *niceyaml.Document) error {
 // ValidateValue checks data, the decoded form of a YAML value, against the
 // schema. The value is the shape a decode into any yields: maps with
 // string keys, slices, strings, bools, nil, and numbers, nested as the
-// document nests them. A Go struct is not accepted, since the validator
+// document nests them. The validator does not accept a Go struct, since it
 // reads the data as JSON does.
 //
-// YAML-native values the JSON Schema validator does not accept are first
-// converted to the JSON spelling of the same data: a !!binary becomes its
-// base64 text and a !!timestamp its RFC 3339 text, anywhere in the value.
+// ValidateValue first converts the YAML-native values the JSON Schema
+// validator does not accept into the JSON spelling of the same data. A
+// !!binary becomes its base64 text and a !!timestamp its RFC 3339 text,
+// anywhere in the value.
 //
 // Returns nil when data conforms. On a constraint violation, returns a
-// [*niceyaml.Error]: a single violation carries its YAML path on the error
+// [*niceyaml.Error]. A single violation carries its YAML path on the error
 // itself, and several violations become a count summary whose nested errors
 // each carry the path to one failing location. Any other failure wraps
 // [ErrValidate], including a $ref a [jsonschema.RefResolver] reports it
 // cannot resolve, since no location in the document is at fault for that.
 //
-// The context is passed to the underlying [jsonschema.Validator], where
-// remote reference resolution honors its cancellation and deadlines.
+// The context reaches the underlying [jsonschema.Validator], where remote
+// reference resolution honors its cancellation and deadlines.
 func (s *Schema) ValidateValue(ctx context.Context, data any) error {
 	return s.validate(ctx, data, nil)
 }
@@ -238,7 +240,7 @@ func (s *Schema) validate(ctx context.Context, data any, doc *niceyaml.Document)
 // newValidationError converts a [*jsonschema.ValidationError] into a
 // [*niceyaml.Error].
 //
-// The error tree is flattened to its concrete failures with
+// The conversion flattens the error tree to its concrete failures with
 // [jsonschema.ValidationError.Leaves]. A single failure becomes the main
 // error, carrying its own path so the printer highlights that location and
 // [niceyaml.Error.Path] reports it. Several failures become a count summary
@@ -295,9 +297,9 @@ func leafError(leaf *jsonschema.ValidationError, doc *niceyaml.Document) *niceya
 
 // buildTargetPath converts instance-location segments to a [paths.Path].
 // Each [jsonschema.Segment] already distinguishes an array index from a
-// property name, so no numeric guessing is needed. A property name is the
-// name the decode produced, which [decodedPosition] locates when the
-// source spells the key another way.
+// property name, so buildTargetPath does no numeric guessing. A property
+// name is the name the decode produced, which [decodedPosition] locates
+// when the source spells the key another way.
 func buildTargetPath(segments []jsonschema.Segment) paths.Path {
 	path := paths.Root()
 
@@ -487,8 +489,8 @@ func contentNode(node ast.Node) ast.Node {
 
 // normalizeJSON converts the YAML-native values a decode produces that the
 // JSON Schema validator does not accept into the JSON spellings of the
-// same data: a !!binary becomes its base64 text and a !!timestamp its RFC
-// 3339 text. Maps and slices are walked so a tagged scalar anywhere in a
+// same data. A !!binary becomes its base64 text and a !!timestamp its RFC
+// 3339 text. It walks maps and slices so a tagged scalar anywhere in a
 // document stays validatable. Every other value comes back unchanged,
 // non-finite floats included, since the validator treats those as numbers.
 func normalizeJSON(data any) any {

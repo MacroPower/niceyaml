@@ -56,7 +56,8 @@ func TestRegistry_Lookup(t *testing.T) {
 	t.Run("first match wins", func(t *testing.T) {
 		t.Parallel()
 
-		// The second resolver matches everything but is never reached.
+		// The second resolver matches everything, but the lookup never
+		// reaches it.
 		fallback, fallbackLoads := countingLoader("fallback.json", schemaData)
 
 		reg := schema.NewRegistry(schema.WithResolvers(
@@ -129,8 +130,8 @@ func TestRegistry_Lookup_ScopedDocument(t *testing.T) {
 	t.Parallel()
 
 	// The resolvers read the file path, the preamble, and the content of a
-	// whole document, so a scope would get the file's schema applied to one
-	// node of it.
+	// whole document, so a lookup on a scope would apply the file's schema
+	// to a single node of that document.
 	schemaData := []byte(`{"type": "object", "properties": {"kind": {"type": "string"}}}`)
 	reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded(schemaData)))
 
@@ -150,7 +151,8 @@ func TestRegistry_Lookup_ScopedDocument(t *testing.T) {
 	require.ErrorAs(t, err, &bound)
 	assert.Same(t, doc.Source(), bound.Source())
 
-	// Validate refuses the scope too, whether or not a schema is required.
+	// Validate refuses the scope too, whether or not the registry
+	// requires a schema.
 	err = spec.Validate(t.Context(), reg)
 	require.ErrorIs(t, err, schema.ErrScopedDocument)
 
@@ -523,7 +525,8 @@ func TestRegistry_Caching(t *testing.T) {
 			schema.Embedded(schemaData),
 		)))
 
-		// Pre-create documents outside goroutines to avoid assertion issues.
+		// Pre-create documents outside goroutines, since only the test
+		// goroutine may run the helper's require calls.
 		docs := make([]*niceyaml.Document, 100)
 		for i := range docs {
 			docs[i] = yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
@@ -1080,9 +1083,9 @@ func TestRegistry_Validator(t *testing.T) {
 func TestRegistry_Lookup_MatcherError(t *testing.T) {
 	t.Parallel()
 
-	// A document whose routing key holds an alias with no anchor cannot be
-	// matched, so the lookup stops there rather than routing the document
-	// to the next resolver.
+	// The matcher cannot decide on a document whose routing key holds an
+	// alias with no anchor, so the lookup stops there rather than routing
+	// the document to the next resolver.
 	fallbackCalled := false
 	reg := schema.NewRegistry(
 		schema.WithResolvers(
@@ -1186,7 +1189,7 @@ func TestRegistry_CompiledSchema(t *testing.T) {
 		t.Parallel()
 
 		// The registry asserts formats, and the schema compiled without
-		// them, so the value passes: the registry compiles nothing here.
+		// them, so the value passes. The registry compiles nothing here.
 		lax := schema.MustCompile([]byte(`{"type": "string", "format": "ipv4"}`))
 
 		reg := schema.NewRegistry(

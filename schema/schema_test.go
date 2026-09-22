@@ -22,8 +22,8 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
-// compileSchema compiles schemaData into a [*schema.Schema],
-// failing the test if the schema does not compile.
+// compileSchema compiles schemaData into a [*schema.Schema] and fails the
+// test if the schema does not compile.
 func compileSchema(t *testing.T, schemaData []byte) *schema.Schema {
 	t.Helper()
 
@@ -368,9 +368,9 @@ func TestSchema_ValidateWithDecoder(t *testing.T) {
 func TestSchema_PathTarget(t *testing.T) {
 	t.Parallel()
 
-	// This test verifies that the validator correctly chooses key vs value
-	// highlighting based on the type of validation error, by checking which
-	// part of the YAML gets wrapped with the error overlay style.
+	// The validator chooses key vs value highlighting based on the type of
+	// validation error. Each case checks which part of the YAML the error
+	// overlay style wraps.
 
 	newXMLPrinter := func() *printer.Printer {
 		return printer.New(
@@ -412,7 +412,7 @@ func TestSchema_PathTarget(t *testing.T) {
 		},
 		"required error highlights the parent key": {
 			// A missing required property targets the containing object's key,
-			// reached through the instance segments leading to it.
+			// and the instance segments lead to it.
 			schema: `{
 				"type": "object",
 				"properties": {
@@ -533,7 +533,8 @@ func TestSchema_PathTarget(t *testing.T) {
 		},
 		"propertyNames error highlights the offending key": {
 			// The library reports a propertyNames violation at the offending
-			// property with keyword "propertyNames", so the bad key is targeted.
+			// property with keyword "propertyNames", so the validator targets
+			// the bad key.
 			schema: `{
 				"type": "object",
 				"properties": {
@@ -784,8 +785,8 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 func TestSchema_BooleanSchema(t *testing.T) {
 	t.Parallel()
 
-	// Boolean schemas are valid in JSON Schema: true accepts everything, false
-	// rejects everything.
+	// Boolean schemas are valid in JSON Schema. A true schema accepts
+	// everything, and a false schema rejects everything.
 	tcs := map[string]struct {
 		input          []byte
 		wantAcceptsAll bool

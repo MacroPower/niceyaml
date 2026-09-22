@@ -57,7 +57,8 @@ func TestFileOrURL(t *testing.T) {
 		t.Parallel()
 
 		// An empty reference must not resolve to the base directory itself,
-		// and reports the empty path rather than the missing base directory.
+		// and FileOrURL reports the empty path rather than the missing
+		// base directory.
 		for _, baseDir := range []string{"/some/dir", ""} {
 			_, err := schema.FileOrURL(baseDir, "")
 			require.ErrorIs(t, err, schema.ErrEmptyPath, "baseDir %q", baseDir)
@@ -74,7 +75,7 @@ func TestFileOrURL(t *testing.T) {
 		err := os.WriteFile(schemaPath, schemaData, 0o600)
 		require.NoError(t, err)
 
-		// BaseDir is ignored for absolute paths.
+		// An absolute path ignores baseDir.
 		url, data, err := load(t, fileOrURL(t, "/some/other/dir", schemaPath))
 		require.NoError(t, err)
 		assert.Equal(t, schemaData, data)
@@ -109,7 +110,7 @@ func TestFileOrURL(t *testing.T) {
 
 		schemaURL := server.URL + "/schema.json"
 
-		// BaseDir is ignored for URLs.
+		// A URL ignores baseDir.
 		url, data, err := load(t, fileOrURL(t, "/some/dir", schemaURL))
 		require.NoError(t, err)
 		assert.Equal(t, []byte(schemaData), data)
@@ -165,7 +166,7 @@ func TestFileOrURL(t *testing.T) {
 		err := os.WriteFile(schemaPath, schemaData, 0o600)
 		require.NoError(t, err)
 
-		// BaseDir is ignored for file URLs, which name an absolute path.
+		// A file URL names a local path, so it ignores baseDir.
 		url, data, err := load(t, fileOrURL(t, "/some/other/dir", "file://"+schemaPath))
 		require.NoError(t, err)
 		assert.Equal(t, schemaData, data)
@@ -259,8 +260,8 @@ func TestFileOrURL(t *testing.T) {
 		t.Parallel()
 
 		// A drive-letter path is absolute on Windows and names nothing a
-		// POSIX base directory can resolve, so the reference must survive
-		// intact rather than be rewritten against baseDir.
+		// POSIX base directory can resolve, so FileOrURL must keep the
+		// reference intact rather than rewrite it against baseDir.
 		url, _, err := load(t, fileOrURL(t, "/configs", "file:///C:/schemas/config.json"))
 		require.Error(t, err)
 		assert.Equal(t, "file:///C:/schemas/config.json", url)

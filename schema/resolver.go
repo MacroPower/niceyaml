@@ -38,16 +38,15 @@ var ErrNoMatch = errors.New("no matching schema")
 //	    return schema.File("schemas/" + kind + ".json"), nil
 //	})
 //
-// A Ref is data, and the registry is where the bytes move: it checks its
+// A Ref is data, and the registry is where the bytes move. It checks its
 // cache by [Ref.Key] first, and loads and compiles the schema only on a
 // cache miss, so a load that succeeds runs once per key however many
-// documents name it and every schema the registry compiles is compiled
-// with the options [WithCompileOptions] gave it. [Registry.Load] reads a
-// file from the file system [WithFS] gave the registry and fetches a URL
-// with the client [WithHTTPClient] gave it, so one file system and one
-// client serve every Ref its resolvers name. A Ref that carries a
-// compiled schema has nothing to load, and the registry validates with
-// the schema as it is.
+// documents name it. The registry compiles every schema with the options
+// [WithCompileOptions] gave it. [Registry.Load] reads a file from the file
+// system [WithFS] gave the registry and fetches a URL with the client
+// [WithHTTPClient] gave it, so one file system and one client serve every
+// Ref its resolvers name. A Ref that carries a compiled schema has nothing
+// to load, and the registry validates with the schema as it is.
 //
 // The zero Ref names no schema. Return it beside an error, as a resolver
 // does with [ErrNoMatch].

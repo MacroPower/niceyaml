@@ -17,14 +17,15 @@ import (
 var (
 	// ErrResolve indicates a resolver applied to the document but could not
 	// name its schema, either by returning an error of its own or the zero
-	// Ref with no error.
+	// Ref with no error. A lookup whose context ends before a resolver names
+	// a schema reports it too.
 	ErrResolve = errors.New("resolve schema")
 
-	// ErrLoad indicates the schema could not be loaded.
+	// ErrLoad indicates the registry could not load the schema.
 	ErrLoad = errors.New("load schema")
 
-	// ErrScopedDocument indicates a [*niceyaml.Document] from
-	// [niceyaml.Document.At] was given to [Registry.Lookup] or
+	// ErrScopedDocument indicates a caller passed a [*niceyaml.Document]
+	// from [niceyaml.Document.At] to [Registry.Lookup] or
 	// [Registry.Validate], which pick a schema for a whole document.
 	ErrScopedDocument = errors.New("registry needs a whole document")
 )
@@ -35,9 +36,9 @@ var (
 // [Resolver] that does not report [ErrNoMatch] wins. The registry caches
 // the schemas it compiles by [Ref.Key] and consults that cache before
 // loading, so it loads and compiles each schema once however many
-// documents name it, and every schema it compiles is compiled with the
-// options [WithCompileOptions] gave it. A [*Schema] compiled elsewhere is
-// a resolver too, and the registry validates with it as it is.
+// documents name it, and it compiles every schema with the options
+// [WithCompileOptions] gave it. A [*Schema] compiled elsewhere is a
+// resolver too, and the registry validates with it as it is.
 //
 // Example:
 //
@@ -170,10 +171,11 @@ func WithRequireSchema(require bool) RegistryOption {
 
 // WithCompileOptions is a [RegistryOption] that sets the [CompileOption]
 // values the registry compiles every schema with, as [Compile] takes them.
-// They apply when a schema is compiled, which happens once per [Ref.Key],
-// so an option such as a format validator takes effect for every document
-// validated against that schema. A [*Schema] compiled elsewhere goes into
-// the registry as it is, with the options it was compiled with:
+// They apply when the registry compiles a schema, which happens once per
+// [Ref.Key], so an option such as a format validator takes effect for
+// every document validated against that schema. A [*Schema] compiled
+// elsewhere goes into the registry as it is, with the options it was
+// compiled with:
 //
 //	reg := schema.NewRegistry(schema.WithCompileOptions(
 //	    schema.WithJSONSchemaOptions(jsonschema.WithFormats(true)),
@@ -223,8 +225,9 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 // [niceyaml.Document.Bind], so its message names the file the document
 // came from.
 //
-// For most use cases, prefer [Validate] which combines lookup and
-// validation. Use Lookup when you need the validator for custom processing.
+// For most use cases, prefer [Registry.Validate] which combines lookup
+// and validation. Use Lookup when you need the validator for custom
+// processing.
 func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.Document) (*Schema, error) {
 	v, err := r.lookup(ctx, doc)
 	if err != nil {
@@ -272,11 +275,10 @@ func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Document) (*Schema,
 
 // Validate validates a document using the first matching schema.
 //
-// This is the primary entry point for schema validation. It combines schema
-// lookup and validation into a single call. Use [Lookup] when you need the
-// validator for custom processing. Validate implements
-// [niceyaml.Validator], so [niceyaml.WithValidator] runs it before a
-// decode:
+// Validate combines schema lookup and validation into a single call. Use
+// [Registry.Lookup] when you need the validator for custom processing.
+// Validate implements [niceyaml.Validator], so [niceyaml.WithValidator]
+// runs it before a decode:
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
 //
@@ -430,8 +432,8 @@ func (r *Registry) cached(key string) (*Schema, bool) {
 }
 
 // compile loads and compiles the schema ref names and caches the result
-// under its Key. A cache entry stored by an earlier call is left in place,
-// so every caller sees one schema per Key.
+// under its Key. When an earlier call cached a schema under that Key,
+// compile keeps it, so every caller sees one schema per Key.
 func (r *Registry) compile(ctx context.Context, ref Ref) error {
 	key := ref.Key()
 
