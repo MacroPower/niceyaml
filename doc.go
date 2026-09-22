@@ -80,10 +80,11 @@
 // document, and [Source.Bind] binds one to the document its location
 // falls in: a position or a range to the document whose span holds it,
 // and a path to the one document of a source that holds one.
-// [SourceError.Error] is one line: the resolved position in
-// front of the message, or the name of the source alone when the error
-// carries no location. [SourceError.Excerpt] returns the surrounding
-// lines with the location highlighted.
+// [SourceError.Error] puts the resolved position in front of the
+// message, or the name of the source alone when the error carries no
+// location, and runs over several lines when the message does.
+// [SourceError.Excerpt] returns the surrounding lines with the location
+// highlighted.
 // Nested errors from [WithErrors] are structure on the Error, and binding
 // binds each of them too: [SourceError.Errors] returns one SourceError per
 // nested error, with its own resolved location and its own children, so a
