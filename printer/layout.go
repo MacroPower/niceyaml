@@ -3,6 +3,7 @@ package printer
 import (
 	"slices"
 	"sort"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -116,8 +117,17 @@ func (p *Printer) layoutAnnotation(
 	var rows int
 
 	for _, group := range p.annotationGroups(view, ln, idx, gutterWidth, placement) {
-		for _, row := range group.rows {
-			*width = max(*width, gutterWidth+group.indentWidth+lipgloss.Width(row))
+		// Each row is measured styled, as renderAnnotation renders it,
+		// since the style of the kind may pad or transform the text.
+		style := p.styles.Style(group.kind)
+
+		for j, row := range group.rows {
+			prefix := group.indent
+			if j > 0 {
+				prefix = strings.Repeat(" ", group.indentWidth)
+			}
+
+			*width = max(*width, gutterWidth+lipgloss.Width(style.Render(prefix+row)))
 		}
 
 		rows += len(group.rows)

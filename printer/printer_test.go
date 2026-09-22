@@ -3826,6 +3826,32 @@ func TestPrinter_Layout_Width(t *testing.T) {
 	}
 }
 
+func TestPrinter_Layout_Width_StyledAnnotation(t *testing.T) {
+	t.Parallel()
+
+	view := niceyaml.NewSourceFromString("key: value\n").View()
+	view.Annotate(0, line.Annotation{Content: "note", Placement: line.Below, Col: 5})
+
+	p := printer.New(
+		printer.WithGutter(printer.NoGutter),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+		printer.WithStyles(style.New(
+			lipgloss.NewStyle(),
+			style.Set(kind.UIAnnotation, lipgloss.NewStyle().PaddingLeft(6)),
+		)),
+	)
+
+	widest := 0
+	for row := range strings.SplitSeq(p.Print(view), "\n") {
+		widest = max(widest, lipgloss.Width(row))
+	}
+
+	// The style pads the annotation row past the content, and the layout
+	// measures that row styled, as Print renders it.
+	assert.Greater(t, widest, lipgloss.Width("key: value"))
+	assert.Equal(t, widest, p.Layout(view).Width())
+}
+
 func TestPrinter_WithGutter_Nil(t *testing.T) {
 	t.Parallel()
 
