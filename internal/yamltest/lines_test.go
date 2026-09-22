@@ -6,13 +6,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
+	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 func TestLines_Validate(t *testing.T) {
@@ -35,9 +35,7 @@ func TestLines_Validate(t *testing.T) {
 			"valid with join flags": {
 				input: "script: |\n  line1\n  line2\n",
 			},
-			// The lexer gives Column 0 to multi-line block scalar content
-			// when other content follows.
-			"block scalar column zero": {
+			"block scalar with content after it": {
 				input: "k: >\n  a\n\n  b\nz: 1\n",
 			},
 			"empty": {
@@ -49,7 +47,7 @@ func TestLines_Validate(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				tks := lexer.Tokenize(tc.input)
+				tks := tokens.Tokenize(tc.input)
 				lines := line.NewLines(tks)
 
 				// Tokens created through NewLines should always be valid.
@@ -221,7 +219,7 @@ func TestLines_Validate_Testdata(t *testing.T) {
 			src, err := os.ReadFile(filepath.Join("..", "..", "testdata", name))
 			require.NoError(t, err)
 
-			lines := line.NewLines(lexer.Tokenize(string(src)))
+			lines := line.NewLines(tokens.Tokenize(string(src)))
 			require.NotEmpty(t, lines)
 
 			assert.Equal(t, strings.Count(string(src), "\n"), lines.Len(), "one line per source line")

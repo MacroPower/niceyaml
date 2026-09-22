@@ -6,6 +6,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/goccy/go-yaml/token"
+
+	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 // Line holds the [Segments] of one source line together with the 1-indexed
@@ -15,8 +17,7 @@ import (
 // type, which adds rendering metadata.
 type Line struct {
 	Segments Segments
-	// The 1-indexed line number used for display. This may differ from the
-	// first token's Position.Line for block scalars.
+	// The 1-indexed line number used for display.
 	Number int
 }
 
@@ -24,37 +25,37 @@ type Line struct {
 // tokens into per-line parts. It skips nil tokens in the stream, and
 // returns nil when tks holds no other token.
 //
-// The parts closely match go-yaml lexer behavior:
+// The tokens are ones [tokens.Tokenize] returns or the clones
+// [tokens.ResetPositions] makes of them, whose Line, Column, and Offset
+// name the rune where the token's text starts. A stream built by hand
+// splits as well, and Split numbers its lines from the positions it
+// carries.
 //
-// Position field semantics (all 1-indexed):
-//   - Line: Line number in the document
-//   - Column: 1-indexed column position; typically where Value starts, but for
-//     certain token types points to structural markers (see below)
-//   - Offset: Rune offset from document start (NOT byte offset)
-//   - IndentNum: Leading spaces on the current line (space chars only)
-//   - IndentLevel: Nesting depth based on indentation changes
+// Every part carries a Position of its own, 1-indexed like the lexer's:
+//   - Line is the line the part sits on.
+//   - The first part of a token that holds text keeps the token's Column
+//     and Offset, so it names the rune where the text starts. Every other
+//     part names the rune where the part starts, so the later lines of a
+//     block scalar start at column 1, and a line ending that closes a
+//     line sits just past the parts before it.
+//   - Offset counts runes from the start of the document, not bytes, and
+//     grows from part to part.
+//   - IndentNum and IndentLevel come from the token for its first text
+//     part, except for a block scalar cut across lines, and from the
+//     leading spaces of the part for every other one.
 //
-// Column exceptions by token type:
-//   - SingleQuoteType/DoubleQuoteType: Column points to opening quote character
-//   - CommentType: Column points to '#' character
-//   - LiteralType/FoldedType: Column points to '|' or '>' indicator
+// The Value of a block scalar goes to its last content part, and the
+// Value of every other token to its first text part. A part that holds
+// horizontal whitespace alone, such as the indentation the lexer bundles
+// into the token before it, becomes a SpaceType part unless it belongs to
+// a block scalar.
 //
-// Position.Line assignment for multiline tokens:
-//   - Plain multiline strings: Points to FIRST line
-//   - Quoted multiline strings: Points to opening quote line
-//   - Block scalar content (StringType after Literal/Folded): See below
-//
-// Block scalar Position has three distinct behaviors:
-//   - Single-line content (any context): Column > 0, Line = content line
-//   - Multi-line with following content: Column = 0 (marker),
-//     Line = first content line
-//   - Multi-line standalone/at end: Column > 0, Line = last content line
-//
-// Additional lexer behaviors:
-//   - The lexer preserves CRLF (\r\n) in Origin but normalizes it to \n in Value
-//   - A bare CR (\r) ends a line, as it advances the lexer's Position.Line
-//   - The lexer absorbs blank lines into the previous token's Origin
-//   - Comments include the trailing newline in Origin but not in Value
+// The lexer keeps a CRLF in Origin and normalizes it to "\n" in Value, and
+// a bare "\r" ends a line for Split as it does for the lexer. The lexer
+// absorbs blank lines into the previous token's Origin, cuts a CRLF between
+// a comment and the next token, and repeats the line ending after a tag at
+// the start of the next token. Split puts each such line ending on the
+// line it closes.
 func Split(tks token.Tokens) []Line {
 	b := newBuilder(tks)
 	if b == nil {
@@ -84,14 +85,12 @@ type builder struct {
 	lines               []Line
 	currentLineSegments Segments
 	currentLine         int // Current line number being built.
-	// Lines the lexer counted that the source does not have. It counts a
-	// CRLF it cut between two tokens as two line breaks, so its
-	// Position.Line runs this far ahead of currentLine.
-	lineDrift int
-	built     bool
+	built               bool
 
 	// Position tracking.
 	currentOffset      int // Cumulative rune offset (1-indexed like lexer).
+	currentColumn      int // Column just past the parts on the current line.
+	prevLineEndColumn  int // Column just past the parts of the line finished last.
 	currentIndentNum   int // Leading spaces on current line.
 	prevLineIndentNum  int // IndentNum from previous line.
 	currentIndentLevel int // Nesting depth level.
@@ -105,17 +104,17 @@ func newBuilder(tks token.Tokens) *builder {
 		return nil
 	}
 
-	b := &builder{}
+	b := &builder{currentColumn: 1}
 
 	// Initialize currentLine from the first token's position.
 	//
-	// The lexer positions a token on the line its content sits on, so an
-	// Origin that opens with earlier lines, blank ones or text the lexer
-	// folded into the token, starts that many lines before Position.Line.
+	// The position names the line the token's text sits on, so an Origin
+	// that opens with earlier lines, blank ones or lines of whitespace,
+	// starts that many lines before Position.Line.
 	if first.Position != nil {
 		b.currentLine = first.Position.Line
 
-		before := countLineEndingsBeforeLast(splitOriginIntoParts(first.Origin))
+		before := countLinesBeforeText(splitOriginIntoParts(first.Origin))
 		if before > 0 && b.currentLine > before {
 			b.currentLine -= before
 		}
@@ -185,23 +184,12 @@ func (b *builder) AddToken(tk *token.Token) {
 	// For simple tokens, check for line number gaps and sync forward if needed.
 	b.handleGap(tk, parts, isBlockScalarContent)
 
-	// Multi-part means the token's Origin holds more than one part.
-	isMultiPart := len(parts) > 1
-
-	// Find the last non-pure-newline part index for Value assignment.
-	// Pure newlines (like trailing "\n" in keep blocks) shouldn't get Value.
-	lastContentPartIdx := findLastContentPartIndex(parts)
-
-	isFirstContentPart := true
-
 	ctx := &partContext{
 		tk:                   tk,
-		parts:                parts,
 		leadingNewlines:      countLeadingNewlineParts(parts),
 		isBlockScalarContent: isBlockScalarContent,
-		isMultiPart:          isMultiPart,
-		lastContentPartIdx:   lastContentPartIdx,
-		isFirstContentPart:   &isFirstContentPart,
+		isMultiPart:          len(parts) > 1,
+		lastContentPartIdx:   findLastContentPartIndex(parts),
 	}
 
 	for i, part := range parts {
@@ -242,31 +230,28 @@ func (b *builder) finishLine() {
 
 	// Prepare indentation tracking for next line.
 	b.prevLineIndentNum = b.currentIndentNum
+	b.prevLineEndColumn = b.currentColumn
 
 	b.currentLineSegments = nil
 	b.currentIndentNum = 0 // The next line's first content sets it again.
+	b.currentColumn = 1
 	b.currentLine++
 }
 
 // partContext contains information needed to process a single origin part.
 type partContext struct {
 	tk                   *token.Token
-	isFirstContentPart   *bool
 	part                 string
-	parts                []string
 	partIndex            int
 	leadingNewlines      int // Number of pure-newline parts at the start of parts.
 	lastContentPartIdx   int
 	isBlockScalarContent bool
 	isMultiPart          bool
+	textPlaced           bool // Whether an earlier part held the token's first text.
 }
 
 // processPart processes a single origin part within a token.
-// Returns false when the part continued the previous line instead of
-// starting a new one.
-//
-//nolint:nestif // Complex part processing requires nested conditions.
-func (b *builder) processPart(ctx *partContext) bool {
+func (b *builder) processPart(ctx *partContext) {
 	partIsPureNewline := isPureNewline(ctx.part)
 
 	// A leading newline part can belong to the line the previous token closed.
@@ -274,98 +259,50 @@ func (b *builder) processPart(ctx *partContext) bool {
 	// we append it to the previous line, so the Origin keeps the newline
 	// without an extra line advance.
 	if b.continuesPreviousLine(ctx) && len(b.lines) > 0 {
-		// Create a segment for the newline and attach to previous line.
-		lastLine := &b.lines[len(b.lines)-1]
-		newTk := &token.Token{
-			Type:          ctx.tk.Type,
-			CharacterType: ctx.tk.CharacterType,
-			Indicator:     ctx.tk.Indicator,
-			Origin:        ctx.part,
-			Position: &token.Position{
-				Line:        b.currentLine - 1, // Goes on previous line.
-				Column:      newlineColumn(lastLine.Segments),
-				Offset:      b.currentOffset,
-				IndentNum:   b.prevLineIndentNum,
-				IndentLevel: b.currentIndentLevel,
-			},
-		}
-		if n := len(lastLine.Segments); n > 0 {
-			linkParts(lastLine.Segments[n-1].Part(), newTk)
-		}
+		b.appendToPreviousLine(ctx)
 
-		lastLine.Segments = append(lastLine.Segments, New(ctx.tk, newTk))
-
-		// The previous token's Origin already counted the runes it shares
-		// with this part, so only the rest advances currentOffset. Line
-		// endings are ASCII, so byte and rune counts agree.
-		b.currentOffset += len(ctx.part) - lineEndingOverlap(b.prevLineEnding, ctx.part)
-
-		// The lexer advanced its line on both halves of the CRLF it cut
-		// between the two tokens, while this line absorbed the second
-		// half, so from here on its Position.Line reads one line too far.
-		if b.prevLineEnding == "\r" && ctx.part == "\n" {
-			b.lineDrift++
-		}
-
-		return false
+		return
 	}
+
+	// The token's text starts in the first part that holds any, and that
+	// part carries the token's own position. Parts before it hold line
+	// endings or whitespace alone.
+	hasText := strings.TrimLeft(tokens.TrimLineEnding(ctx.part), " \t") != ""
+	isFirstText := hasText && !ctx.textPlaced
+	lead := len(ctx.part) - len(strings.TrimLeft(ctx.part, " \t"))
 
 	// Update indentation tracking for first content on new line.
 	//
-	// Use the token's Position if available (more accurate than counting spaces in
-	// Origin, since some tokens like MappingKey don't include leading spaces).
-	//
-	// Exception: multi-part block scalar content has special Position handling, so
-	// calculate indentation for each part to maintain proper tracking.
+	// Use the token's Position if available (more accurate than counting
+	// spaces in Origin, since some tokens like MappingKey don't include
+	// leading spaces). A block scalar cut across lines carries the
+	// indentation of one of its lines, so every part of one counts the
+	// spaces it opens with instead.
 	if len(b.currentLineSegments) == 0 && !partIsPureNewline {
-		if ctx.partIndex == 0 && ctx.tk.Position != nil && (!ctx.isBlockScalarContent || !ctx.isMultiPart) {
-			// First part of non-block-scalar, or single-line block scalar:
-			// use the token's Position.
+		if isFirstText && ctx.tk.Position != nil && (!ctx.isBlockScalarContent || !ctx.isMultiPart) {
 			b.currentIndentNum = ctx.tk.Position.IndentNum
 			b.currentIndentLevel = ctx.tk.Position.IndentLevel
 		} else {
-			// Subsequent parts, or multi-part block scalars: calculate from Origin.
 			b.currentIndentNum = countLeadingWhitespace(ctx.part)
 			b.currentIndentLevel = updateIndentLevel(b.prevLineIndentNum, b.currentIndentNum, b.currentIndentLevel)
 		}
 	}
 
-	var (
-		col int
-		val string
-	)
-
-	isLastContentPart := ctx.partIndex == ctx.lastContentPartIdx
-	// Determine which part should receive the token's Value:
-	// Block scalar: Value goes to last content part (lexer behavior).
-	// Plain/quoted multiline: Value goes to first content part (lexer behavior).
-	shouldHaveValue := shouldPartReceiveValue(ctx.isBlockScalarContent, *ctx.isFirstContentPart, isLastContentPart)
-	// Capture before it changes for later use.
-	wasFirstContentPart := *ctx.isFirstContentPart && !partIsPureNewline
-	if partIsPureNewline {
-		col = newlineColumn(b.currentLineSegments)
-	} else {
-		// The first part of a multi-part block scalar starts at column 1.
-		// The Column of the token belongs to the content line the lexer
-		// positioned it on, which the part that keeps the original
-		// Position carries.
-		isFirst := *ctx.isFirstContentPart && (!ctx.isBlockScalarContent || !ctx.isMultiPart)
-		col, val = partColumnAndValue(ctx.tk, isFirst, shouldHaveValue)
-		*ctx.isFirstContentPart = false
+	// The first text part names the rune where the text starts, as the
+	// token does, and every other part names the rune where it starts.
+	col, offset := b.currentColumn, b.currentOffset
+	if isFirstText {
+		col, offset = textPosition(ctx.tk, col+lead, offset+lead)
 	}
 
-	// Calculate offset where Value starts within the document.
-	// Use original Offset when:
-	//   - Single-part token (not split), or
-	//   - A plain or quoted multiline part that receives the token's Value.
-	//
-	// A block scalar part that keeps the original Position takes its Offset
-	// from that Position below. Every other part counts runes from the
-	// document start, so offsets within one token stay increasing.
-	useOriginalOffset := !ctx.isMultiPart || (shouldHaveValue && val != "" && !ctx.isBlockScalarContent)
-	valueOffset := b.currentOffset
-	if useOriginalOffset && ctx.tk.Position != nil && ctx.tk.Position.Offset > 0 {
-		valueOffset = ctx.tk.Position.Offset
+	// Determine which part should receive the token's Value:
+	// Block scalar: Value goes to last content part (lexer behavior).
+	// Plain/quoted multiline: Value goes to first text part (lexer behavior).
+	isLastContentPart := ctx.partIndex == ctx.lastContentPartIdx
+
+	val := ""
+	if shouldPartReceiveValue(ctx.isBlockScalarContent, isFirstText, isLastContentPart) {
+		val = ctx.tk.Value
 	}
 
 	// Use SpaceType for pure horizontal whitespace parts.
@@ -391,56 +328,28 @@ func (b *builder) processPart(ctx *partContext) bool {
 		Position: &token.Position{
 			Line:        b.currentLine,
 			Column:      col,
-			Offset:      valueOffset,
+			Offset:      offset,
 			IndentNum:   b.currentIndentNum,
 			IndentLevel: b.currentIndentLevel,
 		},
-	}
-
-	// For block scalars, preserve the original token's Position.
-	//
-	// The go-yaml lexer behavior varies:
-	//   - With following content: Position points to first content line (Column=0)
-	//   - Standalone: Position points to last content line (Column>0)
-	//
-	// We determine which case and put the original Position on the appropriate
-	// part.
-	if ctx.isBlockScalarContent && ctx.isMultiPart && ctx.tk.Position != nil {
-		isFirstLinePosition := ctx.tk.Position.Column == 0
-		if (wasFirstContentPart && isFirstLinePosition) || (isLastContentPart && !isFirstLinePosition) {
-			newTk.Position = clonePosition(ctx.tk.Position)
-			// The lexer's line is a guess about which content line it
-			// pointed at, and a folded scalar with content after it lands
-			// one line off. Every part on a line reports that line.
-			newTk.Position.Line = b.currentLine
-		}
-	}
-
-	// For tokens with a leading blank line (Origin starts with "\n"), preserve the
-	// original Position for the first content part.
-	//
-	// The lexer's Position reflects the content line, not the blank line, so we
-	// should use it to ensure round-trip fidelity. The part keeps the line it
-	// sits on, though. The lexer counts a CRLF it cut between a comment and
-	// the next token as two line breaks, and every part on a line reports
-	// that line's number.
-	//
-	// Also update our tracking to match, so subsequent tokens get correct values.
-	hasLeadingBlankLine := ctx.isMultiPart && len(ctx.parts) > 1 && isPureNewline(ctx.parts[0])
-	if hasLeadingBlankLine && wasFirstContentPart && ctx.tk.Position != nil {
-		newTk.Position = clonePosition(ctx.tk.Position)
-		newTk.Position.Line = b.currentLine
-		// Sync our tracking with the original Position to fix subsequent tokens.
-		b.currentIndentLevel = ctx.tk.Position.IndentLevel
 	}
 
 	linkParts(b.lastPart, newTk)
 
 	b.lastPart = newTk
 
-	b.currentLineSegments = append(b.currentLineSegments, New(ctx.tk, newTk))
+	seg := New(ctx.tk, newTk)
+	b.currentLineSegments = append(b.currentLineSegments, seg)
 
-	b.currentOffset += utf8.RuneCountInString(ctx.part)
+	// Count past the part. The first text part counts from the position it
+	// took, so the parts after it follow the source where the Origin
+	// opened with whitespace the lexer dropped.
+	b.currentColumn = col - lead + seg.Width()
+	b.currentOffset = offset - lead + utf8.RuneCountInString(ctx.part)
+
+	if isFirstText {
+		ctx.textPlaced = true
+	}
 
 	// If this part ends with a line ending, finish the current line.
 	//
@@ -452,8 +361,57 @@ func (b *builder) processPart(ctx *partContext) bool {
 	if lineEnding(ctx.part) != "" {
 		b.finishLine()
 	}
+}
 
-	return true
+// textPosition returns the column and offset of the rune where the text of
+// tk starts: the ones its Position carries, or col and offset, the count
+// the builder reached, for each the Position leaves at zero or when tk has
+// none.
+func textPosition(tk *token.Token, col, offset int) (int, int) {
+	if tk.Position == nil {
+		return col, offset
+	}
+
+	if tk.Position.Column > 0 {
+		col = tk.Position.Column
+	}
+
+	if tk.Position.Offset > 0 {
+		offset = tk.Position.Offset
+	}
+
+	return col, offset
+}
+
+// appendToPreviousLine attaches the pure-newline part that opens the token
+// to the line finished last, which the part closes. The part sits just
+// past the parts of that line, and only the runes it adds beyond the line
+// ending the previous token already counted advance the offset.
+func (b *builder) appendToPreviousLine(ctx *partContext) {
+	lastLine := &b.lines[len(b.lines)-1]
+	newTk := &token.Token{
+		Type:          ctx.tk.Type,
+		CharacterType: ctx.tk.CharacterType,
+		Indicator:     ctx.tk.Indicator,
+		Origin:        ctx.part,
+		Position: &token.Position{
+			Line:        b.currentLine - 1, // Goes on previous line.
+			Column:      max(b.prevLineEndColumn, 1),
+			Offset:      b.currentOffset,
+			IndentNum:   b.prevLineIndentNum,
+			IndentLevel: b.currentIndentLevel,
+		},
+	}
+	if n := len(lastLine.Segments); n > 0 {
+		linkParts(lastLine.Segments[n-1].Part(), newTk)
+	}
+
+	lastLine.Segments = append(lastLine.Segments, New(ctx.tk, newTk))
+
+	// The previous token's Origin already counted the runes it shares
+	// with this part, so only the rest advances currentOffset. Line
+	// endings are ASCII, so byte and rune counts agree.
+	b.currentOffset += len(ctx.part) - lineEndingOverlap(b.prevLineEnding, ctx.part)
 }
 
 // continuesPreviousLine reports whether the part, a pure newline that opens
@@ -463,12 +421,10 @@ func (b *builder) processPart(ctx *partContext) bool {
 //   - It cuts a CRLF between tokens, closing a comment with the "\r" and
 //     opening the next token with the "\n". A "\r" directly followed by "\n"
 //     is one line break in every convention, so the "\n" joins the "\r".
-//     The lexer counted two breaks there, so absorbing the "\n" adds one to
-//     lineDrift, which every later reading of a Position.Line subtracts.
 //   - It repeats a line ending at both the end of one token and the start
 //     of the next. After a tag it repeats "\n" as "\n", and in a CRLF
 //     document it closes the tag with "\r" and opens the next token with
-//     the full "\r\n". Position.Line names the line the token's content
+//     the full "\r\n". Position.Line names the line the token's text
 //     starts on, and each leading pure-newline part advances one line from
 //     currentLine, so more leading newlines than lines to advance means the
 //     first one is the repeat. Comparing counts rather than checking
@@ -492,7 +448,7 @@ func (b *builder) continuesPreviousLine(ctx *partContext) bool {
 		return false
 	}
 
-	return ctx.tk.Position != nil && ctx.leadingNewlines > ctx.tk.Position.Line-b.lineDrift-b.currentLine
+	return ctx.tk.Position != nil && ctx.leadingNewlines > ctx.tk.Position.Line-b.currentLine
 }
 
 // handleGap detects and handles line number gaps for simple tokens.
@@ -500,27 +456,23 @@ func (b *builder) continuesPreviousLine(ctx *partContext) bool {
 // endings, at most a trailing one.
 //
 // When it detects a gap (the token is ahead of currentLine), it flushes the
-// current line and syncs forward to the token's line. That line is
-// Position.Line less the drift the lexer picked up from the CRLFs it cut
-// between tokens, so a CRLF document reports the same gaps as the same
-// text with LF endings.
+// current line and syncs forward to the token's line.
 //
-// Block scalar content is never evidence of a gap. The lexer sets its
-// Position.Line to the header's line or to the last content line, not to
-// the line its Origin starts on, so syncing to it would skip a line.
-// The part that owns the original Position carries it forward through
-// processPart. A token that is a line ending alone is no evidence
-// either. It closes the line it sits on, and syncing to its Position.Line
-// would make the blank line it ends read as a repeated line ending.
+// A token without text is no evidence of a gap. It sits where the next
+// text starts, which can be lines below the line its Origin closes, so
+// syncing to it would skip the blank line it stands for. Block scalar
+// content is no evidence either, since the empty content of a scalar has
+// no text and the content of one has its line ending in the Origin.
 func (b *builder) handleGap(tk *token.Token, parts []string, isBlockScalarContent bool) {
-	if len(parts) != 1 || isBlockScalarContent || isPureNewline(tk.Origin) {
+	if len(parts) != 1 || isBlockScalarContent || tk.Position == nil {
 		return
 	}
 
-	tkLine := b.currentLine
-	if tk.Position != nil {
-		tkLine = tk.Position.Line - b.lineDrift
+	if strings.Trim(tk.Origin, " \t\r\n") == "" {
+		return
 	}
+
+	tkLine := tk.Position.Line
 
 	// If there's a gap (simple token is ahead), flush and sync forward.
 	// Never sync backwards, since currentLine must be monotonically increasing.
@@ -533,22 +485,13 @@ func (b *builder) handleGap(tk *token.Token, parts []string, isBlockScalarConten
 
 	if len(b.currentLineSegments) == 0 && tkLine > b.currentLine {
 		b.currentLine = tkLine
-
-		if tk.Position != nil {
-			if tk.Position.Offset > 0 {
-				b.currentOffset = originOffset(tk)
-			}
-
-			b.currentIndentNum = tk.Position.IndentNum
-			b.currentIndentLevel = tk.Position.IndentLevel
-		}
 	}
 }
 
 // originOffset returns the 1-indexed document rune offset where tk.Origin
 // starts.
 //
-// Position.Offset points at the value, past the whitespace and line breaks
+// Position.Offset points at the text, past the whitespace and line breaks
 // that open the Origin. The builder counts the whole Origin, so it must
 // start counting where the Origin does. Those opening runes are ASCII, so
 // their byte count is their rune count.
@@ -556,35 +499,6 @@ func originOffset(tk *token.Token) int {
 	lead := len(tk.Origin) - len(strings.TrimLeft(tk.Origin, " \t\r\n"))
 
 	return max(1, tk.Position.Offset-lead)
-}
-
-// partColumnAndValue calculates the column position and value for a content part.
-//
-// Parameters:
-//   - tk: Original token with Type, Value, Position
-//   - isFirst: Whether this is the first content part
-//   - shouldHaveValue: Whether this part should receive the token's Value
-//     (determined by caller: first part for plain/quoted, last part for
-//     block scalars)
-//
-// Column assignment mirrors go-yaml lexer Position.Column behavior:
-//   - If the part takes a non-empty Value: use the original token's Column
-//   - If isFirst is true (even without Value): use the original token's Column
-//   - Otherwise, or when that Column is not positive: Column defaults to 1
-func partColumnAndValue(tk *token.Token, isFirst, shouldHaveValue bool) (int, string) {
-	col := 1
-	val := ""
-
-	if tk.Value != "" && shouldHaveValue {
-		val = tk.Value
-		if tk.Position != nil && tk.Position.Column > 0 {
-			col = tk.Position.Column
-		}
-	} else if isFirst && tk.Position != nil && tk.Position.Column > 0 {
-		col = tk.Position.Column
-	}
-
-	return col, val
 }
 
 // countLeadingWhitespace returns the number of leading space characters in s.
@@ -599,13 +513,6 @@ func countLeadingWhitespace(s string) int {
 	}
 
 	return count
-}
-
-// newlineColumn returns the 1-indexed Column for a pure-newline part appended
-// to segs: the column just past the existing parts, or 1 when the newline
-// starts an otherwise empty line.
-func newlineColumn(segs Segments) int {
-	return max(segs.EndColumn(), 1)
 }
 
 // countLeadingNewlineParts returns the number of pure-newline parts at the
@@ -624,13 +531,19 @@ func countLeadingNewlineParts(parts []string) int {
 	return count
 }
 
-// countLineEndingsBeforeLast returns the number of parts before the last
-// one that end in a line ending, which is the number of lines the text of
-// a token opens with before the line its last part sits on.
-func countLineEndingsBeforeLast(parts []string) int {
+// countLinesBeforeText returns the number of parts that end in a line
+// ending ahead of the first part holding text, which is the number of lines
+// the Origin of a token opens with before the line its position names. A
+// token without text sits where the next text starts, below every line of
+// its Origin, so all its line endings count.
+func countLinesBeforeText(parts []string) int {
 	count := 0
 
-	for _, p := range parts[:max(len(parts)-1, 0)] {
+	for _, p := range parts {
+		if strings.TrimLeft(tokens.TrimLineEnding(p), " \t") != "" {
+			break
+		}
+
 		if lineEnding(p) != "" {
 			count++
 		}
@@ -784,29 +697,13 @@ func findLastContentPartIndex(parts []string) int {
 // field.
 //
 // Block scalars (literal/folded): Value goes to the last content part.
-// Plain/quoted multiline: Value goes to the first content part.
-func shouldPartReceiveValue(isBlockScalar, isFirstContentPart, isLastContentPart bool) bool {
+// Plain/quoted multiline: Value goes to the first text part.
+func shouldPartReceiveValue(isBlockScalar, isFirstTextPart, isLastContentPart bool) bool {
 	if isBlockScalar {
 		return isLastContentPart
 	}
 
-	return isFirstContentPart
-}
-
-// clonePosition creates a deep copy of a [*token.Position].
-// Returns nil if pos is nil.
-func clonePosition(pos *token.Position) *token.Position {
-	if pos == nil {
-		return nil
-	}
-
-	return &token.Position{
-		Line:        pos.Line,
-		Column:      pos.Column,
-		Offset:      pos.Offset,
-		IndentNum:   pos.IndentNum,
-		IndentLevel: pos.IndentLevel,
-	}
+	return isFirstTextPart
 }
 
 // linkParts chains next after prev so that [token.Token.NextType] and

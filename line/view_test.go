@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/goccy/go-yaml/lexer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
@@ -12,13 +11,14 @@ import (
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style/kind"
+	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 // newTestView creates a view over the lines of input.
 func newTestView(t *testing.T, input string, wantLen int) *line.View {
 	t.Helper()
 
-	lines := line.NewLines(lexer.Tokenize(input))
+	lines := line.NewLines(tokens.Tokenize(input))
 	require.Equal(t, wantLen, lines.Len())
 
 	return line.NewView(lines)
@@ -30,7 +30,7 @@ func TestNewView(t *testing.T) {
 	t.Run("over lines", func(t *testing.T) {
 		t.Parallel()
 
-		lines := line.NewLines(lexer.Tokenize("key: value\nother: data\n"))
+		lines := line.NewLines(tokens.Tokenize("key: value\nother: data\n"))
 		view := line.NewView(lines)
 
 		assert.Equal(t, 2, view.Count())

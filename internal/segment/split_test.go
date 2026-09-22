@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -121,7 +120,7 @@ func TestSplit_DuplicateNewline(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := segment.Split(lexer.Tokenize(tc.input))
+			lines := segment.Split(tokens.Tokenize(tc.input))
 
 			assert.Equal(t, tc.wantContent, lineContents(lines))
 			assert.Equal(t, tc.wantNumbers, lineNumbers(lines))
@@ -206,7 +205,7 @@ func TestSplit_LineEndings(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := segment.Split(lexer.Tokenize(tc.input))
+			lines := segment.Split(tokens.Tokenize(tc.input))
 
 			assert.Equal(t, tc.wantContent, lineContents(lines))
 			assert.Equal(t, tc.wantNumbers, lineNumbers(lines))
@@ -227,14 +226,14 @@ func TestSplit_CRLFSplitOffset(t *testing.T) {
 	// The lexer closes a comment with "\r" and opens the next token with
 	// "\n". That "\n" is a new rune, so it advances the offset by one, while
 	// the "\r" a tag repeats before "\r\n" does not.
-	lines := segment.Split(lexer.Tokenize("# c\r\nk: v\r\n"))
+	lines := segment.Split(tokens.Tokenize("# c\r\nk: v\r\n"))
 	require.Len(t, lines, 2)
 
 	nl := part(t, lines, 0, 1)
 	assert.Equal(t, "\n", nl.Origin)
 	assert.Equal(t, 5, nl.Position.Offset)
 
-	lines = segment.Split(lexer.Tokenize("a: !t\r\n  b: 1\r\nc: 'x\r\n  y'\r\n"))
+	lines = segment.Split(tokens.Tokenize("a: !t\r\n  b: 1\r\nc: 'x\r\n  y'\r\n"))
 	require.Len(t, lines, 4)
 
 	dup := part(t, lines, 0, 3)
@@ -242,18 +241,19 @@ func TestSplit_CRLFSplitOffset(t *testing.T) {
 	assert.Equal(t, 7, dup.Position.Offset, "the repeat shares the tag's \\r offset")
 
 	// "a: !t\r\n" (7) + "  b: 1\r\n" (8) + "c: 'x\r\n" (7) puts the
-	// continuation at 1-indexed offset 23.
+	// continuation at 1-indexed offset 23. Tokenize gives the final line
+	// ending back to the last token, so the part carries it.
 	cont := part(t, lines, 3, 0)
-	assert.Equal(t, "  y'", cont.Origin)
+	assert.Equal(t, "  y'\r\n", cont.Origin)
 	assert.Equal(t, 23, cont.Position.Offset)
 }
 
 func TestSplit_NewlineColumn(t *testing.T) {
 	t.Parallel()
 
-	// A pure-newline part starts just past the parts on its line, at the
-	// largest part Column plus that part's width, or in column 1 on a
-	// blank line.
+	// A pure-newline part starts just past the parts on its line, so the
+	// newline a tag repeats sits one column past the tag, or in column 1
+	// on a blank line.
 	tcs := map[string]struct {
 		input string
 		line  int // 0-indexed line holding the newline part.
@@ -264,13 +264,13 @@ func TestSplit_NewlineColumn(t *testing.T) {
 			input: "a: !t\n  b: 1\n",
 			line:  0,
 			idx:   3,
-			want:  7,
+			want:  6,
 		},
 		"repeated newline after a long tag": {
 			input: "a: !!map\n  b: 1\n",
 			line:  0,
 			idx:   3,
-			want:  10,
+			want:  9,
 		},
 		"blank line inside a block scalar": {
 			input: "k: |\n  a\n\n  b\nz: 1\n",
@@ -290,7 +290,7 @@ func TestSplit_NewlineColumn(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := segment.Split(lexer.Tokenize(tc.input))
+			lines := segment.Split(tokens.Tokenize(tc.input))
 			nl := part(t, lines, tc.line, tc.idx)
 
 			require.Equal(t, "\n", nl.Origin)
@@ -309,7 +309,7 @@ func TestSplit_DuplicateNewlineOffset(t *testing.T) {
 
 	// The repeated newline is the same rune the previous token already
 	// counted, so it must not push later offsets forward.
-	lines := segment.Split(lexer.Tokenize("a: !t\n  b: 1\nc: \"x\n  y\"\nd: 1\n"))
+	lines := segment.Split(tokens.Tokenize("a: !t\n  b: 1\nc: \"x\n  y\"\nd: 1\n"))
 	require.Len(t, lines, 5)
 
 	dup := part(t, lines, 0, 3)
@@ -326,23 +326,24 @@ func TestSplit_DuplicateNewlineOffset(t *testing.T) {
 func TestSplit_BlockScalarOffsets(t *testing.T) {
 	t.Parallel()
 
-	// Offsets of the parts cut from one block scalar must increase down the
-	// scalar, whichever line the lexer pinned the original Position to.
+	// The first part of a block scalar names the rune where its text
+	// starts, and every later part the rune where the line starts, so the
+	// offsets increase down the scalar whether content follows it or not.
 	tcs := map[string]struct {
 		input string
 		want  []int // Offset of the first part on each block scalar line.
 	}{
 		"blank line inside, content follows": {
 			input: "k: |\n  a\n\n  b\nz: 1\n",
-			want:  []int{9, 10, 11},
+			want:  []int{8, 10, 11},
 		},
 		"content follows": {
 			input: "k: |\n  a\n  b\nz: 1\n",
-			want:  []int{9, 10},
+			want:  []int{8, 10},
 		},
 		"at end of input": {
 			input: "k: |\n  a\n  b\n",
-			want:  []int{6, 12},
+			want:  []int{8, 10},
 		},
 	}
 
@@ -350,7 +351,7 @@ func TestSplit_BlockScalarOffsets(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := segment.Split(lexer.Tokenize(tc.input))
+			lines := segment.Split(tokens.Tokenize(tc.input))
 			require.Greater(t, len(lines), len(tc.want))
 
 			got := make([]int, 0, len(tc.want))
@@ -363,13 +364,102 @@ func TestSplit_BlockScalarOffsets(t *testing.T) {
 	}
 }
 
+func TestSplit_OffsetsIncrease(t *testing.T) {
+	t.Parallel()
+
+	// Offsets grow from part to part through the whole stream, across the
+	// tokens the lexer positions short, such as those after a comment or a
+	// tag, and across a CRLF it cuts between two tokens.
+	tcs := map[string]string{
+		"comments":          "# head\na: 1 # line\n# foot\nb: 2\n",
+		"tags":              "t: !!str s\nu: !t\n  v: 1\nw: !!seq\n\n  - x\n",
+		"crlf":              "key: value\r\n# c\r\nnext: 1\r\n",
+		"crlf tag":          "a: !t\r\n  b: 1\r\nc: 'x\r\n  y'\r\n",
+		"block scalars":     "k: |\n  a\n\n  b\nz: >\n  c\n  d\n",
+		"trailing spaces":   "a: 1   \nb: 2  \n",
+		"folded blank line": "a:\n   \n  b: 1\n",
+	}
+
+	for name, input := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			lines := segment.Split(tokens.Tokenize(input))
+			require.NotEmpty(t, lines)
+
+			prev := 0
+
+			for _, l := range lines {
+				for _, seg := range l.Segments {
+					p := seg.Part()
+
+					// The newline a tag repeats and the "\n" of a cut CRLF
+					// hold no new rune, so they may share an offset.
+					if isPureNewline(p.Origin) {
+						assert.GreaterOrEqual(t, p.Position.Offset, prev, "part %q on line %d", p.Origin, l.Number)
+					} else {
+						assert.Greater(t, p.Position.Offset, prev, "part %q on line %d", p.Origin, l.Number)
+					}
+
+					prev = p.Position.Offset
+				}
+			}
+		})
+	}
+}
+
+func isPureNewline(s string) bool {
+	return s == "\n" || s == "\r\n" || s == "\r"
+}
+
+func TestSplit_FirstTextPartKeepsPosition(t *testing.T) {
+	t.Parallel()
+
+	// The first part of a token that holds text carries the token's own
+	// Line, Column, and Offset, whatever whitespace and line endings the
+	// Origin opens with and whatever the lexer dropped before it.
+	tcs := map[string]string{
+		"trailing spaces":      "a: 1   \nb: 2\n",
+		"comment then header":  "# comment\n---\nb: two\n",
+		"tag":                  "t: !!str s\nu: !t\n  v: 1\n",
+		"block scalar":         "k: |\n    hello\n    world\nz: 1\n",
+		"leading blank line":   "k: |\n\n  b\nz: 1\n",
+		"collapsed blank line": "a:\n   \n  b: 1\n",
+		"crlf":                 "key: value\r\n# c\r\nnext: 1\r\n",
+		"quoted multi-line":    "a: 'x\n\n  y'\nb: 1\n",
+	}
+
+	for name, input := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			seen := map[*token.Token]bool{}
+
+			for _, l := range segment.Split(tokens.Tokenize(input)) {
+				for _, seg := range l.Segments {
+					src, p := seg.Source(), seg.Part()
+					if seen[src] || strings.TrimSpace(p.Origin) == "" {
+						continue
+					}
+
+					seen[src] = true
+
+					assert.Equal(t, src.Position.Line, p.Position.Line, "part %q line", p.Origin)
+					assert.Equal(t, src.Position.Column, p.Position.Column, "part %q column", p.Origin)
+					assert.Equal(t, src.Position.Offset, p.Position.Offset, "part %q offset", p.Origin)
+				}
+			}
+		})
+	}
+}
+
 func TestSplit_BlockScalarTrailingIndent(t *testing.T) {
 	t.Parallel()
 
 	// The lexer bundles the indentation of the line after a block scalar into
 	// the scalar's Origin ("    x\n\n  "). That fragment is not content, so the
 	// Value and the original Position stay on the last content line.
-	lines := segment.Split(lexer.Tokenize("a:\n  k: |\n    x\n\n  # c\n  z: 1\n"))
+	lines := segment.Split(tokens.Tokenize("a:\n  k: |\n    x\n\n  # c\n  z: 1\n"))
 	require.Equal(t, []string{"a:", "  k: |", "    x", "", "  # c", "  z: 1"}, lineContents(lines))
 
 	content := part(t, lines, 2, 0)
@@ -393,7 +483,7 @@ func TestSplit_HandBuiltStream(t *testing.T) {
 
 	// A caller can compose a stream itself rather than take one from the
 	// lexer, so Split tolerates what the lexer never emits.
-	pair := lexer.Tokenize("a: 1\nb: 2\n")
+	pair := tokens.Tokenize("a: 1\nb: 2\n")
 	require.NotEmpty(t, pair)
 
 	tcs := map[string]struct {

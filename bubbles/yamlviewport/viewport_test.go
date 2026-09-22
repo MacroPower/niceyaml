@@ -11,7 +11,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
-	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -29,6 +28,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 	"go.jacobcolvin.com/niceyaml/style/theme"
+	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 func TestViewport_SearchDecorationRefreshesRowCounts(t *testing.T) {
@@ -422,7 +422,7 @@ func TestViewport_Golden(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tks := lexer.Tokenize(tc.yaml)
+			tks := tokens.Tokenize(tc.yaml)
 
 			m := yamlviewport.New(tc.opts...)
 			m.SetWidth(tc.width)
@@ -629,7 +629,7 @@ func TestViewport_Scrolling(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tks := lexer.Tokenize(tc.yaml)
+			tks := tokens.Tokenize(tc.yaml)
 
 			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
 			m.SetWidth(tc.width)
@@ -1357,7 +1357,7 @@ func TestViewport_Search(t *testing.T) {
 		item3: fourth
 	`)
 
-	tks := lexer.Tokenize(yaml)
+	tks := tokens.Tokenize(yaml)
 	lines := niceyaml.NewSourceFromTokens(tks)
 
 	tcs := map[string]struct {
@@ -1458,9 +1458,9 @@ func TestViewport_Revisions(t *testing.T) {
 		new: added
 	`)
 
-	rev1Tokens := lexer.Tokenize(rev1)
-	rev2Tokens := lexer.Tokenize(rev2)
-	rev3Tokens := lexer.Tokenize(rev3)
+	rev1Tokens := tokens.Tokenize(rev1)
+	rev2Tokens := tokens.Tokenize(rev2)
+	rev3Tokens := tokens.Tokenize(rev3)
 
 	tcs := map[string]struct {
 		setup func(m *yamlviewport.Model)
@@ -1745,9 +1745,9 @@ func TestViewport_DiffMode(t *testing.T) {
 		new: added
 	`)
 
-	rev1Tokens := lexer.Tokenize(rev1)
-	rev2Tokens := lexer.Tokenize(rev2)
-	rev3Tokens := lexer.Tokenize(rev3)
+	rev1Tokens := tokens.Tokenize(rev1)
+	rev2Tokens := tokens.Tokenize(rev2)
+	rev3Tokens := tokens.Tokenize(rev3)
 
 	tcs := map[string]struct {
 		setup func(m *yamlviewport.Model)
@@ -2066,7 +2066,7 @@ line3: c`
 			}
 
 			if tc.yaml != "" {
-				m.SetRevision(niceyaml.NewSourceFromTokens(lexer.Tokenize(tc.yaml)))
+				m.SetRevision(niceyaml.NewSourceFromTokens(tokens.Tokenize(tc.yaml)))
 			}
 
 			if tc.setup != nil {
@@ -2378,7 +2378,7 @@ func TestViewport_Update(t *testing.T) {
 			height: 5,
 			setup: func(m *yamlviewport.Model) {
 				// Add a second revision and go to revision 0.
-				second := lexer.Tokenize("line1: modified\nline2: changed")
+				second := tokens.Tokenize("line1: modified\nline2: changed")
 				m.AddRevision(niceyaml.NewSourceFromTokens(second, niceyaml.WithName("change")))
 				m.GotoRevision(0)
 			},
@@ -2396,7 +2396,7 @@ func TestViewport_Update(t *testing.T) {
 			height: 5,
 			setup: func(m *yamlviewport.Model) {
 				// Add a second revision (starts at latest index 1).
-				second := lexer.Tokenize("line1: modified\nline2: changed")
+				second := tokens.Tokenize("line1: modified\nline2: changed")
 				m.AddRevision(niceyaml.NewSourceFromTokens(second, niceyaml.WithName("change")))
 
 				// Now at index 1 (latest).
@@ -2415,7 +2415,7 @@ func TestViewport_Update(t *testing.T) {
 			width:  80,
 			height: 5,
 			setup: func(m *yamlviewport.Model) {
-				second := lexer.Tokenize("line1: modified\nline2: changed")
+				second := tokens.Tokenize("line1: modified\nline2: changed")
 				m.AddRevision(niceyaml.NewSourceFromTokens(second, niceyaml.WithName("change")))
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -2429,7 +2429,7 @@ func TestViewport_Update(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tks := lexer.Tokenize(tc.yaml)
+			tks := tokens.Tokenize(tc.yaml)
 
 			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
 			m.SetWidth(tc.width)
@@ -2456,7 +2456,7 @@ func TestViewport_Update(t *testing.T) {
 func TestViewport_KeyMap(t *testing.T) {
 	t.Parallel()
 
-	tks := lexer.Tokenize("key: value\nkey2: value2\nkey3: value3")
+	tks := tokens.Tokenize("key: value\nkey2: value2\nkey3: value3")
 	lines := niceyaml.NewSourceFromTokens(tks)
 
 	tcs := map[string]struct {
@@ -2537,14 +2537,14 @@ func TestViewport_RevisionDeduplication(t *testing.T) {
 		value: 10
 	`)
 
-	sameTokens1 := lexer.Tokenize(content)
-	sameTokens2 := lexer.Tokenize(content)
+	sameTokens1 := tokens.Tokenize(content)
+	sameTokens2 := tokens.Tokenize(content)
 
 	differentContent := stringtest.Input(`
 		name: different
 		value: 20
 	`)
-	differentTokens := lexer.Tokenize(differentContent)
+	differentTokens := tokens.Tokenize(differentContent)
 
 	tcs := map[string]struct {
 		setup func(m *yamlviewport.Model)
@@ -2698,9 +2698,9 @@ func TestViewModeHunks_Golden(t *testing.T) {
 		  retries: 10
 	`)
 
-	rev1Tokens := lexer.Tokenize(rev1YAML)
-	rev2Tokens := lexer.Tokenize(rev2YAML)
-	rev3Tokens := lexer.Tokenize(rev3YAML)
+	rev1Tokens := tokens.Tokenize(rev1YAML)
+	rev2Tokens := tokens.Tokenize(rev2YAML)
+	rev3Tokens := tokens.Tokenize(rev3YAML)
 
 	type goldenTest struct {
 		setupFunc func(m *yamlviewport.Model)
@@ -2894,9 +2894,9 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 		  retries: 10
 	`)
 
-	rev1Tokens := lexer.Tokenize(rev1YAML)
-	rev2Tokens := lexer.Tokenize(rev2YAML)
-	rev3Tokens := lexer.Tokenize(rev3YAML)
+	rev1Tokens := tokens.Tokenize(rev1YAML)
+	rev2Tokens := tokens.Tokenize(rev2YAML)
+	rev3Tokens := tokens.Tokenize(rev3YAML)
 
 	type goldenTest struct {
 		setupFunc func(m *yamlviewport.Model)
@@ -3199,8 +3199,8 @@ func TestViewMode_Behavior(t *testing.T) {
 		enabled: true
 	`)
 
-	rev1Tokens := lexer.Tokenize(rev1YAML)
-	rev2Tokens := lexer.Tokenize(rev2YAML)
+	rev1Tokens := tokens.Tokenize(rev1YAML)
+	rev2Tokens := tokens.Tokenize(rev2YAML)
 
 	tcs := map[string]struct {
 		setup  func(m *yamlviewport.Model)
@@ -3572,8 +3572,8 @@ func TestViewport_WithSearcher(t *testing.T) {
 		m.SetWidth(80)
 		m.SetHeight(10)
 
-		tokens := lexer.Tokenize("key: value\n")
-		m.SetRevision(niceyaml.NewSourceFromTokens(tokens))
+		tks := tokens.Tokenize("key: value\n")
+		m.SetRevision(niceyaml.NewSourceFromTokens(tks))
 
 		m.SetSearchTerm("value")
 
@@ -3724,8 +3724,8 @@ func TestViewport_ScrollEdgeCases(t *testing.T) {
 		m.SetWidth(80)
 		m.SetHeight(10)
 
-		tokens := lexer.Tokenize("line1: value1\nline2: value2\nline3: value3\n")
-		m.SetRevision(niceyaml.NewSourceFromTokens(tokens))
+		tks := tokens.Tokenize("line1: value1\nline2: value2\nline3: value3\n")
+		m.SetRevision(niceyaml.NewSourceFromTokens(tks))
 
 		initialOffset := m.YOffset()
 		m.ScrollDown(0)
@@ -3752,8 +3752,8 @@ func TestViewport_ScrollEdgeCases(t *testing.T) {
 		m.SetHeight(2)
 
 		// Need more lines than viewport height to enable scrolling.
-		tokens := lexer.Tokenize("line1: value1\nline2: value2\nline3: value3\nline4: value4\nline5: value5\n")
-		m.SetRevision(niceyaml.NewSourceFromTokens(tokens))
+		tks := tokens.Tokenize("line1: value1\nline2: value2\nline3: value3\nline4: value4\nline5: value5\n")
+		m.SetRevision(niceyaml.NewSourceFromTokens(tks))
 
 		m.SetYOffset(2)
 		m.ScrollUp(0)
@@ -3800,8 +3800,8 @@ func TestViewport_RevisionStateEdgeCases(t *testing.T) {
 		m.SetWidth(80)
 		m.SetHeight(10)
 
-		tokens1 := lexer.Tokenize("v1: value1\n")
-		tokens2 := lexer.Tokenize("v2: value2\n")
+		tokens1 := tokens.Tokenize("v1: value1\n")
+		tokens2 := tokens.Tokenize("v2: value2\n")
 
 		m.AddRevision(niceyaml.NewSourceFromTokens(tokens1, niceyaml.WithName("rev1")))
 		m.AddRevision(niceyaml.NewSourceFromTokens(tokens2, niceyaml.WithName("rev2")))
@@ -3836,8 +3836,8 @@ func TestViewport_ToggleWordWrapResetsXOffset(t *testing.T) {
 	m.SetWidth(20)
 	m.SetHeight(10)
 
-	tokens := lexer.Tokenize("key: very long value that exceeds width\n")
-	m.SetRevision(niceyaml.NewSourceFromTokens(tokens))
+	tks := tokens.Tokenize("key: very long value that exceeds width\n")
+	m.SetRevision(niceyaml.NewSourceFromTokens(tks))
 
 	// Disable wrapping first.
 	m.ToggleWordWrap()
@@ -4007,8 +4007,8 @@ func TestViewport_SetSearchTermEmpty(t *testing.T) {
 	m.SetWidth(80)
 	m.SetHeight(10)
 
-	tokens := lexer.Tokenize("key: value\n")
-	m.SetRevision(niceyaml.NewSourceFromTokens(tokens))
+	tks := tokens.Tokenize("key: value\n")
+	m.SetRevision(niceyaml.NewSourceFromTokens(tks))
 
 	// Set a search term first.
 	m.SetSearchTerm("value")

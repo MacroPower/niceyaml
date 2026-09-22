@@ -34,12 +34,15 @@ type Lines struct {
 }
 
 // NewLines creates new [Lines] from [token.Tokens], one [Line] per source
-// line.
+// line. The tokens are ones [tokens.Tokenize] returns or the clones
+// [tokens.ResetPositions] makes of them, whose positions name the rune
+// where each token's text starts.
 //
 // NewLines cuts multiline tokens, such as block scalars and quoted multiline
 // strings, into one part per line. Each part is a token whose Position
-// describes its own line, following the go-yaml lexer conventions for that
-// token type, and every part keeps a reference to the original token it was
+// describes its own line. The first part that holds the token's text keeps
+// the token's Column and Offset, every later part names the rune where it
+// starts, and every part keeps a reference to the original token it was
 // cut from. [Lines.Tokens] recombines the parts into the original tokens.
 // Returns the zero Lines when tks is empty.
 func NewLines(tks token.Tokens) Lines {

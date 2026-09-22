@@ -3,13 +3,13 @@ package line_test
 import (
 	"testing"
 
-	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 func TestSplit(t *testing.T) {
@@ -39,7 +39,7 @@ func TestSplit(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := line.NewLines(lexer.Tokenize(tc.input))
+			lines := line.NewLines(tokens.Tokenize(tc.input))
 			require.Equal(t, len(tc.wantContent), lines.Len())
 
 			for i, l := range lines.All() {
@@ -71,24 +71,24 @@ func TestLine_Runes(t *testing.T) {
 		input string
 		want  []string
 	}{
-		"lf ending":                        {input: "a: b\nc: d\n", want: []string{"a: b\n", "c: d"}},
+		"lf ending":                        {input: "a: b\nc: d\n", want: []string{"a: b\n", "c: d\n"}},
 		"crlf ending collapses to newline": {input: "a: b\r\nc: d\r\n", want: []string{"a: b\n", "c: d\n"}},
 		"no ending at end of input":        {input: "ab", want: []string{"ab"}},
 		"multibyte runes":                  {input: "k: héllo\nz: 1", want: []string{"k: héllo\n", "z: 1"}},
 		// The lexer repeats the newline after a tag at the start of the next
 		// token; the line still yields it once.
-		"newline repeated after tag": {input: "a: !!map\n  b: 1\n", want: []string{"a: !!map\n", "  b: 1"}},
+		"newline repeated after tag": {input: "a: !!map\n  b: 1\n", want: []string{"a: !!map\n", "  b: 1\n"}},
 		"crlf repeated after tag":    {input: "a: !t\r\n  b: 1\r\n", want: []string{"a: !t\n", "  b: 1\n"}},
 		"crlf cut after comment":     {input: "a: b # c\r\nd: e\r\n", want: []string{"a: b # c\n", "d: e\n"}},
-		"bare cr ending":             {input: "a: 1\rb: 2\r", want: []string{"a: 1\n", "b: 2"}},
-		"blank line after tag":       {input: "a: !t\n\n  b: 1\n", want: []string{"a: !t\n", "\n", "  b: 1"}},
+		"bare cr ending":             {input: "a: 1\rb: 2\r", want: []string{"a: 1\n", "b: 2\n"}},
+		"blank line after tag":       {input: "a: !t\n\n  b: 1\n", want: []string{"a: !t\n", "\n", "  b: 1\n"}},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := line.NewLines(lexer.Tokenize(tc.input))
+			lines := line.NewLines(tokens.Tokenize(tc.input))
 			require.Equal(t, len(tc.want), lines.Len())
 
 			for i, l := range lines.All() {
@@ -115,7 +115,7 @@ func TestLine_Runes(t *testing.T) {
 	t.Run("stops when yield returns false", func(t *testing.T) {
 		t.Parallel()
 
-		lines := line.NewLines(lexer.Tokenize("abc: def\n"))
+		lines := line.NewLines(tokens.Tokenize("abc: def\n"))
 		require.Equal(t, 1, lines.Len())
 
 		count := 0
@@ -143,7 +143,7 @@ func TestLine_Runes(t *testing.T) {
 func TestLine_Tokens(t *testing.T) {
 	t.Parallel()
 
-	src := lexer.Tokenize("foo: |-\n  hello\n  world\nbar: baz\n")
+	src := tokens.Tokenize("foo: |-\n  hello\n  world\nbar: baz\n")
 	lines := line.NewLines(src)
 	require.Equal(t, 4, lines.Len())
 
@@ -189,7 +189,7 @@ func TestLine_Tokens(t *testing.T) {
 func TestLine_TokenSpan(t *testing.T) {
 	t.Parallel()
 
-	src := lexer.Tokenize("foo: |-\n  hello\n  world\nbar:   baz\n")
+	src := tokens.Tokenize("foo: |-\n  hello\n  world\nbar:   baz\n")
 	lines := line.NewLines(src)
 	require.Equal(t, 4, lines.Len())
 

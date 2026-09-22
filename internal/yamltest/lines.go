@@ -25,7 +25,7 @@ var (
 //   - Every token on a given line is non-nil and carries a Position
 //   - Every token on a given line has an identical line number in its Position
 //   - Every token on a given line has columns that are strictly increasing,
-//     ignoring tokens with an empty Origin or Column 0
+//     ignoring tokens with an empty Origin
 //
 // A line with no tokens is a placeholder, and ValidateLines skips its number.
 //
@@ -98,15 +98,11 @@ func ValidateLines(ls line.Lines) error {
 
 			// Check columns strictly increasing.
 			//
-			// Skip check for zero-width tokens (empty Origin) as they don't occupy
-			// column space.
-			//
-			// The lexer can produce tokens at the same position (e.g., empty block
-			// scalar content). It also gives Column 0 to multi-line block scalar
-			// content when other content follows. That zero is a marker rather
-			// than a column, so such a token neither fails the check nor moves
-			// the baseline.
-			if tk.Origin != "" && tk.Position.Column != 0 {
+			// Skip check for zero-width tokens (empty Origin) as they don't
+			// occupy column space. The lexer places such a token where the
+			// next one starts, as it does the empty content of a block
+			// scalar.
+			if tk.Origin != "" {
 				if tk.Position.Column <= prevCol {
 					return fmt.Errorf(
 						"line at index %d, token %d: column %d not greater than previous %d: %w",

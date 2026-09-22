@@ -148,8 +148,8 @@ func (s Segments) PartTokens() token.Tokens {
 
 // EndColumn returns the 1-indexed column just past the parts, which is the
 // largest Column plus the width of the part that starts there. A part whose
-// Column falls below 1, as a block scalar's continuation lines report,
-// counts as starting at column 1. Returns 0 when no part carries a position.
+// Column falls below 1, as a hand-built token may carry, counts as starting
+// at column 1. Returns 0 when no part carries a position.
 func (s Segments) EndColumn() int {
 	col := 0
 
