@@ -40,7 +40,7 @@
 // [Source], in this package, is the file. It owns the tokens from go-yaml,
 // lazily parses them into an AST with [Source.File], returns each YAML
 // document in the file as a [Document] from [Source.Documents], and binds
-// the errors it and its Documents produce to itself. [Document.Bind]
+// the errors it and its Documents produce to itself. [Node.Bind]
 // binds errors built elsewhere to that document, and [Source.Bind] binds
 // one to the document its location falls in.
 //
@@ -50,11 +50,11 @@
 // mark inserted and deleted lines, and overlays apply style spans for highlighting. A
 // Source hands out its lines from [Source.Lines] and a fresh view over them from
 // [Source.View], so the decoration added to one view reaches neither the Source nor
-// another view, and taking a view costs nothing. [Document.View] is the same view
+// another view, and taking a view costs nothing. [Node.View] is the same view
 // sliced to the lines of one document, with the line numbers they have in the file.
 // Every index and range a view takes is in the coordinates of its lines, and a slice
 // keeps them, so the ranges a [go.jacobcolvin.com/niceyaml/finder.Finder] or
-// [Document.Ranges] returns apply to a view of the whole source and to a slice of it
+// [Node.Ranges] returns apply to a view of the whole source and to a slice of it
 // alike.
 //
 // A view need not be a YAML document. Diffs, for example, interleave lines
@@ -76,7 +76,7 @@
 //
 // [SourceError] binds an error to its [Source] and to the document its
 // path resolves in. Every error a Source or one of its Documents produces
-// is one, [Document.Bind] binds an error built elsewhere to that
+// is one, [Node.Bind] binds an error built elsewhere to that
 // document, and [Source.Bind] binds one to the document its location
 // falls in: a position or a range to the document whose span holds it,
 // and a path to the one document of a source that holds one.
@@ -157,10 +157,10 @@
 //
 // Annotate finds each line by identity, since every view over a source
 // shares its lines, so the view may be a slice of the source, such as one
-// document of a file from [Document.Span], or a diff against another
+// document of a file from [Node.Span], or a diff against another
 // revision, where the marks land on the lines of this source alone.
 //
-// [Document.Ranges] returns the ranges a path covers, the same ones an
+// [Node.Ranges] returns the ranges a path covers, the same ones an
 // error at that path highlights, for a caller that marks a value on a view
 // without an error to bind.
 //
@@ -191,8 +191,10 @@
 //		}
 //	}
 //
-// [Document.Decode] runs validation on both sides of the decode. A
-// [Validator] passed with [WithValidator] checks the document before
+// A [Document] is its root [Node], embedded, so it decodes, validates,
+// and binds as a Node does, and a function that takes a Node takes
+// doc.Node. [Node.Decode] runs validation on both sides of the decode. A
+// [Validator] passed with [WithValidator] checks the node before
 // decoding, and after decoding a type implementing [SelfValidator]
 // validates itself. A [go.jacobcolvin.com/niceyaml/schema.Schema] is a
 // Validator that
@@ -202,7 +204,7 @@
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
 //
-// [Document.Validate] runs the same validators without decoding.
+// [Node.Validate] runs the same validators without decoding.
 //
 // A [SelfValidator] writes its paths from its own root, and [Rebase] puts
 // the error a nested value returns under the path of that value, so a
@@ -213,15 +215,16 @@
 //		return niceyaml.Rebase(c.Hours.Validate(), paths.Root().Child("hours"))
 //	}
 //
-// [Document.DecodeInto] runs the same pipeline on a value you already hold,
+// [Node.DecodeInto] runs the same pipeline on a value you already hold,
 // such as one pre-populated with defaults.
 //
-// [Document.At] returns a Document scoped to the node a path selects, and
-// the same pipeline then runs on that node. Decode reads one value without
+// [Node.At] returns a Node scoped to the node a path selects, and the
+// same pipeline then runs on that node. Decode reads one value without
 // decoding the whole document, a validator given to it checks the node,
 // and the paths in every error it returns or binds resolve from the node,
 // so a check written for a type reports the same lines whether the type is
-// the whole document or a value inside one:
+// the whole document or a value inside one. The Node reaches the document
+// it belongs to through [Node.Document]:
 //
 //	hours, err := doc.At(paths.Root().Child("spec", "hours"))
 //	if err != nil {
@@ -233,7 +236,13 @@
 //		return err
 //	}
 //
-//	return hours.Bind(check(h))
+//	if err := hours.Bind(checkHours(&h)); err != nil {
+//		return err
+//	}
+//
+// A check the caller runs on the value, such as one that needs a registry
+// of known names, binds its result through [Node.Bind], so an [Error]
+// with a path resolves from the node the value came from.
 //
 // All three return errors bound to the source, so a path that selects
 // nothing, a decoding failure, or a validator's [Error] renders its

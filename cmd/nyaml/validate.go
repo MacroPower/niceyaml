@@ -82,7 +82,7 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) er
 	var errs []error
 
 	for _, doc := range docs {
-		err = reg.Validate(ctx, doc)
+		err = doc.Validate(ctx, reg)
 		if err != nil {
 			errs = append(errs, err)
 		}

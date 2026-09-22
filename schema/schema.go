@@ -116,10 +116,11 @@ func FromJSONSchema(v *jsonschema.Validator) *Schema {
 // checks a document against the schema and reports constraint violations
 // as [*niceyaml.Error] values that carry the YAML path to each failing
 // location for [go.jacobcolvin.com/niceyaml/printer.Printer] to display.
-// [Schema.Validate] checks a document, or the node a document from
-// [niceyaml.Document.At] is scoped to, and [Schema.ValidateValue] checks
+// [Schema.Validate] checks a node, which is the whole document for the
+// root [niceyaml.Node] of a [niceyaml.Document] and one value inside it
+// for a Node from [niceyaml.Node.At], and [Schema.ValidateValue] checks
 // decoded data, such as one value taken from a document with a scoped
-// [niceyaml.Document.Decode] into any.
+// [niceyaml.Node.Decode] into any.
 //
 // A Schema is the validator for a program that holds one schema and
 // compiles it itself. It is also a [Resolver] that names itself for every
@@ -165,26 +166,26 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Document) (Ref, error) {
 	return s.Ref(), nil
 }
 
-// Validate implements [niceyaml.Validator]. It decodes doc to any and
+// Validate implements [niceyaml.Validator]. It decodes n to any and
 // checks the result as [Schema.ValidateValue] does, so
 // [niceyaml.WithValidator] runs the schema before a decode and
-// [niceyaml.Document.Validate] runs it on its own. A document from
-// [niceyaml.Document.At] decodes to the node it is scoped to, so the
-// schema checks that node and a violation's path resolves from it. A
-// decoding error comes back bound to the source, and a violation as an
-// unbound [*niceyaml.Error], which the document binds.
+// [niceyaml.Node.Validate] runs it on its own. A Node from
+// [niceyaml.Node.At] decodes to the node it selects, so the schema checks
+// that node and a violation's path resolves from it. A decoding error
+// comes back bound to the source, and a violation as an unbound
+// [*niceyaml.Error], which the node binds.
 //
-// Holding the document lets Validate locate a violation at a key the
-// decoder spells differently from the source, such as the hexadecimal
-// 0x10, which no path names. Such a violation carries the position of the
-// key or value it found rather than a path.
-func (s *Schema) Validate(ctx context.Context, doc *niceyaml.Document) error {
-	data, err := doc.Decode[any](ctx)
+// Holding the node lets Validate locate a violation at a key the decoder
+// spells differently from the source, such as the hexadecimal 0x10,
+// which no path names. Such a violation carries the position of the key
+// or value it found rather than a path.
+func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
+	data, err := n.Decode[any](ctx)
 	if err != nil {
 		return err
 	}
 
-	return s.validate(ctx, data, doc)
+	return s.validate(ctx, data, n)
 }
 
 // ValidateValue checks data, the decoded form of a YAML value, against the
@@ -211,11 +212,11 @@ func (s *Schema) ValidateValue(ctx context.Context, data any) error {
 	return s.validate(ctx, data, nil)
 }
 
-// validate is [Schema.ValidateValue] with the document data was decoded
-// from, which [Schema.Validate] has and a caller of ValidateValue does not.
-// A violation at a key the decoder spells differently from the source, such
-// as the hexadecimal 0x10, needs the document to point at the failing line.
-func (s *Schema) validate(ctx context.Context, data any, doc *niceyaml.Document) error {
+// validate is [Schema.ValidateValue] with the node data was decoded from,
+// which [Schema.Validate] has and a caller of ValidateValue does not. A
+// violation at a key the decoder spells differently from the source, such
+// as the hexadecimal 0x10, needs the node to point at the failing line.
+func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) error {
 	err := s.compiled.Validate(ctx, normalizeJSON(data))
 	if err == nil {
 		return nil
@@ -232,7 +233,7 @@ func (s *Schema) validate(ctx context.Context, data any, doc *niceyaml.Document)
 	// A structured validation failure carries per-location paths; convert it to
 	// a niceyaml.Error. Anything else is an unexpected internal failure.
 	if ve, ok := errors.AsType[*jsonschema.ValidationError](err); ok {
-		return newValidationError(ve, doc)
+		return newValidationError(ve, n)
 	}
 
 	return fmt.Errorf("%w: %w", ErrValidate, err)
@@ -247,19 +248,19 @@ func (s *Schema) validate(ctx context.Context, data any, doc *niceyaml.Document)
 // [niceyaml.Error.Path] reports it. Several failures become a count summary
 // with no path of its own; each nested error carries the path to one
 // failing location.
-func newValidationError(ve *jsonschema.ValidationError, doc *niceyaml.Document) *niceyaml.Error {
+func newValidationError(ve *jsonschema.ValidationError, n *niceyaml.Node) *niceyaml.Error {
 	leaves := ve.Leaves()
 
 	switch len(leaves) {
 	case 0:
 		return niceyaml.NewError(ve.Message)
 	case 1:
-		return leafError(leaves[0], doc)
+		return leafError(leaves[0], n)
 	}
 
 	causes := make([]error, 0, len(leaves))
 	for _, leaf := range leaves {
-		causes = append(causes, leafError(leaf, doc))
+		causes = append(causes, leafError(leaf, n))
 	}
 
 	return niceyaml.NewError(
@@ -275,11 +276,11 @@ func newValidationError(ve *jsonschema.ValidationError, doc *niceyaml.Document) 
 //
 // A path built from a key the decoder spells differently from the source,
 // such as 0x10 decoding to the member name 16, names nothing the document
-// holds. The failure then carries the position the key walk in doc finds
-// instead, so the printer still highlights the failing line. Without doc,
+// holds. The failure then carries the position the key walk in n finds
+// instead, so the printer still highlights the failing line. Without n,
 // which a [Schema.ValidateValue] caller does not hand over, the path stays
 // as it is.
-func leafError(leaf *jsonschema.ValidationError, doc *niceyaml.Document) *niceyaml.Error {
+func leafError(leaf *jsonschema.ValidationError, n *niceyaml.Node) *niceyaml.Error {
 	segments := leaf.InstanceSegments()
 	path := buildTargetPath(segments)
 
@@ -289,7 +290,7 @@ func leafError(leaf *jsonschema.ValidationError, doc *niceyaml.Document) *niceya
 
 	locate := niceyaml.AtPath(path)
 
-	if pos, ok := decodedPosition(doc, path, segments, leaf.TargetsKey()); ok {
+	if pos, ok := decodedPosition(n, path, segments, leaf.TargetsKey()); ok {
 		locate = niceyaml.AtPosition(pos)
 	}
 
@@ -321,24 +322,24 @@ func buildTargetPath(segments []jsonschema.Segment) paths.Path {
 // name instead, and reports the key of the member when key is set, as it
 // is for a path from [paths.Path.Key], and its value otherwise.
 //
-// Reports false without a document, for a path that resolves as it is, and
+// Reports false without a node, for a path that resolves as it is, and
 // for segments the walk cannot follow, such as a member a merge key brought
 // in, which the document holds nowhere.
 func decodedPosition(
-	doc *niceyaml.Document, path paths.Path, segments []jsonschema.Segment, key bool,
+	n *niceyaml.Node, path paths.Path, segments []jsonschema.Segment, key bool,
 ) (position.Position, bool) {
-	if doc == nil {
+	if n == nil {
 		return position.Position{}, false
 	}
 
-	// The path and the segments are written from the node the document is
-	// scoped to, as the data the schema checked was decoded from it.
-	_, err := doc.At(path)
+	// The path and the segments are written from the node, as the data
+	// the schema checked was decoded from it.
+	_, err := n.At(path)
 	if err == nil {
 		return position.Position{}, false
 	}
 
-	root, err := doc.Node()
+	root, err := n.AST()
 	if err != nil {
 		return position.Position{}, false
 	}

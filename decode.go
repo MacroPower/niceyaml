@@ -21,9 +21,12 @@ import (
 
 // SelfValidator is implemented by types that validate themselves.
 //
-// [Document.Decode] and [Document.DecodeInto] call Validate
+// [Node.Decode] and [Node.DecodeInto] call Validate
 // after decoding into a value that implements it, unless
-// [WithSelfValidation] switches that off.
+// [WithSelfValidation] switches that off. A check that belongs to the
+// caller rather than the type, such as one that needs a registry of
+// known names, runs on the decoded value after Decode returns, and
+// [Node.Bind] binds its result to the document the value came from.
 //
 // An [*Error] the value returns writes its path from the value's own
 // root, so a type that delegates to a field's Validate puts the result
@@ -36,21 +39,23 @@ type SelfValidator interface {
 	Validate() error
 }
 
-// Validator is implemented by types that validate a whole [*Document]
-// before it decodes, such as a JSON schema or a schema registry that picks
-// the schema from the document's content or file path.
+// Validator is implemented by types that validate a [*Node] before it
+// decodes, such as a JSON schema or a schema registry that picks the
+// schema from the document's content or file path.
 //
-// Pass one to [Document.Decode] with [WithValidator], or run one on its own
-// with [Document.Validate]. The document is the scope that runs the
-// validator: the whole document, or the node a Document from
-// [Document.At] is scoped to, so a validator given to a scoped decode
-// checks that node and its paths resolve from it. A validator that checks
-// the decoded data decodes the document itself, and the context carries
-// cancellation and deadlines to validators doing cancellable work, such as
-// remote schema reference resolution:
+// Pass one to [Node.Decode] with [WithValidator], or run one on its own
+// with [Node.Validate]. The Node is the scope that runs the validator: the
+// root of a whole document, or the node a Node from [Node.At] selects, so
+// a validator given to a scoped decode checks that node and its paths
+// resolve from it. A validator that needs the whole document, as a
+// registry that picks a schema by file path does, reaches it through
+// [Node.Document]. A validator that checks the decoded data decodes the
+// node itself, and the context carries cancellation and deadlines to
+// validators doing cancellable work, such as remote schema reference
+// resolution:
 //
-//	func (s *Schema) Validate(ctx context.Context, doc *niceyaml.Document) error {
-//		data, err := doc.Decode[any](ctx)
+//	func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
+//		data, err := n.Decode[any](ctx)
 //		if err != nil {
 //			return err
 //		}
@@ -59,22 +64,22 @@ type SelfValidator interface {
 //	}
 //
 // A validator that knows a location returns an unbound [*Error], and the
-// Document binds it to the source with itself as the document its path
-// resolves in. A validator that binds an error itself does so through
-// [Document.Bind], since the Document leaves a bound error as it is.
+// Node binds it to the source with itself as the scope its path resolves
+// from. A validator that binds an error itself does so through
+// [Node.Bind], since the Node leaves a bound error as it is.
 //
 // See [ValidatorFunc], [go.jacobcolvin.com/niceyaml/schema.Schema],
 // and [go.jacobcolvin.com/niceyaml/schema.Registry] for
 // implementations.
 type Validator interface {
-	Validate(ctx context.Context, doc *Document) error
+	Validate(ctx context.Context, n *Node) error
 }
 
 // ValidatorFunc adapts a function to the [Validator] interface.
 //
 //	kindPath := paths.Root().Child("kind")
-//	known := niceyaml.ValidatorFunc(func(ctx context.Context, doc *niceyaml.Document) error {
-//		node, err := doc.At(kindPath)
+//	known := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+//		node, err := n.At(kindPath)
 //		if err != nil {
 //			return err
 //		}
@@ -90,11 +95,11 @@ type Validator interface {
 //
 //		return nil
 //	})
-type ValidatorFunc func(ctx context.Context, doc *Document) error
+type ValidatorFunc func(ctx context.Context, n *Node) error
 
 // Validate implements [Validator].
-func (f ValidatorFunc) Validate(ctx context.Context, doc *Document) error {
-	return f(ctx, doc)
+func (f ValidatorFunc) Validate(ctx context.Context, n *Node) error {
+	return f(ctx, n)
 }
 
 // newDocuments creates one [*Document] per YAML document of file, the AST
@@ -111,9 +116,7 @@ func newDocuments(src *Source, file *ast.File) []*Document {
 	spans := documentSpans(groups, src.lines.Len())
 
 	for i, doc := range docs {
-		doc.source = src
-		doc.content = doc.tokens
-		doc.span = spans[i]
+		doc.Node = &Node{source: src, doc: doc, content: doc.tokens, span: spans[i]}
 		doc.index = i
 		doc.preamble = preambleLen(doc.tokens)
 	}
@@ -143,7 +146,7 @@ func foldPreambles(nodes []*ast.DocumentNode, groups []token.Tokens) []*Document
 			continue
 		}
 
-		docs = append(docs, &Document{doc: node, tokens: slices.Concat(pending, groups[i])})
+		docs = append(docs, &Document{root: node, tokens: slices.Concat(pending, groups[i])})
 		pending = nil
 	}
 
@@ -153,7 +156,7 @@ func foldPreambles(nodes []*ast.DocumentNode, groups []token.Tokens) []*Document
 		last.tokens = append(last.tokens, pending...)
 
 	case len(docs) == 0 && len(nodes) > 0:
-		docs = append(docs, &Document{doc: nodes[0], tokens: pending})
+		docs = append(docs, &Document{root: nodes[0], tokens: pending})
 	}
 
 	return docs
@@ -326,15 +329,18 @@ func documentOffset(doc *ast.DocumentNode) (int, bool) {
 	return 0, false
 }
 
-// Document decodes and validates a single YAML document.
+// Document is a single YAML document of a [Source]: the [*Node] at its
+// root, which decodes and validates it, together with what describes the
+// document as a whole, such as its index in the file and its preamble.
 //
-// [Document.Decode] returns a new value and
-// [Document.DecodeInto] fills one the caller already holds, such as
-// one pre-populated with defaults. Both run the same pipeline. Each
-// [Validator] given with [WithValidator] checks the document before
-// decoding, and a value that implements [SelfValidator] validates itself after,
-// unless [WithSelfValidation] switches that off. [Document.Validate] runs
-// the first step on its own.
+// The root Node is embedded, so a Document decodes, validates, and binds
+// as a Node does. [Node.Decode] returns a new value and [Node.DecodeInto]
+// fills one the caller already holds, such as one pre-populated with
+// defaults. Both run the same pipeline. Each [Validator] given with
+// [WithValidator] checks the document before decoding, and a value that
+// implements [SelfValidator] validates itself after, unless
+// [WithSelfValidation] switches that off. [Node.Validate] runs the first
+// step on its own.
 //
 //	for _, doc := range docs {
 //		config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(validator))
@@ -345,55 +351,92 @@ func documentOffset(doc *ast.DocumentNode) (int, bool) {
 //
 // A source that holds one document hands it out from [Source.Document].
 //
-// A Document is a scope. [Document.At] returns one scoped to the node a
-// path selects, and every method of that Document reads and resolves from
-// the node. Decode decodes the node alone, which reads one value without
-// decoding the whole document, such as a discriminator field that routes
-// the document, and Bind resolves the paths in an error from the node, so
-// a check written for the type of that value reports the right lines.
+// [Node.At] returns a Node scoped to the node a path selects, and every
+// method of that Node reads and resolves from it. Decode decodes the node
+// alone, which reads one value without decoding the whole document, such
+// as a discriminator field that routes the document, and Bind resolves
+// the paths in an error from the node, so a check written for the type
+// of that value reports the right lines. A Node reaches its Document
+// through [Node.Document], and a Document is its root Node as the Node
+// field, so a function that takes a Node takes doc.Node.
 //
-// A Document holds the [*Source] it came from, and every decoding method
-// binds the [Error] values it produces to that source, so the errors it
-// returns carry a [SourceError] that renders the offending lines.
+// [Document.Root], [Document.Index], [Document.Preamble], and
+// [Document.FilePath] describe the document as a whole, whatever Node a
+// caller holds.
 //
-// Receive instances from [Source.Documents] or [Document.At].
+// Receive instances from [Source.Documents], [Source.Document], or
+// [Node.Document].
 type Document struct {
-	source *Source
-	doc    *ast.DocumentNode
-	// The tokens of the whole document, whatever the scope.
+	// Node is the root of the document, which decodes, validates, and
+	// binds it.
+	*Node
+
+	root *ast.DocumentNode
+	// The tokens of the whole document.
 	tokens token.Tokens
-	// The tokens of the node the scope selects: tokens for a whole
-	// document, and a sub-slice of them for a Document from At.
-	content token.Tokens
-	// The scope: the path from the document root to the node the Document
-	// resolves from, which is the root for a whole document.
-	base paths.Path
-	// The lines of the source that the node the scope selects covers.
-	span  position.Span
-	index int
+	index  int
 	// The number of tokens at the start of tokens before the content.
 	preamble int
 }
 
-// Root returns the [*ast.DocumentNode] of the whole document, whatever
-// node the Document is scoped to. [Document.Node] returns the node the
-// scope selects, and [Document.Path] is the path from this root to it.
-func (dd *Document) Root() *ast.DocumentNode {
-	return dd.doc
+// Node is a scope in a YAML document: the node a path selects, or the
+// root of the document, together with the [*Source] and the [*Document]
+// it belongs to. Every method reads and resolves from the node, so
+// [Node.Decode] decodes it alone, [Node.Validate] runs a [Validator] on
+// it, and [Node.Bind] resolves the paths of an error from it, so a check
+// written for the type of a value reports the same lines whether the
+// value is the whole document or one inside it.
+//
+// A Node holds the Source it came from, and every decoding method binds
+// the [Error] values it produces to that source, so the errors it returns
+// carry a [SourceError] that renders the offending lines.
+//
+// Receive instances from [Node.At], or from a [Document], whose Node
+// field is the root Node of the document.
+type Node struct {
+	source *Source
+	// The enclosing document.
+	doc *Document
+	// The tokens of the node: the tokens of the whole document for its
+	// root, and a sub-slice of them for a Node from At.
+	content token.Tokens
+	// The scope: the path from the document root to the node, which is
+	// the root for a whole document.
+	base paths.Path
+	// The lines of the source that the node covers.
+	span position.Span
 }
 
-// Node returns the node the Document is scoped to, resolved in the
-// document as [Document.Decode] and the other scoped methods resolve it:
-// the body of the whole document for a Document from [Source.Documents],
-// and the node its path selects for one from [Document.At]. The text of
-// any node, including a mapping or a sequence, is its String method:
+// Root returns the [*ast.DocumentNode] of the whole document. [Node.AST]
+// returns the node a Node selects, and [Node.Path] is the path from this
+// root to it.
+func (dd *Document) Root() *ast.DocumentNode {
+	return dd.root
+}
+
+// Document returns the [*Document] the Node belongs to, so a Node from
+// [Node.At] reaches what describes the whole document, such as its file
+// path. A nil Node belongs to none.
+func (n *Node) Document() *Document {
+	if n == nil {
+		return nil
+	}
+
+	return n.doc
+}
+
+// AST returns the [ast.Node] the Node selects, resolved in the document
+// as [Node.Decode] and the other methods resolve it: the body of the
+// whole document for the root Node, and the node its path selects for
+// one from [Node.At]. The text of any node, including a mapping or a
+// sequence, is its String method:
 //
 //	scoped, err := doc.At(path)
 //	if err != nil {
 //		return err
 //	}
 //
-//	node, err := scoped.Node()
+//	node, err := scoped.AST()
 //	if err != nil {
 //		return err
 //	}
@@ -401,30 +444,25 @@ func (dd *Document) Root() *ast.DocumentNode {
 //	fmt.Println(node.String())
 //
 // The body is what the parser built: nil for an empty document, and a
-// comment group for one holding only comments. Node returns either
+// comment group for one holding only comments. AST returns either
 // without an error, as such a document decodes to nothing.
-func (dd *Document) Node() (ast.Node, error) {
-	if dd.base.IsRoot() {
-		return dd.doc.Body, nil
+func (n *Node) AST() (ast.Node, error) {
+	if n.base.IsRoot() {
+		return n.doc.root.Body, nil
 	}
 
-	node, err := dd.base.Node(dd.doc)
+	node, err := n.base.Node(n.doc.root)
 
-	return node, dd.Bind(err)
+	return node, n.Bind(err)
 }
 
-// At returns a [*Document] scoped to the node path selects, with path
-// resolving from the scope of the receiver. The scoped Document shares
-// the source and the document with the receiver. [Document.Root],
-// [Document.Index], [Document.Preamble], [Document.FilePath], and
-// [Document.Source] describe the enclosing document as the receiver does,
-// while [Document.Node], [Document.Span], [Document.Tokens],
-// [Document.Decode], [Document.DecodeInto], [Document.Validate],
-// [Document.Bind], and [Document.Ranges] read and resolve from the node.
-// A validator given to a scoped decode checks the node, and a path in an
-// error it or the decoded value reports resolves from the node, so a
-// check written for a type reports the same lines whether the type is
-// the whole document or a value inside one:
+// At returns a [*Node] scoped to the node path selects, with path
+// resolving from the receiver. The Node shares the source and the
+// document with the receiver, and reaches the document through
+// [Node.Document]. A validator given to a scoped decode checks the node,
+// and a path in an error it or the decoded value reports resolves from
+// the node, so a check written for a type reports the same lines whether
+// the type is the whole document or a value inside one:
 //
 //	hours, err := doc.At(paths.Root().Child("spec", "hours"))
 //	if err != nil {
@@ -461,19 +499,18 @@ func (dd *Document) Node() (ast.Node, error) {
 //
 // A node whose tokens carry no position covers no lines and holds no
 // tokens.
-func (dd *Document) At(path paths.Path) (*Document, error) {
-	c := *dd
-	c.base = dd.base.Join(path)
+func (n *Node) At(path paths.Path) (*Node, error) {
+	c := *n
+	c.base = n.base.Join(path)
 
-	node, err := c.base.Node(dd.doc)
+	node, err := c.base.Node(n.doc.root)
 	if err != nil {
-		// Bind to the receiver, a Document that exists, rather than to
-		// the copy, whose scope moved to a path that resolves to no
-		// node.
-		return nil, dd.Bind(err)
+		// Bind to the receiver, a Node that exists, rather than to the
+		// copy, whose scope moved to a path that resolves to no node.
+		return nil, n.Bind(err)
 	}
 
-	c.span, c.content = dd.extent(node)
+	c.span, c.content = n.extent(node)
 
 	return &c, nil
 }
@@ -483,7 +520,7 @@ func (dd *Document) At(path paths.Path) (*Document, error) {
 // last, in source order, and the lines from the one the first starts on
 // through the one the last ends on. A node whose tokens carry no position
 // covers no lines and holds no tokens.
-func (dd *Document) extent(node ast.Node) (position.Span, token.Tokens) {
+func (n *Node) extent(node ast.Node) (position.Span, token.Tokens) {
 	first, last := tokenBounds(node)
 	if first == nil || last == nil {
 		return position.Span{}, nil
@@ -491,7 +528,7 @@ func (dd *Document) extent(node ast.Node) (position.Span, token.Tokens) {
 
 	var tks token.Tokens
 
-	for _, tk := range dd.tokens {
+	for _, tk := range n.doc.tokens {
 		if tk == nil || tk.Position == nil {
 			continue
 		}
@@ -512,11 +549,11 @@ func (dd *Document) extent(node ast.Node) (position.Span, token.Tokens) {
 	// through the line breaks and the indentation of the next line, which
 	// the lexer folds into a scalar, so the ranges of the text would put a
 	// sibling's line into the span.
-	for _, r := range dd.source.lines.ContentRanges(tks[len(tks)-1]) {
+	for _, r := range n.source.lines.ContentRanges(tks[len(tks)-1]) {
 		end = max(end, r.LastLine())
 	}
 
-	total := dd.source.lines.Len()
+	total := n.source.lines.Len()
 
 	return position.NewSpan(min(max(start, 0), total), min(end+1, total)), tks
 }
@@ -584,41 +621,38 @@ func (b *boundsFinder) consider(tk *token.Token) {
 	}
 }
 
-// Path returns the scope of the [Document]: the path from the document
-// root to the node the Document resolves from, which is [paths.Root] for
-// a Document from [Source.Documents] and the joined paths for one from
-// [Document.At].
-func (dd *Document) Path() paths.Path {
-	return dd.base
+// Path returns the scope of the [Node]: the path from the document root
+// to the node, which is [paths.Root] for the root Node of a [Document]
+// and the joined paths for one from [Node.At].
+func (n *Node) Path() paths.Path {
+	return n.base
 }
 
-// Source returns the [*Source] the document came from.
-func (dd *Document) Source() *Source {
-	return dd.source
+// Source returns the [*Source] the node came from.
+func (n *Node) Source() *Source {
+	return n.source
 }
 
-// Index returns the 0-indexed position of the enclosing document within
-// the file, whatever node the Document is scoped to.
+// Index returns the 0-indexed position of the document within the file.
 func (dd *Document) Index() int {
 	return dd.index
 }
 
-// Tokens returns the tokens of the node the Document is scoped to, with
-// the positions they have in the source. For a whole document they are
-// its preamble, its content, and, when no document follows, the comments
-// after a "..." marker that ends it, which otherwise become the preamble
-// of the next document. They are nil when no token anchors the document,
-// such as one with neither a header nor a body. For a Document from
-// [Document.At] they run from the first token under the node through the
-// last, comments between them included, and are nil when the scope
-// selects nothing. The slice is a copy, so reordering it reaches nothing,
-// while the tokens themselves are shared and read-only.
-func (dd *Document) Tokens() token.Tokens {
-	return slices.Clone(dd.content)
+// Tokens returns the tokens of the node, with the positions they have in
+// the source. For the root of a document they are its preamble, its
+// content, and, when no document follows, the comments after a "..."
+// marker that ends it, which otherwise become the preamble of the next
+// document. They are nil when no token anchors the document, such as one
+// with neither a header nor a body. For a Node from [Node.At] they run
+// from the first token under the node through the last, comments between
+// them included, and are nil when the scope selects nothing. The slice
+// is a copy, so reordering it reaches nothing, while the tokens
+// themselves are shared and read-only.
+func (n *Node) Tokens() token.Tokens {
+	return slices.Clone(n.content)
 }
 
-// Preamble returns the tokens of the enclosing document before its
-// content, whatever node the Document is scoped to: the
+// Preamble returns the tokens of the document before its content: the
 // comments and %YAML or %TAG directives above its "---" header, the header
 // itself, and the comments between the header and the first token of the
 // content. The parser cuts the tokens above the header off as a node of
@@ -627,7 +661,7 @@ func (dd *Document) Tokens() token.Tokens {
 // header is in the preamble of the document it describes. A document
 // without content, such as one holding comments alone, is all preamble.
 // The slice is a copy, and the tokens are shared and read-only, as for
-// [Document.Tokens].
+// [Node.Tokens].
 func (dd *Document) Preamble() token.Tokens {
 	return slices.Clone(dd.tokens[:dd.preamble])
 }
@@ -638,35 +672,34 @@ func (dd *Document) FilePath() string {
 	return dd.source.FilePath()
 }
 
-// Span returns the lines of [Source.Lines] that the node the Document is
-// scoped to covers. A whole document covers the lines from the one its
-// first token starts on to the one before the next document starts, or
-// to the end of the source for the last document. The first document also
-// covers the lines above its first token, so the spans of a source cover
-// every one of its lines. A document after the first with no tokens covers
-// no lines.
+// Span returns the lines of [Source.Lines] that the node covers. A whole
+// document covers the lines from the one its first token starts on to the
+// one before the next document starts, or to the end of the source for
+// the last document. The first document also covers the lines above its
+// first token, so the spans of a source cover every one of its lines. A
+// document after the first with no tokens covers no lines.
 //
-// A Document from [Document.At] covers the lines from the one the first
-// token under its node starts on through the one the last token ends on.
-// The node of a mapping entry is its value, so the line of the key is in
-// the span only when the value starts on it, and a scope from
+// A Node from [Node.At] covers the lines from the one the first token
+// under its node starts on through the one the last token ends on. The
+// node of a mapping entry is its value, so the line of the key is in the
+// span only when the value starts on it, and a scope from
 // [paths.Path.Key] covers the key. A scope that selects nothing covers no
 // lines.
 //
-// [Document.View] returns a view of the source sliced to the span, so a
-// caller that renders the document need not slice one itself. The span
+// [Node.View] returns a view of the source sliced to the span, so a
+// caller that renders the node need not slice one itself. The span
 // slices any other view over the source, such as one that carries
 // decoration already:
 //
 //	fmt.Println(p.Print(view.Slice(doc.Span())))
-func (dd *Document) Span() position.Span {
-	return dd.span
+func (n *Node) Span() position.Span {
+	return n.span
 }
 
 // View returns a new [*line.View] over the lines of [Source.Lines] that
-// the Document covers, [Document.Span], with the line numbers they have in
-// the file. A document of a file that holds several, or the node a
-// Document from [Document.At] is scoped to, renders on its own:
+// the node covers, [Node.Span], with the line numbers they have in the
+// file. A document of a file that holds several, or the node a Node from
+// [Node.At] selects, renders on its own:
 //
 //	fmt.Println(p.Print(doc.View()))
 //
@@ -675,14 +708,14 @@ func (dd *Document) Span() position.Span {
 // nor another view. The view shares its lines with every view over the
 // source, so a bound error from the document marks it through
 // [SourceError.Annotate] as it marks a view of the whole source.
-func (dd *Document) View() *line.View {
-	return dd.source.View().Slice(dd.span)
+func (n *Node) View() *line.View {
+	return n.source.View().Slice(n.span)
 }
 
 // Ranges returns the ranges the node at path covers, one per line, without
 // the spaces around its content: the ranges [SourceError.Excerpt] highlights
 // for an [Error] built with [AtPath] at that path. The path resolves
-// from the scope of the Document, as it does in such an Error. A block
+// from the scope of the Node, as it does in such an Error. A block
 // scalar covers its indicator, and a path from [paths.Path.Key] covers
 // the key of the entry rather than its value. The ranges highlight the
 // value on a view of the source:
@@ -699,13 +732,13 @@ func (dd *Document) View() *line.View {
 // describes, bound to the source, and a path whose token carries no
 // position returns an error wrapping [ErrNoLocation]. Returns nil when the
 // value holds no content on any line.
-func (dd *Document) Ranges(path paths.Path) (position.Ranges, error) {
-	pos, err := dd.position(path)
+func (n *Node) Ranges(path paths.Path) (position.Ranges, error) {
+	pos, err := n.position(path)
 	if err != nil {
-		return nil, dd.Bind(err)
+		return nil, n.Bind(err)
 	}
 
-	lines := dd.source.lines
+	lines := n.source.lines
 
 	return lines.ContentRanges(lines.TokenAt(pos)), nil
 }
@@ -714,8 +747,8 @@ func (dd *Document) Ranges(path paths.Path) (position.Ranges, error) {
 // document, through [paths.Path.Token], with path resolving from the
 // scope. An error from it names the path already and comes back as it is,
 // and a token without a position is [ErrNoLocation].
-func (dd *Document) position(path paths.Path) (position.Position, error) {
-	tk, err := dd.base.Join(path).Token(dd.doc)
+func (n *Node) position(path paths.Path) (position.Position, error) {
+	tk, err := n.base.Join(path).Token(n.doc.root)
 	if err != nil {
 		//nolint:wrapcheck // The paths error already names the path.
 		return position.Position{}, err
@@ -728,10 +761,9 @@ func (dd *Document) position(path paths.Path) (position.Position, error) {
 	return position.NewFromToken(tk), nil
 }
 
-// Validate runs each validator on the document in the order given and
-// stops at the first that fails. It is the validation step of
-// [Document.Decode] on its own, for a caller that checks a document without
-// decoding it:
+// Validate runs each validator on the node in the order given and stops
+// at the first that fails. It is the validation step of [Node.Decode] on
+// its own, for a caller that checks a document without decoding it:
 //
 //	for _, doc := range docs {
 //		if err := doc.Validate(ctx, reg); err != nil {
@@ -743,13 +775,13 @@ func (dd *Document) position(path paths.Path) (position.Position, error) {
 // [WithDecodeOptions] set on the source, which belong to a decode.
 //
 // An error from a validator comes back bound to the source as a
-// [SourceError] through [Document.Bind], so an [*Error] renders its
+// [SourceError] through [Node.Bind], so an [*Error] renders its
 // location and any other error names the source.
-func (dd *Document) Validate(ctx context.Context, validators ...Validator) error {
+func (n *Node) Validate(ctx context.Context, validators ...Validator) error {
 	for _, dv := range validators {
-		err := dv.Validate(ctx, dd)
+		err := dv.Validate(ctx, n)
 		if err != nil {
-			return dd.Bind(err)
+			return n.Bind(err)
 		}
 	}
 
@@ -763,11 +795,12 @@ func (dd *Document) Validate(ctx context.Context, validators ...Validator) error
 // [SourceError.Excerpt] returns the excerpt as a view for the caller to
 // render.
 //
-// The Document methods bind the errors they return already. Bind is for
-// an error built elsewhere, such as a validator's [*Error] with a path, or
+// The Node methods bind the errors they return already. Bind is for an
+// error built elsewhere, such as a validator's [*Error] with a path, or
 // one from a check the caller runs on a value it took from the document.
-// Such an error writes its path from the value, so the Document scoped
-// to that value with [Document.At] binds it:
+// Such an error writes its path from the value, so the Node scoped to
+// that value with [Node.At] binds it, and a check written for a type
+// takes a pointer to it and goes with any decode of that type:
 //
 //	item, err := doc.At(path)
 //	if err != nil {
@@ -822,11 +855,11 @@ func (dd *Document) Validate(ctx context.Context, validators ...Validator) error
 // idempotent. A located Error above a binding binds anew at its own
 // location, with the position the inner binding resolved kept in its
 // message. Bind never modifies err.
-func (dd *Document) Bind(err error) error {
-	return bindTree(err, binder{src: dd.source, doc: dd})
+func (n *Node) Bind(err error) error {
+	return bindTree(err, binder{src: n.source, node: n})
 }
 
-// DecodeOption configures [Document.Decode] and [Document.DecodeInto].
+// DecodeOption configures [Node.Decode] and [Node.DecodeInto].
 // [WithDecodeOptions] sets the ones every decode of a [Source] starts
 // from.
 //
@@ -860,19 +893,19 @@ func newDecodeConfig(defaults, opts []DecodeOption) decodeConfig {
 	return cfg
 }
 
-// decodingKey is the context key under which [Document.DecodeInto] marks
+// decodingKey is the context key under which [Node.DecodeInto] marks
 // the context it hands to validators with the [*Source] being decoded.
 type decodingKey struct{}
 
 // defaults returns the [DecodeOption] values [WithDecodeOptions] set on the
-// source of the document, or none when ctx marks a decode of that source
+// source of the node, or none when ctx marks a decode of that source
 // already, which is a validator of one decoding the document for itself.
-func (dd *Document) defaults(ctx context.Context) []DecodeOption {
-	if src, ok := ctx.Value(decodingKey{}).(*Source); ok && src == dd.source {
+func (n *Node) defaults(ctx context.Context) []DecodeOption {
+	if src, ok := ctx.Value(decodingKey{}).(*Source); ok && src == n.source {
 		return nil
 	}
 
-	return dd.source.decodeDefaults
+	return n.source.decodeDefaults
 }
 
 // decodeOptions returns the go-yaml options for one decode: the escape
@@ -928,8 +961,8 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 	}
 }
 
-// DecodeInto validates and decodes the document, or the node a Document
-// from [Document.At] is scoped to, into v, which must be a non-nil
+// DecodeInto validates and decodes the node, which is the whole document
+// for the root Node of a [Document], into v, which must be a non-nil
 // pointer. Any other v returns [ErrDecodeTarget] before anything runs.
 //
 // The options [WithDecodeOptions] set on the source apply first, then
@@ -944,38 +977,34 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 // An alias inside the node resolves against the anchors of the whole
 // document, so a value that refers to an anchor defined outside it decodes
 // as it does in the whole document.
-func (dd *Document) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
+func (n *Node) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
 	err := checkDecodeTarget(v)
 	if err != nil {
 		return err
 	}
 
-	node, err := dd.Node()
+	node, err := n.AST()
 	if err != nil {
 		return err
 	}
 
-	cfg := newDecodeConfig(dd.defaults(ctx), opts)
+	cfg := newDecodeConfig(n.defaults(ctx), opts)
 
 	// A validator that decodes the document for itself decodes under this
 	// context, which tells that decode to leave the defaults of the source
 	// out, so a default validator does not run itself again.
-	err = dd.Validate(context.WithValue(ctx, decodingKey{}, dd.source), cfg.validators...)
+	err = n.Validate(context.WithValue(ctx, decodingKey{}, n.source), cfg.validators...)
 	if err != nil {
 		return err
 	}
 
-	err = dd.decodeNode(ctx, node, v, cfg.decodeOptions())
+	err = n.decodeNode(ctx, node, v, cfg.decodeOptions())
 	if err != nil {
 		return err
 	}
 
-	if !cfg.selfValidation {
-		return nil
-	}
-
-	if validator, ok := v.(SelfValidator); ok {
-		return dd.Bind(validator.Validate())
+	if validator, ok := v.(SelfValidator); ok && cfg.selfValidation {
+		return n.Bind(validator.Validate())
 	}
 
 	return nil
@@ -1003,13 +1032,13 @@ func checkDecodeTarget(v any) error {
 // is. A node without
 // content, the body of an empty document, leaves v as it is, which is what
 // [yaml.Unmarshal] does with input that holds no value.
-func (dd *Document) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []yaml.DecodeOption) error {
+func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []yaml.DecodeOption) error {
 	if !hasContent(node) {
 		return nil
 	}
 
-	decodeOpts := make([]yaml.DecodeOption, 0, len(dd.source.decodeOpts)+len(yamlOpts))
-	decodeOpts = append(decodeOpts, dd.source.decodeOpts...)
+	decodeOpts := make([]yaml.DecodeOption, 0, len(n.source.decodeOpts)+len(yamlOpts))
+	decodeOpts = append(decodeOpts, n.source.decodeOpts...)
 	decodeOpts = append(decodeOpts, yamlOpts...)
 
 	dec := yaml.NewDecoder(bytes.NewReader(nil), decodeOpts...)
@@ -1020,29 +1049,29 @@ func (dd *Document) decodeNode(ctx context.Context, node ast.Node, v any, yamlOp
 	// only primes the anchors, so a failure in it, which concerns a value
 	// the caller did not ask for, is not the caller's error; an alias the
 	// pass could not resolve fails again in the decode of node itself.
-	if node != dd.doc.Body && hasAlias(node) {
+	if node != n.doc.root.Body && hasAlias(node) {
 		var sink any
 
-		_ = dec.DecodeFromNodeContext(ctx, dd.doc.Body, &sink) //nolint:errcheck // The pass only primes anchors.
+		_ = dec.DecodeFromNodeContext(ctx, n.doc.root.Body, &sink) //nolint:errcheck // The pass only primes anchors.
 	}
 
-	return dd.bindDecodeError(dec.DecodeFromNodeContext(ctx, node, v))
+	return n.bindDecodeError(dec.DecodeFromNodeContext(ctx, node, v))
 }
 
 // bindDecodeError binds an error from the decoder to the source: a
 // [yaml.Error] as an [*Error] at its token, so the excerpt marks it, and any
 // other error, such as a canceled context, as it is. Returns nil for a nil
 // err.
-func (dd *Document) bindDecodeError(err error) error {
+func (n *Node) bindDecodeError(err error) error {
 	if err == nil {
 		return nil
 	}
 
 	if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
-		return dd.Bind(WrapError(yamlMessageError{yamlErr}, atToken(yamlErr.GetToken())))
+		return n.Bind(WrapError(yamlMessageError{yamlErr}, atToken(yamlErr.GetToken())))
 	}
 
-	return dd.Bind(err)
+	return n.Bind(err)
 }
 
 // yamlMessageError is a [yaml.Error] reduced to its message. The go-yaml text
@@ -1112,8 +1141,8 @@ func hasContent(node ast.Node) bool {
 	}
 }
 
-// Decode validates and decodes the document, or the node a Document from
-// [Document.At] is scoped to, into a new T.
+// Decode validates and decodes the node, which is the whole document for
+// the root Node of a [Document], into a new T.
 //
 // The options [WithDecodeOptions] set on the source apply first, then
 // opts. Each [Validator] from [WithValidator] runs before decoding. If *T
@@ -1150,13 +1179,13 @@ func hasContent(node ast.Node) bool {
 //	}
 //
 // For the YAML text of any node, including a mapping or a sequence, take
-// the node from [Document.Node] and call its String method.
+// the node from [Node.AST] and call its String method.
 //
-// To decode into a value you already hold, use [Document.DecodeInto].
-func (dd *Document) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
+// To decode into a value you already hold, use [Node.DecodeInto].
+func (n *Node) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
 	var v T
 
-	err := dd.DecodeInto(ctx, &v, opts...)
+	err := n.DecodeInto(ctx, &v, opts...)
 	if err != nil {
 		var zero T
 

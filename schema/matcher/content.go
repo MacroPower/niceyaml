@@ -21,7 +21,7 @@ type contentMatcher[T comparable] struct {
 // path decodes to want.
 //
 // Match decodes the value at path, from the scope of the document, with
-// [niceyaml.Document.Decode] as a T and compares the result to want, so
+// [niceyaml.Node.Decode] as a T and compares the result to want, so
 // the type of want decides how Match reads the YAML. A string matches
 // the text of a scalar, and a number matches its numeric value however
 // the document spells it. A document without the path, or whose value

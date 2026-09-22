@@ -971,7 +971,7 @@ func (m *Model) updateSearchState(lines *line.View) {
 
 // heldMatches returns the matches that start on a line view holds. A
 // search covers the whole content of the view, and a view over part of a
-// document, such as one from [niceyaml.Document.View], holds some of it.
+// document, such as one from [niceyaml.Node.View], holds some of it.
 func heldMatches(view *line.View, matches position.Ranges) position.Ranges {
 	held := make(position.Ranges, 0, len(matches))
 

@@ -28,7 +28,7 @@ import (
 // Source separates two concerns. Parsing lives on Source itself, where [Source.File]
 // lazily parses the AST and [Source.Documents] builds the documents. Every error they
 // and their Documents produce comes back bound to the Source as a [SourceError].
-// [Document.Bind] binds errors built elsewhere to the document they were checked
+// [Node.Bind] binds errors built elsewhere to the document they were checked
 // against, and [Source.Bind] binds one to the document its location falls in. Rendering
 // lives in a [line.View], which carries the overlays, annotations, and flags that a
 // [go.jacobcolvin.com/niceyaml/printer.Printer] renders over the [line.Lines] the
@@ -84,7 +84,7 @@ type Source struct {
 //   - [WithDecodeOptions]
 //
 // Settings that only affect decoding, such as [WithDisallowUnknownFields],
-// are [DecodeOption] values passed to [Document.Decode], and
+// are [DecodeOption] values passed to [Node.Decode], and
 // [WithDecodeOptions] sets the ones every decode of the Source starts
 // from.
 type SourceOption func(*Source)
@@ -132,7 +132,7 @@ func WithYAMLParserOptions(opts ...parser.Option) SourceOption {
 }
 
 // WithDecodeOptions is a [SourceOption] that sets the [DecodeOption]
-// values every [Document.Decode] and [Document.DecodeInto] of the Source
+// values every [Node.Decode] and [Node.DecodeInto] of the Source
 // starts from, ahead of the options of the call itself, so a file that
 // holds many documents, or a Source a library hands to its own callers,
 // decodes with a setting stated once:
@@ -164,7 +164,7 @@ func WithYAMLParserOptions(opts ...parser.Option) SourceOption {
 // decodes the document itself, as a schema does, runs that decode under
 // the context it was given, and a decode under that context applies none
 // of the defaults, so a default validator does not run itself again.
-// [Document.Validate] runs the validators it is given and none of the
+// [Node.Validate] runs the validators it is given and none of the
 // defaults.
 func WithDecodeOptions(opts ...DecodeOption) SourceOption {
 	return func(s *Source) {
@@ -249,9 +249,9 @@ func NewSourceFromString(src string, opts ...SourceOption) *Source {
 // [tokens.Tokenize] does, and line i of [Source.Lines] is line i+1 of the
 // text. Tokens that count from 1 already, as a whole stream
 // does, keep their positions. Tokens cut from a longer stream, as
-// [Document.Tokens] hands out, are renumbered from the first one; to render
+// [Node.Tokens] hands out, are renumbered from the first one; to render
 // one document of a file with the file's line numbers, print the file's
-// view with [Document.Span] instead.
+// view with [Node.Span] instead.
 func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 	t := &Source{}
 	for _, opt := range opts {
@@ -385,8 +385,8 @@ func (s *Source) single() (*Document, error) {
 // a "..." marker has none, past the comments folded above it. It is nil
 // when the document has neither.
 func (dd *Document) anchorToken() *token.Token {
-	if dd.doc.Start != nil {
-		return dd.doc.Start
+	if dd.root.Start != nil {
+		return dd.root.Start
 	}
 
 	if dd.preamble < len(dd.tokens) {
@@ -452,7 +452,7 @@ func (s *Source) parse() (*ast.File, error) {
 // it falls in, so a caller that holds the source binds without picking a
 // document. An error that carries a [position.Position] or a
 // [position.Range], as a check that runs on [Source.Lines] produces, binds
-// to the document whose [Document.Span] holds the line, whatever the
+// to the document whose [Node.Span] holds the line, whatever the
 // file holds:
 //
 //	for i, ln := range source.Lines().All() {
@@ -465,7 +465,7 @@ func (s *Source) parse() (*ast.File, error) {
 //
 // A path resolves in the one document of the source, the one
 // [Source.Document] returns, so a check on a configuration file binds its
-// findings here as it would through [Document.Bind]:
+// findings here as it would through [Node.Bind]:
 //
 //	return source.Bind(check(cfg))
 //
@@ -473,11 +473,11 @@ func (s *Source) parse() (*ast.File, error) {
 // nowhere. The bound error keeps its message and the name of the source,
 // [SourceError.Range] returns [ErrPathNeedsDocument] wrapping the reason
 // [Source.Document] gives, and the %+v verb names it in place of the
-// excerpt. Bind such an error through [Document.Bind] with the document
+// excerpt. Bind such an error through [Node.Bind] with the document
 // it was checked against, which also resolves a path from the scope of a
-// Document from [Document.At].
+// Document from [Node.At].
 //
-// In every other way Bind is [Document.Bind], which describes what comes
+// In every other way Bind is [Node.Bind], which describes what comes
 // back. [SourceError.Document] returns the document each location fell
 // in, and nil for an error whose location resolves in none.
 func (s *Source) Bind(err error) error {

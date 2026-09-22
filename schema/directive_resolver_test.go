@@ -68,7 +68,7 @@ func TestDirective(t *testing.T) {
 			schema.WithResolvers(schema.Directive()),
 		)
 
-		err = reg.Validate(t.Context(), firstDocumentFromFile(t, yamlPath))
+		err = reg.Validate(t.Context(), firstDocumentFromFile(t, yamlPath).Node)
 		require.NoError(t, err)
 		assert.Equal(t, int32(1), requests.Load())
 	})
@@ -381,7 +381,7 @@ func TestDirective_EmbeddedNameMatchesPath(t *testing.T) {
 			}
 
 			for _, key := range tt.order {
-				err := reg.Validate(t.Context(), docs[key])
+				err := reg.Validate(t.Context(), docs[key].Node)
 				require.NoError(t, err, "%s document", key)
 			}
 		})
@@ -487,7 +487,7 @@ func TestDirective_LeadingCommentDocument(t *testing.T) {
 			))
 
 			for i, doc := range docs {
-				err := reg.Validate(t.Context(), doc)
+				err := reg.Validate(t.Context(), doc.Node)
 
 				switch tc.want[i] {
 				case valid:

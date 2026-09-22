@@ -25,9 +25,9 @@ var (
 	// ErrLoad indicates the registry could not load the schema.
 	ErrLoad = errors.New("load schema")
 
-	// ErrScopedDocument indicates a caller passed a [*niceyaml.Document]
-	// from [niceyaml.Document.At] to [Registry.Lookup] or
-	// [Registry.Validate], which pick a schema for a whole document.
+	// ErrScopedDocument indicates a caller passed a [*niceyaml.Node] from
+	// [niceyaml.Node.At] to [Registry.Validate], which picks a schema for
+	// a whole document.
 	ErrScopedDocument = errors.New("registry needs a whole document")
 )
 
@@ -228,13 +228,12 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 // document, and a resolver sees it as it sees any other.
 //
 // The resolvers pick a schema for a whole document, from its file path,
-// its preamble, or its content, so a Document scoped to a node with
-// [niceyaml.Document.At] returns [ErrScopedDocument] rather than a schema
-// for the file applied to the node. Validate one node against a schema
-// of its own with a [Schema].
+// its preamble, or its content, which is why Lookup takes a Document
+// rather than a [niceyaml.Node]. Validate one node against a schema of
+// its own with a [Schema].
 //
 // Every error comes back bound to the document through
-// [niceyaml.Document.Bind], so its message names the file the document
+// [niceyaml.Node.Bind], so its message names the file the document
 // came from.
 //
 // For most use cases, prefer [Registry.Validate] which combines lookup
@@ -252,10 +251,6 @@ func (r *Registry) Lookup(ctx context.Context, doc *niceyaml.Document) (*Schema,
 
 // lookup is [Registry.Lookup] before binding the error to the document.
 func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Document) (*Schema, error) {
-	if !doc.Path().IsRoot() {
-		return nil, fmt.Errorf("%w: document is scoped to %s", ErrScopedDocument, doc.Path())
-	}
-
 	var reasons []error
 
 	for _, res := range r.resolvers {
@@ -331,16 +326,23 @@ func (e reasonError) Unwrap() error {
 // Validate combines schema lookup and validation into a single call. Use
 // [Registry.Lookup] when you need the validator for custom processing.
 // Validate implements [niceyaml.Validator], so [niceyaml.WithValidator]
-// runs it before a decode:
+// runs it before a decode and [niceyaml.Node.Validate] runs it on its
+// own:
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
+//
+// The resolvers pick a schema for a whole document, so n must be the root
+// [niceyaml.Node] of a [niceyaml.Document], which is the Node field of
+// the Document, and a Node from [niceyaml.Node.At] fails with
+// [ErrScopedDocument] rather than a schema for the file applied to the
+// node. Validate one node against a schema of its own with a [Schema].
 //
 // Returns [ErrNoMatch] if no resolver applies to the document, unless
 // [WithRequireSchema] set false, in which case such a document passes.
 // Callers of a registry that requires a schema can check for the error to
 // allow unmatched documents at one call site:
 //
-//	err := reg.Validate(ctx, doc)
+//	err := doc.Validate(ctx, reg)
 //	if err != nil && !errors.Is(err, ErrNoMatch) {
 //	    return err
 //	}
@@ -348,8 +350,13 @@ func (e reasonError) Unwrap() error {
 // Returns validation errors if the document doesn't conform to the schema.
 // Returns resolution, loading, or compilation errors if schema preparation
 // fails.
-func (r *Registry) Validate(ctx context.Context, doc *niceyaml.Document) error {
-	v, err := r.Lookup(ctx, doc)
+func (r *Registry) Validate(ctx context.Context, n *niceyaml.Node) error {
+	if !n.Path().IsRoot() {
+		//nolint:wrapcheck // Binding names the document; the error keeps its own context.
+		return n.Bind(fmt.Errorf("%w: node is scoped to %s", ErrScopedDocument, n.Path()))
+	}
+
+	v, err := r.Lookup(ctx, n.Document())
 	if err != nil {
 		if !r.requireSchema && errors.Is(err, ErrNoMatch) {
 			return nil
@@ -359,7 +366,7 @@ func (r *Registry) Validate(ctx context.Context, doc *niceyaml.Document) error {
 	}
 
 	//nolint:wrapcheck // Validation errors should be returned directly.
-	return doc.Validate(ctx, v)
+	return n.Validate(ctx, v)
 }
 
 // Schema returns the compiled schema ref names: the one a Ref from

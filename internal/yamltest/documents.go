@@ -19,19 +19,25 @@ func FirstDocument(t *testing.T, input string) *niceyaml.Document {
 	return FirstDocumentWithPath(t, input, "")
 }
 
-// At scopes doc to the node that path selects, through
-// [niceyaml.Document.At]. The test fails when the path selects nothing.
-func At(t *testing.T, doc *niceyaml.Document, path paths.Path) *niceyaml.Document {
+// Scope is a [*niceyaml.Node] or a [*niceyaml.Document], whose root Node
+// resolves paths, for [At] to scope.
+type Scope interface {
+	At(path paths.Path) (*niceyaml.Node, error)
+}
+
+// At scopes s to the node that path selects, through [niceyaml.Node.At].
+// The test fails when the path selects nothing.
+func At(t *testing.T, s Scope, path paths.Path) *niceyaml.Node {
 	t.Helper()
 
-	scoped, err := doc.At(path)
+	scoped, err := s.At(path)
 	require.NoError(t, err)
 
 	return scoped
 }
 
 // Bind binds err to the single document of source through
-// [niceyaml.Document.Bind]. The test fails when the source does not hold
+// [niceyaml.Node.Bind]. The test fails when the source does not hold
 // exactly one document.
 func Bind(t *testing.T, source *niceyaml.Source, err error) error {
 	t.Helper()
