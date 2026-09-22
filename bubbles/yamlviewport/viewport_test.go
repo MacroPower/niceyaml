@@ -1222,6 +1222,42 @@ func TestViewport_HorizontalScrollKeepsFrameOfNarrowerPane(t *testing.T) {
 	}
 }
 
+func TestViewport_DiffOfRevisionsOverPartOfTheSource(t *testing.T) {
+	t.Parallel()
+
+	// A diff compares the lines each revision holds, as the other view
+	// modes render them, so a change outside the held lines does not show.
+	slice := func(input string) yamlviewport.Revision {
+		source := niceyaml.NewSourceFromString(input)
+
+		return yamlviewport.NewRevision("part", source.View().Slice(position.NewSpan(1, 4)))
+	}
+
+	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+	m.SetWidth(80)
+	m.SetHeight(10)
+	m.SetRevision(slice("a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n"))
+	m.AddRevision(slice("a: 9\nb: 2\nc: 3\nd: 4\ne: 9\n"))
+
+	require.True(t, m.ShowingDiff())
+
+	added, removed := m.DiffStats()
+	assert.Equal(t, 0, added)
+	assert.Equal(t, 0, removed)
+	assert.Equal(t, 3, m.TotalLineCount())
+	assert.NotContains(t, m.View(), "a: 9")
+	assert.NotContains(t, m.View(), "e: 5")
+
+	// A change inside the held lines shows as it does for a whole source.
+	m.AddRevision(slice("a: 9\nb: 2\nc: 8\nd: 4\ne: 9\n"))
+
+	added, removed = m.DiffStats()
+	assert.Equal(t, 1, added)
+	assert.Equal(t, 1, removed)
+	assert.Contains(t, m.View(), "c: 8")
+	assert.Contains(t, m.View(), "c: 3")
+}
+
 func TestViewport_ViewFitsHeight(t *testing.T) {
 	t.Parallel()
 
