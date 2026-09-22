@@ -163,7 +163,10 @@ func (i *Index) buildByteToRuneIndex() {
 // Every match starts at a source character. When normalization expands one
 // character into several, as case folding turns "ß" into "ss", a needle
 // that matches only the tail of the expansion is not a match, and a match
-// that ends inside an expansion covers the whole character.
+// that ends inside an expansion covers the whole character. When it drops
+// a character, as stripping marks drops a combining accent, a match that
+// ends right before the dropped character covers it too, so the range
+// ends where the next character begins.
 //
 // Returns nil if the search string is empty, or normalizes to empty, or the
 // Index is nil or holds no text.
@@ -208,9 +211,7 @@ func (i *Index) Find(search string) position.Ranges {
 		}
 
 		startPos := i.posMap.lookup(matchStartChar)
-		endPos := i.posMap.lookup(matchEndChar)
-		// End column is exclusive, so add 1.
-		endPos.Col++
+		endPos := i.posMap.end(matchEndChar)
 
 		results = append(results, position.Range{Start: startPos, End: endPos})
 		offset = matchEnd
@@ -278,9 +279,14 @@ func (f *Finder) buildTextAndPositionMap(lines line.Lines) (string, *positionMap
 		}
 
 		// Record where this source rune begins in the normalized text. Every
-		// following char of the expansion resolves to the same position.
+		// following char of the expansion resolves to the same position. A
+		// rune that normalizes to nothing, such as a combining mark, has no
+		// character of its own, so the rune before it on the line extends
+		// over it and a match ending there covers the whole character.
 		if normalized != "" {
 			pm.add(normalizedCharIndex, pos)
+		} else {
+			pm.extend(pos)
 		}
 
 		for _, nr := range normalized {
@@ -300,6 +306,9 @@ func (f *Finder) buildTextAndPositionMap(lines line.Lines) (string, *positionMap
 type positionMap struct {
 	indices   []int
 	positions []position.Position
+	// The column just past each entry's source rune and the runes after it
+	// on its line that normalize to nothing.
+	ends []int
 }
 
 // add records the character index at which a source rune begins and its
@@ -307,6 +316,29 @@ type positionMap struct {
 func (m *positionMap) add(charIndex int, pos position.Position) {
 	m.indices = append(m.indices, charIndex)
 	m.positions = append(m.positions, pos)
+	m.ends = append(m.ends, pos.Col+1)
+}
+
+// extend records a source rune at pos that normalizes to nothing: the
+// entry before it on the same line runs past it. A rune with no entry
+// before it on its line extends nothing, since no match starts at it.
+func (m *positionMap) extend(pos position.Position) {
+	last := len(m.positions) - 1
+	if last >= 0 && m.positions[last].Line == pos.Line {
+		m.ends[last] = pos.Col + 1
+	}
+}
+
+// end returns the position just past the source rune that holds the given
+// character index, past any runes after it on the line that normalize to
+// nothing.
+func (m *positionMap) end(charIndex int) position.Position {
+	idx := m.floor(charIndex)
+	if idx < 0 {
+		return position.New(0, 1)
+	}
+
+	return position.New(m.positions[idx].Line, m.ends[idx])
 }
 
 // floor returns the entry of the source rune that holds charIndex: the last

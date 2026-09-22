@@ -718,3 +718,17 @@ func TestFinder_Find_MultipleSearches(t *testing.T) {
 		})
 	}
 }
+
+func TestIndex_Find_CoversDroppedTrailingRune(t *testing.T) {
+	t.Parallel()
+
+	// The accent is a combining mark the normalizer drops, so it has no
+	// character of its own in the search text. A match ending right before
+	// it covers it, as a match ending inside an expansion covers the whole
+	// character, so the highlight ends where the next character begins.
+	source := niceyaml.NewSourceFromString("k: caféx\n")
+	idx := finder.New(finder.WithNormalizer(normalizer.New())).Load(source.Lines())
+
+	assert.Equal(t, position.Ranges{position.NewRange(position.New(0, 3), position.New(0, 8))}, idx.Find("café"))
+	assert.Equal(t, position.Ranges{position.NewRange(position.New(0, 6), position.New(0, 9))}, idx.Find("ex"))
+}
