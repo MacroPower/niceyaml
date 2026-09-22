@@ -3684,6 +3684,18 @@ func TestAnnotationContext_ColWidth(t *testing.T) {
 	}
 }
 
+func TestAnnotationContext_ColWidth_CombiningMark(t *testing.T) {
+	t.Parallel()
+
+	// The accent is a combining mark that renders on the "e" before it, so
+	// a marker at its column lands under that cell rather than the next.
+	ctx := printer.AnnotationContext{Content: "k: éx"}
+
+	assert.Equal(t, 3, ctx.ColWidth(3), "the base rune")
+	assert.Equal(t, 3, ctx.ColWidth(4), "the combining mark")
+	assert.Equal(t, 4, ctx.ColWidth(5), "the rune after the mark")
+}
+
 func TestPrinter_Layout_MultiLineAnnotation(t *testing.T) {
 	t.Parallel()
 

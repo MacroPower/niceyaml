@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode"
 	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
@@ -234,6 +235,12 @@ type AnnotationContext struct {
 func (ctx AnnotationContext) ColWidth(col int) int {
 	col = max(0, col)
 	runes := []rune(ctx.Content)
+
+	// A combining mark has no cell of its own: it renders on the rune
+	// before it, so a marker at its column lands under that rune.
+	for col > 0 && col < len(runes) && unicode.In(runes[col], unicode.Mn, unicode.Me) {
+		col--
+	}
 
 	if col <= len(runes) {
 		return lipgloss.Width(escape.Control(string(runes[:col])))
