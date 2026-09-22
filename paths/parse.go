@@ -7,8 +7,14 @@ import (
 	"strings"
 )
 
-// ErrInvalidPath indicates a path expression that [Parse] cannot read.
-var ErrInvalidPath = errors.New("invalid path")
+var (
+	// ErrInvalidPath indicates a path expression that [Parse] cannot read.
+	ErrInvalidPath = errors.New("invalid path")
+
+	// The reason an index selector does not parse: it is not a canonical
+	// non-negative decimal integer.
+	errInvalidIndex = errors.New("not a non-negative integer")
+)
 
 // Parse parses a path expression into a [Path].
 //
@@ -174,12 +180,12 @@ func parseIndex(rest string) (segment, string, error) {
 	// leading zero, so every index has one spelling and a parsed path prints
 	// as it was written.
 	if !isCanonicalIndex(body) {
-		return segment{}, "", fmt.Errorf("index %q is not a non-negative integer", body)
+		return segment{}, "", fmt.Errorf("index %q: %w", body, errInvalidIndex)
 	}
 
 	idx, err := strconv.Atoi(body)
 	if err != nil {
-		return segment{}, "", fmt.Errorf("index %q is not a non-negative integer", body)
+		return segment{}, "", fmt.Errorf("index %q: %w: %w", body, errInvalidIndex, err)
 	}
 
 	return segment{kind: segmentIndex, index: idx}, remaining, nil
