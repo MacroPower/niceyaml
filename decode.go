@@ -792,8 +792,11 @@ func (dd *Document) Validate(ctx context.Context, validators ...Validator) error
 // a validator that accumulates into a typed pointer and returns it on
 // success reports no error, and one inside the chain binds nothing, so
 // Bind looks past it. An error that is or wraps a [*SourceError] along its
-// cause chain is bound already, to this source or another, and comes back
-// as it is, so binding is idempotent. Bind never modifies err.
+// cause chain, with no located [*Error] above it, is bound already, to
+// this source or another, and comes back as it is, so binding is
+// idempotent. A located Error above a binding binds anew at its own
+// location, with the position the inner binding resolved kept in its
+// message. Bind never modifies err.
 func (dd *Document) Bind(err error) error {
 	return bindTree(err, binder{src: dd.source, doc: dd})
 }

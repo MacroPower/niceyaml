@@ -166,8 +166,10 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 // stays as it is, with the path the wrapper wrote in it, so rebase an
 // error before adding context to it. A nil err, or a nil [*Error] or
 // [*SourceError] pointer, returns nil, so a validator returns the result as
-// it is. An error that is or wraps a [*SourceError] is bound already, with
-// its location resolved, and comes back as it is.
+// it is. An error that is or wraps a [*SourceError] with no located
+// [*Error] above it is bound already, with its location resolved, and
+// comes back as it is. A located Error above a binding carries a location
+// of its own, so Rebase puts the base in front of that one.
 func Rebase(err error, base paths.Path) error {
 	if isNothing(err) {
 		return nil
@@ -573,9 +575,11 @@ func locatePath(b binder, path paths.Path) (location, *Document, error) {
 // children, each a SourceError with its own location and children, so a
 // validator's report of several violations binds to one SourceError per
 // violation whether it nests them with WithErrors or joins them. An error
-// that is or wraps a SourceError is a binding already: as a nested error
-// it contributes that binding as the child, and as the error given to Bind
-// it comes back as it is.
+// that is or wraps a SourceError, with no located Error above it, is a
+// binding already: as a nested error it contributes that binding as the
+// child, and as the error given to Bind it comes back as it is. A located
+// Error above a binding binds anew at its own location, and its message
+// carries the position the inner binding resolved as well as its own.
 //
 // [SourceError.Excerpt] marks the location of every node in the tree and
 // annotates each child with its message, with distant locations in
@@ -678,9 +682,10 @@ func (b binder) documentAt(idx int) *Document {
 // bindTree binds err to b. A nil err, or a nil [*Error] or [*SourceError]
 // pointer, carries nothing to bind and comes back as a nil error, so a
 // caller compares the result against nil whatever the shape of the nil it
-// passed. An error that is or wraps a [*SourceError] along its cause chain
-// is a binding already and comes back as it is. Any other error is bound
-// as a new SourceError.
+// passed. An error that is or wraps a [*SourceError] along its cause chain,
+// with no located [*Error] above it, is a binding already and comes back
+// as it is. Any other error, including a located Error above a binding, is
+// bound as a new SourceError.
 func bindTree(err error, b binder) error {
 	if isNothing(err) {
 		return nil
