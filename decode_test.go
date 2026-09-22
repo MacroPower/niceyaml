@@ -3010,3 +3010,53 @@ func TestDocument_At_ErrorBoundToReceiver(t *testing.T) {
 	require.ErrorAs(t, err, &bound)
 	assert.Same(t, scoped, bound.Document())
 }
+
+func TestDocument_At_FlowCollectionSpan(t *testing.T) {
+	t.Parallel()
+
+	// The token that closes a flow collection belongs to the node, so the
+	// span and the tokens of a scoped Document run through it.
+	tcs := map[string]struct {
+		input  string
+		path   paths.Path
+		span   position.Span
+		tokens []string
+	}{
+		"flow sequence over several lines": {
+			input:  "a: [\n  1,\n  2,\n]\nb: 3\n",
+			path:   paths.Root().Child("a"),
+			span:   position.NewSpan(0, 4),
+			tokens: []string{"[", "1", ",", "2", ",", "]"},
+		},
+		"flow mapping at the root": {
+			input:  "{\n  \"a\": 1,\n  \"b\": [\n    2\n  ]\n}\n",
+			path:   paths.Root(),
+			span:   position.NewSpan(0, 6),
+			tokens: []string{"{", "a", ":", "1", ",", "b", ":", "[", "2", "]", "}"},
+		},
+		"flow sequence on one line": {
+			input:  "a: [1, 2]\n",
+			path:   paths.Root().Child("a"),
+			span:   position.NewSpan(0, 1),
+			tokens: []string{"[", "1", ",", "2", "]"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			scoped := yamltest.At(t, yamltest.FirstDocument(t, tc.input), tc.path)
+
+			assert.Equal(t, tc.span, scoped.Span())
+
+			var got []string
+
+			for _, tk := range scoped.Tokens() {
+				got = append(got, tk.Value)
+			}
+
+			assert.Equal(t, tc.tokens, got)
+		})
+	}
+}

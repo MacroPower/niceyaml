@@ -554,9 +554,25 @@ func (b *boundsFinder) Visit(node ast.Node) ast.Visitor {
 		return nil
 	}
 
-	tk := node.GetToken()
+	b.consider(node.GetToken())
+
+	// The walk visits the nodes of a collection, not the token that closes
+	// a flow collection, which the node holds beside them.
+	switch n := node.(type) {
+	case *ast.SequenceNode:
+		b.consider(n.End)
+	case *ast.MappingNode:
+		b.consider(n.End)
+	}
+
+	return b
+}
+
+// consider widens the bounds to tk. A nil token, or one without a
+// position, changes nothing.
+func (b *boundsFinder) consider(tk *token.Token) {
 	if tk == nil || tk.Position == nil {
-		return b
+		return
 	}
 
 	if b.first == nil || tk.Position.Offset < b.first.Position.Offset {
@@ -566,8 +582,6 @@ func (b *boundsFinder) Visit(node ast.Node) ast.Visitor {
 	if b.last == nil || tk.Position.Offset > b.last.Position.Offset {
 		b.last = tk
 	}
-
-	return b
 }
 
 // Path returns the scope of the [Document]: the path from the document
