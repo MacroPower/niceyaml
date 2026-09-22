@@ -129,7 +129,7 @@ func BenchmarkPrinterPrint_WithOverlays_IncludingSetup(b *testing.B) {
 }
 
 func BenchmarkPrinterPrint_OverlaysDensity(b *testing.B) {
-	// Tests performance with overlays concentrated on fewer lines vs spread out.
+	// Measures print cost as the overlays on each line rise from 1 to 20.
 	densities := []struct {
 		name         string
 		lines        int

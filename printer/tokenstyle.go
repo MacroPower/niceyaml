@@ -46,9 +46,8 @@ var tokenTypeStyles = map[token.Type]kind.Kind{
 // typeStyle returns the [kind.Kind] for the given [*token.Token]'s
 // [token.Type]. The src token is the lexer token tk is a part of, or nil.
 //
-// It handles context-sensitive styling: a string followed by a colon is styled
-// as a mapping key, and tokens preceded by anchors or aliases inherit that
-// styling.
+// A string followed by a colon takes the mapping key style, and a token
+// after an anchor or alias inherits the style of that anchor or alias.
 func typeStyle(tk, src *token.Token) kind.Kind {
 	tts, ok := tokenTypeStyles[visualType(tk, src)]
 	if ok {

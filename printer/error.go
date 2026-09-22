@@ -21,16 +21,15 @@ const errorConnectorWidth = 4
 
 // PrintError renders err for a reader: its message as a tree, then the
 // [niceyaml.SourceError.Excerpt] of every [*niceyaml.SourceError] in its
-// tree, as [niceyaml.SourceErrors] finds them, each rendered by p with the
-// context lines [WithContextLines] sets on either side of each marked
-// line. An error joined from one bound error per document therefore prints
-// an excerpt for each document. Blank lines separate the parts. A
-// SourceError whose location does not resolve prints a line starting "no
-// excerpt:" that names the reason in place of its excerpt, unless it
-// carries no location at all.
+// tree, as [niceyaml.SourceErrors] finds them, each with the context lines
+// [WithContextLines] sets on either side of each marked line. An error
+// joined from one bound error per document therefore prints an excerpt for
+// each document. Blank lines separate the parts. A SourceError whose
+// location does not resolve prints a line starting "no excerpt:" that names
+// the reason in place of its excerpt, unless it carries no location at all.
 //
-// The message is drawn as a tree with a connector in front of each nested
-// error, in the color of the gutter's line numbers, so a validator's
+// PrintError draws the message as a tree with a connector in front of each
+// nested error, in the color of the gutter's line numbers, so a validator's
 // report reads as its summary with one branch per violation. The root
 // keeps the message as its wrappers wrote it, and each branch carries the
 // "line:col:" its location resolved to, without the name the root already

@@ -76,7 +76,6 @@ func layoutRows(l printer.Layout) []int {
 
 // printDiff generates a full-file diff between two YAML strings.
 // It outputs the entire file with markers for inserted and deleted lines.
-// Helper to replace the removed Printer.PrintTokenDiff method in tests.
 func printDiff(p *printer.Printer, before, after string) string {
 	beforeTks := niceyaml.NewSourceFromString(before, niceyaml.WithName("before"))
 	afterTks := niceyaml.NewSourceFromString(after, niceyaml.WithName("after"))
@@ -85,7 +84,6 @@ func printDiff(p *printer.Printer, before, after string) string {
 }
 
 // printDiffSummary generates a summary diff showing only changed lines with context.
-// Helper to replace the removed Printer.PrintTokenDiffSummary method in tests.
 func printDiffSummary(p *printer.Printer, before, after string, context int) string {
 	beforeTks := niceyaml.NewSourceFromString(before, niceyaml.WithName("before"))
 	afterTks := niceyaml.NewSourceFromString(after, niceyaml.WithName("after"))
@@ -418,7 +416,7 @@ func TestPrinter_PrintTokens_EmptyFile(t *testing.T) {
 	p := testPrinter()
 	got := p.Print(niceyaml.NewSourceFromTokens(tks).View())
 
-	// Empty file should produce empty output.
+	// The printer renders an empty file as empty output.
 	assert.Empty(t, got)
 }
 
@@ -909,7 +907,6 @@ func TestPrinter_PrintTokenDiff_Ordering(t *testing.T) {
 		want   []string
 	}{
 		"deleted lines appear inline": {
-			// Test that deleted lines appear inline where they were removed.
 			before: stringtest.JoinLF(
 				"a: 1",
 				"b: 2",
@@ -924,7 +921,6 @@ func TestPrinter_PrintTokenDiff_Ordering(t *testing.T) {
 			want: []string{" ", "-", " "},
 		},
 		"modifications show delete before insert": {
-			// Test that modifications show delete before insert.
 			before: "key: old\n",
 			after:  "key: new\n",
 			want:   []string{"-", "+"},
@@ -1861,7 +1857,7 @@ func TestPrinter_AnnotationPosition_Disabled(t *testing.T) {
 
 			got := p.Print(view)
 
-			// With annotations disabled, only the content should be rendered.
+			// With annotations disabled, the printer renders only the content.
 			assert.Equal(t, "key: value", got)
 		})
 	}
@@ -2413,13 +2409,13 @@ func TestFinderPrinter_Integration(t *testing.T) {
 		"single character in word": {
 			input:  "foobar",
 			search: "o",
-			// Adjacent styled ranges naturally merge in the Printer.
+			// Adjacent styled ranges merge in the Printer.
 			want: "f[oo]bar",
 		},
 		"multiple matches same line": {
 			input:  "key: abcabc",
 			search: "abc",
-			// Adjacent styled ranges naturally merge in the Printer.
+			// Adjacent styled ranges merge in the Printer.
 			want: "key: [abcabc]",
 		},
 		"match at start": {
@@ -2676,14 +2672,14 @@ func TestPrinter_Golden(t *testing.T) {
 func TestPrinter_BlendStyles(t *testing.T) {
 	t.Parallel()
 
-	// StyleWithTag creates a style that wraps content in XML-like tags.
+	// A style from styleWithTag wraps content in XML-like tags.
 	styleWithTag := func(tag string) lipgloss.Style {
 		return lipgloss.NewStyle().Transform(func(s string) string {
 			return "<" + tag + ">" + s + "</" + tag + ">"
 		})
 	}
 
-	// OverlayRange defines an overlay kind and its range.
+	// The overlayRange type holds an overlay kind and its range.
 	type overlayRange struct {
 		kind  kind.Kind
 		start position.Position
@@ -2739,7 +2735,7 @@ func TestPrinter_BlendStyles(t *testing.T) {
 			want: "<hl>key</hl>: value",
 		},
 		"full line range": {
-			// Each token is styled separately, so transforms apply per-token.
+			// Each token renders on its own, so transforms apply per-token.
 			input: "key: value",
 			ranges: []overlayRange{
 				{kindAll, position.New(0, 0), position.New(0, 10)},
@@ -2765,7 +2761,7 @@ func TestPrinter_BlendStyles(t *testing.T) {
 		"overlapping ranges - transforms compose": {
 			// First range [0,5) gets override, second range [2,7) blends.
 			// Blending composes transforms: overlay(base(text)).
-			// Each token is styled separately.
+			// Each token renders on its own.
 			input: "key: value",
 			ranges: []overlayRange{
 				{kindA, position.New(0, 0), position.New(0, 5)},
@@ -2779,7 +2775,7 @@ func TestPrinter_BlendStyles(t *testing.T) {
 		},
 		"three overlapping ranges": {
 			// Ranges: a=[0,6), b=[2,8), c=[4,10)
-			// Each token styled separately with overlapping transforms.
+			// Each token renders on its own with overlapping transforms.
 			input: "key: value",
 			ranges: []overlayRange{
 				{kindA, position.New(0, 0), position.New(0, 6)},
@@ -2793,7 +2789,7 @@ func TestPrinter_BlendStyles(t *testing.T) {
 			want: "<a>ke</a><b><a>y</a></b><b><a>:</a></b><c><b><a> </a></b></c><c><b><a>v</a></b></c><c><b>al</b></c><c>ue</c>",
 		},
 		"partial character overlap": {
-			// "abcdef" is a single token, styled character-by-character.
+			// "abcdef" is a single token that the printer styles character-by-character.
 			input: "abcdef",
 			ranges: []overlayRange{
 				{kindX, position.New(0, 1), position.New(0, 4)},
@@ -2857,8 +2853,8 @@ func TestPrinter_BlendStyles(t *testing.T) {
 func TestPrinter_ColorBlending_Golden(t *testing.T) {
 	t.Parallel()
 
-	// These tests exercise the color blending code paths in blendColors/blendStyles
-	// by using actual lipgloss colors instead of transforms.
+	// These tests exercise the color blending paths with actual lipgloss
+	// colors instead of transforms.
 
 	type overlayDef struct {
 		style lipgloss.Style
@@ -2878,7 +2874,7 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 		overlays []overlayDef
 	}{
 		"ForegroundBlend": {
-			// Two ranges overlap - the overlapping region should blend colors via LAB.
+			// Where the two ranges overlap, the printer blends the colors via LAB.
 			input: "key: value",
 			overlays: []overlayDef{
 				{lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")), position.New(0, 0), position.New(0, 5)},
@@ -2893,7 +2889,8 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 			},
 		},
 		"FirstColorOnly": {
-			// Second style has NoColor - first color should be used directly.
+			// The second style has NoColor, so the printer uses the first
+			// color directly.
 			input: "key: value",
 			overlays: []overlayDef{
 				{lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")), position.New(0, 0), position.New(0, 5)},
@@ -2901,7 +2898,7 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 			},
 		},
 		"SecondColorOnly": {
-			// First style has NoColor - second color should be used.
+			// The first style has NoColor, so the printer uses the second color.
 			input: "key: value",
 			overlays: []overlayDef{
 				{lipgloss.NewStyle(), position.New(0, 0), position.New(0, 5)},
@@ -2909,7 +2906,7 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 			},
 		},
 		"BothNoColor": {
-			// Both styles have NoColor - should result in nil (no color applied).
+			// Both styles have NoColor, so the blend yields nil and applies no color.
 			input: "key: value",
 			overlays: []overlayDef{
 				{lipgloss.NewStyle(), position.New(0, 0), position.New(0, 5)},
@@ -2917,7 +2914,7 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 			},
 		},
 		"ThreeOverlapping": {
-			// Three ranges overlap - all colors should blend together.
+			// Three ranges overlap, so the printer blends all three colors.
 			input: "key: value",
 			overlays: []overlayDef{
 				{lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")), position.New(0, 0), position.New(0, 6)},
@@ -2926,7 +2923,7 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 			},
 		},
 		"MixedFgBg": {
-			// Foreground and background colors should blend independently.
+			// The printer blends foreground and background colors independently.
 			input: "key: value",
 			overlays: []overlayDef{
 				{
@@ -3464,8 +3461,8 @@ func TestPrinter_BlendKey_StyleNames(t *testing.T) {
 	t.Parallel()
 
 	// A style named "a!b" must not share a cache entry with the sequence
-	// "blend a, then replace with b", which the key separators once spelled
-	// the same way.
+	// "blend a, then replace with b", which unquoted key separators would
+	// spell the same way.
 	const (
 		ab kind.Kind = "a!b"
 		a  kind.Kind = "a"

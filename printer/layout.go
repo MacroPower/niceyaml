@@ -14,18 +14,18 @@ import (
 )
 
 // Layout is the row structure of a view as [Printer.Print] renders it: how
-// many rows each line takes once its content wraps and its annotations are
-// added, which row a position in the view lands on, and how wide the rows
-// are. A viewer that scrolls by rendered row maps rows to lines and back
-// through it, and one that scrolls horizontally reads the width of the
-// widest row.
+// many rows each line takes once its content wraps and its annotations take
+// rows of their own, which row a position in the view lands on, and how
+// wide the rows are. A viewer that scrolls by rendered row maps rows to
+// lines and back through it, and one that scrolls horizontally reads the
+// width of the widest row.
 //
 // A Layout styles and wraps each line as [Printer.Print] does, since a
 // style may transform the text it styles and change its width, but it
 // assembles no output, so one Layout replaces a render for every question
 // about rows. It stays valid until the view or the printer changes.
 //
-// The layout speaks in the coordinates of the view: [Layout.LineRows],
+// The layout speaks in the coordinates of the view. [Layout.LineRows],
 // [Layout.LineStart], and [Layout.LineAt] take and return the index of a
 // line in the content of the view, the one every [line.View] method
 // takes, so a viewer that finds the line at a row reaches its decoration
@@ -117,8 +117,9 @@ func (p *Printer) layoutAnnotation(
 	var rows int
 
 	for _, group := range p.annotationGroups(view, ln, idx, gutterWidth, placement) {
-		// Each row is measured styled, as renderAnnotation renders it,
-		// since the style of the kind may pad or transform the text.
+		// The width of each row comes from its styled form, as
+		// renderAnnotation renders it, since the style of the kind may
+		// pad or transform the text.
 		style := p.styles.Style(group.kind)
 
 		for j, row := range group.rows {
@@ -180,7 +181,7 @@ func (l Layout) Rows() int {
 }
 
 // Count returns the number of lines the layout holds, which is
-// [line.View.Count] of the view it was computed from.
+// [line.View.Count] of the view it came from.
 func (l Layout) Count() int {
 	return len(l.lines)
 }
@@ -255,7 +256,7 @@ func (l Layout) RowOf(pos position.Position) int {
 
 // Width returns the width in cells of the widest row, gutter included,
 // before the container style applies. A viewer that scrolls horizontally
-// uses it to find the column the last row ends on.
+// uses it to find how far the content reaches.
 func (l Layout) Width() int {
 	return l.width
 }
