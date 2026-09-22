@@ -221,22 +221,39 @@ func (r *Result) Hunks(context int) *line.View {
 	return view
 }
 
-// Stats returns the number of added and removed lines in the diff.
-func (r *Result) Stats() (int, int) {
-	var added, removed int
+// Stats counts the lines a diff added and removed.
+//
+// Receive instances from [Result.Stats].
+type Stats struct {
+	Added   int
+	Removed int
+}
+
+// Changed reports whether the diff added or removed any line.
+func (s Stats) Changed() bool {
+	return s.Added > 0 || s.Removed > 0
+}
+
+// Stats returns the number of added and removed lines in the diff:
+//
+//	if s := result.Stats(); s.Changed() {
+//		fmt.Printf("+%d -%d\n", s.Added, s.Removed)
+//	}
+func (r *Result) Stats() Stats {
+	var s Stats
 
 	for _, op := range r.ops {
 		switch op.kind {
 		case lcs.OpInsert:
-			added++
+			s.Added++
 		case lcs.OpDelete:
-			removed++
+			s.Removed++
 		case lcs.OpEqual:
 			// No-op: equal lines don't contribute to stats counts.
 		}
 	}
 
-	return added, removed
+	return s
 }
 
 // getAlignedRows returns the lazily computed aligned rows for side-by-side

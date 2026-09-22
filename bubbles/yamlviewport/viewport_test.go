@@ -20,6 +20,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/bubbles/yamlviewport"
+	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/finder"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
@@ -1242,9 +1243,7 @@ func TestViewport_DiffOfRevisionsOverPartOfTheSource(t *testing.T) {
 
 	require.True(t, m.ShowingDiff())
 
-	added, removed := m.DiffStats()
-	assert.Equal(t, 0, added)
-	assert.Equal(t, 0, removed)
+	assert.Equal(t, diff.Stats{}, m.DiffStats())
 	assert.Equal(t, 3, m.TotalLineCount())
 	assert.NotContains(t, m.View(), "a: 9")
 	assert.NotContains(t, m.View(), "e: 5")
@@ -1252,9 +1251,7 @@ func TestViewport_DiffOfRevisionsOverPartOfTheSource(t *testing.T) {
 	// A change inside the held lines shows as it does for a whole source.
 	m.AddRevision(slice("a: 9\nb: 2\nc: 8\nd: 4\ne: 9\n"))
 
-	added, removed = m.DiffStats()
-	assert.Equal(t, 1, added)
-	assert.Equal(t, 1, removed)
+	assert.Equal(t, diff.Stats{Added: 1, Removed: 1}, m.DiffStats())
 	assert.Contains(t, m.View(), "c: 8")
 	assert.Contains(t, m.View(), "c: 3")
 }

@@ -347,7 +347,7 @@ type titleSegment struct {
 
 func (m *model) titleLine() string {
 	// Diff stats for OK/Error segments.
-	added, removed := m.viewport.DiffStats()
+	stats := m.viewport.DiffStats()
 
 	revisionInfo := m.revisionLabel()
 
@@ -364,8 +364,8 @@ func (m *model) titleLine() string {
 	segments := make([]titleSegment, 0, 6)
 	segments = append(segments,
 		titleSegment{" nyaml ", kind.GenericHeading},
-		titleSegment{fmt.Sprintf(" +%d ", added), kind.GenericHeadingOK},
-		titleSegment{fmt.Sprintf(" -%d ", removed), kind.GenericHeadingError},
+		titleSegment{fmt.Sprintf(" +%d ", stats.Added), kind.GenericHeadingOK},
+		titleSegment{fmt.Sprintf(" -%d ", stats.Removed), kind.GenericHeadingError},
 		titleSegment{linesText, kind.GenericHeadingWarn},
 		titleSegment{titleText, kind.GenericHeadingAccent},
 	)

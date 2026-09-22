@@ -529,13 +529,14 @@ func (m *Model) ShowingDiff() bool {
 	return m.hasRevision() && m.revIndex > 0 && m.diffMode != DiffModeNone
 }
 
-// DiffStats returns the number of added and removed lines in the current diff.
+// DiffStats returns the number of added and removed lines in the current
+// diff, as [diff.Result.Stats] counts them.
 //
-// Returns (0, 0) when the viewport shows no diff (at first revision, diff
-// mode is none, or no revisions exist).
-func (m *Model) DiffStats() (int, int) {
+// Returns the zero [diff.Stats] when the viewport shows no diff (at first
+// revision, diff mode is none, or no revisions exist).
+func (m *Model) DiffStats() diff.Stats {
 	if !m.ShowingDiff() {
-		return 0, 0
+		return diff.Stats{}
 	}
 
 	return m.getDiffResult().Stats()

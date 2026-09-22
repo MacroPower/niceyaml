@@ -874,9 +874,9 @@ func TestDiffResult_Stats(t *testing.T) {
 				beforeSrc.Lines(),
 				afterSrc.Lines(),
 			)
-			added, removed := result.Stats()
-			assert.Equal(t, tt.wantAdded, added, "added count")
-			assert.Equal(t, tt.wantRemoved, removed, "removed count")
+			got := result.Stats()
+			assert.Equal(t, diff.Stats{Added: tt.wantAdded, Removed: tt.wantRemoved}, got)
+			assert.Equal(t, tt.wantAdded > 0 || tt.wantRemoved > 0, got.Changed())
 		})
 	}
 }
