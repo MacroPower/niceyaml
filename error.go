@@ -874,10 +874,11 @@ func (e *SourceError) Source() *Source {
 // methods and validators produced it or whose [Document.Bind] bound it,
 // and in which a path in the error resolves, or, for an error bound
 // through [Source.Bind], the document its location falls in. An error
-// without a location, one whose location resolves in no document, and
-// one a [Source] that does not parse produced itself are bound to none. A
-// caller that sorts the errors of a file by document reads it beside
-// [Document.Index]. A nil SourceError is bound to none.
+// bound through Source.Bind without a location, or with one that resolves
+// in no document, and one a [Source] that does not parse produced itself
+// are bound to none, while Document.Bind keeps its document on every
+// error it binds. A caller that sorts the errors of a file by document
+// reads it beside [Document.Index]. A nil SourceError is bound to none.
 func (e *SourceError) Document() *Document {
 	if e == nil {
 		return nil
