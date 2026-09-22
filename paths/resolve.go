@@ -199,8 +199,8 @@ func (r *resolver) resolve(root ast.Node, segs []segment) ([]match, error) {
 	return matches, nil
 }
 
-// uniqueMatches returns matches with every repeat of an earlier node
-// removed, keeping the first occurrence in place.
+// uniqueMatches returns the first match of each node, in the order matches
+// holds them.
 func uniqueMatches(matches []match) []match {
 	seen := make(map[ast.Node]bool, len(matches))
 	unique := make([]match, 0, len(matches))
@@ -273,7 +273,7 @@ func (r *resolver) apply(seg segment, node ast.Node) ([]match, error) {
 // which is the source the goccy/go-yaml decoder takes.
 //
 // The seen set guards against merge cycles through aliases. The bool result
-// reports whether an entry was found.
+// reports whether lookup found an entry.
 func (r *resolver) lookup(
 	mapping *ast.MappingNode, name string, seen map[*ast.MappingNode]bool,
 ) (*ast.MappingValueNode, bool, error) {
@@ -289,8 +289,8 @@ func (r *resolver) lookup(
 
 	seen[mapping] = true
 
-	// A later merge key overrides an earlier one, as a later source in one
-	// merge key does, so the entries are read from the last one back.
+	// A later merge key wins over an earlier one, as a later source in one
+	// merge key does, so lookup reads the entries from the last one back.
 	for _, entry := range slices.Backward(mapping.Values) {
 		if entry == nil || entry.Key == nil || !entry.Key.IsMergeKey() {
 			continue

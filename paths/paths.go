@@ -22,7 +22,7 @@ var (
 	ErrNotFound = errors.New("not found")
 
 	// ErrAlias indicates an alias on the path that names no anchor or that
-	// leads back to itself, so the content it stands for cannot be reached.
+	// leads back to itself, so it has no content.
 	ErrAlias = errors.New("alias does not resolve")
 
 	// ErrWildcard indicates a request for a single node or token from a path
@@ -87,7 +87,7 @@ func quoteName(name string) string {
 // Path is a location in a YAML document, given as a sequence of selectors
 // from the document root.
 //
-// A Path is a value and never changes: each selector method returns a new
+// A Path is a value and never changes. Each selector method returns a new
 // Path and leaves the receiver as it was, so a Path is safe to share as a
 // common prefix:
 //
@@ -218,8 +218,8 @@ func (p Path) String() string {
 // which [yaml.PathString] reads as two selectors. Use [Path.String] for a
 // form that [Parse] reads back.
 //
-// The `~` selector from [Path.Key] is left out, since goccy/go-yaml has
-// no selector for the key of an entry, so the result selects the value.
+// YAMLPath leaves out the `~` selector from [Path.Key], since goccy/go-yaml
+// has no selector for the key of an entry, so the result selects the value.
 func (p Path) YAMLPath() *yaml.Path {
 	pb := (&yaml.PathBuilder{}).Root()
 
@@ -294,9 +294,9 @@ func (p Path) matches(doc *ast.DocumentNode) ([]match, error) {
 	return found, nil
 }
 
-// selectsRoot reports whether the path names the root node: it has no
-// segments, or only the `~` segments of [Path.Key], which on the root
-// select the node the path already does.
+// selectsRoot reports whether the path names the root node. A path names
+// the root when it has no segments, or only the `~` segments of
+// [Path.Key], which on the root select the node the path already does.
 func (p Path) selectsRoot() bool {
 	for _, s := range p.segments {
 		if s.kind != segmentKey {
@@ -408,9 +408,10 @@ func (p Path) Node(doc *ast.DocumentNode) (ast.Node, error) {
 //
 // The path resolves against the document body only, so the same path
 // resolves to different tokens in different documents of one file. Returns
-// the same errors as [Path.Node], except [ErrAlias]: Token does not
-// dereference the node it resolves to, so an alias that names no anchor
-// still yields the alias's own token.
+// the same errors as [Path.Node], except that Token does not look through
+// the node the last selector reaches, so an alias there that names no
+// anchor yields the alias's own token rather than [ErrAlias]. Token still
+// returns [ErrAlias] for an alias an earlier selector resolves through.
 func (p Path) Token(doc *ast.DocumentNode) (*token.Token, error) {
 	m, err := p.single(doc)
 	if err != nil {

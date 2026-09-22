@@ -149,7 +149,8 @@ func TestPath_Build(t *testing.T) {
 			require.NotNil(t, path)
 			assert.Equal(t, tc.want, path.String())
 
-			// The goccy form only differs where goccy quotes differently.
+			// The goccy form only differs where goccy quotes a name
+			// differently or has no form for a selector.
 			wantGoccy := tc.wantYAML
 			if wantGoccy == "" {
 				wantGoccy = tc.want
@@ -790,7 +791,7 @@ func TestPath_CommentDocument(t *testing.T) {
 func TestPath_Token_UnresolvableAlias(t *testing.T) {
 	t.Parallel()
 
-	// Node dereferences the alias and reports that it names no anchor, while
+	// Node looks through the alias and reports that it names no anchor, while
 	// Token returns the alias's own token.
 	source := niceyaml.NewSourceFromString("a: *x\nb: &x 1\n")
 	file, err := source.File()
@@ -1648,7 +1649,7 @@ none: []
 }
 
 // resolveToken returns the token path selects in doc, the key of the entry
-// when key is set and the value otherwise, and fails the test when the path
+// when key is set and the value otherwise. It fails the test when the path
 // does not resolve.
 func resolveToken(t *testing.T, path paths.Path, key bool, doc *ast.DocumentNode) *token.Token {
 	t.Helper()
@@ -1668,8 +1669,8 @@ func TestPath_Token_HandBuiltMapping(t *testing.T) {
 	t.Parallel()
 
 	// A tree built by hand may hold a typed nil or a nil entry where the
-	// parser always puts a node; the first token of such a mapping is not
-	// found rather than a panic.
+	// parser always puts a node; Token returns a not-found error for such a
+	// mapping rather than panicking.
 	tcs := map[string]ast.Node{
 		"key holding a typed nil": mapNode(mapEntry((*ast.StringNode)(nil), &ast.StringNode{Value: "1"})),
 		"nil entry":               &ast.MappingNode{Values: []*ast.MappingValueNode{nil}},
@@ -1688,7 +1689,7 @@ func TestPath_Token_HandBuiltMapping(t *testing.T) {
 func TestPath_Node_LaterMergeKeyWins(t *testing.T) {
 	t.Parallel()
 
-	// A mapping may hold two merge keys when duplicate keys are allowed.
+	// A mapping may hold two merge keys when the parser allows duplicates.
 	// The decoder takes the value of the later one, so the path does too.
 	src := "p: &p {k: P}\nq: &q {k: Q}\nt:\n  <<: *p\n  <<: *q\n"
 

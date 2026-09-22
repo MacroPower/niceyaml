@@ -11,8 +11,8 @@ var (
 	// ErrInvalidPath indicates a path expression that [Parse] cannot read.
 	ErrInvalidPath = errors.New("invalid path")
 
-	// The reason an index selector does not parse: it is not a canonical
-	// non-negative decimal integer.
+	// An index selector that is not a canonical non-negative decimal
+	// integer produces errInvalidIndex.
 	errInvalidIndex = errors.New("not a non-negative integer")
 )
 

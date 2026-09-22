@@ -43,12 +43,12 @@
 // forms a cycle. When the document has no content to resolve in, the error
 // wraps [ErrNoDocument] along with ErrNotFound.
 //
-// # Integration with niceyaml.Error
+// # Error Highlighting
 //
-// [Path] is directly usable with [niceyaml.AtPath], which highlights the
-// value at the path, or the key of the entry for a path from [Path.Key].
-// The error carries the path, and [niceyaml.Document.Bind] resolves it
-// against the document:
+// Pass a [Path] to [niceyaml.AtPath], which highlights the value at the
+// path, or the key of the entry for a path from [Path.Key]. The error
+// carries the path, and [niceyaml.Document.Bind] resolves it against the
+// document:
 //
 //	err := niceyaml.NewError(
 //		"invalid value",
@@ -78,8 +78,8 @@
 //	paths.Root().Recursive("name")                      // $..name
 //	paths.Root().Child("spec").Key()                    // $.spec~
 //
-// A Path is a value that never changes, so a common prefix can be shared
-// safely:
+// A Path is a value that never changes, so callers can share a common
+// prefix safely:
 //
 //	spec := paths.Root().Child("spec")
 //	replicas := spec.Child("replicas") // $.spec.replicas
