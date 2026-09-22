@@ -153,7 +153,8 @@ type Schema struct {
 //	})
 //
 // The Ref has no [Ref.Key], since the registry has nothing to load or
-// cache for it, and [Registry.Load] returns an error wrapping [ErrLoad].
+// cache for it. [Registry.Schema] returns the schema as it is, and
+// [Registry.Load] returns an error wrapping [ErrLoad].
 func (s *Schema) Ref() Ref {
 	return Ref{schema: s}
 }

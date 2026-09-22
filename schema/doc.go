@@ -126,10 +126,12 @@
 // The loaders return a [Ref] whose key identifies the schema and whose
 // bytes the registry loads through [Registry.Load]: a file from the
 // working directory, or from the file system [WithFS] gave the registry,
-// and a URL with the client [WithHTTPClient] gave it. The registry checks
-// its cache by key first, so it reads a file or fetches a URL once,
-// however many documents name it. A resolver that picks the schema from
-// the document returns the same Refs:
+// and a URL with the client [WithHTTPClient] gave it. [Registry.Schema]
+// compiles those bytes and checks its cache by key first, so the registry
+// reads a file or fetches a URL once, however many documents name it, and
+// a caller that holds a Ref of its own takes the compiled schema from the
+// same cache. A resolver that picks the schema from the document returns
+// the same Refs:
 //
 //	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Document) (schema.Ref, error) {
 //	    node, err := doc.At(kindPath)

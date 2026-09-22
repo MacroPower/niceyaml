@@ -98,9 +98,9 @@ func (r Ref) Key() string {
 }
 
 // Schema returns the compiled schema of a [Ref] from [Schema.Ref], or nil
-// for a Ref that names bytes to load. A caller that resolves schemas
-// without a [Registry] checks it before [Registry.Load], as the registry
-// does.
+// for a Ref that names bytes to load. [Registry.Schema] returns it as it
+// is for such a Ref, and a caller that loads bytes without a registry
+// checks it before [Registry.Load], as the registry does.
 func (r Ref) Schema() *Schema {
 	return r.schema
 }

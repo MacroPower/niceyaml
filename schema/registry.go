@@ -37,8 +37,10 @@ var (
 // the schemas it compiles by [Ref.Key] and consults that cache before
 // loading, so it loads and compiles each schema once however many
 // documents name it, and it compiles every schema with the options
-// [WithCompileOptions] gave it. A [*Schema] compiled elsewhere is a
-// resolver too, and the registry validates with it as it is.
+// [WithCompileOptions] gave it. [Registry.Schema] hands out the compiled
+// schema a [Ref] names through that cache, for a caller that holds a Ref
+// of its own. A [*Schema] compiled elsewhere is a resolver too, and the
+// registry validates with it as it is.
 //
 // Example:
 //
@@ -261,7 +263,7 @@ func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Document) (*Schema,
 			return nil, fmt.Errorf("%w: %w", ErrResolve, err)
 		}
 
-		return r.schema(ctx, ref)
+		return r.Schema(ctx, ref)
 	}
 
 	// The loop-top check does not see a context the last resolver ended, so
@@ -309,19 +311,34 @@ func (r *Registry) Validate(ctx context.Context, doc *niceyaml.Document) error {
 	return doc.Validate(ctx, v)
 }
 
-// schema returns the schema for ref: the one it carries, as it is, or
-// the bytes it loads, compiled on the first request for its Key and
-// served from the cache after that. The zero Ref names no schema, so it
-// is [ErrResolve].
+// Schema returns the compiled schema ref names: the one a Ref from
+// [Schema.Ref] carries, as it is, or the bytes [Registry.Load] loads for
+// it, compiled with the options [WithCompileOptions] gave the registry on
+// the first request for its [Ref.Key] and served from the cache after
+// that. [Registry.Lookup] takes the schema it validates with from here,
+// so a caller that holds a Ref of its own, such as one that checks a Go
+// value with [Schema.ValidateValue], shares the same load and compile:
 //
-// Concurrent requests for one Key share a single load and compile through
-// the singleflight group, and each caller waits for it only while its own
-// context is live. The shared load runs under the context of the caller
-// that started it and reports whether that context had ended when the load
-// failed. A caller that joined with a live context loads again only in that
-// case. Any other failure reaches every caller that shared the load,
-// including a timeout inside the load whose error wraps a context error.
-func (r *Registry) schema(ctx context.Context, ref Ref) (*Schema, error) {
+//	s, err := reg.Schema(ctx, schema.URL(schemaURL))
+//	if err != nil {
+//		return err
+//	}
+//
+//	return s.ValidateValue(ctx, value)
+//
+// The zero Ref names no schema, so it is [ErrResolve]. A load that fails
+// is [ErrLoad], and a compile that fails is [ErrCompile]. When ctx ends
+// before the schema loads, Schema returns [ErrLoad] wrapping the context's
+// error without waiting for the load to finish.
+//
+// Concurrent requests for one Key share a single load and compile, and
+// each caller waits for it only while its own context is live. The shared
+// load runs under the context of the caller that started it and reports
+// whether that context had ended when the load failed. A caller that
+// joined with a live context loads again only in that case. Any other
+// failure reaches every caller that shared the load, including a timeout
+// inside the load whose error wraps a context error.
+func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 	if ref.Schema() != nil {
 		return ref.Schema(), nil
 	}
@@ -383,9 +400,10 @@ func (r *Registry) schema(ctx context.Context, ref Ref) (*Schema, error) {
 // [File] names, read from the file system [WithFS] gave the registry or
 // from the working directory; the URL a Ref from [URL] names, fetched
 // with the client [WithHTTPClient] gave it; or the bytes the load of a Ref
-// from [Loadable] returns. [Registry.Lookup] loads the same bytes and
-// compiles them, so Load is for a caller that wants the bytes
-// themselves, such as one that prints a schema. An error wraps [ErrLoad].
+// from [Loadable] returns. Load reads the bytes on every call and caches
+// nothing. [Registry.Schema] loads the same bytes once and compiles them,
+// so Load is for a caller that wants the bytes themselves, such as one
+// that prints a schema. An error wraps [ErrLoad].
 //
 // The zero Ref names no bytes, and a Ref from [Schema.Ref] carries a
 // compiled schema rather than bytes, which [Ref.Schema] returns, so Load

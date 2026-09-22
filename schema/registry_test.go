@@ -1339,3 +1339,114 @@ func TestRegistry_Load(t *testing.T) {
 		require.ErrorIs(t, err, schema.ErrLoad)
 	})
 }
+
+func TestRegistry_Schema(t *testing.T) {
+	t.Parallel()
+
+	t.Run("compiles a loadable ref once and serves the cache after", func(t *testing.T) {
+		t.Parallel()
+
+		var loads atomic.Int32
+
+		ref := schema.Loadable("k", func(_ context.Context) ([]byte, error) {
+			loads.Add(1)
+
+			return []byte(`{"type": "object", "required": ["port"]}`), nil
+		})
+
+		reg := schema.NewRegistry()
+
+		first, err := reg.Schema(t.Context(), ref)
+		require.NoError(t, err)
+
+		second, err := reg.Schema(t.Context(), ref)
+		require.NoError(t, err)
+		assert.Same(t, first, second)
+		assert.Equal(t, int32(1), loads.Load())
+
+		// The schema validates a Go value as the one Lookup finds does.
+		require.NoError(t, first.ValidateValue(t.Context(), map[string]any{"port": 80}))
+		require.Error(t, first.ValidateValue(t.Context(), map[string]any{}))
+	})
+
+	t.Run("shares the cache with Lookup", func(t *testing.T) {
+		t.Parallel()
+
+		var loads atomic.Int32
+
+		ref := schema.Loadable("k", func(_ context.Context) ([]byte, error) {
+			loads.Add(1)
+
+			return []byte(`{"type": "object"}`), nil
+		})
+
+		reg := schema.NewRegistry(schema.WithResolvers(ref))
+
+		fromLookup, err := reg.Lookup(t.Context(), document(t))
+		require.NoError(t, err)
+
+		fromRef, err := reg.Schema(t.Context(), ref)
+		require.NoError(t, err)
+		assert.Same(t, fromLookup, fromRef)
+		assert.Equal(t, int32(1), loads.Load())
+	})
+
+	t.Run("compiles with the registry's compile options", func(t *testing.T) {
+		t.Parallel()
+
+		ref := schema.Loadable("k", func(_ context.Context) ([]byte, error) {
+			return []byte(`{"type": "string", "format": "email"}`), nil
+		})
+
+		plain, err := schema.NewRegistry().Schema(t.Context(), ref)
+		require.NoError(t, err)
+		require.NoError(t, plain.ValidateValue(t.Context(), "not an email"))
+
+		strict := schema.NewRegistry(schema.WithCompileOptions(
+			schema.WithJSONSchemaOptions(jsonschema.WithFormats(true)),
+		))
+
+		checked, err := strict.Schema(t.Context(), ref)
+		require.NoError(t, err)
+		require.Error(t, checked.ValidateValue(t.Context(), "not an email"))
+	})
+
+	t.Run("a compiled schema comes back as it is", func(t *testing.T) {
+		t.Parallel()
+
+		compiled := schema.MustCompile([]byte(`{}`))
+
+		got, err := schema.NewRegistry().Schema(t.Context(), compiled.Ref())
+		require.NoError(t, err)
+		assert.Same(t, compiled, got)
+	})
+
+	t.Run("the zero ref names no schema", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := schema.NewRegistry().Schema(t.Context(), schema.Ref{})
+		require.ErrorIs(t, err, schema.ErrResolve)
+	})
+
+	t.Run("a load that fails is ErrLoad", func(t *testing.T) {
+		t.Parallel()
+
+		ref := schema.Loadable("k", func(_ context.Context) ([]byte, error) {
+			return nil, errors.New("boom")
+		})
+
+		_, err := schema.NewRegistry().Schema(t.Context(), ref)
+		require.ErrorIs(t, err, schema.ErrLoad)
+	})
+
+	t.Run("bytes that do not compile are ErrCompile", func(t *testing.T) {
+		t.Parallel()
+
+		ref := schema.Loadable("k", func(_ context.Context) ([]byte, error) {
+			return []byte(`{"type": 42}`), nil
+		})
+
+		_, err := schema.NewRegistry().Schema(t.Context(), ref)
+		require.ErrorIs(t, err, schema.ErrCompile)
+	})
+}
