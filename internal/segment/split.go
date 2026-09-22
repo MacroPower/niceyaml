@@ -503,9 +503,11 @@ func (b *builder) continuesPreviousLine(ctx *partContext) bool {
 // Position.Line to the header's line or to the last content line, not to
 // the line its Origin starts on, so syncing to it would skip a line.
 // The part that owns the original Position carries it forward through
-// processPart.
+// processPart. A token that is a line ending alone is no evidence
+// either: it closes the line it sits on, and syncing to its Position.Line
+// would make the blank line it ends read as a repeated line ending.
 func (b *builder) handleGap(tk *token.Token, parts []string, isBlockScalarContent bool) {
-	if len(parts) != 1 || isBlockScalarContent {
+	if len(parts) != 1 || isBlockScalarContent || isPureNewline(tk.Origin) {
 		return
 	}
 

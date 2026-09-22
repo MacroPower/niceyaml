@@ -1742,6 +1742,24 @@ func TestNewLines_BlankLineAbsorption(t *testing.T) {
 		assert.Equal(t, 3, lines.Line(2).Number(), "third line should be 3")
 	})
 
+	t.Run("a blank line after a bare block scalar header stays a line", func(t *testing.T) {
+		t.Parallel()
+
+		// The lexer emits the blank line as a token that is a line ending
+		// alone, positioned on its own line. It ends the header's line
+		// rather than syncing past it, so the blank line keeps its row.
+		for _, input := range []string{">\n\na: 1\n", "|\n\nr\n", "\n>\n\n>\n# c\n"} {
+			lines := line.NewLines(lexer.Tokenize(input))
+			want := strings.Count(input, "\n")
+
+			require.Equal(t, want, lines.Len(), "input %q", input)
+
+			for i := range want {
+				assert.Equal(t, i+1, lines.Line(i).Number(), "input %q line %d", input, i)
+			}
+		}
+	})
+
 	t.Run("line numbers stay contiguous after block scalar content", func(t *testing.T) {
 		t.Parallel()
 
