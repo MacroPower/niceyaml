@@ -32,7 +32,7 @@ type anyMatcher struct {
 //	)
 func Any(matchers ...Matcher) Matcher {
 	for i, m := range matchers {
-		if m == nil {
+		if isNil(m) {
 			panic(fmt.Sprintf("matcher.Any: matcher at index %d is nil", i))
 		}
 	}

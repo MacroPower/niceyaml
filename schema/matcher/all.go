@@ -29,7 +29,7 @@ type allMatcher struct {
 //	)
 func All(matchers ...Matcher) Matcher {
 	for i, m := range matchers {
-		if m == nil {
+		if isNil(m) {
 			panic(fmt.Sprintf("matcher.All: matcher at index %d is nil", i))
 		}
 	}

@@ -106,6 +106,9 @@ func TestAll(t *testing.T) {
 	t.Run("nil matcher panics", func(t *testing.T) {
 		t.Parallel()
 
+		assert.PanicsWithValue(t, "matcher.All: matcher at index 0 is nil", func() {
+			matcher.All(matcher.Func(nil))
+		})
 		assert.PanicsWithValue(t, "matcher.All: matcher at index 1 is nil", func() {
 			matcher.All(matcher.Content(kindPath, "Test"), nil)
 		})
