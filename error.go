@@ -210,6 +210,12 @@ type ErrorOption func(e *Error)
 // field:
 //
 //	niceyaml.NewError("unknown field", niceyaml.AtPath(paths.Root().Child("spec", "foo").Key()))
+//
+// The path resolves from the scope of the [Node] that binds the Error,
+// so [paths.Root] names that node itself, and a check on a value from
+// [Node.At] writes its paths from the value. A path from [Node.Path] is
+// absolute, so it binds through the root of the document or through
+// [Source.Bind], and a scoped Node joins it under its own path again.
 func AtPath(p paths.Path) ErrorOption {
 	return func(e *Error) {
 		e.loc = p
