@@ -25,7 +25,9 @@ func TestFinder_Find(t *testing.T) {
 		input      string
 		search     string
 		normalizer finder.Normalizer
-		want       position.Ranges
+		// Matches bytes exactly, with no normalizer at all.
+		exact bool
+		want  position.Ranges
 	}{
 		"single token match": {
 			input:  "key: value",
@@ -127,9 +129,10 @@ func TestFinder_Find(t *testing.T) {
 				),
 			},
 		},
-		"case sensitive - no match": {
+		"exact matching - no match": {
 			input:  "key: VALUE",
 			search: "value",
+			exact:  true,
 			want:   nil,
 		},
 		"case insensitive with normalizer": {
@@ -333,7 +336,7 @@ func TestFinder_Find(t *testing.T) {
 
 			var opts []finder.Option
 
-			if tc.normalizer != nil {
+			if tc.normalizer != nil || tc.exact {
 				opts = append(opts, finder.WithNormalizer(tc.normalizer))
 			}
 

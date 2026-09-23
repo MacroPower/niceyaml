@@ -9,7 +9,6 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/finder"
-	"go.jacobcolvin.com/niceyaml/normalizer"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
@@ -36,11 +35,8 @@ func main() {
 		)),
 	)
 
-	// Create a finder with standard normalization.
-	// The standard normalizer ignores case and diacritics.
-	f := finder.New(
-		finder.WithNormalizer(normalizer.New()),
-	)
+	// A finder ignores case and diacritics by default.
+	f := finder.New()
 
 	// Load the source lines to build a search index.
 	idx := f.Load(source.Lines())

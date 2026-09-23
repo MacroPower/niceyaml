@@ -304,12 +304,12 @@
 // returns [position.Range] values suitable for [line.View.AddOverlay] and
 // [line.View.BlendOverlay].
 //
-// Use [go.jacobcolvin.com/niceyaml/normalizer.New] with
-// [go.jacobcolvin.com/niceyaml/finder.WithNormalizer] for case-insensitive,
-// diacritic-insensitive matching:
+// A search folds case and ignores diacritics by default, through
+// [go.jacobcolvin.com/niceyaml/normalizer.New], and
+// [go.jacobcolvin.com/niceyaml/finder.WithNormalizer] sets a normalizer
+// of the caller's own, or none for exact matching:
 //
-//	f := finder.New(finder.WithNormalizer(normalizer.New()))
-//	idx := f.Load(source.Lines())
+//	idx := finder.New().Load(source.Lines())
 //	view := source.View()
 //	view.AddOverlay(kind.GenericHighlight, idx.Find("search term")...)
 //	fmt.Println(p.Print(view))

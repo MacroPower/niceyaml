@@ -16,7 +16,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/finder"
 	"go.jacobcolvin.com/niceyaml/line"
-	"go.jacobcolvin.com/niceyaml/normalizer"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style/kind"
@@ -175,8 +174,8 @@ func WithContainerStyle(s lipgloss.Style) Option {
 
 // WithSearcher is an [Option] that sets the [Searcher] that search terms run
 // through. Without it, and without [WithFinder], the viewport creates a
-// [finder.Finder] with a default [normalizer.Normalizer]. A nil s selects
-// that same default.
+// [finder.Finder] with [finder.New], which folds case and ignores
+// diacritics. A nil s selects that same default.
 func WithSearcher(s Searcher) Option {
 	return func(m *Model) {
 		m.searcher = s
@@ -186,9 +185,7 @@ func WithSearcher(s Searcher) Option {
 // WithFinder is an [Option] that sets the [finder.Finder] that builds the
 // search index. It is [WithSearcher] with f adapted to [Searcher]:
 //
-//	yamlviewport.WithFinder(finder.New(finder.WithNormalizer(normalizer.New(
-//		normalizer.WithDiacriticFold(false),
-//	))))
+//	yamlviewport.WithFinder(finder.New(finder.WithNormalizer(nil)))
 //
 // A nil f selects the default searcher, as a nil [WithSearcher] does.
 func WithFinder(f *finder.Finder) Option {
@@ -322,9 +319,7 @@ func (m *Model) setInitialValues() {
 	}
 
 	if m.searcher == nil {
-		m.searcher = finderSearcher{finder: finder.New(
-			finder.WithNormalizer(normalizer.New()),
-		)}
+		m.searcher = finderSearcher{finder: finder.New()}
 	}
 
 	m.relayout()

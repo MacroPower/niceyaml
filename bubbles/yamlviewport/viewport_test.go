@@ -3584,14 +3584,15 @@ func TestViewport_WithSearcher(t *testing.T) {
 
 		m := yamlviewport.New(
 			yamlviewport.WithPrinter(testPrinter()),
-			yamlviewport.WithFinder(finder.New()),
+			yamlviewport.WithFinder(finder.New(finder.WithNormalizer(nil))),
 		)
 
 		m.SetWidth(80)
 		m.SetHeight(10)
 		m.SetRevision(niceyaml.NewSourceFromString("key: Value\n"))
 
-		// The finder has no normalizer, so the search is case-sensitive.
+		// The finder has no normalizer, so the search is case-sensitive,
+		// unlike the default finder.
 		m.SetSearchTerm("value")
 		assert.Equal(t, 0, m.SearchCount())
 

@@ -6,14 +6,15 @@
 // [Index] over the lines once with [Finder.Load], and search the index any
 // number of times with [Index.Find]:
 //
-//	f := finder.New(finder.WithNormalizer(normalizer.New()))
-//	idx := f.Load(source.Lines())
+//	idx := finder.New().Load(source.Lines())
 //	view := source.View()
 //	view.BlendOverlay(kind.GenericHighlight, idx.Find("search term")...)
 //
-// Searches are exact by default. [WithNormalizer] applies a [Normalizer] to
-// both the loaded text and the search string, one character at a time, and
-// the normalizer package provides one that folds case and strips diacritics.
+// A search folds case and ignores diacritics by default, through the
+// [normalizer.Normalizer] that [normalizer.New] builds. [WithNormalizer]
+// applies a [Normalizer] of the caller's own to both the loaded text and
+// the search string, one character at a time, and a nil one matches
+// bytes exactly.
 package finder
 
 import (
@@ -22,6 +23,7 @@ import (
 	"unicode/utf8"
 
 	"go.jacobcolvin.com/niceyaml/line"
+	"go.jacobcolvin.com/niceyaml/normalizer"
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
@@ -49,18 +51,15 @@ type Normalizer interface {
 //
 // Example:
 //
-//	f := finder.New(
-//		finder.WithNormalizer(normalizer.New()),
-//	)
-//	idx := f.Load(source.Lines())
+//	idx := finder.New().Load(source.Lines())
 //	view := source.View()
 //	view.BlendOverlay(kind.GenericHighlight, idx.Find("search term")...)
 //	fmt.Println(p.Print(view))
 //
-// By default, searches are exact (case-sensitive, no normalization).
-//
-// Use [WithNormalizer] with [normalizer.Normalizer] for case-insensitive
-// matching that also ignores diacritics (e.g., "cafe" matches "Café").
+// By default, a search folds case and ignores diacritics, so "cafe"
+// matches "Café", through the [normalizer.Normalizer] that
+// [normalizer.New] builds. [WithNormalizer] sets a normalizer of the
+// caller's own, and [WithNormalizer] with nil matches bytes exactly.
 //
 // Create instances with [New].
 type Finder struct {
@@ -70,10 +69,11 @@ type Finder struct {
 // New creates a new [*Finder].
 // Call [Finder.Load] to build an [Index] over [line.Lines] before searching.
 //
-// By default, the Finder applies no normalization. Use [WithNormalizer] to
-// enable case-insensitive or diacritic-insensitive matching.
+// Without options, the Finder normalizes with [normalizer.New], which
+// folds case and strips diacritics. [WithNormalizer] replaces that
+// normalizer, or removes it for exact matching.
 func New(opts ...Option) *Finder {
-	f := &Finder{}
+	f := &Finder{normalizer: normalizer.New()}
 	for _, opt := range opts {
 		opt(f)
 	}
@@ -87,8 +87,12 @@ func New(opts ...Option) *Finder {
 //   - [WithNormalizer]
 type Option func(*Finder)
 
-// WithNormalizer is an [Option] that sets a [Normalizer] applied to both
-// the search string and the loaded text before matching.
+// WithNormalizer is an [Option] that sets the [Normalizer] applied to
+// both the search string and the loaded text before matching, in place
+// of the one [normalizer.New] builds. A nil normalizer removes
+// normalization, so a search then matches bytes exactly:
+//
+//	exact := finder.New(finder.WithNormalizer(nil))
 //
 // The normalizer receives one character at a time, on both sides, so the
 // same character always normalizes the same way wherever it appears. A
@@ -96,9 +100,9 @@ type Option func(*Finder)
 // casing, sees none and behaves as it would on a one-character string.
 //
 // See [normalizer.Normalizer] for an implementation.
-func WithNormalizer(normalizer Normalizer) Option {
+func WithNormalizer(n Normalizer) Option {
 	return func(f *Finder) {
-		f.normalizer = normalizer
+		f.normalizer = n
 	}
 }
 
