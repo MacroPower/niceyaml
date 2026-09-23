@@ -12,7 +12,6 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/paths"
-	"go.jacobcolvin.com/niceyaml/position"
 )
 
 var (
@@ -176,10 +175,9 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // comes back bound to the source, and a violation as an unbound
 // [*niceyaml.Error], which the node binds.
 //
-// Holding the node lets Validate locate a violation at a key the decoder
-// spells differently from the source, such as the hexadecimal 0x10,
-// which no path names. Such a violation carries the position of the key
-// or value it found rather than a path.
+// Holding the node lets Validate spell each key in a violation's path as
+// the source does, so a key the decoder respells, such as the hexadecimal
+// 0x10 for the member name 16, still names its member.
 func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 	data, err := n.Decode[any](ctx)
 	if err != nil {
@@ -215,8 +213,8 @@ func (s *Schema) ValidateValue(ctx context.Context, data any) error {
 
 // validate is [Schema.ValidateValue] with the node data was decoded from,
 // which [Schema.Validate] has and a caller of ValidateValue does not. A
-// violation at a key the decoder spells differently from the source, such
-// as the hexadecimal 0x10, needs the node to point at the failing line.
+// violation at a key the decoder respells, such as the hexadecimal 0x10,
+// needs the node to spell the key in its path as the source does.
 func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) error {
 	err := s.compiled.Validate(ctx, normalizeJSON(data))
 	if err == nil {
@@ -275,114 +273,71 @@ func newValidationError(ve *jsonschema.ValidationError, n *niceyaml.Node) *nicey
 // of a member, such as an additional property, points at the key through
 // [paths.Path.Key], and any other at the value.
 //
-// A path built from a key the decoder spells differently from the source,
-// such as 0x10 decoding to the member name 16, names nothing the document
-// holds. The failure then carries the position the key walk in n finds
-// instead, so the printer still highlights the failing line. Without n,
-// which a [Schema.ValidateValue] caller does not hand over, the path stays
-// as it is.
+// The path spells each key as the source does, so a key the decoder
+// respells, such as 0x10 for the member name 16, still names its member.
+// Without n, which a [Schema.ValidateValue] caller does not hand over, the
+// path spells each key as the decoder does.
 func leafError(leaf *jsonschema.ValidationError, n *niceyaml.Node) *niceyaml.Error {
-	segments := leaf.InstanceSegments()
-	path := buildTargetPath(segments)
+	path := sourcePath(rootOf(n), leaf.InstanceSegments())
 
 	if leaf.TargetsKey() {
 		path = path.Key()
 	}
 
-	locate := niceyaml.AtPath(path)
-
-	if pos, ok := decodedPosition(n, path, segments, leaf.TargetsKey()); ok {
-		locate = niceyaml.AtPosition(pos)
-	}
-
-	return niceyaml.NewError(leaf.Message, locate)
+	return niceyaml.NewError(leaf.Message, niceyaml.AtPath(path))
 }
 
-// buildTargetPath converts instance-location segments to a [paths.Path].
-// Each [jsonschema.Segment] already distinguishes an array index from a
-// property name, so buildTargetPath does no numeric guessing. A property
-// name is the name the decode produced, which [decodedPosition] locates
-// when the source spells the key another way.
-func buildTargetPath(segments []jsonschema.Segment) paths.Path {
-	path := paths.Root()
-
-	for _, seg := range segments {
-		if seg.IsIndex {
-			path = path.Index(seg.Index)
-		} else {
-			path = path.Child(seg.Key)
-		}
-	}
-
-	return path
-}
-
-// decodedPosition returns the position of the node segments name in doc,
-// for a path that resolves to nothing because a key decodes to a name the
-// source does not spell. The walk matches each mapping key by its decoded
-// name instead, and reports the key of the member when key is set, as it
-// is for a path from [paths.Path.Key], and its value otherwise.
-//
-// Reports false without a node, for a path that resolves as it is, and
-// for segments the walk cannot follow, such as a member a merge key brought
-// in, which the document holds nowhere.
-func decodedPosition(
-	n *niceyaml.Node, path paths.Path, segments []jsonschema.Segment, key bool,
-) (position.Position, bool) {
+// rootOf returns the tree of n, or nil for no node and for a node whose
+// tree does not resolve.
+func rootOf(n *niceyaml.Node) ast.Node {
 	if n == nil {
-		return position.Position{}, false
-	}
-
-	// The path and the segments are written from the node, as the data
-	// the schema checked was decoded from it.
-	_, err := n.At(path)
-	if err == nil {
-		return position.Position{}, false
+		return nil
 	}
 
 	root, err := n.AST()
 	if err != nil {
-		return position.Position{}, false
+		return nil
 	}
 
-	keyNode, valueNode := walkSegments(root, segments)
-
-	node := valueNode
-	if key && keyNode != nil {
-		node = keyNode
-	}
-
-	tk := node.GetToken()
-	if node == nil || tk == nil || tk.Position == nil {
-		return position.Position{}, false
-	}
-
-	return position.NewFromToken(tk), true
+	return root
 }
 
-// walkSegments walks root along segments, matching each mapping key by the
-// name a decode gives it, and returns the key and value nodes of the member
-// the last segment names. The key node is nil for a sequence element and
-// for a walk that ended early, and both are nil when the first segment
-// already names nothing.
-func walkSegments(root ast.Node, segments []jsonschema.Segment) (ast.Node, ast.Node) {
-	var keyNode, valueNode ast.Node = nil, root
+// sourcePath converts instance-location segments to a [paths.Path] that
+// resolves in root. Each [jsonschema.Segment] already distinguishes an
+// array index from a property name, so sourcePath does no numeric
+// guessing.
+//
+// A property name is the name the decoder produced, which the source may
+// spell another way, as it spells the member name 16 as 0x10. The walk
+// down root matches each mapping key by its decoded name and writes the
+// source spelling of that key into the path instead, which a path
+// selector matches. A segment the walk cannot follow, such as a member a
+// merge key brought in, keeps its decoded name, as does every segment
+// when root is nil and a key the walk finds but cannot spell.
+func sourcePath(root ast.Node, segments []jsonschema.Segment) paths.Path {
+	path := paths.Root()
+	node := root
 
 	for _, seg := range segments {
-		if valueNode == nil {
-			return nil, nil
-		}
-
 		if seg.IsIndex {
-			keyNode, valueNode = nil, elementNode(valueNode, seg.Index)
+			path = path.Index(seg.Index)
+			node = elementNode(node, seg.Index)
 
 			continue
 		}
 
-		keyNode, valueNode = memberNodes(valueNode, seg.Key)
+		name := seg.Key
+
+		keyNode, valueNode := memberNodes(node, seg.Key)
+		if spelled := sourceKey(keyNode); spelled != "" {
+			name = spelled
+		}
+
+		path = path.Child(name)
+		node = valueNode
 	}
 
-	return keyNode, valueNode
+	return path
 }
 
 // elementNode returns the element at index of the sequence node holds, or
@@ -446,6 +401,26 @@ func decodedKey(key ast.MapKeyNode) string {
 		return fmt.Sprint(k.GetValue())
 	default:
 		return ""
+	}
+}
+
+// sourceKey returns the name a path selector matches the key node by,
+// which is the source spelling of the key: the unquoted text of a string
+// key, and the token text of any other key, so the hexadecimal key 0x10
+// reads as 0x10. A key with no content, or with no token, has no name.
+func sourceKey(key ast.Node) string {
+	switch k := contentNode(key).(type) {
+	case nil:
+		return ""
+	case *ast.StringNode:
+		return k.Value
+	default:
+		tk := k.GetToken()
+		if tk == nil {
+			return ""
+		}
+
+		return tk.Value
 	}
 }
 

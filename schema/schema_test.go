@@ -552,7 +552,7 @@ func TestSchema_PathTarget(t *testing.T) {
 		},
 		"hexadecimal key highlights value": {
 			// The key decodes to the member name 16, which the source spells
-			// 0x10, so the path names nothing and the walk locates the value.
+			// 0x10, so the path names the member by its source spelling.
 			schema: `{
 				"type": "object",
 				"properties": {
@@ -566,8 +566,7 @@ func TestSchema_PathTarget(t *testing.T) {
 		},
 		"tilde null key highlights value": {
 			// The key decodes to the member name null, which the source
-			// spells ~, so the path names nothing and the walk locates the
-			// value.
+			// spells ~, so the path names the member by its source spelling.
 			schema: `{
 				"type": "object",
 				"additionalProperties": {"type": "string"}
@@ -641,43 +640,64 @@ func TestSchema_PathTarget(t *testing.T) {
 	}
 }
 
-func TestWalkSegments_TypedNilNode(t *testing.T) {
+func TestSourcePath_TypedNilNode(t *testing.T) {
 	t.Parallel()
 
 	// The parser always puts a node where these trees hold a typed nil,
-	// but a tree built or rewritten by hand may not, and the walk reports
-	// no match for it rather than panicking.
+	// but a tree built or rewritten by hand may not, and the walk keeps
+	// the decoded name for it rather than panicking.
 	tcs := map[string]struct {
 		root     ast.Node
 		segments []jsonschema.Segment
+		want     string
 	}{
 		"mapping behind an anchor": {
 			root:     &ast.AnchorNode{Value: (*ast.MappingNode)(nil)},
 			segments: []jsonschema.Segment{{Key: "name"}},
+			want:     "$.name",
 		},
 		"mapping value behind an anchor": {
 			root:     &ast.AnchorNode{Value: (*ast.MappingValueNode)(nil)},
 			segments: []jsonschema.Segment{{Key: "name"}},
+			want:     "$.name",
 		},
 		"sequence behind an anchor": {
 			root:     &ast.AnchorNode{Value: (*ast.SequenceNode)(nil)},
 			segments: []jsonschema.Segment{{Index: 0, IsIndex: true}},
+			want:     "$[0]",
 		},
 		"tag behind an anchor": {
 			root:     &ast.AnchorNode{Value: (*ast.TagNode)(nil)},
 			segments: []jsonschema.Segment{{Key: "name"}},
+			want:     "$.name",
 		},
 		"anchor behind an anchor": {
 			root:     &ast.AnchorNode{Value: (*ast.AnchorNode)(nil)},
 			segments: []jsonschema.Segment{{Key: "name"}},
+			want:     "$.name",
 		},
 		"document behind an anchor": {
 			root:     &ast.AnchorNode{Value: (*ast.DocumentNode)(nil)},
 			segments: []jsonschema.Segment{{Key: "name"}},
+			want:     "$.name",
 		},
 		"mapping key behind an anchor": {
 			root:     &ast.AnchorNode{Value: (*ast.MappingKeyNode)(nil)},
 			segments: []jsonschema.Segment{{Key: "name"}},
+			want:     "$.name",
+		},
+		"key with no token keeps the decoded name": {
+			root: &ast.MappingNode{Values: []*ast.MappingValueNode{{
+				Key:   &ast.IntegerNode{Value: 16},
+				Value: &ast.StringNode{Value: "x"},
+			}}},
+			segments: []jsonschema.Segment{{Key: "16"}},
+			want:     "$.16",
+		},
+		"no tree": {
+			root:     nil,
+			segments: []jsonschema.Segment{{Key: "items"}, {Index: 1, IsIndex: true}, {Key: "16"}},
+			want:     "$.items[1].16",
 		},
 	}
 
@@ -685,9 +705,7 @@ func TestWalkSegments_TypedNilNode(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			keyNode, valueNode := schema.WalkSegments(tc.root, tc.segments)
-			assert.Nil(t, keyNode)
-			assert.Nil(t, valueNode)
+			assert.Equal(t, tc.want, schema.SourcePath(tc.root, tc.segments).String())
 		})
 	}
 }
@@ -1079,8 +1097,8 @@ func TestSchema_Validate_Scope(t *testing.T) {
 		t.Parallel()
 
 		// The key decodes to the member name 16, which the source spells
-		// 0x10, so the path names nothing and the walk from the node
-		// locates the value.
+		// 0x10, so the path names the member by its source spelling and
+		// resolves from the node.
 		dd := yamltest.FirstDocument(t, stringtest.Input(`
 			0x10: 1
 			spec:
@@ -1096,6 +1114,7 @@ func TestSchema_Validate_Scope(t *testing.T) {
 		rng, ok := bound.Range()
 		require.True(t, ok)
 		assert.Equal(t, position.New(2, 8), rng.Start)
+		assert.Equal(t, "3:9: $.0x10: expected \"integer\", got \"string\"", bound.Error())
 	})
 
 	t.Run("additional property resolves from the node", func(t *testing.T) {
@@ -1117,6 +1136,139 @@ func TestSchema_Validate_Scope(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, position.New(2, 2), rng.Start)
 	})
+}
+
+func TestSchema_SourcePath(t *testing.T) {
+	t.Parallel()
+
+	// A violation's path spells each key as the source does, so a key the
+	// decoder respells, such as 0x10 for the member name 16, still names
+	// the member. The path prints in the error and resolves with Node.At.
+	tcs := map[string]struct {
+		schema   string
+		input    string
+		wantPath string
+		want     string
+	}{
+		"hexadecimal key": {
+			schema: `{
+				"type": "object",
+				"properties": {"16": {"type": "integer"}}
+			}`,
+			input:    "0x10: hello\n",
+			wantPath: "$.0x10",
+			want:     "1:7: $.0x10: expected \"integer\", got \"string\"",
+		},
+		"tilde null key": {
+			schema: `{
+				"type": "object",
+				"additionalProperties": {"type": "string"}
+			}`,
+			input:    "~: 5\n",
+			wantPath: "$.'~'",
+			want:     "1:4: $.'~': expected \"string\", got \"integer\"",
+		},
+		"spelled-out null key": {
+			schema: `{
+				"type": "object",
+				"additionalProperties": {"type": "string"}
+			}`,
+			input:    "NULL: 5\n",
+			wantPath: "$.NULL",
+			want:     "1:7: $.NULL: expected \"string\", got \"integer\"",
+		},
+		"boolean key targeted by the failure": {
+			schema: `{
+				"type": "object",
+				"properties": {"name": {"type": "string"}},
+				"additionalProperties": false
+			}`,
+			input:    "True: nope\n",
+			wantPath: "$.True~",
+			want:     "1:1: $.True~: value is not allowed",
+		},
+		"float key": {
+			schema: `{
+				"type": "object",
+				"additionalProperties": {"type": "string"}
+			}`,
+			input:    "1.5: 5\n",
+			wantPath: "$.'1.5'",
+			want:     "1:6: $.'1.5': expected \"string\", got \"integer\"",
+		},
+		"key with a dot": {
+			schema: `{
+				"type": "object",
+				"additionalProperties": {"type": "string"}
+			}`,
+			input:    "a.b: 5\n",
+			wantPath: "$.'a.b'",
+			want:     "1:6: $.'a.b': expected \"string\", got \"integer\"",
+		},
+		"key with a space": {
+			schema: `{
+				"type": "object",
+				"additionalProperties": {"type": "string"}
+			}`,
+			input:    "a b: 5\n",
+			wantPath: "$.a b",
+			want:     "1:6: $.a b: expected \"string\", got \"integer\"",
+		},
+		"nested respelled key": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"spec": {
+						"type": "object",
+						"properties": {"16": {"type": "integer"}}
+					}
+				}
+			}`,
+			input:    "spec:\n  0x10: hello\n",
+			wantPath: "$.spec.0x10",
+			want:     "2:9: $.spec.0x10: expected \"integer\", got \"string\"",
+		},
+		"respelled key inside a sequence": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"items": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {"16": {"type": "integer"}}
+						}
+					}
+				}
+			}`,
+			input:    "items:\n  - 0x10: 1\n  - 0x10: hello\n",
+			wantPath: "$.items[1].0x10",
+			want:     "3:11: $.items[1].0x10: expected \"integer\", got \"string\"",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			v := compileSchema(t, []byte(tc.schema))
+			dd := yamltest.FirstDocument(t, tc.input)
+
+			err := dd.Validate(t.Context(), v)
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+
+			gotPath, ok := bound.Path()
+			require.True(t, ok, "bound error carries no path")
+			assert.Equal(t, tc.wantPath, gotPath.String())
+			assert.Equal(t, tc.want, bound.Error())
+
+			_, err = dd.At(gotPath)
+			require.NoError(t, err, "path from the error does not resolve")
+		})
+	}
 }
 
 func TestSchema_Ref(t *testing.T) {
