@@ -848,7 +848,7 @@ func TestDocument_Node(t *testing.T) {
 
 		node, err := dd.AST()
 		require.NoError(t, err)
-		assert.Same(t, dd.Root().Body, node)
+		assert.Same(t, dd.DocumentAST().Body, node)
 	})
 
 	t.Run("scope is the node the path selects", func(t *testing.T) {
@@ -860,7 +860,7 @@ func TestDocument_Node(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "  name: app", node.String())
 
-		want, err := paths.Root().Child("meta").Node(dd.Root())
+		want, err := paths.Root().Child("meta").Node(dd.DocumentAST())
 		require.NoError(t, err)
 		assert.Same(t, want, node)
 	})
@@ -917,7 +917,7 @@ func TestDocument_Node(t *testing.T) {
 		meta := yamltest.At(t, dd, paths.Root().Child("meta"))
 
 		assert.Same(t, dd, meta.Document())
-		assert.Same(t, dd.Root(), meta.Document().Root())
+		assert.Same(t, dd.DocumentAST(), meta.Document().DocumentAST())
 		assert.Same(t, dd.Source(), meta.Source())
 		assert.Equal(t, paths.Root().Child("meta"), meta.Path())
 		assert.True(t, dd.Path().IsRoot())
@@ -2907,7 +2907,7 @@ func TestDocument_At_Scope(t *testing.T) {
 
 		assert.Same(t, dd.Source(), hours.Source())
 		assert.Same(t, dd, hours.Document())
-		assert.Same(t, dd.Root(), hours.Document().Root())
+		assert.Same(t, dd.DocumentAST(), hours.Document().DocumentAST())
 		assert.Equal(t, dd.Index(), hours.Document().Index())
 		assert.Equal(t, dd.Preamble(), hours.Document().Preamble())
 		assert.Equal(t, dd.FilePath(), hours.Document().FilePath())

@@ -406,7 +406,7 @@ type document struct {
 // [Node.Path] is [paths.Root] for the root and the path from it for a
 // scoped Node.
 //
-// [Node.Root], [Node.Index], [Node.Preamble], and [Node.FilePath]
+// [Node.DocumentAST], [Node.Index], [Node.Preamble], and [Node.FilePath]
 // describe the document as a whole, whatever Node of it a caller holds.
 //
 // A Node holds the Source it came from, and every decoding method binds
@@ -429,10 +429,12 @@ type Node struct {
 	span position.Span
 }
 
-// Root returns the [*ast.DocumentNode] of the whole document the Node
-// belongs to. [Node.AST] returns the node the Node selects, and
-// [Node.Path] is the path from this root to it.
-func (n *Node) Root() *ast.DocumentNode {
+// DocumentAST returns the [*ast.DocumentNode] of the whole document the
+// Node belongs to, the go-yaml node the document parsed into.
+// [Node.Document] returns the root [*Node] of the same document,
+// [Node.AST] returns the go-yaml node the Node selects, and [Node.Path]
+// is the path from the document root to it.
+func (n *Node) DocumentAST() *ast.DocumentNode {
 	return n.doc.root
 }
 

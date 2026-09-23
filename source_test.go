@@ -680,7 +680,7 @@ func TestSource_File_TokensFindLines(t *testing.T) {
 
 		// The parser holds copies of the Source's tokens, and a copy finds
 		// the ranges the original does.
-		tk, err := paths.Root().Child("other").Token(doc.Root())
+		tk, err := paths.Root().Child("other").Token(doc.DocumentAST())
 		require.NoError(t, err)
 		require.NotNil(t, tk)
 
@@ -695,13 +695,13 @@ func TestSource_File_TokensFindLines(t *testing.T) {
 
 		// A path to a key resolves to the key token, and a block scalar to
 		// its indicator, each of which finds its own columns.
-		keyTk, err := paths.Root().Child("other").Key().Token(doc.Root())
+		keyTk, err := paths.Root().Child("other").Key().Token(doc.DocumentAST())
 		require.NoError(t, err)
 		assert.Equal(t, position.Ranges{
 			position.NewRange(position.New(3, 0), position.New(3, 5)),
 		}, source.Lines().ContentRanges(keyTk))
 
-		blockTk, err := paths.Root().Child("key").Token(doc.Root())
+		blockTk, err := paths.Root().Child("key").Token(doc.DocumentAST())
 		require.NoError(t, err)
 		assert.Equal(t, position.Ranges{
 			position.NewRange(position.New(0, 5), position.New(0, 6)),
