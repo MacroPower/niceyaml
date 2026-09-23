@@ -332,6 +332,89 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		_, err := dd.Decode[withPort](t.Context())
 		require.EqualError(t, err, "1:13: $.ports[1]: port out of range")
 	})
+
+	t.Run("a value that decodes itself validates itself alone", func(t *testing.T) {
+		t.Parallel()
+
+		type withSelfDecoding struct {
+			Bytes selfDecodingBytes `yaml:"bytes"`
+			Text  selfDecodingText  `yaml:"text"`
+		}
+
+		dd := yamltest.FirstDocument(t, "bytes: anything\ntext: anything\n")
+
+		var got withSelfDecoding
+
+		// Each unmarshaler fills its hours with a close before its open,
+		// which no Validate reports, since the walk stops at a value that
+		// decodes itself. Each value still validates itself.
+		require.NoError(t, dd.DecodeInto(t.Context(), &got))
+		assert.True(t, got.Bytes.validated)
+		assert.True(t, got.Text.validated)
+		assert.Equal(t, hours{Open: "17:00", Close: "09:00"}, got.Bytes.Inner)
+		assert.Equal(t, hours{Open: "17:00", Close: "09:00"}, got.Text.Inner)
+
+		type withNestedFailure struct {
+			Bytes failingSelfDecoding `yaml:"bytes"`
+		}
+
+		_, err := dd.Decode[withNestedFailure](t.Context())
+		require.EqualError(t, err, "1:8: $.bytes: rejected")
+	})
+}
+
+// selfDecodingBytes decodes itself from the YAML bytes, so its fields
+// need not mirror the document. It fills Inner with hours that close
+// before they open, which the walk must not report.
+type selfDecodingBytes struct {
+	Inner     hours
+	validated bool
+}
+
+func (s *selfDecodingBytes) UnmarshalYAML([]byte) error {
+	s.Inner = hours{Open: "17:00", Close: "09:00"}
+
+	return nil
+}
+
+func (s *selfDecodingBytes) Validate() error {
+	s.validated = true
+
+	return nil
+}
+
+// selfDecodingText is selfDecodingBytes through encoding.TextUnmarshaler.
+type selfDecodingText struct {
+	Inner     hours
+	validated bool
+}
+
+func (s *selfDecodingText) UnmarshalText([]byte) error {
+	s.Inner = hours{Open: "17:00", Close: "09:00"}
+
+	return nil
+}
+
+func (s *selfDecodingText) Validate() error {
+	s.validated = true
+
+	return nil
+}
+
+// failingSelfDecoding decodes itself and rejects itself, so its own
+// Validate still runs at its own path.
+type failingSelfDecoding struct {
+	Inner hours
+}
+
+func (f *failingSelfDecoding) UnmarshalYAML([]byte) error {
+	f.Inner = hours{Open: "17:00", Close: "09:00"}
+
+	return nil
+}
+
+func (failingSelfDecoding) Validate() error {
+	return niceyaml.NewError("rejected")
 }
 
 // ordered validates after its fields, and reports errOrder when a field

@@ -1,11 +1,14 @@
 package niceyaml
 
 import (
+	"encoding"
 	"errors"
 	"fmt"
 	"reflect"
 	"slices"
 	"strings"
+
+	"github.com/goccy/go-yaml"
 
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -18,6 +21,9 @@ import (
 // entry. The values below a value validate before it does, and a value
 // validates only when every value below it passed, so a parent that
 // checks a relation between its fields sees fields that hold together.
+// A value whose type decodes itself, through an unmarshaler method,
+// validates itself and nothing below it, since its fields need not
+// mirror the document and the paths under it would point nowhere.
 // Several errors come back joined, one per value that failed. Returns
 // nil when nothing failed.
 func selfValidate(v any) error {
@@ -72,11 +78,33 @@ func (w *selfWalker) walk(v reflect.Value, base paths.Path) bool {
 		return true
 	}
 
-	if !w.children(v, base) {
+	if !decodesItself(v.Type()) && !w.children(v, base) {
 		return false
 	}
 
 	return w.validate(v, base)
+}
+
+// unmarshalerTypes are the interfaces go-yaml decodes a value through
+// when its pointer implements one, in place of decoding field by field.
+var unmarshalerTypes = []reflect.Type{
+	reflect.TypeFor[yaml.BytesUnmarshaler](),
+	reflect.TypeFor[yaml.BytesUnmarshalerContext](),
+	reflect.TypeFor[yaml.InterfaceUnmarshaler](),
+	reflect.TypeFor[yaml.InterfaceUnmarshalerContext](),
+	reflect.TypeFor[yaml.NodeUnmarshaler](),
+	reflect.TypeFor[yaml.NodeUnmarshalerContext](),
+	reflect.TypeFor[encoding.TextUnmarshaler](),
+}
+
+// decodesItself reports whether go-yaml decodes a value of type t through
+// an unmarshaler method of its own, so the fields, elements, or entries
+// of the value need not mirror the document. The method set of the
+// pointer holds the methods of both receivers, as the decoder checks it.
+func decodesItself(t reflect.Type) bool {
+	pt := reflect.PointerTo(t)
+
+	return slices.ContainsFunc(unmarshalerTypes, pt.Implements)
 }
 
 // children walks the values below v, and reports whether every one of

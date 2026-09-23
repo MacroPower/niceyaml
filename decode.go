@@ -55,9 +55,11 @@ import (
 // one of them passed, so a parent that checks a relation between its
 // fields sees fields that hold together, and a decode reports every
 // value that failed. A field an inline tag flattens keeps the path of
-// the struct that holds it. A parent need not call the Validate of its
-// fields, and [Rebase] is for a check run on a value after Decode
-// returns.
+// the struct that holds it. A value whose type decodes itself, through
+// an UnmarshalYAML or UnmarshalText method, validates itself and
+// nothing below it, since its fields need not mirror the document. A
+// parent need not call the Validate of its fields, and [Rebase] is for
+// a check run on a value after Decode returns.
 type SelfValidator interface {
 	Validate() error
 }
