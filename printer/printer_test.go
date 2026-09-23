@@ -212,9 +212,17 @@ func TestPrinter_PrintError(t *testing.T) {
 	bound := yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("b"))))
 	other := niceyaml.NewSourceFromString("c: 3\n")
 
+	// The root has no message beside its range, so a caret run under the
+	// range shows its extent without color.
 	excerpt := stringtest.JoinLF(
 		"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>1</literalNumberInteger>",
 		"<nameTag>b</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>2</genericError>",
+		"<textError>   ^</textError>",
+	)
+
+	otherExcerpt := stringtest.JoinLF(
+		"<nameTag>c</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>3</genericError>",
+		"<textError>   ^</textError>",
 	)
 
 	// Both values marked, each with its message below it.
@@ -260,8 +268,7 @@ func TestPrinter_PrintError(t *testing.T) {
 					niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("c"))),
 				)),
 			),
-			want: "├── first: 2:4: $.b: bad\n└── second: 1:4: $.c: bad\n\n" + excerpt + "\n\n" +
-				"<nameTag>c</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>3</genericError>",
+			want: "├── first: 2:4: $.b: bad\n└── second: 1:4: $.c: bad\n\n" + excerpt + "\n\n" + otherExcerpt,
 		},
 		"nested errors draw as branches in position order": {
 			err: yamltest.Bind(t, source, niceyaml.NewError("2 problems", niceyaml.WithErrors(
@@ -279,8 +286,7 @@ func TestPrinter_PrintError(t *testing.T) {
 				yamltest.Bind(t, other, niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("c")))),
 			),
 			want: "├── 2 problems\n│   ├── 1:4: $.a: bad a\n│   └── 2:4: $.b: bad b\n└── 1:4: $.c: bad\n\n" +
-				annotated + "\n\n" +
-				"<nameTag>c</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>3</genericError>",
+				annotated + "\n\n" + otherExcerpt,
 		},
 	}
 
@@ -339,6 +345,59 @@ func TestPrinter_PrintError_Wrap(t *testing.T) {
 	// and no row carries padding after its text.
 	assert.Contains(t, got, "\n\u2502   message that\n")
 	assert.NotContains(t, got, " \n")
+}
+
+func TestPrinter_PrintError_MarksRangeWithoutStyles(t *testing.T) {
+	t.Parallel()
+
+	// A childless bound error has no message beside its range, so without
+	// color the carets on the row below are all that shows its extent.
+	source := niceyaml.NewSourceFromString("spec:\n  sla: 99\n  hours:\n")
+	bound := yamltest.Bind(t, source, niceyaml.NewError("bad",
+		niceyaml.AtPath(paths.Root().Child("spec").Child("sla")),
+	))
+
+	tcs := map[string]struct {
+		gutter printer.Gutter
+		want   string
+	}{
+		"no gutter": {
+			gutter: printer.NoGutter,
+			want: stringtest.JoinLF(
+				"2:8: $.spec.sla: bad",
+				"",
+				"spec:",
+				"  sla: 99",
+				"       ^^",
+				"  hours:",
+			),
+		},
+		"line numbers": {
+			gutter: printer.DefaultGutter,
+			want: stringtest.JoinLF(
+				"2:8: $.spec.sla: bad",
+				"",
+				"   1  spec:",
+				"   2    sla: 99",
+				"             ^^",
+				"   3    hours:",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := printer.New(
+				printer.WithStyles(style.Styles{}),
+				printer.WithContainerStyle(lipgloss.NewStyle()),
+				printer.WithGutter(tc.gutter),
+			)
+
+			assert.Equal(t, tc.want, p.PrintError(bound))
+		})
+	}
 }
 
 func TestPrinter_CRLF(t *testing.T) {
@@ -3084,7 +3143,9 @@ func TestDefaultAnnotation(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
+		content     string
 		annotations line.Annotations
+		overlays    line.Overlays
 		position    line.Placement
 		want        string
 	}{
@@ -3092,6 +3153,65 @@ func TestDefaultAnnotation(t *testing.T) {
 			annotations: line.Annotations{},
 			position:    line.Below,
 			want:        "",
+		},
+		"empty content marks the overlays": {
+			content:     "  sla: 99",
+			annotations: line.Annotations{{Placement: line.Below, Col: 7}},
+			overlays:    line.Overlays{{Cols: position.NewSpan(7, 9)}},
+			position:    line.Below,
+			want:        "       ^^",
+		},
+		"empty content marks every overlay": {
+			content:     "a: 1, b: 2",
+			annotations: line.Annotations{{Placement: line.Below}},
+			overlays: line.Overlays{
+				{Cols: position.NewSpan(3, 4)},
+				{Cols: position.NewSpan(9, 10)},
+			},
+			position: line.Below,
+			want:     "   ^     ^",
+		},
+		"empty content marks wide runes with two carets": {
+			content:     "日本語: 値",
+			annotations: line.Annotations{{Placement: line.Below}},
+			overlays:    line.Overlays{{Cols: position.NewSpan(0, 3)}},
+			position:    line.Below,
+			want:        "^^^^^^",
+		},
+		"empty content marks control characters as one cell": {
+			content:     "a: \x07b",
+			annotations: line.Annotations{{Placement: line.Below}},
+			overlays:    line.Overlays{{Cols: position.NewSpan(3, 5)}},
+			position:    line.Below,
+			want:        "   ^^",
+		},
+		"empty content clamps the overlays to the content": {
+			content:     "a: 1",
+			annotations: line.Annotations{{Placement: line.Below}},
+			overlays:    line.Overlays{{Cols: position.NewSpan(3, 9)}},
+			position:    line.Below,
+			want:        "   ^",
+		},
+		"empty content with an overlay of no width renders nothing": {
+			content:     "a: 1",
+			annotations: line.Annotations{{Placement: line.Below, Col: 4}},
+			overlays:    line.Overlays{{Cols: position.NewSpan(4, 4)}},
+			position:    line.Below,
+			want:        "",
+		},
+		"empty content above the line renders nothing": {
+			content:     "a: 1",
+			annotations: line.Annotations{{Placement: line.Above}},
+			overlays:    line.Overlays{{Cols: position.NewSpan(3, 4)}},
+			position:    line.Above,
+			want:        "",
+		},
+		"content beside the overlays keeps its own caret": {
+			content:     "  sla: 99",
+			annotations: line.Annotations{{Content: "bad", Placement: line.Below, Col: 7}},
+			overlays:    line.Overlays{{Cols: position.NewSpan(7, 9)}},
+			position:    line.Below,
+			want:        "       ^ bad",
 		},
 		"single below annotation": {
 			annotations: line.Annotations{{Content: "error here", Placement: line.Below, Col: 0}},
@@ -3167,7 +3287,9 @@ func TestDefaultAnnotation(t *testing.T) {
 
 			fn := printer.DefaultAnnotation
 			ctx := printer.AnnotationContext{
+				Content:     tc.content,
 				Annotations: tc.annotations,
+				Overlays:    tc.overlays,
 				Placement:   tc.position,
 				Styles:      style.Styles{},
 			}

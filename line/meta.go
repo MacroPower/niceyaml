@@ -2,6 +2,7 @@ package line
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style/kind"
@@ -175,3 +176,23 @@ type Overlay struct {
 
 // Overlays is a slice of [Overlay] values for a single [Line].
 type Overlays []Overlay
+
+// MarkerRow returns the row that marks the overlays below content, the
+// text of the line without its line ending: a caret under every column
+// an overlay covers within the content and a space under every other
+// column before the last caret, as [View.String] draws under a line. A
+// column is as many carets wide as the rune on it renders, so the carets
+// stay under the runes they mark on a line holding wide or control
+// characters. Returns "" when the overlays cover no column of the
+// content.
+func (o Overlays) MarkerRow(content string) string {
+	marks := make([]bool, utf8.RuneCountInString(content))
+
+	for _, ov := range o {
+		for col := max(0, ov.Cols.Start); col < min(ov.Cols.End, len(marks)); col++ {
+			marks[col] = true
+		}
+	}
+
+	return strings.TrimRight(renderMarks(content, marks), " ")
+}

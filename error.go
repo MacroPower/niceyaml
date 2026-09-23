@@ -1477,7 +1477,11 @@ func rangeOf(lines line.Lines, loc location) position.Range {
 // the tree with [kind.GenericError] and adds the message of each node
 // below the root as an annotation below its own line in [kind.TextError],
 // so the message reads as error text without the highlight of the token
-// it describes. A location with no token under it, such as a position
+// it describes. A marked line with no message below it, such as the line
+// of the root's own location, gets an annotation below it with no
+// content, which a renderer that draws marks from annotations, as the
+// printer does, draws as a caret run under the highlight, so the range
+// shows its extent without color. A location with no token under it, such as a position
 // past the end of a line or a path to an empty value, gets an overlay of
 // no width at its column, which renders nothing and still counts as
 // decoration, so [line.View.Hunks] keeps the line. A viewer that shows a
@@ -1643,7 +1647,34 @@ func (e *SourceError) annotate(view *line.View) []int {
 		}
 	}
 
+	markUnannotated(view, marked)
+
 	return marked
+}
+
+// markUnannotated adds an annotation without content, in [kind.TextError]
+// and at the first column its overlays cover, below every line of view at
+// an index in marked that carries no annotation below it yet, so a line
+// several locations mark, or that an earlier error marked, gets one.
+// [line.View.String] draws the marks of a line from its overlays, and a
+// renderer that draws them from its annotations, as the printer does,
+// draws such an annotation as a caret run under the overlays, so the
+// range of a location with no message beside it, such as the root of a
+// bound error, shows its extent without color.
+func markUnannotated(view *line.View, marked []int) {
+	for _, i := range marked {
+		overlays := view.Overlays(i)
+		if len(overlays) == 0 || len(view.Annotations(i).Filter(line.Below)) > 0 {
+			continue
+		}
+
+		col := overlays[0].Cols.Start
+		for _, o := range overlays[1:] {
+			col = min(col, o.Cols.Start)
+		}
+
+		view.Annotate(i, line.Annotation{Kind: kind.TextError, Placement: line.Below, Col: col})
+	}
 }
 
 // lineIndex returns a lookup from a line index of the source to the index

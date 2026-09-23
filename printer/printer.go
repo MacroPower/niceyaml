@@ -74,7 +74,9 @@ const wrapOnCharacters = " /-"
 // [line.Annotation.Kind], or [kind.UIAnnotation] when it has none, and the
 // annotations of one Kind on a line share their rows. The printer renders
 // the text of each such group via [AnnotationFunc], defaulting to
-// [DefaultAnnotation] which prefixes below-line annotations with "^ ".
+// [DefaultAnnotation] which prefixes below-line annotations with "^ " and
+// draws a caret under every column the line's overlays cover for a
+// below-line annotation without content.
 //
 // # Word Wrapping
 //
@@ -269,6 +271,11 @@ type AnnotationContext struct {
 	// width gives the padding a marker needs to sit under them.
 	Content string
 
+	// Overlays are the overlays of the annotated line, so a func that
+	// marks the line rather than describing it draws under the columns
+	// they cover.
+	Overlays line.Overlays
+
 	Annotations line.Annotations
 	Placement   line.Placement
 }
@@ -319,16 +326,25 @@ func NoAnnotation(AnnotationContext) string {
 // DefaultAnnotation is the [AnnotationFunc] [New] uses. It joins the
 // annotations with "; ", pads them to their column as
 // [AnnotationContext.ColWidth] measures it, and prefixes [line.Below]
-// annotations with "^ ". It leaves out annotations with empty content and
-// returns "" when none remain, as [line.Annotation.String] does. Control
-// characters in the content render as their pictures, so an escape sequence
-// in a message shows as text.
+// annotations with "^ ". It leaves out annotations with empty content.
+// When none remain, an annotation below the line still marks it. The
+// result is then [line.Overlays.MarkerRow], a caret under every column the
+// line's overlays cover, as [line.View.String] draws them, so a marked
+// range shows its extent without color, or "" when the overlays cover no
+// column. An annotation
+// above the line with no content renders as "", as
+// [line.Annotation.String] does. Control characters in the content render
+// as their pictures, so an escape sequence in a message shows as text.
 func DefaultAnnotation(ctx AnnotationContext) string {
 	// Filter the annotations rather than their contents, so the column
 	// comes from the ones that remain. WithContent returns a new slice,
 	// so the escaping below leaves the caller's annotations alone.
 	kept := ctx.Annotations.WithContent()
 	if len(kept) == 0 {
+		if ctx.Placement == line.Below {
+			return ctx.Overlays.MarkerRow(ctx.Content)
+		}
+
 		return ""
 	}
 
@@ -883,6 +899,7 @@ func (p *Printer) annotationGroups(
 			Placement:   placement,
 			Styles:      p.styles,
 			Content:     ln.Content(),
+			Overlays:    view.Overlays(idx),
 		})
 		if content == "" {
 			continue

@@ -30,8 +30,10 @@
 // annotations above or below a line render as rows in the style of their
 // [line.Annotation.Kind], or [kind.UIAnnotation] for those with none, and
 // an [AnnotationFunc] renders the text of each group of one Kind;
-// [DefaultAnnotation] joins them with "; " and prefixes [line.Below]
-// annotations with "^ ".
+// [DefaultAnnotation] joins them with "; ", prefixes [line.Below]
+// annotations with "^ ", and draws a caret under every column the line's
+// overlays cover for a Below annotation without content, so a marked range
+// shows its extent without color.
 //
 // # Word Wrapping
 //

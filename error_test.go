@@ -126,6 +126,7 @@ func TestError(t *testing.T) {
 				"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>b</literalString>",
 				"<nameTag>foo</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>bar</literalString>",
 				"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
+				"<textError>^^^</textError>",
 			),
 		},
 		"with direct token bypasses path resolution": {
@@ -137,6 +138,7 @@ func TestError(t *testing.T) {
 				"1:1: bad token",
 				"",
 				"<genericError>a</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>b</literalString>",
+				"<textError>^</textError>",
 				"<nameTag>foo</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>bar</literalString>",
 				"<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
 			),
@@ -285,6 +287,7 @@ func TestDocument_BindRender(t *testing.T) {
 				"1:1: $.name~: test error",
 				"",
 				"<genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
+				"<textError>^^^^</textError>",
 				"<nameTag>value</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>123</literalNumberInteger>",
 			),
 		},
@@ -502,6 +505,7 @@ func TestErrorAnnotation(t *testing.T) {
 				"",
 				"<nameTag>foo</nameTag><punctuationMappingValue>:</punctuationMappingValue>",
 				"<text>  </text><genericError>bar</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
+				"<textError>  ^^^</textError>",
 			),
 		},
 		"array element path - first item": {
@@ -517,6 +521,7 @@ func TestErrorAnnotation(t *testing.T) {
 				"",
 				"<nameTag>items</nameTag><punctuationMappingValue>:</punctuationMappingValue>",
 				"<text>  </text><punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><genericError>first</genericError>",
+				"<textError>    ^^^^^</textError>",
 				"<text>  </text><punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><literalString>second</literalString>",
 			),
 		},
@@ -533,6 +538,7 @@ func TestErrorAnnotation(t *testing.T) {
 				"",
 				"<nameTag>users</nameTag><punctuationMappingValue>:</punctuationMappingValue>",
 				"<text>  </text><punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>alice</literalString>",
+				"<textError>    ^^^^</textError>",
 				"<text>    </text><nameTag>age</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>30</literalNumberInteger>",
 			),
 		},
@@ -544,6 +550,7 @@ func TestErrorAnnotation(t *testing.T) {
 				"1:1: $~: root error",
 				"",
 				"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
+				"<textError>^^^</textError>",
 			),
 		},
 		"single top-level key path": {
@@ -554,6 +561,7 @@ func TestErrorAnnotation(t *testing.T) {
 				"1:1: $.key~: top level error",
 				"",
 				"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
+				"<textError>^^^</textError>",
 			),
 		},
 		"with custom source lines": {
@@ -572,6 +580,7 @@ func TestErrorAnnotation(t *testing.T) {
 				"",
 				"<nameTag>line2</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>b</literalString>",
 				"<genericError>line3</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>c</literalString>",
+				"<textError>^^^^^</textError>",
 				"<nameTag>line4</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>d</literalString>",
 			),
 		},
@@ -612,6 +621,7 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 				"1:6: $.key: invalid value",
 				"",
 				"<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>value</genericError>",
+				"<textError>     ^^^^^</textError>",
 			),
 		},
 		"nested path with value target": {
@@ -626,6 +636,7 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 				"",
 				"<nameTag>foo</nameTag><punctuationMappingValue>:</punctuationMappingValue>",
 				"<text>  </text><nameTag>bar</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>nested_value</genericError>",
+				"<textError>       ^^^^^^^^^^^^</textError>",
 			),
 		},
 		"array element works same as key target": {
@@ -642,6 +653,7 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 				"",
 				"<nameTag>items</nameTag><punctuationMappingValue>:</punctuationMappingValue>",
 				"<text>  </text><punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><genericError>first</genericError>",
+				"<textError>    ^^^^^</textError>",
 				"<text>  </text><punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><literalString>second</literalString>",
 			),
 		},
@@ -685,6 +697,7 @@ func TestWithPrinter(t *testing.T) {
 		"1:1: test error",
 		"",
 		"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
+		"<textError>^^^</textError>",
 		"<nameTag>foo</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>bar</literalString>",
 	)
 
@@ -717,6 +730,7 @@ func TestError_SpecialParentContext(t *testing.T) {
 				"",
 				"<punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><literalString>first</literalString>",
 				"<punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><genericError>second</genericError>",
+				"<textError>  ^^^^^^</textError>",
 				"<punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><literalString>third</literalString>",
 			),
 		},
@@ -732,6 +746,7 @@ func TestError_SpecialParentContext(t *testing.T) {
 				"1:1: $~: document root error",
 				"",
 				"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
+				"<textError>^^^</textError>",
 				"<nameTag>another</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>line</literalString>",
 			),
 		},
@@ -1629,13 +1644,14 @@ func TestError_NestedLocationWithoutMessage(t *testing.T) {
 	nested := niceyaml.WrapError(nil, niceyaml.AtPath(paths.Root().Child("b")))
 
 	// A nested Error built from a nil error names a location and nothing
-	// else, so the printer highlights that location and adds no annotation.
+	// else, so the printer highlights that location and marks it with a
+	// caret run alone, with no message beside it.
 	wrapped := yamltest.Bind(t, source, niceyaml.WrapError(inner, niceyaml.WithErrors(nested)))
 
 	got := trimLines(render(wrapped))
-	assert.Contains(t, got, "<genericError>1</genericError>")
-	assert.Contains(t, got, "<genericError>2</genericError>")
-	assert.NotContains(t, got, "^")
+	assert.Contains(t, got, "<genericError>1</genericError>\n<textError>   ^</textError>")
+	assert.Contains(t, got, "<genericError>2</genericError>\n<textError>   ^</textError>")
+	assert.NotContains(t, got, "^ ")
 }
 
 func TestError_calculateNestedLineRange(t *testing.T) {
@@ -2576,7 +2592,8 @@ func TestError_WrappedContext(t *testing.T) {
 
 	detail := newXMLPrinter().Print(excerpt)
 	assert.Contains(t, detail, "second")
-	assert.NotContains(t, detail, "^")
+	assert.Contains(t, detail, "^^^^^^", "the range shows its extent")
+	assert.NotContains(t, detail, "^ ", "the wrapper's text is no annotation")
 
 	// Wrapping a direct Error resolves its position in the message.
 	direct := docs[1].Bind(inner)
@@ -2696,8 +2713,19 @@ func TestError_NestedErrorChains(t *testing.T) {
 		assert.Contains(t, got, "^ ctx: $.b: bad")
 
 		// The excerpt follows the message, which lists the nested error
-		// with its position in front of the context it carries.
-		assert.Equal(t, "1:4: $.a: outer\n└── 2:4: ctx: $.b: bad\n\n"+got, trimLines(render(err)))
+		// with its position in front of the context it carries. The root
+		// has no message beside its range, so the printer marks the range
+		// with a caret run.
+		assert.Equal(t, stringtest.JoinLF(
+			"1:4: $.a: outer",
+			"└── 2:4: ctx: $.b: bad",
+			"",
+			"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>1</genericError>",
+			"<textError>   ^</textError>",
+			"<nameTag>b</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>2</genericError>",
+			"<textError>   ^ ctx: $.b: bad</textError>",
+			"<nameTag>c</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>3</literalNumberInteger>",
+		), trimLines(render(err)))
 	})
 
 	t.Run("annotation drops the position the caret marks", func(t *testing.T) {
@@ -3044,6 +3072,7 @@ func TestError_RangeRendersFromSource(t *testing.T) {
 		"1:6: bad word",
 		"",
 		"<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>some</genericError><literalString> value</literalString>",
+		"<textError>     ^^^^</textError>",
 	), got)
 
 	// A range puts no position in the message until a source binds it.
@@ -3335,7 +3364,9 @@ func TestSourceError_Excerpt(t *testing.T) {
 		assert.Equal(t, line.Annotations{
 			{Content: "bad h", Kind: kind.TextError, Placement: line.Below, Col: 3},
 		}, excerpt.Annotations(7).Filter(line.Below))
-		assert.Empty(t, excerpt.Annotations(1), "the main error has no message of its own")
+		assert.Equal(t, line.Annotations{
+			{Kind: kind.TextError, Placement: line.Below, Col: 3},
+		}, excerpt.Annotations(1), "the main error has no message of its own, so its line carries a marker alone")
 	})
 
 	t.Run("separates hunks after the first with an ellipsis", func(t *testing.T) {
@@ -3365,6 +3396,7 @@ func TestSourceError_Excerpt(t *testing.T) {
 		want := stringtest.JoinLF(
 			"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>1</literalNumberInteger>",
 			"<nameTag>b</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>2</genericError>",
+			"<textError>   ^</textError>",
 			"<nameTag>c</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>3</literalNumberInteger>",
 			"<uiSeparator>...</uiSeparator>",
 			"<nameTag>g</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>7</literalNumberInteger>",
@@ -3375,7 +3407,8 @@ func TestSourceError_Excerpt(t *testing.T) {
 
 		got := trimLines(newXMLPrinter().Print(excerpt))
 		assert.Equal(t, want, got)
-		assert.Equal(t, "2:4: $.b: bad b\n└── 8:4: $.h: bad h\n\n"+got, trimLines(renderContext(bound, 1)))
+
+		assert.Equal(t, "2:4: $.b: bad b\n└── 8:4: $.h: bad h\n\n"+want, trimLines(renderContext(bound, 1)))
 	})
 
 	t.Run("negative context shows the marked lines alone", func(t *testing.T) {
@@ -3482,7 +3515,9 @@ func TestSourceError_Annotate(t *testing.T) {
 		want := line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}
 		assert.Equal(t, want, view.Overlays(1))
 		assert.Equal(t, want, view.Overlays(3))
-		assert.Empty(t, view.Annotations(1))
+		assert.Equal(t, line.Annotations{
+			{Kind: kind.TextError, Placement: line.Below, Col: 3},
+		}, view.Annotations(1), "a location with no message carries a marker alone")
 		assert.Equal(t, line.Annotations{
 			{Content: "too big", Kind: kind.TextError, Placement: line.Below, Col: 3},
 		}, view.Annotations(3))

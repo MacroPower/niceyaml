@@ -504,9 +504,25 @@ func markerRow(ln *Line, overlays Overlays, below Annotations) string {
 
 	var sb strings.Builder
 
-	// The content row renders each rune at its display width, and a column
-	// past the end of the content takes one cell.
-	runes := []rune(ln.Content())
+	sb.WriteString(renderMarks(ln.Content(), marks))
+
+	if len(contents) > 0 {
+		sb.WriteByte(' ')
+		sb.WriteString(escape.Control(strings.Join(contents, "; ")))
+	}
+
+	return sb.String()
+}
+
+// renderMarks renders marks as a row under content: a caret under every
+// marked column and a space under every other. The content row renders
+// each rune at its display width, so a column is as many cells wide as
+// the rune on it renders, and a column past the end of the content takes
+// one cell.
+func renderMarks(content string, marks []bool) string {
+	var sb strings.Builder
+
+	runes := []rune(content)
 
 	for col, marked := range marks {
 		cell := " "
@@ -520,11 +536,6 @@ func markerRow(ln *Line, overlays Overlays, below Annotations) string {
 		}
 
 		sb.WriteString(strings.Repeat(cell, cells))
-	}
-
-	if len(contents) > 0 {
-		sb.WriteByte(' ')
-		sb.WriteString(escape.Control(strings.Join(contents, "; ")))
 	}
 
 	return sb.String()

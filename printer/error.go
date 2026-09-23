@@ -22,9 +22,16 @@ const errorConnectorWidth = 4
 // tree, as [niceyaml.SourceErrors] finds them, each with the context lines
 // [WithContextLines] sets on either side of each marked line. An error
 // joined from one bound error per document therefore prints an excerpt for
-// each document. Blank lines separate the parts. A SourceError whose
-// location does not resolve prints a line starting "no excerpt:" that names
-// the reason in place of its excerpt, unless it carries no location at all.
+// each document. A location with no message beside it in the excerpt,
+// such as the root of a bound error, gets a caret run under its range on
+// the row below, as [niceyaml.FormatError] draws one, since
+// [niceyaml.SourceError.Annotate] marks such a line with an annotation
+// without content and [DefaultAnnotation] draws that as the caret run, so
+// the range shows its extent without color. Blank lines separate the
+// parts. A SourceError
+// whose location does not resolve prints a line starting "no excerpt:"
+// that names the reason in place of its excerpt, unless it carries no
+// location at all.
 //
 // PrintError draws the message as a tree with a connector in front of each
 // nested error, in the color of the gutter's line numbers, so a validator's
