@@ -1214,3 +1214,145 @@ func TestView_String_PlaceholderLine(t *testing.T) {
 
 	assert.Equal(t, "     | ", view.String())
 }
+
+func TestView_Hunks(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.Input(`
+		a: 1
+		b: 2
+		c: 3
+		d: 4
+		e: 5
+		f: 6
+		g: 7
+		h: 8
+	`)
+
+	contents := func(v *line.View) []string {
+		var out []string
+
+		for _, ln := range v.All() {
+			out = append(out, ln.Content())
+		}
+
+		return out
+	}
+
+	separators := func(v *line.View) []int {
+		var out []int
+
+		for i := range v.All() {
+			for _, ann := range v.Annotations(i) {
+				if ann.Kind == kind.UISeparator {
+					out = append(out, i)
+				}
+			}
+		}
+
+		return out
+	}
+
+	t.Run("keeps context around every kind of decoration", func(t *testing.T) {
+		t.Parallel()
+
+		view := newTestView(t, input, 8)
+		view.SetFlag(0, line.FlagInserted)
+		view.AddOverlay("test", position.NewRange(position.New(7, 0), position.New(7, 1)))
+		view.Annotate(4, line.Annotation{Content: "here", Placement: line.Below})
+
+		got := view.Hunks(1)
+
+		assert.Equal(t, []string{"a: 1", "b: 2", "d: 4", "e: 5", "f: 6", "g: 7", "h: 8"}, contents(got))
+		assert.Equal(t, []int{3}, separators(got), "one separator, above the second hunk")
+		assert.Equal(t, line.FlagInserted, got.Flag(0))
+		assert.Len(t, got.Overlays(7), 1)
+		assert.Len(t, got.Annotations(4), 1)
+	})
+
+	t.Run("touching windows share a hunk", func(t *testing.T) {
+		t.Parallel()
+
+		view := newTestView(t, input, 8)
+		view.Annotate(1, line.Annotation{Content: "one", Placement: line.Below})
+		view.Annotate(5, line.Annotation{Content: "two", Placement: line.Below})
+
+		got := view.Hunks(2)
+
+		assert.Equal(t, []string{"a: 1", "b: 2", "c: 3", "d: 4", "e: 5", "f: 6", "g: 7", "h: 8"}, contents(got))
+		assert.Empty(t, separators(got))
+	})
+
+	t.Run("a negative context shows the decorated lines alone", func(t *testing.T) {
+		t.Parallel()
+
+		view := newTestView(t, input, 8)
+		view.Annotate(1, line.Annotation{Content: "one", Placement: line.Below})
+		view.Annotate(6, line.Annotation{Content: "two", Placement: line.Below})
+
+		got := view.Hunks(-1)
+
+		assert.Equal(t, []string{"b: 2", "g: 7"}, contents(got))
+		assert.Equal(t, []int{6}, separators(got))
+	})
+
+	t.Run("no decoration yields no line", func(t *testing.T) {
+		t.Parallel()
+
+		view := newTestView(t, input, 8)
+
+		got := view.Hunks(2)
+
+		assert.Equal(t, 0, got.Count())
+		assert.Equal(t, 8, got.Lines().Len(), "the content is still the whole")
+	})
+
+	t.Run("a slice yields hunks within the slice", func(t *testing.T) {
+		t.Parallel()
+
+		view := newTestView(t, input, 8).Slice(position.NewSpan(2, 8))
+		view.Annotate(2, line.Annotation{Content: "edge", Placement: line.Below})
+		view.Annotate(7, line.Annotation{Content: "end", Placement: line.Below})
+
+		got := view.Hunks(1)
+
+		assert.Equal(t, []string{"c: 3", "d: 4", "g: 7", "h: 8"}, contents(got))
+		assert.Equal(t, []int{6}, separators(got))
+	})
+
+	t.Run("the separator goes above the first line the hunk holds", func(t *testing.T) {
+		t.Parallel()
+
+		// The view skips line d, so the second hunk's window starts on a
+		// line the view does not hold.
+		view := newTestView(t, input, 8).Slice(position.NewSpan(0, 3), position.NewSpan(4, 8))
+		view.Annotate(0, line.Annotation{Content: "one", Placement: line.Below})
+		view.Annotate(4, line.Annotation{Content: "two", Placement: line.Below})
+
+		got := view.Hunks(1)
+
+		assert.Equal(t, []string{"a: 1", "b: 2", "e: 5", "f: 6"}, contents(got))
+		assert.Equal(t, []int{4}, separators(got))
+	})
+
+	t.Run("renders as an excerpt", func(t *testing.T) {
+		t.Parallel()
+
+		view := newTestView(t, input, 8)
+		view.Annotate(1, line.Annotation{Content: "one", Placement: line.Below})
+		view.Annotate(6, line.Annotation{Content: "two", Placement: line.Below})
+
+		want := stringtest.JoinLF(
+			"   1 | a: 1",
+			"   2 | b: 2",
+			"     | ^ one",
+			"   3 | c: 3",
+			"     | ...",
+			"   6 | f: 6",
+			"   7 | g: 7",
+			"     | ^ two",
+			"   8 | h: 8",
+		)
+		assert.Equal(t, want, view.Hunks(1).String())
+	})
+}

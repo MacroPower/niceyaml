@@ -164,6 +164,11 @@
 // shares its lines, so the view may be a slice of the source, such as one
 // document of a file from [Node.Span], or a diff against another
 // revision, where the marks land on the lines of this source alone.
+// [line.View.Hunks] then keeps the marked lines with context around
+// each, so a viewer shows the excerpt of every error at once, with
+// search matches or any other decoration in it:
+//
+//	fmt.Println(p.Print(view.Hunks(2)))
 //
 // [Node.Ranges] returns the ranges a path covers, the same ones an
 // error at that path highlights, for a caller that marks a value on a view

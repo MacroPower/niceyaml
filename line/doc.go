@@ -137,8 +137,10 @@
 //	view.SetFlag(i, line.FlagDeleted)  // Show with "-" prefix.
 //
 // To render the same content two different ways, take two views of it.
-// [View.Clone] copies the decoration of one, and [View.Slice] picks the
-// lines of a few spans, decoration included, as an error excerpt does.
+// [View.Clone] copies the decoration of one, [View.Slice] picks the
+// lines of a few spans, decoration included, and [View.Hunks] picks the
+// decorated lines with context around each, which is what an error
+// excerpt shows.
 //
 // [View.String] renders a view as plain text: each line behind its number,
 // the annotations above it on rows of their own, carets under the columns

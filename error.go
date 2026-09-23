@@ -1353,8 +1353,12 @@ func rangeOf(lines line.Lines, loc location) position.Range {
 // the tree with [kind.GenericError] and adds the message of each node
 // below the root as an annotation below its own line in [kind.TextError],
 // so the message reads as error text without the highlight of the token
-// it describes. A viewer that shows a document with its errors in place
-// marks its view this way and renders it as it is.
+// it describes. A location with no token under it, such as a position
+// past the end of a line or a path to an empty value, gets an overlay of
+// no width at its column, which renders nothing and still counts as
+// decoration, so [line.View.Hunks] keeps the line. A viewer that shows a
+// document with its errors in place marks its view this way and renders
+// it as it is.
 //
 // Annotate finds each line by identity rather than by index, since every
 // view over the source shares its [*line.Line] values, so the view may be
@@ -1372,14 +1376,18 @@ func (e *SourceError) Annotate(view *line.View) bool {
 	return len(e.annotate(view)) > 0
 }
 
-// Excerpt returns a [line.View] of the source around the error's locations with each
-// one highlighted, as [SourceError.Annotate] marks them, and context lines of unchanged
-// content on either side of each marked line. Distant locations become separate hunks,
-// and the first line of each hunk after the first carries a "..." annotation above it.
-// The lines keep the numbers they have in the source, so any
-// [go.jacobcolvin.com/niceyaml/printer.Printer] renders the excerpt with the file's
-// line numbers, as it renders the hunks of a diff. A negative context shows the marked
-// lines alone, as 0 does.
+// Excerpt returns a [line.View] of the source around the error's
+// locations with each one highlighted: [SourceError.Annotate] marks a
+// fresh [Source.View] and [line.View.Hunks] keeps context lines of
+// unchanged content on either side of each marked line. Distant
+// locations become separate hunks, and the first line of each hunk
+// after the first carries a "..." annotation above it. The lines keep
+// the numbers they have in the source, so any
+// [go.jacobcolvin.com/niceyaml/printer.Printer] renders the excerpt
+// with the file's line numbers, as it renders the hunks of a diff. A
+// negative context shows the marked lines alone, as 0 does. A caller
+// that marks several errors on one view, or adds search matches to it,
+// takes the hunks of that view the same way.
 //
 // Excerpt reports false, with no view, when no location resolves, as
 // [SourceError.Annotate] does, and [SourceError.Unresolved] then names
@@ -1393,30 +1401,11 @@ func (e *SourceError) Excerpt(context int) (*line.View, bool) {
 
 	view := e.source.View()
 
-	marked := e.annotate(view)
-	if len(marked) == 0 {
+	if len(e.annotate(view)) == 0 {
 		return nil, false
 	}
 
-	// Group the marked lines into hunks with context around each. Errors
-	// whose context windows touch share a hunk, so a line gap always
-	// separates two hunks for the "..." separator. ContextSpans clamps the
-	// spans to the view, so each one starts on a line the view holds.
-	spans := position.ContextSpans(marked, context, view.Lines().Len())
-	excerpt := view.Slice(spans...)
-
-	// Add "..." annotations to the first line of each hunk after the
-	// first. ContextSpans clamps the spans to the view, so each one starts
-	// on a line the excerpt holds.
-	for _, span := range spans[1:] {
-		excerpt.Annotate(span.Start, line.Annotation{
-			Content:   "...",
-			Kind:      kind.UISeparator,
-			Placement: line.Above,
-		})
-	}
-
-	return excerpt, true
+	return view.Hunks(context), true
 }
 
 // detail returns what [SourceError.Error] leaves out: the excerpt from
@@ -1488,10 +1477,11 @@ func (e *SourceError) annotate(view *line.View) []int {
 	}
 
 	// The view may hold the lines of the source at other indices, as a
-	// diff does, so every mark goes to the index that holds its line. The
-	// line of each position joins the marked lines as well, since a
-	// position with no token under it has no range to highlight and still
-	// picks the lines an excerpt shows.
+	// diff does, so every mark goes to the index that holds its line. A
+	// position with no token under it has no range to highlight, so its
+	// line gets an overlay of no width at its column, which renders
+	// nothing and still marks the line as decorated, so the line joins
+	// the hunks [line.View.Hunks] keeps.
 	index := e.lineIndex(view)
 
 	var marked []int
@@ -1499,6 +1489,13 @@ func (e *SourceError) annotate(view *line.View) []int {
 	for _, pos := range positions {
 		if i, ok := index(pos.pos.Line); ok {
 			marked = append(marked, i)
+
+			if len(pos.ranges) == 0 {
+				view.AddLineOverlay(i, line.Overlay{
+					Cols: position.NewSpan(pos.pos.Col, pos.pos.Col),
+					Kind: kind.GenericError,
+				})
+			}
 		}
 
 		for _, r := range pos.ranges {

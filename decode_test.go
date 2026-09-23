@@ -1925,6 +1925,13 @@ func TestDocument_Ranges(t *testing.T) {
 
 			for i := range view.All() {
 				for _, o := range view.Overlays(i) {
+					// A location with nothing to highlight, such as an
+					// empty value, marks its line with an overlay of no
+					// width, which Ranges does not report.
+					if o.Cols.Len() == 0 {
+						continue
+					}
+
 					got = append(got, position.NewRange(position.New(i, o.Cols.Start), position.New(i, o.Cols.End)))
 				}
 			}

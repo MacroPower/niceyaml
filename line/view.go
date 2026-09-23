@@ -335,6 +335,71 @@ func (v *View) Slice(spans ...position.Span) *View {
 	return out
 }
 
+// Hunks returns a [*View] that holds the decorated lines of the View
+// with context lines of unchanged content on either side of each one,
+// so a caller that marks a document shows the marked parts alone. A
+// decorated line carries a [Flag] other than [FlagDefault], an [Overlay],
+// or an [Annotation]. Decorated lines whose context windows overlap or
+// touch share a hunk, distant ones become separate hunks, and the first
+// line of each hunk after the first carries a "..." annotation of kind
+// [kind.UISeparator] above it. A negative context shows the decorated
+// lines alone, as 0 does, and a View with no decorated line yields a
+// View that holds no line.
+//
+// The result is a [View.Slice], so the lines keep their indices, a
+// range from the content applies to it, and decoration added after
+// slicing lands on the lines it holds. Context lines count in the
+// content, and the hunks hold those of them the View holds, so a slice
+// of a document yields hunks within the slice.
+//
+// An error excerpt is the hunks of a view the error marked, and a caller
+// that marks several errors, or search matches, on one view takes the
+// hunks of that view the same way:
+//
+//	view := source.View()
+//	for _, bound := range niceyaml.SourceErrors(err) {
+//		bound.Annotate(view)
+//	}
+//	fmt.Println(p.Print(view.Hunks(2)))
+func (v *View) Hunks(context int) *View {
+	var marked []int
+
+	for i := range v.All() {
+		if v.decorated(i) {
+			marked = append(marked, i)
+		}
+	}
+
+	spans := position.ContextSpans(marked, context, v.Lines().Len())
+	if len(spans) == 0 {
+		return v.Slice(position.Span{})
+	}
+
+	hunks := v.Slice(spans...)
+
+	// The separator goes above the first line the hunk holds, which is
+	// the start of its span unless the View skips that line.
+	for _, span := range spans[1:] {
+		for i := range hunks.All(span) {
+			hunks.Annotate(i, Annotation{
+				Content:   "...",
+				Kind:      kind.UISeparator,
+				Placement: Above,
+			})
+
+			break
+		}
+	}
+
+	return hunks
+}
+
+// decorated reports whether line i carries a flag, an overlay, or an
+// annotation.
+func (v *View) decorated(i int) bool {
+	return v.Flag(i) != FlagDefault || len(v.Overlays(i)) > 0 || len(v.Annotations(i)) > 0
+}
+
 // String renders the [View] as plain text: each line behind its number,
 // the annotations above it on rows of their own, and a row below it that
 // marks its decoration, with a caret under every column an overlay covers,
