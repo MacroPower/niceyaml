@@ -143,7 +143,8 @@
 // [View.String] renders a view as plain text: each line behind its number,
 // the annotations above it on rows of their own, carets under the columns
 // its overlays cover, and the annotations below it beside the carets, with
-// no escape sequences. It is the rendering the %+v verb of a bound error
-// prints, and it suits a log or a golden file. A printer renders the same
+// no escape sequences. It is the rendering
+// [go.jacobcolvin.com/niceyaml.FormatError] prints for the excerpt of a
+// bound error, and it suits a log or a golden file. A printer renders the same
 // view with styles.
 package line

@@ -106,7 +106,7 @@ type Printer struct {
 
 // DefaultContextLines is the number of context lines [Printer.PrintError]
 // shows around each error location unless [WithContextLines] sets another.
-// It matches the %+v verb.
+// It is the count the %+v verb of a [*niceyaml.SourceError] uses.
 const DefaultContextLines = 2
 
 // New creates a new [*Printer].

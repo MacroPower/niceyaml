@@ -211,9 +211,10 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 //
 // Returns [ErrNoMatch] if no resolver applies to the document, with the
 // reason each resolver gave nested in it, so [errors.Is] finds a reason
-// such as [ErrNoDirective] and a rendering of the error, such as the %+v
-// verb or [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError],
-// lists the reasons below the message:
+// such as [ErrNoDirective] and a rendering of the error, such as
+// [niceyaml.FormatError] or
+// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError], lists the
+// reasons below the message:
 //
 //	app.yaml: no matching schema
 //	├── no schema directive

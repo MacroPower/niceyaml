@@ -345,8 +345,9 @@ func (v *View) Slice(spans ...position.Span) *View {
 // Control characters render as their pictures, and a rune that takes two
 // cells in a terminal gets two carets, so the carets stay under the runes
 // they mark in a fixed-width font. The output holds no escape sequences,
-// so it goes into a log or a golden file as it is, and the %+v verb of a
-// bound error prints its excerpt this way. A printer renders the same
+// so it goes into a log or a golden file as it is, and
+// [go.jacobcolvin.com/niceyaml.FormatError] prints the excerpt of a
+// bound error this way. A printer renders the same
 // view with styles. An empty view renders as "".
 func (v *View) String() string {
 	width := 4

@@ -433,7 +433,7 @@ func (d *document) anchorToken() *token.Token {
 // the original does.
 //
 // A YAML syntax error comes back as a [*SourceError] bound to this Source,
-// so the %+v verb renders it with the offending token marked.
+// so [FormatError] renders it with the offending token marked.
 func (s *Source) File() (*ast.File, error) {
 	s.fileOnce.Do(func() {
 		s.file, s.fileErr = s.parse()
@@ -492,7 +492,7 @@ func (s *Source) parse() (*ast.File, error) {
 // A path in a source that holds several documents, or none, resolves
 // nowhere. The bound error keeps its message and the name of the source,
 // [SourceError.Range] returns [ErrPathNeedsDocument] wrapping the reason
-// [Source.Document] gives, and the %+v verb names it in place of the
+// [Source.Document] gives, and [FormatError] names it in place of the
 // excerpt. Bind such an error through [Node.Bind] with the document
 // it was checked against, which also resolves a path from the scope of a
 // Document from [Node.At].

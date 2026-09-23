@@ -26,10 +26,10 @@
 //
 //	file, err := source.File()
 //	if err != nil {
-//		// The %+v verb prints the message and a plain-text excerpt of
-//		// the YAML with the problematic location marked; plain %v prints
-//		// the message and position only.
-//		fmt.Printf("%+v\n", err)
+//		// FormatError prints the message and a plain-text excerpt of
+//		// the YAML with the problematic location marked, with two lines
+//		// of context; err.Error() is the message and position alone.
+//		log.Print(niceyaml.FormatError(err, 2))
 //	}
 //
 // # Architecture
@@ -88,10 +88,10 @@
 // Nested errors from [WithErrors] are structure on the Error, and binding
 // binds each of them too. [SourceError.Errors] returns one SourceError per
 // nested error, with its own resolved location and its own children, so a
-// validator's report of several violations is a tree of bound errors. The
-// %+v verb prints the message, one line per nested error behind its
-// position, and the excerpt, so a log that prints the error that way still
-// names every violation and where it is. The excerpt marks every location
+// validator's report of several violations is a tree of bound errors.
+// [FormatError] prints the message as a tree with a branch per nested
+// error behind its position, then the excerpt, so a log names every
+// violation and where it is. The excerpt marks every location
 // in the tree, with each nested error as an annotation below its own line
 // and distant errors in separate hunks. An error that unwraps to several,
 // such as one from [errors.Join], binds as one SourceError with a child
@@ -126,18 +126,23 @@
 //
 // # Error Presentation
 //
-// The %+v verb prints a [SourceError] as plain text: the message, one line
-// per nested error, then the excerpt around the locations with two lines
-// of context and carets under the offending columns. The excerpt is
-// [line.View.String], so a view a caller decorates, such as one with
-// search matches, renders the same way. The output holds no escape
-// sequences, so it goes into a log as it is. A terminal gets color
-// from [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError],
-// which prints the same parts with the printer's styles, width, and
-// context lines, and accepts any error, so a caller need not look for the
-// [SourceError] in the chain. It draws the message as a tree, with a
-// connector in front of each nested error, and renders the excerpt of
-// every SourceError in the error's tree:
+// [FormatError] prints an error as plain text: the message as a tree,
+// with a connector in front of each nested error, then the excerpt
+// around the locations with the context lines the caller asks for and
+// carets under the offending columns. It looks through the wrappers and
+// joins around a [SourceError], so it renders an error however a program
+// wrapped it, and it renders the excerpt of every SourceError in the
+// error's tree. The excerpt is [line.View.String], so a view a caller
+// decorates, such as one with search matches, renders the same way. The
+// output holds no escape sequences, so it goes into a log as it is:
+//
+//	log.Print(niceyaml.FormatError(err, 2))
+//
+// A terminal gets color from
+// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError], which prints
+// the same tree and excerpts with the printer's styles, width, and
+// context lines. Both build the tree with [NewErrorTree], which a
+// renderer of its own reads too:
 //
 //	p := printer.New(printer.WithWrap(width), printer.WithContextLines(3))
 //	fmt.Println(p.PrintError(err))
@@ -259,7 +264,7 @@
 //
 // All three return errors bound to the source, so a path that selects
 // nothing, a decoding failure, or a validator's [Error] renders its
-// location with the %+v verb as it is.
+// location through [FormatError] as it is.
 //
 // # Diffs
 //

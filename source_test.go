@@ -1704,8 +1704,8 @@ func TestSource_Bind(t *testing.T) {
 		// the children and prints no excerpt line.
 		assert.Equal(t, stringtest.JoinLF(
 			"two.yaml: 2 problems",
-			"two.yaml: $.a: bad a",
-			"two.yaml: $.b: bad b",
+			"|-- $.a: bad a",
+			"`-- $.b: bad b",
 		), fmt.Sprintf("%+v", err))
 	})
 

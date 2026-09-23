@@ -271,14 +271,14 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		require.Error(t, err)
 
 		assert.Equal(t, stringtest.JoinLF(
-			"cafe.yaml:1:31: $.hours.close: closes before it opens",
-			"cafe.yaml:2:32: $.backup.close: closes before it opens",
+			"|-- cafe.yaml:1:31: $.hours.close: closes before it opens",
+			"`-- cafe.yaml:2:32: $.backup.close: closes before it opens",
 			"",
 			`   1 | hours: {open: "09:00", close: "08:00"}`,
 			"     |                               ^^^^^^^ closes before it opens",
 			`   2 | backup: {open: "09:00", close: "08:00"}`,
 			"     |                                ^^^^^^^ closes before it opens",
-		), niceyaml.Format(err))
+		), niceyaml.FormatError(err, 2))
 	})
 
 	t.Run("WithSelfValidation false switches the walk off", func(t *testing.T) {

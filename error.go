@@ -257,8 +257,9 @@ func AtRange(r position.Range) ErrorOption {
 // A nested error is any error, and one that is an [*Error] carries a
 // location of its own. [Error.Errors] returns them, and the [SourceError]
 // that binds the Error binds each one as a child with its own resolved
-// location, listed on a line of its own by the %+v verb and rendered as
-// an annotation below that line. A nested error that is a [*SourceError]
+// location, listed as a branch of the message by [FormatError] and
+// rendered as an annotation below its line in the excerpt. A nested
+// error that is a [*SourceError]
 // already, or wraps one, is bound as it is. A nil nested error is skipped.
 func WithErrors(errs ...error) ErrorOption {
 	return func(e *Error) {
@@ -569,13 +570,13 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 // [SourceError.Message] returns the message alone, [SourceError.Range]
 // returns the resolved range, [SourceError.Path] the path the error was
 // written with, and [SourceError.Excerpt] returns the surrounding lines
-// with the location highlighted. The %+v verb prints the message, one line per nested
-// error, and the excerpt as plain text, with carets under the locations,
-// so it is safe for a log, and [Format] prints the same for an error
-// that wraps or joins bound errors:
+// with the location highlighted. [FormatError] prints the message as a
+// tree with a branch per nested error, then the excerpt as plain text
+// with carets under the locations, so it is safe for a log, however the
+// error is wrapped or joined:
 //
 //	if _, err := source.File(); err != nil {
-//		fmt.Printf("%+v\n", err)
+//		log.Print(niceyaml.FormatError(err, 2))
 //	}
 //
 // A path resolves from the [Node] that bound the error, which for
@@ -621,10 +622,11 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 // returns the hunks around the locations as a view for any renderer, and
 // [SourceError.Annotate] marks any view that holds lines of the source, as
 // a viewer that shows errors inline needs: the whole source, a slice of
-// it, or a diff against another revision. The %+v verb renders the excerpt as
-// plain text, and [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError]
-// prints the message as a tree and the excerpt with color and the context
-// lines the printer is configured with:
+// it, or a diff against another revision. [FormatError] renders the
+// message as a tree and the excerpt as plain text, and
+// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] prints the
+// same tree and excerpt with color and the context lines the printer is
+// configured with:
 //
 //	fmt.Println(p.PrintError(err))
 //
@@ -656,8 +658,8 @@ type SourceError struct {
 	adopted bool
 }
 
-// defaultContextLines is the number of context lines the %+v verb shows
-// around an error.
+// defaultContextLines is the number of context lines the %+v verb of a
+// [*SourceError] shows around an error.
 const defaultContextLines = 2
 
 // binder is where an error binds: the source, and the node that binds
@@ -1008,12 +1010,12 @@ func (e *SourceError) Errors() []*SourceError {
 // The message is the text of the bound error, which runs over several
 // lines when that text does, as the text of an [errors.Join] and a
 // message written with continuation lines both do. The nested errors
-// are not part of it. [SourceError.Errors] returns them, the %+v verb
-// lists each one behind its own position, and
-// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] draws them as a
-// tree. The result never includes source lines, so it is safe to log or
-// compare; use [SourceError.Excerpt] or the %+v verb for the annotated
-// source excerpt. A nil SourceError, which [Node.Bind] passes through
+// are not part of it. [SourceError.Errors] returns them, and
+// [FormatError] and
+// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] draw them as
+// the branches of a tree. The result never includes source lines, so it
+// is safe to log or compare; use [SourceError.Excerpt] or [FormatError]
+// for the annotated source excerpt. A nil SourceError, which [Node.Bind] passes through
 // as it does any nil pointer, has an empty message, as a nil [*Error] does.
 func (e *SourceError) Error() string {
 	if e == nil {
@@ -1114,39 +1116,6 @@ func (e *SourceError) resolution() error {
 	return errors.Join(errs...)
 }
 
-// echoesChildren reports whether the text of e says no more than the text
-// of its children already does. The message of an [errors.Join] is the
-// text of its branches joined by line breaks and nothing else, and each
-// branch is a child, so the %+v verb that lists every child behind its own
-// position would otherwise print each branch twice. A wrapper that adds
-// context of its own, and a node with a headline above its children, both
-// say something the children do not.
-func (e *SourceError) echoesChildren() bool {
-	if e == nil || e.locErr == nil || len(e.errors) == 0 {
-		return false
-	}
-
-	// The branches of e.err wrote its message, so they say what the
-	// message repeats, while the children they became may not. A branch
-	// bound before the join contributed its position to the text too.
-	multi, ok := e.err.(interface{ Unwrap() []error }) //nolint:errorlint // The node itself, not a chain search.
-	if !ok {
-		return false
-	}
-
-	branches := multi.Unwrap()
-	if len(branches) != len(e.errors) {
-		return false
-	}
-
-	texts := make([]string, 0, len(branches))
-	for _, branch := range branches {
-		texts = append(texts, branch.Error())
-	}
-
-	return e.err.Error() == strings.Join(texts, "\n")
-}
-
 // walk calls visit for every node below e in depth-first order. A nil e
 // has no nodes below it.
 func (e *SourceError) walk(visit func(*SourceError)) {
@@ -1218,16 +1187,16 @@ func SourceErrors(err error) []*SourceError {
 
 // Format implements [fmt.Formatter].
 //
-// The %v and %s verbs print [SourceError.Error]. The %+v verb prints what
-// [Format] renders for the error: [SourceError.Error], then the Error of
-// every node below it in the tree on a line of its own, so a log names
-// every violation and where it is, then [SourceError.Excerpt] rendered as
-// plain text with two lines of context. The %q verb quotes
+// The %v and %s verbs print [SourceError.Error]. The %+v verb prints
+// what [FormatError] renders for the error with two lines of context,
+// for a log that prints its errors that way. A wrapper such as
+// [fmt.Errorf] around a SourceError formats as its own message, so a
+// program that holds any error calls FormatError. The %q verb quotes
 // [SourceError.Error].
 func (e *SourceError) Format(f fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && f.Flag('+'):
-		writeString(f, Format(e))
+		writeString(f, FormatError(e, defaultContextLines))
 
 	case verb == 'q':
 		writeString(f, strconv.Quote(e.Error()))
@@ -1237,90 +1206,98 @@ func (e *SourceError) Format(f fmt.State, verb rune) {
 	}
 }
 
-// Format renders err as plain text, with the excerpt of every error bound
-// to a source in it: the message of err, then the Error of every node
-// below each binding in the tree on a line of its own, so a log names
-// every violation and where it is, then the excerpt of each binding
-// [SourceErrors] finds, in that order, each rendered as
-// [SourceError.Excerpt] with two lines of context: each line of the
-// excerpt behind its number, carets under the columns of every location
-// on the row below, and the message of each child beside its caret. The
+// FormatError renders err as plain text for a log or a terminal without
+// color: its message as a tree, then the excerpt of every error bound to
+// a source in it. The tree is [NewErrorTree], with a connector in front
+// of each nested error, so a validator's report reads as its summary
+// with one branch per violation, each behind the position its location
+// resolved to:
+//
+//	cafe.yaml: 2 schema violations
+//	|-- 6:8: $.spec.sla: string does not match pattern
+//	`-- 22:11: $.spec.hours.days: expected "array", got "string"
+//
+// The excerpts follow, one per binding [SourceErrors] finds, each
+// rendered as [SourceError.Excerpt] with context lines of unchanged
+// content on either side of each marked line, as [line.View.String]
+// renders a view: each line behind its number, carets under the columns
+// of every location on the row below, and the message of each nested
+// error beside its caret. A negative context shows the marked lines
+// alone. Blank lines separate the parts. A binding whose location does
+// not resolve prints a line starting "no excerpt:" that names the reason
+// in place of its excerpt, unless it carries no location at all. The
 // output holds no escape sequences, so it reads in a log as it does in a
 // terminal.
 //
-// The %+v verb of a [*SourceError] prints the same text, but only for the
-// SourceError itself. The docs of [Node.Bind] say to bind an error
-// before adding context to it, and a wrapper such as [fmt.Errorf] does
-// not format its way, so the %+v verb of the wrapped error prints the
-// message alone. Format looks through wrappers and joins, so it renders
-// the excerpt however the error was wrapped, and it is what a program
-// logs when it holds any error:
+// FormatError looks through the wrappers and joins around a
+// [SourceError], so it renders the excerpt however the error was
+// wrapped, and it is what a program logs when it holds any error:
 //
 //	err := fmt.Errorf("load %s: %w", name, doc.Bind(check(cfg)))
-//	log.Print(niceyaml.Format(err))
+//	log.Print(niceyaml.FormatError(err, 2))
 //
-// An error that binds to no source renders as its message. The binding of
-// an [errors.Join] leads with its children instead of its own message,
-// since that message is their text joined and each child follows behind a
-// position of its own.
+// An error that binds to no source renders as its tree alone, which for
+// an error with nothing nested is its message.
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] renders the
-// same parts with styles, the message as a tree and the excerpts with
-// the printer's context lines. A nil err renders as "".
-func Format(err error) string {
+// same tree and excerpts with styles. A nil err renders as "".
+func FormatError(err error, context int) string {
 	if err == nil {
 		return ""
 	}
 
-	var lines []string
-
-	// The value itself, rather than one below it, decides whether its
-	// message repeats its children.
-	bound, isBound := err.(*SourceError) //nolint:errorlint // The node itself, not a chain search.
-	if !isBound || !bound.echoesChildren() {
-		lines = append(lines, err.Error())
-	}
-
-	for _, root := range boundRoots(err) {
-		root.walk(func(n *SourceError) {
-			lines = append(lines, n.Error())
-		})
-	}
-
-	parts := []string{strings.Join(lines, "\n")}
+	parts := []string{renderErrorTree(NewErrorTree(err))}
 
 	for _, bound := range SourceErrors(err) {
-		parts = append(parts, bound.detail(defaultContextLines))
+		parts = append(parts, bound.detail(context))
 	}
 
 	return joinParts(parts...)
 }
 
-// boundRoots returns the bindings in the tree of err reached through the
-// wrappers and joins around them, without looking below a binding, in the
-// order they appear. The nodes below each are its own tree.
-func boundRoots(err error) []*SourceError {
-	switch x := err.(type) { //nolint:errorlint // Walks the tree one node at a time.
-	case *SourceError:
-		if x == nil {
-			return nil
+// renderErrorTree lays t out as plain text: the text of the root, then
+// each child behind a connector, "|-- " for a child with a sibling after
+// it and "`-- " for the last, with the children of a child indented
+// under its connector. A row of a text after its first sits under the
+// text rather than the connector. A root without text, which stands for
+// several errors and adds no message of its own, has no row of its own,
+// so its children lead.
+func renderErrorTree(t ErrorTree) string {
+	var sb strings.Builder
+
+	if t.Text != "" {
+		sb.WriteString(t.Text)
+	}
+
+	writeErrorBranches(&sb, t.Children, "", t.Text != "")
+
+	return sb.String()
+}
+
+// writeErrorBranches writes children behind their connectors, indented
+// by indent, with a line break before each unless the first is the first
+// row of the output.
+func writeErrorBranches(sb *strings.Builder, children []ErrorTree, indent string, broken bool) {
+	for i, child := range children {
+		connector, below := "|-- ", "|   "
+		if i == len(children)-1 {
+			connector, below = "`-- ", "    "
 		}
 
-		return []*SourceError{x}
+		for j, row := range strings.Split(child.Text, "\n") {
+			if broken {
+				sb.WriteByte('\n')
+			}
 
-	case interface{ Unwrap() error }:
-		return boundRoots(x.Unwrap())
+			broken = true
 
-	case interface{ Unwrap() []error }:
-		var out []*SourceError
-
-		for _, inner := range x.Unwrap() {
-			out = append(out, boundRoots(inner)...)
+			if j == 0 {
+				sb.WriteString(indent + connector + row)
+			} else {
+				sb.WriteString(indent + below + row)
+			}
 		}
 
-		return out
-
-	default:
-		return nil
+		writeErrorBranches(sb, child.Children, indent+below, broken)
 	}
 }
 
@@ -1406,8 +1383,9 @@ func (e *SourceError) Annotate(view *line.View) error {
 //
 // Excerpt returns an error only when no location resolves, as
 // [SourceError.Annotate] does. A node whose location does not resolve is
-// left out of the excerpt; its message is still part of the %+v output. A
-// nil SourceError carries no location, so it returns [ErrNoLocation].
+// left out of the excerpt; its message is still part of the tree
+// [FormatError] prints. A nil SourceError carries no location, so it
+// returns [ErrNoLocation].
 func (e *SourceError) Excerpt(context int) (*line.View, error) {
 	if e == nil {
 		return nil, ErrNoLocation

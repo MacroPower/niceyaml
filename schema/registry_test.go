@@ -1497,7 +1497,7 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 
 		assert.Equal(t, []string{"no schema directive", "no kind"}, reasons)
 		assert.Equal(t,
-			"app.yaml: no matching schema\napp.yaml: no schema directive\napp.yaml: no kind",
+			"app.yaml: no matching schema\n|-- no schema directive\n`-- no kind",
 			fmt.Sprintf("%+v", err),
 		)
 	})

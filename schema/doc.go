@@ -41,7 +41,7 @@
 //	var Config = schema.MustCompile(schemaBytes)
 //
 //	if err := doc.Validate(ctx, Config); err != nil {
-//	    // err is a *niceyaml.SourceError; %+v prints the failing lines.
+//	    // err is a *niceyaml.SourceError; niceyaml.FormatError prints the failing lines.
 //	}
 //
 // To validate and decode in one step, pass the schema to

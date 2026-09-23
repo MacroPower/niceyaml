@@ -8,7 +8,6 @@ import (
 	"charm.land/lipgloss/v2/tree"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/internal/errortree"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
@@ -46,9 +45,9 @@ const errorConnectorWidth = 4
 //	fmt.Println(p.PrintError(err))
 //
 // An error whose tree holds no SourceError, or whose excerpts are empty,
-// prints as its message alone, and a nil err prints as "". The %+v verb
-// prints the message as plain lines and the same excerpts as plain text
-// with [DefaultContextLines] lines of context.
+// prints as its message alone, and a nil err prints as "".
+// [niceyaml.FormatError] prints the same tree and excerpts as plain
+// text.
 func (p *Printer) PrintError(err error) string {
 	if err == nil {
 		return ""
@@ -56,7 +55,7 @@ func (p *Printer) PrintError(err error) string {
 
 	parts := make([]string, 0, 2)
 
-	if msg := p.renderErrorTree(errortree.New(err)); msg != "" {
+	if msg := p.renderErrorTree(niceyaml.NewErrorTree(err)); msg != "" {
 		parts = append(parts, msg)
 	}
 
@@ -79,8 +78,8 @@ func (p *Printer) PrintError(err error) string {
 // names the reason there is none: a line starting "no excerpt:" with the
 // error [niceyaml.SourceError.Range] returns, unless that error is
 // [niceyaml.ErrNoLocation], since an error that carries no location has
-// nothing to explain. Returns "" when there is nothing to show, as the %+v
-// verb does.
+// nothing to explain. Returns "" when there is nothing to show, as
+// [niceyaml.FormatError] does.
 func (p *Printer) detail(bound *niceyaml.SourceError) string {
 	excerpt, err := bound.Excerpt(p.contextLines)
 	if err == nil {
@@ -101,7 +100,7 @@ func (p *Printer) detail(bound *niceyaml.SourceError) string {
 // the message text beside them does not have. Control characters in a
 // message render as their pictures, as they do in an excerpt, and each
 // message wraps to the printer's width less the connectors in front of it.
-func (p *Printer) renderErrorTree(t errortree.Tree) string {
+func (p *Printer) renderErrorTree(t niceyaml.ErrorTree) string {
 	branch := lipgloss.NewStyle().
 		Foreground(p.styles.Style(kind.UILineNumber).GetForeground()).
 		PaddingRight(1)
@@ -120,7 +119,7 @@ func (p *Printer) renderErrorTree(t errortree.Tree) string {
 // errorTreeNode builds the [*tree.Tree] of t at depth connectors from the
 // left edge, with branch styling the connector and indent of every child.
 // A child without children is a leaf.
-func (p *Printer) errorTreeNode(t errortree.Tree, branch *lipgloss.Style, depth int) *tree.Tree {
+func (p *Printer) errorTreeNode(t niceyaml.ErrorTree, branch *lipgloss.Style, depth int) *tree.Tree {
 	node := tree.Root(p.errorText(t.Text, depth)).
 		EnumeratorStyle(*branch).
 		IndenterStyle(*branch)
