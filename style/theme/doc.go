@@ -30,6 +30,12 @@
 //	styles := theme.Charm.Styles().With(style.Set(kind.Comment, dim))
 //	p := printer.New(printer.WithStyles(styles))
 //
+// A program that names a kind of its own, such as one for an overlay, gives
+// it a parent with [style.Inherit], and it then takes the parent's style
+// under every theme in the catalog:
+//
+//	styles := t.Styles().With(style.Inherit(match, kind.GenericHighlight))
+//
 // [Catalog.All] returns every theme in the catalog, with the name and
 // [Mode] alongside the styles for building a picker, and [Catalog.Mode]
 // keeps the themes for one background:

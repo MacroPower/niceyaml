@@ -3,8 +3,6 @@ package main
 import (
 	"fmt"
 
-	"charm.land/lipgloss/v2"
-
 	_ "embed"
 
 	"go.jacobcolvin.com/niceyaml"
@@ -18,20 +16,17 @@ import (
 // highlightKind is a custom kind.Kind constant for search highlights.
 const highlightKind kind.Kind = "highlightCustom"
 
-var (
-	//go:embed demo.yaml
-	example string
-
-	highlight = lipgloss.NewStyle().Background(lipgloss.Color("3"))
-)
+//go:embed demo.yaml
+var example string
 
 func main() {
 	source := niceyaml.NewSourceFromString(example)
 
-	// Create a printer with styles that include the highlight overlay style.
+	// Create a printer whose styles place the highlight kind under the
+	// theme's own highlight kind, so it takes that color under any theme.
 	p := printer.New(
 		printer.WithStyles(theme.Charm.Styles().With(
-			style.Set(highlightKind, highlight),
+			style.Inherit(highlightKind, kind.GenericHighlight),
 		)),
 	)
 

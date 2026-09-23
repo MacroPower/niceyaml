@@ -33,6 +33,17 @@
 // [Styles.With] derives a new value with more overrides and resolves
 // inheritance again, so overriding a parent later reaches its children too.
 //
+// A custom kind, such as one a program names for its own overlay, has no
+// parent of its own, so it inherits from [kind.Text]. [Inherit] places it
+// under a predefined kind, and it then takes that kind's style under any
+// theme, with no color of its own.
+//
+//	const match kind.Kind = "match"
+//
+//	styles := theme.Charm.Styles().With(style.Inherit(match, kind.GenericHighlight))
+//
+// A [Set] on the custom kind still wins over the inherited style.
+//
 // # Themes
 //
 // The [go.jacobcolvin.com/niceyaml/style/theme] subpackage provides

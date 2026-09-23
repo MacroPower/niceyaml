@@ -5,9 +5,11 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
+	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
 func TestStyles_Style_EmptyStyles(t *testing.T) {
@@ -286,4 +288,121 @@ func TestStyles_UnsetCategories(t *testing.T) {
 	assert.Equal(t, styles.Style(kind.Text), styles.Style(kind.NameTag))
 	assert.Equal(t, styles.Style(kind.Text), styles.Style("never-set"))
 	assert.Equal(t, lipgloss.NewStyle(), style.Styles{}.Style("never-set"))
+}
+
+func TestInherit(t *testing.T) {
+	t.Parallel()
+
+	const (
+		match kind.Kind = "customMatch"
+		focus kind.Kind = "customFocus"
+	)
+
+	base := lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff"))
+	red := lipgloss.NewStyle().Foreground(lipgloss.Color("#ff0000"))
+	green := lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff00"))
+
+	t.Run("custom kind takes the style of its parent under built-in themes", func(t *testing.T) {
+		t.Parallel()
+
+		dracula, ok := theme.Builtin().Get("dracula")
+		require.True(t, ok)
+
+		for _, th := range []theme.Theme{theme.Charm, dracula} {
+			styles := th.Styles().With(style.Inherit(match, kind.GenericHighlight))
+
+			assert.Equal(t, styles.Style(kind.GenericHighlight), styles.Style(match), th.Name)
+			assert.NotEqual(t, styles.Style(kind.Text), styles.Style(match), th.Name)
+		}
+	})
+
+	t.Run("explicit Set wins in either order", func(t *testing.T) {
+		t.Parallel()
+
+		first := style.New(base,
+			style.Set(match, red),
+			style.Inherit(match, kind.GenericHighlight),
+			style.Set(kind.GenericHighlight, green),
+		)
+		second := style.New(base,
+			style.Inherit(match, kind.GenericHighlight),
+			style.Set(kind.GenericHighlight, green),
+			style.Set(match, red),
+		)
+
+		assert.Equal(t, lipgloss.Color("#ff0000"), first.Style(match).GetForeground())
+		assert.Equal(t, lipgloss.Color("#ff0000"), second.Style(match).GetForeground())
+	})
+
+	t.Run("later Inherit replaces the parent", func(t *testing.T) {
+		t.Parallel()
+
+		styles := style.New(base,
+			style.Set(kind.GenericHighlight, green),
+			style.Set(kind.TextAccent, red),
+			style.Inherit(match, kind.GenericHighlight),
+			style.Inherit(match, kind.TextAccent),
+		)
+
+		assert.Equal(t, lipgloss.Color("#ff0000"), styles.Style(match).GetForeground())
+	})
+
+	t.Run("custom kinds chain to a predefined ancestor", func(t *testing.T) {
+		t.Parallel()
+
+		styles := style.New(base,
+			style.Set(kind.GenericHighlight, green),
+			style.Inherit(focus, match),
+			style.Inherit(match, kind.GenericHighlight),
+		)
+
+		assert.Equal(t, lipgloss.Color("#00ff00"), styles.Style(focus).GetForeground())
+		assert.Equal(t, lipgloss.Color("#00ff00"), styles.Style(match).GetForeground())
+	})
+
+	t.Run("predefined kind moves under a new parent", func(t *testing.T) {
+		t.Parallel()
+
+		styles := style.New(base,
+			style.Set(kind.Comment, green),
+			style.Inherit(kind.UI, kind.Text),
+		)
+
+		assert.Equal(t, lipgloss.Color("#ffffff"), styles.Style(kind.UI).GetForeground())
+		assert.Equal(t, lipgloss.Color("#ffffff"), styles.Style(kind.UILineNumber).GetForeground())
+		assert.Equal(t, lipgloss.Color("#00ff00"), styles.Style(kind.Comment).GetForeground())
+	})
+
+	t.Run("cycle resolves to the base style", func(t *testing.T) {
+		t.Parallel()
+
+		styles := style.New(base,
+			style.Inherit(match, focus),
+			style.Inherit(focus, match),
+		)
+
+		assert.Equal(t, styles.Style(kind.Text), styles.Style(match))
+		assert.Equal(t, styles.Style(kind.Text), styles.Style(focus))
+	})
+
+	t.Run("With re-resolves through the inherited parent", func(t *testing.T) {
+		t.Parallel()
+
+		original := style.New(base, style.Inherit(match, kind.GenericHighlight))
+		result := original.With(style.Set(kind.GenericHighlight, red))
+
+		assert.Equal(t, lipgloss.Color("#ff0000"), result.Style(match).GetForeground())
+		assert.Equal(t, lipgloss.Color("#ffffff"), original.Style(match).GetForeground())
+	})
+
+	t.Run("option applies to a zero value", func(t *testing.T) {
+		t.Parallel()
+
+		var zero style.Styles
+
+		assert.NotPanics(t, func() { style.Inherit(match, kind.Comment)(&zero) })
+
+		result := zero.With(style.Set(kind.Comment, green))
+		assert.Equal(t, lipgloss.Color("#00ff00"), result.Style(match).GetForeground())
+	})
 }

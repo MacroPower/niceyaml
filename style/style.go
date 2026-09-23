@@ -28,14 +28,16 @@ type Styler interface {
 //
 // A Styles value holds a base style plus explicit overrides, and resolves every
 // predefined kind through the inheritance hierarchy when it is built, so
-// [Styles.Style] is a map lookup. A Styles value stores custom kinds, such
-// as one for an overlay, as given, and one that is not set resolves to
-// the base style, as [kind.Parent] places it under [kind.Text].
+// [Styles.Style] is a map lookup. A custom kind, such as one for an
+// overlay, resolves through the parent [Inherit] gives it, so it takes the
+// style of a predefined kind under any theme, and one with no parent
+// resolves to the base style, as [kind.Parent] places it under [kind.Text].
 //
 // The zero value resolves every kind to an empty style. Create instances
 // with [New].
 type Styles struct {
 	overrides map[kind.Kind]*lipgloss.Style
+	parents   map[kind.Kind]kind.Kind
 	resolved  map[kind.Kind]*lipgloss.Style
 }
 
@@ -43,6 +45,7 @@ type Styles struct {
 //
 // Available options:
 //   - [Set]
+//   - [Inherit]
 type Option func(*Styles)
 
 // Set returns an [Option] that sets the [lipgloss.Style] for a [kind.Kind].
@@ -60,11 +63,36 @@ func Set(s kind.Kind, ls lipgloss.Style) Option {
 	}
 }
 
+// Inherit returns an [Option] that places child under parent in the
+// hierarchy, in place of the parent [kind.Parent] gives it. A child that no
+// [Set] names then resolves to the style of parent, or of the closest set
+// ancestor above it. A program that names a kind of its own, such as one
+// for an overlay, gives it the look of a predefined kind under any theme
+// this way, with no color of its own:
+//
+//	styles := theme.Charm.Styles().With(
+//		style.Inherit(kind.Kind("mine"), kind.GenericHighlight),
+//	)
+//
+// A [Set] on child wins over the inherited style, whichever comes first.
+// A later Inherit on the same child replaces the parent. A chain of
+// parents that returns to child resolves to the base style.
+func Inherit(child, parent kind.Kind) Option {
+	return func(st *Styles) {
+		if st.parents == nil {
+			st.parents = make(map[kind.Kind]kind.Kind, 1)
+		}
+
+		st.parents[child] = parent
+	}
+}
+
 // New creates a new [Styles] value with inheritance resolved.
 //
 // [kind.Text] uses the base style, and every other kind inherits it.
 // Use [Set] options to override specific kinds; child kinds inherit from
-// their closest set ancestor.
+// their closest set ancestor. Use [Inherit] to place a custom kind under
+// a predefined one.
 //
 //nolint:gocritic // Value semantics preferred for API ergonomics.
 func New(base lipgloss.Style, opts ...Option) Styles {
@@ -74,52 +102,77 @@ func New(base lipgloss.Style, opts ...Option) Styles {
 		opt(&st)
 	}
 
-	st.resolved = resolveStyles(st.overrides)
+	st.resolved = st.resolve()
 
 	return st
 }
 
-// resolveStyles walks the hierarchy for every predefined kind and returns
-// the map of kind to the style of its closest set ancestor. Custom kinds
-// outside the hierarchy resolve to their own style. The overrides must
-// hold [kind.Text].
-func resolveStyles(overrides map[kind.Kind]*lipgloss.Style) map[kind.Kind]*lipgloss.Style {
+// resolve walks the hierarchy for every predefined kind and every kind an
+// option names and returns the map of kind to the style of its closest set
+// ancestor. The parents set with [Inherit] take precedence over the
+// predefined hierarchy, and a walk that revisits a kind ends at
+// [kind.Text]. Only those parents can form a cycle, since the predefined
+// hierarchy ends at [kind.Text], so a walk records the kinds it visits
+// only when some are set. The overrides must hold [kind.Text].
+func (s Styles) resolve() map[kind.Kind]*lipgloss.Style {
 	lookup := func(st kind.Kind) *lipgloss.Style {
-		for current := st; ; current = kind.Parent(current) {
-			if ls, ok := overrides[current]; ok {
+		var visited map[kind.Kind]bool
+
+		for current := st; ; current = s.parent(current) {
+			if ls, ok := s.overrides[current]; ok {
 				return ls
 			}
 
-			if current == kind.Text {
-				return overrides[kind.Text]
+			if current == kind.Text || visited[current] {
+				return s.overrides[kind.Text]
+			}
+
+			if len(s.parents) > 0 {
+				if visited == nil {
+					visited = make(map[kind.Kind]bool, len(s.parents)+1)
+				}
+
+				visited[current] = true
 			}
 		}
 	}
 
-	resolved := make(map[kind.Kind]*lipgloss.Style, len(overrides))
+	resolved := make(map[kind.Kind]*lipgloss.Style, len(s.overrides)+len(s.parents))
 	resolved[kind.Text] = lookup(kind.Text)
 
 	for st := range kind.All() {
 		resolved[st] = lookup(st)
 	}
 
-	for st, ls := range overrides {
-		if !kind.IsPredefined(st) {
-			resolved[st] = ls
-		}
+	for st := range s.overrides {
+		resolved[st] = lookup(st)
+	}
+
+	for st := range s.parents {
+		resolved[st] = lookup(st)
 	}
 
 	return resolved
 }
 
+// parent returns the parent of st: the one [Inherit] set, or otherwise
+// the one [kind.Parent] gives.
+func (s Styles) parent(st kind.Kind) kind.Kind {
+	if p, ok := s.parents[st]; ok {
+		return p
+	}
+
+	return kind.Parent(st)
+}
+
 // Style returns the [lipgloss.Style] for the given [kind.Kind].
 //
 // A kind that is neither predefined nor set inherits from its parent as a
-// predefined kind does, and [kind.Parent] puts such a kind under
-// [kind.Text], so it returns the base style. An overlay of a custom kind
-// no [Set] names therefore renders as the text it covers rather than
-// with no style at all. The zero Styles value returns an empty style for
-// every kind.
+// predefined kind does. [Inherit] names that parent, and for a kind it
+// leaves out, [kind.Parent] gives [kind.Text], so the kind returns the
+// base style. An overlay of a custom kind that no option names therefore
+// renders as the text it covers rather than with no style at all. The
+// zero Styles value returns an empty style for every kind.
 func (s Styles) Style(st kind.Kind) lipgloss.Style {
 	if ls, ok := s.resolved[st]; ok && ls != nil {
 		return *ls
@@ -136,8 +189,12 @@ func (s Styles) Style(st kind.Kind) lipgloss.Style {
 // inheritance resolved again, so overriding a parent kind also changes
 // the children that inherit from it. The receiver is unchanged.
 func (s Styles) With(opts ...Option) Styles {
-	c := Styles{overrides: make(map[kind.Kind]*lipgloss.Style, len(s.overrides)+len(opts))}
+	c := Styles{
+		overrides: make(map[kind.Kind]*lipgloss.Style, len(s.overrides)+len(opts)),
+		parents:   make(map[kind.Kind]kind.Kind, len(s.parents)+len(opts)),
+	}
 	maps.Copy(c.overrides, s.overrides)
+	maps.Copy(c.parents, s.parents)
 
 	if _, ok := c.overrides[kind.Text]; !ok {
 		c.overrides[kind.Text] = &emptyStyle
@@ -147,7 +204,7 @@ func (s Styles) With(opts ...Option) Styles {
 		opt(&c)
 	}
 
-	c.resolved = resolveStyles(c.overrides)
+	c.resolved = c.resolve()
 
 	return c
 }

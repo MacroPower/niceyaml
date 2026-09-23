@@ -42,7 +42,14 @@
 //
 // A rendering names its own kinds, such as one for search matches, as
 // conversions of a string: kind.Kind("mine"). A custom Kind has no parent
-// in the hierarchy, so [Parent] returns [Text] for it.
+// in the hierarchy, so [Parent] returns [Text] for it, and a theme styles
+// it as plain text. The [go.jacobcolvin.com/niceyaml/style.Inherit] option
+// places it under a predefined Kind, so it takes that Kind's style under
+// any theme:
+//
+//	const mine kind.Kind = "mine"
+//
+//	styles := theme.Charm.Styles().With(style.Inherit(mine, kind.GenericHighlight))
 package kind
 
 import (
