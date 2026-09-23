@@ -5,8 +5,6 @@ import (
 	"errors"
 	"reflect"
 
-	"github.com/goccy/go-yaml"
-
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -65,8 +63,11 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 		return false, err
 	}
 
+	// The decoder rejecting the value is the value not reading as T, which
+	// is a no rather than a failure. An error the value's own UnmarshalYAML
+	// returns is not a rejection, so it comes back as the error.
 	got, err := node.Decode[T](ctx)
-	if isDecodeError(err) {
+	if errors.Is(err, niceyaml.ErrDecodeRejected) {
 		return false, nil
 	}
 
@@ -82,12 +83,4 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 	}
 
 	return got == m.want, nil
-}
-
-// isDecodeError reports whether err is the decoder saying the value does
-// not read as the requested type, which is a no rather than a failure.
-func isDecodeError(err error) bool {
-	_, ok := errors.AsType[yaml.Error](err)
-
-	return ok
 }

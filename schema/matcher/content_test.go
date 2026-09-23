@@ -2,6 +2,7 @@ package matcher_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -182,5 +183,30 @@ func TestContent_ContextEnded(t *testing.T) {
 	// rather than a match, and the registry stops at the document.
 	ok, err := matcher.Content(kindPath, "Deployment").Match(ctx, doc)
 	require.ErrorIs(t, err, context.Canceled)
+	assert.False(t, ok)
+}
+
+// The error rejecting reports from its own decode.
+var errRejecting = errors.New("value rejected itself")
+
+// rejecting decodes itself and reports errRejecting, so the decoder
+// returns the value's own error rather than a rejection of its own.
+type rejecting struct{}
+
+func (*rejecting) UnmarshalYAML([]byte) error {
+	return errRejecting
+}
+
+func TestContent_UnmarshalerError(t *testing.T) {
+	t.Parallel()
+
+	// A value that rejects itself is not the decoder saying the value
+	// does not read as T, so the matcher returns the error rather than
+	// a no.
+	m := matcher.Content(kindPath, rejecting{})
+	doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
+
+	ok, err := m.Match(t.Context(), doc)
+	require.ErrorIs(t, err, errRejecting)
 	assert.False(t, ok)
 }
