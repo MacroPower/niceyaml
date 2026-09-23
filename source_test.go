@@ -1,6 +1,7 @@
 package niceyaml_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -1798,5 +1799,69 @@ func TestNewSourceFromFS(t *testing.T) {
 
 		_, err := niceyaml.NewSourceFromFS(fsys, "configs/missing.yaml")
 		require.ErrorIs(t, err, fs.ErrNotExist)
+	})
+}
+
+func TestSource_Decode(t *testing.T) {
+	t.Parallel()
+
+	type config struct {
+		Name string `yaml:"name"`
+	}
+
+	t.Run("decodes the one document", func(t *testing.T) {
+		t.Parallel()
+
+		called := false
+
+		source := niceyaml.NewSourceFromString("name: test\n", niceyaml.WithValidators(
+			niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
+				called = true
+
+				assert.True(t, n.Path().IsRoot())
+
+				return nil
+			}),
+		))
+
+		got, err := source.Decode[config](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, config{Name: "test"}, got)
+		assert.True(t, called, "the validators of the source run as for a root decode")
+	})
+
+	t.Run("DecodeInto keeps the fields the document leaves out", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("{}\n")
+
+		cfg := config{Name: "default"}
+		require.NoError(t, source.DecodeInto(t.Context(), &cfg))
+		assert.Equal(t, config{Name: "default"}, cfg)
+	})
+
+	t.Run("several documents return the error Document returns", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("name: a\n---\nname: b\n", niceyaml.WithName("two.yaml"))
+
+		got, err := source.Decode[config](t.Context())
+		require.ErrorIs(t, err, niceyaml.ErrMultipleDocuments)
+		assert.Equal(t, config{}, got)
+		assert.Equal(t, "two.yaml:2:1: multiple documents in source: 2 documents", err.Error())
+	})
+
+	t.Run("a decode error binds to the source", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("name: [1]\n", niceyaml.WithName("x.yaml"))
+
+		_, err := source.Decode[config](t.Context())
+		require.Error(t, err)
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, source, bound.Source())
 	})
 }

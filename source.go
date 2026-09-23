@@ -1,6 +1,7 @@
 package niceyaml
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -345,7 +346,10 @@ func (s *Source) Documents() ([]*Node, error) {
 }
 
 // Document returns the root [*Node] of a [Source] that holds a single
-// YAML document, which is the direct path for a configuration file:
+// YAML document, for a caller that reads a configuration file in more
+// than one step, such as one that scopes a Node with [Node.At] or binds
+// a check with [Node.Bind]. [Source.Decode] decodes that document in
+// one step:
 //
 //	doc, err := niceyaml.NewSourceFromString(yamlContent).Document()
 //	if err != nil {
@@ -374,6 +378,47 @@ func (s *Source) Document() (*Node, error) {
 	}
 
 	return doc, nil
+}
+
+// DecodeInto validates and decodes the one document of the [Source] into
+// v, as [Node.DecodeInto] decodes the root Node [Source.Document]
+// returns. A Source that holds more than one document, or none, returns
+// the error Source.Document returns, so a configuration file that must
+// hold one document decodes in one step and reports a second document
+// as the error it is.
+func (s *Source) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
+	doc, err := s.Document()
+	if err != nil {
+		return err
+	}
+
+	return doc.DecodeInto(ctx, v, opts...)
+}
+
+// Decode validates and decodes the one document of the [Source] into a
+// new T, as [Node.Decode] decodes the root Node [Source.Document]
+// returns, which is the direct path for a configuration file:
+//
+//	source, err := niceyaml.NewSourceFromFile(path)
+//	if err != nil {
+//		return err
+//	}
+//
+//	config, err := source.Decode[Config](ctx, niceyaml.WithValidator(schema))
+//
+// A Source that holds more than one document, or none, returns the error
+// Source.Document returns. On error, the returned T is the zero value.
+func (s *Source) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
+	var v T
+
+	err := s.DecodeInto(ctx, &v, opts...)
+	if err != nil {
+		var zero T
+
+		return zero, err
+	}
+
+	return v, nil
 }
 
 // single returns the one document of the Source, or the reason it has

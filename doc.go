@@ -176,17 +176,13 @@
 //
 // # Validation Pipeline
 //
-// For structured validation, [Source.Document] returns the root [Node]
-// of a file that holds one document, and [Source.Documents] returns the
-// root of each document of a file that holds several:
+// For structured validation, [Source.Decode] decodes a file that holds
+// one document, [Source.Document] returns the root [Node] of that
+// document for a caller that works in steps, and [Source.Documents]
+// returns the root of each document of a file that holds several:
 //
 //	source := niceyaml.NewSourceFromString(yamlContent)
-//	doc, err := source.Document()
-//	if err != nil {
-//		return err
-//	}
-//
-//	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(validator))
+//	config, err := source.Decode[Config](ctx, niceyaml.WithValidator(validator))
 //
 //	docs, _ := source.Documents()
 //	for _, doc := range docs {
