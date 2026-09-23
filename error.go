@@ -913,7 +913,7 @@ func (e *SourceError) Node() *Node {
 
 // Document returns the root [*Node] of the document the error is bound
 // to, the one the node [SourceError.Node] returns belongs to, so a caller
-// that sorts the errors of a file by document reads its [Node.Index]. An
+// that sorts the errors of a file by document reads its [Node.DocumentIndex]. An
 // error bound to no node is bound to no document. A nil SourceError is
 // bound to none.
 func (e *SourceError) Document() *Node {

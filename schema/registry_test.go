@@ -416,7 +416,7 @@ func TestRegistry_Caching(t *testing.T) {
 			// Each document names the same schema with a different scheme
 			// case, as two directives in two files might.
 			scheme := "http"
-			if doc.Index() == 1 {
+			if doc.DocumentIndex() == 1 {
 				scheme = "HTTP"
 			}
 

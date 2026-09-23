@@ -408,8 +408,9 @@ type document struct {
 // [Node.Path] is [paths.Root] for the root and the path from it for a
 // scoped Node.
 //
-// [Node.DocumentAST], [Node.Index], [Node.Preamble], and [Node.FilePath]
-// describe the document as a whole, whatever Node of it a caller holds.
+// [Node.DocumentAST], [Node.DocumentIndex], [Node.Preamble], and
+// [Node.FilePath] describe the document as a whole, whatever Node of it a
+// caller holds.
 //
 // A Node holds the Source it came from, and every decoding method binds
 // the [Error] values it produces to that source, so the errors it returns
@@ -704,9 +705,11 @@ func (n *Node) Source() *Source {
 	return n.source
 }
 
-// Index returns the 0-indexed position within the file of the document
-// the Node belongs to.
-func (n *Node) Index() int {
+// DocumentIndex returns the 0-indexed position within the file of the
+// document the Node belongs to. A Node from [Node.At] reports the index
+// of the document that holds it, and the index of the node itself within
+// a sequence is the last segment of [Node.Path].
+func (n *Node) DocumentIndex() int {
 	return n.doc.index
 }
 

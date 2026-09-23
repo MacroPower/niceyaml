@@ -67,7 +67,7 @@ func TestSource_Documents(t *testing.T) {
 	require.Len(t, docs, 2)
 
 	second := docs[1]
-	assert.Equal(t, 1, second.Index())
+	assert.Equal(t, 1, second.DocumentIndex())
 	assert.Equal(t, "two.yaml", second.FilePath())
 	assert.Same(t, source, second.Source())
 	assert.NotNil(t, second.Tokens())
@@ -605,7 +605,7 @@ func TestDocument_Preamble(t *testing.T) {
 				}
 
 				assert.Equal(t, want, got, "document %d", i)
-				assert.Equal(t, i, d.Index())
+				assert.Equal(t, i, d.DocumentIndex())
 			}
 		})
 	}
@@ -2915,7 +2915,7 @@ func TestDocument_At_Scope(t *testing.T) {
 		assert.Same(t, dd.Source(), hours.Source())
 		assert.Same(t, dd, hours.Document())
 		assert.Same(t, dd.DocumentAST(), hours.Document().DocumentAST())
-		assert.Equal(t, dd.Index(), hours.Document().Index())
+		assert.Equal(t, dd.DocumentIndex(), hours.Document().DocumentIndex())
 		assert.Equal(t, dd.Preamble(), hours.Document().Preamble())
 		assert.Equal(t, dd.FilePath(), hours.Document().FilePath())
 	})
