@@ -225,7 +225,7 @@ func boundChildren(bound *SourceError, named bool) []positioned {
 			if inner := child.Unwrap().Error(); inner != text {
 				text = inner
 				if kid.located {
-					text = prefix(kid.pos.String()+":", text)
+					text = prefix(editorPosition(kid.pos)+":", text)
 				}
 			}
 		}

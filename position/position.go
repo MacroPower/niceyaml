@@ -44,10 +44,13 @@ func NewFromToken(tk *token.Token) Position {
 	return Position{Line: line, Col: col}
 }
 
-// String returns the position in "line:col" format with 1-indexed values,
-// which is how editors count. The fields themselves stay 0-indexed.
+// String returns the position as "line:col" with the fields as they
+// are, counted from 0 as every value in this package is, so a logged
+// position reads as the fields compare. An error bound to a source
+// prints its position counted from 1 in its message, as editors and
+// build tools count.
 func (p Position) String() string {
-	return fmt.Sprintf("%d:%d", p.Line+1, p.Col+1)
+	return fmt.Sprintf("%d:%d", p.Line, p.Col)
 }
 
 // Range represents a half-open range [Start, End) between two [Position] values.
@@ -78,8 +81,8 @@ func (r Range) Contains(pos Position) bool {
 	return true
 }
 
-// String returns the range in "startLine:startCol-endLine:endCol" format with
-// 1-indexed values, as [Position.String] does.
+// String returns the range as "startLine:startCol-endLine:endCol" with
+// the fields as they are, counted from 0, as [Position.String] does.
 func (r Range) String() string {
 	return fmt.Sprintf("%s-%s", r.Start.String(), r.End.String())
 }

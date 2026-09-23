@@ -1049,14 +1049,20 @@ func (e *SourceError) Error() string {
 }
 
 // formatPosition returns pos as "name:line:col:", the shape editors and
-// build tools read, or "line:col:" when name is empty. Editors count from
-// 1, so the coordinates are 1-indexed.
+// build tools read, or "line:col:" when name is empty.
 func formatPosition(name string, pos position.Position) string {
 	if name == "" {
-		return pos.String() + ":"
+		return editorPosition(pos) + ":"
 	}
 
-	return name + ":" + pos.String() + ":"
+	return name + ":" + editorPosition(pos) + ":"
+}
+
+// editorPosition returns pos as "line:col" counted from 1, as editors
+// and build tools count, where [position.Position.String] counts from 0
+// as the fields do.
+func editorPosition(pos position.Position) string {
+	return fmt.Sprintf("%d:%d", pos.Line+1, pos.Col+1)
 }
 
 // prefix returns p and msg separated by a space, or p alone when msg is

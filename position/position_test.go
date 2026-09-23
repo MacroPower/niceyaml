@@ -99,19 +99,19 @@ func TestPosition_String(t *testing.T) {
 	}{
 		"zero position": {
 			pos:  position.New(0, 0),
-			want: "1:1",
+			want: "0:0",
 		},
 		"first line tenth column": {
 			pos:  position.New(0, 9),
-			want: "1:10",
+			want: "0:9",
 		},
 		"line 5 col 15 (0-indexed)": {
 			pos:  position.New(4, 14),
-			want: "5:15",
+			want: "4:14",
 		},
 		"large values": {
 			pos:  position.New(999, 499),
-			want: "1000:500",
+			want: "999:499",
 		},
 	}
 
@@ -134,15 +134,15 @@ func TestRange_String(t *testing.T) {
 	}{
 		"single point": {
 			r:    position.NewRange(position.New(0, 0), position.New(0, 0)),
-			want: "1:1-1:1",
+			want: "0:0-0:0",
 		},
 		"single line range": {
 			r:    position.NewRange(position.New(0, 5), position.New(0, 10)),
-			want: "1:6-1:11",
+			want: "0:5-0:10",
 		},
 		"multi-line range": {
 			r:    position.NewRange(position.New(2, 3), position.New(5, 8)),
-			want: "3:4-6:9",
+			want: "2:3-5:8",
 		},
 	}
 
@@ -171,14 +171,14 @@ func TestRanges_String(t *testing.T) {
 			ranges: position.Ranges{
 				position.NewRange(position.New(0, 0), position.New(0, 5)),
 			},
-			want: "1:1-1:6",
+			want: "0:0-0:5",
 		},
 		"multiple ranges": {
 			ranges: position.Ranges{
 				position.NewRange(position.New(0, 0), position.New(0, 5)),
 				position.NewRange(position.New(2, 3), position.New(4, 8)),
 			},
-			want: "1:1-1:6, 3:4-5:9",
+			want: "0:0-0:5, 2:3-4:8",
 		},
 		"three ranges": {
 			ranges: position.Ranges{
@@ -186,7 +186,7 @@ func TestRanges_String(t *testing.T) {
 				position.NewRange(position.New(1, 0), position.New(1, 1)),
 				position.NewRange(position.New(2, 0), position.New(2, 1)),
 			},
-			want: "1:1-1:2, 2:1-2:2, 3:1-3:2",
+			want: "0:0-0:1, 1:0-1:1, 2:0-2:1",
 		},
 	}
 
