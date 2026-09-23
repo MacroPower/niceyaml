@@ -1814,7 +1814,9 @@ func TestSource_Decode(t *testing.T) {
 
 		called := false
 
-		source := niceyaml.NewSourceFromString("name: test\n", niceyaml.WithValidators(
+		source := niceyaml.NewSourceFromString("name: test\n")
+
+		got, err := source.Decode[config](t.Context(), niceyaml.WithValidator(
 			niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
 				called = true
 
@@ -1823,11 +1825,9 @@ func TestSource_Decode(t *testing.T) {
 				return nil
 			}),
 		))
-
-		got, err := source.Decode[config](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, config{Name: "test"}, got)
-		assert.True(t, called, "the validators of the source run as for a root decode")
+		assert.True(t, called, "the validator of the call runs on the root")
 	})
 
 	t.Run("DecodeInto keeps the fields the document leaves out", func(t *testing.T) {

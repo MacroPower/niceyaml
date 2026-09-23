@@ -66,21 +66,21 @@ type SelfValidator interface {
 // decodes, such as a JSON schema or a schema registry that picks the
 // schema from the document's content or file path.
 //
-// Pass one to [Node.Decode] with [WithValidator], set one on a [Source]
-// with [WithValidators] to check every document of it, or run one on its
-// own with [Node.Validate]. The Node is the scope that runs the
-// validator: the root of a whole document, or the node a Node from
+// Pass one to [Node.Decode] with [WithValidator], give one to
+// [NewDecoder] for a [Decoder] that checks every node it decodes, or run
+// one on its own with [Node.Validate]. The Node is the scope that runs
+// the validator: the root of a whole document, or the node a Node from
 // [Node.At] selects, so a validator given to a scoped decode checks that
 // node and its paths resolve from it. A validator that needs the whole
 // document, as a registry that picks a schema by file path does, reaches
 // it through [Node.Document]. A validator that checks the decoded data
-// reads the node with [Node.Value], which decodes it and runs no
-// validator, so a validator on the source does not run itself again. The
+// reads the node with [Node.Decode], which runs the validators the
+// caller passes and no other, so a validator never runs itself again. The
 // context carries cancellation and deadlines to validators doing
 // cancellable work, such as remote schema reference resolution:
 //
 //	func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
-//		data, err := n.Value[any](ctx)
+//		data, err := n.Decode[any](ctx)
 //		if err != nil {
 //			return err
 //		}
@@ -839,24 +839,18 @@ func (n *Node) position(path paths.Path) (position.Position, error) {
 //		}
 //	}
 //
-// Given no validators, Validate runs the ones [WithValidators] set on
-// the source, which check a whole document, on the root of the document
-// the Node belongs to, so doc.Validate(ctx) checks a document against
-// the validators of its source without decoding it.
+// Given no validators, Validate runs none and returns nil.
+// [Decoder.Validate] runs the validators a [Decoder] holds the same way.
 //
 // An error from a validator comes back bound to the source as a
 // [SourceError] through [Node.Bind], so an [*Error] renders its
 // location and any other error names the source.
 func (n *Node) Validate(ctx context.Context, validators ...Validator) error {
-	if len(validators) == 0 {
-		return n.Document().validate(ctx, n.source.decodeCfg.validators)
-	}
-
 	return n.validate(ctx, validators)
 }
 
 // validate runs validators on the node in order and binds the first
-// error, without falling back to the validators of the source.
+// error.
 func (n *Node) validate(ctx context.Context, validators []Validator) error {
 	for _, dv := range validators {
 		err := dv.Validate(ctx, n)
@@ -939,9 +933,9 @@ func (n *Node) Bind(err error) error {
 	return bindTree(err, binder{src: n.source, node: n})
 }
 
-// DecodeOption configures [Node.Decode] and [Node.DecodeInto].
-// [WithDecodeOptions] sets the ones every decode of a [Source] starts
-// from.
+// DecodeOption configures [Node.Decode] and [Node.DecodeInto], and
+// [NewDecoder] takes the same options for a [Decoder] that applies them
+// to every node it decodes.
 //
 // Available options:
 //   - [WithValidator]
@@ -958,21 +952,26 @@ type decodeConfig struct {
 	disallowUnknownFields bool
 }
 
-// newDecodeConfig returns the settings of one decode of the Source: the
-// settings [WithDecodeOptions] set, with opts applied over them. The
-// validators of the Source are not among them, since they check a whole
-// document and [Node.DecodeInto] runs them on the root alone. The result
-// shares nothing with the Source, so opts reach no other decode.
-func (s *Source) newDecodeConfig(opts []DecodeOption) decodeConfig {
-	cfg := s.decodeCfg
-	cfg.validators = nil
-	cfg.yamlOpts = slices.Clone(cfg.yamlOpts)
+// newDecodeConfig returns the settings of a decode: the defaults, with
+// opts applied over them in order. The result shares nothing with any
+// other decode.
+func newDecodeConfig(opts []DecodeOption) decodeConfig {
+	cfg := decodeConfig{selfValidation: true}
 
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 
 	return cfg
+}
+
+// clone returns a copy of the settings that shares no slice with the
+// receiver, so an option applied to the copy reaches no other decode.
+func (c decodeConfig) clone() decodeConfig {
+	c.validators = slices.Clone(c.validators)
+	c.yamlOpts = slices.Clone(c.yamlOpts)
+
+	return c
 }
 
 // decodeOptions returns the go-yaml options for one decode: the escape
@@ -1033,12 +1032,9 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 // for the root Node of a document, into v, which must be a non-nil
 // pointer. Any other v returns [ErrDecodeTarget] before anything runs.
 //
-// The settings [WithDecodeOptions] set on the source apply first, then
-// opts. The validators [WithValidators] set on the source run before
-// decoding when the Node is the root of a document, since they check a
-// whole document, and a scoped decode from [Node.At] runs none of them.
-// Each [Validator] from [WithValidator] runs after them, on any Node.
-// After decoding succeeds, every value in v that implements
+// Each [Validator] from [WithValidator] runs on the node before
+// decoding, in the order given, and no validator runs when opts name
+// none. After decoding succeeds, every value in v that implements
 // [SelfValidator] validates itself, with the paths it reports put under
 // the path of the value, unless [WithSelfValidation] switches that off.
 // Fields absent from the document keep their existing values, so v may
@@ -1051,9 +1047,14 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 // document, so a value that refers to an anchor defined outside it decodes
 // as it does in the whole document.
 //
-// [Node.ValueInto] decodes the node alone, with no validator on either
-// side of the decode.
+// [Decoder.DecodeInto] decodes with options stated once, for every node
+// a [Decoder] decodes.
 func (n *Node) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
+	return n.decodeInto(ctx, v, newDecodeConfig(opts))
+}
+
+// decodeInto is [Node.DecodeInto] with its settings resolved.
+func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig) error {
 	err := checkDecodeTarget(v)
 	if err != nil {
 		return err
@@ -1064,14 +1065,7 @@ func (n *Node) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) erro
 		return err
 	}
 
-	cfg := n.source.newDecodeConfig(opts)
-
-	validators := cfg.validators
-	if n.base.IsRoot() {
-		validators = slices.Concat(n.source.decodeCfg.validators, cfg.validators)
-	}
-
-	err = n.validate(ctx, validators)
+	err = n.validate(ctx, cfg.validators)
 	if err != nil {
 		return err
 	}
@@ -1086,30 +1080,6 @@ func (n *Node) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) erro
 	}
 
 	return nil
-}
-
-// ValueInto decodes the node into v, which must be a non-nil pointer, and
-// nothing more: no [Validator] runs before the decode, and v does not
-// validate itself after it, whatever [WithValidators] and
-// [WithDecodeOptions] set on the source. The settings among the decode
-// options of the source, such as [WithDisallowUnknownFields], apply as
-// they do to every decode. It is the decode for a validator that reads
-// the node it checks, since [Node.DecodeInto] would run the validators
-// of the source, the validator itself among them, again. In every other
-// way v decodes as [Node.DecodeInto] decodes it, and any other v returns
-// [ErrDecodeTarget] before anything runs.
-func (n *Node) ValueInto(ctx context.Context, v any) error {
-	err := checkDecodeTarget(v)
-	if err != nil {
-		return err
-	}
-
-	node, err := n.AST()
-	if err != nil {
-		return err
-	}
-
-	return n.decodeNode(ctx, node, v, n.source.newDecodeConfig(nil).decodeOptions())
 }
 
 // checkDecodeTarget returns [ErrDecodeTarget] unless v is a non-nil
@@ -1246,17 +1216,15 @@ func hasContent(node ast.Node) bool {
 // Decode validates and decodes the node, which is the whole document for
 // the root Node of a document, into a new T.
 //
-// The settings [WithDecodeOptions] set on the source apply first, then
-// opts. The validators [WithValidators] set on the source run before
-// decoding a root Node, and each [Validator] from [WithValidator] runs
-// after them, as [Node.DecodeInto] describes. After decoding succeeds,
-// every value in the result that implements [SelfValidator] validates
-// itself, T first among them, unless [WithSelfValidation] switches that
-// off. The method set of a pointer includes the methods declared on the
-// value, so both value and pointer receivers participate. YAML decoding
-// errors, and [Error] values from the validators, come back bound to the
-// source as [SourceError] values. On error, the returned T is the zero
-// value.
+// Each [Validator] from [WithValidator] runs on the node before
+// decoding, as [Node.DecodeInto] describes, and no validator runs when
+// opts name none. After decoding succeeds, every value in the result
+// that implements [SelfValidator] validates itself, T first among them,
+// unless [WithSelfValidation] switches that off. The method set of a
+// pointer includes the methods declared on the value, so both value and
+// pointer receivers participate. YAML decoding errors, and [Error]
+// values from the validators, come back bound to the source as
+// [SourceError] values. On error, the returned T is the zero value.
 //
 // A scoped Decode reads one typed value without decoding the whole
 // document, such as a version number or a list of tags, and a scalar
@@ -1287,39 +1255,11 @@ func hasContent(node ast.Node) bool {
 // the node from [Node.AST] and call its String method.
 //
 // To decode into a value you already hold, use [Node.DecodeInto]. To
-// decode with no validation on either side, use [Node.Value].
+// decode many nodes with options stated once, use a [Decoder].
 func (n *Node) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
 	var v T
 
 	err := n.DecodeInto(ctx, &v, opts...)
-	if err != nil {
-		var zero T
-
-		return zero, err
-	}
-
-	return v, nil
-}
-
-// Value decodes the node into a new T and nothing more: no [Validator]
-// runs before the decode, and the value does not validate itself after
-// it, as [Node.ValueInto] describes. It is the decode for a validator
-// that reads the node it checks:
-//
-//	func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
-//		data, err := n.Value[any](ctx)
-//		if err != nil {
-//			return err
-//		}
-//
-//		return s.check(ctx, data)
-//	}
-//
-// On error, the returned T is the zero value.
-func (n *Node) Value[T any](ctx context.Context) (T, error) {
-	var v T
-
-	err := n.ValueInto(ctx, &v)
 	if err != nil {
 		var zero T
 

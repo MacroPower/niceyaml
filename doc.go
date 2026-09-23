@@ -204,12 +204,21 @@
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
 //
-// [Node.Validate] runs the same validators without decoding, and
-// [WithValidators] sets the validators every document of a [Source]
-// decodes with, so a file of many documents states its schema once. A
-// validator reads the node it checks with [Node.Value], which decodes
-// without validating, so a validator of the source does not run itself
-// again.
+// [Node.Validate] runs the same validators without decoding, and a
+// [Decoder] holds the options for every node it decodes, so a file of
+// many documents states its schema once:
+//
+//	dec := niceyaml.NewDecoder(niceyaml.WithValidator(reg))
+//	for _, doc := range docs {
+//		config, err := dec.Decode[Config](ctx, doc)
+//		if err != nil {
+//			return err
+//		}
+//	}
+//
+// A validator reads the node it checks with [Node.Decode], which runs
+// the validators the caller passes and no other, so a validator never runs
+// itself again.
 //
 // A [SelfValidator] writes its paths from its own root, and the decode
 // calls Validate on every value in the result that implements it, with
