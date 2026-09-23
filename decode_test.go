@@ -28,6 +28,9 @@ var (
 	errNameRequired           = errors.New("name is required")
 	errDocumentRejected       = errors.New("document rejected")
 	errPlainValidation        = errors.New("plain validation failure")
+
+	// The error rejectingUnmarshaler reports from its own decode.
+	errUnmarshal = errors.New("unmarshaler rejected the value")
 )
 
 func TestSource_Decoder(t *testing.T) {
@@ -3528,5 +3531,123 @@ func TestNode_Nodes(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 		assert.Same(t, empty.Source(), bound.Source())
+	})
+}
+
+// rejectingUnmarshaler decodes itself and reports errUnmarshal, so the
+// error the decoder returns is the caller's own rather than go-yaml's.
+type rejectingUnmarshaler struct{}
+
+func (*rejectingUnmarshaler) UnmarshalYAML([]byte) error {
+	return errUnmarshal
+}
+
+func TestErrDecodeRejected(t *testing.T) {
+	t.Parallel()
+
+	rejected := map[string]struct {
+		input  string
+		decode func(ctx context.Context, dd *niceyaml.Node) error
+	}{
+		"type mismatch": {
+			input: "value: abc",
+			decode: func(ctx context.Context, dd *niceyaml.Node) error {
+				_, err := dd.Decode[struct{ Value int }](ctx)
+
+				return err
+			},
+		},
+		"overflow": {
+			input: "value: 300",
+			decode: func(ctx context.Context, dd *niceyaml.Node) error {
+				_, err := dd.Decode[struct{ Value int8 }](ctx)
+
+				return err
+			},
+		},
+		"unknown field": {
+			input: "other: 1",
+			decode: func(ctx context.Context, dd *niceyaml.Node) error {
+				_, err := dd.Decode[struct{ Value int }](ctx, niceyaml.WithDisallowUnknownFields(true))
+
+				return err
+			},
+		},
+		"mapping into scalar": {
+			input: "value:\n  a: 1",
+			decode: func(ctx context.Context, dd *niceyaml.Node) error {
+				_, err := dd.Decode[struct{ Value string }](ctx)
+
+				return err
+			},
+		},
+		"decoder": {
+			input: "value: abc",
+			decode: func(ctx context.Context, dd *niceyaml.Node) error {
+				var v struct{ Value int }
+
+				return niceyaml.NewDecoder().DecodeInto(ctx, dd, &v)
+			},
+		},
+	}
+
+	for name, tc := range rejected {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dd := yamltest.FirstDocument(t, tc.input)
+
+			err := tc.decode(t.Context(), dd)
+			require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+
+			var srcErr *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &srcErr, "the rejection is not bound to the source")
+
+			_, ok := errors.AsType[yaml.Error](err)
+			assert.True(t, ok, "the go-yaml error left the chain")
+		})
+	}
+
+	t.Run("unmarshaler error does not match", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "value: 1")
+
+		_, err := dd.Decode[rejectingUnmarshaler](t.Context())
+		require.ErrorIs(t, err, errUnmarshal)
+		require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
+	})
+
+	t.Run("decode target does not match", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "value: 1")
+
+		err := dd.DecodeInto(t.Context(), nil)
+		require.ErrorIs(t, err, niceyaml.ErrDecodeTarget)
+		require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
+	})
+
+	t.Run("parse error does not match", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := niceyaml.NewSourceFromString("a: [\n").Documents()
+		require.Error(t, err)
+		require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
+	})
+
+	t.Run("canceled context does not match", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "value: 1")
+
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		_, err := dd.Decode[struct{ Value int }](ctx)
+		if err != nil {
+			require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
+		}
 	})
 }

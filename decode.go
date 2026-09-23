@@ -1052,7 +1052,9 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 // be pre-populated with defaults.
 // YAML decoding errors, and [Error] values from the validators, come back
 // bound to the source as [SourceError] values, with a path in them
-// resolving from the scope.
+// resolving from the scope. A decoding error the go-yaml decoder
+// reports, such as a value that does not read as the target type,
+// matches [ErrDecodeRejected].
 //
 // An alias inside the node resolves against the anchors of the whole
 // document, so a value that refers to an anchor defined outside it decodes
@@ -1142,19 +1144,32 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 }
 
 // bindDecodeError binds an error from the decoder to the source: a
-// [yaml.Error] as an [*Error] at its token, so the excerpt marks it, and any
-// other error, such as a canceled context, as it is. Returns nil for a nil
-// err.
+// [yaml.Error] as an [*Error] at its token, so the excerpt marks it and
+// the error matches [ErrDecodeRejected], and any other error, such as a
+// canceled context or one a value's own UnmarshalYAML returns, as it is.
+// Returns nil for a nil err.
 func (n *Node) bindDecodeError(err error) error {
 	if err == nil {
 		return nil
 	}
 
 	if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
-		return n.Bind(WrapError(yamlMessageError{yamlErr}, atToken(yamlErr.GetToken())))
+		return n.Bind(WrapError(decodeRejectedError{yamlMessageError{yamlErr}}, atToken(yamlErr.GetToken())))
 	}
 
 	return n.Bind(err)
+}
+
+// decodeRejectedError is a [yamlMessageError] the decoder returned, which
+// matches [ErrDecodeRejected]. The same error from the parser does not,
+// so [Source.Documents] wraps it in the plain [yamlMessageError].
+type decodeRejectedError struct {
+	yamlMessageError
+}
+
+// Is reports whether target is [ErrDecodeRejected].
+func (e decodeRejectedError) Is(target error) bool {
+	return target == ErrDecodeRejected
 }
 
 // yamlMessageError is a [yaml.Error] reduced to its message. The go-yaml text
@@ -1235,7 +1250,8 @@ func hasContent(node ast.Node) bool {
 // pointer includes the methods declared on the value, so both value and
 // pointer receivers participate. YAML decoding errors, and [Error]
 // values from the validators, come back bound to the source as
-// [SourceError] values. On error, the returned T is the zero value.
+// [SourceError] values, and a value the go-yaml decoder rejects matches
+// [ErrDecodeRejected]. On error, the returned T is the zero value.
 //
 // A scoped Decode reads one typed value without decoding the whole
 // document, such as a version number or a list of tags, and a scalar

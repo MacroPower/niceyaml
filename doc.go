@@ -322,7 +322,9 @@
 // [token.Tokens] it lexes, and [ast.Node] and [*token.Token] as results of
 // resolving a [paths.Path]. Positions, ranges, lines, errors, and styles are
 // niceyaml's own types, and [paths.Path.YAMLPath] converts to go-yaml's
-// path type when a caller needs it.
+// path type when a caller needs it. A decode the go-yaml decoder rejects
+// matches [ErrDecodeRejected], so a caller tells that case apart without
+// naming go-yaml's error types.
 //
 // Every go-yaml setting has a named option, such as [WithAllowDuplicateKeys]
 // or [go.jacobcolvin.com/niceyaml/encoder.WithIndent]. The options that pass

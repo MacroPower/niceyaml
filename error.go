@@ -37,6 +37,18 @@ var (
 	// not a non-nil pointer, so there is nothing to decode into.
 	ErrDecodeTarget = errors.New("decode target is not a non-nil pointer")
 
+	// ErrDecodeRejected indicates the go-yaml decoder rejected the value
+	// [Node.Decode], [Node.DecodeInto], or [Decoder.DecodeInto] gave it:
+	// a value that does not read as the target type, a number that
+	// overflows it, or a field the target lacks under
+	// [WithDisallowUnknownFields]. The decoder reports every rejection as
+	// one kind of error, so the sentinel tells them apart from nothing
+	// finer.
+	// The error comes back bound as a [SourceError] at the offending
+	// token. An error a value's own UnmarshalYAML returns, and the error
+	// of a context that ended, come back as they are and do not match.
+	ErrDecodeRejected = errors.New("decoder rejected the value")
+
 	// ErrOutOfRange indicates the error's location lies outside the lines of
 	// the source, past the last or before the first, which happens when a
 	// position or range came from other text. [SourceError.Unresolved]
