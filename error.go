@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"maps"
 	"slices"
 	"strconv"
@@ -936,12 +937,18 @@ func (e *SourceError) Document() *Node {
 // It is the text [SourceError.Excerpt] annotates a location with, and
 // the field a structured report such as a JSON line or a CI annotation
 // carries beside the position from [SourceError.Range] and the path from
-// [SourceError.Path]:
+// [SourceError.Path]. Such a report walks every binding in the tree with
+// [AllSourceErrors]. A validator that found several violations reports
+// them as the children of one binding with no location of its own, and
+// a binding whose location did not resolve has no range but still names
+// a violation:
 //
-//	for _, bound := range niceyaml.SourceErrors(err) {
+//	for bound := range niceyaml.AllSourceErrors(err) {
+//		path, _ := bound.Path()
 //		if rng, ok := bound.Range(); ok {
-//			path, _ := bound.Path()
 //			emit(bound.Source().FilePath(), rng.Start, bound.Message(), path)
+//		} else {
+//			emit(bound.Source().FilePath(), position.Position{}, bound.Message(), path)
 //		}
 //	}
 //
@@ -1124,6 +1131,42 @@ func (e *SourceError) walk(visit func(*SourceError)) {
 	}
 }
 
+// All returns an iterator over the binding and every binding below it:
+// the SourceError itself, then each child from [SourceError.Errors] in
+// order, with the children of a child right after it, so a parent comes
+// before the bindings under it and a caller that wants one entry per
+// located error checks [SourceError.Range] on each. A binding with a
+// location and located children yields all of them, as an error at a
+// mapping does with one at each entry below it. A nil SourceError yields
+// nothing.
+//
+// [AllSourceErrors] walks the tree of any error this way.
+func (e *SourceError) All() iter.Seq[*SourceError] {
+	return func(yield func(*SourceError) bool) {
+		e.all(yield)
+	}
+}
+
+// all yields e and every binding below it in depth-first order and
+// reports whether the caller wants more. A nil e yields nothing.
+func (e *SourceError) all(yield func(*SourceError) bool) bool {
+	if e == nil {
+		return true
+	}
+
+	if !yield(e) {
+		return false
+	}
+
+	for _, c := range e.errors {
+		if !c.all(yield) {
+			return false
+		}
+	}
+
+	return true
+}
+
 // SourceErrors returns every binding in the tree of err whose excerpt
 // stands on its own: each [*SourceError] reached through the wrappers and
 // joins around it, in depth-first order, so the outermost comes first and
@@ -1139,45 +1182,81 @@ func (e *SourceError) walk(visit func(*SourceError)) {
 //		bound.Annotate(view)
 //	}
 //
+// A report that wants one entry per error, the children an excerpt
+// covers included, walks [AllSourceErrors] instead.
+//
 // Returns nil when err is nil or its tree holds no SourceError.
 func SourceErrors(err error) []*SourceError {
 	var out []*SourceError
 
-	var walk func(error, map[*Source]bool)
+	var collect func(*SourceError, map[*Source]bool)
 
-	walk = func(err error, seen map[*Source]bool) {
-		switch x := err.(type) { //nolint:errorlint // Walks the tree one node at a time.
-		case *SourceError:
-			if x == nil {
-				return
-			}
+	collect = func(x *SourceError, seen map[*Source]bool) {
+		if x == nil {
+			return
+		}
 
-			if !seen[x.source] {
-				out = append(out, x)
-			}
+		if !seen[x.source] {
+			out = append(out, x)
+		}
 
-			// The children of a binding to a source seen already render
-			// with the ancestor bound to it, and the rest on their own.
-			below := maps.Clone(seen)
-			below[x.source] = true
+		// The children of a binding to a source seen already render
+		// with the ancestor bound to it, and the rest on their own.
+		below := maps.Clone(seen)
+		below[x.source] = true
 
-			for _, c := range x.errors {
-				walk(c, below)
-			}
+		for _, c := range x.errors {
+			collect(c, below)
+		}
+	}
 
-		case interface{ Unwrap() error }:
-			walk(x.Unwrap(), seen)
+	eachBinding(err, func(x *SourceError) bool {
+		collect(x, map[*Source]bool{})
 
-		case interface{ Unwrap() []error }:
-			for _, inner := range x.Unwrap() {
-				walk(inner, seen)
+		return true
+	})
+
+	return out
+}
+
+// eachBinding calls visit for each [*SourceError] reached through the
+// wrappers and joins around err, in depth-first order, and stops when
+// visit reports false. It does not look below a binding, whose children
+// visit reaches through the binding itself. Reports whether every visit
+// wanted more.
+func eachBinding(err error, visit func(*SourceError) bool) bool {
+	switch x := err.(type) { //nolint:errorlint // Walks the tree one node at a time.
+	case *SourceError:
+		return visit(x)
+
+	case interface{ Unwrap() error }:
+		return eachBinding(x.Unwrap(), visit)
+
+	case interface{ Unwrap() []error }:
+		for _, inner := range x.Unwrap() {
+			if !eachBinding(inner, visit) {
+				return false
 			}
 		}
 	}
 
-	walk(err, map[*Source]bool{})
+	return true
+}
 
-	return out
+// AllSourceErrors returns an iterator over every binding in the tree of
+// err: each [*SourceError] reached through the wrappers and joins around
+// err, in depth-first order, and, through [SourceError.All], every
+// binding below each one, whatever source it is bound to. It is the walk
+// a structured report makes, one that emits a row for each error with a
+// location of its own, as the example on [SourceError.Message] shows.
+// [SourceErrors] leaves out the bindings an ancestor's excerpt covers,
+// which suits a renderer and not a report. A nil err has no bindings.
+func AllSourceErrors(err error) iter.Seq[*SourceError] {
+	return func(yield func(*SourceError) bool) {
+		eachBinding(err, func(x *SourceError) bool {
+			return x.all(yield)
+		})
+	}
 }
 
 // Format implements [fmt.Formatter].

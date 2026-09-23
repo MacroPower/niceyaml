@@ -3,6 +3,7 @@ package niceyaml_test
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -4449,4 +4450,153 @@ func requireUnresolved(t *testing.T, bound *niceyaml.SourceError, reason error) 
 	}
 
 	require.ErrorIs(t, bound.Unresolved(), reason)
+}
+
+func TestSourceErrorAll(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.FirstDocument(t, "a:\n  b: 1\n  c: 2\n")
+
+	inner := niceyaml.NewError("bad c", niceyaml.AtPath(paths.Root().Child("a", "c")))
+	middle := niceyaml.NewError("bad a", niceyaml.AtPath(paths.Root().Child("a")), niceyaml.WithErrors(inner))
+	root := doc.Bind(niceyaml.NewError("2 violations", niceyaml.WithErrors(
+		niceyaml.NewError("bad b", niceyaml.AtPath(paths.Root().Child("a", "b"))),
+		middle,
+	)))
+
+	bound, ok := errors.AsType[*niceyaml.SourceError](root)
+	require.True(t, ok)
+
+	t.Run("yields the binding then every descendant in order", func(t *testing.T) {
+		t.Parallel()
+
+		var got []string
+
+		for b := range bound.All() {
+			got = append(got, b.Message())
+		}
+
+		assert.Equal(t, []string{"2 violations", "bad b", "bad a", "bad c"}, got)
+	})
+
+	t.Run("stops when the caller breaks", func(t *testing.T) {
+		t.Parallel()
+
+		var got []string
+
+		for b := range bound.All() {
+			got = append(got, b.Message())
+			if len(got) == 2 {
+				break
+			}
+		}
+
+		assert.Equal(t, []string{"2 violations", "bad b"}, got)
+	})
+
+	t.Run("nil yields nothing", func(t *testing.T) {
+		t.Parallel()
+
+		var nilErr *niceyaml.SourceError
+
+		for range nilErr.All() {
+			t.Fatal("yielded a binding")
+		}
+	})
+}
+
+func TestAllSourceErrors(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n")
+
+	docs, err := source.Documents()
+	require.NoError(t, err)
+	require.Len(t, docs, 2)
+
+	first := docs[0].Bind(niceyaml.NewError("bad a", niceyaml.AtPath(paths.Root().Child("a"))))
+	second := docs[1].Bind(niceyaml.NewError("bad b", niceyaml.AtPath(paths.Root().Child("b"))))
+	other := yamltest.Bind(
+		t,
+		niceyaml.NewSourceFromString("c: 3\n"),
+		niceyaml.NewError("outer", niceyaml.WithErrors(first)),
+	)
+	tree := docs[0].Bind(niceyaml.NewError("2 violations", niceyaml.WithErrors(
+		niceyaml.NewError("bad a", niceyaml.AtPath(paths.Root().Child("a"))),
+		niceyaml.NewError("missing", niceyaml.AtPath(paths.Root().Child("nope"))),
+	)))
+
+	messages := func(err error) []string {
+		var got []string
+
+		for b := range niceyaml.AllSourceErrors(err) {
+			got = append(got, b.Message())
+		}
+
+		return got
+	}
+
+	tcs := map[string]struct {
+		err  error
+		want []string
+	}{
+		"nil": {
+			err: nil,
+		},
+		"no binding": {
+			err: errors.New("plain"),
+		},
+		"one binding through a wrapper": {
+			err:  fmt.Errorf("document 0: %w", first),
+			want: []string{"bad a"},
+		},
+		"joined bindings in order": {
+			err: errors.Join(
+				fmt.Errorf("document 0: %w", first),
+				fmt.Errorf("document 1: %w", second),
+			),
+			want: []string{"bad a", "bad b"},
+		},
+		"child bound to another source appears once, under its parent": {
+			err:  other,
+			want: []string{"outer", "bad a"},
+		},
+		"children bound to the same source appear below their parent": {
+			err:  tree,
+			want: []string{"2 violations", "bad a", "missing"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, messages(tc.err))
+		})
+	}
+
+	t.Run("an unresolved child still appears", func(t *testing.T) {
+		t.Parallel()
+
+		var unresolved *niceyaml.SourceError
+
+		for b := range niceyaml.AllSourceErrors(tree) {
+			if b.Message() == "missing" {
+				unresolved = b
+			}
+		}
+
+		require.NotNil(t, unresolved)
+
+		_, ok := unresolved.Range()
+		assert.False(t, ok)
+		require.ErrorIs(t, unresolved.Unresolved(), paths.ErrNotFound)
+	})
+
+	t.Run("the excerpt walk leaves out what the report walk yields", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Len(t, niceyaml.SourceErrors(tree), 1)
+		assert.Len(t, slices.Collect(niceyaml.AllSourceErrors(tree)), 3)
+	})
 }
