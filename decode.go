@@ -99,9 +99,9 @@ type SelfValidator interface {
 // from. A validator that binds an error itself does so through
 // [Node.Bind], since the Node leaves a bound error as it is.
 //
-// See [ValidatorFunc], [go.jacobcolvin.com/niceyaml/schema.Schema],
-// and [go.jacobcolvin.com/niceyaml/schema.Registry] for
-// implementations.
+// See [ValidatorFunc], [MultiValidator],
+// [go.jacobcolvin.com/niceyaml/schema.Schema], and
+// [go.jacobcolvin.com/niceyaml/schema.Registry] for implementations.
 type Validator interface {
 	Validate(ctx context.Context, n *Node) error
 }
@@ -131,6 +131,48 @@ type ValidatorFunc func(ctx context.Context, n *Node) error
 // Validate implements [Validator].
 func (f ValidatorFunc) Validate(ctx context.Context, n *Node) error {
 	return f(ctx, n)
+}
+
+// MultiValidator returns a [Validator] that runs every validator in
+// order and reports every failure, where the validators [WithValidator]
+// gives a decode run in order and stop at the first that fails. It suits
+// validators that check a document independently, such as a schema and
+// a check on the names it uses, so one run reports the violations of
+// both:
+//
+//	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(niceyaml.MultiValidator(schema, names)))
+//
+// Each validator sees the node whatever the ones before it reported, so
+// a validator that decodes the node reports its own failure beside a
+// schema violation of the same value. A validator that needs an earlier
+// one to have passed runs on its own instead. The error is the failures
+// joined in the order given, which the Node binds as one, so
+// [errors.Is] matches any one of them and the decode renders them as one
+// tree. No failure is no error. A context that ends stops the run, and
+// the error is then the one the context reports, or the one the
+// validator that saw it end returned.
+func MultiValidator(validators ...Validator) Validator {
+	return ValidatorFunc(func(ctx context.Context, n *Node) error {
+		var errs []error
+
+		for _, dv := range validators {
+			err := ctx.Err()
+			if err != nil {
+				return err //nolint:wrapcheck // The context names the reason, and the Node binds it.
+			}
+
+			err = dv.Validate(ctx, n)
+			if err != nil && ctx.Err() != nil {
+				return err //nolint:wrapcheck // The validator's own error, which the Node binds.
+			}
+
+			if err != nil {
+				errs = append(errs, err)
+			}
+		}
+
+		return errors.Join(errs...)
+	})
 }
 
 // newDocuments creates the root [*Node] of each YAML document of file, the
@@ -998,7 +1040,8 @@ func (c decodeConfig) decodeOptions() []yaml.DecodeOption {
 // WithValidator is a [DecodeOption] that validates the document with dv
 // before decoding it, and a validation error ends the decode before any
 // typed decoding. Several validators run in the order given, stopping at
-// the first that fails. A [go.jacobcolvin.com/niceyaml/schema.Schema]
+// the first that fails, and [MultiValidator] runs several and reports
+// every failure. A [go.jacobcolvin.com/niceyaml/schema.Schema]
 // checks the document against one JSON schema, and a
 // [go.jacobcolvin.com/niceyaml/schema.Registry] against the schema
 // it picks for the document:

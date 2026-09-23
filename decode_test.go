@@ -3651,3 +3651,115 @@ func TestErrDecodeRejected(t *testing.T) {
 		}
 	})
 }
+
+func TestMultiValidator(t *testing.T) {
+	t.Parallel()
+
+	errB := errors.New("bad b")
+	errC := errors.New("bad c")
+
+	badB := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+		return niceyaml.WrapError(errB, niceyaml.AtPath(paths.Root().Child("a", "b")))
+	})
+	badC := niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
+		// A validator that binds its own error, as a schema does.
+		return n.Bind(niceyaml.WrapError(errC, niceyaml.AtPath(paths.Root().Child("a", "c"))))
+	})
+	passing := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+		return nil
+	})
+	record := func(order *[]string, name string) niceyaml.Validator {
+		return niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+			*order = append(*order, name)
+
+			return nil
+		})
+	}
+
+	dd := yamltest.FirstDocument(t, "a:\n  b: 1\n  c: 2\n")
+
+	t.Run("runs every validator and reports every failure in order", func(t *testing.T) {
+		t.Parallel()
+
+		var order []string
+
+		multi := niceyaml.MultiValidator(record(&order, "first"), badB, record(&order, "second"), badC)
+
+		err := dd.Validate(t.Context(), multi)
+		require.ErrorIs(t, err, errB)
+		require.ErrorIs(t, err, errC)
+		assert.Equal(t, []string{"first", "second"}, order)
+
+		var got []string
+
+		for b := range niceyaml.AllSourceErrors(err) {
+			if rng, ok := b.Range(); ok {
+				got = append(got, rng.Start.String()+" "+b.Message())
+			}
+		}
+
+		assert.Equal(t, []string{"1:5 bad b", "2:5 bad c"}, got)
+	})
+
+	t.Run("renders as one tree", func(t *testing.T) {
+		t.Parallel()
+
+		err := dd.Validate(t.Context(), niceyaml.MultiValidator(badB, badC))
+		require.Error(t, err)
+
+		assert.Equal(t, "|-- 2:6: $.a.b: bad b\n`-- 3:6: $.a.c: bad c", report(err))
+	})
+
+	t.Run("no failure is no error", func(t *testing.T) {
+		t.Parallel()
+
+		require.NoError(t, dd.Validate(t.Context(), niceyaml.MultiValidator(passing, passing)))
+		require.NoError(t, dd.Validate(t.Context(), niceyaml.MultiValidator()))
+	})
+
+	t.Run("a Decoder carries it to every decode", func(t *testing.T) {
+		t.Parallel()
+
+		dec := niceyaml.NewDecoder(niceyaml.WithValidator(niceyaml.MultiValidator(badB, badC)))
+
+		_, err := dec.Decode[map[string]any](t.Context(), dd)
+		require.ErrorIs(t, err, errB)
+		require.ErrorIs(t, err, errC)
+	})
+
+	t.Run("the message names the source once", func(t *testing.T) {
+		t.Parallel()
+
+		src := niceyaml.NewSourceFromString("a:\n  b: 1\n  c: 2\n", niceyaml.WithFilePath("x.yaml"))
+
+		doc, err := src.Document()
+		require.NoError(t, err)
+
+		err = doc.Validate(t.Context(), niceyaml.MultiValidator(badB, badB))
+		require.Error(t, err)
+		assert.Equal(t, "x.yaml: $.a.b: bad b\n$.a.b: bad b", err.Error())
+	})
+
+	t.Run("a context that ends stops the run", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, cancel := context.WithCancel(t.Context())
+
+		calls := 0
+		canceling := niceyaml.ValidatorFunc(func(ctx context.Context, _ *niceyaml.Node) error {
+			calls++
+
+			cancel()
+
+			return ctx.Err()
+		})
+
+		err := dd.Validate(ctx, niceyaml.MultiValidator(badB, canceling, badC))
+		require.ErrorIs(t, err, context.Canceled)
+		require.NotErrorIs(t, err, errB)
+		assert.Equal(t, 1, calls)
+
+		require.ErrorIs(t, dd.Validate(ctx, niceyaml.MultiValidator(canceling)), context.Canceled)
+		assert.Equal(t, 1, calls, "an ended context runs no validator")
+	})
+}
