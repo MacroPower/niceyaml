@@ -20,8 +20,9 @@ import (
 // a bound error, hands one out.
 //
 // A View shares its lines with every other View over the same content and
-// owns its decoration alone, so creating one costs nothing and decorating
-// one reaches no other. Two renderings of one document, such as search
+// owns its decoration alone, so creating one costs an index of the lines
+// it holds and no copy of their content, and decorating one reaches no
+// other. Two renderings of one document, such as search
 // highlights and error marks, are two Views over the same [Lines].
 //
 // Every index and every [position.Range] a View takes or yields is in the

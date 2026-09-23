@@ -50,7 +50,7 @@
 // mark inserted and deleted lines, and overlays apply style spans for highlighting. A
 // Source hands out its lines from [Source.Lines] and a fresh view over them from
 // [Source.View], so the decoration added to one view reaches neither the Source nor
-// another view, and taking a view costs nothing. [Node.View] is the same view
+// another view, and taking a view copies no content. [Node.View] is the same view
 // sliced to the lines of one document, with the line numbers they have in the file.
 // Every index and range a view takes is in the coordinates of its lines, and a slice
 // keeps them, so the ranges a [go.jacobcolvin.com/niceyaml/finder.Finder] or

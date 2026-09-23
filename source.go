@@ -53,7 +53,7 @@ import (
 //
 // Since nothing mutates a Source, it is safe for concurrent use. Every view
 // taken from it shares its lines and owns its decoration, so creating one
-// costs nothing.
+// costs an index of the lines and no copy of their content.
 //
 // Create instances with [NewSourceFromFile], [NewSourceFromFS],
 // [NewSourceFromReader], [NewSourceFromBytes], [NewSourceFromString], or
