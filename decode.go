@@ -27,7 +27,11 @@ import (
 // unless [WithSelfValidation] switches that off. A check that belongs
 // to the caller rather than the type, such as one that needs a registry
 // of known names, runs on the decoded value after Decode returns, and
-// [Node.Bind] binds its result to the document the value came from.
+// [Node.Bind] binds its result to the document the value came from. A
+// check that must run inside the decode, so a [Decoder] carries it to
+// every node and its failures report beside the others, is a
+// [Validator] that decodes the node itself with [Node.Decode] and checks
+// the value it gets, as the Validator example shows.
 //
 // An [*Error] the value returns writes its path from the value's own
 // root, and the decode puts it under the path of the value in the
