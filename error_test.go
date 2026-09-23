@@ -1012,8 +1012,10 @@ func TestError_MultiError(t *testing.T) {
 		err := niceyaml.NewError("main error", niceyaml.WithErrors(nested1, nested2))
 
 		// The nested errors are structure, not text. Errors returns them
-		// and they surface through Unwrap, while the message stays one line.
-		assert.Equal(t, "main error", render(err))
+		// and they surface through Unwrap, while the message stays one
+		// line and %+v lists them as a tree under it.
+		assert.Equal(t, "main error", err.Error())
+		assert.Equal(t, "main error\n|-- nested 1\n`-- nested 2", render(err))
 		assert.Equal(t, []error{nested1, nested2}, err.Errors())
 		require.ErrorIs(t, err, nested1)
 		require.ErrorIs(t, err, nested2)
@@ -1124,9 +1126,10 @@ func TestError_MultiError(t *testing.T) {
 			),
 		)
 
-		// Without a source, the message alone renders, and the nested error
-		// waits for a binding to list it behind its position.
-		assert.Equal(t, "validation failed", render(err))
+		// Without a source, the tree renders with no excerpt, and the
+		// nested error waits for a binding to put its position in front.
+		assert.Equal(t, "validation failed", err.Error())
+		assert.Equal(t, "validation failed\n`-- $.value: nested error", render(err))
 	})
 
 	t.Run("nested-only error with multiple lines", func(t *testing.T) {
@@ -4598,5 +4601,56 @@ func TestAllSourceErrors(t *testing.T) {
 
 		assert.Len(t, niceyaml.SourceErrors(tree), 1)
 		assert.Len(t, slices.Collect(niceyaml.AllSourceErrors(tree)), 3)
+	})
+}
+
+func TestError_Format(t *testing.T) {
+	t.Parallel()
+
+	err := niceyaml.NewError("2 violations", niceyaml.WithErrors(
+		niceyaml.NewError("bad a", niceyaml.AtPath(paths.Root().Child("a"))),
+		niceyaml.NewError("bad b", niceyaml.AtPath(paths.Root().Child("b"))),
+	))
+
+	tcs := map[string]struct {
+		format string
+		want   string
+	}{
+		"v prints the message": {
+			format: "%v",
+			want:   "2 violations",
+		},
+		"s prints the message": {
+			format: "%s",
+			want:   "2 violations",
+		},
+		"q quotes the message": {
+			format: "%q",
+			want:   `"2 violations"`,
+		},
+		"plus v prints the tree": {
+			format: "%+v",
+			want:   "2 violations\n|-- $.a: bad a\n`-- $.b: bad b",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, fmt.Sprintf(tc.format, err))
+		})
+	}
+
+	t.Run("plus v matches FormatError", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Equal(t, niceyaml.FormatError(err, 2), fmt.Sprintf("%+v", err))
+	})
+
+	t.Run("a wrapper prints the message alone", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Equal(t, "load: 2 violations", fmt.Errorf("load: %w", err).Error())
 	})
 }

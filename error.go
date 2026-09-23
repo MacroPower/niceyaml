@@ -90,7 +90,8 @@ var (
 // "name:line:col: msg". Nested errors from [WithErrors] are structure
 // rather than text. [Error.Errors] returns them, [Error.Unwrap] exposes
 // them to [errors.Is] and [errors.As], and the [SourceError] that binds
-// the Error binds each one as a child with a resolved location of its own.
+// the Error binds each one as a child with a resolved location of its
+// own. [Error.Format] prints them as a tree under the %+v verb.
 //
 // Error implements the error interface. Use [Error.Unwrap] with [errors.Is]
 // and [errors.As] to inspect wrapped errors.
@@ -318,6 +319,26 @@ func (e *Error) Error() string {
 	}
 
 	return msg
+}
+
+// Format implements [fmt.Formatter].
+//
+// The %v and %s verbs print [Error.Error]. The %+v verb prints what
+// [FormatError] renders for the error: its message as a tree with the
+// nested errors from [WithErrors] under it, so a log or a failing test
+// that prints an unbound Error that way shows every nested error, as it
+// does for a [*SourceError]. The %q verb quotes [Error.Error].
+func (e *Error) Format(f fmt.State, verb rune) {
+	switch {
+	case verb == 'v' && f.Flag('+'):
+		writeString(f, FormatError(e, defaultContextLines))
+
+	case verb == 'q':
+		writeString(f, strconv.Quote(e.Error()))
+
+	default:
+		writeString(f, e.Error())
+	}
 }
 
 // nested returns the nested errors of e that are not nothing, in the
