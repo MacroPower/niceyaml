@@ -10,6 +10,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -1699,4 +1700,103 @@ func TestPath_Node_LaterMergeKeyWins(t *testing.T) {
 	node, err := paths.MustParse("$.t.k").Node(f.Docs[0])
 	require.NoError(t, err)
 	assert.Equal(t, "Q", node.String())
+}
+
+func TestPath_Matches(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString(stringtest.Input(`
+		items:
+		  - a
+		  - b
+		spec:
+		  name: x
+		  deep:
+		    - name: y
+		    - other: z
+		base: &base
+		  name: merged
+		mixed:
+		  <<: *base
+		  extra: 1
+		ref: *base
+		'dot.key':
+		  - q
+	`))
+	file, err := source.File()
+	require.NoError(t, err)
+
+	doc := file.Docs[0]
+
+	tcs := map[string]struct {
+		path paths.Path
+		want []string
+	}{
+		"index all": {
+			path: paths.Root().Child("items").IndexAll(),
+			want: []string{"$.items[0]", "$.items[1]"},
+		},
+		"recursive": {
+			path: paths.Root().Recursive("name"),
+			want: []string{"$.spec.name", "$.spec.deep[0].name", "$.base.name"},
+		},
+		"recursive below a child": {
+			path: paths.Root().Child("spec").Recursive("name"),
+			want: []string{"$.spec.name", "$.spec.deep[0].name"},
+		},
+		"single": {
+			path: paths.Root().Child("spec", "name"),
+			want: []string{"$.spec.name"},
+		},
+		"key of an entry": {
+			path: paths.Root().Child("spec").Recursive("name").Key(),
+			want: []string{"$.spec.name~", "$.spec.deep[0].name~"},
+		},
+		"through an alias keeps the path as written": {
+			path: paths.Root().Child("ref", "name"),
+			want: []string{"$.ref.name"},
+		},
+		"through a merge key keeps the path of the mapping": {
+			path: paths.Root().Child("mixed", "name"),
+			want: []string{"$.mixed.name"},
+		},
+		"quoted name": {
+			path: paths.Root().Child("dot.key").IndexAll(),
+			want: []string{"$.'dot.key'[0]"},
+		},
+		"nothing": {
+			path: paths.Root().Child("missing").IndexAll(),
+			want: nil,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			matches, err := tc.path.Matches(doc)
+			require.NoError(t, err)
+
+			var got []string
+
+			for _, m := range matches {
+				got = append(got, m.Path.String())
+			}
+
+			assert.Equal(t, tc.want, got)
+
+			nodes, err := tc.path.Nodes(doc)
+			require.NoError(t, err)
+			require.Len(t, nodes, len(matches))
+
+			for i, m := range matches {
+				assert.Same(t, nodes[i], m.Node)
+
+				// The path of a match selects its node alone.
+				single, err := m.Path.Node(doc)
+				require.NoError(t, err)
+				assert.Same(t, m.Node, single)
+			}
+		})
+	}
 }

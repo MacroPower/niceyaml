@@ -507,8 +507,8 @@ func (n *Node) AST() (ast.Node, error) {
 // document has no content at all, such as an empty document or one
 // holding only directives; [paths.ErrAlias] when an alias on the path
 // does not resolve; and [paths.ErrWildcard] for a path that could match
-// several nodes. A caller that falls back when a value is absent checks
-// for [paths.ErrNotFound]:
+// several nodes, which [Node.Nodes] scopes one by one. A caller that
+// falls back when a value is absent checks for [paths.ErrNotFound]:
 //
 //	version := 1
 //
@@ -537,6 +537,49 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 	c.span, c.content = n.extent(node)
 
 	return &c, nil
+}
+
+// Nodes returns a [*Node] scoped to each node path selects, in document
+// order, with path resolving from the receiver, so a path with a `[*]`
+// or `..name` selector, which [Node.At] rejects, scopes every element of
+// a sequence or every entry with a name at any depth. Each Node is
+// scoped as one from Node.At is, and [Node.Path] is the path that
+// selects its node alone, as [paths.Path.Matches] resolves it, so a
+// validator run on each element, or an error bound to it, reports the
+// element it came from:
+//
+//	items, err := doc.Nodes(paths.Root().Child("items").IndexAll())
+//	if err != nil {
+//		return err
+//	}
+//
+//	for _, item := range items {
+//		if err := item.Validate(ctx, itemSchema); err != nil {
+//			errs = append(errs, err) // bound at $.items[i]
+//		}
+//	}
+//
+// A path that selects nothing returns no Nodes and no error, as
+// [paths.Path.Nodes] does, and the errors it returns come back bound to
+// the source: an error wrapping [paths.ErrNoDocument] when the document
+// has no content, and [paths.ErrAlias] when an alias on the path does not
+// resolve.
+func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
+	found, err := n.base.Join(path).Matches(n.doc.root)
+	if err != nil {
+		return nil, n.Bind(err)
+	}
+
+	nodes := make([]*Node, 0, len(found))
+
+	for _, m := range found {
+		c := *n
+		c.base = m.Path
+		c.span, c.content = n.extent(m.Node)
+		nodes = append(nodes, &c)
+	}
+
+	return nodes, nil
 }
 
 // extent returns the lines and the tokens of node in the document: the

@@ -341,15 +341,56 @@ func (p Path) single(doc *ast.DocumentNode) (match, error) {
 //
 // Wraps [ErrNoDocument], together with [ErrNotFound], when the document has
 // no content to resolve in, and [ErrAlias] when an alias on the path does
-// not resolve.
+// not resolve. [Path.Matches] returns the same nodes with the path that
+// selects each one alone.
 func (p Path) Nodes(doc *ast.DocumentNode) ([]ast.Node, error) {
+	found, err := p.Matches(doc)
+	if err != nil {
+		return nil, err
+	}
+
+	nodes := make([]ast.Node, 0, len(found))
+	for _, m := range found {
+		nodes = append(nodes, m.Node)
+	}
+
+	return nodes, nil
+}
+
+// Match is one node a [Path] selects in a document, together with the
+// path that selects that node alone: the path as given, with each `[*]`
+// selector replaced by the index of the element and each `..name`
+// selector by the selectors from the node it applied to down to the
+// entry it found, so the path names the node wherever it lies.
+//
+// Receive instances from [Path.Matches].
+type Match struct {
+	Node ast.Node
+	Path Path
+}
+
+// Matches resolves every node the path selects in doc, as [Path.Nodes]
+// does, and returns each with the path that selects it alone, so a
+// caller that checks each element of a sequence or each entry a `..name`
+// selector finds reports the one it checked:
+//
+//	for _, m := range matches {
+//		fmt.Println(m.Path) // $.items[0], $.items[1], ...
+//	}
+//
+// A path without `[*]` or `..` selectors yields at most one match, whose
+// path is the path as given. The path of a node reached through an alias
+// is the path as written, not the location of the anchor, and the path
+// of an entry a `<<` merge key brings in is the path of the mapping that
+// merges it. Returns the errors [Path.Nodes] returns.
+func (p Path) Matches(doc *ast.DocumentNode) ([]Match, error) {
 	found, err := p.matches(doc)
 	if err != nil {
 		return nil, err
 	}
 
 	r := newResolver(doc)
-	nodes := make([]ast.Node, 0, len(found))
+	matches := make([]Match, 0, len(found))
 
 	for _, m := range found {
 		node, err := r.deref(m.node)
@@ -363,10 +404,10 @@ func (p Path) Nodes(doc *ast.DocumentNode) ([]ast.Node, error) {
 			continue
 		}
 
-		nodes = append(nodes, node)
+		matches = append(matches, Match{Node: node, Path: Path{segments: m.segs}})
 	}
 
-	return nodes, nil
+	return matches, nil
 }
 
 // Node resolves the node at the path in doc.

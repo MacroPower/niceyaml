@@ -10,26 +10,43 @@ import (
 )
 
 // match is one node a path resolved to, with the mapping entry that holds it
-// when the last selector picked a mapping key.
+// when the last selector picked a mapping key, and the selectors that
+// name the node alone: the ones applied so far, with a `[*]` replaced by
+// the index it matched and a `..name` by the selectors down to the entry
+// it found.
 type match struct {
 	node  ast.Node
 	entry *ast.MappingValueNode
+	segs  []segment
+}
+
+// with returns a copy of m at node, with seg appended to its selectors.
+// The copy owns its selectors, so the matches of one `[*]` do not share
+// a backing array.
+func (m match) with(node ast.Node, entry *ast.MappingValueNode, seg segment) match {
+	segs := make([]segment, 0, len(m.segs)+1)
+	segs = append(segs, m.segs...)
+	segs = append(segs, seg)
+
+	return match{node: node, entry: entry, segs: segs}
 }
 
 // key returns the match for the `~` selector applied to m: the key of the
 // entry m holds, or m itself when m holds no entry or its entry has no key,
 // so a `~` on a sequence element or the root selects what the path before
-// it does.
+// it does. The `~` joins the selectors either way, as the path wrote it.
 func (m match) key() match {
+	seg := segment{kind: segmentKey}
+
 	if m.entry == nil {
-		return m
+		return m.with(m.node, nil, seg)
 	}
 
 	if key := keyContent(m.entry.Key); key != nil {
-		return match{node: key}
+		return m.with(key, nil, seg)
 	}
 
-	return m
+	return m.with(m.node, m.entry, seg)
 }
 
 // resolver walks a document for the selectors of a [Path]. Its targets map
@@ -181,7 +198,7 @@ func (r *resolver) resolve(root ast.Node, segs []segment) ([]match, error) {
 				continue
 			}
 
-			found, err := r.apply(seg, m.node)
+			found, err := r.apply(seg, m)
 			if err != nil {
 				return nil, err
 			}
@@ -217,9 +234,10 @@ func uniqueMatches(matches []match) []match {
 	return unique
 }
 
-// apply applies one selector to node.
-func (r *resolver) apply(seg segment, node ast.Node) ([]match, error) {
-	content, err := r.unwrap(node)
+// apply applies one selector to the node of m, and returns the matches
+// with the selector that names each one appended to the selectors of m.
+func (r *resolver) apply(seg segment, m match) ([]match, error) {
+	content, err := r.unwrap(m.node)
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +254,7 @@ func (r *resolver) apply(seg segment, node ast.Node) ([]match, error) {
 			return nil, err
 		}
 
-		return []match{{node: entry.Value, entry: entry}}, nil
+		return []match{m.with(entry.Value, entry, seg)}, nil
 
 	case segmentIndex:
 		seq, ok := content.(*ast.SequenceNode)
@@ -244,7 +262,7 @@ func (r *resolver) apply(seg segment, node ast.Node) ([]match, error) {
 			return nil, nil
 		}
 
-		return []match{{node: seq.Values[seg.index]}}, nil
+		return []match{m.with(seq.Values[seg.index], nil, seg)}, nil
 
 	case segmentIndexAll:
 		seq, ok := content.(*ast.SequenceNode)
@@ -253,14 +271,14 @@ func (r *resolver) apply(seg segment, node ast.Node) ([]match, error) {
 		}
 
 		matches := make([]match, 0, len(seq.Values))
-		for _, v := range seq.Values {
-			matches = append(matches, match{node: v})
+		for i, v := range seq.Values {
+			matches = append(matches, m.with(v, nil, segment{kind: segmentIndex, index: i}))
 		}
 
 		return matches, nil
 
 	case segmentRecursive:
-		return r.descend(content, seg.name, nil), nil
+		return r.descend(content, seg.name, m, nil), nil
 
 	default:
 		return nil, nil
@@ -349,9 +367,10 @@ func (r *resolver) mergeSources(value ast.Node) ([]*ast.MappingNode, error) {
 }
 
 // descend collects every mapping entry keyed name at any depth below node, in
-// document order. It looks through anchors and tags but not aliases, so it
-// visits each entry of the source once, at its definition.
-func (r *resolver) descend(node ast.Node, name string, acc []match) []match {
+// document order, each with the selectors from at, the match node came
+// from, down to the entry. It looks through anchors and tags but not
+// aliases, so it visits each entry of the source once, at its definition.
+func (r *resolver) descend(node ast.Node, name string, at match, acc []match) []match {
 	switch n := node.(type) {
 	case *ast.MappingNode:
 		for _, entry := range n.Values {
@@ -359,22 +378,25 @@ func (r *resolver) descend(node ast.Node, name string, acc []match) []match {
 				continue
 			}
 
-			if keyName(entry.Key) == name {
-				acc = append(acc, match{node: entry.Value, entry: entry})
+			key := keyName(entry.Key)
+			below := at.with(entry.Value, entry, segment{kind: segmentChild, name: key})
+
+			if key == name {
+				acc = append(acc, below)
 			}
 
-			acc = r.descend(entry.Value, name, acc)
+			acc = r.descend(entry.Value, name, below, acc)
 		}
 
 	case *ast.SequenceNode:
-		for _, v := range n.Values {
-			acc = r.descend(v, name, acc)
+		for i, v := range n.Values {
+			acc = r.descend(v, name, at.with(v, nil, segment{kind: segmentIndex, index: i}), acc)
 		}
 
 	case *ast.AnchorNode:
-		acc = r.descend(n.Value, name, acc)
+		acc = r.descend(n.Value, name, at, acc)
 	case *ast.TagNode:
-		acc = r.descend(n.Value, name, acc)
+		acc = r.descend(n.Value, name, at, acc)
 	}
 
 	return acc

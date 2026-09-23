@@ -3530,3 +3530,119 @@ func TestNode_Value(t *testing.T) {
 		require.ErrorIs(t, dd.ValueInto(t.Context(), nil), niceyaml.ErrDecodeTarget)
 	})
 }
+
+func TestNode_Nodes(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString(stringtest.Input(`
+		items:
+		  - name: tea
+		    price: 1
+		  - name: coffee
+		    price: -1
+		spec:
+		  image: a
+		  nested:
+		    image: b
+		aliased: &items
+		  - x
+		ref: *items
+	`), niceyaml.WithName("m.yaml"))
+
+	doc, err := source.Document()
+	require.NoError(t, err)
+
+	t.Run("scopes each element of a sequence", func(t *testing.T) {
+		t.Parallel()
+
+		items, err := doc.Nodes(paths.Root().Child("items").IndexAll())
+		require.NoError(t, err)
+		require.Len(t, items, 2)
+
+		assert.Equal(t, "$.items[0]", items[0].Path().String())
+		assert.Equal(t, "$.items[1]", items[1].Path().String())
+		assert.Equal(t, position.NewSpan(1, 3), items[0].Span())
+		assert.Same(t, doc, items[1].Document())
+
+		price, err := items[1].At(paths.Root().Child("price"))
+		require.NoError(t, err)
+
+		got, err := price.Decode[int](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, -1, got)
+
+		// The message keeps the path as the error wrote it, from the
+		// scope, and the position is the one it resolved to there.
+		err = items[1].Bind(niceyaml.NewError("negative price", niceyaml.AtPath(paths.Root().Child("price"))))
+		require.EqualError(t, err, "m.yaml:5:12: $.price: negative price")
+	})
+
+	t.Run("scopes each entry a recursive selector finds", func(t *testing.T) {
+		t.Parallel()
+
+		images, err := doc.Nodes(paths.Root().Recursive("image"))
+		require.NoError(t, err)
+		require.Len(t, images, 2)
+
+		assert.Equal(t, "$.spec.image", images[0].Path().String())
+		assert.Equal(t, "$.spec.nested.image", images[1].Path().String())
+
+		got, err := images[1].Decode[string](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, "b", got)
+	})
+
+	t.Run("resolves from the scope of the receiver", func(t *testing.T) {
+		t.Parallel()
+
+		spec := yamltest.At(t, doc, paths.Root().Child("spec"))
+
+		images, err := spec.Nodes(paths.Root().Recursive("image"))
+		require.NoError(t, err)
+		require.Len(t, images, 2)
+		assert.Equal(t, "$.spec.image", images[0].Path().String())
+	})
+
+	t.Run("a single path yields its one node", func(t *testing.T) {
+		t.Parallel()
+
+		nodes, err := doc.Nodes(paths.Root().Child("spec", "image"))
+		require.NoError(t, err)
+		require.Len(t, nodes, 1)
+		assert.Equal(t, "$.spec.image", nodes[0].Path().String())
+	})
+
+	t.Run("a path that selects nothing yields no nodes", func(t *testing.T) {
+		t.Parallel()
+
+		nodes, err := doc.Nodes(paths.Root().Child("missing").IndexAll())
+		require.NoError(t, err)
+		assert.Empty(t, nodes)
+	})
+
+	t.Run("a node through an alias keeps the path as written", func(t *testing.T) {
+		t.Parallel()
+
+		nodes, err := doc.Nodes(paths.Root().Child("ref").IndexAll())
+		require.NoError(t, err)
+		require.Len(t, nodes, 1)
+		assert.Equal(t, "$.ref[0]", nodes[0].Path().String())
+
+		// The content lies at the anchor, so the lines are the anchor's.
+		assert.Equal(t, position.NewSpan(10, 11), nodes[0].Span())
+	})
+
+	t.Run("an empty document binds the error to the receiver", func(t *testing.T) {
+		t.Parallel()
+
+		empty := yamltest.FirstDocument(t, "# only a comment\n")
+
+		_, err := empty.Nodes(paths.Root().IndexAll())
+		require.ErrorIs(t, err, paths.ErrNoDocument)
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, empty.Source(), bound.Source())
+	})
+}
