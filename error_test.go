@@ -1489,13 +1489,14 @@ func TestSourceError_NilReceiver(t *testing.T) {
 	assert.Nil(t, missing.Errors())
 	assert.NoError(t, missing.Unwrap()) //nolint:testifylint // Asserts the nil, not a test failure.
 
-	_, rngErr := missing.Range()
-	require.ErrorIs(t, rngErr, niceyaml.ErrNoLocation)
+	_, resolved := missing.Range()
+	require.False(t, resolved)
+	require.NoError(t, missing.Unresolved())
 
-	_, excerptErr := missing.Excerpt(2)
-	require.ErrorIs(t, excerptErr, niceyaml.ErrNoLocation)
+	_, excerpted := missing.Excerpt(2)
+	require.False(t, excerpted)
 
-	require.ErrorIs(t, missing.Annotate(src.View()), niceyaml.ErrNoLocation)
+	require.False(t, missing.Annotate(src.View()))
 }
 
 func TestSourceError_EmptyDocument(t *testing.T) {
@@ -1515,8 +1516,8 @@ func TestSourceError_EmptyDocument(t *testing.T) {
 
 	require.ErrorAs(t, bound, &se)
 
-	rng, rngErr := se.Range()
-	require.NoError(t, rngErr)
+	rng, ok := se.Range()
+	require.True(t, ok)
 	assert.Equal(t, 1, rng.Start.Line)
 
 	assert.Equal(t, "2:1: $: required property 'a' missing", se.Error())
@@ -1606,8 +1607,8 @@ func TestError_NestedErrorsKeepInnerPosition(t *testing.T) {
 
 	require.ErrorAs(t, wrapped, &bound)
 
-	rng, err := bound.Range()
-	require.NoError(t, err)
+	rng, ok := bound.Range()
+	require.True(t, ok)
 	assert.Equal(t, 0, rng.Start.Line)
 	assert.Equal(t, 3, rng.Start.Col)
 
@@ -2566,8 +2567,8 @@ func TestError_WrappedContext(t *testing.T) {
 
 	require.ErrorAs(t, wrapped, &bound)
 
-	excerpt, err := bound.Excerpt(2)
-	require.NoError(t, err)
+	excerpt, ok := bound.Excerpt(2)
+	require.True(t, ok)
 
 	detail := newXMLPrinter().Print(excerpt)
 	assert.Contains(t, detail, "second")
@@ -2605,8 +2606,8 @@ func TestError_ContextAboveLocation(t *testing.T) {
 
 	require.ErrorAs(t, wrapped, &bound)
 
-	excerpt, err := bound.Excerpt(2)
-	require.NoError(t, err)
+	excerpt, ok := bound.Excerpt(2)
+	require.True(t, ok)
 
 	detail := newXMLPrinter().Print(excerpt)
 	assert.Contains(t, detail, "<genericError>second</genericError>")
@@ -2683,8 +2684,8 @@ func TestError_NestedErrorChains(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 
-		excerpt, excerptErr := bound.Excerpt(2)
-		require.NoError(t, excerptErr)
+		excerpt, ok := bound.Excerpt(2)
+		require.True(t, ok)
 
 		got := trimLines(newXMLPrinter().Print(excerpt))
 		assert.Contains(t, got, "<genericError>2</genericError>")
@@ -2991,8 +2992,8 @@ func TestSourceError_Range_ClampsToTheLines(t *testing.T) {
 
 	require.ErrorAs(t, yamltest.Bind(t, source, err), &bound)
 
-	rng, rngErr := bound.Range()
-	require.NoError(t, rngErr)
+	rng, ok := bound.Range()
+	require.True(t, ok)
 	assert.Equal(t, position.NewRange(position.New(1, 0), position.New(2, 4)), rng)
 	assert.Equal(t, "f.yaml:2:1: wide", bound.Error())
 }
@@ -3017,8 +3018,8 @@ func TestError_ResolvesThroughErrorWrappers(t *testing.T) {
 
 	require.ErrorAs(t, wrapped, &got)
 
-	excerpt, err := got.Excerpt(2)
-	require.NoError(t, err)
+	excerpt, ok := got.Excerpt(2)
+	require.True(t, ok)
 	require.NotNil(t, excerpt)
 	assert.Positive(t, excerpt.Count())
 }
@@ -3064,7 +3065,10 @@ func TestSourceError_Range(t *testing.T) {
 		err  *niceyaml.Error
 		want position.Range
 		is   error
-		doc  int
+		// The error carries no location, so nothing resolves and there
+		// is no reason to report.
+		unlocated bool
+		doc       int
 	}{
 		"path targets the value token": {
 			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("value"))),
@@ -3090,8 +3094,8 @@ func TestSourceError_Range(t *testing.T) {
 			want: position.NewRange(position.New(0, 6), position.New(0, 10)),
 		},
 		"no location": {
-			err: niceyaml.NewError("bad"),
-			is:  niceyaml.ErrNoLocation,
+			err:       niceyaml.NewError("bad"),
+			unlocated: true,
 		},
 		"path that does not resolve": {
 			err: niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("missing"))),
@@ -3123,14 +3127,14 @@ func TestSourceError_Range(t *testing.T) {
 
 			require.ErrorAs(t, docs[tc.doc].Bind(tc.err), &bound)
 
-			got, err := bound.Range()
-			if tc.is != nil {
-				require.ErrorIs(t, err, tc.is)
+			if tc.unlocated || tc.is != nil {
+				requireUnresolved(t, bound, tc.is)
 
 				return
 			}
 
-			require.NoError(t, err)
+			got, ok := bound.Range()
+			require.True(t, ok)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -3150,8 +3154,8 @@ func TestSourceError_Range_MultiLineToken(t *testing.T) {
 		niceyaml.AtPath(paths.Root().Child("text")),
 	)), &bound)
 
-	got, err := bound.Range()
-	require.NoError(t, err)
+	got, ok := bound.Range()
+	require.True(t, ok)
 
 	// The plain scalar continues on the second line, so the range ends there.
 	assert.Equal(t, position.NewRange(position.New(0, 6), position.New(1, 8)), got)
@@ -3169,7 +3173,6 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 	}{
 		"no location": {
 			err:        niceyaml.NewError("bad"),
-			is:         niceyaml.ErrNoLocation,
 			wantRender: "bad",
 		},
 		"path that does not resolve": {
@@ -3200,7 +3203,7 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 					),
 				),
 			),
-			is:         niceyaml.ErrOutOfRange,
+			is:         paths.ErrNotFound,
 			wantRender: "$.missing: bad\n└── first\n\nno excerpt: resolve $.missing: not found",
 		},
 		"every nested error unresolved": {
@@ -3208,7 +3211,6 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 				niceyaml.NewError("first", niceyaml.AtPath(paths.Root().Child("missing"))),
 				niceyaml.NewError("second", niceyaml.AtPosition(position.New(9, 0))),
 			)),
-			is:         niceyaml.ErrOutOfRange,
 			wantRender: "bad\n├── $.missing: first\n└── second",
 		},
 	}
@@ -3221,9 +3223,10 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 
 			require.ErrorAs(t, yamltest.Bind(t, source, tc.err), &bound)
 
-			got, err := bound.Excerpt(2)
-			require.ErrorIs(t, err, tc.is)
+			got, ok := bound.Excerpt(2)
+			require.False(t, ok)
 			assert.Nil(t, got)
+			requireUnresolved(t, bound, tc.is)
 
 			// With no excerpt to show, the detail names why the location did
 			// not resolve, unless the error carries none, and the message
@@ -3244,8 +3247,8 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 			niceyaml.NewError("second", niceyaml.AtPath(paths.Root().Child("value"))),
 		))), &bound)
 
-		excerpt, err := bound.Excerpt(2)
-		require.NoError(t, err)
+		excerpt, ok := bound.Excerpt(2)
+		require.True(t, ok)
 
 		got := newXMLPrinter().Print(excerpt)
 		assert.Contains(t, got, "^ second")
@@ -3294,8 +3297,8 @@ func TestSourceError_Excerpt(t *testing.T) {
 	t.Run("holds only the hunk lines with their source numbers", func(t *testing.T) {
 		t.Parallel()
 
-		excerpt, err := excerptError(t).Excerpt(1)
-		require.NoError(t, err)
+		excerpt, ok := excerptError(t).Excerpt(1)
+		require.True(t, ok)
 
 		assert.Equal(t, []int{1, 2, 3, 7, 8, 9}, lineNumbers(excerpt))
 		assert.Equal(t, "b: 2", excerpt.Lines().Line(1).Content())
@@ -3307,8 +3310,8 @@ func TestSourceError_Excerpt(t *testing.T) {
 	t.Run("overlays the error ranges with the error style", func(t *testing.T) {
 		t.Parallel()
 
-		excerpt, err := excerptError(t).Excerpt(1)
-		require.NoError(t, err)
+		excerpt, ok := excerptError(t).Excerpt(1)
+		require.True(t, ok)
 
 		want := line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}
 		assert.Equal(t, want, excerpt.Overlays(1), "the main error covers the value of b")
@@ -3322,8 +3325,8 @@ func TestSourceError_Excerpt(t *testing.T) {
 	t.Run("annotates nested messages below their lines", func(t *testing.T) {
 		t.Parallel()
 
-		excerpt, err := excerptError(t).Excerpt(1)
-		require.NoError(t, err)
+		excerpt, ok := excerptError(t).Excerpt(1)
+		require.True(t, ok)
 
 		assert.Equal(t, line.Annotations{
 			{Content: "bad h", Kind: kind.TextError, Placement: line.Below, Col: 3},
@@ -3334,8 +3337,8 @@ func TestSourceError_Excerpt(t *testing.T) {
 	t.Run("separates hunks after the first with an ellipsis", func(t *testing.T) {
 		t.Parallel()
 
-		excerpt, err := excerptError(t).Excerpt(1)
-		require.NoError(t, err)
+		excerpt, ok := excerptError(t).Excerpt(1)
+		require.True(t, ok)
 
 		assert.Equal(t, line.Annotations{
 			{Content: "...", Kind: kind.UISeparator, Placement: line.Above},
@@ -3352,8 +3355,8 @@ func TestSourceError_Excerpt(t *testing.T) {
 
 		bound := excerptError(t)
 
-		excerpt, err := bound.Excerpt(1)
-		require.NoError(t, err)
+		excerpt, ok := bound.Excerpt(1)
+		require.True(t, ok)
 
 		want := stringtest.JoinLF(
 			"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>1</literalNumberInteger>",
@@ -3376,11 +3379,11 @@ func TestSourceError_Excerpt(t *testing.T) {
 
 		bound := excerptError(t)
 
-		zero, err := bound.Excerpt(0)
-		require.NoError(t, err)
+		zero, ok := bound.Excerpt(0)
+		require.True(t, ok)
 
-		negative, err := bound.Excerpt(-1)
-		require.NoError(t, err)
+		negative, ok := bound.Excerpt(-1)
+		require.True(t, ok)
 
 		assert.Equal(t, []int{2, 8}, lineNumbers(zero))
 		assert.Equal(t, lineNumbers(zero), lineNumbers(negative))
@@ -3398,9 +3401,10 @@ func TestSourceError_Excerpt(t *testing.T) {
 			&bound,
 		)
 
-		excerpt, err := bound.Excerpt(2)
-		require.ErrorIs(t, err, niceyaml.ErrNoLocation)
+		excerpt, ok := bound.Excerpt(2)
+		require.False(t, ok)
 		assert.Nil(t, excerpt)
+		require.NoError(t, bound.Unresolved())
 	})
 }
 
@@ -3423,7 +3427,7 @@ func TestSourceError_Annotate(t *testing.T) {
 		bound := excerptError(t)
 		view := bound.Source().View()
 
-		require.NoError(t, bound.Annotate(view))
+		require.True(t, bound.Annotate(view))
 
 		assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, lineNumbers(view))
 
@@ -3445,8 +3449,8 @@ func TestSourceError_Annotate(t *testing.T) {
 
 		// The excerpt is the marked view cut down to its hunks, with the
 		// indices of the source.
-		excerpt, err := bound.Excerpt(0)
-		require.NoError(t, err)
+		excerpt, ok := bound.Excerpt(0)
+		require.True(t, ok)
 		assert.Equal(t, view.Overlays(1), excerpt.Overlays(1))
 		assert.Equal(t, view.Overlays(7), excerpt.Overlays(7))
 		assert.Equal(t, view.Annotations(7), excerpt.Annotations(7).Filter(line.Below))
@@ -3468,8 +3472,8 @@ func TestSourceError_Annotate(t *testing.T) {
 			niceyaml.WithErrors(niceyaml.NewError("too big", niceyaml.AtPath(paths.Root().Child("d")))),
 		)), &second)
 
-		require.NoError(t, first.Annotate(view))
-		require.NoError(t, second.Annotate(view))
+		require.True(t, first.Annotate(view))
+		require.True(t, second.Annotate(view))
 
 		want := line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}
 		assert.Equal(t, want, view.Overlays(1))
@@ -3488,7 +3492,7 @@ func TestSourceError_Annotate(t *testing.T) {
 		// Lines 7-10 of the source, which hold h at index 7 and not b.
 		view := bound.Source().View().Slice(position.NewSpan(6, 10))
 
-		require.NoError(t, bound.Annotate(view))
+		require.True(t, bound.Annotate(view))
 
 		assert.Equal(t, []int{7, 8, 9, 10}, lineNumbers(view))
 		assert.Equal(t, line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}, view.Overlays(7))
@@ -3516,7 +3520,7 @@ func TestSourceError_Annotate(t *testing.T) {
 		bound := excerptError(t)
 		view := bound.Source().View().Slice(position.NewSpan(1, 2), position.NewSpan(1, 2))
 
-		require.NoError(t, bound.Annotate(view))
+		require.True(t, bound.Annotate(view))
 
 		require.Equal(t, 1, view.Count())
 		assert.Equal(t, line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}, view.Overlays(1))
@@ -3543,14 +3547,14 @@ func TestSourceError_Annotate(t *testing.T) {
 		view := diff.Diff(before.Lines(), after.Lines()).Unified()
 		require.Equal(t, 3, view.Count())
 
-		require.NoError(t, bound.Annotate(view))
+		require.True(t, bound.Annotate(view))
 
 		assert.Empty(t, view.Overlays(0))
 		assert.Empty(t, view.Overlays(1), "the deleted line of the other revision stays unmarked")
 		assert.Equal(t, line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}, view.Overlays(2))
 	})
 
-	t.Run("returns ErrOutOfRange for a view without the marked lines", func(t *testing.T) {
+	t.Run("marks nothing on a view without the marked lines", func(t *testing.T) {
 		t.Parallel()
 
 		bound := excerptError(t)
@@ -3573,7 +3577,9 @@ func TestSourceError_Annotate(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				require.ErrorIs(t, bound.Annotate(tc.view), niceyaml.ErrOutOfRange)
+				// The location resolved; the view holds none of its lines.
+				require.False(t, bound.Annotate(tc.view))
+				require.NoError(t, bound.Unresolved())
 				unmarked(t, tc.view)
 			})
 		}
@@ -3590,7 +3596,6 @@ func TestSourceError_Annotate(t *testing.T) {
 		}{
 			"no location": {
 				err: niceyaml.NewError("bad"),
-				is:  niceyaml.ErrNoLocation,
 			},
 			"path that does not resolve": {
 				err: niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("missing"))),
@@ -3614,7 +3619,8 @@ func TestSourceError_Annotate(t *testing.T) {
 
 				view := source.View()
 
-				require.ErrorIs(t, bound.Annotate(view), tc.is)
+				require.False(t, bound.Annotate(view))
+				requireUnresolved(t, bound, tc.is)
 				unmarked(t, view)
 			})
 		}
@@ -3690,8 +3696,9 @@ func TestSourceError_TreeBranches(t *testing.T) {
 				require.ErrorAs(t, err, &bound)
 				assert.Equal(t, tc.Error(), bound.Error())
 
-				_, locErr := bound.Range()
-				require.ErrorIs(t, locErr, niceyaml.ErrNoLocation)
+				_, resolved := bound.Range()
+				require.False(t, resolved)
+				require.NoError(t, bound.Unresolved())
 
 				require.Len(t, bound.Errors(), 2)
 				assert.Equal(t, "1:4: $.a: bad a", bound.Errors()[0].Error())
@@ -3750,8 +3757,8 @@ func TestSourceError_TreeBranches(t *testing.T) {
 
 		// The outer binding marks its own branch, and the inner keeps its
 		// excerpt from the other source.
-		excerpt, excerptErr := bound.Excerpt(0)
-		require.NoError(t, excerptErr)
+		excerpt, ok := bound.Excerpt(0)
+		require.True(t, ok)
 		assert.Equal(t, 1, excerpt.Count())
 
 		got := trimLines(newXMLPrinter().PrintError(err))
@@ -3887,25 +3894,27 @@ func TestSourceError_Errors(t *testing.T) {
 		require.ErrorIs(t, children[i], want)
 	}
 
-	rng, err := children[0].Range()
-	require.NoError(t, err)
+	rng, ok := children[0].Range()
+	require.True(t, ok)
 	assert.Equal(t, position.New(0, 3), rng.Start)
 	assert.Equal(t, "1:4: $.a: bad a", children[0].Error())
 
 	// One that did not resolve reports why, and one that carries no
 	// location reports that.
-	_, err = children[1].Range()
-	require.ErrorIs(t, err, paths.ErrNotFound)
+	_, resolved := children[1].Range()
+	require.False(t, resolved)
+	require.ErrorIs(t, children[1].Unresolved(), paths.ErrNotFound)
 
-	_, err = children[2].Range()
-	require.ErrorIs(t, err, niceyaml.ErrNoLocation)
+	_, resolved = children[2].Range()
+	require.False(t, resolved)
+	require.NoError(t, children[2].Unresolved())
 
 	// A nested error further in is a child of its own parent.
 	grandchildren := children[2].Errors()
 	require.Len(t, grandchildren, 1)
 
-	rng, err = grandchildren[0].Range()
-	require.NoError(t, err)
+	rng, ok = grandchildren[0].Range()
+	require.True(t, ok)
 	assert.Equal(t, position.New(1, 3), rng.Start)
 
 	// The slice is a copy.
@@ -4366,8 +4375,8 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, paths.Root().Child("b"), p)
 
-		rng, err := bound.Range()
-		require.NoError(t, err)
+		rng, ok := bound.Range()
+		require.True(t, ok)
 		assert.Equal(t, 1, rng.Start.Line)
 	})
 
@@ -4423,4 +4432,21 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 		_, ok := bound.Path()
 		assert.False(t, ok)
 	})
+}
+
+// requireUnresolved asserts that bound resolved no range, and that
+// Unresolved reports reason, or nothing when reason is nil.
+func requireUnresolved(t *testing.T, bound *niceyaml.SourceError, reason error) {
+	t.Helper()
+
+	_, ok := bound.Range()
+	require.False(t, ok)
+
+	if reason == nil {
+		require.NoError(t, bound.Unresolved())
+
+		return
+	}
+
+	require.ErrorIs(t, bound.Unresolved(), reason)
 }

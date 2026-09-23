@@ -59,7 +59,7 @@ func (s finderSearcher) Load(lines line.Lines) Index {
 //
 //	view := source.View()
 //	for _, bound := range validationErrors {
-//		_ = bound.Annotate(view)
+//		bound.Annotate(view)
 //	}
 //
 //	m.SetRevision(yamlviewport.NewRevision(source.Name(), view))

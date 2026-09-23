@@ -1,7 +1,6 @@
 package printer
 
 import (
-	"errors"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -76,19 +75,17 @@ func (p *Printer) PrintError(err error) string {
 
 // detail renders the excerpt of bound with the printer's context lines, or
 // names the reason there is none: a line starting "no excerpt:" with the
-// error [niceyaml.SourceError.Range] returns, unless that error is
-// [niceyaml.ErrNoLocation], since an error that carries no location has
-// nothing to explain. Returns "" when there is nothing to show, as
-// [niceyaml.FormatError] does.
+// reason [niceyaml.SourceError.Unresolved] returns, and an error that
+// carries no location has nothing to explain. Returns "" when there is
+// nothing to show, as [niceyaml.FormatError] does.
 func (p *Printer) detail(bound *niceyaml.SourceError) string {
-	excerpt, err := bound.Excerpt(p.contextLines)
-	if err == nil {
+	if excerpt, ok := bound.Excerpt(p.contextLines); ok {
 		return p.Print(excerpt)
 	}
 
-	_, locErr := bound.Range()
-	if locErr != nil && !errors.Is(locErr, niceyaml.ErrNoLocation) {
-		return "no excerpt: " + locErr.Error()
+	reason := bound.Unresolved()
+	if reason != nil {
+		return "no excerpt: " + reason.Error()
 	}
 
 	return ""

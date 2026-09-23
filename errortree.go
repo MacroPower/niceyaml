@@ -210,8 +210,7 @@ func boundChildren(bound *SourceError, named bool) []positioned {
 
 		// A location the source does not hold resolved to nothing the
 		// excerpt can mark, so the node reads as an unlocated one.
-		rng, err := child.Range()
-		if err == nil {
+		if rng, ok := child.Range(); ok {
 			kid.located = true
 			kid.pos = rng.Start
 		}

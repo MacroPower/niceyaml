@@ -491,9 +491,9 @@ func (s *Source) parse() (*ast.File, error) {
 //
 // A path in a source that holds several documents, or none, resolves
 // nowhere. The bound error keeps its message and the name of the source,
-// [SourceError.Range] returns [ErrPathNeedsDocument] wrapping the reason
-// [Source.Document] gives, and [FormatError] names it in place of the
-// excerpt. Bind such an error through [Node.Bind] with the document
+// [SourceError.Unresolved] returns [ErrPathNeedsDocument] wrapping the
+// reason [Source.Document] gives, and [FormatError] names it in place of
+// the excerpt. Bind such an error through [Node.Bind] with the document
 // it was checked against, which also resolves a path from the scope of a
 // Document from [Node.At].
 //

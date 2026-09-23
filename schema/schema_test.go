@@ -1063,8 +1063,8 @@ func TestSchema_Validate_Scope(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 
-		rng, err := bound.Range()
-		require.NoError(t, err)
+		rng, ok := bound.Range()
+		require.True(t, ok)
 		assert.Equal(t, position.New(2, 12), rng.Start)
 		assert.Equal(t, "3:13: $.replicas: expected \"integer\", got \"string\"", bound.Error())
 
@@ -1093,8 +1093,8 @@ func TestSchema_Validate_Scope(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 
-		rng, err := bound.Range()
-		require.NoError(t, err)
+		rng, ok := bound.Range()
+		require.True(t, ok)
 		assert.Equal(t, position.New(2, 8), rng.Start)
 	})
 
@@ -1113,8 +1113,8 @@ func TestSchema_Validate_Scope(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 
-		rng, err := bound.Range()
-		require.NoError(t, err)
+		rng, ok := bound.Range()
+		require.True(t, ok)
 		assert.Equal(t, position.New(2, 2), rng.Start)
 	})
 }

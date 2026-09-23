@@ -802,7 +802,7 @@ func TestDocument_View(t *testing.T) {
 		require.ErrorAs(t, docs[1].Bind(niceyaml.NewError("closed", niceyaml.AtPath(paths.Root().Child("b")))), &bound)
 
 		view := docs[1].View()
-		require.NoError(t, bound.Annotate(view))
+		require.True(t, bound.Annotate(view))
 
 		assert.Contains(t, view.String(), "   7 | b: 2\n     |    ^")
 	})
@@ -927,6 +927,67 @@ func TestDocument_Node(t *testing.T) {
 
 		assert.Nil(t, nothing.Document())
 	})
+}
+
+func TestDocument_Bind_Check(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.Input(`
+		kind: Deployment
+		spec:
+		  hours:
+		    open: "09:00"
+		    close: "17:00"
+	`)
+
+	hoursPath := paths.Root().Child("spec", "hours")
+
+	t.Run("path in a check error resolves from the scope", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+		hours := yamltest.At(t, dd, hoursPath)
+
+		h, err := hours.Decode[checkHours](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, "09:00", h.Open)
+
+		check := func(_ *checkHours) error {
+			return niceyaml.NewError("closes too early", niceyaml.AtPath(paths.Root().Child("close")))
+		}
+
+		err = hours.Bind(check(&h))
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, dd.Source(), bound.Source())
+
+		rng, ok := bound.Range()
+		require.True(t, ok)
+		assert.Equal(t, position.NewRange(position.New(4, 11), position.New(4, 18)), rng)
+		assert.Equal(t, "5:12: $.close: closes too early", err.Error())
+	})
+
+	t.Run("a passing check binds to nothing", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+		hours := yamltest.At(t, dd, hoursPath)
+
+		h, err := hours.Decode[checkHours](t.Context())
+		require.NoError(t, err)
+
+		check := func(_ *checkHours) error { return nil }
+
+		require.NoError(t, hours.Bind(check(&h)))
+	})
+}
+
+// checkHours is a value for the tests of a check bound after a decode.
+type checkHours struct {
+	Open  string `yaml:"open"`
+	Close string `yaml:"close"`
 }
 
 // accumulatingConfig is a [niceyaml.SelfValidator] whose Validate builds
@@ -1858,7 +1919,7 @@ func TestDocument_Ranges(t *testing.T) {
 			var bound *niceyaml.SourceError
 
 			require.ErrorAs(t, dd.Bind(niceyaml.NewError("bad", niceyaml.AtPath(path))), &bound)
-			require.NoError(t, bound.Annotate(view))
+			require.True(t, bound.Annotate(view))
 
 			var got position.Ranges
 
@@ -2652,8 +2713,9 @@ func TestDocument_Bind(t *testing.T) {
 		assert.Same(t, source, bound.Source())
 		assert.Equal(t, "plain", err.Error(), "the source has no name to add")
 
-		_, locErr := bound.Range()
-		require.ErrorIs(t, locErr, niceyaml.ErrNoLocation)
+		_, resolved := bound.Range()
+		require.False(t, resolved)
+		require.NoError(t, bound.Unresolved())
 	})
 
 	t.Run("binds an Error to the source and this document", func(t *testing.T) {
@@ -2723,8 +2785,8 @@ func TestDocument_At_Scope(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 
-		rng, err := bound.Range()
-		require.NoError(t, err)
+		rng, ok := bound.Range()
+		require.True(t, ok)
 		assert.Equal(t, openValue, rng.Start)
 		assert.Equal(t, "4:11: $.open: open must be before close", bound.Error())
 	})
@@ -2741,8 +2803,8 @@ func TestDocument_At_Scope(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 
-		rng, err := bound.Range()
-		require.NoError(t, err)
+		rng, ok := bound.Range()
+		require.True(t, ok)
 		assert.Equal(t, openValue, rng.Start)
 		assert.Same(t, hours, bound.Node())
 		assert.Same(t, dd, bound.Document())
@@ -2751,8 +2813,8 @@ func TestDocument_At_Scope(t *testing.T) {
 		err = dd.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("open"))))
 		require.ErrorAs(t, err, &bound)
 
-		rng, err = bound.Range()
-		require.NoError(t, err)
+		rng, ok = bound.Range()
+		require.True(t, ok)
 		assert.Equal(t, position.New(0, 6), rng.Start)
 	})
 
@@ -2811,8 +2873,8 @@ func TestDocument_At_Scope(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 
-		rng, err := bound.Range()
-		require.NoError(t, err)
+		rng, ok := bound.Range()
+		require.True(t, ok)
 		assert.Equal(t, openValue, rng.Start)
 	})
 
@@ -2964,8 +3026,8 @@ func TestDocument_At_Scope(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 
-		excerpt, err := bound.Excerpt(0)
-		require.NoError(t, err)
+		excerpt, ok := bound.Excerpt(0)
+		require.True(t, ok)
 		assert.Equal(t, "   4 |     open: \"17:00\"\n     |           ^^^^^^^", excerpt.String())
 	})
 }

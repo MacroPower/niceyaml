@@ -156,7 +156,7 @@
 //
 //	view := source.View()
 //	for _, bound := range validationErrors {
-//		_ = bound.Annotate(view)
+//		bound.Annotate(view)
 //	}
 //	fmt.Println(p.Print(view))
 //

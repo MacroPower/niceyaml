@@ -781,8 +781,8 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 
-		rng, err := bound.Range()
-		require.NoError(t, err)
+		rng, ok := bound.Range()
+		require.True(t, ok)
 		assert.Equal(t, position.NewRange(position.New(1, 3), position.New(1, 4)), rng)
 
 		got := trimLines(render(bound))
@@ -818,7 +818,7 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 			&bound,
 		)
 
-		_, err := bound.Excerpt(2)
+		err := bound.Unresolved()
 		require.ErrorIs(t, err, niceyaml.ErrOutOfRange)
 		assert.Equal(t, "location outside source: line 5 not in lines 1-4", err.Error())
 	})
@@ -1011,8 +1011,8 @@ func TestSource_Parse(t *testing.T) {
 		require.True(t, ok, "want *niceyaml.SourceError, got %T", err)
 		assert.Same(t, source, bound.Source())
 
-		excerpt, err := bound.Excerpt(2)
-		require.NoError(t, err)
+		excerpt, ok := bound.Excerpt(2)
+		require.True(t, ok)
 
 		detail := newXMLPrinter().Print(excerpt)
 		assert.Contains(t, detail, "<genericError>b</genericError>", "the offending token is highlighted")
@@ -1337,8 +1337,9 @@ func TestDocument_BindChain(t *testing.T) {
 				assert.Equal(t, tc.want, fmt.Sprintf("%+v", wrapped), "no location, so no excerpt")
 				assert.Equal(t, "document 0: "+tc.want, fmt.Errorf("document 0: %w", wrapped).Error())
 
-				_, locErr := bound.Range()
-				require.ErrorIs(t, locErr, niceyaml.ErrNoLocation)
+				_, resolved := bound.Range()
+				require.False(t, resolved)
+				require.NoError(t, bound.Unresolved())
 			})
 		}
 	})
@@ -1401,8 +1402,8 @@ func TestDocument_BindChain(t *testing.T) {
 				require.ErrorIs(t, wrapped, pathErr)
 				require.Len(t, bound.Errors(), 1)
 
-				rng, locErr := bound.Errors()[0].Range()
-				require.NoError(t, locErr)
+				rng, ok := bound.Errors()[0].Range()
+				require.True(t, ok)
 				assert.Equal(t, position.NewRange(position.New(0, 6), position.New(0, 11)), rng)
 
 				docs, docsErr := source.Documents()
@@ -1496,8 +1497,8 @@ func TestSource_Bind(t *testing.T) {
 		assert.Same(t, docs[1], bound.Document())
 		assert.Equal(t, "two.yaml:3:4: too wide", err.Error())
 
-		got, rangeErr := bound.Range()
-		require.NoError(t, rangeErr)
+		got, ok := bound.Range()
+		require.True(t, ok)
 		assert.Equal(t, rng, got)
 
 		assert.Equal(t, stringtest.JoinLF(
@@ -1523,8 +1524,8 @@ func TestSource_Bind(t *testing.T) {
 		require.ErrorAs(t, err, &bound)
 		assert.Same(t, docs[1], bound.Document())
 
-		got, err := bound.Range()
-		require.NoError(t, err)
+		got, ok := bound.Range()
+		require.True(t, ok)
 		assert.Equal(t, position.NewRange(position.New(2, 3), position.New(2, 5)), got)
 	})
 
@@ -1553,7 +1554,7 @@ func TestSource_Bind(t *testing.T) {
 		require.ErrorAs(t, err, &bound)
 		assert.Nil(t, bound.Document())
 
-		_, rangeErr := bound.Range()
+		rangeErr := bound.Unresolved()
 		require.ErrorIs(t, rangeErr, niceyaml.ErrOutOfRange)
 	})
 
@@ -1587,8 +1588,8 @@ func TestSource_Bind(t *testing.T) {
 		assert.Equal(t, "one.yaml:3:4: $.b: bad", err.Error())
 		assert.Same(t, doc, bound.Document())
 
-		got, rangeErr := bound.Range()
-		require.NoError(t, rangeErr)
+		got, ok := bound.Range()
+		require.True(t, ok)
 		assert.Equal(t, position.NewRange(position.New(2, 3), position.New(2, 5)), got)
 
 		assert.Equal(t, stringtest.JoinLF(
@@ -1615,7 +1616,7 @@ func TestSource_Bind(t *testing.T) {
 		assert.Equal(t, "two.yaml: $.b: bad", err.Error())
 		assert.Nil(t, bound.Document())
 
-		_, rangeErr := bound.Range()
+		rangeErr := bound.Unresolved()
 		require.ErrorIs(t, rangeErr, niceyaml.ErrPathNeedsDocument)
 		require.ErrorIs(t, rangeErr, niceyaml.ErrMultipleDocuments)
 
@@ -1637,7 +1638,7 @@ func TestSource_Bind(t *testing.T) {
 		require.ErrorAs(t, err, &bound)
 		assert.Nil(t, bound.Document())
 
-		_, rangeErr := bound.Range()
+		rangeErr := bound.Unresolved()
 		require.ErrorIs(t, rangeErr, niceyaml.ErrPathNeedsDocument)
 		require.ErrorIs(t, rangeErr, niceyaml.ErrNoDocuments)
 	})
@@ -1656,7 +1657,7 @@ func TestSource_Bind(t *testing.T) {
 		require.ErrorAs(t, err, &bound)
 		assert.Nil(t, bound.Document())
 
-		_, rangeErr := bound.Range()
+		rangeErr := bound.Unresolved()
 		require.ErrorIs(t, rangeErr, niceyaml.ErrPathNeedsDocument)
 		assert.Contains(t, rangeErr.Error(), parseErr.Error())
 	})
@@ -1696,7 +1697,7 @@ func TestSource_Bind(t *testing.T) {
 		require.ErrorAs(t, err, &bound)
 
 		for _, child := range bound.Errors() {
-			_, rangeErr := child.Range()
+			rangeErr := child.Unresolved()
 			require.ErrorIs(t, rangeErr, niceyaml.ErrPathNeedsDocument)
 		}
 
