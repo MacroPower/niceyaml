@@ -9,7 +9,7 @@ require (
 	charm.land/bubbletea/v2 v2.0.9
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/charmbracelet/x/ansi v0.11.8
-	github.com/charmbracelet/x/exp/golden v0.0.0-20260913004009-c615ff2f7805
+	github.com/charmbracelet/x/exp/golden v0.0.0-20260920004010-53e2afe73ae5
 	github.com/goccy/go-yaml v1.19.2
 	github.com/stretchr/testify v1.12.1
 	go.jacobcolvin.com/niceyaml v0.0.0-00010101000000-000000000000
