@@ -27,9 +27,14 @@ import (
 // [Decoder.Decode] and [Decoder.DecodeInto] run the pipeline
 // [Node.DecodeInto] describes with the options of the Decoder, on
 // whatever Node the caller hands them: a root from [Source.Documents] or a
-// scoped Node from [Node.At]. [Decoder.Validate] runs the validation
-// step alone. [Node.Decode] with the same options decodes one node the
-// same way, so a Decoder is the options of a call held for reuse.
+// scoped Node from [Node.At]. A [Validator] the Decoder carries sees the
+// same Node, and one that takes roots alone, as a
+// [go.jacobcolvin.com/niceyaml/schema.Registry] does, fails on a scoped
+// Node, so a Decoder built over a registry decodes whole documents, or
+// wraps the registry as the Validator doc shows. [Decoder.Validate] runs
+// the validation step alone. [Node.Decode] with the same options decodes
+// one node the same way, so a Decoder is the options of a call held for
+// reuse.
 //
 // A Decoder never changes after [NewDecoder], so it is safe for
 // concurrent use. [Decoder.With] returns a new Decoder with more options

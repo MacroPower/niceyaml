@@ -78,8 +78,17 @@ type SelfValidator interface {
 // the validator: the root of a whole document, or the node a Node from
 // [Node.At] selects, so a validator given to a scoped decode checks that
 // node and its paths resolve from it. A validator that needs the whole
-// document, as a registry that picks a schema by file path does, reaches
-// it through [Node.Document]. A validator that checks the decoded data
+// document reaches it through [Node.Document]. A validator may also
+// take the root alone: a [go.jacobcolvin.com/niceyaml/schema.Registry]
+// picks a schema for a whole document and rejects a scoped Node, so a
+// caller that decodes a scoped Node under a registry validates the
+// document around it:
+//
+//	whole := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+//		return reg.Validate(ctx, n.Document())
+//	})
+//
+// A validator that checks the decoded data
 // reads the node with [Node.Decode], which runs the validators the
 // caller passes and no other, so a validator never runs itself again. The
 // context carries cancellation and deadlines to validators doing
