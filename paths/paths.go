@@ -209,7 +209,10 @@ func (p Path) String() string {
 }
 
 // YAMLPath returns the equivalent [*yaml.Path] for use with the goccy/go-yaml
-// API, such as [yaml.Path.ReplaceWithNode].
+// API, such as [yaml.Path.FilterNode] on a tree the caller parsed. The
+// tree a Source hands out through its File and AST methods is shared
+// with every Node of the Source, so a call that edits a tree, such as
+// [yaml.Path.ReplaceWithNode], runs on a tree of the caller's own.
 //
 // The result selects the same names as the Path, but its String is the
 // goccy/go-yaml form, which differs from [Path.String] for names with

@@ -412,6 +412,13 @@ func (d *document) anchorToken() *token.Token {
 // lines through [line.Lines.TokenRanges] and [line.Lines.ContentRanges] as
 // the original does.
 //
+// The tree is shared with every [Node] of the Source, and [Node.At],
+// [Node.Ranges], and every error binding resolve against it, so it is
+// read-only. A caller that modifies it corrupts the positions those
+// resolve to and races with any concurrent use of the Source. A caller
+// that edits a document parses a tree of its own, or edits the text and
+// builds a new Source from the result.
+//
 // A YAML syntax error comes back as a [*SourceError] bound to this Source,
 // so [FormatError] renders it with the offending token marked.
 func (s *Source) File() (*ast.File, error) {

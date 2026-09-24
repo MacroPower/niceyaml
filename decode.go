@@ -482,7 +482,9 @@ type Node struct {
 // Node belongs to, the go-yaml node the document parsed into.
 // [Node.Document] returns the root [*Node] of the same document,
 // [Node.AST] returns the go-yaml node the Node selects, and [Node.Path]
-// is the path from the document root to it.
+// is the path from the document root to it. The node is part of the
+// tree [Source.File] returns, which every Node of the Source shares and
+// resolves against, so it is read-only.
 func (n *Node) DocumentAST() *ast.DocumentNode {
 	return n.doc.root
 }
@@ -520,7 +522,9 @@ func (n *Node) Document() *Node {
 //
 // The body is what the parser built: nil for an empty document, and a
 // comment group for one holding only comments. AST returns either
-// without an error, as such a document decodes to nothing.
+// without an error, as such a document decodes to nothing. The node is
+// part of the tree [Source.File] returns, which every Node of the Source
+// shares and resolves against, so it is read-only.
 func (n *Node) AST() (ast.Node, error) {
 	if n.base.IsRoot() {
 		return n.doc.root.Body, nil
