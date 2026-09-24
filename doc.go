@@ -138,6 +138,11 @@
 //
 //	log.Print(niceyaml.FormatError(err, 2))
 //
+// An [*Error] or a [*SourceError] logged as a [log/slog] attribute
+// logs the tree without the excerpt, through [Error.LogValue] and
+// [SourceError.LogValue], so a structured log names every nested error
+// in one attribute whichever handler writes it.
+//
 // A terminal gets color from
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError], which prints
 // the same tree and excerpts with the printer's styles, width, and

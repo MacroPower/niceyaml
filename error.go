@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"log/slog"
 	"maps"
 	"slices"
 	"strconv"
@@ -351,6 +352,19 @@ func (e *Error) Format(f fmt.State, verb rune) {
 	default:
 		writeString(f, e.Error())
 	}
+}
+
+// LogValue implements [slog.LogValuer].
+//
+// The value is the tree [FormatError] prints for the error, as a string:
+// its message, with the nested errors from [WithErrors] under it behind
+// their paths, and no source excerpt. A handler that logs an error by
+// [Error.Error], as [slog.JSONHandler] does, shows every nested error
+// this way, and one that formats it with %+v, as [slog.TextHandler]
+// does, keeps the excerpt out of the attribute. A program that wants
+// the excerpt in a log logs [FormatError] as a string.
+func (e *Error) LogValue() slog.Value {
+	return slog.StringValue(renderErrorTree(NewErrorTree(e)))
 }
 
 // nested returns the nested errors of e that are not nothing, in the
@@ -1320,6 +1334,21 @@ func (e *SourceError) Format(f fmt.State, verb rune) {
 	default:
 		writeString(f, e.Error())
 	}
+}
+
+// LogValue implements [slog.LogValuer].
+//
+// The value is the tree [FormatError] prints for the error, as a string:
+// its message behind the position its location resolved to, with each
+// nested error under it behind its own position, and no source excerpt.
+// A handler that logs an error by [SourceError.Error], as
+// [slog.JSONHandler] does, shows every nested error this way, and one
+// that formats it with %+v, as [slog.TextHandler] does, keeps the
+// excerpt out of the attribute. A wrapper such as [fmt.Errorf] around a
+// SourceError logs as its own message, so a program that holds any
+// error, or wants the excerpt in a log, logs [FormatError] as a string.
+func (e *SourceError) LogValue() slog.Value {
+	return slog.StringValue(renderErrorTree(NewErrorTree(e)))
 }
 
 // FormatError renders err as plain text for a log or a terminal without
