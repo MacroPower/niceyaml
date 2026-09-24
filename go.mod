@@ -6,7 +6,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/charmbracelet/x/ansi v0.11.8
-	github.com/charmbracelet/x/exp/charmtone v0.0.0-20260913004009-c615ff2f7805
+	github.com/charmbracelet/x/exp/charmtone v0.0.0-20260920004010-53e2afe73ae5
 	github.com/charmbracelet/x/exp/golden v0.0.0-20260913004009-c615ff2f7805
 	github.com/goccy/go-yaml v1.19.2
 	github.com/lucasb-eyer/go-colorful v1.4.1
