@@ -64,6 +64,15 @@ import (
 // nothing below it, since its fields need not mirror the document. A
 // parent need not call the Validate of its fields, and [Rebase] is for
 // a check run on a value after Decode returns.
+//
+// Any value with a Validate method takes part, including one from a
+// package that names its own check that way, such as a generated
+// message type, so a decode runs those checks too and reports their
+// errors at the value that owns the method. A check that reads state
+// the caller fills in after the decode runs on a value with that state
+// set already through [Node.DecodeInto], which keeps the fields the
+// document does not name, and [WithSelfValidation] false switches the
+// walk off for every value.
 type SelfValidator interface {
 	Validate() error
 }
