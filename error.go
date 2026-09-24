@@ -1509,6 +1509,12 @@ func rangeOf(lines line.Lines, loc location) position.Range {
 // resolved, for the reason [SourceError.Unresolved] gives, or when the
 // view holds none of the lines the locations fall on. A node whose
 // location does not resolve is left out.
+//
+// Annotate marks the whole tree of the binding, so a caller marks one
+// view with the bindings [SourceErrors] returns, whose excerpts stand
+// on their own, and not with every binding [AllSourceErrors] or
+// [SourceError.All] yields, since a child marked after its parent lands
+// its message on the line twice.
 func (e *SourceError) Annotate(view *line.View) bool {
 	return len(e.annotate(view)) > 0
 }
