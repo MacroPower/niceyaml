@@ -135,13 +135,17 @@
 //
 //	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
 //	    node, err := doc.At(kindPath)
-//	    if err != nil {
+//	    if errors.Is(err, paths.ErrNotFound) {
 //	        return schema.Ref{}, schema.ErrNoMatch
+//	    }
+//
+//	    if err != nil {
+//	        return schema.Ref{}, err
 //	    }
 //
 //	    kind, err := node.Decode[string](ctx)
 //	    if err != nil {
-//	        return schema.Ref{}, schema.ErrNoMatch
+//	        return schema.Ref{}, err
 //	    }
 //
 //	    return schema.File("schemas/" + kind + ".json"), nil
