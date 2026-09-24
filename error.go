@@ -910,7 +910,11 @@ func (e *SourceError) collect(err error, b binder) {
 
 // addChild binds n as a child of e. A binding is the child as it is, and
 // any other error binds where e binds, or takes over the binding it
-// wraps. A nil n, or a nil pointer, adds nothing.
+// wraps. A child under a base from [Rebase] is bound as a rebased Error
+// at that base, so its own message and [SourceError.Path] carry the
+// joined path as the message of the root does, and the base moves off
+// the binder so the child's location does not join it twice. A nil n,
+// or a nil pointer, adds nothing.
 func (e *SourceError) addChild(n error, b binder) {
 	if isNothing(n) {
 		return
@@ -920,6 +924,11 @@ func (e *SourceError) addChild(n error, b binder) {
 		e.errors = append(e.errors, bound)
 
 		return
+	}
+
+	if !b.base.IsRoot() {
+		n = &Error{err: n, base: b.base, rebased: true}
+		b.base = paths.Root()
 	}
 
 	e.errors = append(e.errors, newSourceError(n, b))

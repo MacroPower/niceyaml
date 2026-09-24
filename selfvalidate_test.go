@@ -28,6 +28,31 @@ func (h hours) Validate() error {
 	return nil
 }
 
+// schedule validates itself with several nested errors, each with a path
+// written from its own root.
+type schedule struct {
+	Open  string `yaml:"open"`
+	Close string `yaml:"close"`
+}
+
+func (s schedule) Validate() error {
+	var errs []error
+
+	if s.Open == "" {
+		errs = append(errs, niceyaml.NewError("open is empty", niceyaml.AtPath(paths.Root().Child("open"))))
+	}
+
+	if s.Close == "" {
+		errs = append(errs, niceyaml.NewError("close is empty", niceyaml.AtPath(paths.Root().Child("close"))))
+	}
+
+	if len(errs) == 0 {
+		return nil
+	}
+
+	return niceyaml.NewError("invalid schedule", niceyaml.WithErrors(errs...))
+}
+
 // item validates itself through a pointer receiver.
 type item struct {
 	Name  string  `json:"name"`
@@ -92,6 +117,48 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		p, ok := e.Path()
 		require.True(t, ok)
 		assert.Equal(t, "$.hours.close", p.String())
+	})
+
+	t.Run("errors nested under a field report the joined path", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(stringtest.Input(`
+			schedule:
+			  open: ""
+			  close: ""
+		`), niceyaml.WithName("cafe.yaml"))
+
+		doc, err := source.Document()
+		require.NoError(t, err)
+
+		_, err = doc.Decode[struct {
+			Schedule schedule `yaml:"schedule"`
+		}](t.Context())
+		require.EqualError(t, err, "cafe.yaml:2:3: $.schedule: invalid schedule")
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		require.Len(t, bound.Errors(), 2)
+
+		assert.Equal(t, "cafe.yaml:2:9: $.schedule.open: open is empty", bound.Errors()[0].Error())
+		assert.Equal(t, "cafe.yaml:3:10: $.schedule.close: close is empty", bound.Errors()[1].Error())
+
+		p, ok := bound.Errors()[1].Path()
+		require.True(t, ok)
+		assert.Equal(t, "$.schedule.close", p.String())
+
+		assert.Equal(t, stringtest.JoinLF(
+			"cafe.yaml:2:3: $.schedule: invalid schedule",
+			"|-- 2:9: $.schedule.open: open is empty",
+			"`-- 3:10: $.schedule.close: close is empty",
+			"",
+			"   1 | schedule:",
+			`   2 |   open: ""`,
+			"     |   ^^^^  ^^ open is empty",
+			`   3 |   close: ""`,
+			"     |          ^^ close is empty",
+		), niceyaml.FormatError(err, 2))
 	})
 
 	t.Run("elements and entries report their index or key", func(t *testing.T) {

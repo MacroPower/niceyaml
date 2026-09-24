@@ -4133,8 +4133,29 @@ func TestRebase(t *testing.T) {
 		require.ErrorAs(t, err, &bound)
 		require.Len(t, bound.Errors(), 2)
 
-		assert.Equal(t, "3:9: $.open: bad open", bound.Errors()[0].Error())
-		assert.Equal(t, "4:10: $.close: bad close", bound.Errors()[1].Error())
+		assert.Equal(t, "3:9: $.hours.open: bad open", bound.Errors()[0].Error())
+		assert.Equal(t, "4:10: $.hours.close: bad close", bound.Errors()[1].Error())
+		assert.Equal(t, "bad open", bound.Errors()[0].Message())
+
+		p, ok := bound.Errors()[0].Path()
+		require.True(t, ok)
+		assert.Equal(t, "$.hours.open", p.String())
+	})
+
+	t.Run("a nested error without a location points at the base", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		report := niceyaml.NewError("invalid hours", niceyaml.WithErrors(errors.New("bad hours")))
+
+		err := dd.Bind(niceyaml.Rebase(report, hours))
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		require.Len(t, bound.Errors(), 1)
+		assert.Equal(t, "3:3: $.hours: bad hours", bound.Errors()[0].Error())
 	})
 
 	t.Run("rebases compose", func(t *testing.T) {
