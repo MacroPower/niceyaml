@@ -53,7 +53,8 @@ We also provide a consistent **positioning system** used throughout `niceyaml`. 
 go get go.jacobcolvin.com/niceyaml@latest
 ```
 
-`niceyaml` requires Go 1.27 or later.
+`niceyaml` requires Go 1.27 or later, since `Decode[T]` on `Source`,
+`Node`, and `Decoder` is a generic method, which Go 1.27 introduced.
 
 ## Usage
 
