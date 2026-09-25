@@ -67,6 +67,12 @@ func New(opts ...Option) *Differ {
 // [Result.Unified], [Result.Hunks], [Result.Before], and [Result.After],
 // returns a fresh [line.View] over those lines.
 //
+// The revisions should hold distinct lines, as two parsed Source values
+// do. When both hold one [*line.Line], such as two [line.Collect] values
+// that reorder the lines of one revision, a moved line appears in
+// [Result.Unified] once as deleted and once as inserted, and
+// [line.View.Index] finds only the first of the two.
+//
 // Diff panics when the [lcs.Algorithm] returns an [lcs.Op] with an
 // [lcs.OpKind] other than [lcs.OpEqual], [lcs.OpDelete], or [lcs.OpInsert],
 // or with an index outside the input it refers to.
