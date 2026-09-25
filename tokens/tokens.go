@@ -91,7 +91,7 @@ func Tokenize(src string) token.Tokens {
 func repairPastEnd(src string, tks token.Tokens) {
 	runes := utf8.RuneCountInString(src)
 
-	var line, col int
+	var line, col, offset int
 
 	for _, tk := range tks {
 		if tk == nil || tk.Position == nil || tk.Origin != "" || tk.Position.Offset <= runes {
@@ -99,17 +99,18 @@ func repairPastEnd(src string, tks token.Tokens) {
 		}
 
 		if line == 0 {
-			line, col = sourceEnd(src)
+			line, col, offset = sourceEnd(src)
 		}
 
-		tk.Position.Line, tk.Position.Column = line, col
+		tk.Position.Line, tk.Position.Column, tk.Position.Offset = line, col, offset
 	}
 }
 
 // sourceEnd returns the line of the last rune of src that is no part of
-// its final line ending, and the column just past that rune, counting
-// both from 1. An empty source ends at 1:1.
-func sourceEnd(src string) (int, int) {
+// its final line ending, the column just past that rune, and the rune
+// offset of that place, counting all three from 1. An empty source ends
+// at 1:1 with offset 1.
+func sourceEnd(src string) (int, int, int) {
 	src = TrimLineEnding(src)
 
 	line, col := 1, 1
@@ -135,7 +136,7 @@ func sourceEnd(src string) (int, int) {
 		}
 	}
 
-	return line, col
+	return line, col, utf8.RuneCountInString(src) + 1
 }
 
 // IsPlaceholder reports whether tk is the token [Tokenize] made for text

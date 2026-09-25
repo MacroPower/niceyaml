@@ -127,15 +127,17 @@ func TestTokenize_EmptyContentPastEnd(t *testing.T) {
 	// the end of the header's line. A line the lexer dropped, such as a
 	// lone "!", still exists, and the token stays on it.
 	tcs := map[string]struct {
-		input string
-		line  int
-		col   int
+		input  string
+		line   int
+		col    int
+		offset int
 	}{
-		"header ends the file":      {input: "a: |+\n", line: 1, col: 6},
-		"header ends the file crlf": {input: "a: |+\r\n", line: 1, col: 6},
-		"sequence entry":            {input: "- >+\n", line: 1, col: 5},
-		"dropped line follows":      {input: "a: |+\n!", line: 2, col: 1},
-		"key follows":               {input: "a: |+\nb: 1\n", line: 2, col: 1},
+		"header ends the file":      {input: "a: |+\n", line: 1, col: 6, offset: 6},
+		"header ends the file crlf": {input: "a: |+\r\n", line: 1, col: 6, offset: 6},
+		"sequence entry":            {input: "- >+\n", line: 1, col: 5, offset: 5},
+		"second header ends it":     {input: "x: \"\u00e9\"\nk: |+\n", line: 2, col: 6, offset: 13},
+		"dropped line follows":      {input: "a: |+\n!", line: 2, col: 1, offset: 7},
+		"key follows":               {input: "a: |+\nb: 1\n", line: 2, col: 1, offset: 7},
 	}
 
 	for name, tc := range tcs {
@@ -153,6 +155,7 @@ func TestTokenize_EmptyContentPastEnd(t *testing.T) {
 			require.NotNil(t, empty)
 			assert.Equal(t, tc.line, empty.Position.Line)
 			assert.Equal(t, tc.col, empty.Position.Column)
+			assert.Equal(t, tc.offset, empty.Position.Offset)
 		})
 	}
 }
