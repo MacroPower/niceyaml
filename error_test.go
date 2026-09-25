@@ -3356,6 +3356,37 @@ func TestSourceError_Excerpt(t *testing.T) {
 		}
 	})
 
+	t.Run("a range that covers no column still shows its line", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "a: 1\nb: 2\n")
+
+		tcs := map[string]struct {
+			rng position.Range
+		}{
+			"empty range": {
+				rng: position.NewRange(position.New(1, 2), position.New(1, 2)),
+			},
+			"range past the end of the line": {
+				rng: position.NewRange(position.New(1, 10), position.New(1, 12)),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, dd.Bind(niceyaml.NewError("bad", niceyaml.AtRange(tc.rng))), &bound)
+
+				excerpt, ok := bound.Excerpt(0)
+				require.True(t, ok)
+				assert.Equal(t, []int{2}, lineNumbers(excerpt))
+			})
+		}
+	})
+
 	t.Run("annotates nested messages below their lines", func(t *testing.T) {
 		t.Parallel()
 

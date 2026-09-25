@@ -1737,10 +1737,10 @@ func (e *SourceError) annotate(view *line.View) []int {
 // bound to src, on view and returns the indices of the lines it marked,
 // with repeats. The view may hold the lines of src at any indices, as a
 // diff does, so every mark goes to the index that holds its line. A
-// position with no token under it has no range to highlight, so its line
-// gets an overlay of no width at its column, which renders nothing and
-// still marks the line as decorated, so the line joins the hunks
-// [line.View.Hunks] keeps.
+// position with no token under it, or a range that covers no column of
+// its lines, has nothing to highlight, so its line gets an overlay of no
+// width at its column, which renders nothing and still marks the line as
+// decorated, so the line joins the hunks [line.View.Hunks] keeps.
 func annotateSource(view *line.View, src *Source, positions []errorPosition) []int {
 	if len(positions) == 0 {
 		return nil
@@ -1751,10 +1751,16 @@ func annotateSource(view *line.View, src *Source, positions []errorPosition) []i
 	var marked []int
 
 	for _, pos := range positions {
+		var segments []position.Range
+
+		for _, r := range pos.ranges {
+			segments = append(segments, src.lines.SliceLines(r)...)
+		}
+
 		if i, ok := index(pos.pos.Line); ok {
 			marked = append(marked, i)
 
-			if len(pos.ranges) == 0 {
+			if len(segments) == 0 {
 				view.AddLineOverlay(i, line.Overlay{
 					Cols: position.NewSpan(pos.pos.Col, pos.pos.Col),
 					Kind: kind.GenericError,
@@ -1762,13 +1768,11 @@ func annotateSource(view *line.View, src *Source, positions []errorPosition) []i
 			}
 		}
 
-		for _, r := range pos.ranges {
-			for _, lr := range src.lines.SliceLines(r) {
-				if i, ok := index(lr.Start.Line); ok {
-					view.AddOverlay(kind.GenericError, viewRange(lr, i))
+		for _, lr := range segments {
+			if i, ok := index(lr.Start.Line); ok {
+				view.AddOverlay(kind.GenericError, viewRange(lr, i))
 
-					marked = append(marked, i)
-				}
+				marked = append(marked, i)
 			}
 		}
 	}
