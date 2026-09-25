@@ -1332,8 +1332,9 @@ func hasContent(node ast.Node) bool {
 //
 // A scoped Decode reads one typed value without decoding the whole
 // document, such as a version number or a list of tags, and a scalar
-// decodes into a string as its text, so a Decode[string] reads a
-// discriminator field such as kind whatever its type:
+// decodes into a string whatever its type, so a Decode[string] reads a
+// discriminator field such as kind. A number decodes into a string in its
+// canonical spelling, so 1.10 reads as "1.1" and 0x10 as "16":
 //
 //	kindPath := paths.Root().Child("kind")
 //	for _, doc := range docs {
