@@ -1677,3 +1677,24 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 		require.NoError(t, lenient.Validate(t.Context(), doc))
 	})
 }
+
+func TestRegistry_Schema_PanicReachesCaller(t *testing.T) {
+	t.Parallel()
+
+	// The group runs the load on a goroutine of its own, so a panic in the
+	// load must come back to the caller's goroutine to be recoverable.
+	reg := schema.NewRegistry()
+	ref := schema.Loadable("boom.json", func(_ context.Context) ([]byte, error) {
+		panic("boom")
+	})
+
+	load := func() {
+		_, err := reg.Schema(t.Context(), ref)
+		require.NoError(t, err)
+	}
+
+	assert.PanicsWithValue(t, "boom", load)
+
+	// The next call loads again rather than hanging on the failed load.
+	assert.PanicsWithValue(t, "boom", load)
+}

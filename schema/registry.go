@@ -457,7 +457,11 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 
 	for {
 		ch := r.group.DoChan(ref.Key(), func() (any, error) {
-			err := r.compile(ctx, ref)
+			err := r.compileRecovering(ctx, ref)
+
+			if pe, ok := errors.AsType[*panicError](err); ok {
+				return pe, err
+			}
 
 			// Report whether this caller's context had ended when the load
 			// failed, so a joiner can tell that cancellation apart from a
@@ -482,6 +486,14 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 
 		if res.Err == nil {
 			break
+		}
+
+		// The singleflight group raises a panic from the load on a
+		// goroutine of its own, where no caller can recover it, so the load
+		// hands the panic back as a value and each caller that shared it
+		// raises it here.
+		if pe, ok := res.Val.(*panicError); ok {
+			panic(pe.value)
 		}
 
 		if starterEnded, ok := res.Val.(bool); ok && starterEnded && ctx.Err() == nil {
@@ -556,6 +568,30 @@ func (r *Registry) cached(key string) (*Schema, bool) {
 // compile loads and compiles the schema ref names and caches the result
 // under its Key. When an earlier call cached a schema under that Key,
 // compile keeps it, so every caller sees one schema per Key.
+// A panicError carries a panic out of a shared load as an error, so it
+// can cross the singleflight group and be raised again by every caller
+// that joined the load.
+type panicError struct {
+	value any
+}
+
+// Error implements error.
+func (p *panicError) Error() string {
+	return fmt.Sprintf("load panicked: %v", p.value)
+}
+
+// compileRecovering runs compile and turns a panic in the load or the
+// compiler into a [*panicError].
+func (r *Registry) compileRecovering(ctx context.Context, ref Ref) (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = &panicError{value: p}
+		}
+	}()
+
+	return r.compile(ctx, ref)
+}
+
 func (r *Registry) compile(ctx context.Context, ref Ref) error {
 	key := ref.Key()
 
