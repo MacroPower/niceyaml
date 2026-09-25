@@ -64,6 +64,61 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`version: 3`),
 			want:    false,
 		},
+		"int matches float spelling": {
+			matcher: matcher.Content(versionPath, 1),
+			input:   stringtest.Input(`version: 1.0`),
+			want:    true,
+		},
+		"int does not match a fraction": {
+			matcher: matcher.Content(versionPath, 1),
+			input:   stringtest.Input(`version: 1.5`),
+			want:    false,
+		},
+		"empty string does not match null": {
+			matcher: matcher.Content(kindPath, ""),
+			input:   stringtest.Input(`kind:`),
+			want:    false,
+		},
+		"false does not match null": {
+			matcher: matcher.Content(enabledPath, false),
+			input:   stringtest.Input(`enabled: null`),
+			want:    false,
+		},
+		"nil matches null": {
+			matcher: matcher.Content[any](enabledPath, nil),
+			input:   stringtest.Input(`enabled: ~`),
+			want:    true,
+		},
+		"nil does not match a value": {
+			matcher: matcher.Content[any](enabledPath, nil),
+			input:   stringtest.Input(`enabled: false`),
+			want:    false,
+		},
+		"any int matches integer": {
+			matcher: matcher.Content[any](versionPath, 1),
+			input:   stringtest.Input(`version: 1`),
+			want:    true,
+		},
+		"any int matches float spelling": {
+			matcher: matcher.Content[any](versionPath, 1),
+			input:   stringtest.Input(`version: 1.0`),
+			want:    true,
+		},
+		"any int does not match other integer": {
+			matcher: matcher.Content[any](versionPath, 1),
+			input:   stringtest.Input(`version: 2`),
+			want:    false,
+		},
+		"any negative int does not match unsigned": {
+			matcher: matcher.Content[any](versionPath, -1),
+			input:   stringtest.Input(`version: 18446744073709551615`),
+			want:    false,
+		},
+		"any string does not match number": {
+			matcher: matcher.Content[any](versionPath, "1"),
+			input:   stringtest.Input(`version: 1`),
+			want:    false,
+		},
 		"bool match": {
 			matcher: matcher.Content(enabledPath, true),
 			input:   stringtest.Input(`enabled: true`),
