@@ -4557,6 +4557,12 @@ func TestPrinter_ContainerWidth_Accessor(t *testing.T) {
 	assert.Equal(t, 0, testPrinter().ContainerWidth())
 	assert.Equal(t, 40, testPrinter().With(printer.WithContainerWidth(40)).ContainerWidth())
 	assert.Equal(t, 0, testPrinter().With(printer.WithContainerWidth(-1)).ContainerWidth())
+
+	// A negative count shows the error lines alone, as 0 does, so it
+	// reads back as 0.
+	assert.Equal(t, printer.DefaultContextLines, testPrinter().ContextLines())
+	assert.Equal(t, 3, testPrinter().With(printer.WithContextLines(3)).ContextLines())
+	assert.Equal(t, 0, testPrinter().With(printer.WithContextLines(-3)).ContextLines())
 }
 
 func TestPrinter_PrintError_JoinOfNothing(t *testing.T) {

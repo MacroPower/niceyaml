@@ -579,7 +579,7 @@ func WithMaxNumber(n int) Option {
 // as 0 does.
 func WithContextLines(n int) Option {
 	return func(p *Printer) {
-		p.contextLines = n
+		p.contextLines = max(0, n)
 	}
 }
 
