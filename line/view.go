@@ -378,14 +378,24 @@ func (v *View) Hunks(context int) *View {
 	hunks := v.Slice(spans...)
 
 	// The separator goes above the first line the hunk holds, which is
-	// the start of its span unless the View skips that line.
+	// the start of its span unless the View skips that line. It sits
+	// ahead of the annotations the line already carries, since the
+	// printer renders them in the order their kinds first appear and the
+	// separator marks the top of the hunk.
+	separator := Annotation{
+		Content:   "...",
+		Kind:      kind.UISeparator,
+		Placement: Above,
+	}
+
 	for _, span := range spans[1:] {
 		for i := range hunks.All(span) {
-			hunks.Annotate(i, Annotation{
-				Content:   "...",
-				Kind:      kind.UISeparator,
-				Placement: Above,
-			})
+			hunks.Annotate(i, separator)
+
+			anns := hunks.annotations[i]
+			copy(anns[1:], anns[:len(anns)-1])
+
+			anns[0] = separator
 
 			break
 		}

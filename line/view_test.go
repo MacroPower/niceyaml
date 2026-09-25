@@ -1355,4 +1355,20 @@ func TestView_Hunks(t *testing.T) {
 		)
 		assert.Equal(t, want, view.Hunks(1).String())
 	})
+
+	t.Run("separator sits above an annotated first line", func(t *testing.T) {
+		t.Parallel()
+
+		view := newTestView(t, input, 8)
+		view.Annotate(1, line.Annotation{Content: "one", Placement: line.Below})
+		view.Annotate(6, line.Annotation{Content: "two", Placement: line.Above})
+
+		want := stringtest.JoinLF(
+			"   2 | b: 2",
+			"     | ^ one",
+			"     | ...; two",
+			"   7 | g: 7",
+		)
+		assert.Equal(t, want, view.Hunks(0).String())
+	})
 }
