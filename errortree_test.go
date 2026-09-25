@@ -123,6 +123,7 @@ func TestErrorTree_New(t *testing.T) {
 
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
 	other := niceyaml.NewSourceFromString("c: 3\n", niceyaml.WithName("g.yaml"))
+	wide := niceyaml.NewSourceFromString("a: hello world\nb: 2\n", niceyaml.WithName("f.yaml"))
 
 	badA := func() *niceyaml.Error {
 		return niceyaml.NewError("bad a", niceyaml.AtPath(paths.Root().Child("a")))
@@ -178,14 +179,14 @@ func TestErrorTree_New(t *testing.T) {
 			// The position sits inside the token of the value, so the
 			// child names it as its own message does, rather than the
 			// start of the token the excerpt marks.
-			err: yamltest.Bind(t, source, niceyaml.NewError("2 problems", niceyaml.WithErrors(
+			err: yamltest.Bind(t, wide, niceyaml.NewError("2 problems", niceyaml.WithErrors(
 				badB(),
-				niceyaml.NewError("mid", niceyaml.AtPosition(position.New(0, 3))),
+				niceyaml.NewError("mid", niceyaml.AtPosition(position.New(0, 8))),
 			))),
 			want: niceyaml.ErrorTree{
 				Text: "f.yaml: 2 problems",
 				Children: []niceyaml.ErrorTree{
-					{Text: "1:4: mid"},
+					{Text: "1:9: mid"},
 					{Text: "2:4: $.b: bad b"},
 				},
 			},
