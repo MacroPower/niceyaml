@@ -28,7 +28,7 @@ import (
 // Several errors come back joined, one per value that failed. Returns
 // nil when nothing failed.
 func selfValidate(v any) error {
-	w := selfWalker{walking: map[visit]bool{}}
+	w := selfWalker{walking: map[visit]bool{}, done: map[visit]bool{}}
 	w.walk(reflect.ValueOf(v), paths.Root())
 
 	switch len(w.errs) {
@@ -42,12 +42,15 @@ func selfValidate(v any) error {
 }
 
 // selfWalker collects the errors of the [SelfValidator] values in a
-// decoded value, and the pointers, maps, and slices on the path it is
+// decoded value, the pointers, maps, and slices on the path it is
 // walking down, so a value that refers back to one above it stops
-// there. A value two paths share, as an alias makes one, is on neither
-// path when the other reaches it, so it validates under each path.
+// there, and the result of each it has walked, so a value two paths
+// share, as an alias makes one, walks once and reports its errors under
+// the first path, while a parent on the second path still learns that
+// the value failed.
 type selfWalker struct {
 	walking map[visit]bool
+	done    map[visit]bool
 	errs    []error
 }
 
@@ -79,24 +82,47 @@ func (w *selfWalker) walk(v reflect.Value, base paths.Path) bool {
 		return w.walk(v.Elem(), base)
 
 	case reflect.Pointer, reflect.Map, reflect.Slice:
-		if v.IsNil() || !w.enter(v) {
+		if v.IsNil() {
+			return true
+		}
+
+		if ok, seen := w.done[visitOf(v)]; seen {
+			return ok
+		}
+
+		if !w.enter(v) {
 			return true
 		}
 
 		defer w.leave(v)
 
 		if v.Kind() == reflect.Pointer {
-			return w.walk(v.Elem(), base)
+			return w.finish(v, w.walk(v.Elem(), base))
 		}
+
+		return w.finish(v, w.walkValue(v, base))
 
 	default:
 	}
 
+	return w.walkValue(v, base)
+}
+
+// walkValue validates v, a value that is no pointer or interface, and
+// everything below it, and reports whether nothing under v failed.
+func (w *selfWalker) walkValue(v reflect.Value, base paths.Path) bool {
 	if !decodesItself(v.Type()) && !w.children(v, base) {
 		return false
 	}
 
 	return w.validate(v, base)
+}
+
+// finish records the result of the walk through v and returns it.
+func (w *selfWalker) finish(v reflect.Value, ok bool) bool {
+	w.done[visitOf(v)] = ok
+
+	return ok
 }
 
 // enter records that the walk is inside v, a pointer, map, or slice, and
@@ -188,10 +214,15 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path) bool {
 
 	case reflect.Map:
 		// The entries walk in the order of their keys, so the errors come
-		// back in one order however the map iterates.
+		// back in one order however the map iterates. Two keys of one
+		// text, such as 1 and "1", order by their types.
 		keys := v.MapKeys()
 		slices.SortStableFunc(keys, func(a, b reflect.Value) int {
-			return strings.Compare(mapKey(a), mapKey(b))
+			if c := strings.Compare(mapKey(a), mapKey(b)); c != 0 {
+				return c
+			}
+
+			return strings.Compare(a.Type().String(), b.Type().String())
 		})
 
 		for _, key := range keys {

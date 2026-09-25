@@ -3,6 +3,7 @@ package niceyaml_test
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -387,9 +388,12 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		require.ErrorIs(t, dd.DecodeInto(t.Context(), ring), errRing)
 	})
 
-	t.Run("a value two paths share validates under each", func(t *testing.T) {
+	t.Run("a value two paths share fails the parent on each", func(t *testing.T) {
 		t.Parallel()
 
+		// The alias makes B the same pointer as A. The value reports
+		// under the first path alone, and the parent of the second path
+		// still does not run, since its child failed.
 		type shared struct {
 			A *item `yaml:"a"`
 			B *item `yaml:"b"`
@@ -399,10 +403,29 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		got, err := dd.Decode[shared](t.Context())
 		require.Same(t, got.A, got.B)
-		require.EqualError(t, err, stringtest.JoinLF(
-			"$.a.price: negative price",
-			"$.b.price: negative price",
-		))
+		require.EqualError(t, err, "1:24: $.a.price: negative price")
+
+		_, err = dd.Decode[sharedParent](t.Context())
+		require.EqualError(t, err, "1:24: $.a.price: negative price")
+	})
+
+	t.Run("chained aliases walk in linear time", func(t *testing.T) {
+		t.Parallel()
+
+		// Every node holds the node before it twice, so a walk that
+		// revisits a shared value under every path takes 2^40 steps.
+		var sb strings.Builder
+
+		sb.WriteString("n0: &n0 {}\n")
+
+		for i := 1; i <= 40; i++ {
+			fmt.Fprintf(&sb, "n%d: &n%d {a: *n%d, b: *n%d}\n", i, i, i-1, i-1)
+		}
+
+		dd := yamltest.FirstDocument(t, sb.String())
+
+		_, err := dd.Decode[map[string]*chain](t.Context())
+		require.NoError(t, err)
 	})
 
 	t.Run("a value that refers back through a map walks once", func(t *testing.T) {
@@ -563,6 +586,23 @@ func (h *seenHours) Validate() error {
 	h.seen = true
 
 	return h.Hours.Validate()
+}
+
+// sharedParent validates after its fields, which an alias makes one
+// pointer, and reports that it ran.
+type sharedParent struct {
+	A *item `yaml:"a"`
+	B *item `yaml:"b"`
+}
+
+func (sharedParent) Validate() error {
+	return errors.New("parent ran")
+}
+
+// chain holds two links to the node before it.
+type chain struct {
+	A *chain `yaml:"a"`
+	B *chain `yaml:"b"`
 }
 
 // ring points at itself once decoded, and reports errRing from each
