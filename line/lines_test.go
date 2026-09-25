@@ -1195,6 +1195,8 @@ func TestNewLines_BlockScalars(t *testing.T) {
 				key: |-
 				next: value
 			`),
+			"literal keep empty at end": "key: |+\n",
+			"folded keep empty at end":  "- >+\n",
 		}
 
 		for name, input := range tcs {
@@ -1211,6 +1213,16 @@ func TestNewLines_BlockScalars(t *testing.T) {
 
 				diff := yamltest.CompareTokenSlices(originalTks, resultTks)
 				require.True(t, diff.Equal(), diff.String())
+
+				// The lexer places the empty content of a scalar that
+				// keeps its trailing lines past the end of the source,
+				// which adds no line the file does not have.
+				want := strings.Count(input, "\n")
+				if !strings.HasSuffix(input, "\n") {
+					want++
+				}
+
+				assert.Equal(t, want, lines.Len())
 			})
 		}
 	})

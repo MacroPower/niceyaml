@@ -206,17 +206,57 @@ func (b *builder) AddToken(tk *token.Token) {
 // Build finalizes and returns the constructed [Line] values.
 func (b *builder) Build() []Line {
 	// Handle the last line which may not end with a newline.
+	//
+	// The lexer places the empty content of a block scalar that keeps its
+	// trailing lines on the line after the header, past the end of the
+	// source when the header is its last line. That line holds nothing
+	// from the source, so its segments join the line before it rather
+	// than adding a line the file does not have.
 	if len(b.currentLineSegments) > 0 {
-		b.lines = append(b.lines, Line{
-			Segments: b.currentLineSegments,
-			Number:   b.currentLine,
-		})
+		if b.currentLineHoldsNoOrigin() && len(b.lines) > 0 {
+			b.joinCurrentLineToPrevious()
+		} else {
+			b.lines = append(b.lines, Line{
+				Segments: b.currentLineSegments,
+				Number:   b.currentLine,
+			})
+		}
 	}
 
 	// Mark as built to prevent reuse.
 	b.built = true
 
 	return b.lines
+}
+
+// currentLineHoldsNoOrigin reports whether every segment of the current
+// line has an empty Origin, so the line holds no rune of the source.
+func (b *builder) currentLineHoldsNoOrigin() bool {
+	for _, seg := range b.currentLineSegments {
+		if seg.Part().Origin != "" {
+			return false
+		}
+	}
+
+	return true
+}
+
+// joinCurrentLineToPrevious moves the segments of the current line onto
+// the line finished last, placing each where that line ended.
+func (b *builder) joinCurrentLineToPrevious() {
+	lastLine := &b.lines[len(b.lines)-1]
+
+	for _, seg := range b.currentLineSegments {
+		seg.Part().Position.Line = lastLine.Number
+		seg.Part().Position.Column = max(b.prevLineEndColumn, 1)
+	}
+
+	if n := len(lastLine.Segments); n > 0 {
+		linkParts(lastLine.Segments[n-1].Part(), b.currentLineSegments[0].Part())
+	}
+
+	lastLine.Segments = append(lastLine.Segments, b.currentLineSegments...)
+	b.currentLineSegments = nil
 }
 
 // finishLine completes the current line and prepares for the next one.
