@@ -444,7 +444,9 @@ func (m *Model) AddRevision(r Revision) {
 		return
 	}
 
-	m.revisions = append(m.revisions, r)
+	// Copies of a Model share the backing array of revisions, so the append
+	// must not write into spare capacity that another copy can reach.
+	m.revisions = append(slices.Clip(m.revisions), r)
 	m.revIndex = len(m.revisions) - 1
 
 	m.rebuildViews()

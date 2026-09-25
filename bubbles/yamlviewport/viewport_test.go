@@ -3406,6 +3406,24 @@ func TestViewMode_Behavior(t *testing.T) {
 	}
 }
 
+func TestViewport_CopiesKeepTheirRevisions(t *testing.T) {
+	t.Parallel()
+
+	m := yamlviewport.New()
+	for _, name := range []string{"a", "b", "c"} {
+		m.AddRevision(niceyaml.NewSourceFromString("key: "+name+"\n", niceyaml.WithName(name)))
+	}
+
+	// A Model is a value, so a copy must keep its own history when either
+	// side adds a revision afterward.
+	snap := m
+	m.AddRevision(niceyaml.NewSourceFromString("key: d\n", niceyaml.WithName("d")))
+	snap.AddRevision(niceyaml.NewSourceFromString("key: e\n", niceyaml.WithName("e")))
+
+	assert.Equal(t, []string{"a", "b", "c", "d"}, m.RevisionNames())
+	assert.Equal(t, []string{"a", "b", "c", "e"}, snap.RevisionNames())
+}
+
 func TestViewport_ZeroValue(t *testing.T) {
 	t.Parallel()
 
