@@ -1,7 +1,6 @@
 package line
 
 import (
-	"fmt"
 	"iter"
 	"strings"
 
@@ -197,7 +196,8 @@ func hasLineEnding(origin string) bool {
 
 // String returns the line number and content, as "   1 | key: value",
 // which is the row [View.String] renders for a line with no decoration in
-// a view whose largest line number is under ten thousand.
+// a view whose largest line number is under ten thousand. A line with no
+// number, such as a zero Line, gets a blank gutter.
 func (l *Line) String() string {
-	return fmt.Sprintf("%4d | %s", l.Number(), l.Content())
+	return contentRow(l, 4)
 }

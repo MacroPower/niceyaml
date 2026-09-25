@@ -1530,7 +1530,7 @@ func TestEmptyAndZeroValues(t *testing.T) {
 		assert.True(t, l.IsEmpty())
 		assert.Empty(t, l.Content())
 		assert.Nil(t, l.Tokens())
-		assert.Contains(t, l.String(), "0 |")
+		assert.Equal(t, "     | ", l.String())
 	})
 
 	t.Run("Line/with tokens not empty", func(t *testing.T) {

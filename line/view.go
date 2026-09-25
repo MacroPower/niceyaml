@@ -448,15 +448,7 @@ func (v *View) String() string {
 			rows = append(rows, blank+padding+escape.Control(strings.Join(kept.Contents(), "; ")))
 		}
 
-		// A line with no number, such as the placeholder a diff puts
-		// opposite an inserted or deleted line, gets a blank gutter, as
-		// the printer gives it one.
-		number := ""
-		if ln.Number() > 0 {
-			number = strconv.Itoa(ln.Number())
-		}
-
-		rows = append(rows, fmt.Sprintf("%*s | %s", width, number, escape.Control(ln.Content())))
+		rows = append(rows, contentRow(ln, width))
 
 		if marker := markerRow(ln, v.Overlays(i), anns.Filter(Below)); marker != "" {
 			rows = append(rows, blank+marker)
@@ -464,6 +456,19 @@ func (v *View) String() string {
 	}
 
 	return strings.Join(rows, "\n")
+}
+
+// contentRow returns the row that renders ln, with its number right-aligned
+// in a gutter width cells wide. A line with no number, such as the
+// placeholder a diff puts opposite an inserted or deleted line, gets a
+// blank gutter, as the printer gives it one.
+func contentRow(ln *Line, width int) string {
+	number := ""
+	if ln.Number() > 0 {
+		number = strconv.Itoa(ln.Number())
+	}
+
+	return fmt.Sprintf("%*s | %s", width, number, escape.Control(ln.Content()))
 }
 
 // colWidth returns the width in cells of the content of ln before col, as
