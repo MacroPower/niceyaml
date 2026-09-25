@@ -2,6 +2,7 @@ package line
 
 import (
 	"iter"
+	"slices"
 	"strings"
 
 	"github.com/goccy/go-yaml/token"
@@ -182,8 +183,21 @@ func (l *Line) Runes() iter.Seq2[int, rune] {
 			}
 		}
 
-		if n := len(l.segments); n > 0 && hasLineEnding(l.segments[n-1].Part().Origin) {
-			yield(col, '\n')
+		// The splitter joins a token that holds no text and sits past the
+		// end of the source onto the last line, after the segment that
+		// ends it, so the ending is on the last segment that holds any of
+		// the source.
+		for _, seg := range slices.Backward(l.segments) {
+			origin := seg.Part().Origin
+			if origin == "" {
+				continue
+			}
+
+			if hasLineEnding(origin) {
+				yield(col, '\n')
+			}
+
+			return
 		}
 	}
 }

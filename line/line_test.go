@@ -82,6 +82,12 @@ func TestLine_Runes(t *testing.T) {
 		"crlf cut after comment":     {input: "a: b # c\r\nd: e\r\n", want: []string{"a: b # c\n", "d: e\n"}},
 		"bare cr ending":             {input: "a: 1\rb: 2\r", want: []string{"a: 1\n", "b: 2\n"}},
 		"blank line after tag":       {input: "a: !t\n\n  b: 1\n", want: []string{"a: !t\n", "\n", "  b: 1\n"}},
+		// The empty content of a block scalar that keeps its trailing
+		// lines joins the last line after its ending; the line still
+		// yields the ending.
+		"keep block scalar at the end":        {input: "a: |+\n", want: []string{"a: |+\n"}},
+		"keep block scalar with crlf":         {input: "a: |+\r\n", want: []string{"a: |+\n"}},
+		"nested keep block scalar at the end": {input: "a:\n  b: |+\n", want: []string{"a:\n", "  b: |+\n"}},
 	}
 
 	for name, tc := range tcs {
