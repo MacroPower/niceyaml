@@ -1771,3 +1771,52 @@ func TestRegistry_RelativeRefs(t *testing.T) {
 		assert.Contains(t, err.Error(), "cannot resolve $ref")
 	})
 }
+
+func TestRegistry_Schema_RedactsPassword(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/bad.json" {
+			//nolint:errcheck // Test helper.
+			w.Write([]byte(`{"type": 5}`))
+
+			return
+		}
+
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	withPassword := strings.Replace(server.URL, "://", "://user:secret@", 1)
+
+	tcs := map[string]struct {
+		err error
+		url string
+	}{
+		"a fetch that fails": {
+			url: withPassword + "/missing.json",
+			err: schema.ErrLoad,
+		},
+		"a schema that does not compile": {
+			url: withPassword + "/bad.json",
+			err: schema.ErrCompile,
+		},
+		"a url that does not parse": {
+			url: "http://user:secret@127.0.0.1:port/s.json",
+			err: schema.ErrLoad,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			reg := schema.NewRegistry()
+
+			_, err := reg.Schema(t.Context(), schema.URL(tc.url))
+			require.ErrorIs(t, err, tc.err)
+			assert.NotContains(t, err.Error(), "secret")
+			assert.Contains(t, err.Error(), "user:xxxxx@")
+		})
+	}
+}

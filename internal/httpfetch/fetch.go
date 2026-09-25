@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 // MaxSize is the largest response body [Get] accepts, in bytes.
@@ -67,13 +68,54 @@ func reason(err error) error {
 }
 
 // Redacted returns rawURL with any password in its userinfo replaced by
-// "xxxxx", for use in messages. A string that does not parse as a URL comes
-// back unchanged.
+// "xxxxx", for use in messages. A string that carries no password comes
+// back unchanged, so a name that is not a URL keeps its spelling. A URL
+// that does not parse still has the password between the first colon of
+// its userinfo and the "@" replaced.
 func Redacted(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil {
+		return redactUnparsed(rawURL)
+	}
+
+	if u.User == nil {
+		return rawURL
+	}
+
+	if _, ok := u.User.Password(); !ok {
 		return rawURL
 	}
 
 	return u.Redacted()
+}
+
+// redactUnparsed is [Redacted] for a URL that does not parse. It finds the
+// authority after "://" and replaces the password in its userinfo.
+func redactUnparsed(rawURL string) string {
+	const sep = "://"
+
+	i := strings.Index(rawURL, sep)
+	if i < 0 {
+		return rawURL
+	}
+
+	start := i + len(sep)
+	rest := rawURL[start:]
+
+	end := strings.IndexAny(rest, "/?#")
+	if end < 0 {
+		end = len(rest)
+	}
+
+	at := strings.LastIndex(rest[:end], "@")
+	if at < 0 {
+		return rawURL
+	}
+
+	colon := strings.Index(rest[:at], ":")
+	if colon < 0 {
+		return rawURL
+	}
+
+	return rawURL[:start+colon+1] + "xxxxx" + rest[at:]
 }

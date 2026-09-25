@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 )
 
 // ErrNoMatch reports that a [Resolver] does not apply to a document. A
@@ -99,6 +100,13 @@ func Loadable(key string, load func(ctx context.Context) ([]byte, error)) Ref {
 // bytes to cache.
 func (r Ref) Key() string {
 	return r.key
+}
+
+// name returns the key of r for a message, with any password in a URL
+// key redacted, so an error does not print a credential that the fetch
+// itself redacts.
+func (r Ref) name() string {
+	return httpfetch.Redacted(r.key)
 }
 
 // Schema returns the compiled schema of a [Ref] from [Schema.Ref], or nil

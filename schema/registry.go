@@ -467,7 +467,7 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 				return v, nil
 			}
 
-			return nil, fmt.Errorf("%w: %q: %w", ErrLoad, ref.Key(), ctx.Err())
+			return nil, fmt.Errorf("%w: %q: %w", ErrLoad, ref.name(), ctx.Err())
 
 		case res = <-ch:
 		}
@@ -494,7 +494,7 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 
 	v, ok := r.cached(ref.Key())
 	if !ok {
-		return nil, fmt.Errorf("%w: %q: validator missing after compile", ErrCompile, ref.Key())
+		return nil, fmt.Errorf("%w: %q: validator missing after compile", ErrCompile, ref.name())
 	}
 
 	return v, nil
@@ -515,7 +515,7 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 func (r *Registry) Load(ctx context.Context, ref Ref) ([]byte, error) {
 	data, err := r.load(ctx, ref)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %q: %w", ErrLoad, ref.Key(), err)
+		return nil, fmt.Errorf("%w: %q: %w", ErrLoad, ref.name(), err)
 	}
 
 	return data, nil
@@ -657,7 +657,7 @@ func (r *Registry) compile(ctx context.Context, ref Ref) error {
 
 	compiled, err := Compile(ctx, data, r.refOptions(ref)...)
 	if err != nil {
-		return fmt.Errorf("%q: %w", key, err)
+		return fmt.Errorf("%q: %w", ref.name(), err)
 	}
 
 	r.mu.Lock()

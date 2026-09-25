@@ -76,3 +76,45 @@ func TestGet_RedactsPasswordOnStatus(t *testing.T) {
 	assert.NotContains(t, err.Error(), "secret")
 	assert.Contains(t, err.Error(), "xxxxx")
 }
+
+func TestRedacted(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		url  string
+		want string
+	}{
+		"password": {
+			url:  "https://user:secret@example.com/s.json",
+			want: "https://user:xxxxx@example.com/s.json",
+		},
+		"user without password": {
+			url:  "https://user@example.com/s.json",
+			want: "https://user@example.com/s.json",
+		},
+		"no userinfo keeps its spelling": {
+			url:  "file:///srv/my schema.json",
+			want: "file:///srv/my schema.json",
+		},
+		"not a url": {
+			url:  "embedded:0123abcd",
+			want: "embedded:0123abcd",
+		},
+		"password in a url that does not parse": {
+			url:  "https://user:secret@example.com/%zz",
+			want: "https://user:xxxxx@example.com/%zz",
+		},
+		"password in a url with an invalid port": {
+			url:  "https://user:secret@example.com:port/x",
+			want: "https://user:xxxxx@example.com:port/x",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, httpfetch.Redacted(tc.url))
+		})
+	}
+}
