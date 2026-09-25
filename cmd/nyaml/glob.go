@@ -122,9 +122,15 @@ func expandPaths(args ...string) ([]string, error) {
 		// is that file, even when it also matches others as a pattern, so
 		// the file the user named is never shadowed. A name that is no
 		// valid pattern, such as one with a stray bracket, names a file
-		// the same way. The check admits files only, as the glob does.
+		// the same way. A name that names a directory is an error, as
+		// without a metacharacter, rather than a pattern that could
+		// select an unrelated file.
 		info, statErr := os.Stat(arg)
-		if statErr == nil && !info.IsDir() {
+		if statErr == nil {
+			if info.IsDir() {
+				return nil, fmt.Errorf("%w: %q", errIsDirectory, arg)
+			}
+
 			add(arg)
 
 			continue

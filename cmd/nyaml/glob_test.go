@@ -181,7 +181,7 @@ func TestExpand(t *testing.T) {
 		},
 		"literal directory with metacharacter": {
 			args: []string{bracketDir},
-			err:  errNoMatch,
+			err:  errIsDirectory,
 		},
 		"nonexistent file passes": {
 			// Glob expansion does not check file existence, so expandPaths
