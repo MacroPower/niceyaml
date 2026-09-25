@@ -42,6 +42,46 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`version: 2`),
 			want:    true,
 		},
+		"string matches float text as written": {
+			matcher: matcher.Content(versionPath, "1.10"),
+			input:   stringtest.Input(`version: 1.10`),
+			want:    true,
+		},
+		"string matches trailing zero as written": {
+			matcher: matcher.Content(versionPath, "1.0"),
+			input:   stringtest.Input(`version: 1.0`),
+			want:    true,
+		},
+		"string does not match respelled float": {
+			matcher: matcher.Content(versionPath, "1"),
+			input:   stringtest.Input(`version: 1.0`),
+			want:    false,
+		},
+		"string matches hex text as written": {
+			matcher: matcher.Content(versionPath, "0x10"),
+			input:   stringtest.Input(`version: 0x10`),
+			want:    true,
+		},
+		"string does not match decoded hex": {
+			matcher: matcher.Content(versionPath, "16"),
+			input:   stringtest.Input(`version: 0x10`),
+			want:    false,
+		},
+		"string matches anchored float text": {
+			matcher: matcher.Content(versionPath, "1.10"),
+			input:   stringtest.Input(`version: &v 1.10`),
+			want:    true,
+		},
+		"string matches tagged float text": {
+			matcher: matcher.Content(versionPath, "1.10"),
+			input:   stringtest.Input(`version: !!float 1.10`),
+			want:    true,
+		},
+		"string matches quoted text": {
+			matcher: matcher.Content(versionPath, "1.10"),
+			input:   stringtest.Input(`version: "1.10"`),
+			want:    true,
+		},
 		"uncomparable dynamic type does not match": {
 			// T is any, so the compared values may hold a map, which ==
 			// cannot compare; the matcher declines rather than panics.

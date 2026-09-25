@@ -6,6 +6,8 @@ import (
 	"math"
 	"reflect"
 
+	"github.com/goccy/go-yaml/ast"
+
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -22,9 +24,10 @@ type contentMatcher[T comparable] struct {
 // Match decodes the value at path, from the scope of the document, with
 // [niceyaml.Node.Decode] as a T and compares the result to want, so
 // the type of want decides how Match reads the YAML. A string matches
-// the text of a scalar, and a number matches its numeric value however
-// the document spells it, though an integer want never matches a value
-// with a fraction. A null matches only a nil want, such as
+// the text of a scalar as the document spells it, so "1.10" matches
+// version: 1.10 and "1.1" does not. A number matches its numeric value
+// however the document spells it, though an integer want never matches a
+// value with a fraction. A null matches only a nil want, such as
 // Content[any](path, nil). When T is an interface, two numbers compare
 // by value whatever their Go types, so Content[any](path, 1) matches an
 // integer the decoder reads as a uint64. A document without the path, or
@@ -99,6 +102,20 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 
 	gv := reflect.ValueOf(&got).Elem()
 
+	// The decoder respells a number it reads into a string, so 1.10
+	// becomes "1.1" and 0x10 becomes "16". A string want matches the
+	// scalar's text as written instead.
+	if isPlainString(gv.Type()) {
+		text, ok, err := numberText(node)
+		if err != nil {
+			return false, err
+		}
+
+		if ok {
+			gv.SetString(text)
+		}
+	}
+
 	if f, ok := raw.(float64); ok && isInteger(gv.Kind()) && f != math.Trunc(f) {
 		return false, nil
 	}
@@ -119,6 +136,37 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 	}
 
 	return got == m.want, nil
+}
+
+// isPlainString reports whether t is a string type with no methods, whose
+// decode no UnmarshalYAML or UnmarshalText of its own can change.
+func isPlainString(t reflect.Type) bool {
+	return t.Kind() == reflect.String && reflect.PointerTo(t).NumMethod() == 0
+}
+
+// numberText returns the text of the number node holds as the document
+// spells it, looking through an anchor or a tag on the scalar. The second
+// result is false when node holds anything other than an integer or a
+// float, which includes an alias, whose own text names the anchor.
+func numberText(node *niceyaml.Node) (string, bool, error) {
+	n, err := node.AST()
+	if err != nil {
+		//nolint:wrapcheck // The Node binds the error already.
+		return "", false, err
+	}
+
+	for {
+		switch v := n.(type) {
+		case *ast.AnchorNode:
+			n = v.Value
+		case *ast.TagNode:
+			n = v.Value
+		case *ast.IntegerNode, *ast.FloatNode:
+			return v.GetToken().Value, true, nil
+		default:
+			return "", false, nil
+		}
+	}
 }
 
 // numericEqual reports whether a and b are numbers of predeclared Go
