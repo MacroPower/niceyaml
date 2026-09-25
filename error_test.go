@@ -3459,7 +3459,7 @@ func TestSourceError_Annotate(t *testing.T) {
 		}
 	}
 
-	t.Run("marks the full view as the excerpt is marked", func(t *testing.T) {
+	t.Run("marks the line of the error with its message", func(t *testing.T) {
 		t.Parallel()
 
 		bound := excerptError(t)
@@ -3469,28 +3469,52 @@ func TestSourceError_Annotate(t *testing.T) {
 
 		assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, lineNumbers(view))
 
-		want := line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}
-		assert.Equal(t, want, view.Overlays(1))
-		assert.Equal(t, want, view.Overlays(7))
+		assert.Equal(t, line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}, view.Overlays(1))
 		assert.Equal(t, line.Annotations{
-			{Content: "bad h", Kind: kind.TextError, Placement: line.Below, Col: 3},
-		}, view.Annotations(7))
+			{Content: "bad b", Kind: kind.TextError, Placement: line.Below, Col: 3},
+		}, view.Annotations(1))
 
+		// The child is left to its own Annotate.
 		for i := range view.All() {
-			if i == 1 || i == 7 {
+			if i == 1 {
 				continue
 			}
 
 			assert.Empty(t, view.Overlays(i), "line %d carries no overlay", i)
 			assert.Empty(t, view.Annotations(i), "line %d carries no annotation", i)
 		}
+	})
 
-		// The excerpt is the marked view cut down to its hunks, with the
-		// indices of the source.
+	t.Run("every binding marks the tree as the excerpt is marked", func(t *testing.T) {
+		t.Parallel()
+
+		bound := excerptError(t)
+		view := bound.Source().View()
+
+		for b := range niceyaml.AllSourceErrors(bound) {
+			require.True(t, b.Annotate(view))
+		}
+
+		want := line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}
+		assert.Equal(t, want, view.Overlays(1))
+		assert.Equal(t, want, view.Overlays(7))
+		assert.Equal(t, line.Annotations{
+			{Content: "bad b", Kind: kind.TextError, Placement: line.Below, Col: 3},
+		}, view.Annotations(1))
+		assert.Equal(t, line.Annotations{
+			{Content: "bad h", Kind: kind.TextError, Placement: line.Below, Col: 3},
+		}, view.Annotations(7))
+
+		// The excerpt is the same view cut down to its hunks, with the
+		// indices of the source, except that the root's line carries a
+		// caret run alone since the tree above the excerpt names it.
 		excerpt, ok := bound.Excerpt(0)
 		require.True(t, ok)
 		assert.Equal(t, view.Overlays(1), excerpt.Overlays(1))
 		assert.Equal(t, view.Overlays(7), excerpt.Overlays(7))
+		assert.Equal(t, line.Annotations{
+			{Kind: kind.TextError, Placement: line.Below, Col: 3},
+		}, excerpt.Annotations(1).Filter(line.Below))
 		assert.Equal(t, view.Annotations(7), excerpt.Annotations(7).Filter(line.Below))
 	})
 
@@ -3511,17 +3535,64 @@ func TestSourceError_Annotate(t *testing.T) {
 		)), &second)
 
 		require.True(t, first.Annotate(view))
-		require.True(t, second.Annotate(view))
+		require.False(t, second.Annotate(view), "an error with no location of its own marks nothing")
+
+		for b := range niceyaml.AllSourceErrors(second) {
+			b.Annotate(view)
+		}
 
 		want := line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}
 		assert.Equal(t, want, view.Overlays(1))
 		assert.Equal(t, want, view.Overlays(3))
 		assert.Equal(t, line.Annotations{
-			{Kind: kind.TextError, Placement: line.Below, Col: 3},
-		}, view.Annotations(1), "a location with no message carries a marker alone")
+			{Content: "bad b", Kind: kind.TextError, Placement: line.Below, Col: 3},
+		}, view.Annotations(1))
 		assert.Equal(t, line.Annotations{
 			{Content: "too big", Kind: kind.TextError, Placement: line.Below, Col: 3},
 		}, view.Annotations(3))
+	})
+
+	t.Run("two errors on one line each add an annotation", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(excerptSource)
+		view := source.View()
+
+		for _, msg := range []string{"bad b", "too big"} {
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, yamltest.Bind(t, source, niceyaml.NewError(
+				msg, niceyaml.AtPath(paths.Root().Child("b")),
+			)), &bound)
+			require.True(t, bound.Annotate(view))
+		}
+
+		assert.Equal(t, line.Annotations{
+			{Content: "bad b", Kind: kind.TextError, Placement: line.Below, Col: 3},
+			{Content: "too big", Kind: kind.TextError, Placement: line.Below, Col: 3},
+		}, view.Annotations(1))
+		assert.Equal(t, stringtest.JoinLF(
+			"   2 | b: 2",
+			"     |    ^ bad b; too big",
+		), view.Slice(position.NewSpan(1, 2)).String())
+	})
+
+	t.Run("an error with no message marks a caret run alone", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(excerptSource)
+		view := source.View()
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, yamltest.Bind(t, source, niceyaml.NewError(
+			"", niceyaml.AtPath(paths.Root().Child("b")),
+		)), &bound)
+		require.True(t, bound.Annotate(view))
+
+		assert.Equal(t, line.Annotations{
+			{Kind: kind.TextError, Placement: line.Below, Col: 3},
+		}, view.Annotations(1))
 	})
 
 	t.Run("marks a slice of the source by line identity", func(t *testing.T) {
@@ -3532,7 +3603,11 @@ func TestSourceError_Annotate(t *testing.T) {
 		// Lines 7-10 of the source, which hold h at index 7 and not b.
 		view := bound.Source().View().Slice(position.NewSpan(6, 10))
 
-		require.True(t, bound.Annotate(view))
+		require.False(t, bound.Annotate(view), "the line of the error is outside the slice")
+
+		for b := range niceyaml.AllSourceErrors(bound) {
+			b.Annotate(view)
+		}
 
 		assert.Equal(t, []int{7, 8, 9, 10}, lineNumbers(view))
 		assert.Equal(t, line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}, view.Overlays(7))
@@ -3566,7 +3641,7 @@ func TestSourceError_Annotate(t *testing.T) {
 		assert.Equal(t, line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}, view.Overlays(1))
 		assert.Equal(t, stringtest.JoinLF(
 			"   2 | b: 2",
-			"     |    ^",
+			"     |    ^ bad b",
 		), view.String())
 	})
 
@@ -3943,7 +4018,12 @@ func TestSourceError_Excerpts(t *testing.T) {
 		t.Parallel()
 
 		view := values.View()
-		require.True(t, bound.Annotate(view))
+		require.False(t, bound.Annotate(view), "the binding's own line is in the other source")
+
+		for b := range niceyaml.AllSourceErrors(bound) {
+			b.Annotate(view)
+		}
+
 		assert.Equal(t, stringtest.JoinLF(
 			"   1 | port: many",
 			"     |       ^^^^ not a number",
@@ -4636,59 +4716,6 @@ func requireUnresolved(t *testing.T, bound *niceyaml.SourceError, reason error) 
 	require.ErrorIs(t, bound.Unresolved(), reason)
 }
 
-func TestSourceErrorAll(t *testing.T) {
-	t.Parallel()
-
-	doc := yamltest.FirstDocument(t, "a:\n  b: 1\n  c: 2\n")
-
-	inner := niceyaml.NewError("bad c", niceyaml.AtPath(paths.Root().Child("a", "c")))
-	middle := niceyaml.NewError("bad a", niceyaml.AtPath(paths.Root().Child("a")), niceyaml.WithErrors(inner))
-	root := doc.Bind(niceyaml.NewError("2 violations", niceyaml.WithErrors(
-		niceyaml.NewError("bad b", niceyaml.AtPath(paths.Root().Child("a", "b"))),
-		middle,
-	)))
-
-	bound, ok := errors.AsType[*niceyaml.SourceError](root)
-	require.True(t, ok)
-
-	t.Run("yields the binding then every descendant in order", func(t *testing.T) {
-		t.Parallel()
-
-		var got []string
-
-		for b := range bound.All() {
-			got = append(got, b.Message())
-		}
-
-		assert.Equal(t, []string{"2 violations", "bad b", "bad a", "bad c"}, got)
-	})
-
-	t.Run("stops when the caller breaks", func(t *testing.T) {
-		t.Parallel()
-
-		var got []string
-
-		for b := range bound.All() {
-			got = append(got, b.Message())
-			if len(got) == 2 {
-				break
-			}
-		}
-
-		assert.Equal(t, []string{"2 violations", "bad b"}, got)
-	})
-
-	t.Run("nil yields nothing", func(t *testing.T) {
-		t.Parallel()
-
-		var nilErr *niceyaml.SourceError
-
-		for range nilErr.All() {
-			t.Fatal("yielded a binding")
-		}
-	})
-}
-
 func TestAllSourceErrors(t *testing.T) {
 	t.Parallel()
 
@@ -4709,6 +4736,15 @@ func TestAllSourceErrors(t *testing.T) {
 		niceyaml.NewError("bad a", niceyaml.AtPath(paths.Root().Child("a"))),
 		niceyaml.NewError("missing", niceyaml.AtPath(paths.Root().Child("nope"))),
 	)))
+	nested := yamltest.Bind(t, niceyaml.NewSourceFromString("a:\n  b: 1\n  c: 2\n"), niceyaml.NewError(
+		"2 violations",
+		niceyaml.WithErrors(
+			niceyaml.NewError("bad b", niceyaml.AtPath(paths.Root().Child("a", "b"))),
+			niceyaml.NewError("bad a", niceyaml.AtPath(paths.Root().Child("a")), niceyaml.WithErrors(
+				niceyaml.NewError("bad c", niceyaml.AtPath(paths.Root().Child("a", "c"))),
+			)),
+		),
+	))
 
 	messages := func(err error) []string {
 		var got []string
@@ -4748,6 +4784,14 @@ func TestAllSourceErrors(t *testing.T) {
 		"children bound to the same source appear below their parent": {
 			err:  tree,
 			want: []string{"2 violations", "bad a", "missing"},
+		},
+		"the children of a child follow it": {
+			err:  nested,
+			want: []string{"2 violations", "bad b", "bad a", "bad c"},
+		},
+		"a binding the tree reaches twice comes once": {
+			err:  errors.Join(first, docs[0].Bind(niceyaml.NewError("outer", niceyaml.WithErrors(first)))),
+			want: []string{"bad a", "outer"},
 		},
 	}
 

@@ -20,7 +20,7 @@
 // a document with its error marks in place:
 //
 //	view := source.View()
-//	for _, bound := range validationErrors {
+//	for bound := range niceyaml.AllSourceErrors(err) {
 //		bound.Annotate(view)
 //	}
 //

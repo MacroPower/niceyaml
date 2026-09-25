@@ -25,7 +25,7 @@ const errorConnectorWidth = 4
 // each document. A location with no message beside it in the excerpt,
 // such as the root of a bound error, gets a caret run under its range on
 // the row below, as [niceyaml.FormatError] draws one, since
-// [niceyaml.SourceError.Annotate] marks such a line with an annotation
+// [niceyaml.SourceError.Excerpt] marks such a line with an annotation
 // without content and [DefaultAnnotation] draws that as the caret run, so
 // the range shows its extent without color. Blank lines separate the
 // parts. A SourceError
