@@ -4599,8 +4599,8 @@ func TestColWidth(t *testing.T) {
 	t.Parallel()
 
 	// The width is that of the rendered row: a control character shows as
-	// a one-cell picture, a wide rune takes two cells, and a combining mark
-	// renders on the rune before it.
+	// a one-cell picture, a wide rune takes two cells, and every rune of a
+	// grapheme cluster after its first renders within the first.
 	tcs := map[string]struct {
 		content string
 		col     int
@@ -4615,6 +4615,11 @@ func TestColWidth(t *testing.T) {
 		"at a wide rune":             {content: "k: 日本 x", col: 4, want: 5},
 		"at a combining mark":        {content: "k: éx", col: 4, want: 3},
 		"after a combining mark":     {content: "k: éx", col: 5, want: 4},
+		"at a zwj joiner":            {content: "a: \U0001F468\u200d\U0001F469 x", col: 4, want: 3},
+		"at the second zwj emoji":    {content: "a: \U0001F468\u200d\U0001F469 x", col: 5, want: 3},
+		"after a zwj sequence":       {content: "a: \U0001F468\u200d\U0001F469 x", col: 7, want: 6},
+		"inside a keycap":            {content: "a: 1\ufe0f\u20e3 x", col: 5, want: 3},
+		"after a keycap":             {content: "a: 1\ufe0f\u20e3 x", col: 7, want: 6},
 	}
 
 	for name, tc := range tcs {

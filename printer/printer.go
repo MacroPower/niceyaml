@@ -6,11 +6,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"unicode"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"go.jacobcolvin.com/niceyaml/internal/cells"
 	"go.jacobcolvin.com/niceyaml/internal/colors"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/line"
@@ -291,26 +291,14 @@ func (ctx AnnotationContext) ColWidth(col int) int {
 // ColWidth returns the display width of the first col runes of content, the
 // text of a line without its line ending, plus one cell for every column
 // past the end of the content. The width is that of the row the printer
-// renders, in which a control character shows as a one-cell picture, and a
-// combining mark has no cell of its own, so a column on one measures up to
-// the rune it renders on. A viewer that scrolls horizontally adds the
-// result to [Layout.GutterWidth] to find the cell a column of the line
-// occupies.
+// renders, in which a control character shows as a one-cell picture and a
+// grapheme cluster, such as a letter with a combining mark or an emoji ZWJ
+// sequence, takes its display width once. A column inside a cluster has no
+// cell of its own, so it measures up to the start of its cluster. A viewer
+// that scrolls horizontally adds the result to [Layout.GutterWidth] to
+// find the cell a column of the line occupies.
 func ColWidth(content string, col int) int {
-	col = max(0, col)
-	runes := []rune(content)
-
-	// A combining mark has no cell of its own. It renders on the rune
-	// before it, so a marker at its column lands under that rune.
-	for col > 0 && col < len(runes) && unicode.In(runes[col], unicode.Mn, unicode.Me) {
-		col--
-	}
-
-	if col <= len(runes) {
-		return lipgloss.Width(escape.Control(string(runes[:col])))
-	}
-
-	return lipgloss.Width(escape.Control(content)) + col - len(runes)
+	return cells.NewRow(content).Width(col)
 }
 
 // AnnotationFunc returns the rendered annotation content based on

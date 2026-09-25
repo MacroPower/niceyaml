@@ -6,10 +6,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
-	"github.com/charmbracelet/x/ansi"
-
+	"go.jacobcolvin.com/niceyaml/internal/cells"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style/kind"
@@ -472,25 +470,10 @@ func contentRow(ln *Line, width int) string {
 }
 
 // colWidth returns the width in cells of the content of ln before col, as
-// the content row renders it, with a column past the end of the content
-// taking one cell. A column inside a grapheme cluster, such as a combining
-// mark or the second emoji of a ZWJ sequence, has no cell of its own, so
-// it measures up to the start of its cluster.
+// the content row renders it. See [cells.Row.Width] for the rules it
+// measures by.
 func colWidth(ln *Line, col int) int {
-	widths, starts := clusterCells(ln.Content())
-	col = max(0, col)
-
-	if col < len(starts) {
-		col = starts[col]
-	}
-
-	var width int
-
-	for _, w := range widths[:min(col, len(widths))] {
-		width += w
-	}
-
-	return width + max(0, col-len(widths))
+	return cells.NewRow(ln.Content()).Width(col)
 }
 
 // markerRow returns the row below ln that marks its overlays and carries
@@ -548,12 +531,12 @@ func markerRow(ln *Line, overlays Overlays, below Annotations) string {
 func renderMarks(content string, marks []bool) string {
 	var sb strings.Builder
 
-	widths, starts := clusterCells(content)
+	row := cells.NewRow(content)
 
 	marks = slices.Clone(marks)
 	for col, marked := range marks {
-		if col < len(starts) && marked {
-			marks[starts[col]] = true
+		if marked {
+			marks[row.Start(col)] = true
 		}
 	}
 
@@ -563,42 +546,8 @@ func renderMarks(content string, marks []bool) string {
 			cell = "^"
 		}
 
-		cells := 1
-		if col < len(widths) {
-			cells = widths[col]
-		}
-
-		sb.WriteString(strings.Repeat(cell, cells))
+		sb.WriteString(strings.Repeat(cell, row.Cells(col)))
 	}
 
 	return sb.String()
-}
-
-// clusterCells splits content into grapheme clusters as the content row
-// renders it, with control characters shown as pictures. For each rune it
-// returns the cells the rune takes and the column of the rune its cluster
-// starts on. The first rune of a cluster takes the width of the whole
-// cluster, and every other rune of it takes none.
-func clusterCells(content string) ([]int, []int) {
-	var widths, starts []int
-
-	rest := escape.Control(content)
-
-	for rest != "" {
-		cluster, width := ansi.FirstGraphemeCluster(rest, ansi.GraphemeWidth)
-		start := len(widths)
-
-		for i := range utf8.RuneCountInString(cluster) {
-			widths = append(widths, 0)
-			starts = append(starts, start)
-
-			if i == 0 {
-				widths[start] = width
-			}
-		}
-
-		rest = rest[len(cluster):]
-	}
-
-	return widths, starts
 }
