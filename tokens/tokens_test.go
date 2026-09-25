@@ -91,6 +91,30 @@ func TestTokenize_NumericEscape(t *testing.T) {
 	}
 }
 
+func TestTokenize_RepairsPositionsAfterTruncatedLastToken(t *testing.T) {
+	t.Parallel()
+
+	// The lexer places a token one rune short after a tag. When the last
+	// token's text is not in the source, the final line ending stays lost,
+	// but every position must still move to where the source holds the
+	// text.
+	tks := tokens.Tokenize("a: !!str x\nname: \"Caf\\u00e9\"\n")
+	require.NotEmpty(t, tks)
+
+	var x *token.Token
+
+	for _, tk := range tks {
+		if tk.Value == "x" {
+			x = tk
+		}
+	}
+
+	require.NotNil(t, x)
+	assert.Equal(t, 1, x.Position.Line)
+	assert.Equal(t, 10, x.Position.Column)
+	assert.Equal(t, 10, x.Position.Offset)
+}
+
 func TestTokenize(t *testing.T) {
 	t.Parallel()
 

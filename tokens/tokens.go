@@ -69,13 +69,10 @@ func Tokenize(src string) token.Tokens {
 
 	text := strings.TrimRight(last.Origin, " \t\r\n")
 
-	i := strings.LastIndex(src, text)
-	if i < 0 {
-		return tks
-	}
-
-	if rest := src[i+len(text):]; rest != "" && strings.TrimSpace(rest) == "" {
-		last.Origin = text + rest
+	if i := strings.LastIndex(src, text); i >= 0 {
+		if rest := src[i+len(text):]; rest != "" && strings.TrimSpace(rest) == "" {
+			last.Origin = text + rest
+		}
 	}
 
 	repairPositions(src, tks)
