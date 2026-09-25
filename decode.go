@@ -1218,20 +1218,31 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 }
 
 // bindDecodeError binds an error from the decoder to the source: a
-// [yaml.Error] as an [*Error] at its token, so the excerpt marks it and
-// the error matches [ErrDecodeRejected], and any other error, such as a
-// canceled context or one a value's own UnmarshalYAML returns, as it is.
+// [yaml.Error] at a token of the source as an [*Error] at that token, so
+// the excerpt marks it and the error matches [ErrDecodeRejected], and any
+// other error, such as a canceled context or one a value's own
+// UnmarshalYAML returns, as it is. An UnmarshalYAML that parses the bytes
+// it gets returns a [yaml.Error] of its own, whose token comes from that
+// parse rather than the source, so it stays the value's own error.
 // Returns nil for a nil err.
 func (n *Node) bindDecodeError(err error) error {
 	if err == nil {
 		return nil
 	}
 
-	if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
-		return n.Bind(WrapError(decodeRejectedError{yamlMessageError{yamlErr}}, atToken(yamlErr.GetToken())))
+	yamlErr, ok := errors.AsType[yaml.Error](err)
+	if !ok || !n.holdsToken(yamlErr.GetToken()) {
+		return n.Bind(err)
 	}
 
-	return n.Bind(err)
+	return n.Bind(WrapError(decodeRejectedError{yamlMessageError{yamlErr}}, atToken(yamlErr.GetToken())))
+}
+
+// holdsToken reports whether tk is a token of the source, by its type,
+// value, origin, and position, as [line.Lines.TokenRanges] matches a
+// token the parser cloned from the stream.
+func (n *Node) holdsToken(tk *token.Token) bool {
+	return tk != nil && len(n.source.lines.TokenRanges(tk)) > 0
 }
 
 // decodeRejectedError is a [yamlMessageError] the decoder returned, which

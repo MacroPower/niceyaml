@@ -3,6 +3,7 @@ package niceyaml_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -3561,6 +3562,26 @@ func (*rejectingUnmarshaler) UnmarshalYAML([]byte) error {
 	return errUnmarshal
 }
 
+// reparsingUnmarshaler decodes itself by parsing the bytes it gets again,
+// so the go-yaml error it returns carries a token of that parse rather
+// than one of the source.
+type reparsingUnmarshaler struct {
+	N int
+}
+
+func (u *reparsingUnmarshaler) UnmarshalYAML(data []byte) error {
+	var raw struct{ N int }
+
+	err := yaml.Unmarshal(data, &raw)
+	if err != nil {
+		return fmt.Errorf("custom context: %w", err)
+	}
+
+	u.N = raw.N
+
+	return nil
+}
+
 func TestErrDecodeRejected(t *testing.T) {
 	t.Parallel()
 
@@ -3636,6 +3657,26 @@ func TestErrDecodeRejected(t *testing.T) {
 		_, err := dd.Decode[rejectingUnmarshaler](t.Context())
 		require.ErrorIs(t, err, errUnmarshal)
 		require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
+	})
+
+	t.Run("unmarshaler parse error does not match", func(t *testing.T) {
+		t.Parallel()
+
+		// The error of the value's own parse carries a token of the bytes
+		// it parsed, not of the source, so it comes back as the value's
+		// own error rather than as a rejection at the wrong line.
+		dd := yamltest.FirstDocument(t, "a: 1\nb: x\nc: y\nz:\n  n: notanumber\n")
+
+		_, err := dd.Decode[struct{ Z reparsingUnmarshaler }](t.Context())
+		require.Error(t, err)
+		require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
+
+		var srcErr *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &srcErr)
+
+		_, ok := srcErr.Range()
+		assert.False(t, ok, "the error took a location from the value's own parse")
 	})
 
 	t.Run("decode target does not match", func(t *testing.T) {
