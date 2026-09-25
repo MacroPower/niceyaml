@@ -27,8 +27,9 @@ var (
 	ErrLoad = errors.New("load schema")
 
 	// ErrScopedDocument indicates a caller passed a [*niceyaml.Node] from
-	// [niceyaml.Node.At] to [Registry.Validate], which picks a schema for
-	// a whole document.
+	// [niceyaml.Node.At] to [Registry.Lookup], which picks a schema for a
+	// whole document. [Registry.Validate] validates the document around
+	// such a Node instead.
 	ErrScopedDocument = errors.New("registry needs a whole document")
 
 	// The client every registry that [WithHTTPClient] gave no client
@@ -246,9 +247,11 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 // The resolvers pick a schema for a whole document, from its file path,
 // its preamble, or its content, so n must be the root [niceyaml.Node] of
 // a document, and a Node from [niceyaml.Node.At] fails with
-// [ErrScopedDocument]. Validate one node against a schema of its own
-// with a [Schema], or the document around a scoped Node with
-// [Registry.Document].
+// [ErrScopedDocument], since the schema Lookup would return is the
+// document's and a caller who applied it to the node would check the
+// node against the wrong schema. Validate one node against a schema of
+// its own with a [Schema], or the document around a scoped Node with
+// [Registry.Validate].
 //
 // Every error comes back bound to the document through
 // [niceyaml.Node.Bind], so its message names the file the document
@@ -353,13 +356,22 @@ func (e reasonError) Unwrap() error {
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
 //
-// The resolvers pick a schema for a whole document, so n must be the root
-// [niceyaml.Node] of a document, the one [niceyaml.Source.Documents]
-// returns or [niceyaml.Node.Document] reaches, and a Node from
-// [niceyaml.Node.At] fails with [ErrScopedDocument] rather than a schema
-// for the file applied to the node. Validate one node against a schema of
-// its own with a [Schema], or the document around a scoped Node with
-// [Registry.Document].
+// The resolvers pick a schema for a whole document, so Validate checks
+// the document around n, the one [niceyaml.Node.Document] reaches: a
+// root Node as it is, and a Node from [niceyaml.Node.At] through the
+// document that holds it. A scoped decode under a registry therefore
+// fails on a violation anywhere in that document, with each error bound
+// from the document root, and a loop that decodes several Nodes of one
+// document under a registry validates that document once per Node:
+//
+//	hours, err := doc.At(paths.Root().Child("spec", "hours"))
+//	if err != nil {
+//		return err
+//	}
+//
+//	h, err := hours.Decode[Hours](ctx, niceyaml.WithValidator(reg))
+//
+// Validate one node against a schema of its own with a [Schema].
 //
 // Returns [ErrNoMatch] if no resolver applies to the document, unless
 // [WithRequireSchema] set false, in which case such a document passes.
@@ -375,7 +387,9 @@ func (e reasonError) Unwrap() error {
 // Returns resolution, loading, or compilation errors if schema preparation
 // fails.
 func (r *Registry) Validate(ctx context.Context, n *niceyaml.Node) error {
-	v, err := r.Lookup(ctx, n)
+	doc := n.Document()
+
+	v, err := r.Lookup(ctx, doc)
 	if err != nil {
 		if !r.requireSchema && errors.Is(err, ErrNoMatch) {
 			return nil
@@ -385,34 +399,7 @@ func (r *Registry) Validate(ctx context.Context, n *niceyaml.Node) error {
 	}
 
 	//nolint:wrapcheck // Validation errors should be returned directly.
-	return n.Validate(ctx, v)
-}
-
-// Document returns a [niceyaml.Validator] that validates the whole
-// document around the [niceyaml.Node] it receives, through
-// [Registry.Validate] on [niceyaml.Node.Document]. Where Validate refuses
-// a Node from [niceyaml.Node.At] with [ErrScopedDocument], the returned
-// validator accepts one, so a scoped decode under it fails on a violation
-// anywhere in that document, with each error bound from the document
-// root:
-//
-//	hours, err := doc.At(paths.Root().Child("spec", "hours"))
-//	if err != nil {
-//		return err
-//	}
-//
-//	h, err := hours.Decode[Hours](ctx, niceyaml.WithValidator(reg.Document()))
-//
-// A [niceyaml.Decoder] that decodes scoped Nodes under a registry takes
-// the same validator:
-//
-//	dec := niceyaml.NewDecoder(niceyaml.WithValidator(reg.Document()))
-//
-// On a root Node the returned validator and Validate do the same work.
-func (r *Registry) Document() niceyaml.Validator {
-	return niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
-		return r.Validate(ctx, n.Document())
-	})
+	return doc.Validate(ctx, v)
 }
 
 // Schema returns the compiled schema ref names: the one a Ref from

@@ -130,49 +130,114 @@ func TestRegistry_Validate_ScopedNode(t *testing.T) {
 	t.Parallel()
 
 	// The resolvers read the file path, the preamble, and the content of a
-	// whole document, so Lookup and Validate refuse a scoped Node rather
-	// than apply the file's schema to a single node of that document.
-	schemaData := []byte(`{"type": "object", "properties": {"kind": {"type": "string"}}}`)
+	// whole document, so Validate checks the document around a scoped Node
+	// and Lookup refuses one rather than return the document's schema for
+	// a single node of it.
+	schemaData := []byte(`{
+		"type": "object",
+		"properties": {
+			"kind": {"type": "string"},
+			"spec": {"type": "object", "properties": {"replicas": {"type": "integer"}}}
+		}
+	}`)
 	reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded(schemaData)))
 
-	doc := yamltest.FirstDocument(t, stringtest.Input(`
-		kind: Deployment
-		spec:
-		  replicas: 1
-	`))
-	spec := yamltest.At(t, doc, paths.Root().Child("spec"))
+	t.Run("validates the document around a scoped node", func(t *testing.T) {
+		t.Parallel()
 
-	err := reg.Validate(t.Context(), spec)
-	require.ErrorIs(t, err, schema.ErrScopedDocument)
-	assert.Contains(t, err.Error(), "$.spec")
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
+			kind: Deployment
+			spec:
+			  replicas: 1
+		`))
+		spec := yamltest.At(t, doc, paths.Root().Child("spec"))
 
-	var bound *niceyaml.SourceError
+		require.NoError(t, reg.Validate(t.Context(), spec))
+		require.NoError(t, spec.Validate(t.Context(), reg))
+	})
 
-	require.ErrorAs(t, err, &bound)
-	assert.Same(t, doc.Source(), bound.Source())
+	t.Run("fails on a violation outside the scope", func(t *testing.T) {
+		t.Parallel()
 
-	// The scope refuses through its own Validate too, whether or not the
-	// registry requires a schema.
-	err = spec.Validate(t.Context(), reg)
-	require.ErrorIs(t, err, schema.ErrScopedDocument)
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
+			kind: 1
+			spec:
+			  replicas: 1
+		`))
+		spec := yamltest.At(t, doc, paths.Root().Child("spec"))
 
-	lax := schema.NewRegistry(
-		schema.WithResolvers(schema.Embedded(schemaData)),
-		schema.WithRequireSchema(false),
-	)
-	err = lax.Validate(t.Context(), spec)
-	require.ErrorIs(t, err, schema.ErrScopedDocument)
+		err := spec.Validate(t.Context(), reg)
+		require.Error(t, err)
+		require.NotErrorIs(t, err, schema.ErrScopedDocument)
+		assert.Contains(t, err.Error(), "$.kind")
 
-	_, err = reg.Lookup(t.Context(), spec)
-	require.ErrorIs(t, err, schema.ErrScopedDocument)
+		var bound *niceyaml.SourceError
 
-	// The whole document resolves as before, whichever Node of it reaches
-	// the root.
-	_, err = reg.Lookup(t.Context(), doc)
-	require.NoError(t, err)
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, doc.Source(), bound.Source())
+	})
 
-	_, err = reg.Lookup(t.Context(), spec.Document())
-	require.NoError(t, err)
+	t.Run("binds a violation inside the scope from the root", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
+			kind: Deployment
+			spec:
+			  replicas: many
+		`))
+		spec := yamltest.At(t, doc, paths.Root().Child("spec"))
+
+		var v struct {
+			Replicas int `yaml:"replicas"`
+		}
+
+		err := spec.DecodeInto(t.Context(), &v, niceyaml.WithValidator(reg))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "$.spec.replicas")
+	})
+
+	t.Run("a registry that requires no schema passes a scoped node", func(t *testing.T) {
+		t.Parallel()
+
+		lax := schema.NewRegistry(schema.WithRequireSchema(false))
+
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
+			kind: Deployment
+			spec:
+			  replicas: 1
+		`))
+		spec := yamltest.At(t, doc, paths.Root().Child("spec"))
+
+		require.NoError(t, lax.Validate(t.Context(), spec))
+	})
+
+	t.Run("Lookup refuses a scoped node", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
+			kind: Deployment
+			spec:
+			  replicas: 1
+		`))
+		spec := yamltest.At(t, doc, paths.Root().Child("spec"))
+
+		_, err := reg.Lookup(t.Context(), spec)
+		require.ErrorIs(t, err, schema.ErrScopedDocument)
+		assert.Contains(t, err.Error(), "$.spec")
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, doc.Source(), bound.Source())
+
+		// The whole document resolves, whichever Node of it reaches the
+		// root.
+		_, err = reg.Lookup(t.Context(), doc)
+		require.NoError(t, err)
+
+		_, err = reg.Lookup(t.Context(), spec.Document())
+		require.NoError(t, err)
+	})
 }
 
 func TestRegistry_Lookup_CancelledContext(t *testing.T) {
@@ -222,78 +287,6 @@ func TestRegistry_Lookup_CancelledContext(t *testing.T) {
 		// A registry that does not require a schema passes an unmatched
 		// document, but never a canceled lookup.
 		require.ErrorIs(t, reg.Validate(ctx, doc), context.Canceled)
-	})
-}
-
-func TestRegistry_Document(t *testing.T) {
-	t.Parallel()
-
-	schemaData := []byte(`{
-		"type": "object",
-		"properties": {
-			"kind": {"type": "string"},
-			"spec": {"type": "object", "properties": {"replicas": {"type": "integer"}}}
-		}
-	}`)
-	reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded(schemaData)))
-
-	t.Run("validates the document around a scoped node", func(t *testing.T) {
-		t.Parallel()
-
-		doc := yamltest.FirstDocument(t, stringtest.Input(`
-			kind: Deployment
-			spec:
-			  replicas: 1
-		`))
-		spec := yamltest.At(t, doc, paths.Root().Child("spec"))
-
-		require.NoError(t, spec.Validate(t.Context(), reg.Document()))
-	})
-
-	t.Run("fails on a violation outside the scope", func(t *testing.T) {
-		t.Parallel()
-
-		doc := yamltest.FirstDocument(t, stringtest.Input(`
-			kind: 1
-			spec:
-			  replicas: 1
-		`))
-		spec := yamltest.At(t, doc, paths.Root().Child("spec"))
-
-		err := spec.Validate(t.Context(), reg.Document())
-		require.Error(t, err)
-		require.NotErrorIs(t, err, schema.ErrScopedDocument)
-		assert.Contains(t, err.Error(), "$.kind")
-	})
-
-	t.Run("binds a violation inside the scope from the root", func(t *testing.T) {
-		t.Parallel()
-
-		doc := yamltest.FirstDocument(t, stringtest.Input(`
-			kind: Deployment
-			spec:
-			  replicas: many
-		`))
-		spec := yamltest.At(t, doc, paths.Root().Child("spec"))
-
-		var v struct {
-			Replicas int `yaml:"replicas"`
-		}
-
-		err := spec.DecodeInto(t.Context(), &v, niceyaml.WithValidator(reg.Document()))
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "$.spec.replicas")
-	})
-
-	t.Run("matches Validate on a root", func(t *testing.T) {
-		t.Parallel()
-
-		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: 1`))
-
-		want := reg.Validate(t.Context(), doc)
-		got := reg.Document().Validate(t.Context(), doc)
-		require.Error(t, want)
-		require.EqualError(t, got, want.Error())
 	})
 }
 

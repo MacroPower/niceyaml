@@ -90,11 +90,11 @@ type SelfValidator interface {
 // [Node.At] selects, so a validator given to a scoped decode checks that
 // node and its paths resolve from it. A validator that needs the whole
 // document reaches it through [Node.Document]. A validator may also
-// take the root alone: a [go.jacobcolvin.com/niceyaml/schema.Registry]
-// picks a schema for a whole document and rejects a scoped Node, so a
-// caller that decodes a scoped Node under a registry validates the
-// document around it with the validator
-// [go.jacobcolvin.com/niceyaml/schema.Registry.Document] returns.
+// check the whole document whatever Node it receives: a
+// [go.jacobcolvin.com/niceyaml/schema.Registry] picks a schema for a
+// whole document, so it validates the document around a scoped Node,
+// and a scoped decode under it fails on a violation anywhere in that
+// document.
 //
 // A validator that checks the decoded data
 // reads the node with [Node.Decode], which runs the validators the
