@@ -114,6 +114,21 @@ func TestSplit_DuplicateNewline(t *testing.T) {
 			wantContent: []string{"a: >", ""},
 			wantNumbers: []int{1, 2},
 		},
+		"empty literal scalar with indentation indicator": {
+			input:       "a: |2\n\n\n",
+			wantContent: []string{"a: |2", "", ""},
+			wantNumbers: []int{1, 2, 3},
+		},
+		"empty strip literal scalar with indentation indicator": {
+			input:       "- |1-\n\n",
+			wantContent: []string{"- |1-", ""},
+			wantNumbers: []int{1, 2},
+		},
+		"empty literal scalar with indentation indicator and crlf": {
+			input:       ":\n|1\r\n\r\n",
+			wantContent: []string{":", "|1", ""},
+			wantNumbers: []int{1, 2, 3},
+		},
 	}
 
 	for name, tc := range tcs {

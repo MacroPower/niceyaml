@@ -614,13 +614,15 @@ func updateIndentLevel(prevIndentNum, currentIndentNum, currentLevel int) int {
 	return currentLevel
 }
 
-// isBlockScalarContent reports whether tk is a StringType that follows a block
-// scalar header (Literal/Folded).
+// isBlockScalarContent reports whether tk holds the content that follows a
+// block scalar header (Literal/Folded). The lexer emits that content as a
+// StringType token, or as an InvalidType token when a header with an
+// indentation indicator, such as "|2", finds only blank lines below it.
 //
 // Comments can appear between the header and content, so we traverse the Prev
 // chain.
 func isBlockScalarContent(tk *token.Token) bool {
-	if tk.Type != token.StringType {
+	if tk.Type != token.StringType && tk.Type != token.InvalidType {
 		return false
 	}
 
