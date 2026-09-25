@@ -126,6 +126,31 @@ func TestPattern_Match(t *testing.T) {
 			path:    "./config.yaml",
 			want:    true,
 		},
+		"pattern with dot slash prefix matches a bare path": {
+			pattern: "./configs/*.yaml",
+			path:    "configs/a.yaml",
+			want:    true,
+		},
+		"pattern with dot slash prefix matches a dot slash path": {
+			pattern: "./configs/*.yaml",
+			path:    "./configs/a.yaml",
+			want:    true,
+		},
+		"pattern with repeated separators": {
+			pattern: "configs//*.yaml",
+			path:    "configs/a.yaml",
+			want:    true,
+		},
+		"pattern with trailing separator": {
+			pattern: "configs/",
+			path:    "configs",
+			want:    true,
+		},
+		"pattern with dot slash prefix keeps its depth": {
+			pattern: "./*.yaml",
+			path:    "configs/a.yaml",
+			want:    false,
+		},
 		"wildcard in root after parent traversal": {
 			pattern: "*.yaml",
 			path:    "sub/../config.yaml",
@@ -290,6 +315,11 @@ func TestMatchAny(t *testing.T) {
 		"leading dot slash is dropped": {
 			path:     "repo/.github/workflows/ci.yml",
 			patterns: []string{"./.github/workflows/*.yml"},
+			want:     true,
+		},
+		"repeated separators in a pattern are collapsed": {
+			path:     "repo/.github/workflows/ci.yml",
+			patterns: []string{".github//workflows/*.yml"},
 			want:     true,
 		},
 		"double star prefix is kept": {

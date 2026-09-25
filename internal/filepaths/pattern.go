@@ -14,17 +14,22 @@ var ErrInvalidPattern = errors.New("invalid glob pattern")
 // Pattern represents a validated glob pattern for file path matching.
 // Create instances with [NewPattern] or [MustPattern].
 type Pattern struct {
-	raw string
+	raw  string
+	glob string
 }
 
 // NewPattern creates a [Pattern] from the given glob pattern string.
 // Returns [ErrInvalidPattern] if the pattern syntax is invalid.
+//
+// NewPattern drops a leading "./", repeated separators, and a trailing
+// separator from the pattern, as [Pattern.Match] does for the path, so
+// those spellings do not change what the pattern matches.
 func NewPattern(pattern string) (Pattern, error) {
 	if !doublestar.ValidatePattern(pattern) {
 		return Pattern{}, ErrInvalidPattern
 	}
 
-	return Pattern{raw: pattern}, nil
+	return Pattern{raw: pattern, glob: normalizePattern(pattern)}, nil
 }
 
 // MustPattern creates a [Pattern] from the given glob pattern string.
@@ -47,7 +52,7 @@ func MustPattern(pattern string) Pattern {
 // before matching, so "./config.yaml" and "config.yaml" both match the
 // root-only pattern "*.yaml".
 func (p Pattern) Match(path string) bool {
-	if p.raw == "" || path == "" {
+	if p.glob == "" || path == "" {
 		return false
 	}
 
@@ -55,7 +60,7 @@ func (p Pattern) Match(path string) bool {
 	// accepts some patterns that Match rejects for a multi-segment path,
 	// such as a "{" inside a character class. A pattern Match cannot
 	// interpret matches nothing, which is what a false result says already.
-	matched, _ := doublestar.Match(p.raw, normalizePath(path)) //nolint:errcheck // A pattern error means no match.
+	matched, _ := doublestar.Match(p.glob, normalizePath(path)) //nolint:errcheck // A pattern error means no match.
 
 	return matched
 }
@@ -66,6 +71,27 @@ func (p Pattern) Match(path string) bool {
 // spelling of a path does not decide whether it matches.
 func normalizePath(path string) string {
 	return filepath.ToSlash(filepath.Clean(path))
+}
+
+// normalizePattern returns pattern without a leading "./", repeated
+// separators, or a trailing separator. A cleaned path carries none of
+// them, so a pattern that kept them would match no path. It leaves "."
+// and ".." elements alone, since a glob element before a ".." could stand
+// for any number of directories.
+func normalizePattern(pattern string) string {
+	for strings.HasPrefix(pattern, "./") {
+		pattern = strings.TrimLeft(pattern[2:], "/")
+	}
+
+	for strings.Contains(pattern, "//") {
+		pattern = strings.ReplaceAll(pattern, "//", "/")
+	}
+
+	if len(pattern) > 1 {
+		pattern = strings.TrimSuffix(pattern, "/")
+	}
+
+	return pattern
 }
 
 // String returns the original pattern string.
@@ -106,12 +132,11 @@ func MatchAny(path string, patterns []string) bool {
 }
 
 // anyDepth returns pattern with the "**/" prefix that lets it match at any
-// depth of the tree. Any leading "./" or "/" comes off first, since the
-// path it matches against is cleaned and carries neither, and a pattern
-// that already starts with "**/" comes back unchanged.
+// depth of the tree. It normalizes the pattern as [NewPattern] does and
+// drops a leading "/". A pattern that then starts with "**/" gets no
+// second prefix.
 func anyDepth(pattern string) string {
-	pattern = strings.TrimPrefix(pattern, "./")
-	pattern = strings.TrimPrefix(pattern, "/")
+	pattern = strings.TrimPrefix(normalizePattern(pattern), "/")
 
 	if strings.HasPrefix(pattern, "**/") {
 		return pattern
