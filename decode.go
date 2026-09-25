@@ -1147,13 +1147,15 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig) error {
 		return err
 	}
 
-	err = n.decodeNode(ctx, node, v, cfg.decodeOptions())
+	yamlOpts := n.yamlOptions(cfg.decodeOptions())
+
+	err = n.decodeNode(ctx, node, v, yamlOpts)
 	if err != nil {
 		return err
 	}
 
 	if cfg.selfValidation {
-		return n.Bind(selfValidate(v))
+		return n.Bind(selfValidate(v, n, yamlOpts))
 	}
 
 	return nil
@@ -1175,22 +1177,26 @@ func checkDecodeTarget(v any) error {
 	return nil
 }
 
-// decodeNode decodes node to v with the source's decode options followed by
-// yamlOpts, and binds the error to the source: a YAML error as an [*Error]
-// at the offending token, and any other, such as a canceled context, as it
-// is. A node without
-// content, the body of an empty document, leaves v as it is, which is what
+// yamlOptions returns the go-yaml options for a decode: the source's
+// decode options followed by yamlOpts.
+func (n *Node) yamlOptions(yamlOpts []yaml.DecodeOption) []yaml.DecodeOption {
+	opts := make([]yaml.DecodeOption, 0, len(n.source.decodeOpts)+len(yamlOpts))
+	opts = append(opts, n.source.decodeOpts...)
+
+	return append(opts, yamlOpts...)
+}
+
+// decodeNode decodes node to v with yamlOpts, and binds the error to the
+// source: a YAML error as an [*Error] at the offending token, and any
+// other, such as a canceled context, as it is. A node without content,
+// the body of an empty document, leaves v as it is, which is what
 // [yaml.Unmarshal] does with input that holds no value.
 func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []yaml.DecodeOption) error {
 	if !hasContent(node) {
 		return nil
 	}
 
-	decodeOpts := make([]yaml.DecodeOption, 0, len(n.source.decodeOpts)+len(yamlOpts))
-	decodeOpts = append(decodeOpts, n.source.decodeOpts...)
-	decodeOpts = append(decodeOpts, yamlOpts...)
-
-	dec := yaml.NewDecoder(bytes.NewReader(nil), decodeOpts...)
+	dec := yaml.NewDecoder(bytes.NewReader(nil), yamlOpts...)
 
 	// The decoder registers the anchors of the node it decodes, so an alias
 	// in a node below the body finds an anchor defined elsewhere in the

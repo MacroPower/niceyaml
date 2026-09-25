@@ -495,6 +495,56 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}
 	})
 
+	t.Run("a map key reports the text the document spells it with", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+			want  string
+		}{
+			"float with a trailing zero": {
+				input: "1.50: {price: -1}\n",
+				want:  "1:15: $.'1.50'.price: negative price",
+			},
+			"hexadecimal int": {
+				input: "0x10: {price: -1}\n",
+				want:  "1:15: $.0x10.price: negative price",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				_, err := dd.Decode[map[float64]item](t.Context())
+				require.EqualError(t, err, tc.want)
+			})
+		}
+
+		// A key a merge brings in reports the text of the mapping it
+		// comes from.
+		dd := yamltest.FirstDocument(t, "base: &b {0x10: {price: -1}}\nm: {<<: *b}\n")
+
+		_, err := dd.Decode[map[string]map[float64]item](t.Context())
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+
+		var got []string
+
+		for _, child := range bound.Errors() {
+			got = append(got, child.Error())
+		}
+
+		assert.Equal(t, []string{
+			"1:25: $.base.0x10.price: negative price",
+			"1:25: $.m.0x10.price: negative price",
+		}, got)
+	})
+
 	t.Run("a leaf type validates itself", func(t *testing.T) {
 		t.Parallel()
 

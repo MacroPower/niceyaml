@@ -10,25 +10,26 @@ import (
 	"unsafe"
 
 	"github.com/goccy/go-yaml"
+	"github.com/goccy/go-yaml/ast"
 
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
 // selfValidate runs Validate on every value in the tree of v, a non-nil
-// pointer to a decoded value, that implements [SelfValidator], and
-// returns what they report with the paths in each error rebased under
-// the path of the value in the document: the field name go-yaml decoded
-// it under, the index of a slice or array element, or the key of a map
-// entry. The values below a value validate before it does, and a value
-// validates only when every value below it passed, so a parent that
-// checks a relation between its fields sees fields that hold together.
-// A value whose type decodes itself, through an unmarshaler method,
-// validates itself and nothing below it, since its fields need not
-// mirror the document and the paths under it would point nowhere.
-// Several errors come back joined, one per value that failed. Returns
-// nil when nothing failed.
-func selfValidate(v any) error {
-	w := selfWalker{walking: map[visit]bool{}, done: map[visit]bool{}}
+// pointer to the value n decoded to with opts, that implements
+// [SelfValidator], and returns what they report with the paths in each
+// error rebased under the path of the value in the document: the field
+// name go-yaml decoded it under, the index of a slice or array element,
+// or the key of a map entry as the document spells it. The values below
+// a value validate before it does, and a value validates only when every
+// value below it passed, so a parent that checks a relation between its
+// fields sees fields that hold together. A value whose type decodes
+// itself, through an unmarshaler method, validates itself and nothing
+// below it, since its fields need not mirror the document and the paths
+// under it would point nowhere. Several errors come back joined, one per
+// value that failed. Returns nil when nothing failed.
+func selfValidate(v any, n *Node, opts []yaml.DecodeOption) error {
+	w := selfWalker{node: n, opts: opts, walking: map[visit]bool{}, done: map[visit]bool{}}
 	w.walk(reflect.ValueOf(v), paths.Root())
 
 	switch len(w.errs) {
@@ -47,8 +48,11 @@ func selfValidate(v any) error {
 // there, and the result of each it has walked, so a value two paths
 // share, as an alias makes one, walks once and reports its errors under
 // the first path, while a parent on the second path still learns that
-// the value failed.
+// the value failed. It reads the keys of a map from the node the value
+// decoded from, with the options it decoded with.
 type selfWalker struct {
+	node    *Node
+	opts    []yaml.DecodeOption
 	walking map[visit]bool
 	done    map[visit]bool
 	errs    []error
@@ -241,9 +245,10 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path) bool {
 		// The entries walk in the order of their keys, so the errors come
 		// back in one order however the map iterates. Two keys of one
 		// text, such as 1 and "1", order by their types.
+		names := w.keyNames(base, v.Type().Key())
 		keys := v.MapKeys()
 		slices.SortStableFunc(keys, func(a, b reflect.Value) int {
-			if c := strings.Compare(mapKey(a), mapKey(b)); c != 0 {
+			if c := strings.Compare(mapKey(a, names), mapKey(b, names)); c != 0 {
 				return c
 			}
 
@@ -251,7 +256,7 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path) bool {
 		})
 
 		for _, key := range keys {
-			if !w.walk(v.MapIndex(key), base.Child(mapKey(key))) {
+			if !w.walk(v.MapIndex(key), base.Child(mapKey(key, names))) {
 				ok = false
 			}
 		}
@@ -325,9 +330,143 @@ func fieldName(field reflect.StructField) (string, bool, bool) {
 	return name, slices.Contains(options[1:], "inline"), false
 }
 
-// mapKey returns the path segment for a map key: the string itself, or
-// the text of any other key as the document spells it.
-func mapKey(key reflect.Value) string {
+// keyNames returns the text the document spells each key of the mapping
+// at base with, by the value the key decodes to as type t, so a key such
+// as 0x10 or 1.50 keeps the text a path resolves. A key a `<<` merge key
+// brings in counts, and a key of the mapping itself wins over it, as it
+// does in the decode. The map holds no key a path cannot resolve to, and
+// is empty when no mapping is at base, as for a value the document did
+// not set.
+func (w *selfWalker) keyNames(base paths.Path, t reflect.Type) map[any]string {
+	names := map[any]string{}
+
+	w.collectKeyNames(base, t, names, map[*ast.MappingNode]bool{})
+
+	return names
+}
+
+// collectKeyNames adds the keys of the mapping at the path at, and of
+// the mappings it merges, to names, as [selfWalker.keyNames] describes.
+// The seen set guards against merge cycles.
+func (w *selfWalker) collectKeyNames(
+	at paths.Path, t reflect.Type, names map[any]string, seen map[*ast.MappingNode]bool,
+) {
+	node, err := w.node.base.Join(at).Node(w.node.doc.root)
+	if err != nil {
+		return
+	}
+
+	mapping, ok := unwrapNode(node).(*ast.MappingNode)
+	if !ok || seen[mapping] {
+		return
+	}
+
+	seen[mapping] = true
+
+	// A later merge source wins over an earlier one, and the mapping's
+	// own keys win over both, so the sources go in first, in order.
+	merge := at.Child("<<")
+	for _, entry := range mapping.Values {
+		if entry == nil || entry.Key == nil || !entry.Key.IsMergeKey() {
+			continue
+		}
+
+		if seq, ok := unwrapNode(entry.Value).(*ast.SequenceNode); ok {
+			for i := range seq.Values {
+				w.collectKeyNames(merge.Index(i), t, names, seen)
+			}
+
+			continue
+		}
+
+		w.collectKeyNames(merge, t, names, seen)
+	}
+
+	for _, entry := range mapping.Values {
+		if entry == nil || entry.Key == nil || entry.Key.IsMergeKey() {
+			continue
+		}
+
+		w.addKeyName(entry.Key, t, names)
+	}
+}
+
+// addKeyName decodes key as type t and adds its text to names under the
+// value it decodes to. A key that does not decode, or whose value cannot
+// key a map, adds nothing.
+func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[any]string) {
+	node := keyValueNode(key)
+
+	var name string
+
+	switch n := unwrapNode(node).(type) {
+	case *ast.StringNode:
+		name = n.Value
+	case ast.ScalarNode:
+		tk := n.GetToken()
+		if tk == nil {
+			return
+		}
+
+		name = tk.Value
+
+	default:
+		return
+	}
+
+	decoded := reflect.New(t)
+
+	err := yaml.NodeToValue(node, decoded.Interface(), w.opts...)
+	if err != nil || !decoded.Elem().Comparable() {
+		return
+	}
+
+	names[decoded.Elem().Interface()] = name
+}
+
+// keyValueNode looks through the `?` of an explicit key and the anchors
+// on key, which carry no part of its value, to the node the key decodes
+// from. A tag stays, since it decides how the key decodes.
+func keyValueNode(key ast.MapKeyNode) ast.Node {
+	var node ast.Node = key
+
+	for {
+		switch n := node.(type) {
+		case *ast.MappingKeyNode:
+			node = n.Value
+		case *ast.AnchorNode:
+			node = n.Value
+		default:
+			return node
+		}
+	}
+}
+
+// unwrapNode looks through the anchors and tags on node to the node that
+// carries its content.
+func unwrapNode(node ast.Node) ast.Node {
+	for {
+		switch n := node.(type) {
+		case *ast.AnchorNode:
+			node = n.Value
+		case *ast.TagNode:
+			node = n.Value
+		default:
+			return node
+		}
+	}
+}
+
+// mapKey returns the path segment for a map key: its text in names, as
+// the document spells it, or else the string itself, or the formatted
+// value of any other key.
+func mapKey(key reflect.Value, names map[any]string) string {
+	if key.Comparable() {
+		if name, ok := names[key.Interface()]; ok {
+			return name
+		}
+	}
+
 	if key.Kind() == reflect.String {
 		return key.String()
 	}
