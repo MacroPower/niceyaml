@@ -149,6 +149,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pendingSearch = ""
 		}
 
+	case tea.PasteMsg:
+		// The terminal hands pasted text over as one message rather than
+		// as key presses, so the search prompt reads it here. The theme
+		// picker and the viewport have no use for it.
+		if m.searching {
+			m.searchInput += msg.Content
+		}
+
+		return m, nil
+
 	case tea.KeyPressMsg:
 		// Quit on ctrl+c from every state, including the theme picker and the
 		// search prompt, which otherwise consume every key.

@@ -55,6 +55,28 @@ func TestUpdateSearchInputBackspace(t *testing.T) {
 	}
 }
 
+func TestUpdatePasteIntoSearch(t *testing.T) {
+	t.Parallel()
+
+	m := newModel(&modelOptions{})
+	m.searching = true
+	m.searchInput = "a"
+
+	updated, _ := m.Update(tea.PasteMsg{Content: "bc"})
+	got, ok := updated.(model)
+	require.True(t, ok)
+	assert.Equal(t, "abc", got.searchInput)
+	assert.True(t, got.searching)
+
+	// A paste outside the prompt changes nothing.
+	m.searching = false
+
+	updated, _ = m.Update(tea.PasteMsg{Content: "xyz"})
+	got, ok = updated.(model)
+	require.True(t, ok)
+	assert.Equal(t, "a", got.searchInput)
+}
+
 func TestRevisionLabel(t *testing.T) {
 	t.Parallel()
 
