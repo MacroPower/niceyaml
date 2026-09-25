@@ -872,6 +872,49 @@ func TestNewSourceFromString_ByteOrderMark(t *testing.T) {
 	}
 }
 
+func TestNewSourceFromString_ByteOrderMarkLaterDocument(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		lines string
+		err   string
+	}{
+		"after a document marker": {
+			input: "a: 1\n---\n\ufeffb: 2\n",
+			lines: "a: 1\n---\nb: 2",
+			err:   "3:4: $.b: bad",
+		},
+		"before each document marker": {
+			input: "\ufeff---\na: 1\n\ufeff---\nb: 2\n",
+			lines: "---\na: 1\n---\nb: 2",
+			err:   "4:4: $.b: bad",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input)
+			assert.Equal(t, tc.lines, source.Lines().Content())
+
+			docs, err := source.Documents()
+			require.NoError(t, err)
+			require.Len(t, docs, 2)
+
+			got, err := docs[1].Decode[map[string]any](t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, map[string]any{"b": uint64(2)}, got)
+
+			// The positions count in the text the Source holds, so an
+			// error at the value of b points at it.
+			err = docs[1].Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("b"))))
+			assert.EqualError(t, err, tc.err)
+		})
+	}
+}
+
 func TestSource_Content(t *testing.T) {
 	t.Parallel()
 

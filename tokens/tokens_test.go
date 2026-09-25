@@ -3,6 +3,7 @@ package tokens_test
 import (
 	"fmt"
 	"iter"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -87,6 +88,76 @@ func TestTokenize_NumericEscape(t *testing.T) {
 
 			got := yamltest.DumpTokenOrigins(tokens.Tokenize(tc.input))
 			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestTokenize_ByteOrderMark(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  string
+		// The line and column of the key b, when the input holds one.
+		line, col int
+	}{
+		"start of the stream": {
+			input: "\ufeffa: 1\n",
+			want:  "a: 1\n",
+		},
+		"before a comment": {
+			input: "\ufeff# c\na: 1\n",
+			want:  "# c\na: 1\n",
+		},
+		"after a document marker": {
+			input: "a: 1\n---\n\ufeffb: 2\n",
+			want:  "a: 1\n---\nb: 2\n",
+			line:  3,
+			col:   1,
+		},
+		"after a document marker and a comment": {
+			input: "a: 1\n--- # c\n# d\n\ufeffb: 2\n",
+			want:  "a: 1\n--- # c\n# d\nb: 2\n",
+			line:  4,
+			col:   1,
+		},
+		"before a document marker": {
+			input: "\ufeff---\na: 1\n\ufeff---\n\ufeffb: 2\n",
+			want:  "---\na: 1\n---\nb: 2\n",
+			line:  4,
+			col:   1,
+		},
+		"after a document end marker": {
+			input: "a: 1\n...\n\ufeffb: 2\n",
+			want:  "a: 1\n...\nb: 2\n",
+			line:  3,
+			col:   1,
+		},
+		"inside a document": {
+			input: "a: 1\n\ufeffb: 2\n",
+			want:  "a: 1\n\ufeffb: 2\n",
+		},
+		"after a marker with content": {
+			input: "--- a\n\ufeffb\n",
+			want:  "--- a\n\ufeffb\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tks := tokens.Tokenize(tc.input)
+			assert.Equal(t, tc.want, yamltest.DumpTokenOrigins(tks))
+
+			if tc.line == 0 {
+				return
+			}
+
+			idx := slices.IndexFunc(tks, func(tk *token.Token) bool { return tk.Value == "b" })
+			require.GreaterOrEqual(t, idx, 0)
+			assert.Equal(t, tc.line, tks[idx].Position.Line)
+			assert.Equal(t, tc.col, tks[idx].Position.Column)
 		})
 	}
 }

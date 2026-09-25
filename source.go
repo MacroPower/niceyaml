@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"os"
 	"slices"
-	"strings"
 	"sync"
 
 	"github.com/goccy/go-yaml"
@@ -190,15 +189,11 @@ func NewSourceFromBytes(data []byte, opts ...SourceOption) *Source {
 	return NewSourceFromString(string(data), opts...)
 }
 
-// byteOrderMark is the UTF-8 byte order mark.
-const byteOrderMark = "\ufeff"
-
 // NewSourceFromString creates a new [*Source] from a YAML string using
-// [tokens.Tokenize]. A byte order mark at the start of src, which YAML
-// allows in front of a stream, is dropped, so the Source neither holds
-// it nor reads it as part of the first key.
+// [tokens.Tokenize]. The Source holds the text without the byte order
+// marks Tokenize drops, so no key reads a mark as part of its text.
 func NewSourceFromString(src string, opts ...SourceOption) *Source {
-	tks := tokens.Tokenize(strings.TrimPrefix(src, byteOrderMark))
+	tks := tokens.Tokenize(src)
 
 	return NewSourceFromTokens(tks, opts...)
 }

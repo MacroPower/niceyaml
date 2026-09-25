@@ -21,6 +21,12 @@ import (
 // rest of the scalar never reaches the stream. [SplitDocuments] cuts the
 // stream into one stream per document.
 //
+// Tokenize drops a UTF-8 byte order mark where YAML allows one: at the
+// start of a line before the content of a document, and in front of a
+// "---" or "..." marker. The lexer would read the mark as text and put it
+// in the first key. Every position names a rune of the text without
+// those marks.
+//
 // Every token's Line, Column, and Offset name the rune where its text
 // starts, counting lines, columns, and offsets from 1 and offsets in runes.
 // The Origin may open with whitespace and line endings before that rune.
@@ -34,6 +40,8 @@ import (
 // block scalar, and Tokenize moves each such token to where the source
 // holds its text.
 func Tokenize(src string) token.Tokens {
+	src = dropByteOrderMarks(src)
+
 	tks := lexer.Tokenize(src)
 	if len(tks) == 0 {
 		if src == "" {
@@ -81,6 +89,60 @@ func Tokenize(src string) token.Tokens {
 	repairPastEnd(src, tks)
 
 	return tks
+}
+
+// byteOrderMark is the UTF-8 byte order mark.
+const byteOrderMark = "\ufeff"
+
+// dropByteOrderMarks returns src without the byte order marks that open
+// a line before the content of a document, or that stand in front of a
+// document marker. A document starts at the start of src and after a
+// marker line that holds nothing but the marker and a comment. Blank and
+// comment lines keep the document before its content.
+func dropByteOrderMarks(src string) string {
+	var sb strings.Builder
+
+	sb.Grow(len(src))
+
+	prefix := true
+
+	for line := range strings.SplitAfterSeq(src, "\n") {
+		if rest, ok := strings.CutPrefix(line, byteOrderMark); ok && (prefix || isDocumentMarker(rest)) {
+			line = rest
+		}
+
+		sb.WriteString(line)
+
+		switch {
+		case isDocumentMarker(line):
+			prefix = isBlankOrComment(line[len("---"):])
+		case isBlankOrComment(line):
+		default:
+			prefix = false
+		}
+	}
+
+	return sb.String()
+}
+
+// isDocumentMarker reports whether line opens with a "---" or "..."
+// marker followed by a space, a tab, or the end of the line.
+func isDocumentMarker(line string) bool {
+	if !strings.HasPrefix(line, "---") && !strings.HasPrefix(line, "...") {
+		return false
+	}
+
+	rest := line[len("---"):]
+
+	return rest == "" || strings.ContainsAny(rest[:1], " \t\r\n")
+}
+
+// isBlankOrComment reports whether line holds only whitespace, or a
+// comment after it.
+func isBlankOrComment(line string) bool {
+	text := strings.TrimLeft(line, " \t")
+
+	return strings.TrimRight(text, "\r\n") == "" || strings.HasPrefix(text, "#")
 }
 
 // repairPastEnd moves every token of tks that holds no text and sits past
