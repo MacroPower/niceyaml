@@ -325,36 +325,41 @@ func TestError_Location(t *testing.T) {
 	pos := position.New(1, 4)
 	rng := position.NewRange(position.New(1, 2), position.New(1, 5))
 
-	// The location an Error reports through its accessors. Fails the test
-	// when more than one of them reports.
-	location := func(t *testing.T, e *niceyaml.Error) any {
+	// The accessors of an Error report a path, and a position or a range,
+	// each nil here when the accessor reports false.
+	type located struct {
+		path any
+		pos  any
+		rng  any
+	}
+
+	// Reads the accessors of e. Fails the test when e reports both a
+	// position and a range.
+	location := func(t *testing.T, e *niceyaml.Error) located {
 		t.Helper()
 
-		var (
-			got   any
-			found int
-		)
+		var got located
 
 		if p, ok := e.Path(); ok {
-			got, found = p, found+1
+			got.path = p
 		}
 
 		if p, ok := e.Position(); ok {
-			got, found = p, found+1
+			got.pos = p
 		}
 
 		if r, ok := e.Range(); ok {
-			got, found = r, found+1
+			got.rng = r
 		}
 
-		require.LessOrEqual(t, found, 1, "an Error reports at most one location")
+		require.False(t, got.pos != nil && got.rng != nil, "an Error reports a position or a range, not both")
 
 		return got
 	}
 
 	tcs := map[string]struct {
 		err  *niceyaml.Error
-		want any
+		want located
 	}{
 		"nil": {
 			err: nil,
@@ -364,52 +369,70 @@ func TestError_Location(t *testing.T) {
 		},
 		"path": {
 			err:  niceyaml.NewError("test", niceyaml.AtPath(path)),
-			want: path,
+			want: located{path: path},
 		},
 		"key": {
 			err:  niceyaml.NewError("test", niceyaml.AtPath(path.Key())),
-			want: path.Key(),
+			want: located{path: path.Key()},
 		},
 		"key replaces a path": {
 			err:  niceyaml.NewError("test", niceyaml.AtPath(path), niceyaml.AtPath(path.Key())),
-			want: path.Key(),
+			want: located{path: path.Key()},
 		},
 		"position": {
 			err:  niceyaml.NewError("test", niceyaml.AtPosition(pos)),
-			want: pos,
+			want: located{pos: pos},
 		},
 		"range": {
 			err:  niceyaml.NewError("test", niceyaml.AtRange(rng)),
-			want: rng,
+			want: located{rng: rng},
 		},
-		"last option wins": {
+		"a path and a position combine": {
 			err:  niceyaml.NewError("test", niceyaml.AtPath(path), niceyaml.AtPosition(pos)),
-			want: pos,
+			want: located{path: path, pos: pos},
+		},
+		"a path and a range combine in either order": {
+			err:  niceyaml.NewError("test", niceyaml.AtRange(rng), niceyaml.AtPath(path)),
+			want: located{path: path, rng: rng},
+		},
+		"a range replaces a position": {
+			err:  niceyaml.NewError("test", niceyaml.AtPosition(pos), niceyaml.AtRange(rng)),
+			want: located{rng: rng},
+		},
+		"a position replaces a range": {
+			err:  niceyaml.NewError("test", niceyaml.AtRange(rng), niceyaml.AtPosition(pos)),
+			want: located{pos: pos},
 		},
 		"path on a wrapped error": {
 			err: niceyaml.WrapError(
 				fmt.Errorf("context: %w", niceyaml.NewError("test", niceyaml.AtPath(path))),
 			),
-			want: path,
+			want: located{path: path},
 		},
 		"position on a wrapped error": {
 			err: niceyaml.WrapError(
 				fmt.Errorf("context: %w", niceyaml.NewError("test", niceyaml.AtPosition(pos))),
 			),
-			want: pos,
+			want: located{pos: pos},
 		},
 		"range on a wrapped error": {
 			err: niceyaml.WrapError(
 				fmt.Errorf("context: %w", niceyaml.NewError("test", niceyaml.AtRange(rng))),
 			),
-			want: rng,
+			want: located{rng: rng},
+		},
+		"a path and a range on a wrapped error": {
+			err: niceyaml.WrapError(
+				fmt.Errorf("context: %w", niceyaml.NewError("test", niceyaml.AtPath(path), niceyaml.AtRange(rng))),
+			),
+			want: located{path: path, rng: rng},
 		},
 		"own location wins over a wrapped one": {
 			err: niceyaml.WrapError(
 				niceyaml.NewError("test", niceyaml.AtPath(path)),
 				niceyaml.AtPosition(pos),
 			),
-			want: pos,
+			want: located{pos: pos},
 		},
 	}
 
@@ -417,7 +440,10 @@ func TestError_Location(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, location(t, tc.err))
+			got := location(t, tc.err)
+			assert.Equal(t, tc.want.path, got.path)
+			assert.Equal(t, tc.want.pos, got.pos)
+			assert.Equal(t, tc.want.rng, got.rng)
 		})
 	}
 }
@@ -4784,6 +4810,87 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 
 		_, ok := bound.Path()
 		assert.False(t, ok)
+	})
+
+	t.Run("a path beside a range names the value and binds at the range", func(t *testing.T) {
+		t.Parallel()
+
+		// The key "b" on line 2, not the value the path selects.
+		rng := position.NewRange(position.New(1, 2), position.New(1, 3))
+		bound := bind(t, niceyaml.NewError("bad", niceyaml.AtPath(bPath), niceyaml.AtRange(rng)))
+
+		assert.Equal(t, "x.yaml:2:3: $.a.b: bad", bound.Error())
+		assert.Equal(t, "bad", bound.Message())
+
+		p, ok := bound.Path()
+		require.True(t, ok)
+		assert.Equal(t, bPath, p)
+
+		got, ok := bound.Range()
+		require.True(t, ok)
+		assert.Equal(t, rng, got)
+
+		// The excerpt marks the one character of the range, not the
+		// whole value the path selects.
+		excerpt, ok := bound.Excerpt(0)
+		require.True(t, ok)
+		assert.Equal(t, stringtest.JoinLF(
+			"   2 |   b: 1",
+			"     |   ^",
+		), excerpt.String())
+	})
+
+	t.Run("a path beside a position binds at the position", func(t *testing.T) {
+		t.Parallel()
+
+		bound := bind(t, niceyaml.NewError("bad", niceyaml.AtPath(bPath), niceyaml.AtPosition(position.New(1, 2))))
+
+		assert.Equal(t, "x.yaml:2:3: $.a.b: bad", bound.Error())
+
+		p, ok := bound.Path()
+		require.True(t, ok)
+		assert.Equal(t, bPath, p)
+
+		got, ok := bound.Range()
+		require.True(t, ok)
+		assert.Equal(t, position.New(1, 2), got.Start)
+	})
+
+	t.Run("a range locates the error whether or not the path resolves", func(t *testing.T) {
+		t.Parallel()
+
+		rng := position.NewRange(position.New(1, 2), position.New(1, 3))
+		nope := paths.Root().Child("nope")
+		bound := bind(t, niceyaml.NewError("bad", niceyaml.AtPath(nope), niceyaml.AtRange(rng)))
+
+		require.NoError(t, bound.Unresolved())
+		assert.Equal(t, "x.yaml:2:3: $.nope: bad", bound.Error())
+
+		p, ok := bound.Path()
+		require.True(t, ok)
+		assert.Equal(t, nope, p)
+
+		got, ok := bound.Range()
+		require.True(t, ok)
+		assert.Equal(t, rng, got)
+	})
+
+	t.Run("a rebased path beside a range joins the base and keeps the range", func(t *testing.T) {
+		t.Parallel()
+
+		rng := position.NewRange(position.New(1, 2), position.New(1, 3))
+		inner := niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("b")), niceyaml.AtRange(rng))
+		bound := bind(t, niceyaml.Rebase(inner, paths.Root().Child("a")))
+
+		assert.Equal(t, "x.yaml:2:3: $.a.b: bad", bound.Error())
+
+		p, ok := bound.Path()
+		require.True(t, ok)
+		assert.Equal(t, bPath, p)
+
+		got, ok := bound.Range()
+		require.True(t, ok)
+		assert.Equal(t, rng, got)
 	})
 
 	t.Run("a rebased path joins the base", func(t *testing.T) {

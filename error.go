@@ -73,20 +73,28 @@ var (
 
 // Error is an error that points at a location in a YAML document.
 //
-// The location is a [paths.Path], a [position.Position], or a
-// [position.Range], set with [AtPath], [AtPosition], or [AtRange].
-// An Error holds one, and the last of those options given wins.
-// [Error.Path], [Error.Position], and [Error.Range] each return the
-// location when it is of that type, so a caller that wants the path
-// reads it without a type switch:
+// The location is a [paths.Path], set with [AtPath], a
+// [position.Position] or a [position.Range], set with [AtPosition] or
+// [AtRange], or a path and one of the other two. A path names the value
+// the error is about, and a position or a range names the characters at
+// fault. An Error with both reports the path in its message and binds at
+// the position or the range, so a check that knows the value and the
+// exact characters inside it, such as a rule on one character of a
+// string, names the value and highlights the characters at once. The
+// last of AtPosition and AtRange given wins. [Error.Path],
+// [Error.Position], and [Error.Range] each return the part of the
+// location of that type:
 //
 //	if path, ok := err.Path(); ok {
-//		// The error points at path.
+//		// The error is about the value at path.
 //	}
 //
 // A path resolves within one document of a source, from the [Node] that
 // binds the Error, whether its own methods and validators produced the
-// Error or [Node.Bind] bound one built elsewhere.
+// Error or [Node.Bind] bound one built elsewhere. An Error that carries
+// a position or a range as well binds there, and the path is not
+// resolved, so it names the value in the message and in
+// [SourceError.Path] whether or not the document holds it.
 //
 // An Error carries what a producer knows and nothing about presentation. A
 // validator that knows a path uses [AtPath] and need not hold the source.
@@ -112,14 +120,16 @@ var (
 // Create instances with [NewError] or [WrapError].
 type Error struct {
 	err error
-	// The location: a paths.Path, a position.Position, or a position.Range,
-	// or nil when none is set.
+	// The position or the range: a position.Position or a position.Range,
+	// or nil when neither is set.
 	loc    any
 	errors []error
+	// The path, when hasPath, since the root is a path like any other.
+	path paths.Path
 	// The path the paths under the Error are written from, which Rebase
-	// sets, and whether it is set at all, since the root is a base like
-	// any other.
+	// sets, when rebased, since the root is a base like any other.
 	base    paths.Path
+	hasPath bool
 	rebased bool
 }
 
@@ -221,8 +231,9 @@ func Rebase(err error, base paths.Path) error {
 	return &Error{err: err, base: base, rebased: true}
 }
 
-// ErrorOption configures an [Error]. An At option sets the location of
-// the Error, and the last one given wins. [WithErrors] adds nested errors.
+// ErrorOption configures an [Error]. [AtPath] sets its path, [AtPosition]
+// or [AtRange] sets its position or range, and the last of those two
+// given wins. [WithErrors] adds nested errors.
 //
 // Available options:
 //   - [AtPath]
@@ -231,13 +242,14 @@ func Rebase(err error, base paths.Path) error {
 //   - [WithErrors]
 type ErrorOption func(e *Error)
 
-// AtPath is an [ErrorOption] that sets the YAML path where the error
-// occurred as the location of the [Error], replacing any location set
-// before it. The error points at the node the path selects, which for a
-// mapping entry is its value, so [SourceError.Excerpt] highlights the
-// value. A path from [paths.Path.Key] points at the key of the entry
-// instead, which suits an error about the key itself, such as an unknown
-// field:
+// AtPath is an [ErrorOption] that sets the YAML path of the value the
+// error is about, replacing a path set before it. The error points at
+// the node the path selects, which for a mapping entry is its value, so
+// [SourceError.Excerpt] highlights the value, unless [AtPosition] or
+// [AtRange] narrows the location to the characters at fault, in which
+// case the path names the value in the message alone. A path from
+// [paths.Path.Key] points at the key of the entry instead, which suits
+// an error about the key itself, such as an unknown field:
 //
 //	niceyaml.NewError("unknown field", niceyaml.AtPath(paths.Root().Child("spec", "foo").Key()))
 //
@@ -248,16 +260,17 @@ type ErrorOption func(e *Error)
 // [Source.Bind], and a scoped Node joins it under its own path again.
 func AtPath(p paths.Path) ErrorOption {
 	return func(e *Error) {
-		e.loc = p
+		e.path, e.hasPath = p, true
 	}
 }
 
 // AtPosition is an [ErrorOption] that sets the 0-indexed position where
-// the error occurred as the location of the [Error], replacing any
-// location set before it. The position is in the coordinates of the lines
-// [Source.Lines] returns, where line 0 is line 1 of the text.
-// [SourceError.Excerpt] highlights the content of the token at that
-// position. A producer that holds a go-yaml token converts it with
+// the error occurred, replacing a position or a range set before it. The
+// position is in the coordinates of the lines [Source.Lines] returns,
+// where line 0 is line 1 of the text. [SourceError.Excerpt] highlights
+// the content of the token at that position. A path from [AtPath] on the
+// same Error names the value in the message, and the position locates
+// the error. A producer that holds a go-yaml token converts it with
 // [position.NewFromToken], and one that holds none names the position on
 // its own.
 func AtPosition(p position.Position) ErrorOption {
@@ -278,13 +291,19 @@ func atToken(tk *token.Token) ErrorOption {
 }
 
 // AtRange is an [ErrorOption] that sets the 0-indexed range the error
-// covers as the location of the [Error], replacing any location set
-// before it. The range is in the coordinates of the view [Source.Lines]
-// returns, where line 0 is line 1 of the text. [SourceError.Excerpt]
-// highlights the whole range rather than one token, so it is the option
-// for a check that knows the columns an error covers, such as one that
-// runs on rendered lines. A range that ends before its start covers
-// nothing, so it binds as the empty range at its start.
+// covers, replacing a position or a range set before it. The range is in
+// the coordinates of the view [Source.Lines] returns, where line 0 is
+// line 1 of the text. [SourceError.Excerpt] highlights the whole range
+// rather than one token, so it is the option for a check that knows the
+// columns an error covers, such as one that runs on rendered lines. A
+// path from [AtPath] on the same Error names the value in the message,
+// and the range locates the error, so a check on the characters inside a
+// value names the value and highlights the characters:
+//
+//	niceyaml.NewError("invalid character", niceyaml.AtPath(namePath), niceyaml.AtRange(charRange))
+//
+// A range that ends before its start covers nothing, so it binds as the
+// empty range at its start.
 func AtRange(r position.Range) ErrorOption {
 	return func(e *Error) {
 		e.loc = r
@@ -330,21 +349,21 @@ func (e *Error) Error() string {
 	case e.rebased:
 		msg = e.message()
 
-		if p, ok := e.location().(paths.Path); ok {
-			msg = prefix(p.String()+":", msg)
+		if l := e.location(); l.hasPath {
+			msg = prefix(l.path.String()+":", msg)
 		}
 
 		return msg
 
-	case e.hasPosition():
+	case e.hasLocation():
 		msg = e.message()
 
 	case e.err != nil:
 		msg = e.err.Error()
 	}
 
-	if p, ok := e.loc.(paths.Path); ok {
-		msg = prefix(p.String()+":", msg)
+	if e.hasPath {
+		msg = prefix(e.path.String()+":", msg)
 	}
 
 	return msg
@@ -397,38 +416,64 @@ func (e *Error) nested() []error {
 	return out
 }
 
+// locus is the location an [Error] carries: a path when hasPath, a
+// [position.Position] or a [position.Range] in loc, or both. The zero
+// locus is no location.
+type locus struct {
+	loc     any
+	path    paths.Path
+	hasPath bool
+}
+
+// rebase returns l with base in front of its path. A locus with no path
+// comes back as it is, since a base moves paths alone.
+func (l locus) rebase(base paths.Path) locus {
+	if l.hasPath {
+		l.path = base.Join(l.path)
+	}
+
+	return l
+}
+
+// locus returns the location e carries itself, without looking through
+// its cause chain or applying its base.
+func (e *Error) locus() locus {
+	return locus{loc: e.loc, path: e.path, hasPath: e.hasPath}
+}
+
 // located returns the location of e: its own when it has one, otherwise
 // that of the nearest located Error along its cause chain, looking
 // through foreign wrapping, with the base of every Error from [Rebase] on
 // the way joined in front of a path. An Error from Rebase with no located
 // Error below it is located at its base. Reports false when the chain
 // holds none.
-func (e *Error) located() (any, bool) {
-	if e.hasPosition() {
-		if p, isPath := e.loc.(paths.Path); isPath && e.rebased {
-			return e.base.Join(p), true
+func (e *Error) located() (locus, bool) {
+	if e.hasLocation() {
+		l := e.locus()
+		if e.rebased {
+			l = l.rebase(e.base)
 		}
 
-		return e.loc, true
+		return l, true
 	}
 
 	inner := nextError(e.err)
 	if inner != nil {
-		loc, ok := inner.located()
+		l, ok := inner.located()
 		if ok {
-			if p, isPath := loc.(paths.Path); isPath && e.rebased {
-				loc = e.base.Join(p)
+			if e.rebased {
+				l = l.rebase(e.base)
 			}
 
-			return loc, true
+			return l, true
 		}
 	}
 
 	if e.rebased {
-		return e.base, true
+		return locus{path: e.base, hasPath: true}, true
 	}
 
-	return nil, false
+	return locus{}, false
 }
 
 // nextError returns the nearest [*Error] along the cause chain of err: err
@@ -457,9 +502,10 @@ func nextError(err error) *Error {
 	return nil
 }
 
-// hasPosition reports whether e carries a location of its own.
-func (e *Error) hasPosition() bool {
-	return e.loc != nil
+// hasLocation reports whether e carries a location of its own: a path, a
+// position, or a range.
+func (e *Error) hasLocation() bool {
+	return e.hasPath || e.loc != nil
 }
 
 // Unwrap returns the underlying errors for [errors.Is] and [errors.As]. A
@@ -506,49 +552,49 @@ func (e *Error) Errors() []error {
 // around a located Error reports that location, and a path comes back
 // with the base of every [Rebase] on the way joined in front. A nil Error
 // has none.
-func (e *Error) location() any {
+func (e *Error) location() locus {
 	if e == nil {
-		return nil
+		return locus{}
 	}
 
-	loc, ok := e.located()
+	l, ok := e.located()
 	if !ok {
-		return nil
+		return locus{}
 	}
 
-	return loc
+	return l
 }
 
-// Path returns the [paths.Path] the [Error] points at and true, or the
-// zero Path and false when the Error carries a position, a range, or no
-// location. The location is the one [AtPath] set on the Error itself or
-// on the nearest located Error along its cause chain, so an Error built
-// with [WrapError] around a located Error reports that location, with
-// the base of every [Rebase] on the way joined in front. A nil Error has
-// none.
+// Path returns the [paths.Path] the [Error] is about and true, or the
+// zero Path and false when the Error carries none. The location is the
+// one [AtPath] set on the Error itself or on the nearest located Error
+// along its cause chain, so an Error built with [WrapError] around a
+// located Error reports that location, with the base of every [Rebase]
+// on the way joined in front. An Error that carries a position or a
+// range beside the path reports both. A nil Error has none.
 func (e *Error) Path() (paths.Path, bool) {
-	p, ok := e.location().(paths.Path)
+	l := e.location()
 
-	return p, ok
+	return l.path, l.hasPath
 }
 
 // Position returns the [position.Position] the [Error] points at and
-// true, or the zero Position and false when the Error carries a path, a
-// range, or no location. It looks through wrapping as [Error.Path] does.
+// true, or the zero Position and false when the Error carries a range or
+// no position. It looks through wrapping as [Error.Path] does.
 func (e *Error) Position() (position.Position, bool) {
-	p, ok := e.location().(position.Position)
+	p, ok := e.location().loc.(position.Position)
 
 	return p, ok
 }
 
 // Range returns the [position.Range] the [Error] covers and true, or the
-// zero Range and false when the Error carries a path, a position, or no
-// location. It looks through wrapping as [Error.Path] does. The range is
-// the one [AtRange] set, in the coordinates of [Source.Lines];
+// zero Range and false when the Error carries a position or no range. It
+// looks through wrapping as [Error.Path] does. The range is the one
+// [AtRange] set, in the coordinates of [Source.Lines];
 // [SourceError.Range] returns the range a location of any kind resolved
 // to once the Error is bound.
 func (e *Error) Range() (position.Range, bool) {
-	r, ok := e.location().(position.Range)
+	r, ok := e.location().loc.(position.Range)
 
 	return r, ok
 }
@@ -579,27 +625,30 @@ type location struct {
 	pos position.Position
 }
 
-// locate resolves loc, the location of an [Error], and returns the node
-// it is bound to: a range or a position as it is, and the token a path
-// resolves to in the document, at the position of the token, with the
-// base of b in front of the path. The node is the one b binds with, or,
-// when b routes, the root of the document [binder.route] picks for the
-// location. A nil loc is errUnlocated, and a path bound where no
-// document resolves it is [ErrPathNeedsDocument].
-func locate(b binder, loc any) (location, *Node, error) {
-	switch loc := loc.(type) {
+// locate resolves l, the location of an [Error], and returns the node it
+// is bound to: a range or a position as it is, and otherwise the token
+// the path resolves to in the document, at the position of the token,
+// with the base of b in front of the path. A path beside a range or a
+// position names the value in the message and is not resolved, so a
+// range locates the error whether or not the document holds the path.
+// The node is the one b binds with, or, when b routes, the root of the
+// document [binder.route] picks for the location. An empty l is
+// errUnlocated, and a path bound where no document resolves it is
+// [ErrPathNeedsDocument].
+func locate(b binder, l locus) (location, *Node, error) {
+	switch loc := l.loc.(type) {
 	case position.Range:
 		return location{pos: loc.Start, rng: &loc}, b.nodeAt(loc.Start.Line), nil
 
 	case position.Position:
 		return location{pos: loc}, b.nodeAt(loc.Line), nil
-
-	case paths.Path:
-		return locatePath(b, b.base.Join(loc))
-
-	default:
-		return location{}, b.node, errUnlocated
 	}
+
+	if l.hasPath {
+		return locatePath(b, b.base.Join(l.path))
+	}
+
+	return location{}, b.node, errUnlocated
 }
 
 // locatePath resolves path from the node b binds with, or from the root
@@ -807,7 +856,7 @@ func isBound(err error) bool {
 			return x != nil
 
 		case *Error:
-			if x == nil || x.loc != nil || len(x.nested()) > 0 {
+			if x == nil || x.hasLocation() || len(x.nested()) > 0 {
 				return false
 			}
 
@@ -823,13 +872,13 @@ func isBound(err error) bool {
 }
 
 // anchor is the error along a cause chain that carries the location, and
-// the location it carries: a [paths.Path], with the base of every Error
-// from [Rebase] above it joined in front, a [position.Position], or a
-// [position.Range], or nil for a [*SourceError], which resolved its
-// location already. The zero anchor is a chain that holds none.
+// the location it carries, with the base of every Error from [Rebase]
+// above it joined in front of its path, or the zero locus for a
+// [*SourceError], which resolved its location already. The zero anchor
+// is a chain that holds none.
 type anchor struct {
 	err error
-	loc any
+	locus
 }
 
 // anchorOf returns the anchor of err: the first located [*Error] along
@@ -853,25 +902,28 @@ func anchorOf(err error) anchor {
 			return anchor{}
 		}
 
-		if x.loc != nil {
-			if p, ok := x.loc.(paths.Path); ok && x.rebased {
-				return anchor{err: x, loc: x.base.Join(p)}
+		if x.hasLocation() {
+			l := x.locus()
+			if x.rebased {
+				l = l.rebase(x.base)
 			}
 
-			return anchor{err: x, loc: x.loc}
+			return anchor{err: x, locus: l}
 		}
 
 		a := anchorOf(x.err)
 		if a.err != nil {
-			if p, ok := a.loc.(paths.Path); ok && x.rebased {
-				a.loc = x.base.Join(p)
+			if x.rebased {
+				a.locus = a.rebase(x.base)
 			}
 
 			return a
 		}
 
 		if x.rebased {
-			return anchor{err: x, loc: x.base}
+			at := locus{path: x.base, hasPath: true}
+
+			return anchor{err: x, locus: at}
 		}
 
 		return anchor{}
@@ -893,7 +945,7 @@ func newSourceError(err error, b binder) *SourceError {
 
 	switch a := found.err.(type) { //nolint:errorlint // The anchor itself, found by the walk.
 	case *Error:
-		e.loc, e.node, e.locErr = locate(b, found.loc)
+		e.loc, e.node, e.locErr = locate(b, found.locus)
 
 	case *SourceError:
 		// The error wraps a binding, so it is that binding with more
@@ -1058,14 +1110,15 @@ func (e *SourceError) Message() string {
 	return e.text()
 }
 
-// Path returns the [paths.Path] the bound error points at and true, or
-// the zero Path and false when it carries a position, a range, or no
-// location. It is the path [Error.Path] reports for the [*Error] that
-// gave the binding its location, with the base of every [Rebase] on the
-// way joined in front, so an error bound through a scoped [Node]
-// reports the path as the error wrote it, from the scope. A binding that
-// wraps another reports the path of the one it wraps. A nil SourceError
-// has none.
+// Path returns the [paths.Path] the bound error is about and true, or the
+// zero Path and false when it carries none. It is the path [Error.Path]
+// reports for the [*Error] that gave the binding its location, with the
+// base of every [Rebase] on the way joined in front, so an error bound
+// through a scoped [Node] reports the path as the error wrote it, from
+// the scope. An error that carries a range or a position beside its path
+// binds at that location and reports the path as written, resolved or
+// not. A binding that wraps another reports the path of the one it
+// wraps. A nil SourceError has none.
 func (e *SourceError) Path() (paths.Path, bool) {
 	if e == nil {
 		return paths.Path{}, false
@@ -1077,9 +1130,7 @@ func (e *SourceError) Path() (paths.Path, bool) {
 		return inner.Path()
 	}
 
-	p, ok := found.loc.(paths.Path)
-
-	return p, ok
+	return found.path, found.hasPath
 }
 
 // Unwrap returns the error the [SourceError] was created from. A nil
