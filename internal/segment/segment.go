@@ -96,16 +96,16 @@ func samePosition(a, b *token.Position) bool {
 }
 
 // ContentSpan returns the columns of the part's content relative to the
-// segment start, excluding leading and trailing spaces. The span is empty
-// when the part holds only spaces or the segment has no part.
+// segment start, excluding leading and trailing spaces and tabs. The span
+// is empty when the part holds only whitespace or the segment has no part.
 func (s Segment) ContentSpan() position.Span {
 	if s.part == nil {
 		return position.Span{}
 	}
 
 	origin := tokens.TrimLineEnding(s.part.Origin)
-	leading := len(origin) - len(strings.TrimLeft(origin, " "))
-	trailing := len(origin) - len(strings.TrimRight(origin, " "))
+	leading := len(origin) - len(strings.TrimLeft(origin, " \t"))
+	trailing := len(origin) - len(strings.TrimRight(origin, " \t"))
 
 	end := s.width - trailing
 	if end < leading {

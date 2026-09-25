@@ -129,7 +129,9 @@ func TestSegment_ContentSpan(t *testing.T) {
 		"trailing spaces":    {origin: "value   \n", want: [2]int{0, 5}},
 		"both sides":         {origin: " value  \r\n", want: [2]int{1, 6}},
 		"spaces only":        {origin: "    \n", want: [2]int{4, 4}},
-		"tabs are content":   {origin: "\tvalue", want: [2]int{0, 6}},
+		"leading tab":        {origin: "\tvalue", want: [2]int{1, 6}},
+		"trailing tab":       {origin: "value\t\n", want: [2]int{0, 5}},
+		"tab inside content": {origin: "a\tb", want: [2]int{0, 3}},
 		"multi-byte content": {origin: " 日本 ", want: [2]int{1, 3}},
 	}
 
