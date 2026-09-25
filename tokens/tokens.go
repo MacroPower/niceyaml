@@ -94,7 +94,7 @@ func repairPastEnd(src string, tks token.Tokens) {
 	var line, col, offset int
 
 	for _, tk := range tks {
-		if tk == nil || tk.Position == nil || tk.Origin != "" || tk.Position.Offset <= runes {
+		if tk == nil || tk.Position == nil || strings.Trim(tk.Origin, " \t\r\n") != "" || tk.Position.Offset <= runes {
 			continue
 		}
 

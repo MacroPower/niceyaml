@@ -124,8 +124,10 @@ func TestTokenize_EmptyContentPastEnd(t *testing.T) {
 	// The lexer places the empty content of a block scalar that keeps
 	// its trailing lines on the line after the header. When the header
 	// ends the file, that line does not exist, and the token moves to
-	// the end of the header's line. A line the lexer dropped, such as a
-	// lone "!", still exists, and the token stays on it.
+	// the end of the header's line. Content of blank lines holds no text
+	// either, so when those lines end the file, the token moves to the
+	// end of the last line. A line the lexer dropped, such as a lone "!",
+	// still exists, and the token stays on it.
 	tcs := map[string]struct {
 		input  string
 		line   int
@@ -137,6 +139,11 @@ func TestTokenize_EmptyContentPastEnd(t *testing.T) {
 		"sequence entry":            {input: "- >+\n", line: 1, col: 5, offset: 5},
 		"second header ends it":     {input: "x: \"\u00e9\"\nk: |+\n", line: 2, col: 6, offset: 13},
 		"dropped line follows":      {input: "a: |+\n!", line: 2, col: 1, offset: 7},
+		"blank line ends the file":  {input: "a: |+\n\n", line: 2, col: 1, offset: 7},
+		"blank lines end the file":  {input: "a: |+\n\n\n", line: 3, col: 1, offset: 8},
+		"blank crlf line ends it":   {input: "a: |+\r\n\r\n", line: 2, col: 1, offset: 8},
+		"spaces end the file":       {input: "a: >+\n  \n", line: 2, col: 3, offset: 9},
+		"clipped blank line ends":   {input: "a: |\n\n", line: 2, col: 1, offset: 6},
 		"key follows":               {input: "a: |+\nb: 1\n", line: 2, col: 1, offset: 7},
 	}
 
@@ -147,7 +154,7 @@ func TestTokenize_EmptyContentPastEnd(t *testing.T) {
 			var empty *token.Token
 
 			for _, tk := range tokens.Tokenize(tc.input) {
-				if tk.Origin == "" && empty == nil {
+				if strings.TrimSpace(tk.Origin) == "" && empty == nil {
 					empty = tk
 				}
 			}
