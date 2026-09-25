@@ -3031,6 +3031,46 @@ func TestSourceError_Range_ClampsToTheLines(t *testing.T) {
 	assert.Equal(t, "f.yaml:2:1: wide", bound.Error())
 }
 
+func TestSourceError_Range_Inverted(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n")
+
+	tcs := map[string]struct {
+		rng  position.Range
+		want position.Range
+	}{
+		"end on an earlier line": {
+			rng:  position.NewRange(position.New(2, 2), position.New(0, 1)),
+			want: position.NewRange(position.New(2, 2), position.New(2, 2)),
+		},
+		"end at an earlier column": {
+			rng:  position.NewRange(position.New(1, 3), position.New(1, 1)),
+			want: position.NewRange(position.New(1, 3), position.New(1, 3)),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := niceyaml.NewError("inverted", niceyaml.AtRange(tc.rng))
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, yamltest.Bind(t, source, err), &bound)
+
+			rng, ok := bound.Range()
+			require.True(t, ok)
+			assert.Equal(t, tc.want, rng)
+
+			excerpt, ok := bound.Excerpt(0)
+			require.True(t, ok)
+			assert.Equal(t, []int{tc.want.Start.Line + 1}, lineNumbers(excerpt))
+		})
+	}
+}
+
 func TestError_ResolvesThroughErrorWrappers(t *testing.T) {
 	t.Parallel()
 

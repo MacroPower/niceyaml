@@ -282,7 +282,8 @@ func atToken(tk *token.Token) ErrorOption {
 // returns, where line 0 is line 1 of the text. [SourceError.Excerpt]
 // highlights the whole range rather than one token, so it is the option
 // for a check that knows the columns an error covers, such as one that
-// runs on rendered lines.
+// runs on rendered lines. A range that ends before its start covers
+// nothing, so it binds as the empty range at its start.
 func AtRange(r position.Range) ErrorOption {
 	return func(e *Error) {
 		e.loc = r
@@ -1899,11 +1900,18 @@ func highlightRanges(view line.Lines, loc location) position.Ranges {
 	return view.ContentRanges(view.TokenAt(loc.pos))
 }
 
-// clampRange returns r cut to lines. A range that runs past the last line
-// ends at the end of that line, so a range an error carried marks lines
-// the source has and [SourceError.Range] reports one of them. A range
-// within the lines comes back as it is.
+// clampRange returns r cut to lines. A range that ends before its start
+// covers nothing, as [position.Range.LastLine] counts it, so it becomes
+// the empty range at its start, and [SourceError.Range] never reports an
+// end before the start. A range that runs past the last line ends at the
+// end of that line, so a range an error carried marks lines the source
+// has and SourceError.Range reports one of them. A range within the lines
+// comes back as it is.
 func clampRange(lines line.Lines, r position.Range) position.Range {
+	if r.End.Line < r.Start.Line || (r.End.Line == r.Start.Line && r.End.Col < r.Start.Col) {
+		return position.NewRange(r.Start, r.Start)
+	}
+
 	last := lines.Len() - 1
 	if last < 0 || r.End.Line <= last {
 		return r
