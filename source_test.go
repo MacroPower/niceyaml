@@ -833,6 +833,45 @@ func TestNewSourceFromBytes(t *testing.T) {
 	assert.Equal(t, "key: value", s.Lines().Content())
 }
 
+func TestNewSourceFromString_ByteOrderMark(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  map[string]any
+		lines string
+	}{
+		"before a comment": {
+			input: "\ufeff# yaml-language-server: $schema=foo.json\na: 1\n",
+			want:  map[string]any{"a": uint64(1)},
+			lines: "# yaml-language-server: $schema=foo.json\na: 1",
+		},
+		"before a key": {
+			input: "\ufeffa: 1\n",
+			want:  map[string]any{"a": uint64(1)},
+			lines: "a: 1",
+		},
+		"before a document marker": {
+			input: "\ufeff---\na: 1\n",
+			want:  map[string]any{"a": uint64(1)},
+			lines: "---\na: 1",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input)
+
+			got, err := source.Decode[map[string]any](t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.lines, source.Lines().Content())
+		})
+	}
+}
+
 func TestSource_Content(t *testing.T) {
 	t.Parallel()
 
