@@ -1691,3 +1691,83 @@ func TestRegistry_Schema_PanicReachesCaller(t *testing.T) {
 	// The next call loads again rather than hanging on the failed load.
 	assert.PanicsWithValue(t, "boom", load)
 }
+
+func TestRegistry_RelativeRefs(t *testing.T) {
+	t.Parallel()
+
+	mainSchema := []byte(`{"properties": {"a": {"$ref": "defs.json"}}}`)
+	defsSchema := []byte(`{"type": "string"}`)
+
+	tmpDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "main.json"), mainSchema, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "defs.json"), defsSchema, 0o600))
+
+	bundle := fstest.MapFS{
+		"schemas/main.json": &fstest.MapFile{Data: mainSchema},
+		"schemas/defs.json": &fstest.MapFile{Data: defsSchema},
+	}
+
+	// A schema served over HTTP that names the defs file on disk.
+	localSchema := fmt.Appendf(nil, `{"properties": {"a": {"$ref": %q}}}`,
+		"file://"+filepath.ToSlash(filepath.Join(tmpDir, "defs.json")))
+
+	served := map[string][]byte{
+		"/s/main.json":  mainSchema,
+		"/s/defs.json":  defsSchema,
+		"/s/local.json": localSchema,
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, ok := served[r.URL.Path]
+		if !ok {
+			http.NotFound(w, r)
+
+			return
+		}
+
+		//nolint:errcheck // Test helper.
+		w.Write(data)
+	}))
+	t.Cleanup(server.Close)
+
+	tcs := map[string]struct {
+		ref  schema.Ref
+		opts []schema.RegistryOption
+	}{
+		"file on disk": {
+			ref: schema.File(filepath.Join(tmpDir, "main.json")),
+		},
+		"file in a file system": {
+			ref:  schema.File("schemas/main.json"),
+			opts: []schema.RegistryOption{schema.WithFS(bundle)},
+		},
+		"url": {
+			ref: schema.URL(server.URL + "/s/main.json"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			reg := schema.NewRegistry(append(tc.opts, schema.WithResolvers(tc.ref))...)
+
+			require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: x\n")))
+
+			err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+			require.Error(t, err)
+			require.NotErrorIs(t, err, schema.ErrValidate)
+			assert.Contains(t, err.Error(), `$.a: expected "string", got "integer"`)
+		})
+	}
+
+	t.Run("a url schema reads no local file", func(t *testing.T) {
+		t.Parallel()
+
+		reg := schema.NewRegistry(schema.WithResolvers(schema.URL(server.URL + "/s/local.json")))
+
+		err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+		require.ErrorIs(t, err, schema.ErrValidate)
+		assert.Contains(t, err.Error(), "cannot resolve $ref")
+	})
+}

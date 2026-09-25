@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"go.jacobcolvin.com/x/jsonschema"
 	"golang.org/x/sync/singleflight"
 
 	"go.jacobcolvin.com/niceyaml"
@@ -542,6 +543,69 @@ func (r *Registry) load(ctx context.Context, ref Ref) ([]byte, error) {
 	}
 }
 
+// refOptions returns the options the registry compiles the schema ref
+// names with: the options [WithCompileOptions] gave it, behind options
+// that let a $ref in a schema from [File] or [URL] name a document beside
+// it. Such a schema takes its key as the base URI of its references, and
+// the registry reads each document a reference names as it reads the
+// schema, so a relative $ref resolves against the file or URL that holds
+// it. A schema from [File] reaches local files and URLs, and one from
+// [URL] reaches only URLs, so a remote schema cannot read the local disk.
+// An option from [WithCompileOptions] comes later and wins.
+func (r *Registry) refOptions(ref Ref) []CompileOption {
+	if !ref.url && ref.file == "" {
+		return r.compileOpts
+	}
+
+	allowFile := !ref.url
+
+	resolver := jsonschema.RefResolverFunc(func(ctx context.Context, uri string) (*jsonschema.Schema, error) {
+		if i := strings.IndexByte(uri, '#'); i >= 0 {
+			uri = uri[:i]
+		}
+
+		var (
+			data []byte
+			err  error
+		)
+
+		switch {
+		case isHTTPURL(uri):
+			data, err = httpfetch.Get(ctx, r.client, uri)
+
+		case allowFile && isFileURL(uri):
+			path, ok := fileURLPath(uri)
+			if !ok {
+				return nil, fmt.Errorf("%w: %q", jsonschema.ErrNotResolved, httpfetch.Redacted(uri))
+			}
+
+			data, err = readFile(r.fsys, path, path)
+
+		default:
+			return nil, fmt.Errorf("%w: %q", jsonschema.ErrNotResolved, httpfetch.Redacted(uri))
+		}
+
+		if err != nil {
+			return nil, err
+		}
+
+		s, err := jsonschema.ParseSchema(data)
+		if err != nil {
+			return nil, fmt.Errorf("parse %s: %w", httpfetch.Redacted(uri), err)
+		}
+
+		return s, nil
+	})
+
+	opts := make([]CompileOption, 0, len(r.compileOpts)+1)
+	opts = append(opts, WithJSONSchemaOptions(
+		jsonschema.WithBaseURI(ref.key),
+		jsonschema.WithRefResolver(resolver),
+	))
+
+	return append(opts, r.compileOpts...)
+}
+
 // cached returns the schema cached under key, if any.
 func (r *Registry) cached(key string) (*Schema, bool) {
 	r.mu.RLock()
@@ -591,7 +655,7 @@ func (r *Registry) compile(ctx context.Context, ref Ref) error {
 		return err
 	}
 
-	compiled, err := Compile(ctx, data, r.compileOpts...)
+	compiled, err := Compile(ctx, data, r.refOptions(ref)...)
 	if err != nil {
 		return fmt.Errorf("%q: %w", key, err)
 	}

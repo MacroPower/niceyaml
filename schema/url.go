@@ -19,6 +19,11 @@ import (
 // [Resolver] returns, so a resolver that builds the URL from the document
 // hands it back beside a nil error.
 //
+// A $ref in the schema resolves against the URL, and the registry fetches
+// each HTTP or HTTPS URL a reference names with the same client. A
+// reference to a file:// URL does not resolve, so a remote schema cannot
+// read the local disk.
+//
 // A registry rejects a response body over 10 MB. The client's Timeout and
 // the context of the lookup bound each fetch. [Registry.Load] fetches the
 // URL and returns the bytes, for a caller that wants them rather than the
