@@ -62,9 +62,14 @@ import (
 // value that failed. A field an inline tag flattens keeps the path of
 // the struct that holds it. A value whose type decodes itself, through
 // an UnmarshalYAML or UnmarshalText method, validates itself and
-// nothing below it, since its fields need not mirror the document. A
-// parent need not call the Validate of its fields, and [Rebase] is for
-// a check run on a value after Decode returns.
+// nothing below it, since its fields need not mirror the document. The
+// decode cannot see a type that go-yaml decodes whole through a
+// [yaml.CustomUnmarshaler] option or an UnmarshalJSON method under
+// [yaml.UseJSONUnmarshaler], so the values below such a type walk as if
+// its fields mirrored the document; a decode of one runs its checks
+// with [WithSelfValidation] off. A parent need not call the Validate
+// of its fields, and [Rebase] is for a check run on a value after
+// Decode returns.
 //
 // Any value with a Validate method takes part, including one from a
 // package that names its own check that way, such as a generated
