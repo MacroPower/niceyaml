@@ -4821,3 +4821,41 @@ func TestViewport_ContentChangeResetsHorizontalScroll(t *testing.T) {
 	assert.Equal(t, 0, m.XOffset())
 	assert.Contains(t, m.View(), "k: ---")
 }
+
+func TestViewport_ClipsRowsWiderThanContent(t *testing.T) {
+	t.Parallel()
+
+	// The gutter alone fills a viewport of a few columns, so every printed
+	// row is wider than the content. Such a row is cut to the width rather
+	// than wrapped onto a second screen row, which the scroll math does
+	// not count, so the view keeps one screen row per printed row and the
+	// last rows stay reachable.
+	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinterWithLineNumbers()))
+	m.SetWidth(6)
+	m.SetHeight(4)
+	m.AddRevision(niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n"))
+
+	// Every screen row opens with the gutter, which a wrapped row would
+	// not, and the last row of the view at the largest offset is a row of
+	// the last line.
+	gutterRows := func() []string {
+		t.Helper()
+
+		rows := strings.Split(m.View(), "\n")
+		require.Len(t, rows, 4)
+
+		for _, row := range rows {
+			assert.True(t, strings.HasPrefix(row, "   "), "row %q", row)
+		}
+
+		return rows
+	}
+
+	rows := gutterRows()
+	assert.True(t, strings.HasPrefix(rows[0], "   1"), "row %q", rows[0])
+
+	m.SetYOffset(100)
+
+	rows = gutterRows()
+	assert.True(t, strings.HasPrefix(rows[len(rows)-1], "   -"), "row %q", rows[len(rows)-1])
+}

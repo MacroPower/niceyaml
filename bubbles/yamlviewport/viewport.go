@@ -1863,9 +1863,15 @@ func (m *Model) getViewDimensions() (int, int, bool) {
 
 // renderContent applies styling and renders lines into final output. It clips
 // a row wider than contentW, a width the printer's gutter can force on a
-// viewport of only a few columns.
+// viewport of only a few columns, before the style sees it, since the style
+// would wrap such a row onto a second screen row that the scroll math does
+// not count.
 func (m *Model) renderContent(lines []string, contentW, contentH int) string {
 	textStyle := m.printer.Style(kind.Text)
+
+	for i := range lines {
+		lines[i] = ansi.Truncate(lines[i], contentW, "")
+	}
 
 	contents := textStyle.
 		Width(contentW).
