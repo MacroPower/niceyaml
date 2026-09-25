@@ -30,6 +30,34 @@ func TestPalette_TokensOverrideDerivedKinds(t *testing.T) {
 	assert.Equal(t, lipgloss.Color("#123456"), p.styles().Style(kind.TextOK).GetForeground())
 }
 
+func TestPalette_TokensClearInheritedAttributes(t *testing.T) {
+	t.Parallel()
+
+	// A spec that names "noitalic" turns off the italic its kind inherits,
+	// as a Pygments theme does for a child of an italic parent.
+	p := palette{
+		Mode:   Dark,
+		Fg:     "#ffffff",
+		Bg:     "#000000",
+		Accent: "#ff00ff",
+		OK:     "#00ff00",
+		Warn:   "#ffff00",
+		Error:  "#ff0000",
+		Tokens: map[kind.Kind]string{
+			kind.Generic:        "italic bold underline #888888",
+			kind.GenericDeleted: "noitalic nobold nounderline #ff0000",
+		},
+	}
+
+	s := p.styles()
+
+	assert.True(t, s.Style(kind.Generic).GetItalic())
+	assert.False(t, s.Style(kind.GenericDeleted).GetItalic())
+	assert.False(t, s.Style(kind.GenericDeleted).GetBold())
+	assert.False(t, s.Style(kind.GenericDeleted).GetUnderline())
+	assert.Equal(t, lipgloss.Color("#ff0000"), s.Style(kind.GenericDeleted).GetForeground())
+}
+
 func TestPalette_UITakesCommentColorAlone(t *testing.T) {
 	t.Parallel()
 

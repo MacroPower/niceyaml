@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"maps"
 	"slices"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 
@@ -103,7 +104,7 @@ func (p palette) styles() style.Styles {
 	// a spec of "bold" alone keeps the ancestor's colors. Parents come
 	// first, so a child layers over the parent's finished style.
 	for _, st := range byDepth(p.Tokens) {
-		s = s.With(style.Set(st, layer(s.Style(st), style.MustParse(p.Tokens[st]))))
+		s = s.With(style.Set(st, layer(s.Style(st), p.Tokens[st])))
 	}
 
 	// The chrome takes the comment color alone. A Tokens spec that sets
@@ -159,11 +160,16 @@ func (p palette) surface() (color.Color, color.Color) {
 	return lipgloss.Color(fg), lipgloss.Color(bg)
 }
 
-// layer returns base with the colors and attributes set in over applied on
-// top, leaving base's other properties in place.
+// layer returns base with the colors and attributes the spec sets applied
+// on top, leaving base's other properties in place. The spec is in the
+// form [style.Parse] reads. A "nobold", "noitalic", or "nounderline"
+// keyword turns the attribute off, since [style.Parse] leaves it unset,
+// which reads the same as a spec that never named it.
 //
 //nolint:gocritic // Value semantics match lipgloss.
-func layer(base, over lipgloss.Style) lipgloss.Style {
+func layer(base lipgloss.Style, spec string) lipgloss.Style {
+	over := style.MustParse(spec)
+
 	if c := over.GetForeground(); isColorSet(c) {
 		base = base.Foreground(c)
 	}
@@ -182,6 +188,17 @@ func layer(base, over lipgloss.Style) lipgloss.Style {
 
 	if over.GetUnderline() {
 		base = base.Underline(true)
+	}
+
+	for word := range strings.FieldsSeq(strings.ToLower(spec)) {
+		switch word {
+		case "nobold":
+			base = base.Bold(false)
+		case "noitalic":
+			base = base.Italic(false)
+		case "nounderline":
+			base = base.Underline(false)
+		}
 	}
 
 	return base
