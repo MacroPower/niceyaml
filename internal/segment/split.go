@@ -312,7 +312,14 @@ func (b *builder) processPart(ctx *partContext) {
 	// endings or whitespace alone.
 	hasText := strings.TrimLeft(tokens.TrimLineEnding(ctx.part), " \t") != ""
 	isFirstText := hasText && !ctx.textPlaced
-	lead := len(ctx.part) - len(strings.TrimLeft(ctx.part, " \t"))
+
+	// The first text part skips the whitespace it opens with to reach the
+	// rune where the text starts. No other part skips any, so its lead
+	// stays zero.
+	lead := 0
+	if isFirstText {
+		lead = len(ctx.part) - len(strings.TrimLeft(ctx.part, " \t"))
+	}
 
 	// Update indentation tracking for first content on new line.
 	//

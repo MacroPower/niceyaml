@@ -345,6 +345,22 @@ func TestSplit_BlockScalarOffsets(t *testing.T) {
 			input: "k: |\n  a\n  b\n",
 			want:  []int{8, 10},
 		},
+		"three lines at end of input": {
+			input: "k: |\n  a\n  b\n  c\n",
+			want:  []int{8, 10, 14},
+		},
+		"three lines, content follows": {
+			input: "k: |\n  a\n  b\n  c\nz: 1\n",
+			want:  []int{8, 10, 14},
+		},
+		"quoted, three lines": {
+			input: "k: \"a\n  b\n  c\"\n",
+			want:  []int{7, 11},
+		},
+		"plain, three lines": {
+			input: "k: a\n  b\n  c\n",
+			want:  []int{6, 10},
+		},
 	}
 
 	for name, tc := range tcs {
