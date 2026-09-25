@@ -1316,6 +1316,40 @@ func TestSchema_SourcePath(t *testing.T) {
 	}
 }
 
+func TestSchema_RefToRejectingSchema(t *testing.T) {
+	t.Parallel()
+
+	// A $ref that resolves to a schema allowing nothing fails as a
+	// violation of the document, at the value the reference applies to,
+	// and not as a reference the validator could not resolve.
+	tcs := map[string]string{
+		"false":  `{"$defs": {"never": false}, "properties": {"a": {"$ref": "#/$defs/never"}}}`,
+		"not":    `{"$defs": {"never": {"not": {}}}, "properties": {"a": {"$ref": "#/$defs/never"}}}`,
+		"chain":  `{"$defs": {"never": false, "via": {"$ref": "#/$defs/never"}}, "properties": {"a": {"$ref": "#/$defs/via"}}}`,
+		"direct": `{"properties": {"a": false}}`,
+	}
+
+	for name, schemaData := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			v, err := schema.Compile(t.Context(), []byte(schemaData))
+			require.NoError(t, err)
+
+			err = v.Validate(t.Context(), yamltest.FirstDocument(t, "a: 1\n"))
+			require.NotErrorIs(t, err, schema.ErrValidate)
+
+			var nerr *niceyaml.Error
+
+			require.ErrorAs(t, err, &nerr)
+
+			path, ok := nerr.Path()
+			require.True(t, ok)
+			assert.Equal(t, "$.a", path.String())
+		})
+	}
+}
+
 func TestSchema_Ref(t *testing.T) {
 	t.Parallel()
 

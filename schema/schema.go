@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/goccy/go-yaml/ast"
@@ -240,16 +241,20 @@ func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) error
 
 // unresolvedRefs returns the failures in the tree of ve that report a $ref
 // or $dynamicRef the validator could not resolve, whether a resolver
-// returned an error or no resolver served the reference. A reference that
-// resolves reports its target's failures as causes, so a reference keyword
-// that is itself a leaf names a target the validator never found.
+// returned an error, which wraps [jsonschema.ErrRefResolve], or no
+// resolver served the reference, which the message names. A reference
+// keyword that is itself a leaf for any other reason names a target that
+// allows nothing, such as false or {"not": {}}, so its failure is the
+// document's and stays a violation.
 func unresolvedRefs(ve *jsonschema.ValidationError) []error {
 	var errs []error
 
 	for _, leaf := range ve.Leaves() {
 		switch leaf.Keyword {
 		case jsonschema.KeywordRef, jsonschema.KeywordDynamicRef:
-			errs = append(errs, leaf)
+			if errors.Is(leaf, jsonschema.ErrRefResolve) || strings.HasPrefix(leaf.Message, "cannot resolve ") {
+				errs = append(errs, leaf)
+			}
 		}
 	}
 
