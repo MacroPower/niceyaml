@@ -51,7 +51,8 @@ const errorConnectorWidth = 4
 //	fmt.Println(p.PrintError(err))
 //
 // An error whose tree holds no SourceError, or whose excerpts are empty,
-// prints as its message alone, and a nil err prints as "".
+// prints as its tree alone, which for an error with no nested errors is
+// its message, and a nil err prints as "".
 // [niceyaml.FormatError] prints the same tree and excerpts as plain
 // text.
 func (p *Printer) PrintError(err error) string {
