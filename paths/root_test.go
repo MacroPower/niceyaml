@@ -55,6 +55,19 @@ func TestPath_EmptyDocument(t *testing.T) {
 		assert.Equal(t, token.DocumentHeaderType, tk.Type)
 	})
 
+	t.Run("a match keeps the path as given", func(t *testing.T) {
+		t.Parallel()
+
+		doc := emptyDocument(t, "---\n")
+
+		for _, path := range []paths.Path{paths.Root(), paths.Root().Key()} {
+			matches, err := path.Matches(doc)
+			require.NoError(t, err)
+			require.Len(t, matches, 1)
+			assert.Equal(t, path.String(), matches[0].Path.String())
+		}
+	})
+
 	t.Run("a path with segments reaches nothing", func(t *testing.T) {
 		t.Parallel()
 

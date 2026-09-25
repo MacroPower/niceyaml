@@ -3,6 +3,7 @@ package paths
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -282,7 +283,7 @@ func hasContent(body ast.Node) bool {
 // as the body of a comment-only document.
 func (p Path) matches(doc *ast.DocumentNode) ([]match, error) {
 	if doc != nil && doc.Body == nil && doc.Start != nil && p.selectsRoot() {
-		return []match{{node: ast.Null(doc.Start)}}, nil
+		return []match{{node: ast.Null(doc.Start), segs: slices.Clone(p.segments)}}, nil
 	}
 
 	if doc == nil || doc.Body == nil || !hasContent(doc.Body) {
