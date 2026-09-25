@@ -1210,11 +1210,17 @@ func TestPrinter_WordWrap_BreakpointPastWidth_KeepsStyle(t *testing.T) {
 
 		found = true
 
-		// The text opens right after an SGR sequence rather than after the
-		// gutter's spacing alone.
+		// The escape sequence right before the text sets a color rather
+		// than resetting the style the row before it opened.
 		i := strings.Index(row, "-f")
 		require.Positive(t, i)
-		assert.Equal(t, byte('m'), row[i-1], "%q", row)
+
+		j := strings.LastIndex(row[:i], "\x1b[")
+		require.GreaterOrEqual(t, j, 0, "%q", row)
+
+		seq := row[j:i]
+		assert.NotEqual(t, "\x1b[m", seq, "%q", row)
+		assert.Contains(t, seq, "38;", "%q", row)
 	}
 
 	require.True(t, found, "no row ends in the cut-off text: %q", rows)
