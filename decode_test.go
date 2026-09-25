@@ -582,6 +582,48 @@ func TestDocument_Preamble(t *testing.T) {
 				{preamble: "---\n", content: "b: 2\n"},
 			},
 		},
+		"comment above a later header": {
+			input: "a: 1\n# note\n---\nb: 2\n",
+			want: []doc{
+				{content: "a: 1\n"},
+				{preamble: "# note\n---\n", content: "b: 2\n"},
+			},
+		},
+		"comments and a blank line above a later header": {
+			input: "a: 1\n# one\n\n# two\n---\nb: 2\n",
+			want: []doc{
+				{content: "a: 1\n"},
+				{preamble: "# one\n\n# two\n---\n", content: "b: 2\n"},
+			},
+		},
+		"comment above a later header with crlf": {
+			input: "a: 1\r\n# note\r\n---\r\nb: 2\r\n",
+			want: []doc{
+				{content: "a: 1\r\n"},
+				{preamble: "# note\r\n---\r\n", content: "b: 2\r\n"},
+			},
+		},
+		"comment after a block scalar above a later header": {
+			input: "a: |\n  x\n  y\n# note\n---\nb: 2\n",
+			want: []doc{
+				{content: "a: |\n  x\n  y\n"},
+				{preamble: "# note\n---\n", content: "b: 2\n"},
+			},
+		},
+		"comment on the content line above a later header": {
+			input: "a: 1 # same line\n---\nb: 2\n",
+			want: []doc{
+				{content: "a: 1 # same line\n"},
+				{preamble: "---\n", content: "b: 2\n"},
+			},
+		},
+		"comment above a trailing header": {
+			input: "a: 1\n# note\n---\n",
+			want: []doc{
+				{content: "a: 1\n"},
+				{preamble: "# note\n---\n"},
+			},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -657,6 +699,13 @@ func TestDocument_Span(t *testing.T) {
 			want: []position.Span{
 				position.NewSpan(0, 2),
 				position.NewSpan(2, 5),
+			},
+		},
+		"comment above a later header": {
+			input: "a: 1\n# note\n---\nb: 2\n",
+			want: []position.Span{
+				position.NewSpan(0, 1),
+				position.NewSpan(1, 4),
 			},
 		},
 		"trailing comment": {

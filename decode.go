@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -201,6 +202,7 @@ func MultiValidator(validators ...Validator) Validator {
 // documents.
 func newDocuments(src *Source, file *ast.File) []*Node {
 	docs := foldPreambles(file.Docs, alignDocumentTokens(file, src.Tokens()))
+	liftHeaderComments(docs)
 
 	groups := make([]token.Tokens, len(docs))
 	for i, doc := range docs {
@@ -257,6 +259,71 @@ func foldPreambles(nodes []*ast.DocumentNode, groups []token.Tokens) []*document
 	}
 
 	return docs
+}
+
+// liftHeaderComments moves the whole-line comments that close the tokens
+// of each document to the front of the document below when that one has
+// a "---" header. The parser leaves such comments with the document above
+// as trailing comments of its content, while the same comments above the
+// first header of a file, or after a "..." marker, are the preamble of the
+// document below. Lifting them puts a schema directive written above any
+// header in the preamble of the document it describes. A comment on the
+// last line of content stays with the content, and a comment below the
+// header of a document without content stays with that document.
+func liftHeaderComments(docs []*document) {
+	for i := 1; i < len(docs); i++ {
+		if docs[i].root.Start == nil {
+			continue
+		}
+
+		prev := docs[i-1]
+
+		cut := trailingCommentsStart(prev.tokens)
+		if cut == len(prev.tokens) {
+			continue
+		}
+
+		docs[i].tokens = slices.Concat(prev.tokens[cut:], docs[i].tokens)
+		prev.tokens = prev.tokens[:cut]
+	}
+}
+
+// trailingCommentsStart returns the index of the first token in the run of
+// comments that closes tks, where each comment sits on a line below the
+// last token of any other type. Returns len(tks) when no comment closes
+// tks, or when the token before the run is a "---" header, whose
+// document the comments below it belong to.
+func trailingCommentsStart(tks token.Tokens) int {
+	last := -1
+
+	for i, tk := range tks {
+		if tk.Type != token.CommentType {
+			last = i
+		}
+	}
+
+	if last < 0 || tks[last].Type == token.DocumentHeaderType || tks[last].Position == nil {
+		return len(tks)
+	}
+
+	end := tks[last].Position.Line + countLineBreaks(tokens.TrimLineEnding(tks[last].Origin))
+	start := len(tks)
+
+	for i := len(tks) - 1; i > last; i-- {
+		if tks[i].Position == nil || tks[i].Position.Line <= end {
+			break
+		}
+
+		start = i
+	}
+
+	return start
+}
+
+// countLineBreaks returns the number of line breaks in s, counting a CRLF
+// as one.
+func countLineBreaks(s string) int {
+	return strings.Count(s, "\n") + strings.Count(s, "\r") - strings.Count(s, "\r\n")
 }
 
 // isPreambleNode reports whether node is one the parser cut off from the

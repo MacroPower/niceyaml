@@ -447,6 +447,14 @@ func TestDirective_LeadingCommentDocument(t *testing.T) {
 			input: "# yaml-language-server: $schema=./schema.json\n---\n# note\n---\nc: 3\n",
 			want:  []string{invalid, valid},
 		},
+		"directive above a later header": {
+			input: "a: 1\n# yaml-language-server: $schema=./schema.json\n---\nc: 3\n",
+			want:  []string{valid, invalid},
+		},
+		"directive above a later header after an end marker": {
+			input: "a: 1\n...\n# yaml-language-server: $schema=./schema.json\n---\nc: 3\n",
+			want:  []string{valid, invalid},
+		},
 		"first directive in the preamble wins": {
 			input: "# yaml-language-server: $schema=./schema.json\n---\n# yaml-language-server: $schema=./missing.json\nb: 2\n",
 			want:  []string{valid},
