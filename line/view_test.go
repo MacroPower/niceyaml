@@ -1130,6 +1130,19 @@ func TestView_String(t *testing.T) {
 		assert.Equal(t, "   1 | 名前: value\n     |       ^^^^^ bad", view.String())
 	})
 
+	t.Run("carets on a combining mark sit under its base", func(t *testing.T) {
+		t.Parallel()
+
+		// The acute accent renders on the e before it, so a mark on the
+		// accent's column lands under the e, and an annotation at that
+		// column starts there too.
+		view := newTestView(t, "k: e\u0301x\n", 1)
+		view.AddOverlay("test1", position.NewRange(position.New(0, 4), position.New(0, 5)))
+		view.Annotate(0, line.Annotation{Content: "here", Placement: line.Below, Col: 4})
+
+		assert.Equal(t, "   1 | k: e\u0301x\n     |    ^ here", view.String())
+	})
+
 	t.Run("control characters render as pictures", func(t *testing.T) {
 		t.Parallel()
 

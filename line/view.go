@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -467,10 +468,11 @@ func (v *View) String() string {
 
 // colWidth returns the width in cells of the content of ln before col, as
 // the content row renders it, with a column past the end of the content
-// taking one cell.
+// taking one cell. A combining mark has no cell of its own, so a column
+// on one measures up to the rune it renders on.
 func colWidth(ln *Line, col int) int {
 	runes := []rune(ln.Content())
-	col = max(0, col)
+	col = baseColumn(runes, max(0, col))
 
 	if col <= len(runes) {
 		return ansi.StringWidth(escape.Control(string(runes[:col])))
@@ -528,11 +530,19 @@ func markerRow(ln *Line, overlays Overlays, below Annotations) string {
 // marked column and a space under every other. The content row renders
 // each rune at its display width, so a column is as many cells wide as
 // the rune on it renders, and a column past the end of the content takes
-// one cell.
+// one cell. A combining mark has no cell of its own and renders on the
+// rune before it, so a mark on its column lands under that rune.
 func renderMarks(content string, marks []bool) string {
 	var sb strings.Builder
 
 	runes := []rune(content)
+
+	marks = slices.Clone(marks)
+	for col, marked := range marks {
+		if base := baseColumn(runes, col); marked && base != col {
+			marks[base] = true
+		}
+	}
 
 	for col, marked := range marks {
 		cell := " "
@@ -549,4 +559,14 @@ func renderMarks(content string, marks []bool) string {
 	}
 
 	return sb.String()
+}
+
+// baseColumn returns the column of the rune that col renders on: col
+// itself, or the rune before a run of combining marks that holds col.
+func baseColumn(runes []rune, col int) int {
+	for col > 0 && col < len(runes) && unicode.In(runes[col], unicode.Mn, unicode.Me) {
+		col--
+	}
+
+	return col
 }
