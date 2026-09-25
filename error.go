@@ -1330,7 +1330,7 @@ func (e *SourceError) LogValue() slog.Value {
 //	|-- 6:8: $.spec.sla: string does not match pattern
 //	`-- 22:11: $.spec.hours.days: expected "array", got "string"
 //
-// The excerpts follow, one per binding [SourceErrors] finds, each
+// The excerpts follow, one per binding [Bindings] finds, each
 // rendered as [SourceError.Excerpt] with context lines of unchanged
 // content on either side of each marked line, as [line.View.String]
 // renders a view: each line behind its number, carets under the columns

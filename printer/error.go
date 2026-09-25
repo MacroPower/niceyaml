@@ -19,7 +19,7 @@ const errorConnectorWidth = 4
 
 // PrintError renders err for a reader: its message as a tree, then the
 // [niceyaml.SourceError.Excerpt] of every [*niceyaml.SourceError] in its
-// tree, as [niceyaml.SourceErrors] finds them, each with the context lines
+// tree, as [niceyaml.Bindings] finds them, each with the context lines
 // [WithContextLines] sets on either side of each marked line. An error
 // joined from one bound error per document therefore prints an excerpt for
 // each document. A location with no message beside it in the excerpt,

@@ -95,7 +95,7 @@
 // in the tree, with each nested error as an annotation below its own line
 // and distant errors in separate hunks. An error that unwraps to several,
 // such as one from [errors.Join], binds as one SourceError with a child
-// per branch, and [SourceErrors] finds every binding in an error joined
+// per branch, and [Bindings] finds every binding in an error joined
 // from bound errors, such as one per document of a file, for a caller
 // that renders them all. A SourceError never rewrites the
 // message it binds, so an error built by hand goes through Bind before
