@@ -209,10 +209,13 @@ func boundChildren(bound *SourceError, named bool) []positioned {
 		kid := positioned{src: child.Source()}
 
 		// A location the source does not hold resolved to nothing the
-		// excerpt can mark, so the node reads as an unlocated one.
-		if rng, ok := child.Range(); ok {
+		// excerpt can mark, so the node reads as an unlocated one. A
+		// located child reports the position its message carries, which
+		// is inside the token its range marks when the error was given a
+		// position rather than a path.
+		if _, ok := child.Range(); ok {
 			kid.located = true
-			kid.pos = rng.Start
+			kid.pos = child.loc.pos
 		}
 
 		// The binding put the position in front of the message it wraps,

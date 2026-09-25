@@ -11,6 +11,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/position"
 )
 
 // countNodes returns the number of nodes with text in t.
@@ -169,6 +170,22 @@ func TestErrorTree_New(t *testing.T) {
 				Text: "f.yaml: 2 problems",
 				Children: []niceyaml.ErrorTree{
 					{Text: "1:4: $.a: bad a"},
+					{Text: "2:4: $.b: bad b"},
+				},
+			},
+		},
+		"bound child reports the position it was given": {
+			// The position sits inside the token of the value, so the
+			// child names it as its own message does, rather than the
+			// start of the token the excerpt marks.
+			err: yamltest.Bind(t, source, niceyaml.NewError("2 problems", niceyaml.WithErrors(
+				badB(),
+				niceyaml.NewError("mid", niceyaml.AtPosition(position.New(0, 3))),
+			))),
+			want: niceyaml.ErrorTree{
+				Text: "f.yaml: 2 problems",
+				Children: []niceyaml.ErrorTree{
+					{Text: "1:4: mid"},
 					{Text: "2:4: $.b: bad b"},
 				},
 			},
