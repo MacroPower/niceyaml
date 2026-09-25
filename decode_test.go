@@ -3734,6 +3734,17 @@ func TestMultiValidator(t *testing.T) {
 
 		require.NoError(t, dd.Validate(t.Context(), niceyaml.MultiValidator(passing, passing)))
 		require.NoError(t, dd.Validate(t.Context(), niceyaml.MultiValidator()))
+
+		// A typed nil pointer reports no failure, as it does from a
+		// validator given alone.
+		typedNil := niceyaml.ValidatorFunc(func(_ context.Context, _ *niceyaml.Node) error {
+			var e *niceyaml.Error
+
+			return e
+		})
+
+		require.NoError(t, dd.Validate(t.Context(), typedNil))
+		require.NoError(t, dd.Validate(t.Context(), niceyaml.MultiValidator(typedNil, passing)))
 	})
 
 	t.Run("a Decoder carries it to every decode", func(t *testing.T) {

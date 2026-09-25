@@ -178,14 +178,17 @@ func MultiValidator(validators ...Validator) Validator {
 				return err //nolint:wrapcheck // The context names the reason, and the Node binds it.
 			}
 
+			// A typed nil pointer is no failure, as [Node.Bind] reads it.
 			err = dv.Validate(ctx, n)
-			if err != nil && ctx.Err() != nil {
+			if isNothing(err) {
+				continue
+			}
+
+			if ctx.Err() != nil {
 				return err //nolint:wrapcheck // The validator's own error, which the Node binds.
 			}
 
-			if err != nil {
-				errs = append(errs, err)
-			}
+			errs = append(errs, err)
 		}
 
 		return errors.Join(errs...)
