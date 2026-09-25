@@ -1287,10 +1287,16 @@ func (f *aliasFinder) Visit(node ast.Node) ast.Visitor {
 // hasContent reports whether node holds a YAML value. A nil node, a comment
 // group, and a directive are the bodies of documents that hold none: an
 // empty document, one holding only comments, and one holding only a %YAML
-// directive. The parser gives such documents no value to decode, and
-// [yaml.Unmarshal] leaves its target as it is for their text.
+// directive. So is a scalar holding the placeholder token [tokens.Tokenize]
+// makes for text the lexer emits nothing for, such as a file of
+// whitespace alone. The parser gives such documents no value to decode,
+// and [yaml.Unmarshal] leaves its target as it is for their text.
 func hasContent(node ast.Node) bool {
 	if node == nil {
+		return false
+	}
+
+	if scalar, ok := node.(*ast.StringNode); ok && tokens.IsPlaceholder(scalar.Token) {
 		return false
 	}
 

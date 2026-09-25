@@ -91,6 +91,33 @@ func TestTokenize_NumericEscape(t *testing.T) {
 	}
 }
 
+func TestIsPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  bool
+	}{
+		"whitespace only":   {input: "\n  \n", want: true},
+		"lone tag marker":   {input: "!", want: true},
+		"plain scalar":      {input: "abc", want: false},
+		"plain scalar line": {input: "abc\n", want: false},
+		"mapping":           {input: "a: 1\n", want: false},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tks := tokens.Tokenize(tc.input)
+			require.NotEmpty(t, tks)
+			assert.Equal(t, tc.want, tokens.IsPlaceholder(tks[0]))
+		})
+	}
+
+	assert.False(t, tokens.IsPlaceholder(nil))
+}
+
 func TestTokenize_RepairsPositionsAfterTruncatedLastToken(t *testing.T) {
 	t.Parallel()
 

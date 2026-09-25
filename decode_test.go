@@ -893,6 +893,25 @@ func TestDocument_Node(t *testing.T) {
 		assert.Same(t, dd.Source(), bound.Source())
 	})
 
+	t.Run("file of whitespace decodes to nothing", func(t *testing.T) {
+		t.Parallel()
+
+		// The lexer emits nothing for the text, and yaml.Unmarshal leaves
+		// its target as it is, so the decode agrees rather than reading
+		// the placeholder token as a string.
+		for _, input := range []string{"\n", "  \n", "\t\n", "!"} {
+			dd := yamltest.FirstDocument(t, input)
+
+			got := map[string]int{"kept": 1}
+			require.NoError(t, dd.DecodeInto(t.Context(), &got), "%q", input)
+			assert.Equal(t, map[string]int{"kept": 1}, got, "%q", input)
+
+			v, err := dd.Decode[any](t.Context())
+			require.NoError(t, err, "%q", input)
+			assert.Nil(t, v, "%q", input)
+		}
+	})
+
 	t.Run("empty document has no body", func(t *testing.T) {
 		t.Parallel()
 

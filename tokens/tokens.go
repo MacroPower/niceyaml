@@ -43,7 +43,8 @@ func Tokenize(src string) token.Tokens {
 		// nothing for some text it rejects outright, such as a lone "!",
 		// so give the stream one token holding the whole text, positioned
 		// where the lexer places the first token of a file, and the file
-		// stays visible whatever the lexer made of it.
+		// stays visible whatever the lexer made of it. [IsPlaceholder]
+		// tells that token apart from one the lexer made.
 		return token.Tokens{{
 			Type:          token.StringType,
 			CharacterType: token.CharacterTypeMiscellaneous,
@@ -78,6 +79,19 @@ func Tokenize(src string) token.Tokens {
 	repairPositions(src, tks)
 
 	return tks
+}
+
+// IsPlaceholder reports whether tk is the token [Tokenize] made for text
+// the lexer emits nothing for, such as a source of whitespace alone. The
+// parser reads that token as a plain scalar holding the text, while the
+// go-yaml Unmarshal reads the text as no value at all, so a decoder that
+// wants to agree with it treats the token as no content.
+func IsPlaceholder(tk *token.Token) bool {
+	if tk == nil || tk.Type != token.StringType || tk.Origin != tk.Value {
+		return false
+	}
+
+	return len(lexer.Tokenize(tk.Origin)) == 0
 }
 
 // repairPositions moves every token of tks to the rune of src where its
