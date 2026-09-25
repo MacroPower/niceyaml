@@ -225,6 +225,78 @@ func TestRegistry_Lookup_CancelledContext(t *testing.T) {
 	})
 }
 
+func TestRegistry_Document(t *testing.T) {
+	t.Parallel()
+
+	schemaData := []byte(`{
+		"type": "object",
+		"properties": {
+			"kind": {"type": "string"},
+			"spec": {"type": "object", "properties": {"replicas": {"type": "integer"}}}
+		}
+	}`)
+	reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded(schemaData)))
+
+	t.Run("validates the document around a scoped node", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
+			kind: Deployment
+			spec:
+			  replicas: 1
+		`))
+		spec := yamltest.At(t, doc, paths.Root().Child("spec"))
+
+		require.NoError(t, spec.Validate(t.Context(), reg.Document()))
+	})
+
+	t.Run("fails on a violation outside the scope", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
+			kind: 1
+			spec:
+			  replicas: 1
+		`))
+		spec := yamltest.At(t, doc, paths.Root().Child("spec"))
+
+		err := spec.Validate(t.Context(), reg.Document())
+		require.Error(t, err)
+		require.NotErrorIs(t, err, schema.ErrScopedDocument)
+		assert.Contains(t, err.Error(), "$.kind")
+	})
+
+	t.Run("binds a violation inside the scope from the root", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
+			kind: Deployment
+			spec:
+			  replicas: many
+		`))
+		spec := yamltest.At(t, doc, paths.Root().Child("spec"))
+
+		var v struct {
+			Replicas int `yaml:"replicas"`
+		}
+
+		err := spec.DecodeInto(t.Context(), &v, niceyaml.WithValidator(reg.Document()))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "$.spec.replicas")
+	})
+
+	t.Run("matches Validate on a root", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: 1`))
+
+		want := reg.Validate(t.Context(), doc)
+		got := reg.Document().Validate(t.Context(), doc)
+		require.Error(t, want)
+		require.EqualError(t, got, want.Error())
+	})
+}
+
 func TestRegistry_Validate(t *testing.T) {
 	t.Parallel()
 

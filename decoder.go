@@ -31,7 +31,9 @@ import (
 // same Node, and one that takes roots alone, as a
 // [go.jacobcolvin.com/niceyaml/schema.Registry] does, fails on a scoped
 // Node, so a Decoder built over a registry decodes whole documents, or
-// wraps the registry as the Validator doc shows. [Decoder.Validate] runs
+// takes the validator
+// [go.jacobcolvin.com/niceyaml/schema.Registry.Document] returns to
+// validate the document around each Node. [Decoder.Validate] runs
 // the validation step alone. [Node.Decode] with the same options decodes
 // one node the same way, so a Decoder is the options of a call held for
 // reuse.
