@@ -105,19 +105,13 @@ func file(path string) (Ref, error) {
 // build the key, so a change of working directory between the two does
 // not put another file's bytes under the key. When abs is empty, readFile
 // makes name absolute against the working directory of the read.
+//
+// The root of fsys stands for the working directory, so an absolute name
+// reads relative to it, and one outside it, or a drive-letter path off
+// Windows, names no file in fsys.
 func readFile(fsys fs.FS, name, abs string) ([]byte, error) {
 	if fsys != nil {
-		fsPath := slashpath.Clean(filepath.ToSlash(name))
-		if !fs.ValidPath(fsPath) {
-			return nil, fmt.Errorf("read %s: %w: not a path in the registry's file system", name, fs.ErrInvalid)
-		}
-
-		data, err := fs.ReadFile(fsys, fsPath)
-		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", name, err)
-		}
-
-		return data, nil
+		return readFS(fsys, name)
 	}
 
 	if abs == "" {
@@ -144,6 +138,42 @@ func readFile(fsys fs.FS, name, abs string) ([]byte, error) {
 	data, err := os.ReadFile(abs) //nolint:gosec // User-provided file paths are intentional.
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", abs, err)
+	}
+
+	return data, nil
+}
+
+// readFS returns the bytes of name in fsys, whose root stands for the
+// working directory: a relative name reads from the root as it is, and
+// an absolute one reads relative to the working directory. A name
+// outside the working directory, or a drive-letter path off Windows, is
+// [fs.ErrInvalid].
+func readFS(fsys fs.FS, name string) ([]byte, error) {
+	rel := name
+
+	if filepath.IsAbs(name) || hasDriveLetter(name) {
+		wd, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("resolve %s: %w", name, err)
+		}
+
+		rel, err = filepath.Rel(wd, name)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf(
+				"read %s: %w: not under the working directory the registry's file system stands for",
+				name, fs.ErrInvalid,
+			)
+		}
+	}
+
+	fsPath := slashpath.Clean(filepath.ToSlash(rel))
+	if !fs.ValidPath(fsPath) {
+		return nil, fmt.Errorf("read %s: %w: not a path in the registry's file system", name, fs.ErrInvalid)
+	}
+
+	data, err := fs.ReadFile(fsys, fsPath)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", name, err)
 	}
 
 	return data, nil

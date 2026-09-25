@@ -1377,12 +1377,51 @@ func TestRegistry_WithFS(t *testing.T) {
 		assert.Contains(t, err.Error(), "schemas/missing.json")
 	})
 
-	t.Run("an absolute path names no file in the file system", func(t *testing.T) {
+	t.Run("an absolute path reads relative to the working directory", func(t *testing.T) {
+		t.Parallel()
+
+		wd, err := os.Getwd()
+		require.NoError(t, err)
+
+		reg := schema.NewRegistry(schema.WithFS(bundle))
+
+		data, err := reg.Load(t.Context(), schema.File(filepath.Join(wd, "schemas", "pod.json")))
+		require.NoError(t, err)
+		assert.Equal(t, schemaData, data)
+	})
+
+	t.Run("a directive resolves beside a document opened by absolute path", func(t *testing.T) {
+		t.Parallel()
+
+		wd, err := os.Getwd()
+		require.NoError(t, err)
+
+		source := niceyaml.NewSourceFromString(
+			"# yaml-language-server: $schema=./app.schema.json\nkind: App\n",
+			niceyaml.WithFilePath(filepath.Join(wd, "configs", "app.yaml")),
+		)
+
+		doc, err := source.Document()
+		require.NoError(t, err)
+
+		reg := schema.NewRegistry(
+			schema.WithFS(bundle),
+			schema.WithResolvers(schema.Directive()),
+		)
+
+		require.NoError(t, reg.Validate(t.Context(), doc))
+	})
+
+	t.Run("an absolute path outside the working directory names no file", func(t *testing.T) {
 		t.Parallel()
 
 		reg := schema.NewRegistry(schema.WithFS(bundle))
 
-		_, err := reg.Load(t.Context(), schema.File("/schemas/pod.json"))
+		_, err := reg.Load(t.Context(), schema.File(filepath.Join(t.TempDir(), "pod.json")))
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorIs(t, err, fs.ErrInvalid)
+
+		_, err = reg.Load(t.Context(), schema.File("/schemas/pod.json"))
 		require.ErrorIs(t, err, schema.ErrLoad)
 		require.ErrorIs(t, err, fs.ErrInvalid)
 	})

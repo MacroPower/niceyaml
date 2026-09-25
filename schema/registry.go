@@ -93,9 +93,10 @@ type RegistryOption func(*Registry)
 // WithFS is a [RegistryOption] that sets the file system the registry
 // reads schema files from: every [Ref] from [File], whether a resolver
 // holds it or [Directive] and [FileOrURL] build it from a reference in
-// the input. A path then names a file relative to the root of fsys, in
-// slash form, so schemas shipped in an [embed.FS] beside the documents
-// that name them resolve without touching the disk:
+// the input. The root of fsys stands for the working directory. A
+// relative path names a file relative to that root, in slash form, so
+// schemas shipped in an [embed.FS] beside the documents that name them
+// resolve without touching the disk:
 //
 //	source, err := niceyaml.NewSourceFromFS(bundle, "configs/app.yaml")
 //
@@ -105,9 +106,12 @@ type RegistryOption func(*Registry)
 //	)
 //
 // A directive in that document that names ./schema.json resolves to
-// configs/schema.json in bundle. Without the option, the registry reads
-// the working directory, with each path made absolute against it, and a
-// nil fsys keeps that.
+// configs/schema.json in bundle. An absolute path, such as the one a
+// directive resolves to in a document opened by its absolute path, reads
+// relative to the working directory, so [os.DirFS] of the working
+// directory confines the registry to it and a path outside it names no
+// file. Without the option, the registry reads the working directory,
+// with each path made absolute against it, and a nil fsys keeps that.
 func WithFS(fsys fs.FS) RegistryOption {
 	return func(r *Registry) {
 		if fsys != nil {
