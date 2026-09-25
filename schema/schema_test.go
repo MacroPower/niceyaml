@@ -255,28 +255,73 @@ func TestSchema_UnresolvableRef(t *testing.T) {
 	t.Parallel()
 
 	unreachable := errors.New("host unreachable")
-	resolver := jsonschema.RefResolverFunc(func(_ context.Context, _ string) (*jsonschema.Schema, error) {
+	refusing := jsonschema.RefResolverFunc(func(_ context.Context, _ string) (*jsonschema.Schema, error) {
 		return nil, unreachable
 	})
 
 	// The ref resolves when the validator walks to it, so the failure
-	// arrives at the location of the value that referenced it.
-	v, err := schema.Compile(t.Context(),
-		[]byte(`{"properties": {"a": {"$ref": "https://example.invalid/nope.json"}}}`),
-		schema.WithJSONSchemaOptions(jsonschema.WithRefResolver(resolver)),
-	)
-	require.NoError(t, err)
+	// arrives at the location of the value that referenced it. The schema
+	// is at fault, not the document, so every case wraps ErrValidate.
+	tcs := map[string]struct {
+		data   map[string]any
+		err    error
+		schema string
+		want   string
+		opts   []schema.CompileOption
+	}{
+		"no resolver": {
+			schema: `{"properties": {"a": {"$ref": "https://example.invalid/nope.json"}}}`,
+			data:   map[string]any{"a": 1},
+			want:   `cannot resolve $ref "https://example.invalid/nope.json"`,
+		},
+		"resolver answering not resolved": {
+			opts: []schema.CompileOption{schema.WithJSONSchemaOptions(
+				jsonschema.WithRefResolver(jsonschema.SchemaMap{}),
+			)},
+			schema: `{"properties": {"a": {"$ref": "https://example.invalid/nope.json"}}}`,
+			data:   map[string]any{"a": 1},
+			want:   `cannot resolve $ref "https://example.invalid/nope.json"`,
+		},
+		"resolver returning an error": {
+			opts: []schema.CompileOption{schema.WithJSONSchemaOptions(
+				jsonschema.WithRefResolver(refusing),
+			)},
+			schema: `{"properties": {"a": {"$ref": "https://example.invalid/nope.json"}}}`,
+			data:   map[string]any{"a": 1},
+			err:    unreachable,
+			want:   "host unreachable",
+		},
+		"beside a violation": {
+			schema: `{"properties": {
+				"a": {"$ref": "https://example.invalid/nope.json"},
+				"b": {"type": "string"}
+			}}`,
+			data: map[string]any{"a": 1, "b": 2},
+			want: `cannot resolve $ref "https://example.invalid/nope.json"`,
+		},
+	}
 
-	err = v.ValidateValue(t.Context(), map[string]any{"a": 1})
-	require.ErrorIs(t, err, schema.ErrValidate)
-	require.ErrorIs(t, err, jsonschema.ErrRefResolve)
-	require.ErrorIs(t, err, unreachable)
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	// The schema is at fault, so the failure names no location in the
-	// document to highlight.
-	var nerr *niceyaml.Error
+			v, err := schema.Compile(t.Context(), []byte(tc.schema), tc.opts...)
+			require.NoError(t, err)
 
-	require.NotErrorAs(t, err, &nerr)
+			err = v.ValidateValue(t.Context(), tc.data)
+			require.ErrorIs(t, err, schema.ErrValidate)
+			assert.Contains(t, err.Error(), tc.want)
+
+			if tc.err != nil {
+				require.ErrorIs(t, err, jsonschema.ErrRefResolve)
+				require.ErrorIs(t, err, tc.err)
+			}
+
+			var nerr *niceyaml.Error
+
+			require.NotErrorAs(t, err, &nerr)
+		})
+	}
 }
 
 func TestSchema_ValidateWithDecoder(t *testing.T) {

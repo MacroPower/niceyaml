@@ -202,8 +202,8 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 // [*niceyaml.Error]. A single violation carries its YAML path on the error
 // itself, and several violations become a count summary whose nested errors
 // each carry the path to one failing location. Any other failure wraps
-// [ErrValidate], including a $ref a [jsonschema.RefResolver] reports it
-// cannot resolve, since no location in the document is at fault for that.
+// [ErrValidate], including a $ref the validator cannot resolve, since no
+// location in the document is at fault for that.
 //
 // The context reaches the underlying [jsonschema.Validator], where remote
 // reference resolution honors its cancellation and deadlines.
@@ -221,21 +221,39 @@ func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) error
 		return nil
 	}
 
-	// A resolver that reports a $ref it cannot fetch arrives as a validation
-	// failure at the referencing location, but the data there broke no
-	// constraint, so report the schema problem rather than point at the
-	// document.
-	if errors.Is(err, jsonschema.ErrRefResolve) {
+	// A structured validation failure carries per-location paths; convert it to
+	// a niceyaml.Error. Anything else is an unexpected internal failure.
+	ve, ok := errors.AsType[*jsonschema.ValidationError](err)
+	if !ok {
 		return fmt.Errorf("%w: %w", ErrValidate, err)
 	}
 
-	// A structured validation failure carries per-location paths; convert it to
-	// a niceyaml.Error. Anything else is an unexpected internal failure.
-	if ve, ok := errors.AsType[*jsonschema.ValidationError](err); ok {
-		return newValidationError(ve, n)
+	// A $ref the validator cannot resolve arrives as a validation failure
+	// at the referencing location, but the data there broke no constraint,
+	// so report the schema problem rather than point at the document.
+	if refErrs := unresolvedRefs(ve); len(refErrs) > 0 {
+		return fmt.Errorf("%w: %w", ErrValidate, errors.Join(refErrs...))
 	}
 
-	return fmt.Errorf("%w: %w", ErrValidate, err)
+	return newValidationError(ve, n)
+}
+
+// unresolvedRefs returns the failures in the tree of ve that report a $ref
+// or $dynamicRef the validator could not resolve, whether a resolver
+// returned an error or no resolver served the reference. A reference that
+// resolves reports its target's failures as causes, so a reference keyword
+// that is itself a leaf names a target the validator never found.
+func unresolvedRefs(ve *jsonschema.ValidationError) []error {
+	var errs []error
+
+	for _, leaf := range ve.Leaves() {
+		switch leaf.Keyword {
+		case jsonschema.KeywordRef, jsonschema.KeywordDynamicRef:
+			errs = append(errs, leaf)
+		}
+	}
+
+	return errs
 }
 
 // newValidationError converts a [*jsonschema.ValidationError] into a
