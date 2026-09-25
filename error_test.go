@@ -3577,7 +3577,7 @@ func TestSourceError_Annotate(t *testing.T) {
 		bound := excerptError(t)
 		view := bound.Source().View()
 
-		for b := range niceyaml.AllSourceErrors(bound) {
+		for b := range niceyaml.AllBindings(bound) {
 			require.True(t, b.Annotate(view))
 		}
 
@@ -3623,7 +3623,7 @@ func TestSourceError_Annotate(t *testing.T) {
 		require.True(t, first.Annotate(view))
 		require.False(t, second.Annotate(view), "an error with no location of its own marks nothing")
 
-		for b := range niceyaml.AllSourceErrors(second) {
+		for b := range niceyaml.AllBindings(second) {
 			b.Annotate(view)
 		}
 
@@ -3691,7 +3691,7 @@ func TestSourceError_Annotate(t *testing.T) {
 
 		require.False(t, bound.Annotate(view), "the line of the error is outside the slice")
 
-		for b := range niceyaml.AllSourceErrors(bound) {
+		for b := range niceyaml.AllBindings(bound) {
 			b.Annotate(view)
 		}
 
@@ -4106,7 +4106,7 @@ func TestSourceError_Excerpts(t *testing.T) {
 		view := values.View()
 		require.False(t, bound.Annotate(view), "the binding's own line is in the other source")
 
-		for b := range niceyaml.AllSourceErrors(bound) {
+		for b := range niceyaml.AllBindings(bound) {
 			b.Annotate(view)
 		}
 
@@ -4279,7 +4279,7 @@ func TestSourceError_Errors_AboveBinding(t *testing.T) {
 			t.Parallel()
 
 			got := []string{}
-			for se := range niceyaml.AllSourceErrors(dd.Bind(tc.err)) {
+			for se := range niceyaml.AllBindings(dd.Bind(tc.err)) {
 				got = append(got, se.Error())
 			}
 
@@ -4495,7 +4495,7 @@ func TestRebase(t *testing.T) {
 		require.ErrorIs(t, err, other)
 
 		got := []string{}
-		for se := range niceyaml.AllSourceErrors(dd.Bind(err)) {
+		for se := range niceyaml.AllBindings(dd.Bind(err)) {
 			got = append(got, se.Error())
 		}
 
@@ -4892,7 +4892,7 @@ func requireUnresolved(t *testing.T, bound *niceyaml.SourceError, reason error) 
 	require.ErrorIs(t, bound.Unresolved(), reason)
 }
 
-func TestAllSourceErrors(t *testing.T) {
+func TestAllBindings(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n")
@@ -4925,7 +4925,7 @@ func TestAllSourceErrors(t *testing.T) {
 	messages := func(err error) []string {
 		var got []string
 
-		for b := range niceyaml.AllSourceErrors(err) {
+		for b := range niceyaml.AllBindings(err) {
 			got = append(got, b.Message())
 		}
 
@@ -4984,7 +4984,7 @@ func TestAllSourceErrors(t *testing.T) {
 
 		var unresolved *niceyaml.SourceError
 
-		for b := range niceyaml.AllSourceErrors(tree) {
+		for b := range niceyaml.AllBindings(tree) {
 			if b.Message() == "missing" {
 				unresolved = b
 			}
@@ -5001,7 +5001,7 @@ func TestAllSourceErrors(t *testing.T) {
 		t.Parallel()
 
 		assert.Len(t, slices.Collect(niceyaml.Bindings(tree)), 1)
-		assert.Len(t, slices.Collect(niceyaml.AllSourceErrors(tree)), 3)
+		assert.Len(t, slices.Collect(niceyaml.AllBindings(tree)), 3)
 	})
 }
 

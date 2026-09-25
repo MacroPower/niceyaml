@@ -58,7 +58,7 @@ func (s finderSearcher) Load(lines line.Lines) Index {
 // [niceyaml.SourceError.Annotate] adds, goes in through [NewRevision]:
 //
 //	view := source.View()
-//	for bound := range niceyaml.AllSourceErrors(err) {
+//	for bound := range niceyaml.AllBindings(err) {
 //		bound.Annotate(view)
 //	}
 //

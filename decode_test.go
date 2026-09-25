@@ -3801,7 +3801,7 @@ func TestMultiValidator(t *testing.T) {
 
 		var got []string
 
-		for b := range niceyaml.AllSourceErrors(err) {
+		for b := range niceyaml.AllBindings(err) {
 			if rng, ok := b.Range(); ok {
 				got = append(got, rng.Start.String()+" "+b.Message())
 			}

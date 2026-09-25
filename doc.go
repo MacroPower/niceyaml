@@ -160,7 +160,7 @@
 // viewer shows a document with every error in place:
 //
 //	view := source.View()
-//	for bound := range niceyaml.AllSourceErrors(err) {
+//	for bound := range niceyaml.AllBindings(err) {
 //		bound.Annotate(view)
 //	}
 //	fmt.Println(p.Print(view))

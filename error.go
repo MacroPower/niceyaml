@@ -1037,12 +1037,12 @@ func (e *SourceError) Document() *Node {
 // the field a structured report such as a JSON line or a CI annotation
 // carries beside the position from [SourceError.Range] and the path from
 // [SourceError.Path]. Such a report walks every binding in the tree with
-// [AllSourceErrors]. A validator that found several violations reports
+// [AllBindings]. A validator that found several violations reports
 // them as the children of one binding with no location of its own, and
 // a binding whose location did not resolve has no range but still names
 // a violation:
 //
-//	for bound := range niceyaml.AllSourceErrors(err) {
+//	for bound := range niceyaml.AllBindings(err) {
 //		path, _ := bound.Path()
 //		if rng, ok := bound.Range(); ok {
 //			emit(bound.Source().FilePath(), rng.Start, bound.Message(), path)
@@ -1270,7 +1270,7 @@ func (e *SourceError) all(seen map[*SourceError]bool, yield func(*SourceError) b
 //
 // A caller that marks a view with [SourceError.Annotate], or that wants
 // one entry per error, the nodes below each binding included, walks
-// [AllSourceErrors] instead. A nil err has no bindings.
+// [AllBindings] instead. A nil err has no bindings.
 func Bindings(err error) iter.Seq[*SourceError] {
 	return func(yield func(*SourceError) bool) {
 		eachBinding(err, yield)
@@ -1301,7 +1301,7 @@ func eachBinding(err error, visit func(*SourceError) bool) bool {
 	return true
 }
 
-// AllSourceErrors returns an iterator over every binding in the tree of
+// AllBindings returns an iterator over every binding in the tree of
 // err: each [*SourceError] [Bindings] yields, in the same order, and
 // every binding below each one, with a parent before the bindings under
 // it and the children of a child right after it, whatever source each is
@@ -1311,14 +1311,14 @@ func eachBinding(err error, visit func(*SourceError) bool) bool {
 // marks one binding:
 //
 //	view := source.View()
-//	for bound := range niceyaml.AllSourceErrors(err) {
+//	for bound := range niceyaml.AllBindings(err) {
 //		bound.Annotate(view)
 //	}
 //
 // It is also the walk a structured report makes, one that emits a row for
 // each error with a location of its own, as the example on
 // [SourceError.Message] shows. A nil err has no bindings.
-func AllSourceErrors(err error) iter.Seq[*SourceError] {
+func AllBindings(err error) iter.Seq[*SourceError] {
 	return func(yield func(*SourceError) bool) {
 		seen := make(map[*SourceError]bool)
 
@@ -1545,10 +1545,10 @@ func rangeOf(lines line.Lines, loc location) position.Range {
 // as error text without the highlight of the token it describes. The
 // nodes below the error are left to their own Annotate, so a viewer that
 // shows a document with its errors in place marks its view with every
-// binding [AllSourceErrors] yields and renders it as it is:
+// binding [AllBindings] yields and renders it as it is:
 //
 //	view := source.View()
-//	for bound := range niceyaml.AllSourceErrors(err) {
+//	for bound := range niceyaml.AllBindings(err) {
 //		bound.Annotate(view)
 //	}
 //
