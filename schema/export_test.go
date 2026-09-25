@@ -1,5 +1,7 @@
 package schema
 
+import "net/http"
+
 // Hooks into the package internals, so the Windows drive-letter handling
 // can run on every platform and a test can hand the error path walk a
 // tree the parser never builds.
@@ -16,3 +18,8 @@ var (
 	// ReadFile exposes readFile to the external test package.
 	ReadFile = readFile
 )
+
+// HTTPClient returns the client r fetches schemas with.
+func HTTPClient(r *Registry) *http.Client {
+	return r.client
+}

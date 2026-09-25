@@ -1280,6 +1280,36 @@ func TestRegistry_CompiledSchema(t *testing.T) {
 	})
 }
 
+func TestRegistry_WithHTTPClient(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the default client has a timeout", func(t *testing.T) {
+		t.Parallel()
+
+		reg := schema.NewRegistry()
+
+		client := schema.HTTPClient(reg)
+		require.NotNil(t, client)
+		assert.Positive(t, client.Timeout)
+		assert.NotSame(t, http.DefaultClient, client)
+	})
+
+	t.Run("a nil client keeps the default", func(t *testing.T) {
+		t.Parallel()
+
+		reg := schema.NewRegistry(schema.WithHTTPClient(nil))
+		assert.Same(t, schema.HTTPClient(schema.NewRegistry()), schema.HTTPClient(reg))
+	})
+
+	t.Run("a client replaces the default", func(t *testing.T) {
+		t.Parallel()
+
+		client := &http.Client{}
+		reg := schema.NewRegistry(schema.WithHTTPClient(client))
+		assert.Same(t, client, schema.HTTPClient(reg))
+	})
+}
+
 func TestRegistry_WithFS(t *testing.T) {
 	t.Parallel()
 

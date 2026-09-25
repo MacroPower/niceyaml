@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/singleflight"
 
@@ -29,7 +30,16 @@ var (
 	// [niceyaml.Node.At] to [Registry.Validate], which picks a schema for
 	// a whole document.
 	ErrScopedDocument = errors.New("registry needs a whole document")
+
+	// The client every registry that [WithHTTPClient] gave no client
+	// fetches schemas with. An [http.Client] is safe for concurrent use,
+	// so one serves them all.
+	defaultHTTPClient = &http.Client{Timeout: defaultHTTPTimeout}
 )
+
+// defaultHTTPTimeout bounds each schema fetch of a registry that
+// [WithHTTPClient] gave no client.
+const defaultHTTPTimeout = 30 * time.Second
 
 // Registry maps YAML documents to schemas using pluggable resolvers.
 //
@@ -118,7 +128,8 @@ func WithFS(fsys fs.FS) RegistryOption {
 //	    schema.WithResolvers(schema.Directive(), schemastore.New()),
 //	)
 //
-// The default is [http.DefaultClient], and a nil client keeps it. A
+// The default client bounds each fetch at 30 seconds and is otherwise
+// [http.DefaultClient], and a nil client keeps it. A
 // [go.jacobcolvin.com/niceyaml/schema/schemastore.Store] fetches
 // its catalog with a client of its own, since the catalog is not a schema
 // the registry loads.
@@ -197,7 +208,7 @@ func WithCompileOptions(opts ...CompileOption) RegistryOption {
 func NewRegistry(opts ...RegistryOption) *Registry {
 	r := &Registry{
 		cache:         make(map[string]*Schema),
-		client:        http.DefaultClient,
+		client:        defaultHTTPClient,
 		requireSchema: true,
 	}
 	for _, opt := range opts {
