@@ -78,9 +78,11 @@ func TestExpand(t *testing.T) {
 	require.NoError(t, os.MkdirAll(subdir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(subdir, "003.yaml"), []byte("test"), 0o644))
 
-	// Create a file whose name contains a glob metacharacter.
+	// Create a file whose name contains a glob metacharacter, and one its
+	// name matches when read as a pattern.
 	bracketFile := filepath.Join(tmpDir, "cfg[1].txt")
 	require.NoError(t, os.WriteFile(bracketFile, []byte("test"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "cfg1.txt"), []byte("test"), 0o644))
 
 	// Create a directory whose name contains a glob metacharacter.
 	bracketDir := filepath.Join(tmpDir, "data[1]")
@@ -147,9 +149,11 @@ func TestExpand(t *testing.T) {
 		},
 		"wildcard skips directories": {
 			args:      []string{filepath.Join(tmpDir, "*")},
-			wantNames: []string{"000.yaml", "001.yaml", "002.yaml", "cfg[1].txt"},
+			wantNames: []string{"000.yaml", "001.yaml", "002.yaml", "cfg1.txt", "cfg[1].txt"},
 		},
 		"literal name with metacharacter": {
+			// The name also matches cfg1.txt as a pattern, and the file
+			// the user named wins.
 			args:      []string{bracketFile},
 			wantNames: []string{"cfg[1].txt"},
 		},

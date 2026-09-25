@@ -93,21 +93,25 @@ func expandPaths(args ...string) ([]string, error) {
 			continue
 		}
 
+		// A name that holds a metacharacter and names a file that exists
+		// is that file, even when it also matches others as a pattern, so
+		// the file the user named is never shadowed. A name that is no
+		// valid pattern, such as one with a stray bracket, names a file
+		// the same way. The check admits files only, as the glob does.
+		info, statErr := os.Stat(arg)
+		if statErr == nil && !info.IsDir() {
+			add(arg)
+
+			continue
+		}
+
 		matches, err := glob(arg)
-		if err != nil || len(matches) == 0 {
-			// The fallback admits files only, as the glob itself does. A
-			// name that is no valid pattern, such as one with a stray
-			// bracket, still names a file that exists.
-			info, statErr := os.Stat(arg)
-			if statErr != nil || info.IsDir() {
-				if err != nil {
-					return nil, err
-				}
+		if err != nil {
+			return nil, err
+		}
 
-				return nil, fmt.Errorf("%w: %q", errNoMatch, arg)
-			}
-
-			matches = []string{arg}
+		if len(matches) == 0 {
+			return nil, fmt.Errorf("%w: %q", errNoMatch, arg)
 		}
 
 		for _, match := range matches {
