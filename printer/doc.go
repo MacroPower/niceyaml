@@ -29,11 +29,13 @@
 // The printer renders the [line.Annotations] a view carries. The
 // annotations above or below a line render as rows in the style of their
 // [line.Annotation.Kind], or [kind.UIAnnotation] for those with none, and
-// an [AnnotationFunc] renders the text of each group of one Kind;
-// [DefaultAnnotation] joins them with "; ", prefixes [line.Below]
-// annotations with "^ ", and draws a caret under every column the line's
-// overlays cover for a Below annotation without content, so a marked range
-// shows its extent without color.
+// an [AnnotationFunc] renders each group of one Kind as an
+// [AnnotationRow], the text and the column it starts under, which the
+// printer pads, escapes, wraps, and styles. [DefaultAnnotation] joins
+// them with "; ", marks [line.Below] annotations with "^ ", and draws a
+// caret under every column the line's overlays cover for a Below
+// annotation without content, so a marked range shows its extent without
+// color.
 //
 // # Word Wrapping
 //

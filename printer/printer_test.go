@@ -3217,81 +3217,101 @@ func TestDefaultAnnotation(t *testing.T) {
 		annotations line.Annotations
 		overlays    line.Overlays
 		position    line.Placement
-		want        string
+		want        printer.AnnotationRow
+		ok          bool
 	}{
 		"empty annotations": {
 			annotations: line.Annotations{},
 			position:    line.Below,
-			want:        "",
 		},
 		"empty content marks the overlays": {
 			content:     "  sla: 99",
 			annotations: line.Annotations{{Placement: line.Below, Col: 7}},
 			overlays:    line.Overlays{{Cols: position.NewSpan(7, 9)}},
 			position:    line.Below,
-			want:        "       ^^",
+			want:        printer.AnnotationRow{Col: 7, Text: "^^"},
+			ok:          true,
 		},
 		"empty content marks every overlay": {
 			content:     "a: 1, b: 2",
 			annotations: line.Annotations{{Placement: line.Below}},
 			overlays: line.Overlays{
-				{Cols: position.NewSpan(3, 4)},
 				{Cols: position.NewSpan(9, 10)},
+				{Cols: position.NewSpan(3, 4)},
 			},
 			position: line.Below,
-			want:     "   ^     ^",
+			want:     printer.AnnotationRow{Col: 3, Text: "^     ^"},
+			ok:       true,
 		},
 		"empty content marks wide runes with two carets": {
 			content:     "日本語: 値",
 			annotations: line.Annotations{{Placement: line.Below}},
 			overlays:    line.Overlays{{Cols: position.NewSpan(0, 3)}},
 			position:    line.Below,
-			want:        "^^^^^^",
+			want:        printer.AnnotationRow{Col: 0, Text: "^^^^^^"},
+			ok:          true,
 		},
 		"empty content marks control characters as one cell": {
 			content:     "a: \x07b",
 			annotations: line.Annotations{{Placement: line.Below}},
 			overlays:    line.Overlays{{Cols: position.NewSpan(3, 5)}},
 			position:    line.Below,
-			want:        "   ^^",
+			want:        printer.AnnotationRow{Col: 3, Text: "^^"},
+			ok:          true,
 		},
 		"empty content clamps the overlays to the content": {
 			content:     "a: 1",
 			annotations: line.Annotations{{Placement: line.Below}},
 			overlays:    line.Overlays{{Cols: position.NewSpan(3, 9)}},
 			position:    line.Below,
-			want:        "   ^",
+			want:        printer.AnnotationRow{Col: 3, Text: "^"},
+			ok:          true,
+		},
+		"empty content starts a negative overlay at column zero": {
+			content:     "a: 1",
+			annotations: line.Annotations{{Placement: line.Below}},
+			overlays:    line.Overlays{{Cols: position.NewSpan(-2, 2)}},
+			position:    line.Below,
+			want:        printer.AnnotationRow{Col: 0, Text: "^^"},
+			ok:          true,
 		},
 		"empty content with an overlay of no width renders nothing": {
 			content:     "a: 1",
 			annotations: line.Annotations{{Placement: line.Below, Col: 4}},
 			overlays:    line.Overlays{{Cols: position.NewSpan(4, 4)}},
 			position:    line.Below,
-			want:        "",
+		},
+		"empty content with an overlay past the content renders nothing": {
+			content:     "a: 1",
+			annotations: line.Annotations{{Placement: line.Below}},
+			overlays:    line.Overlays{{Cols: position.NewSpan(4, 6)}},
+			position:    line.Below,
 		},
 		"empty content above the line renders nothing": {
 			content:     "a: 1",
 			annotations: line.Annotations{{Placement: line.Above}},
 			overlays:    line.Overlays{{Cols: position.NewSpan(3, 4)}},
 			position:    line.Above,
-			want:        "",
 		},
 		"content beside the overlays keeps its own caret": {
 			content:     "  sla: 99",
 			annotations: line.Annotations{{Content: "bad", Placement: line.Below, Col: 7}},
 			overlays:    line.Overlays{{Cols: position.NewSpan(7, 9)}},
 			position:    line.Below,
-			want:        "       ^ bad",
+			want:        printer.AnnotationRow{Col: 7, Marker: "^ ", Text: "bad"},
+			ok:          true,
 		},
 		"single below annotation": {
 			annotations: line.Annotations{{Content: "error here", Placement: line.Below, Col: 0}},
 			position:    line.Below,
-			want:        "^ error here",
+			want:        printer.AnnotationRow{Col: 0, Marker: "^ ", Text: "error here"},
+			ok:          true,
 		},
-		"single below annotation with padding": {
+		"single below annotation at a column": {
 			annotations: line.Annotations{{Content: "error", Placement: line.Below, Col: 5}},
 			position:    line.Below,
-			want:        "     ^ error",
+			want:        printer.AnnotationRow{Col: 5, Marker: "^ ", Text: "error"},
+			ok:          true,
 		},
 		"empty content is left out of the column": {
 			annotations: line.Annotations{
@@ -3299,17 +3319,20 @@ func TestDefaultAnnotation(t *testing.T) {
 				{Content: "boom", Placement: line.Below, Col: 5},
 			},
 			position: line.Below,
-			want:     "     ^ boom",
+			want:     printer.AnnotationRow{Col: 5, Marker: "^ ", Text: "boom"},
+			ok:       true,
 		},
 		"single above annotation": {
 			annotations: line.Annotations{{Content: "@@ hunk @@", Placement: line.Above, Col: 0}},
 			position:    line.Above,
-			want:        "@@ hunk @@",
+			want:        printer.AnnotationRow{Col: 0, Text: "@@ hunk @@"},
+			ok:          true,
 		},
-		"single above annotation with padding": {
+		"single above annotation at a column": {
 			annotations: line.Annotations{{Content: "header", Placement: line.Above, Col: 3}},
 			position:    line.Above,
-			want:        "   header",
+			want:        printer.AnnotationRow{Col: 3, Text: "header"},
+			ok:          true,
 		},
 		"multiple below annotations": {
 			annotations: line.Annotations{
@@ -3317,7 +3340,8 @@ func TestDefaultAnnotation(t *testing.T) {
 				{Content: "second", Placement: line.Below, Col: 5},
 			},
 			position: line.Below,
-			want:     "^ first; second",
+			want:     printer.AnnotationRow{Col: 0, Marker: "^ ", Text: "first; second"},
+			ok:       true,
 		},
 		"multiple below annotations uses min col": {
 			annotations: line.Annotations{
@@ -3325,7 +3349,8 @@ func TestDefaultAnnotation(t *testing.T) {
 				{Content: "second", Placement: line.Below, Col: 2},
 			},
 			position: line.Below,
-			want:     "  ^ first; second",
+			want:     printer.AnnotationRow{Col: 2, Marker: "^ ", Text: "first; second"},
+			ok:       true,
 		},
 		"multiple above annotations": {
 			annotations: line.Annotations{
@@ -3333,12 +3358,12 @@ func TestDefaultAnnotation(t *testing.T) {
 				{Content: "header2", Placement: line.Above, Col: 0},
 			},
 			position: line.Above,
-			want:     "header1; header2",
+			want:     printer.AnnotationRow{Col: 0, Text: "header1; header2"},
+			ok:       true,
 		},
 		"empty content renders nothing": {
 			annotations: line.Annotations{{Placement: line.Below, Col: 2}},
 			position:    line.Below,
-			want:        "",
 		},
 		"empty content is left out of the join": {
 			annotations: line.Annotations{
@@ -3347,7 +3372,14 @@ func TestDefaultAnnotation(t *testing.T) {
 				{Content: "third", Placement: line.Below, Col: 2},
 			},
 			position: line.Below,
-			want:     "  ^ first; third",
+			want:     printer.AnnotationRow{Col: 2, Marker: "^ ", Text: "first; third"},
+			ok:       true,
+		},
+		"control characters render as pictures": {
+			annotations: line.Annotations{{Content: "a\nb\x1b[31m", Placement: line.Below}},
+			position:    line.Below,
+			want:        printer.AnnotationRow{Col: 0, Marker: "^ ", Text: "a\u240ab\u241b[31m"},
+			ok:          true,
 		},
 	}
 
@@ -3355,16 +3387,13 @@ func TestDefaultAnnotation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			fn := printer.DefaultAnnotation
-			ctx := printer.AnnotationContext{
+			got, ok := printer.DefaultAnnotation(printer.AnnotationContext{
 				Content:     tc.content,
 				Annotations: tc.annotations,
 				Overlays:    tc.overlays,
 				Placement:   tc.position,
-				Styles:      style.Styles{},
-			}
-
-			got := fn(ctx)
+			})
+			assert.Equal(t, tc.ok, ok)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -3373,19 +3402,23 @@ func TestDefaultAnnotation(t *testing.T) {
 func TestPrinter_WithAnnotation(t *testing.T) {
 	t.Parallel()
 
-	// Custom annotation function that uses different prefixes.
-	customAnnotation := func(ctx printer.AnnotationContext) string {
+	// Custom annotation function that uses different markers.
+	customAnnotation := func(ctx printer.AnnotationContext) (printer.AnnotationRow, bool) {
 		if len(ctx.Annotations) == 0 {
-			return ""
+			return printer.AnnotationRow{}, false
 		}
 
-		contents := ctx.Annotations.Contents()
+		row := printer.AnnotationRow{
+			Col:    ctx.Annotations.Col(),
+			Marker: "=== ",
+			Text:   strings.Join(ctx.Annotations.Contents(), ", "),
+		}
 
 		if ctx.Placement == line.Below {
-			return ">>> " + strings.Join(contents, ", ")
+			row.Marker = ">>> "
 		}
 
-		return "=== " + strings.Join(contents, ", ")
+		return row, true
 	}
 
 	tcs := map[string]struct {
@@ -3463,38 +3496,51 @@ func TestPrinter_AnnotationKind(t *testing.T) {
 	assert.Equal(t, []int{4}, layoutRows(p.Layout(view)))
 }
 
-func TestPrinter_AnnotationFuncKeepsStyling(t *testing.T) {
+func TestPrinter_AnnotationFuncKind(t *testing.T) {
 	t.Parallel()
 
 	view := niceyaml.NewSourceFromString("key: value").View()
-	view.Annotate(0, line.Annotation{Content: "oops", Placement: line.Below})
+	view.Annotate(0, line.Annotation{Content: "oops \x1b[31mred", Placement: line.Below})
 
 	styles := style.New(lipgloss.NewStyle(), style.Set(kind.TextError, lipgloss.NewStyle().Bold(true)))
-	styled := func(ctx printer.AnnotationContext) string {
-		return ctx.Styles.Style(kind.TextError).Render(strings.Join(ctx.Annotations.Contents(), "; "))
+	errored := func(ctx printer.AnnotationContext) (printer.AnnotationRow, bool) {
+		return printer.AnnotationRow{
+			Text: strings.Join(ctx.Annotations.Contents(), "; "),
+			Kind: kind.TextError,
+		}, true
 	}
 
 	p := printer.New(
 		printer.WithStyles(styles),
 		printer.WithContainerStyle(lipgloss.NewStyle()),
 		printer.WithGutter(printer.NoGutter),
-		printer.WithAnnotation(styled),
+		printer.WithAnnotation(errored),
 	)
 
-	// The styling the func applied reaches the output as escape sequences
-	// rather than as control pictures.
+	// The row renders in the Kind the func chose, and the printer escapes
+	// the text, so an escape sequence in a message shows as its picture
+	// rather than styling the output.
 	got := p.Print(view)
-	assert.Contains(t, got, "\x1b[1moops")
-	assert.NotContains(t, got, "\u241b")
+	assert.Contains(t, got, "\x1b[1moops \u241b[31mred")
+	assert.NotContains(t, got, "\x1b[31m")
 }
 
 func TestPrinter_AnnotationWrap(t *testing.T) {
 	t.Parallel()
 
-	// Joins the contents with no padding and no marker, so continuation
+	// Joins the contents with no column and no marker, so continuation
 	// rows carry no indent.
-	bare := func(ctx printer.AnnotationContext) string {
-		return strings.Join(ctx.Annotations.Contents(), " ")
+	bare := func(ctx printer.AnnotationContext) (printer.AnnotationRow, bool) {
+		return printer.AnnotationRow{Text: strings.Join(ctx.Annotations.Contents(), " ")}, true
+	}
+
+	// Marks the annotations with a marker of its own at their column.
+	arrow := func(ctx printer.AnnotationContext) (printer.AnnotationRow, bool) {
+		return printer.AnnotationRow{
+			Col:    ctx.Annotations.Col(),
+			Marker: "-> ",
+			Text:   strings.Join(ctx.Annotations.Contents(), " "),
+		}, true
 	}
 
 	tcs := map[string]struct {
@@ -3638,6 +3684,24 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 				"k: v",
 				"w w w",
 				"w w w",
+			),
+		},
+		"custom marker rows align under the text": {
+			input:   "key: value",
+			gutter:  printer.NoGutter,
+			width:   18,
+			annFunc: arrow,
+			annotation: line.Annotation{
+				Content:   "alpha beta gamma delta epsilon",
+				Placement: line.Below,
+				Col:       5,
+			},
+			want: stringtest.JoinLF(
+				"key: value",
+				"     -> alpha beta",
+				"        gamma",
+				"        delta",
+				"        epsilon",
 			),
 		},
 	}
@@ -4000,8 +4064,8 @@ func TestPrinter_Layout_MultiLineAnnotation(t *testing.T) {
 	// A custom annotation may span several lines. The layout counts each
 	// of them as a row, wrapping or not, so the rows it reports match the
 	// rows Print writes.
-	joined := func(ctx printer.AnnotationContext) string {
-		return strings.Join(ctx.Annotations.Contents(), "\n")
+	joined := func(ctx printer.AnnotationContext) (printer.AnnotationRow, bool) {
+		return printer.AnnotationRow{Text: strings.Join(ctx.Annotations.Contents(), "\n")}, true
 	}
 
 	tcs := map[string]struct {
