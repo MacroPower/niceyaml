@@ -82,7 +82,7 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 	}
 
 	if raw == nil {
-		return any(m.want) == nil, nil
+		return wantsNil(m.want), nil
 	}
 
 	// The decoder rejecting the value is the value not reading as T, which
@@ -133,8 +133,12 @@ func numericEqual(a, b any) (bool, bool) {
 	ak, bk := av.Kind(), bv.Kind()
 
 	switch {
-	case isFloat(ak) || isFloat(bk):
-		return toFloat(av) == toFloat(bv), true
+	case isFloat(ak) && isFloat(bk):
+		return av.Float() == bv.Float(), true
+	case isFloat(ak):
+		return floatEqualsInteger(av.Float(), bv), true
+	case isFloat(bk):
+		return floatEqualsInteger(bv.Float(), av), true
 	case isUnsigned(ak) && isUnsigned(bk):
 		return av.Uint() == bv.Uint(), true
 	case isUnsigned(ak):
@@ -146,12 +150,55 @@ func numericEqual(a, b any) (bool, bool) {
 	}
 }
 
+// floatEqualsInteger reports whether f holds exactly the value of the
+// integer v. The comparison runs in the integer's own type, since a
+// float64 cannot hold every integer above 2^53.
+func floatEqualsInteger(f float64, v reflect.Value) bool {
+	if f != math.Trunc(f) {
+		return false
+	}
+
+	if isUnsigned(v.Kind()) {
+		if f < 0 || f >= math.MaxUint64 {
+			return false
+		}
+
+		return uint64(f) == v.Uint()
+	}
+
+	if f < math.MinInt64 || f >= math.MaxInt64 {
+		return false
+	}
+
+	return int64(f) == v.Int()
+}
+
 func unsignedEqualsSigned(u uint64, i int64) bool {
 	if i < 0 || u > math.MaxInt64 {
 		return false
 	}
 
 	return int64(u) == i
+}
+
+// wantsNil reports whether want is nil: a nil interface, or a nil pointer,
+// map, slice, channel, or function held by one.
+func wantsNil[T comparable](want T) bool {
+	v := reflect.ValueOf(&want).Elem()
+	if v.Kind() == reflect.Interface {
+		if v.IsNil() {
+			return true
+		}
+
+		v = v.Elem()
+	}
+
+	switch v.Kind() {
+	case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func:
+		return v.IsNil()
+	default:
+		return false
+	}
 }
 
 func isPredeclaredNumber(v reflect.Value) bool {
@@ -174,8 +221,4 @@ func isUnsigned(k reflect.Kind) bool {
 
 func isFloat(k reflect.Kind) bool {
 	return k == reflect.Float32 || k == reflect.Float64
-}
-
-func toFloat(v reflect.Value) float64 {
-	return v.Convert(reflect.TypeFor[float64]()).Float()
 }

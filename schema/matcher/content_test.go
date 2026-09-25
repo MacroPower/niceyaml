@@ -89,6 +89,21 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`enabled: ~`),
 			want:    true,
 		},
+		"nil pointer matches null": {
+			matcher: matcher.Content[*string](enabledPath, nil),
+			input:   stringtest.Input(`enabled: null`),
+			want:    true,
+		},
+		"any large int does not match a rounded float": {
+			matcher: matcher.Content[any](versionPath, int64(9007199254740993)),
+			input:   stringtest.Input(`version: 9007199254740992.0`),
+			want:    false,
+		},
+		"any large int matches its float spelling": {
+			matcher: matcher.Content[any](versionPath, int64(9007199254740992)),
+			input:   stringtest.Input(`version: 9007199254740992.0`),
+			want:    true,
+		},
 		"nil does not match a value": {
 			matcher: matcher.Content[any](enabledPath, nil),
 			input:   stringtest.Input(`enabled: false`),
