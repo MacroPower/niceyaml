@@ -1289,6 +1289,39 @@ func TestPath_Node_HandBuiltTree(t *testing.T) {
 			path: paths.Root().Child("a"),
 			err:  paths.ErrNotFound,
 		},
+		"child of a typed nil mapping": {
+			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, (*ast.MappingNode)(nil))),
+			path: paths.Root().Child("a", "b"),
+			err:  paths.ErrNotFound,
+		},
+		"index of a typed nil sequence": {
+			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, (*ast.SequenceNode)(nil))),
+			path: paths.Root().Child("a").Index(0),
+			err:  paths.ErrNotFound,
+		},
+		"path ending at a typed nil anchor": {
+			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, (*ast.AnchorNode)(nil))),
+			path: paths.Root().Child("a"),
+			err:  paths.ErrNotFound,
+		},
+		"child of a typed nil anchor": {
+			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, (*ast.AnchorNode)(nil))),
+			path: paths.Root().Child("a", "b"),
+			err:  paths.ErrNotFound,
+		},
+		"child of a typed nil tag": {
+			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, (*ast.TagNode)(nil))),
+			path: paths.Root().Child("a", "b"),
+			err:  paths.ErrNotFound,
+		},
+		"merge of a typed nil mapping": {
+			body: mapNode(mapEntry(
+				&ast.MergeKeyNode{},
+				&ast.SequenceNode{BaseNode: &ast.BaseNode{}, Values: []ast.Node{(*ast.MappingNode)(nil)}},
+			)),
+			path: paths.Root().Child("b"),
+			err:  paths.ErrNotFound,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -1317,6 +1350,32 @@ func TestPath_Nodes_HandBuiltTreeRecursive(t *testing.T) {
 	nodes, err := paths.Root().Recursive("b").Nodes(doc)
 	require.NoError(t, err)
 	assert.Empty(t, nodes)
+}
+
+func TestPath_Nodes_HandBuiltTreeTypedNil(t *testing.T) {
+	t.Parallel()
+
+	doc := &ast.DocumentNode{Body: mapNode(
+		mapEntry(&ast.StringNode{Value: "m"}, (*ast.MappingNode)(nil)),
+		mapEntry(&ast.StringNode{Value: "s"}, (*ast.SequenceNode)(nil)),
+		mapEntry(&ast.StringNode{Value: "a"}, (*ast.AnchorNode)(nil)),
+		mapEntry(&ast.StringNode{Value: "t"}, (*ast.TagNode)(nil)),
+	)}
+
+	tcs := map[string]paths.Path{
+		"every element of a typed nil sequence": paths.Root().Child("s").IndexAll(),
+		"recursive through typed nils":          paths.Root().Recursive("q"),
+	}
+
+	for name, path := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			nodes, err := path.Nodes(doc)
+			require.NoError(t, err)
+			assert.Empty(t, nodes)
+		})
+	}
 }
 
 func TestPath_RedefinedAnchor(t *testing.T) {

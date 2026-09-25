@@ -121,7 +121,9 @@ func (r *resolver) deref(node ast.Node) (ast.Node, error) {
 }
 
 // unwrap is [resolver.deref] followed by stripping tags, so the result is a
-// mapping, sequence, or scalar that selectors can apply to.
+// mapping, sequence, or scalar that selectors can apply to. It stops at a
+// nil node, including a typed nil a hand-built tree may hold, and returns
+// it.
 //
 // It tracks the aliases it follows across every tag it strips, so an alias
 // that leads back to itself through a tag returns an error wrapping
@@ -136,7 +138,7 @@ func (r *resolver) unwrap(node ast.Node) (ast.Node, error) {
 		}
 
 		tag, ok := content.(*ast.TagNode)
-		if !ok {
+		if !ok || isNilNode(content) {
 			return content, nil
 		}
 
@@ -147,9 +149,14 @@ func (r *resolver) unwrap(node ast.Node) (ast.Node, error) {
 // follow looks through anchors and aliases from node and adds each alias it
 // follows to followed. It returns an error wrapping [ErrAlias] when it
 // reaches an alias already in followed, an alias with no anchor, or an alias
-// with no name.
+// with no name. It stops at a nil node, including a typed nil a hand-built
+// tree may hold, and returns it.
 func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.Node, error) {
 	for {
+		if isNilNode(node) {
+			return node, nil
+		}
+
 		switch n := node.(type) {
 		case *ast.AnchorNode:
 			node = n.Value
@@ -236,9 +243,10 @@ func uniqueMatches(matches []match) []match {
 
 // apply applies one selector to the node of m, and returns the matches
 // with the selector that names each one appended to the selectors of m.
+// A nil node, including a typed nil, has nothing to select.
 func (r *resolver) apply(seg segment, m match) ([]match, error) {
 	content, err := r.unwrap(m.node)
-	if err != nil {
+	if err != nil || isNilNode(content) {
 		return nil, err
 	}
 
@@ -335,10 +343,11 @@ func (r *resolver) lookup(
 }
 
 // mergeSources returns the mappings a `<<` value merges in: the value itself
-// when it is a mapping, or each mapping element when it is a sequence.
+// when it is a mapping, or each mapping element when it is a sequence. It
+// skips a nil node, including a typed nil.
 func (r *resolver) mergeSources(value ast.Node) ([]*ast.MappingNode, error) {
 	content, err := r.unwrap(value)
-	if err != nil {
+	if err != nil || isNilNode(content) {
 		return nil, err
 	}
 
@@ -354,7 +363,7 @@ func (r *resolver) mergeSources(value ast.Node) ([]*ast.MappingNode, error) {
 				return nil, err
 			}
 
-			if m, ok := elem.(*ast.MappingNode); ok {
+			if m, ok := elem.(*ast.MappingNode); ok && m != nil {
 				sources = append(sources, m)
 			}
 		}
@@ -371,6 +380,10 @@ func (r *resolver) mergeSources(value ast.Node) ([]*ast.MappingNode, error) {
 // from, down to the entry. It looks through anchors and tags but not
 // aliases, so it visits each entry of the source once, at its definition.
 func (r *resolver) descend(node ast.Node, name string, at match, acc []match) []match {
+	if isNilNode(node) {
+		return acc
+	}
+
 	switch n := node.(type) {
 	case *ast.MappingNode:
 		for _, entry := range n.Values {
