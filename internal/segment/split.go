@@ -207,13 +207,14 @@ func (b *builder) AddToken(tk *token.Token) {
 func (b *builder) Build() []Line {
 	// Handle the last line which may not end with a newline.
 	//
-	// The lexer places the empty content of a block scalar that keeps its
-	// trailing lines on the line after the header, past the end of the
-	// source when the header is its last line. That line holds nothing
-	// from the source, so its segments join the line before it rather
-	// than adding a line the file does not have.
+	// The tokenizer places a token that holds no text and sits past the
+	// end of the source, such as the empty content of a block scalar
+	// that keeps its trailing lines, on the last line the source has.
+	// Such a token opens no line of its own here, since its line closed
+	// already, so it joins that line rather than adding one the file
+	// does not have.
 	if len(b.currentLineSegments) > 0 {
-		if b.currentLineHoldsNoOrigin() && len(b.lines) > 0 {
+		if b.currentLineIsBehind() && len(b.lines) > 0 {
 			b.joinCurrentLineToPrevious()
 		} else {
 			b.lines = append(b.lines, Line{
@@ -229,11 +230,13 @@ func (b *builder) Build() []Line {
 	return b.lines
 }
 
-// currentLineHoldsNoOrigin reports whether every segment of the current
-// line has an empty Origin, so the line holds no rune of the source.
-func (b *builder) currentLineHoldsNoOrigin() bool {
+// currentLineIsBehind reports whether every segment of the current line
+// holds no rune of the source and comes from a token the tokenizer placed
+// on a line before the current one.
+func (b *builder) currentLineIsBehind() bool {
 	for _, seg := range b.currentLineSegments {
-		if seg.Part().Origin != "" {
+		src := seg.Source()
+		if seg.Part().Origin != "" || src == nil || src.Position == nil || src.Position.Line >= b.currentLine {
 			return false
 		}
 	}

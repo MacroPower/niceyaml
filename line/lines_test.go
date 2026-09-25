@@ -1195,8 +1195,9 @@ func TestNewLines_BlockScalars(t *testing.T) {
 				key: |-
 				next: value
 			`),
-			"literal keep empty at end": "key: |+\n",
-			"folded keep empty at end":  "- >+\n",
+			"literal keep empty at end":      "key: |+\n",
+			"folded keep empty at end":       "- >+\n",
+			"literal keep then dropped line": "key: |+\n!",
 		}
 
 		for name, input := range tcs {

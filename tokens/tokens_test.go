@@ -118,6 +118,45 @@ func TestIsPlaceholder(t *testing.T) {
 	assert.False(t, tokens.IsPlaceholder(nil))
 }
 
+func TestTokenize_EmptyContentPastEnd(t *testing.T) {
+	t.Parallel()
+
+	// The lexer places the empty content of a block scalar that keeps
+	// its trailing lines on the line after the header. When the header
+	// ends the file, that line does not exist, and the token moves to
+	// the end of the header's line. A line the lexer dropped, such as a
+	// lone "!", still exists, and the token stays on it.
+	tcs := map[string]struct {
+		input string
+		line  int
+		col   int
+	}{
+		"header ends the file":      {input: "a: |+\n", line: 1, col: 6},
+		"header ends the file crlf": {input: "a: |+\r\n", line: 1, col: 6},
+		"sequence entry":            {input: "- >+\n", line: 1, col: 5},
+		"dropped line follows":      {input: "a: |+\n!", line: 2, col: 1},
+		"key follows":               {input: "a: |+\nb: 1\n", line: 2, col: 1},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var empty *token.Token
+
+			for _, tk := range tokens.Tokenize(tc.input) {
+				if tk.Origin == "" && empty == nil {
+					empty = tk
+				}
+			}
+
+			require.NotNil(t, empty)
+			assert.Equal(t, tc.line, empty.Position.Line)
+			assert.Equal(t, tc.col, empty.Position.Column)
+		})
+	}
+}
+
 func TestTokenize_RepairsPositionsAfterTruncatedLastToken(t *testing.T) {
 	t.Parallel()
 

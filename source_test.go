@@ -1022,6 +1022,24 @@ func TestSource_Parse(t *testing.T) {
 		_, err = source.Documents()
 		assert.Same(t, bound, err)
 	})
+
+	t.Run("syntax error on a line the lexer dropped keeps its line", func(t *testing.T) {
+		t.Parallel()
+
+		// The lexer drops the text of the last line and leaves the empty
+		// content of the block scalar on it. The line still exists, so
+		// the error names it and the excerpt shows it.
+		source := niceyaml.NewSourceFromString("k: |+\n!", niceyaml.WithName("f.yaml"))
+
+		_, err := source.File()
+		require.EqualError(t, err, "f.yaml:2:1: could not find multi-line content")
+
+		bound, ok := err.(*niceyaml.SourceError) //nolint:errorlint // The top-level value is the bound error.
+		require.True(t, ok, "want *niceyaml.SourceError, got %T", err)
+
+		_, ok = bound.Excerpt(2)
+		assert.True(t, ok)
+	})
 }
 
 func TestSource_WithYAMLParserOptions(t *testing.T) {

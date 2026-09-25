@@ -4,6 +4,7 @@ import (
 	"iter"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/token"
@@ -77,8 +78,64 @@ func Tokenize(src string) token.Tokens {
 	}
 
 	repairPositions(src, tks)
+	repairPastEnd(src, tks)
 
 	return tks
+}
+
+// repairPastEnd moves every token of tks that holds no text and sits past
+// the end of src to the end of the last line that holds a rune. The lexer
+// places the empty content of a block scalar that keeps its trailing
+// lines on the line after the header, which is a line the source does
+// not have when the header ends the file.
+func repairPastEnd(src string, tks token.Tokens) {
+	runes := utf8.RuneCountInString(src)
+
+	var line, col int
+
+	for _, tk := range tks {
+		if tk == nil || tk.Position == nil || tk.Origin != "" || tk.Position.Offset <= runes {
+			continue
+		}
+
+		if line == 0 {
+			line, col = sourceEnd(src)
+		}
+
+		tk.Position.Line, tk.Position.Column = line, col
+	}
+}
+
+// sourceEnd returns the line of the last rune of src that is no part of
+// its final line ending, and the column just past that rune, counting
+// both from 1. An empty source ends at 1:1.
+func sourceEnd(src string) (int, int) {
+	src = TrimLineEnding(src)
+
+	line, col := 1, 1
+
+	for i := 0; i < len(src); {
+		switch {
+		case strings.HasPrefix(src[i:], "\r\n"):
+			line, col = line+1, 1
+
+			i += 2
+
+		case src[i] == '\n' || src[i] == '\r':
+			line, col = line+1, 1
+
+			i++
+
+		default:
+			_, size := utf8.DecodeRuneInString(src[i:])
+
+			col++
+
+			i += size
+		}
+	}
+
+	return line, col
 }
 
 // IsPlaceholder reports whether tk is the token [Tokenize] made for text
