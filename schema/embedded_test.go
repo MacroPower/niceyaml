@@ -38,6 +38,23 @@ func TestEmbedded(t *testing.T) {
 		assert.Equal(t, original, string(data))
 	})
 
+	t.Run("copies the bytes it serves", func(t *testing.T) {
+		t.Parallel()
+
+		// A write to the bytes one load returned must not reach the
+		// bytes a later load returns.
+		original := `{"type": "object"}`
+		ref := schema.Embedded([]byte(original))
+
+		_, data, err := load(t, ref)
+		require.NoError(t, err)
+		copy(data, `{"type": "string"}`)
+
+		_, again, err := load(t, ref)
+		require.NoError(t, err)
+		assert.Equal(t, original, string(again))
+	})
+
 	t.Run("keys by content", func(t *testing.T) {
 		t.Parallel()
 

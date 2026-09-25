@@ -27,7 +27,9 @@ func Embedded(data []byte) Ref {
 	sum := sha256.Sum256(data)
 	schemaData := bytes.Clone(data)
 
+	// Each load hands out its own copy, so a caller that writes to the
+	// bytes one load returned cannot change what a later load returns.
 	return Loadable("embedded:"+hex.EncodeToString(sum[:]), func(_ context.Context) ([]byte, error) {
-		return schemaData, nil
+		return bytes.Clone(schemaData), nil
 	})
 }
