@@ -1080,7 +1080,9 @@ func (p *Printer) wrapContent(content string, gutterWidth int) []string {
 
 	// The wrap leaves a row wider than cw when a breakpoint falls just
 	// past the width, so a hard wrap cuts such a row down to size, and
-	// every row fits the width the caller asked for.
+	// every row fits the width the caller asked for. The hard wrap does
+	// not reopen a style on the rows it cuts off, and a second pass of
+	// the wrap, which does, restores it.
 	out := make([]string, 0, len(rows))
 
 	for _, row := range rows {
@@ -1090,7 +1092,8 @@ func (p *Printer) wrapContent(content string, gutterWidth int) []string {
 			continue
 		}
 
-		out = append(out, strings.Split(ansi.Hardwrap(row, cw, true), "\n")...)
+		cut := lipgloss.Wrap(ansi.Hardwrap(row, cw, true), cw, "")
+		out = append(out, strings.Split(cut, "\n")...)
 	}
 
 	return out

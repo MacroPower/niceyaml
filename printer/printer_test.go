@@ -1188,6 +1188,38 @@ func TestPrinter_WordWrap_BreakpointPastWidth(t *testing.T) {
 	}
 }
 
+func TestPrinter_WordWrap_BreakpointPastWidth_KeepsStyle(t *testing.T) {
+	t.Parallel()
+
+	// The row the hard wrap cuts off must open its style again, so the
+	// text it carries renders like the rows around it.
+	input := "name: some-very-long-name-that-will-wrap-around-the-viewport-width-for-sure\n"
+	view := niceyaml.NewSourceFromString(input).View()
+
+	p := printer.New(printer.WithWrap(13))
+
+	rows := strings.Split(p.Print(view), "\n")
+
+	var found bool
+
+	for _, row := range rows {
+		plain := ansi.Strip(row)
+		if !strings.HasSuffix(strings.TrimRight(plain, " "), "-f") {
+			continue
+		}
+
+		found = true
+
+		// The text opens right after an SGR sequence rather than after the
+		// gutter's spacing alone.
+		i := strings.Index(row, "-f")
+		require.Positive(t, i)
+		assert.Equal(t, byte('m'), row[i-1], "%q", row)
+	}
+
+	require.True(t, found, "no row ends in the cut-off text: %q", rows)
+}
+
 func TestPrinter_WordWrap_WideLineNumbers(t *testing.T) {
 	t.Parallel()
 
