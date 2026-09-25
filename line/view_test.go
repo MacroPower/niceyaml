@@ -1143,6 +1143,68 @@ func TestView_String(t *testing.T) {
 		assert.Equal(t, "   1 | k: e\u0301x\n     |    ^ here", view.String())
 	})
 
+	t.Run("carets sit under grapheme clusters", func(t *testing.T) {
+		t.Parallel()
+
+		// The content row renders a ZWJ sequence or a keycap as one
+		// cluster of two cells, so the columns before x are worth that
+		// much and no more, and the caret lands under x as the row above
+		// starts there.
+		tcs := map[string]struct {
+			content string
+			col     int
+			want    string
+		}{
+			"zwj sequence": {
+				content: "a: \"\U0001F468\u200d\U0001F469\" x",
+				col:     9,
+				want: stringtest.JoinLF(
+					"     |         above",
+					"   1 | a: \"\U0001F468\u200d\U0001F469\" x",
+					"     |         ^ below",
+				),
+			},
+			"keycap": {
+				content: "a: 1\ufe0f\u20e3 x",
+				col:     7,
+				want: stringtest.JoinLF(
+					"     |       above",
+					"   1 | a: 1\ufe0f\u20e3 x",
+					"     |       ^ below",
+				),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				view := newTestView(t, tc.content+"\n", 1)
+				view.AddOverlay("test1", position.NewRange(position.New(0, tc.col), position.New(0, tc.col+1)))
+				view.Annotate(0,
+					line.Annotation{Content: "above", Placement: line.Above, Col: tc.col},
+					line.Annotation{Content: "below", Placement: line.Below, Col: tc.col},
+				)
+
+				assert.Equal(t, tc.want, view.String())
+			})
+		}
+	})
+
+	t.Run("a mark inside a grapheme cluster sits under its first rune", func(t *testing.T) {
+		t.Parallel()
+
+		// The joiner and the second emoji render as part of the cluster
+		// the first emoji starts, so a mark on either lands under it.
+		view := newTestView(t, "a: \U0001F468\u200d\U0001F469 x\n", 1)
+		view.AddOverlay("test1", position.NewRange(position.New(0, 5), position.New(0, 6)))
+
+		assert.Equal(t, stringtest.JoinLF(
+			"   1 | a: \U0001F468\u200d\U0001F469 x",
+			"     |    ^^",
+		), view.String())
+	})
+
 	t.Run("control characters render as pictures", func(t *testing.T) {
 		t.Parallel()
 
