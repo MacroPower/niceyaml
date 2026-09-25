@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"unsafe"
 
 	"github.com/goccy/go-yaml"
 
@@ -27,7 +28,7 @@ import (
 // Several errors come back joined, one per value that failed. Returns
 // nil when nothing failed.
 func selfValidate(v any) error {
-	w := selfWalker{seen: map[any]bool{}}
+	w := selfWalker{walking: map[visit]bool{}}
 	w.walk(reflect.ValueOf(v), paths.Root())
 
 	switch len(w.errs) {
@@ -41,41 +42,54 @@ func selfValidate(v any) error {
 }
 
 // selfWalker collects the errors of the [SelfValidator] values in a
-// decoded value, and the pointers it walked through, so a value that
-// refers back to itself walks once. A pointer as an interface value
-// compares by type and address together, so a struct and its first
-// field, which share an address, are two entries.
+// decoded value, and the pointers, maps, and slices on the path it is
+// walking down, so a value that refers back to one above it stops
+// there. A value two paths share, as an alias makes one, is on neither
+// path when the other reaches it, so it validates under each path.
 type selfWalker struct {
-	seen map[any]bool
-	errs []error
+	walking map[visit]bool
+	errs    []error
+}
+
+// visit names a pointer, map, or slice the walker is inside of, by type
+// and address together, since a struct and its first field share an
+// address, and by length for a slice, since two slices can start at one
+// element. The fields serve as the map key.
+//
+//nolint:unused // The fields tell the keys of the walking map apart.
+type visit struct {
+	typ reflect.Type
+	ptr unsafe.Pointer
+	len int
 }
 
 // walk validates v and everything below it, with base as the path of v
 // in the document, and reports whether nothing under v failed.
 func (w *selfWalker) walk(v reflect.Value, base paths.Path) bool {
-	for v.IsValid() && (v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface) {
+	if !v.IsValid() || !v.CanInterface() {
+		return true
+	}
+
+	switch v.Kind() {
+	case reflect.Interface:
 		if v.IsNil() {
 			return true
 		}
 
-		if v.Kind() == reflect.Pointer {
-			if !v.CanInterface() {
-				return true
-			}
+		return w.walk(v.Elem(), base)
 
-			key := v.Interface()
-			if w.seen[key] {
-				return true
-			}
-
-			w.seen[key] = true
+	case reflect.Pointer, reflect.Map, reflect.Slice:
+		if v.IsNil() || !w.enter(v) {
+			return true
 		}
 
-		v = v.Elem()
-	}
+		defer w.leave(v)
 
-	if !v.IsValid() || !v.CanInterface() {
-		return true
+		if v.Kind() == reflect.Pointer {
+			return w.walk(v.Elem(), base)
+		}
+
+	default:
 	}
 
 	if !decodesItself(v.Type()) && !w.children(v, base) {
@@ -83,6 +97,34 @@ func (w *selfWalker) walk(v reflect.Value, base paths.Path) bool {
 	}
 
 	return w.validate(v, base)
+}
+
+// enter records that the walk is inside v, a pointer, map, or slice, and
+// reports false when it already was, so the walk stops there.
+func (w *selfWalker) enter(v reflect.Value) bool {
+	key := visitOf(v)
+	if w.walking[key] {
+		return false
+	}
+
+	w.walking[key] = true
+
+	return true
+}
+
+// leave records that the walk is inside v no longer.
+func (w *selfWalker) leave(v reflect.Value) {
+	delete(w.walking, visitOf(v))
+}
+
+// visitOf returns the [visit] naming v, a pointer, map, or slice.
+func visitOf(v reflect.Value) visit {
+	key := visit{typ: v.Type(), ptr: v.UnsafePointer()}
+	if v.Kind() == reflect.Slice {
+		key.len = v.Len()
+	}
+
+	return key
 }
 
 // unmarshalerTypes are the interfaces go-yaml decodes a value through
@@ -145,9 +187,15 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path) bool {
 		}
 
 	case reflect.Map:
-		iter := v.MapRange()
-		for iter.Next() {
-			if !w.walk(iter.Value(), base.Child(mapKey(iter.Key()))) {
+		// The entries walk in the order of their keys, so the errors come
+		// back in one order however the map iterates.
+		keys := v.MapKeys()
+		slices.SortStableFunc(keys, func(a, b reflect.Value) int {
+			return strings.Compare(mapKey(a), mapKey(b))
+		})
+
+		for _, key := range keys {
+			if !w.walk(v.MapIndex(key), base.Child(mapKey(key))) {
 				ok = false
 			}
 		}

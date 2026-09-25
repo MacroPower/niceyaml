@@ -387,6 +387,59 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		require.ErrorIs(t, dd.DecodeInto(t.Context(), ring), errRing)
 	})
 
+	t.Run("a value two paths share validates under each", func(t *testing.T) {
+		t.Parallel()
+
+		type shared struct {
+			A *item `yaml:"a"`
+			B *item `yaml:"b"`
+		}
+
+		dd := yamltest.FirstDocument(t, "a: &x {name: n, price: -1}\nb: *x\n")
+
+		got, err := dd.Decode[shared](t.Context())
+		require.Same(t, got.A, got.B)
+		require.EqualError(t, err, stringtest.JoinLF(
+			"$.a.price: negative price",
+			"$.b.price: negative price",
+		))
+	})
+
+	t.Run("a value that refers back through a map walks once", func(t *testing.T) {
+		t.Parallel()
+
+		type withExtra struct {
+			Name  string         `yaml:"name"`
+			Extra map[string]any `yaml:"extra"`
+		}
+
+		extra := map[string]any{}
+		extra["self"] = extra
+
+		got := withExtra{Extra: extra}
+		dd := yamltest.FirstDocument(t, "name: x\n")
+
+		require.NoError(t, dd.DecodeInto(t.Context(), &got))
+	})
+
+	t.Run("map entries report in key order", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "d: {price: -1}\nb: {price: -1}\nc: {price: -1}\na: {price: -1}\n")
+
+		want := stringtest.JoinLF(
+			"$.a.price: negative price",
+			"$.b.price: negative price",
+			"$.c.price: negative price",
+			"$.d.price: negative price",
+		)
+
+		for range 20 {
+			_, err := dd.Decode[map[string]item](t.Context())
+			require.EqualError(t, err, want)
+		}
+	})
+
 	t.Run("a leaf type validates itself", func(t *testing.T) {
 		t.Parallel()
 
