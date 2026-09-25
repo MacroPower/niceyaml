@@ -72,7 +72,9 @@ import (
 // the caller fills in after the decode runs on a value with that state
 // set already through [Node.DecodeInto], which keeps the fields the
 // document does not name, and [WithSelfValidation] false switches the
-// walk off for every value.
+// walk off for every value. A Validate that rewrites its value, or that
+// the value's own UnmarshalYAML already ran, runs again inside the
+// decode, so it should be idempotent.
 type SelfValidator interface {
 	Validate() error
 }
