@@ -928,6 +928,20 @@ func (n *Node) View() *line.View {
 	return n.source.View().Slice(n.span)
 }
 
+// Lines returns the lines of [Source.Lines] that the node covers,
+// [Node.Span], as new [line.Lines] that share the lines of the source,
+// what [line.View.Held] returns for [Node.View]. It is the input for a
+// diff of one document of a file that holds several, where [Source.Lines]
+// would diff the whole file:
+//
+//	result := diff.Diff(before[1].Lines(), after[1].Lines())
+//
+// Each line keeps the number it has in the file. A Node that covers no
+// lines returns empty Lines.
+func (n *Node) Lines() line.Lines {
+	return n.View().Held()
+}
+
 // Ranges returns the ranges the node at path covers, one per line, without
 // the spaces around its content: the ranges [SourceError.Excerpt] highlights
 // for an [Error] built with [AtPath] at that path. The path resolves

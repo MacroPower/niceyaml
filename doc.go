@@ -300,6 +300,12 @@
 //	d := diff.New(diff.WithAlgorithm(myAlgo))
 //	result := d.Diff(before.Lines(), after.Lines())
 //
+// [Source.Lines] is every line of the file. [Node.Lines] is the lines one
+// document or node covers, so a diff of one document of a file that holds
+// several compares that document alone:
+//
+//	result := diff.Diff(before[1].Lines(), after[1].Lines())
+//
 // Diff output is a [line.View] rather than a [Source], since the
 // interleaved lines do not form a YAML document. It uses [line.Flag] to mark
 // inserted/deleted lines and [line.Annotation] for unified diff hunk headers.

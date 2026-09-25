@@ -743,6 +743,60 @@ func TestView_Index(t *testing.T) {
 	}
 }
 
+func TestView_Held(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.Input(`
+		a: 1
+		b: 2
+		c: 3
+		d: 4
+	`)
+
+	view := newTestView(t, input, 4)
+
+	tcs := map[string]struct {
+		view *line.View
+		want []int // Indices in the content of the lines held.
+	}{
+		"every line of the content": {
+			view: view,
+			want: []int{0, 1, 2, 3},
+		},
+		"the lines a slice holds": {
+			view: view.Slice(position.NewSpan(1, 3)),
+			want: []int{1, 2},
+		},
+		"content order through overlapping spans": {
+			view: view.Slice(position.NewSpan(2, 4), position.NewSpan(0, 1)),
+			want: []int{0, 2, 3},
+		},
+		"a slice that holds nothing": {
+			view: view.Slice(position.NewSpan(2, 2)),
+			want: nil,
+		},
+		"nil view": {
+			view: nil,
+			want: nil,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := tc.view.Held()
+			require.Equal(t, len(tc.want), got.Len())
+			assert.Equal(t, tc.view.Count(), got.Len())
+
+			for i, ci := range tc.want {
+				assert.Same(t, view.Lines().Line(ci), got.Line(i), "held line %d shares content line %d", i, ci)
+				assert.Equal(t, ci+1, got.Line(i).Number(), "held line %d keeps the file's number", i)
+			}
+		})
+	}
+}
+
 func TestView_Slice(t *testing.T) {
 	t.Parallel()
 

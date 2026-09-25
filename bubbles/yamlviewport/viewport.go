@@ -1084,23 +1084,13 @@ func (m *Model) getDiffResult() *diff.Result {
 			base = current
 		}
 
-		m.diffResult = diff.Diff(heldLines(base.View()), heldLines(current.View()))
+		// A diff compares the lines each view holds, as the other view
+		// modes render them, rather than every line of the content the
+		// view is over.
+		m.diffResult = diff.Diff(base.View().Held(), current.View().Held())
 	}
 
 	return m.diffResult
-}
-
-// heldLines returns the lines v holds as [line.Lines], so a diff of two
-// revisions compares the lines each view holds, as the other view modes
-// render them, rather than every line of the content the view is over.
-func heldLines(v *line.View) line.Lines {
-	ls := make([]*line.Line, 0, v.Count())
-
-	for _, l := range v.All() {
-		ls = append(ls, l)
-	}
-
-	return line.Collect(ls...)
 }
 
 // resolveRevisionSource determines which revision to display for the

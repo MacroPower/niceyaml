@@ -16,6 +16,7 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -858,6 +859,92 @@ func TestDocument_View(t *testing.T) {
 		require.True(t, bound.Annotate(view))
 
 		assert.Contains(t, view.String(), "   7 | b: 2\n     |    ^")
+	})
+}
+
+func TestDocument_Lines(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.Input(`
+		a: 1
+		---
+		spec:
+		  hours:
+		    open: "09:00"
+		    close: "17:00"
+		b: 2
+	`)
+
+	t.Run("covers the document with the file's line numbers", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(input)
+
+		docs, err := source.Documents()
+		require.NoError(t, err)
+		require.Len(t, docs, 2)
+
+		lines := docs[1].Lines()
+		span := docs[1].Span()
+
+		require.Equal(t, span.Len(), lines.Len())
+
+		for i := range lines.Len() {
+			assert.Same(t, source.Lines().Line(span.Start+i), lines.Line(i))
+		}
+
+		assert.Equal(t, 2, lines.Line(0).Number())
+	})
+
+	t.Run("covers the node of a scoped Document", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(input)
+
+		docs, err := source.Documents()
+		require.NoError(t, err)
+
+		hours := yamltest.At(t, docs[1], paths.Root().Child("spec", "hours"))
+		lines := hours.Lines()
+
+		require.Equal(t, 2, lines.Len())
+		assert.Equal(t, `    open: "09:00"`, lines.Line(0).Content())
+		assert.Equal(t, 5, lines.Line(0).Number())
+	})
+
+	t.Run("diffs one document of a file that holds several", func(t *testing.T) {
+		t.Parallel()
+
+		documents := func(t *testing.T, input string) []*niceyaml.Node {
+			t.Helper()
+
+			docs, err := niceyaml.NewSourceFromString(input).Documents()
+			require.NoError(t, err)
+			require.Len(t, docs, 2)
+
+			return docs
+		}
+
+		before := documents(t, stringtest.Input(`
+			a: 1
+			---
+			b: 2
+			c: 3
+		`))
+		after := documents(t, stringtest.Input(`
+			a: 9
+			---
+			b: 2
+			c: 9
+		`))
+
+		result := diff.Diff(before[1].Lines(), after[1].Lines())
+
+		assert.Equal(t, diff.Stats{Added: 1, Removed: 1}, result.Stats())
+
+		unified := result.Unified().String()
+		assert.Contains(t, unified, "c: 9")
+		assert.NotContains(t, unified, "a: 9", "the first document is not in the diff")
 	})
 }
 

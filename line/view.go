@@ -81,9 +81,36 @@ func (v *View) Lines() Lines {
 	return v.lines
 }
 
+// Held returns the lines the [View] holds as new [Lines], in the order
+// [View.All] yields them, shared by pointer with the content as
+// [Collect] shares them. It is the input for a diff of the lines a slice
+// holds, such as one document of a file that holds several, where
+// [View.Lines] would diff every line of the file:
+//
+//	result := diff.Diff(before.View().Held(), after.View().Held())
+//
+// Each line keeps the number it has in the file, and the hunk headers of
+// such a diff count lines from the first one held. Line i of the result
+// is the i-th held line, not line i of the content, so a range from a
+// search of the result does not apply to the View. Search the content
+// with [View.Lines] for that. A nil View holds no lines.
+func (v *View) Held() Lines {
+	if v == nil {
+		return Lines{}
+	}
+
+	ls := make([]*Line, 0, len(v.held))
+
+	for _, l := range v.All() {
+		ls = append(ls, l)
+	}
+
+	return Collect(ls...)
+}
+
 // Count returns the number of lines the [View] holds, which is the number
-// [View.All] yields. The lines of the content, held or not, are
-// [View.Lines], and [Lines.Len] counts those.
+// [View.All] yields and [View.Held] returns. The lines of the content,
+// held or not, are [View.Lines], and [Lines.Len] counts those.
 func (v *View) Count() int {
 	if v == nil {
 		return 0
