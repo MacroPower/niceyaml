@@ -28,9 +28,8 @@ import (
 // [Node.DecodeInto] describes with the options of the Decoder, on
 // whatever Node the caller hands them: a root from [Source.Documents] or a
 // scoped Node from [Node.At]. A [Validator] the Decoder carries sees the
-// same Node, and one that checks the whole document whatever Node it
-// receives, as a [go.jacobcolvin.com/niceyaml/schema.Registry] does,
-// validates the document around each Node the Decoder decodes.
+// same Node, so a Decoder that carries one for whole documents only, as
+// a [go.jacobcolvin.com/niceyaml/schema.Registry] is, decodes roots.
 // [Decoder.Validate] runs the validation step alone. [Node.Decode] with
 // the same options decodes one node the same way, so a Decoder is the
 // options of a call held for reuse.
