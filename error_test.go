@@ -1461,6 +1461,21 @@ func TestSourceError_Format_Plain(t *testing.T) {
 		)
 	})
 
+	t.Run("control characters in the tree and the reason render as pictures", func(t *testing.T) {
+		t.Parallel()
+
+		// The message and the path spell a key of the document, so an
+		// escape sequence in either renders as its picture in the tree
+		// and in the reason a location did not resolve.
+		src := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("f"))
+		err := yamltest.Bind(t, src, niceyaml.NewError("m\x1b[31mX", niceyaml.AtPath(paths.Root().Child("k\x1b[31mY"))))
+
+		got := niceyaml.FormatError(err, 0)
+		assert.NotContains(t, got, "\x1b")
+		assert.Contains(t, got, "m\u241b[31mX")
+		assert.Contains(t, got, "no excerpt: resolve $.'k\u241b[31mY'")
+	})
+
 	t.Run("control characters render as pictures", func(t *testing.T) {
 		t.Parallel()
 

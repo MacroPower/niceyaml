@@ -12,6 +12,7 @@ import (
 
 	"github.com/goccy/go-yaml/token"
 
+	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -1418,11 +1419,15 @@ func FormatError(err error, context int) string {
 // text rather than the connector. A root without text, which stands for
 // several errors and adds no message of its own, has no row of its own,
 // so its children lead.
+//
+// Control characters in a text render as their pictures, so a key of the
+// document that holds an escape sequence cannot reach the terminal, and
+// the output holds no escape sequences as [FormatError] promises.
 func renderErrorTree(t ErrorTree) string {
 	var sb strings.Builder
 
 	if t.Text != "" {
-		sb.WriteString(t.Text)
+		sb.WriteString(escapeRows(t.Text))
 	}
 
 	writeErrorBranches(&sb, t.Children, "", t.Text != "")
@@ -1448,14 +1453,25 @@ func writeErrorBranches(sb *strings.Builder, children []ErrorTree, indent string
 			broken = true
 
 			if j == 0 {
-				sb.WriteString(indent + connector + row)
+				sb.WriteString(indent + connector + escape.Control(row))
 			} else {
-				sb.WriteString(indent + below + row)
+				sb.WriteString(indent + below + escape.Control(row))
 			}
 		}
 
 		writeErrorBranches(sb, child.Children, indent+below, broken)
 	}
+}
+
+// escapeRows renders the control characters of text as their pictures,
+// keeping the line breaks between its rows.
+func escapeRows(text string) string {
+	rows := strings.Split(text, "\n")
+	for i, row := range rows {
+		rows[i] = escape.Control(row)
+	}
+
+	return strings.Join(rows, "\n")
 }
 
 // writeString writes s to f. It drops write errors, as [fmt] itself does
@@ -1670,9 +1686,11 @@ func (e *SourceError) details(context int) []string {
 		return parts
 	}
 
+	// The reason names the path, which a key of the document spells, so
+	// its control characters render as pictures like those of the tree.
 	reason := e.Unresolved()
 	if reason != nil {
-		return []string{"no excerpt: " + reason.Error()}
+		return []string{"no excerpt: " + escape.Control(reason.Error())}
 	}
 
 	return nil
