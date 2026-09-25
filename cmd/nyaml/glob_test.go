@@ -73,10 +73,16 @@ func TestExpand(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// Create a subdirectory with a file for recursive glob testing.
+	// Create a subdirectory with a file for recursive glob testing, and
+	// one whose path sorts between the files above it, which a directory
+	// walk reports after them.
 	subdir := filepath.Join(tmpDir, "subdir")
 	require.NoError(t, os.MkdirAll(subdir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(subdir, "003.yaml"), []byte("test"), 0o644))
+
+	earlyDir := filepath.Join(tmpDir, "000dir")
+	require.NoError(t, os.MkdirAll(earlyDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(earlyDir, "x.yaml"), []byte("test"), 0o644))
 
 	// Create a file whose name contains a glob metacharacter, and one its
 	// name matches when read as a pattern.
@@ -145,7 +151,7 @@ func TestExpand(t *testing.T) {
 		},
 		"recursive glob": {
 			args:      []string{tmpDir + "/**/*.yaml"},
-			wantNames: []string{"000.yaml", "001.yaml", "002.yaml", "003.yaml"},
+			wantNames: []string{"000.yaml", "x.yaml", "001.yaml", "002.yaml", "003.yaml"},
 		},
 		"wildcard skips directories": {
 			args:      []string{filepath.Join(tmpDir, "*")},

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -56,6 +57,10 @@ func glob(pattern string) ([]string, error) {
 
 		files = append(files, match)
 	}
+
+	// A recursive pattern reports its matches in directory walk order,
+	// which puts every file of a directory ahead of its subdirectories.
+	slices.Sort(files)
 
 	return files, nil
 }
