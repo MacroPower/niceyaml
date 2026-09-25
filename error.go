@@ -189,16 +189,17 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 // stays as it is, with the path the wrapper wrote in it, so rebase an
 // error before adding context to it. A nil err, or a nil [*Error] or
 // [*SourceError] pointer, returns nil, so a validator returns the result as
-// it is. An error that is or wraps a [*SourceError] with no located
-// [*Error] above it is bound already, with its location resolved, and
-// comes back as it is. A located Error above a binding carries a location
-// of its own, so Rebase puts the base in front of that one.
+// it is. An error that is or wraps a [*SourceError], with no [*Error]
+// above it that carries a location or nests errors with [WithErrors], is
+// bound already, with its location resolved, and comes back as it is. An
+// Error above a binding that carries a location or nests errors adds
+// paths of its own, so Rebase puts the base in front of those.
 func Rebase(err error, base paths.Path) error {
 	if isNothing(err) {
 		return nil
 	}
 
-	if _, ok := anchorOf(err).err.(*SourceError); ok { //nolint:errorlint // The anchor itself, found by the walk.
+	if isBound(err) {
 		return err
 	}
 
@@ -651,11 +652,13 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 // children, each a SourceError with its own location and children, so a
 // validator's report of several violations binds to one SourceError per
 // violation whether it nests them with WithErrors or joins them. An error
-// that is or wraps a SourceError, with no located Error above it, is a
-// binding already. As a nested error it contributes that binding as the
-// child, and as the error given to Bind it comes back as it is. A located
-// Error above a binding binds anew at its own location, and its message
-// carries the position the inner binding resolved as well as its own.
+// that is or wraps a SourceError, with no Error above it that carries a
+// location or nests errors, is a binding already. As a nested error it
+// contributes that binding as the child, and as the error given to Bind
+// it comes back as it is. A located Error above a binding binds anew at
+// its own location, and its message carries the position the inner
+// binding resolved as well as its own. An Error above a binding that
+// nests errors binds anew around it, with those errors as children.
 //
 // [SourceError.Excerpt] marks the location of every node in the tree and
 // annotates each child with its message, with distant locations in
@@ -762,20 +765,45 @@ func (b binder) nodeAt(idx int) *Node {
 // bindTree binds err to b. A nil err, or a nil [*Error] or [*SourceError]
 // pointer, carries nothing to bind and comes back as a nil error, so a
 // caller compares the result against nil whatever the shape of the nil it
-// passed. An error that is or wraps a [*SourceError] along its cause chain,
-// with no located [*Error] above it, is a binding already and comes back
-// as it is. Any other error, including a located Error above a binding, is
-// bound as a new SourceError.
+// passed. An error that [isBound] reports is a binding already and comes
+// back as it is. Any other error, including an Error above a binding that
+// carries a location or nests errors, is bound as a new SourceError.
 func bindTree(err error, b binder) error {
 	if isNothing(err) {
 		return nil
 	}
 
-	if _, ok := anchorOf(err).err.(*SourceError); ok { //nolint:errorlint // The anchor itself, found by the walk.
+	if isBound(err) {
 		return err
 	}
 
 	return newSourceError(err, b)
+}
+
+// isBound reports whether err is a binding already: a [*SourceError], or
+// an error that wraps one along its cause chain with no [*Error] above it
+// that carries a location or nests errors with [WithErrors]. Such an Error
+// adds to the tree, so the error binds anew around the inner binding.
+func isBound(err error) bool {
+	for cur := err; ; {
+		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
+		case *SourceError:
+			return x != nil
+
+		case *Error:
+			if x == nil || x.loc != nil || len(x.nested()) > 0 {
+				return false
+			}
+
+			cur = x.err
+
+		case interface{ Unwrap() error }:
+			cur = x.Unwrap()
+
+		default:
+			return false
+		}
+	}
 }
 
 // anchor is the error along a cause chain that carries the location, and

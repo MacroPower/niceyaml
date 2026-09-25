@@ -4167,6 +4167,41 @@ func TestSourceError_Errors(t *testing.T) {
 	assert.NotNil(t, bound.Errors()[0])
 }
 
+func TestSourceError_Errors_AboveBinding(t *testing.T) {
+	t.Parallel()
+
+	dd := yamltest.FirstDocument(t, "name: x\nhours:\n  open: 1\n")
+	bound := dd.Bind(niceyaml.NewError("root", niceyaml.AtPath(paths.Root().Child("name"))))
+	kid := niceyaml.NewError("kid", niceyaml.AtPath(paths.Root().Child("hours", "open")))
+
+	tcs := map[string]struct {
+		err  error
+		want []string
+	}{
+		"nested errors above a binding bind as children": {
+			err:  niceyaml.WrapError(bound, niceyaml.WithErrors(kid)),
+			want: []string{"1:7: $.name: root", "3:9: $.hours.open: kid"},
+		},
+		"a binding with nothing above it comes back as it is": {
+			err:  niceyaml.WrapError(bound),
+			want: []string{"1:7: $.name: root"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := []string{}
+			for se := range niceyaml.AllSourceErrors(dd.Bind(tc.err)) {
+				got = append(got, se.Error())
+			}
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestSourceError_Document(t *testing.T) {
 	t.Parallel()
 
@@ -4396,6 +4431,23 @@ func TestRebase(t *testing.T) {
 
 		wrapped := fmt.Errorf("context: %w", bound)
 		assert.Same(t, wrapped, niceyaml.Rebase(wrapped, hours))
+	})
+
+	t.Run("errors nested above a binding join the base", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		bound := dd.Bind(niceyaml.NewError("bad name", niceyaml.AtPath(paths.Root().Child("name"))))
+		wrapped := niceyaml.WrapError(bound, niceyaml.WithErrors(
+			niceyaml.NewError("bad open", niceyaml.AtPath(paths.Root().Child("open"))),
+		))
+
+		var rebound *niceyaml.SourceError
+
+		require.ErrorAs(t, dd.Bind(niceyaml.Rebase(wrapped, hours)), &rebound)
+		require.Len(t, rebound.Errors(), 1)
+		assert.Equal(t, "3:9: $.hours.open: bad open", rebound.Errors()[0].Error())
 	})
 
 	t.Run("a location set on the rebased error is under the base", func(t *testing.T) {
