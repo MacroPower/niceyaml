@@ -1076,5 +1076,22 @@ func (p *Printer) wrapContent(content string, gutterWidth int) []string {
 		return strings.Split(content, "\n")
 	}
 
-	return strings.Split(lipgloss.Wrap(content, cw, wrapOnCharacters), "\n")
+	rows := strings.Split(lipgloss.Wrap(content, cw, wrapOnCharacters), "\n")
+
+	// The wrap leaves a row wider than cw when a breakpoint falls just
+	// past the width, so a hard wrap cuts such a row down to size, and
+	// every row fits the width the caller asked for.
+	out := make([]string, 0, len(rows))
+
+	for _, row := range rows {
+		if lipgloss.Width(row) <= cw {
+			out = append(out, row)
+
+			continue
+		}
+
+		out = append(out, strings.Split(ansi.Hardwrap(row, cw, true), "\n")...)
+	}
+
+	return out
 }

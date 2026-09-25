@@ -1166,6 +1166,28 @@ func TestPrinter_WordWrap_NarrowWidth(t *testing.T) {
 	}
 }
 
+func TestPrinter_WordWrap_BreakpointPastWidth(t *testing.T) {
+	t.Parallel()
+
+	// A breakpoint character just past the wrap width can leave a row
+	// wider than the width, and every row must still fit.
+	input := "name: some-very-long-name-that-will-wrap-around-the-viewport-width-for-sure\n"
+	view := niceyaml.NewSourceFromString(input).View()
+
+	for _, width := range []int{12, 13, 14, 16} {
+		p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrap(width))
+
+		got := p.Print(view)
+		rows := strings.Split(got, "\n")
+
+		assert.Equal(t, []int{len(rows)}, layoutRows(p.Layout(view)))
+
+		for _, row := range rows {
+			assert.LessOrEqual(t, lipgloss.Width(row), width, "width %d: %q", width, row)
+		}
+	}
+}
+
 func TestPrinter_WordWrap_WideLineNumbers(t *testing.T) {
 	t.Parallel()
 
