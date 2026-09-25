@@ -513,7 +513,12 @@ func (m *Model) GotoRevision(index int) {
 		return
 	}
 
-	m.revIndex = clamp(index, 0, len(m.revisions)-1)
+	index = clamp(index, 0, len(m.revisions)-1)
+	if index == m.revIndex {
+		return
+	}
+
+	m.revIndex = index
 	m.rebuildViews()
 }
 
@@ -559,24 +564,34 @@ func (m *Model) DiffMode() DiffMode {
 	return m.diffMode
 }
 
-// SetDiffMode sets the diff display mode and rebuilds the view.
+// SetDiffMode sets the diff display mode and rebuilds the view when the
+// change shows other content. The mode already set, or a change while the
+// viewport shows no diff before or after it, leaves the view where it is.
 func (m *Model) SetDiffMode(mode DiffMode) {
+	if mode == m.diffMode {
+		return
+	}
+
+	wasDiff := m.ShowingDiff()
 	m.diffMode = mode
-	m.rebuildViews()
+
+	if wasDiff || m.ShowingDiff() {
+		m.rebuildViews()
+	}
 }
 
-// ToggleDiffMode cycles between diff modes.
+// ToggleDiffMode cycles between diff modes, in the order [DiffModeAdjacent],
+// [DiffModeOrigin], [DiffModeNone]. The view rebuilds as for
+// [Model.SetDiffMode].
 func (m *Model) ToggleDiffMode() {
 	switch m.diffMode {
 	case DiffModeAdjacent:
-		m.diffMode = DiffModeOrigin
+		m.SetDiffMode(DiffModeOrigin)
 	case DiffModeOrigin:
-		m.diffMode = DiffModeNone
+		m.SetDiffMode(DiffModeNone)
 	case DiffModeNone:
-		m.diffMode = DiffModeAdjacent
+		m.SetDiffMode(DiffModeAdjacent)
 	}
-
-	m.rebuildViews()
 }
 
 // ViewMode returns the current view mode.
@@ -584,8 +599,13 @@ func (m *Model) ViewMode() ViewMode {
 	return m.viewMode
 }
 
-// SetViewMode sets the view mode and rebuilds the view.
+// SetViewMode sets the view mode and rebuilds the view. The mode already
+// set leaves the view where it is.
 func (m *Model) SetViewMode(mode ViewMode) {
+	if mode == m.viewMode {
+		return
+	}
+
 	m.viewMode = mode
 	m.rebuildViews()
 }
@@ -614,7 +634,12 @@ func (m *Model) HunkContext() int {
 // in [ViewModeHunks], rebuilding the view when that mode is active. Default
 // is 3.
 func (m *Model) SetHunkContext(n int) {
-	m.hunkContext = max(0, n)
+	n = max(0, n)
+	if n == m.hunkContext {
+		return
+	}
+
+	m.hunkContext = n
 
 	if m.viewMode == ViewModeHunks {
 		m.rebuildViews()

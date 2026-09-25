@@ -4859,3 +4859,50 @@ func TestViewport_ClipsRowsWiderThanContent(t *testing.T) {
 	rows = gutterRows()
 	assert.True(t, strings.HasPrefix(rows[len(rows)-1], "   -"), "row %q", rows[len(rows)-1])
 }
+
+func TestViewport_UnchangedModeKeepsPosition(t *testing.T) {
+	t.Parallel()
+
+	// A mode change that shows the same content leaves the scroll offset
+	// and the selected match where they are, as the Model doc promises
+	// for anything but a change of content.
+	var sb strings.Builder
+
+	for i := range 50 {
+		fmt.Fprintf(&sb, "k%d: v\n", i)
+	}
+
+	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+	m.SetWidth(40)
+	m.SetHeight(10)
+	m.AddRevision(niceyaml.NewSourceFromString(sb.String()))
+	m.SetSearchTerm("v")
+	m.SearchNext()
+	m.SearchNext()
+	m.SearchNext()
+	m.SetYOffset(30)
+
+	require.Equal(t, 3, m.SearchIndex())
+	require.Equal(t, 30, m.YOffset())
+
+	// One revision shows no diff in any diff mode.
+	m.ToggleDiffMode()
+	assert.Equal(t, 3, m.SearchIndex(), "toggle diff mode")
+	assert.Equal(t, 30, m.YOffset(), "toggle diff mode")
+
+	m.SetDiffMode(yamlviewport.DiffModeNone)
+	assert.Equal(t, 3, m.SearchIndex(), "set diff mode")
+	assert.Equal(t, 30, m.YOffset(), "set diff mode")
+
+	m.SetViewMode(m.ViewMode())
+	assert.Equal(t, 3, m.SearchIndex(), "same view mode")
+	assert.Equal(t, 30, m.YOffset(), "same view mode")
+
+	m.GotoRevision(m.RevisionIndex())
+	assert.Equal(t, 3, m.SearchIndex(), "same revision")
+	assert.Equal(t, 30, m.YOffset(), "same revision")
+
+	m.SetHunkContext(m.HunkContext())
+	assert.Equal(t, 3, m.SearchIndex(), "same hunk context")
+	assert.Equal(t, 30, m.YOffset(), "same hunk context")
+}
