@@ -184,16 +184,21 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 // A decode rebases the errors of every nested [SelfValidator] itself,
 // so a Validate need not rebase the Validate of a field.
 //
-// The result wraps err, so [errors.Is] and [errors.As] see through it, and
-// the text a wrapper such as [fmt.Errorf] added around a located error
-// stays as it is, with the path the wrapper wrote in it, so rebase an
-// error before adding context to it. A nil err, or a nil [*Error] or
-// [*SourceError] pointer, returns nil, so a validator returns the result as
-// it is. An error that is or wraps a [*SourceError], with no [*Error]
-// above it that carries a location or nests errors with [WithErrors], is
-// bound already, with its location resolved, and comes back as it is. An
-// Error above a binding that carries a location or nests errors adds
-// paths of its own, so Rebase puts the base in front of those.
+// An error joined from several, as [errors.Join] builds one, rebases
+// branch by branch into a new join, so each line of its message carries
+// the path of its own branch.
+//
+// The result wraps err, or each branch of a join, so [errors.Is] and
+// [errors.As] see through it, and the text a wrapper such as [fmt.Errorf]
+// added around a located error stays as it is, with the path the wrapper
+// wrote in it, so rebase an error before adding context to it. A nil
+// err, or a nil [*Error] or [*SourceError] pointer, returns nil, so a
+// validator returns the result as it is. An error that is or wraps a
+// [*SourceError], with no [*Error] above it that carries a location or
+// nests errors with [WithErrors], is bound already, with its location
+// resolved, and comes back as it is. An Error above a binding that
+// carries a location or nests errors adds paths of its own, so Rebase
+// puts the base in front of those.
 func Rebase(err error, base paths.Path) error {
 	if isNothing(err) {
 		return nil
@@ -201,6 +206,15 @@ func Rebase(err error, base paths.Path) error {
 
 	if isBound(err) {
 		return err
+	}
+
+	if branches, ok := joinBranches(err); ok {
+		rebased := make([]error, 0, len(branches))
+		for _, branch := range branches {
+			rebased = append(rebased, Rebase(branch, base))
+		}
+
+		return errors.Join(rebased...)
 	}
 
 	return &Error{err: err, base: base, rebased: true}
@@ -968,7 +982,7 @@ func (e *SourceError) addChild(n error, b binder) {
 	}
 
 	if !b.base.IsRoot() {
-		n = &Error{err: n, base: b.base, rebased: true}
+		n = Rebase(n, b.base)
 		b.base = paths.Root()
 	}
 

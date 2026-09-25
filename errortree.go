@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 
+	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
@@ -134,9 +135,12 @@ func isJoinMessage(msg string, branches []error) bool {
 // err. A binding met along the chain contributes its bound children, each
 // with the position it resolved to, and the chain ends there, since the
 // binding bound everything below it. An unbound Error contributes its
-// nested errors as they are.
+// nested errors, rebased under the base of every Error from [Rebase]
+// above them, as binding rebases them.
 func children(err error) []ErrorTree {
 	var kids []positioned
+
+	base := paths.Root()
 
 	for cur := err; !isNothing(cur); {
 		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
@@ -145,8 +149,12 @@ func children(err error) []ErrorTree {
 			cur = nil
 
 		case *Error:
+			if x.rebased {
+				base = base.Join(x.base)
+			}
+
 			for _, n := range x.Errors() {
-				kids = append(kids, positioned{tree: NewErrorTree(n)})
+				kids = append(kids, positioned{tree: NewErrorTree(rebaseChild(n, base))})
 			}
 
 			cur = x.Cause()
@@ -160,7 +168,7 @@ func children(err error) []ErrorTree {
 			// chain.
 			for _, branch := range x.Unwrap() {
 				if !isNothing(branch) {
-					kids = append(kids, positioned{tree: NewErrorTree(branch)})
+					kids = append(kids, positioned{tree: NewErrorTree(rebaseChild(branch, base))})
 				}
 			}
 
@@ -172,6 +180,16 @@ func children(err error) []ErrorTree {
 	}
 
 	return trees(kids)
+}
+
+// rebaseChild returns n rebased under base, or n as it is when base is
+// the root, which moves no path.
+func rebaseChild(n error, base paths.Path) error {
+	if base.IsRoot() {
+		return n
+	}
+
+	return Rebase(n, base)
 }
 
 // trees returns the nodes of kids in position order within the source

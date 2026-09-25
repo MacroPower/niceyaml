@@ -4413,6 +4413,44 @@ func TestRebase(t *testing.T) {
 		assert.Equal(t, "$.hours.open", p.String())
 	})
 
+	t.Run("an unbound tree shows nested paths under the base", func(t *testing.T) {
+		t.Parallel()
+
+		report := niceyaml.NewError("invalid hours", niceyaml.WithErrors(
+			niceyaml.NewError("bad open", niceyaml.AtPath(paths.Root().Child("open"))),
+		))
+
+		assert.Equal(t, stringtest.JoinLF(
+			"$.hours: invalid hours",
+			"`-- $.hours.open: bad open",
+		), fmt.Sprintf("%+v", niceyaml.Rebase(report, hours)))
+	})
+
+	t.Run("a join rebases branch by branch", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		open := niceyaml.NewError("bad open", niceyaml.AtPath(paths.Root().Child("open")))
+		other := errors.New("bad hours")
+
+		err := niceyaml.Rebase(errors.Join(open, other), hours)
+		require.EqualError(t, err, "$.hours.open: bad open\n$.hours: bad hours")
+		require.ErrorIs(t, err, open)
+		require.ErrorIs(t, err, other)
+
+		got := []string{}
+		for se := range niceyaml.AllSourceErrors(dd.Bind(err)) {
+			got = append(got, se.Error())
+		}
+
+		assert.Equal(t, []string{
+			"$.hours.open: bad open\n$.hours: bad hours",
+			"3:9: $.hours.open: bad open",
+			"3:3: $.hours: bad hours",
+		}, got)
+	})
+
 	t.Run("a nested error without a location points at the base", func(t *testing.T) {
 		t.Parallel()
 
