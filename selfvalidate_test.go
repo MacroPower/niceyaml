@@ -428,6 +428,38 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	t.Run("distinct empty values each validate", func(t *testing.T) {
+		t.Parallel()
+
+		// Every empty slice and every pointer to a zero-size value can
+		// share one address, which must not make them one value.
+		type withRules struct {
+			A rules `yaml:"a"`
+			B rules `yaml:"b"`
+		}
+
+		dd := yamltest.FirstDocument(t, "a: []\nb: []\n")
+
+		_, err := dd.Decode[withRules](t.Context())
+		require.EqualError(t, err, stringtest.JoinLF(
+			"$.a: no rules",
+			"$.b: no rules",
+		))
+
+		type withFlags struct {
+			A *flag `yaml:"a"`
+			B *flag `yaml:"b"`
+		}
+
+		dd = yamltest.FirstDocument(t, "a: {}\nb: {}\n")
+
+		_, err = dd.Decode[withFlags](t.Context())
+		require.EqualError(t, err, stringtest.JoinLF(
+			"$.a: flag set",
+			"$.b: flag set",
+		))
+	})
+
 	t.Run("a value that refers back through a map walks once", func(t *testing.T) {
 		t.Parallel()
 
@@ -625,4 +657,22 @@ func (p port) Validate() error {
 	}
 
 	return nil
+}
+
+// rules is a list that must not be empty.
+type rules []int
+
+func (r rules) Validate() error {
+	if len(r) == 0 {
+		return niceyaml.NewError("no rules")
+	}
+
+	return nil
+}
+
+// flag is a zero-size value that always reports itself.
+type flag struct{}
+
+func (flag) Validate() error {
+	return niceyaml.NewError("flag set")
 }

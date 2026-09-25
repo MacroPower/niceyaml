@@ -86,6 +86,14 @@ func (w *selfWalker) walk(v reflect.Value, base paths.Path) bool {
 			return true
 		}
 
+		if !ownsAddress(v) {
+			if v.Kind() == reflect.Pointer {
+				return w.walk(v.Elem(), base)
+			}
+
+			return w.walkValue(v, base)
+		}
+
 		if ok, seen := w.done[visitOf(v)]; seen {
 			return ok
 		}
@@ -141,6 +149,23 @@ func (w *selfWalker) enter(v reflect.Value) bool {
 // leave records that the walk is inside v no longer.
 func (w *selfWalker) leave(v reflect.Value) {
 	delete(w.walking, visitOf(v))
+}
+
+// ownsAddress reports whether the address of v, a non-nil pointer, map,
+// or slice, names v alone. Every zero-size allocation can share one
+// address, so a pointer to a zero-size value, an empty slice, or a slice
+// of zero-size elements can share its address with an unrelated value.
+// Such a value holds nothing that can refer back to it, so the walk needs
+// no record of it.
+func ownsAddress(v reflect.Value) bool {
+	switch v.Kind() {
+	case reflect.Pointer:
+		return v.Type().Elem().Size() != 0
+	case reflect.Slice:
+		return v.Len() != 0 && v.Type().Elem().Size() != 0
+	default:
+		return true
+	}
 }
 
 // visitOf returns the [visit] naming v, a pointer, map, or slice.
