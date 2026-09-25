@@ -113,7 +113,7 @@ func ignoreN(_ int, _ error) {}
 
 // isUsageError returns true if err appears to be a Cobra usage error. The
 // prefixes cover Cobra's flag parser, its command lookup, its argument-count
-// validators, and its required-flag check.
+// validators, its required-flag check, and its flag groups.
 // This is a workaround until Cobra exposes a proper usage error type.
 // See: https://github.com/spf13/cobra/pull/2266
 func isUsageError(err error) bool {
@@ -126,11 +126,14 @@ func isUsageError(err error) bool {
 		"flag needs an argument:",
 		"unknown flag:",
 		"unknown shorthand flag:",
+		"bad flag syntax:",
 		"unknown command",
 		"invalid argument",
 		"requires at least",
 		"accepts ",
 		"required flag(s)",
+		"if any flags in the group",
+		"at least one of the flags in the group",
 	} {
 		if strings.HasPrefix(s, prefix) {
 			return true

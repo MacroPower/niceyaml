@@ -148,6 +148,39 @@ func TestErrorHandler(t *testing.T) {
 				"",
 			),
 		},
+		"usage error bad flag syntax": {
+			err: errors.New("bad flag syntax: ---flag"),
+			want: stringtest.JoinLF(
+				"Error",
+				"  bad flag syntax: ---flag",
+				"",
+				"Try --help for usage.",
+				"",
+				"",
+			),
+		},
+		"usage error exclusive flag group": {
+			err: errors.New("if any flags in the group [a b] are set none of the others can be; [a b] were all set"),
+			want: stringtest.JoinLF(
+				"Error",
+				"  if any flags in the group [a b] are set none of the others can be; [a b] were all set",
+				"",
+				"Try --help for usage.",
+				"",
+				"",
+			),
+		},
+		"usage error required flag group": {
+			err: errors.New("at least one of the flags in the group [a b] is required"),
+			want: stringtest.JoinLF(
+				"Error",
+				"  at least one of the flags in the group [a b] is required",
+				"",
+				"Try --help for usage.",
+				"",
+				"",
+			),
+		},
 		"usage error unknown shorthand flag": {
 			err: errors.New("unknown shorthand flag: 'x' in -xyz"),
 			want: stringtest.JoinLF(
