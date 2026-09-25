@@ -255,6 +255,14 @@ func TestEncode(t *testing.T) {
 			style: lipgloss.NewStyle().Background(lipgloss.Color("#00ff00")),
 			want:  "bg:#00ff00",
 		},
+		"translucent color keeps its channels": {
+			style: lipgloss.NewStyle().Foreground(color.NRGBA{R: 255, G: 0, B: 0, A: 128}),
+			want:  "#ff0000",
+		},
+		"transparent color is unset": {
+			style: lipgloss.NewStyle().Foreground(color.NRGBA{R: 255, A: 0}),
+			want:  "",
+		},
 		"combined style": {
 			style: lipgloss.NewStyle().
 				Bold(true).

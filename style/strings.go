@@ -192,15 +192,12 @@ func colorToHex(c color.Color) string {
 		return ""
 	}
 
-	r, g, b, a := c.RGBA()
-	if a == 0 {
+	// RGBA premultiplies the channels by alpha, so a translucent color
+	// would encode darker than it is. NRGBA holds the channels as given.
+	nrgba, ok := color.NRGBAModel.Convert(c).(color.NRGBA)
+	if !ok || nrgba.A == 0 {
 		return ""
 	}
 
-	// Convert from 16-bit to 8-bit.
-	r8 := r >> 8
-	g8 := g >> 8
-	b8 := b >> 8
-
-	return fmt.Sprintf("#%02x%02x%02x", r8, g8, b8)
+	return fmt.Sprintf("#%02x%02x%02x", nrgba.R, nrgba.G, nrgba.B)
 }
