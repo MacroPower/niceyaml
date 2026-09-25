@@ -160,7 +160,7 @@
 // viewer shows a document with every error in place:
 //
 //	view := source.View()
-//	for _, bound := range validationErrors {
+//	for bound := range niceyaml.Bindings(err) {
 //		bound.Annotate(view)
 //	}
 //	fmt.Println(p.Print(view))
@@ -168,7 +168,8 @@
 // Annotate finds each line by identity, since every view over a source
 // shares its lines, so the view may be a slice of the source, such as one
 // document of a file from [Node.Span], or a diff against another
-// revision, where the marks land on the lines of this source alone.
+// revision, where the marks of each error land on the lines of the
+// source it is bound to.
 // [line.View.Hunks] then keeps the marked lines with context around
 // each, so a viewer shows the excerpt of every error at once, with
 // search matches or any other decoration in it:

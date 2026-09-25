@@ -65,10 +65,8 @@ func (p *Printer) PrintError(err error) string {
 		parts = append(parts, msg)
 	}
 
-	for _, bound := range niceyaml.SourceErrors(err) {
-		if detail := p.detail(bound); detail != "" {
-			parts = append(parts, detail)
-		}
+	for bound := range niceyaml.Bindings(err) {
+		parts = append(parts, p.details(bound)...)
 	}
 
 	// A bound join whose branches all carry nothing renders as an empty
@@ -80,22 +78,30 @@ func (p *Printer) PrintError(err error) string {
 	return strings.Join(parts, "\n\n")
 }
 
-// detail renders the excerpt of bound with the printer's context lines, or
-// names the reason there is none: a line starting "no excerpt:" with the
-// reason [niceyaml.SourceError.Unresolved] returns, and an error that
-// carries no location has nothing to explain. Returns "" when there is
-// nothing to show, as [niceyaml.FormatError] does.
-func (p *Printer) detail(bound *niceyaml.SourceError) string {
-	if excerpt, ok := bound.Excerpt(p.contextLines); ok {
-		return p.Print(excerpt)
+// details renders each excerpt of bound from
+// [niceyaml.SourceError.Excerpts] with the printer's context lines, one
+// per source the tree of bound touches, or names the reason there is
+// none: a line starting "no excerpt:" with the reason
+// [niceyaml.SourceError.Unresolved] returns, and an error that carries no
+// location has nothing to explain. Returns nothing when there is nothing
+// to show, as [niceyaml.FormatError] does.
+func (p *Printer) details(bound *niceyaml.SourceError) []string {
+	var parts []string
+
+	for _, excerpt := range bound.Excerpts(p.contextLines) {
+		parts = append(parts, p.Print(excerpt))
+	}
+
+	if len(parts) > 0 {
+		return parts
 	}
 
 	reason := bound.Unresolved()
 	if reason != nil {
-		return "no excerpt: " + reason.Error()
+		return []string{"no excerpt: " + reason.Error()}
 	}
 
-	return ""
+	return nil
 }
 
 // renderErrorTree draws t with a connector in front of each child, in the

@@ -3,6 +3,7 @@ package niceyaml_test
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -2870,7 +2871,7 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 		require.Len(t, bound.Errors(), 2)
 		assert.Equal(t, "1:7: a: $.name: bad first", bound.Errors()[0].Error())
 		assert.Equal(t, "1:7: b: $.name: bad second", bound.Errors()[1].Error())
-		assert.Len(t, niceyaml.SourceErrors(wrapped), 1)
+		assert.Len(t, slices.Collect(niceyaml.Bindings(wrapped)), 1)
 	})
 
 	t.Run("binding each branch reports every position", func(t *testing.T) {
@@ -3687,7 +3688,7 @@ func TestSourceError_TreeBranches(t *testing.T) {
 		// is their text joined and says nothing they do not.
 		assert.Equal(t, "$.a: bad a\n$.b: bad b", err.Error())
 		assert.Equal(t, "|-- 1:4: $.a: bad a\n`-- 2:4: $.b: bad b", report(err))
-		require.Len(t, niceyaml.SourceErrors(err), 1)
+		require.Len(t, slices.Collect(niceyaml.Bindings(err)), 1)
 
 		got := trimLines(newXMLPrinter().PrintError(err))
 		assert.Equal(t, "├── 1:4: $.a: bad a\n└── 2:4: $.b: bad b", strings.SplitN(got, "\n\n", 2)[0])
@@ -3806,7 +3807,7 @@ func TestSourceError_TreeBranches(t *testing.T) {
 	})
 }
 
-func TestSourceErrors(t *testing.T) {
+func TestBindings(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n")
@@ -3848,13 +3849,9 @@ func TestSourceErrors(t *testing.T) {
 			err:  yamltest.Bind(t, niceyaml.NewSourceFromString("c: 3\n"), fmt.Errorf("ctx: %w", first)),
 			want: []error{first},
 		},
-		"child bound to another source stands on its own": {
+		"a child stays below its parent whatever source it is bound to": {
 			err:  outer,
-			want: []error{outer, first},
-		},
-		"child bound to the same source is part of its parent": {
-			err:  docs[0].Bind(niceyaml.NewError("outer", niceyaml.WithErrors(first))),
-			want: []error{docs[0].Bind(niceyaml.NewError("outer", niceyaml.WithErrors(first)))},
+			want: []error{outer},
 		},
 	}
 
@@ -3862,15 +3859,7 @@ func TestSourceErrors(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := niceyaml.SourceErrors(tc.err)
-
-			if name == "child bound to the same source is part of its parent" {
-				require.Len(t, got, 1)
-				assert.Same(t, tc.err, got[0])
-				assert.Same(t, first, got[0].Errors()[0])
-
-				return
-			}
+			got := slices.Collect(niceyaml.Bindings(tc.err))
 
 			require.Len(t, got, len(tc.want))
 
@@ -3879,6 +3868,142 @@ func TestSourceErrors(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("stops when the caller does", func(t *testing.T) {
+		t.Parallel()
+
+		var got []*niceyaml.SourceError
+
+		for b := range niceyaml.Bindings(errors.Join(first, second)) {
+			got = append(got, b)
+
+			break
+		}
+
+		require.Len(t, got, 1)
+		assert.Same(t, first, got[0])
+	})
+}
+
+func TestSourceError_Excerpts(t *testing.T) {
+	t.Parallel()
+
+	manifest := niceyaml.NewSourceFromString("kind: App\nvalues: values.yaml\n", niceyaml.WithFilePath("manifest.yaml"))
+	values := niceyaml.NewSourceFromString("port: many\nhost: 7\n", niceyaml.WithFilePath("values.yaml"))
+
+	port := yamltest.Bind(t, values, niceyaml.NewError("not a number", niceyaml.AtPath(paths.Root().Child("port"))))
+	host := yamltest.Bind(t, values, niceyaml.NewError("not a name", niceyaml.AtPath(paths.Root().Child("host"))))
+	err := yamltest.Bind(t, manifest, niceyaml.NewError(
+		"bad values",
+		niceyaml.AtPath(paths.Root().Child("values")),
+		niceyaml.WithErrors(port, host),
+	))
+
+	var bound *niceyaml.SourceError
+
+	require.ErrorAs(t, err, &bound)
+
+	t.Run("one excerpt per source, the binding's source first", func(t *testing.T) {
+		t.Parallel()
+
+		var (
+			sources  []string
+			excerpts []string
+		)
+
+		for src, excerpt := range bound.Excerpts(0) {
+			sources = append(sources, src.Name())
+			excerpts = append(excerpts, excerpt.String())
+		}
+
+		assert.Equal(t, []string{"manifest.yaml", "values.yaml"}, sources)
+		require.Len(t, excerpts, 2)
+
+		assert.Equal(t, "   2 | values: values.yaml\n     |         ^^^^^^^^^^^", excerpts[0])
+
+		// The sibling children bound to the other source share one
+		// excerpt of it, each with its message beside its line.
+		assert.Equal(t, stringtest.JoinLF(
+			"   1 | port: many",
+			"     |       ^^^^ not a number",
+			"   2 | host: 7",
+			"     |       ^ not a name",
+		), excerpts[1])
+	})
+
+	t.Run("Excerpt keeps to the source of the binding", func(t *testing.T) {
+		t.Parallel()
+
+		excerpt, ok := bound.Excerpt(0)
+		require.True(t, ok)
+		assert.Equal(t, 1, excerpt.Count())
+	})
+
+	t.Run("Annotate marks the lines of any source the view holds", func(t *testing.T) {
+		t.Parallel()
+
+		view := values.View()
+		require.True(t, bound.Annotate(view))
+		assert.Equal(t, stringtest.JoinLF(
+			"   1 | port: many",
+			"     |       ^^^^ not a number",
+			"   2 | host: 7",
+			"     |       ^ not a name",
+		), view.String())
+	})
+
+	t.Run("FormatError renders every excerpt", func(t *testing.T) {
+		t.Parallel()
+
+		got := niceyaml.FormatError(bound, 0)
+		assert.Equal(t, stringtest.JoinLF(
+			"manifest.yaml:2:9: $.values: bad values",
+			"|-- values.yaml:1:7: $.port: not a number",
+			"`-- values.yaml:2:7: $.host: not a name",
+			"",
+			"   2 | values: values.yaml",
+			"     |         ^^^^^^^^^^^",
+			"",
+			"   1 | port: many",
+			"     |       ^^^^ not a number",
+			"   2 | host: 7",
+			"     |       ^ not a name",
+		), got)
+	})
+
+	t.Run("a tree in one source yields one excerpt", func(t *testing.T) {
+		t.Parallel()
+
+		var one *niceyaml.SourceError
+
+		require.ErrorAs(t, yamltest.Bind(t, values, niceyaml.NewError("bad", niceyaml.WithErrors(
+			niceyaml.NewError("not a number", niceyaml.AtPath(paths.Root().Child("port"))),
+		))), &one)
+
+		assert.Len(t, maps.Collect(one.Excerpts(0)), 1)
+	})
+
+	t.Run("nothing resolved yields nothing", func(t *testing.T) {
+		t.Parallel()
+
+		var none *niceyaml.SourceError
+
+		require.ErrorAs(
+			t,
+			yamltest.Bind(t, values, niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("missing")))),
+			&none,
+		)
+
+		for range none.Excerpts(0) {
+			t.Fatal("no excerpt expected")
+		}
+
+		var nilErr *niceyaml.SourceError
+
+		for range nilErr.Excerpts(0) {
+			t.Fatal("no excerpt expected")
+		}
+	})
 }
 
 func TestError_Accessors(t *testing.T) {
@@ -4652,10 +4777,10 @@ func TestAllSourceErrors(t *testing.T) {
 		require.ErrorIs(t, unresolved.Unresolved(), paths.ErrNotFound)
 	})
 
-	t.Run("the excerpt walk leaves out what the report walk yields", func(t *testing.T) {
+	t.Run("the binding walk leaves out what the report walk yields", func(t *testing.T) {
 		t.Parallel()
 
-		assert.Len(t, niceyaml.SourceErrors(tree), 1)
+		assert.Len(t, slices.Collect(niceyaml.Bindings(tree)), 1)
 		assert.Len(t, slices.Collect(niceyaml.AllSourceErrors(tree)), 3)
 	})
 }

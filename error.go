@@ -6,7 +6,6 @@ import (
 	"io"
 	"iter"
 	"log/slog"
-	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -1223,56 +1222,25 @@ func (e *SourceError) all(yield func(*SourceError) bool) bool {
 	return true
 }
 
-// SourceErrors returns every binding in the tree of err whose excerpt
-// stands on its own: each [*SourceError] reached through the wrappers and
-// joins around it, in depth-first order, so the outermost comes first and
-// each branch of an [errors.Join] follows the one before it, and, below
-// each one, every child bound to a source none of its ancestors in the
-// result is bound to. The excerpt of a binding marks the children bound to
-// the same source, so those are part of it. A caller that renders an
-// error built from several bindings, such as one per document of a file,
-// marks every one of them this way:
+// Bindings returns an iterator over each [*SourceError] reached through
+// the wrappers and joins around err, in depth-first order, so the
+// outermost comes first and each branch of an [errors.Join] follows the
+// one before it. It does not look below a binding, whose tree
+// [SourceError.All] yields and [SourceError.Annotate] marks whole, so a
+// caller that renders an error built from several bindings, such as one
+// per document of a file, marks every one of them on one view this way:
 //
 //	view := source.View()
-//	for _, bound := range niceyaml.SourceErrors(err) {
+//	for bound := range niceyaml.Bindings(err) {
 //		bound.Annotate(view)
 //	}
 //
-// A report that wants one entry per error, the children an excerpt
-// covers included, walks [AllSourceErrors] instead.
-//
-// Returns nil when err is nil or its tree holds no SourceError.
-func SourceErrors(err error) []*SourceError {
-	var out []*SourceError
-
-	var collect func(*SourceError, map[*Source]bool)
-
-	collect = func(x *SourceError, seen map[*Source]bool) {
-		if x == nil {
-			return
-		}
-
-		if !seen[x.source] {
-			out = append(out, x)
-		}
-
-		// The children of a binding to a source seen already render
-		// with the ancestor bound to it, and the rest on their own.
-		below := maps.Clone(seen)
-		below[x.source] = true
-
-		for _, c := range x.errors {
-			collect(c, below)
-		}
+// A report that wants one entry per error, the nodes below each binding
+// included, walks [AllSourceErrors] instead. A nil err has no bindings.
+func Bindings(err error) iter.Seq[*SourceError] {
+	return func(yield func(*SourceError) bool) {
+		eachBinding(err, yield)
 	}
-
-	eachBinding(err, func(x *SourceError) bool {
-		collect(x, map[*Source]bool{})
-
-		return true
-	})
-
-	return out
 }
 
 // eachBinding calls visit for each [*SourceError] reached through the
@@ -1300,13 +1268,13 @@ func eachBinding(err error, visit func(*SourceError) bool) bool {
 }
 
 // AllSourceErrors returns an iterator over every binding in the tree of
-// err: each [*SourceError] reached through the wrappers and joins around
-// err, in depth-first order, and, through [SourceError.All], every
-// binding below each one, whatever source it is bound to. It is the walk
-// a structured report makes, one that emits a row for each error with a
-// location of its own, as the example on [SourceError.Message] shows.
-// [SourceErrors] leaves out the bindings an ancestor's excerpt covers,
-// which suits a renderer and not a report. A nil err has no bindings.
+// err: each [*SourceError] [Bindings] yields, in the same order, and,
+// through [SourceError.All], every binding below each one, whatever
+// source it is bound to. It is the walk a structured report makes, one
+// that emits a row for each error with a location of its own, as the
+// example on [SourceError.Message] shows. A renderer marks a view with
+// the bindings alone, since each marks its whole tree. A nil err has no
+// bindings.
 func AllSourceErrors(err error) iter.Seq[*SourceError] {
 	return func(yield func(*SourceError) bool) {
 		eachBinding(err, func(x *SourceError) bool {
@@ -1392,8 +1360,8 @@ func FormatError(err error, context int) string {
 
 	parts := []string{renderErrorTree(NewErrorTree(err))}
 
-	for _, bound := range SourceErrors(err) {
-		parts = append(parts, bound.detail(context))
+	for bound := range Bindings(err) {
+		parts = append(parts, bound.details(context)...)
 	}
 
 	return joinParts(parts...)
@@ -1527,11 +1495,13 @@ func rangeOf(lines line.Lines, loc location) position.Range {
 // it as it is.
 //
 // Annotate finds each line by identity rather than by index, since every
-// view over the source shares its [*line.Line] values, so the view may be
+// view over a source shares its [*line.Line] values, so the view may be
 // the whole source from [Source.View], a slice of it from [line.View.Slice]
 // such as one document of a file, or a diff that interleaves the source
-// with another revision, where the marks land on the lines of this source
-// alone. A line the view does not hold is left out.
+// with another revision. A node bound to another source marks the lines
+// of that source the view holds, so a diff of two revisions shows the
+// errors of both, and a view of one source shows the nodes bound to it.
+// A line the view does not hold is left out.
 //
 // Annotate marks every location that resolves and reports whether it
 // marked any line. It reports false when no location in the tree
@@ -1540,18 +1510,24 @@ func rangeOf(lines line.Lines, loc location) position.Range {
 // location does not resolve is left out.
 //
 // Annotate marks the whole tree of the binding, so a caller marks one
-// view with the bindings [SourceErrors] returns, whose excerpts stand
-// on their own, and not with every binding [AllSourceErrors] or
-// [SourceError.All] yields, since a child marked after its parent lands
-// its message on the line twice.
+// view with each binding [Bindings] yields and not with every binding
+// [AllSourceErrors] or [SourceError.All] yields, since a child marked
+// after its parent lands its message on the line twice:
+//
+//	view := source.View()
+//	for bound := range niceyaml.Bindings(err) {
+//		bound.Annotate(view)
+//	}
 func (e *SourceError) Annotate(view *line.View) bool {
 	return len(e.annotate(view)) > 0
 }
 
-// Excerpt returns a [line.View] of the source around the error's
-// locations with each one highlighted: [SourceError.Annotate] marks a
-// fresh [Source.View] and [line.View.Hunks] keeps context lines of
-// unchanged content on either side of each marked line. Distant
+// Excerpt returns a [line.View] of the source the error is bound to
+// around the error's locations with each one highlighted:
+// [SourceError.Annotate] marks a fresh [Source.View] and
+// [line.View.Hunks] keeps context lines of unchanged content on either
+// side of each marked line, so a node bound to another source is left
+// out and [SourceError.Excerpts] shows it in its own source. Distant
 // locations become separate hunks, and the first line of each hunk
 // after the first carries a "..." annotation above it. The lines keep
 // the numbers they have in the source, so any
@@ -1580,24 +1556,66 @@ func (e *SourceError) Excerpt(context int) (*line.View, bool) {
 	return view.Hunks(context), true
 }
 
-// detail returns what [SourceError.Error] leaves out: the excerpt from
-// [SourceError.Excerpt] with context lines, which [line.View.String]
+// Excerpts returns an iterator over one excerpt per source the tree of
+// the error touches, each the [line.View] [SourceError.Excerpt] builds
+// for that source: the source the error is bound to first, then the
+// source of each node below it in the order the tree reaches them, with
+// every node bound to that source marked on it. A source none of whose
+// locations resolve, or that the tree names through unresolved nodes
+// alone, yields nothing, so an error whose tree stays in one source
+// yields one excerpt or none. An error bound to a file of values that
+// names the lines of a template beside it renders as one excerpt of
+// each file:
+//
+//	for src, excerpt := range bound.Excerpts(2) {
+//		fmt.Println(src.Name())
+//		fmt.Println(excerpt)
+//	}
+//
+// [FormatError] and
+// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] render the
+// excerpts of each binding [Bindings] yields this way. A nil SourceError
+// yields nothing.
+func (e *SourceError) Excerpts(context int) iter.Seq2[*Source, *line.View] {
+	return func(yield func(*Source, *line.View) bool) {
+		for _, src := range e.sources() {
+			view := src.View()
+
+			if len(e.annotate(view)) == 0 {
+				continue
+			}
+
+			if !yield(src, view.Hunks(context)) {
+				return
+			}
+		}
+	}
+}
+
+// details returns what [SourceError.Error] leaves out: each excerpt from
+// [SourceError.Excerpts] with context lines, which [line.View.String]
 // renders as plain text. When no location resolves, a line starting
 // "no excerpt:" names the reason [SourceError.Unresolved] returns in
-// place of the excerpt, and an error that carries no location has
-// nothing to explain. Returns "" when there is nothing to show. The
+// place of the excerpts, and an error that carries no location has
+// nothing to explain. Returns nothing when there is nothing to show. The
 // printer renders the same parts with its styles.
-func (e *SourceError) detail(context int) string {
-	if excerpt, ok := e.Excerpt(context); ok {
-		return excerpt.String()
+func (e *SourceError) details(context int) []string {
+	var parts []string
+
+	for _, excerpt := range e.Excerpts(context) {
+		parts = append(parts, excerpt.String())
+	}
+
+	if len(parts) > 0 {
+		return parts
 	}
 
 	reason := e.Unresolved()
 	if reason != nil {
-		return "no excerpt: " + reason.Error()
+		return []string{"no excerpt: " + reason.Error()}
 	}
 
-	return ""
+	return nil
 }
 
 // joinParts joins the parts that are not empty with a blank line between
@@ -1625,36 +1643,61 @@ type errorPosition struct {
 // annotate is [SourceError.Annotate] that returns the indices of the
 // lines of view it marked, with repeats, which are none when no location
 // resolved or the view holds none of their lines.
+//
+// The locations of the tree group by the source each node is bound to,
+// in the order [SourceError.sources] gives, so a line is found by the
+// identity it has in its own source and a line index of one source never
+// stands for a line of another.
 func (e *SourceError) annotate(view *line.View) []int {
 	if e == nil {
 		return nil
 	}
 
-	var positions []errorPosition
+	positions := make(map[*Source][]errorPosition)
 
 	if e.locErr == nil {
-		positions = append(positions, errorPosition{pos: e.loc.pos, ranges: e.ranges})
+		positions[e.source] = append(positions[e.source], errorPosition{pos: e.loc.pos, ranges: e.ranges})
 	}
 
-	// A node bound to another source marks that source, and its excerpt
-	// renders on its own; its children may still be bound to this one.
 	e.walk(func(n *SourceError) {
-		if n.locErr == nil && n.source == e.source {
-			positions = append(positions, errorPosition{pos: n.loc.pos, ranges: n.ranges, message: n.text()})
+		if n.locErr == nil {
+			positions[n.source] = append(positions[n.source], errorPosition{
+				pos:     n.loc.pos,
+				ranges:  n.ranges,
+				message: n.text(),
+			})
 		}
 	})
 
+	var marked []int
+
+	for _, src := range e.sources() {
+		marked = append(marked, annotateSource(view, src, positions[src])...)
+	}
+
+	if len(marked) == 0 {
+		return nil
+	}
+
+	markUnannotated(view, marked)
+
+	return marked
+}
+
+// annotateSource marks positions, the resolved locations of the nodes
+// bound to src, on view and returns the indices of the lines it marked,
+// with repeats. The view may hold the lines of src at any indices, as a
+// diff does, so every mark goes to the index that holds its line. A
+// position with no token under it has no range to highlight, so its line
+// gets an overlay of no width at its column, which renders nothing and
+// still marks the line as decorated, so the line joins the hunks
+// [line.View.Hunks] keeps.
+func annotateSource(view *line.View, src *Source, positions []errorPosition) []int {
 	if len(positions) == 0 {
 		return nil
 	}
 
-	// The view may hold the lines of the source at other indices, as a
-	// diff does, so every mark goes to the index that holds its line. A
-	// position with no token under it has no range to highlight, so its
-	// line gets an overlay of no width at its column, which renders
-	// nothing and still marks the line as decorated, so the line joins
-	// the hunks [line.View.Hunks] keeps.
-	index := e.lineIndex(view)
+	index := src.lineIndex(view)
 
 	var marked []int
 
@@ -1671,7 +1714,7 @@ func (e *SourceError) annotate(view *line.View) []int {
 		}
 
 		for _, r := range pos.ranges {
-			for _, lr := range e.source.lines.SliceLines(r) {
+			for _, lr := range src.lines.SliceLines(r) {
 				if i, ok := index(lr.Start.Line); ok {
 					view.AddOverlay(kind.GenericError, viewRange(lr, i))
 
@@ -1691,9 +1734,29 @@ func (e *SourceError) annotate(view *line.View) []int {
 		}
 	}
 
-	markUnannotated(view, marked)
-
 	return marked
+}
+
+// sources returns the source of the binding, then the source of each
+// node below it that no node before it in depth-first order is bound
+// to, so an excerpt per source comes out in the order the tree reaches
+// them.
+func (e *SourceError) sources() []*Source {
+	if e == nil {
+		return nil
+	}
+
+	out := []*Source{e.source}
+	seen := map[*Source]bool{e.source: true}
+
+	e.walk(func(n *SourceError) {
+		if !seen[n.source] {
+			seen[n.source] = true
+			out = append(out, n.source)
+		}
+	})
+
+	return out
 }
 
 // markUnannotated adds an annotation without content, in [kind.TextError]
@@ -1724,8 +1787,8 @@ func markUnannotated(view *line.View, marked []int) {
 // lineIndex returns a lookup from a line index of the source to the index
 // of view that holds that line, found by identity. A line index the
 // source does not hold, or a line the view does not hold, reports false.
-func (e *SourceError) lineIndex(view *line.View) func(int) (int, bool) {
-	lines := e.source.lines
+func (s *Source) lineIndex(view *line.View) func(int) (int, bool) {
+	lines := s.lines
 
 	return func(srcIdx int) (int, bool) {
 		if srcIdx < 0 || srcIdx >= lines.Len() {

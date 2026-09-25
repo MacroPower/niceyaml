@@ -357,7 +357,7 @@ func (v *View) Slice(spans ...position.Span) *View {
 // hunks of that view the same way:
 //
 //	view := source.View()
-//	for _, bound := range niceyaml.SourceErrors(err) {
+//	for bound := range niceyaml.Bindings(err) {
 //		bound.Annotate(view)
 //	}
 //	fmt.Println(p.Print(view.Hunks(2)))
