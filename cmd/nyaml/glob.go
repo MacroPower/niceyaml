@@ -19,7 +19,12 @@ var (
 )
 
 // glob returns the file paths matching pattern. It excludes directories
-// from the matches.
+// and symlinks to directories from the matches.
+//
+// Wildcards do not follow symlinked directories, so a symlink loop cannot
+// repeat a file or make a recursive pattern walk forever. A symlink in the
+// literal part of the pattern, before any metacharacter, is still
+// followed.
 //
 // Unlike [path/filepath.Glob], this supports ** for recursive directory
 // matching. The pattern syntax follows doublestar conventions:
@@ -32,12 +37,27 @@ var (
 //
 // Returns an error if the pattern syntax is invalid.
 func glob(pattern string) ([]string, error) {
-	matches, err := doublestar.FilepathGlob(pattern, doublestar.WithFilesOnly())
+	matches, err := doublestar.FilepathGlob(
+		pattern,
+		doublestar.WithFilesOnly(),
+		doublestar.WithNoFollow(),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("glob %q: %w", pattern, err)
 	}
 
-	return matches, nil
+	// WithNoFollow reports a symlink to a directory as a file, so drop it.
+	files := matches[:0]
+	for _, match := range matches {
+		info, err := os.Stat(match)
+		if err == nil && info.IsDir() {
+			continue
+		}
+
+		files = append(files, match)
+	}
+
+	return files, nil
 }
 
 // containsGlobChars reports whether s contains glob metacharacters.

@@ -320,3 +320,57 @@ func TestGlob(t *testing.T) {
 		})
 	}
 }
+
+func TestGlobSymlinks(t *testing.T) {
+	t.Parallel()
+
+	// Create a directory structure with symlinks:
+	// tmpDir/
+	//   sub/
+	//     x.yaml
+	//     up -> ..
+	//     up2 -> ..
+	//   dir.yaml -> sub
+	//   file.yaml -> sub/x.yaml
+	tmpDir := t.TempDir()
+	subdir := filepath.Join(tmpDir, "sub")
+
+	require.NoError(t, os.MkdirAll(subdir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(subdir, "x.yaml"), []byte("x"), 0o644))
+
+	err := os.Symlink("..", filepath.Join(subdir, "up"))
+	if err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	require.NoError(t, os.Symlink("..", filepath.Join(subdir, "up2")))
+	require.NoError(t, os.Symlink("sub", filepath.Join(tmpDir, "dir.yaml")))
+	require.NoError(t, os.Symlink(filepath.Join("sub", "x.yaml"), filepath.Join(tmpDir, "file.yaml")))
+
+	tcs := map[string]struct {
+		pattern   string
+		wantFiles []string
+	}{
+		"recursive glob skips symlinked directories": {
+			pattern: tmpDir + "/**/*.yaml",
+			wantFiles: []string{
+				filepath.Join(tmpDir, "file.yaml"),
+				filepath.Join(subdir, "x.yaml"),
+			},
+		},
+		"wildcard skips symlinked directories": {
+			pattern:   filepath.Join(tmpDir, "*.yaml"),
+			wantFiles: []string{filepath.Join(tmpDir, "file.yaml")},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			matches, err := glob(tc.pattern)
+			require.NoError(t, err)
+			assert.ElementsMatch(t, tc.wantFiles, matches)
+		})
+	}
+}
