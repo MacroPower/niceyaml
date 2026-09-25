@@ -313,6 +313,16 @@ func TestPrinter_PrintError_ControlCharacters(t *testing.T) {
 	assert.NotContains(t, got, "\x1b")
 	assert.NotContains(t, got, "\x07")
 	assert.Contains(t, got, "bad \u241b[31mred\u2407 thing")
+
+	// The reason a location did not resolve names the path, which spells a
+	// key of the document, so it gets the same treatment.
+	source := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("f.yaml"))
+	bound := source.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("mi\x1b[31mss"))))
+
+	got = p.PrintError(bound)
+	assert.NotContains(t, got, "\x1b")
+	assert.Contains(t, got, "no excerpt: ")
+	assert.Contains(t, got, "mi\u241b[31mss")
 }
 
 func TestPrinter_PrintError_Wrap(t *testing.T) {

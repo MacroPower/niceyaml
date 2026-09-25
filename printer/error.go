@@ -96,9 +96,12 @@ func (p *Printer) details(bound *niceyaml.SourceError) []string {
 		return parts
 	}
 
+	// The reason names the path that did not resolve, which a key of the
+	// document spells, so it gets the same treatment as a message of the
+	// tree.
 	reason := bound.Unresolved()
 	if reason != nil {
-		return []string{"no excerpt: " + reason.Error()}
+		return []string{strings.Join(p.wrapContent(escape.Control("no excerpt: "+reason.Error()), 0), "\n")}
 	}
 
 	return nil
