@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
@@ -154,7 +155,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// as key presses, so the search prompt reads it here. The theme
 		// picker and the viewport have no use for it.
 		if m.searching {
-			m.searchInput += msg.Content
+			m.searchInput += pastedSearchText(msg.Content)
 		}
 
 		return m, nil
@@ -213,6 +214,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.viewport, cmd = m.viewport.Update(msg)
 
 	return m, cmd
+}
+
+// pastedSearchText returns the part of pasted text that the search prompt
+// takes: the first line, without control characters. The prompt shows the
+// term on one line, and a line break or tab in it would make the term the
+// viewport searches for differ from the term the prompt shows.
+func pastedSearchText(s string) string {
+	first, _, _ := strings.Cut(s, "\n")
+
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+
+		return r
+	}, first)
 }
 
 func (m *model) updateSearchInput(msg tea.KeyPressMsg) {

@@ -77,6 +77,47 @@ func TestUpdatePasteIntoSearch(t *testing.T) {
 	assert.Equal(t, "a", got.searchInput)
 }
 
+func TestUpdatePasteControlCharacters(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		content string
+		want    string
+	}{
+		"newline keeps the first line": {
+			content: "b\nc",
+			want:    "ab",
+		},
+		"carriage return and newline keep the first line": {
+			content: "b\r\nc",
+			want:    "ab",
+		},
+		"tab is dropped": {
+			content: "b\tc",
+			want:    "abc",
+		},
+		"leading newline pastes nothing": {
+			content: "\nb",
+			want:    "a",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := newModel(&modelOptions{})
+			m.searching = true
+			m.searchInput = "a"
+
+			updated, _ := m.Update(tea.PasteMsg{Content: tc.content})
+			got, ok := updated.(model)
+			require.True(t, ok)
+			assert.Equal(t, tc.want, got.searchInput)
+		})
+	}
+}
+
 func TestRevisionLabel(t *testing.T) {
 	t.Parallel()
 
