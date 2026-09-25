@@ -439,6 +439,43 @@ func TestNewLines_NonStandardLineNumbers(t *testing.T) {
 	}
 }
 
+func TestNewLines_DroppedNewline(t *testing.T) {
+	t.Parallel()
+
+	// The lexer drops the line ending ahead of some tokens, such as a "?"
+	// after a document header or a value indicator after a directive. The
+	// token's position still names the next line, so it must open a new
+	// line rather than join the one before it.
+	tcs := map[string]struct {
+		input string
+		want  []string
+	}{
+		"explicit key after header": {
+			input: "x: 1\n---\n? a\n: b\n",
+			want:  []string{"x: 1", "---", "? a", ": b"},
+		},
+		"value indicator after directive": {
+			input: "%YAML 1.2\n: value\n",
+			want:  []string{"%YAML 1.2", ": value"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			lines := line.NewLines(tokens.Tokenize(tc.input))
+			require.Equal(t, len(tc.want), lines.Len())
+
+			for i, want := range tc.want {
+				ln := lines.Line(i)
+				assert.Equal(t, i+1, ln.Number())
+				assert.Equal(t, want, ln.Content())
+			}
+		})
+	}
+}
+
 func TestNewLines_GappedLineNumbers(t *testing.T) {
 	t.Parallel()
 

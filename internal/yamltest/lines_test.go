@@ -150,27 +150,25 @@ func TestLines_Validate(t *testing.T) {
 		assert.Contains(t, err.Error(), "column 5 not greater than previous 10")
 	})
 
-	t.Run("token line numbers normalized on same line", func(t *testing.T) {
+	t.Run("token line number opens a new line", func(t *testing.T) {
 		t.Parallel()
 
-		// Create tokens with inconsistent position line numbers.
-		// NewLines normalizes them to be consistent.
+		// The lexer drops the line ending ahead of some tokens, so a
+		// token whose position names the next line opens that line even
+		// though the Origin before it holds no line ending.
 		tks := token.Tokens{}
 		tks.Add(strTkb.Clone().Origin("first").Value("first").PositionLine(1).PositionColumn(1).Build())
 		tks.Add(
-			strTkb.Clone().Origin("second\n").Value("second").PositionLine(2).PositionColumn(10).Build(),
-		) // Different line in input.
+			strTkb.Clone().Origin("second\n").Value("second").PositionLine(2).PositionColumn(1).Build(),
+		)
 
 		lines := line.NewLines(tks)
 
-		// Both tokens end up on line 1 with normalized positions.
 		require.NoError(t, yamltest.ValidateLines(lines))
-		require.Equal(t, 1, lines.Len())
+		require.Equal(t, 2, lines.Len())
 
-		ln := lines.Line(0)
-		require.Len(t, ln.Tokens(), 2)
-		assert.Equal(t, 1, ln.Token(0).Position.Line)
-		assert.Equal(t, 1, ln.Token(1).Position.Line)
+		assert.Equal(t, 1, lines.Line(0).Token(0).Position.Line)
+		assert.Equal(t, 2, lines.Line(1).Token(0).Position.Line)
 	})
 
 	t.Run("nil position tokens - normalized", func(t *testing.T) {

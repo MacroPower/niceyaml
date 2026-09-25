@@ -479,7 +479,7 @@ func (b *builder) handleGap(tk *token.Token, parts []string, isBlockScalarConten
 	//
 	// Closing the line through finishLine also clears lastPart, so the next
 	// line's first part does not link back across the boundary.
-	if tkLine > b.currentLine+1 && len(b.currentLineSegments) > 0 {
+	if tkLine > b.currentLine && len(b.currentLineSegments) > 0 {
 		b.finishLine()
 	}
 
