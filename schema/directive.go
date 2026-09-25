@@ -177,6 +177,15 @@ type directiveResolver struct{}
 // directive that names a URL with the client [WithHTTPClient] gave it.
 //
 //	reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+//
+// The author of the document picks the file or URL the directive names,
+// so a directive can name any file the registry can read, a path outside
+// the document's directory included, and any host the client can reach.
+// A program that validates documents from another trust domain confines
+// the registry: [WithFS] restricts file reads to one file system, and a
+// client whose Transport or CheckRedirect restricts hosts on every hop
+// bounds the fetch. A program that trusts no directive at all leaves
+// Directive out of the resolvers.
 func Directive() Resolver {
 	return directiveResolver{}
 }

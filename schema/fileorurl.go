@@ -29,6 +29,11 @@ var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 // empty ref is [ErrEmptyPath] whatever baseDir is. The registry fetches
 // an HTTP/HTTPS reference with the client [WithHTTPClient] gave it.
 //
+// FileOrURL uses the reference as written, so whoever wrote it picks the
+// file or host, as the note on [File] says of a path. A registry that
+// takes references from another trust domain confines its reads with
+// [WithFS] and its fetches with a client that restricts hosts.
+//
 // The result is the shape a [Resolver] returns, so a resolver that builds
 // the reference from the document hands it back as it is:
 //
