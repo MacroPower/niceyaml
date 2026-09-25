@@ -102,11 +102,11 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 
 	gv := reflect.ValueOf(&got).Elem()
 
-	// The decoder respells a number it reads into a string, so 1.10
-	// becomes "1.1" and 0x10 becomes "16". A string want matches the
-	// scalar's text as written instead.
+	// The decoder respells a number or a bool it reads into a string, so
+	// 1.10 becomes "1.1", 0x10 becomes "16", and True becomes "true". A
+	// string want matches the scalar's text as written instead.
 	if isPlainString(gv.Type()) {
-		text, ok, err := numberText(node)
+		text, ok, err := scalarText(node)
 		if err != nil {
 			return false, err
 		}
@@ -144,11 +144,12 @@ func isPlainString(t reflect.Type) bool {
 	return t.Kind() == reflect.String && reflect.PointerTo(t).NumMethod() == 0
 }
 
-// numberText returns the text of the number node holds as the document
-// spells it, looking through an anchor or a tag on the scalar. The second
-// result is false when node holds anything other than an integer or a
-// float, which includes an alias, whose own text names the anchor.
-func numberText(node *niceyaml.Node) (string, bool, error) {
+// scalarText returns the text of the scalar node holds as the document
+// spells it, for a scalar the decoder respells: an integer, a float, an
+// infinity, a NaN, or a bool, looking through an anchor or a tag on it.
+// The second result is false when node holds anything else, which
+// includes an alias, whose own text names the anchor.
+func scalarText(node *niceyaml.Node) (string, bool, error) {
 	n, err := node.AST()
 	if err != nil {
 		//nolint:wrapcheck // The Node binds the error already.
@@ -161,7 +162,7 @@ func numberText(node *niceyaml.Node) (string, bool, error) {
 			n = v.Value
 		case *ast.TagNode:
 			n = v.Value
-		case *ast.IntegerNode, *ast.FloatNode:
+		case *ast.IntegerNode, *ast.FloatNode, *ast.InfinityNode, *ast.NanNode, *ast.BoolNode:
 			return v.GetToken().Value, true, nil
 		default:
 			return "", false, nil

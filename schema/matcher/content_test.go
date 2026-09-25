@@ -82,6 +82,31 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`version: "1.10"`),
 			want:    true,
 		},
+		"string matches infinity text as written": {
+			matcher: matcher.Content(versionPath, ".inf"),
+			input:   stringtest.Input(`version: .inf`),
+			want:    true,
+		},
+		"string does not match respelled infinity": {
+			matcher: matcher.Content(versionPath, "+Inf"),
+			input:   stringtest.Input(`version: .inf`),
+			want:    false,
+		},
+		"string matches nan text as written": {
+			matcher: matcher.Content(versionPath, ".nan"),
+			input:   stringtest.Input(`version: .nan`),
+			want:    true,
+		},
+		"string matches bool text as written": {
+			matcher: matcher.Content(versionPath, "True"),
+			input:   stringtest.Input(`version: True`),
+			want:    true,
+		},
+		"string does not match respelled bool": {
+			matcher: matcher.Content(versionPath, "true"),
+			input:   stringtest.Input(`version: True`),
+			want:    false,
+		},
 		"uncomparable dynamic type does not match": {
 			// T is any, so the compared values may hold a map, which ==
 			// cannot compare; the matcher declines rather than panics.
