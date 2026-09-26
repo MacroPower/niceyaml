@@ -640,6 +640,80 @@ func TestSplit_FirstTextPartKeepsPosition(t *testing.T) {
 	}
 }
 
+func TestSplit_PartsTakeLineIndent(t *testing.T) {
+	t.Parallel()
+
+	// Every part of a line carries the indentation of that line, whatever
+	// its token carries. The empty content of a block scalar holds no rune,
+	// so the part after it sets the indentation of the line it opens.
+	tcs := map[string]struct {
+		input           string
+		line            int
+		wantOrigins     []string
+		wantIndentNum   int
+		wantIndentLevel int
+	}{
+		"comment after multiline quoted scalar": {
+			// The lexer gives the comment an IndentNum of 1 and an
+			// IndentLevel of 0, which match no line of the source.
+			input:           "a:\n  k: 'a\n    b' # c\n  z: 1\n",
+			line:            2,
+			wantOrigins:     []string{"    b'", " # c\n"},
+			wantIndentNum:   4,
+			wantIndentLevel: 2,
+		},
+		"empty block scalar before key": {
+			input:           "x:\n  a: |\n  b: 1\n",
+			line:            2,
+			wantOrigins:     []string{"", "  b", ":", " 1\n"},
+			wantIndentNum:   2,
+			wantIndentLevel: 1,
+		},
+		"empty block scalar before comment": {
+			input:           "x:\n  a: |\n  # c\n  b: 1\n",
+			line:            2,
+			wantOrigins:     []string{"", "  # c\n"},
+			wantIndentNum:   2,
+			wantIndentLevel: 1,
+		},
+		"empty block scalar before sequence entry": {
+			input:           "x:\n  - a: |-\n  - b\n",
+			line:            2,
+			wantOrigins:     []string{"", "  -", " b\n"},
+			wantIndentNum:   2,
+			wantIndentLevel: 1,
+		},
+		"empty block scalar past end of source": {
+			// The empty content joins the last line of the source.
+			input:           "x:\n  a: |+\n",
+			line:            1,
+			wantOrigins:     []string{"  a", ":", " |+\n", ""},
+			wantIndentNum:   2,
+			wantIndentLevel: 1,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			lines := segment.Split(tokens.Tokenize(tc.input))
+			require.Greater(t, len(lines), tc.line)
+
+			origins := make([]string, 0, len(lines[tc.line].Segments))
+			for _, seg := range lines[tc.line].Segments {
+				p := seg.Part()
+				origins = append(origins, p.Origin)
+
+				assert.Equal(t, tc.wantIndentNum, p.Position.IndentNum, "part %q IndentNum", p.Origin)
+				assert.Equal(t, tc.wantIndentLevel, p.Position.IndentLevel, "part %q IndentLevel", p.Origin)
+			}
+
+			assert.Equal(t, tc.wantOrigins, origins)
+		})
+	}
+}
+
 func TestSplit_BlockScalarTrailingIndent(t *testing.T) {
 	t.Parallel()
 

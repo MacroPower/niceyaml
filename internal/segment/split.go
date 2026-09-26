@@ -41,9 +41,15 @@ type Line struct {
 //     line sits just past the parts before it.
 //   - Offset counts runes from the start of the document, not bytes, and
 //     grows from part to part.
-//   - IndentNum and IndentLevel come from the token for its first text
-//     part, except for a block scalar cut across lines, and from the
-//     leading spaces of the part for every other one.
+//   - IndentNum and IndentLevel describe the line the part sits on, and
+//     the parts of a line share them. The first part of the line that
+//     holds any rune besides a line ending sets them, so the empty
+//     content of a block scalar never does. That part takes them from
+//     its token when it holds the token's first text, unless the token
+//     is a block scalar cut across lines, and from the spaces it opens
+//     with otherwise. A token whose text starts partway through a line,
+//     such as a comment after a multiline quoted scalar, can carry
+//     indentation its part does not.
 //
 // The Value of a block scalar goes to its last content part, and the
 // Value of every other token to its first text part. A part that holds
@@ -88,13 +94,14 @@ type builder struct {
 	currentLine         int // Current line number being built.
 
 	// Position tracking.
-	currentOffset      int // Cumulative rune offset (1-indexed like lexer).
-	currentColumn      int // Column just past the parts on the current line.
-	prevLineEndColumn  int // Column just past the parts of the line finished last.
-	prevLineEndOffset  int // Offset of the rune at prevLineEndColumn.
-	currentIndentNum   int // Leading spaces on current line.
-	prevLineIndentNum  int // IndentNum from previous line.
-	currentIndentLevel int // Nesting depth level.
+	currentOffset      int  // Cumulative rune offset (1-indexed like lexer).
+	currentColumn      int  // Column just past the parts on the current line.
+	prevLineEndColumn  int  // Column just past the parts of the line finished last.
+	prevLineEndOffset  int  // Offset of the rune at prevLineEndColumn.
+	currentIndentNum   int  // Leading spaces on current line.
+	prevLineIndentNum  int  // IndentNum from previous line.
+	currentIndentLevel int  // Nesting depth level.
+	lineIndentSet      bool // Whether a part of the current line set its indentation.
 }
 
 // newBuilder creates a new [*builder] initialized from the first token.
@@ -219,7 +226,12 @@ func (b *builder) currentLineIsBehind() bool {
 }
 
 // joinCurrentLineToPrevious moves the segments of the current line onto
-// the line finished last, placing each where that line ended.
+// the line finished last, placing each where that line ended and giving
+// each the indentation of that line.
+//
+// No segment it moves holds a rune, so none of them set the indentation
+// of the current line, and currentIndentLevel still holds the level of
+// the line finished last.
 func (b *builder) joinCurrentLineToPrevious() {
 	lastLine := &b.lines[len(b.lines)-1]
 
@@ -227,6 +239,8 @@ func (b *builder) joinCurrentLineToPrevious() {
 		seg.Part().Position.Line = lastLine.Number
 		seg.Part().Position.Column = max(b.prevLineEndColumn, 1)
 		seg.Part().Position.Offset = max(b.prevLineEndOffset, 1)
+		seg.Part().Position.IndentNum = b.prevLineIndentNum
+		seg.Part().Position.IndentLevel = b.currentIndentLevel
 	}
 
 	if n := len(lastLine.Segments); n > 0 {
@@ -261,6 +275,7 @@ func (b *builder) finishLine() {
 
 	b.currentLineSegments = nil
 	b.currentIndentNum = 0 // The next line's first content sets it again.
+	b.lineIndentSet = false
 	b.currentColumn = 1
 	b.currentLine++
 }
@@ -305,20 +320,30 @@ func (b *builder) processPart(ctx *partContext) {
 		lead = len(ctx.part) - len(strings.TrimLeft(ctx.part, " \t"))
 	}
 
-	// Update indentation tracking for first content on new line.
+	// The first part of a line that holds any rune besides a line ending
+	// sets the indentation, and every part of the line shares it. The
+	// empty content of a block scalar can open a line, so the parts
+	// already on the line take the indentation when a later part sets it.
 	//
 	// Use the token's Position if available (more accurate than counting
 	// spaces in Origin, since some tokens like MappingKey don't include
 	// leading spaces). A block scalar cut across lines carries the
 	// indentation of one of its lines, so every part of one counts the
 	// spaces it opens with instead.
-	if len(b.currentLineSegments) == 0 && !partIsPureNewline {
+	if !b.lineIndentSet && ctx.part != "" && !partIsPureNewline {
 		if isFirstText && ctx.tk.Position != nil && (!ctx.isBlockScalarContent || !ctx.isMultiPart) {
 			b.currentIndentNum = ctx.tk.Position.IndentNum
 			b.currentIndentLevel = ctx.tk.Position.IndentLevel
 		} else {
 			b.currentIndentNum = countLeadingWhitespace(ctx.part)
 			b.currentIndentLevel = updateIndentLevel(b.prevLineIndentNum, b.currentIndentNum, b.currentIndentLevel)
+		}
+
+		b.lineIndentSet = true
+
+		for _, seg := range b.currentLineSegments {
+			seg.Part().Position.IndentNum = b.currentIndentNum
+			seg.Part().Position.IndentLevel = b.currentIndentLevel
 		}
 	}
 
