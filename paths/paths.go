@@ -270,7 +270,8 @@ func hasContent(body ast.Node) bool {
 	}
 }
 
-// matches resolves the path in doc and returns every match.
+// matches resolves the path in doc with r, a resolver for doc, and
+// returns every match.
 //
 // A document with a nil body below a "---" header is the null document, and
 // the root path matches that null at the header, so an error about the
@@ -281,7 +282,7 @@ func hasContent(body ast.Node) bool {
 // nil, when a path with segments meets a nil body, or when the body is a
 // directive or a comment, which is what a parse that keeps comments leaves
 // as the body of a comment-only document.
-func (p Path) matches(doc *ast.DocumentNode) ([]match, error) {
+func (p Path) matches(r *resolver, doc *ast.DocumentNode) ([]match, error) {
 	if doc != nil && doc.Body == nil && doc.Start != nil && p.selectsRoot() {
 		return []match{{node: ast.Null(doc.Start), segs: slices.Clone(p.segments)}}, nil
 	}
@@ -290,7 +291,7 @@ func (p Path) matches(doc *ast.DocumentNode) ([]match, error) {
 		return nil, fmt.Errorf("resolve %s: %w: %w", p, ErrNotFound, ErrNoDocument)
 	}
 
-	found, err := newResolver(doc).resolve(doc.Body, p.segments)
+	found, err := r.resolve(doc.Body, p.segments)
 	if err != nil {
 		return nil, fmt.Errorf("resolve %s: %w", p, err)
 	}
@@ -311,16 +312,17 @@ func (p Path) selectsRoot() bool {
 	return true
 }
 
-// single resolves the path in doc to exactly one match.
+// single resolves the path in doc with r, a resolver for doc, to exactly
+// one match.
 //
 // Returns [ErrWildcard] for a path with a `[*]` or `..` selector and wraps
 // [ErrNotFound] when nothing exists at the path.
-func (p Path) single(doc *ast.DocumentNode) (match, error) {
+func (p Path) single(r *resolver, doc *ast.DocumentNode) (match, error) {
 	if p.wildcard() {
 		return match{}, fmt.Errorf("resolve %s: %w", p, ErrWildcard)
 	}
 
-	found, err := p.matches(doc)
+	found, err := p.matches(r, doc)
 	if err != nil {
 		return match{}, err
 	}
@@ -388,12 +390,13 @@ type Match struct {
 // of an entry a `<<` merge key brings in is the path of the mapping that
 // merges it. Returns the errors [Path.Nodes] returns.
 func (p Path) Matches(doc *ast.DocumentNode) ([]Match, error) {
-	found, err := p.matches(doc)
+	r := NewResolver(doc).resolver
+
+	found, err := p.matches(r, doc)
 	if err != nil {
 		return nil, err
 	}
 
-	r := newResolver(doc)
 	matches := make([]Match, 0, len(found))
 
 	for _, m := range found {
@@ -425,23 +428,7 @@ func (p Path) Matches(doc *ast.DocumentNode) ([]Match, error) {
 // the path, together with [ErrNoDocument] when the document has no content
 // to resolve in, and [ErrAlias] when an alias on the path does not resolve.
 func (p Path) Node(doc *ast.DocumentNode) (ast.Node, error) {
-	m, err := p.single(doc)
-	if err != nil {
-		return nil, err
-	}
-
-	node, err := newResolver(doc).deref(m.node)
-	if err != nil {
-		return nil, fmt.Errorf("resolve %s: %w", p, err)
-	}
-
-	// A tree built by hand may hold a nil where the parser always puts a
-	// node, and a path that reaches one selects nothing.
-	if isNilNode(node) {
-		return nil, fmt.Errorf("resolve %s: %w", p, ErrNotFound)
-	}
-
-	return node, nil
+	return NewResolver(doc).Node(p)
 }
 
 // Token resolves the [*token.Token] that starts the node the path selects
@@ -458,7 +445,7 @@ func (p Path) Node(doc *ast.DocumentNode) (ast.Node, error) {
 // anchor yields the alias's own token rather than [ErrAlias]. Token still
 // returns [ErrAlias] for an alias an earlier selector resolves through.
 func (p Path) Token(doc *ast.DocumentNode) (*token.Token, error) {
-	m, err := p.single(doc)
+	m, err := p.single(NewResolver(doc).resolver, doc)
 	if err != nil {
 		return nil, err
 	}

@@ -49,13 +49,16 @@ func selfValidate(v any, n *Node, opts []yaml.DecodeOption) error {
 // share, as an alias makes one, walks once and reports its errors under
 // the first path, while a parent on the second path still learns that
 // the value failed. It reads the keys of a map from the node the value
-// decoded from, with the options it decoded with.
+// decoded from, with the options it decoded with, and finds that node
+// through one [paths.Resolver] for the document, so the walk binds the
+// aliases of the document once however many maps it meets.
 type selfWalker struct {
-	node    *Node
-	opts    []yaml.DecodeOption
-	walking map[visit]bool
-	done    map[visit]bool
-	errs    []error
+	node     *Node
+	resolver *paths.Resolver
+	opts     []yaml.DecodeOption
+	walking  map[visit]bool
+	done     map[visit]bool
+	errs     []error
 }
 
 // visit names a pointer, map, or slice the walker is inside of, by type
@@ -361,7 +364,7 @@ func (w *selfWalker) keyNames(base paths.Path, t reflect.Type) map[any]string {
 func (w *selfWalker) collectKeyNames(
 	at paths.Path, t reflect.Type, names map[any]string, seen map[*ast.MappingNode]bool,
 ) {
-	node, err := w.node.base.Join(at).Node(w.node.doc.root)
+	node, err := w.pathResolver().Node(w.node.base.Join(at))
 	if err != nil {
 		return
 	}
@@ -399,6 +402,17 @@ func (w *selfWalker) collectKeyNames(
 
 		w.addKeyName(entry.Key, t, names)
 	}
+}
+
+// pathResolver returns the [paths.Resolver] for the document of the
+// walk. It creates the Resolver when the walk first needs one, so a walk
+// that meets no map never binds the aliases of the document.
+func (w *selfWalker) pathResolver() *paths.Resolver {
+	if w.resolver == nil {
+		w.resolver = paths.NewResolver(w.node.doc.root)
+	}
+
+	return w.resolver
 }
 
 // addKeyName decodes key as type t and adds its text to names under the
