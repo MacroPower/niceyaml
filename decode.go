@@ -168,9 +168,11 @@ func (f ValidatorFunc) Validate(ctx context.Context, n *Node) error {
 // a validator that decodes the node reports its own failure beside a
 // schema violation of the same value. A validator that needs an earlier
 // one to have passed runs on its own instead. The run skips a nil
-// validator. The error is the failures joined in the order given, which
-// the Node binds as one, so [errors.Is] matches any one of them and the
-// decode renders them as one tree. No failure is no error. A context
+// validator. Two or more failures come back joined in the order given,
+// which the Node binds as one, so [errors.Is] matches any one of them
+// and the decode renders them as one tree. A lone failure comes back as
+// the validator returned it, so it binds with its own position, as it
+// would if that validator ran alone. No failure is no error. A context
 // that ends stops the run, and the error is then the one the context
 // reports, or the one the validator that saw it end returned.
 func MultiValidator(validators ...Validator) Validator {
@@ -200,7 +202,14 @@ func MultiValidator(validators ...Validator) Validator {
 			errs = append(errs, err)
 		}
 
-		return errors.Join(errs...)
+		switch len(errs) {
+		case 0:
+			return nil
+		case 1:
+			return errs[0]
+		default:
+			return errors.Join(errs...)
+		}
 	})
 }
 

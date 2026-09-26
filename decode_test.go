@@ -4041,6 +4041,32 @@ func TestMultiValidator(t *testing.T) {
 		assert.Equal(t, "x.yaml: $.a.b: bad b\n$.a.b: bad b", err.Error())
 	})
 
+	t.Run("a lone failure keeps its position", func(t *testing.T) {
+		t.Parallel()
+
+		src := niceyaml.NewSourceFromString("a:\n  b: 1\n  c: 2\n", niceyaml.WithFilePath("x.yaml"))
+
+		doc, err := src.Document()
+		require.NoError(t, err)
+
+		err = doc.Validate(t.Context(), niceyaml.MultiValidator(badB, passing))
+		require.ErrorIs(t, err, errB)
+		assert.Equal(t, "x.yaml:2:6: $.a.b: bad b", err.Error())
+
+		var serr *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &serr)
+
+		_, ok := serr.Range()
+		assert.True(t, ok)
+		assert.Empty(t, serr.Errors())
+
+		// A validator that binds its own error names the source once.
+		err = doc.Validate(t.Context(), niceyaml.MultiValidator(passing, badC))
+		require.ErrorIs(t, err, errC)
+		assert.Equal(t, "x.yaml:3:6: $.a.c: bad c", err.Error())
+	})
+
 	t.Run("a context that ends stops the run", func(t *testing.T) {
 		t.Parallel()
 
