@@ -169,36 +169,12 @@ func TestSegments_SourceTokenAt(t *testing.T) {
 	assert.Nil(t, segment.Segments(nil).SourceTokenAt(0))
 }
 
-func TestSegments_EndColumn(t *testing.T) {
-	t.Parallel()
-
-	at := func(col int, origin string) segment.Segment {
-		return segment.New(nil, &token.Token{Origin: origin, Position: &token.Position{Column: col}})
-	}
-
-	assert.Equal(t, 0, segment.Segments(nil).EndColumn())
-	assert.Equal(t, 8, segment.Segments{at(1, "x"), at(7, "x"), at(4, "x")}.EndColumn())
-	assert.Equal(t, 7, segment.Segments{at(1, "a"), at(2, ":"), at(4, " !t\n")}.EndColumn(),
-		"a multi-rune part ends past its start column")
-	assert.Equal(t, 1, segment.Segments{at(1, "\n")}.EndColumn(), "a newline has no width")
-	assert.Equal(t, 8, segment.Segments{at(0, "  hello")}.EndColumn(),
-		"a part below column 1, as a block scalar line reports, starts at column 1")
-	assert.Equal(t, 0, segment.Segments{segment.New(nil, &token.Token{Origin: "x"})}.EndColumn())
-}
-
-func TestSegments_Clone(t *testing.T) {
+func TestSegments_PartTokens(t *testing.T) {
 	t.Parallel()
 
 	tk := &token.Token{Origin: "x"}
 	segs := segment.Segments{segment.New(tk, tk)}
-	clone := segs.Clone()
 
-	clone = append(clone, segment.New(tk, tk))
-
-	assert.Len(t, segs, 1)
-	assert.Len(t, clone, 2)
-	assert.Same(t, tk, clone[0].Part())
-	assert.Nil(t, segment.Segments(nil).Clone())
 	assert.Equal(t, token.Tokens{tk}, segs.PartTokens())
 	assert.Nil(t, segment.Segments(nil).PartTokens())
 }

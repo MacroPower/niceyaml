@@ -118,19 +118,6 @@ func (s Segment) ContentSpan() position.Span {
 // Segments is one line's worth of [Segment] values in column order.
 type Segments []Segment
 
-// Clone returns a copy of the slice that shares the tokens with the
-// original, since neither modifies them after segmentation.
-func (s Segments) Clone() Segments {
-	if len(s) == 0 {
-		return nil
-	}
-
-	result := make(Segments, len(s))
-	copy(result, s)
-
-	return result
-}
-
 // PartTokens returns every part token in order. The slice is new, but the
 // tokens are shared.
 func (s Segments) PartTokens() token.Tokens {
@@ -144,24 +131,6 @@ func (s Segments) PartTokens() token.Tokens {
 	}
 
 	return result
-}
-
-// EndColumn returns the 1-indexed column just past the parts, which is the
-// largest Column plus the width of the part that starts there. A part whose
-// Column falls below 1, as a hand-built token may carry, counts as starting
-// at column 1. Returns 0 when no part carries a position.
-func (s Segments) EndColumn() int {
-	col := 0
-
-	for _, seg := range s {
-		if seg.part == nil || seg.part.Position == nil {
-			continue
-		}
-
-		col = max(col, max(seg.part.Position.Column, 1)+seg.width)
-	}
-
-	return col
 }
 
 // SourceTokenAt returns the source token covering the given 0-indexed
