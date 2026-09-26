@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"math"
+	"reflect"
 	"strings"
 	"time"
 
@@ -21,6 +23,13 @@ var (
 	// Schema constraint violations come back as [*niceyaml.Error] values
 	// with path information instead of wrapping this sentinel.
 	ErrValidate = errors.New("validate schema")
+
+	// ErrExcessiveAliasing indicates a value that shares maps, slices, or
+	// byte slices so heavily that the validator would read far more data
+	// than the value holds, as aliases in a YAML document make a decode
+	// share them. [Schema.Validate] and [Schema.ValidateValue] return it
+	// wrapped together with [ErrValidate].
+	ErrExcessiveAliasing = errors.New("excessive aliasing")
 
 	// ErrCompile indicates a schema document that does not compile.
 	// [Compile] and [Registry.Lookup] return it.
@@ -206,6 +215,18 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 // [ErrValidate], including a $ref the validator cannot resolve, since no
 // location in the document is at fault for that.
 //
+// ValidateValue rejects two shapes of data before checking anything. A
+// value whose shared maps, slices, or byte slices would expand past the
+// alias limit, as YAML aliases make them, returns an error wrapping both
+// [ErrValidate] and [ErrExcessiveAliasing]. The limit follows the rule
+// gopkg.in/yaml.v3 applies to the share of aliased nodes in a document,
+// and a []byte counts as one node per character of its base64 text.
+// Where yaml.v3 applies the rule node by node as it decodes,
+// ValidateValue applies it once to the whole value and counts each use
+// of an aliased scalar other than a !!binary as an unaliased node, so it
+// accepts some documents yaml.v3 rejects. A map or slice that contains
+// itself returns an error wrapping [ErrValidate].
+//
 // The context reaches the underlying [jsonschema.Validator], where remote
 // reference resolution honors its cancellation and deadlines.
 func (s *Schema) ValidateValue(ctx context.Context, data any) error {
@@ -217,7 +238,14 @@ func (s *Schema) ValidateValue(ctx context.Context, data any) error {
 // violation at a key the decoder respells, such as the hexadecimal 0x10,
 // needs the node to spell the key in its path as the source does.
 func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) error {
-	err := s.compiled.Validate(ctx, normalizeJSON(data))
+	// Both normalizeJSON and the validator read a shared value again at
+	// every use, so the check runs before either of them.
+	err := checkExpansion(data)
+	if err != nil {
+		return err
+	}
+
+	err = s.compiled.Validate(ctx, normalizeJSON(data))
 	if err == nil {
 		return nil
 	}
@@ -519,4 +547,191 @@ func normalizeJSON(data any) any {
 	default:
 		return data
 	}
+}
+
+// The limits on shared values follow the rule gopkg.in/yaml.v3 applies
+// to the aliases in a document it decodes.
+const (
+	// A value's aliases count as excessive only once the value passes
+	// both of these node counts, for aliased nodes and for all nodes.
+	minAliased  = 100
+	minExpanded = 1000
+
+	// Aliases may make up the larger share of the nodes in a value of up
+	// to the lower count, and the smaller share in a value of the higher
+	// count or more. The share falls in a straight line between them.
+	maxAliasRatio       = 0.99
+	minAliasRatio       = 0.10
+	aliasRatioRangeLow  = 400_000
+	aliasRatioRangeHigh = 4_000_000
+
+	// A node count stops growing at this cap, far past every limit
+	// above, so a chain of nested aliases cannot overflow it.
+	countCap = math.MaxInt32
+)
+
+// checkExpansion returns an error wrapping [ErrValidate] when a map or
+// slice in data contains itself. It returns one wrapping both
+// [ErrValidate] and [ErrExcessiveAliasing] when aliases make up too much
+// of the data the validator would read.
+func checkExpansion(data any) error {
+	w := expansionWalker{sizes: map[sharedKey]int{}, onPath: map[sharedKey]bool{}}
+
+	_, err := w.walk(data)
+	if err != nil {
+		return err
+	}
+
+	expanded := addCapped(w.distinct, w.aliased)
+	if w.aliased > minAliased && expanded > minExpanded &&
+		float64(w.aliased)/float64(expanded) > allowedAliasRatio(expanded) {
+		return fmt.Errorf("%w: %w", ErrValidate, ErrExcessiveAliasing)
+	}
+
+	return nil
+}
+
+// allowedAliasRatio returns the share of the expanded nodes that aliases
+// may make up in a value of expanded nodes.
+func allowedAliasRatio(expanded int) float64 {
+	switch {
+	case expanded <= aliasRatioRangeLow:
+		return maxAliasRatio
+	case expanded >= aliasRatioRangeHigh:
+		return minAliasRatio
+	default:
+		progress := float64(expanded-aliasRatioRangeLow) / float64(aliasRatioRangeHigh-aliasRatioRangeLow)
+
+		return maxAliasRatio - (maxAliasRatio-minAliasRatio)*progress
+	}
+}
+
+// expansionWalker counts the nodes of a decoded value the way the
+// validator reads them, which is every use of a shared value in full. A
+// decode shares the map, slice, or byte slice an anchor holds between
+// its aliases, and a byte slice counts as one node per character of the
+// base64 text normalizeJSON builds from it. The walker holds the size of
+// each shared value it has walked, so it walks one once and adds that
+// size at every later use. It also holds the shared values on the path
+// it is walking down, so a value that contains itself stops the walk.
+// It counts the nodes it visits as distinct, with a later use of a
+// shared value as one node, and the nodes such a use repeats as aliased.
+type expansionWalker struct {
+	sizes    map[sharedKey]int
+	onPath   map[sharedKey]bool
+	distinct int
+	aliased  int
+}
+
+// sharedKey names a map, slice, or byte slice by type, address, and
+// length, since a slice and a shorter slice of it share an address. The
+// fields serve as the map key.
+//
+//nolint:unused // The fields tell the keys of the sizes and onPath maps apart.
+type sharedKey struct {
+	typ reflect.Type
+	ptr uintptr
+	len int
+}
+
+// sharedKeyOf returns the key that names data when it is a map, slice,
+// or byte slice. It returns false for any other value and for an empty
+// one, which holds nothing to share.
+func sharedKeyOf(data any) (sharedKey, bool) {
+	switch v := data.(type) {
+	case map[string]any:
+		if len(v) == 0 {
+			return sharedKey{}, false
+		}
+
+	case []any:
+		if len(v) == 0 {
+			return sharedKey{}, false
+		}
+
+	case []byte:
+		if len(v) == 0 {
+			return sharedKey{}, false
+		}
+
+	default:
+		return sharedKey{}, false
+	}
+
+	rv := reflect.ValueOf(data)
+
+	return sharedKey{typ: rv.Type(), ptr: rv.Pointer(), len: rv.Len()}, true
+}
+
+// walk returns the size of data: one for a scalar, one per character of
+// the base64 text of a byte slice, and one for a map or slice plus the
+// size of each key and value in it. A map or slice that the walk reaches
+// from inside itself returns an error wrapping [ErrValidate].
+func (w *expansionWalker) walk(data any) (int, error) {
+	w.distinct = addCapped(w.distinct, 1)
+
+	key, ok := sharedKeyOf(data)
+	if !ok {
+		return 1, nil
+	}
+
+	if w.onPath[key] {
+		return 0, fmt.Errorf("%w: value contains itself", ErrValidate)
+	}
+
+	if size, seen := w.sizes[key]; seen {
+		w.aliased = addCapped(w.aliased, size)
+
+		return size, nil
+	}
+
+	w.onPath[key] = true
+	defer delete(w.onPath, key)
+
+	size := 1
+
+	switch v := data.(type) {
+	case []byte:
+		// The walk counted the first character of the base64 text on
+		// entry.
+		size = min(base64.StdEncoding.EncodedLen(len(v)), countCap)
+		w.distinct = addCapped(w.distinct, size-1)
+
+	case map[string]any:
+		for _, elem := range v {
+			// The key is a node of its own.
+			w.distinct = addCapped(w.distinct, 1)
+
+			n, err := w.walk(elem)
+			if err != nil {
+				return 0, err
+			}
+
+			size = addCapped(size, addCapped(1, n))
+		}
+
+	case []any:
+		for _, elem := range v {
+			n, err := w.walk(elem)
+			if err != nil {
+				return 0, err
+			}
+
+			size = addCapped(size, n)
+		}
+	}
+
+	w.sizes[key] = size
+
+	return size, nil
+}
+
+// addCapped returns a+b, or countCap when the sum would pass it. Both a
+// and b fall between zero and countCap.
+func addCapped(a, b int) int {
+	if a > countCap-b {
+		return countCap
+	}
+
+	return a + b
 }

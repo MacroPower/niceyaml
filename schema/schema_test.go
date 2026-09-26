@@ -1,7 +1,9 @@
 package schema_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"math"
@@ -843,6 +845,188 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 			assert.Contains(t, err.Error(), tc.err)
 		})
 	}
+}
+
+func TestSchema_AliasExpansion(t *testing.T) {
+	t.Parallel()
+
+	// A decode shares an anchored map, slice, or !!binary between its
+	// aliases, so each alias adds a full copy of the anchored value to the
+	// data the validator would read, and each level of aliases nested in
+	// aliases multiplies it. Validation rejects such a value before
+	// checking it, and rejects a value that contains itself.
+	t.Run("documents", func(t *testing.T) {
+		t.Parallel()
+
+		// Each level lists the level below ten times, so the last level
+		// expands to 10^8 scalars.
+		var bomb strings.Builder
+
+		bomb.WriteString("l0: &l0 [x]\n")
+
+		for level := 1; level <= 8; level++ {
+			aliases := strings.Repeat(fmt.Sprintf("*l%d, ", level-1), 10)
+			fmt.Fprintf(&bomb, "l%d: &l%d [%s]\n", level, level, strings.TrimSuffix(aliases, ", "))
+		}
+
+		// Each document from binaryAliases anchors size bytes as a
+		// !!binary and lists count aliases of it.
+		binaryAliases := func(size, count int) string {
+			text := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xab}, size))
+			list := strings.TrimSuffix(strings.Repeat("*bin, ", count), ", ")
+
+			return fmt.Sprintf("bin: &bin !!binary %s\nlist: [%s]\n", text, list)
+		}
+
+		tcs := map[string]struct {
+			schema string
+			input  string
+			err    string
+			errs   []error
+		}{
+			"alias bomb": {
+				schema: `{"type": "object"}`,
+				input:  bomb.String(),
+				errs:   []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+			},
+			"binary aliased many times": {
+				// Each alias would add the 22 KB of base64 text again.
+				schema: `{"type": "object"}`,
+				input:  binaryAliases(16<<10, 1000),
+				errs:   []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+			},
+			"binary aliased a few times": {
+				// The aliases make up nine tenths of the base64 text, which
+				// stays within the limit.
+				schema: `{"properties": {"list": {"items": {"type": "string"}}}}`,
+				input:  binaryAliases(4<<10, 10),
+			},
+			"anchor reused a few times": {
+				schema: `{
+					"type": "object",
+					"additionalProperties": {
+						"type": "object",
+						"properties": {"a": {"type": "string"}}
+					}
+				}`,
+				input: stringtest.Input(`
+					base: &b {a: 1}
+					x1: *b
+					x2: *b
+					x3: *b
+				`),
+				err: "4 schema violations",
+			},
+			"merge keys": {
+				schema: `{
+					"type": "object",
+					"additionalProperties": {
+						"type": "object",
+						"required": ["name", "replicas"]
+					}
+				}`,
+				input: stringtest.Input(`
+					defaults: &defaults {name: app, replicas: 1}
+					dev:
+					  <<: *defaults
+					staging:
+					  <<: *defaults
+					  replicas: 2
+					prod:
+					  <<: *defaults
+					  replicas: 3
+				`),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				v := compileSchema(t, []byte(tc.schema))
+				doc := yamltest.FirstDocument(t, tc.input)
+
+				data, err := doc.Decode[any](t.Context())
+				require.NoError(t, err)
+
+				for _, err := range []error{doc.Validate(t.Context(), v), v.ValidateValue(t.Context(), data)} {
+					switch {
+					case tc.errs != nil:
+						for _, want := range tc.errs {
+							require.ErrorIs(t, err, want)
+						}
+
+					case tc.err != "":
+						require.Error(t, err)
+						require.NotErrorIs(t, err, schema.ErrValidate)
+						assert.Contains(t, err.Error(), tc.err)
+
+					default:
+						require.NoError(t, err)
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("values", func(t *testing.T) {
+		t.Parallel()
+
+		v := compileSchema(t, []byte(`{
+			"properties": {
+				"a": {"type": "string"},
+				"b": {"type": "string"}
+			}
+		}`))
+
+		selfMap := map[string]any{}
+		selfMap["self"] = selfMap
+
+		selfSlice := make([]any, 1)
+		selfSlice[0] = selfSlice
+
+		outerMap := map[string]any{}
+		outerMap["list"] = []any{outerMap}
+
+		bin := []byte("hi")
+
+		tcs := map[string]struct {
+			data any
+			err  error
+		}{
+			"map containing itself": {
+				data: selfMap,
+				err:  schema.ErrValidate,
+			},
+			"slice containing itself": {
+				data: selfSlice,
+				err:  schema.ErrValidate,
+			},
+			"map containing itself through a slice": {
+				data: outerMap,
+				err:  schema.ErrValidate,
+			},
+			"bytes under two keys": {
+				data: map[string]any{"a": bin, "b": bin},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := v.ValidateValue(t.Context(), tc.data)
+				if tc.err == nil {
+					require.NoError(t, err)
+
+					return
+				}
+
+				require.ErrorIs(t, err, tc.err)
+				assert.NotErrorIs(t, err, schema.ErrExcessiveAliasing)
+			})
+		}
+	})
 }
 
 func TestSchema_BooleanSchema(t *testing.T) {
