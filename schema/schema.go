@@ -312,16 +312,24 @@ func unresolvedRefs(ve *jsonschema.ValidationError) []error {
 func newValidationError(ve *jsonschema.ValidationError, n *niceyaml.Node) *niceyaml.Error {
 	leaves := ve.Leaves()
 
+	// Bind aliases across the whole document, so an alias inside a
+	// scoped node reaches an anchor outside it.
+	var targets map[*ast.AliasNode]ast.Node
+
+	if n != nil {
+		targets = aliasTargets(n.DocumentAST())
+	}
+
 	switch len(leaves) {
 	case 0:
 		return niceyaml.NewError(ve.Message)
 	case 1:
-		return leafError(leaves[0], n)
+		return leafError(leaves[0], n, targets)
 	}
 
 	causes := make([]error, 0, len(leaves))
 	for _, leaf := range leaves {
-		causes = append(causes, leafError(leaf, n))
+		causes = append(causes, leafError(leaf, n, targets))
 	}
 
 	return niceyaml.NewError(
@@ -338,9 +346,14 @@ func newValidationError(ve *jsonschema.ValidationError, n *niceyaml.Node) *nicey
 // The path spells each key as the source does, so a key the decoder
 // respells, such as 0x10 for the member name 16, still names its member.
 // Without n, which a [Schema.ValidateValue] caller does not hand over, the
-// path spells each key as the decoder does.
-func leafError(leaf *jsonschema.ValidationError, n *niceyaml.Node) *niceyaml.Error {
-	path := sourcePath(rootOf(n), leaf.InstanceSegments())
+// path spells each key as the decoder does. The targets map binds each
+// alias in the document of n to the content it refers to.
+func leafError(
+	leaf *jsonschema.ValidationError,
+	n *niceyaml.Node,
+	targets map[*ast.AliasNode]ast.Node,
+) *niceyaml.Error {
+	path := sourcePath(rootOf(n), targets, leaf.InstanceSegments())
 
 	if leaf.TargetsKey() {
 		path = path.Key()
@@ -373,17 +386,27 @@ func rootOf(n *niceyaml.Node) ast.Node {
 // spell another way, as it spells the member name 16 as 0x10. The walk
 // down root matches each mapping key by its decoded name and writes the
 // source spelling of that key into the path instead, which a path
-// selector matches. A segment the walk cannot follow, such as a member a
-// merge key brought in, keeps its decoded name, as does every segment
-// when root is nil and a key the walk finds but cannot spell.
-func sourcePath(root ast.Node, segments []jsonschema.Segment) paths.Path {
+// selector matches.
+//
+// The walk follows an alias to the content targets binds it to, the last
+// anchor of its name before it in the document, as the paths package
+// does. A key under an aliased mapping keeps its source spelling too. A
+// segment the walk cannot follow keeps its decoded name, such as a member
+// a merge key brought in or one behind an alias targets does not bind.
+// Every segment keeps its decoded name when root is nil, as does a key
+// the walk finds but cannot spell.
+func sourcePath(
+	root ast.Node,
+	targets map[*ast.AliasNode]ast.Node,
+	segments []jsonschema.Segment,
+) paths.Path {
 	path := paths.Root()
-	node := root
+	node := followAliases(root, targets)
 
 	for _, seg := range segments {
 		if seg.IsIndex {
 			path = path.Index(seg.Index)
-			node = elementNode(node, seg.Index)
+			node = followAliases(elementNode(node, seg.Index), targets)
 
 			continue
 		}
@@ -396,10 +419,115 @@ func sourcePath(root ast.Node, segments []jsonschema.Segment) paths.Path {
 		}
 
 		path = path.Child(name)
-		node = valueNode
+		node = followAliases(valueNode, targets)
 	}
 
 	return path
+}
+
+// aliasTargets returns the content each alias in doc refers to, which is
+// the content of the last anchor of its name before the alias, the anchor
+// the decoder uses for it. It returns nil for no document and for one
+// with no body.
+func aliasTargets(doc *ast.DocumentNode) map[*ast.AliasNode]ast.Node {
+	if doc == nil || doc.Body == nil {
+		return nil
+	}
+
+	b := &aliasBinder{
+		anchors: map[string]ast.Node{},
+		targets: map[*ast.AliasNode]ast.Node{},
+	}
+
+	ast.Walk(b, doc.Body)
+
+	return b.targets
+}
+
+// aliasBinder binds aliases to anchors while [ast.Walk] visits a document
+// in order. The anchors map holds the content of the last anchor of each
+// name visited so far, and the targets map holds the content each visited
+// alias refers to.
+type aliasBinder struct {
+	anchors map[string]ast.Node
+	targets map[*ast.AliasNode]ast.Node
+}
+
+// Visit records an anchor or binds an alias, then returns b so [ast.Walk]
+// continues into the children of node. It returns nil for a nil node and
+// for a typed nil anchor or alias, so Walk stops rather than reading the
+// fields behind it.
+func (b *aliasBinder) Visit(node ast.Node) ast.Visitor {
+	switch n := node.(type) {
+	case nil:
+		return nil
+
+	case *ast.AnchorNode:
+		if n == nil {
+			return nil
+		}
+
+		if name, ok := anchorName(n.Name); ok {
+			b.anchors[name] = n.Value
+		}
+
+	case *ast.AliasNode:
+		if n == nil {
+			return nil
+		}
+
+		name, ok := anchorName(n.Value)
+		if !ok {
+			return b
+		}
+
+		if target, ok := b.anchors[name]; ok {
+			b.targets[n] = target
+		}
+	}
+
+	return b
+}
+
+// anchorName returns the name that the name node of an anchor or an alias
+// spells, and reports whether the node has one. A nil node, and one with
+// no token, has no name.
+func anchorName(node ast.Node) (string, bool) {
+	if node == nil {
+		return "", false
+	}
+
+	tk := node.GetToken()
+	if tk == nil {
+		return "", false
+	}
+
+	return tk.Value, true
+}
+
+// followAliases looks through node, and through each alias it reaches, to
+// the content targets binds the alias to. It stops at an alias with no
+// target, and at one it has already followed, so an alias that leads back
+// to itself ends the walk rather than looping.
+func followAliases(node ast.Node, targets map[*ast.AliasNode]ast.Node) ast.Node {
+	followed := map[*ast.AliasNode]bool{}
+
+	for {
+		node = contentNode(node)
+
+		alias, ok := node.(*ast.AliasNode)
+		if !ok || alias == nil || followed[alias] {
+			return node
+		}
+
+		target, ok := targets[alias]
+		if !ok {
+			return node
+		}
+
+		followed[alias] = true
+		node = target
+	}
 }
 
 // elementNode returns the element at index of the sequence node holds, or

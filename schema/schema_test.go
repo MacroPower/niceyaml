@@ -695,9 +695,14 @@ func TestSourcePath_TypedNilNode(t *testing.T) {
 
 	// The parser always puts a node where these trees hold a typed nil,
 	// but a tree built or rewritten by hand may not, and the walk keeps
-	// the decoded name for it rather than panicking.
+	// the decoded name for it rather than panicking. An alias the targets
+	// do not bind, or one they bind to itself, keeps the decoded name as
+	// well.
+	cycle := &ast.AliasNode{Value: &ast.StringNode{Value: "a"}}
+
 	tcs := map[string]struct {
 		root     ast.Node
+		targets  map[*ast.AliasNode]ast.Node
 		segments []jsonschema.Segment
 		want     string
 	}{
@@ -736,6 +741,25 @@ func TestSourcePath_TypedNilNode(t *testing.T) {
 			segments: []jsonschema.Segment{{Key: "name"}},
 			want:     "$.name",
 		},
+		"alias behind an anchor": {
+			root:     &ast.AnchorNode{Value: (*ast.AliasNode)(nil)},
+			segments: []jsonschema.Segment{{Key: "name"}},
+			want:     "$.name",
+		},
+		"alias with no target keeps the decoded name": {
+			root: &ast.MappingNode{Values: []*ast.MappingValueNode{{
+				Key:   &ast.StringNode{Value: "a"},
+				Value: &ast.AliasNode{Value: &ast.StringNode{Value: "b"}},
+			}}},
+			segments: []jsonschema.Segment{{Key: "a"}, {Key: "16"}},
+			want:     "$.a.16",
+		},
+		"alias that leads back to itself": {
+			root:     cycle,
+			targets:  map[*ast.AliasNode]ast.Node{cycle: cycle},
+			segments: []jsonschema.Segment{{Key: "name"}},
+			want:     "$.name",
+		},
 		"key with no token keeps the decoded name": {
 			root: &ast.MappingNode{Values: []*ast.MappingValueNode{{
 				Key:   &ast.IntegerNode{Value: 16},
@@ -755,7 +779,7 @@ func TestSourcePath_TypedNilNode(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, schema.SourcePath(tc.root, tc.segments).String())
+			assert.Equal(t, tc.want, schema.SourcePath(tc.root, tc.targets, tc.segments).String())
 		})
 	}
 }
@@ -1597,6 +1621,36 @@ func TestSchema_Validate_Scope(t *testing.T) {
 		assert.Equal(t, "3:9: $.0x10: expected \"integer\", got \"string\"", bound.Error())
 	})
 
+	t.Run("decoded key behind an alias resolves from the node", func(t *testing.T) {
+		t.Parallel()
+
+		// The alias inside the node refers to an anchor outside it, and
+		// the path still names the member by its source spelling.
+		dd := yamltest.FirstDocument(t, stringtest.Input(`
+			a: &a {0x10: 1}
+			b:
+			  c: *a
+		`))
+
+		aliased := compileSchema(t, []byte(`{
+			"type": "object",
+			"properties": {
+				"c": {"additionalProperties": {"type": "string"}}
+			}
+		}`))
+
+		err := yamltest.At(t, dd, paths.Root().Child("b")).Validate(t.Context(), aliased)
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+
+		rng, ok := bound.Range()
+		require.True(t, ok)
+		assert.Equal(t, position.New(0, 13), rng.Start)
+		assert.Equal(t, "1:14: $.c.0x10: expected \"string\", got \"integer\"", bound.Error())
+	})
+
 	t.Run("additional property resolves from the node", func(t *testing.T) {
 		t.Parallel()
 
@@ -1778,6 +1832,28 @@ func TestSchema_SourcePath(t *testing.T) {
 			input:    "items:\n  - 0x10: 1\n  - 0x10: hello\n",
 			wantPath: "$.items[1].0x10",
 			want:     "3:11: $.items[1].0x10: expected \"integer\", got \"string\"",
+		},
+		"respelled key behind an alias": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"b": {"additionalProperties": {"type": "string"}}
+				}
+			}`,
+			input:    "a: &a {0x10: 1}\nb: *a\n",
+			wantPath: "$.b.0x10",
+			want:     "1:14: $.b.0x10: expected \"string\", got \"integer\"",
+		},
+		"respelled key behind an alias to a block mapping": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"b": {"additionalProperties": {"type": "string"}}
+				}
+			}`,
+			input:    "a: &a\n  0x10: 1\nb: *a\n",
+			wantPath: "$.b.0x10",
+			want:     "2:9: $.b.0x10: expected \"string\", got \"integer\"",
 		},
 	}
 
