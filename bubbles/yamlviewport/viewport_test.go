@@ -1253,6 +1253,65 @@ func TestViewport_HorizontalScrollKeepsFrameOfNarrowerPane(t *testing.T) {
 	}
 }
 
+func TestViewport_HorizontalScrollKeepsFrameAtWideRune(t *testing.T) {
+	t.Parallel()
+
+	// A wide character that begins before the horizontal offset has only its
+	// right cell inside the window. The cut once kept the whole character,
+	// which pushed the rest of the row one column right and the right border
+	// out of the view. The window shows that cell as a blank, so the border
+	// keeps its column. The gutter and "k: " take four columns, so an offset
+	// of 5 falls inside the character.
+	tcs := map[string]struct {
+		mode  yamlviewport.ViewMode
+		width int
+	}{
+		"full": {
+			mode:  yamlviewport.ViewModeFull,
+			width: 20,
+		},
+		"side by side": {
+			mode:  yamlviewport.ViewModeSideBySide,
+			width: 41,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := testPrinter().With(printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())))
+			m := yamlviewport.New(yamlviewport.WithPrinter(p))
+			m.SetWidth(tc.width)
+			m.SetHeight(4)
+			m.SetViewMode(tc.mode)
+			m.SetWordWrap(false)
+			m.SetRevision(niceyaml.NewSourceFromString(
+				"a: " + strings.Repeat("a", 34) + "\nk: 日" + strings.Repeat("b", 36) + "\n",
+			))
+
+			m.SetXOffset(5)
+			require.Equal(t, 5, m.XOffset())
+
+			rows := strings.Split(ansi.Strip(m.View()), "\n")
+			require.Len(t, rows, 4)
+
+			top := rows[0]
+			for i, row := range rows[1 : len(rows)-1] {
+				require.Equal(t, ansi.StringWidth(top), ansi.StringWidth(row), "row %d: %q", i, row)
+
+				for col, r := range []rune(top) {
+					if r == '┌' || r == '┐' {
+						assert.Equal(t, "│", ansi.Cut(row, col, col+1), "row %d, col %d: %q", i, col, row)
+					}
+				}
+			}
+
+			assert.True(t, strings.HasPrefix(rows[2], "│ b"), "%q", rows[2])
+		})
+	}
+}
+
 func TestViewport_DiffOfRevisionsOverPartOfTheSource(t *testing.T) {
 	t.Parallel()
 

@@ -1497,7 +1497,8 @@ func (m *Model) rowOffset(r int) int {
 // cutRow fits a rendered row to width by cutting its content columns to the
 // horizontal window that starts at offset. The columns of the printer's
 // container frame on either side stay in place, so a border keeps its edges
-// while the content between them scrolls.
+// while the content between them scrolls. A wide character cut by the left
+// edge of the window shows as blank cells.
 func (m *Model) cutRow(row string, offset, width int) string {
 	frame := m.printer.ContainerStyle()
 	left := frame.GetMarginLeft() + frame.GetBorderLeftSize() + frame.GetPaddingLeft()
@@ -1509,12 +1510,27 @@ func (m *Model) cutRow(row string, offset, width int) string {
 	}
 
 	visible := max(0, width-left-right)
+	body := ansi.Cut(row, left, left+inner)
+
+	// A cut keeps the whole of a wide cluster that begins before offset,
+	// so the content would run wider than the window. Truncating at a
+	// column inside a cluster comes up short of that column, so start
+	// moves to the next cluster boundary, and blank cells fill the columns
+	// of the dropped cluster.
+	start := offset
+	for start < min(inner, offset+visible) && ansi.StringWidth(ansi.Truncate(body, start, "")) != start {
+		start++
+	}
+
+	content := ansi.Cut(body, start, offset+visible)
+	if start > offset {
+		content = m.printer.Style(kind.Text).Render(strings.Repeat(" ", start-offset)) + content
+	}
 
 	// A pane of the side-by-side view is padded to its own widest row,
 	// while the offset runs to the widest row of either pane, so the
 	// window can reach past the content of this row. Filling the window
 	// keeps the right frame in its column.
-	content := ansi.Cut(ansi.Cut(row, left, left+inner), offset, offset+visible)
 	if padding := visible - ansi.StringWidth(content); padding > 0 {
 		content += m.printer.Style(kind.Text).Render(strings.Repeat(" ", padding))
 	}
