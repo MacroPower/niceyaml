@@ -9,46 +9,20 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
-func TestMockNormalizer(t *testing.T) {
+func TestNormalizerFunc(t *testing.T) {
 	t.Parallel()
 
-	var _ finder.Normalizer = (*yamltest.MockNormalizer)(nil)
+	var _ finder.Normalizer = yamltest.NormalizerFunc(nil)
 
-	t.Run("NewIdentityNormalizer returns input unchanged", func(t *testing.T) {
-		t.Parallel()
+	var receivedInput string
 
-		n := yamltest.NewIdentityNormalizer()
-
-		assert.Equal(t, "hello", n.Normalize("hello"))
-		assert.Equal(t, "UPPER", n.Normalize("UPPER"))
-		assert.Empty(t, n.Normalize(""))
-		assert.Equal(t, "Ö", n.Normalize("Ö"))
+	n := yamltest.NormalizerFunc(func(in string) string {
+		receivedInput = in
+		return "custom-" + in
 	})
 
-	t.Run("NewStaticNormalizer returns the specified output", func(t *testing.T) {
-		t.Parallel()
+	result := n.Normalize("test")
 
-		n := yamltest.NewStaticNormalizer("normalized")
-
-		assert.Equal(t, "normalized", n.Normalize("any input"))
-		assert.Equal(t, "normalized", n.Normalize("different input"))
-		assert.Equal(t, "normalized", n.Normalize(""))
-	})
-
-	t.Run("NewCustomNormalizer calls custom function with input", func(t *testing.T) {
-		t.Parallel()
-
-		var receivedInput string
-
-		customFn := func(in string) string {
-			receivedInput = in
-			return "custom-" + in
-		}
-
-		n := yamltest.NewCustomNormalizer(customFn)
-		result := n.Normalize("test")
-
-		assert.Equal(t, "test", receivedInput)
-		assert.Equal(t, "custom-test", result)
-	})
+	assert.Equal(t, "test", receivedInput)
+	assert.Equal(t, "custom-test", result)
 }

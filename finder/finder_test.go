@@ -139,7 +139,7 @@ func TestFinder_Find(t *testing.T) {
 		"case insensitive with normalizer": {
 			input:      "key: VALUE",
 			search:     "value",
-			normalizer: yamltest.NewCustomNormalizer(strings.ToLower),
+			normalizer: yamltest.NormalizerFunc(strings.ToLower),
 			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 5),

@@ -74,10 +74,10 @@
 //
 // # Mocks
 //
-// [MockNormalizer] lets you test code paths that depend on normalization
-// without wiring up a real implementation:
+// [NormalizerFunc] adapts a function so it can stand in for a normalizer
+// in code paths that depend on normalization:
 //
-//	normalizer := yamltest.NewIdentityNormalizer()
+//	normalizer := yamltest.NormalizerFunc(strings.ToLower)
 //
 // A [niceyaml.ValidatorFunc] stands in for a validator.
 package yamltest
