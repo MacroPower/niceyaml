@@ -138,3 +138,79 @@ func TestResolver_Node_SeveralPaths(t *testing.T) {
 		assert.Same(t, want, got, expr)
 	}
 }
+
+func TestResolver_MergeSources(t *testing.T) {
+	t.Parallel()
+
+	// Each case reads the merge sources of the mapping at $.m, and names
+	// each source by its first key.
+	tcs := map[string]struct {
+		input string
+		opts  []niceyaml.SourceOption
+		want  []string
+		err   error
+	}{
+		"one mapping": {
+			input: "a: &a {x: 1}\nm: {<<: *a, own: 1}\n",
+			want:  []string{"x"},
+		},
+		"sequence of mappings": {
+			input: "a: &a {x: 1}\nb: &b {y: 2}\nm: {<<: [*a, *b]}\n",
+			want:  []string{"x", "y"},
+		},
+		"alias to a sequence": {
+			input: "a: &a {x: 1}\nb: &b {y: 2}\nl: &l [*a, *b]\nm: {<<: *l}\n",
+			want:  []string{"x", "y"},
+		},
+		"repeated merge keys": {
+			input: "a: &a {x: 1}\nb: &b {y: 2}\nm: {<<: *b, own: 1, <<: *a}\n",
+			opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+			want:  []string{"y", "x"},
+		},
+		"no merge key": {
+			input: "m: {k: x}\n",
+		},
+		"not a mapping": {
+			input: "m: [x, y]\n",
+		},
+		"unknown alias": {
+			input: "m: {<<: *nope}\n",
+			err:   paths.ErrAlias,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			file, err := niceyaml.NewSourceFromString(tc.input, tc.opts...).File()
+			require.NoError(t, err)
+
+			r := paths.NewResolver(file.Docs[0])
+
+			node, err := r.Node(paths.MustParse("$.m"))
+			require.NoError(t, err)
+
+			sources, err := r.MergeSources(node)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			var got []string
+
+			for _, src := range sources {
+				mapping, ok := src.(*ast.MappingNode)
+				require.True(t, ok, "source is a %T", src)
+				require.NotEmpty(t, mapping.Values)
+
+				got = append(got, mapping.Values[0].Key.GetToken().Value)
+			}
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}

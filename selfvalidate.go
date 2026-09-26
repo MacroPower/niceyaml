@@ -345,30 +345,29 @@ func fieldName(field reflect.StructField) (string, bool, bool) {
 
 // keyNames returns the text the document spells each key of the mapping
 // at base with, by the value the key decodes to as type t, so a key such
-// as 0x10 or 1.50 keeps the text a path resolves. A key a `<<` merge key
-// brings in counts, and a key of the mapping itself wins over it, as it
-// does in the decode. The map holds no key a path cannot resolve to, and
-// is empty when no mapping is at base, as for a value the document did
-// not set.
+// as 0x10 or 1.50 keeps the text a path resolves. A key any `<<` merge
+// key brings in counts, whether the merge names one mapping or a list of
+// them, directly or through an alias. A later merge source wins over an
+// earlier one, and a key of the mapping itself wins over both, as in the
+// decode. The map holds no key a path cannot resolve to, and is empty
+// when no mapping is at base, as for a value the document did not set.
 func (w *selfWalker) keyNames(base paths.Path, t reflect.Type) map[any]string {
 	names := map[any]string{}
 
-	w.collectKeyNames(base, t, names, map[*ast.MappingNode]bool{})
+	node, err := w.pathResolver().Node(w.node.base.Join(base))
+	if err == nil {
+		w.collectKeyNames(node, t, names, map[*ast.MappingNode]bool{})
+	}
 
 	return names
 }
 
-// collectKeyNames adds the keys of the mapping at the path at, and of
-// the mappings it merges, to names, as [selfWalker.keyNames] describes.
-// The seen set guards against merge cycles.
+// collectKeyNames adds the keys of the mapping node, and of the mappings
+// it merges, to names, as [selfWalker.keyNames] describes. The seen set
+// guards against merge cycles.
 func (w *selfWalker) collectKeyNames(
-	at paths.Path, t reflect.Type, names map[any]string, seen map[*ast.MappingNode]bool,
+	node ast.Node, t reflect.Type, names map[any]string, seen map[*ast.MappingNode]bool,
 ) {
-	node, err := w.pathResolver().Node(w.node.base.Join(at))
-	if err != nil {
-		return
-	}
-
 	mapping, ok := unwrapNode(node).(*ast.MappingNode)
 	if !ok || seen[mapping] {
 		return
@@ -377,22 +376,14 @@ func (w *selfWalker) collectKeyNames(
 	seen[mapping] = true
 
 	// A later merge source wins over an earlier one, and the mapping's
-	// own keys win over both, so the sources go in first, in order.
-	merge := at.Child("<<")
-	for _, entry := range mapping.Values {
-		if entry == nil || entry.Key == nil || !entry.Key.IsMergeKey() {
-			continue
+	// own keys win over both, so the sources go in first, in order. An
+	// alias in any merge that does not resolve leaves out the keys of
+	// every merge.
+	sources, err := w.pathResolver().MergeSources(mapping)
+	if err == nil {
+		for _, src := range sources {
+			w.collectKeyNames(src, t, names, seen)
 		}
-
-		if seq, ok := unwrapNode(entry.Value).(*ast.SequenceNode); ok {
-			for i := range seq.Values {
-				w.collectKeyNames(merge.Index(i), t, names, seen)
-			}
-
-			continue
-		}
-
-		w.collectKeyNames(merge, t, names, seen)
 	}
 
 	for _, entry := range mapping.Values {

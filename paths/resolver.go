@@ -48,3 +48,43 @@ func (r *Resolver) Node(p Path) (ast.Node, error) {
 
 	return node, nil
 }
+
+// MergeSources returns the mappings the `<<` merge keys of the mapping at
+// node bring in, in the order the decoder applies them. The merge keys go
+// in document order and the sources of one merge key in sequence order,
+// so a later source wins over an earlier one for a key both define. It
+// looks through the anchors, tags, and aliases on node, on each merge
+// value, and on each element of a sequence of sources.
+//
+// Returns nil when node is not a mapping, and an error wrapping [ErrAlias]
+// when an alias on the way does not resolve.
+func (r *Resolver) MergeSources(node ast.Node) ([]ast.Node, error) {
+	content, err := r.resolver.unwrap(node)
+	if err != nil {
+		return nil, fmt.Errorf("merge sources: %w", err)
+	}
+
+	mapping, ok := content.(*ast.MappingNode)
+	if !ok || mapping == nil {
+		return nil, nil
+	}
+
+	var sources []ast.Node
+
+	for _, entry := range mapping.Values {
+		if entry == nil || isNilNode(entry.Key) || !entry.Key.IsMergeKey() {
+			continue
+		}
+
+		found, err := r.resolver.mergeSources(entry.Value)
+		if err != nil {
+			return nil, fmt.Errorf("merge sources: %w", err)
+		}
+
+		for _, src := range found {
+			sources = append(sources, src)
+		}
+	}
+
+	return sources, nil
+}

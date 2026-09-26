@@ -604,6 +604,51 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			"1:25: $.base.0x10.price: negative price",
 			"1:25: $.m.0x10.price: negative price",
 		}, got)
+
+		// Keys an alias to a list of sources or a second merge key brings
+		// in report the text of their own mappings too.
+		type merged struct {
+			M map[float64]item `yaml:"m"`
+		}
+
+		mergeTcs := map[string]struct {
+			input string
+			opts  []niceyaml.SourceOption
+		}{
+			"alias to a sequence": {
+				input: "a: &a {0x10: {price: -1}}\nb: &b {0x20: {price: -1}}\nl: &l [*a, *b]\nm: {<<: *l}\n",
+			},
+			"repeated merge keys": {
+				input: "a: &a {0x10: {price: -1}}\nb: &b {0x20: {price: -1}}\nm: {<<: *a, <<: *b}\n",
+				opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+			},
+		}
+
+		for name, tc := range mergeTcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd, err := niceyaml.NewSourceFromString(tc.input, tc.opts...).Document()
+				require.NoError(t, err)
+
+				_, err = dd.Decode[merged](t.Context())
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &bound)
+
+				var got []string
+
+				for _, child := range bound.Errors() {
+					got = append(got, child.Error())
+				}
+
+				assert.Equal(t, []string{
+					"1:22: $.m.0x10.price: negative price",
+					"2:22: $.m.0x20.price: negative price",
+				}, got)
+			})
+		}
 	})
 
 	t.Run("a leaf type validates itself", func(t *testing.T) {
