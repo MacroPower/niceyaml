@@ -542,12 +542,12 @@ func TestDiffer_Hunks(t *testing.T) {
 			context: 1,
 			wantLen: 4,
 			flags: map[int]line.Flag{
-				0: line.FlagDefault,
-				1: line.FlagDeleted,
-				2: line.FlagInserted,
 				3: line.FlagDefault,
+				4: line.FlagDeleted,
+				5: line.FlagInserted,
+				6: line.FlagDefault,
 			},
-			annotations: map[int]string{0: "@@ -4,3 +4,3 @@"},
+			annotations: map[int]string{3: "@@ -4,3 +4,3 @@"},
 		},
 		"context 0 shows only changes": {
 			before: stringtest.Input(`
@@ -567,10 +567,10 @@ func TestDiffer_Hunks(t *testing.T) {
 			context: 0,
 			wantLen: 2,
 			flags: map[int]line.Flag{
-				0: line.FlagDeleted,
-				1: line.FlagInserted,
+				2: line.FlagDeleted,
+				3: line.FlagInserted,
 			},
-			annotations: map[int]string{0: "@@ -3 +3 @@"},
+			annotations: map[int]string{2: "@@ -3 +3 @@"},
 		},
 		"no changes returns empty": {
 			before:    "key: value\n",
@@ -592,10 +592,10 @@ func TestDiffer_Hunks(t *testing.T) {
 			context: -5,
 			wantLen: 2,
 			flags: map[int]line.Flag{
-				0: line.FlagDeleted,
-				1: line.FlagInserted,
+				1: line.FlagDeleted,
+				2: line.FlagInserted,
 			},
-			annotations: map[int]string{0: "@@ -2 +2 @@"},
+			annotations: map[int]string{1: "@@ -2 +2 @@"},
 		},
 		"append reports line before insertion with zero count": {
 			before: stringtest.Input(`
@@ -613,10 +613,10 @@ func TestDiffer_Hunks(t *testing.T) {
 			context: 0,
 			wantLen: 2,
 			flags: map[int]line.Flag{
-				0: line.FlagInserted,
-				1: line.FlagInserted,
+				3: line.FlagInserted,
+				4: line.FlagInserted,
 			},
-			annotations: map[int]string{0: "@@ -3,0 +4,2 @@"},
+			annotations: map[int]string{3: "@@ -3,0 +4,2 @@"},
 		},
 		"deletion reports line before removal with zero count": {
 			before: stringtest.Input(`
@@ -631,9 +631,9 @@ func TestDiffer_Hunks(t *testing.T) {
 			context: 0,
 			wantLen: 1,
 			flags: map[int]line.Flag{
-				0: line.FlagDeleted,
+				1: line.FlagDeleted,
 			},
-			annotations: map[int]string{0: "@@ -2 +1,0 @@"},
+			annotations: map[int]string{1: "@@ -2 +1,0 @@"},
 		},
 		"insertion at start reports zero line": {
 			before: stringtest.Input(`
@@ -685,10 +685,12 @@ func TestDiffer_Hunks(t *testing.T) {
 			result := diff.Diff(beforeTokens.Lines(), afterTokens.Lines())
 			got := result.Hunks(tc.context)
 
+			// The hunks keep the indices of the unified view.
+			require.NotNil(t, got)
+			assert.Equal(t, result.Unified().Lines().Len(), got.Lines().Len())
+
 			if tc.wantEmpty {
-				require.NotNil(t, got)
 				assert.Equal(t, 0, got.Count())
-				assert.Equal(t, result.Unified().Lines().Len(), got.Lines().Len())
 
 				// The empty view takes decoration as any other.
 				got.AddOverlay(kind.GenericHighlight, position.NewRange(position.New(0, 0), position.New(0, 1)))
@@ -700,6 +702,7 @@ func TestDiffer_Hunks(t *testing.T) {
 			assert.Equal(t, tc.wantLen, got.Count())
 
 			for lineIdx, wantFlag := range tc.flags {
+				assert.True(t, got.Contains(lineIdx), "line %d not held", lineIdx)
 				assert.Equal(t, wantFlag, got.Flag(lineIdx), "flag mismatch at line %d", lineIdx)
 			}
 
@@ -708,6 +711,64 @@ func TestDiffer_Hunks(t *testing.T) {
 					anns := got.Annotations(lineIdx)
 					require.NotEmpty(t, anns, "expected annotation at line %d", lineIdx)
 					assert.Equal(t, wantAnnotation, anns[0].Content)
+				}
+			}
+		})
+	}
+}
+
+func TestDiffResult_HunksKeepUnifiedIndices(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		before   string
+		after    string
+		mark     int
+		wantHeld []int
+	}{
+		"changes": {
+			before:   "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n",
+			after:    "a: 1\nb: 2\nc: 3\nd: 4\ne: 6\n",
+			mark:     5,
+			wantHeld: []int{3, 4, 5},
+		},
+		"no changes": {
+			before: "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n",
+			after:  "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n",
+			mark:   4,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			before := niceyaml.NewSourceFromString(tc.before, niceyaml.WithName("a"))
+			after := niceyaml.NewSourceFromString(tc.after, niceyaml.WithName("b"))
+			result := diff.Diff(before.Lines(), after.Lines())
+
+			unified := result.Unified()
+			got := result.Hunks(1)
+			require.Equal(t, unified.Lines().Len(), got.Lines().Len())
+
+			var held []int
+
+			for i, l := range got.All() {
+				held = append(held, i)
+
+				assert.Same(t, unified.Lines().Line(i), l, "line %d", i)
+			}
+
+			assert.Equal(t, tc.wantHeld, held)
+
+			// A unified index marks the same line in the hunks.
+			got.AddOverlay(kind.GenericHighlight, position.NewRange(position.New(tc.mark, 0), position.New(tc.mark, 1)))
+
+			for i := range got.Lines().All() {
+				if i == tc.mark {
+					assert.NotEmpty(t, got.Overlays(i), "line %d", i)
+				} else {
+					assert.Empty(t, got.Overlays(i), "line %d", i)
 				}
 			}
 		})

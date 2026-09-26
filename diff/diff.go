@@ -184,7 +184,11 @@ func (r *Result) Unified() *line.View {
 // change. A context of 0 shows only the changed lines, and Hunks treats
 // negative values as 0.
 //
-// Each line carries the flag and the line number it has in
+// The view is a [line.View.Slice] of [Result.Unified] and keeps its
+// indices, as [line.View.Hunks] does. Its [line.View.Lines] returns every
+// line of the unified diff, so a range from a search of those lines
+// applies to the hunks, and [line.View.Count] is the number of lines the
+// hunks hold. Each line carries the flag and the line number it has in
 // [Result.Unified], so the view prints with the same numbers, and the
 // first line of each hunk carries a [line.Above] annotation holding the
 // unified hunk header. A diff with no changes has no hunks, and the view
@@ -194,30 +198,28 @@ func (r *Result) Unified() *line.View {
 // Each call returns a new view with its own decoration, so overlays added
 // to one do not affect another.
 func (r *Result) Hunks(context int) *line.View {
-	context = max(0, context)
+	var changes []int
 
-	hunkSpans := selectHunkSpans(r.ops, context)
-	if len(hunkSpans) == 0 {
-		// A view over the unified lines that holds none of them, so a
-		// caller decorates or prints it as it would the hunks.
-		return lineOps(r.ops).toView().Slice(position.Span{})
+	for i, op := range r.ops {
+		if op.kind != lcs.OpEqual {
+			changes = append(changes, i)
+		}
 	}
 
-	var (
-		selected lineOps
-		headers  []int
-	)
+	unified := r.Unified()
 
-	for _, span := range hunkSpans {
-		headers = append(headers, len(selected))
-		selected = append(selected, r.ops[span.Start:span.End]...)
+	spans := position.ContextSpans(changes, context, len(r.ops))
+	if len(spans) == 0 {
+		// Slice with no span holds every line, and an empty span holds
+		// none.
+		return unified.Slice(position.Span{})
 	}
 
-	view := selected.toView()
+	view := unified.Slice(spans...)
 
 	// The hunk header goes above the first line of each hunk.
-	for i, span := range hunkSpans {
-		view.Annotate(headers[i], line.Annotation{
+	for _, span := range spans {
+		view.Annotate(span.Start, line.Annotation{
 			Content:   formatHunkHeader(span, r.beforeSums, r.afterSums),
 			Kind:      kind.UIHunkHeader,
 			Placement: line.Above,
@@ -516,23 +518,4 @@ func writeHunkRange(b *strings.Builder, sign byte, start, count int) {
 	default:
 		fmt.Fprintf(b, "%c%d,%d", sign, start, count)
 	}
-}
-
-// selectHunkSpans collects change indices and groups them into expanded spans.
-// Returns spans representing the op index ranges to include in each hunk.
-func selectHunkSpans(ops []lineOp, context int) position.Spans {
-	// Collect indices of non-equal operations.
-	var changeIndices []int
-
-	for i, op := range ops {
-		if op.kind != lcs.OpEqual {
-			changeIndices = append(changeIndices, i)
-		}
-	}
-
-	if len(changeIndices) == 0 {
-		return nil
-	}
-
-	return position.ContextSpans(changeIndices, context, len(ops))
 }

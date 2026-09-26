@@ -16,7 +16,8 @@
 // lines around each and a hunk header above it, and [Result.Before] with
 // [Result.After] return aligned views for side-by-side rendering. Each call
 // returns a fresh [line.View], so overlays added to one rendering do not
-// affect another.
+// affect another. The hunks are a slice of the unified view and keep its
+// line indices, so one index marks the same line in both.
 //
 // Lines compare by their content with line endings stripped, so a change
 // from LF to CRLF endings or a missing final newline is not a difference.
