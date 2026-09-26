@@ -90,7 +90,7 @@ func (v *View) Lines() Lines {
 //	result := diff.Diff(before.View().Held(), after.View().Held())
 //
 // Each line keeps the number it has in the file, and the hunk headers of
-// such a diff count lines from the first one held. Line i of the result
+// such a diff name lines by those numbers too. Line i of the result
 // is the i-th held line, not line i of the content, so a range from a
 // search of the result does not apply to the View. Search the content
 // with [View.Lines] for that. A nil View holds no lines.

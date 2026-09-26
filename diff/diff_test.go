@@ -775,6 +775,192 @@ func TestDiffResult_HunksKeepUnifiedIndices(t *testing.T) {
 	}
 }
 
+func TestDiffer_HunksOfPartOfASource(t *testing.T) {
+	t.Parallel()
+
+	// The second document starts after the separator on line 4, so its
+	// body lines are 5, 6, and 7 in the file.
+	head := "x: 1\ny: 2\nz: 3\n"
+	body := "a: 1\nb: 2\nc: 3\n"
+
+	tcs := map[string]struct {
+		beforeHead string
+		before     string
+		afterHead  string
+		after      string
+		context    int
+		want       []string
+	}{
+		"modify one line": {
+			beforeHead: head,
+			before:     body,
+			afterHead:  head,
+			after:      "a: 1\nb: 9\nc: 3\n",
+			want:       []string{"@@ -6 +6 @@"},
+		},
+		"insert after the separator": {
+			beforeHead: head,
+			before:     body,
+			afterHead:  head,
+			after:      "w: 0\na: 1\nb: 2\nc: 3\n",
+			want:       []string{"@@ -4,0 +5 @@"},
+		},
+		"append at end": {
+			beforeHead: head,
+			before:     body,
+			afterHead:  head,
+			after:      "a: 1\nb: 2\nc: 3\nd: 4\n",
+			want:       []string{"@@ -7,0 +8 @@"},
+		},
+		"delete the last line": {
+			beforeHead: head,
+			before:     body,
+			afterHead:  head,
+			after:      "a: 1\nb: 2\n",
+			want:       []string{"@@ -7 +6,0 @@"},
+		},
+		"two separate hunks": {
+			beforeHead: head,
+			before:     "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n",
+			afterHead:  head,
+			after:      "a: 0\nb: 2\nc: 3\nd: 4\ne: 0\n",
+			want:       []string{"@@ -5 +5 @@", "@@ -9 +9 @@"},
+		},
+		"context 1": {
+			beforeHead: head,
+			before:     body,
+			afterHead:  head,
+			after:      "a: 1\nb: 9\nc: 3\n",
+			context:    1,
+			want:       []string{"@@ -5,3 +5,3 @@"},
+		},
+		"earlier document grew": {
+			beforeHead: head,
+			before:     body,
+			afterHead:  head + "v: 4\nu: 5\n",
+			after:      "a: 1\nb: 9\nc: 3\n",
+			want:       []string{"@@ -6 +8 @@"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			before := niceyaml.NewSourceFromString(tc.beforeHead + "---\n" + tc.before)
+			after := niceyaml.NewSourceFromString(tc.afterHead + "---\n" + tc.after)
+
+			beforeDocs, err := before.Documents()
+			require.NoError(t, err)
+			require.Len(t, beforeDocs, 2)
+
+			afterDocs, err := after.Documents()
+			require.NoError(t, err)
+			require.Len(t, afterDocs, 2)
+
+			got := diff.Diff(beforeDocs[1].Lines(), afterDocs[1].Lines()).Hunks(tc.context)
+			assert.Equal(t, tc.want, hunkHeaders(got))
+
+			// With the same first document, a diff of the whole file
+			// names the same lines.
+			if tc.beforeHead == tc.afterHead {
+				whole := diff.Diff(before.Lines(), after.Lines()).Hunks(tc.context)
+				assert.Equal(t, tc.want, hunkHeaders(whole))
+			}
+		})
+	}
+}
+
+func TestDiffer_HunksOfHeldLines(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		before     string
+		after      string
+		beforeSpan position.Span
+		afterSpan  position.Span
+		want       []string
+	}{
+		"insert before the first held line": {
+			before:     "x: 1\ny: 2\nz: 3\na: 1\nb: 2\nc: 3\n",
+			after:      "x: 1\ny: 2\nz: 3\nw: 0\na: 1\nb: 2\nc: 3\n",
+			beforeSpan: position.Span{Start: 3, End: 6},
+			afterSpan:  position.Span{Start: 3, End: 7},
+			want:       []string{"@@ -3,0 +4 @@"},
+		},
+		"delete the first held line": {
+			before:     "x: 1\ny: 2\nz: 3\na: 1\nb: 2\nc: 3\n",
+			after:      "x: 1\ny: 2\nz: 3\nb: 2\nc: 3\n",
+			beforeSpan: position.Span{Start: 3, End: 6},
+			afterSpan:  position.Span{Start: 3, End: 5},
+			want:       []string{"@@ -4 +3,0 @@"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			before := niceyaml.NewSourceFromString(tc.before)
+			after := niceyaml.NewSourceFromString(tc.after)
+
+			beforeHeld := before.View().Slice(tc.beforeSpan).Held()
+			afterHeld := after.View().Slice(tc.afterSpan).Held()
+
+			got := diff.Diff(beforeHeld, afterHeld).Hunks(0)
+			assert.Equal(t, tc.want, hunkHeaders(got))
+
+			// Each change falls within the spans, so a diff of the whole
+			// file names the same lines.
+			whole := diff.Diff(before.Lines(), after.Lines()).Hunks(0)
+			assert.Equal(t, tc.want, hunkHeaders(whole))
+		})
+	}
+}
+
+func TestDiffer_HunksFallBackToPositions(t *testing.T) {
+	t.Parallel()
+
+	src := niceyaml.NewSourceFromString("a: 1\n").Lines()
+
+	tcs := map[string]struct {
+		before line.Lines
+		after  line.Lines
+		ops    []lcs.Op
+		want   []string
+	}{
+		"line with no number": {
+			before: line.Collect(&line.Line{}),
+			after:  line.Collect(),
+			want:   []string{"@@ -1 +0,0 @@"},
+		},
+		"algorithm that repeats a line": {
+			before: src,
+			after:  src,
+			ops: []lcs.Op{
+				{Kind: lcs.OpEqual, Before: 0, After: 0},
+				{Kind: lcs.OpEqual, Before: 0, After: 0},
+				{Kind: lcs.OpDelete, Before: 0, After: -1},
+			},
+			want: []string{"@@ -3 +2,0 @@"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := diff.New()
+			if tc.ops != nil {
+				d = diff.New(diff.WithAlgorithm(opsAlgorithm(tc.ops)))
+			}
+
+			got := d.Diff(tc.before, tc.after).Hunks(0)
+			assert.Equal(t, tc.want, hunkHeaders(got))
+		})
+	}
+}
+
 // opsAlgorithm is an [lcs.Algorithm] that returns a fixed op sequence.
 type opsAlgorithm []lcs.Op
 
@@ -1340,6 +1526,22 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 		assert.Empty(t, before.View().Overlays(0))
 		assert.Empty(t, after.View().Overlays(0))
 	})
+}
+
+// hunkHeaders returns the hunk headers of a view from [diff.Result.Hunks]
+// in the order the view holds them.
+func hunkHeaders(view *line.View) []string {
+	var headers []string
+
+	for i := range view.All() {
+		for _, ann := range view.Annotations(i) {
+			if ann.Kind == kind.UIHunkHeader {
+				headers = append(headers, ann.Content)
+			}
+		}
+	}
+
+	return headers
 }
 
 // hunkCount returns the number of hunks in a view from [diff.Result.Hunks],

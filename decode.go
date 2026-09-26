@@ -955,8 +955,9 @@ func (n *Node) View() *line.View {
 //
 //	result := diff.Diff(before[1].Lines(), after[1].Lines())
 //
-// Each line keeps the number it has in the file. A Node that covers no
-// lines returns empty Lines.
+// Each line keeps the number it has in the file, so the gutter and hunk
+// headers of the diff name lines of the file. A Node that covers no lines
+// returns empty Lines.
 func (n *Node) Lines() line.Lines {
 	return n.View().Held()
 }

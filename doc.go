@@ -306,6 +306,8 @@
 //
 //	result := diff.Diff(before[1].Lines(), after[1].Lines())
 //
+// Its gutter and hunk headers show the line numbers of the file.
+//
 // Diff output is a [line.View] rather than a [Source], since the
 // interleaved lines do not form a YAML document. It uses [line.Flag] to mark
 // inserted/deleted lines and [line.Annotation] for unified diff hunk headers.

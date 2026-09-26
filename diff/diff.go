@@ -90,6 +90,8 @@ func (d *Differ) Diff(a, b line.Lines) *Result {
 	})
 
 	return &Result{
+		before:     a,
+		after:      b,
 		ops:        ops,
 		beforeSums: beforeSums,
 		afterSums:  afterSums,
@@ -152,6 +154,8 @@ func (d *Differ) computeOps(before, after line.Lines) []lineOp {
 type Result struct {
 	beforeSums  *prefixSums
 	afterSums   *prefixSums
+	before      line.Lines // The before revision, which names hunk header lines.
+	after       line.Lines // The after revision, which names hunk header lines.
 	ops         []lineOp
 	alignedRows []alignedRow // Lazily computed for side-by-side rendering.
 	alignedOnce sync.Once    // Ensures thread-safe lazy initialization.
@@ -189,11 +193,16 @@ func (r *Result) Unified() *line.View {
 // line of the unified diff, so a range from a search of those lines
 // applies to the hunks, and [line.View.Count] is the number of lines the
 // hunks hold. Each line carries the flag and the line number it has in
-// [Result.Unified], so the view prints with the same numbers, and the
-// first line of each hunk carries a [line.Above] annotation holding the
-// unified hunk header. A diff with no changes has no hunks, and the view
-// then holds no lines, so it prints as an empty view and takes decoration
-// as any other does.
+// [Result.Unified], so the view prints with the same numbers. A diff with
+// no changes has no hunks, and the view then holds no lines, so it prints
+// as an empty view and takes decoration as any other does.
+//
+// The first line of each hunk carries a [line.Above] annotation holding
+// the unified hunk header. The header names each side's lines by their
+// [line.Line.Number], the numbers the gutter prints, so a diff of
+// [line.View.Held] or of the lines of one document names lines of the
+// file. A line with no number counts by its 1-indexed position in its
+// input instead.
 //
 // Each call returns a new view with its own decoration, so overlays added
 // to one do not affect another.
@@ -220,7 +229,7 @@ func (r *Result) Hunks(context int) *line.View {
 	// The hunk header goes above the first line of each hunk.
 	for _, span := range spans {
 		view.Annotate(span.Start, line.Annotation{
-			Content:   formatHunkHeader(span, r.beforeSums, r.afterSums),
+			Content:   r.formatHunkHeader(span),
 			Kind:      kind.UIHunkHeader,
 			Placement: line.Above,
 		})
@@ -490,14 +499,22 @@ func (ops lineOps) toView() *line.View {
 }
 
 // formatHunkHeader formats a unified diff hunk header like "@@ -1,3 +1,4 @@"
-// with the range syntax of GNU diff -u.
-func formatHunkHeader(span position.Span, beforeSums, afterSums *prefixSums) string {
+// for the ops within span, with the range syntax of GNU diff -u. Each side
+// names its lines by [line.Line.Number], as the gutter does, so a diff of
+// part of a file names the lines of the file.
+func (r *Result) formatHunkHeader(span position.Span) string {
 	var b strings.Builder
 
 	fmt.Fprint(&b, "@@ ")
-	writeHunkRange(&b, '-', beforeSums.At(span.Start)+1, beforeSums.Range(span))
+
+	idx, count := r.beforeSums.At(span.Start), r.beforeSums.Range(span)
+	writeHunkRange(&b, '-', hunkStart(r.before, idx, count), count)
+
 	fmt.Fprint(&b, " ")
-	writeHunkRange(&b, '+', afterSums.At(span.Start)+1, afterSums.Range(span))
+
+	idx, count = r.afterSums.At(span.Start), r.afterSums.Range(span)
+	writeHunkRange(&b, '+', hunkStart(r.after, idx, count), count)
+
 	fmt.Fprint(&b, " @@")
 
 	return b.String()
@@ -518,4 +535,39 @@ func writeHunkRange(b *strings.Builder, sign byte, start, count int) {
 	default:
 		fmt.Fprintf(b, "%c%d,%d", sign, start, count)
 	}
+}
+
+// hunkStart returns the start that [writeHunkRange] takes for one side of
+// a hunk, where idx is the position in side of the hunk's first line on
+// that side and count is the number of lines the hunk covers there. The
+// start is the [line.Line.Number] of that first line. A hunk that covers
+// no lines on the side starts after the line before it, or at the side's
+// first line when none comes before, and an empty side starts at 1 so the
+// header reads "0,0". A line with no number, such as the zero value, gives
+// its 1-indexed position in side instead, and so does a position past the
+// end of side, which an [lcs.Algorithm] that repeats a line can produce.
+func hunkStart(side line.Lines, idx, count int) int {
+	var (
+		pos    int // The position in side of the line that names the start.
+		offset int // The distance from that line to the start.
+	)
+
+	switch {
+	case count > 0:
+		pos = idx
+	case idx > 0:
+		pos, offset = idx-1, 1
+	case side.Len() > 0:
+		pos = 0
+	default:
+		return 1
+	}
+
+	if pos < side.Len() {
+		if n := side.Line(pos).Number(); n > 0 {
+			return n + offset
+		}
+	}
+
+	return idx + 1
 }
