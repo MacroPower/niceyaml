@@ -333,6 +333,10 @@ func TestPrinter_PrintError_ControlCharacters(t *testing.T) {
 	assert.NotContains(t, got, "\x07")
 	assert.Contains(t, got, "bad \u241b[31mred\u2407 thing")
 
+	// An error with no nested errors is the root of a tree of one node, so
+	// its message gets the same treatment as a branch.
+	assert.Equal(t, "bad \u241b[31mred\u2407 thing", p.PrintError(errors.New("bad \x1b[31mred\x07 thing")))
+
 	// The reason a location did not resolve names the path, which spells a
 	// key of the document, so it gets the same treatment.
 	source := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("f.yaml"))
@@ -373,6 +377,17 @@ func TestPrinter_PrintError_Wrap(t *testing.T) {
 	// second row of the first branch starts with the indent of the tree,
 	// and no row carries padding after its text.
 	assert.Contains(t, got, "\n\u2502   message that\n")
+	assert.NotContains(t, got, " \n")
+
+	// An error with no nested errors wraps to the full width.
+	got = p.PrintError(errors.New(long))
+	rows = strings.Split(got, "\n")
+	require.Greater(t, len(rows), 1, "the message wraps")
+
+	for i, row := range rows {
+		assert.LessOrEqual(t, lipgloss.Width(row), width, "row %d: %q", i, row)
+	}
+
 	assert.NotContains(t, got, " \n")
 }
 

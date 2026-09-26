@@ -28,10 +28,9 @@ const errorConnectorWidth = 4
 // [niceyaml.SourceError.Excerpt] marks such a line with an annotation
 // without content and [DefaultAnnotation] draws that as the caret run, so
 // the range shows its extent without color. Blank lines separate the
-// parts. A SourceError
-// whose location does not resolve prints a line starting "no excerpt:"
-// that names the reason in place of its excerpt, unless it carries no
-// location at all.
+// parts. A SourceError whose location does not resolve prints a line
+// starting "no excerpt:" that names the reason in place of its excerpt,
+// unless it carries no location at all.
 //
 // PrintError draws the message as a tree with a connector in front of each
 // nested error, in the color of the gutter's line numbers, so a validator's
@@ -44,8 +43,14 @@ const errorConnectorWidth = 4
 //	├── 6:8: $.spec.sla: string does not match pattern
 //	└── 22:11: $.spec.hours.days: expected "array", got "string"
 //
-// An error with no nested errors prints as [error.Error] as it is, so the
-// context a wrapper added stays in front of the position:
+// An error with no nested errors prints as a tree of one node that holds
+// its whole message, so the context a wrapper added stays in front of the
+// position. PrintError draws every message of the tree, the root's
+// included, with control characters as their pictures, as an excerpt
+// draws them, and wraps each message to the width [WithWrap] sets less the
+// connectors in front of it.
+//
+// A program configures one printer and prints its errors through it:
 //
 //	p := printer.New(printer.WithWrap(width), printer.WithContextLines(3))
 //	fmt.Println(p.PrintError(err))
