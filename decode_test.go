@@ -2760,6 +2760,19 @@ func TestDocument_Decode_Validator(t *testing.T) {
 		assert.Equal(t, []string{"first", "second"}, order)
 	})
 
+	t.Run("a typed nil pointer is no failure and the next validator runs", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "name: test\n")
+
+		result, err := dd.Decode[plainConfig](t.Context(),
+			niceyaml.WithValidator(typedNilValidator()),
+			niceyaml.WithValidator(rejectingValidator(errDocumentRejected)),
+		)
+		require.ErrorIs(t, err, errDocumentRejected)
+		assert.Equal(t, plainConfig{}, result)
+	})
+
 	t.Run("a failing validator ends the decode", func(t *testing.T) {
 		t.Parallel()
 
@@ -2829,6 +2842,16 @@ func passingValidator() niceyaml.Validator {
 func rejectingValidator(err error) niceyaml.Validator {
 	return niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
 		return err
+	})
+}
+
+// typedNilValidator returns a [niceyaml.Validator] that accepts every
+// document by returning a nil [*niceyaml.Error] pointer.
+func typedNilValidator() niceyaml.Validator {
+	return niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+		var e *niceyaml.Error
+
+		return e
 	})
 }
 
@@ -3404,6 +3427,23 @@ func TestDecoder(t *testing.T) {
 		assert.Equal(t, []string{"first"}, order)
 	})
 
+	t.Run("a typed nil pointer is no failure and the next validator runs", func(t *testing.T) {
+		t.Parallel()
+
+		dec := niceyaml.NewDecoder(
+			niceyaml.WithValidator(typedNilValidator()),
+			niceyaml.WithValidator(rejectingValidator(errNameRequired)),
+		)
+
+		dd := yamltest.FirstDocument(t, "name: test\n")
+
+		got, err := dec.Decode[strictConfig](t.Context(), dd)
+		require.ErrorIs(t, err, errNameRequired)
+		assert.Equal(t, strictConfig{}, got)
+
+		require.ErrorIs(t, dec.Validate(t.Context(), dd), errNameRequired)
+	})
+
 	t.Run("Validate runs the validators without decoding", func(t *testing.T) {
 		t.Parallel()
 
@@ -3546,6 +3586,28 @@ func TestNode_Validate(t *testing.T) {
 		)
 		require.ErrorIs(t, err, errNameRequired)
 		assert.Equal(t, []string{"first"}, order)
+	})
+
+	t.Run("a typed nil pointer is no failure and the next validator runs", func(t *testing.T) {
+		t.Parallel()
+
+		var order []string
+
+		dd := yamltest.FirstDocument(t, "name: test\n")
+
+		err := dd.Validate(t.Context(),
+			record(&order, "first"),
+			typedNilValidator(),
+			niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+				var e *niceyaml.SourceError
+
+				return e
+			}),
+			record(&order, "after"),
+			rejectingValidator(errNameRequired),
+		)
+		require.ErrorIs(t, err, errNameRequired)
+		assert.Equal(t, []string{"first", "after"}, order)
 	})
 
 	t.Run("with no validators runs none", func(t *testing.T) {

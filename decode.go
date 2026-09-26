@@ -1001,8 +1001,10 @@ func (n *Node) position(path paths.Path) (position.Position, error) {
 //		}
 //	}
 //
-// Given no validators, Validate runs none and returns nil.
-// [Decoder.Validate] runs the validators a [Decoder] holds the same way.
+// Given no validators, Validate runs none and returns nil. A validator
+// that returns a nil [*Error] or [*SourceError] pointer passes, and the
+// next one runs. [Decoder.Validate] runs the validators a [Decoder]
+// holds the same way.
 //
 // An error from a validator comes back bound to the source as a
 // [SourceError] through [Node.Bind], so an [*Error] renders its
@@ -1015,10 +1017,13 @@ func (n *Node) Validate(ctx context.Context, validators ...Validator) error {
 // error.
 func (n *Node) validate(ctx context.Context, validators []Validator) error {
 	for _, dv := range validators {
+		// A typed nil pointer is no failure, as [Node.Bind] reads it.
 		err := dv.Validate(ctx, n)
-		if err != nil {
-			return n.Bind(err)
+		if isNothing(err) {
+			continue
 		}
+
+		return n.Bind(err)
 	}
 
 	return nil
