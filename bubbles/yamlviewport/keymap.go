@@ -18,9 +18,9 @@ type KeyMap struct {
 	HalfPageUp key.Binding
 	// HalfPageDown scrolls down by half a page.
 	HalfPageDown key.Binding
-	// Down scrolls down by one line.
+	// Down scrolls down by one row.
 	Down key.Binding
-	// Up scrolls up by one line.
+	// Up scrolls up by one row.
 	Up key.Binding
 	// Left scrolls left by the horizontal step.
 	Left key.Binding
