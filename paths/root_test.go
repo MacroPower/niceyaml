@@ -55,6 +55,45 @@ func TestPath_EmptyDocument(t *testing.T) {
 		assert.Equal(t, token.DocumentHeaderType, tk.Type)
 	})
 
+	t.Run("a header over comments is the same null", func(t *testing.T) {
+		t.Parallel()
+
+		// A parse that keeps comments makes the comment group the body of
+		// the document, which still holds no content.
+		tcs := map[string]struct {
+			input string
+			line  int
+		}{
+			"after a document": {input: "a: 1\n---\n# comment\n", line: 2},
+			"first document":   {input: "---\n# comment\n", line: 1},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				docs, err := niceyaml.NewSourceFromString(tc.input).Documents()
+				require.NoError(t, err)
+				require.NotEmpty(t, docs)
+
+				doc := docs[len(docs)-1].DocumentAST()
+
+				node, err := paths.Root().Node(doc)
+				require.NoError(t, err)
+				assert.Equal(t, ast.NullType, node.Type())
+
+				tk, err := paths.Root().Token(doc)
+				require.NoError(t, err)
+				assert.Equal(t, token.DocumentHeaderType, tk.Type)
+				assert.Equal(t, tc.line, tk.Position.Line)
+
+				_, err = paths.Root().Child("a").Node(doc)
+				require.ErrorIs(t, err, paths.ErrNoDocument)
+				require.ErrorIs(t, err, paths.ErrNotFound)
+			})
+		}
+	})
+
 	t.Run("a match keeps the path as given", func(t *testing.T) {
 		t.Parallel()
 

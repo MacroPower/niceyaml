@@ -1593,31 +1593,57 @@ func TestSourceError_EmptyDocument(t *testing.T) {
 	t.Parallel()
 
 	// An explicitly empty document is the null document a schema validates,
-	// so an error at the root of one resolves to its header.
-	source := niceyaml.NewSourceFromString("a: 1\n---\n")
+	// so an error at the root of one resolves to its header, even when
+	// comments sit below the header.
+	tcs := map[string]struct {
+		input string
+		want  string
+	}{
+		"nothing below the header": {
+			input: "a: 1\n---\n",
+			want: stringtest.JoinLF(
+				"2:1: $: required property 'a' missing",
+				"",
+				"   1 | a: 1",
+				"   2 | ---",
+				"     | ^^^",
+			),
+		},
+		"a comment below the header": {
+			input: "a: 1\n---\n# comment\n",
+			want: stringtest.JoinLF(
+				"2:1: $: required property 'a' missing",
+				"",
+				"   1 | a: 1",
+				"   2 | ---",
+				"     | ^^^",
+				"   3 | # comment",
+			),
+		},
+	}
 
-	docs, err := source.Documents()
-	require.NoError(t, err)
-	require.Len(t, docs, 2)
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	bound := docs[1].Bind(niceyaml.NewError("required property 'a' missing", niceyaml.AtPath(paths.Root())))
+			docs, err := niceyaml.NewSourceFromString(tc.input).Documents()
+			require.NoError(t, err)
+			require.Len(t, docs, 2)
 
-	var se *niceyaml.SourceError
+			bound := docs[1].Bind(niceyaml.NewError("required property 'a' missing", niceyaml.AtPath(paths.Root())))
 
-	require.ErrorAs(t, bound, &se)
+			var se *niceyaml.SourceError
 
-	rng, ok := se.Range()
-	require.True(t, ok)
-	assert.Equal(t, 1, rng.Start.Line)
+			require.ErrorAs(t, bound, &se)
 
-	assert.Equal(t, "2:1: $: required property 'a' missing", se.Error())
-	assert.Equal(t, stringtest.JoinLF(
-		"2:1: $: required property 'a' missing",
-		"",
-		"   1 | a: 1",
-		"   2 | ---",
-		"     | ^^^",
-	), fmt.Sprintf("%+v", bound))
+			rng, ok := se.Range()
+			require.True(t, ok)
+			assert.Equal(t, 1, rng.Start.Line)
+
+			assert.Equal(t, "2:1: $: required property 'a' missing", se.Error())
+			assert.Equal(t, tc.want, fmt.Sprintf("%+v", bound))
+		})
+	}
 }
 
 func TestError_NilInnerError(t *testing.T) {

@@ -17,7 +17,9 @@ var (
 	// ErrNoDocument indicates a document with no content to resolve in: a
 	// nil document, a document without a body, or a document holding only
 	// directives or comments. Errors that wrap it also wrap [ErrNotFound],
-	// since nothing exists at any path in such a document.
+	// since nothing exists at any path in such a document. The root path of
+	// such a document under a "---" header still resolves, to the null at
+	// the header.
 	ErrNoDocument = errors.New("document has no content")
 
 	// ErrNotFound indicates that nothing exists at the path in the document.
@@ -336,9 +338,13 @@ func (p Path) wildcard() bool {
 	return false
 }
 
-// hasContent reports whether body holds a value to resolve in. A directive
-// or a comment group is not content.
+// hasContent reports whether body holds a value to resolve in. A nil body,
+// a directive, and a comment group are not content.
 func hasContent(body ast.Node) bool {
+	if isNilNode(body) {
+		return false
+	}
+
 	switch body.Type() {
 	case ast.DirectiveType, ast.CommentType:
 		return false
@@ -350,21 +356,22 @@ func hasContent(body ast.Node) bool {
 // matches resolves the path in doc with r, a resolver for doc, and
 // returns every match.
 //
-// A document with a nil body below a "---" header is the null document, and
-// the root path matches that null at the header, so an error about the
-// document as a whole points at the line it was written on. Every deeper
-// path has no node to reach.
+// A document below a "---" header that holds no content is the null
+// document. Its body is nil, or it holds only comments or directives, as a
+// parse that keeps comments leaves in a comment-only document. The root
+// path matches that null at the header, so an error about the document as
+// a whole points at its header line. Every deeper path has no node to
+// reach.
 //
 // Returns an error wrapping [ErrNotFound] and [ErrNoDocument] when doc is
-// nil, when a path with segments meets a nil body, or when the body is a
-// directive or a comment, which is what a parse that keeps comments leaves
-// as the body of a comment-only document.
+// nil, when a document without a header holds no content, or when a path
+// with segments meets a document without content.
 func (p Path) matches(r *resolver, doc *ast.DocumentNode) ([]match, error) {
-	if doc != nil && doc.Body == nil && doc.Start != nil && p.selectsRoot() {
+	if doc != nil && doc.Start != nil && !hasContent(doc.Body) && p.selectsRoot() {
 		return []match{{node: ast.Null(doc.Start), segs: slices.Clone(p.segments)}}, nil
 	}
 
-	if doc == nil || doc.Body == nil || !hasContent(doc.Body) {
+	if doc == nil || !hasContent(doc.Body) {
 		return nil, fmt.Errorf("resolve %s: %w: %w", p, ErrNotFound, ErrNoDocument)
 	}
 
