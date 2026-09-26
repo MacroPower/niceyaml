@@ -1257,6 +1257,185 @@ func TestPrinter_WordWrap_NarrowWidth(t *testing.T) {
 	}
 }
 
+func TestPrinter_WordWrap_WideAtOneColumn(t *testing.T) {
+	t.Parallel()
+
+	// The layout must map the column of each wide rune of line 0 to the
+	// printed row that holds it. When the wrap drops a row that holds a
+	// rune of the content, the layout matches the rows after it to the
+	// wrong columns.
+	assertClusterRows := func(t *testing.T, l printer.Layout, input string, rows []string) {
+		t.Helper()
+
+		for col, r := range []rune(input) {
+			if lipgloss.Width(string(r)) < 2 {
+				continue
+			}
+
+			row := l.RowOf(position.New(0, col))
+			require.GreaterOrEqual(t, row, 0)
+			require.Less(t, row, len(rows))
+			assert.Contains(t, rows[row], string(r), "column %d", col)
+		}
+	}
+
+	// A cluster two cells wide cannot fit in one column, so it takes a row
+	// of its own and runs past the width, with no empty row before or
+	// after it.
+	tcs := map[string]struct {
+		gutter     printer.Gutter
+		input      string
+		want       string
+		annotation line.Annotation
+		width      int
+	}{
+		"wide value": {
+			gutter: printer.NoGutter,
+			input:  "k: 日本語",
+			width:  1,
+			want:   stringtest.JoinLF("k", ":", "日", "本", "語"),
+		},
+		"wide key": {
+			gutter: printer.NoGutter,
+			input:  "日本: v",
+			width:  1,
+			want:   stringtest.JoinLF("日", "本", ":", " ", "v"),
+		},
+		"wide cluster between narrow ones": {
+			gutter: printer.NoGutter,
+			input:  "a日b: v",
+			width:  1,
+			want:   stringtest.JoinLF("a", "日", "b", ":", " ", "v"),
+		},
+		"emoji with a skin tone modifier": {
+			gutter: printer.NoGutter,
+			input:  "k: 👍🏽",
+			width:  1,
+			want:   stringtest.JoinLF("k", ":", "👍🏽"),
+		},
+		"no-break space ahead of a wide cluster": {
+			// The wrap breaks only on an ASCII space, so the no-break space
+			// is content and keeps its row.
+			gutter: printer.NoGutter,
+			input:  "k: a\u00a0日本語",
+			width:  1,
+			want:   stringtest.JoinLF("k", ":", "a", "\u00a0", "日", "本", "語"),
+		},
+		"zero-width space ahead of a wide cluster": {
+			// The zero-width space takes no cells, but it is content, so it
+			// keeps its row.
+			gutter: printer.NoGutter,
+			input:  "k: \u200b日本",
+			width:  1,
+			want:   stringtest.JoinLF("k", ":", "\u200b", "日", "本"),
+		},
+		"gutter leaves one column": {
+			gutter: printer.DefaultGutter,
+			input:  "k: 日本語",
+			width:  7,
+			want: stringtest.JoinLF(
+				"   1  k",
+				"   -  :",
+				"   -  日",
+				"   -  本",
+				"   -  語",
+			),
+		},
+		"wide annotation above": {
+			gutter: printer.NoGutter,
+			input:  "k: v",
+			width:  1,
+			annotation: line.Annotation{
+				Content:   "日本",
+				Placement: line.Above,
+			},
+			want: stringtest.JoinLF("日", "本", "k", ":", "v"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := niceyaml.NewSourceFromString(tc.input).View()
+			if tc.annotation.Content != "" {
+				view.Annotate(0, tc.annotation)
+			}
+
+			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrap(tc.width))
+
+			got := p.Print(view)
+			assert.Equal(t, tc.want, got)
+
+			l := p.Layout(view)
+			assert.Equal(t, strings.Count(got, "\n")+1, l.Rows())
+			assertClusterRows(t, l, tc.input, strings.Split(got, "\n"))
+		})
+	}
+
+	t.Run("error message", func(t *testing.T) {
+		t.Parallel()
+
+		// The blank row between the message lines stays, since the message
+		// asks for it.
+		p := testPrinter().With(printer.WithWrap(1))
+
+		got := p.PrintError(errors.New("日本語\n\nnext"))
+		assert.Equal(t, stringtest.JoinLF("日", "本", "語", "", "n", "e", "x", "t"), got)
+	})
+
+	t.Run("default styles", func(t *testing.T) {
+		t.Parallel()
+
+		// The default styles open a style ahead of the value, and the wrap
+		// then puts the spaces before a wide cluster on rows of their own.
+		// Those rows go, so the rows match those of a printer without
+		// styles.
+		styled := map[string]struct {
+			input string
+			want  []string
+		}{
+			"wide value": {
+				input: "k: 日本語",
+				want:  []string{"k", ":", "日", "本", "語"},
+			},
+			"wide sequence item": {
+				input: "- 日本",
+				want:  []string{"-", "日", "本"},
+			},
+			"two spaces ahead of a wide value": {
+				input: "i:  日",
+				want:  []string{"i", ":", "日"},
+			},
+			"no-break spaces ahead of a wide value": {
+				input: "k:\u00a0\u00a0日",
+				want:  []string{"k", ":", "\u00a0", "\u00a0", "日"},
+			},
+		}
+
+		for name, tc := range styled {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				view := niceyaml.NewSourceFromString(tc.input).View()
+				p := printer.New(printer.WithGutter(printer.NoGutter), printer.WithWrap(1))
+
+				rows := strings.Split(p.Print(view), "\n")
+				for i, row := range rows {
+					// The container style pads each row on the right.
+					rows[i] = strings.TrimRight(ansi.Strip(row), " ")
+				}
+
+				assert.Equal(t, tc.want, rows)
+
+				l := p.Layout(view)
+				assert.Len(t, rows, l.Rows())
+				assertClusterRows(t, l, tc.input, rows)
+			})
+		}
+	})
+}
+
 func TestPrinter_WordWrap_BreakpointPastWidth(t *testing.T) {
 	t.Parallel()
 

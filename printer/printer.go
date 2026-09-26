@@ -3,6 +3,7 @@ package printer
 import (
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1214,7 +1215,20 @@ func (p *Printer) wrapContent(content string, gutterWidth int) []string {
 		return strings.Split(content, "\n")
 	}
 
-	rows := strings.Split(lipgloss.Wrap(content, cw, wrapOnCharacters), "\n")
+	var out []string
+
+	for text := range strings.SplitSeq(content, "\n") {
+		out = append(out, wrapLine(text, cw)...)
+	}
+
+	return out
+}
+
+// wrapLine wraps text, which holds no newline, to rows of at most cw
+// cells. A grapheme cluster wider than cw takes a row of its own and runs
+// past the width.
+func wrapLine(text string, cw int) []string {
+	rows := strings.Split(lipgloss.Wrap(text, cw, wrapOnCharacters), "\n")
 
 	// The wrap leaves a row wider than cw when a breakpoint falls just
 	// past the width, so a hard wrap cuts such a row down to size, and
@@ -1234,5 +1248,39 @@ func (p *Printer) wrapContent(content string, gutterWidth int) []string {
 		out = append(out, strings.Split(cut, "\n")...)
 	}
 
-	return out
+	// After the cut, a row stays wider than cw only when it holds a lone
+	// cluster the width cannot fit. Both wraps break ahead of such a
+	// cluster even at the start of a row, which leaves rows with no text
+	// on them, so those rows go. When a style opens just before the
+	// cluster, the wrap also puts the ASCII spaces ahead of it on rows of
+	// their own, so rows of only those spaces that lead up to the cluster
+	// go too. Any other rune stays, even one with no width, so the rows
+	// still spell out the content for the layout.
+	tooWide := func(row string) bool { return lipgloss.Width(row) > cw }
+	if !slices.ContainsFunc(out, tooWide) {
+		return out
+	}
+
+	// The walk starts at the last row, so each row of spaces can check the
+	// kept row that follows it.
+	kept := make([]string, 0, len(out))
+	beforeWide := false
+
+	for _, row := range slices.Backward(out) {
+		plain := ansi.Strip(row)
+		if plain == "" {
+			continue
+		}
+
+		if beforeWide && strings.Trim(plain, " ") == "" {
+			continue
+		}
+
+		beforeWide = tooWide(row)
+		kept = append(kept, row)
+	}
+
+	slices.Reverse(kept)
+
+	return kept
 }
