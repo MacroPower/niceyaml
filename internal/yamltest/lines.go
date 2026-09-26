@@ -43,7 +43,7 @@ func ValidateLines(ls line.Lines) error {
 		// A line with no tokens is a placeholder, such as the blank row a
 		// side-by-side diff inserts, and carries no number to check. Every
 		// other line must number above the one before it.
-		if len(l.Tokens()) == 0 {
+		if l.IsEmpty() {
 			continue
 		}
 
