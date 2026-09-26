@@ -1189,11 +1189,11 @@ func (m *Model) fillRows() {
 		p := m.renderPrinter(m.paneWidth())
 
 		c.leftLayout = p.Layout(m.left)
-		c.indices, c.left = lineRows(c.leftLayout, m.left)
+		c.indices, c.left = layoutRows(c.leftLayout, m.left)
 
 		if m.viewMode == ViewModeSideBySide && m.right != nil {
 			c.rightLayout = p.Layout(m.right)
-			_, c.right = lineRows(c.rightLayout, m.right)
+			_, c.right = layoutRows(c.rightLayout, m.right)
 		}
 
 		// A layout counts the rows before the container style applies. Print
@@ -1388,9 +1388,9 @@ func (m *Model) rowWidth() int {
 	return max(m.rows.leftLayout.Width(), m.rows.rightLayout.Width())
 }
 
-// lineRows returns the index in the content of each line view holds and
+// layoutRows returns the index in the content of each line view holds and
 // the number of rows each takes in layout, in content order.
-func lineRows(layout printer.Layout, view *line.View) ([]int, []int) {
+func layoutRows(layout printer.Layout, view *line.View) ([]int, []int) {
 	indices := make([]int, 0, view.Count())
 	rows := make([]int, 0, view.Count())
 
