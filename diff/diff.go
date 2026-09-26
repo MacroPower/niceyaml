@@ -374,20 +374,9 @@ func (r *Result) getAlignedRows() []alignedRow {
 // Each call returns a new view with its own decoration, so overlays added
 // to one do not affect another or the paired [Result.After] view.
 func (r *Result) Before() *line.View {
-	rows := r.getAlignedRows()
-
-	lines := make([]*line.Line, len(rows))
-	for i := range rows {
-		lines[i] = rows[i].before
-	}
-
-	view := line.NewView(line.Collect(lines...))
-
-	for i := range rows {
-		view.SetFlag(i, rows[i].beforeFlag)
-	}
-
-	return view
+	return flaggedView(r.getAlignedRows(), func(row alignedRow) (*line.Line, line.Flag) {
+		return row.before, row.beforeFlag
+	})
 }
 
 // After returns a [line.View] for the right (after) pane of a side-by-side
@@ -404,17 +393,25 @@ func (r *Result) Before() *line.View {
 // Each call returns a new view with its own decoration, so overlays added
 // to one do not affect another or the paired [Result.Before] view.
 func (r *Result) After() *line.View {
-	rows := r.getAlignedRows()
+	return flaggedView(r.getAlignedRows(), func(row alignedRow) (*line.Line, line.Flag) {
+		return row.after, row.afterFlag
+	})
+}
 
-	lines := make([]*line.Line, len(rows))
-	for i := range rows {
-		lines[i] = rows[i].after
+// flaggedView returns a [line.View] of the line pick returns for each item,
+// with the flag pick returns for that item set on its line.
+func flaggedView[T any](items []T, pick func(T) (*line.Line, line.Flag)) *line.View {
+	lines := make([]*line.Line, len(items))
+	flags := make([]line.Flag, len(items))
+
+	for i, item := range items {
+		lines[i], flags[i] = pick(item)
 	}
 
 	view := line.NewView(line.Collect(lines...))
 
-	for i := range rows {
-		view.SetFlag(i, rows[i].afterFlag)
+	for i, flag := range flags {
+		view.SetFlag(i, flag)
 	}
 
 	return view
@@ -478,18 +475,9 @@ type lineOps []lineOp
 // toView converts ops to a [line.View] with the flag of each op set on its
 // line.
 func (ops lineOps) toView() *line.View {
-	lines := make([]*line.Line, len(ops))
-	for i, op := range ops {
-		lines[i] = op.line
-	}
-
-	view := line.NewView(line.Collect(lines...))
-
-	for i, op := range ops {
-		view.SetFlag(i, opKindFlag(op.kind))
-	}
-
-	return view
+	return flaggedView(ops, func(op lineOp) (*line.Line, line.Flag) {
+		return op.line, opKindFlag(op.kind)
+	})
 }
 
 // formatHunkHeader formats a unified diff hunk header like "@@ -1,3 +1,4 @@"
