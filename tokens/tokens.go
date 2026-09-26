@@ -205,9 +205,11 @@ func sourceEnd(src string) (int, int, int) {
 // the lexer emits nothing for, such as a source of whitespace alone. The
 // parser reads that token as a plain scalar holding the text, while the
 // go-yaml Unmarshal reads the text as no value at all, so a decoder that
-// wants to agree with it treats the token as no content.
+// wants to agree with it treats the token as no content. Tokenize makes the
+// placeholder as the only token of its stream, so a token linked to a
+// neighbor, such as the content of a block scalar, is never one.
 func IsPlaceholder(tk *token.Token) bool {
-	if tk == nil || tk.Type != token.StringType || tk.Origin != tk.Value {
+	if tk == nil || tk.Type != token.StringType || tk.Origin != tk.Value || tk.Prev != nil || tk.Next != nil {
 		return false
 	}
 

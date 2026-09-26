@@ -167,13 +167,17 @@ func TestIsPlaceholder(t *testing.T) {
 
 	tcs := map[string]struct {
 		input string
+		idx   int
 		want  bool
 	}{
-		"whitespace only":   {input: "\n  \n", want: true},
-		"lone tag marker":   {input: "!", want: true},
-		"plain scalar":      {input: "abc", want: false},
-		"plain scalar line": {input: "abc\n", want: false},
-		"mapping":           {input: "a: 1\n", want: false},
+		"whitespace only":               {input: "\n  \n", want: true},
+		"lone tag marker":               {input: "!", want: true},
+		"plain scalar":                  {input: "abc", want: false},
+		"plain scalar line":             {input: "abc\n", want: false},
+		"mapping":                       {input: "a: 1\n", want: false},
+		"empty block scalar content":    {input: "a: |\nb: 1\n", idx: 3, want: false},
+		"empty folded scalar content":   {input: "a: >\nb: 1\n", idx: 3, want: false},
+		"kept blank block scalar lines": {input: "a: |+\n\n\nb: 1\n", idx: 3, want: false},
 	}
 
 	for name, tc := range tcs {
@@ -181,8 +185,8 @@ func TestIsPlaceholder(t *testing.T) {
 			t.Parallel()
 
 			tks := tokens.Tokenize(tc.input)
-			require.NotEmpty(t, tks)
-			assert.Equal(t, tc.want, tokens.IsPlaceholder(tks[0]))
+			require.Greater(t, len(tks), tc.idx)
+			assert.Equal(t, tc.want, tokens.IsPlaceholder(tks[tc.idx]))
 		})
 	}
 
