@@ -1472,8 +1472,9 @@ func TestNewLines_ColumnPositionAfterSplit(t *testing.T) {
 	// Test that NewLines calculates Column positions correctly when it splits
 	// multiline tokens across lines.
 	//
-	// The first part of a block scalar keeps the token's Column, which names
-	// its text past the indentation; every later part starts at column 1.
+	// The first part of a block or plain multiline scalar keeps the token's
+	// Column, which names where the scalar's text starts. Every later part
+	// starts at column 1.
 
 	t.Run("block scalar column positions", func(t *testing.T) {
 		t.Parallel()
@@ -1521,6 +1522,17 @@ func TestNewLines_ColumnPositionAfterSplit(t *testing.T) {
 		// Verify round-trip produces identical tokens.
 		resultTks := lines.Tokens()
 		yamltest.RequireTokensEqual(t, originalTks, resultTks)
+
+		// The scalar's first part follows "key: " and keeps the token's
+		// column. The continuation part starts with the indentation, at
+		// column 1.
+		first := lines.Line(0).Tokens()
+		require.Len(t, first, 3)
+		assert.Equal(t, 6, first[2].Position.Column)
+
+		second := lines.Line(1).Tokens()
+		require.NotEmpty(t, second)
+		assert.Equal(t, 1, second[0].Position.Column)
 	})
 }
 
