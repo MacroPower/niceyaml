@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -61,12 +62,28 @@ func validateCmd() *cobra.Command {
 
 // validateFile validates every document of the file at yamlPath against the
 // registry and joins what every document reports, so one run names each
-// invalid document. Errors come back bound to the source, whose name is the
-// file path, so each message opens with "path:line:col:" and the error
-// handler in main renders the excerpt with the terminal width. A file that
-// cannot be read has no source to name it, so the path goes in front here.
+// invalid document. Errors come back bound to the source, whose name is
+// yamlPath as the user typed it, so each message opens with
+// "path:line:col:" and the error handler in main renders the excerpt with
+// the terminal width. The source's file path is absolute, so SchemaStore
+// patterns that name parent directories, such as
+// "**/.github/workflows/*.yml", match whatever the working directory is.
+// When the read fails, no source exists to name the file, so validateFile
+// puts the path in front of the error itself.
 func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) error {
-	source, err := niceyaml.NewSourceFromFile(yamlPath)
+	absPath, err := filepath.Abs(yamlPath)
+	if err != nil {
+		// Abs fails only when the working directory is unreadable.
+		absPath = yamlPath
+	}
+
+	// Resolvers route on the absolute path, and WithName keeps messages
+	// naming the file as the user typed it. The read uses the typed path,
+	// so a read error names the file that way too.
+	source, err := niceyaml.NewSourceFromFile(yamlPath,
+		niceyaml.WithName(yamlPath),
+		niceyaml.WithFilePath(absPath),
+	)
 	if err != nil {
 		return fmt.Errorf("%s: %w", yamlPath, err)
 	}
@@ -121,7 +138,7 @@ func buildRegistry(schemaRef string) (*schema.Registry, error) {
 	return schema.NewRegistry(
 		schema.WithResolvers(
 			schema.Directive(), // Resolves schemas relative to each YAML file.
-			schemastore.New(),  // Automatic discovery by file path.
+			schemastore.New(),  // Automatic discovery by absolute file path.
 		),
 		schema.WithRequireSchema(false),
 	), nil

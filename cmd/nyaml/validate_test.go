@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,18 +10,20 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
+// nameSchema is the schema the validateFile tests apply to every document
+// of their fixtures. It requires a "name" key.
+var nameSchema = []byte(`{
+	"type": "object",
+	"properties": {"name": {"type": "string"}},
+	"required": ["name"]
+}`)
+
 func TestValidateFile(t *testing.T) {
 	t.Parallel()
-
-	// The schema the registry applies to every document of the fixture.
-	schemaData := []byte(`{
-		"type": "object",
-		"properties": {"name": {"type": "string"}},
-		"required": ["name"]
-	}`)
 
 	tcs := map[string]struct {
 		content string
@@ -60,7 +63,7 @@ func TestValidateFile(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config.yaml")
 			require.NoError(t, os.WriteFile(path, []byte(tc.content), 0o600))
 
-			reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded(schemaData)))
+			reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded(nameSchema)))
 
 			err := validateFile(t.Context(), path, reg)
 			if len(tc.want) == 0 {
@@ -76,6 +79,38 @@ func TestValidateFile(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateFileRoutesOnAbsolutePath(t *testing.T) {
+	t.Parallel()
+
+	// SchemaStore routes on patterns that name parent directories, so the
+	// resolver must see the absolute path even when the user types a
+	// relative one. Messages still name the file as the user typed it.
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("value: 1\n"), 0o600))
+
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+
+	rel, err := filepath.Rel(wd, path)
+	require.NoError(t, err)
+	require.False(t, filepath.IsAbs(rel))
+
+	var got string
+
+	reg := schema.NewRegistry(schema.WithResolvers(
+		schema.ResolverFunc(func(_ context.Context, doc *niceyaml.Node) (schema.Ref, error) {
+			got = doc.FilePath()
+
+			return schema.Embedded(nameSchema), nil
+		}),
+	))
+
+	err = validateFile(t.Context(), rel, reg)
+	require.Error(t, err)
+	assert.Equal(t, path, got)
+	assert.Contains(t, err.Error(), rel+":1:1: ")
 }
 
 func TestValidateCmdOutput(t *testing.T) {
