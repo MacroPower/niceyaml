@@ -1155,14 +1155,21 @@ func TestSchemaStore_Resolve(t *testing.T) {
 		assert.Equal(t, []byte(schemaData), data)
 	})
 
-	t.Run("error when schema URL unreachable", func(t *testing.T) {
+	t.Run("error when schema URL not found", func(t *testing.T) {
 		t.Parallel()
+
+		schemaServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		t.Cleanup(schemaServer.Close)
+
+		schemaURL := schemaServer.URL + "/schema.json"
 
 		catalog := schemastore.Catalog{
 			Schemas: []schemastore.CatalogEntry{
 				{
 					Name:      "Test Schema",
-					URL:       "https://example.com/schema.json",
+					URL:       schemaURL,
 					FileMatch: []string{"*.yaml"},
 				},
 			},
@@ -1179,10 +1186,11 @@ func TestSchemaStore_Resolve(t *testing.T) {
 		// which is not a no-match.
 		ref, err := store.Resolve(t.Context(), doc)
 		require.NoError(t, err)
-		assert.Equal(t, "https://example.com/schema.json", ref.Key())
+		assert.Equal(t, schemaURL, ref.Key())
 
 		_, err = schema.NewRegistry().Load(t.Context(), ref)
-		require.ErrorContains(t, err, "fetch https://example.com/schema.json: status 404")
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorContains(t, err, "fetch "+schemaURL+": status 404")
 		require.NotErrorIs(t, err, schema.ErrNoMatch)
 	})
 }
