@@ -36,12 +36,16 @@ type ErrorTree struct {
 // "name:line:col:" position [SourceError.Error] gives it, and
 // each child, a binding of its own from [SourceError.Errors],
 // carries the "line:col:" position its location resolved to without the
-// name, since the root names the source already. The children of a node
-// sort by position within the source they are bound to, with the sources
-// in the order they first appear, since a line number counts only in the
-// source that holds it; those whose location did not resolve follow in
-// the order they were given. A nested error with nested errors of its own
-// is a subtree.
+// name, since the root names the source already. The children of a
+// binding sort by position within the source they are bound to, with the
+// sources in the order they first appear, since a line number counts only
+// in the source that holds it. Children whose location did not resolve
+// follow the rest in the order their parent lists them. An [Error] or
+// join outside any binding keeps its children in the order it lists them,
+// bindings included. So a join of one binding per document shows the
+// documents in the order [errors.Join] took them, as the excerpts of
+// [FormatError] do. A nested error with nested errors of its own is a
+// subtree.
 //
 // An error that unwraps to several, such as one from [errors.Join], is a
 // node with no text and one child per error, so a run over several files
@@ -80,7 +84,7 @@ func NewErrorTree(err error) ErrorTree {
 	return newTree(err.Error(), children(err))
 }
 
-// joinBranches returns the errors err unwraps to when err is joined from
+// joinBranches returns the errors err unwraps to when err is a join of
 // several, as [errors.Join] builds one, and false for any other error. An
 // Error unwraps to several too, but it is one node of the tree with its
 // nested errors as children, so it is not a join. Nor is an error built
@@ -136,7 +140,10 @@ func isJoinMessage(msg string, branches []error) bool {
 // with the position it resolved to, and the chain ends there, since the
 // binding bound everything below it. An unbound Error contributes its
 // nested errors, rebased under the base of every Error from [Rebase]
-// above them, as binding rebases them.
+// above them, as binding rebases them. The nested errors of an unbound
+// Error and the branches of a join keep the order their parent lists them
+// in, since only the children of a binding carry the source and position
+// [trees] sorts by.
 func children(err error) []ErrorTree {
 	var kids []positioned
 
@@ -194,7 +201,7 @@ func rebaseChild(n error, base paths.Path) error {
 
 // trees returns the nodes of kids in position order within the source
 // each is bound to, with those whose location did not resolve after the
-// rest in the order they were given. Returns nil when kids is empty.
+// rest in the order kids lists them. Returns nil when kids is empty.
 func trees(kids []positioned) []ErrorTree {
 	if len(kids) == 0 {
 		return nil
@@ -239,8 +246,8 @@ func boundChildren(bound *SourceError, named bool) []positioned {
 		// A location the source does not hold resolved to nothing the
 		// excerpt can mark, so the node reads as an unlocated one. A
 		// located child reports the position its message carries, which
-		// is inside the token its range marks when the error was given a
-		// position rather than a path.
+		// is inside the token its range marks when the caller gave the
+		// error a position rather than a path.
 		if _, ok := child.Range(); ok {
 			kid.located = true
 			kid.pos = child.loc.pos
@@ -280,8 +287,8 @@ type positioned struct {
 }
 
 // groupSources numbers the source of each of kids in the order the sources
-// first appear, so children of one source stay together in the order they
-// were given rather than interleaving with another source by position. A
+// first appear, so children of one source stay together in the order kids
+// lists them rather than interleaving with another source by position. A
 // line number counts only in the source that holds it.
 func groupSources(kids []positioned) {
 	seen := make([]*Source, 0, 1)

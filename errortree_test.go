@@ -361,6 +361,31 @@ func TestErrorTree_New(t *testing.T) {
 				},
 			},
 		},
+		"unbound Error keeps the order of its bindings": {
+			err: niceyaml.NewError("summary", niceyaml.WithErrors(
+				yamltest.Bind(t, source, badB()),
+				yamltest.Bind(t, source, badA()),
+			)),
+			want: niceyaml.ErrorTree{
+				Text: "summary",
+				Children: []niceyaml.ErrorTree{
+					{Text: "f.yaml:2:4: $.b: bad b"},
+					{Text: "f.yaml:1:4: $.a: bad a"},
+				},
+			},
+		},
+		"unbound join keeps the order of its bindings": {
+			err: errors.Join(
+				yamltest.Bind(t, source, badB()),
+				yamltest.Bind(t, source, badA()),
+			),
+			want: niceyaml.ErrorTree{
+				Children: []niceyaml.ErrorTree{
+					{Text: "f.yaml:2:4: $.b: bad b"},
+					{Text: "f.yaml:1:4: $.a: bad a"},
+				},
+			},
+		},
 		"bound join of two sources keeps the order it was given": {
 			err: yamltest.Bind(t, source, errors.Join(
 				yamltest.Bind(t, source, badB()),
