@@ -779,11 +779,6 @@ items:
 			wantValue: "test",
 			wantType:  token.StringType,
 		},
-		"node target returns value token": {
-			path:      paths.Root().Child("name"),
-			wantValue: "test",
-			wantType:  token.StringType,
-		},
 		"nested key target": {
 			path:      paths.Root().Child("metadata", "labels", "app"),
 			key:       true,
