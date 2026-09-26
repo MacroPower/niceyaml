@@ -1267,9 +1267,8 @@ func TestSourceError_Excerpt_NestedLocations(t *testing.T) {
 	`)
 
 	tcs := map[string]struct {
-		err        error
-		want       string
-		wantDetail bool
+		err  error
+		want string
 	}{
 		"no nested errors": {
 			err: yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
@@ -1285,7 +1284,11 @@ func TestSourceError_Excerpt_NestedLocations(t *testing.T) {
 					niceyaml.NewError("nested 2"),
 				),
 			)),
-			want: "main error\n├── nested 1\n└── nested 2",
+			want: stringtest.JoinLF(
+				"main error",
+				"├── nested 1",
+				"└── nested 2",
+			),
 		},
 		"nested error with path": {
 			err: yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
@@ -1297,7 +1300,14 @@ func TestSourceError_Excerpt_NestedLocations(t *testing.T) {
 					),
 				),
 			)),
-			wantDetail: true,
+			want: stringtest.JoinLF(
+				"main error",
+				"└── 1:1: $.key~: nested with path",
+				"",
+				"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
+				"<textError>^ nested with path</textError>",
+				"<nameTag>other</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>data</literalString>",
+			),
 		},
 		"nested error with token": {
 			err: func() error {
@@ -1313,7 +1323,14 @@ func TestSourceError_Excerpt_NestedLocations(t *testing.T) {
 					),
 				))
 			}(),
-			wantDetail: true,
+			want: stringtest.JoinLF(
+				"main error",
+				"└── 1:1: nested with token",
+				"",
+				"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
+				"<textError>^ nested with token</textError>",
+				"<nameTag>other</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>data</literalString>",
+			),
 		},
 		"mix of located and unlocated nested errors": {
 			err: yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
@@ -1327,7 +1344,16 @@ func TestSourceError_Excerpt_NestedLocations(t *testing.T) {
 					niceyaml.NewError("also no path"),
 				),
 			)),
-			wantDetail: true,
+			want: stringtest.JoinLF(
+				"main error",
+				"├── 1:1: $.key~: has path",
+				"├── no path",
+				"└── also no path",
+				"",
+				"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
+				"<textError>^ has path</textError>",
+				"<nameTag>other</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>data</literalString>",
+			),
 		},
 		"nil nested errors only": {
 			err: yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
@@ -1342,14 +1368,7 @@ func TestSourceError_Excerpt_NestedLocations(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := render(tc.err)
-
-			if tc.wantDetail {
-				assert.Contains(t, got, "main error")
-				assert.Contains(t, got, "key")
-			} else {
-				assert.Equal(t, tc.want, got)
-			}
+			assert.Equal(t, tc.want, trimLines(render(tc.err)))
 		})
 	}
 }
@@ -1970,13 +1989,19 @@ func TestError_HunkDisplay(t *testing.T) {
 			),
 		))
 
-		got := trimLines(renderContext(err, 1))
-
-		// Should show both errors.
-		assert.Contains(t, got, "first error")
-		assert.Contains(t, got, "second error")
-		// Should NOT have "..." separator since errors are close.
-		assert.NotContains(t, got, "...")
+		// The hunk runs from line1 through line4 with no separator.
+		assert.Equal(t, stringtest.JoinLF(
+			"validation error",
+			"├── 1:1: $.line1~: first error",
+			"└── 3:1: $.line3~: second error",
+			"",
+			"<genericError>line1</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>a</literalString>",
+			"<textError>^ first error</textError>",
+			"<nameTag>line2</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>b</literalString>",
+			"<genericError>line3</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>c</literalString>",
+			"<textError>^ second error</textError>",
+			"<nameTag>line4</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>d</literalString>",
+		), trimLines(renderContext(err, 1)))
 	})
 
 	t.Run("nested-only distant errors show separate hunks", func(t *testing.T) {
@@ -2047,15 +2072,21 @@ func TestError_HunkDisplay(t *testing.T) {
 			),
 		))
 
-		got := trimLines(renderContext(err, 1))
-
-		// Should show both errors with context clipped to valid range.
-		assert.Contains(t, got, "error at first")
-		assert.Contains(t, got, "error at last")
-		assert.Contains(t, got, "first")
-		assert.Contains(t, got, "last")
-		// Should have "..." separator.
-		assert.Contains(t, got, "...")
+		// The context clips to the file, so the excerpt starts at first and
+		// ends at last, with a separator between the two hunks.
+		assert.Equal(t, stringtest.JoinLF(
+			"validation error",
+			"├── 1:1: $.first~: error at first",
+			"└── 7:1: $.last~: error at last",
+			"",
+			"<genericError>first</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
+			"<textError>^ error at first</textError>",
+			"<nameTag>middle1</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>a</literalString>",
+			"<uiSeparator>...</uiSeparator>",
+			"<nameTag>middle5</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>e</literalString>",
+			"<genericError>last</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
+			"<textError>^ error at last</textError>",
+		), trimLines(renderContext(err, 1)))
 	})
 
 	t.Run("main error and nested in different hunks", func(t *testing.T) {
@@ -2122,13 +2153,17 @@ func TestError_HunkDisplay(t *testing.T) {
 			),
 		))
 
-		got := trimLines(renderContext(err, 0))
-
-		// Should show both error annotations.
-		assert.Contains(t, got, "error at line1")
-		assert.Contains(t, got, "error at line2")
-		// Should NOT have "..." separator since errors are adjacent.
-		assert.NotContains(t, got, "...")
+		// The hunk holds line1 and line2 with no separator between them.
+		assert.Equal(t, stringtest.JoinLF(
+			"validation error",
+			"├── 1:1: $.line1~: error at line1",
+			"└── 2:1: $.line2~: error at line2",
+			"",
+			"<genericError>line1</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>a</literalString>",
+			"<textError>^ error at line1</textError>",
+			"<genericError>line2</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>b</literalString>",
+			"<textError>^ error at line2</textError>",
+		), trimLines(renderContext(err, 0)))
 	})
 }
 
