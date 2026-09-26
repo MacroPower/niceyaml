@@ -4463,6 +4463,49 @@ func TestPrinter_Layout(t *testing.T) {
 		assert.Equal(t, 1, l.RowOf(position.New(0, 14)))
 	})
 
+	t.Run("unicode spaces the wrapper drops keep columns aligned", func(t *testing.T) {
+		t.Parallel()
+
+		// The wrapper drops a Unicode space at a break as it drops an ASCII
+		// one, so each separator column belongs to the row before the
+		// break and the next word starts the next row.
+		tcs := map[string]struct {
+			content string
+			want    string
+			rows    map[int]int // Column to row.
+		}{
+			"ideographic space": {
+				content: "k: aaaa\u3000bbbb\u3000cccc\u3000dddd",
+				want:    stringtest.JoinLF("k: aaaa", "bbbb", "cccc", "dddd"),
+				rows:    map[int]int{6: 0, 7: 0, 8: 1, 12: 1, 13: 2, 17: 2, 18: 3},
+			},
+			"em space": {
+				content: "k: aaaa\u2003bbbb\u2003cccc\u2003dddd",
+				want:    stringtest.JoinLF("k: aaaa", "bbbb", "cccc", "dddd"),
+				rows:    map[int]int{6: 0, 7: 0, 8: 1, 12: 1, 13: 2, 17: 2, 18: 3},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				view := niceyaml.NewSourceFromString(tc.content).View()
+				p := testPrinter().With(printer.WithWrap(7))
+
+				require.Equal(t, tc.want, p.Print(view))
+
+				l := p.Layout(view)
+
+				assert.Equal(t, 4, l.Rows())
+
+				for col, row := range tc.rows {
+					assert.Equal(t, row, l.RowOf(position.New(0, col)), "column %d", col)
+				}
+			})
+		}
+	})
+
 	t.Run("wide characters count two cells", func(t *testing.T) {
 		t.Parallel()
 

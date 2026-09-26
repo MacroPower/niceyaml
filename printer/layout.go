@@ -4,6 +4,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"unicode"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -137,12 +138,18 @@ func (p *Printer) layoutAnnotation(
 	return rows
 }
 
+// nbsp is the non-breaking space, the one Unicode space the wrapper keeps
+// at a break.
+const nbsp = '\u00a0'
+
 // rowStarts returns the column of content at which each piece of its
-// wrapped form begins. The wrapper drops the spaces at a break and at the
-// end of the content, and a style's transform may add text of its own, so
-// the columns come from matching the runes of each piece against the
-// content in order, skipping the spaces the wrapper dropped and the runes
-// the content does not hold.
+// wrapped form begins. It matches the runes of each piece against the
+// content in order. The wrapper drops every Unicode space but [nbsp] at
+// a break and at the end of the content, so the match skips those
+// spaces in the content. A style's transform may add text of its own,
+// so the match also passes over runes of a piece the content does not
+// hold. The caller escapes the content, so a tab shows as its control
+// picture and never counts as a space.
 func rowStarts(content string, pieces []string) []int {
 	runes := []rune(content)
 	starts := make([]int, len(pieces))
@@ -150,7 +157,7 @@ func rowStarts(content string, pieces []string) []int {
 
 	for i, piece := range pieces {
 		for j, r := range piece {
-			for next < len(runes) && runes[next] != r && (runes[next] == ' ' || runes[next] == '\t') {
+			for next < len(runes) && runes[next] != r && unicode.IsSpace(runes[next]) && runes[next] != nbsp {
 				next++
 			}
 
