@@ -13,8 +13,9 @@
 // A search folds case and ignores diacritics by default, through the
 // [normalizer.Normalizer] that [normalizer.New] builds. [WithNormalizer]
 // applies a [Normalizer] of the caller's own to both the loaded text and
-// the search string, one character at a time, and a nil one matches
-// bytes exactly.
+// the search string, one character at a time. With a nil one, a search
+// matches characters exactly and still reads invalid bytes and line
+// endings as [Index.Find] describes.
 package finder
 
 import (
@@ -65,7 +66,8 @@ type Normalizer interface {
 // By default, a search folds case and ignores diacritics, so "cafe"
 // matches "Café", through the [normalizer.Normalizer] that
 // [normalizer.New] builds. [WithNormalizer] sets a normalizer of the
-// caller's own, and [WithNormalizer] with nil matches bytes exactly.
+// caller's own, and [WithNormalizer] with nil matches characters exactly,
+// with no case folding or diacritic stripping.
 //
 // Create instances with [New].
 type Finder struct {
@@ -96,9 +98,12 @@ type Option func(*Finder)
 // WithNormalizer is an [Option] that sets the [Normalizer] applied to
 // both the search string and the loaded text before matching, in place
 // of the one [normalizer.New] builds. A nil normalizer removes
-// normalization, so a search then matches bytes exactly:
+// normalization, so a search then matches characters exactly:
 //
 //	exact := finder.New(finder.WithNormalizer(nil))
+//
+// Even then, invalid bytes read as U+FFFD and line endings read as "\n",
+// as [Index.Find] describes.
 //
 // The normalizer receives one character at a time, on both sides, so the
 // same character always normalizes the same way wherever it appears. A

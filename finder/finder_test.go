@@ -26,7 +26,7 @@ func TestFinder_Find(t *testing.T) {
 		input      string
 		search     string
 		normalizer finder.Normalizer
-		// Matches bytes exactly, with no normalizer at all.
+		// Matches characters exactly, with no normalizer at all.
 		exact bool
 		want  position.Ranges
 	}{
@@ -516,7 +516,9 @@ func TestFinder_Find_InvalidUTF8(t *testing.T) {
 		input      string
 		search     string
 		normalizer finder.Normalizer
-		want       position.Ranges
+		// Matches characters exactly, with no normalizer at all.
+		exact bool
+		want  position.Ranges
 	}{
 		"continuation byte without normalizer": {
 			input:  "x: a\u00e9",
@@ -541,6 +543,24 @@ func TestFinder_Find_InvalidUTF8(t *testing.T) {
 				position.NewRange(position.New(0, 4), position.New(0, 5)),
 			},
 		},
+		"other invalid byte with exact matching": {
+			// Exact matching compares characters, so any invalid byte
+			// reads as U+FFFD and matches any other.
+			input:  "a: x\xfey\n",
+			search: "\xff",
+			exact:  true,
+			want: position.Ranges{
+				position.NewRange(position.New(0, 4), position.New(0, 5)),
+			},
+		},
+		"U+FFFD needle with exact matching": {
+			input:  "a: x\xfey\n",
+			search: "\ufffd",
+			exact:  true,
+			want: position.Ranges{
+				position.NewRange(position.New(0, 4), position.New(0, 5)),
+			},
+		},
 		"normalizer emitting an invalid byte": {
 			// The needle and the index both pass through the normalizer,
 			// so an invalid byte it emits must read the same on both sides.
@@ -559,7 +579,7 @@ func TestFinder_Find_InvalidUTF8(t *testing.T) {
 
 			var opts []finder.Option
 
-			if tc.normalizer != nil {
+			if tc.normalizer != nil || tc.exact {
 				opts = append(opts, finder.WithNormalizer(tc.normalizer))
 			}
 
