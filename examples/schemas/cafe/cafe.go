@@ -30,7 +30,6 @@ var (
 )
 
 // Config is the root cafe configuration.
-// Create instances with [NewConfig].
 type Config struct {
 	// Kind identifies this configuration type.
 	Kind string `json:"kind" jsonschema:"title=Kind,const=Config"`
@@ -38,11 +37,6 @@ type Config struct {
 	Metadata Metadata `json:"metadata" jsonschema:"title=Metadata"`
 	// Spec contains the cafe specification.
 	Spec spec.Spec `json:"spec" jsonschema:"title=Spec"`
-}
-
-// NewConfig creates a new [Config].
-func NewConfig() Config {
-	return Config{}
 }
 
 // Metadata contains identifying information about the cafe.

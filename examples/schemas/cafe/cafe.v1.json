@@ -295,7 +295,7 @@
       "additionalProperties": false
     }
   },
-  "description": "Config is the root cafe configuration.\nCreate instances with [NewConfig].",
+  "description": "Config is the root cafe configuration.",
   "required": [
     "kind",
     "metadata",
