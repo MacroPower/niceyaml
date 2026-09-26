@@ -806,19 +806,14 @@ func (m *Model) refreshSearch() {
 	if m.baseLeft == nil {
 		m.left = nil
 		m.right = nil
-		m.searchMatches = nil
-		m.leftMatches = nil
-		m.rightMatches = nil
-		m.searchIndex = -1
+		m.clearMatches()
 
 		return
 	}
 
 	switch {
-	case m.searcher == nil:
-		m.searchMatches = nil
-		m.leftMatches = nil
-		m.rightMatches = nil
+	case m.searcher == nil, m.searchTerm == "":
+		m.clearMatches()
 
 	case m.viewMode == ViewModeSideBySide && m.baseRight != nil:
 		m.updateSideBySideSearchState()
@@ -827,7 +822,25 @@ func (m *Model) refreshSearch() {
 		m.updateSearchState(m.baseLeft)
 	}
 
+	// Every caller resets the index before a new term or new content, so
+	// the search starts over at the first match. SetSearchTerm returns
+	// before this point for the term already set, which keeps its match.
+	switch {
+	case len(m.searchMatches) == 0:
+		m.searchIndex = -1
+	case m.searchIndex >= len(m.searchMatches), m.searchIndex < 0:
+		m.searchIndex = 0
+	}
+
 	m.decorate()
+}
+
+// clearMatches drops the matches of both panes and the selected match.
+func (m *Model) clearMatches() {
+	m.searchMatches = nil
+	m.leftMatches = nil
+	m.rightMatches = nil
+	m.searchIndex = -1
 }
 
 // decorate takes a fresh clone of each base view and adds the search
@@ -870,20 +883,14 @@ type searchMatch struct {
 	inLeft bool
 }
 
-// updateSideBySideSearchState updates search matches for side-by-side mode.
+// updateSideBySideSearchState gathers the matches of a non-empty search term
+// in side-by-side mode. It needs a searcher, and it leaves the match index
+// to refreshSearch.
 //
 // It combines the matches from both panes and deduplicates them. Equal lines
 // count as a single match, while deleted and inserted lines count as separate
 // matches.
 func (m *Model) updateSideBySideSearchState() {
-	if m.searchTerm == "" {
-		m.searchMatches = nil
-		m.leftMatches = nil
-		m.rightMatches = nil
-
-		return
-	}
-
 	// Load both panes once per change of content, as the unified path
 	// does, so typing a term does not rebuild the indexes on every
 	// keystroke.
@@ -948,14 +955,6 @@ func (m *Model) updateSideBySideSearchState() {
 	})
 
 	m.searchMatches = combined
-
-	// Adjust search index if matches changed.
-	switch {
-	case len(m.searchMatches) == 0:
-		m.searchIndex = -1
-	case m.searchIndex >= len(m.searchMatches), m.searchIndex < 0:
-		m.searchIndex = 0
-	}
 }
 
 // applySideBySideOverlays adds search highlights to both panes, which hold
@@ -1010,20 +1009,13 @@ func (m *Model) applySideBySidePaneOverlays(
 	}
 }
 
-// updateSearchState updates the searcher and search matches for the given
-// lines.
+// updateSearchState gathers the matches of a non-empty search term in the
+// given lines. It needs a searcher, and it leaves the match index to
+// refreshSearch.
 //
 // It reloads the searcher only when the lines changed since the last load, so
 // typing a search term does not rebuild the index on every keystroke.
 func (m *Model) updateSearchState(lines *line.View) {
-	if m.searchTerm == "" {
-		m.searchMatches = nil
-		m.leftMatches = nil
-		m.rightMatches = nil
-
-		return
-	}
-
 	if m.searcherStale || m.index == nil {
 		m.index = m.searcher.Load(lines.Lines())
 
@@ -1037,14 +1029,6 @@ func (m *Model) updateSearchState(lines *line.View) {
 
 	for _, rng := range ranges {
 		m.searchMatches = append(m.searchMatches, searchMatch{rng: rng})
-	}
-
-	// Adjust search index if matches changed.
-	switch {
-	case len(m.searchMatches) == 0:
-		m.searchIndex = -1
-	case m.searchIndex >= len(m.searchMatches), m.searchIndex < 0:
-		m.searchIndex = 0
 	}
 }
 
@@ -1738,8 +1722,6 @@ func (m *Model) ClearSearch() {
 	}
 
 	m.searchTerm = ""
-	m.searchMatches = nil
-	m.searchIndex = -1
 	m.refreshSearch()
 }
 
