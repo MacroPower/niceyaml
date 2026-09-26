@@ -7,6 +7,7 @@ import (
 
 	"github.com/goccy/go-yaml/token"
 
+	"go.jacobcolvin.com/niceyaml/internal/lineend"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
@@ -694,31 +695,7 @@ func splitOriginIntoParts(origin string) []string {
 		return []string{""}
 	}
 
-	var parts []string
-
-	start := 0
-
-	for i := range len(origin) {
-		switch origin[i] {
-		case '\n':
-		case '\r':
-			if i+1 < len(origin) && origin[i+1] == '\n' {
-				continue // The "\n" of a CRLF ends the part.
-			}
-
-		default:
-			continue
-		}
-
-		parts = append(parts, origin[start:i+1])
-		start = i + 1
-	}
-
-	if start < len(origin) {
-		parts = append(parts, origin[start:])
-	}
-
-	return parts
+	return slices.Collect(lineend.Lines(origin))
 }
 
 // findLastContentPartIndex returns the index of the last part that contains

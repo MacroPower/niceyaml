@@ -8,6 +8,8 @@ import (
 
 	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/token"
+
+	"go.jacobcolvin.com/niceyaml/internal/lineend"
 )
 
 // Tokenize returns the token stream for the given YAML source.
@@ -179,31 +181,27 @@ func repairPastEnd(src string, tks token.Tokens) {
 // at 1:1 with offset 1.
 func sourceEnd(src string) (int, int, int) {
 	src = TrimLineEnding(src)
-
-	line, col := 1, 1
-
-	for i := 0; i < len(src); {
-		switch {
-		case strings.HasPrefix(src[i:], "\r\n"):
-			line, col = line+1, 1
-
-			i += 2
-
-		case src[i] == '\n' || src[i] == '\r':
-			line, col = line+1, 1
-
-			i++
-
-		default:
-			_, size := utf8.DecodeRuneInString(src[i:])
-
-			col++
-
-			i += size
-		}
-	}
+	line, col := advance(1, 1, src)
 
 	return line, col, utf8.RuneCountInString(src) + 1
+}
+
+// advance returns the line and column reached by moving from line and col
+// across s. A line break moves to column 1 of the next line, and any
+// other rune moves one column to the right.
+func advance(line, col int, s string) (int, int) {
+	for ln := range lineend.Lines(s) {
+		text := strings.TrimRight(ln, "\r\n")
+		if len(text) < len(ln) {
+			line, col = line+1, 1
+
+			continue
+		}
+
+		col += utf8.RuneCountInString(text)
+	}
+
+	return line, col
 }
 
 // IsPlaceholder reports whether tk is the token [Tokenize] made for text
@@ -276,7 +274,7 @@ type positioner struct {
 func (p *positioner) place(tk *token.Token) {
 	placed := false
 
-	for ln := range originLines(tk.Origin) {
+	for ln := range lineend.Lines(tk.Origin) {
 		text := []rune(strings.Trim(ln, " \t\r\n"))
 		if len(text) == 0 {
 			continue
@@ -345,13 +343,13 @@ func (p *positioner) restoreGap(tk *token.Token, at int) {
 		// The lexer rewrote a line ending it kept, such as a CRLF it
 		// turned into "\n" in an invalid token, so the gap matches the
 		// stream by the count of line breaks alone.
-		_, rest = cutLineBreaks(gap, countLineBreaks(p.tail))
+		_, rest = cutLineBreaks(gap, lineend.CountBreaks(p.tail))
 	}
 
 	// The lexer keeps the last line breaks of the gap in the whitespace
 	// the Origin opens with, so the first ones of rest are the ones it
 	// dropped.
-	missing := countLineBreaks(rest) - countLineBreaks(lead)
+	missing := lineend.CountBreaks(rest) - lineend.CountBreaks(lead)
 	if missing <= 0 {
 		return
 	}
@@ -376,23 +374,15 @@ func cutLineBreaks(s string, n int) (string, string) {
 
 	i := 0
 
-	for n > 0 && i < len(s) {
-		switch {
-		case strings.HasPrefix(s[i:], "\r\n"):
-			sb.WriteString("\r\n")
-
-			i += 2
-			n--
-
-		case s[i] == '\r' || s[i] == '\n':
-			sb.WriteByte(s[i])
-
-			i++
-			n--
-
-		default:
-			i++
+	for ln := range lineend.Lines(s) {
+		if n == 0 {
+			break
 		}
+
+		sb.WriteString(ln[len(strings.TrimRight(ln, "\r\n")):])
+
+		i += len(ln)
+		n--
 	}
 
 	return sb.String(), s[i:]
@@ -462,17 +452,12 @@ func (p *positioner) locate(tk *token.Token, text []rune) int {
 
 // setPosition writes the line, column, and offset of the rune at index at
 // into tk, counting the runes between the last position written and it.
+// Index at names the end of the source or a rune that is no line ending,
+// so the runes counted never split a CRLF.
 func (p *positioner) setPosition(tk *token.Token, at int) {
-	for p.idx < at && p.idx < len(p.src) {
-		r := p.src[p.idx]
-		p.idx++
-
-		if r == '\n' || (r == '\r' && (p.idx >= len(p.src) || p.src[p.idx] != '\n')) {
-			p.line++
-			p.col = 1
-		} else {
-			p.col++
-		}
+	if end := min(at, len(p.src)); p.idx < end {
+		p.line, p.col = advance(p.line, p.col, string(p.src[p.idx:end]))
+		p.idx = end
 	}
 
 	tk.Position.Line = p.line
@@ -499,45 +484,6 @@ func (p *positioner) hasText(at int, text []rune) bool {
 	}
 
 	return slices.Equal(p.src[at:at+len(text)], text)
-}
-
-// originLines yields the lines of origin, each cut after its line ending:
-// "\n", "\r\n", or a bare "\r", the three the lexer advances
-// Position.Line on. An empty origin yields nothing.
-func originLines(origin string) iter.Seq[string] {
-	return func(yield func(string) bool) {
-		start := 0
-
-		for i := range len(origin) {
-			switch origin[i] {
-			case '\n':
-			case '\r':
-				if i+1 < len(origin) && origin[i+1] == '\n' {
-					continue // The "\n" of a CRLF ends the line.
-				}
-
-			default:
-				continue
-			}
-
-			if !yield(origin[start : i+1]) {
-				return
-			}
-
-			start = i + 1
-		}
-
-		if start < len(origin) {
-			yield(origin[start:])
-		}
-	}
-}
-
-// countLineBreaks returns the number of line breaks in s, counting "\r\n",
-// "\n", and a bare "\r" as one each. The go-yaml lexer advances
-// Position.Line on all three.
-func countLineBreaks(s string) int {
-	return strings.Count(s, "\n") + strings.Count(s, "\r") - strings.Count(s, "\r\n")
 }
 
 // TrimLineEnding returns s without its trailing line ending: "\n", "\r\n",
@@ -594,7 +540,7 @@ func ResetPositions(tks token.Tokens) token.Tokens {
 		lead := tk.Origin[:len(tk.Origin)-len(trimmed)]
 		lastLine := lead[strings.LastIndexAny(lead, "\r\n")+1:]
 
-		startLine = tk.Position.Line - countLineBreaks(lead)
+		startLine = tk.Position.Line - lineend.CountBreaks(lead)
 		startCol = tk.Position.Column - len(lastLine)
 		startOffset = tk.Position.Offset - len(lead)
 

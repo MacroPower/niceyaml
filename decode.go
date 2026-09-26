@@ -14,6 +14,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
+	"go.jacobcolvin.com/niceyaml/internal/lineend"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -329,7 +330,7 @@ func trailingCommentsStart(tks token.Tokens) int {
 		return len(tks)
 	}
 
-	end := tks[last].Position.Line + countLineBreaks(strings.Trim(tks[last].Origin, " \t\r\n"))
+	end := tks[last].Position.Line + lineend.CountBreaks(strings.Trim(tks[last].Origin, " \t\r\n"))
 	start := len(tks)
 
 	for i := len(tks) - 1; i > last; i-- {
@@ -341,12 +342,6 @@ func trailingCommentsStart(tks token.Tokens) int {
 	}
 
 	return start
-}
-
-// countLineBreaks returns the number of line breaks in s, counting a CRLF
-// as one.
-func countLineBreaks(s string) int {
-	return strings.Count(s, "\n") + strings.Count(s, "\r") - strings.Count(s, "\r\n")
 }
 
 // isPreambleNode reports whether node is one the parser cut off from the
