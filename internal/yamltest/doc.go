@@ -25,34 +25,24 @@
 // # Token Comparison
 //
 // When tokens differ, standard equality checks produce unhelpful output.
-//
-// [RequireTokensEqual] fails the test with a detailed diff when two token
-// slices differ:
+// [RequireTokensEqual] validates both slices, compares them field by field,
+// and fails the test with a readable report of what differs:
 //
 //	yamltest.RequireTokensEqual(t, want, got)
 //
-// It builds on [ValidateTokens] and [CompareTokenSlices], which stay
-// available as pure functions for tests that report differences their own
-// way.
-//
-// [ValidateTokens] returns an error wrapping [ErrTokenCountMismatch] when the
-// slice lengths differ. For a nil token or position, it returns
-// [*TokenValidationError] with the underlying [ErrNilToken] or
-// [ErrNilPosition] reason. [ValidateLines] checks that a [line.Lines]
-// collection keeps its line numbers and token columns in increasing order.
-//
-// [CompareTokens] and [CompareTokenSlices] compare token fields and return
-// [TokenDiff] and [TokensDiff] respectively.
-//
-// For content comparison with normalized line endings, use [CompareContent]:
+// A test that reports differences its own way runs those steps itself.
+// [CompareTokens] and [CompareTokenSlices] assume non-nil tokens and
+// positions, so the test calls [ValidateTokens] first. Each diff value reports
+// whether its inputs match through Equal and formats itself through String,
+// so a test can hand one to t.Errorf. [CompareContent] returns the same kind
+// of value for whole text, and it normalizes line endings before comparing:
 //
 //	if diff := yamltest.CompareContent(want, got); !diff.Equal() {
 //		t.Errorf("content mismatch: %s", diff)
 //	}
 //
-// For debugging, [FormatToken] and [FormatTokens] produce readable
-// representations, and [DumpTokenOrigins] reconstructs the original source by
-// concatenating [token.Token.Origin] fields.
+// Tests of code that builds a [line.Lines] collection check its integrity
+// with [ValidateLines].
 //
 // # Styled Output
 //
@@ -66,11 +56,19 @@
 //
 // # Test Documents
 //
-// [FirstDocument] and [FirstDocumentWithPath] create root [*niceyaml.Node]
-// values for testing schema matchers and validators:
+// [FirstDocument] parses a YAML input and returns the root [*niceyaml.Node] of
+// its first document, and [FirstDocumentWithPath] also gives the source a file
+// path. [At] scopes a node to a path and fails the test when nothing matches:
 //
-//	doc := yamltest.FirstDocument(t, "kind: Deployment")
-//	docWithPath := yamltest.FirstDocumentWithPath(t, "on: push", ".github/workflows/ci.yaml")
+//	doc := yamltest.FirstDocument(t, input)
+//	replicas := yamltest.At(t, doc, paths.Root().Child("spec", "replicas"))
+//
+// Tests that check how a bound error reads use [Bind]. It binds an error to
+// the single document of a [*niceyaml.Source] and fails the test unless the
+// source holds exactly one document:
+//
+//	path := paths.Root().Child("spec", "replicas")
+//	err := yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtPath(path)))
 //
 // # Mocks
 //
