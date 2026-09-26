@@ -105,7 +105,7 @@ func (v *View) Held() Lines {
 		ls = append(ls, l)
 	}
 
-	return Collect(ls...)
+	return Lines{lines: ls}
 }
 
 // Count returns the number of lines the [View] holds, which is the number
