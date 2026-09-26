@@ -31,12 +31,16 @@ func TestRootCmdProfileFlags(t *testing.T) {
 			yamlPath := filepath.Join(dir, "doc.yaml")
 			require.NoError(t, os.WriteFile(yamlPath, []byte("name: a\n"), 0o600))
 
+			// An explicit schema keeps validate from fetching the SchemaStore catalog.
+			schemaPath := filepath.Join(dir, "schema.json")
+			require.NoError(t, os.WriteFile(schemaPath, []byte(`{"type": "object"}`), 0o600))
+
 			profilePath := filepath.Join(dir, "out.prof")
 
 			rootCmd, stopProfiler := newRootCmd()
 			rootCmd.SetOut(io.Discard)
 			rootCmd.SetErr(io.Discard)
-			rootCmd.SetArgs([]string{"validate", yamlPath, tc.flag, profilePath})
+			rootCmd.SetArgs([]string{"validate", "--schema", schemaPath, yamlPath, tc.flag, profilePath})
 
 			require.NoError(t, rootCmd.Execute())
 			require.NoError(t, stopProfiler())
