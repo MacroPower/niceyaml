@@ -667,9 +667,8 @@ func (m *Model) WordWrap() bool {
 	return m.wrapEnabled
 }
 
-// SetWordWrap turns word wrapping on or off. Enabling it resets the
-// horizontal scroll offset, since wrapped lines never overflow. The default
-// is on.
+// SetWordWrap turns word wrapping on or off. Enabling it returns the view to
+// its first column. The default is on.
 func (m *Model) SetWordWrap(enabled bool) {
 	m.wrapEnabled = enabled
 
@@ -1314,10 +1313,11 @@ func (m *Model) ScrollPercent() float64 {
 }
 
 // HorizontalScrollPercent returns the horizontal scroll position as a float
-// between 0 and 1. It is 1 while word wrap is on, since wrapped lines never
-// overflow the content width.
+// between 0 and 1. It is 1 when every row fits the content width, which
+// wrapped rows do unless an annotation column past the wrap width or a style
+// transform widens a row.
 func (m *Model) HorizontalScrollPercent() float64 {
-	if m.left == nil || m.printer == nil || m.wrapEnabled {
+	if m.left == nil || m.printer == nil {
 		return 1.0
 	}
 
@@ -1360,10 +1360,11 @@ func (m *Model) lineCount() int {
 }
 
 // maxXOffset returns the maximum X offset, which brings the last column of
-// the widest rendered row into view. Wrapped lines never overflow the content
-// width, so it is 0 while word wrap is on.
+// the widest rendered row into view. It is 0 when every row fits the content
+// width, which wrapped rows do unless an annotation column past the wrap
+// width or a style transform widens a row.
 func (m *Model) maxXOffset() int {
-	if m.left == nil || m.printer == nil || m.wrapEnabled {
+	if m.left == nil || m.printer == nil {
 		return 0
 	}
 
@@ -1469,14 +1470,14 @@ func (m *Model) visibleRows() []string {
 	rows := splitLines(p.Print(m.left.Slice(m.window(first, last))))
 	rows = m.trimWindow(m.trimFrame(rows, first, last), first)
 
-	// Without wrapping, lines may exceed the viewport width. Cut them to the
-	// horizontal window so lipgloss does not wrap them.
-	if !m.wrapEnabled {
-		maxWidth := m.maxWidth()
+	// Rows may run past the content width, with wrap off or when the
+	// printer renders a row wider than the wrap width (see
+	// [printer.WithContainerWidth]). Cutting every row to the horizontal
+	// window keeps the container frame in its columns.
+	maxWidth := m.maxWidth()
 
-		for i := range rows {
-			rows[i] = m.cutRow(rows[i], m.rowOffset(m.yOffset+i), maxWidth)
-		}
+	for i := range rows {
+		rows[i] = m.cutRow(rows[i], m.rowOffset(m.yOffset+i), maxWidth)
 	}
 
 	return rows
@@ -1764,7 +1765,12 @@ func (m *Model) scrollToCurrentMatch() {
 	// For height 21: (21-1)/2 = 10, placing the match at position 10 (middle).
 	m.SetYOffset(row - (m.maxHeight()-1)/2)
 
+	// Wrapped content fits the width, so the match sits in the first
+	// screen. An offset left over from reading a wide annotation row could
+	// hide it.
 	if m.wrapEnabled {
+		m.SetXOffset(0)
+
 		return
 	}
 
@@ -1988,21 +1994,13 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 			left, right := blank, blank
 
 			if i < leftCount && li < len(leftRows) {
-				left = leftRows[li]
+				left = m.cutRow(leftRows[li], offset, paneWidth)
 				li++
-
-				if !m.wrapEnabled {
-					left = m.cutRow(left, offset, paneWidth)
-				}
 			}
 
 			if i < rightCount && ri < len(rightRows) {
-				right = rightRows[ri]
+				right = m.cutRow(rightRows[ri], offset, paneWidth)
 				ri++
-
-				if !m.wrapEnabled {
-					right = m.cutRow(right, offset, paneWidth)
-				}
 			}
 
 			// Pad left pane to consistent width for alignment. Both panes

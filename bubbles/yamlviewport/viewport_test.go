@@ -3972,8 +3972,8 @@ func TestViewport_WordWrapDisablesHorizontalScroll(t *testing.T) {
 
 	before := m.View()
 
-	// Wrapped lines never overflow, so horizontal scrolling has nothing to
-	// move and the offset stays at 0.
+	// Rows that wrap within the width leave nothing to scroll, so the
+	// offset stays at 0.
 	m.ScrollRight(6)
 	m.ScrollRight(6)
 	assert.Equal(t, 0, m.XOffset())
@@ -3987,6 +3987,83 @@ func TestViewport_WordWrapDisablesHorizontalScroll(t *testing.T) {
 	m.SetWordWrap(false)
 	assert.Equal(t, 0, m.XOffset())
 	assert.Contains(t, m.View(), "key: very long")
+}
+
+func TestViewport_WrapKeepsFrameOfOverflowingRow(t *testing.T) {
+	t.Parallel()
+
+	// An annotation column past the wrap width pushes its rows past the
+	// pane even with wrap on. The viewport once passed those rows through
+	// uncut, so the content area truncated them, every row of the window
+	// lost its right border, and horizontal scrolling stayed pinned at 0
+	// with the annotation out of reach.
+	const width = 40
+
+	tcs := map[string]struct {
+		// The columns of the container's right border.
+		cols []int
+		mode yamlviewport.ViewMode
+	}{
+		"full": {
+			cols: []int{width - 1},
+		},
+		"side by side": {
+			// Two panes of 18 columns either side of a 4-column separator.
+			cols: []int{17, width - 1},
+			mode: yamlviewport.ViewModeSideBySide,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString("a: 1\nk: " + strings.Repeat("x", 60) + "\nc: 3\n")
+			view := source.View()
+			view.Annotate(1, line.Annotation{Content: "BAD", Placement: line.Below, Col: 50})
+
+			p := testPrinterWithLineNumbers().With(
+				printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())),
+			)
+			m := yamlviewport.New(yamlviewport.WithPrinter(p))
+			m.SetWidth(width)
+			m.SetHeight(10)
+			m.SetViewMode(tc.mode)
+			m.SetRevision(yamlviewport.NewRevision(source.Name(), view))
+			require.True(t, m.WordWrap())
+
+			assertFrame := func(out string) {
+				t.Helper()
+
+				for i, row := range strings.Split(out, "\n") {
+					plain := []rune(ansi.Strip(row))
+					require.Len(t, plain, width, "row %d: %q", i, row)
+
+					for _, col := range tc.cols {
+						assert.Contains(t, "┐│┘", string(plain[col]), "row %d, col %d: %q", i, col, row)
+					}
+				}
+			}
+
+			out := m.View()
+			assertFrame(out)
+			assert.NotContains(t, out, "^ B")
+			assert.Less(t, m.HorizontalScrollPercent(), 1.0)
+
+			m.SetXOffset(1000)
+			assert.Positive(t, m.XOffset())
+			assert.InDelta(t, 1.0, m.HorizontalScrollPercent(), 0.01)
+
+			out = m.View()
+			assertFrame(out)
+			assert.Contains(t, out, "^ B")
+
+			// Wrapped content fits the width, so moving to a search match
+			// returns the view to its first column.
+			m.SetSearchTerm("a")
+			assert.Equal(t, 0, m.XOffset())
+		})
+	}
 }
 
 func TestViewport_HorizontalScrollReachesEnd(t *testing.T) {
