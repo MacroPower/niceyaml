@@ -407,8 +407,10 @@ func (w *selfWalker) pathResolver() *paths.Resolver {
 }
 
 // addKeyName decodes key as type t and adds its text to names under the
-// value it decodes to. A key that does not decode, or whose value cannot
-// key a map, adds nothing.
+// value it decodes to. The text of a block scalar key is its content
+// rather than its `|` or `>` indicator. A key that does not decode, or
+// whose value cannot key a map, adds nothing, and neither does an alias
+// key, which decodes only beside the anchor it names.
 func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[any]string) {
 	node := keyValueNode(key)
 
@@ -417,6 +419,16 @@ func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[an
 	switch n := unwrapNode(node).(type) {
 	case *ast.StringNode:
 		name = n.Value
+	case *ast.LiteralNode:
+		if n.Value == nil {
+			return
+		}
+
+		name = n.Value.Value
+
+	case *ast.AliasNode:
+		return
+
 	case ast.ScalarNode:
 		tk := n.GetToken()
 		if tk == nil {

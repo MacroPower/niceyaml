@@ -21,7 +21,10 @@
 // (`!!map`) on a value is transparent, an alias (`*name`) resolves to the
 // anchor it names, and a mapping key lookup sees the entries a `<<` merge
 // key brings in. A key the mapping defines itself wins over a merged one.
-// When the parser allows a mapping to define one key twice, as
+// A child selector matches an alias used as a key as it would the content
+// of its anchor, so `*k` after `&k name` matches `.name`, and it matches a
+// block scalar key (`|` or `>`) by its content. When the parser allows a
+// mapping to define one key twice, as
 // [go.jacobcolvin.com/niceyaml.WithAllowDuplicateKeys] makes it do, a path
 // selects the later entry, whose value the decoder keeps, and a `..name`
 // selector lists only that entry. A mapping may hold several `<<` keys the

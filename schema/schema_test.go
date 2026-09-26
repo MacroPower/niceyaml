@@ -1844,6 +1844,35 @@ func TestSchema_SourcePath(t *testing.T) {
 			wantPath: "$.items[1].0x10",
 			want:     "3:11: $.items[1].0x10: expected \"integer\", got \"string\"",
 		},
+		"alias key": {
+			schema: `{
+				"type": "object",
+				"additionalProperties": {"type": "string"}
+			}`,
+			input:    "a: &k name\n*k : 5\n",
+			wantPath: "$.name",
+			want:     "2:6: $.name: expected \"string\", got \"integer\"",
+		},
+		"key named like an alias": {
+			// The alias *k decodes to the key name, so the member k is
+			// the entry k: 1.
+			schema: `{
+				"type": "object",
+				"properties": {"k": {"type": "string"}}
+			}`,
+			input:    "a: &k name\nk: 1\n*k : v\n",
+			wantPath: "$.k",
+			want:     "2:4: $.k: expected \"string\", got \"integer\"",
+		},
+		"block scalar key": {
+			schema: `{
+				"type": "object",
+				"additionalProperties": {"type": "string"}
+			}`,
+			input:    "? |-\n  n\n: 5\n",
+			wantPath: "$.n",
+			want:     "3:3: $.n: expected \"string\", got \"integer\"",
+		},
 		"respelled key behind an alias": {
 			schema: `{
 				"type": "object",

@@ -1333,6 +1333,33 @@ func TestPath_UnknownAlias(t *testing.T) {
 	require.ErrorIs(t, err, paths.ErrAlias)
 }
 
+func TestPath_UnknownAliasKey(t *testing.T) {
+	t.Parallel()
+
+	// An alias key that names no anchor has no name, so no selector
+	// matches it, and a lookup that passes it on the way to another key
+	// still resolves.
+	source := niceyaml.NewSourceFromString("b: 2\n*nope : 1\n")
+	file, err := source.File()
+	require.NoError(t, err)
+
+	doc := file.Docs[0]
+
+	node, err := paths.Root().Child("b").Node(doc)
+	require.NoError(t, err)
+	assert.Equal(t, "2", node.String())
+
+	matches, err := paths.Root().Recursive("b").Matches(doc)
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, "$.b", matches[0].Path.String())
+
+	for _, name := range []string{"nope", "*"} {
+		_, err := paths.Root().Child(name).Node(doc)
+		require.ErrorIs(t, err, paths.ErrNotFound, "Child(%q)", name)
+	}
+}
+
 func TestPath_AliasCycle(t *testing.T) {
 	t.Parallel()
 
@@ -1871,6 +1898,11 @@ empty: {}
 none: []
 !!str tagged: 6
 &k anchored: 7
+base: &kk aliased_name
+*kk : 8
+? |
+  block
+: 9
 `
 
 	source := niceyaml.NewSourceFromString(input)
@@ -1925,6 +1957,19 @@ none: []
 			key:       true,
 			wantValue: "anchored",
 		},
+		"alias key matches by its anchor's content": {
+			path:      paths.Root().Child("aliased_name"),
+			wantValue: "8",
+		},
+		"alias key target is the alias": {
+			path:      paths.Root().Child("aliased_name"),
+			key:       true,
+			wantValue: "*",
+		},
+		"block scalar key matches by its content": {
+			path:      paths.Root().Child("block\n"),
+			wantValue: "9",
+		},
 		"empty flow mapping value target": {
 			path:      paths.Root().Child("empty"),
 			wantValue: "{",
@@ -1944,10 +1989,10 @@ none: []
 		})
 	}
 
-	t.Run("tag and anchor text are not key names", func(t *testing.T) {
+	t.Run("indicator, tag, anchor, and alias text are not key names", func(t *testing.T) {
 		t.Parallel()
 
-		for _, name := range []string{"!!str", "&k", "k", "&", "?"} {
+		for _, name := range []string{"!!str", "&k", "k", "&", "?", "*", "kk", "|"} {
 			_, err := paths.Root().Child(name).Node(file.Docs[0])
 			require.ErrorIs(t, err, paths.ErrNotFound, "Child(%q)", name)
 		}
@@ -2088,6 +2133,13 @@ func TestPath_Matches(t *testing.T) {
 		ref: *base
 		'dot.key':
 		  - q
+		label: &label tagline
+		keyed:
+		  ? >-
+		    folded
+		    text
+		  : 1
+		  *label : 2
 	`))
 	file, err := source.File()
 	require.NoError(t, err)
@@ -2129,6 +2181,14 @@ func TestPath_Matches(t *testing.T) {
 		"quoted name": {
 			path: paths.Root().Child("dot.key").IndexAll(),
 			want: []string{"$.'dot.key'[0]"},
+		},
+		"recursive finds an alias key by its anchor's content": {
+			path: paths.Root().Recursive("tagline"),
+			want: []string{"$.keyed.tagline"},
+		},
+		"recursive finds a block scalar key by its content": {
+			path: paths.Root().Recursive("folded text"),
+			want: []string{"$.keyed.folded text"},
 		},
 		"nothing": {
 			path: paths.Root().Child("missing").IndexAll(),

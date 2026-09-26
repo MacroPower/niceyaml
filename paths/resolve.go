@@ -306,7 +306,7 @@ func (r *resolver) lookup(
 	mapping *ast.MappingNode, name string, seen map[*ast.MappingNode]bool,
 ) (*ast.MappingValueNode, bool, error) {
 	for _, entry := range slices.Backward(mapping.Values) {
-		if entry != nil && keyName(entry.Key) == name {
+		if entry != nil && r.keyName(entry.Key) == name {
 			return entry, true, nil
 		}
 	}
@@ -399,7 +399,7 @@ func (r *resolver) descend(node ast.Node, name string, at match, acc []match) []
 
 		for _, entry := range n.Values {
 			if entry != nil {
-				last[keyName(entry.Key)] = entry
+				last[r.keyName(entry.Key)] = entry
 			}
 		}
 
@@ -408,7 +408,7 @@ func (r *resolver) descend(node ast.Node, name string, at match, acc []match) []
 				continue
 			}
 
-			key := keyName(entry.Key)
+			key := r.keyName(entry.Key)
 			if last[key] != entry {
 				continue
 			}
@@ -470,16 +470,37 @@ func isMergeKey(key ast.MapKeyNode) bool {
 	return ok
 }
 
-// keyName returns the key text a child selector compares against. For a
-// string key that is the unquoted string, and the source text of the key
-// otherwise. A key with no content, or with content a selector cannot name,
-// such as a sequence, has the empty name.
-func keyName(key ast.MapKeyNode) string {
-	switch k := keyContent(key).(type) {
+// keyName returns the key text a child selector compares against. A
+// string key gives its unquoted text, a literal or folded block scalar key
+// gives its content, as the decoder reads it, and any other key gives its
+// source text. An alias key gives the name the content of its anchor
+// would give as a key. A key with no content, or with content a selector
+// cannot name, such as a sequence, has the empty name, and so does an
+// alias key with no anchor before it or one that leads back to itself.
+func (r *resolver) keyName(key ast.MapKeyNode) string {
+	content := keyContent(key)
+
+	if alias, ok := content.(*ast.AliasNode); ok {
+		target, err := r.unwrap(alias)
+		if err != nil || isNilNode(target) {
+			return ""
+		}
+
+		content = target
+	}
+
+	switch k := content.(type) {
 	case nil:
 		return ""
 	case *ast.StringNode:
 		return k.Value
+	case *ast.LiteralNode:
+		if k.Value == nil {
+			return ""
+		}
+
+		return k.Value.Value
+
 	case ast.MapKeyNode:
 		tk := nodeToken(k)
 		if tk == nil {

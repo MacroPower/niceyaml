@@ -616,15 +616,23 @@ func decodedKey(key ast.MapKeyNode) (string, bool) {
 }
 
 // sourceKey returns the name a path selector matches the key node by,
-// which is the source spelling of the key: the unquoted text of a string
-// key, and the token text of any other key, so the hexadecimal key 0x10
-// reads as 0x10. A key with no content, or with no token, has no name.
+// which is the source spelling of the key. A string key gives its
+// unquoted text, a block scalar key gives its content, and any other key
+// gives its token text, so the hexadecimal key 0x10 reads as 0x10. A key
+// with no content, or with no token, has no name.
 func sourceKey(key ast.Node) string {
 	switch k := contentNode(key).(type) {
 	case nil:
 		return ""
 	case *ast.StringNode:
 		return k.Value
+	case *ast.LiteralNode:
+		if k.Value == nil {
+			return ""
+		}
+
+		return k.Value.Value
+
 	default:
 		tk := k.GetToken()
 		if tk == nil {

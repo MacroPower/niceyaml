@@ -584,6 +584,37 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			})
 		}
 
+		// An alias key reports the content of its anchor, and a block
+		// scalar key reports its content rather than its indicator.
+		type named struct {
+			M map[string]item `yaml:"m"`
+		}
+
+		namedTcs := map[string]struct {
+			input string
+			want  string
+		}{
+			"alias": {
+				input: "base: &k n\nm:\n  *k : {price: -1}\n",
+				want:  "3:16: $.m.n.price: negative price",
+			},
+			"block scalar": {
+				input: "m:\n  ? |-\n    n\n  : {price: -1}\n",
+				want:  "4:13: $.m.n.price: negative price",
+			},
+		}
+
+		for name, tc := range namedTcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				_, err := dd.Decode[named](t.Context())
+				require.EqualError(t, err, tc.want)
+			})
+		}
+
 		// A key a merge brings in reports the text of the mapping it
 		// comes from.
 		dd := yamltest.FirstDocument(t, "base: &b {0x10: {price: -1}}\nm: {<<: *b}\n")
