@@ -3871,6 +3871,127 @@ func TestViewport_SideBySideLoadsSearcherOncePerContent(t *testing.T) {
 	assert.Equal(t, 5, searcher.loads)
 }
 
+// countingRevision wraps a [yamlviewport.Revision] and counts its View
+// calls.
+type countingRevision struct {
+	yamlviewport.Revision
+
+	views int
+}
+
+func (r *countingRevision) View() *line.View {
+	r.views++
+
+	return r.Revision.View()
+}
+
+func TestViewport_ViewModeReusesDiff(t *testing.T) {
+	t.Parallel()
+
+	docs := []string{
+		"a: 1\nb: 2\nc: 3\n",
+		"a: 1\nb: 20\nc: 3\n",
+		"a: 10\nb: 20\nc: 3\nd: 4\n",
+	}
+
+	tests := map[string]struct {
+		// Steps that run on a viewport that holds a revision of each doc
+		// and shows the diff at revision index 1.
+		change func(m *yamlviewport.Model, revs []*countingRevision)
+		// Indexes into docs of the revisions the viewport holds after
+		// change.
+		history []int
+		// Whether change reads the view of the revision on display again.
+		reread bool
+	}{
+		"toggle view modes": {
+			change: func(m *yamlviewport.Model, _ []*countingRevision) {
+				m.ToggleViewMode()
+				m.ToggleViewMode()
+				m.ToggleViewMode()
+			},
+			history: []int{0, 1, 2},
+		},
+		"hunk context": {
+			change: func(m *yamlviewport.Model, _ []*countingRevision) {
+				m.SetViewMode(yamlviewport.ViewModeHunks)
+				m.SetHunkContext(5)
+			},
+			history: []int{0, 1, 2},
+		},
+		"revision change": {
+			change: func(m *yamlviewport.Model, _ []*countingRevision) {
+				m.NextRevision()
+				m.PreviousRevision()
+			},
+			history: []int{0, 1, 2},
+			reread:  true,
+		},
+		"history replaced": {
+			// The new history holds another revision at index 1, so the
+			// diff at that index compares other content.
+			change: func(m *yamlviewport.Model, revs []*countingRevision) {
+				m.ClearRevisions()
+				m.AddRevision(revs[0])
+				m.AddRevision(revs[2])
+			},
+			history: []int{0, 2},
+			reread:  true,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+			m.SetWidth(80)
+			m.SetHeight(10)
+
+			revs := make([]*countingRevision, len(docs))
+			for i, doc := range docs {
+				revs[i] = &countingRevision{
+					Revision: niceyaml.NewSourceFromString(doc, niceyaml.WithName(fmt.Sprintf("v%d", i+1))),
+				}
+				m.AddRevision(revs[i])
+			}
+
+			m.GotoRevision(1)
+
+			for _, r := range revs {
+				r.views = 0
+			}
+
+			tc.change(&m, revs)
+
+			shown := revs[tc.history[m.RevisionIndex()]]
+			if tc.reread {
+				assert.Positive(t, shown.views)
+			} else {
+				for i, r := range revs {
+					assert.Zero(t, r.views, "revision %d", i)
+				}
+			}
+
+			want := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+			want.SetWidth(80)
+			want.SetHeight(10)
+
+			for _, i := range tc.history {
+				want.AddRevision(niceyaml.NewSourceFromString(docs[i], niceyaml.WithName(fmt.Sprintf("v%d", i+1))))
+			}
+
+			want.GotoRevision(m.RevisionIndex())
+			want.SetDiffMode(m.DiffMode())
+			want.SetViewMode(m.ViewMode())
+			want.SetHunkContext(m.HunkContext())
+
+			assert.Equal(t, want.DiffStats(), m.DiffStats())
+			assert.Equal(t, want.View(), m.View())
+		})
+	}
+}
+
 func TestViewport_WithSearcher(t *testing.T) {
 	t.Parallel()
 

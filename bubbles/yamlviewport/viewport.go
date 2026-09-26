@@ -64,13 +64,17 @@ func (s finderSearcher) Load(lines line.Lines) Index {
 //
 //	m.SetRevision(yamlviewport.NewRevision(source.Name(), view))
 //
-// The viewport reads the view when the revision, the diff mode, or the view
-// mode changes, and never decorates it. Search highlights go on a clone, so
-// the marks a caller adds stay, and the caller's view stays as the caller
-// left it. Marks added after the viewport read the view show once the
-// revision is set again. A diff between two revisions interleaves their
-// lines in a view of its own, so decoration shows only while the viewport
-// displays a revision without a diff.
+// The viewport reads the view of a revision it shows without a diff when
+// the revision, the diff mode, or the view mode changes, and never
+// decorates it. It computes the diff between two revisions from their views
+// and keeps it until it compares another pair or the history changes, so a
+// change of view mode or hunk context reuses the diff without reading the
+// views again. Search highlights go on a clone, so the marks a caller adds
+// stay, and the caller's view stays as the caller left it. Marks added
+// after the viewport read the view show once the revision is set again. A
+// diff between two revisions interleaves their lines in a view of its own,
+// so decoration shows only while the viewport displays a revision without
+// a diff.
 //
 // The viewport renders the lines the view holds in the order
 // [line.View.All] yields them, which is content order, and windows them
@@ -248,7 +252,8 @@ type Model struct {
 	indexRight Index
 	// Revision history; revIndex below selects the revision on display.
 	revisions []Revision
-	// Cached diff between base and current revision.
+	// Cached diff between the base and current revisions at the indexes in
+	// diffKey below.
 	diffResult *diff.Result
 	// The content on display before search highlights, for the left pane or
 	// main content and for the right pane of a side-by-side diff.
@@ -279,6 +284,7 @@ type Model struct {
 	horizontalStep int
 	revIndex       int
 	diffMode       DiffMode
+	diffKey        [2]int
 	// MouseWheelDelta is the number of rows to scroll per mouse wheel tick.
 	// Default: 3.
 	MouseWheelDelta int
@@ -491,6 +497,9 @@ func isNilRevision(r Revision) bool {
 func (m *Model) ClearRevisions() {
 	m.revisions = nil
 	m.revIndex = 0
+	// The cached diff names its revisions by index, and an index of the
+	// next history can hold another revision.
+	m.diffResult = nil
 	m.rebuildViews()
 }
 
@@ -736,7 +745,6 @@ func (m *Model) PreviousRevision() { m.GotoRevision(m.revIndex - 1) }
 // the view scrolls to the top, or to the first match in the new content when
 // the search term has one.
 func (m *Model) rebuildViews() {
-	m.diffResult = nil // Invalidate cached diff result.
 	m.baseLeft = nil
 	m.baseRight = nil
 	m.searcherStale = true
@@ -1038,13 +1046,6 @@ func heldMatches(view *line.View, matches position.Ranges) position.Ranges {
 	return held
 }
 
-// getDiffBase returns the revision that the diff compares the current one
-// against under the current [DiffMode].
-// Returns nil when the viewport shows no diff.
-func (m *Model) getDiffBase() Revision {
-	return m.revision(m.diffBaseIndex())
-}
-
 // diffBaseIndex returns the index of the revision that the diff compares
 // the current one against under the current [DiffMode], or -1 when the
 // viewport shows no diff.
@@ -1092,23 +1093,26 @@ func (m *Model) getDisplayLines() *line.View {
 	return rev.View()
 }
 
-// getDiffResult returns the cached [diff.Result], computing it if nil.
+// getDiffResult returns the [diff.Result] between the base revision for the
+// current [DiffMode] and the current revision. It caches the result by the
+// pair of revision indexes, and computes the diff again when the pair
+// changes or [Model.ClearRevisions] drops the cache.
 //
 // Without a base for the current [DiffMode], the current revision stands in
 // for it, which yields an empty diff rather than a nil [Revision].
 func (m *Model) getDiffResult() *diff.Result {
-	if m.diffResult == nil {
-		current := m.currentRevision()
+	base := m.diffBaseIndex()
+	if base < 0 {
+		base = m.revIndex
+	}
 
-		base := m.getDiffBase()
-		if base == nil {
-			base = current
-		}
-
+	pair := [2]int{base, m.revIndex}
+	if m.diffResult == nil || m.diffKey != pair {
 		// A diff compares the lines each view holds, as the other view
 		// modes render them, rather than every line of the content the
 		// view is over.
-		m.diffResult = diff.Diff(base.View().Held(), current.View().Held())
+		m.diffResult = diff.Diff(m.revision(base).View().Held(), m.currentRevision().View().Held())
+		m.diffKey = pair
 	}
 
 	return m.diffResult
