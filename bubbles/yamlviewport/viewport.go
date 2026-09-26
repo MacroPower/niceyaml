@@ -470,13 +470,29 @@ func (m *Model) SetRevision(r Revision) {
 // the caller left it. See [Revision]. A nil r, or an r that holds a nil
 // pointer such as a nil [*niceyaml.Source], adds nothing.
 func (m *Model) AddRevision(r Revision) {
-	if isNilRevision(r) {
+	m.AddRevisions(r)
+}
+
+// AddRevisions adds revisions to the history in order and moves to the last
+// one. It matches a call to [Model.AddRevision] for each revision, except
+// that the viewport builds only the view and diff of the last one, so
+// loading a history costs one diff rather than one per revision. A nil
+// revision, or one that holds a nil pointer, adds nothing.
+func (m *Model) AddRevisions(rs ...Revision) {
+	// Copies of a Model share the backing array of revisions, so the appends
+	// must not write into spare capacity that another copy can reach.
+	revisions := slices.Clip(m.revisions)
+	for _, r := range rs {
+		if !isNilRevision(r) {
+			revisions = append(revisions, r)
+		}
+	}
+
+	if len(revisions) == len(m.revisions) {
 		return
 	}
 
-	// Copies of a Model share the backing array of revisions, so the append
-	// must not write into spare capacity that another copy can reach.
-	m.revisions = append(slices.Clip(m.revisions), r)
+	m.revisions = revisions
 	m.revIndex = len(m.revisions) - 1
 
 	m.rebuildViews()

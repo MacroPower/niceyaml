@@ -44,6 +44,10 @@
 //	m.AddRevision(niceyaml.NewSourceFromString(v2, niceyaml.WithName("v2")))
 //	// Now showing diff between v1 and v2.
 //
+// Each call moves to the new revision and computes its diff. To load a
+// whole history, pass it to [Model.AddRevisions] instead, which computes
+// only the diff of the last revision.
+//
 // Three diff modes control how the viewport compares revisions:
 //
 //   - [DiffModeAdjacent]: Compare with the previous revision (default).

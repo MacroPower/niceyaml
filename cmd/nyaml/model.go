@@ -62,9 +62,12 @@ func newModel(opts *modelOptions) model {
 
 	m.applyTheme(theme.Charm.Name)
 
-	for _, source := range opts.sources {
-		m.viewport.AddRevision(source)
+	revisions := make([]yamlviewport.Revision, len(opts.sources))
+	for i, source := range opts.sources {
+		revisions[i] = source
 	}
+
+	m.viewport.AddRevisions(revisions...)
 
 	// The viewport centers a match in the rows it has, and it has none
 	// until the first tea.WindowSizeMsg sizes it, so the initial term waits

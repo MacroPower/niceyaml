@@ -1619,6 +1619,55 @@ func TestViewport_Revisions(t *testing.T) {
 				assert.Equal(t, "rev3", m.RevisionName())
 			},
 		},
+		"AddRevisions/Multiple": {
+			setup: func(m *yamlviewport.Model) {
+				m.AddRevisions(
+					niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")),
+					niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")),
+					niceyaml.NewSourceFromTokens(rev3Tokens, niceyaml.WithName("rev3")),
+				)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, 3, m.RevisionCount())
+				assert.Equal(t, 2, m.RevisionIndex())
+				assert.True(t, m.AtLatestRevision())
+				assert.True(t, m.ShowingDiff())
+				assert.Equal(t, []string{"rev1", "rev2", "rev3"}, m.RevisionNames())
+			},
+		},
+		"AddRevisions/SkipsNil": {
+			setup: func(m *yamlviewport.Model) {
+				m.AddRevisions(
+					nil,
+					niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")),
+					(*niceyaml.Source)(nil),
+					niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")),
+					nil,
+				)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, 2, m.RevisionCount())
+				assert.Equal(t, 1, m.RevisionIndex())
+				assert.Equal(t, []string{"rev1", "rev2"}, m.RevisionNames())
+			},
+		},
+		"AddRevisions/Empty": {
+			setup: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.GotoRevision(0)
+				m.AddRevisions()
+				m.AddRevisions(nil, (*niceyaml.Source)(nil))
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, 2, m.RevisionCount())
+				assert.Equal(t, 0, m.RevisionIndex()) // Stays on the revision it was at.
+				assert.Equal(t, "rev1", m.RevisionName())
+			},
+		},
 		"AddRevision": {
 			setup: func(m *yamlviewport.Model) {
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
@@ -3990,6 +4039,49 @@ func TestViewport_ViewModeReusesDiff(t *testing.T) {
 			assert.Equal(t, want.View(), m.View())
 		})
 	}
+}
+
+func TestViewport_AddRevisionsDiffsOnce(t *testing.T) {
+	t.Parallel()
+
+	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+	m.SetWidth(80)
+	m.SetHeight(10)
+
+	revs := make([]*countingRevision, 5)
+	batch := make([]yamlviewport.Revision, len(revs))
+
+	for i := range revs {
+		doc := fmt.Sprintf("a: %d\nb: 2\n", i)
+		revs[i] = &countingRevision{
+			Revision: niceyaml.NewSourceFromString(doc, niceyaml.WithName(fmt.Sprintf("v%d", i+1))),
+		}
+		batch[i] = revs[i]
+	}
+
+	m.AddRevisions(batch...)
+
+	// Only the diff of the last revision against the one before it reads
+	// views.
+	for i, r := range revs[:3] {
+		assert.Zero(t, r.views, "revision %d", i)
+	}
+
+	assert.Positive(t, revs[3].views)
+	assert.Positive(t, revs[4].views)
+
+	want := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+	want.SetWidth(80)
+	want.SetHeight(10)
+
+	for i := range revs {
+		doc := fmt.Sprintf("a: %d\nb: 2\n", i)
+		want.AddRevision(niceyaml.NewSourceFromString(doc, niceyaml.WithName(fmt.Sprintf("v%d", i+1))))
+	}
+
+	assert.Equal(t, want.RevisionNames(), m.RevisionNames())
+	assert.Equal(t, want.DiffStats(), m.DiffStats())
+	assert.Equal(t, want.View(), m.View())
 }
 
 func TestViewport_WithSearcher(t *testing.T) {
