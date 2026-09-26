@@ -1400,16 +1400,19 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 // [yaml.Error] at a token of the source as an [*Error] at that token, so
 // the excerpt marks it and the error matches [ErrDecodeRejected], and any
 // other error, such as a canceled context or one a value's own
-// UnmarshalYAML returns, as it is. An UnmarshalYAML that parses the bytes
-// it gets returns a [yaml.Error] of its own, whose token comes from that
-// parse rather than the source, so it stays the value's own error.
-// Returns nil for a nil err.
+// UnmarshalYAML returns, as it is. Only a [yaml.Error] the decoder returns
+// itself converts, so a [yaml.Error] that a value's UnmarshalYAML wraps
+// comes back as that unmarshaler's error, with the text and sentinels of
+// its wrapper. An UnmarshalYAML that parses the bytes it gets returns a
+// [yaml.Error] of its own, whose token comes from that parse rather than
+// the source, so it stays the value's own error. Returns nil for a nil
+// err.
 func (n *Node) bindDecodeError(err error) error {
 	if err == nil {
 		return nil
 	}
 
-	yamlErr, ok := errors.AsType[yaml.Error](err)
+	yamlErr, ok := err.(yaml.Error) //nolint:errorlint // A wrapped error is the unmarshaler's own.
 	if !ok || !n.holdsToken(yamlErr.GetToken()) {
 		return n.Bind(err)
 	}

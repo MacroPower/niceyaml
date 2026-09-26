@@ -31,7 +31,8 @@ var (
 	errDocumentRejected       = errors.New("document rejected")
 	errPlainValidation        = errors.New("plain validation failure")
 
-	// The error rejectingUnmarshaler reports from its own decode.
+	// The error rejectingUnmarshaler and wrappingUnmarshaler report from
+	// their own decode.
 	errUnmarshal = errors.New("unmarshaler rejected the value")
 )
 
@@ -4279,6 +4280,24 @@ func (*rejectingUnmarshaler) UnmarshalYAML([]byte) error {
 	return errUnmarshal
 }
 
+// wrappingUnmarshaler decodes itself as an int through the decoder and
+// wraps the error the decoder returns in errUnmarshal, so the error
+// carries go-yaml's error inside the caller's own.
+type wrappingUnmarshaler int
+
+func (u *wrappingUnmarshaler) UnmarshalYAML(unmarshal func(any) error) error {
+	var n int
+
+	err := unmarshal(&n)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errUnmarshal, err)
+	}
+
+	*u = wrappingUnmarshaler(n)
+
+	return nil
+}
+
 // reparsingUnmarshaler decodes itself by parsing the bytes it gets again,
 // so the go-yaml error it returns carries a token of that parse rather
 // than one of the source.
@@ -4374,6 +4393,55 @@ func TestErrDecodeRejected(t *testing.T) {
 		_, err := dd.Decode[rejectingUnmarshaler](t.Context())
 		require.ErrorIs(t, err, errUnmarshal)
 		require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
+	})
+
+	t.Run("wrapped unmarshaler error does not match", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input  string
+			decode func(ctx context.Context, dd *niceyaml.Node) error
+		}{
+			"top-level value": {
+				input: "abc",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[wrappingUnmarshaler](ctx)
+
+					return err
+				},
+			},
+			"sequence element": {
+				input: "- 1\n- abc\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[[]wrappingUnmarshaler](ctx)
+
+					return err
+				},
+			},
+			"mapping value": {
+				input: "a: 1\nb: abc\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[map[string]wrappingUnmarshaler](ctx)
+
+					return err
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				err := tc.decode(t.Context(), dd)
+				require.ErrorIs(t, err, errUnmarshal)
+				require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
+
+				_, ok := errors.AsType[yaml.Error](err)
+				assert.True(t, ok, "the go-yaml error left the chain")
+			})
+		}
 	})
 
 	t.Run("unmarshaler parse error does not match", func(t *testing.T) {
