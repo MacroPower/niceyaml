@@ -438,7 +438,7 @@ func memberNodes(node ast.Node, name string) (ast.Node, ast.Node) {
 	}
 
 	for _, member := range members {
-		if decodedKey(member.Key) == name {
+		if key, ok := decodedKey(member.Key); ok && key == name {
 			return member.Key, member.Value
 		}
 	}
@@ -446,23 +446,36 @@ func memberNodes(node ast.Node, name string) (ast.Node, ast.Node) {
 	return nil, nil
 }
 
-// decodedKey returns the member name a decode gives the key node: the
-// unquoted text of a string key, and the Go value of any other scalar as
-// the decoder spells it, so the hexadecimal key 0x10 reads as 16, and a
-// null key, however it is written, reads as null. A key that is no
-// scalar, such as a sequence, has no name.
-func decodedKey(key ast.MapKeyNode) string {
-	switch k := contentNode(key).(type) {
-	case *ast.StringNode:
-		return k.Value
-	case *ast.NullNode:
-		// A null node carries a nil value, which prints as "<nil>" rather
-		// than the "null" the decoder names the member by.
-		return "null"
-	case ast.ScalarNode:
-		return fmt.Sprint(k.GetValue())
+// decodedKey returns the member name a decode gives the key node, with
+// the key's tag applied, and reports whether the key has a name. A
+// string key gives its unquoted text, and any other scalar gives its Go
+// value as the decoder spells it. The hexadecimal key 0x10 reads as 16,
+// !!bool yes reads as true, and a !!timestamp key reads as its time
+// value. A null key reads as null in every spelling. A merge key has no
+// name, because the decoder folds its value into the mapping. A key that
+// is no scalar, such as a sequence, has no name either, and neither does
+// a key the decoder cannot read on its own, such as an alias.
+func decodedKey(key ast.MapKeyNode) (string, bool) {
+	if _, ok := contentNode(key).(ast.ScalarNode); !ok || key.IsMergeKey() {
+		return "", false
+	}
+
+	var v any
+
+	err := yaml.NodeToValue(key, &v)
+	if err != nil {
+		return "", false
+	}
+
+	switch k := v.(type) {
+	case nil:
+		// A nil value prints as "<nil>" rather than the "null" the decoder
+		// names the member by.
+		return "null", true
+	case string:
+		return k, true
 	default:
-		return ""
+		return fmt.Sprint(k), true
 	}
 }
 

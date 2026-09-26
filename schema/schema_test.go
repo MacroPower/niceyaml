@@ -1648,6 +1648,24 @@ func TestSchema_SourcePath(t *testing.T) {
 			wantPath: "$.'~'",
 			want:     "1:4: $.'~': expected \"string\", got \"integer\"",
 		},
+		"merge key ahead of a null key": {
+			schema: `{
+				"type": "object",
+				"additionalProperties": {"type": ["string", "object"]}
+			}`,
+			input:    "<<: {a: x}\n~: 5\n",
+			wantPath: "$.'~'",
+			want:     "2:4: $.'~': expected [\"string\", \"object\"], got \"integer\"",
+		},
+		"merge key ahead of an empty key": {
+			schema: `{
+				"type": "object",
+				"additionalProperties": {"type": ["string", "object"]}
+			}`,
+			input:    "<<: {a: x}\n\"\": 5\n",
+			wantPath: "$.''",
+			want:     "2:5: $.'': expected [\"string\", \"object\"], got \"integer\"",
+		},
 		"spelled-out null key": {
 			schema: `{
 				"type": "object",
@@ -1666,6 +1684,42 @@ func TestSchema_SourcePath(t *testing.T) {
 			input:    "True: nope\n",
 			wantPath: "$.True~",
 			want:     "1:1: $.True~: value is not allowed",
+		},
+		"bool-tagged key": {
+			schema: `{
+				"type": "object",
+				"additionalProperties": {"type": "string"}
+			}`,
+			input:    "!!bool yes: 5\n",
+			wantPath: "$.yes",
+			want:     "1:13: $.yes: expected \"string\", got \"integer\"",
+		},
+		"null-tagged key": {
+			schema: `{
+				"type": "object",
+				"additionalProperties": {"type": "string"}
+			}`,
+			input:    "!!null x: 5\n",
+			wantPath: "$.x",
+			want:     "1:11: $.x: expected \"string\", got \"integer\"",
+		},
+		"int-tagged quoted key": {
+			schema: `{
+				"type": "object",
+				"additionalProperties": {"type": "string"}
+			}`,
+			input:    "!!int \"0x10\": 5\n",
+			wantPath: "$.0x10",
+			want:     "1:15: $.0x10: expected \"string\", got \"integer\"",
+		},
+		"timestamp-tagged key": {
+			schema: `{
+				"type": "object",
+				"additionalProperties": {"type": "string"}
+			}`,
+			input:    "? !!timestamp 2001-01-01\n: 5\n",
+			wantPath: "$.2001-01-01",
+			want:     "2:3: $.2001-01-01: expected \"string\", got \"integer\"",
 		},
 		"float key": {
 			schema: `{
