@@ -536,16 +536,14 @@ func TestSource_Runes_WithRanges(t *testing.T) {
 		}
 
 		// Line 1: cols 2-4 (newline at 4), Line 2: cols 0-1.
-		require.NotEmpty(t, collected)
-
-		// First should be ' ' at line 1, col 2.
-		assert.Equal(t, ' ', collected[0].R)
-		assert.Equal(t, position.New(1, 2), collected[0].Pos)
-
-		// Verify all positions are within the range.
-		for _, rp := range collected {
-			assert.True(t, rng.Contains(rp.Pos), "position %v should be in range", rp.Pos)
+		want := []runePosition{
+			{R: ' ', Pos: position.New(1, 2)},
+			{R: '2', Pos: position.New(1, 3)},
+			{R: '\n', Pos: position.New(1, 4)},
+			{R: 'c', Pos: position.New(2, 0)},
+			{R: ':', Pos: position.New(2, 1)},
 		}
+		assert.Equal(t, want, collected)
 	})
 
 	t.Run("range clamped to bounds", func(t *testing.T) {
@@ -554,16 +552,19 @@ func TestSource_Runes_WithRanges(t *testing.T) {
 		// Range that extends beyond source bounds.
 		rng := position.NewRange(position.New(-5, 0), position.New(100, 100))
 
-		var collected []runePosition
+		var collected, all []runePosition
 
 		for pos, r := range source.Lines().Runes(rng) {
 			collected = append(collected, runePosition{R: r, Pos: pos})
 		}
 
+		for pos, r := range source.Lines().Runes() {
+			all = append(all, runePosition{R: r, Pos: pos})
+		}
+
 		// Should return all runes since range encompasses everything.
-		assert.NotEmpty(t, collected)
-		// First should be 'a'.
-		assert.Equal(t, 'a', collected[0].R)
+		require.NotEmpty(t, all)
+		assert.Equal(t, all, collected)
 	})
 
 	t.Run("empty source returns nothing", func(t *testing.T) {
