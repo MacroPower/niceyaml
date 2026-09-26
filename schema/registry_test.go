@@ -1874,6 +1874,154 @@ func TestRegistry_Schema_GoexitReachesCaller(t *testing.T) {
 	assert.False(t, load())
 }
 
+func TestRegistry_FragmentRefs(t *testing.T) {
+	t.Parallel()
+
+	// The root takes any object, and each subschema requires a member.
+	// Foo reaches Name through a pointer $ref, which resolves against the
+	// root of the document rather than against Foo.
+	defsSchema := []byte(`{
+		"type": "object",
+		"$defs": {
+			"Foo": {"$ref": "#/$defs/Name"},
+			"Name": {"required": ["name"]},
+			"Bar": {"required": ["id"]},
+			"Named": {"$anchor": "named", "required": ["name"]}
+		}
+	}`)
+
+	// Each subtest starts a server of its own, which serves defs.json and
+	// counts every request it receives, whatever the path.
+	serve := func(t *testing.T) (string, *atomic.Int32) {
+		t.Helper()
+
+		var requests atomic.Int32
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requests.Add(1)
+
+			if r.URL.Path != "/defs.json" {
+				http.NotFound(w, r)
+
+				return
+			}
+
+			//nolint:errcheck // Test helper.
+			w.Write(defsSchema)
+		}))
+		t.Cleanup(server.Close)
+
+		return server.URL, &requests
+	}
+
+	// A file subtest writes defs.json to a directory of its own.
+	defsFile := func(t *testing.T) string {
+		t.Helper()
+
+		path := filepath.Join(t.TempDir(), "defs.json")
+		require.NoError(t, os.WriteFile(path, defsSchema, 0o600))
+
+		return path
+	}
+
+	tcs := map[string]struct {
+		ref      func(t *testing.T, serverURL string) schema.Ref
+		valid    string
+		invalid  string
+		want     string
+		requests int32
+	}{
+		"url pointer": {
+			ref: func(_ *testing.T, serverURL string) schema.Ref {
+				return schema.URL(serverURL + "/defs.json#/$defs/Foo")
+			},
+			valid:    "name: x\n",
+			invalid:  "other: 1\n",
+			want:     `missing required property "name"`,
+			requests: 1,
+		},
+		"url anchor": {
+			ref: func(_ *testing.T, serverURL string) schema.Ref {
+				return schema.URL(serverURL + "/defs.json#named")
+			},
+			valid:    "name: x\n",
+			invalid:  "other: 1\n",
+			want:     `missing required property "name"`,
+			requests: 1,
+		},
+		"file url pointer": {
+			ref: func(t *testing.T, _ string) schema.Ref {
+				t.Helper()
+
+				return fileOrURL(t, "", "file://"+filepath.ToSlash(defsFile(t))+"#/$defs/Foo")
+			},
+			valid:   "name: x\n",
+			invalid: "other: 1\n",
+			want:    `missing required property "name"`,
+		},
+		"empty fragment names the root": {
+			ref: func(_ *testing.T, serverURL string) schema.Ref {
+				return schema.URL(serverURL + "/defs.json#")
+			},
+			valid:    "other: 1\n",
+			invalid:  "- x\n",
+			want:     `expected "object", got "array"`,
+			requests: 1,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			serverURL, requests := serve(t)
+			reg := schema.NewRegistry(schema.WithResolvers(tc.ref(t, serverURL)))
+
+			require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, tc.valid)))
+
+			err := reg.Validate(t.Context(), yamltest.FirstDocument(t, tc.invalid))
+			require.Error(t, err)
+			require.NotErrorIs(t, err, schema.ErrValidate)
+			assert.Contains(t, err.Error(), tc.want)
+
+			assert.Equal(t, tc.requests, requests.Load())
+		})
+	}
+
+	t.Run("fragments of one document apply their own subschemas", func(t *testing.T) {
+		t.Parallel()
+
+		serverURL, requests := serve(t)
+		reg := schema.NewRegistry()
+
+		foo, err := reg.Schema(t.Context(), schema.URL(serverURL+"/defs.json#/$defs/Foo"))
+		require.NoError(t, err)
+
+		bar, err := reg.Schema(t.Context(), schema.URL(serverURL+"/defs.json#/$defs/Bar"))
+		require.NoError(t, err)
+
+		require.NoError(t, yamltest.FirstDocument(t, "name: x\n").Validate(t.Context(), foo))
+		require.ErrorContains(t, yamltest.FirstDocument(t, "id: 1\n").Validate(t.Context(), foo),
+			`missing required property "name"`)
+
+		require.NoError(t, yamltest.FirstDocument(t, "id: 1\n").Validate(t.Context(), bar))
+		require.ErrorContains(t, yamltest.FirstDocument(t, "name: x\n").Validate(t.Context(), bar),
+			`missing required property "id"`)
+
+		// The registry fetches the document once for each schema it compiles.
+		assert.Equal(t, int32(2), requests.Load())
+	})
+
+	t.Run("a pointer that names nothing does not compile", func(t *testing.T) {
+		t.Parallel()
+
+		serverURL, _ := serve(t)
+
+		_, err := schema.NewRegistry().Schema(t.Context(), schema.URL(serverURL+"/defs.json#/$defs/Missing"))
+		require.ErrorIs(t, err, schema.ErrCompile)
+	})
+}
+
 func TestRegistry_RelativeRefs(t *testing.T) {
 	t.Parallel()
 
@@ -2173,14 +2321,18 @@ func TestRegistry_Schema_RedactsPassword(t *testing.T) {
 	t.Parallel()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/bad.json" {
+		switch r.URL.Path {
+		case "/bad.json":
 			//nolint:errcheck // Test helper.
 			w.Write([]byte(`{"type": 5}`))
 
-			return
-		}
+		case "/defs.json":
+			//nolint:errcheck // Test helper.
+			w.Write([]byte(`{"$defs": {"Foo": {}}}`))
 
-		http.NotFound(w, r)
+		default:
+			http.NotFound(w, r)
+		}
 	}))
 	t.Cleanup(server.Close)
 
@@ -2196,6 +2348,10 @@ func TestRegistry_Schema_RedactsPassword(t *testing.T) {
 		},
 		"a schema that does not compile": {
 			url: withPassword + "/bad.json",
+			err: schema.ErrCompile,
+		},
+		"a fragment that names no subschema": {
+			url: withPassword + "/defs.json#/$defs/Missing",
 			err: schema.ErrCompile,
 		},
 		"a url that does not parse": {

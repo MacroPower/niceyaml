@@ -23,6 +23,8 @@ var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 // resolves to the local path it names. A file:// URL with a host other
 // than localhost names no local path, so FileOrURL treats the whole
 // reference as a relative file path, which then fails to resolve or read.
+// A fragment on an HTTP/HTTPS or file:// URL selects a subschema, as the
+// note on [URL] says, and a '#' in a plain path is part of the file name.
 // A relative file path joins baseDir; the path a file:// URL names, an
 // absolute path, and an HTTP/HTTPS URL ignore baseDir. When baseDir is
 // empty and the path is relative, the error wraps [ErrNoBaseDir], and an
@@ -81,11 +83,26 @@ func FileOrURL(baseDir, ref string) (Ref, error) {
 	}
 
 	// A file URL names a local path, which never joins baseDir, whether or
-	// not the platform reads that path as absolute. A drive-letter path is
-	// absolute on Windows and names nothing a POSIX base directory can
-	// resolve, so it never joins baseDir either. The drive then survives
-	// into the URL and the read error.
-	if fromFileURL || filepath.IsAbs(path) || hasDriveLetter(path) {
+	// not the platform reads that path as absolute. The path leaves out the
+	// fragment, which names a subschema, so the key takes it back as
+	// written, as the key of an HTTP/HTTPS URL keeps it.
+	if fromFileURL {
+		r, err := file(path)
+		if err != nil {
+			return Ref{}, err
+		}
+
+		if _, fragment, _ := strings.Cut(ref, "#"); fragment != "" {
+			r.key += "#" + fragment
+		}
+
+		return r, nil
+	}
+
+	// A drive-letter path is absolute on Windows and names nothing a POSIX
+	// base directory can resolve, so it never joins baseDir either. The
+	// drive then survives into the URL and the read error.
+	if filepath.IsAbs(path) || hasDriveLetter(path) {
 		return file(path)
 	}
 

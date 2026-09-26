@@ -221,6 +221,24 @@ func TestFileOrURL(t *testing.T) {
 		assert.Equal(t, fileURL(t, schemaPath), url)
 	})
 
+	t.Run("file URL with fragment", func(t *testing.T) {
+		t.Parallel()
+
+		tmpDir := t.TempDir()
+		schemaPath := filepath.Join(tmpDir, "schema.json")
+		schemaData := []byte(`{"definitions": {"Foo": {"type": "object"}}}`)
+		require.NoError(t, os.WriteFile(schemaPath, schemaData, 0o600))
+
+		// The key keeps the fragment that names the subschema, and the
+		// registry loads the whole file.
+		ref := "file://" + filepath.ToSlash(schemaPath) + "#/definitions/Foo"
+
+		url, data, err := load(t, fileOrURL(t, "/some/other/dir", ref))
+		require.NoError(t, err)
+		assert.Equal(t, schemaData, data)
+		assert.Equal(t, fileURL(t, schemaPath)+"#/definitions/Foo", url)
+	})
+
 	t.Run("URL with custom client", func(t *testing.T) {
 		t.Parallel()
 

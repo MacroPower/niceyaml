@@ -131,6 +131,39 @@ func TestURL(t *testing.T) {
 		}
 	})
 
+	t.Run("fragment kept in key", func(t *testing.T) {
+		t.Parallel()
+
+		// Each fragment names a subschema of its own, so the key keeps it.
+		// An empty fragment names the whole document, and the key drops
+		// it, so both spellings share one cache entry.
+		tcs := map[string]struct {
+			ref  string
+			want string
+		}{
+			"json pointer": {
+				ref:  "https://example.com/s.json#/$defs/tasks",
+				want: "https://example.com/s.json#/$defs/tasks",
+			},
+			"anchor": {
+				ref:  "https://example.com/s.json#tasks",
+				want: "https://example.com/s.json#tasks",
+			},
+			"empty fragment": {
+				ref:  "https://example.com/s.json#",
+				want: "https://example.com/s.json",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				assert.Equal(t, tc.want, schema.URL(tc.ref).Key())
+			})
+		}
+	})
+
 	t.Run("not found", func(t *testing.T) {
 		t.Parallel()
 

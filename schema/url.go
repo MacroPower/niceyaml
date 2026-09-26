@@ -19,6 +19,12 @@ import (
 // [Resolver] returns, so a resolver that builds the URL from the document
 // hands it back beside a nil error.
 //
+// A fragment, such as the JSON pointer #/$defs/tasks or an anchor name,
+// selects that subschema of the document the URL names, as a $ref with
+// the same fragment would. The registry caches each fragment apart, so
+// it fetches the document once for each fragment that names it. An empty
+// fragment names the whole document, so URL drops a trailing '#'.
+//
 // A $ref in the schema resolves against the URL, and the registry fetches
 // each HTTP or HTTPS URL a reference names with the same client. A
 // reference to a file:// URL does not resolve, so a remote schema cannot
@@ -26,14 +32,19 @@ import (
 //
 // A registry rejects a response body over 10 MB. The client's Timeout and
 // the context of the lookup bound each fetch. [Registry.Load] fetches the
-// URL and returns the bytes, for a caller that wants them rather than the
-// compiled schema.
+// URL and returns the bytes of the whole document, whatever its fragment,
+// for a caller that wants them rather than the compiled schema.
 func URL(schemaURL string) Ref {
 	if schemaURL == "" {
 		panic("schema.URL: schema URL is empty")
 	}
 
-	return Ref{key: normalizeScheme(schemaURL), url: true}
+	key := normalizeScheme(schemaURL)
+	if base, fragment, ok := strings.Cut(key, "#"); ok && fragment == "" {
+		key = base
+	}
+
+	return Ref{key: key, url: true}
 }
 
 // normalizeScheme lowercases the scheme at the start of ref when "://"

@@ -62,8 +62,8 @@ const defaultHTTPTimeout = 30 * time.Second
 // loading, so it loads and compiles each schema once however many
 // documents name it. The cache never evicts, so the registry keeps every
 // schema it compiles for its whole lifetime, and each distinct Key adds
-// an entry, a URL that differs from another only in its query string
-// included. The registry compiles every schema with the options
+// an entry, a URL that differs from another only in its query string or
+// fragment included. The registry compiles every schema with the options
 // [WithCompileOptions] gave it. [Registry.Schema] hands out the compiled
 // schema a [Ref] names through that cache, for a caller that holds a Ref
 // of its own. A [*Schema] compiled elsewhere is a resolver too, and the
@@ -548,7 +548,9 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 // from [Loadable] returns. Load reads the bytes on every call and caches
 // nothing. [Registry.Schema] loads the same bytes once and compiles them,
 // so Load is for a caller that wants the bytes themselves, such as one
-// that prints a schema. An error wraps [ErrLoad].
+// that prints a schema. For a file or URL whose fragment selects a
+// subschema, Load returns the bytes of the whole document. An error wraps
+// [ErrLoad].
 //
 // The zero Ref names no bytes, and a Ref from [Schema.Ref] carries a
 // compiled schema rather than bytes, which [Ref.Schema] returns, so Load
@@ -717,9 +719,15 @@ func (r *Registry) keepRefDoc(uri string, data []byte) bool {
 // [File] reaches cannot read the local disk either, because the resolver
 // refuses a document fetched over HTTP or HTTPS that names a file URL.
 // The refusal holds whatever order the compiler reaches documents in, and
-// it covers a document the registry kept for a schema from [URL]. An
-// option from [WithCompileOptions] comes later and wins.
-func (r *Registry) refOptions(ref Ref) []CompileOption {
+// it covers a document the registry kept for a schema from [URL].
+//
+// When ref names a subschema by a fragment, doc is the document the
+// registry loaded for ref, parsed, and docURL is the key without its
+// fragment. A reference to docURL then resolves to doc without a second
+// load, and a relative $ref in doc resolves against docURL. A nil doc
+// means ref names a whole document. An option from [WithCompileOptions]
+// comes later and wins.
+func (r *Registry) refOptions(ref Ref, docURL string, doc *jsonschema.Schema) []CompileOption {
 	if !ref.url && ref.file == "" {
 		return r.compileOpts
 	}
@@ -776,11 +784,30 @@ func (r *Registry) refOptions(ref Ref) []CompileOption {
 		return s, nil
 	})
 
-	opts := make([]CompileOption, 0, len(r.compileOpts)+1)
-	opts = append(opts, WithJSONSchemaOptions(
+	refOpts := []jsonschema.ValidateOption{
 		jsonschema.WithBaseURI(ref.key),
 		jsonschema.WithRefResolver(resolver),
-	))
+	}
+
+	// The schema that names the fragment takes no base URI, because a base
+	// equal to the document's URL would point its $ref at itself. The
+	// document takes its URL as its base, as a whole document does.
+	if doc != nil {
+		preload := jsonschema.RefResolverFunc(func(_ context.Context, uri string) (*jsonschema.Schema, error) {
+			if base, _, _ := strings.Cut(uri, "#"); base == docURL {
+				return doc, nil
+			}
+
+			return nil, fmt.Errorf("%w: %q", jsonschema.ErrNotResolved, httpfetch.Redacted(uri))
+		})
+
+		refOpts = []jsonschema.ValidateOption{
+			jsonschema.WithRefResolver(jsonschema.ChainResolvers(preload, resolver)),
+		}
+	}
+
+	opts := make([]CompileOption, 0, len(r.compileOpts)+1)
+	opts = append(opts, WithJSONSchemaOptions(refOpts...))
 
 	return append(opts, r.compileOpts...)
 }
@@ -873,9 +900,29 @@ func (r *Registry) compile(ctx context.Context, ref Ref) (*Schema, error) {
 		return nil, err
 	}
 
-	compiled, err := Compile(ctx, data, r.refOptions(ref)...)
+	// A fragment on the key of a file or a URL names a subschema of the
+	// document. The registry compiles a schema whose $ref names that
+	// subschema and serves the loaded document to the reference. A key
+	// from Loadable is a name, where a '#' may mean anything, so it
+	// compiles whole.
+	var doc *jsonschema.Schema
+
+	docURL, fragment, _ := strings.Cut(key, "#")
+	if (ref.url || ref.file != "") && fragment != "" {
+		doc, err = jsonschema.ParseSchema(data)
+		if err != nil {
+			return nil, fmt.Errorf("%q: %w: %w", ref.name(), ErrCompile, err)
+		}
+
+		data, err = json.Marshal(map[string]string{"$ref": key})
+		if err != nil {
+			return nil, fmt.Errorf("%q: %w: %w", ref.name(), ErrCompile, err)
+		}
+	}
+
+	compiled, err := Compile(ctx, data, r.refOptions(ref, docURL, doc)...)
 	if err != nil {
-		return nil, fmt.Errorf("%q: %w", ref.name(), err)
+		return nil, fmt.Errorf("%q: %w", ref.name(), redactURL(err, docURL))
 	}
 
 	r.mu.Lock()
@@ -884,4 +931,36 @@ func (r *Registry) compile(ctx context.Context, ref Ref) (*Schema, error) {
 	r.cache[key] = compiled
 
 	return compiled, nil
+}
+
+// A redactedError is an error whose message quotes a URL that holds a
+// password, such as the $ref the compiler cannot resolve when a fragment
+// names no subschema. Its message spells each copy of the URL as
+// [httpfetch.Redacted] spells it.
+type redactedError struct {
+	err  error
+	url  string
+	name string
+}
+
+// Error implements error.
+func (e *redactedError) Error() string {
+	return strings.ReplaceAll(e.err.Error(), e.url, e.name)
+}
+
+// Unwrap returns the error whose message e redacts.
+func (e *redactedError) Unwrap() error {
+	return e.err
+}
+
+// redactURL returns err with each copy of rawURL in its message redacted
+// as [httpfetch.Redacted] redacts it, or err itself when rawURL holds no
+// password.
+func redactURL(err error, rawURL string) error {
+	name := httpfetch.Redacted(rawURL)
+	if name == rawURL {
+		return err
+	}
+
+	return &redactedError{err: err, url: rawURL, name: name}
 }

@@ -223,6 +223,31 @@ func TestDirective_Resolve(t *testing.T) {
 		assert.Equal(t, server.URL+"/schema.json", url)
 	})
 
+	t.Run("validates against the subschema a URL fragment names", func(t *testing.T) {
+		t.Parallel()
+
+		// The root takes any document, and Foo requires a name.
+		schemaData := `{
+			"$schema": "http://json-schema.org/draft-07/schema#",
+			"definitions": {"Foo": {"type": "object", "required": ["name"]}}
+		}`
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			//nolint:errcheck // Test helper.
+			w.Write([]byte(schemaData))
+		}))
+		defer server.Close()
+
+		directive := "# yaml-language-server: $schema=" + server.URL + "/defs.json#/definitions/Foo\n"
+		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+
+		err := reg.Validate(t.Context(), yamltest.FirstDocument(t, directive+"name: x\n"))
+		require.NoError(t, err)
+
+		err = reg.Validate(t.Context(), yamltest.FirstDocument(t, directive+"kind: Deployment\n"))
+		require.ErrorContains(t, err, `missing required property "name"`)
+	})
+
 	t.Run("returns ErrNoDirective when no directive present", func(t *testing.T) {
 		t.Parallel()
 
