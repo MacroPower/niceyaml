@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -118,26 +119,67 @@ func TestValidateCmdOutput(t *testing.T) {
 
 	// The per-file line goes to the writer the caller set on the command,
 	// so embedding the command and redirecting its output captures it.
-	dir := t.TempDir()
-
-	schemaPath := filepath.Join(dir, "schema.json")
-	require.NoError(t, os.WriteFile(schemaPath, []byte(`{"type": "object"}`), 0o600))
-
-	paths := []string{
-		filepath.Join(dir, "a.yaml"),
-		filepath.Join(dir, "b.yaml"),
+	tcs := map[string]struct {
+		// Names of the valid files to write to the test directory.
+		files []string
+		// Arguments after the schema flag, relative to the test directory.
+		args []string
+		// Names that the "valid" lines report in order, relative to the
+		// test directory.
+		want []string
+	}{
+		"explicit names": {
+			files: []string{"a.yaml", "b.yaml"},
+			args:  []string{"a.yaml", "b.yaml"},
+			want:  []string{"a.yaml", "b.yaml"},
+		},
+		"control characters in a matched name": {
+			files: []string{"\x1b]52;c;eA==\a.yaml"},
+			args:  []string{"*.yaml"},
+			// The Control Pictures for ESC and BEL stand in for them.
+			want: []string{"␛]52;c;eA==␇.yaml"},
+		},
 	}
-	for _, path := range paths {
-		require.NoError(t, os.WriteFile(path, []byte("name: a\n"), 0o600))
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+
+			schemaPath := filepath.Join(dir, "schema.json")
+			require.NoError(t, os.WriteFile(schemaPath, []byte(`{"type": "object"}`), 0o600))
+
+			for _, file := range tc.files {
+				err := os.WriteFile(filepath.Join(dir, file), []byte("name: a\n"), 0o600)
+				if err != nil {
+					// Some file systems, such as those on Windows, reject
+					// control characters in a name.
+					t.Skipf("write %q: %v", file, err)
+				}
+			}
+
+			args := []string{"--schema", schemaPath}
+			for _, arg := range tc.args {
+				args = append(args, filepath.Join(dir, arg))
+			}
+
+			var want strings.Builder
+
+			for _, w := range tc.want {
+				want.WriteString(filepath.Join(dir, w) + ": valid\n")
+			}
+
+			out := &bytes.Buffer{}
+
+			cmd := validateCmd()
+			cmd.SetOut(out)
+			cmd.SetErr(out)
+			cmd.SetArgs(args)
+
+			require.NoError(t, cmd.Execute())
+			assert.Equal(t, want.String(), out.String())
+			assert.NotContains(t, out.String(), "\x1b")
+		})
 	}
-
-	out := &bytes.Buffer{}
-
-	cmd := validateCmd()
-	cmd.SetOut(out)
-	cmd.SetErr(out)
-	cmd.SetArgs(append([]string{"--schema", schemaPath}, paths...))
-
-	require.NoError(t, cmd.Execute())
-	assert.Equal(t, paths[0]+": valid\n"+paths[1]+": valid\n", out.String())
 }

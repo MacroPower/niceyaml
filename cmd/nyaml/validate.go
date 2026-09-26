@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/schemastore"
 )
@@ -45,7 +46,9 @@ func validateCmd() *cobra.Command {
 					continue
 				}
 
-				_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s: valid\n", yamlPath)
+				// A glob match takes its name from the file system, so
+				// escape it the way the error handler renders one.
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s: valid\n", escape.Control(yamlPath))
 				if err != nil {
 					errs = append(errs, fmt.Errorf("write the result of %s: %w", yamlPath, err))
 				}
