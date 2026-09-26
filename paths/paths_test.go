@@ -443,6 +443,9 @@ func TestParse_Invalid(t *testing.T) {
 		"non-numeric index": {
 			expr: "$[a]",
 		},
+		"index overflows int": {
+			expr: "$[99999999999999999999]",
+		},
 		"wildcard child": {
 			expr: "$.*",
 		},
@@ -458,6 +461,9 @@ func TestParse_Invalid(t *testing.T) {
 		"bare text after key selector": {
 			expr: "$.a~b",
 		},
+		"non-ASCII after root": {
+			expr: "$é",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -469,6 +475,46 @@ func TestParse_Invalid(t *testing.T) {
 			require.ErrorIs(t, err, paths.ErrInvalidPath)
 			assert.Equal(t, paths.Path{}, p)
 			assert.Contains(t, err.Error(), "parse path")
+		})
+	}
+}
+
+func TestParse_ErrorMessage(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		expr string
+		want string
+	}{
+		"ASCII after root": {
+			expr: "$a",
+			want: `parse path "$a": invalid path: unexpected 'a' at 1`,
+		},
+		"non-ASCII after root": {
+			expr: "$é",
+			want: `parse path "$é": invalid path: unexpected 'é' at 1`,
+		},
+		"non-ASCII after index": {
+			expr: "$[0]日",
+			want: `parse path "$[0]日": invalid path: unexpected '日' at 4`,
+		},
+		"invalid UTF-8 after quoted name": {
+			expr: "$.'a'\xff",
+			want: `parse path "$.'a'\xff": invalid path: unexpected "\xff" at 5`,
+		},
+		"index overflows int": {
+			expr: "$[99999999999999999999]",
+			want: `parse path "$[99999999999999999999]": invalid path: ` +
+				`index "99999999999999999999": out of range`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := paths.Parse(tc.expr)
+			require.EqualError(t, err, tc.want)
 		})
 	}
 }

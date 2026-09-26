@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 var (
@@ -14,6 +15,9 @@ var (
 	// An index selector that is not a canonical non-negative decimal
 	// integer produces errInvalidIndex.
 	errInvalidIndex = errors.New("not a non-negative integer")
+
+	// An index selector too large for an int produces errIndexOutOfRange.
+	errIndexOutOfRange = errors.New("out of range")
 )
 
 // Parse parses a path expression into a [Path].
@@ -86,7 +90,7 @@ func parseSegments(expr string) ([]segment, error) {
 		case strings.HasPrefix(rest, "~"):
 			seg, rest = segment{kind: segmentKey}, rest[1:]
 		default:
-			return nil, fmt.Errorf("unexpected %q at %d", rest[0], len(expr)-len(rest))
+			return nil, unexpectedError(rest, len(expr)-len(rest))
 		}
 
 		if err != nil {
@@ -97,6 +101,18 @@ func parseSegments(expr string) ([]segment, error) {
 	}
 
 	return segs, nil
+}
+
+// unexpectedError reports the character that starts rest, found at byte
+// offset in the expression. A byte that does not start valid UTF-8 prints
+// as an escape such as "\xff".
+func unexpectedError(rest string, offset int) error {
+	r, size := utf8.DecodeRuneInString(rest)
+	if r == utf8.RuneError && size == 1 {
+		return fmt.Errorf("unexpected %q at %d", rest[:1], offset)
+	}
+
+	return fmt.Errorf("unexpected %q at %d", r, offset)
 }
 
 // parseName reads an unquoted selector name up to the next `.`, `[`, or
@@ -185,9 +201,11 @@ func parseIndex(rest string) (segment, string, error) {
 		return segment{}, "", fmt.Errorf("index %q: %w", body, errInvalidIndex)
 	}
 
+	// A canonical index is valid syntax, so Atoi fails only when the
+	// number does not fit in an int.
 	idx, err := strconv.Atoi(body)
 	if err != nil {
-		return segment{}, "", fmt.Errorf("index %q: %w: %w", body, errInvalidIndex, err)
+		return segment{}, "", fmt.Errorf("index %q: %w", body, errIndexOutOfRange)
 	}
 
 	return segment{kind: segmentIndex, index: idx}, remaining, nil
