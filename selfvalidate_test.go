@@ -68,6 +68,19 @@ func (it *item) Validate() error {
 	return nil
 }
 
+// signed validates itself with a message that names its value.
+type signed struct {
+	N int `yaml:"n"`
+}
+
+func (s signed) Validate() error {
+	if s.N < 0 {
+		return niceyaml.NewError(fmt.Sprintf("negative %d", s.N), niceyaml.AtPath(paths.Root().Child("n")))
+	}
+
+	return nil
+}
+
 var (
 	// The error a value reports when its children ran after it.
 	errOrder = errors.New("children ran after the parent")
@@ -519,6 +532,26 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		for range 20 {
 			_, err := dd.Decode[map[string]item](t.Context())
+			require.EqualError(t, err, want)
+		}
+	})
+
+	t.Run("keys of one text order by the types they hold", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("1: {n: -1}\n\"1\": {n: -2}\n", niceyaml.WithAllowDuplicateKeys(true))
+
+		dd, err := source.Document()
+		require.NoError(t, err)
+
+		// The string key sorts before the uint64 key.
+		want := stringtest.JoinLF(
+			"$.1.n: negative -2",
+			"$.1.n: negative -1",
+		)
+
+		for range 20 {
+			_, err = dd.Decode[map[any]signed](t.Context())
 			require.EqualError(t, err, want)
 		}
 	})

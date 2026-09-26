@@ -254,7 +254,7 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path) bool {
 	case reflect.Map:
 		// The entries walk in the order of their keys, so the errors come
 		// back in one order however the map iterates. Two keys of one
-		// text, such as 1 and "1", order by their types.
+		// text, such as 1 and "1", order by the types they hold.
 		names := w.keyNames(base, v.Type().Key())
 		keys := v.MapKeys()
 		slices.SortStableFunc(keys, func(a, b reflect.Value) int {
@@ -262,7 +262,7 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path) bool {
 				return c
 			}
 
-			return strings.Compare(a.Type().String(), b.Type().String())
+			return strings.Compare(keyTypeName(a), keyTypeName(b))
 		})
 
 		for _, key := range keys {
@@ -482,4 +482,18 @@ func mapKey(key reflect.Value, names map[any]string) string {
 	}
 
 	return fmt.Sprint(key.Interface())
+}
+
+// keyTypeName returns the name of the type a map key holds: the dynamic
+// type of a key an interface holds, or "" for a nil one.
+func keyTypeName(key reflect.Value) string {
+	if key.Kind() == reflect.Interface {
+		if key.IsNil() {
+			return ""
+		}
+
+		key = key.Elem()
+	}
+
+	return key.Type().String()
 }
