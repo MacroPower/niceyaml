@@ -2,6 +2,7 @@ package finder_test
 
 import (
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -792,6 +793,37 @@ func TestFinder_Find_MultipleSearches(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIndex_Find_Concurrent(t *testing.T) {
+	t.Parallel()
+
+	// The default normalizer is safe for concurrent use, so goroutines that
+	// share one Index get the ranges a single goroutine gets.
+	source := niceyaml.NewSourceFromString("name: Café\nstreet: Straße\nnote: café au lait\n")
+	idx := finder.New().Load(source.Lines())
+
+	searches := []string{"cafe", "STRASSE", "note", "au"}
+	want := make([]position.Ranges, len(searches))
+
+	for i, search := range searches {
+		want[i] = idx.Find(search)
+		assert.NotEmpty(t, want[i], search)
+	}
+
+	var wg sync.WaitGroup
+
+	for range 8 {
+		wg.Go(func() {
+			for range 50 {
+				for i, search := range searches {
+					assert.Equal(t, want[i], idx.Find(search), search)
+				}
+			}
+		})
+	}
+
+	wg.Wait()
 }
 
 func TestIndex_Find_CoversDroppedTrailingRune(t *testing.T) {

@@ -29,6 +29,11 @@ import (
 
 // Normalizer transforms strings for comparison (e.g., removing diacritics).
 //
+// A [Finder] and every [Index] it builds share one normalizer, so goroutines
+// that load with the Finder or search any of those Indexes at the same time
+// call Normalize concurrently. A normalizer used that way must be safe for
+// concurrent use, as [normalizer.Normalizer] is.
+//
 // See [normalizer.Normalizer] for an implementation.
 type Normalizer interface {
 	Normalize(in string) string
@@ -47,7 +52,8 @@ type Normalizer interface {
 // [Index.Find] uses that map on every call without re-reading the lines.
 //
 // A Finder holds only its settings and never changes after [New], so it is
-// safe for concurrent use, as is every Index it builds.
+// safe for concurrent use when its [Normalizer] is, as the default from
+// [normalizer.New] is, and so is every Index it builds.
 //
 // Example:
 //
@@ -99,6 +105,9 @@ type Option func(*Finder)
 // transformer whose output depends on surrounding characters, such as title
 // casing, sees none and behaves as it would on a one-character string.
 //
+// The [Finder] and every [Index] it builds share n, so goroutines that use
+// any of them at once need a normalizer that is safe for concurrent use.
+//
 // See [normalizer.Normalizer] for an implementation.
 func WithNormalizer(n Normalizer) Option {
 	return func(f *Finder) {
@@ -122,7 +131,9 @@ func (f *Finder) Load(lines line.Lines) *Index {
 
 // Index is the loaded text of one [line.Lines] together with the map from
 // its characters back to [position.Position] values in the lines. It never
-// changes after [Finder.Load] builds it, so it is safe for concurrent use.
+// changes after [Finder.Load] builds it, so it is safe for concurrent use
+// when the Finder's [Normalizer] is. Every Index from one Finder shares that
+// normalizer.
 //
 // Create instances with [Finder.Load].
 type Index struct {
