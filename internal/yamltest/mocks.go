@@ -1,6 +1,7 @@
 package yamltest
 
-// MockNormalizer implements [finder.Normalizer] for testing.
+// MockNormalizer implements [go.jacobcolvin.com/niceyaml/finder.Normalizer] for
+// testing.
 //
 // It wraps a normalization function that returns input unchanged, returns
 // static output, or runs custom logic.

@@ -6,17 +6,18 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
-// XMLStyles implements [style.Styler] using XML tags instead of ANSI
-// escape codes.
+// XMLStyles implements [go.jacobcolvin.com/niceyaml/style.Styler] using XML
+// tags instead of ANSI escape codes.
 //
 // Each [kind.Kind] category wraps content in descriptive tags.
 //
 // For example, a comment renders as `<comment># text</comment>`.
 //
 // The tags are ordinary text, so lipgloss counts them toward display width.
-// A printer that combines XMLStyles with [printer.WithWrap] or a padded
-// container style wraps and pads by tag length rather than by the visible
-// text, so assert width and alignment through a color theme instead.
+// A printer that combines XMLStyles with
+// [go.jacobcolvin.com/niceyaml/printer.WithWrap] or a padded container style
+// wraps and pads by tag length rather than by the visible text, so assert
+// width and alignment through a color theme instead.
 //
 // Create instances with [NewXMLStyles].
 type XMLStyles struct {
