@@ -86,8 +86,16 @@ func (w *selfWalker) walk(v reflect.Value, base paths.Path) bool {
 		return w.walk(v.Elem(), base)
 
 	case reflect.Pointer, reflect.Map, reflect.Slice:
+		// A nil pointer holds no value to validate. A nil map or slice is
+		// an empty value with nothing below it, so it validates here rather
+		// than through done, where every nil value of its type would share
+		// one record.
 		if v.IsNil() {
-			return true
+			if v.Kind() == reflect.Pointer {
+				return true
+			}
+
+			return w.validate(v, base)
 		}
 
 		if !ownsAddress(v) {

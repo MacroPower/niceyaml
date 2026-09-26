@@ -460,6 +460,34 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		))
 	})
 
+	t.Run("a nil slice or map still validates", func(t *testing.T) {
+		t.Parallel()
+
+		// Every nil slice or map of one type shares one address, which
+		// must not make them one value.
+		type withEmpty struct {
+			A rules `yaml:"a"`
+			B rules `yaml:"b"`
+			M names `yaml:"m"`
+			N names `yaml:"n"`
+		}
+
+		dd := yamltest.FirstDocument(t, "a: null\nm: null\n")
+
+		_, err := dd.Decode[withEmpty](t.Context())
+		require.EqualError(t, err, stringtest.JoinLF(
+			"$.a: no rules",
+			"$.b: no rules",
+			"$.m: no names",
+			"$.n: no names",
+		))
+
+		dd = yamltest.FirstDocument(t, "null\n")
+
+		_, err = dd.Decode[rules](t.Context())
+		require.EqualError(t, err, "no rules")
+	})
+
 	t.Run("a value that refers back through a map walks once", func(t *testing.T) {
 		t.Parallel()
 
@@ -715,6 +743,17 @@ type rules []int
 func (r rules) Validate() error {
 	if len(r) == 0 {
 		return niceyaml.NewError("no rules")
+	}
+
+	return nil
+}
+
+// names is a map that must not be empty.
+type names map[string]int
+
+func (n names) Validate() error {
+	if len(n) == 0 {
+		return niceyaml.NewError("no names")
 	}
 
 	return nil
