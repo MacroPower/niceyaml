@@ -297,11 +297,13 @@ func (m model) View() tea.View {
 }
 
 // baseView renders the viewport above the status bar, in the rows the
-// terminal has. A terminal of two rows leaves the viewport none, and a
-// viewport with no rows renders an empty string that the vertical join
-// still counts as a row, so the viewport drops out of the render instead.
-// A terminal of one row shows the title line alone, and one with no rows,
-// as before the first window size arrives, renders nothing.
+// terminal has. The viewport and the status bar each render rows as wide
+// as the terminal, so a newline between them stacks them without padding.
+// A terminal of two rows leaves the viewport none, and a viewport with no
+// rows renders an empty string that the newline would still turn into a
+// row, so the viewport drops out of the render instead. A terminal of one
+// row shows the title line alone, and one with no rows, as before the
+// first window size arrives, renders nothing.
 func (m *model) baseView() string {
 	switch {
 	case m.height <= 0:
@@ -314,11 +316,7 @@ func (m *model) baseView() string {
 		return m.statusBar()
 
 	default:
-		return lipgloss.JoinVertical(
-			lipgloss.Top,
-			m.viewport.View(),
-			m.statusBar(),
-		)
+		return m.viewport.View() + "\n" + m.statusBar()
 	}
 }
 

@@ -385,7 +385,7 @@ func TestBaseViewNoRows(t *testing.T) {
 	t.Parallel()
 
 	// A terminal with no rows, as before the first window size arrives,
-	// renders nothing rather than a status bar the join counts as rows.
+	// renders nothing rather than a status bar that takes up rows.
 	m := newModel(&modelOptions{
 		sources: []*niceyaml.Source{
 			niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("a.yaml")),
@@ -399,6 +399,54 @@ func TestBaseViewNoRows(t *testing.T) {
 	got, ok := updated.(model)
 	require.True(t, ok)
 	assert.Empty(t, got.baseView())
+}
+
+func TestBaseViewFillsTerminal(t *testing.T) {
+	t.Parallel()
+
+	// The viewport and the status bar each render rows as wide as the
+	// terminal, so baseView stacks them with a newline and needs no padding.
+	tcs := map[string]struct {
+		width  int
+		height int
+	}{
+		"narrow": {
+			width:  20,
+			height: 24,
+		},
+		"standard": {
+			width:  80,
+			height: 24,
+		},
+		"large": {
+			width:  200,
+			height: 60,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := newModel(&modelOptions{
+				sources: []*niceyaml.Source{
+					niceyaml.NewSourceFromString("a: 1\nb: [2, 3]\nc:\n  d: 4\n", niceyaml.WithName("a.yaml")),
+				},
+			})
+
+			updated, _ := m.Update(tea.WindowSizeMsg{Width: tc.width, Height: tc.height})
+
+			got, ok := updated.(model)
+			require.True(t, ok)
+
+			rows := strings.Split(got.baseView(), "\n")
+			require.Len(t, rows, tc.height)
+
+			for i, row := range rows {
+				assert.Equal(t, tc.width, lipgloss.Width(row), "row %d", i)
+			}
+		})
+	}
 }
 
 func TestOverlayOffset(t *testing.T) {
