@@ -57,7 +57,9 @@ const errorConnectorWidth = 4
 //
 // An error whose tree holds no SourceError, or whose excerpts are empty,
 // prints as its tree alone, which for an error with no nested errors is
-// its message, and a nil err prints as "".
+// its message, and a nil err prints as "". An error whose tree and
+// excerpts both render nothing, such as a bound join of typed-nil errors,
+// prints its message in their place, escaped and wrapped like any other.
 // [niceyaml.FormatError] prints the same tree and excerpts as plain
 // text.
 func (p *Printer) PrintError(err error) string {
@@ -76,9 +78,10 @@ func (p *Printer) PrintError(err error) string {
 	}
 
 	// A bound join whose branches all carry nothing renders as an empty
-	// tree, so the message stands in for it rather than nothing.
+	// tree, so the message stands in for it rather than nothing, drawn as
+	// the tree of one node that a plain error with that message draws.
 	if len(parts) == 0 {
-		return err.Error()
+		return p.renderErrorTree(niceyaml.ErrorTree{Text: err.Error()})
 	}
 
 	return strings.Join(parts, "\n\n")

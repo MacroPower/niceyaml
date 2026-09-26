@@ -4821,6 +4821,48 @@ func TestFormat(t *testing.T) {
 	})
 }
 
+func TestFormatError_JoinOfNothing(t *testing.T) {
+	t.Parallel()
+
+	// A bound join whose branches all carry nothing renders as an empty
+	// tree and no excerpt, so the message stands in rather than nothing.
+	// It renders as the tree of one node that holds the message, with
+	// control characters as their pictures, as a plain error with the
+	// same message renders.
+	var nilErr *niceyaml.Error
+
+	tcs := map[string]struct {
+		name string
+		want string
+	}{
+		"plain name": {
+			name: "f.yaml",
+			want: "f.yaml: \n",
+		},
+		"name with an escape sequence": {
+			name: "f\x1b[31m.yaml",
+			want: "f\u241b[31m.yaml: \n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName(tc.name))
+			err := source.Bind(errors.Join(nilErr, nilErr))
+			require.Error(t, err)
+
+			got := niceyaml.FormatError(err, 2)
+
+			assert.Equal(t, tc.want, got)
+			assert.Equal(t, niceyaml.FormatError(errors.New(err.Error()), 2), got)
+			assert.Equal(t, got, fmt.Sprintf("%+v", err))
+			assert.NotContains(t, got, "\x1b")
+		})
+	}
+}
+
 func TestSourceError_MessageAndPath(t *testing.T) {
 	t.Parallel()
 

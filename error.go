@@ -1452,7 +1452,10 @@ func (e *SourceError) LogValue() slog.Value {
 //	log.Print(niceyaml.FormatError(err, 2))
 //
 // An error that binds to no source renders as its tree alone, which for
-// an error with nothing nested is its message.
+// an error with nothing nested is its message. An error whose tree and
+// excerpts both render nothing, such as a bound join of typed-nil errors,
+// renders its message in their place, with control characters as their
+// pictures like any other.
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] renders the
 // same tree and excerpts with styles. A nil err renders as "".
 func FormatError(err error, context int) string {
@@ -1466,7 +1469,16 @@ func FormatError(err error, context int) string {
 		parts = append(parts, bound.details(context)...)
 	}
 
-	return joinParts(parts...)
+	out := joinParts(parts...)
+
+	// A bound join whose branches all carry nothing renders as an empty
+	// tree, so the message stands in for it rather than nothing, laid out
+	// as the tree of one node that a plain error with that message gets.
+	if out == "" {
+		return renderErrorTree(ErrorTree{Text: err.Error()})
+	}
+
+	return out
 }
 
 // renderErrorTree lays t out as plain text: the text of the root, then

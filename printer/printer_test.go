@@ -5013,13 +5013,41 @@ func TestPrinter_PrintError_JoinOfNothing(t *testing.T) {
 
 	// A bound join whose branches all carry nothing renders as an empty
 	// tree and no excerpt, so the message stands in rather than nothing.
+	// It prints as the tree of one node that holds the message, with
+	// control characters as their pictures, as a plain error with the
+	// same message prints.
 	var nilErr *niceyaml.Error
 
-	source := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("f.yaml"))
-	err := source.Bind(errors.Join(nilErr, nilErr))
-	require.Error(t, err)
+	tcs := map[string]struct {
+		name string
+		want string
+	}{
+		"plain name": {
+			name: "f.yaml",
+			want: "f.yaml:\n",
+		},
+		"name with an escape sequence": {
+			name: "f\x1b[31m.yaml",
+			want: "f\u241b[31m.yaml:\n",
+		},
+	}
 
-	assert.Equal(t, err.Error(), testPrinterWithGutter(printer.NoGutter).PrintError(err))
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName(tc.name))
+			err := source.Bind(errors.Join(nilErr, nilErr))
+			require.Error(t, err)
+
+			p := testPrinter()
+			got := p.PrintError(err)
+
+			assert.Equal(t, tc.want, got)
+			assert.Equal(t, p.PrintError(errors.New(err.Error())), got)
+			assert.NotContains(t, got, "\x1b")
+		})
+	}
 }
 
 func TestPrinter_AnnotationGutterSoftAcrossKinds(t *testing.T) {
