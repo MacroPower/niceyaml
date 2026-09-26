@@ -4275,6 +4275,20 @@ func TestNode_Nodes(t *testing.T) {
 		assert.Equal(t, "b", got)
 	})
 
+	t.Run("keeps document order for nested recursive matches", func(t *testing.T) {
+		t.Parallel()
+
+		nested := yamltest.FirstDocument(t, "a:\n  b:\n    a:\n      c: 1\n  c: 2\n")
+
+		// The outer entry a comes first, but its c follows the c of the
+		// inner one in the source.
+		nodes, err := nested.Nodes(paths.Root().Recursive("a").Child("c"))
+		require.NoError(t, err)
+		require.Len(t, nodes, 2)
+		assert.Equal(t, "$.a.b.a.c", nodes[0].Path().String())
+		assert.Equal(t, "$.a.c", nodes[1].Path().String())
+	})
+
 	t.Run("a duplicate key scopes the entry the decode keeps", func(t *testing.T) {
 		t.Parallel()
 

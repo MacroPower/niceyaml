@@ -1795,6 +1795,18 @@ chain:
       a: 1
 merged:
   <<: *r
+nest:
+  a:
+    b:
+      a:
+        c: 1
+    c: 2
+nestseq:
+  a:
+    - a: [x, y]
+    - z
+aliased: [&s [p, q], [r], *s]
+refs: [*r, *r]
 `
 
 	source := niceyaml.NewSourceFromString(input)
@@ -1834,6 +1846,29 @@ merged:
 			// mapping {a: 1} prints as its ":" token.
 			path: paths.Root().Child("chain").Recursive("a").Recursive("a"),
 			want: []string{":", "1"},
+		},
+		"recursive then child keeps document order": {
+			// The outer entry a comes first, but its c follows the c of
+			// the inner one in the source.
+			path: paths.Root().Child("nest").Recursive("a").Child("c"),
+			want: []string{"1", "2"},
+		},
+		"recursive then index all keeps document order": {
+			// The mapping {a: [x, y]} prints as its ":" token.
+			path: paths.Root().Child("nestseq").Recursive("a").IndexAll(),
+			want: []string{":", "x", "y", "z"},
+		},
+		"index all through an alias keeps path order": {
+			path: paths.Root().Child("aliased").IndexAll().IndexAll(),
+			want: []string{"p", "q", "r", "p", "q"},
+		},
+		"index all through aliases repeats the anchor": {
+			path: paths.Root().Child("refs").IndexAll().Child("name"),
+			want: []string{"e", "e"},
+		},
+		"recursive looks through an alias at its start": {
+			path: paths.Root().Child("alias").Recursive("name"),
+			want: []string{"e"},
 		},
 		"recursive skips merge sources": {
 			path: paths.Root().Child("merged").Recursive("name"),
@@ -2140,6 +2175,13 @@ func TestPath_Matches(t *testing.T) {
 		    text
 		  : 1
 		  *label : 2
+		twice: [*base, *base]
+		nest:
+		  a:
+		    b:
+		      a:
+		        c: 1
+		    c: 2
 	`))
 	file, err := source.File()
 	require.NoError(t, err)
@@ -2177,6 +2219,14 @@ func TestPath_Matches(t *testing.T) {
 		"through a merge key keeps the path of the mapping": {
 			path: paths.Root().Child("mixed", "name"),
 			want: []string{"$.mixed.name"},
+		},
+		"each alias to one anchor is its own match": {
+			path: paths.Root().Child("twice").IndexAll(),
+			want: []string{"$.twice[0]", "$.twice[1]"},
+		},
+		"recursive then child keeps document order": {
+			path: paths.Root().Child("nest").Recursive("a").Child("c"),
+			want: []string{"$.nest.a.b.a.c", "$.nest.a.c"},
 		},
 		"quoted name": {
 			path: paths.Root().Child("dot.key").IndexAll(),

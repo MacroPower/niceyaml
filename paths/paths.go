@@ -430,15 +430,20 @@ func (p Path) single(r *resolver, doc *ast.DocumentNode) (match, error) {
 
 // Nodes resolves every node the path selects in doc, in document order. A
 // path without `[*]` or `..` selectors yields at most one node; an empty
-// result means nothing exists at the path. Each node appears once, even
-// when chained `..` selectors reach it more than once.
+// result means nothing exists at the path. Nodes lists one node for each
+// path that selects it, as [Path.Matches] does, so a node that several
+// aliases or `<<` merge keys lead to appears once for each, in the place
+// of that alias or merge key. A `..name` selector lists each entry once,
+// even when chained `..` selectors reach it more than once.
 //
 // It looks through anchors and aliases, so each node is the content the
 // path names. The `.name`, `[n]`, and `[*]` selectors follow aliases to
 // their anchor and see the entries a `<<` merge key brings into a mapping.
-// The `..name` selector visits an entry where the source defines it, so it
-// neither follows aliases nor looks into merge sources, and it skips an
-// entry that a later entry with the same key in its mapping shadows.
+// The `..name` selector looks through an alias or tag on the node it
+// starts from, as the other selectors do. Below that node it visits each
+// entry once, where the source defines it, so it neither follows aliases
+// nor looks into merge sources, and it skips an entry that a later entry
+// with the same key in its mapping shadows.
 //
 // Wraps [ErrNoDocument], together with [ErrNotFound], when the document has
 // no content to resolve in, and [ErrAlias] when an alias on the path does

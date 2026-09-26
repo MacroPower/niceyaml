@@ -9,26 +9,39 @@ import (
 	"github.com/goccy/go-yaml/token"
 )
 
-// match is one node a path resolved to, with the mapping entry that holds it
-// when the last selector picked a mapping key, and the selectors that
-// name the node alone: the ones applied so far, with a `[*]` replaced by
-// the index it matched and a `..name` by the selectors down to the entry
-// it found.
+// match is one node a path resolved to. The entry field holds the mapping
+// entry that holds the node when the last selector picked a mapping key.
+// The segs field holds the selectors that name the node alone: the ones
+// applied so far, with a `[*]` replaced by the index it matched and a
+// `..name` by the selectors down to the entry it found.
+//
+// The order field holds one place for each step of the walk that reached
+// the node. A step into a mapping adds the index of the entry, a step into
+// a sequence adds the index of the element, and a step to the key of an
+// entry adds -1, so a key comes before its value. Comparing two orders
+// puts the matches in document order along the path. An entry a `<<` merge
+// key brings in takes the place of that merge key, and a node reached
+// through an alias takes the place of the alias.
 type match struct {
 	node  ast.Node
 	entry *ast.MappingValueNode
 	segs  []segment
+	order []int
 }
 
-// with returns a copy of m at node, with seg appended to its selectors.
-// The copy owns its selectors, so the matches of one `[*]` do not share
-// a backing array.
-func (m match) with(node ast.Node, entry *ast.MappingValueNode, seg segment) match {
+// with returns a copy of m at node, with seg appended to its selectors and
+// ord to its order. The copy owns its selectors and its order, so the
+// matches of one `[*]` do not share a backing array.
+func (m match) with(node ast.Node, entry *ast.MappingValueNode, seg segment, ord ...int) match {
 	segs := make([]segment, 0, len(m.segs)+1)
 	segs = append(segs, m.segs...)
 	segs = append(segs, seg)
 
-	return match{node: node, entry: entry, segs: segs}
+	order := make([]int, 0, len(m.order)+len(ord))
+	order = append(order, m.order...)
+	order = append(order, ord...)
+
+	return match{node: node, entry: entry, segs: segs, order: order}
 }
 
 // key returns the match for the `~` selector applied to m: the key of the
@@ -43,7 +56,7 @@ func (m match) key() match {
 	}
 
 	if key := keyContent(m.entry.Key); key != nil {
-		return m.with(key, nil, seg)
+		return m.with(key, nil, seg, -1)
 	}
 
 	return m.with(m.node, m.entry, seg)
@@ -187,11 +200,15 @@ func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.
 	}
 }
 
-// resolve applies segs to root and returns every match.
+// resolve applies segs to root and returns every match, in document order
+// along the path.
 //
 // A recursive selector walks the whole subtree of each match, so when one
 // match lies inside another, the entries below the inner match appear once
-// for each, and resolve keeps only the first, so every node appears once.
+// for each. Resolve keeps the first of these, so a recursive selector
+// yields each entry once. Only a recursive selector drops repeats, so a
+// later `.name`, `[n]`, or `[*]` selector can still reach one node through
+// several aliases.
 func (r *resolver) resolve(root ast.Node, segs []segment) ([]match, error) {
 	matches := []match{{node: root}}
 
@@ -213,6 +230,12 @@ func (r *resolver) resolve(root ast.Node, segs []segment) ([]match, error) {
 			next = append(next, found...)
 		}
 
+		// A selector applied to a match that lies inside another can
+		// reach a node before the ones it reaches from the outer match.
+		slices.SortStableFunc(next, func(a, b match) int {
+			return slices.Compare(a.order, b.order)
+		})
+
 		if seg.kind == segmentRecursive {
 			next = uniqueMatches(next)
 		}
@@ -224,7 +247,8 @@ func (r *resolver) resolve(root ast.Node, segs []segment) ([]match, error) {
 }
 
 // uniqueMatches returns the first match of each node, in the order matches
-// holds them.
+// holds them. It compares the nodes as the source writes them, before it
+// follows aliases, so two aliases to one anchor count as two nodes.
 func uniqueMatches(matches []match) []match {
 	seen := make(map[ast.Node]bool, len(matches))
 	unique := make([]match, 0, len(matches))
@@ -257,12 +281,12 @@ func (r *resolver) apply(seg segment, m match) ([]match, error) {
 			return nil, nil
 		}
 
-		entry, ok, err := r.lookup(mapping, seg.name, nil)
+		entry, i, ok, err := r.lookup(mapping, seg.name, nil)
 		if err != nil || !ok {
 			return nil, err
 		}
 
-		return []match{m.with(entry.Value, entry, seg)}, nil
+		return []match{m.with(entry.Value, entry, seg, i)}, nil
 
 	case segmentIndex:
 		seq, ok := content.(*ast.SequenceNode)
@@ -270,7 +294,7 @@ func (r *resolver) apply(seg segment, m match) ([]match, error) {
 			return nil, nil
 		}
 
-		return []match{m.with(seq.Values[seg.index], nil, seg)}, nil
+		return []match{m.with(seq.Values[seg.index], nil, seg, seg.index)}, nil
 
 	case segmentIndexAll:
 		seq, ok := content.(*ast.SequenceNode)
@@ -280,7 +304,7 @@ func (r *resolver) apply(seg segment, m match) ([]match, error) {
 
 		matches := make([]match, 0, len(seq.Values))
 		for i, v := range seq.Values {
-			matches = append(matches, m.with(v, nil, segment{kind: segmentIndex, index: i}))
+			matches = append(matches, m.with(v, nil, segment{kind: segmentIndex, index: i}, i))
 		}
 
 		return matches, nil
@@ -300,14 +324,16 @@ func (r *resolver) apply(seg segment, m match) ([]match, error) {
 // of the mapping itself with that key, the later one wins, which is the
 // entry whose value the decoder keeps.
 //
-// The seen set guards against merge cycles through aliases. The bool result
+// The seen set guards against merge cycles through aliases. The int result
+// is the index in mapping of the entry lookup found, or, for an entry a
+// merge source holds, of the `<<` entry that brings it in. The bool result
 // reports whether lookup found an entry.
 func (r *resolver) lookup(
 	mapping *ast.MappingNode, name string, seen map[*ast.MappingNode]bool,
-) (*ast.MappingValueNode, bool, error) {
-	for _, entry := range slices.Backward(mapping.Values) {
+) (*ast.MappingValueNode, int, bool, error) {
+	for i, entry := range slices.Backward(mapping.Values) {
 		if entry != nil && r.keyName(entry.Key) == name {
-			return entry, true, nil
+			return entry, i, true, nil
 		}
 	}
 
@@ -319,14 +345,14 @@ func (r *resolver) lookup(
 
 	// A later merge key wins over an earlier one, as a later source in one
 	// merge key does, so lookup reads the entries from the last one back.
-	for _, entry := range slices.Backward(mapping.Values) {
+	for i, entry := range slices.Backward(mapping.Values) {
 		if entry == nil || !isMergeKey(entry.Key) {
 			continue
 		}
 
 		sources, err := r.mergeSources(entry.Value)
 		if err != nil {
-			return nil, false, err
+			return nil, 0, false, err
 		}
 
 		for _, src := range slices.Backward(sources) {
@@ -334,14 +360,14 @@ func (r *resolver) lookup(
 				continue
 			}
 
-			found, ok, err := r.lookup(src, name, seen)
+			found, _, ok, err := r.lookup(src, name, seen)
 			if err != nil || ok {
-				return found, ok, err
+				return found, i, ok, err
 			}
 		}
 	}
 
-	return nil, false, nil
+	return nil, 0, false, nil
 }
 
 // mergeSources returns the mappings a `<<` value merges in: the value itself
@@ -403,7 +429,7 @@ func (r *resolver) descend(node ast.Node, name string, at match, acc []match) []
 			}
 		}
 
-		for _, entry := range n.Values {
+		for i, entry := range n.Values {
 			if entry == nil {
 				continue
 			}
@@ -413,7 +439,7 @@ func (r *resolver) descend(node ast.Node, name string, at match, acc []match) []
 				continue
 			}
 
-			below := at.with(entry.Value, entry, segment{kind: segmentChild, name: key})
+			below := at.with(entry.Value, entry, segment{kind: segmentChild, name: key}, i)
 
 			if key == name {
 				acc = append(acc, below)
@@ -424,7 +450,7 @@ func (r *resolver) descend(node ast.Node, name string, at match, acc []match) []
 
 	case *ast.SequenceNode:
 		for i, v := range n.Values {
-			acc = r.descend(v, name, at.with(v, nil, segment{kind: segmentIndex, index: i}), acc)
+			acc = r.descend(v, name, at.with(v, nil, segment{kind: segmentIndex, index: i}, i), acc)
 		}
 
 	case *ast.AnchorNode:
