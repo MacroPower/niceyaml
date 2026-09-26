@@ -4745,16 +4745,62 @@ func TestRebase(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		bound := dd.Bind(niceyaml.NewError("bad name", niceyaml.AtPath(paths.Root().Child("name"))))
+		namePath := paths.Root().Child("name")
+		bound := dd.Bind(niceyaml.NewError("bad name", niceyaml.AtPath(namePath)))
 		wrapped := niceyaml.WrapError(bound, niceyaml.WithErrors(
 			niceyaml.NewError("bad open", niceyaml.AtPath(paths.Root().Child("open"))),
 		))
 
+		r := niceyaml.Rebase(wrapped, hours)
+		assert.Equal(t, "1:7: $.name: bad name", r.Error())
+
+		var e *niceyaml.Error
+
+		require.ErrorAs(t, r, &e)
+
+		p, ok := e.Path()
+		require.True(t, ok)
+		assert.Equal(t, namePath, p)
+
 		var rebound *niceyaml.SourceError
 
-		require.ErrorAs(t, dd.Bind(niceyaml.Rebase(wrapped, hours)), &rebound)
+		require.ErrorAs(t, dd.Bind(r), &rebound)
+		assert.Equal(t, "1:7: $.name: bad name", rebound.Error())
+
+		p, ok = rebound.Path()
+		require.True(t, ok)
+		assert.Equal(t, namePath, p)
+
 		require.Len(t, rebound.Errors(), 1)
 		assert.Equal(t, "3:9: $.hours.open: bad open", rebound.Errors()[0].Error())
+	})
+
+	t.Run("an unlocated binding under the base keeps no path", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		bound := dd.Bind(errors.New("plain"))
+		wrapped := niceyaml.WrapError(bound, niceyaml.WithErrors(
+			niceyaml.NewError("bad open", niceyaml.AtPath(paths.Root().Child("open"))),
+		))
+
+		r := niceyaml.Rebase(wrapped, hours)
+		assert.Equal(t, bound.Error(), r.Error())
+
+		var e *niceyaml.Error
+
+		require.ErrorAs(t, r, &e)
+
+		_, ok := e.Path()
+		assert.False(t, ok)
+
+		var rebound *niceyaml.SourceError
+
+		require.ErrorAs(t, dd.Bind(r), &rebound)
+
+		_, ok = rebound.Path()
+		assert.False(t, ok)
 	})
 
 	t.Run("a location set on the rebased error is under the base", func(t *testing.T) {

@@ -195,10 +195,11 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 //
 // The same call puts each element of a slice under its index. Rebases
 // compose, so a chain of them composes the chain of paths. An error
-// under the base that carries no location points at base itself, and a
-// position or a range stays as it is, since the base moves paths alone.
-// A decode rebases the errors of every nested [SelfValidator] itself,
-// so a Validate need not rebase the Validate of a field.
+// under the base that carries no location and wraps no binding points at
+// base itself, and a position or a range stays as it is, since the base
+// moves paths alone. A decode rebases the errors of every nested
+// [SelfValidator] itself, so a Validate need not rebase the Validate of
+// a field.
 //
 // An error joined from several, as [errors.Join] builds one, rebases
 // branch by branch into a new join, so each line of its message carries
@@ -343,7 +344,10 @@ func WithErrors(errs ...error) ErrorOption {
 // message of the error it rebased, in place of the path that error wrote,
 // and an Error with a location of its own likewise replaces the path an
 // Error it wraps wrote, so the message names one location, the one
-// [Error.Path] reports.
+// [Error.Path] reports. An Error from Rebase whose cause chain reaches a
+// [*SourceError] before a located Error puts no path in front, whether
+// or not the binding has a location. That binding owns the location, and
+// its text names whatever position and path it has.
 func (e *Error) Error() string {
 	if e == nil {
 		return ""
@@ -355,8 +359,8 @@ func (e *Error) Error() string {
 	case e.rebased:
 		msg = e.message()
 
-		if l := e.location(); l.hasPath {
-			msg = prefix(l.path.String()+":", msg)
+		if a := anchorOf(e); a.hasPath {
+			msg = prefix(a.path.String()+":", msg)
 		}
 
 		return msg
@@ -451,61 +455,25 @@ func (e *Error) locus() locus {
 // that of the nearest located Error along its cause chain, looking
 // through foreign wrapping, with the base of every Error from [Rebase] on
 // the way joined in front of a path. An Error from Rebase with no located
-// Error below it is located at its base. Reports false when the chain
-// holds none.
+// Error below it is located at its base. The walk stops at a
+// [*SourceError], as binding does, and reports the location that binding
+// resolved from, with no base from above the binding in front, so an
+// Error and its binding agree on the location. Reports false when the
+// chain holds no location.
 func (e *Error) located() (locus, bool) {
-	if e.hasLocation() {
-		l := e.locus()
-		if e.rebased {
-			l = l.rebase(e.base)
-		}
+	a := anchorOf(e)
 
-		return l, true
-	}
+	switch x := a.err.(type) { //nolint:errorlint // The anchor itself, found by the walk.
+	case *Error:
+		return a.locus, true
 
-	inner := nextError(e.err)
-	if inner != nil {
-		l, ok := inner.located()
-		if ok {
-			if e.rebased {
-				l = l.rebase(e.base)
-			}
+	case *SourceError:
+		l := boundLocus(x)
 
-			return l, true
-		}
-	}
-
-	if e.rebased {
-		return locus{path: e.base, hasPath: true}, true
+		return l, l.hasPath || l.loc != nil
 	}
 
 	return locus{}, false
-}
-
-// nextError returns the nearest [*Error] along the cause chain of err: err
-// itself, or the one a wrapper wraps, following each wrapper to the one
-// error it wraps. An error that unwraps to several ends the chain, as it
-// does for binding, so an Error and its binding agree on the location.
-// Returns nil when the chain holds none.
-func nextError(err error) *Error {
-	for cur := err; cur != nil; {
-		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
-		case *Error:
-			if x == nil {
-				return nil
-			}
-
-			return x
-
-		case interface{ Unwrap() error }:
-			cur = x.Unwrap()
-
-		default:
-			return nil
-		}
-	}
-
-	return nil
 }
 
 // hasLocation reports whether e carries a location of its own: a path, a
@@ -555,9 +523,11 @@ func (e *Error) Errors() []error {
 // [position.Position], or [position.Range] that [AtPath], [AtPosition],
 // or [AtRange] set, or nil when none did. It looks through wrapping to
 // the nearest Error that carries one, so an Error built with [WrapError]
-// around a located Error reports that location, and a path comes back
-// with the base of every [Rebase] on the way joined in front. A nil Error
-// has none.
+// around a located Error reports that location. A path comes back with
+// the base of every [Rebase] on the way joined in front, unless a
+// [*SourceError] on the way resolved it, and then it comes back as
+// [SourceError.Path] reports it, with no base from above the binding. A
+// nil Error has none.
 func (e *Error) location() locus {
 	if e == nil {
 		return locus{}
@@ -576,8 +546,11 @@ func (e *Error) location() locus {
 // one [AtPath] set on the Error itself or on the nearest located Error
 // along its cause chain, so an Error built with [WrapError] around a
 // located Error reports that location, with the base of every [Rebase]
-// on the way joined in front. An Error that carries a position or a
-// range beside the path reports both. A nil Error has none.
+// on the way joined in front. A [*SourceError] along the chain ends the
+// walk, and the Error reports the path [SourceError.Path] reports for
+// that binding, with no base from a Rebase above the binding in front.
+// An Error that carries a position or a range beside the path reports
+// both. A nil Error has none.
 func (e *Error) Path() (paths.Path, bool) {
 	l := e.location()
 
@@ -940,6 +913,20 @@ func anchorOf(err error) anchor {
 	default:
 		return anchor{}
 	}
+}
+
+// boundLocus returns the location e resolved its position from. Its path
+// is the one [SourceError.Path] reports for e, with the base of every
+// [Rebase] inside e joined in front and no base from an Error above e. A
+// binding that wraps another reports the one it wraps.
+func boundLocus(e *SourceError) locus {
+	found := anchorOf(e.err)
+
+	if inner, ok := found.err.(*SourceError); ok { //nolint:errorlint // The anchor itself, found by the walk.
+		return boundLocus(inner)
+	}
+
+	return found.locus
 }
 
 // newSourceError binds err to b and resolves its location, with a path
