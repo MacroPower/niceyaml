@@ -59,10 +59,16 @@ import (
 // [NewSourceFromReader], [NewSourceFromBytes], [NewSourceFromString], or
 // [NewSourceFromTokens].
 type Source struct {
-	name       string
-	filePath   string
-	lines      line.Lines
-	file       *ast.File
+	name     string
+	filePath string
+	lines    line.Lines
+	file     *ast.File
+	// Holds the copies of the tokens parse hands the parser. Every token the
+	// parser takes from the stream is one of these copies, and holdsToken
+	// matches against them by pointer. The implicit null tokens the parser
+	// makes for missing values are not copies, so holdsToken never matches
+	// them.
+	fileTokens token.Tokens
 	fileErr    error
 	docs       []*Node
 	parserOpts []parser.Option
@@ -426,7 +432,7 @@ func (d *document) anchorToken() *token.Token {
 // so [FormatError] renders it with the offending token marked.
 func (s *Source) File() (*ast.File, error) {
 	s.fileOnce.Do(func() {
-		s.file, s.fileErr = s.parse()
+		s.file, s.fileTokens, s.fileErr = s.parse()
 	})
 
 	return s.file, s.fileErr
@@ -434,8 +440,9 @@ func (s *Source) File() (*ast.File, error) {
 
 // parse hands a private copy of the tokens to the parser. The go-yaml parser
 // relinks Next and Prev while it moves comment tokens, and the Source's own
-// tokens, which its lines and the caller share, stay untouched.
-func (s *Source) parse() (*ast.File, error) {
+// tokens, which its lines and the caller share, stay untouched. It returns
+// the copies with the file they parsed to.
+func (s *Source) parse() (*ast.File, token.Tokens, error) {
 	shared := s.Tokens()
 
 	tks := make(token.Tokens, 0, len(shared))
@@ -456,14 +463,14 @@ func (s *Source) parse() (*ast.File, error) {
 		// The documents come from the file this parse returns, so the error
 		// binds to the source alone rather than routing to one of them.
 		if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
-			return nil, bindTree(WrapError(yamlMessageError{yamlErr}, atToken(yamlErr.GetToken())), binder{src: s})
+			return nil, nil, bindTree(WrapError(yamlMessageError{yamlErr}, atToken(yamlErr.GetToken())), binder{src: s})
 		}
 
 		//nolint:wrapcheck // Return the original error if it's not a [yaml.Error].
-		return nil, err
+		return nil, nil, err
 	}
 
-	return file, nil
+	return file, tks, nil
 }
 
 // splitConsecutiveHeaders cuts tks before each "---" header that directly

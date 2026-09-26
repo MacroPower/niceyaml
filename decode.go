@@ -1527,11 +1527,12 @@ func (n *Node) bindDecodeError(err error) error {
 	return n.Bind(WrapError(decodeRejectedError{yamlMessageError{yamlErr}}, atToken(yamlErr.GetToken())))
 }
 
-// holdsToken reports whether tk is a token of the source, by its type,
-// value, origin, and position, as [line.Lines.TokenRanges] matches a
-// token the parser cloned from the stream.
+// holdsToken reports whether tk is one of the tokens the source's parse
+// built its tree from. It compares pointers, so a token from another
+// parse, such as the one an UnmarshalYAML runs on its bytes, never
+// matches, however closely it resembles a token of the source.
 func (n *Node) holdsToken(tk *token.Token) bool {
-	return tk != nil && len(n.source.lines.TokenRanges(tk)) > 0
+	return tk != nil && slices.Contains(n.source.fileTokens, tk)
 }
 
 // decodeRejectedError is a [yamlMessageError] the decoder returned, which

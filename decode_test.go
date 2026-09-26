@@ -4520,6 +4520,27 @@ func (u *reparsingUnmarshaler) UnmarshalYAML(data []byte) error {
 	return nil
 }
 
+// bareReparsingUnmarshaler decodes itself by parsing the bytes it gets
+// again and returns the go-yaml error of that parse unwrapped. The parse
+// starts at line 1, so the token of its error can share its type, value,
+// and position with a token near the top of the source.
+type bareReparsingUnmarshaler struct {
+	Name []int
+}
+
+func (u *bareReparsingUnmarshaler) UnmarshalYAML(data []byte) error {
+	var raw struct{ Name []int }
+
+	err := yaml.Unmarshal(data, &raw)
+	if err != nil {
+		return err //nolint:wrapcheck // The test needs the go-yaml error as it is.
+	}
+
+	u.Name = raw.Name
+
+	return nil
+}
+
 func TestErrDecodeRejected(t *testing.T) {
 	t.Parallel()
 
@@ -4655,6 +4676,28 @@ func TestErrDecodeRejected(t *testing.T) {
 		dd := yamltest.FirstDocument(t, "a: 1\nb: x\nc: y\nz:\n  n: notanumber\n")
 
 		_, err := dd.Decode[struct{ Z reparsingUnmarshaler }](t.Context())
+		require.Error(t, err)
+		require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
+
+		var srcErr *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &srcErr)
+
+		_, ok := srcErr.Range()
+		assert.False(t, ok, "the error took a location from the value's own parse")
+	})
+
+	t.Run("unmarshaler parse error matching a source token does not match", func(t *testing.T) {
+		t.Parallel()
+
+		// The item's own parse fails at "abc" on its line 1, where the
+		// source holds the same token at the same position.
+		dd := yamltest.FirstDocument(t, "name: [abc]\nitems:\n  - name: [abc]\n")
+
+		_, err := dd.Decode[struct {
+			Name  []string
+			Items []bareReparsingUnmarshaler
+		}](t.Context())
 		require.Error(t, err)
 		require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
 
