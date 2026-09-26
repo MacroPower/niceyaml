@@ -32,11 +32,12 @@ var ErrEmptyPath = errors.New("schema file path is empty")
 // however the registry reads it. A schema that [Embedded] names by a
 // digest of its bytes, or that another resolver names by a bare path such
 // as "schemas/config.json", therefore never shares a cache entry with the
-// file. Relative spellings of one path, such as "schemas/config.json" and
-// "./schemas/config.json", resolve to the same URL, so the registry reads
-// the file once and reuses the compiled schema for every document that
-// names it. The registry reads the file when the Ref loads, not when File
-// runs.
+// file. Spellings of one path, such as "schemas/config.json" and
+// "./schemas/config.json" from /srv, and
+// "/srv/schemas/../schemas/config.json", resolve to the same URL, so the
+// registry reads the file once and reuses the compiled schema for every
+// document that names it. The registry reads the file when the Ref
+// loads, not when File runs.
 //
 // A $ref in the schema resolves against that file:// URL, so "defs.json"
 // names the file beside it. The registry reads each file or HTTP URL a
@@ -95,19 +96,28 @@ func file(path string) (Ref, error) {
 		return Ref{}, ErrEmptyPath
 	}
 
+	const driveLen = 2 // A letter and a colon.
+
 	abs := path
 
-	// A drive-letter path is absolute wherever it is read, but filepath.Abs
-	// on a POSIX platform treats it as relative and puts the working
-	// directory in front of it. Keep it as written, so the drive survives
-	// into the URL and the read error.
-	if !hasDriveLetter(path) {
+	switch {
+	case !hasDriveLetter(path) || runtime.GOOS == "windows":
 		var err error
 
 		abs, err = filepath.Abs(path)
 		if err != nil {
 			return Ref{}, fmt.Errorf("resolve %s: %w", path, err)
 		}
+
+	case len(path) > driveLen:
+		// A drive-letter path is absolute on every platform, but
+		// filepath.Abs on a POSIX platform treats it as relative and puts
+		// the working directory in front of it. Clean only the part behind
+		// the drive, as Windows does, so a ".." at the drive root stays
+		// there and the drive survives into the URL and the read error. A
+		// bare drive has nothing to clean and stays as written.
+		rest := strings.ReplaceAll(path[driveLen:], `\`, "/")
+		abs = path[:driveLen] + slashpath.Clean(rest)
 	}
 
 	return Ref{key: fileURL(abs), file: path, abs: abs}, nil

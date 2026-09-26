@@ -117,6 +117,18 @@ func TestFile_URL(t *testing.T) {
 			path: "/schemas/../schemas/./config.json",
 			want: "file:///schemas/config.json",
 		},
+		"unclean drive-letter path": {
+			path: "C:/schemas/../schemas/./config.json",
+			want: "file:///C:/schemas/config.json",
+		},
+		"dot-dot above the drive root": {
+			path: "C:/../schemas/config.json",
+			want: "file:///C:/schemas/config.json",
+		},
+		"backslash drive-letter path": {
+			path: `C:\schemas\config.json`,
+			want: "file:///C:/schemas/config.json",
+		},
 		"space in path": {
 			path: "/schemas/my config.json",
 			want: "file:///schemas/my%20config.json",

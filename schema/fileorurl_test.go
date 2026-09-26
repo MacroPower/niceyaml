@@ -271,6 +271,11 @@ func TestFileOrURL(t *testing.T) {
 		url, _, err = load(t, fileOrURL(t, "/configs", "C:/schemas/config.json"))
 		require.Error(t, err)
 		assert.Equal(t, "file:///C:/schemas/config.json", url)
+
+		// A file URL keys the cleaned path, as File keys a drive-letter
+		// path, so both spellings share one registry entry.
+		ref := fileOrURL(t, "/configs", "file:///C:/schemas/../schemas/config.json")
+		assert.Equal(t, "file:///C:/schemas/config.json", ref.Key())
 	})
 
 	t.Run("colon in a relative path", func(t *testing.T) {
