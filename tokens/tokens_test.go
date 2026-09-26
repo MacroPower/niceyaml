@@ -294,7 +294,8 @@ func TestTokenize_EmptyContentPastEnd(t *testing.T) {
 	// ends the file, that line does not exist, and the token moves to
 	// the end of the header's line. Content of blank lines holds no text
 	// either, so when those lines end the file, the token moves to the
-	// end of the last line. A line the lexer dropped, such as a lone "!",
+	// end of the last line, even after a header the lexer rewrote past
+	// the end of the source. A line the lexer dropped, such as a lone "!",
 	// still exists, and the token stays on it.
 	tcs := map[string]struct {
 		input  string
@@ -304,6 +305,7 @@ func TestTokenize_EmptyContentPastEnd(t *testing.T) {
 	}{
 		"header ends the file":      {input: "a: |+\n", line: 1, col: 6, offset: 6},
 		"header ends the file crlf": {input: "a: |+\r\n", line: 1, col: 6, offset: 6},
+		"header ends the file cr":   {input: "a: |+\r", line: 1, col: 6, offset: 6},
 		"sequence entry":            {input: "- >+\n", line: 1, col: 5, offset: 5},
 		"second header ends it":     {input: "x: \"\u00e9\"\nk: |+\n", line: 2, col: 6, offset: 13},
 		"dropped line follows":      {input: "a: |+\n!", line: 2, col: 1, offset: 7},
@@ -313,6 +315,7 @@ func TestTokenize_EmptyContentPastEnd(t *testing.T) {
 		"spaces end the file":       {input: "a: >+\n  \n", line: 2, col: 3, offset: 9},
 		"clipped blank line ends":   {input: "a: |\n\n", line: 2, col: 1, offset: 6},
 		"key follows":               {input: "a: |+\nb: 1\n", line: 2, col: 1, offset: 7},
+		"rewritten header past end": {input: "\"\\u>+: |\n\n", line: 2, col: 1, offset: 10},
 	}
 
 	for name, tc := range tcs {

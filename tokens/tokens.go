@@ -115,7 +115,6 @@ func Tokenize(src string) token.Tokens {
 	}
 
 	repairPositions(src, tks)
-	repairPastEnd(src, tks)
 
 	return tks
 }
@@ -174,40 +173,6 @@ func isBlankOrComment(line string) bool {
 	return strings.TrimRight(text, "\r\n") == "" || strings.HasPrefix(text, "#")
 }
 
-// repairPastEnd moves every token of tks that holds no text and sits past
-// the end of src to the end of the last line that holds a rune. The lexer
-// places the empty content of a block scalar that keeps its trailing
-// lines on the line after the header, which is a line the source does
-// not have when the header ends the file.
-func repairPastEnd(src string, tks token.Tokens) {
-	runes := utf8.RuneCountInString(src)
-
-	var line, col, offset int
-
-	for _, tk := range tks {
-		if tk == nil || tk.Position == nil || strings.Trim(tk.Origin, " \t\r\n") != "" || tk.Position.Offset <= runes {
-			continue
-		}
-
-		if line == 0 {
-			line, col, offset = sourceEnd(src)
-		}
-
-		tk.Position.Line, tk.Position.Column, tk.Position.Offset = line, col, offset
-	}
-}
-
-// sourceEnd returns the line of the last rune of src that is no part of
-// its final line ending, the column just past that rune, and the rune
-// offset of that place, counting all three from 1. An empty source ends
-// at 1:1 with offset 1.
-func sourceEnd(src string) (int, int, int) {
-	src = TrimLineEnding(src)
-	line, col := advance(1, 1, src)
-
-	return line, col, utf8.RuneCountInString(src) + 1
-}
-
 // advance returns the line and column reached by moving from line and col
 // across s. A line break moves to column 1 of the next line, and any
 // other rune moves one column to the right.
@@ -249,7 +214,13 @@ func IsPlaceholder(tk *token.Token) bool {
 // breaks the lexer dropped in front of it, so the Origins ahead of a
 // token's text hold as many lines as the source does.
 func repairPositions(src string, tks token.Tokens) {
-	p := &positioner{src: []rune(src), line: 1, col: 1, reliable: true}
+	p := &positioner{
+		src:      []rune(src),
+		end:      utf8.RuneCountInString(TrimLineEnding(src)),
+		line:     1,
+		col:      1,
+		reliable: true,
+	}
 
 	for _, tk := range tks {
 		if tk == nil || tk.Position == nil {
@@ -280,6 +251,7 @@ type positioner struct {
 	tail string // The whitespace the stream holds after the text placed last.
 
 	src []rune
+	end int // The rune index where the last line of src ends, before its final line ending.
 
 	cursor   int // The rune index just past the text placed so far.
 	reliable bool
@@ -294,11 +266,12 @@ type positioner struct {
 
 // place moves tk to the rune where its text starts and advances the cursor
 // past the text of every line of its Origin. A token without text sits
-// where the next text starts and leaves the cursor where it is. When the
-// text follows the cursor past whitespace alone, place gives tk the line
-// breaks the lexer dropped from that whitespace. A double-quoted scalar
-// found in the source moves the cursor past its closing quote instead, and
-// takes its Origin from the source when the lexer shortened it.
+// where the next text starts, or at the end of the last line when no text
+// follows, and leaves the cursor where it is. When the text follows the
+// cursor past whitespace alone, place gives tk the line breaks the lexer
+// dropped from that whitespace. A double-quoted scalar found in the source
+// moves the cursor past its closing quote instead, and takes its Origin
+// from the source when the lexer shortened it.
 func (p *positioner) place(tk *token.Token) {
 	var (
 		placed, found bool
@@ -343,7 +316,21 @@ func (p *positioner) place(tk *token.Token) {
 	}
 
 	if !placed {
-		p.setPosition(tk, p.skipSpace())
+		// The lexer places the empty content of a block scalar that keeps
+		// its trailing lines on the line after the header, a line the
+		// source does not have when the header ends the file. When no
+		// text follows, the token sits at the end of the last line
+		// instead. The cursor can run past the end of the source after a
+		// token the lexer rewrote, so the check takes any index at or
+		// past the end. Such a token can also carry the line and column
+		// count past the end of the last line, and setPosition then
+		// counts again from the start of the source.
+		at := p.skipSpace()
+		if at >= len(p.src) {
+			at = p.end
+		}
+
+		p.setPosition(tk, at)
 
 		p.tail += tk.Origin
 
@@ -591,10 +578,16 @@ func (p *positioner) anchor(tk *token.Token, at int) {
 
 // setPosition writes the line, column, and offset of the rune at index at
 // into tk, counting the runes between the last position written and it.
-// Index at names the end of the source or a rune that is no line ending,
-// so the runes counted never split a CRLF.
+// When at sits before the last position written, the count starts again
+// from the start of the source. Index at never names the "\n" of a CRLF,
+// so the runes counted never split one.
 func (p *positioner) setPosition(tk *token.Token, at int) {
-	if end := min(at, len(p.src)); p.idx < end {
+	end := min(at, len(p.src))
+	if end < p.idx {
+		p.idx, p.line, p.col = 0, 1, 1
+	}
+
+	if p.idx < end {
 		p.line, p.col = advance(p.line, p.col, string(p.src[p.idx:end]))
 		p.idx = end
 	}
