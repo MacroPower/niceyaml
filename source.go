@@ -100,8 +100,8 @@ func WithName(name string) SourceOption {
 // Each document of the Source reports it from [Node.FilePath], which
 // schema matchers route on.
 //
-// For file-based sources, use [NewSourceFromFile] which sets this
-// automatically.
+// For file-based sources, [NewSourceFromFile] and [NewSourceFromFS] set
+// this automatically.
 func WithFilePath(path string) SourceOption {
 	return func(s *Source) {
 		s.filePath = path
@@ -238,7 +238,8 @@ func (s *Source) Name() string {
 
 // FilePath returns the file path of the [Source].
 //
-// Returns an empty string unless [WithFilePath] or [NewSourceFromFile] sets it.
+// Returns an empty string unless [WithFilePath], [NewSourceFromFile], or
+// [NewSourceFromFS] sets it.
 func (s *Source) FilePath() string {
 	return s.filePath
 }
