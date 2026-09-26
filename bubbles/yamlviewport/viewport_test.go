@@ -351,6 +351,9 @@ func TestViewport_Golden(t *testing.T) {
 			},
 		},
 		"SearchMultipleMatchesSameLine": {
+			// The XML tags of the test styles take up columns, so the
+			// viewport is wide enough that the highlighted line fits on
+			// one row.
 			opts: []yamlviewport.Option{
 				yamlviewport.WithPrinter(testPrinterWithSearch()),
 			},
@@ -358,7 +361,7 @@ func TestViewport_Golden(t *testing.T) {
 				item: item_value
 				another: data
 			`),
-			width:  80,
+			width:  120,
 			height: 24,
 			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
 				m.SetSearchTerm("item") // Matches twice on the same line.
@@ -3243,6 +3246,9 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 		},
 		"SideBySideSearch": {
 			// Verifies search highlights work in side-by-side mode.
+			// The XML tags of the test styles take up columns, so this
+			// case and the search cases below use a viewport wide enough
+			// that highlighted lines fit on one row.
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetPrinter(testPrinterWithSearch())
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("v1")))
@@ -3251,7 +3257,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 				m.SetViewMode(yamlviewport.ViewModeSideBySide)
 				m.SetSearchTerm("modified")
 			},
-			width:  80,
+			width:  190,
 			height: 24,
 		},
 		"SideBySideSearchNavigate": {
@@ -3265,7 +3271,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 				m.SetSearchTerm("enabled") // Appears in both revisions.
 				m.SearchNext()             // Navigate to second match.
 			},
-			width:  80,
+			width:  190,
 			height: 24,
 		},
 		"SideBySideSearchDeletedLine": {
@@ -3278,7 +3284,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 				m.SetViewMode(yamlviewport.ViewModeSideBySide)
 				m.SetSearchTerm("original") // Only in deleted line.
 			},
-			width:  80,
+			width:  190,
 			height: 24,
 		},
 		"SideBySideSearchInsertedLine": {
@@ -3291,7 +3297,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 				m.SetViewMode(yamlviewport.ViewModeSideBySide)
 				m.SetSearchTerm("modified") // Only in inserted line.
 			},
-			width:  80,
+			width:  190,
 			height: 24,
 		},
 		"SideBySideSearchBothSidesFirstSelected": {
@@ -3307,7 +3313,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 
 				// First match is selected by default (before/deleted line).
 			},
-			width:  80,
+			width:  190,
 			height: 24,
 		},
 		"SideBySideWrapAligned": {
@@ -3343,7 +3349,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 				m.SetSearchTerm("name") // Appears on both deleted and inserted lines.
 				m.SearchNext()          // Move to second match (after/inserted line).
 			},
-			width:  80,
+			width:  190,
 			height: 24,
 		},
 	}
