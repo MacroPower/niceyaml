@@ -72,8 +72,8 @@
 // Most built-in themes come from a small palette: a base foreground and
 // background, an accent color, OK, warning, and error colors, and the token
 // kinds it colors. The package derives the remaining kinds, such as headings,
-// highlights, and dimmed text, from those colors, so every theme presents the
-// same set of kinds.
+// highlights, dimmed text, diff lines, and error marks, from those colors, so
+// every theme presents the same set of kinds.
 //
 // Most themes in this package derive from the Chroma syntax highlighter:
 // https://github.com/alecthomas/chroma

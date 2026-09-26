@@ -277,6 +277,35 @@ func TestPalette_SubtleTextDiffersFromText(t *testing.T) {
 	}
 }
 
+func TestPalette_DiffAndErrorKindsStandOut(t *testing.T) {
+	t.Parallel()
+
+	// The printer paints whole diff lines and error marks in these kinds,
+	// so every built-in theme must draw each one apart from plain text and
+	// draw deleted lines apart from inserted ones.
+	for _, th := range theme.Builtin().All() {
+		t.Run(th.Name, func(t *testing.T) {
+			t.Parallel()
+
+			styles := th.Styles()
+			text := style.Encode(styles.Style(kind.Text))
+
+			for _, k := range []kind.Kind{kind.GenericError, kind.GenericDeleted, kind.GenericInserted} {
+				st := styles.Style(k)
+
+				assert.NotEqual(t, text, style.Encode(st), "%s matches Text", k)
+				assert.NotEqual(t, st.GetForeground(), st.GetBackground(), "%s draws its foreground on itself", k)
+			}
+
+			assert.NotEqual(t,
+				style.Encode(styles.Style(kind.GenericDeleted)),
+				style.Encode(styles.Style(kind.GenericInserted)),
+				"GenericDeleted matches GenericInserted",
+			)
+		})
+	}
+}
+
 func TestPalette_TokensLayerOverAncestors(t *testing.T) {
 	t.Parallel()
 

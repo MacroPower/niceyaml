@@ -32,6 +32,73 @@ func TestPalette_TokensOverrideDerivedKinds(t *testing.T) {
 	assert.Equal(t, lipgloss.Color("#123456"), p.styles().Style(kind.TextOK).GetForeground())
 }
 
+func TestPalette_DiffAndErrorKindsDefaultFromStatusColors(t *testing.T) {
+	t.Parallel()
+
+	// A palette that leaves the diff and error kinds out draws inserted
+	// lines in OK, deleted lines in Error, and error marks as a badge of
+	// the background color on Error.
+	tcs := map[string]struct {
+		tokens     map[kind.Kind]string
+		kind       kind.Kind
+		wantFg     color.Color
+		wantBg     color.Color
+		wantItalic bool
+	}{
+		"inserted takes ok": {
+			kind:   kind.GenericInserted,
+			wantFg: lipgloss.Color("#00ff00"),
+			wantBg: lipgloss.Color("#000000"),
+		},
+		"deleted takes error": {
+			kind:   kind.GenericDeleted,
+			wantFg: lipgloss.Color("#ff0000"),
+			wantBg: lipgloss.Color("#000000"),
+		},
+		"error draws a badge": {
+			kind:   kind.GenericError,
+			wantFg: lipgloss.Color("#000000"),
+			wantBg: lipgloss.Color("#ff0000"),
+		},
+		"error token wins": {
+			tokens: map[kind.Kind]string{kind.GenericError: "#123456"},
+			kind:   kind.GenericError,
+			wantFg: lipgloss.Color("#123456"),
+			wantBg: lipgloss.Color("#000000"),
+		},
+		"defaults layer over generic": {
+			tokens:     map[kind.Kind]string{kind.Generic: "italic"},
+			kind:       kind.GenericDeleted,
+			wantFg:     lipgloss.Color("#ff0000"),
+			wantBg:     lipgloss.Color("#000000"),
+			wantItalic: true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := palette{
+				Mode:   Dark,
+				Fg:     "#ffffff",
+				Bg:     "#000000",
+				Accent: "#ff00ff",
+				OK:     "#00ff00",
+				Warn:   "#ffff00",
+				Error:  "#ff0000",
+				Tokens: tc.tokens,
+			}
+
+			got := p.styles().Style(tc.kind)
+
+			assert.Equal(t, tc.wantFg, got.GetForeground())
+			assert.Equal(t, tc.wantBg, got.GetBackground())
+			assert.Equal(t, tc.wantItalic, got.GetItalic())
+		})
+	}
+}
+
 func TestPalette_TokensClearInheritedAttributes(t *testing.T) {
 	t.Parallel()
 

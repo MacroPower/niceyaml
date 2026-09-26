@@ -27,7 +27,8 @@ type palette struct {
 	// Tokens sets token kinds in the style-string form [style.Parse]
 	// reads. Each spec layers over the style its kind inherits, so a spec
 	// naming only attributes keeps the colors of the closest kind above
-	// it. Kinds left out inherit from their parent.
+	// it. Kinds left out inherit from their parent, except the inserted,
+	// deleted, and error marks, which take their colors from OK and Error.
 	Tokens map[kind.Kind]string
 	// Fg and Bg are the base text colors as hex strings. An empty value
 	// leaves the terminal default in place; the derived kinds then
@@ -35,7 +36,8 @@ type palette struct {
 	// [Dark] one.
 	Fg, Bg string
 	// Accent colors headings and accented text. OK, Warn, and Error color
-	// the status kinds.
+	// the status kinds. OK and Error also color the inserted, deleted, and
+	// error marks when Tokens leaves them out.
 	Accent, OK, Warn, Error string
 	// Mode is the background the theme is designed for. It also picks the
 	// direction of the derived shifts. [kind.TextSubtle] and
@@ -96,13 +98,37 @@ func (p palette) styles() style.Styles {
 
 	s := style.New(base, derived...)
 
+	// The printer paints whole inserted and deleted lines and their + and -
+	// markers in these kinds, and it marks errors with a GenericError
+	// overlay that replaces the style underneath. A palette that leaves
+	// them out takes its OK and Error colors, and the error mark draws as a
+	// badge so it shows over a token drawn in the Error color. Each default
+	// fills in for a missing Tokens spec and layers over Generic the same
+	// way, so a theme spec for one of these kinds replaces the default
+	// outright rather than layering over it.
+	tokens := maps.Clone(p.Tokens)
+	if tokens == nil {
+		tokens = map[kind.Kind]string{}
+	}
+
+	defaults := map[kind.Kind]string{
+		kind.GenericInserted: style.Encode(lipgloss.NewStyle().Foreground(ok)),
+		kind.GenericDeleted:  style.Encode(lipgloss.NewStyle().Foreground(errColor)),
+		kind.GenericError:    style.Encode(lipgloss.NewStyle().Foreground(bg).Background(errColor)),
+	}
+	for st, spec := range defaults {
+		if _, ok := tokens[st]; !ok {
+			tokens[st] = spec
+		}
+	}
+
 	// A Tokens spec layers over the style its kind already resolves to, so
 	// a spec of "bold" alone keeps the ancestor's colors. Parents come
 	// first, so a child layers over the parent's finished style. The pass
 	// visits UI even when Tokens leaves it out, since the chrome takes its
 	// color from the finished comments.
-	kinds := slices.Collect(maps.Keys(p.Tokens))
-	if _, ok := p.Tokens[kind.UI]; !ok {
+	kinds := slices.Collect(maps.Keys(tokens))
+	if _, ok := tokens[kind.UI]; !ok {
 		kinds = append(kinds, kind.UI)
 	}
 
@@ -118,7 +144,7 @@ func (p palette) styles() style.Styles {
 			cur = base.Foreground(s.Style(kind.Comment).GetForeground())
 		}
 
-		if spec, ok := p.Tokens[st]; ok {
+		if spec, ok := tokens[st]; ok {
 			cur = layer(cur, spec)
 		}
 
