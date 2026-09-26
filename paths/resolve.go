@@ -481,7 +481,8 @@ func nodeToken(node ast.Node) *token.Token {
 
 // firstToken returns the token that starts node's content: the first key of
 // a mapping, the first element of a sequence, or the scalar itself. It looks
-// through anchors and tags; an alias is its own token. An entry with no key
+// through anchors and tags, and through the `?` indicator, anchors and tags
+// of a mapping's first key; an alias is its own token. An entry with no key
 // starts at its own token. A nil node, including a typed nil a hand-built
 // tree may hold, has no token.
 func firstToken(node ast.Node) *token.Token {
@@ -500,11 +501,12 @@ func firstToken(node ast.Node) *token.Token {
 				return n.GetToken()
 			}
 
-			if isNilNode(n.Values[0].Key) {
+			key := keyContent(n.Values[0].Key)
+			if key == nil {
 				return n.Values[0].GetToken()
 			}
 
-			return n.Values[0].Key.GetToken()
+			node = key
 
 		case *ast.SequenceNode:
 			if len(n.Values) == 0 {

@@ -2101,6 +2101,8 @@ func TestDocument_Ranges(t *testing.T) {
 		map:
 		  x: 1
 		  y: 2
+		tagged:
+		  !!str k: v
 	`)
 
 	tcs := map[string]struct {
@@ -2122,6 +2124,10 @@ func TestDocument_Ranges(t *testing.T) {
 			path: paths.Root().Child("list").Index(0),
 			key:  true,
 			want: position.Ranges{position.NewRange(position.New(8, 4), position.New(8, 5))},
+		},
+		"mapping with a tagged first key starts at the key": {
+			path: paths.Root().Child("tagged"),
+			want: position.Ranges{position.NewRange(position.New(13, 8), position.New(13, 9))},
 		},
 		"value across lines": {
 			path: paths.Root().Child("text"),

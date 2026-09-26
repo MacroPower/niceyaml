@@ -723,6 +723,13 @@ metadata:
 items:
   - first
   - second
+tag_first:
+  !!str inner: 8
+anchor_first:
+  &ka inner: 9
+explicit_first:
+  ? inner
+  : 10
 `
 
 	source := niceyaml.NewSourceFromString(input)
@@ -749,6 +756,21 @@ items:
 		"mapping value target returns its first key": {
 			path:      paths.Root().Child("metadata"),
 			wantValue: "labels",
+			wantType:  token.StringType,
+		},
+		"mapping with a tagged first key starts at the key": {
+			path:      paths.Root().Child("tag_first"),
+			wantValue: "inner",
+			wantType:  token.StringType,
+		},
+		"mapping with an anchored first key starts at the key": {
+			path:      paths.Root().Child("anchor_first"),
+			wantValue: "inner",
+			wantType:  token.StringType,
+		},
+		"mapping with an explicit first key starts at the key": {
+			path:      paths.Root().Child("explicit_first"),
+			wantValue: "inner",
 			wantType:  token.StringType,
 		},
 		"mapping key target returns the entry key": {
