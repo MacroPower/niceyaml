@@ -83,8 +83,8 @@ func New(
 
 // env returns the devbox environment container with the project source
 // overlaid and the Go module, build, and golangci-lint caches mounted, ready
-// to run `devbox run -- task <target>`. The caches persist across runs so the
-// containerized tasks reuse work the way the local toolchain does.
+// for [Ci.task] to queue a Taskfile target. The caches persist across runs so
+// the containerized tasks reuse work the way the local toolchain does.
 func (m *Ci) env() *dagger.Container {
 	owner := dagger.ContainerWithMountedCacheOpts{Owner: devboxUser}
 	return m.Devbox.WithSource().
@@ -95,12 +95,17 @@ func (m *Ci) env() *dagger.Container {
 		WithMountedCache(devboxHome+"/.cache/golangci-lint", dag.CacheVolume(cacheNamespace+":golangci-lint"), owner)
 }
 
+// task returns the devbox environment with `devbox run -- task <target>` queued
+// as its next exec. Every task-based function builds on it so they all run
+// their targets the same way.
+func (m *Ci) task(target string) *dagger.Container {
+	return m.env().WithExec([]string{"devbox", "run", "--", "task", target})
+}
+
 // runTask runs a Taskfile target inside the devbox environment, failing if it
 // exits non-zero.
 func (m *Ci) runTask(ctx context.Context, target string) error {
-	_, err := m.env().
-		WithExec([]string{"devbox", "run", "--", "task", target}).
-		Sync(ctx)
+	_, err := m.task(target).Sync(ctx)
 	return err
 }
 
@@ -132,9 +137,7 @@ func (m *Ci) TestIntegration(ctx context.Context) error {
 // environment (mirroring `task go:test:cover`) and returns the coverage profile
 // file.
 func (m *Ci) TestCoverage() *dagger.File {
-	return m.env().
-		WithExec([]string{"devbox", "run", "--", "task", "go:test:cover"}).
-		File(".test/coverage.txt")
+	return m.task("go:test:cover").File(".test/coverage.txt")
 }
 
 // Security scans source dependencies for known vulnerabilities by composing the
