@@ -4438,6 +4438,27 @@ func TestNode_Nodes(t *testing.T) {
 		assert.Equal(t, position.NewSpan(10, 11), nodes[0].Span())
 	})
 
+	t.Run("an error at the root of an aliased scope binds at the alias", func(t *testing.T) {
+		t.Parallel()
+
+		ref := yamltest.At(t, doc, paths.Root().Child("ref"))
+		assert.Equal(t, position.NewSpan(10, 11), ref.Span())
+
+		// The path points at the alias, so the error binds there, where
+		// the document binds the same path, and the view of the scope
+		// holds no line to mark.
+		err := ref.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root())))
+		require.EqualError(t, err, "m.yaml:12:6: $: bad")
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.False(t, bound.Annotate(ref.View()))
+
+		err = doc.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("ref"))))
+		require.EqualError(t, err, "m.yaml:12:6: $.ref: bad")
+	})
+
 	t.Run("an empty document binds the error to the receiver", func(t *testing.T) {
 		t.Parallel()
 

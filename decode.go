@@ -1004,8 +1004,13 @@ func (n *Node) FilePath() string {
 // under its node starts on through the one the last token ends on. The
 // node of a mapping entry is its value, so the line of the key is in the
 // span only when the value starts on it, and a scope from
-// [paths.Path.Key] covers the key. A scope that selects nothing covers no
-// lines.
+// [paths.Path.Key] covers the key. The node of a path that ends at an
+// alias, such as `$.c` in `c: *x`, is the content of the anchor, so the
+// span covers the lines of that content, which [Node.AST], [Node.Decode],
+// and [Node.Tokens] read. [Node.Ranges] of the scope and an error bound at
+// its root resolve to the alias, where the path points. They lie outside
+// the span unless the alias shares a line with that content, as it can in
+// a flow collection. A scope that selects nothing covers no lines.
 //
 // [Node.View] returns a view of the source sliced to the span, so a
 // caller that renders the node need not slice one itself. The span
@@ -1027,8 +1032,11 @@ func (n *Node) Span() position.Span {
 // Each call returns a view of its own with no decoration, as [Source.View]
 // does, so overlays and annotations added to one reach neither the Source
 // nor another view. The view shares its lines with every view over the
-// source, so a bound error from the document marks it through
-// [SourceError.Annotate] as it marks a view of the whole source.
+// source, so [SourceError.Annotate] marks a bound error on it as on a
+// view of the whole source when the location of the error lies in
+// [Node.Span]. An error outside the span, such as one bound at the root
+// of a scope whose path ends at an alias on a line below the content of
+// the anchor, marks nothing on the view.
 func (n *Node) View() *line.View {
 	return n.source.View().Slice(n.span)
 }
