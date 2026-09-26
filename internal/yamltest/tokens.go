@@ -411,9 +411,17 @@ func (b *TokenBuilder) Build() *token.Token {
 	return b.token.Clone()
 }
 
-// DumpTokenOrigins concatenates all token Origin fields into a single string,
-// reconstructing the original source text. A nil token contributes nothing,
-// since a placeholder such as "<nil>" would corrupt the reconstruction.
+// DumpTokenOrigins joins the Origin fields of tks into one string.
+//
+// The result matches the source only where the lexer kept each rune exactly
+// once. The lexer drops trailing spaces, so a whitespace-only line loses its
+// spaces. It repeats the line ending after a tag that ends its line, and it
+// can lose text after a tab used as indentation or after a "\x", "\u", or
+// "\U" escape. [go.jacobcolvin.com/niceyaml/tokens.Tokenize] also drops byte
+// order marks.
+//
+// A nil token contributes nothing rather than a placeholder such as "<nil>",
+// so the output holds only source text.
 func DumpTokenOrigins(tks token.Tokens) string {
 	var sb strings.Builder
 
