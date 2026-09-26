@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"strconv"
 
 	"github.com/goccy/go-yaml/ast"
 
@@ -116,7 +117,7 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 		}
 	}
 
-	if f, ok := raw.(float64); ok && isInteger(gv.Kind()) && f != math.Trunc(f) {
+	if isInteger(gv.Kind()) && hasFraction(raw) {
 		return false, nil
 	}
 
@@ -258,6 +259,24 @@ func isPredeclaredNumber(v reflect.Value) bool {
 	k := v.Kind()
 
 	return isInteger(k) || isFloat(k)
+}
+
+// hasFraction reports whether raw, the value as the YAML types name it,
+// is a number with a fraction. The decoder reads some plain floats, such
+// as 25e-1, as strings and truncates them when it decodes them into an
+// integer, so a string counts when it parses as a float.
+func hasFraction(raw any) bool {
+	switch v := raw.(type) {
+	case float64:
+		return v != math.Trunc(v)
+	case string:
+		f, err := strconv.ParseFloat(v, 64)
+
+		return err == nil && f != math.Trunc(f)
+
+	default:
+		return false
+	}
 }
 
 func isInteger(k reflect.Kind) bool {

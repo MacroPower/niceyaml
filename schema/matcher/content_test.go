@@ -139,6 +139,22 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`version: 1.5`),
 			want:    false,
 		},
+		"int does not match a plain exponent fraction": {
+			// The decoder reads 25e-1 as a string and truncates it to 2.
+			matcher: matcher.Content(versionPath, 2),
+			input:   stringtest.Input(`version: 25e-1`),
+			want:    false,
+		},
+		"int does not match a quoted fraction": {
+			matcher: matcher.Content(versionPath, 2),
+			input:   stringtest.Input(`version: "2.5"`),
+			want:    false,
+		},
+		"int matches a plain exponent spelling": {
+			matcher: matcher.Content(versionPath, 1000),
+			input:   stringtest.Input(`version: 1e3`),
+			want:    true,
+		},
 		"empty string does not match null": {
 			matcher: matcher.Content(kindPath, ""),
 			input:   stringtest.Input(`kind:`),
