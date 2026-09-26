@@ -656,6 +656,70 @@ func TestFinder_Find_DiffBuiltLines(t *testing.T) {
 	}
 }
 
+func TestFinder_Find_LineWithoutEnding(t *testing.T) {
+	t.Parallel()
+
+	// A diff view can hold a line with no line ending before another line,
+	// such as the last line of a revision or a placeholder row. The loaded
+	// text still ends every line but the last with "\n", so no match joins
+	// the text of two lines.
+	noEnding := diff.Diff(
+		niceyaml.NewSourceFromString("x: 1").Lines(),
+		niceyaml.NewSourceFromString("x: 2\n").Lines(),
+	)
+	placeholders := diff.Diff(
+		niceyaml.NewSourceFromString("a: 1\nb: 2\n").Lines(),
+		niceyaml.NewSourceFromString("a: 1\nn: 1\nm: 1\nb: 2\n").Lines(),
+	)
+
+	tcs := map[string]struct {
+		lines  line.Lines
+		search string
+		want   position.Ranges
+	}{
+		"unified view keeps the deleted line apart from the next": {
+			lines:  noEnding.Unified().Lines(),
+			search: "1x",
+		},
+		"unified view matches across the line break": {
+			lines:  noEnding.Unified().Lines(),
+			search: "1\nx",
+			want: position.Ranges{
+				position.NewRange(position.New(0, 3), position.New(1, 1)),
+			},
+		},
+		"hunks view keeps the deleted line apart from the next": {
+			lines:  noEnding.Hunks(3).Lines(),
+			search: "1x",
+		},
+		"placeholder rows keep their neighbors apart": {
+			lines:  placeholders.Before().Lines(),
+			search: "1\nb",
+		},
+		"placeholder rows each read as a line break": {
+			lines:  placeholders.Before().Lines(),
+			search: "1\n\n\nb",
+			want: position.Ranges{
+				position.NewRange(position.New(0, 3), position.New(3, 1)),
+			},
+		},
+		"last line without an ending reads no line break": {
+			lines:  niceyaml.NewSourceFromString("a: 1").Lines(),
+			search: "1\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := finder.New().Load(tc.lines).Find(tc.search)
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestFinder_Reload(t *testing.T) {
 	t.Parallel()
 

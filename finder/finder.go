@@ -162,7 +162,10 @@ func (i *Index) buildByteToRuneIndex() {
 // The search string goes through the same per-character normalization as
 // the loaded text, so Find finds any string that appears in the source.
 // Bytes that are not valid UTF-8 read as U+FFFD on both sides, and a CRLF
-// or bare CR line ending reads as "\n" on both sides.
+// or bare CR line ending reads as "\n" on both sides. Every line but the
+// last reads as ending in "\n", even one with no line ending of its own,
+// such as the last line of a diff revision or a placeholder row, so a
+// match never joins two lines.
 //
 // Every match starts at a source character. When normalization expands one
 // character into several, as case folding turns "ß" into "ss", a needle
@@ -256,8 +259,10 @@ func normalizeRune(n Normalizer, r rune) string {
 }
 
 // buildTextAndPositionMap concatenates the runes of every line into the
-// loaded text and builds a position map. [line.Lines.Runes] yields every
-// line ending as a single "\n".
+// loaded text and builds a position map. [line.Line.Runes] yields every
+// line ending as a single "\n", and every line but the last without an
+// ending of its own gets a "\n" at column [line.Line.Width], where an
+// ending would sit, so no match joins the text of two lines.
 //
 // When a normalizer is set, it normalizes the returned text, and the position
 // map records where each source rune begins in the normalized text so
@@ -276,7 +281,7 @@ func (f *Finder) buildTextAndPositionMap(lines line.Lines) (string, *positionMap
 	// Cache normalized forms per unique rune to avoid repeated normalizer calls.
 	normalizedCache := make(map[rune]string)
 
-	for pos, r := range lines.Runes() {
+	emit := func(pos position.Position, r rune) {
 		normalized, ok := normalizedCache[r]
 		if !ok {
 			normalized = normalizeRune(f.normalizer, r)
@@ -298,6 +303,20 @@ func (f *Finder) buildTextAndPositionMap(lines line.Lines) (string, *positionMap
 			sb.WriteRune(nr)
 
 			normalizedCharIndex++
+		}
+	}
+
+	last := lines.Len() - 1
+	for i, l := range lines.All() {
+		ended := false
+		for col, r := range l.Runes() {
+			emit(position.New(i, col), r)
+
+			ended = r == '\n'
+		}
+
+		if !ended && i < last {
+			emit(position.New(i, l.Width()), '\n')
 		}
 	}
 
