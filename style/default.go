@@ -57,7 +57,7 @@ func buildDefault() Styles {
 		Set(kind.TextSubtleDim, base.Foreground(charmtone.Iron)),
 		Set(kind.TextSubtle, base.Foreground(charmtone.Oyster)),
 		Set(kind.GenericHighlightDim, lipgloss.NewStyle().Background(charmtone.Iron)),
-		Set(kind.GenericHighlight, lipgloss.NewStyle().Background(charmtone.Smoke)),
+		Set(kind.GenericHighlight, lipgloss.NewStyle().Background(charmtone.Ox)),
 		Set(
 			kind.GenericHeadingOK,
 			lipgloss.NewStyle().Foreground(charmtone.Pepper).Background(charmtone.Julep).Bold(true),
