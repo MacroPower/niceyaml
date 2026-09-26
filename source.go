@@ -250,10 +250,15 @@ func (s *Source) FilePath() string {
 	return s.filePath
 }
 
-// Tokens reconstructs the full [token.Tokens] stream from all [line.Line]s.
-// See [line.Lines.Tokens] for details on token recombination behavior. The
-// tokens are the ones [tokens.Tokenize] returned for the text, so the Line
-// and Column of each name the rune where its text starts.
+// Tokens reconstructs the full [token.Tokens] stream from every [line.Line]
+// of the [Source]. See [line.Lines.Tokens] for how a token cut across lines
+// comes back whole.
+//
+// The tokens are the clones [NewSourceFromTokens] made through
+// [tokens.ResetPositions], not the tokens passed to it. The Source keeps
+// using them, so treat them as read-only. When the input came from
+// [tokens.Tokenize], as it does for every constructor that reads text, the
+// Line and Column of each token name the rune where its text starts.
 func (s *Source) Tokens() token.Tokens {
 	return s.lines.Tokens()
 }
