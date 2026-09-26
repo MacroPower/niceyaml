@@ -2773,6 +2773,16 @@ func TestDocument_Decode_Validator(t *testing.T) {
 		assert.Equal(t, plainConfig{}, result)
 	})
 
+	t.Run("skips a nil validator", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "name: test\nvalue: 42\n")
+
+		result, err := dd.Decode[plainConfig](t.Context(), niceyaml.WithValidator(nil))
+		require.NoError(t, err)
+		assert.Equal(t, plainConfig{Name: "test", Value: 42}, result)
+	})
+
 	t.Run("a failing validator ends the decode", func(t *testing.T) {
 		t.Parallel()
 
@@ -3617,6 +3627,18 @@ func TestNode_Validate(t *testing.T) {
 		require.NoError(t, dd.Validate(t.Context()))
 	})
 
+	t.Run("skips a nil validator", func(t *testing.T) {
+		t.Parallel()
+
+		var order []string
+
+		dd := yamltest.FirstDocument(t, "name: test\n")
+
+		err := dd.Validate(t.Context(), record(&order, "first"), nil, record(&order, "second"))
+		require.NoError(t, err)
+		assert.Equal(t, []string{"first", "second"}, order)
+	})
+
 	t.Run("a validator of one call reaches no other decode", func(t *testing.T) {
 		t.Parallel()
 
@@ -3984,6 +4006,16 @@ func TestMultiValidator(t *testing.T) {
 
 		require.NoError(t, dd.Validate(t.Context(), typedNil))
 		require.NoError(t, dd.Validate(t.Context(), niceyaml.MultiValidator(typedNil, passing)))
+	})
+
+	t.Run("skips a nil validator", func(t *testing.T) {
+		t.Parallel()
+
+		var order []string
+
+		err := dd.Validate(t.Context(), niceyaml.MultiValidator(badB, nil, record(&order, "after")))
+		require.ErrorIs(t, err, errB)
+		assert.Equal(t, []string{"after"}, order)
 	})
 
 	t.Run("a Decoder carries it to every decode", func(t *testing.T) {

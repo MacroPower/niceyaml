@@ -167,17 +167,21 @@ func (f ValidatorFunc) Validate(ctx context.Context, n *Node) error {
 // Each validator sees the node whatever the ones before it reported, so
 // a validator that decodes the node reports its own failure beside a
 // schema violation of the same value. A validator that needs an earlier
-// one to have passed runs on its own instead. The error is the failures
-// joined in the order given, which the Node binds as one, so
-// [errors.Is] matches any one of them and the decode renders them as one
-// tree. No failure is no error. A context that ends stops the run, and
-// the error is then the one the context reports, or the one the
-// validator that saw it end returned.
+// one to have passed runs on its own instead. The run skips a nil
+// validator. The error is the failures joined in the order given, which
+// the Node binds as one, so [errors.Is] matches any one of them and the
+// decode renders them as one tree. No failure is no error. A context
+// that ends stops the run, and the error is then the one the context
+// reports, or the one the validator that saw it end returned.
 func MultiValidator(validators ...Validator) Validator {
 	return ValidatorFunc(func(ctx context.Context, n *Node) error {
 		var errs []error
 
 		for _, dv := range validators {
+			if dv == nil {
+				continue
+			}
+
 			err := ctx.Err()
 			if err != nil {
 				return err //nolint:wrapcheck // The context names the reason, and the Node binds it.
@@ -1001,10 +1005,11 @@ func (n *Node) position(path paths.Path) (position.Position, error) {
 //		}
 //	}
 //
-// Given no validators, Validate runs none and returns nil. A validator
-// that returns a nil [*Error] or [*SourceError] pointer passes, and the
-// next one runs. [Decoder.Validate] runs the validators a [Decoder]
-// holds the same way.
+// Given no validators, Validate runs none and returns nil, and it skips
+// a nil validator. A validator that returns a nil [*Error] or
+// [*SourceError] pointer passes, and the next one runs.
+// [Decoder.Validate] runs the validators a [Decoder] holds the same
+// way.
 //
 // An error from a validator comes back bound to the source as a
 // [SourceError] through [Node.Bind], so an [*Error] renders its
@@ -1017,6 +1022,10 @@ func (n *Node) Validate(ctx context.Context, validators ...Validator) error {
 // error.
 func (n *Node) validate(ctx context.Context, validators []Validator) error {
 	for _, dv := range validators {
+		if dv == nil {
+			continue
+		}
+
 		// A typed nil pointer is no failure, as [Node.Bind] reads it.
 		err := dv.Validate(ctx, n)
 		if isNothing(err) {
@@ -1154,12 +1163,13 @@ func (c decodeConfig) decodeOptions() []yaml.DecodeOption {
 
 // WithValidator is a [DecodeOption] that validates the document with dv
 // before decoding it, and a validation error ends the decode before any
-// typed decoding. Several validators run in the order given, stopping at
-// the first that fails, and [MultiValidator] runs several and reports
-// every failure. A [go.jacobcolvin.com/niceyaml/schema.Schema]
-// checks the document against one JSON schema, and a
-// [go.jacobcolvin.com/niceyaml/schema.Registry] against the schema
-// it picks for the document:
+// typed decoding. Several validators run in the order given, stopping
+// at the first that fails, and [MultiValidator] runs several and
+// reports every failure. Validation skips a nil dv. A
+// [go.jacobcolvin.com/niceyaml/schema.Schema] checks the document
+// against one JSON schema, and a
+// [go.jacobcolvin.com/niceyaml/schema.Registry] against the schema it
+// picks for the document:
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
 func WithValidator(dv Validator) DecodeOption {
