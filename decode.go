@@ -568,6 +568,10 @@ type document struct {
 // Receive instances from [Source.Documents], [Source.Document],
 // [Node.At], or [Node.Document].
 type Node struct {
+	// The node the scope selects, which At or Nodes resolves once when it
+	// scopes the Node. The root of a document leaves it unset, since its
+	// node is the body of the document.
+	node   ast.Node
 	source *Source
 	// The enclosing document.
 	doc *document
@@ -605,11 +609,12 @@ func (n *Node) Document() *Node {
 	return n.doc.node
 }
 
-// AST returns the [ast.Node] the Node selects, resolved in the document
-// as [Node.Decode] and the other methods resolve it: the body of the
-// whole document for the root Node, and the node its path selects for
-// one from [Node.At]. The text of any node, including a mapping or a
-// sequence, is its String method:
+// AST returns the [ast.Node] the Node selects, the one [Node.Decode]
+// decodes. For the root Node that is the body of the whole document, and
+// for one from [Node.At] or [Node.Nodes] it is the node that method
+// resolved when it scoped the Node, so two entries of a duplicate key,
+// which share one path, each keep their own node. The text of any node,
+// including a mapping or a sequence, is its String method:
 //
 //	scoped, err := doc.At(path)
 //	if err != nil {
@@ -633,9 +638,7 @@ func (n *Node) AST() (ast.Node, error) {
 		return n.doc.root.Body, nil
 	}
 
-	node, err := n.base.Node(n.doc.root)
-
-	return node, n.Bind(err)
+	return n.node, nil
 }
 
 // At returns a [*Node] scoped to the node path selects, with path
@@ -692,6 +695,7 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 		return nil, n.Bind(err)
 	}
 
+	c.node = node
 	c.span, c.content = n.extent(node)
 
 	return &c, nil
@@ -733,6 +737,7 @@ func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 	for _, m := range found {
 		c := *n
 		c.base = m.Path
+		c.node = m.Node
 		c.span, c.content = n.extent(m.Node)
 		nodes = append(nodes, &c)
 	}

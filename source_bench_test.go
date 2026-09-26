@@ -5,8 +5,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/paths"
 )
 
 // generateNestedYAML creates YAML nested to the given depth, where each
@@ -77,6 +80,51 @@ func BenchmarkNewSourceFromString_Nested(b *testing.B) {
 
 			for b.Loop() {
 				_ = niceyaml.NewSourceFromString(yaml)
+			}
+		})
+	}
+}
+
+func BenchmarkNode_DecodeScoped(b *testing.B) {
+	type item struct {
+		Name  string `yaml:"name"`
+		Value int    `yaml:"value"`
+	}
+
+	sizes := []struct {
+		name  string
+		items int
+	}{
+		{"items_100", 100},
+		{"items_1000", 1000},
+	}
+
+	for _, sz := range sizes {
+		var sb strings.Builder
+
+		sb.WriteString("items:\n")
+
+		for i := range sz.items {
+			fmt.Fprintf(&sb, "  - name: item_%d\n    value: %d\n", i, i)
+		}
+
+		doc, err := niceyaml.NewSourceFromString(sb.String()).Document()
+		require.NoError(b, err)
+
+		items, err := doc.Nodes(paths.Root().Child("items").IndexAll())
+		require.NoError(b, err)
+
+		b.Run(sz.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for b.Loop() {
+				for _, it := range items {
+					_, err := it.Decode[item](b.Context())
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
 			}
 		})
 	}

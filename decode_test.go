@@ -4217,6 +4217,29 @@ func TestNode_Nodes(t *testing.T) {
 		assert.Equal(t, "b", got)
 	})
 
+	t.Run("a duplicate key scopes each entry", func(t *testing.T) {
+		t.Parallel()
+
+		dup, err := niceyaml.NewSourceFromString("a: 1\na: 2\n", niceyaml.WithAllowDuplicateKeys(true)).Document()
+		require.NoError(t, err)
+
+		entries, err := dup.Nodes(paths.Root().Recursive("a"))
+		require.NoError(t, err)
+		require.Len(t, entries, 2)
+
+		// Both entries share the path $.a, so each decodes the node Nodes
+		// found rather than the one the path resolves to.
+		for i, want := range []int{1, 2} {
+			got, err := entries[i].Decode[int](t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, want, got)
+
+			node, err := entries[i].AST()
+			require.NoError(t, err)
+			assert.Equal(t, fmt.Sprint(want), node.String())
+		}
+	})
+
 	t.Run("resolves from the scope of the receiver", func(t *testing.T) {
 		t.Parallel()
 
