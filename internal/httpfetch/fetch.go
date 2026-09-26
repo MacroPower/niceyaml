@@ -18,10 +18,16 @@ const MaxSize = 10 * 1024 * 1024 // 10 MB.
 //
 // Errors name the URL with any password in its userinfo redacted, so a
 // credential embedded in a schema URL does not reach logs. Errors omit a
-// URL that does not parse, since Get cannot redact its userinfo.
+// URL that does not parse, since Get cannot redact its userinfo. When
+// [Redacted] would hide a password in such a URL, errors omit the reason
+// too, since the reason can quote part of the password.
 func Get(ctx context.Context, client *http.Client, rawURL string) ([]byte, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
+		if _, ok := redactUnparsed(rawURL); ok {
+			return nil, errors.New("parse URL: reason withheld because it can quote the password")
+		}
+
 		return nil, fmt.Errorf("parse URL: %w", reason(err))
 	}
 
@@ -69,13 +75,17 @@ func reason(err error) error {
 
 // Redacted returns rawURL with any password in its userinfo replaced by
 // "xxxxx", for use in messages. A string that carries no password comes
-// back unchanged, so a name that is not a URL keeps its spelling. A URL
-// that does not parse still has the password between the first colon of
-// its userinfo and the "@" replaced.
+// back unchanged, so a name that is not a URL keeps its spelling. For a
+// URL that does not parse, Redacted replaces everything from the first
+// colon after "://" to the last "@". That span covers a password that
+// holds a "/", "?" or "#", and it can also cover text that is not a
+// password, such as a port before an "@" in the path.
 func Redacted(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return redactUnparsed(rawURL)
+		name, _ := redactUnparsed(rawURL)
+
+		return name
 	}
 
 	if u.User == nil {
@@ -89,33 +99,30 @@ func Redacted(rawURL string) string {
 	return u.Redacted()
 }
 
-// redactUnparsed is [Redacted] for a URL that does not parse. It finds the
-// authority after "://" and replaces the password in its userinfo.
-func redactUnparsed(rawURL string) string {
+// redactUnparsed is [Redacted] for a URL that does not parse. It replaces
+// everything from the first colon after "://" to the last "@", and it
+// reports whether it found such a span. The span does not stop at the
+// first "/", "?" or "#", because a password can hold one of them.
+func redactUnparsed(rawURL string) (string, bool) {
 	const sep = "://"
 
 	i := strings.Index(rawURL, sep)
 	if i < 0 {
-		return rawURL
+		return rawURL, false
 	}
 
 	start := i + len(sep)
 	rest := rawURL[start:]
 
-	end := strings.IndexAny(rest, "/?#")
-	if end < 0 {
-		end = len(rest)
-	}
-
-	at := strings.LastIndex(rest[:end], "@")
+	at := strings.LastIndex(rest, "@")
 	if at < 0 {
-		return rawURL
+		return rawURL, false
 	}
 
 	colon := strings.Index(rest[:at], ":")
 	if colon < 0 {
-		return rawURL
+		return rawURL, false
 	}
 
-	return rawURL[:start+colon+1] + "xxxxx" + rest[at:]
+	return rawURL[:start+colon+1] + "xxxxx" + rest[at:], true
 }

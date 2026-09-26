@@ -1836,6 +1836,10 @@ func TestRegistry_Schema_RedactsPassword(t *testing.T) {
 			url: "http://user:secret@127.0.0.1:port/s.json",
 			err: schema.ErrLoad,
 		},
+		"a password with a slash in a url that does not parse": {
+			url: "http://user:secret/x@127.0.0.1:1/s.json",
+			err: schema.ErrLoad,
+		},
 	}
 
 	for name, tc := range tcs {

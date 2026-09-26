@@ -21,9 +21,12 @@ func TestGet_RedactsPassword(t *testing.T) {
 	tcs := map[string]struct {
 		url string
 	}{
-		"invalid port":           {url: "https://user:secret@example.com:port/x"},
-		"invalid percent escape": {url: "https://user:secret@example.com/%zz"},
-		"control character":      {url: "https://user:secret@example.com/\x7f"},
+		"invalid port":                  {url: "https://user:secret@example.com:port/x"},
+		"invalid percent escape":        {url: "https://user:secret@example.com/%zz"},
+		"control character":             {url: "https://user:secret@example.com/\x7f"},
+		"password with a slash":         {url: "https://user:secret/x@example.com/x"},
+		"password with a question mark": {url: "https://user:secret?x@example.com/x"},
+		"password with a hash":          {url: "https://user:secret#x@example.com/x"},
 	}
 
 	for name, tc := range tcs {
@@ -35,6 +38,14 @@ func TestGet_RedactsPassword(t *testing.T) {
 			assert.NotContains(t, err.Error(), "secret")
 		})
 	}
+}
+
+func TestGet_ParseReason(t *testing.T) {
+	t.Parallel()
+
+	// A URL with no password keeps the reason url.Parse gives.
+	_, err := httpfetch.Get(t.Context(), http.DefaultClient, "https://example.com:port/x")
+	require.ErrorContains(t, err, `parse URL: invalid port ":port" after host`)
 }
 
 func TestGet_RedactsPasswordOnTransport(t *testing.T) {
@@ -107,6 +118,22 @@ func TestRedacted(t *testing.T) {
 		"password in a url with an invalid port": {
 			url:  "https://user:secret@example.com:port/x",
 			want: "https://user:xxxxx@example.com:port/x",
+		},
+		"password with a slash in a url that does not parse": {
+			url:  "https://user:s3/cret@example.com/x",
+			want: "https://user:xxxxx@example.com/x",
+		},
+		"password with a question mark in a url that does not parse": {
+			url:  "https://user:s3?cret@example.com/x",
+			want: "https://user:xxxxx@example.com/x",
+		},
+		"password with a hash in a url that does not parse": {
+			url:  "https://user:s3#cret@example.com/x",
+			want: "https://user:xxxxx@example.com/x",
+		},
+		"at sign in the path of a url that parses keeps its spelling": {
+			url:  "https://example.com:8443/pkg@1.0/s.json",
+			want: "https://example.com:8443/pkg@1.0/s.json",
 		},
 	}
 
