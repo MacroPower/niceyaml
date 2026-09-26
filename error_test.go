@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"strings"
 	"testing"
@@ -3518,6 +3519,63 @@ func TestSourceError_Excerpt(t *testing.T) {
 		}
 	})
 
+	t.Run("an annotation past the end of its line sits after the last rune", func(t *testing.T) {
+		t.Parallel()
+
+		// A renderer that spent a cell on every column up to this one
+		// would panic.
+		far := position.New(0, math.MaxInt/2)
+
+		tcs := map[string]struct {
+			err     *niceyaml.Error
+			want    line.Annotations
+			row     string
+			printed string
+		}{
+			"nested position": {
+				err: niceyaml.NewError("top", niceyaml.WithErrors(
+					niceyaml.NewError("far", niceyaml.AtPosition(far)),
+				)),
+				want:    line.Annotations{{Content: "far", Kind: kind.TextError, Placement: line.Below, Col: 4}},
+				row:     "     |     ^ far",
+				printed: "<textError>    ^ far</textError>",
+			},
+			"nested range": {
+				err: niceyaml.NewError("top", niceyaml.WithErrors(
+					niceyaml.NewError("far", niceyaml.AtRange(position.NewRange(far, position.New(0, far.Col+2)))),
+				)),
+				want:    line.Annotations{{Content: "far", Kind: kind.TextError, Placement: line.Below, Col: 4}},
+				row:     "     |     ^ far",
+				printed: "<textError>    ^ far</textError>",
+			},
+			"root position": {
+				err:     niceyaml.NewError("far", niceyaml.AtPosition(far)),
+				want:    line.Annotations{{Kind: kind.TextError, Placement: line.Below, Col: 4}},
+				row:     "   1 | a: 1",
+				printed: "<literalNumberInteger>1</literalNumberInteger>",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, yamltest.Bind(t, niceyaml.NewSourceFromString("a: 1\n"), tc.err), &bound)
+
+				excerpt, ok := bound.Excerpt(0)
+				require.True(t, ok)
+				assert.Equal(t, tc.want, excerpt.Annotations(0))
+
+				formatted := niceyaml.FormatError(bound, 0)
+				assert.Contains(t, formatted, fmt.Sprintf("1:%d: far", far.Col+1), "the tree keeps the column as given")
+				assert.True(t, strings.HasSuffix(formatted, "\n"+tc.row), formatted)
+				assert.True(t, strings.HasSuffix(renderContext(bound, 0), tc.printed))
+			})
+		}
+	})
+
 	t.Run("annotates nested messages below their lines", func(t *testing.T) {
 		t.Parallel()
 
@@ -3755,6 +3813,29 @@ func TestSourceError_Annotate(t *testing.T) {
 		assert.Equal(t, line.Annotations{
 			{Kind: kind.TextError, Placement: line.Below, Col: 3},
 		}, view.Annotations(1))
+	})
+
+	t.Run("a position past the end of its line marks the column after the last rune", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("a: 1\n")
+		view := source.View()
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, yamltest.Bind(t, source, niceyaml.NewError(
+			"far", niceyaml.AtPosition(position.New(0, math.MaxInt/2)),
+		)), &bound)
+		require.True(t, bound.Annotate(view))
+
+		assert.Equal(t, line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(4, 4)}}, view.Overlays(0))
+		assert.Equal(t, line.Annotations{
+			{Content: "far", Kind: kind.TextError, Placement: line.Below, Col: 4},
+		}, view.Annotations(0))
+		assert.Equal(t, stringtest.JoinLF(
+			"   1 | a: 1",
+			"     |     ^ far",
+		), view.String())
 	})
 
 	t.Run("marks a slice of the source by line identity", func(t *testing.T) {

@@ -1619,7 +1619,10 @@ func rangeOf(lines line.Lines, loc location) position.Range {
 // no token under it, such as a position past the end of a line or a path
 // to an empty value, gets an overlay of no width at its column, which
 // renders nothing and still counts as decoration, so [line.View.Hunks]
-// keeps the line.
+// keeps the line. Annotate moves a column past the end of its line to the
+// column after its last rune, for the overlay and the message alike, so a
+// renderer spends at most one cell past the line on the mark.
+// [SourceError.Error] still reports the column as given.
 //
 // Annotate finds each line by identity rather than by index, since every
 // view over a source shares its [*line.Line] values, so the view may be
@@ -1834,7 +1837,10 @@ func (e *SourceError) annotate(view *line.View) []int {
 // position with no token under it, or a range that covers no column of
 // its lines, has nothing to highlight, so its line gets an overlay of no
 // width at its column, which renders nothing and still marks the line as
-// decorated, so the line joins the hunks [line.View.Hunks] keeps.
+// decorated, so the line joins the hunks [line.View.Hunks] keeps. A column
+// past the end of its line moves to the column after its last rune, in
+// the overlay and in the annotation below the line. A far column then
+// costs a renderer no more cells than a column at the end.
 func annotateSource(view *line.View, src *Source, positions []errorPosition) []int {
 	if len(positions) == 0 {
 		return nil
@@ -1855,8 +1861,9 @@ func annotateSource(view *line.View, src *Source, positions []errorPosition) []i
 			marked = append(marked, i)
 
 			if len(segments) == 0 {
+				col := min(pos.pos.Col, src.lines.Line(pos.pos.Line).Width())
 				view.AddLineOverlay(i, line.Overlay{
-					Cols: position.NewSpan(pos.pos.Col, pos.pos.Col),
+					Cols: position.NewSpan(col, col),
 					Kind: kind.GenericError,
 				})
 			}
@@ -1877,6 +1884,7 @@ func annotateSource(view *line.View, src *Source, positions []errorPosition) []i
 
 	for lineIdx, annotation := range prepareLineAnnotations(positions) {
 		if i, ok := index(lineIdx); ok {
+			annotation.Col = min(annotation.Col, src.lines.Line(lineIdx).Width())
 			view.Annotate(i, annotation)
 		}
 	}
