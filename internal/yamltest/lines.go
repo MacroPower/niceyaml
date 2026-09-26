@@ -12,8 +12,9 @@ var (
 	// ErrLineNumberNotIncreasing indicates a line number is not greater than
 	// the previous.
 	ErrLineNumberNotIncreasing = errors.New("line number not greater than previous")
-	// ErrLineNumberMismatch indicates a token's line number differs from expected.
-	ErrLineNumberMismatch = errors.New("token line number differs from expected")
+	// ErrLineNumberMismatch indicates a token's line differs from the number
+	// of the line holding it.
+	ErrLineNumberMismatch = errors.New("token line differs from line number")
 	// ErrColumnNotIncreasing indicates a column is not greater than the previous.
 	ErrColumnNotIncreasing = errors.New("column not greater than previous")
 )
@@ -23,7 +24,8 @@ var (
 // It checks that:
 //   - Line numbers are strictly increasing
 //   - Every token on a given line is non-nil and carries a Position
-//   - Every token on a given line has an identical line number in its Position
+//   - Every token on a given line carries the line's [line.Line.Number] in
+//     its Position
 //   - Every token on a given line has columns that are strictly increasing,
 //     ignoring tokens with an empty Origin
 //
@@ -59,11 +61,8 @@ func ValidateLines(ls line.Lines) error {
 
 		prevLineNum = lineNum
 
-		// Check: all tokens have identical line number and columns are strictly increasing.
-		var (
-			expectedLineNum = -1
-			prevCol         = 0
-		)
+		// Check: every token carries the line's number and columns are strictly increasing.
+		prevCol := 0
 
 		for j, tk := range l.Tokens() {
 			if tk == nil {
@@ -82,16 +81,14 @@ func ValidateLines(ls line.Lines) error {
 				)
 			}
 
-			// Check token line number consistency.
-			if expectedLineNum == -1 {
-				expectedLineNum = tk.Position.Line
-			} else if tk.Position.Line != expectedLineNum {
+			// Check the token's line matches the line number.
+			if tk.Position.Line != lineNum {
 				return fmt.Errorf(
-					"line at index %d, token %d: line number %d differs from expected %d: %w",
+					"line at index %d, token %d: token line %d differs from line number %d: %w",
 					i,
 					j,
 					tk.Position.Line,
-					expectedLineNum,
+					lineNum,
 					ErrLineNumberMismatch,
 				)
 			}

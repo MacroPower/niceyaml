@@ -31,7 +31,6 @@ type Line struct {
 	segments segment.Segments
 
 	// The 1-indexed line number used for display.
-	// This may differ from the first token's Position.Line for block scalars.
 	number int
 }
 

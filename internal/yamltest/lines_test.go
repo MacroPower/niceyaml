@@ -117,6 +117,23 @@ func TestLines_Validate(t *testing.T) {
 		require.ErrorIs(t, err, yamltest.ErrLineNumberNotIncreasing)
 	})
 
+	t.Run("token line differs from line number", func(t *testing.T) {
+		t.Parallel()
+
+		lines := line.NewLines(tokens.Tokenize("a: 1\nb: 2\n"))
+		require.Equal(t, 2, lines.Len())
+
+		// The line shares its tokens, so renumbering them moves every token
+		// on the second line away from its number, 2.
+		for _, tk := range lines.Line(1).Tokens() {
+			tk.Position.Line = 7
+		}
+
+		err := yamltest.ValidateLines(lines)
+		require.ErrorIs(t, err, yamltest.ErrLineNumberMismatch)
+		assert.Contains(t, err.Error(), "token line 7 differs from line number 2")
+	})
+
 	t.Run("columns not increasing - same", func(t *testing.T) {
 		t.Parallel()
 
