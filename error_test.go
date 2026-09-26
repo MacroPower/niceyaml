@@ -1391,6 +1391,23 @@ func TestSourceError_UnresolvedNestedInTree(t *testing.T) {
 	assert.Equal(t, "2 schema violations", err.Error())
 	assert.Equal(t, "2 schema violations\n|-- $.x: bad x\n`-- $.y: bad y", report(err))
 	assert.Equal(t, "2 schema violations\n├── $.x: bad x\n└── $.y: bad y", render(err))
+
+	// The summary carries no location of its own, so it has no reason to
+	// give, and each nested error names why its path did not resolve.
+	var bound *niceyaml.SourceError
+
+	require.ErrorAs(t, err, &bound)
+
+	_, ok := bound.Excerpt(2)
+	assert.False(t, ok)
+	require.NoError(t, bound.Unresolved())
+
+	children := bound.Errors()
+	require.Len(t, children, 2)
+
+	for _, child := range children {
+		require.ErrorIs(t, child.Unresolved(), paths.ErrNotFound)
+	}
 }
 
 func TestSourceError_Format_Plain(t *testing.T) {

@@ -1665,10 +1665,13 @@ func (e *SourceError) Annotate(view *line.View) bool {
 // takes the hunks of that view the same way.
 //
 // Excerpt reports false, with no view, when no location in the tree
-// resolves, and [SourceError.Unresolved] then names the reason. A node
-// whose location does not resolve is left out of the
-// excerpt; its message is still part of the tree [FormatError] prints.
-// A nil SourceError carries no location.
+// resolves. [SourceError.Unresolved] then names why the location of the
+// error itself did not resolve, and returns nil for an error that
+// carries no location of its own, such as a join or a summary over
+// nested errors, whose children from [SourceError.Errors] each name
+// their own reason. A node whose location does not resolve is left out
+// of the excerpt; its message is still part of the tree [FormatError]
+// prints. A nil SourceError carries no location.
 func (e *SourceError) Excerpt(context int) (*line.View, bool) {
 	if e == nil {
 		return nil, false
