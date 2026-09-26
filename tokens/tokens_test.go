@@ -57,24 +57,24 @@ func TestTokenize_NumericEscape(t *testing.T) {
 	t.Parallel()
 
 	// The lexer truncates a double-quoted scalar's Origin at a "\x", "\u",
-	// or "\U" escape, so the stream loses the rest of the scalar and the
-	// source's final line ending. Pin that shape, so an upstream fix shows
-	// up here.
+	// or "\U" escape, so the stream loses the rest of the scalar but keeps
+	// the source's final line ending. Pin that shape, so an upstream fix
+	// shows up here.
 	tcs := map[string]struct {
 		input string
 		want  string
 	}{
 		"hex escape": {
 			input: `a: "x\x41"` + "\n",
-			want:  `a: "x\"`,
+			want:  `a: "x\"` + "\n",
 		},
 		"short unicode escape": {
 			input: `a: "x\u0041"` + "\n",
-			want:  `a: "x\"`,
+			want:  `a: "x\"` + "\n",
 		},
 		"long unicode escape": {
 			input: `a: "x\U00000041"` + "\n",
-			want:  `a: "x\"`,
+			want:  `a: "x\"` + "\n",
 		},
 		"escape the lexer keeps": {
 			input: `a: "x\ty"` + "\n",
@@ -88,6 +88,83 @@ func TestTokenize_NumericEscape(t *testing.T) {
 
 			got := yamltest.DumpTokenOrigins(tokens.Tokenize(tc.input))
 			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestTokenize_FinalBlankLines(t *testing.T) {
+	t.Parallel()
+
+	// The stream keeps the blank lines that end the file, even when the
+	// lexer rewrote the last token, cut it short, or gave it whitespace
+	// alone. The whitespace comes back once, so a block scalar header that
+	// holds the start of it does not repeat it. A last token that sits in
+	// front of text the lexer dropped keeps the line ending it holds.
+	tcs := map[string]struct {
+		input string
+		// The joined Origins equal the input.
+		whole bool
+	}{
+		"trailing space inside the last scalar": {
+			input: "description: first line \n  second line\n\n",
+		},
+		"blank line of spaces inside the last scalar": {
+			input: "description: first\n  \n  second\n\n",
+		},
+		"several final blank lines": {
+			input: "k: plain\n   \n  more\n\n\n",
+		},
+		"sequence entry": {
+			input: "- a\n  \n  b\n\n",
+		},
+		"invalid tab token": {
+			input: "a:\n\t\n\n",
+			whole: true,
+		},
+		"invalid tab token after a header": {
+			input: "a: |\n\t\n\n",
+			whole: true,
+		},
+		"truncated escape": {
+			input: `a: "\x41"` + "\n\n",
+		},
+		"empty block scalar content": {
+			input: "a: |\n\n",
+			whole: true,
+		},
+		"empty block scalar content crlf": {
+			input: "a: |+\r\n\r\n",
+			whole: true,
+		},
+		"empty block scalar in a sequence": {
+			input: "- |\n\n",
+			whole: true,
+		},
+		"header with trailing spaces": {
+			input: "a: |  \n  \n \n",
+			whole: true,
+		},
+		"dropped text ends the file": {
+			input: "a: 1\n!",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tks := tokens.Tokenize(tc.input)
+			require.NotEmpty(t, tks)
+
+			got := yamltest.DumpTokenOrigins(tks)
+			assert.Equal(t, countLineBreaks(tc.input), countLineBreaks(got), "joined origins %q", got)
+
+			tail := tc.input[len(strings.TrimRight(tc.input, " \t\r\n")):]
+			assert.True(t, strings.HasSuffix(got, tail), "joined origins %q", got)
+
+			if tc.whole {
+				assert.Equal(t, tc.input, got)
+			}
 		})
 	}
 }
@@ -246,9 +323,8 @@ func TestTokenize_RepairsPositionsAfterTruncatedLastToken(t *testing.T) {
 	t.Parallel()
 
 	// The lexer places a token one rune short after a tag. When the last
-	// token's text is not in the source, the final line ending stays lost,
-	// but every position must still move to where the source holds the
-	// text.
+	// token's text is not in the source, every position must still move to
+	// where the source holds the text.
 	tks := tokens.Tokenize("a: !!str x\nname: \"Caf\\u00e9\"\n")
 	require.NotEmpty(t, tks)
 

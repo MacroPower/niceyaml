@@ -71,25 +71,38 @@ func Tokenize(src string) token.Tokens {
 		}}
 	}
 
-	// The lexer drops the source's final line ending, so a file that ends
-	// in a blank line tokenizes like one that does not. Give the dropped
-	// whitespace back to the last token so the stream ends where the file
-	// does and the last line count matches the text. Find the rest behind
-	// the last token's text rather than behind the joined origins, which
-	// need not be a prefix of the source when the lexer dropped text
-	// earlier in the file. The search leaves the token's own trailing
-	// whitespace out as well, because the lexer rewrites it. The lexer
-	// collapses a blank line of spaces to a bare line ending, which leaves
-	// an Origin the source does not hold. A token whose text the source
-	// does not hold either keeps the Origin it came with.
+	// The lexer drops the source's final line ending and rewrites the
+	// whitespace ahead of it, so a file that ends in blank lines tokenizes
+	// like one that does not. Give the whitespace after the last text of
+	// the source to the last token in place of the whitespace the token
+	// ends with, so the stream ends where the file does and the line count
+	// matches the text. A last token of whitespace alone, such as the empty
+	// content of a block scalar or the lexer's invalid tab token, gets only
+	// the part the tokens before it do not already hold. A token that ends
+	// in more line breaks than the source does sits in front of text the
+	// lexer dropped, such as a lone "!" that ends the file, and it keeps
+	// the Origin it came with.
 	last := tks[len(tks)-1]
 
 	text := strings.TrimRight(last.Origin, " \t\r\n")
+	tail := src[len(strings.TrimRight(src, " \t\r\n")):]
 
-	if i := strings.LastIndex(src, text); i >= 0 {
-		if rest := src[i+len(text):]; rest != "" && strings.TrimSpace(rest) == "" {
-			last.Origin = text + rest
+	var held string
+
+	if text == "" {
+		var before strings.Builder
+
+		for _, tk := range tks[:len(tks)-1] {
+			before.WriteString(tk.Origin)
 		}
+
+		joined := before.String()
+		held = joined[len(strings.TrimRight(joined, " \t\r\n")):]
+	}
+
+	rest, ok := strings.CutPrefix(tail, held)
+	if ok && lineend.CountBreaks(rest) >= lineend.CountBreaks(last.Origin[len(text):]) {
+		last.Origin = text + rest
 	}
 
 	repairPositions(src, tks)
