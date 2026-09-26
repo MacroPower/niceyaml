@@ -1665,7 +1665,8 @@ func TestError_NilInnerErrorWithLocation(t *testing.T) {
 	require.NotNil(t, tk)
 
 	// An Error from a nil error has no message, so its text is the path it
-	// carries, or nothing, and binding puts the resolved position in front.
+	// carries and a colon, or nothing, and binding puts the resolved
+	// position in front.
 	tcs := map[string]struct {
 		err       *niceyaml.Error
 		want      string

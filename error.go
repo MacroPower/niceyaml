@@ -339,15 +339,16 @@ func WithErrors(errs ...error) ErrorOption {
 // that binds the Error puts the resolved position in front, and the nested
 // errors from [WithErrors] put nothing in it either, since that SourceError
 // lists them behind their own positions. An Error created from a nil error
-// has an empty message, so its text is the path alone, or "" when it has
-// none. An Error from [Rebase] carries the joined path in front of the
-// message of the error it rebased, in place of the path that error wrote,
-// and an Error with a location of its own likewise replaces the path an
-// Error it wraps wrote, so the message names one location, the one
-// [Error.Path] reports. An Error from Rebase whose cause chain reaches a
-// [*SourceError] before a located Error puts no path in front, whether
-// or not the binding has a location. That binding owns the location, and
-// its text names whatever position and path it has.
+// has an empty message, so its text is the path and a colon, such as
+// "$.a:", or "" when it has none. An Error from [Rebase] carries the
+// joined path in front of the message of the error it rebased, in place
+// of the path that error wrote, and an Error with a location of its own
+// likewise replaces the path an Error it wraps wrote, so the message
+// names one location, the one [Error.Path] reports. An Error from Rebase
+// whose cause chain reaches a [*SourceError] before a located Error puts
+// no path in front, whether or not the binding has a location. That
+// binding owns the location, and its text names whatever position and
+// path it has.
 func (e *Error) Error() string {
 	if e == nil {
 		return ""
