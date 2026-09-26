@@ -706,29 +706,11 @@ func (m *Model) SetContainerStyle(s lipgloss.Style) {
 
 // NextRevision moves to the next revision in history.
 // If already at the latest, does nothing.
-func (m *Model) NextRevision() { m.seekRevision(1) }
+func (m *Model) NextRevision() { m.GotoRevision(m.revIndex + 1) }
 
 // PreviousRevision moves to the previous revision in history.
 // If already at the first (index 0), does nothing.
-func (m *Model) PreviousRevision() { m.seekRevision(-1) }
-
-// seekRevision moves the revision index by delta, with boundary checks.
-func (m *Model) seekRevision(delta int) {
-	if !m.hasRevision() {
-		return
-	}
-
-	if delta > 0 && m.AtLatestRevision() {
-		return
-	}
-
-	if delta < 0 && m.AtFirstRevision() {
-		return
-	}
-
-	m.revIndex = clamp(m.revIndex+delta, 0, len(m.revisions)-1)
-	m.rebuildViews()
-}
+func (m *Model) PreviousRevision() { m.GotoRevision(m.revIndex - 1) }
 
 // rebuildViews rebuilds the displayed views from the revision, diff mode, and
 // view mode, then refreshes the search state and drops the cached row counts.
