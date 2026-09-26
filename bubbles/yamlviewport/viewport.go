@@ -641,8 +641,8 @@ func (m *Model) HunkContext() int {
 }
 
 // SetHunkContext sets the number of context lines shown around diff hunks
-// in [ViewModeHunks], rebuilding the view when that mode is active. Default
-// is 3.
+// in [ViewModeHunks]. The view rebuilds when that mode shows a diff, and
+// otherwise stays where it is. Default is 3.
 func (m *Model) SetHunkContext(n int) {
 	n = max(0, n)
 	if n == m.hunkContext {
@@ -651,7 +651,7 @@ func (m *Model) SetHunkContext(n int) {
 
 	m.hunkContext = n
 
-	if m.viewMode == ViewModeHunks {
+	if m.viewMode == ViewModeHunks && m.ShowingDiff() {
 		m.rebuildViews()
 	}
 }

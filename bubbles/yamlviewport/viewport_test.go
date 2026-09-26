@@ -4934,4 +4934,19 @@ func TestViewport_UnchangedModeKeepsPosition(t *testing.T) {
 	m.SetHunkContext(m.HunkContext())
 	assert.Equal(t, 3, m.SearchIndex(), "same hunk context")
 	assert.Equal(t, 30, m.YOffset(), "same hunk context")
+
+	// Switching to hunks mode rebuilds the view, but without a diff the
+	// hunk context shapes nothing on screen.
+	m.SetViewMode(yamlviewport.ViewModeHunks)
+	m.SearchNext()
+	m.SearchNext()
+	m.SearchNext()
+	m.SetYOffset(30)
+
+	require.Equal(t, 3, m.SearchIndex())
+	require.Equal(t, 30, m.YOffset())
+
+	m.SetHunkContext(m.HunkContext() + 2)
+	assert.Equal(t, 3, m.SearchIndex(), "hunk context without diff")
+	assert.Equal(t, 30, m.YOffset(), "hunk context without diff")
 }
