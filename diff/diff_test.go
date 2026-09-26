@@ -1,6 +1,7 @@
 package diff_test
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -1018,6 +1019,35 @@ func TestDiffer_WithAlgorithm(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDiff_Concurrent(t *testing.T) {
+	t.Parallel()
+
+	before := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\nd: 4\n").Lines()
+	after := niceyaml.NewSourceFromString("a: 1\nb: 5\nc: 3\ne: 6\nd: 4\n").Lines()
+	want := diff.New().Diff(before, after).Unified()
+
+	var wg sync.WaitGroup
+
+	for range 8 {
+		wg.Go(func() {
+			for range 50 {
+				got := diff.Diff(before, after).Unified()
+				if !assert.Equal(t, want.Count(), got.Count()) {
+					return
+				}
+
+				assert.Equal(t, want.String(), got.String())
+
+				for i := range want.Count() {
+					assert.Equal(t, want.Flag(i), got.Flag(i), "flag mismatch at line %d", i)
+				}
+			}
+		})
+	}
+
+	wg.Wait()
 }
 
 func TestDiffer_IsEmpty(t *testing.T) {

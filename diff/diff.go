@@ -422,12 +422,17 @@ func (r *Result) IsEmpty() bool {
 	return len(r.ops) == 0
 }
 
+// defaultDiffer is the shared [Differ] behind [Diff]. Its [lcs.Hirschberg]
+// is safe for concurrent use and pools its working buffers across calls.
+var defaultDiffer = New()
+
 // Diff computes the difference between two revisions using the default
 // algorithm. See [Differ.Diff].
 //
-// This is a convenience function equivalent to New().Diff(a, b).
+// Every call goes through one shared [Differ], which is safe for concurrent
+// use, so repeated calls reuse its pooled working buffers.
 func Diff(a, b line.Lines) *Result {
-	return New().Diff(a, b)
+	return defaultDiffer.Diff(a, b)
 }
 
 // lineOp represents a line in the unified diff output.
