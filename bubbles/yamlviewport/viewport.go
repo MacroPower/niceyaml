@@ -1705,16 +1705,17 @@ func (m *Model) SetSearchTerm(term string) {
 		return
 	}
 
-	// The match index of another term points at an arbitrary match of this
-	// one. The same term keeps the current match and the scroll position,
-	// so a parent that pushes the term on every update does not snap the
-	// view back to the match.
+	// The same term keeps the current match, its highlights, and the scroll
+	// position, so a parent that pushes the term on every update does not
+	// snap the view back to the match or lay out the content again. Every
+	// change of content refreshes the search, and the searcher stays the
+	// one New set, so the matches of the same term still hold.
 	if term == m.searchTerm {
-		m.refreshSearch()
-
 		return
 	}
 
+	// The match index of another term points at an arbitrary match of this
+	// one.
 	m.searchIndex = -1
 	m.searchTerm = term
 	m.refreshSearch()
@@ -1727,7 +1728,12 @@ func (m *Model) SearchTerm() string {
 }
 
 // ClearSearch removes all search highlights and clears the search term.
+// With no term set, ClearSearch leaves the view and its layout as they are.
 func (m *Model) ClearSearch() {
+	if m.searchTerm == "" {
+		return
+	}
+
 	m.searchTerm = ""
 	m.searchMatches = nil
 	m.searchIndex = -1

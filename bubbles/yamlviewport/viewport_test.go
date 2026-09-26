@@ -5000,6 +5000,82 @@ func TestViewport_NewSearchTermStartsAtFirstMatch(t *testing.T) {
 	assert.NotContains(t, m.View(), "k16: needle")
 }
 
+func TestViewport_UnchangedSearchKeepsLayout(t *testing.T) {
+	t.Parallel()
+
+	var sb strings.Builder
+
+	for i := range 50 {
+		fmt.Fprintf(&sb, "k%d: v%d\n", i, i)
+	}
+
+	tcs := map[string]struct {
+		setup func(m *yamlviewport.Model)
+		act   func(m *yamlviewport.Model)
+	}{
+		"same term": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetSearchTerm("v")
+				m.SearchNext()
+			},
+			act: func(m *yamlviewport.Model) {
+				m.SetSearchTerm("v")
+			},
+		},
+		"clear without term": {
+			setup: func(*yamlviewport.Model) {},
+			act: func(m *yamlviewport.Model) {
+				m.ClearSearch()
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// The base style counts every piece of text the printer styles,
+			// which a layout of the view does for each line.
+			renders := 0
+			count := lipgloss.NewStyle().Transform(func(s string) string {
+				renders++
+
+				return s
+			})
+			p := printer.New(
+				printer.WithStyles(style.New(count)),
+				printer.WithContainerStyle(lipgloss.NewStyle()),
+				printer.WithGutter(printer.NoGutter),
+			)
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(p))
+			m.SetWidth(40)
+			m.SetHeight(10)
+			m.SetRevision(niceyaml.NewSourceFromString(sb.String()))
+
+			tc.setup(&m)
+			m.SetYOffset(20)
+			m.TotalRowCount()
+
+			index := m.SearchIndex()
+			offset := m.YOffset()
+
+			require.Positive(t, renders)
+
+			renders = 0
+
+			// The call changes no match, highlight, or content, so the
+			// cached layout still holds and nothing renders again.
+			tc.act(&m)
+			m.TotalRowCount()
+
+			assert.Zero(t, renders)
+			assert.Equal(t, index, m.SearchIndex())
+			assert.Equal(t, offset, m.YOffset())
+		})
+	}
+}
+
 func TestViewport_SideBySideSearchOrder(t *testing.T) {
 	t.Parallel()
 
