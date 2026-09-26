@@ -1,6 +1,8 @@
 package theme
 
 import (
+	"image/color"
+	"maps"
 	"testing"
 
 	"charm.land/lipgloss/v2"
@@ -83,4 +85,66 @@ func TestPalette_UITakesCommentColorAlone(t *testing.T) {
 	assert.False(t, s.Style(kind.UI).GetItalic())
 	assert.Equal(t, s.Style(kind.UI), s.Style(kind.UILineNumber), "children inherit the chrome style")
 	assert.Equal(t, lipgloss.Color("#000000"), s.Style(kind.UILineNumber).GetBackground())
+}
+
+func TestPalette_UITokensLayerOverChrome(t *testing.T) {
+	t.Parallel()
+
+	// Every case sets the comments in italics. A Tokens spec for UI or one
+	// of its children layers over the upright chrome style, so none of the
+	// chrome kinds turn italic.
+	tcs := map[string]struct {
+		tokens   map[kind.Kind]string
+		kind     kind.Kind
+		wantFg   color.Color
+		wantBold bool
+	}{
+		"ui token": {
+			tokens: map[kind.Kind]string{kind.UI: "#123456"},
+			kind:   kind.UI,
+			wantFg: lipgloss.Color("#123456"),
+		},
+		"ui token reaches children": {
+			tokens: map[kind.Kind]string{kind.UI: "#123456"},
+			kind:   kind.UILineNumber,
+			wantFg: lipgloss.Color("#123456"),
+		},
+		"ui child color": {
+			tokens: map[kind.Kind]string{kind.UILineNumber: "#abcdef"},
+			kind:   kind.UILineNumber,
+			wantFg: lipgloss.Color("#abcdef"),
+		},
+		"ui child attribute only": {
+			tokens:   map[kind.Kind]string{kind.UIHunkHeader: "bold"},
+			kind:     kind.UIHunkHeader,
+			wantFg:   lipgloss.Color("#654321"),
+			wantBold: true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tokens := map[kind.Kind]string{kind.Comment: "italic #654321"}
+			maps.Copy(tokens, tc.tokens)
+
+			p := palette{
+				Mode:   Dark,
+				Fg:     "#ffffff",
+				Bg:     "#000000",
+				Accent: "#ff00ff",
+				OK:     "#00ff00",
+				Warn:   "#ffff00",
+				Error:  "#ff0000",
+				Tokens: tokens,
+			}
+
+			got := p.styles().Style(tc.kind)
+
+			assert.Equal(t, tc.wantFg, got.GetForeground())
+			assert.Equal(t, tc.wantBold, got.GetBold())
+			assert.False(t, got.GetItalic())
+		})
+	}
 }

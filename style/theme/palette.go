@@ -98,22 +98,41 @@ func (p palette) styles() style.Styles {
 
 	// A Tokens spec layers over the style its kind already resolves to, so
 	// a spec of "bold" alone keeps the ancestor's colors. Parents come
-	// first, so a child layers over the parent's finished style.
-	for _, st := range byDepth(p.Tokens) {
-		s = s.With(style.Set(st, layer(s.Style(st), p.Tokens[st])))
+	// first, so a child layers over the parent's finished style. The pass
+	// visits UI even when Tokens leaves it out, since the chrome takes its
+	// color from the finished comments.
+	kinds := slices.Collect(maps.Keys(p.Tokens))
+	if _, ok := p.Tokens[kind.UI]; !ok {
+		kinds = append(kinds, kind.UI)
 	}
 
-	// The chrome takes the comment color alone. A Tokens spec that sets
-	// comments in italics or bold styles the comments, and a line number
-	// drawn the same way would read as one.
-	return s.With(style.Set(kind.UI, base.Foreground(s.Style(kind.Comment).GetForeground())))
+	for _, st := range byDepth(kinds) {
+		cur := s.Style(st)
+		if st == kind.UI {
+			// The chrome takes the comment color alone. A Tokens spec that
+			// sets comments in italics or bold styles the comments, and a
+			// line number drawn the same way would read as one. UI comes
+			// after Comment and ahead of its own children in the depth
+			// order, so a UI spec layers over this style, and a spec for a
+			// child layers over UI rather than over the comments.
+			cur = base.Foreground(s.Style(kind.Comment).GetForeground())
+		}
+
+		if spec, ok := p.Tokens[st]; ok {
+			cur = layer(cur, spec)
+		}
+
+		s = s.With(style.Set(st, cur))
+	}
+
+	return s
 }
 
-// byDepth returns the kinds of tokens ordered by their distance from
-// [kind.Text], parents ahead of their children. Kinds an equal distance
-// out never inherit from one another, so name orders those.
-func byDepth(tokens map[kind.Kind]string) []kind.Kind {
-	return slices.SortedFunc(maps.Keys(tokens), func(a, b kind.Kind) int {
+// byDepth returns kinds ordered by their distance from [kind.Text],
+// parents ahead of their children. Kinds an equal distance out never
+// inherit from one another, so name orders those.
+func byDepth(kinds []kind.Kind) []kind.Kind {
+	return slices.SortedFunc(slices.Values(kinds), func(a, b kind.Kind) int {
 		if d := cmp.Compare(depth(a), depth(b)); d != 0 {
 			return d
 		}
