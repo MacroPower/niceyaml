@@ -38,8 +38,8 @@
 //		t.Errorf("token mismatch: %s", diff)
 //	}
 //
-// [ValidateTokenPair] and [ValidateTokens] check for nil tokens or positions,
-// returning [*TokenValidationError] with the underlying [ErrNilToken] or
+// [ValidateTokens] checks for nil tokens or positions, returning
+// [*TokenValidationError] with the underlying [ErrNilToken] or
 // [ErrNilPosition] reason. [ValidateLines] checks that a [line.Lines]
 // collection keeps its line numbers and token columns in increasing order.
 //

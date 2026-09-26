@@ -21,15 +21,13 @@ import (
 //
 // Create instances with [NewXMLStyles].
 type XMLStyles struct {
-	only    map[kind.Kind]bool // If non-nil, only these styles get XML tags.
-	exclude map[kind.Kind]bool // Styles to exclude from XML tagging.
+	only map[kind.Kind]bool // If non-nil, only these styles get XML tags.
 }
 
 // XMLStylesOption configures [XMLStyles].
 //
 // Available options:
 //   - [XMLStyleInclude]
-//   - [XMLStyleExclude]
 type XMLStylesOption func(*XMLStyles)
 
 // XMLStyleInclude is an [XMLStylesOption] that limits XML tags to the given
@@ -42,20 +40,6 @@ func XMLStyleInclude(styles ...kind.Kind) XMLStylesOption {
 
 		for _, s := range styles {
 			x.only[s] = true
-		}
-	}
-}
-
-// XMLStyleExclude is an [XMLStylesOption] that excludes the given styles
-// from XML tagging. Excluded styles return an empty (no-op) style.
-func XMLStyleExclude(styles ...kind.Kind) XMLStylesOption {
-	return func(x *XMLStyles) {
-		if x.exclude == nil {
-			x.exclude = make(map[kind.Kind]bool)
-		}
-
-		for _, s := range styles {
-			x.exclude[s] = true
 		}
 	}
 }
@@ -74,14 +58,8 @@ func NewXMLStyles(opts ...XMLStylesOption) *XMLStyles {
 // Style returns a [lipgloss.Style] that wraps content in XML tags based on
 // the [kind.Kind] category.
 //
-// Returns an empty style when [XMLStyleExclude] excludes s, or when
-// [XMLStyleInclude] limits tags to other styles.
+// Returns an empty style when [XMLStyleInclude] limits tags to other styles.
 func (x *XMLStyles) Style(s kind.Kind) lipgloss.Style {
-	// Check if style should be excluded.
-	if x.exclude != nil && x.exclude[s] {
-		return lipgloss.NewStyle()
-	}
-
 	// Check if only specific styles are allowed.
 	if x.only != nil && !x.only[s] {
 		return lipgloss.NewStyle()

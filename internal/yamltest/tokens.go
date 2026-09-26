@@ -26,15 +26,11 @@ var (
 type TokenValidationError struct {
 	Reason error  // [ErrNilToken] or [ErrNilPosition].
 	Which  string // "want" or "got".
-	Index  int    // -1 for single token validation.
+	Index  int    // Index of the offending token.
 }
 
 // Error implements the [error] interface.
 func (e *TokenValidationError) Error() string {
-	if e.Index < 0 {
-		return fmt.Sprintf("%s: %v", e.Which, e.Reason)
-	}
-
 	return fmt.Sprintf("token %d %s: %v", e.Index, e.Which, e.Reason)
 }
 
@@ -142,28 +138,6 @@ func (d ContentDiff) String() string {
 	return fmt.Sprintf("content mismatch:\n  want: %q\n  got:  %q", d.Want, d.Got)
 }
 
-// ValidateTokenPair checks that both tokens and their positions are non-nil.
-// Returns nil if both tokens are valid, or a [*TokenValidationError] if not.
-func ValidateTokenPair(want, got *token.Token) error {
-	if want == nil {
-		return &TokenValidationError{Index: -1, Which: whichWant, Reason: ErrNilToken}
-	}
-
-	if want.Position == nil {
-		return &TokenValidationError{Index: -1, Which: whichWant, Reason: ErrNilPosition}
-	}
-
-	if got == nil {
-		return &TokenValidationError{Index: -1, Which: whichGot, Reason: ErrNilToken}
-	}
-
-	if got.Position == nil {
-		return &TokenValidationError{Index: -1, Which: whichGot, Reason: ErrNilPosition}
-	}
-
-	return nil
-}
-
 // ValidateTokens checks that all tokens and their positions are non-nil.
 // Returns nil if all tokens are valid, or the first [*TokenValidationError]
 // found. If the slice lengths differ, returns an error reporting both counts
@@ -196,8 +170,8 @@ func ValidateTokens(want, got token.Tokens) error {
 }
 
 // CompareTokens compares all fields of two tokens and returns a [TokenDiff].
-// Assumes both tokens are valid (non-nil with non-nil positions); use
-// [ValidateTokenPair] first to check validity.
+// Assumes both tokens are valid (non-nil with non-nil positions);
+// [ValidateTokens] checks this for token slices.
 func CompareTokens(want, got *token.Token) TokenDiff {
 	return TokenDiff{
 		Fields: DiffTokenFields(want, got),
@@ -241,8 +215,8 @@ func CompareContent(want, got string) ContentDiff {
 }
 
 // DiffTokenFields returns a list of field names that differ between two tokens.
-// Assumes both tokens are valid (non-nil with non-nil positions); use
-// [ValidateTokenPair] first to check validity.
+// Assumes both tokens are valid (non-nil with non-nil positions);
+// [ValidateTokens] checks this for token slices.
 func DiffTokenFields(want, got *token.Token) []string {
 	var diffs []string
 

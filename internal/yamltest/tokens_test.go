@@ -351,66 +351,6 @@ func TestTokenBuilder(t *testing.T) {
 	})
 }
 
-func TestValidateTokenPair(t *testing.T) {
-	t.Parallel()
-
-	t.Run("valid tokens pass", func(t *testing.T) {
-		t.Parallel()
-
-		want := yamltest.NewTokenBuilder().Build()
-		got := yamltest.NewTokenBuilder().Build()
-
-		err := yamltest.ValidateTokenPair(want, got)
-		assert.NoError(t, err)
-	})
-
-	t.Run("nil want token fails", func(t *testing.T) {
-		t.Parallel()
-
-		got := yamltest.NewTokenBuilder().Build()
-
-		err := yamltest.ValidateTokenPair(nil, got)
-		require.Error(t, err)
-		require.ErrorIs(t, err, yamltest.ErrNilToken)
-		assert.Contains(t, err.Error(), "want")
-	})
-
-	t.Run("nil want position fails", func(t *testing.T) {
-		t.Parallel()
-
-		want := &token.Token{}
-		got := yamltest.NewTokenBuilder().Build()
-
-		err := yamltest.ValidateTokenPair(want, got)
-		require.Error(t, err)
-		require.ErrorIs(t, err, yamltest.ErrNilPosition)
-		assert.Contains(t, err.Error(), "want")
-	})
-
-	t.Run("nil got token fails", func(t *testing.T) {
-		t.Parallel()
-
-		want := yamltest.NewTokenBuilder().Build()
-
-		err := yamltest.ValidateTokenPair(want, nil)
-		require.Error(t, err)
-		require.ErrorIs(t, err, yamltest.ErrNilToken)
-		assert.Contains(t, err.Error(), "got")
-	})
-
-	t.Run("nil got position fails", func(t *testing.T) {
-		t.Parallel()
-
-		want := yamltest.NewTokenBuilder().Build()
-		got := &token.Token{}
-
-		err := yamltest.ValidateTokenPair(want, got)
-		require.Error(t, err)
-		require.ErrorIs(t, err, yamltest.ErrNilPosition)
-		assert.Contains(t, err.Error(), "got")
-	})
-}
-
 func TestValidateTokens(t *testing.T) {
 	t.Parallel()
 
@@ -703,17 +643,6 @@ func TestDiffTokenFields(t *testing.T) {
 func TestTokenValidationError(t *testing.T) {
 	t.Parallel()
 
-	t.Run("single token error message", func(t *testing.T) {
-		t.Parallel()
-
-		err := &yamltest.TokenValidationError{
-			Index:  -1,
-			Which:  "want",
-			Reason: yamltest.ErrNilToken,
-		}
-		assert.Equal(t, "want: token is nil", err.Error())
-	})
-
 	t.Run("indexed token error message", func(t *testing.T) {
 		t.Parallel()
 
@@ -729,7 +658,7 @@ func TestTokenValidationError(t *testing.T) {
 		t.Parallel()
 
 		err := &yamltest.TokenValidationError{
-			Index:  -1,
+			Index:  0,
 			Which:  "want",
 			Reason: yamltest.ErrNilToken,
 		}
