@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1721,6 +1722,46 @@ func TestRegistry_Schema_PanicReachesCaller(t *testing.T) {
 
 	// The next call loads again rather than hanging on the failed load.
 	assert.PanicsWithValue(t, "boom", load)
+}
+
+func TestRegistry_Schema_GoexitReachesCaller(t *testing.T) {
+	t.Parallel()
+
+	// A load that calls runtime.Goexit, as t.FailNow does, must end the
+	// caller's goroutine the same way instead of leaving the caller waiting
+	// on a load that never answers.
+	reg := schema.NewRegistry()
+	ref := schema.Loadable("goexit.json", func(context.Context) ([]byte, error) {
+		runtime.Goexit()
+
+		return nil, nil
+	})
+
+	load := func() bool {
+		var returned bool
+
+		done := make(chan struct{})
+
+		go func() {
+			defer close(done)
+
+			_, _ = reg.Schema(t.Context(), ref) //nolint:errcheck // The call exits through runtime.Goexit.
+			returned = true
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			require.FailNow(t, "Schema hung after the load called runtime.Goexit")
+		}
+
+		return returned
+	}
+
+	assert.False(t, load())
+
+	// The next call loads again rather than hanging on the failed load.
+	assert.False(t, load())
 }
 
 func TestRegistry_RelativeRefs(t *testing.T) {

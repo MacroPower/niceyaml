@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +33,11 @@ var (
 	// which pick a schema for a whole document. Validate the document
 	// once at its root, then decode its nodes without the registry.
 	ErrScopedDocument = errors.New("registry needs a whole document")
+
+	// The error that carries a call to [runtime.Goexit] out of a shared
+	// load, so every caller that joined the load can end its own goroutine
+	// the same way.
+	errGoexit = errors.New("load called runtime.Goexit")
 
 	// The client every registry that [WithHTTPClient] gave no client
 	// fetches schemas with. An [http.Client] is safe for concurrent use,
@@ -430,7 +436,9 @@ func (r *Registry) Validate(ctx context.Context, n *niceyaml.Node) error {
 // whether that context had ended when the load failed. A caller that
 // joined with a live context loads again only in that case. Any other
 // failure reaches every caller that shared the load, including a timeout
-// inside the load whose error wraps a context error.
+// inside the load whose error wraps a context error. A panic or a call to
+// [runtime.Goexit] in the load happens again in every caller that shared
+// it.
 func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 	if ref.Schema() != nil {
 		return ref.Schema(), nil
@@ -472,9 +480,14 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 		// The singleflight group raises a panic from the load on a
 		// goroutine of its own, where no caller can recover it, so the load
 		// hands the panic back as an error and each caller that shared it
-		// raises it here.
+		// raises it here. The load hands back a call to runtime.Goexit the
+		// same way, and each caller calls runtime.Goexit in turn.
 		if pe, ok := errors.AsType[*panicError](res.Err); ok {
 			panic(pe.value)
+		}
+
+		if errors.Is(res.Err, errGoexit) {
+			runtime.Goexit()
 		}
 
 		f, _ := res.Val.(flight) //nolint:errcheck // The DoChan function always returns a flight.
@@ -629,15 +642,43 @@ type flight struct {
 }
 
 // compileRecovering runs compile and turns a panic in the load or the
-// compiler into a [*panicError].
-func (r *Registry) compileRecovering(ctx context.Context, ref Ref) (_ *Schema, err error) {
-	defer func() {
-		if p := recover(); p != nil {
-			err = &panicError{value: p}
-		}
+// compiler into a [*panicError] and a call to [runtime.Goexit] into
+// errGoexit. The singleflight group's DoChan never answers a flight whose
+// function ends its goroutine that way, so compileRecovering runs compile
+// on a goroutine of its own and waits for it.
+func (r *Registry) compileRecovering(ctx context.Context, ref Ref) (*Schema, error) {
+	var (
+		s        *Schema
+		err      error
+		returned bool
+	)
+
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		defer func() {
+			if p := recover(); p != nil {
+				err = &panicError{value: p}
+				returned = true
+			}
+		}()
+
+		s, err = r.compile(ctx, ref)
+		returned = true
 	}()
 
-	return r.compile(ctx, ref)
+	<-done
+
+	// The deferred recover returns nil while runtime.Goexit unwinds the
+	// goroutine, so returned stays false only when compile called
+	// runtime.Goexit.
+	if !returned {
+		return nil, errGoexit
+	}
+
+	return s, err
 }
 
 // compile loads and compiles the schema ref names, caches it under its
