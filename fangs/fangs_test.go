@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"charm.land/fang/v2"
@@ -350,6 +351,53 @@ func TestErrorHandler(t *testing.T) {
 			fangs.NewErrorHandler(fangs.WithPrinter(xmlPrinter()))(&buf, styles, tc.err)
 
 			assert.Equal(t, tc.want, buf.String())
+		})
+	}
+}
+
+func TestNewErrorHandler_Width(t *testing.T) {
+	t.Parallel()
+
+	// The value is a single token three times the terminal width, so the
+	// excerpt wraps it into rows that fill the width the printer wraps at.
+	tcs := map[string]struct {
+		width int
+	}{
+		"40 columns": {width: 40},
+		"80 columns": {width: 80},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			src := niceyaml.NewSourceFromTokens(tokens.Tokenize(
+				"name: " + strings.Repeat("x", 3*tc.width) + "\n",
+			))
+
+			err := yamltest.Bind(t, src, niceyaml.NewError(
+				"invalid name",
+				niceyaml.AtPath(paths.Root().Child("name")),
+			))
+
+			p := printer.New()
+			p = p.With(printer.WithWrap(
+				tc.width - fangs.Indent - p.ContainerStyle().GetHorizontalFrameSize(),
+			))
+
+			var buf bytes.Buffer
+
+			fangs.NewErrorHandler(fangs.WithPrinter(p))(&buf, testStyles(), err)
+
+			widest := 0
+
+			for row := range strings.SplitSeq(buf.String(), "\n") {
+				assert.LessOrEqual(t, lipgloss.Width(row), tc.width, "row %q", row)
+
+				widest = max(widest, lipgloss.Width(row))
+			}
+
+			assert.Equal(t, tc.width, widest)
 		})
 	}
 }

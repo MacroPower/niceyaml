@@ -20,6 +20,10 @@ func ErrorHandler(w io.Writer, styles fang.Styles, err error) {
 	handleError(w, styles, err, newConfig(nil))
 }
 
+// Indent is the number of columns [NewErrorHandler] puts in front of every
+// line [printer.Printer.PrintError] renders.
+const Indent = 2
+
 // Option configures the [fang.ErrorHandler] that [NewErrorHandler] returns.
 //
 // Available options:
@@ -52,6 +56,12 @@ func newConfig(opts []Option) config {
 // with [printer.WithWrap], controls word wrapping, its styles color the
 // highlighted locations, and [printer.WithContextLines] sets the context
 // lines around each one.
+//
+// The handler indents every line by [Indent] columns, and the printer's
+// container style adds its horizontal frame, one column of right padding
+// by default, outside the width. To fit a terminal w columns wide, set the
+// width to w - [Indent] - p.ContainerStyle().GetHorizontalFrameSize(), as
+// the [NewErrorHandler] example does.
 func WithPrinter(p *printer.Printer) Option {
 	return func(cfg *config) {
 		cfg.printer = p
@@ -60,12 +70,17 @@ func WithPrinter(p *printer.Printer) Option {
 
 // NewErrorHandler creates a new [fang.ErrorHandler] that renders
 // [*go.jacobcolvin.com/niceyaml.SourceError] values with their annotated
-// source, using opts for the [printer.Printer]:
+// source, using opts for the [printer.Printer]. To fit the output in a
+// terminal that is width columns wide, subtract [Indent] and the
+// container's frame from the width the printer wraps at:
+//
+//	p := printer.New()
+//	p = p.With(printer.WithWrap(
+//	    width - fangs.Indent - p.ContainerStyle().GetHorizontalFrameSize(),
+//	))
 //
 //	err := fang.Execute(ctx, rootCmd,
-//	    fang.WithErrorHandler(fangs.NewErrorHandler(
-//	        fangs.WithPrinter(printer.New(printer.WithWrap(width))),
-//	    )),
+//	    fang.WithErrorHandler(fangs.NewErrorHandler(fangs.WithPrinter(p))),
 //	)
 //
 // The handler writes the error header, then what
@@ -91,8 +106,10 @@ func NewErrorHandler(opts ...Option) fang.ErrorHandler {
 func handleError(w io.Writer, styles fang.Styles, err error, cfg config) {
 	ignoreN(fmt.Fprintln(w, styles.ErrorHeader.String()))
 
+	indent := strings.Repeat(" ", Indent)
+
 	for line := range strings.SplitSeq(cfg.printer.PrintError(err), "\n") {
-		ignoreN(fmt.Fprintln(w, "  "+line))
+		ignoreN(fmt.Fprintln(w, indent+line))
 	}
 
 	ignoreN(fmt.Fprintln(w))
