@@ -1003,7 +1003,7 @@ func newSourceError(err error, b binder) *SourceError {
 
 		if e.locErr == nil {
 			e.ranges = highlightRanges(b.src.lines, e.loc)
-			e.rng = rangeOf(b.src.lines, e.loc)
+			e.rng = rangeOf(e.ranges, e.loc.pos)
 		}
 	}
 
@@ -1664,13 +1664,12 @@ func (e *SourceError) Unresolved() error {
 	return e.locErr
 }
 
-// rangeOf returns the range loc covers in lines: the range it carries, or
-// the content of the token at its position, which spans several lines for
-// a multi-line token. A position with no token yields an empty range.
-func rangeOf(lines line.Lines, loc location) position.Range {
-	ranges := highlightRanges(lines, loc)
+// rangeOf returns the one range that spans the highlight ranges from
+// [highlightRanges], from the start of the first to the end of the last.
+// With no ranges, it returns the empty range at the position at.
+func rangeOf(ranges position.Ranges, at position.Position) position.Range {
 	if len(ranges) == 0 {
-		return position.NewRange(loc.pos, loc.pos)
+		return position.NewRange(at, at)
 	}
 
 	return position.NewRange(ranges[0].Start, ranges[len(ranges)-1].End)
