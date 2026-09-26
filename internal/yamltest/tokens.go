@@ -20,6 +20,8 @@ var (
 	ErrNilToken = errors.New("token is nil")
 	// ErrNilPosition indicates a token's position is nil.
 	ErrNilPosition = errors.New("token position is nil")
+	// ErrTokenCountMismatch indicates two token slices differ in length.
+	ErrTokenCountMismatch = errors.New("token count mismatch")
 )
 
 // TokenValidationError indicates a token failed validation.
@@ -140,12 +142,13 @@ func (d ContentDiff) String() string {
 
 // ValidateTokens checks that all tokens and their positions are non-nil.
 // Returns nil if all tokens are valid, or the first [*TokenValidationError]
-// found. If the slice lengths differ, returns an error reporting both counts
-// (not a [*TokenValidationError]).
+// found. If the slice lengths differ, returns an error wrapping
+// [ErrTokenCountMismatch] that reports both counts and lists both slices (not a
+// [*TokenValidationError]).
 func ValidateTokens(want, got token.Tokens) error {
 	if len(want) != len(got) {
-		return fmt.Errorf("token count mismatch: want %d, got %d\nwant tokens:\n%s\ngot tokens:\n%s",
-			len(want), len(got), FormatTokens(want), FormatTokens(got))
+		return fmt.Errorf("%w: want %d, got %d\nwant tokens:\n%s\ngot tokens:\n%s",
+			ErrTokenCountMismatch, len(want), len(got), FormatTokens(want), FormatTokens(got))
 	}
 
 	for i := range want {

@@ -380,8 +380,12 @@ func TestValidateTokens(t *testing.T) {
 		got := token.Tokens{tb.Build(), tb.Build()}
 
 		err := yamltest.ValidateTokens(want, got)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "count mismatch")
+		require.ErrorIs(t, err, yamltest.ErrTokenCountMismatch)
+		assert.Contains(t, err.Error(), "want 1, got 2")
+
+		var tve *yamltest.TokenValidationError
+
+		assert.NotErrorAs(t, err, &tve)
 	})
 
 	t.Run("nil want token fails", func(t *testing.T) {

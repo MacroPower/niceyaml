@@ -28,7 +28,7 @@
 //
 // This package provides pure comparison functions that return detailed diffs:
 //
-//	// Validate tokens first (returns error if nil tokens or positions)
+//	// Validate tokens first (length mismatch, nil tokens, nil positions)
 //	if err := yamltest.ValidateTokens(want, got); err != nil {
 //		t.Fatalf("invalid tokens: %v", err)
 //	}
@@ -38,7 +38,8 @@
 //		t.Errorf("token mismatch: %s", diff)
 //	}
 //
-// [ValidateTokens] checks for nil tokens or positions, returning
+// [ValidateTokens] returns an error wrapping [ErrTokenCountMismatch] when the
+// slice lengths differ. For a nil token or position, it returns
 // [*TokenValidationError] with the underlying [ErrNilToken] or
 // [ErrNilPosition] reason. [ValidateLines] checks that a [line.Lines]
 // collection keeps its line numbers and token columns in increasing order.
