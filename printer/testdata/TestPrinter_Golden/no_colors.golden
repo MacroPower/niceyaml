@@ -196,7 +196,7 @@ typed_values:
   zip_code: !!str 01onal         # Would be octal without tag
   version: !!str 1.0             # Would be float without tag
   japanese_bool: !!str はい      # Not a boolean
-
+  
   # Binary data (base64 encoded)
   tiny_icon: !!binary |
     R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7
@@ -215,12 +215,12 @@ typed_values:
 
 # Set (unique values only)
 allergens: !!set
-? gluten
+  ? gluten
   ? dairy
   ? nuts
   ? shellfish
   ? 大豆 # Soy in Japanese
-? بيض # Eggs in Arabic
+  ? بيض # Eggs in Arabic
 
 # Ordered map (preserves insertion order)
 course_order: !!omap

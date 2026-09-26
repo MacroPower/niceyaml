@@ -243,8 +243,8 @@ func TestSplit_BlankLinesBeforeExplicitKey(t *testing.T) {
 	// The lexer drops the blank lines between a comment, a quoted scalar,
 	// or a flow collection and a "?" or ":" indicator after it, and a
 	// blank line from a run of them after a double-quoted scalar that
-	// holds a tab. Tokenize gives them back, so Split keeps every line and
-	// its number.
+	// holds a tab. Tokenize gives them back with the spaces they hold, so
+	// Split keeps every line, its number, and its content.
 	tcs := map[string]struct {
 		input       string
 		wantContent []string
@@ -287,22 +287,22 @@ func TestSplit_BlankLinesBeforeExplicitKey(t *testing.T) {
 		},
 		"plain scalar after a blank line of spaces": {
 			input:       "t: \"a\tb\"\n  \n  r'\n- e\n",
-			wantContent: []string{"t: \"a\tb\"", "", "  r'", "- e"},
+			wantContent: []string{"t: \"a\tb\"", "  ", "  r'", "- e"},
 			wantNumbers: []int{1, 2, 3, 4},
 		},
 		"plain scalar after blank lines of spaces": {
 			input:       "t: \"a\tb\"\n  \n  \n  r'\n- e\n",
-			wantContent: []string{"t: \"a\tb\"", "", "", "  r'", "- e"},
+			wantContent: []string{"t: \"a\tb\"", "  ", "  ", "  r'", "- e"},
 			wantNumbers: []int{1, 2, 3, 4, 5},
 		},
 		"key after blank lines of spaces": {
 			input:       "a: \"t\tb\"\n  \n  \nc: 1\n",
-			wantContent: []string{"a: \"t\tb\"", "", "", "c: 1"},
+			wantContent: []string{"a: \"t\tb\"", "  ", "  ", "c: 1"},
 			wantNumbers: []int{1, 2, 3, 4},
 		},
 		"comment after blank lines of spaces": {
 			input:       "a: \"t\tb\"\n  \n  \n# c\nd: 1\ne: 2\n",
-			wantContent: []string{"a: \"t\tb\"", "", "", "# c", "d: 1", "e: 2"},
+			wantContent: []string{"a: \"t\tb\"", "  ", "  ", "# c", "d: 1", "e: 2"},
 			wantNumbers: []int{1, 2, 3, 4, 5, 6},
 		},
 	}

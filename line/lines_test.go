@@ -429,9 +429,9 @@ func TestNewLines_DroppedNewline(t *testing.T) {
 	t.Parallel()
 
 	// The lexer drops the line ending ahead of some tokens, such as a "?"
-	// after a document header or a value indicator after a directive. The
-	// token's position still names the next line, so it must open a new
-	// line rather than join the one before it.
+	// after a document header or a value indicator after a directive.
+	// Tokenize restores it, so the token opens a new line rather than
+	// joining the one before it.
 	tcs := map[string]struct {
 		input string
 		want  []string

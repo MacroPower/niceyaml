@@ -15,18 +15,14 @@ import (
 // Tokenize returns the token stream for the given YAML source.
 //
 // It is the one place niceyaml calls the go-yaml lexer, so every token stream
-// the module works with comes through here. The stream covers the whole
-// file, except where the lexer itself drops text, as when a tab used as
-// indentation swallows the characters after it into an invalid token.
-// Tokenize gives back two other kinds of text the lexer drops. The lexer
-// drops the letter and hex digits of a "\x", "\u", or "\U" escape from the
-// Origin of a double-quoted scalar and keeps the backslash and the rest of
-// the scalar. Tokenize restores that Origin from the source. The lexer
-// also drops the line breaks and indentation in front of some tokens, such
-// as the blank lines before a "?" or ":" indicator that follows a flow
-// collection, a quoted scalar, or a comment. Tokenize gives them back at
-// the start of that token's Origin, with each blank line as a bare line
-// ending, the way the lexer keeps the blank lines it does not drop.
+// the module works with comes through here. The lexer drops some text from
+// the Origins, and Tokenize gives it back from the source. It restores the
+// letter and hex digits of a "\x", "\u", or "\U" escape in a double-quoted
+// scalar. It restores the spaces and tabs that end a line or fill a blank
+// line, the space in front of a ":" after a quoted or alias key, and the
+// space between a "-" and a "?". It restores the line breaks and
+// indentation in front of some tokens, such as a "?" or ":" indicator that
+// follows a flow collection, a quoted scalar, or a comment.
 // [SplitDocuments] cuts the stream into one stream per document.
 //
 // Tokenize drops a UTF-8 byte order mark where YAML allows one: at the
@@ -34,6 +30,17 @@ import (
 // "---" or "..." marker. The lexer would read the mark as text and put it
 // in the first key. Every position names a rune of the text without
 // those marks.
+//
+// The joined Origins match that text, except in a few places Tokenize
+// leaves as the lexer made them. The lexer drops some text outright, such
+// as a lone "!" that ends the file. A tab used as indentation makes the
+// lexer read an invalid token that can swallow the characters after it,
+// such as a ":" indicator, and the text around such a token keeps the
+// lexer's shape. The lexer also ends one token with a line ending and
+// opens the next with it again, as after a tag that ends its line and
+// after the invalid token it makes of text that follows a block scalar
+// header. Tokenize keeps the repeat, and a blank line between the two
+// tokens loses its spaces and tabs.
 //
 // Every token's Line, Column, and Offset name the rune where its text
 // starts, counting lines, columns, and offsets from 1 and offsets in runes.
@@ -44,10 +51,10 @@ import (
 // as the empty content of a block scalar, sits where the next text starts,
 // so it shares the position of the token after it. A source of whitespace
 // alone comes back as one token at line 1, column 1. The lexer itself
-// places a token behind the trailing spaces it drops from the Origin, one
-// rune short after a comment or a tag, and on the last line of a
-// multi-line block scalar, and Tokenize moves each such token to where the
-// source holds its text.
+// places a token behind the trailing spaces it drops, one rune short after
+// a comment or a tag, and on the last line of a multi-line block scalar.
+// Tokenize moves each such token to where the source holds its text, and
+// the Origins hold the spaces the lexer dropped.
 func Tokenize(src string) token.Tokens {
 	src = dropByteOrderMarks(src)
 
@@ -74,7 +81,7 @@ func Tokenize(src string) token.Tokens {
 		}}
 
 		if strings.Trim(src, " \t\r\n") != "" {
-			repairPositions(src, tks)
+			repairPositions([]rune(src), tks)
 		}
 
 		return tks
@@ -114,7 +121,9 @@ func Tokenize(src string) token.Tokens {
 		last.Origin = text + rest
 	}
 
-	repairPositions(src, tks)
+	runes := []rune(src)
+
+	restoreWhitespace(runes, tks, repairPositions(runes, tks))
 
 	return tks
 }
@@ -212,23 +221,186 @@ func IsPlaceholder(tk *token.Token) bool {
 // token starts at or after the end of the text before it, and leaves
 // IndentNum and IndentLevel as they are. It gives each token the line
 // breaks the lexer dropped in front of it, so the Origins ahead of a
-// token's text hold as many lines as the source does.
-func repairPositions(src string, tks token.Tokens) {
+// token's text hold as many lines as the source does. It returns the runes
+// of src each token's text covers, one [span] for each token of tks.
+func repairPositions(src []rune, tks token.Tokens) []span {
 	p := &positioner{
-		src:      []rune(src),
-		end:      utf8.RuneCountInString(TrimLineEnding(src)),
+		src:      src,
+		end:      utf8.RuneCountInString(TrimLineEnding(string(src))),
 		line:     1,
 		col:      1,
 		reliable: true,
 	}
 
-	for _, tk := range tks {
+	spans := make([]span, len(tks))
+
+	for i, tk := range tks {
 		if tk == nil || tk.Position == nil {
 			continue
 		}
 
-		p.place(tk)
+		spans[i] = p.place(tk)
 	}
+
+	return spans
+}
+
+// span holds the runes of the source that the text of a token covers,
+// from its first text rune to its last.
+type span struct {
+	start int // The rune index where the text starts.
+	end   int // The rune index just past where the text ends.
+
+	// Whether the source holds each text line of the Origin, in order,
+	// between start and end. It is false for a token without text and
+	// for one the positioner placed where the source does not hold its
+	// text.
+	ok bool
+}
+
+// restoreWhitespace gives the Origins of tks the whitespace of src that
+// the lexer drops. The lexer drops the spaces and tabs that end a line,
+// the spaces and tabs of a blank line, the space in front of a ":" after
+// a quoted or alias key, and the space between a "-" and a "?". It leaves
+// every position as it is.
+//
+// Each token that holds text takes the source's runes from its first text
+// rune to its last when the two differ in whitespace alone. Between two
+// tokens that hold text, the Origins take the whitespace of the source
+// when the whitespace they hold there lacks some of its runes and adds
+// none. The line breaks and the lines they close go to the end of the
+// earlier Origin, where the lexer puts the line ending that closes a line
+// of text. The indentation of the line the later token starts on goes to
+// the start of the later one. The first token that holds text opens with
+// all the whitespace ahead of its text, blank lines included. The Origins
+// stay as they are on both sides of a token of whitespace alone and of a
+// token whose [span] is not ok. They also stay as they are where the
+// lexer repeats a line ending, such as after a tag, because the repeat
+// adds a rune the source lacks. A blank line there loses its spaces and
+// tabs. The repair of the final line ending in [Tokenize] handles the
+// whitespace after the last token that holds text.
+func restoreWhitespace(src []rune, tks token.Tokens, spans []span) {
+	var (
+		prev     *token.Token
+		prevSpan span
+		blocked  bool // Whether a token of whitespace alone sits after prev.
+	)
+
+	for i, tk := range tks {
+		if tk == nil || tk.Position == nil {
+			continue
+		}
+
+		if strings.Trim(tk.Origin, " \t\r\n") == "" {
+			blocked = blocked || tk.Origin != ""
+
+			continue
+		}
+
+		sp := spans[i]
+		if sp.ok {
+			restoreText(src, tk, sp)
+
+			if !blocked && (prev == nil || prevSpan.ok) {
+				restoreBetween(src, prev, prevSpan, tk, sp)
+			}
+		}
+
+		prev, prevSpan, blocked = tk, sp, false
+	}
+}
+
+// restoreText gives tk the runes of src its text covers, in place of the
+// text of its Origin, when the source adds whitespace alone, such as the
+// spaces of a blank line inside a multi-line plain scalar.
+func restoreText(src []rune, tk *token.Token, sp span) {
+	lead := len(tk.Origin) - len(strings.TrimLeft(tk.Origin, " \t\r\n"))
+	trail := len(strings.TrimRight(tk.Origin, " \t\r\n"))
+
+	text := tk.Origin[lead:trail]
+
+	want := string(src[sp.start:sp.end])
+	if want == text || !isSubsequence(text, want) || withoutWhitespace(text) != withoutWhitespace(want) {
+		return
+	}
+
+	tk.Origin = tk.Origin[:lead] + want + tk.Origin[trail:]
+}
+
+// restoreBetween gives prev and cur the whitespace of src between the
+// text of the two, when the whitespace the Origins hold between them is
+// part of it. The line breaks and the lines they close go to the end of
+// the Origin of prev, and the rest to the start of the Origin of cur. A
+// nil prev stands for the start of the source, and cur then opens with
+// all the whitespace ahead of its text.
+//
+// A gap that holds anything but whitespace holds text the lexer dropped,
+// and a gap the Origins hold more whitespace for than the source has
+// holds a line ending the lexer repeats, such as the one after a tag.
+// Both keep the Origins as they are.
+func restoreBetween(src []rune, prev *token.Token, prevSpan span, cur *token.Token, curSpan span) {
+	from := 0
+	if prev != nil {
+		from = prevSpan.end
+	}
+
+	if from > curSpan.start {
+		return
+	}
+
+	gap := string(src[from:curSpan.start])
+	if strings.Trim(gap, " \t\r\n") != "" {
+		return
+	}
+
+	var trail string
+
+	if prev != nil {
+		trail = prev.Origin[len(strings.TrimRight(prev.Origin, " \t\r\n")):]
+	}
+
+	text := strings.TrimLeft(cur.Origin, " \t\r\n")
+	lead := cur.Origin[:len(cur.Origin)-len(text)]
+
+	if trail+lead == gap || !isSubsequence(trail+lead, gap) {
+		return
+	}
+
+	if prev == nil {
+		cur.Origin = gap + text
+
+		return
+	}
+
+	cut := strings.LastIndexAny(gap, "\r\n") + 1
+
+	prev.Origin = strings.TrimRight(prev.Origin, " \t\r\n") + gap[:cut]
+	cur.Origin = gap[cut:] + text
+}
+
+// isSubsequence reports whether s holds the bytes of sub in order, with
+// any bytes between them.
+func isSubsequence(sub, s string) bool {
+	i := 0
+
+	for j := 0; j < len(s) && i < len(sub); j++ {
+		if s[j] == sub[i] {
+			i++
+		}
+	}
+
+	return i == len(sub)
+}
+
+// withoutWhitespace returns s without its spaces, tabs, and line endings.
+func withoutWhitespace(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == ' ' || r == '\t' || r == '\r' || r == '\n' {
+			return -1
+		}
+
+		return r
+	}, s)
 }
 
 // positioner finds the rune each token's text starts at.
@@ -271,12 +443,17 @@ type positioner struct {
 // cursor past whitespace alone, place gives tk the line breaks the lexer
 // dropped from that whitespace. A double-quoted scalar found in the source
 // moves the cursor past its closing quote instead, and takes its Origin
-// from the source when the lexer shortened it.
-func (p *positioner) place(tk *token.Token) {
+// from the source when the lexer shortened it. It returns the runes of the
+// source the text of tk covers.
+func (p *positioner) place(tk *token.Token) span {
 	var (
 		placed, found bool
 		start         int
 	)
+
+	// Whether the source holds every text line of the Origin where place
+	// put it.
+	matched := true
 
 	for ln := range lineend.Lines(tk.Origin) {
 		text := []rune(strings.Trim(ln, " \t\r\n"))
@@ -292,7 +469,7 @@ func (p *positioner) place(tk *token.Token) {
 			// line ending.
 			at = p.skipSpace()
 			if !p.hasText(at, text) {
-				p.reliable = false
+				p.reliable, matched = false, false
 			}
 		} else {
 			// Only the whitespace between a reliable cursor and the text
@@ -306,6 +483,8 @@ func (p *positioner) place(tk *token.Token) {
 			if reliable && at == next {
 				p.restoreGap(tk, at)
 			}
+
+			matched = found && p.hasText(at, text)
 
 			p.setPosition(tk, at)
 
@@ -334,14 +513,19 @@ func (p *positioner) place(tk *token.Token) {
 
 		p.tail += tk.Origin
 
-		return
+		return span{}
 	}
 
-	if found && tk.Type == token.DoubleQuoteType && p.src[start] == '"' {
-		p.restoreQuoted(tk, start)
+	// A double-quoted scalar whose closing quote the source holds takes
+	// its text from the source, so it matches whatever the lexer made of
+	// it.
+	if found && tk.Type == token.DoubleQuoteType && p.src[start] == '"' && p.restoreQuoted(tk, start) {
+		matched = true
 	}
 
 	p.tail = tk.Origin[len(strings.TrimRight(tk.Origin, " \t\r\n")):]
+
+	return span{start: start, end: p.cursor, ok: matched}
 }
 
 // restoreQuoted moves the cursor past the closing quote of the
@@ -349,12 +533,13 @@ func (p *positioner) place(tk *token.Token) {
 // The lexer drops the code of a "\x", "\u", or "\U" escape from the
 // Origin. When the source from the opening to the closing quote differs
 // from the text of the Origin, the Origin takes the source's runes in
-// place of its text and keeps the whitespace around it. A scalar that no
-// quote closes leaves the cursor and the Origin as they are.
-func (p *positioner) restoreQuoted(tk *token.Token, start int) {
+// place of its text and keeps the whitespace around it. It reports
+// whether a quote closes the scalar, and one that no quote closes leaves
+// the cursor and the Origin as they are.
+func (p *positioner) restoreQuoted(tk *token.Token, start int) bool {
 	end, ok := p.closingQuote(start)
 	if !ok {
-		return
+		return false
 	}
 
 	p.cursor, p.reliable = end, true
@@ -366,6 +551,8 @@ func (p *positioner) restoreQuoted(tk *token.Token, start int) {
 
 		tk.Origin = tk.Origin[:lead] + quoted + tk.Origin[trail:]
 	}
+
+	return true
 }
 
 // closingQuote returns the rune index just past the quote that closes the
@@ -414,9 +601,12 @@ func (p *positioner) escapeWidth(i int) int {
 // Origin as bare line endings, the way the lexer keeps the blank lines it
 // does not drop. Bare line endings keep tabs out of the Origin, and the
 // parser rejects a key whose Origin holds a tab in front of a line break.
-// When the lexer dropped every line break in front of tk, the indentation
-// of the line tk starts on goes with them. An Origin stays as it is when
-// the stream already holds every line break of the source.
+// [restoreWhitespace] later moves them to the end of the Origin before,
+// together with the spaces and tabs of the source, when the two Origins
+// hold nothing else of the gap. When the lexer dropped every line break
+// in front of tk, the indentation of the line tk starts on goes with
+// them. An Origin stays as it is when the stream already holds every line
+// break of the source.
 func (p *positioner) restoreGap(tk *token.Token, at int) {
 	gap := string(p.src[p.cursor:at])
 	lead := tk.Origin[:len(tk.Origin)-len(strings.TrimLeft(tk.Origin, " \t\r\n"))]

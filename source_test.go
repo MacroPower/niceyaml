@@ -681,6 +681,91 @@ func TestSource_Lines_EscapedScalar(t *testing.T) {
 	}
 }
 
+func TestSource_Lines_DroppedWhitespace(t *testing.T) {
+	t.Parallel()
+
+	// The lexer drops trailing spaces, the whitespace of a blank line, and
+	// the space in front of a ":" after a quoted key. The lines still hold
+	// the whole source, the position of each token leads back to it, and
+	// a blank line with a tab before the first key still parses.
+	tcs := map[string]struct {
+		input string
+	}{
+		"blank line with a tab before the first key": {input: " \t\na: 1\n"},
+		"blank line of a tab before the first key":   {input: "\t\na: 1\n"},
+		"space before a colon after a quoted key":    {input: "{\"a\" : 1, \"b\" : \"x\"}\n"},
+		"trailing spaces":                            {input: "a: 1   \nb: 2\n"},
+		"blank line of spaces":                       {input: "a: 1\n   \nb: 2\n"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input)
+
+			assert.Equal(t, strings.TrimSuffix(tc.input, "\n"), source.Lines().Content())
+
+			for _, tk := range source.Tokens() {
+				assert.Same(t, tk, source.Lines().TokenAt(position.NewFromToken(tk)), "token %q", tk.Origin)
+			}
+
+			_, err := source.Documents()
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestSource_File_BlankLineBeforeFirstKey(t *testing.T) {
+	t.Parallel()
+
+	// The parser reads the first key without the spaces and tabs of the
+	// blank line above it. The tree still holds a copy of the Source's
+	// own first token, so the key finds its lines, a scope keeps it, and
+	// a decode error binds to it.
+	tcs := map[string]struct {
+		input string
+	}{
+		"blank line of spaces":  {input: "  \na: 1\nb: 2\n"},
+		"blank line with a tab": {input: " \t\na: 1\nb: 2\n"},
+		"blank line of a tab":   {input: "\t\na: 1\nb: 2\n"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input)
+
+			docs, err := source.Documents()
+			require.NoError(t, err)
+			require.Len(t, docs, 1)
+
+			doc := docs[0]
+
+			keyTk, err := paths.Root().Child("a").Key().Token(doc.DocumentAST())
+			require.NoError(t, err)
+			require.NotNil(t, keyTk)
+
+			original := source.Lines().TokenAt(position.NewFromToken(keyTk))
+			require.NotNil(t, original)
+			assert.Equal(t, original.Origin, keyTk.Origin)
+			assert.Equal(t, position.Ranges{
+				position.NewRange(position.New(1, 0), position.New(1, 1)),
+			}, source.Lines().ContentRanges(keyTk))
+
+			assert.Equal(t,
+				yamltest.DumpTokenOrigins(source.Tokens()),
+				yamltest.DumpTokenOrigins(yamltest.At(t, doc, paths.Root()).Tokens()),
+			)
+			assert.Len(t, yamltest.At(t, doc, paths.Root().Child("a").Key()).Tokens(), 1)
+
+			_, err = doc.Decode[struct{ B int }](t.Context(), niceyaml.WithDisallowUnknownFields(true))
+			require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+		})
+	}
+}
+
 func TestSource_Document_EscapeAfterTag(t *testing.T) {
 	t.Parallel()
 

@@ -410,11 +410,10 @@ func TestTokenize_RestoresDroppedLineBreaks(t *testing.T) {
 	// The lexer drops the line breaks and indentation between some tokens
 	// and a "?" or ":" indicator that follows them, and a blank line from
 	// a run of them after a double-quoted scalar that holds a tab.
-	// Tokenize puts them back at the start of the later token's Origin, so
-	// the Origins ahead of each token's text hold as many line breaks as
-	// the source does. The want field holds the joined Origins where they
-	// differ from the input, because the lexer drops trailing spaces and
-	// Tokenize gives back a blank line as a bare line ending.
+	// Tokenize puts them back, so the Origins ahead of each token's text
+	// hold as many line breaks as the source does. The want field holds
+	// the joined Origins where they differ from the input, around the
+	// invalid token the lexer makes for a tab on a blank line.
 	tcs := map[string]struct {
 		input string
 		want  string
@@ -457,19 +456,15 @@ func TestTokenize_RestoresDroppedLineBreaks(t *testing.T) {
 		},
 		"plain scalar after a blank line of spaces": {
 			input: "t: \"a\tb\"\n  \n  r'\n- e\n",
-			want:  "t: \"a\tb\"\n\n  r'\n- e\n",
 		},
 		"plain scalar after blank lines of spaces": {
 			input: "t: \"a\tb\"\n  \n  \n  r'\n- e\n",
-			want:  "t: \"a\tb\"\n\n\n  r'\n- e\n",
 		},
 		"key after blank lines of spaces": {
 			input: "a: \"t\tb\"\n  \n  \nc: 1\n",
-			want:  "a: \"t\tb\"\n\n\nc: 1\n",
 		},
 		"comment after blank lines of spaces": {
 			input: "a: \"t\tb\"\n  \n  \n# c\nd: 1\ne: 2\n",
-			want:  "a: \"t\tb\"\n\n\n# c\nd: 1\ne: 2\n",
 		},
 		"crlf key after a blank line the lexer rewrites": {
 			// The lexer turns the CRLF in front of the invalid blank line
@@ -478,14 +473,16 @@ func TestTokenize_RestoresDroppedLineBreaks(t *testing.T) {
 			want:  "x:\r\n  a: \"t\tb\"\n \t\r\n\r\n? b\r\n",
 		},
 		"key after a blank line with a tab": {
-			// A tab in front of a line break in its Origin makes the
-			// parser reject the key.
+			// The blank line goes to the end of the scalar's Origin. A
+			// tab in front of a line break in the key's Origin would
+			// make the parser reject the key.
 			input: "a: \"t\tb\"\n \t\nb: 1\n",
-			want:  "a: \"t\tb\"\n\nb: 1\n",
 		},
 		"key after trailing spaces the lexer drops": {
-			// The lexer drops the spaces after the flow mapping, and the
-			// indentation of the next line it keeps must not repeat.
+			// The lexer drops the spaces after the flow mapping and makes
+			// an invalid token of the blank line, whose indentation must
+			// not repeat. Tokenize leaves the whitespace around that
+			// token as the lexer made it.
 			input: "{a: b}  \n \t\n? k\n",
 			want:  "{a: b}\n \t\n? k\n",
 		},
@@ -643,6 +640,113 @@ func TestTokenize(t *testing.T) {
 			want[last].Origin = got[last].Origin
 
 			yamltest.RequireTokensEqual(t, want, got)
+		})
+	}
+}
+
+func TestTokenize_RestoresDroppedWhitespace(t *testing.T) {
+	t.Parallel()
+
+	// The lexer drops the spaces and tabs that end a line, the spaces of a
+	// blank line, the space in front of a ":" after a quoted or alias key,
+	// the space between a "-" and a "?", and the line breaks in front of a
+	// "?" key. Tokenize gives them back, so the joined Origins equal the
+	// input. The want field holds the joined Origins where they differ
+	// from the input.
+	tcs := map[string]struct {
+		input string
+		want  string
+	}{
+		"space before a colon after quoted flow keys": {
+			input: "{\"a\" : 1, \"b\" : \"x\"}\n",
+		},
+		"space before a colon after an alias key": {
+			input: "&a a : 1\n*a : 2\n",
+		},
+		"space before a colon after a single-quoted key": {
+			input: "'a' : 1\n",
+		},
+		"nested explicit key": {
+			input: "a:\n  ? zz\n  : x\n",
+		},
+		"explicit key in a sequence entry": {
+			input: "- ? earth\n  : blue\n",
+		},
+		"explicit key after a document header": {
+			input: "x: 1\n---\n\n\n? a\n: b\n",
+		},
+		"explicit key after a flow sequence": {
+			input: "tags: [a, b]\n\n? key\n: value\n",
+		},
+		"explicit key after a comment": {
+			input: "# c\n\n? b\n: c\n",
+		},
+		"explicit key after a blank line": {
+			input: "\n? k\n: v\n",
+		},
+		"crlf explicit key after a comment": {
+			input: "# c\r\n\r\n? b\r\n",
+		},
+		"trailing tab": {
+			input: "a: 1\t\nb: 2\n",
+		},
+		"trailing spaces": {
+			input: "a: 1   \nb: 2\n",
+		},
+		"trailing spaces after a quoted scalar": {
+			input: "a: 'x'   \nb: 1\n",
+		},
+		"trailing spaces after an anchor": {
+			input: "a: &k   \n  b: 1\n",
+		},
+		"trailing spaces after a tag": {
+			input: "a: !t   \n  b: 1\n",
+		},
+		"trailing spaces after a flow sequence": {
+			input: "a: [1, 2]   \nb: 2\n",
+		},
+		"blank line of spaces": {
+			input: "a: 1\n   \nb: 2\n",
+		},
+		"blank line of spaces after a document end": {
+			input: "a: 1\n...\n  \nb: 2\n",
+		},
+		"blank line of spaces in a plain scalar": {
+			input: "a: plain\n   \n  multi\nb: 2\n",
+		},
+		"blank line with a tab before the first key": {
+			input: " \t\na: 1\n",
+		},
+		"line ending the lexer repeats after a tag": {
+			// The source holds one line break where the Origins hold two,
+			// so Tokenize keeps the Origins the lexer made.
+			input: "u: !t\n  v: 1\n",
+			want:  "u: !t\n\n  v: 1\n",
+		},
+		"blank line after a line ending the lexer repeats": {
+			// Tokenize keeps the Origins the lexer made around the
+			// repeat, so the blank line loses its spaces.
+			input: "a: !t\n  \n  b: 1\n",
+			want:  "a: !t\n\n\n  b: 1\n",
+		},
+		"line ending the lexer repeats after a block scalar header": {
+			// The lexer makes an invalid token of the header and the
+			// text after it, and repeats the line ending that closes it.
+			input: "a: | x\n  b\n",
+			want:  "a: | x\n\n  b\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			want := tc.want
+			if want == "" {
+				want = tc.input
+			}
+
+			assert.Equal(t, want, yamltest.DumpTokenOrigins(tokens.Tokenize(tc.input)))
 		})
 	}
 }
@@ -1079,6 +1183,20 @@ func TestResetPositions(t *testing.T) {
 		assert.Equal(t, 2, got[0][1].Position.Line)
 		assert.Equal(t, 5, got[0][1].Position.Column)
 		assert.Equal(t, 3, got[0][1].Position.Offset)
+	})
+
+	t.Run("keeps a blank line with a tab before the first key", func(t *testing.T) {
+		t.Parallel()
+
+		// The first token opens with the whole blank line, so a stream
+		// that starts at line 1 keeps its positions.
+		got := tokens.ResetPositions(tokens.Tokenize(" \t\na: 1\n"))
+
+		require.NotEmpty(t, got)
+		assert.Equal(t, " \t\na", got[0].Origin)
+		assert.Equal(t, 2, got[0].Position.Line)
+		assert.Equal(t, 1, got[0].Position.Column)
+		assert.Equal(t, 4, got[0].Position.Offset)
 	})
 
 	t.Run("handles nil position", func(t *testing.T) {
@@ -1564,53 +1682,72 @@ func TestTokenize_Positions(t *testing.T) {
 // positionCorpus holds sources whose tokens exercise the positions the lexer
 // places oddly.
 var positionCorpus = map[string]string{
-	"mapping":                             "a: 1\nb: two\n",
-	"trailing spaces":                     "a: 1   \nb: 2  \n",
-	"trailing spaces before a comment":    "a: 1   # c\nb: 2\n",
-	"comments":                            "# head\na: 1 # line\n# foot\nb: 2\n",
-	"header after a comment":              "# comment\n---\nb: two\n",
-	"tag on a value":                      "t: !!str s\nu: !!int 1\n",
-	"tag before a nested map":             "a: !t\n  b: 1\nc: 2\n",
-	"tag before a blank line":             "a: !!seq\n\n  - b\n",
-	"anchor and alias":                    "a: &x 1\nb: *x\n",
-	"literal at the end":                  "k: |\n    hello\n    world\n",
-	"literal with content after":          "k: |\n  a\n  b\nz: 1\n",
-	"literal with blank lines":            "k: |\n  a\n\n  b\n\nz: 1\n",
-	"literal with a blank line of spaces": "k: |\n  a\n   \n  b\nz: 1\n",
-	"literal with a leading blank line":   "k: |\n\n  b\nz: 1\n",
-	"literal with keep":                   "k: |+\n  a\n\n\nz: 1\n",
-	"literal with an indent indicator":    "k: |2\n   a\n  b\n",
-	"literal with a comment after":        "k: |\n  a\n# c\nz: 1\n",
-	"literal followed by a header":        "k: |\n  a\n---\nz: 1\n",
-	"nested literal with a comment after": "a:\n  k: |\n    x\n\n  # c\n  z: 1\n",
-	"folded":                              "k: >\n  a\n\n  b\n\nz: 1\n",
-	"empty literal":                       "a: |\nb: 1\n",
-	"empty literal with keep":             "a: |+\n\nb: 1\n",
-	"quoted multi-line":                   "a: 'x\n\n  y'\nb: 1\n",
-	"double-quoted multi-line":            "c: \"x\n  y\"\nd: 1\n",
-	"escape after a tag":                  "name: !!str \"Caf\\u00e9\"\nage: 3\n",
-	"escape after a comment":              "m:\n  # c\n  \"\\u00e9\": 1\n  b: 2\n",
-	"escape in a flow sequence":           "[!!str \"\\u00e9\", b]\n",
-	"escape in a sequence":                "- !!str \"\\u00e9\"\n- b\n",
-	"escaped scalars in a row":            "a: \"\\u00e9\"\n\"\\u00e8\": \"\\x41 b\"\nc: 1\n",
-	"escape in a multi-line scalar":       "a: \"x\\x41\n  b c\"\nc: 1\n",
-	"plain multi-line":                    "a: plain\n  multi\nb: 2\n",
-	"flow collections":                    "{a: 1, b: [1, 2]}\n",
-	"flow sequence over lines":            "a: [\n  1,\n  2\n]\n",
-	"sequences":                           "- a\n- b # c\n- - c\n  - d\n",
-	"complex key":                         "? k\n: v\n",
-	"directive":                           "%YAML 1.2\n---\na: 1\n",
-	"several documents":                   "a: 1\n---\nb: 2\n...\n# tail\nc: 3\n",
-	"blank lines":                         "a: 1\n\n\nb: 2\n",
-	"blank line with a tab after a quote": "a: \"t\tb\"\n \t\nb: 1\n",
-	"key with trailing spaces":            "a  : 1\n",
-	"tab after a colon":                   "a:\t1\n",
-	"wide runes":                          "a: 日本 x\nb: é\n日: 1\n",
-	"crlf":                                "key: value\r\n# c\r\nnext: 1\r\n",
-	"crlf literal":                        "a: 1\r\nb: |\r\n  x\r\n  y\r\nc: 3\r\n",
-	"crlf tag and quoted":                 "a: !t\r\n  b: 1\r\nc: 'x\r\n  y'\r\n",
-	"bare cr":                             "a: 1\rb: 2\r",
-	"no final line ending":                "a: 1\nb: 2",
+	"mapping":                                        "a: 1\nb: two\n",
+	"trailing spaces":                                "a: 1   \nb: 2  \n",
+	"trailing spaces before a comment":               "a: 1   # c\nb: 2\n",
+	"comments":                                       "# head\na: 1 # line\n# foot\nb: 2\n",
+	"header after a comment":                         "# comment\n---\nb: two\n",
+	"tag on a value":                                 "t: !!str s\nu: !!int 1\n",
+	"tag before a nested map":                        "a: !t\n  b: 1\nc: 2\n",
+	"tag before a blank line":                        "a: !!seq\n\n  - b\n",
+	"anchor and alias":                               "a: &x 1\nb: *x\n",
+	"literal at the end":                             "k: |\n    hello\n    world\n",
+	"literal with content after":                     "k: |\n  a\n  b\nz: 1\n",
+	"literal with blank lines":                       "k: |\n  a\n\n  b\n\nz: 1\n",
+	"literal with a blank line of spaces":            "k: |\n  a\n   \n  b\nz: 1\n",
+	"literal with a leading blank line":              "k: |\n\n  b\nz: 1\n",
+	"literal with keep":                              "k: |+\n  a\n\n\nz: 1\n",
+	"literal with an indent indicator":               "k: |2\n   a\n  b\n",
+	"literal with a comment after":                   "k: |\n  a\n# c\nz: 1\n",
+	"literal followed by a header":                   "k: |\n  a\n---\nz: 1\n",
+	"nested literal with a comment after":            "a:\n  k: |\n    x\n\n  # c\n  z: 1\n",
+	"folded":                                         "k: >\n  a\n\n  b\n\nz: 1\n",
+	"empty literal":                                  "a: |\nb: 1\n",
+	"empty literal with keep":                        "a: |+\n\nb: 1\n",
+	"quoted multi-line":                              "a: 'x\n\n  y'\nb: 1\n",
+	"double-quoted multi-line":                       "c: \"x\n  y\"\nd: 1\n",
+	"escape after a tag":                             "name: !!str \"Caf\\u00e9\"\nage: 3\n",
+	"escape after a comment":                         "m:\n  # c\n  \"\\u00e9\": 1\n  b: 2\n",
+	"escape in a flow sequence":                      "[!!str \"\\u00e9\", b]\n",
+	"escape in a sequence":                           "- !!str \"\\u00e9\"\n- b\n",
+	"escaped scalars in a row":                       "a: \"\\u00e9\"\n\"\\u00e8\": \"\\x41 b\"\nc: 1\n",
+	"escape in a multi-line scalar":                  "a: \"x\\x41\n  b c\"\nc: 1\n",
+	"plain multi-line":                               "a: plain\n  multi\nb: 2\n",
+	"flow collections":                               "{a: 1, b: [1, 2]}\n",
+	"flow sequence over lines":                       "a: [\n  1,\n  2\n]\n",
+	"sequences":                                      "- a\n- b # c\n- - c\n  - d\n",
+	"complex key":                                    "? k\n: v\n",
+	"directive":                                      "%YAML 1.2\n---\na: 1\n",
+	"several documents":                              "a: 1\n---\nb: 2\n...\n# tail\nc: 3\n",
+	"blank lines":                                    "a: 1\n\n\nb: 2\n",
+	"blank line with a tab after a quote":            "a: \"t\tb\"\n \t\nb: 1\n",
+	"key with trailing spaces":                       "a  : 1\n",
+	"tab after a colon":                              "a:\t1\n",
+	"wide runes":                                     "a: 日本 x\nb: é\n日: 1\n",
+	"crlf":                                           "key: value\r\n# c\r\nnext: 1\r\n",
+	"crlf literal":                                   "a: 1\r\nb: |\r\n  x\r\n  y\r\nc: 3\r\n",
+	"crlf tag and quoted":                            "a: !t\r\n  b: 1\r\nc: 'x\r\n  y'\r\n",
+	"bare cr":                                        "a: 1\rb: 2\r",
+	"no final line ending":                           "a: 1\nb: 2",
+	"space before a colon after quoted flow keys":    "{\"a\" : 1, \"b\" : \"x\"}\n",
+	"space before a colon after an alias key":        "&a a : 1\n*a : 2\n",
+	"space before a colon after a single-quoted key": "'a' : 1\n",
+	"nested explicit key":                            "a:\n  ? zz\n  : x\n",
+	"explicit key in a sequence entry":               "- ? earth\n  : blue\n",
+	"explicit key after a document header":           "x: 1\n---\n\n\n? a\n: b\n",
+	"explicit key after a flow sequence":             "tags: [a, b]\n\n? key\n: value\n",
+	"explicit key after a comment":                   "# c\n\n? b\n: c\n",
+	"explicit key after a blank line":                "\n? k\n: v\n",
+	"crlf explicit key after a comment":              "# c\r\n\r\n? b\r\n",
+	"trailing tab":                                   "a: 1\t\nb: 2\n",
+	"trailing spaces before a key":                   "a: 1   \nb: 2\n",
+	"trailing spaces after a quoted scalar":          "a: 'x'   \nb: 1\n",
+	"trailing spaces after an anchor":                "a: &k   \n  b: 1\n",
+	"trailing spaces after a tag":                    "a: !t   \n  b: 1\n",
+	"trailing spaces after a flow sequence":          "a: [1, 2]   \nb: 2\n",
+	"blank line of spaces":                           "a: 1\n   \nb: 2\n",
+	"blank line of spaces after a document end":      "a: 1\n...\n  \nb: 2\n",
+	"blank line of spaces in a plain scalar":         "a: plain\n   \n  multi\nb: 2\n",
 }
 
 func TestTokenize_PositionsLocateText(t *testing.T) {

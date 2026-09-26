@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/goccy/go-yaml"
@@ -447,12 +448,29 @@ func (s *Source) File() (*ast.File, error) {
 // relinks Next and Prev while it moves comment tokens, and the Source's own
 // tokens, which its lines and the caller share, stay untouched. It returns
 // the copies with the file they parsed to.
+//
+// [tokens.Tokenize] gives the first token all the whitespace ahead of its
+// text, where the lexer keeps only the line breaks of the blank lines and
+// the indentation of the last line. The parser trims spaces and line
+// breaks from the start of a key's Origin and rejects the key when a line
+// break is left, so a blank line that holds a tab would make it reject the
+// first key. The copy of the first token takes the shape the lexer gives
+// it while the parser runs. It gets its own Origin back once the parser
+// returns, so it matches the Source's first token as [Source.File]
+// promises.
 func (s *Source) parse() (*ast.File, token.Tokens, error) {
 	shared := s.Tokens()
 
 	tks := make(token.Tokens, 0, len(shared))
 	for _, tk := range shared {
 		tks.Add(tk.Clone())
+	}
+
+	if len(tks) > 0 && tks[0] != nil {
+		first, origin := tks[0], tks[0].Origin
+		first.Origin = bareLeadingLines(origin)
+
+		defer func() { first.Origin = origin }()
 	}
 
 	file := &ast.File{Docs: []*ast.DocumentNode{}}
@@ -476,6 +494,29 @@ func (s *Source) parse() (*ast.File, token.Tokens, error) {
 	}
 
 	return file, tks, nil
+}
+
+// bareLeadingLines returns origin with each blank line in front of its
+// text cut down to its line break. The indentation of the line the text
+// starts on stays. An Origin that holds no text comes back as it is.
+func bareLeadingLines(origin string) string {
+	text := strings.TrimLeft(origin, " \t\r\n")
+	if text == "" {
+		return origin
+	}
+
+	lead := origin[:len(origin)-len(text)]
+	cut := strings.LastIndexAny(lead, "\r\n") + 1
+
+	breaks := strings.Map(func(r rune) rune {
+		if r == '\r' || r == '\n' {
+			return r
+		}
+
+		return -1
+	}, lead[:cut])
+
+	return breaks + lead[cut:] + text
 }
 
 // splitConsecutiveHeaders cuts tks before each "---" header that directly
