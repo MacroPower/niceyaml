@@ -141,6 +141,22 @@ func TestSource_Document(t *testing.T) {
 		assert.Equal(t, "3:1: multiple documents in source: 2 documents", err.Error())
 	})
 
+	t.Run("rejects several documents at a header that follows another", func(t *testing.T) {
+		t.Parallel()
+
+		// The first header holds an empty document, so the second header
+		// starts another one.
+		source := niceyaml.NewSourceFromString(stringtest.Input(`
+			---
+			---
+			b: 2
+		`))
+
+		_, err := source.Document()
+		require.ErrorIs(t, err, niceyaml.ErrMultipleDocuments)
+		assert.Equal(t, "2:1: multiple documents in source: 2 documents", err.Error())
+	})
+
 	t.Run("rejects several documents past the comments above the second", func(t *testing.T) {
 		t.Parallel()
 
@@ -1733,14 +1749,11 @@ func TestDocuments_All(t *testing.T) {
 		}, types)
 	})
 
-	t.Run("pairs by offset when the parser collapses consecutive headers", func(t *testing.T) {
+	t.Run("splits consecutive headers into an empty document and the next one", func(t *testing.T) {
 		t.Parallel()
 
-		// The go-yaml parser folds everything after consecutive headers into
-		// one empty document anchored at the first header, while the
-		// splitter cuts a group at each header. The document takes every
-		// group from its anchor on, so its tokens cover the same lines its
-		// span does.
+		// Each header starts a document, so the first header holds an empty
+		// document and the second opens the document that holds the content.
 		input := stringtest.Input(`
 			---
 			---
@@ -1749,16 +1762,69 @@ func TestDocuments_All(t *testing.T) {
 		source := niceyaml.NewSourceFromString(input)
 		d, err := source.Documents()
 		require.NoError(t, err)
-		require.Len(t, d, 1)
+		require.Len(t, d, 2)
+
+		first := d[0].Tokens()
+		require.Len(t, first, 1)
+		assert.Same(t, source.Tokens()[0], first[0])
+
+		second := d[1].Tokens()
+		require.NotEmpty(t, second)
+		assert.Equal(t, token.DocumentHeaderType, second[0].Type)
+		assert.Equal(t, input, yamltest.DumpTokenOrigins(first)+yamltest.DumpTokenOrigins(second))
+
+		empty, err := d[0].Decode[map[string]int](t.Context())
+		require.NoError(t, err)
+		assert.Nil(t, empty)
+
+		got, err := d[1].Decode[map[string]int](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]int{"b": 2}, got)
+	})
+
+	t.Run("keeps every document after consecutive headers", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(stringtest.Input(`
+			a: 1
+			---
+			---
+			b: 2
+			---
+			c: 3
+		`))
+		d, err := source.Documents()
+		require.NoError(t, err)
+
+		var got []map[string]int
 
 		for _, dd := range d {
-			tks := dd.Tokens()
-			require.Len(t, tks, 5)
-			assert.Equal(t, token.DocumentHeaderType, tks[0].Type)
-			assert.Equal(t, token.DocumentHeaderType, tks[1].Type)
-			assert.Same(t, source.Tokens()[0], tks[0])
-			assert.Equal(t, input, yamltest.DumpTokenOrigins(tks))
+			v, err := dd.Decode[map[string]int](t.Context())
+			require.NoError(t, err)
+
+			got = append(got, v)
 		}
+
+		assert.Equal(t, []map[string]int{{"a": 1}, nil, {"b": 2}, {"c": 3}}, got)
+	})
+
+	t.Run("splits consecutive headers past a comment on the first", func(t *testing.T) {
+		t.Parallel()
+
+		// The parser folds the comment into the first header, so the two
+		// headers still meet with nothing between them.
+		source := niceyaml.NewSourceFromString(stringtest.Input(`
+			--- # first
+			---
+			port: http
+		`))
+		d, err := source.Documents()
+		require.NoError(t, err)
+		require.Len(t, d, 2)
+
+		got, err := d[1].Decode[map[string]string](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"port": "http"}, got)
 	})
 
 	t.Run("early break stops iteration", func(t *testing.T) {

@@ -430,9 +430,7 @@ func documentSpans(groups []token.Tokens, total int) []position.Span {
 // ahead of the first anchor, such as a leading "..." marker, joins the
 // document below it. Matching by offset rather than by index keeps a
 // document paired with its own tokens when the parser and the splitter
-// disagree on boundaries. The splitter cuts a group at every header, while
-// the parser collapses consecutive headers into one document, so such a
-// document spans several groups and takes them all. A document with no
+// disagree on boundaries, as they do for such a marker. A document with no
 // anchor gets nil tokens.
 func alignDocumentTokens(file *ast.File, tks token.Tokens) []token.Tokens {
 	var (

@@ -587,8 +587,8 @@ func ResetPositions(tks token.Tokens) token.Tokens {
 // belongs to the end of it, so content that follows without a header forms
 // a new document. These are the boundaries the go-yaml parser uses for
 // well-formed streams. The parser may produce fewer documents than this
-// function yields, for example when consecutive headers collapse, so pair
-// the two by token offset rather than by index.
+// function yields, for example when a "..." marker opens the stream, so
+// pair the two by token offset rather than by index.
 //
 // Each returned slice holds the tokens of one document in their original
 // order and with their original positions. The tokens are the caller's, not

@@ -47,6 +47,10 @@ func TestValidateFile(t *testing.T) {
 			content: "# a preamble\n---\nvalue: 1\n",
 			want:    []string{"3:1:"},
 		},
+		"invalid document after consecutive headers": {
+			content: "name: a\n---\n---\nvalue: 1\n",
+			want:    []string{"2:1:", "4:1:"},
+		},
 	}
 
 	for name, tc := range tcs {

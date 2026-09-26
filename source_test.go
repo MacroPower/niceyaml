@@ -1042,6 +1042,53 @@ func TestSource_Parse(t *testing.T) {
 				`),
 				want: 2,
 			},
+			"consecutive headers": {
+				input: stringtest.Input(`
+					---
+					---
+				`),
+				want: 2,
+			},
+			"consecutive headers before more documents": {
+				input: stringtest.Input(`
+					---
+					---
+					kind: A
+					---
+					kind: B
+				`),
+				want: 3,
+			},
+			"consecutive headers after an end marker": {
+				input: stringtest.Input(`
+					a: 1
+					...
+					---
+					---
+					b: 2
+				`),
+				want: 3,
+			},
+			"consecutive headers after a directive": {
+				// The parser puts the directive in a node of its own.
+				input: stringtest.Input(`
+					%YAML 1.2
+					---
+					---
+					a: 1
+				`),
+				want: 3,
+			},
+			"comment between headers": {
+				input: stringtest.Input(`
+					a: 1
+					---
+					# c
+					---
+					b: 2
+				`),
+				want: 3,
+			},
 			"list": {
 				input: stringtest.Input(`
 					items:
