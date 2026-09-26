@@ -172,15 +172,19 @@ func (c Catalog) All() []Theme {
 //		fmt.Println(t.Name)
 //	}
 func (c Catalog) Mode(mode Mode) Catalog {
-	var out Catalog
+	matches := make([]Theme, 0, len(c.themes))
 
 	for _, t := range c.themes {
 		if t.Mode == mode {
-			out = out.With(t)
+			matches = append(matches, t)
 		}
 	}
 
-	return out
+	if len(matches) == 0 {
+		return Catalog{}
+	}
+
+	return Catalog{}.With(matches...)
 }
 
 // Len returns the number of themes in the [Catalog].

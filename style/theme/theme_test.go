@@ -192,9 +192,22 @@ func TestCatalog_Mode(t *testing.T) {
 	assert.Equal(t, 1, light.Len())
 	assert.Equal(t, "b-light", light.All()[0].Name)
 
-	for _, th := range theme.Builtin().Mode(theme.Dark).All() {
+	none := light.Mode(theme.Dark)
+	assert.Equal(t, 0, none.Len())
+	assert.Empty(t, none.All())
+
+	builtinDark := theme.Builtin().Mode(theme.Dark)
+	builtinLight := theme.Builtin().Mode(theme.Light)
+	assert.Equal(t, theme.Builtin().Len(), builtinDark.Len()+builtinLight.Len())
+
+	darkNames := make([]string, 0, builtinDark.Len())
+	for _, th := range builtinDark.All() {
 		assert.Equal(t, theme.Dark, th.Mode, th.Name)
+
+		darkNames = append(darkNames, th.Name)
 	}
+
+	assert.True(t, slices.IsSorted(darkNames), "filtering keeps the name order")
 }
 
 func TestBuiltin(t *testing.T) {
