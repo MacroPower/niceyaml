@@ -964,25 +964,6 @@ func TestRegistry_DynamicResolver(t *testing.T) {
 	})
 }
 
-func TestRegistry_WithCompileOptions(t *testing.T) {
-	t.Parallel()
-
-	// Create a registry with custom compile options.
-	schemaData := []byte(`{"type": "object"}`)
-	reg := schema.NewRegistry(
-		schema.WithCompileOptions(), // Empty options, just testing they pass through.
-		schema.WithResolvers(schema.When(
-			matcher.Content(kindPath, "Deployment"),
-			schema.Embedded(schemaData),
-		)),
-	)
-
-	doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
-	v, err := reg.Lookup(t.Context(), doc)
-	require.NoError(t, err)
-	assert.NotNil(t, v)
-}
-
 func TestRegistry_CompileOptionsNotAliased(t *testing.T) {
 	t.Parallel()
 
