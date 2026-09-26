@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"go.jacobcolvin.com/x/jsonschema"
 
@@ -206,9 +207,12 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 // reads the data as JSON does.
 //
 // ValidateValue first converts the YAML-native values the JSON Schema
-// validator does not accept into the JSON spelling of the same data. A
-// !!binary becomes its base64 text and a !!timestamp its RFC 3339 text,
-// anywhere in the value.
+// validator does not accept into the JSON spelling of the same data,
+// anywhere in the value. A !!binary becomes its base64 text and a
+// !!timestamp its RFC 3339 text. The [yaml.MapSlice] a decode with
+// [yaml.UseOrderedMap] yields for each mapping becomes a map with the same
+// members, and where two items share a key, the later one wins, as it does
+// in a decode into a map.
 //
 // Returns nil when data conforms. On a constraint violation, returns a
 // [*niceyaml.Error]. A single violation carries its YAML path on the error
@@ -521,16 +525,20 @@ func contentNode(node ast.Node) ast.Node {
 // normalizeJSON converts the YAML-native values a decode produces that the
 // JSON Schema validator does not accept into the JSON spellings of the
 // same data. A !!binary becomes its base64 text and a !!timestamp its RFC
-// 3339 text. It walks maps and slices so a tagged scalar anywhere in a
-// document stays validatable. Every other value comes back unchanged,
-// non-finite floats included, since the validator treats those as numbers.
+// 3339 text. A [yaml.MapSlice], which a decode with [yaml.UseOrderedMap]
+// yields for each mapping, becomes a map with the same members, and a
+// later item replaces an earlier one with the same key, as a decode into
+// a map does. It walks maps, slices, and ordered mappings so such a value
+// anywhere in a document stays validatable. Every other value comes back
+// unchanged, non-finite floats included, since the validator treats those
+// as numbers.
 //
-// A map or slice that holds no !!binary or !!timestamp comes back as the
-// same container, and one that does comes back as a copy, so
-// normalizeJSON never writes into the caller's data. Handing the
-// validator the caller's own containers is safe because
-// [jsonschema.Validator.Validate] only reads its instance and keeps no
-// reference to it.
+// A map or slice that holds none of these values comes back as the same
+// container, and one that does comes back as a copy. An ordered mapping
+// always comes back as a new map. Either way, normalizeJSON never writes
+// into the caller's data. Handing the validator the caller's own
+// containers is safe because [jsonschema.Validator.Validate] only reads
+// its instance and keeps no reference to it.
 func normalizeJSON(data any) any {
 	out, _ := normalize(data)
 
@@ -589,8 +597,32 @@ func normalize(data any) (any, bool) {
 
 		return out, true
 
+	case yaml.MapSlice:
+		out := make(map[string]any, len(v))
+
+		for _, item := range v {
+			norm, _ := normalize(item.Value)
+			out[mapItemKey(item.Key)] = norm
+		}
+
+		return out, true
+
 	default:
 		return data, false
+	}
+}
+
+// mapItemKey returns the member name a decode into a map gives the key of
+// a [yaml.MapItem]: null for a nil key, the text of a string key, and the
+// printed Go value of any other key.
+func mapItemKey(key any) string {
+	switch k := key.(type) {
+	case nil:
+		return "null"
+	case string:
+		return k
+	default:
+		return fmt.Sprint(k)
 	}
 }
 
@@ -694,6 +726,11 @@ func sharedKeyOf(data any) (sharedKey, bool) {
 			return sharedKey{}, false
 		}
 
+	case yaml.MapSlice:
+		if len(v) == 0 {
+			return sharedKey{}, false
+		}
+
 	case []byte:
 		if len(v) == 0 {
 			return sharedKey{}, false
@@ -748,6 +785,19 @@ func (w *expansionWalker) walk(data any) (int, error) {
 			w.distinct = addCapped(w.distinct, 1)
 
 			n, err := w.walk(elem)
+			if err != nil {
+				return 0, err
+			}
+
+			size = addCapped(size, addCapped(1, n))
+		}
+
+	case yaml.MapSlice:
+		for _, item := range v {
+			// The key is a node of its own.
+			w.distinct = addCapped(w.distinct, 1)
+
+			n, err := w.walk(item.Value)
 			if err != nil {
 				return 0, err
 			}

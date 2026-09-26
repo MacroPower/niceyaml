@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -849,13 +850,140 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 	}
 }
 
+func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
+	t.Parallel()
+
+	// A decode with yaml.UseOrderedMap yields yaml.MapSlice for every
+	// mapping, which the JSON Schema validator does not accept.
+	// ValidateValue converts each one to a map with the same members, so
+	// the schema checks the data as it checks a plain decode.
+	//
+	// Each level of the bomb maps ten keys to the level below, so the last
+	// level expands to 10^4 mappings.
+	var bomb strings.Builder
+
+	bomb.WriteString("l0: &l0 {a: x}\n")
+
+	for level := 1; level <= 4; level++ {
+		members := make([]string, 0, 10)
+		for i := range 10 {
+			members = append(members, fmt.Sprintf("k%d: *l%d", i, level-1))
+		}
+
+		fmt.Fprintf(&bomb, "l%d: &l%d {%s}\n", level, level, strings.Join(members, ", "))
+	}
+
+	tcs := map[string]struct {
+		schema string
+		input  string
+		err    string
+		errs   []error
+	}{
+		"conforming ordered mapping": {
+			schema: `{
+				"type": "object",
+				"properties": {"a": {"type": "string"}}
+			}`,
+			input: stringtest.Input(`
+				a: x
+			`),
+		},
+		"top-level violation": {
+			schema: `{
+				"type": "object",
+				"properties": {"a": {"type": "string"}}
+			}`,
+			input: stringtest.Input(`
+				a: 1
+			`),
+			err: `$.a: expected "string", got "integer"`,
+		},
+		"nested ordered mapping": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"n": {
+						"type": "object",
+						"properties": {"b": {"type": "integer"}}
+					}
+				}
+			}`,
+			input: stringtest.Input(`
+				n: {b: notint}
+			`),
+			err: `$.n.b`,
+		},
+		"ordered mapping inside a sequence": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"items": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {"b": {"type": "integer"}}
+						}
+					}
+				}
+			}`,
+			input: stringtest.Input(`
+				items: [{b: notint}]
+			`),
+			err: `$.items[0].b`,
+		},
+		"binary scalar inside ordered mapping": {
+			schema: `{
+				"type": "object",
+				"properties": {"b": {"type": "string"}}
+			}`,
+			input: stringtest.Input(`
+				b: !!binary aGk=
+			`),
+		},
+		"alias bomb of ordered mappings": {
+			schema: `{"type": "object"}`,
+			input:  bomb.String(),
+			errs:   []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			v := compileSchema(t, []byte(tc.schema))
+			doc := yamltest.FirstDocument(t, tc.input)
+
+			data, err := doc.Decode[any](t.Context(), niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap()))
+			require.NoError(t, err)
+
+			err = v.ValidateValue(t.Context(), data)
+
+			switch {
+			case tc.errs != nil:
+				for _, want := range tc.errs {
+					require.ErrorIs(t, err, want)
+				}
+
+			case tc.err != "":
+				require.Error(t, err)
+				require.NotErrorIs(t, err, schema.ErrValidate)
+				assert.Contains(t, err.Error(), tc.err)
+
+			default:
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestNormalizeJSON(t *testing.T) {
 	t.Parallel()
 
-	// NormalizeJSON copies a map or slice only when a !!binary or
-	// !!timestamp value sits somewhere under it, and it never writes into
-	// the caller's data. Each input builds a fresh value, so a second call
-	// yields the original to compare against.
+	// NormalizeJSON copies a map or slice only when a !!binary, a
+	// !!timestamp, or an ordered mapping sits somewhere under it, and it
+	// never writes into the caller's data. Each input builds a fresh value,
+	// so a second call yields the original to compare against.
 	stamp := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
 
 	tcs := map[string]struct {
@@ -892,6 +1020,29 @@ func TestNormalizeJSON(t *testing.T) {
 			},
 			want: []any{"2024-01-02T03:04:05Z", map[string]any{"k": "v"}},
 		},
+		"ordered mapping beside a plain map": {
+			// Each key reads as a decode into a map names it, and the later
+			// of two items with the same key wins.
+			input: func() any {
+				return map[string]any{
+					"ordered": yaml.MapSlice{
+						{Key: "a", Value: 1},
+						{Key: nil, Value: []byte("hi")},
+						{Key: 16, Value: yaml.MapSlice{{Key: "k", Value: "v"}}},
+						{Key: "a", Value: 2},
+					},
+					"sibling": map[string]any{"k": "v"},
+				}
+			},
+			want: map[string]any{
+				"ordered": map[string]any{
+					"a":    2,
+					"null": "aGk=",
+					"16":   map[string]any{"k": "v"},
+				},
+				"sibling": map[string]any{"k": "v"},
+			},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -909,15 +1060,15 @@ func TestNormalizeJSON(t *testing.T) {
 
 // assertCopiedOnChange asserts that each map and slice in input comes
 // back at the same place in got as the same container when nothing under
-// it holds a []byte or time.Time, and as a different one otherwise. It
-// reports whether input holds either type.
+// it holds a []byte, time.Time, or yaml.MapSlice, and as a different one
+// otherwise. It reports whether input holds any of these types.
 func assertCopiedOnChange(t *testing.T, input, got any) bool {
 	t.Helper()
 
 	changed := false
 
 	switch v := input.(type) {
-	case []byte, time.Time:
+	case []byte, time.Time, yaml.MapSlice:
 		return true
 
 	case map[string]any:
