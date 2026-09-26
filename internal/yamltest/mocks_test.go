@@ -5,11 +5,14 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"go.jacobcolvin.com/niceyaml/finder"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
 func TestMockNormalizer(t *testing.T) {
 	t.Parallel()
+
+	var _ finder.Normalizer = (*yamltest.MockNormalizer)(nil)
 
 	t.Run("NewIdentityNormalizer returns input unchanged", func(t *testing.T) {
 		t.Parallel()

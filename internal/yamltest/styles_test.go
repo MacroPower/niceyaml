@@ -7,11 +7,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
 func TestNewXMLStyles(t *testing.T) {
 	t.Parallel()
+
+	var _ style.Styler = (*yamltest.XMLStyles)(nil)
 
 	getter := yamltest.NewXMLStyles()
 	assert.NotNil(t, getter)
