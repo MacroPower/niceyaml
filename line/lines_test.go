@@ -2285,11 +2285,9 @@ func TestLine_Number_Fallbacks(t *testing.T) {
 		assert.Equal(t, 3, lines.Line(2).Number())
 	})
 
-	t.Run("segment with nil position returns zero", func(t *testing.T) {
+	t.Run("token with nil position numbers from one", func(t *testing.T) {
 		t.Parallel()
 
-		// Create tokens where Position is nil.
-		// NewLines processes these but they won't contribute to Number().
 		tks := token.Tokens{}
 		tks.Add(&token.Token{
 			Type:     token.StringType,
@@ -2300,12 +2298,11 @@ func TestLine_Number_Fallbacks(t *testing.T) {
 
 		lines := line.NewLines(tks)
 
-		// NewLines creates a line from the token even with a nil Position.
 		require.Equal(t, 1, lines.Len())
 
-		// With no Position to read, NewLines numbers the line from its own
-		// line tracking, so Number() stays non-negative.
-		assert.GreaterOrEqual(t, lines.Line(0).Number(), 0)
+		// With no Position to read, NewLines numbers the stream from line 1.
+		assert.Equal(t, 1, lines.Line(0).Number())
+		assert.Equal(t, 1, lines.Line(0).Token(0).Position.Line)
 	})
 
 	t.Run("fallback to segment position line", func(t *testing.T) {
