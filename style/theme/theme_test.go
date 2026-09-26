@@ -149,7 +149,10 @@ func TestCatalog_Get(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, "dracula", got.Name)
 		assert.Equal(t, theme.Dark, got.Mode)
-		assert.NotNil(t, got.Styles().Style(kind.Text))
+
+		text := got.Styles().Style(kind.Text)
+		assert.Equal(t, lipgloss.Color("#f8f8f2"), text.GetForeground())
+		assert.Equal(t, lipgloss.Color("#282a36"), text.GetBackground())
 	})
 
 	t.Run("unknown theme", func(t *testing.T) {
@@ -228,7 +231,8 @@ func TestBuiltin(t *testing.T) {
 	// Every entry is complete and builds.
 	for _, th := range all {
 		assert.NotEmpty(t, th.Name)
-		assert.NotNil(t, th.Styles().Style(kind.Text), th.Name)
+		assert.NotEqual(t, style.Styles{}, th.Styles(), th.Name)
+		assert.NotEqual(t, lipgloss.NoColor{}, th.Style(kind.Comment).GetForeground(), th.Name)
 	}
 
 	// The slice is a copy.
@@ -266,7 +270,8 @@ func TestThemeStyles(t *testing.T) {
 
 		var th theme.Theme
 
-		assert.NotNil(t, th.Styles().Style(kind.Text))
+		assert.Equal(t, style.Styles{}, th.Styles())
+		assert.Equal(t, lipgloss.NewStyle(), th.Style(kind.Text))
 	})
 }
 
