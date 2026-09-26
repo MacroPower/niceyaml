@@ -585,8 +585,10 @@ func (m *Model) DiffMode() DiffMode {
 }
 
 // SetDiffMode sets the diff display mode and rebuilds the view when the
-// change shows other content. The mode already set, or a change while the
-// viewport shows no diff before or after it, leaves the view where it is.
+// change shows other content. The view stays where it is when the mode is
+// already set or when the viewport shows no diff before or after the change.
+// It also stays when both modes compare against the same revision, as
+// [DiffModeAdjacent] and [DiffModeOrigin] do at revision index 1.
 // An undefined mode falls back to [DiffModeAdjacent], the default.
 func (m *Model) SetDiffMode(mode DiffMode) {
 	if mode < DiffModeAdjacent || mode > DiffModeNone {
@@ -597,10 +599,10 @@ func (m *Model) SetDiffMode(mode DiffMode) {
 		return
 	}
 
-	wasDiff := m.ShowingDiff()
+	oldBase := m.diffBaseIndex()
 	m.diffMode = mode
 
-	if wasDiff || m.ShowingDiff() {
+	if m.diffBaseIndex() != oldBase {
 		m.rebuildViews()
 	}
 }
@@ -1036,22 +1038,26 @@ func heldMatches(view *line.View, matches position.Ranges) position.Ranges {
 	return held
 }
 
-// getDiffBase returns the revision the current one is compared against
-// based on the current [DiffMode].
-// Returns nil if diff mode is [DiffModeNone] or there are no revisions.
+// getDiffBase returns the revision that the diff compares the current one
+// against under the current [DiffMode].
+// Returns nil when the viewport shows no diff.
 func (m *Model) getDiffBase() Revision {
-	if !m.hasRevision() {
-		return nil
+	return m.revision(m.diffBaseIndex())
+}
+
+// diffBaseIndex returns the index of the revision that the diff compares
+// the current one against under the current [DiffMode], or -1 when the
+// viewport shows no diff.
+func (m *Model) diffBaseIndex() int {
+	if !m.ShowingDiff() {
+		return -1
 	}
 
-	switch m.diffMode {
-	case DiffModeOrigin:
-		return m.revision(0)
-	case DiffModeAdjacent:
-		return m.revision(m.revIndex - 1)
-	default:
-		return nil
+	if m.diffMode == DiffModeOrigin {
+		return 0
 	}
+
+	return m.revIndex - 1
 }
 
 // currentRevision returns the revision on display, or nil without revisions.

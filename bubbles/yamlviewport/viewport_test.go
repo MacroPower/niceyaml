@@ -2028,6 +2028,64 @@ func TestViewport_DiffMode(t *testing.T) {
 	}
 }
 
+func TestViewport_SameDiffBaseKeepsPosition(t *testing.T) {
+	t.Parallel()
+
+	// At revision index 1, adjacent and origin both compare against the
+	// first revision, so a change between them shows the same diff and
+	// leaves the scroll offset and the selected match where they are.
+	doc := func(changed int) string {
+		var sb strings.Builder
+
+		for i := range 50 {
+			value := "v"
+			if i == changed {
+				value = "w"
+			}
+
+			fmt.Fprintf(&sb, "k%d: %s\n", i, value)
+		}
+
+		return sb.String()
+	}
+
+	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+	m.SetWidth(40)
+	m.SetHeight(10)
+	m.AddRevision(niceyaml.NewSourceFromString(doc(-1), niceyaml.WithName("v1")))
+	m.AddRevision(niceyaml.NewSourceFromString(doc(20), niceyaml.WithName("v2")))
+	m.SetSearchTerm("v")
+	m.SearchNext()
+	m.SearchNext()
+	m.SetYOffset(30)
+
+	require.Equal(t, 1, m.RevisionIndex())
+	require.Equal(t, 2, m.SearchIndex())
+	require.Equal(t, 30, m.YOffset())
+
+	m.ToggleDiffMode()
+	require.Equal(t, yamlviewport.DiffModeOrigin, m.DiffMode())
+	assert.Equal(t, 2, m.SearchIndex(), "adjacent to origin")
+	assert.Equal(t, 30, m.YOffset(), "adjacent to origin")
+
+	m.SetDiffMode(yamlviewport.DiffModeAdjacent)
+	assert.Equal(t, 2, m.SearchIndex(), "origin to adjacent")
+	assert.Equal(t, 30, m.YOffset(), "origin to adjacent")
+
+	// At revision index 2, origin compares against another revision than
+	// adjacent does, so the view shows other content and starts over.
+	m.AddRevision(niceyaml.NewSourceFromString(doc(40), niceyaml.WithName("v3")))
+	m.SearchNext()
+	m.SetYOffset(30)
+
+	require.Equal(t, 1, m.SearchIndex())
+	require.Equal(t, 30, m.YOffset())
+
+	m.SetDiffMode(yamlviewport.DiffModeOrigin)
+	assert.Equal(t, 0, m.SearchIndex(), "adjacent to origin at index 2")
+	assert.Equal(t, 0, m.YOffset(), "adjacent to origin at index 2")
+}
+
 func TestViewport_State(t *testing.T) {
 	t.Parallel()
 
