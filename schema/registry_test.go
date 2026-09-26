@@ -298,6 +298,29 @@ func TestRegistry_Lookup_CancelledContext(t *testing.T) {
 		// document, but never a canceled lookup.
 		require.ErrorIs(t, reg.Validate(ctx, doc), context.Canceled)
 	})
+
+	t.Run("ends while the schema loads", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		// A resolver named the schema, so the ended context is a failed
+		// load rather than a failed resolution.
+		reg := schema.NewRegistry(schema.WithResolvers(schema.Loadable(
+			"cancel.json",
+			func(loadCtx context.Context) ([]byte, error) {
+				cancel()
+
+				return nil, loadCtx.Err()
+			},
+		)))
+
+		_, err := reg.Lookup(ctx, yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`)))
+		require.ErrorIs(t, err, context.Canceled)
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.NotErrorIs(t, err, schema.ErrResolve)
+	})
 }
 
 func TestRegistry_Validate(t *testing.T) {

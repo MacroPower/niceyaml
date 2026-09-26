@@ -266,8 +266,13 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 //
 // Returns [ErrResolve] if a resolver applied but could not name the schema, and
 // [ErrLoad] or [ErrCompile] if loading or compiling the schema fails. When
-// ctx ends before the schema loads, Lookup returns [ErrLoad] wrapping the
-// context's error without waiting for the load to finish.
+// ctx has ended before a resolver runs, or before Lookup finds that no
+// resolver applies, Lookup returns [ErrResolve] wrapping the context's
+// error, even when the resolvers ignore their context. When ctx ends before
+// the named schema finishes loading, Lookup returns [ErrLoad] wrapping the
+// context's error without waiting for the load. Either way [errors.Is]
+// finds the context's error, such as [context.Canceled] or
+// [context.DeadlineExceeded].
 //
 // An empty document, such as one that holds only comments, is the null
 // document, and a resolver sees it as it sees any other.
@@ -416,7 +421,9 @@ func (e reasonError) Unwrap() error {
 //
 // Returns validation errors if the document doesn't conform to the schema.
 // Returns resolution, loading, or compilation errors if schema preparation
-// fails.
+// fails. When ctx ends before the lookup finishes, Validate returns the
+// error [Registry.Lookup] returns for it, even with [WithRequireSchema] set
+// false.
 func (r *Registry) Validate(ctx context.Context, n *niceyaml.Node) error {
 	v, err := r.Lookup(ctx, n)
 	if err != nil {
