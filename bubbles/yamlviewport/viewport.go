@@ -1772,7 +1772,7 @@ func (m *Model) scrollToCurrentMatch() {
 		return
 	}
 
-	i := layout.LineAt(matchRow)
+	i := match.rng.Start.Line
 	k, _ := slices.BinarySearch(m.rows.indices, i)
 	row := m.rows.sums[k] + matchRow - layout.LineStart(i)
 
@@ -1800,11 +1800,11 @@ func (m *Model) scrollToCurrentMatch() {
 		view = m.right
 	}
 
-	if view == nil || match.rng.Start.Line < 0 || match.rng.Start.Line >= view.Lines().Len() {
+	if view == nil {
 		return
 	}
 
-	content := view.Lines().Line(match.rng.Start.Line).Content()
+	content := view.Lines().Line(i).Content()
 	x := layout.GutterWidth() + printer.ColWidth(content, match.rng.Start.Col)
 
 	m.SetXOffset(x - (m.scrollWidth()-1)/2)
