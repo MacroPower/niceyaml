@@ -330,8 +330,8 @@ func (v *View) addOverlayRange(s kind.Kind, blend bool, r position.Range) {
 
 // Clone returns a copy of the [View] with its own decoration. The copy
 // shares the lines with the original and holds the same ones, so it costs
-// one copy of the flags, overlays, and annotations, and decorating either
-// reaches nothing in the other.
+// one copy of the index of the lines it holds and of the flags, overlays,
+// and annotations, and decorating either reaches nothing in the other.
 func (v *View) Clone() *View {
 	if v == nil {
 		return nil

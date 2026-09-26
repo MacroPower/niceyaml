@@ -94,8 +94,8 @@
 // A [View] is the unit the printer renders. It is a Lines value together
 // with the decoration one rendering carries. [NewView] creates one over
 // any Lines, and a niceyaml Source hands one out. The view shares the
-// lines and owns the decoration, so creating a view costs nothing and
-// decorating one reaches no other:
+// lines and owns the decoration, so creating a view costs an index of the
+// lines and no copy of their content, and decorating one reaches no other:
 //
 //	view := line.NewView(lines)
 //

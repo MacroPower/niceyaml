@@ -21,8 +21,8 @@ import (
 // is not a YAML document at all, such as a diff that interleaves lines from
 // two revisions. The lines never change after creation, and nothing outside
 // this package can add to, remove from, or reorder a Lines value, so it is
-// safe to share between views and goroutines, and a view over it costs
-// nothing to create.
+// safe to share between views and goroutines, and a view over it shares
+// the lines instead of copying them.
 //
 // Reach a line with [Lines.Line] or by ranging over [Lines.All], as
 // with a [View]. The zero value holds no lines.
