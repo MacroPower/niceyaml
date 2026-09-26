@@ -318,7 +318,7 @@ func (r *resolver) lookup(
 	// A later merge key wins over an earlier one, as a later source in one
 	// merge key does, so lookup reads the entries from the last one back.
 	for _, entry := range slices.Backward(mapping.Values) {
-		if entry == nil || entry.Key == nil || !entry.Key.IsMergeKey() {
+		if entry == nil || !isMergeKey(entry.Key) {
 			continue
 		}
 
@@ -438,6 +438,15 @@ func keyContent(key ast.MapKeyNode) ast.Node {
 			return node
 		}
 	}
+}
+
+// isMergeKey reports whether key is a `<<` merge key, looking through the `?`
+// indicator, anchors, and tags. A nil key, including a typed nil a hand-built
+// tree may hold at any step, is not a merge key.
+func isMergeKey(key ast.MapKeyNode) bool {
+	_, ok := keyContent(key).(*ast.MergeKeyNode)
+
+	return ok
 }
 
 // keyName returns the key text a child selector compares against. For a

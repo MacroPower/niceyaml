@@ -1455,6 +1455,29 @@ func TestPath_Node_HandBuiltTree(t *testing.T) {
 			path: paths.Root().Child("a"),
 			err:  paths.ErrNotFound,
 		},
+		"key holding a typed nil anchor": {
+			body: mapNode(mapEntry((*ast.AnchorNode)(nil), &ast.StringNode{Value: "1"})),
+			path: paths.Root().Child("a"),
+			err:  paths.ErrNotFound,
+		},
+		"key holding a typed nil tag": {
+			body: mapNode(mapEntry((*ast.TagNode)(nil), &ast.StringNode{Value: "1"})),
+			path: paths.Root().Child("a"),
+			err:  paths.ErrNotFound,
+		},
+		"key holding a typed nil explicit key": {
+			body: mapNode(mapEntry((*ast.MappingKeyNode)(nil), &ast.StringNode{Value: "1"})),
+			path: paths.Root().Child("a"),
+			err:  paths.ErrNotFound,
+		},
+		"explicit key wrapping a typed nil anchor": {
+			body: mapNode(mapEntry(
+				&ast.MappingKeyNode{Value: (*ast.AnchorNode)(nil)},
+				&ast.StringNode{Value: "1"},
+			)),
+			path: paths.Root().Child("a"),
+			err:  paths.ErrNotFound,
+		},
 		"child of a typed nil mapping": {
 			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, (*ast.MappingNode)(nil))),
 			path: paths.Root().Child("a", "b"),
