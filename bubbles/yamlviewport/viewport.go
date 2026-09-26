@@ -587,7 +587,12 @@ func (m *Model) DiffMode() DiffMode {
 // SetDiffMode sets the diff display mode and rebuilds the view when the
 // change shows other content. The mode already set, or a change while the
 // viewport shows no diff before or after it, leaves the view where it is.
+// An undefined mode falls back to [DiffModeAdjacent], the default.
 func (m *Model) SetDiffMode(mode DiffMode) {
+	if mode < DiffModeAdjacent || mode > DiffModeNone {
+		mode = DiffModeAdjacent
+	}
+
 	if mode == m.diffMode {
 		return
 	}
@@ -609,7 +614,7 @@ func (m *Model) ToggleDiffMode() {
 		m.SetDiffMode(DiffModeOrigin)
 	case DiffModeOrigin:
 		m.SetDiffMode(DiffModeNone)
-	case DiffModeNone:
+	default:
 		m.SetDiffMode(DiffModeAdjacent)
 	}
 }

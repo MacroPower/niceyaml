@@ -1928,6 +1928,32 @@ func TestViewport_DiffMode(t *testing.T) {
 				assert.Equal(t, yamlviewport.DiffModeAdjacent, m.DiffMode())
 			},
 		},
+		"SetDiffMode/OutOfRange": {
+			setup: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.SetDiffMode(yamlviewport.DiffMode(3))
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				// An undefined mode falls back to the default.
+				assert.Equal(t, yamlviewport.DiffModeAdjacent, m.DiffMode())
+				assert.True(t, m.ShowingDiff())
+				assert.Equal(t, diff.Stats{Added: 2, Removed: 2}, m.DiffStats())
+			},
+		},
+		"ToggleDiffMode/FromOutOfRange": {
+			setup: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
+				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("rev2")))
+				m.SetDiffMode(yamlviewport.DiffMode(-1))
+				m.ToggleDiffMode()
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, yamlviewport.DiffModeOrigin, m.DiffMode())
+			},
+		},
 		"SetDiffMode/None": {
 			setup: func(m *yamlviewport.Model) {
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
