@@ -217,10 +217,12 @@ func (p Path) String() string {
 }
 
 // YAMLPath returns the equivalent [*yaml.Path] for use with the goccy/go-yaml
-// API, such as [yaml.Path.FilterNode] on a tree the caller parsed. The
-// tree a Source hands out through its File and AST methods is shared
-// with every Node of the Source, so a call that edits a tree, such as
-// [yaml.Path.ReplaceWithNode], runs on a tree of the caller's own.
+// API, such as [yaml.Path.FilterNode] on a tree the caller parsed. Every Node
+// of a Source shares the tree [go.jacobcolvin.com/niceyaml.Source.File]
+// returns, and [go.jacobcolvin.com/niceyaml.Node.AST] and
+// [go.jacobcolvin.com/niceyaml.Node.DocumentAST] return parts of that tree,
+// so a call that edits a tree, such as [yaml.Path.ReplaceWithNode], runs on
+// a tree of the caller's own.
 //
 // The result holds each child name as its raw text, so
 // [yaml.Path.FilterNode] and [yaml.Path.ReplaceWithNode] compare keys with
