@@ -217,11 +217,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // pastedSearchText returns the part of pasted text that the search prompt
-// takes: the first line, without control characters. The prompt shows the
-// term on one line, and a line break or tab in it would make the term the
-// viewport searches for differ from the term the prompt shows.
+// takes: the first line, without control characters. The first line ends
+// at the first carriage return or line feed, since terminals deliver
+// pasted line breaks as either. The prompt shows the term on one line,
+// and a line break or tab in it would make the term the viewport searches
+// for differ from the term the prompt shows.
 func pastedSearchText(s string) string {
-	first, _, _ := strings.Cut(s, "\n")
+	first := s
+	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
+		first = s[:i]
+	}
 
 	return strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {

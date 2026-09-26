@@ -92,12 +92,20 @@ func TestUpdatePasteControlCharacters(t *testing.T) {
 			content: "b\r\nc",
 			want:    "ab",
 		},
+		"carriage return keeps the first line": {
+			content: "b\rc",
+			want:    "ab",
+		},
 		"tab is dropped": {
 			content: "b\tc",
 			want:    "abc",
 		},
 		"leading newline pastes nothing": {
 			content: "\nb",
+			want:    "a",
+		},
+		"leading carriage return pastes nothing": {
+			content: "\rb",
 			want:    "a",
 		},
 	}
