@@ -76,10 +76,13 @@ func (a Annotations) Filter(p Placement) Annotations {
 	return result
 }
 
-// ByKind groups the annotations by [Annotation.Kind], one group per Kind
-// in the order each Kind first appears, with the annotations of a group in
-// their original order. The printer renders each group as rows of its own
-// in the style of its Kind.
+// ByKind groups the annotations by the kind each renders in, its
+// [Annotation.Kind] or [kind.UIAnnotation] for the zero Kind, one group per
+// kind in the order each kind first appears, with the annotations of a
+// group in their original order. Each annotation keeps its Kind as given,
+// so the [kind.UIAnnotation] group can mix annotations of the zero Kind
+// with ones of that kind. The printer renders each group as rows of its
+// own in the style of its kind.
 func (a Annotations) ByKind() []Annotations {
 	var (
 		groups []Annotations
@@ -87,10 +90,15 @@ func (a Annotations) ByKind() []Annotations {
 	)
 
 	for _, ann := range a {
-		i, ok := index[ann.Kind]
+		k := ann.Kind
+		if k == "" {
+			k = kind.UIAnnotation
+		}
+
+		i, ok := index[k]
 		if !ok {
 			i = len(groups)
-			index[ann.Kind] = i
+			index[k] = i
 
 			groups = append(groups, nil)
 		}

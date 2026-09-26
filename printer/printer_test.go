@@ -3547,6 +3547,7 @@ func TestPrinter_AnnotationKind(t *testing.T) {
 		line.Annotation{Content: "bad key", Kind: kind.TextError, Placement: line.Below, Col: 0},
 		line.Annotation{Content: "note", Placement: line.Below, Col: 5},
 		line.Annotation{Content: "bad value", Kind: kind.TextError, Placement: line.Below, Col: 5},
+		line.Annotation{Content: "hint", Kind: kind.UIAnnotation, Placement: line.Below, Col: 5},
 	)
 
 	p := printer.New(
@@ -3559,7 +3560,7 @@ func TestPrinter_AnnotationKind(t *testing.T) {
 		"<uiAnnotation>hunk</uiAnnotation>",
 		"<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
 		"<textError>^ bad key; bad value</textError>",
-		"<uiAnnotation>     ^ note</uiAnnotation>",
+		"<uiAnnotation>     ^ note; hint</uiAnnotation>",
 	)
 
 	assert.Equal(t, want, p.Print(view))

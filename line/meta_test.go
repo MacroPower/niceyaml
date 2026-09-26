@@ -216,6 +216,17 @@ func TestAnnotations_ByKind(t *testing.T) {
 				{{Content: "d", Kind: kind.Comment}},
 			},
 		},
+		"zero kind groups with UIAnnotation": {
+			anns: line.Annotations{
+				{Content: "a"},
+				{Content: "b", Kind: kind.TextError},
+				{Content: "c", Kind: kind.UIAnnotation},
+			},
+			want: []line.Annotations{
+				{{Content: "a"}, {Content: "c", Kind: kind.UIAnnotation}},
+				{{Content: "b", Kind: kind.TextError}},
+			},
+		},
 	}
 
 	for name, tc := range tcs {

@@ -32,10 +32,10 @@
 // The printer renders the [line.Annotations] a view carries. The
 // annotations above or below a line render as rows in the style of their
 // [line.Annotation.Kind], or [kind.UIAnnotation] for those with none. An
-// [AnnotationFunc] renders each group of one Kind as an [AnnotationRow],
-// the text and the column it starts under, and the printer pads, escapes,
-// wraps, and styles that row. [New] starts with [DefaultAnnotation], and
-// [WithAnnotation] sets another.
+// [AnnotationFunc] renders the annotations of each such kind as one
+// [AnnotationRow], the text and the column it starts under, and the printer
+// pads, escapes, wraps, and styles that row. [New] starts with
+// [DefaultAnnotation], and [WithAnnotation] sets another.
 //
 // # Word Wrapping
 //
