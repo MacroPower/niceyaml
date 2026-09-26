@@ -416,7 +416,7 @@ func TestSource_Lines(t *testing.T) {
 	src := niceyaml.NewSourceFromString("key: value\nfoo: bar")
 	lines := src.Lines()
 
-	assert.Equal(t, src.Lines().Len(), lines.Len())
+	require.Equal(t, 2, lines.Len())
 	assert.Equal(t, "key: value", lines.Line(0).Content())
 	assert.Equal(t, "foo: bar", lines.Line(1).Content())
 }
