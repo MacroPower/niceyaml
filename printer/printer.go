@@ -954,17 +954,12 @@ func (p *Printer) annotationGroups(
 
 		// The printer escapes the text, so a control character in a
 		// message shows as its picture and the wrap measures the cells
-		// the terminal shows. A newline is a row break, so the text is
-		// escaped row by row.
+		// the terminal shows. The escape keeps each newline, and the wrap
+		// starts a new row at each one.
 		marker := escape.Control(row.Marker)
 		indent := strings.Repeat(" ", ColWidth(ln.Content(), max(0, row.Col))) + marker
 		indentWidth := lipgloss.Width(indent)
-
-		var wrapped []string
-
-		for text := range strings.SplitSeq(row.Text, "\n") {
-			wrapped = append(wrapped, p.wrapContent(escape.Control(text), gutterWidth+indentWidth)...)
-		}
+		wrapped := p.wrapContent(escape.Rows(row.Text), gutterWidth+indentWidth)
 
 		k := row.Kind
 		if k == "" {

@@ -156,12 +156,7 @@ func (p *Printer) errorTreeNode(t niceyaml.ErrorTree, branch *lipgloss.Style, de
 // branches in its own text. The tree indents every row of a message after
 // the first under the connector.
 func (p *Printer) errorText(text string, depth int) string {
-	lines := strings.Split(text, "\n")
-	for i, ln := range lines {
-		lines[i] = escape.Control(ln)
-	}
-
-	rows := p.wrapContent(strings.Join(lines, "\n"), depth*errorConnectorWidth)
+	rows := p.wrapContent(escape.Rows(text), depth*errorConnectorWidth)
 
 	return strings.Join(rows, "\n")
 }

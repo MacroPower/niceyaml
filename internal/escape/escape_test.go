@@ -189,3 +189,50 @@ func TestControl_PreservesRuneCount(t *testing.T) {
 		})
 	}
 }
+
+func TestRows(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		input string
+		want  string
+	}{
+		"empty string": {
+			input: "",
+			want:  "",
+		},
+		"single row": {
+			input: "a\x1bb",
+			want:  "a␛b",
+		},
+		"line feed kept": {
+			input: "a\nb",
+			want:  "a\nb",
+		},
+		"controls replaced in each row": {
+			input: "\x1b[31m\nx\ty",
+			want:  "␛[31m\nx␉y",
+		},
+		"carriage return before line feed replaced": {
+			input: "a\r\nb",
+			want:  "a␍\nb",
+		},
+		"leading and trailing line feeds kept": {
+			input: "\na\n",
+			want:  "\na\n",
+		},
+		"only line feeds kept": {
+			input: "\n\n",
+			want:  "\n\n",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := escape.Rows(tt.input)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}

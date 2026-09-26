@@ -1484,7 +1484,7 @@ func renderErrorTree(t ErrorTree) string {
 	var sb strings.Builder
 
 	if t.Text != "" {
-		sb.WriteString(escapeRows(t.Text))
+		sb.WriteString(escape.Rows(t.Text))
 	}
 
 	writeErrorBranches(&sb, t.Children, "", t.Text != "")
@@ -1518,17 +1518,6 @@ func writeErrorBranches(sb *strings.Builder, children []ErrorTree, indent string
 
 		writeErrorBranches(sb, child.Children, indent+below, broken)
 	}
-}
-
-// escapeRows renders the control characters of text as their pictures,
-// keeping the line breaks between its rows.
-func escapeRows(text string) string {
-	rows := strings.Split(text, "\n")
-	for i, row := range rows {
-		rows[i] = escape.Control(row)
-	}
-
-	return strings.Join(rows, "\n")
 }
 
 // writeString writes s to f. It drops write errors, as [fmt] itself does

@@ -55,3 +55,16 @@ func Control(s string) string {
 
 	return sb.String()
 }
+
+// Rows is like [Control], but it keeps each line feed in s as a line
+// break and replaces the control characters of the rows between them.
+//
+// For example, "\x1b[31m\nred" becomes "␛[31m\nred".
+func Rows(s string) string {
+	rows := strings.Split(s, "\n")
+	for i, row := range rows {
+		rows[i] = Control(row)
+	}
+
+	return strings.Join(rows, "\n")
+}
