@@ -1,6 +1,7 @@
 package style_test
 
 import (
+	"image/color"
 	"testing"
 
 	"charm.land/lipgloss/v2"
@@ -74,33 +75,33 @@ func TestNew(t *testing.T) {
 		assert.Equal(t, lipgloss.Color("#ffffff"), got.GetForeground())
 	})
 
-	t.Run("all styles are pre-computed", func(t *testing.T) {
+	t.Run("each kind resolves to its closest set ancestor", func(t *testing.T) {
 		t.Parallel()
 
-		// Check a sampling of styles exist directly in the map.
-		stylesToCheck := []kind.Kind{
-			kind.Text,
-			kind.Comment,
-			kind.LiteralNumber,
-			kind.LiteralNumberFloat,
-			kind.LiteralString,
-			kind.NameTag,
-			kind.Punctuation,
-			kind.PunctuationMappingValue,
-			kind.TextAccentDim,
-			kind.TextSubtleDim,
-			kind.GenericHeading,
+		tests := map[string]struct {
+			want color.Color
+			kind kind.Kind
+		}{
+			"Text":                    {kind: kind.Text, want: lipgloss.Color("#ffffff")},
+			"Comment":                 {kind: kind.Comment, want: lipgloss.Color("#00ff00")},
+			"LiteralNumber":           {kind: kind.LiteralNumber, want: lipgloss.Color("#ff0000")},
+			"LiteralNumberFloat":      {kind: kind.LiteralNumberFloat, want: lipgloss.Color("#ff0000")},
+			"LiteralString":           {kind: kind.LiteralString, want: lipgloss.Color("#ffffff")},
+			"NameTag":                 {kind: kind.NameTag, want: lipgloss.Color("#ffffff")},
+			"Punctuation":             {kind: kind.Punctuation, want: lipgloss.Color("#ffffff")},
+			"PunctuationMappingValue": {kind: kind.PunctuationMappingValue, want: lipgloss.Color("#ffffff")},
+			"TextAccentDim":           {kind: kind.TextAccentDim, want: lipgloss.Color("#ffffff")},
+			"TextSubtleDim":           {kind: kind.TextSubtleDim, want: lipgloss.Color("#ffffff")},
+			"GenericHeading":          {kind: kind.GenericHeading, want: lipgloss.Color("#ffffff")},
+			"UILineNumber":            {kind: kind.UILineNumber, want: lipgloss.Color("#00ff00")},
 		}
 
-		// Every kind resolves to the style of its closest set ancestor.
-		set := []lipgloss.Style{
-			styles.Style(kind.Text),
-			styles.Style(kind.LiteralNumber),
-			styles.Style(kind.Comment),
-		}
+		for name, tt := range tests {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		for _, s := range stylesToCheck {
-			assert.Contains(t, set, styles.Style(s), "style %q should resolve to a set ancestor", s)
+				assert.Equal(t, tt.want, styles.Style(tt.kind).GetForeground())
+			})
 		}
 	})
 }
