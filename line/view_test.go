@@ -1344,6 +1344,62 @@ func TestView_String_PlaceholderLine(t *testing.T) {
 	assert.Equal(t, "     | ", view.String())
 }
 
+func TestOverlays_MarkerRow(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		content  string
+		want     string
+		overlays line.Overlays
+	}{
+		"no overlays": {
+			content: "key: v",
+			want:    "",
+		},
+		"negative start clamps to the first column": {
+			content:  "key: v",
+			overlays: line.Overlays{{Cols: position.NewSpan(-2, 3)}},
+			want:     "^^^",
+		},
+		"span past the end stops at the content": {
+			content:  "key: v",
+			overlays: line.Overlays{{Cols: position.NewSpan(3, 10)}},
+			want:     "   ^^^",
+		},
+		"span past the content marks nothing": {
+			content:  "key: v",
+			overlays: line.Overlays{{Cols: position.NewSpan(8, 12)}},
+			want:     "",
+		},
+		"empty span marks nothing": {
+			content:  "key: v",
+			overlays: line.Overlays{{Cols: position.NewSpan(2, 2)}},
+			want:     "",
+		},
+		"overlapping overlays": {
+			content: "key: v",
+			overlays: line.Overlays{
+				{Cols: position.NewSpan(1, 3)},
+				{Cols: position.NewSpan(2, 5)},
+			},
+			want: " ^^^^",
+		},
+		"wide rune gets two carets": {
+			content:  "名前: v",
+			overlays: line.Overlays{{Cols: position.NewSpan(1, 2)}},
+			want:     "  ^^",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.overlays.MarkerRow(tc.content))
+		})
+	}
+}
+
 func TestView_Hunks(t *testing.T) {
 	t.Parallel()
 

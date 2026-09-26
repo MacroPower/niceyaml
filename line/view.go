@@ -511,26 +511,16 @@ func colWidth(ln *Line, col int) int {
 // holding wide, combining, or control characters. Returns "" when the line
 // has neither.
 func markerRow(ln *Line, overlays Overlays, below Annotations) string {
-	var marks []bool
+	marks := overlayMarks(overlays, ln.Width())
 
-	mark := func(col int) {
-		col = max(0, col)
+	kept := below.WithContent()
+	if len(kept) > 0 {
+		col := max(0, kept.Col())
 		if col >= len(marks) {
 			marks = append(marks, make([]bool, col+1-len(marks))...)
 		}
 
 		marks[col] = true
-	}
-
-	for _, o := range overlays {
-		for col := max(0, o.Cols.Start); col < min(o.Cols.End, ln.Width()); col++ {
-			mark(col)
-		}
-	}
-
-	contents := below.WithContent().Contents()
-	if len(contents) > 0 {
-		mark(below.WithContent().Col())
 	}
 
 	if len(marks) == 0 {
@@ -541,12 +531,37 @@ func markerRow(ln *Line, overlays Overlays, below Annotations) string {
 
 	sb.WriteString(renderMarks(ln.Content(), marks))
 
-	if len(contents) > 0 {
+	if len(kept) > 0 {
 		sb.WriteByte(' ')
-		sb.WriteString(escape.Control(strings.Join(contents, "; ")))
+		sb.WriteString(escape.Control(strings.Join(kept.Contents(), "; ")))
 	}
 
 	return sb.String()
+}
+
+// overlayMarks marks every column that overlays cover within the first
+// width columns of a line. The slice ends at the last marked column, so
+// a row rendered from it puts nothing after the last caret. Returns nil
+// when the overlays cover no column.
+func overlayMarks(overlays Overlays, width int) []bool {
+	var marks []bool
+
+	for _, o := range overlays {
+		start, end := max(0, o.Cols.Start), min(o.Cols.End, width)
+		if start >= end {
+			continue
+		}
+
+		if end > len(marks) {
+			marks = append(marks, make([]bool, end-len(marks))...)
+		}
+
+		for col := start; col < end; col++ {
+			marks[col] = true
+		}
+	}
+
+	return marks
 }
 
 // renderMarks renders marks as a row under content: a caret under every

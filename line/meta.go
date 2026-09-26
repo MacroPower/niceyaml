@@ -186,13 +186,5 @@ type Overlays []Overlay
 // characters. Returns "" when the overlays cover no column of the
 // content.
 func (o Overlays) MarkerRow(content string) string {
-	marks := make([]bool, utf8.RuneCountInString(content))
-
-	for _, ov := range o {
-		for col := max(0, ov.Cols.Start); col < min(ov.Cols.End, len(marks)); col++ {
-			marks[col] = true
-		}
-	}
-
-	return strings.TrimRight(renderMarks(content, marks), " ")
+	return strings.TrimRight(renderMarks(content, overlayMarks(o, utf8.RuneCountInString(content))), " ")
 }
