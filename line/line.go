@@ -149,7 +149,10 @@ func (l *Line) IsEmpty() bool {
 	return len(l.segments) == 0
 }
 
-// Width returns the total rune width of this line's content.
+// Width returns the number of runes in this line's content, excluding the
+// line ending. Positions on the line count columns in the same unit. Width
+// is not the display width, because a wide rune such as a CJK ideograph
+// takes one column but two terminal cells.
 func (l *Line) Width() int {
 	var w int
 
