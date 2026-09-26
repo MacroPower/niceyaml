@@ -1,16 +1,30 @@
 package style
 
 import (
+	"sync"
+
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/charmtone"
 
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
-// Default returns the [Styles] niceyaml renders with when no theme is chosen.
-// It uses the CharmTone palette, and the theme catalog exposes the same
-// palette as [go.jacobcolvin.com/niceyaml/style/theme.Charm].
+// defaultStyles builds the [Styles] that [Default] returns on its first
+// call and returns the same value to every later call.
+var defaultStyles = sync.OnceValue(buildDefault)
+
+// Default returns the [Styles] niceyaml renders with unless a caller picks a
+// theme. It uses the CharmTone palette, and the theme catalog exposes the
+// same palette as [go.jacobcolvin.com/niceyaml/style/theme.Charm].
+//
+// Every call returns the same shared value. Extend it with [Styles.With],
+// which returns a copy.
 func Default() Styles {
+	return defaultStyles()
+}
+
+// buildDefault builds the [Styles] that [Default] returns.
+func buildDefault() Styles {
 	base := lipgloss.NewStyle().
 		Foreground(charmtone.Smoke).
 		Background(charmtone.Pepper)
