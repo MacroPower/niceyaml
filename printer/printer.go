@@ -11,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/cells"
 	"go.jacobcolvin.com/niceyaml/internal/colors"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
@@ -75,8 +76,10 @@ type Printer struct {
 
 // DefaultContextLines is the number of context lines [Printer.PrintError]
 // shows around each error location unless [WithContextLines] sets another.
-// It is the count the %+v verb of a [*niceyaml.SourceError] uses.
-const DefaultContextLines = 2
+// It is [niceyaml.DefaultContextLines], the count the %+v verb of a
+// [*niceyaml.SourceError] uses, so PrintError and %+v show the same
+// context by default.
+const DefaultContextLines = niceyaml.DefaultContextLines
 
 // New creates a new [*Printer].
 // By default it uses [style.Default], [DefaultGutter], and [DefaultAnnotation].

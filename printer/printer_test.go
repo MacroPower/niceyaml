@@ -5055,6 +5055,20 @@ func TestPrinter_ContainerWidth_Accessor(t *testing.T) {
 	assert.Equal(t, 0, testPrinter().With(printer.WithContextLines(-3)).ContextLines())
 }
 
+func TestPrinter_DefaultContextLines(t *testing.T) {
+	t.Parallel()
+
+	// The marked line sits in the middle of a source with more lines on
+	// each side than the default shows, so the count changes the excerpt.
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\nd: 4\ne: 5\nf: 6\ng: 7\nh: 8\ni: 9\n")
+	bound := yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("e"))))
+
+	got := fmt.Sprintf("%+v", bound)
+
+	assert.Equal(t, niceyaml.FormatError(bound, printer.DefaultContextLines), got)
+	assert.NotEqual(t, niceyaml.FormatError(bound, printer.DefaultContextLines+1), got)
+}
+
 func TestPrinter_PrintError_JoinOfNothing(t *testing.T) {
 	t.Parallel()
 

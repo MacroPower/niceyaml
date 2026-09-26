@@ -385,7 +385,7 @@ func (e *Error) Error() string {
 func (e *Error) Format(f fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && f.Flag('+'):
-		writeString(f, FormatError(e, defaultContextLines))
+		writeString(f, FormatError(e, DefaultContextLines))
 
 	case verb == 'q':
 		writeString(f, strconv.Quote(e.Error()))
@@ -791,9 +791,9 @@ type SourceError struct {
 	adopted bool
 }
 
-// defaultContextLines is the number of context lines the %+v verb of a
-// [*SourceError] shows around an error.
-const defaultContextLines = 2
+// DefaultContextLines is the number of context lines the %+v verb of an
+// [*Error] or a [*SourceError] shows on either side of each marked line.
+const DefaultContextLines = 2
 
 // binder is where an error binds: the source, and the node that binds
 // it, which is nil for [Source.Bind] and for the errors a Source produces
@@ -1388,15 +1388,15 @@ func AllBindings(err error) iter.Seq[*SourceError] {
 // Format implements [fmt.Formatter].
 //
 // The %v and %s verbs print [SourceError.Error]. The %+v verb prints
-// what [FormatError] renders for the error with two lines of context,
-// for a log that prints its errors that way. A wrapper such as
-// [fmt.Errorf] around a SourceError formats as its own message, so a
-// program that holds any error calls FormatError. The %q verb quotes
+// what [FormatError] renders for the error with [DefaultContextLines]
+// lines of context, for a log that prints its errors that way. A wrapper
+// such as [fmt.Errorf] around a SourceError formats as its own message,
+// so a program that holds any error calls FormatError. The %q verb quotes
 // [SourceError.Error].
 func (e *SourceError) Format(f fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && f.Flag('+'):
-		writeString(f, FormatError(e, defaultContextLines))
+		writeString(f, FormatError(e, DefaultContextLines))
 
 	case verb == 'q':
 		writeString(f, strconv.Quote(e.Error()))
