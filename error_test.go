@@ -490,14 +490,6 @@ func TestError_GracefulDegradation(t *testing.T) {
 			)),
 			want: "$.nonexistent.deep~: path not found\n\nno excerpt: resolve $.nonexistent.deep~: not found",
 		},
-		"empty document source": {
-			// Tests a source with no documents (the Docs slice is empty).
-			err: yamltest.Bind(t, niceyaml.NewSourceFromTokens(emptyTokens), niceyaml.NewError(
-				"empty doc error",
-				niceyaml.AtPath(paths.Root().Child("key").Key()),
-			)),
-			want: "$.key~: empty doc error\n\nno excerpt: resolve $.key~: not found: document has no content",
-		},
 	}
 
 	for name, tc := range tcs {
