@@ -1560,12 +1560,14 @@ func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v 
 // Each [Validator] from [WithValidator] runs on the node before
 // decoding, as [Node.DecodeInto] describes, and no validator runs when
 // opts name none. After decoding succeeds, every value in the result
-// that implements [SelfValidator] validates itself, T first among them,
-// unless [WithSelfValidation] switches that off. The method set of a
-// pointer includes the methods declared on the value, so both value and
-// pointer receivers participate. YAML decoding errors, and [Error]
-// values from the validators, come back bound to the source as
-// [SourceError] values, and a value the go-yaml decoder rejects matches
+// that implements [SelfValidator] validates itself, unless
+// [WithSelfValidation] switches that off. The values below T validate
+// first, and T validates last and only when every one of them passed,
+// as [SelfValidator] describes. The method set of a pointer includes
+// the methods declared on the value, so both value and pointer
+// receivers participate. YAML decoding errors, and [Error] values from
+// the validators, come back bound to the source as [SourceError]
+// values, and a value the go-yaml decoder rejects matches
 // [ErrDecodeRejected]. On error, the returned T is the zero value.
 //
 // A scoped Decode reads one typed value without decoding the whole
