@@ -125,8 +125,13 @@ func Root() Path {
 
 // extend returns a copy of p with segs appended to its selectors. The copy
 // owns its selectors, so extending the same prefix twice yields two
-// independent paths.
+// independent paths. With no segs, extend returns p itself, so extending by
+// nothing leaves a path equal to the receiver and the root equal to [Root].
 func (p Path) extend(segs ...segment) Path {
+	if len(segs) == 0 {
+		return p
+	}
+
 	merged := make([]segment, 0, len(p.segments)+len(segs))
 	merged = append(merged, p.segments...)
 	merged = append(merged, segs...)

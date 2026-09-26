@@ -227,6 +227,15 @@ func TestPath_Immutable(t *testing.T) {
 		assert.Equal(t, "$", p.String())
 		assert.Equal(t, "$.a", p.Child("a").String())
 	})
+
+	t.Run("an empty extension is the root", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Equal(t, paths.Root(), paths.Root().Child())
+		assert.Equal(t, paths.Root(), paths.Root().Index())
+		assert.Equal(t, paths.Root(), paths.Root().Join(paths.Root()))
+		assert.Equal(t, paths.Root().Child("a"), paths.Root().Child("a").Child())
+	})
 }
 
 func TestPath_Join(t *testing.T) {
@@ -269,6 +278,7 @@ func TestPath_Join(t *testing.T) {
 			t.Parallel()
 
 			assert.Equal(t, tc.want, tc.p.Join(tc.q).String())
+			assert.Equal(t, paths.MustParse(tc.want), tc.p.Join(tc.q))
 		})
 	}
 

@@ -1185,6 +1185,7 @@ func TestDocument_Node(t *testing.T) {
 		assert.Same(t, dd.Source(), meta.Source())
 		assert.Equal(t, paths.Root().Child("meta"), meta.Path())
 		assert.True(t, dd.Path().IsRoot())
+		assert.Equal(t, paths.Root(), yamltest.At(t, dd, paths.Root()).Path())
 		assert.Same(t, dd, dd.Document())
 
 		var nothing *niceyaml.Node
