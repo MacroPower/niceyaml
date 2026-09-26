@@ -745,49 +745,20 @@ func TestNewLines_Value_PrevNextLinking(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			input := tokens.Tokenize(tc.input)
-			lines := line.NewLines(input)
+			lines := line.NewLines(tokens.Tokenize(tc.input))
 
-			// Tokens() returns recombined tokens matching the original lexer output.
-			tks := lines.Tokens()
-			require.NotEmpty(t, tks, "expected non-empty tokens")
+			// The parts on each line link to their neighbors in column
+			// order, and the chain stops at both ends of the line.
+			for _, ln := range lines.All() {
+				parts := ln.Tokens()
+				require.NotEmpty(t, parts, "line %d", ln.Number())
 
-			// Recombined token count should match original lexer output.
-			assert.Len(t, tks, len(input), "recombined token count should match original")
+				assert.Nil(t, parts[0].Prev, "line %d first part Prev", ln.Number())
+				assert.Nil(t, parts[len(parts)-1].Next, "line %d last part Next", ln.Number())
 
-			firstToken := tks[0]
-			lastToken := tks[len(tks)-1]
-
-			// First token should have no Prev.
-			assert.Nil(t, firstToken.Prev, "first token Prev should be nil")
-
-			// Last token should have no Next.
-			assert.Nil(t, lastToken.Next, "last token Next should be nil")
-
-			// Verify forward traversal reaches all tokens.
-			forwardCount := 0
-			for tk := firstToken; tk != nil; tk = tk.Next {
-				forwardCount++
-			}
-
-			assert.Equal(t, len(tks), forwardCount, "forward traversal count mismatch")
-
-			// Verify backward traversal reaches all tokens.
-			backwardCount := 0
-			for tk := lastToken; tk != nil; tk = tk.Prev {
-				backwardCount++
-			}
-
-			assert.Equal(t, len(tks), backwardCount, "backward traversal count mismatch")
-
-			// Verify bidirectional linking integrity.
-			for tk := firstToken; tk != nil; tk = tk.Next {
-				if tk.Next != nil {
-					assert.Equal(t, tk, tk.Next.Prev, "Next.Prev should point back")
-				}
-
-				if tk.Prev != nil {
-					assert.Equal(t, tk, tk.Prev.Next, "Prev.Next should point forward")
+				for j := range len(parts) - 1 {
+					assert.Same(t, parts[j+1], parts[j].Next, "line %d part %d Next", ln.Number(), j)
+					assert.Same(t, parts[j], parts[j+1].Prev, "line %d part %d Prev", ln.Number(), j+1)
 				}
 			}
 		})
@@ -867,7 +838,7 @@ func TestNewLines_LeadingNewlineTokens(t *testing.T) {
 	}
 }
 
-func TestNewLines_PositionFieldsMatchLexer(t *testing.T) {
+func TestNewLines_PartPositionsMatchLexer(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]string{
@@ -887,46 +858,46 @@ func TestNewLines_PositionFieldsMatchLexer(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			// Get original tokens from lexer.
 			originalTks := tokens.Tokenize(input)
-
-			// Process through Lines and reconstruct.
 			lines := line.NewLines(originalTks)
-			resultTks := lines.Tokens()
 
-			// For non-split tokens, Position fields should match.
-			// Build map of (Line, Column) -> original Position for comparison.
+			// Index the lexer's positions by the (Line, Column) where the
+			// text of each token starts.
 			type posKey struct {
 				line, col int
 			}
 
-			origByPos := make(map[posKey]*token.Position)
+			origByPos := make(map[posKey]*token.Position, len(originalTks))
 			for _, tk := range originalTks {
-				if tk.Position != nil {
-					key := posKey{tk.Position.Line, tk.Position.Column}
-					origByPos[key] = tk.Position
+				origByPos[posKey{tk.Position.Line, tk.Position.Column}] = tk.Position
+			}
+
+			require.Len(t, origByPos, len(originalTks), "lexer tokens should start at distinct positions")
+
+			// The part that holds a token's text sits at the token's
+			// position. A part that holds only a line ending or the
+			// indentation cut from an Origin sits where no text starts.
+			for _, ln := range lines.All() {
+				for _, part := range ln.Tokens() {
+					key := posKey{part.Position.Line, part.Position.Column}
+
+					orig, ok := origByPos[key]
+					if !ok {
+						continue
+					}
+
+					delete(origByPos, key)
+
+					assert.Equal(t, orig.Offset, part.Position.Offset,
+						"Offset mismatch at line %d col %d", key.line, key.col)
+					assert.Equal(t, orig.IndentNum, part.Position.IndentNum,
+						"IndentNum mismatch at line %d col %d", key.line, key.col)
+					assert.Equal(t, orig.IndentLevel, part.Position.IndentLevel,
+						"IndentLevel mismatch at line %d col %d", key.line, key.col)
 				}
 			}
 
-			for _, tk := range resultTks {
-				if tk.Position == nil {
-					continue
-				}
-
-				key := posKey{tk.Position.Line, tk.Position.Column}
-				orig, ok := origByPos[key]
-				if !ok {
-					// Token was split, skip comparison.
-					continue
-				}
-
-				assert.Equal(t, orig.Offset, tk.Position.Offset,
-					"Offset mismatch at line %d col %d", key.line, key.col)
-				assert.Equal(t, orig.IndentNum, tk.Position.IndentNum,
-					"IndentNum mismatch at line %d col %d", key.line, key.col)
-				assert.Equal(t, orig.IndentLevel, tk.Position.IndentLevel,
-					"IndentLevel mismatch at line %d col %d", key.line, key.col)
-			}
+			assert.Empty(t, origByPos, "every lexer position should match a part")
 		})
 	}
 }
@@ -970,14 +941,13 @@ func TestNewLines_SplitTokenOffsets(t *testing.T) {
 func TestNewLines_OffsetRuneCount(t *testing.T) {
 	t.Parallel()
 
-	// Test that Offset uses rune count, not byte count.
-	// The go-yaml lexer increments offset by rune count, not byte count.
-	// UTF-8 chars like 日 are 3 bytes each, but 1 rune each.
+	// Test that part Offsets count runes, not bytes, as the go-yaml lexer
+	// does. UTF-8 chars like 日 are 3 bytes each, but 1 rune each.
 	//
 	// For input "日: value\n":
-	//   - "日" token at offset 1 (first position)
-	//   - ":" token at offset 2 (after 1 rune for 日)
-	//   - "value" token at offset 4 (after 3 runes for "日: ")
+	//   - "日" part at offset 1 (first position)
+	//   - ":" part at offset 2 (after 1 rune for 日)
+	//   - "value" part at offset 4 (after 3 runes for "日: ")
 	//
 	// If byte-based, ":" would be at offset 4 (after 3 bytes for 日).
 	input := "日: value\n"
@@ -989,18 +959,21 @@ func TestNewLines_OffsetRuneCount(t *testing.T) {
 	yamltest.RequireTokensEqual(t, originalTks, resultTks)
 
 	// Verify specific offset values that prove rune-based counting.
-	// The ":" (MappingValue) token should be at offset 2, not 4.
-	require.Len(t, resultTks, 3, "expected 3 tokens: key, :, value")
+	// The ":" (MappingValue) part should be at offset 2, not 4.
+	require.Equal(t, 1, lines.Len())
 
-	// Token 0: "日" at offset 1.
-	assert.Equal(t, 1, resultTks[0].Position.Offset, "first token offset should be 1")
+	parts := lines.Line(0).Tokens()
+	require.Len(t, parts, 3, "expected 3 parts: key, :, value")
 
-	// Token 1: ":" at offset 2 (rune-based) not 4 (byte-based).
-	assert.Equal(t, 2, resultTks[1].Position.Offset,
+	// Part 0: "日" at offset 1.
+	assert.Equal(t, 1, parts[0].Position.Offset, "first part offset should be 1")
+
+	// Part 1: ":" at offset 2 (rune-based) not 4 (byte-based).
+	assert.Equal(t, 2, parts[1].Position.Offset,
 		"MappingValue ':' should be at offset 2 (rune-based), not 4 (byte-based)")
 
-	// Token 2: "value" at offset 4 (after "日: " which is 3 runes).
-	assert.Equal(t, 4, resultTks[2].Position.Offset, "value token offset should be 4")
+	// Part 2: "value" at offset 4 (after "日: " which is 3 runes).
+	assert.Equal(t, 4, parts[2].Position.Offset, "value part offset should be 4")
 
 	// Also verify total bytes match for Origin content preservation.
 	var origTotalBytes, resultTotalBytes int
@@ -1009,8 +982,8 @@ func TestNewLines_OffsetRuneCount(t *testing.T) {
 		origTotalBytes += len(tk.Origin)
 	}
 
-	for _, tk := range resultTks {
-		resultTotalBytes += len(tk.Origin)
+	for _, part := range parts {
+		resultTotalBytes += len(part.Origin)
 	}
 
 	assert.Equal(t, origTotalBytes, resultTotalBytes, "total bytes should match lexer output")
@@ -1081,12 +1054,15 @@ func TestNewLines_BlockScalars(t *testing.T) {
 	t.Run("position semantics", func(t *testing.T) {
 		t.Parallel()
 
-		// Block scalar content sits on the first line that holds its text,
-		// as every token does, whether content follows the scalar or not.
+		// Block scalar content has one part on each line it spans, from the
+		// first line that holds its text. The first part keeps the content's
+		// Column and Offset, and the last part that holds content carries
+		// the Value, whether content follows the scalar or not.
 
 		tcs := map[string]struct {
 			input string
-			want  int // Expected Position.Line of the StringType content token.
+			line  int      // Line of the content's first part.
+			want  []string // Value of the content's part on each line from line on.
 		}{
 			"literal two lines": {
 				input: stringtest.Input(`
@@ -1094,7 +1070,8 @@ func TestNewLines_BlockScalars(t *testing.T) {
 					  line1
 					  line2
 				`),
-				want: 2,
+				line: 2,
+				want: []string{"", "line1\nline2"},
 			},
 			"literal three lines": {
 				input: stringtest.Input(`
@@ -1103,7 +1080,8 @@ func TestNewLines_BlockScalars(t *testing.T) {
 					  b
 					  c
 				`),
-				want: 2,
+				line: 2,
+				want: []string{"", "", "a\nb\nc"},
 			},
 			"folded two lines": {
 				input: stringtest.Input(`
@@ -1111,7 +1089,8 @@ func TestNewLines_BlockScalars(t *testing.T) {
 					  first
 					  second
 				`),
-				want: 2,
+				line: 2,
+				want: []string{"", "first second"},
 			},
 			"literal with strip": {
 				input: stringtest.Input(`
@@ -1119,7 +1098,8 @@ func TestNewLines_BlockScalars(t *testing.T) {
 					  line1
 					  line2
 				`),
-				want: 2,
+				line: 2,
+				want: []string{"", "line1\nline2"},
 			},
 			"literal with keep and trailing blank": {
 				input: `key: |+
@@ -1127,11 +1107,13 @@ func TestNewLines_BlockScalars(t *testing.T) {
   line2
 
 `,
-				want: 2,
+				line: 2,
+				want: []string{"", "line1\nline2\n\n", ""},
 			},
 			"literal followed by a key": {
 				input: "key: |\n  line1\n  line2\nnext: 1\n",
-				want:  2,
+				line:  2,
+				want:  []string{"", "line1\nline2\n"},
 			},
 		}
 
@@ -1145,18 +1127,31 @@ func TestNewLines_BlockScalars(t *testing.T) {
 
 				yamltest.RequireTokensEqual(t, originalTks, resultTks)
 
+				// The content is the string whose text crosses a line break.
 				var contentToken *token.Token
 
-				for _, tk := range resultTks {
-					if tk.Type == token.StringType && strings.Contains(tk.Origin, "\n") {
+				for _, tk := range originalTks {
+					if tk.Type == token.StringType && strings.Contains(strings.TrimSpace(tk.Origin), "\n") {
 						contentToken = tk
 						break
 					}
 				}
 
 				require.NotNil(t, contentToken, "expected to find block scalar content token")
-				assert.Equal(t, tc.want, contentToken.Position.Line,
-					"block scalar content Position.Line should point to its first text line")
+
+				for i, want := range tc.want {
+					parts := lines.Line(tc.line - 1 + i).Tokens()
+					require.Len(t, parts, 1, "line %d", tc.line+i)
+
+					part := parts[0]
+					assert.Equal(t, tc.line+i, part.Position.Line, "part %q", part.Origin)
+					assert.Equal(t, want, part.Value, "part %q", part.Origin)
+
+					if i == 0 {
+						assert.Equal(t, contentToken.Position.Column, part.Position.Column, "part %q", part.Origin)
+						assert.Equal(t, contentToken.Position.Offset, part.Position.Offset, "part %q", part.Origin)
+					}
+				}
 			})
 		}
 	})
@@ -1279,40 +1274,56 @@ func TestNewLines_BlockScalars(t *testing.T) {
 
 				yamltest.RequireTokensEqual(t, originalTks, resultTks)
 
-				var contentToken *token.Token
-
-				for _, tk := range resultTks {
-					if tk.Type == token.StringType && strings.Contains(tk.Origin, "\n") {
-						contentToken = tk
-						break
-					}
-				}
-
-				require.NotNil(t, contentToken, "expected to find block scalar content token")
-				assert.Equal(t, tc.want, contentToken.Value,
+				assert.Equal(t, strings.Count(tc.input, "\n"), lines.Len())
+				assert.Equal(t, tc.want, blockScalarValue(t, lines),
 					"block scalar Value should match chomping behavior")
 			})
 		}
 	})
 }
 
+// blockScalarValue returns the Value of the one part that carries a Value on
+// the lines after the first. The input behind lines holds a block scalar
+// whose header ends the first line and whose content fills every line after
+// it.
+func blockScalarValue(t *testing.T, lines line.Lines) string {
+	t.Helper()
+
+	var values []string
+
+	for _, ln := range lines.All(position.NewSpan(1, lines.Len())) {
+		for _, part := range ln.Tokens() {
+			if part.Value != "" {
+				values = append(values, part.Value)
+			}
+		}
+	}
+
+	require.Len(t, values, 1, "one content part should carry the Value")
+
+	return values[0]
+}
+
 func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 	t.Parallel()
 
-	// The go-yaml lexer places the Position of plain multiline strings
-	// (StringType) on the FIRST line, not the last.
-	// This is different from block scalars.
+	// A plain multiline string has one part on each line it spans, and that
+	// part is the last on its line. The first part keeps the string's Column
+	// and Offset and carries its Value, which block scalars put on their
+	// last content part instead.
 
 	tcs := map[string]struct {
 		input string
-		want  int // Expected Position.Line of the StringType content token.
+		line  int      // Line of the string's first part.
+		want  []string // Value of the string's part on each line from line on.
 	}{
 		"plain multiline two lines": {
 			input: stringtest.Input(`
 				key: this is
 				  continued
 			`),
-			want: 1, // Position should be on FIRST line.
+			line: 1,
+			want: []string{"this is continued", ""},
 		},
 		"plain multiline three lines": {
 			input: stringtest.Input(`
@@ -1320,7 +1331,8 @@ func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 				  second
 				  third
 			`),
-			want: 1,
+			line: 1,
+			want: []string{"first second third", "", ""},
 		},
 		"plain multiline with more indent": {
 			input: stringtest.Input(`
@@ -1328,7 +1340,8 @@ func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 				  child: line one
 				    continued line
 			`),
-			want: 2, // First line of the value.
+			line: 2, // First line of the value.
+			want: []string{"line one continued line", ""},
 		},
 	}
 
@@ -1343,19 +1356,31 @@ func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 			// Verify round-trip fidelity.
 			yamltest.RequireTokensEqual(t, originalTks, resultTks)
 
-			// Find the multiline StringType token (value with newlines).
+			// The string is the one whose text crosses a line break.
 			var contentToken *token.Token
 
-			for _, tk := range resultTks {
-				if tk.Type == token.StringType && strings.Contains(tk.Origin, "\n") {
+			for _, tk := range originalTks {
+				if tk.Type == token.StringType && strings.Contains(strings.TrimSpace(tk.Origin), "\n") {
 					contentToken = tk
 					break
 				}
 			}
 
 			require.NotNil(t, contentToken, "expected to find plain multiline string token")
-			assert.Equal(t, tc.want, contentToken.Position.Line,
-				"plain multiline string Position.Line should point to FIRST line")
+
+			for i, want := range tc.want {
+				parts := lines.Line(tc.line - 1 + i).Tokens()
+				require.NotEmpty(t, parts, "line %d", tc.line+i)
+
+				part := parts[len(parts)-1]
+				assert.Equal(t, tc.line+i, part.Position.Line, "part %q", part.Origin)
+				assert.Equal(t, want, part.Value, "part %q", part.Origin)
+
+				if i == 0 {
+					assert.Equal(t, contentToken.Position.Column, part.Position.Column, "part %q", part.Origin)
+					assert.Equal(t, contentToken.Position.Offset, part.Position.Offset, "part %q", part.Origin)
+				}
+			}
 		})
 	}
 }
@@ -1364,36 +1389,28 @@ func TestNewLines_QuotedMultilineActualNewlines(t *testing.T) {
 	t.Parallel()
 
 	// Test quoted strings with actual newlines in the content (not escaped \n).
-	// The go-yaml lexer places the Position at the opening quote line.
-	// The Value normalizes actual newlines to spaces in double-quoted strings.
+	// The part on the opening quote line keeps the string's Column and
+	// Offset and carries its Value. Every later part starts at column 1 with
+	// an empty Value.
 
 	tcs := map[string]struct {
 		input         string
-		wantValue     string
-		wantLine      int
-		wantColumn    int
+		want          int // Number of lines the string spans.
 		wantTokenType token.Type
 	}{
 		"double quoted with actual newline": {
-			input: "key: \"line1\nline2\"\n",
-			// Position should be at opening quote on line 1.
-			wantLine:      1,
-			wantColumn:    6,             // After "key: ".
-			wantValue:     "line1 line2", // Newline becomes space.
+			input:         "key: \"line1\nline2\"\n",
+			want:          2,
 			wantTokenType: token.DoubleQuoteType,
 		},
 		"double quoted with multiple newlines": {
 			input:         "key: \"a\nb\nc\"\n",
-			wantLine:      1,
-			wantColumn:    6,
-			wantValue:     "a b c",
+			want:          3,
 			wantTokenType: token.DoubleQuoteType,
 		},
 		"single quoted with actual newline": {
 			input:         "key: 'line1\nline2'\n",
-			wantLine:      1,
-			wantColumn:    6,
-			wantValue:     "line1 line2", // Newline becomes space.
+			want:          2,
 			wantTokenType: token.SingleQuoteType,
 		},
 	}
@@ -1412,7 +1429,7 @@ func TestNewLines_QuotedMultilineActualNewlines(t *testing.T) {
 			// Find the quoted token.
 			var quotedToken *token.Token
 
-			for _, tk := range resultTks {
+			for _, tk := range originalTks {
 				if tk.Type == tc.wantTokenType {
 					quotedToken = tk
 					break
@@ -1420,12 +1437,31 @@ func TestNewLines_QuotedMultilineActualNewlines(t *testing.T) {
 			}
 
 			require.NotNil(t, quotedToken, "expected to find quoted string token")
-			assert.Equal(t, tc.wantLine, quotedToken.Position.Line,
-				"quoted string Position.Line should point to opening quote line")
-			assert.Equal(t, tc.wantColumn, quotedToken.Position.Column,
-				"quoted string Position.Column should point to opening quote")
-			assert.Equal(t, tc.wantValue, quotedToken.Value,
-				"quoted string Value should have normalized newlines")
+			require.Equal(t, tc.want, lines.Len())
+
+			// The string's first part is the last part on the first line.
+			parts := lines.Line(0).Tokens()
+			require.NotEmpty(t, parts)
+
+			first := parts[len(parts)-1]
+			assert.Equal(t, tc.wantTokenType, first.Type)
+			assert.Equal(t, 1, first.Position.Line)
+			assert.Equal(t, quotedToken.Position.Column, first.Position.Column,
+				"first part should keep the opening quote's Column")
+			assert.Equal(t, quotedToken.Position.Offset, first.Position.Offset,
+				"first part should keep the opening quote's Offset")
+			assert.Equal(t, quotedToken.Value, first.Value, "first part should carry the Value")
+
+			// Each later line holds one continuation part.
+			for i, ln := range lines.All(position.NewSpan(1, lines.Len())) {
+				require.Len(t, ln.Tokens(), 1, "line %d", i+1)
+
+				part := ln.Token(0)
+				assert.Equal(t, tc.wantTokenType, part.Type, "part %q", part.Origin)
+				assert.Equal(t, i+1, part.Position.Line, "part %q", part.Origin)
+				assert.Equal(t, 1, part.Position.Column, "part %q", part.Origin)
+				assert.Empty(t, part.Value, "part %q", part.Origin)
+			}
 		})
 	}
 }
@@ -1858,19 +1894,9 @@ func TestNewLines_FoldedBlockBlankLines(t *testing.T) {
 
 		yamltest.RequireTokensEqual(t, original, result)
 
-		// Find the content token.
-		var contentToken *token.Token
-
-		for _, tk := range result {
-			if tk.Type == token.StringType && strings.Contains(tk.Origin, "first") {
-				contentToken = tk
-				break
-			}
-		}
-
-		require.NotNil(t, contentToken, "expected to find folded content token")
+		assert.Equal(t, 4, lines.Len())
 		// The blank line causes a paragraph break in folded output.
-		assert.Contains(t, contentToken.Value, "\n",
+		assert.Contains(t, blockScalarValue(t, lines), "\n",
 			"folded block with blank line should have newline in Value")
 	})
 
@@ -1886,18 +1912,9 @@ func TestNewLines_FoldedBlockBlankLines(t *testing.T) {
 
 		yamltest.RequireTokensEqual(t, original, result)
 
-		var contentToken *token.Token
-
-		for _, tk := range result {
-			if tk.Type == token.StringType && strings.Contains(tk.Origin, "first") {
-				contentToken = tk
-				break
-			}
-		}
-
-		require.NotNil(t, contentToken, "expected to find folded content token")
+		assert.Equal(t, 3, lines.Len())
 		// Adjacent lines fold to a space, so the Value is "first second\n".
-		assert.Equal(t, "first second\n", contentToken.Value,
+		assert.Equal(t, "first second\n", blockScalarValue(t, lines),
 			"folded block without blank line should have space-joined Value")
 	})
 
@@ -1913,18 +1930,9 @@ func TestNewLines_FoldedBlockBlankLines(t *testing.T) {
 
 		yamltest.RequireTokensEqual(t, original, result)
 
-		var contentToken *token.Token
-
-		for _, tk := range result {
-			if tk.Type == token.StringType && strings.Contains(tk.Origin, "first") {
-				contentToken = tk
-				break
-			}
-		}
-
-		require.NotNil(t, contentToken, "expected to find literal content token")
+		assert.Equal(t, 4, lines.Len())
 		// Literal preserves blank line as newline.
-		assert.Equal(t, "first\n\nsecond\n", contentToken.Value,
+		assert.Equal(t, "first\n\nsecond\n", blockScalarValue(t, lines),
 			"literal block should preserve blank line in Value")
 	})
 
@@ -1939,6 +1947,10 @@ func TestNewLines_FoldedBlockBlankLines(t *testing.T) {
 		result := lines.Tokens()
 
 		yamltest.RequireTokensEqual(t, original, result)
+
+		assert.Equal(t, 5, lines.Len())
+		// Folding drops the break after "first" and keeps one per blank line.
+		assert.Equal(t, "first\n\nsecond\n", blockScalarValue(t, lines))
 	})
 }
 
