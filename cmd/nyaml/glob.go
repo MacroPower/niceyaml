@@ -77,11 +77,13 @@ func containsGlobChars(s string) bool {
 // argument without glob metacharacters joins the list as-is, and one that
 // names a directory is an error wrapping [errIsDirectory].
 //
-// A pattern that matches no file, or that is no valid pattern, falls back
-// to the argument itself when a file with that literal name exists, so a
-// file such as "cfg[1].yaml" or "report[2024.txt" is still reachable.
-// Otherwise a pattern that matches nothing is an error wrapping
-// [errNoMatch], and an invalid pattern is its own error.
+// An argument with glob metacharacters that names an existing file is that
+// file, even when it also matches other files as a pattern, so a file such
+// as "cfg[1].yaml" or "report[2024.txt" is still reachable. One that names
+// an existing directory is an error wrapping [errIsDirectory]. Any other
+// argument with metacharacters expands as a pattern. A pattern that matches
+// no file is an error wrapping [errNoMatch], and an invalid pattern is its
+// own error.
 func expandPaths(args ...string) ([]string, error) {
 	var result []string
 
