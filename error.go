@@ -1227,8 +1227,9 @@ func (e *SourceError) Errors() []*SourceError {
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] draw them as
 // the branches of a tree. The result never includes source lines, so it
 // is safe to log or compare; use [SourceError.Excerpt] or [FormatError]
-// for the annotated source excerpt. A nil SourceError, which [Node.Bind] passes through
-// as it does any nil pointer, has an empty message, as a nil [*Error] does.
+// for the annotated source excerpt. A nil SourceError, as [errors.As] can
+// yield from a chain that holds one, has an empty message, as a nil
+// [*Error] does.
 func (e *SourceError) Error() string {
 	if e == nil {
 		return ""
