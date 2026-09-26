@@ -218,6 +218,14 @@ func TestView_Segments(t *testing.T) {
 		assert.Equal(t, "text(   ) comment(# c)", segmentText(view, 1))
 	})
 
+	t.Run("a line of only spaces in a block scalar is Text", func(t *testing.T) {
+		t.Parallel()
+
+		view := newTestView(t, "k: |\n  a\n    \n  b\n", 4)
+
+		assert.Equal(t, "text(    )", segmentText(view, 2))
+	})
+
 	t.Run("an empty line has no segments", func(t *testing.T) {
 		t.Parallel()
 

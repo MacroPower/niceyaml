@@ -2,8 +2,6 @@ package line
 
 import (
 	"iter"
-	"strings"
-	"unicode/utf8"
 
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style/kind"
@@ -67,9 +65,9 @@ func (v *View) Segments(i int) iter.Seq[Segment] {
 	return func(yield func(Segment) bool) {
 		col := 0
 
-		for j := range ln.segments {
-			origin := tokens.TrimLineEnding(ln.Token(j).Origin)
-			width := utf8.RuneCountInString(origin)
+		for j, seg := range ln.segments {
+			origin := tokens.TrimLineEnding(seg.Part().Origin)
+			sp := seg.ContentSpan()
 			start := col
 
 			// The separator is the whitespace the token carries before its
@@ -77,22 +75,16 @@ func (v *View) Segments(i int) iter.Seq[Segment] {
 			// an anchor, a comment, or the continuation of a multiline
 			// scalar. The trailer is the whitespace it carries after that
 			// text, which the lexer hands to the token preceding a comment.
-			// Neither is part of the text, so both are Text. A token of
+			// Neither is part of the text, so both are Text. The content
+			// span of the segment covers the text between them. A token of
 			// nothing but whitespace is all separator.
-			separator := leadingWhitespaceRunes(origin)
-
-			trailer := trailingWhitespaceRunes(origin)
-			if separator+trailer > width {
-				trailer = 0
-			}
-
 			pieces := [...]struct {
 				kind kind.Kind
 				end  int
 			}{
-				{kind.Text, col + separator},
-				{ln.Kind(j), col + width - trailer},
-				{kind.Text, col + width},
+				{kind.Text, col + sp.Start},
+				{ln.Kind(j), col + sp.End},
+				{kind.Text, col + seg.Width()},
 			}
 
 			for _, piece := range pieces {
@@ -189,16 +181,4 @@ func insertEdge(edges []int, edge int) []int {
 	}
 
 	return append(edges, edge)
-}
-
-// leadingWhitespaceRunes returns the number of runes in the run of spaces
-// and tabs that starts s.
-func leadingWhitespaceRunes(s string) int {
-	return utf8.RuneCountInString(s) - utf8.RuneCountInString(strings.TrimLeft(s, " \t"))
-}
-
-// trailingWhitespaceRunes returns the number of runes in the run of spaces
-// and tabs that ends s.
-func trailingWhitespaceRunes(s string) int {
-	return utf8.RuneCountInString(s) - utf8.RuneCountInString(strings.TrimRight(s, " \t"))
 }
