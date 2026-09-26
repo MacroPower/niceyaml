@@ -298,33 +298,40 @@ func (r *Result) getAlignedRows() []alignedRow {
 				i++
 
 			case lcs.OpDelete:
-				// Collect consecutive deletes.
-				deletes := collectConsecutive(r.ops, i, lcs.OpDelete)
-				i += len(deletes)
-
-				// Collect consecutive inserts that follow.
-				var inserts []lineOp
-
-				if i < len(r.ops) && r.ops[i].kind == lcs.OpInsert {
-					inserts = collectConsecutive(r.ops, i, lcs.OpInsert)
-					i += len(inserts)
+				// Skip past the run of deletes.
+				delStart := i
+				for i < len(r.ops) && r.ops[i].kind == lcs.OpDelete {
+					i++
 				}
 
-				// Pair deletes with inserts on the same row.
-				maxPairs := max(len(deletes), len(inserts))
-				for j := range maxPairs {
-					// Each filler row gets a line of its own, so a
-					// line pointer names one row of one view.
-					row := alignedRow{before: &line.Line{}, after: &line.Line{}}
+				nDel := i - delStart
 
-					if j < len(deletes) {
-						row.before = deletes[j].line
+				// Skip past the run of inserts that follows, if any.
+				insStart := i
+				for i < len(r.ops) && r.ops[i].kind == lcs.OpInsert {
+					i++
+				}
+
+				nIns := i - insStart
+
+				// Pair deletes with inserts on the same row. Each filler
+				// row gets a line of its own, so a line pointer names one
+				// row of one view.
+				for j := range max(nDel, nIns) {
+					var row alignedRow
+
+					if j < nDel {
+						row.before = r.ops[delStart+j].line
 						row.beforeFlag = line.FlagDeleted
+					} else {
+						row.before = &line.Line{}
 					}
 
-					if j < len(inserts) {
-						row.after = inserts[j].line
+					if j < nIns {
+						row.after = r.ops[insStart+j].line
 						row.afterFlag = line.FlagInserted
+					} else {
+						row.after = &line.Line{}
 					}
 
 					rows = append(rows, row)
@@ -411,19 +418,6 @@ func (r *Result) After() *line.View {
 	}
 
 	return view
-}
-
-// collectConsecutive collects consecutive ops of the same kind starting at
-// index i.
-func collectConsecutive(ops []lineOp, i int, op lcs.OpKind) []lineOp {
-	var result []lineOp
-
-	for i < len(ops) && ops[i].kind == op {
-		result = append(result, ops[i])
-		i++
-	}
-
-	return result
 }
 
 // IsEmpty reports whether the diff contains no lines.

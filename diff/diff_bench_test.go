@@ -130,6 +130,48 @@ func BenchmarkHunksDiffSource(b *testing.B) {
 	}
 }
 
+func BenchmarkSideBySideDiffSource(b *testing.B) {
+	sizes := []struct {
+		name  string
+		lines int
+	}{
+		{"small_50", 50},
+		{"medium_500", 500},
+		{"large_2000", 2000},
+	}
+
+	for _, sz := range sizes {
+		yamlA := yamltest.GenerateYAML(sz.lines)
+		sourceA := niceyaml.NewSourceFromString(yamlA, niceyaml.WithName("a"))
+
+		// Create B with 10% changed lines.
+		var sb strings.Builder
+
+		for i := range sz.lines {
+			if i%10 == 0 {
+				fmt.Fprintf(&sb, "modified_key_%d: modified_value_%d\n", i, i)
+			} else {
+				fmt.Fprintf(&sb, "key_%d: value_%d\n", i, i)
+			}
+		}
+
+		yamlB := sb.String()
+		sourceB := niceyaml.NewSourceFromString(yamlB, niceyaml.WithName("b"))
+
+		b.Run(sz.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			linesA, linesB := sourceA.Lines(), sourceB.Lines()
+
+			for b.Loop() {
+				result := diff.Diff(linesA, linesB)
+				_ = result.Before()
+				_ = result.After()
+			}
+		})
+	}
+}
+
 func BenchmarkFullDiffSource_WorstCase(b *testing.B) {
 	// Worst case: interleaved insertions/deletions that maximize LCS computation.
 	sizes := []int{100, 500, 1000}
