@@ -22,9 +22,9 @@
 // kinds:
 //
 //	styles := style.New(
-//	    lipgloss.NewStyle().Foreground(lipgloss.Color("white")),
+//	    lipgloss.NewStyle().Foreground(lipgloss.Color("15")),
 //	    style.Set(kind.Comment, lipgloss.NewStyle().Foreground(lipgloss.Color("8"))),
-//	    style.Set(kind.LiteralNumber, lipgloss.NewStyle().Foreground(lipgloss.Color("cyan"))),
+//	    style.Set(kind.LiteralNumber, lipgloss.NewStyle().Foreground(lipgloss.Color("6"))),
 //	)
 //
 // With this configuration, [kind.LiteralNumberFloat] and
