@@ -38,10 +38,19 @@ var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 // it fetches, and an allowed host can answer endless ones.
 //
 // The result is the shape a [Resolver] returns, so a resolver that builds
-// the reference from the document hands it back as it is:
+// the reference from the document hands it back as it is. [filepath.Dir]
+// of an empty path is ".", so the resolver leaves baseDir empty for a
+// document without a file path. A relative reference from such a document
+// then reports [ErrNoBaseDir] instead of resolving against the working
+// directory:
 //
 //	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
-//	    return schema.FileOrURL(filepath.Dir(doc.FilePath()), pickSchema(doc))
+//	    var baseDir string
+//	    if path := doc.FilePath(); path != "" {
+//	        baseDir = filepath.Dir(path)
+//	    }
+//
+//	    return schema.FileOrURL(baseDir, pickSchema(doc))
 //	})
 //
 // A reference from a command line reports its error where the flag is
