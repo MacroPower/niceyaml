@@ -107,8 +107,8 @@ func quoteName(name string) string {
 // node, which for a mapping entry is its value. [Path.Key] appends the `~`
 // selector, which picks the key of that entry instead, so one Path names
 // either node of an entry and every method that takes a Path, such as
-// [Path.Token] or [niceyaml.AtPath], reads the key or the value from the
-// Path alone.
+// [Path.Token] or [go.jacobcolvin.com/niceyaml.AtPath], reads the key or the
+// value from the Path alone.
 //
 // [Path.String] returns the selectors as a path expression, and [Parse]
 // reads it back as an equal Path.

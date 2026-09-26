@@ -45,9 +45,10 @@
 //
 // # Error Highlighting
 //
-// Pass a [Path] to [niceyaml.AtPath], which highlights the value at the
-// path, or the key of the entry for a path from [Path.Key]. The error
-// carries the path, and [niceyaml.Node.Bind] resolves it against the
+// Pass a [Path] to [go.jacobcolvin.com/niceyaml.AtPath], which highlights
+// the value at the path, or the key of the entry for a path from
+// [Path.Key]. The error carries the path, and
+// [go.jacobcolvin.com/niceyaml.Node.Bind] resolves it against the
 // document:
 //
 //	err := niceyaml.NewError(
