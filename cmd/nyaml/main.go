@@ -64,6 +64,17 @@ func newRootCmd() (*cobra.Command, func() error) {
 		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
 			p = cfg.NewProfiler()
 
+			// Start applies the sampling rates to the whole process, and
+			// the flag defaults record every blocking and contention
+			// event. Only a block or mutex profile reads those records.
+			if p.BlockProfile == "" {
+				p.BlockProfileRate = 0
+			}
+
+			if p.MutexProfile == "" {
+				p.MutexProfileFraction = 0
+			}
+
 			return p.Start()
 		},
 	}
