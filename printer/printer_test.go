@@ -3,6 +3,7 @@ package printer_test
 import (
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -4594,8 +4595,10 @@ func TestPrinter_Layout(t *testing.T) {
 
 		assert.Equal(t, 0, l.LineAt(-1))
 		assert.Equal(t, 0, l.LineAt(-100))
+		assert.Equal(t, 0, l.LineAt(math.MinInt))
 		assert.Equal(t, 2, l.LineAt(l.Rows()))
 		assert.Equal(t, 2, l.LineAt(l.Rows()+100))
+		assert.Equal(t, 2, l.LineAt(math.MaxInt))
 	})
 
 	t.Run("empty view", func(t *testing.T) {
@@ -4626,7 +4629,9 @@ func TestPrinter_Layout(t *testing.T) {
 			"space dropped at the second break":                   {pos: position.New(0, 30), want: 3},
 			"first column of the third piece":                     {pos: position.New(0, 31), want: 4},
 			"column past the end lands on the last content row":   {pos: position.New(0, 1000), want: 4},
+			"column at max int lands on the last content row":     {pos: position.New(0, math.MaxInt), want: 4},
 			"negative column lands on the first content row":      {pos: position.New(0, -1), want: 2},
+			"column at min int lands on the first content row":    {pos: position.New(0, math.MinInt), want: 2},
 			"line without annotations":                            {pos: position.New(1, 0), want: 6},
 			"line with an annotation below":                       {pos: position.New(2, 3), want: 7},
 			"line past the layout":                                {pos: position.New(3, 0), want: -1},
