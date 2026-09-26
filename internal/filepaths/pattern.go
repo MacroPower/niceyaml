@@ -150,14 +150,24 @@ func anyDepth(pattern string) string {
 // could otherwise stand for millions of patterns.
 const MaxBraceExpansions = 1024
 
+// maxBraceWork is the most bytes of intermediate patterns [ExpandBraces]
+// builds for one pattern. Each brace group rebuilds the pattern around
+// it, so a long pattern with many groups could otherwise cost time and
+// memory quadratic in its length while expanding to few patterns.
+const maxBraceWork = 1 << 20
+
 // ExpandBraces returns the patterns the brace alternatives of pattern
 // stand for, so "*.{yml,yaml}" yields "*.yml" and "*.yaml", and nested
 // groups multiply out. A backslash escapes the character after it. A
 // pattern with no brace group, or with an unclosed one, yields itself, and
 // so does a pattern that would expand to more than [MaxBraceExpansions]
-// patterns.
+// patterns. A pattern also yields itself when expanding it would take too
+// much work, such as a very long pattern or one with very many brace
+// groups.
 func ExpandBraces(pattern string) []string {
-	expanded, ok := expandBraces(pattern, MaxBraceExpansions)
+	work := maxBraceWork
+
+	expanded, ok := expandBraces(pattern, MaxBraceExpansions, &work)
 	if !ok {
 		return []string{pattern}
 	}
@@ -166,8 +176,10 @@ func ExpandBraces(pattern string) []string {
 }
 
 // expandBraces is [ExpandBraces] with a budget of patterns left to
-// produce. It reports false once the expansion outgrows the budget.
-func expandBraces(pattern string, budget int) ([]string, bool) {
+// produce and the bytes of intermediate patterns left to build, which
+// work points to and which all calls of one expansion share. It reports
+// false once the expansion outgrows either.
+func expandBraces(pattern string, budget int, work *int) ([]string, bool) {
 	open, closing := braceGroup(pattern)
 	if open < 0 {
 		return []string{pattern}, budget >= 1
@@ -178,7 +190,14 @@ func expandBraces(pattern string, budget int) ([]string, bool) {
 	var expanded []string
 
 	for _, alt := range splitAlternatives(pattern[open+1 : closing]) {
-		more, ok := expandBraces(prefix+alt+suffix, budget-len(expanded))
+		// Counting one byte more than the pattern holds makes an empty
+		// pattern cost something too, which also caps the recursion depth.
+		*work -= len(prefix) + len(alt) + len(suffix) + 1
+		if *work < 0 {
+			return nil, false
+		}
+
+		more, ok := expandBraces(prefix+alt+suffix, budget-len(expanded), work)
 		if !ok {
 			return nil, false
 		}

@@ -358,6 +358,34 @@ func TestExpandBraces_Budget(t *testing.T) {
 	assert.Equal(t, []string{over}, filepaths.ExpandBraces(over))
 }
 
+func TestExpandBraces_Work(t *testing.T) {
+	t.Parallel()
+
+	// Each pattern expands to few patterns, but only after rebuilding a
+	// long pattern once per brace group, so it comes back as it is.
+	tcs := map[string]struct {
+		pattern string
+	}{
+		"many single-alternative groups": {
+			pattern: strings.Repeat("{a}", 20000) + ".yaml",
+		},
+		"deeply nested group": {
+			pattern: strings.Repeat("{", 20000) + "a" + strings.Repeat("}", 20000) + ".yaml",
+		},
+		"long chain after branching groups": {
+			pattern: strings.Repeat("{a,b}", 10) + strings.Repeat("{a}", 1300) + ".yaml",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, []string{tc.pattern}, filepaths.ExpandBraces(tc.pattern))
+		})
+	}
+}
+
 func TestExpandBraces(t *testing.T) {
 	t.Parallel()
 
