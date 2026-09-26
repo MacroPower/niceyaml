@@ -307,14 +307,20 @@ func liftHeaderComments(docs []*document) {
 
 // trailingCommentsStart returns the index of the first token in the run of
 // comments that closes tks, where each comment sits on a line below the
-// last token of any other type. Returns len(tks) when no comment closes
-// tks, or when the token before the run is a "---" header, whose
-// document the comments below it belong to.
+// last token of any other type that holds text. That token ends on the
+// line where its text starts plus the line breaks within its text. The
+// spaces, tabs, and line breaks around the text do not count, because the
+// lexer can end a token with a line break and the indentation of the next
+// line. YAML reads other Unicode spaces, such as U+00A0, as text. Returns
+// len(tks) when no comment closes tks, or when the token before the run
+// is a "---" header, whose document the comments below it belong to.
 func trailingCommentsStart(tks token.Tokens) int {
 	last := -1
 
 	for i, tk := range tks {
-		if tk.Type != token.CommentType {
+		// The lexer gives an empty block scalar a token with no text at
+		// the position of the token after it, which can be a comment.
+		if tk.Type != token.CommentType && strings.Trim(tk.Origin, " \t\r\n") != "" {
 			last = i
 		}
 	}
@@ -323,11 +329,11 @@ func trailingCommentsStart(tks token.Tokens) int {
 		return len(tks)
 	}
 
-	end := tks[last].Position.Line + countLineBreaks(tokens.TrimLineEnding(tks[last].Origin))
+	end := tks[last].Position.Line + countLineBreaks(strings.Trim(tks[last].Origin, " \t\r\n"))
 	start := len(tks)
 
 	for i := len(tks) - 1; i > last; i-- {
-		if tks[i].Position == nil || tks[i].Position.Line <= end {
+		if tks[i].Type != token.CommentType || tks[i].Position == nil || tks[i].Position.Line <= end {
 			break
 		}
 

@@ -611,6 +611,111 @@ func TestDocument_Preamble(t *testing.T) {
 				{preamble: "# note\n---\n", content: "b: 2\n"},
 			},
 		},
+		"comment after a block scalar that opens with a blank line": {
+			input: "a: |\n\n  x\n\n# note\n---\nb: 2\n",
+			want: []doc{
+				{content: "a: |\n\n  x\n\n"},
+				{preamble: "# note\n---\n", content: "b: 2\n"},
+			},
+		},
+		"comment after an empty block scalar": {
+			input: "a: |\n# note\n---\nb: 2\n",
+			want: []doc{
+				{content: "a: |\n"},
+				{preamble: "# note\n---\n", content: "b: 2\n"},
+			},
+		},
+		"comment after a value on the next line": {
+			input: "a:\n  b\n# note\n---\nc: 1\n",
+			want: []doc{
+				{content: "a:\n  b\n"},
+				{preamble: "# note\n---\n", content: "c: 1\n"},
+			},
+		},
+		"comment after a quoted value on the next line": {
+			input: "a:\n  'q'\n# note\n---\nc: 1\n",
+			want: []doc{
+				{content: "a:\n  'q'\n"},
+				{preamble: "# note\n---\n", content: "c: 1\n"},
+			},
+		},
+		"comment after a sequence entry on the next line": {
+			input: "-\n  y\n# note\n---\nc: 1\n",
+			want: []doc{
+				{content: "-\n  y\n"},
+				{preamble: "# note\n---\n", content: "c: 1\n"},
+			},
+		},
+		"comment after a value below blank lines": {
+			input: "a:\n\n\n  x\n# note\n---\nc: 1\n",
+			want: []doc{
+				{content: "a:\n\n\n  x\n"},
+				{preamble: "# note\n---\n", content: "c: 1\n"},
+			},
+		},
+		"comment after a value on the next line with crlf": {
+			input: "a:\r\n  b\r\n# note\r\n---\r\nb: 2\r\n",
+			want: []doc{
+				{content: "a:\r\n  b\r\n"},
+				{preamble: "# note\r\n---\r\n", content: "b: 2\r\n"},
+			},
+		},
+		"indented comment after a value": {
+			input: "a: 1\n  # note\n---\nb: 2\n",
+			want: []doc{
+				{content: "a: 1\n"},
+				{preamble: "# note\n---\n", content: "b: 2\n"},
+			},
+		},
+		"indented comment after a nested value": {
+			input: "a:\n  b: 1\n  # note\n---\nc: 1\n",
+			want: []doc{
+				{content: "a:\n  b: 1\n"},
+				{preamble: "# note\n---\n", content: "c: 1\n"},
+			},
+		},
+		"indented comment after a nested block scalar": {
+			input: "a:\n  b: |\n    x\n  # note\n---\nc: 1\n",
+			want: []doc{
+				{content: "a:\n  b: |\n    x\n"},
+				{preamble: "# note\n---\n", content: "c: 1\n"},
+			},
+		},
+		"indented comment after a nested value with crlf": {
+			input: "a:\r\n  b: 1\r\n  # note\r\n---\r\nc: 1\r\n",
+			want: []doc{
+				{content: "a:\r\n  b: 1\r\n"},
+				{preamble: "# note\r\n---\r\n", content: "c: 1\r\n"},
+			},
+		},
+		"comment on the line of a value on the next line": {
+			input: "a:\n  b # same\n---\nc: 1\n",
+			want: []doc{
+				{content: "a:\n  b # same\n"},
+				{preamble: "---\n", content: "c: 1\n"},
+			},
+		},
+		"comment on the line of a no-break space value": {
+			input: "a:\n  \u00a0 # same\n---\nc: 1\n",
+			want: []doc{
+				{content: "a:\n  \u00a0 # same\n"},
+				{preamble: "---\n", content: "c: 1\n"},
+			},
+		},
+		"comment on the last line of a value that opens with a no-break space": {
+			input: "a:\n  \u00a0\n  x # same\n---\nc: 1\n",
+			want: []doc{
+				{content: "a:\n  \u00a0\n  x # same\n"},
+				{preamble: "---\n", content: "c: 1\n"},
+			},
+		},
+		"comment on the last line of a value that opens with an ideographic space": {
+			input: "a: \u3000\n  x # same\n---\nc: 1\n",
+			want: []doc{
+				{content: "a: \u3000\n  x # same\n"},
+				{preamble: "---\n", content: "c: 1\n"},
+			},
+		},
 		"comment on the content line above a later header": {
 			input: "a: 1 # same line\n---\nb: 2\n",
 			want: []doc{
