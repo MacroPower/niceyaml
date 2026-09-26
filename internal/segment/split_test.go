@@ -235,6 +235,95 @@ func TestSplit_LineEndings(t *testing.T) {
 	}
 }
 
+func TestSplit_BlankLinesBeforeExplicitKey(t *testing.T) {
+	t.Parallel()
+
+	// The lexer drops the blank lines between a comment, a quoted scalar,
+	// or a flow collection and a "?" or ":" indicator after it, and a
+	// blank line from a run of them after a double-quoted scalar that
+	// holds a tab. Tokenize gives them back, so Split keeps every line and
+	// its number.
+	tcs := map[string]struct {
+		input       string
+		wantContent []string
+		wantNumbers []int
+	}{
+		"key after a comment": {
+			input:       "# c\n\n? b\n: c\n",
+			wantContent: []string{"# c", "", "? b", ": c"},
+			wantNumbers: []int{1, 2, 3, 4},
+		},
+		"key after a quoted scalar": {
+			input:       "a: 'x'\n\n? b\n: c\n",
+			wantContent: []string{"a: 'x'", "", "? b", ": c"},
+			wantNumbers: []int{1, 2, 3, 4},
+		},
+		"key after a flow sequence": {
+			input:       "tags: [a, b]\n\n? key\n: value\n",
+			wantContent: []string{"tags: [a, b]", "", "? key", ": value"},
+			wantNumbers: []int{1, 2, 3, 4},
+		},
+		"nested key after a flow sequence": {
+			input:       "a:\n  b: [x]\n\n  ? k\n  : v\n",
+			wantContent: []string{"a:", "  b: [x]", "", "  ? k", "  : v"},
+			wantNumbers: []int{1, 2, 3, 4, 5},
+		},
+		"key after blank lines": {
+			input:       "\n\n? b\n: c\n",
+			wantContent: []string{"", "", "? b", ": c"},
+			wantNumbers: []int{1, 2, 3, 4},
+		},
+		"crlf key after a comment": {
+			input:       "# c\r\n\r\n? b\r\n",
+			wantContent: []string{"# c", "", "? b"},
+			wantNumbers: []int{1, 2, 3},
+		},
+		"crlf key after a blank line the lexer rewrites": {
+			input:       "x:\r\n  a: \"t\tb\"\r\n \t\r\n  \r\n? b\r\n",
+			wantContent: []string{"x:", "  a: \"t\tb\"", " \t", "", "? b"},
+			wantNumbers: []int{1, 2, 3, 4, 5},
+		},
+		"plain scalar after a blank line of spaces": {
+			input:       "t: \"a\tb\"\n  \n  r'\n- e\n",
+			wantContent: []string{"t: \"a\tb\"", "", "  r'", "- e"},
+			wantNumbers: []int{1, 2, 3, 4},
+		},
+		"plain scalar after blank lines of spaces": {
+			input:       "t: \"a\tb\"\n  \n  \n  r'\n- e\n",
+			wantContent: []string{"t: \"a\tb\"", "", "", "  r'", "- e"},
+			wantNumbers: []int{1, 2, 3, 4, 5},
+		},
+		"key after blank lines of spaces": {
+			input:       "a: \"t\tb\"\n  \n  \nc: 1\n",
+			wantContent: []string{"a: \"t\tb\"", "", "", "c: 1"},
+			wantNumbers: []int{1, 2, 3, 4},
+		},
+		"comment after blank lines of spaces": {
+			input:       "a: \"t\tb\"\n  \n  \n# c\nd: 1\ne: 2\n",
+			wantContent: []string{"a: \"t\tb\"", "", "", "# c", "d: 1", "e: 2"},
+			wantNumbers: []int{1, 2, 3, 4, 5, 6},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			lines := segment.Split(tokens.Tokenize(tc.input))
+
+			assert.Equal(t, tc.wantContent, lineContents(lines))
+			assert.Equal(t, tc.wantNumbers, lineNumbers(lines))
+
+			// Every part on a line reports that line's number.
+			for _, l := range lines {
+				for _, seg := range l.Segments {
+					assert.Equal(t, l.Number, seg.Part().Position.Line, "part %q", seg.Part().Origin)
+				}
+			}
+		})
+	}
+}
+
 func TestSplit_CRLFSplitOffset(t *testing.T) {
 	t.Parallel()
 

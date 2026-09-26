@@ -266,6 +266,148 @@ func TestTokenize_RepairsPositionsAfterTruncatedLastToken(t *testing.T) {
 	assert.Equal(t, 10, x.Position.Offset)
 }
 
+func TestTokenize_RestoresDroppedLineBreaks(t *testing.T) {
+	t.Parallel()
+
+	// The lexer drops the line breaks and indentation between some tokens
+	// and a "?" or ":" indicator that follows them, and a blank line from
+	// a run of them after a double-quoted scalar that holds a tab.
+	// Tokenize puts them back at the start of the later token's Origin, so
+	// the Origins ahead of each token's text hold as many line breaks as
+	// the source does. The want field holds the joined Origins where they
+	// differ from the input, because the lexer drops trailing spaces and
+	// Tokenize gives back a blank line as a bare line ending.
+	tcs := map[string]struct {
+		input string
+		want  string
+	}{
+		"key after a flow sequence": {
+			input: "tags: [a, b]\n\n? key\n: value\n",
+		},
+		"value after a flow mapping": {
+			input: "a: {x: y}\n\n: v\n",
+		},
+		"key after a quoted scalar": {
+			input: "a: 'x'\n\n? b\n: c\n",
+		},
+		"key after an alias": {
+			input: "a: *x\n\n? b\n",
+		},
+		"key after an empty value": {
+			input: "a:\n\n? b\n: c\n",
+		},
+		"key after a document header": {
+			input: "---\n\n? b\n",
+		},
+		"key after a line comment": {
+			input: "a: 1 # note\n\n? k\n",
+		},
+		"key after a comment": {
+			input: "# c\n\n? k\n",
+		},
+		"key after a blank line": {
+			input: "\n? k\n: v\n",
+		},
+		"key after blank lines": {
+			input: "\n\n? b\n: c\n",
+		},
+		"nested key after a flow sequence": {
+			input: "a:\n  b: [x]\n\n  ? k\n  : v\n",
+		},
+		"crlf key after a comment": {
+			input: "# c\r\n\r\n? k\r\n",
+		},
+		"plain scalar after a blank line of spaces": {
+			input: "t: \"a\tb\"\n  \n  r'\n- e\n",
+			want:  "t: \"a\tb\"\n\n  r'\n- e\n",
+		},
+		"plain scalar after blank lines of spaces": {
+			input: "t: \"a\tb\"\n  \n  \n  r'\n- e\n",
+			want:  "t: \"a\tb\"\n\n\n  r'\n- e\n",
+		},
+		"key after blank lines of spaces": {
+			input: "a: \"t\tb\"\n  \n  \nc: 1\n",
+			want:  "a: \"t\tb\"\n\n\nc: 1\n",
+		},
+		"comment after blank lines of spaces": {
+			input: "a: \"t\tb\"\n  \n  \n# c\nd: 1\ne: 2\n",
+			want:  "a: \"t\tb\"\n\n\n# c\nd: 1\ne: 2\n",
+		},
+		"crlf key after a blank line the lexer rewrites": {
+			// The lexer turns the CRLF in front of the invalid blank line
+			// into "\n".
+			input: "x:\r\n  a: \"t\tb\"\r\n \t\r\n  \r\n? b\r\n",
+			want:  "x:\r\n  a: \"t\tb\"\n \t\r\n\r\n? b\r\n",
+		},
+		"key after a blank line with a tab": {
+			// A tab in front of a line break in its Origin makes the
+			// parser reject the key.
+			input: "a: \"t\tb\"\n \t\nb: 1\n",
+			want:  "a: \"t\tb\"\n\nb: 1\n",
+		},
+		"key after trailing spaces the lexer drops": {
+			// The lexer drops the spaces after the flow mapping, and the
+			// indentation of the next line it keeps must not repeat.
+			input: "{a: b}  \n \t\n? k\n",
+			want:  "{a: b}\n \t\n? k\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			runes := []rune(tc.input)
+
+			var joined strings.Builder
+
+			for i, tk := range tokens.Tokenize(tc.input) {
+				require.NotNil(t, tk.Position, "token %d", i)
+
+				text := firstTextLine(tk.Origin)
+				if text != "" {
+					// The line breaks in the Origins ahead of the token
+					// and in the whitespace its own Origin opens with add
+					// up to the lines above its text.
+					lead := tk.Origin[:len(tk.Origin)-len(strings.TrimLeft(tk.Origin, " \t\r\n"))]
+					assert.Equal(
+						t,
+						tk.Position.Line,
+						1+countLineBreaks(joined.String()+lead),
+						"token %d %q origins",
+						i,
+						tk.Origin,
+					)
+
+					// The position names the rune of the source where the
+					// text starts.
+					at := tk.Position.Offset - 1
+					require.GreaterOrEqual(t, at, 0, "token %d %q", i, tk.Origin)
+					require.LessOrEqual(t, at, len(runes), "token %d %q", i, tk.Origin)
+
+					before := string(runes[:at])
+					lastBreak := strings.LastIndexAny(before, "\r\n")
+
+					assert.Equal(t, 1+countLineBreaks(before), tk.Position.Line, "token %d %q line", i, tk.Origin)
+
+					wantCol := utf8.RuneCountInString(before[lastBreak+1:]) + 1
+					assert.Equal(t, wantCol, tk.Position.Column, "token %d %q column", i, tk.Origin)
+					assert.True(t, strings.HasPrefix(string(runes[at:]), text), "token %d %q at %d", i, tk.Origin, at)
+				}
+
+				joined.WriteString(tk.Origin)
+			}
+
+			want := tc.want
+			if want == "" {
+				want = tc.input
+			}
+
+			assert.Equal(t, want, joined.String())
+		})
+	}
+}
+
 func TestTokenize(t *testing.T) {
 	t.Parallel()
 
@@ -1250,6 +1392,7 @@ var positionCorpus = map[string]string{
 	"directive":                           "%YAML 1.2\n---\na: 1\n",
 	"several documents":                   "a: 1\n---\nb: 2\n...\n# tail\nc: 3\n",
 	"blank lines":                         "a: 1\n\n\nb: 2\n",
+	"blank line with a tab after a quote": "a: \"t\tb\"\n \t\nb: 1\n",
 	"key with trailing spaces":            "a  : 1\n",
 	"tab after a colon":                   "a:\t1\n",
 	"wide runes":                          "a: 日本 x\nb: é\n日: 1\n",

@@ -18,7 +18,12 @@ import (
 // swallows the characters after it into an invalid token, and a "\x", "\u",
 // or "\U" escape in a double-quoted scalar truncates the token's Origin at
 // the escape, leaving the text before the escape and a closing quote, so the
-// rest of the scalar never reaches the stream. [SplitDocuments] cuts the
+// rest of the scalar never reaches the stream. The lexer also drops the line
+// breaks and indentation in front of some tokens, such as the blank lines
+// before a "?" or ":" indicator that follows a flow collection, a quoted
+// scalar, or a comment. Tokenize gives them back at the start of that
+// token's Origin, with each blank line as a bare line ending, the way the
+// lexer keeps the blank lines it does not drop. [SplitDocuments] cuts the
 // stream into one stream per document.
 //
 // Tokenize drops a UTF-8 byte order mark where YAML allows one: at the
@@ -220,7 +225,9 @@ func IsPlaceholder(tk *token.Token) bool {
 // text starts, so Line, Column, and Offset agree with the source whatever
 // the lexer counted. It walks src once from left to right, since each
 // token starts at or after the end of the text before it, and leaves
-// IndentNum and IndentLevel as they are.
+// IndentNum and IndentLevel as they are. It gives each token the line
+// breaks the lexer dropped in front of it, so the Origins ahead of a
+// token's text hold as many lines as the source does.
 func repairPositions(src string, tks token.Tokens) {
 	p := &positioner{src: []rune(src), line: 1, col: 1, reliable: true}
 
@@ -246,6 +253,8 @@ func repairPositions(src string, tks token.Tokens) {
 // scalar. The cursor is reliable again once a token is found by either
 // candidate.
 type positioner struct {
+	tail string // The whitespace the stream holds after the text placed last.
+
 	src []rune
 
 	cursor   int // The rune index just past the text placed so far.
@@ -261,7 +270,9 @@ type positioner struct {
 
 // place moves tk to the rune where its text starts and advances the cursor
 // past the text of every line of its Origin. A token without text sits
-// where the next text starts and leaves the cursor where it is.
+// where the next text starts and leaves the cursor where it is. When the
+// text follows the cursor past whitespace alone, place gives tk the line
+// breaks the lexer dropped from that whitespace.
 func (p *positioner) place(tk *token.Token) {
 	placed := false
 
@@ -282,7 +293,18 @@ func (p *positioner) place(tk *token.Token) {
 				p.reliable = false
 			}
 		} else {
+			// Only the whitespace between a reliable cursor and the text
+			// shows the line breaks the lexer dropped. After a token the
+			// lexer truncated or rewrote, the text sits where the lexer's
+			// Offset points instead.
+			reliable := p.reliable
+			next := p.skipSpace()
+
 			at = p.locate(tk, text)
+			if reliable && at == next {
+				p.restoreGap(tk, at)
+			}
+
 			p.setPosition(tk, at)
 
 			placed = true
@@ -293,7 +315,112 @@ func (p *positioner) place(tk *token.Token) {
 
 	if !placed {
 		p.setPosition(tk, p.skipSpace())
+
+		p.tail += tk.Origin
+
+		return
 	}
+
+	p.tail = tk.Origin[len(strings.TrimRight(tk.Origin, " \t\r\n")):]
+}
+
+// restoreGap gives tk the line breaks and indentation the lexer dropped
+// between the text placed last and the text of tk, which starts at rune
+// index at. The lexer drops them in front of a "?" or ":" indicator that
+// follows a flow collection, a quoted scalar, or a comment, and after a
+// double-quoted scalar that holds a tab it drops one line of a run of
+// blank lines. The line breaks the stream lacks go at the start of the
+// Origin as bare line endings, the way the lexer keeps the blank lines it
+// does not drop. Bare line endings keep tabs out of the Origin, and the
+// parser rejects a key whose Origin holds a tab in front of a line break.
+// When the lexer dropped every line break in front of tk, the indentation
+// of the line tk starts on goes with them. An Origin stays as it is when
+// the stream already holds every line break of the source.
+func (p *positioner) restoreGap(tk *token.Token, at int) {
+	gap := string(p.src[p.cursor:at])
+	lead := tk.Origin[:len(tk.Origin)-len(strings.TrimLeft(tk.Origin, " \t\r\n"))]
+
+	rest, ok := cutWhitespace(gap, p.tail)
+	if !ok {
+		// The lexer rewrote a line ending it kept, such as a CRLF it
+		// turned into "\n" in an invalid token, so the gap matches the
+		// stream by the count of line breaks alone.
+		_, rest = cutLineBreaks(gap, countLineBreaks(p.tail))
+	}
+
+	// The lexer keeps the last line breaks of the gap in the whitespace
+	// the Origin opens with, so the first ones of rest are the ones it
+	// dropped.
+	missing := countLineBreaks(rest) - countLineBreaks(lead)
+	if missing <= 0 {
+		return
+	}
+
+	breaks, rest := cutLineBreaks(rest, missing)
+
+	// When the lexer dropped every line break, rest is the indentation of
+	// the line tk starts on, and the Origin opens with the part of it the
+	// lexer kept.
+	if indent, ok := strings.CutSuffix(rest, lead); ok && !strings.ContainsAny(lead, "\r\n") {
+		breaks += indent
+	}
+
+	tk.Origin = breaks + tk.Origin
+}
+
+// cutLineBreaks returns the first n line breaks of s joined together,
+// dropping the spaces and tabs between them, and the rest of s after the
+// last of them. A CRLF counts as one line break.
+func cutLineBreaks(s string, n int) (string, string) {
+	var sb strings.Builder
+
+	i := 0
+
+	for n > 0 && i < len(s) {
+		switch {
+		case strings.HasPrefix(s[i:], "\r\n"):
+			sb.WriteString("\r\n")
+
+			i += 2
+			n--
+
+		case s[i] == '\r' || s[i] == '\n':
+			sb.WriteByte(s[i])
+
+			i++
+			n--
+
+		default:
+			i++
+		}
+	}
+
+	return sb.String(), s[i:]
+}
+
+// cutWhitespace returns gap without the whitespace ws the stream holds
+// for its start, and reports whether gap opens with ws. The lexer drops
+// the spaces and tabs that end a line of text and collapses a blank line
+// of spaces into a bare line ending, so ws may lack some spaces and tabs
+// of gap, but never a line break. A "\r" that ends ws leaves the "\n"
+// of a CRLF in gap, where the lexer cut the CRLF between two tokens.
+func cutWhitespace(gap, ws string) (string, bool) {
+	i := 0
+
+	for j := 0; j < len(ws); {
+		switch {
+		case i < len(gap) && gap[i] == ws[j]:
+			i++
+			j++
+
+		case i < len(gap) && (gap[i] == ' ' || gap[i] == '\t'):
+			i++
+		default:
+			return "", false
+		}
+	}
+
+	return gap[i:], true
 }
 
 // locate returns the rune index where text, the first text line of tk,

@@ -945,6 +945,23 @@ func TestSource_Content(t *testing.T) {
 				"  child: value",
 			),
 		},
+		"blank line before an explicit key": {
+			input: "tags: [a, b]\n\n? key\n: value\n",
+			want: stringtest.JoinLF(
+				"tags: [a, b]",
+				"",
+				"? key",
+				": value",
+			),
+		},
+		"explicit key after a leading blank line": {
+			input: "\n? key\n: value\n",
+			want: stringtest.JoinLF(
+				"",
+				"? key",
+				": value",
+			),
+		},
 	}
 
 	for name, tc := range tcs {
@@ -1700,6 +1717,38 @@ func TestSource_Bind(t *testing.T) {
 			"   2 | a: 1",
 			"   3 | b: 22",
 			"     |    ^^",
+		), fmt.Sprintf("%+v", err))
+	})
+
+	t.Run("path error after a blank line before an explicit key", func(t *testing.T) {
+		t.Parallel()
+
+		// The lexer drops the blank line between the flow sequence and
+		// the "?", and the source keeps it, so the key after the explicit
+		// entry keeps its line number and the excerpt shows its line.
+		keyed := niceyaml.NewSourceFromString(
+			"tags: [a, b]\n\n? key\n: value\nport: http\n",
+			niceyaml.WithName("f.yaml"),
+		)
+
+		err := keyed.Bind(niceyaml.NewError("bad port", niceyaml.AtPath(paths.Root().Child("port"))))
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Equal(t, "f.yaml:5:7: $.port: bad port", err.Error())
+
+		got, ok := bound.Range()
+		require.True(t, ok)
+		assert.Equal(t, position.NewRange(position.New(4, 6), position.New(4, 10)), got)
+
+		assert.Equal(t, stringtest.JoinLF(
+			"f.yaml:5:7: $.port: bad port",
+			"",
+			"   3 | ? key",
+			"   4 | : value",
+			"   5 | port: http",
+			"     |       ^^^^",
 		), fmt.Sprintf("%+v", err))
 	})
 
