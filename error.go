@@ -1297,17 +1297,44 @@ func isNothing(err error) bool {
 
 // text returns the text the excerpt annotates the location of e with: the
 // message of an [*Error] without the location it puts in front, since the
-// caret marks it, or the message of any other error as it is.
+// caret marks it, or the message of any other error as it is. An Error
+// that wraps a binding e adopted annotates with the text of that binding,
+// since the caret marks the location of the binding.
 func (e *SourceError) text() string {
 	if e == nil {
 		return ""
 	}
 
 	if x, ok := e.err.(*Error); ok { //nolint:errorlint // The node itself, not a chain search.
+		if e.adopted {
+			inner := boundCause(x)
+			if inner != nil {
+				return inner.text()
+			}
+		}
+
 		return x.message()
 	}
 
 	return e.err.Error()
+}
+
+// boundCause returns the [*SourceError] x reaches through the causes of
+// Errors alone, or nil when a wrapper of another kind or the end of the
+// chain comes first.
+func boundCause(x *Error) *SourceError {
+	for cur := x; cur != nil; {
+		switch next := cur.err.(type) { //nolint:errorlint // Identity of the direct child, not a chain search.
+		case *Error:
+			cur = next
+		case *SourceError:
+			return next
+		default:
+			return nil
+		}
+	}
+
+	return nil
 }
 
 // walk calls visit for every node below e in depth-first order. A nil e

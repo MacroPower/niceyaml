@@ -5298,6 +5298,29 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 		assert.Equal(t, bPath, p)
 	})
 
+	t.Run("an Error that nests errors around a binding keeps the inner message", func(t *testing.T) {
+		t.Parallel()
+
+		inner := bind(t, niceyaml.NewError("bad", niceyaml.AtPath(bPath)))
+
+		// The Error adds no text of its own, so the message is the one the
+		// inner binding annotates with, and Error still reports the
+		// position and path in front of it.
+		wrapped := bind(t, niceyaml.WrapError(inner, niceyaml.WithErrors(errors.New("zz"))))
+		assert.Equal(t, "bad", wrapped.Message())
+		assert.Equal(t, "x.yaml:2:6: $.a.b: bad", wrapped.Error())
+
+		outer := bind(t, niceyaml.NewError("outer", niceyaml.WithErrors(
+			niceyaml.WrapError(inner, niceyaml.WithErrors(errors.New("zz"))),
+		)))
+		require.NotEmpty(t, outer.Errors())
+		assert.Equal(t, "bad", outer.Errors()[0].Message())
+
+		got := niceyaml.FormatError(outer, 0)
+		assert.Contains(t, got, "^ bad")
+		assert.NotContains(t, got, "^ x.yaml:")
+	})
+
 	t.Run("an error without a location has neither", func(t *testing.T) {
 		t.Parallel()
 
