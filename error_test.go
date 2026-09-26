@@ -2313,11 +2313,12 @@ func TestError_Width_DefaultPrinter(t *testing.T) {
 	output := renderWith(err, errPrinter, 2)
 	lines := strings.Split(output, "\n")
 
-	// Should have multiple content lines due to wrapping.
+	// Should have multiple content lines due to wrapping. Each check is a
+	// single word, which stays whole on one row wherever the rows break.
 	contentLines := 0
 	for _, line := range lines {
-		if strings.Contains(line, "key") || strings.Contains(line, "this is") ||
-			strings.Contains(line, "should wrap") {
+		if strings.Contains(line, "key") || strings.Contains(line, "value") ||
+			strings.Contains(line, "limited") {
 			contentLines++
 		}
 	}

@@ -48,7 +48,9 @@ const errorConnectorWidth = 4
 // position. PrintError draws every message of the tree, the root's
 // included, with control characters as their pictures, as an excerpt
 // draws them, and wraps each message to the width [WithWrap] sets less the
-// connectors in front of it.
+// connectors in front of it. Each excerpt wraps to that width less the
+// horizontal frame of the container style, so an excerpt and its frame
+// fit the width together.
 //
 // A program configures one printer and prints its errors through it:
 //
@@ -95,10 +97,18 @@ func (p *Printer) PrintError(err error) string {
 // location has nothing to explain. Returns nothing when there is nothing
 // to show, as [niceyaml.FormatError] does.
 func (p *Printer) details(bound *niceyaml.SourceError) []string {
+	// Print wraps the gutter and content to the printer's width and draws
+	// the container's frame outside it, so the excerpts wrap to the width
+	// less the frame.
+	ex := p
+	if p.wrap > 0 {
+		ex = p.With(WithWrap(max(1, p.wrap-p.style.GetHorizontalFrameSize())))
+	}
+
 	var parts []string
 
 	for _, excerpt := range bound.Excerpts(p.contextLines) {
-		parts = append(parts, p.Print(excerpt))
+		parts = append(parts, ex.Print(excerpt))
 	}
 
 	if len(parts) > 0 {

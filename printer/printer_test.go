@@ -391,6 +391,53 @@ func TestPrinter_PrintError_Wrap(t *testing.T) {
 	assert.NotContains(t, got, " \n")
 }
 
+func TestPrinter_PrintError_WrapFitsExcerpts(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\nb: " + strings.Repeat("x", 80) + "\nc: 3\n")
+	bound := yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("b"))))
+
+	tcs := map[string]struct {
+		opts  []printer.Option
+		width int
+	}{
+		"default container": {
+			width: 30,
+		},
+		"bordered container": {
+			opts: []printer.Option{
+				printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())),
+			},
+			width: 30,
+		},
+		"gutterless": {
+			opts:  []printer.Option{printer.WithGutter(printer.NoGutter)},
+			width: 40,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := printer.New(append(tc.opts, printer.WithWrap(tc.width))...)
+
+			got := p.PrintError(bound)
+			rows := strings.Split(got, "\n")
+
+			// The tree, the blank row after it, the three source lines, and
+			// the caret row would fit in six rows without wrapping.
+			require.Greater(t, len(rows), 6, "the excerpt wraps")
+
+			// The container's frame counts toward the width, so every row of
+			// the excerpt fits it.
+			for i, row := range rows {
+				assert.LessOrEqual(t, lipgloss.Width(row), tc.width, "row %d: %q", i, row)
+			}
+		})
+	}
+}
+
 func TestPrinter_PrintError_MarksRangeWithoutStyles(t *testing.T) {
 	t.Parallel()
 
