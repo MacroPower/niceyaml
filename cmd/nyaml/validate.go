@@ -14,17 +14,14 @@ import (
 )
 
 func validateCmd() *cobra.Command {
+	var schemaRef string
+
 	cmd := &cobra.Command{
 		Use:   "validate file.yaml [file.yaml...]",
 		Short: "Validate YAML files",
 		Long:  "Validate YAML files.\nOptionally validate against a JSON schema (local file or http/https URL).\nSupports glob patterns like *.yaml.",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			schemaRef, err := cmd.Flags().GetString("schema")
-			if err != nil {
-				return fmt.Errorf("get schema flag: %w", err)
-			}
-
 			// Expand glob patterns.
 			yamlPaths, err := expandPaths(args...)
 			if err != nil {
@@ -57,7 +54,7 @@ func validateCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringP("schema", "s", "", "JSON schema file path or URL")
+	cmd.Flags().StringVarP(&schemaRef, "schema", "s", "", "JSON schema file path or URL")
 
 	return cmd
 }
