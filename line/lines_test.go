@@ -2489,11 +2489,19 @@ func TestLines_ContentRanges(t *testing.T) {
 	t.Run("space-only part contributes no range", func(t *testing.T) {
 		t.Parallel()
 
-		lines := line.NewLines(tokens.Tokenize("key:     \nnext: value\n"))
+		tks := tokens.Tokenize("a: 'x\n   \n  y'\n")
+		lines := line.NewLines(tks)
+		require.Len(t, tks, 3)
 
-		for _, r := range lines.ContentRanges(lines.TokenAt(position.New(0, 5))) {
-			assert.Greater(t, r.End.Col, r.Start.Col)
-		}
+		tk := lines.TokenAt(position.New(1, 0))
+		require.Same(t, tks[2], tk)
+
+		assert.Contains(t, lines.TokenRanges(tk),
+			position.NewRange(position.New(1, 0), position.New(1, 3)))
+		assert.Equal(t, position.Ranges{
+			position.NewRange(position.New(0, 3), position.New(0, 5)),
+			position.NewRange(position.New(2, 2), position.New(2, 4)),
+		}, lines.ContentRanges(tk))
 	})
 
 	t.Run("nil and missing tokens return nil", func(t *testing.T) {
