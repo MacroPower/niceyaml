@@ -752,7 +752,7 @@ func (m *Model) rebuildViews() {
 	m.searcherStale = true
 	m.searchIndex = -1
 
-	_, needsDiff := m.resolveRevisionSource()
+	needsDiff := m.ShowingDiff()
 
 	switch {
 	case m.viewMode == ViewModeSideBySide && needsDiff:
@@ -1083,16 +1083,15 @@ func (m *Model) revision(index int) Revision {
 // content changed, so marks the caller adds later stay off the display.
 // Returns nil when there is no revision.
 func (m *Model) getDisplayLines() *line.View {
-	rev, needsDiff := m.resolveRevisionSource()
-	if needsDiff {
+	if m.ShowingDiff() {
 		return m.getDiffResult().Unified()
 	}
 
-	if rev == nil {
-		return nil
+	if rev := m.currentRevision(); rev != nil {
+		return rev.View().Clone()
 	}
 
-	return rev.View().Clone()
+	return nil
 }
 
 // getDiffResult returns the [diff.Result] between the base revision for the
@@ -1118,24 +1117,6 @@ func (m *Model) getDiffResult() *diff.Result {
 	}
 
 	return m.diffResult
-}
-
-// resolveRevisionSource determines which revision to display for the
-// current revision state.
-//
-// Returns (revision, false) when the viewport shows a revision without a
-// diff (at the origin, or with diff mode none), (nil, false) without a
-// revision, or (nil, true) when the caller must compute a diff.
-func (m *Model) resolveRevisionSource() (Revision, bool) {
-	if !m.hasRevision() {
-		return nil, false
-	}
-
-	if !m.ShowingDiff() {
-		return m.currentRevision(), false
-	}
-
-	return nil, true
 }
 
 // paneWidth returns the width lines wrap to: the content width, or in
