@@ -1,6 +1,7 @@
 package line
 
 import (
+	"cmp"
 	"fmt"
 	"iter"
 	"slices"
@@ -167,16 +168,55 @@ func (v *View) All(spans ...position.Span) iter.Seq2[int, *Line] {
 			return
 		}
 
-		for _, i := range v.held {
-			if len(spans) > 0 && !slices.ContainsFunc(spans, func(s position.Span) bool { return s.Contains(i) }) {
-				continue
+		if len(spans) == 0 {
+			for _, i := range v.held {
+				if !yield(i, v.lines.lines[i]) {
+					return
+				}
 			}
 
-			if !yield(i, v.lines.lines[i]) {
-				return
+			return
+		}
+
+		// The merge sorts the spans and makes them disjoint, so walking
+		// the held lines of each in turn yields every selected line once,
+		// in content order, without testing each held line against every
+		// span.
+		for _, s := range mergeSpans(spans, v.lines.Len()) {
+			j, _ := slices.BinarySearch(v.held, s.Start)
+
+			for ; j < len(v.held) && v.held[j] < s.End; j++ {
+				i := v.held[j]
+				if !yield(i, v.lines.lines[i]) {
+					return
+				}
 			}
 		}
 	}
+}
+
+// mergeSpans returns spans clamped to [0, n), sorted by start, with each
+// group of spans that overlap or touch merged into one. Every index of
+// [0, n) that some span contains lies in exactly one span of the result.
+func mergeSpans(spans []position.Span, n int) position.Spans {
+	clamped := position.Spans(spans).Clamp(0, n)
+	slices.SortFunc(clamped, func(a, b position.Span) int {
+		return cmp.Compare(a.Start, b.Start)
+	})
+
+	merged := clamped[:0]
+
+	for _, s := range clamped {
+		if last := len(merged) - 1; last >= 0 && s.Start <= merged[last].End {
+			merged[last].End = max(merged[last].End, s.End)
+
+			continue
+		}
+
+		merged = append(merged, s)
+	}
+
+	return merged
 }
 
 // Flag returns the [Flag] of line i. The zero value is [FlagDefault].

@@ -168,6 +168,86 @@ func TestView_All(t *testing.T) {
 		assert.Equal(t, []int{1, 2}, indices)
 	})
 
+	t.Run("spans select held lines in content order", func(t *testing.T) {
+		t.Parallel()
+
+		six := stringtest.Input(`
+			a: 1
+			b: 2
+			c: 3
+			d: 4
+			e: 5
+			f: 6
+		`)
+
+		// Sparse slices the view to lines 0, 2, and 5 before selecting.
+		sparse := []position.Span{position.NewSpan(0, 1), position.NewSpan(2, 3), position.NewSpan(5, 6)}
+
+		tcs := map[string]struct {
+			held  []position.Span
+			spans []position.Span
+			want  []int
+		}{
+			"out of order": {
+				spans: []position.Span{position.NewSpan(4, 6), position.NewSpan(0, 2)},
+				want:  []int{0, 1, 4, 5},
+			},
+			"nested": {
+				spans: []position.Span{position.NewSpan(0, 5), position.NewSpan(1, 2)},
+				want:  []int{0, 1, 2, 3, 4},
+			},
+			"overlapping": {
+				spans: []position.Span{position.NewSpan(2, 5), position.NewSpan(0, 3)},
+				want:  []int{0, 1, 2, 3, 4},
+			},
+			"touching": {
+				spans: []position.Span{position.NewSpan(2, 4), position.NewSpan(0, 2)},
+				want:  []int{0, 1, 2, 3},
+			},
+			"empty span among real ones": {
+				spans: []position.Span{position.NewSpan(4, 5), position.NewSpan(3, 3), position.NewSpan(1, 2)},
+				want:  []int{1, 4},
+			},
+			"negative start": {
+				spans: []position.Span{position.NewSpan(-3, 2)},
+				want:  []int{0, 1},
+			},
+			"sparse view": {
+				held:  sparse,
+				spans: []position.Span{position.NewSpan(1, 5)},
+				want:  []int{2},
+			},
+			"sparse view with overlapping spans": {
+				held:  sparse,
+				spans: []position.Span{position.NewSpan(4, 6), position.NewSpan(2, 5), position.NewSpan(0, 3)},
+				want:  []int{0, 2, 5},
+			},
+			"spans over lines the view does not hold": {
+				held:  sparse,
+				spans: []position.Span{position.NewSpan(3, 5), position.NewSpan(1, 2)},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				view := newTestView(t, six, 6)
+				if tc.held != nil {
+					view = view.Slice(tc.held...)
+				}
+
+				var got []int
+
+				for i := range view.All(tc.spans...) {
+					got = append(got, i)
+				}
+
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	})
+
 	t.Run("index reaches decoration", func(t *testing.T) {
 		t.Parallel()
 
