@@ -14,7 +14,7 @@ Package `niceyaml` combines the powers of [go-yaml][goccy/go-yaml], [bubbletea][
 
 It enables **friendly and predictable handling of YAML-compatible documents** in your **CLI** or **TUI** applications, and includes:
 
-- [`Source`][niceyaml.Source] **style overlay** and **annotation** system
+- [`line.View`][niceyaml/line.View] **style overlay** and **annotation** system over a [`Source`][niceyaml.Source]
 - Pretty [`printer`][niceyaml/printer] with [themes][niceyaml/style/theme]
 - Rich [`Error`][niceyaml.Error] display using the above systems
 - Source [**diffs**][niceyaml/diff] between revisions of a file
@@ -65,7 +65,7 @@ Module `niceyaml` adds a few abstractions on top of [go-yaml][goccy/go-yaml]:
 - [`line.Line`][niceyaml/line] - Tokens for a single line of YAML content
 - [`line.Lines`][niceyaml/line] - A collection of `Line`s, which never changes once built
 - [`line.View`][niceyaml/line] - One rendering of a `Lines` value, carrying the overlays, annotations, and flags the printer draws
-- [`niceyaml.Source`][niceyaml.Source] - A YAML file, which parses into one `Node` per document, decodes, wraps errors, and exposes its `Lines` view
+- [`niceyaml.Source`][niceyaml.Source] - A YAML file, which parses into one `Node` per document, decodes, wraps errors, exposes its `Lines`, and returns fresh `View`s over them
 
 Most use cases will only need to interact with `Source`. Its `Lines` method returns the `line.Lines` that the [`finder`][niceyaml/finder] and [`diff`][niceyaml/diff] packages read, and its `View` method returns a fresh `line.View` over them for the [`printer`][niceyaml/printer]. Diffs return plain views, since interleaved lines from two revisions are not a YAML document.
 
@@ -115,6 +115,7 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [niceyaml/encoder]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/encoder
 [niceyaml/finder]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/finder
 [niceyaml/line]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/line
+[niceyaml/line.View]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/line#View
 [niceyaml/printer]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/printer
 [niceyaml/style/theme]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/style/theme
 [niceyaml/style/kind.Kind]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/style/kind#Kind
