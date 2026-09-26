@@ -6,7 +6,7 @@
   <a href="https://pkg.go.dev/go.jacobcolvin.com/niceyaml"><img alt="Go Reference" src="https://pkg.go.dev/badge/go.jacobcolvin.com/niceyaml.svg"></a>
   <a href="https://goreportcard.com/report/go.jacobcolvin.com/niceyaml"><img alt="Go Report Card" src="https://goreportcard.com/badge/go.jacobcolvin.com/niceyaml"></a>
   <a href="https://codecov.io/gh/macropower/niceyaml"><img src="https://codecov.io/gh/macropower/niceyaml/graph/badge.svg?token=4TNYTL2WXV"/></a>
-  <a href="#-installation"><img alt="Latest tag" src="https://img.shields.io/github/v/tag/macropower/niceyaml?label=version&sort=semver"></a>
+  <a href="#installation"><img alt="Latest tag" src="https://img.shields.io/github/v/tag/macropower/niceyaml?label=version&sort=semver"></a>
   <a href="https://github.com/macropower/niceyaml/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/macropower/niceyaml"></a>
 </p>
 
