@@ -604,15 +604,16 @@ type location struct {
 }
 
 // locate resolves l, the location of an [Error], and returns the node it
-// is bound to: a range or a position as it is, and otherwise the token
-// the path resolves to in the document, at the position of the token,
-// with the base of b in front of the path. A path beside a range or a
-// position names the value in the message and is not resolved, so a
-// range locates the error whether or not the document holds the path.
-// The node is the one b binds with, or, when b routes, the root of the
-// document [binder.route] picks for the location. An empty l is
-// errUnlocated, and a path bound where no document resolves it is
-// [ErrPathNeedsDocument].
+// is bound to. A range or a position is the location as it is, and a
+// path locates the error at the position of the token it resolves to in
+// the document. [anchorOf] joins the base of every Error from [Rebase]
+// above that Error in front of the path, so locate resolves the path as
+// it is. A path beside a range or a position names the value in the
+// message and is not resolved, so a range locates the error whether or
+// not the document holds the path. The node is the one b binds with, or,
+// when b routes, the root of the document [binder.route] picks for the
+// location. An empty l is errUnlocated, and a path bound where no
+// document resolves it is [ErrPathNeedsDocument].
 func locate(b binder, l locus) (location, *Node, error) {
 	switch loc := l.loc.(type) {
 	case position.Range:
@@ -623,7 +624,7 @@ func locate(b binder, l locus) (location, *Node, error) {
 	}
 
 	if l.hasPath {
-		return locatePath(b, b.base.Join(l.path))
+		return locatePath(b, l.path)
 	}
 
 	return location{}, b.node, errUnlocated
@@ -776,11 +777,8 @@ const DefaultContextLines = 2
 // binder must not, since the documents are not built until the parse
 // ends, binds to the source alone.
 type binder struct {
-	src  *Source
-	node *Node
-	// The path the paths of the errors bound here are written from: the
-	// root, joined with the base of every Error from Rebase above them.
-	base  paths.Path
+	src   *Source
+	node  *Node
 	route bool
 }
 
@@ -1016,6 +1014,8 @@ func newSourceError(err error, b binder) *SourceError {
 // rather than a violation of its own, so its children join the children
 // of e.
 func (e *SourceError) collect(err error, b binder) {
+	base := paths.Root()
+
 	for cur := err; !isNothing(cur); {
 		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
 		case *SourceError:
@@ -1025,11 +1025,11 @@ func (e *SourceError) collect(err error, b binder) {
 
 		case *Error:
 			if x.rebased {
-				b.base = b.base.Join(x.base)
+				base = base.Join(x.base)
 			}
 
 			for _, n := range x.errors {
-				e.addChild(n, b)
+				e.addChild(n, b, base)
 			}
 
 			cur = x.err
@@ -1039,7 +1039,7 @@ func (e *SourceError) collect(err error, b binder) {
 
 		case interface{ Unwrap() []error }:
 			for _, branch := range x.Unwrap() {
-				e.addChild(branch, b)
+				e.addChild(branch, b, base)
 			}
 
 			return
@@ -1052,12 +1052,12 @@ func (e *SourceError) collect(err error, b binder) {
 
 // addChild binds n as a child of e. A binding is the child as it is, and
 // any other error binds where e binds, or takes over the binding it
-// wraps. A child under a base from [Rebase] is bound as a rebased Error
-// at that base, so its own message and [SourceError.Path] carry the
-// joined path as the message of the root does, and the base moves off
-// the binder so the child's location does not join it twice. A nil n,
-// or a nil pointer, adds nothing.
-func (e *SourceError) addChild(n error, b binder) {
+// wraps. The base is the base of every Error from [Rebase] above n, and
+// a child under a base other than the root binds as a rebased Error at
+// that base, so its own message and [SourceError.Path] carry the joined
+// path as the message of the root does. A nil n, or a nil pointer, adds
+// nothing.
+func (e *SourceError) addChild(n error, b binder, base paths.Path) {
 	if isNothing(n) {
 		return
 	}
@@ -1068,12 +1068,7 @@ func (e *SourceError) addChild(n error, b binder) {
 		return
 	}
 
-	if !b.base.IsRoot() {
-		n = Rebase(n, b.base)
-		b.base = paths.Root()
-	}
-
-	e.errors = append(e.errors, newSourceError(n, b))
+	e.errors = append(e.errors, newSourceError(rebaseChild(n, base), b))
 }
 
 // Source returns the [*Source] the error is bound to. A nil SourceError is
