@@ -24,15 +24,9 @@ import (
 // below the viewport.
 const statusBarHeight = 2
 
-// fileEntry holds a file path and its contents.
-type fileEntry struct {
-	path    string
-	content []byte
-}
-
 type modelOptions struct {
 	search      string
-	files       []fileEntry
+	sources     []*niceyaml.Source
 	lineNumbers bool
 }
 
@@ -86,12 +80,8 @@ func newModel(opts *modelOptions) model {
 		lineNumbers:  opts.lineNumbers,
 	}
 
-	labels := revisionLabels(opts.files)
-	for i, f := range opts.files {
-		m.viewport.AddRevision(niceyaml.NewSourceFromString(
-			string(f.content),
-			niceyaml.WithName(labels[i]),
-		))
+	for _, source := range opts.sources {
+		m.viewport.AddRevision(source)
 	}
 
 	// The viewport centers a match in the rows it has, and it has none
@@ -106,18 +96,18 @@ func newModel(opts *modelOptions) model {
 // labels it, so a full path stays out of the bar. Two files sharing a base
 // name, such as a/config.yaml and b/config.yaml, each fall back to the path
 // as the user typed it, so the bar tells the revisions apart.
-func revisionLabels(files []fileEntry) []string {
-	labels := make([]string, len(files))
-	counts := make(map[string]int, len(files))
+func revisionLabels(paths []string) []string {
+	labels := make([]string, len(paths))
+	counts := make(map[string]int, len(paths))
 
-	for i, f := range files {
-		labels[i] = filepath.Base(f.path)
+	for i, path := range paths {
+		labels[i] = filepath.Base(path)
 		counts[labels[i]]++
 	}
 
-	for i, f := range files {
+	for i, path := range paths {
 		if counts[labels[i]] > 1 {
-			labels[i] = f.path
+			labels[i] = path
 		}
 	}
 

@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/bubbles/yamlviewport"
 )
 
@@ -129,56 +130,56 @@ func TestUpdatePasteControlCharacters(t *testing.T) {
 func TestRevisionLabel(t *testing.T) {
 	t.Parallel()
 
-	three := []fileEntry{
-		{path: "a.yaml", content: []byte("a: 1\n")},
-		{path: "b.yaml", content: []byte("a: 2\n")},
-		{path: "c.yaml", content: []byte("a: 3\n")},
+	three := []*niceyaml.Source{
+		niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("a.yaml")),
+		niceyaml.NewSourceFromString("a: 2\n", niceyaml.WithName("b.yaml")),
+		niceyaml.NewSourceFromString("a: 3\n", niceyaml.WithName("c.yaml")),
 	}
 
 	tcs := map[string]struct {
-		files    []fileEntry
+		sources  []*niceyaml.Source
 		diffMode yamlviewport.DiffMode
 		index    int
 		want     string
 	}{
 		"single revision": {
-			files:    three[:1],
+			sources:  three[:1],
 			diffMode: yamlviewport.DiffModeAdjacent,
 			index:    0,
 			want:     "",
 		},
 		"first revision": {
-			files:    three,
+			sources:  three,
 			diffMode: yamlviewport.DiffModeAdjacent,
 			index:    0,
 			want:     "rev 1/3",
 		},
 		"middle revision adjacent": {
-			files:    three,
+			sources:  three,
 			diffMode: yamlviewport.DiffModeAdjacent,
 			index:    1,
 			want:     "diff 2/3",
 		},
 		"middle revision origin": {
-			files:    three,
+			sources:  three,
 			diffMode: yamlviewport.DiffModeOrigin,
 			index:    1,
 			want:     "diff 2/3 origin",
 		},
 		"middle revision none": {
-			files:    three,
+			sources:  three,
 			diffMode: yamlviewport.DiffModeNone,
 			index:    1,
 			want:     "rev 2/3 none",
 		},
 		"last revision adjacent": {
-			files:    three,
+			sources:  three,
 			diffMode: yamlviewport.DiffModeAdjacent,
 			index:    2,
 			want:     "diff 3/3",
 		},
 		"last revision none": {
-			files:    three,
+			sources:  three,
 			diffMode: yamlviewport.DiffModeNone,
 			index:    2,
 			want:     "rev 3/3 none",
@@ -189,7 +190,7 @@ func TestRevisionLabel(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := newModel(&modelOptions{files: tc.files})
+			m := newModel(&modelOptions{sources: tc.sources})
 			m.viewport.SetDiffMode(tc.diffMode)
 			m.viewport.GotoRevision(tc.index)
 
@@ -223,15 +224,7 @@ func TestRevisionLabels(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			files := make([]fileEntry, len(tc.paths))
-			for i, path := range tc.paths {
-				files[i] = fileEntry{path: path, content: []byte("a: 1\n")}
-			}
-
-			assert.Equal(t, tc.want, revisionLabels(files))
-
-			m := newModel(&modelOptions{files: files})
-			assert.Equal(t, tc.want, m.viewport.RevisionNames())
+			assert.Equal(t, tc.want, revisionLabels(tc.paths))
 		})
 	}
 }
@@ -288,14 +281,16 @@ func TestInitialSearchScrollsLikeALaterOne(t *testing.T) {
 		fmt.Fprintf(lines, "k%d: v\n", i)
 	}
 
-	files := []fileEntry{{path: "a.yaml", content: []byte(lines.String())}}
+	sources := []*niceyaml.Source{
+		niceyaml.NewSourceFromString(lines.String(), niceyaml.WithName("a.yaml")),
+	}
 	size := tea.WindowSizeMsg{Width: 40, Height: 14}
 
-	sized, _ := newModel(&modelOptions{files: files, search: "k30"}).Update(size)
+	sized, _ := newModel(&modelOptions{sources: sources, search: "k30"}).Update(size)
 	got, ok := sized.(model)
 	require.True(t, ok)
 
-	sized, _ = newModel(&modelOptions{files: files}).Update(size)
+	sized, _ = newModel(&modelOptions{sources: sources}).Update(size)
 	want, ok := sized.(model)
 	require.True(t, ok)
 
@@ -317,7 +312,9 @@ func TestBaseViewHeight(t *testing.T) {
 			t.Parallel()
 
 			m := newModel(&modelOptions{
-				files: []fileEntry{{path: "a.yaml", content: []byte("a: 1\nb: 2\nc: 3\n")}},
+				sources: []*niceyaml.Source{
+					niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n", niceyaml.WithName("a.yaml")),
+				},
 			})
 
 			updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: height})
@@ -335,7 +332,9 @@ func TestBaseViewNoRows(t *testing.T) {
 	// A terminal with no rows, as before the first window size arrives,
 	// renders nothing rather than a status bar the join counts as rows.
 	m := newModel(&modelOptions{
-		files: []fileEntry{{path: "a.yaml", content: []byte("a: 1\n")}},
+		sources: []*niceyaml.Source{
+			niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("a.yaml")),
+		},
 	})
 
 	assert.Empty(t, m.baseView())

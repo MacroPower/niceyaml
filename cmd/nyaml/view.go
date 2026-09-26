@@ -2,11 +2,12 @@ package main
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 
 	tea "charm.land/bubbletea/v2"
+
+	"go.jacobcolvin.com/niceyaml"
 )
 
 func viewCmd() *cobra.Command {
@@ -25,20 +26,15 @@ func viewCmd() *cobra.Command {
 				return err
 			}
 
-			files := make([]fileEntry, 0, len(paths))
-			for _, path := range paths {
-				content, err := os.ReadFile(path) //nolint:gosec // User-provided file paths are intentional.
-				if err != nil {
-					return fmt.Errorf("read file %s: %w", path, err)
-				}
-
-				files = append(files, fileEntry{path: path, content: content})
+			sources, err := loadSources(paths)
+			if err != nil {
+				return err
 			}
 
 			opts := modelOptions{
 				lineNumbers: lineNumbers,
 				search:      search,
-				files:       files,
+				sources:     sources,
 			}
 
 			m := newModel(&opts)
@@ -61,4 +57,24 @@ func viewCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&search, "search", "s", "", "initial search term")
 
 	return cmd
+}
+
+// loadSources reads the file at each path into a [*niceyaml.Source] and
+// names each Source with the status bar label that [revisionLabels] gives
+// its path. A read error already names the path, so loadSources returns
+// it unchanged.
+func loadSources(paths []string) ([]*niceyaml.Source, error) {
+	labels := revisionLabels(paths)
+	sources := make([]*niceyaml.Source, 0, len(paths))
+
+	for i, path := range paths {
+		source, err := niceyaml.NewSourceFromFile(path, niceyaml.WithName(labels[i]))
+		if err != nil {
+			return nil, err
+		}
+
+		sources = append(sources, source)
+	}
+
+	return sources, nil
 }
