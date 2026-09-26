@@ -37,10 +37,6 @@ type palette struct {
 	// Accent colors headings and accented text. OK, Warn, and Error color
 	// the status kinds.
 	Accent, OK, Warn, Error string
-	// Overrides takes effect last, after the derived kinds and Tokens, for
-	// the few kinds a theme sets outside those two. An override replaces
-	// a kind's style rather than layering over it.
-	Overrides []style.Option
 	// Mode is the background the theme is designed for. It also picks the
 	// direction of the derived shifts. [kind.TextSubtle] and
 	// [kind.TextSubtleDim] move toward the background, while highlights,
@@ -110,9 +106,7 @@ func (p palette) styles() style.Styles {
 	// The chrome takes the comment color alone. A Tokens spec that sets
 	// comments in italics or bold styles the comments, and a line number
 	// drawn the same way would read as one.
-	s = s.With(style.Set(kind.UI, base.Foreground(s.Style(kind.Comment).GetForeground())))
-
-	return s.With(p.Overrides...)
+	return s.With(style.Set(kind.UI, base.Foreground(s.Style(kind.Comment).GetForeground())))
 }
 
 // byDepth returns the kinds of tokens ordered by their distance from
