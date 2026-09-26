@@ -340,12 +340,15 @@
 // matches [ErrDecodeRejected], so a caller tells that case apart without
 // naming go-yaml's error types.
 //
-// Every go-yaml setting has a named option, such as [WithAllowDuplicateKeys]
-// or [go.jacobcolvin.com/niceyaml/encoder.WithIndent]. The options that pass
-// go-yaml values through carry a YAML prefix, as in [WithYAMLDecodeOptions]
-// and [go.jacobcolvin.com/niceyaml/encoder.WithYAMLOptions], so a
-// caller can tell at the call site when the go-yaml dependency shows. A test
-// in this package enforces both rules on every exported declaration.
+// The go-yaml settings niceyaml supports have named options, such as
+// [WithAllowDuplicateKeys] or [go.jacobcolvin.com/niceyaml/encoder.WithIndent].
+// The rest pass through options that take go-yaml values, and these carry a
+// YAML prefix, as in [WithYAMLDecodeOptions], [WithYAMLParserOptions], and
+// [go.jacobcolvin.com/niceyaml/encoder.WithYAMLOptions], so a caller can tell
+// at the call site when the go-yaml dependency shows. A test in this package
+// checks every exported declaration. It fails when a declaration names a
+// go-yaml type outside the test's allowlist, or names a go-yaml option type
+// in an identifier without the YAML prefix.
 //
 // The [go.jacobcolvin.com/niceyaml/schema] package follows the same rule
 // for the JSON Schema library it builds on:
