@@ -1189,6 +1189,50 @@ func TestResetPositions_Text(t *testing.T) {
 		}
 	})
 
+	t.Run("counts whitespace tokens ahead of the text", func(t *testing.T) {
+		t.Parallel()
+
+		// The lexer emits an invalid token holding whitespace alone for a
+		// tab that indents the line after "...", but a fresh tokenize of the
+		// document's text emits none, so compare only the tokens with text.
+		// The raw lexer miscounts the columns after such a tab, so
+		// [tokens.Tokenize] gives the positions to compare against.
+		withText := func(tks token.Tokens) token.Tokens {
+			return slices.DeleteFunc(slices.Clone(tks), func(tk *token.Token) bool {
+				return strings.Trim(tk.Origin, " \t\r\n") == ""
+			})
+		}
+
+		tcs := map[string]struct {
+			input string
+		}{
+			"tab before a key":          {input: "a: 1\n...\n\tb: 2\n"},
+			"tab before a comment":      {input: "a: 1\n...\n\t# c\nb: 2\n"},
+			"tab on a blank line":       {input: "a: 1\n...\n\t\nb: 2\n"},
+			"tab after a crlf line end": {input: "a: 1\n...\r\n\tb: 2\r\n"},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				for i, doc := range tokens.SplitDocuments(tokens.Tokenize(tc.input)) {
+					doc = tokens.ResetPositions(doc)
+					fresh := withText(tokens.Tokenize(yamltest.DumpTokenOrigins(doc)))
+					text := withText(doc)
+					require.Len(t, text, len(fresh), "document %d", i)
+
+					for j, want := range fresh {
+						got := text[j].Position
+						assert.Equal(t, want.Position.Line, got.Line, "document %d token %d line", i, j)
+						assert.Equal(t, want.Position.Column, got.Column, "document %d token %d column", i, j)
+						assert.Equal(t, want.Position.Offset, got.Offset, "document %d token %d offset", i, j)
+					}
+				}
+			})
+		}
+	})
+
 	t.Run("severs links to neighboring documents", func(t *testing.T) {
 		t.Parallel()
 
