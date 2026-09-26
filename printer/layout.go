@@ -81,8 +81,22 @@ func (p *Printer) Layout(view *line.View) Layout {
 func (p *Printer) layoutLine(view *line.View, idx int, ln *line.Line, gutterWidth int, width *int) lineLayout {
 	var ll lineLayout
 
-	ll.above = p.layoutAnnotation(view, ln, idx, gutterWidth, line.Above, width)
+	pieces, starts := p.wrapLine(view, idx, ln, gutterWidth)
+	for _, piece := range pieces {
+		*width = max(*width, gutterWidth+lipgloss.Width(piece))
+	}
 
+	ll.rows = starts
+	ll.above = p.layoutAnnotation(view, ln, idx, gutterWidth, line.Above, starts, width)
+	ll.below = p.layoutAnnotation(view, ln, idx, gutterWidth, line.Below, starts, width)
+
+	return ll
+}
+
+// wrapLine renders the content of line idx of view, which is ln, wraps it
+// to the printer width, and returns the pieces with the column of the
+// content at which each piece begins.
+func (p *Printer) wrapLine(view *line.View, idx int, ln *line.Line, gutterWidth int) ([]string, []int) {
 	// The content wraps as the rendered line does, styles included, since
 	// a style's transform may change the shown text. The wrap is
 	// ANSI-aware and measures the shown cells.
@@ -94,29 +108,26 @@ func (p *Printer) layoutLine(view *line.View, idx int, ln *line.Line, gutterWidt
 	plain := make([]string, len(pieces))
 	for i, piece := range pieces {
 		plain[i] = ansi.Strip(piece)
-		*width = max(*width, gutterWidth+lipgloss.Width(piece))
 	}
 
-	ll.rows = rowStarts(escape.Control(ln.Content()), plain)
-
-	ll.below = p.layoutAnnotation(view, ln, idx, gutterWidth, line.Below, width)
-
-	return ll
+	return pieces, rowStarts(escape.Control(ln.Content()), plain)
 }
 
 // layoutAnnotation returns the number of rows the styled annotations of
 // line idx at placement take, as [Printer.renderAnnotation] writes them,
-// and raises *width to the widest of them.
+// and raises *width to the widest of them. Starts holds the column of the
+// content at which each wrapped row of the line begins.
 func (p *Printer) layoutAnnotation(
 	view *line.View,
 	ln *line.Line,
 	idx, gutterWidth int,
 	placement line.Placement,
+	starts []int,
 	width *int,
 ) int {
 	var rows int
 
-	for _, group := range p.annotationGroups(view, ln, idx, gutterWidth, placement) {
+	for _, group := range p.annotationGroups(view, ln, idx, gutterWidth, placement, starts) {
 		for _, row := range group.rows {
 			*width = max(*width, gutterWidth+lipgloss.Width(row))
 		}
@@ -137,8 +148,9 @@ const nbsp = '\u00a0'
 // a break and at the end of the content, so the match skips those
 // spaces in the content. A style's transform may add text of its own,
 // so the match also passes over runes of a piece the content does not
-// hold. The caller escapes the content, so a tab shows as its control
-// picture and never counts as a space.
+// hold. The first piece begins at column 0, even when a transform puts
+// text in front of an indented line. The caller escapes the content, so
+// a tab shows as its control picture and never counts as a space.
 func rowStarts(content string, pieces []string) []int {
 	runes := []rune(content)
 	starts := make([]int, len(pieces))
@@ -150,7 +162,7 @@ func rowStarts(content string, pieces []string) []int {
 				next++
 			}
 
-			if j == 0 {
+			if j == 0 && i > 0 {
 				starts[i] = next
 			}
 
@@ -165,6 +177,15 @@ func rowStarts(content string, pieces []string) []int {
 	}
 
 	return starts
+}
+
+// rowIndex returns the index of the row that holds col, given the column
+// at which each row begins: the last row that begins at or before col, or
+// the first row when col comes before them all.
+func rowIndex(starts []int, col int) int {
+	// Search finds the first row that begins past col. It compares with >
+	// rather than searching for col+1, which overflows at [math.MaxInt].
+	return max(0, sort.Search(len(starts), func(i int) bool { return starts[i] > col })-1)
 }
 
 // Rows returns the number of rows the view takes.

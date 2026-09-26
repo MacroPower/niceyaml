@@ -211,6 +211,7 @@ func TestPrinter_PrintError(t *testing.T) {
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
 	bound := yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("b"))))
 	other := niceyaml.NewSourceFromString("c: 3\n")
+	nested := niceyaml.NewSourceFromString("a:\n  b: 2\n")
 
 	// The root has no message beside its range, so a caret run under the
 	// range shows its extent without color.
@@ -223,6 +224,15 @@ func TestPrinter_PrintError(t *testing.T) {
 	otherExcerpt := stringtest.JoinLF(
 		"<nameTag>c</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>3</genericError>",
 		"<textError>   ^</textError>",
+	)
+
+	// The style of the indent adds text in front of the second line, and
+	// the caret still lands under the value.
+	nestedExcerpt := stringtest.JoinLF(
+		"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue>",
+		"<text>  </text><nameTag>b</nameTag><punctuationMappingValue>:</punctuationMappingValue>"+
+			"<text> </text><genericError>2</genericError>",
+		"<textError>     ^</textError>",
 	)
 
 	// Both values marked, each with its message below it.
@@ -252,6 +262,14 @@ func TestPrinter_PrintError(t *testing.T) {
 		"wrapped bound error keeps the wrapper's context": {
 			err:  fmt.Errorf("document 0: %w", bound),
 			want: "document 0: 2:4: $.b: bad\n\n" + excerpt,
+		},
+		"bound error on an indented line": {
+			err: yamltest.Bind(
+				t,
+				nested,
+				niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("a").Child("b"))),
+			),
+			want: "2:6: $.a.b: bad\n\n" + nestedExcerpt,
 		},
 		"bound error without a location": {
 			err:  yamltest.Bind(t, source, niceyaml.NewError("bad")),
@@ -3599,6 +3617,51 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 				strings.Repeat(" ", 30)+"^ x",
 			),
 		},
+		"below column on a wrapped row pads from that row's start": {
+			input:  "key: aaaa bbbb cccc",
+			gutter: printer.NoGutter,
+			width:  10,
+			annotation: line.Annotation{
+				Content:   "x",
+				Placement: line.Below,
+				Col:       15,
+			},
+			want: stringtest.JoinLF(
+				"key: aaaa",
+				"bbbb cccc",
+				"     ^ x",
+			),
+		},
+		"above column on a wrapped row pads from that row's start": {
+			input:  "key: aaaa bbbb cccc",
+			gutter: printer.NoGutter,
+			width:  10,
+			annotation: line.Annotation{
+				Content:   "hi",
+				Placement: line.Above,
+				Col:       15,
+			},
+			want: stringtest.JoinLF(
+				"     hi",
+				"key: aaaa",
+				"bbbb cccc",
+			),
+		},
+		"column on a wrapped row pads from that row's start past the gutter": {
+			input:  "key: aaaa bbbb cccc",
+			gutter: printer.LineNumberGutter,
+			width:  15,
+			annotation: line.Annotation{
+				Content:   "x",
+				Placement: line.Below,
+				Col:       15,
+			},
+			want: stringtest.JoinLF(
+				"   1 key: aaaa",
+				"   - bbbb cccc",
+				"          ^ x",
+			),
+		},
 		"negative column renders at column zero": {
 			input:  "key: value",
 			gutter: printer.NoGutter,
@@ -3720,8 +3783,52 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 
 			got := p.Print(view)
 			assert.Equal(t, tc.want, got)
+
+			// The layout counts the rows Print writes and measures the
+			// widest of them.
+			rows := strings.Split(got, "\n")
+			layout := p.Layout(view)
+			assert.Len(t, rows, layout.Rows())
+
+			widest := 0
+			for _, row := range rows {
+				widest = max(widest, lipgloss.Width(row))
+			}
+
+			assert.Equal(t, widest, layout.Width())
 		})
 	}
+}
+
+func TestPrinter_PrintError_WrappedAnnotation(t *testing.T) {
+	t.Parallel()
+
+	const width = 40
+
+	p := printer.New(
+		printer.WithWrap(width),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+	)
+
+	items := make([]string, 0, 20)
+	for i := range 20 {
+		items = append(items, fmt.Sprintf("item%02d", i))
+	}
+
+	// The sequence wraps over several rows, and item 16 sits near the
+	// start of its row, so the message fits beside the caret.
+	source := niceyaml.NewSourceFromString("items: [" + strings.Join(items, ", ") + "]\n")
+	err := yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithErrors(
+		niceyaml.NewError("expected string", niceyaml.AtPath(paths.Root().Child("items").Index(16))),
+	)))
+
+	got := p.PrintError(err)
+
+	for i, row := range strings.Split(got, "\n") {
+		assert.LessOrEqual(t, lipgloss.Width(row), width, "row %d: %q", i, row)
+	}
+
+	assert.Contains(t, got, "^ expected string")
 }
 
 func TestPrinter_Print_EmptySpans(t *testing.T) {
