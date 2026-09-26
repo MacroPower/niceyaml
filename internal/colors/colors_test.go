@@ -273,6 +273,16 @@ func TestBlendStyles(t *testing.T) {
 			overlay: lipgloss.NewStyle().Foreground(blue),
 			wantFg:  blue,
 		},
+		"only base has background": {
+			base:    lipgloss.NewStyle().Background(red),
+			overlay: lipgloss.NewStyle(),
+			wantBg:  red,
+		},
+		"only overlay has background": {
+			base:    lipgloss.NewStyle(),
+			overlay: lipgloss.NewStyle().Background(blue),
+			wantBg:  blue,
+		},
 		"composes transforms overlay wraps base": {
 			base:          lipgloss.NewStyle().Transform(lowerTransform),
 			overlay:       lipgloss.NewStyle().Transform(upperTransform),
