@@ -86,7 +86,6 @@ type builder struct {
 	lines               []Line
 	currentLineSegments Segments
 	currentLine         int // Current line number being built.
-	built               bool
 
 	// Position tracking.
 	currentOffset      int // Cumulative rune offset (1-indexed like lexer).
@@ -169,10 +168,6 @@ func lastToken(tks token.Tokens) *token.Token {
 
 // AddToken adds a single token, splitting it into per-line parts.
 func (b *builder) AddToken(tk *token.Token) {
-	if b.built {
-		panic("segment: cannot add token after Build() has been called")
-	}
-
 	// Detect if this token is block scalar content by checking if it follows a
 	// Literal/Folded header in the token chain.
 	isBlockScalarContent := isBlockScalarContent(tk)
@@ -224,9 +219,6 @@ func (b *builder) Build() []Line {
 			})
 		}
 	}
-
-	// Mark as built to prevent reuse.
-	b.built = true
 
 	return b.lines
 }
