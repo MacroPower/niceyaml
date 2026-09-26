@@ -1314,27 +1314,6 @@ func TestDocument_Decode_SchemaThenDecodeError(t *testing.T) {
 	}
 }
 
-func TestDocument_Decode_CanceledContext(t *testing.T) {
-	t.Parallel()
-
-	// Test Decode with a canceled context to trigger the non-yaml error path.
-	input := `key: value`
-	source := niceyaml.NewSourceFromString(input)
-	d, err := source.Documents()
-	require.NoError(t, err)
-
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel() // Cancel immediately.
-
-	for _, dd := range d {
-		_, err := dd.Decode[map[string]string](ctx)
-		// Context cancellation may or may not cause an error depending on timing.
-		// The decode might complete before it checks the context.
-		// This test mainly ensures the code path doesn't panic.
-		_ = err
-	}
-}
-
 func TestDocument_Decode_SelfValidator(t *testing.T) {
 	t.Parallel()
 
@@ -4541,6 +4520,21 @@ func (u *bareReparsingUnmarshaler) UnmarshalYAML(data []byte) error {
 	return nil
 }
 
+// cancelAwareUnmarshaler decodes itself by wrapping the error of the
+// context it gets, so a canceled context fails the decode. The go-yaml
+// decoder never checks the context itself and only passes it to
+// unmarshalers like this one.
+type cancelAwareUnmarshaler struct{}
+
+func (*cancelAwareUnmarshaler) UnmarshalYAML(ctx context.Context, _ []byte) error {
+	err := ctx.Err()
+	if err != nil {
+		return fmt.Errorf("decode stopped: %w", err)
+	}
+
+	return nil
+}
+
 func TestErrDecodeRejected(t *testing.T) {
 	t.Parallel()
 
@@ -4735,10 +4729,9 @@ func TestErrDecodeRejected(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
-		_, err := dd.Decode[struct{ Value int }](ctx)
-		if err != nil {
-			require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
-		}
+		_, err := dd.Decode[cancelAwareUnmarshaler](ctx)
+		require.ErrorIs(t, err, context.Canceled)
+		require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
 	})
 }
 
