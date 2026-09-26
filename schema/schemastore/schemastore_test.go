@@ -536,6 +536,75 @@ func TestSchemaStore_Filter(t *testing.T) {
 	require.ErrorIs(t, err, schemastore.ErrNoCatalogMatch)
 }
 
+func TestSchemaStore_FetchPanicReachesCaller(t *testing.T) {
+	t.Parallel()
+
+	// The fetch runs on a goroutine the store starts, so a panic during it
+	// must reach the lookup that waits for the fetch rather than end the
+	// process.
+	tcs := map[string]struct {
+		setup func(t *testing.T) ([]schemastore.Option, *atomic.Int32)
+		want  any
+	}{
+		"filter": {
+			setup: func(t *testing.T) ([]schemastore.Option, *atomic.Int32) {
+				t.Helper()
+
+				server, fetchCount := newCountingCatalogServer(t, testCatalog)
+
+				return []schemastore.Option{
+					schemastore.WithCatalogURL(server.URL),
+					schemastore.WithFilter(func(schemastore.CatalogEntry) bool {
+						panic("filter bug")
+					}),
+				}, fetchCount
+			},
+			want: "filter bug",
+		},
+		"transport": {
+			setup: func(t *testing.T) ([]schemastore.Option, *atomic.Int32) {
+				t.Helper()
+
+				var fetchCount atomic.Int32
+
+				client := &http.Client{
+					Transport: &roundTripperFunc{fn: func(*http.Request) (*http.Response, error) {
+						fetchCount.Add(1)
+
+						panic("transport bug")
+					}},
+				}
+
+				return []schemastore.Option{
+					schemastore.WithCatalogURL("http://example.com/catalog.json"),
+					schemastore.WithHTTPClient(client),
+				}, &fetchCount
+			},
+			want: "transport bug",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			opts, fetchCount := tc.setup(t)
+			store := schemastore.New(opts...)
+
+			assert.PanicsWithValue(t, tc.want, func() {
+				_, err := store.FindMatch(t.Context(), "config.yaml")
+				require.NoError(t, err)
+			})
+
+			// The panicked fetch counts as a failed one, so the next lookup
+			// reports it within the retry interval and does not fetch again.
+			res := receive(t, findMatchAsync(t.Context(), store))
+			require.ErrorIs(t, res.err, schemastore.ErrFetchCatalog)
+			assert.Equal(t, int32(1), fetchCount.Load())
+		})
+	}
+}
+
 func TestSchemaStore_HTTPClient(t *testing.T) {
 	t.Parallel()
 

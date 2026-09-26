@@ -122,6 +122,17 @@ type fetchCall struct {
 	entries []CatalogEntry
 }
 
+// A panicError carries a panic out of the refresh goroutine as an error,
+// so the lookup that waits for the fetch can raise it again.
+type panicError struct {
+	value any
+}
+
+// Error implements error.
+func (p *panicError) Error() string {
+	return fmt.Sprintf("catalog fetch panicked: %v", p.value)
+}
+
 // Option configures [Store] creation.
 //
 // Available options:
@@ -205,7 +216,8 @@ func WithRetryAfter(interval time.Duration) Option {
 //
 // The store matches only the entries for which the filter returns true.
 // It calls the filter during catalog refresh; avoid expensive or stateful
-// operations.
+// operations. The store raises a panic from the filter again in each lookup
+// that waits for the refresh.
 //
 // Example:
 //
@@ -327,6 +339,13 @@ func (s *Store) catalog(ctx context.Context) ([]CatalogEntry, error) {
 
 	select {
 	case <-call.done:
+		// The fetch runs on a goroutine of its own, where no caller can
+		// recover a panic, so the fetch hands the panic back as an error
+		// and each lookup that waited for it raises it here.
+		if pe, ok := errors.AsType[*panicError](call.err); ok {
+			panic(pe.value)
+		}
+
 		if call.err != nil {
 			return s.stale(call.err)
 		}
@@ -389,7 +408,7 @@ func (s *Store) refresh(ctx context.Context, call *fetchCall) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.refreshTimeout)
 	defer cancel()
 
-	entries, err := s.fetch(ctx)
+	entries, err := s.fetchRecovering(ctx)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -405,6 +424,26 @@ func (s *Store) refresh(ctx context.Context, call *fetchCall) {
 
 	call.entries, call.err = entries, err
 	close(call.done)
+}
+
+// fetchRecovering runs fetch and turns a panic in the filter, the HTTP
+// transport, or the catalog parsing into a [*panicError].
+func (s *Store) fetchRecovering(ctx context.Context) ([]CatalogEntry, error) {
+	var entries []CatalogEntry
+
+	err := func() (err error) {
+		defer func() {
+			if p := recover(); p != nil {
+				err = &panicError{value: p}
+			}
+		}()
+
+		entries, err = s.fetch(ctx)
+
+		return err
+	}()
+
+	return entries, err
 }
 
 // stale returns the previous entries when a fetch has ever succeeded and
