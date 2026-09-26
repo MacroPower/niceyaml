@@ -32,7 +32,7 @@ const wrapOnCharacters = " /-"
 // Every setting is an [Option]; to change one on an existing Printer,
 // derive a copy with [Printer.With]:
 //
-//	narrow := printer.With(printer.WithWrap(40))
+//	narrow := p.With(printer.WithWrap(40))
 //
 // Create instances with [New].
 //
@@ -131,7 +131,7 @@ func New(opts ...Option) *Printer {
 // With returns a copy of the [Printer] with the given options applied. The
 // receiver is unchanged, so callers can specialize a shared Printer per call:
 //
-//	wrapped := printer.With(printer.WithWrap(80))
+//	wrapped := p.With(printer.WithWrap(80))
 //
 // The copy shares the receiver's cache of blended styles unless [WithStyles]
 // is among the options; the cache is safe for concurrent use.
