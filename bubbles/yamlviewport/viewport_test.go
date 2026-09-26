@@ -290,6 +290,8 @@ func TestViewport_Golden(t *testing.T) {
 			height: 5,
 		},
 		"SearchNavigateNext": {
+			// "i" matches four times, in list, item1, item2, and child, so
+			// each navigation case selects a different match.
 			opts: []yamlviewport.Option{
 				yamlviewport.WithPrinter(testPrinterWithSearch()),
 			},
@@ -297,8 +299,8 @@ func TestViewport_Golden(t *testing.T) {
 			width:  80,
 			height: 24,
 			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
-				m.SetSearchTerm("item")
-				m.SearchNext() // Move to second match.
+				m.SetSearchTerm("i")
+				m.SearchNext() // Move to the second match, in item1.
 			},
 		},
 		"SearchNoMatches": {
@@ -320,8 +322,8 @@ func TestViewport_Golden(t *testing.T) {
 			width:  80,
 			height: 24,
 			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
-				m.SetSearchTerm("item")
-				m.SearchPrevious() // Wrap from first to last match.
+				m.SetSearchTerm("i")
+				m.SearchPrevious() // Wrap from the first match to the last, in child.
 			},
 		},
 		"SearchWrapAroundNext": {
@@ -332,9 +334,11 @@ func TestViewport_Golden(t *testing.T) {
 			width:  80,
 			height: 24,
 			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
-				m.SetSearchTerm("item")
-				m.SearchNext() // Second match.
-				m.SearchNext() // Wrap to first match.
+				m.SetSearchTerm("i")
+				m.SearchNext() // Second match, in item1.
+				m.SearchNext() // Third match, in item2.
+				m.SearchNext() // Fourth match, in child.
+				m.SearchNext() // Wrap to the first match, in list.
 			},
 		},
 		"SearchWrapAroundPrevious": {
@@ -345,9 +349,9 @@ func TestViewport_Golden(t *testing.T) {
 			width:  80,
 			height: 24,
 			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
-				m.SetSearchTerm("item")
-				m.SearchPrevious() // Wrap to last match.
-				m.SearchPrevious() // Move to first match.
+				m.SetSearchTerm("i")
+				m.SearchPrevious() // Wrap to the last match, in child.
+				m.SearchPrevious() // Move back to the third match, in item2.
 			},
 		},
 		"SearchMultipleMatchesSameLine": {
@@ -3310,15 +3314,19 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			height: 24,
 		},
 		"SideBySideSearchNavigate": {
-			// Verifies search navigation updates highlights in side-by-side mode.
+			// Verifies search navigation moves the selection in side-by-side
+			// mode. "key" matches on the changed key1 and key2 lines of both
+			// panes. The matches run in row order, and the before pane comes
+			// first within a row.
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetPrinter(testPrinterWithSearch())
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("v1")))
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("v2")))
 				m.GotoRevision(1)
 				m.SetViewMode(yamlviewport.ViewModeSideBySide)
-				m.SetSearchTerm("enabled") // Appears in both revisions.
-				m.SearchNext()             // Navigate to second match.
+				m.SetSearchTerm("key")
+				m.SearchNext() // Second match, key1 in the after pane.
+				m.SearchNext() // Third match, key2 in the before pane.
 			},
 			width:  190,
 			height: 24,

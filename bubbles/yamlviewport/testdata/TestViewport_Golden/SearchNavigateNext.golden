@@ -1,11 +1,11 @@
  key: value                                                                     
  number: 42                                                                     
  bool: true                                                                     
- list:                                                                          
-   - <genericHighlightDim>item</genericHighlightDim>1                           
-   - <genericHighlight>item</genericHighlight>2                                 
+ l<genericHighlightDim>i</genericHighlightDim>st:                               
+   - <genericHighlight>i</genericHighlight>tem1                                 
+   - <genericHighlightDim>i</genericHighlightDim>tem2                           
  nested:                                                                        
-   child: data                                                                  
+   ch<genericHighlightDim>i</genericHighlightDim>ld: data                       
                                                                                 
                                                                                 
                                                                                 

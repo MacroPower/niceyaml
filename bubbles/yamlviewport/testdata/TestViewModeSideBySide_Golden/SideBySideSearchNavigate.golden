@@ -1,6 +1,6 @@
 -name: original                                                                               │  +name: modified                                                                              
 -count: 10                                                                                    │  +count: 20                                                                                   
- <genericHighlight>enabled</genericHighlight>: true                                           │   <genericHighlight>enabled</genericHighlight>: true                                          
+ enabled: true                                                                                │   enabled: true                                                                               
 -description: "This is the original description"                                              │  +description: "This is the updated description"                                              
  tags:                                                                                        │   tags:                                                                                       
    - alpha                                                                                    │     - alpha                                                                                   
@@ -9,8 +9,8 @@
 -  timeout: 30                                                                                │  +  timeout: 60                                                                               
 -  retries: 3                                                                                 │  +  retries: 5                                                                                
  extra:                                                                                       │   extra:                                                                                      
--  key1: value1                                                                               │  +  key1: changed1                                                                            
--  key2: value2                                                                               │  +  key2: changed2                                                                            
+-  <genericHighlightDim>key</genericHighlightDim>1: value1                                    │  +  <genericHighlightDim>key</genericHighlightDim>1: changed1                                 
+-  <genericHighlight>key</genericHighlight>2: value2                                          │  +  <genericHighlightDim>key</genericHighlightDim>2: changed2                                 
                                                                                                                                                                                               
                                                                                                                                                                                               
                                                                                                                                                                                               
