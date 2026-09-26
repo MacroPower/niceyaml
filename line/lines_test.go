@@ -2370,49 +2370,42 @@ func TestNewLines_WhitespaceType(t *testing.T) {
 	t.Run("trailing whitespace becomes SpaceType", func(t *testing.T) {
 		t.Parallel()
 
-		// The lexer may bundle "true\n  " together as a single boolean token.
-		// After splitting, the "  " part should be SpaceType, not BoolType.
-		input := "parent:\n  child: true\n"
-		tks := tokens.Tokenize(input)
-		lines := line.NewLines(tks)
+		// The lexer bundles " true\n  " into one boolean token, where "  " is
+		// the indentation of "other". After splitting, the "  " part on line
+		// 3 is SpaceType, not BoolType.
+		input := stringtest.Input(`
+			parent:
+			  child: true
+			  other: 1
+		`)
+		lines := line.NewLines(tokens.Tokenize(input))
+		require.Greater(t, lines.Len(), 2)
 
-		// Line 2 (index 1) should have the indented "child: true".
-		require.Greater(t, lines.Len(), 1)
-
-		line2 := lines.Line(1)
-		parts := line2.Tokens()
-
-		// Find any pure whitespace tokens and verify they are SpaceType.
-		for _, tk := range parts {
-			if strings.TrimSpace(tk.Origin) == "" && tk.Origin != "" && !strings.Contains(tk.Origin, "\n") {
-				assert.Equal(t, token.SpaceType, tk.Type,
-					"pure horizontal whitespace should be SpaceType, got %s for Origin %q",
-					tk.Type, tk.Origin)
-			}
-		}
+		parts := lines.Line(2).Tokens()
+		require.NotEmpty(t, parts)
+		assert.Equal(t, "  ", parts[0].Origin)
+		assert.Equal(t, token.SpaceType, parts[0].Type)
 	})
 
 	t.Run("block scalar whitespace preserved as StringType", func(t *testing.T) {
 		t.Parallel()
 
-		// Block scalar content whitespace should retain StringType.
-		input := "text: |\n  line1\n  line2\n"
-		tks := tokens.Tokenize(input)
-		lines := line.NewLines(tks)
+		// The lexer bundles the indentation of "next" into the block scalar
+		// token. Whitespace parts of block scalar content keep StringType, so
+		// the "  " part on line 4 is not SpaceType.
+		input := stringtest.Input(`
+			root:
+			  text: |
+			    a
+			  next: x
+		`)
+		lines := line.NewLines(tokens.Tokenize(input))
+		require.Greater(t, lines.Len(), 3)
 
-		// Lines 2 and 3 contain block scalar content.
-		// NewLines must NOT convert their whitespace to SpaceType.
-		for i := 1; i < lines.Len(); i++ {
-			for _, tk := range lines.Line(i).Tokens() {
-				// Check if this is a whitespace-only token from block scalar.
-				if strings.TrimSpace(tk.Origin) == "" && tk.Origin != "" {
-					// Whitespace in block scalar should remain StringType.
-					assert.Equal(t, token.StringType, tk.Type,
-						"block scalar whitespace should remain StringType, got %s for Origin %q on line %d",
-						tk.Type, tk.Origin, i)
-				}
-			}
-		}
+		parts := lines.Line(3).Tokens()
+		require.NotEmpty(t, parts)
+		assert.Equal(t, "  ", parts[0].Origin)
+		assert.Equal(t, token.StringType, parts[0].Type)
 	})
 
 	t.Run("nested indentation with boolean", func(t *testing.T) {
@@ -2429,15 +2422,21 @@ func TestNewLines_WhitespaceType(t *testing.T) {
 		lines := line.NewLines(tks)
 
 		// Verify all pure horizontal whitespace parts are SpaceType.
+		checked := 0
 		for i, ln := range lines.All() {
 			for _, tk := range ln.Tokens() {
 				if strings.TrimSpace(tk.Origin) == "" && tk.Origin != "" && !strings.Contains(tk.Origin, "\n") {
+					checked++
+
 					assert.Equal(t, token.SpaceType, tk.Type,
 						"pure horizontal whitespace should be SpaceType on line %d, got %s for Origin %q",
 						i, tk.Type, tk.Origin)
 				}
 			}
 		}
+
+		// The indentation of "disabled" is one such part.
+		require.Positive(t, checked)
 	})
 }
 
