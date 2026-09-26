@@ -87,11 +87,12 @@ const defaultHTTPTimeout = 30 * time.Second
 type Registry struct {
 	group       singleflight.Group // one load and compile in flight per Key
 	cache       map[string]*Schema // compiled schemas by Ref.Key
+	refDocs     map[string][]byte  // bytes of the documents a $ref names, by URI without fragment
 	client      *http.Client       // fetches the schemas URL refs name
 	fsys        fs.FS              // reads the schemas File refs name; nil reads the working directory
 	resolvers   []Resolver
 	compileOpts []CompileOption
-	mu          sync.RWMutex // guards cache
+	mu          sync.RWMutex // guards cache and refDocs
 	// Makes Validate report ErrNoMatch when no resolver applies.
 	requireSchema bool
 }
@@ -245,6 +246,7 @@ func WithCompileOptions(opts ...CompileOption) RegistryOption {
 func NewRegistry(opts ...RegistryOption) *Registry {
 	r := &Registry{
 		cache:         make(map[string]*Schema),
+		refDocs:       make(map[string][]byte),
 		client:        defaultHTTPClient,
 		requireSchema: true,
 	}
@@ -637,19 +639,83 @@ func isRefKeyword(key string) bool {
 	})
 }
 
+// refDocument returns the document a $ref names by uri, a URI without a
+// fragment, as its bytes and as a schema parsed for this caller alone.
+// The first call whose load succeeds and whose bytes parse keeps the
+// bytes in the registry, and every later call parses the kept bytes
+// instead of calling load. A load that fails and bytes that do not parse
+// stay out of the registry, so the next call loads again. When two calls
+// load one document at once, both return the bytes the first of them
+// kept.
+func (r *Registry) refDocument(uri string, load func() ([]byte, error)) ([]byte, *jsonschema.Schema, error) {
+	data, kept := r.keptRefDoc(uri)
+	if !kept {
+		var err error
+
+		data, err = load()
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	s, err := jsonschema.ParseSchema(data)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse %s: %w", httpfetch.Redacted(uri), err)
+	}
+
+	// Another call kept the document while this one loaded it. Return the
+	// bytes that call kept, so every schema sees one document per URI.
+	if !kept && !r.keepRefDoc(uri, data) {
+		return r.refDocument(uri, load)
+	}
+
+	return data, s, nil
+}
+
+// keptRefDoc returns the bytes the registry keeps under uri, if any.
+func (r *Registry) keptRefDoc(uri string) ([]byte, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	data, ok := r.refDocs[uri]
+
+	return data, ok
+}
+
+// keepRefDoc keeps data under uri and reports true, unless the registry
+// keeps bytes under uri already, in which case it reports false and keeps
+// those.
+func (r *Registry) keepRefDoc(uri string, data []byte) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.refDocs[uri]; ok {
+		return false
+	}
+
+	r.refDocs[uri] = data
+
+	return true
+}
+
 // refOptions returns the options the registry compiles the schema ref
 // names with: the options [WithCompileOptions] gave it, behind options
 // that let a $ref in a schema from [File] or [URL] name a document beside
 // it. Such a schema takes its key as the base URI of its references, and
 // the registry reads each document a reference names as it reads the
 // schema, so a relative $ref resolves against the file or URL that holds
-// it. A schema from [File] reaches local files and URLs, and one from
-// [URL] reaches only URLs, so a remote schema cannot read the local disk.
-// A remote document that a schema from [File] reaches cannot read the
-// local disk either, because the resolver refuses a document fetched over
-// HTTP or HTTPS that names a file URL. The refusal holds whatever order
-// the compiler fetches documents in. An option from [WithCompileOptions]
-// comes later and wins.
+// it. The registry loads each such document once and keeps it for every
+// schema that references it, at compile time and during validation. A
+// document that fails to load stays out of the registry, so a later
+// validation that reaches the reference loads it again. A schema from
+// [File] reaches local files and URLs, and one from [URL] reaches only
+// URLs, so a remote schema cannot read the local disk, even when a schema
+// from [File] loaded the file first. A remote document that a schema from
+// [File] reaches cannot read the local disk either, because the resolver
+// refuses a document fetched over HTTP or HTTPS that names a file URL.
+// The refusal holds whatever order the compiler reaches documents in, and
+// it covers a document the registry kept for a schema from [URL]. An
+// option from [WithCompileOptions] comes later and wins.
 func (r *Registry) refOptions(ref Ref) []CompileOption {
 	if !ref.url && ref.file == "" {
 		return r.compileOpts
@@ -662,14 +728,17 @@ func (r *Registry) refOptions(ref Ref) []CompileOption {
 			uri = uri[:i]
 		}
 
-		var (
-			data []byte
-			err  error
-		)
+		// The scheme decides what a schema may reach before the registry
+		// looks for a kept document, so a schema from URL never receives a
+		// local file that a schema from File loaded.
+		var load func() ([]byte, error)
 
 		switch {
 		case isHTTPURL(uri):
-			data, err = httpfetch.Get(ctx, r.client, uri)
+			load = func() ([]byte, error) {
+				//nolint:wrapcheck // The fetch error names the URL already.
+				return httpfetch.Get(ctx, r.client, uri)
+			}
 
 		case allowFile && isFileURL(uri):
 			path, ok := fileURLPath(uri)
@@ -677,19 +746,17 @@ func (r *Registry) refOptions(ref Ref) []CompileOption {
 				return nil, fmt.Errorf("%w: %q", jsonschema.ErrNotResolved, httpfetch.Redacted(uri))
 			}
 
-			data, err = readFile(r.fsys, path, path)
+			load = func() ([]byte, error) {
+				return readFile(r.fsys, path, path)
+			}
 
 		default:
 			return nil, fmt.Errorf("%w: %q", jsonschema.ErrNotResolved, httpfetch.Redacted(uri))
 		}
 
+		data, s, err := r.refDocument(uri, load)
 		if err != nil {
 			return nil, err
-		}
-
-		s, err := jsonschema.ParseSchema(data)
-		if err != nil {
-			return nil, fmt.Errorf("parse %s: %w", httpfetch.Redacted(uri), err)
 		}
 
 		if allowFile && isHTTPURL(uri) {

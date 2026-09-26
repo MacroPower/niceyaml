@@ -37,8 +37,10 @@ var ErrEmptyPath = errors.New("schema file path is empty")
 //
 // A $ref in the schema resolves against that file:// URL, so "defs.json"
 // names the file beside it. The registry reads each file or HTTP URL a
-// reference names the way it reads the schema. A remote schema that names
-// a local file fails to resolve, and the registry does not read that file.
+// reference names the way it reads the schema, once however many schemas
+// reference it. When a reference fails to load, a later validation that
+// reaches it loads it again. A remote schema that names a local file fails
+// to resolve, and the registry does not read that file.
 //
 // File is for a path written in the program, so it panics on an empty
 // path, as [Loadable] panics on an empty key, and on a working directory
