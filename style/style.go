@@ -171,8 +171,14 @@ func (s Styles) parent(st kind.Kind) kind.Kind {
 // predefined kind does. [Inherit] names that parent, and for a kind it
 // leaves out, [kind.Parent] gives [kind.Text], so the kind returns the
 // base style. An overlay of a custom kind that no option names therefore
-// renders as the text it covers rather than with no style at all. The
-// zero Styles value returns an empty style for every kind.
+// layers the base style over the text it covers. An overlay that replaces
+// the style underneath gives that text the colors the base style sets,
+// and one that blends tints the text toward those colors. Where the base
+// style leaves a color unset, as the pygments theme does, the text keeps
+// its own. The text also keeps attributes such as bold, since an overlay
+// cannot turn one off. Use [Inherit] to give such a kind the style of a
+// predefined kind, or [Set] to give it a style of its own. The zero
+// Styles value returns an empty style for every kind.
 func (s Styles) Style(st kind.Kind) lipgloss.Style {
 	if ls, ok := s.resolved[st]; ok && ls != nil {
 		return *ls
