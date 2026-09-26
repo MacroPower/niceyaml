@@ -335,6 +335,49 @@ func TestTokenize_EmptyContentPastEnd(t *testing.T) {
 	}
 }
 
+func TestTokenize_PlaceholderPosition(t *testing.T) {
+	t.Parallel()
+
+	// The placeholder sits where its text starts, like any other token,
+	// and at 1:1:1 when the source holds whitespace alone. A fresh stream
+	// already counts from 1, so ResetPositions keeps its position.
+	tcs := map[string]struct {
+		input  string
+		line   int
+		col    int
+		offset int
+	}{
+		"lone tag marker":            {input: "!", line: 1, col: 1, offset: 1},
+		"spaces before":              {input: "  !", line: 1, col: 3, offset: 3},
+		"tab before":                 {input: "\t!", line: 1, col: 2, offset: 2},
+		"line break before":          {input: "\n!", line: 2, col: 1, offset: 2},
+		"indented after a break":     {input: "\n  !", line: 2, col: 3, offset: 4},
+		"indented after two breaks":  {input: "\n\n  !", line: 3, col: 3, offset: 5},
+		"tab after two breaks":       {input: "\n\n\t!", line: 3, col: 2, offset: 4},
+		"whitespace alone":           {input: "  \n", line: 1, col: 1, offset: 1},
+		"line breaks alone":          {input: "\n\n", line: 1, col: 1, offset: 1},
+		"byte order mark is dropped": {input: "\ufeff  !", line: 1, col: 3, offset: 3},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tks := tokens.Tokenize(tc.input)
+			require.Len(t, tks, 1)
+			require.True(t, tokens.IsPlaceholder(tks[0]))
+
+			assert.Equal(t, tc.line, tks[0].Position.Line)
+			assert.Equal(t, tc.col, tks[0].Position.Column)
+			assert.Equal(t, tc.offset, tks[0].Position.Offset)
+
+			reset := tokens.ResetPositions(tks)
+			require.Len(t, reset, 1)
+			assert.Equal(t, *tks[0].Position, *reset[0].Position)
+		})
+	}
+}
+
 func TestTokenize_RepairsPositionsAfterTruncatedLastToken(t *testing.T) {
 	t.Parallel()
 

@@ -42,11 +42,12 @@ import (
 // for a token cut across lines, such as a block scalar, the position names
 // the first line that holds text. A token whose Origin holds no text, such
 // as the empty content of a block scalar, sits where the next text starts,
-// so it shares the position of the token after it. The lexer itself places
-// a token behind the trailing spaces it drops from the Origin, one rune
-// short after a comment or a tag, and on the last line of a multi-line
-// block scalar, and Tokenize moves each such token to where the source
-// holds its text.
+// so it shares the position of the token after it. A source of whitespace
+// alone comes back as one token at line 1, column 1. The lexer itself
+// places a token behind the trailing spaces it drops from the Origin, one
+// rune short after a comment or a tag, and on the last line of a
+// multi-line block scalar, and Tokenize moves each such token to where the
+// source holds its text.
 func Tokenize(src string) token.Tokens {
 	src = dropByteOrderMarks(src)
 
@@ -58,11 +59,12 @@ func Tokenize(src string) token.Tokens {
 
 		// The lexer emits nothing for a source of whitespace alone, and
 		// nothing for some text it rejects outright, such as a lone "!",
-		// so give the stream one token holding the whole text, positioned
-		// where the lexer places the first token of a file, and the file
-		// stays visible whatever the lexer made of it. [IsPlaceholder]
-		// tells that token apart from one the lexer made.
-		return token.Tokens{{
+		// so give the stream one token holding the whole text, and the
+		// file stays visible whatever the lexer made of it. The token
+		// sits where its text starts, like any other token, and at 1:1:1
+		// when the source holds whitespace alone. [IsPlaceholder] tells
+		// that token apart from one the lexer made.
+		tks = token.Tokens{{
 			Type:          token.StringType,
 			CharacterType: token.CharacterTypeMiscellaneous,
 			Indicator:     token.NotIndicator,
@@ -70,6 +72,12 @@ func Tokenize(src string) token.Tokens {
 			Origin:        src,
 			Position:      &token.Position{Line: 1, Column: 1, Offset: 1},
 		}}
+
+		if strings.Trim(src, " \t\r\n") != "" {
+			repairPositions(src, tks)
+		}
+
+		return tks
 	}
 
 	// The lexer drops the source's final line ending and rewrites the
