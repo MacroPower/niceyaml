@@ -4263,14 +4263,16 @@ func TestViewport_ScrollEdgeCases(t *testing.T) {
 
 		m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
 		m.SetWidth(80)
-		m.SetHeight(10)
+		m.SetHeight(2)
 
-		tks := tokens.Tokenize("line1: value1\nline2: value2\nline3: value3\n")
+		// Need more lines than viewport height to enable scrolling.
+		tks := tokens.Tokenize("line1: value1\nline2: value2\nline3: value3\nline4: value4\nline5: value5\n")
 		m.SetRevision(niceyaml.NewSourceFromTokens(tks))
 
-		initialOffset := m.YOffset()
+		m.SetYOffset(1)
+		require.False(t, m.AtBottom())
 		m.ScrollDown(0)
-		assert.Equal(t, initialOffset, m.YOffset())
+		assert.Equal(t, 1, m.YOffset())
 	})
 
 	t.Run("scroll down with empty lines does nothing", func(t *testing.T) {
