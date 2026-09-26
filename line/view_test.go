@@ -1262,13 +1262,13 @@ func TestView_String(t *testing.T) {
 	t.Run("control characters render as pictures", func(t *testing.T) {
 		t.Parallel()
 
-		view := newTestView(t, "a: \"x\\ty\"\n", 1)
+		view := newTestView(t, "a: \"x\ty\x1b\"\n", 1)
 		view.AddOverlay("test1", position.NewRange(position.New(0, 3), position.New(0, 9)))
 		view.Annotate(0, line.Annotation{Content: "tab\x1bhere", Placement: line.Above})
 
 		assert.Equal(t, stringtest.JoinLF(
 			"     | tab\u241bhere",
-			"   1 | a: \"x\\ty\"",
+			"   1 | a: \"x\u2409y\u241b\"",
 			"     |    ^^^^^^",
 		), view.String())
 	})

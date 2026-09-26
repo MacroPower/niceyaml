@@ -271,15 +271,19 @@ func TestLine_String(t *testing.T) {
 
 	tcs := map[string]struct {
 		line *line.Line
+		want string
 	}{
 		"numbered": {
 			line: newTestView(t, "key: value\n", 1).Lines().Line(0),
+			want: "   1 | key: value",
 		},
 		"control characters": {
 			line: newTestView(t, "a: \"x\ty\"\n", 1).Lines().Line(0),
+			want: "   1 | a: \"x\u2409y\"",
 		},
 		"placeholder": {
 			line: &line.Line{},
+			want: "     | ",
 		},
 	}
 
@@ -287,10 +291,8 @@ func TestLine_String(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			// A line renders as the row a view holding only it renders.
-			want := line.NewView(line.Collect(tc.line)).String()
-
-			assert.Equal(t, want, tc.line.String())
+			assert.Equal(t, tc.want, tc.line.String())
+			assert.Equal(t, line.NewView(line.Collect(tc.line)).String(), tc.line.String())
 		})
 	}
 }
