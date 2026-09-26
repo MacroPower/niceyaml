@@ -65,7 +65,8 @@ func TestViewport_SearchDecorationRefreshesRowCounts(t *testing.T) {
 
 	cached := m.TotalRowCount()
 
-	// A width change drops every cached count, so this is the true total.
+	// A width round trip drops every cached count, so this is the true total.
+	m.SetWidth(25)
 	m.SetWidth(24)
 	assert.Equal(t, m.TotalRowCount(), cached)
 	assert.Greater(t, cached, before, "the widened highlights should wrap more rows")
@@ -3691,6 +3692,63 @@ func TestViewport_LayoutChangesKeepSearchIndex(t *testing.T) {
 	m.PreviousRevision()
 	assert.Equal(t, 2, searcher.loads)
 	assert.Equal(t, 1, m.SearchCount())
+}
+
+func TestViewport_UnchangedLayoutKeepsRowCache(t *testing.T) {
+	t.Parallel()
+
+	// A program may pass the current width on every window size message.
+	// Setting a value the Model already holds keeps the row counts, so the
+	// next read lays out nothing.
+	tcs := map[string]struct {
+		change func(*yamlviewport.Model)
+	}{
+		"same width": {
+			change: func(m *yamlviewport.Model) { m.SetWidth(m.Width()) },
+		},
+		"same word wrap": {
+			change: func(m *yamlviewport.Model) { m.SetWordWrap(m.WordWrap()) },
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			renders := 0
+			base := lipgloss.NewStyle().Transform(func(s string) string {
+				renders++
+
+				return s
+			})
+			p := printer.New(
+				printer.WithStyles(style.New(base)),
+				printer.WithContainerStyle(lipgloss.NewStyle()),
+				printer.WithGutter(printer.NoGutter),
+			)
+
+			var src strings.Builder
+
+			for i := range 50 {
+				fmt.Fprintf(&src, "line%d: v\n", i)
+			}
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(p))
+			m.SetWidth(40)
+			m.SetHeight(10)
+			m.SetRevision(niceyaml.NewSourceFromString(src.String()))
+			m.SetYOffset(20)
+			m.TotalRowCount()
+
+			renders = 0
+
+			tc.change(&m)
+			m.TotalRowCount()
+
+			assert.Zero(t, renders, "the row counts should come from the cache")
+			assert.Equal(t, 20, m.YOffset())
+		})
+	}
 }
 
 func TestViewport_SideBySideLoadsSearcherOncePerContent(t *testing.T) {

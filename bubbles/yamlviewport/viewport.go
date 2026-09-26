@@ -355,8 +355,12 @@ func (m *Model) Width() int {
 }
 
 // SetWidth sets the width of the viewport and clamps the scroll offsets to
-// the new bounds.
+// the new bounds. The width already set leaves the view where it is.
 func (m *Model) SetWidth(w int) {
+	if w == m.width {
+		return
+	}
+
 	m.width = w
 	m.relayout()
 }
@@ -668,8 +672,13 @@ func (m *Model) WordWrap() bool {
 }
 
 // SetWordWrap turns word wrapping on or off. Enabling it returns the view to
-// its first column. The default is on.
+// its first column. The setting already in place leaves the view where it
+// is. The default is on.
 func (m *Model) SetWordWrap(enabled bool) {
+	if enabled == m.wrapEnabled {
+		return
+	}
+
 	m.wrapEnabled = enabled
 
 	if enabled {
