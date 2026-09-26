@@ -612,11 +612,16 @@ func TestViewport_Scrolling(t *testing.T) {
 			width:  40,
 			height: 10,
 			setup: func(m *yamlviewport.Model) {
+				m.ToggleWordWrap() // Disable wrap.
 				m.SetHorizontalStep(10)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
-				// Initial offset is 0.
+
+				*m, _ = m.Update(tea.KeyPressMsg{Code: 'l'})
+				assert.Equal(t, 10, m.XOffset())
+
+				*m, _ = m.Update(tea.KeyPressMsg{Code: 'h'})
 				assert.Equal(t, 0, m.XOffset())
 			},
 		},
