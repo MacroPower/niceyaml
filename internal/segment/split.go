@@ -91,6 +91,7 @@ type builder struct {
 	currentOffset      int // Cumulative rune offset (1-indexed like lexer).
 	currentColumn      int // Column just past the parts on the current line.
 	prevLineEndColumn  int // Column just past the parts of the line finished last.
+	prevLineEndOffset  int // Offset of the rune at prevLineEndColumn.
 	currentIndentNum   int // Leading spaces on current line.
 	prevLineIndentNum  int // IndentNum from previous line.
 	currentIndentLevel int // Nesting depth level.
@@ -225,6 +226,7 @@ func (b *builder) joinCurrentLineToPrevious() {
 	for _, seg := range b.currentLineSegments {
 		seg.Part().Position.Line = lastLine.Number
 		seg.Part().Position.Column = max(b.prevLineEndColumn, 1)
+		seg.Part().Position.Offset = max(b.prevLineEndOffset, 1)
 	}
 
 	if n := len(lastLine.Segments); n > 0 {
@@ -247,6 +249,15 @@ func (b *builder) finishLine() {
 	// Prepare indentation tracking for next line.
 	b.prevLineIndentNum = b.currentIndentNum
 	b.prevLineEndColumn = b.currentColumn
+
+	// The column stops at the line ending that closed the line, while
+	// currentOffset counts past it, so the offset steps back over the
+	// ending to reach the rune the column names. Line endings are ASCII,
+	// so byte and rune counts agree.
+	b.prevLineEndOffset = b.currentOffset
+	if n := len(b.currentLineSegments); n > 0 {
+		b.prevLineEndOffset -= len(lineEnding(b.currentLineSegments[n-1].Part().Origin))
+	}
 
 	b.currentLineSegments = nil
 	b.currentIndentNum = 0 // The next line's first content sets it again.
@@ -379,17 +390,17 @@ func (b *builder) processPart(ctx *partContext) {
 	// Each part but the last ends a line, because splitOriginIntoParts cuts
 	// after "\n" and after a bare "\r". The last part ends one when the
 	// Origin did. The lexer advances Position.Line on a bare "\r" as well,
-	// and this mirrors it. The ending stays in the part's Origin so the
-	// token can be rebuilt, and Content() strips it.
+	// and this mirrors it. The part's Origin keeps the ending, so the parts
+	// rebuild the token's Origin, and Content() strips it.
 	if lineEnding(ctx.part) != "" {
 		b.finishLine()
 	}
 }
 
 // textPosition returns the column and offset of the rune where the text of
-// tk starts: the ones its Position carries, or col and offset, the count
-// the builder reached, for each the Position leaves at zero or when tk has
-// none.
+// tk starts, as its Position carries them. For each one the Position leaves
+// at zero, or for both when tk has none, it returns col or offset, the
+// count the builder reached.
 func textPosition(tk *token.Token, col, offset int) (int, int) {
 	if tk.Position == nil {
 		return col, offset
@@ -408,8 +419,9 @@ func textPosition(tk *token.Token, col, offset int) (int, int) {
 
 // appendToPreviousLine attaches the pure-newline part that opens the token
 // to the line finished last, which the part closes. The part sits just
-// past the parts of that line, and only the runes it adds beyond the line
-// ending the previous token already counted advance the offset.
+// past the parts of that line, and its Offset names the rune it starts
+// with, which the previous token may already have counted. Only the runes
+// it adds beyond that line ending advance the offset.
 func (b *builder) appendToPreviousLine(ctx *partContext) {
 	lastLine := &b.lines[len(b.lines)-1]
 	newTk := &token.Token{
@@ -420,7 +432,7 @@ func (b *builder) appendToPreviousLine(ctx *partContext) {
 		Position: &token.Position{
 			Line:        b.currentLine - 1, // Goes on previous line.
 			Column:      max(b.prevLineEndColumn, 1),
-			Offset:      b.currentOffset,
+			Offset:      b.currentOffset - lineEndingOverlap(b.prevLineEnding, ctx.part),
 			IndentNum:   b.prevLineIndentNum,
 			IndentLevel: b.currentIndentLevel,
 		},

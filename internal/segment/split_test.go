@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
@@ -343,7 +344,7 @@ func TestSplit_CRLFSplitOffset(t *testing.T) {
 
 	dup := part(t, lines, 0, 3)
 	assert.Equal(t, "\r\n", dup.Origin)
-	assert.Equal(t, 7, dup.Position.Offset, "the repeat shares the tag's \\r offset")
+	assert.Equal(t, 6, dup.Position.Offset, "the repeat shares the tag's \\r offset")
 
 	// "a: !t\r\n" (7) + "  b: 1\r\n" (8) + "c: 'x\r\n" (7) puts the
 	// continuation at 1-indexed offset 23. Tokenize gives the final line
@@ -419,13 +420,78 @@ func TestSplit_DuplicateNewlineOffset(t *testing.T) {
 
 	dup := part(t, lines, 0, 3)
 	assert.Equal(t, "\n", dup.Origin)
-	assert.Equal(t, 7, dup.Position.Offset, "the repeat shares the tag newline's offset")
+	assert.Equal(t, 6, dup.Position.Offset, "the repeat shares the tag newline's offset")
 
 	// "a: !t\n" (6) + "  b: 1\n" (7) + "c: \"x\n" (6) puts the continuation
 	// at 1-indexed offset 20.
 	cont := part(t, lines, 3, 0)
 	assert.Equal(t, "  y\"", cont.Origin)
 	assert.Equal(t, 20, cont.Position.Offset)
+}
+
+func TestSplit_MovedPartOffset(t *testing.T) {
+	t.Parallel()
+
+	// A part Split moves onto the line finished last names the rune it
+	// starts with, the same rune its Line and Column name, even when the
+	// previous token already counted that rune. The parts after it keep
+	// the offsets the source gives them.
+	tcs := map[string]struct {
+		input  string
+		origin string // Origin of the part.
+		line   int    // 0-indexed line holding the part.
+		idx    int    // Segment index of the part on that line.
+		want   int
+	}{
+		"newline repeated after a tag": {
+			input:  "a: !t\n\n\n  b: 1\n",
+			origin: "\n",
+			line:   0,
+			idx:    3,
+			want:   6,
+		},
+		"blank line after a repeated newline": {
+			input:  "a: !t\n\n\n  b: 1\n",
+			origin: "\n",
+			line:   1,
+			idx:    0,
+			want:   7,
+		},
+		"crlf repeated after a tag": {
+			input:  "a: !t\r\n  b: 1\r\n",
+			origin: "\r\n",
+			line:   0,
+			idx:    3,
+			want:   6,
+		},
+		"empty content of a keep block scalar": {
+			input:  "a: |+\n",
+			origin: "",
+			line:   0,
+			idx:    3,
+			want:   6,
+		},
+		"newline of a crlf cut after a comment": {
+			input:  "# c\r\nk: v\r\n",
+			origin: "\n",
+			line:   0,
+			idx:    1,
+			want:   5,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			lines := segment.Split(tokens.Tokenize(tc.input))
+			p := part(t, lines, tc.line, tc.idx)
+
+			require.Equal(t, tc.origin, p.Origin)
+			assert.Equal(t, tc.want, p.Position.Offset)
+			assert.LessOrEqual(t, p.Position.Offset, utf8.RuneCountInString(tc.input))
+		})
+	}
 }
 
 func TestSplit_BlockScalarOffsets(t *testing.T) {
