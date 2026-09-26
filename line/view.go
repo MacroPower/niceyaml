@@ -105,7 +105,7 @@ func (v *View) Held() Lines {
 		ls = append(ls, l)
 	}
 
-	return Lines{lines: ls}
+	return newLines(ls)
 }
 
 // Count returns the number of lines the [View] holds, which is the number
@@ -140,10 +140,15 @@ func (v *View) Index(l *Line) (int, bool) {
 		return 0, false
 	}
 
-	for _, i := range v.held {
-		if v.lines.lines[i] == l {
+	// Walk every index that holds l in ascending order, so a View that
+	// drops the first occurrence finds a later one.
+	i, ok := v.lines.firstIndex(l)
+	for ok {
+		if v.mask[i] {
 			return i, true
 		}
+
+		i, ok = v.lines.nextIndex(i)
 	}
 
 	return 0, false

@@ -696,6 +696,9 @@ func TestView_Index(t *testing.T) {
 	view := newTestView(t, input, 4)
 	other := newTestView(t, input, 4)
 
+	a, b := view.Lines().Line(0), view.Lines().Line(1)
+	repeated := line.NewView(line.Collect(a, b, a, b, a))
+
 	tcs := map[string]struct {
 		view *line.View
 		line *line.Line
@@ -707,6 +710,34 @@ func TestView_Index(t *testing.T) {
 			line: view.Lines().Line(2),
 			want: 2,
 			ok:   true,
+		},
+		"line of a view over held lines": {
+			view: line.NewView(view.Slice(position.NewSpan(1, 3)).Held()),
+			line: view.Lines().Line(2),
+			want: 1,
+			ok:   true,
+		},
+		"first copy of a repeated line": {
+			view: repeated,
+			line: a,
+			want: 0,
+			ok:   true,
+		},
+		"later copy of a repeated line a slice holds": {
+			view: repeated.Slice(position.NewSpan(1, 5)),
+			line: a,
+			want: 2,
+			ok:   true,
+		},
+		"last copy of a repeated line a slice holds": {
+			view: repeated.Slice(position.NewSpan(3, 5)),
+			line: a,
+			want: 4,
+			ok:   true,
+		},
+		"repeated line a slice holds no copy of": {
+			view: repeated.Slice(position.NewSpan(1, 2), position.NewSpan(3, 4)),
+			line: a,
 		},
 		"line a slice holds through overlapping spans": {
 			view: view.Slice(position.NewSpan(2, 4), position.NewSpan(2, 3)),

@@ -5,6 +5,7 @@ import (
 	"iter"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/goccy/go-yaml/token"
 
@@ -30,6 +31,7 @@ import (
 // [Line] per source line, or [Collect], which gathers lines taken from
 // other Lines values.
 type Lines struct {
+	idx   *lineIndex
 	lines []*Line
 }
 
@@ -56,7 +58,7 @@ func NewLines(tks token.Tokens) Lines {
 		lines[i] = &Line{segments: l.Segments, number: l.Number}
 	}
 
-	return Lines{lines: lines}
+	return newLines(lines)
 }
 
 // Collect creates new [Lines] holding ls in the order given, such as the
@@ -70,7 +72,102 @@ func Collect(ls ...*Line) Lines {
 		}
 	}
 
-	return Lines{lines: slices.Clone(ls)}
+	return newLines(slices.Clone(ls))
+}
+
+// newLines creates new [Lines] that own ls, which the caller must not
+// change afterward. Returns the zero Lines when ls is empty.
+func newLines(ls []*Line) Lines {
+	if len(ls) == 0 {
+		return Lines{}
+	}
+
+	return Lines{lines: ls, idx: &lineIndex{}}
+}
+
+// lineIndex finds the indices that hold a [*Line] by identity. The first
+// lookup builds it, so creating [Lines] costs no map.
+type lineIndex struct {
+	// The first index that holds each line.
+	first map[*Line]int
+	// The next index that holds the same line as each index, or -1 at its
+	// last occurrence. Nil when no line repeats.
+	next []int
+	once sync.Once
+}
+
+// build indexes ls by identity.
+func (x *lineIndex) build(ls []*Line) {
+	x.first = make(map[*Line]int, len(ls))
+
+	// The last index seen of each line that repeats.
+	var last map[*Line]int
+
+	for i, l := range ls {
+		prev, seen := x.first[l]
+		if !seen {
+			x.first[l] = i
+
+			continue
+		}
+
+		if x.next == nil {
+			x.next = make([]int, len(ls))
+			for j := range x.next {
+				x.next[j] = -1
+			}
+
+			last = map[*Line]int{}
+		}
+
+		if j, ok := last[l]; ok {
+			prev = j
+		}
+
+		x.next[prev] = i
+		last[l] = i
+	}
+}
+
+// index returns the identity index of ls, building it on first use, or
+// nil when ls holds no lines.
+func (ls Lines) index() *lineIndex {
+	if ls.idx == nil {
+		return nil
+	}
+
+	ls.idx.once.Do(func() { ls.idx.build(ls.lines) })
+
+	return ls.idx
+}
+
+// firstIndex returns the first index that holds l and true, or false when
+// no index holds it.
+func (ls Lines) firstIndex(l *Line) (int, bool) {
+	x := ls.index()
+	if x == nil {
+		return 0, false
+	}
+
+	i, ok := x.first[l]
+
+	return i, ok
+}
+
+// nextIndex returns the next index after i that holds the same line as i
+// and true, or false when i holds its last occurrence.
+func (ls Lines) nextIndex(i int) (int, bool) {
+	x := ls.index()
+	if x == nil || x.next == nil {
+		return 0, false
+	}
+
+	j := x.next[i]
+	if j < 0 {
+		return 0, false
+	}
+
+	return j, true
 }
 
 // Line returns the [*Line] at index i. Panics when i is outside the
