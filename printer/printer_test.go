@@ -4771,6 +4771,70 @@ func TestPrinter_Layout(t *testing.T) {
 		assert.Equal(t, 0, l.RowOf(position.New(0, 5)))
 	})
 
+	t.Run("a style that rewrites runes keeps columns aligned", func(t *testing.T) {
+		t.Parallel()
+
+		// A transform may rewrite every rune of the text it styles, as
+		// strings.ToUpper does, or add text of its own, as brackets do.
+		// Either way, each row still starts at the column of the content
+		// it shows, and an annotation indents from the start of its row.
+		brackets := func(s string) string { return "<" + s + ">" }
+
+		tcs := map[string]struct {
+			styles style.Styles
+			below  []line.Annotation
+			want   string
+			rows   map[int]int // Column to row.
+		}{
+			"base style uppercases every run": {
+				styles: style.New(lipgloss.NewStyle().Transform(strings.ToUpper)),
+				want:   stringtest.JoinLF("KEY: AAAA", "BBBB CCCC", "DDDD"),
+				rows:   map[int]int{0: 0, 8: 0, 9: 0, 10: 1, 19: 1, 20: 2, 1000: 2},
+			},
+			"key style uppercases the first run": {
+				styles: style.New(
+					lipgloss.NewStyle(),
+					style.Set(kind.NameTag, lipgloss.NewStyle().Transform(strings.ToUpper)),
+				),
+				below: []line.Annotation{{Content: "x", Placement: line.Below, Col: 20}},
+				want:  stringtest.JoinLF("KEY: aaaa", "bbbb cccc", "dddd", "^ x"),
+				rows:  map[int]int{0: 0, 8: 0, 9: 0, 10: 1, 19: 1, 20: 2, 1000: 2},
+			},
+			"value style adds brackets": {
+				styles: style.New(
+					lipgloss.NewStyle(),
+					style.Set(kind.LiteralString, lipgloss.NewStyle().Transform(brackets)),
+				),
+				want: stringtest.JoinLF("key: <aaaa", "bbbb cccc", "dddd>"),
+				rows: map[int]int{0: 0, 10: 1, 20: 2},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				view := niceyaml.NewSourceFromString("key: aaaa bbbb cccc dddd").View()
+				view.Annotate(0, tc.below...)
+
+				p := printer.New(
+					printer.WithGutter(printer.NoGutter),
+					printer.WithContainerStyle(lipgloss.NewStyle()),
+					printer.WithWrap(10),
+					printer.WithStyles(tc.styles),
+				)
+
+				require.Equal(t, tc.want, p.Print(view))
+
+				l := p.Layout(view)
+
+				for col, row := range tc.rows {
+					assert.Equal(t, row, l.RowOf(position.New(0, col)), "column %d", col)
+				}
+			})
+		}
+	})
+
 	t.Run("width and gutter width match the rendered rows", func(t *testing.T) {
 		t.Parallel()
 

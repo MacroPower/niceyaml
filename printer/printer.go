@@ -838,12 +838,24 @@ func (p *Printer) renderLine(view *line.View, idx int, ln *line.Line, maxNumber,
 	return rows
 }
 
-// renderContent renders the content of line idx of view with its
-// overlays, one styled run per run of segments from [line.View.Segments]
-// that style the same: a deleted or inserted line in the diff style for
-// its flag, and any other line in the kind of each segment, with the
-// overlays that cover the segment applied over that.
-func (p *Printer) renderContent(view *line.View, idx int) string {
+// runSpan places one styled run of a line in both the content and the
+// shown text, the rendered line without its escape sequences. Offsets and
+// lengths count runes.
+type runSpan struct {
+	text     string // The escaped content the run covers.
+	col      int    // The column of the content at which the run starts.
+	cols     int    // The number of columns of the content the run covers.
+	shown    int    // The offset in the shown text at which the run starts.
+	shownLen int    // The number of runes the run shows.
+}
+
+// renderRuns renders the content of line idx of view with its overlays,
+// one styled run per run of segments from [line.View.Segments] that
+// style the same. A deleted or inserted line takes the diff style for its
+// flag, and any other line takes the kind of each segment, with the
+// overlays that cover the segment applied over that. It returns the
+// rendered content and a [runSpan] for each run, in order.
+func (p *Printer) renderRuns(view *line.View, idx int) (string, []runSpan) {
 	var base kind.Kind
 
 	switch view.Flag(idx) {
@@ -863,13 +875,34 @@ func (p *Printer) renderContent(view *line.View, idx int) string {
 		runKey  string
 		runSeg  line.Segment
 		started bool
+		spans   []runSpan
+		col     int
+		shown   int
 	)
 
 	flush := func() {
-		if started {
-			sb.WriteString(p.blended(runKey, runSeg).Render(escape.Control(run.String())))
-			run.Reset()
+		if !started {
+			return
 		}
+
+		// The escape keeps one rune per rune of the content, so the escaped
+		// text counts the columns of the run.
+		text := escape.Control(run.String())
+		rendered := p.blended(runKey, runSeg).Render(text)
+		span := runSpan{
+			text:     text,
+			col:      col,
+			cols:     utf8.RuneCountInString(text),
+			shown:    shown,
+			shownLen: utf8.RuneCountInString(ansi.Strip(rendered)),
+		}
+
+		sb.WriteString(rendered)
+		run.Reset()
+
+		spans = append(spans, span)
+		col += span.cols
+		shown += span.shownLen
 	}
 
 	for seg := range view.Segments(idx) {
@@ -889,7 +922,7 @@ func (p *Printer) renderContent(view *line.View, idx int) string {
 
 	flush()
 
-	return sb.String()
+	return sb.String(), spans
 }
 
 // renderAnnotation renders the annotations of line idx of view, which is

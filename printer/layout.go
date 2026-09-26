@@ -4,11 +4,11 @@ import (
 	"slices"
 	"sort"
 	"unicode"
+	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -100,17 +100,67 @@ func (p *Printer) wrapLine(view *line.View, idx int, ln *line.Line, gutterWidth 
 	// The content wraps as the rendered line does, styles included, since
 	// a style's transform may change the shown text. The wrap is
 	// ANSI-aware and measures the shown cells.
-	pieces := p.wrapContent(p.renderContent(view, idx), gutterWidth)
+	rendered, runs := p.renderRuns(view, idx)
+	pieces := p.wrapContent(rendered, gutterWidth)
 
-	// The columns come from the shown text of each piece matched against
-	// the escaped content, which is what the rows spell out when no style
-	// transforms it.
+	// The wrap cuts the pieces from the shown text of the line, so each
+	// piece matches the shown text at the offset where it begins. The
+	// runs then map each offset back to a column of the content, which
+	// confines a transform that rewrites its text to the run it styles.
 	plain := make([]string, len(pieces))
 	for i, piece := range pieces {
 		plain[i] = ansi.Strip(piece)
 	}
 
-	return pieces, rowStarts(escape.Control(ln.Content()), plain)
+	shownText := ansi.Strip(rendered)
+	shown := []rune(shownText)
+	contentLen := utf8.RuneCountInString(ln.Content())
+
+	starts := rowStarts(shownText, plain)
+	for i, offset := range starts {
+		starts[i] = sourceCol(runs, shown, offset, contentLen)
+	}
+
+	return pieces, starts
+}
+
+// sourceCol returns the column of the content at which offset in shown,
+// the shown text of a line, falls. Runs holds the runs the line renders
+// in, and contentLen is the number of columns of the content. Offset 0 is
+// column 0, and an offset at or past the end of shown is contentLen.
+//
+// The run that shows the rune at offset decides the column. A run that
+// shows as many runes as it covers maps rune for rune, as a style that
+// only colors its text or changes its case does. In any other run, the
+// shown runes before offset match against the text of the run as
+// [rowStarts] matches pieces, and the column stays within the run.
+func sourceCol(runs []runSpan, shown []rune, offset, contentLen int) int {
+	switch {
+	case offset <= 0:
+		return 0
+	case offset >= len(shown):
+		return contentLen
+	}
+
+	// The last run that starts at or before offset, which shows the rune
+	// there. Search finds the first run that starts past offset, and the
+	// first run starts at offset 0.
+	run := runs[sort.Search(len(runs), func(i int) bool { return runs[i].shown > offset })-1]
+	if run.shownLen == run.cols {
+		return run.col + offset - run.shown
+	}
+
+	text := []rune(run.text)
+	next := 0
+
+	for _, r := range shown[run.shown:offset] {
+		next = skipDropped(text, next, r)
+		if next < len(text) && text[next] == r {
+			next++
+		}
+	}
+
+	return run.col + min(next, run.cols)
 }
 
 // layoutAnnotation returns the number of rows the styled annotations of
@@ -142,25 +192,21 @@ func (p *Printer) layoutAnnotation(
 // at a break.
 const nbsp = '\u00a0'
 
-// rowStarts returns the column of content at which each piece of its
-// wrapped form begins. It matches the runes of each piece against the
-// content in order. The wrapper drops every Unicode space but [nbsp] at
-// a break and at the end of the content, so the match skips those
-// spaces in the content. A style's transform may add text of its own,
-// so the match also passes over runes of a piece the content does not
-// hold. The first piece begins at column 0, even when a transform puts
-// text in front of an indented line. The caller escapes the content, so
-// a tab shows as its control picture and never counts as a space.
-func rowStarts(content string, pieces []string) []int {
-	runes := []rune(content)
+// rowStarts returns the rune offset in text at which each piece of its
+// wrapped form begins. It matches the runes of each piece against text
+// in order. The wrapper drops every Unicode space but [nbsp] at a break
+// and at the end of the text, so the match skips those spaces in text,
+// and they are the only runes it skips. The first piece begins at offset
+// 0. The caller escapes the text, so a tab shows as its control picture
+// and never counts as a space.
+func rowStarts(text string, pieces []string) []int {
+	runes := []rune(text)
 	starts := make([]int, len(pieces))
 	next := 0
 
 	for i, piece := range pieces {
 		for j, r := range piece {
-			for next < len(runes) && runes[next] != r && unicode.IsSpace(runes[next]) && runes[next] != nbsp {
-				next++
-			}
+			next = skipDropped(runes, next, r)
 
 			if j == 0 && i > 0 {
 				starts[i] = next
@@ -177,6 +223,16 @@ func rowStarts(content string, pieces []string) []int {
 	}
 
 	return starts
+}
+
+// skipDropped returns the index of the first rune of runes at or after
+// next that is r or is no space the wrapper drops.
+func skipDropped(runes []rune, next int, r rune) int {
+	for next < len(runes) && runes[next] != r && unicode.IsSpace(runes[next]) && runes[next] != nbsp {
+		next++
+	}
+
+	return next
 }
 
 // rowIndex returns the index of the row that holds col, given the column
