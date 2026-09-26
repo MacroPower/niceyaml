@@ -88,7 +88,7 @@ type aliasBinder struct {
 // It returns nil for a nil node, including a typed nil a hand-built tree may
 // hold, so Walk stops rather than reading the fields behind it.
 func (b *aliasBinder) Visit(node ast.Node) ast.Visitor {
-	if node == nil || reflect.ValueOf(node).IsNil() {
+	if isNilNode(node) {
 		return nil
 	}
 
