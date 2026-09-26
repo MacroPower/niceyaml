@@ -530,12 +530,15 @@ type document struct {
 }
 
 // Node is a scope in a YAML document: the root of the document, which
-// [Source.Documents] and [Source.Document] return, or the node a path
-// selects, which [Node.At] returns. Every method reads and resolves from
-// the node, so [Node.Decode] decodes it alone, [Node.Validate] runs a
-// [Validator] on it, and [Node.Bind] resolves the paths of an error from
-// it, so a check written for the type of a value reports the same lines
-// whether the value is the whole document or one inside it.
+// [Source.Documents] and [Source.Document] return, or a node a path
+// selects. [Node.At] returns the one node a path selects, and
+// [Node.Nodes] returns one Node per match of a path that can select
+// several, such as one with a `[*]` selector. Every method reads and
+// resolves from the node, so [Node.Decode] decodes it alone,
+// [Node.Validate] runs a [Validator] on it, and [Node.Bind] resolves the
+// paths of an error from it, so a check written for the type of a value
+// reports the same lines whether the value is the whole document or one
+// inside it.
 //
 // [Node.Decode] returns a new value and [Node.DecodeInto] fills one the
 // caller already holds, such as one pre-populated with defaults. Both run
@@ -554,11 +557,11 @@ type document struct {
 // A source that holds one document hands its root out from
 // [Source.Document].
 //
-// A Node from [Node.At] is scoped to the node a path selects. Decode
-// decodes that node alone, which reads one value without decoding the
-// whole document, such as a discriminator field that routes the
-// document, and Bind resolves the paths in an error from the node, so a
-// check written for the type of that value reports the right lines. Any
+// A Node from [Node.At] or [Node.Nodes] is scoped to the node a path
+// selects. Decode decodes that node alone, which reads one value without
+// decoding the whole document, such as a discriminator field that routes
+// the document, and Bind resolves the paths in an error from the node, so
+// a check written for the type of that value reports the right lines. Any
 // Node reaches the root of its document through [Node.Document], and
 // [Node.Path] is [paths.Root] for the root and the path from it for a
 // scoped Node.
@@ -572,7 +575,8 @@ type document struct {
 // carry a [SourceError] that renders the offending lines.
 //
 // Receive instances from [Source.Documents], [Source.Document],
-// [Node.At], or [Node.Document].
+// [Node.At], [Node.Nodes], [Node.Document], [SourceError.Node], or
+// [SourceError.Document].
 type Node struct {
 	// The node the scope selects, which At or Nodes resolves once when it
 	// scopes the Node. The root of a document leaves it unset, since its
@@ -941,7 +945,9 @@ func (b *boundsFinder) consider(tk *token.Token) {
 
 // Path returns the scope of the [Node]: the path from the document root
 // to the node, which is [paths.Root] for the root Node of a document and
-// the joined paths for one from [Node.At].
+// the joined paths for one from [Node.At]. A Node from [Node.Nodes]
+// reports the path that selects its node alone, so the Node for the first
+// match of `$.items[*]` reports `$.items[0]`.
 func (n *Node) Path() paths.Path {
 	return n.base
 }
