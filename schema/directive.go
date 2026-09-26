@@ -202,10 +202,10 @@ type directiveResolver struct{}
 // so a directive can name any file the registry can read, a path outside
 // the document's directory included, and any host the client can reach.
 // A program that validates documents from another trust domain confines
-// the registry: [WithFS] restricts file reads to one file system, and a
-// client whose Transport or CheckRedirect restricts hosts on every hop
-// bounds the fetch. A program that trusts no directive at all leaves
-// Directive out of the resolvers.
+// the registry. [WithFS] with the file system of an [os.Root] restricts
+// file reads to one directory tree, and a client whose Transport or
+// CheckRedirect restricts hosts on every hop bounds the fetch. A program
+// that trusts no directive at all leaves Directive out of the resolvers.
 func Directive() Resolver {
 	return directiveResolver{}
 }

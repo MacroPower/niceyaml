@@ -1451,6 +1451,36 @@ func TestRegistry_WithFS(t *testing.T) {
 		require.ErrorIs(t, err, fs.ErrInvalid)
 	})
 
+	t.Run("an os.Root refuses a symlink out of its tree", func(t *testing.T) {
+		t.Parallel()
+
+		outside := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(outside, "s.json"), schemaData, 0o600))
+
+		root := t.TempDir()
+
+		err := os.Symlink(filepath.Join(outside, "s.json"), filepath.Join(root, "s.json"))
+		if err != nil {
+			t.Skipf("create symlink: %v", err)
+		}
+
+		r, err := os.OpenRoot(root)
+		require.NoError(t, err)
+		t.Cleanup(func() { assert.NoError(t, r.Close()) })
+
+		reg := schema.NewRegistry(schema.WithFS(r.FS()))
+
+		_, err = reg.Load(t.Context(), schema.File("s.json"))
+		require.ErrorIs(t, err, schema.ErrLoad)
+
+		// A registry on os.DirFS follows the link and reads the file
+		// outside the tree.
+		dirFS := schema.NewRegistry(schema.WithFS(os.DirFS(root)))
+		data, err := dirFS.Load(t.Context(), schema.File("s.json"))
+		require.NoError(t, err)
+		assert.Equal(t, schemaData, data)
+	})
+
 	t.Run("a nil file system keeps the disk", func(t *testing.T) {
 		t.Parallel()
 

@@ -117,10 +117,27 @@ type RegistryOption func(*Registry)
 // A directive in that document that names ./schema.json resolves to
 // configs/schema.json in bundle. An absolute path, such as the one a
 // directive resolves to in a document opened by its absolute path, reads
-// relative to the working directory, so [os.DirFS] of the working
-// directory confines the registry to it and a path outside it names no
-// file. Without the option, the registry reads the working directory,
-// with each path made absolute against it, and a nil fsys keeps that.
+// relative to the working directory, and a path outside it names no
+// file. The registry checks only the path, and [os.DirFS] follows
+// symbolic links, so a link inside the working directory still reads a
+// file anywhere on disk. The file system [os.Root.FS] returns refuses a
+// link that leads out of the tree, so a program that validates documents
+// from another trust domain passes that file system and keeps the Root
+// open while the registry is in use:
+//
+//	root, err := os.OpenRoot(".")
+//	if err != nil {
+//	    return err
+//	}
+//	defer root.Close()
+//
+//	reg := schema.NewRegistry(
+//	    schema.WithFS(root.FS()),
+//	    schema.WithResolvers(schema.Directive()),
+//	)
+//
+// Without the option, the registry reads the working directory, with
+// each path made absolute against it, and a nil fsys keeps that.
 func WithFS(fsys fs.FS) RegistryOption {
 	return func(r *Registry) {
 		if fsys != nil {
