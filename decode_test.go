@@ -2846,6 +2846,20 @@ func TestWithAllowDuplicateKeys(t *testing.T) {
 		assert.Equal(t, "second", result.Name)
 	})
 
+	t.Run("At resolves the value the decode keeps", func(t *testing.T) {
+		t.Parallel()
+
+		d, err := niceyaml.NewSourceFromString(input, niceyaml.WithAllowDuplicateKeys(true)).Documents()
+		require.NoError(t, err)
+		require.Len(t, d, 1)
+
+		name := yamltest.At(t, d[0], paths.Root().Child("name"))
+
+		got, err := name.Decode[string](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, "second", got)
+	})
+
 	t.Run("a later false turns the option off", func(t *testing.T) {
 		t.Parallel()
 
@@ -4261,27 +4275,22 @@ func TestNode_Nodes(t *testing.T) {
 		assert.Equal(t, "b", got)
 	})
 
-	t.Run("a duplicate key scopes each entry", func(t *testing.T) {
+	t.Run("a duplicate key scopes the entry the decode keeps", func(t *testing.T) {
 		t.Parallel()
 
 		dup, err := niceyaml.NewSourceFromString("a: 1\na: 2\n", niceyaml.WithAllowDuplicateKeys(true)).Document()
 		require.NoError(t, err)
 
+		// The path $.a selects the later entry, so `..a` lists only that
+		// one.
 		entries, err := dup.Nodes(paths.Root().Recursive("a"))
 		require.NoError(t, err)
-		require.Len(t, entries, 2)
+		require.Len(t, entries, 1)
+		assert.Equal(t, "$.a", entries[0].Path().String())
 
-		// Both entries share the path $.a, so each decodes the node Nodes
-		// found rather than the one the path resolves to.
-		for i, want := range []int{1, 2} {
-			got, err := entries[i].Decode[int](t.Context())
-			require.NoError(t, err)
-			assert.Equal(t, want, got)
-
-			node, err := entries[i].AST()
-			require.NoError(t, err)
-			assert.Equal(t, fmt.Sprint(want), node.String())
-		}
+		got, err := entries[0].Decode[int](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, 2, got)
 	})
 
 	t.Run("resolves from the scope of the receiver", func(t *testing.T) {

@@ -436,8 +436,9 @@ func (p Path) single(r *resolver, doc *ast.DocumentNode) (match, error) {
 // It looks through anchors and aliases, so each node is the content the
 // path names. The `.name`, `[n]`, and `[*]` selectors follow aliases to
 // their anchor and see the entries a `<<` merge key brings into a mapping.
-// The `..name` selector visits each entry once, where the source defines
-// it, so it neither follows aliases nor looks into merge sources.
+// The `..name` selector visits an entry where the source defines it, so it
+// neither follows aliases nor looks into merge sources, and it skips an
+// entry that a later entry with the same key in its mapping shadows.
 //
 // Wraps [ErrNoDocument], together with [ErrNotFound], when the document has
 // no content to resolve in, and [ErrAlias] when an alias on the path does

@@ -1784,6 +1784,17 @@ func TestSchema_SourcePath(t *testing.T) {
 			wantPath: "$.'1.5'",
 			want:     "1:6: $.'1.5': expected \"string\", got \"integer\"",
 		},
+		"two keys decoding to one name": {
+			// Both keys decode to 1, and the decoder keeps the later
+			// member, so the path names the later key.
+			schema: `{
+				"type": "object",
+				"additionalProperties": {"type": "string"}
+			}`,
+			input:    "1.0: x\n1: 2\n",
+			wantPath: "$.1",
+			want:     "2:4: $.1: expected \"string\", got \"integer\"",
+		},
 		"key with a dot": {
 			schema: `{
 				"type": "object",

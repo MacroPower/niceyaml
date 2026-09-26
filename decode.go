@@ -622,9 +622,8 @@ func (n *Node) Document() *Node {
 // AST returns the [ast.Node] the Node selects, the one [Node.Decode]
 // decodes. For the root Node that is the body of the whole document, and
 // for one from [Node.At] or [Node.Nodes] it is the node that method
-// resolved when it scoped the Node, so two entries of a duplicate key,
-// which share one path, each keep their own node. The text of any node,
-// including a mapping or a sequence, is its String method:
+// resolved when it scoped the Node. The text of any node, including a
+// mapping or a sequence, is its String method:
 //
 //	scoped, err := doc.At(path)
 //	if err != nil {

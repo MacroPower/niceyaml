@@ -551,8 +551,10 @@ func elementNode(node ast.Node, index int) ast.Node {
 
 // memberNodes returns the key and value nodes of the member whose key
 // decodes to name, or nil nodes when the node is no mapping or holds no
-// such member. A tree built by hand may hold a typed nil where the parser
-// always puts a node, which holds no member either.
+// such member. When several members decode to name, memberNodes returns
+// the last, which is the member whose value the decode keeps. A tree built
+// by hand may hold a typed nil where the parser always puts a node, which
+// holds no member either.
 func memberNodes(node ast.Node, name string) (ast.Node, ast.Node) {
 	var members []*ast.MappingValueNode
 
@@ -571,7 +573,7 @@ func memberNodes(node ast.Node, name string) (ast.Node, ast.Node) {
 		return nil, nil
 	}
 
-	for _, member := range members {
+	for _, member := range slices.Backward(members) {
 		if key, ok := decodedKey(member.Key); ok && key == name {
 			return member.Key, member.Value
 		}

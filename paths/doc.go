@@ -21,10 +21,16 @@
 // (`!!map`) on a value is transparent, an alias (`*name`) resolves to the
 // anchor it names, and a mapping key lookup sees the entries a `<<` merge
 // key brings in. A key the mapping defines itself wins over a merged one.
-// When `<<` lists several sources the later source wins, which is the source
-// the goccy/go-yaml decoder takes; YAML 1.1 gives the earlier source
-// precedence instead. A token found through an alias or merge key sits where
-// the anchor defines it, which is where the offending text is.
+// When the parser allows a mapping to define one key twice, as
+// [go.jacobcolvin.com/niceyaml.WithAllowDuplicateKeys] makes it do, a path
+// selects the later entry, whose value the decoder keeps, and a `..name`
+// selector lists only that entry. A mapping may hold several `<<` keys the
+// same way. The decoder merges all of them and a key lookup sees the
+// entries of each, but `..name` visits only the inline mapping of the last
+// one. When `<<` lists several sources the later source wins, which is the
+// source the goccy/go-yaml decoder takes; YAML 1.1 gives the earlier source
+// precedence instead. A token found through an alias or merge key sits
+// where the anchor defines it, which is where the offending text is.
 //
 // The decoder parts ways over an own key in one shape. A `<<` written after
 // a key of the same name overwrites that key when the decoder fills a map,

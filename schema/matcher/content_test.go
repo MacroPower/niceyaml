@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
@@ -263,6 +264,21 @@ func TestContent(t *testing.T) {
 
 		got := match(t, m, doc)
 		assert.True(t, got)
+	})
+
+	t.Run("duplicate key matches the value the decode keeps", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(stringtest.Input(`
+			kind: Pod
+			kind: Service
+		`), niceyaml.WithAllowDuplicateKeys(true))
+		docs, err := source.Documents()
+		require.NoError(t, err)
+		require.Len(t, docs, 1)
+
+		assert.True(t, match(t, matcher.Content(kindPath, "Service"), docs[0]))
+		assert.False(t, match(t, matcher.Content(kindPath, "Pod"), docs[0]))
 	})
 
 	t.Run("alias without an anchor is an error", func(t *testing.T) {

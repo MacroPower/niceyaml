@@ -2007,6 +2007,67 @@ func TestPath_Node_LaterMergeKeyWins(t *testing.T) {
 	assert.Equal(t, "Q", node.String())
 }
 
+func TestPath_Matches_RepeatedMergeKey(t *testing.T) {
+	t.Parallel()
+
+	// The decoder merges both inline mappings, but a path through `<<`
+	// selects the later one, so `..` visits only that mapping.
+	src := "t:\n  <<: {a: 1}\n  <<: {b: 2}\n"
+
+	f, err := parser.ParseBytes([]byte(src), 0, parser.AllowDuplicateMapKey())
+	require.NoError(t, err)
+
+	doc := f.Docs[0]
+
+	matches, err := paths.MustParse("$..a").Matches(doc)
+	require.NoError(t, err)
+	assert.Empty(t, matches)
+
+	matches, err = paths.MustParse("$..b").Matches(doc)
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, "$.t.<<.b", matches[0].Path.String())
+
+	single, err := matches[0].Path.Node(doc)
+	require.NoError(t, err)
+	assert.Same(t, matches[0].Node, single)
+
+	node, err := paths.MustParse("$.t.a").Node(doc)
+	require.NoError(t, err)
+	assert.Equal(t, "1", node.String())
+}
+
+func TestPath_Node_LaterDuplicateKeyWins(t *testing.T) {
+	t.Parallel()
+
+	// A mapping may hold one key twice when the parser allows duplicates.
+	// The decoder keeps the value of the later entry, so the path selects
+	// it, and `..a` lists that entry alone.
+	src := "m:\n  a: 1\n  a: 2\n"
+
+	f, err := parser.ParseBytes([]byte(src), 0, parser.AllowDuplicateMapKey())
+	require.NoError(t, err)
+
+	doc := f.Docs[0]
+
+	node, err := paths.MustParse("$.m.a").Node(doc)
+	require.NoError(t, err)
+	assert.Equal(t, "2", node.String())
+
+	key, err := paths.MustParse("$.m.a~").Token(doc)
+	require.NoError(t, err)
+	assert.Equal(t, 3, key.Position.Line)
+
+	matches, err := paths.MustParse("$..a").Matches(doc)
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, "$.m.a", matches[0].Path.String())
+
+	single, err := matches[0].Path.Node(doc)
+	require.NoError(t, err)
+	assert.Same(t, matches[0].Node, single)
+}
+
 func TestPath_Matches(t *testing.T) {
 	t.Parallel()
 

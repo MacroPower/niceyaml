@@ -296,14 +296,16 @@ func (r *resolver) apply(seg segment, m match) ([]match, error) {
 // lookup finds the entry for name in mapping, looking through `<<` merge keys
 // when no entry of the mapping itself has that key. A key the mapping defines
 // wins over a merged one, and a later merge source wins over an earlier one,
-// which is the source the goccy/go-yaml decoder takes.
+// which is the source the goccy/go-yaml decoder takes. Among several entries
+// of the mapping itself with that key, the later one wins, which is the
+// entry whose value the decoder keeps.
 //
 // The seen set guards against merge cycles through aliases. The bool result
 // reports whether lookup found an entry.
 func (r *resolver) lookup(
 	mapping *ast.MappingNode, name string, seen map[*ast.MappingNode]bool,
 ) (*ast.MappingValueNode, bool, error) {
-	for _, entry := range mapping.Values {
+	for _, entry := range slices.Backward(mapping.Values) {
 		if entry != nil && keyName(entry.Key) == name {
 			return entry, true, nil
 		}
@@ -378,7 +380,14 @@ func (r *resolver) mergeSources(value ast.Node) ([]*ast.MappingNode, error) {
 // descend collects every mapping entry keyed name at any depth below node, in
 // document order, each with the selectors from at, the match node came
 // from, down to the entry. It looks through anchors and tags but not
-// aliases, so it visits each entry of the source once, at its definition.
+// aliases, so it visits an entry of the source at most once, at its
+// definition.
+//
+// It skips an entry whose key a later entry in its mapping repeats, and
+// everything below it, because a path through that key selects the later
+// entry. When a mapping holds several `<<` keys, descend thus visits only
+// the inline mapping of the last one, even though the decoder merges them
+// all.
 func (r *resolver) descend(node ast.Node, name string, at match, acc []match) []match {
 	if isNilNode(node) {
 		return acc
@@ -386,12 +395,24 @@ func (r *resolver) descend(node ast.Node, name string, at match, acc []match) []
 
 	switch n := node.(type) {
 	case *ast.MappingNode:
+		last := make(map[string]*ast.MappingValueNode, len(n.Values))
+
+		for _, entry := range n.Values {
+			if entry != nil {
+				last[keyName(entry.Key)] = entry
+			}
+		}
+
 		for _, entry := range n.Values {
 			if entry == nil {
 				continue
 			}
 
 			key := keyName(entry.Key)
+			if last[key] != entry {
+				continue
+			}
+
 			below := at.with(entry.Value, entry, segment{kind: segmentChild, name: key})
 
 			if key == name {
