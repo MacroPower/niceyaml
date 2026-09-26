@@ -27,13 +27,18 @@
 //     Syntax
 //   - Generic -> GenericDeleted, GenericInserted, GenericError: Diff and error
 //     markers
-//   - GenericHighlight -> GenericHighlightDim: Search and selection highlights
+//   - Generic -> GenericHighlight -> GenericHighlightDim: Search and selection
+//     highlights
+//   - Generic -> GenericHeading -> GenericHeadingAccent, GenericHeadingSubtle,
+//     GenericHeadingOK, GenericHeadingWarn, GenericHeadingError: Headings
 //   - TextAccent -> TextAccentDim: Emphasized text
 //   - TextSubtle -> TextSubtleDim: De-emphasized text
-//   - GenericHeading -> GenericHeadingAccent, GenericHeadingSubtle,
-//     GenericHeadingOK, GenericHeadingWarn, GenericHeadingError: Headings
 //   - Comment -> UI -> UILineNumber, UIAnnotation -> UIHunkHeader,
 //     UISeparator: The chrome a renderer draws around content
+//
+// The highlight and heading kinds inherit from [Generic] rather than from
+// [Text], so a theme that sets Generic and leaves them unset draws
+// highlights and headings in its Generic style.
 //
 // The UI kinds inherit from [Comment] rather than from [Text], so a theme
 // that sets none of them draws gutters, annotations, and hunk headers in
