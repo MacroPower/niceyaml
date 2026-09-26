@@ -45,7 +45,7 @@ type Segment struct {
 // the overlays, so it styles the line as the printer does without
 // reading either:
 //
-//	for i, ln := range view.All() {
+//	for i := range view.All() {
 //		for seg := range view.Segments(i) {
 //			class := string(seg.Kind)
 //			if n := len(seg.Overlays); n > 0 {
