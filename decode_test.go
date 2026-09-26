@@ -326,15 +326,11 @@ func TestDocument_Decode(t *testing.T) {
 	t.Run("decode to map", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString("key: value")
-		d, err := source.Documents()
-		require.NoError(t, err)
+		dd := yamltest.FirstDocument(t, "key: value")
 
-		for _, dd := range d {
-			result, err := dd.Decode[map[string]string](t.Context())
-			require.NoError(t, err)
-			assert.Equal(t, map[string]string{"key": "value"}, result)
-		}
+		result, err := dd.Decode[map[string]string](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"key": "value"}, result)
 	})
 
 	t.Run("decode to struct", func(t *testing.T) {
@@ -344,15 +340,11 @@ func TestDocument_Decode(t *testing.T) {
 			name: test
 			value: 42
 		`)
-		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
+		dd := yamltest.FirstDocument(t, input)
 
-		for _, dd := range d {
-			result, err := dd.Decode[testStruct](t.Context())
-			require.NoError(t, err)
-			assert.Equal(t, testStruct{Name: "test", Value: 42}, result)
-		}
+		result, err := dd.Decode[testStruct](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, testStruct{Name: "test", Value: 42}, result)
 	})
 
 	t.Run("decode to slice", func(t *testing.T) {
@@ -363,15 +355,11 @@ func TestDocument_Decode(t *testing.T) {
 			- two
 			- three
 		`)
-		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
+		dd := yamltest.FirstDocument(t, input)
 
-		for _, dd := range d {
-			result, err := dd.Decode[[]string](t.Context())
-			require.NoError(t, err)
-			assert.Equal(t, []string{"one", "two", "three"}, result)
-		}
+		result, err := dd.Decode[[]string](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, []string{"one", "two", "three"}, result)
 	})
 
 	t.Run("decode multiple documents", func(t *testing.T) {
@@ -410,19 +398,15 @@ func TestDocument_Decode_TypeMismatch(t *testing.T) {
 	t.Run("string to int", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString("value: not_a_number")
-		d, err := source.Documents()
-		require.NoError(t, err)
+		dd := yamltest.FirstDocument(t, "value: not_a_number")
 
-		for _, dd := range d {
-			_, err := dd.Decode[struct{ Value int }](t.Context())
+		_, err := dd.Decode[struct{ Value int }](t.Context())
 
-			require.Error(t, err)
+		require.Error(t, err)
 
-			var yamlErr *niceyaml.Error
+		var yamlErr *niceyaml.Error
 
-			require.ErrorAs(t, err, &yamlErr)
-		}
+		require.ErrorAs(t, err, &yamlErr)
 	})
 }
 
@@ -436,19 +420,15 @@ func TestDocument_Decode_Schema(t *testing.T) {
 			name: test
 			value: 42
 		`)
-		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
+		dd := yamltest.FirstDocument(t, input)
+
+		var called bool
+
+		result, err := dd.Decode[plainConfig](t.Context(), niceyaml.WithValidator(nameSchema(&called)))
 		require.NoError(t, err)
-
-		for _, dd := range d {
-			var called bool
-
-			result, err := dd.Decode[plainConfig](t.Context(), niceyaml.WithValidator(nameSchema(&called)))
-			require.NoError(t, err)
-			assert.Equal(t, "test", result.Name)
-			assert.Equal(t, 42, result.Value)
-			assert.True(t, called, "the validator should have been called")
-		}
+		assert.Equal(t, "test", result.Name)
+		assert.Equal(t, 42, result.Value)
+		assert.True(t, called, "the validator should have been called")
 	})
 
 	t.Run("runs every schema in order and stops at the first failure", func(t *testing.T) {
@@ -489,14 +469,10 @@ func TestDocument_Decode_Schema(t *testing.T) {
 			name: invalid
 			value: 42
 		`)
-		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
+		dd := yamltest.FirstDocument(t, input)
 
-		for _, dd := range d {
-			_, err := dd.Decode[plainConfig](t.Context(), niceyaml.WithValidator(nameSchema(nil)))
-			require.ErrorIs(t, err, errSchemaValidationFailed)
-		}
+		_, err := dd.Decode[plainConfig](t.Context(), niceyaml.WithValidator(nameSchema(nil)))
+		require.ErrorIs(t, err, errSchemaValidationFailed)
 	})
 
 	t.Run("decodes without a schema", func(t *testing.T) {
@@ -506,16 +482,12 @@ func TestDocument_Decode_Schema(t *testing.T) {
 			name: test
 			value: 42
 		`)
-		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
+		dd := yamltest.FirstDocument(t, input)
 
-		for _, dd := range d {
-			result, err := dd.Decode[plainConfig](t.Context())
-			require.NoError(t, err)
-			assert.Equal(t, "test", result.Name)
-			assert.Equal(t, 42, result.Value)
-		}
+		result, err := dd.Decode[plainConfig](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, "test", result.Name)
+		assert.Equal(t, 42, result.Value)
 	})
 }
 
@@ -1295,23 +1267,18 @@ func TestDocument_Decode_SchemaThenDecodeError(t *testing.T) {
 	t.Parallel()
 
 	// Test when the decode after validation fails.
-	input := `value: not_a_number`
-	source := niceyaml.NewSourceFromString(input)
-	d, err := source.Documents()
-	require.NoError(t, err)
+	dd := yamltest.FirstDocument(t, `value: not_a_number`)
 
-	for _, dd := range d {
-		// Schema validation passes, but the decode fails on a type mismatch.
-		_, err := dd.Decode[strictValueConfig](t.Context(),
-			niceyaml.WithValidator(passingValidator()),
-		)
+	// Schema validation passes, but the decode fails on a type mismatch.
+	_, err := dd.Decode[strictValueConfig](t.Context(),
+		niceyaml.WithValidator(passingValidator()),
+	)
 
-		require.Error(t, err)
+	require.Error(t, err)
 
-		var yamlErr *niceyaml.Error
+	var yamlErr *niceyaml.Error
 
-		require.ErrorAs(t, err, &yamlErr)
-	}
+	require.ErrorAs(t, err, &yamlErr)
 }
 
 func TestDocument_Decode_SelfValidator(t *testing.T) {
@@ -1324,17 +1291,13 @@ func TestDocument_Decode_SelfValidator(t *testing.T) {
 			name: test
 			value: 42
 		`)
-		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
+		dd := yamltest.FirstDocument(t, input)
 
-		for _, dd := range d {
-			result, err := dd.Decode[validatorConfig](t.Context())
-			require.NoError(t, err)
-			assert.True(t, result.validated, "Validate() should have been called by Decode()")
-			assert.Equal(t, "test", result.Name)
-			assert.Equal(t, 42, result.Value)
-		}
+		result, err := dd.Decode[validatorConfig](t.Context())
+		require.NoError(t, err)
+		assert.True(t, result.validated, "Validate() should have been called by Decode()")
+		assert.Equal(t, "test", result.Name)
+		assert.Equal(t, 42, result.Value)
 	})
 
 	t.Run("WithoutValidator skips Validate", func(t *testing.T) {
@@ -1405,16 +1368,12 @@ func TestDocument_Decode_SelfValidator(t *testing.T) {
 			name: test
 			value: 42
 		`)
-		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
+		dd := yamltest.FirstDocument(t, input)
 
-		for _, dd := range d {
-			result, err := dd.Decode[plainConfig](t.Context())
-			require.NoError(t, err)
-			assert.Equal(t, "test", result.Name)
-			assert.Equal(t, 42, result.Value)
-		}
+		result, err := dd.Decode[plainConfig](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, "test", result.Name)
+		assert.Equal(t, 42, result.Value)
 	})
 
 	t.Run("runs schema and Validate in order", func(t *testing.T) {
@@ -1424,21 +1383,17 @@ func TestDocument_Decode_SelfValidator(t *testing.T) {
 			name: test
 			value: 42
 		`)
-		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
+		dd := yamltest.FirstDocument(t, input)
+
+		var called bool
+
+		result, err := dd.Decode[bothValidatorConfig](
+			t.Context(),
+			niceyaml.WithValidator(nameSchema(&called)),
+		)
 		require.NoError(t, err)
-
-		for _, dd := range d {
-			var called bool
-
-			result, err := dd.Decode[bothValidatorConfig](
-				t.Context(),
-				niceyaml.WithValidator(nameSchema(&called)),
-			)
-			require.NoError(t, err)
-			assert.True(t, called, "the validator should have been called")
-			assert.True(t, result.validated, "Validate() should have been called after decode")
-		}
+		assert.True(t, called, "the validator should have been called")
+		assert.True(t, result.validated, "Validate() should have been called after decode")
 	})
 
 	t.Run("returns SelfValidator error", func(t *testing.T) {
@@ -1448,14 +1403,10 @@ func TestDocument_Decode_SelfValidator(t *testing.T) {
 			name: ""
 			value: 42
 		`)
-		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
+		dd := yamltest.FirstDocument(t, input)
 
-		for _, dd := range d {
-			_, err := dd.Decode[bothValidatorConfig](t.Context())
-			require.ErrorIs(t, err, errNameRequired)
-		}
+		_, err := dd.Decode[bothValidatorConfig](t.Context())
+		require.ErrorIs(t, err, errNameRequired)
 	})
 }
 
@@ -1772,16 +1723,10 @@ func TestDocument_Validate(t *testing.T) {
 			name: test
 			count: 42
 		`)
-		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
+		dd := yamltest.FirstDocument(t, input)
+
+		err := dd.Validate(t.Context(), passingValidator())
 		require.NoError(t, err)
-
-		validator := passingValidator()
-
-		for _, dd := range d {
-			err := dd.Validate(t.Context(), validator)
-			require.NoError(t, err)
-		}
 	})
 
 	t.Run("invalid data fails schema validation", func(t *testing.T) {
@@ -1791,17 +1736,12 @@ func TestDocument_Validate(t *testing.T) {
 			name: test
 			count: not-a-number
 		`)
-		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
+		dd := yamltest.FirstDocument(t, input)
 
 		wantErr := errors.New("validation failed")
-		validator := rejectingValidator(wantErr)
 
-		for _, dd := range d {
-			err := dd.Validate(t.Context(), validator)
-			require.ErrorIs(t, err, wantErr)
-		}
+		err := dd.Validate(t.Context(), rejectingValidator(wantErr))
+		require.ErrorIs(t, err, wantErr)
 	})
 }
 
@@ -1913,15 +1853,11 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 			name: test
 			extra: field
 		`)
-		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
+		dd := yamltest.FirstDocument(t, input)
 
-		for _, dd := range d {
-			result, err := dd.Decode[strictConfig](t.Context())
-			require.NoError(t, err)
-			assert.Equal(t, "test", result.Name)
-		}
+		result, err := dd.Decode[strictConfig](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, "test", result.Name)
 	})
 
 	t.Run("option rejects unknown fields", func(t *testing.T) {
@@ -1931,18 +1867,14 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 			name: test
 			extra: field
 		`)
-		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
+		dd := yamltest.FirstDocument(t, input)
 
-		for _, dd := range d {
-			_, err := dd.Decode[strictConfig](t.Context(), niceyaml.WithDisallowUnknownFields(true))
-			require.Error(t, err)
+		_, err := dd.Decode[strictConfig](t.Context(), niceyaml.WithDisallowUnknownFields(true))
+		require.Error(t, err)
 
-			var yamlErr *niceyaml.Error
+		var yamlErr *niceyaml.Error
 
-			require.ErrorAs(t, err, &yamlErr)
-		}
+		require.ErrorAs(t, err, &yamlErr)
 	})
 
 	t.Run("option applies per call", func(t *testing.T) {
@@ -1952,20 +1884,16 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 			name: test
 			extra: field
 		`)
-		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
+		dd := yamltest.FirstDocument(t, input)
 
 		// The same document decodes strictly on one call and loosely on the
 		// next, so the option belongs to the call rather than the Source.
-		for _, dd := range d {
-			_, err := dd.Decode[strictConfig](t.Context(), niceyaml.WithDisallowUnknownFields(true))
-			require.Error(t, err)
+		_, err := dd.Decode[strictConfig](t.Context(), niceyaml.WithDisallowUnknownFields(true))
+		require.Error(t, err)
 
-			result, err := dd.Decode[strictConfig](t.Context())
-			require.NoError(t, err)
-			assert.Equal(t, "test", result.Name)
-		}
+		result, err := dd.Decode[strictConfig](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, "test", result.Name)
 	})
 
 	t.Run("a later false turns the option off", func(t *testing.T) {
@@ -1989,27 +1917,23 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 			  name: test
 			  extra: field
 		`)
-		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
+		dd := yamltest.FirstDocument(t, input)
 
 		innerPath := paths.Root().Child("inner")
 
-		for _, dd := range d {
-			_, err := yamltest.At(t, dd, innerPath).Decode[strictConfig](
-				t.Context(),
-				niceyaml.WithDisallowUnknownFields(true),
-			)
-			require.Error(t, err)
+		_, err := yamltest.At(t, dd, innerPath).Decode[strictConfig](
+			t.Context(),
+			niceyaml.WithDisallowUnknownFields(true),
+		)
+		require.Error(t, err)
 
-			var yamlErr *niceyaml.Error
+		var yamlErr *niceyaml.Error
 
-			require.ErrorAs(t, err, &yamlErr)
+		require.ErrorAs(t, err, &yamlErr)
 
-			result, err := yamltest.At(t, dd, innerPath).Decode[strictConfig](t.Context())
-			require.NoError(t, err)
-			assert.Equal(t, "test", result.Name)
-		}
+		result, err := yamltest.At(t, dd, innerPath).Decode[strictConfig](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, "test", result.Name)
 	})
 
 	t.Run("option applies across multiple documents", func(t *testing.T) {
@@ -2046,15 +1970,11 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 			name: test
 			extra: field
 		`)
-		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
+		dd := yamltest.FirstDocument(t, input)
 
-		for _, dd := range d {
-			result, err := dd.Decode[strictConfig](t.Context(), niceyaml.WithYAMLDecodeOptions())
-			require.NoError(t, err)
-			assert.Equal(t, "test", result.Name)
-		}
+		result, err := dd.Decode[strictConfig](t.Context(), niceyaml.WithYAMLDecodeOptions())
+		require.NoError(t, err)
+		assert.Equal(t, "test", result.Name)
 	})
 }
 
@@ -2918,14 +2838,12 @@ func TestWithAllowDuplicateKeys(t *testing.T) {
 	t.Run("with option the last value wins", func(t *testing.T) {
 		t.Parallel()
 
-		d, err := niceyaml.NewSourceFromString(input, niceyaml.WithAllowDuplicateKeys(true)).Documents()
+		doc, err := niceyaml.NewSourceFromString(input, niceyaml.WithAllowDuplicateKeys(true)).Document()
 		require.NoError(t, err)
 
-		for _, dd := range d {
-			result, err := dd.Decode[config](t.Context())
-			require.NoError(t, err)
-			assert.Equal(t, "second", result.Name)
-		}
+		result, err := doc.Decode[config](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, "second", result.Name)
 	})
 
 	t.Run("a later false turns the option off", func(t *testing.T) {
