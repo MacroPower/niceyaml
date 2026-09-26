@@ -51,34 +51,16 @@ type model struct {
 }
 
 func newModel(opts *modelOptions) model {
-	// Get sorted theme list.
 	themeList := darkThemeNames()
-	slices.Sort(themeList)
-
-	// Default theme.
-	defaultTheme := "charm"
-	styles := themeStyles(defaultTheme)
-
-	// Create printer with options.
-	printerOpts := buildPrinterOpts(opts.lineNumbers, styles)
-	p := printer.New(printerOpts...)
-
-	// Create viewport.
-	vp := yamlviewport.New(
-		yamlviewport.WithPrinter(p),
-	)
-
-	// Find default theme index.
-	themeIndex := max(0, slices.Index(themeList, defaultTheme))
 
 	m := model{
-		viewport:     vp,
-		themeList:    themeList,
-		themeIndex:   themeIndex,
-		currentTheme: defaultTheme,
-		styles:       styles,
-		lineNumbers:  opts.lineNumbers,
+		viewport:    yamlviewport.New(),
+		themeList:   themeList,
+		themeIndex:  max(0, slices.Index(themeList, theme.Charm.Name)),
+		lineNumbers: opts.lineNumbers,
 	}
+
+	m.applyTheme(theme.Charm.Name)
 
 	for _, source := range opts.sources {
 		m.viewport.AddRevision(source)
@@ -603,6 +585,9 @@ func themeStyles(name string) style.Styles {
 	return style.Default()
 }
 
+// applyTheme switches the model to the named theme. It is the one place
+// that builds a theme's styles and printer, for the first frame and for
+// the theme picker alike.
 func (m *model) applyTheme(name string) {
 	m.currentTheme = name
 	m.styles = themeStyles(name)

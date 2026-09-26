@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -13,6 +14,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/bubbles/yamlviewport"
+	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
 func TestUpdateSearchInputBackspace(t *testing.T) {
@@ -227,6 +229,59 @@ func TestRevisionLabels(t *testing.T) {
 			assert.Equal(t, tc.want, revisionLabels(tc.paths))
 		})
 	}
+}
+
+func TestNewModelDefaultTheme(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		lineNumbers bool
+	}{
+		"diff gutter": {
+			lineNumbers: false,
+		},
+		"line numbers": {
+			lineNumbers: true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := newModel(&modelOptions{
+				sources: []*niceyaml.Source{
+					niceyaml.NewSourceFromString("a: 1\nb: [2, 3]\n", niceyaml.WithName("a.yaml")),
+				},
+				lineNumbers: tc.lineNumbers,
+			})
+
+			assert.Equal(t, theme.Charm.Name, m.currentTheme)
+			assert.Equal(t, theme.Charm.Name, m.themeList[m.themeIndex])
+
+			// The first frame renders as the theme picker would after
+			// switching to the default theme.
+			updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 10})
+
+			got, ok := updated.(model)
+			require.True(t, ok)
+
+			want := got
+			want.applyTheme(theme.Charm.Name)
+
+			assert.Equal(t, want.baseView(), got.baseView())
+		})
+	}
+}
+
+func TestDarkThemeNames(t *testing.T) {
+	t.Parallel()
+
+	// The theme picker lists the names in the order this returns them.
+	names := darkThemeNames()
+
+	assert.NotEmpty(t, names)
+	assert.True(t, slices.IsSorted(names), "names out of order: %v", names)
 }
 
 func TestUpdateWindowSizeViewportHeight(t *testing.T) {
