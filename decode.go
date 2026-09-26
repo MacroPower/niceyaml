@@ -1308,8 +1308,9 @@ func (n *Node) yamlOptions(yamlOpts []yaml.DecodeOption) []yaml.DecodeOption {
 // decodeNode decodes node to v with yamlOpts, and binds the error to the
 // source: a YAML error as an [*Error] at the offending token, and any
 // other, such as a canceled context, as it is. A node without content,
-// the body of an empty document, leaves v as it is, which is what
-// [yaml.Unmarshal] does with input that holds no value.
+// the body of an empty document, leaves v as it is, so defaults already
+// in v survive, as [Node.DecodeInto] promises. [yaml.Unmarshal] instead
+// zeroes its target for input that holds no value.
 func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []yaml.DecodeOption) error {
 	if !hasContent(node) {
 		return nil
@@ -1426,7 +1427,8 @@ func (f *aliasFinder) Visit(node ast.Node) ast.Visitor {
 // directive. So is a scalar holding the placeholder token [tokens.Tokenize]
 // makes for text the lexer emits nothing for, such as a file of
 // whitespace alone. The parser gives such documents no value to decode,
-// and [yaml.Unmarshal] leaves its target as it is for their text.
+// so a decode leaves its target as it is and keeps any defaults in it,
+// where [yaml.Unmarshal] would zero the target.
 func hasContent(node ast.Node) bool {
 	if node == nil {
 		return false

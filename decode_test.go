@@ -1033,9 +1033,9 @@ func TestDocument_Node(t *testing.T) {
 	t.Run("file of whitespace decodes to nothing", func(t *testing.T) {
 		t.Parallel()
 
-		// The lexer emits nothing for the text, and yaml.Unmarshal leaves
-		// its target as it is, so the decode agrees rather than reading
-		// the placeholder token as a string.
+		// The lexer emits nothing for the text, so the document holds no
+		// value, and the decode leaves its target as it is rather than
+		// reading the placeholder token as a string.
 		for _, input := range []string{"\n", "  \n", "\t\n", "!"} {
 			dd := yamltest.FirstDocument(t, input)
 
