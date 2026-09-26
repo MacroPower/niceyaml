@@ -3536,6 +3536,57 @@ func TestViewport_ZeroValue(t *testing.T) {
 	assert.Empty(t, m.View())
 }
 
+func TestViewport_NilPrinterSelectsDefault(t *testing.T) {
+	t.Parallel()
+
+	// SetPrinter stored a nil printer as given, so the view went blank and
+	// counted no rows while the search still counted its matches.
+	setup := func(m *yamlviewport.Model) {
+		m.SetWidth(40)
+		m.SetHeight(5)
+		m.SetRevision(niceyaml.NewSourceFromString("a: 1\nb: foo\nc: foo\n"))
+		m.SetSearchTerm("foo")
+	}
+
+	ref := yamlviewport.New(yamlviewport.WithPrinter(printer.New()))
+	setup(&ref)
+
+	wantView := ref.View()
+	wantRows := ref.TotalRowCount()
+
+	tcs := map[string]struct {
+		newModel func() yamlviewport.Model
+	}{
+		"WithPrinter(nil)": {
+			newModel: func() yamlviewport.Model {
+				return yamlviewport.New(yamlviewport.WithPrinter(nil))
+			},
+		},
+		"SetPrinter(nil)": {
+			newModel: func() yamlviewport.Model {
+				m := yamlviewport.New(yamlviewport.WithPrinter(testPrinterWithColors()))
+				m.SetPrinter(nil)
+
+				return m
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := tc.newModel()
+			setup(&m)
+
+			assert.NotEmpty(t, m.View())
+			assert.Equal(t, wantView, m.View())
+			assert.Equal(t, wantRows, m.TotalRowCount())
+			assert.Equal(t, 2, m.SearchCount())
+		})
+	}
+}
+
 // countingSearcher wraps a [finder.Finder] and counts its Load calls.
 type countingSearcher struct {
 	finder *finder.Finder

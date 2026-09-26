@@ -152,6 +152,7 @@ type Option func(*Model)
 
 // WithPrinter is an [Option] that sets the [*printer.Printer] used for
 // rendering. Without it, the viewport creates a default [printer.Printer].
+// A nil p selects that same default.
 //
 // The viewport never modifies the printer. Each render derives a copy with
 // [printer.Printer.With] and the viewport's wrap width, so other renderers
@@ -426,11 +427,16 @@ func (m *Model) renderPrinter(width int) *printer.Printer {
 }
 
 // SetPrinter sets the [*printer.Printer] used for rendering. See
-// [WithPrinter].
+// [WithPrinter]. A nil p selects the default printer, as a nil
+// [WithPrinter] does.
 //
 // The view, its diff, and its search matches stay as they are, so switching
 // themes costs one render and no diff or search index rebuild.
 func (m *Model) SetPrinter(p *printer.Printer) {
+	if p == nil {
+		p = printer.New()
+	}
+
 	m.printer = p
 	m.relayout()
 }
