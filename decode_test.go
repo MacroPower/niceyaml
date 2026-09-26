@@ -2323,6 +2323,18 @@ func TestDocument_At(t *testing.T) {
 		assert.Nil(t, got)
 	})
 
+	t.Run("file of whitespace returns ErrNotFound and ErrNoDocument", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "\n")
+
+		got, err := dd.At(paths.Root().Child("key"))
+		require.ErrorIs(t, err, paths.ErrNotFound)
+		require.ErrorIs(t, err, paths.ErrNoDocument)
+		assert.Contains(t, err.Error(), "$.key")
+		assert.Nil(t, got)
+	})
+
 	t.Run("alias without anchor returns ErrAlias", func(t *testing.T) {
 		t.Parallel()
 

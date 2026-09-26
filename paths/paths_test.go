@@ -900,6 +900,44 @@ func TestPath_CommentDocument(t *testing.T) {
 	require.ErrorIs(t, err, paths.ErrNoDocument)
 }
 
+func TestPath_WhitespaceDocument(t *testing.T) {
+	t.Parallel()
+
+	// The tokenizer gives a source the lexer emits nothing for one
+	// placeholder token, which the parser reads as a plain scalar. That
+	// scalar is not content, so nothing resolves in the document.
+	tcs := map[string]struct {
+		input string
+	}{
+		"newline":     {input: "\n"},
+		"blank lines": {input: "\n\n"},
+		"spaces":      {input: "   "},
+		"lone bang":   {input: "!"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			file, err := niceyaml.NewSourceFromString(tc.input).File()
+			require.NoError(t, err)
+			require.Len(t, file.Docs, 1)
+
+			_, err = paths.Root().Node(file.Docs[0])
+			require.ErrorIs(t, err, paths.ErrNoDocument)
+			require.ErrorIs(t, err, paths.ErrNotFound)
+
+			_, err = paths.Root().Child("a").Token(file.Docs[0])
+			require.ErrorIs(t, err, paths.ErrNoDocument)
+			require.ErrorIs(t, err, paths.ErrNotFound)
+
+			_, err = paths.Root().Nodes(file.Docs[0])
+			require.ErrorIs(t, err, paths.ErrNoDocument)
+			require.ErrorIs(t, err, paths.ErrNotFound)
+		})
+	}
+}
+
 func TestPath_Token_UnresolvableAlias(t *testing.T) {
 	t.Parallel()
 

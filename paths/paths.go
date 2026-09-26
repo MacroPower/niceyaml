@@ -11,15 +11,17 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
+
+	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 var (
 	// ErrNoDocument indicates a document with no content to resolve in: a
-	// nil document, a document without a body, or a document holding only
-	// directives or comments. Errors that wrap it also wrap [ErrNotFound],
-	// since nothing exists at any path in such a document. The root path of
-	// such a document under a "---" header still resolves, to the null at
-	// the header.
+	// nil document, a document without a body, a document holding only
+	// directives or comments, or a document of whitespace alone. Errors
+	// that wrap it also wrap [ErrNotFound], since nothing exists at any
+	// path in such a document. The root path of such a document under a
+	// "---" header still resolves, to the null at the header.
 	ErrNoDocument = errors.New("document has no content")
 
 	// ErrNotFound indicates that nothing exists at the path in the document.
@@ -339,9 +341,15 @@ func (p Path) wildcard() bool {
 }
 
 // hasContent reports whether body holds a value to resolve in. A nil body,
-// a directive, and a comment group are not content.
+// a directive, and a comment group are not content. Neither is the
+// placeholder scalar [tokens.Tokenize] makes for a source of whitespace
+// alone.
 func hasContent(body ast.Node) bool {
 	if isNilNode(body) {
+		return false
+	}
+
+	if scalar, ok := body.(*ast.StringNode); ok && tokens.IsPlaceholder(scalar.Token) {
 		return false
 	}
 
@@ -365,7 +373,9 @@ func hasContent(body ast.Node) bool {
 //
 // Returns an error wrapping [ErrNotFound] and [ErrNoDocument] when doc is
 // nil, when a document without a header holds no content, or when a path
-// with segments meets a document without content.
+// with segments meets a document without content. A file of whitespace
+// alone parses to a document without a header whose body is the
+// placeholder scalar from [tokens.Tokenize], which holds no content.
 func (p Path) matches(r *resolver, doc *ast.DocumentNode) ([]match, error) {
 	if doc != nil && doc.Start != nil && !hasContent(doc.Body) && p.selectsRoot() {
 		return []match{{node: ast.Null(doc.Start), segs: slices.Clone(p.segments)}}, nil
