@@ -357,6 +357,14 @@ func TestParse(t *testing.T) {
 			expr: `$.'it\'s'`,
 			want: `$.'it\'s'`,
 		},
+		"quoted key with escaped backslash": {
+			expr: `$.'a\\b.c'`,
+			want: `$.'a\\b.c'`,
+		},
+		"backslash before another character is dropped": {
+			expr: `$.'C:\temp'`,
+			want: `$.C:temp`,
+		},
 		"quoted key followed by index": {
 			expr: "$.'a.b'[1].c",
 			want: "$.'a.b'[1].c",
@@ -440,6 +448,9 @@ func TestParse_Invalid(t *testing.T) {
 		},
 		"unterminated quote": {
 			expr: "$.'foo",
+		},
+		"unterminated escape": {
+			expr: `$.'a\`,
 		},
 		"bare text after root": {
 			expr: "$foo",

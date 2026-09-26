@@ -22,7 +22,9 @@ var (
 // of selectors:
 //
 //	.name     a mapping entry by key
-//	.'name'   a key containing reserved characters, with `\` escaping `'`
+//	.'name'   a key containing reserved characters, in which `\` escapes
+//	          the next character, so `\'` is a quote, `\\` is a backslash,
+//	          and `\t` is a plain `t`
 //	.''       the empty key
 //	..name    every mapping entry with that key, at any depth
 //	..'name'  the same for a key containing reserved characters
