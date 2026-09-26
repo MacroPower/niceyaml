@@ -1232,7 +1232,11 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 // [SelfValidator] validates itself, with the paths it reports put under
 // the path of the value, unless [WithSelfValidation] switches that off.
 // Fields absent from the document keep their existing values, so v may
-// be pre-populated with defaults.
+// be pre-populated with defaults. When v points to a pointer, a nil
+// pointer gets a new value, and the node decodes into the value the
+// pointer points to. An untagged null sets the pointer to nil. A node
+// without content, or a tagged null such as "!!null", leaves the
+// pointer as it is.
 // YAML decoding errors, and [Error] values from the validators, come back
 // bound to the source as [SourceError] values, with a path in them
 // resolving from the scope. A decoding error the go-yaml decoder
@@ -1283,6 +1287,8 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig) error {
 // checkDecodeTarget returns [ErrDecodeTarget] unless v is a non-nil
 // pointer. The go-yaml decoder panics on a nil interface and decodes
 // nothing into a nil pointer, so the check runs before v reaches it.
+// When v points to a pointer, that pointer may be nil, since
+// [decodeTarget] allocates it.
 func checkDecodeTarget(v any) error {
 	rv := reflect.ValueOf(v)
 	if !rv.IsValid() {
@@ -1294,6 +1300,51 @@ func checkDecodeTarget(v any) error {
 	}
 
 	return nil
+}
+
+// maxPointerDepth caps the pointers [decodeTarget] allocates through. A
+// type that refers back to itself, such as "type P *P", never reaches a
+// value that is not a pointer, and the go-yaml decoder loops forever on
+// a non-nil one.
+const maxPointerDepth = 8
+
+// decodeTarget returns the pointer the go-yaml decoder decodes node into
+// for v, a non-nil pointer. The decoder decodes nothing into a nil
+// pointer and replaces the value behind a non-nil one. When v points to
+// a pointer, decodeTarget therefore allocates each nil pointer on the way
+// down and returns the last one, and the decoder fills its value in
+// place. For a node that reads as null, it returns v, so the decoder sets
+// *v to nil. It also returns v when the pointers go deeper than
+// [maxPointerDepth].
+func decodeTarget(v any, node ast.Node) any {
+	if anchor, ok := node.(*ast.AnchorNode); ok {
+		node = anchor.Value
+	}
+
+	if isNilNode(node) || node.Type() == ast.NullType {
+		return v
+	}
+
+	rv := reflect.ValueOf(v)
+
+	depth := 0
+	for t := rv.Type().Elem(); t.Kind() == reflect.Pointer; t = t.Elem() {
+		depth++
+		if depth > maxPointerDepth {
+			return v
+		}
+	}
+
+	for range depth {
+		elem := rv.Elem()
+		if elem.IsNil() {
+			elem.Set(reflect.New(elem.Type().Elem()))
+		}
+
+		rv = elem
+	}
+
+	return rv.Interface()
 }
 
 // yamlOptions returns the go-yaml options for a decode: the source's
@@ -1338,7 +1389,7 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 	// tagged null under a mapping key decoded into a slice. The recover
 	// also catches a panic in a value's own UnmarshalYAML, which then
 	// comes back as a rejection too.
-	return n.bindDecodeError(decodeWithRecover(ctx, dec, node, v))
+	return n.bindDecodeError(decodeWithRecover(ctx, dec, node, decodeTarget(v, node)))
 }
 
 // bindDecodeError binds an error from the decoder to the source: a

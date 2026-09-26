@@ -2517,6 +2517,176 @@ func TestDocument_DecodeInto(t *testing.T) {
 		}
 	})
 
+	t.Run("decodes through a pointer target", func(t *testing.T) {
+		t.Parallel()
+
+		// A selfPointer never reaches a value that is not a pointer.
+		type selfPointer *selfPointer
+
+		tcs := map[string]struct {
+			decode func(t *testing.T, dd *niceyaml.Node) (any, error)
+			want   any
+			err    error
+			input  string
+		}{
+			"Decode validates the value": {
+				input: "name: a\nvalue: 1\n",
+				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
+					t.Helper()
+
+					return dd.Decode[*validatorConfig](t.Context())
+				},
+				want: &validatorConfig{Name: "a", Value: 1, validated: true},
+			},
+			"Decode returns the error of Validate": {
+				input: "value: 1\n",
+				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
+					t.Helper()
+
+					return dd.Decode[*validatorConfig](t.Context())
+				},
+				want: (*validatorConfig)(nil),
+				err:  errNameRequired,
+			},
+			"DecodeInto allocates a nil pointer": {
+				input: "name: a\nvalue: 1\n",
+				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
+					t.Helper()
+
+					var got *validatorConfig
+
+					err := dd.DecodeInto(t.Context(), &got)
+
+					return got, err //nolint:wrapcheck // The test inspects the error of the decode.
+				},
+				want: &validatorConfig{Name: "a", Value: 1, validated: true},
+			},
+			"DecodeInto keeps the fields of a non-nil pointer": {
+				input: "name: a\n",
+				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
+					t.Helper()
+
+					got := &plainConfig{Value: 7}
+					before := got
+
+					err := dd.DecodeInto(t.Context(), &got)
+					assert.Same(t, before, got, "the decode replaced the pointer")
+
+					return got, err //nolint:wrapcheck // The test inspects the error of the decode.
+				},
+				want: &plainConfig{Name: "a", Value: 7},
+			},
+			"null": {
+				input: "null\n",
+				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
+					t.Helper()
+
+					return dd.Decode[*validatorConfig](t.Context())
+				},
+				want: (*validatorConfig)(nil),
+			},
+			"DecodeInto sets a non-nil pointer to nil for null": {
+				input: "null\n",
+				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
+					t.Helper()
+
+					got := &plainConfig{Value: 7}
+
+					err := dd.DecodeInto(t.Context(), &got)
+
+					return got, err //nolint:wrapcheck // The test inspects the error of the decode.
+				},
+				want: (*plainConfig)(nil),
+			},
+			"DecodeInto keeps a non-nil pointer for a tagged null": {
+				input: "!!null\n",
+				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
+					t.Helper()
+
+					got := &plainConfig{Value: 7}
+					before := got
+
+					err := dd.DecodeInto(t.Context(), &got)
+					assert.Same(t, before, got, "the decode replaced the pointer")
+
+					return got, err //nolint:wrapcheck // The test inspects the error of the decode.
+				},
+				want: &plainConfig{Value: 7},
+			},
+			"anchored null": {
+				input: "&a null\n",
+				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
+					t.Helper()
+
+					return dd.Decode[*validatorConfig](t.Context())
+				},
+				want: (*validatorConfig)(nil),
+			},
+			"comment only": {
+				input: "# comment\n",
+				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
+					t.Helper()
+
+					return dd.Decode[*validatorConfig](t.Context())
+				},
+				want: (*validatorConfig)(nil),
+			},
+			"scalar": {
+				input: "7\n",
+				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
+					t.Helper()
+
+					return dd.Decode[*int](t.Context())
+				},
+				want: new(7),
+			},
+			"string tag over no value": {
+				input: "!!str\n",
+				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
+					t.Helper()
+
+					return dd.Decode[*string](t.Context())
+				},
+				want: new(""),
+			},
+			"pointer to a pointer": {
+				input: "7\n",
+				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
+					t.Helper()
+
+					return dd.Decode[**int](t.Context())
+				},
+				want: new(new(7)),
+			},
+			"pointer type that refers to itself": {
+				input: "a: 1\n",
+				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
+					t.Helper()
+
+					return dd.Decode[selfPointer](t.Context())
+				},
+				want: selfPointer(nil),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				got, err := tc.decode(t, dd)
+				if tc.err != nil {
+					require.ErrorIs(t, err, tc.err)
+				} else {
+					require.NoError(t, err)
+				}
+
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	})
+
 	t.Run("runs schema and Validate around the decode", func(t *testing.T) {
 		t.Parallel()
 
@@ -3707,6 +3877,20 @@ func TestDecoder(t *testing.T) {
 		cfg := plainConfig{Value: 7}
 		require.NoError(t, niceyaml.NewDecoder().DecodeInto(t.Context(), dd, &cfg))
 		assert.Equal(t, plainConfig{Name: "test", Value: 7}, cfg)
+	})
+
+	t.Run("Decode decodes through a pointer target", func(t *testing.T) {
+		t.Parallel()
+
+		dec := niceyaml.NewDecoder()
+
+		got, err := dec.Decode[*validatorConfig](t.Context(), yamltest.FirstDocument(t, "name: test\n"))
+		require.NoError(t, err)
+		assert.Equal(t, &validatorConfig{Name: "test", validated: true}, got)
+
+		got, err = dec.Decode[*validatorConfig](t.Context(), yamltest.FirstDocument(t, "value: 1\n"))
+		require.ErrorIs(t, err, errNameRequired)
+		assert.Nil(t, got)
 	})
 
 	t.Run("rejects a target that is not a pointer", func(t *testing.T) {
