@@ -1,6 +1,7 @@
 package schemastore_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -280,54 +282,61 @@ func TestSchemaStore_NoCaching(t *testing.T) {
 func TestSchemaStore_ConcurrentFirstFetch(t *testing.T) {
 	t.Parallel()
 
-	// Concurrent lookups before the catalog has loaded share one fetch.
-	const goroutines = 10
-
-	var fetchCount atomic.Int32
-
-	release := make(chan struct{})
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fetchCount.Add(1)
-		<-release // Hold the fetch open until every goroutine has looked up.
+	synctest.Test(t, func(t *testing.T) {
+		// Concurrent lookups before the catalog has loaded share one fetch.
+		const goroutines = 10
 
 		data, err := json.Marshal(testCatalog)
-		if err != nil {
-			t.Errorf("marshal catalog: %v", err)
+		require.NoError(t, err)
+
+		var fetchCount atomic.Int32
+
+		release := make(chan struct{})
+
+		// A goroutine waiting on a test server's socket does not count as
+		// durably blocked inside the bubble, so a stub transport stands in
+		// for the server.
+		client := &http.Client{
+			Transport: &roundTripperFunc{fn: func(r *http.Request) (*http.Response, error) {
+				fetchCount.Add(1)
+				<-release // Hold the fetch open until every caller waits on it.
+
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(bytes.NewReader(data)),
+					Request:    r,
+				}, nil
+			}},
 		}
 
-		//nolint:errcheck // Test helper.
-		w.Write(data)
-	}))
-	t.Cleanup(server.Close)
+		store := schemastore.New(
+			schemastore.WithCatalogURL("https://example.com/catalog.json"),
+			schemastore.WithHTTPClient(client),
+		)
 
-	store := schemastore.New(schemastore.WithCatalogURL(server.URL))
+		entries := make([]schemastore.CatalogEntry, goroutines)
+		errs := make([]error, goroutines)
 
-	var (
-		started sync.WaitGroup
-		done    sync.WaitGroup
-	)
+		var wg sync.WaitGroup
 
-	started.Add(goroutines)
-	done.Add(goroutines)
+		for i := range goroutines {
+			wg.Go(func() {
+				entries[i], errs[i] = store.FindMatch(t.Context(), "config.yaml")
+			})
+		}
 
-	for range goroutines {
-		go func() {
-			defer done.Done()
+		// Wait until every caller is waiting on the one fetch in flight.
+		synctest.Wait()
+		close(release)
+		wg.Wait()
 
-			started.Done()
+		assert.Equal(t, int32(1), fetchCount.Load(), "concurrent lookups should share one fetch")
 
-			entry, err := store.FindMatch(t.Context(), "config.yaml")
-			assert.NoError(t, err)
-			assert.Equal(t, "Test", entry.Name)
-		}()
-	}
-
-	started.Wait()
-	close(release)
-	done.Wait()
-
-	assert.Equal(t, int32(1), fetchCount.Load(), "concurrent lookups should share one fetch")
+		for i := range goroutines {
+			require.NoError(t, errs[i])
+			assert.Equal(t, "Test", entries[i].Name)
+		}
+	})
 }
 
 func TestSchemaStore_SlowFetch(t *testing.T) {

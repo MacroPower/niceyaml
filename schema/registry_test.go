@@ -657,63 +657,58 @@ func TestRegistry_Caching(t *testing.T) {
 func TestRegistry_ConcurrentLoad(t *testing.T) {
 	t.Parallel()
 
-	// Concurrent lookups for one URL share a single load and compile, and
-	// every caller receives the same validator.
-	const goroutines = 10
+	synctest.Test(t, func(t *testing.T) {
+		// Concurrent lookups for one URL share a single load and compile, and
+		// every caller receives the same validator.
+		const goroutines = 10
 
-	release := make(chan struct{})
+		release := make(chan struct{})
 
-	var loads atomic.Int32
+		var loads atomic.Int32
 
-	reg := schema.NewRegistry(
-		schema.WithResolvers(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Node) (schema.Ref, error) {
-			return schema.Loadable("test.json", func(_ context.Context) ([]byte, error) {
-				loads.Add(1)
-				<-release // Hold the load open until every goroutine has looked up.
+		reg := schema.NewRegistry(
+			schema.WithResolvers(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Node) (schema.Ref, error) {
+				return schema.Loadable("test.json", func(_ context.Context) ([]byte, error) {
+					loads.Add(1)
+					<-release // Hold the load open until every caller waits on it.
 
-				return []byte(`{"type": "object"}`), nil
-			}), nil
-		})),
-	)
+					return []byte(`{"type": "object"}`), nil
+				}), nil
+			})),
+		)
 
-	// Pre-create documents outside goroutines.
-	docs := make([]*niceyaml.Node, goroutines)
-	for i := range docs {
-		docs[i] = yamltest.FirstDocument(t, stringtest.Input(`key: value`))
-	}
+		// Pre-create documents outside goroutines.
+		docs := make([]*niceyaml.Node, goroutines)
+		for i := range docs {
+			docs[i] = yamltest.FirstDocument(t, stringtest.Input(`key: value`))
+		}
 
-	validators := make([]*schema.Schema, goroutines)
+		validators := make([]*schema.Schema, goroutines)
+		errs := make([]error, goroutines)
 
-	var (
-		started sync.WaitGroup
-		done    sync.WaitGroup
-	)
+		var wg sync.WaitGroup
 
-	started.Add(goroutines)
-	done.Add(goroutines)
+		for i := range goroutines {
+			wg.Go(func() {
+				validators[i], errs[i] = reg.Lookup(t.Context(), docs[i])
+			})
+		}
 
-	for i := range goroutines {
-		go func() {
-			defer done.Done()
+		// Wait until every caller is waiting on the one load in flight.
+		synctest.Wait()
+		close(release)
+		wg.Wait()
 
-			started.Done()
+		for _, err := range errs {
+			require.NoError(t, err)
+		}
 
-			v, err := reg.Lookup(t.Context(), docs[i])
-			assert.NoError(t, err)
+		assert.Equal(t, int32(1), loads.Load(), "concurrent lookups should share one load")
 
-			validators[i] = v
-		}()
-	}
-
-	started.Wait()
-	close(release)
-	done.Wait()
-
-	assert.Equal(t, int32(1), loads.Load(), "concurrent lookups should share one load")
-
-	for i := 1; i < goroutines; i++ {
-		assert.Same(t, validators[0], validators[i])
-	}
+		for i := 1; i < goroutines; i++ {
+			assert.Same(t, validators[0], validators[i])
+		}
+	})
 }
 
 func TestRegistry_SharedLoad(t *testing.T) {
