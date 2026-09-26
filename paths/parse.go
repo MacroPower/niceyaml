@@ -80,11 +80,11 @@ func parseSegments(expr string) ([]segment, error) {
 		case strings.HasPrefix(rest, "..'"):
 			seg, rest, err = parseQuoted(rest[3:], segmentRecursive)
 		case strings.HasPrefix(rest, ".."):
-			seg, rest, err = parseRecursive(rest[2:])
+			seg, rest, err = parseUnquoted(rest[2:], segmentRecursive)
 		case strings.HasPrefix(rest, ".'"):
 			seg, rest, err = parseQuoted(rest[2:], segmentChild)
 		case strings.HasPrefix(rest, "."):
-			seg, rest, err = parseChild(rest[1:])
+			seg, rest, err = parseUnquoted(rest[1:], segmentChild)
 		case strings.HasPrefix(rest, "["):
 			seg, rest, err = parseIndex(rest[1:])
 		case strings.HasPrefix(rest, "~"):
@@ -135,24 +135,15 @@ func parseName(rest string) (string, string, error) {
 	return name, rest[end:], nil
 }
 
-// parseChild reads the name after `.`.
-func parseChild(rest string) (segment, string, error) {
+// parseUnquoted reads an unquoted name after `.` or `..` as a selector of
+// the given kind.
+func parseUnquoted(rest string, kind segmentKind) (segment, string, error) {
 	name, remaining, err := parseName(rest)
 	if err != nil {
 		return segment{}, "", err
 	}
 
-	return segment{kind: segmentChild, name: name}, remaining, nil
-}
-
-// parseRecursive reads the name after `..`.
-func parseRecursive(rest string) (segment, string, error) {
-	name, remaining, err := parseName(rest)
-	if err != nil {
-		return segment{}, "", err
-	}
-
-	return segment{kind: segmentRecursive, name: name}, remaining, nil
+	return segment{kind: kind, name: name}, remaining, nil
 }
 
 // parseQuoted reads a single-quoted name after `.'` or `..'` as a selector
