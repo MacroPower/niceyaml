@@ -1811,13 +1811,33 @@ func TestRegistry_RelativeRefs(t *testing.T) {
 	}
 
 	// A schema served over HTTP that names the defs file on disk.
-	localSchema := fmt.Appendf(nil, `{"properties": {"a": {"$ref": %q}}}`,
-		"file://"+filepath.ToSlash(filepath.Join(tmpDir, "defs.json")))
+	defsURL := "file://" + filepath.ToSlash(filepath.Join(tmpDir, "defs.json"))
+	localSchema := fmt.Appendf(nil, `{"properties": {"a": {"$ref": %q}}}`, defsURL)
+
+	// A schema served over HTTP whose $id moves its base to the directory
+	// on disk, so "defs.json" names the defs file there.
+	idBaseSchema := fmt.Appendf(nil, `{"$id": %q, "properties": {"a": {"$ref": "defs.json"}}}`,
+		"file://"+filepath.ToSlash(tmpDir)+"/")
+
+	// A schema served over HTTP that names the defs file on disk from an
+	// unknown keyword, which a JSON pointer $ref reaches.
+	keywordSchema := fmt.Appendf(nil,
+		`{"properties": {"a": {"$ref": "#/x-local"}}, "x-local": {"$ref": %q}}`, defsURL)
+
+	// Schemas served over HTTP that spell the keyword in upper case. The
+	// schema decoder reads "$REF" as $ref and "$ID" as $id.
+	upperRefSchema := fmt.Appendf(nil, `{"properties": {"a": {"$REF": %q}}}`, defsURL)
+	upperIDSchema := fmt.Appendf(nil, `{"$ID": %q, "properties": {"a": {"$ref": "defs.json"}}}`,
+		"file://"+filepath.ToSlash(tmpDir)+"/")
 
 	served := map[string][]byte{
-		"/s/main.json":  mainSchema,
-		"/s/defs.json":  defsSchema,
-		"/s/local.json": localSchema,
+		"/s/main.json":     mainSchema,
+		"/s/defs.json":     defsSchema,
+		"/s/local.json":    localSchema,
+		"/s/idbase.json":   idBaseSchema,
+		"/s/keyword.json":  keywordSchema,
+		"/s/upperref.json": upperRefSchema,
+		"/s/upperid.json":  upperIDSchema,
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1872,6 +1892,52 @@ func TestRegistry_RelativeRefs(t *testing.T) {
 		err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
 		require.ErrorIs(t, err, schema.ErrValidate)
 		assert.Contains(t, err.Error(), "cannot resolve $ref")
+	})
+
+	t.Run("a url reached from a file schema reads no local file", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			remote string
+		}{
+			"$ref names the file": {
+				remote: "/s/local.json",
+			},
+			"$id names a file base": {
+				remote: "/s/idbase.json",
+			},
+			"an unknown keyword names the file": {
+				remote: "/s/keyword.json",
+			},
+			"$REF names the file": {
+				remote: "/s/upperref.json",
+			},
+			"$ID names a file base": {
+				remote: "/s/upperid.json",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				root := filepath.Join(t.TempDir(), "root.json")
+				rootSchema := fmt.Appendf(nil, `{"$ref": %q}`, server.URL+tc.remote)
+				require.NoError(t, os.WriteFile(root, rootSchema, 0o600))
+
+				reg := schema.NewRegistry(schema.WithResolvers(schema.File(root)))
+
+				err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+				require.ErrorIs(t, err, schema.ErrValidate)
+				assert.NotContains(t, err.Error(), `expected "string", got "integer"`)
+				assert.Contains(t, err.Error(), "names local file")
+
+				// A string fails too, since the registry refuses the remote
+				// schema rather than skip the reference.
+				err = reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: x\n"))
+				require.ErrorContains(t, err, "names local file")
+			})
+		}
 	})
 }
 

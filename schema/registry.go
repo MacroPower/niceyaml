@@ -1,12 +1,16 @@
 package schema
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"net/http"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -575,6 +579,64 @@ func (r *Registry) load(ctx context.Context, ref Ref) ([]byte, error) {
 	}
 }
 
+// localFileURL returns the first file URL that the schema document data
+// names in a $id, $ref, or $dynamicRef member, or "" when it names none.
+// A member name matches in any case, because the schema decoder reads
+// "$REF" as $ref. The search covers every object in the document, not
+// only its subschemas, because a JSON pointer $ref can reach an object
+// under an unknown keyword and resolve the references there.
+func localFileURL(data []byte) (string, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+
+	var doc any
+
+	err := dec.Decode(&doc)
+	if err != nil {
+		return "", fmt.Errorf("decode schema: %w", err)
+	}
+
+	return findFileURL(doc), nil
+}
+
+// findFileURL is [localFileURL] for a decoded JSON value. It visits object
+// members in sorted key order, so the result is the same on every call.
+func findFileURL(v any) string {
+	switch v := v.(type) {
+	case map[string]any:
+		keys := slices.Sorted(maps.Keys(v))
+
+		for _, key := range keys {
+			if s, ok := v[key].(string); ok && isRefKeyword(key) && hasPrefixFold(s, "file:") {
+				return s
+			}
+		}
+
+		for _, key := range keys {
+			if target := findFileURL(v[key]); target != "" {
+				return target
+			}
+		}
+
+	case []any:
+		for _, elem := range v {
+			if target := findFileURL(elem); target != "" {
+				return target
+			}
+		}
+	}
+
+	return ""
+}
+
+// isRefKeyword reports whether key names $id, $ref, or $dynamicRef under
+// Unicode case folding, the match encoding/json uses for struct fields.
+func isRefKeyword(key string) bool {
+	return slices.ContainsFunc([]string{"$id", "$ref", "$dynamicRef"}, func(kw string) bool {
+		return strings.EqualFold(key, kw)
+	})
+}
+
 // refOptions returns the options the registry compiles the schema ref
 // names with: the options [WithCompileOptions] gave it, behind options
 // that let a $ref in a schema from [File] or [URL] name a document beside
@@ -583,7 +645,11 @@ func (r *Registry) load(ctx context.Context, ref Ref) ([]byte, error) {
 // schema, so a relative $ref resolves against the file or URL that holds
 // it. A schema from [File] reaches local files and URLs, and one from
 // [URL] reaches only URLs, so a remote schema cannot read the local disk.
-// An option from [WithCompileOptions] comes later and wins.
+// A remote document that a schema from [File] reaches cannot read the
+// local disk either, because the resolver refuses a document fetched over
+// HTTP or HTTPS that names a file URL. The refusal holds whatever order
+// the compiler fetches documents in. An option from [WithCompileOptions]
+// comes later and wins.
 func (r *Registry) refOptions(ref Ref) []CompileOption {
 	if !ref.url && ref.file == "" {
 		return r.compileOpts
@@ -624,6 +690,17 @@ func (r *Registry) refOptions(ref Ref) []CompileOption {
 		s, err := jsonschema.ParseSchema(data)
 		if err != nil {
 			return nil, fmt.Errorf("parse %s: %w", httpfetch.Redacted(uri), err)
+		}
+
+		if allowFile && isHTTPURL(uri) {
+			target, err := localFileURL(data)
+			if err != nil {
+				return nil, fmt.Errorf("parse %s: %w", httpfetch.Redacted(uri), err)
+			}
+
+			if target != "" {
+				return nil, fmt.Errorf("%s: remote schema names local file %q", httpfetch.Redacted(uri), target)
+			}
 		}
 
 		return s, nil
