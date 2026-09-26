@@ -62,12 +62,14 @@
 // # Resolution
 //
 // When a document's schema is unknown ahead of time, a [Resolver] finds
-// it. Resolve inspects the document and returns a [Ref], which names a
-// schema by key and loads its bytes on demand through [Loadable], or
-// reports [ErrNoMatch] when the resolver does not apply. A
+// it. Resolve inspects the document and returns a [Ref] naming the
+// schema, or reports [ErrNoMatch] when the resolver does not apply. A
 // [Registry] tries its resolvers in order and validates the document
-// against the first schema named. A Ref is a Resolver itself, so the
-// loaders below go in directly or behind a [When] guard:
+// against the first schema named. A Ref names either bytes under a key or
+// a [*Schema] compiled already. The registry loads the bytes from a file,
+// a URL, or the function given to [Loadable], and caches the compiled
+// schema by the key. A Ref is a Resolver itself, so the loaders below go
+// in directly or behind a [When] guard:
 //
 //	kindPath := paths.Root().Child("kind")
 //	reg := schema.NewRegistry(schema.WithResolvers(
@@ -128,14 +130,14 @@
 // compiled with.
 //
 // The loaders return a [Ref] whose key identifies the schema and whose
-// bytes the registry loads through [Registry.Load]: a file from the
-// working directory, or from the file system [WithFS] gave the registry,
-// and a URL with the client [WithHTTPClient] gave it. [Registry.Schema]
-// compiles those bytes and checks its cache by key first, so the registry
-// reads a file or fetches a URL once, however many documents name it, and
-// a caller that holds a Ref of its own takes the compiled schema from the
-// same cache. A resolver that picks the schema from the document returns
-// the same Refs:
+// bytes the registry loads through [Registry.Load]: the copy [Embedded]
+// holds, a file from the working directory or from the file system
+// [WithFS] gave the registry, and a URL with the client [WithHTTPClient]
+// gave it. [Registry.Schema] checks its cache by key before it loads and
+// compiles those bytes, so the registry loads and compiles each schema
+// once, however many documents name it. A caller that holds a Ref of its
+// own takes the compiled schema from the same cache. A resolver that picks
+// the schema from the document returns the same Refs:
 //
 //	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
 //	    node, err := doc.At(kindPath)
@@ -205,13 +207,6 @@
 // [go.jacobcolvin.com/niceyaml/schema/schemastore.Store] that cannot
 // reach SchemaStore.org ends the lookup this way, so place it after any
 // resolver that should still apply without the catalog.
-//
-// # Schema Caching
-//
-// A resolver returns a [Ref] that names the schema by key and loads its
-// bytes on demand. The registry checks its cache of compiled schemas by
-// key before loading, so it loads and compiles each schema once, however
-// many documents name it.
 //
 // # SchemaStore Integration
 //
