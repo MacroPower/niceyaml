@@ -26,7 +26,8 @@ const wrapOnCharacters = " /-"
 // It accepts a [line.View], such as the view of a niceyaml Source, and
 // renders its YAML tokens as styled terminal output using
 // [lipgloss.Style]s, with customizable gutters, annotations, styled
-// overlays, and word wrapping.
+// overlays, and word wrapping. The package documentation covers each of
+// these.
 //
 // A Printer is immutable after construction and safe for concurrent use.
 // Every setting is an [Option]; to change one on an existing Printer,
@@ -49,41 +50,6 @@ const wrapOnCharacters = " /-"
 // of returning it as a string:
 //
 //	p.Fprint(os.Stdout, view)
-//
-// # Gutters
-//
-// Gutters appear at the left edge of each row and typically show line numbers
-// or diff markers. The printer uses [DefaultGutter] by default, which combines
-// line numbers with diff markers (+/-). Other built-in options include
-// [DiffGutter] (markers only), [LineNumberGutter] (numbers only), and [NoGutter].
-// A [Gutter] of your own declares its width and renders each row, and a
-// [GutterFunc] adapts a function.
-//
-// # Overlays
-//
-// Overlays style column spans within lines. Add them to a [line.View] with
-// [line.View.AddOverlay], which replaces the style underneath, or
-// [line.View.BlendOverlay], which mixes with it, then print the view. Error
-// positions use the first and search highlights the second, so a match keeps
-// the token or diff color it covers.
-//
-// # Annotations
-//
-// Annotations are extra text rows above or below a line, outside the token
-// stream. They display error messages, diff hunk headers, or other
-// contextual notes. Each annotation renders in the style of its
-// [line.Annotation.Kind], or [kind.UIAnnotation] when it has none, and the
-// annotations of one Kind on a line share their rows. The printer renders
-// the text of each such group via [AnnotationFunc], defaulting to
-// [DefaultAnnotation] which prefixes below-line annotations with "^ " and
-// draws a caret under every column the line's overlays cover for a
-// below-line annotation without content.
-//
-// # Word Wrapping
-//
-// Pass [WithWrap] to enable word wrapping at a given width. The printer
-// subtracts the gutter width from it. A wrapped continuation row shows a
-// "-" marker in the gutter. A width of 0 turns wrapping off.
 //
 // # Errors
 //

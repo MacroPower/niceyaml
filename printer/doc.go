@@ -14,35 +14,35 @@
 // # Gutters
 //
 // A [Gutter] renders the left edge of each row from a [GutterContext] and
-// declares its width, which the printer pads or cuts every row to.
-// [DefaultGutter] shows the line number and a diff marker, [DiffGutter] the
-// marker only, [LineNumberGutter] the number only, and [NoGutter] nothing,
-// and a [GutterFunc] adapts a function. Pass one to [WithGutter].
+// declares its width, which the printer pads or cuts every row to, so
+// content starts in the same column on every row. [New] starts with a
+// gutter that shows line numbers and diff markers, and [WithGutter] sets
+// another.
 //
 // # Overlays
 //
 // The printer renders the [line.Overlays] a view carries. An overlay
-// styles a column span.
+// styles a column span. [line.View.AddOverlay] adds one that replaces the
+// style underneath, and [line.View.BlendOverlay] adds one that mixes with
+// it. Error positions use the first and search highlights the second, so a
+// match keeps the token or diff color it covers.
 //
 // # Annotations
 //
 // The printer renders the [line.Annotations] a view carries. The
 // annotations above or below a line render as rows in the style of their
-// [line.Annotation.Kind], or [kind.UIAnnotation] for those with none, and
-// an [AnnotationFunc] renders each group of one Kind as an
-// [AnnotationRow], the text and the column it starts under, which the
-// printer pads, escapes, wraps, and styles. [DefaultAnnotation] joins
-// them with "; ", marks [line.Below] annotations with "^ ", and draws a
-// caret under every column the line's overlays cover for a Below
-// annotation without content, so a marked range shows its extent without
-// color.
+// [line.Annotation.Kind], or [kind.UIAnnotation] for those with none. An
+// [AnnotationFunc] renders each group of one Kind as an [AnnotationRow],
+// the text and the column it starts under, and the printer pads, escapes,
+// wraps, and styles that row. [New] starts with [DefaultAnnotation], and
+// [WithAnnotation] sets another.
 //
 // # Word Wrapping
 //
 // [WithWrap] wraps content at a width, less the width of the gutter.
 // [Printer.Layout] reports the row structure of a view without rendering
 // it: how many rows each line takes, which row a position lands on, and
-// how wide the rows are, so a viewer that scrolls by rendered row maps rows
-// to lines and back, and one that scrolls horizontally knows how far the
-// content reaches.
+// how wide the rows are. A viewer that scrolls by rendered row maps rows
+// to lines and back with it, and one that scrolls horizontally learns how
+// far the content reaches.
 package printer
