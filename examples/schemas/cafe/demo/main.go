@@ -34,9 +34,11 @@ func main() {
 }
 
 // load parses a cafe configuration and validates it. A single Decode runs
-// the JSON schema from [cafe.Schema] first, then the custom open-before-close
-// check that [cafe.Config] implements. Failures come back bound to the
-// source, so they print with the offending lines annotated.
+// the JSON schema from [cafe.Schema] first, then the open-before-close
+// check that [go.jacobcolvin.com/niceyaml/examples/schemas/cafe/spec.Hours]
+// implements. Decode finds that check on the hours of the decoded config
+// and reports its failures under $.spec.hours. Failures come back bound to
+// the source, so they print with the offending lines annotated.
 func load(in string) (*cafe.Config, error) {
 	doc, err := niceyaml.NewSourceFromString(in).Document()
 	if err != nil {
