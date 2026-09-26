@@ -57,11 +57,10 @@ func newConfig(opts []Option) config {
 // highlighted locations, and [printer.WithContextLines] sets the context
 // lines around each one.
 //
-// The handler indents every line by [Indent] columns, and the printer's
-// container style adds its horizontal frame, one column of right padding
-// by default, outside the width. To fit a terminal w columns wide, set the
-// width to w - [Indent] - p.ContainerStyle().GetHorizontalFrameSize(), as
-// the [NewErrorHandler] example does.
+// The handler indents every line by [Indent] columns, and
+// [printer.Printer.PrintError] fits each excerpt and the frame of its
+// container within the width. To fit a terminal w columns wide, set the
+// width to w - [Indent], as the [NewErrorHandler] example does.
 func WithPrinter(p *printer.Printer) Option {
 	return func(cfg *config) {
 		cfg.printer = p
@@ -71,13 +70,10 @@ func WithPrinter(p *printer.Printer) Option {
 // NewErrorHandler creates a new [fang.ErrorHandler] that renders
 // [*go.jacobcolvin.com/niceyaml.SourceError] values with their annotated
 // source, using opts for the [printer.Printer]. To fit the output in a
-// terminal that is width columns wide, subtract [Indent] and the
-// container's frame from the width the printer wraps at:
+// terminal that is width columns wide, subtract [Indent] from the width
+// the printer wraps at:
 //
-//	p := printer.New()
-//	p = p.With(printer.WithWrap(
-//	    width - fangs.Indent - p.ContainerStyle().GetHorizontalFrameSize(),
-//	))
+//	p := printer.New(printer.WithWrap(width - fangs.Indent))
 //
 //	err := fang.Execute(ctx, rootCmd,
 //	    fang.WithErrorHandler(fangs.NewErrorHandler(fangs.WithPrinter(p))),
