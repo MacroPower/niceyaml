@@ -1915,6 +1915,27 @@ func TestSchema_RefToRejectingSchema(t *testing.T) {
 	}
 }
 
+func TestFromJSONSchema(t *testing.T) {
+	t.Parallel()
+
+	t.Run("wraps a compiled validator", func(t *testing.T) {
+		t.Parallel()
+
+		s := schema.FromJSONSchema(jsonschema.MustCompileJSON([]byte(`{"type": "object"}`)))
+
+		require.NoError(t, s.ValidateValue(t.Context(), map[string]any{"key": "value"}))
+		require.Error(t, s.ValidateValue(t.Context(), "value"))
+	})
+
+	t.Run("nil validator panics", func(t *testing.T) {
+		t.Parallel()
+
+		assert.PanicsWithValue(t, "schema.FromJSONSchema: validator is nil", func() {
+			schema.FromJSONSchema(nil)
+		})
+	})
+}
+
 func TestSchema_Ref(t *testing.T) {
 	t.Parallel()
 

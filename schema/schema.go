@@ -125,7 +125,13 @@ func MustCompile(data []byte, opts ...CompileOption) *Schema {
 // compiled elsewhere, such as one built from a Go type with
 // [jsonschema.Compile]. A schema held as JSON compiles with [Compile] or
 // [MustCompile] instead.
+//
+// Panics if v is nil.
 func FromJSONSchema(v *jsonschema.Validator) *Schema {
+	if v == nil {
+		panic("schema.FromJSONSchema: validator is nil")
+	}
+
 	return &Schema{compiled: v}
 }
 
