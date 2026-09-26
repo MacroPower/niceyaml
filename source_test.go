@@ -665,6 +665,31 @@ func TestSource_Lines_TokenLookup(t *testing.T) {
 	}, content)
 }
 
+func TestSource_Lines_EscapedScalar(t *testing.T) {
+	t.Parallel()
+
+	// The lexer drops the code of an escape from a double-quoted scalar,
+	// and the lines still hold the whole source, so the position of each
+	// token leads back to it.
+	input := "m: {a: \"\\u00e9\", b: xx, c: yy}\n"
+	source := niceyaml.NewSourceFromString(input)
+
+	assert.Equal(t, strings.TrimSuffix(input, "\n"), source.Lines().Content())
+
+	for _, tk := range source.Tokens() {
+		assert.Same(t, tk, source.Lines().TokenAt(position.NewFromToken(tk)), "token %q", tk.Origin)
+	}
+}
+
+func TestSource_Document_EscapeAfterTag(t *testing.T) {
+	t.Parallel()
+
+	// The key after the escaped scalar keeps its own line, so the parser
+	// reads the mapping the source holds.
+	_, err := niceyaml.NewSourceFromString("name: !!str \"Caf\\u00e9\"\nage: 3\n").Document()
+	require.NoError(t, err)
+}
+
 func TestSource_File_TokensFindLines(t *testing.T) {
 	t.Parallel()
 

@@ -113,6 +113,7 @@ func TestNewLines_Roundtrip(t *testing.T) {
 		"single quote literal": "text: 'no \\n escape'\n",
 		"quote in single":      "text: 'it''s quoted'\n",
 		"quote in double":      "text: \"say \\\"hello\\\"\"\n",
+		"unicode escape":       "text: \"\\u65E5\\u672C\"\n",
 
 		// Unicode content.
 		"unicode value":   "name: 日本語\n",
@@ -123,15 +124,6 @@ func TestNewLines_Roundtrip(t *testing.T) {
 		"rtl text":        "arabic: مرحبا\n",
 		"emoji sequence":  "family: 👨‍👩‍👧‍👦\n",
 		"flag emoji":      "flag: 🇯🇵\n",
-
-		// TODO: go-yaml's scanner does not preserve \u, \U, or \x escape sequences in
-		// the Origin field.
-		//
-		// See scanner/scanner.go:455-516, where these cases skip ctx.addOriginBuf()
-		// calls, so the scanner truncates Origin (e.g., "\u65E5" becomes "\\").
-		// This makes Content() roundtrip impossible for these escapes.
-		//
-		//	"unicode escape": "text: \"\\u65E5\\u672C\"\n"
 
 		// Edge cases.
 		"colon in value":     "text: \"Note: important\"\n",

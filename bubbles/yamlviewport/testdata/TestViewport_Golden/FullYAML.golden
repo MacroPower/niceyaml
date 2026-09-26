@@ -7,7 +7,7 @@
    count: 42                                                                    
    ratio: 3.14159                                                               
    empty: null                                                                  
-   unicode: "Hello \\"                                                          
+   unicode: "Hello \u4e16\u754c"                                                
                                                                                 
  # Nested mappings                                                              
  spec:                                                                          

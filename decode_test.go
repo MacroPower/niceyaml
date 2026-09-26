@@ -2075,6 +2075,18 @@ func TestDocument_Ranges(t *testing.T) {
 		})
 	}
 
+	t.Run("value after an escaped scalar", func(t *testing.T) {
+		t.Parallel()
+
+		// The lexer drops the code of the escape from the scalar before b,
+		// and the range of b still covers the runes of its value.
+		dd := yamltest.FirstDocument(t, "m: {a: \"\\u00e9\", b: xx}\n")
+
+		got, err := dd.Ranges(paths.Root().Child("m").Child("b"))
+		require.NoError(t, err)
+		assert.Equal(t, position.Ranges{position.NewRange(position.New(0, 20), position.New(0, 22))}, got)
+	})
+
 	t.Run("matches the ranges a bound error highlights", func(t *testing.T) {
 		t.Parallel()
 

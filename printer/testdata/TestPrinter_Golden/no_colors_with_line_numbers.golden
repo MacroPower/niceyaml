@@ -137,8 +137,8 @@
  137            return "☕"
  138  
  139    # Quoted strings with escapes
- 140    escaped_text: "Line1\nLine2\tTabbed\\"
- 141    unicode_escape: "\\" # 日本 via escapes
+ 140    escaped_text: "Line1\nLine2\tTabbed\u0041\x42"
+ 141    unicode_escape: "\u65E5\u672C" # 日本 via escapes
  142  
  143    # Single quotes (no escape processing)
  144    raw_escapes: 'This has \n literal backslash-n'

@@ -56,29 +56,44 @@ func TestTokenize_TabIndentation(t *testing.T) {
 func TestTokenize_NumericEscape(t *testing.T) {
 	t.Parallel()
 
-	// The lexer truncates a double-quoted scalar's Origin at a "\x", "\u",
-	// or "\U" escape, so the stream loses the rest of the scalar but keeps
-	// the source's final line ending. Pin that shape, so an upstream fix
-	// shows up here.
+	// The lexer drops the code of a "\x", "\u", or "\U" escape from a
+	// double-quoted scalar's Origin, and Tokenize restores the Origin from
+	// the source, so the joined Origins equal the input.
 	tcs := map[string]struct {
 		input string
-		want  string
 	}{
 		"hex escape": {
 			input: `a: "x\x41"` + "\n",
-			want:  `a: "x\"` + "\n",
 		},
 		"short unicode escape": {
 			input: `a: "x\u0041"` + "\n",
-			want:  `a: "x\"` + "\n",
 		},
 		"long unicode escape": {
 			input: `a: "x\U00000041"` + "\n",
-			want:  `a: "x\"` + "\n",
+		},
+		"text after the escape": {
+			input: `a: "x\x41 b"` + "\n",
+		},
+		"flow mapping": {
+			input: `m: {a: "\u00e9", b: xx}` + "\n",
+		},
+		"trailing comment": {
+			input: `a: "\u00e9" # c` + "\n",
+		},
+		"multi-line scalar": {
+			input: `a: "x\x41` + "\n" + `  b c"` + "\n" + "c: 1\n",
+		},
+		"surrogate pair": {
+			input: `a: "\uD83D\uDE00"` + "\n",
+		},
+		"escaped quote before the escape": {
+			input: `a: "\"\u00e9"` + "\n",
+		},
+		"hex escape over a quote": {
+			input: `a: "\x"b"` + "\n",
 		},
 		"escape the lexer keeps": {
 			input: `a: "x\ty"` + "\n",
-			want:  `a: "x\ty"` + "\n",
 		},
 	}
 
@@ -87,7 +102,7 @@ func TestTokenize_NumericEscape(t *testing.T) {
 			t.Parallel()
 
 			got := yamltest.DumpTokenOrigins(tokens.Tokenize(tc.input))
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.input, got)
 		})
 	}
 }
@@ -127,6 +142,7 @@ func TestTokenize_FinalBlankLines(t *testing.T) {
 		},
 		"truncated escape": {
 			input: `a: "\x41"` + "\n\n",
+			whole: true,
 		},
 		"empty block scalar content": {
 			input: "a: |\n\n",
@@ -1422,6 +1438,28 @@ func TestTokenize_Positions(t *testing.T) {
 			input: "a: \"x\\x41 b c\"\nc: 2\n",
 			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:16", "2:2:17", "2:4:19"},
 		},
+		"escape after a tag": {
+			input: "name: !!str \"Caf\\u00e9\"\nage: 3\n",
+			want:  []string{"1:1:1", "1:5:5", "1:7:7", "1:13:13", "2:1:25", "2:4:28", "2:6:30"},
+		},
+		"escape after a tag in a CRLF file": {
+			input: "name: !!str \"Caf\\u00e9\"\r\nage: 3\r\n",
+			want:  []string{"1:1:1", "1:5:5", "1:7:7", "1:13:13", "2:1:26", "2:4:29", "2:6:31"},
+		},
+		"escaped key after an escaped value": {
+			input: "a: \"\\u00e9\"\n\"\\u00e8\": 1\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:13", "2:9:21", "2:11:23"},
+		},
+		"escape after a comment": {
+			input: "m:\n  # c\n  \"\\u00e9\": 1\n  b: 2\n",
+			want:  []string{"1:1:1", "1:2:2", "2:3:6", "3:3:12", "3:11:20", "3:13:22", "4:3:26", "4:4:27", "4:6:29"},
+		},
+		"tab indentation": {
+			// The lexer drops the ":" after the tab, so the value's text
+			// sits further on than the cursor.
+			input: "\ta: 1\nb: 2\nc: 3\n",
+			want:  []string{"1:2:2", "1:5:5", "2:2:8", "2:4:10", "3:1:12", "3:2:13", "3:4:15"},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -1434,7 +1472,7 @@ func TestTokenize_Positions(t *testing.T) {
 }
 
 // positionCorpus holds sources whose tokens exercise the positions the lexer
-// places oddly, and none whose Origin the lexer truncates.
+// places oddly.
 var positionCorpus = map[string]string{
 	"mapping":                             "a: 1\nb: two\n",
 	"trailing spaces":                     "a: 1   \nb: 2  \n",
@@ -1460,6 +1498,12 @@ var positionCorpus = map[string]string{
 	"empty literal with keep":             "a: |+\n\nb: 1\n",
 	"quoted multi-line":                   "a: 'x\n\n  y'\nb: 1\n",
 	"double-quoted multi-line":            "c: \"x\n  y\"\nd: 1\n",
+	"escape after a tag":                  "name: !!str \"Caf\\u00e9\"\nage: 3\n",
+	"escape after a comment":              "m:\n  # c\n  \"\\u00e9\": 1\n  b: 2\n",
+	"escape in a flow sequence":           "[!!str \"\\u00e9\", b]\n",
+	"escape in a sequence":                "- !!str \"\\u00e9\"\n- b\n",
+	"escaped scalars in a row":            "a: \"\\u00e9\"\n\"\\u00e8\": \"\\x41 b\"\nc: 1\n",
+	"escape in a multi-line scalar":       "a: \"x\\x41\n  b c\"\nc: 1\n",
 	"plain multi-line":                    "a: plain\n  multi\nb: 2\n",
 	"flow collections":                    "{a: 1, b: [1, 2]}\n",
 	"flow sequence over lines":            "a: [\n  1,\n  2\n]\n",
@@ -1507,8 +1551,13 @@ func TestTokenize_PositionsLocateText(t *testing.T) {
 				assert.Equal(t, wantCol, tk.Position.Column, "token %d %q column", i, tk.Origin)
 
 				// The first line of text in the Origin is in the source at
-				// Offset.
+				// Offset. Tokenize restores the Origin of a double-quoted
+				// scalar from the source, so all of its text is there.
 				text := firstTextLine(tk.Origin)
+				if tk.Type == token.DoubleQuoteType {
+					text = strings.Trim(tk.Origin, " \t\r\n")
+				}
+
 				if text == "" {
 					continue
 				}

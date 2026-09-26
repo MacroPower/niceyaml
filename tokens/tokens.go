@@ -16,17 +16,18 @@ import (
 //
 // It is the one place niceyaml calls the go-yaml lexer, so every token stream
 // the module works with comes through here. The stream covers the whole
-// file, except where the lexer itself drops text: a tab used as indentation
-// swallows the characters after it into an invalid token, and a "\x", "\u",
-// or "\U" escape in a double-quoted scalar truncates the token's Origin at
-// the escape, leaving the text before the escape and a closing quote, so the
-// rest of the scalar never reaches the stream. The lexer also drops the line
-// breaks and indentation in front of some tokens, such as the blank lines
-// before a "?" or ":" indicator that follows a flow collection, a quoted
-// scalar, or a comment. Tokenize gives them back at the start of that
-// token's Origin, with each blank line as a bare line ending, the way the
-// lexer keeps the blank lines it does not drop. [SplitDocuments] cuts the
-// stream into one stream per document.
+// file, except where the lexer itself drops text, as when a tab used as
+// indentation swallows the characters after it into an invalid token.
+// Tokenize gives back two other kinds of text the lexer drops. The lexer
+// drops the letter and hex digits of a "\x", "\u", or "\U" escape from the
+// Origin of a double-quoted scalar and keeps the backslash and the rest of
+// the scalar. Tokenize restores that Origin from the source. The lexer
+// also drops the line breaks and indentation in front of some tokens, such
+// as the blank lines before a "?" or ":" indicator that follows a flow
+// collection, a quoted scalar, or a comment. Tokenize gives them back at
+// the start of that token's Origin, with each blank line as a bare line
+// ending, the way the lexer keeps the blank lines it does not drop.
+// [SplitDocuments] cuts the stream into one stream per document.
 //
 // Tokenize drops a UTF-8 byte order mark where YAML allows one: at the
 // start of a line before the content of a document, and in front of a
@@ -255,14 +256,18 @@ func repairPositions(src string, tks token.Tokens) {
 //
 // The cursor stands just past the last text placed, and the next token's
 // text starts at the first rune after it that is not whitespace, because
-// the stream covers the source. The lexer's Offset serves as a second
+// the stream covers the source. The lexer's Offset gives a second
 // candidate. The lexer counts the runes it consumes, so its Offset stands a
 // fixed distance from the truth until it drops or repeats a rune, and that
-// distance is delta. The offset candidate is what places the tokens after a
-// double-quoted scalar whose Origin the lexer truncated at an escape, where
-// the cursor stops short and the whitespace rule would land inside the
-// scalar. The cursor is reliable again once a token is found by either
-// candidate.
+// distance is delta. The offset candidate places the tokens after one the
+// lexer rewrote, where the cursor is unreliable. The cursor is reliable
+// again once either candidate finds a token.
+//
+// The lexer shortens the Origin of a double-quoted scalar at a "\x", "\u",
+// or "\U" escape, so the positioner finds such a token by its text through
+// the first backslash. The cursor then moves past the scalar's closing
+// quote in the source rather than past the shortened text, where the next
+// token would land inside the scalar.
 type positioner struct {
 	tail string // The whitespace the stream holds after the text placed last.
 
@@ -283,9 +288,14 @@ type positioner struct {
 // past the text of every line of its Origin. A token without text sits
 // where the next text starts and leaves the cursor where it is. When the
 // text follows the cursor past whitespace alone, place gives tk the line
-// breaks the lexer dropped from that whitespace.
+// breaks the lexer dropped from that whitespace. A double-quoted scalar
+// found in the source moves the cursor past its closing quote instead, and
+// takes its Origin from the source when the lexer shortened it.
 func (p *positioner) place(tk *token.Token) {
-	placed := false
+	var (
+		placed, found bool
+		start         int
+	)
 
 	for ln := range lineend.Lines(tk.Origin) {
 		text := []rune(strings.Trim(ln, " \t\r\n"))
@@ -306,19 +316,19 @@ func (p *positioner) place(tk *token.Token) {
 		} else {
 			// Only the whitespace between a reliable cursor and the text
 			// shows the line breaks the lexer dropped. After a token the
-			// lexer truncated or rewrote, the text sits where the lexer's
-			// Offset points instead.
+			// lexer rewrote, the text sits where the lexer's Offset points
+			// instead.
 			reliable := p.reliable
 			next := p.skipSpace()
 
-			at = p.locate(tk, text)
+			at, found = p.locate(tk, text)
 			if reliable && at == next {
 				p.restoreGap(tk, at)
 			}
 
 			p.setPosition(tk, at)
 
-			placed = true
+			placed, start = true, at
 		}
 
 		p.cursor = at + len(text)
@@ -332,7 +342,72 @@ func (p *positioner) place(tk *token.Token) {
 		return
 	}
 
+	if found && tk.Type == token.DoubleQuoteType && p.src[start] == '"' {
+		p.restoreQuoted(tk, start)
+	}
+
 	p.tail = tk.Origin[len(strings.TrimRight(tk.Origin, " \t\r\n")):]
+}
+
+// restoreQuoted moves the cursor past the closing quote of the
+// double-quoted scalar tk, whose opening quote sits at rune index start.
+// The lexer drops the code of a "\x", "\u", or "\U" escape from the
+// Origin. When the source from the opening to the closing quote differs
+// from the text of the Origin, the Origin takes the source's runes in
+// place of its text and keeps the whitespace around it. A scalar that no
+// quote closes leaves the cursor and the Origin as they are.
+func (p *positioner) restoreQuoted(tk *token.Token, start int) {
+	end, ok := p.closingQuote(start)
+	if !ok {
+		return
+	}
+
+	p.cursor, p.reliable = end, true
+
+	text := strings.Trim(tk.Origin, " \t\r\n")
+	if quoted := string(p.src[start:end]); quoted != text {
+		lead := len(tk.Origin) - len(strings.TrimLeft(tk.Origin, " \t\r\n"))
+		trail := len(strings.TrimRight(tk.Origin, " \t\r\n"))
+
+		tk.Origin = tk.Origin[:lead] + quoted + tk.Origin[trail:]
+	}
+}
+
+// closingQuote returns the rune index just past the quote that closes the
+// double-quoted scalar opening at rune index start, and whether one does.
+// It steps over each escape as the lexer reads it, so a quote inside an
+// escape does not close the scalar.
+func (p *positioner) closingQuote(start int) (int, bool) {
+	for i := start + 1; i < len(p.src); i++ {
+		switch p.src[i] {
+		case '"':
+			return i + 1, true
+		case '\\':
+			i += p.escapeWidth(i)
+		}
+	}
+
+	return 0, false
+}
+
+// escapeWidth returns how many runes after the backslash at rune index i
+// the lexer reads as part of the escape. A "\x" escape takes the letter
+// and two hex digits when the source holds them, "\u" takes the letter and
+// four, "\U" the letter and eight, and any other escape takes the one rune
+// after the backslash.
+func (p *positioner) escapeWidth(i int) int {
+	switch {
+	case i+1 >= len(p.src):
+		return 0
+	case p.src[i+1] == 'x' && i+3 < len(p.src):
+		return 3
+	case p.src[i+1] == 'u':
+		return 5
+	case p.src[i+1] == 'U':
+		return 9
+	default:
+		return 1
+	}
 }
 
 // restoreGap gives tk the line breaks and indentation the lexer dropped
@@ -427,12 +502,51 @@ func cutWhitespace(gap, ws string) (string, bool) {
 }
 
 // locate returns the rune index where text, the first text line of tk,
-// starts. It prefers the first rune after the cursor that is not
+// starts, and reports whether the source holds text there. It asks
+// [positioner.pick] for the whole text first. A double-quoted scalar
+// whose Origin the lexer shortened at an escape holds its text verbatim
+// only through the first backslash, so pick tries that prefix next.
+// Failing both, the text sits at the first place on the line of the next
+// text that holds it, past text the lexer dropped in front of the token,
+// such as the ":" after a tab used as indentation. The search stops at the
+// end of that line, so a token the lexer rewrote does not jump to text
+// further on. When the line does not hold the text, the token sits where
+// the next text starts, and the cursor is unreliable from there on.
+func (p *positioner) locate(tk *token.Token, text []rune) (int, bool) {
+	if at, ok := p.pick(tk, text); ok {
+		return at, true
+	}
+
+	if tk.Type == token.DoubleQuoteType {
+		if i := slices.Index(text, '\\'); i >= 0 {
+			if at, ok := p.pick(tk, text[:i+1]); ok {
+				return at, true
+			}
+		}
+	}
+
+	b := p.skipSpace()
+
+	for at := b; at < len(p.src) && p.src[at] != '\n' && p.src[at] != '\r'; at++ {
+		if p.hasText(at, text) {
+			p.anchor(tk, at)
+
+			return at, true
+		}
+	}
+
+	p.reliable = false
+
+	return b, false
+}
+
+// pick returns the rune index where text, the first text line of tk or
+// the start of it, starts, and reports whether one of the two candidates
+// holds it. It prefers the first rune after the cursor that is not
 // whitespace while the cursor is reliable, and the lexer's Offset shifted
 // by delta otherwise, and takes whichever of the two holds the text when
-// only one does. When neither does, the token is one the lexer rewrote,
-// and it sits after the cursor, which is unreliable from there on.
-func (p *positioner) locate(tk *token.Token, text []rune) int {
+// only one does. When neither does, pick leaves the positioner as it is.
+func (p *positioner) pick(tk *token.Token, text []rune) (int, bool) {
 	b := p.skipSpace()
 	foundB := p.hasText(b, text)
 
@@ -449,18 +563,22 @@ func (p *positioner) locate(tk *token.Token, text []rune) int {
 	case foundA:
 		at = a
 	default:
-		p.reliable = false
-
-		return b
+		return 0, false
 	}
 
+	p.anchor(tk, at)
+
+	return at, true
+}
+
+// anchor marks the cursor reliable once the text of tk sits at rune index
+// at, and takes delta from the lexer's Offset for it.
+func (p *positioner) anchor(tk *token.Token, at int) {
 	p.reliable = true
 
 	if tk.Position.Offset > 0 {
 		p.delta = at - (tk.Position.Offset - 1)
 	}
-
-	return at
 }
 
 // setPosition writes the line, column, and offset of the rune at index at
