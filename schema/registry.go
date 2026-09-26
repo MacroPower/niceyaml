@@ -446,16 +446,12 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 
 	for {
 		ch := r.group.DoChan(ref.Key(), func() (any, error) {
-			err := r.compileRecovering(ctx, ref)
-
-			if pe, ok := errors.AsType[*panicError](err); ok {
-				return pe, err
-			}
+			s, err := r.compileRecovering(ctx, ref)
 
 			// Report whether this caller's context had ended when the load
 			// failed, so a joiner can tell that cancellation apart from a
 			// failure of the load itself.
-			return err != nil && ctx.Err() != nil, err
+			return flight{schema: s, starterEnded: err != nil && ctx.Err() != nil}, err
 		})
 
 		var res singleflight.Result
@@ -473,32 +469,26 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 		case res = <-ch:
 		}
 
-		if res.Err == nil {
-			break
-		}
-
 		// The singleflight group raises a panic from the load on a
 		// goroutine of its own, where no caller can recover it, so the load
-		// hands the panic back as a value and each caller that shared it
+		// hands the panic back as an error and each caller that shared it
 		// raises it here.
-		if pe, ok := res.Val.(*panicError); ok {
+		if pe, ok := errors.AsType[*panicError](res.Err); ok {
 			panic(pe.value)
 		}
 
-		if starterEnded, ok := res.Val.(bool); ok && starterEnded && ctx.Err() == nil {
+		f, _ := res.Val.(flight) //nolint:errcheck // The DoChan function always returns a flight.
+		if res.Err == nil {
+			return f.schema, nil
+		}
+
+		if f.starterEnded && ctx.Err() == nil {
 			continue
 		}
 
 		//nolint:wrapcheck // compile already wraps its errors with the sentinel and Key.
 		return nil, res.Err
 	}
-
-	v, ok := r.cached(ref.Key())
-	if !ok {
-		return nil, fmt.Errorf("%w: %q: validator missing after compile", ErrCompile, ref.name())
-	}
-
-	return v, nil
 }
 
 // Load returns the bytes of the schema ref names: the file a Ref from
@@ -629,9 +619,18 @@ func (p *panicError) Error() string {
 	return fmt.Sprintf("load panicked: %v", p.value)
 }
 
+// A flight carries the result of a shared load to every caller that
+// joined it. It holds the schema the load compiled and whether the
+// context of the caller that started the load had ended when the load
+// failed.
+type flight struct {
+	schema       *Schema
+	starterEnded bool
+}
+
 // compileRecovering runs compile and turns a panic in the load or the
 // compiler into a [*panicError].
-func (r *Registry) compileRecovering(ctx context.Context, ref Ref) (err error) {
+func (r *Registry) compileRecovering(ctx context.Context, ref Ref) (_ *Schema, err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			err = &panicError{value: p}
@@ -641,32 +640,32 @@ func (r *Registry) compileRecovering(ctx context.Context, ref Ref) (err error) {
 	return r.compile(ctx, ref)
 }
 
-// compile loads and compiles the schema ref names and caches the result
-// under its Key. When an earlier call cached a schema under that Key,
-// compile keeps it, so every caller sees one schema per Key.
-func (r *Registry) compile(ctx context.Context, ref Ref) error {
+// compile loads and compiles the schema ref names, caches it under its
+// Key, and returns it. When an earlier flight cached a schema under that
+// Key, compile returns that schema. The group runs one compile per Key at
+// a time and each compile checks the cache first, so every caller sees
+// one schema per Key.
+func (r *Registry) compile(ctx context.Context, ref Ref) (*Schema, error) {
 	key := ref.Key()
 
-	if _, ok := r.cached(key); ok {
-		return nil
+	if v, ok := r.cached(key); ok {
+		return v, nil
 	}
 
 	data, err := r.Load(ctx, ref)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	compiled, err := Compile(ctx, data, r.refOptions(ref)...)
 	if err != nil {
-		return fmt.Errorf("%q: %w", ref.name(), err)
+		return nil, fmt.Errorf("%q: %w", ref.name(), err)
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, ok := r.cache[key]; !ok {
-		r.cache[key] = compiled
-	}
+	r.cache[key] = compiled
 
-	return nil
+	return compiled, nil
 }
