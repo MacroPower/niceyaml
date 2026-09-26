@@ -1075,7 +1075,11 @@ func (n *Node) validate(ctx context.Context, validators []Validator) error {
 //
 // The message of a bound [*Error] keeps the path as the error wrote it,
 // and the position in front of it is the one the path resolved to from
-// the scope.
+// the scope. An Error that carries a position or a range beside its path,
+// from [AtPosition] or [AtRange], binds at that position or range instead,
+// with the position or the start of the range in front of the message.
+// Bind does not resolve the path of such an Error, so a path the document
+// does not hold gives no [SourceError.Unresolved] reason.
 //
 // An error without a location, such as one from
 // [go.jacobcolvin.com/niceyaml/paths], binds all the same, and the bound
