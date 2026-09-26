@@ -344,11 +344,6 @@ func TestPalette_TokensLayerOverAncestors(t *testing.T) {
 			kind:  kind.NameTag,
 			want:  "#268bd2 bg:#002b36",
 		},
-		"a child keeps the parent's attributes": {
-			theme: "solarized-dark",
-			kind:  kind.GenericDeleted,
-			want:  "italic #dc322f bg:#002b36",
-		},
 		"a child keeps the parent's bold": {
 			theme: "tokyonight-night",
 			kind:  kind.PunctuationHeading,
@@ -363,6 +358,46 @@ func TestPalette_TokensLayerOverAncestors(t *testing.T) {
 			th, ok := theme.Builtin().Get(tc.theme)
 			require.True(t, ok)
 			assert.Equal(t, tc.want, style.Encode(th.Style(tc.kind)))
+		})
+	}
+}
+
+func TestPalette_DiffAndErrorKindsUpright(t *testing.T) {
+	t.Parallel()
+
+	// No source theme sets its diff or error tokens in italic, so none of
+	// them may pick up italic from the Generic kind above them.
+	upright := []kind.Kind{
+		kind.GenericDeleted,
+		kind.GenericInserted,
+		kind.GenericError,
+		kind.GenericErrorInvalid,
+		kind.GenericErrorUnknown,
+	}
+
+	for _, th := range theme.Builtin().All() {
+		t.Run(th.Name, func(t *testing.T) {
+			t.Parallel()
+
+			styles := th.Styles()
+			for _, k := range upright {
+				assert.False(t, styles.Style(k).GetItalic(), "%s renders italic", k)
+			}
+		})
+	}
+
+	// Fruity sets its headings in bold and swapoff its strong text, and
+	// neither may pass that bold on to its diff lines.
+	for _, name := range []string{"fruity", "swapoff"} {
+		t.Run(name+" diff lines", func(t *testing.T) {
+			t.Parallel()
+
+			th, ok := theme.Builtin().Get(name)
+			require.True(t, ok)
+
+			for _, k := range []kind.Kind{kind.GenericDeleted, kind.GenericInserted} {
+				assert.False(t, th.Style(k).GetBold(), "%s renders bold", k)
+			}
 		})
 	}
 }
