@@ -522,24 +522,20 @@ func (e *Error) Errors() []error {
 	return e.nested()
 }
 
-// location returns the location of the [Error]: the [paths.Path],
-// [position.Position], or [position.Range] that [AtPath], [AtPosition],
-// or [AtRange] set, or nil when none did. It looks through wrapping to
-// the nearest Error that carries one, so an Error built with [WrapError]
-// around a located Error reports that location. A path comes back with
-// the base of every [Rebase] on the way joined in front, unless a
-// [*SourceError] on the way resolved it, and then it comes back as
-// [SourceError.Path] reports it, with no base from above the binding. A
-// nil Error has none.
+// location returns the locus of the [Error]: a path from [AtPath], a
+// position from [AtPosition], a range from [AtRange], or a path beside a
+// position or a range. It looks through wrapping to the nearest Error
+// that carries one, with the base of every [Rebase] on the way joined in
+// front of a path. A [*SourceError] on the way ends the walk and reports
+// the location it resolved from, with no base from above the binding. An
+// Error from Rebase with nothing located below it is located at its
+// base. A nil Error and an Error with no location return the zero locus.
 func (e *Error) location() locus {
 	if e == nil {
 		return locus{}
 	}
 
-	l, ok := e.located()
-	if !ok {
-		return locus{}
-	}
+	l, _ := e.located()
 
 	return l
 }
