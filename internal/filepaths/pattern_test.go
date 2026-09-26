@@ -49,7 +49,7 @@ func TestNewPattern(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p, err := filepaths.NewPattern(tc.pattern)
+			_, err := filepaths.NewPattern(tc.pattern)
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
 
@@ -57,28 +57,8 @@ func TestNewPattern(t *testing.T) {
 			}
 
 			require.NoError(t, err)
-			assert.Equal(t, tc.pattern, p.String())
 		})
 	}
-}
-
-func TestMustPattern(t *testing.T) {
-	t.Parallel()
-
-	t.Run("valid pattern", func(t *testing.T) {
-		t.Parallel()
-
-		p := filepaths.MustPattern("**/*.yaml")
-		assert.Equal(t, "**/*.yaml", p.String())
-	})
-
-	t.Run("panics on invalid", func(t *testing.T) {
-		t.Parallel()
-
-		assert.Panics(t, func() {
-			filepaths.MustPattern("[")
-		})
-	})
 }
 
 func TestPattern_Match(t *testing.T) {
@@ -247,7 +227,9 @@ func TestPattern_Match(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := filepaths.MustPattern(tc.pattern)
+			p, err := filepaths.NewPattern(tc.pattern)
+			require.NoError(t, err)
+
 			got := p.Match(tc.path)
 			assert.Equal(t, tc.want, got)
 		})

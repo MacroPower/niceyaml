@@ -12,9 +12,8 @@ import (
 var ErrInvalidPattern = errors.New("invalid glob pattern")
 
 // Pattern represents a validated glob pattern for file path matching.
-// Create instances with [NewPattern] or [MustPattern].
+// Create instances with [NewPattern].
 type Pattern struct {
-	raw  string
 	glob string
 }
 
@@ -30,21 +29,7 @@ func NewPattern(pattern string) (Pattern, error) {
 		return Pattern{}, ErrInvalidPattern
 	}
 
-	return Pattern{raw: pattern, glob: normalizePattern(pattern)}, nil
-}
-
-// MustPattern creates a [Pattern] from the given glob pattern string.
-// Panics if the pattern syntax is invalid. Use this for patterns fixed
-// at compile time.
-//
-//	var configPattern = filepaths.MustPattern("**/*.yaml")
-func MustPattern(pattern string) Pattern {
-	p, err := NewPattern(pattern)
-	if err != nil {
-		panic("filepaths: " + err.Error() + ": " + pattern)
-	}
-
-	return p
+	return Pattern{glob: normalizePattern(pattern)}, nil
 }
 
 // Match reports whether the path matches the pattern.
@@ -106,11 +91,6 @@ func normalizePattern(pattern string) string {
 	}
 }
 
-// String returns the original pattern string.
-func (p Pattern) String() string {
-	return p.raw
-}
-
 // MatchAny reports whether path matches any of the glob patterns, with
 // the semantics VS Code and yaml-language-server give a schema fileMatch
 // pattern. A pattern applies at any depth of the tree, so "*.yaml" matches
@@ -125,7 +105,7 @@ func (p Pattern) String() string {
 //
 // MatchAny skips an invalid pattern without error, so a typo in a
 // SchemaStore catalog entry does not break validation. To validate a
-// pattern upfront, use [NewPattern] or [MustPattern] instead.
+// pattern upfront, use [NewPattern] instead.
 func MatchAny(path string, patterns []string) bool {
 	if path == "" {
 		return false
