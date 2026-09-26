@@ -353,6 +353,8 @@ func TestStyles_Attributes(t *testing.T) {
 		"override": colors.OverrideStyles,
 	}
 
+	red := lipgloss.Color("#FF0000")
+
 	tcs := map[string]struct {
 		base    lipgloss.Style
 		overlay lipgloss.Style
@@ -374,6 +376,31 @@ func TestStyles_Attributes(t *testing.T) {
 			want: lipgloss.NewStyle().Bold(true).
 				Strikethrough(true).Faint(true).Blink(true).Reverse(true),
 		},
+		"overlay underline style and color apply": {
+			base:    lipgloss.NewStyle(),
+			overlay: lipgloss.NewStyle().UnderlineStyle(lipgloss.UnderlineCurly).UnderlineColor(red),
+			want:    lipgloss.NewStyle().UnderlineStyle(lipgloss.UnderlineCurly).UnderlineColor(red),
+		},
+		"overlay underline style replaces base's": {
+			base:    lipgloss.NewStyle().UnderlineStyle(lipgloss.UnderlineDouble),
+			overlay: lipgloss.NewStyle().UnderlineStyle(lipgloss.UnderlineCurly),
+			want:    lipgloss.NewStyle().UnderlineStyle(lipgloss.UnderlineCurly),
+		},
+		"base underline color survives an overlay without one": {
+			base:    lipgloss.NewStyle().Underline(true).UnderlineColor(red),
+			overlay: lipgloss.NewStyle().Bold(true),
+			want:    lipgloss.NewStyle().Bold(true).Underline(true).UnderlineColor(red),
+		},
+		"overlay hyperlink applies": {
+			base:    lipgloss.NewStyle(),
+			overlay: lipgloss.NewStyle().Hyperlink("https://example.com"),
+			want:    lipgloss.NewStyle().Hyperlink("https://example.com"),
+		},
+		"overlay hyperlink replaces base's": {
+			base:    lipgloss.NewStyle().Hyperlink("https://a.example", "id=a"),
+			overlay: lipgloss.NewStyle().Hyperlink("https://b.example"),
+			want:    lipgloss.NewStyle().Hyperlink("https://b.example"),
+		},
 	}
 
 	for layerName, fn := range layer {
@@ -386,6 +413,13 @@ func TestStyles_Attributes(t *testing.T) {
 				assert.Equal(t, tc.want.GetBold(), got.GetBold(), "bold")
 				assert.Equal(t, tc.want.GetItalic(), got.GetItalic(), "italic")
 				assert.Equal(t, tc.want.GetUnderline(), got.GetUnderline(), "underline")
+				assert.Equal(t, tc.want.GetUnderlineStyle(), got.GetUnderlineStyle(), "underline style")
+				assert.Equal(t, tc.want.GetUnderlineColor(), got.GetUnderlineColor(), "underline color")
+
+				wantLink, wantParams := tc.want.GetHyperlink()
+				gotLink, gotParams := got.GetHyperlink()
+				assert.Equal(t, wantLink, gotLink, "hyperlink")
+				assert.Equal(t, wantParams, gotParams, "hyperlink params")
 				assert.Equal(t, tc.want.GetStrikethrough(), got.GetStrikethrough(), "strikethrough")
 				assert.Equal(t, tc.want.GetFaint(), got.GetFaint(), "faint")
 				assert.Equal(t, tc.want.GetBlink(), got.GetBlink(), "blink")

@@ -72,10 +72,11 @@ func clamped(c color.Color) color.Color {
 	return c
 }
 
-// BlendStyles blends two [lipgloss.Style] values. It blends colors in LAB
-// color space and composes transforms so overlay wraps base. Text
-// attributes the overlay sets, such as bold or underline, apply on top of
-// the base's.
+// BlendStyles blends two [lipgloss.Style] values. It blends the foreground,
+// background, and underline colors in LAB color space and composes
+// transforms so overlay wraps base. Text attributes the overlay sets, such
+// as bold or italic, apply on top of the base's, and an underline style or
+// hyperlink the overlay sets replaces the base's.
 //
 //nolint:gocritic // hugeParam: value semantics match lipgloss.
 func BlendStyles(base, overlay lipgloss.Style) lipgloss.Style {
@@ -97,6 +98,12 @@ func BlendStyles(base, overlay lipgloss.Style) lipgloss.Style {
 	blendedBg := Blend(baseBg, overlayBg)
 	if blendedBg != nil {
 		style = style.Background(blendedBg)
+	}
+
+	// Blend underline colors.
+	blendedUl := Blend(style.GetUnderlineColor(), overlay.GetUnderlineColor())
+	if blendedUl != nil {
+		style = style.UnderlineColor(blendedUl)
 	}
 
 	// Compose transforms so overlay wraps base.
@@ -121,9 +128,11 @@ func BlendStyles(base, overlay lipgloss.Style) lipgloss.Style {
 // OverrideStyles applies overlay on top of base [lipgloss.Style], so
 // overlay properties replace base properties.
 //
-// OverrideStyles replaces colors rather than blending them, and transforms
-// rather than composing them. Text attributes the overlay sets, such as
-// bold or underline, apply on top of the base's.
+// OverrideStyles replaces the foreground, background, and underline colors
+// rather than blending them, and transforms rather than composing them.
+// Text attributes the overlay sets, such as bold or italic, apply on top of
+// the base's, and an underline style or hyperlink the overlay sets replaces
+// the base's.
 //
 //nolint:gocritic // hugeParam: value semantics match lipgloss.
 func OverrideStyles(base, overlay lipgloss.Style) lipgloss.Style {
@@ -139,6 +148,11 @@ func OverrideStyles(base, overlay lipgloss.Style) lipgloss.Style {
 		style = style.Background(bg)
 	}
 
+	// Override underline color if overlay has one.
+	if ul := Override(style.GetUnderlineColor(), overlay.GetUnderlineColor()); ul != nil {
+		style = style.UnderlineColor(ul)
+	}
+
 	// Override transform if overlay has one (not composed).
 	if overlayTransform := overlay.GetTransform(); overlayTransform != nil {
 		style = style.Transform(overlayTransform)
@@ -148,8 +162,10 @@ func OverrideStyles(base, overlay lipgloss.Style) lipgloss.Style {
 }
 
 // layerAttributes returns base with every text attribute that over sets
-// turned on. A [lipgloss.Style] reports an unset attribute as false, so an
-// overlay cannot turn an attribute of the base off.
+// turned on, and with the underline style and hyperlink that over sets in
+// place of the base's, so a curly underline on over stays curly. A
+// [lipgloss.Style] reports an unset attribute as false, so an overlay
+// cannot turn an attribute of the base off.
 //
 //nolint:gocritic // hugeParam: value semantics match lipgloss.
 func layerAttributes(base, over lipgloss.Style) lipgloss.Style {
@@ -161,8 +177,8 @@ func layerAttributes(base, over lipgloss.Style) lipgloss.Style {
 		base = base.Italic(true)
 	}
 
-	if over.GetUnderline() {
-		base = base.Underline(true)
+	if u := over.GetUnderlineStyle(); u != lipgloss.UnderlineNone {
+		base = base.UnderlineStyle(u)
 	}
 
 	if over.GetStrikethrough() {
@@ -179,6 +195,10 @@ func layerAttributes(base, over lipgloss.Style) lipgloss.Style {
 
 	if over.GetReverse() {
 		base = base.Reverse(true)
+	}
+
+	if link, params := over.GetHyperlink(); link != "" {
+		base = base.Hyperlink(link, params)
 	}
 
 	return base

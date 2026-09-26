@@ -4097,22 +4097,29 @@ func TestPrinter_Overlay_Attributes(t *testing.T) {
 	// rendered output, whether it replaces or blends with the style beneath.
 	const underlined kind.Kind = "underlined"
 
-	st := lipgloss.NewStyle().Underline(true).Bold(true)
-
-	// Each token renders on its own, so the expected output styles them one
-	// at a time.
-	want := st.Render("k") + st.Render(":") + st.Render(" ") + st.Render("v")
+	single := lipgloss.NewStyle().Underline(true).Bold(true)
+	curly := lipgloss.NewStyle().
+		UnderlineStyle(lipgloss.UnderlineCurly).
+		UnderlineColor(lipgloss.Color("#FF0000"))
 
 	tcs := map[string]struct {
+		style lipgloss.Style
 		blend bool
 	}{
-		"replace": {blend: false},
-		"blend":   {blend: true},
+		"replace":       {style: single, blend: false},
+		"blend":         {style: single, blend: true},
+		"replace curly": {style: curly, blend: false},
+		"blend curly":   {style: curly, blend: true},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
+
+			// Each token renders on its own, so the expected output styles
+			// them one at a time.
+			st := tc.style
+			want := st.Render("k") + st.Render(":") + st.Render(" ") + st.Render("v")
 
 			view := niceyaml.NewSourceFromString("k: v").View()
 			view.AddLineOverlay(0, line.Overlay{Kind: underlined, Cols: position.NewSpan(0, 4), Blend: tc.blend})
