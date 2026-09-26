@@ -49,7 +49,7 @@ func Parse(s string) (lipgloss.Style, error) {
 
 // MustParse parses a Pygments-style string, panicking on error.
 //
-// Use this for compile-time constants where the format is known to be valid.
+// Use this for package-level variables where the format is known to be valid.
 func MustParse(s string) lipgloss.Style {
 	style, err := Parse(s)
 	if err != nil {

@@ -83,17 +83,17 @@
 // Example usage:
 //
 //	// A simple foreground color:
-//	style, err := style.Parse("#ff0000")
+//	red, err := style.Parse("#ff0000")
 //
 //	// Bold text with a specific color:
-//	style, err := style.Parse("bold #c678dd")
+//	keyword, err := style.Parse("bold #c678dd")
 //
 //	// Full specification with foreground and background:
-//	style, err := style.Parse("#abb2bf bg:#282c34")
+//	full, err := style.Parse("#abb2bf bg:#282c34")
 //
-//	// For compile-time constants, use MustParse:
+//	// For package-level variables, use MustParse:
 //	var keywordStyle = style.MustParse("bold #c678dd")
 //
 //	// To convert a style back to a string:
-//	s := style.Encode(style) // "bold #c678dd"
+//	s := style.Encode(keyword) // "bold #c678dd"
 package style
