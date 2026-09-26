@@ -201,9 +201,10 @@ func (p palette) surface() (color.Color, color.Color) {
 
 // layer returns base with the colors and attributes the spec sets applied
 // on top, leaving base's other properties in place. The spec is in the
-// form [style.Parse] reads. A "nobold", "noitalic", or "nounderline"
-// keyword turns the attribute off, since [style.Parse] leaves it unset,
-// which reads the same as a spec that never named it.
+// form [style.Parse] reads, and attribute keywords apply left to right as
+// they do there, so the last keyword for an attribute wins. A "nobold",
+// "noitalic", or "nounderline" keyword turns the attribute off even when
+// base sets it, where [style.Parse] only leaves it unset.
 //
 //nolint:gocritic // Value semantics match lipgloss.
 func layer(base lipgloss.Style, spec string) lipgloss.Style {
@@ -217,24 +218,18 @@ func layer(base lipgloss.Style, spec string) lipgloss.Style {
 		base = base.Background(c)
 	}
 
-	if over.GetBold() {
-		base = base.Bold(true)
-	}
-
-	if over.GetItalic() {
-		base = base.Italic(true)
-	}
-
-	if over.GetUnderline() {
-		base = base.Underline(true)
-	}
-
 	for word := range strings.FieldsSeq(strings.ToLower(spec)) {
 		switch word {
+		case "bold":
+			base = base.Bold(true)
 		case "nobold":
 			base = base.Bold(false)
+		case "italic":
+			base = base.Italic(true)
 		case "noitalic":
 			base = base.Italic(false)
+		case "underline":
+			base = base.Underline(true)
 		case "nounderline":
 			base = base.Underline(false)
 		}

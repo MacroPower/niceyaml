@@ -127,6 +127,73 @@ func TestPalette_TokensClearInheritedAttributes(t *testing.T) {
 	assert.Equal(t, lipgloss.Color("#ff0000"), s.Style(kind.GenericDeleted).GetForeground())
 }
 
+func TestPalette_TokensApplyAttributeKeywordsInOrder(t *testing.T) {
+	t.Parallel()
+
+	// Attribute keywords apply left to right, as [style.Parse] reads them,
+	// so the last keyword for an attribute wins. Every case layers over an
+	// italic Generic.
+	tcs := map[string]struct {
+		spec          string
+		wantBold      bool
+		wantItalic    bool
+		wantUnderline bool
+	}{
+		"bold after nobold": {
+			spec:       "nobold bold",
+			wantBold:   true,
+			wantItalic: true,
+		},
+		"nobold after bold": {
+			spec:       "bold nobold",
+			wantItalic: true,
+		},
+		"italic after noitalic": {
+			spec:       "noitalic italic",
+			wantItalic: true,
+		},
+		"noitalic after italic": {
+			spec: "italic noitalic",
+		},
+		"underline after nounderline": {
+			spec:          "nounderline underline",
+			wantItalic:    true,
+			wantUnderline: true,
+		},
+		"nounderline after underline": {
+			spec:       "underline nounderline",
+			wantItalic: true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := palette{
+				Mode:   Dark,
+				Fg:     "#ffffff",
+				Bg:     "#000000",
+				Accent: "#ff00ff",
+				OK:     "#00ff00",
+				Warn:   "#ffff00",
+				Error:  "#ff0000",
+				Tokens: map[kind.Kind]string{
+					kind.Generic:        "italic #888888",
+					kind.GenericDeleted: tc.spec + " #ff0000",
+				},
+			}
+
+			got := p.styles().Style(kind.GenericDeleted)
+
+			assert.Equal(t, tc.wantBold, got.GetBold())
+			assert.Equal(t, tc.wantItalic, got.GetItalic())
+			assert.Equal(t, tc.wantUnderline, got.GetUnderline())
+			assert.Equal(t, lipgloss.Color("#ff0000"), got.GetForeground())
+		})
+	}
+}
+
 func TestPalette_UITakesCommentColorAlone(t *testing.T) {
 	t.Parallel()
 
