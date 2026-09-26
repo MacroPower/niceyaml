@@ -176,9 +176,9 @@
 //
 //	fmt.Println(p.Print(view.Hunks(2)))
 //
-// [Node.Ranges] returns the ranges a path covers, the same ones an
-// error at that path highlights, for a caller that marks a value on a view
-// without an error to bind.
+// [Node.Ranges] returns the ranges an error at a path highlights, those of
+// the token that starts the value, for a caller that marks a value on a
+// view without an error to bind.
 //
 // This separates error production (validators, decoders) from error
 // presentation (source context, formatting). Each layer provides what it

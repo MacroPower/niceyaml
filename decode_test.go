@@ -1992,6 +1992,9 @@ func TestDocument_Ranges(t *testing.T) {
 		empty:
 		list:
 		  - a
+		map:
+		  x: 1
+		  y: 2
 	`)
 
 	tcs := map[string]struct {
@@ -2024,6 +2027,14 @@ func TestDocument_Ranges(t *testing.T) {
 		"block scalar covers its indicator": {
 			path: paths.Root().Child("block"),
 			want: position.Ranges{position.NewRange(position.New(3, 7), position.New(3, 8))},
+		},
+		"mapping covers its first key": {
+			path: paths.Root().Child("map"),
+			want: position.Ranges{position.NewRange(position.New(10, 2), position.New(10, 3))},
+		},
+		"sequence covers its first element": {
+			path: paths.Root().Child("list"),
+			want: position.Ranges{position.NewRange(position.New(8, 4), position.New(8, 5))},
 		},
 		"missing path": {
 			path: paths.Root().Child("missing"),
@@ -2069,6 +2080,8 @@ func TestDocument_Ranges(t *testing.T) {
 			paths.Root().Child("text"),
 			paths.Root().Child("block"),
 			paths.Root().Child("empty"),
+			paths.Root().Child("list"),
+			paths.Root().Child("map"),
 		} {
 			want, err := dd.Ranges(path)
 			require.NoError(t, err)

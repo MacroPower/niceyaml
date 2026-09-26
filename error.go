@@ -250,9 +250,10 @@ type ErrorOption func(e *Error)
 // AtPath is an [ErrorOption] that sets the YAML path of the value the
 // error is about, replacing a path set before it. The error points at
 // the node the path selects, which for a mapping entry is its value, so
-// [SourceError.Excerpt] highlights the value, unless [AtPosition] or
-// [AtRange] narrows the location to the characters at fault, in which
-// case the path names the value in the message alone. A path from
+// [SourceError.Excerpt] highlights the value, and for a mapping or
+// sequence it highlights the first key or element. [AtPosition] or
+// [AtRange] narrows the location to the characters at fault instead, and
+// the path then names the value in the message alone. A path from
 // [paths.Path.Key] points at the key of the entry instead, which suits
 // an error about the key itself, such as an unknown field:
 //

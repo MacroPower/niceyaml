@@ -955,13 +955,15 @@ func (n *Node) Lines() line.Lines {
 	return n.View().Held()
 }
 
-// Ranges returns the ranges the node at path covers, one per line, without
-// the spaces around its content: the ranges [SourceError.Excerpt] highlights
-// for an [Error] built with [AtPath] at that path. The path resolves
-// from the scope of the Node, as it does in such an Error. A block
-// scalar covers its indicator, and a path from [paths.Path.Key] covers
-// the key of the entry rather than its value. The ranges highlight the
-// value on a view of the source:
+// Ranges returns the ranges of the token that starts the node at path, the
+// token [paths.Path.Token] resolves, one per line the token spans, without
+// the spaces around its content. They are the ranges [SourceError.Excerpt]
+// highlights for an [Error] built with [AtPath] at that path, and the path
+// resolves from the scope of the Node, as it does in such an Error. A
+// scalar covers every line of its text, a block scalar its indicator, a
+// mapping its first key, and a sequence its first element. A path from
+// [paths.Path.Key] covers the key of the entry rather than its value.
+// The ranges mark where the value starts on a view of the source:
 //
 //	ranges, err := doc.Ranges(paths.Root().Child("spec", "replicas"))
 //	if err != nil {
@@ -970,6 +972,9 @@ func (n *Node) Lines() line.Lines {
 //
 //	view := doc.View()
 //	view.AddOverlay(kind.GenericHighlight, ranges...)
+//
+// To mark every line of a mapping or sequence, pass the path to [Node.At]
+// and use [Node.Span] or [Node.View] of the Node it returns.
 //
 // A path that does not resolve returns the error [paths.Path.Token]
 // describes, bound to the source, and a path whose token carries no
