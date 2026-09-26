@@ -12,8 +12,8 @@ import (
 )
 
 // ErrorHandler is the [fang.ErrorHandler] that [NewErrorHandler] returns
-// with no options, so [niceyaml.SourceError] values render with a
-// [printer.Printer] from [printer.New].
+// with no options, so [*go.jacobcolvin.com/niceyaml.SourceError] values
+// render with a [printer.Printer] from [printer.New].
 //
 //nolint:gocritic // hugeParam: required by [fang.ErrorHandler] signature.
 func ErrorHandler(w io.Writer, styles fang.Styles, err error) {
@@ -59,8 +59,8 @@ func WithPrinter(p *printer.Printer) Option {
 }
 
 // NewErrorHandler creates a new [fang.ErrorHandler] that renders
-// [niceyaml.SourceError] values with their annotated source, using opts for
-// the [printer.Printer]:
+// [*go.jacobcolvin.com/niceyaml.SourceError] values with their annotated
+// source, using opts for the [printer.Printer]:
 //
 //	err := fang.Execute(ctx, rootCmd,
 //	    fang.WithErrorHandler(fangs.NewErrorHandler(
@@ -71,8 +71,9 @@ func WithPrinter(p *printer.Printer) Option {
 // The handler writes the error header, then what
 // [printer.Printer.PrintError] renders for err: the message as a tree,
 // with the context its wrappers added in front and a connector before
-// each nested error, then the excerpt of each [niceyaml.SourceError] in
-// the error's tree, so a joined error annotates each failure it holds.
+// each nested error, then the excerpt of each
+// [*go.jacobcolvin.com/niceyaml.SourceError] in the error's tree, so a
+// joined error annotates each failure it holds.
 // Unlike [fang.DefaultErrorHandler], which wraps errors in a lipgloss style
 // that can break multi-line output, this handler applies styling only to
 // the error header and leaves the rendered lines intact.
