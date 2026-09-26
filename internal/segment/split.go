@@ -14,8 +14,9 @@ import (
 // Line holds the [Segments] of one source line together with the 1-indexed
 // line number the lexer assigned to it.
 //
-// [Split] produces Line values; the line package wraps them in its own Line
-// type, which adds rendering metadata.
+// [Split] produces Line values. The line package builds its own Line type
+// from each one and keeps the decoration that rendering attaches to a line
+// on its View.
 type Line struct {
 	Segments Segments
 	// The 1-indexed line number used for display.

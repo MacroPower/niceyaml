@@ -35,6 +35,7 @@
 //	│String                     │
 //	└───────────────────────────┘
 //
-// The line package wraps the result in its Line type, which adds
-// rendering metadata.
+// The line package builds its own Line type from each [Line], with the
+// same segments and number. The flag, overlays, and annotations that
+// rendering attaches to a line live on the line package's View.
 package segment
