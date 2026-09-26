@@ -986,9 +986,7 @@ func (n *Node) Ranges(path paths.Path) (position.Ranges, error) {
 		return nil, n.Bind(err)
 	}
 
-	lines := n.source.lines
-
-	return lines.ContentRanges(lines.TokenAt(pos)), nil
+	return highlightRanges(n.source.lines, location{pos: pos}), nil
 }
 
 // position returns the position of the token that path resolves to in the

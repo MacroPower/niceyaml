@@ -2082,6 +2082,8 @@ func TestDocument_Ranges(t *testing.T) {
 			paths.Root().Child("empty"),
 			paths.Root().Child("list"),
 			paths.Root().Child("map"),
+			paths.Root().Child("list").Index(0),
+			paths.Root().Child("kind").Key(),
 		} {
 			want, err := dd.Ranges(path)
 			require.NoError(t, err)
