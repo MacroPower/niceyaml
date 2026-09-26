@@ -206,8 +206,16 @@ func TestURL(t *testing.T) {
 	t.Run("client error", func(t *testing.T) {
 		t.Parallel()
 
-		_, _, err := load(t, schema.URL("http://localhost:0/schema.json")) // Port 0 = connection refused.
-		require.ErrorContains(t, err, "fetch http://localhost:0/schema.json")
+		// The transport stands in for a refused connection.
+		client := &http.Client{
+			Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+				return nil, errors.New("connection refused")
+			}),
+		}
+
+		err := lookup(t, client, schema.URL("http://example.com/schema.json"))
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorContains(t, err, "fetch http://example.com/schema.json: connection refused")
 	})
 
 	t.Run("body read error", func(t *testing.T) {
