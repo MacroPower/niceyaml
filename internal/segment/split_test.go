@@ -1,6 +1,7 @@
 package segment_test
 
 import (
+	"math"
 	"slices"
 	"strings"
 	"testing"
@@ -645,6 +646,24 @@ func TestSplit_HandBuiltStream(t *testing.T) {
 			}},
 			wantContent: []string{"a"},
 			wantNumbers: []int{-5},
+		},
+		"line number at the int limit": {
+			input: token.Tokens{
+				{
+					Type:     token.StringType,
+					Value:    "a",
+					Origin:   "a\n",
+					Position: &token.Position{Line: 1, Column: 1, Offset: 1},
+				},
+				{
+					Type:     token.StringType,
+					Value:    "b",
+					Origin:   "b",
+					Position: &token.Position{Line: math.MaxInt, Column: 1, Offset: 3},
+				},
+			},
+			wantContent: []string{"a", "b"},
+			wantNumbers: []int{1, math.MaxInt},
 		},
 	}
 
