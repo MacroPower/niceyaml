@@ -1,6 +1,7 @@
 package line_test
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -109,6 +110,40 @@ func segmentText(view *line.View, i int) string {
 	return strings.Join(parts, " ")
 }
 
+// flowMappingView returns a view of a one-line flow mapping of n entries,
+// {k0: v, k1: v, ...}. With highlight set, every v has a blend overlay,
+// as a search for v would add to a long minified line.
+func flowMappingView(n int, highlight bool) *line.View {
+	var (
+		sb     strings.Builder
+		ranges []position.Range
+	)
+
+	sb.WriteString("{")
+
+	for i := range n {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+
+		fmt.Fprintf(&sb, "k%d: ", i)
+
+		col := sb.Len()
+		ranges = append(ranges, position.NewRange(position.New(0, col), position.New(0, col+1)))
+
+		sb.WriteString("v")
+	}
+
+	sb.WriteString("}\n")
+
+	view := line.NewView(line.NewLines(tokens.Tokenize(sb.String())))
+	if highlight {
+		view.BlendOverlay("hl", ranges...)
+	}
+
+	return view
+}
+
 func TestView_Segments(t *testing.T) {
 	t.Parallel()
 
@@ -195,6 +230,61 @@ func TestView_Segments(t *testing.T) {
 
 		assert.Equal(t, want, view.Overlays(0))
 		assert.Equal(t, kind.Kind("w"), segs[1].Overlays[0].Kind)
+	})
+
+	t.Run("overlapping overlays keep added order across many edges", func(t *testing.T) {
+		t.Parallel()
+
+		view := newTestView(t, "abcdefgh\n", 1)
+		view.AddOverlay("w", position.NewRange(position.New(0, 0), position.New(0, 8)))
+		view.BlendOverlay("b", position.NewRange(position.New(0, 2), position.New(0, 5)))
+		view.AddOverlay("a", position.NewRange(position.New(0, 4), position.New(0, 6)))
+
+		assert.Equal(
+			t,
+			"literalString(ab)[w] literalString(cd)[w,b] literalString(e)[w,b,a] literalString(f)[w,a] literalString(gh)[w]",
+			segmentText(view, 0),
+		)
+	})
+
+	t.Run("a zero-width overlay still splits but covers nothing", func(t *testing.T) {
+		t.Parallel()
+
+		view := newTestView(t, "abcdef\n", 1)
+		view.AddLineOverlay(0, line.Overlay{Cols: position.NewSpan(3, 3), Kind: "z"})
+
+		assert.Equal(t, "literalString(abc) literalString(def)", segmentText(view, 0))
+	})
+
+	t.Run("many overlays on one long line", func(t *testing.T) {
+		t.Parallel()
+
+		const n = 500
+
+		view := flowMappingView(n, true)
+		ln := view.Lines().Line(0)
+
+		var (
+			text        string
+			highlighted int
+		)
+
+		for seg := range view.Segments(0) {
+			text += seg.Text
+
+			if seg.Text == "v" {
+				require.Len(t, seg.Overlays, 1)
+
+				highlighted++
+
+				continue
+			}
+
+			assert.Empty(t, seg.Overlays, "segment %q at %s", seg.Text, seg.Cols)
+		}
+
+		assert.Equal(t, ln.Content(), text)
+		assert.Equal(t, n, highlighted)
 	})
 
 	t.Run("an overlay on a line the view does not hold is not asked for", func(t *testing.T) {

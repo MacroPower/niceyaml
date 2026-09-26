@@ -2,6 +2,7 @@ package line
 
 import (
 	"iter"
+	"slices"
 
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style/kind"
@@ -21,9 +22,9 @@ type Segment struct {
 	// or after its text.
 	Kind kind.Kind
 	// Overlays are the overlays of the view that cover Cols, in the order
-	// they were added, so the last one added is the outermost. The slice
-	// is the segment's own and holds copies of the view's overlays, so
-	// changing it leaves the view and the other segments as they were.
+	// the view took them in, so the last one added is the outermost. The
+	// slice is the segment's own and holds copies of the view's overlays,
+	// so changing it leaves the view and the other segments as they were.
 	Overlays Overlays
 	// Cols are the columns of the line the segment covers.
 	Cols position.Span
@@ -63,12 +64,12 @@ func (v *View) Segments(i int) iter.Seq[Segment] {
 	overlays := v.Overlays(i)
 
 	return func(yield func(Segment) bool) {
+		runs := newOverlayRuns(overlays)
 		col := 0
 
 		for j, seg := range ln.segments {
-			origin := tokens.TrimLineEnding(seg.Part().Origin)
+			rest := tokens.TrimLineEnding(seg.Part().Origin)
 			sp := seg.ContentSpan()
-			start := col
 
 			// The separator is the whitespace the token carries before its
 			// text, whether that text is a plain scalar, a quoted string,
@@ -88,97 +89,115 @@ func (v *View) Segments(i int) iter.Seq[Segment] {
 			}
 
 			for _, piece := range pieces {
-				if !yieldPiece(yield, origin, start, position.NewSpan(col, piece.end), piece.kind, overlays) {
-					return
+				for col < piece.end {
+					end, covering := runs.next(col, piece.end)
+					n := runeBytes(rest, end-col)
+
+					s := Segment{
+						Cols:     position.NewSpan(col, end),
+						Text:     rest[:n],
+						Kind:     piece.kind,
+						Overlays: covering,
+					}
+
+					rest = rest[n:]
+					col = end
+
+					if !yield(s) {
+						return
+					}
 				}
-
-				col = piece.end
 			}
 		}
 	}
 }
 
-// yieldPiece yields the segments of one piece of a token: cols of the
-// line, which origin covers from the column start, in kind k, split where
-// an overlay starts or ends inside them. A piece that covers no columns
-// yields nothing. Reports whether the iteration goes on.
-func yieldPiece(
-	yield func(Segment) bool,
-	origin string,
-	start int,
-	cols position.Span,
-	k kind.Kind,
-	overlays Overlays,
-) bool {
-	if cols.Len() == 0 {
-		return true
-	}
-
-	runes := []rune(origin)
-
-	for _, span := range splitAtOverlays(cols, overlays) {
-		var covering Overlays
-
-		for _, o := range overlays {
-			if o.Cols.Contains(span.Start) {
-				covering = append(covering, o)
-			}
-		}
-
-		seg := Segment{
-			Cols:     span,
-			Text:     string(runes[span.Start-start : span.End-start]),
-			Kind:     k,
-			Overlays: covering,
-		}
-
-		if !yield(seg) {
-			return false
-		}
-	}
-
-	return true
+// overlayRuns cuts the columns of one line into runs where its overlays
+// start or end, so every column of a run has the same overlays over it.
+// Each call to [overlayRuns.next] asks for columns at or after the ones
+// the call before asked for, so it moves through the edges once, from
+// left to right.
+//
+// Create instances with [newOverlayRuns].
+type overlayRuns struct {
+	// Edges are the columns where an overlay starts or ends, ascending and
+	// without repeats.
+	edges []int
+	// Covers holds the overlays over each run, in the order the view took
+	// them in. Covers[k] is the run after the first k edges, so covers[0]
+	// is the run before the first edge. It is nil when there are no
+	// overlays.
+	covers []Overlays
+	// K is the run holding the col the last call to next asked for.
+	k int
 }
 
-// splitAtOverlays cuts cols where an overlay starts or ends strictly
-// inside them and returns the pieces in column order.
-func splitAtOverlays(cols position.Span, overlays Overlays) []position.Span {
-	edges := []int{cols.Start}
+// newOverlayRuns creates a new [overlayRuns] over the given overlays. An
+// overlay that covers no columns, one added with its end at or before its
+// start, still cuts the line at both edges.
+func newOverlayRuns(overlays Overlays) overlayRuns {
+	if len(overlays) == 0 {
+		return overlayRuns{}
+	}
+
+	edges := make([]int, 0, 2*len(overlays))
+	for _, o := range overlays {
+		edges = append(edges, o.Cols.Start, o.Cols.End)
+	}
+
+	slices.Sort(edges)
+
+	edges = slices.Compact(edges)
+
+	covers := make([]Overlays, len(edges)+1)
 
 	for _, o := range overlays {
-		for _, edge := range [...]int{o.Cols.Start, o.Cols.End} {
-			if edge > cols.Start && edge < cols.End {
-				edges = insertEdge(edges, edge)
-			}
+		if o.Cols.Start >= o.Cols.End {
+			continue
+		}
+
+		first, _ := slices.BinarySearch(edges, o.Cols.Start)
+		last, _ := slices.BinarySearch(edges, o.Cols.End)
+
+		// Start is edges[first] and End is edges[last], so the overlay
+		// covers the runs from first+1 through last.
+		for k := first + 1; k <= last; k++ {
+			covers[k] = append(covers[k], o)
 		}
 	}
 
-	edges = append(edges, cols.End)
-
-	spans := make([]position.Span, 0, len(edges)-1)
-	for i := range len(edges) - 1 {
-		spans = append(spans, position.NewSpan(edges[i], edges[i+1]))
-	}
-
-	return spans
+	return overlayRuns{edges: edges, covers: covers}
 }
 
-// insertEdge inserts edge into the ascending edges, once.
-func insertEdge(edges []int, edge int) []int {
-	for i, e := range edges {
-		switch {
-		case e == edge:
-			return edges
-
-		case e > edge:
-			edges = append(edges, 0)
-			copy(edges[i+1:], edges[i:])
-
-			edges[i] = edge
-
-			return edges
-		}
+// next returns where the run holding col ends, at the next edge after col
+// or at end if that comes first, and a new slice of the overlays over it,
+// or nil for none.
+func (r *overlayRuns) next(col, end int) (int, Overlays) {
+	for r.k < len(r.edges) && r.edges[r.k] <= col {
+		r.k++
 	}
 
-	return append(edges, edge)
+	if r.k < len(r.edges) && r.edges[r.k] < end {
+		end = r.edges[r.k]
+	}
+
+	if r.covers == nil {
+		return end, nil
+	}
+
+	return end, slices.Clone(r.covers[r.k])
+}
+
+// runeBytes returns the length in bytes of the first n runes of s, or of
+// all of s if it holds fewer.
+func runeBytes(s string, n int) int {
+	for i := range s {
+		if n == 0 {
+			return i
+		}
+
+		n--
+	}
+
+	return len(s)
 }
