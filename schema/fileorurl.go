@@ -124,20 +124,53 @@ func hasPrefixFold(s, prefix string) bool {
 // [File] names such a path by. The function drops that slash so the
 // result is the absolute path C:\schemas\config.json rather than the
 // relative path \C:\schemas\config.json.
+//
+// Off Windows, a colon escaped as %3A, as in
+// file:///C%3A/schemas/config.json, marks a directory at the root that
+// only looks like a drive, the form [File] names the POSIX path
+// /C:/schemas/config.json by, so the function keeps that slash. Windows
+// has no such directory, so there the escaped colon names the drive, as
+// it does in the URLs VS Code writes, and the function drops the slash.
 func fileURLPath(ref string) (string, bool) {
 	u, err := url.Parse(ref)
 	if err != nil || u.Path == "" || (u.Host != "" && !strings.EqualFold(u.Host, "localhost")) {
 		return ref, false
 	}
 
-	return filepath.FromSlash(trimDriveSlash(u.Path)), true
+	return filepath.FromSlash(trimDriveSlash(u)), true
 }
 
-// trimDriveSlash drops the leading slash of a URL path whose first segment
-// is a Windows drive letter, so "/C:/schemas" becomes "C:/schemas". Any
-// other path comes back unchanged.
-func trimDriveSlash(p string) string {
+// trimDriveSlash returns the path of u, without its leading slash when
+// its first segment is a Windows drive letter, so "/C:/schemas" becomes
+// "C:/schemas". Any other path comes back unchanged. On Windows, a colon
+// escaped as %3A names the drive too. Off Windows, it names a directory,
+// so "/C%3A/schemas" comes back as "/C:/schemas".
+func trimDriveSlash(u *url.URL) string {
+	p := u.Path
 	if p == "" || p[0] != '/' || !hasDriveLetter(p[1:]) {
+		return p
+	}
+
+	if onWindows {
+		return p[1:]
+	}
+
+	// RawPath holds the path as the URL spells it whenever that differs
+	// from the default escaping, as a %3A always does. EscapedPath ignores
+	// RawPath that leaves a byte such as a space unescaped, and then spells
+	// the colon as itself.
+	esc := u.RawPath
+	if esc == "" {
+		esc = u.Path
+	}
+
+	// The letter is one byte, or three when percent-encoded as in %43.
+	colon := len("/C")
+	if strings.HasPrefix(esc, "/%") {
+		colon = len("/%43")
+	}
+
+	if len(esc) <= colon || esc[colon] != ':' {
 		return p
 	}
 
@@ -146,8 +179,8 @@ func trimDriveSlash(p string) string {
 
 // hasDriveLetter reports whether p starts with a Windows drive letter and
 // nothing else or a separator behind it, as in "C:" or "C:/schemas". Such
-// a path is absolute wherever it is read, so the check does not depend on
-// the platform running it.
+// a path is absolute wherever a program reads it, so the check does not
+// depend on the platform running it.
 //
 // A colon is a legal character in a POSIX file name, so "a:b.json" is a
 // relative path. Windows reads it as a path relative to the current

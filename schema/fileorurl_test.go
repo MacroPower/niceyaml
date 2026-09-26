@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -278,6 +279,22 @@ func TestFileOrURL(t *testing.T) {
 		assert.Equal(t, "file:///C:/schemas/config.json", ref.Key())
 	})
 
+	t.Run("escaped colon in a file URL", func(t *testing.T) {
+		t.Parallel()
+
+		if runtime.GOOS == "windows" {
+			t.Skip("an escaped colon names the drive on Windows")
+		}
+
+		// The escaped colon names the directory /C: at the root, the form
+		// File keys it by, so the read looks for the file there rather
+		// than refusing a drive path.
+		url, _, err := load(t, fileOrURL(t, "/configs", "file:///C%3A/schemas/config.json"))
+		assert.Equal(t, "file:///C%3A/schemas/config.json", url)
+		require.ErrorIs(t, err, os.ErrNotExist)
+		require.ErrorContains(t, err, "read /C:/schemas/config.json")
+	})
+
 	t.Run("colon in a relative path", func(t *testing.T) {
 		t.Parallel()
 
@@ -341,6 +358,15 @@ func TestFileURLPath(t *testing.T) {
 	// URL yields C:/schemas/config.json here and C:\schemas\config.json on
 	// Windows. Either way the drive letter comes first, so filepath.IsAbs
 	// reports the path absolute on Windows.
+	//
+	// Off Windows, a colon escaped as %3A names a directory at the root,
+	// which keeps its leading slash. Windows has no such directory, so
+	// there the escaped colon names the drive.
+	escapedRoot := "/C:"
+	if runtime.GOOS == "windows" {
+		escapedRoot = "C:"
+	}
+
 	tcs := map[string]struct {
 		ref    string
 		want   string
@@ -369,6 +395,26 @@ func TestFileURLPath(t *testing.T) {
 		"drive letter alone": {
 			ref:    "file:///C:",
 			want:   "C:",
+			wantOK: true,
+		},
+		"percent-encoded drive letter": {
+			ref:    "file:///%43:/schemas/config.json",
+			want:   filepath.FromSlash("C:/schemas/config.json"),
+			wantOK: true,
+		},
+		"escaped colon": {
+			ref:    "file:///C%3A/schemas/config.json",
+			want:   filepath.FromSlash(escapedRoot + "/schemas/config.json"),
+			wantOK: true,
+		},
+		"escaped colon beside a literal non-ascii letter": {
+			ref:    "file:///C%3A/sch\u00e9mas/config.json",
+			want:   filepath.FromSlash(escapedRoot + "/sch\u00e9mas/config.json"),
+			wantOK: true,
+		},
+		"escaped colon beside a literal pipe": {
+			ref:    "file:///C%3A/a|b/config.json",
+			want:   filepath.FromSlash(escapedRoot + "/a|b/config.json"),
 			wantOK: true,
 		},
 		"colon after a digit is not a drive": {

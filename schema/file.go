@@ -20,6 +20,10 @@ import (
 // file.
 var ErrEmptyPath = errors.New("schema file path is empty")
 
+// onWindows reports whether the program runs on Windows, the one platform
+// where a drive letter names a drive.
+const onWindows = runtime.GOOS == "windows"
+
 // File creates a [Ref] that names a schema file. The Ref is a [Resolver]
 // that names the file for every document, and the registry reads the
 // file with [Registry.Load]: from the working directory, with path made
@@ -51,8 +55,8 @@ var ErrEmptyPath = errors.New("schema file path is empty")
 // device, or a named pipe fails to load.
 //
 // File is for a path written in the program, so it panics on an empty
-// path, as [Loadable] panics on an empty key, and on a working directory
-// that cannot be read to make the path absolute. A reference read from a
+// path, as [Loadable] panics on an empty key, and when it cannot get the
+// working directory to make the path absolute. A reference read from a
 // directive or a command line, which may be empty or a URL, goes through
 // [FileOrURL], which returns an error instead. The result is the shape a
 // [Resolver] returns, so a resolver that builds the path from the document
@@ -101,7 +105,7 @@ func file(path string) (Ref, error) {
 	abs := path
 
 	switch {
-	case !hasDriveLetter(path) || runtime.GOOS == "windows":
+	case !hasDriveLetter(path) || onWindows:
 		var err error
 
 		abs, err = filepath.Abs(path)
@@ -123,11 +127,11 @@ func file(path string) (Ref, error) {
 	return Ref{key: fileURL(abs), file: path, abs: abs}, nil
 }
 
-// readFile returns the bytes of the file a [Ref] from [File] names: from
-// fsys, with name in slash form relative to its root, or from the working
-// directory when fsys is nil, at abs, the path [File] made absolute to
-// build the key, so a change of working directory between the two does
-// not put another file's bytes under the key.
+// readFile returns the bytes of the file a [Ref] from [File] names. It
+// reads name from fsys, in slash form relative to its root. When fsys is
+// nil, it reads abs, the path [File] made absolute to build the key, so
+// a change of working directory after [File] does not put another file's
+// bytes under the key.
 //
 // The root of fsys stands for the working directory, so an absolute name
 // reads relative to it, and one outside it, or a drive-letter path off
@@ -141,7 +145,7 @@ func readFile(fsys fs.FS, name, abs string) ([]byte, error) {
 	// the read would resolve the path against the working directory
 	// while the key stays the cwd-independent drive URL. One key would
 	// then name different bytes per directory, so refuse the read.
-	if hasDriveLetter(abs) && runtime.GOOS != "windows" {
+	if hasDriveLetter(abs) && !onWindows {
 		return nil, fmt.Errorf("read %s: a drive letter names no file on %s", abs, runtime.GOOS)
 	}
 
@@ -166,7 +170,7 @@ func readFile(fsys fs.FS, name, abs string) ([]byte, error) {
 }
 
 // readFS returns the bytes of name in fsys, whose root stands for the
-// working directory: a relative name reads from the root as it is, and
+// working directory. A relative name reads from the root as it is, and
 // an absolute one reads relative to the working directory. A name
 // outside the working directory, or a drive-letter path off Windows, is
 // [fs.ErrInvalid].
@@ -255,8 +259,20 @@ func fileURL(abs string) string {
 	// A Windows path starts with a drive letter, which needs a slash in front
 	// of it in a URL path, as in file:///C:/schemas/config.json.
 	if !strings.HasPrefix(p, "/") {
-		p = "/" + p
+		return (&url.URL{Scheme: "file", Path: "/" + p}).String()
 	}
 
-	return (&url.URL{Scheme: "file", Path: p}).String()
+	u := &url.URL{Scheme: "file", Path: p}
+
+	// Escape the colon when the first directory of a rooted path looks like
+	// a drive, as /C: does in /C:/schemas on a POSIX platform. The URL
+	// file:///C%3A/schemas then never shares a key with the drive path
+	// C:/schemas, because RFC 3986 tells an escaped colon from a literal one.
+	// From that URL, fileURLPath recovers the rooted path.
+	if hasDriveLetter(p[1:]) {
+		esc := u.EscapedPath()
+		u.RawPath = esc[:len("/C")] + "%3A" + esc[len("/C:"):]
+	}
+
+	return u.String()
 }

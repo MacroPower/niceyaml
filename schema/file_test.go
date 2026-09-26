@@ -102,6 +102,18 @@ func TestFile_DriveLetter(t *testing.T) {
 	require.NotErrorIs(t, err, os.ErrNotExist)
 }
 
+func TestFile_DirectoryNamedLikeADrive(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("a rooted path has no drive on Windows")
+	}
+
+	// Here /C: is an ordinary directory at the root, and a different file
+	// from the drive path C:/x, so the two must not share a cache entry.
+	assert.NotEqual(t, schema.File("C:/x").Key(), schema.File("/C:/x").Key())
+}
+
 func TestFile_URL(t *testing.T) {
 	t.Parallel()
 
@@ -128,6 +140,10 @@ func TestFile_URL(t *testing.T) {
 		"backslash drive-letter path": {
 			path: `C:\schemas\config.json`,
 			want: "file:///C:/schemas/config.json",
+		},
+		"rooted directory named like a drive": {
+			path: "/C:/schemas/config.json",
+			want: "file:///C%3A/schemas/config.json",
 		},
 		"space in path": {
 			path: "/schemas/my config.json",
