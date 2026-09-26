@@ -40,6 +40,11 @@ var ErrNoMatch = errors.New("no matching schema")
 //	        return schema.Ref{}, err
 //	    }
 //
+//	    // The document picks kind, so keep it to a file name in schemas/.
+//	    if strings.ContainsAny(kind, `/\`) {
+//	        return schema.Ref{}, fmt.Errorf("kind %q: not a schema name", kind)
+//	    }
+//
 //	    return schema.File("schemas/" + kind + ".json"), nil
 //	})
 //
@@ -161,6 +166,11 @@ type Resolver interface {
 //	    kind, err := node.Decode[string](ctx)
 //	    if err != nil {
 //	        return schema.Ref{}, err
+//	    }
+//
+//	    // The document picks kind, so keep it to a file name in schemas/.
+//	    if strings.ContainsAny(kind, `/\`) {
+//	        return schema.Ref{}, fmt.Errorf("kind %q: not a schema name", kind)
 //	    }
 //
 //	    return schema.File("schemas/" + strings.ToLower(kind) + ".json"), nil

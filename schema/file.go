@@ -77,12 +77,18 @@ const onWindows = runtime.GOOS == "windows"
 //	        return schema.Ref{}, err
 //	    }
 //
+//	    // The document picks kind, so keep it to a file name in schemas/.
+//	    if strings.ContainsAny(kind, `/\`) {
+//	        return schema.Ref{}, fmt.Errorf("kind %q: not a schema name", kind)
+//	    }
+//
 //	    return schema.File("schemas/" + kind + ".json"), nil
 //	})
 //
-// File uses the path as written, without validating it. Validate a path
-// from an untrusted source before passing it to File, to prevent path
-// traversal attacks.
+// File uses the path as written, so a path built from a document can
+// name any file the registry can read. Check such a path before passing
+// it to File, as the example does, or confine the registry with
+// [WithFS], so a path outside its file system names no file.
 func File(path string) Ref {
 	ref, err := file(path)
 	if err != nil {
