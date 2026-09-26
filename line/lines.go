@@ -85,15 +85,40 @@ func newLines(ls []*Line) Lines {
 	return Lines{lines: ls, idx: &lineIndex{}}
 }
 
-// lineIndex finds the indices that hold a [*Line] by identity. The first
-// lookup builds it, so creating [Lines] costs no map.
+// lineIndex finds the indices that hold a [*Line] by identity, and the
+// indices of the lines that hold a token. The first lookup of each kind
+// builds its maps, so creating [Lines] costs no map.
 type lineIndex struct {
 	// The first index that holds each line.
 	first map[*Line]int
+	// The indices, in ascending order, of the lines with a segment whose
+	// source or part token sits at each position.
+	byPos map[posKey][]int
 	// The next index that holds the same line as each index, or -1 at its
 	// last occurrence. Nil when no line repeats.
-	next []int
-	once sync.Once
+	next    []int
+	once    sync.Once
+	posOnce sync.Once
+}
+
+// posKey holds the fields of a [*token.Position] that
+// [segment.Segment.Contains] compares, so a token can match a segment only
+// when the keys of their positions are equal. A nil position has the zero
+// key.
+//
+//nolint:unused // The fields tell the keys of the position map apart.
+type posKey struct {
+	line, col, off int
+	set            bool
+}
+
+// keyOf returns the key of p.
+func keyOf(p *token.Position) posKey {
+	if p == nil {
+		return posKey{}
+	}
+
+	return posKey{line: p.Line, col: p.Column, off: p.Offset, set: true}
 }
 
 // build indexes ls by identity.
@@ -127,6 +152,37 @@ func (x *lineIndex) build(ls []*Line) {
 		x.next[prev] = i
 		last[l] = i
 	}
+}
+
+// buildPositions indexes ls by the positions of the source and part token
+// of every segment.
+func (x *lineIndex) buildPositions(ls []*Line) {
+	x.byPos = make(map[posKey][]int, len(ls))
+
+	for i, l := range ls {
+		for _, seg := range l.segments {
+			x.addPosition(seg.Source(), i)
+			x.addPosition(seg.Part(), i)
+		}
+	}
+}
+
+// addPosition records index i under the position of tk, once per index.
+// The indices of one line arrive together, so comparing with the last
+// index recorded under the key skips repeats.
+func (x *lineIndex) addPosition(tk *token.Token, i int) {
+	if tk == nil {
+		return
+	}
+
+	k := keyOf(tk.Position)
+
+	idxs := x.byPos[k]
+	if n := len(idxs); n > 0 && idxs[n-1] == i {
+		return
+	}
+
+	x.byPos[k] = append(idxs, i)
 }
 
 // index returns the identity index of ls, building it on first use, or
@@ -168,6 +224,20 @@ func (ls Lines) nextIndex(i int) (int, bool) {
 	}
 
 	return j, true
+}
+
+// linesAt returns the indices, in ascending order, of the lines with a
+// segment whose source or part token sits at p, building the position
+// index on first use. Every line where a token at p can match a segment is
+// among them.
+func (ls Lines) linesAt(p *token.Position) []int {
+	if ls.idx == nil {
+		return nil
+	}
+
+	ls.idx.posOnce.Do(func() { ls.idx.buildPositions(ls.lines) })
+
+	return ls.idx.byPos[keyOf(p)]
 }
 
 // Line returns the [*Line] at index i. Panics when i is outside the
@@ -399,6 +469,7 @@ func (ls Lines) ContentRanges(tk *token.Token) position.Ranges {
 
 // ranges collects one range per line that holds tk, using span to pick the
 // columns within the line. Lines where span is empty contribute no range.
+// It visits only the lines that hold a token at tk's position.
 func (ls Lines) ranges(
 	tk *token.Token, span func(*Line, *token.Token) (position.Span, bool),
 ) position.Ranges {
@@ -408,7 +479,7 @@ func (ls Lines) ranges(
 
 	var result position.Ranges
 
-	for i := range ls.lines {
+	for _, i := range ls.linesAt(tk.Position) {
 		sp, ok := span(ls.lines[i], tk)
 		if !ok || sp.Len() <= 0 {
 			continue

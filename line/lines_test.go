@@ -2180,6 +2180,118 @@ func TestLines_TokenRanges(t *testing.T) {
 		other := tokens.Tokenize("key: |\n  other\n  lines\n")
 		assert.Nil(t, lines.TokenRanges(other[len(other)-1]))
 	})
+
+	t.Run("ranges name indices in the collection", func(t *testing.T) {
+		t.Parallel()
+
+		// The two content lines of a block scalar, collected in reverse
+		// order.
+		src := line.NewLines(tokens.Tokenize("key: |\n  line1\n  line2\n"))
+		reversed := line.Collect(src.Line(2), src.Line(1))
+		block := src.TokenAt(position.New(1, 2))
+
+		// Two sections whose line numbers jump from 11 to 40, so the line
+		// numbers of the tokens differ from the indices of their lines.
+		gappedTks := token.Tokens{}
+
+		for _, tk := range tokens.Tokenize("key1: value1\nkey2: value2\n") {
+			tk.Position.Line += 9
+			gappedTks.Add(tk)
+		}
+
+		for _, tk := range tokens.Tokenize("key3: |\n  a\n  b\n") {
+			tk.Position.Line += 39
+			gappedTks.Add(tk)
+		}
+
+		gapped := line.NewLines(gappedTks)
+		require.Equal(t, 5, gapped.Len())
+		require.Equal(t, 40, gapped.Line(2).Number())
+
+		tcs := map[string]struct {
+			lines       line.Lines
+			tk          *token.Token
+			wantToken   position.Ranges
+			wantContent position.Ranges
+		}{
+			"collected lexer token": {
+				lines: reversed,
+				tk:    block,
+				wantToken: position.Ranges{
+					position.NewRange(position.New(0, 0), position.New(0, 7)),
+					position.NewRange(position.New(1, 0), position.New(1, 7)),
+				},
+				wantContent: position.Ranges{
+					position.NewRange(position.New(0, 2), position.New(0, 7)),
+					position.NewRange(position.New(1, 2), position.New(1, 7)),
+				},
+			},
+			"collected part token": {
+				lines: reversed,
+				tk:    src.Line(1).Token(0),
+				wantToken: position.Ranges{
+					position.NewRange(position.New(1, 0), position.New(1, 7)),
+				},
+				wantContent: position.Ranges{
+					position.NewRange(position.New(1, 2), position.New(1, 7)),
+				},
+			},
+			"collected copy of a token": {
+				lines: reversed,
+				tk:    block.Clone(),
+				wantToken: position.Ranges{
+					position.NewRange(position.New(0, 0), position.New(0, 7)),
+					position.NewRange(position.New(1, 0), position.New(1, 7)),
+				},
+				wantContent: position.Ranges{
+					position.NewRange(position.New(0, 2), position.New(0, 7)),
+					position.NewRange(position.New(1, 2), position.New(1, 7)),
+				},
+			},
+			"gapped lexer token": {
+				lines: gapped,
+				tk:    gapped.TokenAt(position.New(3, 2)),
+				wantToken: position.Ranges{
+					position.NewRange(position.New(3, 0), position.New(3, 3)),
+					position.NewRange(position.New(4, 0), position.New(4, 3)),
+				},
+				wantContent: position.Ranges{
+					position.NewRange(position.New(3, 2), position.New(3, 3)),
+					position.NewRange(position.New(4, 2), position.New(4, 3)),
+				},
+			},
+			"gapped part token": {
+				lines: gapped,
+				tk:    gapped.Line(4).Token(0),
+				wantToken: position.Ranges{
+					position.NewRange(position.New(4, 0), position.New(4, 3)),
+				},
+				wantContent: position.Ranges{
+					position.NewRange(position.New(4, 2), position.New(4, 3)),
+				},
+			},
+			"gapped copy of a token": {
+				lines: gapped,
+				tk:    gapped.TokenAt(position.New(1, 6)).Clone(),
+				wantToken: position.Ranges{
+					position.NewRange(position.New(1, 5), position.New(1, 12)),
+				},
+				wantContent: position.Ranges{
+					position.NewRange(position.New(1, 6), position.New(1, 12)),
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				require.NotNil(t, tc.tk)
+				assert.Equal(t, tc.wantToken, tc.lines.TokenRanges(tc.tk))
+				assert.Equal(t, tc.wantContent, tc.lines.ContentRanges(tc.tk))
+			})
+		}
+	})
 }
 
 func TestLines_String(t *testing.T) {
