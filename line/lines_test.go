@@ -2550,6 +2550,52 @@ func TestLines_View(t *testing.T) {
 		assert.Equal(t, []int{1, 2}, indices)
 	})
 
+	t.Run("All yields each line once in content order", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			spans []position.Span
+			want  []int
+		}{
+			"overlapping": {
+				spans: []position.Span{position.NewSpan(0, 2), position.NewSpan(1, 3)},
+				want:  []int{0, 1, 2},
+			},
+			"out of order": {
+				spans: []position.Span{position.NewSpan(2, 3), position.NewSpan(0, 1)},
+				want:  []int{0, 2},
+			},
+			"repeated": {
+				spans: []position.Span{position.NewSpan(1, 2), position.NewSpan(1, 2)},
+				want:  []int{1},
+			},
+			"only empty spans": {
+				spans: []position.Span{position.NewSpan(1, 1), position.NewSpan(2, 2)},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				lines := line.NewLines(tokens.Tokenize(input))
+
+				var got, fromView []int
+
+				for i := range lines.All(tc.spans...) {
+					got = append(got, i)
+				}
+
+				for i := range line.NewView(lines).All(tc.spans...) {
+					fromView = append(fromView, i)
+				}
+
+				assert.Equal(t, tc.want, got)
+				assert.Equal(t, fromView, got)
+			})
+		}
+	})
+
 	t.Run("All yields the lines of the collection", func(t *testing.T) {
 		t.Parallel()
 
@@ -2572,6 +2618,59 @@ func TestLines_View(t *testing.T) {
 		}
 
 		assert.Equal(t, input, sb.String())
+	})
+
+	t.Run("Runes yields each rune once in content order", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			ranges []position.Range
+			want   []position.Position
+		}{
+			"overlapping": {
+				ranges: []position.Range{
+					position.NewRange(position.New(0, 0), position.New(0, 3)),
+					position.NewRange(position.New(0, 1), position.New(0, 4)),
+				},
+				want: []position.Position{
+					position.New(0, 0), position.New(0, 1), position.New(0, 2), position.New(0, 3),
+				},
+			},
+			"reverse line order": {
+				ranges: []position.Range{
+					position.NewRange(position.New(2, 0), position.New(2, 2)),
+					position.NewRange(position.New(0, 0), position.New(0, 2)),
+				},
+				want: []position.Position{
+					position.New(0, 0), position.New(0, 1), position.New(2, 0), position.New(2, 1),
+				},
+			},
+			"reverse column order on one line": {
+				ranges: []position.Range{
+					position.NewRange(position.New(1, 3), position.New(1, 5)),
+					position.NewRange(position.New(1, 0), position.New(1, 2)),
+				},
+				want: []position.Position{
+					position.New(1, 0), position.New(1, 1), position.New(1, 3), position.New(1, 4),
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				lines := line.NewLines(tokens.Tokenize(input))
+
+				var got []position.Position
+
+				for pos := range lines.Runes(tc.ranges...) {
+					got = append(got, pos)
+				}
+
+				assert.Equal(t, tc.want, got)
+			})
+		}
 	})
 
 	t.Run("CRLF endings do not count toward width or runes", func(t *testing.T) {

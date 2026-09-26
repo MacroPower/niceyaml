@@ -199,11 +199,13 @@ func (ls Lines) Width() int {
 	return maxWidth
 }
 
-// All returns an iterator over lines within the given spans.
+// All returns an iterator over the lines within any of the given spans, in
+// content order and each once whatever order the spans come in and however
+// they overlap. Without spans, All yields every line.
 //
-// Without spans, All yields every line. Each iteration yields the
-// 0-indexed line index and the [*Line] at that index. All clamps
-// spans to the available lines.
+// Each iteration yields the 0-indexed line index and the [*Line] at that
+// index. A span reaching outside the collection selects the lines it does
+// hold.
 func (ls Lines) All(spans ...position.Span) iter.Seq2[int, *Line] {
 	return func(yield func(int, *Line) bool) {
 		if len(spans) == 0 {
@@ -216,11 +218,8 @@ func (ls Lines) All(spans ...position.Span) iter.Seq2[int, *Line] {
 			return
 		}
 
-		for _, span := range spans {
-			start := max(0, span.Start)
-			end := min(len(ls.lines), span.End)
-
-			for i := start; i < end; i++ {
+		for _, s := range mergeSpans(spans, len(ls.lines)) {
+			for i := s.Start; i < s.End; i++ {
 				if !yield(i, ls.lines[i]) {
 					return
 				}
@@ -229,13 +228,15 @@ func (ls Lines) All(spans ...position.Span) iter.Seq2[int, *Line] {
 	}
 }
 
-// Runes returns an iterator over runes within the given ranges.
+// Runes returns an iterator over the runes within any of the given ranges,
+// in content order and each once whatever order the ranges come in and
+// however they overlap. Without ranges, Runes yields every rune.
 //
-// Without ranges, Runes yields every rune. Each iteration yields a
-// [position.Position] and the rune at that position. The iteration includes
-// line endings as a single '\n', as [Line.Runes] does, so a newline
-// occupies the column after the last visible rune whether the source used LF
-// or CRLF, and columns match [Line.Width].
+// Each iteration yields a [position.Position] and the rune at that
+// position. The iteration includes line endings as a single '\n', as
+// [Line.Runes] does, so a newline occupies the column after the last
+// visible rune whether the source used LF or CRLF, and columns match
+// [Line.Width].
 func (ls Lines) Runes(ranges ...position.Range) iter.Seq2[position.Position, rune] {
 	return func(yield func(position.Position, rune) bool) {
 		if len(ranges) == 0 {
@@ -248,12 +249,18 @@ func (ls Lines) Runes(ranges ...position.Range) iter.Seq2[position.Position, run
 			return
 		}
 
-		for _, rng := range ranges {
-			startLine := max(0, rng.Start.Line)
-			endLine := min(len(ls.lines)-1, rng.End.Line)
+		// A range holds runes only on the lines from its start line through
+		// its end line, so merging those line spans visits each line that
+		// any range touches once, in content order. Capping the end line
+		// first keeps the span end from overflowing.
+		spans := make([]position.Span, len(ranges))
+		for j, rng := range ranges {
+			spans[j] = position.NewSpan(rng.Start.Line, min(rng.End.Line, len(ls.lines)-1)+1)
+		}
 
-			for i := startLine; i <= endLine; i++ {
-				if !ls.yieldRunes(i, &rng, yield) {
+		for _, s := range mergeSpans(spans, len(ls.lines)) {
+			for i := s.Start; i < s.End; i++ {
+				if !ls.yieldRunes(i, ranges, yield) {
 					return
 				}
 			}
@@ -262,13 +269,15 @@ func (ls Lines) Runes(ranges ...position.Range) iter.Seq2[position.Position, run
 }
 
 // yieldRunes yields every rune of the line at index lineIdx as a position.
-// When rng is non-nil, it yields only the runes inside it. Returns false when
-// yield stops the iteration.
-func (ls Lines) yieldRunes(lineIdx int, rng *position.Range, yield func(position.Position, rune) bool) bool {
+// When ranges is not empty, it yields only the runes inside one of them.
+// Returns false when yield stops the iteration.
+func (ls Lines) yieldRunes(lineIdx int, ranges []position.Range, yield func(position.Position, rune) bool) bool {
 	for col, r := range ls.lines[lineIdx].Runes() {
 		pos := position.New(lineIdx, col)
 
-		if rng != nil && !rng.Contains(pos) {
+		if len(ranges) > 0 && !slices.ContainsFunc(ranges, func(rng position.Range) bool {
+			return rng.Contains(pos)
+		}) {
 			continue
 		}
 
