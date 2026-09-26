@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/goccy/go-yaml/ast"
 	"github.com/stretchr/testify/assert"
@@ -845,6 +847,104 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 			assert.Contains(t, err.Error(), tc.err)
 		})
 	}
+}
+
+func TestNormalizeJSON(t *testing.T) {
+	t.Parallel()
+
+	// NormalizeJSON copies a map or slice only when a !!binary or
+	// !!timestamp value sits somewhere under it, and it never writes into
+	// the caller's data. Each input builds a fresh value, so a second call
+	// yields the original to compare against.
+	stamp := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
+
+	tcs := map[string]struct {
+		input func() any
+		want  any
+	}{
+		"plain nested containers": {
+			input: func() any {
+				return map[string]any{
+					"list": []any{1, "x"},
+					"map":  map[string]any{"ok": true},
+				}
+			},
+			want: map[string]any{
+				"list": []any{1, "x"},
+				"map":  map[string]any{"ok": true},
+			},
+		},
+		"binary two levels deep beside a plain map": {
+			input: func() any {
+				return map[string]any{
+					"outer":   map[string]any{"b": []byte("hi")},
+					"sibling": map[string]any{"k": "v"},
+				}
+			},
+			want: map[string]any{
+				"outer":   map[string]any{"b": "aGk="},
+				"sibling": map[string]any{"k": "v"},
+			},
+		},
+		"timestamp in a slice beside a plain map": {
+			input: func() any {
+				return []any{stamp, map[string]any{"k": "v"}}
+			},
+			want: []any{"2024-01-02T03:04:05Z", map[string]any{"k": "v"}},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			input := tc.input()
+			got := schema.NormalizeJSON(input)
+			require.Equal(t, tc.want, got)
+			assert.Equal(t, tc.input(), input)
+			assertCopiedOnChange(t, input, got)
+		})
+	}
+}
+
+// assertCopiedOnChange asserts that each map and slice in input comes
+// back at the same place in got as the same container when nothing under
+// it holds a []byte or time.Time, and as a different one otherwise. It
+// reports whether input holds either type.
+func assertCopiedOnChange(t *testing.T, input, got any) bool {
+	t.Helper()
+
+	changed := false
+
+	switch v := input.(type) {
+	case []byte, time.Time:
+		return true
+
+	case map[string]any:
+		out, ok := got.(map[string]any)
+		require.True(t, ok, "got %T for a map", got)
+
+		for key, elem := range v {
+			changed = assertCopiedOnChange(t, elem, out[key]) || changed
+		}
+
+	case []any:
+		out, ok := got.([]any)
+		require.True(t, ok, "got %T for a slice", got)
+		require.Len(t, out, len(v))
+
+		for i, elem := range v {
+			changed = assertCopiedOnChange(t, elem, out[i]) || changed
+		}
+
+	default:
+		return false
+	}
+
+	same := reflect.ValueOf(input).Pointer() == reflect.ValueOf(got).Pointer()
+	assert.Equal(t, !changed, same, "whether %v comes back as the same container", input)
+
+	return changed
 }
 
 func TestSchema_AliasExpansion(t *testing.T) {

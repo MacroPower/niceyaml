@@ -17,6 +17,9 @@ var (
 
 	// ReadFile exposes readFile to the external test package.
 	ReadFile = readFile
+
+	// NormalizeJSON exposes normalizeJSON to the external test package.
+	NormalizeJSON = normalizeJSON
 )
 
 // HTTPClient returns the client r fetches schemas with.

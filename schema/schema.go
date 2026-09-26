@@ -5,8 +5,10 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -522,30 +524,73 @@ func contentNode(node ast.Node) ast.Node {
 // 3339 text. It walks maps and slices so a tagged scalar anywhere in a
 // document stays validatable. Every other value comes back unchanged,
 // non-finite floats included, since the validator treats those as numbers.
+//
+// A map or slice that holds no !!binary or !!timestamp comes back as the
+// same container, and one that does comes back as a copy, so
+// normalizeJSON never writes into the caller's data. Handing the
+// validator the caller's own containers is safe because
+// [jsonschema.Validator.Validate] only reads its instance and keeps no
+// reference to it.
 func normalizeJSON(data any) any {
+	out, _ := normalize(data)
+
+	return out
+}
+
+// normalize is [normalizeJSON] that also reports whether the value it
+// returns differs from data.
+func normalize(data any) (any, bool) {
 	switch v := data.(type) {
 	case []byte:
-		return base64.StdEncoding.EncodeToString(v)
+		return base64.StdEncoding.EncodeToString(v), true
 	case time.Time:
-		return v.Format(time.RFC3339Nano)
+		return v.Format(time.RFC3339Nano), true
 	case map[string]any:
-		out := make(map[string]any, len(v))
+		var out map[string]any
+
 		for key, elem := range v {
-			out[key] = normalizeJSON(elem)
+			norm, changed := normalize(elem)
+			if !changed {
+				continue
+			}
+
+			if out == nil {
+				out = maps.Clone(v)
+			}
+
+			out[key] = norm
 		}
 
-		return out
+		if out == nil {
+			return data, false
+		}
+
+		return out, true
 
 	case []any:
-		out := make([]any, len(v))
+		var out []any
+
 		for i, elem := range v {
-			out[i] = normalizeJSON(elem)
+			norm, changed := normalize(elem)
+			if !changed {
+				continue
+			}
+
+			if out == nil {
+				out = slices.Clone(v)
+			}
+
+			out[i] = norm
 		}
 
-		return out
+		if out == nil {
+			return data, false
+		}
+
+		return out, true
 
 	default:
-		return data
+		return data, false
 	}
 }
 
