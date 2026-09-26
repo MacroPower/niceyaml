@@ -4113,6 +4113,44 @@ func TestSourceError_TreeBranches(t *testing.T) {
 		assert.Equal(t, "|-- 1:4: $.a: bad a\n`-- 2:4: $.b: bad b", report(err))
 	})
 
+	t.Run("a join in a named source names it once", func(t *testing.T) {
+		t.Parallel()
+
+		// Each branch names its own source, so the join puts no name in
+		// front of them, whichever source it binds to.
+		named := func(name string) *niceyaml.Source {
+			return niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n", niceyaml.WithName(name))
+		}
+
+		src := named("f.yaml")
+		err := yamltest.Bind(t, src, errors.Join(
+			yamltest.Bind(t, src, badA),
+			yamltest.Bind(t, src, badB),
+		))
+		assert.Equal(t, "f.yaml:1:4: $.a: bad a\nf.yaml:2:4: $.b: bad b", err.Error())
+
+		err = yamltest.Bind(t, named("c.yaml"), errors.Join(
+			yamltest.Bind(t, named("a.yaml"), badA),
+			yamltest.Bind(t, named("b.yaml"), badB),
+		))
+		assert.Equal(t, "a.yaml:1:4: $.a: bad a\nb.yaml:2:4: $.b: bad b", err.Error())
+
+		// Only the first line can take the name, so a join that leads
+		// with a binding, even one nested in another join, puts no name
+		// in front, and a join that leads with an unbound branch does.
+		err = yamltest.Bind(t, src, errors.Join(yamltest.Bind(t, src, badA), badB))
+		assert.Equal(t, "f.yaml:1:4: $.a: bad a\n$.b: bad b", err.Error())
+
+		err = yamltest.Bind(t, src, errors.Join(
+			errors.Join(yamltest.Bind(t, src, badA), badB),
+			badC,
+		))
+		assert.Equal(t, "f.yaml:1:4: $.a: bad a\n$.b: bad b\n$.c: bad c", err.Error())
+
+		err = yamltest.Bind(t, src, errors.Join(badB, yamltest.Bind(t, src, badA)))
+		assert.Equal(t, "f.yaml: $.b: bad b\nf.yaml:1:4: $.a: bad a", err.Error())
+	})
+
 	t.Run("every multi-error binds the same way", func(t *testing.T) {
 		t.Parallel()
 

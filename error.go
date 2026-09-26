@@ -851,6 +851,45 @@ func isBound(err error) bool {
 	}
 }
 
+// leadsWithBinding reports whether the first line of the message of err
+// comes from a binding, which puts the name or position of its own
+// source there. The walk follows the cause chain of err as [isBound]
+// does. At an error that unwraps to several, the walk continues with its
+// first branch that is not nil, since that branch supplies the first
+// line of the text of an [errors.Join].
+func leadsWithBinding(err error) bool {
+	for cur := err; ; {
+		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
+		case *SourceError:
+			return x != nil
+
+		case *Error:
+			if x == nil || x.hasLocation() || len(x.nested()) > 0 {
+				return false
+			}
+
+			cur = x.err
+
+		case interface{ Unwrap() error }:
+			cur = x.Unwrap()
+
+		case interface{ Unwrap() []error }:
+			cur = nil
+
+			for _, branch := range x.Unwrap() {
+				if !isNothing(branch) {
+					cur = branch
+
+					break
+				}
+			}
+
+		default:
+			return false
+		}
+	}
+}
+
 // anchor is the error along a cause chain that carries the location, and
 // the location it carries, with the base of every Error from [Rebase]
 // above it joined in front of its path, or the zero locus for a
@@ -1174,8 +1213,10 @@ func (e *SourceError) Errors() []*SourceError {
 // diagnostic that editors and build tools link to the line. An error
 // without a location, or one whose location does not resolve, has no
 // position to add, and the name then stands alone in front as "name: msg",
-// so an error from one file of many still says which file; without a name
-// the message comes back as it is.
+// so an error from one file of many still says which file. The message
+// comes back as it is when the source has no name, and when the first
+// line of the message comes from a binding, which puts the name or
+// position of its own source there already.
 //
 // The message is the text of the bound error, which runs over several
 // lines when that text does, as the text of an [errors.Join] and a
@@ -1202,7 +1243,7 @@ func (e *SourceError) Error() string {
 	case e.locErr == nil:
 		return prefix(formatPosition(name, e.loc.pos), msg)
 
-	case name != "":
+	case name != "" && !leadsWithBinding(e.err):
 		return prefix(name+":", msg)
 
 	default:
