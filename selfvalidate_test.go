@@ -586,6 +586,56 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		require.EqualError(t, err, "1:13: $.ports[1]: port out of range")
 	})
 
+	t.Run("a byte-sized leaf type validates itself", func(t *testing.T) {
+		t.Parallel()
+
+		type withLevels struct {
+			Levels []level `yaml:"levels"`
+		}
+
+		type withFixed struct {
+			Fixed [2]level `yaml:"fixed"`
+		}
+
+		type withData struct {
+			Data []byte `yaml:"data"`
+		}
+
+		tcs := map[string]struct {
+			target any
+			input  string
+			want   string
+		}{
+			"slice": {
+				target: &withLevels{},
+				input:  "levels: [1, 9]\n",
+				want:   "1:13: $.levels[1]: level above 5",
+			},
+			"array": {
+				target: &withFixed{},
+				input:  "fixed: [1, 9]\n",
+				want:   "1:12: $.fixed[1]: level above 5",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				err := dd.DecodeInto(t.Context(), tc.target)
+				require.EqualError(t, err, tc.want)
+			})
+		}
+
+		// The bytes of a plain []byte hold nothing to validate.
+		dd := yamltest.FirstDocument(t, "data: [1, 9]\n")
+
+		_, err := dd.Decode[withData](t.Context())
+		require.NoError(t, err)
+	})
+
 	t.Run("a value that decodes itself validates itself alone", func(t *testing.T) {
 		t.Parallel()
 
@@ -732,6 +782,17 @@ type port int
 func (p port) Validate() error {
 	if p < 0 || p > 65535 {
 		return fmt.Errorf("port out of range")
+	}
+
+	return nil
+}
+
+// level is a byte-sized scalar that validates itself.
+type level uint8
+
+func (l level) Validate() error {
+	if l > 5 {
+		return niceyaml.NewError("level above 5")
 	}
 
 	return nil
