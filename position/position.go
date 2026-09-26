@@ -11,7 +11,7 @@ import (
 
 // Position represents a 0-indexed line and column location.
 //
-// Note that it is not simply an offset of [token.Position]s. Rather, it
+// Note that it is not an offset of [token.Position] values. Rather, it
 // represents the absolute line and column in a document, including in cases
 // where multiple instances of the same token exist (e.g. in diffs).
 //

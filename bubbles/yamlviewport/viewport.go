@@ -33,7 +33,7 @@ type Searcher interface {
 	Load(lines line.Lines) Index
 }
 
-// Index finds the [position.Range]s that match a search string in the lines
+// Index finds each [position.Range] that matches a search string in the lines
 // it was built from.
 //
 // See [finder.Index] for an implementation.
@@ -217,7 +217,7 @@ func New(opts ...Option) Model {
 // A zero Model has no printer, keymap, or searcher. It counts no rows, so
 // [Model.View] returns "" and both scroll offsets stay at 0. Searching needs
 // the searcher that [New] creates, so a zero Model finds no match for any
-// term. Construct every Model with [New] and its [Option]s.
+// term. Construct every Model with [New] and any [Option] values.
 //
 // # Rows
 //

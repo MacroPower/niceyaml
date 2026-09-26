@@ -26,7 +26,7 @@ const wrapOnCharacters = " /-"
 //
 // It accepts a [line.View], such as the view of a niceyaml Source, and
 // renders its YAML tokens as styled terminal output using
-// [lipgloss.Style]s, with customizable gutters, annotations, styled
+// [lipgloss.Style] values, with customizable gutters, annotations, styled
 // overlays, and word wrapping. The package documentation covers each of
 // these.
 //
