@@ -72,15 +72,19 @@ func (d TokenDiff) String() string {
 //
 // Use [CompareTokenSlices] to create a TokensDiff.
 type TokensDiff struct {
-	Diffs         []TokenDiff // Per-token [TokenDiff] values (only populated if counts match).
-	WantCount     int         // Length of want slice.
-	GotCount      int         // Length of got slice.
-	CountMismatch bool        // True if slice lengths differ.
+	Diffs     []TokenDiff // Per-token [TokenDiff] values (only populated if counts match).
+	WantCount int         // Length of want slice.
+	GotCount  int         // Length of got slice.
+}
+
+// CountMismatch reports whether the want and got slices differ in length.
+func (d TokensDiff) CountMismatch() bool {
+	return d.WantCount != d.GotCount
 }
 
 // Equal returns true if all tokens are equal.
 func (d TokensDiff) Equal() bool {
-	if d.CountMismatch {
+	if d.CountMismatch() {
 		return false
 	}
 
@@ -99,7 +103,7 @@ func (d TokensDiff) String() string {
 		return "token slices equal"
 	}
 
-	if d.CountMismatch {
+	if d.CountMismatch() {
 		return fmt.Sprintf("token count mismatch: want %d, got %d", d.WantCount, d.GotCount)
 	}
 
@@ -191,9 +195,8 @@ func CompareTokens(want, got *token.Token) TokenDiff {
 func CompareTokenSlices(want, got token.Tokens) TokensDiff {
 	if len(want) != len(got) {
 		return TokensDiff{
-			CountMismatch: true,
-			WantCount:     len(want),
-			GotCount:      len(got),
+			WantCount: len(want),
+			GotCount:  len(got),
 		}
 	}
 

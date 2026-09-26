@@ -534,7 +534,7 @@ func TestCompareTokenSlices(t *testing.T) {
 
 		diff := yamltest.CompareTokenSlices(want, got)
 		assert.False(t, diff.Equal())
-		assert.True(t, diff.CountMismatch)
+		assert.True(t, diff.CountMismatch())
 		assert.Equal(t, 1, diff.WantCount)
 		assert.Equal(t, 2, diff.GotCount)
 		assert.Contains(t, diff.String(), "count mismatch")
@@ -790,5 +790,17 @@ func TestTokensDiff_String(t *testing.T) {
 		assert.Contains(t, str, "token 1")
 		assert.Contains(t, str, "token 2")
 		assert.NotContains(t, str, "token 0") // Equal token not shown.
+	})
+
+	t.Run("counts that differ", func(t *testing.T) {
+		t.Parallel()
+
+		diff := yamltest.TokensDiff{
+			WantCount: 1,
+			GotCount:  2,
+		}
+
+		assert.False(t, diff.Equal())
+		assert.Contains(t, diff.String(), "token count mismatch: want 1, got 2")
 	})
 }
