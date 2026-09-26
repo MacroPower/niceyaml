@@ -31,7 +31,7 @@ func validateCmd() *cobra.Command {
 			}
 
 			// Build registry once for all files to enable cross-file schema caching.
-			reg, err := buildRegistry(schemaRef)
+			reg, err := buildRegistry(cmd.Context(), schemaRef)
 			if err != nil {
 				return err
 			}
@@ -110,9 +110,12 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) er
 
 // buildRegistry creates a schema registry based on CLI flags.
 //
-// When schemaRef is set, it is the only resolver, so every document
-// validates against it. The schema ref resolves relative to the current
-// working directory.
+// When schemaRef is set, buildRegistry loads and compiles that schema once,
+// before the command reads any file, and the compiled schema is the only
+// resolver, so every document validates against it. A schema that cannot
+// load or compile fails the command with one "--schema:" error. The schema
+// ref resolves relative to the current working directory, and a $ref inside
+// the schema resolves relative to the schema's own file or URL.
 //
 // Otherwise the registry matches on schema directives first, and a
 // directive's reference resolves relative to its own YAML file. A document
@@ -121,8 +124,7 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) er
 // document that reaches it, and a file it cannot fetch the catalog for
 // reports that in the file's error. Schema validation is optional here, so
 // a document that no resolver claims passes rather than failing the file.
-func buildRegistry(schemaRef string) (*schema.Registry, error) {
-	// A loader applies to every document, so the CLI schema needs no matcher.
+func buildRegistry(ctx context.Context, schemaRef string) (*schema.Registry, error) {
 	// Resolve relative to current working directory. If cwd fails, use ".".
 	if schemaRef != "" {
 		cwd, err := os.Getwd()
@@ -135,7 +137,19 @@ func buildRegistry(schemaRef string) (*schema.Registry, error) {
 			return nil, fmt.Errorf("--schema: %w", err)
 		}
 
-		return schema.NewRegistry(schema.WithResolvers(ref)), nil
+		// A registry caches only the schemas it compiles, so with the Ref as
+		// its resolver, the registry would load a broken schema again for
+		// every document. Compiling through Registry.Schema, rather than
+		// Compile on the loaded bytes, lets a $ref in the schema resolve
+		// against the schema's own file or URL.
+		s, err := schema.NewRegistry().Schema(ctx, ref)
+		if err != nil {
+			return nil, fmt.Errorf("--schema: %w", err)
+		}
+
+		// The compiled schema names itself for every document, so it needs
+		// no matcher, and the registry validates with it as it is.
+		return schema.NewRegistry(schema.WithResolvers(s)), nil
 	}
 
 	return schema.NewRegistry(

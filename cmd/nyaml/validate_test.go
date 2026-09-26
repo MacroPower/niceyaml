@@ -3,9 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -112,6 +115,92 @@ func TestValidateFileRoutesOnAbsolutePath(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, path, got)
 	assert.Contains(t, err.Error(), rel+":1:1: ")
+}
+
+func TestValidateCmdSchemaError(t *testing.T) {
+	t.Parallel()
+
+	// A --schema that cannot load or compile fails the command once,
+	// before it reads any file, however many documents the files hold.
+	tcs := map[string]struct {
+		err error
+		// Contents of the schema file. With neither this nor url set, the
+		// reference names a file that does not exist.
+		content string
+		// Serves the schema from a server that answers every request
+		// with a 500.
+		url bool
+	}{
+		"missing file": {
+			err: schema.ErrLoad,
+		},
+		"invalid JSON": {
+			content: `{"type": 12`,
+			err:     schema.ErrCompile,
+		},
+		"URL fails": {
+			url: true,
+			err: schema.ErrLoad,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+
+			var fetches atomic.Int32
+
+			ref := filepath.Join(dir, "schema.json")
+
+			switch {
+			case tc.url:
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					fetches.Add(1)
+					w.WriteHeader(http.StatusInternalServerError)
+				}))
+				t.Cleanup(srv.Close)
+
+				ref = srv.URL + "/schema.json"
+
+			case tc.content != "":
+				require.NoError(t, os.WriteFile(ref, []byte(tc.content), 0o600))
+			}
+
+			// Three documents across two files, so a schema loaded per
+			// document would report three times.
+			yamlPaths := []string{filepath.Join(dir, "one.yaml"), filepath.Join(dir, "two.yaml")}
+			require.NoError(t, os.WriteFile(yamlPaths[0], []byte("a: 1\n"), 0o600))
+			require.NoError(t, os.WriteFile(yamlPaths[1], []byte("a: 1\n---\nb: 2\n"), 0o600))
+
+			out := &bytes.Buffer{}
+
+			cmd := validateCmd()
+			cmd.SilenceErrors = true
+			cmd.SilenceUsage = true
+			cmd.SetOut(out)
+			cmd.SetErr(out)
+			cmd.SetArgs(append([]string{"--schema", ref}, yamlPaths...))
+
+			err := cmd.Execute()
+			require.ErrorIs(t, err, tc.err)
+
+			msg := err.Error()
+			assert.True(t, strings.HasPrefix(msg, "--schema: "), msg)
+			assert.Equal(t, 1, strings.Count(msg, tc.err.Error()), msg)
+
+			for _, yamlPath := range yamlPaths {
+				assert.NotContains(t, msg, yamlPath)
+			}
+
+			assert.Empty(t, out.String())
+
+			if tc.url {
+				assert.Equal(t, int32(1), fetches.Load())
+			}
+		})
+	}
 }
 
 func TestValidateCmdOutput(t *testing.T) {
