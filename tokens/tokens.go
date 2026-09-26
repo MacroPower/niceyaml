@@ -530,17 +530,13 @@ func SplitDocuments(tks token.Tokens) iter.Seq2[int, token.Tokens] {
 			current token.Tokens
 		)
 
-		yieldDoc := func(doc token.Tokens) bool {
-			return yield(docIdx, doc)
-		}
-
 		for _, tk := range tks {
 			if tk == nil {
 				continue
 			}
 
 			if tk.Type == token.DocumentHeaderType && len(current) > 0 {
-				if !yieldDoc(current) {
+				if !yield(docIdx, current) {
 					return
 				}
 
@@ -551,7 +547,7 @@ func SplitDocuments(tks token.Tokens) iter.Seq2[int, token.Tokens] {
 			current = append(current, tk)
 
 			if tk.Type == token.DocumentEndType {
-				if !yieldDoc(current) {
+				if !yield(docIdx, current) {
 					return
 				}
 
@@ -561,9 +557,7 @@ func SplitDocuments(tks token.Tokens) iter.Seq2[int, token.Tokens] {
 		}
 
 		if len(current) > 0 {
-			if !yieldDoc(current) {
-				return
-			}
+			yield(docIdx, current)
 		}
 	}
 }
