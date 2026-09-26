@@ -202,6 +202,16 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // Holding the node lets Validate spell each key in a violation's path as
 // the source does, so a key the decoder respells, such as the hexadecimal
 // 0x10 for the member name 16, still names its member.
+//
+// The node also shows which !!timestamp values the source wrote as a bare
+// date. Validate hands the schema each of those as an RFC 3339 full-date,
+// so !!timestamp 2001-12-14 matches format "date" as the untagged
+// 2001-12-14 does. Where Validate cannot tell which scalar a timestamp
+// came from, the timestamp keeps the date-time spelling that
+// [Schema.ValidateValue] gives it. That holds behind an alias. It also
+// holds under a mapping, at any depth, with a merge key, an alias key, or
+// a key that is no scalar at or after the member leading to the
+// timestamp. Such a key may set a member of the same name.
 func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 	data, err := n.Decode[any](ctx)
 	if err != nil {
@@ -220,10 +230,13 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 // ValidateValue first converts the YAML-native values the JSON Schema
 // validator does not accept into the JSON spelling of the same data,
 // anywhere in the value. A !!binary becomes its base64 text and a
-// !!timestamp its RFC 3339 text. The [yaml.MapSlice] a decode with
-// [yaml.UseOrderedMap] yields for each mapping becomes a map with the same
-// members, and where two items share a key, the later one wins, as it does
-// in a decode into a map.
+// !!timestamp its RFC 3339 date-time text, even for a timestamp the
+// source wrote as a bare date, since a [time.Time] does not record that.
+// [Schema.Validate] reads the source and spells such a timestamp as a
+// full-date where it can. The [yaml.MapSlice] a decode with
+// [yaml.UseOrderedMap] yields for each mapping becomes a map with the
+// same members, and where two items share a key, the later one wins, as
+// it does in a decode into a map.
 //
 // Returns nil when data conforms. On a constraint violation, returns a
 // [*niceyaml.Error]. A single violation carries its YAML path on the error
@@ -253,7 +266,8 @@ func (s *Schema) ValidateValue(ctx context.Context, data any) error {
 // validate is [Schema.ValidateValue] with the node data was decoded from,
 // which [Schema.Validate] has and a caller of ValidateValue does not. A
 // violation at a key the decoder respells, such as the hexadecimal 0x10,
-// needs the node to spell the key in its path as the source does.
+// needs the node to spell the key in its path as the source does, and a
+// !!timestamp needs it to show whether the source wrote only a date.
 func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) error {
 	// Both normalizeJSON and the validator read a shared value again at
 	// every use, so the check runs before either of them.
@@ -262,7 +276,7 @@ func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) error
 		return err
 	}
 
-	err = s.compiled.Validate(ctx, normalizeJSON(data))
+	err = s.compiled.Validate(ctx, normalizeJSON(data, rootOf(n)))
 	if err == nil {
 		return nil
 	}
@@ -552,34 +566,58 @@ func elementNode(node ast.Node, index int) ast.Node {
 // memberNodes returns the key and value nodes of the member whose key
 // decodes to name, or nil nodes when the node is no mapping or holds no
 // such member. When several members decode to name, memberNodes returns
-// the last, which is the member whose value the decode keeps. A tree built
-// by hand may hold a typed nil where the parser always puts a node, which
-// holds no member either.
+// the last, which is the member whose value the decode keeps.
 func memberNodes(node ast.Node, name string) (ast.Node, ast.Node) {
-	var members []*ast.MappingValueNode
-
-	switch n := contentNode(node).(type) {
-	case *ast.MappingNode:
-		if n != nil {
-			members = n.Values
-		}
-
-	case *ast.MappingValueNode:
-		if n != nil {
-			members = []*ast.MappingValueNode{n}
-		}
-
-	default:
-		return nil, nil
-	}
-
-	for _, member := range slices.Backward(members) {
+	for _, member := range slices.Backward(mappingMembers(node)) {
 		if key, ok := decodedKey(member.Key); ok && key == name {
 			return member.Key, member.Value
 		}
 	}
 
 	return nil, nil
+}
+
+// keptMembers returns the value node of each member of the mapping node
+// holds, by the name [decodedKey] gives its key, or an empty map for any
+// other node. A decode sets the members in order, so where two members
+// share a name, the map holds the value of the later one, which the decode
+// keeps. A key with no name, such as a merge key or an alias, may set a
+// member of any name, so the map leaves out every member before the last
+// such key.
+func keptMembers(node ast.Node) map[string]ast.Node {
+	kept := map[string]ast.Node{}
+
+	for _, member := range slices.Backward(mappingMembers(node)) {
+		name, ok := decodedKey(member.Key)
+		if !ok {
+			break
+		}
+
+		if _, found := kept[name]; !found {
+			kept[name] = member.Value
+		}
+	}
+
+	return kept
+}
+
+// mappingMembers returns the members of the mapping node holds, or nil
+// for any other node. A tree built by hand may hold a typed nil where the
+// parser always puts a node, which holds no member either.
+func mappingMembers(node ast.Node) []*ast.MappingValueNode {
+	switch n := contentNode(node).(type) {
+	case *ast.MappingNode:
+		if n != nil {
+			return n.Values
+		}
+
+	case *ast.MappingValueNode:
+		if n != nil {
+			return []*ast.MappingValueNode{n}
+		}
+	}
+
+	return nil
 }
 
 // decodedKey returns the member name a decode gives the key node, with
@@ -686,14 +724,17 @@ func contentNode(node ast.Node) ast.Node {
 
 // normalizeJSON converts the YAML-native values a decode produces that the
 // JSON Schema validator does not accept into the JSON spellings of the
-// same data. A !!binary becomes its base64 text and a !!timestamp its RFC
-// 3339 text. A [yaml.MapSlice], which a decode with [yaml.UseOrderedMap]
-// yields for each mapping, becomes a map with the same members, and a
-// later item replaces an earlier one with the same key, as a decode into
-// a map does. It walks maps, slices, and ordered mappings so such a value
-// anywhere in a document stays validatable. Every other value comes back
-// unchanged, non-finite floats included, since the validator treats those
-// as numbers.
+// same data. A !!binary becomes its base64 text. A !!timestamp becomes an
+// RFC 3339 full-date, such as 2001-12-14, when the scalar in root it was
+// decoded from holds only a date, and an RFC 3339 date-time otherwise.
+// Root is the node data was decoded from, and without it every timestamp
+// becomes a date-time. A [yaml.MapSlice], which a decode with
+// [yaml.UseOrderedMap] yields for each mapping, becomes a map with the
+// same members, and a later item replaces an earlier one with the same
+// key, as a decode into a map does. It walks maps, slices, and ordered
+// mappings so such a value anywhere in a document stays validatable.
+// Every other value comes back unchanged, non-finite floats included,
+// since the validator treats those as numbers.
 //
 // A map or slice that holds none of these values comes back as the same
 // container, and one that does comes back as a copy. An ordered mapping
@@ -701,25 +742,48 @@ func contentNode(node ast.Node) ast.Node {
 // into the caller's data. Handing the validator the caller's own
 // containers is safe because [jsonschema.Validator.Validate] only reads
 // its instance and keeps no reference to it.
-func normalizeJSON(data any) any {
-	out, _ := normalize(data)
+func normalizeJSON(data any, root ast.Node) any {
+	w := normalizer{
+		members: map[ast.Node]map[string]ast.Node{},
+		nodes:   []ast.Node{root},
+	}
+
+	out, _ := w.normalize(data)
 
 	return out
 }
 
+// normalizer walks a value for [normalizeJSON]. It records the path from
+// the top of the value down to the value it visits, and looks up the node
+// in root that the path leads to only when it reaches a timestamp. It
+// keeps each node it finds while the walk stays under that node, and it
+// keeps the named members of each mapping it reads. So the lookups step
+// down root at most once for each value the walk visits, and read each
+// mapping at most once.
+type normalizer struct {
+	// The result of [keptMembers] for each mapping node the lookups have
+	// stepped through.
+	members map[ast.Node]map[string]ast.Node
+	path    []jsonschema.Segment
+	// The node each prefix of path leads to in root, as far down path as
+	// the lookups have gone. The first is root, and nodes[i] is the node
+	// path[:i] leads to.
+	nodes []ast.Node
+}
+
 // normalize is [normalizeJSON] that also reports whether the value it
 // returns differs from data.
-func normalize(data any) (any, bool) {
+func (w *normalizer) normalize(data any) (any, bool) {
 	switch v := data.(type) {
 	case []byte:
 		return base64.StdEncoding.EncodeToString(v), true
 	case time.Time:
-		return v.Format(time.RFC3339Nano), true
+		return timestampText(v, w.node()), true
 	case map[string]any:
 		var out map[string]any
 
 		for key, elem := range v {
-			norm, changed := normalize(elem)
+			norm, changed := w.child(jsonschema.Segment{Key: key}, elem)
 			if !changed {
 				continue
 			}
@@ -741,7 +805,7 @@ func normalize(data any) (any, bool) {
 		var out []any
 
 		for i, elem := range v {
-			norm, changed := normalize(elem)
+			norm, changed := w.child(jsonschema.Segment{Index: i, IsIndex: true}, elem)
 			if !changed {
 				continue
 			}
@@ -763,8 +827,9 @@ func normalize(data any) (any, bool) {
 		out := make(map[string]any, len(v))
 
 		for _, item := range v {
-			norm, _ := normalize(item.Value)
-			out[mapItemKey(item.Key)] = norm
+			key := mapItemKey(item.Key)
+			norm, _ := w.child(jsonschema.Segment{Key: key}, item.Value)
+			out[key] = norm
 		}
 
 		return out, true
@@ -772,6 +837,102 @@ func normalize(data any) (any, bool) {
 	default:
 		return data, false
 	}
+}
+
+// child normalizes elem, the member or element of the visited value that
+// seg names.
+func (w *normalizer) child(seg jsonschema.Segment, elem any) (any, bool) {
+	w.path = append(w.path, seg)
+	norm, changed := w.normalize(elem)
+	w.path = w.path[:len(w.path)-1]
+
+	// The walk leaves elem, so it drops the nodes it found for elem and
+	// below it.
+	w.nodes = w.nodes[:min(len(w.nodes), len(w.path)+1)]
+
+	return norm, changed
+}
+
+// node returns the node in root that the visited value was decoded from.
+// It returns nil when root is nil and when no node in root holds the
+// value, as under an alias, whose content sits under its anchor, and at a
+// member name [keptMembers] leaves out.
+func (w *normalizer) node() ast.Node {
+	for len(w.nodes) <= len(w.path) {
+		parent := w.nodes[len(w.nodes)-1]
+		seg := w.path[len(w.nodes)-1]
+
+		var next ast.Node
+
+		if seg.IsIndex {
+			next = elementNode(parent, seg.Index)
+		} else {
+			next = w.member(parent, seg.Key)
+		}
+
+		w.nodes = append(w.nodes, next)
+	}
+
+	return w.nodes[len(w.path)]
+}
+
+// member returns the value node that [keptMembers] finds for name in the
+// mapping node holds, or nil when it finds none.
+func (w *normalizer) member(node ast.Node, name string) ast.Node {
+	node = contentNode(node)
+
+	members, ok := w.members[node]
+	if !ok {
+		members = keptMembers(node)
+		w.members[node] = members
+	}
+
+	return members[name]
+}
+
+// dateOnlyLayout is the layout go-yaml uses to parse a !!timestamp that
+// holds only a date. It accepts a month or a day of one digit, as in
+// 2001-1-2.
+const dateOnlyLayout = "2006-1-2"
+
+// timestampText returns the RFC 3339 text of t, the value of a !!timestamp
+// decoded from node. When the string scalar under the tag holds only a
+// date, and that date is t, the text is a full-date such as 2001-12-14.
+// Any other node gives a date-time, and so does a nil node, since t alone
+// does not show whether the source wrote only a date.
+func timestampText(t time.Time, node ast.Node) string {
+	text, ok := stringText(node)
+	if ok {
+		// A second tag under the !!timestamp tag, such as !!int, changes
+		// the value the decode parses, so the text must also give t.
+		date, err := time.Parse(dateOnlyLayout, text)
+		if err == nil && date.Equal(t) {
+			return t.Format(time.DateOnly)
+		}
+	}
+
+	return t.Format(time.RFC3339Nano)
+}
+
+// stringText returns the text of the string scalar under the anchors and
+// tags of node, and reports whether node holds one. A block scalar gives
+// its content without the header, as a decode reads it. A tree built by
+// hand may hold a typed nil where the parser always puts a node, which
+// holds no text.
+func stringText(node ast.Node) (string, bool) {
+	switch n := contentNode(node).(type) {
+	case *ast.StringNode:
+		if n != nil {
+			return n.Value, true
+		}
+
+	case *ast.LiteralNode:
+		if n != nil && n.Value != nil {
+			return n.Value.Value, true
+		}
+	}
+
+	return "", false
 }
 
 // mapItemKey returns the member name a decode into a map gives the key of

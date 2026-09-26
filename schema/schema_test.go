@@ -816,11 +816,16 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 	// YAML decodes !!binary into []byte and !!timestamp into time.Time,
 	// neither of which the JSON Schema validator accepts. The validator
 	// converts them to their JSON spellings, so a tagged scalar does not
-	// suppress every other constraint in the document.
+	// suppress every other constraint in the document. A !!timestamp the
+	// source wrote as a bare date becomes a full-date, the spelling the same
+	// date has without the tag. Where the source does not show which scalar
+	// a timestamp came from, as behind an alias or a merge key, the
+	// timestamp becomes a date-time.
 	tcs := map[string]struct {
 		schema string
 		input  string
 		err    string
+		opts   []niceyaml.SourceOption
 	}{
 		"binary scalar": {
 			schema: `{
@@ -840,6 +845,140 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 				d: !!timestamp 2024-01-01T00:00:00Z
 			`),
 		},
+		"date-only timestamp matches format date": {
+			schema: `{
+				"type": "object",
+				"properties": {"d": {"type": "string", "format": "date"}}
+			}`,
+			input: stringtest.Input(`
+				d: !!timestamp 2001-12-14
+			`),
+		},
+		"date-only timestamp is no date-time": {
+			schema: `{
+				"type": "object",
+				"properties": {"d": {"type": "string", "format": "date-time"}}
+			}`,
+			input: stringtest.Input(`
+				d: !!timestamp 2001-12-14
+			`),
+			err: `1:16: $.d: string does not match format "date-time"`,
+		},
+		"midnight date-time timestamp keeps its time": {
+			schema: `{
+				"type": "object",
+				"properties": {"d": {"type": "string", "format": "date-time"}}
+			}`,
+			input: stringtest.Input(`
+				d: !!timestamp 2001-12-14T00:00:00Z
+			`),
+		},
+		"date-only timestamp in a sequence": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"d": {
+						"type": "array",
+						"items": {"type": "string", "format": "date"}
+					}
+				}
+			}`,
+			input: stringtest.Input(`
+				d: [!!timestamp 2001-12-14]
+			`),
+		},
+		"date-only block scalar timestamp matches format date": {
+			schema: `{
+				"type": "object",
+				"properties": {"d": {"type": "string", "format": "date"}}
+			}`,
+			input: stringtest.Input(`
+				d: !!timestamp >-
+				  2001-12-14
+			`),
+		},
+		"repeated key keeps the later midnight date-time": {
+			schema: `{
+				"type": "object",
+				"properties": {"d": {"type": "string", "format": "date-time"}}
+			}`,
+			input: stringtest.Input(`
+				d: !!timestamp 2001-12-14
+				d: !!timestamp 2001-12-14T00:00:00Z
+			`),
+			opts: []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+		},
+		"repeated key keeps the later date": {
+			schema: `{
+				"type": "object",
+				"properties": {"d": {"type": "string", "format": "date"}}
+			}`,
+			input: stringtest.Input(`
+				d: !!timestamp 2001-12-14T00:00:00Z
+				d: !!timestamp 2001-12-14
+			`),
+			opts: []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+		},
+		"tagged key keeps the later midnight date-time": {
+			// The !!null tag makes the key x name the member null.
+			schema: `{
+				"type": "object",
+				"properties": {"null": {"type": "string", "format": "date-time"}}
+			}`,
+			input: stringtest.Input(`
+				null: !!timestamp 2001-12-14
+				!!null x: !!timestamp 2001-12-14T00:00:00Z
+			`),
+		},
+		"alias key keeps the later midnight date-time": {
+			// The alias key names the member d, as its anchored value does.
+			schema: `{
+				"type": "object",
+				"properties": {"d": {"type": "string", "format": "date-time"}}
+			}`,
+			input: stringtest.Input(`
+				a: &k d
+				d: !!timestamp 2001-12-14
+				*k : !!timestamp 2001-12-14T00:00:00Z
+			`),
+		},
+		"merge key keeps the merged midnight date-time": {
+			// The merge key sets d after the member written before it.
+			schema: `{
+				"type": "object",
+				"properties": {"d": {"type": "string", "format": "date-time"}}
+			}`,
+			input: stringtest.Input(`
+				base: &base
+				  d: !!timestamp 2001-12-14T00:00:00Z
+				d: !!timestamp 2001-12-14
+				<<: *base
+			`),
+		},
+		"date-only timestamp behind an alias is a date-time": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"a": {"type": "string", "format": "date"},
+					"d": {"type": "string", "format": "date-time"}
+				}
+			}`,
+			input: stringtest.Input(`
+				a: &x !!timestamp 2001-12-14
+				d: *x
+			`),
+		},
+		"date under a second tag keeps the date-time": {
+			// The !!int tag hands the !!timestamp tag a number rather than
+			// the text, so the decode yields the zero time.
+			schema: `{
+				"type": "object",
+				"properties": {"d": {"type": "string", "format": "date-time"}}
+			}`,
+			input: stringtest.Input(`
+				d: !!timestamp !!int 2001-12-14
+			`),
+		},
 		"binary scalar violating a constraint": {
 			schema: `{
 				"type": "object",
@@ -857,10 +996,16 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v := compileSchema(t, []byte(tc.schema))
-			doc := yamltest.FirstDocument(t, tc.input)
+			v, err := schema.Compile(t.Context(), []byte(tc.schema),
+				schema.WithJSONSchemaOptions(jsonschema.WithFormats(true)))
+			require.NoError(t, err)
 
-			err := doc.Validate(t.Context(), v)
+			// FirstDocument takes no source options, and a repeated key
+			// needs one.
+			doc, err := niceyaml.NewSourceFromString(tc.input, tc.opts...).Document()
+			require.NoError(t, err)
+
+			err = doc.Validate(t.Context(), v)
 			if tc.err == "" {
 				require.NoError(t, err)
 
@@ -1074,7 +1219,7 @@ func TestNormalizeJSON(t *testing.T) {
 			t.Parallel()
 
 			input := tc.input()
-			got := schema.NormalizeJSON(input)
+			got := schema.NormalizeJSON(input, nil)
 			require.Equal(t, tc.want, got)
 			assert.Equal(t, tc.input(), input)
 			assertCopiedOnChange(t, input, got)
