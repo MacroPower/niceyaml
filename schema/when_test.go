@@ -21,13 +21,11 @@ func TestWhen(t *testing.T) {
 	schemaData := []byte(`{"type": "object"}`)
 
 	tcs := map[string]struct {
-		input    string
-		wantErr  error
-		wantLoad bool
+		input   string
+		wantErr error
 	}{
 		"matcher accepts": {
-			input:    `kind: Deployment`,
-			wantLoad: true,
+			input: `kind: Deployment`,
 		},
 		"matcher rejects": {
 			input:   `kind: Service`,
