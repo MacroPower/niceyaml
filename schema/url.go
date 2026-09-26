@@ -36,16 +36,42 @@ func URL(schemaURL string) Ref {
 	return Ref{key: normalizeScheme(schemaURL), url: true}
 }
 
-// normalizeScheme lowercases the scheme of ref and leaves the rest of it
-// as written, since a URL path is case-sensitive. The registry keys its
-// cache on the URL, so one spelling means one fetch and one compile.
+// normalizeScheme lowercases the scheme at the start of ref when "://"
+// follows it, and leaves the rest of ref as written, since a URL path is
+// case-sensitive. The registry keys its cache on the URL, so one spelling
+// means one fetch and one compile. A reference that does not start with a
+// scheme and "://" comes back as written, such as one with no scheme and
+// "://" in its query, or an opaque mailto: URL.
 func normalizeScheme(ref string) string {
 	const sep = "://"
 
 	i := strings.Index(ref, sep)
-	if i < 0 {
+	if i < 0 || !isScheme(ref[:i]) {
 		return ref
 	}
 
 	return strings.ToLower(ref[:i]) + ref[i:]
+}
+
+// isScheme reports whether s is a URL scheme as RFC 3986 defines one: an
+// ASCII letter followed by letters, digits, '+', '-' or '.'. A scheme
+// holds no ':', so when a reference starts with a scheme and "://", the
+// first "://" in it follows the scheme.
+func isScheme(s string) bool {
+	if s == "" {
+		return false
+	}
+
+	for i := range len(s) {
+		c := s[i]
+
+		switch {
+		case (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'):
+		case i > 0 && ((c >= '0' && c <= '9') || c == '+' || c == '-' || c == '.'):
+		default:
+			return false
+		}
+	}
+
+	return true
 }

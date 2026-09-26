@@ -82,7 +82,10 @@ func TestURL(t *testing.T) {
 		t.Parallel()
 
 		// Every entry point shares one cache key, so URL lowercases the
-		// scheme and leaves the rest of the URL alone.
+		// scheme at the start of a reference when "://" follows it and
+		// leaves the rest of the URL alone. URL leaves any other reference
+		// as written, such as one with no scheme and "://" in its query, or
+		// an opaque mailto: URL.
 		tcs := map[string]struct {
 			ref  string
 			want string
@@ -98,6 +101,22 @@ func TestURL(t *testing.T) {
 			"uppercase https scheme": {
 				ref:  "HTTPS://Example.COM/Schema.json",
 				want: "https://Example.COM/Schema.json",
+			},
+			"custom scheme is lowercased": {
+				ref:  "S3://Bucket/Key",
+				want: "s3://Bucket/Key",
+			},
+			"no scheme with :// in query": {
+				ref:  "Example.com/Path?u=http://x",
+				want: "Example.com/Path?u=http://x",
+			},
+			"scheme-relative with :// in query": {
+				ref:  "//Example.com/Path?u=http://x",
+				want: "//Example.com/Path?u=http://x",
+			},
+			"opaque scheme with :// in query": {
+				ref:  "Mailto:User@Example.com?Body=http://x",
+				want: "Mailto:User@Example.com?Body=http://x",
 			},
 		}
 
