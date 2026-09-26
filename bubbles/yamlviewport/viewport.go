@@ -263,8 +263,10 @@ type Model struct {
 	// In ViewModeSideBySide without diff: the view of the revision on the
 	// left and nil on the right.
 	//
-	// A view a Revision hands out is the caller's, so the model never
-	// decorates a base. It decorates a clone.
+	// A base is the model's own copy of the view the Revision hands out, or
+	// the view of the diff. Decorate adds the search highlights to a fresh
+	// clone of it, so each term or selection starts without the highlights
+	// of the last.
 	baseLeft, baseRight *line.View
 	// The base views with the search highlights added: fresh clones of
 	// baseLeft and baseRight that decorate takes on every change of the term
@@ -814,8 +816,7 @@ func (m *Model) refreshSearch() {
 
 // decorate takes a fresh clone of each base view and adds the search
 // highlights of the current matches and selection to it. A fresh clone
-// carries no highlight of the last term or the last selection, and the
-// base, which may be the caller's view, stays as it is.
+// carries no highlight of the last term or the last selection.
 func (m *Model) decorate() {
 	m.left = m.baseLeft.Clone()
 	m.right = m.baseRight.Clone()
@@ -1077,8 +1078,9 @@ func (m *Model) revision(index int) Revision {
 }
 
 // getDisplayLines returns the base view to display for the current
-// revision and [DiffMode]: a fresh unified diff, or the view the revision
-// hands out, which is the caller's and which the model never decorates.
+// revision and [DiffMode]: a fresh unified diff, or a copy of the view the
+// revision hands out. The copy holds the marks the view carried when the
+// content changed, so marks the caller adds later stay off the display.
 // Returns nil when there is no revision.
 func (m *Model) getDisplayLines() *line.View {
 	rev, needsDiff := m.resolveRevisionSource()
@@ -1090,7 +1092,7 @@ func (m *Model) getDisplayLines() *line.View {
 		return nil
 	}
 
-	return rev.View()
+	return rev.View().Clone()
 }
 
 // getDiffResult returns the [diff.Result] between the base revision for the

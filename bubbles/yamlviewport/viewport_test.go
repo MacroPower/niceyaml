@@ -4767,6 +4767,74 @@ func TestViewport_RevisionKeepsDecoration(t *testing.T) {
 	assert.Len(t, view.Overlays(1), 1)
 }
 
+func TestViewport_RevisionIgnoresLaterMarks(t *testing.T) {
+	t.Parallel()
+
+	// A mark the caller adds after setting the revision shows once the
+	// revision is set again, and no search action brings it in sooner.
+	tcs := map[string]struct {
+		act func(*yamlviewport.Model)
+	}{
+		"new term": {
+			act: func(m *yamlviewport.Model) { m.SetSearchTerm("other") },
+		},
+		"term without match": {
+			act: func(m *yamlviewport.Model) { m.SetSearchTerm("zzz") },
+		},
+		"same term": {
+			act: func(m *yamlviewport.Model) { m.SetSearchTerm("value") },
+		},
+		"search next": {
+			act: func(m *yamlviewport.Model) { m.SearchNext() },
+		},
+		"search previous": {
+			act: func(m *yamlviewport.Model) { m.SearchPrevious() },
+		},
+		"clear search": {
+			act: func(m *yamlviewport.Model) { m.ClearSearch() },
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := printer.New(
+				printer.WithStyles(yamltest.NewXMLStyles(
+					yamltest.XMLStyleInclude(kind.GenericHighlight),
+				)),
+				printer.WithContainerStyle(lipgloss.NewStyle()),
+				printer.WithGutter(printer.NoGutter),
+			)
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(p))
+			m.SetWidth(80)
+			m.SetHeight(10)
+
+			source := niceyaml.NewSourceFromString("key: value\nother: value\n", niceyaml.WithName(name))
+			view := source.View()
+
+			m.SetRevision(yamlviewport.NewRevision(name, view))
+			m.SetSearchTerm("value")
+			require.Equal(t, 2, m.SearchCount())
+
+			_ = m.View()
+			rows := m.TotalRowCount()
+
+			view.Annotate(0, line.Annotation{Content: "late", Placement: line.Below})
+
+			tc.act(&m)
+
+			assert.NotContains(t, m.View(), "^ late")
+			assert.Equal(t, rows, m.TotalRowCount())
+
+			m.SetRevision(yamlviewport.NewRevision(name, view))
+
+			assert.Contains(t, m.View(), "^ late")
+		})
+	}
+}
+
 func TestViewport_RevisionNavigationResetsSearch(t *testing.T) {
 	t.Parallel()
 
