@@ -1724,12 +1724,11 @@ func TestError_NestedLocationWithoutMessage(t *testing.T) {
 	assert.NotContains(t, got, "^ ")
 }
 
-func TestError_calculateNestedLineRange(t *testing.T) {
+func TestError_NestedErrorExcerpt(t *testing.T) {
 	t.Parallel()
 
-	// These tests exercise the nested line range indirectly through
-	// rendered output. The line range determines which lines are
-	// visible in the output.
+	// These subtests check which source lines the excerpt shows for
+	// nested errors.
 
 	t.Run("single nested error shows correct context lines", func(t *testing.T) {
 		t.Parallel()
@@ -1759,9 +1758,11 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 		assert.Contains(t, got, "line2")
 		assert.Contains(t, got, "line3")
 		assert.Contains(t, got, "line4")
+		assert.NotContains(t, got, "line1")
+		assert.NotContains(t, got, "line5")
 	})
 
-	t.Run("multiple nested errors on different lines expands range", func(t *testing.T) {
+	t.Run("nested errors on distant lines show separate hunks", func(t *testing.T) {
 		t.Parallel()
 
 		source := stringtest.Input(`
@@ -1787,16 +1788,20 @@ func TestError_calculateNestedLineRange(t *testing.T) {
 			),
 		))
 
-		got := trimLines(renderContext(err, 0))
-
-		// Should show the full range from line1 to line6.
-		assert.Contains(t, got, "line1")
-		assert.Contains(t, got, "line6")
-		assert.Contains(t, got, "error at line1")
-		assert.Contains(t, got, "error at line6")
+		assert.Equal(t, stringtest.JoinLF(
+			"validation error",
+			"├── 1:1: $.line1~: error at line1",
+			"└── 6:1: $.line6~: error at line6",
+			"",
+			"<genericError>line1</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>a</literalString>",
+			"<textError>^ error at line1</textError>",
+			"<uiSeparator>...</uiSeparator>",
+			"<genericError>line6</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>f</literalString>",
+			"<textError>^ error at line6</textError>",
+		), trimLines(renderContext(err, 0)))
 	})
 
-	t.Run("nested errors on same line do not expand range", func(t *testing.T) {
+	t.Run("nested errors on one line share an annotation", func(t *testing.T) {
 		t.Parallel()
 
 		source := stringtest.Input(`
