@@ -10,8 +10,9 @@
 //	# yaml-language-server: $schema=./config.schema.json
 //	name: example
 //
-// The directive "# yaml-language-server: $schema=none" turns validation off
-// for its document, as it does in yaml-language-server.
+// The IntelliJ short form "# $schema: ./config.schema.json" names a schema
+// too. The directive "# yaml-language-server: $schema=none" turns validation
+// off for its document, as it does in yaml-language-server.
 //
 // Use [ParseDirective] to extract the schema path from a single comment, and
 // [ParseDocumentDirective] to find the directive in one document's tokens.

@@ -15,13 +15,18 @@ import (
 )
 
 var (
-	// Pattern of a yaml-language-server schema directive, such as
-	// "yaml-language-server: $schema=./schema.json". The marker must open
-	// the comment, after optional whitespace, so a comment that mentions
-	// the marker mid-sentence is not a directive. The reference runs to
-	// the first whitespace, as yaml-language-server reads it, so a remark
-	// after the reference is not part of it.
-	schemaDirectiveRE = regexp.MustCompile(`^\s*yaml-language-server:\s*\$schema=(\S+)`)
+	// Pattern of the marker that opens a schema directive after optional
+	// whitespace. The marker is "yaml-language-server:", with optional
+	// whitespace before the colon, or the IntelliJ "$schema:" short form.
+	// A comment that mentions a marker mid-sentence is not a directive.
+	modelineRE = regexp.MustCompile(`^\s*(?:yaml-language-server\s*:|\$schema:)`)
+
+	// Pattern of the schema reference in a directive, after "$schema=" or
+	// "$schema:". Like yaml-language-server, ParseDirective searches the
+	// whole comment for it, so other settings may come before it. The
+	// reference runs to the first whitespace, so a remark after the
+	// reference is not part of it.
+	schemaValueRE = regexp.MustCompile(`\$schema(?:=|:[ \t]*)(\S+)`)
 
 	// ErrNoDirective indicates a document has no schema directive.
 	// It wraps [ErrNoMatch], so [Registry] moves on to the next resolver.
@@ -57,15 +62,21 @@ type ParsedDirective struct {
 // The comment text should not include the '#' prefix.
 // Example input: " yaml-language-server: $schema=./schema.json".
 //
-// The "yaml-language-server:" marker must open the comment, after any
-// leading whitespace; a comment that mentions the marker after other text
-// is not a directive. The reference is the text after "$schema=" up to the
-// first whitespace, as yaml-language-server reads it, so a remark after
-// the reference on the same line is not part of it, and a path cannot
-// contain spaces. A directive with nothing after the equals sign yields
-// nil.
+// The marker is "yaml-language-server:", with optional whitespace before
+// the colon, or the IntelliJ "$schema:" short form. The marker must open
+// the comment, after any leading whitespace; a comment that mentions the
+// marker after other text is not a directive. The reference follows
+// "$schema=" or "$schema:" anywhere in the comment, so other settings may
+// precede it. It runs to the first whitespace, as yaml-language-server
+// reads it, so a remark after the reference on the same line is not part
+// of it, and a path cannot contain spaces. A directive that names no
+// reference yields nil.
 func ParseDirective(comment string) *ParsedDirective {
-	matches := schemaDirectiveRE.FindStringSubmatch(comment)
+	if !modelineRE.MatchString(comment) {
+		return nil
+	}
+
+	matches := schemaValueRE.FindStringSubmatch(comment)
 	if len(matches) < 2 {
 		return nil
 	}

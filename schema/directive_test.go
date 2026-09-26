@@ -54,6 +54,42 @@ func TestParseDirective(t *testing.T) {
 			input: " yaml-language-server:   $schema=schema.json",
 			want:  &schema.ParsedDirective{Schema: "schema.json"},
 		},
+		"space before colon": {
+			input: " yaml-language-server : $schema=./s.json",
+			want:  &schema.ParsedDirective{Schema: "./s.json"},
+		},
+		"colon value form": {
+			input: " yaml-language-server: $schema: ./s.json",
+			want:  &schema.ParsedDirective{Schema: "./s.json"},
+		},
+		"other settings before schema": {
+			input: " yaml-language-server: foo=bar $schema=./s.json",
+			want:  &schema.ParsedDirective{Schema: "./s.json"},
+		},
+		"short form": {
+			input: " $schema: ./s.json",
+			want:  &schema.ParsedDirective{Schema: "./s.json"},
+		},
+		"short form without space": {
+			input: " $schema:./s.json",
+			want:  &schema.ParsedDirective{Schema: "./s.json"},
+		},
+		"short form with equals is not a directive": {
+			input: " $schema=./s.json",
+			want:  nil,
+		},
+		"short form after other text": {
+			input: " see $schema: ./s.json",
+			want:  nil,
+		},
+		"short form with nothing after the colon": {
+			input: " $schema:   ",
+			want:  nil,
+		},
+		"none is returned as written": {
+			input: " yaml-language-server: $schema=none",
+			want:  &schema.ParsedDirective{Schema: "none"},
+		},
 		"trailing whitespace": {
 			input: " yaml-language-server: $schema=./schema.json   ",
 			want:  &schema.ParsedDirective{Schema: "./schema.json"},
@@ -149,6 +185,10 @@ func TestParseDocumentDirective(t *testing.T) {
 		},
 		"only comment with directive": {
 			input: "# yaml-language-server: $schema=./schema.json\n",
+			want:  map[int]string{0: "./schema.json"},
+		},
+		"short form directive": {
+			input: "# $schema: ./schema.json\nkey: value\n",
 			want:  map[int]string{0: "./schema.json"},
 		},
 		"directive with trailing spaces": {
