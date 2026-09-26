@@ -1401,6 +1401,36 @@ func TestRegistry_WithFS(t *testing.T) {
 		assert.Contains(t, err.Error(), "schemas/missing.json")
 	})
 
+	t.Run("a named pipe is invalid", func(t *testing.T) {
+		t.Parallel()
+
+		fsys := fstest.MapFS{
+			"schemas/pipe.json": &fstest.MapFile{Mode: fs.ModeNamedPipe},
+		}
+
+		reg := schema.NewRegistry(schema.WithFS(fsys))
+
+		_, err := reg.Load(t.Context(), schema.File("schemas/pipe.json"))
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorIs(t, err, fs.ErrInvalid)
+	})
+
+	t.Run("an oversize file exceeds the limit", func(t *testing.T) {
+		t.Parallel()
+
+		const maxSchemaSize = 10 * 1024 * 1024 // Must match httpfetch.MaxSize.
+
+		fsys := fstest.MapFS{
+			"schemas/big.json": &fstest.MapFile{Data: make([]byte, maxSchemaSize+1)},
+		}
+
+		reg := schema.NewRegistry(schema.WithFS(fsys))
+
+		_, err := reg.Load(t.Context(), schema.File("schemas/big.json"))
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorContains(t, err, "exceeds")
+	})
+
 	t.Run("an absolute path reads relative to the working directory", func(t *testing.T) {
 		t.Parallel()
 

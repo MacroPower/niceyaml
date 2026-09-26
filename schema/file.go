@@ -3,6 +3,7 @@ package schema
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/url"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"strings"
 
 	slashpath "path"
+
+	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 )
 
 // ErrEmptyPath reports an empty path given to [FileOrURL], which names no
@@ -41,6 +44,10 @@ var ErrEmptyPath = errors.New("schema file path is empty")
 // reference it. When a reference fails to load, a later validation that
 // reaches it loads it again. A remote schema that names a local file fails
 // to resolve, and the registry does not read that file.
+//
+// The registry reads only a regular file of at most 10 MB, the limit it
+// sets on a response from a [URL], so a path that names a directory, a
+// device, or a named pipe fails to load.
 //
 // File is for a path written in the program, so it panics on an empty
 // path, as [Loadable] panics on an empty key, and on a working directory
@@ -121,19 +128,31 @@ func readFile(fsys fs.FS, name, abs string) ([]byte, error) {
 	}
 
 	// Off Windows, a drive letter is an ordinary directory name, so
-	// os.ReadFile would read the path against the working directory
+	// the read would resolve the path against the working directory
 	// while the key stays the cwd-independent drive URL. One key would
 	// then name different bytes per directory, so refuse the read.
 	if hasDriveLetter(abs) && runtime.GOOS != "windows" {
 		return nil, fmt.Errorf("read %s: a drive letter names no file on %s", abs, runtime.GOOS)
 	}
 
-	data, err := os.ReadFile(abs) //nolint:gosec // User-provided file paths are intentional.
+	// Stat before the open, since opening a FIFO blocks until a writer
+	// opens the other end.
+	info, err := os.Stat(abs)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", abs, err)
 	}
 
-	return data, nil
+	if !info.Mode().IsRegular() {
+		return nil, notRegular(abs)
+	}
+
+	f, err := os.Open(abs) //nolint:gosec // User-provided file paths are intentional.
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", abs, err)
+	}
+	defer f.Close() //nolint:errcheck // Best-effort close.
+
+	return readBounded(f, abs)
 }
 
 // readFS returns the bytes of name in fsys, whose root stands for the
@@ -164,12 +183,59 @@ func readFS(fsys fs.FS, name string) ([]byte, error) {
 		return nil, fmt.Errorf("read %s: %w: not a path in the registry's file system", name, fs.ErrInvalid)
 	}
 
-	data, err := fs.ReadFile(fsys, fsPath)
+	// Stat before the open, as readFile does. The Stat of [os.DirFS]
+	// follows a symbolic link, so a link to a device is not regular.
+	info, err := fs.Stat(fsys, fsPath)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", name, err)
 	}
 
+	if !info.Mode().IsRegular() {
+		return nil, notRegular(name)
+	}
+
+	f, err := fsys.Open(fsPath)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", name, err)
+	}
+	defer f.Close() //nolint:errcheck // Best-effort close.
+
+	return readBounded(f, name)
+}
+
+// readBounded returns the bytes of f, the file at name. It checks again
+// that f is a regular file, since the file at the path can change after
+// the caller's check, and refuses a file over [httpfetch.MaxSize] bytes,
+// the limit a schema fetched from a URL has.
+func readBounded(f fs.File, name string) ([]byte, error) {
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", name, err)
+	}
+
+	if !info.Mode().IsRegular() {
+		return nil, notRegular(name)
+	}
+
+	// Read one byte past the limit, as [httpfetch.Get] does, so an
+	// over-size file reads as MaxSize+1 bytes.
+	data, err := io.ReadAll(io.LimitReader(f, httpfetch.MaxSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", name, err)
+	}
+
+	if int64(len(data)) > httpfetch.MaxSize {
+		return nil, fmt.Errorf("read %s: file exceeds %d bytes", name, httpfetch.MaxSize)
+	}
+
 	return data, nil
+}
+
+// notRegular returns the [fs.ErrInvalid] error for name, a path that
+// names something other than a regular file, such as a directory, a
+// device, or a named pipe.
+func notRegular(name string) error {
+	return fmt.Errorf("read %s: %w: not a regular file", name, fs.ErrInvalid)
 }
 
 // fileURL returns the file:// URL that names the absolute path abs.

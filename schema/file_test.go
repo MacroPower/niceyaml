@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -38,6 +39,39 @@ func TestFile(t *testing.T) {
 		assert.Equal(t, "file:///nonexistent/path/schema.json", url)
 		require.ErrorIs(t, err, os.ErrNotExist)
 		require.ErrorContains(t, err, "read /nonexistent/path/schema.json")
+	})
+
+	t.Run("oversize file", func(t *testing.T) {
+		t.Parallel()
+
+		const maxSchemaSize = 10 * 1024 * 1024 // Must match httpfetch.MaxSize.
+
+		// Truncate grows the file without writing its bytes.
+		path := filepath.Join(t.TempDir(), "schema.json")
+		f, err := os.Create(path)
+		require.NoError(t, err)
+		require.NoError(t, f.Truncate(maxSchemaSize+1))
+		require.NoError(t, f.Close())
+
+		_, data, err := load(t, schema.File(path))
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorContains(t, err, "exceeds")
+		assert.Nil(t, data)
+	})
+
+	t.Run("device file", func(t *testing.T) {
+		t.Parallel()
+
+		if runtime.GOOS == "windows" {
+			t.Skip("os.DevNull is a reserved device name on Windows")
+		}
+
+		// The null device reads as empty, but a device such as /dev/zero
+		// never ends, so the loader refuses every file that is not regular.
+		_, data, err := load(t, schema.File(os.DevNull))
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorIs(t, err, fs.ErrInvalid)
+		assert.Nil(t, data)
 	})
 
 	t.Run("empty path", func(t *testing.T) {

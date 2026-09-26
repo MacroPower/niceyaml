@@ -146,6 +146,8 @@ type RegistryOption func(*Registry)
 //
 // Without the option, the registry reads the working directory, with
 // each path made absolute against it, and a nil fsys keeps that.
+// Either way, the registry reads only a regular file of at most 10 MB,
+// the limit it sets on a response from a [URL].
 func WithFS(fsys fs.FS) RegistryOption {
 	return func(r *Registry) {
 		if fsys != nil {
