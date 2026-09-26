@@ -362,8 +362,7 @@ func TestTokenize(t *testing.T) {
 
 			want[last].Origin = got[last].Origin
 
-			diff := yamltest.CompareTokenSlices(want, got)
-			require.True(t, diff.Equal(), diff.String())
+			yamltest.RequireTokensEqual(t, want, got)
 		})
 	}
 }
@@ -402,8 +401,7 @@ func TestSplitDocuments(t *testing.T) {
 		require.Len(t, got, 1)
 		require.Len(t, got[0], 3)
 
-		diff := yamltest.CompareTokenSlices(input, got[0])
-		require.True(t, diff.Equal(), diff.String())
+		yamltest.RequireTokensEqual(t, input, got[0])
 	})
 
 	t.Run("nil tokens are skipped", func(t *testing.T) {
@@ -429,8 +427,7 @@ func TestSplitDocuments(t *testing.T) {
 
 				require.Len(t, got, 1)
 
-				diff := yamltest.CompareTokenSlices(want, got[0])
-				require.True(t, diff.Equal(), diff.String())
+				yamltest.RequireTokensEqual(t, want, got[0])
 			})
 		}
 	})
@@ -451,8 +448,7 @@ func TestSplitDocuments(t *testing.T) {
 		require.Len(t, got, 1)
 		require.Len(t, got[0], 4)
 
-		diff := yamltest.CompareTokenSlices(input, got[0])
-		require.True(t, diff.Equal(), diff.String())
+		yamltest.RequireTokensEqual(t, input, got[0])
 	})
 
 	t.Run("end marker closes a document", func(t *testing.T) {
@@ -475,11 +471,9 @@ func TestSplitDocuments(t *testing.T) {
 		require.Len(t, got[0], 4)
 		require.Len(t, got[1], 3)
 
-		diff := yamltest.CompareTokenSlices(input[:4], got[0])
-		require.True(t, diff.Equal(), diff.String())
+		yamltest.RequireTokensEqual(t, input[:4], got[0])
 
-		diff = yamltest.CompareTokenSlices(input[4:], got[1])
-		require.True(t, diff.Equal(), diff.String())
+		yamltest.RequireTokensEqual(t, input[4:], got[1])
 	})
 
 	t.Run("end marker followed by header", func(t *testing.T) {
@@ -521,11 +515,9 @@ func TestSplitDocuments(t *testing.T) {
 		require.Len(t, got[0], 3)
 		require.Len(t, got[1], 4)
 
-		diff0 := yamltest.CompareTokenSlices(token.Tokens{key1, colon1, value1}, got[0])
-		require.True(t, diff0.Equal(), diff0.String())
+		yamltest.RequireTokensEqual(t, token.Tokens{key1, colon1, value1}, got[0])
 
-		diff1 := yamltest.CompareTokenSlices(token.Tokens{header, key2, colon2, value2}, got[1])
-		require.True(t, diff1.Equal(), diff1.String())
+		yamltest.RequireTokensEqual(t, token.Tokens{header, key2, colon2, value2}, got[1])
 	})
 
 	t.Run("three docs with headers", func(t *testing.T) {
@@ -545,14 +537,11 @@ func TestSplitDocuments(t *testing.T) {
 
 		require.Len(t, got, 3)
 
-		diff0 := yamltest.CompareTokenSlices(token.Tokens{header1, doc1}, got[0])
-		require.True(t, diff0.Equal(), diff0.String())
+		yamltest.RequireTokensEqual(t, token.Tokens{header1, doc1}, got[0])
 
-		diff1 := yamltest.CompareTokenSlices(token.Tokens{header2, doc2}, got[1])
-		require.True(t, diff1.Equal(), diff1.String())
+		yamltest.RequireTokensEqual(t, token.Tokens{header2, doc2}, got[1])
 
-		diff2 := yamltest.CompareTokenSlices(token.Tokens{header3, doc3}, got[2])
-		require.True(t, diff2.Equal(), diff2.String())
+		yamltest.RequireTokensEqual(t, token.Tokens{header3, doc3}, got[2])
 	})
 
 	t.Run("doc with end marker", func(t *testing.T) {
@@ -571,8 +560,7 @@ func TestSplitDocuments(t *testing.T) {
 		require.Len(t, got, 1)
 		require.Len(t, got[0], 4)
 
-		diff := yamltest.CompareTokenSlices(input, got[0])
-		require.True(t, diff.Equal(), diff.String())
+		yamltest.RequireTokensEqual(t, input, got[0])
 	})
 
 	t.Run("doc end followed by new doc", func(t *testing.T) {
@@ -590,11 +578,9 @@ func TestSplitDocuments(t *testing.T) {
 
 		require.Len(t, got, 2)
 
-		diff0 := yamltest.CompareTokenSlices(token.Tokens{doc1, docEnd}, got[0])
-		require.True(t, diff0.Equal(), diff0.String())
+		yamltest.RequireTokensEqual(t, token.Tokens{doc1, docEnd}, got[0])
 
-		diff1 := yamltest.CompareTokenSlices(token.Tokens{header, doc2}, got[1])
-		require.True(t, diff1.Equal(), diff1.String())
+		yamltest.RequireTokensEqual(t, token.Tokens{header, doc2}, got[1])
 	})
 
 	t.Run("early termination at first doc", func(t *testing.T) {
@@ -617,8 +603,7 @@ func TestSplitDocuments(t *testing.T) {
 
 		require.Len(t, got, 1)
 
-		diff := yamltest.CompareTokenSlices(token.Tokens{doc1}, got[0])
-		require.True(t, diff.Equal(), diff.String())
+		yamltest.RequireTokensEqual(t, token.Tokens{doc1}, got[0])
 	})
 
 	t.Run("early termination at second doc", func(t *testing.T) {
@@ -646,11 +631,9 @@ func TestSplitDocuments(t *testing.T) {
 
 		require.Len(t, got, 2)
 
-		diff0 := yamltest.CompareTokenSlices(token.Tokens{doc1}, got[0])
-		require.True(t, diff0.Equal(), diff0.String())
+		yamltest.RequireTokensEqual(t, token.Tokens{doc1}, got[0])
 
-		diff1 := yamltest.CompareTokenSlices(token.Tokens{header1, doc2}, got[1])
-		require.True(t, diff1.Equal(), diff1.String())
+		yamltest.RequireTokensEqual(t, token.Tokens{header1, doc2}, got[1])
 	})
 
 	t.Run("early termination single doc", func(t *testing.T) {

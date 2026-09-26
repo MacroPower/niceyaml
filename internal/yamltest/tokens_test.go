@@ -1,6 +1,8 @@
 package yamltest_test
 
 import (
+	"fmt"
+	"runtime"
 	"testing"
 
 	"github.com/goccy/go-yaml/token"
@@ -564,6 +566,104 @@ func TestCompareTokenSlices(t *testing.T) {
 		diff := yamltest.CompareTokenSlices(token.Tokens{}, token.Tokens{})
 		assert.True(t, diff.Equal())
 	})
+}
+
+// recordingTB is a [testing.TB] that records a reported failure instead of
+// failing the test. Methods it does not override panic through the nil
+// embedded TB.
+type recordingTB struct {
+	testing.TB
+
+	msg    string
+	failed bool
+}
+
+func (r *recordingTB) Helper() {}
+
+// Name overrides the embedded TB because testify adds the test name to every
+// failure message when t has a Name method.
+func (r *recordingTB) Name() string {
+	return "recordingTB"
+}
+
+func (r *recordingTB) Errorf(format string, args ...any) {
+	r.failed = true
+	r.msg += fmt.Sprintf(format, args...)
+}
+
+func (r *recordingTB) FailNow() {
+	r.failed = true
+
+	runtime.Goexit()
+}
+
+func TestRequireTokensEqual(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		want token.Tokens
+		got  token.Tokens
+		msgs []string // Empty when the helper passes.
+	}{
+		"equal slices pass": {
+			want: token.Tokens{
+				yamltest.NewTokenBuilder().Value("a").Build(),
+				yamltest.NewTokenBuilder().Value("b").Build(),
+			},
+			got: token.Tokens{
+				yamltest.NewTokenBuilder().Value("a").Build(),
+				yamltest.NewTokenBuilder().Value("b").Build(),
+			},
+		},
+		"value mismatch fails": {
+			want: token.Tokens{yamltest.NewTokenBuilder().Value("a").Build()},
+			got:  token.Tokens{yamltest.NewTokenBuilder().Value("b").Build()},
+			msgs: []string{"token 0", "Value"},
+		},
+		"count mismatch fails": {
+			want: token.Tokens{yamltest.NewTokenBuilder().Build()},
+			got: token.Tokens{
+				yamltest.NewTokenBuilder().Build(),
+				yamltest.NewTokenBuilder().Build(),
+			},
+			msgs: []string{"token count mismatch"},
+		},
+		"nil got token fails": {
+			want: token.Tokens{yamltest.NewTokenBuilder().Build()},
+			got:  token.Tokens{nil},
+			msgs: []string{"token 0 got: token is nil"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			rec := &recordingTB{}
+			done := make(chan struct{})
+
+			// FailNow ends the goroutine, as it does for a real test.
+			go func() {
+				defer close(done)
+
+				yamltest.RequireTokensEqual(rec, tc.want, tc.got)
+			}()
+
+			<-done
+
+			if len(tc.msgs) == 0 {
+				assert.False(t, rec.failed, rec.msg)
+
+				return
+			}
+
+			require.True(t, rec.failed)
+
+			for _, msg := range tc.msgs {
+				assert.Contains(t, rec.msg, msg)
+			}
+		})
+	}
 }
 
 func TestDiffTokenFields(t *testing.T) {

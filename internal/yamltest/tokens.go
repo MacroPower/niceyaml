@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"testing"
 
 	"github.com/goccy/go-yaml/token"
+	"github.com/stretchr/testify/require"
 )
 
 // Names for the two sides of a token comparison.
@@ -205,6 +207,19 @@ func CompareTokenSlices(want, got token.Tokens) TokensDiff {
 		GotCount:  len(got),
 		Diffs:     diffs,
 	}
+}
+
+// RequireTokensEqual fails the test unless want and got hold the same tokens.
+// It checks both slices with [ValidateTokens] and then compares them with
+// [CompareTokenSlices], so the failure message names the token count
+// mismatch, the nil token or position, or the fields that differ.
+func RequireTokensEqual(tb testing.TB, want, got token.Tokens) {
+	tb.Helper()
+
+	require.NoError(tb, ValidateTokens(want, got))
+
+	diff := CompareTokenSlices(want, got)
+	require.True(tb, diff.Equal(), diff.String())
 }
 
 // CompareContent compares two strings for equality and returns a [ContentDiff].

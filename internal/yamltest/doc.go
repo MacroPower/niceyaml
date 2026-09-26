@@ -26,17 +26,14 @@
 //
 // When tokens differ, standard equality checks produce unhelpful output.
 //
-// This package provides pure comparison functions that return detailed diffs:
+// [RequireTokensEqual] fails the test with a detailed diff when two token
+// slices differ:
 //
-//	// Validate tokens first (length mismatch, nil tokens, nil positions)
-//	if err := yamltest.ValidateTokens(want, got); err != nil {
-//		t.Fatalf("invalid tokens: %v", err)
-//	}
+//	yamltest.RequireTokensEqual(t, want, got)
 //
-//	// Compare tokens and get diff details
-//	if diff := yamltest.CompareTokenSlices(want, got); !diff.Equal() {
-//		t.Errorf("token mismatch: %s", diff)
-//	}
+// It builds on [ValidateTokens] and [CompareTokenSlices], which stay
+// available as pure functions for tests that report differences their own
+// way.
 //
 // [ValidateTokens] returns an error wrapping [ErrTokenCountMismatch] when the
 // slice lengths differ. For a nil token or position, it returns
