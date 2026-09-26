@@ -219,11 +219,21 @@ func trees(kids []positioned) []ErrorTree {
 // carries the "line:col:" its location resolved to in front of its
 // message, without the name the parent gives already. A child that wraps
 // a binding took that binding over, so its message names the position
-// already and comes through as it is.
+// already and comes through as it is. A child that binds a join has no
+// text and gives its place to its branches, which keep the name of their
+// source when named is set or when the join is bound to another source.
 func boundChildren(bound *SourceError, named bool) []positioned {
 	var kids []positioned
 
 	for _, child := range bound.Errors() {
+		// The branches sit beside the other children, so they sort by
+		// position among them rather than under a node of their own.
+		if _, joined := joinBranches(child.Unwrap()); joined {
+			kids = append(kids, boundChildren(child, named || child.Source() != bound.Source())...)
+
+			continue
+		}
+
 		kid := positioned{src: child.Source()}
 
 		// A location the source does not hold resolved to nothing the

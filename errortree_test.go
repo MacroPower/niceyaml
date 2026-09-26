@@ -384,6 +384,44 @@ func TestErrorTree_New(t *testing.T) {
 			},
 			multiLine: true,
 		},
+		"bound nested join flattens into one forest": {
+			err: yamltest.Bind(t, source, errors.Join(errors.Join(badB()), badA())),
+			want: niceyaml.ErrorTree{
+				Children: []niceyaml.ErrorTree{
+					{Text: "f.yaml:1:4: $.a: bad a"},
+					{Text: "f.yaml:2:4: $.b: bad b"},
+				},
+			},
+		},
+		"join nested under a message gives its place to its branches": {
+			err: yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithErrors(
+				errors.Join(badB(), badA()),
+			))),
+			want: niceyaml.ErrorTree{
+				Text: "f.yaml: outer",
+				Children: []niceyaml.ErrorTree{
+					{Text: "1:4: $.a: bad a"},
+					{Text: "2:4: $.b: bad b"},
+				},
+			},
+		},
+		"nested join bound to another source names it on its branches": {
+			err: yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithErrors(
+				badA(),
+				yamltest.Bind(t, other, errors.Join(
+					niceyaml.NewError("bad c", niceyaml.AtPath(paths.Root().Child("c"))),
+					niceyaml.NewError("start", niceyaml.AtPosition(position.New(0, 0))),
+				)),
+			))),
+			want: niceyaml.ErrorTree{
+				Text: "f.yaml: outer",
+				Children: []niceyaml.ErrorTree{
+					{Text: "1:4: $.a: bad a"},
+					{Text: "g.yaml:1:1: start"},
+					{Text: "g.yaml:1:4: $.c: bad c"},
+				},
+			},
+		},
 		"bound join below a wrapper keeps the wrapper as the root": {
 			err: yamltest.Bind(t, source, fmt.Errorf("ctx: %w", errors.Join(badA(), badB()))),
 			want: niceyaml.ErrorTree{
