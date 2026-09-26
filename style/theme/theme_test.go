@@ -398,6 +398,25 @@ func TestPalette_HeadingsCarryForeground(t *testing.T) {
 	}
 }
 
+func TestBuiltin_ChromeIgnoresCommentOverride(t *testing.T) {
+	t.Parallel()
+
+	// Every built-in theme sets the chrome itself, so a program that
+	// restyles comments keeps the line numbers each theme draws.
+	comment := lipgloss.NewStyle().Foreground(lipgloss.Color("#123456")).Italic(true)
+
+	for _, th := range theme.Builtin().All() {
+		t.Run(th.Name, func(t *testing.T) {
+			t.Parallel()
+
+			got := th.Styles().With(style.Set(kind.Comment, comment))
+
+			assert.Equal(t, th.Styles().Style(kind.UILineNumber), got.Style(kind.UILineNumber))
+			assert.False(t, got.Style(kind.UILineNumber).GetItalic())
+		})
+	}
+}
+
 // countOf returns how many times name appears in names.
 func countOf(names []string, name string) int {
 	n := 0

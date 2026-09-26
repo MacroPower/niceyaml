@@ -33,6 +33,9 @@ func buildDefault() Styles {
 		base,
 		Set(kind.Comment, base.Foreground(charmtone.Oyster)),
 		Set(kind.CommentPreproc, base.Foreground(charmtone.Smoke)),
+		// The chrome takes the comment color alone, so a later Comment
+		// override leaves the gutter as it was.
+		Set(kind.UI, base.Foreground(charmtone.Oyster)),
 		Set(kind.GenericDeleted, base.Foreground(charmtone.Cherry).Background(charmtone.Toast)),
 		Set(kind.GenericInserted, base.Foreground(charmtone.Julep).Background(charmtone.Spinach)),
 		Set(kind.GenericError, base.Foreground(charmtone.Butter).Background(charmtone.Sriracha)),
