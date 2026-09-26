@@ -310,7 +310,9 @@ func (r *resolver) apply(seg segment, m match) ([]match, error) {
 		return matches, nil
 
 	case segmentRecursive:
-		return r.descend(content, seg.name, m, nil), nil
+		segs, order := slices.Clone(m.segs), slices.Clone(m.order)
+
+		return r.descend(content, seg.name, &segs, &order, nil), nil
 
 	default:
 		return nil, nil
@@ -404,20 +406,26 @@ func (r *resolver) mergeSources(value ast.Node) ([]*ast.MappingNode, error) {
 }
 
 // descend collects every mapping entry keyed name at any depth below node, in
-// document order, each with the selectors from at, the match node came
-// from, down to the entry. It looks through anchors and tags but not
-// aliases, so it visits an entry of the source at most once, at its
-// definition.
+// document order. It looks through anchors and tags but not aliases, so it
+// visits an entry of the source at most once, at its definition.
+//
+// The segs and order stacks hold the selectors and the order down to
+// node. For each entry and element it visits, descend pushes the selector
+// and the place of that step onto the stacks, and each match gets its own
+// copy of them down to its entry. Before it returns, descend cuts both
+// stacks back to the length they had when it began.
 //
 // It skips an entry whose key a later entry in its mapping repeats, and
 // everything below it, because a path through that key selects the later
 // entry. When a mapping holds several `<<` keys, descend thus visits only
 // the inline mapping of the last one, even though the decoder merges them
 // all.
-func (r *resolver) descend(node ast.Node, name string, at match, acc []match) []match {
+func (r *resolver) descend(node ast.Node, name string, segs *[]segment, order *[]int, acc []match) []match {
 	if isNilNode(node) {
 		return acc
 	}
+
+	segsDepth, orderDepth := len(*segs), len(*order)
 
 	switch n := node.(type) {
 	case *ast.MappingNode:
@@ -439,25 +447,37 @@ func (r *resolver) descend(node ast.Node, name string, at match, acc []match) []
 				continue
 			}
 
-			below := at.with(entry.Value, entry, segment{kind: segmentChild, name: key}, i)
+			*segs = append((*segs)[:segsDepth], segment{kind: segmentChild, name: key})
+			*order = append((*order)[:orderDepth], i)
 
 			if key == name {
-				acc = append(acc, below)
+				acc = append(acc, match{
+					node:  entry.Value,
+					entry: entry,
+					segs:  slices.Clone(*segs),
+					order: slices.Clone(*order),
+				})
 			}
 
-			acc = r.descend(entry.Value, name, below, acc)
+			acc = r.descend(entry.Value, name, segs, order, acc)
 		}
 
 	case *ast.SequenceNode:
 		for i, v := range n.Values {
-			acc = r.descend(v, name, at.with(v, nil, segment{kind: segmentIndex, index: i}, i), acc)
+			*segs = append((*segs)[:segsDepth], segment{kind: segmentIndex, index: i})
+			*order = append((*order)[:orderDepth], i)
+
+			acc = r.descend(v, name, segs, order, acc)
 		}
 
 	case *ast.AnchorNode:
-		acc = r.descend(n.Value, name, at, acc)
+		acc = r.descend(n.Value, name, segs, order, acc)
 	case *ast.TagNode:
-		acc = r.descend(n.Value, name, at, acc)
+		acc = r.descend(n.Value, name, segs, order, acc)
 	}
+
+	*segs = (*segs)[:segsDepth]
+	*order = (*order)[:orderDepth]
 
 	return acc
 }

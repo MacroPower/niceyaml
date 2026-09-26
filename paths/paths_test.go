@@ -2182,6 +2182,13 @@ func TestPath_Matches(t *testing.T) {
 		      a:
 		        c: 1
 		    c: 2
+		siblings:
+		  a:
+		    id: 1
+		    x:
+		      - id: 2
+		  b:
+		    id: 3
 	`))
 	file, err := source.File()
 	require.NoError(t, err)
@@ -2203,6 +2210,14 @@ func TestPath_Matches(t *testing.T) {
 		"recursive below a child": {
 			path: paths.Root().Child("spec").Recursive("name"),
 			want: []string{"$.spec.name", "$.spec.deep[0].name"},
+		},
+		"recursive gives each sibling its own path": {
+			path: paths.Root().Recursive("id"),
+			want: []string{"$.siblings.a.id", "$.siblings.a.x[0].id", "$.siblings.b.id"},
+		},
+		"recursive below a recursive match": {
+			path: paths.Root().Recursive("a").Recursive("id"),
+			want: []string{"$.siblings.a.id", "$.siblings.a.x[0].id"},
 		},
 		"single": {
 			path: paths.Root().Child("spec", "name"),
