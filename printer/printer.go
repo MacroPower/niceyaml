@@ -139,10 +139,15 @@ type Option func(*Printer)
 // Index, Number, and Flag describe the line the row belongs to. MaxNumber
 // is the number the gutter sizes its line number column for, the larger
 // of the view's largest line number and the one [WithMaxNumber] sets, so
-// every row of the view lines up. Soft marks a wrapped continuation row
-// of that line, and Annotation marks a row that holds one of its
-// annotations rather than its content, so the built-in gutters leave the
-// line number and diff marker out of it.
+// every row of the view lines up. Annotation marks a row that holds one
+// of the line's annotations rather than its content, so the built-in
+// gutters leave the line number and diff marker out of it. Soft marks a
+// row that continues the one above it. On a content row, Soft marks a
+// wrapped continuation of the line. On an annotation row, Soft marks
+// every row after the first of the line's annotations at one placement,
+// which covers the first row of a later [AnnotationRow] and a row that
+// starts at a newline in its Text. A gutter that draws a wrap marker
+// only beside wrapped content checks Annotation before Soft.
 type GutterContext struct {
 	Styles     style.Styler
 	Index      int
