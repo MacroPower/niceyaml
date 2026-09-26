@@ -41,7 +41,7 @@ task docs # Print all package docs
 
 ### Code Patterns
 
-- Functional options pattern used throughout (e.g., `PrinterOption`, `SourceOption`, `ErrorOption`).
+- Functional options pattern used throughout (e.g., `printer.Option`, `SourceOption`, `ErrorOption`).
 - 0-indexed positioning convention for `position.Position` (line and column start at 0).
 - Half-open ranges `[Start, End)` for `position.Range`.
 - Prefer consistency over performance, avoid "fast paths" that could lead to unpredictable behavior.
