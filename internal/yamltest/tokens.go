@@ -303,7 +303,7 @@ type TokenBuilder struct {
 	token *token.Token
 }
 
-// NewTokenBuilder creates a new [TokenBuilder] with default values.
+// NewTokenBuilder creates a new [*TokenBuilder] with default values.
 // All position fields start at zero.
 func NewTokenBuilder() *TokenBuilder {
 	return &TokenBuilder{
