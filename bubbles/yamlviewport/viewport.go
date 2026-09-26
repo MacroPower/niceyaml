@@ -2061,10 +2061,15 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 // blankPaneRow renders the row a side-by-side pane shows where it has run
 // out of rows, because the line wraps taller in the other pane. It is one
 // empty content row with the frame of p's container style around it, so the
-// pane keeps its border down the whole window. A container without a
-// horizontal frame gives "", as a pane of spaces would render anyway.
+// pane keeps its border down the whole window. Print pads the row out to p's
+// container width, which the side-by-side view pins to the pane width, so a
+// container without a horizontal frame gives a row of [kind.Text] spaces as
+// wide as the pane.
 func (m *Model) blankPaneRow(p *printer.Printer) string {
 	rows := splitLines(p.Print(m.left.Slice(position.NewSpan(0, 0))))
+
+	// Print renders an empty view as one content row below the top frame,
+	// so this guard is defensive.
 	if m.rows.top >= len(rows) {
 		return ""
 	}
