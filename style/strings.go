@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+
+	"go.jacobcolvin.com/niceyaml/internal/colors"
 )
 
 var (
@@ -191,6 +193,10 @@ func colorToHex(c color.Color) string {
 	if !isColorSet(c) {
 		return ""
 	}
+
+	// RGBA wraps a colorful.Color channel that lies outside the sRGB gamut,
+	// so a negative channel would encode bright. Clamp the color first.
+	c = colors.Clamped(c)
 
 	// RGBA premultiplies the channels by alpha, so a translucent color
 	// would encode darker than it is. NRGBA holds the channels as given.

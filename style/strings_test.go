@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/lucasb-eyer/go-colorful"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -262,6 +263,14 @@ func TestEncode(t *testing.T) {
 		"transparent color is unset": {
 			style: lipgloss.NewStyle().Foreground(color.NRGBA{R: 255, A: 0}),
 			want:  "",
+		},
+		"out-of-gamut color is clamped": {
+			style: lipgloss.NewStyle().Foreground(colorful.Color{R: -0.2, G: 0.5, B: 1.3}),
+			want:  "#0080ff",
+		},
+		"out-of-gamut background is clamped": {
+			style: lipgloss.NewStyle().Background(colorful.Color{R: -0.2, G: 0.5, B: 1.3}),
+			want:  "bg:#0080ff",
 		},
 		"combined style": {
 			style: lipgloss.NewStyle().

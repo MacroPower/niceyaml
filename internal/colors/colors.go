@@ -17,7 +17,7 @@ func Override(base, overlay color.Color) color.Color {
 	}
 
 	if _, visible := colorful.MakeColor(overlay); visible {
-		return clamped(overlay)
+		return Clamped(overlay)
 	}
 
 	return base
@@ -39,9 +39,9 @@ func Blend(c1, c2 color.Color) color.Color {
 	case !visible1 && !visible2:
 		return nil
 	case !visible1:
-		return clamped(c2)
+		return Clamped(c2)
 	case !visible2:
-		return clamped(c1)
+		return Clamped(c1)
 	}
 
 	return cf1.BlendLab(cf2, 0.5).Clamped()
@@ -58,13 +58,13 @@ func visible(c color.Color) (colorful.Color, bool) {
 		return colorful.Color{}, false
 	}
 
-	return colorful.MakeColor(clamped(c))
+	return colorful.MakeColor(Clamped(c))
 }
 
-// clamped returns c as it is when every channel lies in [0, 1], and c
+// Clamped returns c as it is when every channel lies in [0, 1], and c
 // clamped to the sRGB gamut otherwise. Only a [colorful.Color] can hold a
 // channel outside that range; integer channels bound every other color type.
-func clamped(c color.Color) color.Color {
+func Clamped(c color.Color) color.Color {
 	if cf, ok := c.(colorful.Color); ok && !cf.IsValid() {
 		return cf.Clamped()
 	}
