@@ -1985,15 +1985,9 @@ const sideBySideSeparator = " │ "
 
 // renderSideBySide renders the side-by-side view with two panes.
 func (m *Model) renderSideBySide(contentW, contentH int) string {
-	// Get views for both panes. The model owns both, with overlays applied.
+	// A model with no content renders an empty viewport.
 	if !m.hasContent() {
 		return m.renderContent(nil, contentW, contentH)
-	}
-
-	right := m.right
-	if right == nil {
-		// Without a diff, show the same content on both sides.
-		right = m.left
 	}
 
 	// Need room for separator plus at least 1 character per pane.
@@ -2012,7 +2006,14 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 	p := m.renderPrinter(paneWidth)
 
 	leftRows := m.trimFrame(splitLines(p.Print(m.left.Slice(window))), first, last)
-	rightRows := m.trimFrame(splitLines(p.Print(right.Slice(window))), first, last)
+
+	// Without a diff, both panes show the left content, so the right pane
+	// reuses the rows the left pane rendered.
+	rightRows := leftRows
+	if m.right != nil {
+		rightRows = m.trimFrame(splitLines(p.Print(m.right.Slice(window))), first, last)
+	}
+
 	blank := m.blankPaneRow(p)
 
 	// Get text style for padding empty areas.

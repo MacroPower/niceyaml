@@ -4671,6 +4671,52 @@ func TestViewport_SideBySidePanesShareGutterWidth(t *testing.T) {
 	assert.Contains(t, left, "k0: ")
 }
 
+// countingGutter renders line numbers and counts the gutters it renders for
+// each line number.
+type countingGutter struct {
+	renders map[int]int
+}
+
+func (g *countingGutter) Width(ctx printer.GutterContext) int {
+	return printer.LineNumberGutter.Width(ctx)
+}
+
+func (g *countingGutter) Render(ctx printer.GutterContext) string {
+	g.renders[ctx.Number]++
+
+	return printer.LineNumberGutter.Render(ctx)
+}
+
+func TestViewport_SideBySideWithoutDiffPrintsOnce(t *testing.T) {
+	t.Parallel()
+
+	// Without a diff both panes show the same content, so the view prints
+	// the window once and shows its rows in both panes.
+	gutter := &countingGutter{renders: map[int]int{}}
+	p := testPrinter().With(printer.WithGutter(gutter))
+	m := yamlviewport.New(yamlviewport.WithPrinter(p))
+	m.SetWidth(40)
+	m.SetHeight(10)
+	m.SetViewMode(yamlviewport.ViewModeSideBySide)
+	m.SetRevision(niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n"))
+	m.TotalRowCount()
+
+	clear(gutter.renders)
+
+	rows := strings.Split(m.View(), "\n")
+
+	for i, want := range []string{"a: 1", "b: 2", "c: 3"} {
+		left, right, ok := strings.Cut(ansi.Strip(rows[i]), "│")
+		require.True(t, ok, "no pane separator in %q", rows[i])
+		assert.Contains(t, left, want)
+		assert.Contains(t, right, want)
+	}
+
+	for number := 1; number <= 3; number++ {
+		assert.Equal(t, 1, gutter.renders[number], "line %d", number)
+	}
+}
+
 func TestSideBySideSearch_MatchCounting(t *testing.T) {
 	t.Parallel()
 
