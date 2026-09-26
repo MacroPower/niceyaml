@@ -42,8 +42,8 @@ type Normalizer interface {
 // in place.
 //
 // Finder uses a load-once, search-many design. [Finder.Load] reads the
-// lines once and returns an [Index] that maps character positions in the
-// loaded text back to [position.Position] values in the original lines, and
+// lines once and returns an [Index] that maps offsets in the loaded text
+// back to [position.Position] values in the original lines, and
 // [Index.Find] uses that map on every call without re-reading the lines.
 //
 // A Finder holds only its settings and never changes after [New], so it is
@@ -116,7 +116,6 @@ func WithNormalizer(n Normalizer) Option {
 func (f *Finder) Load(lines line.Lines) *Index {
 	idx := &Index{normalizer: f.normalizer}
 	idx.text, idx.posMap = f.buildTextAndPositionMap(lines)
-	idx.buildByteToRuneIndex()
 
 	return idx
 }
@@ -130,28 +129,6 @@ type Index struct {
 	normalizer Normalizer
 	posMap     *positionMap
 	text       string
-	byteToRune []int
-}
-
-// buildByteToRuneIndex builds a lookup table mapping byte offsets to rune counts.
-// This enables O(1) byte-to-rune conversion during Find instead of O(n) scanning.
-func (i *Index) buildByteToRuneIndex() {
-	if i.text == "" {
-		i.byteToRune = nil
-		return
-	}
-
-	i.byteToRune = make([]int, len(i.text)+1)
-	runeCount := 0
-
-	for b := 0; b < len(i.text); {
-		i.byteToRune[b] = runeCount
-		_, size := utf8.DecodeRuneInString(i.text[b:])
-		b += size
-		runeCount++
-	}
-
-	i.byteToRune[len(i.text)] = runeCount
 }
 
 // Find finds all occurrences of the search string in the loaded text.
@@ -190,8 +167,6 @@ func (i *Index) Find(search string) position.Ranges {
 		return nil
 	}
 
-	searchRuneCount := utf8.RuneCountInString(searchStr)
-
 	var results position.Ranges
 
 	offset := 0
@@ -204,21 +179,19 @@ func (i *Index) Find(search string) position.Ranges {
 		matchStart := offset + idx
 		matchEnd := matchStart + len(searchStr)
 
-		// Convert byte offsets to character offsets for position map lookup.
-		matchStartChar := i.byteToRune[matchStart]
-		matchEndChar := matchStartChar + searchRuneCount - 1
-
 		// A match inside the expansion of one source rune has no character
 		// of its own to start at, so skip past that rune.
-		if !i.posMap.starts(matchStartChar) {
+		if !i.posMap.starts(matchStart) {
 			_, size := utf8.DecodeRuneInString(i.text[matchStart:])
 			offset = matchStart + size
 
 			continue
 		}
 
-		startPos := i.posMap.lookup(matchStartChar)
-		endPos := i.posMap.end(matchEndChar)
+		// The last byte of the match sits at matchEnd-1, and end finds the
+		// source rune that holds it.
+		startPos := i.posMap.lookup(matchStart)
+		endPos := i.posMap.end(matchEnd - 1)
 
 		results = append(results, position.Range{Start: startPos, End: endPos})
 		offset = matchEnd
@@ -276,8 +249,6 @@ func (f *Finder) buildTextAndPositionMap(lines line.Lines) (string, *positionMap
 		return "", pm
 	}
 
-	normalizedCharIndex := 0
-
 	// Cache normalized forms per unique rune to avoid repeated normalizer calls.
 	normalizedCache := make(map[rune]string)
 
@@ -288,21 +259,21 @@ func (f *Finder) buildTextAndPositionMap(lines line.Lines) (string, *positionMap
 			normalizedCache[r] = normalized
 		}
 
-		// Record where this source rune begins in the normalized text. Every
-		// following char of the expansion resolves to the same position. A
-		// rune that normalizes to nothing, such as a combining mark, has no
+		// Record the byte offset where this source rune begins in the
+		// normalized text, so every byte of its expansion resolves to the
+		// same position. The offset comes from the builder because WriteRune
+		// writes a byte that is not valid UTF-8 as the 3-byte U+FFFD. A rune
+		// that normalizes to nothing, such as a combining mark, has no
 		// character of its own, so the rune before it on the line extends
 		// over it and a match ending there covers the whole character.
 		if normalized != "" {
-			pm.add(normalizedCharIndex, pos)
+			pm.add(sb.Len(), pos)
 		} else {
 			pm.extend(pos)
 		}
 
 		for _, nr := range normalized {
 			sb.WriteRune(nr)
-
-			normalizedCharIndex++
 		}
 	}
 
@@ -323,23 +294,23 @@ func (f *Finder) buildTextAndPositionMap(lines line.Lines) (string, *positionMap
 	return sb.String(), pm
 }
 
-// positionMap maps character indices in a concatenated string to original
+// positionMap maps byte offsets in the loaded text to original
 // [position.Position] values in the loaded lines. It holds one entry per
-// source rune whose normalized form is non-empty, at the index where that
+// source rune whose normalized form is non-empty, at the offset where that
 // form begins, in increasing order. A rune that normalizes to nothing has
 // no entry of its own and extends the entry before it on its line.
 type positionMap struct {
-	indices   []int
+	offsets   []int
 	positions []position.Position
 	// The column just past each entry's source rune and the runes after it
 	// on its line that normalize to nothing.
 	ends []int
 }
 
-// add records the character index at which a source rune begins and its
+// add records the byte offset at which a source rune begins and its
 // position.
-func (m *positionMap) add(charIndex int, pos position.Position) {
-	m.indices = append(m.indices, charIndex)
+func (m *positionMap) add(offset int, pos position.Position) {
+	m.offsets = append(m.offsets, offset)
 	m.positions = append(m.positions, pos)
 	m.ends = append(m.ends, pos.Col+1)
 }
@@ -354,11 +325,11 @@ func (m *positionMap) extend(pos position.Position) {
 	}
 }
 
-// end returns the position just past the source rune that holds the given
-// character index, past any runes after it on the line that normalize to
+// end returns the position just past the source rune that holds the byte
+// at offset, past any runes after it on the line that normalize to
 // nothing.
-func (m *positionMap) end(charIndex int) position.Position {
-	idx := m.floor(charIndex)
+func (m *positionMap) end(offset int) position.Position {
+	idx := m.floor(offset)
 	if idx < 0 {
 		return position.New(0, 1)
 	}
@@ -366,21 +337,21 @@ func (m *positionMap) end(charIndex int) position.Position {
 	return position.New(m.positions[idx].Line, m.ends[idx])
 }
 
-// floor returns the entry of the source rune that holds charIndex, the last
-// entry whose index is at most charIndex. It returns -1 when the map is
-// empty.
-func (m *positionMap) floor(charIndex int) int {
-	idx := sort.Search(len(m.indices), func(i int) bool {
-		return m.indices[i] > charIndex
+// floor returns the entry of the source rune that holds the byte at
+// offset, the last entry that begins at or before offset. It returns -1
+// when the map is empty.
+func (m *positionMap) floor(offset int) int {
+	idx := sort.Search(len(m.offsets), func(i int) bool {
+		return m.offsets[i] > offset
 	})
 
 	return idx - 1
 }
 
 // lookup finds the [position.Position] of the source rune that holds the
-// given character index.
-func (m *positionMap) lookup(charIndex int) position.Position {
-	idx := m.floor(charIndex)
+// byte at offset.
+func (m *positionMap) lookup(offset int) position.Position {
+	idx := m.floor(offset)
 	if idx < 0 {
 		return position.New(0, 0)
 	}
@@ -388,9 +359,9 @@ func (m *positionMap) lookup(charIndex int) position.Position {
 	return m.positions[idx]
 }
 
-// starts reports whether a source rune begins at the given character index.
-func (m *positionMap) starts(charIndex int) bool {
-	idx := m.floor(charIndex)
+// starts reports whether a source rune begins at the given byte offset.
+func (m *positionMap) starts(offset int) bool {
+	idx := m.floor(offset)
 
-	return idx >= 0 && m.indices[idx] == charIndex
+	return idx >= 0 && m.offsets[idx] == offset
 }

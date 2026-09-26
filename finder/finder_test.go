@@ -448,6 +448,14 @@ func TestFinder_Find_Expansion(t *testing.T) {
 				position.NewRange(position.New(0, 4), position.New(0, 5)),
 			},
 		},
+		"multibyte character between expansions": {
+			input:  "x: ß日 ß",
+			search: "ss",
+			want: position.Ranges{
+				position.NewRange(position.New(0, 3), position.New(0, 4)),
+				position.NewRange(position.New(0, 6), position.New(0, 7)),
+			},
+		},
 	}
 
 	for name, tc := range tcs {
