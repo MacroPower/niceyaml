@@ -204,8 +204,13 @@ type directiveResolver struct{}
 // A program that validates documents from another trust domain confines
 // the registry. [WithFS] with the file system of an [os.Root] restricts
 // file reads to one directory tree, and a client whose Transport or
-// CheckRedirect restricts hosts on every hop bounds the fetch. A program
-// that trusts no directive at all leaves Directive out of the resolvers.
+// CheckRedirect restricts hosts on every hop bounds the fetch. Neither
+// limits how many schemas documents can name. The registry keeps every
+// schema it compiles, so documents that name endless distinct URLs on an
+// allowed host, such as one URL with a new query string each time, grow
+// its cache without bound. A long-running program that validates such
+// documents builds a registry per batch or request. A program that trusts
+// no directive at all leaves Directive out of the resolvers.
 func Directive() Resolver {
 	return directiveResolver{}
 }

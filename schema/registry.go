@@ -56,7 +56,10 @@ const defaultHTTPTimeout = 30 * time.Second
 // [Resolver] that does not report [ErrNoMatch] wins. The registry caches
 // the schemas it compiles by [Ref.Key] and consults that cache before
 // loading, so it loads and compiles each schema once however many
-// documents name it, and it compiles every schema with the options
+// documents name it. The cache never evicts, so the registry keeps every
+// schema it compiles for its whole lifetime, and each distinct Key adds
+// an entry, a URL that differs from another only in its query string
+// included. The registry compiles every schema with the options
 // [WithCompileOptions] gave it. [Registry.Schema] hands out the compiled
 // schema a [Ref] names through that cache, for a caller that holds a Ref
 // of its own. A [*Schema] compiled elsewhere is a resolver too, and the
