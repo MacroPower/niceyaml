@@ -2511,10 +2511,28 @@ func TestDocument_DecodeInto(t *testing.T) {
 
 				err := dd.DecodeInto(t.Context(), tc.target, niceyaml.WithValidator(nameSchema(&called)))
 				require.ErrorIs(t, err, niceyaml.ErrDecodeTarget)
+
+				var srcErr *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &srcErr)
 				assert.Equal(t, tc.want, err.Error())
 				assert.False(t, called, "the validator should not run for a bad target")
 			})
 		}
+	})
+
+	t.Run("binds a rejected target to the source", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocumentWithPath(t, "name: test", "f.yaml")
+
+		err := dd.DecodeInto(t.Context(), nil)
+		require.ErrorIs(t, err, niceyaml.ErrDecodeTarget)
+
+		var srcErr *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &srcErr)
+		assert.Equal(t, "f.yaml: decode target is not a non-nil pointer: got nil", err.Error())
 	})
 
 	t.Run("decodes through a pointer target", func(t *testing.T) {
@@ -3902,8 +3920,14 @@ func TestDecoder(t *testing.T) {
 
 		dec := niceyaml.NewDecoder()
 
-		require.ErrorIs(t, dec.DecodeInto(t.Context(), dd, cfg), niceyaml.ErrDecodeTarget)
-		require.ErrorIs(t, dec.DecodeInto(t.Context(), dd, nil), niceyaml.ErrDecodeTarget)
+		for _, target := range []any{cfg, nil} {
+			err := dec.DecodeInto(t.Context(), dd, target)
+			require.ErrorIs(t, err, niceyaml.ErrDecodeTarget)
+
+			var srcErr *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &srcErr)
+		}
 	})
 }
 

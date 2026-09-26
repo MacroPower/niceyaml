@@ -1224,7 +1224,8 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 
 // DecodeInto validates and decodes the node, which is the whole document
 // for the root Node of a document, into v, which must be a non-nil
-// pointer. Any other v returns [ErrDecodeTarget] before anything runs.
+// pointer. Any other v returns an error wrapping [ErrDecodeTarget],
+// bound to the source, before anything runs.
 //
 // Each [Validator] from [WithValidator] runs on the node before
 // decoding, in the order given, and no validator runs when opts name
@@ -1257,7 +1258,7 @@ func (n *Node) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) erro
 func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig) error {
 	err := checkDecodeTarget(v)
 	if err != nil {
-		return err
+		return n.Bind(err)
 	}
 
 	node, err := n.AST()

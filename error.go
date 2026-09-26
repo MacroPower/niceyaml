@@ -35,7 +35,9 @@ var (
 	ErrMultipleDocuments = errors.New("multiple documents in source")
 
 	// ErrDecodeTarget indicates the value given to [Node.DecodeInto] is
-	// not a non-nil pointer, so there is nothing to decode into.
+	// not a non-nil pointer, so there is nothing to decode into. The
+	// error comes back bound to the source as a [SourceError] with no
+	// location.
 	ErrDecodeTarget = errors.New("decode target is not a non-nil pointer")
 
 	// ErrDecodeRejected indicates the go-yaml decoder rejected the value

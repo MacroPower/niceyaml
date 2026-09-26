@@ -80,8 +80,8 @@ func (d *Decoder) Validate(ctx context.Context, n *Node) error {
 
 // DecodeInto validates and decodes n into v with the options of the
 // [Decoder], as [Node.DecodeInto] decodes it with the same options. Any
-// v that is not a non-nil pointer returns [ErrDecodeTarget] before
-// anything runs.
+// v that is not a non-nil pointer returns an error wrapping
+// [ErrDecodeTarget], bound to the source, before anything runs.
 func (d *Decoder) DecodeInto(ctx context.Context, n *Node, v any) error {
 	return n.decodeInto(ctx, v, d.cfg)
 }
