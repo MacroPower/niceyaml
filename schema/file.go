@@ -110,8 +110,7 @@ func file(path string) (Ref, error) {
 // fsys, with name in slash form relative to its root, or from the working
 // directory when fsys is nil, at abs, the path [File] made absolute to
 // build the key, so a change of working directory between the two does
-// not put another file's bytes under the key. When abs is empty, readFile
-// makes name absolute against the working directory of the read.
+// not put another file's bytes under the key.
 //
 // The root of fsys stands for the working directory, so an absolute name
 // reads relative to it, and one outside it, or a drive-letter path off
@@ -119,19 +118,6 @@ func file(path string) (Ref, error) {
 func readFile(fsys fs.FS, name, abs string) ([]byte, error) {
 	if fsys != nil {
 		return readFS(fsys, name)
-	}
-
-	if abs == "" {
-		abs = name
-
-		if !hasDriveLetter(name) {
-			var err error
-
-			abs, err = filepath.Abs(name)
-			if err != nil {
-				return nil, fmt.Errorf("resolve %s: %w", name, err)
-			}
-		}
 	}
 
 	// Off Windows, a drive letter is an ordinary directory name, so
