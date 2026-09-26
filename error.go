@@ -1097,6 +1097,11 @@ func (e *SourceError) Document() *Node {
 //		}
 //	}
 //
+// The report carries the start of the resolved range. For a position an
+// error gave with [AtPosition] inside a token, that start marks where the
+// content of the token starts, and it can differ from the position
+// [SourceError.Error] reports, as [SourceError.Range] describes.
+//
 // Text a wrapper such as [fmt.Errorf] added around the Error stays, with
 // the path the wrapper wrote in it, as it does everywhere else. A nil
 // SourceError has an empty message.
@@ -1529,7 +1534,12 @@ func writeString(f fmt.State, s string) {
 // Range returns the range in the source that the error points at: the
 // range it carries, or the content of the token at the position it carries
 // or its path resolves to. A token that spans several lines yields a range
-// across them, and its start is the position [SourceError.Error] reports.
+// across them. For a range or a path, the range starts at the position
+// [SourceError.Error] reports. Error reports a position from [AtPosition]
+// as the error gave it. When that position falls inside a token, on the
+// spaces before it, or on a later line of a multi-line token, the range
+// starts where the content of the token starts instead. That start lies
+// at an earlier column or line, or at a later column past the spaces.
 // The range is in the coordinates of the view [Source.Lines] returns, where
 // line 0 is line 1 of the text.
 //

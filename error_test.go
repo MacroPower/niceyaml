@@ -3290,6 +3290,10 @@ func TestSourceError_Range(t *testing.T) {
 			err:  niceyaml.NewError("bad", niceyaml.AtPosition(position.New(0, 6))),
 			want: position.NewRange(position.New(0, 6), position.New(0, 10)),
 		},
+		"position inside its token covers the whole token": {
+			err:  niceyaml.NewError("bad", niceyaml.AtPosition(position.New(1, 8))),
+			want: position.NewRange(position.New(1, 7), position.New(1, 10)),
+		},
 		"no location": {
 			err:       niceyaml.NewError("bad"),
 			unlocated: true,
@@ -3356,6 +3360,30 @@ func TestSourceError_Range_MultiLineToken(t *testing.T) {
 
 	// The plain scalar continues on the second line, so the range ends there.
 	assert.Equal(t, position.NewRange(position.New(0, 6), position.New(1, 8)), got)
+}
+
+func TestSourceError_Range_PositionInsideToken(t *testing.T) {
+	t.Parallel()
+
+	source := xmlSource(stringtest.Input(`
+		text: first
+		  second
+	`))
+
+	var bound *niceyaml.SourceError
+
+	require.ErrorAs(t, yamltest.Bind(t, source, niceyaml.NewError("bad",
+		niceyaml.AtPosition(position.New(1, 4)),
+	)), &bound)
+
+	got, ok := bound.Range()
+	require.True(t, ok)
+
+	// The position falls on the second line of the plain scalar, so the
+	// range starts on the first line where the token does, while the
+	// message reports the position as the error gave it.
+	assert.Equal(t, position.NewRange(position.New(0, 6), position.New(1, 8)), got)
+	assert.Equal(t, "2:5: bad", bound.Error())
 }
 
 func TestSourceError_Excerpt_Errors(t *testing.T) {
