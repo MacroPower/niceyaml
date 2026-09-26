@@ -1342,12 +1342,11 @@ func TestPrinter_PrintTokenDiff_Wrapping(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		before       string
-		after        string
-		wantExact    string
-		wantContains []string
-		overlays     []position.Range
-		width        int
+		before   string
+		after    string
+		want     string
+		overlays []position.Range
+		width    int
 	}{
 		// Line 1 is the inserted line. The overlay covers "dddd", which
 		// wraps to the third row.
@@ -1356,7 +1355,7 @@ func TestPrinter_PrintTokenDiff_Wrapping(t *testing.T) {
 			after:    "key: aaaa bbbb cccc dddd\n",
 			overlays: []position.Range{position.NewRange(position.New(1, 20), position.New(1, 24))},
 			width:    13,
-			wantExact: stringtest.JoinLF(
+			want: stringtest.JoinLF(
 				"-key: x",
 				"+key: aaaa",
 				" bbbb cccc",
@@ -1368,7 +1367,7 @@ func TestPrinter_PrintTokenDiff_Wrapping(t *testing.T) {
 			before: "b: x\n",
 			after:  "b: \"\x1b[31mred\x1b[0m and more words here\"\n",
 			width:  13,
-			wantExact: stringtest.JoinLF(
+			want: stringtest.JoinLF(
 				"-b: x",
 				"+b:",
 				" \"␛[31mred␛[0",
@@ -1382,7 +1381,7 @@ func TestPrinter_PrintTokenDiff_Wrapping(t *testing.T) {
 			before: "b: x\n",
 			after:  "b: \"x\t\t\t\t\t\t\t\t\t\ty\tz\tw\"\n",
 			width:  13,
-			wantExact: stringtest.JoinLF(
+			want: stringtest.JoinLF(
 				"-b: x",
 				"+b:",
 				" \"x␉␉␉␉␉␉␉␉␉␉",
@@ -1393,7 +1392,7 @@ func TestPrinter_PrintTokenDiff_Wrapping(t *testing.T) {
 			before: "key: short\n",
 			after:  "key: this is a very long value that should wrap\n",
 			width:  30,
-			wantExact: stringtest.JoinLF(
+			want: stringtest.JoinLF(
 				"-key: short",
 				"+key: this is a very long",
 				" value that should wrap",
@@ -1403,7 +1402,7 @@ func TestPrinter_PrintTokenDiff_Wrapping(t *testing.T) {
 			before: "key: original value\n",
 			after:  "key: new very long value that definitely wraps\n",
 			width:  25,
-			wantExact: stringtest.JoinLF(
+			want: stringtest.JoinLF(
 				"-key: original value",
 				"+key: new very long value",
 				" that definitely wraps",
@@ -1413,7 +1412,7 @@ func TestPrinter_PrintTokenDiff_Wrapping(t *testing.T) {
 			before: "name: old-hyphenated-name-value\n",
 			after:  "name: new-hyphenated-name-value\n",
 			width:  20,
-			wantExact: stringtest.JoinLF(
+			want: stringtest.JoinLF(
 				"-name: old-",
 				" hyphenated-name-",
 				" value",
@@ -1442,15 +1441,7 @@ func TestPrinter_PrintTokenDiff_Wrapping(t *testing.T) {
 				assert.LessOrEqual(t, lipgloss.Width(row), tc.width, row)
 			}
 
-			if tc.wantExact != "" {
-				assert.Equal(t, tc.wantExact, got)
-
-				return
-			}
-
-			for _, want := range tc.wantContains {
-				assert.Contains(t, got, want)
-			}
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
@@ -2475,19 +2466,15 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		before         string
-		after          string
-		context        int
-		wantExact      string
-		wantContains   []string
-		wantNotContain []string
-		wantEmpty      bool
+		before  string
+		after   string
+		want    string
+		context int
 	}{
 		"no changes returns empty": {
-			before:    "key: value\n",
-			after:     "key: value\n",
-			context:   1,
-			wantEmpty: true,
+			before:  "key: value\n",
+			after:   "key: value\n",
+			context: 1,
 		},
 		"simple change no context": {
 			before: stringtest.JoinLF(
@@ -2503,7 +2490,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				"",
 			),
 			context: 0,
-			wantExact: stringtest.JoinLF(
+			want: stringtest.JoinLF(
 				"      @@ -2 +2 @@",
 				"   2 -b: 2",
 				"   2 +b: changed",
@@ -2525,7 +2512,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				"",
 			),
 			context: 1,
-			wantExact: stringtest.JoinLF(
+			want: stringtest.JoinLF(
 				"      @@ -1,3 +1,3 @@",
 				"   1  a: 1",
 				"   2 -b: 2",
@@ -2551,7 +2538,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				"",
 			),
 			context: 1,
-			wantExact: stringtest.JoinLF(
+			want: stringtest.JoinLF(
 				"      @@ -1,2 +1,2 @@",
 				"   1 -a: 1",
 				"   1 +a: X",
@@ -2582,7 +2569,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				"",
 			),
 			context: 0,
-			wantExact: stringtest.JoinLF(
+			want: stringtest.JoinLF(
 				"      @@ -1 +1 @@",
 				"   1 -line1: a",
 				"   1 +line1: X",
@@ -2604,7 +2591,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				"",
 			),
 			context: 1,
-			wantExact: stringtest.JoinLF(
+			want: stringtest.JoinLF(
 				"      @@ -1,2 +1,3 @@",
 				"   1  a: 1",
 				"   2 +b: 2",
@@ -2624,7 +2611,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				"",
 			),
 			context: 1,
-			wantExact: stringtest.JoinLF(
+			want: stringtest.JoinLF(
 				"      @@ -1,3 +1,2 @@",
 				"   1  a: 1",
 				"   2 -b: 2",
@@ -2632,10 +2619,9 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 			),
 		},
 		"empty files": {
-			before:    "",
-			after:     "",
-			context:   1,
-			wantEmpty: true,
+			before:  "",
+			after:   "",
+			context: 1,
 		},
 		"context larger than ops length includes all lines": {
 			before: stringtest.JoinLF(
@@ -2651,7 +2637,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				"",
 			),
 			context: 100, // Much larger than 3 lines.
-			wantExact: stringtest.JoinLF(
+			want: stringtest.JoinLF(
 				"      @@ -1,3 +1,3 @@",
 				"   1  a: 1",
 				"   2 -b: 2",
@@ -2677,7 +2663,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				"",
 			),
 			context: 1,
-			wantExact: stringtest.JoinLF(
+			want: stringtest.JoinLF(
 				"      @@ -1,3 +1,3 @@",
 				"   1  a: 1",
 				"   2 -b: 2",
@@ -2698,25 +2684,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 
 			got := printDiffSummary(p, tc.before, tc.after, tc.context)
 
-			if tc.wantEmpty {
-				assert.Empty(t, got)
-
-				return
-			}
-
-			if tc.wantExact != "" {
-				assert.Equal(t, tc.wantExact, got)
-
-				return
-			}
-
-			for _, want := range tc.wantContains {
-				assert.Contains(t, got, want)
-			}
-
-			for _, notWant := range tc.wantNotContain {
-				assert.NotContains(t, got, notWant)
-			}
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
