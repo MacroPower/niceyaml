@@ -29,6 +29,11 @@ var (
 	// ErrWildcard indicates a request for a single node or token from a path
 	// with a `[*]` or `..` selector. Use [Path.Nodes] for such paths.
 	ErrWildcard = errors.New("wildcard path matches any number of nodes")
+
+	// Before quoteName wraps a selector name in single quotes, nameEscaper
+	// escapes its backslashes and single quotes. A [strings.Replacer] is
+	// safe for concurrent use, so every call shares this one.
+	nameEscaper = strings.NewReplacer(`\`, `\\`, `'`, `\'`)
 )
 
 // segmentKind identifies the selector a [segment] applies.
@@ -80,7 +85,7 @@ func quoteName(name string) string {
 		return name
 	}
 
-	escaped := strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(name)
+	escaped := nameEscaper.Replace(name)
 
 	return "'" + escaped + "'"
 }
