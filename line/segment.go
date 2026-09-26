@@ -24,7 +24,8 @@ type Segment struct {
 	Kind kind.Kind
 	// Overlays are the overlays of the view that cover Cols, in the order
 	// they were added, so the last one added is the outermost. The slice
-	// is shared with the view, so treat it as read-only.
+	// is the segment's own and holds copies of the view's overlays, so
+	// changing it leaves the view and the other segments as they were.
 	Overlays Overlays
 	// Cols are the columns of the line the segment covers.
 	Cols position.Span

@@ -180,6 +180,23 @@ func TestView_Segments(t *testing.T) {
 		assert.Equal(t, position.NewSpan(2, 4), segs[1].Cols)
 	})
 
+	t.Run("a segment's overlays are its own", func(t *testing.T) {
+		t.Parallel()
+
+		view := newTestView(t, "key: value\n", 1)
+		view.AddOverlay("w", position.NewRange(position.New(0, 0), position.New(0, 10)))
+
+		want := slices.Clone(view.Overlays(0))
+
+		segs := slices.Collect(view.Segments(0))
+		require.Greater(t, len(segs), 1)
+
+		segs[0].Overlays[0].Kind = "changed"
+
+		assert.Equal(t, want, view.Overlays(0))
+		assert.Equal(t, kind.Kind("w"), segs[1].Overlays[0].Kind)
+	})
+
 	t.Run("an overlay on a line the view does not hold is not asked for", func(t *testing.T) {
 		t.Parallel()
 
