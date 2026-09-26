@@ -22,7 +22,8 @@ var (
 	// ErrResolve indicates a resolver applied to the document but could not
 	// name its schema, either by returning an error of its own or the zero
 	// Ref with no error. A lookup whose context ends before a resolver names
-	// a schema reports it too.
+	// a schema reports it too, and so does [Registry.Schema] for the zero
+	// Ref.
 	ErrResolve = errors.New("resolve schema")
 
 	// ErrLoad indicates the registry could not load the schema.
@@ -445,7 +446,7 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 	}
 
 	if ref.Key() == "" {
-		return nil, fmt.Errorf("%w: resolver returned an empty ref", ErrResolve)
+		return nil, fmt.Errorf("%w: ref names no schema", ErrResolve)
 	}
 
 	if v, ok := r.cached(ref.Key()); ok {

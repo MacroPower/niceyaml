@@ -550,7 +550,7 @@ func TestRegistry_Caching(t *testing.T) {
 		doc := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
 		_, err := reg.Lookup(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrResolve)
-		require.ErrorContains(t, err, "empty ref")
+		require.ErrorContains(t, err, "names no schema")
 	})
 
 	t.Run("reference error is rejected", func(t *testing.T) {
@@ -1599,6 +1599,8 @@ func TestRegistry_Schema(t *testing.T) {
 
 		_, err := schema.NewRegistry().Schema(t.Context(), schema.Ref{})
 		require.ErrorIs(t, err, schema.ErrResolve)
+		require.ErrorContains(t, err, "names no schema")
+		assert.NotContains(t, err.Error(), "resolver")
 	})
 
 	t.Run("a load that fails is ErrLoad", func(t *testing.T) {
