@@ -1975,24 +1975,23 @@ func highlightRanges(view line.Lines, loc location) position.Ranges {
 	return view.ContentRanges(view.TokenAt(loc.pos))
 }
 
-// clampRange returns r cut to lines. A range that ends before its start
-// covers nothing, as [position.Range.LastLine] counts it, so it becomes
-// the empty range at its start, and [SourceError.Range] never reports an
-// end before the start. A range that runs past the last line ends at the
-// end of that line, so a range an error carried marks lines the source
-// has and SourceError.Range reports one of them. A range within the lines
-// comes back as it is.
+// clampRange returns r cut to lines. A range that runs past the last line
+// ends at the end of that line, so a range an error carried marks lines
+// the source has and [SourceError.Range] reports one of them. A range
+// that ends before its start, as given or after that cut, covers nothing,
+// as [position.Range.LastLine] counts it, so it becomes the empty range at
+// its start, and SourceError.Range never reports an end before the start.
+// A range within the lines comes back as it is.
 func clampRange(lines line.Lines, r position.Range) position.Range {
+	if last := lines.Len() - 1; last >= 0 && r.End.Line > last {
+		r.End = position.New(last, lines.Line(last).Width())
+	}
+
 	if r.End.Line < r.Start.Line || (r.End.Line == r.Start.Line && r.End.Col < r.Start.Col) {
 		return position.NewRange(r.Start, r.Start)
 	}
 
-	last := lines.Len() - 1
-	if last < 0 || r.End.Line <= last {
-		return r
-	}
-
-	return position.NewRange(r.Start, position.New(last, lines.Line(last).Width()))
+	return r
 }
 
 // prepareLineAnnotations prepares annotations grouped by line index. It

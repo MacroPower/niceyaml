@@ -3167,6 +3167,10 @@ func TestSourceError_Range_Inverted(t *testing.T) {
 			rng:  position.NewRange(position.New(1, 3), position.New(1, 1)),
 			want: position.NewRange(position.New(1, 3), position.New(1, 3)),
 		},
+		"start past the end of the last line, end past it": {
+			rng:  position.NewRange(position.New(2, 10), position.New(9, 0)),
+			want: position.NewRange(position.New(2, 10), position.New(2, 10)),
+		},
 	}
 
 	for name, tc := range tcs {
