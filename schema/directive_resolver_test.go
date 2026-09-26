@@ -288,6 +288,59 @@ func TestDirective_Resolve(t *testing.T) {
 		assert.Equal(t, schemaData, data)
 	})
 
+	t.Run("none turns validation off", func(t *testing.T) {
+		t.Parallel()
+
+		tests := map[string]struct {
+			ref string
+		}{
+			"lowercase":  {ref: "none"},
+			"uppercase":  {ref: "NONE"},
+			"mixed case": {ref: "None"},
+		}
+
+		for name, tt := range tests {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, "# yaml-language-server: $schema="+tt.ref+"\nkind: Deployment\n")
+
+				ref, err := schema.Directive().Resolve(t.Context(), doc)
+				require.NoError(t, err)
+				assert.NotNil(t, ref.Schema())
+				assert.Empty(t, ref.Key())
+
+				// A schema that rejects every document follows the directive,
+				// so the document passes only if the lookup ends at the
+				// directive.
+				reg := schema.NewRegistry(schema.WithResolvers(
+					schema.Directive(),
+					schema.MustCompile([]byte("false")),
+				))
+				require.NoError(t, reg.Validate(t.Context(), doc))
+			})
+		}
+	})
+
+	t.Run("./none names a file", func(t *testing.T) {
+		t.Parallel()
+
+		tmpDir := t.TempDir()
+		schemaData := []byte(`{"type":"object"}`)
+		err := os.WriteFile(filepath.Join(tmpDir, "none"), schemaData, 0o600)
+		require.NoError(t, err)
+
+		yamlPath := filepath.Join(tmpDir, "config.yaml")
+		yamlData := []byte("# yaml-language-server: $schema=./none\nkind: Deployment\n")
+		err = os.WriteFile(yamlPath, yamlData, 0o600)
+		require.NoError(t, err)
+
+		doc := firstDocumentFromFile(t, yamlPath)
+		url, data := resolveAndLoad(t, schema.Directive(), doc)
+		assert.Equal(t, schemaData, data)
+		assert.Equal(t, fileURL(t, filepath.Join(tmpDir, "none")), url)
+	})
+
 	t.Run("resolves relative paths against document directory", func(t *testing.T) {
 		t.Parallel()
 
