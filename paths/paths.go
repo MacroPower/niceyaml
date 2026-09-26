@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -30,9 +31,10 @@ var (
 	// with a `[*]` or `..` selector. Use [Path.Nodes] for such paths.
 	ErrWildcard = errors.New("wildcard path matches any number of nodes")
 
-	// Before quoteName wraps a selector name in single quotes, nameEscaper
-	// escapes its backslashes and single quotes. A [strings.Replacer] is
-	// safe for concurrent use, so every call shares this one.
+	// Before quoteName or goccyString wraps a selector name in single
+	// quotes, nameEscaper escapes its backslashes and single quotes. A
+	// [strings.Replacer] is safe for concurrent use, so every call shares
+	// this one.
 	nameEscaper = strings.NewReplacer(`\`, `\\`, `'`, `\'`)
 )
 
@@ -220,24 +222,45 @@ func (p Path) String() string {
 // with every Node of the Source, so a call that edits a tree, such as
 // [yaml.Path.ReplaceWithNode], runs on a tree of the caller's own.
 //
-// The result selects the same names as the Path, but its String is the
-// goccy/go-yaml form, which differs from [Path.String] for names with
-// reserved characters and is not always re-parseable. The builder has no
-// quoting for recursive selectors, so Recursive("a.b") prints as `$..a.b`,
-// which [yaml.PathString] reads as two selectors. Use [Path.String] for a
-// form that [Parse] reads back.
+// The result holds each child name as its raw text, so
+// [yaml.Path.FilterNode] and [yaml.Path.ReplaceWithNode] compare keys with
+// the same names as the Path, with two exceptions. FilterNode strips single
+// quotes from around a name and quotes from around the text of a key, so
+// Child("'id'") may select the key id. A path has no goccy/go-yaml string
+// form when it holds an empty name, a name that is not valid UTF-8, or a
+// recursive name with `.`, `[`, `]`, `$`, or `*`. YAMLPath builds such a
+// path with [yaml.PathBuilder], whose ReplaceWithNode skips any child name
+// that holds `.` or `*`.
 //
-// YAMLPath leaves out the `~` selector from [Path.Key], since goccy/go-yaml
-// has no selector for the key of an entry, so the result selects the value.
+// The String of the result is the goccy/go-yaml form, which differs from
+// [Path.String] for names with reserved characters and is not always
+// re-parseable. The goccy/go-yaml syntax has no quoting for recursive
+// selectors, so Recursive("a.b") prints as `$..a.b`, which
+// [yaml.PathString] reads as two selectors. Use [Path.String] for a form
+// that [Parse] reads back.
+//
+// The goccy/go-yaml syntax has no selector for the key of an entry, so
+// YAMLPath leaves out the `~` selector from [Path.Key] and the selectors
+// after it apply to the value. The path $.a~.b becomes $.a.b, which can
+// select a node where [Path.Node] finds nothing.
 func (p Path) YAMLPath() *yaml.Path {
+	// Only a path that yaml.PathString reads holds a quoted name as its raw
+	// text. The builder holds a name with `.` or `*` still quoted, and the
+	// goccy replace compares that quoted text with each key, so it matches
+	// none. A path from PathString takes no further builder selectors, so a
+	// path without a string form comes from the builder whole.
+	if s, ok := p.goccyString(); ok {
+		yp, err := yaml.PathString(s)
+		if err == nil {
+			return yp
+		}
+	}
+
 	pb := (&yaml.PathBuilder{}).Root()
 
 	for _, seg := range p.segments {
 		switch seg.kind {
 		case segmentChild:
-			// The builder quotes names itself, and the goccy filter strips
-			// only the quotes it adds, so a name quoted here would never
-			// match its key.
 			pb = pb.Child(seg.name)
 		case segmentIndex:
 			pb = pb.Index(uint(seg.index)) //nolint:gosec // Index and Parse never store a negative.
@@ -251,6 +274,48 @@ func (p Path) YAMLPath() *yaml.Path {
 	}
 
 	return pb.Build()
+}
+
+// goccyString returns the path in the syntax [yaml.PathString] reads, with
+// every child name quoted so that PathString holds it as its raw text. It
+// reports false for a path that syntax cannot hold. PathString rejects an
+// empty name, has no quoting for a recursive name, and reads a name that
+// is not valid UTF-8 as a different name.
+func (p Path) goccyString() (string, bool) {
+	var sb strings.Builder
+
+	sb.WriteByte('$')
+
+	for _, seg := range p.segments {
+		if !utf8.ValidString(seg.name) {
+			return "", false
+		}
+
+		switch seg.kind {
+		case segmentChild:
+			if seg.name == "" {
+				return "", false
+			}
+
+			sb.WriteString(".'" + nameEscaper.Replace(seg.name) + "'")
+
+		case segmentIndex:
+			sb.WriteString("[" + strconv.Itoa(seg.index) + "]")
+		case segmentIndexAll:
+			sb.WriteString("[*]")
+		case segmentRecursive:
+			if seg.name == "" || strings.ContainsAny(seg.name, ".[]$*") {
+				return "", false
+			}
+
+			sb.WriteString(".." + seg.name)
+
+		case segmentKey:
+			// No goccy selector names a key.
+		}
+	}
+
+	return sb.String(), true
 }
 
 // wildcard reports whether any selector can match more than one node.

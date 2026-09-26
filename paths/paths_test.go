@@ -3,6 +3,7 @@ package paths_test
 import (
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -133,6 +134,16 @@ func TestPath_Build(t *testing.T) {
 			build:    func() paths.Path { return paths.Root().Child("spec", "name").Key() },
 			want:     "$.spec.name~",
 			wantYAML: "$.spec.name",
+		},
+		"key selector mid-path": {
+			build:    func() paths.Path { return paths.Root().Child("a").Key().Child("b") },
+			want:     "$.a~.b",
+			wantYAML: "$.a.b",
+		},
+		"name wrapped in single quotes": {
+			build:    func() paths.Path { return paths.Root().Child("'x'") },
+			want:     `$.'\'x\''`,
+			wantYAML: "$.'x'",
 		},
 		"tilde in a name is quoted": {
 			build:    func() paths.Path { return paths.Root().Child("a~b") },
@@ -558,7 +569,7 @@ func TestMustParse(t *testing.T) {
 func TestPath_YAMLPath(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("a:\n  'b.c': [x, y]\n  don't: 1\n  a\\.b: 2\n")
+	source := niceyaml.NewSourceFromString("a:\n  'b.c': [x, y]\n  don't: 1\n  a\\.b: 2\n  a.b'c: 3\n")
 	file, err := source.File()
 	require.NoError(t, err)
 
@@ -582,6 +593,11 @@ func TestPath_YAMLPath(t *testing.T) {
 			wantString: `$.a.'a\.b'`,
 			want:       "2",
 		},
+		"dotted name with a quote filters by its raw text": {
+			path:       paths.Root().Child("a", "a.b'c"),
+			wantString: `$.a.'a.b\'c'`,
+			want:       "3",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -598,6 +614,91 @@ func TestPath_YAMLPath(t *testing.T) {
 			assert.Equal(t, tc.want, node.GetToken().Value)
 		})
 	}
+}
+
+func TestPath_YAMLPath_Replace(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		src  string
+		path paths.Path
+		want string
+	}{
+		"dotted name": {
+			src:  "plain: 1\na.b: 2\n",
+			path: paths.Root().Child("a.b"),
+			want: "plain: 1\na.b: 9\n",
+		},
+		"star name": {
+			src:  "plain: 1\na*b: 2\n",
+			path: paths.Root().Child("a*b"),
+			want: "plain: 1\na*b: 9\n",
+		},
+		"nested dotted label": {
+			src:  "metadata:\n  labels:\n    app.kubernetes.io/name: web\n",
+			path: paths.Root().Child("metadata", "labels", "app.kubernetes.io/name"),
+			want: "metadata:\n  labels:\n    app.kubernetes.io/name: 9\n",
+		},
+		"empty name via builder fallback": {
+			src:  "\"\": v\n",
+			path: paths.Root().Child(""),
+			want: "\"\": 9\n",
+		},
+		"name that is not valid UTF-8 matches no key": {
+			src:  string(utf8.RuneError) + ": v\n",
+			path: paths.Root().Child("\xff"),
+			want: string(utf8.RuneError) + ": v\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			file, err := parser.ParseBytes([]byte(tc.src), 0)
+			require.NoError(t, err)
+
+			replacement, err := parser.ParseBytes([]byte("9"), 0)
+			require.NoError(t, err)
+
+			err = tc.path.YAMLPath().ReplaceWithNode(file, replacement.Docs[0].Body)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, file.String())
+		})
+	}
+}
+
+func TestPath_YAMLPath_Limits(t *testing.T) {
+	t.Parallel()
+
+	t.Run("goccy strips single quotes from a name", func(t *testing.T) {
+		t.Parallel()
+
+		file, err := parser.ParseBytes([]byte("x: plain\n\"'x'\": quoted\n"), 0)
+		require.NoError(t, err)
+
+		node, err := paths.Root().Child("'x'").YAMLPath().FilterNode(file.Docs[0].Body)
+		require.NoError(t, err)
+		require.NotNil(t, node, "node not found")
+		assert.Equal(t, "plain", node.GetToken().Value)
+	})
+
+	t.Run("goccy drops a key selector mid-path", func(t *testing.T) {
+		t.Parallel()
+
+		file, err := parser.ParseBytes([]byte("a:\n  b: 1\n"), 0)
+		require.NoError(t, err)
+
+		path := paths.Root().Child("a").Key().Child("b")
+
+		node, err := path.YAMLPath().FilterNode(file.Docs[0].Body)
+		require.NoError(t, err)
+		require.NotNil(t, node, "node not found")
+		assert.Equal(t, "1", node.GetToken().Value)
+
+		_, err = path.Node(file.Docs[0])
+		require.ErrorIs(t, err, paths.ErrNotFound)
+	})
 }
 
 func TestPath_Token(t *testing.T) {
