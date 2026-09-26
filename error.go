@@ -1205,8 +1205,9 @@ func (e *SourceError) Errors() []*SourceError {
 }
 
 // Error returns the message of the bound error with its resolved position
-// in front: "name:line:col: $.path: msg" for a path error and
-// "name:line:col: msg" for a position or range error, with any context a
+// in front: "name:line:col: $.path: msg" when the error carries a path,
+// whether it binds at the path or at a position or range beside it, and
+// "name:line:col: msg" for a position or range alone, with any context a
 // wrapper added between the position and the rest. The name is
 // [Source.Name], and the position stands alone as "line:col:" when the
 // source has none, so an error from a named file reads as a compiler
