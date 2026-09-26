@@ -135,7 +135,8 @@ const byteOrderMark = "\ufeff"
 // a line before the content of a document, or that stand in front of a
 // document marker. A document starts at the start of src and after a
 // marker line that holds nothing but the marker and a comment. Blank and
-// comment lines keep the document before its content.
+// comment lines keep the document before its content. A line ends where
+// the lexer ends one, at "\n", "\r\n", or a bare "\r".
 func dropByteOrderMarks(src string) string {
 	var sb strings.Builder
 
@@ -143,7 +144,7 @@ func dropByteOrderMarks(src string) string {
 
 	prefix := true
 
-	for line := range strings.SplitAfterSeq(src, "\n") {
+	for line := range lineend.Lines(src) {
 		if rest, ok := strings.CutPrefix(line, byteOrderMark); ok && (prefix || isDocumentMarker(rest)) {
 			line = rest
 		}

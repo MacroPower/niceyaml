@@ -202,9 +202,25 @@ func TestTokenize_ByteOrderMark(t *testing.T) {
 			input: "\ufeff# c\na: 1\n",
 			want:  "# c\na: 1\n",
 		},
+		"after a comment cr": {
+			input: "\ufeff# c\r\ufeffa: 1\r",
+			want:  "# c\ra: 1\r",
+		},
 		"after a document marker": {
 			input: "a: 1\n---\n\ufeffb: 2\n",
 			want:  "a: 1\n---\nb: 2\n",
+			line:  3,
+			col:   1,
+		},
+		"after a document marker crlf": {
+			input: "a: 1\r\n---\r\n\ufeffb: 2\r\n",
+			want:  "a: 1\r\n---\r\nb: 2\r\n",
+			line:  3,
+			col:   1,
+		},
+		"after a document marker cr": {
+			input: "a: 1\r---\r\ufeffb: 2\r",
+			want:  "a: 1\r---\rb: 2\r",
 			line:  3,
 			col:   1,
 		},
@@ -226,9 +242,19 @@ func TestTokenize_ByteOrderMark(t *testing.T) {
 			line:  3,
 			col:   1,
 		},
+		"after a document end marker cr": {
+			input: "a: 1\r...\r\ufeffb: 2\r",
+			want:  "a: 1\r...\rb: 2\r",
+			line:  3,
+			col:   1,
+		},
 		"inside a document": {
 			input: "a: 1\n\ufeffb: 2\n",
 			want:  "a: 1\n\ufeffb: 2\n",
+		},
+		"inside a document mixed endings": {
+			input: "# c\ra: 1\n\ufeffb: 2\n",
+			want:  "# c\ra: 1\n\ufeffb: 2\n",
 		},
 		"after a marker with content": {
 			input: "--- a\n\ufeffb\n",
