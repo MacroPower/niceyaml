@@ -49,13 +49,7 @@ func Bind(t *testing.T, source *niceyaml.Source, err error) error {
 func FirstDocumentWithPath(t *testing.T, input, filePath string) *niceyaml.Node {
 	t.Helper()
 
-	var opts []niceyaml.SourceOption
-
-	if filePath != "" {
-		opts = append(opts, niceyaml.WithFilePath(filePath))
-	}
-
-	source := niceyaml.NewSourceFromString(input, opts...)
+	source := niceyaml.NewSourceFromString(input, niceyaml.WithFilePath(filePath))
 	docs, err := source.Documents()
 	require.NoError(t, err)
 	require.NotEmpty(t, docs, "no documents found in input")
