@@ -64,6 +64,10 @@ type CatalogEntry struct {
 	// that cannot match a YAML or JSON file, so the slice may be shorter
 	// than the catalog's.
 	FileMatch []string `json:"fileMatch"`
+
+	// The store prepares FileMatch for matching once per catalog load, so
+	// a lookup does not rewrite every pattern in the catalog.
+	globs filepaths.AnyDepthPatterns
 }
 
 // Store matches documents to SchemaStore.org catalog entries.
@@ -312,11 +316,15 @@ func (s *Store) FindMatch(ctx context.Context, filePath string) (CatalogEntry, e
 		return CatalogEntry{}, err
 	}
 
+	cleanPath := filepaths.CleanPath(matchPath)
+
 	for _, entry := range entries {
-		if filepaths.MatchAny(matchPath, entry.FileMatch) {
+		if entry.globs.MatchClean(cleanPath) {
 			// The cached entry shares its pattern slice with s.entries, so
-			// hand the caller a copy it can write to.
+			// hand the caller a copy it can write to. The prepared globs
+			// serve lookups alone, so the caller gets none.
 			entry.FileMatch = slices.Clone(entry.FileMatch)
+			entry.globs = filepaths.AnyDepthPatterns{}
 
 			return entry, nil
 		}
@@ -518,6 +526,7 @@ func (s *Store) filterAndNormalizeEntries(schemas []CatalogEntry) []CatalogEntry
 
 		// Store entry with only supported patterns.
 		entry.FileMatch = supportedPatterns
+		entry.globs = filepaths.NewAnyDepthPatterns(supportedPatterns)
 		entries = append(entries, entry)
 	}
 

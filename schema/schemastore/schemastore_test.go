@@ -205,7 +205,9 @@ func TestSchemaStore_FindMatchDoesNotAliasCatalog(t *testing.T) {
 
 	entry, err := store.FindMatch(t.Context(), "/x/myapp.yaml")
 	require.NoError(t, err)
-	require.Equal(t, "Generic", entry.Name)
+	// The entry equals the catalog's, so no state the store keeps for
+	// matching reaches the caller.
+	require.Equal(t, catalog.Schemas[0], entry)
 
 	entry.FileMatch[0] = "*.json"
 
@@ -213,6 +215,38 @@ func TestSchemaStore_FindMatchDoesNotAliasCatalog(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Generic", entry.Name)
 	assert.Equal(t, []string{"*.yaml"}, entry.FileMatch)
+}
+
+func BenchmarkStore_FindMatch(b *testing.B) {
+	// A path no entry matches makes each lookup try every pattern, as a
+	// document outside the catalog does.
+	catalog := schemastore.Catalog{}
+	for i := range 1000 {
+		catalog.Schemas = append(catalog.Schemas, schemastore.CatalogEntry{
+			Name: fmt.Sprintf("Schema %d", i),
+			URL:  fmt.Sprintf("https://example.com/schema-%d.json", i),
+			FileMatch: []string{
+				fmt.Sprintf("schema-%d.yaml", i),
+				fmt.Sprintf("/.config/schema-%d/*.{yml,yaml}", i),
+			},
+		})
+	}
+
+	server := newCatalogServer(b, catalog)
+	b.Cleanup(server.Close)
+
+	store := schemastore.New(schemastore.WithCatalogURL(server.URL))
+
+	_, err := store.FindMatch(b.Context(), "/repo/unmatched.yaml")
+	require.ErrorIs(b, err, schemastore.ErrNoCatalogMatch)
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		_, err = store.FindMatch(b.Context(), "/repo/unmatched.yaml")
+	}
+
+	require.ErrorIs(b, err, schemastore.ErrNoCatalogMatch)
 }
 
 func TestSchemaStore_LazyLoading(t *testing.T) {
@@ -1325,13 +1359,13 @@ func TestIntegration(t *testing.T) {
 
 // Helper functions.
 
-func newCatalogServer(t *testing.T, catalog schemastore.Catalog) *httptest.Server {
-	t.Helper()
+func newCatalogServer(tb testing.TB, catalog schemastore.Catalog) *httptest.Server {
+	tb.Helper()
 
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		data, err := json.Marshal(catalog)
 		if err != nil {
-			t.Errorf("marshal catalog: %v", err)
+			tb.Errorf("marshal catalog: %v", err)
 		}
 
 		//nolint:errcheck // Test helper.

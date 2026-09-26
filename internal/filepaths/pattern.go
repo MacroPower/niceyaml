@@ -46,16 +46,16 @@ func (p Pattern) Match(path string) bool {
 	// accepts some patterns that Match rejects for a multi-segment path,
 	// such as a "{" inside a character class. A pattern Match cannot
 	// interpret matches nothing, which is what a false result says already.
-	matched, _ := doublestar.Match(p.glob, normalizePath(path)) //nolint:errcheck // A pattern error means no match.
+	matched, _ := doublestar.Match(p.glob, CleanPath(path)) //nolint:errcheck // A pattern error means no match.
 
 	return matched
 }
 
-// normalizePath returns path cleaned, with forward slashes as separators,
+// CleanPath returns path cleaned, with forward slashes as separators,
 // which is the form the patterns match against. Cleaning drops a leading
 // "./", collapses repeated separators, and resolves ".." elements, so the
 // spelling of a path does not decide whether it matches.
-func normalizePath(path string) string {
+func CleanPath(path string) string {
 	return filepath.ToSlash(filepath.Clean(path))
 }
 
@@ -106,15 +106,49 @@ func normalizePattern(pattern string) string {
 // MatchAny skips an invalid pattern without error, so a typo in a
 // SchemaStore catalog entry does not break validation. To validate a
 // pattern upfront, use [NewPattern] instead.
+//
+// MatchAny rewrites the patterns on each call. To match many paths
+// against the same patterns, use [NewAnyDepthPatterns] instead.
 func MatchAny(path string, patterns []string) bool {
 	if path == "" {
 		return false
 	}
 
-	path = normalizePath(path)
+	return NewAnyDepthPatterns(patterns).MatchClean(CleanPath(path))
+}
 
-	for _, pattern := range patterns {
-		matched, err := doublestar.Match(anyDepth(pattern), path)
+// AnyDepthPatterns holds glob patterns rewritten once for the any-depth
+// matching [MatchAny] performs, so matching many paths against them
+// repeats none of the rewriting. Create instances with
+// [NewAnyDepthPatterns].
+//
+// The zero value holds no patterns and matches no path.
+type AnyDepthPatterns struct {
+	globs []string
+}
+
+// NewAnyDepthPatterns creates a new [AnyDepthPatterns] from the given
+// glob patterns. It keeps every pattern, the invalid ones included, and
+// [AnyDepthPatterns.MatchClean] skips a pattern it cannot interpret, as
+// [MatchAny] does.
+func NewAnyDepthPatterns(patterns []string) AnyDepthPatterns {
+	globs := make([]string, len(patterns))
+	for i, pattern := range patterns {
+		globs[i] = anyDepth(pattern)
+	}
+
+	return AnyDepthPatterns{globs: globs}
+}
+
+// MatchClean reports whether path matches any of the patterns, with the
+// semantics of [MatchAny]. The path must already be in the form
+// [CleanPath] returns, so a caller matching one path against many
+// pattern sets cleans it once.
+func (p AnyDepthPatterns) MatchClean(path string) bool {
+	for _, glob := range p.globs {
+		// Whether Match reports a pattern error depends on the path, so
+		// an error skips the pattern for this path alone.
+		matched, err := doublestar.Match(glob, path)
 		if err == nil && matched {
 			return true
 		}

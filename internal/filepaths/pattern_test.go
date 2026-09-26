@@ -279,6 +279,13 @@ func TestMatchAny(t *testing.T) {
 			patterns: []string{"[", "*.yaml"},
 			want:     true,
 		},
+		"pattern that fails validation still matches": {
+			// The "[" alternative fails doublestar.ValidatePattern, but
+			// doublestar.Match reads the pattern for this path.
+			path:     "x/a.yaml",
+			patterns: []string{"{a.yaml,[}"},
+			want:     true,
+		},
 		"github workflow deep path": {
 			path:     ".github/workflows/ci.yaml",
 			patterns: []string{".github/workflows/*.yml", ".github/workflows/*.yaml"},
@@ -347,6 +354,12 @@ func TestMatchAny(t *testing.T) {
 
 			got := filepaths.MatchAny(tc.path, tc.patterns)
 			assert.Equal(t, tc.want, got)
+
+			if tc.path != "" {
+				prepared := filepaths.NewAnyDepthPatterns(tc.patterns)
+				got = prepared.MatchClean(filepaths.CleanPath(tc.path))
+				assert.Equal(t, tc.want, got, "prepared patterns")
+			}
 		})
 	}
 }
