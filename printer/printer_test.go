@@ -3662,6 +3662,38 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 				"          ^ x",
 			),
 		},
+		"column near the edge moves the text off the marker row": {
+			input:  "key: value",
+			gutter: printer.NoGutter,
+			width:  16,
+			annotation: line.Annotation{
+				Content:   "string does not match pattern",
+				Placement: line.Below,
+				Col:       8,
+			},
+			want: stringtest.JoinLF(
+				"key: value",
+				strings.Repeat(" ", 8)+"^",
+				"string does not",
+				"match pattern",
+			),
+		},
+		"column near the edge hangs the text under a narrower indent": {
+			input:  "key: value",
+			gutter: printer.NoGutter,
+			width:  40,
+			annotation: line.Annotation{
+				Content:   "string does not match pattern",
+				Placement: line.Below,
+				Col:       34,
+			},
+			want: stringtest.JoinLF(
+				"key: value",
+				strings.Repeat(" ", 34)+"^",
+				strings.Repeat(" ", 20)+"string does not",
+				strings.Repeat(" ", 20)+"match pattern",
+			),
+		},
 		"negative column renders at column zero": {
 			input:  "key: value",
 			gutter: printer.NoGutter,
@@ -3829,6 +3861,40 @@ func TestPrinter_PrintError_WrappedAnnotation(t *testing.T) {
 	}
 
 	assert.Contains(t, got, "^ expected string")
+}
+
+func TestPrinter_PrintError_AnnotationNearEdge(t *testing.T) {
+	t.Parallel()
+
+	const width = 80
+
+	p := printer.New(
+		printer.WithWrap(width),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+	)
+
+	// The value starts near the right edge, so the message has too little
+	// room beside the caret and moves to the rows below it.
+	key := strings.Repeat("a", 66)
+	source := niceyaml.NewSourceFromString(key + ": value\n")
+	err := yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithErrors(
+		niceyaml.NewError("string does not match pattern", niceyaml.AtPath(paths.Root().Child(key))),
+	)))
+
+	got := p.PrintError(err)
+
+	var trimmed []string
+
+	for i, row := range strings.Split(got, "\n") {
+		assert.LessOrEqual(t, lipgloss.Width(row), width, "row %d: %q", i, row)
+
+		trimmed = append(trimmed, strings.TrimSpace(ansi.Strip(row)))
+	}
+
+	// The header holds the whole message on one row, so these two rows
+	// come from the annotation.
+	assert.Contains(t, trimmed, "string does not")
+	assert.Contains(t, trimmed, "match pattern")
 }
 
 func TestPrinter_Print_EmptySpans(t *testing.T) {

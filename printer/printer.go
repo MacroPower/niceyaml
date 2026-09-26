@@ -310,7 +310,12 @@ type AnnotationRow struct {
 	// Marker is the text between the padding and Text on the first row,
 	// such as the "^ " [DefaultAnnotation] puts before a [line.Below]
 	// annotation. When Text wraps, its continuation rows indent past the
-	// Marker, so they align under the start of Text.
+	// Marker, so they align under the start of Text. When the column
+	// leaves Text less room than its widest word, the Marker keeps its
+	// column on a row of its own, and Text moves to the rows below under
+	// a smaller indent. That indent leaves Text 20 cells, or its widest
+	// word when that is wider, and shrinks to nothing when the printer
+	// width has less room.
 	Marker string
 
 	// Text is the body of the row. A newline in it starts a new row, and
@@ -930,6 +935,11 @@ type annotationGroup struct {
 	rows []string
 }
 
+// minAnnotationWidth is the fewest cells the text of an annotation wraps
+// to once it moves off the marker row, when the printer width has room
+// for them.
+const minAnnotationWidth = 20
+
 // annotationGroups renders the annotations of line idx of view, which is
 // ln, at the given placement: one group per [line.Annotation.Kind], as
 // [line.Annotations.ByKind] orders them, each rendered by the
@@ -979,9 +989,12 @@ func (p *Printer) annotationGroups(
 		// the terminal shows. The escape keeps each newline, and the wrap
 		// starts a new row at each one.
 		marker := escape.Control(row.Marker)
-		indent := strings.Repeat(" ", max(0, cr.Width(col)-cr.Width(from))) + marker
+		mark := strings.TrimRight(marker, " ")
+		padding := strings.Repeat(" ", max(0, cr.Width(col)-cr.Width(from)))
+		indent := padding + marker
 		indentWidth := lipgloss.Width(indent)
-		wrapped := p.wrapContent(escape.Rows(row.Text), gutterWidth+indentWidth)
+		text := escape.Rows(row.Text)
+		widest := widestWord(text)
 
 		k := row.Kind
 		if k == "" {
@@ -990,27 +1003,48 @@ func (p *Printer) annotationGroups(
 
 		kindStyle := p.styles.Style(k)
 
-		// The indent is the padding to the column plus the marker. It
-		// stays out of the wrapped text and comes back on every row: the
-		// first row keeps it as rendered and continuation rows get the
-		// same width in spaces, so the annotation column survives the
-		// wrap. A column past the end of the content keeps its cell even
-		// when that cell lies past the width, and its rows then run
-		// wider, since the body still gets one column.
-		//
 		// The style of the kind may lay a row out over several terminal
 		// rows, through a width, vertical padding, a margin, or a border.
 		// The group keeps each terminal row apart, so Print puts the
 		// gutter on each one and Layout counts each one.
 		var rows []string
 
-		for j, text := range wrapped {
-			prefix := indent
-			if j > 0 {
-				prefix = strings.Repeat(" ", indentWidth)
-			}
+		add := func(s string) {
+			rows = append(rows, strings.Split(kindStyle.Render(s), "\n")...)
+		}
 
-			rows = append(rows, strings.Split(kindStyle.Render(prefix+text), "\n")...)
+		// The indent is the padding to the column plus the marker, and
+		// the wrap leaves it out. The first row keeps it as rendered, and
+		// continuation rows get the same width in spaces, so every row of
+		// the text starts under the start of the text.
+		//
+		// When the column leaves the text less room than its widest word,
+		// the marker keeps its column on a row of its own, without its
+		// trailing spaces, and the text moves to the rows below under a
+		// smaller indent. That indent leaves the text minAnnotationWidth
+		// cells, or its widest word when that is wider, and shrinks to
+		// nothing when the width has less room. A row without a marker
+		// keeps its text at the column, since only the marker holds the
+		// column once the text moves. A column past the end of the
+		// content keeps its cell even when that cell lies past the width,
+		// and the rows indented to it then run wider.
+		if p.wrap > 0 && mark != "" && widest > p.contentWidth(gutterWidth+indentWidth) {
+			hang := max(0, p.contentWidth(gutterWidth)-max(minAnnotationWidth, widest))
+
+			add(padding + mark)
+
+			for _, wrapped := range p.wrapContent(text, gutterWidth+hang) {
+				add(strings.Repeat(" ", hang) + wrapped)
+			}
+		} else {
+			for j, wrapped := range p.wrapContent(text, gutterWidth+indentWidth) {
+				prefix := indent
+				if j > 0 {
+					prefix = strings.Repeat(" ", indentWidth)
+				}
+
+				add(prefix + wrapped)
+			}
 		}
 
 		groups = append(groups, annotationGroup{rows: rows})
@@ -1027,6 +1061,21 @@ func annotationKind(k kind.Kind) kind.Kind {
 	}
 
 	return k
+}
+
+// widestWord returns the width in cells of the widest word of text, where
+// words run between newlines and the characters the wrap breaks on.
+func widestWord(text string) int {
+	words := strings.FieldsFunc(text, func(r rune) bool {
+		return r == '\n' || strings.ContainsRune(wrapOnCharacters, r)
+	})
+
+	widest := 0
+	for _, word := range words {
+		widest = max(widest, lipgloss.Width(word))
+	}
+
+	return widest
 }
 
 // contentRows returns the wrapped pieces of a line's rendered content as
