@@ -11,33 +11,32 @@
 //
 // Consider this YAML input with a block scalar:
 //
-//	┌───────────────────┐
-//	│foo: |-            │
-//	│  hello            │
-//	│  world            │
-//	└───────────────────┘
+//	┌───────────────────────────┐
+//	│foo: |-                    │
+//	│  hello                    │
+//	│  world                    │
+//	└───────────────────────────┘
 //
 // The go-yaml lexer produces a normal [token.Tokens] stream where the block
 // scalar content is a single token spanning multiple lines:
 //
-//	┌──────┬────────────┐
-//	│String│MappingValue│
-//	├──────┴────────────┤
-//	│String             │
-//	│                   │
-//	│                   │
-//	└───────────────────┘
+//	┌──────┬────────────┬───────┐
+//	│String│MappingValue│Literal│
+//	├──────┴────────────┴───────┤
+//	│String                     │
+//	│                           │
+//	└───────────────────────────┘
 //
 // [NewLines] cuts the tokens at line boundaries while every part keeps a
 // reference to its source token:
 //
-//	┌──────┬────────────┐
-//	│String│MappingValue│
-//	├──────┴────────────┤
-//	│String             │
-//	├───────────────────┤
-//	│String             │
-//	└───────────────────┘
+//	┌──────┬────────────┬───────┐
+//	│String│MappingValue│Literal│
+//	├──────┴────────────┴───────┤
+//	│String                     │
+//	├───────────────────────────┤
+//	│String                     │
+//	└───────────────────────────┘
 //
 // # Lines
 //
