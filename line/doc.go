@@ -102,7 +102,7 @@
 // [Annotations] add extra content above or below a line, which is useful for
 // error messages, hints, or context. An [Annotation] takes a [Placement] of
 // [Above] or [Below], and its Kind names the style it renders in, as the Kind
-// of an [Overlay] does; without one it renders as a comment:
+// of an [Overlay] does; without one it renders in [kind.UIAnnotation]:
 //
 //	view.Annotate(i, line.Annotation{
 //	    Content:   "missing required field",
