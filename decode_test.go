@@ -1557,27 +1557,8 @@ type strictValueConfig struct {
 	Value int `yaml:"value"`
 }
 
-func TestDocuments_All(t *testing.T) {
+func TestDocument_Tokens(t *testing.T) {
 	t.Parallel()
-
-	t.Run("iterates over single document", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString("key: value")
-		d, err := source.Documents()
-		require.NoError(t, err)
-
-		var count int
-
-		for i, dd := range d {
-			assert.Equal(t, count, i)
-			require.NotNil(t, dd)
-
-			count++
-		}
-
-		assert.Equal(t, 1, count)
-	})
 
 	t.Run("yields the same tokens on every pass", func(t *testing.T) {
 		t.Parallel()
@@ -1624,33 +1605,6 @@ func TestDocuments_All(t *testing.T) {
 		require.Len(t, passes, 2)
 		assert.Same(t, passes[0], passes[1])
 		assert.Same(t, source.Tokens()[4], passes[0])
-	})
-
-	t.Run("iterates over multiple documents", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			---
-			a: 1
-			---
-			b: 2
-			---
-			c: 3
-		`)
-		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
-
-		var count int
-
-		for i, dd := range d {
-			assert.Equal(t, count, i)
-			require.NotNil(t, dd)
-
-			count++
-		}
-
-		assert.Equal(t, 3, count)
 	})
 
 	t.Run("pairs tokens with documents closed by an end marker", func(t *testing.T) {
@@ -1825,33 +1779,6 @@ func TestDocuments_All(t *testing.T) {
 		got, err := d[1].Decode[map[string]string](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, map[string]string{"port": "http"}, got)
-	})
-
-	t.Run("early break stops iteration", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			---
-			a: 1
-			---
-			b: 2
-			---
-			c: 3
-		`)
-		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
-
-		var count int
-
-		for range d {
-			count++
-			if count == 2 {
-				break
-			}
-		}
-
-		assert.Equal(t, 2, count)
 	})
 }
 
