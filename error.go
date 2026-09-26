@@ -55,10 +55,10 @@ var (
 	// token of the node, with no go-yaml error in the chain.
 	ErrDecodeRejected = errors.New("decoder rejected the value")
 
-	// ErrOutOfRange indicates the error's location lies outside the lines of
-	// the source, past the last or before the first, which happens when a
-	// position or range came from other text. [SourceError.Unresolved]
-	// reports it.
+	// ErrOutOfRange indicates the error's location lies outside the source.
+	// The location starts on a line past the last or before the first,
+	// which happens when a position or range came from other text, or at a
+	// column before the first. [SourceError.Unresolved] reports it.
 	ErrOutOfRange = errors.New("location outside source")
 
 	// ErrPathNeedsDocument indicates an error that carries a path was bound
@@ -1561,11 +1561,12 @@ func (e *SourceError) Range() (position.Range, bool) {
 // resolve, and nil when it did or when the error carries no location at
 // all, which is the ordinary case for an error from [fmt.Errorf] and
 // nothing to explain. The reason is [ErrOutOfRange] for a location on a
-// line the source does not hold, [ErrPathNeedsDocument] for a path bound
-// through [Source.Bind] in a source with no single document, the
-// resolution error from [go.jacobcolvin.com/niceyaml/paths] for a path
-// the document does not hold, or [ErrNoLocation] for a path whose token
-// carries no position. A renderer names it in place of the excerpt:
+// line the source does not hold or at a column before the first,
+// [ErrPathNeedsDocument] for a path bound through [Source.Bind] in a
+// source with no single document, the resolution error from
+// [go.jacobcolvin.com/niceyaml/paths] for a path the document does not
+// hold, or [ErrNoLocation] for a path whose token carries no position. A
+// renderer names it in place of the excerpt:
 //
 //	if excerpt, ok := bound.Excerpt(2); ok {
 //		fmt.Println(excerpt)
@@ -1958,20 +1959,26 @@ func viewRange(r position.Range, i int) position.Range {
 }
 
 // checkInRange reports [ErrOutOfRange] when loc starts on a line lines
-// does not hold: one past its last line, or one before its first. The
-// message names the line and the lines the source holds as the text counts
-// them, from 1.
+// does not hold, past its last line or before its first, or at a column
+// before the first. The message counts lines and columns from 1, as the
+// text does. It names the line and the lines the source holds, or the
+// column and its line.
 func checkInRange(loc location, lines line.Lines) error {
-	if loc.pos.Line >= 0 && loc.pos.Line < lines.Len() {
-		return nil
-	}
-
 	textLine := loc.pos.Line + 1
-	if lines.Len() == 0 {
-		return fmt.Errorf("%w: line %d of an empty source", ErrOutOfRange, textLine)
+
+	if loc.pos.Line < 0 || loc.pos.Line >= lines.Len() {
+		if lines.Len() == 0 {
+			return fmt.Errorf("%w: line %d of an empty source", ErrOutOfRange, textLine)
+		}
+
+		return fmt.Errorf("%w: line %d not in lines 1-%d", ErrOutOfRange, textLine, lines.Len())
 	}
 
-	return fmt.Errorf("%w: line %d not in lines 1-%d", ErrOutOfRange, textLine, lines.Len())
+	if loc.pos.Col < 0 {
+		return fmt.Errorf("%w: column %d of line %d", ErrOutOfRange, loc.pos.Col+1, textLine)
+	}
+
+	return nil
 }
 
 // highlightRanges returns the ranges to highlight for loc: the range itself
@@ -1991,7 +1998,9 @@ func highlightRanges(view line.Lines, loc location) position.Ranges {
 // that ends before its start, as given or after that cut, covers nothing,
 // as [position.Range.LastLine] counts it, so it becomes the empty range at
 // its start, and SourceError.Range never reports an end before the start.
-// A range within the lines comes back as it is.
+// An end on a later line at a column before the first moves to the start
+// of that line, so SourceError.Range never reports a negative column. A
+// range within the lines comes back as it is.
 func clampRange(lines line.Lines, r position.Range) position.Range {
 	if last := lines.Len() - 1; last >= 0 && r.End.Line > last {
 		r.End = position.New(last, lines.Line(last).Width())
@@ -2000,6 +2009,8 @@ func clampRange(lines line.Lines, r position.Range) position.Range {
 	if r.End.Line < r.Start.Line || (r.End.Line == r.Start.Line && r.End.Col < r.Start.Col) {
 		return position.NewRange(r.Start, r.Start)
 	}
+
+	r.End.Col = max(r.End.Col, 0)
 
 	return r
 }

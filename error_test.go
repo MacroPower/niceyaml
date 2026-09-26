@@ -3314,8 +3314,24 @@ func TestSourceError_Range(t *testing.T) {
 			),
 			is: niceyaml.ErrOutOfRange,
 		},
+		"range before the first column": {
+			err: niceyaml.NewError("bad",
+				niceyaml.AtRange(position.NewRange(position.New(0, -2), position.New(0, 2))),
+			),
+			is: niceyaml.ErrOutOfRange,
+		},
+		"range end before the first column on a later line": {
+			err: niceyaml.NewError("bad",
+				niceyaml.AtRange(position.NewRange(position.New(0, 1), position.New(1, -3))),
+			),
+			want: position.NewRange(position.New(0, 1), position.New(1, 0)),
+		},
 		"position from other text": {
 			err: niceyaml.NewError("bad", niceyaml.AtPosition(position.New(8, 0))),
+			is:  niceyaml.ErrOutOfRange,
+		},
+		"position before the first column": {
+			err: niceyaml.NewError("bad", niceyaml.AtPosition(position.New(1, -5))),
 			is:  niceyaml.ErrOutOfRange,
 		},
 	}
@@ -3418,6 +3434,13 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 			),
 			is:         niceyaml.ErrOutOfRange,
 			wantRender: "bad\n\nno excerpt: location outside source: line 0 not in lines 1-2",
+		},
+		"range before the first column": {
+			err: niceyaml.NewError("bad",
+				niceyaml.AtRange(position.NewRange(position.New(0, -2), position.New(0, 2))),
+			),
+			is:         niceyaml.ErrOutOfRange,
+			wantRender: "bad\n\nno excerpt: location outside source: column -1 of line 1",
 		},
 		"nested range before the first line": {
 			err: niceyaml.NewError("bad",
