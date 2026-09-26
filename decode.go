@@ -1210,13 +1210,14 @@ func (n *Node) validate(ctx context.Context, validators []Validator) error {
 //
 // Binding binds the whole tree of err. The [Error] that anchors it gives
 // the [SourceError] its location, and every error nested with
-// [WithErrors] along the way becomes a child with a location of its own,
-// which [SourceError.Errors] returns. An error that unwraps to several,
-// such as one from [errors.Join], binds the same way whatever wraps it.
-// The SourceError carries no location of its own, and each branch is a
-// child with its own, so a validator that joins its violations reports
-// each one with its position. To keep several errors as separate
-// bindings, bind each one before joining them.
+// [WithErrors] along the way becomes a child, which [SourceError.Errors]
+// returns. An error that unwraps to several, such as one from
+// [errors.Join], binds the same way whatever wraps it. The SourceError
+// carries no location of its own, and each branch is a child. Each child
+// binds at the location its own error carries, if any, so a validator
+// that joins its violations reports each one with its position. To keep
+// several errors as separate bindings, bind each one before joining
+// them.
 //
 // If err is nil, Bind returns nil. A nil [*Error] or [*SourceError]
 // pointer as err carries nothing to bind and also returns a nil error, so

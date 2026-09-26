@@ -116,8 +116,9 @@ var (
 // "name:line:col: msg". Nested errors from [WithErrors] are structure
 // rather than text. [Error.Errors] returns them, [Error.Unwrap] exposes
 // them to [errors.Is] and [errors.As], and the [SourceError] that binds
-// the Error binds each one as a child with a resolved location of its
-// own. [Error.Format] prints them as a tree under the %+v verb.
+// the Error binds each one as a child at the location its own error
+// carries, if any. [Error.Format] prints them as a tree under the %+v
+// verb.
 //
 // Error implements the error interface. Use [Error.Unwrap] with [errors.Is]
 // and [errors.As] to inspect wrapped errors.
@@ -320,13 +321,14 @@ func AtRange(r position.Range) ErrorOption {
 // WithErrors is an [ErrorOption] that adds nested errors to the [Error],
 // such as one per violation a validator found.
 //
-// A nested error is any error, and one that is an [*Error] carries a
+// A nested error is any error, and one that is an [*Error] can carry a
 // location of its own. [Error.Errors] returns them, and the [SourceError]
-// that binds the Error binds each one as a child with its own resolved
-// location, listed as a branch of the message by [FormatError] and
-// rendered as an annotation below its line in the excerpt. A nested
-// error that is a [*SourceError]
-// already, or wraps one, is bound as it is. A nil nested error is skipped.
+// that binds the Error binds each one as a child at the location its own
+// error carries, if any. [FormatError] lists each child as a branch of
+// the message, and [SourceError.Excerpt] annotates the line of each child
+// whose location resolves. A nested error that is a [*SourceError]
+// already, or wraps one, is bound as it is. A nil nested error is
+// skipped.
 func WithErrors(errs ...error) ErrorOption {
 	return func(e *Error) {
 		e.errors = append(e.errors, errs...)
@@ -694,16 +696,17 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 // Every error nested with [WithErrors] in an Error along that chain, and
 // every branch of the error that ends it, is bound the same way to the
 // same document and becomes a child. [SourceError.Errors] returns the
-// children, each a SourceError with its own location and children, so a
-// validator's report of several violations binds to one SourceError per
-// violation whether it nests them with WithErrors or joins them. An error
-// that is or wraps a SourceError, with no Error above it that carries a
-// location or nests errors, is a binding already. As a nested error it
-// contributes that binding as the child, and as the error given to Bind
-// it comes back as it is. A located Error above a binding binds anew at
-// its own location, and its message carries the position the inner
-// binding resolved as well as its own. An Error above a binding that
-// nests errors binds anew around it, with those errors as children.
+// children, each a SourceError with its own children, if any, and its own
+// location when its error carries one. A validator's report of several
+// violations therefore binds to one SourceError per violation whether it
+// nests them with WithErrors or joins them. An error that is or wraps a
+// SourceError, with no Error above it that carries a location or nests
+// errors, is a binding already. As a nested error it contributes that
+// binding as the child, and as the error given to Bind it comes back as
+// it is. A located Error above a binding binds anew at its own location,
+// and its message carries the position the inner binding resolved as well
+// as its own. An Error above a binding that nests errors binds anew
+// around it, with those errors as children.
 //
 // [SourceError.Excerpt] marks the location of every node in the tree and
 // annotates each child with its message, with distant locations in
@@ -752,8 +755,9 @@ type SourceError struct {
 	// that does not resolve, or ErrOutOfRange for a location the source
 	// does not hold.
 	locErr error
-	// The bound children: the errors nested along the cause chain and the
-	// branches of it that lead to a location of their own.
+	// The bound children: the errors nested with WithErrors along the cause
+	// chain and every branch of the error that ends it by unwrapping to
+	// several, located or not.
 	errors []*SourceError
 	// The ranges the excerpt highlights, the location, resolved when the
 	// error was bound, and the range it covers in the source.
@@ -1181,12 +1185,15 @@ func (e *SourceError) Unwrap() error {
 	return e.err
 }
 
-// Errors returns the bound children of the [SourceError]: one SourceError
-// per error nested with [WithErrors] along the cause chain of the bound
-// error, and per branch of it that leads to a location of its own, in the
-// order they were given, each with its own location and children. A
+// Errors returns the bound children of the [SourceError]. Each error
+// nested with [WithErrors] along the cause chain of the bound error
+// becomes a child, and so does each branch of the error that ends the
+// chain by unwrapping to several, such as one from [errors.Join]. A
 // validator's report of several violations therefore unwraps to one
-// child per violation:
+// child per violation, in the order the validator gave them. Each child
+// carries its own children, if any, and a location when its error carries
+// one, so a caller checks [SourceError.Range] before it uses the
+// position:
 //
 //	for _, violation := range bound.Errors() {
 //		if rng, ok := violation.Range(); ok {

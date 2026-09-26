@@ -4524,6 +4524,19 @@ func TestSourceError_Errors(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, position.New(1, 3), rng.Start)
 
+	// Every branch of a join is a child, and a branch that carries no
+	// location binds without one.
+	var joined *niceyaml.SourceError
+
+	require.ErrorAs(t, yamltest.Bind(t, source, errors.Join(badA, errors.New("plain"))), &joined)
+
+	branches := joined.Errors()
+	require.Len(t, branches, 2)
+
+	_, resolved = branches[1].Range()
+	require.False(t, resolved)
+	require.NoError(t, branches[1].Unresolved())
+
 	// The slice is a copy.
 	children[0] = nil
 

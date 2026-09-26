@@ -87,8 +87,9 @@
 // highlighted.
 // Nested errors from [WithErrors] are structure on the Error, and binding
 // binds each of them too. [SourceError.Errors] returns one SourceError per
-// nested error, with its own resolved location and its own children, so a
-// validator's report of several violations is a tree of bound errors.
+// nested error, with its own children, if any, and its own location when
+// the nested error carries one, so a validator's report of several
+// violations is a tree of bound errors.
 // [FormatError] prints the message as a tree with a branch per nested
 // error behind its position, then the excerpt, so a log names every
 // violation and where it is. The excerpt marks every location
