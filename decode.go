@@ -1207,9 +1207,11 @@ func WithDisallowUnknownFields(disallow bool) DecodeOption {
 }
 
 // WithYAMLDecodeOptions is a [DecodeOption] that passes [yaml.DecodeOption]
-// values to the go-yaml decoder for this call, after the ones the [Source]
-// sends for every decode. It is the escape hatch for decoder settings that
-// have no option of their own.
+// values to the go-yaml decoder, after the ones the [Source] sends for
+// every decode. Each WithYAMLDecodeOptions appends to the values given
+// before it, so the go-yaml decoder receives them in the order given. It
+// is the escape hatch for decoder settings that have no option of their
+// own.
 func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 	return func(c *decodeConfig) {
 		c.yamlOpts = append(c.yamlOpts, opts...)

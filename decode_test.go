@@ -3527,6 +3527,48 @@ func TestDecoder(t *testing.T) {
 		assert.Equal(t, []string{"base"}, order, "the receiver keeps its validators")
 	})
 
+	t.Run("With adds go-yaml options after the receiver's", func(t *testing.T) {
+		t.Parallel()
+
+		type marker string
+
+		type holder struct {
+			M   any    `yaml:"m"`
+			Tag marker `yaml:"tag"`
+		}
+
+		// The go-yaml decoder keeps the last CustomUnmarshaler given for
+		// a type, so the marker a decode yields names the option that
+		// came last.
+		setMarker := func(value marker) yaml.DecodeOption {
+			return yaml.CustomUnmarshaler(func(m *marker, _ []byte) error {
+				*m = value
+
+				return nil
+			})
+		}
+
+		base := niceyaml.NewDecoder(niceyaml.WithYAMLDecodeOptions(
+			yaml.UseOrderedMap(),
+			setMarker("base"),
+		))
+		derived := base.With(niceyaml.WithYAMLDecodeOptions(setMarker("derived")))
+
+		dd := yamltest.FirstDocument(t, "m: {b: 1, a: 2}\ntag: x\n")
+
+		got, err := derived.Decode[holder](t.Context(), dd)
+		require.NoError(t, err)
+		assert.Equal(t, yaml.MapSlice{
+			{Key: "b", Value: uint64(1)},
+			{Key: "a", Value: uint64(2)},
+		}, got.M, "the receiver's options still apply")
+		assert.Equal(t, marker("derived"), got.Tag, "the derived options apply after the receiver's")
+
+		got, err = base.Decode[holder](t.Context(), dd)
+		require.NoError(t, err)
+		assert.Equal(t, marker("base"), got.Tag, "the receiver keeps its options")
+	})
+
 	t.Run("a scoped node decodes with the same options", func(t *testing.T) {
 		t.Parallel()
 

@@ -52,10 +52,11 @@ func NewDecoder(opts ...DecodeOption) *Decoder {
 }
 
 // With returns a new [*Decoder] with opts applied over the options of
-// the receiver, in order. A [WithValidator] adds to the validators the
-// receiver holds, and a setting replaces the one the receiver holds. The
-// receiver is unchanged, so a Decoder shared between callers can be
-// specialized per use:
+// the receiver, in order. [WithValidator] and [WithYAMLDecodeOptions]
+// append to the validators and go-yaml options the receiver holds, and
+// [WithSelfValidation] and [WithDisallowUnknownFields] replace the
+// setting the receiver holds. The receiver is unchanged, so a Decoder
+// shared between callers can be specialized per use:
 //
 //	strict := dec.With(niceyaml.WithDisallowUnknownFields(true))
 func (d *Decoder) With(opts ...DecodeOption) *Decoder {
