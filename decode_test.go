@@ -2345,6 +2345,121 @@ func TestDocument_DecodeInto(t *testing.T) {
 		}
 	})
 
+	t.Run("leaves the value as it is for a tagged null", func(t *testing.T) {
+		t.Parallel()
+
+		// Each input tags a value it leaves out, which the go-yaml decoder
+		// reads as null.
+		tcs := map[string]struct {
+			input string
+		}{
+			"map tag after a header": {input: "--- !!map\n"},
+			"seq tag":                {input: "!!seq\n"},
+			"null tag":               {input: "!!null\n"},
+			"local tag":              {input: "!custom\n"},
+			"anchored seq tag":       {input: "&a !!seq\n"},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				slice := []string{"default"}
+
+				err := dd.DecodeInto(t.Context(), &slice)
+				require.NoError(t, err)
+				assert.Equal(t, []string{"default"}, slice)
+
+				array := [2]string{"a", "b"}
+
+				err = dd.DecodeInto(t.Context(), &array)
+				require.NoError(t, err)
+				assert.Equal(t, [2]string{"a", "b"}, array)
+
+				config := plainConfig{Name: "default", Value: 7}
+
+				err = dd.DecodeInto(t.Context(), &config)
+				require.NoError(t, err)
+				assert.Equal(t, plainConfig{Name: "default", Value: 7}, config)
+			})
+		}
+	})
+
+	t.Run("leaves the value as it is for a scoped tagged null", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "items: !!seq\n")
+		scoped := yamltest.At(t, dd, paths.Root().Child("items"))
+
+		got, err := scoped.Decode[[]string](t.Context())
+		require.NoError(t, err)
+		assert.Nil(t, got)
+	})
+
+	t.Run("rejects a tagged value the decoder cannot read", func(t *testing.T) {
+		t.Parallel()
+
+		type listConfig struct {
+			Items []string `yaml:"items"`
+		}
+
+		// The go-yaml decoder panics on each of these, as it reads a
+		// sequence out of a tagged value that holds none.
+		tcs := map[string]struct {
+			input  string
+			decode func(ctx context.Context, dd *niceyaml.Node) error
+		}{
+			"seq tag without a value in a field": {
+				input: "name: x\nitems: !!seq\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[listConfig](ctx)
+
+					return err
+				},
+			},
+			"str tag in a field": {
+				input: "items: !!str foo\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[listConfig](ctx)
+
+					return err
+				},
+			},
+			"str tag into a slice": {
+				input: "!!str foo\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[[]string](ctx)
+
+					return err
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				var err error
+
+				require.NotPanics(t, func() {
+					err = tc.decode(t.Context(), dd)
+				})
+				require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+
+				var srcErr *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &srcErr, "the rejection is not bound to the source")
+
+				_, ok := errors.AsType[yaml.Error](err)
+				assert.False(t, ok, "a go-yaml error is in the chain")
+			})
+		}
+	})
+
 	t.Run("decodes each document of a stream with a comment-only document", func(t *testing.T) {
 		t.Parallel()
 

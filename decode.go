@@ -1310,9 +1310,13 @@ func (n *Node) yamlOptions(yamlOpts []yaml.DecodeOption) []yaml.DecodeOption {
 // other, such as a canceled context, as it is. A node without content,
 // the body of an empty document, leaves v as it is, so defaults already
 // in v survive, as [Node.DecodeInto] promises. [yaml.Unmarshal] instead
-// zeroes its target for input that holds no value.
+// zeroes its target for input that holds no value. A tagged null, such
+// as a "!!seq" tag over no value, also leaves v as it is, since the
+// go-yaml decoder reads it as no value. A panic in the decoder comes back
+// as an error that matches [ErrDecodeRejected], bound at the first token
+// of node.
 func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []yaml.DecodeOption) error {
-	if !hasContent(node) {
+	if !hasContent(node) || isTaggedNull(node) {
 		return nil
 	}
 
@@ -1330,7 +1334,11 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 		_ = dec.DecodeFromNodeContext(ctx, n.doc.root.Body, &sink) //nolint:errcheck // The pass only primes anchors.
 	}
 
-	return n.bindDecodeError(dec.DecodeFromNodeContext(ctx, node, v))
+	// The go-yaml decoder panics on some values it cannot read, such as a
+	// tagged null under a mapping key decoded into a slice. The recover
+	// also catches a panic in a value's own UnmarshalYAML, which then
+	// comes back as a rejection too.
+	return n.bindDecodeError(decodeWithRecover(ctx, dec, node, v))
 }
 
 // bindDecodeError binds an error from the decoder to the source: a
@@ -1445,6 +1453,53 @@ func hasContent(node ast.Node) bool {
 	default:
 		return true
 	}
+}
+
+// isTaggedNull reports whether node, or the value an anchor on node
+// names, is a tag the go-yaml decoder reads as null: a "!!null" tag over
+// any value, or a tag such as "!!seq", "!!map", or a local one over no
+// value. [yaml.Unmarshal] reads a document whose body is a tagged null as
+// empty. A tag that converts its value, such as "!!str" or "!!int",
+// reads as a value even over no value, as does any tag after a %TAG
+// directive that redefines the "!!" handle.
+func isTaggedNull(node ast.Node) bool {
+	if anchor, ok := node.(*ast.AnchorNode); ok {
+		node = anchor.Value
+	}
+
+	tag, ok := node.(*ast.TagNode)
+	if !ok || tag.Start == nil || tag.Directive != nil {
+		return false
+	}
+
+	switch token.ReservedTagKeyword(tag.Start.Value) {
+	case token.NullTag:
+		return true
+
+	case token.StringTag, token.IntegerTag, token.FloatTag, token.BooleanTag,
+		token.TimestampTag, token.BinaryTag:
+		return false
+
+	default:
+		return isNilNode(tag.Value) || tag.Value.Type() == ast.NullType
+	}
+}
+
+// decodeWithRecover decodes node into v with dec. It turns a panic in the
+// decoder into an [*Error] that matches [ErrDecodeRejected], with no
+// [yaml.Error] behind it, located at the first token of node.
+func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v any) (err error) {
+	defer func() {
+		p := recover()
+		if p == nil {
+			return
+		}
+
+		first, _ := tokenBounds(node)
+		err = WrapError(fmt.Errorf("%w: panic: %v", ErrDecodeRejected, p), atToken(first))
+	}()
+
+	return dec.DecodeFromNodeContext(ctx, node, v) //nolint:wrapcheck // The caller binds the error.
 }
 
 // Decode validates and decodes the node, which is the whole document for
