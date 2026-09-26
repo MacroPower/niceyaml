@@ -1412,6 +1412,10 @@ func Bindings(err error) iter.Seq[*SourceError] {
 func eachBinding(err error, visit func(*SourceError) bool) bool {
 	switch x := err.(type) { //nolint:errorlint // Walks the tree one node at a time.
 	case *SourceError:
+		if x == nil {
+			return true
+		}
+
 		return visit(x)
 
 	case interface{ Unwrap() error }:

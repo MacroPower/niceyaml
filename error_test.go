@@ -4272,6 +4272,12 @@ func TestBindings(t *testing.T) {
 		"no binding": {
 			err: errors.New("plain"),
 		},
+		"nil binding is none": {
+			err: fmt.Errorf("ctx: %w", (*niceyaml.SourceError)(nil)),
+		},
+		"nil binding in a join is none": {
+			err: errors.Join(errors.New("plain"), (*niceyaml.SourceError)(nil)),
+		},
 		"one binding": {
 			err:  fmt.Errorf("document 0: %w", first),
 			want: []error{first},
@@ -5423,6 +5429,12 @@ func TestAllBindings(t *testing.T) {
 		},
 		"no binding": {
 			err: errors.New("plain"),
+		},
+		"nil binding is none": {
+			err: fmt.Errorf("ctx: %w", (*niceyaml.SourceError)(nil)),
+		},
+		"nil binding in a join is none": {
+			err: errors.Join(errors.New("plain"), (*niceyaml.SourceError)(nil)),
 		},
 		"one binding through a wrapper": {
 			err:  fmt.Errorf("document 0: %w", first),
