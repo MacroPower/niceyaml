@@ -4226,6 +4226,85 @@ func TestPrinter_Layout_Width_StyledAnnotation(t *testing.T) {
 	assert.Equal(t, widest, p.Layout(view).Width())
 }
 
+func TestPrinter_Layout_StyledAnnotationRows(t *testing.T) {
+	t.Parallel()
+
+	// A style with a width, vertical padding, a margin, or a border lays an
+	// annotation out over more rows than the wrap gives it. The layout
+	// counts and measures those rows as Print writes them, and Print puts
+	// the gutter on each of them.
+	tcs := map[string]struct {
+		style  lipgloss.Style
+		gutter printer.Gutter
+		wrap   int
+		col    int
+	}{
+		"width": {
+			style:  lipgloss.NewStyle().Width(6),
+			gutter: printer.NoGutter,
+		},
+		"vertical padding": {
+			style:  lipgloss.NewStyle().PaddingTop(1),
+			gutter: printer.NoGutter,
+		},
+		"margin": {
+			style:  lipgloss.NewStyle().MarginBottom(1),
+			gutter: printer.NoGutter,
+		},
+		"border": {
+			style:  lipgloss.NewStyle().Border(lipgloss.NormalBorder()),
+			gutter: printer.NoGutter,
+		},
+		"continuation rows": {
+			style:  lipgloss.NewStyle().PaddingLeft(2),
+			gutter: printer.NoGutter,
+			wrap:   12,
+			col:    2,
+		},
+		"gutter": {
+			style:  lipgloss.NewStyle().Width(6),
+			gutter: printer.DefaultGutter,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := niceyaml.NewSourceFromString("a: 1\n").View()
+			view.Annotate(0, line.Annotation{Content: "hello world foo", Placement: line.Below, Col: tc.col})
+
+			p := printer.New(
+				printer.WithContainerStyle(lipgloss.NewStyle()),
+				printer.WithGutter(tc.gutter),
+				printer.WithWrap(tc.wrap),
+				printer.WithStyles(style.New(
+					lipgloss.NewStyle(),
+					style.Set(kind.UIAnnotation, tc.style),
+				)),
+			)
+
+			printed := strings.Split(p.Print(view), "\n")
+			l := p.Layout(view)
+
+			require.Len(t, printed, l.Rows())
+			assert.Greater(t, l.Rows(), 2, "the annotation takes several rows")
+
+			widest := 0
+			for _, row := range printed {
+				widest = max(widest, lipgloss.Width(row))
+			}
+
+			assert.Equal(t, widest, l.Width())
+
+			gutter := strings.Repeat(" ", l.GutterWidth())
+			for i, row := range printed[1:] {
+				assert.True(t, strings.HasPrefix(ansi.Strip(row), gutter), "row %d: %q", i+1, row)
+			}
+		})
+	}
+}
+
 func TestPrinter_WithGutter_Nil(t *testing.T) {
 	t.Parallel()
 

@@ -3,7 +3,6 @@ package printer
 import (
 	"slices"
 	"sort"
-	"strings"
 	"unicode"
 
 	"charm.land/lipgloss/v2"
@@ -105,9 +104,9 @@ func (p *Printer) layoutLine(view *line.View, idx int, ln *line.Line, gutterWidt
 	return ll
 }
 
-// layoutAnnotation returns the number of rows the annotations of line idx
-// at placement take, as [Printer.renderAnnotation] renders them, and
-// raises *width to the widest of them.
+// layoutAnnotation returns the number of rows the styled annotations of
+// line idx at placement take, as [Printer.renderAnnotation] writes them,
+// and raises *width to the widest of them.
 func (p *Printer) layoutAnnotation(
 	view *line.View,
 	ln *line.Line,
@@ -118,18 +117,8 @@ func (p *Printer) layoutAnnotation(
 	var rows int
 
 	for _, group := range p.annotationGroups(view, ln, idx, gutterWidth, placement) {
-		// The width of each row comes from its styled form, as
-		// renderAnnotation renders it, since the style of the kind may
-		// pad or transform the text.
-		style := p.styles.Style(group.kind)
-
-		for j, row := range group.rows {
-			prefix := group.indent
-			if j > 0 {
-				prefix = strings.Repeat(" ", group.indentWidth)
-			}
-
-			*width = max(*width, gutterWidth+lipgloss.Width(style.Render(prefix+row)))
+		for _, row := range group.rows {
+			*width = max(*width, gutterWidth+lipgloss.Width(row))
 		}
 
 		rows += len(group.rows)
@@ -200,8 +189,8 @@ func (l Layout) position(i int) (int, bool) {
 }
 
 // LineRows returns the number of rows line i of the content takes: one
-// for each wrapped piece of its content and one for each wrapped piece of
-// its annotations. A line the layout does not hold takes none.
+// for each wrapped piece of its content and one for each row its styled
+// annotations take. A line the layout does not hold takes none.
 func (l Layout) LineRows(i int) int {
 	k, ok := l.position(i)
 	if !ok {

@@ -896,12 +896,10 @@ func (p *Printer) renderAnnotation(
 	var rows []string
 
 	for _, group := range p.annotationGroups(view, ln, idx, gutterWidth, placement) {
-		for j, subLine := range group.rows {
-			var sb strings.Builder
-
+		for _, row := range group.rows {
 			// Every row after the first of the line's annotation block is
 			// a continuation, whichever kind group it belongs to.
-			sb.WriteString(p.renderGutter(GutterContext{
+			gutter := p.renderGutter(GutterContext{
 				Index:      idx,
 				Number:     ln.Number(),
 				MaxNumber:  maxNumber,
@@ -909,37 +907,27 @@ func (p *Printer) renderAnnotation(
 				Flag:       view.Flag(idx),
 				Annotation: true,
 				Styles:     p.styles,
-			}, gutterWidth))
+			}, gutterWidth)
 
-			prefix := group.indent
-			if j > 0 {
-				prefix = strings.Repeat(" ", group.indentWidth)
-			}
-
-			sb.WriteString(p.styles.Style(group.kind).Render(prefix + subLine))
-
-			rows = append(rows, sb.String())
+			rows = append(rows, gutter+row)
 		}
 	}
 
 	return rows
 }
 
-// annotationGroup is the rendered text of the annotations of one Kind on a
-// line: the style to render it in, the indent every row aligns under, and
-// the rows the body wraps to.
+// annotationGroup holds the annotations of one Kind on a line as the rows
+// they take once the printer wraps and styles them. Each row is one
+// terminal row, without the gutter.
 type annotationGroup struct {
-	indent      string
-	kind        kind.Kind
-	rows        []string
-	indentWidth int
+	rows []string
 }
 
 // annotationGroups renders the annotations of line idx of view, which is
 // ln, at the given placement: one group per [line.Annotation.Kind], as
 // [line.Annotations.ByKind] orders them, each rendered by the
-// [AnnotationFunc] and wrapped to the printer width. It leaves out a group
-// the func leaves out.
+// [AnnotationFunc], wrapped to the printer width, and styled in the style
+// of its kind. It leaves out a group the func leaves out.
 func (p *Printer) annotationGroups(
 	view *line.View,
 	ln *line.Line,
@@ -964,14 +952,6 @@ func (p *Printer) annotationGroups(
 			continue
 		}
 
-		// The indent is the padding to the column plus the marker. It
-		// stays out of the wrapped text and comes back on every row: the
-		// first row keeps it as rendered and continuation rows get the
-		// same width in spaces, so the annotation column survives the
-		// wrap. An annotation column past the width wins over the width,
-		// and its rows then run wider, since the body still gets one
-		// column.
-		//
 		// The printer escapes the text, so a control character in a
 		// message shows as its picture and the wrap measures the cells
 		// the terminal shows. A newline is a row break, so the text is
@@ -980,23 +960,43 @@ func (p *Printer) annotationGroups(
 		indent := strings.Repeat(" ", ColWidth(ln.Content(), max(0, row.Col))) + marker
 		indentWidth := lipgloss.Width(indent)
 
+		var wrapped []string
+
+		for text := range strings.SplitSeq(row.Text, "\n") {
+			wrapped = append(wrapped, p.wrapContent(escape.Control(text), gutterWidth+indentWidth)...)
+		}
+
 		k := row.Kind
 		if k == "" {
 			k = annotationKind(group[0].Kind)
 		}
 
+		kindStyle := p.styles.Style(k)
+
+		// The indent is the padding to the column plus the marker. It
+		// stays out of the wrapped text and comes back on every row: the
+		// first row keeps it as rendered and continuation rows get the
+		// same width in spaces, so the annotation column survives the
+		// wrap. An annotation column past the width wins over the width,
+		// and its rows then run wider, since the body still gets one
+		// column.
+		//
+		// The style of the kind may lay a row out over several terminal
+		// rows, through a width, vertical padding, a margin, or a border.
+		// The group keeps each terminal row apart, so Print puts the
+		// gutter on each one and Layout counts each one.
 		var rows []string
 
-		for text := range strings.SplitSeq(row.Text, "\n") {
-			rows = append(rows, p.wrapContent(escape.Control(text), gutterWidth+indentWidth)...)
+		for j, text := range wrapped {
+			prefix := indent
+			if j > 0 {
+				prefix = strings.Repeat(" ", indentWidth)
+			}
+
+			rows = append(rows, strings.Split(kindStyle.Render(prefix+text), "\n")...)
 		}
 
-		groups = append(groups, annotationGroup{
-			kind:        k,
-			indent:      indent,
-			indentWidth: indentWidth,
-			rows:        rows,
-		})
+		groups = append(groups, annotationGroup{rows: rows})
 	}
 
 	return groups
