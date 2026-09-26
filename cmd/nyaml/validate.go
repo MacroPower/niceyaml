@@ -71,8 +71,8 @@ func validateCmd() *cobra.Command {
 // the terminal width. The source's file path is absolute, so SchemaStore
 // patterns that name parent directories, such as
 // "**/.github/workflows/*.yml", match whatever the working directory is.
-// When the read fails, no source exists to name the file, so validateFile
-// puts the path in front of the error itself.
+// When the read fails, the read error already names the file, so
+// validateFile returns it as is.
 func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) error {
 	absPath, err := filepath.Abs(yamlPath)
 	if err != nil {
@@ -88,7 +88,7 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) er
 		niceyaml.WithFilePath(absPath),
 	)
 	if err != nil {
-		return fmt.Errorf("%s: %w", yamlPath, err)
+		return err
 	}
 
 	docs, err := source.Documents()

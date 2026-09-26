@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -129,6 +130,17 @@ func TestValidateFileRoutesOnAbsolutePath(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, path, got)
 	assert.Contains(t, err.Error(), rel+":1:1: ")
+}
+
+func TestValidateFileUnreadable(t *testing.T) {
+	t.Parallel()
+
+	// The read error already names the file, so the message names it once.
+	path := filepath.Join(t.TempDir(), "missing.yaml")
+
+	err := validateFile(t.Context(), path, schema.NewRegistry())
+	require.ErrorIs(t, err, fs.ErrNotExist)
+	assert.Equal(t, 1, strings.Count(err.Error(), path))
 }
 
 func TestValidateCmdSchemaError(t *testing.T) {
