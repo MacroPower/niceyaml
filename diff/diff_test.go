@@ -1162,12 +1162,11 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		before      string
-		after       string
-		wantBefore  []wantLine
-		wantAfter   []wantLine
-		wantRowLen  int
-		description string
+		before     string
+		after      string
+		wantBefore []wantLine
+		wantAfter  []wantLine
+		wantRowLen int
 	}{
 		"no changes": {
 			before: "key: value\n",
