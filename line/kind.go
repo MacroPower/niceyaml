@@ -39,7 +39,6 @@ var tokenKinds = map[token.Type]kind.Kind{
 	token.SequenceEntryType:  kind.PunctuationSequenceEntry,
 	token.SequenceStartType:  kind.PunctuationSequenceStart,
 	token.SingleQuoteType:    kind.LiteralStringSingle,
-	token.SpaceType:          kind.Text,
 	token.StringType:         kind.LiteralString,
 	token.TagType:            kind.NameDecorator,
 	token.UnknownType:        kind.GenericErrorUnknown,
