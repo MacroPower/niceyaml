@@ -3618,6 +3618,72 @@ func TestDocument_At_Scope(t *testing.T) {
 		assert.Equal(t, "a\nb\n", text.Tokens()[1].Value)
 	})
 
+	t.Run("scope ends on the last line of content", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input  string
+			path   paths.Path
+			span   position.Span
+			tokens []string
+		}{
+			"block scalar with trailing blank lines": {
+				input:  "a: |\n  t\n\n\nb: 1\n",
+				path:   paths.Root().Child("a"),
+				span:   position.NewSpan(0, 2),
+				tokens: []string{"|", "t\n"},
+			},
+			"kept block scalar with trailing blank lines": {
+				input:  "a: |+\n  t\n\n\nb: 1\n",
+				path:   paths.Root().Child("a"),
+				span:   position.NewSpan(0, 2),
+				tokens: []string{"|+", "t\n\n\n"},
+			},
+			"multi-line plain scalar": {
+				input:  "a: one\n  two\n  three\nb: 1\n",
+				path:   paths.Root().Child("a"),
+				span:   position.NewSpan(0, 3),
+				tokens: []string{"one two three"},
+			},
+			"multi-line double-quoted scalar": {
+				input:  "a: \"one\n  two\"\nb: 1\n",
+				path:   paths.Root().Child("a"),
+				span:   position.NewSpan(0, 2),
+				tokens: []string{"one two"},
+			},
+			"CRLF source": {
+				input:  "a:\r\n  x: 1\r\n  y: |\r\n    t\r\nb: 1\r\n",
+				path:   paths.Root().Child("a"),
+				span:   position.NewSpan(1, 4),
+				tokens: []string{"x", ":", "1", "y", ":", "|", "t\n"},
+			},
+			"element that ends in a trailing comment": {
+				input:  "- x: 1\n  y: 2 # c\n- b\n",
+				path:   paths.Root().Index(0),
+				span:   position.NewSpan(0, 2),
+				tokens: []string{"x", ":", "1", "y", ":", "2", " c"},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				scoped := yamltest.At(t, yamltest.FirstDocument(t, tc.input), tc.path)
+
+				assert.Equal(t, tc.span, scoped.Span())
+
+				var got []string
+
+				for _, tk := range scoped.Tokens() {
+					got = append(got, tk.Value)
+				}
+
+				assert.Equal(t, tc.tokens, got)
+			})
+		}
+	})
+
 	t.Run("scopes chain to the same extent", func(t *testing.T) {
 		t.Parallel()
 
@@ -3766,6 +3832,87 @@ func TestDocument_At_FlowCollectionSpan(t *testing.T) {
 			path:   paths.Root().Child("a"),
 			span:   position.NewSpan(0, 1),
 			tokens: []string{"[", "1", ",", "2", "]"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			scoped := yamltest.At(t, yamltest.FirstDocument(t, tc.input), tc.path)
+
+			assert.Equal(t, tc.span, scoped.Span())
+
+			var got []string
+
+			for _, tk := range scoped.Tokens() {
+				got = append(got, tk.Value)
+			}
+
+			assert.Equal(t, tc.tokens, got)
+		})
+	}
+}
+
+func TestDocument_At_ZeroWidthBoundary(t *testing.T) {
+	t.Parallel()
+
+	// A token that holds no text can share its offset with a token of
+	// another node. The empty content of a block scalar sits where the
+	// next key starts, and an implicit null takes the offset of the ":"
+	// or "-" before it. The span and the tokens of a scoped Document keep
+	// to the tokens of the node.
+	tcs := map[string]struct {
+		input  string
+		path   paths.Path
+		span   position.Span
+		tokens []string
+	}{
+		"empty block scalar before a sibling": {
+			input:  "a: |\nb: 1\n",
+			path:   paths.Root().Child("a"),
+			span:   position.NewSpan(0, 1),
+			tokens: []string{"|", ""},
+		},
+		"empty folded scalar before an indented sibling": {
+			input:  "x:\n  a: >\n  b: 1\n",
+			path:   paths.Root().Child("x", "a"),
+			span:   position.NewSpan(1, 2),
+			tokens: []string{">", ""},
+		},
+		"mapping that ends in an empty block scalar": {
+			input:  "x:\n  a: 1\n  b: |\ny: 1\n",
+			path:   paths.Root().Child("x"),
+			span:   position.NewSpan(1, 3),
+			tokens: []string{"a", ":", "1", "b", ":", "|", ""},
+		},
+		"key after an empty block scalar": {
+			input:  "a: |\nb: 1\n",
+			path:   paths.Root().Child("b").Key(),
+			span:   position.NewSpan(1, 2),
+			tokens: []string{"b"},
+		},
+		"implicit null in a mapping": {
+			input: "a:\nb: 1\n",
+			path:  paths.Root().Child("a"),
+			span:  position.NewSpan(0, 1),
+		},
+		"implicit null in a sequence": {
+			input: "- \n- 1\n",
+			path:  paths.Root().Index(0),
+			span:  position.NewSpan(0, 1),
+		},
+		"mapping that ends in an implicit null": {
+			input:  "x:\n  a: 1\n  b:\ny: 2\n",
+			path:   paths.Root().Child("x"),
+			span:   position.NewSpan(1, 3),
+			tokens: []string{"a", ":", "1", "b", ":"},
+		},
+		"sequence that ends in an implicit null": {
+			input:  "x:\n  - a\n  -\ny: 1\n",
+			path:   paths.Root().Child("x"),
+			span:   position.NewSpan(1, 3),
+			tokens: []string{"-", "a", "-"},
 		},
 	}
 
@@ -4258,6 +4405,17 @@ func TestNode_Nodes(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, nodes, 1)
 		assert.Equal(t, "$.spec.image", nodes[0].Path().String())
+	})
+
+	t.Run("an empty block scalar stays off the line of its sibling", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "x:\n  a: |\n  b: 1\n")
+
+		nodes, err := dd.Nodes(paths.Root().Child("x", "a"))
+		require.NoError(t, err)
+		require.Len(t, nodes, 1)
+		assert.Equal(t, position.NewSpan(1, 2), nodes[0].Span())
 	})
 
 	t.Run("a path that selects nothing yields no nodes", func(t *testing.T) {

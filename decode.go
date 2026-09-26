@@ -234,6 +234,9 @@ func newDocuments(src *Source, file *ast.File) []*Node {
 	for i, doc := range docs {
 		doc.index = i
 		doc.preamble = preambleLen(doc.tokens)
+		doc.positioned = slices.DeleteFunc(slices.Clone(doc.tokens), func(tk *token.Token) bool {
+			return tk == nil || tk.Position == nil
+		})
 		doc.node = &Node{source: src, doc: doc, content: doc.tokens, span: spans[i]}
 		nodes[i] = doc.node
 	}
@@ -518,7 +521,10 @@ type document struct {
 	root *ast.DocumentNode
 	// The tokens of the whole document.
 	tokens token.Tokens
-	index  int
+	// The tokens that carry a position, in the order of their offsets,
+	// which the extent of a Node searches.
+	positioned token.Tokens
+	index      int
 	// The number of tokens at the start of tokens before the content.
 	preamble int
 }
@@ -745,47 +751,109 @@ func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 	return nodes, nil
 }
 
-// extent returns the lines and the tokens of node in the document: the
-// tokens of the document from the first token under the node through the
-// last, in source order, and the lines from the one the first starts on
-// through the one the last ends on. A node whose tokens carry no position
-// covers no lines and holds no tokens.
+// extent returns the lines and the tokens of node in the document. The
+// tokens run from the first token under the node through the last, in
+// source order. The lines run from the one the first token starts on
+// through the last one that holds content of a token among them. A node
+// whose tokens carry no position covers no lines and holds no tokens. A
+// node with no token in the document, such as an implicit null the
+// parser adds, holds no tokens and covers the line its token names.
 func (n *Node) extent(node ast.Node) (position.Span, token.Tokens) {
 	first, last := tokenBounds(node)
-	if first == nil || last == nil {
+	if len(first) == 0 {
 		return position.Span{}, nil
 	}
 
-	var tks token.Tokens
+	total := n.source.lines.Len()
+	lo, hi := first[0].Position.Offset, last[0].Position.Offset
 
-	for _, tk := range n.doc.tokens {
-		if tk == nil || tk.Position == nil {
-			continue
-		}
+	all := n.doc.positioned
+	from := sort.Search(len(all), func(i int) bool { return all[i].Position.Offset >= lo })
+	to := sort.Search(len(all), func(i int) bool { return all[i].Position.Offset > hi })
+	tks := all[from:to:to]
 
-		if tk.Position.Offset >= first.Position.Offset && tk.Position.Offset <= last.Position.Offset {
-			tks = append(tks, tk)
+	// A token that holds no text can share its offset with a token of
+	// another node. The empty content of a block scalar sits where the
+	// next key starts, and an implicit null takes the offset of the ":"
+	// or "-" before it. A token at either end of the window therefore
+	// belongs to the node only when the node holds it.
+	outside := func(tk *token.Token) bool {
+		switch tk.Position.Offset {
+		case lo:
+			return !slices.ContainsFunc(first, func(b *token.Token) bool { return sameToken(tk, b) })
+		case hi:
+			return !slices.ContainsFunc(last, func(b *token.Token) bool { return sameToken(tk, b) })
+		default:
+			return false
 		}
+	}
+
+	if slices.ContainsFunc(tks, outside) {
+		tks = slices.DeleteFunc(slices.Clone(tks), outside)
 	}
 
 	if len(tks) == 0 {
-		return position.Span{}, nil
+		at := min(max(first[0].Position.Line-1, 0), total)
+
+		return position.NewSpan(at, min(at+1, total)), nil
 	}
 
 	start := tks[0].Position.Line - 1
 	end := start
 
-	// The content of the last token ends the span. Its text runs on
-	// through the line breaks and the indentation of the next line, which
-	// the lexer folds into a scalar, so the ranges of the text would put a
-	// sibling's line into the span.
-	for _, r := range n.source.lines.ContentRanges(tks[len(tks)-1]) {
-		end = max(end, r.LastLine())
+	// The last token with content ends the span. A token after it, such as
+	// the empty content of a block scalar, holds no text to put a line
+	// into the span.
+	for _, tk := range slices.Backward(tks) {
+		if lastLine, ok := n.lastContentLine(tk); ok {
+			end = max(end, lastLine)
+
+			break
+		}
 	}
 
-	total := n.source.lines.Len()
-
 	return position.NewSpan(min(max(start, 0), total), min(end+1, total)), tks
+}
+
+// lastContentLine returns the last line of the source that holds content
+// of tk other than spaces. The lexer folds the line breaks and the
+// indentation of the next line into a scalar, and a line where tk holds
+// only those does not count, so a sibling's line stays out of the span.
+// The boolean is false when tk holds no content on any line.
+func (n *Node) lastContentLine(tk *token.Token) (int, bool) {
+	lines := n.source.lines
+
+	last, found := 0, false
+
+	for i := max(tk.Position.Line-1, 0); i < lines.Len(); i++ {
+		sp, ok := lines.Line(i).ContentSpan(tk)
+		if !ok {
+			// The lines of a token follow one another from the line its
+			// position names, so the first line without it ends the
+			// search. A token that holds no text, such as the empty
+			// content of a block scalar, is on no line.
+			break
+		}
+
+		if sp.Len() > 0 {
+			last, found = i, true
+		}
+	}
+
+	return last, found
+}
+
+// sameToken reports whether a and b are one token or copies of one, with
+// the same type, value, origin, and position. The parser builds the AST
+// from clones of the tokens of the document, so a token from a node
+// matches its original by these fields rather than by pointer.
+func sameToken(a, b *token.Token) bool {
+	return a.Type == b.Type &&
+		a.Value == b.Value &&
+		a.Origin == b.Origin &&
+		a.Position.Line == b.Position.Line &&
+		a.Position.Column == b.Position.Column &&
+		a.Position.Offset == b.Position.Offset
 }
 
 // isNilNode reports whether node is nil, including a typed nil a
@@ -795,9 +863,9 @@ func isNilNode(node ast.Node) bool {
 }
 
 // tokenBounds returns the tokens under node with the lowest and the
-// highest offset, comments included, or nil when no token under node
-// carries a position.
-func tokenBounds(node ast.Node) (*token.Token, *token.Token) {
+// highest offset, comments included, each in walk order, or nil when no
+// token under node carries a position.
+func tokenBounds(node ast.Node) (token.Tokens, token.Tokens) {
 	if isNilNode(node) {
 		return nil, nil
 	}
@@ -810,9 +878,10 @@ func tokenBounds(node ast.Node) (*token.Token, *token.Token) {
 }
 
 // boundsFinder is an [ast.Visitor] that records the tokens with the lowest
-// and the highest offset among the nodes it visits.
+// and the highest offset among the nodes it visits, all of them when
+// several share the offset.
 type boundsFinder struct {
-	first, last *token.Token
+	first, last token.Tokens
 }
 
 // Visit implements [ast.Visitor].
@@ -824,10 +893,20 @@ func (b *boundsFinder) Visit(node ast.Node) ast.Visitor {
 	b.consider(node.GetToken())
 
 	// The walk visits the nodes of a collection, not the token that closes
-	// a flow collection, which the node holds beside them.
+	// a flow collection or the "-" that opens each entry of a block
+	// sequence, which the node holds beside them. An entry whose value is
+	// an implicit null shares the offset of its "-", which then ends the
+	// sequence.
 	switch n := node.(type) {
 	case *ast.SequenceNode:
 		b.consider(n.End)
+
+		for _, entry := range n.Entries {
+			if entry != nil {
+				b.consider(entry.Start)
+			}
+		}
+
 	case *ast.MappingNode:
 		b.consider(n.End)
 	}
@@ -835,19 +914,28 @@ func (b *boundsFinder) Visit(node ast.Node) ast.Visitor {
 	return b
 }
 
-// consider widens the bounds to tk. A nil token, or one without a
-// position, changes nothing.
+// consider widens the bounds to tk, or adds tk to the tokens at a bound
+// that it shares the offset of. A nil token, or one without a position,
+// changes nothing.
 func (b *boundsFinder) consider(tk *token.Token) {
 	if tk == nil || tk.Position == nil {
 		return
 	}
 
-	if b.first == nil || tk.Position.Offset < b.first.Position.Offset {
-		b.first = tk
+	off := tk.Position.Offset
+
+	switch {
+	case len(b.first) == 0 || off < b.first[0].Position.Offset:
+		b.first = append(b.first[:0], tk)
+	case off == b.first[0].Position.Offset:
+		b.first = append(b.first, tk)
 	}
 
-	if b.last == nil || tk.Position.Offset > b.last.Position.Offset {
-		b.last = tk
+	switch {
+	case len(b.last) == 0 || off > b.last[0].Position.Offset:
+		b.last = append(b.last[:0], tk)
+	case off == b.last[0].Position.Offset:
+		b.last = append(b.last, tk)
 	}
 }
 
@@ -1558,8 +1646,13 @@ func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v 
 			return
 		}
 
-		first, _ := tokenBounds(node)
-		err = WrapError(fmt.Errorf("%w: panic: %v", ErrDecodeRejected, p), atToken(first))
+		var at *token.Token
+
+		if first, _ := tokenBounds(node); len(first) > 0 {
+			at = first[0]
+		}
+
+		err = WrapError(fmt.Errorf("%w: panic: %v", ErrDecodeRejected, p), atToken(at))
 	}()
 
 	return dec.DecodeFromNodeContext(ctx, node, v) //nolint:wrapcheck // The caller binds the error.

@@ -130,6 +130,48 @@ func BenchmarkNode_DecodeScoped(b *testing.B) {
 	}
 }
 
+func BenchmarkNode_Nodes(b *testing.B) {
+	sizes := []struct {
+		name  string
+		items int
+	}{
+		{"items_100", 100},
+		{"items_1000", 1000},
+		{"items_10000", 10000},
+	}
+
+	path := paths.Root().Child("items").IndexAll()
+
+	for _, sz := range sizes {
+		var sb strings.Builder
+
+		sb.WriteString("items:\n")
+
+		for i := range sz.items {
+			fmt.Fprintf(&sb, "  - name: item_%d\n    value: %d\n", i, i)
+		}
+
+		doc, err := niceyaml.NewSourceFromString(sb.String()).Document()
+		require.NoError(b, err)
+
+		b.Run(sz.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for b.Loop() {
+				items, err := doc.Nodes(path)
+				if err != nil {
+					b.Fatal(err)
+				}
+
+				if len(items) != sz.items {
+					b.Fatalf("got %d nodes, want %d", len(items), sz.items)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkSourceRunes(b *testing.B) {
 	sizes := []struct {
 		name  string
