@@ -617,9 +617,6 @@ func (r *Registry) cached(key string) (*Schema, bool) {
 	return v, ok
 }
 
-// compile loads and compiles the schema ref names and caches the result
-// under its Key. When an earlier call cached a schema under that Key,
-// compile keeps it, so every caller sees one schema per Key.
 // A panicError carries a panic out of a shared load as an error, so it
 // can cross the singleflight group and be raised again by every caller
 // that joined the load.
@@ -644,6 +641,9 @@ func (r *Registry) compileRecovering(ctx context.Context, ref Ref) (err error) {
 	return r.compile(ctx, ref)
 }
 
+// compile loads and compiles the schema ref names and caches the result
+// under its Key. When an earlier call cached a schema under that Key,
+// compile keeps it, so every caller sees one schema per Key.
 func (r *Registry) compile(ctx context.Context, ref Ref) error {
 	key := ref.Key()
 
