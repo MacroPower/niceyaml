@@ -39,6 +39,28 @@ func TestLine_Kind(t *testing.T) {
 			input: "<<: *base\n",
 			want:  []kind.Kind{kind.NameAliasMerge, kind.PunctuationMappingValue, kind.NameAlias, kind.NameAlias},
 		},
+		"comment between explicit key and colon": {
+			input: "? a # c\n: b\n",
+			want:  []kind.Kind{kind.NameTag, kind.NameTag, kind.Comment},
+		},
+		"flow sequence key keeps its closing bracket": {
+			input: "[a]: v\n",
+			want: []kind.Kind{
+				kind.PunctuationSequenceStart,
+				kind.LiteralString,
+				kind.PunctuationSequenceEnd,
+				kind.PunctuationMappingValue,
+				kind.LiteralString,
+			},
+		},
+		"tag before an empty key stays a decorator": {
+			input: "!!null : v\n",
+			want:  []kind.Kind{kind.NameDecorator, kind.PunctuationMappingValue, kind.LiteralString},
+		},
+		"sequence entry before an empty key stays punctuation": {
+			input: "- : v\n",
+			want:  []kind.Kind{kind.PunctuationSequenceEntry, kind.PunctuationMappingValue, kind.LiteralString},
+		},
 		"block scalar continuation is a string": {
 			input: "text: |\n  hello\n",
 			line:  1,

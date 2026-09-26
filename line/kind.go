@@ -47,12 +47,13 @@ var tokenKinds = map[token.Type]kind.Kind{
 
 // TokenKind returns the [kind.Kind] the text of tk renders with: the kind
 // of its [token.Type], read with its neighbors in the chain it links
-// into. A string followed by a colon reads as a mapping key, [kind.NameTag],
-// and a token after an anchor or an alias takes the kind of that anchor
-// or alias, so the name of "&base" renders as the "&" does. A merge key
-// keeps its own kind, since the lexer reports "<<" as one only when a
-// colon follows it. A type with no kind of its own, such as a space, and
-// a nil token render as [kind.Text].
+// into. A scalar, such as a plain or quoted string, a number, a bool, or
+// a null, reads as a mapping key, [kind.NameTag], when a colon follows
+// it, even with comments between the two. Punctuation, tags, comments,
+// and merge keys keep their own kinds before a colon. A token after an
+// anchor or an alias takes the kind of that anchor or alias, so the name
+// of "&base" renders as the "&" does. A type with no kind of its own,
+// such as a space, and a nil token render as [kind.Text].
 //
 // TokenKind reads a token of a whole stream, such as one from
 // [Lines.Tokens]. [Line.Kind] reads a token on a line, whose chain stops
@@ -94,8 +95,9 @@ func tokenKind(tk, src *token.Token) kind.Kind {
 // the lookup reads the neighbor of src, whose chain spans the whole stream.
 // A key whose colon sits on the next line still reads as a key that way.
 //
-// A merge key keeps its own type, since the lexer only reports "<<" as a
-// merge key when a colon already follows it.
+// Only a scalar that [isKeyType] accepts turns into a key before a colon,
+// and the lookup skips comments on the way to that colon. Every other
+// token keeps its own type.
 func visualType(tk, src *token.Token) token.Type {
 	prevType := tk.PreviousType()
 	if tk.Prev == nil && src != nil {
@@ -106,14 +108,60 @@ func visualType(tk, src *token.Token) token.Type {
 		return prevType
 	}
 
-	nextType := tk.NextType()
-	if tk.Next == nil && src != nil {
-		nextType = src.NextType()
-	}
-
-	if nextType == token.MappingValueType && tk.Type != token.MergeKeyType {
+	if isKeyType(tk.Type) && nextSignificantType(tk, src) == token.MappingValueType {
 		return token.MappingKeyType
 	}
 
 	return tk.Type
+}
+
+// isKeyType reports whether typ is a scalar type that reads as a mapping
+// key when a colon follows it. [token.MergeKeyType] stays out, since the
+// lexer reports "<<" as a merge key only when a colon already follows it.
+func isKeyType(typ token.Type) bool {
+	switch typ {
+	case token.BinaryIntegerType,
+		token.BoolType,
+		token.DoubleQuoteType,
+		token.FloatType,
+		token.HexIntegerType,
+		token.ImplicitNullType,
+		token.InfinityType,
+		token.IntegerType,
+		token.NanType,
+		token.NullType,
+		token.OctetIntegerType,
+		token.SingleQuoteType,
+		token.StringType:
+		return true
+	default:
+		return false
+	}
+}
+
+// nextSignificantType returns the type of the first token after tk that
+// is not a comment, or [token.UnknownType] when none follows. Where the
+// chain of tk runs out, the walk carries on from src, whose chain spans
+// the whole stream.
+func nextSignificantType(tk, src *token.Token) token.Type {
+	next := skipComments(tk.Next)
+	if next == nil && src != nil {
+		next = skipComments(src.Next)
+	}
+
+	if next == nil {
+		return token.UnknownType
+	}
+
+	return next.Type
+}
+
+// skipComments returns the first token from tk onward that is not a
+// comment, or nil when the chain ends first.
+func skipComments(tk *token.Token) *token.Token {
+	for tk != nil && tk.Type == token.CommentType {
+		tk = tk.Next
+	}
+
+	return tk
 }

@@ -255,6 +255,53 @@ func TestTokenKind(t *testing.T) {
 			},
 			want: kind.NameAliasMerge,
 		},
+		"comment followed by colon stays a comment": {
+			setup: func() *token.Token {
+				comment := newToken(token.CommentType, "# c")
+				colon := newToken(token.MappingValueType, ":")
+				comment.Next = colon
+				colon.Prev = comment
+
+				return comment
+			},
+			want: kind.Comment,
+		},
+		"sequence end followed by colon stays punctuation": {
+			setup: func() *token.Token {
+				end := newToken(token.SequenceEndType, "]")
+				colon := newToken(token.MappingValueType, ":")
+				end.Next = colon
+				colon.Prev = end
+
+				return end
+			},
+			want: kind.PunctuationSequenceEnd,
+		},
+		"integer followed by colon becomes mapping key": {
+			setup: func() *token.Token {
+				key := newToken(token.IntegerType, "1")
+				colon := newToken(token.MappingValueType, ":")
+				key.Next = colon
+				colon.Prev = key
+
+				return key
+			},
+			want: kind.NameTag,
+		},
+		"string followed by a comment then a colon becomes mapping key": {
+			setup: func() *token.Token {
+				key := newToken(token.StringType, "key")
+				comment := newToken(token.CommentType, "# c")
+				colon := newToken(token.MappingValueType, ":")
+				key.Next = comment
+				comment.Prev = key
+				comment.Next = colon
+				colon.Prev = comment
+
+				return key
+			},
+			want: kind.NameTag,
+		},
 		"collect entry type": {
 			setup: func() *token.Token {
 				return newToken(token.CollectEntryType, ",")
