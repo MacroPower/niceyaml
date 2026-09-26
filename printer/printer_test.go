@@ -2333,9 +2333,19 @@ func TestPrinter_TokenTypes_XMLStyler(t *testing.T) {
 				"<text>  </text><literalString>line2</literalString>",
 			),
 		},
-		"punctuation": {
-			input: "key: value",
-			want:  "<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
+		"flow sequence punctuation": {
+			input: "k: [a, b]",
+			want:  "<nameTag>k</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><punctuationSequenceStart>[</punctuationSequenceStart><literalString>a</literalString><punctuationCollectEntry>,</punctuationCollectEntry><text> </text><literalString>b</literalString><punctuationSequenceEnd>]</punctuationSequenceEnd>",
+		},
+		"block sequence entry": {
+			input: stringtest.JoinLF(
+				"- a",
+				"- b",
+			),
+			want: stringtest.JoinLF(
+				"<punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><literalString>a</literalString>",
+				"<punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><literalString>b</literalString>",
+			),
 		},
 		// The lexer hands the whole gap before a comment to the value
 		// token, and every cell of it renders unstyled.
