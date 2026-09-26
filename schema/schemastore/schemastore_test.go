@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -972,6 +974,47 @@ func TestSchemaStore_Resolve(t *testing.T) {
 		require.ErrorIs(t, err, schemastore.ErrNoCatalogMatch)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 		require.ErrorContains(t, err, "random.yaml")
+	})
+
+	t.Run("matches a relative path against the working directory", func(t *testing.T) {
+		t.Parallel()
+
+		// A pattern that names a directory matches a file read from inside
+		// it, as yaml-language-server matches the absolute document path.
+		// Go runs a test with the package directory as its working
+		// directory, so the pattern names that directory.
+		cwd, err := os.Getwd()
+		require.NoError(t, err)
+
+		catalog := schemastore.Catalog{
+			Schemas: []schemastore.CatalogEntry{
+				{
+					Name:      "Local Workflow",
+					URL:       "https://example.com/local.json",
+					FileMatch: []string{filepath.Base(cwd) + "/*.yml"},
+				},
+			},
+		}
+
+		server := newCatalogServer(t, catalog)
+		t.Cleanup(server.Close)
+
+		store := schemastore.New(schemastore.WithCatalogURL(server.URL))
+
+		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`on: push`), "ci.yml")
+		ref, err := store.Resolve(t.Context(), doc)
+		require.NoError(t, err)
+		assert.Equal(t, "https://example.com/local.json", ref.Key())
+
+		entry, err := store.FindMatch(t.Context(), "./ci.yml")
+		require.NoError(t, err)
+		assert.Equal(t, "Local Workflow", entry.Name)
+
+		// The error names the path as the caller wrote it.
+		_, err = store.FindMatch(t.Context(), "ci.yaml")
+		require.ErrorIs(t, err, schemastore.ErrNoCatalogMatch)
+		require.ErrorContains(t, err, `"ci.yaml"`)
+		assert.NotContains(t, err.Error(), cwd)
 	})
 
 	t.Run("loads matching schema", func(t *testing.T) {

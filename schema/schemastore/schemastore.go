@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -264,6 +265,14 @@ func (s *Store) Resolve(ctx context.Context, doc *niceyaml.Node) (schema.Ref, er
 
 // FindMatch finds the catalog entry matching a file path.
 //
+// FindMatch resolves a relative path against the working directory before
+// matching, since yaml-language-server matches the absolute path of a
+// document. A pattern such as ".github/workflows/*.yml" then matches
+// "ci.yml" read from inside that directory. A pattern matches at any
+// depth, so the directories above the working directory never stop a
+// match. For a path from [niceyaml.NewSourceFromFS], the root of the file
+// system stands for the working directory.
+//
 // The returned entry owns its FileMatch patterns, so writing to them
 // leaves the cached catalog alone.
 //
@@ -275,13 +284,24 @@ func (s *Store) FindMatch(ctx context.Context, filePath string) (CatalogEntry, e
 		return CatalogEntry{}, fmt.Errorf("%w: document has no file path", ErrNoCatalogMatch)
 	}
 
+	// Abs fails only when the working directory is unknown, and the path
+	// as written is then the closest match left.
+	matchPath := filePath
+
+	if !filepath.IsAbs(filePath) {
+		abs, err := filepath.Abs(filePath)
+		if err == nil {
+			matchPath = abs
+		}
+	}
+
 	entries, err := s.catalog(ctx)
 	if err != nil {
 		return CatalogEntry{}, err
 	}
 
 	for _, entry := range entries {
-		if filepaths.MatchAny(filePath, entry.FileMatch) {
+		if filepaths.MatchAny(matchPath, entry.FileMatch) {
 			// The cached entry shares its pattern slice with s.entries, so
 			// hand the caller a copy it can write to.
 			entry.FileMatch = slices.Clone(entry.FileMatch)
