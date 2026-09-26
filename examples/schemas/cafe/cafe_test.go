@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml"
@@ -44,7 +45,23 @@ func TestCafeBrokenConfig(t *testing.T) {
 	t.Parallel()
 
 	_, err := cafeConfig(t.Context(), cafe.BrokenYAML)
-	require.Error(t, err, "broken config should fail schema validation")
+	require.EqualError(t, err, "2 schema violations", "broken config should fail schema validation")
+
+	// Both values also fail the plain decode, so the paths confirm that
+	// the schema rejected each one.
+	var bound *niceyaml.SourceError
+
+	require.ErrorAs(t, err, &bound)
+
+	got := []string{}
+	for _, violation := range bound.Errors() {
+		path, ok := violation.Path()
+		require.True(t, ok)
+
+		got = append(got, path.String())
+	}
+
+	assert.ElementsMatch(t, []string{"$.spec.sla", "$.spec.hours.days"}, got)
 }
 
 func TestCafeSLA(t *testing.T) {
