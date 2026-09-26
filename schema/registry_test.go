@@ -986,6 +986,28 @@ func TestRegistry_CompileOptionsNotAliased(t *testing.T) {
 	require.NotErrorIs(t, err, schema.ErrNoMatch)
 }
 
+func TestRegistry_JSONSchemaOptionsNotAliased(t *testing.T) {
+	t.Parallel()
+
+	// The registry runs a CompileOption only when it first compiles a
+	// schema, so WithJSONSchemaOptions must copy its slice when the option
+	// is built. Otherwise a write after NewRegistry would turn format
+	// assertions off.
+	jopts := []jsonschema.ValidateOption{jsonschema.WithFormats(true)}
+
+	reg := schema.NewRegistry(
+		schema.WithCompileOptions(schema.WithJSONSchemaOptions(jopts...)),
+		schema.WithResolvers(schema.Embedded([]byte(`{"type": "string", "format": "ipv4"}`))),
+	)
+
+	jopts[0] = jsonschema.WithFormats(false)
+
+	doc := yamltest.FirstDocument(t, stringtest.Input(`not-an-ip`))
+	err := reg.Validate(t.Context(), doc)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, schema.ErrNoMatch)
+}
+
 func TestRegistry_CompileOptionsAppend(t *testing.T) {
 	t.Parallel()
 

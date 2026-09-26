@@ -69,7 +69,12 @@ func newCompileConfig(opts []CompileOption) compileConfig {
 // assertions or a custom format validator:
 //
 //	v, err := schema.Compile(ctx, data, schema.WithJSONSchemaOptions(jsonschema.WithFormats(true)))
+//
+// The option keeps its own copy of opts, so writing to the caller's slice
+// afterwards changes nothing, even for a [Registry] that compiles later.
 func WithJSONSchemaOptions(opts ...jsonschema.ValidateOption) CompileOption {
+	opts = slices.Clone(opts)
+
 	return func(cfg *compileConfig) {
 		cfg.jsonOpts = append(cfg.jsonOpts, opts...)
 	}
