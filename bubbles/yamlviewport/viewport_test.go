@@ -851,6 +851,35 @@ func TestViewport_LayoutChangesKeepTopLine(t *testing.T) {
 	}
 }
 
+func TestViewport_ContainerStyleKeepsTopLine(t *testing.T) {
+	t.Parallel()
+
+	// The new style makes the content area taller and narrower at once. The
+	// taller area lowers the scroll limit of the old layout to k17, but the
+	// lines wrap in the narrower area, so the new layout can still show k20
+	// at the top.
+	var src strings.Builder
+
+	for i := range 30 {
+		fmt.Fprintf(&src, "k%02d: word word word word\n", i)
+	}
+
+	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+	m.SetWidth(40)
+	m.SetHeight(13)
+	m.SetContainerStyle(lipgloss.NewStyle().PaddingTop(3))
+	m.SetRevision(niceyaml.NewSourceFromString(src.String()))
+	m.GotoBottom()
+	require.Equal(t, 20, m.YOffset())
+
+	m.SetContainerStyle(lipgloss.NewStyle().PaddingLeft(25))
+
+	assert.Equal(t, 40, m.YOffset())
+
+	top, _, _ := strings.Cut(m.View(), "\n")
+	assert.Contains(t, top, "k20:")
+}
+
 func TestViewport_SearchBeforeSize(t *testing.T) {
 	t.Parallel()
 

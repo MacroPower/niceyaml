@@ -366,19 +366,29 @@ func (m *Model) SetWidth(w int) {
 // The next read of the scroll bounds fills the new cache.
 //
 // Row offsets from the old cache point at other lines once the rows reflow,
-// so relayout records the line at the top of the view and the row within it,
-// and ensureRows scrolls back to them. An anchor that ensureRows has not
-// restored yet stays, so several changes in a row keep the original top line.
+// so relayout calls anchorTop to record the top line as the old layout shows
+// it, and ensureRows scrolls back to that line.
 func (m *Model) relayout() {
-	if !m.anchored && m.rows != nil && len(m.rows.left) > 0 {
-		first, _ := m.rowWindow()
-
-		m.anchorLine = min(first, len(m.rows.left)-1)
-		m.anchorRow = m.yOffset - m.rows.sums[m.anchorLine]
-		m.anchored = true
-	}
+	m.anchorTop()
 
 	m.rows = &rowCache{}
+}
+
+// anchorTop records the line at the top of the view and the row within it,
+// with the vertical offset clamped to the bounds of the current layout, for
+// ensureRows to restore after the rows reflow. An anchor that ensureRows has
+// not restored yet stays, so several changes in a row keep the original top
+// line.
+func (m *Model) anchorTop() {
+	if m.anchored || m.rows == nil || len(m.rows.left) == 0 {
+		return
+	}
+
+	first, _ := m.rowWindow()
+
+	m.anchorLine = min(first, len(m.rows.left)-1)
+	m.anchorRow = m.yOffset - m.rows.sums[m.anchorLine]
+	m.anchored = true
 }
 
 // renderPrinter returns the printer to render with: the configured printer
@@ -680,6 +690,10 @@ func (m *Model) ContainerStyle() lipgloss.Style {
 //
 //nolint:gocritic // hugeParam: Copying.
 func (m *Model) SetContainerStyle(s lipgloss.Style) {
+	// The style sets the content height that bounds the offset, so anchorTop
+	// reads the top line before the new style applies.
+	m.anchorTop()
+
 	m.style = s
 	m.relayout()
 }
