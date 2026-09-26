@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -114,6 +115,83 @@ func TestExportedAPI_DependencyPolicy(t *testing.T) {
 	require.Empty(t, violations, "exported API names third-party types outside the policy")
 }
 
+// TestCheckFile_Coverage checks that checkFile reads the declarations that
+// expose a type outside a named field or a plain receiver: embedded fields,
+// untyped vars, and methods on generic receivers.
+func TestCheckFile_Coverage(t *testing.T) {
+	t.Parallel()
+
+	const header = `package p
+
+import (
+	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/parser"
+)
+
+`
+
+	tcs := map[string]struct {
+		src  string
+		want []string
+	}{
+		"embedded field": {
+			src:  `type Foo struct{ ast.MappingNode }`,
+			want: []string{"Foo.MappingNode"},
+		},
+		"embedded pointer": {
+			src:  `type Foo struct{ *ast.MappingNode }`,
+			want: []string{"Foo.MappingNode"},
+		},
+		"embedded allowed type": {
+			src: `type Foo struct{ *ast.File }`,
+		},
+		"untyped var": {
+			src:  `var Default = parser.ParseComments`,
+			want: []string{"Default"},
+		},
+		"untyped var from call": {
+			src:  `var Default = ast.Mapping(nil, false)`,
+			want: []string{"Default"},
+		},
+		"function literal body": {
+			src: `var Parse = func(src []byte) (*ast.File, error) {
+	return parser.ParseBytes(src, parser.ParseComments)
+}`,
+		},
+		"method on receiver with type parameters": {
+			src: `type Map[K comparable, V any] struct{}
+
+func (m *Map[K, V]) Node() *ast.MappingNode { return nil }`,
+			want: []string{"Node"},
+		},
+		"method on unexported receiver with type parameters": {
+			src: `type pair[K comparable, V any] struct{}
+
+func (p *pair[K, V]) Node() *ast.MappingNode { return nil }`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(t.TempDir(), "src.go")
+			require.NoError(t, os.WriteFile(path, []byte(header+tc.src), 0o600))
+
+			var got []string
+
+			// A violation reads "file:line:col: Owner names ...".
+			for _, v := range checkFile(t, path) {
+				_, rest, _ := strings.Cut(v, ": ")
+				owner, _, _ := strings.Cut(rest, " ")
+				got = append(got, owner)
+			}
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 // checkFile returns the policy violations in the exported declarations of
 // the Go file at path.
 func checkFile(t *testing.T, path string) []string {
@@ -210,9 +288,19 @@ func checkFile(t *testing.T, path string) []string {
 					}
 
 				case *ast.ValueSpec:
-					for _, name := range s.Names {
-						if name.IsExported() && s.Type != nil {
+					for i, name := range s.Names {
+						if !name.IsExported() {
+							continue
+						}
+
+						switch {
+						case s.Type != nil:
 							report(name.Name, s.Type)
+						case len(s.Values) == len(s.Names):
+							report(name.Name, valueType(s.Values[i]))
+						case len(s.Values) == 1:
+							// A call that returns one value per name.
+							report(name.Name, valueType(s.Values[0]))
 						}
 					}
 				}
@@ -225,7 +313,9 @@ func checkFile(t *testing.T, path string) []string {
 
 // reportType reports the third-party references in an exported type. A struct
 // contributes only its exported fields, each under a "Type.Field" name, so
-// the prefix rule reads the field's name along with the type's.
+// the prefix rule reads the field's name along with the type's. An embedded
+// field counts under the name of the type it embeds, exported or not,
+// because the struct promotes that type's exported fields and methods.
 func reportType(report func(string, ast.Node), spec *ast.TypeSpec) {
 	st, ok := spec.Type.(*ast.StructType)
 	if !ok {
@@ -235,6 +325,12 @@ func reportType(report func(string, ast.Node), spec *ast.TypeSpec) {
 	}
 
 	for _, field := range st.Fields.List {
+		if len(field.Names) == 0 {
+			report(spec.Name.Name+"."+typeName(field.Type), field.Type)
+
+			continue
+		}
+
 		for _, name := range field.Names {
 			if name.IsExported() {
 				report(spec.Name.Name+"."+name.Name, field.Type)
@@ -243,22 +339,52 @@ func reportType(report func(string, ast.Node), spec *ast.TypeSpec) {
 	}
 }
 
-// receiverExported reports whether a method's receiver type is exported.
-func receiverExported(recv *ast.FieldList) bool {
-	if len(recv.List) == 0 {
-		return false
+// valueType returns the part of an untyped var or const value that decides
+// its type. A function literal yields its signature and a composite literal
+// its type, so neither a function body nor the elements of a literal count.
+// A call yields its function, which also covers a conversion.
+func valueType(expr ast.Expr) ast.Node {
+	switch e := expr.(type) {
+	case *ast.ParenExpr:
+		return valueType(e.X)
+	case *ast.UnaryExpr:
+		return valueType(e.X)
+	case *ast.FuncLit:
+		return e.Type
+	case *ast.CompositeLit:
+		return e.Type
+	case *ast.CallExpr:
+		return e.Fun
 	}
 
-	expr := recv.List[0].Type
+	return expr
+}
+
+// typeName returns the name of the type in a receiver or embedded field,
+// without the pointer, the type arguments, or the package qualifier.
+func typeName(expr ast.Expr) string {
 	if star, ok := expr.(*ast.StarExpr); ok {
 		expr = star.X
 	}
 
-	if idx, ok := expr.(*ast.IndexExpr); ok {
-		expr = idx.X
+	switch e := expr.(type) {
+	case *ast.IndexExpr:
+		expr = e.X
+	case *ast.IndexListExpr:
+		expr = e.X
 	}
 
-	ident, ok := expr.(*ast.Ident)
+	switch e := expr.(type) {
+	case *ast.Ident:
+		return e.Name
+	case *ast.SelectorExpr:
+		return e.Sel.Name
+	}
 
-	return ok && ident.IsExported()
+	return ""
+}
+
+// receiverExported reports whether a method's receiver type is exported.
+func receiverExported(recv *ast.FieldList) bool {
+	return len(recv.List) > 0 && token.IsExported(typeName(recv.List[0].Type))
 }
