@@ -146,6 +146,26 @@ func TestPattern_Match(t *testing.T) {
 			path:    "configs",
 			want:    true,
 		},
+		"pattern with an inner dot element": {
+			pattern: "k8s/./*.yaml",
+			path:    "k8s/app.yaml",
+			want:    true,
+		},
+		"pattern with a trailing dot element": {
+			pattern: "k8s/.",
+			path:    "k8s",
+			want:    true,
+		},
+		"dot slash pattern reads as dot": {
+			pattern: "./",
+			path:    ".",
+			want:    true,
+		},
+		"dot slash pattern matches no file": {
+			pattern: "./",
+			path:    "x.yaml",
+			want:    false,
+		},
 		"pattern with dot slash prefix keeps its depth": {
 			pattern: "./*.yaml",
 			path:    "configs/a.yaml",
@@ -320,6 +340,11 @@ func TestMatchAny(t *testing.T) {
 		"repeated separators in a pattern are collapsed": {
 			path:     "repo/.github/workflows/ci.yml",
 			patterns: []string{".github//workflows/*.yml"},
+			want:     true,
+		},
+		"dot elements in a pattern are dropped": {
+			path:     "repo/k8s/x.yaml",
+			patterns: []string{"k8s/./x.yaml"},
 			want:     true,
 		},
 		"double star prefix is kept": {

@@ -21,9 +21,10 @@ type Pattern struct {
 // NewPattern creates a [Pattern] from the given glob pattern string.
 // Returns [ErrInvalidPattern] if the pattern syntax is invalid.
 //
-// NewPattern drops a leading "./", repeated separators, and a trailing
-// separator from the pattern, as [Pattern.Match] does for the path, so
-// those spellings do not change what the pattern matches.
+// NewPattern drops "." elements such as a leading "./", repeated
+// separators, and a trailing separator from the pattern, as
+// [Pattern.Match] does for the path, so those spellings do not change
+// what the pattern matches.
 func NewPattern(pattern string) (Pattern, error) {
 	if !doublestar.ValidatePattern(pattern) {
 		return Pattern{}, ErrInvalidPattern
@@ -73,25 +74,36 @@ func normalizePath(path string) string {
 	return filepath.ToSlash(filepath.Clean(path))
 }
 
-// normalizePattern returns pattern without a leading "./", repeated
+// normalizePattern returns pattern without "." elements, repeated
 // separators, or a trailing separator. A cleaned path carries none of
-// them, so a pattern that kept them would match no path. It leaves "."
-// and ".." elements alone, since a glob element before a ".." could stand
-// for any number of directories.
+// them, so a pattern that kept them would match no path. A pattern left
+// with no other element reads as "." or "/", as [filepath.Clean] reads
+// it. It leaves ".." elements alone, since a glob element before a ".."
+// could stand for any number of directories.
 func normalizePattern(pattern string) string {
-	for strings.HasPrefix(pattern, "./") {
-		pattern = strings.TrimLeft(pattern[2:], "/")
+	if pattern == "" {
+		return ""
 	}
 
-	for strings.Contains(pattern, "//") {
-		pattern = strings.ReplaceAll(pattern, "//", "/")
+	elems := strings.Split(pattern, "/")
+	kept := elems[:0]
+
+	for _, elem := range elems {
+		if elem != "" && elem != "." {
+			kept = append(kept, elem)
+		}
 	}
 
-	if len(pattern) > 1 {
-		pattern = strings.TrimSuffix(pattern, "/")
-	}
+	glob := strings.Join(kept, "/")
 
-	return pattern
+	switch {
+	case strings.HasPrefix(pattern, "/"):
+		return "/" + glob
+	case glob == "":
+		return "."
+	default:
+		return glob
+	}
 }
 
 // String returns the original pattern string.

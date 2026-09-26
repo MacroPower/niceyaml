@@ -43,6 +43,11 @@ func TestFilePath(t *testing.T) {
 			filePath: "./config.yaml",
 			want:     true,
 		},
+		"pattern with a dot element": {
+			pattern:  "k8s/./*.yaml",
+			filePath: "deploy/../k8s/app.yaml",
+			want:     true,
+		},
 		"pattern no match": {
 			pattern:  "**/*.json",
 			filePath: "config.yaml",
