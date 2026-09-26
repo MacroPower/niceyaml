@@ -4199,11 +4199,13 @@ func TestViewport_WordWrapDisablesHorizontalScroll(t *testing.T) {
 func TestViewport_WrapKeepsFrameOfOverflowingRow(t *testing.T) {
 	t.Parallel()
 
-	// An annotation column past the wrap width pushes its rows past the
-	// pane even with wrap on. The viewport once passed those rows through
-	// uncut, so the content area truncated them, every row of the window
+	// An annotation column past the end of a short line keeps its cell
+	// even past the wrap width. The printer moves the message within the
+	// width, but the "^" marker stays in that cell, so its row runs past
+	// the pane with wrap on. The viewport once passed such a row through
+	// uncut, so the content area truncated it, every row of the window
 	// lost its right border, and horizontal scrolling stayed pinned at 0
-	// with the annotation out of reach.
+	// with the marker out of reach.
 	const width = 40
 
 	tcs := map[string]struct {
@@ -4225,7 +4227,11 @@ func TestViewport_WrapKeepsFrameOfOverflowingRow(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			source := niceyaml.NewSourceFromString("a: 1\nk: " + strings.Repeat("x", 60) + "\nc: 3\n")
+			// The lines fill the pane, so every row of the view is a row
+			// of the frame.
+			source := niceyaml.NewSourceFromString(
+				"a: 1\nk: v\nc: 3\nd: 4\ne: 5\nf: 6\ng: 7\nh: 8\ni: 9\nj: 10\n",
+			)
 			view := source.View()
 			view.Annotate(1, line.Annotation{Content: "BAD", Placement: line.Below, Col: 50})
 
@@ -4254,7 +4260,7 @@ func TestViewport_WrapKeepsFrameOfOverflowingRow(t *testing.T) {
 
 			out := m.View()
 			assertFrame(out)
-			assert.NotContains(t, out, "^ B")
+			assert.NotContains(t, out, "^")
 			assert.Less(t, m.HorizontalScrollPercent(), 1.0)
 
 			m.SetXOffset(1000)
@@ -4263,7 +4269,7 @@ func TestViewport_WrapKeepsFrameOfOverflowingRow(t *testing.T) {
 
 			out = m.View()
 			assertFrame(out)
-			assert.Contains(t, out, "^ B")
+			assert.Contains(t, out, "^")
 
 			// Wrapped content fits the width, so moving to a search match
 			// returns the view to its first column.

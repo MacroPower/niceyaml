@@ -1334,8 +1334,8 @@ func (m *Model) ScrollPercent() float64 {
 
 // HorizontalScrollPercent returns the horizontal scroll position as a float
 // between 0 and 1. It is 1 when every row fits the content width, which
-// wrapped rows do unless an annotation column past the wrap width or a style
-// transform widens a row.
+// wrapped rows do unless an annotation column past the end of its line lies
+// past the wrap width or a style transform widens a row.
 func (m *Model) HorizontalScrollPercent() float64 {
 	if m.left == nil || m.printer == nil {
 		return 1.0
@@ -1381,8 +1381,8 @@ func (m *Model) lineCount() int {
 
 // maxXOffset returns the maximum X offset, which brings the last column of
 // the widest rendered row into view. It is 0 when every row fits the content
-// width, which wrapped rows do unless an annotation column past the wrap
-// width or a style transform widens a row.
+// width, which wrapped rows do unless an annotation column past the end of
+// its line lies past the wrap width or a style transform widens a row.
 func (m *Model) maxXOffset() int {
 	if m.left == nil || m.printer == nil {
 		return 0
