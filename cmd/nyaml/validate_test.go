@@ -31,9 +31,9 @@ func TestValidateFile(t *testing.T) {
 
 	tcs := map[string]struct {
 		content string
-		// Positions of the invalid documents, each as the "line:col:" that
-		// follows the file path in the joined error, or none when the file
-		// is valid.
+		// Positions of every document the joined error reports, in file
+		// order, each as the "line:col:" that follows the file path. Valid
+		// documents have no entry, and a valid file has none.
 		want []string
 	}{
 		"every document valid": {
@@ -42,6 +42,10 @@ func TestValidateFile(t *testing.T) {
 		"first and last document invalid": {
 			content: "value: 1\n---\nname: b\n---\nvalue: 3\n",
 			want:    []string{"1:1:", "5:1:"},
+		},
+		"first two documents invalid": {
+			content: "value: 1\n---\nvalue: 2\n---\nname: c\n",
+			want:    []string{"1:1:", "3:1:"},
 		},
 		"middle document invalid": {
 			content: "name: a\n---\nvalue: 2\n---\nname: c\n",
@@ -76,11 +80,21 @@ func TestValidateFile(t *testing.T) {
 				return
 			}
 
-			require.Error(t, err)
+			var joined interface{ Unwrap() []error }
 
-			for _, want := range tc.want {
-				assert.Contains(t, err.Error(), path+":"+want+" ")
+			require.ErrorAs(t, err, &joined)
+
+			var got []string
+
+			for _, e := range joined.Unwrap() {
+				msg, ok := strings.CutPrefix(e.Error(), path+":")
+				require.True(t, ok, e.Error())
+
+				pos, _, _ := strings.Cut(msg, " ")
+				got = append(got, pos)
 			}
+
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
