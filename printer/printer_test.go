@@ -1701,6 +1701,17 @@ func TestGutter(t *testing.T) {
 		assert.Equal(t, "aa: 1\nab: 2", p.Print(view))
 	})
 
+	t.Run("pads a row whose cut drops a wide rune", func(t *testing.T) {
+		t.Parallel()
+
+		// The two-cell rune does not fit in one cell, so the cut leaves
+		// nothing and the printer pads the row back to the width.
+		p := testPrinterWithGutter(fixedGutter{width: 1, text: "日"})
+
+		assert.Equal(t, " a: 1\n b: 2", p.Print(view))
+		assert.Equal(t, 1, p.Layout(view).GutterWidth())
+	})
+
 	t.Run("a negative width counts as none", func(t *testing.T) {
 		t.Parallel()
 

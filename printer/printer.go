@@ -755,16 +755,17 @@ func (p *Printer) gutterWidth(maxNumber int) int {
 func (p *Printer) renderGutter(ctx GutterContext, width int) string {
 	text := p.gutter.Render(ctx)
 
-	switch w := lipgloss.Width(text); {
-	case w < width:
-		return text + p.styles.Style(kind.Text).Render(strings.Repeat(" ", width-w))
-
-	case w > width:
-		return ansi.Truncate(text, width, "")
-
-	default:
-		return text
+	if lipgloss.Width(text) > width {
+		text = ansi.Truncate(text, width, "")
 	}
+
+	// The cut drops a wide rune that straddles the width whole, so a cut
+	// row can fall short of the width and gets padded like any other.
+	if w := lipgloss.Width(text); w < width {
+		text += p.styles.Style(kind.Text).Render(strings.Repeat(" ", width-w))
+	}
+
+	return text
 }
 
 // renderRows renders the lines of view as rows, with the gutter sized for
