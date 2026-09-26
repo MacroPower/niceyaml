@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"testing/fstest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -186,7 +187,60 @@ func TestReadFile_ReadsTheAbsolutePath(t *testing.T) {
 	abs := filepath.Join(dir, "s.json")
 	require.NoError(t, os.WriteFile(abs, []byte(`{"type": "object"}`), 0o600))
 
-	data, err := schema.ReadFile(nil, "elsewhere/s.json", abs)
+	data, err := schema.ReadFile(nil, "elsewhere/s.json", abs, "")
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"type": "object"}`, string(data))
+}
+
+func TestReadFile_FSReadsAgainstTheRecordedDirectory(t *testing.T) {
+	t.Parallel()
+
+	// The root of the file system stands for the working directory File
+	// recorded, not the one at the time of the read. A $ref that resolves
+	// to an absolute path under the recorded directory keeps reading after
+	// the program changes directory.
+	base := filepath.Join(t.TempDir(), "recorded")
+
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+
+	fsys := fstest.MapFS{
+		"schemas/defs.json": &fstest.MapFile{Data: []byte(`{"type": "string"}`)},
+	}
+
+	tests := map[string]struct {
+		err  error
+		name string
+		wd   string
+	}{
+		"under the recorded directory": {
+			name: filepath.Join(base, "schemas", "defs.json"),
+			wd:   base,
+		},
+		"outside the recorded directory": {
+			name: filepath.Join(filepath.Dir(base), "schemas", "defs.json"),
+			wd:   base,
+			err:  fs.ErrInvalid,
+		},
+		"no recorded directory": {
+			name: filepath.Join(cwd, "schemas", "defs.json"),
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			data, err := schema.ReadFile(fsys, tt.name, tt.name, tt.wd)
+			if tt.err != nil {
+				require.ErrorIs(t, err, tt.err)
+				assert.Nil(t, data)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.JSONEq(t, `{"type": "string"}`, string(data))
+		})
+	}
 }

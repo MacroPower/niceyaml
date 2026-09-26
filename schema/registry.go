@@ -123,15 +123,16 @@ type RegistryOption func(*Registry)
 //	)
 //
 // A directive in that document that names ./schema.json resolves to
-// configs/schema.json in bundle. An absolute path, such as the one a
-// directive resolves to in a document opened by its absolute path, reads
-// relative to the working directory, and a path outside it names no
-// file. The registry checks only the path, and [os.DirFS] follows
-// symbolic links, so a link inside the working directory still reads a
-// file anywhere on disk. The file system [os.Root.FS] returns refuses a
-// link that leads out of the tree, so a program that validates documents
-// from another trust domain passes that file system and keeps the Root
-// open while the registry is in use:
+// configs/schema.json in bundle. An absolute path reads relative to the
+// working directory at the time [File] or [FileOrURL] built the Ref. That
+// covers the path a directive resolves to in a document opened by its
+// absolute path and the path a $ref resolves to. A path outside that
+// directory names no file. The registry checks only the path, and
+// [os.DirFS] follows symbolic links, so a link inside the directory still
+// reads a file anywhere on disk. The file system [os.Root.FS] returns
+// refuses a link that leads out of the tree, so a program that validates
+// documents from another trust domain passes that file system and keeps
+// the Root open while the registry is in use:
 //
 //	root, err := os.OpenRoot(".")
 //	if err != nil {
@@ -570,7 +571,7 @@ func (r *Registry) load(ctx context.Context, ref Ref) ([]byte, error) {
 		return httpfetch.Get(ctx, r.client, ref.key)
 
 	case ref.file != "":
-		return readFile(r.fsys, ref.file, ref.abs)
+		return readFile(r.fsys, ref.file, ref.abs, ref.wd)
 
 	case ref.load != nil:
 		return ref.load(ctx)
@@ -749,7 +750,7 @@ func (r *Registry) refOptions(ref Ref) []CompileOption {
 			}
 
 			load = func() ([]byte, error) {
-				return readFile(r.fsys, path, path)
+				return readFile(r.fsys, path, path, ref.wd)
 			}
 
 		default:

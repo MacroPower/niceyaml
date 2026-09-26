@@ -73,6 +73,11 @@ type Ref struct {
 	// it to build the key, which a read from the working directory uses,
 	// so the bytes under the key stay the same wherever the read happens.
 	abs string
+	// The working directory File made the path absolute against. The
+	// root of the registry's file system stands for it, so an absolute
+	// path, such as the one a $ref resolves to, reads the same file
+	// after a change of working directory.
+	wd string
 	// The key is an HTTP URL the registry fetches with its client.
 	url bool
 }

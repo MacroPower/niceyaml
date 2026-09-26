@@ -108,12 +108,19 @@ func file(path string) (Ref, error) {
 
 	const driveLen = 2 // A letter and a colon.
 
+	// A registry with a file system reads an absolute path relative to
+	// this directory. When os.Getwd fails, wd stays empty and the registry
+	// uses the working directory at the time of the read, so an absolute
+	// path still builds a Ref.
+	wd, err := os.Getwd()
+	if err != nil {
+		wd = ""
+	}
+
 	abs := path
 
 	switch {
 	case !hasDriveLetter(path) || onWindows:
-		var err error
-
 		abs, err = filepath.Abs(path)
 		if err != nil {
 			return Ref{}, fmt.Errorf("resolve %s: %w", path, err)
@@ -130,7 +137,7 @@ func file(path string) (Ref, error) {
 		abs = path[:driveLen] + slashpath.Clean(rest)
 	}
 
-	return Ref{key: fileURL(abs), file: path, abs: abs}, nil
+	return Ref{key: fileURL(abs), file: path, abs: abs, wd: wd}, nil
 }
 
 // readFile returns the bytes of the file a [Ref] from [File] names. It
@@ -139,12 +146,13 @@ func file(path string) (Ref, error) {
 // a change of working directory after [File] does not put another file's
 // bytes under the key.
 //
-// The root of fsys stands for the working directory, so an absolute name
-// reads relative to it, and one outside it, or a drive-letter path off
-// Windows, names no file in fsys.
-func readFile(fsys fs.FS, name, abs string) ([]byte, error) {
+// The root of fsys stands for wd, the working directory [File] made the
+// path absolute against, so an absolute name reads relative to wd, and
+// one outside wd, or a drive-letter path off Windows, names no file in
+// fsys.
+func readFile(fsys fs.FS, name, abs, wd string) ([]byte, error) {
 	if fsys != nil {
-		return readFS(fsys, name)
+		return readFS(fsys, name, wd)
 	}
 
 	// Off Windows, a drive letter is an ordinary directory name, so
@@ -175,18 +183,22 @@ func readFile(fsys fs.FS, name, abs string) ([]byte, error) {
 	return readBounded(f, abs)
 }
 
-// readFS returns the bytes of name in fsys, whose root stands for the
-// working directory. A relative name reads from the root as it is, and
-// an absolute one reads relative to the working directory. A name
-// outside the working directory, or a drive-letter path off Windows, is
-// [fs.ErrInvalid].
-func readFS(fsys fs.FS, name string) ([]byte, error) {
+// readFS returns the bytes of name in fsys, whose root stands for wd. A
+// relative name reads from the root as it is, and an absolute one reads
+// relative to wd. An empty wd stands for the working directory at the
+// time of the read. A name outside wd, or a drive-letter path off
+// Windows, is [fs.ErrInvalid].
+func readFS(fsys fs.FS, name, wd string) ([]byte, error) {
 	rel := name
 
 	if filepath.IsAbs(name) || hasDriveLetter(name) {
-		wd, err := os.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("resolve %s: %w", name, err)
+		var err error
+
+		if wd == "" {
+			wd, err = os.Getwd()
+			if err != nil {
+				return nil, fmt.Errorf("resolve %s: %w", name, err)
+			}
 		}
 
 		rel, err = filepath.Rel(wd, name)

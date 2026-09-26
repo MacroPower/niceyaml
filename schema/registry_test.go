@@ -1525,6 +1525,55 @@ func TestRegistry_WithFS(t *testing.T) {
 	})
 }
 
+// A program can build a Ref with File, change directory, and only then
+// validate through a registry with a file system. The test changes the
+// process's working directory, so it does not run in parallel.
+//
+//nolint:paralleltest // See above.
+func TestRegistry_WithFS_AfterChdir(t *testing.T) {
+	bundle := fstest.MapFS{
+		"schemas/config.json": &fstest.MapFile{
+			Data: []byte(`{"properties": {"a": {"$ref": "defs.json"}}}`),
+		},
+		"schemas/defs.json": &fstest.MapFile{Data: []byte(`{"type": "string"}`)},
+	}
+
+	// The registry reads a relative root schema from the root of the file
+	// system as it is, and an absolute one against the directory File saw.
+	// The $ref resolves to an absolute path in both cases.
+	tcs := map[string]struct {
+		path func(wd string) string
+	}{
+		"relative path": {
+			path: func(string) string { return "schemas/config.json" },
+		},
+		"absolute path": {
+			path: func(wd string) string { return filepath.Join(wd, "schemas", "config.json") },
+		},
+	}
+
+	for name, tc := range tcs {
+		//nolint:paralleltest // See above.
+		t.Run(name, func(t *testing.T) {
+			wd := t.TempDir()
+			t.Chdir(wd)
+
+			ref := schema.File(tc.path(wd))
+
+			t.Chdir(t.TempDir())
+
+			reg := schema.NewRegistry(schema.WithFS(bundle), schema.WithResolvers(ref))
+
+			require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: x\n")))
+
+			err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+			require.Error(t, err)
+			require.NotErrorIs(t, err, schema.ErrValidate)
+			assert.Contains(t, err.Error(), `$.a: expected "string", got "integer"`)
+		})
+	}
+}
+
 func TestRegistry_Load(t *testing.T) {
 	t.Parallel()
 
