@@ -26,6 +26,31 @@ func cafeConfig(ctx context.Context, in string) (*cafe.Config, error) {
 	return &c, nil
 }
 
+// violationPaths returns the path of each violation in err, which must be
+// bound to its source. A lone violation is the bound error itself.
+func violationPaths(t *testing.T, err error) []string {
+	t.Helper()
+
+	var bound *niceyaml.SourceError
+
+	require.ErrorAs(t, err, &bound)
+
+	violations := bound.Errors()
+	if len(violations) == 0 {
+		violations = []*niceyaml.SourceError{bound}
+	}
+
+	got := []string{}
+	for _, violation := range violations {
+		path, ok := violation.Path()
+		require.True(t, ok)
+
+		got = append(got, path.String())
+	}
+
+	return got
+}
+
 func TestCafeDefaultConfig(t *testing.T) {
 	t.Parallel()
 
@@ -45,23 +70,15 @@ func TestCafeBrokenConfig(t *testing.T) {
 	t.Parallel()
 
 	_, err := cafeConfig(t.Context(), cafe.BrokenYAML)
-	require.EqualError(t, err, "2 schema violations", "broken config should fail schema validation")
+	require.EqualError(t, err, "3 schema violations", "broken config should fail schema validation")
 
 	// Both values also fail the plain decode, so the paths confirm that
-	// the schema rejected each one.
-	var bound *niceyaml.SourceError
-
-	require.ErrorAs(t, err, &bound)
-
-	got := []string{}
-	for _, violation := range bound.Errors() {
-		path, ok := violation.Path()
-		require.True(t, ok)
-
-		got = append(got, path.String())
-	}
-
-	assert.ElementsMatch(t, []string{"$.spec.sla", "$.spec.hours.days"}, got)
+	// the schema rejected each one. The SLA schema admits a string or
+	// null, and the bad string fails both, so the SLA reports twice.
+	assert.ElementsMatch(t,
+		[]string{"$.spec.sla", "$.spec.sla", "$.spec.hours.days"},
+		violationPaths(t, err),
+	)
 }
 
 func TestCafeSLA(t *testing.T) {
@@ -76,6 +93,8 @@ func TestCafeSLA(t *testing.T) {
 		"seconds":      {sla: "90s"},
 		"compound":     {sla: "1h30m"},
 		"fractional":   {sla: "1.5h"},
+		"null":         {sla: "null"},
+		"tilde":        {sla: "~"},
 		"days":         {sla: "1d", err: true},
 		"empty":        {sla: `""`, err: true},
 		"uppercase":    {sla: "15M", err: true},
@@ -99,8 +118,12 @@ func TestCafeSLA(t *testing.T) {
 
 			// A schema violation carries the location of the value, which a
 			// decode failure inside UnmarshalText would not.
-			require.Error(t, err)
-			require.Contains(t, err.Error(), "$.spec.sla")
+			got := violationPaths(t, err)
+			require.NotEmpty(t, got)
+
+			for _, path := range got {
+				assert.Equal(t, "$.spec.sla", path)
+			}
 		})
 	}
 }
