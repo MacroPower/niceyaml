@@ -512,13 +512,16 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 
 		select {
 		case <-ctx.Done():
-			// The load may have finished in the same instant the context
-			// ended, so hand back the cached schema when there is one.
-			if v, ok := r.cached(ref.Key()); ok {
-				return v, nil
+			// The load this caller waits on may have finished in the same
+			// instant the context ended. Its result counts when it is ready,
+			// so the outcome does not depend on which case the select picks.
+			// A schema that a later load cached does not count, because this
+			// caller's context ended before that load began.
+			select {
+			case res = <-ch:
+			default:
+				return nil, fmt.Errorf("%w: %q: %w", ErrLoad, ref.name(), ctx.Err())
 			}
-
-			return nil, fmt.Errorf("%w: %q: %w", ErrLoad, ref.name(), ctx.Err())
 
 		case res = <-ch:
 		}

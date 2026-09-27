@@ -50,6 +50,29 @@ func countingLoader(key string, data []byte) (schema.Resolver, *atomic.Int32) {
 	return r, &loads
 }
 
+// A gatedContext is a context whose Done method waits for gate to close.
+// A test uses it to hold a caller of [schema.Registry.Schema] after the
+// caller joins a load and before it waits on the result.
+type gatedContext struct {
+	context.Context
+
+	gate <-chan struct{}
+}
+
+// withGate returns a copy of ctx whose Done method waits for gate to
+// close.
+func withGate(ctx context.Context, gate <-chan struct{}) context.Context {
+	return gatedContext{Context: ctx, gate: gate}
+}
+
+// Done waits for gate to close and returns the done channel of the
+// wrapped context.
+func (c gatedContext) Done() <-chan struct{} {
+	<-c.gate
+
+	return c.Context.Done()
+}
+
 func TestRegistry_Lookup(t *testing.T) {
 	t.Parallel()
 
@@ -881,9 +904,93 @@ func TestRegistry_SharedLoad(t *testing.T) {
 			cancelLeader()
 			wg.Wait()
 
+			require.ErrorIs(t, leaderErr, schema.ErrLoad)
 			require.ErrorIs(t, leaderErr, context.Canceled)
 			require.NoError(t, joinerErr)
 			assert.Equal(t, int32(2), loads.Load())
+		})
+	})
+
+	t.Run("caller whose context ends takes no schema from a later load", func(t *testing.T) {
+		t.Parallel()
+
+		// A late caller joins a load, and its context ends before it waits
+		// on the result. The load fails because its starter cancels, and a
+		// joiner with a live context loads again and caches the schema.
+		// The late caller then finds both its context and the failed load
+		// ready, and the select picks one at random, so the test runs the
+		// race enough times to take both picks.
+		synctest.Test(t, func(t *testing.T) {
+			for range 64 {
+				var loads atomic.Int32
+
+				ref := schema.Loadable("slow.json", func(ctx context.Context) ([]byte, error) {
+					if loads.Add(1) == 1 {
+						<-ctx.Done()
+
+						return nil, fmt.Errorf("fetch slow.json: %w", ctx.Err())
+					}
+
+					return schemaData, nil
+				})
+
+				reg := schema.NewRegistry()
+
+				starterCtx, cancelStarter := context.WithCancel(t.Context())
+
+				var (
+					wg         sync.WaitGroup
+					starterErr error
+					joinerErr  error
+				)
+
+				wg.Go(func() {
+					_, starterErr = reg.Schema(starterCtx, ref)
+				})
+
+				synctest.Wait()
+
+				wg.Go(func() {
+					_, joinerErr = reg.Schema(t.Context(), ref)
+				})
+
+				synctest.Wait()
+
+				// The late caller's context has already ended, and the gate
+				// holds the caller between joining the load and waiting on it
+				// until the joiner has loaded again.
+				ended, cancelLate := context.WithCancel(t.Context())
+				cancelLate()
+
+				gate := make(chan struct{})
+				lateCtx := withGate(ended, gate)
+				lateDone := make(chan struct{})
+
+				var (
+					late    *schema.Schema
+					lateErr error
+				)
+
+				go func() {
+					defer close(lateDone)
+
+					late, lateErr = reg.Schema(lateCtx, ref)
+				}()
+
+				synctest.Wait()
+				cancelStarter()
+				wg.Wait()
+				close(gate)
+				<-lateDone
+
+				require.ErrorIs(t, starterErr, schema.ErrLoad)
+				require.ErrorIs(t, starterErr, context.Canceled)
+				require.NoError(t, joinerErr)
+				require.ErrorIs(t, lateErr, schema.ErrLoad)
+				require.ErrorIs(t, lateErr, context.Canceled)
+				require.Nil(t, late)
+				require.Equal(t, int32(2), loads.Load())
+			}
 		})
 	})
 }
