@@ -87,7 +87,7 @@ func BenchmarkFinderFind_WithNormalizer(b *testing.B) {
 		source := niceyaml.NewSourceFromString(yaml)
 
 		b.Run(sz.name+"/without_normalizer", func(b *testing.B) {
-			f := finder.New()
+			f := finder.New(finder.WithNormalizer(nil))
 			idx := f.Load(source.Lines())
 
 			b.ReportAllocs()
@@ -151,7 +151,7 @@ func BenchmarkFinderFind_UnicodeContent(b *testing.B) {
 	source := niceyaml.NewSourceFromString(yaml)
 
 	b.Run("without_normalizer", func(b *testing.B) {
-		f := finder.New()
+		f := finder.New(finder.WithNormalizer(nil))
 		idx := f.Load(source.Lines())
 
 		b.ReportAllocs()
@@ -214,7 +214,7 @@ func BenchmarkFinderCreate(b *testing.B) {
 		b.ReportAllocs()
 
 		for b.Loop() {
-			f := finder.New()
+			f := finder.New(finder.WithNormalizer(nil))
 			_ = f.Load(source.Lines())
 		}
 	})
