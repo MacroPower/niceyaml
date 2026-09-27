@@ -2175,7 +2175,9 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 // container without a horizontal frame gives a row of [kind.Text] spaces as
 // wide as the pane.
 func (m *Model) blankPaneRow(p *printer.Printer) string {
-	rows := splitLines(p.Print(m.left.Slice(position.NewSpan(0, 0))))
+	// The row holds no content, so an empty view prints it without copying
+	// the decoration of a view as long as the document.
+	rows := splitLines(p.Print(&line.View{}))
 
 	// Print renders an empty view as one content row below the top frame,
 	// so this guard is defensive.
