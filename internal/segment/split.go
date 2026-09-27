@@ -105,54 +105,81 @@ type builder struct {
 	lineIndentSet      bool // Whether a part of the current line set its indentation.
 }
 
-// newBuilder creates a new [*builder] initialized from the first token.
-// It skips nil tokens, and returns nil when tks holds no other token.
+// newBuilder creates a new [*builder] initialized from the token that
+// anchors the start of tks. It skips nil tokens, and returns nil when tks
+// holds no other token.
 func newBuilder(tks token.Tokens) *builder {
-	first := firstToken(tks)
-	if first == nil {
+	anchor, lead := startAnchor(tks)
+	if anchor == nil {
 		return nil
 	}
 
-	b := &builder{currentColumn: 1}
-
-	// Initialize currentLine from the first token's position.
-	//
-	// The position names the line the token's text sits on, so an Origin
-	// that opens with earlier lines, blank ones or lines of whitespace,
-	// starts that many lines before Position.Line.
-	if first.Position != nil {
-		b.currentLine = first.Position.Line
-
-		before := countLinesBeforeText(splitOriginIntoParts(first.Origin))
-		if before > 0 && b.currentLine > before {
-			b.currentLine -= before
-		}
-	} else {
-		b.currentLine = 1
+	b := &builder{currentColumn: 1, currentLine: 1, currentOffset: 1}
+	if anchor.Position == nil {
+		return b
 	}
 
-	// Initialize position tracking from first token (1-indexed like lexer).
-	if first.Position != nil && first.Position.Offset > 0 {
-		b.currentOffset = originOffset(first)
-		b.currentIndentNum = first.Position.IndentNum
-		b.currentIndentLevel = first.Position.IndentLevel
-	} else {
-		b.currentOffset = 1
+	// The position names the line the anchor's text sits on, so the stream
+	// starts as many lines before Position.Line as lead holds line breaks.
+	b.currentLine = anchor.Position.Line
+
+	before := lineend.CountBreaks(lead)
+	if before > 0 && b.currentLine > before {
+		b.currentLine -= before
+	}
+
+	// Initialize position tracking from the anchor (1-indexed like lexer).
+	if anchor.Position.Offset > 0 {
+		b.currentOffset = max(1, anchor.Position.Offset-utf8.RuneCountInString(lead))
+		b.currentIndentNum = anchor.Position.IndentNum
+		b.currentIndentLevel = anchor.Position.IndentLevel
 	}
 
 	return b
 }
 
-// firstToken returns the first non-nil token in tks, or nil when tks holds
-// none.
-func firstToken(tks token.Tokens) *token.Token {
+// startAnchor returns the token whose position anchors the start of tks,
+// together with the text of tks that comes before the rune that position
+// names. It skips nil tokens, and returns a nil token when tks holds no
+// other token.
+//
+// The anchor is the first token whose Origin holds a rune besides spaces,
+// tabs, and line breaks, as [tokens.ResetPositions] picks it. A position
+// points past the whitespace and line breaks that open the Origin, so they
+// come before the rune it names. A token whose Origin holds them alone
+// shares the position of the text after it, so its whole Origin comes
+// before that rune too. When no token holds such a rune, the first token
+// anchors the start.
+func startAnchor(tks token.Tokens) (*token.Token, string) {
+	var (
+		first *token.Token
+		lead  strings.Builder
+	)
+
 	for _, tk := range tks {
-		if tk != nil {
-			return tk
+		if tk == nil {
+			continue
 		}
+
+		if first == nil {
+			first = tk
+		}
+
+		trimmed := strings.TrimLeft(tk.Origin, " \t\r\n")
+		if trimmed != "" {
+			lead.WriteString(tk.Origin[:len(tk.Origin)-len(trimmed)])
+
+			return tk, lead.String()
+		}
+
+		lead.WriteString(tk.Origin)
 	}
 
-	return nil
+	if first == nil {
+		return nil, ""
+	}
+
+	return first, first.Origin
 }
 
 // AddToken adds a single token, splitting it into per-line parts.
@@ -549,19 +576,6 @@ func (b *builder) handleGap(tk *token.Token, parts []string, isBlockScalarConten
 	}
 }
 
-// originOffset returns the 1-indexed document rune offset where tk.Origin
-// starts.
-//
-// Position.Offset points at the text, past the whitespace and line breaks
-// that open the Origin. The builder counts the whole Origin, so it must
-// start counting where the Origin does. Those opening runes are ASCII, so
-// their byte count is their rune count.
-func originOffset(tk *token.Token) int {
-	lead := len(tk.Origin) - len(strings.TrimLeft(tk.Origin, " \t\r\n"))
-
-	return max(1, tk.Position.Offset-lead)
-}
-
 // countLeadingWhitespace returns the number of leading space characters in s.
 func countLeadingWhitespace(s string) int {
 	count := 0
@@ -587,27 +601,6 @@ func countLeadingNewlineParts(parts []string) int {
 		}
 
 		count++
-	}
-
-	return count
-}
-
-// countLinesBeforeText returns the number of parts that end in a line
-// ending ahead of the first part holding text, which is the number of lines
-// the Origin of a token opens with before the line its position names. A
-// token without text sits where the next text starts, below every line of
-// its Origin, so all its line endings count.
-func countLinesBeforeText(parts []string) int {
-	count := 0
-
-	for _, p := range parts {
-		if strings.TrimLeft(tokens.TrimLineEnding(p), " \t") != "" {
-			break
-		}
-
-		if lineEnding(p) != "" {
-			count++
-		}
 	}
 
 	return count

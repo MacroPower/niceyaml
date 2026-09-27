@@ -640,6 +640,79 @@ func TestSplit_FirstTextPartKeepsPosition(t *testing.T) {
 	}
 }
 
+func TestSplit_ResetDocument(t *testing.T) {
+	t.Parallel()
+
+	// A document cut from a stream and passed through
+	// [tokens.ResetPositions] numbers its lines from 1. A tab line after a
+	// "..." marker opens the document with a token that holds whitespace
+	// alone and shares the position of the text after it, so the line
+	// breaks of both tokens come before that text.
+	tcs := map[string]struct {
+		input       string
+		wantContent []string
+		wantNumbers []int
+	}{
+		"tab line after document end": {
+			input:       "a: 1\n...\n\t\nb: 2\n",
+			wantContent: []string{"", "\t", "b: 2"},
+			wantNumbers: []int{1, 2, 3},
+		},
+		"tab line and blank line after document end": {
+			input:       "a: 1\n...\n\t\n\nb: 2\n",
+			wantContent: []string{"", "\t", "", "b: 2"},
+			wantNumbers: []int{1, 2, 3, 4},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var docs []token.Tokens
+
+			for _, doc := range tokens.SplitDocuments(tokens.Tokenize(tc.input)) {
+				docs = append(docs, doc)
+			}
+
+			require.Len(t, docs, 2)
+
+			lines := segment.Split(tokens.ResetPositions(docs[1]))
+
+			assert.Equal(t, tc.wantContent, lineContents(lines))
+			assert.Equal(t, tc.wantNumbers, lineNumbers(lines))
+
+			seen := map[*token.Token]bool{}
+			prev := 0
+
+			for _, l := range lines {
+				for _, seg := range l.Segments {
+					src, p := seg.Source(), seg.Part()
+
+					assert.Equal(t, l.Number, p.Position.Line, "part %q line", p.Origin)
+
+					if isPureNewline(p.Origin) {
+						assert.GreaterOrEqual(t, p.Position.Offset, prev, "part %q offset", p.Origin)
+					} else {
+						assert.Greater(t, p.Position.Offset, prev, "part %q offset", p.Origin)
+					}
+
+					prev = p.Position.Offset
+
+					if seen[src] || strings.TrimSpace(p.Origin) == "" {
+						continue
+					}
+
+					seen[src] = true
+
+					assert.Equal(t, src.Position.Line, p.Position.Line, "part %q token line", p.Origin)
+					assert.Equal(t, src.Position.Offset, p.Position.Offset, "part %q token offset", p.Origin)
+				}
+			}
+		})
+	}
+}
+
 func TestSplit_PartsTakeLineIndent(t *testing.T) {
 	t.Parallel()
 
