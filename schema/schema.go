@@ -30,8 +30,9 @@ var (
 	// ErrExcessiveAliasing indicates a value that shares maps, slices, or
 	// byte slices so heavily that the validator would read far more data
 	// than the value holds, as aliases in a YAML document make a decode
-	// share them. [Schema.Validate] and [Schema.ValidateValue] return it
-	// wrapped together with [ErrValidate].
+	// share them. It also indicates a document whose aliases would make
+	// the decoder itself read that much. [Schema.Validate] and
+	// [Schema.ValidateValue] return it wrapped together with [ErrValidate].
 	ErrExcessiveAliasing = errors.New("excessive aliasing")
 
 	// ErrCompile indicates a schema document that does not compile.
@@ -212,7 +213,24 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // holds under a mapping, at any depth, with a merge key, an alias key, or
 // a key that is no scalar at or after the member leading to the
 // timestamp. Such a key may set a member of the same name.
+//
+// The decoder writes out the whole content of an alias it spells as
+// text, such as an alias used as a key, and it reads a mapping a merge
+// key brings in again at every merge, so a small document can cost far
+// more to decode than the decoded value shows. Before it decodes a node
+// that holds an alias, Validate therefore counts the nodes a decode of
+// the whole document reads, with each alias reading its content in full,
+// since the decoder reads the whole document to find the anchors of the
+// node. It applies the alias limit of [Schema.ValidateValue] to that
+// count, where an alias to a scalar counts as one unaliased node, and a
+// document past the limit returns an error wrapping both [ErrValidate]
+// and [ErrExcessiveAliasing] without decoding.
 func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
+	err := checkDecodeExpansion(n)
+	if err != nil {
+		return err
+	}
+
 	// A decode into any yields only the YAML built-in types, none of which
 	// validates itself, so the self-validation walk would find nothing.
 	data, err := n.Decode[any](ctx, niceyaml.WithSelfValidation(false))
@@ -978,13 +996,214 @@ func checkExpansion(data any) error {
 		return err
 	}
 
-	expanded := addCapped(w.distinct, w.aliased)
-	if w.aliased > minAliased && expanded > minExpanded &&
-		float64(w.aliased)/float64(expanded) > allowedAliasRatio(expanded) {
+	if excessiveAliasing(w.distinct, w.aliased) {
 		return fmt.Errorf("%w: %w", ErrValidate, ErrExcessiveAliasing)
 	}
 
 	return nil
+}
+
+// excessiveAliasing reports whether aliased nodes make up too large a
+// share of a value that holds distinct nodes and repeats aliased more
+// through its aliases.
+func excessiveAliasing(distinct, aliased int) bool {
+	expanded := addCapped(distinct, aliased)
+
+	return aliased > minAliased && expanded > minExpanded &&
+		float64(aliased)/float64(expanded) > allowedAliasRatio(expanded)
+}
+
+// checkDecodeExpansion returns an error wrapping both [ErrValidate] and
+// [ErrExcessiveAliasing] when n holds an alias and aliases make up too
+// much of what a decode of its document reads. A decode of a node that
+// holds an alias reads the whole document to find its anchors, so the
+// count covers the whole document. A node without an alias decodes on
+// its own and reads nothing twice.
+func checkDecodeExpansion(n *niceyaml.Node) error {
+	if !holdsAlias(rootOf(n)) {
+		return nil
+	}
+
+	doc := n.DocumentAST()
+
+	c := treeCounter{
+		targets: aliasTargets(doc),
+		sizes:   map[ast.Node]int{},
+		open:    map[ast.Node]bool{},
+	}
+
+	c.count(doc.Body, true)
+
+	if excessiveAliasing(c.distinct, c.aliased) {
+		return fmt.Errorf("%w: %w", ErrValidate, ErrExcessiveAliasing)
+	}
+
+	return nil
+}
+
+// holdsAlias reports whether node or any node below it is an alias.
+func holdsAlias(node ast.Node) bool {
+	if isNilNode(node) {
+		return false
+	}
+
+	var found aliasFinder
+
+	ast.Walk(&found, node)
+
+	return bool(found)
+}
+
+// aliasFinder is an [ast.Visitor] that records whether it visited an
+// alias and stops the walk once it has.
+type aliasFinder bool
+
+// Visit implements [ast.Visitor].
+func (f *aliasFinder) Visit(node ast.Node) ast.Visitor {
+	if bool(*f) || isNilNode(node) {
+		return nil
+	}
+
+	if _, ok := node.(*ast.AliasNode); ok {
+		*f = true
+
+		return nil
+	}
+
+	return f
+}
+
+// treeCounter counts the nodes a decode of a document tree reads, the way
+// gopkg.in/yaml.v3 counts them for its alias limit, where each alias
+// reads the content it refers to in full. That covers an alias the
+// decoder writes out as text, such as a key, and a mapping a merge key
+// brings in, which the decoder reads again at every merge. The targets
+// map binds each alias to its content. An alias to a scalar counts as
+// one unaliased node, as it does for [checkExpansion], and so does an
+// alias with no content and one inside its own content, which the
+// decoder reads as null.
+//
+// The distinct field counts the nodes of the tree once each, and the
+// aliased field counts the nodes the aliases in the tree repeat. The
+// sizes map holds the size of each alias's content once the counter has
+// read it, so a chain of nested aliases costs one read per anchor, and
+// the open map holds the content the counter is reading.
+type treeCounter struct {
+	targets  map[*ast.AliasNode]ast.Node
+	sizes    map[ast.Node]int
+	open     map[ast.Node]bool
+	distinct int
+	aliased  int
+}
+
+// count returns the number of nodes a decode of node reads: one for a
+// scalar, and one for a mapping or sequence plus the count of each key,
+// value, or element in it. An anchor, a tag, or the `?` of an explicit
+// key counts what it wraps. With top set, node lies outside the content
+// of every alias, and count adds its nodes to distinct and the nodes its
+// aliases repeat to aliased.
+func (c *treeCounter) count(node ast.Node, top bool) int {
+	if isNilNode(node) {
+		return 0
+	}
+
+	switch n := node.(type) {
+	case *ast.AliasNode:
+		return c.alias(n, top)
+	case *ast.AnchorNode:
+		return c.count(n.Value, top)
+	case *ast.TagNode:
+		return c.count(n.Value, top)
+	case *ast.MappingKeyNode:
+		return c.count(n.Value, top)
+	case *ast.CommentGroupNode:
+		return 0
+	}
+
+	if top {
+		c.distinct = addCapped(c.distinct, 1)
+	}
+
+	size := 1
+
+	switch n := node.(type) {
+	case *ast.MappingNode:
+		for _, entry := range n.Values {
+			size = addCapped(size, c.entry(entry, top))
+		}
+
+	case *ast.MappingValueNode:
+		size = addCapped(size, c.entry(n, top))
+
+	case *ast.SequenceNode:
+		for _, elem := range n.Values {
+			size = addCapped(size, c.count(elem, top))
+		}
+	}
+
+	return size
+}
+
+// entry returns the number of nodes a decode of the key and the value of
+// a mapping entry reads, as [treeCounter.count] counts them.
+func (c *treeCounter) entry(entry *ast.MappingValueNode, top bool) int {
+	if entry == nil {
+		return 0
+	}
+
+	return addCapped(c.count(entry.Key, top), c.count(entry.Value, top))
+}
+
+// alias returns the number of nodes a decode of the alias reads, which is
+// the size of the mapping or sequence it refers to, or one for any other
+// alias. With top set, the alias lies outside the content of every other
+// alias, and alias adds that size to aliased, or the one node to
+// distinct.
+func (c *treeCounter) alias(alias *ast.AliasNode, top bool) int {
+	target, ok := c.targets[alias]
+	if !ok || c.open[target] || !isCollection(target) {
+		if top {
+			c.distinct = addCapped(c.distinct, 1)
+		}
+
+		return 1
+	}
+
+	size, ok := c.sizes[target]
+	if !ok {
+		c.open[target] = true
+		size = c.count(target, false)
+		delete(c.open, target)
+
+		c.sizes[target] = size
+	}
+
+	if top {
+		c.aliased = addCapped(c.aliased, size)
+	}
+
+	return size
+}
+
+// isCollection reports whether node holds a mapping or a sequence under
+// its anchors and tags.
+func isCollection(node ast.Node) bool {
+	switch n := contentNode(node).(type) {
+	case *ast.MappingNode:
+		return n != nil
+	case *ast.MappingValueNode:
+		return n != nil
+	case *ast.SequenceNode:
+		return n != nil
+	default:
+		return false
+	}
+}
+
+// isNilNode reports whether node is nil, including a typed nil a tree
+// built by hand may hold behind a non-nil interface.
+func isNilNode(node ast.Node) bool {
+	return node == nil || reflect.ValueOf(node).IsNil()
 }
 
 // allowedAliasRatio returns the share of the expanded nodes that aliases

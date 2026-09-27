@@ -1389,6 +1389,99 @@ func TestSchema_AliasExpansion(t *testing.T) {
 		}
 	})
 
+	// The decoder writes out in full what an alias refers to when it
+	// spells a key or a !!str value that holds one, and it reads a mapping
+	// a merge key brings in again at every merge. Such a document costs
+	// its expanded size while it decodes, and the decoded value may share
+	// nothing, as when a later key replaces the member that held the
+	// anchors. Each case runs Validate alone, since a decode of the
+	// document would pay that cost.
+	t.Run("decoded aliases", func(t *testing.T) {
+		t.Parallel()
+
+		// Each level lists the level below ten times, so the last level
+		// expands to 10^7 scalars. The alias key replaces the member that
+		// holds the levels, so the decoded value drops them.
+		var lists strings.Builder
+
+		lists.WriteString("k: &k a\na:\n  - &l0 [x]\n")
+
+		for level := 1; level <= 7; level++ {
+			aliases := strings.Repeat(fmt.Sprintf("*l%d, ", level-1), 10)
+			fmt.Fprintf(&lists, "  - &l%d [%s]\n", level, strings.TrimSuffix(aliases, ", "))
+		}
+
+		lists.WriteString("*k : small\n")
+
+		// Each level merges the level below ten times, so a decode reads
+		// the first level 10^7 times.
+		var merges strings.Builder
+
+		merges.WriteString("m0: &m0 {a: x}\n")
+
+		for level := 1; level <= 7; level++ {
+			aliases := strings.Repeat(fmt.Sprintf("*m%d, ", level-1), 10)
+			fmt.Fprintf(&merges, "m%d: &m%d\n  <<: [%s]\n", level, level, strings.TrimSuffix(aliases, ", "))
+		}
+
+		v := compileSchema(t, []byte(`{"maxProperties": 5}`))
+
+		tcs := map[string]struct {
+			path  paths.Path
+			input string
+			errs  []error
+		}{
+			"alias bomb as mapping key": {
+				input: lists.String() + "b:\n  ? *l7\n  : v\n",
+				errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+			},
+			"alias bomb as flow mapping key": {
+				input: lists.String() + "b: {*l7 : v}\n",
+				errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+			},
+			"alias bomb under a string tag": {
+				input: lists.String() + "b: !!str *l7\n",
+				errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+			},
+			"merge key bomb": {
+				input: merges.String(),
+				errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+			},
+			"node holding an alias with a bomb outside it": {
+				// A decode of a node that holds an alias reads the whole
+				// document to find the anchor.
+				path:  paths.Root().Child("c"),
+				input: lists.String() + "b:\n  ? *l7\n  : v\nc: [*k]\n",
+				errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+			},
+			"alias to a small sequence as mapping key": {
+				input: "s: &s [a, b]\n*s : v\n",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input)
+				if !tc.path.IsRoot() {
+					doc = yamltest.At(t, doc, tc.path)
+				}
+
+				err := doc.Validate(t.Context(), v)
+				if tc.errs == nil {
+					require.NoError(t, err)
+
+					return
+				}
+
+				for _, want := range tc.errs {
+					require.ErrorIs(t, err, want)
+				}
+			})
+		}
+	})
+
 	t.Run("values", func(t *testing.T) {
 		t.Parallel()
 
