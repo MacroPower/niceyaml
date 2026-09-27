@@ -1379,17 +1379,17 @@ func boundCause(x *Error) *SourceError {
 	return nil
 }
 
-// walk calls visit for every node below e in depth-first order. A nil e
-// has no nodes below it.
+// walk calls visit for every node below e in depth-first order, each
+// once however many times the tree reaches it, as [AllBindings] yields
+// them. A nil e has no nodes below it.
 func (e *SourceError) walk(visit func(*SourceError)) {
-	if e == nil {
-		return
-	}
+	e.all(map[*SourceError]bool{}, func(n *SourceError) bool {
+		if n != e {
+			visit(n)
+		}
 
-	for _, c := range e.errors {
-		visit(c)
-		c.walk(visit)
-	}
+		return true
+	})
 }
 
 // all yields e and every binding below it in depth-first order, each

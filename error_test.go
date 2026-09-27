@@ -3820,6 +3820,57 @@ func TestSourceError_Annotate(t *testing.T) {
 		assert.Equal(t, view.Annotations(7), excerpt.Annotations(7).Filter(line.Below))
 	})
 
+	t.Run("a binding the tree reaches twice marks its line once", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
+		badA := yamltest.Bind(t, source, niceyaml.NewError("bad a", niceyaml.AtPath(paths.Root().Child("a"))))
+		summary := yamltest.Bind(t, source, niceyaml.NewError("summary", niceyaml.WithErrors(badA)))
+		err := yamltest.Bind(t, source, errors.Join(summary, badA))
+
+		got := niceyaml.FormatError(err, 1)
+		assert.Contains(t, got, "^ bad a")
+		assert.NotContains(t, got, "bad a; bad a")
+
+		// The excerpt marks the view as every binding AllBindings yields
+		// marks it.
+		view := source.View()
+		for b := range niceyaml.AllBindings(err) {
+			b.Annotate(view)
+		}
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+
+		excerpt, ok := bound.Excerpt(0)
+		require.True(t, ok)
+		assert.Equal(t, view.Annotations(0), excerpt.Annotations(0))
+	})
+
+	t.Run("a binding reached along many paths marks in linear time", func(t *testing.T) {
+		t.Parallel()
+
+		// Every binding nests the one before it twice, so a walk that
+		// visits a binding once per path takes 2^40 steps.
+		source := niceyaml.NewSourceFromString("a: 1\n")
+		err := yamltest.Bind(t, source, niceyaml.NewError("bad a", niceyaml.AtPath(paths.Root().Child("a"))))
+
+		for range 40 {
+			err = yamltest.Bind(t, source, niceyaml.NewError("summary", niceyaml.WithErrors(err, err)))
+		}
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+
+		excerpt, ok := bound.Excerpt(0)
+		require.True(t, ok)
+		assert.Equal(t, line.Annotations{
+			{Content: "bad a", Kind: kind.TextError, Placement: line.Below, Col: 3},
+		}, excerpt.Annotations(0).Filter(line.Below))
+	})
+
 	t.Run("two errors annotate one view", func(t *testing.T) {
 		t.Parallel()
 
