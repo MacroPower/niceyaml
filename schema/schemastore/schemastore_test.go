@@ -784,35 +784,19 @@ func TestSchemaStore_FetchGoexitReachesCaller(t *testing.T) {
 func TestSchemaStore_HTTPClient(t *testing.T) {
 	t.Parallel()
 
-	var headerReceived string
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		headerReceived = r.Header.Get("X-Custom-Header")
-
-		//nolint:errcheck // Test data is static and valid.
-		data, _ := json.Marshal(testCatalog)
-
-		//nolint:errcheck // Test helper.
-		w.Write(data)
-	}))
-	defer server.Close()
-
-	client := &http.Client{
-		Transport: &roundTripperFunc{fn: func(r *http.Request) (*http.Response, error) {
-			r.Header.Set("X-Custom-Header", "test-value")
-
-			return http.DefaultTransport.RoundTrip(r) //nolint:wrapcheck // Test helper.
-		}},
-	}
+	// The catalog URL names a host that never resolves, so only the
+	// configured client can answer it.
+	client, fetchCount := newCountingCatalogClient(t, testCatalog)
 
 	store := schemastore.New(
-		schemastore.WithCatalogURL(server.URL),
+		schemastore.WithCatalogURL("https://catalog.invalid/catalog.json"),
 		schemastore.WithHTTPClient(client),
 	)
 
-	_, err := store.FindMatch(t.Context(), "config.yaml")
+	entry, err := store.FindMatch(t.Context(), "config.yaml")
 	require.NoError(t, err)
-	assert.Equal(t, "test-value", headerReceived)
+	assert.Equal(t, "Test", entry.Name)
+	assert.Equal(t, int32(1), fetchCount.Load())
 }
 
 func TestSchemaStore_ZeroRefreshTimeout(t *testing.T) {
