@@ -182,8 +182,14 @@ func TestValidateCmdSchemaError(t *testing.T) {
 
 			switch {
 			case tc.url:
-				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-					fetches.Add(1)
+				// A test in another process can dial a port it released,
+				// and this server may hold that port by then, so the
+				// handler counts only requests for the schema path.
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path == "/schema.json" {
+						fetches.Add(1)
+					}
+
 					w.WriteHeader(http.StatusInternalServerError)
 				}))
 				t.Cleanup(srv.Close)
