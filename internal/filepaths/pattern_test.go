@@ -346,6 +346,46 @@ func TestMatchAny(t *testing.T) {
 			patterns: []string{"docker-compose.yaml"},
 			want:     true,
 		},
+		"negation excludes file": {
+			path:     "/x/docker-compose.yml",
+			patterns: []string{"*.yml", "!docker-compose.yml"},
+			want:     false,
+		},
+		"negation leaves other files": {
+			path:     "/x/app.yml",
+			patterns: []string{"*.yml", "!docker-compose.yml"},
+			want:     true,
+		},
+		"negation before the include still excludes": {
+			path:     "/x/docker-compose.yml",
+			patterns: []string{"!docker-compose.yml", "*.yml"},
+			want:     false,
+		},
+		"negation only matches nothing": {
+			path:     "/x/other.yml",
+			patterns: []string{"!docker-compose.yml"},
+			want:     false,
+		},
+		"negation does not match its literal spelling": {
+			path:     "/x/!docker-compose.yml",
+			patterns: []string{"!docker-compose.yml"},
+			want:     false,
+		},
+		"negation at depth": {
+			path:     "/r/.github/workflows/ci.yml",
+			patterns: []string{"**/*.yml", "!.github/**"},
+			want:     false,
+		},
+		"negation with a leading slash": {
+			path:     "/r/.github/workflows/ci.yml",
+			patterns: []string{"*.yml", "!/.github/workflows/*.yml"},
+			want:     false,
+		},
+		"bare negation is skipped": {
+			path:     "/x/app.yml",
+			patterns: []string{"*.yml", "!"},
+			want:     true,
+		},
 	}
 
 	for name, tc := range tcs {

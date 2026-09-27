@@ -84,6 +84,11 @@ func TestSchemaStore_FindMatch(t *testing.T) {
 				URL:       "https://json.schemastore.org/mixed.json",
 				FileMatch: []string{"**/mixed/!(config).yml", "**/mixed/*.yaml"},
 			},
+			{
+				Name:      "Compose Overrides",
+				URL:       "https://json.schemastore.org/compose-overrides.json",
+				FileMatch: []string{"**/compose/*.yml", "!docker-compose.yml"},
+			},
 		},
 	}
 
@@ -142,6 +147,14 @@ func TestSchemaStore_FindMatch(t *testing.T) {
 		"matches the supported pattern beside an extglob one": {
 			filePath: "repo/mixed/config.yaml",
 			wantName: "Mixed Patterns",
+		},
+		"matches a pattern beside an exclusion": {
+			filePath: "repo/compose/override.yml",
+			wantName: "Compose Overrides",
+		},
+		"no match for an excluded file": {
+			filePath: "repo/compose/docker-compose.yml",
+			err:      schemastore.ErrNoCatalogMatch,
 		},
 		"no match for unrelated file": {
 			filePath: "config.yaml",

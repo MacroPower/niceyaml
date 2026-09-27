@@ -98,6 +98,12 @@ func normalizePattern(pattern string) string {
 // "/repo/.github/workflows/ci.yml". Every pattern gets an implicit "**/"
 // prefix unless it already has one, and drops a leading "/" first.
 //
+// A pattern with a leading "!" excludes the paths the rest of it matches,
+// wherever it sits in the list, as yaml-language-server reads it. So
+// "*.yml" and "!docker-compose.yml" together match every YAML file but
+// "docker-compose.yml", and a list that holds only exclusions matches
+// nothing.
+//
 // MatchAny cleans the path and normalizes its separators to forward
 // slashes before matching, as [Pattern.Match] does.
 //
@@ -124,28 +130,41 @@ func MatchAny(path string, patterns []string) bool {
 //
 // The zero value holds no patterns and matches no path.
 type AnyDepthPatterns struct {
-	globs []string
+	globs    []string
+	excludes []string
 }
 
 // NewAnyDepthPatterns creates a new [AnyDepthPatterns] from the given
 // glob patterns. It keeps every pattern, the invalid ones included, and
 // [AnyDepthPatterns.MatchClean] skips a pattern it cannot interpret, as
-// [MatchAny] does.
+// [MatchAny] does. It drops a "!" that has nothing after it.
 func NewAnyDepthPatterns(patterns []string) AnyDepthPatterns {
-	globs := make([]string, len(patterns))
-	for i, pattern := range patterns {
-		globs[i] = anyDepth(pattern)
+	var p AnyDepthPatterns
+
+	for _, pattern := range patterns {
+		exclude, ok := strings.CutPrefix(pattern, "!")
+		switch {
+		case !ok:
+			p.globs = append(p.globs, anyDepth(pattern))
+		case exclude != "":
+			p.excludes = append(p.excludes, anyDepth(exclude))
+		}
 	}
 
-	return AnyDepthPatterns{globs: globs}
+	return p
 }
 
-// MatchClean reports whether path matches any of the patterns, with the
-// semantics of [MatchAny]. The path must already be in the form
-// [CleanPath] returns, so a caller matching one path against many
-// pattern sets cleans it once.
+// MatchClean reports whether path matches any of the patterns and none
+// of the exclusions, with the semantics of [MatchAny]. The path must
+// already be in the form [CleanPath] returns, so a caller matching one
+// path against many pattern sets cleans it once.
 func (p AnyDepthPatterns) MatchClean(path string) bool {
-	for _, glob := range p.globs {
+	return matchAnyGlob(p.globs, path) && !matchAnyGlob(p.excludes, path)
+}
+
+// matchAnyGlob reports whether path matches any of globs.
+func matchAnyGlob(globs []string, path string) bool {
+	for _, glob := range globs {
 		// Whether Match reports a pattern error depends on the path, so
 		// an error skips the pattern for this path alone.
 		matched, err := doublestar.Match(glob, path)
