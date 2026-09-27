@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/token"
 )
 
 // Resolver resolves paths in one document. [NewResolver] binds each alias
@@ -47,6 +48,45 @@ func (r *Resolver) Node(p Path) (ast.Node, error) {
 	}
 
 	return node, nil
+}
+
+// Token resolves the token that starts the node at p in the document of
+// the Resolver, as [Path.Token] does, with the same results and errors.
+func (r *Resolver) Token(p Path) (*token.Token, error) {
+	m, err := p.single(r.resolver, r.doc)
+	if err != nil {
+		return nil, err
+	}
+
+	return p.tokenOf(m.node)
+}
+
+// Matches resolves every node p selects in the document of the Resolver,
+// as [Path.Matches] does, with the same results and errors.
+func (r *Resolver) Matches(p Path) ([]Match, error) {
+	found, err := p.matches(r.resolver, r.doc)
+	if err != nil {
+		return nil, err
+	}
+
+	matches := make([]Match, 0, len(found))
+
+	for _, m := range found {
+		node, err := r.resolver.deref(m.node)
+		if err != nil {
+			return nil, fmt.Errorf("resolve %s: %w", p, err)
+		}
+
+		// A tree built by hand may hold a nil where the parser always
+		// puts a node, and a nil is nothing to list.
+		if isNilNode(node) {
+			continue
+		}
+
+		matches = append(matches, Match{Node: node, Path: Path{segments: m.segs}})
+	}
+
+	return matches, nil
 }
 
 // MergeSources returns the mappings the `<<` merge keys of the mapping at

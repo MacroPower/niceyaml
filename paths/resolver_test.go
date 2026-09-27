@@ -89,11 +89,192 @@ func TestResolver_Node(t *testing.T) {
 	}
 }
 
-func TestResolver_Node_SeveralPaths(t *testing.T) {
+func TestResolver_Token(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input    string
+		path     string
+		want     string
+		wantLine int
+		err      error
+	}{
+		"plain child": {
+			input:    "a:\n  b: x\n",
+			path:     "$.a.b",
+			want:     "x",
+			wantLine: 2,
+		},
+		"key": {
+			input:    "a:\n  b: x\n",
+			path:     "$.a.b~",
+			want:     "b",
+			wantLine: 2,
+		},
+		"through an alias": {
+			input:    "base: &b {k: x}\nref: *b\n",
+			path:     "$.ref.k",
+			want:     "x",
+			wantLine: 1,
+		},
+		"alias at the end": {
+			input:    "base: &b x\nref: *b\n",
+			path:     "$.ref",
+			want:     "*",
+			wantLine: 2,
+		},
+		"key a merge brings in": {
+			input:    "base: &b {k: x}\nm:\n  <<: *b\n  own: 1\n",
+			path:     "$.m.k",
+			want:     "x",
+			wantLine: 1,
+		},
+		"unknown alias": {
+			input: "a: *nope\n",
+			path:  "$.a.b",
+			err:   paths.ErrAlias,
+		},
+		"wildcard": {
+			input: "a: [x, y]\n",
+			path:  "$..a",
+			err:   paths.ErrWildcard,
+		},
+		"missing path": {
+			input: "a: x\n",
+			path:  "$.b",
+			err:   paths.ErrNotFound,
+		},
+		"nil document": {
+			path: "$.a",
+			err:  paths.ErrNoDocument,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// A case with no input resolves in a nil document.
+			var doc *ast.DocumentNode
+
+			if tc.input != "" {
+				file, err := niceyaml.NewSourceFromString(tc.input).File()
+				require.NoError(t, err)
+
+				doc = file.Docs[0]
+			}
+
+			tk, err := paths.NewResolver(doc).Token(paths.MustParse(tc.path))
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, tk.Value)
+			assert.Equal(t, tc.wantLine, tk.Position.Line)
+		})
+	}
+}
+
+func TestResolver_Matches(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input      string
+		path       string
+		want       []string
+		wantValues []string
+		err        error
+	}{
+		"index all": {
+			input:      "a: [x, y]\n",
+			path:       "$.a[*]",
+			want:       []string{"$.a[0]", "$.a[1]"},
+			wantValues: []string{"x", "y"},
+		},
+		"recursive": {
+			input:      "a: {name: x}\nb: {c: {name: y}}\n",
+			path:       "$..name",
+			want:       []string{"$.a.name", "$.b.c.name"},
+			wantValues: []string{"x", "y"},
+		},
+		"each alias to one anchor": {
+			input:      "base: &b {k: x}\nrefs: [*b, *b]\n",
+			path:       "$.refs[*].k",
+			want:       []string{"$.refs[0].k", "$.refs[1].k"},
+			wantValues: []string{"x", "x"},
+		},
+		"key a merge brings in": {
+			input:      "base: &b {k: x}\nm:\n  <<: *b\n  own: 1\n",
+			path:       "$.m.k",
+			want:       []string{"$.m.k"},
+			wantValues: []string{"x"},
+		},
+		"key of each entry": {
+			input:      "a: {name: x}\nb: {name: y}\n",
+			path:       "$..name~",
+			want:       []string{"$.a.name~", "$.b.name~"},
+			wantValues: []string{"name", "name"},
+		},
+		"nothing": {
+			input: "a: x\n",
+			path:  "$.b[*]",
+		},
+		"unknown alias": {
+			input: "a: *nope\n",
+			path:  "$.a[*]",
+			err:   paths.ErrAlias,
+		},
+		"nil document": {
+			path: "$.a",
+			err:  paths.ErrNoDocument,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// A case with no input resolves in a nil document.
+			var doc *ast.DocumentNode
+
+			if tc.input != "" {
+				file, err := niceyaml.NewSourceFromString(tc.input).File()
+				require.NoError(t, err)
+
+				doc = file.Docs[0]
+			}
+
+			matches, err := paths.NewResolver(doc).Matches(paths.MustParse(tc.path))
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			var got, gotValues []string
+
+			for _, m := range matches {
+				got = append(got, m.Path.String())
+				gotValues = append(gotValues, m.Node.String())
+			}
+
+			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.wantValues, gotValues)
+		})
+	}
+}
+
+func TestResolver_SeveralPaths(t *testing.T) {
 	t.Parallel()
 
 	// One Resolver resolves every path, including one it resolved before,
-	// to the node and error that Path.Node finds on its own.
+	// to the node, token, matches, and error that Path.Node, Path.Token,
+	// and Path.Matches find on their own.
 	source := niceyaml.NewSourceFromString(stringtest.Input(`
 		base: &base
 		  name: shared
@@ -120,23 +301,56 @@ func TestResolver_Node_SeveralPaths(t *testing.T) {
 		"$.mixed.extra",
 		"$.bad",
 		"$.items[*]",
+		"$..name",
+		"$.mixed~",
 		"$.spec.missing",
 		"$.spec.name",
 	} {
 		p := paths.MustParse(expr)
 
-		want, wantErr := p.Node(doc)
-		got, err := r.Node(p)
+		wantNode, wantErr := p.Node(doc)
+		gotNode, err := r.Node(p)
 
-		if wantErr != nil {
-			require.EqualError(t, err, wantErr.Error(), expr)
-
-			continue
+		if assertSameError(t, wantErr, err, expr) {
+			assert.Same(t, wantNode, gotNode, expr)
 		}
 
-		require.NoError(t, err, expr)
-		assert.Same(t, want, got, expr)
+		wantToken, wantErr := p.Token(doc)
+		gotToken, err := r.Token(p)
+
+		if assertSameError(t, wantErr, err, expr) {
+			assert.Same(t, wantToken, gotToken, expr)
+		}
+
+		wantMatches, wantErr := p.Matches(doc)
+		gotMatches, err := r.Matches(p)
+
+		if assertSameError(t, wantErr, err, expr) {
+			require.Len(t, gotMatches, len(wantMatches), expr)
+
+			for i, want := range wantMatches {
+				assert.Same(t, want.Node, gotMatches[i].Node, expr)
+				assert.Equal(t, want.Path, gotMatches[i].Path, expr)
+			}
+		}
 	}
+}
+
+// assertSameError asserts that err has the text of wantErr, or that both
+// are nil, and reports whether both are nil, so the caller compares the
+// results.
+func assertSameError(t *testing.T, wantErr, err error, expr string) bool {
+	t.Helper()
+
+	if wantErr != nil {
+		require.EqualError(t, err, wantErr.Error(), expr)
+
+		return false
+	}
+
+	require.NoError(t, err, expr)
+
+	return true
 }
 
 func TestResolver_MergeSources(t *testing.T) {

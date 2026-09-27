@@ -490,31 +490,7 @@ type Match struct {
 // of an entry a `<<` merge key brings in is the path of the mapping that
 // merges it. Returns the errors [Path.Nodes] returns.
 func (p Path) Matches(doc *ast.DocumentNode) ([]Match, error) {
-	r := NewResolver(doc).resolver
-
-	found, err := p.matches(r, doc)
-	if err != nil {
-		return nil, err
-	}
-
-	matches := make([]Match, 0, len(found))
-
-	for _, m := range found {
-		node, err := r.deref(m.node)
-		if err != nil {
-			return nil, fmt.Errorf("resolve %s: %w", p, err)
-		}
-
-		// A tree built by hand may hold a nil where the parser always
-		// puts a node, and a nil is nothing to list.
-		if isNilNode(node) {
-			continue
-		}
-
-		matches = append(matches, Match{Node: node, Path: Path{segments: m.segs}})
-	}
-
-	return matches, nil
+	return NewResolver(doc).Matches(p)
 }
 
 // Node resolves the node at the path in doc.
@@ -545,12 +521,7 @@ func (p Path) Node(doc *ast.DocumentNode) (ast.Node, error) {
 // anchor yields the alias's own token rather than [ErrAlias]. Token still
 // returns [ErrAlias] for an alias an earlier selector resolves through.
 func (p Path) Token(doc *ast.DocumentNode) (*token.Token, error) {
-	m, err := p.single(NewResolver(doc).resolver, doc)
-	if err != nil {
-		return nil, err
-	}
-
-	return p.tokenOf(m.node)
+	return NewResolver(doc).Token(p)
 }
 
 // tokenOf returns the token that starts node. A tree built by hand may hold

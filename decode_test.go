@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"charm.land/lipgloss/v2"
@@ -4486,6 +4487,49 @@ func (*cancelAwareUnmarshaler) UnmarshalYAML(ctx context.Context, _ []byte) erro
 	}
 
 	return nil
+}
+
+func TestNode_ConcurrentPaths(t *testing.T) {
+	t.Parallel()
+
+	// Every Node of a document resolves paths through one resolver, which
+	// the first path creates, so Nodes of one document resolve paths from
+	// several goroutines at once.
+	doc, err := niceyaml.NewSourceFromString(stringtest.Input(`
+		base: &b
+		  name: x
+		items: [*b, *b]
+		spec:
+		  replicas: 1
+	`)).Document()
+	require.NoError(t, err)
+
+	spec, err := doc.At(paths.Root().Child("spec"))
+	require.NoError(t, err)
+
+	var wg sync.WaitGroup
+
+	for range 8 {
+		wg.Go(func() {
+			node, err := doc.At(paths.Root().Child("items").Index(1).Child("name"))
+			if assert.NoError(t, err) {
+				assert.Equal(t, position.NewSpan(1, 2), node.Span())
+			}
+
+			items, err := doc.Nodes(paths.Root().Child("items").IndexAll())
+			if assert.NoError(t, err) {
+				assert.Len(t, items, 2)
+			}
+
+			ranges, err := spec.Ranges(paths.Root().Child("replicas"))
+			if assert.NoError(t, err) {
+				want := position.NewRange(position.New(4, 12), position.New(4, 13))
+				assert.Equal(t, position.Ranges{want}, ranges)
+			}
+		})
+	}
+
+	wg.Wait()
 }
 
 func TestErrDecodeRejected(t *testing.T) {

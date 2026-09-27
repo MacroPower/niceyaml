@@ -50,15 +50,14 @@ func selfValidate(v any, n *Node, opts []yaml.DecodeOption) error {
 // the first path, while a parent on the second path still learns that
 // the value failed. It reads the keys of a map from the node the value
 // decoded from, with the options it decoded with, and finds that node
-// through one [paths.Resolver] for the document, so the walk binds the
+// through the [paths.Resolver] of the document, so the walk binds the
 // aliases of the document once however many maps it meets.
 type selfWalker struct {
-	node     *Node
-	resolver *paths.Resolver
-	opts     []yaml.DecodeOption
-	walking  map[visit]bool
-	done     map[visit]bool
-	errs     []error
+	node    *Node
+	opts    []yaml.DecodeOption
+	walking map[visit]bool
+	done    map[visit]bool
+	errs    []error
 }
 
 // visit names a pointer, map, or slice the walker is inside of, by type
@@ -396,14 +395,9 @@ func (w *selfWalker) collectKeyNames(
 }
 
 // pathResolver returns the [paths.Resolver] for the document of the
-// walk. It creates the Resolver when the walk first needs one, so a walk
-// that meets no map never binds the aliases of the document.
+// walk.
 func (w *selfWalker) pathResolver() *paths.Resolver {
-	if w.resolver == nil {
-		w.resolver = paths.NewResolver(w.node.doc.root)
-	}
-
-	return w.resolver
+	return w.node.doc.pathResolver()
 }
 
 // addKeyName decodes key as type t and adds its text to names under the

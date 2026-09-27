@@ -1,6 +1,7 @@
 package niceyaml_test
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -167,6 +168,43 @@ func BenchmarkNode_Nodes(b *testing.B) {
 				if len(items) != sz.items {
 					b.Fatalf("got %d nodes, want %d", len(items), sz.items)
 				}
+			}
+		})
+	}
+}
+
+func BenchmarkNode_BindManyPaths(b *testing.B) {
+	sizes := []struct {
+		name string
+		keys int
+	}{
+		{"keys_500", 500},
+		{"keys_2000", 2000},
+		{"keys_5000", 5000},
+	}
+
+	for _, sz := range sizes {
+		var sb strings.Builder
+
+		errs := make([]error, 0, sz.keys)
+
+		for i := range sz.keys {
+			fmt.Fprintf(&sb, "k%d: v%d\n", i, i)
+
+			errs = append(errs, niceyaml.NewError("bad value",
+				niceyaml.AtPath(paths.Root().Child(fmt.Sprintf("k%d", i)))))
+		}
+
+		doc, err := niceyaml.NewSourceFromString(sb.String()).Document()
+		require.NoError(b, err)
+
+		joined := errors.Join(errs...)
+
+		b.Run(sz.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				_ = doc.Bind(joined).Error()
 			}
 		})
 	}

@@ -15,6 +15,16 @@
 // Every method resolves within a single document, so callers working with
 // multi-document files pick the document first.
 //
+// Each [Path] method walks the whole document to bind its aliases before it
+// resolves. A caller that resolves many paths in one document creates one
+// [Resolver], which binds them once, and resolves each path through it:
+//
+//	r := paths.NewResolver(doc)
+//	for _, p := range fields {
+//		tk, err := r.Token(p)
+//		// ...
+//	}
+//
 // # Resolution
 //
 // Selectors apply to the content of a node, so an anchor (`&name`) or tag

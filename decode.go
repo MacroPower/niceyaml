@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -513,12 +514,18 @@ func documentOffset(doc *ast.DocumentNode) (int, bool) {
 }
 
 // document is what describes one YAML document of a [Source] as a whole:
-// its root, the tokens of the whole document, its index in the file, and
-// the length of its preamble. Every [Node] of the document shares it.
+// its root, the tokens of the whole document, its index in the file, the
+// length of its preamble, and the resolver its paths resolve through.
+// Every [Node] of the document shares it.
 type document struct {
 	// The root Node of the document.
 	node *Node
 	root *ast.DocumentNode
+	// Resolves every path in root, which pathResolver creates when the
+	// first path needs it. No Node edits the tree, so the resolver binds
+	// the aliases once however many paths the Nodes of the document
+	// resolve.
+	resolver *paths.Resolver
 	// The tokens of the whole document.
 	tokens token.Tokens
 	// The tokens that carry a position, in the order of their offsets,
@@ -527,6 +534,18 @@ type document struct {
 	index      int
 	// The number of tokens at the start of tokens before the content.
 	preamble int
+	// Creates resolver once, for the first path any Node resolves.
+	resolverOnce sync.Once
+}
+
+// pathResolver returns the [paths.Resolver] for the document, and creates
+// it on the first call.
+func (d *document) pathResolver() *paths.Resolver {
+	d.resolverOnce.Do(func() {
+		d.resolver = paths.NewResolver(d.root)
+	})
+
+	return d.resolver
 }
 
 // Node is a scope in a YAML document: the root of the document, which
@@ -697,7 +716,7 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 	c := *n
 	c.base = n.base.Join(path)
 
-	node, err := c.base.Node(n.doc.root)
+	node, err := n.doc.pathResolver().Node(c.base)
 	if err != nil {
 		// Bind to the receiver, a Node that exists, rather than to the
 		// copy, whose scope moved to a path that resolves to no node.
@@ -736,7 +755,7 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 // has no content, and [paths.ErrAlias] when an alias on the path does not
 // resolve.
 func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
-	found, err := n.base.Join(path).Matches(n.doc.root)
+	found, err := n.doc.pathResolver().Matches(n.base.Join(path))
 	if err != nil {
 		return nil, n.Bind(err)
 	}
@@ -1100,7 +1119,7 @@ func (n *Node) Ranges(path paths.Path) (position.Ranges, error) {
 // scope. An error from it names the path already and comes back as it is,
 // and a token without a position is [ErrNoLocation].
 func (n *Node) position(path paths.Path) (position.Position, error) {
-	tk, err := n.base.Join(path).Token(n.doc.root)
+	tk, err := n.doc.pathResolver().Token(n.base.Join(path))
 	if err != nil {
 		//nolint:wrapcheck // The paths error already names the path.
 		return position.Position{}, err
