@@ -1544,15 +1544,9 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 
 	// The decoder registers the anchors of the node it decodes, so an alias
 	// in a node below the body finds an anchor defined elsewhere in the
-	// document only after the decoder has seen the whole body. That pass
-	// only primes the anchors, so a failure in it, which concerns a value
-	// the caller did not ask for, is not the caller's error; an alias the
-	// pass could not resolve fails again in the decode of node itself.
+	// document only after the decoder has seen that anchor.
 	if node != n.doc.root.Body && hasAlias(node) {
-		var sink any
-
-		//nolint:errcheck // The pass only primes anchors.
-		_ = dec.DecodeFromNodeContext(ctx, decodeView(n.doc.root.Body), &sink)
+		primeAnchors(ctx, dec, n.doc.root.Body, node)
 	}
 
 	// The go-yaml decoder panics on some values it cannot read, such as a
@@ -1560,6 +1554,78 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 	// also catches a panic in a value's own UnmarshalYAML, which then
 	// comes back as a rejection too.
 	return n.bindDecodeError(decodeWithRecover(ctx, dec, decodeView(node), decodeTarget(v, node)))
+}
+
+// primeAnchors registers with dec the anchors of body that the decoder
+// meets before node, where an alias in node can refer to them. It decodes
+// each anchor that starts before node, and each `<<` merge key, which
+// records again the anchors of the mappings it merges, on its own and in
+// document order, the order a decode of the whole body reads them in. The
+// pass only primes anchors, so a failure in it, which concerns a value
+// the caller did not ask for, is not the caller's error, and it stops
+// none of the decodes after it. An alias the pass could not resolve fails
+// again in the decode of the node itself. A context that ends stops the
+// pass.
+func primeAnchors(ctx context.Context, dec *yaml.Decoder, body, node ast.Node) {
+	start, ok := startOffset(node)
+	if !ok {
+		return
+	}
+
+	var found anchorFinder
+
+	ast.Walk(&found, body)
+
+	for _, anchor := range found {
+		if ctx.Err() != nil {
+			return
+		}
+
+		if at, ok := startOffset(anchor); !ok || at >= start {
+			continue
+		}
+
+		var sink any
+
+		//nolint:errcheck // The pass only primes anchors.
+		_ = decodeWithRecover(ctx, dec, decodeView(anchor), &sink)
+	}
+}
+
+// startOffset returns the offset of the first token under node, and
+// false when no token under node carries a position.
+func startOffset(node ast.Node) (int, bool) {
+	first, _ := tokenBounds(node)
+	if len(first) == 0 {
+		return 0, false
+	}
+
+	return first[0].Position.Offset, true
+}
+
+// anchorFinder is an [ast.Visitor] that collects, in document order, the
+// outermost nodes that register anchors when the decoder reads them: an
+// anchor, and a mapping entry with a `<<` merge key. The decoder reads
+// the nodes inside those with them, so the walk stops there.
+type anchorFinder []ast.Node
+
+// Visit implements [ast.Visitor].
+func (f *anchorFinder) Visit(node ast.Node) ast.Visitor {
+	switch n := node.(type) {
+	case *ast.AnchorNode:
+		*f = append(*f, n)
+
+		return nil
+
+	case *ast.MappingValueNode:
+		if n.Key != nil && n.Key.IsMergeKey() {
+			*f = append(*f, n)
+
+			return nil
+		}
+	}
+
+	return f
 }
 
 // decodeView returns node as the go-yaml decoder reads it: the same tree,

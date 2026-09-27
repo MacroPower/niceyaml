@@ -2379,18 +2379,34 @@ func TestDocument_At(t *testing.T) {
 	t.Run("a failure elsewhere in the document does not break Get", func(t *testing.T) {
 		t.Parallel()
 
-		// Resolving the alias under $.sub decodes the whole body once to
-		// register its anchors. The undefined alias under $.bad fails that
-		// pass, and the value the caller asked for still comes back.
-		dd := yamltest.FirstDocument(t, stringtest.Input(`
-			a: &x 1
-			sub: {k: *x}
-			bad: *nope
-		`))
+		// Resolving the alias under $.sub first decodes the anchors of the
+		// document. The undefined alias under $.bad fails to decode, and
+		// the value the caller asked for still comes back.
+		tcs := map[string]struct {
+			input string
+		}{
+			"failure after the anchor": {
+				input: "a: &x 1\nsub: {k: *x}\nbad: *nope\n",
+			},
+			"failure before the anchor": {
+				input: "bad: *nope\na: &x 1\nsub: {k: *x}\n",
+			},
+			"failure inside another anchor": {
+				input: "b: &y [*nope]\na: &x 1\nsub: {k: *x}\n",
+			},
+		}
 
-		got, err := yamltest.At(t, dd, paths.Root().Child("sub")).Decode[map[string]any](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, map[string]any{"k": uint64(1)}, got)
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				got, err := yamltest.At(t, dd, paths.Root().Child("sub")).Decode[map[string]any](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, map[string]any{"k": uint64(1)}, got)
+			})
+		}
 	})
 
 	t.Run("alias to a later anchor stays an error", func(t *testing.T) {
