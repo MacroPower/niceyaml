@@ -266,27 +266,38 @@ func BenchmarkStore_FindMatch(b *testing.B) {
 func TestSchemaStore_LazyLoading(t *testing.T) {
 	t.Parallel()
 
-	client, fetchCount := newCountingCatalogClient(t, testCatalog)
+	// A fetch the store starts on a goroutine of its own can reach the
+	// transport after the call that started it returns. Inside the bubble,
+	// synctest.Wait lets every such fetch reach the transport before the
+	// test reads the count.
+	synctest.Test(t, func(t *testing.T) {
+		client, fetchCount := newCountingCatalogClient(t, testCatalog)
 
-	// New performs no I/O.
-	store := schemastore.New(
-		schemastore.WithCatalogURL("https://example.com/catalog.json"),
-		schemastore.WithHTTPClient(client),
-	)
+		// New performs no I/O.
+		store := schemastore.New(
+			schemastore.WithCatalogURL("https://example.com/catalog.json"),
+			schemastore.WithHTTPClient(client),
+		)
 
-	assert.Equal(t, int32(0), fetchCount.Load())
+		synctest.Wait()
+		assert.Equal(t, int32(0), fetchCount.Load())
 
-	// First lookup fetches.
-	entry, err := store.FindMatch(t.Context(), "config.yaml")
-	require.NoError(t, err)
-	assert.NotEmpty(t, entry.Name)
-	assert.Equal(t, int32(1), fetchCount.Load())
+		// First lookup fetches.
+		entry, err := store.FindMatch(t.Context(), "config.yaml")
+		require.NoError(t, err)
+		assert.NotEmpty(t, entry.Name)
 
-	// Second lookup uses cache.
-	entry, err = store.FindMatch(t.Context(), "other.yaml")
-	require.NoError(t, err)
-	assert.NotEmpty(t, entry.Name)
-	assert.Equal(t, int32(1), fetchCount.Load())
+		synctest.Wait()
+		assert.Equal(t, int32(1), fetchCount.Load())
+
+		// Second lookup uses cache.
+		entry, err = store.FindMatch(t.Context(), "other.yaml")
+		require.NoError(t, err)
+		assert.NotEmpty(t, entry.Name)
+
+		synctest.Wait()
+		assert.Equal(t, int32(1), fetchCount.Load())
+	})
 }
 
 func TestSchemaStore_CacheTTL(t *testing.T) {
@@ -1010,59 +1021,75 @@ func TestSchemaStore_EmptyCatalog(t *testing.T) {
 func TestSchemaStore_CanceledContext(t *testing.T) {
 	t.Parallel()
 
+	// Each subtest runs in a synctest bubble. A lookup with a canceled
+	// context returns at once, so a fetch it wrongly started could still
+	// be on its way to the transport. Calling synctest.Wait lets that
+	// fetch reach the transport before the test reads the count.
+
 	t.Run("uses cached data without refreshing", func(t *testing.T) {
 		t.Parallel()
 
-		client, fetchCount := newCountingCatalogClient(t, testCatalog)
+		synctest.Test(t, func(t *testing.T) {
+			client, fetchCount := newCountingCatalogClient(t, testCatalog)
 
-		// Use short TTL so cache expires quickly.
-		store := schemastore.New(
-			schemastore.WithCatalogURL("https://example.com/catalog.json"),
-			schemastore.WithHTTPClient(client),
-			schemastore.WithCacheTTL(10*time.Millisecond),
-		)
+			// Use short TTL so cache expires quickly.
+			store := schemastore.New(
+				schemastore.WithCatalogURL("https://example.com/catalog.json"),
+				schemastore.WithHTTPClient(client),
+				schemastore.WithCacheTTL(10*time.Millisecond),
+			)
 
-		_, err := store.FindMatch(t.Context(), "config.yaml")
-		require.NoError(t, err)
+			_, err := store.FindMatch(t.Context(), "config.yaml")
+			require.NoError(t, err)
 
-		// Wait for cache to expire.
-		time.Sleep(20 * time.Millisecond)
+			// Wait for cache to expire.
+			time.Sleep(20 * time.Millisecond)
 
-		// Create a canceled context.
-		ctx, cancel := context.WithCancel(t.Context())
-		cancel()
+			// Create a canceled context.
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
 
-		// FindMatch skips the refresh with a canceled context but still
-		// returns cached data.
-		entry, err := store.FindMatch(ctx, "config.yaml")
-		require.NoError(t, err)
-		assert.Equal(t, "Test", entry.Name)
-		assert.Equal(t, int32(1), fetchCount.Load())
+			// FindMatch skips the refresh with a canceled context but still
+			// returns cached data.
+			entry, err := store.FindMatch(ctx, "config.yaml")
+			require.NoError(t, err)
+			assert.Equal(t, "Test", entry.Name)
+
+			synctest.Wait()
+			assert.Equal(t, int32(1), fetchCount.Load())
+		})
 	})
 
 	t.Run("reports the cancellation without cached data", func(t *testing.T) {
 		t.Parallel()
 
-		client, fetchCount := newCountingCatalogClient(t, testCatalog)
+		synctest.Test(t, func(t *testing.T) {
+			client, fetchCount := newCountingCatalogClient(t, testCatalog)
 
-		store := schemastore.New(
-			schemastore.WithCatalogURL("https://example.com/catalog.json"),
-			schemastore.WithHTTPClient(client),
-		)
+			store := schemastore.New(
+				schemastore.WithCatalogURL("https://example.com/catalog.json"),
+				schemastore.WithHTTPClient(client),
+			)
 
-		ctx, cancel := context.WithCancel(t.Context())
-		cancel()
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
 
-		_, err := store.FindMatch(ctx, "config.yaml")
-		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
-		require.ErrorIs(t, err, context.Canceled)
-		assert.Equal(t, int32(0), fetchCount.Load())
+			_, err := store.FindMatch(ctx, "config.yaml")
+			require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+			require.ErrorIs(t, err, context.Canceled)
 
-		// A cancellation is not a failed attempt, so the next lookup fetches.
-		entry, err := store.FindMatch(t.Context(), "config.yaml")
-		require.NoError(t, err)
-		assert.Equal(t, "Test", entry.Name)
-		assert.Equal(t, int32(1), fetchCount.Load())
+			synctest.Wait()
+			assert.Equal(t, int32(0), fetchCount.Load())
+
+			// A cancellation is not a failed attempt, so the next lookup
+			// fetches.
+			entry, err := store.FindMatch(t.Context(), "config.yaml")
+			require.NoError(t, err)
+			assert.Equal(t, "Test", entry.Name)
+
+			synctest.Wait()
+			assert.Equal(t, int32(1), fetchCount.Load())
+		})
 	})
 }
 
