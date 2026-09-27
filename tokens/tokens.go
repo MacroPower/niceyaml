@@ -20,12 +20,15 @@ import (
 // letter and hex digits of a "\x", "\u", or "\U" escape in a double-quoted
 // scalar, also in the invalid token the lexer makes of a scalar that no
 // quote closes, as when an escape reads the closing quote as a hex digit.
-// It restores the spaces and tabs that end a line or fill a blank
-// line, the space in front of a ":" after a quoted or alias key, and the
-// space between a "-" and a "?". It restores the line breaks and
-// indentation in front of some tokens, such as a "?" or ":" indicator that
-// follows a flow collection, a quoted scalar, or a comment.
-// [SplitDocuments] cuts the stream into one stream per document.
+// It restores the spaces and tabs that end a line or fill a blank line,
+// the space in front of a ":" after a quoted or alias key, and the space
+// between a "-" and a "?". It restores the line breaks and indentation in
+// front of some tokens, such as a "?" or ":" indicator that follows a flow
+// collection, a quoted scalar, or a comment. When the lexer gives up on a
+// "\u" or "\U" escape, such as one the source ends too soon for, it reads
+// the escape's backslash into two tokens, and Tokenize leaves it in the
+// second alone. [SplitDocuments] cuts the stream into one stream per
+// document.
 //
 // Tokenize drops a UTF-8 byte order mark where YAML allows one: at the
 // start of a line before the content of a document, and in front of a
@@ -423,13 +426,19 @@ func withoutWhitespace(s string) string {
 // quote in the source rather than past the shortened text, where the next
 // token would land inside the scalar. A scalar that no quote closes runs
 // to the end of the source, and the cursor moves past its last text.
+//
+// When the lexer gives up on a "\u" or "\U" escape, it ends the invalid
+// token of the scalar with the escape's backslash and opens the next
+// token with the backslash again. The invalid token gives up the
+// backslash, and the cursor stops in front of it, so the next token lands
+// on it.
 type positioner struct {
 	tail string // The whitespace the stream holds after the text placed last.
 
 	src []rune
 	end int // The rune index where the last line of src ends, before its final line ending.
 
-	cursor   int // The rune index just past the text placed so far.
+	cursor   int // The rune index just past the text placed so far, at most the length of src.
 	reliable bool
 
 	// The rune index the line and column count runs up to.
@@ -441,15 +450,18 @@ type positioner struct {
 }
 
 // place moves tk to the rune where its text starts and advances the cursor
-// past the text of every line of its Origin. A token without text sits
-// where the next text starts, or at the end of the last line when no text
-// follows, and leaves the cursor where it is. When the text follows the
+// past the text of every line of its Origin, never past the end of the
+// source. A token without text sits where the next text starts, or at the
+// end of the last line when no text follows, and leaves the cursor where
+// it is. A token with text sits at the end of the last line too when the
+// source holds whitespace alone past the cursor. When the text follows the
 // cursor past whitespace alone, place gives tk the line breaks the lexer
 // dropped from that whitespace. A double-quoted scalar found in the source
 // moves the cursor past its closing quote instead, or past the last text of
 // the source when no quote closes it, and takes its Origin from the source
-// when the lexer shortened it. It returns the runes of the source the text
-// of tk covers.
+// when the lexer shortened it. The invalid token of a scalar the lexer cut
+// at the backslash of an escape gives that backslash up to the token after
+// it. It returns the runes of the source the text of tk covers.
 func (p *positioner) place(tk *token.Token) span {
 	var (
 		placed, found bool
@@ -484,7 +496,14 @@ func (p *positioner) place(tk *token.Token) span {
 			reliable := p.reliable
 			next := p.skipSpace()
 
+			// When the source holds whitespace alone past the cursor, the
+			// token sits at the end of the last line, as one without text
+			// does.
 			at, found = p.locate(tk, text)
+			if at >= len(p.src) {
+				at = p.end
+			}
+
 			if reliable && at == next {
 				p.restoreGap(tk, at)
 			}
@@ -496,7 +515,7 @@ func (p *positioner) place(tk *token.Token) span {
 			placed, start = true, at
 		}
 
-		p.cursor = at + len(text)
+		p.cursor = min(at+len(text), len(p.src))
 	}
 
 	if !placed {
@@ -504,11 +523,7 @@ func (p *positioner) place(tk *token.Token) span {
 		// its trailing lines on the line after the header, a line the
 		// source does not have when the header ends the file. When no
 		// text follows, the token sits at the end of the last line
-		// instead. The cursor can run past the end of the source after a
-		// token the lexer rewrote, so the check takes any index at or
-		// past the end. Such a token can also carry the line and column
-		// count past the end of the last line, and setPosition then
-		// counts again from the start of the source.
+		// instead.
 		at := p.skipSpace()
 		if at >= len(p.src) {
 			at = p.end
@@ -525,6 +540,10 @@ func (p *positioner) place(tk *token.Token) span {
 	// whatever the lexer made of it.
 	if found && doubleQuoted(tk) && p.src[start] == '"' && p.restoreQuoted(tk, start) {
 		matched = true
+	}
+
+	if matched && cutAtEscape(tk) {
+		p.dropBackslash(tk, start)
 	}
 
 	p.tail = tk.Origin[len(strings.TrimRight(tk.Origin, " \t\r\n")):]
@@ -547,6 +566,37 @@ func doubleQuoted(tk *token.Token) bool {
 		return tk.Next == nil && strings.HasPrefix(strings.TrimLeft(tk.Origin, " \t\r\n"), `"`)
 	default:
 		return false
+	}
+}
+
+// cutAtEscape reports whether tk is the invalid token the lexer makes of a
+// double-quoted scalar when it gives up on a "\u" or "\U" escape, such as
+// one the source ends too soon for. The lexer ends that token with the
+// escape's backslash and reads on from the backslash, so the token after
+// tk opens with it too.
+func cutAtEscape(tk *token.Token) bool {
+	if tk.Type != token.InvalidType || tk.Next == nil {
+		return false
+	}
+
+	text := strings.Trim(tk.Origin, " \t\r\n")
+	next := strings.TrimLeft(tk.Next.Origin, " \t\r\n")
+
+	return len(text) > 1 && strings.HasPrefix(text, `"`) && strings.HasSuffix(text, `\`) && strings.HasPrefix(next, `\`)
+}
+
+// dropBackslash takes the backslash that ends the text of tk off its
+// Origin, so the token after tk holds it alone. The text of tk starts at
+// rune index start, and the cursor stands just past the backslash. The
+// whitespace in front of the backslash then ends the Origin, and the
+// cursor moves back to the end of the text left.
+func (p *positioner) dropBackslash(tk *token.Token, start int) {
+	trail := len(strings.TrimRight(tk.Origin, " \t\r\n"))
+	tk.Origin = tk.Origin[:trail-1] + tk.Origin[trail:]
+
+	p.cursor--
+	for p.cursor > start && strings.ContainsRune(" \t\r\n", p.src[p.cursor-1]) {
+		p.cursor--
 	}
 }
 

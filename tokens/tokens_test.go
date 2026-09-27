@@ -61,7 +61,9 @@ func TestTokenize_NumericEscape(t *testing.T) {
 	// the source, so the joined Origins equal the input. An escape that
 	// reads the closing quote as a hex digit leaves the scalar open, and the
 	// lexer makes an invalid token of the rest of the source, which Tokenize
-	// restores the same way.
+	// restores the same way. When the lexer gives up on a "\u" or "\U"
+	// escape, it reads the backslash into two tokens, and Tokenize leaves it
+	// in the second alone.
 	tcs := map[string]struct {
 		input string
 	}{
@@ -118,6 +120,24 @@ func TestTokenize_NumericEscape(t *testing.T) {
 		},
 		"escape swallows the quote of the whole source": {
 			input: `"\x4"` + "\n",
+		},
+		"unicode escape cut short by the end": {
+			input: `a: "\u: 1`,
+		},
+		"long unicode escape cut short by the end": {
+			input: `"\U: \U`,
+		},
+		"unicode escape cut short before the quote": {
+			input: `a: "\u1"` + "\n",
+		},
+		"high surrogate without a low one": {
+			input: `a: "\uD83Dxx"` + "\n" + "b: 1\n",
+		},
+		"escape cut short on a later line": {
+			input: `a: "x` + "\n" + `  \u1"` + "\n",
+		},
+		"escape cut short after an escaped backslash": {
+			input: `a: "\\\u"`,
 		},
 	}
 
@@ -344,9 +364,9 @@ func TestTokenize_EmptyContentPastEnd(t *testing.T) {
 	// ends the file, that line does not exist, and the token moves to
 	// the end of the header's line. Content of blank lines holds no text
 	// either, so when those lines end the file, the token moves to the
-	// end of the last line, even after a header the lexer rewrote past
-	// the end of the source. A line the lexer dropped, such as a lone "!",
-	// still exists, and the token stays on it.
+	// end of the last line, even after an escape the lexer gives up on
+	// and reads again. A line the lexer dropped, such as a lone "!", still
+	// exists, and the token stays on it.
 	tcs := map[string]struct {
 		input  string
 		line   int
@@ -365,7 +385,7 @@ func TestTokenize_EmptyContentPastEnd(t *testing.T) {
 		"spaces end the file":       {input: "a: >+\n  \n", line: 2, col: 3, offset: 9},
 		"clipped blank line ends":   {input: "a: |\n\n", line: 2, col: 1, offset: 6},
 		"key follows":               {input: "a: |+\nb: 1\n", line: 2, col: 1, offset: 7},
-		"rewritten header past end": {input: "\"\\u>+: |\n\n", line: 2, col: 1, offset: 10},
+		"header after a cut escape": {input: "\"\\u>+: |\n\n", line: 2, col: 1, offset: 10},
 	}
 
 	for name, tc := range tcs {
@@ -1718,6 +1738,16 @@ func TestTokenize_Positions(t *testing.T) {
 			input: "\ta: 1\nb: 2\nc: 3\n",
 			want:  []string{"1:2:2", "1:5:5", "2:2:8", "2:4:10", "3:1:12", "3:2:13", "3:4:15"},
 		},
+		"escape cut short by the end": {
+			// The lexer reads the backslash into the invalid token for the
+			// scalar and again into the token after it.
+			input: "a: \"\\u: 1",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "1:5:5", "1:7:7", "1:9:9"},
+		},
+		"long escape cut short by the end": {
+			input: "\"\\U: \\U",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "1:6:6"},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -1763,6 +1793,10 @@ var positionCorpus = map[string]string{
 	"escaped scalars in a row":                       "a: \"\\u00e9\"\n\"\\u00e8\": \"\\x41 b\"\nc: 1\n",
 	"escape in a multi-line scalar":                  "a: \"x\\x41\n  b c\"\nc: 1\n",
 	"escape that swallows the quote":                 "a: \"\\u12\"\nb: 1\nc: 2\n",
+	"escape cut short by the end":                    "a: \"\\u: 1",
+	"long escape cut short by the end":               "\"\\U: \\U",
+	"high surrogate without a low one":               "a: \"\\uD83Dxx\"\nb: 1\n",
+	"escape cut short on a later line":               "a: \"x\n  \\u1\"\n",
 	"plain multi-line":                               "a: plain\n  multi\nb: 2\n",
 	"flow collections":                               "{a: 1, b: [1, 2]}\n",
 	"flow sequence over lines":                       "a: [\n  1,\n  2\n]\n",
