@@ -1,6 +1,7 @@
 package niceyaml
 
 import (
+	"bytes"
 	"encoding"
 	"errors"
 	"fmt"
@@ -53,9 +54,12 @@ func selfValidate(v any, n *Node, opts []yaml.DecodeOption) error {
 // decoded from, with the options it decoded with, and finds that node
 // through the [paths.Resolver] of the document, so the walk binds the
 // aliases of the document, and reads the keys of each mapping on the way
-// to a map, once however many maps it meets.
+// to a map, once however many maps it meets. One go-yaml decoder decodes
+// every key, so the walk applies the options, and reads any reference
+// files they name, once too.
 type selfWalker struct {
 	node    *Node
+	decoder *yaml.Decoder
 	opts    []yaml.DecodeOption
 	walking map[visit]bool
 	done    map[visit]bool
@@ -405,6 +409,16 @@ func (w *selfWalker) pathResolver() *paths.Resolver {
 	return w.node.doc.pathResolver()
 }
 
+// keyDecoder returns the go-yaml decoder for the keys of the walk, and
+// creates it when the walk first decodes a key.
+func (w *selfWalker) keyDecoder() *yaml.Decoder {
+	if w.decoder == nil {
+		w.decoder = yaml.NewDecoder(bytes.NewReader(nil), w.opts...)
+	}
+
+	return w.decoder
+}
+
 // addKeyName decodes key as type t and adds its text to names under the
 // value it decodes to. The text of a block scalar key is its content
 // rather than its `|` or `>` indicator. A key that does not decode, or
@@ -442,7 +456,7 @@ func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[an
 
 	decoded := reflect.New(t)
 
-	err := yaml.NodeToValue(node, decoded.Interface(), w.opts...)
+	err := w.keyDecoder().DecodeFromNode(node, decoded.Interface())
 	if err != nil || !decoded.Elem().Comparable() {
 		return
 	}

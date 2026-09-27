@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -700,6 +701,33 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		_, err := dd.Decode[map[string]map[float64]item](t.Context())
 		require.EqualError(t, err, "2001:22: $.last.0x10.price: negative price")
+	})
+
+	t.Run("the keys of every map decode with one go-yaml decoder", func(t *testing.T) {
+		t.Parallel()
+
+		// A go-yaml decoder applies its options once, when it first
+		// decodes, and reads any reference files then too.
+		var sb strings.Builder
+
+		for i := range 50 {
+			fmt.Fprintf(&sb, "k%d: {1: {price: 1}}\n", i)
+		}
+
+		dd := yamltest.FirstDocument(t, sb.String())
+
+		decoders := 0
+		count := yaml.DecodeOption(func(*yaml.Decoder) error {
+			decoders++
+
+			return nil
+		})
+
+		_, err := dd.Decode[map[string]map[float64]item](t.Context(), niceyaml.WithYAMLDecodeOptions(count))
+		require.NoError(t, err)
+
+		// One decoder decodes the value, and one reads its keys.
+		assert.LessOrEqual(t, decoders, 2)
 	})
 
 	t.Run("a leaf type validates itself", func(t *testing.T) {
