@@ -2,12 +2,14 @@ package schema_test
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -58,24 +60,59 @@ func TestURL(t *testing.T) {
 	t.Run("resolve does not fetch", func(t *testing.T) {
 		t.Parallel()
 
-		var requests int
+		// The server counts only requests for a path that holds a random
+		// nonce. A fetch of the schema URL counts whatever client or context
+		// sends it, and a stray request that another process sends to a
+		// reused port gets 404 and leaves the count alone. The server closes
+		// each connection after one response, so a fetch from the bubble
+		// below leaves no idle connection whose reader the bubble would wait
+		// on forever.
+		path := "/" + rand.Text() + "/schema.json"
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			requests++
+		var requests atomic.Int32
+
+		server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != path {
+				w.WriteHeader(http.StatusNotFound)
+
+				return
+			}
+
+			requests.Add(1)
 
 			//nolint:errcheck // Test helper.
 			w.Write([]byte(`{}`))
 		}))
+		server.Config.SetKeepAlivesEnabled(false)
+		server.Start()
+
 		defer server.Close()
 
-		ref, err := schema.URL(server.URL+"/schema.json").Resolve(t.Context(), document(t))
-		require.NoError(t, err)
-		assert.Equal(t, server.URL+"/schema.json", ref.Key())
-		assert.Equal(t, 0, requests, "Resolve should name the schema without fetching it")
+		schemaURL := server.URL + path
 
-		_, err = schema.NewRegistry().Load(t.Context(), ref)
+		// Resolve runs in a bubble. A goroutine that waits on the network is
+		// not durably blocked, so Wait returns only after a fetch that
+		// Resolve left running has finished, before the bubble cancels its
+		// context. Test then waits for every goroutine in the bubble to exit
+		// and panics when one stays blocked, such as one that sleeps before
+		// it fetches.
+		var ref schema.Ref
+
+		synctest.Test(t, func(t *testing.T) {
+			var err error
+
+			ref, err = schema.URL(schemaURL).Resolve(t.Context(), document(t))
+			require.NoError(t, err)
+
+			synctest.Wait()
+		})
+
+		assert.Equal(t, schemaURL, ref.Key())
+		assert.Equal(t, int32(0), requests.Load(), "Resolve should name the schema without fetching it")
+
+		_, err := schema.NewRegistry().Load(t.Context(), ref)
 		require.NoError(t, err)
-		assert.Equal(t, 1, requests)
+		assert.Equal(t, int32(1), requests.Load())
 	})
 
 	t.Run("scheme is lowercased", func(t *testing.T) {
