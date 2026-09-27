@@ -197,7 +197,8 @@ func (i *Index) Find(search string) position.Ranges {
 
 		// A match inside the expansion of one source rune has no character
 		// of its own to start at, so skip past that rune.
-		if !i.posMap.starts(matchStart) {
+		start, ok := i.posMap.at(matchStart)
+		if !ok {
 			_, size := utf8.DecodeRuneInString(i.text[matchStart:])
 			offset = matchStart + size
 
@@ -206,7 +207,7 @@ func (i *Index) Find(search string) position.Ranges {
 
 		// The last byte of the match sits at matchEnd-1, and end finds the
 		// source rune that holds it.
-		startPos := i.posMap.lookup(matchStart)
+		startPos := i.posMap.positions[start]
 		endPos := i.posMap.end(matchEnd - 1)
 
 		results = append(results, position.Range{Start: startPos, End: endPos})
@@ -343,12 +344,9 @@ func (m *positionMap) extend(pos position.Position) {
 
 // end returns the position just past the source rune that holds the byte
 // at offset, past any runes after it on the line that normalize to
-// nothing.
+// nothing. The offset must lie at or after the first entry.
 func (m *positionMap) end(offset int) position.Position {
 	idx := m.floor(offset)
-	if idx < 0 {
-		return position.New(0, 1)
-	}
 
 	return position.New(m.positions[idx].Line, m.ends[idx])
 }
@@ -364,20 +362,10 @@ func (m *positionMap) floor(offset int) int {
 	return idx - 1
 }
 
-// lookup finds the [position.Position] of the source rune that holds the
-// byte at offset.
-func (m *positionMap) lookup(offset int) position.Position {
-	idx := m.floor(offset)
-	if idx < 0 {
-		return position.New(0, 0)
-	}
-
-	return m.positions[idx]
-}
-
-// starts reports whether a source rune begins at the given byte offset.
-func (m *positionMap) starts(offset int) bool {
+// at returns the entry of the source rune whose normalized form begins at
+// offset, and false when no entry begins there.
+func (m *positionMap) at(offset int) (int, bool) {
 	idx := m.floor(offset)
 
-	return idx >= 0 && m.offsets[idx] == offset
+	return idx, idx >= 0 && m.offsets[idx] == offset
 }
