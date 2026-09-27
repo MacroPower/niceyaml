@@ -1085,33 +1085,39 @@ func TestSchemaStore_CanceledContext(t *testing.T) {
 func TestSchemaStore_RefetchFails(t *testing.T) {
 	t.Parallel()
 
+	data, err := json.Marshal(testCatalog)
+	require.NoError(t, err)
+
 	var requestCount atomic.Int32
 
-	// Server succeeds first time, fails on subsequent requests.
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		count := requestCount.Add(1)
-		if count > 1 {
-			w.WriteHeader(http.StatusInternalServerError)
+	// The transport succeeds the first time and fails on later requests.
+	client := &http.Client{
+		Transport: &roundTripperFunc{fn: func(r *http.Request) (*http.Response, error) {
+			if requestCount.Add(1) > 1 {
+				return &http.Response{
+					StatusCode: http.StatusInternalServerError,
+					Body:       http.NoBody,
+					Request:    r,
+				}, nil
+			}
 
-			return
-		}
-
-		//nolint:errcheck // Test data is static and valid.
-		data, _ := json.Marshal(testCatalog)
-
-		//nolint:errcheck // Test helper.
-		w.Write(data)
-	}))
-	t.Cleanup(server.Close)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewReader(data)),
+				Request:    r,
+			}, nil
+		}},
+	}
 
 	// Use short TTL so cache expires quickly.
 	store := schemastore.New(
-		schemastore.WithCatalogURL(server.URL),
+		schemastore.WithCatalogURL("https://example.com/catalog.json"),
+		schemastore.WithHTTPClient(client),
 		schemastore.WithCacheTTL(10*time.Millisecond),
 	)
 
 	// First fetch succeeds.
-	_, err := store.FindMatch(t.Context(), "config.yaml")
+	_, err = store.FindMatch(t.Context(), "config.yaml")
 	require.NoError(t, err)
 	assert.Equal(t, int32(1), requestCount.Load())
 
