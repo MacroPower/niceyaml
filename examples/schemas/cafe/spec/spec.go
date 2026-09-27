@@ -13,7 +13,7 @@ import (
 type Spec struct {
 	// SLA is the service level agreement duration for order fulfillment.
 	// Defaults to 15 minutes.
-	SLA *Duration `json:"sla,omitempty" jsonschema:"title=SLA,pattern=^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$,default=900000000000,examples=900000000000|3600000000000|90000000000"`
+	SLA *Duration `json:"sla,omitempty" jsonschema:"title=SLA,pattern=^([0-9]+(\\.[0-9]+)?(ns|[uµμ]s|ms|s|m|h))+$,default=900000000000,examples=900000000000|3600000000000|90000000000"`
 	// Settings contains optional cafe settings.
 	Settings *Settings `json:"settings,omitempty" jsonschema:"title=Settings"`
 	// Hours defines operating hours.
@@ -117,7 +117,10 @@ func (d Duration) MarshalText() ([]byte, error) {
 	return []byte(time.Duration(d).String()), nil
 }
 
-// UnmarshalText parses the duration with [time.ParseDuration].
+// UnmarshalText parses the duration with [time.ParseDuration]. The schema
+// pattern checks the form of a duration but not its range, so a value too
+// large for a [time.Duration], such as "99999999999h", passes the schema
+// and fails here. That failure carries no location in the document.
 func (d *Duration) UnmarshalText(b []byte) error {
 	v, err := time.ParseDuration(string(b))
 	if err != nil {

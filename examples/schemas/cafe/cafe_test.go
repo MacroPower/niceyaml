@@ -95,6 +95,11 @@ func TestCafeSLA(t *testing.T) {
 		"fractional":   {sla: "1.5h"},
 		"null":         {sla: "null"},
 		"tilde":        {sla: "~"},
+		"microseconds": {sla: "500us"},
+		// MarshalText writes the micro sign, and time.ParseDuration also
+		// reads the Greek mu.
+		"micro sign":   {sla: "500\u00b5s"},
+		"greek mu":     {sla: "500\u03bcs"},
 		"days":         {sla: "1d", err: true},
 		"empty":        {sla: `""`, err: true},
 		"uppercase":    {sla: "15M", err: true},
