@@ -1,11 +1,14 @@
 package httpfetch_test
 
 import (
+	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -71,19 +74,20 @@ func TestGet_ParseReason(t *testing.T) {
 func TestGet_RedactsPasswordOnTransport(t *testing.T) {
 	t.Parallel()
 
-	// A closed server refuses the connection, and the transport quotes the
-	// URL as written in its error. Get names the URL once, redacted.
-	server := httptest.NewServer(http.NotFoundHandler())
+	// The dialer refuses every connection in place of a closed server, so
+	// the test never dials a released port that another process may have
+	// bound. The client quotes the URL as written in its error, and Get
+	// names the URL once, redacted.
+	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(context.Context, string, string) (net.Conn, error) {
+				return nil, syscall.ECONNREFUSED
+			},
+		},
+	}
 
-	u, err := url.Parse(server.URL)
-	require.NoError(t, err)
-
-	server.Close()
-
-	u.User = url.UserPassword("user", "secret")
-
-	_, err = httpfetch.Get(t.Context(), server.Client(), u.String())
-	require.Error(t, err)
+	_, err := httpfetch.Get(t.Context(), client, "http://user:secret@127.0.0.1:8080/s.json")
+	require.ErrorIs(t, err, syscall.ECONNREFUSED)
 	assert.NotContains(t, err.Error(), "secret")
 	assert.NotContains(t, err.Error(), `Get "`)
 	assert.Equal(t, 1, strings.Count(err.Error(), "xxxxx"))
