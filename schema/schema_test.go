@@ -1237,6 +1237,45 @@ func TestNormalizeJSON(t *testing.T) {
 	}
 }
 
+func TestNormalizeJSON_OrderedMapDates(t *testing.T) {
+	t.Parallel()
+
+	// A decode with yaml.UseOrderedMap names each member by the key of its
+	// yaml.MapItem, and the lookup of the scalar a timestamp came from
+	// names each key node the same way, so a date-only timestamp under a
+	// key the decoder respells keeps its full-date spelling.
+	tcs := map[string]struct {
+		input string
+		want  any
+	}{
+		"hexadecimal key": {
+			input: "0x10: !!timestamp 2001-12-14\n",
+			want:  map[string]any{"16": "2001-12-14"},
+		},
+		"null key": {
+			input: "~: !!timestamp 2001-12-14\n",
+			want:  map[string]any{"null": "2001-12-14"},
+		},
+		"bool-tagged key": {
+			input: "!!bool yes: !!timestamp 2001-12-14\n",
+			want:  map[string]any{"true": "2001-12-14"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input)
+
+			data, err := doc.Decode[any](t.Context(), niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap()))
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.want, schema.NormalizeJSON(data, doc.AST()))
+		})
+	}
+}
+
 // assertCopiedOnChange asserts that each map and slice in input comes
 // back at the same place in got as the same container when nothing under
 // it holds a []byte, time.Time, or yaml.MapSlice, and as a different one

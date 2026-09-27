@@ -631,16 +631,7 @@ func decodedKey(key ast.MapKeyNode) (string, bool) {
 		return "", false
 	}
 
-	switch k := v.(type) {
-	case nil:
-		// A nil value prints as "<nil>" rather than the "null" the decoder
-		// names the member by.
-		return "null", true
-	case string:
-		return k, true
-	default:
-		return fmt.Sprint(k), true
-	}
+	return mapItemKey(v), true
 }
 
 // sourceKey returns the name a path selector matches the key node by,
@@ -925,9 +916,11 @@ func stringText(node ast.Node) (string, bool) {
 	return "", false
 }
 
-// mapItemKey returns the member name a decode into a map gives the key of
-// a [yaml.MapItem]: null for a nil key, the text of a string key, and the
-// printed Go value of any other key.
+// mapItemKey returns the member name a decode into a map gives a key it
+// reads as the Go value key, such as the key of a [yaml.MapItem] or the
+// value [decodedKey] reads from a key node: the text of a string key, the
+// printed Go value of any other key, and null for a nil key, which would
+// print as <nil>.
 func mapItemKey(key any) string {
 	switch k := key.(type) {
 	case nil:
