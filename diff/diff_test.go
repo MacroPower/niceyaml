@@ -1449,6 +1449,132 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 	}
 }
 
+func TestDiffResult_BeforeAfterPairsAnyOrder(t *testing.T) {
+	t.Parallel()
+
+	oneChange := struct{ before, after string }{"a: 1\nb: 2\n", "a: 1\nb: 3\n"}
+	twoChanges := struct{ before, after string }{"a: 1\nb: 2\nc: 3\n", "a: 1\nb: 3\nc: 4\n"}
+
+	tcs := map[string]struct {
+		before     string
+		after      string
+		ops        []lcs.Op
+		wantBefore []wantLine
+		wantAfter  []wantLine
+	}{
+		"delete then insert": {
+			before: oneChange.before,
+			after:  oneChange.after,
+			ops: []lcs.Op{
+				{Kind: lcs.OpEqual, Before: 0, After: 0},
+				{Kind: lcs.OpDelete, Before: 1, After: -1},
+				{Kind: lcs.OpInsert, Before: -1, After: 1},
+			},
+			wantBefore: []wantLine{
+				{content: "a: 1", flag: line.FlagDefault},
+				{content: "b: 2", flag: line.FlagDeleted},
+			},
+			wantAfter: []wantLine{
+				{content: "a: 1", flag: line.FlagDefault},
+				{content: "b: 3", flag: line.FlagInserted},
+			},
+		},
+		"insert then delete": {
+			before: oneChange.before,
+			after:  oneChange.after,
+			ops: []lcs.Op{
+				{Kind: lcs.OpEqual, Before: 0, After: 0},
+				{Kind: lcs.OpInsert, Before: -1, After: 1},
+				{Kind: lcs.OpDelete, Before: 1, After: -1},
+			},
+			wantBefore: []wantLine{
+				{content: "a: 1", flag: line.FlagDefault},
+				{content: "b: 2", flag: line.FlagDeleted},
+			},
+			wantAfter: []wantLine{
+				{content: "a: 1", flag: line.FlagDefault},
+				{content: "b: 3", flag: line.FlagInserted},
+			},
+		},
+		"interleaved deletes and inserts": {
+			before: twoChanges.before,
+			after:  twoChanges.after,
+			ops: []lcs.Op{
+				{Kind: lcs.OpEqual, Before: 0, After: 0},
+				{Kind: lcs.OpDelete, Before: 1, After: -1},
+				{Kind: lcs.OpInsert, Before: -1, After: 1},
+				{Kind: lcs.OpDelete, Before: 2, After: -1},
+				{Kind: lcs.OpInsert, Before: -1, After: 2},
+			},
+			wantBefore: []wantLine{
+				{content: "a: 1", flag: line.FlagDefault},
+				{content: "b: 2", flag: line.FlagDeleted},
+				{content: "c: 3", flag: line.FlagDeleted},
+			},
+			wantAfter: []wantLine{
+				{content: "a: 1", flag: line.FlagDefault},
+				{content: "b: 3", flag: line.FlagInserted},
+				{content: "c: 4", flag: line.FlagInserted},
+			},
+		},
+		"inserts ahead of deletes": {
+			before: twoChanges.before,
+			after:  twoChanges.after,
+			ops: []lcs.Op{
+				{Kind: lcs.OpEqual, Before: 0, After: 0},
+				{Kind: lcs.OpInsert, Before: -1, After: 1},
+				{Kind: lcs.OpInsert, Before: -1, After: 2},
+				{Kind: lcs.OpDelete, Before: 1, After: -1},
+				{Kind: lcs.OpDelete, Before: 2, After: -1},
+			},
+			wantBefore: []wantLine{
+				{content: "a: 1", flag: line.FlagDefault},
+				{content: "b: 2", flag: line.FlagDeleted},
+				{content: "c: 3", flag: line.FlagDeleted},
+			},
+			wantAfter: []wantLine{
+				{content: "a: 1", flag: line.FlagDefault},
+				{content: "b: 3", flag: line.FlagInserted},
+				{content: "c: 4", flag: line.FlagInserted},
+			},
+		},
+		"more inserts than deletes": {
+			before: oneChange.before,
+			after:  twoChanges.after,
+			ops: []lcs.Op{
+				{Kind: lcs.OpEqual, Before: 0, After: 0},
+				{Kind: lcs.OpInsert, Before: -1, After: 1},
+				{Kind: lcs.OpDelete, Before: 1, After: -1},
+				{Kind: lcs.OpInsert, Before: -1, After: 2},
+			},
+			wantBefore: []wantLine{
+				{content: "a: 1", flag: line.FlagDefault},
+				{content: "b: 2", flag: line.FlagDeleted},
+				{content: "", flag: line.FlagDefault, empty: true}, // Placeholder.
+			},
+			wantAfter: []wantLine{
+				{content: "a: 1", flag: line.FlagDefault},
+				{content: "b: 3", flag: line.FlagInserted},
+				{content: "c: 4", flag: line.FlagInserted},
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			before := niceyaml.NewSourceFromString(tc.before).Lines()
+			after := niceyaml.NewSourceFromString(tc.after).Lines()
+
+			result := diff.New(diff.WithAlgorithm(opsAlgorithm(tc.ops))).Diff(before, after)
+
+			verifyLines(t, "Before", result.Before(), tc.wantBefore)
+			verifyLines(t, "After", result.After(), tc.wantAfter)
+		})
+	}
+}
+
 // wantLine specifies expected line content and flag for testing.
 type wantLine struct {
 	content string

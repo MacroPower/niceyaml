@@ -6,7 +6,8 @@ package lcs
 type Algorithm interface {
 	// Diff returns operations transforming before into after. Operations
 	// reference indices in the original slices, and the returned slice is the
-	// caller's to keep.
+	// caller's to keep. Between two [OpEqual] operations, the deletions and
+	// insertions may come in any order.
 	Diff(before, after []string) []Op
 }
 

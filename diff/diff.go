@@ -173,9 +173,11 @@ type alignedRow struct {
 // Unified returns a [line.View] of the complete diff.
 //
 // The view interleaves lines from both revisions. Unchanged lines come from
-// the after revision, and changed lines include deleted lines from the
-// before revision followed by inserted lines from the after revision. Each
-// line carries a [line.Flag] marking it as deleted, inserted, or unchanged.
+// the after revision. Each run of changes holds deleted lines from the
+// before revision and inserted lines from the after revision, in the order
+// the [lcs.Algorithm] lists them, and [lcs.Hirschberg] lists the deleted
+// lines first. Each line carries a [line.Flag] marking it as deleted,
+// inserted, or unchanged.
 //
 // Each call returns a new view with its own decoration, so overlays added
 // to one do not affect another.
@@ -276,7 +278,8 @@ func (r *Result) Stats() Stats {
 // getAlignedRows returns the lazily computed aligned rows for side-by-side
 // rendering. It aligns lines so both sides have equal counts:
 //   - Equal lines appear on both sides at the same position.
-//   - Consecutive delete/insert pairs appear on the same row.
+//   - Within each run of changes, the n-th deletion and the n-th insertion
+//     share a row, whatever order the algorithm listed them in.
 //   - Unmatched deletions have empty placeholders on the right.
 //   - Unmatched insertions have empty placeholders on the left.
 func (r *Result) getAlignedRows() []alignedRow {
@@ -297,39 +300,33 @@ func (r *Result) getAlignedRows() []alignedRow {
 				})
 				i++
 
-			case lcs.OpDelete:
-				// Skip past the run of deletes.
-				delStart := i
-				for i < len(r.ops) && r.ops[i].kind == lcs.OpDelete {
-					i++
+			case lcs.OpDelete, lcs.OpInsert:
+				end := i
+				for end < len(r.ops) && (r.ops[end].kind == lcs.OpDelete || r.ops[end].kind == lcs.OpInsert) {
+					end++
 				}
 
-				nDel := i - delStart
+				// Pair the deletes of the run with its inserts, each side in
+				// its own order. Each filler row gets a line of its own, so
+				// a line pointer names one row of one view.
+				del := nextOfKind(r.ops, lcs.OpDelete, i, end)
+				ins := nextOfKind(r.ops, lcs.OpInsert, i, end)
 
-				// Skip past the run of inserts that follows, if any.
-				insStart := i
-				for i < len(r.ops) && r.ops[i].kind == lcs.OpInsert {
-					i++
-				}
-
-				nIns := i - insStart
-
-				// Pair deletes with inserts on the same row. Each filler
-				// row gets a line of its own, so a line pointer names one
-				// row of one view.
-				for j := range max(nDel, nIns) {
+				for del < end || ins < end {
 					var row alignedRow
 
-					if j < nDel {
-						row.before = r.ops[delStart+j].line
+					if del < end {
+						row.before = r.ops[del].line
 						row.beforeFlag = line.FlagDeleted
+						del = nextOfKind(r.ops, lcs.OpDelete, del+1, end)
 					} else {
 						row.before = &line.Line{}
 					}
 
-					if j < nIns {
-						row.after = r.ops[insStart+j].line
+					if ins < end {
+						row.after = r.ops[ins].line
 						row.afterFlag = line.FlagInserted
+						ins = nextOfKind(r.ops, lcs.OpInsert, ins+1, end)
 					} else {
 						row.after = &line.Line{}
 					}
@@ -337,14 +334,7 @@ func (r *Result) getAlignedRows() []alignedRow {
 					rows = append(rows, row)
 				}
 
-			case lcs.OpInsert:
-				// Standalone insert (not following a delete).
-				rows = append(rows, alignedRow{
-					before:    &line.Line{},
-					after:     op.line,
-					afterFlag: line.FlagInserted,
-				})
-				i++
+				i = end
 
 			default:
 				// Only the cases above advance i, so an op of any other
@@ -364,7 +354,8 @@ func (r *Result) getAlignedRows() []alignedRow {
 // diff.
 //
 // Before aligns its lines with [Result.After] so both views have equal
-// line counts. It pairs consecutive delete/insert sequences row-by-row.
+// line counts. It pairs the deleted and inserted lines of each run of
+// changes row by row, whatever order the [lcs.Algorithm] lists them in.
 // When there are more insertions than deletions, empty placeholder lines
 // (zero value) fill the remaining rows on this side.
 //
@@ -383,7 +374,8 @@ func (r *Result) Before() *line.View {
 // diff.
 //
 // After aligns its lines with [Result.Before] so both views have equal
-// line counts. It pairs consecutive delete/insert sequences row-by-row.
+// line counts. It pairs the deleted and inserted lines of each run of
+// changes row by row, whatever order the [lcs.Algorithm] lists them in.
 // When there are more deletions than insertions, empty placeholder lines
 // (zero value) fill the remaining rows on this side.
 //
@@ -445,6 +437,16 @@ type lineOp struct {
 	before *line.Line
 
 	kind lcs.OpKind // One of [lcs.OpEqual], [lcs.OpDelete], [lcs.OpInsert].
+}
+
+// nextOfKind returns the index of the first op of kind k in ops[from:end],
+// or end when there is none.
+func nextOfKind(ops []lineOp, k lcs.OpKind, from, end int) int {
+	for from < end && ops[from].kind != k {
+		from++
+	}
+
+	return from
 }
 
 // opKindDeltas returns the line count deltas that k contributes to the
