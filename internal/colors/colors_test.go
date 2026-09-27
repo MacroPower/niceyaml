@@ -8,6 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/lucasb-eyer/go-colorful"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml/internal/colors"
 )
@@ -70,6 +71,21 @@ func TestOverride(t *testing.T) {
 	}
 }
 
+// labMidpoint returns the 50/50 LAB blend of c1 and c2, clamped to the
+// sRGB gamut. It mixes the colors with go-colorful directly, so a test that
+// compares against it catches a blend that drops either color.
+func labMidpoint(t *testing.T, c1, c2 color.Color) color.Color {
+	t.Helper()
+
+	cf1, ok := colorful.MakeColor(c1)
+	require.True(t, ok, "c1 is visible")
+
+	cf2, ok := colorful.MakeColor(c2)
+	require.True(t, ok, "c2 is visible")
+
+	return cf1.BlendLab(cf2, 0.5).Clamped()
+}
+
 func TestBlend(t *testing.T) {
 	t.Parallel()
 
@@ -77,15 +93,14 @@ func TestBlend(t *testing.T) {
 	blue := lipgloss.Color("#0000FF")
 
 	tcs := map[string]struct {
-		c1      color.Color
-		c2      color.Color
-		want    color.Color
-		isBlend bool
+		c1   color.Color
+		c2   color.Color
+		want color.Color
 	}{
 		"both valid returns blend": {
-			c1:      red,
-			c2:      blue,
-			isBlend: true,
+			c1:   red,
+			c2:   blue,
+			want: labMidpoint(t, red, blue),
 		},
 		"both nil returns nil": {
 			c1:   nil,
@@ -144,13 +159,46 @@ func TestBlend(t *testing.T) {
 			t.Parallel()
 
 			got := colors.Blend(tc.c1, tc.c2)
-			if tc.isBlend {
-				assert.NotNil(t, got)
-				assert.NotEqual(t, tc.c1, got)
-				assert.NotEqual(t, tc.c2, got)
-			} else {
-				assert.Equal(t, tc.want, got)
-			}
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestBlend_Symmetric(t *testing.T) {
+	t.Parallel()
+
+	// The order of the two colors does not change the blend. BlendLab
+	// rounds differently in each direction, so the check allows a tiny
+	// distance.
+	tcs := map[string]struct {
+		c1 color.Color
+		c2 color.Color
+	}{
+		"red and blue": {
+			c1: lipgloss.Color("#FF0000"),
+			c2: lipgloss.Color("#0000FF"),
+		},
+		"green and yellow": {
+			c1: lipgloss.Color("#00FF00"),
+			c2: lipgloss.Color("#FFFF00"),
+		},
+		"gray and orange": {
+			c1: lipgloss.Color("#808080"),
+			c2: lipgloss.Color("#FFA500"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			forward, ok := colorful.MakeColor(colors.Blend(tc.c1, tc.c2))
+			require.True(t, ok)
+
+			backward, ok := colorful.MakeColor(colors.Blend(tc.c2, tc.c1))
+			require.True(t, ok)
+
+			assert.InDelta(t, 0, forward.DistanceLab(backward), 1e-9)
 		})
 	}
 }
@@ -249,19 +297,17 @@ func TestBlendStyles(t *testing.T) {
 		transformIn   string
 		wantFg        color.Color
 		wantBg        color.Color
-		checkFgBlend  bool
-		checkBgBlend  bool
 		wantTransform string
 	}{
 		"blends foreground colors": {
-			base:         lipgloss.NewStyle().Foreground(red),
-			overlay:      lipgloss.NewStyle().Foreground(blue),
-			checkFgBlend: true,
+			base:    lipgloss.NewStyle().Foreground(red),
+			overlay: lipgloss.NewStyle().Foreground(blue),
+			wantFg:  labMidpoint(t, red, blue),
 		},
 		"blends background colors": {
-			base:         lipgloss.NewStyle().Background(red),
-			overlay:      lipgloss.NewStyle().Background(blue),
-			checkBgBlend: true,
+			base:    lipgloss.NewStyle().Background(red),
+			overlay: lipgloss.NewStyle().Background(blue),
+			wantBg:  labMidpoint(t, red, blue),
 		},
 		"only base has foreground": {
 			base:    lipgloss.NewStyle().Foreground(red),
@@ -311,8 +357,8 @@ func TestBlendStyles(t *testing.T) {
 			base:          lipgloss.NewStyle().Foreground(red).Background(green).Transform(lowerTransform),
 			overlay:       lipgloss.NewStyle().Foreground(blue).Background(yellow).Transform(upperTransform),
 			transformIn:   "Hello",
-			checkFgBlend:  true,
-			checkBgBlend:  true,
+			wantFg:        labMidpoint(t, red, blue),
+			wantBg:        labMidpoint(t, green, yellow),
 			wantTransform: "HELLO",
 		},
 	}
@@ -324,21 +370,11 @@ func TestBlendStyles(t *testing.T) {
 			got := colors.BlendStyles(tc.base, tc.overlay)
 			assert.NotNil(t, got)
 
-			if tc.checkFgBlend {
-				fg := got.GetForeground()
-				assert.NotNil(t, fg)
-				assert.NotEqual(t, tc.base.GetForeground(), fg)
-				assert.NotEqual(t, tc.overlay.GetForeground(), fg)
-			} else if tc.wantFg != nil {
+			if tc.wantFg != nil {
 				assert.Equal(t, tc.wantFg, got.GetForeground())
 			}
 
-			if tc.checkBgBlend {
-				bg := got.GetBackground()
-				assert.NotNil(t, bg)
-				assert.NotEqual(t, tc.base.GetBackground(), bg)
-				assert.NotEqual(t, tc.overlay.GetBackground(), bg)
-			} else if tc.wantBg != nil {
+			if tc.wantBg != nil {
 				assert.Equal(t, tc.wantBg, got.GetBackground())
 			}
 
