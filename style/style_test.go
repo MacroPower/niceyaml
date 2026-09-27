@@ -40,7 +40,6 @@ func TestNew(t *testing.T) {
 		t.Parallel()
 
 		got := styles.Style(kind.Text)
-		assert.NotNil(t, got)
 		assert.Equal(t, lipgloss.Color("#ffffff"), got.GetForeground())
 	})
 
@@ -48,7 +47,6 @@ func TestNew(t *testing.T) {
 		t.Parallel()
 
 		got := styles.Style(kind.LiteralNumber)
-		assert.NotNil(t, got)
 		assert.Equal(t, lipgloss.Color("#ff0000"), got.GetForeground())
 	})
 
@@ -56,7 +54,6 @@ func TestNew(t *testing.T) {
 		t.Parallel()
 
 		got := styles.Style(kind.LiteralNumberFloat)
-		assert.NotNil(t, got)
 		assert.Equal(t, lipgloss.Color("#ff0000"), got.GetForeground())
 	})
 
@@ -71,7 +68,6 @@ func TestNew(t *testing.T) {
 		t.Parallel()
 
 		got := styles.Style(kind.NameTag)
-		assert.NotNil(t, got)
 		assert.Equal(t, lipgloss.Color("#ffffff"), got.GetForeground())
 	})
 
@@ -118,7 +114,6 @@ func TestNew_TextStyles(t *testing.T) {
 
 		for _, s := range []kind.Kind{kind.TextAccentDim, kind.TextSubtleDim, kind.GenericHeading} {
 			got := styles.Style(s)
-			assert.NotNil(t, got)
 			assert.Equal(t, lipgloss.Color("#ffffff"), got.GetForeground(),
 				"style %q should inherit foreground from Text", s)
 		}
@@ -163,7 +158,6 @@ func TestNew_Override(t *testing.T) {
 		t.Parallel()
 
 		got := styles.Style(kind.Text)
-		assert.NotNil(t, got)
 		assert.Equal(t, lipgloss.Color("#ff0000"), got.GetForeground())
 	})
 
@@ -171,7 +165,6 @@ func TestNew_Override(t *testing.T) {
 		t.Parallel()
 
 		got := styles.Style(kind.LiteralNumber)
-		assert.NotNil(t, got)
 		assert.Equal(t, lipgloss.Color("#0000ff"), got.GetForeground())
 	})
 }
@@ -195,7 +188,6 @@ func TestStyles_With(t *testing.T) {
 		result := original.With(style.Set(customKey, red))
 
 		got := result.Style(customKey)
-		assert.NotNil(t, got)
 		assert.Equal(t, lipgloss.Color("#ff0000"), got.GetForeground())
 	})
 
@@ -205,7 +197,6 @@ func TestStyles_With(t *testing.T) {
 		result := original.With(style.Set(kind.Comment, yellow))
 
 		got := result.Style(kind.Comment)
-		assert.NotNil(t, got)
 		assert.Equal(t, lipgloss.Color("#ffff00"), got.GetForeground())
 	})
 
@@ -219,12 +210,10 @@ func TestStyles_With(t *testing.T) {
 
 		// The custom key is unset in the original, so it inherits the base.
 		got := original.Style(customKey)
-		assert.NotNil(t, got)
 		assert.Equal(t, original.Style(kind.Text), got)
 
 		// Comment should still be green in original.
 		got = original.Style(kind.Comment)
-		assert.NotNil(t, got)
 		assert.Equal(t, lipgloss.Color("#00ff00"), got.GetForeground())
 	})
 
