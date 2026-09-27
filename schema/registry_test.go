@@ -72,6 +72,17 @@ func (c gatedContext) Done() <-chan struct{} {
 	return c.Context.Done()
 }
 
+// pastDeadline returns a context whose deadline has already passed, so
+// its error is [context.DeadlineExceeded].
+func pastDeadline(t *testing.T) context.Context {
+	t.Helper()
+
+	ctx, cancel := context.WithDeadline(t.Context(), time.Now())
+	t.Cleanup(cancel)
+
+	return ctx
+}
+
 func TestRegistry_Lookup(t *testing.T) {
 	t.Parallel()
 
@@ -913,12 +924,14 @@ func TestRegistry_SharedLoad(t *testing.T) {
 	t.Run("caller whose context ends takes no schema from a later load", func(t *testing.T) {
 		t.Parallel()
 
-		// A late caller joins a load, and its context ends before it waits
-		// on the result. The load fails because its starter cancels, and a
-		// joiner with a live context loads again and caches the schema.
-		// The late caller then finds both its context and the failed load
-		// ready, and the select picks one at random, so the test runs the
-		// race enough times to take both picks.
+		// A late caller joins a load, and its deadline passes before it
+		// waits on the result. The load fails because its starter cancels,
+		// and a joiner with a live context loads again and caches the
+		// schema. The late caller then finds both its context and the
+		// failed load ready, and the select picks one at random, so the
+		// test runs the race enough times to take both picks. Either way
+		// the late caller reports its own deadline rather than the
+		// starter's cancellation.
 		synctest.Test(t, func(t *testing.T) {
 			for range 64 {
 				var loads atomic.Int32
@@ -955,14 +968,11 @@ func TestRegistry_SharedLoad(t *testing.T) {
 
 				synctest.Wait()
 
-				// The late caller's context has already ended, and the gate
+				// The late caller's deadline has already passed, and the gate
 				// holds the caller between joining the load and waiting on it
 				// until the joiner has loaded again.
-				ended, cancelLate := context.WithCancel(t.Context())
-				cancelLate()
-
 				gate := make(chan struct{})
-				lateCtx := withGate(ended, gate)
+				lateCtx := withGate(pastDeadline(t), gate)
 				lateDone := make(chan struct{})
 
 				var (
@@ -979,6 +989,10 @@ func TestRegistry_SharedLoad(t *testing.T) {
 				synctest.Wait()
 				cancelStarter()
 				wg.Wait()
+
+				// Let the failed load reach the late caller before it waits
+				// on the result.
+				synctest.Wait()
 				close(gate)
 				<-lateDone
 
@@ -986,7 +1000,8 @@ func TestRegistry_SharedLoad(t *testing.T) {
 				require.ErrorIs(t, starterErr, context.Canceled)
 				require.NoError(t, joinerErr)
 				require.ErrorIs(t, lateErr, schema.ErrLoad)
-				require.ErrorIs(t, lateErr, context.Canceled)
+				require.ErrorIs(t, lateErr, context.DeadlineExceeded)
+				require.NotErrorIs(t, lateErr, context.Canceled)
 				require.Nil(t, late)
 				require.Equal(t, int32(2), loads.Load())
 			}

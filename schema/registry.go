@@ -479,8 +479,9 @@ func (r *Registry) Validate(ctx context.Context, n *niceyaml.Node) error {
 // Concurrent requests for one Key share a single load and compile, and
 // each caller waits for it only while its own context is live. The shared
 // load runs under the context of the caller that started it and reports
-// whether that context had ended when the load failed. A caller that
-// joined with a live context loads again only in that case. Any other
+// whether that context had ended when the load failed. In that case a
+// caller with a live context loads again, and a caller whose context has
+// ended returns [ErrLoad] wrapping its own context's error. Any other
 // failure reaches every caller that shared the load, including a timeout
 // inside the load whose error wraps a context error. A panic or a call to
 // [runtime.Goexit] in the load happens again in every caller that shared
@@ -544,8 +545,16 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 			return f.schema, nil
 		}
 
-		if f.starterEnded && ctx.Err() == nil {
-			continue
+		// A load that failed because its starter's context ended says
+		// nothing about the schema, so a caller with a live context loads
+		// again, and a caller whose context has ended reports its own
+		// context's error rather than the starter's.
+		if f.starterEnded {
+			if ctx.Err() == nil {
+				continue
+			}
+
+			return nil, fmt.Errorf("%w: %q: %w", ErrLoad, ref.name(), ctx.Err())
 		}
 
 		//nolint:wrapcheck // compile already wraps its errors with the sentinel and Key.
