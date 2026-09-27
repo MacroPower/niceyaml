@@ -17,6 +17,8 @@ var (
 	ErrLineNumberMismatch = errors.New("token line differs from line number")
 	// ErrColumnNotIncreasing indicates a column is not greater than the previous.
 	ErrColumnNotIncreasing = errors.New("column not greater than previous")
+	// ErrEmptyLineNumbered indicates a line with no tokens has a number.
+	ErrEmptyLineNumbered = errors.New("line with no tokens has a number")
 )
 
 // ValidateLines checks the integrity of ls.
@@ -29,21 +31,33 @@ var (
 //   - Every token on a given line has columns that are strictly increasing,
 //     ignoring tokens with an empty Origin
 //
-// A line with no tokens is a placeholder, and ValidateLines skips its number.
+// A line with no tokens must be a numberless placeholder, such as the blank
+// row a side-by-side diff inserts. ValidateLines rejects such a line when it
+// has a number and otherwise leaves it out of the numbering check.
 //
-// Returns an error wrapping [ErrLineNumberNotIncreasing],
-// [ErrLineNumberMismatch], or [ErrColumnNotIncreasing] for the first check
-// that fails. A nil token or a token without a Position yields an error
-// wrapping a [*TokenValidationError], whose Reason is [ErrNilToken] or
+// Returns an error wrapping [ErrEmptyLineNumbered],
+// [ErrLineNumberNotIncreasing], [ErrLineNumberMismatch], or
+// [ErrColumnNotIncreasing] for the first check that fails. A nil token or a
+// token without a Position yields an error wrapping a
+// [*TokenValidationError], whose Reason is [ErrNilToken] or
 // [ErrNilPosition].
 func ValidateLines(ls line.Lines) error {
 	prevLineNum := 0
 
 	for i, l := range ls.All() {
 		// A line with no tokens is a placeholder, such as the blank row a
-		// side-by-side diff inserts, and carries no number to check. Every
-		// other line must number above the one before it.
+		// side-by-side diff inserts, and carries no number. Every other
+		// line must number above the one before it.
 		if l.IsEmpty() {
+			if n := l.Number(); n != 0 {
+				return fmt.Errorf(
+					"line at index %d: line with no tokens has number %d: %w",
+					i,
+					n,
+					ErrEmptyLineNumbered,
+				)
+			}
+
 			continue
 		}
 
