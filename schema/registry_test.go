@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -2006,30 +2005,42 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 		}
 	}`)
 
-	// Each subtest starts a server of its own, which serves defs.json and
-	// counts every request it receives, whatever the path. The server
-	// also answers a spelling of the path with dot segments, as a server
-	// that removes them does.
-	serve := func(t *testing.T) (string, *atomic.Int32) {
-		t.Helper()
+	// Names under .test never resolve, so a fetch that bypasses the
+	// registry's client fails rather than going uncounted.
+	const baseURL = "http://schemas.test"
 
+	// The handler also answers a spelling of the path with dot segments,
+	// as a server that removes them does.
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/defs.json" && r.URL.Path != "/x/../defs.json" {
+			http.NotFound(w, r)
+
+			return
+		}
+
+		//nolint:errcheck // Test helper.
+		w.Write(defsSchema)
+	})
+
+	// Each subtest takes a client of its own, which serves defs.json from
+	// memory and counts every request it sends, whatever the path or host.
+	// No server listens on a port, so a connection that another process
+	// opens cannot add to the count.
+	serve := func() (*http.Client, *atomic.Int32) {
 		var requests atomic.Int32
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			requests.Add(1)
+		client := &http.Client{
+			Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				requests.Add(1)
 
-			if r.URL.Path != "/defs.json" && r.URL.Path != "/x/../defs.json" {
-				http.NotFound(w, r)
+				rec := httptest.NewRecorder()
+				handler.ServeHTTP(rec, r)
 
-				return
-			}
+				return rec.Result(), nil
+			}),
+		}
 
-			//nolint:errcheck // Test helper.
-			w.Write(defsSchema)
-		}))
-		t.Cleanup(server.Close)
-
-		return server.URL, &requests
+		return client, &requests
 	}
 
 	// A file subtest writes defs.json to a directory of its own.
@@ -2043,15 +2054,15 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 	}
 
 	tcs := map[string]struct {
-		ref      func(t *testing.T, serverURL string) schema.Ref
+		ref      func(t *testing.T) schema.Ref
 		valid    string
 		invalid  string
 		want     string
 		requests int32
 	}{
 		"url pointer": {
-			ref: func(_ *testing.T, serverURL string) schema.Ref {
-				return schema.URL(serverURL + "/defs.json#/$defs/Foo")
+			ref: func(_ *testing.T) schema.Ref {
+				return schema.URL(baseURL + "/defs.json#/$defs/Foo")
 			},
 			valid:    "name: x\n",
 			invalid:  "other: 1\n",
@@ -2059,8 +2070,8 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 			requests: 1,
 		},
 		"url pointer with an escaped unreserved character": {
-			ref: func(_ *testing.T, serverURL string) schema.Ref {
-				return schema.URL(serverURL + "/%64efs.json#/$defs/Foo")
+			ref: func(_ *testing.T) schema.Ref {
+				return schema.URL(baseURL + "/%64efs.json#/$defs/Foo")
 			},
 			valid:    "name: x\n",
 			invalid:  "other: 1\n",
@@ -2068,8 +2079,8 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 			requests: 1,
 		},
 		"url pointer with a dot segment": {
-			ref: func(_ *testing.T, serverURL string) schema.Ref {
-				return schema.URL(serverURL + "/x/../defs.json#/$defs/Foo")
+			ref: func(_ *testing.T) schema.Ref {
+				return schema.URL(baseURL + "/x/../defs.json#/$defs/Foo")
 			},
 			valid:    "name: x\n",
 			invalid:  "other: 1\n",
@@ -2077,13 +2088,8 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 			requests: 1,
 		},
 		"url pointer with an upper-case host": {
-			ref: func(t *testing.T, serverURL string) schema.Ref {
-				t.Helper()
-
-				_, port, err := net.SplitHostPort(strings.TrimPrefix(serverURL, "http://"))
-				require.NoError(t, err)
-
-				return schema.URL("http://Schemas.Example.com:" + port + "/defs.json#/$defs/Foo")
+			ref: func(_ *testing.T) schema.Ref {
+				return schema.URL("http://Schemas.Test/defs.json#/$defs/Foo")
 			},
 			valid:    "name: x\n",
 			invalid:  "other: 1\n",
@@ -2091,8 +2097,8 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 			requests: 1,
 		},
 		"url anchor": {
-			ref: func(_ *testing.T, serverURL string) schema.Ref {
-				return schema.URL(serverURL + "/defs.json#named")
+			ref: func(_ *testing.T) schema.Ref {
+				return schema.URL(baseURL + "/defs.json#named")
 			},
 			valid:    "name: x\n",
 			invalid:  "other: 1\n",
@@ -2100,7 +2106,7 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 			requests: 1,
 		},
 		"file url pointer": {
-			ref: func(t *testing.T, _ string) schema.Ref {
+			ref: func(t *testing.T) schema.Ref {
 				t.Helper()
 
 				return fileOrURL(t, "", "file://"+filepath.ToSlash(defsFile(t))+"#/$defs/Foo")
@@ -2110,8 +2116,8 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 			want:    `missing required property "name"`,
 		},
 		"empty fragment names the root": {
-			ref: func(_ *testing.T, serverURL string) schema.Ref {
-				return schema.URL(serverURL + "/defs.json#")
+			ref: func(_ *testing.T) schema.Ref {
+				return schema.URL(baseURL + "/defs.json#")
 			},
 			valid:    "other: 1\n",
 			invalid:  "- x\n",
@@ -2120,31 +2126,12 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 		},
 	}
 
-	// The client dials the server whatever host a URL names, so a case can
-	// spell the host in upper case.
-	dialServer := func(t *testing.T, serverURL string) *http.Client {
-		t.Helper()
-
-		addr := strings.TrimPrefix(serverURL, "http://")
-		transport := &http.Transport{
-			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
-				return (&net.Dialer{}).DialContext(ctx, network, addr)
-			},
-		}
-		t.Cleanup(transport.CloseIdleConnections)
-
-		return &http.Client{Transport: transport}
-	}
-
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			serverURL, requests := serve(t)
-			reg := schema.NewRegistry(
-				schema.WithHTTPClient(dialServer(t, serverURL)),
-				schema.WithResolvers(tc.ref(t, serverURL)),
-			)
+			client, requests := serve()
+			reg := schema.NewRegistry(schema.WithHTTPClient(client), schema.WithResolvers(tc.ref(t)))
 
 			require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, tc.valid)))
 
@@ -2160,13 +2147,13 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 	t.Run("fragments of one document apply their own subschemas", func(t *testing.T) {
 		t.Parallel()
 
-		serverURL, requests := serve(t)
-		reg := schema.NewRegistry()
+		client, requests := serve()
+		reg := schema.NewRegistry(schema.WithHTTPClient(client))
 
-		foo, err := reg.Schema(t.Context(), schema.URL(serverURL+"/defs.json#/$defs/Foo"))
+		foo, err := reg.Schema(t.Context(), schema.URL(baseURL+"/defs.json#/$defs/Foo"))
 		require.NoError(t, err)
 
-		bar, err := reg.Schema(t.Context(), schema.URL(serverURL+"/defs.json#/$defs/Bar"))
+		bar, err := reg.Schema(t.Context(), schema.URL(baseURL+"/defs.json#/$defs/Bar"))
 		require.NoError(t, err)
 
 		require.NoError(t, yamltest.FirstDocument(t, "name: x\n").Validate(t.Context(), foo))
@@ -2184,9 +2171,10 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 	t.Run("a pointer that names nothing does not compile", func(t *testing.T) {
 		t.Parallel()
 
-		serverURL, _ := serve(t)
+		client, _ := serve()
+		reg := schema.NewRegistry(schema.WithHTTPClient(client))
 
-		_, err := schema.NewRegistry().Schema(t.Context(), schema.URL(serverURL+"/defs.json#/$defs/Missing"))
+		_, err := reg.Schema(t.Context(), schema.URL(baseURL+"/defs.json#/$defs/Missing"))
 		require.ErrorIs(t, err, schema.ErrCompile)
 	})
 }
