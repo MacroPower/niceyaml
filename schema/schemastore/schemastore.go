@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -38,6 +39,11 @@ var (
 	// [go.jacobcolvin.com/niceyaml/schema.Registry] moves on to the
 	// next resolver.
 	ErrNoCatalogMatch = fmt.Errorf("%w: no catalog entry matches", schema.ErrNoMatch)
+
+	// The error that carries a call to [runtime.Goexit] out of the refresh
+	// goroutine, so each lookup that waited for the fetch can end its own
+	// goroutine the same way.
+	errGoexit = errors.New("catalog fetch called runtime.Goexit")
 
 	// An extglob group, such as the "!(config)" in
 	// "**/.github/ISSUE_TEMPLATE/!(config).yml". The matcher implements no
@@ -220,8 +226,8 @@ func WithRetryAfter(interval time.Duration) Option {
 //
 // The store matches only the entries for which the filter returns true.
 // It calls the filter during catalog refresh; avoid expensive or stateful
-// operations. The store raises a panic from the filter again in each lookup
-// that waits for the refresh.
+// operations. A panic or a call to [runtime.Goexit] in the filter happens
+// again in each lookup that waits for the refresh.
 //
 // Example:
 //
@@ -349,9 +355,15 @@ func (s *Store) catalog(ctx context.Context) ([]CatalogEntry, error) {
 	case <-call.done:
 		// The fetch runs on a goroutine of its own, where no caller can
 		// recover a panic, so the fetch hands the panic back as an error
-		// and each lookup that waited for it raises it here.
+		// and each lookup that waited for it raises it here. The fetch
+		// hands back a call to runtime.Goexit the same way, and each lookup
+		// that waited for it calls runtime.Goexit in turn.
 		if pe, ok := errors.AsType[*panicError](call.err); ok {
 			panic(pe.value)
+		}
+
+		if errors.Is(call.err, errGoexit) {
+			runtime.Goexit()
 		}
 
 		if call.err != nil {
@@ -412,26 +424,36 @@ func (s *Store) join(ctx context.Context) (*fetchCall, []CatalogEntry, error) {
 // belongs to the lookup that started it, so a lookup that stops waiting
 // does not cancel a fetch that other lookups share; the refresh timeout
 // bounds it instead.
+//
+// A fetch that calls [runtime.Goexit] ends the refresh goroutine without
+// returning, so refresh records the outcome from a deferred call, which
+// reports errGoexit when the fetch never returned.
 func (s *Store) refresh(ctx context.Context, call *fetchCall) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.refreshTimeout)
 	defer cancel()
 
-	entries, err := s.fetchRecovering(ctx)
+	var entries []CatalogEntry
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	err := errGoexit
 
-	s.inflight = nil
-	s.lastAttempt = time.Now()
-	s.lastErr = err
+	defer func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
 
-	if err == nil {
-		s.entries = entries
-		s.lastFetch = s.lastAttempt
-	}
+		s.inflight = nil
+		s.lastAttempt = time.Now()
+		s.lastErr = err
 
-	call.entries, call.err = entries, err
-	close(call.done)
+		if err == nil {
+			s.entries = entries
+			s.lastFetch = s.lastAttempt
+		}
+
+		call.entries, call.err = entries, err
+		close(call.done)
+	}()
+
+	entries, err = s.fetchRecovering(ctx)
 }
 
 // fetchRecovering runs fetch and turns a panic in the filter, the HTTP

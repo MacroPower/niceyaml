@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -647,6 +648,92 @@ func TestSchemaStore_FetchPanicReachesCaller(t *testing.T) {
 			// reports it within the retry interval and does not fetch again.
 			res := receive(t, findMatchAsync(t.Context(), store))
 			require.ErrorIs(t, res.err, schemastore.ErrFetchCatalog)
+			assert.Equal(t, int32(1), fetchCount.Load())
+		})
+	}
+}
+
+func TestSchemaStore_FetchGoexitReachesCaller(t *testing.T) {
+	t.Parallel()
+
+	// A fetch that calls runtime.Goexit, as t.FailNow does, must end the
+	// goroutine of the lookup that waits for it the same way, rather than
+	// leave every lookup waiting on a fetch that never finishes.
+	tcs := map[string]struct {
+		setup func(t *testing.T) ([]schemastore.Option, *atomic.Int32)
+	}{
+		"filter": {
+			setup: func(t *testing.T) ([]schemastore.Option, *atomic.Int32) {
+				t.Helper()
+
+				server, fetchCount := newCountingCatalogServer(t, testCatalog)
+
+				return []schemastore.Option{
+					schemastore.WithCatalogURL(server.URL),
+					schemastore.WithFilter(func(schemastore.CatalogEntry) bool {
+						runtime.Goexit()
+
+						return true
+					}),
+				}, fetchCount
+			},
+		},
+		"transport": {
+			setup: func(t *testing.T) ([]schemastore.Option, *atomic.Int32) {
+				t.Helper()
+
+				var fetchCount atomic.Int32
+
+				client := &http.Client{
+					Transport: &roundTripperFunc{fn: func(*http.Request) (*http.Response, error) {
+						fetchCount.Add(1)
+						runtime.Goexit()
+
+						panic("unreachable")
+					}},
+				}
+
+				return []schemastore.Option{
+					schemastore.WithCatalogURL("http://example.com/catalog.json"),
+					schemastore.WithHTTPClient(client),
+				}, &fetchCount
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			opts, fetchCount := tc.setup(t)
+			store := schemastore.New(opts...)
+
+			var returned bool
+
+			done := make(chan struct{})
+
+			go func() {
+				defer close(done)
+
+				//nolint:errcheck // The call exits through runtime.Goexit.
+				_, _ = store.FindMatch(t.Context(), "config.yaml")
+				returned = true
+			}()
+
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				require.FailNow(t, "FindMatch hung after the fetch called runtime.Goexit")
+			}
+
+			assert.False(t, returned)
+
+			// The fetch that called runtime.Goexit counts as a failed one, so
+			// the next lookup reports it within the retry interval and does
+			// not fetch again.
+			res := receive(t, findMatchAsync(t.Context(), store))
+			require.ErrorIs(t, res.err, schemastore.ErrFetchCatalog)
+			require.NotErrorIs(t, res.err, schema.ErrNoMatch)
 			assert.Equal(t, int32(1), fetchCount.Load())
 		})
 	}
