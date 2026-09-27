@@ -18,7 +18,9 @@ import (
 // the module works with comes through here. The lexer drops some text from
 // the Origins, and Tokenize gives it back from the source. It restores the
 // letter and hex digits of a "\x", "\u", or "\U" escape in a double-quoted
-// scalar. It restores the spaces and tabs that end a line or fill a blank
+// scalar, also in the invalid token the lexer makes of a scalar that no
+// quote closes, as when an escape reads the closing quote as a hex digit.
+// It restores the spaces and tabs that end a line or fill a blank
 // line, the space in front of a ":" after a quoted or alias key, and the
 // space between a "-" and a "?". It restores the line breaks and
 // indentation in front of some tokens, such as a "?" or ":" indicator that
@@ -419,7 +421,8 @@ func withoutWhitespace(s string) string {
 // or "\U" escape, so the positioner finds such a token by its text through
 // the first backslash. The cursor then moves past the scalar's closing
 // quote in the source rather than past the shortened text, where the next
-// token would land inside the scalar.
+// token would land inside the scalar. A scalar that no quote closes runs
+// to the end of the source, and the cursor moves past its last text.
 type positioner struct {
 	tail string // The whitespace the stream holds after the text placed last.
 
@@ -443,9 +446,10 @@ type positioner struct {
 // follows, and leaves the cursor where it is. When the text follows the
 // cursor past whitespace alone, place gives tk the line breaks the lexer
 // dropped from that whitespace. A double-quoted scalar found in the source
-// moves the cursor past its closing quote instead, and takes its Origin
-// from the source when the lexer shortened it. It returns the runes of the
-// source the text of tk covers.
+// moves the cursor past its closing quote instead, or past the last text of
+// the source when no quote closes it, and takes its Origin from the source
+// when the lexer shortened it. It returns the runes of the source the text
+// of tk covers.
 func (p *positioner) place(tk *token.Token) span {
 	var (
 		placed, found bool
@@ -517,10 +521,9 @@ func (p *positioner) place(tk *token.Token) span {
 		return span{}
 	}
 
-	// A double-quoted scalar whose closing quote the source holds takes
-	// its text from the source, so it matches whatever the lexer made of
-	// it.
-	if found && tk.Type == token.DoubleQuoteType && p.src[start] == '"' && p.restoreQuoted(tk, start) {
+	// A double-quoted scalar takes its text from the source, so it matches
+	// whatever the lexer made of it.
+	if found && doubleQuoted(tk) && p.src[start] == '"' && p.restoreQuoted(tk, start) {
 		matched = true
 	}
 
@@ -529,18 +532,42 @@ func (p *positioner) place(tk *token.Token) span {
 	return span{start: start, end: p.cursor, ok: matched}
 }
 
-// restoreQuoted moves the cursor past the closing quote of the
-// double-quoted scalar tk, whose opening quote sits at rune index start.
-// The lexer drops the code of a "\x", "\u", or "\U" escape from the
-// Origin. When the source from the opening to the closing quote differs
-// from the text of the Origin, the Origin takes the source's runes in
-// place of its text and keeps the whitespace around it. It reports
-// whether a quote closes the scalar, and one that no quote closes leaves
-// the cursor and the Origin as they are.
+// doubleQuoted reports whether tk holds a double-quoted scalar: a token the
+// lexer read through its closing quote, or the invalid token it makes of a
+// scalar no quote closes. The lexer reads such a scalar to the end of the
+// source, so that invalid token ends the stream. An invalid token that
+// opens with a quote and has tokens after it holds the part of a scalar
+// the lexer read before some other fault, such as an unknown escape, and
+// the tokens after it hold the rest.
+func doubleQuoted(tk *token.Token) bool {
+	switch tk.Type {
+	case token.DoubleQuoteType:
+		return true
+	case token.InvalidType:
+		return tk.Next == nil && strings.HasPrefix(strings.TrimLeft(tk.Origin, " \t\r\n"), `"`)
+	default:
+		return false
+	}
+}
+
+// restoreQuoted moves the cursor past the end of the double-quoted scalar
+// tk, whose opening quote sits at rune index start. The scalar ends with
+// its closing quote. The invalid token the lexer makes of a scalar no
+// quote closes runs to the end of the source, and it ends with the last
+// text of the source. The lexer drops the code of a "\x", "\u", or "\U"
+// escape from the Origin. When the source from the opening quote to the
+// end of the scalar differs from the text of the Origin, the Origin takes
+// the source's runes in place of its text and keeps the whitespace around
+// it. It reports whether it found the end, and a DoubleQuoteType token
+// that no quote closes leaves the cursor and the Origin as they are.
 func (p *positioner) restoreQuoted(tk *token.Token, start int) bool {
 	end, ok := p.closingQuote(start)
 	if !ok {
-		return false
+		if tk.Type != token.InvalidType {
+			return false
+		}
+
+		end = utf8.RuneCountInString(strings.TrimRight(string(p.src), " \t\r\n"))
 	}
 
 	p.cursor, p.reliable = end, true
@@ -703,7 +730,7 @@ func (p *positioner) locate(tk *token.Token, text []rune) (int, bool) {
 		return at, true
 	}
 
-	if tk.Type == token.DoubleQuoteType {
+	if doubleQuoted(tk) {
 		if i := slices.Index(text, '\\'); i >= 0 {
 			if at, ok := p.pick(tk, text[:i+1]); ok {
 				return at, true

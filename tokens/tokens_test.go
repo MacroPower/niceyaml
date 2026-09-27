@@ -58,7 +58,10 @@ func TestTokenize_NumericEscape(t *testing.T) {
 
 	// The lexer drops the code of a "\x", "\u", or "\U" escape from a
 	// double-quoted scalar's Origin, and Tokenize restores the Origin from
-	// the source, so the joined Origins equal the input.
+	// the source, so the joined Origins equal the input. An escape that
+	// reads the closing quote as a hex digit leaves the scalar open, and the
+	// lexer makes an invalid token of the rest of the source, which Tokenize
+	// restores the same way.
 	tcs := map[string]struct {
 		input string
 	}{
@@ -94,6 +97,27 @@ func TestTokenize_NumericEscape(t *testing.T) {
 		},
 		"escape the lexer keeps": {
 			input: `a: "x\ty"` + "\n",
+		},
+		"short unicode escape swallows the quote": {
+			input: `a: "\u12"` + "\n" + "b: 1\nc: 2\nd: 3\n",
+		},
+		"hex escape swallows the quote": {
+			input: `a: "\x4"` + "\n" + "b: 1\n",
+		},
+		"unicode escape one digit short": {
+			input: `name: "caf\u00e"` + "\n" + "age: 3\n",
+		},
+		"escape swallows the quote at the end": {
+			input: `a: "\x4"`,
+		},
+		"escape swallows the quote and a cr": {
+			input: `a: "\u12"` + "\r\nb: 1\r\n",
+		},
+		"escape swallows the quote before blank lines": {
+			input: `a: "\u12"` + "\n" + "b: 1\n  \n\n",
+		},
+		"escape swallows the quote of the whole source": {
+			input: `"\x4"` + "\n",
 		},
 	}
 
@@ -1738,6 +1762,7 @@ var positionCorpus = map[string]string{
 	"escape in a sequence":                           "- !!str \"\\u00e9\"\n- b\n",
 	"escaped scalars in a row":                       "a: \"\\u00e9\"\n\"\\u00e8\": \"\\x41 b\"\nc: 1\n",
 	"escape in a multi-line scalar":                  "a: \"x\\x41\n  b c\"\nc: 1\n",
+	"escape that swallows the quote":                 "a: \"\\u12\"\nb: 1\nc: 2\n",
 	"plain multi-line":                               "a: plain\n  multi\nb: 2\n",
 	"flow collections":                               "{a: 1, b: [1, 2]}\n",
 	"flow sequence over lines":                       "a: [\n  1,\n  2\n]\n",
