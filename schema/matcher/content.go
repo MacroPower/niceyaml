@@ -75,8 +75,10 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 
 	// Read the value as the YAML types name it first, because a decode
 	// into T loses what tells a null from an empty string or a false,
-	// and a fraction from the integer it truncates to.
-	raw, err := node.Decode[any](ctx)
+	// and a fraction from the integer it truncates to. A decode into any
+	// yields only the YAML built-in types, none of which validates itself,
+	// so the self-validation walk would find nothing.
+	raw, err := node.Decode[any](ctx, niceyaml.WithSelfValidation(false))
 	if errors.Is(err, niceyaml.ErrDecodeRejected) {
 		return false, nil
 	}

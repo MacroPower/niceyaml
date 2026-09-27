@@ -1,0 +1,69 @@
+package schema_test
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/schema"
+)
+
+// BenchmarkSchema_Validate checks a list of small mappings against a
+// schema that matches it, so the time goes to reading the document and
+// to the schema check.
+func BenchmarkSchema_Validate(b *testing.B) {
+	sizes := []struct {
+		name  string
+		items int
+	}{
+		{"items_1000", 1000},
+		{"items_4000", 4000},
+	}
+
+	s, err := schema.Compile(b.Context(), []byte(`{
+		"type": "object",
+		"properties": {
+			"items": {
+				"type": "array",
+				"items": {
+					"type": "object",
+					"properties": {
+						"name": {"type": "string"},
+						"value": {"type": "integer"},
+						"tags": {"type": "object"}
+					}
+				}
+			}
+		}
+	}`))
+	require.NoError(b, err)
+
+	for _, sz := range sizes {
+		var sb strings.Builder
+
+		sb.WriteString("items:\n")
+
+		for range sz.items {
+			sb.WriteString("  - {name: x, value: 1, tags: {a: 1}}\n")
+		}
+
+		yaml := sb.String()
+
+		doc, err := niceyaml.NewSourceFromString(yaml).Document()
+		require.NoError(b, err)
+
+		b.Run(sz.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(yaml)))
+
+			for b.Loop() {
+				err := s.Validate(b.Context(), doc)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}

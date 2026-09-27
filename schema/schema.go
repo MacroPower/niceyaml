@@ -213,7 +213,9 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // a key that is no scalar at or after the member leading to the
 // timestamp. Such a key may set a member of the same name.
 func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
-	data, err := n.Decode[any](ctx)
+	// A decode into any yields only the YAML built-in types, none of which
+	// validates itself, so the self-validation walk would find nothing.
+	data, err := n.Decode[any](ctx, niceyaml.WithSelfValidation(false))
 	if err != nil {
 		return err
 	}
