@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
@@ -477,6 +478,99 @@ func TestResolver_NestedMerges(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		require.FailNow(t, "binding the aliases did not return within 10s")
 	}
+}
+
+func TestResolver_Deref(t *testing.T) {
+	t.Parallel()
+
+	// Each case dereferences the value of the entry v.
+	tcs := map[string]struct {
+		input string
+		want  string
+		err   error
+	}{
+		"alias": {
+			input: "a: &a {k: x}\nv: *a\n",
+			want:  "{k: x}",
+		},
+		"last anchor of its name": {
+			input: "a: &a one\nb: &a two\nv: *a\n",
+			want:  "two",
+		},
+		"anchor a merge brings in again": {
+			input: "base: &b\n  k: &x one\nother: &x two\nm:\n  <<: *b\nv: *x\n",
+			want:  "one",
+		},
+		"anchor": {
+			input: "v: &a {k: x}\n",
+			want:  "{k: x}",
+		},
+		"tag on the content of the anchor": {
+			input: "a: &a !!str 0x10\nv: *a\n",
+			want:  "!!str 0x10",
+		},
+		"no alias": {
+			input: "v: {k: x}\n",
+			want:  "{k: x}",
+		},
+		"alias with no anchor before it": {
+			input: "v: *a\na: &a x\n",
+			err:   paths.ErrAlias,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			file, err := niceyaml.NewSourceFromString(tc.input).File()
+			require.NoError(t, err)
+
+			mapping, ok := file.Docs[0].Body.(*ast.MappingNode)
+			require.True(t, ok, "body is a %T", file.Docs[0].Body)
+
+			var value ast.Node
+
+			for _, entry := range mapping.Values {
+				if entry.Key.GetToken().Value == "v" {
+					value = entry.Value
+				}
+			}
+
+			require.NotNil(t, value, "no entry v")
+
+			got, err := paths.NewResolver(file.Docs[0]).Deref(value)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got.String())
+		})
+	}
+
+	t.Run("alias that leads back to itself", func(t *testing.T) {
+		t.Parallel()
+
+		// The parser never puts an alias right under an anchor, but a tree
+		// built by hand may, and the alias then refers to itself.
+		name := &ast.StringNode{Token: &token.Token{Value: "a"}, Value: "a"}
+		alias := &ast.AliasNode{Value: name}
+		doc := &ast.DocumentNode{Body: &ast.AnchorNode{Name: name, Value: alias}}
+
+		_, err := paths.NewResolver(doc).Deref(alias)
+		require.ErrorIs(t, err, paths.ErrAlias)
+	})
+
+	t.Run("nil node", func(t *testing.T) {
+		t.Parallel()
+
+		got, err := paths.NewResolver(nil).Deref(nil)
+		require.NoError(t, err)
+		assert.Nil(t, got)
+	})
 }
 
 func TestResolver_MergeSources(t *testing.T) {

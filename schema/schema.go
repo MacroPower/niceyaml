@@ -354,22 +354,24 @@ func newValidationError(ve *jsonschema.ValidationError, n *niceyaml.Node) *nicey
 
 	// Bind aliases across the whole document, so an alias inside a
 	// scoped node reaches an anchor outside it.
-	var targets map[*ast.AliasNode]ast.Node
+	var doc *ast.DocumentNode
 
 	if n != nil {
-		targets = aliasTargets(n.DocumentAST())
+		doc = n.DocumentAST()
 	}
+
+	r := paths.NewResolver(doc)
 
 	switch len(leaves) {
 	case 0:
 		return niceyaml.NewError(ve.Message)
 	case 1:
-		return leafError(leaves[0], n, targets)
+		return leafError(leaves[0], n, r)
 	}
 
 	causes := make([]error, 0, len(leaves))
 	for _, leaf := range leaves {
-		causes = append(causes, leafError(leaf, n, targets))
+		causes = append(causes, leafError(leaf, n, r))
 	}
 
 	return niceyaml.NewError(
@@ -386,14 +388,10 @@ func newValidationError(ve *jsonschema.ValidationError, n *niceyaml.Node) *nicey
 // The path spells each key as the source does, so a key the decoder
 // respells, such as 0x10 for the member name 16, still names its member.
 // Without n, which a [Schema.ValidateValue] caller does not hand over, the
-// path spells each key as the decoder does. The targets map binds each
-// alias in the document of n to the content it refers to.
-func leafError(
-	leaf *jsonschema.ValidationError,
-	n *niceyaml.Node,
-	targets map[*ast.AliasNode]ast.Node,
-) *niceyaml.Error {
-	path := sourcePath(rootOf(n), targets, leaf.InstanceSegments())
+// path spells each key as the decoder does. The resolver r binds the
+// aliases of the document of n.
+func leafError(leaf *jsonschema.ValidationError, n *niceyaml.Node, r *paths.Resolver) *niceyaml.Error {
+	path := sourcePath(rootOf(n), r, leaf.InstanceSegments())
 
 	if leaf.TargetsKey() {
 		path = path.Key()
@@ -422,25 +420,20 @@ func rootOf(n *niceyaml.Node) ast.Node {
 // source spelling of that key into the path instead, which a path
 // selector matches.
 //
-// The walk follows an alias to the content targets binds it to, the last
-// anchor of its name before it in the document, as the paths package
-// does. A key under an aliased mapping keeps its source spelling too. A
-// segment the walk cannot follow keeps its decoded name, such as a member
-// a merge key brought in or one behind an alias targets does not bind.
-// Every segment keeps its decoded name when root is nil, as does a key
-// the walk finds but cannot spell.
-func sourcePath(
-	root ast.Node,
-	targets map[*ast.AliasNode]ast.Node,
-	segments []jsonschema.Segment,
-) paths.Path {
+// The walk follows each alias through r, so it reaches the node a path
+// through the same alias resolves to. A key under an aliased mapping
+// keeps its source spelling too. A segment the walk cannot follow keeps
+// its decoded name, such as a member a merge key brought in or one
+// behind an alias that does not resolve. Every segment keeps its decoded
+// name when root is nil, as does a key the walk finds but cannot spell.
+func sourcePath(root ast.Node, r *paths.Resolver, segments []jsonschema.Segment) paths.Path {
 	path := paths.Root()
-	node := followAliases(root, targets)
+	node := deref(r, root)
 
 	for _, seg := range segments {
 		if seg.IsIndex {
 			path = path.Index(seg.Index)
-			node = followAliases(elementNode(node, seg.Index), targets)
+			node = deref(r, elementNode(node, seg.Index))
 
 			continue
 		}
@@ -453,113 +446,38 @@ func sourcePath(
 		}
 
 		path = path.Child(name)
-		node = followAliases(valueNode, targets)
+		node = deref(r, valueNode)
 	}
 
 	return path
 }
 
-// aliasTargets returns the content each alias in doc refers to, which is
-// the content of the last anchor of its name before the alias, the anchor
-// the decoder uses for it. It returns nil for no document and for one
-// with no body.
-func aliasTargets(doc *ast.DocumentNode) map[*ast.AliasNode]ast.Node {
-	if doc == nil || doc.Body == nil {
-		return nil
-	}
-
-	b := &aliasBinder{
-		anchors: map[string]ast.Node{},
-		targets: map[*ast.AliasNode]ast.Node{},
-	}
-
-	ast.Walk(b, doc.Body)
-
-	return b.targets
-}
-
-// aliasBinder binds aliases to anchors while [ast.Walk] visits a document
-// in order. The anchors map holds the content of the last anchor of each
-// name visited so far, and the targets map holds the content each visited
-// alias refers to.
-type aliasBinder struct {
-	anchors map[string]ast.Node
-	targets map[*ast.AliasNode]ast.Node
-}
-
-// Visit records an anchor or binds an alias, then returns b so [ast.Walk]
-// continues into the children of node. It returns nil for a nil node and
-// for a typed nil anchor or alias, so Walk stops rather than reading the
-// fields behind it.
-func (b *aliasBinder) Visit(node ast.Node) ast.Visitor {
-	switch n := node.(type) {
-	case nil:
-		return nil
-
-	case *ast.AnchorNode:
-		if n == nil {
-			return nil
-		}
-
-		if name, ok := anchorName(n.Name); ok {
-			b.anchors[name] = n.Value
-		}
-
-	case *ast.AliasNode:
-		if n == nil {
-			return nil
-		}
-
-		name, ok := anchorName(n.Value)
-		if !ok {
-			return b
-		}
-
-		if target, ok := b.anchors[name]; ok {
-			b.targets[n] = target
-		}
-	}
-
-	return b
-}
-
-// anchorName returns the name that the name node of an anchor or an alias
-// spells, and reports whether the node has one. A nil node, and one with
-// no token, has no name.
-func anchorName(node ast.Node) (string, bool) {
-	if node == nil {
-		return "", false
-	}
-
-	tk := node.GetToken()
-	if tk == nil {
-		return "", false
-	}
-
-	return tk.Value, true
-}
-
-// followAliases looks through node, and through each alias it reaches, to
-// the content targets binds the alias to. It stops at an alias with no
-// target, and at one it has already followed, so an alias that leads back
-// to itself ends the walk rather than looping.
-func followAliases(node ast.Node, targets map[*ast.AliasNode]ast.Node) ast.Node {
-	followed := map[*ast.AliasNode]bool{}
+// deref returns the content under node: it looks through what
+// [contentNode] looks through and follows each alias through r. It
+// returns nil for an alias that does not resolve, and for an alias it
+// reaches again, which leads back to itself through a tag.
+func deref(r *paths.Resolver, node ast.Node) ast.Node {
+	var followed []*ast.AliasNode
 
 	for {
 		node = contentNode(node)
 
 		alias, ok := node.(*ast.AliasNode)
-		if !ok || alias == nil || followed[alias] {
+		if !ok || alias == nil {
 			return node
 		}
 
-		target, ok := targets[alias]
-		if !ok {
-			return node
+		if slices.Contains(followed, alias) {
+			return nil
 		}
 
-		followed[alias] = true
+		followed = append(followed, alias)
+
+		target, err := r.Deref(alias)
+		if err != nil {
+			return nil
+		}
+
 		node = target
 	}
 }
@@ -1027,9 +945,9 @@ func checkDecodeExpansion(n *niceyaml.Node) error {
 	doc := n.DocumentAST()
 
 	c := treeCounter{
-		targets: aliasTargets(doc),
-		sizes:   map[ast.Node]int{},
-		open:    map[ast.Node]bool{},
+		resolver: paths.NewResolver(doc),
+		sizes:    map[ast.Node]int{},
+		open:     map[ast.Node]bool{},
 	}
 
 	c.count(doc.Body, true)
@@ -1077,10 +995,10 @@ func (f *aliasFinder) Visit(node ast.Node) ast.Visitor {
 // gopkg.in/yaml.v3 counts them for its alias limit, where each alias
 // reads the content it refers to in full. That covers an alias the
 // decoder writes out as text, such as a key, and a mapping a merge key
-// brings in, which the decoder reads again at every merge. The targets
-// map binds each alias to its content. An alias to a scalar counts as
-// one unaliased node, as it does for [checkExpansion], and so does an
-// alias with no content and one inside its own content, which the
+// brings in, which the decoder reads again at every merge. The resolver
+// binds each alias to its content. An alias to a scalar counts as one
+// unaliased node, as it does for [checkExpansion], and so does an alias
+// that does not resolve and one inside its own content, which the
 // decoder reads as null.
 //
 // The distinct field counts the nodes of the tree once each, and the
@@ -1089,7 +1007,7 @@ func (f *aliasFinder) Visit(node ast.Node) ast.Visitor {
 // read it, so a chain of nested aliases costs one read per anchor, and
 // the open map holds the content the counter is reading.
 type treeCounter struct {
-	targets  map[*ast.AliasNode]ast.Node
+	resolver *paths.Resolver
 	sizes    map[ast.Node]int
 	open     map[ast.Node]bool
 	distinct int
@@ -1160,8 +1078,8 @@ func (c *treeCounter) entry(entry *ast.MappingValueNode, top bool) int {
 // alias, and alias adds that size to aliased, or the one node to
 // distinct.
 func (c *treeCounter) alias(alias *ast.AliasNode, top bool) int {
-	target, ok := c.targets[alias]
-	if !ok || c.open[target] || !isCollection(target) {
+	target, err := c.resolver.Deref(alias)
+	if err != nil || c.open[target] || !isCollection(target) {
 		if top {
 			c.distinct = addCapped(c.distinct, 1)
 		}

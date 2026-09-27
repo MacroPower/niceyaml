@@ -92,6 +92,25 @@ func (r *Resolver) Matches(p Path) ([]Match, error) {
 	return matches, nil
 }
 
+// Deref returns the content under node: it looks through the anchors on
+// node and follows an alias to the content of the anchor it refers to, as
+// [Resolver.Node] does. A tag on that content stays, so the result reads
+// as the decoder reads the alias. A caller that walks the document itself
+// follows aliases with Deref to reach the node a path through the same
+// alias resolves to, and looks through a tag it reaches on the way. A nil
+// node gives nil.
+//
+// Returns an error wrapping [ErrAlias] for an alias that names no anchor
+// or that leads back to itself.
+func (r *Resolver) Deref(node ast.Node) (ast.Node, error) {
+	content, err := r.resolver.deref(node)
+	if err != nil {
+		return nil, fmt.Errorf("deref: %w", err)
+	}
+
+	return content, nil
+}
+
 // MergeSources returns the mappings the `<<` merge keys of the mapping at
 // node bring in, in the order the decoder applies them. The merge keys go
 // in document order and the sources of one merge key in sequence order,

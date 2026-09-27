@@ -14,6 +14,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/jsonschema"
@@ -695,14 +696,13 @@ func TestSourcePath_TypedNilNode(t *testing.T) {
 
 	// The parser always puts a node where these trees hold a typed nil,
 	// but a tree built or rewritten by hand may not, and the walk keeps
-	// the decoded name for it rather than panicking. An alias the targets
-	// do not bind, or one they bind to itself, keeps the decoded name as
-	// well.
-	cycle := &ast.AliasNode{Value: &ast.StringNode{Value: "a"}}
+	// the decoded name for it rather than panicking. An alias that does
+	// not resolve, or one that leads back to itself, keeps the decoded
+	// name as well.
+	name := &ast.StringNode{Token: &token.Token{Value: "a"}, Value: "a"}
 
 	tcs := map[string]struct {
 		root     ast.Node
-		targets  map[*ast.AliasNode]ast.Node
 		segments []jsonschema.Segment
 		want     string
 	}{
@@ -755,8 +755,16 @@ func TestSourcePath_TypedNilNode(t *testing.T) {
 			want:     "$.a.16",
 		},
 		"alias that leads back to itself": {
-			root:     cycle,
-			targets:  map[*ast.AliasNode]ast.Node{cycle: cycle},
+			// The anchor holds the alias, so the alias refers to itself.
+			root:     &ast.AnchorNode{Name: name, Value: &ast.AliasNode{Value: name}},
+			segments: []jsonschema.Segment{{Key: "name"}},
+			want:     "$.name",
+		},
+		"alias that leads back to itself through a tag": {
+			root: &ast.AnchorNode{
+				Name:  name,
+				Value: &ast.TagNode{Value: &ast.AliasNode{Value: name}},
+			},
 			segments: []jsonschema.Segment{{Key: "name"}},
 			want:     "$.name",
 		},
@@ -779,7 +787,9 @@ func TestSourcePath_TypedNilNode(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, schema.SourcePath(tc.root, tc.targets, tc.segments).String())
+			r := paths.NewResolver(&ast.DocumentNode{Body: tc.root})
+
+			assert.Equal(t, tc.want, schema.SourcePath(tc.root, r, tc.segments).String())
 		})
 	}
 }
@@ -2132,6 +2142,35 @@ func TestSchema_SourcePath(t *testing.T) {
 			input:    "a: &a\n  0x10: 1\nb: *a\n",
 			wantPath: "$.b.0x10",
 			want:     "2:9: $.b.0x10: expected \"string\", got \"integer\"",
+		},
+		"respelled key behind a redefined anchor": {
+			// The alias refers to the last anchor of its name before it.
+			schema: `{
+				"type": "object",
+				"properties": {
+					"c": {"additionalProperties": {"type": "string"}}
+				}
+			}`,
+			input:    "a: &a {16: x}\nb: &a {0x10: 1}\nc: *a\n",
+			wantPath: "$.c.0x10",
+			want:     "2:14: $.c.0x10: expected \"string\", got \"integer\"",
+		},
+		"respelled key behind an anchor a merge brings in again": {
+			// The decoder reads the anchors of a merged mapping again at
+			// the merge key, so *x refers to the &x inside base.
+			schema: `{
+				"type": "object",
+				"properties": {
+					"m": {
+						"properties": {
+							"v": {"additionalProperties": {"type": "string"}}
+						}
+					}
+				}
+			}`,
+			input:    "base: &b\n  k: &x {0x10: 1}\nother: &x {16: x}\nm:\n  <<: *b\n  v: *x\n",
+			wantPath: "$.m.v.0x10",
+			want:     "2:16: $.m.v.0x10: expected \"string\", got \"integer\"",
 		},
 	}
 
