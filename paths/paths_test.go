@@ -1,6 +1,7 @@
 package paths_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -2146,6 +2147,90 @@ func TestPath_Node_LaterDuplicateKeyWins(t *testing.T) {
 	single, err := matches[0].Path.Node(doc)
 	require.NoError(t, err)
 	assert.Same(t, matches[0].Node, single)
+}
+
+// nestedChain returns depth flow mappings nested in one another, each with
+// the single key a, and the paths of the entries from the outermost in.
+func nestedChain(depth int) (string, []string) {
+	want := make([]string, 0, depth)
+
+	for i := 1; i <= depth; i++ {
+		want = append(want, "$"+strings.Repeat(".a", i))
+	}
+
+	return strings.Repeat("{a: ", depth) + "1" + strings.Repeat("}", depth), want
+}
+
+func TestPath_Matches_RecursiveReachedTwice(t *testing.T) {
+	t.Parallel()
+
+	chain, chainPaths := nestedChain(400)
+
+	tcs := map[string]struct {
+		input string
+		path  string
+		want  []string
+	}{
+		"single recursive on a deep chain": {
+			input: chain,
+			path:  "$..a",
+			want:  chainPaths,
+		},
+		"chained recursive on a deep chain": {
+			// The second ..a reaches each entry below the first from
+			// every enclosing match, and keeps the outermost path.
+			input: chain,
+			path:  "$..a..a",
+			want:  chainPaths[1:],
+		},
+		"aliases to one anchor keep the first": {
+			input: "base: &b {c: {name: 1}}\nrefs: [*b, *b]\n",
+			path:  "$.refs[*]..name",
+			want:  []string{"$.refs[0].c.name"},
+		},
+		"outer match reaches an alias target first": {
+			input: "k:\n  y: &b\n    name: 1\n  k: *b\n",
+			path:  "$..k..name",
+			want:  []string{"$.k.y.name"},
+		},
+		"merged entry comes before the outer walk": {
+			// The walk from $.x.k reaches the anchor through the `<<`
+			// entry, one place deeper than the order of the merged
+			// entry $.x.k.x.k, so the merged entry's path comes first.
+			input: "x:\n  k:\n    x:\n      <<: {k: &c {name: 1}}\n",
+			path:  "$..x.k..name",
+			want:  []string{"$.x.k.x.k.name"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			file, err := niceyaml.NewSourceFromString(tc.input).File()
+			require.NoError(t, err)
+
+			doc := file.Docs[0]
+
+			matches, err := paths.MustParse(tc.path).Matches(doc)
+			require.NoError(t, err)
+
+			got := make([]string, 0, len(matches))
+			for _, m := range matches {
+				got = append(got, m.Path.String())
+			}
+
+			assert.Equal(t, tc.want, got)
+
+			nodes, err := paths.MustParse(tc.path).Nodes(doc)
+			require.NoError(t, err)
+			require.Len(t, nodes, len(matches))
+
+			for i, m := range matches {
+				assert.Same(t, m.Node, nodes[i])
+			}
+		})
+	}
 }
 
 func TestPath_Matches(t *testing.T) {

@@ -203,9 +203,9 @@ func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.
 // resolve applies segs to root and returns every match, in document order
 // along the path.
 //
-// A recursive selector walks the whole subtree of each match, so when one
-// match lies inside another, the entries below the inner match appear once
-// for each. Resolve keeps the first of these, so a recursive selector
+// A recursive selector can reach one entry from several matches, such as
+// when one match lies inside another or two aliases share an anchor.
+// Resolve keeps the first match of each entry, so a recursive selector
 // yields each entry once. Only a recursive selector drops repeats, so a
 // later `.name`, `[n]`, or `[*]` selector can still reach one node through
 // several aliases.
@@ -215,19 +215,29 @@ func (r *resolver) resolve(root ast.Node, segs []segment) ([]match, error) {
 	for _, seg := range segs {
 		var next []match
 
-		for _, m := range matches {
-			if seg.kind == segmentKey {
+		switch seg.kind {
+		case segmentKey:
+			for _, m := range matches {
 				next = append(next, m.key())
-
-				continue
 			}
 
-			found, err := r.apply(seg, m)
+		case segmentRecursive:
+			found, err := r.recurse(matches, seg.name)
 			if err != nil {
 				return nil, err
 			}
 
-			next = append(next, found...)
+			next = found
+
+		default:
+			for _, m := range matches {
+				found, err := r.apply(seg, m)
+				if err != nil {
+					return nil, err
+				}
+
+				next = append(next, found...)
+			}
 		}
 
 		// A selector applied to a match that lies inside another can
@@ -265,9 +275,10 @@ func uniqueMatches(matches []match) []match {
 	return unique
 }
 
-// apply applies one selector to the node of m, and returns the matches
-// with the selector that names each one appended to the selectors of m.
-// A nil node, including a typed nil, has nothing to select.
+// apply applies one `.name`, `[n]`, or `[*]` selector to the node of m,
+// and returns the matches with the selector that names each one appended
+// to the selectors of m. A nil node, including a typed nil, has nothing to
+// select.
 func (r *resolver) apply(seg segment, m match) ([]match, error) {
 	content, err := r.unwrap(m.node)
 	if err != nil || isNilNode(content) {
@@ -308,11 +319,6 @@ func (r *resolver) apply(seg segment, m match) ([]match, error) {
 		}
 
 		return matches, nil
-
-	case segmentRecursive:
-		segs, order := slices.Clone(m.segs), slices.Clone(m.order)
-
-		return r.descend(content, seg.name, &segs, &order, nil), nil
 
 	default:
 		return nil, nil
@@ -405,35 +411,139 @@ func (r *resolver) mergeSources(value ast.Node) ([]*ast.MappingNode, error) {
 	}
 }
 
+// recurse applies the `..name` selector to each of matches, in order, and
+// returns every entry it finds below each, in the order it finds them.
+// It returns an error wrapping [ErrAlias] when the node of a match is an
+// alias that does not resolve.
+//
+// A walk from one match can reach the start of another, such as when one
+// match lies inside another. Take an earlier walk that reaches the start
+// of a later match at an order that [covers] the order of that match. No
+// entry below the start sorts earlier from the later walk than from the
+// earlier one, so resolve keeps the entry the earlier walk finds. Hence
+// recurse skips a later match whose start an earlier walk covers, and a
+// walk stops at the start of an earlier match whose order covers the walk
+// there. On a chain of nested matches the first walk thus covers the rest,
+// and the step costs one walk rather than one for each match.
+func (r *resolver) recurse(matches []match, name string) ([]match, error) {
+	w := &recursiveWalk{
+		resolver: r,
+		name:     name,
+		from:     matches,
+		starts:   make(map[ast.Node][]int, len(matches)),
+		skip:     make([]bool, len(matches)),
+	}
+
+	contents := make([]ast.Node, len(matches))
+
+	for i, m := range matches {
+		content, err := r.unwrap(m.node)
+		if err != nil {
+			return nil, err
+		}
+
+		contents[i] = content
+
+		if !isNilNode(content) {
+			w.starts[content] = append(w.starts[content], i)
+		}
+	}
+
+	for i, m := range matches {
+		if w.skip[i] || isNilNode(contents[i]) {
+			continue
+		}
+
+		// Clipped, the selectors and the order of the match have no
+		// spare capacity, so the first push copies them rather than
+		// writing past the end of the match.
+		w.cur = i
+		w.segs = slices.Clip(m.segs)
+		w.order = slices.Clip(m.order)
+		w.heldSegs, w.heldOrder = 0, 0
+
+		w.descend(contents[i])
+	}
+
+	return w.found, nil
+}
+
+// covers reports whether a walk that reaches a node at order a finds each
+// entry below the node no later than a walk that reaches it at order b
+// does. That holds when the orders are equal, or when they first differ
+// at a place both hold and a is lower there. When one order extends the other, the
+// entry decides which walk finds it first, so covers reports false.
+func covers(a, b []int) bool {
+	for i := range min(len(a), len(b)) {
+		if a[i] != b[i] {
+			return a[i] < b[i]
+		}
+	}
+
+	return len(a) == len(b)
+}
+
+// recursiveWalk walks the subtrees of the matches one `..name` selector
+// applies to, as [resolver.recurse] describes.
+//
+// The from field holds those matches, and the starts field maps the
+// content each one starts from to its indexes in from. The cur field is
+// the index of the current match, and the skip field marks the matches an
+// earlier walk covers.
+//
+// The segs and order stacks hold the selectors and the order down to the
+// node the walk has reached. Each entry the walk finds holds the stacks as they
+// stand, and the held fields record how much of each stack the entries
+// hold, so a push that would overwrite a held place copies the stack
+// first. Entries along one branch thus share their selectors and their
+// order rather than holding a copy each.
+type recursiveWalk struct {
+	resolver  *resolver
+	starts    map[ast.Node][]int
+	name      string
+	from      []match
+	skip      []bool
+	found     []match
+	segs      []segment
+	order     []int
+	cur       int
+	heldSegs  int
+	heldOrder int
+}
+
 // descend collects every mapping entry keyed name at any depth below node, in
 // document order. It looks through anchors and tags but not aliases, so it
-// visits an entry of the source at most once, at its definition.
+// visits an entry of the source at most once, at its definition. It skips a
+// mapping or sequence that the walk of another match covers, as
+// [resolver.recurse] describes.
 //
-// The segs and order stacks hold the selectors and the order down to
-// node. For each entry and element it visits, descend pushes the selector
-// and the place of that step onto the stacks, and each match gets its own
-// copy of them down to its entry. Before it returns, descend cuts both
-// stacks back to the length they had when it began.
+// For each entry and element it visits, descend pushes the selector and
+// the place of that step onto the stacks. Before it returns, descend cuts
+// both stacks back to the length they had when it began.
 //
 // It skips an entry whose key a later entry in its mapping repeats, and
 // everything below it, because a path through that key selects the later
 // entry. When a mapping holds several `<<` keys, descend thus visits only
 // the inline mapping of the last one, even though the decoder merges them
 // all.
-func (r *resolver) descend(node ast.Node, name string, segs *[]segment, order *[]int, acc []match) []match {
+func (w *recursiveWalk) descend(node ast.Node) {
 	if isNilNode(node) {
-		return acc
+		return
 	}
 
-	segsDepth, orderDepth := len(*segs), len(*order)
+	segsDepth, orderDepth := len(w.segs), len(w.order)
 
 	switch n := node.(type) {
 	case *ast.MappingNode:
+		if w.covered(n) {
+			return
+		}
+
 		last := make(map[string]*ast.MappingValueNode, len(n.Values))
 
 		for _, entry := range n.Values {
 			if entry != nil {
-				last[r.keyName(entry.Key)] = entry
+				last[w.resolver.keyName(entry.Key)] = entry
 			}
 		}
 
@@ -442,44 +552,84 @@ func (r *resolver) descend(node ast.Node, name string, segs *[]segment, order *[
 				continue
 			}
 
-			key := r.keyName(entry.Key)
+			key := w.resolver.keyName(entry.Key)
 			if last[key] != entry {
 				continue
 			}
 
-			*segs = append((*segs)[:segsDepth], segment{kind: segmentChild, name: key})
-			*order = append((*order)[:orderDepth], i)
+			w.push(segsDepth, orderDepth, segment{kind: segmentChild, name: key}, i)
 
-			if key == name {
-				acc = append(acc, match{
-					node:  entry.Value,
-					entry: entry,
-					segs:  slices.Clone(*segs),
-					order: slices.Clone(*order),
-				})
+			if key == w.name {
+				segs, order := w.hold()
+				w.found = append(w.found, match{node: entry.Value, entry: entry, segs: segs, order: order})
 			}
 
-			acc = r.descend(entry.Value, name, segs, order, acc)
+			w.descend(entry.Value)
 		}
 
 	case *ast.SequenceNode:
-		for i, v := range n.Values {
-			*segs = append((*segs)[:segsDepth], segment{kind: segmentIndex, index: i})
-			*order = append((*order)[:orderDepth], i)
+		if w.covered(n) {
+			return
+		}
 
-			acc = r.descend(v, name, segs, order, acc)
+		for i, v := range n.Values {
+			w.push(segsDepth, orderDepth, segment{kind: segmentIndex, index: i}, i)
+			w.descend(v)
 		}
 
 	case *ast.AnchorNode:
-		acc = r.descend(n.Value, name, segs, order, acc)
+		w.descend(n.Value)
 	case *ast.TagNode:
-		acc = r.descend(n.Value, name, segs, order, acc)
+		w.descend(n.Value)
 	}
 
-	*segs = (*segs)[:segsDepth]
-	*order = (*order)[:orderDepth]
+	w.segs = w.segs[:segsDepth]
+	w.order = w.order[:orderDepth]
+}
 
-	return acc
+// covered reports whether the walk of an earlier match covers node, so
+// the current walk leaves out everything below it, as [resolver.recurse]
+// describes. It marks each later match that starts at node and that the
+// current walk covers, so recurse skips it.
+func (w *recursiveWalk) covered(node ast.Node) bool {
+	for _, j := range w.starts[node] {
+		switch {
+		case j < w.cur && covers(w.from[j].order, w.order):
+			return true
+		case j > w.cur && covers(w.order, w.from[j].order):
+			w.skip[j] = true
+		}
+	}
+
+	return false
+}
+
+// push sets the selector and the order place of one step, at the depths
+// given, onto the stacks. It copies a stack first when the place it sets
+// is one an entry holds.
+func (w *recursiveWalk) push(segsDepth, orderDepth int, seg segment, ord int) {
+	if segsDepth < w.heldSegs {
+		w.segs = slices.Clone(w.segs[:segsDepth])
+		w.heldSegs = 0
+	}
+
+	if orderDepth < w.heldOrder {
+		w.order = slices.Clone(w.order[:orderDepth])
+		w.heldOrder = 0
+	}
+
+	w.segs = append(w.segs[:segsDepth], seg)
+	w.order = append(w.order[:orderDepth], ord)
+}
+
+// hold returns the stacks as they stand, for an entry the walk finds, and
+// records that an entry holds them. The results have no spare capacity,
+// so an append to one copies it.
+func (w *recursiveWalk) hold() ([]segment, []int) {
+	w.heldSegs = max(w.heldSegs, len(w.segs))
+	w.heldOrder = max(w.heldOrder, len(w.order))
+
+	return slices.Clip(w.segs), slices.Clip(w.order)
 }
 
 // keyContent looks through the `?` indicator of an explicit key and the

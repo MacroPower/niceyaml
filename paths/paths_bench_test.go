@@ -56,3 +56,35 @@ func BenchmarkPath_Nodes_Recursive(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkPath_Nodes_RecursiveChained(b *testing.B) {
+	depths := []int{100, 200, 400, 3000}
+
+	// The second ..a reaches each entry below the first from every
+	// enclosing match of the first.
+	path := paths.Root().Recursive("a").Recursive("a")
+
+	for _, depth := range depths {
+		src := strings.Repeat("{a: ", depth) + "1" + strings.Repeat("}", depth)
+
+		file, err := niceyaml.NewSourceFromString(src).File()
+		require.NoError(b, err)
+
+		doc := file.Docs[0]
+
+		b.Run(fmt.Sprintf("depth_%d", depth), func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				nodes, err := path.Nodes(doc)
+				if err != nil {
+					b.Fatal(err)
+				}
+
+				if len(nodes) != depth-1 {
+					b.Fatalf("got %d nodes, want %d", len(nodes), depth-1)
+				}
+			}
+		})
+	}
+}
