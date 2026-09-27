@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/goccy/go-yaml/ast"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
@@ -792,6 +793,44 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		_, err := dd.Decode[withNestedFailure](t.Context())
 		require.EqualError(t, err, "1:8: $.bytes: rejected")
 	})
+
+	t.Run("an ast.Node value validates itself alone", func(t *testing.T) {
+		t.Parallel()
+
+		type withSpec struct {
+			Hours *seenHours `yaml:"hours"`
+			Spec  ast.Node   `yaml:"spec"`
+		}
+
+		// Go-yaml sets an ast.Node to the node itself, whose tokens link to
+		// every other token of the file, so the walk stops at the node
+		// rather than read the keys after it.
+		var sb strings.Builder
+
+		sb.WriteString("hours: {open: \"09:00\", close: \"17:00\"}\nspec:\n  a: 1\n")
+
+		for i := range 200 {
+			fmt.Fprintf(&sb, "k%d: v\n", i)
+		}
+
+		dd := yamltest.FirstDocument(t, sb.String())
+
+		got, err := dd.Decode[withSpec](t.Context())
+		require.NoError(t, err)
+		require.NotNil(t, got.Hours)
+		assert.True(t, got.Hours.seen)
+		assert.IsType(t, &ast.MappingNode{}, got.Spec)
+
+		// The walk reaches no value below a node, such as a validator a
+		// tree built by hand holds.
+		dd = yamltest.FirstDocument(t, "hours: {open: \"09:00\", close: \"17:00\"}\n")
+
+		built := withSpec{Spec: &ast.MappingNode{
+			Values: []*ast.MappingValueNode{{Value: walkedNode{}}},
+		}}
+
+		require.NoError(t, dd.DecodeInto(t.Context(), &built))
+	})
 }
 
 // selfDecodingBytes decodes itself from the YAML bytes, so its fields
@@ -846,6 +885,15 @@ func (f *failingSelfDecoding) UnmarshalYAML([]byte) error {
 
 func (failingSelfDecoding) Validate() error {
 	return niceyaml.NewError("rejected")
+}
+
+// walkedNode is a syntax tree node that reports any walk that reaches it.
+type walkedNode struct {
+	ast.Node
+}
+
+func (walkedNode) Validate() error {
+	return errors.New("walked below an ast.Node")
 }
 
 // ordered validates after its fields, and reports errOrder when a field

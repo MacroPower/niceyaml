@@ -64,7 +64,8 @@ import (
 // value that failed. A field an inline tag flattens keeps the path of
 // the struct that holds it. A value whose type decodes itself, through
 // an UnmarshalYAML or UnmarshalText method, validates itself and
-// nothing below it, since its fields need not mirror the document. The
+// nothing below it, since its fields need not mirror the document, and
+// so does an [ast.Node], which go-yaml sets to the node it decodes. The
 // decode cannot see a type that go-yaml decodes whole through a
 // [yaml.CustomUnmarshaler] option or an UnmarshalJSON method under
 // [yaml.UseJSONUnmarshaler], so the values below such a type walk as if

@@ -26,8 +26,9 @@ import (
 // fields sees fields that hold together. A value whose type decodes
 // itself, through an unmarshaler method, validates itself and nothing
 // below it, since its fields need not mirror the document and the paths
-// under it would point nowhere. Several errors come back joined, one per
-// value that failed. Returns nil when nothing failed.
+// under it would point nowhere. So does a node of the syntax tree, which
+// go-yaml sets whole. Several errors come back joined, one per value
+// that failed. Returns nil when nothing failed.
 func selfValidate(v any, n *Node, opts []yaml.DecodeOption) error {
 	w := selfWalker{node: n, opts: opts, walking: map[visit]bool{}, done: map[visit]bool{}}
 	w.walk(reflect.ValueOf(v), paths.Root())
@@ -205,14 +206,17 @@ var unmarshalerTypes = []reflect.Type{
 	reflect.TypeFor[encoding.TextUnmarshaler](),
 }
 
-// decodesItself reports whether go-yaml decodes a value of type t through
-// an unmarshaler method of its own, so the fields, elements, or entries
-// of the value need not mirror the document. The method set of the
-// pointer holds the methods of both receivers, as the decoder checks it.
+// decodesItself reports whether go-yaml decodes a value of type t whole,
+// so the fields, elements, or entries of the value need not mirror the
+// document: through an unmarshaler method of its own, or as an
+// [ast.Node], which the decoder sets to the node it decodes rather than
+// decoding field by field. The tokens of a node also link to every other
+// token of the file. The method set of the pointer holds the methods of
+// both receivers, as the decoder checks it.
 func decodesItself(t reflect.Type) bool {
 	pt := reflect.PointerTo(t)
 
-	return slices.ContainsFunc(unmarshalerTypes, pt.Implements)
+	return pt.Implements(reflect.TypeFor[ast.Node]()) || slices.ContainsFunc(unmarshalerTypes, pt.Implements)
 }
 
 // children walks the values below v, and reports whether every one of
