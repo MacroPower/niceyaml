@@ -92,21 +92,35 @@ func BenchmarkNode_DecodeScoped(b *testing.B) {
 		Value int    `yaml:"value"`
 	}
 
+	// Each entry of a merge layout takes its value from the defaults
+	// through a `<<` merge key.
 	sizes := []struct {
 		name  string
 		items int
+		merge bool
 	}{
-		{"items_100", 100},
-		{"items_1000", 1000},
+		{"items_100", 100, false},
+		{"items_1000", 1000, false},
+		{"merge_items_100", 100, true},
+		{"merge_items_1000", 1000, true},
+		{"merge_items_4000", 4000, true},
 	}
 
 	for _, sz := range sizes {
 		var sb strings.Builder
 
-		sb.WriteString("items:\n")
+		if sz.merge {
+			sb.WriteString("defaults: &d\n  value: 1\nitems:\n")
+		} else {
+			sb.WriteString("items:\n")
+		}
 
 		for i := range sz.items {
-			fmt.Fprintf(&sb, "  - name: item_%d\n    value: %d\n", i, i)
+			if sz.merge {
+				fmt.Fprintf(&sb, "  - <<: *d\n    name: item_%d\n", i)
+			} else {
+				fmt.Fprintf(&sb, "  - name: item_%d\n    value: %d\n", i, i)
+			}
 		}
 
 		doc, err := niceyaml.NewSourceFromString(sb.String()).Document()

@@ -2460,6 +2460,67 @@ func TestDocument_At(t *testing.T) {
 		}
 	})
 
+	t.Run("scoped decode reads the anchors its aliases need", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+			path  paths.Path
+			want  any
+		}{
+			"merge key in each list entry": {
+				input: "defaults: &d\n  a: 1\nitems:\n  - <<: *d\n    name: x\n  - <<: *d\n    name: y\n",
+				path:  paths.Root().Child("items").Index(1),
+				want:  map[string]any{"a": uint64(1), "name": "y"},
+			},
+			"anchor inside another anchor": {
+				input: "outer: &o\n  inner: &i 1\nsub: {k: *i}\n",
+				path:  paths.Root().Child("sub"),
+				want:  map[string]any{"k": uint64(1)},
+			},
+			"anchor that refers to another anchor": {
+				input: "a: &a 1\nb: &b [*a]\nsub: {k: *b}\n",
+				path:  paths.Root().Child("sub"),
+				want:  map[string]any{"k": []any{uint64(1)}},
+			},
+			"anchor inside the node": {
+				input: "a: &x 1\nsub:\n  b: &x 2\n  k: *x\n",
+				path:  paths.Root().Child("sub"),
+				want:  map[string]any{"b": uint64(2), "k": uint64(2)},
+			},
+			"merge key that records an anchor again": {
+				// The merge under q records the anchor b of m again, so p
+				// reads 1, while X read b before the merge, as 2.
+				input: stringtest.Input(`
+					m: &m
+					  x: &b 1
+					b: &b 2
+					X: &X
+					  z: *b
+					q:
+					  <<: *m
+					node:
+					  p: *b
+					  r: *X
+				`),
+				path: paths.Root().Child("node"),
+				want: map[string]any{"p": uint64(1), "r": map[string]any{"z": uint64(2)}},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				got, err := yamltest.At(t, dd, tc.path).Decode[any](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	})
+
 	t.Run("alias to an anchor that holds the node reads null", func(t *testing.T) {
 		t.Parallel()
 

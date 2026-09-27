@@ -531,6 +531,10 @@ type document struct {
 	// parser makes for a value the document leaves out, such as the null
 	// of a key without a value, which no lexer token stands for.
 	nodeTokens map[*token.Token]struct{}
+	// The nodes of root that register anchors, which indexAnchors
+	// collects for the first decode of a node below the body, so each
+	// decode primes the anchors it needs without walking the document.
+	anchors *anchorIndex
 	// The tokens of the whole document.
 	tokens token.Tokens
 	// The tokens that carry a position, in the order of their offsets,
@@ -543,6 +547,8 @@ type document struct {
 	resolverOnce sync.Once
 	// Collects nodeTokens once.
 	nodeTokensOnce sync.Once
+	// Creates anchors once, for the first decode of a node below the body.
+	anchorsOnce sync.Once
 }
 
 // pathResolver returns the [paths.Resolver] for the document, and creates
@@ -1545,8 +1551,8 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 	// The decoder registers the anchors of the node it decodes, so an alias
 	// in a node below the body finds an anchor defined elsewhere in the
 	// document only after the decoder has seen that anchor.
-	if node != n.doc.root.Body && hasAlias(node) {
-		primeAnchors(ctx, dec, n.doc.root.Body, node)
+	if node != n.doc.root.Body {
+		n.doc.primeAnchors(ctx, dec, node)
 	}
 
 	// The go-yaml decoder panics on some values it cannot read, such as a
@@ -1556,113 +1562,13 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 	return n.bindDecodeError(decodeWithRecover(ctx, dec, decodeView(node), decodeTarget(v, node)))
 }
 
-// primeAnchors registers with dec the anchors of body that the decoder
-// meets before node, where an alias in node refers to the last anchor of
-// its name before it. It decodes each anchor that ends before node, and
-// each `<<` merge key, which records again the anchors of the mappings it
-// merges, on its own and in document order, the order a decode of the
-// whole body reads them in. An anchor or merge key that holds node
-// counts for the anchors inside it that end before node, and one that
-// starts after node counts for none. An anchor that holds node registers
-// its name as null, as it is while the decoder reads the value of the
-// anchor. The pass only primes anchors, so a failure in it, which
-// concerns a value the caller did not ask for, is not the caller's
-// error, and it stops none of the decodes after it. An alias the pass
-// could not resolve fails again in the decode of the node itself. A
-// context that ends stops the pass.
-func primeAnchors(ctx context.Context, dec *yaml.Decoder, body, node ast.Node) {
-	first, _ := tokenBounds(node)
-	if len(first) == 0 {
-		return
-	}
-
-	found := anchorFinder{before: first[0].Position.Offset}
-
-	ast.Walk(&found, body)
-
-	for _, anchor := range found.anchors {
-		if ctx.Err() != nil {
-			return
-		}
-
-		var sink any
-
-		//nolint:errcheck // The pass only primes anchors.
-		_ = decodeWithRecover(ctx, dec, decodeView(anchor), &sink)
-	}
-}
-
-// anchorFinder is an [ast.Visitor] that collects, in document order, the
-// outermost nodes that register anchors when the decoder reads them and
-// that end before the offset before: an anchor, and a mapping entry with
-// a `<<` merge key. The decoder reads the nodes inside those with them,
-// so the walk stops there. The walk goes on into one that holds the
-// offset, and stops at one that starts at or after it.
-type anchorFinder struct {
-	anchors []ast.Node
-	before  int
-}
-
-// Visit implements [ast.Visitor].
-func (f *anchorFinder) Visit(node ast.Node) ast.Visitor {
-	switch n := node.(type) {
-	case *ast.AnchorNode:
-	case *ast.MappingValueNode:
-		if n.Key == nil || !n.Key.IsMergeKey() {
-			return f
-		}
-
-	default:
-		return f
-	}
-
-	first, last := tokenBounds(node)
-
-	switch {
-	case len(first) == 0 || first[0].Position.Offset >= f.before:
-		return nil
-
-	case last[0].Position.Offset < f.before:
-		f.anchors = append(f.anchors, node)
-
-		return nil
-
-	default:
-		if anchor, ok := node.(*ast.AnchorNode); ok {
-			f.anchors = append(f.anchors, pendingAnchor(anchor))
-		}
-
-		return f
-	}
-}
-
-// pendingAnchor returns an anchor with the name of anchor over a null.
-// The decoder registers a name as null while it reads the value of its
-// anchor, so an alias inside that value reads as null, and the anchor
-// pendingAnchor returns registers the name that way for an alias in a
-// node inside anchor.
-func pendingAnchor(anchor *ast.AnchorNode) *ast.AnchorNode {
-	var pos *token.Position
-
-	if anchor.Start != nil {
-		pos = anchor.Start.Position
-	}
-
-	return &ast.AnchorNode{
-		BaseNode: &ast.BaseNode{},
-		Start:    anchor.Start,
-		Name:     anchor.Name,
-		Value:    ast.Null(token.New("null", "null", pos)),
-	}
-}
-
 // decodeView returns node as the go-yaml decoder reads it: the same tree,
 // with the name of each alias free of comments. The parser attaches a
 // comment on the line of an alias to its name, and the decoder looks the
 // anchor up by the text of the name, comment included, so `*x # note`
 // would name no anchor. The view copies each alias and the nodes above
-// it, and shares every other node and every token with node, so the tree
-// the Source shares stays as the parser built it, and every error the
+// it, and shares every other node and every token with node. The tree the
+// Source shares thus stays as the parser built it, and every error the
 // decoder reports names a token of the source.
 func decodeView(node ast.Node) ast.Node {
 	view, _ := viewOf(node)
@@ -1833,10 +1739,10 @@ func (n *Node) bindDecodeError(err error) error {
 	return n.Bind(WrapError(decodeRejectedError{yamlMessageError{yamlErr}}, atToken(yamlErr.GetToken())))
 }
 
-// holdsToken reports whether tk is a token of the source's parse: one of
-// the tokens the parser built its tree from, or one it made for a node of
-// the document, such as the null of a key without a value. It compares
-// pointers, so a token from another parse, such as the one an
+// holdsToken reports whether tk is a token of the source's parse. That is
+// one of the tokens the parser built its tree from, or one it made for a
+// node of the document, such as the null of a key without a value. It
+// compares pointers, so a token from another parse, such as the one an
 // UnmarshalYAML runs on its bytes, never matches, however closely it
 // resembles a token of the source.
 func (n *Node) holdsToken(tk *token.Token) bool {
@@ -1877,38 +1783,6 @@ func (e yamlMessageError) Error() string {
 
 func (e yamlMessageError) Unwrap() error {
 	return e.err
-}
-
-// hasAlias reports whether node or any node below it is an alias.
-func hasAlias(node ast.Node) bool {
-	if node == nil {
-		return false
-	}
-
-	var found aliasFinder
-
-	ast.Walk(&found, node)
-
-	return bool(found)
-}
-
-// aliasFinder is an [ast.Visitor] that records whether it visited an alias
-// node and stops the walk once it has.
-type aliasFinder bool
-
-// Visit implements [ast.Visitor].
-func (f *aliasFinder) Visit(node ast.Node) ast.Visitor {
-	if *f {
-		return nil
-	}
-
-	if _, ok := node.(*ast.AliasNode); ok {
-		*f = true
-
-		return nil
-	}
-
-	return f
 }
 
 // hasContent reports whether node holds a YAML value. A nil node, a comment
