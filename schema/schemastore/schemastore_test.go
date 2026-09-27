@@ -266,10 +266,13 @@ func BenchmarkStore_FindMatch(b *testing.B) {
 func TestSchemaStore_LazyLoading(t *testing.T) {
 	t.Parallel()
 
-	server, fetchCount := newCountingCatalogServer(t, testCatalog)
+	client, fetchCount := newCountingCatalogClient(t, testCatalog)
 
 	// New performs no I/O.
-	store := schemastore.New(schemastore.WithCatalogURL(server.URL))
+	store := schemastore.New(
+		schemastore.WithCatalogURL("https://example.com/catalog.json"),
+		schemastore.WithHTTPClient(client),
+	)
 
 	assert.Equal(t, int32(0), fetchCount.Load())
 
@@ -289,11 +292,12 @@ func TestSchemaStore_LazyLoading(t *testing.T) {
 func TestSchemaStore_CacheTTL(t *testing.T) {
 	t.Parallel()
 
-	server, fetchCount := newCountingCatalogServer(t, testCatalog)
+	client, fetchCount := newCountingCatalogClient(t, testCatalog)
 
 	// Use a very short TTL for testing.
 	store := schemastore.New(
-		schemastore.WithCatalogURL(server.URL),
+		schemastore.WithCatalogURL("https://example.com/catalog.json"),
+		schemastore.WithHTTPClient(client),
 		schemastore.WithCacheTTL(10*time.Millisecond),
 	)
 
@@ -314,11 +318,12 @@ func TestSchemaStore_CacheTTL(t *testing.T) {
 func TestSchemaStore_NoCaching(t *testing.T) {
 	t.Parallel()
 
-	server, fetchCount := newCountingCatalogServer(t, testCatalog)
+	client, fetchCount := newCountingCatalogClient(t, testCatalog)
 
 	// TTL of 0 should disable caching (fetch on every lookup).
 	store := schemastore.New(
-		schemastore.WithCatalogURL(server.URL),
+		schemastore.WithCatalogURL("https://example.com/catalog.json"),
+		schemastore.WithHTTPClient(client),
 		schemastore.WithCacheTTL(0),
 	)
 
@@ -633,10 +638,11 @@ func TestSchemaStore_FetchPanicReachesCaller(t *testing.T) {
 			setup: func(t *testing.T) ([]schemastore.Option, *atomic.Int32) {
 				t.Helper()
 
-				server, fetchCount := newCountingCatalogServer(t, testCatalog)
+				client, fetchCount := newCountingCatalogClient(t, testCatalog)
 
 				return []schemastore.Option{
-					schemastore.WithCatalogURL(server.URL),
+					schemastore.WithCatalogURL("https://example.com/catalog.json"),
+					schemastore.WithHTTPClient(client),
 					schemastore.WithFilter(func(schemastore.CatalogEntry) bool {
 						panic("filter bug")
 					}),
@@ -701,10 +707,11 @@ func TestSchemaStore_FetchGoexitReachesCaller(t *testing.T) {
 			setup: func(t *testing.T) ([]schemastore.Option, *atomic.Int32) {
 				t.Helper()
 
-				server, fetchCount := newCountingCatalogServer(t, testCatalog)
+				client, fetchCount := newCountingCatalogClient(t, testCatalog)
 
 				return []schemastore.Option{
-					schemastore.WithCatalogURL(server.URL),
+					schemastore.WithCatalogURL("https://example.com/catalog.json"),
+					schemastore.WithHTTPClient(client),
 					schemastore.WithFilter(func(schemastore.CatalogEntry) bool {
 						runtime.Goexit()
 
@@ -1027,11 +1034,12 @@ func TestSchemaStore_CanceledContext(t *testing.T) {
 	t.Run("uses cached data without refreshing", func(t *testing.T) {
 		t.Parallel()
 
-		server, fetchCount := newCountingCatalogServer(t, testCatalog)
+		client, fetchCount := newCountingCatalogClient(t, testCatalog)
 
 		// Use short TTL so cache expires quickly.
 		store := schemastore.New(
-			schemastore.WithCatalogURL(server.URL),
+			schemastore.WithCatalogURL("https://example.com/catalog.json"),
+			schemastore.WithHTTPClient(client),
 			schemastore.WithCacheTTL(10*time.Millisecond),
 		)
 
@@ -1056,9 +1064,12 @@ func TestSchemaStore_CanceledContext(t *testing.T) {
 	t.Run("reports the cancellation without cached data", func(t *testing.T) {
 		t.Parallel()
 
-		server, fetchCount := newCountingCatalogServer(t, testCatalog)
+		client, fetchCount := newCountingCatalogClient(t, testCatalog)
 
-		store := schemastore.New(schemastore.WithCatalogURL(server.URL))
+		store := schemastore.New(
+			schemastore.WithCatalogURL("https://example.com/catalog.json"),
+			schemastore.WithHTTPClient(client),
+		)
 
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
@@ -1457,29 +1468,28 @@ func TestIntegration(t *testing.T) {
 	t.Run("fetches each schema once", func(t *testing.T) {
 		t.Parallel()
 
-		var schemaFetches atomic.Int32
-
-		schemaServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			schemaFetches.Add(1)
-
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(schemaData))
-		}))
-		t.Cleanup(schemaServer.Close)
-
 		catalog := schemastore.Catalog{
 			Schemas: []schemastore.CatalogEntry{
 				{
 					Name:      "GitHub Workflow",
-					URL:       schemaServer.URL + "/github-workflow.json",
+					URL:       "https://example.com/github-workflow.json",
 					FileMatch: []string{".github/workflows/*.yaml"},
 				},
 			},
 		}
 
-		catalogServer, catalogFetches := newCountingCatalogServer(t, catalog)
+		catalogClient, catalogFetches := newCountingCatalogClient(t, catalog)
+		schemaClient, schemaFetches := newCountingClient(http.StatusOK, []byte(schemaData))
 
-		reg := schema.NewRegistry(schema.WithResolvers(schemastore.New(schemastore.WithCatalogURL(catalogServer.URL))))
+		store := schemastore.New(
+			schemastore.WithCatalogURL("https://example.com/catalog.json"),
+			schemastore.WithHTTPClient(catalogClient),
+		)
+
+		reg := schema.NewRegistry(
+			schema.WithHTTPClient(schemaClient),
+			schema.WithResolvers(store),
+		)
 
 		for _, name := range []string{"ci.yaml", "release.yaml", "lint.yaml"} {
 			doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`on: push`), ".github/workflows/"+name)
@@ -1599,27 +1609,36 @@ func newCatalogServer(tb testing.TB, catalog schemastore.Catalog) *httptest.Serv
 	}))
 }
 
-// newCountingCatalogServer serves catalog and counts the requests it
-// receives. The server closes with the test.
-func newCountingCatalogServer(t *testing.T, catalog schemastore.Catalog) (*httptest.Server, *atomic.Int32) {
+// newCountingClient returns a client whose transport answers every URL
+// with status and body, along with a counter of the requests it has
+// answered. The transport opens no socket, so no other test or process
+// can reach it and change the count.
+func newCountingClient(status int, body []byte) (*http.Client, *atomic.Int32) {
+	var requests atomic.Int32
+
+	client := &http.Client{
+		Transport: &roundTripperFunc{fn: func(r *http.Request) (*http.Response, error) {
+			requests.Add(1)
+
+			return &http.Response{
+				StatusCode: status,
+				Body:       io.NopCloser(bytes.NewReader(body)),
+				Request:    r,
+			}, nil
+		}},
+	}
+
+	return client, &requests
+}
+
+// newCountingCatalogClient is newCountingClient serving catalog.
+func newCountingCatalogClient(t *testing.T, catalog schemastore.Catalog) (*http.Client, *atomic.Int32) {
 	t.Helper()
 
-	var fetchCount atomic.Int32
+	data, err := json.Marshal(catalog)
+	require.NoError(t, err)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fetchCount.Add(1)
-
-		data, err := json.Marshal(catalog)
-		if err != nil {
-			t.Errorf("marshal catalog: %v", err)
-		}
-
-		//nolint:errcheck // Test helper.
-		w.Write(data)
-	}))
-	t.Cleanup(server.Close)
-
-	return server, &fetchCount
+	return newCountingClient(http.StatusOK, data)
 }
 
 // newHeldCatalogClient returns a client whose transport answers every URL
