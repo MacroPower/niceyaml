@@ -24,7 +24,10 @@ type Matcher interface {
 	Match(ctx context.Context, doc *niceyaml.Node) (bool, error)
 }
 
-// Func adapts a function to the [Matcher] interface.
+// Func adapts a function to the [Matcher] interface. The function below
+// matches a kind that starts with "Custom". A kind the decoder rejects,
+// such as a mapping or a sequence, reads as a plain no, so the function
+// returns false with no error for it, as [Content] does:
 //
 //	kindPath := paths.Root().Child("kind")
 //	m := matcher.Func(func(ctx context.Context, doc *niceyaml.Node) (bool, error) {
@@ -38,6 +41,10 @@ type Matcher interface {
 //	    }
 //
 //	    kind, err := node.Decode[string](ctx)
+//	    if errors.Is(err, niceyaml.ErrDecodeRejected) {
+//	        return false, nil
+//	    }
+//
 //	    if err != nil {
 //	        return false, err
 //	    }
