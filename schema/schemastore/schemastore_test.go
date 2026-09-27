@@ -941,36 +941,36 @@ func TestSchemaStore_FetchError(t *testing.T) {
 func TestSchemaStore_RetryAfter(t *testing.T) {
 	t.Parallel()
 
-	var fetchCount atomic.Int32
+	// The bubble's clock stands still while goroutines run, so the second
+	// lookup lands inside the retry interval however slowly the first one
+	// returns.
+	synctest.Test(t, func(t *testing.T) {
+		client, fetchCount := newCountingClient(http.StatusInternalServerError, nil)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fetchCount.Add(1)
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	t.Cleanup(server.Close)
+		store := schemastore.New(
+			schemastore.WithCatalogURL("https://example.com/catalog.json"),
+			schemastore.WithHTTPClient(client),
+			schemastore.WithRetryAfter(20*time.Millisecond),
+		)
 
-	store := schemastore.New(
-		schemastore.WithCatalogURL(server.URL),
-		schemastore.WithRetryAfter(20*time.Millisecond),
-	)
+		// The first lookup fetches and fails.
+		_, err := store.FindMatch(t.Context(), "config.yaml")
+		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+		assert.Equal(t, int32(1), fetchCount.Load())
 
-	// The first lookup fetches and fails.
-	_, err := store.FindMatch(t.Context(), "config.yaml")
-	require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
-	assert.Equal(t, int32(1), fetchCount.Load())
+		// A lookup inside the retry interval reports the same failure
+		// without contacting the server again.
+		_, err = store.FindMatch(t.Context(), "config.yaml")
+		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+		assert.Equal(t, int32(1), fetchCount.Load())
 
-	// A lookup inside the retry interval reports the same failure without
-	// contacting the server again.
-	_, err = store.FindMatch(t.Context(), "config.yaml")
-	require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
-	assert.Equal(t, int32(1), fetchCount.Load())
+		// Once the interval passes, the next lookup tries again.
+		time.Sleep(30 * time.Millisecond)
 
-	// Once the interval passes, the next lookup tries again.
-	time.Sleep(30 * time.Millisecond)
-
-	_, err = store.FindMatch(t.Context(), "config.yaml")
-	require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
-	assert.Equal(t, int32(2), fetchCount.Load())
+		_, err = store.FindMatch(t.Context(), "config.yaml")
+		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+		assert.Equal(t, int32(2), fetchCount.Load())
+	})
 }
 
 func TestSchemaStore_NonPositiveRetryAfter(t *testing.T) {
