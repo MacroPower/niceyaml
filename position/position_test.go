@@ -325,6 +325,52 @@ func TestRange_Contains(t *testing.T) {
 	}
 }
 
+func TestRange_LastLine(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		r    position.Range
+		want int
+	}{
+		"single line": {
+			r:    position.NewRange(position.New(3, 1), position.New(3, 5)),
+			want: 3,
+		},
+		"multiple lines": {
+			r:    position.NewRange(position.New(1, 2), position.New(4, 1)),
+			want: 4,
+		},
+		"end at column 0 stops on the line before": {
+			r:    position.NewRange(position.New(1, 2), position.New(4, 0)),
+			want: 3,
+		},
+		"empty range covers its line": {
+			r:    position.NewRange(position.New(2, 3), position.New(2, 3)),
+			want: 2,
+		},
+		"inverted columns end on the line before": {
+			r:    position.NewRange(position.New(2, 3), position.New(2, 1)),
+			want: 1,
+		},
+		"inverted lines end on the end line": {
+			r:    position.NewRange(position.New(4, 0), position.New(2, 5)),
+			want: 2,
+		},
+		"inverted columns at the MinInt line saturate": {
+			r:    position.NewRange(position.New(math.MinInt, 5), position.New(math.MinInt, 2)),
+			want: math.MinInt,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.r.LastLine())
+		})
+	}
+}
+
 func TestRanges_UniqueValues(t *testing.T) {
 	t.Parallel()
 
@@ -424,6 +470,7 @@ func TestRanges_LineIndices(t *testing.T) {
 			position.NewRange(position.New(2, 0), position.New(1, 0)),
 			position.NewRange(position.New(2, 0), position.New(1, 5)),
 			position.NewRange(position.New(1, 3), position.New(1, 1)),
+			position.NewRange(position.New(math.MinInt, 3), position.New(math.MinInt, 1)),
 		}
 		assert.Empty(t, rs.LineIndices())
 	})

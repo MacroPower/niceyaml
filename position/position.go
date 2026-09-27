@@ -91,12 +91,14 @@ func (r Range) String() string {
 // that ends at column 0 holds nothing on its end line, so it stops at the
 // line before. For a range that ends before its start, on an earlier line
 // or at an earlier column of the same line, LastLine returns a line before
-// Start.Line, so the range covers none. An empty range, whose end is its
-// start, covers the line it sits on although [Range.Contains] reports
-// nothing inside it.
+// Start.Line, so the range covers none. No line comes before
+// [math.MinInt], so an inverted range on that line returns that line
+// rather than wrapping around. An empty range, whose end is its start,
+// covers the line it sits on although [Range.Contains] reports nothing
+// inside it.
 func (r Range) LastLine() int {
 	if r.Start.Line == r.End.Line && r.End.Col < r.Start.Col {
-		return r.Start.Line - 1
+		return subSat(r.Start.Line, 1)
 	}
 
 	if r.End.Col == 0 && r.End.Line > r.Start.Line {
@@ -104,6 +106,13 @@ func (r Range) LastLine() int {
 	}
 
 	return r.End.Line
+}
+
+// inverted reports whether the [Range] ends before its start, on an
+// earlier line or at an earlier column of the same line, so it covers no
+// lines.
+func (r Range) inverted() bool {
+	return r.End.Line < r.Start.Line || r.End.Line == r.Start.Line && r.End.Col < r.Start.Col
 }
 
 // Span represents a half-open range [Start, End) of integers.
@@ -258,6 +267,12 @@ func (rs Ranges) LineIndices() []int {
 	var result []int
 
 	for _, r := range rs {
+		// LastLine cannot come before math.MinInt, so an inverted range
+		// on that line would still cover it by LastLine alone.
+		if r.inverted() {
+			continue
+		}
+
 		last := r.LastLine()
 		for line := r.Start.Line; line <= last; line++ {
 			result = append(result, line)

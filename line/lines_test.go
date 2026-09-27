@@ -1,6 +1,7 @@
 package line_test
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -3004,6 +3005,10 @@ func TestLines_SliceLines(t *testing.T) {
 		},
 		"inverted lines": {
 			input: position.NewRange(position.New(2, 0), position.New(1, 5)),
+			want:  nil,
+		},
+		"inverted columns at the MinInt line": {
+			input: position.NewRange(position.New(math.MinInt, 5), position.New(math.MinInt, 2)),
 			want:  nil,
 		},
 	}
