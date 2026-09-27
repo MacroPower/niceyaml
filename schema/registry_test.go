@@ -2022,6 +2022,87 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 	})
 }
 
+func TestRegistry_FragmentRefsDraft07(t *testing.T) {
+	t.Parallel()
+
+	// Draft-07 ignores the keywords beside a $ref, so Bar takes any
+	// string. The tuple document also holds array-form items, which only
+	// draft-07 accepts, and a draft-07 fragment $id that names an anchor.
+	defsSchema := []byte(`{
+		"$schema": "http://json-schema.org/draft-07/schema#",
+		"definitions": {
+			"Bar": {"$ref": "#/definitions/Str", "type": "integer"},
+			"Str": {"type": "string"}
+		}
+	}`)
+	tupleSchema := []byte(`{
+		"$schema": "http://json-schema.org/draft-07/schema#",
+		"definitions": {
+			"Str": {"type": "string"},
+			"T": {"$id": "#tuple", "items": [{"type": "string"}]}
+		}
+	}`)
+
+	served := map[string][]byte{
+		"/defs.json":  defsSchema,
+		"/tuple.json": tupleSchema,
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, ok := served[r.URL.Path]
+		if !ok {
+			http.NotFound(w, r)
+
+			return
+		}
+
+		//nolint:errcheck // Test helper.
+		w.Write(data)
+	}))
+	t.Cleanup(server.Close)
+
+	tcs := map[string]struct {
+		path    string
+		valid   string
+		invalid string
+		want    string
+	}{
+		"keywords beside a $ref": {
+			path:    "/defs.json#/definitions/Bar",
+			valid:   "x\n",
+			invalid: "5\n",
+			want:    `expected "string", got "integer"`,
+		},
+		"a pointer into a document with array-form items": {
+			path:    "/tuple.json#/definitions/Str",
+			valid:   "x\n",
+			invalid: "5\n",
+			want:    `expected "string", got "integer"`,
+		},
+		"a draft-07 anchor with array-form items": {
+			path:    "/tuple.json#tuple",
+			valid:   "- x\n- 5\n",
+			invalid: "- 5\n",
+			want:    `expected "string", got "integer"`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			reg := schema.NewRegistry(schema.WithResolvers(schema.URL(server.URL + tc.path)))
+
+			require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, tc.valid)))
+
+			err := reg.Validate(t.Context(), yamltest.FirstDocument(t, tc.invalid))
+			require.Error(t, err)
+			require.NotErrorIs(t, err, schema.ErrValidate)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
 func TestRegistry_RelativeRefs(t *testing.T) {
 	t.Parallel()
 

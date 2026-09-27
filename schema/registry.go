@@ -922,9 +922,12 @@ func (r *Registry) compile(ctx context.Context, ref Ref) (*Schema, error) {
 
 	// A fragment on the key of a file or a URL names a subschema of the
 	// document. The registry compiles a schema whose $ref names that
-	// subschema and serves the loaded document to the reference. A key
-	// from Loadable is a name, where a '#' may mean anything, so it
-	// compiles whole.
+	// subschema and serves the loaded document to the reference. The
+	// compiler reads the draft from the $schema of the root it compiles,
+	// so that schema declares the $schema of the document, and the
+	// subschema follows the draft it does when the document compiles
+	// whole. A key from Loadable is a name, where a '#' may mean anything,
+	// so it compiles whole.
 	var doc *jsonschema.Schema
 
 	_, fragment, _ := strings.Cut(base, "#")
@@ -934,7 +937,12 @@ func (r *Registry) compile(ctx context.Context, ref Ref) (*Schema, error) {
 			return nil, fmt.Errorf("%q: %w: %w", ref.name(), ErrCompile, err)
 		}
 
-		data, err = json.Marshal(map[string]string{"$ref": base})
+		wrapper := map[string]string{"$ref": base}
+		if doc.Schema != "" {
+			wrapper["$schema"] = doc.Schema
+		}
+
+		data, err = json.Marshal(wrapper)
 		if err != nil {
 			return nil, fmt.Errorf("%q: %w: %w", ref.name(), ErrCompile, err)
 		}
