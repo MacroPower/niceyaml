@@ -549,6 +549,18 @@ func TestSpan_Len(t *testing.T) {
 			input: position.NewSpan(5, 15),
 			want:  10,
 		},
+		"inverted span": {
+			input: position.NewSpan(15, 5),
+			want:  -10,
+		},
+		"span wider than MaxInt saturates": {
+			input: position.NewSpan(math.MinInt, math.MaxInt),
+			want:  math.MaxInt,
+		},
+		"inverted span wider than MaxInt saturates": {
+			input: position.NewSpan(math.MaxInt, math.MinInt),
+			want:  math.MinInt,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -968,6 +980,16 @@ func TestSpans_Clamp(t *testing.T) {
 			input: position.Spans{position.NewSpan(0, 2), position.NewSpan(7, 9), position.NewSpan(3, 5)},
 			min:   0, max: 5,
 			want: position.Spans{position.NewSpan(0, 2), position.NewSpan(3, 5)},
+		},
+		"full int range is kept": {
+			input: position.Spans{position.NewSpan(math.MinInt, math.MaxInt)},
+			min:   math.MinInt, max: math.MaxInt,
+			want: position.Spans{position.NewSpan(math.MinInt, math.MaxInt)},
+		},
+		"span wider than MaxInt is kept": {
+			input: position.Spans{position.NewSpan(-1, math.MaxInt)},
+			min:   -1, max: math.MaxInt,
+			want: position.Spans{position.NewSpan(-1, math.MaxInt)},
 		},
 	}
 

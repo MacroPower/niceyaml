@@ -127,9 +127,12 @@ func NewSpan(start, end int) Span {
 	return Span{Start: start, End: end}
 }
 
-// Len returns the length of the span.
+// Len returns the length of the span, End minus Start, which is negative
+// for a span whose Start is past its End. The length saturates at
+// [math.MinInt] and [math.MaxInt] instead of wrapping around, so it keeps
+// the sign of a span wider than the int range.
 func (s Span) Len() int {
-	return s.End - s.Start
+	return subSat(s.End, s.Start)
 }
 
 // Contains reports whether v is within this [Span] [Start, End).
