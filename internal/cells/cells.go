@@ -22,7 +22,8 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 )
 
-// Row holds the cells each rune column of one line of content takes.
+// Row holds the cells each rune column of one line of content takes. Its
+// methods treat a negative column as column 0.
 //
 // Create instances with [NewRow].
 type Row struct {
@@ -71,7 +72,8 @@ func (r Row) Start(col int) int {
 // rune of a cluster, zero on every other rune of it, and one past the end
 // of the content.
 func (r Row) Cells(col int) int {
-	if col >= 0 && col < len(r.widths) {
+	col = max(0, col)
+	if col < len(r.widths) {
 		return r.widths[col]
 	}
 
