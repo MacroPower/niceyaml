@@ -261,7 +261,7 @@ func TestPattern_Match(t *testing.T) {
 	}
 }
 
-func TestMatchAny(t *testing.T) {
+func TestAnyDepthPatterns_MatchClean(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -432,14 +432,9 @@ func TestMatchAny(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := filepaths.MatchAny(tc.path, tc.patterns)
+			p := filepaths.NewAnyDepthPatterns(tc.patterns)
+			got := p.MatchClean(filepaths.CleanPath(tc.path))
 			assert.Equal(t, tc.want, got)
-
-			if tc.path != "" {
-				prepared := filepaths.NewAnyDepthPatterns(tc.patterns)
-				got = prepared.MatchClean(filepaths.CleanPath(tc.path))
-				assert.Equal(t, tc.want, got, "prepared patterns")
-			}
 		})
 	}
 }

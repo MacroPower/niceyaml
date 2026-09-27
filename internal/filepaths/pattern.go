@@ -129,9 +129,11 @@ func splitElements(pattern string) []string {
 	return append(elems, pattern[start:])
 }
 
-// MatchAny reports whether path matches any of the glob patterns, with
-// the semantics VS Code and yaml-language-server give a schema fileMatch
-// pattern. A pattern applies at any depth of the tree, so "*.yaml" matches
+// AnyDepthPatterns holds glob patterns prepared for matching at any depth
+// of the tree, with the semantics VS Code and yaml-language-server give a
+// schema fileMatch pattern. Create instances with [NewAnyDepthPatterns].
+//
+// A pattern applies at any depth, so "*.yaml" matches
 // "some/dir/config.yaml" and ".github/workflows/*.yml" matches
 // "/repo/.github/workflows/ci.yml". Every pattern gets an implicit "**/"
 // prefix unless it already has one, and drops a leading "/" first.
@@ -142,30 +144,6 @@ func splitElements(pattern string) []string {
 // "docker-compose.yml", and a list that holds only exclusions matches
 // nothing.
 //
-// MatchAny cleans the path and normalizes its separators to forward
-// slashes before matching, as [Pattern.Match] does.
-//
-// # Pattern Validation
-//
-// MatchAny skips an invalid pattern without error, so a typo in a
-// SchemaStore catalog entry does not break validation. To validate a
-// pattern upfront, use [NewPattern] instead.
-//
-// MatchAny rewrites the patterns on each call. To match many paths
-// against the same patterns, use [NewAnyDepthPatterns] instead.
-func MatchAny(path string, patterns []string) bool {
-	if path == "" {
-		return false
-	}
-
-	return NewAnyDepthPatterns(patterns).MatchClean(CleanPath(path))
-}
-
-// AnyDepthPatterns holds glob patterns rewritten once for the any-depth
-// matching [MatchAny] performs, so matching many paths against them
-// repeats none of the rewriting. Create instances with
-// [NewAnyDepthPatterns].
-//
 // The zero value holds no patterns and matches no path.
 type AnyDepthPatterns struct {
 	globs    []string
@@ -173,9 +151,14 @@ type AnyDepthPatterns struct {
 }
 
 // NewAnyDepthPatterns creates a new [AnyDepthPatterns] from the given
-// glob patterns. It keeps every pattern, the invalid ones included, and
-// [AnyDepthPatterns.MatchClean] skips a pattern it cannot interpret, as
-// [MatchAny] does. It drops a "!" that has nothing after it.
+// glob patterns. It normalizes each pattern as [NewPattern] does, once,
+// so matching many paths against the patterns repeats none of that
+// work. It drops a "!" that has nothing after it.
+//
+// NewAnyDepthPatterns keeps every other pattern, the invalid ones
+// included, and [AnyDepthPatterns.MatchClean] skips a pattern it cannot
+// interpret, so a typo in a SchemaStore catalog entry does not break
+// validation. To validate a pattern upfront, use [NewPattern] instead.
 func NewAnyDepthPatterns(patterns []string) AnyDepthPatterns {
 	var p AnyDepthPatterns
 
@@ -193,9 +176,9 @@ func NewAnyDepthPatterns(patterns []string) AnyDepthPatterns {
 }
 
 // MatchClean reports whether path matches any of the patterns and none
-// of the exclusions, with the semantics of [MatchAny]. The path must
-// already be in the form [CleanPath] returns, so a caller matching one
-// path against many pattern sets cleans it once.
+// of the exclusions. The path must already be in the form [CleanPath]
+// returns, so a caller matching one path against many pattern sets
+// cleans it once.
 func (p AnyDepthPatterns) MatchClean(path string) bool {
 	return matchAnyGlob(p.globs, path) && !matchAnyGlob(p.excludes, path)
 }
