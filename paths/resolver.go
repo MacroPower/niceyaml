@@ -9,7 +9,10 @@ import (
 
 // Resolver resolves paths in one document. [NewResolver] binds each alias
 // of the document to its anchor once, so resolving many paths in one
-// document walks it once rather than once per path. After a change to the
+// document walks it once rather than once per path. A Resolver also reads
+// the keys of a mapping once, the first time a path looks up a key there,
+// so resolving every key of a mapping takes time in proportion to its
+// size. A Resolver is safe for concurrent use. After a change to the
 // document, create a new Resolver.
 //
 // Create instances with [NewResolver].

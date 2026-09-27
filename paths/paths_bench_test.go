@@ -88,3 +88,43 @@ func BenchmarkPath_Nodes_RecursiveChained(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkResolver_Node_WideMapping resolves every key of one wide mapping
+// through one Resolver. The time per key should stay flat as the mapping
+// grows.
+func BenchmarkResolver_Node_WideMapping(b *testing.B) {
+	for _, keys := range []int{1000, 4000, 16000} {
+		var sb strings.Builder
+
+		for i := range keys {
+			fmt.Fprintf(&sb, "k%d: %d\n", i, i)
+		}
+
+		file, err := niceyaml.NewSourceFromString(sb.String()).File()
+		require.NoError(b, err)
+
+		doc := file.Docs[0]
+
+		ps := make([]paths.Path, keys)
+		for i := range keys {
+			ps[i] = paths.Root().Child(fmt.Sprintf("k%d", i))
+		}
+
+		b.Run(fmt.Sprintf("keys_%d", keys), func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				r := paths.NewResolver(doc)
+
+				for _, p := range ps {
+					_, err := r.Node(p)
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+
+			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*keys), "ns/key")
+		})
+	}
+}

@@ -3,6 +3,7 @@ package paths_test
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -371,6 +372,56 @@ func TestResolver_SeveralPaths(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestResolver_ConcurrentUse(t *testing.T) {
+	t.Parallel()
+
+	// Several goroutines look up keys in the same mappings through one
+	// Resolver, as the Nodes of one document do, and each finds the node
+	// Path.Node finds on its own.
+	var sb strings.Builder
+
+	sb.WriteString("base: &base {shared: 1}\n")
+
+	for i := range 50 {
+		fmt.Fprintf(&sb, "k%d: {<<: *base, own: %d}\n", i, i)
+	}
+
+	file, err := niceyaml.NewSourceFromString(sb.String()).File()
+	require.NoError(t, err)
+
+	doc := file.Docs[0]
+
+	want := map[string]ast.Node{}
+
+	for i := range 50 {
+		for _, name := range []string{"own", "shared"} {
+			p := paths.Root().Child(fmt.Sprintf("k%d", i), name)
+
+			node, err := p.Node(doc)
+			require.NoError(t, err)
+
+			want[p.String()] = node
+		}
+	}
+
+	r := paths.NewResolver(doc)
+
+	var wg sync.WaitGroup
+
+	for range 8 {
+		wg.Go(func() {
+			for expr, node := range want {
+				got, err := r.Node(paths.MustParse(expr))
+				if assert.NoError(t, err, expr) {
+					assert.Same(t, node, got, expr)
+				}
+			}
+		})
+	}
+
+	wg.Wait()
 }
 
 // assertSameError asserts that err has the text of wantErr, or that both

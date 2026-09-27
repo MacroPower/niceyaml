@@ -51,7 +51,8 @@ func selfValidate(v any, n *Node, opts []yaml.DecodeOption) error {
 // the value failed. It reads the keys of a map from the node the value
 // decoded from, with the options it decoded with, and finds that node
 // through the [paths.Resolver] of the document, so the walk binds the
-// aliases of the document once however many maps it meets.
+// aliases of the document, and reads the keys of each mapping on the way
+// to a map, once however many maps it meets.
 type selfWalker struct {
 	node    *Node
 	opts    []yaml.DecodeOption

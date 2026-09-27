@@ -5,6 +5,7 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"sync"
 
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
@@ -66,9 +67,52 @@ func (m match) key() match {
 // resolver walks a document for the selectors of a [Path]. Its targets map
 // holds the content of the anchor each alias refers to.
 //
+// The keys map holds the [*mappingKeys] of each mapping a lookup has read,
+// so a later lookup in that mapping finds a key without reading its
+// entries again. A [Resolver] may serve several goroutines, so the map is
+// a [sync.Map].
+//
 // Create instances with [newResolver].
 type resolver struct {
 	targets map[*ast.AliasNode]ast.Node
+	keys    sync.Map
+}
+
+// mappingKeys indexes the entries of one mapping for [resolver.lookup].
+// The names map holds the index of the last entry with each key name, and
+// the merges slice holds the index of each `<<` entry, in document order.
+type mappingKeys struct {
+	names  map[string]int
+	merges []int
+}
+
+// mappingKeys returns the [*mappingKeys] of mapping, and reads its entries
+// the first time a lookup asks for them. Two goroutines that ask at once
+// may each read the entries, and each gets the same index.
+func (r *resolver) mappingKeys(mapping *ast.MappingNode) *mappingKeys {
+	if cached, ok := r.keys.Load(mapping); ok {
+		if keys, ok := cached.(*mappingKeys); ok {
+			return keys
+		}
+	}
+
+	keys := &mappingKeys{names: make(map[string]int, len(mapping.Values))}
+
+	for i, entry := range mapping.Values {
+		if entry == nil {
+			continue
+		}
+
+		keys.names[r.keyName(entry.Key)] = i
+
+		if isMergeKey(entry.Key) {
+			keys.merges = append(keys.merges, i)
+		}
+	}
+
+	r.keys.Store(mapping, keys)
+
+	return keys
 }
 
 // newResolver creates a new [*resolver] for doc.
@@ -579,10 +623,10 @@ func (r *resolver) apply(seg segment, m match) ([]match, error) {
 func (r *resolver) lookup(
 	mapping *ast.MappingNode, name string, seen map[*ast.MappingNode]bool,
 ) (*ast.MappingValueNode, int, bool, error) {
-	for i, entry := range slices.Backward(mapping.Values) {
-		if entry != nil && r.keyName(entry.Key) == name {
-			return entry, i, true, nil
-		}
+	keys := r.mappingKeys(mapping)
+
+	if i, ok := keys.names[name]; ok {
+		return mapping.Values[i], i, true, nil
 	}
 
 	if seen == nil {
@@ -592,13 +636,9 @@ func (r *resolver) lookup(
 	seen[mapping] = true
 
 	// A later merge key wins over an earlier one, as a later source in one
-	// merge key does, so lookup reads the entries from the last one back.
-	for i, entry := range slices.Backward(mapping.Values) {
-		if entry == nil || !isMergeKey(entry.Key) {
-			continue
-		}
-
-		sources, err := r.mergeSources(entry.Value)
+	// merge key does, so lookup reads the merge keys from the last one back.
+	for _, i := range slices.Backward(keys.merges) {
+		sources, err := r.mergeSources(mapping.Values[i].Value)
 		if err != nil {
 			return nil, 0, false, err
 		}

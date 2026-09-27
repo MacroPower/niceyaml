@@ -682,6 +682,25 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}
 	})
 
+	t.Run("a key below a wide map reports the text the document spells it with", func(t *testing.T) {
+		t.Parallel()
+
+		// The walk reads the keys of every map below the wide one from the
+		// document, and each of those maps sits among 2000 siblings.
+		var sb strings.Builder
+
+		for i := range 2000 {
+			fmt.Fprintf(&sb, "k%d: {1: {price: 1}}\n", i)
+		}
+
+		sb.WriteString("last: {0x10: {price: -1}}\n")
+
+		dd := yamltest.FirstDocument(t, sb.String())
+
+		_, err := dd.Decode[map[string]map[float64]item](t.Context())
+		require.EqualError(t, err, "2001:22: $.last.0x10.price: negative price")
+	})
+
 	t.Run("a leaf type validates itself", func(t *testing.T) {
 		t.Parallel()
 
