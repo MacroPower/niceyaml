@@ -739,6 +739,90 @@ func TestDiffer_Hunks(t *testing.T) {
 			},
 			annotations: map[int]string{5: "@@ -5,0 +6,4 @@"},
 		},
+		"three hunks without context": {
+			before: stringtest.Input(`
+				l1: 1
+				l2: 2
+				l3: 3
+				l4: 4
+				l5: 5
+				l6: 6
+				l7: 7
+				l8: 8
+				l9: 9
+				l10: 10
+			`),
+			after: stringtest.Input(`
+				l1: 1
+				l3: 3
+				l4: 4
+				l5: 5
+				new: x
+				l6: 6
+				l7: 7
+				l8: 8
+				l9: changed
+				l10: 10
+			`),
+			context: 0,
+			wantLen: 4,
+			flags: map[int]line.Flag{
+				1:  line.FlagDeleted,
+				5:  line.FlagInserted,
+				9:  line.FlagDeleted,
+				10: line.FlagInserted,
+			},
+			annotations: map[int]string{
+				1: "@@ -2 +1,0 @@",
+				5: "@@ -5,0 +5 @@",
+				9: "@@ -9 +9 @@",
+			},
+		},
+		"three hunks with context": {
+			before: stringtest.Input(`
+				l1: 1
+				l2: 2
+				l3: 3
+				l4: 4
+				l5: 5
+				l6: 6
+				l7: 7
+				l8: 8
+				l9: 9
+				l10: 10
+			`),
+			after: stringtest.Input(`
+				l1: 1
+				l3: 3
+				l4: 4
+				l5: 5
+				new: x
+				l6: 6
+				l7: 7
+				l8: 8
+				l9: changed
+				l10: 10
+			`),
+			context: 1,
+			wantLen: 10,
+			flags: map[int]line.Flag{
+				0:  line.FlagDefault,
+				1:  line.FlagDeleted,
+				2:  line.FlagDefault,
+				4:  line.FlagDefault,
+				5:  line.FlagInserted,
+				6:  line.FlagDefault,
+				8:  line.FlagDefault,
+				9:  line.FlagDeleted,
+				10: line.FlagInserted,
+				11: line.FlagDefault,
+			},
+			annotations: map[int]string{
+				0: "@@ -1,3 +1,2 @@",
+				4: "@@ -5,2 +4,3 @@",
+				8: "@@ -8,3 +8,3 @@",
+			},
+		},
 	}
 
 	for name, tc := range tcs {

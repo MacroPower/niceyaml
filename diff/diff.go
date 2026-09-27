@@ -77,24 +77,10 @@ func New(opts ...Option) *Differ {
 // [lcs.OpKind] other than [lcs.OpEqual], [lcs.OpDelete], or [lcs.OpInsert],
 // or with an index outside the input it refers to.
 func (d *Differ) Diff(a, b line.Lines) *Result {
-	ops := d.computeOps(a, b)
-
-	// Precompute prefix sums for O(1) line number and count queries.
-	beforeSums := newPrefixSums(len(ops), func(i int) int {
-		d, _ := opKindDeltas(ops[i].kind)
-		return d
-	})
-	afterSums := newPrefixSums(len(ops), func(i int) int {
-		_, d := opKindDeltas(ops[i].kind)
-		return d
-	})
-
 	return &Result{
-		before:     a,
-		after:      b,
-		ops:        ops,
-		beforeSums: beforeSums,
-		afterSums:  afterSums,
+		before: a,
+		after:  b,
+		ops:    d.computeOps(a, b),
 	}
 }
 
@@ -152,8 +138,6 @@ func (d *Differ) computeOps(before, after line.Lines) []lineOp {
 //
 // Create instances with [Differ.Diff] or [Diff].
 type Result struct {
-	beforeSums  *prefixSums
-	afterSums   *prefixSums
 	before      line.Lines // The before revision, which names hunk header lines.
 	after       line.Lines // The after revision, which names hunk header lines.
 	ops         []lineOp
@@ -228,13 +212,34 @@ func (r *Result) Hunks(context int) *line.View {
 
 	view := unified.Slice(spans...)
 
-	// The hunk header goes above the first line of each hunk.
+	// The spans come in order, so one pass over the ops counts the lines
+	// each side holds before each hunk and within it.
+	var beforeIdx, afterIdx, pos int
+
 	for _, span := range spans {
+		for ; pos < span.Start; pos++ {
+			b, a := opKindDeltas(r.ops[pos].kind)
+			beforeIdx += b
+			afterIdx += a
+		}
+
+		var beforeCount, afterCount int
+
+		for ; pos < span.End; pos++ {
+			b, a := opKindDeltas(r.ops[pos].kind)
+			beforeCount += b
+			afterCount += a
+		}
+
+		// The hunk header goes above the first line of each hunk.
 		view.Annotate(span.Start, line.Annotation{
-			Content:   r.formatHunkHeader(span),
+			Content:   r.formatHunkHeader(beforeIdx, beforeCount, afterIdx, afterCount),
 			Kind:      kind.UIHunkHeader,
 			Placement: line.Above,
 		})
+
+		beforeIdx += beforeCount
+		afterIdx += afterCount
 	}
 
 	return view
@@ -488,21 +493,21 @@ func (ops lineOps) toView() *line.View {
 }
 
 // formatHunkHeader formats a unified diff hunk header like "@@ -1,3 +1,4 @@"
-// for the ops within span, with the range syntax of GNU diff -u. Each side
+// in the range syntax that GNU diff -u prints. The Idx arguments give the
+// position of the hunk's first line in each revision, and the Count
+// arguments give the number of lines the hunk covers there. Each side
 // names its lines by [line.Line.Number], as the gutter does, so a diff of
 // part of a file names the lines of the file.
-func (r *Result) formatHunkHeader(span position.Span) string {
+func (r *Result) formatHunkHeader(beforeIdx, beforeCount, afterIdx, afterCount int) string {
 	var b strings.Builder
 
 	fmt.Fprint(&b, "@@ ")
 
-	idx, count := r.beforeSums.At(span.Start), r.beforeSums.Range(span)
-	writeHunkRange(&b, '-', hunkStart(r.before, idx, count), count)
+	writeHunkRange(&b, '-', hunkStart(r.before, beforeIdx, beforeCount), beforeCount)
 
 	fmt.Fprint(&b, " ")
 
-	idx, count = r.afterSums.At(span.Start), r.afterSums.Range(span)
-	writeHunkRange(&b, '+', hunkStart(r.after, idx, count), count)
+	writeHunkRange(&b, '+', hunkStart(r.after, afterIdx, afterCount), afterCount)
 
 	fmt.Fprint(&b, " @@")
 
