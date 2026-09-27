@@ -1267,18 +1267,16 @@ func wrapLine(text string, cw int) []string {
 		out = append(out, strings.Split(cut, "\n")...)
 	}
 
-	// After the cut, a row stays wider than cw only when it holds a lone
-	// cluster the width cannot fit. Both wraps break ahead of such a
-	// cluster even at the start of a row, which leaves rows with no text
-	// on them, so those rows go. When a style opens just before the
-	// cluster, the wrap also puts the ASCII spaces ahead of it on rows of
-	// their own, so rows of only those spaces that lead up to the cluster
-	// go too. Any other rune stays, even one with no width, so the rows
-	// still spell out the content for the layout.
+	// The wrap can leave rows with no text on them, so those rows go. It
+	// emits them for a word that follows a run of breakpoints longer than
+	// the width, and both wraps break ahead of a lone cluster the width
+	// cannot fit even at the start of a row. After the cut, a row stays
+	// wider than cw only when it holds such a cluster. When a style opens
+	// just before the cluster, the wrap also puts the ASCII spaces ahead
+	// of it on rows of their own, so rows of only those spaces that lead
+	// up to the cluster go too. Any other rune stays, even one with no
+	// width, so the rows still spell out the content for the layout.
 	tooWide := func(row string) bool { return lipgloss.Width(row) > cw }
-	if !slices.ContainsFunc(out, tooWide) {
-		return out
-	}
 
 	// The walk starts at the last row, so each row of spaces can check the
 	// kept row that follows it.
@@ -1297,6 +1295,12 @@ func wrapLine(text string, cw int) []string {
 
 		beforeWide = tooWide(row)
 		kept = append(kept, row)
+	}
+
+	// Text with nothing to show, such as an empty line, still takes a
+	// row.
+	if len(kept) == 0 {
+		return out[:1]
 	}
 
 	slices.Reverse(kept)

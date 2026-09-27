@@ -1530,6 +1530,70 @@ func TestPrinter_WordWrap_BreakSpaceBeforeBreakpoint(t *testing.T) {
 	})
 }
 
+func TestPrinter_WordWrap_NoEmptyRows(t *testing.T) {
+	t.Parallel()
+
+	// The wrap emits empty rows for the word after a run of breakpoints
+	// longer than the width, and for a word wider than the width after
+	// leading spaces. Those rows hold no text, so they go.
+	tcs := map[string]struct {
+		input string
+		want  string
+		width int
+	}{
+		"word wider than the width after leading spaces": {
+			input: "k: |\n    abcdefghijkl\n",
+			width: 5,
+			want:  stringtest.JoinLF("k: |", "abcde", "fghij", "kl"),
+		},
+		"hyphenated value at one column": {
+			input: "key: long-word-here",
+			width: 1,
+			want:  stringtest.JoinLF(strings.Split("key:long-word-here", "")...),
+		},
+		"url at two columns": {
+			input: "u: https://x",
+			width: 2,
+			want:  stringtest.JoinLF("u:", "ht", "tp", "s:", "//", "x"),
+		},
+		"run of hyphens longer than the width": {
+			input: "x: " + strings.Repeat("-", 25) + "abc",
+			width: 10,
+			want:  stringtest.JoinLF("x: -------", "----------", "--------ab", "c"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := niceyaml.NewSourceFromString(tc.input).View()
+			p := testPrinter().With(printer.WithWrap(tc.width))
+
+			got := p.Print(view)
+			assert.Equal(t, tc.want, got)
+			assert.Equal(t, strings.Count(got, "\n")+1, p.Layout(view).Rows())
+		})
+	}
+
+	t.Run("gutter", func(t *testing.T) {
+		t.Parallel()
+
+		// The gutter leaves one column of content, and no row shows the
+		// gutter alone.
+		view := niceyaml.NewSourceFromString("image: nginx-alpine").View()
+		p := testPrinterWithGutter(printer.DefaultGutter).With(printer.WithWrap(7))
+
+		rows := strings.Split(p.Print(view), "\n")
+		for _, row := range rows {
+			assert.NotEmpty(t, strings.TrimSpace(strings.TrimPrefix(row, "   -")), "%q", rows)
+		}
+
+		assert.Len(t, rows, len("image:nginx-alpine"))
+		assert.Equal(t, []int{len(rows)}, layoutRows(p.Layout(view)))
+	})
+}
+
 func TestPrinter_WordWrap_BreakpointPastWidth_KeepsStyle(t *testing.T) {
 	t.Parallel()
 
