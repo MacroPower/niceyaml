@@ -1967,23 +1967,26 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			break
 		}
 
-		// Handle shift+wheel for horizontal scrolling.
-		if msg.Mod.Contains(tea.ModShift) {
-			switch msg.Button {
-			case tea.MouseWheelDown:
-				m.ScrollRight(m.horizontalStep)
-			case tea.MouseWheelUp:
-				m.ScrollLeft(m.horizontalStep)
-			}
-
-			break
-		}
+		// Shift turns the vertical wheel into horizontal scrolling. A
+		// horizontal wheel scrolls sideways with or without Shift, since
+		// some platforms send Shift with it.
+		shift := msg.Mod.Contains(tea.ModShift)
 
 		switch msg.Button {
 		case tea.MouseWheelDown:
-			m.ScrollDown(m.MouseWheelDelta)
+			if shift {
+				m.ScrollRight(m.horizontalStep)
+			} else {
+				m.ScrollDown(m.MouseWheelDelta)
+			}
+
 		case tea.MouseWheelUp:
-			m.ScrollUp(m.MouseWheelDelta)
+			if shift {
+				m.ScrollLeft(m.horizontalStep)
+			} else {
+				m.ScrollUp(m.MouseWheelDelta)
+			}
+
 		case tea.MouseWheelLeft:
 			m.ScrollLeft(m.horizontalStep)
 		case tea.MouseWheelRight:

@@ -2703,6 +2703,36 @@ func TestViewport_Update(t *testing.T) {
 				assert.Positive(t, m.XOffset())
 			},
 		},
+		// Shift remaps the vertical wheel alone, so a horizontal wheel
+		// with Shift held scrolls as it does without it.
+		"Behavior/MouseWheelLeftWithShift": {
+			msg:    tea.MouseWheelMsg{Button: tea.MouseWheelLeft, Mod: tea.ModShift},
+			yaml:   wideYAML,
+			width:  40,
+			height: 10,
+			setup: func(m *yamlviewport.Model) {
+				m.ToggleWordWrap() // Disable wrap.
+				m.SetXOffset(20)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Less(t, m.XOffset(), 20)
+			},
+		},
+		"Behavior/MouseWheelRightWithShift": {
+			msg:    tea.MouseWheelMsg{Button: tea.MouseWheelRight, Mod: tea.ModShift},
+			yaml:   wideYAML,
+			width:  40,
+			height: 10,
+			setup: func(m *yamlviewport.Model) {
+				m.ToggleWordWrap() // Disable wrap.
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Positive(t, m.XOffset())
+				assert.Equal(t, 0, m.YOffset()) // Y should not change.
+			},
+		},
 		"Behavior/MouseWheelDisabled": {
 			msg:    tea.MouseWheelMsg{Button: tea.MouseWheelDown},
 			yaml:   verticalYAML,
