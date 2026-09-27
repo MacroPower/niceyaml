@@ -589,18 +589,30 @@ func (e *Error) Range() (position.Range, bool) {
 }
 
 // message returns the text of e without the location e or the Errors it
-// directly wraps put in front: the message of the innermost error that is
-// not an Error, or "" when that error is nil. Text a foreign wrapper such as
-// [fmt.Errorf] added stays as it is, as it does everywhere else.
+// directly wraps put in front: the message of [Error.textCause], or ""
+// when that is nil. Text a foreign wrapper such as [fmt.Errorf] added
+// stays as it is, as it does everywhere else.
 func (e *Error) message() string {
+	cause := e.textCause()
+	if cause == nil {
+		return ""
+	}
+
+	return cause.Error()
+}
+
+// textCause returns the innermost error along the causes of e that is
+// not an Error, the one whose text [Error.message] returns, or nil when
+// the causes end at nil or at a nil Error, which has no text.
+func (e *Error) textCause() error {
 	for cur := e; ; {
 		inner, ok := cur.err.(*Error) //nolint:errorlint // Identity of the direct child, not a chain search.
-		if !ok || inner == nil {
-			if cur.err == nil {
-				return ""
-			}
+		if !ok {
+			return cur.err
+		}
 
-			return cur.err.Error()
+		if inner == nil {
+			return nil
 		}
 
 		cur = inner
@@ -862,10 +874,15 @@ func isBound(err error) bool {
 
 // leadsWithBinding reports whether the first line of the message of err
 // comes from a binding, which puts the name or position of its own
-// source there. The walk follows the cause chain of err as [isBound]
-// does. At an error that unwraps to several, the walk continues with its
-// first branch that is not nil, since that branch supplies the first
-// line of the text of an [errors.Join].
+// source there. The walk follows the text [Error.Error] writes rather
+// than the structure [isBound] reads, since the nested errors of an
+// [*Error] never reach its text. An Error that writes a path in front
+// leads with the path. An Error from [Rebase], or one that carries a
+// position or a range alone, writes the text of [Error.textCause]
+// otherwise, so the walk continues there, and any other Error writes
+// the text of its cause. At an error that unwraps to several, the walk
+// continues with its first branch that is not nil, since that branch
+// supplies the first line of the text of an [errors.Join].
 func leadsWithBinding(err error) bool {
 	for cur := err; ; {
 		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
@@ -873,11 +890,26 @@ func leadsWithBinding(err error) bool {
 			return x != nil
 
 		case *Error:
-			if x == nil || x.hasLocation() || len(x.nested()) > 0 {
+			switch {
+			case x == nil:
 				return false
-			}
 
-			cur = x.err
+			case x.rebased:
+				if anchorOf(x).hasPath {
+					return false
+				}
+
+				cur = x.textCause()
+
+			case x.hasPath:
+				return false
+
+			case x.hasLocation():
+				cur = x.textCause()
+
+			default:
+				cur = x.err
+			}
 
 		case interface{ Unwrap() error }:
 			cur = x.Unwrap()

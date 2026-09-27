@@ -4149,6 +4149,29 @@ func TestSourceError_TreeBranches(t *testing.T) {
 
 		err = yamltest.Bind(t, src, errors.Join(badB, yamltest.Bind(t, src, badA)))
 		assert.Equal(t, "f.yaml: $.b: bad b\nf.yaml:1:4: $.a: bad a", err.Error())
+
+		// An Error above a binding that nests errors, or that carries a
+		// position alone, writes the text of the binding as it is, so a
+		// join that leads with one puts no name in front either.
+		tcs := map[string]struct {
+			lead error
+		}{
+			"nested errors": {
+				lead: niceyaml.WrapError(yamltest.Bind(t, src, badA), niceyaml.WithErrors(badB)),
+			},
+			"position alone": {
+				lead: niceyaml.WrapError(yamltest.Bind(t, src, badA), niceyaml.AtPosition(position.New(0, 3))),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := yamltest.Bind(t, src, errors.Join(tc.lead, badC))
+				assert.Equal(t, "f.yaml:1:4: $.a: bad a\n$.c: bad c", err.Error())
+			})
+		}
 	})
 
 	t.Run("every multi-error binds the same way", func(t *testing.T) {
