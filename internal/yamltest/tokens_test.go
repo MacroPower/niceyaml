@@ -334,14 +334,28 @@ func TestTokenBuilder(t *testing.T) {
 		assert.Equal(t, tk1.Value, tk2.Value)
 	})
 
+	t.Run("Build does not share Position", func(t *testing.T) {
+		t.Parallel()
+
+		b := yamltest.NewTokenBuilder().PositionLine(1)
+		tk1 := b.Build()
+		b.PositionLine(2)
+
+		tk2 := b.Build()
+
+		assert.NotSame(t, tk1.Position, tk2.Position)
+		assert.Equal(t, 1, tk1.Position.Line)
+		assert.Equal(t, 2, tk2.Position.Line)
+	})
+
 	t.Run("Clone returns independent builder", func(t *testing.T) {
 		t.Parallel()
 
-		base := yamltest.NewTokenBuilder().Type(token.StringType)
+		base := yamltest.NewTokenBuilder().Type(token.StringType).PositionLine(1)
 		clone := base.Clone()
 
 		base.Value("base")
-		clone.Value("clone")
+		clone.Value("clone").PositionLine(2)
 
 		tkBase := base.Build()
 		tkClone := clone.Build()
@@ -350,6 +364,8 @@ func TestTokenBuilder(t *testing.T) {
 		assert.Equal(t, "clone", tkClone.Value)
 		assert.Equal(t, token.StringType, tkBase.Type)
 		assert.Equal(t, token.StringType, tkClone.Type)
+		assert.Equal(t, 1, tkBase.Position.Line)
+		assert.Equal(t, 2, tkClone.Position.Line)
 	})
 }
 
