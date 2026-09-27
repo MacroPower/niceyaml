@@ -72,6 +72,121 @@ func TestViewport_SearchDecorationRefreshesRowCounts(t *testing.T) {
 	assert.Greater(t, cached, before, "the widened highlights should wrap more rows")
 }
 
+func TestViewport_SearchNextRefreshesRowCounts(t *testing.T) {
+	t.Parallel()
+
+	// Only the selected match widens, so each move of the selection changes
+	// the rows and the width of the line it leaves and of the line it
+	// reaches. The row counts and the horizontal scroll bound follow both.
+	widen := lipgloss.NewStyle().Transform(func(s string) string {
+		return "<<" + s + ">>"
+	})
+	styles := style.New(lipgloss.NewStyle(),
+		style.Set(kind.GenericHighlight, widen),
+		style.Set(kind.GenericHighlightDim, lipgloss.NewStyle()),
+	)
+	p := printer.New(
+		printer.WithStyles(styles),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+		printer.WithGutter(printer.NoGutter),
+	)
+
+	// Line i is 9+i columns wide, or 13+i with the selected match, so the
+	// widest row and the lines that wrap change with the selection.
+	lines := make([]string, 0, 12)
+	for i := range 12 {
+		lines = append(lines, fmt.Sprintf("k%d: %s term", i, strings.Repeat("a", i)))
+	}
+
+	before := strings.Join(lines, "\n") + "\n"
+	lines[3] = "k3: changed term"
+	after := strings.Join(lines, "\n") + "\n"
+
+	const height = 5
+
+	tcs := map[string]struct {
+		viewMode yamlviewport.ViewMode
+		width    int
+		wrap     bool
+	}{
+		"unified wrapped": {
+			viewMode: yamlviewport.ViewModeFull,
+			width:    20,
+			wrap:     true,
+		},
+		"unified unwrapped": {
+			viewMode: yamlviewport.ViewModeFull,
+			width:    12,
+		},
+		"side by side wrapped": {
+			viewMode: yamlviewport.ViewModeSideBySide,
+			width:    43, // Two panes of 20 columns.
+			wrap:     true,
+		},
+		"side by side unwrapped": {
+			viewMode: yamlviewport.ViewModeSideBySide,
+			width:    27, // Two panes of 12 columns.
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(p))
+			m.SetWidth(tc.width)
+			m.SetHeight(height)
+			m.SetWordWrap(tc.wrap)
+			m.AddRevision(niceyaml.NewSourceFromString(before, niceyaml.WithName("v1")))
+			m.AddRevision(niceyaml.NewSourceFromString(after, niceyaml.WithName("v2")))
+			m.SetViewMode(tc.viewMode)
+			m.SetSearchTerm("term")
+			require.Positive(t, m.SearchCount())
+
+			maxXOffset := func(m yamlviewport.Model) int {
+				m.SetXOffset(1 << 30)
+
+				return m.XOffset()
+			}
+
+			check := func(step int) {
+				t.Helper()
+
+				// The selected match sits on the center row unless the
+				// offset stops at either end.
+				rows := strings.Split(m.View(), "\n")
+				at := slices.IndexFunc(rows, func(row string) bool {
+					return strings.Contains(row, "<<")
+				})
+				require.NotEqual(t, -1, at, "step %d: the selected match is on screen", step)
+
+				if top := m.YOffset(); top > 0 && top < m.TotalRowCount()-height {
+					assert.Equal(t, (height-1)/2, at, "step %d", step)
+				}
+
+				// A width round trip on a copy drops every cached count, so
+				// the copy measures every line with the current decoration.
+				fresh := m
+				fresh.SetWidth(tc.width + 1)
+				fresh.SetWidth(tc.width)
+
+				assert.Equal(t, fresh.TotalRowCount(), m.TotalRowCount(), "step %d", step)
+				assert.Equal(t, maxXOffset(fresh), maxXOffset(m), "step %d", step)
+			}
+
+			for step := range m.SearchCount() + 2 {
+				check(step)
+				m.SearchNext()
+			}
+
+			for step := range 3 {
+				m.SearchPrevious()
+				check(-step - 1)
+			}
+		})
+	}
+}
+
 // testPrinter returns a printer without styles or line numbers for predictable golden output.
 func testPrinter() *printer.Printer {
 	return printer.New(

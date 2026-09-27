@@ -26,15 +26,15 @@ import (
 // about rows. It stays valid until the view or the printer changes.
 //
 // The layout speaks in the coordinates of the view. [Layout.LineRows],
-// [Layout.LineStart], and [Layout.LineAt] take and return the index of a
-// line in the content of the view, the one every [line.View] method
-// takes, so a viewer that finds the line at a row reaches its decoration
-// through the view with the same index, and [Layout.RowOf] takes a
-// position in the content, as a search yields one. A line the view does
-// not hold takes no rows and starts nowhere. Rows count from 0 at the
-// first row of the first line and leave the container style out. An empty
-// view has no rows, though [Printer.Print] draws one empty row for it to
-// carry the container.
+// [Layout.LineWidth], [Layout.LineStart], and [Layout.LineAt] take and
+// return the index of a line in the content of the view, the one every
+// [line.View] method takes, so a viewer that finds the line at a row
+// reaches its decoration through the view with the same index, and
+// [Layout.RowOf] takes a position in the content, as a search yields one.
+// A line the view does not hold takes no rows and starts nowhere. Rows
+// count from 0 at the first row of the first line and leave the container
+// style out. An empty view has no rows, though [Printer.Print] draws one
+// empty row for it to carry the container.
 //
 // Create instances with [Printer.Layout].
 type Layout struct {
@@ -46,12 +46,13 @@ type Layout struct {
 }
 
 // lineLayout is the row structure of one line: the annotation rows above
-// its content, the content column each content row starts at, and the
-// annotation rows below.
+// its content, the content column each content row starts at, the
+// annotation rows below, and the width of the widest of those rows.
 type lineLayout struct {
 	rows  []int
 	above int
 	below int
+	width int
 }
 
 // Layout computes the [Layout] of view as [Printer.Print] would render it.
@@ -66,8 +67,9 @@ func (p *Printer) Layout(view *line.View) Layout {
 	}
 
 	for idx, ln := range view.All() {
-		ll := p.layoutLine(view, idx, ln, gutterWidth, &l.width)
+		ll := p.layoutLine(view, idx, ln, gutterWidth)
 
+		l.width = max(l.width, ll.width)
 		l.lines = append(l.lines, ll)
 		l.indices = append(l.indices, idx)
 		l.starts = append(l.starts, l.starts[len(l.starts)-1]+ll.above+len(ll.rows)+ll.below)
@@ -76,19 +78,18 @@ func (p *Printer) Layout(view *line.View) Layout {
 	return l
 }
 
-// layoutLine computes the row structure of line idx of view, which is ln,
-// and raises *width to the widest row of the line.
-func (p *Printer) layoutLine(view *line.View, idx int, ln *line.Line, gutterWidth int, width *int) lineLayout {
+// layoutLine computes the row structure of line idx of view, which is ln.
+func (p *Printer) layoutLine(view *line.View, idx int, ln *line.Line, gutterWidth int) lineLayout {
 	var ll lineLayout
 
 	pieces, starts := p.wrapLine(view, idx, ln, gutterWidth)
 	for _, piece := range pieces {
-		*width = max(*width, gutterWidth+lipgloss.Width(piece))
+		ll.width = max(ll.width, gutterWidth+lipgloss.Width(piece))
 	}
 
 	ll.rows = starts
-	ll.above = p.layoutAnnotation(view, ln, idx, gutterWidth, line.Above, starts, width)
-	ll.below = p.layoutAnnotation(view, ln, idx, gutterWidth, line.Below, starts, width)
+	ll.above = p.layoutAnnotation(view, ln, idx, gutterWidth, line.Above, starts, &ll.width)
+	ll.below = p.layoutAnnotation(view, ln, idx, gutterWidth, line.Below, starts, &ll.width)
 
 	return ll
 }
@@ -378,6 +379,19 @@ func (l Layout) RowOf(pos position.Position) int {
 // uses it to find how far the content reaches.
 func (l Layout) Width() int {
 	return l.width
+}
+
+// LineWidth returns the width in cells of the widest row of line i of the
+// content, annotation rows and gutter included, before the container style
+// applies. [Layout.Width] is the largest of these. A line the layout does
+// not hold has width 0.
+func (l Layout) LineWidth(i int) int {
+	k, ok := l.position(i)
+	if !ok {
+		return 0
+	}
+
+	return l.lines[k].width
 }
 
 // GutterWidth returns the width in cells of the gutter on every row, so a

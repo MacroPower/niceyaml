@@ -387,6 +387,44 @@ func (m *Model) relayout() {
 	m.rows = &rowCache{}
 }
 
+// remeasure responds to a change of decoration confined to the lines that
+// ranges cover, such as a move of the selected search match. It lays out
+// those lines again, since a highlight style may change the width of the
+// text it styles, and gives the Model a new cache that carries over the
+// counts of every other line. Like relayout, it leaves any copy that
+// shares the old cache untouched and records the top line for ensureRows
+// to restore. An empty cache has no counts to carry over, so remeasure
+// drops it as relayout does.
+func (m *Model) remeasure(ranges ...position.Range) {
+	if m.rows == nil || m.rows.sums == nil {
+		m.relayout()
+
+		return
+	}
+
+	m.anchorTop()
+
+	spans := make([]position.Span, 0, len(ranges))
+	for _, r := range ranges {
+		spans = append(spans, position.NewSpan(r.Start.Line, r.End.Line+1))
+	}
+
+	p := m.renderPrinter(m.paneWidth())
+	c := m.rows.clone()
+
+	left := m.left.Slice(spans...)
+	c.measure(p.Layout(left), left, c.left, c.leftWidths)
+
+	if c.right != nil && m.right != nil {
+		right := m.right.Slice(spans...)
+		c.measure(p.Layout(right), right, c.right, c.rightWidths)
+	}
+
+	c.sum()
+
+	m.rows = c
+}
+
 // anchorTop records the line at the top of the view and the row within it,
 // with the vertical offset clamped to the bounds of the current layout, for
 // ensureRows to restore after the rows reflow. An anchor that ensureRows has
@@ -833,6 +871,11 @@ func (m *Model) refreshSearch() {
 	}
 
 	m.decorate()
+
+	// A highlight style may change the width of the text it styles, and a
+	// new term or new content moves highlights on any line, so the row
+	// counts of the old decoration no longer hold.
+	m.relayout()
 }
 
 // clearMatches drops the matches of both panes and the selected match.
@@ -846,6 +889,9 @@ func (m *Model) clearMatches() {
 // decorate takes a fresh clone of each base view and adds the search
 // highlights of the current matches and selection to it. A fresh clone
 // carries no highlight of the last term or the last selection.
+//
+// The caller brings the row counts up to date with the new decoration,
+// through relayout or remeasure.
 func (m *Model) decorate() {
 	m.left = m.baseLeft.Clone()
 	m.right = m.baseRight.Clone()
@@ -859,10 +905,6 @@ func (m *Model) decorate() {
 	} else {
 		m.applySearchOverlays(m.left)
 	}
-
-	// A highlight style may change the width of the text it styles, so the
-	// row counts of the old decoration no longer hold.
-	m.relayout()
 }
 
 // applySearchOverlays adds overlay highlights for all search matches to
@@ -1139,23 +1181,26 @@ func (m *Model) paneWidth() int {
 	return m.maxWidth()
 }
 
-// rowCache holds the layout of a view: the row structure the printer
-// reports for each pane and the prefix sums that place every line.
+// rowCache holds the layout of a view: the row count and width the
+// printer reports for each line of each pane, and the prefix sums that
+// place every line.
 type rowCache struct {
 	// Row counts of each line the view renders, in content order, for the
 	// left and right panes. The right counts are nil outside side-by-side
 	// diffs.
 	left, right []int
+	// Widths in cells of the widest row of each line the view renders, in
+	// the order of the row counts, for the left and right panes. The right
+	// widths are nil outside side-by-side diffs.
+	leftWidths, rightWidths []int
 	// The index in the content of the k-th rendered line, ascending.
 	indices []int
 	// Prefix sums of the taller pane after the top frame, so sums[k] is the
 	// first row of the k-th rendered line and the last entry is the first row
 	// of the bottom frame. Nil until filled.
 	sums []int
-	// Layouts of the left and right panes, which the row counts come from
-	// and which place a position within its line. The right layout is
-	// empty outside side-by-side diffs.
-	leftLayout, rightLayout printer.Layout
+	// Width in cells of the widest row of either pane.
+	width int
 	// Rows of the printer's container frame above the first line and below
 	// the last. A view without lines has no frame rows.
 	top, bottom int
@@ -1164,6 +1209,51 @@ type rowCache struct {
 // total returns the number of rows in a filled cache.
 func (c *rowCache) total() int {
 	return c.sums[len(c.sums)-1] + c.bottom
+}
+
+// clone returns a copy of the cache with row counts and widths of its own,
+// so a change to the copy leaves every Model that shares c as it was.
+func (c *rowCache) clone() *rowCache {
+	out := *c
+	out.left = slices.Clone(c.left)
+	out.right = slices.Clone(c.right)
+	out.leftWidths = slices.Clone(c.leftWidths)
+	out.rightWidths = slices.Clone(c.rightWidths)
+
+	return &out
+}
+
+// sum computes the prefix sums and the widest row from the row counts and
+// widths of the lines.
+func (c *rowCache) sum() {
+	sums := make([]int, len(c.left)+1)
+	sums[0] = c.top
+	c.width = 0
+
+	for k, rows := range c.left {
+		c.width = max(c.width, c.leftWidths[k])
+
+		if c.right != nil {
+			rows = max(rows, c.right[k])
+			c.width = max(c.width, c.rightWidths[k])
+		}
+
+		sums[k+1] = sums[k] + rows
+	}
+
+	c.sums = sums
+}
+
+// measure copies the row count and width of each line of view from layout,
+// the layout of view, into rows and widths, which hold an entry for each
+// rendered line of the cache.
+func (c *rowCache) measure(layout printer.Layout, view *line.View, rows, widths []int) {
+	for i := range view.All() {
+		if k, ok := slices.BinarySearch(c.indices, i); ok {
+			rows[k] = layout.LineRows(i)
+			widths[k] = layout.LineWidth(i)
+		}
+	}
 }
 
 // ensureRows fills the row count cache when it is empty, scrolls back to the
@@ -1199,17 +1289,16 @@ func (m *Model) ensureRows() {
 func (m *Model) fillRows() {
 	c := m.rows
 	c.left, c.right = nil, nil
+	c.leftWidths, c.rightWidths = nil, nil
 	c.top, c.bottom = 0, 0
 
 	if m.left != nil && m.printer != nil {
 		p := m.renderPrinter(m.paneWidth())
 
-		c.leftLayout = p.Layout(m.left)
-		c.indices, c.left = layoutRows(c.leftLayout, m.left)
+		c.indices, c.left, c.leftWidths = layoutRows(p.Layout(m.left), m.left)
 
 		if m.viewMode == ViewModeSideBySide && m.right != nil {
-			c.rightLayout = p.Layout(m.right)
-			_, c.right = layoutRows(c.rightLayout, m.right)
+			_, c.right, c.rightWidths = layoutRows(p.Layout(m.right), m.right)
 		}
 
 		// A layout counts the rows before the container style applies. Print
@@ -1221,18 +1310,7 @@ func (m *Model) fillRows() {
 		}
 	}
 
-	sums := make([]int, len(c.left)+1)
-	sums[0] = c.top
-
-	for k, rows := range c.left {
-		if c.right != nil {
-			rows = max(rows, c.right[k])
-		}
-
-		sums[k+1] = sums[k] + rows
-	}
-
-	c.sums = sums
+	c.sum()
 }
 
 // lineRows returns the number of rows the k-th rendered line takes, which is
@@ -1390,8 +1468,9 @@ func (m *Model) maxXOffset() int {
 
 // rowWidth returns the width in cells of the widest row the printer renders
 // for the view before the container frame applies, over both panes in
-// side-by-side mode. It reads the layouts, so annotation rows and wide
-// characters count toward the horizontal scroll bound.
+// side-by-side mode. It reads the line widths the layouts report, so
+// annotation rows and wide characters count toward the horizontal scroll
+// bound.
 func (m *Model) rowWidth() int {
 	// Fill the cache without ensureRows, which clamps the horizontal offset
 	// through this method.
@@ -1403,21 +1482,24 @@ func (m *Model) rowWidth() int {
 		m.fillRows()
 	}
 
-	return max(m.rows.leftLayout.Width(), m.rows.rightLayout.Width())
+	return m.rows.width
 }
 
-// layoutRows returns the index in the content of each line view holds and
-// the number of rows each takes in layout, in content order.
-func layoutRows(layout printer.Layout, view *line.View) ([]int, []int) {
+// layoutRows returns the index in the content of each line view holds, the
+// number of rows each takes in layout, and the width of its widest row, in
+// content order.
+func layoutRows(layout printer.Layout, view *line.View) ([]int, []int, []int) {
 	indices := make([]int, 0, view.Count())
 	rows := make([]int, 0, view.Count())
+	widths := make([]int, 0, view.Count())
 
 	for i := range view.All() {
 		indices = append(indices, i)
 		rows = append(rows, layout.LineRows(i))
+		widths = append(widths, layout.LineWidth(i))
 	}
 
-	return indices, rows
+	return indices, rows, widths
 }
 
 // scrollWidth returns the number of row columns a pane shows at once: the
@@ -1751,10 +1833,14 @@ func (m *Model) navigateSearch(delta int) {
 		return
 	}
 
+	prev := m.searchMatches[m.searchIndex]
 	m.searchIndex = (m.searchIndex + delta + len(m.searchMatches)) % len(m.searchMatches)
 
-	// Update overlays; rendering happens lazily in View.
+	// Only the match that lost the selection and the one that gained it
+	// change style, so only their lines need new row counts. Rendering
+	// happens lazily in View.
 	m.decorate()
+	m.remeasure(prev.rng, m.searchMatches[m.searchIndex].rng)
 
 	m.scrollToCurrentMatch()
 }
@@ -1780,22 +1866,29 @@ func (m *Model) scrollToCurrentMatch() {
 	match := m.searchMatches[m.searchIndex]
 	m.ensureRows()
 
-	// The row of the match within its line comes from the layout of the
-	// pane it is in, and the line's first row from the sums that place the
-	// taller of the two panes.
-	layout := m.rows.leftLayout
+	view := m.left
 	if m.right != nil && !match.inLeft {
-		layout = m.rows.rightLayout
+		view = m.right
 	}
+
+	i := match.rng.Start.Line
+
+	k, ok := slices.BinarySearch(m.rows.indices, i)
+	if !ok || view == nil {
+		return
+	}
+
+	// The row of the match within its line comes from a layout of the line
+	// alone in the pane it is in, and the line's first row from the sums
+	// that place the taller of the two panes.
+	layout := m.renderPrinter(m.paneWidth()).Layout(view.Slice(position.NewSpan(i, i+1)))
 
 	matchRow := layout.RowOf(match.rng.Start)
 	if matchRow < 0 {
 		return
 	}
 
-	i := match.rng.Start.Line
-	k, _ := slices.BinarySearch(m.rows.indices, i)
-	row := m.rows.sums[k] + matchRow - layout.LineStart(i)
+	row := m.rows.sums[k] + matchRow
 
 	// Use (maxHeight-1)/2 to ensure the match appears at the visual center.
 	// For height 22: (22-1)/2 = 10, placing the match at position 10 (middle).
@@ -1816,15 +1909,6 @@ func (m *Model) scrollToCurrentMatch() {
 	// before its column, and the offset centers that cell the way the Y
 	// offset centers its row. SetXOffset clamps, so a match inside the
 	// first screen keeps the offset at 0.
-	view := m.left
-	if m.right != nil && !match.inLeft {
-		view = m.right
-	}
-
-	if view == nil {
-		return
-	}
-
 	content := view.Lines().Line(i).Content()
 	x := layout.GutterWidth() + printer.ColWidth(content, match.rng.Start.Col)
 

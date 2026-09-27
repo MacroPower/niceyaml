@@ -4988,6 +4988,57 @@ func TestPrinter_Layout_Width(t *testing.T) {
 	}
 }
 
+func TestPrinter_Layout_LineWidth(t *testing.T) {
+	t.Parallel()
+
+	view := niceyaml.NewSourceFromString("a: 1\nbb: " + strings.Repeat("日", 3) + "\nc: 3").View()
+	view.Annotate(2, line.Annotation{Content: "a note wider than the lines", Placement: line.Below})
+
+	tcs := map[string]struct {
+		spans []position.Span
+		want  []int
+	}{
+		"every line": {
+			want: []int{10, 16, 35},
+		},
+		"lines the view does not hold": {
+			spans: []position.Span{position.NewSpan(1, 2)},
+			want:  []int{0, 16, 0},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := testPrinterWithGutter(printer.DefaultGutter)
+			sliced := view.Slice(tc.spans...)
+			l := p.Layout(sliced)
+
+			got := make([]int, 0, len(tc.want))
+			for i := range tc.want {
+				got = append(got, l.LineWidth(i))
+			}
+
+			assert.Equal(t, tc.want, got)
+			assert.Equal(t, slices.Max(got), l.Width())
+
+			// Each width is the widest row Print renders for the line.
+			for i := range sliced.All() {
+				widest := 0
+				for row := range strings.SplitSeq(p.Print(view.Slice(position.NewSpan(i, i+1))), "\n") {
+					widest = max(widest, lipgloss.Width(row))
+				}
+
+				assert.Equal(t, widest, l.LineWidth(i), "line %d", i)
+			}
+
+			assert.Equal(t, 0, l.LineWidth(-1))
+			assert.Equal(t, 0, l.LineWidth(len(tc.want)))
+		})
+	}
+}
+
 func TestPrinter_Layout_Width_StyledAnnotation(t *testing.T) {
 	t.Parallel()
 
