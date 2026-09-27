@@ -1151,14 +1151,10 @@ func (m *Model) getDisplayLines() *line.View {
 // pair of revision indexes, and computes the diff again when the pair
 // changes or [Model.ClearRevisions] drops the cache.
 //
-// Without a base for the current [DiffMode], the current revision stands in
-// for it, which yields an empty diff rather than a nil [Revision].
+// Callers must check [Model.ShowingDiff] first. Without a diff there is no
+// base revision.
 func (m *Model) getDiffResult() *diff.Result {
 	base := m.diffBaseIndex()
-	if base < 0 {
-		base = m.revIndex
-	}
-
 	pair := [2]int{base, m.revIndex}
 	if m.diffResult == nil || m.diffKey != pair {
 		// A diff compares the lines each view holds, as the other view
