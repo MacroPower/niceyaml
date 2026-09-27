@@ -2739,6 +2739,50 @@ func TestDocument_DecodeInto(t *testing.T) {
 		}
 	})
 
+	t.Run("locates a decoder panic at the value, not a head comment", func(t *testing.T) {
+		t.Parallel()
+
+		type listConfig struct {
+			Items []string `yaml:"items"`
+		}
+
+		tcs := map[string]struct {
+			input string
+			path  paths.Path
+			want  position.Position
+		}{
+			"whole document": {
+				input: "# about the file\n\nname: x\nitems: !!seq\n",
+				path:  paths.Root(),
+				want:  position.New(2, 0),
+			},
+			"scoped node": {
+				input: "a: 1\nwrap:\n  # the list\n  items: !!seq\n",
+				path:  paths.Root().Child("wrap"),
+				want:  position.New(3, 2),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				_, err := yamltest.At(t, dd, tc.path).Decode[listConfig](t.Context())
+				require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+
+				var srcErr *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &srcErr)
+
+				rng, ok := srcErr.Range()
+				require.True(t, ok, "the rejection has no location")
+				assert.Equal(t, tc.want, rng.Start)
+			})
+		}
+	})
+
 	t.Run("decodes each document of a stream with a comment-only document", func(t *testing.T) {
 		t.Parallel()
 

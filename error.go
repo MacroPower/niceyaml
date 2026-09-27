@@ -55,7 +55,8 @@ var (
 	// of a context that ended, come back as they are and do not match.
 	// A value the go-yaml decoder cannot handle and panics on, such as a
 	// "!!str" tag decoded into a slice, also matches, bound at the first
-	// token of the node, with no go-yaml error in the chain.
+	// token of the node that is not a comment, with no go-yaml error in
+	// the chain.
 	ErrDecodeRejected = errors.New("decoder rejected the value")
 
 	// ErrOutOfRange indicates the error's location lies outside the source.

@@ -944,16 +944,40 @@ func tokenBounds(node ast.Node) (token.Tokens, token.Tokens) {
 	return b.first, b.last
 }
 
+// contentStart returns the token with the lowest offset under node that
+// is not a comment, or nil when no such token carries a position.
+func contentStart(node ast.Node) *token.Token {
+	if isNilNode(node) {
+		return nil
+	}
+
+	b := boundsFinder{skipComments: true}
+
+	ast.Walk(&b, node)
+
+	if len(b.first) == 0 {
+		return nil
+	}
+
+	return b.first[0]
+}
+
 // boundsFinder is an [ast.Visitor] that records the tokens with the lowest
 // and the highest offset among the nodes it visits, all of them when
-// several share the offset.
+// several share the offset. With skipComments set, it leaves out the
+// comments.
 type boundsFinder struct {
-	first, last token.Tokens
+	first, last  token.Tokens
+	skipComments bool
 }
 
 // Visit implements [ast.Visitor].
 func (b *boundsFinder) Visit(node ast.Node) ast.Visitor {
 	if isNilNode(node) {
+		return nil
+	}
+
+	if b.skipComments && node.Type() == ast.CommentType {
 		return nil
 	}
 
@@ -1540,7 +1564,7 @@ func (n *Node) yamlOptions(yamlOpts []yaml.DecodeOption) []yaml.DecodeOption {
 // as a "!!seq" tag over no value, also leaves v as it is, since the
 // go-yaml decoder reads it as no value. A panic in the decoder comes back
 // as an error that matches [ErrDecodeRejected], bound at the first token
-// of node.
+// of node that is not a comment.
 func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []yaml.DecodeOption) error {
 	if !hasContent(node) || isTaggedNull(node) {
 		return nil
@@ -1843,7 +1867,8 @@ func isTaggedNull(node ast.Node) bool {
 
 // decodeWithRecover decodes node into v with dec. It turns a panic in the
 // decoder into an [*Error] that matches [ErrDecodeRejected], with no
-// [yaml.Error] behind it, located at the first token of node.
+// [yaml.Error] behind it, located at the first token of node that is not
+// a comment, so a comment above the value does not take the location.
 func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v any) (err error) {
 	defer func() {
 		p := recover()
@@ -1851,13 +1876,7 @@ func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v 
 			return
 		}
 
-		var at *token.Token
-
-		if first, _ := tokenBounds(node); len(first) > 0 {
-			at = first[0]
-		}
-
-		err = WrapError(fmt.Errorf("%w: panic: %v", ErrDecodeRejected, p), atToken(at))
+		err = WrapError(fmt.Errorf("%w: panic: %v", ErrDecodeRejected, p), atToken(contentStart(node)))
 	}()
 
 	return dec.DecodeFromNodeContext(ctx, node, v) //nolint:wrapcheck // The caller binds the error.
