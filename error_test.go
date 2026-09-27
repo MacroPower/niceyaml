@@ -6,6 +6,7 @@ import (
 	"maps"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -253,6 +254,51 @@ func TestSourceError_Error_Name(t *testing.T) {
 			}
 
 			assert.Equal(t, wantPlus, fmt.Sprintf("%+v", err), "no excerpt without a location")
+		})
+	}
+
+	// The last line or column an int holds still counts from 1 without
+	// wrapping around to a negative number.
+	maxOneBased := strconv.FormatUint(uint64(math.MaxInt)+1, 10)
+
+	far := map[string]struct {
+		pos  position.Position
+		want string
+		// The reason the location did not resolve, or "" when it did.
+		wantUnresolved string
+	}{
+		"column past the end of its line": {
+			pos:  position.New(0, math.MaxInt),
+			want: "a.yaml:1:" + maxOneBased + ": far",
+		},
+		"line past the end of the source": {
+			pos:            position.New(math.MaxInt, 0),
+			want:           "a.yaml: far",
+			wantUnresolved: "line " + maxOneBased + " not in lines 1-2",
+		},
+	}
+
+	for name, tc := range far {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("a.yaml"))
+			err := yamltest.Bind(t, source, niceyaml.NewError("far", niceyaml.AtPosition(tc.pos)))
+
+			assert.Equal(t, tc.want, err.Error())
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+
+			if tc.wantUnresolved == "" {
+				require.NoError(t, bound.Unresolved())
+
+				return
+			}
+
+			require.ErrorIs(t, bound.Unresolved(), niceyaml.ErrOutOfRange)
+			assert.Contains(t, bound.Unresolved().Error(), tc.wantUnresolved)
 		})
 	}
 }

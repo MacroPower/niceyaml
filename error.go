@@ -6,6 +6,7 @@ import (
 	"io"
 	"iter"
 	"log/slog"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -1309,7 +1310,19 @@ func formatPosition(name string, pos position.Position) string {
 // and build tools count, where [position.Position.String] counts from 0
 // as the fields do.
 func editorPosition(pos position.Position) string {
-	return fmt.Sprintf("%d:%d", pos.Line+1, pos.Col+1)
+	return oneBased(pos.Line) + ":" + oneBased(pos.Col)
+}
+
+// oneBased returns the decimal text of n + 1, which turns an index
+// counted from 0 into one counted from 1. The sum for the largest int
+// does not fit in an int, so it prints through a uint64 rather than
+// wrapping around to a negative number.
+func oneBased(n int) string {
+	if n == math.MaxInt {
+		return strconv.FormatUint(uint64(n)+1, 10)
+	}
+
+	return strconv.Itoa(n + 1)
 }
 
 // prefix returns p and msg separated by a space, or p alone when msg is
@@ -2079,18 +2092,18 @@ func viewRange(r position.Range, i int) position.Range {
 // text does. It names the line and the lines the source holds, or the
 // column and its line.
 func checkInRange(loc location, lines line.Lines) error {
-	textLine := loc.pos.Line + 1
+	textLine := oneBased(loc.pos.Line)
 
 	if loc.pos.Line < 0 || loc.pos.Line >= lines.Len() {
 		if lines.Len() == 0 {
-			return fmt.Errorf("%w: line %d of an empty source", ErrOutOfRange, textLine)
+			return fmt.Errorf("%w: line %s of an empty source", ErrOutOfRange, textLine)
 		}
 
-		return fmt.Errorf("%w: line %d not in lines 1-%d", ErrOutOfRange, textLine, lines.Len())
+		return fmt.Errorf("%w: line %s not in lines 1-%d", ErrOutOfRange, textLine, lines.Len())
 	}
 
 	if loc.pos.Col < 0 {
-		return fmt.Errorf("%w: column %d of line %d", ErrOutOfRange, loc.pos.Col+1, textLine)
+		return fmt.Errorf("%w: column %d of line %s", ErrOutOfRange, loc.pos.Col+1, textLine)
 	}
 
 	return nil
