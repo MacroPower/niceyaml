@@ -764,6 +764,22 @@ func TestSplit_PartsTakeLineIndent(t *testing.T) {
 			wantIndentNum:   2,
 			wantIndentLevel: 1,
 		},
+		"single-line block scalar under explicit key": {
+			// The lexer gives the content the IndentNum of the line
+			// after it, which starts at column 1.
+			input:           "? |\n  k\n: v\n",
+			line:            1,
+			wantOrigins:     []string{"  k\n"},
+			wantIndentNum:   2,
+			wantIndentLevel: 1,
+		},
+		"single-line block scalar in sequence": {
+			input:           "- |\n  a\n- b\n",
+			line:            1,
+			wantOrigins:     []string{"  a\n"},
+			wantIndentNum:   2,
+			wantIndentLevel: 1,
+		},
 	}
 
 	for name, tc := range tcs {

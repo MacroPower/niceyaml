@@ -47,8 +47,8 @@ type Line struct {
 //     holds any rune besides a line ending sets them, so the empty
 //     content of a block scalar never does. That part takes them from
 //     its token when it holds the token's first text, unless the token
-//     is a block scalar cut across lines, and from the spaces it opens
-//     with otherwise. A token whose text starts partway through a line,
+//     holds block scalar content, and from the spaces it opens with
+//     otherwise. A token whose text starts partway through a line,
 //     such as a comment after a multiline quoted scalar, can carry
 //     indentation its part does not.
 //
@@ -200,7 +200,6 @@ func (b *builder) AddToken(tk *token.Token) {
 		tk:                   tk,
 		leadingNewlines:      countLeadingNewlineParts(parts),
 		isBlockScalarContent: isBlockScalarContent,
-		isMultiPart:          len(parts) > 1,
 		lastContentPartIdx:   findLastContentPartIndex(parts),
 	}
 
@@ -316,7 +315,6 @@ type partContext struct {
 	leadingNewlines      int // Number of pure-newline parts at the start of parts.
 	lastContentPartIdx   int
 	isBlockScalarContent bool
-	isMultiPart          bool
 	textPlaced           bool // Whether an earlier part held the token's first text.
 }
 
@@ -355,11 +353,11 @@ func (b *builder) processPart(ctx *partContext) {
 	//
 	// Use the token's Position if available (more accurate than counting
 	// spaces in Origin, since some tokens like MappingKey don't include
-	// leading spaces). A block scalar cut across lines carries the
-	// indentation of one of its lines, so every part of one counts the
-	// spaces it opens with instead.
+	// leading spaces). The lexer gives block scalar content the
+	// indentation of a later line, so every part of it counts the spaces
+	// it opens with instead.
 	if !b.lineIndentSet && ctx.part != "" && !partIsPureNewline {
-		if isFirstText && ctx.tk.Position != nil && (!ctx.isBlockScalarContent || !ctx.isMultiPart) {
+		if isFirstText && ctx.tk.Position != nil && !ctx.isBlockScalarContent {
 			b.currentIndentNum = ctx.tk.Position.IndentNum
 			b.currentIndentLevel = ctx.tk.Position.IndentLevel
 		} else {
