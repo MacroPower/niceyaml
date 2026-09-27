@@ -1181,13 +1181,9 @@ func (e *SourceError) Path() (paths.Path, bool) {
 		return paths.Path{}, false
 	}
 
-	found := anchorOf(e.err)
+	l := boundLocus(e)
 
-	if inner, ok := found.err.(*SourceError); ok { //nolint:errorlint // The anchor itself, found by the walk.
-		return inner.Path()
-	}
-
-	return found.path, found.hasPath
+	return l.path, l.hasPath
 }
 
 // Unwrap returns the error the [SourceError] was created from. A nil
