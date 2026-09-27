@@ -2112,6 +2112,28 @@ func TestSchema_SourcePath(t *testing.T) {
 			wantPath: "$.k",
 			want:     "2:4: $.k: expected \"string\", got \"integer\"",
 		},
+		"alias key overrides an earlier key": {
+			// The decoder keeps the member the alias key sets, so the
+			// path spells the keys below it.
+			schema: `{
+				"type": "object",
+				"properties": {
+					"name": {"additionalProperties": {"type": "integer"}}
+				}
+			}`,
+			input:    "a: &k name\nname: {16: x}\n*k : {0x10: y}\n",
+			wantPath: "$.name.0x10",
+			want:     "3:13: $.name.0x10: expected \"integer\", got \"string\"",
+		},
+		"alias key overrides a respelled key": {
+			schema: `{
+				"type": "object",
+				"properties": {"16": {"type": "integer"}}
+			}`,
+			input:    "a: &k 16\n0x10: hello\n*k : [1]\n",
+			wantPath: "$.16",
+			want:     "3:7: $.16: expected \"integer\", got \"array\"",
+		},
 		"block scalar key": {
 			schema: `{
 				"type": "object",

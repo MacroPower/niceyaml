@@ -422,7 +422,8 @@ func rootOf(n *niceyaml.Node) ast.Node {
 //
 // The walk follows each alias through r, so it reaches the node a path
 // through the same alias resolves to. A key under an aliased mapping
-// keeps its source spelling too. A segment the walk cannot follow keeps
+// keeps its source spelling too, and an alias used as a key takes the
+// spelling of its anchor's content. A segment the walk cannot follow keeps
 // its decoded name, such as a member a merge key brought in or one
 // behind an alias that does not resolve. Every segment keeps its decoded
 // name when root is nil, as does a key the walk finds but cannot spell.
@@ -440,7 +441,7 @@ func sourcePath(root ast.Node, r *paths.Resolver, segments []jsonschema.Segment)
 
 		name := seg.Key
 
-		keyNode, valueNode := memberNodes(node, seg.Key)
+		keyNode, valueNode := memberNodes(r, node, seg.Key)
 		if spelled := sourceKey(keyNode); spelled != "" {
 			name = spelled
 		}
@@ -498,15 +499,72 @@ func elementNode(node ast.Node, index int) ast.Node {
 // memberNodes returns the key and value nodes of the member whose key
 // decodes to name, or nil nodes when the node is no mapping or holds no
 // such member. When several members decode to name, memberNodes returns
-// the last, which is the member whose value the decode keeps.
-func memberNodes(node ast.Node, name string) (ast.Node, ast.Node) {
+// the last, which is the member whose value the decode keeps. It passes
+// over a merge key, since a path selects a key the mapping defines itself
+// over a merged one.
+//
+// An alias key decodes to the name the content of its anchor gives, and
+// memberNodes returns that content as the key node, since a path selector
+// matches the key by the spelling of that content. An alias key that
+// [aliasKeyName] cannot name may set a member of any name, so memberNodes
+// stops there and returns nil nodes rather than a member the alias may
+// have replaced.
+func memberNodes(r *paths.Resolver, node ast.Node, name string) (ast.Node, ast.Node) {
 	for _, member := range slices.Backward(mappingMembers(node)) {
+		if _, ok := contentNode(member.Key).(*ast.AliasNode); ok {
+			target, key, ok := aliasKeyName(r, member.Key)
+			if !ok {
+				return nil, nil
+			}
+
+			if key == name {
+				return target, member.Value
+			}
+
+			continue
+		}
+
 		if key, ok := decodedKey(member.Key); ok && key == name {
 			return member.Key, member.Value
 		}
 	}
 
 	return nil, nil
+}
+
+// aliasKeyName returns the content of the anchor an alias key refers to,
+// through r, and the member name a decode gives the key, which is the
+// name [decodedKey] gives that content. It reports false for an alias
+// that does not resolve, for content with no name, and for an alias
+// under a tag or an anchor of the key's own, which may change the name.
+func aliasKeyName(r *paths.Resolver, key ast.MapKeyNode) (ast.Node, string, bool) {
+	var node ast.Node = key
+
+	if explicit, ok := node.(*ast.MappingKeyNode); ok && explicit != nil {
+		node = explicit.Value
+	}
+
+	alias, ok := node.(*ast.AliasNode)
+	if !ok || alias == nil {
+		return nil, "", false
+	}
+
+	target, err := r.Deref(alias)
+	if err != nil {
+		return nil, "", false
+	}
+
+	content, ok := target.(ast.MapKeyNode)
+	if !ok {
+		return nil, "", false
+	}
+
+	name, ok := decodedKey(content)
+	if !ok {
+		return nil, "", false
+	}
+
+	return target, name, true
 }
 
 // keptMembers returns the value node of each member of the mapping node
