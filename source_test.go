@@ -2052,6 +2052,59 @@ func TestSource_Bind(t *testing.T) {
 	})
 }
 
+func TestSource_Bind_RoutesDocuments(t *testing.T) {
+	t.Parallel()
+
+	// Four documents, the second holding a comment alone.
+	commented := "a: 1\n---\n# only\n---\nb: 2\n---\nc: 3\n"
+	// Three documents, each a header alone.
+	headers := "---\n---\n---\n"
+
+	tcs := map[string]struct {
+		input string
+		line  int
+		// The index of the document the error binds to, or -1 for none.
+		want int
+	}{
+		"first line of the first document":   {input: commented, line: 0, want: 0},
+		"header of a comment-only document":  {input: commented, line: 1, want: 1},
+		"comment of a comment-only document": {input: commented, line: 2, want: 1},
+		"header of a middle document":        {input: commented, line: 3, want: 2},
+		"content of a middle document":       {input: commented, line: 4, want: 2},
+		"last line of the last document":     {input: commented, line: 6, want: 3},
+		"line past the last document":        {input: commented, line: 7, want: -1},
+		"first of several headers":           {input: headers, line: 0, want: 0},
+		"middle of several headers":          {input: headers, line: 1, want: 1},
+		"last of several headers":            {input: headers, line: 2, want: 2},
+		"line of an empty source":            {input: "", line: 0, want: -1},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input)
+
+			docs, err := source.Documents()
+			require.NoError(t, err)
+
+			rng := position.NewRange(position.New(tc.line, 0), position.New(tc.line, 1))
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, source.Bind(niceyaml.NewError("bad", niceyaml.AtRange(rng))), &bound)
+
+			if tc.want < 0 {
+				assert.Nil(t, bound.Document())
+
+				return
+			}
+
+			assert.Same(t, docs[tc.want], bound.Document())
+		})
+	}
+}
+
 // errReadFailed is the error a failing reader reports.
 var errReadFailed = errors.New("read failed")
 

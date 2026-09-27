@@ -11,6 +11,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/position"
 )
 
 // generateNestedYAML creates YAML nested to the given depth, where each
@@ -358,6 +359,43 @@ func BenchmarkSourceContent(b *testing.B) {
 
 			for b.Loop() {
 				_ = source.Lines().Content()
+			}
+		})
+	}
+}
+
+func BenchmarkSourceBind_ManyDocuments(b *testing.B) {
+	sizes := []struct {
+		name string
+		docs int
+	}{
+		{"docs_100", 100},
+		{"docs_1000", 1000},
+	}
+
+	for _, sz := range sizes {
+		// Each document spans three lines, and the error joins one
+		// finding per line, as a line-oriented lint reports them.
+		source := niceyaml.NewSourceFromString(strings.Repeat("---\na: 1\nb: 2\n", sz.docs))
+
+		_, err := source.Documents()
+		require.NoError(b, err)
+
+		total := source.Lines().Len()
+		findings := make([]error, 0, total)
+
+		for i := range total {
+			rng := position.NewRange(position.New(i, 0), position.New(i, 1))
+			findings = append(findings, niceyaml.NewError("finding", niceyaml.AtRange(rng)))
+		}
+
+		joined := errors.Join(findings...)
+
+		b.Run(sz.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				require.Error(b, source.Bind(joined))
 			}
 		})
 	}

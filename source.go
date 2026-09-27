@@ -283,6 +283,18 @@ func (s *Source) Tokens() token.Tokens {
 // A YAML syntax error comes back bound to the Source. It is the same error
 // [Source.File] returns.
 func (s *Source) Documents() ([]*Node, error) {
+	docs, err := s.documents()
+	if err != nil {
+		return nil, err
+	}
+
+	return slices.Clone(docs), nil
+}
+
+// documents returns the root [*Node] of each YAML document, as
+// [Source.Documents] does, in the slice the Source keeps rather than a
+// copy, so a caller must not change it.
+func (s *Source) documents() ([]*Node, error) {
 	f, err := s.File()
 	if err != nil {
 		return nil, err
@@ -292,7 +304,7 @@ func (s *Source) Documents() ([]*Node, error) {
 		s.docs = newDocuments(s, f)
 	})
 
-	return slices.Clone(s.docs), nil
+	return s.docs, nil
 }
 
 // Document returns the root [*Node] of a [Source] that holds a single
@@ -375,7 +387,7 @@ func (s *Source) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, er
 // none, unbound: the error [Source.File] returns, [ErrNoDocuments], or
 // [ErrMultipleDocuments] at the anchor of the second document.
 func (s *Source) single() (*Node, error) {
-	docs, err := s.Documents()
+	docs, err := s.documents()
 	if err != nil {
 		return nil, err
 	}

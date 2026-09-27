@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"math"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -788,21 +789,24 @@ type binder struct {
 // nodeAt returns the node an error on line idx binds to: the one b binds
 // with, or, when b routes, the root of the document of the source whose
 // span holds the line, which is nil when the source does not parse or the
-// line lies outside it.
+// line lies outside it. The spans of the documents run in order and each
+// ends where the next starts, so a search for the first span that ends
+// past the line finds the one that holds it.
 func (b binder) nodeAt(idx int) *Node {
 	if b.node != nil || !b.route {
 		return b.node
 	}
 
-	docs, err := b.src.Documents()
+	docs, err := b.src.documents()
 	if err != nil {
 		return nil
 	}
 
-	for _, doc := range docs {
-		if doc.span.Contains(idx) {
-			return doc
-		}
+	i := sort.Search(len(docs), func(i int) bool {
+		return docs[i].span.End > idx
+	})
+	if i < len(docs) && docs[i].span.Contains(idx) {
+		return docs[i]
 	}
 
 	return nil
