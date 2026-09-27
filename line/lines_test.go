@@ -26,11 +26,7 @@ func TestNewLines_Roundtrip(t *testing.T) {
 		input, err := os.ReadFile(filepath.Join("..", "testdata", "full.yaml"))
 		require.NoError(t, err)
 
-		original := tokens.Tokenize(string(input))
-		lines := line.NewLines(original)
-		gotTokens := lines.Tokens()
-
-		yamltest.RequireTokensEqual(t, original, gotTokens)
+		requireRoundtrip(t, string(input))
 	})
 
 	tcs := map[string]string{
@@ -218,14 +214,68 @@ func TestNewLines_Roundtrip(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			original := tokens.Tokenize(input)
-			lines := line.NewLines(original)
-			gotTokens := lines.Tokens()
-
-			yamltest.RequireTokensEqual(t, original, gotTokens)
+			lines := requireRoundtrip(t, input)
 
 			contentDiff := yamltest.CompareContent(input, lines.Content())
 			require.True(t, contentDiff.Equal(), contentDiff.String())
+		})
+	}
+}
+
+// requireRoundtrip creates [line.Lines] from the tokens of input and
+// requires [line.Lines.Tokens] to return tokens equal to those of a second
+// tokenization of input. The lines hold the tokens passed to
+// [line.NewLines], so comparing with those would compare each token with
+// itself.
+func requireRoundtrip(t *testing.T, input string) line.Lines {
+	t.Helper()
+
+	want := tokens.Tokenize(input)
+	lines := line.NewLines(tokens.Tokenize(input))
+
+	yamltest.RequireTokensEqual(t, want, lines.Tokens())
+
+	return lines
+}
+
+// TestNewLines_DoesNotMutateInput verifies that NewLines leaves the tokens
+// it cuts into parts as the lexer produced them, and that Lines.Tokens
+// returns those same tokens.
+func TestNewLines_DoesNotMutateInput(t *testing.T) {
+	t.Parallel()
+
+	full, err := os.ReadFile(filepath.Join("..", "testdata", "full.yaml"))
+	require.NoError(t, err)
+
+	tcs := map[string]string{
+		"testdata/full.yaml":      string(full),
+		"literal block":           "script: |\n  line1\n  line2\n",
+		"literal keep":            "text: |+\n  line1\n  line2\n\n",
+		"folded with blank lines": "text: >\n  first\n\n  second\n",
+		"double quoted multiline": "key: \"line1\nline2\"\n",
+		"single quoted multiline": "key: 'line1\nline2'\n",
+		"plain multiline":         "key: this is\n  a multiline\n  plain string\n",
+		"unicode key":             "日: value\n",
+		"block scalar CRLF":       "key: |\r\n  line1\r\n  line2\r\n",
+		"quoted string CRLF":      "key: \"line1\r\nline2\"\r\n",
+		"plain multiline CRLF":    "key: text\r\n  continued\r\n",
+		"blank line between CRLF": "key: value\r\n\r\nnext: data\r\n",
+	}
+
+	for name, input := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			want := tokens.Tokenize(input)
+			tks := tokens.Tokenize(input)
+			got := line.NewLines(tks).Tokens()
+
+			yamltest.RequireTokensEqual(t, want, tks)
+			require.Len(t, got, len(tks))
+
+			for i := range tks {
+				assert.Same(t, tks[i], got[i], "token %d", i)
+			}
 		})
 	}
 }
@@ -850,8 +900,10 @@ func TestNewLines_PartPositionsMatchLexer(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
+			// The lines hold the tokens passed to NewLines, so the lexer's
+			// positions come from a second tokenization.
 			originalTks := tokens.Tokenize(input)
-			lines := line.NewLines(originalTks)
+			lines := line.NewLines(tokens.Tokenize(input))
 
 			// Index the lexer's positions by the (Line, Column) where the
 			// text of each token starts.
@@ -943,12 +995,7 @@ func TestNewLines_OffsetRuneCount(t *testing.T) {
 	//
 	// If byte-based, ":" would be at offset 4 (after 3 bytes for 日).
 	input := "日: value\n"
-	originalTks := tokens.Tokenize(input)
-	lines := line.NewLines(originalTks)
-	resultTks := lines.Tokens()
-
-	// Verify the round-trip preserves lexer output exactly.
-	yamltest.RequireTokensEqual(t, originalTks, resultTks)
+	lines := requireRoundtrip(t, input)
 
 	// Verify specific offset values that prove rune-based counting.
 	// The ":" (MappingValue) part should be at offset 2, not 4.
@@ -970,7 +1017,7 @@ func TestNewLines_OffsetRuneCount(t *testing.T) {
 	// Also verify total bytes match for Origin content preservation.
 	var origTotalBytes, resultTotalBytes int
 
-	for _, tk := range originalTks {
+	for _, tk := range tokens.Tokenize(input) {
 		origTotalBytes += len(tk.Origin)
 	}
 
@@ -1113,16 +1160,12 @@ func TestNewLines_BlockScalars(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				originalTks := tokens.Tokenize(tc.input)
-				lines := line.NewLines(originalTks)
-				resultTks := lines.Tokens()
-
-				yamltest.RequireTokensEqual(t, originalTks, resultTks)
+				lines := requireRoundtrip(t, tc.input)
 
 				// The content is the string whose text crosses a line break.
 				var contentToken *token.Token
 
-				for _, tk := range originalTks {
+				for _, tk := range tokens.Tokenize(tc.input) {
 					if tk.Type == token.StringType && strings.Contains(strings.TrimSpace(tk.Origin), "\n") {
 						contentToken = tk
 						break
@@ -1179,13 +1222,9 @@ func TestNewLines_BlockScalars(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				originalTks := tokens.Tokenize(input)
-				lines := line.NewLines(originalTks)
-				resultTks := lines.Tokens()
+				lines := requireRoundtrip(t, input)
 
 				require.NoError(t, yamltest.ValidateLines(lines))
-
-				yamltest.RequireTokensEqual(t, originalTks, resultTks)
 
 				// The lexer places the empty content of a scalar that
 				// keeps its trailing lines past the end of the source,
@@ -1260,11 +1299,7 @@ func TestNewLines_BlockScalars(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				originalTks := tokens.Tokenize(tc.input)
-				lines := line.NewLines(originalTks)
-				resultTks := lines.Tokens()
-
-				yamltest.RequireTokensEqual(t, originalTks, resultTks)
+				lines := requireRoundtrip(t, tc.input)
 
 				assert.Equal(t, strings.Count(tc.input, "\n"), lines.Len())
 				assert.Equal(t, tc.want, blockScalarValue(t, lines),
@@ -1341,17 +1376,12 @@ func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			originalTks := tokens.Tokenize(tc.input)
-			lines := line.NewLines(originalTks)
-			resultTks := lines.Tokens()
-
-			// Verify round-trip fidelity.
-			yamltest.RequireTokensEqual(t, originalTks, resultTks)
+			lines := requireRoundtrip(t, tc.input)
 
 			// The string is the one whose text crosses a line break.
 			var contentToken *token.Token
 
-			for _, tk := range originalTks {
+			for _, tk := range tokens.Tokenize(tc.input) {
 				if tk.Type == token.StringType && strings.Contains(strings.TrimSpace(tk.Origin), "\n") {
 					contentToken = tk
 					break
@@ -1411,17 +1441,12 @@ func TestNewLines_QuotedMultilineActualNewlines(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			originalTks := tokens.Tokenize(tc.input)
-			lines := line.NewLines(originalTks)
-			resultTks := lines.Tokens()
-
-			// Verify round-trip fidelity.
-			yamltest.RequireTokensEqual(t, originalTks, resultTks)
+			lines := requireRoundtrip(t, tc.input)
 
 			// Find the quoted token.
 			var quotedToken *token.Token
 
-			for _, tk := range originalTks {
+			for _, tk := range tokens.Tokenize(tc.input) {
 				if tk.Type == tc.wantTokenType {
 					quotedToken = tk
 					break
@@ -1476,15 +1501,10 @@ func TestNewLines_ColumnPositionAfterSplit(t *testing.T) {
 			  line1
 			  line2
 		`)
-		originalTks := tokens.Tokenize(input)
-		lines := line.NewLines(originalTks)
+		lines := requireRoundtrip(t, input)
 
 		// Verify we have the expected number of lines.
 		require.Equal(t, 3, lines.Len())
-
-		// Verify round-trip produces identical tokens.
-		resultTks := lines.Tokens()
-		yamltest.RequireTokensEqual(t, originalTks, resultTks)
 
 		// The token sits where "line1" starts, past two spaces of
 		// indentation, and its first part carries that column. The second
@@ -1505,15 +1525,10 @@ func TestNewLines_ColumnPositionAfterSplit(t *testing.T) {
 			key: this is
 			  continued
 		`)
-		originalTks := tokens.Tokenize(input)
-		lines := line.NewLines(originalTks)
+		lines := requireRoundtrip(t, input)
 
 		// Verify we have the expected number of lines.
 		require.Equal(t, 2, lines.Len())
-
-		// Verify round-trip produces identical tokens.
-		resultTks := lines.Tokens()
-		yamltest.RequireTokensEqual(t, originalTks, resultTks)
 
 		// The scalar's first part follows "key: " and keeps the token's
 		// column. The continuation part starts with the indentation, at
@@ -1636,12 +1651,9 @@ func TestNewLines_BlockScalarPositionBehavior(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			original := tokens.Tokenize(tc.input)
-			lines := line.NewLines(original)
-			result := lines.Tokens()
+			lines := requireRoundtrip(t, tc.input)
 
 			require.NoError(t, yamltest.ValidateLines(lines))
-			yamltest.RequireTokensEqual(t, original, result)
 
 			for i := range lines.All() {
 				ln := lines.Line(i)
@@ -1676,18 +1688,13 @@ func TestNewLines_BlankLineAbsorption(t *testing.T) {
 		// The lexer absorbs the blank line into the first value's Origin.
 		input := "key: value\n\nnext: data\n"
 
-		original := tokens.Tokenize(input)
-		lines := line.NewLines(original)
-		result := lines.Tokens()
-
-		// Verify round-trip.
-		yamltest.RequireTokensEqual(t, original, result)
+		lines := requireRoundtrip(t, input)
 
 		// Verify the blank line is in the value token's Origin.
 		// The value token should have Origin " value\n\n" (two newlines).
 		var valueToken *token.Token
 
-		for _, tk := range result {
+		for _, tk := range lines.Tokens() {
 			if tk.Value == "value" {
 				valueToken = tk
 				break
@@ -1705,15 +1712,11 @@ func TestNewLines_BlankLineAbsorption(t *testing.T) {
 		// Multiple blank lines between key-value pairs.
 		input := "key: value\n\n\nnext: data\n"
 
-		original := tokens.Tokenize(input)
-		lines := line.NewLines(original)
-		result := lines.Tokens()
-
-		yamltest.RequireTokensEqual(t, original, result)
+		lines := requireRoundtrip(t, input)
 
 		var valueToken *token.Token
 
-		for _, tk := range result {
+		for _, tk := range lines.Tokens() {
 			if tk.Value == "value" {
 				valueToken = tk
 				break
@@ -1892,11 +1895,7 @@ func TestNewLines_FoldedBlockBlankLines(t *testing.T) {
 		// newline in the Value instead of a space.
 		input := "text: >\n  first\n\n  second\n"
 
-		original := tokens.Tokenize(input)
-		lines := line.NewLines(original)
-		result := lines.Tokens()
-
-		yamltest.RequireTokensEqual(t, original, result)
+		lines := requireRoundtrip(t, input)
 
 		assert.Equal(t, 4, lines.Len())
 		// The blank line causes a paragraph break in folded output.
@@ -1910,11 +1909,7 @@ func TestNewLines_FoldedBlockBlankLines(t *testing.T) {
 		// Without blank lines, folded content joins with spaces.
 		input := "text: >\n  first\n  second\n"
 
-		original := tokens.Tokenize(input)
-		lines := line.NewLines(original)
-		result := lines.Tokens()
-
-		yamltest.RequireTokensEqual(t, original, result)
+		lines := requireRoundtrip(t, input)
 
 		assert.Equal(t, 3, lines.Len())
 		// Adjacent lines fold to a space, so the Value is "first second\n".
@@ -1928,11 +1923,7 @@ func TestNewLines_FoldedBlockBlankLines(t *testing.T) {
 		// Literal blocks preserve blank lines as-is.
 		input := "text: |\n  first\n\n  second\n"
 
-		original := tokens.Tokenize(input)
-		lines := line.NewLines(original)
-		result := lines.Tokens()
-
-		yamltest.RequireTokensEqual(t, original, result)
+		lines := requireRoundtrip(t, input)
 
 		assert.Equal(t, 4, lines.Len())
 		// Literal preserves blank line as newline.
@@ -1946,11 +1937,7 @@ func TestNewLines_FoldedBlockBlankLines(t *testing.T) {
 		// Multiple blank lines in folded content.
 		input := "text: >\n  first\n\n\n  second\n"
 
-		original := tokens.Tokenize(input)
-		lines := line.NewLines(original)
-		result := lines.Tokens()
-
-		yamltest.RequireTokensEqual(t, original, result)
+		lines := requireRoundtrip(t, input)
 
 		assert.Equal(t, 5, lines.Len())
 		// Folding drops the break after "first" and keeps one per blank line.
