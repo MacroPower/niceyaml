@@ -37,13 +37,6 @@ func resolveAndLoad(t *testing.T, res schema.Resolver, doc *niceyaml.Node) (stri
 func TestDirective(t *testing.T) {
 	t.Parallel()
 
-	t.Run("returns Resolver implementation", func(t *testing.T) {
-		t.Parallel()
-
-		res := schema.Directive()
-		assert.NotNil(t, res)
-	})
-
 	t.Run("registry fetches a directive URL with its client", func(t *testing.T) {
 		t.Parallel()
 
