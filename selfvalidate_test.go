@@ -835,6 +835,57 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	t.Run("a value validates whatever its type holds below it", func(t *testing.T) {
+		t.Parallel()
+
+		type withLabels struct {
+			Labels labels `yaml:"labels"`
+		}
+
+		type withExtra struct {
+			Name  string         `yaml:"name"`
+			Extra map[string]any `yaml:"extra"`
+		}
+
+		tcs := map[string]struct {
+			target any
+			input  string
+			want   string
+		}{
+			"map of strings": {
+				target: &labels{},
+				input:  "a: x\nb: \"\"\n",
+				want:   "2:4: $.b: empty label",
+			},
+			"map of strings behind a field": {
+				target: &withLabels{},
+				input:  "labels: {a: x, b: \"\"}\n",
+				want:   "1:19: $.labels.b: empty label",
+			},
+			"map of strings in a map of any the caller filled": {
+				target: &withExtra{Extra: map[string]any{"l": labels{"b": ""}}},
+				input:  "name: x\n",
+				want:   "$.extra.l.b: empty label",
+			},
+			"type that holds itself": {
+				target: &tree{},
+				input:  "kids:\n  - port: 70000\nport: 1\n",
+				want:   "2:11: $.kids[0].port: port out of range",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				err := dd.DecodeInto(t.Context(), tc.target)
+				require.EqualError(t, err, tc.want)
+			})
+		}
+	})
+
 	t.Run("a value that decodes itself validates itself alone", func(t *testing.T) {
 		t.Parallel()
 
@@ -1064,6 +1115,26 @@ func (n names) Validate() error {
 	}
 
 	return nil
+}
+
+// labels is a map of strings with no empty value, which holds no
+// validator below it.
+type labels map[string]string
+
+func (l labels) Validate() error {
+	for k, v := range l {
+		if v == "" {
+			return niceyaml.NewError("empty label", niceyaml.AtPath(paths.Root().Child(k)))
+		}
+	}
+
+	return nil
+}
+
+// tree holds trees like itself, and a port that validates itself.
+type tree struct {
+	Kids []tree `yaml:"kids"`
+	Port port   `yaml:"port"`
 }
 
 // flag is a zero-size value that always reports itself.

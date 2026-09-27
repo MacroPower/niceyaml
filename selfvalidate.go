@@ -2,6 +2,7 @@ package niceyaml
 
 import (
 	"bytes"
+	"cmp"
 	"encoding"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"unsafe"
 
 	"github.com/goccy/go-yaml"
@@ -83,6 +85,12 @@ type visit struct {
 // in the document, and reports whether nothing under v failed.
 func (w *selfWalker) walk(v reflect.Value, base paths.Path) bool {
 	if !v.IsValid() || !v.CanInterface() {
+		return true
+	}
+
+	// A value whose type holds no validator, itself included, passes
+	// without a look at the values below it.
+	if !mayHoldValidator(v.Type()) {
 		return true
 	}
 
@@ -199,17 +207,23 @@ func visitOf(v reflect.Value) visit {
 	return key
 }
 
-// unmarshalerTypes are the interfaces go-yaml decodes a value through
-// when its pointer implements one, in place of decoding field by field.
-var unmarshalerTypes = []reflect.Type{
-	reflect.TypeFor[yaml.BytesUnmarshaler](),
-	reflect.TypeFor[yaml.BytesUnmarshalerContext](),
-	reflect.TypeFor[yaml.InterfaceUnmarshaler](),
-	reflect.TypeFor[yaml.InterfaceUnmarshalerContext](),
-	reflect.TypeFor[yaml.NodeUnmarshaler](),
-	reflect.TypeFor[yaml.NodeUnmarshalerContext](),
-	reflect.TypeFor[encoding.TextUnmarshaler](),
-}
+var (
+	// The interfaces go-yaml decodes a value through when its pointer
+	// implements one, in place of decoding field by field.
+	unmarshalerTypes = []reflect.Type{
+		reflect.TypeFor[yaml.BytesUnmarshaler](),
+		reflect.TypeFor[yaml.BytesUnmarshalerContext](),
+		reflect.TypeFor[yaml.InterfaceUnmarshaler](),
+		reflect.TypeFor[yaml.InterfaceUnmarshalerContext](),
+		reflect.TypeFor[yaml.NodeUnmarshaler](),
+		reflect.TypeFor[yaml.NodeUnmarshalerContext](),
+		reflect.TypeFor[encoding.TextUnmarshaler](),
+	}
+
+	// The result of [mayHoldValidator] for each type it has read. A type
+	// never changes, so every walk shares the results.
+	holdsValidator sync.Map
+)
 
 // decodesItself reports whether go-yaml decodes a value of type t whole,
 // so the fields, elements, or entries of the value need not mirror the
@@ -222,6 +236,61 @@ func decodesItself(t reflect.Type) bool {
 	pt := reflect.PointerTo(t)
 
 	return pt.Implements(reflect.TypeFor[ast.Node]()) || slices.ContainsFunc(unmarshalerTypes, pt.Implements)
+}
+
+// mayHoldValidator reports whether a value of type t can implement
+// [SelfValidator], or can hold a value the walk reaches below it that
+// does: through an interface, which can hold a value of any type, or
+// through a field, element, map value, or pointee whose type may. The
+// walk passes a value whose type may not without a look below it.
+func mayHoldValidator(t reflect.Type) bool {
+	if cached, ok := holdsValidator.Load(t); ok {
+		if held, ok := cached.(bool); ok {
+			return held
+		}
+	}
+
+	held := reachesValidator(t, map[reflect.Type]bool{})
+	holdsValidator.Store(t, held)
+
+	return held
+}
+
+// reachesValidator reports whether t, or a type below it, can hold a
+// [SelfValidator], as [mayHoldValidator] describes. The seen set holds
+// the types the search has reached, so the search reads a type that holds
+// itself once, and a validator below that type shows on the first read.
+func reachesValidator(t reflect.Type, seen map[reflect.Type]bool) bool {
+	if seen[t] {
+		return false
+	}
+
+	seen[t] = true
+
+	if t.Kind() == reflect.Interface || reflect.PointerTo(t).Implements(reflect.TypeFor[SelfValidator]()) {
+		return true
+	}
+
+	// The walk validates a value that decodes itself and nothing below it.
+	if decodesItself(t) {
+		return false
+	}
+
+	switch t.Kind() {
+	case reflect.Pointer, reflect.Slice, reflect.Array, reflect.Map:
+		return reachesValidator(t.Elem(), seen)
+
+	case reflect.Struct:
+		for field := range t.Fields() {
+			if _, _, skip := fieldName(field); !skip && reachesValidator(field.Type, seen) {
+				return true
+			}
+		}
+
+	default:
+	}
+
+	return false
 }
 
 // children walks the values below v, and reports whether every one of
@@ -272,25 +341,28 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path) bool {
 		names := w.keyNames(base, v.Type().Key())
 
 		type entry struct {
-			key, value reflect.Value
+			value         reflect.Value
+			seg, typeName string
 		}
 
 		entries := make([]entry, 0, v.Len())
 
 		for iter := v.MapRange(); iter.Next(); {
-			entries = append(entries, entry{key: iter.Key(), value: iter.Value()})
+			key := iter.Key()
+
+			entries = append(entries, entry{
+				value:    iter.Value(),
+				seg:      mapKey(key, names),
+				typeName: keyTypeName(key),
+			})
 		}
 
 		slices.SortStableFunc(entries, func(a, b entry) int {
-			if c := strings.Compare(mapKey(a.key, names), mapKey(b.key, names)); c != 0 {
-				return c
-			}
-
-			return strings.Compare(keyTypeName(a.key), keyTypeName(b.key))
+			return cmp.Or(strings.Compare(a.seg, b.seg), strings.Compare(a.typeName, b.typeName))
 		})
 
 		for _, e := range entries {
-			if !w.walk(e.value, base.Child(mapKey(e.key, names))) {
+			if !w.walk(e.value, base.Child(e.seg)) {
 				ok = false
 			}
 		}

@@ -1,6 +1,7 @@
 package niceyaml_test
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -8,24 +9,53 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 )
 
-// BenchmarkNode_Decode_SelfValidation decodes a list of small mappings, and
-// a mapping that holds as many small mappings, with and without
-// self-validation, which reads the keys of every map in the decoded value
-// from the document. The time per item should stay flat as either grows.
+// BenchmarkNode_Decode_SelfValidation decodes several shapes of document
+// with and without self-validation, which reads the keys of every map in
+// the decoded value from the document: a list of small mappings and a
+// mapping that holds as many small mappings, both as any, and a mapping
+// of strings and a list of ints, whose types hold no validator. The time
+// per item should stay flat as each grows.
 func BenchmarkNode_Decode_SelfValidation(b *testing.B) {
+	decodeAny := func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
+		_, err := doc.Decode[any](ctx, opts...)
+
+		return err
+	}
+
 	shapes := []struct {
+		decode func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error
+		item   func(i int) string
 		name   string
 		header string
-		item   func(i int) string
 	}{
 		{
 			name:   "list",
 			header: "items:\n",
 			item:   func(int) string { return "  - {name: x, value: 1, tags: {a: 1}}\n" },
+			decode: decodeAny,
 		},
 		{
-			name: "wide_map",
-			item: func(i int) string { return fmt.Sprintf("k%d: {a: 1}\n", i) },
+			name:   "wide_map",
+			item:   func(i int) string { return fmt.Sprintf("k%d: {a: 1}\n", i) },
+			decode: decodeAny,
+		},
+		{
+			name: "string_map",
+			item: func(i int) string { return fmt.Sprintf("k%d: v%d\n", i, i) },
+			decode: func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
+				_, err := doc.Decode[map[string]string](ctx, opts...)
+
+				return err
+			},
+		},
+		{
+			name: "int_list",
+			item: func(i int) string { return fmt.Sprintf("- %d\n", i) },
+			decode: func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
+				_, err := doc.Decode[[]int](ctx, opts...)
+
+				return err
+			},
 		},
 	}
 
@@ -62,7 +92,7 @@ func BenchmarkNode_Decode_SelfValidation(b *testing.B) {
 					b.SetBytes(int64(len(yaml)))
 
 					for b.Loop() {
-						_, err := doc.Decode[any](b.Context(), mode.opts...)
+						err := shape.decode(b.Context(), doc, mode.opts)
 						if err != nil {
 							b.Fatal(err)
 						}
