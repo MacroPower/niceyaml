@@ -608,6 +608,48 @@ func TestPalette_HeadingsCarryForeground(t *testing.T) {
 	}
 }
 
+func TestPalette_HeadingsReadable(t *testing.T) {
+	t.Parallel()
+
+	// A heading paints an accent or status color, and its text must stand
+	// out on that color at least as well as either body color would, so a
+	// light accent on a light theme takes the dark body color.
+	headings := []kind.Kind{
+		kind.GenericHeading,
+		kind.GenericHeadingOK,
+		kind.GenericHeadingWarn,
+		kind.GenericHeadingError,
+	}
+
+	for _, th := range theme.Builtin().All() {
+		if th.Name == theme.Charm.Name {
+			// Charm sets its headings by hand rather than from a palette.
+			continue
+		}
+
+		t.Run(th.Name, func(t *testing.T) {
+			t.Parallel()
+
+			styles := th.Styles()
+			text := styles.Style(kind.Text)
+
+			for _, k := range headings {
+				st := styles.Style(k)
+				got := contrast(st.GetForeground(), st.GetBackground())
+
+				for _, body := range []color.Color{text.GetForeground(), text.GetBackground()} {
+					if _, unset := body.(lipgloss.NoColor); unset {
+						continue
+					}
+
+					assert.GreaterOrEqual(t, got, contrast(body, st.GetBackground()),
+						"%s draws %s", k, style.Encode(st))
+				}
+			}
+		})
+	}
+}
+
 func TestBuiltin_ChromeIgnoresCommentOverride(t *testing.T) {
 	t.Parallel()
 

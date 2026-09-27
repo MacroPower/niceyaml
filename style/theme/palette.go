@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/lucasb-eyer/go-colorful"
 
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
@@ -37,7 +38,9 @@ type palette struct {
 	Fg, Bg string
 	// Accent colors headings and accented text. OK, Warn, and Error color
 	// the status kinds. OK and Error also color the inserted, deleted, and
-	// error marks when Tokens leaves them out.
+	// error marks when Tokens leaves them out. A heading, and an error mark
+	// Tokens leaves out, draws its text in Fg or Bg, whichever contrasts
+	// more with the color behind it.
 	Accent, OK, Warn, Error string
 	// Mode is the background the theme is designed for. It also picks the
 	// direction of the derived shifts. [kind.TextSubtle] and
@@ -70,8 +73,19 @@ func (p palette) styles() style.Styles {
 		towardFg, towardBg = lipgloss.Darken, lipgloss.Lighten
 	}
 
+	// Text drawn on a painted color takes whichever surface color reads
+	// best there, so a light accent on a light theme takes the dark
+	// foreground.
+	textOn := func(c color.Color) color.Color {
+		if contrast(fg, c) > contrast(bg, c) {
+			return fg
+		}
+
+		return bg
+	}
+
 	heading := func(c color.Color) lipgloss.Style {
-		return lipgloss.NewStyle().Foreground(bg).Background(c).Bold(true)
+		return lipgloss.NewStyle().Foreground(textOn(c)).Background(c).Bold(true)
 	}
 
 	// The derived kinds resolve first, so a Tokens entry naming one of them
@@ -114,7 +128,7 @@ func (p palette) styles() style.Styles {
 	defaults := map[kind.Kind]string{
 		kind.GenericInserted: style.Encode(lipgloss.NewStyle().Foreground(ok)),
 		kind.GenericDeleted:  style.Encode(lipgloss.NewStyle().Foreground(errColor)),
-		kind.GenericError:    style.Encode(lipgloss.NewStyle().Foreground(bg).Background(errColor)),
+		kind.GenericError:    style.Encode(lipgloss.NewStyle().Foreground(textOn(errColor)).Background(errColor)),
 	}
 	for st, spec := range defaults {
 		if _, ok := tokens[st]; !ok {
@@ -197,6 +211,25 @@ func (p palette) surface() (color.Color, color.Color) {
 	}
 
 	return lipgloss.Color(fg), lipgloss.Color(bg)
+}
+
+// contrast returns the WCAG contrast ratio between a and b, from 1 for
+// equal colors to 21 for black on white.
+func contrast(a, b color.Color) float64 {
+	la, lb := luminance(a), luminance(b)
+	if la < lb {
+		la, lb = lb, la
+	}
+
+	return (la + 0.05) / (lb + 0.05)
+}
+
+// luminance returns the WCAG relative luminance of c.
+func luminance(c color.Color) float64 {
+	cf, _ := colorful.MakeColor(c)
+	r, g, b := cf.LinearRgb()
+
+	return 0.2126*r + 0.7152*g + 0.0722*b
 }
 
 // layer returns base with the colors and attributes the spec sets applied

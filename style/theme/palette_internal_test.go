@@ -36,8 +36,8 @@ func TestPalette_DiffAndErrorKindsDefaultFromStatusColors(t *testing.T) {
 	t.Parallel()
 
 	// A palette that leaves the diff and error kinds out draws inserted
-	// lines in OK, deleted lines in Error, and error marks as a badge of
-	// the background color on Error.
+	// lines in OK, deleted lines in Error, and error marks as a badge on
+	// Error in whichever body color reads better there.
 	tcs := map[string]struct {
 		tokens     map[kind.Kind]string
 		kind       kind.Kind
