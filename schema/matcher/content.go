@@ -109,12 +109,7 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 	// 1.10 becomes "1.1", 0x10 becomes "16", and True becomes "true". A
 	// string want matches the scalar's text as written instead.
 	if isPlainString(gv.Type()) {
-		text, ok, err := scalarText(node)
-		if err != nil {
-			return false, err
-		}
-
-		if ok {
+		if text, ok := scalarText(node); ok {
 			gv.SetString(text)
 		}
 	}
@@ -152,12 +147,8 @@ func isPlainString(t reflect.Type) bool {
 // infinity, a NaN, or a bool, looking through an anchor or a tag on it.
 // The second result is false when node holds anything else, which
 // includes an alias, whose own text names the anchor.
-func scalarText(node *niceyaml.Node) (string, bool, error) {
-	n, err := node.AST()
-	if err != nil {
-		//nolint:wrapcheck // The Node binds the error already.
-		return "", false, err
-	}
+func scalarText(node *niceyaml.Node) (string, bool) {
+	n := node.AST()
 
 	for {
 		switch v := n.(type) {
@@ -166,9 +157,9 @@ func scalarText(node *niceyaml.Node) (string, bool, error) {
 		case *ast.TagNode:
 			n = v.Value
 		case *ast.IntegerNode, *ast.FloatNode, *ast.InfinityNode, *ast.NanNode, *ast.BoolNode:
-			return v.GetToken().Value, true, nil
+			return v.GetToken().Value, true
 		default:
-			return "", false, nil
+			return "", false
 		}
 	}
 }

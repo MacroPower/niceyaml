@@ -699,24 +699,19 @@ func (n *Node) Document() *Node {
 //		return err
 //	}
 //
-//	node, err := scoped.AST()
-//	if err != nil {
-//		return err
-//	}
-//
-//	fmt.Println(node.String())
+//	fmt.Println(scoped.AST().String())
 //
 // The body is what the parser built: nil for an empty document, and a
-// comment group for one holding only comments. AST returns either
-// without an error, as such a document decodes to nothing. The node is
-// part of the tree [Source.File] returns, which every Node of the Source
-// shares and resolves against, so it is read-only.
-func (n *Node) AST() (ast.Node, error) {
+// comment group for one holding only comments. AST returns either as it
+// is, as such a document decodes to nothing. The node is part of the tree
+// [Source.File] returns, which every Node of the Source shares and
+// resolves against, so it is read-only.
+func (n *Node) AST() ast.Node {
 	if n.base.IsRoot() {
-		return n.doc.root.Body, nil
+		return n.doc.root.Body
 	}
 
-	return n.node, nil
+	return n.node
 }
 
 // At returns a [*Node] scoped to the node path selects, with path
@@ -1466,11 +1461,6 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig) error {
 		return n.Bind(err)
 	}
 
-	node, err := n.AST()
-	if err != nil {
-		return err
-	}
-
 	err = n.validate(ctx, cfg.validators)
 	if err != nil {
 		return err
@@ -1478,7 +1468,7 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig) error {
 
 	yamlOpts := n.yamlOptions(cfg.decodeOptions())
 
-	err = n.decodeNode(ctx, node, v, yamlOpts)
+	err = n.decodeNode(ctx, n.AST(), v, yamlOpts)
 	if err != nil {
 		return err
 	}

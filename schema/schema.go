@@ -384,19 +384,13 @@ func leafError(
 	return niceyaml.NewError(leaf.Message, niceyaml.AtPath(path))
 }
 
-// rootOf returns the tree of n, or nil for no node and for a node whose
-// tree does not resolve.
+// rootOf returns the tree of n, or nil for no node.
 func rootOf(n *niceyaml.Node) ast.Node {
 	if n == nil {
 		return nil
 	}
 
-	root, err := n.AST()
-	if err != nil {
-		return nil
-	}
-
-	return root
+	return n.AST()
 }
 
 // sourcePath converts instance-location segments to a [paths.Path] that

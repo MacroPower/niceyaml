@@ -1152,9 +1152,7 @@ func TestDocument_Node(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		node, err := dd.AST()
-		require.NoError(t, err)
-		assert.Same(t, dd.DocumentAST().Body, node)
+		assert.Same(t, dd.DocumentAST().Body, dd.AST())
 	})
 
 	t.Run("scope is the node the path selects", func(t *testing.T) {
@@ -1162,8 +1160,7 @@ func TestDocument_Node(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		node, err := yamltest.At(t, dd, paths.Root().Child("meta")).AST()
-		require.NoError(t, err)
+		node := yamltest.At(t, dd, paths.Root().Child("meta")).AST()
 		assert.Equal(t, "  name: app", node.String())
 
 		want, err := paths.Root().Child("meta").Node(dd.DocumentAST())
@@ -1176,8 +1173,7 @@ func TestDocument_Node(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		node, err := yamltest.At(t, yamltest.At(t, dd, paths.Root().Child("meta")), paths.Root().Child("name")).AST()
-		require.NoError(t, err)
+		node := yamltest.At(t, yamltest.At(t, dd, paths.Root().Child("meta")), paths.Root().Child("name")).AST()
 		assert.Equal(t, "app", node.String())
 	})
 
@@ -1220,9 +1216,7 @@ func TestDocument_Node(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, "---\n")
 
-		node, err := dd.AST()
-		require.NoError(t, err)
-		assert.Nil(t, node)
+		assert.Nil(t, dd.AST())
 	})
 
 	t.Run("document of comments has its comment group", func(t *testing.T) {
@@ -1230,9 +1224,7 @@ func TestDocument_Node(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, "# only a comment\n")
 
-		node, err := dd.AST()
-		require.NoError(t, err)
-		assert.IsType(t, &ast.CommentGroupNode{}, node)
+		assert.IsType(t, &ast.CommentGroupNode{}, dd.AST())
 	})
 
 	t.Run("a scoped node reaches the whole document", func(t *testing.T) {
