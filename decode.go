@@ -1512,14 +1512,168 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 	if node != n.doc.root.Body && hasAlias(node) {
 		var sink any
 
-		_ = dec.DecodeFromNodeContext(ctx, n.doc.root.Body, &sink) //nolint:errcheck // The pass only primes anchors.
+		//nolint:errcheck // The pass only primes anchors.
+		_ = dec.DecodeFromNodeContext(ctx, decodeView(n.doc.root.Body), &sink)
 	}
 
 	// The go-yaml decoder panics on some values it cannot read, such as a
 	// tagged null under a mapping key decoded into a slice. The recover
 	// also catches a panic in a value's own UnmarshalYAML, which then
 	// comes back as a rejection too.
-	return n.bindDecodeError(decodeWithRecover(ctx, dec, node, decodeTarget(v, node)))
+	return n.bindDecodeError(decodeWithRecover(ctx, dec, decodeView(node), decodeTarget(v, node)))
+}
+
+// decodeView returns node as the go-yaml decoder reads it: the same tree,
+// with the name of each alias free of comments. The parser attaches a
+// comment on the line of an alias to its name, and the decoder looks the
+// anchor up by the text of the name, comment included, so `*x # note`
+// would name no anchor. The view copies each alias and the nodes above
+// it, and shares every other node and every token with node, so the tree
+// the Source shares stays as the parser built it, and every error the
+// decoder reports names a token of the source.
+func decodeView(node ast.Node) ast.Node {
+	view, _ := viewOf(node)
+
+	return view
+}
+
+// viewOf returns the [decodeView] of node, and whether it differs from
+// node.
+func viewOf(node ast.Node) (ast.Node, bool) {
+	if isNilNode(node) {
+		return node, false
+	}
+
+	switch n := node.(type) {
+	case *ast.AliasNode:
+		if isNilNode(n.Value) || n.Value.GetToken() == nil {
+			return n, false
+		}
+
+		// The decoder registers an anchor under the value of its name
+		// token, which a plain string node of the same token spells.
+		c := *n
+		c.Value = ast.String(n.Value.GetToken())
+
+		return &c, true
+
+	case *ast.AnchorNode:
+		value, changed := viewOf(n.Value)
+		if !changed {
+			return n, false
+		}
+
+		c := *n
+		c.Value = value
+
+		return &c, true
+
+	case *ast.TagNode:
+		value, changed := viewOf(n.Value)
+		if !changed {
+			return n, false
+		}
+
+		c := *n
+		c.Value = value
+
+		return &c, true
+
+	case *ast.MappingKeyNode:
+		value, changed := viewOf(n.Value)
+		if !changed {
+			return n, false
+		}
+
+		c := *n
+		c.Value = value
+
+		return &c, true
+
+	case *ast.MappingValueNode:
+		value, changed := mappingValueView(n)
+
+		return value, changed
+
+	case *ast.MappingNode:
+		values, changed := viewsOf(n.Values, mappingValueView)
+		if !changed {
+			return n, false
+		}
+
+		c := *n
+		c.Values = values
+
+		return &c, true
+
+	case *ast.SequenceNode:
+		values, changed := viewsOf(n.Values, viewOf)
+		if !changed {
+			return n, false
+		}
+
+		c := *n
+		c.Values = values
+
+		return &c, true
+
+	default:
+		return node, false
+	}
+}
+
+// mappingValueView is [viewOf] for an entry of a mapping.
+func mappingValueView(n *ast.MappingValueNode) (*ast.MappingValueNode, bool) {
+	if n == nil {
+		return nil, false
+	}
+
+	key, keyChanged := viewOf(n.Key)
+	value, valueChanged := viewOf(n.Value)
+
+	if !keyChanged && !valueChanged {
+		return n, false
+	}
+
+	c := *n
+	c.Value = value
+
+	// A copy has the type of its original, so a key stays a key.
+	if k, ok := key.(ast.MapKeyNode); ok {
+		c.Key = k
+	}
+
+	return &c, true
+}
+
+// viewsOf applies view to each of nodes, and returns a new slice when any
+// of them changed, or nodes itself when none did.
+func viewsOf[T ast.Node](nodes []T, view func(T) (T, bool)) ([]T, bool) {
+	var views []T
+
+	for i, node := range nodes {
+		v, changed := view(node)
+		if !changed {
+			if views != nil {
+				views[i] = node
+			}
+
+			continue
+		}
+
+		if views == nil {
+			views = make([]T, len(nodes))
+			copy(views, nodes[:i])
+		}
+
+		views[i] = v
+	}
+
+	if views == nil {
+		return nodes, false
+	}
+
+	return views, true
 }
 
 // bindDecodeError binds an error from the decoder to the source: a

@@ -391,6 +391,77 @@ func TestDocument_Decode(t *testing.T) {
 		assert.Equal(t, testStruct{Name: "first", Value: 1}, results[0])
 		assert.Equal(t, testStruct{Name: "second", Value: 2}, results[1])
 	})
+
+	t.Run("alias with a trailing comment", func(t *testing.T) {
+		t.Parallel()
+
+		// The parser attaches a comment on the line of an alias to its
+		// name, which the go-yaml decoder looks the anchor up by.
+		tcs := map[string]struct {
+			input   string
+			path    paths.Path
+			want    any
+			comment string
+		}{
+			"mapping value": {
+				input:   "base: &x 1\nref: *x # same as base\n",
+				path:    paths.Root(),
+				want:    map[string]any{"base": uint64(1), "ref": uint64(1)},
+				comment: "# same as base",
+			},
+			"sequence item": {
+				input:   "- &x 1\n- *x # c\n",
+				path:    paths.Root(),
+				want:    []any{uint64(1), uint64(1)},
+				comment: "# c",
+			},
+			"scoped node": {
+				input:   "base: &x 1\nsub:\n  ref: *x # same as base\n",
+				path:    paths.Root().Child("sub"),
+				want:    map[string]any{"ref": uint64(1)},
+				comment: "# same as base",
+			},
+			"scoped node through an anchor": {
+				input:   "a: &a 1\nb: &b\n  - *a # c\nsub: {k: *b}\n",
+				path:    paths.Root().Child("sub"),
+				want:    map[string]any{"k": []any{uint64(1)}},
+				comment: "# c",
+			},
+			"spec example 2.10": {
+				input: stringtest.Input(`
+					---
+					hr:
+					  - Mark McGwire
+					  # Following node labeled SS
+					  - &SS Sammy Sosa
+					rbi:
+					  - *SS # Subsequent occurrence
+					  - Ken Griffey
+				`),
+				path: paths.Root(),
+				want: map[string]any{
+					"hr":  []any{"Mark McGwire", "Sammy Sosa"},
+					"rbi": []any{"Sammy Sosa", "Ken Griffey"},
+				},
+				comment: "# Subsequent occurrence",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				got, err := yamltest.At(t, dd, tc.path).Decode[any](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got)
+
+				// The decode leaves the tree the Source shares as it was.
+				assert.Contains(t, dd.DocumentAST().String(), tc.comment)
+			})
+		}
+	})
 }
 
 func TestDocument_Decode_TypeMismatch(t *testing.T) {
