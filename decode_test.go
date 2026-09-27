@@ -4195,6 +4195,36 @@ func TestDecoder(t *testing.T) {
 		assert.Equal(t, "test", lax.Name)
 	})
 
+	t.Run("the zero value decodes as NewDecoder does", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			dec *niceyaml.Decoder
+		}{
+			"zero value": {
+				dec: &niceyaml.Decoder{},
+			},
+			"With on the zero value": {
+				dec: (&niceyaml.Decoder{}).With(),
+			},
+			"With an option on the zero value": {
+				dec: (&niceyaml.Decoder{}).With(niceyaml.WithDisallowUnknownFields(false)),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, "name: test\n")
+
+				got, err := tc.dec.Decode[validatorConfig](t.Context(), dd)
+				require.NoError(t, err)
+				assert.True(t, got.validated, "the value did not validate itself")
+			})
+		}
+	})
+
 	t.Run("runs the validators in order and stops at the first that fails", func(t *testing.T) {
 		t.Parallel()
 

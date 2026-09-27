@@ -1337,11 +1337,13 @@ func (n *Node) Bind(err error) error {
 //   - [WithYAMLDecodeOptions]
 type DecodeOption func(*decodeConfig)
 
-// decodeConfig holds the settings a [DecodeOption] configures.
+// decodeConfig holds the settings a [DecodeOption] configures. Its zero
+// value holds the defaults, so a zero [Decoder] decodes as [NewDecoder]
+// without options does.
 type decodeConfig struct {
 	validators            []Validator
 	yamlOpts              []yaml.DecodeOption
-	selfValidation        bool
+	skipSelfValidation    bool
 	disallowUnknownFields bool
 }
 
@@ -1349,7 +1351,7 @@ type decodeConfig struct {
 // opts applied over them in order. The result shares nothing with any
 // other decode.
 func newDecodeConfig(opts []DecodeOption) decodeConfig {
-	cfg := decodeConfig{selfValidation: true}
+	var cfg decodeConfig
 
 	for _, opt := range opts {
 		opt(&cfg)
@@ -1400,7 +1402,7 @@ func WithValidator(dv Validator) DecodeOption {
 // [WithValidator] run either way.
 func WithSelfValidation(enabled bool) DecodeOption {
 	return func(c *decodeConfig) {
-		c.selfValidation = enabled
+		c.skipSelfValidation = !enabled
 	}
 }
 
@@ -1481,7 +1483,7 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig) error {
 		return err
 	}
 
-	if cfg.selfValidation {
+	if !cfg.skipSelfValidation {
 		return n.Bind(selfValidate(v, n, yamlOpts))
 	}
 

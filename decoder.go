@@ -36,7 +36,8 @@ import (
 //
 // A Decoder never changes after [NewDecoder], so it is safe for
 // concurrent use. [Decoder.With] returns a new Decoder with more options
-// applied.
+// applied. The zero Decoder decodes as one from NewDecoder without
+// options does.
 //
 // Create instances with [NewDecoder].
 type Decoder struct {
