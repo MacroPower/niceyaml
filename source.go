@@ -64,12 +64,13 @@ type Source struct {
 	filePath string
 	lines    line.Lines
 	file     *ast.File
-	// Holds the copies of the tokens parse hands the parser. Every token the
-	// parser takes from the stream is one of these copies, and holdsToken
-	// matches against them by pointer. The implicit null tokens the parser
-	// makes for missing values are not copies, so holdsToken finds them
-	// among the tokens of the nodes of the document instead.
-	fileTokens token.Tokens
+	// Holds the set of copies of the tokens parse hands the parser. Every
+	// token the parser takes from the stream is one of these copies, and
+	// holdsToken looks a token up in the set by pointer. The implicit null
+	// tokens the parser makes for missing values are not copies, so
+	// holdsToken finds them among the tokens of the nodes of the document
+	// instead.
+	fileTokens map[*token.Token]struct{}
 	fileErr    error
 	docs       []*Node
 	parserOpts []parser.Option
@@ -447,7 +448,7 @@ func (s *Source) File() (*ast.File, error) {
 // parse hands a private copy of the tokens to the parser. The go-yaml parser
 // relinks Next and Prev while it moves comment tokens, and the Source's own
 // tokens, which its lines and the caller share, stay untouched. It returns
-// the copies with the file they parsed to.
+// the set of copies with the file they parsed to.
 //
 // [tokens.Tokenize] gives the first token all the whitespace ahead of its
 // text, where the lexer keeps only the line breaks of the blank lines and
@@ -458,12 +459,19 @@ func (s *Source) File() (*ast.File, error) {
 // it while the parser runs. It gets its own Origin back once the parser
 // returns, so it matches the Source's first token as [Source.File]
 // promises.
-func (s *Source) parse() (*ast.File, token.Tokens, error) {
+func (s *Source) parse() (*ast.File, map[*token.Token]struct{}, error) {
 	shared := s.Tokens()
 
 	tks := make(token.Tokens, 0, len(shared))
 	for _, tk := range shared {
 		tks.Add(tk.Clone())
+	}
+
+	set := make(map[*token.Token]struct{}, len(tks))
+	for _, tk := range tks {
+		if tk != nil {
+			set[tk] = struct{}{}
+		}
 	}
 
 	if len(tks) > 0 && tks[0] != nil {
@@ -493,7 +501,7 @@ func (s *Source) parse() (*ast.File, token.Tokens, error) {
 		return nil, nil, err
 	}
 
-	return file, tks, nil
+	return file, set, nil
 }
 
 // bareLeadingLines returns origin with each blank line in front of its

@@ -1750,7 +1750,11 @@ func (n *Node) holdsToken(tk *token.Token) bool {
 		return false
 	}
 
-	return slices.Contains(n.source.fileTokens, tk) || n.doc.holdsNodeToken(tk)
+	if _, ok := n.source.fileTokens[tk]; ok {
+		return true
+	}
+
+	return n.doc.holdsNodeToken(tk)
 }
 
 // decodeRejectedError is a [yamlMessageError] the decoder returned, which

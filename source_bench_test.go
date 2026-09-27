@@ -131,6 +131,45 @@ func BenchmarkNode_DecodeScoped(b *testing.B) {
 	}
 }
 
+func BenchmarkNode_DecodeRejectedStream(b *testing.B) {
+	sizes := []struct {
+		name string
+		docs int
+	}{
+		{"docs_1000", 1000},
+		{"docs_10000", 10000},
+	}
+
+	for _, sz := range sizes {
+		var sb strings.Builder
+
+		for i := range sz.docs {
+			fmt.Fprintf(&sb, "---\na: x%d\nb: y\nc: z\n", i)
+		}
+
+		docs, err := niceyaml.NewSourceFromString(sb.String()).Documents()
+		require.NoError(b, err)
+
+		b.Run(sz.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for b.Loop() {
+				for _, doc := range docs {
+					var v struct{ A int }
+
+					err := doc.DecodeInto(b.Context(), &v)
+					if !errors.Is(err, niceyaml.ErrDecodeRejected) {
+						b.Fatalf("got %v, want a rejection", err)
+					}
+				}
+			}
+
+			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*sz.docs), "ns/doc")
+		})
+	}
+}
+
 func BenchmarkNode_Nodes(b *testing.B) {
 	sizes := []struct {
 		name  string
