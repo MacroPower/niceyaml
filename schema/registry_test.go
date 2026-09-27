@@ -1007,6 +1007,105 @@ func TestRegistry_SharedLoad(t *testing.T) {
 			}
 		})
 	})
+
+	t.Run("caller whose context ends takes a load that already finished", func(t *testing.T) {
+		t.Parallel()
+
+		errBroken := errors.New("broken")
+
+		tcs := map[string]struct {
+			data []byte
+			err  error
+		}{
+			"schema": {
+				data: schemaData,
+			},
+			"failure": {
+				err: errBroken,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				// A late caller joins a load, and its deadline passes before
+				// it waits on the result. The load then finishes, so the late
+				// caller finds both its context and the result ready, and the
+				// select picks one at random. The result counts either way,
+				// and the test runs the race enough times to take both picks.
+				synctest.Test(t, func(t *testing.T) {
+					for range 64 {
+						release := make(chan struct{})
+
+						var loads atomic.Int32
+
+						ref := schema.Loadable("slow.json", func(_ context.Context) ([]byte, error) {
+							loads.Add(1)
+							<-release
+
+							return tc.data, tc.err
+						})
+
+						reg := schema.NewRegistry()
+
+						var (
+							wg         sync.WaitGroup
+							starter    *schema.Schema
+							starterErr error
+						)
+
+						wg.Go(func() {
+							starter, starterErr = reg.Schema(t.Context(), ref)
+						})
+
+						synctest.Wait()
+
+						// The gate holds the late caller between joining the load
+						// and waiting on it until the load has finished.
+						gate := make(chan struct{})
+						lateCtx := withGate(pastDeadline(t), gate)
+						lateDone := make(chan struct{})
+
+						var (
+							late    *schema.Schema
+							lateErr error
+						)
+
+						go func() {
+							defer close(lateDone)
+
+							late, lateErr = reg.Schema(lateCtx, ref)
+						}()
+
+						synctest.Wait()
+						close(release)
+						wg.Wait()
+
+						// Let the result reach the late caller before it waits on
+						// it.
+						synctest.Wait()
+						close(gate)
+						<-lateDone
+
+						require.Equal(t, int32(1), loads.Load())
+						require.Same(t, starter, late)
+
+						if tc.err == nil {
+							require.NoError(t, starterErr)
+							require.NoError(t, lateErr)
+							require.NotNil(t, late)
+						} else {
+							require.ErrorIs(t, starterErr, tc.err)
+							require.ErrorIs(t, lateErr, schema.ErrLoad)
+							require.ErrorIs(t, lateErr, tc.err)
+							require.NotErrorIs(t, lateErr, context.DeadlineExceeded)
+						}
+					}
+				})
+			})
+		}
+	})
 }
 
 func TestRegistry_DynamicResolver(t *testing.T) {
