@@ -14,6 +14,14 @@ import (
 // take O(m+n) space, and the pool keeps a buffer of that capacity for
 // later calls until the garbage collector clears the pool.
 //
+// Repeated lines often allow several shortest edit scripts. Hirschberg
+// picks one by sliding each run of changed lines as GNU diff does. A run
+// moves down as far as the content allows, then back up to where it lines
+// up with a run of changes in the other input. A removed or added copy of
+// a repeated block therefore shows as the later copy, and a replaced line
+// stays next to its replacement. Within each run of changes, the
+// deletions come before the insertions.
+//
 // A Hirschberg is safe for concurrent use. Each call borrows a set of
 // working buffers from a pool, so concurrent calls never share one, and the
 // buffers stay in the pool for later calls. Each call returns a fresh slice.
@@ -41,6 +49,7 @@ func (h *Hirschberg) Diff(before, after []string) []Op {
 
 	b.reset(len(before), len(after))
 	b.recurse(before, after, 0, len(before), 0, len(after))
+	b.compact(before, after)
 
 	if len(b.ops) == 0 {
 		return nil
@@ -58,6 +67,9 @@ type buffers struct {
 	// These are safe to reuse since recurse consumes each result
 	// before recursion.
 	fwdResult, bwdResult []int
+
+	// Changed lines of each input, which compact slides into place.
+	changedBefore, changedAfter []bool
 
 	// Accumulated diff operations.
 	ops []Op

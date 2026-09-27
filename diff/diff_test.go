@@ -674,6 +674,64 @@ func TestDiffer_Hunks(t *testing.T) {
 			},
 			annotations: map[int]string{0: "@@ -1,2 +0,0 @@"},
 		},
+		"delete trailing repeated list item": {
+			before: stringtest.Input(`
+				containers:
+				  - name: app
+				    image: nginx
+				    ports:
+				      - containerPort: 80
+				  - name: sidecar
+				    image: nginx
+				    ports:
+				      - containerPort: 80
+			`),
+			after: stringtest.Input(`
+				containers:
+				  - name: app
+				    image: nginx
+				    ports:
+				      - containerPort: 80
+			`),
+			context: 0,
+			wantLen: 4,
+			flags: map[int]line.Flag{
+				5: line.FlagDeleted,
+				6: line.FlagDeleted,
+				7: line.FlagDeleted,
+				8: line.FlagDeleted,
+			},
+			annotations: map[int]string{5: "@@ -6,4 +5,0 @@"},
+		},
+		"insert trailing repeated list item": {
+			before: stringtest.Input(`
+				containers:
+				  - name: app
+				    image: nginx
+				    ports:
+				      - containerPort: 80
+			`),
+			after: stringtest.Input(`
+				containers:
+				  - name: app
+				    image: nginx
+				    ports:
+				      - containerPort: 80
+				  - name: sidecar
+				    image: nginx
+				    ports:
+				      - containerPort: 80
+			`),
+			context: 0,
+			wantLen: 4,
+			flags: map[int]line.Flag{
+				5: line.FlagInserted,
+				6: line.FlagInserted,
+				7: line.FlagInserted,
+				8: line.FlagInserted,
+			},
+			annotations: map[int]string{5: "@@ -5,0 +6,4 @@"},
+		},
 	}
 
 	for name, tc := range tcs {
