@@ -4172,6 +4172,42 @@ func TestViewport_WithSearcher(t *testing.T) {
 	})
 }
 
+// nilSearcher is a [yamlviewport.Searcher] whose Load returns a nil Index.
+type nilSearcher struct{}
+
+func (nilSearcher) Load(line.Lines) yamlviewport.Index { return nil }
+
+func TestViewport_NilIndexFindsNothing(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		viewMode yamlviewport.ViewMode
+	}{
+		"unified":      {viewMode: yamlviewport.ViewModeFull},
+		"side by side": {viewMode: yamlviewport.ViewModeSideBySide},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(
+				yamlviewport.WithPrinter(testPrinter()),
+				yamlviewport.WithSearcher(nilSearcher{}),
+			)
+			m.SetWidth(80)
+			m.SetHeight(10)
+			m.AddRevision(niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("v1")))
+			m.AddRevision(niceyaml.NewSourceFromString("a: 2\n", niceyaml.WithName("v2")))
+			m.SetViewMode(tc.viewMode)
+
+			assert.NotPanics(t, func() { m.SetSearchTerm("a") })
+			assert.Equal(t, 0, m.SearchCount())
+			assert.Equal(t, -1, m.SearchIndex())
+		})
+	}
+}
+
 func TestViewport_SideBySideSelectedMatchOnInsertedLine(t *testing.T) {
 	t.Parallel()
 

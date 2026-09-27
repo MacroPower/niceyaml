@@ -26,7 +26,7 @@ const defaultHorizontalStep = 6
 
 // Searcher builds an [Index] over the lines on display. The viewport loads
 // the lines once per change of content and runs every search term through
-// the Index it gets back.
+// the Index it gets back. A nil Index finds no match for any term.
 //
 // [WithFinder] adapts a [finder.Finder] to this interface.
 type Searcher interface {
@@ -902,8 +902,8 @@ func (m *Model) updateSideBySideSearchState() {
 	}
 
 	// Search both panes and cache the results for overlay application.
-	m.leftMatches = heldMatches(m.baseLeft, m.index.Find(m.searchTerm))
-	m.rightMatches = heldMatches(m.baseRight, m.indexRight.Find(m.searchTerm))
+	m.leftMatches = heldMatches(m.baseLeft, find(m.index, m.searchTerm))
+	m.rightMatches = heldMatches(m.baseRight, find(m.indexRight, m.searchTerm))
 
 	// Build combined match list. For equal lines, a match appears in both
 	// panes at the same position, so we deduplicate by (row, startCol).
@@ -1024,12 +1024,22 @@ func (m *Model) updateSearchState(lines *line.View) {
 
 	// Convert ranges to searchMatch structs (the unified path does not
 	// use inLeft).
-	ranges := heldMatches(lines, m.index.Find(m.searchTerm))
+	ranges := heldMatches(lines, find(m.index, m.searchTerm))
 	m.searchMatches = make([]searchMatch, 0, len(ranges))
 
 	for _, rng := range ranges {
 		m.searchMatches = append(m.searchMatches, searchMatch{rng: rng})
 	}
+}
+
+// find returns the matches of search in idx. A nil idx, which a [Searcher]
+// may return, finds nothing.
+func find(idx Index, search string) position.Ranges {
+	if idx == nil {
+		return nil
+	}
+
+	return idx.Find(search)
 }
 
 // heldMatches returns the matches that start on a line view holds. A
