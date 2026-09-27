@@ -210,6 +210,34 @@ func BenchmarkFullDiffSource_WorstCase(b *testing.B) {
 	}
 }
 
+func BenchmarkFullDiffSource_NearIdentical(b *testing.B) {
+	// A watched file that changes one line at a time diffs two
+	// near-identical revisions.
+	const size = 20000
+
+	yamlA := yamltest.GenerateYAML(size)
+	sourceA := niceyaml.NewSourceFromString(yamlA, niceyaml.WithName("a"))
+
+	changes := map[string]string{
+		"identical":        yamlA,
+		"one_line_changed": strings.Replace(yamlA, "key_10000: value_10000\n", "key_10000: changed\n", 1),
+	}
+
+	for name, yamlB := range changes {
+		sourceB := niceyaml.NewSourceFromString(yamlB, niceyaml.WithName("b"))
+
+		b.Run(fmt.Sprintf("%s_%d", name, size), func(b *testing.B) {
+			b.ReportAllocs()
+
+			linesA, linesB := sourceA.Lines(), sourceB.Lines()
+
+			for b.Loop() {
+				_ = diff.Diff(linesA, linesB).Unified()
+			}
+		})
+	}
+}
+
 func BenchmarkFullDiffSource_InsertAtEnd(b *testing.B) {
 	// Best case for LCS: append-only changes.
 	sizes := []int{100, 500, 1000}

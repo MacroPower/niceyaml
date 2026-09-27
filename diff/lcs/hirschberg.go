@@ -7,12 +7,15 @@ import (
 
 // Hirschberg implements [Algorithm] using a space-efficient LCS algorithm.
 //
-// Time complexity is O(m*n), where m and n are the lengths of before and
-// after. The dynamic programming rows take O(n) space, since the algorithm
-// keeps two rows over the after sequence instead of an m by n table. The
-// result holds one [Op] per line of either input, so the accumulated ops
-// take O(m+n) space, and the pool keeps a buffer of that capacity for
-// later calls until the garbage collector clears the pool.
+// Diff first pairs up the lines that before and after share at the start
+// and at the end. The search over the rest takes O(m*n) time, where m and
+// n are the lengths of what remains of before and after, so identical
+// inputs and inputs with one short changed region diff in linear time.
+// The dynamic programming rows take O(n) space, since the algorithm keeps
+// two rows over the after sequence instead of an m by n table. The result
+// holds one [Op] per line of either input, so the accumulated ops take
+// space linear in the length of both inputs. The pool keeps buffers of
+// that capacity for later calls until the garbage collector clears it.
 //
 // Repeated lines often allow several shortest edit scripts. Hirschberg
 // picks one by sliding each run of changed lines as GNU diff does. A run
@@ -47,8 +50,16 @@ func (h *Hirschberg) Diff(before, after []string) []Op {
 
 	defer h.pool.Put(b)
 
-	b.reset(len(before), len(after))
-	b.recurse(before, after, 0, len(before), 0, len(after))
+	// The lines the inputs share at the start and at the end pair up in
+	// order, so only the middle needs the search. The ops of recurse then
+	// cover only the middle, and compact counts every line they leave out
+	// as unchanged.
+	prefix, suffix := commonEnds(before, after)
+	bEnd, aEnd := len(before)-suffix, len(after)-suffix
+
+	b.reset(len(before), len(after), aEnd-prefix)
+	b.intern(before, after, prefix, bEnd, aEnd)
+	b.recurse(b.beforeIDs, b.afterIDs, prefix, bEnd, prefix, aEnd)
 	b.compact(before, after)
 
 	if len(b.ops) == 0 {
@@ -68,6 +79,11 @@ type buffers struct {
 	// before recursion.
 	fwdResult, bwdResult []int
 
+	// Line IDs of each input, which name equal lines by one number so
+	// the search compares ints instead of strings. Only the lines between
+	// the shared start and end hold an ID.
+	beforeIDs, afterIDs []int
+
 	// Changed lines of each input, which compact slides into place.
 	changedBefore, changedAfter []bool
 
@@ -75,12 +91,12 @@ type buffers struct {
 	ops []Op
 }
 
-// reset empties the operations and sizes the rows for sequences of the
-// given lengths.
-func (b *buffers) reset(beforeLen, afterLen int) {
+// reset empties the operations and sizes the buffers for inputs of the
+// given lengths, whose search covers rowLen after lines.
+func (b *buffers) reset(beforeLen, afterLen, rowLen int) {
 	b.ops = b.ops[:0]
 
-	needed := afterLen + 1
+	needed := rowLen + 1
 	if cap(b.row0) < needed {
 		b.row0 = make([]int, needed)
 		b.row1 = make([]int, needed)
@@ -91,11 +107,56 @@ func (b *buffers) reset(beforeLen, afterLen int) {
 	if worst := beforeLen + afterLen; cap(b.ops) < worst {
 		b.ops = make([]Op, 0, worst)
 	}
+
+	b.beforeIDs = slices.Grow(b.beforeIDs[:0], beforeLen)[:beforeLen]
+	b.afterIDs = slices.Grow(b.afterIDs[:0], afterLen)[:afterLen]
+}
+
+// intern gives each line of before[start:bEnd] and after[start:aEnd] an
+// ID, the same one for equal lines, in b.beforeIDs and b.afterIDs.
+func (b *buffers) intern(before, after []string, start, bEnd, aEnd int) {
+	ids := make(map[string]int, bEnd-start)
+
+	id := func(line string) int {
+		n, ok := ids[line]
+		if !ok {
+			n = len(ids)
+			ids[line] = n
+		}
+
+		return n
+	}
+
+	for i := start; i < bEnd; i++ {
+		b.beforeIDs[i] = id(before[i])
+	}
+
+	for j := start; j < aEnd; j++ {
+		b.afterIDs[j] = id(after[j])
+	}
+}
+
+// commonEnds returns the number of lines that before and after share at
+// the start, and then the number they share at the end of what remains.
+func commonEnds(before, after []string) (int, int) {
+	prefix := 0
+	for prefix < len(before) && prefix < len(after) && before[prefix] == after[prefix] {
+		prefix++
+	}
+
+	suffix := 0
+	for suffix < len(before)-prefix && suffix < len(after)-prefix &&
+		before[len(before)-1-suffix] == after[len(after)-1-suffix] {
+		suffix++
+	}
+
+	return prefix, suffix
 }
 
 // recurse finds the LCS using divide-and-conquer.
-// Operates on before[bStart:bEnd] and after[aStart:aEnd].
-func (b *buffers) recurse(before, after []string, bStart, bEnd, aStart, aEnd int) {
+// Operates on before[bStart:bEnd] and after[aStart:aEnd], which hold the
+// line IDs from intern.
+func (b *buffers) recurse(before, after []int, bStart, bEnd, aStart, aEnd int) {
 	m := bEnd - bStart
 	n := aEnd - aStart
 
@@ -152,7 +213,7 @@ func (b *buffers) recurse(before, after []string, bStart, bEnd, aStart, aEnd int
 
 // singleBeforeLine handles the base case where there's exactly one before line.
 // Maintains "deletions before insertions" convention.
-func (b *buffers) singleBeforeLine(before, after []string, bStart, aStart, aEnd int) {
+func (b *buffers) singleBeforeLine(before, after []int, bStart, aStart, aEnd int) {
 	// Find first match in after sequence.
 	matchIdx := -1
 
@@ -191,39 +252,29 @@ func (b *buffers) singleBeforeLine(before, after []string, bStart, aStart, aEnd 
 // before[bStart:bMid] and after[aStart:aStart+j-aStart].
 //
 // The returned slice uses an internal buffer and is valid until the next call.
-func (b *buffers) forward(before, after []string, bStart, bMid, aStart, aEnd int) []int {
+func (b *buffers) forward(before, after []int, bStart, bMid, aStart, aEnd int) []int {
 	n := aEnd - aStart
+	seg := after[aStart:aEnd]
 
-	// Initialize both rows to zeros (required since we swap them).
-	for j := 0; j <= n; j++ {
-		b.row0[j] = 0
-		b.row1[j] = 0
-	}
+	// Both rows start at zero, since they trade places on each line.
+	prev, cur := b.row0[:n+1], b.row1[:n+1]
+	clear(prev)
+	clear(cur)
 
-	for i := bStart; i < bMid; i++ {
-		// Swap rows so row1 becomes the new row to fill.
-		b.row0, b.row1 = b.row1, b.row0
-		b.row1[0] = 0
+	for _, line := range before[bStart:bMid] {
+		prev, cur = cur, prev
+		cur[0] = 0
 
-		for j := range n {
-			if before[i] == after[aStart+j] {
-				b.row1[j+1] = b.row0[j] + 1
+		for j, other := range seg {
+			if line == other {
+				cur[j+1] = prev[j] + 1
 			} else {
-				b.row1[j+1] = max(b.row1[j], b.row0[j+1])
+				cur[j+1] = max(cur[j], prev[j+1])
 			}
 		}
 	}
 
-	// Copy to reusable result buffer.
-	// If no iterations occurred (bStart == bMid), copy row0 (all zeros).
-	src := b.row1
-	if bStart == bMid {
-		src = b.row0
-	}
-
-	copy(b.fwdResult[:n+1], src[:n+1])
-
-	return b.fwdResult[:n+1]
+	return b.fwdResult[:copy(b.fwdResult, cur)]
 }
 
 // backward computes LCS lengths going backward from bEnd to bMid.
@@ -232,37 +283,28 @@ func (b *buffers) forward(before, after []string, bStart, bMid, aStart, aEnd int
 // and after[j:aEnd].
 //
 // The returned slice uses an internal buffer and is valid until the next call.
-func (b *buffers) backward(before, after []string, bMid, bEnd, aStart, aEnd int) []int {
+func (b *buffers) backward(before, after []int, bMid, bEnd, aStart, aEnd int) []int {
 	n := aEnd - aStart
+	seg := after[aStart:aEnd]
 
-	// Initialize both rows to zeros (required since we swap them).
-	for j := 0; j <= n; j++ {
-		b.row0[j] = 0
-		b.row1[j] = 0
-	}
+	// Both rows start at zero, since they trade places on each line.
+	prev, cur := b.row0[:n+1], b.row1[:n+1]
+	clear(prev)
+	clear(cur)
 
 	for i := bEnd - 1; i >= bMid; i-- {
-		// Swap rows so row1 becomes the new row to fill.
-		b.row0, b.row1 = b.row1, b.row0
-		b.row1[0] = 0
+		prev, cur = cur, prev
+		cur[0] = 0
 
+		line := before[i]
 		for j := range n {
-			if before[i] == after[aEnd-1-j] {
-				b.row1[j+1] = b.row0[j] + 1
+			if line == seg[n-1-j] {
+				cur[j+1] = prev[j] + 1
 			} else {
-				b.row1[j+1] = max(b.row1[j], b.row0[j+1])
+				cur[j+1] = max(cur[j], prev[j+1])
 			}
 		}
 	}
 
-	// Copy to reusable result buffer.
-	// If no iterations occurred (bMid == bEnd), copy row0 (all zeros).
-	src := b.row1
-	if bMid == bEnd {
-		src = b.row0
-	}
-
-	copy(b.bwdResult[:n+1], src[:n+1])
-
-	return b.bwdResult[:n+1]
+	return b.bwdResult[:copy(b.bwdResult, cur)]
 }

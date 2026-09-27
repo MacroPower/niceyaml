@@ -208,6 +208,61 @@ func TestHirschberg_Diff(t *testing.T) {
 				{Kind: lcs.OpInsert, Before: -1, After: 4},
 			},
 		},
+		"repeated_line_around_deletion": {
+			before: []string{"a", "x", "a"},
+			after:  []string{"a"},
+			want: []lcs.Op{
+				{Kind: lcs.OpEqual, Before: 0, After: 0},
+				{Kind: lcs.OpDelete, Before: 1, After: -1},
+				{Kind: lcs.OpDelete, Before: 2, After: -1},
+			},
+		},
+		"repeated_pair_deletion": {
+			before: []string{"a", "b", "a", "b"},
+			after:  []string{"a", "b"},
+			want: []lcs.Op{
+				{Kind: lcs.OpEqual, Before: 0, After: 0},
+				{Kind: lcs.OpEqual, Before: 1, After: 1},
+				{Kind: lcs.OpDelete, Before: 2, After: -1},
+				{Kind: lcs.OpDelete, Before: 3, After: -1},
+			},
+		},
+		"repeated_line_deletion": {
+			before: []string{"a", "a"},
+			after:  []string{"a"},
+			want: []lcs.Op{
+				{Kind: lcs.OpEqual, Before: 0, After: 0},
+				{Kind: lcs.OpDelete, Before: 1, After: -1},
+			},
+		},
+		"shared_start_and_end": {
+			before: []string{"a", "b", "c", "d", "e", "f"},
+			after:  []string{"a", "b", "x", "y", "e", "f"},
+			want: []lcs.Op{
+				{Kind: lcs.OpEqual, Before: 0, After: 0},
+				{Kind: lcs.OpEqual, Before: 1, After: 1},
+				{Kind: lcs.OpDelete, Before: 2, After: -1},
+				{Kind: lcs.OpDelete, Before: 3, After: -1},
+				{Kind: lcs.OpInsert, Before: -1, After: 2},
+				{Kind: lcs.OpInsert, Before: -1, After: 3},
+				{Kind: lcs.OpEqual, Before: 4, After: 4},
+				{Kind: lcs.OpEqual, Before: 5, After: 5},
+			},
+		},
+		"shared_start_and_end_of_unequal_lengths": {
+			before: []string{"a", "b", "c", "e", "f"},
+			after:  []string{"a", "x", "y", "z", "e", "f"},
+			want: []lcs.Op{
+				{Kind: lcs.OpEqual, Before: 0, After: 0},
+				{Kind: lcs.OpDelete, Before: 1, After: -1},
+				{Kind: lcs.OpDelete, Before: 2, After: -1},
+				{Kind: lcs.OpInsert, Before: -1, After: 1},
+				{Kind: lcs.OpInsert, Before: -1, After: 2},
+				{Kind: lcs.OpInsert, Before: -1, After: 3},
+				{Kind: lcs.OpEqual, Before: 3, After: 4},
+				{Kind: lcs.OpEqual, Before: 4, After: 5},
+			},
+		},
 		"replace_before_repeated_line": {
 			before: []string{"x", "x"},
 			after:  []string{"y", "x"},
