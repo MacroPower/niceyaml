@@ -275,6 +275,22 @@ func TestFileOrURL(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	t.Run("rooted path on any platform", func(t *testing.T) {
+		t.Parallel()
+
+		// A rooted path never joins baseDir, as the rooted file URL above
+		// does not. Windows reads a rooted path that carries no volume as
+		// relative, so there the path would otherwise land under baseDir,
+		// and an empty baseDir would report ErrNoBaseDir. The key names
+		// the path as File does, on the current drive on Windows.
+		url, _, err := load(t, fileOrURL(t, "/configs", "/schemas/config.json"))
+		require.Error(t, err)
+		assert.Equal(t, schema.File("/schemas/config.json").Key(), url)
+
+		_, err = schema.FileOrURL("", "/schemas/config.json")
+		require.NoError(t, err)
+	})
+
 	t.Run("windows file URL on any platform", func(t *testing.T) {
 		t.Parallel()
 

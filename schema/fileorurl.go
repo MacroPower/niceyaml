@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -26,12 +27,14 @@ var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 // A fragment on an HTTP/HTTPS or file:// URL selects a subschema, as the
 // note on [URL] says, and a '#' in a plain path is part of the file name.
 // [Directive] splits a fragment off a plain path before it calls
-// FileOrURL, as yaml-language-server does.
-// A relative file path joins baseDir; the path a file:// URL names, an
-// absolute path, and an HTTP/HTTPS URL ignore baseDir. When baseDir is
-// empty and the path is relative, the error wraps [ErrNoBaseDir], and an
-// empty ref is [ErrEmptyPath] whatever baseDir is. The registry fetches
-// an HTTP/HTTPS reference with the client [WithHTTPClient] gave it.
+// FileOrURL, as yaml-language-server does. A relative file path joins
+// baseDir; the path a file:// URL names, an absolute or rooted path, and
+// an HTTP/HTTPS URL ignore baseDir, so on Windows "/schemas/config.json"
+// names a file at the root of the current drive rather than one below
+// baseDir. When baseDir is empty and the path is relative, the error wraps
+// [ErrNoBaseDir], and an empty ref is [ErrEmptyPath] whatever baseDir is.
+// The registry fetches an HTTP/HTTPS reference with the client
+// [WithHTTPClient] gave it.
 //
 // FileOrURL uses the reference as written, so whoever wrote it picks the
 // file or host, as the note on [File] says of a path. A registry that
@@ -103,8 +106,11 @@ func FileOrURL(baseDir, ref string) (Ref, error) {
 
 	// A drive-letter path is absolute on Windows and names nothing a POSIX
 	// base directory can resolve, so it never joins baseDir either. The
-	// drive then survives into the URL and the read error.
-	if filepath.IsAbs(path) || hasDriveLetter(path) {
+	// drive then survives into the URL and the read error. A rooted path
+	// counts as absolute everywhere, as the path of a file URL does, though
+	// Windows reads one that carries no volume as relative; there it
+	// resolves on the current drive.
+	if filepath.IsAbs(path) || hasDriveLetter(path) || os.IsPathSeparator(path[0]) {
 		return file(path)
 	}
 
