@@ -503,3 +503,54 @@ func TestResolver_MergeSources(t *testing.T) {
 		})
 	}
 }
+
+func TestResolver_MergeSources_HandBuilt(t *testing.T) {
+	t.Parallel()
+
+	// The parser never produces these keys, but MergeSources accepts any
+	// node, so a mutated tree must return no sources rather than panic.
+	source := mapNode(mapEntry(&ast.StringNode{Value: "k"}, &ast.StringNode{Value: "x"}))
+
+	tcs := map[string]struct {
+		key  ast.MapKeyNode
+		want int
+	}{
+		"explicit key wrapping a typed nil anchor": {
+			key: &ast.MappingKeyNode{Value: (*ast.AnchorNode)(nil)},
+		},
+		"anchor key wrapping a typed nil tag": {
+			key: &ast.AnchorNode{Value: (*ast.TagNode)(nil)},
+		},
+		"typed nil explicit key": {
+			key: (*ast.MappingKeyNode)(nil),
+		},
+		"explicit merge key": {
+			key:  &ast.MappingKeyNode{Value: &ast.MergeKeyNode{}},
+			want: 1,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			mapping := mapNode(mapEntry(tc.key, source))
+			doc := &ast.DocumentNode{Body: mapping}
+
+			var (
+				sources []ast.Node
+				err     error
+			)
+
+			require.NotPanics(t, func() {
+				sources, err = paths.NewResolver(doc).MergeSources(mapping)
+			})
+			require.NoError(t, err)
+			require.Len(t, sources, tc.want)
+
+			for _, src := range sources {
+				assert.Same(t, source, src)
+			}
+		})
+	}
+}

@@ -112,7 +112,7 @@ func (r *Resolver) MergeSources(node ast.Node) ([]ast.Node, error) {
 	var sources []ast.Node
 
 	for _, entry := range mapping.Values {
-		if entry == nil || isNilNode(entry.Key) || !entry.Key.IsMergeKey() {
+		if entry == nil || !isMergeKey(entry.Key) {
 			continue
 		}
 
