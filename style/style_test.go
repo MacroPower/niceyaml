@@ -277,6 +277,18 @@ func TestStyles_With(t *testing.T) {
 		assert.Equal(t, lipgloss.NewStyle(), zero.Style(kind.Comment))
 		assert.Equal(t, lipgloss.Color("#ffff00"), zero.With().Style(kind.Comment).GetForeground())
 	})
+
+	t.Run("option on a copy leaves the original unchanged", func(t *testing.T) {
+		t.Parallel()
+
+		shared := style.New(base, style.Set(kind.Comment, green))
+		cp := shared
+
+		style.Set(kind.Comment, red)(&cp)
+
+		assert.Equal(t, lipgloss.Color("#00ff00"), shared.With().Style(kind.Comment).GetForeground())
+		assert.Equal(t, lipgloss.Color("#ff0000"), cp.With().Style(kind.Comment).GetForeground())
+	})
 }
 
 func TestStyles_UnsetCategories(t *testing.T) {
@@ -405,5 +417,20 @@ func TestInherit(t *testing.T) {
 
 		result := zero.With(style.Set(kind.Comment, green))
 		assert.Equal(t, lipgloss.Color("#00ff00"), result.Style(match).GetForeground())
+	})
+
+	t.Run("option on a copy leaves the original unchanged", func(t *testing.T) {
+		t.Parallel()
+
+		shared := style.New(base,
+			style.Set(kind.Comment, green),
+			style.Inherit(focus, kind.Comment),
+		)
+		cp := shared
+
+		style.Inherit(match, kind.Comment)(&cp)
+
+		assert.Equal(t, lipgloss.Color("#ffffff"), shared.With().Style(match).GetForeground())
+		assert.Equal(t, lipgloss.Color("#00ff00"), cp.With().Style(match).GetForeground())
 	})
 }

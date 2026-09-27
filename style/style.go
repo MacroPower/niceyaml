@@ -39,9 +39,17 @@ type Styles struct {
 	overrides map[kind.Kind]*lipgloss.Style
 	parents   map[kind.Kind]kind.Kind
 	resolved  map[kind.Kind]*lipgloss.Style
+	// Building is true while [New] or [Styles.With] runs options on maps
+	// it just made, so the options may write to those maps in place.
+	building bool
 }
 
 // Option configures a [Styles] value during construction.
+//
+// An option applied by hand to an existing value changes that value
+// alone and leaves every copy of it as it was, including the shared value
+// [Default] returns. [Styles.Style] reports the change once [Styles.With]
+// resolves inheritance again.
 //
 // Available options:
 //   - [Set]
@@ -55,8 +63,11 @@ type Option func(*Styles)
 //nolint:gocritic // Value semantics preferred for API ergonomics.
 func Set(s kind.Kind, ls lipgloss.Style) Option {
 	return func(st *Styles) {
-		if st.overrides == nil {
+		switch {
+		case st.overrides == nil:
 			st.overrides = make(map[kind.Kind]*lipgloss.Style, 1)
+		case !st.building:
+			st.overrides = maps.Clone(st.overrides)
 		}
 
 		st.overrides[s] = &ls
@@ -79,8 +90,11 @@ func Set(s kind.Kind, ls lipgloss.Style) Option {
 // parents that returns to child resolves to the base style.
 func Inherit(child, parent kind.Kind) Option {
 	return func(st *Styles) {
-		if st.parents == nil {
+		switch {
+		case st.parents == nil:
 			st.parents = make(map[kind.Kind]kind.Kind, 1)
+		case !st.building:
+			st.parents = maps.Clone(st.parents)
 		}
 
 		st.parents[child] = parent
@@ -96,12 +110,16 @@ func Inherit(child, parent kind.Kind) Option {
 //
 //nolint:gocritic // Value semantics preferred for API ergonomics.
 func New(base lipgloss.Style, opts ...Option) Styles {
-	st := Styles{overrides: map[kind.Kind]*lipgloss.Style{kind.Text: &base}}
+	st := Styles{
+		overrides: map[kind.Kind]*lipgloss.Style{kind.Text: &base},
+		building:  true,
+	}
 
 	for _, opt := range opts {
 		opt(&st)
 	}
 
+	st.building = false
 	st.resolved = st.resolve()
 
 	return st
@@ -198,6 +216,7 @@ func (s Styles) With(opts ...Option) Styles {
 	c := Styles{
 		overrides: make(map[kind.Kind]*lipgloss.Style, len(s.overrides)+len(opts)),
 		parents:   make(map[kind.Kind]kind.Kind, len(s.parents)+len(opts)),
+		building:  true,
 	}
 	maps.Copy(c.overrides, s.overrides)
 	maps.Copy(c.parents, s.parents)
@@ -210,6 +229,7 @@ func (s Styles) With(opts ...Option) Styles {
 		opt(&c)
 	}
 
+	c.building = false
 	c.resolved = c.resolve()
 
 	return c
