@@ -350,11 +350,10 @@ func (l Layout) LineAt(row int) int {
 		return -1
 	}
 
-	// The last start at or before row, which is the line whose rows hold
-	// it. The search finds the first start past row.
-	k := sort.Search(n, func(i int) bool { return l.starts[i] > row }) - 1
-
-	return l.indices[min(max(k, 0), n-1)]
+	// The line whose first row is the last start at or before row. The
+	// last entry of starts is the row count rather than a line, so the
+	// lookup leaves it out.
+	return l.indices[rowIndex(l.starts[:n], row)]
 }
 
 // RowOf returns the row that holds column pos.Col of line pos.Line of the
@@ -371,10 +370,7 @@ func (l Layout) RowOf(pos position.Position) int {
 
 	ll := l.lines[k]
 
-	// The last content row that starts at or before the column.
-	row := sort.Search(len(ll.rows), func(i int) bool { return ll.rows[i] > pos.Col }) - 1
-
-	return l.starts[k] + ll.above + max(row, 0)
+	return l.starts[k] + ll.above + rowIndex(ll.rows, pos.Col)
 }
 
 // Width returns the width in cells of the widest row, gutter included,
