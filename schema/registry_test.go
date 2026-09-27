@@ -2330,6 +2330,14 @@ func TestRegistry_Schema_RedactsPassword(t *testing.T) {
 			//nolint:errcheck // Test helper.
 			w.Write([]byte(`{"$defs": {"Foo": {}}}`))
 
+		case "/d/root.json":
+			//nolint:errcheck // Test helper.
+			w.Write([]byte(`{"properties": {"a": {"$ref": "../anchor.json"}}}`))
+
+		case "/anchor.json":
+			//nolint:errcheck // Test helper.
+			w.Write([]byte(`{"$defs": {"a": {"$anchor": "1bad"}}}`))
+
 		default:
 			http.NotFound(w, r)
 		}
@@ -2354,6 +2362,14 @@ func TestRegistry_Schema_RedactsPassword(t *testing.T) {
 			url: withPassword + "/defs.json#/$defs/Missing",
 			err: schema.ErrCompile,
 		},
+		"a relative $ref to a document with an invalid anchor": {
+			url: withPassword + "/d/root.json",
+			err: schema.ErrCompile,
+		},
+		"a fragment whose relative $ref names an invalid anchor": {
+			url: withPassword + "/d/root.json#/properties/a",
+			err: schema.ErrCompile,
+		},
 		"a url that does not parse": {
 			url: "http://user:secret@127.0.0.1:port/s.json",
 			err: schema.ErrLoad,
@@ -2376,4 +2392,132 @@ func TestRegistry_Schema_RedactsPassword(t *testing.T) {
 			assert.Contains(t, err.Error(), "user:xxxxx@")
 		})
 	}
+}
+
+func TestRegistry_Validate_RedactsPassword(t *testing.T) {
+	t.Parallel()
+
+	// The referenced document answers 500 to its first request, so the
+	// compile misses it and the first validation loads it, and then holds
+	// an anchor the compiler rejects.
+	var lateHits atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/d/root.json":
+			//nolint:errcheck // Test helper.
+			w.Write([]byte(`{"properties": {"a": {"$ref": "../late.json"}}}`))
+
+		case "/late.json":
+			if lateHits.Add(1) == 1 {
+				http.Error(w, "unavailable", http.StatusInternalServerError)
+
+				return
+			}
+
+			//nolint:errcheck // Test helper.
+			w.Write([]byte(`{"$defs": {"a": {"$anchor": "1bad"}}}`))
+
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	ref := schema.URL(strings.Replace(server.URL, "://", "://user:secret@", 1) + "/d/root.json")
+	reg := schema.NewRegistry(schema.WithResolvers(ref))
+
+	_, err := reg.Schema(t.Context(), ref)
+	require.NoError(t, err)
+
+	err = reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+	require.ErrorIs(t, err, schema.ErrValidate)
+	assert.Contains(t, err.Error(), "1bad")
+	assert.NotContains(t, err.Error(), "secret")
+}
+
+func TestRegistry_RefCredentials(t *testing.T) {
+	t.Parallel()
+
+	// The server answers only a request that carries the password, so a
+	// referenced document loads only when the registry sends it.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if user, pass, ok := r.BasicAuth(); !ok || user != "user" || pass != "secret" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+
+			return
+		}
+
+		switch r.URL.Path {
+		case "/d/root.json":
+			//nolint:errcheck // Test helper.
+			w.Write([]byte(`{"properties": {"a": {"$ref": "../defs.json#/$defs/Str"}}}`))
+
+		case "/defs.json":
+			//nolint:errcheck // Test helper.
+			w.Write([]byte(`{"$defs": {"Str": {"type": "string"}}}`))
+
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	withPassword := strings.Replace(server.URL, "://", "://user:secret@", 1)
+
+	tcs := map[string]struct {
+		url   string
+		input string
+	}{
+		"a whole document": {
+			url:   withPassword + "/d/root.json",
+			input: "a: 5\n",
+		},
+		"a fragment": {
+			url:   withPassword + "/d/root.json#/properties/a",
+			input: "5\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			reg := schema.NewRegistry(schema.WithResolvers(schema.URL(tc.url)))
+
+			err := reg.Validate(t.Context(), yamltest.FirstDocument(t, tc.input))
+			require.Error(t, err)
+			require.NotErrorIs(t, err, schema.ErrValidate)
+			assert.Contains(t, err.Error(), `expected "string", got "integer"`)
+		})
+	}
+
+	t.Run("a document on another host gets no userinfo", func(t *testing.T) {
+		t.Parallel()
+
+		var sawAuth atomic.Bool
+
+		other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if _, _, ok := r.BasicAuth(); ok {
+				sawAuth.Store(true)
+			}
+
+			//nolint:errcheck // Test helper.
+			w.Write([]byte(`{"type": "string"}`))
+		}))
+		t.Cleanup(other.Close)
+
+		root := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			//nolint:errcheck // Test helper.
+			fmt.Fprintf(w, `{"properties": {"a": {"$ref": %q}}}`, other.URL+"/defs.json")
+		}))
+		t.Cleanup(root.Close)
+
+		ref := schema.URL(strings.Replace(root.URL, "://", "://user:secret@", 1) + "/root.json")
+		reg := schema.NewRegistry(schema.WithResolvers(ref))
+
+		err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+		require.ErrorContains(t, err, `expected "string", got "integer"`)
+		assert.False(t, sawAuth.Load())
+	})
 }

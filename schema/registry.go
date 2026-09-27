@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"maps"
 	"net/http"
+	"net/url"
 	"runtime"
 	"slices"
 	"strings"
@@ -706,28 +707,37 @@ func (r *Registry) keepRefDoc(uri string, data []byte) bool {
 // refOptions returns the options the registry compiles the schema ref
 // names with: the options [WithCompileOptions] gave it, behind options
 // that let a $ref in a schema from [File] or [URL] name a document beside
-// it. Such a schema takes its key as the base URI of its references, and
-// the registry reads each document a reference names as it reads the
-// schema, so a relative $ref resolves against the file or URL that holds
-// it. The registry loads each such document once and keeps it for every
-// schema that references it, at compile time and during validation. A
-// document that fails to load stays out of the registry, so a later
-// validation that reaches the reference loads it again. A schema from
-// [File] reaches local files and URLs, and one from [URL] reaches only
-// URLs, so a remote schema cannot read the local disk, even when a schema
-// from [File] loaded the file first. A remote document that a schema from
-// [File] reaches cannot read the local disk either, because the resolver
-// refuses a document fetched over HTTP or HTTPS that names a file URL.
-// The refusal holds whatever order the compiler reaches documents in, and
-// it covers a document the registry kept for a schema from [URL].
+// it. Such a schema takes base, its key without any userinfo, as the base
+// URI of its references. The registry reads each document a reference
+// names as it reads the schema, so a relative $ref resolves against the
+// file or URL that holds it. The registry loads each such document once
+// and keeps it for every schema that references it, at compile time and
+// during validation. A document that fails to load stays out of the
+// registry, so a later validation that reaches the reference loads it
+// again. A schema from [File] reaches local files and URLs, and one from
+// [URL] reaches only URLs, so a remote schema cannot read the local disk,
+// even when a schema from [File] loaded the file first. A remote document
+// that a schema from [File] reaches cannot read the local disk either,
+// because the resolver refuses a document fetched over HTTP or HTTPS that
+// names a file URL. The refusal holds whatever order the compiler reaches
+// documents in, and it covers a document the registry kept for a schema
+// from [URL].
+//
+// User holds the userinfo of a key from [URL], such as a password. It
+// stays out of every URI the compiler and the validator resolve, so no
+// error that quotes such a URI holds the password. The registry adds user
+// to each fetch of a URL that names the scheme and host of the key and
+// carries no userinfo of its own. It keeps the document under that URL
+// with user in it, so a document fetched with the password stays apart
+// from one fetched without it.
 //
 // When ref names a subschema by a fragment, doc is the document the
-// registry loaded for ref, parsed, and docURL is the key without its
+// registry loaded for ref, parsed, and docURL is base without its
 // fragment. A reference to docURL then resolves to doc without a second
 // load, and a relative $ref in doc resolves against docURL. A nil doc
 // means ref names a whole document. An option from [WithCompileOptions]
 // comes later and wins.
-func (r *Registry) refOptions(ref Ref, docURL string, doc *jsonschema.Schema) []CompileOption {
+func (r *Registry) refOptions(ref Ref, base string, user keyUserinfo, doc *jsonschema.Schema) []CompileOption {
 	if !ref.url && ref.file == "" {
 		return r.compileOpts
 	}
@@ -746,6 +756,7 @@ func (r *Registry) refOptions(ref Ref, docURL string, doc *jsonschema.Schema) []
 
 		switch {
 		case isHTTPURL(uri):
+			uri = user.apply(uri)
 			load = func() ([]byte, error) {
 				//nolint:wrapcheck // The fetch error names the URL already.
 				return httpfetch.Get(ctx, r.client, uri)
@@ -785,7 +796,7 @@ func (r *Registry) refOptions(ref Ref, docURL string, doc *jsonschema.Schema) []
 	})
 
 	refOpts := []jsonschema.ValidateOption{
-		jsonschema.WithBaseURI(ref.key),
+		jsonschema.WithBaseURI(base),
 		jsonschema.WithRefResolver(resolver),
 	}
 
@@ -793,8 +804,10 @@ func (r *Registry) refOptions(ref Ref, docURL string, doc *jsonschema.Schema) []
 	// equal to the document's URL would point its $ref at itself. The
 	// document takes its URL as its base, as a whole document does.
 	if doc != nil {
+		docURL, _, _ := strings.Cut(base, "#")
+
 		preload := jsonschema.RefResolverFunc(func(_ context.Context, uri string) (*jsonschema.Schema, error) {
-			if base, _, _ := strings.Cut(uri, "#"); base == docURL {
+			if target, _, _ := strings.Cut(uri, "#"); target == docURL {
 				return doc, nil
 			}
 
@@ -900,6 +913,13 @@ func (r *Registry) compile(ctx context.Context, ref Ref) (*Schema, error) {
 		return nil, err
 	}
 
+	// The compiler sees the key of a URL without its userinfo, and the
+	// resolver adds the userinfo back to each fetch.
+	base, user := key, keyUserinfo{}
+	if ref.url {
+		base, user = splitUserinfo(key)
+	}
+
 	// A fragment on the key of a file or a URL names a subschema of the
 	// document. The registry compiles a schema whose $ref names that
 	// subschema and serves the loaded document to the reference. A key
@@ -907,22 +927,22 @@ func (r *Registry) compile(ctx context.Context, ref Ref) (*Schema, error) {
 	// compiles whole.
 	var doc *jsonschema.Schema
 
-	docURL, fragment, _ := strings.Cut(key, "#")
+	_, fragment, _ := strings.Cut(base, "#")
 	if (ref.url || ref.file != "") && fragment != "" {
 		doc, err = jsonschema.ParseSchema(data)
 		if err != nil {
 			return nil, fmt.Errorf("%q: %w: %w", ref.name(), ErrCompile, err)
 		}
 
-		data, err = json.Marshal(map[string]string{"$ref": key})
+		data, err = json.Marshal(map[string]string{"$ref": base})
 		if err != nil {
 			return nil, fmt.Errorf("%q: %w: %w", ref.name(), ErrCompile, err)
 		}
 	}
 
-	compiled, err := Compile(ctx, data, r.refOptions(ref, docURL, doc)...)
+	compiled, err := Compile(ctx, data, r.refOptions(ref, base, user, doc)...)
 	if err != nil {
-		return nil, fmt.Errorf("%q: %w", ref.name(), redactURL(err, docURL))
+		return nil, fmt.Errorf("%q: %w", ref.name(), err)
 	}
 
 	r.mu.Lock()
@@ -933,34 +953,43 @@ func (r *Registry) compile(ctx context.Context, ref Ref) (*Schema, error) {
 	return compiled, nil
 }
 
-// A redactedError is an error whose message quotes a URL that holds a
-// password, such as the $ref the compiler cannot resolve when a fragment
-// names no subschema. Its message spells each copy of the URL as
-// [httpfetch.Redacted] spells it.
-type redactedError struct {
-	err  error
-	url  string
-	name string
+// A keyUserinfo is the userinfo of a URL key, with the scheme and host
+// it belongs to. The zero keyUserinfo holds none.
+type keyUserinfo struct {
+	user   *url.Userinfo
+	scheme string
+	host   string
 }
 
-// Error implements error.
-func (e *redactedError) Error() string {
-	return strings.ReplaceAll(e.err.Error(), e.url, e.name)
-}
-
-// Unwrap returns the error whose message e redacts.
-func (e *redactedError) Unwrap() error {
-	return e.err
-}
-
-// redactURL returns err with each copy of rawURL in its message redacted
-// as [httpfetch.Redacted] redacts it, or err itself when rawURL holds no
-// password.
-func redactURL(err error, rawURL string) error {
-	name := httpfetch.Redacted(rawURL)
-	if name == rawURL {
-		return err
+// splitUserinfo returns rawURL without its userinfo, and that userinfo.
+// A URL that carries none, or does not parse, comes back unchanged with
+// the zero keyUserinfo.
+func splitUserinfo(rawURL string) (string, keyUserinfo) {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.User == nil {
+		return rawURL, keyUserinfo{}
 	}
 
-	return &redactedError{err: err, url: rawURL, name: name}
+	info := keyUserinfo{user: u.User, scheme: u.Scheme, host: u.Host}
+	u.User = nil
+
+	return u.String(), info
+}
+
+// apply returns uri with the userinfo of k when uri names the scheme and
+// host of k and carries no userinfo of its own, and uri unchanged
+// otherwise.
+func (k keyUserinfo) apply(uri string) string {
+	if k.user == nil {
+		return uri
+	}
+
+	u, err := url.Parse(uri)
+	if err != nil || u.User != nil || !strings.EqualFold(u.Scheme, k.scheme) || !strings.EqualFold(u.Host, k.host) {
+		return uri
+	}
+
+	u.User = k.user
+
+	return u.String()
 }
