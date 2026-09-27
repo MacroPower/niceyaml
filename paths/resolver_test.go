@@ -1,7 +1,10 @@
 package paths_test
 
 import (
+	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/goccy/go-yaml/ast"
 	"github.com/stretchr/testify/assert"
@@ -40,6 +43,40 @@ func TestResolver_Node(t *testing.T) {
 			input: "base: &b {k: x}\nm:\n  <<: *b\n  own: 1\n",
 			path:  "$.m.k",
 			want:  "x",
+		},
+		"anchor a merge brings in again": {
+			// The decoder reads the anchors of a merged mapping again at
+			// the merge key, so &x one is the last &x before *x.
+			input: "base: &b\n  k: &x one\nother: &x two\nm:\n  <<: *b\n  v: *x\n",
+			path:  "$.m.v",
+			want:  "one",
+		},
+		"anchor a merge brings in again for a later mapping": {
+			input: "base: &b\n  k: &x one\nother: &x two\nm:\n  <<: *b\nv: *x\n",
+			path:  "$.v",
+			want:  "one",
+		},
+		"anchor a nested merge brings in again": {
+			input: "b1: &b1 {k: &x one}\nb2: &b2 {<<: *b1}\nother: &x two\nm:\n  <<: *b2\n  v: *x\n",
+			path:  "$.m.v",
+			want:  "one",
+		},
+		"anchor of the later merge source": {
+			input: "a: &a {k: &x one}\nb: &b {k: &x two}\nother: &x three\nm:\n  <<: [*b, *a]\n  v: *x\n",
+			path:  "$.m.v",
+			want:  "one",
+		},
+		"anchor of a later inline merge source": {
+			input: "base: &b {k: &x one}\nother: &x two\nm:\n  <<: [*b, {j: &x three}]\n  v: *x\n",
+			path:  "$.m.v",
+			want:  "three",
+		},
+		"anchor of a merge source that merges itself": {
+			// The decoder rejects the merge of a mapping into itself. The
+			// binding stops at the cycle and still counts &x one again.
+			input: "a: &a {k: &x one, i: {<<: *a}}\nother: &x two\nm:\n  <<: *a\n  v: *x\n",
+			path:  "$.m.v",
+			want:  "one",
 		},
 		"unknown alias": {
 			input: "a: *nope\n",
@@ -351,6 +388,44 @@ func assertSameError(t *testing.T, wantErr, err error, expr string) bool {
 	require.NoError(t, err, expr)
 
 	return true
+}
+
+func TestResolver_NestedMerges(t *testing.T) {
+	t.Parallel()
+
+	// Each mapping merges the one before it four times, so reading every
+	// merge again would take 4^39 reads. The anchors of each mapping count
+	// once per merge all the same.
+	var sb strings.Builder
+
+	sb.WriteString("l0: &l0 {k: &x one}\nother: &x two\n")
+
+	for i := 1; i < 40; i++ {
+		fmt.Fprintf(&sb, "l%d: &l%d {<<: [*l%d, *l%d, *l%d, *l%d]}\n", i, i, i-1, i-1, i-1, i-1)
+	}
+
+	sb.WriteString("v: *x\n")
+
+	file, err := niceyaml.NewSourceFromString(sb.String()).File()
+	require.NoError(t, err)
+
+	nodes := make(chan ast.Node, 1)
+
+	go func() {
+		node, err := paths.NewResolver(file.Docs[0]).Node(paths.Root().Child("v"))
+		assert.NoError(t, err)
+
+		nodes <- node
+	}()
+
+	select {
+	case node := <-nodes:
+		require.NotNil(t, node)
+		assert.Equal(t, "one", node.String())
+
+	case <-time.After(10 * time.Second):
+		require.FailNow(t, "binding the aliases did not return within 10s")
+	}
 }
 
 func TestResolver_MergeSources(t *testing.T) {

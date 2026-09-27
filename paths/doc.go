@@ -51,9 +51,15 @@
 // keeps the mapping's own key either way.
 //
 // When several anchors share a name, an alias refers to the last one before
-// it, which is the anchor the goccy/go-yaml decoder uses. An alias with no
-// anchor of its name before it, or one that leads back to itself, has no
-// content, so resolving through it returns an error wrapping [ErrAlias].
+// it, which is the anchor the goccy/go-yaml decoder uses when it fills a
+// map. The decoder reads each mapping a `<<` merge key brings in again at
+// the merge key, so the anchors inside that mapping count again there. It
+// also looks up the aliases inside that mapping again, while a path keeps
+// the anchor each alias refers to where the mapping defines it. When the
+// decoder fills a struct it resolves aliases in the order of the struct's
+// fields, which a path does not follow. An alias with no anchor of its name
+// before it, or one that leads back to itself, has no content, so resolving
+// through it returns an error wrapping [ErrAlias].
 //
 // The wildcard selectors `[*]` and `..name` select any number of nodes, so
 // [Path.Token] and [Path.Node] reject them with [ErrWildcard]; use

@@ -2,6 +2,7 @@ package paths
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 
@@ -73,11 +74,16 @@ type resolver struct {
 // newResolver creates a new [*resolver] for doc.
 //
 // It binds each alias to the last anchor of its name before it in doc, which
-// is the anchor the goccy/go-yaml decoder uses for that alias.
+// is the anchor the goccy/go-yaml decoder uses for that alias when it fills
+// a map. The decoder reads a mapping a `<<` merge key brings in again at the
+// merge key, and so does newResolver, so the anchors of that mapping count
+// again there.
 func newResolver(doc *ast.DocumentNode) *resolver {
 	b := &aliasBinder{
 		anchors: map[string]ast.Node{},
 		targets: map[*ast.AliasNode]ast.Node{},
+		merged:  map[*ast.MappingNode]map[string]ast.Node{},
+		open:    map[*ast.MappingNode]bool{},
 	}
 
 	ast.Walk(b, doc.Body)
@@ -90,13 +96,22 @@ func newResolver(doc *ast.DocumentNode) *resolver {
 // visited so far, and the targets map holds the content each visited alias
 // refers to. Walk visits an anchor before its content, so an alias inside
 // that content refers to the anchor around it.
+//
+// The merged map holds, for each mapping a merge key has brought in through
+// an alias, the anchors that merging it records, from
+// [aliasBinder.mergedAnchors]. The open map holds the anchored and merged
+// mappings the walk is inside of, and the ones mergedAnchors is reading, so
+// a mapping that merges itself stops there.
 type aliasBinder struct {
 	anchors map[string]ast.Node
 	targets map[*ast.AliasNode]ast.Node
+	merged  map[*ast.MappingNode]map[string]ast.Node
+	open    map[*ast.MappingNode]bool
 }
 
 // Visit records an anchor or binds an alias, then returns b so [ast.Walk]
-// continues into the children of node.
+// continues into the children of node. It walks the content of an anchor
+// and the entry of a `<<` merge key itself and returns nil for them.
 //
 // It returns nil for a nil node, including a typed nil a hand-built tree may
 // hold, so Walk stops rather than reading the fields behind it.
@@ -111,6 +126,14 @@ func (b *aliasBinder) Visit(node ast.Node) ast.Visitor {
 			b.anchors[name.Value] = n.Value
 		}
 
+		if mapping := anchoredMapping(n.Value); mapping != nil {
+			b.walkOpen(mapping)
+		} else {
+			ast.Walk(b, n.Value)
+		}
+
+		return nil
+
 	case *ast.AliasNode:
 		name := nodeToken(n.Value)
 		if name == nil {
@@ -120,9 +143,226 @@ func (b *aliasBinder) Visit(node ast.Node) ast.Visitor {
 		if target, ok := b.anchors[name.Value]; ok {
 			b.targets[n] = target
 		}
+
+	case *ast.MappingValueNode:
+		if isMergeKey(n.Key) {
+			ast.Walk(b, n.Key)
+			b.merge(n.Value)
+
+			return nil
+		}
 	}
 
 	return b
+}
+
+// merge walks the value of a `<<` merge key in the order the decoder reads
+// it. [aliasBinder.findSources] records the anchors and binds the aliases
+// on the way to each mapping the value merges. Then merge walks each
+// inline mapping, and records again the anchors of each mapping an alias
+// brings in.
+func (b *aliasBinder) merge(value ast.Node) {
+	for _, src := range b.findSources(value, b.anchors, true) {
+		if src.inline {
+			b.walkOpen(src.mapping)
+
+			continue
+		}
+
+		anchors, _ := b.mergedAnchors(src.mapping)
+		maps.Copy(b.anchors, anchors)
+	}
+}
+
+// mergeSource is a mapping a `<<` merge key brings in. The inline field
+// reports whether the value of the merge key holds the mapping itself,
+// rather than an alias to it.
+type mergeSource struct {
+	mapping *ast.MappingNode
+	inline  bool
+}
+
+// findSources returns the mappings a `<<` merge key with value brings in,
+// in the order the decoder reads them. As the decoder does before it
+// reads any of them, findSources looks through the anchors, tags, and
+// aliases on value and on each element of a sequence of them, and records
+// each anchor on the way into anchors. It follows an alias to the anchor
+// Visit bound it to, and stops at an alias it has already followed.
+//
+// With bind set, findSources binds each alias of value itself and walks
+// any other node of value where the decoder expects a mapping, so the
+// aliases inside that node bind too.
+func (b *aliasBinder) findSources(value ast.Node, anchors map[string]ast.Node, bind bool) []mergeSource {
+	var sources []mergeSource
+
+	var find func(node ast.Node, inline, top bool)
+
+	find = func(node ast.Node, inline, top bool) {
+		var followed []*ast.AliasNode
+
+		for !isNilNode(node) {
+			switch n := node.(type) {
+			case *ast.AnchorNode:
+				if name := nodeToken(n.Name); name != nil {
+					anchors[name.Value] = n.Value
+				}
+
+				node = n.Value
+
+			case *ast.TagNode:
+				node = n.Value
+			case *ast.AliasNode:
+				if slices.Contains(followed, n) {
+					return
+				}
+
+				followed = append(followed, n)
+
+				if bind && inline {
+					ast.Walk(b, n)
+				}
+
+				node, inline = b.targets[n], false
+
+			case *ast.MappingNode:
+				sources = append(sources, mergeSource{mapping: n, inline: inline})
+
+				return
+
+			case *ast.SequenceNode:
+				if top {
+					for _, v := range n.Values {
+						find(v, inline, false)
+					}
+				} else if bind && inline {
+					ast.Walk(b, n)
+				}
+
+				return
+
+			default:
+				if bind && inline {
+					ast.Walk(b, n)
+				}
+
+				return
+			}
+		}
+	}
+
+	find(value, true, true)
+
+	return sources
+}
+
+// mergedAnchors returns the anchors the decoder records when a `<<` merge
+// key brings mapping in. Those are the last anchor of each name in mapping,
+// in document order, where a `<<` merge key inside mapping counts the
+// anchors of the mappings it merges. It finds the mappings those merge keys
+// bring in through the aliases as Visit bound them, and reads each mapping
+// once however many merge keys bring it in. The bool result reports
+// whether the result holds for every later merge of mapping. It does not
+// when mapping, or a mapping it merges, is open, since those merge nothing
+// until the walk leaves them.
+func (b *aliasBinder) mergedAnchors(mapping *ast.MappingNode) (map[string]ast.Node, bool) {
+	if anchors, ok := b.merged[mapping]; ok {
+		return anchors, true
+	}
+
+	if b.open[mapping] {
+		return nil, false
+	}
+
+	b.open[mapping] = true
+	defer delete(b.open, mapping)
+
+	r := &anchorReader{binder: b, anchors: map[string]ast.Node{}, final: true}
+	ast.Walk(r, mapping)
+
+	if r.final {
+		b.merged[mapping] = r.anchors
+	}
+
+	return r.anchors, r.final
+}
+
+// anchorReader collects the anchors [aliasBinder.mergedAnchors] returns
+// while [ast.Walk] visits a mapping. The anchors map holds the last anchor
+// of each name so far, and final reports whether the result holds for
+// every merge.
+type anchorReader struct {
+	binder  *aliasBinder
+	anchors map[string]ast.Node
+	final   bool
+}
+
+// Visit records an anchor, or at a `<<` merge key records the anchors of
+// the mappings it merges, then returns r so [ast.Walk] continues into the
+// children of node. It returns nil for a nil node, including a typed nil a
+// hand-built tree may hold, and for an alias, whose content the merge
+// records nothing from.
+func (r *anchorReader) Visit(node ast.Node) ast.Visitor {
+	if isNilNode(node) {
+		return nil
+	}
+
+	switch n := node.(type) {
+	case *ast.AnchorNode:
+		if name := nodeToken(n.Name); name != nil {
+			r.anchors[name.Value] = n.Value
+		}
+
+	case *ast.AliasNode:
+		return nil
+
+	case *ast.MappingValueNode:
+		if isMergeKey(n.Key) {
+			r.merge(n.Value)
+
+			return nil
+		}
+	}
+
+	return r
+}
+
+// merge records the anchors a `<<` merge key with value brings in, in the
+// order [aliasBinder.merge] records them.
+func (r *anchorReader) merge(value ast.Node) {
+	for _, src := range r.binder.findSources(value, r.anchors, false) {
+		anchors, final := r.binder.mergedAnchors(src.mapping)
+		maps.Copy(r.anchors, anchors)
+
+		r.final = r.final && final
+	}
+}
+
+// walkOpen walks mapping, the content of an anchor or a mapping a `<<`
+// merge key holds inline, and holds it open while the walk is inside it.
+func (b *aliasBinder) walkOpen(mapping *ast.MappingNode) {
+	if !b.open[mapping] {
+		b.open[mapping] = true
+		defer delete(b.open, mapping)
+	}
+
+	ast.Walk(b, mapping)
+}
+
+// anchoredMapping returns the mapping an anchor's content holds, looking
+// through tags, or nil when the content is not a mapping.
+func anchoredMapping(content ast.Node) *ast.MappingNode {
+	for !isNilNode(content) {
+		switch n := content.(type) {
+		case *ast.TagNode:
+			content = n.Value
+		case *ast.MappingNode:
+			return n
+		default:
+			return nil
+		}
+	}
+
+	return nil
 }
 
 // deref looks through anchors and aliases to the content node they carry.
