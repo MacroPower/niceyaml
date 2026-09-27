@@ -90,10 +90,17 @@ func expandPaths(args ...string) ([]string, error) {
 	seen := make(map[string]bool)
 	add := func(path string) {
 		// One file named two ways, such as by a relative and an absolute
-		// path, is one file.
+		// path, or by a symlink and its target, is one file. A name that
+		// does not resolve, such as one with no file behind it, keeps its
+		// lexical key, and the read reports it.
 		key, err := filepath.Abs(path)
 		if err != nil {
 			key = filepath.Clean(path)
+		}
+
+		resolved, err := filepath.EvalSymlinks(key)
+		if err == nil {
+			key = resolved
 		}
 
 		if seen[key] {

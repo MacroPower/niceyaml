@@ -213,6 +213,64 @@ func TestExpand(t *testing.T) {
 	}
 }
 
+func TestExpandPathsSymlinks(t *testing.T) {
+	t.Parallel()
+
+	// Create a directory structure with symlinks:
+	// tmpDir/
+	//   sub/
+	//     x.yaml
+	//   link.yaml -> sub/x.yaml
+	//   ldir -> sub
+	tmpDir := t.TempDir()
+	subdir := filepath.Join(tmpDir, "sub")
+	target := filepath.Join(subdir, "x.yaml")
+	link := filepath.Join(tmpDir, "link.yaml")
+	throughDir := filepath.Join(tmpDir, "ldir", "x.yaml")
+
+	require.NoError(t, os.MkdirAll(subdir, 0o755))
+	require.NoError(t, os.WriteFile(target, []byte("x"), 0o644))
+
+	err := os.Symlink(filepath.Join("sub", "x.yaml"), link)
+	if err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	require.NoError(t, os.Symlink("sub", filepath.Join(tmpDir, "ldir")))
+
+	tcs := map[string]struct {
+		args []string
+		want []string
+	}{
+		"recursive glob with symlinked file": {
+			args: []string{tmpDir + "/**/*.yaml"},
+			want: []string{link},
+		},
+		"symlink and target named explicitly": {
+			args: []string{link, target},
+			want: []string{link},
+		},
+		"target and symlink named explicitly": {
+			args: []string{target, link},
+			want: []string{target},
+		},
+		"file through symlinked directory and directly": {
+			args: []string{throughDir, target},
+			want: []string{throughDir},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			paths, err := expandPaths(tc.args...)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, paths)
+		})
+	}
+}
+
 func TestGlob(t *testing.T) {
 	t.Parallel()
 
