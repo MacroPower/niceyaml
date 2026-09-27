@@ -309,7 +309,9 @@ type AnnotationRow struct {
 	Kind kind.Kind
 
 	// Col is the column of the content the row starts under, in runes of
-	// [AnnotationContext.Content]. A negative Col starts at column zero.
+	// [AnnotationContext.Content]. A negative Col starts at column zero,
+	// and a Col more than 1024 columns past the end of the content starts
+	// 1024 columns past it.
 	Col int
 }
 
@@ -954,6 +956,11 @@ type annotationGroup struct {
 // for them.
 const minAnnotationWidth = 20
 
+// maxColPastEnd is the furthest an annotation row starts past the end of
+// the content, in columns, so a far column pads the row by at most this
+// many cells past the content.
+const maxColPastEnd = 1024
+
 // annotationGroups renders the annotations of line idx of view, which is
 // ln, at the given placement: one group per kind, as
 // [line.Annotations.ByKind] groups and orders them, each rendered by the
@@ -974,6 +981,7 @@ func (p *Printer) annotationGroups(
 	}
 
 	cr := cells.NewRow(ln.Content())
+	lastCol := utf8.RuneCountInString(ln.Content()) + maxColPastEnd
 
 	var groups []annotationGroup
 
@@ -990,8 +998,9 @@ func (p *Printer) annotationGroups(
 
 		// The padding runs from the start of the wrapped row that holds
 		// the column, so the marker lands in the cell the column takes on
-		// that row.
-		col := max(0, row.Col)
+		// that row. The column stops at lastCol, so a stray column such as
+		// math.MaxInt pads a bounded row.
+		col := min(max(0, row.Col), lastCol)
 
 		from := 0
 		if len(starts) > 0 {

@@ -14,6 +14,7 @@
 package cells
 
 import (
+	"math"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
@@ -79,7 +80,8 @@ func (r Row) Cells(col int) int {
 
 // Width returns the cells the content takes before col, with a column past
 // the end of the content taking one cell. A column inside a cluster
-// measures up to the start of its cluster.
+// measures up to the start of its cluster. The width saturates at
+// [math.MaxInt].
 func (r Row) Width(col int) int {
 	col = r.Start(col)
 
@@ -89,5 +91,5 @@ func (r Row) Width(col int) int {
 		width += w
 	}
 
-	return width + max(0, col-len(r.widths))
+	return width + min(max(0, col-len(r.widths)), math.MaxInt-width)
 }

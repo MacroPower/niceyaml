@@ -2261,6 +2261,68 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 	}
 }
 
+func TestPrinter_AnnotationFarColumn(t *testing.T) {
+	t.Parallel()
+
+	// A column more than 1024 columns past the end of the content starts
+	// 1024 columns past it, after every cell of the content.
+	tcs := map[string]struct {
+		input string
+		want  string
+		col   int
+		width int
+	}{
+		"max column": {
+			input: "k: v",
+			col:   math.MaxInt,
+			want:  strings.Repeat(" ", 4+1024) + "^ x",
+		},
+		"max column after wide runes": {
+			input: "k: 日本語",
+			col:   math.MaxInt,
+			want:  strings.Repeat(" ", 9+1024) + "^ x",
+		},
+		"max column when wrapping": {
+			input: "k: v",
+			col:   math.MaxInt,
+			width: 10,
+			want:  strings.Repeat(" ", 4+1024) + "^ x",
+		},
+		"column past the bound": {
+			input: "k: v",
+			col:   1 << 32,
+			want:  strings.Repeat(" ", 4+1024) + "^ x",
+		},
+		"column at the bound": {
+			input: "k: v",
+			col:   4 + 1024,
+			want:  strings.Repeat(" ", 4+1024) + "^ x",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := niceyaml.NewSourceFromString(tc.input).View()
+			view.Annotate(0, line.Annotation{Content: "x", Placement: line.Below, Col: tc.col})
+
+			p := testPrinter().With(printer.WithWrap(tc.width))
+
+			var got string
+
+			require.NotPanics(t, func() { got = p.Print(view) })
+			assert.Equal(t, stringtest.JoinLF(tc.input, tc.want), got)
+
+			var l printer.Layout
+
+			require.NotPanics(t, func() { l = p.Layout(view) })
+			assert.Equal(t, 2, l.Rows())
+			assert.Equal(t, lipgloss.Width(tc.want), l.Width())
+		})
+	}
+}
+
 func TestPrinter_AnnotationPosition_WithGutter(t *testing.T) {
 	t.Parallel()
 

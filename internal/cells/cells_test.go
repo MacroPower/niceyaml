@@ -1,6 +1,7 @@
 package cells_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -29,6 +30,13 @@ func TestRow(t *testing.T) {
 		"second zwj emoji":         {content: zwj, col: 5, wantStart: 3, wantCells: 0, wantWidth: 3},
 		"after a zwj sequence":     {content: zwj, col: 7, wantStart: 7, wantCells: 1, wantWidth: 6},
 		"past the end":             {content: "a: b", col: 6, wantStart: 6, wantCells: 1, wantWidth: 6},
+		"max column after wide runes saturates": {
+			content:   "k: 日本語",
+			col:       math.MaxInt,
+			wantStart: math.MaxInt,
+			wantCells: 1,
+			wantWidth: math.MaxInt,
+		},
 	}
 
 	for name, tc := range tcs {
