@@ -1548,9 +1548,10 @@ func (m *Model) hasRevision() bool {
 	return len(m.revisions) > 0
 }
 
-// canRender reports whether the content area has room for any rows.
+// canRender reports whether the content area has room for any rows. In
+// side-by-side mode each pane needs a column beside the separator.
 func (m *Model) canRender() bool {
-	return m.maxHeight() > 0 && m.maxWidth() > 0
+	return m.maxHeight() > 0 && m.paneWidth() > 0
 }
 
 // visibleRows renders the rows of the visible window, trimmed to the content
@@ -1998,8 +1999,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 // getViewDimensions returns (width, height, ok). If ok is false, the content
-// area has no room for rows, because a dimension is zero or negative or the
-// frame of the container style takes all of it, and View renders "".
+// area has no room for rows, because a dimension is zero or negative, the
+// frame of the container style takes all of it, or the separator of the
+// side-by-side view leaves its panes no column, and View renders "".
 func (m *Model) getViewDimensions() (int, int, bool) {
 	if !m.canRender() {
 		return 0, 0, false
@@ -2069,11 +2071,7 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 		return m.renderContent(nil, contentW, contentH)
 	}
 
-	// Need room for separator plus at least 1 character per pane.
 	paneWidth := m.paneWidth()
-	if paneWidth < 1 {
-		return m.renderContent(nil, contentW, contentH)
-	}
 
 	first, last := m.rowWindow()
 	if first >= last {

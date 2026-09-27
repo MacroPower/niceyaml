@@ -1440,6 +1440,37 @@ func TestViewport_HorizontalScrollKeepsFrameAtWideRune(t *testing.T) {
 	}
 }
 
+func TestViewport_SideBySideWithoutPaneColumns(t *testing.T) {
+	t.Parallel()
+
+	// The separator takes three columns, so a width of 3 or 4 leaves the
+	// panes no column. The view shows nothing, and the counts of what is
+	// on screen agree with it.
+	tcs := map[string]struct {
+		width int
+	}{
+		"width 3": {width: 3},
+		"width 4": {width: 4},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+			m.SetWidth(tc.width)
+			m.SetHeight(5)
+			m.AddRevision(niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n", niceyaml.WithName("v1")))
+			m.AddRevision(niceyaml.NewSourceFromString("a: 1\nb: 9\nc: 3\n", niceyaml.WithName("v2")))
+			m.SetViewMode(yamlviewport.ViewModeSideBySide)
+
+			assert.Empty(t, m.View())
+			assert.Equal(t, 0, m.VisibleLineCount())
+			assert.Equal(t, 0, m.VisibleRowCount())
+		})
+	}
+}
+
 func TestViewport_DiffOfRevisionsOverPartOfTheSource(t *testing.T) {
 	t.Parallel()
 
@@ -3374,14 +3405,15 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			height: 16,
 		},
 		"SideBySideTooNarrow": {
-			// Width <=4: renders empty without panic.
+			// Width <=4: paneWidth = (4-3)/2 = 0, so it renders empty
+			// without panic.
 			setupFunc: func(m *yamlviewport.Model) {
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("v1")))
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev2Tokens, niceyaml.WithName("v2")))
 				m.GotoRevision(1)
 				m.SetViewMode(yamlviewport.ViewModeSideBySide)
 			},
-			width:  0,
+			width:  4,
 			height: 10,
 		},
 		"SideBySideMinimal": {
