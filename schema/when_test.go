@@ -133,4 +133,20 @@ func TestWhen(t *testing.T) {
 			schema.When(matcher.Content(kindPath, "x"), nil)
 		})
 	})
+
+	t.Run("nil Func matcher panics", func(t *testing.T) {
+		t.Parallel()
+
+		assert.PanicsWithValue(t, "schema.When: matcher is nil", func() {
+			schema.When(matcher.Func(nil), schema.Embedded(schemaData))
+		})
+	})
+
+	t.Run("nil ResolverFunc panics", func(t *testing.T) {
+		t.Parallel()
+
+		assert.PanicsWithValue(t, "schema.When: resolver is nil", func() {
+			schema.When(matcher.Content(kindPath, "x"), schema.ResolverFunc(nil))
+		})
+	})
 }
