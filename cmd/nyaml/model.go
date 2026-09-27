@@ -265,7 +265,12 @@ func (m *model) updateThemeInput(msg tea.KeyPressMsg) {
 	}
 }
 
+// applySearch searches for term and scrolls to its first match. The viewport
+// keeps its current match and scroll position when it gets the term it
+// already has, so applySearch clears the term first. Submitting the active
+// term again then brings its first match back into view.
 func (m *model) applySearch(term string) {
+	m.viewport.ClearSearch()
 	m.viewport.SetSearchTerm(term)
 }
 

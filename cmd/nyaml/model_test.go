@@ -357,6 +357,56 @@ func TestInitialSearchScrollsLikeALaterOne(t *testing.T) {
 	assert.Equal(t, want.viewport.YOffset(), got.viewport.YOffset())
 }
 
+func TestResubmittedSearchScrollsToMatch(t *testing.T) {
+	t.Parallel()
+
+	lines := &strings.Builder{}
+	for i := 1; i <= 40; i++ {
+		fmt.Fprintf(lines, "k%d: v\n", i)
+	}
+
+	var m tea.Model = newModel(&modelOptions{
+		sources: []*niceyaml.Source{
+			niceyaml.NewSourceFromString(lines.String(), niceyaml.WithName("a.yaml")),
+		},
+	})
+
+	press := func(keys ...tea.KeyPressMsg) model {
+		t.Helper()
+
+		for _, k := range keys {
+			m, _ = m.Update(k)
+		}
+
+		got, ok := m.(model)
+		require.True(t, ok)
+
+		return got
+	}
+
+	search := []tea.KeyPressMsg{
+		{Code: '/', Text: "/"},
+		{Code: 'k', Text: "k"},
+		{Code: '3', Text: "3"},
+		{Code: '0', Text: "0"},
+		{Code: tea.KeyEnter},
+	}
+
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 40, Height: 14})
+
+	got := press(search...)
+	matched := got.viewport.YOffset()
+	require.Positive(t, matched)
+
+	got = press(tea.KeyPressMsg{Code: 'g', Text: "g"})
+	require.Zero(t, got.viewport.YOffset())
+
+	// Submitting the active term again brings its match back into view.
+	got = press(search...)
+	assert.Equal(t, "k30", got.viewport.SearchTerm())
+	assert.Equal(t, matched, got.viewport.YOffset())
+}
+
 func TestBaseViewHeight(t *testing.T) {
 	t.Parallel()
 
