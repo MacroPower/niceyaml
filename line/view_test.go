@@ -1,6 +1,7 @@
 package line_test
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style/kind"
@@ -295,6 +297,20 @@ func TestView_Flag(t *testing.T) {
 		view.SetFlag(0, line.FlagDeleted)
 
 		assert.Equal(t, line.FlagDeleted, view.Flag(0))
+	})
+
+	t.Run("SetFlag to FlagDefault clears the flag", func(t *testing.T) {
+		t.Parallel()
+
+		view := newTestView(t, "a: 1\nb: 2\n", 2)
+		view.SetFlag(0, line.FlagInserted)
+		view.SetFlag(0, line.FlagDefault)
+		view.SetFlag(1, line.FlagDefault)
+
+		assert.Equal(t, line.FlagDefault, view.Flag(0))
+		assert.Equal(t, line.FlagDefault, view.Flag(1))
+		assert.Equal(t, line.FlagDefault, view.Slice().Flag(0))
+		assert.Equal(t, 0, view.Hunks(0).Count())
 	})
 }
 
@@ -1140,6 +1156,57 @@ func TestView_Slice(t *testing.T) {
 
 		assert.Equal(t, "   3 | c: 3\n     | ^^^ c: 3", got.String())
 	})
+}
+
+func TestView_Slice_CostIndependentOfContent(t *testing.T) {
+	t.Parallel()
+
+	const (
+		smallLen = 1000
+		largeLen = 20000
+		runs     = 1000
+	)
+
+	// SliceBytes returns the bytes one slice of the same 50-line window of
+	// a decorated view over n lines allocates, averaged over many runs so
+	// that allocations by tests running alongside spread thin.
+	sliceBytes := func(t *testing.T, n int) int64 {
+		t.Helper()
+
+		view := line.NewView(line.NewLines(tokens.Tokenize(yamltest.GenerateYAML(n))))
+		view.SetFlag(110, line.FlagInserted)
+		view.AddLineOverlay(120, line.Overlay{Cols: position.NewSpan(0, 3), Kind: kind.GenericHighlight})
+		view.Annotate(130, line.Annotation{Content: "note", Placement: line.Below})
+
+		var (
+			before, after runtime.MemStats
+			got           *line.View
+		)
+
+		runtime.ReadMemStats(&before)
+
+		for range runs {
+			got = view.Slice(position.NewSpan(100, 150))
+		}
+
+		runtime.ReadMemStats(&after)
+
+		require.Equal(t, 50, got.Count())
+		assert.Equal(t, line.FlagInserted, got.Flag(110))
+		assert.Len(t, got.Overlays(120), 1)
+		assert.Len(t, got.Annotations(130), 1)
+
+		return int64(after.TotalAlloc-before.TotalAlloc) / runs
+	}
+
+	small := sliceBytes(t, smallLen)
+	large := sliceBytes(t, largeLen)
+
+	// A slice that allocated even one byte per line of content would grow
+	// by the number of lines the larger content adds.
+	assert.Less(t, large-small, int64(largeLen-smallLen),
+		"slice of %d lines allocates %d B, slice of %d lines allocates %d B",
+		smallLen, small, largeLen, large)
 }
 
 func TestView_String(t *testing.T) {

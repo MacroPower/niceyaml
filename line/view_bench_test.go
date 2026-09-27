@@ -64,3 +64,32 @@ func BenchmarkViewHunks(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkViewSlice(b *testing.B) {
+	sizes := []struct {
+		name  string
+		lines int
+	}{
+		{"medium_1000", 1000},
+		{"large_100000", 100000},
+	}
+
+	for _, sz := range sizes {
+		lines := line.NewLines(tokens.Tokenize(yamltest.GenerateYAML(sz.lines)))
+
+		// A viewport slices the same 50-line window of a decorated view on
+		// every frame, whatever the length of the content.
+		view := line.NewView(lines)
+		view.SetFlag(110, line.FlagInserted)
+		view.AddLineOverlay(120, line.Overlay{Cols: position.NewSpan(0, 3), Kind: kind.GenericHighlight})
+		view.Annotate(130, line.Annotation{Content: "note", Placement: line.Below})
+
+		b.Run(sz.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				_ = view.Slice(position.NewSpan(100, 150))
+			}
+		})
+	}
+}

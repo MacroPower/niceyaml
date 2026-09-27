@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"iter"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -44,28 +45,27 @@ import (
 //
 // Create instances with [NewView]. The zero value is an empty view.
 type View struct {
-	lines Lines
+	// The decoration of the lines that carry some, keyed by index. An
+	// undecorated line has no entry, so a slice or a clone costs the
+	// lines it holds and the decoration it copies, whatever the length of
+	// the content.
+	flags       map[int]Flag
+	overlays    map[int]Overlays
+	annotations map[int]Annotations
+	lines       Lines
 	// The index in lines of each line the View holds, ascending.
 	held []int
-	// Whether the View holds each line of lines, by index.
-	mask        []bool
-	flags       []Flag
-	overlays    []Overlays
-	annotations []Annotations
 }
 
 // NewView creates a new [*View] over lines with no decoration, holding
 // every line in order.
 func NewView(lines Lines) *View {
 	held := make([]int, lines.Len())
-	mask := make([]bool, lines.Len())
-
 	for i := range held {
 		held[i] = i
-		mask[i] = true
 	}
 
-	return &View{lines: lines, held: held, mask: mask}
+	return &View{lines: lines, held: held}
 }
 
 // Lines returns the content of the [View], every line of the [Lines] it is
@@ -123,11 +123,13 @@ func (v *View) Count() int {
 // Contains reports whether the [View] holds line i of its content. A nil
 // View holds no line, and no View holds an index outside its content.
 func (v *View) Contains(i int) bool {
-	if v == nil || i < 0 || i >= len(v.mask) {
+	if v == nil {
 		return false
 	}
 
-	return v.mask[i]
+	_, ok := slices.BinarySearch(v.held, i)
+
+	return ok
 }
 
 // Index returns the index of the line the [View] holds that is l and
@@ -145,7 +147,7 @@ func (v *View) Index(l *Line) (int, bool) {
 	// drops the first occurrence finds a later one.
 	i, ok := v.lines.firstIndex(l)
 	for ok {
-		if v.mask[i] {
+		if v.Contains(i) {
 			return i, true
 		}
 
@@ -223,10 +225,6 @@ func mergeSpans(spans []position.Span, n int) position.Spans {
 func (v *View) Flag(i int) Flag {
 	_ = v.lines.lines[i]
 
-	if v.flags == nil {
-		return FlagDefault
-	}
-
 	return v.flags[i]
 }
 
@@ -234,8 +232,14 @@ func (v *View) Flag(i int) Flag {
 func (v *View) SetFlag(i int, f Flag) {
 	_ = v.lines.lines[i]
 
+	if f == FlagDefault {
+		delete(v.flags, i)
+
+		return
+	}
+
 	if v.flags == nil {
-		v.flags = make([]Flag, v.lines.Len())
+		v.flags = make(map[int]Flag)
 	}
 
 	v.flags[i] = f
@@ -247,10 +251,6 @@ func (v *View) SetFlag(i int, f Flag) {
 func (v *View) Annotations(i int) Annotations {
 	_ = v.lines.lines[i]
 
-	if v.annotations == nil {
-		return nil
-	}
-
 	return v.annotations[i]
 }
 
@@ -259,7 +259,7 @@ func (v *View) Annotate(i int, ann ...Annotation) {
 	_ = v.lines.lines[i]
 
 	if v.annotations == nil {
-		v.annotations = make([]Annotations, v.lines.Len())
+		v.annotations = make(map[int]Annotations)
 	}
 
 	v.annotations[i] = append(v.annotations[i], ann...)
@@ -272,10 +272,6 @@ func (v *View) Annotate(i int, ann ...Annotation) {
 func (v *View) Overlays(i int) Overlays {
 	_ = v.lines.lines[i]
 
-	if v.overlays == nil {
-		return nil
-	}
-
 	return v.overlays[i]
 }
 
@@ -286,7 +282,7 @@ func (v *View) AddLineOverlay(i int, o ...Overlay) {
 	_ = v.lines.lines[i]
 
 	if v.overlays == nil {
-		v.overlays = make([]Overlays, v.lines.Len())
+		v.overlays = make(map[int]Overlays)
 	}
 
 	v.overlays[i] = append(v.overlays[i], o...)
@@ -337,24 +333,14 @@ func (v *View) Clone() *View {
 		return nil
 	}
 
-	c := &View{lines: v.lines, held: slices.Clone(v.held), mask: slices.Clone(v.mask)}
+	c := &View{lines: v.lines, held: slices.Clone(v.held), flags: maps.Clone(v.flags)}
 
-	if v.flags != nil {
-		c.flags = slices.Clone(v.flags)
+	for i, o := range v.overlays {
+		c.AddLineOverlay(i, o...)
 	}
 
-	if v.overlays != nil {
-		c.overlays = make([]Overlays, len(v.overlays))
-		for i, o := range v.overlays {
-			c.overlays[i] = slices.Clone(o)
-		}
-	}
-
-	if v.annotations != nil {
-		c.annotations = make([]Annotations, len(v.annotations))
-		for i, a := range v.annotations {
-			c.annotations[i] = slices.Clone(a)
-		}
+	for i, a := range v.annotations {
+		c.Annotate(i, a...)
 	}
 
 	return c
@@ -374,32 +360,19 @@ func (v *View) Slice(spans ...position.Span) *View {
 		return out
 	}
 
-	n := v.lines.Len()
-	out.mask = make([]bool, n)
-
 	for i := range v.All(spans...) {
 		out.held = append(out.held, i)
-		out.mask[i] = true
-	}
 
-	if v.flags != nil {
-		out.flags = make([]Flag, n)
-		for _, i := range out.held {
-			out.flags[i] = v.flags[i]
+		if f := v.Flag(i); f != FlagDefault {
+			out.SetFlag(i, f)
 		}
-	}
 
-	if v.overlays != nil {
-		out.overlays = make([]Overlays, n)
-		for _, i := range out.held {
-			out.overlays[i] = slices.Clone(v.overlays[i])
+		if o := v.Overlays(i); len(o) > 0 {
+			out.AddLineOverlay(i, o...)
 		}
-	}
 
-	if v.annotations != nil {
-		out.annotations = make([]Annotations, n)
-		for _, i := range out.held {
-			out.annotations[i] = slices.Clone(v.annotations[i])
+		if a := v.Annotations(i); len(a) > 0 {
+			out.Annotate(i, a...)
 		}
 	}
 
