@@ -51,3 +51,29 @@ func TestRow(t *testing.T) {
 		})
 	}
 }
+
+func TestTrimLastCluster(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  string
+	}{
+		"empty":                         {input: "", want: ""},
+		"ascii":                         {input: "abc", want: "ab"},
+		"wide rune":                     {input: "k日本", want: "k日"},
+		"combining mark":                {input: "cafe\u0301", want: "caf"},
+		"emoji with skin tone modifier": {input: "a\U0001F44D\U0001F3FD", want: "a"},
+		"flag":                          {input: "x\U0001F1FA\U0001F1F8", want: "x"},
+		"zwj sequence":                  {input: "a\U0001F468\u200d\U0001F469", want: "a"},
+		"crlf":                          {input: "a\r\n", want: "a"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, cells.TrimLastCluster(tc.input))
+		})
+	}
+}

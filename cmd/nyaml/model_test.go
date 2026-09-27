@@ -36,6 +36,18 @@ func TestUpdateSearchInputBackspace(t *testing.T) {
 			input: "é",
 			want:  "",
 		},
+		"emoji with skin tone modifier": {
+			input: "a\U0001F44D\U0001F3FD",
+			want:  "a",
+		},
+		"flag": {
+			input: "\U0001F1FA\U0001F1F8",
+			want:  "",
+		},
+		"combining sequence": {
+			input: "café",
+			want:  "caf",
+		},
 		"empty": {
 			input: "",
 			want:  "",

@@ -93,3 +93,16 @@ func (r Row) Width(col int) int {
 
 	return width + min(max(0, col-len(r.widths)), math.MaxInt-width)
 }
+
+// TrimLastCluster returns s without its last grapheme cluster, the
+// character a user sees. It splits s at the cluster boundaries [NewRow]
+// uses.
+func TrimLastCluster(s string) string {
+	var cluster string
+
+	for rest := s; rest != ""; rest = rest[len(cluster):] {
+		cluster, _ = ansi.FirstGraphemeCluster(rest, ansi.GraphemeWidth)
+	}
+
+	return s[:len(s)-len(cluster)]
+}

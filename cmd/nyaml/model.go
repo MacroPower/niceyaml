@@ -14,6 +14,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/bubbles/yamlviewport"
+	"go.jacobcolvin.com/niceyaml/internal/cells"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
@@ -224,9 +225,10 @@ func (m *model) updateSearchInput(msg tea.KeyPressMsg) {
 		m.searchInput = ""
 
 	case key.Matches(msg, key.NewBinding(key.WithKeys("backspace"))):
-		if runes := []rune(m.searchInput); len(runes) > 0 {
-			m.searchInput = string(runes[:len(runes)-1])
-		}
+		// The key decoder delivers a character built from several runes,
+		// such as an emoji with a skin tone modifier, as one key press, so
+		// backspace removes the whole character rather than its last rune.
+		m.searchInput = cells.TrimLastCluster(m.searchInput)
 
 	default:
 		if s := msg.Text; s != "" {
