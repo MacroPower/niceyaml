@@ -253,7 +253,8 @@ type AnnotationContext struct {
 
 	// Overlays are the overlays of the annotated line, so a func that
 	// marks the line rather than describing it draws under the columns
-	// they cover.
+	// they cover. Each context holds a copy, so the func may change it
+	// without changing the view.
 	Overlays line.Overlays
 
 	Annotations line.Annotations
@@ -995,7 +996,7 @@ func (p *Printer) annotationGroups(
 			Annotations: group,
 			Placement:   placement,
 			Content:     ln.Content(),
-			Overlays:    view.Overlays(idx),
+			Overlays:    slices.Clone(view.Overlays(idx)),
 		})
 		if !ok {
 			continue

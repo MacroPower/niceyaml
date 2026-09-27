@@ -1,10 +1,12 @@
 package printer_test
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"math"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -3911,6 +3913,71 @@ func TestPrinter_WithAnnotation(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
+}
+
+func TestPrinter_AnnotationFuncOverlays(t *testing.T) {
+	t.Parallel()
+
+	// An AnnotationFunc may change the overlays its context holds without
+	// changing the view, the next print, or the context of another group.
+	newView := func(anns ...line.Annotation) *line.View {
+		view := niceyaml.NewSourceFromString("key: value\n").View()
+		view.AddLineOverlay(0,
+			line.Overlay{Kind: kind.GenericHeadingOK, Cols: position.NewSpan(5, 7)},
+			line.Overlay{Kind: kind.GenericHeadingWarn, Cols: position.NewSpan(0, 10)},
+		)
+		view.Annotate(0, anns...)
+
+		return view
+	}
+
+	t.Run("sorting leaves the view as it was", func(t *testing.T) {
+		t.Parallel()
+
+		view := newView(line.Annotation{Content: "x", Placement: line.Below})
+		want := slices.Clone(view.Overlays(0))
+
+		sortByStart := func(ctx printer.AnnotationContext) (printer.AnnotationRow, bool) {
+			slices.SortFunc(ctx.Overlays, func(a, b line.Overlay) int {
+				return cmp.Compare(a.Cols.Start, b.Cols.Start)
+			})
+
+			return printer.DefaultAnnotation(ctx)
+		}
+
+		p := printer.New(
+			printer.WithStyles(yamltest.NewXMLStyles()),
+			printer.WithAnnotation(sortByStart),
+		)
+
+		first := p.Print(view)
+		assert.Equal(t, first, p.Print(view))
+		assert.Equal(t, want, view.Overlays(0))
+	})
+
+	t.Run("each group gets its own copy", func(t *testing.T) {
+		t.Parallel()
+
+		view := newView(
+			line.Annotation{Content: "a", Placement: line.Below},
+			line.Annotation{Content: "b", Kind: kind.TextError, Placement: line.Below},
+		)
+		want := slices.Clone(view.Overlays(0))
+
+		var seen []line.Overlays
+
+		clearOverlays := func(ctx printer.AnnotationContext) (printer.AnnotationRow, bool) {
+			seen = append(seen, slices.Clone(ctx.Overlays))
+			clear(ctx.Overlays)
+
+			return printer.DefaultAnnotation(ctx)
+		}
+
+		printer.New(printer.WithAnnotation(clearOverlays)).Print(view)
+
+		assert.Equal(t, []line.Overlays{want, want}, seen)
+		assert.Equal(t, want, view.Overlays(0))
+	})
 }
 
 func TestPrinter_AnnotationKind(t *testing.T) {
