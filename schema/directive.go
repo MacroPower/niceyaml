@@ -36,9 +36,9 @@ var (
 	// needs to resolve a relative schema path.
 	ErrNoFilePath = errors.New("document has no file path")
 
-	// Schema that a "$schema=none" directive names. It accepts every
-	// document, so the directive turns validation off.
-	noneSchema = MustCompile([]byte("true"))
+	// Schema that a "$schema=none" directive names. It passes every
+	// document without decoding it, so the directive turns validation off.
+	noneSchema = &Schema{compiled: MustCompile([]byte("true")).compiled, acceptAll: true}
 )
 
 // ParsedDirective is a yaml-language-server schema directive read from a
@@ -182,8 +182,8 @@ type directiveResolver struct{}
 //
 // A directive of "$schema=none", in any letter case, turns validation off
 // for the document, as it does in yaml-language-server. Resolve names a
-// schema that accepts every document, so the lookup ends at the directive,
-// and the document needs no file path.
+// schema that passes every document without decoding it, so the lookup
+// ends at the directive, and the document needs no file path.
 //
 // The preamble holds the comments above the document's "---" header as
 // well as those below it, so a directive written either way names the

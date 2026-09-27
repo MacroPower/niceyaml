@@ -316,19 +316,38 @@ func TestDirective_Resolve(t *testing.T) {
 	t.Run("none turns validation off", func(t *testing.T) {
 		t.Parallel()
 
+		// Each level lists ten aliases of the level before it, so a decode
+		// expands the last level to a million values.
+		fanOut := stringtest.LinesLF(
+			"a: &a [x, x, x, x, x, x, x, x, x, x]",
+			"b: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a]",
+			"c: &c [*b, *b, *b, *b, *b, *b, *b, *b, *b, *b]",
+			"d: &d [*c, *c, *c, *c, *c, *c, *c, *c, *c, *c]",
+			"e: &e [*d, *d, *d, *d, *d, *d, *d, *d, *d, *d]",
+			"f: &f [*e, *e, *e, *e, *e, *e, *e, *e, *e, *e]",
+			"g: &g [*f, *f, *f, *f, *f, *f, *f, *f, *f, *f]",
+		)
+
 		tests := map[string]struct {
-			ref string
+			ref  string
+			body string
 		}{
-			"lowercase":  {ref: "none"},
-			"uppercase":  {ref: "NONE"},
-			"mixed case": {ref: "None"},
+			"lowercase":  {ref: "none", body: "kind: Deployment\n"},
+			"uppercase":  {ref: "NONE", body: "kind: Deployment\n"},
+			"mixed case": {ref: "None", body: "kind: Deployment\n"},
+			// The document passes without a decode, which would reject an
+			// alias that names no anchor.
+			"undefined alias": {ref: "none", body: "a: *nope\n"},
+			// The document passes without a decode, which would reject
+			// aliases that expand past the limit.
+			"excessive aliasing": {ref: "none", body: fanOut},
 		}
 
 		for name, tt := range tests {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				doc := yamltest.FirstDocument(t, "# yaml-language-server: $schema="+tt.ref+"\nkind: Deployment\n")
+				doc := yamltest.FirstDocument(t, "# yaml-language-server: $schema="+tt.ref+"\n"+tt.body)
 
 				ref, err := schema.Directive().Resolve(t.Context(), doc)
 				require.NoError(t, err)

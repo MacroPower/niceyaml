@@ -163,6 +163,9 @@ func FromJSONSchema(v *jsonschema.Validator) *Schema {
 // [MustCompile], or [FromJSONSchema].
 type Schema struct {
 	compiled *jsonschema.Validator
+	// Passes every document and value without reading it, as the schema a
+	// "$schema=none" directive names does.
+	acceptAll bool
 }
 
 // Ref returns the [Ref] that carries the compiled schema, which
@@ -226,6 +229,10 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // document past the limit returns an error wrapping both [ErrValidate]
 // and [ErrExcessiveAliasing] without decoding.
 func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
+	if s.acceptAll {
+		return nil
+	}
+
 	err := checkDecodeExpansion(n)
 	if err != nil {
 		return err
@@ -280,6 +287,10 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 // The context reaches the underlying [jsonschema.Validator], where remote
 // reference resolution honors its cancellation and deadlines.
 func (s *Schema) ValidateValue(ctx context.Context, data any) error {
+	if s.acceptAll {
+		return nil
+	}
+
 	return s.validate(ctx, data, nil)
 }
 
