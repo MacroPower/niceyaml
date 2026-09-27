@@ -684,6 +684,48 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}
 	})
 
+	t.Run("an entry under a NaN key validates", func(t *testing.T) {
+		t.Parallel()
+
+		// NaN equals no value, itself included, so no lookup by the key
+		// finds its entry.
+		tcs := map[string]struct {
+			target any
+		}{
+			"float key": {
+				target: &map[float64]item{},
+			},
+			"key behind an interface": {
+				target: &map[any]item{},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, ".nan: {price: -1}\n1.5: {price: -1}\n")
+
+				err := dd.DecodeInto(t.Context(), tc.target)
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &bound)
+
+				var got []string
+
+				for _, child := range bound.Errors() {
+					got = append(got, child.Error())
+				}
+
+				assert.Equal(t, []string{
+					"1:15: $.'.nan'.price: negative price",
+					"2:14: $.'1.5'.price: negative price",
+				}, got)
+			})
+		}
+	})
+
 	t.Run("a key below a wide map reports the text the document spells it with", func(t *testing.T) {
 		t.Parallel()
 

@@ -5,6 +5,7 @@ import (
 	"encoding"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"slices"
 	"strings"
@@ -265,19 +266,31 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path) bool {
 	case reflect.Map:
 		// The entries walk in the order of their keys, so the errors come
 		// back in one order however the map iterates. Two keys of one
-		// text, such as 1 and "1", order by the types they hold.
+		// text, such as 1 and "1", order by the types they hold. Each
+		// value comes from the iteration rather than a lookup by its key,
+		// since a NaN key equals no key, itself included.
 		names := w.keyNames(base, v.Type().Key())
-		keys := v.MapKeys()
-		slices.SortStableFunc(keys, func(a, b reflect.Value) int {
-			if c := strings.Compare(mapKey(a, names), mapKey(b, names)); c != 0 {
+
+		type entry struct {
+			key, value reflect.Value
+		}
+
+		entries := make([]entry, 0, v.Len())
+
+		for iter := v.MapRange(); iter.Next(); {
+			entries = append(entries, entry{key: iter.Key(), value: iter.Value()})
+		}
+
+		slices.SortStableFunc(entries, func(a, b entry) int {
+			if c := strings.Compare(mapKey(a.key, names), mapKey(b.key, names)); c != 0 {
 				return c
 			}
 
-			return strings.Compare(keyTypeName(a), keyTypeName(b))
+			return strings.Compare(keyTypeName(a.key), keyTypeName(b.key))
 		})
 
-		for _, key := range keys {
-			if !w.walk(v.MapIndex(key), base.Child(mapKey(key, names))) {
+		for _, e := range entries {
+			if !w.walk(e.value, base.Child(mapKey(e.key, names))) {
 				ok = false
 			}
 		}
@@ -420,10 +433,11 @@ func (w *selfWalker) keyDecoder() *yaml.Decoder {
 }
 
 // addKeyName decodes key as type t and adds its text to names under the
-// value it decodes to. The text of a block scalar key is its content
-// rather than its `|` or `>` indicator. A key that does not decode, or
-// whose value cannot key a map, adds nothing, and neither does an alias
-// key, which decodes only beside the anchor it names.
+// value it decodes to, as [nameKey] keys it. The text of a block scalar
+// key is its content rather than its `|` or `>` indicator. A key that
+// does not decode, or whose value cannot key a map, adds nothing, and
+// neither does an alias key, which decodes only beside the anchor it
+// names.
 func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[any]string) {
 	node := keyValueNode(key)
 
@@ -457,11 +471,37 @@ func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[an
 	decoded := reflect.New(t)
 
 	err := w.keyDecoder().DecodeFromNode(node, decoded.Interface())
-	if err != nil || !decoded.Elem().Comparable() {
+	if err != nil {
 		return
 	}
 
-	names[decoded.Elem().Interface()] = name
+	if k, ok := nameKey(decoded.Elem()); ok {
+		names[k] = name
+	}
+}
+
+// nanKey stands in names for a NaN key, since a NaN equals no value,
+// itself included, and so finds no entry under its own value.
+type nanKey struct{}
+
+// nameKey returns the value names holds the text of key under: [nanKey]
+// for a float NaN, alone or behind an interface, or else the value of
+// key itself. The bool result is false for a key that cannot key a map.
+func nameKey(key reflect.Value) (any, bool) {
+	if !key.Comparable() {
+		return nil, false
+	}
+
+	v := key
+	if v.Kind() == reflect.Interface && !v.IsNil() {
+		v = v.Elem()
+	}
+
+	if v.CanFloat() && math.IsNaN(v.Float()) {
+		return nanKey{}, true
+	}
+
+	return key.Interface(), true
 }
 
 // keyValueNode looks through the `?` of an explicit key and the anchors
@@ -498,11 +538,11 @@ func unwrapNode(node ast.Node) ast.Node {
 }
 
 // mapKey returns the path segment for a map key: its text in names, as
-// the document spells it, or else the string itself, or the formatted
-// value of any other key.
+// the document spells it, under the value [nameKey] gives, or else the
+// string itself, or the formatted value of any other key.
 func mapKey(key reflect.Value, names map[any]string) string {
-	if key.Comparable() {
-		if name, ok := names[key.Interface()]; ok {
+	if k, ok := nameKey(key); ok {
+		if name, ok := names[k]; ok {
 			return name
 		}
 	}
