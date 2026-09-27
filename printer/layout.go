@@ -153,8 +153,10 @@ func sourceCol(runs []runSpan, shown []rune, offset, contentLen int) int {
 	text := []rune(run.text)
 	next := 0
 
+	// The shown text comes before the wrap, so it keeps the runes the
+	// wrapper drops after a space, and no rune counts as a tail.
 	for _, r := range shown[run.shown:offset] {
-		next = skipDropped(text, next, r)
+		next = skipDropped(text, nil, next, r)
 		if next < len(text) && text[next] == r {
 			next++
 		}
@@ -200,19 +202,22 @@ func isBreakSpace(r rune) bool {
 
 // rowStarts returns the rune offset in text at which each piece of its
 // wrapped form begins. It matches the runes of each piece against text
-// in order. The wrapper drops every Unicode space but [nbsp] at a break
-// and at the end of the text, so the match skips those spaces in text,
-// and they are the only runes it skips. The first piece begins at offset
-// 0. The caller escapes the text, so a tab shows as its control picture
-// and never counts as a space.
+// in order, and skips the runes of text the wrapper drops. The wrapper
+// drops every Unicode space but [nbsp] at a break and at the end of the
+// text. From a grapheme cluster that starts with such a space outside
+// ASCII, it keeps at most the space and drops the runes after it
+// wherever the cluster falls. The first piece begins at offset 0. The
+// caller escapes the text, so a tab shows as its control picture and
+// never counts as a space.
 func rowStarts(text string, pieces []string) []int {
 	runes := []rune(text)
+	tails := spaceTails(text, len(runes))
 	starts := make([]int, len(pieces))
 	next := 0
 
 	for i, piece := range pieces {
 		for j, r := range piece {
-			next = skipDropped(runes, next, r)
+			next = skipDropped(runes, tails, next, r)
 
 			if j == 0 && i > 0 {
 				starts[i] = next
@@ -231,10 +236,49 @@ func rowStarts(text string, pieces []string) []int {
 	return starts
 }
 
+// spaceTails marks the runes of text, which holds n runes, that follow the
+// first rune of a grapheme cluster starting with a break space outside
+// ASCII. The wrapper segments text into clusters wherever a rune outside
+// ASCII starts one and takes each ASCII byte alone, so a mark after an
+// ASCII space stays.
+func spaceTails(text string, n int) []bool {
+	tails := make([]bool, n)
+	col := 0
+
+	for off := 0; off < len(text); {
+		r, size := utf8.DecodeRuneInString(text[off:])
+		if r < utf8.RuneSelf || !isBreakSpace(r) {
+			off += size
+			col++
+
+			continue
+		}
+
+		cluster, _ := ansi.FirstGraphemeCluster(text[off:], ansi.GraphemeWidth)
+		count := utf8.RuneCountInString(cluster)
+
+		for i := col + 1; i < col+count; i++ {
+			tails[i] = true
+		}
+
+		off += len(cluster)
+		col += count
+	}
+
+	return tails
+}
+
 // skipDropped returns the index of the first rune of runes at or after
-// next that is r or is no space the wrapper drops.
-func skipDropped(runes []rune, next int, r rune) int {
-	for next < len(runes) && runes[next] != r && isBreakSpace(runes[next]) {
+// next that r can match. It skips every rune tails marks, which the
+// wrapper always drops, and every break space that is not r. A nil tails
+// marks no rune.
+func skipDropped(runes []rune, tails []bool, next int, r rune) int {
+	for next < len(runes) {
+		tail := next < len(tails) && tails[next]
+		if !tail && (runes[next] == r || !isBreakSpace(runes[next])) {
+			break
+		}
+
 		next++
 	}
 

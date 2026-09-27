@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -1436,6 +1437,83 @@ func TestPrinter_WordWrap_WideAtOneColumn(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestPrinter_WordWrap_SpaceCluster(t *testing.T) {
+	t.Parallel()
+
+	// The wrap keeps at most the space of a cluster that starts with a
+	// non-ASCII space and drops the runes after it, so the rows show no
+	// mark after such a space. Every row after the cluster still starts
+	// at its own column of the content.
+	tcs := map[string]struct {
+		input string
+		want  string
+		col   int
+		width int
+	}{
+		"ideographic space with a combining mark": {
+			input: "k: a\u3000\u0301b cccc dddd eeee",
+			width: 9,
+			col:   21,
+			want:  stringtest.JoinLF("k: a\u3000b", "cccc dddd", "eeee", "   ^ x"),
+		},
+		"em space with a zero-width joiner": {
+			input: "k: a\u2003\u200db cccc dddd eeee",
+			width: 9,
+			col:   21,
+			want:  stringtest.JoinLF("k: a\u2003b", "cccc dddd", "eeee", "   ^ x"),
+		},
+		"em space with a variation selector": {
+			input: "k: a\u2003\ufe0fb cccc dddd eeee",
+			width: 9,
+			col:   21,
+			want:  stringtest.JoinLF("k: a\u2003b", "cccc dddd", "eeee", "   ^ x"),
+		},
+		"ideographic space with a combining mark at a break": {
+			input: "k: aaaa \u3000\u0301bbbb cccc dddd",
+			width: 5,
+			col:   11,
+			want:  stringtest.JoinLF("k:", "aaaa", "bbbb", "cccc", "dddd", " ^ x"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := niceyaml.NewSourceFromString(tc.input).View()
+			view.Annotate(0, line.Annotation{Content: "x", Placement: line.Below, Col: tc.col})
+
+			p := testPrinter().With(printer.WithWrap(tc.width))
+
+			got := p.Print(view)
+			assert.Equal(t, tc.want, got)
+
+			rows := strings.Split(got, "\n")
+			l := p.Layout(view)
+			assert.Len(t, rows, l.Rows())
+
+			widest := 0
+			for _, row := range rows {
+				widest = max(widest, lipgloss.Width(row))
+			}
+
+			assert.Equal(t, widest, l.Width())
+
+			// Each letter shows on one row, which RowOf must name.
+			for col, r := range []rune(tc.input) {
+				if !unicode.IsLetter(r) {
+					continue
+				}
+
+				row := l.RowOf(position.New(0, col))
+				require.GreaterOrEqual(t, row, 0)
+				require.Less(t, row, len(rows))
+				assert.Contains(t, rows[row], string(r), "column %d", col)
+			}
+		})
+	}
 }
 
 func TestPrinter_WordWrap_BreakpointPastWidth(t *testing.T) {
