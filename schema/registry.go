@@ -197,7 +197,15 @@ func WithHTTPClient(client *http.Client) RegistryOption {
 //
 // Given more than once, each call appends after the resolvers of the one
 // before it.
+//
+// Panics if any resolver is nil.
 func WithResolvers(res ...Resolver) RegistryOption {
+	for _, resolver := range res {
+		if resolver == nil {
+			panic("schema.WithResolvers: resolver is nil")
+		}
+	}
+
 	return func(r *Registry) {
 		r.resolvers = append(r.resolvers, res...)
 	}

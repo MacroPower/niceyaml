@@ -1073,6 +1073,14 @@ func TestRegistry_ErrorCases(t *testing.T) {
 		require.ErrorIs(t, err, schema.ErrCompile)
 		assert.Contains(t, err.Error(), "bad.json")
 	})
+
+	t.Run("a nil resolver panics", func(t *testing.T) {
+		t.Parallel()
+
+		assert.PanicsWithValue(t, "schema.WithResolvers: resolver is nil", func() {
+			schema.WithResolvers(schema.Directive(), nil)
+		})
+	})
 }
 
 func TestRegistry_MultipleDocuments(t *testing.T) {
