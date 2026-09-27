@@ -393,12 +393,12 @@ func (w *selfWalker) validate(v reflect.Value, base paths.Path) bool {
 	}
 
 	err := validator.Validate()
-	if isNothing(err) {
-		return true
-	}
-
 	if !base.IsRoot() {
 		err = Rebase(err, base)
+	}
+
+	if isNothing(err) {
+		return true
 	}
 
 	w.errs = append(w.errs, err)

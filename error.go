@@ -208,7 +208,9 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 //
 // An error joined from several, as [errors.Join] builds one, rebases
 // branch by branch into a new join, so each line of its message carries
-// the path of its own branch.
+// the path of its own branch. A join whose every branch is a nil
+// [*Error] or [*SourceError] pointer is still an error, and it points at
+// base as an error with no location does.
 //
 // The result wraps err, or each branch of a join, so [errors.Is] and
 // [errors.As] see through it, and the text a wrapper such as [fmt.Errorf]
@@ -233,10 +235,15 @@ func Rebase(err error, base paths.Path) error {
 	if branches, ok := joinBranches(err); ok {
 		rebased := make([]error, 0, len(branches))
 		for _, branch := range branches {
-			rebased = append(rebased, Rebase(branch, base))
+			r := Rebase(branch, base)
+			if r != nil {
+				rebased = append(rebased, r)
+			}
 		}
 
-		return errors.Join(rebased...)
+		if len(rebased) > 0 {
+			return errors.Join(rebased...)
+		}
 	}
 
 	return &Error{err: err, base: base, rebased: true}
@@ -1062,17 +1069,20 @@ func (e *SourceError) collect(err error, b binder) {
 // path as the message of the root does. A nil n, or a nil pointer, adds
 // nothing.
 func (e *SourceError) addChild(n error, b binder, base paths.Path) {
-	if isNothing(n) {
+	// Rebase returns a binding as it is, so the child is a binding exactly
+	// when n is.
+	child := rebaseChild(n, base)
+	if isNothing(child) {
 		return
 	}
 
-	if bound, ok := n.(*SourceError); ok { //nolint:errorlint // The node itself, not a chain search.
+	if bound, ok := child.(*SourceError); ok { //nolint:errorlint // The node itself, not a chain search.
 		e.errors = append(e.errors, bound)
 
 		return
 	}
 
-	e.errors = append(e.errors, newSourceError(rebaseChild(n, base), b))
+	e.errors = append(e.errors, newSourceError(child, b))
 }
 
 // Source returns the [*Source] the error is bound to. A nil SourceError is

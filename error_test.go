@@ -4686,6 +4686,43 @@ func TestRebase(t *testing.T) {
 		assert.NoError(t, niceyaml.Rebase(nilErr, hours))
 	})
 
+	t.Run("a join of nil pointers stays an error at the base", func(t *testing.T) {
+		t.Parallel()
+
+		var openErr, closeErr *niceyaml.Error
+
+		joined := errors.Join(openErr, closeErr)
+		require.Error(t, joined)
+
+		err := niceyaml.Rebase(joined, hours)
+		require.Error(t, err)
+
+		var e *niceyaml.Error
+
+		require.ErrorAs(t, err, &e)
+
+		p, ok := e.Path()
+		require.True(t, ok)
+		assert.Equal(t, hours, p)
+
+		dd := yamltest.FirstDocument(t, input)
+
+		report := niceyaml.NewError("invalid hours", niceyaml.WithErrors(joined))
+		bound := dd.Bind(niceyaml.Rebase(report, hours))
+
+		var se *niceyaml.SourceError
+
+		require.ErrorAs(t, bound, &se)
+		require.Len(t, se.Errors(), 1)
+
+		child := se.Errors()[0]
+		assert.NotPanics(t, func() {
+			assert.Equal(t, "3:3: $.hours:", strings.TrimSpace(child.Error()))
+			assert.Equal(t, "\n", child.Message())
+			assert.Contains(t, niceyaml.FormatError(bound, 1), "3:3: $.hours: invalid hours")
+		})
+	})
+
 	t.Run("path composes with the base", func(t *testing.T) {
 		t.Parallel()
 

@@ -886,6 +886,32 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}
 	})
 
+	t.Run("a join of nil pointers fails at every depth", func(t *testing.T) {
+		t.Parallel()
+
+		// The join holds two nil pointers, which is not a nil error, so
+		// the value fails at the root and under a field alike, and the
+		// parent of the field does not run.
+		dd := yamltest.FirstDocument(t, "open: x\n")
+
+		_, err := dd.Decode[nothingJoined](t.Context())
+		require.Error(t, err)
+
+		dd = yamltest.FirstDocument(t, "hours:\n  open: x\n")
+
+		_, err = dd.Decode[withNothingJoined](t.Context())
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), "parent ran")
+
+		var e *niceyaml.Error
+
+		require.ErrorAs(t, err, &e)
+
+		p, ok := e.Path()
+		require.True(t, ok)
+		assert.Equal(t, "$.hours", p.String())
+	})
+
 	t.Run("a value that decodes itself validates itself alone", func(t *testing.T) {
 		t.Parallel()
 
@@ -1015,6 +1041,27 @@ type walkedNode struct {
 
 func (walkedNode) Validate() error {
 	return errors.New("walked below an ast.Node")
+}
+
+// nothingJoined validates itself with a join of two nil pointers, which
+// is not a nil error.
+type nothingJoined struct {
+	Open string `yaml:"open"`
+}
+
+func (nothingJoined) Validate() error {
+	var openErr, closeErr *niceyaml.Error
+
+	return errors.Join(openErr, closeErr)
+}
+
+// withNothingJoined holds a nothingJoined, and reports that it ran.
+type withNothingJoined struct {
+	Hours nothingJoined `yaml:"hours"`
+}
+
+func (withNothingJoined) Validate() error {
+	return errors.New("parent ran")
 }
 
 // ordered validates after its fields, and reports errOrder when a field
