@@ -1,6 +1,7 @@
 package httpfetch_test
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,27 +18,46 @@ func TestGet_RedactsPassword(t *testing.T) {
 	t.Parallel()
 
 	// Get cannot redact a URL that does not parse, so it keeps the URL out
-	// of the error.
+	// of the error and sends no request. A password that starts with "/",
+	// "?" or "#" parses, but as an empty port and then a path, query or
+	// fragment, so Get refuses it too.
 	tcs := map[string]struct {
 		url string
 	}{
-		"invalid port":                  {url: "https://user:secret@example.com:port/x"},
-		"invalid percent escape":        {url: "https://user:secret@example.com/%zz"},
-		"control character":             {url: "https://user:secret@example.com/\x7f"},
-		"password with a slash":         {url: "https://user:secret/x@example.com/x"},
-		"password with a question mark": {url: "https://user:secret?x@example.com/x"},
-		"password with a hash":          {url: "https://user:secret#x@example.com/x"},
+		"invalid port":                           {url: "https://user:secret@example.com:port/x"},
+		"invalid percent escape":                 {url: "https://user:secret@example.com/%zz"},
+		"control character":                      {url: "https://user:secret@example.com/\x7f"},
+		"password with a slash":                  {url: "https://user:secret/x@example.com/x"},
+		"password with a question mark":          {url: "https://user:secret?x@example.com/x"},
+		"password with a hash":                   {url: "https://user:secret#x@example.com/x"},
+		"password starting with a slash":         {url: "https://user:/secret@example.com/x"},
+		"password starting with a question mark": {url: "https://user:?secret@example.com/x"},
+		"password starting with a hash":          {url: "https://user:#secret@example.com/x"},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := httpfetch.Get(t.Context(), http.DefaultClient, tc.url)
+			client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				t.Errorf("Get sent a request to host %q", r.URL.Host)
+
+				return nil, errors.New("unexpected request")
+			})}
+
+			_, err := httpfetch.Get(t.Context(), client, tc.url)
 			require.Error(t, err)
 			assert.NotContains(t, err.Error(), "secret")
 		})
 	}
+}
+
+// roundTripFunc adapts a function to [http.RoundTripper].
+type roundTripFunc func(r *http.Request) (*http.Response, error)
+
+// RoundTrip implements [http.RoundTripper].
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
 }
 
 func TestGet_ParseReason(t *testing.T) {
@@ -129,6 +149,18 @@ func TestRedacted(t *testing.T) {
 		},
 		"password with a hash in a url that does not parse": {
 			url:  "https://user:s3#cret@example.com/x",
+			want: "https://user:xxxxx@example.com/x",
+		},
+		"password starting with a slash": {
+			url:  "https://user:/s3cret@example.com/x",
+			want: "https://user:xxxxx@example.com/x",
+		},
+		"password starting with a question mark": {
+			url:  "https://user:?s3cret@example.com/x",
+			want: "https://user:xxxxx@example.com/x",
+		},
+		"password starting with a hash": {
+			url:  "https://user:#s3cret@example.com/x",
 			want: "https://user:xxxxx@example.com/x",
 		},
 		"at sign in the path of a url that parses keeps its spelling": {
