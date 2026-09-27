@@ -21,7 +21,12 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
-const wrapOnCharacters = " /-"
+// breakpoints are the characters other than a space that the wrap breaks
+// after, keeping each with the word before it.
+const breakpoints = "/-"
+
+// wrapOnCharacters are the characters the wrap breaks on.
+const wrapOnCharacters = " " + breakpoints
 
 // Printer prints YAML with syntax highlighting for terminal output.
 //
@@ -1087,15 +1092,22 @@ func annotationKind(k kind.Kind) kind.Kind {
 }
 
 // widestWord returns the width in cells of the widest word of text, where
-// words run between newlines and the characters the wrap breaks on.
+// words run between newlines, spaces, and [breakpoints]. A word includes
+// the '/' or '-' that ends it, since the wrap keeps that character with
+// the word before it.
 func widestWord(text string) int {
-	words := strings.FieldsFunc(text, func(r rune) bool {
-		return r == '\n' || strings.ContainsRune(wrapOnCharacters, r)
-	})
-
 	widest := 0
-	for _, word := range words {
-		widest = max(widest, lipgloss.Width(word))
+
+	for field := range strings.FieldsFuncSeq(text, func(r rune) bool { return r == '\n' || r == ' ' }) {
+		for field != "" {
+			word := field
+			if i := strings.IndexAny(field, breakpoints); i >= 0 {
+				word = field[:i+1]
+			}
+
+			widest = max(widest, lipgloss.Width(word))
+			field = field[len(word):]
+		}
 	}
 
 	return widest

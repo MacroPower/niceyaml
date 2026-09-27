@@ -4108,6 +4108,39 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 				"match pattern",
 			),
 		},
+		"hyphenated word wider than the room beside the marker hangs": {
+			// The wrap keeps the hyphen with the word before it, so
+			// "abc-" needs four cells and the three beside the marker
+			// would split "def".
+			input:  "key: value",
+			gutter: printer.NoGutter,
+			width:  10,
+			annotation: line.Annotation{
+				Content:   "abc-def",
+				Placement: line.Below,
+				Col:       5,
+			},
+			want: stringtest.JoinLF(
+				"key: value",
+				strings.Repeat(" ", 5)+"^",
+				"abc-def",
+			),
+		},
+		"word with a slash wider than the room beside the marker hangs": {
+			input:  "key: value",
+			gutter: printer.NoGutter,
+			width:  10,
+			annotation: line.Annotation{
+				Content:   "abc/def",
+				Placement: line.Below,
+				Col:       5,
+			},
+			want: stringtest.JoinLF(
+				"key: value",
+				strings.Repeat(" ", 5)+"^",
+				"abc/def",
+			),
+		},
 		"column near the edge hangs the text under a narrower indent": {
 			input:  "key: value",
 			gutter: printer.NoGutter,
