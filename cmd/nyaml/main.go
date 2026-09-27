@@ -112,9 +112,9 @@ func newRootCmd() (*cobra.Command, func() error) {
 	}
 }
 
-// terminalWidth returns the width of the terminal on stderr less the
-// handler's margin, or 88 when stderr is not a terminal. Error output
-// wraps to that width.
+// terminalWidth returns the width of the terminal on stderr, or 90 when
+// stderr is not a terminal, less the [fangs.Indent] the error handler puts
+// in front of each line. Error output wraps to that width.
 func terminalWidth() int {
 	width := 90
 
@@ -125,5 +125,5 @@ func terminalWidth() int {
 		}
 	}
 
-	return max(0, width-2)
+	return max(0, width-fangs.Indent)
 }
