@@ -2409,6 +2409,92 @@ func TestDocument_At(t *testing.T) {
 		}
 	})
 
+	t.Run("alias resolves to the anchor before it when a later anchor reuses the name", func(t *testing.T) {
+		t.Parallel()
+
+		// The alias names the anchor defined last before it, so a path
+		// through the alias reads v1, and so does a decode of the node
+		// that holds the alias.
+		tcs := map[string]struct {
+			input string
+			path  paths.Path
+		}{
+			"later anchor after the node": {
+				input: "a: &x v1\nm:\n  k: *x\nc: &x v2\n",
+				path:  paths.Root().Child("m"),
+			},
+			"later anchor inside an enclosing mapping": {
+				input: "a: &x v1\nm:\n  s:\n    k: *x\n  c: &x v2\n",
+				path:  paths.Root().Child("m", "s"),
+			},
+			"later anchor inside an enclosing anchor": {
+				input: "m: &m\n  a: &x v1\n  s:\n    k: *x\n  c: &x v2\n",
+				path:  paths.Root().Child("m", "s"),
+			},
+			"later anchor inside an enclosing merge": {
+				input: "a: &x v1\nm:\n  <<:\n    s:\n      k: *x\n    c: &x v2\n",
+				path:  paths.Root().Child("m", "s"),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				k, err := yamltest.At(t, dd, tc.path.Child("k")).Decode[string](t.Context())
+				require.NoError(t, err)
+				require.Equal(t, "v1", k)
+
+				got, err := yamltest.At(t, dd, tc.path).Decode[map[string]any](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, map[string]any{"k": "v1"}, got)
+
+				var scoped map[string]any
+
+				err = niceyaml.NewDecoder().DecodeInto(t.Context(), yamltest.At(t, dd, tc.path), &scoped)
+				require.NoError(t, err)
+				assert.Equal(t, map[string]any{"k": "v1"}, scoped)
+			})
+		}
+	})
+
+	t.Run("alias to an anchor that holds the node reads null", func(t *testing.T) {
+		t.Parallel()
+
+		// The decoder reads an alias inside the value of its own anchor as
+		// null, as a decode of the whole document does.
+		tcs := map[string]struct {
+			input string
+			path  paths.Path
+			want  any
+		}{
+			"value of the anchor": {
+				input: "a: &a\n  - 1\n  - *a\n",
+				path:  paths.Root().Child("a"),
+				want:  []any{uint64(1), nil},
+			},
+			"node inside the anchor": {
+				input: "a: &a\n  b:\n    c: *a\n",
+				path:  paths.Root().Child("a", "b"),
+				want:  map[string]any{"c": nil},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				got, err := yamltest.At(t, dd, tc.path).Decode[any](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	})
+
 	t.Run("alias to a later anchor stays an error", func(t *testing.T) {
 		t.Parallel()
 

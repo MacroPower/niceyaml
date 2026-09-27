@@ -1413,8 +1413,8 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 // matches [ErrDecodeRejected].
 //
 // An alias inside the node resolves against the anchors of the whole
-// document, so a value that refers to an anchor defined outside it decodes
-// as it does in the whole document.
+// document, to the anchor of its name defined last before the alias,
+// inside the node or outside it, as a path through the alias resolves.
 //
 // [Decoder.DecodeInto] decodes with options stated once, for every node
 // a [Decoder] decodes.
@@ -1557,32 +1557,32 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 }
 
 // primeAnchors registers with dec the anchors of body that the decoder
-// meets before node, where an alias in node can refer to them. It decodes
-// each anchor that starts before node, and each `<<` merge key, which
-// records again the anchors of the mappings it merges, on its own and in
-// document order, the order a decode of the whole body reads them in. The
-// pass only primes anchors, so a failure in it, which concerns a value
-// the caller did not ask for, is not the caller's error, and it stops
-// none of the decodes after it. An alias the pass could not resolve fails
-// again in the decode of the node itself. A context that ends stops the
-// pass.
+// meets before node, where an alias in node refers to the last anchor of
+// its name before it. It decodes each anchor that ends before node, and
+// each `<<` merge key, which records again the anchors of the mappings it
+// merges, on its own and in document order, the order a decode of the
+// whole body reads them in. An anchor or merge key that holds node
+// counts for the anchors inside it that end before node, and one that
+// starts after node counts for none. An anchor that holds node registers
+// its name as null, as it is while the decoder reads the value of the
+// anchor. The pass only primes anchors, so a failure in it, which
+// concerns a value the caller did not ask for, is not the caller's
+// error, and it stops none of the decodes after it. An alias the pass
+// could not resolve fails again in the decode of the node itself. A
+// context that ends stops the pass.
 func primeAnchors(ctx context.Context, dec *yaml.Decoder, body, node ast.Node) {
-	start, ok := startOffset(node)
-	if !ok {
+	first, _ := tokenBounds(node)
+	if len(first) == 0 {
 		return
 	}
 
-	var found anchorFinder
+	found := anchorFinder{before: first[0].Position.Offset}
 
 	ast.Walk(&found, body)
 
-	for _, anchor := range found {
+	for _, anchor := range found.anchors {
 		if ctx.Err() != nil {
 			return
-		}
-
-		if at, ok := startOffset(anchor); !ok || at >= start {
-			continue
 		}
 
 		var sink any
@@ -1592,40 +1592,68 @@ func primeAnchors(ctx context.Context, dec *yaml.Decoder, body, node ast.Node) {
 	}
 }
 
-// startOffset returns the offset of the first token under node, and
-// false when no token under node carries a position.
-func startOffset(node ast.Node) (int, bool) {
-	first, _ := tokenBounds(node)
-	if len(first) == 0 {
-		return 0, false
-	}
-
-	return first[0].Position.Offset, true
-}
-
 // anchorFinder is an [ast.Visitor] that collects, in document order, the
-// outermost nodes that register anchors when the decoder reads them: an
-// anchor, and a mapping entry with a `<<` merge key. The decoder reads
-// the nodes inside those with them, so the walk stops there.
-type anchorFinder []ast.Node
+// outermost nodes that register anchors when the decoder reads them and
+// that end before the offset before: an anchor, and a mapping entry with
+// a `<<` merge key. The decoder reads the nodes inside those with them,
+// so the walk stops there. The walk goes on into one that holds the
+// offset, and stops at one that starts at or after it.
+type anchorFinder struct {
+	anchors []ast.Node
+	before  int
+}
 
 // Visit implements [ast.Visitor].
 func (f *anchorFinder) Visit(node ast.Node) ast.Visitor {
 	switch n := node.(type) {
 	case *ast.AnchorNode:
-		*f = append(*f, n)
+	case *ast.MappingValueNode:
+		if n.Key == nil || !n.Key.IsMergeKey() {
+			return f
+		}
+
+	default:
+		return f
+	}
+
+	first, last := tokenBounds(node)
+
+	switch {
+	case len(first) == 0 || first[0].Position.Offset >= f.before:
+		return nil
+
+	case last[0].Position.Offset < f.before:
+		f.anchors = append(f.anchors, node)
 
 		return nil
 
-	case *ast.MappingValueNode:
-		if n.Key != nil && n.Key.IsMergeKey() {
-			*f = append(*f, n)
-
-			return nil
+	default:
+		if anchor, ok := node.(*ast.AnchorNode); ok {
+			f.anchors = append(f.anchors, pendingAnchor(anchor))
 		}
+
+		return f
+	}
+}
+
+// pendingAnchor returns an anchor with the name of anchor over a null.
+// The decoder registers a name as null while it reads the value of its
+// anchor, so an alias inside that value reads as null, and the anchor
+// pendingAnchor returns registers the name that way for an alias in a
+// node inside anchor.
+func pendingAnchor(anchor *ast.AnchorNode) *ast.AnchorNode {
+	var pos *token.Position
+
+	if anchor.Start != nil {
+		pos = anchor.Start.Position
 	}
 
-	return f
+	return &ast.AnchorNode{
+		BaseNode: &ast.BaseNode{},
+		Start:    anchor.Start,
+		Name:     anchor.Name,
+		Value:    ast.Null(token.New("null", "null", pos)),
+	}
 }
 
 // decodeView returns node as the go-yaml decoder reads it: the same tree,
