@@ -392,92 +392,127 @@ func TestSchemaStore_ConcurrentFirstFetch(t *testing.T) {
 func TestSchemaStore_SlowFetch(t *testing.T) {
 	t.Parallel()
 
+	// Each subtest runs in a synctest bubble, whose clock stands still until
+	// every goroutine in it waits. A lookup therefore reaches the store before
+	// its own deadline, and synctest.Wait marks the moment a held fetch has
+	// reached the transport.
+
 	t.Run("serves the previous catalog during a refresh", func(t *testing.T) {
 		t.Parallel()
 
-		server, held, release := newHeldCatalogServer(t, 1)
+		synctest.Test(t, func(t *testing.T) {
+			client, requests, release := newHeldCatalogClient(t, 1)
 
-		store := schemastore.New(
-			schemastore.WithCatalogURL(server.URL),
-			schemastore.WithCacheTTL(10*time.Millisecond),
-		)
+			store := schemastore.New(
+				schemastore.WithCatalogURL("https://example.com/catalog.json"),
+				schemastore.WithHTTPClient(client),
+				schemastore.WithCacheTTL(10*time.Millisecond),
+			)
 
-		entry, err := store.FindMatch(t.Context(), "config.yaml")
-		require.NoError(t, err)
-		require.Equal(t, "Catalog 1", entry.Name)
+			entry, err := store.FindMatch(t.Context(), "config.yaml")
+			require.NoError(t, err)
+			require.Equal(t, "Catalog 1", entry.Name)
 
-		// Wait for cache to expire.
-		time.Sleep(20 * time.Millisecond)
+			// Let the cache expire.
+			time.Sleep(20 * time.Millisecond)
 
-		// This lookup starts the refresh, which the server holds.
-		refreshing := findMatchAsync(t.Context(), store)
-		receive(t, held)
+			// This lookup starts the refresh, which the transport holds.
+			refreshing := findMatchAsync(t.Context(), store)
 
-		// A lookup during the refresh gets the previous catalog at once.
-		result := receive(t, findMatchAsync(t.Context(), store))
-		require.NoError(t, result.err)
-		assert.Equal(t, "Catalog 1", result.entry.Name)
+			synctest.Wait()
+			require.Equal(t, int32(2), requests.Load())
 
-		// The lookup that started the refresh waits for it.
-		release()
+			// A lookup during the refresh gets the previous catalog at once.
+			result := receive(t, findMatchAsync(t.Context(), store))
+			require.NoError(t, result.err)
+			assert.Equal(t, "Catalog 1", result.entry.Name)
 
-		result = receive(t, refreshing)
-		require.NoError(t, result.err)
-		assert.Equal(t, "Catalog 2", result.entry.Name)
+			// The lookup that started the refresh waits for it.
+			release()
+
+			result = receive(t, refreshing)
+			require.NoError(t, result.err)
+			assert.Equal(t, "Catalog 2", result.entry.Name)
+			assert.Equal(t, int32(2), requests.Load())
+		})
 	})
 
 	t.Run("stops waiting for the first fetch when the context ends", func(t *testing.T) {
 		t.Parallel()
 
-		server, held, release := newHeldCatalogServer(t, 0)
+		synctest.Test(t, func(t *testing.T) {
+			client, requests, release := newHeldCatalogClient(t, 0)
 
-		store := schemastore.New(schemastore.WithCatalogURL(server.URL))
+			store := schemastore.New(
+				schemastore.WithCatalogURL("https://example.com/catalog.json"),
+				schemastore.WithHTTPClient(client),
+			)
 
-		// This lookup starts the first fetch, which the server holds.
-		first := findMatchAsync(t.Context(), store)
-		receive(t, held)
+			// This lookup starts the first fetch, which the transport holds.
+			first := findMatchAsync(t.Context(), store)
 
-		// With no catalog to fall back on, a second lookup waits for the fetch
-		// only until its own deadline.
-		ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
-		defer cancel()
+			synctest.Wait()
+			require.Equal(t, int32(1), requests.Load())
 
-		result := receive(t, findMatchAsync(ctx, store))
-		require.ErrorIs(t, result.err, schemastore.ErrFetchCatalog)
-		require.ErrorIs(t, result.err, context.DeadlineExceeded)
+			// With no catalog to fall back on, a second lookup waits for the
+			// fetch until its own deadline and no longer.
+			const timeout = 50 * time.Millisecond
 
-		release()
+			start := time.Now()
 
-		result = receive(t, first)
-		require.NoError(t, result.err)
-		assert.Equal(t, "Catalog 1", result.entry.Name)
+			ctx, cancel := context.WithTimeout(t.Context(), timeout)
+			defer cancel()
+
+			result := receive(t, findMatchAsync(ctx, store))
+			require.ErrorIs(t, result.err, schemastore.ErrFetchCatalog)
+			require.ErrorIs(t, result.err, context.DeadlineExceeded)
+			assert.Equal(t, timeout, time.Since(start), "lookup should wait for the fetch until its deadline")
+
+			release()
+
+			result = receive(t, first)
+			require.NoError(t, result.err)
+			assert.Equal(t, "Catalog 1", result.entry.Name)
+			assert.Equal(t, int32(1), requests.Load())
+		})
 	})
 
 	t.Run("finishes a fetch after its lookup stops waiting", func(t *testing.T) {
 		t.Parallel()
 
-		server, held, release := newHeldCatalogServer(t, 0)
+		synctest.Test(t, func(t *testing.T) {
+			client, requests, release := newHeldCatalogClient(t, 0)
 
-		store := schemastore.New(schemastore.WithCatalogURL(server.URL))
+			store := schemastore.New(
+				schemastore.WithCatalogURL("https://example.com/catalog.json"),
+				schemastore.WithHTTPClient(client),
+			)
 
-		ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
-		defer cancel()
+			ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+			defer cancel()
 
-		abandoned := findMatchAsync(ctx, store)
+			abandoned := findMatchAsync(ctx, store)
 
-		receive(t, held)
+			// The lookup starts the fetch before its deadline, and the
+			// transport holds it.
+			synctest.Wait()
+			require.Equal(t, int32(1), requests.Load())
 
-		result := receive(t, abandoned)
-		require.ErrorIs(t, result.err, schemastore.ErrFetchCatalog)
-		require.ErrorIs(t, result.err, context.DeadlineExceeded)
+			result := receive(t, abandoned)
+			require.ErrorIs(t, result.err, schemastore.ErrFetchCatalog)
+			require.ErrorIs(t, result.err, context.DeadlineExceeded)
 
-		// The fetch outlives the lookup that started it, so the next lookup
-		// gets its catalog rather than sending a second request.
-		release()
+			// The fetch outlives the lookup that started it and records its
+			// catalog, so the next lookup gets that catalog rather than
+			// sending a second request.
+			release()
+			synctest.Wait()
 
-		entry, err := store.FindMatch(t.Context(), "config.yaml")
-		require.NoError(t, err)
-		assert.Equal(t, "Catalog 1", entry.Name)
+			entry, err := store.FindMatch(t.Context(), "config.yaml")
+			require.NoError(t, err)
+			assert.Equal(t, "Catalog 1", entry.Name)
+			assert.Equal(t, int32(1), requests.Load())
+		})
 	})
 }
 
@@ -1587,49 +1622,57 @@ func newCountingCatalogServer(t *testing.T, catalog schemastore.Catalog) (*httpt
 	return server, &fetchCount
 }
 
-// newHeldCatalogServer serves a one-entry catalog whose pattern matches every
-// YAML file and names its entry for the request count, starting with
-// "Catalog 1". It answers the first immediate requests at once and holds each
-// later one until the caller calls release, sending on held as the request
-// arrives. Cleanup releases held requests before the server closes.
-func newHeldCatalogServer(t *testing.T, immediate int32) (*httptest.Server, <-chan struct{}, func()) {
+// newHeldCatalogClient returns a client whose transport answers every URL
+// with a one-entry catalog whose pattern matches every YAML file and names
+// its entry for the request count, starting with "Catalog 1". It answers
+// the first immediate requests at once and holds each later one until the
+// caller calls release or the request's context ends. The returned counter
+// reports the requests the transport has received. Cleanup releases held
+// requests.
+//
+// The transport stands in for a test server so the client works inside a
+// synctest bubble, where a goroutine waiting on a socket does not count as
+// durably blocked.
+func newHeldCatalogClient(t *testing.T, immediate int32) (*http.Client, *atomic.Int32, func()) {
 	t.Helper()
 
 	var requests atomic.Int32
 
-	held := make(chan struct{}, 10)
 	unblock := make(chan struct{})
 	release := sync.OnceFunc(func() { close(unblock) })
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		n := requests.Add(1)
-		if n > immediate {
-			held <- struct{}{}
-
-			<-unblock
-		}
-
-		data, err := json.Marshal(schemastore.Catalog{
-			Schemas: []schemastore.CatalogEntry{{
-				Name:      fmt.Sprintf("Catalog %d", n),
-				URL:       "https://example.com/test.json",
-				FileMatch: []string{"*.yaml"},
-			}},
-		})
-		if err != nil {
-			t.Errorf("marshal catalog: %v", err)
-		}
-
-		//nolint:errcheck // Test helper.
-		w.Write(data)
-	}))
-
-	// Cleanups run in reverse order, so held requests finish before Close
-	// waits for them.
-	t.Cleanup(server.Close)
 	t.Cleanup(release)
 
-	return server, held, release
+	client := &http.Client{
+		Transport: &roundTripperFunc{fn: func(r *http.Request) (*http.Response, error) {
+			n := requests.Add(1)
+			if n > immediate {
+				select {
+				case <-unblock:
+				case <-r.Context().Done():
+					return nil, r.Context().Err()
+				}
+			}
+
+			data, err := json.Marshal(schemastore.Catalog{
+				Schemas: []schemastore.CatalogEntry{{
+					Name:      fmt.Sprintf("Catalog %d", n),
+					URL:       "https://example.com/test.json",
+					FileMatch: []string{"*.yaml"},
+				}},
+			})
+			if err != nil {
+				return nil, fmt.Errorf("marshal catalog: %w", err)
+			}
+
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewReader(data)),
+				Request:    r,
+			}, nil
+		}},
+	}
+
+	return client, &requests, release
 }
 
 // findMatchResult holds what a FindMatch call started by findMatchAsync
@@ -1653,7 +1696,9 @@ func findMatchAsync(ctx context.Context, store *schemastore.Store) <-chan findMa
 }
 
 // receive returns the next value from ch and fails the test if none arrives
-// within five seconds.
+// within five seconds. Inside a synctest bubble the five seconds pass on the
+// bubble's clock, which moves only once every goroutine waits, so a failure
+// there means the value could never arrive.
 func receive[T any](t *testing.T, ch <-chan T) T {
 	t.Helper()
 
