@@ -4650,6 +4650,42 @@ func TestErrDecodeRejected(t *testing.T) {
 				return niceyaml.NewDecoder().DecodeInto(ctx, dd, &v)
 			},
 		},
+		// The parser makes a null token for each value the document leaves
+		// out, which the lexer never saw.
+		"missing mapping value": {
+			input: "a: null\nc:\n",
+			decode: func(ctx context.Context, dd *niceyaml.Node) error {
+				node, err := dd.At(paths.Root().Child("c"))
+				if err != nil {
+					return err //nolint:wrapcheck // The test inspects the error as it is.
+				}
+
+				_, err = node.Decode[struct{ X int }](ctx)
+
+				return err
+			},
+		},
+		"bare sequence item": {
+			input: "items:\n  -\n  - x: 1\n",
+			decode: func(ctx context.Context, dd *niceyaml.Node) error {
+				items, err := dd.Nodes(paths.Root().Child("items").IndexAll())
+				if err != nil {
+					return err //nolint:wrapcheck // The test inspects the error as it is.
+				}
+
+				_, err = items[0].Decode[struct{ X int }](ctx)
+
+				return err
+			},
+		},
+		"tag over no value": {
+			input: "a: !!bool\n",
+			decode: func(ctx context.Context, dd *niceyaml.Node) error {
+				_, err := dd.Decode[map[string]any](ctx)
+
+				return err
+			},
+		},
 	}
 
 	for name, tc := range rejected {
@@ -4667,6 +4703,7 @@ func TestErrDecodeRejected(t *testing.T) {
 
 			_, ok := errors.AsType[yaml.Error](err)
 			assert.True(t, ok, "the go-yaml error left the chain")
+			assert.NotContains(t, err.Error(), "\n", "the go-yaml excerpt leaked into the message")
 		})
 	}
 

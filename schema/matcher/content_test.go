@@ -226,6 +226,11 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`enabled: "true"`),
 			want:    false,
 		},
+		"bool does not match a tag over no value": {
+			matcher: matcher.Content(enabledPath, true),
+			input:   "enabled: !!bool\n",
+			want:    false,
+		},
 		"value that does not decode": {
 			matcher: matcher.Content(versionPath, 1),
 			input:   stringtest.Input(`version: abc`),

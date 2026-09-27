@@ -67,8 +67,8 @@ type Source struct {
 	// Holds the copies of the tokens parse hands the parser. Every token the
 	// parser takes from the stream is one of these copies, and holdsToken
 	// matches against them by pointer. The implicit null tokens the parser
-	// makes for missing values are not copies, so holdsToken never matches
-	// them.
+	// makes for missing values are not copies, so holdsToken finds them
+	// among the tokens of the nodes of the document instead.
 	fileTokens token.Tokens
 	fileErr    error
 	docs       []*Node

@@ -526,6 +526,11 @@ type document struct {
 	// the aliases once however many paths the Nodes of the document
 	// resolve.
 	resolver *paths.Resolver
+	// The tokens the nodes of root hold, which holdsNodeToken collects for
+	// the first decode error that needs them. They include the token the
+	// parser makes for a value the document leaves out, such as the null
+	// of a key without a value, which no lexer token stands for.
+	nodeTokens map[*token.Token]struct{}
 	// The tokens of the whole document.
 	tokens token.Tokens
 	// The tokens that carry a position, in the order of their offsets,
@@ -536,6 +541,8 @@ type document struct {
 	preamble int
 	// Creates resolver once, for the first path any Node resolves.
 	resolverOnce sync.Once
+	// Collects nodeTokens once.
+	nodeTokensOnce sync.Once
 }
 
 // pathResolver returns the [paths.Resolver] for the document, and creates
@@ -546,6 +553,38 @@ func (d *document) pathResolver() *paths.Resolver {
 	})
 
 	return d.resolver
+}
+
+// holdsNodeToken reports whether tk is the token of a node of the
+// document, and collects those tokens on the first call.
+func (d *document) holdsNodeToken(tk *token.Token) bool {
+	d.nodeTokensOnce.Do(func() {
+		c := tokenCollector{}
+		ast.Walk(c, d.root)
+
+		d.nodeTokens = c
+	})
+
+	_, ok := d.nodeTokens[tk]
+
+	return ok
+}
+
+// tokenCollector is an [ast.Visitor] that adds the token of each node it
+// visits to the set.
+type tokenCollector map[*token.Token]struct{}
+
+// Visit implements [ast.Visitor].
+func (c tokenCollector) Visit(node ast.Node) ast.Visitor {
+	if isNilNode(node) {
+		return nil
+	}
+
+	if tk := node.GetToken(); tk != nil {
+		c[tk] = struct{}{}
+	}
+
+	return c
 }
 
 // Node is a scope in a YAML document: the root of the document, which
@@ -1700,12 +1739,18 @@ func (n *Node) bindDecodeError(err error) error {
 	return n.Bind(WrapError(decodeRejectedError{yamlMessageError{yamlErr}}, atToken(yamlErr.GetToken())))
 }
 
-// holdsToken reports whether tk is one of the tokens the source's parse
-// built its tree from. It compares pointers, so a token from another
-// parse, such as the one an UnmarshalYAML runs on its bytes, never
-// matches, however closely it resembles a token of the source.
+// holdsToken reports whether tk is a token of the source's parse: one of
+// the tokens the parser built its tree from, or one it made for a node of
+// the document, such as the null of a key without a value. It compares
+// pointers, so a token from another parse, such as the one an
+// UnmarshalYAML runs on its bytes, never matches, however closely it
+// resembles a token of the source.
 func (n *Node) holdsToken(tk *token.Token) bool {
-	return tk != nil && slices.Contains(n.source.fileTokens, tk)
+	if tk == nil {
+		return false
+	}
+
+	return slices.Contains(n.source.fileTokens, tk) || n.doc.holdsNodeToken(tk)
 }
 
 // decodeRejectedError is a [yamlMessageError] the decoder returned, which

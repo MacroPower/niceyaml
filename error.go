@@ -48,7 +48,10 @@ var (
 	// one kind of error, so the sentinel tells them apart from nothing
 	// finer.
 	// The error comes back bound as a [SourceError] at the offending
-	// token. An error a value's own UnmarshalYAML returns, and the error
+	// token. For a value the document leaves out, such as the value of a
+	// key with nothing after its colon, that is the null the parser puts
+	// there, which an error at the path of the value binds to as well.
+	// An error a value's own UnmarshalYAML returns, and the error
 	// of a context that ended, come back as they are and do not match.
 	// A value the go-yaml decoder cannot handle and panics on, such as a
 	// "!!str" tag decoded into a slice, also matches, bound at the first
