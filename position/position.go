@@ -268,14 +268,21 @@ func (rs Ranges) LineIndices() []int {
 
 	for _, r := range rs {
 		// LastLine cannot come before math.MinInt, so an inverted range
-		// on that line would still cover it by LastLine alone.
+		// on that line would still cover it by LastLine alone. Every other
+		// range starts at or before its last line.
 		if r.inverted() {
 			continue
 		}
 
+		// The loop stops at last rather than testing past it, since the
+		// line after math.MaxInt wraps around.
 		last := r.LastLine()
-		for line := r.Start.Line; line <= last; line++ {
+		for line := r.Start.Line; ; line++ {
 			result = append(result, line)
+
+			if line == last {
+				break
+			}
 		}
 	}
 

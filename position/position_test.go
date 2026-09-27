@@ -475,6 +475,16 @@ func TestRanges_LineIndices(t *testing.T) {
 		assert.Empty(t, rs.LineIndices())
 	})
 
+	t.Run("range on the MaxInt line", func(t *testing.T) {
+		t.Parallel()
+
+		rs := position.Ranges{
+			position.NewRange(position.New(math.MaxInt, 0), position.New(math.MaxInt, 3)),
+			position.NewRange(position.New(math.MaxInt-1, 2), position.New(math.MaxInt, 1)),
+		}
+		assert.Equal(t, []int{math.MaxInt, math.MaxInt - 1, math.MaxInt}, rs.LineIndices())
+	})
+
 	t.Run("includes duplicate lines from overlapping ranges", func(t *testing.T) {
 		t.Parallel()
 
