@@ -7,16 +7,13 @@ import (
 	"github.com/lucasb-eyer/go-colorful"
 )
 
-// Override returns the overlay color if valid, otherwise the base color.
-// Override clamps an overlay outside the sRGB gamut into it, as [Blend]
-// clamps, so the result renders as a valid SGR sequence.
+// Override returns the overlay color, or the base color when the overlay
+// is absent. An overlay is absent when it is nil, [lipgloss.NoColor], or
+// invisible, the same rule [Blend] applies. Override clamps an overlay
+// outside the sRGB gamut into it, as [Blend] clamps, so the result renders
+// as a valid SGR sequence.
 func Override(base, overlay color.Color) color.Color {
-	_, isNoColor := overlay.(lipgloss.NoColor)
-	if overlay == nil || isNoColor {
-		return base
-	}
-
-	if _, visible := colorful.MakeColor(overlay); visible {
+	if _, ok := visible(overlay); ok {
 		return Clamped(overlay)
 	}
 

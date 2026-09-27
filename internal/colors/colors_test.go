@@ -71,6 +71,31 @@ func TestOverride(t *testing.T) {
 	}
 }
 
+func TestAbsentOverlay(t *testing.T) {
+	t.Parallel()
+
+	// Override and Blend share one rule for an absent color, so both hand
+	// back the base color for each of these overlays.
+	base := lipgloss.Color("#FF0000")
+
+	tcs := map[string]struct {
+		overlay color.Color
+	}{
+		"nil":       {overlay: nil},
+		"NoColor":   {overlay: lipgloss.NoColor{}},
+		"invisible": {overlay: color.RGBA{A: 0}},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, base, colors.Override(base, tc.overlay))
+			assert.Equal(t, base, colors.Blend(base, tc.overlay))
+		})
+	}
+}
+
 // labMidpoint returns the 50/50 LAB blend of c1 and c2, clamped to the
 // sRGB gamut. It mixes the colors with go-colorful directly, so a test that
 // compares against it catches a blend that drops either color.
