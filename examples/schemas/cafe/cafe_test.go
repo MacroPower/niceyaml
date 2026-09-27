@@ -132,3 +132,43 @@ func TestCafeSLA(t *testing.T) {
 		})
 	}
 }
+
+func TestCafeHours(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		open  string
+		close string
+		err   bool
+	}{
+		"open before close": {open: "7:00", close: "19:00"},
+		"open after close":  {open: "19:00", close: "07:00", err: true},
+		"open equals close": {open: "07:00", close: "07:00", err: true},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			open := `open: "` + tc.open + `"`
+			closing := `close: "` + tc.close + `"`
+
+			in := strings.Replace(cafe.DefaultYAML, `open: "07:00"`, open, 1)
+			in = strings.Replace(in, `close: "19:00"`, closing, 1)
+			require.Contains(t, in, open)
+			require.Contains(t, in, closing)
+
+			_, err := cafeConfig(t.Context(), in)
+			if !tc.err {
+				require.NoError(t, err)
+
+				return
+			}
+
+			// The schema admits both times, so the failure comes from
+			// Hours.Validate, which the decode reports under the hours.
+			require.ErrorContains(t, err, "open must be before close")
+			assert.Equal(t, []string{"$.spec.hours.open"}, violationPaths(t, err))
+		})
+	}
+}
