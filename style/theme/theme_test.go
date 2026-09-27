@@ -406,6 +406,60 @@ func TestPalette_NameKindsKeepSourceAttributes(t *testing.T) {
 	}
 }
 
+func TestPalette_LiteralsTakeSourceColors(t *testing.T) {
+	t.Parallel()
+
+	// These source themes color numbers through their Literal entry, and
+	// solarized-light colors booleans through Keyword, so each literal
+	// must keep that color rather than fall back to the body text.
+	tests := map[string]struct {
+		theme string
+		kind  kind.Kind
+		want  string
+	}{
+		"solarized-light numbers": {
+			theme: "solarized-light",
+			kind:  kind.LiteralNumberInteger,
+			want:  "bold #2aa198 bg:#eee8d5",
+		},
+		"solarized-light booleans": {
+			theme: "solarized-light",
+			kind:  kind.LiteralBoolean,
+			want:  "bold #859900 bg:#eee8d5",
+		},
+		"github-dark numbers": {
+			theme: "github-dark",
+			kind:  kind.LiteralNumberInteger,
+			want:  "#a5d6ff bg:#0d1117",
+		},
+		"hrdark numbers": {
+			theme: "hrdark",
+			kind:  kind.LiteralNumberInteger,
+			want:  "#a6be9d bg:#1d2432",
+		},
+		"modus-operandi numbers": {
+			theme: "modus-operandi",
+			kind:  kind.LiteralNumberInteger,
+			want:  "#0000c0 bg:#ffffff",
+		},
+		"modus-vivendi numbers": {
+			theme: "modus-vivendi",
+			kind:  kind.LiteralNumberFloat,
+			want:  "#00bcff bg:#000000",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			th, ok := theme.Builtin().Get(tc.theme)
+			require.True(t, ok)
+			assert.Equal(t, tc.want, style.Encode(th.Style(tc.kind)))
+		})
+	}
+}
+
 func TestPalette_DiffAndErrorKindsUpright(t *testing.T) {
 	t.Parallel()
 

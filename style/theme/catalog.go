@@ -576,6 +576,7 @@ var palettes = map[string]palette{
 			kind.GenericError:       "#ffa198",
 			kind.GenericInserted:    "#56d364 bg:#0f5323",
 			kind.LiteralBoolean:     "#79c0ff",
+			kind.LiteralNumber:      "#a5d6ff",
 			kind.LiteralString:      "#a5d6ff",
 			kind.Name:               "#e6edf3",
 			kind.NameDecorator:      "bold #d2a8ff",
@@ -656,6 +657,7 @@ var palettes = map[string]palette{
 		Error:  "#ff0000",
 		Tokens: map[kind.Kind]string{
 			kind.Comment:       "italic #828b96",
+			kind.LiteralNumber: "#a6be9d",
 			kind.LiteralString: "#a6be9d",
 			kind.Name:          "#58a1dd",
 			kind.NameTag:       "#ff636f",
@@ -797,6 +799,7 @@ var palettes = map[string]palette{
 		Tokens: map[kind.Kind]string{
 			kind.Comment:        "#505050",
 			kind.LiteralBoolean: "#0000c0",
+			kind.LiteralNumber:  "#0000c0",
 			kind.LiteralString:  "#2544bb",
 			kind.Name:           "#8f0075",
 			kind.NameTag:        "#5317ac",
@@ -814,6 +817,7 @@ var palettes = map[string]palette{
 		Tokens: map[kind.Kind]string{
 			kind.Comment:        "#a8a8a8",
 			kind.LiteralBoolean: "#00bcff",
+			kind.LiteralNumber:  "#00bcff",
 			kind.LiteralString:  "#79a8ff",
 			kind.Name:           "#f78fe7",
 			kind.NameTag:        "#b6a0ff",
@@ -1273,8 +1277,8 @@ var palettes = map[string]palette{
 		Tokens: map[kind.Kind]string{
 			kind.Comment:        "italic #93a1a1",
 			kind.Generic:        "#d33682",
-			kind.LiteralBoolean: "bold",
-			kind.LiteralNumber:  "bold",
+			kind.LiteralBoolean: "bold #859900",
+			kind.LiteralNumber:  "bold #2aa198",
 			kind.LiteralString:  "#2aa198",
 			kind.Name:           "#268bd2",
 			kind.NameTag:        "bold",
