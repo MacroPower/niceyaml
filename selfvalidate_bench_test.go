@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
 // BenchmarkNode_Decode_SelfValidation decodes several shapes of document
@@ -81,10 +82,7 @@ func BenchmarkNode_Decode_SelfValidation(b *testing.B) {
 
 			yaml := sb.String()
 
-			doc, err := niceyaml.NewSourceFromString(yaml).Document()
-			if err != nil {
-				b.Fatal(err)
-			}
+			doc := yamltest.FirstDocument(b, yaml)
 
 			for _, mode := range modes {
 				b.Run(fmt.Sprintf("%s_%d/%s", shape.name, items, mode.name), func(b *testing.B) {

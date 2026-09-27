@@ -13,19 +13,19 @@ import (
 // of a YAML input for testing.
 //
 // If the input contains no documents, the test fails.
-func FirstDocument(t *testing.T, input string) *niceyaml.Node {
-	t.Helper()
+func FirstDocument(tb testing.TB, input string) *niceyaml.Node {
+	tb.Helper()
 
-	return FirstDocumentWithPath(t, input, "")
+	return FirstDocumentWithPath(tb, input, "")
 }
 
 // At scopes n to the node that path selects, through [niceyaml.Node.At].
 // The test fails when the path selects nothing.
-func At(t *testing.T, n *niceyaml.Node, path paths.Path) *niceyaml.Node {
-	t.Helper()
+func At(tb testing.TB, n *niceyaml.Node, path paths.Path) *niceyaml.Node {
+	tb.Helper()
 
 	scoped, err := n.At(path)
-	require.NoError(t, err)
+	require.NoError(tb, err)
 
 	return scoped
 }
@@ -33,11 +33,11 @@ func At(t *testing.T, n *niceyaml.Node, path paths.Path) *niceyaml.Node {
 // Bind binds err to the single document of source through
 // [niceyaml.Node.Bind]. The test fails when the source does not hold
 // exactly one document.
-func Bind(t *testing.T, source *niceyaml.Source, err error) error {
-	t.Helper()
+func Bind(tb testing.TB, source *niceyaml.Source, err error) error {
+	tb.Helper()
 
 	doc, docErr := source.Document()
-	require.NoError(t, docErr)
+	require.NoError(tb, docErr)
 
 	return doc.Bind(err)
 }
@@ -46,13 +46,13 @@ func Bind(t *testing.T, source *niceyaml.Source, err error) error {
 // document of a YAML input, with file path context, for testing.
 //
 // If the input contains no documents, the test fails.
-func FirstDocumentWithPath(t *testing.T, input, filePath string) *niceyaml.Node {
-	t.Helper()
+func FirstDocumentWithPath(tb testing.TB, input, filePath string) *niceyaml.Node {
+	tb.Helper()
 
 	source := niceyaml.NewSourceFromString(input, niceyaml.WithFilePath(filePath))
 	docs, err := source.Documents()
-	require.NoError(t, err)
-	require.NotEmpty(t, docs, "no documents found in input")
+	require.NoError(tb, err)
+	require.NotEmpty(tb, docs, "no documents found in input")
 
 	return docs[0]
 }

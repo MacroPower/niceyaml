@@ -124,8 +124,7 @@ func BenchmarkNode_DecodeScoped(b *testing.B) {
 			}
 		}
 
-		doc, err := niceyaml.NewSourceFromString(sb.String()).Document()
-		require.NoError(b, err)
+		doc := yamltest.FirstDocument(b, sb.String())
 
 		items, err := doc.Nodes(paths.Root().Child("items").IndexAll())
 		require.NoError(b, err)
@@ -206,8 +205,7 @@ func BenchmarkNode_Nodes(b *testing.B) {
 			fmt.Fprintf(&sb, "  - name: item_%d\n    value: %d\n", i, i)
 		}
 
-		doc, err := niceyaml.NewSourceFromString(sb.String()).Document()
-		require.NoError(b, err)
+		doc := yamltest.FirstDocument(b, sb.String())
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
